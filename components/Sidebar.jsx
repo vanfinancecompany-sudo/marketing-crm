@@ -1,4 +1,4 @@
-const MAIN_CRM_URL = import.meta.env.VITE_MAIN_CRM_URL || "/";
+const MAIN_CRM_URL = "https://crm-roan-rho.vercel.app";
 
 export default function Sidebar({ currentView, onNavigate }) {
   const items = [
