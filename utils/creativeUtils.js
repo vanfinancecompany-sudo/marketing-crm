@@ -1,3 +1,6 @@
+import rent2buyLogo from "../assets/rent2buy-vans.png";
+import financeLogo from "../assets/van-finance-company.png";
+
 export function createCreativePreview(creative) {
   return {
     headline: `${creative.hookStyle} - ${creative.vehicle.name}`,
@@ -28,9 +31,7 @@ export function pipelineDestination(pipeline) {
 }
 
 function reelBrandAsset(pipeline) {
-  return pipeline === "rent2buy"
-    ? "/assets/rent2buy-vans.png"
-    : "/assets/van-finance-company.png";
+  return pipeline === "rent2buy" ? rent2buyLogo : financeLogo;
 }
 
 function oldFormatPoundDisplay(value) {
