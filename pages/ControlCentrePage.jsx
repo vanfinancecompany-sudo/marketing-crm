@@ -1,6 +1,7 @@
 import StatCard from "../components/StatCard.jsx";
 
-const MAIN_CRM_URL = import.meta.env.VITE_MAIN_CRM_URL || "/";
+const MAIN_CRM_URL = "https://crm-roan-rho.vercel.app";
+const MARKETING_CRM_URL = "https://marketing-crm-six.vercel.app";
 
 export default function ControlCentrePage({ stats, onNavigate }) {
   function stopCardClick(event) {
@@ -62,28 +63,49 @@ export default function ControlCentrePage({ stats, onNavigate }) {
           </div>
         </div>
         <div className="control-action-grid">
-          <a className="button button--primary control-action-button control-action-button--finance" href={MAIN_CRM_URL}>
+          <a
+            className="button button--primary control-action-button control-action-button--finance"
+            href={MAIN_CRM_URL}
+          >
             Open Pipeline Board
           </a>
-          <a className="button button--primary control-action-button control-action-button--finance" href={MAIN_CRM_URL}>
+          <a
+            className="button button--primary control-action-button control-action-button--finance"
+            href={MAIN_CRM_URL}
+          >
             View Lead List
           </a>
-          <a className="button button--ghost control-action-button" href={MAIN_CRM_URL}>
+          <a
+            className="button button--ghost control-action-button"
+            href={MAIN_CRM_URL}
+          >
             Add Manual Lead
           </a>
-          <button className="button button--primary control-action-button" onClick={() => onNavigate("Reel Factory")}>
+          <button
+            className="button button--primary control-action-button"
+            onClick={() => onNavigate("Reel Factory")}
+          >
             <span aria-hidden="true">🎥</span>
             Create Reel
           </button>
-          <button className="button button--primary control-action-button" onClick={() => onNavigate("Van Finance Facebook")}>
+          <button
+            className="button button--primary control-action-button"
+            onClick={() => onNavigate("Van Finance Facebook")}
+          >
             <span aria-hidden="true">📣</span>
             Post Vans
           </button>
-          <button className="button button--ghost control-action-button" onClick={() => onNavigate("Stock")}>
+          <button
+            className="button button--ghost control-action-button"
+            onClick={() => onNavigate("Stock")}
+          >
             <span aria-hidden="true">🚐</span>
             View Stock
           </button>
-          <button className="button button--ghost control-action-button" onClick={() => onNavigate("Creative Library")}>
+          <button
+            className="button button--ghost control-action-button"
+            onClick={() => onNavigate("Creative Library")}
+          >
             <span aria-hidden="true">📁</span>
             Creative Library
           </button>
@@ -106,36 +128,45 @@ export default function ControlCentrePage({ stats, onNavigate }) {
           </a>
         </article>
 
-        <article className="panel control-app-card" onClick={() => onNavigate("Stock")}>
+        <article
+          className="panel control-app-card"
+          onClick={() => {
+            window.location.href = MARKETING_CRM_URL;
+          }}
+        >
           <div>
             <h3>Marketing CRM</h3>
             <p>Stock, reels, Facebook posting</p>
           </div>
           <div className="control-button-row">
-            <button className="button button--ghost" onClick={(event) => {
-              stopCardClick(event);
-              onNavigate("Stock");
-            }}>
+            <a
+              className="button button--ghost"
+              href={MARKETING_CRM_URL}
+              onClick={stopCardClick}
+            >
               Stock
-            </button>
-            <button className="button button--ghost" onClick={(event) => {
-              stopCardClick(event);
-              onNavigate("Reel Factory");
-            }}>
+            </a>
+            <a
+              className="button button--ghost"
+              href={MARKETING_CRM_URL}
+              onClick={stopCardClick}
+            >
               Reel Factory
-            </button>
-            <button className="button button--ghost" onClick={(event) => {
-              stopCardClick(event);
-              onNavigate("Van Finance Facebook");
-            }}>
+            </a>
+            <a
+              className="button button--ghost"
+              href={MARKETING_CRM_URL}
+              onClick={stopCardClick}
+            >
               Posting Pages
-            </button>
-            <button className="button button--ghost" onClick={(event) => {
-              stopCardClick(event);
-              onNavigate("Creative Library");
-            }}>
+            </a>
+            <a
+              className="button button--ghost"
+              href={MARKETING_CRM_URL}
+              onClick={stopCardClick}
+            >
               Creative Library
-            </button>
+            </a>
           </div>
         </article>
       </section>
