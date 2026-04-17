@@ -795,7 +795,7 @@ export async function saveReelVideoBlob(id, blob, metadata = {}) {
   db.close();
 }
 
-async function loadReelVideoBlob(id) {
+export async function loadReelVideoBlob(id) {
   if (!id) return null;
 
   const db = await openReelAssetDb();
