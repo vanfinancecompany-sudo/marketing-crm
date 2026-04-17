@@ -1034,15 +1034,40 @@ export default function App() {
 
       <main className="app-main">
         <header className="topbar">
-          <div>
-            <div className="eyebrow">Standalone React App</div>
-            <h2>{currentView}</h2>
-          </div>
-          <div className="topbar__meta">
-            <span>{vehicles.length} vehicles</span>
-            <span>{creatives.length} creatives</span>
-          </div>
-        </header>
+  <div>
+    <div className="eyebrow">Standalone React App</div>
+    <h2>{currentView}</h2>
+  </div>
+
+  <div
+    style={{
+      display: "flex",
+      alignItems: "center",
+      gap: "12px",
+      flexWrap: "wrap",
+    }}
+  >
+    <a
+      href="https://control-centre-navy.vercel.app"
+      style={{
+        padding: "8px 12px",
+        background: "#2563eb",
+        color: "#fff",
+        borderRadius: 8,
+        textDecoration: "none",
+        fontSize: 14,
+        fontWeight: 600,
+      }}
+    >
+      Control Centre
+    </a>
+
+    <div className="topbar__meta">
+      <span>{vehicles.length} vehicles</span>
+      <span>{creatives.length} creatives</span>
+    </div>
+  </div>
+</header>
 
         {renderCurrentPage()}
       </main>
