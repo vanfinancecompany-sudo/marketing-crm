@@ -77,8 +77,28 @@ const HIDDEN_POSTING_STORAGE_KEYS = {
   marketplace: "marketingHiddenMarketplaceVehicles",
 };
 
+const VIEW_PATHS = {
+  Dashboard: "/",
+  Stock: "/stock",
+  "Reel Factory": "/reel-factory",
+  "Creative Library": "/creative-library",
+  "Van Finance Facebook": "/van-finance-facebook",
+  "Rent2Buy Facebook": "/rent2buy-facebook",
+  "Facebook Marketplace": "/facebook-marketplace",
+};
 
 function viewFromPath() {
+  if (typeof window === "undefined") return "Dashboard";
+
+  const path = window.location.pathname;
+
+  if (path === "/stock") return "Stock";
+  if (path === "/reel-factory") return "Reel Factory";
+  if (path === "/creative-library") return "Creative Library";
+  if (path === "/van-finance-facebook") return "Van Finance Facebook";
+  if (path === "/rent2buy-facebook") return "Rent2Buy Facebook";
+  if (path === "/facebook-marketplace") return "Facebook Marketplace";
+
   return "Dashboard";
 }
 
