@@ -19,19 +19,17 @@ export default function App() {
         </p>
 
         <div style={{ display: "flex", gap: "20px", justifyContent: "center" }}>
-          
-          <a href="https://crm-b5po.vercel.app" target="_blank">
+          <a href="https://crm-roan-rho.vercel.app" target="_blank" rel="noopener noreferrer">
             <button style={btnStyle}>
               Main CRM
             </button>
           </a>
 
-          <a href="https://marketing-crm-six.vercel.app" target="_blank">
+          <a href="https://marketing-crm-six.vercel.app" target="_blank" rel="noopener noreferrer">
             <button style={btnStyle}>
               Marketing CRM
             </button>
           </a>
-
         </div>
       </div>
     </div>
