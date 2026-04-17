@@ -29,6 +29,7 @@ import {
   filterVehicles,
   generateReelVideoAsset,
   isToday,
+  loadReelVideoBlob,
   saveReelVideoBlob,
   sanitizePostingCaption,
 } from "./utils/creativeUtils.js";
@@ -233,11 +234,11 @@ useEffect(() => {
       const today = new Date().toISOString().slice(0, 10);
 
       const todayCreativeReels = savedCreatives.filter(
-        (c) =>
-          c.createdAt &&
-          String(c.createdAt).slice(0, 10) === today &&
-          c.type === "reel"
-      );
+  (c) =>
+    c.createdAt &&
+    String(c.createdAt).slice(0, 10) === today &&
+    c.status === "reel_asset"
+);
 
       const rebuilt = await Promise.all(
         todayCreativeReels.map(async (creative) => {
