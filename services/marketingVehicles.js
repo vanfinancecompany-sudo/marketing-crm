@@ -4,7 +4,6 @@ function convertWixImage(url) {
   if (!url) return "";
 
   const value = String(url).trim();
-
   if (!value) return "";
 
   if (/^https?:\/\//i.test(value)) {
@@ -12,9 +11,7 @@ function convertWixImage(url) {
   }
 
   const match = value.match(/wix:image:\/\/v1\/([^/]+)/);
-  if (!match) {
-    return value;
-  }
+  if (!match) return value;
 
   return `https://static.wixstatic.com/media/${match[1]}`;
 }
@@ -41,7 +38,7 @@ function valueOrFallback(...values) {
 
 function mapFinanceVehicleRow(row, index) {
   const imageUrl = convertWixImage(row.picture);
-  const title = valueOrFallback(row.title, `Finance vehicle ${index + 1}`);
+  const title = valueOrFallback(row.title, `finance-${index + 1}`);
 
   return {
     id: row.id || title || `finance-${index}`,
@@ -66,7 +63,7 @@ function mapFinanceVehicleRow(row, index) {
 
 function mapRentVehicleRow(row, index) {
   const imageUrl = convertWixImage(row.picture);
-  const registration = valueOrFallback(row.registration, `Rent vehicle ${index + 1}`);
+  const registration = valueOrFallback(row.registration, `rent-${index + 1}`);
 
   return {
     id: row.id || registration || `rent-${index}`,
