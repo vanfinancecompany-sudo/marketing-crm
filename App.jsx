@@ -77,13 +77,9 @@ const HIDDEN_POSTING_STORAGE_KEYS = {
   marketplace: "marketingHiddenMarketplaceVehicles",
 };
 
-const VIEW_PATHS = {
-  "Control Centre": "/control",
-};
 
 function viewFromPath() {
-  if (typeof window === "undefined") return "Dashboard";
-  return window.location.pathname === "/control" ? "Control Centre" : "Dashboard";
+  return "Dashboard";
 }
 
 function loadHiddenPostingIds(pageKey) {
@@ -903,14 +899,7 @@ export default function App() {
 
   function renderCurrentPage() {
     switch (currentView) {
-      case "Control Centre":
-        return (
-          <ControlCentrePage
-            stats={controlCentreStats}
-            onNavigate={handleNavigate}
-          />
-        );
-      case "Stock":
+          case "Stock":
         return (
           <StockPage
             vehicles={filteredStockVehicles}
