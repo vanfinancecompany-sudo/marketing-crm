@@ -1,5 +1,6 @@
 import rent2buyLogo from "../assets/rent2buy-vans.png";
 import financeLogo from "../assets/van-finance-company.png";
+import defaultReelAudio from "../assets/default-reel-audio.mp3";
 
 export function createCreativePreview(creative) {
   return {
@@ -1201,7 +1202,7 @@ export async function generateReelVideoAsset(reel) {
 
   if (reel.musicOn) {
     try {
-      const audioResult = await createReelAudioStream(durationMs, "/assets/default-reel-audio.mp3");
+      const audioResult = await createReelAudioStream(durationMs, defaultReelAudio);
       audioCleanup = audioResult.cleanup;
       if (audioResult.stream) {
         mixedStream = new MediaStream([
