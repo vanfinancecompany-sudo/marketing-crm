@@ -1,8 +1,9 @@
-const MAIN_CRM_URL = "https://crm-roan-rho.vercel.app";
+const MAIN_CRM_URL = import.meta.env.VITE_MAIN_CRM_URL || "/";
 
 export default function Sidebar({ currentView, onNavigate }) {
   const items = [
-   "Dashboard",
+    "Control Centre",
+    "Dashboard",
     "Stock",
     "Reel Factory",
     "Creative Library",
@@ -14,13 +15,13 @@ export default function Sidebar({ currentView, onNavigate }) {
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
-        <div className="sidebar__eyebrow">Separate App</div>
+        <div className="sidebar__eyebrow">CRM Suite</div>
         <h1>Marketing CRM</h1>
       </div>
 
       <nav className="sidebar__nav">
         <a className="sidebar__main-crm" href={MAIN_CRM_URL}>
-          MAIN CRM
+          Main CRM
         </a>
         {items.map((item) => (
           <button
