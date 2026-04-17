@@ -1,21 +1,24 @@
-import Sidebar from "./components/Sidebar";
-
 export default function App() {
   return (
-    <div style={{ display: "flex" }}>
-      <Sidebar />
-      <div style={{ padding: 20 }}>
-        <h1>Control Centre</h1>
-        <p>This is the Control Centre app</p>
+    <div style={{ padding: 24, fontFamily: "Inter, sans-serif" }}>
+      <h1>Control Centre</h1>
+      <p>This is the Control Centre app.</p>
 
-        <a href="https://crm-b5po.vercel.app">
-          Go to Main CRM
+      <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
+        <a
+          href="https://crm-b5po.vercel.app"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Main CRM
         </a>
 
-        <br /><br />
-
-        <a href="https://crm-b5po.vercel.app">
-          Go to Marketing CRM
+        <a
+          href="https://marketing-crm-six.vercel.app/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Marketing CRM
         </a>
       </div>
     </div>
