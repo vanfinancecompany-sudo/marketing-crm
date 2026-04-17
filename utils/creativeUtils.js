@@ -474,7 +474,7 @@ export function buildFinanceReelContent(vehicle) {
     templateName: "Finance - Deal Hook",
     sourceLabel: "Finance stock",
     subtext: "Low deposit options | Bad credit considered | Self-employed welcome",
-    priceLine: `${vehicle?.price || "Price available"} | From ${vehicle?.monthly || "monthly options"}`,
+    priceLine: `${vehicle?.price || "Price available"} | ${vehicle?.monthly || "monthly options"}`,
     ctaLine: "APPLY NOW",
   };
 }
@@ -484,7 +484,7 @@ export function buildRentReelContent(vehicle) {
     templateName: "Rent2Buy - Access Hook",
     sourceLabel: "Rent2Buy stock",
     subtext: "Rent2Buy this van | No credit checks | Own the van at the end",
-    priceLine: `${vehicle?.monthly || "Monthly options"} | Initial rental ${vehicle?.price || "available"}`,
+    priceLine: `${vehicle?.monthly || "Monthly options"} | ${vehicle?.price || "available"}`,
     ctaLine: "APPLY TODAY",
   };
 }
