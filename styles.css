@@ -56,7 +56,7 @@ textarea {
 
 .sidebar__nav {
   display: grid;
-  gap: 8px;
+  gap: 9px;
 }
 
 .sidebar__main-crm {
@@ -85,11 +85,13 @@ textarea {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.06);
   color: #e2e8f0;
-  padding: 11px 13px;
+  padding: 12px 14px;
   border-radius: 12px;
   text-align: left;
   cursor: pointer;
   transition: 0.2s ease;
+  font-weight: 750;
+  line-height: 1.15;
 }
 
 .sidebar__link:hover,
