@@ -3,8 +3,18 @@ import { supabase } from "./supabase.js";
 function convertWixImage(url) {
   if (!url) return "";
 
-  const match = String(url).match(/wix:image:\/\/v1\/([^/]+)/);
-  if (!match) return url;
+  const value = String(url).trim();
+
+  if (!value) return "";
+
+  if (/^https?:\/\//i.test(value)) {
+    return value;
+  }
+
+  const match = value.match(/wix:image:\/\/v1\/([^/]+)/);
+  if (!match) {
+    return value;
+  }
 
   return `https://static.wixstatic.com/media/${match[1]}`;
 }
@@ -30,13 +40,16 @@ function valueOrFallback(...values) {
 }
 
 function mapFinanceVehicleRow(row, index) {
+  const imageUrl = convertWixImage(row.picture);
+  const title = valueOrFallback(row.title, `Finance vehicle ${index + 1}`);
+
   return {
-    id: row.id || row.title || `finance-${index}`,
-    title: row.title || "",
-    name: row.title || "",
-    reg: "",
-    picture: row.picture || "",
-    image: row.picture || "",
+    id: row.id || title || `finance-${index}`,
+    title,
+    name: title,
+    reg: extractRegistration(title),
+    picture: imageUrl,
+    image: imageUrl,
     price: row.price || "",
     vat: row.vat || "",
     monthly: row.salePrice || "",
@@ -52,13 +65,16 @@ function mapFinanceVehicleRow(row, index) {
 }
 
 function mapRentVehicleRow(row, index) {
+  const imageUrl = convertWixImage(row.picture);
+  const registration = valueOrFallback(row.registration, `Rent vehicle ${index + 1}`);
+
   return {
-    id: row.id || row.registration || `rent-${index}`,
-    title: row.registration || "",
-    name: row.registration || "",
-    reg: row.registration || "",
-    picture: row.picture || "",
-    image: row.picture || "",
+    id: row.id || registration || `rent-${index}`,
+    title: registration,
+    name: registration,
+    reg: registration,
+    picture: imageUrl,
+    image: imageUrl,
     price: row.initialRental || "",
     monthly: row.monthly || "",
     week: row.week || "",
