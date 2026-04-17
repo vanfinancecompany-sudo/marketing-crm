@@ -812,9 +812,16 @@ async function loadCanvasImage(imageUrl, missingMessage = "No image available.")
     throw new Error(missingMessage);
   }
 
-  const response = await fetch(imageUrl);
+  let response;
+
+  try {
+    response = await fetch(imageUrl);
+  } catch (error) {
+    throw new Error(`Could not load image asset: ${imageUrl}`);
+  }
+
   if (!response.ok) {
-    throw new Error("Could not load image asset.");
+    throw new Error(`Could not load image asset: ${imageUrl}`);
   }
 
   const blob = await response.blob();
@@ -824,7 +831,7 @@ async function loadCanvasImage(imageUrl, missingMessage = "No image available.")
     const image = await new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error("Could not decode vehicle image."));
+      img.onerror = () => reject(new Error(`Could not decode vehicle image: ${imageUrl}`));
       img.src = objectUrl;
     });
 
