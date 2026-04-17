@@ -1047,21 +1047,7 @@ export default function App() {
       flexWrap: "wrap",
     }}
   >
-    <a
-      href="https://control-centre-navy.vercel.app"
-      style={{
-        padding: "8px 12px",
-        background: "#2563eb",
-        color: "#fff",
-        borderRadius: 8,
-        textDecoration: "none",
-        fontSize: 14,
-        fontWeight: 600,
-      }}
-    >
-      Control Centre
-    </a>
-
+    
     <div className="topbar__meta">
       <span>{vehicles.length} vehicles</span>
       <span>{creatives.length} creatives</span>
