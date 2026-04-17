@@ -2,8 +2,7 @@ const MAIN_CRM_URL = import.meta.env.VITE_MAIN_CRM_URL || "/";
 
 export default function Sidebar({ currentView, onNavigate }) {
   const items = [
-    "Control Centre",
-    "Dashboard",
+   "Dashboard",
     "Stock",
     "Reel Factory",
     "Creative Library",
