@@ -223,6 +223,48 @@ export default function App() {
     };
   }, []);
 
+
+// 👉 PASTE NEW ONE HERE (separate block)
+useEffect(() => {
+  async function rebuildTodayReels() {
+    try {
+      const savedCreatives = await fetchMarketingCreatives();
+
+      const today = new Date().toISOString().slice(0, 10);
+
+      const todayCreativeReels = savedCreatives.filter(
+        (c) =>
+          c.createdAt &&
+          String(c.createdAt).slice(0, 10) === today &&
+          c.type === "reel"
+      );
+
+      const rebuilt = await Promise.all(
+        todayCreativeReels.map(async (creative) => {
+          const blobData = await loadReelVideoBlob?.(creative.id).catch(() => null);
+
+          if (!blobData?.blob) return null;
+
+          return {
+            id: creative.id,
+            creativeId: creative.id,
+            createdAt: creative.createdAt,
+            url: URL.createObjectURL(blobData.blob),
+            downloadName: blobData.downloadName,
+            mimeType: blobData.mimeType,
+          };
+        })
+      );
+
+      setTodayReels(rebuilt.filter(Boolean));
+    } catch {
+      // fail silently
+    }
+  }
+
+  rebuildTodayReels();
+}, []);
+
   const selectedVehicle =
     vehicles.find((vehicle) => vehicle.id === selectedVehicleId) || vehicles[0] || null;
   const selectedReelFactoryVehicle =
