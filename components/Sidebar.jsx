@@ -1,4 +1,5 @@
 const MAIN_CRM_URL = import.meta.env.VITE_MAIN_CRM_URL || "https://crm-roan-rho.vercel.app";
+const IMAGE_SUITE_URL = "http://localhost:5173";
 
 export default function Sidebar({ currentView, onNavigate }) {
   const items = [
@@ -6,6 +7,7 @@ export default function Sidebar({ currentView, onNavigate }) {
     "Stock",
     "Reel Factory",
     "Creative Library",
+    "Image Suite",
     "Van Finance Facebook",
     "Rent2Buy Facebook",
     "Facebook Marketplace",
@@ -22,15 +24,32 @@ export default function Sidebar({ currentView, onNavigate }) {
         <a className="sidebar__main-crm" href={MAIN_CRM_URL}>
           Main CRM
         </a>
-        {items.map((item) => (
-          <button
-            key={item}
-            className={currentView === item ? "sidebar__link is-active" : "sidebar__link"}
-            onClick={() => onNavigate(item)}
-          >
-            {item}
-          </button>
-        ))}
+
+        {items.map((item) => {
+          if (item === "Image Suite") {
+            return (
+              <a
+                key={item}
+                className="sidebar__link"
+                href={IMAGE_SUITE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {item}
+              </a>
+            );
+          }
+
+          return (
+            <button
+              key={item}
+              className={currentView === item ? "sidebar__link is-active" : "sidebar__link"}
+              onClick={() => onNavigate(item)}
+            >
+              {item}
+            </button>
+          );
+        })}
       </nav>
     </aside>
   );
