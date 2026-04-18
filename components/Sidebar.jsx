@@ -1,7 +1,7 @@
 const MAIN_CRM_URL =
   import.meta.env.VITE_MAIN_CRM_URL || "https://crm-roan-rho.vercel.app";
 
-const IMAGE_SUITE_URL = "http://localhost:5173";
+const IMAGE_SUITE_URL = "https://vehicle-image-suite.vercel.app";
 
 export default function Sidebar({ currentView, onNavigate }) {
   const items = [
