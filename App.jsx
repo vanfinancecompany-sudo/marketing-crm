@@ -39,6 +39,7 @@ import {
   fetchMarketingCreatives,
   saveMarketingCreatives,
 } from "./services/marketingCreatives.js";
+import { fetchReelClickDashboard, logReelClick } from "./services/reelClickTracking.js";
 
 const DEFAULT_STOCK_FILTERS = {
   pipeline: "all",
@@ -72,6 +73,10 @@ const RENT_FACEBOOK_URL = "https://www.facebook.com/profile.php?id=1000769041579
 const MARKETPLACE_URL = "https://www.facebook.com/marketplace/create/vehicle";
 const FINANCE_SYNC_URL = "https://www.vanfinancecompany.co.uk/sync-vans";
 const RENT_SYNC_URL = "https://www.rent2buyvans.co.uk/sync-vans";
+const TRACK_REDIRECTS = {
+  finance: "https://www.vanfinancecompany.co.uk/",
+  rent2buy: "https://www.rent2buyvans.co.uk/",
+};
 const HIDDEN_POSTING_STORAGE_KEYS = {
   vanFinanceFacebook: "marketingHiddenVanFinanceFacebookVehicles",
   rent2BuyFacebook: "marketingHiddenRent2BuyFacebookVehicles",
@@ -153,6 +158,11 @@ export default function App() {
   const [lastRandomReelVehicleId, setLastRandomReelVehicleId] = useState("");
   const [uploadedReelImages, setUploadedReelImages] = useState([]);
   const [todayReels, setTodayReels] = useState([]);
+  const [reelClickStats, setReelClickStats] = useState({
+    financeClicksToday: 0,
+    rent2BuyClicksToday: 0,
+    topReels: [],
+  });
   const [postedToday, setPostedToday] = useState([]);
   const [hiddenPostingVehicleIds, setHiddenPostingVehicleIds] = useState(() => ({
     vanFinanceFacebook: loadHiddenPostingIds("vanFinanceFacebook"),
@@ -191,6 +201,21 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!window.location.pathname.startsWith("/track")) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const type = params.get("type") === "rent2buy" ? "rent2buy" : "finance";
+    const reelId = params.get("reel") || "unknown";
+    const source = params.get("src") || "reel";
+
+    logReelClick({ source, type, reelId })
+      .catch(() => {})
+      .finally(() => {
+        window.location.replace(TRACK_REDIRECTS[type]);
+      });
+  }, []);
+
+  useEffect(() => {
     function handlePopState() {
       setCurrentView(viewFromPath());
     }
@@ -218,6 +243,22 @@ export default function App() {
     }
 
     loadCreatives();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    fetchReelClickDashboard()
+      .then((stats) => {
+        if (active) {
+          setReelClickStats(stats);
+        }
+      })
+      .catch(() => {});
 
     return () => {
       active = false;
@@ -364,6 +405,8 @@ useEffect(() => {
       createdToday,
       readyToPost,
       postedToday: postedVehicleCount,
+      financeClicksToday: reelClickStats.financeClicksToday,
+      rent2BuyClicksToday: reelClickStats.rent2BuyClicksToday,
     };
   }, [
     creatives,
@@ -371,6 +414,8 @@ useEffect(() => {
     rent2BuyFacebookQueue.length,
     marketplaceQueue.length,
     postedToday,
+    reelClickStats.financeClicksToday,
+    reelClickStats.rent2BuyClicksToday,
   ]);
 
   const controlCentreStats = useMemo(() => {
@@ -1075,6 +1120,7 @@ useEffect(() => {
           <DashboardPage
             stats={dashboardStats}
             recentCreatives={recentCreatives}
+            topReels={reelClickStats.topReels}
           />
         );
     }
