@@ -28,13 +28,14 @@ export default function Sidebar({ currentView, onNavigate }) {
         {items.map((item) => {
           if (item === "Image Suite") {
             return (
-              <a
-                key={item}
-                className="sidebar__link"
-                href={IMAGE_SUITE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
+<a
+  key={item}
+  className="sidebar__link"
+  href={IMAGE_SUITE_URL}
+>
+  {item}
+</a>
+              
                 {item}
               </a>
             );
