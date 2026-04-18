@@ -1,3 +1,37 @@
+// 🚀 INSTANT TRACK + REDIRECT (runs before React loads)
+if (typeof window !== "undefined" && window.location.pathname.startsWith("/track")) {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const type = params.get("type") === "rent2buy" ? "rent2buy" : "finance";
+    const reelId = params.get("reel") || "unknown";
+    const source = params.get("src") || "reel";
+
+    // 🔥 send tracking without blocking redirect
+    const payload = JSON.stringify({ type, reelId, source });
+
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon("/api/track", payload);
+    } else {
+      fetch("/api/track", {
+        method: "POST",
+        body: payload,
+        headers: { "Content-Type": "application/json" },
+        keepalive: true,
+      });
+    }
+
+    const redirects = {
+      finance: "https://www.vanfinancecompany.co.uk/",
+      rent2buy: "https://www.rent2buyvans.co.uk/",
+    };
+
+    window.location.replace(redirects[type] || "https://marketing-crm-six.vercel.app/");
+  } catch (e) {
+    // fallback redirect
+    window.location.replace("https://www.vanfinancecompany.co.uk/");
+  }
+}
+
 import { useEffect, useMemo, useState } from "react";
 import Sidebar from "./components/Sidebar.jsx";
 import ControlCentrePage from "./pages/ControlCentrePage.jsx";
