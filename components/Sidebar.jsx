@@ -1,4 +1,6 @@
-const MAIN_CRM_URL = import.meta.env.VITE_MAIN_CRM_URL || "https://crm-roan-rho.vercel.app";
+const MAIN_CRM_URL =
+  import.meta.env.VITE_MAIN_CRM_URL || "https://crm-roan-rho.vercel.app";
+
 const IMAGE_SUITE_URL = "http://localhost:5173";
 
 export default function Sidebar({ currentView, onNavigate }) {
@@ -28,14 +30,7 @@ export default function Sidebar({ currentView, onNavigate }) {
         {items.map((item) => {
           if (item === "Image Suite") {
             return (
-<a
-  key={item}
-  className="sidebar__link"
-  href={IMAGE_SUITE_URL}
->
-  {item}
-</a>
-              
+              <a key={item} className="sidebar__link" href={IMAGE_SUITE_URL}>
                 {item}
               </a>
             );
