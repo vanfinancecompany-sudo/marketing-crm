@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import FilterBar from "../components/FilterBar.jsx";
 import {
   financeReelHooks,
@@ -6,6 +7,44 @@ import {
   reelTypes,
   rentReelHooks,
 } from "../data/mockData.js";
+
+const TRACK_BASE_URL = "https://marketing-crm-six.vercel.app/track?src=reel";
+const DEFAULT_FINANCE_DESCRIPTION = `🚐 VAN FINANCE AVAILABLE NOW
+💰 From £99 deposit
+⚡ Approved in 60 minutes
+
+👇 Apply now
+${TRACK_BASE_URL}&type=finance&reel={reelId}`;
+const DEFAULT_RENT_DESCRIPTION = `🚐 RENT TO BUY YOUR VAN
+🚫 NO CREDIT CHECK
+🔑 RENT IT - DRIVE IT - OWN IT
+
+👇 Apply now
+${TRACK_BASE_URL}&type=rent2buy&reel={reelId}`;
+
+function createDraftReelId() {
+  return `reel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getDescriptionType({ filters, formValues, selectedVehicle, todayReels }) {
+  if (formValues.reelType === "Finance") return "finance";
+  if (formValues.reelType === "Rent2Buy") return "rent2buy";
+  if (filters.pipeline === "vanFinance") return "finance";
+  if (filters.pipeline === "rent2buy") return "rent2buy";
+  if (selectedVehicle?.pipeline === "rent2buy") return "rent2buy";
+  if (selectedVehicle?.pipeline === "vanFinance") return "finance";
+  if (todayReels[0]?.pipeline === "rent2buy") return "rent2buy";
+  return "finance";
+}
+
+function buildReelDescription(type, reelId) {
+  const template = type === "rent2buy" ? DEFAULT_RENT_DESCRIPTION : DEFAULT_FINANCE_DESCRIPTION;
+  return template.replaceAll("{reelId}", encodeURIComponent(reelId));
+}
+
+function fillDescriptionTemplate(template, reelId) {
+  return template.replaceAll("{reelId}", encodeURIComponent(reelId));
+}
 
 function ReelStoryboardPreview({ creative }) {
   const previewStyles = {
@@ -484,11 +523,91 @@ export function TodayReelsSection({
   );
 }
 
+function ReelDescriptionPanel({
+  filters,
+  formValues,
+  selectedVehicle,
+  todayReels,
+  financeDescription,
+  rentDescription,
+  onFinanceDescriptionChange,
+  onRentDescriptionChange,
+}) {
+  const [draftReelId] = useState(createDraftReelId);
+  const [financeOpen, setFinanceOpen] = useState(true);
+  const [rentOpen, setRentOpen] = useState(false);
+  const type = getDescriptionType({ filters, formValues, selectedVehicle, todayReels });
+  const matchingReel = todayReels.find((reel) =>
+    type === "rent2buy" ? reel.pipeline === "rent2buy" : reel.pipeline !== "rent2buy"
+  );
+  const reelId = matchingReel?.id || todayReels[0]?.id || draftReelId;
+  const financePreview = useMemo(() => fillDescriptionTemplate(financeDescription, reelId), [financeDescription, reelId]);
+  const rentPreview = useMemo(() => fillDescriptionTemplate(rentDescription, reelId), [rentDescription, reelId]);
+
+  return (
+    <section className="panel">
+      <div className="panel__header">
+        <div>
+          <h3>Reel Descriptions</h3>
+          <p>Editable tracked caption text. The matching version auto-copies when a reel is downloaded.</p>
+        </div>
+      </div>
+      <div className="page-stack" style={{ gap: 12 }}>
+        <div>
+          <button className="button button--ghost" type="button" onClick={() => setFinanceOpen((open) => !open)}>
+            {financeOpen ? "Hide" : "Show"} Van Finance Reel Description
+          </button>
+          {financeOpen ? (
+            <textarea
+              className="field__input"
+              rows={7}
+              value={financeDescription}
+              onChange={(event) => onFinanceDescriptionChange(event.target.value)}
+            />
+          ) : null}
+        </div>
+        <div>
+          <button className="button button--ghost" type="button" onClick={() => setRentOpen((open) => !open)}>
+            {rentOpen ? "Hide" : "Show"} Rent2Buy Reel Description
+          </button>
+          {rentOpen ? (
+            <textarea
+              className="field__input"
+              rows={7}
+              value={rentDescription}
+              onChange={(event) => onRentDescriptionChange(event.target.value)}
+            />
+          ) : null}
+        </div>
+        <div className="creative-card__meta">
+          Active preview: {type === "rent2buy" ? rentPreview : financePreview}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function ReelFactoryPage(props) {
+  const [financeDescription, setFinanceDescription] = useState(DEFAULT_FINANCE_DESCRIPTION);
+  const [rentDescription, setRentDescription] = useState(DEFAULT_RENT_DESCRIPTION);
+
+  async function handleDownloadWithDescription(reel) {
+    const template = reel.pipeline === "rent2buy" ? rentDescription : financeDescription;
+    await navigator.clipboard.writeText(fillDescriptionTemplate(template, reel.id)).catch(() => {});
+    props.onDownloadReel(reel);
+  }
+
   return (
     <div className="page-stack">
       <DailyReelFactoryPanel {...props} todayReelsCount={props.todayReels.length} />
-      <TodayReelsSection {...props} />
+      <ReelDescriptionPanel
+        {...props}
+        financeDescription={financeDescription}
+        rentDescription={rentDescription}
+        onFinanceDescriptionChange={setFinanceDescription}
+        onRentDescriptionChange={setRentDescription}
+      />
+      <TodayReelsSection {...props} onDownloadReel={handleDownloadWithDescription} />
     </div>
   );
 }
