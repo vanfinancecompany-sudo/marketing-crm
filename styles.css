@@ -1209,17 +1209,26 @@ textarea {
     padding: 18px;
   }
 
-  .topbar,
-  .hero-panel,
-  .panel {
-    padding: 18px;
-  }
+.topbar,
+.hero-panel,
+.panel {
+  padding: 18px;
+}
 
-  .creative-preview__headline {
-    font-size: 24px;
-  }
+.creative-preview__headline {
+  font-size: 24px;
+}
 
-  .reel-storyboard {
-    grid-template-columns: 1fr;
-  }
+.reel-storyboard {
+  grid-template-columns: 1fr;
+}
+
+/* CLOSES your media query */
+}
+
+/* ✅ ADD THIS OUTSIDE */
+.sidebar__link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
 }
