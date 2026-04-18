@@ -443,6 +443,38 @@ useEffect(() => {
     rentVehicles.length,
   ]);
 
+  const topReelsWithLabels = useMemo(() => {
+    const reelLookup = new Map();
+
+    for (const reel of todayReels) {
+      if (reel.id) reelLookup.set(reel.id, reel);
+      if (reel.creativeId) reelLookup.set(reel.creativeId, reel);
+    }
+
+    for (const creative of creatives) {
+      if (creative.id && !reelLookup.has(creative.id)) {
+        reelLookup.set(creative.id, creative);
+      }
+    }
+
+    return reelClickStats.topReels.map((trackedReel) => {
+      const reelId = trackedReel.reelId;
+      const matchedReel = reelId && reelId !== "unknown" ? reelLookup.get(reelId) : null;
+      const label =
+        matchedReel?.hook ||
+        matchedReel?.title ||
+        matchedReel?.headline ||
+        matchedReel?.subtext ||
+        (reelId && reelId !== "unknown" ? reelId : "Unknown reel");
+
+      return {
+        ...trackedReel,
+        label,
+        isUnknown: !reelId || reelId === "unknown",
+      };
+    });
+  }, [creatives, reelClickStats.topReels, todayReels]);
+
   function handleFormChange(field, value) {
     setFactoryForm((prev) => ({
       ...prev,
@@ -1120,7 +1152,7 @@ useEffect(() => {
           <DashboardPage
             stats={dashboardStats}
             recentCreatives={recentCreatives}
-            topReels={reelClickStats.topReels}
+            topReels={topReelsWithLabels}
           />
         );
     }
