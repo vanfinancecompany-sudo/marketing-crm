@@ -53,8 +53,11 @@ export default function DashboardPage({ stats, recentCreatives, topReels = [] })
             {topReels.map((reel) => (
               <div key={`${reel.type}-${reel.reelId}`} className="simple-list__item">
                 <div>
-                  <strong>{reel.reelId || "Untitled reel"}</strong>
-                  <div>{reel.type === "rent2buy" ? "Rent2Buy" : "Van Finance"}</div>
+                  <strong>{reel.label || "Unknown reel"}</strong>
+                  <div>
+                    {reel.type === "rent2buy" ? "Rent2Buy" : "Van Finance"}
+                    {reel.isUnknown ? " | missing reel id" : ""}
+                  </div>
                 </div>
                 <div className="status-pill">{reel.clickCount} clicks</div>
               </div>
