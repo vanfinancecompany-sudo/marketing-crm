@@ -16,7 +16,7 @@ function getCreativeActivityLabel(creative) {
   return "Reel asset";
 }
 
-export default function DashboardPage({ stats, recentCreatives }) {
+export default function DashboardPage({ stats, recentCreatives, topReels = [] }) {
   return (
     <div className="page-stack">
       <section className="hero-panel">
@@ -34,6 +34,33 @@ export default function DashboardPage({ stats, recentCreatives }) {
         <StatCard label="Reel assets created today" value={stats.createdToday} tone="blue" />
         <StatCard label="Stock posts waiting" value={stats.readyToPost} tone="amber" />
         <StatCard label="Stock posts marked posted today" value={stats.postedToday} tone="green" />
+        <StatCard label="Finance clicks today" value={stats.financeClicksToday || 0} tone="blue" />
+        <StatCard label="Rent2Buy clicks today" value={stats.rent2BuyClicksToday || 0} tone="green" />
+      </section>
+
+      <section className="panel">
+        <div className="panel__header">
+          <div>
+            <h3>Top Performing Reels</h3>
+            <p>Tracked reel links ranked by click count.</p>
+          </div>
+        </div>
+
+        {topReels.length === 0 ? (
+          <div className="empty-state">No tracked reel clicks yet.</div>
+        ) : (
+          <div className="simple-list">
+            {topReels.map((reel) => (
+              <div key={`${reel.type}-${reel.reelId}`} className="simple-list__item">
+                <div>
+                  <strong>{reel.reelId || "Untitled reel"}</strong>
+                  <div>{reel.type === "rent2buy" ? "Rent2Buy" : "Van Finance"}</div>
+                </div>
+                <div className="status-pill">{reel.clickCount} clicks</div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="panel">
