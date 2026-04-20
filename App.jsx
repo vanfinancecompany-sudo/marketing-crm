@@ -1022,7 +1022,9 @@ useEffect(() => {
   }
 } 
 
-function handleClearTodayReels() {
+async function handleClearTodayReels() {
+  const reelsToDelete = [...todayReels];
+
   setTodayReels((prev) => {
     prev.forEach((reel) => {
       if (reel?.url?.startsWith?.("blob:")) {
@@ -1034,6 +1036,17 @@ function handleClearTodayReels() {
 
     return [];
   });
+
+  const reelIds = reelsToDelete.map((reel) => reel.id).filter(Boolean);
+
+  setCreatives((prev) => prev.filter((creative) => !reelIds.includes(creative.id)));
+  setRecentGeneratedIds((prev) => prev.filter((id) => !reelIds.includes(id)));
+
+  try {
+    await Promise.all(reelIds.map((id) => deleteMarketingCreative(id)));
+  } catch (error) {
+    setCreativeError(error.message || "Could not clear today's reels.");
+  }
 }
 
   async function downloadAdvertImage(vehicle) {
