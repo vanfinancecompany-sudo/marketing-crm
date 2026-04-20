@@ -117,6 +117,142 @@ const HIDDEN_POSTING_STORAGE_KEYS = {
   marketplace: "marketingHiddenMarketplaceVehicles",
 };
 
+const REEL_CLICK_HISTORY_STORAGE_KEY = "marketingReelClickHistory";
+const RANDOM_REEL_HISTORY_STORAGE_KEY = "marketingRecentRandomReelVehicleIds";
+const ROLLING_REEL_WINDOW_DAYS = 7;
+const MAX_RANDOM_REEL_HISTORY = 24;
+
+function parseDateValue(value) {
+  const date = value ? new Date(value) : null;
+  return Number.isNaN(date?.getTime?.()) ? null : date;
+}
+
+function isWithinLastDays(value, days = ROLLING_REEL_WINDOW_DAYS) {
+  const date = parseDateValue(value);
+  if (!date) return false;
+
+  const now = new Date();
+  const threshold = new Date(now);
+  threshold.setHours(0, 0, 0, 0);
+  threshold.setDate(threshold.getDate() - (days - 1));
+
+  return date >= threshold;
+}
+
+function loadReelClickHistory() {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(REEL_CLICK_HISTORY_STORAGE_KEY) || "[]");
+    return Array.isArray(saved)
+      ? saved.filter((entry) => entry?.date && isWithinLastDays(entry.date, ROLLING_REEL_WINDOW_DAYS))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveReelClickHistory(history) {
+  if (typeof window === "undefined") return;
+
+  localStorage.setItem(REEL_CLICK_HISTORY_STORAGE_KEY, JSON.stringify(history));
+}
+
+function mergeReelClickHistory(stats) {
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const history = loadReelClickHistory();
+  const nextEntry = {
+    date: todayKey,
+    topReels: Array.isArray(stats?.topReels) ? stats.topReels : [],
+  };
+
+  const merged = [
+    nextEntry,
+    ...history.filter((entry) => entry.date !== todayKey),
+  ]
+    .filter((entry) => isWithinLastDays(entry.date, ROLLING_REEL_WINDOW_DAYS))
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  saveReelClickHistory(merged);
+  return merged;
+}
+
+function buildRollingTopReels(history) {
+  const counts = new Map();
+
+  for (const day of history) {
+    for (const reel of day.topReels || []) {
+      const key = `${reel.type || "finance"}::${reel.reelId || "unknown"}`;
+      const previous = counts.get(key) || {
+        type: reel.type || "finance",
+        reelId: reel.reelId || "unknown",
+        clickCount: 0,
+      };
+
+      counts.set(key, {
+        ...previous,
+        clickCount: previous.clickCount + (Number(reel.clickCount) || 0),
+      });
+    }
+  }
+
+  return [...counts.values()]
+    .sort((a, b) => b.clickCount - a.clickCount)
+    .slice(0, 10);
+}
+
+function loadRecentRandomReelVehicleIds() {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(RANDOM_REEL_HISTORY_STORAGE_KEY) || "[]");
+    return Array.isArray(saved) ? saved.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentRandomReelVehicleIds(ids) {
+  if (typeof window === "undefined") return;
+
+  const normalized = ids.map((id) => String(id || "")).filter(Boolean).slice(0, MAX_RANDOM_REEL_HISTORY);
+  localStorage.setItem(RANDOM_REEL_HISTORY_STORAGE_KEY, JSON.stringify(normalized));
+}
+
+function shuffleItems(items) {
+  const copy = [...items];
+
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+
+  return copy;
+}
+
+function getRandomPoolItemKey(item) {
+  if (item.kind === "vehicle") return `vehicle:${item.vehicle.id}`;
+  if (item.kind === "upload") return `upload:${item.image.id}`;
+  return JSON.stringify(item);
+}
+
+function rankRandomPool(pool, recentVehicleIds = []) {
+  const recentIds = new Set(recentVehicleIds);
+  const fresh = [];
+  const recent = [];
+
+  pool.forEach((item) => {
+    if (item.kind === "vehicle" && recentIds.has(item.vehicle.id)) {
+      recent.push(item);
+      return;
+    }
+
+    fresh.push(item);
+  });
+
+  return [...shuffleItems(fresh), ...shuffleItems(recent)];
+}
+
 const VIEW_PATHS = {
   Dashboard: "/",
   Stock: "/stock",
@@ -189,7 +325,7 @@ export default function App() {
   const [reelFactoryForm, setReelFactoryForm] = useState(DEFAULT_REEL_FACTORY_FORM);
   const [reelFactoryVehicleId, setReelFactoryVehicleId] = useState("");
   const [reelFactorySelectionMode, setReelFactorySelectionMode] = useState("");
-  const [lastRandomReelVehicleId, setLastRandomReelVehicleId] = useState("");
+  const [recentRandomReelVehicleIds, setRecentRandomReelVehicleIds] = useState(loadRecentRandomReelVehicleIds);
   const [uploadedReelImages, setUploadedReelImages] = useState([]);
   const [todayReels, setTodayReels] = useState([]);
   const [reelClickStats, setReelClickStats] = useState({
@@ -197,6 +333,9 @@ export default function App() {
     rent2BuyClicksToday: 0,
     topReels: [],
   });
+  const [rollingTopReels, setRollingTopReels] = useState(() =>
+    buildRollingTopReels(loadReelClickHistory())
+  );
   const [postedToday, setPostedToday] = useState([]);
   const [hiddenPostingVehicleIds, setHiddenPostingVehicleIds] = useState(() => ({
     vanFinanceFacebook: loadHiddenPostingIds("vanFinanceFacebook"),
@@ -288,11 +427,17 @@ export default function App() {
 
     fetchReelClickDashboard()
       .then((stats) => {
-        if (active) {
-          setReelClickStats(stats);
-        }
+        if (!active) return;
+
+        setReelClickStats(stats);
+        const mergedHistory = mergeReelClickHistory(stats);
+        setRollingTopReels(buildRollingTopReels(mergedHistory));
       })
-      .catch(() => {});
+      .catch(() => {
+        if (active) {
+          setRollingTopReels(buildRollingTopReels(loadReelClickHistory()));
+        }
+      });
 
     return () => {
       active = false;
@@ -491,7 +636,7 @@ useEffect(() => {
       }
     }
 
-    return reelClickStats.topReels.map((trackedReel) => {
+    return rollingTopReels.map((trackedReel) => {
       const reelId = trackedReel.reelId;
       const matchedReel = reelId && reelId !== "unknown" ? reelLookup.get(reelId) : null;
       const label =
@@ -507,7 +652,7 @@ useEffect(() => {
         isUnknown: !reelId || reelId === "unknown",
       };
     });
-  }, [creatives, reelClickStats.topReels, todayReels]);
+  }, [creatives, rollingTopReels, todayReels]);
 
   function handleFormChange(field, value) {
     setFactoryForm((prev) => ({
@@ -661,16 +806,37 @@ useEffect(() => {
       return Array.from({ length: quantity }, (_, index) => pool[index % pool.length]);
     }
 
-    const vehicleItems = pool.filter((item) => item.kind === "vehicle");
-    const otherItems = pool.filter((item) => item.kind !== "vehicle");
-    const preferredVehicles = vehicleItems.filter((item) => item.vehicle.id !== lastRandomReelVehicleId);
-    const orderedPool = [
-      ...preferredVehicles.sort(() => Math.random() - 0.5),
-      ...vehicleItems.filter((item) => item.vehicle.id === lastRandomReelVehicleId),
-      ...otherItems.sort(() => Math.random() - 0.5),
-    ];
+    const uniquePool = [];
+    const seenKeys = new Set();
 
-    return Array.from({ length: quantity }, (_, index) => orderedPool[index % orderedPool.length]);
+    rankRandomPool(pool, recentRandomReelVehicleIds).forEach((item) => {
+      const key = getRandomPoolItemKey(item);
+      if (seenKeys.has(key)) return;
+      seenKeys.add(key);
+      uniquePool.push(item);
+    });
+
+    if (!uniquePool.length) {
+      return Array.from({ length: quantity }, (_, index) => pool[index % pool.length]);
+    }
+
+    const selected = [];
+    let batchRecentIds = [...recentRandomReelVehicleIds];
+
+    while (selected.length < quantity) {
+      const round = rankRandomPool(uniquePool, batchRecentIds);
+      const remaining = quantity - selected.length;
+      const nextItems = round.slice(0, remaining);
+      selected.push(...nextItems);
+
+      const roundVehicleIds = nextItems
+        .filter((item) => item.kind === "vehicle")
+        .map((item) => item.vehicle.id);
+
+      batchRecentIds = [...roundVehicleIds.reverse(), ...batchRecentIds].slice(0, MAX_RANDOM_REEL_HISTORY);
+    }
+
+    return selected;
   }
 
   async function addReelsToCreativeLibrary(reels) {
@@ -731,11 +897,19 @@ useEffect(() => {
       });
     });
 
-    const lastGeneratedVehicle = [...selectedPoolItems]
-      .reverse()
-      .find((item) => item.kind === "vehicle")?.vehicle;
-    if (reelFactorySelectionMode !== "stock" && lastGeneratedVehicle) {
-      setLastRandomReelVehicleId(lastGeneratedVehicle.id);
+    if (reelFactorySelectionMode !== "stock") {
+      const generatedVehicleIds = selectedPoolItems
+        .filter((item) => item.kind === "vehicle")
+        .map((item) => item.vehicle.id)
+        .filter(Boolean);
+
+      if (generatedVehicleIds.length) {
+        setRecentRandomReelVehicleIds((prev) => {
+          const next = [...generatedVehicleIds.reverse(), ...prev].slice(0, MAX_RANDOM_REEL_HISTORY);
+          saveRecentRandomReelVehicleIds(next);
+          return next;
+        });
+      }
     }
 
     setGenerationMessage(`Generating ${reelDrafts.length} video reel(s)...`);
