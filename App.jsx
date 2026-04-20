@@ -71,6 +71,7 @@ import { fetchMarketingVehicles } from "./services/marketingVehicles.js";
 import {
   deleteMarketingCreative,
   fetchMarketingCreatives,
+  fetchTodayReelCreatives,
   saveMarketingCreatives,
 } from "./services/marketingCreatives.js";
 import { fetchReelClickDashboard, logReelClick } from "./services/reelClickTracking.js";
