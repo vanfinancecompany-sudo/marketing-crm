@@ -4,10 +4,23 @@ import {
   toMarketingCreativePayload,
 } from "../utils/creativeUtils.js";
 
+const CREATIVE_SELECT = `
+  id,
+  created_at,
+  status,
+  template_type,
+  hook_style,
+  cta,
+  caption,
+  destination_page,
+  vehicle,
+  file_name
+`;
+
 export async function fetchMarketingCreatives(limit = 50) {
   const { data, error } = await supabase
     .from("marketing_creatives")
-    .select("*")
+    .select(CREATIVE_SELECT)
     .order("created_at", { ascending: false })
     .limit(limit);
 
@@ -24,7 +37,7 @@ export async function fetchTodayReelCreatives(limit = 20) {
 
   const { data, error } = await supabase
     .from("marketing_creatives")
-    .select("*")
+    .select(CREATIVE_SELECT)
     .in("status", ["reel_asset", "ready_to_post"])
     .gte("created_at", startOfToday.toISOString())
     .order("created_at", { ascending: false })
@@ -42,7 +55,7 @@ export async function saveMarketingCreatives(creatives) {
   const { data, error } = await supabase
     .from("marketing_creatives")
     .insert(payload)
-    .select("*");
+    .select(CREATIVE_SELECT);
 
   if (error) {
     throw new Error(`Creative save failed: ${error.message}`);
@@ -60,7 +73,7 @@ export async function updateMarketingCreative(id, updates) {
     .from("marketing_creatives")
     .update(payload)
     .eq("id", id)
-    .select("*")
+    .select(CREATIVE_SELECT)
     .single();
 
   if (error) {
