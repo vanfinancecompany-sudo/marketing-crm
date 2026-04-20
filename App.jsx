@@ -455,23 +455,18 @@ useEffect(() => {
         todayCreativeReels.map(async (creative) => {
           const blobData = await loadReelVideoBlob?.(creative.id).catch(() => null);
 
-        return {
- const rebuilt = await Promise.all(
-  todayCreativeReels.map(async (creative) => {
-    const blobData = await loadReelVideoBlob?.(creative.id).catch(() => null);
+          if (!blobData?.blob) return null;
 
-    if (!blobData?.blob) return null;
-
-    return {
-      id: creative.id,
-      creativeId: creative.id,
-      createdAt: creative.createdAt,
-      url: URL.createObjectURL(blobData.blob),
-      downloadName: blobData.downloadName,
-      mimeType: blobData.mimeType,
-    };
-  })
-);
+          return {
+            id: creative.id,
+            creativeId: creative.id,
+            createdAt: creative.createdAt,
+            url: URL.createObjectURL(blobData.blob),
+            downloadName: blobData.downloadName,
+            mimeType: blobData.mimeType,
+          };
+        })
+      );
 
       if (!active) return;
 
