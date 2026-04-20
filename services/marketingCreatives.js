@@ -12,9 +12,7 @@ const CREATIVE_SELECT = `
   hook_style,
   cta,
   caption,
-  destination_page,
-  vehicle,
-  file_name
+  destination_page
 `;
 
 export async function fetchMarketingCreatives(limit = 50) {
