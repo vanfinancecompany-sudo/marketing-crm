@@ -8,7 +8,8 @@ export async function fetchMarketingCreatives() {
   const { data, error } = await supabase
     .from("marketing_creatives")
     .select("*")
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(100);
 
   if (error) {
     throw new Error(`Failed to load marketing creatives: ${error.message}`);
