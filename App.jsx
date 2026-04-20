@@ -1168,11 +1168,13 @@ async function handleSyncAndGenerate(destination) {
 
 console.log("SYNC NEW VEHICLES", vehiclesToProcess);
 
-setGenerationMessage(
-  `Sync complete. ${vehiclesToProcess.length} new vehicle(s) found: ${vehiclesToProcess
-    .map((vehicle) => vehicle.name || vehicle.reg || vehicle.id)
-    .join(", ")}`
-);
+  const message = `Sync complete. ${vehiclesToProcess.length} new vehicle(s) found: ${vehiclesToProcess
+  .map((vehicle) => vehicle.name || vehicle.reg || vehicle.id)
+  .join(", ")}`;
+
+setGenerationMessage(message);
+alert(message);
+
   } catch (error) {
     setCreativeError(error.message || "Sync + reel preparation failed.");
   }
