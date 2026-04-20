@@ -9,7 +9,7 @@ export async function fetchMarketingCreatives() {
     .from("marketing_creatives")
     .select("*")
     .order("created_at", { ascending: false })
-    .limit(100);
+    .limit(50);
 
   if (error) {
     throw new Error(`Failed to load marketing creatives: ${error.message}`);
