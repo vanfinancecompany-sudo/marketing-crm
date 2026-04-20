@@ -1157,11 +1157,61 @@ for (const vehicle of vehiclesToProcess) {
   try {
     console.log("Generating reel for:", vehicle.name || vehicle.reg);
 
-    await handleGenerate({
-      selectedVehicle: vehicle,
+    const isRent = vehicle.pipeline === "rent2buy";
+
+    setReelFactoryVehicleId(vehicle.id);
+    setReelFactorySelectionMode("stock");
+    setFactoryFilters((prev) => ({ ...prev, pipeline: vehicle.pipeline }));
+    setReelFactoryForm((prev) => ({
+      ...prev,
+      reelSource: isRent ? "Rent2Buy stock" : "Finance stock",
+      reelType: isRent ? "Rent2Buy" : "Finance",
       quantity: 1,
+      hookMode: "Single selected hook",
+    }));
+
+    setSelectedVehicleId(vehicle.id);
+    setSelectedVehicleIds([vehicle.id]);
+
+    const hook = pickHookForPipeline(vehicle.pipeline, 0);
+    const reel = createReelFromVehicle(vehicle, {
+      hook,
+      sourceType: "stock",
     });
 
+    const videoAsset = await generateReelVideoAsset(reel);
+
+    const nextReel = {
+      ...reel,
+      url: videoAsset.url,
+      downloadName: videoAsset.downloadName,
+      posterUrl: videoAsset.posterUrl,
+      extension: videoAsset.extension,
+      mimeType: videoAsset.mimeType,
+      audioEmbedded: videoAsset.audioEmbedded,
+      blob: videoAsset.blob,
+      fileName: videoAsset.downloadName,
+    };
+
+    setTodayReels((prev) => [nextReel, ...prev].slice(0, 20));
+
+    const libraryCreatives = await addReelsToCreativeLibrary([nextReel]);
+    const savedCreative = libraryCreatives?.[0];
+
+    if (savedCreative) {
+      await saveReelVideoBlob(savedCreative.id, nextReel.blob, {
+        downloadName: nextReel.downloadName,
+        mimeType: nextReel.mimeType,
+      }).catch(() => {});
+
+      setTodayReels((prev) =>
+        prev.map((existingReel) =>
+          existingReel.id === nextReel.id
+            ? { ...existingReel, creativeId: savedCreative.id }
+            : existingReel
+        )
+      );
+    }
   } catch (err) {
     console.error("Reel generation failed:", vehicle?.id, err);
   }
