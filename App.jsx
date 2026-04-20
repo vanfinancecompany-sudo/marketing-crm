@@ -1150,16 +1150,24 @@ async function handleSyncStock(destination) {
     (v) => v?.id && !beforeIds.has(v.id)
   );
 
-  const vehiclesToProcess = newVehicles.slice(0, 5);
+ const vehiclesToProcess = newVehicles.slice(0, 5);
 
-  // 👇 TEMP DEBUG (we will remove later)
-  alert(
-    `SYNC RESULT:\n${vehiclesToProcess.length} new vehicle(s):\n${vehiclesToProcess
-      .map((v) => v.name || v.reg || v.id)
-      .join("\n")}`
-  );
+// 👇 Generate reels
+for (const vehicle of vehiclesToProcess) {
+  try {
+    console.log("Generating reel for:", vehicle.name || vehicle.reg);
 
-  return syncedVehicles;
+    await handleGenerate({
+      selectedVehicle: vehicle,
+      quantity: 1,
+    });
+
+  } catch (err) {
+    console.error("Reel generation failed:", vehicle?.id, err);
+  }
+}
+
+return syncedVehicles;
 }
 
 async function handleSyncAndGenerate(destination) {
@@ -1185,7 +1193,7 @@ async function handleSyncAndGenerate(destination) {
       return;
     }
 
-   const vehiclesToProcess = newVehicles.slice(0, 5);
+   const vehiclesToProcess = (syncedVehicles || []).slice(0, 2);
 
 console.log("SYNC NEW VEHICLES", vehiclesToProcess);
 
