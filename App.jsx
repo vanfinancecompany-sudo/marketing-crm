@@ -443,20 +443,78 @@ export default function App() {
   }, []);
 
 
-// 👉 PASTE NEW ONE HERE (separate block)
 useEffect(() => {
+  let active = true;
+
   async function rebuildTodayReels() {
     try {
       const savedCreatives = await fetchMarketingCreatives();
-
       const today = new Date().toISOString().slice(0, 10);
 
-      const todayCreativeReels = savedCreatives.filter(
-  (c) =>
-    c.createdAt &&
-    String(c.createdAt).slice(0, 10) === today &&
-    c.status === "reel_asset"
-);
+      const todayCreativeReels = savedCreatives
+        .filter(
+          (creative) =>
+            creative.createdAt &&
+            String(creative.createdAt).slice(0, 10) === today &&
+            (creative.status === "reel_asset" || creative.status === "ready_to_post")
+        )
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .slice(0, 20);
+
+      const rebuilt = await Promise.all(
+        todayCreativeReels.map(async (creative) => {
+          const blobData = await loadReelVideoBlob?.(creative.id).catch(() => null);
+
+          return {
+            id: creative.id,
+            creativeId: creative.id,
+            createdAt: creative.createdAt,
+            url: blobData?.blob ? URL.createObjectURL(blobData.blob) : "",
+            downloadName: blobData?.downloadName || creative.fileName || "",
+            mimeType: blobData?.mimeType || "video/webm",
+            pipeline: creative.vehicle?.pipeline || "vanFinance",
+            templateName: creative.templateType || "Reel",
+            headline: creative.hookStyle || creative.title || "Saved reel",
+            hook: creative.hookStyle || "",
+            title: creative.vehicle?.name || creative.title || "Saved reel",
+            subtext: creative.caption || "",
+            priceLine: creative.vehicle?.price || "",
+            ctaLine: creative.cta || "",
+            domain: "www.vanfinancecompany.co.uk",
+            image: creative.vehicle?.image || "",
+            posterUrl: creative.vehicle?.image || "",
+            sourceLabel: "Saved reel",
+            musicOn: true,
+            fileName: blobData?.downloadName || creative.fileName || "",
+          };
+        })
+      );
+
+      if (!active) return;
+
+      setTodayReels((prev) => {
+        prev.forEach((reel) => {
+          if (reel?.url?.startsWith?.("blob:")) {
+            try {
+              URL.revokeObjectURL(reel.url);
+            } catch {}
+          }
+        });
+
+        return rebuilt.filter(Boolean);
+      });
+    } catch {
+      if (!active) return;
+      setTodayReels([]);
+    }
+  }
+
+  rebuildTodayReels();
+
+  return () => {
+    active = false;
+  };
+}, []);
 
       const rebuilt = await Promise.all(
         todayCreativeReels.map(async (creative) => {
@@ -978,24 +1036,38 @@ useEffect(() => {
     }
   }
 
-  function handleDeleteReel(reelId) {
-    setTodayReels((prev) => {
-      const reel = prev.find((item) => item.id === reelId);
-      if (reel?.url) {
-        window.URL.revokeObjectURL(reel.url);
-      }
-      return prev.filter((reel) => reel.id !== reelId);
-    });
-  }
+ async function handleDeleteReel(reelId) {
+  const reelToDelete = todayReels.find((item) => item.id === reelId);
 
-  function handleClearTodayReels() {
-    setTodayReels((prev) => {
-      prev.forEach((reel) => {
-        if (reel.url) window.URL.revokeObjectURL(reel.url);
-      });
-      return [];
-    });
+  // remove from UI immediately
+  setTodayReels((prev) => {
+    const reel = prev.find((item) => item.id === reelId);
+
+    if (reel?.url?.startsWith?.("blob:")) {
+      try {
+        window.URL.revokeObjectURL(reel.url);
+      } catch {}
+    }
+
+    return prev.filter((reel) => reel.id !== reelId);
+  });
+
+  // also remove from Creative Library state
+  setCreatives((prev) => prev.filter((creative) => creative.id !== reelId));
+  setRecentGeneratedIds((prev) => prev.filter((id) => id !== reelId));
+
+  // 🔥 THIS is the important bit (fixes reappearing bug)
+  try {
+    await deleteMarketingCreative(reelId);
+  } catch (error) {
+    setCreativeError(error.message || "Could not delete reel.");
+
+    // rollback if needed
+    if (reelToDelete) {
+      setTodayReels((prev) => [reelToDelete, ...prev]);
+    }
   }
+} 
 
   async function downloadAdvertImage(vehicle) {
     const imageUrl = vehicle.image || vehicle.picture;
