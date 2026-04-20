@@ -361,6 +361,7 @@ export default function App() {
       setVehicles(data);
       setSelectedVehicleId((prev) => prev || data[0]?.id || "");
       setSelectedVehicleIds((prev) => (prev.length ? prev : data[0]?.id ? [data[0].id] : []));
+return data;
     } catch (error) {
       setVehicles([]);
       setVehiclesError(error.message || "Failed to load vehicles.");
@@ -1123,13 +1124,59 @@ async function handleClearTodayReels() {
     loadVehicles();
   }
 
-  function handleSyncStock(destination) {
-    const syncUrl = destination === "Van Finance Facebook" ? FINANCE_SYNC_URL : RENT_SYNC_URL;
-    window.open(syncUrl, "_blank", "noopener,noreferrer");
-    window.setTimeout(() => {
-      loadVehicles();
-    }, 3000);
+async function handleSyncStock(destination) {
+  const syncUrl =
+    destination === "Van Finance Facebook"
+      ? FINANCE_SYNC_URL
+      : RENT_SYNC_URL;
+
+  window.open(syncUrl, "_blank", "noopener,noreferrer");
+
+  await new Promise((resolve) => {
+    window.setTimeout(resolve, 3000);
+  });
+
+  const vehicles = await loadVehicles();
+
+  return vehicles; // 👈 THIS is the key line
+}
+
+async function handleSyncAndGenerate(destination) {
+  setGenerationMessage("");
+  setCreativeError("");
+
+  try {
+    const vehiclesBeforeSync = vehicles;
+    const syncedVehicles = await handleSyncStock(destination);
+
+    const beforeIds = new Set(
+      vehiclesBeforeSync
+        .map((vehicle) => vehicle?.id)
+        .filter(Boolean)
+    );
+
+    const newVehicles = (syncedVehicles || []).filter(
+      (vehicle) => vehicle?.id && !beforeIds.has(vehicle.id)
+    );
+
+    if (!newVehicles.length) {
+      setGenerationMessage("Sync complete. No new vehicles found for reel generation.");
+      return;
+    }
+
+   const vehiclesToProcess = newVehicles.slice(0, 5);
+
+console.log("SYNC NEW VEHICLES", vehiclesToProcess);
+
+setGenerationMessage(
+  `Sync complete. ${vehiclesToProcess.length} new vehicle(s) found: ${vehiclesToProcess
+    .map((vehicle) => vehicle.name || vehicle.reg || vehicle.id)
+    .join(", ")}`
+);
+  } catch (error) {
+    setCreativeError(error.message || "Sync + reel preparation failed.");
   }
+}
 
   function handleMarkVehiclePosted(vehicle, destination = getDefaultPostingDestination(vehicle)) {
     setPostedToday((prev) => {
@@ -1380,7 +1427,7 @@ async function handleClearTodayReels() {
             onPostVehicle={handlePostVehicle}
             onSkip={handleSkipVehicle}
             onRefreshStock={handleRefreshStock}
-            onSyncStock={handleSyncStock}
+            onSyncStock={handleSyncAndGenerate}
             onShowHiddenAgain={handleShowHiddenAgain}
           />
         );
