@@ -449,18 +449,7 @@ useEffect(() => {
 
   async function rebuildTodayReels() {
     try {
-      const savedCreatives = await fetchMarketingCreatives();
-      const today = new Date().toISOString().slice(0, 10);
-
-      const todayCreativeReels = savedCreatives
-        .filter(
-          (creative) =>
-            creative.createdAt &&
-            String(creative.createdAt).slice(0, 10) === today &&
-            (creative.status === "reel_asset" || creative.status === "ready_to_post")
-        )
-        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-        .slice(0, 20);
+      const todayCreativeReels = await fetchTodayReelCreatives(20);
 
       const rebuilt = await Promise.all(
         todayCreativeReels.map(async (creative) => {
