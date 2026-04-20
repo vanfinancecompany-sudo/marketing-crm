@@ -1044,6 +1044,20 @@ useEffect(() => {
   }
 } 
 
+function handleClearTodayReels() {
+  setTodayReels((prev) => {
+    prev.forEach((reel) => {
+      if (reel?.url?.startsWith?.("blob:")) {
+        try {
+          URL.revokeObjectURL(reel.url);
+        } catch {}
+      }
+    });
+
+    return [];
+  });
+}
+
   async function downloadAdvertImage(vehicle) {
     const imageUrl = vehicle.image || vehicle.picture;
     if (!imageUrl) return;
