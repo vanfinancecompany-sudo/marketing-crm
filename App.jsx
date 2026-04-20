@@ -456,29 +456,22 @@ useEffect(() => {
           const blobData = await loadReelVideoBlob?.(creative.id).catch(() => null);
 
         return {
-  id: creative.id,
-  creativeId: creative.id,
-  createdAt: creative.createdAt,
-  url: blobData?.blob ? URL.createObjectURL(blobData.blob) : "",
-  downloadName: blobData?.downloadName || "",
-  mimeType: blobData?.mimeType || "video/webm",
-  pipeline: "vanFinance",
-  templateName: creative.templateType || "Reel",
-  headline: creative.hookStyle || "Saved reel",
-  hook: creative.hookStyle || "",
-  title: creative.hookStyle || "Saved reel",
-  subtext: creative.caption || "",
-  priceLine: "",
-  ctaLine: creative.cta || "",
-  domain: "www.vanfinancecompany.co.uk",
-  image: "",
-  posterUrl: "",
-  sourceLabel: "Saved reel",
-  musicOn: true,
-  fileName: blobData?.downloadName || "",
-};
-        })
-      );
+ const rebuilt = await Promise.all(
+  todayCreativeReels.map(async (creative) => {
+    const blobData = await loadReelVideoBlob?.(creative.id).catch(() => null);
+
+    if (!blobData?.blob) return null;
+
+    return {
+      id: creative.id,
+      creativeId: creative.id,
+      createdAt: creative.createdAt,
+      url: URL.createObjectURL(blobData.blob),
+      downloadName: blobData.downloadName,
+      mimeType: blobData.mimeType,
+    };
+  })
+);
 
       if (!active) return;
 
