@@ -361,7 +361,6 @@ export default function App() {
       setVehicles(data);
       setSelectedVehicleId((prev) => prev || data[0]?.id || "");
       setSelectedVehicleIds((prev) => (prev.length ? prev : data[0]?.id ? [data[0].id] : []));
-return data;
     } catch (error) {
       setVehicles([]);
       setVehiclesError(error.message || "Failed to load vehicles.");
@@ -1124,140 +1123,13 @@ async function handleClearTodayReels() {
     loadVehicles();
   }
 
-async function handleSyncStock(destination) {
-  const syncUrl =
-    destination === "Van Finance Facebook"
-      ? FINANCE_SYNC_URL
-      : RENT_SYNC_URL;
-
-  // 👇 snapshot BEFORE sync
-  const vehiclesBeforeSync = vehicles;
-
-  window.open(syncUrl, "_blank", "noopener,noreferrer");
-
-  await new Promise((resolve) => {
-    window.setTimeout(resolve, 3000);
-  });
-
-  // 👇 AFTER sync
-  const syncedVehicles = await loadVehicles();
-
-  const beforeIds = new Set(
-    vehiclesBeforeSync.map((v) => v?.id).filter(Boolean)
-  );
-
-  const newVehicles = (syncedVehicles || []).filter(
-    (v) => v?.id && !beforeIds.has(v.id)
-  );
-
- const vehiclesToProcess = newVehicles.slice(0, 5);
-
-// 👇 Generate reels
-for (const vehicle of vehiclesToProcess) {
-  try {
-    console.log("Generating reel for:", vehicle.name || vehicle.reg);
-
-    const isRent = vehicle.pipeline === "rent2buy";
-
-    setReelFactoryVehicleId(vehicle.id);
-    setReelFactorySelectionMode("stock");
-    setFactoryFilters((prev) => ({ ...prev, pipeline: vehicle.pipeline }));
-    setReelFactoryForm((prev) => ({
-      ...prev,
-      reelSource: isRent ? "Rent2Buy stock" : "Finance stock",
-      reelType: isRent ? "Rent2Buy" : "Finance",
-      quantity: 1,
-      hookMode: "Single selected hook",
-    }));
-
-    setSelectedVehicleId(vehicle.id);
-    setSelectedVehicleIds([vehicle.id]);
-
-    const hook = pickHookForPipeline(vehicle.pipeline, 0);
-    const reel = createReelFromVehicle(vehicle, {
-      hook,
-      sourceType: "stock",
-    });
-
-    const videoAsset = await generateReelVideoAsset(reel);
-
-    const nextReel = {
-      ...reel,
-      url: videoAsset.url,
-      downloadName: videoAsset.downloadName,
-      posterUrl: videoAsset.posterUrl,
-      extension: videoAsset.extension,
-      mimeType: videoAsset.mimeType,
-      audioEmbedded: videoAsset.audioEmbedded,
-      blob: videoAsset.blob,
-      fileName: videoAsset.downloadName,
-    };
-
-    setTodayReels((prev) => [nextReel, ...prev].slice(0, 20));
-
-    const libraryCreatives = await addReelsToCreativeLibrary([nextReel]);
-    const savedCreative = libraryCreatives?.[0];
-
-    if (savedCreative) {
-      await saveReelVideoBlob(savedCreative.id, nextReel.blob, {
-        downloadName: nextReel.downloadName,
-        mimeType: nextReel.mimeType,
-      }).catch(() => {});
-
-      setTodayReels((prev) =>
-        prev.map((existingReel) =>
-          existingReel.id === nextReel.id
-            ? { ...existingReel, creativeId: savedCreative.id }
-            : existingReel
-        )
-      );
-    }
-  } catch (err) {
-    console.error("Reel generation failed:", vehicle?.id, err);
+  function handleSyncStock(destination) {
+    const syncUrl = destination === "Van Finance Facebook" ? FINANCE_SYNC_URL : RENT_SYNC_URL;
+    window.open(syncUrl, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => {
+      loadVehicles();
+    }, 3000);
   }
-}
-
-return syncedVehicles;
-}
-
-async function handleSyncAndGenerate(destination) {
-  setGenerationMessage("");
-  setCreativeError("");
-
-  try {
-    const vehiclesBeforeSync = vehicles;
-    const syncedVehicles = await handleSyncStock(destination);
-
-    const beforeIds = new Set(
-      vehiclesBeforeSync
-        .map((vehicle) => vehicle?.id)
-        .filter(Boolean)
-    );
-
-    const newVehicles = (syncedVehicles || []).filter(
-      (vehicle) => vehicle?.id && !beforeIds.has(vehicle.id)
-    );
-
-    if (!newVehicles.length) {
-      setGenerationMessage("Sync complete. No new vehicles found for reel generation.");
-      return;
-    }
-
-   const vehiclesToProcess = (syncedVehicles || []).slice(0, 2);
-
-console.log("SYNC NEW VEHICLES", vehiclesToProcess);
-
-  const message = `Sync complete. ${vehiclesToProcess.length} new vehicle(s) found: ${vehiclesToProcess
-  .map((vehicle) => vehicle.name || vehicle.reg || vehicle.id)
-  .join(", ")}`;
-
-setGenerationMessage(message);
-alert(message);
-
-  } catch (error) {
-    setCreativeError(error.message || "Sync + reel preparation failed.");
-  }
-}
 
   function handleMarkVehiclePosted(vehicle, destination = getDefaultPostingDestination(vehicle)) {
     setPostedToday((prev) => {
@@ -1508,7 +1380,7 @@ alert(message);
             onPostVehicle={handlePostVehicle}
             onSkip={handleSkipVehicle}
             onRefreshStock={handleRefreshStock}
-            onSyncStock={handleSyncAndGenerate}
+            onSyncStock={handleSyncStock}
             onShowHiddenAgain={handleShowHiddenAgain}
           />
         );
