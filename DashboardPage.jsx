@@ -24,8 +24,8 @@ export default function DashboardPage({ stats, recentCreatives, topReels = [] })
           <div className="eyebrow">Content Operations</div>
           <h2>Today&apos;s marketing workflow at a glance</h2>
           <p>
-            Track reel assets created today, stock waiting to be posted, and vehicles already
-            marked posted.
+            Track reel assets created today, stock waiting to be posted, vehicles already
+            marked posted, and reel clicks across the last 7 days.
           </p>
         </div>
       </section>
@@ -34,8 +34,8 @@ export default function DashboardPage({ stats, recentCreatives, topReels = [] })
         <StatCard label="Reel assets created today" value={stats.createdToday} tone="blue" />
         <StatCard label="Stock posts waiting" value={stats.readyToPost} tone="amber" />
         <StatCard label="Stock posts marked posted today" value={stats.postedToday} tone="green" />
-        <StatCard label="Finance clicks today" value={stats.financeClicksToday || 0} tone="blue" />
-        <StatCard label="Rent2Buy clicks today" value={stats.rent2BuyClicksToday || 0} tone="green" />
+        <StatCard label="Finance clicks last 7 days" value={stats.financeClicksToday || 0} tone="blue" />
+        <StatCard label="Rent2Buy clicks last 7 days" value={stats.rent2BuyClicksToday || 0} tone="green" />
       </section>
 
       <section className="panel">
@@ -53,7 +53,7 @@ export default function DashboardPage({ stats, recentCreatives, topReels = [] })
             {topReels.map((reel) => (
               <div key={`${reel.type}-${reel.reelId}`} className="simple-list__item">
                 <div>
-                  <strong>{reel.reelId || "Untitled reel"}</strong>
+                  <strong>{reel.label || reel.reelId || "Untitled reel"}</strong>
                   <div>{reel.type === "rent2buy" ? "Rent2Buy" : "Van Finance"}</div>
                 </div>
                 <div className="status-pill">{reel.clickCount} clicks</div>
