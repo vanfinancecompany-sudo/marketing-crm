@@ -42,7 +42,7 @@ export default function DashboardPage({ stats, recentCreatives, topReels = [] })
         <div className="panel__header">
           <div>
             <h3>Top Performing Reels</h3>
-            <p>Tracked reel links ranked by click count.</p>
+            <p>Tracked reel links ranked by click count across the last 7 days.</p>
           </div>
         </div>
 
