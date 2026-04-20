@@ -991,6 +991,7 @@ useEffect(() => {
 
  async function handleDeleteReel(reelId) {
   const reelToDelete = todayReels.find((item) => item.id === reelId);
+  const creativeId = reelToDelete?.creativeId || reelId;
 
   // remove from UI immediately
   setTodayReels((prev) => {
@@ -1005,13 +1006,12 @@ useEffect(() => {
     return prev.filter((reel) => reel.id !== reelId);
   });
 
-  // also remove from Creative Library state
-  setCreatives((prev) => prev.filter((creative) => creative.id !== reelId));
-  setRecentGeneratedIds((prev) => prev.filter((id) => id !== reelId));
+  // remove from Creative Library state (USE creativeId here)
+  setCreatives((prev) => prev.filter((creative) => creative.id !== creativeId));
+  setRecentGeneratedIds((prev) => prev.filter((id) => id !== creativeId));
 
-  // 🔥 THIS is the important bit (fixes reappearing bug)
   try {
-    await deleteMarketingCreative(reelId);
+    await deleteMarketingCreative(creativeId); // ✅ FIXED
   } catch (error) {
     setCreativeError(error.message || "Could not delete reel.");
 
@@ -1020,7 +1020,7 @@ useEffect(() => {
       setTodayReels((prev) => [reelToDelete, ...prev]);
     }
   }
-} 
+}
 
 async function handleClearTodayReels() {
   const reelsToDelete = [...todayReels];
