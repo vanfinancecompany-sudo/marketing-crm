@@ -1130,15 +1130,36 @@ async function handleSyncStock(destination) {
       ? FINANCE_SYNC_URL
       : RENT_SYNC_URL;
 
+  // 👇 snapshot BEFORE sync
+  const vehiclesBeforeSync = vehicles;
+
   window.open(syncUrl, "_blank", "noopener,noreferrer");
 
   await new Promise((resolve) => {
     window.setTimeout(resolve, 3000);
   });
 
-  const vehicles = await loadVehicles();
+  // 👇 AFTER sync
+  const syncedVehicles = await loadVehicles();
 
-  return vehicles; // 👈 THIS is the key line
+  const beforeIds = new Set(
+    vehiclesBeforeSync.map((v) => v?.id).filter(Boolean)
+  );
+
+  const newVehicles = (syncedVehicles || []).filter(
+    (v) => v?.id && !beforeIds.has(v.id)
+  );
+
+  const vehiclesToProcess = newVehicles.slice(0, 5);
+
+  // 👇 TEMP DEBUG (we will remove later)
+  alert(
+    `SYNC RESULT:\n${vehiclesToProcess.length} new vehicle(s):\n${vehiclesToProcess
+      .map((v) => v.name || v.reg || v.id)
+      .join("\n")}`
+  );
+
+  return syncedVehicles;
 }
 
 async function handleSyncAndGenerate(destination) {
