@@ -19,8 +19,15 @@ export async function logReelClick({ source, type, reelId }) {
 }
 
 export async function fetchReelClickDashboard() {
+  const now = new Date();
+
+  // TODAY (for small cards if needed later)
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // LAST 7 DAYS (main dashboard logic)
   const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  sevenDaysAgo.setDate(now.getDate() - 7);
   sevenDaysAgo.setHours(0, 0, 0, 0);
 
   const { data, error } = await supabase
@@ -33,24 +40,34 @@ export async function fetchReelClickDashboard() {
   }
 
   const clicks = data || [];
+
   const topReelMap = new Map();
 
   for (const click of clicks) {
     const reelId = click.reel_id || "unknown";
     const type = normalizeType(click.type);
     const key = `${type}:${reelId}`;
+
     const current = topReelMap.get(key) || {
       reelId,
       type,
       clickCount: 0,
     };
+
     current.clickCount += 1;
     topReelMap.set(key, current);
   }
 
   return {
-    financeClicksToday: clicks.filter((click) => normalizeType(click.type) === "finance").length,
-    rent2BuyClicksToday: clicks.filter((click) => normalizeType(click.type) === "rent2buy").length,
+    // still named "Today" to avoid breaking App
+    financeClicksToday: clicks.filter(
+      (c) => normalizeType(c.type) === "finance"
+    ).length,
+
+    rent2BuyClicksToday: clicks.filter(
+      (c) => normalizeType(c.type) === "rent2buy"
+    ).length,
+
     topReels: [...topReelMap.values()]
       .sort((a, b) => b.clickCount - a.clickCount)
       .slice(0, 5),
