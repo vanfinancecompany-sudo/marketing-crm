@@ -972,7 +972,7 @@ useEffect(() => {
       return;
     }
 
-    setTodayReels((prev) => [...nextReels, ...prev]);
+    setTodayReels((prev) => [...nextReels, ...prev].slice(0, 20));
     try {
       const libraryCreatives = await addReelsToCreativeLibrary(nextReels);
       await Promise.all(
