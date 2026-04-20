@@ -17,8 +17,7 @@ const CREATIVE_SELECT = `
   vehicle_name,
   registration,
   pipeline,
-  preview_payload,
-  file_name
+  preview_payload
 `;
 
 export async function fetchMarketingCreatives(limit = 50) {
