@@ -333,9 +333,7 @@ export default function App() {
     rent2BuyClicksToday: 0,
     topReels: [],
   });
-  const [rollingTopReels, setRollingTopReels] = useState(() =>
-    buildRollingTopReels(loadReelClickHistory())
-  );
+  const [rollingTopReels, setRollingTopReels] = useState([]);
   const [postedToday, setPostedToday] = useState([]);
   const [hiddenPostingVehicleIds, setHiddenPostingVehicleIds] = useState(() => ({
     vanFinanceFacebook: loadHiddenPostingIds("vanFinanceFacebook"),
@@ -430,12 +428,11 @@ export default function App() {
         if (!active) return;
 
         setReelClickStats(stats);
-        const mergedHistory = mergeReelClickHistory(stats);
-        setRollingTopReels(buildRollingTopReels(mergedHistory));
+        setRollingTopReels(Array.isArray(stats?.topReels) ? stats.topReels : []);
       })
       .catch(() => {
         if (active) {
-          setRollingTopReels(buildRollingTopReels(loadReelClickHistory()));
+          setRollingTopReels([]);
         }
       });
 
