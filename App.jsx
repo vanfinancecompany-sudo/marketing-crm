@@ -516,32 +516,7 @@ useEffect(() => {
   };
 }, []);
 
-      const rebuilt = await Promise.all(
-        todayCreativeReels.map(async (creative) => {
-          const blobData = await loadReelVideoBlob?.(creative.id).catch(() => null);
-
-          if (!blobData?.blob) return null;
-
-          return {
-            id: creative.id,
-            creativeId: creative.id,
-            createdAt: creative.createdAt,
-            url: URL.createObjectURL(blobData.blob),
-            downloadName: blobData.downloadName,
-            mimeType: blobData.mimeType,
-          };
-        })
-      );
-
-      setTodayReels(rebuilt.filter(Boolean));
-    } catch {
-      // fail silently
-    }
-  }
-
-  rebuildTodayReels();
-}, []);
-
+      
   const selectedVehicle =
     vehicles.find((vehicle) => vehicle.id === selectedVehicleId) || vehicles[0] || null;
   const selectedReelFactoryVehicle =
