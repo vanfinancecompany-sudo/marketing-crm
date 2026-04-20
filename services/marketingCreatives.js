@@ -4,15 +4,34 @@ import {
   toMarketingCreativePayload,
 } from "../utils/creativeUtils.js";
 
-export async function fetchMarketingCreatives() {
+export async function fetchMarketingCreatives(limit = 50) {
   const { data, error } = await supabase
     .from("marketing_creatives")
     .select("*")
     .order("created_at", { ascending: false })
-    .limit(50);
+    .limit(limit);
 
   if (error) {
     throw new Error(`Failed to load marketing creatives: ${error.message}`);
+  }
+
+  return (data || []).map(normalizeCreativeRecord);
+}
+
+export async function fetchTodayReelCreatives(limit = 20) {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const { data, error } = await supabase
+    .from("marketing_creatives")
+    .select("*")
+    .in("status", ["reel_asset", "ready_to_post"])
+    .gte("created_at", startOfToday.toISOString())
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    throw new Error(`Failed to load today reels: ${error.message}`);
   }
 
   return (data || []).map(normalizeCreativeRecord);
