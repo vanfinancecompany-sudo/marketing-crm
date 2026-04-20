@@ -238,19 +238,20 @@ function getRandomPoolItemKey(item) {
 
 function rankRandomPool(pool, recentVehicleIds = []) {
   const recentIds = new Set(recentVehicleIds);
-  const fresh = [];
-  const recent = [];
 
-  pool.forEach((item) => {
-    if (item.kind === "vehicle" && recentIds.has(item.vehicle.id)) {
-      recent.push(item);
-      return;
-    }
+  // 🔥 HARD EXCLUDE recent vehicles
+  const fresh = pool.filter(
+    (item) =>
+      item.kind !== "vehicle" || !recentIds.has(item.vehicle.id)
+  );
 
-    fresh.push(item);
-  });
+  // if enough fresh items → ONLY use them
+  if (fresh.length >= 5) {
+    return shuffleItems(fresh);
+  }
 
-  return [...shuffleItems(fresh), ...shuffleItems(recent)];
+  // fallback: allow all (prevents empty pool issue)
+  return shuffleItems(pool);
 }
 
 const VIEW_PATHS = {
