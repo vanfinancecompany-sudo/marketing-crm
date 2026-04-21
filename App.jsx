@@ -1006,25 +1006,7 @@ function handleDeleteReel(reelId) {
   });
 }
 
-    return prev.filter((reel) => reel.id !== reelId);
-  });
-
-  // remove from Creative Library state (USE creativeId here)
-  setCreatives((prev) => prev.filter((creative) => creative.id !== creativeId));
-  setRecentGeneratedIds((prev) => prev.filter((id) => id !== creativeId));
-
-  try {
-    await deleteMarketingCreative(creativeId); // ✅ FIXED
-  } catch (error) {
-    setCreativeError(error.message || "Could not delete reel.");
-
-    // rollback if needed
-    if (reelToDelete) {
-      setTodayReels((prev) => [reelToDelete, ...prev]);
-    }
-  }
-}
-
+   
 async function handleClearTodayReels() {
   const reelsToDelete = [...todayReels];
 
