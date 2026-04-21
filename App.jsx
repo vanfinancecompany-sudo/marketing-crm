@@ -330,7 +330,13 @@ export default function App() {
   const [recentRandomReelVehicleIds, setRecentRandomReelVehicleIds] = useState(loadRecentRandomReelVehicleIds);
   const [uploadedReelImages, setUploadedReelImages] = useState([]);
   const [todayReels, setTodayReels] = useState([]);
-const [hiddenTodayReelIds, setHiddenTodayReelIds] = useState([]);
+const [hiddenTodayReelIds, setHiddenTodayReelIds] = useState(() => {
+  try {
+    return JSON.parse(localStorage.getItem("hiddenTodayReelIds") || "[]");
+  } catch {
+    return [];
+  }
+});
   const [reelClickStats, setReelClickStats] = useState({
     financeClicksToday: 0,
     rent2BuyClicksToday: 0,
@@ -388,6 +394,10 @@ const [hiddenTodayReelIds, setHiddenTodayReelIds] = useState([]);
         window.location.replace(TRACK_REDIRECTS[type]);
       });
   }, []);
+
+useEffect(() => {
+  localStorage.setItem("hiddenTodayReelIds", JSON.stringify(hiddenTodayReelIds));
+}, [hiddenTodayReelIds]);
 
   useEffect(() => {
     function handlePopState() {
@@ -480,7 +490,9 @@ useEffect(() => {
           }
         });
 
-        return rebuilt.filter(Boolean);
+        return rebuilt
+  .filter(Boolean)
+  .filter((reel) => !hiddenTodayReelIds.includes(reel.id));
       });
     } catch {
       if (!active) return;
