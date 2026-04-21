@@ -330,6 +330,7 @@ export default function App() {
   const [recentRandomReelVehicleIds, setRecentRandomReelVehicleIds] = useState(loadRecentRandomReelVehicleIds);
   const [uploadedReelImages, setUploadedReelImages] = useState([]);
   const [todayReels, setTodayReels] = useState([]);
+const [hiddenTodayReelIds, setHiddenTodayReelIds] = useState([]);
   const [reelClickStats, setReelClickStats] = useState({
     financeClicksToday: 0,
     rent2BuyClicksToday: 0,
@@ -989,11 +990,9 @@ useEffect(() => {
     }
   }
 
- async function handleDeleteReel(reelId) {
-  const reelToDelete = todayReels.find((item) => item.id === reelId);
-  const creativeId = reelToDelete?.creativeId || reelId;
+function handleDeleteReel(reelId) {
+  setHiddenTodayReelIds((prev) => [...prev, reelId]);
 
-  // remove from UI immediately
   setTodayReels((prev) => {
     const reel = prev.find((item) => item.id === reelId);
 
@@ -1002,6 +1001,10 @@ useEffect(() => {
         window.URL.revokeObjectURL(reel.url);
       } catch {}
     }
+
+    return prev.filter((reel) => reel.id !== reelId);
+  });
+}
 
     return prev.filter((reel) => reel.id !== reelId);
   });
