@@ -500,13 +500,12 @@ useEffect(() => {
     }
   }
 
-  rebuildTodayReels();
+    rebuildTodayReels();
 
   return () => {
     active = false;
   };
-}, []);
-
+}, [hiddenTodayReelIds]);
       
   const selectedVehicle =
     vehicles.find((vehicle) => vehicle.id === selectedVehicleId) || vehicles[0] || null;
