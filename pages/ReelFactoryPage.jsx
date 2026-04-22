@@ -467,30 +467,32 @@ export function TodayReelsSection({
                   ) : (
                     <div className="reel-frame__safe-zone" style={{ gridRow: "1 / -1", width: "100%" }}>
                       <div className="reel-frame__top-safe" />
-                      <div className="reel-frame__center">
-                        <div className="reel-frame__vehicle-wrap">
-                          {reel.image ? (
-                            <img
-                              src={reel.image}
-                              alt={reel.title}
-                              className="reel-frame__vehicle-image"
-                            />
-                          ) : null}
-                        </div>
-                        <div className="reel-frame__headline">{reel.headline}</div>
-                        <div className="reel-frame__subtext">{reel.priceLine}</div>
-                        <div className="reel-frame__subtext">{reel.ctaLine}</div>
-                        <div className="reel-frame__subtext">{reel.domain}</div>
-                      </div>
-                      <div className="reel-frame__bottom-safe" />
-                    </div>
-                  )}
-                  <div className="creative-preview__overlay">
-                    <div className="creative-preview__chip">{reel.templateName}</div>
-                    <div className="creative-preview__headline">{reel.headline}</div>
-                    <div className="creative-preview__subline">{reel.priceLine || reel.domain}</div>
-                  </div>
-                </div>
+                     <div className="reel-frame__center">
+  <div className="reel-frame__vehicle-wrap">
+    {reel.image ? (
+      <img
+        src={reel.image}
+        alt={reel.title}
+        className="reel-frame__vehicle-image"
+      />
+    ) : null}
+  </div>
+
+  <div className="reel-frame__headline">{reel.headline}</div>
+
+  {/* ✅ PRICE LINE (Finance only gets smaller text) */}
+  <div
+    className={`reel-frame__subtext ${
+      reel.pipeline !== "rent2buy" ? "reel-frame__subtext--price" : ""
+    }`}
+  >
+    {reel.priceLine}
+  </div>
+
+  {/* leave these unchanged */}
+  <div className="reel-frame__subtext">{reel.ctaLine}</div>
+  <div className="reel-frame__subtext">{reel.domain}</div>
+</div>
 
                 <div className="creative-card__body">
                   <div className="creative-card__tags">
