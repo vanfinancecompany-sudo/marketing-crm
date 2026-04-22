@@ -1121,6 +1121,13 @@ textarea {
   letter-spacing: 0.04em;
 }
 
+.reel-frame__subtext--price {
+  font-size: 10px;
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
 .reel-frame__vehicle-wrap {
   width: 100%;
   min-height: 46%;
