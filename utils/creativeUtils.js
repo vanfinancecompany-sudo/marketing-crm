@@ -1074,16 +1074,29 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
     const textProgress = Math.min((elapsedSeconds - 3) / 0.45, 1);
     ctx.globalAlpha = textProgress;
     let cursorY = textPanelY + 44 + (1 - textProgress) * 22;
-    cursorY += drawCanvasTextBlock(ctx, reel.priceLine || reel.title || "", {
-      x: width / 2,
-      y: cursorY,
-      maxWidth: width - 180,
-      maxHeight: 180,
-      startSize: 104,
-      minSize: 48,
-      maxLines: 2,
-      weight: 900,
-    });
+    if (reel.pipeline === "rent2buy") {
+  cursorY += drawCanvasTextBlock(ctx, reel.priceLine || reel.title || "", {
+    x: width / 2,
+    y: cursorY,
+    maxWidth: width - 180,
+    maxHeight: 180,
+    startSize: 104,
+    minSize: 48,
+    maxLines: 2,
+    weight: 900,
+  });
+} else {
+  cursorY += drawCanvasTextBlock(ctx, reel.priceLine || reel.title || "", {
+    x: width / 2,
+    y: cursorY,
+    maxWidth: width - 140,
+    maxHeight: 120,
+    startSize: 82,
+    minSize: 34,
+    maxLines: 1,
+    weight: 900,
+  });
+}
     cursorY += 26;
     drawCanvasTextBlock(ctx, reel.title || "", {
       x: width / 2,
