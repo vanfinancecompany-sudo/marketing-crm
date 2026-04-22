@@ -430,98 +430,108 @@ export function TodayReelsSection({
   onClearReels,
 }) {
   return (
-      <section className="panel">
-        <div className="panel__header">
-          <div>
-            <h3>Today's Reels</h3>
-            <p>Generated reel videos stay visible here for this session with preview and download controls.</p>
-          </div>
-          <div className="card-actions">
-            <button className="button button--ghost" onClick={onDownloadAll} disabled={!todayReels.length}>
-              Download All
-            </button>
-            <button className="button button--danger" onClick={onClearReels} disabled={!todayReels.length}>
-              Clear Today's Reels
-            </button>
-          </div>
+    <section className="panel">
+      <div className="panel__header">
+        <div>
+          <h3>Today's Reels</h3>
+          <p>Generated reel videos stay visible here for this session with preview and download controls.</p>
         </div>
+        <div className="card-actions">
+          <button className="button button--ghost" onClick={onDownloadAll} disabled={!todayReels.length}>
+            Download All
+          </button>
+          <button className="button button--danger" onClick={onClearReels} disabled={!todayReels.length}>
+            Clear Today's Reels
+          </button>
+        </div>
+      </div>
 
-        {todayReels.length === 0 ? (
-          <div className="empty-state">No reels generated today.</div>
-        ) : (
-          <div className="today-reel-grid">
-            {todayReels.map((reel) => (
-              <article
-                className={`creative-card creative-card--${reel.pipeline === "rent2buy" ? "rent" : "finance"} today-reel-card`}
-                key={reel.id}
-              >
-                <div className="creative-preview today-reel-preview">
-                  {reel.url ? (
-                    <video
-                      className="creative-preview__image today-reel-video"
-                      src={reel.url}
-                      poster={reel.posterUrl || reel.image}
-                      controls
-                      playsInline
-                    />
-                  ) : (
-                    <div className="reel-frame__safe-zone" style={{ gridRow: "1 / -1", width: "100%" }}>
-                      <div className="reel-frame__top-safe" />
-                     <div className="reel-frame__center">
-  <div className="reel-frame__vehicle-wrap">
-    {reel.image ? (
-      <img
-        src={reel.image}
-        alt={reel.title}
-        className="reel-frame__vehicle-image"
-      />
-    ) : null}
-  </div>
+      {todayReels.length === 0 ? (
+        <div className="empty-state">No reels generated today.</div>
+      ) : (
+        <div className="today-reel-grid">
+          {todayReels.map((reel) => (
+            <article
+              className={`creative-card creative-card--${reel.pipeline === "rent2buy" ? "rent" : "finance"} today-reel-card`}
+              key={reel.id}
+            >
+              <div className="creative-preview today-reel-preview">
+                {reel.url ? (
+                  <video
+                    className="creative-preview__image today-reel-video"
+                    src={reel.url}
+                    poster={reel.posterUrl || reel.image}
+                    controls
+                    playsInline
+                  />
+                ) : (
+                  <div className="reel-frame__safe-zone" style={{ gridRow: "1 / -1", width: "100%" }}>
+                    <div className="reel-frame__top-safe" />
 
-  <div className="reel-frame__headline">{reel.headline}</div>
+                    <div className="reel-frame__center">
+                      <div className="reel-frame__vehicle-wrap">
+                        {reel.image ? (
+                          <img
+                            src={reel.image}
+                            alt={reel.title}
+                            className="reel-frame__vehicle-image"
+                          />
+                        ) : null}
+                      </div>
 
-  {/* ✅ PRICE LINE (Finance only gets smaller text) */}
-  <div
-    className={`reel-frame__subtext ${
-      reel.pipeline !== "rent2buy" ? "reel-frame__subtext--price" : ""
-    }`}
-  >
-    {reel.priceLine}
-  </div>
+                      <div className="reel-frame__headline">{reel.headline}</div>
 
-  {/* leave these unchanged */}
-  <div className="reel-frame__subtext">{reel.ctaLine}</div>
-  <div className="reel-frame__subtext">{reel.domain}</div>
-</div>
+                      <div
+                        className={`reel-frame__subtext ${
+                          reel.pipeline !== "rent2buy" ? "reel-frame__subtext--price" : ""
+                        }`}
+                      >
+                        {reel.priceLine}
+                      </div>
 
-                <div className="creative-card__body">
-                  <div className="creative-card__tags">
-                    <span className="tag">{reel.pipeline === "rent2buy" ? "Rent2Buy reel" : "Finance reel"}</span>
-                    <span className="tag">Hook: {reel.hook}</span>
-                    <span className="tag">{reel.sourceLabel}</span>
-                    {reel.musicOn ? <span className="tag">Music on</span> : null}
-                    <span className="tag">{reel.templateName}</span>
+                      <div className="reel-frame__subtext">{reel.ctaLine}</div>
+                      <div className="reel-frame__subtext">{reel.domain}</div>
+                    </div>
+
+                    <div className="reel-frame__bottom-safe" />
                   </div>
-                  <h3>{reel.title}</h3>
-                  <div className="creative-card__meta">Hook: {reel.headline}</div>
-                  <div className="creative-card__meta">Content: {reel.subtext}</div>
-                  <div className="creative-card__meta">Domain: {reel.domain}</div>
-                  <div className="creative-card__meta">File: {reel.downloadName || reel.fileName}</div>
-                  <div className="creative-card__meta">Format: {reel.mimeType || "Video file"}</div>
-                  <div className="card-actions">
-                    <button className="button button--primary" onClick={() => onDownloadReel(reel)}>
-                      Download Reel
-                    </button>
-                    <button className="button button--danger" onClick={() => onDeleteReel(reel.id)}>
-                      Delete Reel
-                    </button>
-                  </div>
+                )}
+
+                <div className="creative-preview__overlay">
+                  <div className="creative-preview__chip">{reel.templateName}</div>
+                  <div className="creative-preview__headline">{reel.headline}</div>
+                  <div className="creative-preview__subline">{reel.priceLine || reel.domain}</div>
                 </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+              </div>
+
+              <div className="creative-card__body">
+                <div className="creative-card__tags">
+                  <span className="tag">{reel.pipeline === "rent2buy" ? "Rent2Buy reel" : "Finance reel"}</span>
+                  <span className="tag">Hook: {reel.hook}</span>
+                  <span className="tag">{reel.sourceLabel}</span>
+                  {reel.musicOn ? <span className="tag">Music on</span> : null}
+                  <span className="tag">{reel.templateName}</span>
+                </div>
+                <h3>{reel.title}</h3>
+                <div className="creative-card__meta">Hook: {reel.headline}</div>
+                <div className="creative-card__meta">Content: {reel.subtext}</div>
+                <div className="creative-card__meta">Domain: {reel.domain}</div>
+                <div className="creative-card__meta">File: {reel.downloadName || reel.fileName}</div>
+                <div className="creative-card__meta">Format: {reel.mimeType || "Video file"}</div>
+                <div className="card-actions">
+                  <button className="button button--primary" onClick={() => onDownloadReel(reel)}>
+                    Download Reel
+                  </button>
+                  <button className="button button--danger" onClick={() => onDeleteReel(reel.id)}>
+                    Delete Reel
+                  </button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
