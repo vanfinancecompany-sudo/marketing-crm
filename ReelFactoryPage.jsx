@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import FilterBar from "../components/FilterBar.jsx";
 import {
   financeReelHooks,
@@ -8,19 +8,19 @@ import {
   rentReelHooks,
 } from "../data/mockData.js";
 
-const TRACK_BASE_URL = "https://marketing-crm-six.vercel.app/track?src=reel";
 const DEFAULT_FINANCE_DESCRIPTION = `🚐 VAN FINANCE AVAILABLE NOW
 💰 From £99 deposit
 ⚡ Approved in 60 minutes
 
 👇 Apply now
-${TRACK_BASE_URL}&type=finance&reel={reelId}`;
+https://www.vanfinancecompany.co.uk/r/finance/{reelId}`;
+
 const DEFAULT_RENT_DESCRIPTION = `🚐 RENT TO BUY YOUR VAN
 🚫 NO CREDIT CHECK
 🔑 RENT IT - DRIVE IT - OWN IT
 
 👇 Apply now
-${TRACK_BASE_URL}&type=rent2buy&reel={reelId}`;
+https://www.rent2buyvans.co.uk/r/rent2buy/{reelId}`;
 
 function createDraftReelId() {
   return `reel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
