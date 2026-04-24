@@ -470,13 +470,37 @@ export function TodayReelsSection({
   }}
 >                 
 {reel.url ? (
-  <video
-    className="creative-preview__image today-reel-video"
-    src={reel.url}
-    poster={reel.posterUrl || reel.image}
-    controls
-    playsInline
-  />
+  <div style={{ position: "relative" }}>
+    
+    {visualMode === "enhanced" && (
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "#000",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "#fff",
+          fontWeight: 900,
+          fontSize: "28px",
+          textAlign: "center",
+          zIndex: 2,
+        }}
+      >
+        £99 DEPOSIT<br />DRIVE TODAY
+      </div>
+    )}
+
+    <video
+      className="creative-preview__image today-reel-video"
+      src={reel.url}
+      poster={reel.posterUrl || reel.image}
+      controls
+      playsInline
+    />
+    
+  </div>
 ) : (
                     <div className="reel-frame__safe-zone" style={{ gridRow: "1 / -1", width: "100%" }}>
                       <div className="reel-frame__top-safe" />
