@@ -455,8 +455,19 @@ export function TodayReelsSection({
                 className={`creative-card creative-card--${reel.pipeline === "rent2buy" ? "rent" : "finance"} today-reel-card`}
                 key={reel.id}
               >
-                <div className="creative-preview today-reel-preview">
-                  {reel.url ? (
+<div
+  className="creative-preview today-reel-preview"
+  style={{
+    boxShadow:
+      visualMode === "enhanced"
+        ? "0 18px 45px rgba(15, 23, 42, 0.25)"
+        : undefined,
+    background:
+      visualMode === "enhanced"
+        ? "linear-gradient(180deg, rgba(15,23,42,0.15), rgba(15,23,42,0.45))"
+        : undefined,
+  }}
+>                  {reel.url ? (
                     <video
                       className="creative-preview__image today-reel-video"
                       src={reel.url}
@@ -591,6 +602,8 @@ export default function ReelFactoryPage(props) {
   const [financeDescription, setFinanceDescription] = useState(DEFAULT_FINANCE_DESCRIPTION);
   const [rentDescription, setRentDescription] = useState(DEFAULT_RENT_DESCRIPTION);
 
+  const [visualMode, setVisualMode] = useState("enhanced");
+
   async function handleDownloadWithDescription(reel) {
     const template = reel.pipeline === "rent2buy" ? rentDescription : financeDescription;
     await navigator.clipboard.writeText(fillDescriptionTemplate(template, reel.id)).catch(() => {});
@@ -607,7 +620,11 @@ export default function ReelFactoryPage(props) {
         onFinanceDescriptionChange={setFinanceDescription}
         onRentDescriptionChange={setRentDescription}
       />
-      <TodayReelsSection {...props} onDownloadReel={handleDownloadWithDescription} />
+     <TodayReelsSection
+  {...props}
+  visualMode={visualMode}
+  onDownloadReel={handleDownloadWithDescription}
+/>
     </div>
   );
 }
