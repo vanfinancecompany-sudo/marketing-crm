@@ -665,5 +665,6 @@ async function handleDownloadWithDescription(reel) {
     />
 
     <TodayReelsSection {...props} onDownloadReel={handleDownloadWithDescription} />
-  </div>
+   </div>
 );
+}
