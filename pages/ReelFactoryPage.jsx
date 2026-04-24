@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import FilterBar from "../components/FilterBar.jsx";
 import {
   financeReelHooks,
@@ -690,15 +690,25 @@ export default function ReelFactoryPage(props) {
   const [selectedFinanceDescriptionIndex, setSelectedFinanceDescriptionIndex] = useState(0);
   const [selectedRentDescriptionIndex, setSelectedRentDescriptionIndex] = useState(0);
 
- const [financeDescriptions, setFinanceDescriptions] = useState(() =>
-  FINANCE_DESCRIPTION_OPTIONS.map((option) => option.text)
-);
+ const [financeDescriptions, setFinanceDescriptions] = useState(() => {
+  const saved = localStorage.getItem("financeDescriptions");
+  return saved ? JSON.parse(saved) : FINANCE_DESCRIPTION_OPTIONS.map((option) => option.text);
+});
 
-const [rentDescriptions, setRentDescriptions] = useState(() =>
-  RENT_DESCRIPTION_OPTIONS.map((option) => option.text)
-); 
+const [rentDescriptions, setRentDescriptions] = useState(() => {
+  const saved = localStorage.getItem("rentDescriptions");
+  return saved ? JSON.parse(saved) : RENT_DESCRIPTION_OPTIONS.map((option) => option.text);
+});
 
   const [copyMessage, setCopyMessage] = useState("");
+
+useEffect(() => {
+  localStorage.setItem("financeDescriptions", JSON.stringify(financeDescriptions));
+}, [financeDescriptions]);
+
+useEffect(() => {
+  localStorage.setItem("rentDescriptions", JSON.stringify(rentDescriptions));
+}, [rentDescriptions]);
 
 function handleFinanceDescriptionSelect(index) {
   setSelectedFinanceDescriptionIndex(index);
