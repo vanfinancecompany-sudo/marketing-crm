@@ -488,8 +488,28 @@ export function TodayReelsSection({
                             />
                           ) : null}
                         </div>
-                        <div className="reel-frame__headline">{reel.headline}</div>
-                        <div className="reel-frame__subtext">{reel.priceLine}</div>
+                        <div
+  className="reel-frame__headline"
+  style={{
+    textShadow:
+      visualMode === "enhanced"
+        ? "0 3px 10px rgba(0,0,0,0.7)"
+        : undefined,
+  }}
+>
+  {reel.headline}
+</div>
+                        <div
+  className="reel-frame__subtext"
+  style={{
+    textShadow:
+      visualMode === "enhanced"
+        ? "0 2px 8px rgba(0,0,0,0.7)"
+        : undefined,
+  }}
+>
+  {reel.priceLine}
+</div>
                         <div className="reel-frame__subtext">{reel.ctaLine}</div>
                         <div className="reel-frame__subtext">{reel.domain}</div>
                       </div>
