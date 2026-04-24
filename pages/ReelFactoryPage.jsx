@@ -568,14 +568,11 @@ export function TodayReelsSection({
 }
 
 function ReelDescriptionPanel({
-  filters,
-  formValues,
-  selectedVehicle,
-  todayReels,
-  financeDescription,
-  rentDescription,
-  onFinanceDescriptionChange,
-  onRentDescriptionChange,
+  ...
+  financeDescriptions,
+  rentDescriptions,
+  setFinanceDescriptions,
+  setRentDescriptions,
   financeOptions,
   rentOptions,
   selectedFinanceIndex,
@@ -627,8 +624,12 @@ function ReelDescriptionPanel({
     <textarea
       className="field__input"
       rows={7}
-      value={financeDescription}
-      onChange={(event) => onFinanceDescriptionChange(event.target.value)}
+      value={financeDescriptions[selectedFinanceIndex]}
+onChange={(event) => {
+  const updated = [...financeDescriptions];
+  updated[selectedFinanceIndex] = event.target.value;
+  setFinanceDescriptions(updated);
+}}
     />
   </>
 ) : null}
@@ -657,8 +658,12 @@ function ReelDescriptionPanel({
     <textarea
       className="field__input"
       rows={7}
-      value={rentDescription}
-      onChange={(event) => onRentDescriptionChange(event.target.value)}
+      value={rentDescriptions[selectedRentIndex]}
+onChange={(event) => {
+  const updated = [...rentDescriptions];
+  updated[selectedRentIndex] = event.target.value;
+  setRentDescriptions(updated);
+}}
     />
   </>
 ) : null}
@@ -675,29 +680,30 @@ export default function ReelFactoryPage(props) {
   const [selectedFinanceDescriptionIndex, setSelectedFinanceDescriptionIndex] = useState(0);
   const [selectedRentDescriptionIndex, setSelectedRentDescriptionIndex] = useState(0);
 
-  const [financeDescription, setFinanceDescription] = useState(
-    FINANCE_DESCRIPTION_OPTIONS[0].text
-  );
+ const [financeDescriptions, setFinanceDescriptions] = useState(() =>
+  FINANCE_DESCRIPTION_OPTIONS.map((option) => option.text)
+);
 
-  const [rentDescription, setRentDescription] = useState(
-    RENT_DESCRIPTION_OPTIONS[0].text
-  );
+const [rentDescriptions, setRentDescriptions] = useState(() =>
+  RENT_DESCRIPTION_OPTIONS.map((option) => option.text)
+); 
 
   const [copyMessage, setCopyMessage] = useState("");
 
 function handleFinanceDescriptionSelect(index) {
   setSelectedFinanceDescriptionIndex(index);
-  setFinanceDescription(FINANCE_DESCRIPTION_OPTIONS[index].text);
 }
 
 function handleRentDescriptionSelect(index) {
   setSelectedRentDescriptionIndex(index);
-  setRentDescription(RENT_DESCRIPTION_OPTIONS[index].text);
 }
 
   async function copyReelDescription(reel) {
     const type = reel.pipeline === "rent2buy" ? "rent2buy" : "finance";
-const template = type === "rent2buy" ? rentDescription : financeDescription;
+const template =
+  type === "rent2buy"
+    ? rentDescriptions[selectedRentDescriptionIndex]
+    : financeDescriptions[selectedFinanceDescriptionIndex];
   const reelId = reel.creativeId || reel.id || "unknown";
   const text = fillDescriptionTemplate(template, reelId);
 
@@ -747,12 +753,12 @@ async function handleDownloadWithDescription(reel) {
 
     <DailyReelFactoryPanel {...props} todayReelsCount={props.todayReels.length} />
 
-  <ReelDescriptionPanel
+<ReelDescriptionPanel
   {...props}
-  financeDescription={financeDescription}
-  rentDescription={rentDescription}
-  onFinanceDescriptionChange={setFinanceDescription}
-  onRentDescriptionChange={setRentDescription}
+  financeDescriptions={financeDescriptions}
+  rentDescriptions={rentDescriptions}
+  setFinanceDescriptions={setFinanceDescriptions}
+  setRentDescriptions={setRentDescriptions}  
 
   financeOptions={FINANCE_DESCRIPTION_OPTIONS}
   rentOptions={RENT_DESCRIPTION_OPTIONS}
