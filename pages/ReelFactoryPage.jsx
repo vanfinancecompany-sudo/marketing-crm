@@ -568,7 +568,10 @@ export function TodayReelsSection({
 }
 
 function ReelDescriptionPanel({
-  ...
+  filters,
+  formValues,
+  selectedVehicle,
+  todayReels,
   financeDescriptions,
   rentDescriptions,
   setFinanceDescriptions,
@@ -588,9 +591,16 @@ function ReelDescriptionPanel({
     type === "rent2buy" ? reel.pipeline === "rent2buy" : reel.pipeline !== "rent2buy"
   );
   const reelId = matchingReel?.id || todayReels[0]?.id || draftReelId;
-  const financePreview = useMemo(() => fillDescriptionTemplate(financeDescription, reelId), [financeDescription, reelId]);
-  const rentPreview = useMemo(() => fillDescriptionTemplate(rentDescription, reelId), [rentDescription, reelId]);
+  
+const financePreview = useMemo(
+  () => fillDescriptionTemplate(financeDescriptions[selectedFinanceIndex], reelId),
+  [financeDescriptions, selectedFinanceIndex, reelId]
+);
 
+const rentPreview = useMemo(
+  () => fillDescriptionTemplate(rentDescriptions[selectedRentIndex], reelId),
+  [rentDescriptions, selectedRentIndex, reelId]
+);
   return (
     <section className="panel">
       <div className="panel__header">
