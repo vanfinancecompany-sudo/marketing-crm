@@ -468,15 +468,16 @@ export function TodayReelsSection({
         ? "linear-gradient(180deg, rgba(15,23,42,0.15), rgba(15,23,42,0.45))"
         : undefined,
   }}
->                  {reel.url ? (
-                    <video
-                      className="creative-preview__image today-reel-video"
-                      src={reel.url}
-                      poster={reel.posterUrl || reel.image}
-                      controls
-                      playsInline
-                    />
-                  ) : (
+>                 
+{reel.url ? (
+  <video
+    className="creative-preview__image today-reel-video"
+    src={reel.url}
+    poster={reel.posterUrl || reel.image}
+    controls
+    playsInline
+  />
+) : (
                     <div className="reel-frame__safe-zone" style={{ gridRow: "1 / -1", width: "100%" }}>
                       <div className="reel-frame__top-safe" />
                       <div className="reel-frame__center">
