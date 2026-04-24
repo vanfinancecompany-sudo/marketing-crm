@@ -34,7 +34,7 @@ if (window.location.pathname.startsWith("/r/")) {
       rent2buy: "https://www.rent2buyvans.co.uk/",
     };
 
-    window.location.replace(redirects[type] || "https://marketing-crm-six.vercel.app/");
+   window.location.replace(redirects[type] || "https://www.vanfinancecompany.co.uk/");
   } catch (e) {
     // fallback redirect
     window.location.replace("https://www.vanfinancecompany.co.uk/");
