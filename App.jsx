@@ -1,10 +1,19 @@
 // 🚀 INSTANT TRACK + REDIRECT (runs before React loads)
-if (typeof window !== "undefined" && window.location.pathname.startsWith("/track")) {
-  try {
+if (
+  typeof window !== "undefined" &&
+  (window.location.pathname.startsWith("/track") || window.location.pathname.startsWith("/r/"))
+) {  try {
     const params = new URLSearchParams(window.location.search);
-    const type = params.get("type") === "rent2buy" ? "rent2buy" : "finance";
-    const reelId = params.get("reel") || "unknown";
-    const source = params.get("src") || "reel";
+   let type = params.get("type") === "rent2buy" ? "rent2buy" : "finance";
+let reelId = params.get("reel") || "unknown";
+const source = params.get("src") || "reel";
+
+if (window.location.pathname.startsWith("/r/")) {
+  const parts = window.location.pathname.split("/").filter(Boolean);
+
+  type = parts[1] === "rent2buy" ? "rent2buy" : "finance";
+  reelId = parts[2] || "unknown";
+}
 
     // 🔥 send tracking without blocking redirect
     const payload = JSON.stringify({ type, reelId, source });
