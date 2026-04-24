@@ -428,6 +428,7 @@ export function TodayReelsSection({
   onDownloadAll,
   onDeleteReel,
   onClearReels,
+  visualMode,
 }) {
   return (
       <section className="panel">
