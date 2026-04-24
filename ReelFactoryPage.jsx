@@ -499,17 +499,28 @@ export function TodayReelsSection({
 >
   {reel.headline}
 </div>
-                        <div
+                      
+<div
   className="reel-frame__subtext"
   style={{
-    textShadow:
+    display: "inline-block",
+    padding: visualMode === "enhanced" ? "6px 12px" : undefined,
+    borderRadius: visualMode === "enhanced" ? "999px" : undefined,
+    background:
       visualMode === "enhanced"
-        ? "0 2px 8px rgba(0,0,0,0.7)"
+        ? "linear-gradient(135deg, #facc15, #f97316)"
+        : undefined,
+    color: visualMode === "enhanced" ? "#000" : undefined,
+    fontWeight: visualMode === "enhanced" ? "700" : undefined,
+    boxShadow:
+      visualMode === "enhanced"
+        ? "0 4px 12px rgba(0,0,0,0.25)"
         : undefined,
   }}
 >
   {reel.priceLine}
 </div>
+
                         <div className="reel-frame__subtext">{reel.ctaLine}</div>
                         <div className="reel-frame__subtext">{reel.domain}</div>
                       </div>
