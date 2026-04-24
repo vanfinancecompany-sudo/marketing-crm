@@ -22,6 +22,38 @@ const DEFAULT_RENT_DESCRIPTION = `🚐 RENT TO BUY YOUR VAN
 👇 Apply now
 ${TRACK_BASE_URL}&type=rent2buy&reel={reelId}`;
 
+const FINANCE_DESCRIPTION_OPTIONS = [
+  {
+    label: "Finance Default",
+    text: DEFAULT_FINANCE_DESCRIPTION,
+  },
+  {
+    label: "Finance Low Deposit",
+    text: `🚐 VAN FINANCE AVAILABLE NOW
+💰 Low deposit options available
+⚡ Fast decision
+
+👇 Apply now
+${TRACK_BASE_URL}&type=finance&reel={reelId}`,
+  },
+];
+
+const RENT_DESCRIPTION_OPTIONS = [
+  {
+    label: "Rent2Buy Default",
+    text: DEFAULT_RENT_DESCRIPTION,
+  },
+  {
+    label: "Rent2Buy No Credit Check",
+    text: `🚐 RENT TO BUY YOUR VAN
+🚫 No credit check
+🔑 Rent it - drive it - own it
+
+👇 Apply now
+${TRACK_BASE_URL}&type=rent2buy&reel={reelId}`,
+  },
+];
+
 function createDraftReelId() {
   return `reel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -544,6 +576,12 @@ function ReelDescriptionPanel({
   rentDescription,
   onFinanceDescriptionChange,
   onRentDescriptionChange,
+  financeOptions,
+  rentOptions,
+  selectedFinanceIndex,
+  selectedRentIndex,
+  onSelectFinance,
+  onSelectRent,
 }) {
   const [draftReelId] = useState(createDraftReelId);
   const [financeOpen, setFinanceOpen] = useState(true);
@@ -570,26 +608,60 @@ function ReelDescriptionPanel({
             {financeOpen ? "Hide" : "Show"} Van Finance Reel Description
           </button>
           {financeOpen ? (
-            <textarea
-              className="field__input"
-              rows={7}
-              value={financeDescription}
-              onChange={(event) => onFinanceDescriptionChange(event.target.value)}
-            />
-          ) : null}
+  <>
+    <label className="field">
+      <span className="field__label">Finance Caption Option</span>
+      <select
+        className="field__input"
+        value={selectedFinanceIndex}
+        onChange={(e) => onSelectFinance(Number(e.target.value))}
+      >
+        {financeOptions.map((option, i) => (
+          <option key={i} value={i}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+
+    <textarea
+      className="field__input"
+      rows={7}
+      value={financeDescription}
+      onChange={(event) => onFinanceDescriptionChange(event.target.value)}
+    />
+  </>
+) : null}
         </div>
         <div>
           <button className="button button--ghost" type="button" onClick={() => setRentOpen((open) => !open)}>
             {rentOpen ? "Hide" : "Show"} Rent2Buy Reel Description
           </button>
-          {rentOpen ? (
-            <textarea
-              className="field__input"
-              rows={7}
-              value={rentDescription}
-              onChange={(event) => onRentDescriptionChange(event.target.value)}
-            />
-          ) : null}
+        {rentOpen ? (
+  <>
+    <label className="field">
+      <span className="field__label">Rent2Buy Caption Option</span>
+      <select
+        className="field__input"
+        value={selectedRentIndex}
+        onChange={(e) => onSelectRent(Number(e.target.value))}
+      >
+        {rentOptions.map((option, i) => (
+          <option key={i} value={i}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+
+    <textarea
+      className="field__input"
+      rows={7}
+      value={rentDescription}
+      onChange={(event) => onRentDescriptionChange(event.target.value)}
+    />
+  </>
+) : null}
         </div>
         <div className="creative-card__meta">
           Active preview: {type === "rent2buy" ? rentPreview : financePreview}
@@ -600,9 +672,28 @@ function ReelDescriptionPanel({
 }
 
 export default function ReelFactoryPage(props) {
-  const [financeDescription, setFinanceDescription] = useState(DEFAULT_FINANCE_DESCRIPTION);
-  const [rentDescription, setRentDescription] = useState(DEFAULT_RENT_DESCRIPTION);
+  const [selectedFinanceDescriptionIndex, setSelectedFinanceDescriptionIndex] = useState(0);
+  const [selectedRentDescriptionIndex, setSelectedRentDescriptionIndex] = useState(0);
+
+  const [financeDescription, setFinanceDescription] = useState(
+    FINANCE_DESCRIPTION_OPTIONS[0].text
+  );
+
+  const [rentDescription, setRentDescription] = useState(
+    RENT_DESCRIPTION_OPTIONS[0].text
+  );
+
   const [copyMessage, setCopyMessage] = useState("");
+
+function handleFinanceDescriptionSelect(index) {
+  setSelectedFinanceDescriptionIndex(index);
+  setFinanceDescription(FINANCE_DESCRIPTION_OPTIONS[index].text);
+}
+
+function handleRentDescriptionSelect(index) {
+  setSelectedRentDescriptionIndex(index);
+  setRentDescription(RENT_DESCRIPTION_OPTIONS[index].text);
+}
 
   async function copyReelDescription(reel) {
     const type = reel.pipeline === "rent2buy" ? "rent2buy" : "finance";
@@ -656,13 +747,20 @@ async function handleDownloadWithDescription(reel) {
 
     <DailyReelFactoryPanel {...props} todayReelsCount={props.todayReels.length} />
 
-    <ReelDescriptionPanel
-      {...props}
-      financeDescription={financeDescription}
-      rentDescription={rentDescription}
-      onFinanceDescriptionChange={setFinanceDescription}
-      onRentDescriptionChange={setRentDescription}
-    />
+  <ReelDescriptionPanel
+  {...props}
+  financeDescription={financeDescription}
+  rentDescription={rentDescription}
+  onFinanceDescriptionChange={setFinanceDescription}
+  onRentDescriptionChange={setRentDescription}
+
+  financeOptions={FINANCE_DESCRIPTION_OPTIONS}
+  rentOptions={RENT_DESCRIPTION_OPTIONS}
+  selectedFinanceIndex={selectedFinanceDescriptionIndex}
+  selectedRentIndex={selectedRentDescriptionIndex}
+  onSelectFinance={handleFinanceDescriptionSelect}
+  onSelectRent={handleRentDescriptionSelect}
+/>  
 
     <TodayReelsSection {...props} onDownloadReel={handleDownloadWithDescription} />
    </div>
