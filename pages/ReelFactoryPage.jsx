@@ -602,24 +602,68 @@ function ReelDescriptionPanel({
 export default function ReelFactoryPage(props) {
   const [financeDescription, setFinanceDescription] = useState(DEFAULT_FINANCE_DESCRIPTION);
   const [rentDescription, setRentDescription] = useState(DEFAULT_RENT_DESCRIPTION);
+  const [copyMessage, setCopyMessage] = useState("");
 
-  async function handleDownloadWithDescription(reel) {
-    const template = reel.pipeline === "rent2buy" ? rentDescription : financeDescription;
-    await navigator.clipboard.writeText(fillDescriptionTemplate(template, reel.id)).catch(() => {});
-    props.onDownloadReel(reel);
+  async function copyReelDescription(reel) {
+    const type = reel.pipeline === "rent2buy" ? "rent2buy" : "finance";
+const template = type === "rent2buy" ? rentDescription : financeDescription;
+  const reelId = reel.creativeId || reel.id || "unknown";
+  const text = fillDescriptionTemplate(template, reelId);
+
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    try {
+      document.execCommand("copy");
+      return true;
+    } catch {
+      return false;
+    } finally {
+      document.body.removeChild(textarea);
+    }
   }
+}
+
+async function handleDownloadWithDescription(reel) {
+  const copied = await copyReelDescription(reel);
+
+  setCopyMessage(
+    copied
+      ? "Caption copied. Reel downloaded."
+      : "Reel downloaded. Caption could not auto-copy."
+  );
+
+  props.onDownloadReel(reel);
+}
 
   return (
-    <div className="page-stack">
-      <DailyReelFactoryPanel {...props} todayReelsCount={props.todayReels.length} />
-      <ReelDescriptionPanel
-        {...props}
-        financeDescription={financeDescription}
-        rentDescription={rentDescription}
-        onFinanceDescriptionChange={setFinanceDescription}
-        onRentDescriptionChange={setRentDescription}
-      />
-      <TodayReelsSection {...props} onDownloadReel={handleDownloadWithDescription} />
-    </div>
-  );
-}
+  <div className="page-stack">
+
+    {copyMessage && (
+      <div className="notice notice--success">
+        {copyMessage}
+      </div>
+    )}
+
+    <DailyReelFactoryPanel {...props} todayReelsCount={props.todayReels.length} />
+
+    <ReelDescriptionPanel
+      {...props}
+      financeDescription={financeDescription}
+      rentDescription={rentDescription}
+      onFinanceDescriptionChange={setFinanceDescription}
+      onRentDescriptionChange={setRentDescription}
+    />
+
+    <TodayReelsSection {...props} onDownloadReel={handleDownloadWithDescription} />
+  </div>
+);
