@@ -632,16 +632,55 @@ function ReelDescriptionPanel({
 }
 
 export default function ReelFactoryPage(props) {
-  const [financeDescription, setFinanceDescription] = useState(DEFAULT_FINANCE_DESCRIPTION);
-  const [rentDescription, setRentDescription] = useState(DEFAULT_RENT_DESCRIPTION);
+ const [financeDescription, setFinanceDescription] = useState(() => {
+  return localStorage.getItem("financeDescription") || DEFAULT_FINANCE_DESCRIPTION;
+});
+
+const [rentDescription, setRentDescription] = useState(() => {
+  return localStorage.getItem("rentDescription") || DEFAULT_RENT_DESCRIPTION;
+});
 
   const [visualMode, setVisualMode] = useState("enhanced");
 
-  async function handleDownloadWithDescription(reel) {
-    const template = reel.pipeline === "rent2buy" ? rentDescription : financeDescription;
-    await navigator.clipboard.writeText(fillDescriptionTemplate(template, reel.id)).catch(() => {});
-    props.onDownloadReel(reel);
-  }
+useEffect(() => {
+  localStorage.setItem("financeDescription", financeDescription);
+}, [financeDescription]);
+
+useEffect(() => {
+  localStorage.setItem("rentDescription", rentDescription);
+}, [rentDescription]);
+
+ async function handleDownloadWithDescription(reel) {
+  const values = [
+    reel?.pipeline,
+    reel?.vehicle?.pipeline,
+    reel?.postingChannel,
+    reel?.templateName,
+    reel?.sourceLabel,
+    reel?.downloadName,
+    reel?.fileName,
+    reel?.domain,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  const reelType =
+    values.includes("rent2buy") ||
+    values.includes("rent to buy") ||
+    values.includes("rent 2 buy")
+      ? "rent2buy"
+      : "finance";
+
+  const template = reelType === "rent2buy" ? rentDescription : financeDescription;
+  const reelId = reel?.creativeId || reel?.id || "unknown";
+
+  await navigator.clipboard
+    .writeText(fillDescriptionTemplate(template, reelId))
+    .catch(() => {});
+
+  props.onDownloadReel(reel);
+}
 
   return (
     <div className="page-stack">
