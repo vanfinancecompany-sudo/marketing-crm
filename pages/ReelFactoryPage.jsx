@@ -14,7 +14,7 @@ const DEFAULT_FINANCE_DESCRIPTION = `🚐 VAN FINANCE AVAILABLE NOW
 ⚡ Approved in 60 minutes
 
 👇 Apply now
-${TRACK_BASE_URL}&type=finance&reel={reelId}`;
+${TRACK_BASE_URL}&type=finance&reel={reelId}&reg={reg}`;
 const DEFAULT_RENT_DESCRIPTION = `🚐 RENT TO BUY YOUR VAN
 🚫 NO CREDIT CHECK
 🔑 RENT IT - DRIVE IT - OWN IT
@@ -34,7 +34,7 @@ const FINANCE_DESCRIPTION_OPTIONS = [
 ⚡ Fast decision
 
 👇 Apply now
-${TRACK_BASE_URL}&type=finance&reel={reelId}`,
+${TRACK_BASE_URL}&type=finance&reel={reelId}&reg={reg}`,
   },
 ];
 
@@ -74,8 +74,24 @@ function buildReelDescription(type, reelId) {
   return template.replaceAll("{reelId}", encodeURIComponent(reelId));
 }
 
-function fillDescriptionTemplate(template, reelId) {
-  return template.replaceAll("{reelId}", encodeURIComponent(reelId));
+function getReelRegistration(reel) {
+  return String(
+    reel?.registration ||
+    reel?.vehicle?.reg ||
+    reel?.reg ||
+    ""
+  )
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+}
+
+function fillDescriptionTemplate(template, reelId, reel = null) {
+  const reg = getReelRegistration(reel);
+
+  return template
+    .replaceAll("{reelId}", encodeURIComponent(reelId))
+    .replaceAll("{reg}", encodeURIComponent(reg));
 }
 
 function ReelStoryboardPreview({ creative }) {
@@ -593,13 +609,13 @@ function ReelDescriptionPanel({
   const reelId = matchingReel?.id || todayReels[0]?.id || draftReelId;
   
 const financePreview = useMemo(
-  () => fillDescriptionTemplate(financeDescriptions[selectedFinanceIndex], reelId),
-  [financeDescriptions, selectedFinanceIndex, reelId]
+  () => fillDescriptionTemplate(financeDescriptions[selectedFinanceIndex], reelId, matchingReel),
+  [financeDescriptions, selectedFinanceIndex, reelId, matchingReel]
 );
 
 const rentPreview = useMemo(
-  () => fillDescriptionTemplate(rentDescriptions[selectedRentIndex], reelId),
-  [rentDescriptions, selectedRentIndex, reelId]
+  () => fillDescriptionTemplate(rentDescriptions[selectedRentIndex], reelId, matchingReel),
+  [rentDescriptions, selectedRentIndex, reelId, matchingReel]
 );
   return (
     <section className="panel">
@@ -725,7 +741,7 @@ const template =
     ? rentDescriptions[selectedRentDescriptionIndex]
     : financeDescriptions[selectedFinanceDescriptionIndex];
   const reelId = reel.creativeId || reel.id || "unknown";
-  const text = fillDescriptionTemplate(template, reelId);
+  const text = fillDescriptionTemplate(template, reelId, reel);
 
   try {
     await navigator.clipboard.writeText(text);
