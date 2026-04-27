@@ -812,13 +812,14 @@ useEffect(() => {
       return [{ kind: "vehicle", vehicle: selectedReelVehicle }];
     }
 
-    const vehiclePool = [
-      ...financeVehicles.filter((vehicle) => allowedPipelines.has(vehicle.pipeline)),
-      ...rentVehicles.filter((vehicle) => allowedPipelines.has(vehicle.pipeline)),
-    ].filter((vehicle) => {
-      if (source === "Uploaded images") return false;
-      return true;
-    });
+   const visibleFilteredVehicles = filteredFactoryVehicles.filter((vehicle) =>
+  allowedPipelines.has(vehicle.pipeline)
+);
+
+const vehiclePool = visibleFilteredVehicles.filter((vehicle) => {
+  if (source === "Uploaded images") return false;
+  return true;
+});
 
     const uploadPool = source === "Uploaded images" || source === "Mixed" ? uploadedReelImages : [];
     const uploadPipelines = [...allowedPipelines];
