@@ -563,13 +563,18 @@ export function createCreativeFromReel(reel) {
       headline: reel.headline || reel.hook || "",
       subline: `${reel.priceLine || ""} | ${reel.domain || ""}`,
     },
-    caption: `${reel.headline || reel.hook || ""}
+   
+caption: `${reel.headline || reel.hook || ""}
 ${reel.title || ""}
 ${reel.priceLine || ""}
 ${reel.subtext || ""}
 
 ${reel.ctaLine || ""}
-${reel.domain || ""}`,
+${
+  reel.pipeline === "rent2buy"
+    ? reel.domain || ""
+    : `https://marketing-crm-six.vercel.app/r/finance/${reel.id}?reg=${encodeURIComponent(reel.registration || "")}`
+}`,
     mediaUrl: reel.url || "",
     downloadName: reel.downloadName || reel.fileName || "",
     mimeType: reel.mimeType || "",
