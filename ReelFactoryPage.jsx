@@ -13,7 +13,7 @@ const DEFAULT_FINANCE_DESCRIPTION = `🚐 VAN FINANCE AVAILABLE NOW
 ⚡ Approved in 60 minutes
 
 👇 Apply now
-https://www.vanfinancecompany.co.uk/r/finance/{reelId}`;
+https://marketing-crm-six.vercel.app/r/finance/{reelId}?reg={reg}`;
 
 const DEFAULT_RENT_DESCRIPTION = `🚐 RENT TO BUY YOUR VAN
 🚫 NO CREDIT CHECK
@@ -42,8 +42,24 @@ function buildReelDescription(type, reelId) {
   return template.replaceAll("{reelId}", encodeURIComponent(reelId));
 }
 
-function fillDescriptionTemplate(template, reelId) {
-  return template.replaceAll("{reelId}", encodeURIComponent(reelId));
+function getReelRegistration(reel) {
+  return String(
+    reel?.registration ||
+    reel?.vehicle?.reg ||
+    reel?.reg ||
+    ""
+  )
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+}
+
+function fillDescriptionTemplate(template, reelId, reel = null) {
+  const reg = getReelRegistration(reel);
+
+  return template
+    .replaceAll("{reelId}", encodeURIComponent(reelId))
+    .replaceAll("{reg}", encodeURIComponent(reg));
 }
 
 function ReelStoryboardPreview({ creative }) {
@@ -585,8 +601,15 @@ function ReelDescriptionPanel({
     type === "rent2buy" ? reel.pipeline === "rent2buy" : reel.pipeline !== "rent2buy"
   );
   const reelId = matchingReel?.id || todayReels[0]?.id || draftReelId;
-  const financePreview = useMemo(() => fillDescriptionTemplate(financeDescription, reelId), [financeDescription, reelId]);
-  const rentPreview = useMemo(() => fillDescriptionTemplate(rentDescription, reelId), [rentDescription, reelId]);
+ const financePreview = useMemo(
+  () => fillDescriptionTemplate(financeDescription, reelId, matchingReel),
+  [financeDescription, reelId, matchingReel]
+);
+
+const rentPreview = useMemo(
+  () => fillDescriptionTemplate(rentDescription, reelId, matchingReel),
+  [rentDescription, reelId, matchingReel]
+);
 
   return (
     <section className="panel">
@@ -676,7 +699,7 @@ useEffect(() => {
   const reelId = reel?.creativeId || reel?.id || "unknown";
 
   await navigator.clipboard
-    .writeText(fillDescriptionTemplate(template, reelId))
+    .writeText(fillDescriptionTemplate(template, reelId, reel))
     .catch(() => {});
 
   props.onDownloadReel(reel);
