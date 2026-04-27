@@ -29,12 +29,19 @@ if (window.location.pathname.startsWith("/r/")) {
       });
     }
 
-    const redirects = {
-      finance: "https://www.vanfinancecompany.co.uk/",
-      rent2buy: "https://www.rent2buyvans.co.uk/",
-    };
+    const reg = String(params.get("reg") || params.get("registration") || "")
+  .trim()
+  .toLowerCase()
+  .replace(/\s+/g, "");
 
-   window.location.replace(redirects[type] || "https://www.vanfinancecompany.co.uk/");
+const redirects = {
+  finance: reg
+    ? `https://www.vanfinancecompany.co.uk/apply-by-reg-finance/${encodeURIComponent(reg)}`
+    : "https://www.vanfinancecompany.co.uk/",
+  rent2buy: "https://www.rent2buyvans.co.uk/",
+};
+
+window.location.replace(redirects[type] || "https://www.vanfinancecompany.co.uk/");
   } catch (e) {
     // fallback redirect
     window.location.replace("https://www.vanfinancecompany.co.uk/");
