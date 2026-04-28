@@ -286,6 +286,29 @@ function ReelStoryboardPreview({ creative }) {
   );
 }
 
+function ReelStudioHero() {
+  return (
+    <section className="reel-studio-hero">
+      <div className="reel-studio-hero__content">
+        <span className="reel-studio-hero__eyebrow">Campaign video workspace</span>
+        <h2>Reel Studio</h2>
+        <p>Create campaign-ready videos for Van Finance and Rent2Buy stock.</p>
+      </div>
+
+      <div className="reel-studio-hero__rail" aria-label="Campaign types">
+        <div className="reel-studio-mini reel-studio-mini--finance">
+          <span>Van Finance</span>
+          <strong>Finance Campaign</strong>
+        </div>
+        <div className="reel-studio-mini reel-studio-mini--rent">
+          <span>Rent2Buy</span>
+          <strong>Customer Journey</strong>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function DailyReelFactoryPanel({
   vehicles,
   vehiclesLoading,
@@ -309,13 +332,43 @@ export function DailyReelFactoryPanel({
   const isAllTab = !isFinanceTab && !isRentTab;
 
   return (
-    <section className="panel reel-factory-panel">
+    <section
+      className={`panel reel-factory-panel ${
+        isRentTab ? "reel-factory-panel--rent" : "reel-factory-panel--finance"
+      }`}
+    >
       <div className="panel__header">
         <div>
           <h3>Daily Reel Factory</h3>
           <p>Generate a batch of daily reels from live stock or uploaded images.</p>
         </div>
         <span className="status-pill">{todayReelsCount} today</span>
+      </div>
+
+      <div className="campaign-card-grid">
+        <div className="campaign-card campaign-card--finance">
+          <div>
+            <span className="campaign-card__label">Van Finance</span>
+            <h4>Sharp finance reels</h4>
+          </div>
+          <div className="campaign-card__chips">
+            <span>Finance Campaign</span>
+            <span>Low Deposit</span>
+            <span>Ready for Reel</span>
+          </div>
+        </div>
+
+        <div className="campaign-card campaign-card--rent">
+          <div>
+            <span className="campaign-card__label">Rent2Buy</span>
+            <h4>Trust-led journey reels</h4>
+          </div>
+          <div className="campaign-card__chips">
+            <span>Rent2Buy Campaign</span>
+            <span>Proof Checklist</span>
+            <span>Customer Journey</span>
+          </div>
+        </div>
       </div>
 
       <FilterBar filters={filters} onChange={onFiltersChange} />
@@ -478,7 +531,7 @@ export function TodayReelsSection({
   onClearReels,
 }) {
   return (
-    <section className="panel">
+    <section className="panel reel-output-panel">
       <div className="panel__header">
         <div>
           <h3>Today's Reels</h3>
@@ -500,7 +553,7 @@ export function TodayReelsSection({
         <div className="today-reel-grid">
           {todayReels.map((reel) => (
             <article
-              className={`creative-card creative-card--${reel.pipeline === "rent2buy" ? "rent" : "finance"} today-reel-card`}
+              className={`creative-card creative-card--${reel.pipeline === "rent2buy" ? "rent" : "finance"} today-reel-card today-reel-card--${reel.pipeline === "rent2buy" ? "rent" : "finance"}`}
               key={reel.id}
             >
               <div className="creative-preview today-reel-preview">
@@ -554,7 +607,11 @@ export function TodayReelsSection({
 
               <div className="creative-card__body">
                 <div className="creative-card__tags">
-                  <span className="tag">{reel.pipeline === "rent2buy" ? "Rent2Buy reel" : "Finance reel"}</span>
+                  <span className={`tag tag--${reel.pipeline === "rent2buy" ? "rent" : "finance"}`}>
+                    {reel.pipeline === "rent2buy" ? "Rent2Buy Campaign" : "Finance Campaign"}
+                  </span>
+                  <span className="tag">{reel.pipeline === "rent2buy" ? "Proof Checklist" : "Low Deposit"}</span>
+                  <span className="tag">{reel.pipeline === "rent2buy" ? "Customer Journey" : "Ready for Reel"}</span>
                   <span className="tag">Hook: {reel.hook}</span>
                   <span className="tag">{reel.sourceLabel}</span>
                   {reel.musicOn ? <span className="tag">Music on</span> : null}
@@ -780,6 +837,7 @@ async function handleDownloadWithDescription(reel) {
 
   return (
   <div className="page-stack">
+    <ReelStudioHero />
 
     {copyMessage && (
       <div className="notice notice--success">
