@@ -726,26 +726,37 @@ async function createReelAudioStream(durationMs, musicUrl) {
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
     const destination = audioContext.createMediaStreamDestination();
     const source = audioContext.createBufferSource();
+    const silentSource = audioContext.createConstantSource();
     const gainNode = audioContext.createGain();
+    const silentGain = audioContext.createGain();
 
     source.buffer = audioBuffer;
     source.loop = audioBuffer.duration * 1000 < durationMs;
     gainNode.gain.value = 0.22;
+    silentSource.offset.value = 0;
+    silentGain.gain.value = 0;
 
     source.connect(gainNode);
     gainNode.connect(destination);
+    silentSource.connect(silentGain);
+    silentGain.connect(destination);
 
     if (audioContext.state === "suspended") {
       await audioContext.resume();
     }
 
     source.start(0);
+    silentSource.start(0);
+    silentSource.stop(audioContext.currentTime + durationMs / 1000 + 0.25);
 
     return {
       stream: destination.stream,
       cleanup: () => {
         try {
           source.stop();
+        } catch {}
+        try {
+          silentSource.stop();
         } catch {}
         audioContext.close().catch(() => {});
       },
@@ -1083,7 +1094,7 @@ function drawContainedCanvasImage(ctx, image, x, y, width, height, progress = 0)
 
 function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeconds) {
   const { width, height } = canvas;
-  const durationSeconds = 12;
+  const durationSeconds = 14;
   const safeTop = Math.round(height * 0.2);
   const safeBottom = Math.round(height * 0.8);
   const safeCenterY = (safeTop + safeBottom) / 2;
@@ -1222,7 +1233,7 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
     return;
   }
 
-  if (elapsedSeconds < 10) {
+  if (elapsedSeconds < 11) {
     const supportProgress = Math.min((elapsedSeconds - 8) / 0.45, 1);
     ctx.globalAlpha = supportProgress;
     drawPremiumPanel(ctx, 70, safeCenterY - 205 - (1 - supportProgress) * 18, width - 140, 420, 42, palette);
@@ -1247,7 +1258,7 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
     return;
   }
 
-  const ctaProgress = Math.min((elapsedSeconds - 10) / 0.45, 1);
+  const ctaProgress = Math.min((elapsedSeconds - 11) / 0.45, 1);
   ctx.globalAlpha = ctaProgress;
   let finalCursorY = safeCenterY - 190 - (1 - ctaProgress) * 18;
   drawPremiumPanel(ctx, 76, finalCursorY - 54, width - 152, 380, 44, palette);
@@ -1284,8 +1295,39 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
   drawVideoProgressBar(ctx, width, height, elapsedSeconds, durationSeconds, reel.pipeline);
 }
 
-const REEL_EXPORT_DURATION_MS = 12000;
+const REEL_EXPORT_DURATION_MS = 14000;
 const REEL_EXPORT_FRAME_RATE = 30;
+const REEL_EXPORT_MIN_DURATION_SECONDS = 13.75;
+
+function getRecordedVideoDuration(blob) {
+  return new Promise((resolve) => {
+    if (typeof document === "undefined" || !blob) {
+      resolve(null);
+      return;
+    }
+
+    const video = document.createElement("video");
+    const url = window.URL.createObjectURL(blob);
+    let settled = false;
+    let timeout = 0;
+
+    const finish = (duration) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      video.removeAttribute("src");
+      video.load();
+      window.URL.revokeObjectURL(url);
+      resolve(Number.isFinite(duration) && duration > 0 ? duration : null);
+    };
+
+    timeout = window.setTimeout(() => finish(null), 2500);
+    video.preload = "metadata";
+    video.onloadedmetadata = () => finish(video.duration);
+    video.onerror = () => finish(null);
+    video.src = url;
+  });
+}
 
 export async function generateReelVideoAsset(reel) {
   if (typeof window === "undefined" || typeof document === "undefined") {
@@ -1332,8 +1374,7 @@ export async function generateReelVideoAsset(reel) {
   }
 
   const durationMs = REEL_EXPORT_DURATION_MS;
-  const canvasStream = canvas.captureStream(0);
-  const [canvasVideoTrack] = canvasStream.getVideoTracks();
+  const canvasStream = canvas.captureStream(REEL_EXPORT_FRAME_RATE);
   let audioCleanup = () => {};
   let mixedStream = canvasStream;
 
@@ -1352,69 +1393,153 @@ export async function generateReelVideoAsset(reel) {
     }
   }
 
-  const chunks = [];
-  const recorder = new MediaRecorder(mixedStream, mimeType ? { mimeType } : undefined);
-
-  recorder.ondataavailable = (event) => {
-    if (event.data && event.data.size > 0) {
-      chunks.push(event.data);
-    }
-  };
-
-  let renderTimer = 0;
-  let frameIndex = 0;
-  let stopScheduled = false;
-  let rejectRecording = () => {};
   const frameDurationMs = 1000 / REEL_EXPORT_FRAME_RATE;
   const totalFrames = Math.ceil(durationMs / frameDurationMs);
 
-  const finishedBlob = new Promise((resolve, reject) => {
-    rejectRecording = reject;
-    recorder.onerror = (event) => {
-      reject(event?.error || new Error("Reel recording failed."));
-    };
-    recorder.onstop = () => {
-      resolve(new Blob(chunks, { type: mimeType || "video/webm" }));
-    };
+  mixedStream.getAudioTracks().forEach((track) => {
+    track.addEventListener?.("ended", () => {
+      console.warn("Reel audio track ended before export completed; video export continuing.", {
+        readyState: track.readyState,
+      });
+    });
   });
 
-  const started = window.performance.now();
+  const recordReelStream = (recordingStream, label) =>
+    new Promise((resolve, reject) => {
+      const chunks = [];
+      const recorder = new MediaRecorder(recordingStream, mimeType ? { mimeType } : undefined);
+      const exportStarted = window.performance.now();
+      let renderTimer = 0;
+      let frameIndex = 0;
+      let stopScheduled = false;
 
-  const renderLoop = () => {
-    try {
-      const elapsedSeconds = Math.min(frameIndex / REEL_EXPORT_FRAME_RATE, durationMs / 1000);
-      drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, elapsedSeconds);
-      canvasVideoTrack?.requestFrame?.();
-      frameIndex += 1;
-    } catch (error) {
-      rejectRecording(error);
-      if (recorder.state !== "inactive") {
-        recorder.stop();
-      }
-      return;
-    }
-
-    if (frameIndex <= totalFrames) {
-      const nextFrameAt = started + frameIndex * frameDurationMs;
-      renderTimer = window.setTimeout(renderLoop, Math.max(0, nextFrameAt - window.performance.now()));
-    } else if (!stopScheduled) {
-      stopScheduled = true;
-      renderTimer = window.setTimeout(() => {
-        drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, durationMs / 1000);
-        canvasVideoTrack?.requestFrame?.();
-        if (recorder.state !== "inactive") {
-          recorder.requestData?.();
-          recorder.stop();
+      const clearRenderTimer = () => {
+        if (renderTimer) {
+          window.clearTimeout(renderTimer);
+          renderTimer = 0;
         }
-      }, frameDurationMs);
-    }
+      };
+
+      console.info("Reel export started", {
+        label,
+        durationMs,
+        totalFrames,
+        frameRate: REEL_EXPORT_FRAME_RATE,
+        audioTracks: recordingStream.getAudioTracks().length,
+      });
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+      recorder.onerror = (event) => {
+        clearRenderTimer();
+        reject(event?.error || new Error("Reel recording failed."));
+      };
+      recorder.onstop = () => {
+        clearRenderTimer();
+        const elapsedMs = window.performance.now() - exportStarted;
+        const blob = new Blob(chunks, { type: mimeType || "video/webm" });
+        const stopInfo = {
+          label,
+          elapsedMs: Math.round(elapsedMs),
+          frameCount: frameIndex,
+          chunks: chunks.length,
+          blobSize: blob.size,
+          blobType: blob.type,
+        };
+        console.info("Reel recorder stopped", stopInfo);
+        resolve({ blob, elapsedMs, frameCount: frameIndex, audioEmbedded: recordingStream.getAudioTracks().length > 0 });
+      };
+
+      const started = exportStarted;
+
+      const renderLoop = () => {
+        try {
+          const elapsedSeconds = Math.min(frameIndex / REEL_EXPORT_FRAME_RATE, durationMs / 1000);
+          drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, elapsedSeconds);
+        } catch (error) {
+          console.warn("Reel frame draw failed; continuing export:", error);
+        }
+        frameIndex += 1;
+
+        if (frameIndex <= totalFrames) {
+          const nextFrameAt = started + frameIndex * frameDurationMs;
+          renderTimer = window.setTimeout(renderLoop, Math.max(0, nextFrameAt - window.performance.now()));
+        } else if (!stopScheduled) {
+          stopScheduled = true;
+          renderTimer = window.setTimeout(() => {
+            try {
+              drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, durationMs / 1000);
+            } catch (error) {
+              console.warn("Final reel frame draw failed; stopping export:", error);
+            }
+            window.setTimeout(() => {
+              if (recorder.state !== "inactive") {
+                recorder.requestData?.();
+                recorder.stop();
+              }
+            }, frameDurationMs * 2);
+          }, frameDurationMs);
+        }
+      };
+
+      recorder.start(1000);
+      renderLoop();
+    });
+
+  const validateRecording = async (recording, label) => {
+    const readableDuration = await getRecordedVideoDuration(recording.blob);
+    console.info("Reel blob duration check", {
+      label,
+      readableDuration,
+      expectedDuration: durationMs / 1000,
+      blobSize: recording.blob.size,
+    });
+
+    return {
+      ...recording,
+      readableDuration,
+      isComplete:
+        recording.elapsedMs >= durationMs - 250 &&
+        (readableDuration === null || readableDuration >= REEL_EXPORT_MIN_DURATION_SECONDS),
+    };
   };
 
-  recorder.start(1000);
-  renderLoop();
-
   try {
-    const blob = await finishedBlob;
+    let recording;
+    try {
+      recording = await validateRecording(await recordReelStream(mixedStream, "primary"), "primary");
+    } catch (error) {
+      if (mixedStream.getAudioTracks().length === 0) {
+        throw error;
+      }
+      console.warn("Reel export failed with audio; retrying video-only export.", error);
+      audioCleanup();
+      audioCleanup = () => {};
+      recording = await validateRecording(await recordReelStream(canvasStream, "video-only retry"), "video-only retry");
+    }
+
+    if (recording.audioEmbedded && !recording.isComplete) {
+      console.warn("Reel export incomplete with audio; retrying video-only export.", {
+        elapsedMs: Math.round(recording.elapsedMs),
+        expectedMs: durationMs,
+        frameCount: recording.frameCount,
+        readableDuration: recording.readableDuration,
+      });
+      audioCleanup();
+      audioCleanup = () => {};
+      recording = await validateRecording(await recordReelStream(canvasStream, "video-only retry"), "video-only retry");
+    }
+    if (!recording.isComplete) {
+      throw new Error(
+        `Reel export incomplete after ${Math.round(recording.elapsedMs)}ms` +
+          (recording.readableDuration ? ` (${recording.readableDuration.toFixed(2)}s readable).` : ".")
+      );
+    }
+
+    const { blob } = recording;
     const url = window.URL.createObjectURL(blob);
     const fileLabel = buildReelFilename(reel);
     cleanup();
@@ -1428,12 +1553,9 @@ export async function generateReelVideoAsset(reel) {
       downloadName: `${fileLabel}.webm`,
       posterUrl,
       mimeType: blob.type,
-      audioEmbedded: mixedStream.getAudioTracks().length > 0,
+      audioEmbedded: recording.audioEmbedded,
     };
   } catch (error) {
-    if (renderTimer) {
-      window.clearTimeout(renderTimer);
-    }
     cleanup();
     logoAsset.cleanup();
     audioCleanup();
