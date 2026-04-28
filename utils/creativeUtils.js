@@ -1329,6 +1329,7 @@ export async function generateReelVideoAsset(reel) {
   }
 
   const durationMs = 12000;
+  const recordingDurationMs = durationMs + 1800;
   const canvasStream = canvas.captureStream(30);
   const [canvasVideoTrack] = canvasStream.getVideoTracks();
   let audioCleanup = () => {};
@@ -1375,7 +1376,7 @@ export async function generateReelVideoAsset(reel) {
     const elapsed = Date.now() - started;
     drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, Math.min(elapsed, durationMs) / 1000);
     canvasVideoTrack?.requestFrame?.();
-    if (elapsed < durationMs) {
+    if (elapsed < recordingDurationMs) {
       animationFrame = window.requestAnimationFrame(renderLoop);
     } else if (!stopScheduled) {
       stopScheduled = true;
