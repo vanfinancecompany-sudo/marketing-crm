@@ -438,6 +438,168 @@ textarea {
   color: #be123c;
 }
 
+.reel-studio-hero {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.42fr);
+  gap: 18px;
+  align-items: stretch;
+  min-height: 220px;
+  padding: 26px;
+  border-radius: 24px;
+  background:
+    linear-gradient(135deg, rgba(9, 20, 40, 0.96) 0%, rgba(17, 24, 39, 0.95) 54%, rgba(127, 29, 29, 0.92) 100%);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 22px 55px rgba(15, 23, 42, 0.2);
+}
+
+.reel-studio-hero::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 auto;
+  width: 44%;
+  height: 5px;
+  background: linear-gradient(90deg, #dc2626, #22c55e);
+}
+
+.reel-studio-hero__content {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  max-width: 720px;
+}
+
+.reel-studio-hero__eyebrow,
+.campaign-card__label {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.reel-studio-hero h2 {
+  margin: 0;
+  font-size: 44px;
+  line-height: 1;
+}
+
+.reel-studio-hero p {
+  margin: 0;
+  max-width: 560px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 17px;
+  line-height: 1.5;
+}
+
+.reel-studio-hero__rail {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 12px;
+}
+
+.reel-studio-mini {
+  display: grid;
+  align-content: center;
+  gap: 7px;
+  min-height: 88px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.reel-studio-mini span {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.reel-studio-mini strong {
+  font-size: 18px;
+}
+
+.reel-studio-mini--finance {
+  box-shadow: inset 4px 0 0 #dc2626;
+}
+
+.reel-studio-mini--rent {
+  box-shadow: inset 4px 0 0 #22c55e;
+}
+
+.reel-factory-panel {
+  border-top: 0;
+}
+
+.reel-factory-panel--finance {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.reel-factory-panel--rent {
+  background: linear-gradient(180deg, #ffffff 0%, #f4fbf7 100%);
+}
+
+.campaign-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.campaign-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.campaign-card h4 {
+  margin: 5px 0 0;
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.campaign-card--finance {
+  border-color: rgba(220, 38, 38, 0.22);
+  box-shadow: inset 0 4px 0 #dc2626;
+}
+
+.campaign-card--finance .campaign-card__label,
+.campaign-card--finance h4 {
+  color: #111827;
+}
+
+.campaign-card--rent {
+  border-color: rgba(5, 150, 105, 0.22);
+  box-shadow: inset 0 4px 0 #059669;
+}
+
+.campaign-card--rent .campaign-card__label,
+.campaign-card--rent h4 {
+  color: #064e3b;
+}
+
+.campaign-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.campaign-card__chips span {
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 850;
+}
+
 .daily-reel-controls {
   display: grid;
   grid-template-columns: repeat(4, minmax(160px, 1fr));
@@ -618,7 +780,7 @@ textarea {
 
 .today-reel-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 320px));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 360px));
   gap: 16px;
   align-items: start;
 }
@@ -628,11 +790,13 @@ textarea {
 }
 
 .today-reel-card--finance {
-  border-top: 4px solid #2563eb;
+  border-top: 4px solid #dc2626;
+  box-shadow: 0 20px 44px rgba(15, 23, 42, 0.11);
 }
 
 .today-reel-card--rent {
   border-top: 4px solid #059669;
+  box-shadow: 0 20px 44px rgba(5, 150, 105, 0.1);
 }
 
 .today-reel-preview {
@@ -651,6 +815,29 @@ textarea {
 
 .today-reel-video {
   object-fit: contain;
+}
+
+.today-reel-card .creative-preview {
+  min-height: 440px;
+}
+
+.today-reel-card .creative-card__body {
+  padding: 16px;
+  gap: 10px;
+}
+
+.today-reel-card h3 {
+  font-size: 19px;
+}
+
+.tag--finance {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.tag--rent {
+  background: #dcfce7;
+  color: #047857;
 }
 
 .today-reel-preview__text {
@@ -1187,6 +1374,8 @@ textarea {
   .control-finance-grid,
   .field-grid,
   .filter-bar,
+  .campaign-card-grid,
+  .reel-studio-hero,
   .daily-reel-controls,
   .posting-lanes-grid,
   .posting-summary-strip {
@@ -1224,6 +1413,19 @@ textarea {
 
 .creative-preview__headline {
   font-size: 24px;
+}
+
+.reel-studio-hero {
+  min-height: auto;
+  padding: 22px;
+}
+
+.reel-studio-hero h2 {
+  font-size: 34px;
+}
+
+.today-reel-card .creative-preview {
+  min-height: 380px;
 }
 
 .reel-storyboard {
