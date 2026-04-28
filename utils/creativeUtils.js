@@ -1359,6 +1359,7 @@ export async function generateReelVideoAsset(reel) {
 
   const started = Date.now();
   let animationFrame = 0;
+  let stopScheduled = false;
 
   const finishedBlob = new Promise((resolve, reject) => {
     recorder.onerror = (event) => {
@@ -1371,11 +1372,16 @@ export async function generateReelVideoAsset(reel) {
 
   const renderLoop = () => {
     const elapsed = Date.now() - started;
-    drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, elapsed / 1000);
+    drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, Math.min(elapsed, durationMs) / 1000);
     if (elapsed < durationMs) {
       animationFrame = window.requestAnimationFrame(renderLoop);
-    } else if (recorder.state !== "inactive") {
-      recorder.stop();
+    } else if (!stopScheduled) {
+      stopScheduled = true;
+      animationFrame = window.requestAnimationFrame(() => {
+        if (recorder.state !== "inactive") {
+          recorder.stop();
+        }
+      });
     }
   };
 
