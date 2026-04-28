@@ -1329,7 +1329,7 @@ export async function generateReelVideoAsset(reel) {
   }
 
   const durationMs = 12000;
-  const recordingDurationMs = durationMs + 1800;
+  const recordingDurationMs = durationMs + 2500;
   const canvasStream = canvas.captureStream(30);
   const [canvasVideoTrack] = canvasStream.getVideoTracks();
   let audioCleanup = () => {};
