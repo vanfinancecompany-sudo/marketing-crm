@@ -1096,13 +1096,6 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
     ctx.globalAlpha = popProgress;
     const hookY = safeCenterY - 185 - (1 - popProgress) * 18;
     drawPremiumPanel(ctx, 58, hookY - 54, width - 116, 570, 42, palette);
-    ctx.fillStyle = palette.accent;
-    ctx.shadowColor = palette.glowStrong;
-    ctx.shadowBlur = 20;
-    ctx.beginPath();
-    ctx.roundRect(118, hookY - 18, width - 236, 8, 999);
-    ctx.fill();
-    ctx.shadowBlur = 0;
     let cursorY = hookY;
     const hookHeight = drawCanvasTextBlock(ctx, String(reel.headline || reel.hook || "").toUpperCase(), {
       x: width / 2,
@@ -1176,18 +1169,10 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
     ctx.restore();
 
     drawPremiumPanel(ctx, 60, textPanelY, width - 120, textPanelHeight, 36, palette);
-    ctx.fillStyle = palette.accent;
-    ctx.shadowColor = palette.glowStrong;
-    ctx.shadowBlur = 16;
-    ctx.beginPath();
-    ctx.roundRect(110, textPanelY + 26, width - 220, 7, 999);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-
     const textProgress = Math.min((elapsedSeconds - 3) / 0.45, 1);
     ctx.globalAlpha = textProgress;
     let cursorY =
-      textPanelY + (reel.pipeline === "rent2buy" ? 44 : 68) + (1 - textProgress) * 18;
+      textPanelY + (reel.pipeline === "rent2buy" ? 44 : 78) + (1 - textProgress) * 18;
     if (reel.pipeline === "rent2buy") {
       cursorY += drawCanvasTextBlock(ctx, reel.priceLine || reel.title || "", {
         x: width / 2,
@@ -1266,13 +1251,6 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
   ctx.globalAlpha = ctaProgress;
   let finalCursorY = safeCenterY - 190 - (1 - ctaProgress) * 18;
   drawPremiumPanel(ctx, 76, finalCursorY - 54, width - 152, 380, 44, palette);
-  ctx.fillStyle = palette.accent;
-  ctx.shadowColor = palette.glowStrong;
-  ctx.shadowBlur = 22;
-  ctx.beginPath();
-  ctx.roundRect(156, finalCursorY - 18, width - 312, 8, 999);
-  ctx.fill();
-  ctx.shadowBlur = 0;
   finalCursorY += drawCanvasTextBlock(ctx, reel.ctaLine || "APPLY TODAY", {
     x: width / 2,
     y: finalCursorY,
