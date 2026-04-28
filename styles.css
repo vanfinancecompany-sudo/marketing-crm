@@ -840,6 +840,42 @@ textarea {
   display: block;
 }
 
+.studio-phone__placeholder {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  padding: 24px;
+  color: #ffffff;
+  text-align: center;
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.12), rgba(15, 23, 42, 0.82)),
+    radial-gradient(circle at 50% 20%, rgba(220, 38, 38, 0.38), transparent 42%),
+    linear-gradient(180deg, #0f172a 0%, #111827 100%);
+}
+
+.studio-phone__placeholder span {
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.studio-phone__placeholder strong {
+  font-size: 26px;
+  line-height: 1.05;
+}
+
+.studio-phone__placeholder small {
+  max-width: 170px;
+  color: rgba(255, 255, 255, 0.68);
+  font-weight: 800;
+  line-height: 1.35;
+}
+
 .studio-preview-panel__body {
   display: grid;
   gap: 10px;

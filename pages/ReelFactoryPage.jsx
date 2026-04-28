@@ -530,6 +530,8 @@ export function TodayReelsSection({
   onDeleteReel,
   onClearReels,
 }) {
+  const previewReel = todayReels[0] || null;
+
   return (
     <section className="panel reel-output-panel">
       <div className="panel__header">
@@ -547,46 +549,56 @@ export function TodayReelsSection({
         </div>
       </div>
 
+      <div className={`studio-preview-panel studio-preview-panel--${previewReel?.pipeline === "rent2buy" ? "rent" : "finance"}`}>
+        <div className="studio-phone">
+          <div className="studio-phone__speaker" />
+          <div className="studio-phone__screen">
+            {previewReel?.url ? (
+              <video
+                src={previewReel.url}
+                poster={previewReel.posterUrl || previewReel.image}
+                controls
+                playsInline
+              />
+            ) : previewReel?.posterUrl || previewReel?.image ? (
+              <img src={previewReel.posterUrl || previewReel.image} alt={previewReel.title} />
+            ) : (
+              <div className="studio-phone__placeholder">
+                <span>9:16</span>
+                <strong>Reel preview</strong>
+                <small>Latest generated video appears here</small>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="studio-preview-panel__body">
+          <span className={`tag tag--${previewReel?.pipeline === "rent2buy" ? "rent" : "finance"}`}>
+            {previewReel?.pipeline === "rent2buy" ? "Rent2Buy Campaign" : "Finance Campaign"}
+          </span>
+          <h3>{previewReel?.title || "Studio preview"}</h3>
+          <p>{previewReel?.headline || "Generate a reel to preview the latest phone-ready creative before download."}</p>
+          <div className="creative-card__meta">Template: {previewReel?.templateName || "Waiting for generated reel"}</div>
+          <div className="creative-card__meta">File: {previewReel?.downloadName || previewReel?.fileName || "No file yet"}</div>
+          <div className="card-actions">
+            <button
+              className="button button--primary"
+              onClick={() => previewReel && onDownloadReel(previewReel)}
+              disabled={!previewReel}
+            >
+              Download Reel
+            </button>
+            <button className="button button--ghost" onClick={onDownloadAll} disabled={!todayReels.length}>
+              Download All
+            </button>
+          </div>
+        </div>
+      </div>
+
       {todayReels.length === 0 ? (
         <div className="empty-state">No reels generated today.</div>
       ) : (
         <>
-          <div className={`studio-preview-panel studio-preview-panel--${todayReels[0].pipeline === "rent2buy" ? "rent" : "finance"}`}>
-            <div className="studio-phone">
-              <div className="studio-phone__speaker" />
-              <div className="studio-phone__screen">
-                {todayReels[0].url ? (
-                  <video
-                    src={todayReels[0].url}
-                    poster={todayReels[0].posterUrl || todayReels[0].image}
-                    controls
-                    playsInline
-                  />
-                ) : (
-                  <img src={todayReels[0].posterUrl || todayReels[0].image} alt={todayReels[0].title} />
-                )}
-              </div>
-            </div>
-
-            <div className="studio-preview-panel__body">
-              <span className={`tag tag--${todayReels[0].pipeline === "rent2buy" ? "rent" : "finance"}`}>
-                {todayReels[0].pipeline === "rent2buy" ? "Rent2Buy Campaign" : "Finance Campaign"}
-              </span>
-              <h3>{todayReels[0].title}</h3>
-              <p>{todayReels[0].headline}</p>
-              <div className="creative-card__meta">Template: {todayReels[0].templateName}</div>
-              <div className="creative-card__meta">File: {todayReels[0].downloadName || todayReels[0].fileName}</div>
-              <div className="card-actions">
-                <button className="button button--primary" onClick={() => onDownloadReel(todayReels[0])}>
-                  Download Reel
-                </button>
-                <button className="button button--ghost" onClick={onDownloadAll}>
-                  Download All
-                </button>
-              </div>
-            </div>
-          </div>
-
           <div className="today-reel-grid">
             {todayReels.map((reel) => (
               <article
