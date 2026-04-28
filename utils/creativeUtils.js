@@ -1329,7 +1329,10 @@ export async function generateReelVideoAsset(reel) {
   }
 
   const durationMs = 14000;
-  const canvasStream = canvas.captureStream(30);
+  const framesPerSecond = 30;
+  const frameDurationMs = 1000 / framesPerSecond;
+  const totalFrames = Math.ceil(durationMs / frameDurationMs);
+  const canvasStream = canvas.captureStream(0);
   const [canvasVideoTrack] = canvasStream.getVideoTracks();
   let audioCleanup = () => {};
   let mixedStream = canvasStream;
@@ -1359,10 +1362,13 @@ export async function generateReelVideoAsset(reel) {
   };
 
   const started = performance.now();
-  let animationFrame = 0;
+  let frameIndex = 0;
+  let renderTimer = 0;
   let stopScheduled = false;
+  let rejectRecording = () => {};
 
   const finishedBlob = new Promise((resolve, reject) => {
+    rejectRecording = reject;
     recorder.onerror = (event) => {
       reject(event?.error || new Error("Reel recording failed."));
     };
@@ -1372,25 +1378,36 @@ export async function generateReelVideoAsset(reel) {
   });
 
   const renderLoop = () => {
-    const elapsed = performance.now() - started;
-    drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, Math.min(elapsed, durationMs) / 1000);
-    canvasVideoTrack?.requestFrame?.();
-    if (elapsed < durationMs) {
-      animationFrame = window.requestAnimationFrame(renderLoop);
+    try {
+      const elapsedSeconds = Math.min(frameIndex / framesPerSecond, durationMs / 1000);
+      drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, elapsedSeconds);
+      canvasVideoTrack?.requestFrame?.();
+      frameIndex += 1;
+    } catch (error) {
+      rejectRecording(error);
+      if (recorder.state !== "inactive") {
+        recorder.stop();
+      }
+      return;
+    }
+
+    if (frameIndex <= totalFrames) {
+      const nextFrameAt = started + frameIndex * frameDurationMs;
+      renderTimer = window.setTimeout(renderLoop, Math.max(0, nextFrameAt - performance.now()));
     } else if (!stopScheduled) {
       stopScheduled = true;
-      animationFrame = window.requestAnimationFrame(() => {
+      renderTimer = window.setTimeout(() => {
         drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, durationMs / 1000);
         canvasVideoTrack?.requestFrame?.();
         if (recorder.state !== "inactive") {
           recorder.requestData?.();
           recorder.stop();
         }
-      });
+      }, frameDurationMs);
     }
   };
 
-  recorder.start();
+  recorder.start(1000);
   renderLoop();
 
   try {
@@ -1411,8 +1428,8 @@ export async function generateReelVideoAsset(reel) {
       audioEmbedded: mixedStream.getAudioTracks().length > 0,
     };
   } catch (error) {
-    if (animationFrame) {
-      window.cancelAnimationFrame(animationFrame);
+    if (renderTimer) {
+      window.clearTimeout(renderTimer);
     }
     cleanup();
     logoAsset.cleanup();
