@@ -926,17 +926,17 @@ function getReelPalette(pipeline) {
 
 function drawPremiumPanel(ctx, x, y, width, height, radius, palette) {
   ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,0.5)";
-  ctx.shadowBlur = 42;
-  ctx.shadowOffsetY = 20;
+  ctx.shadowColor = "rgba(0,0,0,0.34)";
+  ctx.shadowBlur = 24;
+  ctx.shadowOffsetY = 12;
   ctx.fillStyle = palette.glass;
   ctx.beginPath();
   ctx.roundRect(x, y, width, height, radius);
   ctx.fill();
 
   const sheen = ctx.createLinearGradient(x, y, x + width, y + height);
-  sheen.addColorStop(0, "rgba(255,255,255,0.16)");
-  sheen.addColorStop(0.42, "rgba(255,255,255,0.04)");
+  sheen.addColorStop(0, "rgba(255,255,255,0.1)");
+  sheen.addColorStop(0.42, "rgba(255,255,255,0.03)");
   sheen.addColorStop(1, palette.glowSoft);
   ctx.fillStyle = sheen;
   ctx.beginPath();
@@ -945,13 +945,9 @@ function drawPremiumPanel(ctx, x, y, width, height, radius, palette) {
 
   ctx.shadowColor = "transparent";
   ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(255,255,255,0.14)";
+  ctx.strokeStyle = "rgba(255,255,255,0.12)";
   ctx.beginPath();
   ctx.roundRect(x, y, width, height, radius);
-  ctx.stroke();
-  ctx.strokeStyle = palette.border;
-  ctx.beginPath();
-  ctx.roundRect(x + 3, y + 3, width - 6, height - 6, Math.max(radius - 3, 1));
   ctx.stroke();
   ctx.restore();
 }
@@ -970,28 +966,12 @@ function drawVideoBrandLogo(ctx, width, height, logoImage, options = {}) {
   const logoWidth = logoImage.width * ratio;
   const logoHeight = logoImage.height * ratio;
   const logoX = align === "right" ? x - logoWidth : x - logoWidth / 2;
-  const platePadX = 28;
-  const platePadY = 20;
-  const plateX = logoX - platePadX;
-  const plateY = y - platePadY;
-  const plateWidth = logoWidth + platePadX * 2;
-  const plateHeight = logoHeight + platePadY * 2;
 
   ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,0.38)";
-  ctx.shadowBlur = 28;
-  ctx.shadowOffsetY = 12;
-  ctx.fillStyle = "rgba(255,255,255,0.9)";
-  ctx.beginPath();
-  ctx.roundRect(plateX, plateY, plateWidth, plateHeight, 30);
-  ctx.fill();
-  ctx.shadowColor = "transparent";
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(255,255,255,0.38)";
-  ctx.beginPath();
-  ctx.roundRect(plateX, plateY, plateWidth, plateHeight, 30);
-  ctx.stroke();
   ctx.globalAlpha = 0.92;
+  ctx.shadowColor = "rgba(0,0,0,0.34)";
+  ctx.shadowBlur = 16;
+  ctx.shadowOffsetY = 8;
   ctx.drawImage(logoImage, logoX, y, logoWidth, logoHeight);
   ctx.restore();
 
@@ -1161,7 +1141,11 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
       glowColor: palette.glowSoft,
     });
     ctx.globalAlpha = 1;
-    drawVideoBrandLogo(ctx, width, height, logoImage, { y: cursorY + 78, maxWidth: 480, maxHeight: 205 });
+    drawVideoBrandLogo(ctx, width, height, logoImage, {
+      y: Math.min(cursorY + 116, height - 285),
+      maxWidth: 420,
+      maxHeight: 165,
+    });
     drawVideoProgressBar(ctx, width, height, elapsedSeconds, durationSeconds, reel.pipeline);
     return;
   }
@@ -1202,32 +1186,33 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
 
     const textProgress = Math.min((elapsedSeconds - 3) / 0.45, 1);
     ctx.globalAlpha = textProgress;
-    let cursorY = textPanelY + 44 + (1 - textProgress) * 22;
+    let cursorY =
+      textPanelY + (reel.pipeline === "rent2buy" ? 44 : 68) + (1 - textProgress) * 18;
     if (reel.pipeline === "rent2buy") {
-  cursorY += drawCanvasTextBlock(ctx, reel.priceLine || reel.title || "", {
-    x: width / 2,
-    y: cursorY,
-    maxWidth: width - 180,
-    maxHeight: 180,
-    startSize: 104,
-    minSize: 48,
-    maxLines: 2,
-    weight: 900,
-    glowColor: palette.glowStrong,
-  });
-} else {
-  cursorY += drawCanvasTextBlock(ctx, reel.priceLine || reel.title || "", {
-    x: width / 2,
-    y: cursorY,
-    maxWidth: width - 140,
-    maxHeight: 120,
-    startSize: 82,
-    minSize: 34,
-    maxLines: 1,
-    weight: 900,
-    glowColor: palette.glowStrong,
-  });
-}
+      cursorY += drawCanvasTextBlock(ctx, reel.priceLine || reel.title || "", {
+        x: width / 2,
+        y: cursorY,
+        maxWidth: width - 180,
+        maxHeight: 180,
+        startSize: 104,
+        minSize: 48,
+        maxLines: 2,
+        weight: 900,
+        glowColor: palette.glowStrong,
+      });
+    } else {
+      cursorY += drawCanvasTextBlock(ctx, reel.priceLine || reel.title || "", {
+        x: width / 2,
+        y: cursorY,
+        maxWidth: width - 140,
+        maxHeight: 120,
+        startSize: 82,
+        minSize: 34,
+        maxLines: 1,
+        weight: 900,
+        glowColor: palette.glowStrong,
+      });
+    }
     cursorY += 26;
     drawCanvasTextBlock(ctx, reel.title || "", {
       x: width / 2,
@@ -1241,7 +1226,13 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
       color: "#e5e7eb",
     });
     ctx.globalAlpha = 1;
-    drawVideoBrandLogo(ctx, width, height, logoImage, { x: width - 54, y: height - 230, align: "right", maxWidth: 360, maxHeight: 145 });
+    drawVideoBrandLogo(ctx, width, height, logoImage, {
+      x: width - 54,
+      y: height - 205,
+      align: "right",
+      maxWidth: 300,
+      maxHeight: 112,
+    });
     drawVideoProgressBar(ctx, width, height, elapsedSeconds, durationSeconds, reel.pipeline);
     return;
   }
@@ -1262,7 +1253,11 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
       glowColor: palette.glowStrong,
     });
     ctx.globalAlpha = 1;
-    drawVideoBrandLogo(ctx, width, height, logoImage, { y: safeCenterY + 190, maxWidth: 430, maxHeight: 175 });
+    drawVideoBrandLogo(ctx, width, height, logoImage, {
+      y: safeCenterY + 255,
+      maxWidth: 360,
+      maxHeight: 132,
+    });
     drawVideoProgressBar(ctx, width, height, elapsedSeconds, durationSeconds, reel.pipeline);
     return;
   }
@@ -1303,7 +1298,11 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
     glowColor: palette.glowSoft,
   });
   ctx.globalAlpha = 1;
-  drawVideoBrandLogo(ctx, width, height, logoImage, { y: finalCursorY + 86, maxWidth: 500, maxHeight: 210 });
+  drawVideoBrandLogo(ctx, width, height, logoImage, {
+    y: Math.min(finalCursorY + 124, height - 300),
+    maxWidth: 420,
+    maxHeight: 160,
+  });
   drawVideoProgressBar(ctx, width, height, elapsedSeconds, durationSeconds, reel.pipeline);
 }
 
