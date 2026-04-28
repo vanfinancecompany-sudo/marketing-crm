@@ -1284,6 +1284,9 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
   drawVideoProgressBar(ctx, width, height, elapsedSeconds, durationSeconds, reel.pipeline);
 }
 
+const REEL_EXPORT_DURATION_MS = 12000;
+const REEL_EXPORT_FRAME_RATE = 30;
+
 export async function generateReelVideoAsset(reel) {
   if (typeof window === "undefined" || typeof document === "undefined") {
     throw new Error("Video generation is only available in the browser.");
@@ -1328,8 +1331,9 @@ export async function generateReelVideoAsset(reel) {
     posterUrl = reel.image || "";
   }
 
-  const durationMs = 12000;
-  const canvasStream = canvas.captureStream(30);
+  const durationMs = REEL_EXPORT_DURATION_MS;
+  const canvasStream = canvas.captureStream(0);
+  const [canvasVideoTrack] = canvasStream.getVideoTracks();
   let audioCleanup = () => {};
   let mixedStream = canvasStream;
 
@@ -1357,10 +1361,15 @@ export async function generateReelVideoAsset(reel) {
     }
   };
 
-  const started = Date.now();
-  let animationFrame = 0;
+  let renderTimer = 0;
+  let frameIndex = 0;
+  let stopScheduled = false;
+  let rejectRecording = () => {};
+  const frameDurationMs = 1000 / REEL_EXPORT_FRAME_RATE;
+  const totalFrames = Math.ceil(durationMs / frameDurationMs);
 
   const finishedBlob = new Promise((resolve, reject) => {
+    rejectRecording = reject;
     recorder.onerror = (event) => {
       reject(event?.error || new Error("Reel recording failed."));
     };
@@ -1369,17 +1378,39 @@ export async function generateReelVideoAsset(reel) {
     };
   });
 
+  const started = window.performance.now();
+
   const renderLoop = () => {
-    const elapsed = Date.now() - started;
-    drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, elapsed / 1000);
-    if (elapsed < durationMs) {
-      animationFrame = window.requestAnimationFrame(renderLoop);
-    } else if (recorder.state !== "inactive") {
-      recorder.stop();
+    try {
+      const elapsedSeconds = Math.min(frameIndex / REEL_EXPORT_FRAME_RATE, durationMs / 1000);
+      drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, elapsedSeconds);
+      canvasVideoTrack?.requestFrame?.();
+      frameIndex += 1;
+    } catch (error) {
+      rejectRecording(error);
+      if (recorder.state !== "inactive") {
+        recorder.stop();
+      }
+      return;
+    }
+
+    if (frameIndex <= totalFrames) {
+      const nextFrameAt = started + frameIndex * frameDurationMs;
+      renderTimer = window.setTimeout(renderLoop, Math.max(0, nextFrameAt - window.performance.now()));
+    } else if (!stopScheduled) {
+      stopScheduled = true;
+      renderTimer = window.setTimeout(() => {
+        drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, durationMs / 1000);
+        canvasVideoTrack?.requestFrame?.();
+        if (recorder.state !== "inactive") {
+          recorder.requestData?.();
+          recorder.stop();
+        }
+      }, frameDurationMs);
     }
   };
 
-  recorder.start();
+  recorder.start(1000);
   renderLoop();
 
   try {
@@ -1400,8 +1431,8 @@ export async function generateReelVideoAsset(reel) {
       audioEmbedded: mixedStream.getAudioTracks().length > 0,
     };
   } catch (error) {
-    if (animationFrame) {
-      window.cancelAnimationFrame(animationFrame);
+    if (renderTimer) {
+      window.clearTimeout(renderTimer);
     }
     cleanup();
     logoAsset.cleanup();
