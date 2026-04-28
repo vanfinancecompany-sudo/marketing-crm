@@ -530,6 +530,8 @@ export function TodayReelsSection({
   onDeleteReel,
   onClearReels,
 }) {
+  const featuredReel = todayReels[0] || null;
+
   return (
     <section className="panel reel-output-panel">
       <div className="panel__header">
@@ -547,8 +549,59 @@ export function TodayReelsSection({
         </div>
       </div>
 
+      <div className={`studio-preview-panel studio-preview-panel--${featuredReel?.pipeline === "rent2buy" ? "rent" : "finance"}`}>
+        <div className="studio-phone">
+          <div className="studio-phone__speaker" />
+          <div className="studio-phone__screen">
+            {featuredReel?.url ? (
+              <video
+                src={featuredReel.url}
+                poster={featuredReel.posterUrl || featuredReel.image}
+                controls
+                playsInline
+              />
+            ) : featuredReel?.posterUrl || featuredReel?.image ? (
+              <img src={featuredReel.posterUrl || featuredReel.image} alt={featuredReel.title} />
+            ) : (
+              <div className="studio-phone__placeholder">
+                <span>9:16 preview</span>
+                <strong>Reel Studio</strong>
+                <small>Generated reels will appear here before download.</small>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="studio-preview-panel__body">
+          <span className={`tag tag--${featuredReel?.pipeline === "rent2buy" ? "rent" : "finance"}`}>
+            {featuredReel?.pipeline === "rent2buy" ? "Rent2Buy Campaign" : "Finance Campaign"}
+          </span>
+          <h3>{featuredReel?.title || "Latest reel preview"}</h3>
+          <p>{featuredReel?.headline || "Generate a reel to review the latest social-ready creative here."}</p>
+          <div className="studio-preview-panel__meta">
+            <span>Template: {featuredReel?.templateName || "Waiting for reel"}</span>
+            <span>File: {featuredReel?.downloadName || featuredReel?.fileName || "Not generated yet"}</span>
+          </div>
+          <div className="card-actions">
+            <button
+              className="button button--primary"
+              onClick={() => featuredReel && onDownloadReel(featuredReel)}
+              disabled={!featuredReel}
+            >
+              Download Reel
+            </button>
+            <button className="button button--ghost" onClick={onDownloadAll} disabled={!todayReels.length}>
+              Download All
+            </button>
+          </div>
+        </div>
+      </div>
+
       {todayReels.length === 0 ? (
-        <div className="empty-state">No reels generated today.</div>
+        <div className="empty-state empty-state--studio">
+          <strong>No reels generated today.</strong>
+          <span>Choose stock or uploaded images, then generate reels to fill the preview workspace.</span>
+        </div>
       ) : (
         <div className="today-reel-grid">
           {todayReels.map((reel) => (
@@ -618,16 +671,19 @@ export function TodayReelsSection({
                   <span className="tag">{reel.templateName}</span>
                 </div>
                 <h3>{reel.title}</h3>
-                <div className="creative-card__meta">Hook: {reel.headline}</div>
-                <div className="creative-card__meta">Content: {reel.subtext}</div>
-                <div className="creative-card__meta">Domain: {reel.domain}</div>
-                <div className="creative-card__meta">File: {reel.downloadName || reel.fileName}</div>
-                <div className="creative-card__meta">Format: {reel.mimeType || "Video file"}</div>
+                <div className="today-reel-card__details">
+                  <span>Hook</span>
+                  <strong>{reel.headline}</strong>
+                  <span>File</span>
+                  <strong>{reel.downloadName || reel.fileName}</strong>
+                  <span>Domain</span>
+                  <strong>{reel.domain}</strong>
+                </div>
                 <div className="card-actions">
                   <button className="button button--primary" onClick={() => onDownloadReel(reel)}>
                     Download Reel
                   </button>
-                  <button className="button button--danger" onClick={() => onDeleteReel(reel.id)}>
+                  <button className="button button--ghost button--quiet-danger" onClick={() => onDeleteReel(reel.id)}>
                     Delete Reel
                   </button>
                 </div>
