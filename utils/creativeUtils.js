@@ -1330,6 +1330,7 @@ export async function generateReelVideoAsset(reel) {
 
   const durationMs = 14000;
   const canvasStream = canvas.captureStream(30);
+  const [canvasVideoTrack] = canvasStream.getVideoTracks();
   let audioCleanup = () => {};
   let mixedStream = canvasStream;
 
@@ -1357,8 +1358,9 @@ export async function generateReelVideoAsset(reel) {
     }
   };
 
-  const started = Date.now();
+  const started = performance.now();
   let animationFrame = 0;
+  let stopScheduled = false;
 
   const finishedBlob = new Promise((resolve, reject) => {
     recorder.onerror = (event) => {
@@ -1370,12 +1372,21 @@ export async function generateReelVideoAsset(reel) {
   });
 
   const renderLoop = () => {
-    const elapsed = Date.now() - started;
+    const elapsed = performance.now() - started;
     drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, Math.min(elapsed, durationMs) / 1000);
+    canvasVideoTrack?.requestFrame?.();
     if (elapsed < durationMs) {
       animationFrame = window.requestAnimationFrame(renderLoop);
-    } else if (recorder.state !== "inactive") {
-      recorder.stop();
+    } else if (!stopScheduled) {
+      stopScheduled = true;
+      animationFrame = window.requestAnimationFrame(() => {
+        drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, durationMs / 1000);
+        canvasVideoTrack?.requestFrame?.();
+        if (recorder.state !== "inactive") {
+          recorder.requestData?.();
+          recorder.stop();
+        }
+      });
     }
   };
 
