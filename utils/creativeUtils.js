@@ -1083,7 +1083,7 @@ function drawContainedCanvasImage(ctx, image, x, y, width, height, progress = 0)
 
 function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeconds) {
   const { width, height } = canvas;
-  const durationSeconds = 12;
+  const durationSeconds = 14;
   const safeTop = Math.round(height * 0.2);
   const safeBottom = Math.round(height * 0.8);
   const safeCenterY = (safeTop + safeBottom) / 2;
@@ -1222,7 +1222,7 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
     return;
   }
 
-  if (elapsedSeconds < 10) {
+  if (elapsedSeconds < 11) {
     const supportProgress = Math.min((elapsedSeconds - 8) / 0.45, 1);
     ctx.globalAlpha = supportProgress;
     drawPremiumPanel(ctx, 70, safeCenterY - 205 - (1 - supportProgress) * 18, width - 140, 420, 42, palette);
@@ -1247,7 +1247,7 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
     return;
   }
 
-  const ctaProgress = Math.min((elapsedSeconds - 10) / 0.45, 1);
+  const ctaProgress = Math.min((elapsedSeconds - 11) / 0.45, 1);
   ctx.globalAlpha = ctaProgress;
   let finalCursorY = safeCenterY - 190 - (1 - ctaProgress) * 18;
   drawPremiumPanel(ctx, 76, finalCursorY - 54, width - 152, 380, 44, palette);
@@ -1283,6 +1283,9 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
   });
   drawVideoProgressBar(ctx, width, height, elapsedSeconds, durationSeconds, reel.pipeline);
 }
+
+const REEL_EXPORT_DURATION_MS = 14000;
+const REEL_EXPORT_FRAME_RATE = 30;
 
 export async function generateReelVideoAsset(reel) {
   if (typeof window === "undefined" || typeof document === "undefined") {
@@ -1328,8 +1331,9 @@ export async function generateReelVideoAsset(reel) {
     posterUrl = reel.image || "";
   }
 
-  const durationMs = 12000;
-  const canvasStream = canvas.captureStream(30);
+  const durationMs = REEL_EXPORT_DURATION_MS;
+  const canvasStream = canvas.captureStream(0);
+  const [canvasVideoTrack] = canvasStream.getVideoTracks();
   let audioCleanup = () => {};
   let mixedStream = canvasStream;
 
@@ -1357,8 +1361,11 @@ export async function generateReelVideoAsset(reel) {
     }
   };
 
-  const started = Date.now();
-  let animationFrame = 0;
+  let renderTimer = 0;
+  let frameIndex = 0;
+  let stopScheduled = false;
+  const frameDurationMs = 1000 / REEL_EXPORT_FRAME_RATE;
+  const totalFrames = Math.ceil(durationMs / frameDurationMs);
 
   const finishedBlob = new Promise((resolve, reject) => {
     recorder.onerror = (event) => {
@@ -1369,17 +1376,39 @@ export async function generateReelVideoAsset(reel) {
     };
   });
 
+  const started = window.performance.now();
+
   const renderLoop = () => {
-    const elapsed = Date.now() - started;
-    drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, elapsed / 1000);
-    if (elapsed < durationMs) {
-      animationFrame = window.requestAnimationFrame(renderLoop);
-    } else if (recorder.state !== "inactive") {
-      recorder.stop();
+    try {
+      const elapsedSeconds = Math.min(frameIndex / REEL_EXPORT_FRAME_RATE, durationMs / 1000);
+      drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, elapsedSeconds);
+    } catch (error) {
+      console.warn("Reel frame draw failed; continuing export:", error);
+    }
+    canvasVideoTrack?.requestFrame?.();
+    frameIndex += 1;
+
+    if (frameIndex <= totalFrames) {
+      const nextFrameAt = started + frameIndex * frameDurationMs;
+      renderTimer = window.setTimeout(renderLoop, Math.max(0, nextFrameAt - window.performance.now()));
+    } else if (!stopScheduled) {
+      stopScheduled = true;
+      renderTimer = window.setTimeout(() => {
+        try {
+          drawMarketingReelFrame(ctx, canvas, image, logoAsset.image, reel, durationMs / 1000);
+        } catch (error) {
+          console.warn("Final reel frame draw failed; stopping export:", error);
+        }
+        canvasVideoTrack?.requestFrame?.();
+        if (recorder.state !== "inactive") {
+          recorder.requestData?.();
+          recorder.stop();
+        }
+      }, frameDurationMs);
     }
   };
 
-  recorder.start();
+  recorder.start(1000);
   renderLoop();
 
   try {
@@ -1400,8 +1429,8 @@ export async function generateReelVideoAsset(reel) {
       audioEmbedded: mixedStream.getAudioTracks().length > 0,
     };
   } catch (error) {
-    if (animationFrame) {
-      window.cancelAnimationFrame(animationFrame);
+    if (renderTimer) {
+      window.clearTimeout(renderTimer);
     }
     cleanup();
     logoAsset.cleanup();
