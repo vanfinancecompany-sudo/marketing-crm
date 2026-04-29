@@ -2,6 +2,9 @@ const MAIN_CRM_URL =
   import.meta.env.VITE_MAIN_CRM_URL || "https://crm-roan-rho.vercel.app";
 
 const IMAGE_SUITE_URL = "https://vehicle-image-suite.vercel.app";
+const WORK_DOCUMENTS_HUB_URL =
+  import.meta.env.VITE_WORK_DOCUMENTS_HUB_URL ||
+  "https://work-documents-hub.vercel.app";
 
 export default function Sidebar({ currentView, onNavigate }) {
   const items = [
@@ -10,6 +13,7 @@ export default function Sidebar({ currentView, onNavigate }) {
     "Reel Factory",
     "Creative Library",
     "Image Suite",
+    "Documents Hub",
     "Van Finance Facebook",
     "Rent2Buy Facebook",
     "Facebook Marketplace",
@@ -31,6 +35,14 @@ export default function Sidebar({ currentView, onNavigate }) {
           if (item === "Image Suite") {
             return (
               <a key={item} className="sidebar__link" href={IMAGE_SUITE_URL}>
+                {item}
+              </a>
+            );
+          }
+
+          if (item === "Documents Hub") {
+            return (
+              <a key={item} className="sidebar__link" href={WORK_DOCUMENTS_HUB_URL}>
                 {item}
               </a>
             );
