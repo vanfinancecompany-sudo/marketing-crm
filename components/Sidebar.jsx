@@ -1,5 +1,6 @@
-const MAIN_CRM_URL =
-  import.meta.env.VITE_MAIN_CRM_URL || "https://crm-roan-rho.vercel.app";
+const CONTROL_CENTRE_URL =
+  import.meta.env.VITE_CONTROL_CENTRE_URL ||
+  "https://control-centre-navy.vercel.app";
 
 const IMAGE_SUITE_URL = "https://vehicle-image-suite.vercel.app";
 const WORK_DOCUMENTS_HUB_URL =
@@ -27,8 +28,8 @@ export default function Sidebar({ currentView, onNavigate }) {
       </div>
 
       <nav className="sidebar__nav">
-        <a className="sidebar__main-crm" href={MAIN_CRM_URL}>
-          Main CRM
+        <a className="sidebar__main-crm" href={CONTROL_CENTRE_URL}>
+          Control Centre
         </a>
 
         {items.map((item) => {
