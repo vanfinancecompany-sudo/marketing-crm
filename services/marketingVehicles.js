@@ -86,17 +86,22 @@ function mapRentVehicleRow(row, index) {
   };
 }
 
-export async function fetchMarketingVehicles() {
-  const [financeResult, rentResult] = await Promise.all([
-    supabase
-      .from("facebook_adverts")
-      .select("id, title, picture, price, vat, salePrice, vanDescription, vanSpec, weblink, is_active")
-      .eq("is_active", true),
-    supabase
-      .from("rent_vehicles")
-      .select("id, registration, picture, monthly, week, initialRental, vanDescription, vanSpec, webLink, is_active")
-      .eq("is_active", true),
-  ]);
+export async function fetchMarketingVehicles(limitPerPipeline = 80) {
+  const safeLimit = Math.min(Number(limitPerPipeline) || 80, 120);
+
+  const financeQuery = supabase
+    .from("facebook_adverts")
+    .select("id, title, picture, price, vat, salePrice, vanDescription, vanSpec, weblink, is_active")
+    .eq("is_active", true)
+    .limit(safeLimit);
+
+  const rentQuery = supabase
+    .from("rent_vehicles")
+    .select("id, registration, picture, monthly, week, initialRental, vanDescription, vanSpec, webLink, is_active")
+    .eq("is_active", true)
+    .limit(safeLimit);
+
+  const [financeResult, rentResult] = await Promise.all([financeQuery, rentQuery]);
 
   if (financeResult.error) {
     throw new Error(`Failed to load finance vehicles: ${financeResult.error.message}`);
