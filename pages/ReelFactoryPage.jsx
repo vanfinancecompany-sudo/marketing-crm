@@ -341,6 +341,9 @@ export function DailyReelFactoryPanel({
         <div>
           <h3>Daily Reel Factory</h3>
           <p>Generate a batch of daily reels from live stock or uploaded images.</p>
+          <p className="creative-card__meta">
+            Vehicles used in the last 5 days are skipped for better variety.
+          </p>
         </div>
         <span className="status-pill">{todayReelsCount} today</span>
       </div>
@@ -500,6 +503,15 @@ export function DailyReelFactoryPanel({
             onChange={(event) => onFormChange("musicOn", event.target.checked)}
           />
           <span>{formValues.musicOn ? "Music On" : "Music Off"}</span>
+        </label>
+
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={Boolean(formValues.ignoreVehicleCooldown)}
+            onChange={(event) => onFormChange("ignoreVehicleCooldown", event.target.checked)}
+          />
+          <span>Ignore 5-day cooldown for this generation</span>
         </label>
       </div>
 

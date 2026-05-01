@@ -91,6 +91,11 @@ import {
   saveMarketingCreatives,
 } from "./services/marketingCreatives.js";
 import { fetchReelClickDashboard, logReelClick } from "./services/reelClickTracking.js";
+import {
+  fetchRecentReelVehicleUsage,
+  logReelVehicleUsage,
+  REEL_VEHICLE_COOLDOWN_DAYS,
+} from "./services/reelVehicleUsage.js";
 
 const DEFAULT_STOCK_FILTERS = {
   pipeline: "all",
@@ -117,6 +122,7 @@ const DEFAULT_REEL_FACTORY_FORM = {
   rentHook: rentReelHooks[0],
   customHook: "",
   musicOn: true,
+  ignoreVehicleCooldown: false,
 };
 
 const FINANCE_FACEBOOK_URL = "https://www.facebook.com/VanFinance";
@@ -311,6 +317,72 @@ function normalizePostingVehicleId(vehicleOrId) {
       ? vehicleOrId.id
       : vehicleOrId;
   return String(rawId ?? "");
+}
+
+function normalizeRegistration(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+}
+
+function reelTypeForPipeline(pipeline) {
+  return pipeline === "rent2buy" ? "rent2buy" : "finance";
+}
+
+function getReelVehicleKey(vehicleOrReel) {
+  const id = vehicleOrReel?.id || vehicleOrReel?.vehicleId;
+  if (id) return String(id);
+
+  const registration = normalizeRegistration(vehicleOrReel?.reg || vehicleOrReel?.registration);
+  if (registration) return registration;
+
+  return String(vehicleOrReel?.name || vehicleOrReel?.title || "").trim().toLowerCase();
+}
+
+function getReelVehicleUsageKeys(vehicleOrReel) {
+  return [
+    getReelVehicleKey(vehicleOrReel),
+    normalizeRegistration(vehicleOrReel?.reg || vehicleOrReel?.registration),
+  ].filter(Boolean);
+}
+
+function buildRecentUsageLookup(rows) {
+  const lookup = {
+    finance: new Set(),
+    rent2buy: new Set(),
+  };
+
+  rows.forEach((row) => {
+    const reelType = row.reel_type === "rent2buy" ? "rent2buy" : "finance";
+    if (row.vehicle_key) lookup[reelType].add(String(row.vehicle_key));
+    const registration = normalizeRegistration(row.registration);
+    if (registration) lookup[reelType].add(registration);
+  });
+
+  return lookup;
+}
+
+function isRecentlyUsedReelVehicle(item, recentUsageLookup) {
+  if (item.kind !== "vehicle") return false;
+  const reelType = reelTypeForPipeline(item.vehicle.pipeline);
+  return getReelVehicleUsageKeys(item.vehicle).some((key) =>
+    recentUsageLookup[reelType]?.has(key),
+  );
+}
+
+function reelVehicleUsagePayloadFromReel(reel) {
+  if (reel.sourceType !== "stock") return null;
+  const vehicleKey = getReelVehicleKey(reel);
+  if (!vehicleKey) return null;
+
+  return {
+    reel_type: reelTypeForPipeline(reel.pipeline),
+    vehicle_key: vehicleKey,
+    registration: normalizeRegistration(reel.registration),
+    vehicle_title: reel.title || "",
+    source: "generate",
+  };
 }
 
 function saveHiddenPostingIds(pageKey, ids) {
@@ -892,12 +964,58 @@ const vehiclePool = visibleFilteredVehicles.filter((vehicle) => {
     setGenerationMessage("");
     setCreativeError("");
 
-    const pool = buildDailyReelPool();
+    const basePool = buildDailyReelPool();
     const quantity = Math.max(1, Math.min(50, Number(reelFactoryForm.quantity) || 10));
 
-    if (!pool.length) {
+    if (!basePool.length) {
       setGenerationMessage("No stock or uploaded images are available for those reel settings.");
       return;
+    }
+
+    let pool = basePool;
+    let cooldownWarning = "";
+
+    if (!reelFactoryForm.ignoreVehicleCooldown) {
+      const reelTypes = [
+        ...new Set(
+          basePool
+            .filter((item) => item.kind === "vehicle")
+            .map((item) => reelTypeForPipeline(item.vehicle.pipeline)),
+        ),
+      ];
+
+      if (reelTypes.length) {
+        try {
+          const { rows, setupMissing } = await fetchRecentReelVehicleUsage(reelTypes);
+          if (setupMissing) {
+            cooldownWarning =
+              `Vehicle cooldown tracking table is not set up yet. Run the reel_vehicle_usage SQL from README.md to enable the ${REEL_VEHICLE_COOLDOWN_DAYS}-day cooldown.`;
+          } else {
+            const recentUsageLookup = buildRecentUsageLookup(rows);
+            const freshPool = basePool.filter(
+              (item) => !isRecentlyUsedReelVehicle(item, recentUsageLookup),
+            );
+            const freshVehicles = freshPool.filter((item) => item.kind === "vehicle").length;
+            const recentVehicles = basePool.filter((item) =>
+              isRecentlyUsedReelVehicle(item, recentUsageLookup),
+            ).length;
+
+            if (freshPool.length > 0 && freshPool.length >= quantity) {
+              pool = freshPool;
+            } else if (freshPool.length > 0 && recentVehicles > 0) {
+              pool = basePool;
+              cooldownWarning = `Only ${freshVehicles} fresh vehicle${freshVehicles === 1 ? "" : "s"} available. Recently used vehicles may be reused.`;
+            } else if (freshPool.length > 0) {
+              pool = freshPool;
+            } else if (recentVehicles > 0) {
+              pool = basePool;
+              cooldownWarning = "No fresh vehicles available. Recently used vehicles may be reused.";
+            }
+          }
+        } catch (error) {
+          cooldownWarning = `Vehicle cooldown check skipped: ${error.message || "could not load recent usage"}.`;
+        }
+      }
     }
 
     const hookCounters = {
@@ -979,6 +1097,22 @@ const vehiclePool = visibleFilteredVehicles.filter((vehicle) => {
       return;
     }
 
+    const generatedUsage = nextReels
+      .map(reelVehicleUsagePayloadFromReel)
+      .filter(Boolean);
+
+    if (generatedUsage.length) {
+      try {
+        const { setupMissing } = await logReelVehicleUsage(generatedUsage);
+        if (setupMissing && !cooldownWarning) {
+          cooldownWarning =
+            "Vehicle usage was not logged because reel_vehicle_usage is not set up yet.";
+        }
+      } catch (error) {
+        cooldownWarning = `Vehicle usage could not be logged: ${error.message || "unknown error"}.`;
+      }
+    }
+
     setTodayReels((prev) => [...nextReels, ...prev].slice(0, 20));
     try {
       const libraryCreatives = await addReelsToCreativeLibrary(nextReels);
@@ -1001,10 +1135,14 @@ const vehiclePool = visibleFilteredVehicles.filter((vehicle) => {
             : reel;
         })
       );
-      setGenerationMessage(`Generated ${nextReels.length} reel(s) and saved them to Creative Library.`);
+      setGenerationMessage(
+        `Generated ${nextReels.length} reel(s) and saved them to Creative Library.${cooldownWarning ? ` ${cooldownWarning}` : ""}`,
+      );
     } catch (error) {
       setCreativeError(error.message || "Could not save generated reels to Creative Library.");
-      setGenerationMessage(`Generated ${nextReels.length} reel(s) for Today's Reels.`);
+      setGenerationMessage(
+        `Generated ${nextReels.length} reel(s) for Today's Reels.${cooldownWarning ? ` ${cooldownWarning}` : ""}`,
+      );
     }
   }
 
