@@ -394,6 +394,10 @@ export default function VanscoStockWatchPage() {
           <div className="vansco-debug-panel">
             <div className="vehicle-card__meta">Vansco page fetched: {activeDebug.pageFetched ? "yes" : "no"}</div>
             <div className="vehicle-card__meta">HTML length: {activeDebug.htmlLength || 0}</div>
+            <div className="vehicle-card__meta">Endpoint used: {activeDebug.endpointUsed || "Unknown"}</div>
+            <div className="vehicle-card__meta">Pages fetched: {activeDebug.pagesFetched || 0}</div>
+            <div className="vehicle-card__meta">Candidate links found: {activeDebug.candidateLinksFound || 0}</div>
+            <div className="vehicle-card__meta">Vehicle detail URLs kept: {activeDebug.vehiclesParsed || 0}</div>
             <div className="vehicle-card__meta">Vehicles parsed: {activeDebug.vehiclesParsed || 0}</div>
             <div className="vehicle-card__meta">
               Vehicles parsed for {pipelineLabel(selectedPipeline)}: {activeDebug.vehiclesParsedForPipeline || 0}
@@ -415,6 +419,11 @@ export default function VanscoStockWatchPage() {
                 Parser warning: {warning}
               </div>
             ))}
+            {(activeDebug.sampleTitles || []).length ? (
+              <div className="vehicle-card__meta">
+                Sample titles: {(activeDebug.sampleTitles || []).join(" | ")}
+              </div>
+            ) : null}
           </div>
         ) : null}
 

@@ -1429,7 +1429,7 @@ textarea {
 
 .vansco-card__image {
   width: 100%;
-  aspect-ratio: 16 / 10;
+  height: 160px;
   object-fit: cover;
   display: block;
 }

@@ -890,6 +890,30 @@ async function fetchVanscoSourceHtml(pipeline) {
   return payload;
 }
 
+function normalizeApiVehicle(vehicle, fallbackCategory = "unknown") {
+  return {
+    vehicleKey: deriveVehicleKey(
+      {
+        title: vehicle.title,
+        registration: vehicle.registration,
+        stockUrl: vehicle.stockUrl,
+        year: vehicle.year,
+        mileage: vehicle.mileage,
+      },
+      vehicle.stockUrl || vehicle.title
+    ),
+    title: compactWhitespace(vehicle.title || ""),
+    registration: normalizeRegistration(vehicle.registration || ""),
+    imageUrl: normalizeUrl(vehicle.imageUrl || ""),
+    stockUrl: normalizeUrl(vehicle.stockUrl || ""),
+    price: compactWhitespace(vehicle.price || ""),
+    mileage: compactWhitespace(vehicle.mileage || ""),
+    year: normalizeYear(vehicle.year || ""),
+    sourceStatus: vehicle.sourceStatus || "unknown",
+    vehicleCategory: vehicle.vehicleCategory || fallbackCategory,
+  };
+}
+
 function mergeRecordData(base, next) {
   return cleanWatchRecordPayload({
     ...base,
@@ -906,7 +930,16 @@ export async function runVanscoStockCheck(pipeline) {
     fetchVanscoSourceHtml(pipeline),
   ]);
 
-  const parsedHtml = parseVehicleCardsFromHtml(sourcePayload.html || "");
+  const parsedHtml = Array.isArray(sourcePayload.vehicles) && sourcePayload.vehicles.length
+    ? {
+        vehicles: sourcePayload.vehicles.map((vehicle) =>
+          normalizeApiVehicle(vehicle, pipeline === "cars" ? "car" : "van")
+        ),
+        parserWarnings: sourcePayload.diagnostics?.parserWarnings || [],
+        htmlLength: sourcePayload.diagnostics?.htmlLength || sourcePayload.htmlLength || 0,
+        duplicateCount: 0,
+      }
+    : parseVehicleCardsFromHtml(sourcePayload.html || "");
   const parsedSourceVehicles = filterSourceVehiclesForPipeline(parsedHtml.vehicles, pipeline);
   const localLookup = buildVehicleLookup(localVehicles);
   const existingByKey = new Map(existingRecords.map((record) => [record.vehicleKey, record]));
@@ -923,6 +956,10 @@ export async function runVanscoStockCheck(pipeline) {
     upsertDuplicateKeysCollapsed: 0,
     localWarning,
     sourceTable: sourceTable || "",
+    endpointUsed: sourcePayload.endpointUsed || SOURCE_URL,
+    pagesFetched: sourcePayload.pagesFetched || 1,
+    candidateLinksFound: sourcePayload.diagnostics?.candidateLinksFound || 0,
+    sampleTitles: sourcePayload.diagnostics?.sampleTitles || parsedSourceVehicles.slice(0, 3).map((vehicle) => vehicle.title),
   };
 
   if (!parsedSourceVehicles.length) {
