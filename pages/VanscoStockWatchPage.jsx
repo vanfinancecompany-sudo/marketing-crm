@@ -33,6 +33,8 @@ const RUNNING_STEPS = [
   { key: "complete", label: "Complete" },
 ];
 
+const CURRENT_SCAN_WINDOW_MS = 10 * 60 * 1000;
+
 function normalizeWatchRegistration(value) {
   const text = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (!text || text.length < 5 || text.length > 8) return "";
@@ -46,6 +48,28 @@ function isReservedLikeStatus(status) {
 
 function isBlockedStatus(workflowStatus) {
   return workflowStatus === "ignored" || String(workflowStatus || "").startsWith("not_listing_");
+}
+
+function recordCheckedTimeMs(record) {
+  const rawValue = record?.lastCheckedAt || record?.last_checked_at || record?.updatedAt || record?.updated_at;
+  const time = rawValue ? new Date(rawValue).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function filterCurrentScanRecords(records) {
+  const activeRows = records.filter((record) => !isBlockedStatus(record.workflowStatus));
+  const latestCheckedAt = activeRows.reduce((latest, record) => Math.max(latest, recordCheckedTimeMs(record)), 0);
+
+  if (!latestCheckedAt) return records;
+
+  const cutoff = latestCheckedAt - CURRENT_SCAN_WINDOW_MS;
+
+  return records.filter((record) => {
+    if (isBlockedStatus(record.workflowStatus)) return true;
+    const checkedAt = recordCheckedTimeMs(record);
+    if (!checkedAt) return true;
+    return checkedAt >= cutoff;
+  });
 }
 
 function classifyWatchRecord(record, localRegistrationSet) {
@@ -103,6 +127,23 @@ function classifyWatchRecord(record, localRegistrationSet) {
     matchStatus: "listed",
     safeExactRegistrationMatch: true,
   };
+}
+
+function dedupeDisplayRecords(records) {
+  const byKey = new Map();
+
+  records.forEach((record) => {
+    const registration = normalizeWatchRegistration(record.registration);
+    const key = registration || record.stockUrl || record.vehicleKey || record.id;
+    if (!key) return;
+
+    const existing = byKey.get(key);
+    if (!existing || recordCheckedTimeMs(record) >= recordCheckedTimeMs(existing)) {
+      byKey.set(key, record);
+    }
+  });
+
+  return Array.from(byKey.values());
 }
 
 function formatElapsed(seconds) {
@@ -374,10 +415,14 @@ export default function VanscoStockWatchPage() {
 
   const activeFilter = filtersByPipeline[selectedPipeline] || "missing";
   const rawActiveRecords = recordsByPipeline[selectedPipeline] || [];
+  const currentRawRecords = useMemo(
+    () => dedupeDisplayRecords(filterCurrentScanRecords(rawActiveRecords)),
+    [rawActiveRecords]
+  );
   const activeLocalRegistrations = localRegistrationsByPipeline[selectedPipeline] || new Set();
   const activeRecords = useMemo(
-    () => rawActiveRecords.map((record) => classifyWatchRecord(record, activeLocalRegistrations)),
-    [activeLocalRegistrations, rawActiveRecords]
+    () => currentRawRecords.map((record) => classifyWatchRecord(record, activeLocalRegistrations)),
+    [activeLocalRegistrations, currentRawRecords]
   );
 
   const summary = useMemo(() => {
@@ -408,12 +453,12 @@ export default function VanscoStockWatchPage() {
   }, [activeFilter, activeRecords]);
 
   const lastCheckedAt = useMemo(() => {
-    return rawActiveRecords.reduce((latest, record) => {
+    return currentRawRecords.reduce((latest, record) => {
       if (!record.lastCheckedAt) return latest;
       if (!latest) return record.lastCheckedAt;
       return new Date(record.lastCheckedAt) > new Date(latest) ? record.lastCheckedAt : latest;
     }, "");
-  }, [rawActiveRecords]);
+  }, [currentRawRecords]);
 
   async function handleRunCheck() {
     const confirmed = window.confirm(
