@@ -16,7 +16,7 @@ function convertWixImage(url) {
   return `https://static.wixstatic.com/media/${match[1]}`;
 }
 
-function extractRegistration(value) {
+export function extractRegistration(value) {
   const text = String(value || "").trim().toUpperCase();
   if (!text) return "";
 
@@ -36,7 +36,7 @@ function valueOrFallback(...values) {
   return "";
 }
 
-function mapFinanceVehicleRow(row, index) {
+export function mapFinanceVehicleRow(row, index) {
   const imageUrl = convertWixImage(row.picture);
   const title = valueOrFallback(row.title, `finance-${index + 1}`);
 
@@ -61,7 +61,7 @@ function mapFinanceVehicleRow(row, index) {
   };
 }
 
-function mapRentVehicleRow(row, index) {
+export function mapRentVehicleRow(row, index) {
   const imageUrl = convertWixImage(row.picture);
   const registration = valueOrFallback(row.registration, `rent-${index + 1}`);
 
@@ -86,7 +86,7 @@ function mapRentVehicleRow(row, index) {
   };
 }
 
-export async function fetchMarketingVehicles(limitPerPipeline = 80) {
+export async function fetchFinanceMarketingVehicles(limitPerPipeline = 80) {
   const safeLimit = Math.min(Number(limitPerPipeline) || 80, 120);
 
   const financeQuery = supabase
@@ -95,24 +95,37 @@ export async function fetchMarketingVehicles(limitPerPipeline = 80) {
     .eq("is_active", true)
     .limit(safeLimit);
 
+  const financeResult = await financeQuery;
+
+  if (financeResult.error) {
+    throw new Error(`Failed to load finance vehicles: ${financeResult.error.message}`);
+  }
+
+  return (financeResult.data || []).map(mapFinanceVehicleRow);
+}
+
+export async function fetchRentMarketingVehicles(limitPerPipeline = 80) {
+  const safeLimit = Math.min(Number(limitPerPipeline) || 80, 120);
+
   const rentQuery = supabase
     .from("rent_vehicles")
     .select("id, registration, picture, monthly, week, initialRental, vanDescription, vanSpec, webLink, is_active")
     .eq("is_active", true)
     .limit(safeLimit);
 
-  const [financeResult, rentResult] = await Promise.all([financeQuery, rentQuery]);
-
-  if (financeResult.error) {
-    throw new Error(`Failed to load finance vehicles: ${financeResult.error.message}`);
-  }
-
+  const rentResult = await rentQuery;
   if (rentResult.error) {
     throw new Error(`Failed to load Rent2Buy vehicles: ${rentResult.error.message}`);
   }
 
-  const financeVehicles = (financeResult.data || []).map(mapFinanceVehicleRow);
-  const rentVehicles = (rentResult.data || []).map(mapRentVehicleRow);
+  return (rentResult.data || []).map(mapRentVehicleRow);
+}
+
+export async function fetchMarketingVehicles(limitPerPipeline = 80) {
+  const [financeVehicles, rentVehicles] = await Promise.all([
+    fetchFinanceMarketingVehicles(limitPerPipeline),
+    fetchRentMarketingVehicles(limitPerPipeline),
+  ]);
 
   return [...financeVehicles, ...rentVehicles];
 }

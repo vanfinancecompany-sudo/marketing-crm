@@ -1,4 +1,5 @@
 import { supabase } from "./supabase.js";
+import { fetchFinanceMarketingVehicles, fetchRentMarketingVehicles } from "./marketingVehicles.js";
 
 const WATCH_TABLE = "vansco_stock_watch";
 const VAN_SCO_SOURCE_URL = "https://www.vansco.co.uk/all-stock/";
@@ -796,29 +797,51 @@ function mapCarsVehicleRow(row, index) {
 }
 
 async function fetchFinanceStockGroup() {
-  const { data, error } = await supabase
-    .from("facebook_adverts")
-    .select("id, title, picture, price, weblink, is_active")
-    .eq("is_active", true);
-
-  if (error) {
-    throw new Error(`Failed to load finance stock group: ${error.message}`);
-  }
-
-  return (data || []).map(mapFinanceVehicleRow);
+  const vehicles = await fetchFinanceMarketingVehicles(120);
+  return vehicles.map((vehicle) => ({
+    vehicleKey: deriveVehicleKey(
+      {
+        title: vehicle.title,
+        registration: vehicle.reg,
+        stockUrl: vehicle.weblink || vehicle.link || "",
+        price: vehicle.price || "",
+      },
+      vehicle.title
+    ),
+    title: compactWhitespace(vehicle.title || ""),
+    registration: normalizeRegistration(vehicle.reg || ""),
+    rawRegistration: compactWhitespace(vehicle.reg || ""),
+    imageUrl: convertStoredImage(vehicle.picture || vehicle.image || ""),
+    stockUrl: vehicle.weblink || vehicle.link || "",
+    price: vehicle.price || "",
+    mileage: "",
+    year: normalizeYear(vehicle.title || ""),
+    vehicleCategory: "van",
+  }));
 }
 
 async function fetchRent2BuyStockGroup() {
-  const { data, error } = await supabase
-    .from("rent_vehicles")
-    .select("id, registration, picture, monthly, initialRental, webLink, is_active")
-    .eq("is_active", true);
-
-  if (error) {
-    throw new Error(`Failed to load Rent2Buy stock group: ${error.message}`);
-  }
-
-  return (data || []).map(mapRentVehicleRow);
+  const vehicles = await fetchRentMarketingVehicles(120);
+  return vehicles.map((vehicle) => ({
+    vehicleKey: deriveVehicleKey(
+      {
+        title: vehicle.title,
+        registration: vehicle.reg,
+        stockUrl: vehicle.weblink || vehicle.link || "",
+        price: vehicle.initialRental || vehicle.monthly || "",
+      },
+      vehicle.title
+    ),
+    title: compactWhitespace(vehicle.title || ""),
+    registration: normalizeRegistration(vehicle.reg || ""),
+    rawRegistration: compactWhitespace(vehicle.reg || ""),
+    imageUrl: convertStoredImage(vehicle.picture || vehicle.image || ""),
+    stockUrl: vehicle.weblink || vehicle.link || "",
+    price: vehicle.initialRental || vehicle.monthly || "",
+    mileage: "",
+    year: "",
+    vehicleCategory: "van",
+  }));
 }
 
 async function fetchCarsStockGroup() {
@@ -852,6 +875,7 @@ async function fetchLocalStockGroup(pipeline) {
     return {
       vehicles: await fetchFinanceStockGroup(),
       sourceTable: PIPELINE_CONFIG.finance.localSource,
+      registrationField: "vehicle.reg (derived from facebook_adverts.title via Stock page mapper)",
     };
   }
 
@@ -859,6 +883,7 @@ async function fetchLocalStockGroup(pipeline) {
     return {
       vehicles: await fetchRent2BuyStockGroup(),
       sourceTable: PIPELINE_CONFIG.rent2buy.localSource,
+      registrationField: "vehicle.reg (from rent_vehicles.registration via Stock page mapper)",
     };
   }
 
@@ -866,6 +891,7 @@ async function fetchLocalStockGroup(pipeline) {
     vehicles: result.rows,
     sourceTable: result.sourceTable,
     warning: result.warning || "",
+    registrationField: result.sourceTable ? "registration/reg" : "",
   }));
 }
 
@@ -998,7 +1024,7 @@ function mergeRecordData(base, next) {
 }
 
 export async function runVanscoStockCheck(pipeline, options = {}) {
-  const [{ vehicles: localVehicles, sourceTable, warning: localWarning = "" }, existingRecords, sourcePayload] = await Promise.all([
+  const [{ vehicles: localVehicles, sourceTable, warning: localWarning = "", registrationField = "" }, existingRecords, sourcePayload] = await Promise.all([
     fetchLocalStockGroup(pipeline),
     fetchVanscoWatchRecords(pipeline),
     fetchVanscoSourceHtml(pipeline, options),
@@ -1033,6 +1059,7 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
     finalPayloadContainsId: false,
     localWarning,
     sourceTable: sourceTable || "",
+    registrationField,
     endpointUsed: sourcePayload.endpointUsed || VAN_SCO_SOURCE_URL,
     pagesFetched: sourcePayload.pagesFetched || 1,
     candidateLinksFound: sourcePayload.diagnostics?.candidateLinksFound || 0,
@@ -1052,7 +1079,26 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
     matchesByFallbackTitle: 0,
     vanscoValidRegistrationsFound: 0,
     vanscoVehiclesWithoutValidRegistrationMovedToNeedsReview: 0,
+    crmRecordCount: localVehicles.length,
     crmValidRegistrationsFound: localVehicles.filter((vehicle) => hasValidRegistration(vehicle)).length,
+    crmRawRegistrationsSample: localVehicles
+      .map((vehicle) => compactWhitespace(vehicle.rawRegistration || vehicle.registration || ""))
+      .filter(Boolean)
+      .slice(0, 20),
+    crmNormalizedRegistrationsSample: localVehicles
+      .map((vehicle) => normalizeRegistration(vehicle.rawRegistration || vehicle.registration || ""))
+      .filter(Boolean)
+      .slice(0, 20),
+    vanscoRawRegistrationsSample: parsedSourceVehicles
+      .map((vehicle) => compactWhitespace(vehicle.registration || ""))
+      .filter(Boolean)
+      .slice(0, 20),
+    vanscoNormalizedRegistrationsSample: parsedSourceVehicles
+      .map((vehicle) => normalizeRegistration(vehicle.registration || ""))
+      .filter(Boolean)
+      .slice(0, 20),
+    exactRegistrationOverlapCount: 0,
+    sampleMatchedRegistrations: [],
     scanComplete: false,
     registrationConfidence: "low",
     noLongerHighConfidenceOnly: true,
@@ -1076,6 +1122,18 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
   diagnostics.vanscoValidRegistrationsFound = registrationConfidence.validRegistrations;
   diagnostics.scanComplete = registrationConfidence.scanComplete;
   diagnostics.registrationConfidence = registrationConfidence.registrationConfidence;
+
+  const crmNormalizedSet = new Set(
+    localVehicles
+      .map((vehicle) => normalizeRegistration(vehicle.rawRegistration || vehicle.registration || ""))
+      .filter(Boolean)
+  );
+  const vanscoNormalizedSet = new Set(
+    parsedSourceVehicles.map((vehicle) => normalizeRegistration(vehicle.registration || "")).filter(Boolean)
+  );
+  const overlap = [...crmNormalizedSet].filter((registration) => vanscoNormalizedSet.has(registration));
+  diagnostics.exactRegistrationOverlapCount = overlap.length;
+  diagnostics.sampleMatchedRegistrations = overlap.slice(0, 20);
 
   if (!parsedSourceVehicles.length) {
     const error = new Error("No vehicles found in Vansco HTML. Site may require JS-rendered scraping or a feed.");
@@ -1154,6 +1212,11 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
   if (parsedSourceVehicles.some((vehicle) => !normalizeRegistration(vehicle.registration))) {
     diagnostics.lowConfidenceWarning =
       "Some vehicles could not be matched confidently because registration was not found.";
+  }
+
+  if ((pipeline === "finance" || pipeline === "rent2buy") && diagnostics.crmValidRegistrationsFound === 0) {
+    diagnostics.lowConfidenceWarning =
+      "CRM registrations could not be read from the same stock data used by the Stock page. Review manually.";
   }
 
   localVehicles.forEach((localVehicle) => {

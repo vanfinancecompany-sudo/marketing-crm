@@ -554,6 +554,8 @@ export default function VanscoStockWatchPage() {
             <div className="vehicle-card__meta">HTML length: {activeDebug.htmlLength || 0}</div>
             <div className="vehicle-card__meta">Endpoint used: {activeDebug.endpointUsed || "Unknown"}</div>
             <div className="vehicle-card__meta">Source used: {activeDebug.sourceFamily || "unknown"}</div>
+            <div className="vehicle-card__meta">Stock page CRM source used: {activeDebug.sourceTable || "Unknown"}</div>
+            <div className="vehicle-card__meta">Registration field used: {activeDebug.registrationField || "Unknown"}</div>
             <div className="vehicle-card__meta">Pages fetched: {activeDebug.pagesFetched || 0}</div>
             <div className="vehicle-card__meta">
               Detail fetch mode: {activeDebug.detailFetchMode || "standard"} | Detail fetch limit applied: {activeDebug.detailFetchLimitApplied ?? "-"}
@@ -589,8 +591,27 @@ export default function VanscoStockWatchPage() {
             <div className="vehicle-card__meta">
               Vansco vehicles without valid registration moved to Needs Review: {activeDebug.vanscoVehiclesWithoutValidRegistrationMovedToNeedsReview || 0}
             </div>
+            <div className="vehicle-card__meta">Finance/selected CRM records loaded: {activeDebug.crmRecordCount ?? 0}</div>
             <div className="vehicle-card__meta">
               CRM valid registrations found: {activeDebug.crmValidRegistrationsFound || 0}
+            </div>
+            <div className="vehicle-card__meta">
+              First 20 raw CRM registrations: {(activeDebug.crmRawRegistrationsSample || []).join(", ") || "none"}
+            </div>
+            <div className="vehicle-card__meta">
+              First 20 normalised CRM registrations: {(activeDebug.crmNormalizedRegistrationsSample || []).join(", ") || "none"}
+            </div>
+            <div className="vehicle-card__meta">
+              Vansco raw registrations sample: {(activeDebug.vanscoRawRegistrationsSample || []).join(", ") || "none"}
+            </div>
+            <div className="vehicle-card__meta">
+              Vansco normalised registrations sample: {(activeDebug.vanscoNormalizedRegistrationsSample || []).join(", ") || "none"}
+            </div>
+            <div className="vehicle-card__meta">
+              Exact registration overlap count: {activeDebug.exactRegistrationOverlapCount || 0}
+            </div>
+            <div className="vehicle-card__meta">
+              Sample matched registrations: {(activeDebug.sampleMatchedRegistrations || []).join(", ") || "none"}
             </div>
             <div className="vehicle-card__meta">
               Missing count based on valid registrations only: {activeDebug.missingCountBasedOnValidRegistrationsOnly || 0}
