@@ -44,24 +44,36 @@ function isReservedLikeStatus(status) {
 }
 
 function applySafeExactRegistrationMatches(records, localRegistrationSet) {
-  if (!localRegistrationSet?.size) return records;
-
   return records.map((record) => {
     const registration = normalizeWatchRegistration(record.registration);
-    const hasExactLocalMatch = registration && localRegistrationSet.has(registration);
+    const hasExactLocalMatch =
+      registration && localRegistrationSet?.has(registration);
 
-    if (!hasExactLocalMatch) return record;
+    // Reserved / sold / deposit-taken Vansco vehicles should always go
+    // into the Reserved on Vansco section first.
+    // This prevents reserved Vansco stock appearing under Missing from my stock.
+    if (isReservedLikeStatus(record.sourceStatus)) {
+      return {
+        ...record,
+        originalMatchStatus: record.originalMatchStatus || record.matchStatus,
+        matchStatus: "reserved_still_listed",
+        safeExactRegistrationMatch: Boolean(hasExactLocalMatch),
+      };
+    }
 
-    const matchStatus = isReservedLikeStatus(record.sourceStatus)
-      ? "reserved_still_listed"
-      : "listed";
+    // If the registration exists in the selected CRM stock tab,
+    // show it as Already listed even if the wider scan is low-confidence.
+    if (hasExactLocalMatch) {
+      return {
+        ...record,
+        originalMatchStatus: record.originalMatchStatus || record.matchStatus,
+        matchStatus: "listed",
+        safeExactRegistrationMatch: true,
+      };
+    }
 
-    return {
-      ...record,
-      originalMatchStatus: record.originalMatchStatus || record.matchStatus,
-      matchStatus,
-      safeExactRegistrationMatch: true,
-    };
+    // Otherwise leave the original conservative classification alone.
+    return record;
   });
 }
 
