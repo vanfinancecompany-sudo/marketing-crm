@@ -13,14 +13,12 @@ const VANSCO_CATEGORY_PAGES = {
     { url: "https://www.vansco.co.uk/used-cars/", sourceCategory: "used_cars" },
   ],
 };
+
 const JUNK_TITLE_PATTERN = /\b(vansco ltd|all stock|showroom|flexibuy|finance|contact|about)\b/i;
 const VEHICLE_PATH_PATTERN = /\/vehicle-details\//i;
-const PRICE_PATTERN = /(?:£|&pound;)\s?[0-9][0-9,]*/gi;
-const YEAR_PATTERN = /\b(20\d{2}|19\d{2})\b/;
-const REGISTRATION_PATTERN =
-  /\b([A-Z]{2}[0-9]{2}\s?[A-Z]{3}|[A-Z][0-9]{1,3}\s?[A-Z]{3}|[A-Z]{3}\s?[0-9]{1,3}[A-Z]|[0-9]{1,4}\s?[A-Z]{1,3})\b/i;
 const MODERN_UK_REG_PATTERN = /^[A-Z]{2}[0-9]{2}[A-Z]{3}$/;
 const LEGACY_REG_PATTERN = /^(?:[A-Z][0-9]{1,3}[A-Z]{3}|[A-Z]{3}[0-9]{1,3}[A-Z]|[0-9]{1,4}[A-Z]{1,3})$/i;
+const REGISTRATION_PATTERN = /\b([A-Z]{2}[0-9]{2}\s?[A-Z]{3}|[A-Z][0-9]{1,3}\s?[A-Z]{3}|[A-Z]{3}\s?[0-9]{1,3}[A-Z]|[0-9]{1,4}\s?[A-Z]{1,3})\b/i;
 const FAKE_REG_PATTERNS = [
   /^[0-9]{2,3}PS$/i,
   /^[0-9]{2,3}BHP$/i,
@@ -30,22 +28,39 @@ const FAKE_REG_PATTERNS = [
   /^U\d{4,6}$/i,
   /^SHOWROOM$/i,
   /^333$/i,
+  /^0BOX$/i,
+  /^FROMODOMETER$/i,
 ];
+const BLOCKED_REG_VALUES = new Set([
+  "VANSCO",
+  "VANSCOLTD",
+  "ALLSTOCK",
+  "HOMESTOCK",
+  "UNDEFINED",
+  "UNKNOWN",
+  "NULL",
+  "N/A",
+  "NA",
+  "NOTFOUND",
+  "ULEZ",
+  "EURO6",
+  "SHOWROOM",
+  "FROMODOMETER",
+]);
+
 const DETAIL_FETCH_CONCURRENCY = 4;
 const DETAIL_FETCH_TIMEOUT_MS = 7000;
-const DETAIL_FETCH_LIMITS = {
-  finance: 140,
-  rent2buy: 140,
-  cars: 90,
-};
+const CATEGORY_FETCH_TIMEOUT_MS = 9000;
+const MAX_CATEGORY_PAGES_PER_SOURCE = 25;
+const MAX_DETAIL_URLS = 800;
+const FULL_SCAN_BATCH_SIZE = 40;
 const DETAIL_FETCH_MODE_LIMITS = {
   fast: 100,
   standard: 100,
   full: 0,
 };
-const FULL_SCAN_BATCH_SIZE = 40;
 const CAR_KEYWORDS = /\b(audi|bmw|jaguar|jeep|kia|lexus|mercedes-benz|mercedes|skoda|suzuki|hyundai|q2|q3|a3|a4|a5|estate|hatchback|cabriolet|suv|coupe|saloon)\b/i;
-const VAN_KEYWORDS = /\b(transit|transit custom|transit connect|transit courier|tourneo|custom|tipper|dropside|luton|crew van|minibus|panel van|box van|pickup|pick-up|chassis cab|relay|dispatch|scudo|daily|doblo|partner|berlingo|sprinter|crafter|vivaro|movano)\b/i;
+const VAN_KEYWORDS = /\b(transit|transit custom|transit connect|transit courier|tourneo|custom|tipper|dropside|luton|crew van|minibus|panel van|box van|pickup|pick-up|chassis cab|relay|dispatch|scudo|daily|doblo|partner|berlingo|sprinter|crafter|vivaro|movano|box-van)\b/i;
 
 function decodeHtml(value) {
   return String(value || "")
@@ -70,109 +85,13 @@ function normalizeUrl(value) {
   try {
     const url = new URL(text, SOURCE_URL);
     url.hash = "";
+    ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"].forEach((key) =>
+      url.searchParams.delete(key)
+    );
     return url.toString().replace(/\/$/, "");
   } catch {
     return text.replace(/\/$/, "");
   }
-}
-
-function extractAnchorMatches(html) {
-  const matches = [];
-  const anchorPattern = /<a\b[^>]*href=(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi;
-  let match;
-
-  while ((match = anchorPattern.exec(html))) {
-    matches.push({
-      href: normalizeUrl(match[2]),
-      text: decodeHtml(match[3]),
-    });
-  }
-
-  return matches;
-}
-
-function looksLikeVehicleTitle(title) {
-  const text = decodeHtml(title);
-  if (!text || text.length < 12) return false;
-  if (JUNK_TITLE_PATTERN.test(text)) return false;
-  if (/^(home|reviews|warranty|privacy policy|cookies|complaints|new forest|southampton airport)$/i.test(text)) {
-    return false;
-  }
-
-  const words = text.split(/\s+/).filter(Boolean);
-  return words.length >= 2;
-}
-
-function detectVehicleCategory(text, href = "") {
-  const haystack = `${compactWhitespace(text)} ${compactWhitespace(href)}`;
-  if (VAN_KEYWORDS.test(haystack)) return "van";
-  if (CAR_KEYWORDS.test(haystack)) return "car";
-  if (/used-cars/i.test(href)) return "car";
-  if (/used-vans|no-vat-vans/i.test(href)) return "van";
-  return "unknown";
-}
-
-function toVehicleStub(anchor) {
-  return {
-    title: decodeHtml(anchor.text),
-    stockUrl: normalizeUrl(anchor.href),
-    imageUrl: "",
-    price: "",
-    registration: "",
-    mileage: "",
-    year: "",
-    sourceStatus: "unknown",
-    vehicleCategory: detectVehicleCategory(anchor.text, anchor.href),
-    sourceCategory: "",
-  };
-}
-
-function dedupeVehicles(vehicles) {
-  const byUrl = new Map();
-
-  vehicles.forEach((vehicle) => {
-    const key = normalizeUrl(vehicle.stockUrl);
-    if (!key) return;
-
-    if (!byUrl.has(key)) {
-      byUrl.set(key, vehicle);
-      return;
-    }
-
-    const existing = byUrl.get(key);
-    const existingScore = [existing.registration, existing.imageUrl, existing.price, existing.mileage, existing.year]
-      .filter(Boolean)
-      .join("|").length + String(existing.title || "").length;
-    const nextScore = [vehicle.registration, vehicle.imageUrl, vehicle.price, vehicle.mileage, vehicle.year]
-      .filter(Boolean)
-      .join("|").length + String(vehicle.title || "").length;
-    byUrl.set(key, nextScore > existingScore ? vehicle : existing);
-  });
-
-  return Array.from(byUrl.values());
-}
-
-function withSourceCategory(vehicles, sourceCategory) {
-  return vehicles.map((vehicle) => ({
-    ...vehicle,
-    sourceCategory: vehicle.sourceCategory || sourceCategory,
-  }));
-}
-
-function parseVehicleLinksFromHtml(html) {
-  const anchors = extractAnchorMatches(html);
-  const candidates = anchors.filter((anchor) => VEHICLE_PATH_PATTERN.test(anchor.href));
-  const vehicles = dedupeVehicles(
-    candidates
-      .filter((anchor) => looksLikeVehicleTitle(anchor.text))
-      .map(toVehicleStub)
-  );
-
-  return {
-    anchors,
-    candidates,
-    vehicles,
-  };
 }
 
 function timeoutSignal(timeoutMs) {
@@ -208,22 +127,184 @@ async function fetchHtml(url, timeoutMs = DETAIL_FETCH_TIMEOUT_MS) {
     }
 
     const html = await response.text();
-    return {
-      url,
-      html,
-      htmlLength: html.length,
-    };
+    return { url: normalizeUrl(url), html, htmlLength: html.length };
   } finally {
     timed.clear();
   }
 }
 
+function extractAnchorMatches(html) {
+  const matches = [];
+  const anchorPattern = /<a\b[^>]*href=(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi;
+  let match;
+
+  while ((match = anchorPattern.exec(html || ""))) {
+    matches.push({
+      href: normalizeUrl(match[2]),
+      text: decodeHtml(match[3]),
+    });
+  }
+
+  return matches;
+}
+
+function looksLikeVehicleTitle(title) {
+  const text = decodeHtml(title);
+  if (!text || text.length < 12) return false;
+  if (JUNK_TITLE_PATTERN.test(text)) return false;
+  if (/^(home|reviews|warranty|privacy policy|cookies|complaints|new forest|southampton airport)$/i.test(text)) {
+    return false;
+  }
+
+  const words = text.split(/\s+/).filter(Boolean);
+  return words.length >= 2;
+}
+
+function detectVehicleCategory(text, href = "") {
+  const haystack = `${compactWhitespace(text)} ${compactWhitespace(href)}`;
+  if (/used-cars/i.test(href)) return "car";
+  if (/used-vans|no-vat-vans/i.test(href)) return "van";
+  if (VAN_KEYWORDS.test(haystack)) return "van";
+  if (CAR_KEYWORDS.test(haystack)) return "car";
+  return "unknown";
+}
+
+function toVehicleStub(anchor, sourceCategory = "") {
+  return {
+    title: decodeHtml(anchor.text),
+    stockUrl: normalizeUrl(anchor.href),
+    imageUrl: "",
+    price: "",
+    registration: "",
+    mileage: "",
+    year: "",
+    sourceStatus: "unknown",
+    vehicleCategory: detectVehicleCategory(anchor.text, anchor.href),
+    sourceCategory,
+  };
+}
+
+function vehicleScore(vehicle) {
+  return [
+    vehicle.registration ? 5 : 0,
+    vehicle.imageUrl ? 3 : 0,
+    vehicle.sourceStatus && vehicle.sourceStatus !== "unknown" ? 2 : 0,
+    vehicle.stockUrl ? 2 : 0,
+    compactWhitespace(vehicle.title).length,
+  ].reduce((total, value) => total + value, 0);
+}
+
+function dedupeVehicles(vehicles) {
+  const byUrl = new Map();
+
+  vehicles.forEach((vehicle) => {
+    const key = normalizeUrl(vehicle.stockUrl);
+    if (!key) return;
+
+    if (!byUrl.has(key) || vehicleScore(vehicle) > vehicleScore(byUrl.get(key))) {
+      byUrl.set(key, vehicle);
+    }
+  });
+
+  return Array.from(byUrl.values());
+}
+
+function parseVehicleLinksFromHtml(html, sourceCategory = "") {
+  const anchors = extractAnchorMatches(html);
+  const candidates = anchors.filter((anchor) => VEHICLE_PATH_PATTERN.test(anchor.href));
+  const vehicles = candidates
+    .filter((anchor) => looksLikeVehicleTitle(anchor.text) || VEHICLE_PATH_PATTERN.test(anchor.href))
+    .map((anchor) => toVehicleStub(anchor, sourceCategory));
+
+  return { anchors, candidates, vehicles: dedupeVehicles(vehicles) };
+}
+
+function isLikelyCategoryPageUrl(url, baseUrl) {
+  const normalized = normalizeUrl(url);
+  if (!normalized) return false;
+
+  try {
+    const candidate = new URL(normalized);
+    const base = new URL(baseUrl);
+    if (candidate.hostname !== base.hostname) return false;
+    if (!candidate.pathname.startsWith(base.pathname.replace(/\/$/, ""))) return false;
+    if (VEHICLE_PATH_PATTERN.test(candidate.pathname)) return false;
+    if (/\/page\/\d+\/?$/i.test(candidate.pathname)) return true;
+    if (candidate.searchParams.has("page") || candidate.searchParams.has("paged")) return true;
+    return candidate.pathname.replace(/\/$/, "") === base.pathname.replace(/\/$/, "");
+  } catch {
+    return false;
+  }
+}
+
+function buildLikelyPaginationUrls(baseUrl) {
+  const urls = [];
+  const normalized = normalizeUrl(baseUrl);
+  const withSlash = `${normalized.replace(/\/$/, "")}/`;
+
+  for (let page = 2; page <= MAX_CATEGORY_PAGES_PER_SOURCE; page += 1) {
+    urls.push(`${withSlash}page/${page}/`);
+    urls.push(`${withSlash}?page=${page}`);
+    urls.push(`${withSlash}?paged=${page}`);
+  }
+
+  return urls;
+}
+
+async function fetchCategoryPages(pageConfig, parserWarnings) {
+  const pages = [];
+  const seen = new Set();
+  const queue = [normalizeUrl(pageConfig.url), ...buildLikelyPaginationUrls(pageConfig.url)];
+  let consecutiveEmptyPages = 0;
+
+  while (queue.length && pages.length < MAX_CATEGORY_PAGES_PER_SOURCE) {
+    const nextUrl = normalizeUrl(queue.shift());
+    if (!nextUrl || seen.has(nextUrl) || !isLikelyCategoryPageUrl(nextUrl, pageConfig.url)) continue;
+    seen.add(nextUrl);
+
+    try {
+      const page = await fetchHtml(nextUrl, CATEGORY_FETCH_TIMEOUT_MS);
+      const parsed = parseVehicleLinksFromHtml(page.html, pageConfig.sourceCategory);
+      if (!parsed.vehicles.length && nextUrl !== normalizeUrl(pageConfig.url)) {
+        consecutiveEmptyPages += 1;
+        if (consecutiveEmptyPages >= 3) break;
+        continue;
+      }
+
+      consecutiveEmptyPages = 0;
+      pages.push({ ...page, parsed, sourceCategory: pageConfig.sourceCategory });
+
+      parsed.anchors.forEach((anchor) => {
+        const href = normalizeUrl(anchor.href);
+        if (href && !seen.has(href) && isLikelyCategoryPageUrl(href, pageConfig.url)) {
+          queue.push(href);
+        }
+      });
+    } catch (error) {
+      if (nextUrl === normalizeUrl(pageConfig.url)) {
+        parserWarnings.push(`Category page could not be fetched: ${pageConfig.url}`);
+      }
+    }
+  }
+
+  return pages;
+}
+
+function filterVehiclesForPipeline(vehicles, pipeline) {
+  if (pipeline === "cars") {
+    return vehicles.filter((vehicle) => detectVehicleCategory(vehicle.title, vehicle.stockUrl) === "car");
+  }
+
+  return vehicles.filter((vehicle) => detectVehicleCategory(vehicle.title, vehicle.stockUrl) !== "car");
+}
+
 function extractMetaContent(html, key) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const patterns = [
-    new RegExp(`<meta[^>]+property=["']${key}["'][^>]+content=["']([^"']+)["'][^>]*>`, "i"),
-    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${key}["'][^>]*>`, "i"),
-    new RegExp(`<meta[^>]+name=["']${key}["'][^>]+content=["']([^"']+)["'][^>]*>`, "i"),
-    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${key}["'][^>]*>`, "i"),
+    new RegExp(`<meta[^>]+property=["']${escaped}["'][^>]+content=["']([^"']+)["'][^>]*>`, "i"),
+    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${escaped}["'][^>]*>`, "i"),
+    new RegExp(`<meta[^>]+name=["']${escaped}["'][^>]+content=["']([^"']+)["'][^>]*>`, "i"),
+    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${escaped}["'][^>]*>`, "i"),
   ];
 
   for (const pattern of patterns) {
@@ -255,34 +336,11 @@ function extractLabelValue(html, label) {
   return "";
 }
 
-function extractYearValue(html, fallbackText = "") {
-  return "";
-}
-
-function extractMileageValue(html) {
-  return "";
-}
-
-function extractPrice(html) {
-  return "";
-}
-
 function isValidVehicleImage(url) {
   const value = normalizeUrl(url);
-  if (!value) return false;
-  if (!/^https?:\/\//i.test(value)) return false;
+  if (!value || !/^https?:\/\//i.test(value)) return false;
 
-  const blocked = [
-    "logo",
-    "placeholder",
-    "favicon",
-    "icon",
-    "facebook.com",
-    "google.com",
-    "whatsapp",
-    "flexibuy",
-  ];
-
+  const blocked = ["logo", "placeholder", "favicon", "icon", "facebook.com", "google.com", "whatsapp", "flexibuy"];
   return !blocked.some((fragment) => value.toLowerCase().includes(fragment));
 }
 
@@ -293,7 +351,7 @@ function extractImageUrl(html) {
   const twitterImage = normalizeUrl(extractMetaContent(html, "twitter:image"));
   if (isValidVehicleImage(twitterImage)) return twitterImage;
 
-  const imagePattern = /<img\b[^>]*(?:src|data-src)=["']([^"']+)["'][^>]*>/gi;
+  const imagePattern = /<img\b[^>]*(?:src|data-src|data-lazy-src)=["']([^"']+)["'][^>]*>/gi;
   let match;
 
   while ((match = imagePattern.exec(html))) {
@@ -307,17 +365,17 @@ function extractImageUrl(html) {
 function normalizeRegistration(value) {
   const text = compactWhitespace(value).toUpperCase();
   if (!text) return "";
-  const blocked = new Set(["VANSCO", "VANSCOLTD", "ALLSTOCK", "HOMESTOCK", "UNDEFINED", "UNKNOWN", "NULL", "N/A", "NA", "NOTFOUND", "ULEZ", "EURO6", "SHOWROOM"]);
   const cleaned = text.replace(/[^A-Z0-9]/g, "");
   if (!cleaned || cleaned.length < 5 || cleaned.length > 8) return "";
   if (!/[A-Z]/.test(cleaned) || !/[0-9]/.test(cleaned)) return "";
-  if (blocked.has(cleaned)) return "";
+  if (BLOCKED_REG_VALUES.has(cleaned)) return "";
   if (FAKE_REG_PATTERNS.some((pattern) => pattern.test(cleaned))) return "";
+
   const match = cleaned.match(REGISTRATION_PATTERN);
   const candidate = (match?.[1] || cleaned).replace(/[^A-Z0-9]/g, "");
   if (!candidate || candidate.length < 5 || candidate.length > 8) return "";
   if (!/[A-Z]/.test(candidate) || !/[0-9]/.test(candidate)) return "";
-  if (blocked.has(candidate)) return "";
+  if (BLOCKED_REG_VALUES.has(candidate)) return "";
   if (FAKE_REG_PATTERNS.some((pattern) => pattern.test(candidate))) return "";
   return candidate;
 }
@@ -344,30 +402,13 @@ function collectBracketedCandidates(text) {
   return matches;
 }
 
-function extractRegistrationFromHeadingHtml(html) {
-  const headingMatch = html.match(/<h1[^>]*>[\s\S]*?\(([A-Z0-9 ]{5,10})\)[\s\S]*?<\/h1>/i);
-  return headingMatch?.[1] ? headingMatch[1] : "";
-}
-
-function extractRegistrationFromOgTitle(html) {
-  const ogTitle = extractMetaContent(html, "og:title");
-  const candidates = collectBracketedCandidates(ogTitle);
-  return candidates[0] || "";
-}
-
 function extractRegistrationFromTitle(title, rejectedCandidates) {
   const candidates = collectBracketedCandidates(title);
   for (const candidate of candidates) {
     const normalized = normalizeRegistration(candidate);
-    if (isStrictUkRegistration(normalized)) {
-      return normalized;
-    }
-
-    if (candidate) {
-      rejectedCandidates.push(candidate);
-    }
+    if (isStrictUkRegistration(normalized)) return normalized;
+    if (candidate) rejectedCandidates.push(candidate);
   }
-
   return "";
 }
 
@@ -376,9 +417,7 @@ function extractStrictRegistrationCandidate(rawValue, rejectedCandidates) {
   if (!value) return "";
 
   const normalized = normalizeRegistration(value);
-  if (isStrictUkRegistration(normalized)) {
-    return normalized;
-  }
+  if (isStrictUkRegistration(normalized)) return normalized;
 
   rejectedCandidates.push(value);
   return "";
@@ -401,41 +440,37 @@ function enrichVehicleStub(stub, html, diagnostics) {
   const fullTitle = compactWhitespace([pageTitle, subtitle].filter(Boolean).join(" - "));
   const rejectedCandidates = diagnostics.rejectedRegistrationCandidates;
   const titleCandidates = [
-    extractRegistrationFromHeadingHtml(html),
-    extractRegistrationFromOgTitle(html),
+    pageTitle,
+    extractMetaContent(html, "og:title"),
+    extractMetaContent(html, "twitter:title"),
     stub.title,
     fullTitle,
-    pageTitle,
   ].filter(Boolean);
   let bracketRegistration = "";
-  let usedBracketTitleSource = false;
 
   for (const titleCandidate of titleCandidates) {
     const extracted = extractRegistrationFromTitle(titleCandidate, rejectedCandidates);
     if (extracted) {
       bracketRegistration = extracted;
-      usedBracketTitleSource = true;
+      diagnostics.registrationsExtractedFromTitleBrackets += 1;
       break;
     }
   }
 
   const registration =
     bracketRegistration ||
-    extractStrictRegistrationCandidate(extractLabelValue(html, "Registration"), rejectedCandidates);
-
-  if (registration && usedBracketTitleSource) {
-    diagnostics.registrationsExtractedFromTitleBrackets += 1;
-  }
+    extractStrictRegistrationCandidate(extractLabelValue(html, "Registration"), rejectedCandidates) ||
+    extractStrictRegistrationCandidate(extractLabelValue(html, "Reg"), rejectedCandidates);
 
   return {
     ...stub,
-    title: fullTitle || stub.title,
+    title: fullTitle || pageTitle || stub.title,
     stockUrl: normalizeUrl(stub.stockUrl),
     imageUrl: extractImageUrl(html) || stub.imageUrl,
-    price: extractPrice(html) || stub.price,
+    price: "",
     registration,
-    mileage: extractMileageValue(html) || stub.mileage,
-    year: extractYearValue(html, pageTitle || stub.title || ""),
+    mileage: "",
+    year: "",
     sourceStatus: detectSourceStatus(bodyText),
     vehicleCategory: detectVehicleCategory(`${fullTitle} ${bodyText}`, stub.stockUrl) || stub.vehicleCategory,
     sourceCategory: stub.sourceCategory || "",
@@ -458,31 +493,17 @@ async function mapWithConcurrency(items, limit, worker) {
   return results;
 }
 
-function filterVehiclesForPipeline(vehicles, pipeline) {
-  if (pipeline === "cars") {
-    return vehicles.filter((vehicle) => detectVehicleCategory(vehicle.title, vehicle.stockUrl) === "car");
-  }
-
-  return vehicles.filter((vehicle) => detectVehicleCategory(vehicle.title, vehicle.stockUrl) !== "car");
-}
-
 function buildDiagnostics({
   endpointUsed,
   sourceFamily,
-  pagesFetched,
-  htmlLength,
+  pageResults,
   candidateLinksFound,
-  sitemapUrlsFound,
-  categoryPagesFetched,
   categoryPageFailures,
   vehiclesParsedByCategory,
-  vehiclesKept,
+  filteredVehicleCount,
   detailPagesFetched,
   detailPagesFailed,
-  vehiclesWithRegistration,
-  vehiclesWithImage,
-  vehiclesWithSourceStatus,
-  vehiclesWithValidMatchKey,
+  finalVehicles,
   detailFetchMode,
   detailFetchLimitApplied,
   partialScan,
@@ -490,37 +511,42 @@ function buildDiagnostics({
   registrationsExtractedFromTitleBrackets,
   rejectedRegistrationCandidates,
   parserWarnings,
-  sampleTitles,
-  sampleRegistrations,
+  detailOffset,
+  remainingVehicleCount,
 }) {
   return {
     endpointUsed,
     sourceFamily,
-    pagesFetched,
-    htmlLength,
+    pagesFetched: pageResults.length + detailPagesFetched,
+    htmlLength: pageResults.reduce((total, page) => total + page.htmlLength, 0),
     candidateLinksFound,
-    sitemapUrlsFound,
-    categoryPagesFetched,
+    sitemapUrlsFound: filteredVehicleCount,
+    categoryPagesFetched: pageResults.length,
     categoryPageFailures,
     vehiclesParsedByCategory,
-    vehicleDetailUrlsKept: vehiclesKept,
-    vehiclesParsed: vehiclesKept,
+    vehicleDetailUrlsKept: finalVehicles.length,
+    vehiclesParsed: finalVehicles.length,
     detailPagesFetched,
     detailPagesFailed,
-    vehiclesEnrichedWithRegistration: vehiclesWithRegistration,
-    vehiclesEnrichedWithImage: vehiclesWithImage,
-    vehiclesWithSourceStatus,
-    vehiclesWithValidMatchKey,
+    vehiclesEnrichedWithRegistration: finalVehicles.filter((vehicle) => vehicle.registration).length,
+    vehiclesEnrichedWithImage: finalVehicles.filter((vehicle) => vehicle.imageUrl).length,
+    vehiclesWithSourceStatus: finalVehicles.filter((vehicle) => vehicle.sourceStatus && vehicle.sourceStatus !== "unknown").length,
+    vehiclesWithValidMatchKey: finalVehicles.filter((vehicle) => vehicle.registration || vehicle.stockUrl).length,
     detailFetchMode,
     detailFetchLimitApplied,
     partialScan,
     totalVehicleUrlsFound,
+    detailOffset,
+    remainingVehicleCount,
+    currentBatchStart: detailOffset,
+    currentBatchEnd: detailOffset + finalVehicles.length,
+    vehiclesProcessedThisBatch: finalVehicles.length,
     registrationsExtractedFromTitleBrackets,
     rejectedFakeRegistrationsCount: rejectedRegistrationCandidates.length,
     sampleRejectedFakeRegistrations: rejectedRegistrationCandidates.slice(0, 20),
     parserWarnings,
-    sampleTitles,
-    sampleRegistrations,
+    sampleTitles: finalVehicles.slice(0, 3).map((vehicle) => vehicle.title),
+    sampleRegistrations: finalVehicles.map((vehicle) => vehicle.registration).filter(Boolean).slice(0, 20),
   };
 }
 
@@ -535,69 +561,63 @@ export default async function handler(request, response) {
     const detailFetchMode = String(request.query?.detailFetchMode || "standard").toLowerCase();
     const detailOffset = Math.max(0, Number(request.query?.detailOffset || 0) || 0);
     const requestedBatchSize = Math.max(0, Number(request.query?.detailBatchSize || 0) || 0);
-    const pageResults = [];
     const parserWarnings = [];
     const categorySourcePages = VANSCO_CATEGORY_PAGES[pipeline] || VANSCO_CATEGORY_PAGES.finance;
-    const categoryPageResults = [];
     const categoryPageFailures = [];
+    const vehiclesParsedByCategory = {};
+    let pageResults = [];
     let candidateLinksFound = 0;
     let categoryVehicles = [];
-    const vehiclesParsedByCategory = {};
 
     for (const pageConfig of categorySourcePages) {
-      try {
-        const page = await fetchHtml(pageConfig.url);
+      const pages = await fetchCategoryPages(pageConfig, parserWarnings);
+      if (!pages.length) categoryPageFailures.push(pageConfig.sourceCategory);
+
+      pages.forEach((page) => {
         pageResults.push(page);
-        categoryPageResults.push(page);
-        const parsed = parseVehicleLinksFromHtml(page.html);
-        candidateLinksFound += parsed.candidates.length;
-        const taggedVehicles = withSourceCategory(parsed.vehicles, pageConfig.sourceCategory);
-        vehiclesParsedByCategory[pageConfig.sourceCategory] = taggedVehicles.length;
-        categoryVehicles = dedupeVehicles([...categoryVehicles, ...taggedVehicles]);
-      } catch {
-        categoryPageFailures.push(pageConfig.sourceCategory);
-        parserWarnings.push(`Category page could not be fetched: ${pageConfig.url}`);
-      }
+        candidateLinksFound += page.parsed.candidates.length;
+        const currentCount = vehiclesParsedByCategory[pageConfig.sourceCategory] || 0;
+        vehiclesParsedByCategory[pageConfig.sourceCategory] = currentCount + page.parsed.vehicles.length;
+        categoryVehicles = dedupeVehicles([...categoryVehicles, ...page.parsed.vehicles]);
+      });
     }
 
     let vehicles = categoryVehicles;
     let endpointUsed = categorySourcePages.map((page) => page.url).join(", ");
-    let sourceFamily = "vansco-category-pages";
+    let sourceFamily = "vansco-category-pagination";
 
     if (vehicles.length < 10) {
-      const sitemapPage = await fetchHtml(SITEMAP_URL);
-      pageResults.push(sitemapPage);
-      const sitemapParsed = parseVehicleLinksFromHtml(sitemapPage.html);
+      const sitemapPage = await fetchHtml(SITEMAP_URL, CATEGORY_FETCH_TIMEOUT_MS);
+      const sitemapParsed = parseVehicleLinksFromHtml(sitemapPage.html, "sitemap_fallback");
+      pageResults.push({ ...sitemapPage, parsed: sitemapParsed });
       candidateLinksFound += sitemapParsed.candidates.length;
 
       if (sitemapParsed.vehicles.length > vehicles.length) {
-        vehicles = withSourceCategory(sitemapParsed.vehicles, "sitemap_fallback");
+        vehicles = sitemapParsed.vehicles;
         endpointUsed = SITEMAP_URL;
         sourceFamily = "sitemap-fallback";
         parserWarnings.push("Sitemap fallback was used. Confidence is low and comparisons should be treated as needs review.");
       }
     }
 
-    const filteredVehicles = filterVehiclesForPipeline(vehicles, pipeline);
-    const baseLimit = DETAIL_FETCH_LIMITS[pipeline] || DETAIL_FETCH_LIMITS.finance;
+    const filteredVehicles = filterVehiclesForPipeline(vehicles, pipeline).slice(0, MAX_DETAIL_URLS);
+    const totalVehicleUrlsFound = filteredVehicles.length;
     const requestedLimit = DETAIL_FETCH_MODE_LIMITS[detailFetchMode] ?? DETAIL_FETCH_MODE_LIMITS.standard;
     const batchSize = requestedBatchSize > 0
       ? requestedBatchSize
       : detailFetchMode === "full"
         ? FULL_SCAN_BATCH_SIZE
-        : requestedLimit === 0
-          ? filteredVehicles.length
-          : Math.min(baseLimit, requestedLimit);
+        : requestedLimit || filteredVehicles.length;
     const detailFetchLimit = requestedLimit === 0
-      ? Math.min(Math.max(0, filteredVehicles.length - detailOffset), batchSize)
-      : Math.min(baseLimit, requestedLimit, batchSize);
+      ? Math.min(Math.max(0, totalVehicleUrlsFound - detailOffset), batchSize)
+      : Math.min(requestedLimit, batchSize, Math.max(0, totalVehicleUrlsFound - detailOffset));
     const vehiclesToEnrich = filteredVehicles.slice(detailOffset, detailOffset + detailFetchLimit);
-    const remainingVehicleCount = Math.max(0, filteredVehicles.length - (detailOffset + vehiclesToEnrich.length));
+    const remainingVehicleCount = Math.max(0, totalVehicleUrlsFound - (detailOffset + vehiclesToEnrich.length));
     const hasMore = remainingVehicleCount > 0;
 
-    if (remainingVehicleCount > 0) {
+    if (hasMore) {
       parserWarnings.push(
-        `Detail enrichment was limited to ${vehiclesToEnrich.length} vehicles for this manual check batch. ${remainingVehicleCount} remaining vehicles were left for later batches or review.`
+        `Batch ${Math.floor(detailOffset / Math.max(1, detailFetchLimit || batchSize)) + 1} processed ${vehiclesToEnrich.length} vehicles. ${remainingVehicleCount} remaining vehicles are queued for automatic batches.`
       );
     }
 
@@ -624,40 +644,32 @@ export default async function handler(request, response) {
     );
 
     const finalVehicles = dedupeVehicles(enrichedVehicles);
-    const partialScan = remainingVehicleCount > 0 || detailPagesFailed > 0 || sourceFamily === "sitemap-fallback";
-    if (finalVehicles.length < 10) {
-      parserWarnings.push("Parser warning: fewer than 10 vehicles found after detail enrichment.");
-    }
-    if (partialScan) {
-      parserWarnings.push("Partial scan only. Results are review-only and should not be used for stock decisions.");
+    const partialScan = hasMore || detailPagesFailed > 0 || sourceFamily === "sitemap-fallback";
+
+    if (finalVehicles.length < vehiclesToEnrich.length) {
+      parserWarnings.push("Some duplicate detail URLs were collapsed in this batch.");
     }
 
     const diagnostics = buildDiagnostics({
       endpointUsed,
       sourceFamily,
-      pagesFetched: pageResults.length + detailPagesFetched,
-      htmlLength: pageResults.reduce((total, page) => total + page.htmlLength, 0),
+      pageResults,
       candidateLinksFound,
-      sitemapUrlsFound: filteredVehicles.length,
-      categoryPagesFetched: categoryPageResults.length,
       categoryPageFailures,
       vehiclesParsedByCategory,
-      vehiclesKept: finalVehicles.length,
+      filteredVehicleCount: filteredVehicles.length,
       detailPagesFetched,
       detailPagesFailed,
-      vehiclesWithRegistration: finalVehicles.filter((vehicle) => vehicle.registration).length,
-      vehiclesWithImage: finalVehicles.filter((vehicle) => vehicle.imageUrl).length,
-      vehiclesWithSourceStatus: finalVehicles.filter((vehicle) => vehicle.sourceStatus && vehicle.sourceStatus !== "unknown").length,
-      vehiclesWithValidMatchKey: finalVehicles.filter((vehicle) => vehicle.registration || vehicle.stockUrl).length,
-      partialScan,
-      totalVehicleUrlsFound: filteredVehicles.length,
-      registrationsExtractedFromTitleBrackets: enrichmentDiagnostics.registrationsExtractedFromTitleBrackets,
-      rejectedRegistrationCandidates: enrichmentDiagnostics.rejectedRegistrationCandidates,
+      finalVehicles,
       detailFetchMode,
       detailFetchLimitApplied: vehiclesToEnrich.length,
+      partialScan,
+      totalVehicleUrlsFound,
+      registrationsExtractedFromTitleBrackets: enrichmentDiagnostics.registrationsExtractedFromTitleBrackets,
+      rejectedRegistrationCandidates: enrichmentDiagnostics.rejectedRegistrationCandidates,
       parserWarnings,
-      sampleTitles: finalVehicles.slice(0, 3).map((vehicle) => vehicle.title),
-      sampleRegistrations: finalVehicles.map((vehicle) => vehicle.registration).filter(Boolean).slice(0, 20),
+      detailOffset,
+      remainingVehicleCount,
     });
 
     response.setHeader("Cache-Control", "no-store, max-age=0");
@@ -671,6 +683,7 @@ export default async function handler(request, response) {
       vehicles: finalVehicles,
       detailOffset,
       hasMore,
+      nextDetailOffset: detailOffset + vehiclesToEnrich.length,
       diagnostics,
     });
   } catch (error) {
