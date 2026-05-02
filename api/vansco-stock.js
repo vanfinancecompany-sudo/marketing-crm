@@ -13,6 +13,11 @@ const DETAIL_FETCH_LIMITS = {
   rent2buy: 140,
   cars: 90,
 };
+const DETAIL_FETCH_MODE_LIMITS = {
+  fast: 50,
+  standard: 100,
+  full: 0,
+};
 const CAR_KEYWORDS = /\b(audi|bmw|jaguar|jeep|kia|lexus|mercedes-benz|mercedes|skoda|suzuki|hyundai|q2|q3|a3|a4|a5|estate|hatchback|cabriolet|suv|coupe|saloon)\b/i;
 const VAN_KEYWORDS = /\b(transit|transit custom|transit connect|transit courier|tourneo|custom|tipper|dropside|luton|crew van|minibus|panel van|box van|pickup|pick-up|chassis cab|relay|dispatch|scudo|daily|doblo|partner|berlingo|sprinter|crafter|vivaro|movano)\b/i;
 
@@ -370,6 +375,7 @@ export default async function handler(request, response) {
 
   try {
     const pipeline = String(request.query?.pipeline || "finance").toLowerCase();
+    const detailFetchMode = String(request.query?.detailFetchMode || "standard").toLowerCase();
     const pageResults = [];
     const parserWarnings = [];
 
@@ -396,7 +402,9 @@ export default async function handler(request, response) {
     }
 
     const filteredVehicles = filterVehiclesForPipeline(vehicles, pipeline);
-    const detailFetchLimit = DETAIL_FETCH_LIMITS[pipeline] || DETAIL_FETCH_LIMITS.finance;
+    const baseLimit = DETAIL_FETCH_LIMITS[pipeline] || DETAIL_FETCH_LIMITS.finance;
+    const requestedLimit = DETAIL_FETCH_MODE_LIMITS[detailFetchMode] ?? DETAIL_FETCH_MODE_LIMITS.standard;
+    const detailFetchLimit = requestedLimit === 0 ? filteredVehicles.length : Math.min(baseLimit, requestedLimit);
     const vehiclesToEnrich = filteredVehicles.slice(0, detailFetchLimit);
     const remainingVehicleCount = Math.max(0, filteredVehicles.length - vehiclesToEnrich.length);
 
@@ -441,6 +449,8 @@ export default async function handler(request, response) {
       vehiclesWithRegistration: finalVehicles.filter((vehicle) => vehicle.registration).length,
       vehiclesWithImage: finalVehicles.filter((vehicle) => vehicle.imageUrl).length,
       vehiclesWithValidMatchKey: finalVehicles.filter((vehicle) => vehicle.registration || vehicle.stockUrl).length,
+      detailFetchMode,
+      detailFetchLimitApplied: detailFetchLimit,
       parserWarnings,
       sampleTitles: finalVehicles.slice(0, 3).map((vehicle) => vehicle.title),
     });

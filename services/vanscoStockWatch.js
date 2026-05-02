@@ -64,6 +64,12 @@ export const WATCH_FILTERS = [
   { value: "all", label: "All" },
 ];
 
+export const DETAIL_FETCH_PRESETS = [
+  { value: "fast", label: "Fast check", limit: 50 },
+  { value: "standard", label: "Standard check", limit: 100 },
+  { value: "full", label: "Full check", limit: 0 },
+];
+
 export function pipelineLabel(pipeline) {
   return PIPELINE_CONFIG[pipeline]?.label || pipeline;
 }
@@ -905,8 +911,17 @@ export async function updateVanscoWatchRecord(id, updates) {
   return normalizeWatchRecord(data);
 }
 
-async function fetchVanscoSourceHtml(pipeline) {
-  const response = await fetch(`/api/vansco-stock?pipeline=${encodeURIComponent(pipeline)}&_=${Date.now()}`, {
+async function fetchVanscoSourceHtml(pipeline, options = {}) {
+  const params = new URLSearchParams({
+    pipeline: String(pipeline || "finance"),
+    _: String(Date.now()),
+  });
+
+  if (options.detailFetchMode) {
+    params.set("detailFetchMode", options.detailFetchMode);
+  }
+
+  const response = await fetch(`/api/vansco-stock?${params.toString()}`, {
     headers: {
       accept: "application/json",
     },
@@ -922,7 +937,9 @@ async function fetchVanscoSourceHtml(pipeline) {
   }
 
   if (!response.ok) {
-    throw new Error(payload.message || "Vansco source fetch failed.");
+    const error = new Error(payload.message || "Vansco source fetch failed.");
+    error.debugInfo = payload.diagnostics || null;
+    throw error;
   }
 
   return payload;
@@ -961,11 +978,11 @@ function mergeRecordData(base, next) {
   });
 }
 
-export async function runVanscoStockCheck(pipeline) {
+export async function runVanscoStockCheck(pipeline, options = {}) {
   const [{ vehicles: localVehicles, sourceTable, warning: localWarning = "" }, existingRecords, sourcePayload] = await Promise.all([
     fetchLocalStockGroup(pipeline),
     fetchVanscoWatchRecords(pipeline),
-    fetchVanscoSourceHtml(pipeline),
+    fetchVanscoSourceHtml(pipeline, options),
   ]);
 
   const parsedHtml = Array.isArray(sourcePayload.vehicles) && sourcePayload.vehicles.length
@@ -1006,6 +1023,8 @@ export async function runVanscoStockCheck(pipeline) {
     vehiclesEnrichedWithRegistration: sourcePayload.diagnostics?.vehiclesEnrichedWithRegistration || 0,
     vehiclesEnrichedWithImage: sourcePayload.diagnostics?.vehiclesEnrichedWithImage || 0,
     vehiclesWithValidMatchKey: sourcePayload.diagnostics?.vehiclesWithValidMatchKey || 0,
+    detailFetchMode: sourcePayload.diagnostics?.detailFetchMode || options.detailFetchMode || "standard",
+    detailFetchLimitApplied: sourcePayload.diagnostics?.detailFetchLimitApplied ?? null,
     matchesByRegistration: 0,
     matchesByUrl: 0,
     matchesByFallbackTitle: 0,

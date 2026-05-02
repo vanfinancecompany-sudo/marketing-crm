@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  DETAIL_FETCH_PRESETS,
   WATCH_FILTERS,
   WATCH_PIPELINES,
   WORKFLOW_OPTIONS,
@@ -19,6 +20,66 @@ const DEFAULT_FILTERS = {
   rent2buy: "missing",
   cars: "missing",
 };
+
+const RUNNING_STEPS = [
+  { key: "fetch-sitemap", label: "Fetching Vansco sitemap..." },
+  { key: "found-urls", label: "Found vehicle URLs" },
+  { key: "fetch-details", label: "Fetching vehicle details..." },
+  { key: "compare-stock", label: "Comparing against current stock..." },
+  { key: "save-results", label: "Saving results..." },
+  { key: "complete", label: "Complete" },
+];
+
+function formatElapsed(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (mins <= 0) return `${secs}s`;
+  return `${mins}m ${String(secs).padStart(2, "0")}s`;
+}
+
+function buildRunningProgress(elapsedSeconds, preset) {
+  const limitText = preset?.limit ? `${preset.limit}` : "all possible";
+  if (elapsedSeconds < 4) {
+    return {
+      percent: 12,
+      currentStep: "fetch-sitemap",
+      detailText: "Fetching Vansco sitemap...",
+    };
+  }
+  if (elapsedSeconds < 8) {
+    return {
+      percent: 24,
+      currentStep: "found-urls",
+      detailText: "Finding vehicle detail URLs...",
+    };
+  }
+  if (elapsedSeconds < 24) {
+    return {
+      percent: 48,
+      currentStep: "fetch-details",
+      detailText: `Fetching vehicle details for up to ${limitText} vehicles...`,
+    };
+  }
+  if (elapsedSeconds < 34) {
+    return {
+      percent: 72,
+      currentStep: "compare-stock",
+      detailText: "Comparing against selected CRM stock...",
+    };
+  }
+  if (elapsedSeconds < 48) {
+    return {
+      percent: 88,
+      currentStep: "save-results",
+      detailText: "Saving comparison results...",
+    };
+  }
+  return {
+    percent: 94,
+    currentStep: "save-results",
+    detailText: "Finishing and saving results...",
+  };
+}
 
 function SummaryCard({ label, value, tone = "default" }) {
   const className = tone === "blue"
@@ -169,11 +230,26 @@ export default function VanscoStockWatchPage() {
   const [checkingPipeline, setCheckingPipeline] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [detailFetchMode, setDetailFetchMode] = useState("standard");
+  const [checkStartedAt, setCheckStartedAt] = useState("");
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [debugByPipeline, setDebugByPipeline] = useState({
     finance: null,
     rent2buy: null,
     cars: null,
   });
+
+  useEffect(() => {
+    if (!checkingPipeline || !checkStartedAt) return undefined;
+
+    const interval = window.setInterval(() => {
+      const started = new Date(checkStartedAt).getTime();
+      const now = Date.now();
+      setElapsedSeconds(Math.max(0, Math.floor((now - started) / 1000)));
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [checkingPipeline, checkStartedAt]);
 
   useEffect(() => {
     let active = true;
@@ -268,9 +344,12 @@ export default function VanscoStockWatchPage() {
     setCheckingPipeline(selectedPipeline);
     setErrorMessage("");
     setSuccessMessage("");
+    const startedAt = new Date().toISOString();
+    setCheckStartedAt(startedAt);
+    setElapsedSeconds(0);
 
     try {
-      const result = await runVanscoStockCheck(selectedPipeline);
+      const result = await runVanscoStockCheck(selectedPipeline, { detailFetchMode });
       setRecordsByPipeline((prev) => ({
         ...prev,
         [selectedPipeline]: result.records,
@@ -303,6 +382,10 @@ export default function VanscoStockWatchPage() {
   }
 
   const activeDebug = debugByPipeline[selectedPipeline];
+  const activePreset =
+    DETAIL_FETCH_PRESETS.find((preset) => preset.value === detailFetchMode) || DETAIL_FETCH_PRESETS[1];
+  const runningProgress = buildRunningProgress(elapsedSeconds, activePreset);
+  const isCheckingActiveTab = checkingPipeline === selectedPipeline;
 
   return (
     <div className="page-stack">
@@ -314,15 +397,40 @@ export default function VanscoStockWatchPage() {
               Manual stock checker only. It never auto-adds, auto-removes, auto-posts, or changes your
               existing stock records.
             </p>
+            <div className="vehicle-card__meta">
+              Detail fetch mode: {activePreset.label} {activePreset.limit ? `(${activePreset.limit} detail pages)` : "(full detail pass)"}
+            </div>
           </div>
-          <button
-            className="button button--primary"
-            type="button"
-            onClick={handleRunCheck}
-            disabled={checkingPipeline === selectedPipeline}
-          >
-            {checkingPipeline === selectedPipeline ? "Checking Vansco..." : "Check Vansco Stock"}
-          </button>
+          <div className="vansco-action-stack">
+            <label className="field vansco-action-stack__field">
+              <span className="field__label">Detail fetch limit</span>
+              <select
+                className="field__input"
+                value={detailFetchMode}
+                onChange={(event) => setDetailFetchMode(event.target.value)}
+                disabled={isCheckingActiveTab}
+              >
+                {DETAIL_FETCH_PRESETS.map((preset) => (
+                  <option key={preset.value} value={preset.value}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="button button--primary vansco-run-button"
+              type="button"
+              onClick={handleRunCheck}
+              disabled={isCheckingActiveTab}
+            >
+              {isCheckingActiveTab ? (
+                <>
+                  <span className="vansco-spinner" aria-hidden="true" />
+                  Checking Vansco...
+                </>
+              ) : "Check Vansco Stock"}
+            </button>
+          </div>
         </div>
 
         <div className="vansco-tabs vansco-pipeline-tabs">
@@ -345,6 +453,44 @@ export default function VanscoStockWatchPage() {
         <div className="vehicle-card__meta">
           Selected tab: {pipelineLabel(selectedPipeline)} | Last checked: {formatWatchTimestamp(lastCheckedAt)}
         </div>
+
+        {isCheckingActiveTab ? (
+          <div className="vansco-progress-panel">
+            <div className="vansco-progress-panel__header">
+              <strong>{runningProgress.detailText}</strong>
+              <span>{runningProgress.percent}%</span>
+            </div>
+            <div className="vansco-progress-bar" aria-hidden="true">
+              <div className="vansco-progress-bar__fill" style={{ width: `${runningProgress.percent}%` }} />
+            </div>
+            <div className="vehicle-card__meta">
+              Started at: {formatWatchTimestamp(checkStartedAt)} | Running for {formatElapsed(elapsedSeconds)}
+            </div>
+            <div className="vansco-progress-steps">
+              {RUNNING_STEPS.map((step, index) => {
+                const currentIndex = RUNNING_STEPS.findIndex((item) => item.key === runningProgress.currentStep);
+                const status =
+                  index < currentIndex ? "done" : index === currentIndex ? "active" : "pending";
+
+                return (
+                  <div key={step.key} className={`vansco-progress-step vansco-progress-step--${status}`}>
+                    {step.label}
+                  </div>
+                );
+              })}
+            </div>
+            {elapsedSeconds >= 30 ? (
+              <div className="notice-banner notice-banner--error">
+                This is taking longer than usual because vehicle detail pages are being enriched.
+              </div>
+            ) : null}
+            {elapsedSeconds >= 55 ? (
+              <div className="notice-banner notice-banner--error">
+                The request may hit a Vercel timeout. Consider reducing batch size or using staged checks.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <section className="stats-grid vansco-summary-grid">
@@ -399,6 +545,9 @@ export default function VanscoStockWatchPage() {
             <div className="vehicle-card__meta">HTML length: {activeDebug.htmlLength || 0}</div>
             <div className="vehicle-card__meta">Endpoint used: {activeDebug.endpointUsed || "Unknown"}</div>
             <div className="vehicle-card__meta">Pages fetched: {activeDebug.pagesFetched || 0}</div>
+            <div className="vehicle-card__meta">
+              Detail fetch mode: {activeDebug.detailFetchMode || "standard"} | Detail fetch limit applied: {activeDebug.detailFetchLimitApplied ?? "-"}
+            </div>
             <div className="vehicle-card__meta">Candidate links found: {activeDebug.candidateLinksFound || 0}</div>
             <div className="vehicle-card__meta">Sitemap URLs found: {activeDebug.sitemapUrlsFound || 0}</div>
             <div className="vehicle-card__meta">Vehicle detail URLs kept: {activeDebug.vehiclesParsed || 0}</div>
