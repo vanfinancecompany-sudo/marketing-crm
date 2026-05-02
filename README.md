@@ -34,6 +34,11 @@ If the table is missing, Reel Factory will still generate reels but will show a 
 
 It:
 - checks `https://www.vansco.co.uk/all-stock/` only when a user clicks `Check Vansco Stock`
+- prefers the Dragon2000 stock category pages as the source-selection entry point:
+  - `https://vansco.dragon2000.net/used-vans/`
+  - `https://vansco.dragon2000.net/no-vat-vans/`
+  - `https://vansco.dragon2000.net/used-cars/`
+- falls back to Vansco sitemap discovery only when those Dragon2000 pages do not expose usable vehicle detail links
 - compares Vansco vehicles against separate Marketing CRM stock groups for:
   - Finance Vans
   - Rent2Buy Vans

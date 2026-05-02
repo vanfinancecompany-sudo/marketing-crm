@@ -1,5 +1,18 @@
 const SOURCE_URL = "https://www.vansco.co.uk/all-stock/";
 const SITEMAP_URL = "https://www.vansco.co.uk/sitemap/";
+const DRAGON2000_SOURCE_PAGES = {
+  finance: [
+    "https://vansco.dragon2000.net/used-vans/",
+    "https://vansco.dragon2000.net/no-vat-vans/",
+  ],
+  rent2buy: [
+    "https://vansco.dragon2000.net/used-vans/",
+    "https://vansco.dragon2000.net/no-vat-vans/",
+  ],
+  cars: [
+    "https://vansco.dragon2000.net/used-cars/",
+  ],
+};
 const JUNK_TITLE_PATTERN = /\b(vansco ltd|all stock|showroom|flexibuy|finance|contact|about)\b/i;
 const VEHICLE_PATH_PATTERN = /\/vehicle-details\//i;
 const PRICE_PATTERN = /(?:£|&pound;)\s?[0-9][0-9,]*/gi;
@@ -336,31 +349,39 @@ function filterVehiclesForPipeline(vehicles, pipeline) {
 
 function buildDiagnostics({
   endpointUsed,
+  sourceFamily,
   pagesFetched,
   htmlLength,
   candidateLinksFound,
   sitemapUrlsFound,
+  dragonPagesFetched,
+  dragonVehiclesFound,
   vehiclesKept,
   detailPagesFetched,
   detailPagesFailed,
   vehiclesWithRegistration,
   vehiclesWithImage,
+  vehiclesWithSourceStatus,
   vehiclesWithValidMatchKey,
   parserWarnings,
   sampleTitles,
 }) {
   return {
     endpointUsed,
+    sourceFamily,
     pagesFetched,
     htmlLength,
     candidateLinksFound,
     sitemapUrlsFound,
+    dragonPagesFetched,
+    dragonVehiclesFound,
     vehicleDetailUrlsKept: vehiclesKept,
     vehiclesParsed: vehiclesKept,
     detailPagesFetched,
     detailPagesFailed,
     vehiclesEnrichedWithRegistration: vehiclesWithRegistration,
     vehiclesEnrichedWithImage: vehiclesWithImage,
+    vehiclesWithSourceStatus,
     vehiclesWithValidMatchKey,
     parserWarnings,
     sampleTitles,
@@ -378,18 +399,44 @@ export default async function handler(request, response) {
     const detailFetchMode = String(request.query?.detailFetchMode || "standard").toLowerCase();
     const pageResults = [];
     const parserWarnings = [];
+    const dragonSourcePages = DRAGON2000_SOURCE_PAGES[pipeline] || DRAGON2000_SOURCE_PAGES.finance;
+    const dragonPageResults = [];
+    let candidateLinksFound = 0;
+    let dragonVehicles = [];
 
-    const allStockPage = await fetchHtml(SOURCE_URL);
-    pageResults.push(allStockPage);
-    const allStockParsed = parseVehicleLinksFromHtml(allStockPage.html);
+    for (const dragonUrl of dragonSourcePages) {
+      try {
+        const page = await fetchHtml(dragonUrl);
+        pageResults.push(page);
+        dragonPageResults.push(page);
+        const parsed = parseVehicleLinksFromHtml(page.html);
+        candidateLinksFound += parsed.candidates.length;
+        dragonVehicles = dedupeVehicles([...dragonVehicles, ...parsed.vehicles]);
+      } catch {
+        parserWarnings.push(`Dragon2000 source page could not be fetched: ${dragonUrl}`);
+      }
+    }
 
-    let vehicles = allStockParsed.vehicles;
-    let endpointUsed = SOURCE_URL;
-    let candidateLinksFound = allStockParsed.candidates.length;
+    let vehicles = dragonVehicles;
+    let endpointUsed = dragonSourcePages[0] || SOURCE_URL;
+    let sourceFamily = "dragon2000";
 
     if (vehicles.length < 10) {
-      parserWarnings.push("All-stock HTML did not expose enough real vehicle detail links.");
+      parserWarnings.push("Dragon2000 stock pages did not expose enough server-rendered vehicle detail links.");
 
+      const allStockPage = await fetchHtml(SOURCE_URL);
+      pageResults.push(allStockPage);
+      const allStockParsed = parseVehicleLinksFromHtml(allStockPage.html);
+      candidateLinksFound += allStockParsed.candidates.length;
+
+      if (allStockParsed.vehicles.length > vehicles.length) {
+        vehicles = allStockParsed.vehicles;
+        endpointUsed = SOURCE_URL;
+        sourceFamily = "vansco-all-stock";
+      }
+    }
+
+    if (vehicles.length < 10) {
       const sitemapPage = await fetchHtml(SITEMAP_URL);
       pageResults.push(sitemapPage);
       const sitemapParsed = parseVehicleLinksFromHtml(sitemapPage.html);
@@ -398,6 +445,7 @@ export default async function handler(request, response) {
       if (sitemapParsed.vehicles.length > vehicles.length) {
         vehicles = sitemapParsed.vehicles;
         endpointUsed = SITEMAP_URL;
+        sourceFamily = "sitemap-fallback";
       }
     }
 
@@ -439,15 +487,19 @@ export default async function handler(request, response) {
 
     const diagnostics = buildDiagnostics({
       endpointUsed,
+      sourceFamily,
       pagesFetched: pageResults.length + detailPagesFetched,
       htmlLength: pageResults.reduce((total, page) => total + page.htmlLength, 0),
       candidateLinksFound,
       sitemapUrlsFound: filteredVehicles.length,
+      dragonPagesFetched: dragonPageResults.length,
+      dragonVehiclesFound: dragonVehicles.length,
       vehiclesKept: finalVehicles.length,
       detailPagesFetched,
       detailPagesFailed,
       vehiclesWithRegistration: finalVehicles.filter((vehicle) => vehicle.registration).length,
       vehiclesWithImage: finalVehicles.filter((vehicle) => vehicle.imageUrl).length,
+      vehiclesWithSourceStatus: finalVehicles.filter((vehicle) => vehicle.sourceStatus && vehicle.sourceStatus !== "unknown").length,
       vehiclesWithValidMatchKey: finalVehicles.filter((vehicle) => vehicle.registration || vehicle.stockUrl).length,
       detailFetchMode,
       detailFetchLimitApplied: detailFetchLimit,

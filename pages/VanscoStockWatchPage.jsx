@@ -551,10 +551,13 @@ export default function VanscoStockWatchPage() {
             <div className="vehicle-card__meta">Vansco page fetched: {activeDebug.pageFetched ? "yes" : "no"}</div>
             <div className="vehicle-card__meta">HTML length: {activeDebug.htmlLength || 0}</div>
             <div className="vehicle-card__meta">Endpoint used: {activeDebug.endpointUsed || "Unknown"}</div>
+            <div className="vehicle-card__meta">Source used: {activeDebug.sourceFamily || "unknown"}</div>
             <div className="vehicle-card__meta">Pages fetched: {activeDebug.pagesFetched || 0}</div>
             <div className="vehicle-card__meta">
               Detail fetch mode: {activeDebug.detailFetchMode || "standard"} | Detail fetch limit applied: {activeDebug.detailFetchLimitApplied ?? "-"}
             </div>
+            <div className="vehicle-card__meta">Dragon2000 pages fetched: {activeDebug.dragonPagesFetched || 0}</div>
+            <div className="vehicle-card__meta">Dragon2000 vehicles found: {activeDebug.dragonVehiclesFound || 0}</div>
             <div className="vehicle-card__meta">Candidate links found: {activeDebug.candidateLinksFound || 0}</div>
             <div className="vehicle-card__meta">Sitemap URLs found: {activeDebug.sitemapUrlsFound || 0}</div>
             <div className="vehicle-card__meta">Vehicle detail URLs kept: {activeDebug.vehiclesParsed || 0}</div>
@@ -566,6 +569,9 @@ export default function VanscoStockWatchPage() {
             </div>
             <div className="vehicle-card__meta">
               Vehicles enriched with image: {activeDebug.vehiclesEnrichedWithImage || 0}
+            </div>
+            <div className="vehicle-card__meta">
+              Reserved / sold status found: {activeDebug.vehiclesWithSourceStatus || 0}
             </div>
             <div className="vehicle-card__meta">
               Vehicles with valid match key: {activeDebug.vehiclesWithValidMatchKey || 0}
