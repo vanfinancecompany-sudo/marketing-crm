@@ -511,7 +511,18 @@ export default function VanscoStockWatchPage() {
         ) : null}
       </section>
 
-      <section className="stats-grid vansco-summary-grid">
+      <section
+        className="stats-grid vansco-summary-grid"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 320px))",
+          justifyContent: "center",
+          gap: "1.5rem",
+          maxWidth: "1100px",
+          margin: "0 auto",
+          width: "100%",
+        }}
+      >
         <SummaryCard label={`Missing from ${pipelineLabel(selectedPipeline)}`} value={summary.missing} tone="blue" />
         <SummaryCard label="Reserved on Vansco" value={summary.reserved} tone="amber" />
         <SummaryCard label="Ignored / Blocked" value={summary.ignored} />
@@ -523,7 +534,7 @@ export default function VanscoStockWatchPage() {
         {summary.hiddenReserved ? <div className="notice-banner">{summary.hiddenReserved} reserved Vansco vehicle{summary.hiddenReserved === 1 ? "" : "s"} not in your stock were hidden from Missing.</div> : null}
         {summary.hiddenNoReg ? <div className="notice-banner">{summary.hiddenNoReg} Vansco vehicle{summary.hiddenNoReg === 1 ? "" : "s"} had no valid registration and were hidden from the simple list.</div> : null}
 
-        <div className="vansco-tabs vansco-filter-tabs">
+        <div className="vansco-tabs vansco-filter-tabs" style={{ marginBottom: "1.25rem" }}>
           {SIMPLE_FILTERS.map((filter) => (
             <button
               key={filter.value}
