@@ -49,11 +49,11 @@ const BLOCKED_REG_VALUES = new Set([
 ]);
 
 const DETAIL_FETCH_CONCURRENCY = 4;
-const DETAIL_FETCH_TIMEOUT_MS = 7000;
-const CATEGORY_FETCH_TIMEOUT_MS = 9000;
-const MAX_CATEGORY_PAGES_PER_SOURCE = 25;
+const DETAIL_FETCH_TIMEOUT_MS = 5500;
+const CATEGORY_FETCH_TIMEOUT_MS = 6000;
+const MAX_CATEGORY_PAGES_PER_SOURCE = 12;
 const MAX_DETAIL_URLS = 800;
-const FULL_SCAN_BATCH_SIZE = 40;
+const FULL_SCAN_BATCH_SIZE = 10;
 const DETAIL_FETCH_MODE_LIMITS = {
   fast: 100,
   standard: 100,
@@ -230,7 +230,6 @@ function isLikelyCategoryPageUrl(url, baseUrl) {
     if (!candidate.pathname.startsWith(base.pathname.replace(/\/$/, ""))) return false;
     if (VEHICLE_PATH_PATTERN.test(candidate.pathname)) return false;
     if (/\/page\/\d+\/?$/i.test(candidate.pathname)) return true;
-    if (candidate.searchParams.has("page") || candidate.searchParams.has("paged")) return true;
     return candidate.pathname.replace(/\/$/, "") === base.pathname.replace(/\/$/, "");
   } catch {
     return false;
@@ -244,8 +243,6 @@ function buildLikelyPaginationUrls(baseUrl) {
 
   for (let page = 2; page <= MAX_CATEGORY_PAGES_PER_SOURCE; page += 1) {
     urls.push(`${withSlash}page/${page}/`);
-    urls.push(`${withSlash}?page=${page}`);
-    urls.push(`${withSlash}?paged=${page}`);
   }
 
   return urls;
@@ -254,8 +251,9 @@ function buildLikelyPaginationUrls(baseUrl) {
 async function fetchCategoryPages(pageConfig, parserWarnings) {
   const pages = [];
   const seen = new Set();
+  const seenVehicleUrls = new Set();
   const queue = [normalizeUrl(pageConfig.url), ...buildLikelyPaginationUrls(pageConfig.url)];
-  let consecutiveEmptyPages = 0;
+  let consecutivePagesWithoutNewVehicles = 0;
 
   while (queue.length && pages.length < MAX_CATEGORY_PAGES_PER_SOURCE) {
     const nextUrl = normalizeUrl(queue.shift());
@@ -265,14 +263,21 @@ async function fetchCategoryPages(pageConfig, parserWarnings) {
     try {
       const page = await fetchHtml(nextUrl, CATEGORY_FETCH_TIMEOUT_MS);
       const parsed = parseVehicleLinksFromHtml(page.html, pageConfig.sourceCategory);
-      if (!parsed.vehicles.length && nextUrl !== normalizeUrl(pageConfig.url)) {
-        consecutiveEmptyPages += 1;
-        if (consecutiveEmptyPages >= 3) break;
+      const newVehicles = parsed.vehicles.filter((vehicle) => {
+        const key = normalizeUrl(vehicle.stockUrl);
+        return key && !seenVehicleUrls.has(key);
+      });
+
+      newVehicles.forEach((vehicle) => seenVehicleUrls.add(normalizeUrl(vehicle.stockUrl)));
+
+      if (!newVehicles.length && nextUrl !== normalizeUrl(pageConfig.url)) {
+        consecutivePagesWithoutNewVehicles += 1;
+        if (consecutivePagesWithoutNewVehicles >= 2) break;
         continue;
       }
 
-      consecutiveEmptyPages = 0;
-      pages.push({ ...page, parsed, sourceCategory: pageConfig.sourceCategory });
+      consecutivePagesWithoutNewVehicles = 0;
+      pages.push({ ...page, parsed: { ...parsed, vehicles: newVehicles }, sourceCategory: pageConfig.sourceCategory });
 
       parsed.anchors.forEach((anchor) => {
         const href = normalizeUrl(anchor.href);
@@ -604,7 +609,7 @@ export default async function handler(request, response) {
     const totalVehicleUrlsFound = filteredVehicles.length;
     const requestedLimit = DETAIL_FETCH_MODE_LIMITS[detailFetchMode] ?? DETAIL_FETCH_MODE_LIMITS.standard;
     const batchSize = requestedBatchSize > 0
-      ? requestedBatchSize
+      ? Math.min(requestedBatchSize, FULL_SCAN_BATCH_SIZE)
       : detailFetchMode === "full"
         ? FULL_SCAN_BATCH_SIZE
         : requestedLimit || filteredVehicles.length;
