@@ -677,6 +677,7 @@ export default function VanscoStockWatchPage() {
               Final payload contains id: {activeDebug.finalPayloadContainsId ? "yes" : "no"}
             </div>
             <div className="vehicle-card__meta">Stale rows deleted this run: {activeDebug.staleRowsDeleted || 0}</div>
+            <div className="vehicle-card__meta">Obsolete rows deleted this run: {activeDebug.obsoleteRowsDeleted || 0}</div>
             {activeDebug.sourceTable ? (
               <div className="vehicle-card__meta">CRM stock table: {activeDebug.sourceTable}</div>
             ) : null}

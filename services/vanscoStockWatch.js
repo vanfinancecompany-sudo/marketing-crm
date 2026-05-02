@@ -1254,6 +1254,7 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
     missingCountBasedOnValidRegistrationsOnly: 0,
     needsReviewCount: 0,
     staleRowsDeleted: 0,
+    obsoleteRowsDeleted: 0,
     lowConfidenceWarning: "",
     sampleTitles: sourcePayload.diagnostics?.sampleTitles || parsedSourceVehicles.slice(0, 3).map((vehicle) => vehicle.title),
   };
@@ -1437,6 +1438,7 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
   ).length;
 
   if (nextRecords.length) {
+    const nextVehicleKeys = new Set(nextRecords.map((record) => record.vehicle_key).filter(Boolean));
     const nextStockUrlToVehicleKey = new Map(
       nextRecords
         .map((record) => [normalizeUrl(record.stock_url || ""), record.vehicle_key])
@@ -1462,6 +1464,27 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
         const wrappedDeleteError = new Error(`Failed to clean stale Vansco Stock Watch rows: ${deleteError.message}`);
         wrappedDeleteError.debugInfo = diagnostics;
         throw wrappedDeleteError;
+      }
+    }
+
+    const obsoleteExistingIds = existingRecords
+      .filter((record) => record.vehicleKey && !nextVehicleKeys.has(record.vehicleKey))
+      .map((record) => record.id)
+      .filter(Boolean);
+
+    if (obsoleteExistingIds.length) {
+      diagnostics.obsoleteRowsDeleted = obsoleteExistingIds.length;
+      const { error: obsoleteDeleteError } = await supabase
+        .from(WATCH_TABLE)
+        .delete()
+        .in("id", obsoleteExistingIds);
+
+      if (obsoleteDeleteError) {
+        const wrappedObsoleteDeleteError = new Error(
+          `Failed to remove obsolete Vansco Stock Watch rows: ${obsoleteDeleteError.message}`
+        );
+        wrappedObsoleteDeleteError.debugInfo = diagnostics;
+        throw wrappedObsoleteDeleteError;
       }
     }
 
