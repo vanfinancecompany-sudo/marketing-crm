@@ -169,6 +169,11 @@ export default function VanscoStockWatchPage() {
   const [checkingPipeline, setCheckingPipeline] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [debugByPipeline, setDebugByPipeline] = useState({
+    finance: null,
+    rent2buy: null,
+    cars: null,
+  });
 
   useEffect(() => {
     let active = true;
@@ -270,10 +275,18 @@ export default function VanscoStockWatchPage() {
         ...prev,
         [selectedPipeline]: result.records,
       }));
+      setDebugByPipeline((prev) => ({
+        ...prev,
+        [selectedPipeline]: result.diagnostics || null,
+      }));
       setSuccessMessage(
         `Checked ${result.sourceVehicleCount} Vansco vehicles against ${result.localVehicleCount} ${pipelineLabel(selectedPipeline)} records.`
       );
     } catch (error) {
+      setDebugByPipeline((prev) => ({
+        ...prev,
+        [selectedPipeline]: error.debugInfo || prev[selectedPipeline],
+      }));
       setErrorMessage(error.message || "Vansco Stock Watch check failed.");
     } finally {
       setCheckingPipeline("");
@@ -288,6 +301,8 @@ export default function VanscoStockWatchPage() {
       ),
     }));
   }
+
+  const activeDebug = debugByPipeline[selectedPipeline];
 
   return (
     <div className="page-stack">
@@ -374,6 +389,34 @@ export default function VanscoStockWatchPage() {
 
         {successMessage ? <div className="notice-banner notice-banner--success">{successMessage}</div> : null}
         {errorMessage ? <div className="notice-banner notice-banner--error">{errorMessage}</div> : null}
+
+        {activeDebug ? (
+          <div className="vansco-debug-panel">
+            <div className="vehicle-card__meta">Vansco page fetched: {activeDebug.pageFetched ? "yes" : "no"}</div>
+            <div className="vehicle-card__meta">HTML length: {activeDebug.htmlLength || 0}</div>
+            <div className="vehicle-card__meta">Vehicles parsed: {activeDebug.vehiclesParsed || 0}</div>
+            <div className="vehicle-card__meta">
+              Vehicles parsed for {pipelineLabel(selectedPipeline)}: {activeDebug.vehiclesParsedForPipeline || 0}
+            </div>
+            <div className="vehicle-card__meta">
+              Source duplicate keys collapsed: {activeDebug.sourceDuplicateKeysCollapsed || 0}
+            </div>
+            <div className="vehicle-card__meta">
+              Upsert duplicate keys collapsed: {activeDebug.upsertDuplicateKeysCollapsed || 0}
+            </div>
+            {activeDebug.sourceTable ? (
+              <div className="vehicle-card__meta">CRM stock table: {activeDebug.sourceTable}</div>
+            ) : null}
+            {activeDebug.localWarning ? (
+              <div className="vehicle-card__meta">{activeDebug.localWarning}</div>
+            ) : null}
+            {(activeDebug.parserWarnings || []).map((warning) => (
+              <div key={warning} className="vehicle-card__meta">
+                Parser warning: {warning}
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         {loadingPipeline === selectedPipeline ? (
           <div className="empty-state">Loading saved Vansco Stock Watch records...</div>

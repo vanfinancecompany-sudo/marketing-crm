@@ -1480,6 +1480,16 @@ textarea {
   color: #991b1b;
 }
 
+.vansco-debug-panel {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid #dbe2ea;
+  background: #f8fafc;
+  display: grid;
+  gap: 6px;
+}
+
 @media (max-width: 1080px) {
   .app-shell {
     grid-template-columns: 1fr;

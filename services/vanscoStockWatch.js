@@ -26,6 +26,8 @@ const PIPELINE_CONFIG = {
   },
 };
 
+export const CARS_TABLE_CANDIDATES = ["cars_stock", "car_stock", "cars", "car_vehicles"];
+
 export const WATCH_PIPELINES = [
   { value: "finance", label: "Finance Vans" },
   { value: "rent2buy", label: "Rent2Buy Vans" },
@@ -250,6 +252,10 @@ function detectVehicleCategory({ text, href }) {
   return "unknown";
 }
 
+function normalizeImageUrl(value) {
+  return normalizeUrl(value);
+}
+
 function buildMetaKeyParts(vehicle) {
   const title = normalizeText(vehicle.title);
   const year = normalizeYear(vehicle.year);
@@ -269,6 +275,24 @@ function deriveVehicleKey(vehicle, fallbackSeed = "") {
 
   const fallback = normalizeText(vehicle.title || fallbackSeed || "vehicle");
   return `fallback:${fallback || "vehicle"}`;
+}
+
+function vehicleCompletenessScore(vehicle) {
+  return [
+    vehicle.registration ? 5 : 0,
+    vehicle.imageUrl ? 3 : 0,
+    vehicle.stockUrl ? 3 : 0,
+    compactWhitespace(vehicle.title).length,
+    vehicle.price ? 1 : 0,
+    vehicle.mileage ? 1 : 0,
+    vehicle.year ? 1 : 0,
+  ].reduce((total, value) => total + value, 0);
+}
+
+function chooseBetterVehicleRecord(currentVehicle, nextVehicle) {
+  return vehicleCompletenessScore(nextVehicle) > vehicleCompletenessScore(currentVehicle)
+    ? { ...currentVehicle, ...nextVehicle }
+    : { ...nextVehicle, ...currentVehicle };
 }
 
 function buildVehicleLookup(vehicles) {
@@ -399,6 +423,148 @@ function pickVehicleTitle(container, anchor, fallbackHref) {
   return hrefName || "Vansco vehicle";
 }
 
+function extractJsonLdVehicleCandidates(document) {
+  const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+  const candidates = [];
+
+  function visit(node) {
+    if (!node) return;
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+
+    if (typeof node !== "object") return;
+
+    const title = compactWhitespace(
+      node.name ||
+      node.headline ||
+      node.vehicleModel ||
+      node.alternateName ||
+      ""
+    );
+    const stockUrl = normalizeUrl(node.url || node.mainEntityOfPage || "");
+    const imageUrl = normalizeImageUrl(
+      Array.isArray(node.image) ? node.image[0] : node.image?.url || node.image || ""
+    );
+    const price = compactWhitespace(node.offers?.priceCurrency && node.offers?.price
+      ? `${node.offers.priceCurrency === "GBP" ? "£" : `${node.offers.priceCurrency} `}${node.offers.price}`
+      : node.offers?.price || "");
+    const mileage = compactWhitespace(
+      node.mileageFromOdometer?.value || node.vehicleMileage || node.mileage || ""
+    );
+    const year = normalizeYear(node.vehicleModelDate || node.modelDate || node.productionDate || title);
+    const registration = normalizeRegistration(
+      node.identifier?.value || node.sku || node.registration || title
+    );
+
+    if (title && stockUrl) {
+      candidates.push({
+        title,
+        stockUrl,
+        imageUrl,
+        price,
+        mileage,
+        year,
+        registration,
+        sourceStatus: detectSourceStatus(JSON.stringify(node)),
+        vehicleCategory: detectVehicleCategory({ text: JSON.stringify(node), href: stockUrl }),
+      });
+    }
+
+    Object.values(node).forEach(visit);
+  }
+
+  scripts.forEach((script) => {
+    const raw = script.textContent?.trim();
+    if (!raw) return;
+
+    try {
+      visit(JSON.parse(raw));
+    } catch {
+      // Ignore malformed script blocks from the source page.
+    }
+  });
+
+  return candidates;
+}
+
+function dedupeSourceVehicles(vehicles) {
+  const deduped = new Map();
+
+  vehicles.forEach((vehicle) => {
+    const key = vehicle.vehicleKey;
+    if (!key) return;
+
+    if (!deduped.has(key)) {
+      deduped.set(key, vehicle);
+      return;
+    }
+
+    deduped.set(key, chooseBetterVehicleRecord(deduped.get(key), vehicle));
+  });
+
+  return {
+    vehicles: Array.from(deduped.values()),
+    duplicateCount: Math.max(0, vehicles.length - deduped.size),
+  };
+}
+
+function dedupeWatchRecords(records) {
+  const deduped = new Map();
+
+  records.forEach((record) => {
+    const dedupeKey = `${record.pipeline}::${record.vehicle_key}`;
+    if (!deduped.has(dedupeKey)) {
+      deduped.set(dedupeKey, record);
+      return;
+    }
+
+    const existing = deduped.get(dedupeKey);
+    const mergedVehicle = chooseBetterVehicleRecord(
+      {
+        title: existing.title,
+        registration: existing.registration,
+        imageUrl: existing.image_url,
+        stockUrl: existing.stock_url,
+        price: existing.price,
+        mileage: existing.mileage,
+        year: existing.year,
+      },
+      {
+        title: record.title,
+        registration: record.registration,
+        imageUrl: record.image_url,
+        stockUrl: record.stock_url,
+        price: record.price,
+        mileage: record.mileage,
+        year: record.year,
+      }
+    );
+
+    deduped.set(dedupeKey, {
+      ...existing,
+      ...record,
+      title: mergedVehicle.title || existing.title || record.title,
+      registration: mergedVehicle.registration || existing.registration || record.registration,
+      image_url: mergedVehicle.imageUrl || existing.image_url || record.image_url,
+      stock_url: mergedVehicle.stockUrl || existing.stock_url || record.stock_url,
+      price: mergedVehicle.price || existing.price || record.price,
+      mileage: mergedVehicle.mileage || existing.mileage || record.mileage,
+      year: mergedVehicle.year || existing.year || record.year,
+      notes: existing.notes || record.notes || null,
+      first_seen_at: existing.first_seen_at || record.first_seen_at,
+      last_seen_at: record.last_seen_at || existing.last_seen_at,
+      last_checked_at: record.last_checked_at || existing.last_checked_at,
+    });
+  });
+
+  return {
+    records: Array.from(deduped.values()),
+    duplicateCount: Math.max(0, records.length - deduped.size),
+  };
+}
+
 function parseVehicleCardsFromHtml(html) {
   if (typeof DOMParser === "undefined") {
     throw new Error("DOMParser is not available in this browser.");
@@ -406,7 +572,9 @@ function parseVehicleCardsFromHtml(html) {
 
   const document = new DOMParser().parseFromString(html, "text/html");
   const anchors = Array.from(document.querySelectorAll("a[href]"));
-  const vehicles = new Map();
+  const htmlLength = String(html || "").length;
+  const discoveredVehicles = [];
+  const parserWarnings = [];
 
   anchors.forEach((anchor) => {
     const href = normalizeUrl(anchor.getAttribute("href"));
@@ -443,36 +611,39 @@ function parseVehicleCardsFromHtml(html) {
       href
     );
 
-    if (!vehicles.has(vehicleKey)) {
-      vehicles.set(vehicleKey, {
-        vehicleKey,
-        title,
-        registration,
-        imageUrl,
-        stockUrl: href,
-        price,
-        mileage,
-        year,
-        sourceStatus,
-        vehicleCategory,
-      });
-      return;
-    }
-
-    const existing = vehicles.get(vehicleKey);
-    if (!existing.imageUrl && imageUrl) existing.imageUrl = imageUrl;
-    if (!existing.price && price) existing.price = price;
-    if (!existing.mileage && mileage) existing.mileage = mileage;
-    if (!existing.year && year) existing.year = year;
-    if (existing.sourceStatus === "unknown" && sourceStatus !== "unknown") {
-      existing.sourceStatus = sourceStatus;
-    }
-    if (existing.vehicleCategory === "unknown" && vehicleCategory !== "unknown") {
-      existing.vehicleCategory = vehicleCategory;
-    }
+    discoveredVehicles.push({
+      vehicleKey,
+      title,
+      registration,
+      imageUrl,
+      stockUrl: href,
+      price,
+      mileage,
+      year,
+      sourceStatus,
+      vehicleCategory,
+    });
   });
 
-  return Array.from(vehicles.values());
+  extractJsonLdVehicleCandidates(document).forEach((candidate) => {
+    discoveredVehicles.push({
+      ...candidate,
+      vehicleKey: deriveVehicleKey(candidate, candidate.stockUrl || candidate.title),
+    });
+  });
+
+  const deduped = dedupeSourceVehicles(discoveredVehicles);
+
+  if (!deduped.vehicles.length) {
+    parserWarnings.push("No vehicles found in Vansco HTML. Site may require JS-rendered scraping or a feed.");
+  }
+
+  return {
+    vehicles: deduped.vehicles,
+    parserWarnings,
+    htmlLength,
+    duplicateCount: deduped.duplicateCount,
+  };
 }
 
 function filterSourceVehiclesForPipeline(vehicles, pipeline) {
@@ -589,10 +760,9 @@ async function fetchRent2BuyStockGroup() {
 }
 
 async function fetchCarsStockGroup() {
-  const candidateTables = ["cars_stock", "car_stock", "cars", "car_vehicles"];
   let lastError = null;
 
-  for (const tableName of candidateTables) {
+  for (const tableName of CARS_TABLE_CANDIDATES) {
     const { data, error } = await supabase.from(tableName).select("*").limit(2000);
 
     if (error) {
@@ -607,10 +777,12 @@ async function fetchCarsStockGroup() {
     };
   }
 
-  const message = lastError?.message || "Cars stock table was not found.";
-  throw new Error(
-    `${message} Update services/vanscoStockWatch.js with the correct cars stock table name if your project uses a different table.`
-  );
+  return {
+    rows: [],
+    sourceTable: null,
+    warning: "Cars stock table is not configured yet.",
+    errorMessage: lastError?.message || "Cars stock table was not found.",
+  };
 }
 
 async function fetchLocalStockGroup(pipeline) {
@@ -631,6 +803,7 @@ async function fetchLocalStockGroup(pipeline) {
   return fetchCarsStockGroup().then((result) => ({
     vehicles: result.rows,
     sourceTable: result.sourceTable,
+    warning: result.warning || "",
   }));
 }
 
@@ -727,21 +900,36 @@ function mergeRecordData(base, next) {
 }
 
 export async function runVanscoStockCheck(pipeline) {
-  const [{ vehicles: localVehicles, sourceTable }, existingRecords, sourcePayload] = await Promise.all([
+  const [{ vehicles: localVehicles, sourceTable, warning: localWarning = "" }, existingRecords, sourcePayload] = await Promise.all([
     fetchLocalStockGroup(pipeline),
     fetchVanscoWatchRecords(pipeline),
     fetchVanscoSourceHtml(pipeline),
   ]);
 
-  const parsedSourceVehicles = filterSourceVehiclesForPipeline(
-    parseVehicleCardsFromHtml(sourcePayload.html || ""),
-    pipeline
-  );
+  const parsedHtml = parseVehicleCardsFromHtml(sourcePayload.html || "");
+  const parsedSourceVehicles = filterSourceVehiclesForPipeline(parsedHtml.vehicles, pipeline);
   const localLookup = buildVehicleLookup(localVehicles);
   const existingByKey = new Map(existingRecords.map((record) => [record.vehicleKey, record]));
   const now = cleanTimestamp(sourcePayload.fetchedAt) || new Date().toISOString();
   const matchedLocalKeys = new Set();
   const nextRecords = [];
+  const diagnostics = {
+    pageFetched: Boolean(sourcePayload.html),
+    htmlLength: parsedHtml.htmlLength || sourcePayload.htmlLength || 0,
+    vehiclesParsed: parsedHtml.vehicles.length,
+    vehiclesParsedForPipeline: parsedSourceVehicles.length,
+    parserWarnings: [...(parsedHtml.parserWarnings || [])],
+    sourceDuplicateKeysCollapsed: parsedHtml.duplicateCount || 0,
+    upsertDuplicateKeysCollapsed: 0,
+    localWarning,
+    sourceTable: sourceTable || "",
+  };
+
+  if (!parsedSourceVehicles.length) {
+    const error = new Error("No vehicles found in Vansco HTML. Site may require JS-rendered scraping or a feed.");
+    error.debugInfo = diagnostics;
+    throw error;
+  }
 
   parsedSourceVehicles.forEach((sourceVehicle) => {
     const matchedLocalVehicle = findMatchingLocalVehicle(sourceVehicle, localLookup);
@@ -835,12 +1023,17 @@ export async function runVanscoStockCheck(pipeline) {
   });
 
   if (nextRecords.length) {
+    const dedupedBatch = dedupeWatchRecords(nextRecords);
+    diagnostics.upsertDuplicateKeysCollapsed = dedupedBatch.duplicateCount;
+
     const { error } = await supabase
       .from(WATCH_TABLE)
-      .upsert(nextRecords, { onConflict: "pipeline,vehicle_key" });
+      .upsert(dedupedBatch.records, { onConflict: "pipeline,vehicle_key" });
 
     if (error) {
-      throw new Error(`Failed to save Vansco Stock Watch results: ${error.message}`);
+      const wrappedError = new Error(`Failed to save Vansco Stock Watch results: ${error.message}`);
+      wrappedError.debugInfo = diagnostics;
+      throw wrappedError;
     }
   }
 
@@ -852,5 +1045,6 @@ export async function runVanscoStockCheck(pipeline) {
     localVehicleCount: localVehicles.length,
     checkedAt: now,
     sourceTable,
+    diagnostics,
   };
 }
