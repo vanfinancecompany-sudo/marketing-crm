@@ -556,10 +556,15 @@ export default function VanscoStockWatchPage() {
             <div className="vehicle-card__meta">
               Detail fetch mode: {activeDebug.detailFetchMode || "standard"} | Detail fetch limit applied: {activeDebug.detailFetchLimitApplied ?? "-"}
             </div>
-            <div className="vehicle-card__meta">Dragon2000 pages fetched: {activeDebug.dragonPagesFetched || 0}</div>
-            <div className="vehicle-card__meta">Dragon2000 vehicles found: {activeDebug.dragonVehiclesFound || 0}</div>
+            <div className="vehicle-card__meta">Category pages fetched: {activeDebug.categoryPagesFetched || 0}</div>
+            <div className="vehicle-card__meta">
+              Category page failures: {(activeDebug.categoryPageFailures || []).length ? activeDebug.categoryPageFailures.join(", ") : "none"}
+            </div>
             <div className="vehicle-card__meta">Candidate links found: {activeDebug.candidateLinksFound || 0}</div>
             <div className="vehicle-card__meta">Sitemap URLs found: {activeDebug.sitemapUrlsFound || 0}</div>
+            <div className="vehicle-card__meta">
+              Vehicles parsed per category: {Object.entries(activeDebug.vehiclesParsedByCategory || {}).map(([key, value]) => `${key}: ${value}`).join(" | ") || "none"}
+            </div>
             <div className="vehicle-card__meta">Vehicle detail URLs kept: {activeDebug.vehiclesParsed || 0}</div>
             <div className="vehicle-card__meta">Vehicles parsed: {activeDebug.vehiclesParsed || 0}</div>
             <div className="vehicle-card__meta">Detail pages fetched: {activeDebug.detailPagesFetched || 0}</div>

@@ -997,6 +997,7 @@ function normalizeApiVehicle(vehicle, fallbackCategory = "unknown") {
     year: normalizeYear(vehicle.year || ""),
     sourceStatus: vehicle.sourceStatus || "unknown",
     vehicleCategory: vehicle.vehicleCategory || fallbackCategory,
+    sourceCategory: vehicle.sourceCategory || "",
   };
 }
 
@@ -1049,6 +1050,9 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
     pagesFetched: sourcePayload.pagesFetched || 1,
     candidateLinksFound: sourcePayload.diagnostics?.candidateLinksFound || 0,
     sitemapUrlsFound: sourcePayload.diagnostics?.sitemapUrlsFound || 0,
+    categoryPagesFetched: sourcePayload.diagnostics?.categoryPagesFetched || 0,
+    categoryPageFailures: sourcePayload.diagnostics?.categoryPageFailures || [],
+    vehiclesParsedByCategory: sourcePayload.diagnostics?.vehiclesParsedByCategory || {},
     detailPagesFetched: sourcePayload.diagnostics?.detailPagesFetched || 0,
     detailPagesFailed: sourcePayload.diagnostics?.detailPagesFailed || 0,
     vehiclesEnrichedWithRegistration: sourcePayload.diagnostics?.vehiclesEnrichedWithRegistration || 0,
@@ -1073,7 +1077,10 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
     detailPagesFailed: diagnostics.detailPagesFailed,
     detailFetchLimitApplied: diagnostics.detailFetchLimitApplied,
     detailFetchMode: diagnostics.detailFetchMode,
-    parserWarnings: diagnostics.parserWarnings,
+    parserWarnings: [
+      ...(diagnostics.parserWarnings || []),
+      ...(diagnostics.sourceFamily === "sitemap-fallback" ? ["Sitemap fallback was used."] : []),
+    ],
   });
 
   diagnostics.vanscoValidRegistrationsFound = registrationConfidence.validRegistrations;
@@ -1105,8 +1112,11 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
       existingRecord?.stockUrl ||
       VAN_SCO_SOURCE_URL;
     let matchStatus = "missing";
+    const isSitemapFallback = diagnostics.sourceFamily === "sitemap-fallback";
 
-    if (matchedByRegistration && isReservedLikeSourceStatus(sourceVehicle.sourceStatus)) {
+    if (isSitemapFallback) {
+      matchStatus = "needs_review";
+    } else if (matchedByRegistration && isReservedLikeSourceStatus(sourceVehicle.sourceStatus)) {
       matchStatus = "reserved_still_listed";
     } else if (matchedByRegistration) {
       matchStatus = "listed";
@@ -1163,7 +1173,12 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
       !parsedSourceVehicles.some(
         (vehicle) => normalizeRegistration(vehicle.registration) === normalizeRegistration(localVehicle.registration)
       );
-    const matchStatus = hasTrustedRemovalSignal ? "no_longer_on_vansco" : "needs_review";
+    const matchStatus =
+      diagnostics.sourceFamily === "sitemap-fallback"
+        ? "needs_review"
+        : hasTrustedRemovalSignal
+          ? "no_longer_on_vansco"
+          : "needs_review";
     const baseRecord = existingRecord
       ? {
           id: existingRecord.id,

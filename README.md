@@ -33,12 +33,12 @@ If the table is missing, Reel Factory will still generate reels but will show a 
 `Vansco Stock Watch` is a manual checking tool only.
 
 It:
-- checks `https://www.vansco.co.uk/all-stock/` only when a user clicks `Check Vansco Stock`
-- prefers the Dragon2000 stock category pages as the source-selection entry point:
-  - `https://vansco.dragon2000.net/used-vans/`
-  - `https://vansco.dragon2000.net/no-vat-vans/`
-  - `https://vansco.dragon2000.net/used-cars/`
-- falls back to Vansco sitemap discovery only when those Dragon2000 pages do not expose usable vehicle detail links
+- checks the live Vansco category pages only when a user clicks `Check Vansco Stock`
+- uses these category pages as the primary source:
+  - `https://www.vansco.co.uk/used-vans/`
+  - `https://www.vansco.co.uk/no-vat-vans/`
+  - `https://www.vansco.co.uk/used-cars/`
+- uses sitemap discovery only as an emergency fallback when the category pages do not expose enough usable vehicle detail links
 - compares Vansco vehicles against separate Marketing CRM stock groups for:
   - Finance Vans
   - Rent2Buy Vans
@@ -150,6 +150,7 @@ alter table public.vansco_stock_watch
 - it requires a valid CRM registration
 - it requires a complete enough Vansco registration set
 - it requires high registration confidence from the manual scan
+- if sitemap fallback is used, the tool drops to low confidence and uses `needs_review`
 
 If that confidence is not high enough, the record is stored as `needs_review` with:
 

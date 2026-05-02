@@ -1,16 +1,16 @@
 const SOURCE_URL = "https://www.vansco.co.uk/all-stock/";
 const SITEMAP_URL = "https://www.vansco.co.uk/sitemap/";
-const DRAGON2000_SOURCE_PAGES = {
+const VANSCO_CATEGORY_PAGES = {
   finance: [
-    "https://vansco.dragon2000.net/used-vans/",
-    "https://vansco.dragon2000.net/no-vat-vans/",
+    { url: "https://www.vansco.co.uk/used-vans/", sourceCategory: "used_vans" },
+    { url: "https://www.vansco.co.uk/no-vat-vans/", sourceCategory: "no_vat_vans" },
   ],
   rent2buy: [
-    "https://vansco.dragon2000.net/used-vans/",
-    "https://vansco.dragon2000.net/no-vat-vans/",
+    { url: "https://www.vansco.co.uk/used-vans/", sourceCategory: "used_vans" },
+    { url: "https://www.vansco.co.uk/no-vat-vans/", sourceCategory: "no_vat_vans" },
   ],
   cars: [
-    "https://vansco.dragon2000.net/used-cars/",
+    { url: "https://www.vansco.co.uk/used-cars/", sourceCategory: "used_cars" },
   ],
 };
 const JUNK_TITLE_PATTERN = /\b(vansco ltd|all stock|showroom|flexibuy|finance|contact|about)\b/i;
@@ -110,6 +110,7 @@ function toVehicleStub(anchor) {
     year: "",
     sourceStatus: "unknown",
     vehicleCategory: detectVehicleCategory(anchor.text, anchor.href),
+    sourceCategory: "",
   };
 }
 
@@ -136,6 +137,13 @@ function dedupeVehicles(vehicles) {
   });
 
   return Array.from(byUrl.values());
+}
+
+function withSourceCategory(vehicles, sourceCategory) {
+  return vehicles.map((vehicle) => ({
+    ...vehicle,
+    sourceCategory: vehicle.sourceCategory || sourceCategory,
+  }));
 }
 
 function parseVehicleLinksFromHtml(html) {
@@ -320,6 +328,7 @@ function enrichVehicleStub(stub, html) {
     year: extractLabelValue(html, "Year") || (pageTitle.match(YEAR_PATTERN)?.[1] || stub.year),
     sourceStatus: detectSourceStatus(bodyText),
     vehicleCategory: detectVehicleCategory(`${fullTitle} ${bodyText}`, stub.stockUrl) || stub.vehicleCategory,
+    sourceCategory: stub.sourceCategory || "",
   };
 }
 
@@ -354,8 +363,9 @@ function buildDiagnostics({
   htmlLength,
   candidateLinksFound,
   sitemapUrlsFound,
-  dragonPagesFetched,
-  dragonVehiclesFound,
+  categoryPagesFetched,
+  categoryPageFailures,
+  vehiclesParsedByCategory,
   vehiclesKept,
   detailPagesFetched,
   detailPagesFailed,
@@ -373,8 +383,9 @@ function buildDiagnostics({
     htmlLength,
     candidateLinksFound,
     sitemapUrlsFound,
-    dragonPagesFetched,
-    dragonVehiclesFound,
+    categoryPagesFetched,
+    categoryPageFailures,
+    vehiclesParsedByCategory,
     vehicleDetailUrlsKept: vehiclesKept,
     vehiclesParsed: vehiclesKept,
     detailPagesFetched,
@@ -399,42 +410,32 @@ export default async function handler(request, response) {
     const detailFetchMode = String(request.query?.detailFetchMode || "standard").toLowerCase();
     const pageResults = [];
     const parserWarnings = [];
-    const dragonSourcePages = DRAGON2000_SOURCE_PAGES[pipeline] || DRAGON2000_SOURCE_PAGES.finance;
-    const dragonPageResults = [];
+    const categorySourcePages = VANSCO_CATEGORY_PAGES[pipeline] || VANSCO_CATEGORY_PAGES.finance;
+    const categoryPageResults = [];
+    const categoryPageFailures = [];
     let candidateLinksFound = 0;
-    let dragonVehicles = [];
+    let categoryVehicles = [];
+    const vehiclesParsedByCategory = {};
 
-    for (const dragonUrl of dragonSourcePages) {
+    for (const pageConfig of categorySourcePages) {
       try {
-        const page = await fetchHtml(dragonUrl);
+        const page = await fetchHtml(pageConfig.url);
         pageResults.push(page);
-        dragonPageResults.push(page);
+        categoryPageResults.push(page);
         const parsed = parseVehicleLinksFromHtml(page.html);
         candidateLinksFound += parsed.candidates.length;
-        dragonVehicles = dedupeVehicles([...dragonVehicles, ...parsed.vehicles]);
+        const taggedVehicles = withSourceCategory(parsed.vehicles, pageConfig.sourceCategory);
+        vehiclesParsedByCategory[pageConfig.sourceCategory] = taggedVehicles.length;
+        categoryVehicles = dedupeVehicles([...categoryVehicles, ...taggedVehicles]);
       } catch {
-        parserWarnings.push(`Dragon2000 source page could not be fetched: ${dragonUrl}`);
+        categoryPageFailures.push(pageConfig.sourceCategory);
+        parserWarnings.push(`Category page could not be fetched: ${pageConfig.url}`);
       }
     }
 
-    let vehicles = dragonVehicles;
-    let endpointUsed = dragonSourcePages[0] || SOURCE_URL;
-    let sourceFamily = "dragon2000";
-
-    if (vehicles.length < 10) {
-      parserWarnings.push("Dragon2000 stock pages did not expose enough server-rendered vehicle detail links.");
-
-      const allStockPage = await fetchHtml(SOURCE_URL);
-      pageResults.push(allStockPage);
-      const allStockParsed = parseVehicleLinksFromHtml(allStockPage.html);
-      candidateLinksFound += allStockParsed.candidates.length;
-
-      if (allStockParsed.vehicles.length > vehicles.length) {
-        vehicles = allStockParsed.vehicles;
-        endpointUsed = SOURCE_URL;
-        sourceFamily = "vansco-all-stock";
-      }
-    }
+    let vehicles = categoryVehicles;
+    let endpointUsed = categorySourcePages.map((page) => page.url).join(", ");
+    let sourceFamily = "vansco-category-pages";
 
     if (vehicles.length < 10) {
       const sitemapPage = await fetchHtml(SITEMAP_URL);
@@ -443,9 +444,10 @@ export default async function handler(request, response) {
       candidateLinksFound += sitemapParsed.candidates.length;
 
       if (sitemapParsed.vehicles.length > vehicles.length) {
-        vehicles = sitemapParsed.vehicles;
+        vehicles = withSourceCategory(sitemapParsed.vehicles, "sitemap_fallback");
         endpointUsed = SITEMAP_URL;
         sourceFamily = "sitemap-fallback";
+        parserWarnings.push("Sitemap fallback was used. Confidence is low and comparisons should be treated as needs review.");
       }
     }
 
@@ -492,8 +494,9 @@ export default async function handler(request, response) {
       htmlLength: pageResults.reduce((total, page) => total + page.htmlLength, 0),
       candidateLinksFound,
       sitemapUrlsFound: filteredVehicles.length,
-      dragonPagesFetched: dragonPageResults.length,
-      dragonVehiclesFound: dragonVehicles.length,
+      categoryPagesFetched: categoryPageResults.length,
+      categoryPageFailures,
+      vehiclesParsedByCategory,
       vehiclesKept: finalVehicles.length,
       detailPagesFetched,
       detailPagesFailed,
