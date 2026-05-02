@@ -79,6 +79,15 @@ function classifyWatchRecord(record, localRegistrationSet) {
     };
   }
 
+  if (reservedOnVansco && !hasExactLocalMatch) {
+    return {
+      ...record,
+      displayStatus: "reserved_not_advertised",
+      matchStatus: "listed",
+      safeExactRegistrationMatch: false,
+    };
+  }
+
   if (!hasExactLocalMatch) {
     return {
       ...record,
@@ -377,7 +386,8 @@ export default function VanscoStockWatchPage() {
       reserved: activeRecords.filter((record) => record.displayStatus === "reserved").length,
       ignored: activeRecords.filter((record) => record.displayStatus === "ignored").length,
       noRegistration: activeRecords.filter((record) => record.displayStatus === "needs_review").length,
-      listedOk: activeRecords.filter((record) => record.displayStatus === "listed_ok").length,
+      hiddenReserved: activeRecords.filter((record) => record.displayStatus === "reserved_not_advertised").length,
+      listedOk: activeRecords.filter((record) => ["listed_ok", "reserved_not_advertised"].includes(record.displayStatus)).length,
     };
   }, [activeRecords]);
 
@@ -489,6 +499,9 @@ export default function VanscoStockWatchPage() {
               Simple mode: Missing from my stock, Reserved on Vansco, and Ignored / Blocked only.
             </div>
             <div className="vehicle-card__meta">
+              Reserved Vansco vehicles that you do not currently advertise are hidden from Missing.
+            </div>
+            <div className="vehicle-card__meta">
               Blocking is saved per tab. Blocking in Finance does not block the same vehicle in Rent2Buy or Cars.
             </div>
           </div>
@@ -576,7 +589,7 @@ export default function VanscoStockWatchPage() {
           <div>
             <h3>{pipelineLabel(selectedPipeline)}</h3>
             <p>
-              Missing means a Vansco registration is not currently in this selected CRM stock tab. Reserved means you currently advertise it, but Vansco says reserved, sold, or deposit taken.
+              Missing means a Vansco available registration is not currently in this selected CRM stock tab. Reserved means you currently advertise it, but Vansco says reserved, sold, or deposit taken.
             </p>
           </div>
         </div>
@@ -584,6 +597,11 @@ export default function VanscoStockWatchPage() {
         <div className="notice-banner notice-banner--error">
           Advisory only. Do not remove stock unless manually checked.
         </div>
+        {summary.hiddenReserved ? (
+          <div className="notice-banner">
+            {summary.hiddenReserved} reserved Vansco vehicle{summary.hiddenReserved === 1 ? "" : "s"} not in your stock were hidden from Missing.
+          </div>
+        ) : null}
         {summary.noRegistration ? (
           <div className="notice-banner">
             {summary.noRegistration} Vansco vehicle{summary.noRegistration === 1 ? "" : "s"} had no valid registration and were hidden from the simple list.
