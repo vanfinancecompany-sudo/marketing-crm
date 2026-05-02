@@ -43,6 +43,7 @@ const DETAIL_FETCH_MODE_LIMITS = {
   standard: 100,
   full: 0,
 };
+const FULL_SCAN_BATCH_SIZE = 40;
 const CAR_KEYWORDS = /\b(audi|bmw|jaguar|jeep|kia|lexus|mercedes-benz|mercedes|skoda|suzuki|hyundai|q2|q3|a3|a4|a5|estate|hatchback|cabriolet|suv|coupe|saloon)\b/i;
 const VAN_KEYWORDS = /\b(transit|transit custom|transit connect|transit courier|tourneo|custom|tipper|dropside|luton|crew van|minibus|panel van|box van|pickup|pick-up|chassis cab|relay|dispatch|scudo|daily|doblo|partner|berlingo|sprinter|crafter|vivaro|movano)\b/i;
 
@@ -502,6 +503,8 @@ export default async function handler(request, response) {
   try {
     const pipeline = String(request.query?.pipeline || "finance").toLowerCase();
     const detailFetchMode = String(request.query?.detailFetchMode || "standard").toLowerCase();
+    const detailOffset = Math.max(0, Number(request.query?.detailOffset || 0) || 0);
+    const requestedBatchSize = Math.max(0, Number(request.query?.detailBatchSize || 0) || 0);
     const pageResults = [];
     const parserWarnings = [];
     const categorySourcePages = VANSCO_CATEGORY_PAGES[pipeline] || VANSCO_CATEGORY_PAGES.finance;
@@ -548,13 +551,23 @@ export default async function handler(request, response) {
     const filteredVehicles = filterVehiclesForPipeline(vehicles, pipeline);
     const baseLimit = DETAIL_FETCH_LIMITS[pipeline] || DETAIL_FETCH_LIMITS.finance;
     const requestedLimit = DETAIL_FETCH_MODE_LIMITS[detailFetchMode] ?? DETAIL_FETCH_MODE_LIMITS.standard;
-    const detailFetchLimit = requestedLimit === 0 ? filteredVehicles.length : Math.min(baseLimit, requestedLimit);
-    const vehiclesToEnrich = filteredVehicles.slice(0, detailFetchLimit);
-    const remainingVehicleCount = Math.max(0, filteredVehicles.length - vehiclesToEnrich.length);
+    const batchSize = requestedBatchSize > 0
+      ? requestedBatchSize
+      : detailFetchMode === "full"
+        ? FULL_SCAN_BATCH_SIZE
+        : requestedLimit === 0
+          ? filteredVehicles.length
+          : Math.min(baseLimit, requestedLimit);
+    const detailFetchLimit = requestedLimit === 0
+      ? Math.min(Math.max(0, filteredVehicles.length - detailOffset), batchSize)
+      : Math.min(baseLimit, requestedLimit, batchSize);
+    const vehiclesToEnrich = filteredVehicles.slice(detailOffset, detailOffset + detailFetchLimit);
+    const remainingVehicleCount = Math.max(0, filteredVehicles.length - (detailOffset + vehiclesToEnrich.length));
+    const hasMore = remainingVehicleCount > 0;
 
     if (remainingVehicleCount > 0) {
       parserWarnings.push(
-        `Detail enrichment was limited to ${detailFetchLimit} vehicles for this manual check. ${remainingVehicleCount} remaining vehicles were left as title-only stubs.`
+        `Detail enrichment was limited to ${vehiclesToEnrich.length} vehicles for this manual check batch. ${remainingVehicleCount} remaining vehicles were left for later batches or review.`
       );
     }
 
@@ -611,7 +624,7 @@ export default async function handler(request, response) {
       registrationsExtractedFromTitleBrackets: enrichmentDiagnostics.registrationsExtractedFromTitleBrackets,
       rejectedRegistrationCandidates: enrichmentDiagnostics.rejectedRegistrationCandidates,
       detailFetchMode,
-      detailFetchLimitApplied: detailFetchLimit,
+      detailFetchLimitApplied: vehiclesToEnrich.length,
       parserWarnings,
       sampleTitles: finalVehicles.slice(0, 3).map((vehicle) => vehicle.title),
       sampleRegistrations: finalVehicles.map((vehicle) => vehicle.registration).filter(Boolean).slice(0, 20),
@@ -626,6 +639,8 @@ export default async function handler(request, response) {
       endpointUsed,
       pagesFetched: diagnostics.pagesFetched,
       vehicles: finalVehicles,
+      detailOffset,
+      hasMore,
       diagnostics,
     });
   } catch (error) {

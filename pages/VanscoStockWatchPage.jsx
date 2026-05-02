@@ -401,7 +401,7 @@ export default function VanscoStockWatchPage() {
               Detail fetch mode: {activePreset.label} {activePreset.limit ? `(${activePreset.limit} detail pages)` : "(full detail pass)"}
             </div>
             <div className="vehicle-card__meta">
-              Fast = review-only partial scan. Full = all detail URLs for comparison if completed.
+              Fast = review-only partial scan. Full = all detail URLs for comparison if completed, now fetched in smaller batches.
             </div>
           </div>
           <div className="vansco-action-stack">
@@ -489,7 +489,9 @@ export default function VanscoStockWatchPage() {
             ) : null}
             {elapsedSeconds >= 55 ? (
               <div className="notice-banner notice-banner--error">
-                The request may hit a Vercel timeout. Consider reducing batch size or using staged checks.
+                {detailFetchMode === "full"
+                  ? "Full scan is running in staged batches, so it can take a couple of minutes."
+                  : "This check may still hit a Vercel timeout. Consider using Fast check or retrying later."}
               </div>
             ) : null}
           </div>

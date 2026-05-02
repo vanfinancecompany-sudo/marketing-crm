@@ -346,7 +346,8 @@ function computeRegistrationConfidence({
   const validRegistrations = sourceVehicles.filter((vehicle) => hasValidRegistration(vehicle)).length;
   const totalVehicles = sourceVehicles.length;
   const registrationCoverage = totalVehicles ? validRegistrations / totalVehicles : 0;
-  const detailLimitHit = detailFetchMode !== "full" || (detailFetchLimitApplied > 0 && totalVehicles >= detailFetchLimitApplied);
+  const detailLimitHit =
+    detailFetchMode !== "full" && detailFetchLimitApplied > 0 && totalVehicles >= detailFetchLimitApplied;
   const scanComplete =
     !partialScan &&
     !detailPagesFailed &&
@@ -961,7 +962,7 @@ export async function updateVanscoWatchRecord(id, updates) {
   return normalizeWatchRecord(data);
 }
 
-async function fetchVanscoSourceHtml(pipeline, options = {}) {
+async function fetchVanscoSourceBatch(pipeline, options = {}) {
   const params = new URLSearchParams({
     pipeline: String(pipeline || "finance"),
     _: String(Date.now()),
@@ -969,6 +970,12 @@ async function fetchVanscoSourceHtml(pipeline, options = {}) {
 
   if (options.detailFetchMode) {
     params.set("detailFetchMode", options.detailFetchMode);
+  }
+  if (Number.isFinite(options.detailOffset) && options.detailOffset > 0) {
+    params.set("detailOffset", String(options.detailOffset));
+  }
+  if (Number.isFinite(options.detailBatchSize) && options.detailBatchSize > 0) {
+    params.set("detailBatchSize", String(options.detailBatchSize));
   }
 
   const controller = new AbortController();
@@ -1019,6 +1026,108 @@ async function fetchVanscoSourceHtml(pipeline, options = {}) {
   }
 
   return payload;
+}
+
+function mergeVanscoBatchPayloads(batchPayloads, detailBatchSize) {
+  const firstPayload = batchPayloads[0] || {};
+  const mergedVehicles = batchPayloads.flatMap((payload) => payload.vehicles || []);
+  const parserWarnings = Array.from(
+    new Set(batchPayloads.flatMap((payload) => payload.diagnostics?.parserWarnings || []))
+  );
+  const categoryPageFailures = Array.from(
+    new Set(batchPayloads.flatMap((payload) => payload.diagnostics?.categoryPageFailures || []))
+  );
+  const sampleTitles = mergedVehicles.slice(0, 3).map((vehicle) => vehicle.title).filter(Boolean);
+  const sampleRegistrations = mergedVehicles
+    .map((vehicle) => normalizeRegistration(vehicle.registration || ""))
+    .filter(Boolean)
+    .slice(0, 20);
+
+  const totalVehicleUrlsFound = firstPayload.diagnostics?.totalVehicleUrlsFound || mergedVehicles.length;
+  const detailPagesFetched = batchPayloads.reduce(
+    (total, payload) => total + (payload.diagnostics?.detailPagesFetched || 0),
+    0
+  );
+  const detailPagesFailed = batchPayloads.reduce(
+    (total, payload) => total + (payload.diagnostics?.detailPagesFailed || 0),
+    0
+  );
+  const vehiclesWithRegistration = mergedVehicles.filter((vehicle) => normalizeRegistration(vehicle.registration)).length;
+  const vehiclesWithImage = mergedVehicles.filter((vehicle) => normalizeUrl(vehicle.imageUrl)).length;
+  const vehiclesWithSourceStatus = mergedVehicles.filter(
+    (vehicle) => vehicle.sourceStatus && vehicle.sourceStatus !== "unknown"
+  ).length;
+  const vehiclesWithValidMatchKey = mergedVehicles.filter(
+    (vehicle) => normalizeRegistration(vehicle.registration) || normalizeUrl(vehicle.stockUrl)
+  ).length;
+  const partialScan =
+    (firstPayload.diagnostics?.sourceFamily || "unknown") === "sitemap-fallback" ||
+    detailPagesFailed > 0 ||
+    mergedVehicles.length < totalVehicleUrlsFound;
+
+  return {
+    ...firstPayload,
+    fetchedAt: new Date().toISOString(),
+    vehicles: mergedVehicles,
+    hasMore: false,
+    diagnostics: {
+      ...(firstPayload.diagnostics || {}),
+      parserWarnings,
+      categoryPageFailures,
+      pagesFetched: batchPayloads.reduce((total, payload) => total + (payload.pagesFetched || 0), 0),
+      detailPagesFetched,
+      detailPagesFailed,
+      vehiclesParsed: mergedVehicles.length,
+      vehicleDetailUrlsKept: mergedVehicles.length,
+      vehiclesEnrichedWithRegistration: vehiclesWithRegistration,
+      vehiclesEnrichedWithImage: vehiclesWithImage,
+      vehiclesWithSourceStatus,
+      vehiclesWithValidMatchKey,
+      totalVehicleUrlsFound,
+      partialScan,
+      detailFetchMode: "full",
+      detailFetchLimitApplied: mergedVehicles.length,
+      detailBatchSize,
+      sampleTitles,
+      sampleRegistrations,
+      registrationsExtractedFromTitleBrackets: batchPayloads.reduce(
+        (total, payload) => total + (payload.diagnostics?.registrationsExtractedFromTitleBrackets || 0),
+        0
+      ),
+      rejectedFakeRegistrationsCount: batchPayloads.reduce(
+        (total, payload) => total + (payload.diagnostics?.rejectedFakeRegistrationsCount || 0),
+        0
+      ),
+      sampleRejectedFakeRegistrations: Array.from(
+        new Set(batchPayloads.flatMap((payload) => payload.diagnostics?.sampleRejectedFakeRegistrations || []))
+      ).slice(0, 20),
+    },
+  };
+}
+
+async function fetchVanscoSourceHtml(pipeline, options = {}) {
+  if (options.detailFetchMode !== "full") {
+    return fetchVanscoSourceBatch(pipeline, options);
+  }
+
+  const detailBatchSize = Math.max(1, Number(options.detailBatchSize || 40));
+  const batchPayloads = [];
+  let detailOffset = 0;
+
+  while (true) {
+    const batchPayload = await fetchVanscoSourceBatch(pipeline, {
+      ...options,
+      detailOffset,
+      detailBatchSize,
+    });
+    batchPayloads.push(batchPayload);
+
+    const batchCount = (batchPayload.vehicles || []).length;
+    if (!batchPayload.hasMore || batchCount === 0) break;
+    detailOffset += batchCount;
+  }
+
+  return mergeVanscoBatchPayloads(batchPayloads, detailBatchSize);
 }
 
 function normalizeApiVehicle(vehicle, fallbackCategory = "unknown") {
