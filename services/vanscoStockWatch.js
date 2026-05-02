@@ -78,7 +78,7 @@ export const WATCH_FILTERS = [
 ];
 
 export const DETAIL_FETCH_PRESETS = [
-  { value: "fast", label: "Fast check", limit: 50 },
+  { value: "fast", label: "Fast check (review-only)", limit: 100 },
   { value: "standard", label: "Standard check", limit: 100 },
   { value: "full", label: "Full check", limit: 0 },
 ];
@@ -339,13 +339,18 @@ function computeRegistrationConfidence({
   detailPagesFailed,
   detailFetchLimitApplied,
   detailFetchMode,
+  partialScan,
   parserWarnings,
 }) {
   const validRegistrations = sourceVehicles.filter((vehicle) => hasValidRegistration(vehicle)).length;
   const totalVehicles = sourceVehicles.length;
   const registrationCoverage = totalVehicles ? validRegistrations / totalVehicles : 0;
   const detailLimitHit = detailFetchMode !== "full" || (detailFetchLimitApplied > 0 && totalVehicles >= detailFetchLimitApplied);
-  const scanComplete = !detailPagesFailed && !detailLimitHit && !(parserWarnings || []).some((warning) => /limited to|timeout|fewer than 10/i.test(warning));
+  const scanComplete =
+    !partialScan &&
+    !detailPagesFailed &&
+    !detailLimitHit &&
+    !(parserWarnings || []).some((warning) => /limited to|timeout|fewer than 10|partial scan/i.test(warning));
   const highConfidence = scanComplete && validRegistrations >= 25 && registrationCoverage >= 0.8;
 
   return {
@@ -990,21 +995,22 @@ async function fetchVanscoSourceHtml(pipeline, options = {}) {
 }
 
 function normalizeApiVehicle(vehicle, fallbackCategory = "unknown") {
+  const normalizedStockUrl = normalizeUrl(vehicle.stockUrl || "");
   return {
-    vehicleKey: deriveVehicleKey(
+    vehicleKey: normalizedStockUrl ? `url:${normalizedStockUrl}` : deriveVehicleKey(
       {
         title: vehicle.title,
         registration: vehicle.registration,
-        stockUrl: vehicle.stockUrl,
+        stockUrl: normalizedStockUrl,
         year: vehicle.year,
         mileage: vehicle.mileage,
       },
-      vehicle.stockUrl || vehicle.title
+      normalizedStockUrl || vehicle.title
     ),
     title: compactWhitespace(vehicle.title || ""),
     registration: normalizeRegistration(vehicle.registration || ""),
     imageUrl: normalizeUrl(vehicle.imageUrl || ""),
-    stockUrl: normalizeUrl(vehicle.stockUrl || ""),
+    stockUrl: normalizedStockUrl,
     price: compactWhitespace(vehicle.price || ""),
     mileage: compactWhitespace(vehicle.mileage || ""),
     year: normalizeYear(vehicle.year || ""),
@@ -1061,9 +1067,11 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
     sourceTable: sourceTable || "",
     registrationField,
     endpointUsed: sourcePayload.endpointUsed || VAN_SCO_SOURCE_URL,
+    sourceFamily: sourcePayload.diagnostics?.sourceFamily || "unknown",
     pagesFetched: sourcePayload.pagesFetched || 1,
     candidateLinksFound: sourcePayload.diagnostics?.candidateLinksFound || 0,
     sitemapUrlsFound: sourcePayload.diagnostics?.sitemapUrlsFound || 0,
+    totalVehicleUrlsFound: sourcePayload.diagnostics?.totalVehicleUrlsFound || 0,
     categoryPagesFetched: sourcePayload.diagnostics?.categoryPagesFetched || 0,
     categoryPageFailures: sourcePayload.diagnostics?.categoryPageFailures || [],
     vehiclesParsedByCategory: sourcePayload.diagnostics?.vehiclesParsedByCategory || {},
@@ -1072,8 +1080,13 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
     vehiclesEnrichedWithRegistration: sourcePayload.diagnostics?.vehiclesEnrichedWithRegistration || 0,
     vehiclesEnrichedWithImage: sourcePayload.diagnostics?.vehiclesEnrichedWithImage || 0,
     vehiclesWithValidMatchKey: sourcePayload.diagnostics?.vehiclesWithValidMatchKey || 0,
+    partialScan: Boolean(sourcePayload.diagnostics?.partialScan),
     detailFetchMode: sourcePayload.diagnostics?.detailFetchMode || options.detailFetchMode || "standard",
     detailFetchLimitApplied: sourcePayload.diagnostics?.detailFetchLimitApplied ?? null,
+    vanscoRegistrationsExtractedFromTitleBrackets:
+      sourcePayload.diagnostics?.registrationsExtractedFromTitleBrackets || 0,
+    rejectedFakeRegistrationsCount: sourcePayload.diagnostics?.rejectedFakeRegistrationsCount || 0,
+    sampleRejectedFakeRegistrations: sourcePayload.diagnostics?.sampleRejectedFakeRegistrations || [],
     matchesByRegistration: 0,
     matchesByUrl: 0,
     matchesByFallbackTitle: 0,
@@ -1104,6 +1117,7 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
     noLongerHighConfidenceOnly: true,
     missingCountBasedOnValidRegistrationsOnly: 0,
     needsReviewCount: 0,
+    staleRowsDeleted: 0,
     lowConfidenceWarning: "",
     sampleTitles: sourcePayload.diagnostics?.sampleTitles || parsedSourceVehicles.slice(0, 3).map((vehicle) => vehicle.title),
   };
@@ -1113,6 +1127,7 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
     detailPagesFailed: diagnostics.detailPagesFailed,
     detailFetchLimitApplied: diagnostics.detailFetchLimitApplied,
     detailFetchMode: diagnostics.detailFetchMode,
+    partialScan: diagnostics.partialScan,
     parserWarnings: [
       ...(diagnostics.parserWarnings || []),
       ...(diagnostics.sourceFamily === "sitemap-fallback" ? ["Sitemap fallback was used."] : []),
@@ -1163,7 +1178,9 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
     let matchStatus = "needs_review";
     const isSitemapFallback = diagnostics.sourceFamily === "sitemap-fallback";
 
-    if (isSitemapFallback) {
+    if (diagnostics.partialScan) {
+      matchStatus = "needs_review";
+    } else if (isSitemapFallback) {
       matchStatus = "needs_review";
     } else if (!sourceHasValidRegistration) {
       matchStatus = "needs_review";
@@ -1214,6 +1231,11 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
       "Some vehicles could not be matched confidently because registration was not found.";
   }
 
+  if (diagnostics.partialScan) {
+    diagnostics.lowConfidenceWarning =
+      "Partial Vansco scan. Results are review-only and should not be used for stock decisions.";
+  }
+
   if ((pipeline === "finance" || pipeline === "rent2buy") && diagnostics.crmValidRegistrationsFound === 0) {
     diagnostics.lowConfidenceWarning =
       "CRM registrations could not be read from the same stock data used by the Stock page. Review manually.";
@@ -1227,12 +1249,13 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
     const localHasValidRegistration = hasValidRegistration(localVehicle);
     const hasTrustedRemovalSignal =
       registrationConfidence.highConfidence &&
+      !diagnostics.partialScan &&
       localHasValidRegistration &&
       !parsedSourceVehicles.some(
         (vehicle) => normalizeRegistration(vehicle.registration) === normalizeRegistration(localVehicle.registration)
       );
     const matchStatus =
-      diagnostics.sourceFamily === "sitemap-fallback" || !localHasValidRegistration
+      diagnostics.partialScan || diagnostics.sourceFamily === "sitemap-fallback" || !localHasValidRegistration
         ? "needs_review"
         : hasTrustedRemovalSignal
           ? "no_longer_on_vansco"
@@ -1278,6 +1301,34 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
   ).length;
 
   if (nextRecords.length) {
+    const nextStockUrlToVehicleKey = new Map(
+      nextRecords
+        .map((record) => [normalizeUrl(record.stock_url || ""), record.vehicle_key])
+        .filter(([stockUrl]) => stockUrl)
+    );
+    const staleExistingIds = existingRecords
+      .filter((record) => {
+        const stockUrl = normalizeUrl(record.stockUrl || "");
+        const nextVehicleKey = nextStockUrlToVehicleKey.get(stockUrl);
+        return stockUrl && nextVehicleKey && nextVehicleKey !== record.vehicleKey;
+      })
+      .map((record) => record.id)
+      .filter(Boolean);
+
+    if (staleExistingIds.length) {
+      diagnostics.staleRowsDeleted = staleExistingIds.length;
+      const { error: deleteError } = await supabase
+        .from(WATCH_TABLE)
+        .delete()
+        .in("id", staleExistingIds);
+
+      if (deleteError) {
+        const wrappedDeleteError = new Error(`Failed to clean stale Vansco Stock Watch rows: ${deleteError.message}`);
+        wrappedDeleteError.debugInfo = diagnostics;
+        throw wrappedDeleteError;
+      }
+    }
+
     const dedupedBatch = dedupeWatchRecords(nextRecords);
     diagnostics.upsertDuplicateKeysCollapsed = dedupedBatch.duplicateCount;
     const cleanedBatch = dedupedBatch.records.map(cleanWatchRecordPayload);

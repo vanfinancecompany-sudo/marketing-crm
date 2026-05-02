@@ -19,6 +19,18 @@ const PRICE_PATTERN = /(?:£|&pound;)\s?[0-9][0-9,]*/gi;
 const YEAR_PATTERN = /\b(20\d{2}|19\d{2})\b/;
 const REGISTRATION_PATTERN =
   /\b([A-Z]{2}[0-9]{2}\s?[A-Z]{3}|[A-Z][0-9]{1,3}\s?[A-Z]{3}|[A-Z]{3}\s?[0-9]{1,3}[A-Z]|[0-9]{1,4}\s?[A-Z]{1,3})\b/i;
+const MODERN_UK_REG_PATTERN = /^[A-Z]{2}[0-9]{2}[A-Z]{3}$/;
+const LEGACY_REG_PATTERN = /^(?:[A-Z][0-9]{1,3}[A-Z]{3}|[A-Z]{3}[0-9]{1,3}[A-Z]|[0-9]{1,4}[A-Z]{1,3})$/i;
+const FAKE_REG_PATTERNS = [
+  /^[0-9]{2,3}PS$/i,
+  /^[0-9]{2,3}BHP$/i,
+  /^ULEZ$/i,
+  /^EURO\d+$/i,
+  /^L\dH\d$/i,
+  /^U\d{4,6}$/i,
+  /^SHOWROOM$/i,
+  /^333$/i,
+];
 const DETAIL_FETCH_CONCURRENCY = 4;
 const DETAIL_FETCH_TIMEOUT_MS = 7000;
 const DETAIL_FETCH_LIMITS = {
@@ -27,7 +39,7 @@ const DETAIL_FETCH_LIMITS = {
   cars: 90,
 };
 const DETAIL_FETCH_MODE_LIMITS = {
-  fast: 50,
+  fast: 100,
   standard: 100,
   full: 0,
 };
@@ -290,17 +302,70 @@ function extractImageUrl(html) {
 function normalizeRegistration(value) {
   const text = compactWhitespace(value).toUpperCase();
   if (!text) return "";
-  const blocked = new Set(["VANSCO", "VANSCOLTD", "ALLSTOCK", "HOMESTOCK", "UNDEFINED", "UNKNOWN", "NULL", "N/A", "NA", "NOTFOUND"]);
+  const blocked = new Set(["VANSCO", "VANSCOLTD", "ALLSTOCK", "HOMESTOCK", "UNDEFINED", "UNKNOWN", "NULL", "N/A", "NA", "NOTFOUND", "ULEZ", "EURO6", "SHOWROOM"]);
   const cleaned = text.replace(/[^A-Z0-9]/g, "");
   if (!cleaned || cleaned.length < 5 || cleaned.length > 8) return "";
   if (!/[A-Z]/.test(cleaned) || !/[0-9]/.test(cleaned)) return "";
   if (blocked.has(cleaned)) return "";
+  if (FAKE_REG_PATTERNS.some((pattern) => pattern.test(cleaned))) return "";
   const match = cleaned.match(REGISTRATION_PATTERN);
   const candidate = (match?.[1] || cleaned).replace(/[^A-Z0-9]/g, "");
   if (!candidate || candidate.length < 5 || candidate.length > 8) return "";
   if (!/[A-Z]/.test(candidate) || !/[0-9]/.test(candidate)) return "";
   if (blocked.has(candidate)) return "";
+  if (FAKE_REG_PATTERNS.some((pattern) => pattern.test(candidate))) return "";
   return candidate;
+}
+
+function isStrictUkRegistration(value) {
+  const cleaned = normalizeRegistration(value);
+  if (!cleaned) return false;
+  if (MODERN_UK_REG_PATTERN.test(cleaned)) return true;
+  if (!LEGACY_REG_PATTERN.test(cleaned)) return false;
+  if (FAKE_REG_PATTERNS.some((pattern) => pattern.test(cleaned))) return false;
+  return cleaned.length >= 5 && cleaned.length <= 8;
+}
+
+function collectBracketedCandidates(text) {
+  const matches = [];
+  const pattern = /\(([^)]+)\)/g;
+  let match;
+
+  while ((match = pattern.exec(text || ""))) {
+    const candidate = compactWhitespace(match[1]);
+    if (candidate) matches.push(candidate);
+  }
+
+  return matches;
+}
+
+function extractRegistrationFromTitle(title, rejectedCandidates) {
+  const candidates = collectBracketedCandidates(title);
+  for (const candidate of candidates) {
+    const normalized = normalizeRegistration(candidate);
+    if (isStrictUkRegistration(normalized)) {
+      return normalized;
+    }
+
+    if (candidate) {
+      rejectedCandidates.push(candidate);
+    }
+  }
+
+  return "";
+}
+
+function extractStrictRegistrationCandidate(rawValue, rejectedCandidates) {
+  const value = compactWhitespace(rawValue);
+  if (!value) return "";
+
+  const normalized = normalizeRegistration(value);
+  if (isStrictUkRegistration(normalized)) {
+    return normalized;
+  }
+
+  rejectedCandidates.push(value);
+  return "";
 }
 
 function detectSourceStatus(text) {
@@ -313,15 +378,23 @@ function detectSourceStatus(text) {
   return "unknown";
 }
 
-function enrichVehicleStub(stub, html) {
+function enrichVehicleStub(stub, html, diagnostics) {
   const bodyText = decodeHtml(html);
   const pageTitle = extractHeading(html, "h1") || extractMetaContent(html, "og:title") || stub.title;
   const subtitle = extractHeading(html, "h2");
   const fullTitle = compactWhitespace([pageTitle, subtitle].filter(Boolean).join(" - "));
+  const rejectedCandidates = diagnostics.rejectedRegistrationCandidates;
   const registration =
-    normalizeRegistration(pageTitle) ||
-    normalizeRegistration(bodyText.match(/\(([A-Z0-9 ]{5,10})\)/i)?.[1]) ||
-    normalizeRegistration(extractLabelValue(html, "Registration"));
+    extractRegistrationFromTitle(fullTitle || pageTitle || stub.title, rejectedCandidates) ||
+    extractStrictRegistrationCandidate(extractLabelValue(html, "Registration"), rejectedCandidates) ||
+    extractStrictRegistrationCandidate(extractLabelValue(html, "Reg"), rejectedCandidates);
+
+  if (registration) {
+    diagnostics.registrationsExtractedFromTitleBrackets += collectBracketedCandidates(fullTitle || pageTitle || stub.title)
+      .some((candidate) => normalizeRegistration(candidate) === registration)
+      ? 1
+      : 0;
+  }
 
   return {
     ...stub,
@@ -379,8 +452,15 @@ function buildDiagnostics({
   vehiclesWithImage,
   vehiclesWithSourceStatus,
   vehiclesWithValidMatchKey,
+  detailFetchMode,
+  detailFetchLimitApplied,
+  partialScan,
+  totalVehicleUrlsFound,
+  registrationsExtractedFromTitleBrackets,
+  rejectedRegistrationCandidates,
   parserWarnings,
   sampleTitles,
+  sampleRegistrations,
 }) {
   return {
     endpointUsed,
@@ -400,8 +480,16 @@ function buildDiagnostics({
     vehiclesEnrichedWithImage: vehiclesWithImage,
     vehiclesWithSourceStatus,
     vehiclesWithValidMatchKey,
+    detailFetchMode,
+    detailFetchLimitApplied,
+    partialScan,
+    totalVehicleUrlsFound,
+    registrationsExtractedFromTitleBrackets,
+    rejectedFakeRegistrationsCount: rejectedRegistrationCandidates.length,
+    sampleRejectedFakeRegistrations: rejectedRegistrationCandidates.slice(0, 20),
     parserWarnings,
     sampleTitles,
+    sampleRegistrations,
   };
 }
 
@@ -472,6 +560,10 @@ export default async function handler(request, response) {
 
     let detailPagesFetched = 0;
     let detailPagesFailed = 0;
+    const enrichmentDiagnostics = {
+      registrationsExtractedFromTitleBrackets: 0,
+      rejectedRegistrationCandidates: [],
+    };
 
     const enrichedVehicles = await mapWithConcurrency(
       vehiclesToEnrich,
@@ -480,7 +572,7 @@ export default async function handler(request, response) {
         try {
           const detailPage = await fetchHtml(vehicle.stockUrl);
           detailPagesFetched += 1;
-          return enrichVehicleStub(vehicle, detailPage.html);
+          return enrichVehicleStub(vehicle, detailPage.html, enrichmentDiagnostics);
         } catch {
           detailPagesFailed += 1;
           return vehicle;
@@ -489,8 +581,12 @@ export default async function handler(request, response) {
     );
 
     const finalVehicles = dedupeVehicles(enrichedVehicles);
+    const partialScan = remainingVehicleCount > 0 || detailPagesFailed > 0 || sourceFamily === "sitemap-fallback";
     if (finalVehicles.length < 10) {
       parserWarnings.push("Parser warning: fewer than 10 vehicles found after detail enrichment.");
+    }
+    if (partialScan) {
+      parserWarnings.push("Partial scan only. Results are review-only and should not be used for stock decisions.");
     }
 
     const diagnostics = buildDiagnostics({
@@ -510,10 +606,15 @@ export default async function handler(request, response) {
       vehiclesWithImage: finalVehicles.filter((vehicle) => vehicle.imageUrl).length,
       vehiclesWithSourceStatus: finalVehicles.filter((vehicle) => vehicle.sourceStatus && vehicle.sourceStatus !== "unknown").length,
       vehiclesWithValidMatchKey: finalVehicles.filter((vehicle) => vehicle.registration || vehicle.stockUrl).length,
+      partialScan,
+      totalVehicleUrlsFound: filteredVehicles.length,
+      registrationsExtractedFromTitleBrackets: enrichmentDiagnostics.registrationsExtractedFromTitleBrackets,
+      rejectedRegistrationCandidates: enrichmentDiagnostics.rejectedRegistrationCandidates,
       detailFetchMode,
       detailFetchLimitApplied: detailFetchLimit,
       parserWarnings,
       sampleTitles: finalVehicles.slice(0, 3).map((vehicle) => vehicle.title),
+      sampleRegistrations: finalVehicles.map((vehicle) => vehicle.registration).filter(Boolean).slice(0, 20),
     });
 
     response.setHeader("Cache-Control", "no-store, max-age=0");

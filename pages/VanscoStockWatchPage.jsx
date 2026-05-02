@@ -22,7 +22,7 @@ const DEFAULT_FILTERS = {
 };
 
 const RUNNING_STEPS = [
-  { key: "fetch-sitemap", label: "Fetching Vansco sitemap..." },
+  { key: "fetch-sitemap", label: "Fetching Vansco category pages..." },
   { key: "found-urls", label: "Found vehicle URLs" },
   { key: "fetch-details", label: "Fetching vehicle details..." },
   { key: "compare-stock", label: "Comparing against current stock..." },
@@ -43,7 +43,7 @@ function buildRunningProgress(elapsedSeconds, preset) {
     return {
       percent: 12,
       currentStep: "fetch-sitemap",
-      detailText: "Fetching Vansco sitemap...",
+      detailText: "Fetching Vansco category pages...",
     };
   }
   if (elapsedSeconds < 8) {
@@ -400,6 +400,9 @@ export default function VanscoStockWatchPage() {
             <div className="vehicle-card__meta">
               Detail fetch mode: {activePreset.label} {activePreset.limit ? `(${activePreset.limit} detail pages)` : "(full detail pass)"}
             </div>
+            <div className="vehicle-card__meta">
+              Fast = review-only partial scan. Full = all detail URLs for comparison if completed.
+            </div>
           </div>
           <div className="vansco-action-stack">
             <label className="field vansco-action-stack__field">
@@ -546,6 +549,11 @@ export default function VanscoStockWatchPage() {
         {activeDebug?.lowConfidenceWarning ? (
           <div className="notice-banner notice-banner--error">{activeDebug.lowConfidenceWarning}</div>
         ) : null}
+        {activeDebug?.partialScan ? (
+          <div className="notice-banner notice-banner--error">
+            Partial Vansco scan. Results are review-only and should not be used for stock decisions.
+          </div>
+        ) : null}
 
         {activeDebug ? (
           <details className="vansco-debug-panel" open={showDiagnostics} onToggle={(event) => setShowDiagnostics(event.currentTarget.open)}>
@@ -557,6 +565,8 @@ export default function VanscoStockWatchPage() {
             <div className="vehicle-card__meta">Stock page CRM source used: {activeDebug.sourceTable || "Unknown"}</div>
             <div className="vehicle-card__meta">Registration field used: {activeDebug.registrationField || "Unknown"}</div>
             <div className="vehicle-card__meta">Pages fetched: {activeDebug.pagesFetched || 0}</div>
+            <div className="vehicle-card__meta">Vansco total URLs found: {activeDebug.totalVehicleUrlsFound || 0}</div>
+            <div className="vehicle-card__meta">Partial scan: {activeDebug.partialScan ? "yes" : "no"}</div>
             <div className="vehicle-card__meta">
               Detail fetch mode: {activeDebug.detailFetchMode || "standard"} | Detail fetch limit applied: {activeDebug.detailFetchLimitApplied ?? "-"}
             </div>
@@ -589,6 +599,12 @@ export default function VanscoStockWatchPage() {
               Vansco valid registrations found: {activeDebug.vanscoValidRegistrationsFound || 0}
             </div>
             <div className="vehicle-card__meta">
+              Vansco registrations extracted from title brackets: {activeDebug.vanscoRegistrationsExtractedFromTitleBrackets || 0}
+            </div>
+            <div className="vehicle-card__meta">
+              Rejected fake registrations count: {activeDebug.rejectedFakeRegistrationsCount || 0}
+            </div>
+            <div className="vehicle-card__meta">
               Vansco vehicles without valid registration moved to Needs Review: {activeDebug.vanscoVehiclesWithoutValidRegistrationMovedToNeedsReview || 0}
             </div>
             <div className="vehicle-card__meta">Finance/selected CRM records loaded: {activeDebug.crmRecordCount ?? 0}</div>
@@ -606,6 +622,12 @@ export default function VanscoStockWatchPage() {
             </div>
             <div className="vehicle-card__meta">
               Vansco normalised registrations sample: {(activeDebug.vanscoNormalizedRegistrationsSample || []).join(", ") || "none"}
+            </div>
+            <div className="vehicle-card__meta">
+              Sample first 20 extracted Vansco registrations: {(activeDebug.vanscoNormalizedRegistrationsSample || []).join(", ") || "none"}
+            </div>
+            <div className="vehicle-card__meta">
+              Sample first 20 rejected fake reg candidates: {(activeDebug.sampleRejectedFakeRegistrations || []).join(", ") || "none"}
             </div>
             <div className="vehicle-card__meta">
               Exact registration overlap count: {activeDebug.exactRegistrationOverlapCount || 0}
@@ -647,6 +669,7 @@ export default function VanscoStockWatchPage() {
             <div className="vehicle-card__meta">
               Final payload contains id: {activeDebug.finalPayloadContainsId ? "yes" : "no"}
             </div>
+            <div className="vehicle-card__meta">Stale rows deleted this run: {activeDebug.staleRowsDeleted || 0}</div>
             {activeDebug.sourceTable ? (
               <div className="vehicle-card__meta">CRM stock table: {activeDebug.sourceTable}</div>
             ) : null}
