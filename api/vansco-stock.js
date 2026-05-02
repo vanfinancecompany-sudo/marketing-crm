@@ -255,6 +255,21 @@ function extractLabelValue(html, label) {
   return "";
 }
 
+function extractYearValue(html, fallbackText = "") {
+  const labeledYear = normalizeYear(extractLabelValue(html, "Year"));
+  if (labeledYear) return labeledYear;
+  return normalizeYear(fallbackText);
+}
+
+function extractMileageValue(html) {
+  const labeledMileage = compactWhitespace(extractLabelValue(html, "Mileage"));
+  const match = labeledMileage.match(/\b([0-9][0-9,]{1,})\s*(?:miles|mile|mi)\b/i);
+  if (match?.[0]) return compactWhitespace(match[0]);
+
+  const bodyMatch = decodeHtml(html).match(/\b([0-9][0-9,]{1,})\s*(?:miles|mile|mi)\b/i);
+  return bodyMatch?.[0] ? compactWhitespace(bodyMatch[0]) : "";
+}
+
 function extractPrice(html) {
   const metaPrice = extractMetaContent(html, "product:price:amount");
   if (metaPrice) return `£${metaPrice}`;
@@ -385,16 +400,26 @@ function enrichVehicleStub(stub, html, diagnostics) {
   const subtitle = extractHeading(html, "h2");
   const fullTitle = compactWhitespace([pageTitle, subtitle].filter(Boolean).join(" - "));
   const rejectedCandidates = diagnostics.rejectedRegistrationCandidates;
+  const titleCandidates = [stub.title, fullTitle, pageTitle].filter(Boolean);
+  let bracketRegistration = "";
+  let usedBracketTitleSource = false;
+
+  for (const titleCandidate of titleCandidates) {
+    const extracted = extractRegistrationFromTitle(titleCandidate, rejectedCandidates);
+    if (extracted) {
+      bracketRegistration = extracted;
+      usedBracketTitleSource = true;
+      break;
+    }
+  }
+
   const registration =
-    extractRegistrationFromTitle(fullTitle || pageTitle || stub.title, rejectedCandidates) ||
+    bracketRegistration ||
     extractStrictRegistrationCandidate(extractLabelValue(html, "Registration"), rejectedCandidates) ||
     extractStrictRegistrationCandidate(extractLabelValue(html, "Reg"), rejectedCandidates);
 
-  if (registration) {
-    diagnostics.registrationsExtractedFromTitleBrackets += collectBracketedCandidates(fullTitle || pageTitle || stub.title)
-      .some((candidate) => normalizeRegistration(candidate) === registration)
-      ? 1
-      : 0;
+  if (registration && usedBracketTitleSource) {
+    diagnostics.registrationsExtractedFromTitleBrackets += 1;
   }
 
   return {
@@ -404,8 +429,8 @@ function enrichVehicleStub(stub, html, diagnostics) {
     imageUrl: extractImageUrl(html) || stub.imageUrl,
     price: extractPrice(html) || stub.price,
     registration,
-    mileage: extractLabelValue(html, "Mileage") || stub.mileage,
-    year: extractLabelValue(html, "Year") || (pageTitle.match(YEAR_PATTERN)?.[1] || stub.year),
+    mileage: extractMileageValue(html) || stub.mileage,
+    year: extractYearValue(html, pageTitle || stub.title || ""),
     sourceStatus: detectSourceStatus(bodyText),
     vehicleCategory: detectVehicleCategory(`${fullTitle} ${bodyText}`, stub.stockUrl) || stub.vehicleCategory,
     sourceCategory: stub.sourceCategory || "",
