@@ -111,11 +111,9 @@ export function matchStatusLabel(matchStatus) {
 export function sourceStatusLabel(sourceStatus) {
   switch (sourceStatus) {
     case "reserved":
-      return "Reserved";
     case "sold":
-      return "Sold";
     case "deposit_taken":
-      return "Deposit Taken";
+      return "Reserved";
     case "available":
       return "Available";
     default:

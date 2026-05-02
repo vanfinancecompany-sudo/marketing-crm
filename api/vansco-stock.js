@@ -256,26 +256,15 @@ function extractLabelValue(html, label) {
 }
 
 function extractYearValue(html, fallbackText = "") {
-  const labeledYear = normalizeYear(extractLabelValue(html, "Year"));
-  if (labeledYear) return labeledYear;
-  return normalizeYear(fallbackText);
+  return "";
 }
 
 function extractMileageValue(html) {
-  const labeledMileage = compactWhitespace(extractLabelValue(html, "Mileage"));
-  const match = labeledMileage.match(/\b([0-9][0-9,]{1,})\s*(?:miles|mile|mi)\b/i);
-  if (match?.[0]) return compactWhitespace(match[0]);
-
-  const bodyMatch = decodeHtml(html).match(/\b([0-9][0-9,]{1,})\s*(?:miles|mile|mi)\b/i);
-  return bodyMatch?.[0] ? compactWhitespace(bodyMatch[0]) : "";
+  return "";
 }
 
 function extractPrice(html) {
-  const metaPrice = extractMetaContent(html, "product:price:amount");
-  if (metaPrice) return `£${metaPrice}`;
-
-  const matches = Array.from(html.matchAll(PRICE_PATTERN)).map((match) => decodeHtml(match[0]));
-  return matches[0] || "";
+  return "";
 }
 
 function isValidVehicleImage(url) {
@@ -398,9 +387,9 @@ function extractStrictRegistrationCandidate(rawValue, rejectedCandidates) {
 function detectSourceStatus(text) {
   const normalized = compactWhitespace(text);
   if (!normalized) return "unknown";
-  if (/deposit taken/i.test(normalized)) return "deposit_taken";
+  if (/deposit taken/i.test(normalized)) return "reserved";
   if (/reserved/i.test(normalized)) return "reserved";
-  if (/\bsold\b/i.test(normalized)) return "sold";
+  if (/\bsold\b/i.test(normalized)) return "reserved";
   if (/enquire now|finance options|reserve now|available/i.test(normalized)) return "available";
   return "unknown";
 }

@@ -161,13 +161,6 @@ function WatchCard({ record, onRecordSaved }) {
         <h3>{record.title || "Untitled vehicle"}</h3>
 
         <div className="vehicle-card__meta">Registration: {record.registration || "Not found"}</div>
-        <div className="vehicle-card__meta">Price: {record.price || "Not found"}</div>
-        <div className="vehicle-card__meta">
-          {record.year || "Year not found"} {record.mileage ? `| ${record.mileage}` : ""}
-        </div>
-        <div className="vehicle-card__meta">First seen: {formatWatchTimestamp(record.firstSeenAt)}</div>
-        <div className="vehicle-card__meta">Last checked: {formatWatchTimestamp(record.lastCheckedAt)}</div>
-        <div className="vehicle-card__meta">Last seen on Vansco: {formatWatchTimestamp(record.lastSeenAt)}</div>
 
         <div className="field">
           <span className="field__label">Workflow status</span>
