@@ -140,6 +140,15 @@ function cleanTimestamp(value) {
 function cleanWatchRecordPayload(payload) {
   const cleaned = { ...payload };
 
+  if ("id" in cleaned) {
+    const idValue = compactWhitespace(cleaned.id);
+    if (idValue) {
+      cleaned.id = idValue;
+    } else {
+      delete cleaned.id;
+    }
+  }
+
   const timestampFields = ["first_seen_at", "last_seen_at", "last_checked_at", "created_at", "updated_at"];
   timestampFields.forEach((field) => {
     if (!(field in cleaned)) return;
