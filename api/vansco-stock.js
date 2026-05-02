@@ -355,6 +355,17 @@ function collectBracketedCandidates(text) {
   return matches;
 }
 
+function extractRegistrationFromHeadingHtml(html) {
+  const headingMatch = html.match(/<h1[^>]*>[\s\S]*?\(([A-Z0-9 ]{5,10})\)[\s\S]*?<\/h1>/i);
+  return headingMatch?.[1] ? headingMatch[1] : "";
+}
+
+function extractRegistrationFromOgTitle(html) {
+  const ogTitle = extractMetaContent(html, "og:title");
+  const candidates = collectBracketedCandidates(ogTitle);
+  return candidates[0] || "";
+}
+
 function extractRegistrationFromTitle(title, rejectedCandidates) {
   const candidates = collectBracketedCandidates(title);
   for (const candidate of candidates) {
@@ -400,7 +411,13 @@ function enrichVehicleStub(stub, html, diagnostics) {
   const subtitle = extractHeading(html, "h2");
   const fullTitle = compactWhitespace([pageTitle, subtitle].filter(Boolean).join(" - "));
   const rejectedCandidates = diagnostics.rejectedRegistrationCandidates;
-  const titleCandidates = [stub.title, fullTitle, pageTitle].filter(Boolean);
+  const titleCandidates = [
+    extractRegistrationFromHeadingHtml(html),
+    extractRegistrationFromOgTitle(html),
+    stub.title,
+    fullTitle,
+    pageTitle,
+  ].filter(Boolean);
   let bracketRegistration = "";
   let usedBracketTitleSource = false;
 
@@ -415,8 +432,7 @@ function enrichVehicleStub(stub, html, diagnostics) {
 
   const registration =
     bracketRegistration ||
-    extractStrictRegistrationCandidate(extractLabelValue(html, "Registration"), rejectedCandidates) ||
-    extractStrictRegistrationCandidate(extractLabelValue(html, "Reg"), rejectedCandidates);
+    extractStrictRegistrationCandidate(extractLabelValue(html, "Registration"), rejectedCandidates);
 
   if (registration && usedBracketTitleSource) {
     diagnostics.registrationsExtractedFromTitleBrackets += 1;
