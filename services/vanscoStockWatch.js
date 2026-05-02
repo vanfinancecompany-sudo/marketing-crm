@@ -121,6 +121,55 @@ function compactWhitespace(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+function cleanOptionalText(value) {
+  const text = compactWhitespace(value);
+  return text || null;
+}
+
+function cleanTimestamp(value) {
+  if (!value) return null;
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return date.toISOString();
+}
+
+function cleanWatchRecordPayload(payload) {
+  const cleaned = { ...payload };
+
+  const timestampFields = ["first_seen_at", "last_seen_at", "last_checked_at", "created_at", "updated_at"];
+  timestampFields.forEach((field) => {
+    if (!(field in cleaned)) return;
+
+    const nextValue = cleanTimestamp(cleaned[field]);
+    if (nextValue) {
+      cleaned[field] = nextValue;
+    } else {
+      delete cleaned[field];
+    }
+  });
+
+  ["title", "registration", "image_url", "stock_url", "price", "mileage", "year", "vehicle_category", "notes"].forEach(
+    (field) => {
+      if (!(field in cleaned)) return;
+      if (field === "stock_url") {
+        cleaned[field] = compactWhitespace(cleaned[field]) || VAN_SCO_SOURCE_URL;
+        return;
+      }
+
+      const nextValue = cleanOptionalText(cleaned[field]);
+      if (nextValue === null) {
+        delete cleaned[field];
+      } else {
+        cleaned[field] = nextValue;
+      }
+    }
+  );
+
+  return cleaned;
+}
+
 function convertStoredImage(value) {
   const text = compactWhitespace(value);
   if (!text) return "";
@@ -669,12 +718,12 @@ async function fetchVanscoSourceHtml(pipeline) {
 }
 
 function mergeRecordData(base, next) {
-  return {
+  return cleanWatchRecordPayload({
     ...base,
     ...next,
-    notes: base.notes || next.notes || "",
+    notes: base.notes || next.notes || null,
     first_seen_at: base.first_seen_at || next.first_seen_at,
-  };
+  });
 }
 
 export async function runVanscoStockCheck(pipeline) {
@@ -690,7 +739,7 @@ export async function runVanscoStockCheck(pipeline) {
   );
   const localLookup = buildVehicleLookup(localVehicles);
   const existingByKey = new Map(existingRecords.map((record) => [record.vehicleKey, record]));
-  const now = sourcePayload.fetchedAt || new Date().toISOString();
+  const now = cleanTimestamp(sourcePayload.fetchedAt) || new Date().toISOString();
   const matchedLocalKeys = new Set();
   const nextRecords = [];
 
@@ -723,7 +772,7 @@ export async function runVanscoStockCheck(pipeline) {
         }
       : {
           workflow_status: "new",
-          notes: "",
+          notes: null,
           first_seen_at: now,
         };
 
@@ -762,9 +811,8 @@ export async function runVanscoStockCheck(pipeline) {
         }
       : {
           workflow_status: "new",
-          notes: "",
+          notes: null,
           first_seen_at: now,
-          last_seen_at: "",
         };
 
     nextRecords.push(
