@@ -968,9 +968,12 @@ export async function runVanscoStockCheck(pipeline) {
     parserWarnings: [...(parsedHtml.parserWarnings || [])],
     sourceDuplicateKeysCollapsed: parsedHtml.duplicateCount || 0,
     upsertDuplicateKeysCollapsed: 0,
+    upsertPayloadCount: 0,
+    idsRemovedBeforeUpsert: 0,
+    finalPayloadContainsId: false,
     localWarning,
     sourceTable: sourceTable || "",
-    endpointUsed: sourcePayload.endpointUsed || SOURCE_URL,
+    endpointUsed: sourcePayload.endpointUsed || VAN_SCO_SOURCE_URL,
     pagesFetched: sourcePayload.pagesFetched || 1,
     candidateLinksFound: sourcePayload.diagnostics?.candidateLinksFound || 0,
     sampleTitles: sourcePayload.diagnostics?.sampleTitles || parsedSourceVehicles.slice(0, 3).map((vehicle) => vehicle.title),
@@ -1081,10 +1084,20 @@ export async function runVanscoStockCheck(pipeline) {
     diagnostics.recordsWithIdAfterCleaning = cleanedBatch.filter((record) => "id" in record).length;
     diagnostics.idsRemovedDuringCleaning =
       diagnostics.recordsWithIdBeforeCleaning - diagnostics.recordsWithIdAfterCleaning;
+    const finalPayload = cleanedBatch.map(({ id, ...rest }) => rest);
+    diagnostics.upsertPayloadCount = finalPayload.length;
+    diagnostics.idsRemovedBeforeUpsert = cleanedBatch.filter((record) => "id" in record).length;
+    diagnostics.finalPayloadContainsId = finalPayload.some((record) => "id" in record);
+
+    if (diagnostics.finalPayloadContainsId) {
+      const payloadError = new Error("Vansco Stock Watch payload still contains id before upsert");
+      payloadError.debugInfo = diagnostics;
+      throw payloadError;
+    }
 
     const { error } = await supabase
       .from(WATCH_TABLE)
-      .upsert(cleanedBatch, { onConflict: "pipeline,vehicle_key" });
+      .upsert(finalPayload, { onConflict: "pipeline,vehicle_key" });
 
     if (error) {
       const wrappedError = new Error(`Failed to save Vansco Stock Watch results: ${error.message}`);

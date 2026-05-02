@@ -408,6 +408,13 @@ export default function VanscoStockWatchPage() {
             <div className="vehicle-card__meta">
               Upsert duplicate keys collapsed: {activeDebug.upsertDuplicateKeysCollapsed || 0}
             </div>
+            <div className="vehicle-card__meta">Upsert payload count: {activeDebug.upsertPayloadCount || 0}</div>
+            <div className="vehicle-card__meta">
+              ID fields removed before upsert: {activeDebug.idsRemovedBeforeUpsert || 0}
+            </div>
+            <div className="vehicle-card__meta">
+              Final payload contains id: {activeDebug.finalPayloadContainsId ? "yes" : "no"}
+            </div>
             {activeDebug.sourceTable ? (
               <div className="vehicle-card__meta">CRM stock table: {activeDebug.sourceTable}</div>
             ) : null}
