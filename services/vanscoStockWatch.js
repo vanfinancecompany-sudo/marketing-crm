@@ -3,6 +3,7 @@ import { fetchFinanceMarketingVehicles, fetchRentMarketingVehicles } from "./mar
 
 const WATCH_TABLE = "vansco_stock_watch";
 const VAN_SCO_SOURCE_URL = "https://www.vansco.co.uk/all-stock/";
+const VAN_SCO_REQUEST_TIMEOUT_MS = 58000;
 const PRICE_PATTERN = /(?:\u00A3|&pound;)\s?[0-9][0-9,]*/i;
 const YEAR_PATTERN = /\b(20\d{2}|19\d{2})\b/;
 const MILEAGE_PATTERN = /\b([0-9][0-9,]{1,})\s*(?:miles|mile|mi)\b/i;
@@ -970,11 +971,37 @@ async function fetchVanscoSourceHtml(pipeline, options = {}) {
     params.set("detailFetchMode", options.detailFetchMode);
   }
 
-  const response = await fetch(`/api/vansco-stock?${params.toString()}`, {
-    headers: {
-      accept: "application/json",
-    },
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), VAN_SCO_REQUEST_TIMEOUT_MS);
+
+  let response;
+  try {
+    response = await fetch(`/api/vansco-stock?${params.toString()}`, {
+      headers: {
+        accept: "application/json",
+      },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      const timeoutError = new Error(
+        "Vansco Stock Watch timed out before the server responded. Try Fast check or Standard check, or retry Full check later."
+      );
+      timeoutError.debugInfo = {
+        endpointUsed: `/api/vansco-stock?${params.toString()}`,
+        requestTimedOut: true,
+        requestTimeoutMs: VAN_SCO_REQUEST_TIMEOUT_MS,
+        partialScan: true,
+        lowConfidenceWarning:
+          "Partial Vansco scan. Results are review-only and should not be used for stock decisions.",
+      };
+      throw timeoutError;
+    }
+
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 
   const text = await response.text();
   let payload = {};

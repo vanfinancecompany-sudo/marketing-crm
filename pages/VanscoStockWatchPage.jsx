@@ -554,6 +554,11 @@ export default function VanscoStockWatchPage() {
             Partial Vansco scan. Results are review-only and should not be used for stock decisions.
           </div>
         ) : null}
+        {activeDebug?.requestTimedOut ? (
+          <div className="notice-banner notice-banner--error">
+            The browser timed out waiting for the Vansco check to finish. Full scans may exceed Vercel request limits.
+          </div>
+        ) : null}
 
         {activeDebug ? (
           <details className="vansco-debug-panel" open={showDiagnostics} onToggle={(event) => setShowDiagnostics(event.currentTarget.open)}>
