@@ -1026,6 +1026,14 @@ async function fetchVanscoSourceBatch(pipeline, options = {}) {
   return payload;
 }
 
+export async function clearVanscoWatchRecords(pipeline) {
+  const { error } = await supabase.from(WATCH_TABLE).delete().eq("pipeline", pipeline);
+
+  if (error) {
+    throw new Error(`Failed to clear Vansco Stock Watch records: ${error.message}`);
+  }
+}
+
 function mergeVanscoBatchPayloads(batchPayloads, detailBatchSize) {
   const firstPayload = batchPayloads[0] || {};
   const mergedVehicles = batchPayloads.flatMap((payload) => payload.vehicles || []);
@@ -1104,15 +1112,27 @@ function mergeVanscoBatchPayloads(batchPayloads, detailBatchSize) {
 }
 
 async function fetchVanscoSourceHtml(pipeline, options = {}) {
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
   if (options.detailFetchMode !== "full") {
     return fetchVanscoSourceBatch(pipeline, options);
   }
 
-  const detailBatchSize = Math.max(1, Number(options.detailBatchSize || 40));
+  const detailBatchSize = Math.max(1, Number(options.detailBatchSize || 25));
   const batchPayloads = [];
   let detailOffset = 0;
 
   while (true) {
+    if (onProgress) {
+      onProgress({
+        stage: batchPayloads.length === 0 ? "discovering" : "processing",
+        message:
+          batchPayloads.length === 0
+            ? "Discovering Vansco vehicles..."
+            : `Processing batch ${batchPayloads.length + 1}...`,
+        processedVehicles: detailOffset,
+      });
+    }
+
     const batchPayload = await fetchVanscoSourceBatch(pipeline, {
       ...options,
       detailOffset,
@@ -1121,6 +1141,26 @@ async function fetchVanscoSourceHtml(pipeline, options = {}) {
     batchPayloads.push(batchPayload);
 
     const batchCount = (batchPayload.vehicles || []).length;
+    const totalVehicles = batchPayload.diagnostics?.totalVehicleUrlsFound || batchCount;
+    const processedVehicles = Math.min(detailOffset + batchCount, totalVehicles);
+    const batchTotal = Math.max(1, Math.ceil(totalVehicles / detailBatchSize));
+    const batchIndex = Math.min(batchPayloads.length, batchTotal);
+
+    if (onProgress) {
+      onProgress({
+        stage: "processing",
+        message: `Processing batch ${batchIndex} of ${batchTotal}...`,
+        processedVehicles,
+        totalVehicles,
+        batchIndex,
+        batchTotal,
+        validRegistrationsFound: batchPayload.diagnostics?.vehiclesEnrichedWithRegistration || 0,
+        imagesFound: batchPayload.diagnostics?.vehiclesEnrichedWithImage || 0,
+        reservedStatusesFound: batchPayload.diagnostics?.vehiclesWithSourceStatus || 0,
+        percent: totalVehicles ? Math.min(90, Math.round((processedVehicles / totalVehicles) * 90)) : 0,
+      });
+    }
+
     if (!batchPayload.hasMore || batchCount === 0) break;
     detailOffset += batchCount;
   }
@@ -1164,11 +1204,22 @@ function mergeRecordData(base, next) {
 }
 
 export async function runVanscoStockCheck(pipeline, options = {}) {
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
   const [{ vehicles: localVehicles, sourceTable, warning: localWarning = "", registrationField = "" }, existingRecords, sourcePayload] = await Promise.all([
     fetchLocalStockGroup(pipeline),
     fetchVanscoWatchRecords(pipeline),
-    fetchVanscoSourceHtml(pipeline, options),
+    fetchVanscoSourceHtml(pipeline, { ...options, onProgress }),
   ]);
+
+  if (onProgress) {
+    onProgress({
+      stage: "classifying",
+      message: "Classifying results...",
+      processedVehicles: sourcePayload.diagnostics?.totalVehicleUrlsFound || 0,
+      totalVehicles: sourcePayload.diagnostics?.totalVehicleUrlsFound || 0,
+      percent: 94,
+    });
+  }
 
   const parsedHtml = Array.isArray(sourcePayload.vehicles) && sourcePayload.vehicles.length
     ? {
@@ -1487,6 +1538,18 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
     }
 
     const dedupedBatch = dedupeWatchRecords(nextRecords);
+    if (onProgress) {
+      onProgress({
+        stage: "save-results",
+        message: "Saving results...",
+        processedVehicles: dedupedBatch.records.length,
+        totalVehicles: sourcePayload.diagnostics?.totalVehicleUrlsFound || dedupedBatch.records.length,
+        validRegistrationsFound: diagnostics.vanscoValidRegistrationsFound,
+        imagesFound: diagnostics.vehiclesEnrichedWithImage,
+        reservedStatusesFound: diagnostics.vehiclesWithSourceStatus,
+        percent: 98,
+      });
+    }
     diagnostics.upsertDuplicateKeysCollapsed = dedupedBatch.duplicateCount;
     const cleanedBatch = dedupedBatch.records.map(cleanWatchRecordPayload);
     diagnostics.recordsWithIdBeforeCleaning = dedupedBatch.records.filter((record) => "id" in record).length;
@@ -1516,6 +1579,19 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
   }
 
   const refreshedRecords = await fetchVanscoWatchRecords(pipeline);
+
+  if (onProgress) {
+    onProgress({
+      stage: "complete",
+      message: "Complete",
+      processedVehicles: sourcePayload.diagnostics?.totalVehicleUrlsFound || refreshedRecords.length,
+      totalVehicles: sourcePayload.diagnostics?.totalVehicleUrlsFound || refreshedRecords.length,
+      validRegistrationsFound: diagnostics.vanscoValidRegistrationsFound,
+      imagesFound: diagnostics.vehiclesEnrichedWithImage,
+      reservedStatusesFound: diagnostics.vehiclesWithSourceStatus,
+      percent: 100,
+    });
+  }
 
   return {
     records: refreshedRecords,

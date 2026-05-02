@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  clearVanscoWatchRecords,
   DETAIL_FETCH_PRESETS,
   WATCH_FILTERS,
   WATCH_PIPELINES,
@@ -22,10 +23,10 @@ const DEFAULT_FILTERS = {
 };
 
 const RUNNING_STEPS = [
-  { key: "fetch-sitemap", label: "Fetching Vansco category pages..." },
-  { key: "found-urls", label: "Found vehicle URLs" },
-  { key: "fetch-details", label: "Fetching vehicle details..." },
-  { key: "compare-stock", label: "Comparing against current stock..." },
+  { key: "clearing", label: "Clearing old results" },
+  { key: "discovering", label: "Discovering Vansco vehicles" },
+  { key: "processing", label: "Processing batches" },
+  { key: "classifying", label: "Classifying results" },
   { key: "save-results", label: "Saving results..." },
   { key: "complete", label: "Complete" },
 ];
@@ -232,6 +233,7 @@ export default function VanscoStockWatchPage() {
     cars: null,
   });
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [runningStatus, setRunningStatus] = useState(null);
 
   useEffect(() => {
     if (!checkingPipeline || !checkStartedAt) return undefined;
@@ -334,15 +336,46 @@ export default function VanscoStockWatchPage() {
   }, [activeRecords]);
 
   async function handleRunCheck() {
+    const confirmed = window.confirm(
+      `Run a fresh Vansco check for ${pipelineLabel(selectedPipeline)}? This will clear previous watch results for this tab only. It will not delete CRM stock.`
+    );
+
+    if (!confirmed) return;
+
     setCheckingPipeline(selectedPipeline);
     setErrorMessage("");
     setSuccessMessage("");
     const startedAt = new Date().toISOString();
     setCheckStartedAt(startedAt);
     setElapsedSeconds(0);
+    setRunningStatus({
+      stage: "clearing",
+      message: "Clearing old results...",
+      processedVehicles: 0,
+      totalVehicles: 0,
+      percent: 4,
+      validRegistrationsFound: 0,
+      imagesFound: 0,
+      reservedStatusesFound: 0,
+    });
 
     try {
-      const result = await runVanscoStockCheck(selectedPipeline, { detailFetchMode });
+      await clearVanscoWatchRecords(selectedPipeline);
+      setRecordsByPipeline((prev) => ({
+        ...prev,
+        [selectedPipeline]: [],
+      }));
+
+      const result = await runVanscoStockCheck(selectedPipeline, {
+        detailFetchMode: "full",
+        detailBatchSize: 25,
+        onProgress: (progress) => {
+          setRunningStatus((prev) => ({
+            ...prev,
+            ...progress,
+          }));
+        },
+      });
       setRecordsByPipeline((prev) => ({
         ...prev,
         [selectedPipeline]: result.records,
@@ -362,6 +395,7 @@ export default function VanscoStockWatchPage() {
       setErrorMessage(error.message || "Vansco Stock Watch check failed.");
     } finally {
       setCheckingPipeline("");
+      setRunningStatus((prev) => prev?.stage === "complete" ? prev : null);
     }
   }
 
@@ -376,8 +410,7 @@ export default function VanscoStockWatchPage() {
 
   const activeDebug = debugByPipeline[selectedPipeline];
   const activePreset =
-    DETAIL_FETCH_PRESETS.find((preset) => preset.value === detailFetchMode) || DETAIL_FETCH_PRESETS[1];
-  const runningProgress = buildRunningProgress(elapsedSeconds, activePreset);
+    DETAIL_FETCH_PRESETS.find((preset) => preset.value === detailFetchMode) || DETAIL_FETCH_PRESETS[2];
   const isCheckingActiveTab = checkingPipeline === selectedPipeline;
 
   return (
@@ -391,28 +424,13 @@ export default function VanscoStockWatchPage() {
               existing stock records.
             </p>
             <div className="vehicle-card__meta">
-              Detail fetch mode: {activePreset.label} {activePreset.limit ? `(${activePreset.limit} detail pages)` : "(full detail pass)"}
+              Detail fetch mode: Full check (automatic batched full scan)
             </div>
             <div className="vehicle-card__meta">
-              Fast = review-only partial scan. Full = all detail URLs for comparison if completed, now fetched in smaller batches.
+              One click runs a full scan for this tab, clears old watch rows for this tab only, and processes all batches automatically.
             </div>
           </div>
           <div className="vansco-action-stack">
-            <label className="field vansco-action-stack__field">
-              <span className="field__label">Detail fetch limit</span>
-              <select
-                className="field__input"
-                value={detailFetchMode}
-                onChange={(event) => setDetailFetchMode(event.target.value)}
-                disabled={isCheckingActiveTab}
-              >
-                {DETAIL_FETCH_PRESETS.map((preset) => (
-                  <option key={preset.value} value={preset.value}>
-                    {preset.label}
-                  </option>
-                ))}
-              </select>
-            </label>
             <button
               className="button button--primary vansco-run-button"
               type="button"
@@ -453,18 +471,24 @@ export default function VanscoStockWatchPage() {
         {isCheckingActiveTab ? (
           <div className="vansco-progress-panel">
             <div className="vansco-progress-panel__header">
-              <strong>{runningProgress.detailText}</strong>
-              <span>{runningProgress.percent}%</span>
+              <strong>{runningStatus?.message || "Running full Vansco scan..."}</strong>
+              <span>{runningStatus?.percent ?? 0}%</span>
             </div>
             <div className="vansco-progress-bar" aria-hidden="true">
-              <div className="vansco-progress-bar__fill" style={{ width: `${runningProgress.percent}%` }} />
+              <div className="vansco-progress-bar__fill" style={{ width: `${runningStatus?.percent ?? 0}%` }} />
             </div>
             <div className="vehicle-card__meta">
               Started at: {formatWatchTimestamp(checkStartedAt)} | Running for {formatElapsed(elapsedSeconds)}
             </div>
+            <div className="vehicle-card__meta">
+              Total URLs found: {runningStatus?.totalVehicles || 0} | Processed: {runningStatus?.processedVehicles || 0}
+            </div>
+            <div className="vehicle-card__meta">
+              Valid registrations: {runningStatus?.validRegistrationsFound || 0} | Images: {runningStatus?.imagesFound || 0} | Reserved statuses: {runningStatus?.reservedStatusesFound || 0}
+            </div>
             <div className="vansco-progress-steps">
               {RUNNING_STEPS.map((step, index) => {
-                const currentIndex = RUNNING_STEPS.findIndex((item) => item.key === runningProgress.currentStep);
+                const currentIndex = RUNNING_STEPS.findIndex((item) => item.key === runningStatus?.stage);
                 const status =
                   index < currentIndex ? "done" : index === currentIndex ? "active" : "pending";
 
@@ -482,9 +506,7 @@ export default function VanscoStockWatchPage() {
             ) : null}
             {elapsedSeconds >= 55 ? (
               <div className="notice-banner notice-banner--error">
-                {detailFetchMode === "full"
-                  ? "Full scan is running in staged batches, so it can take a couple of minutes."
-                  : "This check may still hit a Vercel timeout. Consider using Fast check or retrying later."}
+                Full scan is running in staged batches, so it can take a couple of minutes.
               </div>
             ) : null}
           </div>
