@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { fetchFinanceMarketingVehicles, fetchRentMarketingVehicles } from "../services/marketingVehicles.js";
 import {
   clearVanscoWatchRecords,
   DETAIL_FETCH_PRESETS,
@@ -31,55 +32,44 @@ const RUNNING_STEPS = [
   { key: "complete", label: "Complete" },
 ];
 
+function normalizeWatchRegistration(value) {
+  const text = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!text || text.length < 5 || text.length > 8) return "";
+  if (!/[A-Z]/.test(text) || !/[0-9]/.test(text)) return "";
+  return text;
+}
+
+function isReservedLikeStatus(status) {
+  return ["reserved", "sold", "deposit_taken"].includes(status);
+}
+
+function applySafeExactRegistrationMatches(records, localRegistrationSet) {
+  if (!localRegistrationSet?.size) return records;
+
+  return records.map((record) => {
+    const registration = normalizeWatchRegistration(record.registration);
+    const hasExactLocalMatch = registration && localRegistrationSet.has(registration);
+
+    if (!hasExactLocalMatch) return record;
+
+    const matchStatus = isReservedLikeStatus(record.sourceStatus)
+      ? "reserved_still_listed"
+      : "listed";
+
+    return {
+      ...record,
+      originalMatchStatus: record.originalMatchStatus || record.matchStatus,
+      matchStatus,
+      safeExactRegistrationMatch: true,
+    };
+  });
+}
+
 function formatElapsed(seconds) {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   if (mins <= 0) return `${secs}s`;
   return `${mins}m ${String(secs).padStart(2, "0")}s`;
-}
-
-function buildRunningProgress(elapsedSeconds, preset) {
-  const limitText = preset?.limit ? `${preset.limit}` : "all possible";
-  if (elapsedSeconds < 4) {
-    return {
-      percent: 12,
-      currentStep: "fetch-sitemap",
-      detailText: "Fetching Vansco category pages...",
-    };
-  }
-  if (elapsedSeconds < 8) {
-    return {
-      percent: 24,
-      currentStep: "found-urls",
-      detailText: "Finding vehicle detail URLs...",
-    };
-  }
-  if (elapsedSeconds < 24) {
-    return {
-      percent: 48,
-      currentStep: "fetch-details",
-      detailText: `Fetching vehicle details for up to ${limitText} vehicles...`,
-    };
-  }
-  if (elapsedSeconds < 34) {
-    return {
-      percent: 72,
-      currentStep: "compare-stock",
-      detailText: "Comparing against selected CRM stock...",
-    };
-  }
-  if (elapsedSeconds < 48) {
-    return {
-      percent: 88,
-      currentStep: "save-results",
-      detailText: "Saving comparison results...",
-    };
-  }
-  return {
-    percent: 94,
-    currentStep: "save-results",
-    detailText: "Finishing and saving results...",
-  };
 }
 
 function SummaryCard({ label, value, tone = "default" }) {
@@ -162,6 +152,9 @@ function WatchCard({ record, onRecordSaved }) {
         <h3>{record.title || "Untitled vehicle"}</h3>
 
         <div className="vehicle-card__meta">Registration: {record.registration || "Not found"}</div>
+        {record.safeExactRegistrationMatch ? (
+          <div className="vehicle-card__meta">Exact registration match found in this CRM stock tab.</div>
+        ) : null}
 
         <div className="field">
           <span className="field__label">Workflow status</span>
@@ -220,11 +213,16 @@ export default function VanscoStockWatchPage() {
     rent2buy: [],
     cars: [],
   });
+  const [localRegistrationsByPipeline, setLocalRegistrationsByPipeline] = useState({
+    finance: new Set(),
+    rent2buy: new Set(),
+    cars: new Set(),
+  });
   const [loadingPipeline, setLoadingPipeline] = useState("");
   const [checkingPipeline, setCheckingPipeline] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [detailFetchMode, setDetailFetchMode] = useState("standard");
+  const [detailFetchMode] = useState("standard");
   const [checkStartedAt, setCheckStartedAt] = useState("");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [debugByPipeline, setDebugByPipeline] = useState({
@@ -246,6 +244,45 @@ export default function VanscoStockWatchPage() {
 
     return () => window.clearInterval(interval);
   }, [checkingPipeline, checkStartedAt]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadLocalRegistrations() {
+      try {
+        let vehicles = [];
+
+        if (selectedPipeline === "finance") {
+          vehicles = await fetchFinanceMarketingVehicles(120);
+        } else if (selectedPipeline === "rent2buy") {
+          vehicles = await fetchRentMarketingVehicles(120);
+        }
+
+        if (!active) return;
+
+        setLocalRegistrationsByPipeline((prev) => ({
+          ...prev,
+          [selectedPipeline]: new Set(
+            vehicles
+              .map((vehicle) => normalizeWatchRegistration(vehicle.reg || vehicle.registration || vehicle.title))
+              .filter(Boolean)
+          ),
+        }));
+      } catch {
+        if (!active) return;
+        setLocalRegistrationsByPipeline((prev) => ({
+          ...prev,
+          [selectedPipeline]: new Set(),
+        }));
+      }
+    }
+
+    loadLocalRegistrations();
+
+    return () => {
+      active = false;
+    };
+  }, [selectedPipeline]);
 
   useEffect(() => {
     let active = true;
@@ -277,7 +314,12 @@ export default function VanscoStockWatchPage() {
   }, [selectedPipeline]);
 
   const activeFilter = filtersByPipeline[selectedPipeline] || "missing";
-  const activeRecords = recordsByPipeline[selectedPipeline] || [];
+  const rawActiveRecords = recordsByPipeline[selectedPipeline] || [];
+  const activeLocalRegistrations = localRegistrationsByPipeline[selectedPipeline] || new Set();
+  const activeRecords = useMemo(
+    () => applySafeExactRegistrationMatches(rawActiveRecords, activeLocalRegistrations),
+    [activeLocalRegistrations, rawActiveRecords]
+  );
 
   const filteredRecords = useMemo(() => {
     if (activeFilter === "all") {
@@ -327,13 +369,18 @@ export default function VanscoStockWatchPage() {
     };
   }, [activeRecords]);
 
+  const exactUiMatches = useMemo(
+    () => activeRecords.filter((record) => record.safeExactRegistrationMatch).length,
+    [activeRecords]
+  );
+
   const lastCheckedAt = useMemo(() => {
-    return activeRecords.reduce((latest, record) => {
+    return rawActiveRecords.reduce((latest, record) => {
       if (!record.lastCheckedAt) return latest;
       if (!latest) return record.lastCheckedAt;
       return new Date(record.lastCheckedAt) > new Date(latest) ? record.lastCheckedAt : latest;
     }, "");
-  }, [activeRecords]);
+  }, [rawActiveRecords]);
 
   async function handleRunCheck() {
     const confirmed = window.confirm(
@@ -429,6 +476,9 @@ export default function VanscoStockWatchPage() {
             <div className="vehicle-card__meta">
               One click runs a full scan for this tab, clears old watch rows for this tab only, and processes all batches automatically.
             </div>
+            <div className="vehicle-card__meta">
+              Safe exact-reg display: exact CRM registration matches are allowed to show as Already listed / Reserved even if the scan is low-confidence. Missing/removal decisions remain blocked by scan confidence.
+            </div>
           </div>
           <div className="vansco-action-stack">
             <button
@@ -465,7 +515,7 @@ export default function VanscoStockWatchPage() {
         </div>
 
         <div className="vehicle-card__meta">
-          Selected tab: {pipelineLabel(selectedPipeline)} | Last checked: {formatWatchTimestamp(lastCheckedAt)}
+          Selected tab: {pipelineLabel(selectedPipeline)} | Last checked: {formatWatchTimestamp(lastCheckedAt)} | Local regs loaded: {activeLocalRegistrations.size} | Exact reg matches shown: {exactUiMatches}
         </div>
 
         {isCheckingActiveTab ? (
@@ -542,6 +592,11 @@ export default function VanscoStockWatchPage() {
         <div className="notice-banner">
           Registration is the comparison key. Vehicles without a valid registration are review-only.
         </div>
+        {exactUiMatches ? (
+          <div className="notice-banner notice-banner--success">
+            {exactUiMatches} exact registration match{exactUiMatches === 1 ? "" : "es"} found in this CRM stock tab. These are shown as Already listed or Reserved on Vansco even if the scan confidence is low.
+          </div>
+        ) : null}
 
         <div className="vansco-tabs vansco-filter-tabs">
           {WATCH_FILTERS.map((filter) => (
@@ -568,7 +623,7 @@ export default function VanscoStockWatchPage() {
         ) : null}
         {activeDebug?.partialScan ? (
           <div className="notice-banner notice-banner--error">
-            Partial Vansco scan. Results are review-only and should not be used for stock decisions.
+            Partial Vansco scan. Results are review-only for missing/removal decisions. Exact registration matches can still be shown safely.
           </div>
         ) : null}
         {activeDebug?.requestTimedOut ? (
@@ -653,6 +708,9 @@ export default function VanscoStockWatchPage() {
             </div>
             <div className="vehicle-card__meta">
               Exact registration overlap count: {activeDebug.exactRegistrationOverlapCount || 0}
+            </div>
+            <div className="vehicle-card__meta">
+              UI exact registration matches shown: {exactUiMatches}
             </div>
             <div className="vehicle-card__meta">
               Sample matched registrations: {(activeDebug.sampleMatchedRegistrations || []).join(", ") || "none"}
