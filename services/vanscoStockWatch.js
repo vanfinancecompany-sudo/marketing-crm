@@ -52,7 +52,8 @@ export const WORKFLOW_OPTIONS = [
 export const WATCH_FILTERS = [
   { value: "missing", label: "Missing from my stock" },
   { value: "listed", label: "Already listed" },
-  { value: "no_longer_on_vansco", label: "No longer on Vansco" },
+  { value: "needs_review", label: "Needs Review" },
+  { value: "no_longer_on_vansco", label: "No longer on Vansco - high confidence only" },
   { value: "reserved_still_listed", label: "Reserved on Vansco" },
   { value: "new", label: "New" },
   { value: "review_later", label: "Review Later" },
@@ -82,8 +83,10 @@ export function matchStatusLabel(matchStatus) {
   switch (matchStatus) {
     case "listed":
       return "Already listed";
+    case "needs_review":
+      return "Needs Review";
     case "no_longer_on_vansco":
-      return "No longer on Vansco";
+      return "No longer on Vansco - high confidence only";
     case "reserved_still_listed":
       return "Reserved on Vansco but still listed by me";
     case "missing":
@@ -307,6 +310,34 @@ function isStrongVehicleTitle(value) {
   if (!text || text.length < 18) return false;
   const words = text.split(/\s+/).filter(Boolean);
   return words.length >= 3;
+}
+
+function hasValidRegistration(vehicle) {
+  return Boolean(normalizeRegistration(vehicle?.registration));
+}
+
+function computeRegistrationConfidence({
+  sourceVehicles,
+  detailPagesFailed,
+  detailFetchLimitApplied,
+  detailFetchMode,
+  parserWarnings,
+}) {
+  const validRegistrations = sourceVehicles.filter((vehicle) => hasValidRegistration(vehicle)).length;
+  const totalVehicles = sourceVehicles.length;
+  const registrationCoverage = totalVehicles ? validRegistrations / totalVehicles : 0;
+  const detailLimitHit = detailFetchMode !== "full" || (detailFetchLimitApplied > 0 && totalVehicles >= detailFetchLimitApplied);
+  const scanComplete = !detailPagesFailed && !detailLimitHit && !(parserWarnings || []).some((warning) => /limited to|timeout|fewer than 10/i.test(warning));
+  const highConfidence = scanComplete && validRegistrations >= 25 && registrationCoverage >= 0.8;
+
+  return {
+    validRegistrations,
+    totalVehicles,
+    registrationCoverage,
+    scanComplete,
+    registrationConfidence: highConfidence ? "high" : "low",
+    highConfidence,
+  };
 }
 
 function vehicleCompletenessScore(vehicle) {
@@ -1028,9 +1059,26 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
     matchesByRegistration: 0,
     matchesByUrl: 0,
     matchesByFallbackTitle: 0,
+    vanscoValidRegistrationsFound: 0,
+    crmValidRegistrationsFound: localVehicles.filter((vehicle) => hasValidRegistration(vehicle)).length,
+    scanComplete: false,
+    registrationConfidence: "low",
+    noLongerHighConfidenceOnly: true,
     lowConfidenceWarning: "",
     sampleTitles: sourcePayload.diagnostics?.sampleTitles || parsedSourceVehicles.slice(0, 3).map((vehicle) => vehicle.title),
   };
+
+  const registrationConfidence = computeRegistrationConfidence({
+    sourceVehicles: parsedSourceVehicles,
+    detailPagesFailed: diagnostics.detailPagesFailed,
+    detailFetchLimitApplied: diagnostics.detailFetchLimitApplied,
+    detailFetchMode: diagnostics.detailFetchMode,
+    parserWarnings: diagnostics.parserWarnings,
+  });
+
+  diagnostics.vanscoValidRegistrationsFound = registrationConfidence.validRegistrations;
+  diagnostics.scanComplete = registrationConfidence.scanComplete;
+  diagnostics.registrationConfidence = registrationConfidence.registrationConfidence;
 
   if (!parsedSourceVehicles.length) {
     const error = new Error("No vehicles found in Vansco HTML. Site may require JS-rendered scraping or a feed.");
@@ -1041,12 +1089,13 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
   parsedSourceVehicles.forEach((sourceVehicle) => {
     const matchResult = findMatchingLocalVehicle(sourceVehicle, localLookup);
     const matchedLocalVehicle = matchResult.vehicle;
-    if (matchedLocalVehicle) {
+    const matchedByRegistration = matchedLocalVehicle && matchResult.method === "registration";
+    if (matchedLocalVehicle && matchedByRegistration) {
       matchedLocalKeys.add(matchedLocalVehicle.vehicleKey);
-      if (matchResult.method === "registration") diagnostics.matchesByRegistration += 1;
-      if (matchResult.method === "url") diagnostics.matchesByUrl += 1;
-      if (matchResult.method === "fallback_title") diagnostics.matchesByFallbackTitle += 1;
     }
+    if (matchResult.method === "registration") diagnostics.matchesByRegistration += 1;
+    if (matchResult.method === "url") diagnostics.matchesByUrl += 1;
+    if (matchResult.method === "fallback_title") diagnostics.matchesByFallbackTitle += 1;
 
     const vehicleKey = matchedLocalVehicle?.vehicleKey || sourceVehicle.vehicleKey;
     const existingRecord = existingByKey.get(vehicleKey) || existingByKey.get(sourceVehicle.vehicleKey);
@@ -1055,23 +1104,26 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
       matchedLocalVehicle?.stockUrl ||
       existingRecord?.stockUrl ||
       VAN_SCO_SOURCE_URL;
-    const matchStatus =
-      matchedLocalVehicle && isReservedLikeSourceStatus(sourceVehicle.sourceStatus)
-        ? "reserved_still_listed"
-        : matchedLocalVehicle
-          ? "listed"
-          : "missing";
+    let matchStatus = "missing";
+
+    if (matchedByRegistration && isReservedLikeSourceStatus(sourceVehicle.sourceStatus)) {
+      matchStatus = "reserved_still_listed";
+    } else if (matchedByRegistration) {
+      matchStatus = "listed";
+    } else if (matchedLocalVehicle) {
+      matchStatus = "needs_review";
+    }
 
     const baseRecord = existingRecord
       ? {
           id: existingRecord.id,
           workflow_status: existingRecord.workflowStatus,
-          notes: existingRecord.notes,
+          notes: existingRecord.notes || (matchStatus === "needs_review" ? "Cannot safely verify removal. Review manually." : null),
           first_seen_at: existingRecord.firstSeenAt,
         }
       : {
           workflow_status: "new",
-          notes: null,
+          notes: matchStatus === "needs_review" ? "Cannot safely verify removal. Review manually." : null,
           first_seen_at: now,
         };
 
@@ -1105,17 +1157,24 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
 
     const existingRecord = existingByKey.get(localVehicle.vehicleKey);
     const stockUrl = localVehicle.stockUrl || existingRecord?.stockUrl || VAN_SCO_SOURCE_URL;
+    const hasTrustedRemovalSignal =
+      registrationConfidence.highConfidence &&
+      hasValidRegistration(localVehicle) &&
+      !parsedSourceVehicles.some(
+        (vehicle) => normalizeRegistration(vehicle.registration) === normalizeRegistration(localVehicle.registration)
+      );
+    const matchStatus = hasTrustedRemovalSignal ? "no_longer_on_vansco" : "needs_review";
     const baseRecord = existingRecord
       ? {
           id: existingRecord.id,
           workflow_status: existingRecord.workflowStatus,
-          notes: existingRecord.notes,
+          notes: existingRecord.notes || (matchStatus === "needs_review" ? "Cannot safely verify removal. Review manually." : null),
           first_seen_at: existingRecord.firstSeenAt,
           last_seen_at: existingRecord.lastSeenAt,
         }
       : {
           workflow_status: "new",
-          notes: null,
+          notes: matchStatus === "needs_review" ? "Cannot safely verify removal. Review manually." : null,
           first_seen_at: now,
         };
 
@@ -1132,7 +1191,7 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
         year: localVehicle.year,
         vehicle_category: localVehicle.vehicleCategory,
         source_status: existingRecord?.sourceStatus || "unknown",
-        match_status: "no_longer_on_vansco",
+        match_status: matchStatus,
         last_checked_at: now,
       })
     );

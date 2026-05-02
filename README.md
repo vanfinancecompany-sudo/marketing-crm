@@ -66,7 +66,7 @@ create table if not exists public.vansco_stock_watch (
   source_status text not null default 'unknown'
     check (source_status in ('available', 'reserved', 'sold', 'deposit_taken', 'unknown')),
   match_status text not null default 'missing'
-    check (match_status in ('missing', 'listed', 'no_longer_on_vansco', 'reserved_still_listed')),
+    check (match_status in ('missing', 'listed', 'needs_review', 'no_longer_on_vansco', 'reserved_still_listed')),
   workflow_status text not null default 'new'
     check (
       workflow_status in (
@@ -126,6 +126,29 @@ create trigger vansco_stock_watch_updated_at
 before update on public.vansco_stock_watch
 for each row execute function public.set_updated_at();
 ```
+
+If the table already exists, update the `match_status` constraint to allow `needs_review`:
+
+```sql
+alter table public.vansco_stock_watch
+  drop constraint if exists vansco_stock_watch_match_status_check;
+
+alter table public.vansco_stock_watch
+  add constraint vansco_stock_watch_match_status_check
+  check (match_status in ('missing', 'listed', 'needs_review', 'no_longer_on_vansco', 'reserved_still_listed'));
+```
+
+### Safety note
+
+`No longer on Vansco` is now intentionally conservative and high-confidence only.
+
+- it requires a valid CRM registration
+- it requires a complete enough Vansco registration set
+- it requires high registration confidence from the manual scan
+
+If that confidence is not high enough, the record is stored as `needs_review` with:
+
+`Cannot safely verify removal. Review manually.`
 
 ### Cars stock table note
 

@@ -298,6 +298,7 @@ export default function VanscoStockWatchPage() {
 
     if (
       [
+        "needs_review",
         "review_later",
         "added_to_crm",
         "added_to_wix",
@@ -323,6 +324,7 @@ export default function VanscoStockWatchPage() {
         (record) => record.matchStatus === "missing" && !isSuppressedWorkflowStatus(record.workflowStatus)
       ).length,
       listed: activeRecords.filter((record) => record.matchStatus === "listed").length,
+      needsReview: activeRecords.filter((record) => record.matchStatus === "needs_review").length,
       noLonger: activeRecords.filter((record) => record.matchStatus === "no_longer_on_vansco").length,
       reserved: activeRecords.filter((record) => record.matchStatus === "reserved_still_listed").length,
       reviewLater: activeRecords.filter((record) => record.workflowStatus === "review_later").length,
@@ -496,7 +498,8 @@ export default function VanscoStockWatchPage() {
       <section className="stats-grid vansco-summary-grid">
         <SummaryCard label={`Missing from ${pipelineLabel(selectedPipeline)}`} value={summary.missing} tone="blue" />
         <SummaryCard label="Already listed" value={summary.listed} tone="green" />
-        <SummaryCard label="No longer on Vansco" value={summary.noLonger} tone="amber" />
+        <SummaryCard label="Needs Review" value={summary.needsReview} tone="amber" />
+        <SummaryCard label="No longer on Vansco - high confidence only" value={summary.noLonger} tone="amber" />
         <SummaryCard label="Reserved on Vansco" value={summary.reserved} tone="amber" />
         <SummaryCard label="Review later" value={summary.reviewLater} />
         <SummaryCard label="Ignored / Not listing" value={summary.ignored} />
@@ -513,6 +516,10 @@ export default function VanscoStockWatchPage() {
               sold, and deposit-taken wording is flagged separately when it is still listed by you.
             </p>
           </div>
+        </div>
+
+        <div className="notice-banner notice-banner--error">
+          Do not remove stock unless manually checked. This tool is advisory.
         </div>
 
         <div className="vansco-tabs vansco-filter-tabs">
@@ -562,6 +569,19 @@ export default function VanscoStockWatchPage() {
             </div>
             <div className="vehicle-card__meta">
               Vehicles with valid match key: {activeDebug.vehiclesWithValidMatchKey || 0}
+            </div>
+            <div className="vehicle-card__meta">
+              Vansco valid registrations found: {activeDebug.vanscoValidRegistrationsFound || 0}
+            </div>
+            <div className="vehicle-card__meta">
+              CRM valid registrations found: {activeDebug.crmValidRegistrationsFound || 0}
+            </div>
+            <div className="vehicle-card__meta">Scan complete: {activeDebug.scanComplete ? "yes" : "no"}</div>
+            <div className="vehicle-card__meta">
+              Registration confidence: {activeDebug.registrationConfidence || "low"}
+            </div>
+            <div className="vehicle-card__meta">
+              No longer on Vansco results shown only if confidence is high: {activeDebug.noLongerHighConfidenceOnly ? "yes" : "no"}
             </div>
             <div className="vehicle-card__meta">
               Vehicles parsed for {pipelineLabel(selectedPipeline)}: {activeDebug.vehiclesParsedForPipeline || 0}
