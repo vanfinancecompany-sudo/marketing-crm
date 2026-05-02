@@ -53,6 +53,7 @@ import Sidebar from "./components/Sidebar.jsx";
 import ControlCentrePage from "./pages/ControlCentrePage.jsx";
 import DashboardPage from "./pages/DashboardPage.jsx";
 import StockPage from "./pages/StockPage.jsx";
+import VanscoStockWatchPage from "./pages/VanscoStockWatchPage.jsx";
 import ReelFactoryPage from "./pages/ReelFactoryPage.jsx";
 import CreativeLibraryPage from "./pages/CreativeLibraryPage.jsx";
 import PostingDeskPage from "./pages/PostingDeskPage.jsx";
@@ -280,6 +281,7 @@ function rankRandomPool(pool, recentVehicleIds = []) {
 const VIEW_PATHS = {
   Dashboard: "/",
   Stock: "/stock",
+  "Vansco Stock Watch": "/vansco-stock-watch",
   "Reel Factory": "/reel-factory",
   "Creative Library": "/creative-library",
   "Van Finance Facebook": "/van-finance-facebook",
@@ -293,6 +295,7 @@ function viewFromPath() {
   const path = window.location.pathname;
 
   if (path === "/stock") return "Stock";
+  if (path === "/vansco-stock-watch") return "Vansco Stock Watch";
   if (path === "/reel-factory") return "Reel Factory";
   if (path === "/creative-library") return "Creative Library";
   if (path === "/van-finance-facebook") return "Van Finance Facebook";
@@ -1448,7 +1451,7 @@ async function handleClearTodayReels() {
 
   function renderCurrentPage() {
     switch (currentView) {
-          case "Stock":
+      case "Stock":
         return (
           <StockPage
             vehicles={filteredStockVehicles}
@@ -1460,6 +1463,8 @@ async function handleClearTodayReels() {
             onViewCreatives={handleViewCreatives}
           />
         );
+      case "Vansco Stock Watch":
+        return <VanscoStockWatchPage />;
       case "Reel Factory":
         return (
           <ReelFactoryPage

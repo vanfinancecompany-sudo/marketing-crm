@@ -1358,6 +1358,128 @@ textarea {
   background: #f8fafc;
 }
 
+.notice-banner {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  font-weight: 700;
+}
+
+.notice-banner--success {
+  background: #ecfdf5;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.notice-banner--error {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.vansco-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vansco-tab-button {
+  border: 1px solid #cbd5e1;
+  background: #f8fbff;
+  color: #17324d;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.vansco-tab-button.is-active {
+  background: #102d4a;
+  color: #fff;
+  border-color: #102d4a;
+}
+
+.field__textarea {
+  resize: vertical;
+  min-height: 84px;
+}
+
+.vansco-pipeline-tabs,
+.vansco-filter-tabs {
+  margin-top: 14px;
+}
+
+.vansco-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.vansco-card {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  border-radius: 22px;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.vansco-card__image-wrap {
+  background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
+}
+
+.vansco-card__image {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  display: block;
+}
+
+.vansco-card__image--placeholder {
+  display: grid;
+  place-items: center;
+  color: #47627e;
+  font-weight: 800;
+}
+
+.vansco-card__body {
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.vansco-card__body h3 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.vansco-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vansco-status-pill {
+  color: #17324d;
+  background: #e2e8f0;
+}
+
+.vansco-status-pill--available {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.vansco-status-pill--reserved,
+.vansco-status-pill--deposit_taken {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.vansco-status-pill--sold {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
 @media (max-width: 1080px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1398,6 +1520,10 @@ textarea {
   .preview-modal__body {
     grid-template-columns: 1fr;
   }
+
+  .vansco-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
@@ -1429,6 +1555,10 @@ textarea {
 }
 
 .reel-storyboard {
+  grid-template-columns: 1fr;
+}
+
+.vansco-summary-grid {
   grid-template-columns: 1fr;
 }
 

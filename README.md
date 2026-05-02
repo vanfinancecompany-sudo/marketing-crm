@@ -27,3 +27,118 @@ on public.reel_vehicle_usage(reel_type, vehicle_key, used_at desc);
 ```
 
 If the table is missing, Reel Factory will still generate reels but will show a setup warning and skip cooldown tracking until the SQL is applied.
+
+## Vansco Stock Watch
+
+`Vansco Stock Watch` is a manual checking tool only.
+
+It:
+- checks `https://www.vansco.co.uk/all-stock/` only when a user clicks `Check Vansco Stock`
+- compares Vansco vehicles against separate Marketing CRM stock groups for:
+  - Finance Vans
+  - Rent2Buy Vans
+  - Cars
+- stores watch metadata and workflow decisions in Supabase
+
+It does **not**:
+- auto-run on a timer
+- auto-add vehicles to CRM
+- auto-remove vehicles from CRM
+- auto-publish to Wix
+- auto-post to Facebook
+- auto-edit existing stock rows
+
+### Supabase SQL
+
+```sql
+create table if not exists public.vansco_stock_watch (
+  id uuid primary key default gen_random_uuid(),
+  pipeline text not null check (pipeline in ('finance', 'rent2buy', 'cars')),
+  vehicle_key text not null,
+  title text,
+  registration text,
+  image_url text,
+  stock_url text not null,
+  price text,
+  mileage text,
+  year text,
+  vehicle_category text,
+  source_status text not null default 'unknown'
+    check (source_status in ('available', 'reserved', 'sold', 'deposit_taken', 'unknown')),
+  match_status text not null default 'missing'
+    check (match_status in ('missing', 'listed', 'no_longer_on_vansco', 'reserved_still_listed')),
+  workflow_status text not null default 'new'
+    check (
+      workflow_status in (
+        'new',
+        'review_later',
+        'added_to_crm',
+        'added_to_wix',
+        'removed_from_crm',
+        'removed_from_wix',
+        'keep_listed',
+        'not_listing_mileage',
+        'not_listing_price',
+        'not_listing_spec',
+        'ignored'
+      )
+    ),
+  first_seen_at timestamptz not null default now(),
+  last_seen_at timestamptz,
+  last_checked_at timestamptz not null default now(),
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (pipeline, vehicle_key)
+);
+
+create index if not exists vansco_stock_watch_pipeline_idx
+  on public.vansco_stock_watch (pipeline);
+
+create index if not exists vansco_stock_watch_match_status_idx
+  on public.vansco_stock_watch (match_status);
+
+create index if not exists vansco_stock_watch_workflow_status_idx
+  on public.vansco_stock_watch (workflow_status);
+
+create index if not exists vansco_stock_watch_source_status_idx
+  on public.vansco_stock_watch (source_status);
+
+create index if not exists vansco_stock_watch_first_seen_desc_idx
+  on public.vansco_stock_watch (first_seen_at desc);
+
+create index if not exists vansco_stock_watch_pipeline_used_idx
+  on public.vansco_stock_watch (pipeline, updated_at desc);
+
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists vansco_stock_watch_updated_at on public.vansco_stock_watch;
+
+create trigger vansco_stock_watch_updated_at
+before update on public.vansco_stock_watch
+for each row execute function public.set_updated_at();
+```
+
+### Cars stock table note
+
+The Finance and Rent2Buy checks use the existing app tables:
+- `facebook_adverts`
+- `rent_vehicles`
+
+The Cars tab tries these table names in order:
+- `cars_stock`
+- `car_stock`
+- `cars`
+- `car_vehicles`
+
+If your cars stock uses a different table name, update the candidate list in:
+
+`services/vanscoStockWatch.js`
