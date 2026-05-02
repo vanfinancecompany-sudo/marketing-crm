@@ -7,6 +7,7 @@ const YEAR_PATTERN = /\b(20\d{2}|19\d{2})\b/;
 const MILEAGE_PATTERN = /\b([0-9][0-9,]{1,})\s*(?:miles|mile|mi)\b/i;
 const REGISTRATION_PATTERN =
   /\b([A-Z]{2}[0-9]{2}\s?[A-Z]{3}|[A-Z][0-9]{1,3}\s?[A-Z]{3}|[A-Z]{3}\s?[0-9]{1,3}[A-Z]|[0-9]{1,4}\s?[A-Z]{1,3})\b/i;
+const INVALID_REGISTRATION_VALUES = new Set(["VANSCO", "VANSCOLTD", "ALLSTOCK", "HOMESTOCK", "UNDEFINED", "UNKNOWN", "NULL", "NA"]);
 
 const PIPELINE_CONFIG = {
   finance: {
@@ -207,7 +208,9 @@ function normalizeRegistration(value) {
   const text = compactWhitespace(value).toUpperCase();
   if (!text) return "";
   const match = text.match(REGISTRATION_PATTERN);
-  return (match ? match[1] : text).replace(/\s+/g, "");
+  const candidate = (match?.[1] || "").replace(/\s+/g, "");
+  if (!candidate || INVALID_REGISTRATION_VALUES.has(candidate)) return "";
+  return candidate;
 }
 
 function normalizeUrl(value) {
@@ -271,14 +274,16 @@ function normalizeImageUrl(value) {
 }
 
 function buildMetaKeyParts(vehicle) {
+  if (!isStrongVehicleTitle(vehicle.title)) return [];
   const title = normalizeText(vehicle.title);
   const year = normalizeYear(vehicle.year);
   const mileage = normalizeMileage(vehicle.mileage);
+  if (!year && !mileage) return [];
   return [title, year, mileage].filter(Boolean);
 }
 
 function deriveVehicleKey(vehicle, fallbackSeed = "") {
-  const registration = normalizeRegistration(vehicle.registration || vehicle.reg || vehicle.title);
+  const registration = normalizeRegistration(vehicle.registration || vehicle.reg || "");
   if (registration) return `reg:${registration}`;
 
   const stockUrl = normalizeUrl(vehicle.stockUrl || vehicle.weblink || vehicle.webLink || vehicle.link);
@@ -289,6 +294,13 @@ function deriveVehicleKey(vehicle, fallbackSeed = "") {
 
   const fallback = normalizeText(vehicle.title || fallbackSeed || "vehicle");
   return `fallback:${fallback || "vehicle"}`;
+}
+
+function isStrongVehicleTitle(value) {
+  const text = compactWhitespace(value);
+  if (!text || text.length < 18) return false;
+  const words = text.split(/\s+/).filter(Boolean);
+  return words.length >= 3;
 }
 
 function vehicleCompletenessScore(vehicle) {
@@ -339,20 +351,32 @@ function buildVehicleLookup(vehicles) {
 function findMatchingLocalVehicle(sourceVehicle, lookup) {
   const registration = normalizeRegistration(sourceVehicle.registration);
   if (registration && lookup.byRegistration.has(registration)) {
-    return lookup.byRegistration.get(registration);
+    return {
+      vehicle: lookup.byRegistration.get(registration),
+      method: "registration",
+    };
   }
 
   const stockUrl = normalizeUrl(sourceVehicle.stockUrl);
   if (stockUrl && lookup.byUrl.has(stockUrl)) {
-    return lookup.byUrl.get(stockUrl);
+    return {
+      vehicle: lookup.byUrl.get(stockUrl),
+      method: "url",
+    };
   }
 
   const metaKey = buildMetaKeyParts(sourceVehicle).join("|");
   if (metaKey && lookup.byMeta.has(metaKey)) {
-    return lookup.byMeta.get(metaKey);
+    return {
+      vehicle: lookup.byMeta.get(metaKey),
+      method: "fallback_title",
+    };
   }
 
-  return null;
+  return {
+    vehicle: null,
+    method: "none",
+  };
 }
 
 function isPotentialVehicleLink(url) {
@@ -976,6 +1000,16 @@ export async function runVanscoStockCheck(pipeline) {
     endpointUsed: sourcePayload.endpointUsed || VAN_SCO_SOURCE_URL,
     pagesFetched: sourcePayload.pagesFetched || 1,
     candidateLinksFound: sourcePayload.diagnostics?.candidateLinksFound || 0,
+    sitemapUrlsFound: sourcePayload.diagnostics?.sitemapUrlsFound || 0,
+    detailPagesFetched: sourcePayload.diagnostics?.detailPagesFetched || 0,
+    detailPagesFailed: sourcePayload.diagnostics?.detailPagesFailed || 0,
+    vehiclesEnrichedWithRegistration: sourcePayload.diagnostics?.vehiclesEnrichedWithRegistration || 0,
+    vehiclesEnrichedWithImage: sourcePayload.diagnostics?.vehiclesEnrichedWithImage || 0,
+    vehiclesWithValidMatchKey: sourcePayload.diagnostics?.vehiclesWithValidMatchKey || 0,
+    matchesByRegistration: 0,
+    matchesByUrl: 0,
+    matchesByFallbackTitle: 0,
+    lowConfidenceWarning: "",
     sampleTitles: sourcePayload.diagnostics?.sampleTitles || parsedSourceVehicles.slice(0, 3).map((vehicle) => vehicle.title),
   };
 
@@ -986,9 +1020,13 @@ export async function runVanscoStockCheck(pipeline) {
   }
 
   parsedSourceVehicles.forEach((sourceVehicle) => {
-    const matchedLocalVehicle = findMatchingLocalVehicle(sourceVehicle, localLookup);
+    const matchResult = findMatchingLocalVehicle(sourceVehicle, localLookup);
+    const matchedLocalVehicle = matchResult.vehicle;
     if (matchedLocalVehicle) {
       matchedLocalKeys.add(matchedLocalVehicle.vehicleKey);
+      if (matchResult.method === "registration") diagnostics.matchesByRegistration += 1;
+      if (matchResult.method === "url") diagnostics.matchesByUrl += 1;
+      if (matchResult.method === "fallback_title") diagnostics.matchesByFallbackTitle += 1;
     }
 
     const vehicleKey = matchedLocalVehicle?.vehicleKey || sourceVehicle.vehicleKey;
@@ -1037,6 +1075,11 @@ export async function runVanscoStockCheck(pipeline) {
       })
     );
   });
+
+  if (parsedSourceVehicles.some((vehicle) => !normalizeRegistration(vehicle.registration))) {
+    diagnostics.lowConfidenceWarning =
+      "Some vehicles could not be matched confidently because registration was not found.";
+  }
 
   localVehicles.forEach((localVehicle) => {
     if (matchedLocalKeys.has(localVehicle.vehicleKey)) return;

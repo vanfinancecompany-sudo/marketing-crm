@@ -389,6 +389,9 @@ export default function VanscoStockWatchPage() {
 
         {successMessage ? <div className="notice-banner notice-banner--success">{successMessage}</div> : null}
         {errorMessage ? <div className="notice-banner notice-banner--error">{errorMessage}</div> : null}
+        {activeDebug?.lowConfidenceWarning ? (
+          <div className="notice-banner notice-banner--error">{activeDebug.lowConfidenceWarning}</div>
+        ) : null}
 
         {activeDebug ? (
           <div className="vansco-debug-panel">
@@ -397,8 +400,20 @@ export default function VanscoStockWatchPage() {
             <div className="vehicle-card__meta">Endpoint used: {activeDebug.endpointUsed || "Unknown"}</div>
             <div className="vehicle-card__meta">Pages fetched: {activeDebug.pagesFetched || 0}</div>
             <div className="vehicle-card__meta">Candidate links found: {activeDebug.candidateLinksFound || 0}</div>
+            <div className="vehicle-card__meta">Sitemap URLs found: {activeDebug.sitemapUrlsFound || 0}</div>
             <div className="vehicle-card__meta">Vehicle detail URLs kept: {activeDebug.vehiclesParsed || 0}</div>
             <div className="vehicle-card__meta">Vehicles parsed: {activeDebug.vehiclesParsed || 0}</div>
+            <div className="vehicle-card__meta">Detail pages fetched: {activeDebug.detailPagesFetched || 0}</div>
+            <div className="vehicle-card__meta">Detail pages failed: {activeDebug.detailPagesFailed || 0}</div>
+            <div className="vehicle-card__meta">
+              Vehicles enriched with registration: {activeDebug.vehiclesEnrichedWithRegistration || 0}
+            </div>
+            <div className="vehicle-card__meta">
+              Vehicles enriched with image: {activeDebug.vehiclesEnrichedWithImage || 0}
+            </div>
+            <div className="vehicle-card__meta">
+              Vehicles with valid match key: {activeDebug.vehiclesWithValidMatchKey || 0}
+            </div>
             <div className="vehicle-card__meta">
               Vehicles parsed for {pipelineLabel(selectedPipeline)}: {activeDebug.vehiclesParsedForPipeline || 0}
             </div>
@@ -407,6 +422,11 @@ export default function VanscoStockWatchPage() {
             </div>
             <div className="vehicle-card__meta">
               Upsert duplicate keys collapsed: {activeDebug.upsertDuplicateKeysCollapsed || 0}
+            </div>
+            <div className="vehicle-card__meta">Matches by registration: {activeDebug.matchesByRegistration || 0}</div>
+            <div className="vehicle-card__meta">Matches by URL: {activeDebug.matchesByUrl || 0}</div>
+            <div className="vehicle-card__meta">
+              Matches by fallback title: {activeDebug.matchesByFallbackTitle || 0}
             </div>
             <div className="vehicle-card__meta">Upsert payload count: {activeDebug.upsertPayloadCount || 0}</div>
             <div className="vehicle-card__meta">
