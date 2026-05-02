@@ -21,7 +21,7 @@ const SIMPLE_FILTERS = [
   { value: "missing", label: "Missing from my stock" },
   { value: "reserved", label: "Reserved on Vansco" },
   { value: "ignored", label: "Ignored / Blocked" },
-  { value: "all", label: "All visible" },
+  { value: "all", label: "All action cards" },
 ];
 
 const RUNNING_STEPS = [
@@ -59,9 +59,7 @@ function recordCheckedTimeMs(record) {
 function filterCurrentScanRecords(records) {
   const activeRows = records.filter((record) => !isBlockedStatus(record.workflowStatus));
   const latestCheckedAt = activeRows.reduce((latest, record) => Math.max(latest, recordCheckedTimeMs(record)), 0);
-
   if (!latestCheckedAt) return records;
-
   const cutoff = latestCheckedAt - CURRENT_SCAN_WINDOW_MS;
 
   return records.filter((record) => {
@@ -70,63 +68,6 @@ function filterCurrentScanRecords(records) {
     if (!checkedAt) return true;
     return checkedAt >= cutoff;
   });
-}
-
-function classifyWatchRecord(record, localRegistrationSet) {
-  const registration = normalizeWatchRegistration(record.registration);
-  const hasExactLocalMatch = registration && localRegistrationSet?.has(registration);
-  const blocked = isBlockedStatus(record.workflowStatus);
-  const reservedOnVansco = isReservedLikeStatus(record.sourceStatus);
-
-  if (blocked) {
-    return {
-      ...record,
-      displayStatus: "ignored",
-      safeExactRegistrationMatch: Boolean(hasExactLocalMatch),
-    };
-  }
-
-  if (!registration) {
-    return {
-      ...record,
-      displayStatus: "needs_review",
-      safeExactRegistrationMatch: false,
-    };
-  }
-
-  if (hasExactLocalMatch && reservedOnVansco) {
-    return {
-      ...record,
-      displayStatus: "reserved",
-      matchStatus: "reserved_still_listed",
-      safeExactRegistrationMatch: true,
-    };
-  }
-
-  if (reservedOnVansco && !hasExactLocalMatch) {
-    return {
-      ...record,
-      displayStatus: "reserved_not_advertised",
-      matchStatus: "listed",
-      safeExactRegistrationMatch: false,
-    };
-  }
-
-  if (!hasExactLocalMatch) {
-    return {
-      ...record,
-      displayStatus: "missing",
-      matchStatus: "missing",
-      safeExactRegistrationMatch: false,
-    };
-  }
-
-  return {
-    ...record,
-    displayStatus: "listed_ok",
-    matchStatus: "listed",
-    safeExactRegistrationMatch: true,
-  };
 }
 
 function dedupeDisplayRecords(records) {
@@ -146,6 +87,62 @@ function dedupeDisplayRecords(records) {
   return Array.from(byKey.values());
 }
 
+function classifyWatchRecord(record, localRegistrationSet) {
+  const registration = normalizeWatchRegistration(record.registration);
+  const hasExactLocalMatch = registration && localRegistrationSet?.has(registration);
+  const blocked = isBlockedStatus(record.workflowStatus);
+  const reservedOnVansco = isReservedLikeStatus(record.sourceStatus);
+
+  if (blocked) {
+    return {
+      ...record,
+      displayStatus: "ignored",
+      safeExactRegistrationMatch: Boolean(hasExactLocalMatch),
+    };
+  }
+
+  if (!registration) {
+    return {
+      ...record,
+      displayStatus: "hidden_no_registration",
+      safeExactRegistrationMatch: false,
+    };
+  }
+
+  if (hasExactLocalMatch && reservedOnVansco) {
+    return {
+      ...record,
+      displayStatus: "reserved",
+      matchStatus: "reserved_still_listed",
+      safeExactRegistrationMatch: true,
+    };
+  }
+
+  if (reservedOnVansco && !hasExactLocalMatch) {
+    return {
+      ...record,
+      displayStatus: "hidden_reserved_not_advertised",
+      safeExactRegistrationMatch: false,
+    };
+  }
+
+  if (!hasExactLocalMatch) {
+    return {
+      ...record,
+      displayStatus: "missing",
+      matchStatus: "missing",
+      safeExactRegistrationMatch: false,
+    };
+  }
+
+  return {
+    ...record,
+    displayStatus: "hidden_already_ok",
+    matchStatus: "listed",
+    safeExactRegistrationMatch: true,
+  };
+}
+
 function formatElapsed(seconds) {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
@@ -156,11 +153,9 @@ function formatElapsed(seconds) {
 function SummaryCard({ label, value, tone = "default" }) {
   const className = tone === "blue"
     ? "stat-card stat-card--blue"
-    : tone === "green"
-      ? "stat-card stat-card--green"
-      : tone === "amber"
-        ? "stat-card stat-card--amber"
-        : "stat-card";
+    : tone === "amber"
+      ? "stat-card stat-card--amber"
+      : "stat-card";
 
   return (
     <article className={className}>
@@ -180,9 +175,7 @@ function DisplayStatusBadge({ status }) {
     ? "Reserved on Vansco"
     : status === "ignored"
       ? "Ignored / Blocked"
-      : status === "needs_review"
-        ? "No valid reg"
-        : "Missing from my stock";
+      : "Missing from my stock";
 
   return <span className="tag">{label}</span>;
 }
@@ -240,7 +233,6 @@ function WatchCard({ record, onRecordSaved }) {
         </div>
 
         <h3>{record.title || "Untitled vehicle"}</h3>
-
         <div className="vehicle-card__meta">Registration: {record.registration || "Not found"}</div>
         {record.safeExactRegistrationMatch ? (
           <div className="vehicle-card__meta">This registration is currently in this CRM stock tab.</div>
@@ -261,12 +253,7 @@ function WatchCard({ record, onRecordSaved }) {
         </label>
 
         <div className="card-actions">
-          <a
-            className="button button--ghost"
-            href={record.stockUrl || "#"}
-            target="_blank"
-            rel="noreferrer"
-          >
+          <a className="button button--ghost" href={record.stockUrl || "#"} target="_blank" rel="noreferrer">
             Open Vansco Page
           </a>
           {isIgnored ? (
@@ -309,11 +296,7 @@ function WatchCard({ record, onRecordSaved }) {
 export default function VanscoStockWatchPage() {
   const [selectedPipeline, setSelectedPipeline] = useState("finance");
   const [filtersByPipeline, setFiltersByPipeline] = useState(DEFAULT_FILTERS);
-  const [recordsByPipeline, setRecordsByPipeline] = useState({
-    finance: [],
-    rent2buy: [],
-    cars: [],
-  });
+  const [recordsByPipeline, setRecordsByPipeline] = useState({ finance: [], rent2buy: [], cars: [] });
   const [localRegistrationsByPipeline, setLocalRegistrationsByPipeline] = useState({
     finance: new Set(),
     rent2buy: new Set(),
@@ -325,23 +308,16 @@ export default function VanscoStockWatchPage() {
   const [successMessage, setSuccessMessage] = useState("");
   const [checkStartedAt, setCheckStartedAt] = useState("");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [debugByPipeline, setDebugByPipeline] = useState({
-    finance: null,
-    rent2buy: null,
-    cars: null,
-  });
+  const [debugByPipeline, setDebugByPipeline] = useState({ finance: null, rent2buy: null, cars: null });
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [runningStatus, setRunningStatus] = useState(null);
 
   useEffect(() => {
     if (!checkingPipeline || !checkStartedAt) return undefined;
-
     const interval = window.setInterval(() => {
       const started = new Date(checkStartedAt).getTime();
-      const now = Date.now();
-      setElapsedSeconds(Math.max(0, Math.floor((now - started) / 1000)));
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - started) / 1000)));
     }, 1000);
-
     return () => window.clearInterval(interval);
   }, [checkingPipeline, checkStartedAt]);
 
@@ -351,15 +327,9 @@ export default function VanscoStockWatchPage() {
     async function loadLocalRegistrations() {
       try {
         let vehicles = [];
-
-        if (selectedPipeline === "finance") {
-          vehicles = await fetchFinanceMarketingVehicles(250);
-        } else if (selectedPipeline === "rent2buy") {
-          vehicles = await fetchRentMarketingVehicles(250);
-        }
-
+        if (selectedPipeline === "finance") vehicles = await fetchFinanceMarketingVehicles(250);
+        if (selectedPipeline === "rent2buy") vehicles = await fetchRentMarketingVehicles(250);
         if (!active) return;
-
         setLocalRegistrationsByPipeline((prev) => ({
           ...prev,
           [selectedPipeline]: new Set(
@@ -370,18 +340,12 @@ export default function VanscoStockWatchPage() {
         }));
       } catch {
         if (!active) return;
-        setLocalRegistrationsByPipeline((prev) => ({
-          ...prev,
-          [selectedPipeline]: new Set(),
-        }));
+        setLocalRegistrationsByPipeline((prev) => ({ ...prev, [selectedPipeline]: new Set() }));
       }
     }
 
     loadLocalRegistrations();
-
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [selectedPipeline]);
 
   useEffect(() => {
@@ -390,14 +354,10 @@ export default function VanscoStockWatchPage() {
     async function loadPipeline() {
       setLoadingPipeline(selectedPipeline);
       setErrorMessage("");
-
       try {
         const records = await fetchVanscoWatchRecords(selectedPipeline);
         if (!active) return;
-        setRecordsByPipeline((prev) => ({
-          ...prev,
-          [selectedPipeline]: records,
-        }));
+        setRecordsByPipeline((prev) => ({ ...prev, [selectedPipeline]: records }));
       } catch (error) {
         if (!active) return;
         setErrorMessage(error.message || "Could not load Vansco Stock Watch data.");
@@ -407,10 +367,7 @@ export default function VanscoStockWatchPage() {
     }
 
     loadPipeline();
-
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [selectedPipeline]);
 
   const activeFilter = filtersByPipeline[selectedPipeline] || "missing";
@@ -425,46 +382,31 @@ export default function VanscoStockWatchPage() {
     [activeLocalRegistrations, currentRawRecords]
   );
 
-  const summary = useMemo(() => {
-    return {
-      missing: activeRecords.filter((record) => record.displayStatus === "missing").length,
-      reserved: activeRecords.filter((record) => record.displayStatus === "reserved").length,
-      ignored: activeRecords.filter((record) => record.displayStatus === "ignored").length,
-      noRegistration: activeRecords.filter((record) => record.displayStatus === "needs_review").length,
-      hiddenReserved: activeRecords.filter((record) => record.displayStatus === "reserved_not_advertised").length,
-      listedOk: activeRecords.filter((record) => ["listed_ok", "reserved_not_advertised"].includes(record.displayStatus)).length,
-    };
-  }, [activeRecords]);
+  const summary = useMemo(() => ({
+    missing: activeRecords.filter((record) => record.displayStatus === "missing").length,
+    reserved: activeRecords.filter((record) => record.displayStatus === "reserved").length,
+    ignored: activeRecords.filter((record) => record.displayStatus === "ignored").length,
+    hiddenNoReg: activeRecords.filter((record) => record.displayStatus === "hidden_no_registration").length,
+    hiddenReserved: activeRecords.filter((record) => record.displayStatus === "hidden_reserved_not_advertised").length,
+  }), [activeRecords]);
 
   const filteredRecords = useMemo(() => {
-    if (activeFilter === "all") {
-      return activeRecords.filter((record) => ["missing", "reserved", "ignored"].includes(record.displayStatus));
-    }
-
-    if (activeFilter === "reserved") {
-      return activeRecords.filter((record) => record.displayStatus === "reserved");
-    }
-
-    if (activeFilter === "ignored") {
-      return activeRecords.filter((record) => record.displayStatus === "ignored");
-    }
-
+    if (activeFilter === "all") return activeRecords.filter((record) => ["missing", "reserved", "ignored"].includes(record.displayStatus));
+    if (activeFilter === "reserved") return activeRecords.filter((record) => record.displayStatus === "reserved");
+    if (activeFilter === "ignored") return activeRecords.filter((record) => record.displayStatus === "ignored");
     return activeRecords.filter((record) => record.displayStatus === "missing");
   }, [activeFilter, activeRecords]);
 
-  const lastCheckedAt = useMemo(() => {
-    return currentRawRecords.reduce((latest, record) => {
-      if (!record.lastCheckedAt) return latest;
-      if (!latest) return record.lastCheckedAt;
-      return new Date(record.lastCheckedAt) > new Date(latest) ? record.lastCheckedAt : latest;
-    }, "");
-  }, [currentRawRecords]);
+  const lastCheckedAt = useMemo(() => currentRawRecords.reduce((latest, record) => {
+    if (!record.lastCheckedAt) return latest;
+    if (!latest) return record.lastCheckedAt;
+    return new Date(record.lastCheckedAt) > new Date(latest) ? record.lastCheckedAt : latest;
+  }, ""), [currentRawRecords]);
 
   async function handleRunCheck() {
     const confirmed = window.confirm(
       `Run a fresh Vansco check for ${pipelineLabel(selectedPipeline)}? It will compare Vansco stock against this tab only and will not edit CRM stock.`
     );
-
     if (!confirmed) return;
 
     setCheckingPipeline(selectedPipeline);
@@ -488,30 +430,13 @@ export default function VanscoStockWatchPage() {
       const result = await runVanscoStockCheck(selectedPipeline, {
         detailFetchMode: "full",
         detailBatchSize: 25,
-        onProgress: (progress) => {
-          setRunningStatus((prev) => ({
-            ...prev,
-            ...progress,
-          }));
-        },
+        onProgress: (progress) => setRunningStatus((prev) => ({ ...prev, ...progress })),
       });
-
-      setRecordsByPipeline((prev) => ({
-        ...prev,
-        [selectedPipeline]: result.records,
-      }));
-      setDebugByPipeline((prev) => ({
-        ...prev,
-        [selectedPipeline]: result.diagnostics || null,
-      }));
-      setSuccessMessage(
-        `Checked ${result.sourceVehicleCount} Vansco vehicles against ${result.localVehicleCount} ${pipelineLabel(selectedPipeline)} records.`
-      );
+      setRecordsByPipeline((prev) => ({ ...prev, [selectedPipeline]: result.records }));
+      setDebugByPipeline((prev) => ({ ...prev, [selectedPipeline]: result.diagnostics || null }));
+      setSuccessMessage(`Checked ${result.sourceVehicleCount} Vansco vehicles against ${result.localVehicleCount} ${pipelineLabel(selectedPipeline)} records.`);
     } catch (error) {
-      setDebugByPipeline((prev) => ({
-        ...prev,
-        [selectedPipeline]: error.debugInfo || prev[selectedPipeline],
-      }));
+      setDebugByPipeline((prev) => ({ ...prev, [selectedPipeline]: error.debugInfo || prev[selectedPipeline] }));
       setErrorMessage(error.message || "Vansco Stock Watch check failed.");
     } finally {
       setCheckingPipeline("");
@@ -522,9 +447,7 @@ export default function VanscoStockWatchPage() {
   function handleRecordSaved(nextRecord) {
     setRecordsByPipeline((prev) => ({
       ...prev,
-      [selectedPipeline]: prev[selectedPipeline].map((record) =>
-        record.id === nextRecord.id ? nextRecord : record
-      ),
+      [selectedPipeline]: prev[selectedPipeline].map((record) => record.id === nextRecord.id ? nextRecord : record),
     }));
   }
 
@@ -537,32 +460,14 @@ export default function VanscoStockWatchPage() {
         <div className="panel__header">
           <div>
             <h3>Vansco Stock Watch</h3>
-            <p>
-              Manual advisory checker only. It compares Vansco registrations against the selected Marketing CRM stock tab.
-            </p>
-            <div className="vehicle-card__meta">
-              Simple mode: Missing from my stock, Reserved on Vansco, and Ignored / Blocked only.
-            </div>
-            <div className="vehicle-card__meta">
-              Reserved Vansco vehicles that you do not currently advertise are hidden from Missing.
-            </div>
-            <div className="vehicle-card__meta">
-              Blocking is saved per tab. Blocking in Finance does not block the same vehicle in Rent2Buy or Cars.
-            </div>
+            <p>Manual advisory checker only. It compares Vansco registrations against the selected Marketing CRM stock tab.</p>
+            <div className="vehicle-card__meta">Simple mode: Missing from my stock, Reserved on Vansco, and Ignored / Blocked only.</div>
+            <div className="vehicle-card__meta">Reserved Vansco vehicles that you do not currently advertise are hidden from Missing.</div>
+            <div className="vehicle-card__meta">Blocking is saved per tab. Blocking in Finance does not block the same vehicle in Rent2Buy or Cars.</div>
           </div>
           <div className="vansco-action-stack">
-            <button
-              className="button button--primary vansco-run-button"
-              type="button"
-              onClick={handleRunCheck}
-              disabled={isCheckingActiveTab}
-            >
-              {isCheckingActiveTab ? (
-                <>
-                  <span className="vansco-spinner" aria-hidden="true" />
-                  Checking Vansco...
-                </>
-              ) : "Check Vansco Stock"}
+            <button className="button button--primary vansco-run-button" type="button" onClick={handleRunCheck} disabled={isCheckingActiveTab}>
+              {isCheckingActiveTab ? <><span className="vansco-spinner" aria-hidden="true" />Checking Vansco...</> : "Check Vansco Stock"}
             </button>
           </div>
         </div>
@@ -590,32 +495,16 @@ export default function VanscoStockWatchPage() {
 
         {isCheckingActiveTab ? (
           <div className="vansco-progress-panel">
-            <div className="vansco-progress-panel__header">
-              <strong>{runningStatus?.message || "Running full Vansco scan..."}</strong>
-              <span>{runningStatus?.percent ?? 0}%</span>
-            </div>
-            <div className="vansco-progress-bar" aria-hidden="true">
-              <div className="vansco-progress-bar__fill" style={{ width: `${runningStatus?.percent ?? 0}%` }} />
-            </div>
-            <div className="vehicle-card__meta">
-              Started at: {formatWatchTimestamp(checkStartedAt)} | Running for {formatElapsed(elapsedSeconds)}
-            </div>
-            <div className="vehicle-card__meta">
-              Total URLs found: {runningStatus?.totalVehicles || 0} | Processed: {runningStatus?.processedVehicles || 0}
-            </div>
-            <div className="vehicle-card__meta">
-              Valid registrations: {runningStatus?.validRegistrationsFound || 0} | Images: {runningStatus?.imagesFound || 0} | Reserved statuses: {runningStatus?.reservedStatusesFound || 0}
-            </div>
+            <div className="vansco-progress-panel__header"><strong>{runningStatus?.message || "Running full Vansco scan..."}</strong><span>{runningStatus?.percent ?? 0}%</span></div>
+            <div className="vansco-progress-bar" aria-hidden="true"><div className="vansco-progress-bar__fill" style={{ width: `${runningStatus?.percent ?? 0}%` }} /></div>
+            <div className="vehicle-card__meta">Started at: {formatWatchTimestamp(checkStartedAt)} | Running for {formatElapsed(elapsedSeconds)}</div>
+            <div className="vehicle-card__meta">Total URLs found: {runningStatus?.totalVehicles || 0} | Processed: {runningStatus?.processedVehicles || 0}</div>
+            <div className="vehicle-card__meta">Valid registrations: {runningStatus?.validRegistrationsFound || 0} | Images: {runningStatus?.imagesFound || 0} | Reserved statuses: {runningStatus?.reservedStatusesFound || 0}</div>
             <div className="vansco-progress-steps">
               {RUNNING_STEPS.map((step, index) => {
                 const currentIndex = RUNNING_STEPS.findIndex((item) => item.key === runningStatus?.stage);
                 const status = index < currentIndex ? "done" : index === currentIndex ? "active" : "pending";
-
-                return (
-                  <div key={step.key} className={`vansco-progress-step vansco-progress-step--${status}`}>
-                    {step.label}
-                  </div>
-                );
+                return <div key={step.key} className={`vansco-progress-step vansco-progress-step--${status}`}>{step.label}</div>;
               })}
             </div>
           </div>
@@ -626,32 +515,13 @@ export default function VanscoStockWatchPage() {
         <SummaryCard label={`Missing from ${pipelineLabel(selectedPipeline)}`} value={summary.missing} tone="blue" />
         <SummaryCard label="Reserved on Vansco" value={summary.reserved} tone="amber" />
         <SummaryCard label="Ignored / Blocked" value={summary.ignored} />
-        <SummaryCard label="Already OK / hidden" value={summary.listedOk} tone="green" />
       </section>
 
       <section className="panel">
-        <div className="panel__header">
-          <div>
-            <h3>{pipelineLabel(selectedPipeline)}</h3>
-            <p>
-              Missing means a Vansco available registration is not currently in this selected CRM stock tab. Reserved means you currently advertise it, but Vansco says reserved, sold, or deposit taken.
-            </p>
-          </div>
-        </div>
-
-        <div className="notice-banner notice-banner--error">
-          Advisory only. Do not remove stock unless manually checked.
-        </div>
-        {summary.hiddenReserved ? (
-          <div className="notice-banner">
-            {summary.hiddenReserved} reserved Vansco vehicle{summary.hiddenReserved === 1 ? "" : "s"} not in your stock were hidden from Missing.
-          </div>
-        ) : null}
-        {summary.noRegistration ? (
-          <div className="notice-banner">
-            {summary.noRegistration} Vansco vehicle{summary.noRegistration === 1 ? "" : "s"} had no valid registration and were hidden from the simple list.
-          </div>
-        ) : null}
+        <div className="panel__header"><div><h3>{pipelineLabel(selectedPipeline)}</h3><p>Missing means a Vansco available registration is not currently in this selected CRM stock tab. Reserved means you currently advertise it, but Vansco says reserved, sold, or deposit taken.</p></div></div>
+        <div className="notice-banner notice-banner--error">Advisory only. Do not remove stock unless manually checked.</div>
+        {summary.hiddenReserved ? <div className="notice-banner">{summary.hiddenReserved} reserved Vansco vehicle{summary.hiddenReserved === 1 ? "" : "s"} not in your stock were hidden from Missing.</div> : null}
+        {summary.hiddenNoReg ? <div className="notice-banner">{summary.hiddenNoReg} Vansco vehicle{summary.hiddenNoReg === 1 ? "" : "s"} had no valid registration and were hidden from the simple list.</div> : null}
 
         <div className="vansco-tabs vansco-filter-tabs">
           {SIMPLE_FILTERS.map((filter) => (
@@ -659,12 +529,7 @@ export default function VanscoStockWatchPage() {
               key={filter.value}
               type="button"
               className={activeFilter === filter.value ? "vansco-tab-button is-active" : "vansco-tab-button"}
-              onClick={() =>
-                setFiltersByPipeline((prev) => ({
-                  ...prev,
-                  [selectedPipeline]: filter.value,
-                }))
-              }
+              onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: filter.value }))}
             >
               {filter.label}
             </button>
@@ -685,9 +550,7 @@ export default function VanscoStockWatchPage() {
             <div className="vehicle-card__meta">Vansco valid registrations found: {activeDebug.vanscoValidRegistrationsFound || 0}</div>
             <div className="vehicle-card__meta">CRM valid registrations found: {activeDebug.crmValidRegistrationsFound || 0}</div>
             <div className="vehicle-card__meta">Scan complete: {activeDebug.scanComplete ? "yes" : "no"}</div>
-            {(activeDebug.parserWarnings || []).map((warning) => (
-              <div key={warning} className="vehicle-card__meta">Parser warning: {warning}</div>
-            ))}
+            {(activeDebug.parserWarnings || []).map((warning) => <div key={warning} className="vehicle-card__meta">Parser warning: {warning}</div>)}
           </details>
         ) : null}
 
@@ -697,9 +560,7 @@ export default function VanscoStockWatchPage() {
           <div className="empty-state">No vehicles in this section.</div>
         ) : (
           <div className="card-grid">
-            {filteredRecords.map((record) => (
-              <WatchCard key={record.id || `${record.pipeline}-${record.vehicleKey}`} record={record} onRecordSaved={handleRecordSaved} />
-            ))}
+            {filteredRecords.map((record) => <WatchCard key={record.id || `${record.pipeline}-${record.vehicleKey}`} record={record} onRecordSaved={handleRecordSaved} />)}
           </div>
         )}
       </section>
