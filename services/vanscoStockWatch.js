@@ -1051,10 +1051,13 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
     matchesByUrl: 0,
     matchesByFallbackTitle: 0,
     vanscoValidRegistrationsFound: 0,
+    vanscoVehiclesWithoutValidRegistrationMovedToNeedsReview: 0,
     crmValidRegistrationsFound: localVehicles.filter((vehicle) => hasValidRegistration(vehicle)).length,
     scanComplete: false,
     registrationConfidence: "low",
     noLongerHighConfidenceOnly: true,
+    missingCountBasedOnValidRegistrationsOnly: 0,
+    needsReviewCount: 0,
     lowConfidenceWarning: "",
     sampleTitles: sourcePayload.diagnostics?.sampleTitles || parsedSourceVehicles.slice(0, 3).map((vehicle) => vehicle.title),
   };
@@ -1106,6 +1109,7 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
       matchStatus = "needs_review";
     } else if (!sourceHasValidRegistration) {
       matchStatus = "needs_review";
+      diagnostics.vanscoVehiclesWithoutValidRegistrationMovedToNeedsReview += 1;
     } else if (matchedByRegistration && isReservedLikeSourceStatus(sourceVehicle.sourceStatus)) {
       matchStatus = "reserved_still_listed";
     } else if (matchedByRegistration) {
@@ -1202,6 +1206,13 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
       })
     );
   });
+
+  diagnostics.missingCountBasedOnValidRegistrationsOnly = nextRecords.filter(
+    (record) => record.match_status === "missing"
+  ).length;
+  diagnostics.needsReviewCount = nextRecords.filter(
+    (record) => record.match_status === "needs_review"
+  ).length;
 
   if (nextRecords.length) {
     const dedupedBatch = dedupeWatchRecords(nextRecords);

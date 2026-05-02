@@ -587,7 +587,16 @@ export default function VanscoStockWatchPage() {
               Vansco valid registrations found: {activeDebug.vanscoValidRegistrationsFound || 0}
             </div>
             <div className="vehicle-card__meta">
+              Vansco vehicles without valid registration moved to Needs Review: {activeDebug.vanscoVehiclesWithoutValidRegistrationMovedToNeedsReview || 0}
+            </div>
+            <div className="vehicle-card__meta">
               CRM valid registrations found: {activeDebug.crmValidRegistrationsFound || 0}
+            </div>
+            <div className="vehicle-card__meta">
+              Missing count based on valid registrations only: {activeDebug.missingCountBasedOnValidRegistrationsOnly || 0}
+            </div>
+            <div className="vehicle-card__meta">
+              Needs Review count: {activeDebug.needsReviewCount || 0}
             </div>
             <div className="vehicle-card__meta">Scan complete: {activeDebug.scanComplete ? "yes" : "no"}</div>
             <div className="vehicle-card__meta">
