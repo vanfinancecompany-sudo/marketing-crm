@@ -120,12 +120,18 @@ export function formatWatchTimestamp(value) {
 }
 
 function compactWhitespace(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
+  if (value === null || value === undefined) return "";
+  return String(value).replace(/\s+/g, " ").trim();
 }
 
 function cleanOptionalText(value) {
   const text = compactWhitespace(value);
   return text || null;
+}
+
+function isUuid(value) {
+  return typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function cleanTimestamp(value) {
@@ -141,9 +147,8 @@ function cleanWatchRecordPayload(payload) {
   const cleaned = { ...payload };
 
   if ("id" in cleaned) {
-    const idValue = compactWhitespace(cleaned.id);
-    if (idValue) {
-      cleaned.id = idValue;
+    if (isUuid(cleaned.id)) {
+      cleaned.id = cleaned.id;
     } else {
       delete cleaned.id;
     }
@@ -1071,10 +1076,15 @@ export async function runVanscoStockCheck(pipeline) {
   if (nextRecords.length) {
     const dedupedBatch = dedupeWatchRecords(nextRecords);
     diagnostics.upsertDuplicateKeysCollapsed = dedupedBatch.duplicateCount;
+    const cleanedBatch = dedupedBatch.records.map(cleanWatchRecordPayload);
+    diagnostics.recordsWithIdBeforeCleaning = dedupedBatch.records.filter((record) => "id" in record).length;
+    diagnostics.recordsWithIdAfterCleaning = cleanedBatch.filter((record) => "id" in record).length;
+    diagnostics.idsRemovedDuringCleaning =
+      diagnostics.recordsWithIdBeforeCleaning - diagnostics.recordsWithIdAfterCleaning;
 
     const { error } = await supabase
       .from(WATCH_TABLE)
-      .upsert(dedupedBatch.records, { onConflict: "pipeline,vehicle_key" });
+      .upsert(cleanedBatch, { onConflict: "pipeline,vehicle_key" });
 
     if (error) {
       const wrappedError = new Error(`Failed to save Vansco Stock Watch results: ${error.message}`);
