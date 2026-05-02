@@ -290,10 +290,16 @@ function extractImageUrl(html) {
 function normalizeRegistration(value) {
   const text = compactWhitespace(value).toUpperCase();
   if (!text) return "";
-  const blocked = new Set(["VANSCO", "VANSCOLTD", "ALLSTOCK", "HOMESTOCK", "UNDEFINED", "UNKNOWN", "NULL", "N/A"]);
-  const match = text.match(REGISTRATION_PATTERN);
-  const candidate = (match?.[1] || "").replace(/\s+/g, "");
-  if (!candidate || blocked.has(candidate)) return "";
+  const blocked = new Set(["VANSCO", "VANSCOLTD", "ALLSTOCK", "HOMESTOCK", "UNDEFINED", "UNKNOWN", "NULL", "N/A", "NA", "NOTFOUND"]);
+  const cleaned = text.replace(/[^A-Z0-9]/g, "");
+  if (!cleaned || cleaned.length < 5 || cleaned.length > 8) return "";
+  if (!/[A-Z]/.test(cleaned) || !/[0-9]/.test(cleaned)) return "";
+  if (blocked.has(cleaned)) return "";
+  const match = cleaned.match(REGISTRATION_PATTERN);
+  const candidate = (match?.[1] || cleaned).replace(/[^A-Z0-9]/g, "");
+  if (!candidate || candidate.length < 5 || candidate.length > 8) return "";
+  if (!/[A-Z]/.test(candidate) || !/[0-9]/.test(candidate)) return "";
+  if (blocked.has(candidate)) return "";
   return candidate;
 }
 

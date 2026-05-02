@@ -238,6 +238,7 @@ export default function VanscoStockWatchPage() {
     rent2buy: null,
     cars: null,
   });
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   useEffect(() => {
     if (!checkingPipeline || !checkStartedAt) return undefined;
@@ -298,7 +299,6 @@ export default function VanscoStockWatchPage() {
 
     if (
       [
-        "needs_review",
         "review_later",
         "added_to_crm",
         "added_to_wix",
@@ -309,13 +309,11 @@ export default function VanscoStockWatchPage() {
       return activeRecords.filter((record) => record.workflowStatus === activeFilter);
     }
 
-    if (activeFilter === "missing") {
-      return activeRecords.filter(
-        (record) => record.matchStatus === "missing" && !isSuppressedWorkflowStatus(record.workflowStatus)
-      );
+    if (["missing", "listed", "needs_review", "no_longer_on_vansco", "reserved_still_listed"].includes(activeFilter)) {
+      return activeRecords.filter((record) => record.matchStatus === activeFilter);
     }
 
-    return activeRecords.filter((record) => record.matchStatus === activeFilter);
+    return activeRecords;
   }, [activeFilter, activeRecords]);
 
   const summary = useMemo(() => {
@@ -521,6 +519,9 @@ export default function VanscoStockWatchPage() {
         <div className="notice-banner notice-banner--error">
           Do not remove stock unless manually checked. This tool is advisory.
         </div>
+        <div className="notice-banner">
+          Registration is the comparison key. Vehicles without a valid registration are review-only.
+        </div>
 
         <div className="vansco-tabs vansco-filter-tabs">
           {WATCH_FILTERS.map((filter) => (
@@ -547,7 +548,8 @@ export default function VanscoStockWatchPage() {
         ) : null}
 
         {activeDebug ? (
-          <div className="vansco-debug-panel">
+          <details className="vansco-debug-panel" open={showDiagnostics} onToggle={(event) => setShowDiagnostics(event.currentTarget.open)}>
+            <summary className="vansco-debug-panel__summary">Diagnostics</summary>
             <div className="vehicle-card__meta">Vansco page fetched: {activeDebug.pageFetched ? "yes" : "no"}</div>
             <div className="vehicle-card__meta">HTML length: {activeDebug.htmlLength || 0}</div>
             <div className="vehicle-card__meta">Endpoint used: {activeDebug.endpointUsed || "Unknown"}</div>
@@ -631,7 +633,7 @@ export default function VanscoStockWatchPage() {
                 Sample titles: {(activeDebug.sampleTitles || []).join(" | ")}
               </div>
             ) : null}
-          </div>
+          </details>
         ) : null}
 
         {loadingPipeline === selectedPipeline ? (

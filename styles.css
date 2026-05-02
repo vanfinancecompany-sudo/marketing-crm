@@ -1490,6 +1490,13 @@ textarea {
   gap: 6px;
 }
 
+.vansco-debug-panel__summary {
+  cursor: pointer;
+  font-weight: 800;
+  color: #17324d;
+  margin-bottom: 6px;
+}
+
 .vansco-action-stack {
   display: grid;
   gap: 10px;

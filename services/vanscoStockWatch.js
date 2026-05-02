@@ -7,7 +7,18 @@ const YEAR_PATTERN = /\b(20\d{2}|19\d{2})\b/;
 const MILEAGE_PATTERN = /\b([0-9][0-9,]{1,})\s*(?:miles|mile|mi)\b/i;
 const REGISTRATION_PATTERN =
   /\b([A-Z]{2}[0-9]{2}\s?[A-Z]{3}|[A-Z][0-9]{1,3}\s?[A-Z]{3}|[A-Z]{3}\s?[0-9]{1,3}[A-Z]|[0-9]{1,4}\s?[A-Z]{1,3})\b/i;
-const INVALID_REGISTRATION_VALUES = new Set(["VANSCO", "VANSCOLTD", "ALLSTOCK", "HOMESTOCK", "UNDEFINED", "UNKNOWN", "NULL", "NA"]);
+const INVALID_REGISTRATION_VALUES = new Set([
+  "VANSCO",
+  "VANSCOLTD",
+  "ALLSTOCK",
+  "HOMESTOCK",
+  "UNKNOWN",
+  "NOTFOUND",
+  "NULL",
+  "UNDEFINED",
+  "NA",
+  "N/A",
+]);
 
 const PIPELINE_CONFIG = {
   finance: {
@@ -216,9 +227,15 @@ function normalizeText(value) {
 function normalizeRegistration(value) {
   const text = compactWhitespace(value).toUpperCase();
   if (!text) return "";
-  const match = text.match(REGISTRATION_PATTERN);
-  const candidate = (match?.[1] || "").replace(/\s+/g, "");
-  if (!candidate || INVALID_REGISTRATION_VALUES.has(candidate)) return "";
+  const cleaned = text.replace(/[^A-Z0-9]/g, "");
+  if (!cleaned || cleaned.length < 5 || cleaned.length > 8) return "";
+  if (!/[A-Z]/.test(cleaned) || !/[0-9]/.test(cleaned)) return "";
+  if (INVALID_REGISTRATION_VALUES.has(cleaned)) return "";
+  const match = cleaned.match(REGISTRATION_PATTERN);
+  const candidate = (match?.[1] || cleaned).replace(/[^A-Z0-9]/g, "");
+  if (!candidate || candidate.length < 5 || candidate.length > 8) return "";
+  if (!/[A-Z]/.test(candidate) || !/[0-9]/.test(candidate)) return "";
+  if (INVALID_REGISTRATION_VALUES.has(candidate)) return "";
   return candidate;
 }
 
@@ -359,29 +376,15 @@ function chooseBetterVehicleRecord(currentVehicle, nextVehicle) {
 }
 
 function buildVehicleLookup(vehicles) {
-  const byKey = new Map();
   const byRegistration = new Map();
-  const byUrl = new Map();
-  const byMeta = new Map();
 
   vehicles.forEach((vehicle) => {
-    byKey.set(vehicle.vehicleKey, vehicle);
-
     const registration = normalizeRegistration(vehicle.registration);
     if (registration) byRegistration.set(registration, vehicle);
-
-    const stockUrl = normalizeUrl(vehicle.stockUrl);
-    if (stockUrl) byUrl.set(stockUrl, vehicle);
-
-    const metaKey = buildMetaKeyParts(vehicle).join("|");
-    if (metaKey) byMeta.set(metaKey, vehicle);
   });
 
   return {
-    byKey,
     byRegistration,
-    byUrl,
-    byMeta,
   };
 }
 
@@ -391,22 +394,6 @@ function findMatchingLocalVehicle(sourceVehicle, lookup) {
     return {
       vehicle: lookup.byRegistration.get(registration),
       method: "registration",
-    };
-  }
-
-  const stockUrl = normalizeUrl(sourceVehicle.stockUrl);
-  if (stockUrl && lookup.byUrl.has(stockUrl)) {
-    return {
-      vehicle: lookup.byUrl.get(stockUrl),
-      method: "url",
-    };
-  }
-
-  const metaKey = buildMetaKeyParts(sourceVehicle).join("|");
-  if (metaKey && lookup.byMeta.has(metaKey)) {
-    return {
-      vehicle: lookup.byMeta.get(metaKey),
-      method: "fallback_title",
     };
   }
 
@@ -1096,6 +1083,7 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
   parsedSourceVehicles.forEach((sourceVehicle) => {
     const matchResult = findMatchingLocalVehicle(sourceVehicle, localLookup);
     const matchedLocalVehicle = matchResult.vehicle;
+    const sourceHasValidRegistration = hasValidRegistration(sourceVehicle);
     const matchedByRegistration = matchedLocalVehicle && matchResult.method === "registration";
     if (matchedLocalVehicle && matchedByRegistration) {
       matchedLocalKeys.add(matchedLocalVehicle.vehicleKey);
@@ -1111,17 +1099,19 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
       matchedLocalVehicle?.stockUrl ||
       existingRecord?.stockUrl ||
       VAN_SCO_SOURCE_URL;
-    let matchStatus = "missing";
+    let matchStatus = "needs_review";
     const isSitemapFallback = diagnostics.sourceFamily === "sitemap-fallback";
 
     if (isSitemapFallback) {
+      matchStatus = "needs_review";
+    } else if (!sourceHasValidRegistration) {
       matchStatus = "needs_review";
     } else if (matchedByRegistration && isReservedLikeSourceStatus(sourceVehicle.sourceStatus)) {
       matchStatus = "reserved_still_listed";
     } else if (matchedByRegistration) {
       matchStatus = "listed";
-    } else if (matchedLocalVehicle) {
-      matchStatus = "needs_review";
+    } else {
+      matchStatus = "missing";
     }
 
     const baseRecord = existingRecord
@@ -1167,14 +1157,15 @@ export async function runVanscoStockCheck(pipeline, options = {}) {
 
     const existingRecord = existingByKey.get(localVehicle.vehicleKey);
     const stockUrl = localVehicle.stockUrl || existingRecord?.stockUrl || VAN_SCO_SOURCE_URL;
+    const localHasValidRegistration = hasValidRegistration(localVehicle);
     const hasTrustedRemovalSignal =
       registrationConfidence.highConfidence &&
-      hasValidRegistration(localVehicle) &&
+      localHasValidRegistration &&
       !parsedSourceVehicles.some(
         (vehicle) => normalizeRegistration(vehicle.registration) === normalizeRegistration(localVehicle.registration)
       );
     const matchStatus =
-      diagnostics.sourceFamily === "sitemap-fallback"
+      diagnostics.sourceFamily === "sitemap-fallback" || !localHasValidRegistration
         ? "needs_review"
         : hasTrustedRemovalSignal
           ? "no_longer_on_vansco"
