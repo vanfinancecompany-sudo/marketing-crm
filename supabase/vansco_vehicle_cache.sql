@@ -30,12 +30,11 @@ create index if not exists vansco_vehicle_cache_priority_idx on public.vansco_ve
 
 alter table public.vansco_vehicle_cache enable row level security;
 
-create policy if not exists "Allow anon read Vansco cache"
+drop policy if exists "Allow anon read Vansco cache" on public.vansco_vehicle_cache;
+create policy "Allow anon read Vansco cache"
   on public.vansco_vehicle_cache
   for select
   to anon, authenticated
   using (true);
 
 -- Writes should go through Marketing CRM API routes using the service role key.
--- If Supabase policy syntax on your project does not support IF NOT EXISTS for policies,
--- create the table first, then add equivalent read policy manually in Supabase SQL editor.
