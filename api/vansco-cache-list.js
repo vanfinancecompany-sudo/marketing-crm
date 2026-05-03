@@ -13,6 +13,10 @@ function rowMatchesPipeline(row, pipeline) {
   return vehicleType !== "car";
 }
 
+function isReservedLikeStatus(status) {
+  return ["reserved", "sold", "deposit_taken"].includes(String(status || "").toLowerCase());
+}
+
 export default async function handler(request, response) {
   if (request.method !== "GET") {
     response.status(405).json({ ok: false, message: "Method not allowed." });
@@ -68,6 +72,12 @@ export default async function handler(request, response) {
 
     const allRecords = [...records, ...ignoredOnly];
     const cachedRegs = currentPipelineRows.filter((row) => normalizeRegistration(row.registration)).length;
+    const currentNoRegistrationCount = currentPipelineRows.filter((row) => !normalizeRegistration(row.registration)).length;
+    const currentReservedCount = currentPipelineRows.filter((row) => isReservedLikeStatus(row.source_status)).length;
+    const currentAvailableOrUnknownCount = currentPipelineRows.filter((row) => !isReservedLikeStatus(row.source_status)).length;
+    const currentCheckedCount = currentPipelineRows.filter((row) => row.last_successfully_checked_at || row.last_attempted_at).length;
+    const currentUncheckedCount = Math.max(0, currentPipelineRows.length - currentCheckedCount);
+
     const detailRefreshedToday = currentPipelineRows.filter((row) => {
       if (!row.last_successfully_checked_at) return false;
       const checked = new Date(row.last_successfully_checked_at);
@@ -90,9 +100,16 @@ export default async function handler(request, response) {
         currentPipelineUrlCount: currentPipelineRows.length,
         hiddenOtherTabTypeCount: Math.max(0, currentRows.length - currentPipelineRows.length),
         cachedRegs,
+        usableCachedRegistrations: cachedRegs,
+        currentNoRegistrationCount,
+        currentReservedCount,
+        currentAvailableOrUnknownCount,
+        currentCheckedCount,
+        currentUncheckedCount,
         detailRefreshedToday,
         failedDetailChecks: currentPipelineRows.filter((row) => Number(row.fail_count || 0) > 0).length,
         latestUrlListCheckedAt: latestUrlListCheckedAt ? new Date(latestUrlListCheckedAt).toISOString() : "",
+        totalsNote: "Action card counts do not add up to Vansco URL count because already-listed, wrong-tab type, reserved-not-advertised, blocked, and no-registration rows are hidden from action lists.",
       },
     });
   } catch (error) {
