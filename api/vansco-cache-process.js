@@ -56,8 +56,9 @@ export default async function handler(request, response) {
         }
 
         const parsed = parseDetailHtml(row.stock_url, page.html, row.title || vehicleTitleFromUrl(row.stock_url));
+        const { rejected_registration_candidates: rejectedRegistrationCandidates = [], ...cacheFields } = parsed;
         const updatePayload = {
-          ...parsed,
+          ...cacheFields,
           attempt_count: Number(row.attempt_count || 0) + 1,
           fail_count: 0,
           last_error: null,
@@ -85,7 +86,7 @@ export default async function handler(request, response) {
           registration: parsed.registration,
           sourceStatus: parsed.source_status,
           imageFound: Boolean(parsed.image_url),
-          rejectedRegistrationCandidates: parsed.rejected_registration_candidates || [],
+          rejectedRegistrationCandidates,
         });
       } catch (error) {
         const attempts = error?.attempts || [];
