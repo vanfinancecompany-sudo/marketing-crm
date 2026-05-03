@@ -18,27 +18,38 @@ function stageLabel(stage) {
   return labels[stage] || stage || "Running";
 }
 
-function ensureProgressPanel() {
-  if (typeof document === "undefined") return null;
-
-  let panel = document.getElementById("vansco-live-refresh-progress");
-  if (panel) return panel;
-
-  const target = document.querySelector(".hero-panel") || document.querySelector(".page-stack") || document.body;
-  panel = document.createElement("section");
-  panel.id = "vansco-live-refresh-progress";
-  panel.setAttribute("aria-live", "polite");
+function positionProgressPanel(panel) {
+  if (!panel || typeof document === "undefined") return;
+  if (panel.parentElement !== document.body) document.body.appendChild(panel);
   panel.style.cssText = [
-    "margin-top:14px",
+    "position:fixed",
+    "right:18px",
+    "bottom:18px",
+    "z-index:99999",
+    "width:min(560px,calc(100vw - 36px))",
     "padding:14px",
     "border-radius:18px",
     "border:1px solid #bfdbfe",
     "background:linear-gradient(180deg,#eff6ff 0%,#ffffff 100%)",
-    "box-shadow:0 12px 32px rgba(37,99,235,0.14)",
+    "box-shadow:0 18px 48px rgba(15,23,42,0.22)",
     "color:#0f172a",
     "display:grid",
     "gap:10px",
   ].join(";");
+}
+
+function ensureProgressPanel() {
+  if (typeof document === "undefined") return null;
+
+  let panel = document.getElementById("vansco-live-refresh-progress");
+  if (panel) {
+    positionProgressPanel(panel);
+    return panel;
+  }
+
+  panel = document.createElement("section");
+  panel.id = "vansco-live-refresh-progress";
+  panel.setAttribute("aria-live", "polite");
 
   panel.innerHTML = `
     <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
@@ -55,17 +66,7 @@ function ensureProgressPanel() {
     <div style="font-size:12px;color:#64748b;">Refresh in progress uses safe Dragon batches. CRM stock, Wix, Facebook and your Ignore/Delete-Block records are not changed.</div>
   `;
 
-  if (target === document.body) {
-    panel.style.position = "fixed";
-    panel.style.right = "18px";
-    panel.style.bottom = "18px";
-    panel.style.zIndex = "9999";
-    panel.style.maxWidth = "560px";
-    document.body.appendChild(panel);
-  } else {
-    target.appendChild(panel);
-  }
-
+  positionProgressPanel(panel);
   return panel;
 }
 
@@ -108,6 +109,7 @@ function finishProgressPanel(payload) {
   updateProgressPanel(payload, "complete");
   const panel = typeof document !== "undefined" ? document.getElementById("vansco-live-refresh-progress") : null;
   if (!panel) return;
+  positionProgressPanel(panel);
   panel.style.borderColor = payload?.complete ? "#86efac" : "#fed7aa";
   panel.style.background = payload?.complete
     ? "linear-gradient(180deg,#ecfdf5 0%,#ffffff 100%)"
