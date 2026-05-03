@@ -17,7 +17,8 @@ const MAX_DETAIL_URLS = 800;
 const DETAIL_DIAGNOSTIC_SAMPLE_LIMIT = 5;
 const DETAIL_FETCH_MODE_LIMITS = { fast: 100, standard: 100, full: 0 };
 const CAR_KEYWORDS = /\b(audi|bmw|jaguar|jeep|kia|lexus|mercedes-benz|mercedes|skoda|suzuki|hyundai|q2|q3|a3|a4|a5|estate|hatchback|cabriolet|suv|coupe|saloon)\b/i;
-const VAN_KEYWORDS = /\b(transit|custom|tipper|dropside|luton|crew van|minibus|panel van|box van|pickup|pick-up|chassis cab|relay|dispatch|scudo|daily|doblo|partner|berlingo|sprinter|crafter|vivaro|movano|box-van)\b/i;
+const VAN_KEYWORDS = /\b(transit|custom|tipper|dropside|luton|crew van|minibus|panel van|box van|pickup|pick-up|chassis cab|relay|dispatch|scudo|daily|doblo|partner|berlingo|sprinter|crafter|vivaro|movano|box-van|kangoo|traffic|master|ducato|talento|expert|transporter)\b/i;
+const NON_VAN_STOCK_KEYWORDS = /\b(bailey|pegasus|winnebago|motorhome|motorhomes|caravan|campervan|camper|autotrail|auto-trail|swift|elddis|roller team)\b/i;
 
 function compactWhitespace(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -142,9 +143,14 @@ function extractVehicleUrls(html) {
   return Array.from(urls).filter(Boolean);
 }
 
+function isExcludedNonVanStock(text, href = "") {
+  return NON_VAN_STOCK_KEYWORDS.test(`${compactWhitespace(text)} ${compactWhitespace(href)}`);
+}
+
 function detectVehicleCategory(text, href = "") {
   const haystack = `${compactWhitespace(text)} ${compactWhitespace(href)}`;
   if (/used-cars/i.test(href)) return "car";
+  if (isExcludedNonVanStock(haystack, href)) return "excluded_non_van";
   if (/used-vans|no-vat-vans/i.test(href)) return "van";
   if (VAN_KEYWORDS.test(haystack)) return "van";
   if (CAR_KEYWORDS.test(haystack)) return "car";
@@ -212,7 +218,10 @@ async function discoverVehicles(parserWarnings) {
 
 function filterVehiclesForPipeline(vehicles, pipeline) {
   if (pipeline === "cars") return vehicles.filter((vehicle) => detectVehicleCategory(vehicle.title, vehicle.stockUrl) === "car");
-  return vehicles.filter((vehicle) => detectVehicleCategory(vehicle.title, vehicle.stockUrl) !== "car");
+  return vehicles.filter((vehicle) => {
+    const category = detectVehicleCategory(vehicle.title, vehicle.stockUrl);
+    return category !== "car" && category !== "excluded_non_van";
+  });
 }
 
 function extractMetaContent(html, key) {
@@ -347,7 +356,7 @@ async function mapWithConcurrency(items, limit, worker) {
   return results;
 }
 
-function buildDiagnostics({ discovery, filteredVehicleCount, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied, detailTimeoutMs, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, detailDiagnostics, parserWarnings, detailOffset, remainingVehicleCount }) {
+function buildDiagnostics({ discovery, filteredVehicleCount, excludedNonVanCount, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied, detailTimeoutMs, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, detailDiagnostics, parserWarnings, detailOffset, remainingVehicleCount }) {
   return {
     endpointUsed: discovery.endpointUsed,
     sourceFamily: discovery.sourceFamily,
@@ -355,6 +364,7 @@ function buildDiagnostics({ discovery, filteredVehicleCount, detailPagesFetched,
     htmlLength: discovery.pageResults.reduce((total, page) => total + page.htmlLength, 0),
     candidateLinksFound: discovery.candidateLinksFound,
     sitemapUrlsFound: filteredVehicleCount,
+    excludedNonVanCount,
     categoryPagesFetched: 0,
     categoryPageFailures: [],
     vehiclesParsedByCategory: {},
@@ -402,7 +412,9 @@ export default async function handler(request, response) {
     const detailTimeoutMs = emergencySlowMode ? EMERGENCY_DETAIL_FETCH_TIMEOUT_MS : DETAIL_FETCH_TIMEOUT_MS;
     const parserWarnings = [];
     const discovery = await discoverVehicles(parserWarnings);
-    const filteredVehicles = filterVehiclesForPipeline(discovery.vehicles, pipeline).slice(0, MAX_DETAIL_URLS);
+    const pipelineVehicles = filterVehiclesForPipeline(discovery.vehicles, pipeline).slice(0, MAX_DETAIL_URLS);
+    const excludedNonVanCount = pipeline === "cars" ? 0 : discovery.vehicles.filter((vehicle) => detectVehicleCategory(vehicle.title, vehicle.stockUrl) === "excluded_non_van").length;
+    const filteredVehicles = pipelineVehicles;
     const totalVehicleUrlsFound = filteredVehicles.length;
     const requestedLimit = DETAIL_FETCH_MODE_LIMITS[detailFetchMode] ?? DETAIL_FETCH_MODE_LIMITS.standard;
     const batchSize = requestedBatchSize > 0 ? Math.min(requestedBatchSize, FULL_SCAN_BATCH_SIZE) : detailFetchMode === "full" ? FULL_SCAN_BATCH_SIZE : requestedLimit || filteredVehicles.length;
@@ -412,6 +424,7 @@ export default async function handler(request, response) {
     const hasMore = remainingVehicleCount > 0;
     if (hasMore) parserWarnings.push(`Batch ${Math.floor(detailOffset / Math.max(1, detailFetchLimit || batchSize)) + 1} processed ${vehiclesToEnrich.length} vehicles. ${remainingVehicleCount} remaining vehicles are queued for automatic batches.`);
     if (emergencySlowMode) parserWarnings.push(`Emergency slow mode active. Detail timeout is ${detailTimeoutMs / 1000}s per vehicle.`);
+    if (excludedNonVanCount) parserWarnings.push(`${excludedNonVanCount} caravan/motorhome-style Vansco URLs were excluded from van checks.`);
 
     let detailPagesFetched = 0;
     let detailPagesFailed = 0;
@@ -437,15 +450,33 @@ export default async function handler(request, response) {
             sample: error?.htmlSample || "",
           });
         }
-        return vehicle;
+        return null;
       }
     });
-    const finalVehicles = dedupeVehicles(enrichedVehicles);
+    const finalVehicles = dedupeVehicles(enrichedVehicles.filter(Boolean));
     const partialScan = hasMore || detailPagesFailed > 0 || discovery.sourceFamily === "vansco-category-fallback";
-    const diagnostics = buildDiagnostics({ discovery, filteredVehicleCount: filteredVehicles.length, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied: vehiclesToEnrich.length, detailTimeoutMs, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, detailDiagnostics, parserWarnings, detailOffset, remainingVehicleCount });
+    const diagnostics = buildDiagnostics({ discovery, filteredVehicleCount: filteredVehicles.length, excludedNonVanCount, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied: vehiclesToEnrich.length, detailTimeoutMs, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, detailDiagnostics, parserWarnings, detailOffset, remainingVehicleCount });
 
     if (vehiclesToEnrich.length && !finalVehicles.some(hasEnrichedDetail)) {
       response.setHeader("Cache-Control", "no-store, max-age=0");
+
+      if (hasMore) {
+        response.status(200).json({
+          html: discovery.pageResults[0]?.html || "",
+          htmlLength: diagnostics.htmlLength,
+          fetchedAt: new Date().toISOString(),
+          sourceUrl: SOURCE_URL,
+          endpointUsed: discovery.endpointUsed,
+          pagesFetched: diagnostics.pagesFetched,
+          vehicles: [],
+          detailOffset,
+          hasMore,
+          nextDetailOffset: detailOffset + vehiclesToEnrich.length,
+          diagnostics,
+        });
+        return;
+      }
+
       response.status(502).json({
         message: `Vansco detail pages did not return usable registrations, images, or statuses. Reason: ${diagnostics.detailFailureReason}. The scan was stopped so blank rows are not saved.`,
         diagnostics,
