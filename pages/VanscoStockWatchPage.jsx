@@ -603,9 +603,21 @@ export default function VanscoStockWatchPage() {
             <div className="vehicle-card__meta">Pages fetched: {activeDebug.pagesFetched || 0}</div>
             <div className="vehicle-card__meta">Detail pages fetched: {activeDebug.detailPagesFetched || 0}</div>
             <div className="vehicle-card__meta">Detail pages failed: {activeDebug.detailPagesFailed || 0}</div>
+            <div className="vehicle-card__meta">Detail failure reason: {activeDebug.detailFailureReason || "none"}</div>
+            <div className="vehicle-card__meta">Detail timeout used: {activeDebug.detailTimeoutMs ? `${activeDebug.detailTimeoutMs / 1000}s` : "-"}</div>
             <div className="vehicle-card__meta">Vansco valid registrations found: {activeDebug.vanscoValidRegistrationsFound || 0}</div>
             <div className="vehicle-card__meta">CRM valid registrations found: {activeDebug.crmValidRegistrationsFound || 0}</div>
             <div className="vehicle-card__meta">Scan complete: {activeDebug.scanComplete ? "yes" : "no"}</div>
+            {(activeDebug.detailFailureSamples || []).map((sample, index) => (
+              <div key={`${sample.url || "sample"}-${index}`} className="vehicle-card__meta">
+                Failed detail {index + 1}: {sample.url || "unknown URL"} | status {sample.status || 0} | timeout {sample.timeout ? "yes" : "no"} | html length {sample.htmlLength || 0}
+              </div>
+            ))}
+            {(activeDebug.detailHtmlSamples || []).map((sample, index) => (
+              <div key={`${sample.url || "html"}-${index}`} className="vehicle-card__meta">
+                Detail HTML {index + 1}: status {sample.status || 0} | length {sample.htmlLength || 0} | title {sample.title || "none"} | blocked {sample.looksBlocked ? "yes" : "no"} | vehicle hints {sample.hasVehicleHints ? "yes" : "no"}
+              </div>
+            ))}
             {(activeDebug.parserWarnings || []).map((warning) => <div key={warning} className="vehicle-card__meta">Parser warning: {warning}</div>)}
           </details>
         ) : null}
