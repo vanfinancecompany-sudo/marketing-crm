@@ -16,6 +16,11 @@ const MAX_BATCH_SIZE = 50;
 const DEFAULT_MAX_MS = 45000;
 const HARD_MAX_MS = 54000;
 const DETAIL_TIMEOUT_MS = 25000;
+const AUTO_BATCH_SIZE = 15;
+const AUTO_MAX_MS = 45000;
+const AUTO_RUNNING_STALE_MS = 2 * 60 * 60 * 1000;
+const AUTO_RECENT_SLOT_MS = 25 * 60 * 1000;
+const AUTO_START_WINDOWS = new Set(["08:00", "12:30", "16:30", "02:00"]);
 
 function nowIso() {
   return new Date().toISOString();
@@ -24,6 +29,28 @@ function nowIso() {
 function toTime(value) {
   const time = value ? new Date(value).getTime() : 0;
   return Number.isFinite(time) ? time : 0;
+}
+
+function londonParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+
+  const pick = (type) => parts.find((part) => part.type === type)?.value || "";
+  return {
+    dateKey: `${pick("year")}-${pick("month")}-${pick("day")}`,
+    timeKey: `${pick("hour")}:${pick("minute")}`,
+  };
+}
+
+function isAutoStartWindow(date = new Date()) {
+  return AUTO_START_WINDOWS.has(londonParts(date).timeKey);
 }
 
 function prioritySort(a, b) {
@@ -40,6 +67,80 @@ function prioritySort(a, b) {
   return aChecked - bChecked;
 }
 
+async function getLatestRunningRun(supabase) {
+  const { data, error } = await supabase
+    .from(REFRESH_RUNS_TABLE)
+    .select("*")
+    .eq("status", "running")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data || null;
+}
+
+async function getRecentScheduledRun(supabase) {
+  const since = new Date(Date.now() - AUTO_RECENT_SLOT_MS).toISOString();
+  const { data, error } = await supabase
+    .from(REFRESH_RUNS_TABLE)
+    .select("*")
+    .eq("run_type", "scheduled")
+    .gte("started_at", since)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data || null;
+}
+
+async function updateRun(supabase, runId, patch) {
+  if (!runId) return null;
+  const { data, error } = await supabase
+    .from(REFRESH_RUNS_TABLE)
+    .update({ ...patch, updated_at: nowIso() })
+    .eq("id", runId)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function prepareScheduledRun(supabase) {
+  const running = await getLatestRunningRun(supabase);
+  const now = Date.now();
+
+  if (running) {
+    const updatedAt = toTime(running.updated_at || running.started_at);
+    if (updatedAt && now - updatedAt <= AUTO_RUNNING_STALE_MS) {
+      return { mode: "continue_running", runId: running.id, refreshUrls: false, idle: false };
+    }
+
+    await updateRun(supabase, running.id, {
+      status: "failed",
+      stage: "failed",
+      last_error: "Scheduled refresh marked this run stale before starting a new one.",
+    });
+  }
+
+  if (!isAutoStartWindow(new Date())) {
+    return { mode: "idle_waiting_for_window", idle: true, london: londonParts(new Date()) };
+  }
+
+  const recentScheduled = await getRecentScheduledRun(supabase);
+  if (recentScheduled) {
+    return {
+      mode: "idle_already_started_this_window",
+      idle: true,
+      runId: recentScheduled.id,
+      london: londonParts(new Date()),
+    };
+  }
+
+  return { mode: "start_new_scheduled_run", refreshUrls: true, idle: false };
+}
+
 async function getOrCreateRun(supabase, { runId, runType, forceNew = false }) {
   if (runId) {
     const { data, error } = await supabase
@@ -52,15 +153,7 @@ async function getOrCreateRun(supabase, { runId, runType, forceNew = false }) {
   }
 
   if (!forceNew) {
-    const { data: existing, error: existingError } = await supabase
-      .from(REFRESH_RUNS_TABLE)
-      .select("*")
-      .eq("status", "running")
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (existingError) throw existingError;
+    const existing = await getLatestRunningRun(supabase);
     if (existing) return existing;
   } else {
     await supabase
@@ -87,18 +180,6 @@ async function getOrCreateRun(supabase, { runId, runType, forceNew = false }) {
   return data;
 }
 
-async function updateRun(supabase, runId, patch) {
-  if (!runId) return null;
-  const { data, error } = await supabase
-    .from(REFRESH_RUNS_TABLE)
-    .update({ ...patch, updated_at: nowIso() })
-    .eq("id", runId)
-    .select("*")
-    .single();
-  if (error) throw error;
-  return data;
-}
-
 async function refreshUrlList(supabase, runId) {
   await updateRun(supabase, runId, { stage: "refreshing_url_list" });
 
@@ -106,9 +187,7 @@ async function refreshUrlList(supabase, runId) {
   const refreshedAt = nowIso();
   const urls = Array.from(new Set(discovery.urls.map(normalizeUrl).filter(Boolean)));
 
-  if (!urls.length) {
-    throw new Error("Could not find current Vansco vehicle URLs from sitemap.");
-  }
+  if (!urls.length) throw new Error("Could not find current Vansco vehicle URLs from sitemap.");
 
   const rows = urls.map((stockUrl) => {
     const title = vehicleTitleFromUrl(stockUrl);
@@ -177,7 +256,6 @@ async function countRemainingForRun(supabase, runStartedAt) {
     .limit(2000);
 
   if (error) throw error;
-
   return (data || []).filter((row) => !wasAttemptedDuringRun(row, runStartedAt)).length;
 }
 
@@ -186,27 +264,24 @@ async function processOne(supabase, row) {
 
   try {
     const page = await fetchVanscoDetailHtml(row.stock_url, DETAIL_TIMEOUT_MS);
-    if (!page.ok) {
-      throw new Error(`Vansco detail returned ${page.status} ${page.statusText || ""}`.trim());
-    }
+    if (!page.ok) throw new Error(`Vansco detail returned ${page.status} ${page.statusText || ""}`.trim());
 
     const parsed = parseDetailHtml(row.stock_url, page.html, row.title || vehicleTitleFromUrl(row.stock_url));
     const { rejected_registration_candidates: rejectedRegistrationCandidates = [], ...cacheFields } = parsed;
     const checkedAt = nowIso();
-    const updatePayload = {
-      ...cacheFields,
-      attempt_count: Number(row.attempt_count || 0) + 1,
-      fail_count: 0,
-      last_error: null,
-      last_attempted_at: attemptedAt,
-      last_successfully_checked_at: checkedAt,
-      is_currently_on_vansco: true,
-      updated_at: checkedAt,
-    };
 
     const { error: updateError } = await supabase
       .from(CACHE_TABLE)
-      .update(updatePayload)
+      .update({
+        ...cacheFields,
+        attempt_count: Number(row.attempt_count || 0) + 1,
+        fail_count: 0,
+        last_error: null,
+        last_attempted_at: attemptedAt,
+        last_successfully_checked_at: checkedAt,
+        is_currently_on_vansco: true,
+        updated_at: checkedAt,
+      })
       .eq("id", row.id);
 
     if (updateError) throw updateError;
@@ -260,24 +335,46 @@ export default async function handler(request, response) {
 
   const startedAtMs = Date.now();
   const query = request.query || {};
-  const refreshUrls = String(query.refreshUrls || "true") !== "false";
-  const requestedBatchSize = Math.max(1, Number(query.batchSize || DEFAULT_BATCH_SIZE) || DEFAULT_BATCH_SIZE);
-  const batchSize = Math.min(requestedBatchSize, MAX_BATCH_SIZE);
-  const maxMs = Math.min(Math.max(Number(query.maxMs || DEFAULT_MAX_MS) || DEFAULT_MAX_MS, 5000), HARD_MAX_MS);
-  const runType = String(query.runType || "manual");
+  const autoScheduled = String(query.auto || query.autoScheduled || "false") === "true";
+  let refreshUrls = String(query.refreshUrls || "true") !== "false";
+  let batchSize = Math.min(Math.max(1, Number(query.batchSize || DEFAULT_BATCH_SIZE) || DEFAULT_BATCH_SIZE), MAX_BATCH_SIZE);
+  let maxMs = Math.min(Math.max(Number(query.maxMs || DEFAULT_MAX_MS) || DEFAULT_MAX_MS, 5000), HARD_MAX_MS);
+  let runType = String(query.runType || "manual");
+  let runId = query.runId;
+  let scheduleDecision = null;
 
   let supabase;
   let run;
 
   try {
     supabase = getSupabaseAdmin();
-    run = await getOrCreateRun(supabase, { runId: query.runId, runType, forceNew: refreshUrls && !query.runId });
+
+    if (autoScheduled) {
+      runType = "scheduled";
+      batchSize = Math.min(Math.max(Number(query.batchSize || AUTO_BATCH_SIZE) || AUTO_BATCH_SIZE, 1), MAX_BATCH_SIZE);
+      maxMs = Math.min(Math.max(Number(query.maxMs || AUTO_MAX_MS) || AUTO_MAX_MS, 5000), HARD_MAX_MS);
+      scheduleDecision = await prepareScheduledRun(supabase);
+
+      if (scheduleDecision.idle) {
+        response.setHeader("Cache-Control", "no-store, max-age=0");
+        response.status(200).json({
+          ok: true,
+          mode: "scheduled-idle",
+          fetchedAt: nowIso(),
+          scheduleDecision,
+          message: "No scheduled Vansco refresh action needed on this tick.",
+        });
+        return;
+      }
+
+      refreshUrls = Boolean(scheduleDecision.refreshUrls);
+      runId = scheduleDecision.runId || "";
+    }
+
+    run = await getOrCreateRun(supabase, { runId, runType, forceNew: refreshUrls && !runId });
 
     const refresh = refreshUrls ? await refreshUrlList(supabase, run.id) : null;
-    run = await updateRun(supabase, run.id, {
-      stage: "processing_dragon_details",
-      last_batch_size: batchSize,
-    });
+    run = await updateRun(supabase, run.id, { stage: "processing_dragon_details", last_batch_size: batchSize });
 
     const runStartedAt = run.started_at;
     const results = [];
@@ -333,7 +430,12 @@ export default async function handler(request, response) {
       remaining_count: remainingCount,
       last_batch_size: batchSize,
       last_error: null,
-      last_result: { stoppedReason, processedThisBatch: results.length, successThisBatch: results.filter((item) => item.ok).length, failureThisBatch: results.filter((item) => !item.ok).length },
+      last_result: {
+        stoppedReason,
+        processedThisBatch: results.length,
+        successThisBatch: results.filter((item) => item.ok).length,
+        failureThisBatch: results.filter((item) => !item.ok).length,
+      },
     });
 
     response.setHeader("Cache-Control", "no-store, max-age=0");
@@ -341,7 +443,8 @@ export default async function handler(request, response) {
       ok: true,
       fetchedAt: nowIso(),
       detailHostPreference: "dragon-first",
-      mode: "safe-live-batch",
+      mode: autoScheduled ? "scheduled-safe-live-batch" : "safe-live-batch",
+      scheduleDecision,
       run: finalRun,
       runId: run.id,
       batchSize,
@@ -370,7 +473,7 @@ export default async function handler(request, response) {
           last_error: error?.message || "Could not run Vansco live refresh.",
         });
       } catch {
-        // keep the original error response
+        // keep original error response
       }
     }
     response.status(500).json({ ok: false, message: error?.message || "Could not run Vansco live refresh." });
