@@ -63,19 +63,13 @@ async function refreshUrlList(supabase) {
 
   if (upsertError) throw upsertError;
 
-  const { error: staleError } = await supabase
-    .from(CACHE_TABLE)
-    .update({ is_currently_on_vansco: false, updated_at: refreshedAt })
-    .not("stock_url", "in", `(${urls.map((url) => `"${url.replace(/"/g, "\\\"")}"`).join(",")})`);
-
-  if (staleError) throw staleError;
-
   return {
     sitemapUrl: discovery.sitemapUrl,
     discoveryAttempts: discovery.attempts,
     urlsFound: urls.length,
     rowsUpserted: rows.length,
     refreshedAt,
+    staleMarkingSkipped: true,
   };
 }
 
