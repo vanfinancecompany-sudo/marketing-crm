@@ -7,6 +7,12 @@ import {
   normalizeRegistration,
 } from "./_vansco-cache-utils.js";
 
+function rowMatchesPipeline(row, pipeline) {
+  const vehicleType = String(row.vehicle_type || row.vehicleCategory || "unknown").toLowerCase();
+  if (pipeline === "cars") return vehicleType === "car";
+  return vehicleType !== "car";
+}
+
 export default async function handler(request, response) {
   if (request.method !== "GET") {
     response.status(405).json({ ok: false, message: "Method not allowed." });
@@ -33,6 +39,10 @@ export default async function handler(request, response) {
 
     if (watchError) throw watchError;
 
+    const pipelineCacheRows = (cacheRows || []).filter((row) => rowMatchesPipeline(row, pipeline));
+    const currentRows = (cacheRows || []).filter((row) => row.is_currently_on_vansco !== false);
+    const currentPipelineRows = pipelineCacheRows.filter((row) => row.is_currently_on_vansco !== false);
+
     const actionByRegistration = new Map();
     const actionByUrl = new Map();
     (watchRows || []).forEach((row) => {
@@ -42,7 +52,7 @@ export default async function handler(request, response) {
       if (row.stock_url) actionByUrl.set(row.stock_url, normalized);
     });
 
-    const records = (cacheRows || []).map((row) => {
+    const records = pipelineCacheRows.map((row) => {
       const reg = normalizeRegistration(row.registration);
       const action = (reg && actionByRegistration.get(reg)) || actionByUrl.get(row.stock_url) || null;
       return normalizeCacheRow(row, action);
@@ -57,9 +67,8 @@ export default async function handler(request, response) {
       });
 
     const allRecords = [...records, ...ignoredOnly];
-    const currentRows = (cacheRows || []).filter((row) => row.is_currently_on_vansco !== false);
-    const cachedRegs = currentRows.filter((row) => normalizeRegistration(row.registration)).length;
-    const detailRefreshedToday = currentRows.filter((row) => {
+    const cachedRegs = currentPipelineRows.filter((row) => normalizeRegistration(row.registration)).length;
+    const detailRefreshedToday = currentPipelineRows.filter((row) => {
       if (!row.last_successfully_checked_at) return false;
       const checked = new Date(row.last_successfully_checked_at);
       const now = new Date();
@@ -78,9 +87,11 @@ export default async function handler(request, response) {
       records: allRecords,
       summary: {
         currentUrlCount: currentRows.length,
+        currentPipelineUrlCount: currentPipelineRows.length,
+        hiddenOtherTabTypeCount: Math.max(0, currentRows.length - currentPipelineRows.length),
         cachedRegs,
         detailRefreshedToday,
-        failedDetailChecks: currentRows.filter((row) => Number(row.fail_count || 0) > 0).length,
+        failedDetailChecks: currentPipelineRows.filter((row) => Number(row.fail_count || 0) > 0).length,
         latestUrlListCheckedAt: latestUrlListCheckedAt ? new Date(latestUrlListCheckedAt).toISOString() : "",
       },
     });
