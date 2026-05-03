@@ -166,7 +166,7 @@ function classifyHtml(html, status) {
   return "normal_vehicle_like_html";
 }
 
-async function probeUrl(url, timeoutMs, index) {
+async function probeUrl(url, timeoutMs, index, sitemapOffset) {
   try {
     const page = await fetchHtml(url, timeoutMs);
     const title = extractTitle(page.html);
@@ -174,6 +174,7 @@ async function probeUrl(url, timeoutMs, index) {
     const decoded = decodeHtml(page.html);
     return {
       index,
+      sitemapOffset,
       url,
       ok: page.ok,
       timeout: false,
@@ -192,6 +193,7 @@ async function probeUrl(url, timeoutMs, index) {
   } catch (error) {
     return {
       index,
+      sitemapOffset,
       url,
       ok: false,
       timeout: error?.name === "AbortError",
@@ -210,15 +212,16 @@ export default async function handler(request, response) {
   }
 
   const limit = Math.min(Math.max(Number(request.query?.limit || DEFAULT_LIMIT) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+  const offset = Math.max(Number(request.query?.offset || 0) || 0, 0);
   const timeoutMs = Math.min(Math.max(Number(request.query?.timeoutMs || DEFAULT_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS, 1000), 55000);
 
   try {
     const discovery = await discoverUrls();
-    const urls = discovery.urls.slice(0, limit);
+    const urls = discovery.urls.slice(offset, offset + limit);
     const results = [];
 
     for (let index = 0; index < urls.length; index += 1) {
-      results.push(await probeUrl(urls[index], timeoutMs, index + 1));
+      results.push(await probeUrl(urls[index], timeoutMs, index + 1, offset + index));
     }
 
     const successfulFetches = results.filter((item) => item.ok).length;
@@ -231,6 +234,8 @@ export default async function handler(request, response) {
       sitemapUrl: discovery.sitemapUrl,
       discoveryAttempts: discovery.attempts,
       totalUrlsFound: discovery.urls.length,
+      offset,
+      nextOffset: offset + results.length,
       probedCount: results.length,
       timeoutMs,
       successfulFetches,
