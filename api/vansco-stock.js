@@ -13,6 +13,7 @@ const DETAIL_FETCH_TIMEOUT_MS = 9000;
 const DISCOVERY_FETCH_TIMEOUT_MS = 10000;
 const FULL_SCAN_BATCH_SIZE = 5;
 const MAX_DETAIL_URLS = 800;
+const DETAIL_DIAGNOSTIC_SAMPLE_LIMIT = 5;
 const DETAIL_FETCH_MODE_LIMITS = { fast: 100, standard: 100, full: 0 };
 const CAR_KEYWORDS = /\b(audi|bmw|jaguar|jeep|kia|lexus|mercedes-benz|mercedes|skoda|suzuki|hyundai|q2|q3|a3|a4|a5|estate|hatchback|cabriolet|suv|coupe|saloon)\b/i;
 const VAN_KEYWORDS = /\b(transit|custom|tipper|dropside|luton|crew van|minibus|panel van|box van|pickup|pick-up|chassis cab|relay|dispatch|scudo|daily|doblo|partner|berlingo|sprinter|crafter|vivaro|movano|box-van)\b/i;
@@ -66,12 +67,57 @@ async function fetchHtml(url, timeoutMs = DETAIL_FETCH_TIMEOUT_MS) {
         "cache-control": "no-cache",
       },
     });
-    if (!response.ok) throw new Error(`Vansco request failed with status ${response.status}.`);
     const html = await response.text();
-    return { url: normalizeUrl(url), html, htmlLength: html.length };
+    if (!response.ok) {
+      const error = new Error(`Vansco request failed with status ${response.status}.`);
+      error.status = response.status;
+      error.htmlLength = html.length;
+      error.htmlSample = decodeHtml(html).slice(0, 220);
+      throw error;
+    }
+    return {
+      url: normalizeUrl(url),
+      html,
+      htmlLength: html.length,
+      status: response.status,
+      contentType: response.headers.get("content-type") || "",
+    };
   } finally {
     timed.clear();
   }
+}
+
+function analyseDetailHtml(url, page) {
+  const html = page?.html || "";
+  const decoded = decodeHtml(html);
+  const lower = decoded.toLowerCase();
+  const title = decodeHtml(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "").slice(0, 140);
+  const looksBlocked = /cloudflare|captcha|access denied|forbidden|blocked|enable cookies|checking your browser|attention required|bot|security check/i.test(decoded);
+  const hasVehicleHints = /registration|reg\b|reserve|reserved|deposit taken|enquire now|finance options|vehicle-details|og:title|og:image/i.test(html);
+
+  return {
+    url: normalizeUrl(url),
+    status: page?.status || 0,
+    contentType: page?.contentType || "",
+    htmlLength: html.length,
+    title,
+    looksBlocked,
+    hasVehicleHints,
+    sample: lower.slice(0, 240),
+  };
+}
+
+function classifyDetailFailure(diagnostics) {
+  const failures = diagnostics?.failureSamples || [];
+  const samples = diagnostics?.htmlSamples || [];
+
+  if (failures.some((failure) => failure.timeout)) return "timeout";
+  if (failures.some((failure) => [401, 403, 429, 503].includes(Number(failure.status)))) return "blocked_or_rate_limited";
+  if (samples.some((sample) => sample.looksBlocked)) return "blocked_or_challenge_page";
+  if (samples.length && samples.every((sample) => sample.htmlLength < 1000)) return "empty_or_tiny_html";
+  if (samples.length && samples.every((sample) => !sample.hasVehicleHints)) return "unexpected_html";
+  if (failures.length) return "detail_fetch_failed";
+  return "unknown";
 }
 
 function extractAnchorMatches(html) {
@@ -300,7 +346,7 @@ async function mapWithConcurrency(items, limit, worker) {
   return results;
 }
 
-function buildDiagnostics({ discovery, filteredVehicleCount, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, parserWarnings, detailOffset, remainingVehicleCount }) {
+function buildDiagnostics({ discovery, filteredVehicleCount, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, detailDiagnostics, parserWarnings, detailOffset, remainingVehicleCount }) {
   return {
     endpointUsed: discovery.endpointUsed,
     sourceFamily: discovery.sourceFamily,
@@ -315,6 +361,9 @@ function buildDiagnostics({ discovery, filteredVehicleCount, detailPagesFetched,
     vehiclesParsed: finalVehicles.length,
     detailPagesFetched,
     detailPagesFailed,
+    detailFailureReason: classifyDetailFailure(detailDiagnostics),
+    detailFailureSamples: detailDiagnostics.failureSamples,
+    detailHtmlSamples: detailDiagnostics.htmlSamples,
     vehiclesEnrichedWithRegistration: finalVehicles.filter((vehicle) => vehicle.registration).length,
     vehiclesEnrichedWithImage: finalVehicles.filter((vehicle) => vehicle.imageUrl).length,
     vehiclesWithSourceStatus: finalVehicles.filter((vehicle) => vehicle.sourceStatus && vehicle.sourceStatus !== "unknown").length,
@@ -362,24 +411,38 @@ export default async function handler(request, response) {
     let detailPagesFetched = 0;
     let detailPagesFailed = 0;
     const enrichmentDiagnostics = { registrationsExtractedFromTitleBrackets: 0, rejectedRegistrationCandidates: [] };
+    const detailDiagnostics = { failureSamples: [], htmlSamples: [] };
     const enrichedVehicles = await mapWithConcurrency(vehiclesToEnrich, DETAIL_FETCH_CONCURRENCY, async (vehicle) => {
       try {
         const detailPage = await fetchHtml(vehicle.stockUrl);
         detailPagesFetched += 1;
+        if (detailDiagnostics.htmlSamples.length < DETAIL_DIAGNOSTIC_SAMPLE_LIMIT) {
+          detailDiagnostics.htmlSamples.push(analyseDetailHtml(vehicle.stockUrl, detailPage));
+        }
         return enrichVehicleStub(vehicle, detailPage.html, enrichmentDiagnostics);
-      } catch {
+      } catch (error) {
         detailPagesFailed += 1;
+        if (detailDiagnostics.failureSamples.length < DETAIL_DIAGNOSTIC_SAMPLE_LIMIT) {
+          detailDiagnostics.failureSamples.push({
+            url: normalizeUrl(vehicle.stockUrl),
+            message: error?.message || "Detail fetch failed",
+            status: error?.status || 0,
+            timeout: error?.name === "AbortError",
+            htmlLength: error?.htmlLength || 0,
+            sample: error?.htmlSample || "",
+          });
+        }
         return vehicle;
       }
     });
     const finalVehicles = dedupeVehicles(enrichedVehicles);
     const partialScan = hasMore || detailPagesFailed > 0 || discovery.sourceFamily === "vansco-category-fallback";
-    const diagnostics = buildDiagnostics({ discovery, filteredVehicleCount: filteredVehicles.length, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied: vehiclesToEnrich.length, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, parserWarnings, detailOffset, remainingVehicleCount });
+    const diagnostics = buildDiagnostics({ discovery, filteredVehicleCount: filteredVehicles.length, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied: vehiclesToEnrich.length, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, detailDiagnostics, parserWarnings, detailOffset, remainingVehicleCount });
 
     if (vehiclesToEnrich.length && !finalVehicles.some(hasEnrichedDetail)) {
       response.setHeader("Cache-Control", "no-store, max-age=0");
       response.status(502).json({
-        message: "Vansco detail pages did not return usable registrations, images, or statuses. The scan was stopped so blank rows are not saved. Please retry shortly.",
+        message: `Vansco detail pages did not return usable registrations, images, or statuses. Reason: ${diagnostics.detailFailureReason}. The scan was stopped so blank rows are not saved.`,
         diagnostics,
       });
       return;
