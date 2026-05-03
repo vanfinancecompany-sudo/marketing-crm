@@ -327,6 +327,7 @@ export default function VanscoStockWatchPage() {
   const [debugByPipeline, setDebugByPipeline] = useState({ finance: null, rent2buy: null, cars: null });
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [runningStatus, setRunningStatus] = useState(null);
+  const [slowModeActive, setSlowModeActive] = useState(false);
 
   useEffect(() => {
     if (!checkingPipeline || !checkStartedAt) return undefined;
@@ -430,13 +431,16 @@ export default function VanscoStockWatchPage() {
     return new Date(record.lastCheckedAt) > new Date(latest) ? record.lastCheckedAt : latest;
   }, ""), [currentRawRecords]);
 
-  async function handleRunCheck() {
+  async function handleRunCheck({ emergencySlow = false } = {}) {
     const confirmed = window.confirm(
-      `Run a fresh Vansco check for ${pipelineLabel(selectedPipeline)}? It will compare Vansco stock against this tab only and will not edit CRM stock.`
+      emergencySlow
+        ? `Run Emergency slow check for ${pipelineLabel(selectedPipeline)}? This checks one Vansco detail page at a time and may take longer, but is safer when Vansco is timing out.`
+        : `Run a fresh Vansco check for ${pipelineLabel(selectedPipeline)}? It will compare Vansco stock against this tab only and will not edit CRM stock.`
     );
     if (!confirmed) return;
 
     setCheckingPipeline(selectedPipeline);
+    setSlowModeActive(emergencySlow);
     setErrorMessage("");
     setSuccessMessage("");
     const startedAt = new Date().toISOString();
@@ -444,7 +448,7 @@ export default function VanscoStockWatchPage() {
     setElapsedSeconds(0);
     setRunningStatus({
       stage: "clearing",
-      message: "Preparing check...",
+      message: emergencySlow ? "Preparing emergency slow check..." : "Preparing check...",
       processedVehicles: 0,
       totalVehicles: 0,
       percent: 4,
@@ -456,17 +460,26 @@ export default function VanscoStockWatchPage() {
     try {
       const result = await runVanscoStockCheck(selectedPipeline, {
         detailFetchMode: "full",
-        detailBatchSize: 25,
-        onProgress: (progress) => setRunningStatus((prev) => ({ ...prev, ...progress })),
+        detailBatchSize: emergencySlow ? 1 : 25,
+        onProgress: (progress) => setRunningStatus((prev) => ({
+          ...prev,
+          ...progress,
+          message: emergencySlow && progress?.stage === "processing"
+            ? `Emergency slow check: ${progress.message || "checking one vehicle at a time..."}`
+            : progress?.message || prev?.message,
+        })),
       });
       setRecordsByPipeline((prev) => ({ ...prev, [selectedPipeline]: result.records }));
       setDebugByPipeline((prev) => ({ ...prev, [selectedPipeline]: result.diagnostics || null }));
-      setSuccessMessage(`Checked ${result.sourceVehicleCount} Vansco vehicles against ${result.localVehicleCount} ${pipelineLabel(selectedPipeline)} records.`);
+      setSuccessMessage(
+        `${emergencySlow ? "Emergency slow check completed." : "Checked"} ${result.sourceVehicleCount} Vansco vehicles against ${result.localVehicleCount} ${pipelineLabel(selectedPipeline)} records.`
+      );
     } catch (error) {
       setDebugByPipeline((prev) => ({ ...prev, [selectedPipeline]: error.debugInfo || prev[selectedPipeline] }));
       setErrorMessage(`${error.message || "Vansco Stock Watch check failed."} Showing the last usable saved scan if available.`);
     } finally {
       setCheckingPipeline("");
+      setSlowModeActive(false);
       setRunningStatus((prev) => prev?.stage === "complete" ? prev : null);
     }
   }
@@ -493,8 +506,11 @@ export default function VanscoStockWatchPage() {
             <div className="vehicle-card__meta">Blocking is saved per tab. Blocking in Finance does not block the same vehicle in Rent2Buy or Cars.</div>
           </div>
           <div className="vansco-action-stack">
-            <button className="button button--primary vansco-run-button" type="button" onClick={handleRunCheck} disabled={isCheckingActiveTab}>
-              {isCheckingActiveTab ? <><span className="vansco-spinner" aria-hidden="true" />Checking Vansco...</> : "Check Vansco Stock"}
+            <button className="button button--primary vansco-run-button" type="button" onClick={() => handleRunCheck()} disabled={isCheckingActiveTab}>
+              {isCheckingActiveTab && !slowModeActive ? <><span className="vansco-spinner" aria-hidden="true" />Checking Vansco...</> : "Check Vansco Stock"}
+            </button>
+            <button className="button button--ghost vansco-run-button" type="button" onClick={() => handleRunCheck({ emergencySlow: true })} disabled={isCheckingActiveTab}>
+              {isCheckingActiveTab && slowModeActive ? <><span className="vansco-spinner" aria-hidden="true" />Emergency slow check...</> : "Emergency slow check"}
             </button>
           </div>
         </div>
@@ -522,11 +538,12 @@ export default function VanscoStockWatchPage() {
 
         {isCheckingActiveTab ? (
           <div className="vansco-progress-panel">
-            <div className="vansco-progress-panel__header"><strong>{runningStatus?.message || "Running full Vansco scan..."}</strong><span>{runningStatus?.percent ?? 0}%</span></div>
+            <div className="vansco-progress-panel__header"><strong>{runningStatus?.message || (slowModeActive ? "Running emergency slow Vansco scan..." : "Running full Vansco scan...")}</strong><span>{runningStatus?.percent ?? 0}%</span></div>
             <div className="vansco-progress-bar" aria-hidden="true"><div className="vansco-progress-bar__fill" style={{ width: `${runningStatus?.percent ?? 0}%` }} /></div>
             <div className="vehicle-card__meta">Started at: {formatWatchTimestamp(checkStartedAt)} | Running for {formatElapsed(elapsedSeconds)}</div>
             <div className="vehicle-card__meta">Total URLs found: {runningStatus?.totalVehicles || 0} | Processed: {runningStatus?.processedVehicles || 0}</div>
             <div className="vehicle-card__meta">Valid registrations: {runningStatus?.validRegistrationsFound || 0} | Images: {runningStatus?.imagesFound || 0} | Reserved statuses: {runningStatus?.reservedStatusesFound || 0}</div>
+            {slowModeActive ? <div className="notice-banner">Emergency slow mode is checking 1 detail page per batch to reduce Vansco timeouts.</div> : null}
             <div className="vansco-progress-steps">
               {RUNNING_STEPS.map((step, index) => {
                 const currentIndex = RUNNING_STEPS.findIndex((item) => item.key === runningStatus?.stage);
