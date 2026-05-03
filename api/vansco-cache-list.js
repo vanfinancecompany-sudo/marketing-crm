@@ -44,6 +44,15 @@ function isReservedLikeStatus(status) {
   return ["reserved", "sold", "deposit_taken"].includes(String(status || "").toLowerCase());
 }
 
+function workflowStatusOf(row) {
+  return String(row?.workflowStatus || row?.workflow_status || "");
+}
+
+function isBlockedAction(row) {
+  const status = workflowStatusOf(row);
+  return status === "ignored" || status.startsWith("not_listing_");
+}
+
 function actionKeys(row) {
   const reg = normalizeRegistration(row.registration);
   const url = normalizeUrl(row.stock_url || row.stockUrl || row.stock_url_raw || "");
@@ -56,6 +65,21 @@ function recordKeys(row) {
   const url = normalizeUrl(row.stock_url || row.stockUrl || "");
   const vanscoId = String(row.vansco_id || row.vanscoId || extractVanscoId(url) || "").toLowerCase();
   return { reg, url, vanscoId };
+}
+
+function applyMatchedAction(cacheRecord, action) {
+  const normalized = normalizeCacheRow(cacheRecord, action);
+  if (!action) return normalized;
+
+  const workflowStatus = workflowStatusOf(action);
+  return {
+    ...normalized,
+    watchActionId: action.id || action.watchActionId || normalized.watchActionId || "",
+    workflowStatus,
+    workflow_status: workflowStatus,
+    notes: action.notes ?? normalized.notes ?? "",
+    actionMatched: true,
+  };
 }
 
 export default async function handler(request, response) {
@@ -94,10 +118,16 @@ export default async function handler(request, response) {
 
     (watchRows || []).forEach((row) => {
       const normalized = normalizeActionRecord(row);
+      const action = {
+        ...normalized,
+        workflowStatus: workflowStatusOf(normalized) || workflowStatusOf(row),
+        workflow_status: workflowStatusOf(normalized) || workflowStatusOf(row),
+        notes: normalized.notes ?? row.notes ?? "",
+      };
       const keys = actionKeys(row);
-      if (keys.reg) actionByRegistration.set(keys.reg, normalized);
-      if (keys.url) actionByUrl.set(keys.url, normalized);
-      if (keys.vanscoId) actionByVanscoId.set(keys.vanscoId, normalized);
+      if (keys.reg) actionByRegistration.set(keys.reg, action);
+      if (keys.url) actionByUrl.set(keys.url, action);
+      if (keys.vanscoId) actionByVanscoId.set(keys.vanscoId, action);
     });
 
     const records = pipelineCacheRows.map((row) => {
@@ -107,7 +137,7 @@ export default async function handler(request, response) {
         (keys.url && actionByUrl.get(keys.url)) ||
         (keys.vanscoId && actionByVanscoId.get(keys.vanscoId)) ||
         null;
-      return normalizeCacheRow(row, action);
+      return applyMatchedAction(row, action);
     });
 
     const ignoredOnly = (watchRows || [])
@@ -122,7 +152,7 @@ export default async function handler(request, response) {
             (keys.vanscoId && recordKey.vanscoId === keys.vanscoId)
           );
         });
-        return !inCache && (row.workflowStatus === "ignored" || String(row.workflowStatus || "").startsWith("not_listing_"));
+        return !inCache && isBlockedAction(row);
       });
 
     const allRecords = [...records, ...ignoredOnly];
