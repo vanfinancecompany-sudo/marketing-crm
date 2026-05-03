@@ -9,35 +9,25 @@ export async function fetchVanscoCacheRecords(pipeline) {
   return payload;
 }
 
-export async function refreshVanscoCacheUrls() {
-  const response = await fetch("/api/vansco-cache-refresh", {
-    method: "POST",
+export async function fetchVanscoRefreshStatus(runId = "") {
+  const params = runId ? `?runId=${encodeURIComponent(runId)}` : "";
+  const response = await fetch(`/api/vansco-refresh-status${params}`, {
     headers: { accept: "application/json" },
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.ok === false) {
-    throw new Error(payload.message || "Could not refresh Vansco URL cache.");
+    throw new Error(payload.message || "Could not load Vansco refresh status.");
   }
   return payload;
 }
 
-export async function processVanscoCacheBatch(batchSize = 3) {
-  const response = await fetch(`/api/vansco-cache-process?batchSize=${encodeURIComponent(batchSize)}`, {
-    method: "POST",
-    headers: { accept: "application/json" },
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.ok === false) {
-    throw new Error(payload.message || "Could not process Vansco cache batch.");
-  }
-  return payload;
-}
-
-export async function runVanscoLiveRefreshBatch({ batchSize = 10, refreshUrls = false } = {}) {
+export async function runVanscoLiveRefreshBatch({ batchSize = 10, refreshUrls = false, runId = "" } = {}) {
   const params = new URLSearchParams({
     batchSize: String(batchSize),
     refreshUrls: refreshUrls ? "true" : "false",
   });
+  if (runId) params.set("runId", runId);
+
   const response = await fetch(`/api/vansco-cache-live-refresh?${params.toString()}`, {
     method: "POST",
     headers: { accept: "application/json" },
