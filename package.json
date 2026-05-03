@@ -2,7 +2,7 @@
   "name": "marketing-crm",
   "private": true,
   "version": "1.0.0",
-  "description": "Marketing CRM",
+  "description": "Marketing CRM with Vansco Stock Watch automation",
   "type": "module",
   "scripts": {
     "dev": "vite",
