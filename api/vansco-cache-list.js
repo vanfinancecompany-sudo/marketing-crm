@@ -1,10 +1,12 @@
 import {
   CACHE_TABLE,
   WATCH_TABLE,
+  extractVanscoId,
   getSupabaseAdmin,
   normalizeActionRecord,
   normalizeCacheRow,
   normalizeRegistration,
+  normalizeUrl,
 } from "./_vansco-cache-utils.js";
 
 const VAN_KEYWORDS = /\b(transit|transit custom|custom|tipper|dropside|luton|crew van|minibus|panel van|box van|pickup|pick-up|chassis cab|relay|dispatch|scudo|daily|doblo|partner|berlingo|sprinter|crafter|vito|vivaro|movano|box-van|kangoo|trafic|traffic|master|ducato|talento|expert|transporter|caddy|maxus|combo|proace|primastar|nv200|nv300|bailey|pegasus|winnebago|motorhome|caravan|camper)\b/i;
@@ -42,6 +44,20 @@ function isReservedLikeStatus(status) {
   return ["reserved", "sold", "deposit_taken"].includes(String(status || "").toLowerCase());
 }
 
+function actionKeys(row) {
+  const reg = normalizeRegistration(row.registration);
+  const url = normalizeUrl(row.stock_url || row.stockUrl || row.stock_url_raw || "");
+  const vanscoId = String(row.vansco_id || row.vanscoId || extractVanscoId(url) || "").toLowerCase();
+  return { reg, url, vanscoId };
+}
+
+function recordKeys(row) {
+  const reg = normalizeRegistration(row.registration);
+  const url = normalizeUrl(row.stock_url || row.stockUrl || "");
+  const vanscoId = String(row.vansco_id || row.vanscoId || extractVanscoId(url) || "").toLowerCase();
+  return { reg, url, vanscoId };
+}
+
 export default async function handler(request, response) {
   if (request.method !== "GET") {
     response.status(405).json({ ok: false, message: "Method not allowed." });
@@ -74,24 +90,38 @@ export default async function handler(request, response) {
 
     const actionByRegistration = new Map();
     const actionByUrl = new Map();
+    const actionByVanscoId = new Map();
+
     (watchRows || []).forEach((row) => {
       const normalized = normalizeActionRecord(row);
-      const reg = normalizeRegistration(row.registration);
-      if (reg) actionByRegistration.set(reg, normalized);
-      if (row.stock_url) actionByUrl.set(row.stock_url, normalized);
+      const keys = actionKeys(row);
+      if (keys.reg) actionByRegistration.set(keys.reg, normalized);
+      if (keys.url) actionByUrl.set(keys.url, normalized);
+      if (keys.vanscoId) actionByVanscoId.set(keys.vanscoId, normalized);
     });
 
     const records = pipelineCacheRows.map((row) => {
-      const reg = normalizeRegistration(row.registration);
-      const action = (reg && actionByRegistration.get(reg)) || actionByUrl.get(row.stock_url) || null;
+      const keys = recordKeys(row);
+      const action =
+        (keys.reg && actionByRegistration.get(keys.reg)) ||
+        (keys.url && actionByUrl.get(keys.url)) ||
+        (keys.vanscoId && actionByVanscoId.get(keys.vanscoId)) ||
+        null;
       return normalizeCacheRow(row, action);
     });
 
     const ignoredOnly = (watchRows || [])
       .map(normalizeActionRecord)
       .filter((row) => {
-        const reg = normalizeRegistration(row.registration);
-        const inCache = records.some((record) => (reg && normalizeRegistration(record.registration) === reg) || (row.stockUrl && record.stockUrl === row.stockUrl));
+        const keys = actionKeys(row);
+        const inCache = records.some((record) => {
+          const recordKey = recordKeys(record);
+          return Boolean(
+            (keys.reg && recordKey.reg === keys.reg) ||
+            (keys.url && recordKey.url === keys.url) ||
+            (keys.vanscoId && recordKey.vanscoId === keys.vanscoId)
+          );
+        });
         return !inCache && (row.workflowStatus === "ignored" || String(row.workflowStatus || "").startsWith("not_listing_"));
       });
 
@@ -134,7 +164,7 @@ export default async function handler(request, response) {
         detailRefreshedToday,
         failedDetailChecks: currentPipelineRows.filter((row) => Number(row.fail_count || 0) > 0).length,
         latestUrlListCheckedAt: latestUrlListCheckedAt ? new Date(latestUrlListCheckedAt).toISOString() : "",
-        totalsNote: "Cars tab excludes van, pickup, motorhome and commercial keywords. Emissions terms such as Euro 6 are not used for van/car splitting. Action card counts are filtered per tab and do not add up to the full Vansco URL count.",
+        totalsNote: "Cars tab excludes van, pickup, motorhome and commercial keywords. Ignore/Delete-Block matching uses registration, normalized URL, and Vansco stock ID so blocks persist after reload.",
       },
     });
   } catch (error) {
