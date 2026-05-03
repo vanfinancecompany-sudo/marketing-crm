@@ -7,6 +7,14 @@ import {
   normalizeUrl,
 } from "./_vansco-cache-utils.js";
 
+const ALLOWED_MATCH_STATUSES = new Set([
+  "missing",
+  "listed",
+  "needs_review",
+  "no_longer_on_vansco",
+  "reserved_still_listed",
+]);
+
 async function readJsonBody(request) {
   if (request.body && typeof request.body === "object") return request.body;
   const chunks = [];
@@ -29,6 +37,29 @@ function storedWorkflowStatus(requestedStatus) {
   if (status === "never_show_again" || status === "hard_delete") return "not_listing_spec";
   if (status === "hidden") return "ignored";
   return status;
+}
+
+function safeMatchStatus(record) {
+  const fromRecord = String(record?.matchStatus || record?.match_status || "").toLowerCase();
+  if (ALLOWED_MATCH_STATUSES.has(fromRecord)) return fromRecord;
+
+  const displayStatus = String(record?.displayStatus || record?.display_status || "").toLowerCase();
+  if (displayStatus === "reserved") return "reserved_still_listed";
+  if (displayStatus === "hidden_already_ok") return "listed";
+  if (displayStatus === "missing" || displayStatus === "back_in_stock" || displayStatus === "hidden" || displayStatus === "never") return "missing";
+
+  return "missing";
+}
+
+function safeActionPayload(pipeline, record, workflowStatus, notes) {
+  const payload = cacheRowToActionPayload(pipeline, record, workflowStatus, notes);
+
+  // The vansco_stock_watch.match_status check constraint only accepts the older
+  // comparison statuses. New UI buckets such as Hidden, Back in stock, and Never
+  // show again must be stored as workflow_status decisions, not match_status.
+  payload.match_status = safeMatchStatus(record);
+
+  return payload;
 }
 
 async function findExistingAction({ supabase, pipeline, registration, stockUrl, actionId }) {
@@ -124,7 +155,7 @@ export default async function handler(request, response) {
     const registration = normalizeRegistration(record.registration);
     const stockUrl = normalizeUrl(record.stockUrl || record.stock_url);
     const actionId = uuidOrEmpty(record.watchActionId || record.watch_action_id || "");
-    const payload = cacheRowToActionPayload(pipeline, record, workflowStatus, notes);
+    const payload = safeActionPayload(pipeline, record, workflowStatus, notes);
 
     if (requestedWorkflowStatus === "new") {
       await removeExistingAction({ supabase, pipeline, registration, stockUrl, actionId });
