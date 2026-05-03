@@ -2,6 +2,7 @@
   "name": "marketing-crm",
   "private": true,
   "version": "1.0.0",
+  "description": "Marketing CRM",
   "type": "module",
   "scripts": {
     "dev": "vite",
