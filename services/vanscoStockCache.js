@@ -18,7 +18,7 @@ function stageLabel(stage) {
   return labels[stage] || stage || "Running";
 }
 
-function positionProgressPanel(panel) {
+function positionStatusHub(panel) {
   if (!panel || typeof document === "undefined") return;
   if (panel.parentElement !== document.body) document.body.appendChild(panel);
   panel.style.cssText = [
@@ -27,6 +27,8 @@ function positionProgressPanel(panel) {
     "bottom:18px",
     "z-index:99999",
     "width:min(560px,calc(100vw - 36px))",
+    "max-height:min(76vh,640px)",
+    "overflow:auto",
     "padding:14px",
     "border-radius:18px",
     "border:1px solid #bfdbfe",
@@ -38,40 +40,58 @@ function positionProgressPanel(panel) {
   ].join(";");
 }
 
-function ensureProgressPanel() {
+function ensureStatusHub() {
   if (typeof document === "undefined") return null;
 
-  let panel = document.getElementById("vansco-live-refresh-progress");
+  let panel = document.getElementById("vansco-status-hub");
   if (panel) {
-    positionProgressPanel(panel);
+    positionStatusHub(panel);
     return panel;
   }
 
   panel = document.createElement("section");
-  panel.id = "vansco-live-refresh-progress";
+  panel.id = "vansco-status-hub";
   panel.setAttribute("aria-live", "polite");
 
   panel.innerHTML = `
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
       <div>
-        <div style="font-weight:900;font-size:15px;">Vansco live refresh</div>
-        <div data-vansco-progress-stage style="color:#475569;font-size:13px;margin-top:2px;">Starting...</div>
+        <div style="font-weight:900;font-size:15px;">Vansco Status Hub</div>
+        <div data-vansco-progress-stage style="color:#475569;font-size:13px;margin-top:2px;">Ready</div>
       </div>
-      <div data-vansco-progress-percent style="font-weight:900;font-size:22px;color:#1d4ed8;">0%</div>
+      <button data-vansco-status-close type="button" style="border:0;background:#dbeafe;color:#0f172a;border-radius:999px;width:28px;height:28px;font-weight:900;cursor:pointer;">×</button>
     </div>
+    <div data-vansco-status-message style="font-size:13px;color:#334155;line-height:1.35;">Refresh status, progress and totals notes will appear here.</div>
     <div style="height:12px;border-radius:999px;background:#dbeafe;overflow:hidden;">
       <div data-vansco-progress-bar style="height:100%;width:0%;background:#2563eb;transition:width .25s ease;"></div>
     </div>
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+      <div data-vansco-progress-percent style="font-weight:900;font-size:22px;color:#1d4ed8;">0%</div>
+      <div data-vansco-run-id style="font-size:12px;color:#64748b;"></div>
+    </div>
     <div data-vansco-progress-detail style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;font-size:13px;color:#334155;"></div>
-    <div style="font-size:12px;color:#64748b;">Refresh in progress uses safe Dragon batches. CRM stock, Wix, Facebook and your Ignore/Delete-Block records are not changed.</div>
+    <div data-vansco-totals-note style="font-size:12px;color:#64748b;line-height:1.35;border-top:1px solid #dbeafe;padding-top:8px;">
+      Action card totals are filtered per tab. They do not add up to the full Vansco URL count because already-listed, wrong-tab type, reserved-not-advertised, blocked and no-registration rows are hidden.
+    </div>
+    <div style="font-size:12px;color:#64748b;line-height:1.35;">Safe advisory tool only. CRM stock, Wix, Facebook and your Ignore/Delete-Block records are not changed by refresh.</div>
   `;
 
-  positionProgressPanel(panel);
+  panel.querySelector("[data-vansco-status-close]")?.addEventListener("click", () => {
+    panel.style.display = "none";
+  });
+
+  positionStatusHub(panel);
   return panel;
 }
 
-function updateProgressPanel(payload, fallbackStage = "processing_dragon_details") {
-  const panel = ensureProgressPanel();
+function showStatusHub() {
+  const panel = ensureStatusHub();
+  if (panel) panel.style.display = "grid";
+  return panel;
+}
+
+function updateStatusHub(payload, fallbackStage = "processing_dragon_details", message = "Refresh running in safe Dragon batches.") {
+  const panel = showStatusHub();
   if (!panel) return;
 
   const run = payload?.run || {};
@@ -84,12 +104,16 @@ function updateProgressPanel(payload, fallbackStage = "processing_dragon_details
   const stage = payload?.complete ? "complete" : run.stage || fallbackStage;
 
   const stageEl = panel.querySelector("[data-vansco-progress-stage]");
+  const messageEl = panel.querySelector("[data-vansco-status-message]");
   const percentEl = panel.querySelector("[data-vansco-progress-percent]");
+  const runIdEl = panel.querySelector("[data-vansco-run-id]");
   const barEl = panel.querySelector("[data-vansco-progress-bar]");
   const detailEl = panel.querySelector("[data-vansco-progress-detail]");
 
-  if (stageEl) stageEl.textContent = `${stageLabel(stage)}${activeVanscoRunId ? ` · Run ${activeVanscoRunId.slice(0, 8)}` : ""}`;
+  if (stageEl) stageEl.textContent = stageLabel(stage);
+  if (messageEl) messageEl.textContent = message;
   if (percentEl) percentEl.textContent = `${percent}%`;
+  if (runIdEl) runIdEl.textContent = activeVanscoRunId ? `Run ${activeVanscoRunId.slice(0, 8)}` : "";
   if (barEl) {
     barEl.style.width = `${percent}%`;
     barEl.style.background = payload?.complete ? "#16a34a" : failed > 0 ? "#f59e0b" : "#2563eb";
@@ -105,13 +129,18 @@ function updateProgressPanel(payload, fallbackStage = "processing_dragon_details
   }
 }
 
-function finishProgressPanel(payload) {
-  updateProgressPanel(payload, "complete");
-  const panel = typeof document !== "undefined" ? document.getElementById("vansco-live-refresh-progress") : null;
+function finishStatusHub(payload) {
+  const complete = Boolean(payload?.complete) || Number(payload?.remainingCount || payload?.remainingThisRunCount || 0) === 0;
+  updateStatusHub(
+    payload,
+    complete ? "complete" : "waiting_next_batch",
+    complete ? "Full Vansco refresh complete. Reloaded comparison from the saved cache." : "Refresh stopped safely before completion. Press Refresh Vansco cache again to continue."
+  );
+  const panel = typeof document !== "undefined" ? document.getElementById("vansco-status-hub") : null;
   if (!panel) return;
-  positionProgressPanel(panel);
-  panel.style.borderColor = payload?.complete ? "#86efac" : "#fed7aa";
-  panel.style.background = payload?.complete
+  positionStatusHub(panel);
+  panel.style.borderColor = complete ? "#86efac" : "#fed7aa";
+  panel.style.background = complete
     ? "linear-gradient(180deg,#ecfdf5 0%,#ffffff 100%)"
     : "linear-gradient(180deg,#fff7ed 0%,#ffffff 100%)";
 }
@@ -122,6 +151,8 @@ export async function fetchVanscoCacheRecords(pipeline) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.ok === false) {
+    showStatusHub();
+    updateStatusHub({}, "failed", payload.message || "Could not load Vansco cache records.");
     throw new Error(payload.message || "Could not load Vansco cache records.");
   }
   return payload;
@@ -152,15 +183,17 @@ export async function runVanscoLiveRefreshBatch({ batchSize = 10, refreshUrls = 
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.ok === false) {
+    updateStatusHub(payload, "failed", payload.message || "Could not run Vansco live refresh.");
     throw new Error(payload.message || "Could not run Vansco live refresh.");
   }
   if (payload.runId) activeVanscoRunId = payload.runId;
-  updateProgressPanel(payload, refreshUrls ? "refreshing_url_list" : "processing_dragon_details");
+  updateStatusHub(payload, refreshUrls ? "refreshing_url_list" : "processing_dragon_details");
   return payload;
 }
 
 export async function refreshVanscoCacheUrls() {
-  ensureProgressPanel();
+  showStatusHub();
+  updateStatusHub({}, "starting", "Starting full Vansco feed refresh. First step: refresh current URL list.");
   const payload = await runVanscoLiveRefreshBatch({ batchSize: 10, refreshUrls: true });
   return {
     ...payload,
@@ -177,7 +210,7 @@ export async function processVanscoCacheBatch() {
   for (let batchIndex = 0; batchIndex < maxBatches; batchIndex += 1) {
     latest = await runVanscoLiveRefreshBatch({ batchSize: 10, refreshUrls: false, runId });
     runId = latest.runId || runId;
-    updateProgressPanel(latest);
+    updateStatusHub(latest, "processing_dragon_details", `Processing safe batch ${batchIndex + 1}. Keep this page open while refresh runs.`);
 
     if (!latest.shouldContinue || latest.complete) break;
     await wait(1000);
@@ -191,7 +224,7 @@ export async function processVanscoCacheBatch() {
     remainingCount: latest?.remainingThisRunCount ?? latest?.remainingUncheckedOrMissingRegCount ?? 0,
   };
 
-  finishProgressPanel(result);
+  finishStatusHub(result);
   return result;
 }
 
@@ -206,7 +239,9 @@ export async function saveVanscoWatchAction({ pipeline, record, workflowStatus, 
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.ok === false) {
+    updateStatusHub({}, "failed", payload.message || "Could not save Vansco Stock Watch action.");
     throw new Error(payload.message || "Could not save Vansco Stock Watch action.");
   }
+  updateStatusHub({}, "complete", "Action saved. Ignore/Delete-Block changes are stored per tab only.");
   return payload.record;
 }
