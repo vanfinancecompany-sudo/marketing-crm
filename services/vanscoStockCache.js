@@ -4,6 +4,111 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function ensureVanscoLayoutStyles() {
+  if (typeof document === "undefined") return;
+  if (document.getElementById("vansco-stock-watch-layout-fix")) return;
+
+  const style = document.createElement("style");
+  style.id = "vansco-stock-watch-layout-fix";
+  style.textContent = `
+    .vansco-watch-panel .stat-grid,
+    .vansco-watch-panel .stat-grid--centered {
+      display: grid !important;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)) !important;
+      gap: 16px !important;
+      align-items: stretch !important;
+      margin: 18px auto !important;
+      max-width: 980px !important;
+    }
+
+    .vansco-watch-panel .stat-card {
+      min-height: 112px !important;
+    }
+
+    .vansco-watch-panel .segmented-control {
+      display: inline-flex !important;
+      flex-wrap: wrap !important;
+      width: auto !important;
+      max-width: 100% !important;
+    }
+
+    .vansco-watch-panel .vansco-watch-note,
+    .vansco-watch-panel .error-banner,
+    .vansco-watch-panel .success-banner {
+      max-width: 100% !important;
+      margin-top: 10px !important;
+      border-radius: 14px !important;
+      padding: 10px 12px !important;
+      line-height: 1.35 !important;
+    }
+
+    .vansco-card-grid {
+      display: grid !important;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)) !important;
+      gap: 14px !important;
+      align-items: start !important;
+    }
+
+    .vansco-card {
+      display: grid !important;
+      overflow: hidden !important;
+      border-radius: 18px !important;
+      background: rgba(255,255,255,0.92) !important;
+      border: 1px solid rgba(148,163,184,0.22) !important;
+      box-shadow: 0 14px 32px rgba(15,23,42,0.08) !important;
+    }
+
+    .vansco-card__image-wrap {
+      width: 100% !important;
+      overflow: hidden !important;
+      background: #e2e8f0 !important;
+    }
+
+    .vansco-card__image {
+      width: 100% !important;
+      aspect-ratio: 16 / 10 !important;
+      object-fit: cover !important;
+      display: block !important;
+    }
+
+    .vansco-card__body {
+      padding: 12px !important;
+      display: grid !important;
+      gap: 8px !important;
+    }
+
+    .vansco-card__body h3 {
+      margin: 0 !important;
+      font-size: 14px !important;
+      line-height: 1.22 !important;
+    }
+
+    .vansco-card__badges {
+      display: flex !important;
+      flex-wrap: wrap !important;
+      gap: 6px !important;
+    }
+
+    .vansco-card .field__textarea {
+      min-height: 66px !important;
+      resize: vertical !important;
+    }
+
+    .vansco-card .card-actions {
+      gap: 6px !important;
+    }
+
+    .vansco-card .button {
+      padding: 8px 10px !important;
+      border-radius: 10px !important;
+      font-size: 12px !important;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+ensureVanscoLayoutStyles();
+
 function stageLabel(stage) {
   const labels = {
     starting: "Starting",
@@ -20,6 +125,7 @@ function stageLabel(stage) {
 
 function positionStatusHub(panel) {
   if (!panel || typeof document === "undefined") return;
+  ensureVanscoLayoutStyles();
   if (panel.parentElement !== document.body) document.body.appendChild(panel);
   panel.style.cssText = [
     "position:fixed",
@@ -42,6 +148,7 @@ function positionStatusHub(panel) {
 
 function ensureStatusHub() {
   if (typeof document === "undefined") return null;
+  ensureVanscoLayoutStyles();
 
   let panel = document.getElementById("vansco-status-hub");
   if (panel) {
@@ -146,6 +253,7 @@ function finishStatusHub(payload) {
 }
 
 export async function fetchVanscoCacheRecords(pipeline) {
+  ensureVanscoLayoutStyles();
   const response = await fetch(`/api/vansco-cache-list?pipeline=${encodeURIComponent(pipeline)}`, {
     headers: { accept: "application/json" },
   });
