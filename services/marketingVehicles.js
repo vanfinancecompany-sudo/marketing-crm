@@ -1,5 +1,7 @@
 import { supabase } from "./supabase.js";
 
+const CAR_TABLE_CANDIDATES = ["cars_stock", "car_stock", "cars", "car_vehicles", "facebook_cars", "car_adverts"];
+
 function convertWixImage(url) {
   if (!url) return "";
 
@@ -34,6 +36,15 @@ function valueOrFallback(...values) {
     }
   }
   return "";
+}
+
+function isActiveMarketingRow(row) {
+  if (row?.is_active === false) return false;
+  if (row?.active === false) return false;
+  if (String(row?.status || "").toLowerCase() === "inactive") return false;
+  if (String(row?.archived || "").toLowerCase() === "true") return false;
+  if (String(row?.hidden || "").toLowerCase() === "true") return false;
+  return true;
 }
 
 export function mapFinanceVehicleRow(row, index) {
@@ -86,6 +97,30 @@ export function mapRentVehicleRow(row, index) {
   };
 }
 
+export function mapCarVehicleRow(row, index) {
+  const imageUrl = convertWixImage(row.picture || row.image || row.image_url || row.imageUrl);
+  const title = valueOrFallback(row.title, row.name, row.vehicle, row.make_model, row.description, `car-${index + 1}`);
+  const registration = valueOrFallback(row.registration, row.reg, row.vehicle_reg, row.number_plate, extractRegistration(title));
+
+  return {
+    id: row.id || registration || title || `car-${index}`,
+    title,
+    name: title,
+    reg: registration,
+    registration,
+    picture: imageUrl,
+    image: imageUrl,
+    price: row.price || row.cashPrice || row.salePrice || "",
+    monthly: row.monthly || row.financeMonthly || "",
+    salePrice: row.salePrice || row.price || "",
+    description: row.description || row.carDescription || row.vanDescription || "",
+    spec: row.spec || row.carSpec || row.vanSpec || "",
+    weblink: row.weblink || row.webLink || row.link || "",
+    link: row.weblink || row.webLink || row.link || "",
+    pipeline: "cars",
+  };
+}
+
 export async function fetchFinanceMarketingVehicles(limitPerPipeline = 80) {
   const safeLimit = Math.min(Number(limitPerPipeline) || 80, 120);
 
@@ -119,6 +154,30 @@ export async function fetchRentMarketingVehicles(limitPerPipeline = 80) {
   }
 
   return (rentResult.data || []).map(mapRentVehicleRow);
+}
+
+export async function fetchCarMarketingVehicles(limitPerPipeline = 80) {
+  const safeLimit = Math.min(Number(limitPerPipeline) || 80, 150);
+  const errors = [];
+
+  for (const tableName of CAR_TABLE_CANDIDATES) {
+    const result = await supabase
+      .from(tableName)
+      .select("*")
+      .limit(safeLimit);
+
+    if (result.error) {
+      errors.push(`${tableName}: ${result.error.message}`);
+      continue;
+    }
+
+    const rows = (result.data || []).filter(isActiveMarketingRow);
+    if (rows.length) {
+      return rows.map(mapCarVehicleRow);
+    }
+  }
+
+  throw new Error(`Failed to load Cars vehicles. Tried: ${errors.join(" | ") || CAR_TABLE_CANDIDATES.join(", ")}`);
 }
 
 export async function fetchMarketingVehicles(limitPerPipeline = 80) {
