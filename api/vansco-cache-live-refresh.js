@@ -91,6 +91,18 @@ async function getNextCandidates(supabase, limit) {
   return (data || []).sort(prioritySort).slice(0, limit);
 }
 
+async function countRemainingUncheckedOrMissingReg(supabase) {
+  const { data, error } = await supabase
+    .from(CACHE_TABLE)
+    .select("id, registration, last_successfully_checked_at")
+    .eq("is_currently_on_vansco", true)
+    .limit(2000);
+
+  if (error) throw error;
+
+  return (data || []).filter((row) => !row.registration || !row.last_successfully_checked_at).length;
+}
+
 async function processOne(supabase, row) {
   const attemptedAt = nowIso();
 
@@ -205,13 +217,7 @@ export default async function handler(request, response) {
       if (stoppedReason === "time_guard") break;
     }
 
-    const { count: remainingCount, error: countError } = await supabase
-      .from(CACHE_TABLE)
-      .select("id", { count: "exact", head: true })
-      .eq("is_currently_on_vansco", true)
-      .or("registration.is.null,last_successfully_checked_at.is.null");
-
-    if (countError) throw countError;
+    const remainingCount = await countRemainingUncheckedOrMissingReg(supabase);
 
     response.setHeader("Cache-Control", "no-store, max-age=0");
     response.status(200).json({
@@ -227,9 +233,9 @@ export default async function handler(request, response) {
       processedCount: results.length,
       successCount: results.filter((item) => item.ok).length,
       failureCount: results.filter((item) => !item.ok).length,
-      remainingUncheckedOrMissingRegCount: remainingCount || 0,
-      complete: (remainingCount || 0) === 0,
-      shouldContinue: (remainingCount || 0) > 0,
+      remainingUncheckedOrMissingRegCount: remainingCount,
+      complete: remainingCount === 0,
+      shouldContinue: remainingCount > 0,
       results,
     });
   } catch (error) {
