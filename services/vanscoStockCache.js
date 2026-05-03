@@ -4,6 +4,23 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function formatDateTime(value) {
+  if (!value) return "Not run yet";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not run yet";
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function runWhen(run) {
+  return run?.completed_at || run?.updated_at || run?.started_at || "";
+}
+
 function ensureVanscoLayoutStyles() {
   if (typeof document === "undefined") return;
   if (document.getElementById("vansco-stock-watch-layout-fix")) return;
@@ -20,18 +37,13 @@ function ensureVanscoLayoutStyles() {
       margin: 18px auto !important;
       max-width: 980px !important;
     }
-
-    .vansco-watch-panel .stat-card {
-      min-height: 112px !important;
-    }
-
+    .vansco-watch-panel .stat-card { min-height: 112px !important; }
     .vansco-watch-panel .segmented-control {
       display: inline-flex !important;
       flex-wrap: wrap !important;
       width: auto !important;
       max-width: 100% !important;
     }
-
     .vansco-watch-panel .vansco-watch-note,
     .vansco-watch-panel .error-banner,
     .vansco-watch-panel .success-banner {
@@ -41,14 +53,33 @@ function ensureVanscoLayoutStyles() {
       padding: 10px 12px !important;
       line-height: 1.35 !important;
     }
-
+    .vansco-auto-refresh-card {
+      margin-top: 12px !important;
+      padding: 12px 14px !important;
+      border-radius: 16px !important;
+      border: 1px solid #bfdbfe !important;
+      background: linear-gradient(180deg,#eff6ff 0%,#ffffff 100%) !important;
+      display: grid !important;
+      gap: 8px !important;
+      color: #0f172a !important;
+    }
+    .vansco-auto-refresh-card__title {
+      font-weight: 900 !important;
+      font-size: 14px !important;
+    }
+    .vansco-auto-refresh-card__grid {
+      display: grid !important;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)) !important;
+      gap: 8px !important;
+      font-size: 13px !important;
+      color: #334155 !important;
+    }
     .vansco-card-grid {
       display: grid !important;
       grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)) !important;
       gap: 14px !important;
       align-items: start !important;
     }
-
     .vansco-card {
       display: grid !important;
       overflow: hidden !important;
@@ -57,52 +88,14 @@ function ensureVanscoLayoutStyles() {
       border: 1px solid rgba(148,163,184,0.22) !important;
       box-shadow: 0 14px 32px rgba(15,23,42,0.08) !important;
     }
-
-    .vansco-card__image-wrap {
-      width: 100% !important;
-      overflow: hidden !important;
-      background: #e2e8f0 !important;
-    }
-
-    .vansco-card__image {
-      width: 100% !important;
-      aspect-ratio: 16 / 10 !important;
-      object-fit: cover !important;
-      display: block !important;
-    }
-
-    .vansco-card__body {
-      padding: 12px !important;
-      display: grid !important;
-      gap: 8px !important;
-    }
-
-    .vansco-card__body h3 {
-      margin: 0 !important;
-      font-size: 14px !important;
-      line-height: 1.22 !important;
-    }
-
-    .vansco-card__badges {
-      display: flex !important;
-      flex-wrap: wrap !important;
-      gap: 6px !important;
-    }
-
-    .vansco-card .field__textarea {
-      min-height: 66px !important;
-      resize: vertical !important;
-    }
-
-    .vansco-card .card-actions {
-      gap: 6px !important;
-    }
-
-    .vansco-card .button {
-      padding: 8px 10px !important;
-      border-radius: 10px !important;
-      font-size: 12px !important;
-    }
+    .vansco-card__image-wrap { width: 100% !important; overflow: hidden !important; background: #e2e8f0 !important; }
+    .vansco-card__image { width: 100% !important; aspect-ratio: 16 / 10 !important; object-fit: cover !important; display: block !important; }
+    .vansco-card__body { padding: 12px !important; display: grid !important; gap: 8px !important; }
+    .vansco-card__body h3 { margin: 0 !important; font-size: 14px !important; line-height: 1.22 !important; }
+    .vansco-card__badges { display: flex !important; flex-wrap: wrap !important; gap: 6px !important; }
+    .vansco-card .field__textarea { min-height: 66px !important; resize: vertical !important; }
+    .vansco-card .card-actions { gap: 6px !important; }
+    .vansco-card .button { padding: 8px 10px !important; border-radius: 10px !important; font-size: 12px !important; }
   `;
   document.head.appendChild(style);
 }
@@ -121,6 +114,49 @@ function stageLabel(stage) {
     superseded: "Superseded",
   };
   return labels[stage] || stage || "Running";
+}
+
+function statusLabel(status) {
+  const labels = { complete: "Complete", running: "Running", failed: "Failed", paused: "Paused" };
+  return labels[status] || status || "Not run yet";
+}
+
+function updateAutomaticRefreshCard(statusPayload) {
+  if (typeof document === "undefined") return;
+  ensureVanscoLayoutStyles();
+
+  const panel = document.querySelector(".vansco-watch-panel");
+  if (!panel) return;
+
+  let card = document.getElementById("vansco-auto-refresh-card");
+  if (!card) {
+    card = document.createElement("div");
+    card.id = "vansco-auto-refresh-card";
+    card.className = "vansco-auto-refresh-card";
+    const firstNote = panel.querySelector(".vansco-watch-note") || panel.querySelector(".stat-grid") || panel.querySelector(".segmented-control");
+    if (firstNote?.nextSibling) panel.insertBefore(card, firstNote.nextSibling);
+    else panel.appendChild(card);
+  }
+
+  const latest = statusPayload?.latestScheduledRun || null;
+  const completed = statusPayload?.latestCompletedScheduledRun || null;
+  const displayRun = latest || completed;
+  const lastSuccess = completed ? formatDateTime(runWhen(completed)) : "No completed automatic refresh yet";
+  const lastAttempt = displayRun ? formatDateTime(runWhen(displayRun)) : "No automatic refresh yet";
+
+  card.innerHTML = `
+    <div class="vansco-auto-refresh-card__title">Automatic Vansco refresh</div>
+    <div class="vansco-auto-refresh-card__grid">
+      <span><strong>Status:</strong> ${statusLabel(displayRun?.status)}</span>
+      <span><strong>Last success:</strong> ${lastSuccess}</span>
+      <span><strong>Last attempt:</strong> ${lastAttempt}</span>
+      <span><strong>Processed:</strong> ${displayRun?.processed_count ?? 0}</span>
+      <span><strong>Success:</strong> ${displayRun?.success_count ?? 0}</span>
+      <span><strong>Failed:</strong> ${displayRun?.failure_count ?? 0}</span>
+      <span><strong>Remaining:</strong> ${displayRun?.remaining_count ?? 0}</span>
+      <span><strong>Stage:</strong> ${stageLabel(displayRun?.stage)}</span>
+    </div>
+  `;
 }
 
 function positionStatusHub(panel) {
@@ -254,6 +290,8 @@ function finishStatusHub(payload) {
 
 export async function fetchVanscoCacheRecords(pipeline) {
   ensureVanscoLayoutStyles();
+  fetchVanscoRefreshStatus().catch(() => null);
+
   const response = await fetch(`/api/vansco-cache-list?pipeline=${encodeURIComponent(pipeline)}`, {
     headers: { accept: "application/json" },
   });
@@ -275,6 +313,7 @@ export async function fetchVanscoRefreshStatus(runId = "") {
   if (!response.ok || payload.ok === false) {
     throw new Error(payload.message || "Could not load Vansco refresh status.");
   }
+  updateAutomaticRefreshCard(payload);
   return payload;
 }
 
@@ -296,6 +335,7 @@ export async function runVanscoLiveRefreshBatch({ batchSize = 10, refreshUrls = 
   }
   if (payload.runId) activeVanscoRunId = payload.runId;
   updateStatusHub(payload, refreshUrls ? "refreshing_url_list" : "processing_dragon_details");
+  fetchVanscoRefreshStatus().catch(() => null);
   return payload;
 }
 
@@ -333,6 +373,7 @@ export async function processVanscoCacheBatch() {
   };
 
   finishStatusHub(result);
+  fetchVanscoRefreshStatus().catch(() => null);
   return result;
 }
 
@@ -350,6 +391,12 @@ export async function saveVanscoWatchAction({ pipeline, record, workflowStatus, 
     updateStatusHub({}, "failed", payload.message || "Could not save Vansco Stock Watch action.");
     throw new Error(payload.message || "Could not save Vansco Stock Watch action.");
   }
-  updateStatusHub({}, "complete", "Action saved. Ignore/Delete-Block changes are stored per tab only.");
-  return payload.record;
+
+  return {
+    ...record,
+    ...(payload.record || {}),
+    workflowStatus: payload.record?.workflowStatus || payload.record?.workflow_status || workflowStatus,
+    workflow_status: payload.record?.workflow_status || payload.record?.workflowStatus || workflowStatus,
+    notes,
+  };
 }
