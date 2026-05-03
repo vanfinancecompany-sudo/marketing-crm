@@ -56,18 +56,34 @@ function recordCheckedTimeMs(record) {
   return Number.isFinite(time) ? time : 0;
 }
 
-function filterCurrentScanRecords(records) {
-  const activeRows = records.filter((record) => !isBlockedStatus(record.workflowStatus));
-  const latestCheckedAt = activeRows.reduce((latest, record) => Math.max(latest, recordCheckedTimeMs(record)), 0);
-  if (!latestCheckedAt) return records;
-  const cutoff = latestCheckedAt - CURRENT_SCAN_WINDOW_MS;
+function hasUsableWatchDetail(record) {
+  const registration = normalizeWatchRegistration(record.registration);
+  const imageUrl = record.imageUrl || record.image_url || "";
+  const sourceStatus = String(record.sourceStatus || record.source_status || "").toLowerCase();
+  return Boolean(registration || imageUrl || (sourceStatus && sourceStatus !== "unknown"));
+}
 
-  return records.filter((record) => {
-    if (isBlockedStatus(record.workflowStatus)) return true;
+function filterCurrentScanRecords(records) {
+  const blockedRows = records.filter((record) => isBlockedStatus(record.workflowStatus));
+  const activeRows = records.filter((record) => !isBlockedStatus(record.workflowStatus));
+  const usableRows = activeRows.filter(hasUsableWatchDetail);
+  const latestUsableCheckedAt = usableRows.reduce(
+    (latest, record) => Math.max(latest, recordCheckedTimeMs(record)),
+    0
+  );
+
+  if (!latestUsableCheckedAt) {
+    return blockedRows;
+  }
+
+  const cutoff = latestUsableCheckedAt - CURRENT_SCAN_WINDOW_MS;
+  const latestUsableRows = usableRows.filter((record) => {
     const checkedAt = recordCheckedTimeMs(record);
     if (!checkedAt) return true;
     return checkedAt >= cutoff;
   });
+
+  return [...latestUsableRows, ...blockedRows];
 }
 
 function dedupeDisplayRecords(records) {
@@ -376,6 +392,17 @@ export default function VanscoStockWatchPage() {
     () => dedupeDisplayRecords(filterCurrentScanRecords(rawActiveRecords)),
     [rawActiveRecords]
   );
+  const latestRawCheckedAt = useMemo(
+    () => rawActiveRecords.reduce((latest, record) => Math.max(latest, recordCheckedTimeMs(record)), 0),
+    [rawActiveRecords]
+  );
+  const latestUsableCheckedAt = useMemo(
+    () => currentRawRecords
+      .filter((record) => !isBlockedStatus(record.workflowStatus))
+      .reduce((latest, record) => Math.max(latest, recordCheckedTimeMs(record)), 0),
+    [currentRawRecords]
+  );
+  const showingLastUsableScan = Boolean(latestRawCheckedAt && latestUsableCheckedAt && latestRawCheckedAt > latestUsableCheckedAt + CURRENT_SCAN_WINDOW_MS);
   const activeLocalRegistrations = localRegistrationsByPipeline[selectedPipeline] || new Set();
   const activeRecords = useMemo(
     () => currentRawRecords.map((record) => classifyWatchRecord(record, activeLocalRegistrations)),
@@ -437,7 +464,7 @@ export default function VanscoStockWatchPage() {
       setSuccessMessage(`Checked ${result.sourceVehicleCount} Vansco vehicles against ${result.localVehicleCount} ${pipelineLabel(selectedPipeline)} records.`);
     } catch (error) {
       setDebugByPipeline((prev) => ({ ...prev, [selectedPipeline]: error.debugInfo || prev[selectedPipeline] }));
-      setErrorMessage(error.message || "Vansco Stock Watch check failed.");
+      setErrorMessage(`${error.message || "Vansco Stock Watch check failed."} Showing the last usable saved scan if available.`);
     } finally {
       setCheckingPipeline("");
       setRunningStatus((prev) => prev?.stage === "complete" ? prev : null);
@@ -531,6 +558,7 @@ export default function VanscoStockWatchPage() {
       <section className="panel">
         <div className="panel__header"><div><h3>{pipelineLabel(selectedPipeline)}</h3><p>Missing means a Vansco available registration is not currently in this selected CRM stock tab. Reserved means you currently advertise it, but Vansco says reserved, sold, or deposit taken.</p></div></div>
         <div className="notice-banner notice-banner--error">Advisory only. Do not remove stock unless manually checked.</div>
+        {showingLastUsableScan ? <div className="notice-banner notice-banner--success">Latest Vansco response was not usable, so this page is showing the last usable saved scan.</div> : null}
         {summary.hiddenReserved ? <div className="notice-banner">{summary.hiddenReserved} reserved Vansco vehicle{summary.hiddenReserved === 1 ? "" : "s"} not in your stock were hidden from Missing.</div> : null}
         {summary.hiddenNoReg ? <div className="notice-banner">{summary.hiddenNoReg} Vansco vehicle{summary.hiddenNoReg === 1 ? "" : "s"} had no valid registration and were hidden from the simple list.</div> : null}
 
