@@ -9,9 +9,10 @@ import {
   normalizeUrl,
 } from "./_vansco-cache-utils.js";
 
-const VAN_KEYWORDS = /\b(transit|transit custom|custom|tipper|dropside|luton|crew van|minibus|panel van|box van|pickup|pick-up|chassis cab|relay|dispatch|scudo|daily|doblo|partner|berlingo|sprinter|crafter|vito|vivaro|movano|box-van|kangoo|trafic|traffic|master|ducato|talento|expert|transporter|caddy|maxus|combo|proace|primastar|nv200|nv300|bailey|pegasus|winnebago|motorhome|caravan|camper)\b/i;
-const VAN_PHRASES = /\b(l1h1|l2h1|l3h2|panel van|double cab|crew cab|welfare|dropside|tail lift|twin side loading door|high roof|medium roof|long wheelbase|short wheelbase)\b/i;
+const VAN_KEYWORDS = /\b(transit|transit custom|custom|tipper|dropside|luton|crew van|minibus|panel van|box van|pickup|pick-up|chassis cab|relay|dispatch|scudo|daily|doblo|partner|berlingo|sprinter|crafter|vito|evito|e-vito|vivaro|movano|box-van|kangoo|trafic|traffic|master|ducato|talento|expert|transporter|caddy|maxus|combo|proace|primastar|nv200|nv300|bailey|pegasus|winnebago|motorhome|caravan|camper|townstar|vn5|levc|boxer|relay|jumper|bipper|nemo|vauxhall combo|citroen nemo|peugeot partner|mercedes-benz evito|mercedes evito)\b/i;
+const VAN_PHRASES = /\b(l1h1|l2h1|l3h2|panel van|double cab|crew cab|welfare|dropside|tail lift|twin side loading door|high roof|medium roof|long wheelbase|short wheelbase|crew bus|crew van|double cab|commercial vehicle|black cab|city van|leader van|minibus)\b/i;
 const CAR_KEYWORDS = /\b(audi|bmw|jaguar|jeep|kia|lexus|mercedes-benz|mercedes|skoda|suzuki|hyundai|tesla|q2|q3|a1|a3|a4|a5|i10|i20|estate|hatchback|cabriolet|suv|coupe|saloon|convertible|sportback|xdrive|petrol|hybrid|electric|mhev)\b/i;
+const COMMERCIAL_NEGATIVE_KEYWORDS = /\b(van|minibus|panel|commercial|crew|cab|pickup|pick-up|motorhome|camper|chassis|luton|dropside|taxi|black cab|city van|leader van)\b/i;
 
 function rowCategoryText(row) {
   return [
@@ -31,8 +32,13 @@ function looksLikeVan(row) {
 
 function looksLikeCar(row) {
   const text = rowCategoryText(row);
+  const explicitCategory = String(row.vehicle_type || row.vehicleCategory || "").toLowerCase();
+  const explicitCar = explicitCategory === "car" || /used-cars/i.test(text);
+
   if (looksLikeVan(row)) return false;
-  return CAR_KEYWORDS.test(text) || /used-cars/i.test(text) || String(row.vehicle_type || row.vehicleCategory || "").toLowerCase() === "car";
+  if (COMMERCIAL_NEGATIVE_KEYWORDS.test(text)) return false;
+
+  return explicitCar || CAR_KEYWORDS.test(text);
 }
 
 function rowMatchesPipeline(row, pipeline) {
@@ -194,7 +200,7 @@ export default async function handler(request, response) {
         detailRefreshedToday,
         failedDetailChecks: currentPipelineRows.filter((row) => Number(row.fail_count || 0) > 0).length,
         latestUrlListCheckedAt: latestUrlListCheckedAt ? new Date(latestUrlListCheckedAt).toISOString() : "",
-        totalsNote: "Cars tab excludes van, pickup, motorhome and commercial keywords. Ignore/Delete-Block matching uses registration, normalized URL, and Vansco stock ID so blocks persist after reload.",
+        totalsNote: "Cars tab excludes van, pickup, motorhome, taxi, minibus and commercial keywords. Hidden/Never Show matching uses registration, normalized URL, and Vansco stock ID.",
       },
     });
   } catch (error) {
