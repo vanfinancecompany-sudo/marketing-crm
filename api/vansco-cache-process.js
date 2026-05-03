@@ -1,6 +1,6 @@
 import {
   CACHE_TABLE,
-  fetchHtml,
+  fetchVanscoDetailHtml,
   getSupabaseAdmin,
   parseDetailHtml,
   vehicleTitleFromUrl,
@@ -50,7 +50,7 @@ export default async function handler(request, response) {
     for (const row of queued) {
       const attemptedAt = new Date().toISOString();
       try {
-        const page = await fetchHtml(row.stock_url, DETAIL_TIMEOUT_MS);
+        const page = await fetchVanscoDetailHtml(row.stock_url, DETAIL_TIMEOUT_MS);
         if (!page.ok) {
           throw new Error(`Vansco detail returned ${page.status} ${page.statusText || ""}`.trim());
         }
@@ -77,6 +77,8 @@ export default async function handler(request, response) {
         results.push({
           id: row.id,
           stockUrl: row.stock_url,
+          fetchedFrom: page.usedHost,
+          requestedUrl: page.requestedUrl,
           ok: true,
           status: page.status,
           elapsedMs: page.elapsedMs,
@@ -86,7 +88,10 @@ export default async function handler(request, response) {
           rejectedRegistrationCandidates: parsed.rejected_registration_candidates || [],
         });
       } catch (error) {
-        const message = error?.name === "AbortError" ? "timeout" : error?.message || "Detail fetch failed";
+        const attempts = error?.attempts || [];
+        const message = attempts.length
+          ? attempts.map((attempt) => `${attempt.url}: ${attempt.timeout ? "timeout" : attempt.message || attempt.status || "failed"}`).join(" | ")
+          : error?.name === "AbortError" ? "timeout" : error?.message || "Detail fetch failed";
         const { error: updateError } = await supabase
           .from(CACHE_TABLE)
           .update({
@@ -104,7 +109,8 @@ export default async function handler(request, response) {
           id: row.id,
           stockUrl: row.stock_url,
           ok: false,
-          timeout: error?.name === "AbortError",
+          timeout: attempts.some((attempt) => attempt.timeout) || error?.name === "AbortError",
+          attempts,
           error: message,
         });
       }
@@ -114,6 +120,7 @@ export default async function handler(request, response) {
     response.status(200).json({
       ok: true,
       fetchedAt: now,
+      detailHostPreference: "dragon-first",
       batchSize,
       queuedCount: queued.length,
       processedCount: results.length,
