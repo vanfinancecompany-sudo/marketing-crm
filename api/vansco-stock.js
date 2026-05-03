@@ -10,6 +10,7 @@ const BLOCKED_REG_VALUES = new Set(["VANSCO", "VANSCOLTD", "ALLSTOCK", "HOMESTOC
 
 const DETAIL_FETCH_CONCURRENCY = 2;
 const DETAIL_FETCH_TIMEOUT_MS = 9000;
+const EMERGENCY_DETAIL_FETCH_TIMEOUT_MS = 25000;
 const DISCOVERY_FETCH_TIMEOUT_MS = 10000;
 const FULL_SCAN_BATCH_SIZE = 5;
 const MAX_DETAIL_URLS = 800;
@@ -346,7 +347,7 @@ async function mapWithConcurrency(items, limit, worker) {
   return results;
 }
 
-function buildDiagnostics({ discovery, filteredVehicleCount, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, detailDiagnostics, parserWarnings, detailOffset, remainingVehicleCount }) {
+function buildDiagnostics({ discovery, filteredVehicleCount, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied, detailTimeoutMs, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, detailDiagnostics, parserWarnings, detailOffset, remainingVehicleCount }) {
   return {
     endpointUsed: discovery.endpointUsed,
     sourceFamily: discovery.sourceFamily,
@@ -370,6 +371,7 @@ function buildDiagnostics({ discovery, filteredVehicleCount, detailPagesFetched,
     vehiclesWithValidMatchKey: finalVehicles.filter((vehicle) => vehicle.registration || vehicle.stockUrl).length,
     detailFetchMode,
     detailFetchLimitApplied,
+    detailTimeoutMs,
     partialScan,
     totalVehicleUrlsFound,
     detailOffset,
@@ -396,6 +398,8 @@ export default async function handler(request, response) {
     const detailFetchMode = String(request.query?.detailFetchMode || "standard").toLowerCase();
     const detailOffset = Math.max(0, Number(request.query?.detailOffset || 0) || 0);
     const requestedBatchSize = Math.max(0, Number(request.query?.detailBatchSize || 0) || 0);
+    const emergencySlowMode = requestedBatchSize === 1;
+    const detailTimeoutMs = emergencySlowMode ? EMERGENCY_DETAIL_FETCH_TIMEOUT_MS : DETAIL_FETCH_TIMEOUT_MS;
     const parserWarnings = [];
     const discovery = await discoverVehicles(parserWarnings);
     const filteredVehicles = filterVehiclesForPipeline(discovery.vehicles, pipeline).slice(0, MAX_DETAIL_URLS);
@@ -407,6 +411,7 @@ export default async function handler(request, response) {
     const remainingVehicleCount = Math.max(0, totalVehicleUrlsFound - (detailOffset + vehiclesToEnrich.length));
     const hasMore = remainingVehicleCount > 0;
     if (hasMore) parserWarnings.push(`Batch ${Math.floor(detailOffset / Math.max(1, detailFetchLimit || batchSize)) + 1} processed ${vehiclesToEnrich.length} vehicles. ${remainingVehicleCount} remaining vehicles are queued for automatic batches.`);
+    if (emergencySlowMode) parserWarnings.push(`Emergency slow mode active. Detail timeout is ${detailTimeoutMs / 1000}s per vehicle.`);
 
     let detailPagesFetched = 0;
     let detailPagesFailed = 0;
@@ -414,7 +419,7 @@ export default async function handler(request, response) {
     const detailDiagnostics = { failureSamples: [], htmlSamples: [] };
     const enrichedVehicles = await mapWithConcurrency(vehiclesToEnrich, DETAIL_FETCH_CONCURRENCY, async (vehicle) => {
       try {
-        const detailPage = await fetchHtml(vehicle.stockUrl);
+        const detailPage = await fetchHtml(vehicle.stockUrl, detailTimeoutMs);
         detailPagesFetched += 1;
         if (detailDiagnostics.htmlSamples.length < DETAIL_DIAGNOSTIC_SAMPLE_LIMIT) {
           detailDiagnostics.htmlSamples.push(analyseDetailHtml(vehicle.stockUrl, detailPage));
@@ -437,7 +442,7 @@ export default async function handler(request, response) {
     });
     const finalVehicles = dedupeVehicles(enrichedVehicles);
     const partialScan = hasMore || detailPagesFailed > 0 || discovery.sourceFamily === "vansco-category-fallback";
-    const diagnostics = buildDiagnostics({ discovery, filteredVehicleCount: filteredVehicles.length, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied: vehiclesToEnrich.length, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, detailDiagnostics, parserWarnings, detailOffset, remainingVehicleCount });
+    const diagnostics = buildDiagnostics({ discovery, filteredVehicleCount: filteredVehicles.length, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied: vehiclesToEnrich.length, detailTimeoutMs, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, detailDiagnostics, parserWarnings, detailOffset, remainingVehicleCount });
 
     if (vehiclesToEnrich.length && !finalVehicles.some(hasEnrichedDetail)) {
       response.setHeader("Cache-Control", "no-store, max-age=0");
