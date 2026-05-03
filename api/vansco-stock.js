@@ -8,9 +8,9 @@ const REGISTRATION_PATTERN = /\b([A-Z]{2}[0-9]{2}\s?[A-Z]{3}|[A-Z][0-9]{1,3}\s?[
 const FAKE_REG_PATTERNS = [/^[0-9]{2,3}PS$/i, /^[0-9]{2,3}BHP$/i, /^ULEZ$/i, /^EURO\d+$/i, /^L\dH\d$/i, /^U\d{4,6}$/i, /^SHOWROOM$/i, /^333$/i, /^0BOX$/i, /^FROMODOMETER$/i];
 const BLOCKED_REG_VALUES = new Set(["VANSCO", "VANSCOLTD", "ALLSTOCK", "HOMESTOCK", "UNDEFINED", "UNKNOWN", "NULL", "N/A", "NA", "NOTFOUND", "ULEZ", "EURO6", "SHOWROOM", "FROMODOMETER"]);
 
-const DETAIL_FETCH_CONCURRENCY = 3;
-const DETAIL_FETCH_TIMEOUT_MS = 4500;
-const DISCOVERY_FETCH_TIMEOUT_MS = 8000;
+const DETAIL_FETCH_CONCURRENCY = 2;
+const DETAIL_FETCH_TIMEOUT_MS = 9000;
+const DISCOVERY_FETCH_TIMEOUT_MS = 10000;
 const FULL_SCAN_BATCH_SIZE = 5;
 const MAX_DETAIL_URLS = 800;
 const DETAIL_FETCH_MODE_LIMITS = { fast: 100, standard: 100, full: 0 };
@@ -61,7 +61,7 @@ async function fetchHtml(url, timeoutMs = DETAIL_FETCH_TIMEOUT_MS) {
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
         accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "accept-language": "en-GB,en;q=0.9",
-        referer: "https://marketing-crm-six.vercel.app/",
+        referer: "https://www.vansco.co.uk/all-stock/",
         pragma: "no-cache",
         "cache-control": "no-cache",
       },
@@ -263,6 +263,10 @@ function extractImageUrl(html) {
   return "";
 }
 
+function hasEnrichedDetail(vehicle) {
+  return Boolean(vehicle.registration || vehicle.imageUrl || (vehicle.sourceStatus && vehicle.sourceStatus !== "unknown"));
+}
+
 function enrichVehicleStub(stub, html, diagnostics) {
   const bodyText = decodeHtml(html);
   const pageTitle = extractHeading(html, "h1") || extractMetaContent(html, "og:title") || stub.title;
@@ -371,6 +375,16 @@ export default async function handler(request, response) {
     const finalVehicles = dedupeVehicles(enrichedVehicles);
     const partialScan = hasMore || detailPagesFailed > 0 || discovery.sourceFamily === "vansco-category-fallback";
     const diagnostics = buildDiagnostics({ discovery, filteredVehicleCount: filteredVehicles.length, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied: vehiclesToEnrich.length, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, parserWarnings, detailOffset, remainingVehicleCount });
+
+    if (vehiclesToEnrich.length && !finalVehicles.some(hasEnrichedDetail)) {
+      response.setHeader("Cache-Control", "no-store, max-age=0");
+      response.status(502).json({
+        message: "Vansco detail pages did not return usable registrations, images, or statuses. The scan was stopped so blank rows are not saved. Please retry shortly.",
+        diagnostics,
+      });
+      return;
+    }
+
     response.setHeader("Cache-Control", "no-store, max-age=0");
     response.status(200).json({ html: discovery.pageResults[0]?.html || "", htmlLength: diagnostics.htmlLength, fetchedAt: new Date().toISOString(), sourceUrl: SOURCE_URL, endpointUsed: discovery.endpointUsed, pagesFetched: diagnostics.pagesFetched, vehicles: finalVehicles, detailOffset, hasMore, nextDetailOffset: detailOffset + vehiclesToEnrich.length, diagnostics });
   } catch (error) {
