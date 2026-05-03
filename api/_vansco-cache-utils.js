@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 
 export const SITEMAP_URLS = ["https://www.vansco.co.uk/sitemap/", "https://www.vansco.co.uk/sitemap.xml"];
 export const VANSCO_SOURCE_URL = "https://www.vansco.co.uk/all-stock/";
+export const DRAGON_SOURCE_ORIGIN = "https://vansco.dragon2000.net";
 export const CACHE_TABLE = "vansco_vehicle_cache";
 export const WATCH_TABLE = "vansco_stock_watch";
 
@@ -9,7 +10,7 @@ const VEHICLE_PATH_PATTERN = /\/vehicle-details\//i;
 const REGISTRATION_PATTERN = /\b([A-Z]{2}[0-9]{2}\s?[A-Z]{3}|[A-Z][0-9]{1,3}\s?[A-Z]{3}|[A-Z]{3}\s?[0-9]{1,3}[A-Z]|[0-9]{1,4}\s?[A-Z]{1,3})\b/i;
 const MODERN_UK_REG_PATTERN = /^[A-Z]{2}[0-9]{2}[A-Z]{3}$/;
 const LEGACY_REG_PATTERN = /^(?:[A-Z][0-9]{1,3}[A-Z]{3}|[A-Z]{3}[0-9]{1,3}[A-Z]|[0-9]{1,4}[A-Z]{1,3})$/i;
-const FAKE_REG_PATTERNS = [/^[0-9]{2,3}PS$/i, /^[0-9]{2,3}BHP$/i, /^ULEZ$/i, /^EURO\d+$/i, /^L\dH\d$/i, /^U\d{4,6}$/i, /^SHOWROOM$/i, /^333$/i, /^0BOX$/i, /^FROMODOMETER$/i, /^360DEG$/i];
+const FAKE_REG_PATTERNS = [/^[0-9]{2,3}PS$/i, /^[0-9]{2,3}BHP$/i, /^ULEZ$/i, /^EURO\d+$/i, /^L\dH\d$/i, /^U\d{4,6}$/i, /^SHOWROOM$/i, /^333$/i, /^0BOX$/i, /^FROMODOMETER$/i, /^360DEG$/i, /^504PX$/i];
 const BLOCKED_REG_VALUES = new Set(["VANSCO", "VANSCOLTD", "ALLSTOCK", "HOMESTOCK", "UNKNOWN", "NULL", "UNDEFINED", "NA", "N/A", "NOTFOUND", "ULEZ", "EURO6", "SHOWROOM", "FROMODOMETER", "SCHEMA", "JSON"]);
 const CAR_KEYWORDS = /\b(audi|bmw|jaguar|jeep|kia|lexus|mercedes-benz|mercedes|skoda|suzuki|hyundai|q2|q3|a3|a4|a5|estate|hatchback|cabriolet|suv|coupe|saloon)\b/i;
 const VAN_KEYWORDS = /\b(transit|custom|tipper|dropside|luton|crew van|minibus|panel van|box van|pickup|pick-up|chassis cab|relay|dispatch|scudo|daily|doblo|partner|berlingo|sprinter|crafter|vivaro|movano|box-van|kangoo|traffic|master|ducato|talento|expert|transporter|bailey|pegasus|winnebago|motorhome|caravan|camper)\b/i;
@@ -52,6 +53,18 @@ export function normalizeUrl(value) {
     return url.toString().replace(/\/$/, "");
   } catch {
     return text.replace(/\/$/, "");
+  }
+}
+
+export function toDragonDetailUrl(value) {
+  const stockUrl = normalizeUrl(value);
+  if (!stockUrl) return "";
+  try {
+    const parsed = new URL(stockUrl, VANSCO_SOURCE_URL);
+    if (!VEHICLE_PATH_PATTERN.test(parsed.pathname)) return stockUrl;
+    return `${DRAGON_SOURCE_ORIGIN}${parsed.pathname}${parsed.search}`.replace(/\/$/, "");
+  } catch {
+    return stockUrl;
   }
 }
 
@@ -105,6 +118,7 @@ export async function fetchHtml(url, timeoutMs = 25000) {
   try {
     const response = await fetch(url, {
       signal: timed.signal,
+      redirect: "follow",
       headers: {
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
         accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -119,6 +133,7 @@ export async function fetchHtml(url, timeoutMs = 25000) {
       ok: response.ok,
       status: response.status,
       statusText: response.statusText,
+      finalUrl: response.url,
       contentType: response.headers.get("content-type") || "",
       html,
       htmlLength: html.length,
@@ -127,6 +142,48 @@ export async function fetchHtml(url, timeoutMs = 25000) {
   } finally {
     timed.clear();
   }
+}
+
+export async function fetchVanscoDetailHtml(stockUrl, timeoutMs = 25000) {
+  const normalUrl = normalizeUrl(stockUrl);
+  const dragonUrl = toDragonDetailUrl(normalUrl);
+  const attempts = [];
+
+  for (const candidateUrl of Array.from(new Set([dragonUrl, normalUrl].filter(Boolean)))) {
+    try {
+      const page = await fetchHtml(candidateUrl, timeoutMs);
+      attempts.push({
+        url: candidateUrl,
+        ok: page.ok,
+        status: page.status,
+        statusText: page.statusText,
+        finalUrl: page.finalUrl,
+        elapsedMs: page.elapsedMs,
+        htmlLength: page.htmlLength,
+      });
+
+      if (page.ok) {
+        return {
+          ...page,
+          requestedUrl: candidateUrl,
+          stockUrl: normalUrl,
+          usedHost: candidateUrl.includes("dragon2000.net") ? "dragon" : "vansco",
+          attempts,
+        };
+      }
+    } catch (error) {
+      attempts.push({
+        url: candidateUrl,
+        ok: false,
+        timeout: error?.name === "AbortError",
+        message: error?.message || "Detail fetch failed",
+      });
+    }
+  }
+
+  const error = new Error(attempts.map((attempt) => `${attempt.url}: ${attempt.message || attempt.status || "failed"}`).join(" | ") || "Detail fetch failed");
+  error.attempts = attempts;
+  throw error;
 }
 
 export function extractVehicleUrls(html) {
