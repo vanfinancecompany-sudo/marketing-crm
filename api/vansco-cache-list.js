@@ -8,8 +8,8 @@ import {
 } from "./_vansco-cache-utils.js";
 
 const VAN_KEYWORDS = /\b(transit|transit custom|custom|tipper|dropside|luton|crew van|minibus|panel van|box van|pickup|pick-up|chassis cab|relay|dispatch|scudo|daily|doblo|partner|berlingo|sprinter|crafter|vito|vivaro|movano|box-van|kangoo|trafic|traffic|master|ducato|talento|expert|transporter|caddy|maxus|combo|proace|primastar|nv200|nv300|bailey|pegasus|winnebago|motorhome|caravan|camper)\b/i;
-const VAN_PHRASES = /\b(l1h1|l2h1|l3h2|euro 6|panel|double cab|crew cab|welfare|dropside|tail lift|twin side loading door|high roof|medium roof|long wheelbase|short wheelbase)\b/i;
-const CAR_KEYWORDS = /\b(audi|bmw|jaguar|jeep|kia|lexus|skoda|suzuki|hyundai|tesla|q2|q3|a3|a4|a5|i10|i20|estate|hatchback|cabriolet|suv|coupe|saloon|convertible|sportback|xdrive)\b/i;
+const VAN_PHRASES = /\b(l1h1|l2h1|l3h2|panel van|double cab|crew cab|welfare|dropside|tail lift|twin side loading door|high roof|medium roof|long wheelbase|short wheelbase)\b/i;
+const CAR_KEYWORDS = /\b(audi|bmw|jaguar|jeep|kia|lexus|mercedes-benz|mercedes|skoda|suzuki|hyundai|tesla|q2|q3|a1|a3|a4|a5|i10|i20|estate|hatchback|cabriolet|suv|coupe|saloon|convertible|sportback|xdrive|petrol|hybrid|electric|mhev)\b/i;
 
 function rowCategoryText(row) {
   return [
@@ -134,7 +134,7 @@ export default async function handler(request, response) {
         detailRefreshedToday,
         failedDetailChecks: currentPipelineRows.filter((row) => Number(row.fail_count || 0) > 0).length,
         latestUrlListCheckedAt: latestUrlListCheckedAt ? new Date(latestUrlListCheckedAt).toISOString() : "",
-        totalsNote: "Cars tab excludes van, pickup, motorhome and commercial keywords even if an old cache row was previously marked car. Action card counts are filtered per tab and do not add up to the full Vansco URL count.",
+        totalsNote: "Cars tab excludes van, pickup, motorhome and commercial keywords. Emissions terms such as Euro 6 are not used for van/car splitting. Action card counts are filtered per tab and do not add up to the full Vansco URL count.",
       },
     });
   } catch (error) {
