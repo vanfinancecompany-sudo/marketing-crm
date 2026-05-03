@@ -9,7 +9,6 @@ import {
   formatWatchTimestamp,
   pipelineLabel,
   sourceStatusLabel,
-  workflowLabel,
 } from "../services/vanscoStockWatch.js";
 import {
   fetchVanscoCacheRecords,
@@ -27,7 +26,9 @@ const DEFAULT_FILTERS = {
 const SIMPLE_FILTERS = [
   { value: "missing", label: "Missing from my stock" },
   { value: "reserved", label: "Reserved on Vansco" },
-  { value: "ignored", label: "Ignored / Blocked" },
+  { value: "back_in_stock", label: "Back in stock / Review hidden" },
+  { value: "hidden", label: "Hidden" },
+  { value: "never", label: "Never show again" },
   { value: "all", label: "All action cards" },
 ];
 
@@ -38,18 +39,49 @@ function normalizeWatchRegistration(value) {
   return text;
 }
 
+function workflowStatusOf(record) {
+  return String(record?.workflowStatus || record?.workflow_status || "").toLowerCase();
+}
+
 function isReservedLikeStatus(status) {
   return ["reserved", "sold", "deposit_taken"].includes(String(status || "").toLowerCase());
 }
 
-function isBlockedStatus(workflowStatus) {
-  return workflowStatus === "ignored" || String(workflowStatus || "").startsWith("not_listing_");
+function isAvailableLikeStatus(status) {
+  return !isReservedLikeStatus(status);
+}
+
+function isTemporaryHiddenStatus(status) {
+  return status === "ignored" || status === "hidden";
+}
+
+function isNeverShowStatus(status) {
+  return status === "never_show_again" || status === "hard_delete" || status === "not_listing_spec" || status === "not_listing_price" || status === "not_listing_mileage";
+}
+
+function workflowLabel(status) {
+  const value = String(status || "").toLowerCase();
+  if (isTemporaryHiddenStatus(value)) return "Hidden";
+  if (isNeverShowStatus(value)) return "Never show again";
+  return "New";
 }
 
 function recordCheckedTimeMs(record) {
   const rawValue = record?.lastCheckedAt || record?.lastSuccessfullyCheckedAt || record?.updatedAt || record?.updated_at;
   const time = rawValue ? new Date(rawValue).getTime() : 0;
   return Number.isFinite(time) ? time : 0;
+}
+
+function recordSearchText(record) {
+  return [
+    record.registration,
+    record.title,
+    record.sourceStatus,
+    record.workflowStatus,
+    record.workflow_status,
+    record.notes,
+    record.stockUrl,
+  ].filter(Boolean).join(" ").toLowerCase();
 }
 
 function dedupeDisplayRecords(records) {
@@ -71,77 +103,91 @@ function dedupeDisplayRecords(records) {
 
 function classifyWatchRecord(record, localRegistrationSet, selectedPipeline) {
   const registration = normalizeWatchRegistration(record.registration);
-  const hasExactLocalMatch = registration && localRegistrationSet?.has(registration);
-  const blocked = isBlockedStatus(record.workflowStatus);
+  const hasExactLocalMatch = Boolean(registration && localRegistrationSet?.has(registration));
+  const workflowStatus = workflowStatusOf(record);
   const reservedOnVansco = isReservedLikeStatus(record.sourceStatus);
+  const availableOnVansco = isAvailableLikeStatus(record.sourceStatus);
   const currentlyOnVansco = record.isCurrentlyOnVansco !== false;
 
-  if (blocked) {
+  const baseRecord = {
+    ...record,
+    pipeline: selectedPipeline,
+    workflowStatus,
+    safeExactRegistrationMatch: hasExactLocalMatch,
+  };
+
+  if (isNeverShowStatus(workflowStatus)) {
     return {
-      ...record,
-      pipeline: selectedPipeline,
-      displayStatus: "ignored",
-      safeExactRegistrationMatch: Boolean(hasExactLocalMatch),
+      ...baseRecord,
+      displayStatus: "never",
+      matchStatus: "never_show_again",
+    };
+  }
+
+  if (isTemporaryHiddenStatus(workflowStatus)) {
+    if (currentlyOnVansco && availableOnVansco && registration && !hasExactLocalMatch) {
+      return {
+        ...baseRecord,
+        displayStatus: "back_in_stock",
+        matchStatus: "hidden_back_in_stock",
+      };
+    }
+
+    return {
+      ...baseRecord,
+      displayStatus: "hidden",
+      matchStatus: "hidden",
     };
   }
 
   if (!currentlyOnVansco) {
     return {
-      ...record,
-      pipeline: selectedPipeline,
+      ...baseRecord,
       displayStatus: "hidden_not_current",
-      safeExactRegistrationMatch: Boolean(hasExactLocalMatch),
+      matchStatus: "hidden_not_current",
     };
   }
 
   if (!registration) {
     return {
-      ...record,
-      pipeline: selectedPipeline,
+      ...baseRecord,
       displayStatus: "hidden_no_registration",
-      safeExactRegistrationMatch: false,
+      matchStatus: "hidden_no_registration",
     };
   }
 
   if (hasExactLocalMatch && reservedOnVansco) {
     return {
-      ...record,
-      pipeline: selectedPipeline,
+      ...baseRecord,
       displayStatus: "reserved",
       matchStatus: "reserved_still_listed",
-      safeExactRegistrationMatch: true,
     };
   }
 
   if (reservedOnVansco && !hasExactLocalMatch) {
     return {
-      ...record,
-      pipeline: selectedPipeline,
+      ...baseRecord,
       displayStatus: "hidden_reserved_not_advertised",
-      safeExactRegistrationMatch: false,
+      matchStatus: "hidden_reserved_not_advertised",
     };
   }
 
   if (!hasExactLocalMatch) {
     return {
-      ...record,
-      pipeline: selectedPipeline,
+      ...baseRecord,
       displayStatus: "missing",
       matchStatus: "missing",
-      safeExactRegistrationMatch: false,
     };
   }
 
   return {
-    ...record,
-    pipeline: selectedPipeline,
+    ...baseRecord,
     displayStatus: "hidden_already_ok",
     matchStatus: "listed",
-    safeExactRegistrationMatch: true,
   };
 }
 
-function SummaryCard({ label, value, tone = "default" }) {
+function SummaryCard({ label, value, tone = "default", onClick }) {
   const className = tone === "blue"
     ? "stat-card stat-card--blue"
     : tone === "amber"
@@ -149,7 +195,7 @@ function SummaryCard({ label, value, tone = "default" }) {
       : "stat-card";
 
   return (
-    <article className={className}>
+    <article className={className} onClick={onClick} role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined}>
       <div className="stat-card__label">{label}</div>
       <div className="stat-card__value">{value}</div>
     </article>
@@ -161,14 +207,23 @@ function SourceStatusBadge({ status }) {
   return <span className={badgeClass}>{sourceStatusLabel(status)}</span>;
 }
 
-function DisplayStatusBadge({ status }) {
-  const label = status === "reserved"
-    ? "Reserved on Vansco"
-    : status === "ignored"
-      ? "Ignored / Blocked"
-      : "Missing from my stock";
+function displayStatusLabel(status) {
+  switch (status) {
+    case "reserved":
+      return "Reserved on Vansco";
+    case "back_in_stock":
+      return "Back in stock / Review hidden";
+    case "hidden":
+      return "Hidden";
+    case "never":
+      return "Never show again";
+    default:
+      return "Missing from my stock";
+  }
+}
 
-  return <span className="tag">{label}</span>;
+function DisplayStatusBadge({ status }) {
+  return <span className="tag">{displayStatusLabel(status)}</span>;
 }
 
 function PipelineBadge({ pipeline }) {
@@ -184,7 +239,7 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
     setNotesDraft(record.notes || "");
     setSaveMessage("");
     setSavingAction("");
-  }, [record.id, record.notes, record.workflowStatus]);
+  }, [record.id, record.notes, record.workflowStatus, record.displayStatus]);
 
   async function saveWorkflow(workflowStatus, message) {
     setSavingAction(workflowStatus);
@@ -206,7 +261,8 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
     }
   }
 
-  const isIgnored = isBlockedStatus(record.workflowStatus);
+  const status = workflowStatusOf(record);
+  const isHiddenOrNever = isTemporaryHiddenStatus(status) || isNeverShowStatus(status);
 
   return (
     <article className="vansco-card">
@@ -234,7 +290,7 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
           <div className="vehicle-card__meta">Status last checked: {formatWatchTimestamp(record.lastSuccessfullyCheckedAt)}</div>
         ) : null}
         {record.lastError ? <div className="vehicle-card__meta">Last detail check issue: {record.lastError}</div> : null}
-        {isIgnored ? <div className="vehicle-card__meta">Current status: {workflowLabel(record.workflowStatus)}</div> : null}
+        {isHiddenOrNever ? <div className="vehicle-card__meta">Current status: {workflowLabel(status)}</div> : null}
 
         <label className="field">
           <span className="field__label">Notes</span>
@@ -251,37 +307,42 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
           <a className="button button--ghost" href={record.stockUrl || "#"} target="_blank" rel="noreferrer">
             Open Vansco Page
           </a>
-          {isIgnored ? (
+
+          {isHiddenOrNever ? (
             <button
               className="button button--primary"
               type="button"
-              onClick={() => saveWorkflow("new", "Restored")}
+              onClick={() => saveWorkflow("new", "Unhidden")}
               disabled={Boolean(savingAction)}
             >
-              {savingAction === "new" ? "Restoring..." : "Unblock"}
+              {savingAction === "new" ? "Unhiding..." : "Unhide"}
             </button>
           ) : (
-            <>
-              <button
-                className="button button--ghost"
-                type="button"
-                onClick={() => saveWorkflow("ignored", "Ignored")}
-                disabled={Boolean(savingAction)}
-              >
-                {savingAction === "ignored" ? "Ignoring..." : "Ignore"}
-              </button>
-              <button
-                className="button button--primary"
-                type="button"
-                onClick={() => saveWorkflow("not_listing_spec", "Blocked")}
-                disabled={Boolean(savingAction)}
-              >
-                {savingAction === "not_listing_spec" ? "Blocking..." : "Delete / Block"}
-              </button>
-            </>
+            <button
+              className="button button--ghost"
+              type="button"
+              onClick={() => saveWorkflow("ignored", "Hidden")}
+              disabled={Boolean(savingAction)}
+            >
+              {savingAction === "ignored" ? "Hiding..." : "Hide"}
+            </button>
           )}
+
+          {!isNeverShowStatus(status) ? (
+            <button
+              className="button button--primary"
+              type="button"
+              onClick={() => saveWorkflow("never_show_again", "Moved to Never show again")}
+              disabled={Boolean(savingAction)}
+            >
+              {savingAction === "never_show_again" ? "Saving..." : "Never show again"}
+            </button>
+          ) : null}
         </div>
 
+        {record.displayStatus === "back_in_stock" ? (
+          <div className="vehicle-card__meta">This was hidden before, but Vansco now shows it as available/unknown again.</div>
+        ) : null}
         {saveMessage ? <div className="vehicle-card__meta">{saveMessage}</div> : null}
       </div>
     </article>
@@ -298,6 +359,7 @@ async function fetchLocalVehiclesForPipeline(pipeline) {
 export default function VanscoStockWatchPage() {
   const [selectedPipeline, setSelectedPipeline] = useState("finance");
   const [filtersByPipeline, setFiltersByPipeline] = useState(DEFAULT_FILTERS);
+  const [searchByPipeline, setSearchByPipeline] = useState({ finance: "", rent2buy: "", cars: "" });
   const [recordsByPipeline, setRecordsByPipeline] = useState({ finance: [], rent2buy: [], cars: [] });
   const [cacheSummaryByPipeline, setCacheSummaryByPipeline] = useState({ finance: null, rent2buy: null, cars: null });
   const [localRegistrationsByPipeline, setLocalRegistrationsByPipeline] = useState({ finance: new Set(), rent2buy: new Set(), cars: new Set() });
@@ -354,6 +416,7 @@ export default function VanscoStockWatchPage() {
   }, [selectedPipeline]);
 
   const activeFilter = filtersByPipeline[selectedPipeline] || "missing";
+  const activeSearch = searchByPipeline[selectedPipeline] || "";
   const rawActiveRecords = recordsByPipeline[selectedPipeline] || [];
   const currentRawRecords = useMemo(() => dedupeDisplayRecords(rawActiveRecords), [rawActiveRecords]);
   const activeLocalRegistrations = localRegistrationsByPipeline[selectedPipeline] || new Set();
@@ -368,18 +431,24 @@ export default function VanscoStockWatchPage() {
   const summary = useMemo(() => ({
     missing: activeRecords.filter((record) => record.displayStatus === "missing").length,
     reserved: activeRecords.filter((record) => record.displayStatus === "reserved").length,
-    ignored: activeRecords.filter((record) => record.displayStatus === "ignored").length,
+    backInStock: activeRecords.filter((record) => record.displayStatus === "back_in_stock").length,
+    hidden: activeRecords.filter((record) => record.displayStatus === "hidden").length,
+    never: activeRecords.filter((record) => record.displayStatus === "never").length,
     hiddenNoReg: activeRecords.filter((record) => record.displayStatus === "hidden_no_registration").length,
     hiddenReserved: activeRecords.filter((record) => record.displayStatus === "hidden_reserved_not_advertised").length,
     alreadyListed: activeRecords.filter((record) => record.displayStatus === "hidden_already_ok").length,
   }), [activeRecords]);
 
   const filteredRecords = useMemo(() => {
-    if (activeFilter === "all") return activeRecords.filter((record) => ["missing", "reserved", "ignored"].includes(record.displayStatus));
-    if (activeFilter === "reserved") return activeRecords.filter((record) => record.displayStatus === "reserved");
-    if (activeFilter === "ignored") return activeRecords.filter((record) => record.displayStatus === "ignored");
-    return activeRecords.filter((record) => record.displayStatus === "missing");
-  }, [activeFilter, activeRecords]);
+    const actionStatuses = ["missing", "reserved", "back_in_stock", "hidden", "never"];
+    const byFilter = activeFilter === "all"
+      ? activeRecords.filter((record) => actionStatuses.includes(record.displayStatus))
+      : activeRecords.filter((record) => record.displayStatus === activeFilter);
+
+    const searchText = activeSearch.trim().toLowerCase();
+    if (!searchText) return byFilter;
+    return byFilter.filter((record) => recordSearchText(record).includes(searchText));
+  }, [activeFilter, activeRecords, activeSearch]);
 
   const lastCheckedAt = useMemo(() => currentRawRecords.reduce((latest, record) => {
     const checked = record.lastCheckedAt || record.lastSuccessfullyCheckedAt;
@@ -423,7 +492,8 @@ export default function VanscoStockWatchPage() {
           ? {
               ...record,
               ...actionRecord,
-              workflowStatus: actionRecord.workflowStatus || actionRecord.workflow_status || record.workflowStatus,
+              workflowStatus: workflowStatusOf(actionRecord) || workflowStatusOf(record),
+              workflow_status: workflowStatusOf(actionRecord) || workflowStatusOf(record),
               notes: actionRecord.notes ?? record.notes,
             }
           : record;
@@ -463,10 +533,16 @@ export default function VanscoStockWatchPage() {
         </div>
 
         <div className="stat-grid stat-grid--centered">
-          <SummaryCard label={`Missing from ${pipelineLabel(selectedPipeline)}`} value={summary.missing} tone="blue" />
-          <SummaryCard label="Reserved on Vansco" value={summary.reserved} tone="amber" />
-          <SummaryCard label="Ignored / Blocked" value={summary.ignored} />
+          <SummaryCard label={`Missing from ${pipelineLabel(selectedPipeline)}`} value={summary.missing} tone="blue" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "missing" }))} />
+          <SummaryCard label="Reserved on Vansco" value={summary.reserved} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "reserved" }))} />
+          <SummaryCard label="Back in stock / Review hidden" value={summary.backInStock} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "back_in_stock" }))} />
+          <SummaryCard label="Hidden" value={summary.hidden} onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "hidden" }))} />
+          <SummaryCard label="Never show again" value={summary.never} onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "never" }))} />
           <SummaryCard label="Local CRM regs loaded" value={activeLocalRegistrations.size} />
+        </div>
+
+        <div className="vansco-watch-note">
+          <strong>Back in stock rule:</strong> hidden vehicles only appear there when Vansco is currently available/unknown, the vehicle is still on Vansco, and it is not already in this CRM stock tab. Use <strong>Never show again</strong> for vehicles you will not advertise so they do not inflate the review number.
         </div>
 
         <div className="vansco-watch-note">
@@ -486,7 +562,7 @@ export default function VanscoStockWatchPage() {
         {successMessage ? <div className="success-banner">{successMessage}</div> : null}
 
         <div className="vansco-watch-note">
-          Hidden from action cards: {summary.alreadyListed} already listed/available, {summary.hiddenReserved} reserved but not advertised in this tab, {summary.hiddenNoReg} no valid registration. Ignore/Delete-Block is stored per tab.
+          Hidden from working cards: {summary.alreadyListed} already listed/available, {summary.hiddenReserved} reserved but not advertised in this tab, {summary.hiddenNoReg} no valid registration. Hide and Never Show Again are stored per tab.
         </div>
 
         <div className="segmented-control">
@@ -501,6 +577,16 @@ export default function VanscoStockWatchPage() {
             </button>
           ))}
         </div>
+
+        <label className="field">
+          <span className="field__label">Search this view</span>
+          <input
+            className="field__input"
+            value={activeSearch}
+            onChange={(event) => setSearchByPipeline((prev) => ({ ...prev, [selectedPipeline]: event.target.value }))}
+            placeholder="Search registration, title, status or notes"
+          />
+        </label>
 
         <div className="card-actions">
           <button className="button button--ghost" type="button" onClick={() => setShowDiagnostics((value) => !value)}>
