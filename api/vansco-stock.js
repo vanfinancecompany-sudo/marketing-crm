@@ -1,5 +1,5 @@
 const SOURCE_URL = "https://www.vansco.co.uk/all-stock/";
-const SITEMAP_URL = "https://www.vansco.co.uk/sitemap/";
+const SITEMAP_URLS = ["https://www.vansco.co.uk/sitemap/", "https://www.vansco.co.uk/sitemap.xml"];
 
 const VEHICLE_PATH_PATTERN = /\/vehicle-details\//i;
 const MODERN_UK_REG_PATTERN = /^[A-Z]{2}[0-9]{2}[A-Z]{3}$/;
@@ -8,17 +8,16 @@ const REGISTRATION_PATTERN = /\b([A-Z]{2}[0-9]{2}\s?[A-Z]{3}|[A-Z][0-9]{1,3}\s?[
 const FAKE_REG_PATTERNS = [/^[0-9]{2,3}PS$/i, /^[0-9]{2,3}BHP$/i, /^ULEZ$/i, /^EURO\d+$/i, /^L\dH\d$/i, /^U\d{4,6}$/i, /^SHOWROOM$/i, /^333$/i, /^0BOX$/i, /^FROMODOMETER$/i];
 const BLOCKED_REG_VALUES = new Set(["VANSCO", "VANSCOLTD", "ALLSTOCK", "HOMESTOCK", "UNDEFINED", "UNKNOWN", "NULL", "N/A", "NA", "NOTFOUND", "ULEZ", "EURO6", "SHOWROOM", "FROMODOMETER"]);
 
-const DETAIL_FETCH_CONCURRENCY = 2;
 const DETAIL_FETCH_TIMEOUT_MS = 9000;
 const EMERGENCY_DETAIL_FETCH_TIMEOUT_MS = 25000;
 const DISCOVERY_FETCH_TIMEOUT_MS = 10000;
+const DETAIL_FETCH_CONCURRENCY = 2;
 const FULL_SCAN_BATCH_SIZE = 5;
 const MAX_DETAIL_URLS = 800;
-const DETAIL_DIAGNOSTIC_SAMPLE_LIMIT = 5;
+const DETAIL_DIAGNOSTIC_SAMPLE_LIMIT = 8;
 const DETAIL_FETCH_MODE_LIMITS = { fast: 100, standard: 100, full: 0 };
 const CAR_KEYWORDS = /\b(audi|bmw|jaguar|jeep|kia|lexus|mercedes-benz|mercedes|skoda|suzuki|hyundai|q2|q3|a3|a4|a5|estate|hatchback|cabriolet|suv|coupe|saloon)\b/i;
-const VAN_KEYWORDS = /\b(transit|custom|tipper|dropside|luton|crew van|minibus|panel van|box van|pickup|pick-up|chassis cab|relay|dispatch|scudo|daily|doblo|partner|berlingo|sprinter|crafter|vivaro|movano|box-van|kangoo|traffic|master|ducato|talento|expert|transporter)\b/i;
-const NON_VAN_STOCK_KEYWORDS = /\b(bailey|pegasus|winnebago|motorhome|motorhomes|caravan|campervan|camper|autotrail|auto-trail|swift|elddis|roller team)\b/i;
+const VAN_KEYWORDS = /\b(transit|custom|tipper|dropside|luton|crew van|minibus|panel van|box van|pickup|pick-up|chassis cab|relay|dispatch|scudo|daily|doblo|partner|berlingo|sprinter|crafter|vivaro|movano|box-van|kangoo|traffic|master|ducato|talento|expert|transporter|bailey|pegasus|winnebago|motorhome|caravan|camper)\b/i;
 
 function compactWhitespace(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -55,7 +54,8 @@ function timeoutSignal(timeoutMs) {
   return { signal: controller.signal, clear: () => clearTimeout(timeout) };
 }
 
-async function fetchHtml(url, timeoutMs = DETAIL_FETCH_TIMEOUT_MS) {
+async function fetchHtml(url, timeoutMs) {
+  const startedAt = Date.now();
   const timed = timeoutSignal(timeoutMs);
   try {
     const response = await fetch(url, {
@@ -70,10 +70,12 @@ async function fetchHtml(url, timeoutMs = DETAIL_FETCH_TIMEOUT_MS) {
       },
     });
     const html = await response.text();
+    const elapsedMs = Date.now() - startedAt;
     if (!response.ok) {
       const error = new Error(`Vansco request failed with status ${response.status}.`);
       error.status = response.status;
       error.htmlLength = html.length;
+      error.elapsedMs = elapsedMs;
       error.htmlSample = decodeHtml(html).slice(0, 220);
       throw error;
     }
@@ -81,6 +83,7 @@ async function fetchHtml(url, timeoutMs = DETAIL_FETCH_TIMEOUT_MS) {
       url: normalizeUrl(url),
       html,
       htmlLength: html.length,
+      elapsedMs,
       status: response.status,
       contentType: response.headers.get("content-type") || "",
     };
@@ -89,37 +92,35 @@ async function fetchHtml(url, timeoutMs = DETAIL_FETCH_TIMEOUT_MS) {
   }
 }
 
-function analyseDetailHtml(url, page) {
-  const html = page?.html || "";
-  const decoded = decodeHtml(html);
-  const lower = decoded.toLowerCase();
-  const title = decodeHtml(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "").slice(0, 140);
-  const looksBlocked = /cloudflare|captcha|access denied|forbidden|blocked|enable cookies|checking your browser|attention required|bot|security check/i.test(decoded);
-  const hasVehicleHints = /registration|reg\b|reserve|reserved|deposit taken|enquire now|finance options|vehicle-details|og:title|og:image/i.test(html);
-
-  return {
-    url: normalizeUrl(url),
-    status: page?.status || 0,
-    contentType: page?.contentType || "",
-    htmlLength: html.length,
-    title,
-    looksBlocked,
-    hasVehicleHints,
-    sample: lower.slice(0, 240),
-  };
-}
-
 function classifyDetailFailure(diagnostics) {
   const failures = diagnostics?.failureSamples || [];
   const samples = diagnostics?.htmlSamples || [];
-
   if (failures.some((failure) => failure.timeout)) return "timeout";
   if (failures.some((failure) => [401, 403, 429, 503].includes(Number(failure.status)))) return "blocked_or_rate_limited";
   if (samples.some((sample) => sample.looksBlocked)) return "blocked_or_challenge_page";
   if (samples.length && samples.every((sample) => sample.htmlLength < 1000)) return "empty_or_tiny_html";
   if (samples.length && samples.every((sample) => !sample.hasVehicleHints)) return "unexpected_html";
   if (failures.length) return "detail_fetch_failed";
-  return "unknown";
+  return "none";
+}
+
+function analyseDetailHtml(url, page) {
+  const html = page?.html || "";
+  const decoded = decodeHtml(html);
+  const title = decodeHtml(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "").slice(0, 160);
+  const looksBlocked = /cloudflare|captcha|access denied|forbidden|enable cookies|checking your browser|attention required|bot|security check/i.test(decoded);
+  const hasVehicleHints = /registration|reg\b|reserve|reserved|deposit taken|enquire now|finance options|vehicle-details|og:title|og:image/i.test(html);
+  return {
+    url: normalizeUrl(url),
+    status: page?.status || 0,
+    elapsedMs: page?.elapsedMs || 0,
+    contentType: page?.contentType || "",
+    htmlLength: html.length,
+    title,
+    looksBlocked,
+    hasVehicleHints,
+    sample: decoded.slice(0, 240),
+  };
 }
 
 function extractAnchorMatches(html) {
@@ -143,14 +144,9 @@ function extractVehicleUrls(html) {
   return Array.from(urls).filter(Boolean);
 }
 
-function isExcludedNonVanStock(text, href = "") {
-  return NON_VAN_STOCK_KEYWORDS.test(`${compactWhitespace(text)} ${compactWhitespace(href)}`);
-}
-
 function detectVehicleCategory(text, href = "") {
   const haystack = `${compactWhitespace(text)} ${compactWhitespace(href)}`;
   if (/used-cars/i.test(href)) return "car";
-  if (isExcludedNonVanStock(haystack, href)) return "excluded_non_van";
   if (/used-vans|no-vat-vans/i.test(href)) return "van";
   if (VAN_KEYWORDS.test(haystack)) return "van";
   if (CAR_KEYWORDS.test(haystack)) return "car";
@@ -168,7 +164,18 @@ function vehicleTitleFromUrl(url) {
 
 function toVehicleStub(url, sourceCategory = "sitemap") {
   const title = vehicleTitleFromUrl(url);
-  return { title, stockUrl: normalizeUrl(url), imageUrl: "", price: "", registration: "", mileage: "", year: "", sourceStatus: "unknown", vehicleCategory: detectVehicleCategory(title, url), sourceCategory };
+  return {
+    title,
+    stockUrl: normalizeUrl(url),
+    imageUrl: "",
+    price: "",
+    registration: "",
+    mileage: "",
+    year: "",
+    sourceStatus: "unknown",
+    vehicleCategory: detectVehicleCategory(title, url),
+    sourceCategory,
+  };
 }
 
 function dedupeVehicles(vehicles) {
@@ -182,17 +189,21 @@ function dedupeVehicles(vehicles) {
 }
 
 async function discoverVehicles(parserWarnings) {
-  const endpoints = [SITEMAP_URL, "https://www.vansco.co.uk/sitemap.xml"];
-  for (const endpoint of endpoints) {
+  for (const endpoint of SITEMAP_URLS) {
     try {
       const page = await fetchHtml(endpoint, DISCOVERY_FETCH_TIMEOUT_MS);
       const urls = extractVehicleUrls(page.html);
       if (urls.length) {
-        const vehicles = dedupeVehicles(urls.map((url) => toVehicleStub(url, "sitemap")));
-        return { pageResults: [{ ...page, parsed: { candidates: urls, vehicles } }], vehicles, candidateLinksFound: urls.length, sourceFamily: "vansco-sitemap-url-list", endpointUsed: endpoint };
+        return {
+          pageResults: [{ ...page, parsed: { candidates: urls } }],
+          vehicles: dedupeVehicles(urls.map((url) => toVehicleStub(url, "sitemap"))),
+          candidateLinksFound: urls.length,
+          sourceFamily: "vansco-sitemap-url-list",
+          endpointUsed: endpoint,
+        };
       }
-    } catch {
-      parserWarnings.push(`Sitemap discovery failed for ${endpoint}.`);
+    } catch (error) {
+      parserWarnings.push(`Sitemap discovery failed for ${endpoint}: ${error?.message || "unknown error"}.`);
     }
   }
 
@@ -205,23 +216,21 @@ async function discoverVehicles(parserWarnings) {
     try {
       const page = await fetchHtml(endpoint, DISCOVERY_FETCH_TIMEOUT_MS);
       const urls = extractVehicleUrls(page.html);
-      const stubs = urls.map((url) => toVehicleStub(url, "category_fallback"));
-      pageResults.push({ ...page, parsed: { candidates: urls, vehicles: stubs } });
+      pageResults.push({ ...page, parsed: { candidates: urls } });
       candidateLinksFound += urls.length;
-      vehicles = dedupeVehicles([...vehicles, ...stubs]);
-    } catch {
-      parserWarnings.push(`Category fallback failed for ${endpoint}.`);
+      vehicles = dedupeVehicles([...vehicles, ...urls.map((url) => toVehicleStub(url, "category_fallback"))]);
+    } catch (error) {
+      parserWarnings.push(`Category fallback failed for ${endpoint}: ${error?.message || "unknown error"}.`);
     }
   }
   return { pageResults, vehicles, candidateLinksFound, sourceFamily: "vansco-category-fallback", endpointUsed: fallbackUrls.join(", ") };
 }
 
 function filterVehiclesForPipeline(vehicles, pipeline) {
-  if (pipeline === "cars") return vehicles.filter((vehicle) => detectVehicleCategory(vehicle.title, vehicle.stockUrl) === "car");
-  return vehicles.filter((vehicle) => {
-    const category = detectVehicleCategory(vehicle.title, vehicle.stockUrl);
-    return category !== "car" && category !== "excluded_non_van";
-  });
+  if (pipeline === "cars") {
+    return vehicles.filter((vehicle) => detectVehicleCategory(vehicle.title, vehicle.stockUrl) === "car");
+  }
+  return vehicles.filter((vehicle) => detectVehicleCategory(vehicle.title, vehicle.stockUrl) !== "car");
 }
 
 function extractMetaContent(html, key) {
@@ -246,7 +255,10 @@ function extractHeading(html, tagName) {
 
 function extractLabelValue(html, label) {
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const patterns = [new RegExp(`${escaped}\\s*[:|-]?\\s*<[^>]*>\\s*([^<]+)`, "i"), new RegExp(`${escaped}\\s*[:|-]?\\s*([^<\\n\\r]+)`, "i")];
+  const patterns = [
+    new RegExp(`${escaped}\\s*[:|-]?\\s*<[^>]*>\\s*([^<]+)`, "i"),
+    new RegExp(`${escaped}\\s*[:|-]?\\s*([^<\\n\\r]+)`, "i"),
+  ];
   for (const pattern of patterns) {
     const match = html.match(pattern);
     const value = compactWhitespace(decodeHtml(match?.[1] || ""));
@@ -339,7 +351,19 @@ function enrichVehicleStub(stub, html, diagnostics) {
     }
   }
   registration = registration || extractStrictRegistrationCandidate(extractLabelValue(html, "Registration"), rejectedCandidates) || extractStrictRegistrationCandidate(extractLabelValue(html, "Reg"), rejectedCandidates);
-  return { ...stub, title: fullTitle || pageTitle || stub.title, stockUrl: normalizeUrl(stub.stockUrl), imageUrl: extractImageUrl(html) || stub.imageUrl, price: "", registration, mileage: "", year: "", sourceStatus: detectSourceStatus(bodyText), vehicleCategory: detectVehicleCategory(`${fullTitle} ${bodyText}`, stub.stockUrl) || stub.vehicleCategory, sourceCategory: stub.sourceCategory || "" };
+  return {
+    ...stub,
+    title: fullTitle || pageTitle || stub.title,
+    stockUrl: normalizeUrl(stub.stockUrl),
+    imageUrl: extractImageUrl(html) || stub.imageUrl,
+    price: "",
+    registration,
+    mileage: "",
+    year: "",
+    sourceStatus: detectSourceStatus(bodyText),
+    vehicleCategory: detectVehicleCategory(`${fullTitle} ${bodyText}`, stub.stockUrl) || stub.vehicleCategory,
+    sourceCategory: stub.sourceCategory || "",
+  };
 }
 
 async function mapWithConcurrency(items, limit, worker) {
@@ -356,7 +380,7 @@ async function mapWithConcurrency(items, limit, worker) {
   return results;
 }
 
-function buildDiagnostics({ discovery, filteredVehicleCount, excludedNonVanCount, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied, detailTimeoutMs, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, detailDiagnostics, parserWarnings, detailOffset, remainingVehicleCount }) {
+function buildDiagnostics({ discovery, filteredVehicleCount, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied, detailTimeoutMs, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, detailDiagnostics, parserWarnings, detailOffset, remainingVehicleCount }) {
   return {
     endpointUsed: discovery.endpointUsed,
     sourceFamily: discovery.sourceFamily,
@@ -364,7 +388,6 @@ function buildDiagnostics({ discovery, filteredVehicleCount, excludedNonVanCount
     htmlLength: discovery.pageResults.reduce((total, page) => total + page.htmlLength, 0),
     candidateLinksFound: discovery.candidateLinksFound,
     sitemapUrlsFound: filteredVehicleCount,
-    excludedNonVanCount,
     categoryPagesFetched: 0,
     categoryPageFailures: [],
     vehiclesParsedByCategory: {},
@@ -387,8 +410,9 @@ function buildDiagnostics({ discovery, filteredVehicleCount, excludedNonVanCount
     detailOffset,
     remainingVehicleCount,
     currentBatchStart: detailOffset,
-    currentBatchEnd: detailOffset + finalVehicles.length,
-    vehiclesProcessedThisBatch: finalVehicles.length,
+    currentBatchEnd: detailOffset + detailFetchLimitApplied,
+    vehiclesProcessedThisBatch: detailFetchLimitApplied,
+    usableVehiclesThisBatch: finalVehicles.filter(hasEnrichedDetail).length,
     registrationsExtractedFromTitleBrackets: enrichmentDiagnostics.registrationsExtractedFromTitleBrackets,
     rejectedFakeRegistrationsCount: enrichmentDiagnostics.rejectedRegistrationCandidates.length,
     sampleRejectedFakeRegistrations: enrichmentDiagnostics.rejectedRegistrationCandidates.slice(0, 20),
@@ -403,6 +427,7 @@ export default async function handler(request, response) {
     response.status(405).json({ message: "Method not allowed." });
     return;
   }
+
   try {
     const pipeline = String(request.query?.pipeline || "finance").toLowerCase();
     const detailFetchMode = String(request.query?.detailFetchMode || "standard").toLowerCase();
@@ -411,10 +436,9 @@ export default async function handler(request, response) {
     const emergencySlowMode = requestedBatchSize === 1;
     const detailTimeoutMs = emergencySlowMode ? EMERGENCY_DETAIL_FETCH_TIMEOUT_MS : DETAIL_FETCH_TIMEOUT_MS;
     const parserWarnings = [];
+
     const discovery = await discoverVehicles(parserWarnings);
-    const pipelineVehicles = filterVehiclesForPipeline(discovery.vehicles, pipeline).slice(0, MAX_DETAIL_URLS);
-    const excludedNonVanCount = pipeline === "cars" ? 0 : discovery.vehicles.filter((vehicle) => detectVehicleCategory(vehicle.title, vehicle.stockUrl) === "excluded_non_van").length;
-    const filteredVehicles = pipelineVehicles;
+    const filteredVehicles = filterVehiclesForPipeline(discovery.vehicles, pipeline).slice(0, MAX_DETAIL_URLS);
     const totalVehicleUrlsFound = filteredVehicles.length;
     const requestedLimit = DETAIL_FETCH_MODE_LIMITS[detailFetchMode] ?? DETAIL_FETCH_MODE_LIMITS.standard;
     const batchSize = requestedBatchSize > 0 ? Math.min(requestedBatchSize, FULL_SCAN_BATCH_SIZE) : detailFetchMode === "full" ? FULL_SCAN_BATCH_SIZE : requestedLimit || filteredVehicles.length;
@@ -422,14 +446,15 @@ export default async function handler(request, response) {
     const vehiclesToEnrich = filteredVehicles.slice(detailOffset, detailOffset + detailFetchLimit);
     const remainingVehicleCount = Math.max(0, totalVehicleUrlsFound - (detailOffset + vehiclesToEnrich.length));
     const hasMore = remainingVehicleCount > 0;
+
     if (hasMore) parserWarnings.push(`Batch ${Math.floor(detailOffset / Math.max(1, detailFetchLimit || batchSize)) + 1} processed ${vehiclesToEnrich.length} vehicles. ${remainingVehicleCount} remaining vehicles are queued for automatic batches.`);
     if (emergencySlowMode) parserWarnings.push(`Emergency slow mode active. Detail timeout is ${detailTimeoutMs / 1000}s per vehicle.`);
-    if (excludedNonVanCount) parserWarnings.push(`${excludedNonVanCount} caravan/motorhome-style Vansco URLs were excluded from van checks.`);
 
     let detailPagesFetched = 0;
     let detailPagesFailed = 0;
     const enrichmentDiagnostics = { registrationsExtractedFromTitleBrackets: 0, rejectedRegistrationCandidates: [] };
     const detailDiagnostics = { failureSamples: [], htmlSamples: [] };
+
     const enrichedVehicles = await mapWithConcurrency(vehiclesToEnrich, DETAIL_FETCH_CONCURRENCY, async (vehicle) => {
       try {
         const detailPage = await fetchHtml(vehicle.stockUrl, detailTimeoutMs);
@@ -446,6 +471,7 @@ export default async function handler(request, response) {
             message: error?.message || "Detail fetch failed",
             status: error?.status || 0,
             timeout: error?.name === "AbortError",
+            elapsedMs: error?.elapsedMs || detailTimeoutMs,
             htmlLength: error?.htmlLength || 0,
             sample: error?.htmlSample || "",
           });
@@ -453,13 +479,13 @@ export default async function handler(request, response) {
         return null;
       }
     });
+
     const finalVehicles = dedupeVehicles(enrichedVehicles.filter(Boolean));
     const partialScan = hasMore || detailPagesFailed > 0 || discovery.sourceFamily === "vansco-category-fallback";
-    const diagnostics = buildDiagnostics({ discovery, filteredVehicleCount: filteredVehicles.length, excludedNonVanCount, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied: vehiclesToEnrich.length, detailTimeoutMs, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, detailDiagnostics, parserWarnings, detailOffset, remainingVehicleCount });
+    const diagnostics = buildDiagnostics({ discovery, filteredVehicleCount: filteredVehicles.length, detailPagesFetched, detailPagesFailed, finalVehicles, detailFetchMode, detailFetchLimitApplied: vehiclesToEnrich.length, detailTimeoutMs, partialScan, totalVehicleUrlsFound, enrichmentDiagnostics, detailDiagnostics, parserWarnings, detailOffset, remainingVehicleCount });
 
     if (vehiclesToEnrich.length && !finalVehicles.some(hasEnrichedDetail)) {
       response.setHeader("Cache-Control", "no-store, max-age=0");
-
       if (hasMore) {
         response.status(200).json({
           html: discovery.pageResults[0]?.html || "",
@@ -485,7 +511,19 @@ export default async function handler(request, response) {
     }
 
     response.setHeader("Cache-Control", "no-store, max-age=0");
-    response.status(200).json({ html: discovery.pageResults[0]?.html || "", htmlLength: diagnostics.htmlLength, fetchedAt: new Date().toISOString(), sourceUrl: SOURCE_URL, endpointUsed: discovery.endpointUsed, pagesFetched: diagnostics.pagesFetched, vehicles: finalVehicles, detailOffset, hasMore, nextDetailOffset: detailOffset + vehiclesToEnrich.length, diagnostics });
+    response.status(200).json({
+      html: discovery.pageResults[0]?.html || "",
+      htmlLength: diagnostics.htmlLength,
+      fetchedAt: new Date().toISOString(),
+      sourceUrl: SOURCE_URL,
+      endpointUsed: discovery.endpointUsed,
+      pagesFetched: diagnostics.pagesFetched,
+      vehicles: finalVehicles,
+      detailOffset,
+      hasMore,
+      nextDetailOffset: detailOffset + vehiclesToEnrich.length,
+      diagnostics,
+    });
   } catch (error) {
     response.status(500).json({ message: error?.message || "Could not fetch Vansco stock source." });
   }
