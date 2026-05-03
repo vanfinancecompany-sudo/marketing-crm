@@ -21,21 +21,26 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function toTime(value) {
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
 function prioritySort(a, b) {
-  const aNoReg = a.registration ? 1 : 0;
-  const bNoReg = b.registration ? 1 : 0;
-  if (aNoReg !== bNoReg) return aNoReg - bNoReg;
+  const aAttempted = a.last_attempted_at ? 1 : 0;
+  const bAttempted = b.last_attempted_at ? 1 : 0;
+  if (aAttempted !== bAttempted) return aAttempted - bAttempted;
 
   const aFail = Number(a.fail_count || 0);
   const bFail = Number(b.fail_count || 0);
   if (aFail !== bFail) return aFail - bFail;
 
-  const aChecked = new Date(a.last_successfully_checked_at || a.last_attempted_at || 0).getTime() || 0;
-  const bChecked = new Date(b.last_successfully_checked_at || b.last_attempted_at || 0).getTime() || 0;
+  const aChecked = toTime(a.last_successfully_checked_at || a.last_attempted_at);
+  const bChecked = toTime(b.last_successfully_checked_at || b.last_attempted_at);
   return aChecked - bChecked;
 }
 
-async function getOrCreateRun(supabase, { runId, runType }) {
+async function getOrCreateRun(supabase, { runId, runType, forceNew = false }) {
   if (runId) {
     const { data, error } = await supabase
       .from(REFRESH_RUNS_TABLE)
@@ -46,16 +51,23 @@ async function getOrCreateRun(supabase, { runId, runType }) {
     if (data) return data;
   }
 
-  const { data: existing, error: existingError } = await supabase
-    .from(REFRESH_RUNS_TABLE)
-    .select("*")
-    .eq("status", "running")
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  if (!forceNew) {
+    const { data: existing, error: existingError } = await supabase
+      .from(REFRESH_RUNS_TABLE)
+      .select("*")
+      .eq("status", "running")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-  if (existingError) throw existingError;
-  if (existing) return existing;
+    if (existingError) throw existingError;
+    if (existing) return existing;
+  } else {
+    await supabase
+      .from(REFRESH_RUNS_TABLE)
+      .update({ status: "paused", stage: "superseded", updated_at: nowIso() })
+      .eq("status", "running");
+  }
 
   const startedAt = nowIso();
   const { data, error } = await supabase
@@ -121,7 +133,11 @@ async function refreshUrlList(supabase, runId) {
   await updateRun(supabase, runId, {
     stage: "url_list_refreshed",
     total_urls: rows.length,
+    processed_count: 0,
+    success_count: 0,
+    failure_count: 0,
     remaining_count: rows.length,
+    last_error: null,
   });
 
   return {
@@ -134,28 +150,35 @@ async function refreshUrlList(supabase, runId) {
   };
 }
 
-async function getNextCandidates(supabase, limit) {
+function wasAttemptedDuringRun(row, runStartedAt) {
+  return toTime(row.last_attempted_at) >= toTime(runStartedAt);
+}
+
+async function getNextCandidates(supabase, limit, runStartedAt) {
   const { data, error } = await supabase
     .from(CACHE_TABLE)
     .select("*")
-    .eq("is_currently_on_vansco", true)
-    .limit(500);
-
-  if (error) throw error;
-
-  return (data || []).sort(prioritySort).slice(0, limit);
-}
-
-async function countRemainingUncheckedOrMissingReg(supabase) {
-  const { data, error } = await supabase
-    .from(CACHE_TABLE)
-    .select("id, registration, last_successfully_checked_at")
     .eq("is_currently_on_vansco", true)
     .limit(2000);
 
   if (error) throw error;
 
-  return (data || []).filter((row) => !row.registration || !row.last_successfully_checked_at).length;
+  return (data || [])
+    .filter((row) => !wasAttemptedDuringRun(row, runStartedAt))
+    .sort(prioritySort)
+    .slice(0, limit);
+}
+
+async function countRemainingForRun(supabase, runStartedAt) {
+  const { data, error } = await supabase
+    .from(CACHE_TABLE)
+    .select("id, last_attempted_at")
+    .eq("is_currently_on_vansco", true)
+    .limit(2000);
+
+  if (error) throw error;
+
+  return (data || []).filter((row) => !wasAttemptedDuringRun(row, runStartedAt)).length;
 }
 
 async function processOne(supabase, row) {
@@ -248,16 +271,17 @@ export default async function handler(request, response) {
 
   try {
     supabase = getSupabaseAdmin();
-    run = await getOrCreateRun(supabase, { runId: query.runId, runType });
+    run = await getOrCreateRun(supabase, { runId: query.runId, runType, forceNew: refreshUrls && !query.runId });
 
     const refresh = refreshUrls ? await refreshUrlList(supabase, run.id) : null;
-    const results = [];
-    let stoppedReason = "batch_complete";
-
-    await updateRun(supabase, run.id, {
+    run = await updateRun(supabase, run.id, {
       stage: "processing_dragon_details",
       last_batch_size: batchSize,
     });
+
+    const runStartedAt = run.started_at;
+    const results = [];
+    let stoppedReason = "batch_complete";
 
     while (results.length < batchSize) {
       if (Date.now() - startedAtMs > maxMs - 5000) {
@@ -265,7 +289,7 @@ export default async function handler(request, response) {
         break;
       }
 
-      const nextRows = await getNextCandidates(supabase, Math.min(batchSize - results.length, 10));
+      const nextRows = await getNextCandidates(supabase, Math.min(batchSize - results.length, 10), runStartedAt);
       if (!nextRows.length) {
         stoppedReason = "complete";
         break;
@@ -280,7 +304,7 @@ export default async function handler(request, response) {
         results.push(await processOne(supabase, row));
       }
 
-      const remainingMidBatch = await countRemainingUncheckedOrMissingReg(supabase);
+      const remainingMidBatch = await countRemainingForRun(supabase, runStartedAt);
       await updateRun(supabase, run.id, {
         stage: "processing_dragon_details",
         processed_count: Number(run.processed_count || 0) + results.length,
@@ -293,7 +317,7 @@ export default async function handler(request, response) {
       if (stoppedReason === "time_guard") break;
     }
 
-    const remainingCount = await countRemainingUncheckedOrMissingReg(supabase);
+    const remainingCount = await countRemainingForRun(supabase, runStartedAt);
     const complete = remainingCount === 0;
     const processedCount = Number(run.processed_count || 0) + results.length;
     const successCount = Number(run.success_count || 0) + results.filter((item) => item.ok).length;
@@ -332,6 +356,7 @@ export default async function handler(request, response) {
       totalRunSuccessCount: successCount,
       totalRunFailureCount: failureCount,
       remainingUncheckedOrMissingRegCount: remainingCount,
+      remainingThisRunCount: remainingCount,
       complete,
       shouldContinue: remainingCount > 0,
       results,
