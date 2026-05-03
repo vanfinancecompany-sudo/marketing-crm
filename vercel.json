@@ -1,4 +1,10 @@
 {
+  "crons": [
+    {
+      "path": "/api/vansco-cache-live-refresh?auto=true&batchSize=15&maxMs=45000",
+      "schedule": "*/15 * * * *"
+    }
+  ],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
