@@ -309,7 +309,9 @@ export default function VanscoStockWatchPage() {
   const activeLocalVehicles = localVehiclesByPipeline[selectedPipeline] || [];
   const localLoadError = localLoadErrorByPipeline[selectedPipeline] || "";
   const cacheSummary = cacheSummaryByPipeline[selectedPipeline] || null;
+
   const activeRecords = useMemo(() => currentRawRecords.map((record) => classifyWatchRecord(record, activeLocalRegistrations, selectedPipeline)), [activeLocalRegistrations, currentRawRecords, selectedPipeline]);
+
   const currentVanscoRegistrationSet = useMemo(() => {
     const regs = currentRawRecords
       .filter((record) => record.isCurrentlyOnVansco !== false)
@@ -317,10 +319,13 @@ export default function VanscoStockWatchPage() {
       .filter(Boolean);
     return new Set(regs);
   }, [currentRawRecords]);
+
   const localNotVanscoRecords = useMemo(() => dedupeLocalVehiclesByRegistration(activeLocalVehicles)
     .filter(({ registration }) => registration && !currentVanscoRegistrationSet.has(registration))
     .map(({ vehicle, index }) => mapLocalVehicleToWatchRecord(vehicle, index, selectedPipeline)), [activeLocalVehicles, currentVanscoRegistrationSet, selectedPipeline]);
+
   const displayRecords = useMemo(() => [...activeRecords, ...localNotVanscoRecords], [activeRecords, localNotVanscoRecords]);
+
   const summary = useMemo(() => ({
     missing: activeRecords.filter((record) => record.displayStatus === "missing").length,
     localNotVansco: localNotVanscoRecords.length,
@@ -333,6 +338,25 @@ export default function VanscoStockWatchPage() {
     hiddenReserved: activeRecords.filter((record) => record.displayStatus === "hidden_reserved_not_advertised").length,
     alreadyListed: activeRecords.filter((record) => record.displayStatus === "hidden_already_ok").length,
   }), [activeRecords, localNotVanscoRecords]);
+
+  const filterCounts = useMemo(() => ({
+    missing: summary.missing,
+    local_not_vansco: summary.localNotVansco,
+    advertised: summary.advertised,
+    reserved: summary.reserved,
+    back_in_stock: summary.backInStock,
+    hidden: summary.hidden,
+    never: summary.never,
+    all:
+      summary.missing +
+      summary.localNotVansco +
+      summary.advertised +
+      summary.reserved +
+      summary.backInStock +
+      summary.hidden +
+      summary.never,
+  }), [summary]);
+
   const filteredRecords = useMemo(() => {
     const actionStatuses = ["missing", "local_not_vansco", "advertised", "reserved", "back_in_stock", "hidden", "never"];
     const byFilter = activeFilter === "all" ? displayRecords.filter((record) => actionStatuses.includes(record.displayStatus)) : displayRecords.filter((record) => record.displayStatus === activeFilter);
@@ -340,6 +364,7 @@ export default function VanscoStockWatchPage() {
     if (!searchText) return byFilter;
     return byFilter.filter((record) => recordSearchText(record).includes(searchText));
   }, [activeFilter, displayRecords, activeSearch]);
+
   const lastCheckedAt = useMemo(() => currentRawRecords.reduce((latest, record) => {
     const checked = record.lastCheckedAt || record.lastSuccessfullyCheckedAt;
     if (!checked) return latest;
@@ -400,7 +425,7 @@ export default function VanscoStockWatchPage() {
         {selectedPipeline === "cars" && activeLocalRegistrations.size !== 43 ? <div className="vansco-watch-note vansco-watch-note--warning">Cars local stock expected around 43, but this page loaded {activeLocalRegistrations.size}. Check the Cars Supabase table name/fields before relying on Cars results.</div> : null}
         {localLoadError ? <div className="error-banner">{localLoadError}</div> : null}{errorMessage ? <div className="error-banner">{errorMessage}</div> : null}{successMessage ? <div className="success-banner">{successMessage}</div> : null}
         <div className="vansco-watch-note">Hidden from working cards: {summary.alreadyListed} already listed/available, {summary.hiddenReserved} reserved but not advertised in this tab, {summary.hiddenNoReg} no valid registration. Advertised, Hide and Never Show Again are stored per tab. My stock not on Vansco is advisory only and does not save actions.</div>
-        <div className="segmented-control">{SIMPLE_FILTERS.map((filter) => <button key={filter.value} className={activeFilter === filter.value ? "segment is-active" : "segment"} type="button" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: filter.value }))}>{filter.label}</button>)}</div>
+        <div className="segmented-control">{SIMPLE_FILTERS.map((filter) => <button key={filter.value} className={activeFilter === filter.value ? "segment is-active" : "segment"} type="button" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: filter.value }))}>{filter.label} ({filterCounts[filter.value] ?? 0})</button>)}</div>
         <label className="field"><span className="field__label">Search this view</span><input className="field__input" value={activeSearch} onChange={(event) => setSearchByPipeline((prev) => ({ ...prev, [selectedPipeline]: event.target.value }))} placeholder="Search registration, title, status or notes" /></label>
         <div className="card-actions"><button className="button button--ghost" type="button" onClick={() => setShowDiagnostics((value) => !value)}>{showDiagnostics ? "Hide accuracy details" : "Show accuracy details"}</button></div>
         {showDiagnostics ? <pre className="diagnostics-panel">{JSON.stringify({ selectedPipeline, localRegsLoaded: activeLocalRegistrations.size, vanscoCurrentRegsLoaded: currentVanscoRegistrationSet.size, localNotVansco: summary.localNotVansco, localLoadError, cacheSummary, actionSummary: summary, debug: debugByPipeline[selectedPipeline] }, null, 2)}</pre> : null}
