@@ -1,6 +1,7 @@
 import { supabase } from "./supabase.js";
 
 const CAR_TABLE_CANDIDATES = ["cars_stock", "car_stock", "cars", "car_vehicles", "facebook_cars", "car_adverts"];
+const MARKETING_STOCK_WATCH_LIMIT = 500;
 
 function convertWixImage(url) {
   if (!url) return "";
@@ -122,7 +123,7 @@ export function mapCarVehicleRow(row, index) {
 }
 
 export async function fetchFinanceMarketingVehicles(limitPerPipeline = 80) {
-  const safeLimit = Math.min(Number(limitPerPipeline) || 80, 120);
+  const safeLimit = Math.min(Number(limitPerPipeline) || 80, MARKETING_STOCK_WATCH_LIMIT);
 
   const financeQuery = supabase
     .from("facebook_adverts")
@@ -140,7 +141,7 @@ export async function fetchFinanceMarketingVehicles(limitPerPipeline = 80) {
 }
 
 export async function fetchRentMarketingVehicles(limitPerPipeline = 80) {
-  const safeLimit = Math.min(Number(limitPerPipeline) || 80, 120);
+  const safeLimit = Math.min(Number(limitPerPipeline) || 80, MARKETING_STOCK_WATCH_LIMIT);
 
   const rentQuery = supabase
     .from("rent_vehicles")
@@ -157,7 +158,7 @@ export async function fetchRentMarketingVehicles(limitPerPipeline = 80) {
 }
 
 export async function fetchCarMarketingVehicles(limitPerPipeline = 80) {
-  const safeLimit = Math.min(Number(limitPerPipeline) || 80, 150);
+  const safeLimit = Math.min(Number(limitPerPipeline) || 80, MARKETING_STOCK_WATCH_LIMIT);
   const errors = [];
 
   for (const tableName of CAR_TABLE_CANDIDATES) {
