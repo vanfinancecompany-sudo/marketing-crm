@@ -84,6 +84,7 @@ import {
   saveReelVideoBlob,
   sanitizePostingCaption,
 } from "./utils/creativeUtils.js";
+import { downloadFacebookMp4Reel } from "./utils/facebookMp4Export.js";
 import { fetchMarketingVehicles } from "./services/marketingVehicles.js";
 import {
   deleteMarketingCreative,
@@ -180,6 +181,50 @@ function saveReelClickHistory(history) {
   if (typeof window === "undefined") return;
 
   localStorage.setItem(REEL_CLICK_HISTORY_STORAGE_KEY, JSON.stringify(history));
+}
+
+function normalizeStockRegistration(value) {
+  return String(value || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function creativeRegistration(creative) {
+  return normalizeStockRegistration(
+    creative?.vehicle?.reg ||
+      creative?.vehicle?.registration ||
+      creative?.registration ||
+      creative?.vehicle?.title ||
+      creative?.vehicle?.name ||
+      ""
+  );
+}
+
+function vehicleRegistrationKey(vehicle) {
+  return normalizeStockRegistration(
+    vehicle?.reg ||
+      vehicle?.registration ||
+      vehicle?.title ||
+      vehicle?.name ||
+      ""
+  );
+}
+
+function vehicleIdKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function findCurrentStockVehicleForCreative(creative, vehicles) {
+  const creativeReg = creativeRegistration(creative);
+  if (creativeReg) {
+    const regMatch = vehicles.find((vehicle) => vehicleRegistrationKey(vehicle) === creativeReg);
+    if (regMatch) return regMatch;
+  }
+
+  const creativeVehicleId = vehicleIdKey(creative?.vehicle?.id || creative?.vehicleId);
+  if (!creativeVehicleId) return null;
+
+  return vehicles.find((vehicle) => vehicleIdKey(vehicle.id) === creativeVehicleId) || null;
 }
 
 function mergeReelClickHistory(stats) {
@@ -614,8 +659,10 @@ useEffect(() => {
   }, [vehicles, factoryFilters]);
 
   const filteredLibraryCreatives = useMemo(() => {
-    return filterCreatives(creatives, libraryFilters);
-  }, [creatives, libraryFilters]);
+    return filterCreatives(creatives, libraryFilters).filter((creative) =>
+      Boolean(findCurrentStockVehicleForCreative(creative, vehicles))
+    );
+  }, [creatives, libraryFilters, vehicles]);
 
   const generatedCreatives = useMemo(() => {
     return creatives.filter((creative) => recentGeneratedIds.includes(creative.id));
@@ -1434,7 +1481,63 @@ async function handleClearTodayReels() {
     try {
       await downloadCreativeReelVideo(creative);
     } catch (error) {
-      setCreativeError(error.message || "This saved reel does not have downloadable video media.");
+      setCreativeError(
+        `${error.message || "This saved reel does not have downloadable video media."} Use Regenerate Facebook MP4 to rebuild it from current stock.`
+      );
+    }
+  }
+
+  async function handleRegenerateCreativeFacebookMp4(creative) {
+    const vehicle = findCurrentStockVehicleForCreative(creative, vehicles);
+
+    if (!vehicle) {
+      setCreativeError("Vehicle no longer in stock");
+      return;
+    }
+
+    setCreativeError("");
+    setGenerationMessage(`Regenerating Facebook MP4 for ${vehicle.reg || vehicle.name || "vehicle"}...`);
+
+    try {
+      const pipeline = vehicle.pipeline || creative.vehicle?.pipeline || "vanFinance";
+      const defaultContent =
+        pipeline === "rent2buy" ? buildRentReelContent(vehicle) : buildFinanceReelContent(vehicle);
+      const reel = createReelRecord({
+        vehicle,
+        image: vehicle.image || vehicle.picture || creative.vehicle?.image || "",
+        pipeline,
+        hook: creative.hookStyle || defaultContent.templateName,
+        templateName: creative.templateType || defaultContent.templateName,
+        musicOn: true,
+        sourceType: "stock",
+        sourceLabel: defaultContent.sourceLabel,
+        subtext: creative.preview?.subline || defaultContent.subtext,
+        priceLine: defaultContent.priceLine,
+        ctaLine: creative.cta || defaultContent.ctaLine,
+      });
+      const videoAsset = await generateReelVideoAsset(reel);
+      const regeneratedReel = {
+        ...reel,
+        url: videoAsset.url,
+        downloadName: videoAsset.downloadName,
+        posterUrl: videoAsset.posterUrl,
+        extension: videoAsset.extension,
+        mimeType: videoAsset.mimeType,
+        audioEmbedded: videoAsset.audioEmbedded,
+        blob: videoAsset.blob,
+        fileName: videoAsset.downloadName,
+      };
+
+      await saveReelVideoBlob(creative.id, videoAsset.blob, {
+        downloadName: videoAsset.downloadName,
+        mimeType: videoAsset.mimeType,
+      }).catch(() => {});
+
+      await downloadFacebookMp4Reel(regeneratedReel);
+      setGenerationMessage(`Facebook MP4 regenerated for ${vehicle.reg || vehicle.name || "vehicle"}.`);
+    } catch (error) {
+      setCreativeError(error.message || "Could not regenerate Facebook MP4.");
+      setGenerationMessage("");
     }
   }
 
@@ -1497,6 +1600,7 @@ async function handleClearTodayReels() {
             onFiltersChange={setLibraryFilters}
             creativeError={creativeError}
             onDownload={handleDownloadCreative}
+            onRegenerateFacebookMp4={handleRegenerateCreativeFacebookMp4}
             onDelete={handleDeleteCreative}
           />
         );
