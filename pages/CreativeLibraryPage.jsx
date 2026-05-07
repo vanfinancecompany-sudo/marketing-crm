@@ -8,8 +8,12 @@ export default function CreativeLibraryPage({
   creativeError,
   onDownload,
   onRegenerateFacebookMp4,
+  regeneratingCreativeId = "",
+  regenerationStatuses = {},
   onDelete,
 }) {
+  const isRegenerating = Boolean(regeneratingCreativeId);
+
   return (
     <div className="page-stack">
       <section className="panel">
@@ -32,28 +36,60 @@ export default function CreativeLibraryPage({
           <div className="empty-state">No creatives have been generated yet.</div>
         ) : (
           <div className="creative-grid">
-            {creatives.map((creative) => (
-              <CreativeCard
-                key={creative.id}
-                creative={creative}
-                actions={
-                  <>
-                    <button className="button button--ghost" onClick={() => onDownload(creative)}>
-                      Download Reel
-                    </button>
-                    <button className="button button--ghost" onClick={() => onRegenerateFacebookMp4(creative)}>
-                      Regenerate Facebook MP4
-                    </button>
-                    <button className="button button--danger" onClick={() => onDelete(creative.id)}>
-                      Delete
-                    </button>
-                  </>
-                }
-              />
-            ))}
+            {creatives.map((creative) => {
+              const status = regenerationStatuses[creative.id];
+              const isCurrent = regeneratingCreativeId === creative.id;
+
+              return (
+                <div className="creative-library-card-shell" key={creative.id}>
+                  {isCurrent ? (
+                    <div className="reel-conversion-overlay creative-regeneration-overlay">
+                      <span className="loading-spinner" aria-hidden="true" />
+                      <strong>Converting MP4...</strong>
+                      <span>{status?.state || "Preparing"}</span>
+                    </div>
+                  ) : null}
+                  <CreativeCard
+                    creative={creative}
+                    actions={
+                      <>
+                        <button className="button button--ghost" onClick={() => onDownload(creative)} disabled={isRegenerating}>
+                          Download Reel
+                        </button>
+                        <button
+                          className="button button--ghost"
+                          onClick={() => onRegenerateFacebookMp4(creative)}
+                          disabled={isRegenerating}
+                        >
+                          {isCurrent ? "Converting MP4... please wait" : "Regenerate Facebook MP4"}
+                        </button>
+                        <button className="button button--danger" onClick={() => onDelete(creative.id)} disabled={isRegenerating}>
+                          Delete
+                        </button>
+                        {status ? (
+                          <div className="creative-regeneration-status">
+                            <span className={`mp4-batch-status__state mp4-batch-status__state--${mp4StateClassName(status.state)}`}>
+                              {status.state}
+                            </span>
+                            {status.error ? <span className="mp4-batch-status__error">{status.error}</span> : null}
+                          </div>
+                        ) : null}
+                      </>
+                    }
+                  />
+                </div>
+              );
+            })}
           </div>
         )}
       </section>
     </div>
   );
+}
+
+function mp4StateClassName(state) {
+  return String(state || "queued")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }

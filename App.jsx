@@ -456,6 +456,8 @@ export default function App() {
   const [creatives, setCreatives] = useState([]);
   const [recentGeneratedIds, setRecentGeneratedIds] = useState([]);
   const [creativeError, setCreativeError] = useState("");
+  const [regeneratingCreativeId, setRegeneratingCreativeId] = useState("");
+  const [creativeRegenerationStatuses, setCreativeRegenerationStatuses] = useState({});
   const [generationMessage, setGenerationMessage] = useState("");
   const [stockFilters, setStockFilters] = useState(DEFAULT_STOCK_FILTERS);
   const [factoryFilters, setFactoryFilters] = useState(DEFAULT_STOCK_FILTERS);
@@ -1488,13 +1490,23 @@ async function handleClearTodayReels() {
   }
 
   async function handleRegenerateCreativeFacebookMp4(creative) {
+    if (regeneratingCreativeId) return;
+
     const vehicle = findCurrentStockVehicleForCreative(creative, vehicles);
 
     if (!vehicle) {
-      setCreativeError("Vehicle no longer in stock");
+      setCreativeRegenerationStatuses((current) => ({
+        ...current,
+        [creative.id]: { state: "Failed", error: "Vehicle no longer in stock" },
+      }));
       return;
     }
 
+    setRegeneratingCreativeId(creative.id);
+    setCreativeRegenerationStatuses((current) => ({
+      ...current,
+      [creative.id]: { state: "Preparing", error: "" },
+    }));
     setCreativeError("");
     setGenerationMessage(`Regenerating Facebook MP4 for ${vehicle.reg || vehicle.name || "vehicle"}...`);
 
@@ -1515,6 +1527,10 @@ async function handleClearTodayReels() {
         priceLine: defaultContent.priceLine,
         ctaLine: creative.cta || defaultContent.ctaLine,
       });
+      setCreativeRegenerationStatuses((current) => ({
+        ...current,
+        [creative.id]: { state: "Preparing", error: "" },
+      }));
       const videoAsset = await generateReelVideoAsset(reel);
       const regeneratedReel = {
         ...reel,
@@ -1533,11 +1549,48 @@ async function handleClearTodayReels() {
         mimeType: videoAsset.mimeType,
       }).catch(() => {});
 
-      await downloadFacebookMp4Reel(regeneratedReel);
+      await downloadFacebookMp4Reel(regeneratedReel, {
+        onPreparing: () => {
+          setCreativeRegenerationStatuses((current) => ({
+            ...current,
+            [creative.id]: { state: "Preparing", error: "" },
+          }));
+        },
+        onUploading: () => {
+          setCreativeRegenerationStatuses((current) => ({
+            ...current,
+            [creative.id]: { state: "Uploading reel", error: "" },
+          }));
+        },
+        onConverting: () => {
+          setCreativeRegenerationStatuses((current) => ({
+            ...current,
+            [creative.id]: { state: "Converting MP4", error: "" },
+          }));
+        },
+        onDownloading: () => {
+          setCreativeRegenerationStatuses((current) => ({
+            ...current,
+            [creative.id]: { state: "Downloading", error: "" },
+          }));
+        },
+      });
+      setCreativeRegenerationStatuses((current) => ({
+        ...current,
+        [creative.id]: { state: "Complete", error: "" },
+      }));
       setGenerationMessage(`Facebook MP4 regenerated for ${vehicle.reg || vehicle.name || "vehicle"}.`);
     } catch (error) {
-      setCreativeError(error.message || "Could not regenerate Facebook MP4.");
+      setCreativeRegenerationStatuses((current) => ({
+        ...current,
+        [creative.id]: {
+          state: "Failed",
+          error: error.message || "Could not regenerate Facebook MP4.",
+        },
+      }));
       setGenerationMessage("");
+    } finally {
+      setRegeneratingCreativeId("");
     }
   }
 
@@ -1601,6 +1654,8 @@ async function handleClearTodayReels() {
             creativeError={creativeError}
             onDownload={handleDownloadCreative}
             onRegenerateFacebookMp4={handleRegenerateCreativeFacebookMp4}
+            regeneratingCreativeId={regeneratingCreativeId}
+            regenerationStatuses={creativeRegenerationStatuses}
             onDelete={handleDeleteCreative}
           />
         );

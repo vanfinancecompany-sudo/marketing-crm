@@ -1361,6 +1361,26 @@ textarea {
   border: 1px solid #e2e8f0;
 }
 
+.creative-library-card-shell {
+  position: relative;
+}
+
+.creative-regeneration-overlay {
+  border-radius: 20px;
+}
+
+.creative-regeneration-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.creative-regeneration-status .mp4-batch-status__error {
+  width: 100%;
+}
+
 .reel-factory-output {
   overflow: hidden;
 }
