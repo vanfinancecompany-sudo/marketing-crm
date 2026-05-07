@@ -60,6 +60,20 @@ function parseDataUrl(value) {
   };
 }
 
+function getBinaryRequestBody(req) {
+  if (Buffer.isBuffer(req.body)) return req.body;
+
+  if (req.body instanceof Uint8Array) {
+    return Buffer.from(req.body);
+  }
+
+  if (typeof req.body === "string") {
+    return Buffer.from(req.body, "binary");
+  }
+
+  return null;
+}
+
 function runFfmpeg(args) {
   return new Promise((resolve, reject) => {
     if (!ffmpegPath) {
@@ -96,21 +110,28 @@ export default async function handler(req, res) {
     return;
   }
 
-  const body = parseRequestBody(req.body);
-  const parsed = parseDataUrl(body.videoDataUrl);
-  if (!parsed?.buffer?.length) {
+  const contentType = String(req.headers["content-type"] || "");
+  const isJsonRequest = contentType.includes("application/json");
+  const body = isJsonRequest ? parseRequestBody(req.body) : {};
+  const parsed = isJsonRequest ? parseDataUrl(body.videoDataUrl) : null;
+  const binaryBody = !isJsonRequest ? getBinaryRequestBody(req) : null;
+  const inputBuffer = parsed?.buffer?.length ? parsed.buffer : binaryBody;
+
+  if (!inputBuffer?.length) {
     sendJson(res, 400, { error: "Missing reel video data." });
     return;
   }
 
-  const inputExtension = parsed.mimeType.includes("mp4") ? "mp4" : "webm";
-  const outputName = `${safeBaseFilename(body.filename)}.mp4`;
+  const mimeType = parsed?.mimeType || contentType || "video/webm";
+  const requestedFilename = body.filename || req.headers["x-reel-filename"] || "facebook-reel.mp4";
+  const inputExtension = mimeType.includes("mp4") ? "mp4" : "webm";
+  const outputName = `${safeBaseFilename(requestedFilename)}.mp4`;
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "reel-mp4-"));
   const inputPath = path.join(workDir, `input.${inputExtension}`);
   const outputPath = path.join(workDir, outputName);
 
   try {
-    await fs.writeFile(inputPath, parsed.buffer);
+    await fs.writeFile(inputPath, inputBuffer);
 
     await runFfmpeg([
       "-y",
