@@ -7,6 +7,7 @@ import {
   reelTypes,
   rentReelHooks,
 } from "../data/mockData.js";
+import { downloadFacebookMp4Reel } from "../utils/facebookMp4Export.js";
 
 const TRACK_BASE_URL = "https://marketing-crm-six.vercel.app/track?src=reel";
 const DEFAULT_FINANCE_DESCRIPTION = `🚐 VAN FINANCE AVAILABLE NOW
@@ -539,6 +540,10 @@ export function TodayReelsSection({
   todayReels,
   onDownloadReel,
   onDownloadAll,
+  onDownloadAllFacebookMp4,
+  mp4Statuses = {},
+  mp4BatchRunning = false,
+  mp4ProgressMessage = "",
   onDeleteReel,
   onClearReels,
 }) {
@@ -550,6 +555,13 @@ export function TodayReelsSection({
           <p>Generated reel videos stay visible here for this session with preview and download controls.</p>
         </div>
         <div className="card-actions">
+          <button
+            className="button button--primary"
+            onClick={onDownloadAllFacebookMp4}
+            disabled={!todayReels.length || mp4BatchRunning}
+          >
+            Convert All to Facebook MP4
+          </button>
           <button className="button button--ghost" onClick={onDownloadAll} disabled={!todayReels.length}>
             Download All
           </button>
@@ -558,6 +570,26 @@ export function TodayReelsSection({
           </button>
         </div>
       </div>
+
+      {mp4ProgressMessage || Object.keys(mp4Statuses).length ? (
+        <div className="mp4-batch-status">
+          {mp4ProgressMessage ? <div className="mp4-batch-status__summary">{mp4ProgressMessage}</div> : null}
+          {todayReels.map((reel) => {
+            const status = mp4Statuses[reel.id];
+            if (!status) return null;
+
+            return (
+              <div className="mp4-batch-status__row" key={`mp4-status-${reel.id}`}>
+                <span className="mp4-batch-status__name">{reel.downloadName || reel.fileName || reel.title}</span>
+                <span className={`mp4-batch-status__state mp4-batch-status__state--${status.state.toLowerCase()}`}>
+                  {status.state}
+                </span>
+                {status.error ? <span className="mp4-batch-status__error">{status.error}</span> : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
 
       {todayReels.length === 0 ? (
         <div className="empty-state">No reels generated today.</div>
@@ -774,6 +806,9 @@ onChange={(event) => {
 export default function ReelFactoryPage(props) {
   const [selectedFinanceDescriptionIndex, setSelectedFinanceDescriptionIndex] = useState(0);
   const [selectedRentDescriptionIndex, setSelectedRentDescriptionIndex] = useState(0);
+  const [mp4BatchRunning, setMp4BatchRunning] = useState(false);
+  const [mp4Statuses, setMp4Statuses] = useState({});
+  const [mp4ProgressMessage, setMp4ProgressMessage] = useState("");
 
  const [financeDescriptions, setFinanceDescriptions] = useState(() => {
   const saved = localStorage.getItem("financeDescriptions");
@@ -847,6 +882,58 @@ async function handleDownloadWithDescription(reel) {
   props.onDownloadReel(reel);
 }
 
+async function handleDownloadAllFacebookMp4() {
+  const reels = [...(props.todayReels || [])];
+  if (!reels.length || mp4BatchRunning) return;
+
+  setMp4BatchRunning(true);
+  setCopyMessage("");
+  setMp4ProgressMessage(`Converting 0 of ${reels.length}`);
+  setMp4Statuses(
+    reels.reduce((statuses, reel) => {
+      statuses[reel.id] = { state: "Queued", error: "" };
+      return statuses;
+    }, {})
+  );
+
+  for (let index = 0; index < reels.length; index += 1) {
+    const reel = reels[index];
+    setMp4ProgressMessage(`Converting ${index + 1} of ${reels.length}`);
+    setMp4Statuses((current) => ({
+      ...current,
+      [reel.id]: { state: "Converting", error: "" },
+    }));
+
+    try {
+      await copyReelDescription(reel);
+      await downloadFacebookMp4Reel(reel, {
+        onDownloading: () => {
+          setMp4Statuses((current) => ({
+            ...current,
+            [reel.id]: { state: "Downloading", error: "" },
+          }));
+        },
+      });
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+      setMp4Statuses((current) => ({
+        ...current,
+        [reel.id]: { state: "Complete", error: "" },
+      }));
+    } catch (error) {
+      setMp4Statuses((current) => ({
+        ...current,
+        [reel.id]: {
+          state: "Failed",
+          error: error instanceof Error ? error.message : "Could not convert this reel.",
+        },
+      }));
+    }
+  }
+
+  setMp4ProgressMessage(`Converting ${reels.length} of ${reels.length}`);
+  setMp4BatchRunning(false);
+}
+
   return (
   <div className="page-stack">
     <ReelStudioHero />
@@ -874,7 +961,14 @@ async function handleDownloadWithDescription(reel) {
   onSelectRent={handleRentDescriptionSelect}
 />  
 
-    <TodayReelsSection {...props} onDownloadReel={handleDownloadWithDescription} />
+    <TodayReelsSection
+      {...props}
+      onDownloadReel={handleDownloadWithDescription}
+      onDownloadAllFacebookMp4={handleDownloadAllFacebookMp4}
+      mp4Statuses={mp4Statuses}
+      mp4BatchRunning={mp4BatchRunning}
+      mp4ProgressMessage={mp4ProgressMessage}
+    />
    </div>
 );
 }
