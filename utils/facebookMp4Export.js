@@ -37,8 +37,16 @@ async function getReelBlob(reel) {
 }
 
 export async function downloadFacebookMp4Reel(reel, options = {}) {
+  options.onPreparing?.();
   const sourceBlob = await getReelBlob(reel);
   const filename = safeDownloadName(reel?.downloadName || reel?.fileName || reel?.id);
+
+  options.onUploading?.();
+  let convertingShown = false;
+  const convertingTimer = window.setTimeout(() => {
+    convertingShown = true;
+    options.onConverting?.();
+  }, 800);
 
   const response = await fetch("/api/convert-reel-mp4", {
     method: "POST",
@@ -47,8 +55,9 @@ export async function downloadFacebookMp4Reel(reel, options = {}) {
       "X-Reel-Filename": filename,
     },
     body: sourceBlob,
-  });
+  }).finally(() => window.clearTimeout(convertingTimer));
 
+  if (!convertingShown) options.onConverting?.();
   if (!response.ok) {
     let message = "Could not convert reel to Facebook MP4.";
     try {
