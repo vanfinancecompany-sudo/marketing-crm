@@ -59,6 +59,13 @@ function createDraftReelId() {
   return `reel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function mp4StateClassName(state) {
+  return String(state || "queued")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function getDescriptionType({ filters, formValues, selectedVehicle, todayReels }) {
   if (formValues.reelType === "Finance") return "finance";
   if (formValues.reelType === "Rent2Buy") return "rent2buy";
@@ -560,16 +567,17 @@ export function TodayReelsSection({
             onClick={onDownloadAllFacebookMp4}
             disabled={!todayReels.length || mp4BatchRunning}
           >
-            Convert All to Facebook MP4
+            {mp4BatchRunning ? "Converting MP4... please wait" : "Convert All to Facebook MP4"}
           </button>
-          <button className="button button--ghost" onClick={onDownloadAll} disabled={!todayReels.length}>
+          <button className="button button--ghost" onClick={onDownloadAll} disabled={!todayReels.length || mp4BatchRunning}>
             Download All
           </button>
-          <button className="button button--danger" onClick={onClearReels} disabled={!todayReels.length}>
+          <button className="button button--danger" onClick={onClearReels} disabled={!todayReels.length || mp4BatchRunning}>
             Clear Today's Reels
           </button>
         </div>
       </div>
+      <p className="mp4-conversion-note">MP4 conversion may take 20-60 seconds per reel.</p>
 
       {mp4ProgressMessage || Object.keys(mp4Statuses).length ? (
         <div className="mp4-batch-status">
@@ -581,7 +589,7 @@ export function TodayReelsSection({
             return (
               <div className="mp4-batch-status__row" key={`mp4-status-${reel.id}`}>
                 <span className="mp4-batch-status__name">{reel.downloadName || reel.fileName || reel.title}</span>
-                <span className={`mp4-batch-status__state mp4-batch-status__state--${status.state.toLowerCase()}`}>
+                <span className={`mp4-batch-status__state mp4-batch-status__state--${mp4StateClassName(status.state)}`}>
                   {status.state}
                 </span>
                 {status.error ? <span className="mp4-batch-status__error">{status.error}</span> : null}
@@ -596,11 +604,26 @@ export function TodayReelsSection({
       ) : (
         <div className="today-reel-grid">
           {todayReels.map((reel) => (
+            (() => {
+              const mp4Status = mp4Statuses[reel.id];
+              const isCurrentConversion =
+                mp4BatchRunning &&
+                mp4Status &&
+                !["Queued", "Complete", "Failed"].includes(mp4Status.state);
+
+              return (
             <article
               className={`creative-card creative-card--${reel.pipeline === "rent2buy" ? "rent" : "finance"} today-reel-card today-reel-card--${reel.pipeline === "rent2buy" ? "rent" : "finance"}`}
               key={reel.id}
             >
               <div className="creative-preview today-reel-preview">
+                {isCurrentConversion ? (
+                  <div className="reel-conversion-overlay">
+                    <span className="loading-spinner" aria-hidden="true" />
+                    <strong>Converting MP4...</strong>
+                    <span>{mp4Status.state}</span>
+                  </div>
+                ) : null}
                 {reel.url ? (
                   <video
                     className="creative-preview__image today-reel-video"
@@ -668,15 +691,17 @@ export function TodayReelsSection({
                 <div className="creative-card__meta">File: {reel.downloadName || reel.fileName}</div>
                 <div className="creative-card__meta">Format: {reel.mimeType || "Video file"}</div>
                 <div className="card-actions">
-                  <button className="button button--primary" onClick={() => onDownloadReel(reel)}>
+                  <button className="button button--primary" onClick={() => onDownloadReel(reel)} disabled={mp4BatchRunning}>
                     Download Reel
                   </button>
-                  <button className="button button--danger" onClick={() => onDeleteReel(reel.id)}>
+                  <button className="button button--danger" onClick={() => onDeleteReel(reel.id)} disabled={mp4BatchRunning}>
                     Delete Reel
                   </button>
                 </div>
               </div>
             </article>
+              );
+            })()
           ))}
         </div>
       )}
@@ -898,16 +923,38 @@ async function handleDownloadAllFacebookMp4() {
 
   for (let index = 0; index < reels.length; index += 1) {
     const reel = reels[index];
-    setMp4ProgressMessage(`Converting ${index + 1} of ${reels.length}`);
+    setMp4ProgressMessage(`Preparing ${index + 1} of ${reels.length}`);
     setMp4Statuses((current) => ({
       ...current,
-      [reel.id]: { state: "Converting", error: "" },
+      [reel.id]: { state: "Preparing", error: "" },
     }));
 
     try {
       await copyReelDescription(reel);
       await downloadFacebookMp4Reel(reel, {
+        onPreparing: () => {
+          setMp4ProgressMessage(`Preparing ${index + 1} of ${reels.length}`);
+          setMp4Statuses((current) => ({
+            ...current,
+            [reel.id]: { state: "Preparing", error: "" },
+          }));
+        },
+        onUploading: () => {
+          setMp4ProgressMessage(`Uploading reel ${index + 1} of ${reels.length}`);
+          setMp4Statuses((current) => ({
+            ...current,
+            [reel.id]: { state: "Uploading reel", error: "" },
+          }));
+        },
+        onConverting: () => {
+          setMp4ProgressMessage(`Converting MP4 ${index + 1} of ${reels.length}`);
+          setMp4Statuses((current) => ({
+            ...current,
+            [reel.id]: { state: "Converting MP4", error: "" },
+          }));
+        },
         onDownloading: () => {
+          setMp4ProgressMessage(`Downloading ${index + 1} of ${reels.length}`);
           setMp4Statuses((current) => ({
             ...current,
             [reel.id]: { state: "Downloading", error: "" },

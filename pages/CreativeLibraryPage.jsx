@@ -7,6 +7,7 @@ export default function CreativeLibraryPage({
   onFiltersChange,
   creativeError,
   onDownload,
+  onRegenerateFacebookMp4,
   onDelete,
 }) {
   return (
@@ -39,6 +40,9 @@ export default function CreativeLibraryPage({
                   <>
                     <button className="button button--ghost" onClick={() => onDownload(creative)}>
                       Download Reel
+                    </button>
+                    <button className="button button--ghost" onClick={() => onRegenerateFacebookMp4(creative)}>
+                      Regenerate Facebook MP4
                     </button>
                     <button className="button button--danger" onClick={() => onDelete(creative.id)}>
                       Delete
