@@ -45,7 +45,7 @@ async function getReelBlob(reel) {
   return response.blob();
 }
 
-export async function downloadFacebookMp4Reel(reel) {
+export async function downloadFacebookMp4Reel(reel, options = {}) {
   const sourceBlob = await getReelBlob(reel);
   const filename = safeDownloadName(reel?.downloadName || reel?.fileName || reel?.id);
   const videoDataUrl = await blobToDataUrl(sourceBlob);
@@ -71,6 +71,7 @@ export async function downloadFacebookMp4Reel(reel) {
   }
 
   const mp4Blob = await response.blob();
+  options.onDownloading?.();
   triggerDownload(mp4Blob, filename);
 
   return {
