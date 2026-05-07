@@ -462,6 +462,17 @@ export function safeFilename(value) {
     .slice(0, 80);
 }
 
+export function cleanPublicReelLabel(value, pipeline) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  if (/\b(deal hook|access hook|finance\s*-\s*deal hook|rent2buy\s*-\s*deal hook|finance\s*-\s*access hook|rent2buy\s*-\s*access hook)\b/i.test(text)) {
+    return pipeline === "rent2buy" ? "Rent2Buy" : "Van Finance";
+  }
+
+  return text;
+}
+
 export function buildReelFilename(reel) {
   const pipeline = reel.pipeline === "rent2buy" ? "rent2buy" : "finance";
   const identifier = safeFilename(reel.registration || reel.title || reel.sourceLabel);
@@ -503,33 +514,37 @@ export function createReelRecord({
   ctaLine,
 }) {
   const resolvedPipeline = pipeline || vehicle?.pipeline || "vanFinance";
-  const title = vehicle ? vehicleTitle(vehicle) : sourceLabel || "Uploaded image";
+  const publicHook = cleanPublicReelLabel(hook, resolvedPipeline);
+  const publicTemplateName = cleanPublicReelLabel(templateName, resolvedPipeline);
+  const publicSourceLabel = cleanPublicReelLabel(sourceLabel, resolvedPipeline);
+  const publicSubtext = cleanPublicReelLabel(subtext, resolvedPipeline);
+  const title = vehicle ? vehicleTitle(vehicle) : publicSourceLabel || sourceLabel || "Uploaded image";
   const registration = vehicle ? vehicleRegistration(vehicle) : "";
   const domain = pipelineDomain(resolvedPipeline);
   const fileName = buildReelFilename({
     pipeline: resolvedPipeline,
     registration,
     title,
-    sourceLabel,
-    hook,
-    templateName,
+    sourceLabel: publicSourceLabel || sourceLabel,
+    hook: publicHook || hook,
+    templateName: publicTemplateName || templateName,
   });
 
   return {
     id: `reel-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     vehicleId: vehicle?.id || "",
     pipeline: resolvedPipeline,
-    headline: hook,
-    subtext,
+    headline: publicHook || hook,
+    subtext: publicSubtext || subtext,
     image: image || vehicle?.image || "",
     title,
     registration,
     description: vehicle?.description || vehicle?.spec || "",
-    hook,
-    templateName,
+    hook: publicHook || hook,
+    templateName: publicTemplateName || templateName,
     priceLine,
     ctaLine,
-    sourceLabel: sourceLabel || (vehicle ? "Live stock" : "Uploaded image"),
+    sourceLabel: publicSourceLabel || sourceLabel || (vehicle ? "Live stock" : "Uploaded image"),
     sourceType: sourceType || "stock",
     domain,
     musicOn,
@@ -1005,6 +1020,9 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
   const safeTop = Math.round(height * 0.2);
   const safeBottom = Math.round(height * 0.8);
   const safeCenterY = (safeTop + safeBottom) / 2;
+  const publicHeadline = cleanPublicReelLabel(reel.headline || reel.hook, reel.pipeline);
+  const publicSubtext = cleanPublicReelLabel(reel.subtext || reel.hook, reel.pipeline);
+  const publicTitle = cleanPublicReelLabel(reel.title, reel.pipeline);
 
   drawVideoBackground(ctx, width, height, reel.pipeline);
 
@@ -1013,7 +1031,7 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
     ctx.globalAlpha = popProgress;
     const hookY = safeCenterY - 185 - (1 - popProgress) * 18;
     let cursorY = hookY;
-    const hookHeight = drawCanvasTextBlock(ctx, String(reel.headline || reel.hook || "").toUpperCase(), {
+    const hookHeight = drawCanvasTextBlock(ctx, String(publicHeadline || "").toUpperCase(), {
       x: width / 2,
       y: cursorY,
       maxWidth: width - 140,
@@ -1024,7 +1042,7 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
       weight: 900,
     });
     cursorY += hookHeight + 22;
-    cursorY += drawCanvasTextBlock(ctx, reel.title || "", {
+    cursorY += drawCanvasTextBlock(ctx, publicTitle || "", {
       x: width / 2,
       y: cursorY,
       maxWidth: width - 170,
@@ -1080,7 +1098,7 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
     ctx.globalAlpha = textProgress;
     let cursorY = textPanelY + 44 + (1 - textProgress) * 22;
     if (reel.pipeline === "rent2buy") {
-  cursorY += drawCanvasTextBlock(ctx, reel.priceLine || reel.title || "", {
+  cursorY += drawCanvasTextBlock(ctx, reel.priceLine || publicTitle || "", {
     x: width / 2,
     y: cursorY,
     maxWidth: width - 180,
@@ -1091,7 +1109,7 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
     weight: 900,
   });
 } else {
-  cursorY += drawCanvasTextBlock(ctx, reel.priceLine || reel.title || "", {
+  cursorY += drawCanvasTextBlock(ctx, reel.priceLine || publicTitle || "", {
     x: width / 2,
     y: cursorY,
     maxWidth: width - 140,
@@ -1103,7 +1121,7 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
   });
 }
     cursorY += 26;
-    drawCanvasTextBlock(ctx, reel.title || "", {
+    drawCanvasTextBlock(ctx, publicTitle || "", {
       x: width / 2,
       y: cursorY,
       maxWidth: width - 180,
@@ -1123,7 +1141,7 @@ function drawMarketingReelFrame(ctx, canvas, image, logoImage, reel, elapsedSeco
   if (elapsedSeconds < 10) {
     const supportProgress = Math.min((elapsedSeconds - 8) / 0.45, 1);
     ctx.globalAlpha = supportProgress;
-    drawCanvasTextBlock(ctx, reel.subtext || reel.hook || "", {
+    drawCanvasTextBlock(ctx, publicSubtext || "", {
       x: width / 2,
       y: safeCenterY - 145 - (1 - supportProgress) * 18,
       maxWidth: width - 150,
@@ -1407,11 +1425,27 @@ async function buildReelPreviewBlob(reel, includeImage = true) {
   ctx.shadowColor = "rgba(2, 6, 23, 0.42)";
   ctx.shadowBlur = 26;
   ctx.font = "900 92px Arial";
-  drawWrappedText(ctx, reel.headline || reel.hook || "DAILY REEL", width / 2, 1060, 850, 96, 3);
+  drawWrappedText(
+    ctx,
+    cleanPublicReelLabel(reel.headline || reel.hook, reel.pipeline) || "DAILY REEL",
+    width / 2,
+    1060,
+    850,
+    96,
+    3
+  );
 
   ctx.font = "800 46px Arial";
   ctx.fillStyle = "rgba(255,255,255,0.92)";
-  drawWrappedText(ctx, reel.priceLine || reel.title || "", width / 2, 1345, 820, 56, 2);
+  drawWrappedText(
+    ctx,
+    reel.priceLine || cleanPublicReelLabel(reel.title, reel.pipeline) || "",
+    width / 2,
+    1345,
+    820,
+    56,
+    2
+  );
 
   ctx.font = "800 42px Arial";
   ctx.fillStyle = "#ffffff";

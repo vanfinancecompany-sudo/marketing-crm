@@ -71,6 +71,7 @@ import {
   buildFinanceReelContent,
   buildPostingCaption,
   buildRentReelContent,
+  cleanPublicReelLabel,
   createCreativeFromReel,
   createReelRecord,
   createCreativeRecord,
@@ -1517,16 +1518,17 @@ async function handleClearTodayReels() {
       const pipeline = vehicle.pipeline || creative.vehicle?.pipeline || "vanFinance";
       const defaultContent =
         pipeline === "rent2buy" ? buildRentReelContent(vehicle) : buildFinanceReelContent(vehicle);
+      const publicPipelineLabel = pipeline === "rent2buy" ? "Rent2Buy" : "Van Finance";
       const reel = createReelRecord({
         vehicle,
         image: vehicle.image || vehicle.picture || creative.vehicle?.image || "",
         pipeline,
-        hook: creative.hookStyle || defaultContent.templateName,
-        templateName: creative.templateType || defaultContent.templateName,
+        hook: cleanPublicReelLabel(creative.hookStyle, pipeline) || publicPipelineLabel,
+        templateName: cleanPublicReelLabel(creative.templateType, pipeline) || publicPipelineLabel,
         musicOn: true,
         sourceType: "stock",
-        sourceLabel: defaultContent.sourceLabel,
-        subtext: creative.preview?.subline || defaultContent.subtext,
+        sourceLabel: publicPipelineLabel,
+        subtext: cleanPublicReelLabel(creative.preview?.subline, pipeline) || defaultContent.subtext,
         priceLine: defaultContent.priceLine,
         ctaLine: creative.cta || defaultContent.ctaLine,
       });
