@@ -661,9 +661,12 @@ useEffect(() => {
   }, [vehicles, factoryFilters]);
 
   const filteredLibraryCreatives = useMemo(() => {
-    return filterCreatives(creatives, libraryFilters).filter((creative) =>
-      Boolean(findCurrentStockVehicleForCreative(creative, vehicles))
-    );
+    return filterCreatives(creatives, libraryFilters)
+      .map((creative) => ({
+        ...creative,
+        currentStockVehicle: findCurrentStockVehicleForCreative(creative, vehicles),
+      }))
+      .filter((creative) => Boolean(creative.currentStockVehicle));
   }, [creatives, libraryFilters, vehicles]);
 
   const generatedCreatives = useMemo(() => {

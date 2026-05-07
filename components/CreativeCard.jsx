@@ -4,9 +4,23 @@ export default function CreativeCard({
   creative,
   actions,
 }) {
-  const pipelineLabel = creative.vehicle.pipeline === "rent2buy" ? "Rent2Buy" : "Van Finance";
-  const registration = creative.vehicle.reg || "No reg";
-  const pipelineClass = creative.vehicle.pipeline === "rent2buy" ? "rent" : "finance";
+  const vehicle = creative.currentStockVehicle || creative.vehicle || {};
+  const pipelineLabel = vehicle.pipeline === "rent2buy" ? "Rent2Buy" : "Van Finance";
+  const registration = vehicle.reg || vehicle.registration || creative.vehicle?.reg || "No reg";
+  const pipelineClass = vehicle.pipeline === "rent2buy" ? "rent" : "finance";
+  const previewImage =
+    creative.posterUrl ||
+    vehicle.image ||
+    vehicle.imageUrl ||
+    vehicle.photo ||
+    vehicle.picture ||
+    creative.vehicle?.image ||
+    creative.image ||
+    "";
+  const cleanTemplateLabel = pipelineLabel;
+  const headline = cleanPreviewText(creative.preview?.headline, cleanTemplateLabel);
+  const subline = cleanPreviewText(creative.preview?.subline, "");
+  const vehicleName = vehicle.name || vehicle.title || creative.vehicle?.name || "Vehicle";
 
   return (
     <article className={`creative-card creative-card--${pipelineClass}`}>
@@ -14,18 +28,18 @@ export default function CreativeCard({
         {creative.mediaUrl ? (
           <video
             src={creative.mediaUrl}
-            poster={creative.posterUrl || creative.vehicle.image}
+            poster={previewImage}
             className="creative-preview__image"
             controls
             playsInline
           />
-        ) : creative.vehicle.image ? (
-          <img src={creative.vehicle.image} alt={creative.vehicle.name} className="creative-preview__image" />
+        ) : previewImage ? (
+          <img src={previewImage} alt={vehicleName} className="creative-preview__image" />
         ) : null}
         <div className="creative-preview__overlay">
-          <div className="creative-preview__chip">{creative.templateType}</div>
-          <div className="creative-preview__headline">{creative.preview.headline}</div>
-          <div className="creative-preview__subline">{creative.preview.subline}</div>
+          <div className="creative-preview__chip">{cleanTemplateLabel}</div>
+          <div className="creative-preview__headline">{headline}</div>
+          <div className="creative-preview__subline">{subline}</div>
         </div>
       </div>
 
@@ -37,7 +51,7 @@ export default function CreativeCard({
           <span className="tag">{formatDateShort(creative.createdAt)}</span>
         </div>
 
-        <h3>{creative.vehicle.name}</h3>
+        <h3>{vehicleName}</h3>
         <div className="creative-card__meta-grid">
           <span>Hook: {creative.hookStyle}</span>
           <span>CTA: {creative.cta}</span>
@@ -50,4 +64,12 @@ export default function CreativeCard({
       </div>
     </article>
   );
+}
+
+function cleanPreviewText(value, fallback) {
+  const text = String(value || "").trim();
+  if (!text || /\b(deal hook|finance - deal hook|rent2buy - deal hook)\b/i.test(text)) {
+    return fallback;
+  }
+  return text;
 }
