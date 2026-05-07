@@ -28,6 +28,28 @@ function safeBaseFilename(value) {
   return name || "facebook-reel";
 }
 
+function parseRequestBody(body) {
+  if (!body) return {};
+
+  if (typeof body === "string") {
+    try {
+      return JSON.parse(body);
+    } catch {
+      return {};
+    }
+  }
+
+  if (Buffer.isBuffer(body)) {
+    try {
+      return JSON.parse(body.toString("utf8"));
+    } catch {
+      return {};
+    }
+  }
+
+  return body;
+}
+
 function parseDataUrl(value) {
   const match = String(value || "").match(/^data:([^;]+);base64,(.+)$/);
   if (!match) return null;
@@ -74,14 +96,15 @@ export default async function handler(req, res) {
     return;
   }
 
-  const parsed = parseDataUrl(req.body?.videoDataUrl);
+  const body = parseRequestBody(req.body);
+  const parsed = parseDataUrl(body.videoDataUrl);
   if (!parsed?.buffer?.length) {
     sendJson(res, 400, { error: "Missing reel video data." });
     return;
   }
 
   const inputExtension = parsed.mimeType.includes("mp4") ? "mp4" : "webm";
-  const outputName = `${safeBaseFilename(req.body?.filename)}.mp4`;
+  const outputName = `${safeBaseFilename(body.filename)}.mp4`;
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "reel-mp4-"));
   const inputPath = path.join(workDir, `input.${inputExtension}`);
   const outputPath = path.join(workDir, outputName);
