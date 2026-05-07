@@ -71,6 +71,7 @@ import {
   buildFinanceReelContent,
   buildPostingCaption,
   buildRentReelContent,
+  cleanPublicReelLabel,
   createCreativeFromReel,
   createReelRecord,
   createCreativeRecord,
@@ -456,6 +457,8 @@ export default function App() {
   const [creatives, setCreatives] = useState([]);
   const [recentGeneratedIds, setRecentGeneratedIds] = useState([]);
   const [creativeError, setCreativeError] = useState("");
+  const [regeneratingCreativeId, setRegeneratingCreativeId] = useState("");
+  const [creativeRegenerationStatuses, setCreativeRegenerationStatuses] = useState({});
   const [generationMessage, setGenerationMessage] = useState("");
   const [stockFilters, setStockFilters] = useState(DEFAULT_STOCK_FILTERS);
   const [factoryFilters, setFactoryFilters] = useState(DEFAULT_STOCK_FILTERS);
@@ -659,9 +662,12 @@ useEffect(() => {
   }, [vehicles, factoryFilters]);
 
   const filteredLibraryCreatives = useMemo(() => {
-    return filterCreatives(creatives, libraryFilters).filter((creative) =>
-      Boolean(findCurrentStockVehicleForCreative(creative, vehicles))
-    );
+    return filterCreatives(creatives, libraryFilters)
+      .map((creative) => ({
+        ...creative,
+        currentStockVehicle: findCurrentStockVehicleForCreative(creative, vehicles),
+      }))
+      .filter((creative) => Boolean(creative.currentStockVehicle));
   }, [creatives, libraryFilters, vehicles]);
 
   const generatedCreatives = useMemo(() => {
@@ -1488,13 +1494,23 @@ async function handleClearTodayReels() {
   }
 
   async function handleRegenerateCreativeFacebookMp4(creative) {
+    if (regeneratingCreativeId) return;
+
     const vehicle = findCurrentStockVehicleForCreative(creative, vehicles);
 
     if (!vehicle) {
-      setCreativeError("Vehicle no longer in stock");
+      setCreativeRegenerationStatuses((current) => ({
+        ...current,
+        [creative.id]: { state: "Failed", error: "Vehicle no longer in stock" },
+      }));
       return;
     }
 
+    setRegeneratingCreativeId(creative.id);
+    setCreativeRegenerationStatuses((current) => ({
+      ...current,
+      [creative.id]: { state: "Preparing", error: "" },
+    }));
     setCreativeError("");
     setGenerationMessage(`Regenerating Facebook MP4 for ${vehicle.reg || vehicle.name || "vehicle"}...`);
 
@@ -1502,19 +1518,24 @@ async function handleClearTodayReels() {
       const pipeline = vehicle.pipeline || creative.vehicle?.pipeline || "vanFinance";
       const defaultContent =
         pipeline === "rent2buy" ? buildRentReelContent(vehicle) : buildFinanceReelContent(vehicle);
+      const publicPipelineLabel = pipeline === "rent2buy" ? "Rent2Buy" : "Van Finance";
       const reel = createReelRecord({
         vehicle,
         image: vehicle.image || vehicle.picture || creative.vehicle?.image || "",
         pipeline,
-        hook: creative.hookStyle || defaultContent.templateName,
-        templateName: creative.templateType || defaultContent.templateName,
+        hook: cleanPublicReelLabel(creative.hookStyle, pipeline) || publicPipelineLabel,
+        templateName: cleanPublicReelLabel(creative.templateType, pipeline) || publicPipelineLabel,
         musicOn: true,
         sourceType: "stock",
-        sourceLabel: defaultContent.sourceLabel,
-        subtext: creative.preview?.subline || defaultContent.subtext,
+        sourceLabel: publicPipelineLabel,
+        subtext: cleanPublicReelLabel(creative.preview?.subline, pipeline) || defaultContent.subtext,
         priceLine: defaultContent.priceLine,
         ctaLine: creative.cta || defaultContent.ctaLine,
       });
+      setCreativeRegenerationStatuses((current) => ({
+        ...current,
+        [creative.id]: { state: "Preparing", error: "" },
+      }));
       const videoAsset = await generateReelVideoAsset(reel);
       const regeneratedReel = {
         ...reel,
@@ -1533,11 +1554,48 @@ async function handleClearTodayReels() {
         mimeType: videoAsset.mimeType,
       }).catch(() => {});
 
-      await downloadFacebookMp4Reel(regeneratedReel);
+      await downloadFacebookMp4Reel(regeneratedReel, {
+        onPreparing: () => {
+          setCreativeRegenerationStatuses((current) => ({
+            ...current,
+            [creative.id]: { state: "Preparing", error: "" },
+          }));
+        },
+        onUploading: () => {
+          setCreativeRegenerationStatuses((current) => ({
+            ...current,
+            [creative.id]: { state: "Uploading reel", error: "" },
+          }));
+        },
+        onConverting: () => {
+          setCreativeRegenerationStatuses((current) => ({
+            ...current,
+            [creative.id]: { state: "Converting MP4", error: "" },
+          }));
+        },
+        onDownloading: () => {
+          setCreativeRegenerationStatuses((current) => ({
+            ...current,
+            [creative.id]: { state: "Downloading", error: "" },
+          }));
+        },
+      });
+      setCreativeRegenerationStatuses((current) => ({
+        ...current,
+        [creative.id]: { state: "Complete", error: "" },
+      }));
       setGenerationMessage(`Facebook MP4 regenerated for ${vehicle.reg || vehicle.name || "vehicle"}.`);
     } catch (error) {
-      setCreativeError(error.message || "Could not regenerate Facebook MP4.");
+      setCreativeRegenerationStatuses((current) => ({
+        ...current,
+        [creative.id]: {
+          state: "Failed",
+          error: error.message || "Could not regenerate Facebook MP4.",
+        },
+      }));
       setGenerationMessage("");
+    } finally {
+      setRegeneratingCreativeId("");
     }
   }
 
@@ -1601,6 +1659,8 @@ async function handleClearTodayReels() {
             creativeError={creativeError}
             onDownload={handleDownloadCreative}
             onRegenerateFacebookMp4={handleRegenerateCreativeFacebookMp4}
+            regeneratingCreativeId={regeneratingCreativeId}
+            regenerationStatuses={creativeRegenerationStatuses}
             onDelete={handleDeleteCreative}
           />
         );
