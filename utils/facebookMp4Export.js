@@ -8,15 +8,6 @@ function safeDownloadName(value) {
   return `${base || "facebook-reel"}.mp4`;
 }
 
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error || new Error("Could not read reel video."));
-    reader.readAsDataURL(blob);
-  });
-}
-
 function triggerDownload(blob, filename) {
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -48,17 +39,14 @@ async function getReelBlob(reel) {
 export async function downloadFacebookMp4Reel(reel, options = {}) {
   const sourceBlob = await getReelBlob(reel);
   const filename = safeDownloadName(reel?.downloadName || reel?.fileName || reel?.id);
-  const videoDataUrl = await blobToDataUrl(sourceBlob);
 
   const response = await fetch("/api/convert-reel-mp4", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
+      "Content-Type": sourceBlob.type || "video/webm",
+      "X-Reel-Filename": filename,
     },
-    body: JSON.stringify({
-      filename,
-      videoDataUrl,
-    }),
+    body: sourceBlob,
   });
 
   if (!response.ok) {
