@@ -548,6 +548,7 @@ export function TodayReelsSection({
   onDownloadReel,
   onDownloadAll,
   onDownloadAllFacebookMp4,
+  onDownloadSingleFacebookMp4,
   mp4Statuses = {},
   mp4BatchRunning = false,
   mp4ProgressMessage = "",
@@ -563,7 +564,7 @@ export function TodayReelsSection({
         </div>
         <div className="card-actions">
           <button
-            className="button button--primary"
+            className="button button--ghost"
             onClick={onDownloadAllFacebookMp4}
             disabled={!todayReels.length || mp4BatchRunning}
           >
@@ -577,11 +578,13 @@ export function TodayReelsSection({
           </button>
         </div>
       </div>
-      <p className="mp4-conversion-note">MP4 conversion may take 20-60 seconds per reel.</p>
+      <p className="mp4-conversion-note">
+        Use the per-reel MP4 button when posting so the correct caption stays copied. Batch conversion is a secondary tool.
+      </p>
 
-      {mp4ProgressMessage || Object.keys(mp4Statuses).length ? (
+      {mp4ProgressMessage ? (
         <div className="mp4-batch-status">
-          {mp4ProgressMessage ? <div className="mp4-batch-status__summary">{mp4ProgressMessage}</div> : null}
+          <div className="mp4-batch-status__summary">{mp4ProgressMessage}</div>
           {todayReels.map((reel) => {
             const status = mp4Statuses[reel.id];
             if (!status) return null;
@@ -607,7 +610,6 @@ export function TodayReelsSection({
             (() => {
               const mp4Status = mp4Statuses[reel.id];
               const isCurrentConversion =
-                mp4BatchRunning &&
                 mp4Status &&
                 !["Queued", "Complete", "Failed"].includes(mp4Status.state);
 
@@ -690,11 +692,26 @@ export function TodayReelsSection({
                 <div className="creative-card__meta">Domain: {reel.domain}</div>
                 <div className="creative-card__meta">File: {reel.downloadName || reel.fileName}</div>
                 <div className="creative-card__meta">Format: {reel.mimeType || "Video file"}</div>
+                {mp4Status ? (
+                  <div className="mp4-batch-status__row">
+                    <span className={`mp4-batch-status__state mp4-batch-status__state--${mp4StateClassName(mp4Status.state)}`}>
+                      {mp4Status.state}
+                    </span>
+                    {mp4Status.error ? <span className="mp4-batch-status__error">{mp4Status.error}</span> : null}
+                  </div>
+                ) : null}
                 <div className="card-actions">
-                  <button className="button button--primary" onClick={() => onDownloadReel(reel)} disabled={mp4BatchRunning}>
-                    Download Reel
+                  <button
+                    className="button button--primary"
+                    onClick={() => onDownloadSingleFacebookMp4(reel)}
+                    disabled={mp4BatchRunning || isCurrentConversion}
+                  >
+                    {isCurrentConversion ? "Converting MP4..." : "Download MP4 + Copy Text"}
                   </button>
-                  <button className="button button--danger" onClick={() => onDeleteReel(reel.id)} disabled={mp4BatchRunning}>
+                  <button className="button button--ghost" onClick={() => onDownloadReel(reel)} disabled={mp4BatchRunning || isCurrentConversion}>
+                    Download WebM Reel
+                  </button>
+                  <button className="button button--danger" onClick={() => onDeleteReel(reel.id)} disabled={mp4BatchRunning || isCurrentConversion}>
                     Delete Reel
                   </button>
                 </div>
@@ -907,6 +924,62 @@ async function handleDownloadWithDescription(reel) {
   props.onDownloadReel(reel);
 }
 
+async function handleDownloadSingleFacebookMp4(reel) {
+  if (!reel?.id || mp4BatchRunning) return;
+
+  setCopyMessage("");
+  setMp4ProgressMessage("");
+  setMp4Statuses((current) => ({
+    ...current,
+    [reel.id]: { state: "Preparing", error: "" },
+  }));
+
+  try {
+    await copyReelDescription(reel);
+
+    await downloadFacebookMp4Reel(reel, {
+      onPreparing: () => {
+        setMp4Statuses((current) => ({
+          ...current,
+          [reel.id]: { state: "Preparing", error: "" },
+        }));
+      },
+      onUploading: () => {
+        setMp4Statuses((current) => ({
+          ...current,
+          [reel.id]: { state: "Uploading reel", error: "" },
+        }));
+      },
+      onConverting: () => {
+        setMp4Statuses((current) => ({
+          ...current,
+          [reel.id]: { state: "Converting MP4", error: "" },
+        }));
+      },
+      onDownloading: () => {
+        setMp4Statuses((current) => ({
+          ...current,
+          [reel.id]: { state: "Downloading", error: "" },
+        }));
+      },
+    });
+
+    setMp4Statuses((current) => ({
+      ...current,
+      [reel.id]: { state: "Complete", error: "" },
+    }));
+    setCopyMessage("MP4 downloaded + advert text copied.");
+  } catch (error) {
+    setMp4Statuses((current) => ({
+      ...current,
+      [reel.id]: {
+        state: "Failed",
+        error: error instanceof Error ? error.message : "Could not convert this reel.",
+      },
+    }));
+  }
+}
+
 async function handleDownloadAllFacebookMp4() {
   const reels = [...(props.todayReels || [])];
   if (!reels.length || mp4BatchRunning) return;
@@ -1012,6 +1085,7 @@ async function handleDownloadAllFacebookMp4() {
       {...props}
       onDownloadReel={handleDownloadWithDescription}
       onDownloadAllFacebookMp4={handleDownloadAllFacebookMp4}
+      onDownloadSingleFacebookMp4={handleDownloadSingleFacebookMp4}
       mp4Statuses={mp4Statuses}
       mp4BatchRunning={mp4BatchRunning}
       mp4ProgressMessage={mp4ProgressMessage}
