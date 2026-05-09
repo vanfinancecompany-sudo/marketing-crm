@@ -276,7 +276,22 @@ function loadRecentRandomReelVehicleIds() {
 
   try {
     const saved = JSON.parse(localStorage.getItem(RANDOM_REEL_HISTORY_STORAGE_KEY) || "[]");
-    return Array.isArray(saved) ? saved.filter(Boolean) : [];
+    if (!Array.isArray(saved)) return [];
+
+    return saved
+      .flatMap((entry) => {
+        if (entry && typeof entry === "object") {
+          return [
+            entry.registration,
+            entry.id,
+            ...(Array.isArray(entry.keys) ? entry.keys : []),
+          ];
+        }
+
+        return [entry];
+      })
+      .map((key) => String(key || "").trim())
+      .filter(Boolean);
   } catch {
     return [];
   }
@@ -285,7 +300,16 @@ function loadRecentRandomReelVehicleIds() {
 function saveRecentRandomReelVehicleIds(ids) {
   if (typeof window === "undefined") return;
 
-  const normalized = ids.map((id) => String(id || "")).filter(Boolean).slice(0, MAX_RANDOM_REEL_HISTORY);
+  const seen = new Set();
+  const normalized = ids
+    .map((id) => String(id || "").trim())
+    .filter(Boolean)
+    .filter((id) => {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    })
+    .slice(0, MAX_RANDOM_REEL_HISTORY);
   localStorage.setItem(RANDOM_REEL_HISTORY_STORAGE_KEY, JSON.stringify(normalized));
 }
 
@@ -301,27 +325,32 @@ function shuffleItems(items) {
 }
 
 function getRandomPoolItemKey(item) {
-  if (item.kind === "vehicle") return `vehicle:${item.vehicle.id}`;
+  if (item.kind === "vehicle") {
+    const { registration, id } = getVehicleCooldownKeys(item.vehicle);
+    return `vehicle:${registration || id}`;
+  }
   if (item.kind === "upload") return `upload:${item.image.id}`;
   return JSON.stringify(item);
 }
 
+function isRecentRandomPoolVehicle(item, recentIds) {
+  return item.kind === "vehicle" && getVehicleCooldownKeys(item.vehicle).keys.some((key) => recentIds.has(key));
+}
+
 function rankRandomPool(pool, recentVehicleIds = []) {
-  const recentIds = new Set(recentVehicleIds);
+  const recentIds = new Set(recentVehicleIds.map((id) => String(id || "").trim()).filter(Boolean));
+  const fresh = [];
+  const recent = [];
 
-  // 🔥 HARD EXCLUDE recent vehicles
-  const fresh = pool.filter(
-    (item) =>
-      item.kind !== "vehicle" || !recentIds.has(item.vehicle.id)
-  );
-
-  // if enough fresh items → ONLY use them
-  if (fresh.length >= 5) {
-    return shuffleItems(fresh);
+  for (const item of pool) {
+    if (isRecentRandomPoolVehicle(item, recentIds)) {
+      recent.push(item);
+    } else {
+      fresh.push(item);
+    }
   }
 
-  // fallback: allow all (prevents empty pool issue)
-  return shuffleItems(pool);
+  return [...shuffleItems(fresh), ...shuffleItems(recent)];
 }
 
 const VIEW_PATHS = {
@@ -372,28 +401,48 @@ function normalizeRegistration(value) {
   return String(value || "")
     .trim()
     .toUpperCase()
-    .replace(/\s+/g, "");
+    .replace(/[^A-Z0-9]/g, "");
 }
 
 function reelTypeForPipeline(pipeline) {
   return pipeline === "rent2buy" ? "rent2buy" : "finance";
 }
 
-function getReelVehicleKey(vehicleOrReel) {
-  const id = vehicleOrReel?.id || vehicleOrReel?.vehicleId;
-  if (id) return String(id);
+function getVehicleCooldownKeys(vehicle) {
+  const registration = normalizeRegistration(
+    vehicle?.reg || vehicle?.registration || vehicle?.title || vehicle?.name,
+  );
+  const id = String(vehicle?.id || "").trim();
 
-  const registration = normalizeRegistration(vehicleOrReel?.reg || vehicleOrReel?.registration);
+  return {
+    registration,
+    id,
+    keys: [registration, id].filter(Boolean),
+  };
+}
+
+function getReelVehicleKey(vehicleOrReel) {
+  const registration = normalizeRegistration(
+    vehicleOrReel?.reg ||
+      vehicleOrReel?.registration ||
+      vehicleOrReel?.title ||
+      vehicleOrReel?.name,
+  );
   if (registration) return registration;
+
+  const id = vehicleOrReel?.id || vehicleOrReel?.vehicleId;
+  if (id) return String(id).trim();
 
   return String(vehicleOrReel?.name || vehicleOrReel?.title || "").trim().toLowerCase();
 }
 
 function getReelVehicleUsageKeys(vehicleOrReel) {
-  return [
-    getReelVehicleKey(vehicleOrReel),
-    normalizeRegistration(vehicleOrReel?.reg || vehicleOrReel?.registration),
-  ].filter(Boolean);
+  return getVehicleCooldownKeys({
+    id: vehicleOrReel?.id || vehicleOrReel?.vehicleId,
+    reg: vehicleOrReel?.reg || vehicleOrReel?.registration,
+    title: vehicleOrReel?.title,
+    name: vehicleOrReel?.name,
+  }).keys;
 }
 
 function buildRecentUsageLookup(rows) {
@@ -418,6 +467,18 @@ function isRecentlyUsedReelVehicle(item, recentUsageLookup) {
   return getReelVehicleUsageKeys(item.vehicle).some((key) =>
     recentUsageLookup[reelType]?.has(key),
   );
+}
+
+function recentUsageKeysFromRows(rows) {
+  return rows.flatMap((row) => [
+    normalizeRegistration(row.registration),
+    String(row.vehicle_key || "").trim(),
+  ]).filter(Boolean);
+}
+
+function appendCooldownWarning(current, next) {
+  if (!next) return current;
+  return current ? `${current} ${next}` : next;
 }
 
 function reelVehicleUsagePayloadFromReel(reel) {
@@ -966,7 +1027,7 @@ const vehiclePool = visibleFilteredVehicles.filter((vehicle) => {
     ];
   }
 
-  function pickRandomReelPoolItems(pool, quantity) {
+  function pickRandomReelPoolItems(pool, quantity, recentVehicleIds = recentRandomReelVehicleIds) {
     const selectedMode = reelFactorySelectionMode === "stock";
     if (selectedMode || pool.length <= 1) {
       return Array.from({ length: quantity }, (_, index) => pool[index % pool.length]);
@@ -975,7 +1036,7 @@ const vehiclePool = visibleFilteredVehicles.filter((vehicle) => {
     const uniquePool = [];
     const seenKeys = new Set();
 
-    rankRandomPool(pool, recentRandomReelVehicleIds).forEach((item) => {
+    rankRandomPool(pool, recentVehicleIds).forEach((item) => {
       const key = getRandomPoolItemKey(item);
       if (seenKeys.has(key)) return;
       seenKeys.add(key);
@@ -987,7 +1048,7 @@ const vehiclePool = visibleFilteredVehicles.filter((vehicle) => {
     }
 
     const selected = [];
-    let batchRecentIds = [...recentRandomReelVehicleIds];
+    let batchRecentIds = [...recentVehicleIds];
 
     while (selected.length < quantity) {
       const round = rankRandomPool(uniquePool, batchRecentIds);
@@ -997,7 +1058,7 @@ const vehiclePool = visibleFilteredVehicles.filter((vehicle) => {
 
       const roundVehicleIds = nextItems
         .filter((item) => item.kind === "vehicle")
-        .map((item) => item.vehicle.id);
+        .flatMap((item) => getVehicleCooldownKeys(item.vehicle).keys);
 
       batchRecentIds = [...roundVehicleIds.reverse(), ...batchRecentIds].slice(0, MAX_RANDOM_REEL_HISTORY);
     }
@@ -1030,6 +1091,7 @@ const vehiclePool = visibleFilteredVehicles.filter((vehicle) => {
 
     let pool = basePool;
     let cooldownWarning = "";
+    let cooldownRecentVehicleIds = [...recentRandomReelVehicleIds];
 
     if (!reelFactoryForm.ignoreVehicleCooldown) {
       const reelTypes = [
@@ -1044,32 +1106,26 @@ const vehiclePool = visibleFilteredVehicles.filter((vehicle) => {
         try {
           const { rows, setupMissing } = await fetchRecentReelVehicleUsage(reelTypes);
           if (setupMissing) {
-            cooldownWarning =
-              `Vehicle cooldown tracking table is not set up yet. Run the reel_vehicle_usage SQL from README.md to enable the ${REEL_VEHICLE_COOLDOWN_DAYS}-day cooldown.`;
+            cooldownWarning = appendCooldownWarning(
+              cooldownWarning,
+              `Vehicle cooldown tracking table is not set up yet. Local browser history is active, but the full ${REEL_VEHICLE_COOLDOWN_DAYS}-day cooldown is not fully active until reel_vehicle_usage is set up.`,
+            );
           } else {
             const recentUsageLookup = buildRecentUsageLookup(rows);
-            const freshPool = basePool.filter(
-              (item) => !isRecentlyUsedReelVehicle(item, recentUsageLookup),
-            );
-            const freshVehicles = freshPool.filter((item) => item.kind === "vehicle").length;
-            const recentVehicles = basePool.filter((item) =>
-              isRecentlyUsedReelVehicle(item, recentUsageLookup),
-            ).length;
+            const supabaseRecentKeys = recentUsageKeysFromRows(rows);
+            cooldownRecentVehicleIds = [
+              ...new Set([...cooldownRecentVehicleIds, ...supabaseRecentKeys]),
+            ];
 
-            if (freshPool.length > 0 && freshPool.length >= quantity) {
-              pool = freshPool;
-            } else if (freshPool.length > 0 && recentVehicles > 0) {
-              pool = basePool;
-              cooldownWarning = `Only ${freshVehicles} fresh vehicle${freshVehicles === 1 ? "" : "s"} available. Recently used vehicles may be reused.`;
-            } else if (freshPool.length > 0) {
-              pool = freshPool;
-            } else if (recentVehicles > 0) {
-              pool = basePool;
-              cooldownWarning = "No fresh vehicles available. Recently used vehicles may be reused.";
+            if (basePool.some((item) => isRecentlyUsedReelVehicle(item, recentUsageLookup))) {
+              pool = rankRandomPool(basePool, cooldownRecentVehicleIds);
             }
           }
         } catch (error) {
-          cooldownWarning = `Vehicle cooldown check skipped: ${error.message || "could not load recent usage"}.`;
+          cooldownWarning = appendCooldownWarning(
+            cooldownWarning,
+            `Vehicle cooldown check skipped: ${error.message || "could not load recent usage"}. Local browser history will still be used.`,
+          );
         }
       }
     }
@@ -1079,7 +1135,19 @@ const vehiclePool = visibleFilteredVehicles.filter((vehicle) => {
       rent2buy: 0,
     };
 
-    const selectedPoolItems = pickRandomReelPoolItems(pool, quantity);
+    const selectedPoolItems = pickRandomReelPoolItems(pool, quantity, cooldownRecentVehicleIds);
+    if (!reelFactoryForm.ignoreVehicleCooldown) {
+      const recentIds = new Set(cooldownRecentVehicleIds);
+      const freshVehicleCount = basePool.filter((item) => item.kind === "vehicle" && !isRecentRandomPoolVehicle(item, recentIds)).length;
+      const repeatVehicleCount = selectedPoolItems.filter((item) => isRecentRandomPoolVehicle(item, recentIds)).length;
+
+      if (repeatVehicleCount > 0) {
+        cooldownWarning = appendCooldownWarning(
+          cooldownWarning,
+          `Only ${freshVehicleCount} fresh van${freshVehicleCount === 1 ? "" : "s"} available. Added ${repeatVehicleCount} cooldown repeat${repeatVehicleCount === 1 ? "" : "s"} to reach requested quantity.`,
+        );
+      }
+    }
     const reelDrafts = selectedPoolItems.map((item) => {
       if (item.kind === "vehicle") {
         const pipelineIndex = hookCounters[item.vehicle.pipeline]++;
@@ -1112,7 +1180,7 @@ const vehiclePool = visibleFilteredVehicles.filter((vehicle) => {
     if (reelFactorySelectionMode !== "stock") {
       const generatedVehicleIds = selectedPoolItems
         .filter((item) => item.kind === "vehicle")
-        .map((item) => item.vehicle.id)
+        .flatMap((item) => getVehicleCooldownKeys(item.vehicle).keys)
         .filter(Boolean);
 
       if (generatedVehicleIds.length) {
@@ -1161,11 +1229,16 @@ const vehiclePool = visibleFilteredVehicles.filter((vehicle) => {
       try {
         const { setupMissing } = await logReelVehicleUsage(generatedUsage);
         if (setupMissing && !cooldownWarning) {
-          cooldownWarning =
-            "Vehicle usage was not logged because reel_vehicle_usage is not set up yet.";
+          cooldownWarning = appendCooldownWarning(
+            cooldownWarning,
+            "Vehicle usage was not logged because reel_vehicle_usage is not set up yet, so the full 5-day cooldown is not fully active.",
+          );
         }
       } catch (error) {
-        cooldownWarning = `Vehicle usage could not be logged: ${error.message || "unknown error"}.`;
+        cooldownWarning = appendCooldownWarning(
+          cooldownWarning,
+          `Vehicle usage could not be logged: ${error.message || "unknown error"}.`,
+        );
       }
     }
 
