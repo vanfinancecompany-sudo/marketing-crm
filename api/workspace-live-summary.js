@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from "./_vansco-cache-utils.js";
 
 const STOCK_LIMIT = 500;
+const POSTING_STATE_TABLE = "marketing_posting_state";
 
 function isToday(value) {
   if (!value) return false;
@@ -152,20 +153,54 @@ async function fetchPostedToday(supabase) {
     }));
 }
 
-function buildPostingSummary(stock, postedToday) {
+async function fetchHiddenPostingState(supabase) {
+  const result = await supabase
+    .from(POSTING_STATE_TABLE)
+    .select("page_key, vehicle_id")
+    .limit(2000);
+
+  if (result.error) {
+    if (/does not exist|schema cache|relation/i.test(result.error.message || "")) {
+      return {
+        vanFinanceFacebook: new Set(),
+        rent2BuyFacebook: new Set(),
+        marketplace: new Set()
+      };
+    }
+    throw new Error(`Failed to load posting hidden state: ${result.error.message}`);
+  }
+
+  const state = {
+    vanFinanceFacebook: new Set(),
+    rent2BuyFacebook: new Set(),
+    marketplace: new Set()
+  };
+
+  (result.data || []).forEach((row) => {
+    const pageKey = row.page_key;
+    const vehicleId = normalizePostingVehicleId(row.vehicle_id);
+    if (state[pageKey] && vehicleId) state[pageKey].add(vehicleId);
+  });
+
+  return state;
+}
+
+function buildPostingSummary(stock, postedToday, hiddenState) {
   const postedPostingKeys = new Set(
     postedToday.map((item) => getPostingActionKey(item.vehicle, item.destination))
   );
 
-  const vanFinanceFacebookQueue = stock.finance.filter(
-    (vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Van Finance Facebook"))
-  );
-  const rent2BuyFacebookQueue = stock.rent2buy.filter(
-    (vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Rent2Buy Facebook"))
-  );
-  const marketplaceQueue = stock.rent2buy.filter(
-    (vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Facebook Marketplace"))
-  );
+  const vanFinanceFacebookQueue = stock.finance
+    .filter((vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Van Finance Facebook")))
+    .filter((vehicle) => !hiddenState.vanFinanceFacebook.has(normalizePostingVehicleId(vehicle)));
+
+  const rent2BuyFacebookQueue = stock.rent2buy
+    .filter((vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Rent2Buy Facebook")))
+    .filter((vehicle) => !hiddenState.rent2BuyFacebook.has(normalizePostingVehicleId(vehicle)));
+
+  const marketplaceQueue = stock.rent2buy
+    .filter((vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Facebook Marketplace")))
+    .filter((vehicle) => !hiddenState.marketplace.has(normalizePostingVehicleId(vehicle)));
 
   return {
     vanFinanceFacebook: vanFinanceFacebookQueue.length,
@@ -182,7 +217,11 @@ export default async function handler(request, response) {
 
   try {
     const supabase = getSupabaseAdmin();
-    const [stock, postedToday] = await Promise.all([fetchStock(supabase), fetchPostedToday(supabase)]);
+    const [stock, postedToday, hiddenState] = await Promise.all([
+      fetchStock(supabase),
+      fetchPostedToday(supabase),
+      fetchHiddenPostingState(supabase)
+    ]);
     const checkedAt = new Date().toISOString();
 
     response.setHeader("Cache-Control", "no-store, max-age=0");
@@ -195,7 +234,7 @@ export default async function handler(request, response) {
           rent2buy: stock.rent2buy.length,
           cars: stock.cars.length
         },
-        posting: buildPostingSummary(stock, postedToday),
+        posting: buildPostingSummary(stock, postedToday, hiddenState),
         checkedAt
       }
     });
