@@ -13,9 +13,12 @@ import {
 const REFRESH_RUNS_TABLE = "vansco_refresh_runs";
 const DEFAULT_BATCH_SIZE = 25;
 const MAX_BATCH_SIZE = 50;
+const STARTUP_BATCH_SIZE = 5;
 const DEFAULT_MAX_MS = 45000;
 const HARD_MAX_MS = 54000;
-const DETAIL_TIMEOUT_MS = 25000;
+const DETAIL_TIMEOUT_MS = 12000;
+const DISCOVERY_RETRY_COUNT = 3;
+const DISCOVERY_RETRY_DELAY_MS = 2500;
 const AUTO_BATCH_SIZE = 15;
 const AUTO_MAX_MS = 45000;
 const AUTO_RUNNING_STALE_MS = 2 * 60 * 60 * 1000;
@@ -24,6 +27,10 @@ const AUTO_START_WINDOWS = new Set(["08:00", "12:30", "16:30", "02:00"]);
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function toTime(value) {
@@ -180,14 +187,86 @@ async function getOrCreateRun(supabase, { runId, runType, forceNew = false }) {
   return data;
 }
 
+async function discoverVanscoUrlsWithRetries() {
+  const attempts = [];
+
+  for (let attemptNumber = 1; attemptNumber <= DISCOVERY_RETRY_COUNT; attemptNumber += 1) {
+    const discovery = await discoverVanscoUrls();
+    attempts.push({ attemptNumber, ...discovery });
+
+    if (discovery.urls?.length) {
+      return {
+        ...discovery,
+        retryAttempts: attempts,
+        usedFallbackCache: false,
+      };
+    }
+
+    if (attemptNumber < DISCOVERY_RETRY_COUNT) {
+      await delay(DISCOVERY_RETRY_DELAY_MS * attemptNumber);
+    }
+  }
+
+  return {
+    sitemapUrl: "",
+    attempts: attempts.flatMap((item) => item.attempts || []),
+    retryAttempts: attempts,
+    urls: [],
+    usedFallbackCache: false,
+  };
+}
+
+async function fallbackToCachedUrlList(supabase, runId, discovery) {
+  const { data, error } = await supabase
+    .from(CACHE_TABLE)
+    .select("id, stock_url")
+    .eq("is_currently_on_vansco", true)
+    .limit(2000);
+
+  if (error) throw error;
+
+  const cachedRows = (data || []).filter((row) => row.stock_url);
+  if (!cachedRows.length) {
+    throw new Error("Could not find current Vansco vehicle URLs from sitemap and no cached Vansco URL list is available.");
+  }
+
+  await updateRun(supabase, runId, {
+    stage: "using_cached_url_list_after_discovery_failure",
+    total_urls: cachedRows.length,
+    processed_count: 0,
+    success_count: 0,
+    failure_count: 0,
+    remaining_count: cachedRows.length,
+    last_error: "Vansco URL discovery failed at startup, so the refresh is continuing with the last cached URL list.",
+    last_result: {
+      startupFallback: true,
+      cachedUrlCount: cachedRows.length,
+      discoveryAttempts: discovery.retryAttempts || discovery.attempts || [],
+    },
+  });
+
+  return {
+    sitemapUrl: "cached-url-list",
+    discoveryAttempts: discovery.retryAttempts || discovery.attempts || [],
+    urlsFound: cachedRows.length,
+    rowsUpserted: 0,
+    refreshedAt: nowIso(),
+    staleMarkingSkipped: true,
+    usedFallbackCache: true,
+    message: "Vansco URL discovery failed, so the last cached URL list was used for this run.",
+  };
+}
+
 async function refreshUrlList(supabase, runId) {
   await updateRun(supabase, runId, { stage: "refreshing_url_list" });
 
-  const discovery = await discoverVanscoUrls();
+  const discovery = await discoverVanscoUrlsWithRetries();
   const refreshedAt = nowIso();
-  const urls = Array.from(new Set(discovery.urls.map(normalizeUrl).filter(Boolean)));
+  const urls = Array.from(new Set((discovery.urls || []).map(normalizeUrl).filter(Boolean)));
 
-  if (!urls.length) throw new Error("Could not find current Vansco vehicle URLs from sitemap.");
+  if (!urls.length) {
+    return fallbackToCachedUrlList(supabase, runId, discovery);
+  }
 
   const rows = urls.map((stockUrl) => {
     const title = vehicleTitleFromUrl(stockUrl);
@@ -221,11 +300,12 @@ async function refreshUrlList(supabase, runId) {
 
   return {
     sitemapUrl: discovery.sitemapUrl,
-    discoveryAttempts: discovery.attempts,
+    discoveryAttempts: discovery.retryAttempts || discovery.attempts,
     urlsFound: urls.length,
     rowsUpserted: rows.length,
     refreshedAt,
     staleMarkingSkipped: true,
+    usedFallbackCache: false,
   };
 }
 
@@ -371,6 +451,11 @@ export default async function handler(request, response) {
       runId = scheduleDecision.runId || "";
     }
 
+    if (refreshUrls && !runId) {
+      batchSize = Math.min(batchSize, STARTUP_BATCH_SIZE);
+      maxMs = Math.max(maxMs, 45000);
+    }
+
     run = await getOrCreateRun(supabase, { runId, runType, forceNew: refreshUrls && !runId });
 
     const refresh = refreshUrls ? await refreshUrlList(supabase, run.id) : null;
@@ -435,6 +520,7 @@ export default async function handler(request, response) {
         processedThisBatch: results.length,
         successThisBatch: results.filter((item) => item.ok).length,
         failureThisBatch: results.filter((item) => !item.ok).length,
+        usedFallbackCache: Boolean(refresh?.usedFallbackCache),
       },
     });
 
