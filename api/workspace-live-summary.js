@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from "./_vansco-cache-utils.js";
 
 const STOCK_LIMIT = 500;
+const POSTING_VISIBILITY_TABLE = "posting_visibility_state";
 
 function isToday(value) {
   if (!value) return false;
@@ -49,7 +50,7 @@ function mapFinanceVehicle(row, index) {
     id: row.id || title || `finance-${index}`,
     title,
     name: title,
-    reg: title,
+    reg: normalizeRegistration(title),
     pipeline: "vanFinance"
   };
 }
@@ -86,6 +87,42 @@ function isActiveMarketingRow(row) {
   if (String(row?.archived || "").toLowerCase() === "true") return false;
   if (String(row?.hidden || "").toLowerCase() === "true") return false;
   return true;
+}
+
+function normalizeHiddenIds(value) {
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Set();
+  return value
+    .map((item) => normalizePostingVehicleId(item))
+    .filter(Boolean)
+    .filter((item) => {
+      if (seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    });
+}
+
+async function fetchPostingHiddenState(supabase) {
+  const fallback = {
+    vanFinanceFacebook: [],
+    rent2BuyFacebook: [],
+    marketplace: []
+  };
+
+  const result = await supabase
+    .from(POSTING_VISIBILITY_TABLE)
+    .select("page_key, hidden_ids")
+    .in("page_key", Object.keys(fallback));
+
+  if (result.error) return fallback;
+
+  return (result.data || []).reduce((state, row) => {
+    if (Object.prototype.hasOwnProperty.call(state, row.page_key)) {
+      state[row.page_key] = normalizeHiddenIds(row.hidden_ids);
+    }
+    return state;
+  }, fallback);
 }
 
 async function fetchCars(supabase) {
@@ -152,19 +189,35 @@ async function fetchPostedToday(supabase) {
     }));
 }
 
-function buildPostingSummary(stock, postedToday) {
+function filterHiddenVehicles(vehicles, hiddenIds = []) {
+  const hidden = new Set(normalizeHiddenIds(hiddenIds));
+  return vehicles.filter((vehicle) => !hidden.has(normalizePostingVehicleId(vehicle)));
+}
+
+function buildPostingSummary(stock, postedToday, hiddenState) {
   const postedPostingKeys = new Set(
     postedToday.map((item) => getPostingActionKey(item.vehicle, item.destination))
   );
 
-  const vanFinanceFacebookQueue = stock.finance.filter(
-    (vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Van Finance Facebook"))
+  const vanFinanceFacebookQueue = filterHiddenVehicles(
+    stock.finance.filter(
+      (vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Van Finance Facebook"))
+    ),
+    hiddenState.vanFinanceFacebook
   );
-  const rent2BuyFacebookQueue = stock.rent2buy.filter(
-    (vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Rent2Buy Facebook"))
+
+  const rent2BuyFacebookQueue = filterHiddenVehicles(
+    stock.rent2buy.filter(
+      (vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Rent2Buy Facebook"))
+    ),
+    hiddenState.rent2BuyFacebook
   );
-  const marketplaceQueue = stock.rent2buy.filter(
-    (vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Facebook Marketplace"))
+
+  const marketplaceQueue = filterHiddenVehicles(
+    stock.rent2buy.filter(
+      (vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Facebook Marketplace"))
+    ),
+    hiddenState.marketplace
   );
 
   return {
@@ -182,7 +235,11 @@ export default async function handler(request, response) {
 
   try {
     const supabase = getSupabaseAdmin();
-    const [stock, postedToday] = await Promise.all([fetchStock(supabase), fetchPostedToday(supabase)]);
+    const [stock, postedToday, hiddenState] = await Promise.all([
+      fetchStock(supabase),
+      fetchPostedToday(supabase),
+      fetchPostingHiddenState(supabase)
+    ]);
     const checkedAt = new Date().toISOString();
 
     response.setHeader("Cache-Control", "no-store, max-age=0");
@@ -195,7 +252,7 @@ export default async function handler(request, response) {
           rent2buy: stock.rent2buy.length,
           cars: stock.cars.length
         },
-        posting: buildPostingSummary(stock, postedToday),
+        posting: buildPostingSummary(stock, postedToday, hiddenState),
         checkedAt
       }
     });
