@@ -10,6 +10,8 @@ export const config = {
   },
 };
 
+const FACEBOOK_REEL_DURATION_SECONDS = 11;
+
 function sendJson(res, statusCode, payload) {
   res.statusCode = statusCode;
   res.setHeader("Content-Type", "application/json");
@@ -117,10 +119,14 @@ export default async function handler(req, res) {
 
     await runFfmpeg([
       "-y",
+      "-fflags",
+      "+genpts",
       "-i",
       inputPath,
+      "-t",
+      String(FACEBOOK_REEL_DURATION_SECONDS),
       "-vf",
-      "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1",
+      "fps=30,scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1,setpts=PTS-STARTPTS",
       "-r",
       "30",
       "-c:v",
@@ -147,6 +153,10 @@ export default async function handler(req, res) {
       "44100",
       "-ac",
       "2",
+      "-avoid_negative_ts",
+      "make_zero",
+      "-map_metadata",
+      "-1",
       "-movflags",
       "+faststart",
       outputPath,
