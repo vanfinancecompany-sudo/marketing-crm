@@ -1,6 +1,9 @@
 import { getSupabaseAdmin } from "./_vansco-cache-utils.js";
 
-const STOCK_LIMIT = 500;
+// Keep this aligned with services/marketingVehicles.js fetchMarketingVehicles default.
+// The posting pages only load/count this browser-side stock window, so the workspace
+// summary must use the same limit or it will report higher numbers than the page.
+const STOCK_LIMIT = 80;
 const POSTING_VISIBILITY_TABLE = "posting_visibility_state";
 
 function isToday(value) {
