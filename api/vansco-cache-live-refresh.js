@@ -24,9 +24,16 @@ const AUTO_MAX_MS = 45000;
 const AUTO_RUNNING_STALE_MS = 2 * 60 * 60 * 1000;
 const AUTO_RECENT_SLOT_MS = 25 * 60 * 1000;
 const AUTO_START_WINDOWS = new Set(["08:00", "12:30", "16:30", "02:00"]);
+const REFRESH_RUN_RETENTION_DAYS = 60;
+const CACHE_ABSENT_RETENTION_DAYS = 120;
+const CLEANUP_LIMIT = 250;
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function daysAgoIso(days) {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 }
 
 function delay(ms) {
@@ -112,6 +119,48 @@ async function updateRun(supabase, runId, patch) {
     .single();
   if (error) throw error;
   return data;
+}
+
+async function cleanupOldVanscoData(supabase) {
+  const cleanup = {
+    refreshRunsDeleted: 0,
+    staleCacheRowsDeleted: 0,
+    errors: [],
+  };
+
+  try {
+    const oldRunsCutoff = daysAgoIso(REFRESH_RUN_RETENTION_DAYS);
+    const { data, error } = await supabase
+      .from(REFRESH_RUNS_TABLE)
+      .delete()
+      .lt("updated_at", oldRunsCutoff)
+      .neq("status", "running")
+      .select("id")
+      .limit(CLEANUP_LIMIT);
+
+    if (error) throw error;
+    cleanup.refreshRunsDeleted = Array.isArray(data) ? data.length : 0;
+  } catch (error) {
+    cleanup.errors.push(`refresh_runs: ${error?.message || "cleanup failed"}`);
+  }
+
+  try {
+    const oldCacheCutoff = daysAgoIso(CACHE_ABSENT_RETENTION_DAYS);
+    const { data, error } = await supabase
+      .from(CACHE_TABLE)
+      .delete()
+      .eq("is_currently_on_vansco", false)
+      .lt("last_seen_in_url_list_at", oldCacheCutoff)
+      .select("id")
+      .limit(CLEANUP_LIMIT);
+
+    if (error) throw error;
+    cleanup.staleCacheRowsDeleted = Array.isArray(data) ? data.length : 0;
+  } catch (error) {
+    cleanup.errors.push(`vehicle_cache: ${error?.message || "cleanup failed"}`);
+  }
+
+  return cleanup;
 }
 
 async function prepareScheduledRun(supabase) {
@@ -504,6 +553,7 @@ export default async function handler(request, response) {
     const processedCount = Number(run.processed_count || 0) + results.length;
     const successCount = Number(run.success_count || 0) + results.filter((item) => item.ok).length;
     const failureCount = Number(run.failure_count || 0) + results.filter((item) => !item.ok).length;
+    const cleanup = complete ? await cleanupOldVanscoData(supabase) : null;
 
     const finalRun = await updateRun(supabase, run.id, {
       status: complete ? "complete" : "running",
@@ -521,6 +571,7 @@ export default async function handler(request, response) {
         successThisBatch: results.filter((item) => item.ok).length,
         failureThisBatch: results.filter((item) => !item.ok).length,
         usedFallbackCache: Boolean(refresh?.usedFallbackCache),
+        cleanup,
       },
     });
 
@@ -537,6 +588,7 @@ export default async function handler(request, response) {
       maxMs,
       elapsedMs: Date.now() - startedAtMs,
       refresh,
+      cleanup,
       stoppedReason,
       processedCount: results.length,
       successCount: results.filter((item) => item.ok).length,
