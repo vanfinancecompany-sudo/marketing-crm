@@ -804,17 +804,21 @@ function ManualReelQueueSection({
           </div>
 
           <div className="manual-queue-info">
-            <strong>{queuedReg || "No reg"}</strong>
-            <span>{queuedTitle}</span>
+            <div className="manual-queue-heading">
+              <strong>{queuedReg || "No reg"}</strong>
+              <span>{queuedTitle}</span>
+            </div>
             <div className="manual-queue-meta">
               <span>{queuedPipeline}</span>
               <span>Position 1 of {queue.length}</span>
             </div>
-            <div className="manual-queue-progress">
-              <div className="manual-queue-progress__bar" style={{ width: `${progressPercent}%` }} />
+            <div className="manual-queue-progress-wrap">
+              <div className="manual-queue-progress">
+                <div className="manual-queue-progress__bar" style={{ width: `${progressPercent}%` }} />
+              </div>
+              <span>{completed} of {total || queue.length} complete ({progressPercent}%)</span>
             </div>
-            <span>{completed} of {total || queue.length} complete ({progressPercent}%)</span>
-            <span>Status: {currentReelLocked ? lockLabel : manualQueueStatus}</span>
+            <span className="manual-queue-status">Status: {currentReelLocked ? lockLabel : manualQueueStatus}</span>
           </div>
 
           <div className="card-actions manual-queue-actions">
