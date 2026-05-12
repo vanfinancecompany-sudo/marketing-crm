@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import FilterBar from "../components/FilterBar.jsx";
 import {
   financeReelHooks,
@@ -726,6 +726,157 @@ export function TodayReelsSection({
   );
 }
 
+function ManualReelQueueSection({
+  manualReelQueues = { finance: [], rent2buy: [] },
+  manualReelQueueVehicles = { finance: null, rent2buy: null },
+  manualReelQueueLocks = { finance: null, rent2buy: null },
+  manualReelQueueType = "finance",
+  onManualReelQueueTypeChange,
+  onGenerateManualQueuedReel,
+  onNextManualQueuedVehicle,
+  onRemoveManualQueuedVehicle,
+  onClearManualReelQueue,
+  onAutoGenerateQueue,
+  onCancelAutoQueue,
+  autoQueueRunning = false,
+  autoQueueCancelPending = false,
+  manualQueueStatus = "Ready",
+  manualQueueProgress = { completed: 0, total: 0 },
+}) {
+  const queue = manualReelQueues[manualReelQueueType] || [];
+  const queuedItem = queue[0];
+  const queuedVehicle = manualReelQueueVehicles[manualReelQueueType] || null;
+  const queueLock = manualReelQueueLocks[manualReelQueueType] || null;
+  const isRent = manualReelQueueType === "rent2buy";
+  const queueLabel = isRent ? "Rent2Buy" : "Finance";
+  const queuedReg = queuedVehicle?.reg || queuedVehicle?.registration || queuedItem?.reg || queuedItem?.registration || "";
+  const queuedTitle = queuedVehicle?.title || queuedVehicle?.name || queuedReg || queuedItem?.id || "Queued vehicle";
+  const queuedPipeline = queuedItem?.targetPipeline === "rent2buy" || queuedVehicle?.pipeline === "rent2buy"
+    ? "Rent2Buy"
+    : "Finance";
+  const completed = Math.min(manualQueueProgress.completed || 0, manualQueueProgress.total || queue.length || 0);
+  const total = manualQueueProgress.total || queue.length;
+  const progressPercent = total ? Math.round((completed / total) * 100) : 0;
+  const controlsDisabled = autoQueueRunning || autoQueueCancelPending;
+  const currentReelLocked = Boolean(queueLock?.locked);
+  const lockUntil = queueLock?.until ? new Date(queueLock.until) : null;
+  const lockLabel = lockUntil
+    ? `Reel locked until ${lockUntil.toLocaleString([], { dateStyle: "short", timeStyle: "short" })}`
+    : "Reel locked for 72 hours";
+
+  return (
+    <section className="panel">
+      <div className="panel__header">
+        <div>
+          <h3>Manual Reel Queue</h3>
+          <p>Process selected stock one reel at a time so the copied caption matches the downloaded MP4.</p>
+        </div>
+        <span className="status-pill">{queue.length} queued</span>
+      </div>
+
+      <div className="segmented-control manual-queue-tabs">
+        <button
+          className={manualReelQueueType === "finance" ? "segment is-active" : "segment"}
+          type="button"
+          onClick={() => onManualReelQueueTypeChange?.("finance")}
+          disabled={controlsDisabled}
+        >
+          Finance ({manualReelQueues.finance?.length || 0})
+        </button>
+        <button
+          className={manualReelQueueType === "rent2buy" ? "segment is-active" : "segment"}
+          type="button"
+          onClick={() => onManualReelQueueTypeChange?.("rent2buy")}
+          disabled={controlsDisabled}
+        >
+          Rent2Buy ({manualReelQueues.rent2buy?.length || 0})
+        </button>
+      </div>
+
+      {queuedItem ? (
+        <div className={`selected-reel-stock manual-queue-card selected-reel-stock--${isRent ? "rent" : "finance"}`}>
+          <div className="manual-queue-thumb">
+            {queuedVehicle?.image ? (
+              <img src={queuedVehicle.image} alt={queuedTitle} />
+            ) : (
+              <span>No image</span>
+            )}
+          </div>
+
+          <div className="manual-queue-info">
+            <strong>{queuedReg || "No reg"}</strong>
+            <span>{queuedTitle}</span>
+            <div className="manual-queue-meta">
+              <span>{queuedPipeline}</span>
+              <span>Position 1 of {queue.length}</span>
+            </div>
+            <div className="manual-queue-progress">
+              <div className="manual-queue-progress__bar" style={{ width: `${progressPercent}%` }} />
+            </div>
+            <span>{completed} of {total || queue.length} complete ({progressPercent}%)</span>
+            <span>Status: {currentReelLocked ? lockLabel : manualQueueStatus}</span>
+          </div>
+
+          <div className="card-actions manual-queue-actions">
+            <button
+              className="button button--primary"
+              type="button"
+              onClick={() => onGenerateManualQueuedReel?.(manualReelQueueType)}
+              disabled={controlsDisabled || currentReelLocked}
+            >
+              {currentReelLocked ? "Reel Locked" : "Generate Current Reel"}
+            </button>
+            <button
+              className="button button--primary"
+              type="button"
+              onClick={() => onAutoGenerateQueue?.(manualReelQueueType)}
+              disabled={controlsDisabled || currentReelLocked || !queue.length}
+            >
+              Auto Generate + Download Queue
+            </button>
+            {autoQueueRunning ? (
+              <button
+                className="button button--danger"
+                type="button"
+                onClick={onCancelAutoQueue}
+                disabled={autoQueueCancelPending}
+              >
+                {autoQueueCancelPending ? "Stopping..." : "Stop / Cancel Queue"}
+              </button>
+            ) : null}
+            <button
+              className="button button--ghost"
+              type="button"
+              onClick={() => onNextManualQueuedVehicle?.(manualReelQueueType)}
+              disabled={controlsDisabled || queue.length < 2}
+            >
+              Next
+            </button>
+            <button
+              className="button button--ghost"
+              type="button"
+              onClick={() => onRemoveManualQueuedVehicle?.(manualReelQueueType)}
+              disabled={controlsDisabled}
+            >
+              Remove
+            </button>
+            <button
+              className="button button--danger"
+              type="button"
+              onClick={() => onClearManualReelQueue?.(manualReelQueueType)}
+              disabled={controlsDisabled}
+            >
+              Clear queue
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="empty-state">No vehicles in the {queueLabel} manual reel queue.</div>
+      )}
+    </section>
+  );
+}
+
 function ReelDescriptionPanel({
   filters,
   formValues,
@@ -851,6 +1002,17 @@ export default function ReelFactoryPage(props) {
   const [mp4BatchRunning, setMp4BatchRunning] = useState(false);
   const [mp4Statuses, setMp4Statuses] = useState({});
   const [mp4ProgressMessage, setMp4ProgressMessage] = useState("");
+  const [autoQueueRunning, setAutoQueueRunning] = useState(false);
+  const [autoQueueCancelPending, setAutoQueueCancelPending] = useState(false);
+  const [manualQueueStatuses, setManualQueueStatuses] = useState({
+    finance: "Ready",
+    rent2buy: "Ready",
+  });
+  const [manualQueueProgress, setManualQueueProgress] = useState({
+    finance: { completed: 0, total: 0 },
+    rent2buy: { completed: 0, total: 0 },
+  });
+  const autoQueueCancelRef = useRef(false);
 
  const [financeDescriptions, setFinanceDescriptions] = useState(() => {
   const saved = localStorage.getItem("financeDescriptions");
@@ -924,8 +1086,8 @@ async function handleDownloadWithDescription(reel) {
   props.onDownloadReel(reel);
 }
 
-async function handleDownloadSingleFacebookMp4(reel) {
-  if (!reel?.id || mp4BatchRunning) return;
+async function handleDownloadSingleFacebookMp4(reel, options = {}) {
+  if (!reel?.id || (mp4BatchRunning && !options.bypassBusy)) return;
 
   setCopyMessage("");
   setMp4ProgressMessage("");
@@ -936,27 +1098,32 @@ async function handleDownloadSingleFacebookMp4(reel) {
 
   try {
     await copyReelDescription(reel);
+    options.onStatus?.("Converting MP4...");
 
     await downloadFacebookMp4Reel(reel, {
       onPreparing: () => {
+        options.onStatus?.("Converting MP4...");
         setMp4Statuses((current) => ({
           ...current,
           [reel.id]: { state: "Preparing", error: "" },
         }));
       },
       onUploading: () => {
+        options.onStatus?.("Converting MP4...");
         setMp4Statuses((current) => ({
           ...current,
           [reel.id]: { state: "Uploading reel", error: "" },
         }));
       },
       onConverting: () => {
+        options.onStatus?.("Converting MP4...");
         setMp4Statuses((current) => ({
           ...current,
           [reel.id]: { state: "Converting MP4", error: "" },
         }));
       },
       onDownloading: () => {
+        options.onStatus?.("Downloading MP4...");
         setMp4Statuses((current) => ({
           ...current,
           [reel.id]: { state: "Downloading", error: "" },
@@ -968,7 +1135,9 @@ async function handleDownloadSingleFacebookMp4(reel) {
       ...current,
       [reel.id]: { state: "Complete", error: "" },
     }));
+    props.onReelDownloadComplete?.(reel);
     setCopyMessage("MP4 downloaded + advert text copied.");
+    options.onStatus?.("Complete");
   } catch (error) {
     setMp4Statuses((current) => ({
       ...current,
@@ -977,6 +1146,8 @@ async function handleDownloadSingleFacebookMp4(reel) {
         error: error instanceof Error ? error.message : "Could not convert this reel.",
       },
     }));
+    options.onStatus?.("Error, please retry");
+    if (options.throwOnError) throw error;
   }
 }
 
@@ -1054,6 +1225,103 @@ async function handleDownloadAllFacebookMp4() {
   setMp4BatchRunning(false);
 }
 
+function setManualQueueStatus(queueKey, status) {
+  setManualQueueStatuses((current) => ({
+    ...current,
+    [queueKey]: status,
+  }));
+}
+
+function setManualQueueProgressFor(queueKey, progress) {
+  setManualQueueProgress((current) => ({
+    ...current,
+    [queueKey]: {
+      ...current[queueKey],
+      ...progress,
+    },
+  }));
+}
+
+async function handleGenerateManualCurrentReel(queueKey) {
+  if (autoQueueRunning) return;
+
+  try {
+    setManualQueueStatus(queueKey, "Generating reel...");
+    const reel = await props.onGenerateManualQueuedReel?.(queueKey, {
+      onStatus: (status) => setManualQueueStatus(queueKey, status),
+      throwOnError: true,
+    });
+
+    setManualQueueStatus(queueKey, reel ? "Complete" : "Error, please retry");
+  } catch {
+    setManualQueueStatus(queueKey, "Error, please retry");
+  }
+}
+
+async function handleAutoGenerateQueue(queueKey) {
+  const queue = [...(props.manualReelQueues?.[queueKey] || [])];
+  if (!queue.length || autoQueueRunning || mp4BatchRunning) return;
+
+  autoQueueCancelRef.current = false;
+  setAutoQueueRunning(true);
+  setMp4BatchRunning(true);
+  setAutoQueueCancelPending(false);
+  setManualQueueStatus(queueKey, "Ready");
+  setManualQueueProgressFor(queueKey, { completed: 0, total: queue.length });
+
+  let completed = 0;
+
+  try {
+    for (const queueItem of queue) {
+      if (autoQueueCancelRef.current) break;
+
+      try {
+        setManualQueueStatus(queueKey, "Generating reel...");
+        const reel = await props.onGenerateManualQueuedReel?.(queueKey, {
+          queueItem,
+          onStatus: (status) => setManualQueueStatus(queueKey, status),
+          throwOnError: true,
+        });
+
+        if (!reel) {
+          throw new Error("Queued vehicle could not be generated.");
+        }
+
+        setManualQueueStatus(queueKey, "Converting MP4...");
+        await handleDownloadSingleFacebookMp4(reel, {
+          bypassBusy: true,
+          throwOnError: true,
+          onStatus: (status) => setManualQueueStatus(queueKey, status),
+        });
+
+        completed += 1;
+        setManualQueueProgressFor(queueKey, { completed, total: queue.length });
+        props.onRemoveManualQueuedVehicle?.(queueKey);
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+      } catch (error) {
+        console.warn("Manual queue auto-run stopped.", error);
+        setManualQueueStatus(queueKey, "Error, please retry");
+        break;
+      }
+    }
+  } finally {
+    setAutoQueueRunning(false);
+    setMp4BatchRunning(false);
+    setAutoQueueCancelPending(false);
+    autoQueueCancelRef.current = false;
+
+    if (completed === queue.length) {
+      setManualQueueStatus(queueKey, "Complete");
+    }
+  }
+}
+
+function handleCancelAutoQueue() {
+  if (!autoQueueRunning) return;
+  autoQueueCancelRef.current = true;
+  setAutoQueueCancelPending(true);
+}
+
   return (
   <div className="page-stack">
     <ReelStudioHero />
@@ -1065,6 +1333,17 @@ async function handleDownloadAllFacebookMp4() {
     )}
 
     <DailyReelFactoryPanel {...props} todayReelsCount={props.todayReels.length} />
+
+    <ManualReelQueueSection
+      {...props}
+      onGenerateManualQueuedReel={handleGenerateManualCurrentReel}
+      onAutoGenerateQueue={handleAutoGenerateQueue}
+      onCancelAutoQueue={handleCancelAutoQueue}
+      autoQueueRunning={autoQueueRunning}
+      autoQueueCancelPending={autoQueueCancelPending}
+      manualQueueStatus={manualQueueStatuses[props.manualReelQueueType] || "Ready"}
+      manualQueueProgress={manualQueueProgress[props.manualReelQueueType] || { completed: 0, total: 0 }}
+    />
 
 <ReelDescriptionPanel
   {...props}
