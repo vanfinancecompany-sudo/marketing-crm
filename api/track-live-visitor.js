@@ -1,6 +1,10 @@
-import { getSupabaseAdmin } from "./_vansco-cache-utils.js";
+import { getSupabaseAdmin, isMissingOptionalTableError, optionalTableReason } from "./_vansco-cache-utils.js";
 
 const LIVE_SESSIONS_TABLE = "site_live_sessions";
+const STALE_SESSION_MS = 10 * 60 * 1000;
+
+const BOT_USER_AGENT_PATTERN =
+  /bot|crawler|spider|preview|facebookexternalhit|slurp|bingpreview|headless|phantom|curl|wget|python-requests|httpclient|monitoring|uptime/i;
 
 function sendJson(response, statusCode, payload) {
   response.statusCode = statusCode;
@@ -43,6 +47,25 @@ function normalizeSource(value) {
   return source ? source.slice(0, 120) : null;
 }
 
+function getHeader(request, name) {
+  const value = request.headers?.[name.toLowerCase()];
+  return Array.isArray(value) ? value.join(" ") : String(value || "");
+}
+
+function isObviousBotRequest(request) {
+  const userAgent = getHeader(request, "user-agent");
+  const purpose = getHeader(request, "purpose") || getHeader(request, "sec-purpose");
+  const fetchMode = getHeader(request, "sec-fetch-mode");
+
+  return BOT_USER_AGENT_PATTERN.test(userAgent) || /prefetch|preview/i.test(purpose) || /navigate/i.test(fetchMode) && /bot|crawler|spider/i.test(userAgent);
+}
+
+async function cleanupStaleSessions(supabase) {
+  const staleBefore = new Date(Date.now() - STALE_SESSION_MS).toISOString();
+  const result = await supabase.from(LIVE_SESSIONS_TABLE).delete().lt("last_seen_at", staleBefore);
+  if (result.error && !isMissingOptionalTableError(result.error)) throw result.error;
+}
+
 export default async function handler(request, response) {
   setCorsHeaders(response);
 
@@ -69,6 +92,13 @@ export default async function handler(request, response) {
 
     const now = new Date().toISOString();
     const supabase = getSupabaseAdmin();
+    await cleanupStaleSessions(supabase);
+
+    if (isObviousBotRequest(request)) {
+      sendJson(response, 200, { ok: true, ignored: true });
+      return;
+    }
+
     const result = await supabase
       .from(LIVE_SESSIONS_TABLE)
       .upsert(
@@ -83,8 +113,18 @@ export default async function handler(request, response) {
       .single();
 
     if (result.error) {
-      sendJson(response, 500, {
+      if (isMissingOptionalTableError(result.error)) {
+        sendJson(response, 200, {
+          ok: false,
+          skipped: true,
+          reason: optionalTableReason(result.error),
+        });
+        return;
+      }
+
+      sendJson(response, 200, {
         ok: false,
+        skipped: true,
         message: result.error.message || "Could not track live visitor.",
       });
       return;
@@ -92,8 +132,10 @@ export default async function handler(request, response) {
 
     sendJson(response, 200, { ok: true, session: result.data });
   } catch (error) {
-    sendJson(response, 500, {
+    sendJson(response, 200, {
       ok: false,
+      skipped: true,
+      reason: optionalTableReason(error),
       message: error?.message || "Live visitor tracking failed.",
     });
   }

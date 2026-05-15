@@ -178,14 +178,24 @@ export async function fetchCarMarketingVehicles(limitPerPipeline = 80) {
     }
   }
 
-  throw new Error(`Failed to load Cars vehicles. Tried: ${errors.join(" | ") || CAR_TABLE_CANDIDATES.join(", ")}`);
+  return [];
 }
 
 export async function fetchMarketingVehicles(limitPerPipeline = 80) {
-  const [financeVehicles, rentVehicles] = await Promise.all([
+  const [financeResult, rentResult] = await Promise.allSettled([
     fetchFinanceMarketingVehicles(limitPerPipeline),
     fetchRentMarketingVehicles(limitPerPipeline),
   ]);
+
+  const financeVehicles = financeResult.status === "fulfilled" ? financeResult.value : [];
+  const rentVehicles = rentResult.status === "fulfilled" ? rentResult.value : [];
+
+  if (!financeVehicles.length && !rentVehicles.length && (financeResult.status === "rejected" || rentResult.status === "rejected")) {
+    const messages = [financeResult, rentResult]
+      .filter((result) => result.status === "rejected")
+      .map((result) => result.reason?.message || "stock source failed");
+    throw new Error(messages.join(" | ") || "Failed to load stock.");
+  }
 
   return [...financeVehicles, ...rentVehicles];
 }

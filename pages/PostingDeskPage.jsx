@@ -152,18 +152,15 @@ export default function PostingDeskPage({
 }) {
   const [previewItem, setPreviewItem] = useState(null);
 
-  if (vehiclesLoading) {
+  if (vehiclesLoading && vehicles.length === 0) {
     return <div className="empty-state">Loading live stock...</div>;
-  }
-
-  if (vehiclesError) {
-    return <div className="empty-state">Unable to load stock: {vehiclesError}</div>;
   }
 
   const destinationPostedToday = postedToday.filter((item) => item.destination === destination);
 
   return (
     <div className="page-stack">
+      {vehiclesError ? <div className="error-banner">{vehiclesError}</div> : null}
       <section className={`panel posting-destination-hero posting-destination-hero--${summary.accent || "default"}`}>
         <div className="panel__header">
           <div>

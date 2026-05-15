@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from "./_vansco-cache-utils.js";
+import { getSupabaseAdmin, optionalTableReason } from "./_vansco-cache-utils.js";
 
 // Keep this aligned with services/marketingVehicles.js fetchMarketingVehicles default.
 // The posting pages only load/count this browser-side stock window, so the workspace
@@ -106,7 +106,7 @@ function normalizeHiddenIds(value) {
     });
 }
 
-async function fetchPostingHiddenState(supabase) {
+async function fetchPostingHiddenState(supabase, warnings = []) {
   const fallback = {
     vanFinanceFacebook: [],
     rent2BuyFacebook: [],
@@ -118,7 +118,10 @@ async function fetchPostingHiddenState(supabase) {
     .select("page_key, hidden_ids")
     .in("page_key", Object.keys(fallback));
 
-  if (result.error) return fallback;
+  if (result.error) {
+    warnings.push(`posting visibility unavailable: ${optionalTableReason(result.error)}`);
+    return fallback;
+  }
 
   return (result.data || []).reduce((state, row) => {
     if (Object.prototype.hasOwnProperty.call(state, row.page_key)) {
@@ -128,12 +131,15 @@ async function fetchPostingHiddenState(supabase) {
   }, fallback);
 }
 
-async function fetchCars(supabase) {
+async function fetchCars(supabase, warnings = []) {
   const tableCandidates = ["cars_stock", "car_stock", "cars", "car_vehicles", "facebook_cars", "car_adverts"];
 
   for (const tableName of tableCandidates) {
     const result = await supabase.from(tableName).select("*").limit(STOCK_LIMIT);
-    if (result.error) continue;
+    if (result.error) {
+      warnings.push(`${tableName} unavailable: ${optionalTableReason(result.error)}`);
+      continue;
+    }
     const rows = (result.data || []).filter(isActiveMarketingRow);
     if (rows.length) return rows.map(mapCarVehicle);
   }
@@ -141,8 +147,8 @@ async function fetchCars(supabase) {
   return [];
 }
 
-async function fetchStock(supabase) {
-  const [financeResult, rentResult, cars] = await Promise.all([
+async function fetchStock(supabase, warnings = []) {
+  const [financeSettled, rentSettled, carsSettled] = await Promise.allSettled([
     supabase
       .from("facebook_adverts")
       .select("id, title, is_active")
@@ -153,14 +159,19 @@ async function fetchStock(supabase) {
       .select("id, registration, is_active")
       .eq("is_active", true)
       .limit(STOCK_LIMIT),
-    fetchCars(supabase)
+    fetchCars(supabase, warnings)
   ]);
 
-  if (financeResult.error) throw new Error(`Failed to load finance vehicles: ${financeResult.error.message}`);
-  if (rentResult.error) throw new Error(`Failed to load Rent2Buy vehicles: ${rentResult.error.message}`);
+  const financeResult = financeSettled.status === "fulfilled" ? financeSettled.value : { error: financeSettled.reason };
+  const rentResult = rentSettled.status === "fulfilled" ? rentSettled.value : { error: rentSettled.reason };
+  const cars = carsSettled.status === "fulfilled" ? carsSettled.value : [];
 
-  const finance = (financeResult.data || []).map(mapFinanceVehicle);
-  const rent2buy = (rentResult.data || []).map(mapRentVehicle);
+  if (carsSettled.status === "rejected") warnings.push(`cars stock unavailable: ${optionalTableReason(carsSettled.reason)}`);
+  if (financeResult.error) warnings.push(`finance stock unavailable: ${optionalTableReason(financeResult.error)}`);
+  if (rentResult.error) warnings.push(`Rent2Buy stock unavailable: ${optionalTableReason(rentResult.error)}`);
+
+  const finance = financeResult.error ? [] : (financeResult.data || []).map(mapFinanceVehicle);
+  const rent2buy = rentResult.error ? [] : (rentResult.data || []).map(mapRentVehicle);
 
   return {
     finance,
@@ -170,7 +181,7 @@ async function fetchStock(supabase) {
   };
 }
 
-async function fetchPostedToday(supabase) {
+async function fetchPostedToday(supabase, warnings = []) {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 
@@ -181,7 +192,10 @@ async function fetchPostedToday(supabase) {
     .order("created_at", { ascending: false })
     .limit(200);
 
-  if (error) throw new Error(`Failed to load marketing posting records: ${error.message}`);
+  if (error) {
+    warnings.push(`posting records unavailable: ${optionalTableReason(error)}`);
+    return [];
+  }
 
   return (data || [])
     .filter((row) => isToday(row.created_at))
@@ -238,11 +252,24 @@ export default async function handler(request, response) {
 
   try {
     const supabase = getSupabaseAdmin();
-    const [stock, postedToday, hiddenState] = await Promise.all([
-      fetchStock(supabase),
-      fetchPostedToday(supabase),
-      fetchPostingHiddenState(supabase)
+    const warnings = [];
+    const [stockResult, postedTodayResult, hiddenStateResult] = await Promise.allSettled([
+      fetchStock(supabase, warnings),
+      fetchPostedToday(supabase, warnings),
+      fetchPostingHiddenState(supabase, warnings)
     ]);
+    const stock = stockResult.status === "fulfilled" ? stockResult.value : { finance: [], rent2buy: [], cars: [], all: [] };
+    const postedToday = postedTodayResult.status === "fulfilled" ? postedTodayResult.value : [];
+    const hiddenState = hiddenStateResult.status === "fulfilled" ? hiddenStateResult.value : {
+      vanFinanceFacebook: [],
+      rent2BuyFacebook: [],
+      marketplace: []
+    };
+
+    if (stockResult.status === "rejected") warnings.push(`stock summary unavailable: ${optionalTableReason(stockResult.reason)}`);
+    if (postedTodayResult.status === "rejected") warnings.push(`posting records unavailable: ${optionalTableReason(postedTodayResult.reason)}`);
+    if (hiddenStateResult.status === "rejected") warnings.push(`posting visibility unavailable: ${optionalTableReason(hiddenStateResult.reason)}`);
+
     const checkedAt = new Date().toISOString();
 
     response.setHeader("Cache-Control", "no-store, max-age=0");
@@ -256,12 +283,19 @@ export default async function handler(request, response) {
           cars: stock.cars.length
         },
         posting: buildPostingSummary(stock, postedToday, hiddenState),
-        checkedAt
+        checkedAt,
+        warnings
       }
     });
   } catch (error) {
-    response.status(500).json({
+    response.status(200).json({
       ok: false,
+      summary: {
+        stock: { all: 0, vanFinance: 0, rent2buy: 0, cars: 0 },
+        posting: { vanFinanceFacebook: 0, rent2BuyFacebook: 0, facebookMarketplace: 0 },
+        checkedAt: new Date().toISOString(),
+        warnings: [optionalTableReason(error)]
+      },
       message: error?.message || "Could not load Workspace live summary."
     });
   }

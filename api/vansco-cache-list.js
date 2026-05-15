@@ -7,6 +7,7 @@ import {
   normalizeCacheRow,
   normalizeRegistration,
   normalizeUrl,
+  optionalTableReason,
 } from "./_vansco-cache-utils.js";
 
 const VAN_KEYWORDS = /\b(transit|transit custom|custom|tipper|dropside|luton|crew van|minibus|panel van|box van|pickup|pick-up|chassis cab|relay|dispatch|scudo|daily|doblo|partner|berlingo|sprinter|crafter|vito|evito|e-vito|vivaro|movano|box-van|kangoo|trafic|traffic|master|ducato|talento|expert|transporter|caddy|maxus|combo|proace|primastar|nv200|nv300|bailey|pegasus|winnebago|motorhome|caravan|camper|townstar|vn5|levc|boxer|relay|jumper|bipper|nemo|vauxhall combo|citroen nemo|peugeot partner|mercedes-benz evito|mercedes evito)\b/i;
@@ -104,7 +105,31 @@ export default async function handler(request, response) {
       .order("last_seen_in_url_list_at", { ascending: false })
       .limit(2000);
 
-    if (cacheError) throw cacheError;
+    if (cacheError) {
+      response.setHeader("Cache-Control", "no-store, max-age=0");
+      response.status(200).json({
+        ok: false,
+        pipeline,
+        records: [],
+        summary: {
+          currentUrlCount: 0,
+          currentPipelineUrlCount: 0,
+          cachedRegs: 0,
+          usableCachedRegistrations: 0,
+          currentNoRegistrationCount: 0,
+          currentReservedCount: 0,
+          currentAvailableOrUnknownCount: 0,
+          currentCheckedCount: 0,
+          currentUncheckedCount: 0,
+          detailRefreshedToday: 0,
+          failedDetailChecks: 0,
+          latestUrlListCheckedAt: "",
+          warning: optionalTableReason(cacheError),
+        },
+        message: "Vansco cache is unavailable. Showing saved comparison if available.",
+      });
+      return;
+    }
 
     const { data: watchRows, error: watchError } = await supabase
       .from(WATCH_TABLE)
@@ -112,7 +137,20 @@ export default async function handler(request, response) {
       .eq("pipeline", pipeline)
       .limit(2000);
 
-    if (watchError) throw watchError;
+    if (watchError) {
+      response.setHeader("Cache-Control", "no-store, max-age=0");
+      response.status(200).json({
+        ok: false,
+        pipeline,
+        records: [],
+        summary: {},
+        message: "Vansco Stock Watch actions are unavailable. Showing saved comparison if available.",
+        warning: optionalTableReason(watchError),
+      });
+      return;
+    }
+
+    const safeWatchRows = watchRows || [];
 
     const pipelineCacheRows = (cacheRows || []).filter((row) => rowMatchesPipeline(row, pipeline));
     const currentRows = (cacheRows || []).filter((row) => row.is_currently_on_vansco !== false);
@@ -122,7 +160,7 @@ export default async function handler(request, response) {
     const actionByUrl = new Map();
     const actionByVanscoId = new Map();
 
-    (watchRows || []).forEach((row) => {
+    safeWatchRows.forEach((row) => {
       const normalized = normalizeActionRecord(row);
       const action = {
         ...normalized,
@@ -146,7 +184,7 @@ export default async function handler(request, response) {
       return applyMatchedAction(row, action);
     });
 
-    const ignoredOnly = (watchRows || [])
+    const ignoredOnly = safeWatchRows
       .map(normalizeActionRecord)
       .filter((row) => {
         const keys = actionKeys(row);
@@ -204,6 +242,6 @@ export default async function handler(request, response) {
       },
     });
   } catch (error) {
-    response.status(500).json({ ok: false, message: error?.message || "Could not load Vansco cache records." });
+    response.status(200).json({ ok: false, records: [], summary: {}, message: error?.message || "Could not load Vansco cache records." });
   }
 }

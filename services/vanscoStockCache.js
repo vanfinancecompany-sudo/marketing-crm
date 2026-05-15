@@ -17,6 +17,15 @@ function formatDateTime(value) {
   }).format(date);
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function runWhen(run) {
   return run?.completed_at || run?.updated_at || run?.started_at || "";
 }
@@ -263,11 +272,11 @@ function updateStatusHub(payload, fallbackStage = "processing_dragon_details", m
   }
   if (detailEl) {
     detailEl.innerHTML = `
-      <strong>Checked: ${processed} / ${total || "?"}</strong>
-      <span>Success: ${success}</span>
-      <span>Failed: ${failed}</span>
-      <span>Remaining: ${remaining}</span>
-      <span>Stage: ${stageLabel(stage)}</span>
+      <strong>Checked: ${escapeHtml(processed)} / ${escapeHtml(total || "?")}</strong>
+      <span>Success: ${escapeHtml(success)}</span>
+      <span>Failed: ${escapeHtml(failed)}</span>
+      <span>Remaining: ${escapeHtml(remaining)}</span>
+      <span>Stage: ${escapeHtml(stageLabel(stage))}</span>
     `;
   }
 }
@@ -298,8 +307,9 @@ export async function fetchVanscoCacheRecords(pipeline) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.ok === false) {
     showStatusHub();
-    updateStatusHub({}, "failed", payload.message || "Could not load Vansco cache records.");
-    throw new Error(payload.message || "Could not load Vansco cache records.");
+    const message = payload.message || "Vansco cache could not refresh. Showing saved comparison if available.";
+    updateStatusHub({}, "failed", message);
+    throw new Error(message);
   }
   return payload;
 }

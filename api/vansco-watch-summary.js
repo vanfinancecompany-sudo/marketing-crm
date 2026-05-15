@@ -17,8 +17,14 @@ export default async function handler(request, response) {
       checkedAt,
     });
   } catch (error) {
-    response.status(500).json({
+    response.status(200).json({
       ok: false,
+      summary: {
+        finance: { missing: 0, localNotVansco: 0, latestDetailCheck: "" },
+        rent2buy: { missing: 0, localNotVansco: 0, latestDetailCheck: "" },
+        cars: { missing: 0, localNotVansco: 0, latestDetailCheck: "" },
+      },
+      checkedAt: new Date().toISOString(),
       message: error?.message || "Could not load Vansco Stock Watch summary.",
     });
   }

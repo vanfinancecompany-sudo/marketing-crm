@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from "./_vansco-cache-utils.js";
+import { getSupabaseAdmin, optionalTableReason } from "./_vansco-cache-utils.js";
 
 const REFRESH_RUNS_TABLE = "vansco_refresh_runs";
 
@@ -45,6 +45,13 @@ export default async function handler(request, response) {
       latestCompletedScheduledRun,
     });
   } catch (error) {
-    response.status(500).json({ ok: false, message: error?.message || "Could not load Vansco refresh status." });
+    response.status(200).json({
+      ok: false,
+      active: false,
+      run: null,
+      latestScheduledRun: null,
+      latestCompletedScheduledRun: null,
+      message: optionalTableReason(error) || "Could not load Vansco refresh status.",
+    });
   }
 }

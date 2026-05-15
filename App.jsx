@@ -743,8 +743,8 @@ const [hiddenTodayReelIds, setHiddenTodayReelIds] = useState(() => {
       setSelectedVehicleId((prev) => prev || data[0]?.id || "");
       setSelectedVehicleIds((prev) => (prev.length ? prev : data[0]?.id ? [data[0].id] : []));
     } catch (error) {
-      setVehicles([]);
-      setVehiclesError(error.message || "Failed to load vehicles.");
+      setVehicles((prev) => prev);
+      setVehiclesError(`Stock could not refresh. Showing saved stock if available. ${error.message || ""}`.trim());
     } finally {
       setVehiclesLoading(false);
     }

@@ -3,15 +3,18 @@ import {
   WATCH_TABLE,
   extractVanscoId,
   getSupabaseAdmin,
+  isMissingOptionalTableError,
   normalizeActionRecord,
   normalizeCacheRow,
   normalizeRegistration as normalizeCacheRegistration,
   normalizeUrl,
+  optionalTableReason,
 } from "./_vansco-cache-utils.js";
 
 const PIPELINES = ["finance", "rent2buy", "cars"];
 const CAR_TABLE_CANDIDATES = ["cars_stock", "car_stock", "cars", "car_vehicles", "facebook_cars", "car_adverts"];
 const STOCK_LIMIT = 500;
+const EMPTY_PIPELINE_SUMMARY = { missing: 0, localNotVansco: 0, latestDetailCheck: "" };
 
 const VAN_KEYWORDS = /\b(transit|transit custom|custom|tipper|dropside|luton|crew van|minibus|panel van|box van|pickup|pick-up|chassis cab|relay|dispatch|scudo|daily|doblo|partner|berlingo|sprinter|crafter|vito|evito|e-vito|vivaro|movano|box-van|kangoo|trafic|traffic|master|ducato|talento|expert|transporter|caddy|maxus|combo|proace|primastar|nv200|nv300|bailey|pegasus|winnebago|motorhome|caravan|camper|townstar|vn5|levc|boxer|relay|jumper|bipper|nemo|vauxhall combo|citroen nemo|peugeot partner|mercedes-benz evito|mercedes evito)\b/i;
 const VAN_PHRASES = /\b(l1h1|l2h1|l3h2|panel van|double cab|crew cab|welfare|dropside|tail lift|twin side loading door|high roof|medium roof|long wheelbase|short wheelbase|crew bus|crew van|double cab|commercial vehicle|black cab|city van|leader van|minibus)\b/i;
@@ -253,14 +256,17 @@ function applyMatchedAction(cacheRecord, action) {
   };
 }
 
-async function fetchLocalVehiclesForPipeline(supabase, pipeline) {
+async function fetchLocalVehiclesForPipeline(supabase, pipeline, warnings = []) {
   if (pipeline === "finance") {
     const result = await supabase
       .from("facebook_adverts")
       .select("id, title, picture, price, vat, salePrice, vanDescription, vanSpec, weblink, is_active")
       .eq("is_active", true)
       .limit(STOCK_LIMIT);
-    if (result.error) throw new Error(`Failed to load finance vehicles: ${result.error.message}`);
+    if (result.error) {
+      warnings.push(`finance stock unavailable: ${optionalTableReason(result.error)}`);
+      return [];
+    }
     return (result.data || []).map(mapFinanceVehicleRow);
   }
 
@@ -270,7 +276,10 @@ async function fetchLocalVehiclesForPipeline(supabase, pipeline) {
       .select("id, registration, picture, monthly, week, initialRental, vanDescription, vanSpec, webLink, is_active")
       .eq("is_active", true)
       .limit(STOCK_LIMIT);
-    if (result.error) throw new Error(`Failed to load Rent2Buy vehicles: ${result.error.message}`);
+    if (result.error) {
+      warnings.push(`Rent2Buy stock unavailable: ${optionalTableReason(result.error)}`);
+      return [];
+    }
     return (result.data || []).map(mapRentVehicleRow);
   }
 
@@ -286,17 +295,23 @@ async function fetchLocalVehiclesForPipeline(supabase, pipeline) {
     if (rows.length) return rows.map(mapCarVehicleRow);
   }
 
-  throw new Error(`Failed to load Cars vehicles. Tried: ${errors.join(" | ") || CAR_TABLE_CANDIDATES.join(", ")}`);
+  warnings.push(`cars stock unavailable: ${errors.join(" | ") || CAR_TABLE_CANDIDATES.join(", ")}`);
+  return [];
 }
 
-async function fetchVanscoRecordsForPipeline(supabase, cacheRows, pipeline) {
+async function fetchVanscoRecordsForPipeline(supabase, cacheRows, pipeline, warnings = []) {
   const { data: watchRows, error: watchError } = await supabase
     .from(WATCH_TABLE)
     .select("*")
     .eq("pipeline", pipeline)
     .limit(2000);
 
-  if (watchError) throw watchError;
+  if (watchError) {
+    if (!isMissingOptionalTableError(watchError)) warnings.push(`Vansco watch actions unavailable: ${optionalTableReason(watchError)}`);
+    return (cacheRows || [])
+      .filter((row) => rowMatchesPipeline(row, pipeline))
+      .map((row) => normalizeCacheRow(row, null));
+  }
 
   const pipelineCacheRows = (cacheRows || []).filter((row) => rowMatchesPipeline(row, pipeline));
   const actionByRegistration = new Map();
@@ -346,10 +361,16 @@ async function fetchVanscoRecordsForPipeline(supabase, cacheRows, pipeline) {
 }
 
 async function buildPipelineSummary(supabase, cacheRows, pipeline) {
-  const [records, localVehicles] = await Promise.all([
-    fetchVanscoRecordsForPipeline(supabase, cacheRows, pipeline),
-    fetchLocalVehiclesForPipeline(supabase, pipeline),
+  const warnings = [];
+  const [recordsResult, localVehiclesResult] = await Promise.allSettled([
+    fetchVanscoRecordsForPipeline(supabase, cacheRows, pipeline, warnings),
+    fetchLocalVehiclesForPipeline(supabase, pipeline, warnings),
   ]);
+  const records = recordsResult.status === "fulfilled" ? recordsResult.value : [];
+  const localVehicles = localVehiclesResult.status === "fulfilled" ? localVehiclesResult.value : [];
+
+  if (recordsResult.status === "rejected") warnings.push(`Vansco records unavailable: ${optionalTableReason(recordsResult.reason)}`);
+  if (localVehiclesResult.status === "rejected") warnings.push(`local stock unavailable: ${optionalTableReason(localVehiclesResult.reason)}`);
 
   const currentRawRecords = dedupeDisplayRecords(records);
   const localRegistrations = new Set(
@@ -372,6 +393,7 @@ async function buildPipelineSummary(supabase, cacheRows, pipeline) {
     missing: activeRecords.filter((record) => record.displayStatus === "missing").length,
     localNotVansco: localNotVanscoRecords.length,
     latestDetailCheck: latestIso(currentRawRecords.map((record) => record.lastCheckedAt || record.lastSuccessfullyCheckedAt || record.updatedAt)),
+    warnings,
   };
 }
 
@@ -383,11 +405,19 @@ export async function buildVanscoWatchSummary() {
     .order("last_seen_in_url_list_at", { ascending: false })
     .limit(2000);
 
-  if (cacheError) throw cacheError;
+  if (cacheError) {
+    const fallback = Object.fromEntries(PIPELINES.map((pipeline) => [pipeline, { ...EMPTY_PIPELINE_SUMMARY, warnings: [optionalTableReason(cacheError)] }]));
+    return fallback;
+  }
 
-  const entries = await Promise.all(
+  const entries = await Promise.allSettled(
     PIPELINES.map(async (pipeline) => [pipeline, await buildPipelineSummary(supabase, cacheRows || [], pipeline)])
   );
 
-  return Object.fromEntries(entries);
+  return Object.fromEntries(
+    entries.map((entry, index) => {
+      if (entry.status === "fulfilled") return entry.value;
+      return [PIPELINES[index], { ...EMPTY_PIPELINE_SUMMARY, warnings: [optionalTableReason(entry.reason)] }];
+    })
+  );
 }

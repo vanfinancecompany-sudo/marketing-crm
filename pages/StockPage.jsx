@@ -52,10 +52,10 @@ export default function StockPage({
           </div>
         </div>
 
-        {vehiclesLoading ? (
+        {vehiclesError ? <div className="error-banner">{vehiclesError}</div> : null}
+
+        {vehiclesLoading && vehicles.length === 0 ? (
           <div className="empty-state">Loading live stock...</div>
-        ) : vehiclesError ? (
-          <div className="empty-state">Unable to load stock: {vehiclesError}</div>
         ) : vehicles.length === 0 ? (
           <div className="empty-state">No vehicles are ready for marketing yet.</div>
         ) : (
