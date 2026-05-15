@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from "./_vansco-cache-utils.js";
+import { getSupabaseAdmin, isMissingOptionalTableError } from "./_vansco-cache-utils.js";
 
 const LIVE_SESSIONS_TABLE = "site_live_sessions";
 
@@ -83,6 +83,15 @@ export default async function handler(request, response) {
       .single();
 
     if (result.error) {
+      if (isMissingOptionalTableError(result.error)) {
+        sendJson(response, 200, {
+          ok: false,
+          skipped: true,
+          reason: "table missing",
+        });
+        return;
+      }
+
       sendJson(response, 500, {
         ok: false,
         message: result.error.message || "Could not track live visitor.",
@@ -92,6 +101,15 @@ export default async function handler(request, response) {
 
     sendJson(response, 200, { ok: true, session: result.data });
   } catch (error) {
+    if (isMissingOptionalTableError(error)) {
+      sendJson(response, 200, {
+        ok: false,
+        skipped: true,
+        reason: "table missing",
+      });
+      return;
+    }
+
     sendJson(response, 500, {
       ok: false,
       message: error?.message || "Live visitor tracking failed.",

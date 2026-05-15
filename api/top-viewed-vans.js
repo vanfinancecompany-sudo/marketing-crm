@@ -1,4 +1,4 @@
-import { getSupabaseAdmin, normalizeRegistration } from "./_vansco-cache-utils.js";
+import { getSupabaseAdmin, isMissingOptionalTableError, normalizeRegistration } from "./_vansco-cache-utils.js";
 
 const VEHICLE_VIEWS_TABLE = "vehicle_views";
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
@@ -33,6 +33,16 @@ export default async function handler(request, response) {
       .limit(10000);
 
     if (result.error) {
+      if (isMissingOptionalTableError(result.error)) {
+        sendJson(response, 200, {
+          ok: true,
+          vans: [],
+          skipped: true,
+          reason: "table missing",
+        });
+        return;
+      }
+
       sendJson(response, 500, {
         ok: false,
         message: result.error.message || "Could not load top viewed vans.",
@@ -58,6 +68,16 @@ export default async function handler(request, response) {
 
     sendJson(response, 200, { ok: true, vans });
   } catch (error) {
+    if (isMissingOptionalTableError(error)) {
+      sendJson(response, 200, {
+        ok: true,
+        vans: [],
+        skipped: true,
+        reason: "table missing",
+      });
+      return;
+    }
+
     sendJson(response, 500, {
       ok: false,
       message: error?.message || "Top viewed vans API failed.",

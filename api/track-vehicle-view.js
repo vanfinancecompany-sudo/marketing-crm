@@ -1,4 +1,4 @@
-import { getSupabaseAdmin, normalizeRegistration } from "./_vansco-cache-utils.js";
+import { getSupabaseAdmin, isMissingOptionalTableError, normalizeRegistration } from "./_vansco-cache-utils.js";
 
 const VEHICLE_VIEWS_TABLE = "vehicle_views";
 
@@ -72,6 +72,15 @@ export default async function handler(request, response) {
       .single();
 
     if (result.error) {
+      if (isMissingOptionalTableError(result.error)) {
+        sendJson(response, 200, {
+          ok: false,
+          skipped: true,
+          reason: "table missing",
+        });
+        return;
+      }
+
       sendJson(response, 500, {
         ok: false,
         message: result.error.message || "Could not track vehicle view.",
@@ -81,6 +90,15 @@ export default async function handler(request, response) {
 
     sendJson(response, 200, { ok: true, view: result.data });
   } catch (error) {
+    if (isMissingOptionalTableError(error)) {
+      sendJson(response, 200, {
+        ok: false,
+        skipped: true,
+        reason: "table missing",
+      });
+      return;
+    }
+
     sendJson(response, 500, {
       ok: false,
       message: error?.message || "Vehicle view tracking failed.",

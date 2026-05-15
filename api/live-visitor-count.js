@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from "./_vansco-cache-utils.js";
+import { getSupabaseAdmin, isMissingOptionalTableError } from "./_vansco-cache-utils.js";
 
 const LIVE_SESSIONS_TABLE = "site_live_sessions";
 const ACTIVE_WINDOW_MS = 3 * 60 * 1000;
@@ -27,6 +27,16 @@ export default async function handler(request, response) {
       .gte("last_seen_at", since);
 
     if (result.error) {
+      if (isMissingOptionalTableError(result.error)) {
+        sendJson(response, 200, {
+          ok: true,
+          activeCount: 0,
+          skipped: true,
+          reason: "table missing",
+        });
+        return;
+      }
+
       sendJson(response, 500, {
         ok: false,
         message: result.error.message || "Could not load live visitor count.",
@@ -36,6 +46,16 @@ export default async function handler(request, response) {
 
     sendJson(response, 200, { ok: true, activeCount: result.count || 0 });
   } catch (error) {
+    if (isMissingOptionalTableError(error)) {
+      sendJson(response, 200, {
+        ok: true,
+        activeCount: 0,
+        skipped: true,
+        reason: "table missing",
+      });
+      return;
+    }
+
     sendJson(response, 500, {
       ok: false,
       message: error?.message || "Live visitor count API failed.",

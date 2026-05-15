@@ -26,6 +26,21 @@ export function getSupabaseAdmin() {
   return createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } });
 }
 
+export function isMissingOptionalTableError(error) {
+  const code = String(error?.code || error?.details || "");
+  const message = String(error?.message || error || "");
+  const text = `${code} ${message}`.toLowerCase();
+
+  return (
+    code === "42P01" ||
+    code.startsWith("PGRST") ||
+    text.includes("relation does not exist") ||
+    text.includes("table does not exist") ||
+    text.includes("could not find the table") ||
+    text.includes("schema cache")
+  );
+}
+
 export function compactWhitespace(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
