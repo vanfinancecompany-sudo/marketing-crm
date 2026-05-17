@@ -993,8 +993,8 @@ export default function PremiumReelStudioBetaPage({
     <section className="premium-reel-beta">
       <div className="premium-reel-beta__header">
         <div>
-          <span className="premium-reel-beta__eyebrow">Beta reel studio</span>
-          <h2>Premium Reel Studio Beta</h2>
+          <span className="premium-reel-beta__eyebrow">Premium reel studio</span>
+          <h2>Premium Reel Studio</h2>
           <p>Original stock photos, existing hooks, red/black/white frame, 1080 x 1920 MP4 export with the current reel audio.</p>
         </div>
         <div className="premium-reel-beta__status">{status}</div>
@@ -1172,7 +1172,7 @@ export default function PremiumReelStudioBetaPage({
             </div>
             <div>
               <span>Audio</span>
-              <strong>Existing Reel Factory music</strong>
+              <strong>Existing reel music</strong>
             </div>
             <div>
               <span>Duration</span>
@@ -1189,7 +1189,7 @@ export default function PremiumReelStudioBetaPage({
               }}
               disabled={isBusy}
             />
-            <span>Use existing Reel Factory music</span>
+            <span>Use existing reel music</span>
           </label>
 
           <div className="premium-reel-beta__actions">

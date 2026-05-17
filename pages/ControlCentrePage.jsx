@@ -71,7 +71,7 @@ export default function ControlCentrePage({ stats, onNavigate }) {
           <a className="button button--ghost control-action-button" href={MAIN_CRM_URL}>
             Add Manual Lead
           </a>
-          <button className="button button--primary control-action-button" onClick={() => onNavigate("Reel Factory")}>
+          <button className="button button--primary control-action-button" onClick={() => onNavigate("Premium Reel Studio")}>
             <span aria-hidden="true">🎥</span>
             Create Reel
           </button>
@@ -120,9 +120,9 @@ export default function ControlCentrePage({ stats, onNavigate }) {
             </button>
             <button className="button button--ghost" onClick={(event) => {
               stopCardClick(event);
-              onNavigate("Reel Factory");
+              onNavigate("Premium Reel Studio");
             }}>
-              Reel Factory
+              Premium Reel Studio
             </button>
             <button className="button button--ghost" onClick={(event) => {
               stopCardClick(event);

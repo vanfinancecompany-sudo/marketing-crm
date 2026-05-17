@@ -67,7 +67,7 @@ export default function DashboardPage({ stats, recentCreatives, topReels = [] })
         <div className="panel__header">
           <div>
             <h3>Recent Reel Activity</h3>
-            <p>Fresh reel assets from the separate Reel Factory workflow.</p>
+            <p>Fresh reel assets from the Premium Reel Studio workflow.</p>
           </div>
         </div>
 

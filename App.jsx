@@ -428,7 +428,7 @@ const VIEW_PATHS = {
   Stock: "/stock",
   "Vansco Stock Watch": "/vansco-stock-watch",
   "Reel Factory": "/reel-factory",
-  "Premium Reel Studio Beta": "/reel-studio-beta",
+  "Premium Reel Studio": "/premium-reel-studio",
   "Creative Library": "/creative-library",
   "Van Finance Facebook": "/van-finance-facebook",
   "Rent2Buy Facebook": "/rent2buy-facebook",
@@ -443,7 +443,9 @@ function viewFromPath() {
   if (path === "/stock") return "Stock";
   if (path === "/vansco-stock-watch") return "Vansco Stock Watch";
   if (path === "/reel-factory") return "Reel Factory";
-  if (path === "/reel-studio-beta" || path === "/premium-reels") return "Premium Reel Studio Beta";
+  if (path === "/premium-reel-studio" || path === "/reel-studio-beta" || path === "/premium-reels") {
+    return "Premium Reel Studio";
+  }
   if (path === "/creative-library") return "Creative Library";
   if (path === "/van-finance-facebook") return "Van Finance Facebook";
   if (path === "/rent2buy-facebook") return "Rent2Buy Facebook";
@@ -1686,9 +1688,12 @@ async function handleClearTodayReels() {
       quantity: 1,
       hookMode: "Single selected hook",
     }));
-    setGenerationMessage(`${vehicle.name || vehicle.reg || "Selected vehicle"} is ready in Reel Factory.`);
+    setGenerationMessage(`${vehicle.name || vehicle.reg || "Selected vehicle"} is ready in Premium Reel Studio.`);
     setCreativeError("");
-    setCurrentView("Reel Factory");
+    if (typeof window !== "undefined" && window.location.pathname !== VIEW_PATHS["Premium Reel Studio"]) {
+      window.history.pushState({}, "", VIEW_PATHS["Premium Reel Studio"]);
+    }
+    setCurrentView("Premium Reel Studio");
   }
 
   function handleToggleManualStockVehicle(vehicle) {
@@ -1745,13 +1750,13 @@ async function handleClearTodayReels() {
     setGenerationMessage(
       `${selectedItems.length} vehicle${selectedItems.length === 1 ? "" : "s"} added to the ${
         queueKey === "rent2buy" ? "Rent2Buy" : "Finance"
-      } manual reel queue.`
+      } premium reel queue.`
     );
     setCreativeError("");
-    if (typeof window !== "undefined" && window.location.pathname !== VIEW_PATHS["Reel Factory"]) {
-      window.history.pushState({}, "", VIEW_PATHS["Reel Factory"]);
+    if (typeof window !== "undefined" && window.location.pathname !== VIEW_PATHS["Premium Reel Studio"]) {
+      window.history.pushState({}, "", VIEW_PATHS["Premium Reel Studio"]);
     }
-    setCurrentView("Reel Factory");
+    setCurrentView("Premium Reel Studio");
   }
 
   function updateManualReelQueue(queueKey, updater) {
@@ -2181,7 +2186,7 @@ async function handleClearTodayReels() {
             onReelDownloadComplete={handleReelDownloadComplete}
           />
         );
-      case "Premium Reel Studio Beta":
+      case "Premium Reel Studio":
         return (
           <PremiumReelStudioBetaPage
             vehicles={vehicles}

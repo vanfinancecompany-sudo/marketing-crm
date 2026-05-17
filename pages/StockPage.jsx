@@ -31,7 +31,7 @@ export default function StockPage({
 
         <div className="selection-summary stock-selection-summary">
           <strong>{selectedCount} selected for manual reel queue</strong>
-          <span>Pick 10-15 vehicles, then send them to the Finance or Rent2Buy Reel Factory queue.</span>
+          <span>Pick 10-15 vehicles, then send them to the Finance or Rent2Buy Premium Reel Studio queue.</span>
           <div className="card-actions">
             <button
               className="button button--primary"
@@ -39,7 +39,7 @@ export default function StockPage({
               onClick={() => onAddSelectedToQueue?.("finance")}
               disabled={!selectedCount}
             >
-              Add selected to Finance Reel Queue
+              Add selected to Finance Premium Reel Queue
             </button>
             <button
               className="button button--ghost"
@@ -47,7 +47,7 @@ export default function StockPage({
               onClick={() => onAddSelectedToQueue?.("rent2buy")}
               disabled={!selectedCount}
             >
-              Add selected to Rent2Buy Reel Queue
+              Add selected to Rent2Buy Premium Reel Queue
             </button>
           </div>
         </div>
