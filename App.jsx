@@ -87,6 +87,10 @@ import {
   sanitizePostingCaption,
 } from "./utils/creativeUtils.js";
 import { downloadFacebookMp4Reel } from "./utils/facebookMp4Export.js";
+import {
+  downloadPremiumReelMp4,
+  generatePremiumReelVideoAsset,
+} from "./utils/premiumReelVideoExport.js";
 import { fetchMarketingVehicles } from "./services/marketingVehicles.js";
 import {
   deleteMarketingCreative,
@@ -1988,7 +1992,7 @@ async function handleClearTodayReels() {
       await downloadCreativeReelVideo(creative);
     } catch (error) {
       setCreativeError(
-        `${error.message || "This saved reel does not have downloadable video media."} Use Regenerate Facebook MP4 to rebuild it from current stock.`
+        `${error.message || "This saved reel does not have downloadable video media."} Use Regenerate Premium MP4 to rebuild it from current stock.`
       );
     }
   }
@@ -2012,7 +2016,7 @@ async function handleClearTodayReels() {
       [creative.id]: { state: "Preparing", error: "" },
     }));
     setCreativeError("");
-    setGenerationMessage(`Regenerating Facebook MP4 for ${vehicle.reg || vehicle.name || "vehicle"}...`);
+    setGenerationMessage(`Regenerating Premium MP4 for ${vehicle.reg || vehicle.name || "vehicle"}...`);
 
     try {
       const pipeline = vehicle.pipeline || creative.vehicle?.pipeline || "vanFinance";
@@ -2032,13 +2036,18 @@ async function handleClearTodayReels() {
         priceLine: defaultContent.priceLine,
         ctaLine: creative.cta || defaultContent.ctaLine,
       });
+      const premiumReel = {
+        ...reel,
+        uspLine: pipeline === "rent2buy" ? "NO CREDIT CHECKS" : "200 VANS IN STOCK",
+        vehicleName: reel.title || vehicle.name || vehicle.reg || "Vehicle",
+      };
       setCreativeRegenerationStatuses((current) => ({
         ...current,
         [creative.id]: { state: "Preparing", error: "" },
       }));
-      const videoAsset = await generateReelVideoAsset(reel);
+      const videoAsset = await generatePremiumReelVideoAsset(premiumReel);
       const regeneratedReel = {
-        ...reel,
+        ...premiumReel,
         url: videoAsset.url,
         downloadName: videoAsset.downloadName,
         posterUrl: videoAsset.posterUrl,
@@ -2054,7 +2063,7 @@ async function handleClearTodayReels() {
         mimeType: videoAsset.mimeType,
       }).catch(() => {});
 
-      await downloadFacebookMp4Reel(regeneratedReel, {
+      await downloadPremiumReelMp4(regeneratedReel, {
         onPreparing: () => {
           setCreativeRegenerationStatuses((current) => ({
             ...current,
@@ -2084,13 +2093,13 @@ async function handleClearTodayReels() {
         ...current,
         [creative.id]: { state: "Complete", error: "" },
       }));
-      setGenerationMessage(`Facebook MP4 regenerated for ${vehicle.reg || vehicle.name || "vehicle"}.`);
+      setGenerationMessage(`Premium MP4 regenerated for ${vehicle.reg || vehicle.name || "vehicle"}.`);
     } catch (error) {
       setCreativeRegenerationStatuses((current) => ({
         ...current,
         [creative.id]: {
           state: "Failed",
-          error: error.message || "Could not regenerate Facebook MP4.",
+          error: error.message || "Could not regenerate Premium MP4.",
         },
       }));
       setGenerationMessage("");

@@ -61,7 +61,7 @@ export default function CreativeLibraryPage({
                           onClick={() => onRegenerateFacebookMp4(creative)}
                           disabled={isRegenerating}
                         >
-                          {isCurrent ? "Converting MP4... please wait" : "Regenerate Facebook MP4"}
+                          {isCurrent ? "Converting MP4... please wait" : "Regenerate Premium MP4"}
                         </button>
                         <button className="button button--danger" onClick={() => onDelete(creative.id)} disabled={isRegenerating}>
                           Delete
