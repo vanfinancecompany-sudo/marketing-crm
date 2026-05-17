@@ -55,6 +55,7 @@ import DashboardPage from "./pages/DashboardPage.jsx";
 import StockPage from "./pages/StockPage.jsx";
 import VanscoStockWatchPage from "./pages/VanscoStockWatchPage.jsx";
 import ReelFactoryPage from "./pages/ReelFactoryPage.jsx";
+import PremiumReelStudioBetaPage from "./pages/PremiumReelStudioBetaPage.jsx";
 import CreativeLibraryPage from "./pages/CreativeLibraryPage.jsx";
 import PostingDeskPage from "./pages/PostingDeskPage.jsx";
 import {
@@ -427,6 +428,7 @@ const VIEW_PATHS = {
   Stock: "/stock",
   "Vansco Stock Watch": "/vansco-stock-watch",
   "Reel Factory": "/reel-factory",
+  "Premium Reel Studio Beta": "/reel-studio-beta",
   "Creative Library": "/creative-library",
   "Van Finance Facebook": "/van-finance-facebook",
   "Rent2Buy Facebook": "/rent2buy-facebook",
@@ -441,6 +443,7 @@ function viewFromPath() {
   if (path === "/stock") return "Stock";
   if (path === "/vansco-stock-watch") return "Vansco Stock Watch";
   if (path === "/reel-factory") return "Reel Factory";
+  if (path === "/reel-studio-beta" || path === "/premium-reels") return "Premium Reel Studio Beta";
   if (path === "/creative-library") return "Creative Library";
   if (path === "/van-finance-facebook") return "Van Finance Facebook";
   if (path === "/rent2buy-facebook") return "Rent2Buy Facebook";
@@ -2176,6 +2179,24 @@ async function handleClearTodayReels() {
             onRemoveManualQueuedVehicle={handleRemoveManualQueuedVehicle}
             onClearManualReelQueue={handleClearManualReelQueue}
             onReelDownloadComplete={handleReelDownloadComplete}
+          />
+        );
+      case "Premium Reel Studio Beta":
+        return (
+          <PremiumReelStudioBetaPage
+            vehicles={vehicles}
+            vehiclesLoading={vehiclesLoading}
+            vehiclesError={vehiclesError}
+            manualReelQueues={manualReelQueues}
+            manualReelQueueVehicles={manualReelQueueVehicles}
+            manualReelQueueLocks={manualReelQueueLocks}
+            manualReelQueueType={manualReelQueueType}
+            onManualReelQueueTypeChange={setManualReelQueueType}
+            onNextManualQueuedVehicle={handleNextManualQueuedVehicle}
+            onRemoveManualQueuedVehicle={handleRemoveManualQueuedVehicle}
+            onClearManualReelQueue={handleClearManualReelQueue}
+            onReelDownloadComplete={handleReelDownloadComplete}
+            reelActionLocks={reelActionLocks}
           />
         );
       case "Creative Library":
