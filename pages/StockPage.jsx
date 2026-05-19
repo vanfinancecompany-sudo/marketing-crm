@@ -16,6 +16,12 @@ export default function StockPage({
 }) {
   const selectedCount = selectedVehicleIds.length;
 
+  function refreshStockPage() {
+    if (typeof window !== "undefined") {
+      window.location.reload();
+    }
+  }
+
   return (
     <div className="page-stack">
       <section className="panel">
@@ -24,7 +30,17 @@ export default function StockPage({
             <h3>Stock</h3>
             <p>Browse vehicles and jump straight into creative generation.</p>
           </div>
-          <span className="status-pill">{vehicles.length} visible</span>
+          <div className="card-actions">
+            <button
+              className="button button--ghost"
+              type="button"
+              onClick={refreshStockPage}
+              disabled={vehiclesLoading}
+            >
+              {vehiclesLoading ? "Refreshing..." : "Refresh Stock"}
+            </button>
+            <span className="status-pill">{vehicles.length} visible</span>
+          </div>
         </div>
 
         <FilterBar filters={filters} onChange={onFiltersChange} />
