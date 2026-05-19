@@ -1,5 +1,8 @@
+import { useEffect } from "react";
 import VehicleCard from "../components/VehicleCard.jsx";
 import FilterBar from "../components/FilterBar.jsx";
+
+const STOCK_AUTO_REFRESH_MS = 30 * 60 * 1000;
 
 export default function StockPage({
   vehicles,
@@ -22,6 +25,16 @@ export default function StockPage({
     }
   }
 
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const interval = window.setInterval(() => {
+      refreshStockPage();
+    }, STOCK_AUTO_REFRESH_MS);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
   return (
     <div className="page-stack">
       <section className="panel">
@@ -40,6 +53,7 @@ export default function StockPage({
               {vehiclesLoading ? "Refreshing..." : "Refresh Stock"}
             </button>
             <span className="status-pill">{vehicles.length} visible</span>
+            <span className="status-pill">Auto-refresh 30 mins</span>
           </div>
         </div>
 
