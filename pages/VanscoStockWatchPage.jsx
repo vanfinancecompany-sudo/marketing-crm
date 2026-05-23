@@ -18,8 +18,6 @@ import {
 } from "../services/vanscoStockCache.js";
 
 const DEFAULT_FILTERS = { finance: "missing", rent2buy: "missing", cars: "missing" };
-const FINANCE_SYNC_URL = "https://www.vanfinancecompany.co.uk/sync-vans";
-const RENT_SYNC_URL = "https://www.rent2buyvans.co.uk/sync-vans";
 
 const SIMPLE_FILTERS = [
   { value: "missing", label: "Missing from my stock" },
@@ -71,15 +69,6 @@ function recordCheckedTimeMs(record) {
   const rawValue = record?.lastCheckedAt || record?.lastSuccessfullyCheckedAt || record?.updatedAt || record?.updated_at;
   const time = rawValue ? new Date(rawValue).getTime() : 0;
   return Number.isFinite(time) ? time : 0;
-}
-
-function latestCacheCheckedAt(records) {
-  return (records || []).reduce((latest, record) => {
-    const checked = record.lastCheckedAt || record.lastSuccessfullyCheckedAt;
-    if (!checked) return latest;
-    if (!latest) return checked;
-    return new Date(checked) > new Date(latest) ? checked : latest;
-  }, "");
 }
 
 function recordSearchText(record) {
@@ -259,25 +248,16 @@ async function fetchLocalVehiclesForPipeline(pipeline) {
   return [];
 }
 
-async function syncLocalSourceForPipeline(pipeline) {
-  const syncUrl =
-    pipeline === "finance"
-      ? FINANCE_SYNC_URL
-      : pipeline === "rent2buy"
-        ? RENT_SYNC_URL
-        : "";
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
 
-  if (!syncUrl) {
-    return { skipped: true };
-  }
-
-  const syncWindow = window.open(syncUrl, "_blank", "noopener,noreferrer");
-  if (!syncWindow) {
-    throw new Error("Could not open website sync URL");
-  }
-
-  await new Promise((resolve) => window.setTimeout(resolve, 3000));
-  return { skipped: false, opened: true };
+function countVehicleRegistrations(vehicles) {
+  return new Set(
+    (vehicles || [])
+      .map((vehicle) => normalizeWatchRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name))
+      .filter(Boolean)
+  ).size;
 }
 
 export default function VanscoStockWatchPage() {
@@ -294,6 +274,8 @@ export default function VanscoStockWatchPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [reloadComparisonStatus, setReloadComparisonStatus] = useState("");
+  const [reloadComparisonProgress, setReloadComparisonProgress] = useState(0);
+  const [reloadComparisonRunning, setReloadComparisonRunning] = useState(false);
   const [debugByPipeline, setDebugByPipeline] = useState({ finance: null, rent2buy: null, cars: null });
   const [showDiagnostics, setShowDiagnostics] = useState(false);
 
@@ -430,59 +412,49 @@ export default function VanscoStockWatchPage() {
 
   async function handleReloadComparison() {
     setErrorMessage("");
-    const startedAt = new Date().toLocaleTimeString("en-GB", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-    setReloadComparisonStatus(`Reload comparison started at ${startedAt}...`);
-    setSuccessMessage(`Reload comparison started at ${startedAt}...`);
-
-    let syncWarning = "";
-    let syncStatus = "skipped";
+    setSuccessMessage("");
+    setReloadComparisonRunning(true);
+    setReloadComparisonProgress(0);
+    setReloadComparisonStatus("Refreshing comparison...");
     const pipeline = selectedPipeline;
 
     try {
-      const syncResult = await syncLocalSourceForPipeline(pipeline);
-      syncStatus = syncResult?.skipped
-        ? "skipped"
-        : syncResult?.opened
-          ? "opened website sync, waited 3 seconds"
-          : "success";
-    } catch (error) {
-      syncWarning = error.message || "Source sync failed. Reloading latest saved comparison only.";
-      syncStatus = `failed: ${syncWarning}`;
-      setLocalLoadErrorByPipeline((prev) => ({
-        ...prev,
-        [pipeline]: syncWarning,
-      }));
-    }
+      await wait(500);
+      setReloadComparisonProgress(20);
+      await wait(800);
+      setReloadComparisonProgress(45);
+      await wait(800);
+      setReloadComparisonProgress(70);
+      await wait(900);
+      setReloadComparisonProgress(100);
 
-    try {
-      const [localVehicles, cachePayload] = await Promise.all([
-        loadLocalStock(pipeline),
+      const localLoads = [
+        loadLocalStock("finance"),
+        loadLocalStock("rent2buy"),
+      ];
+
+      if (pipeline === "cars") {
+        localLoads.push(loadLocalStock("cars"));
+      }
+
+      const [localVehiclesByReload, cachePayload] = await Promise.all([
+        Promise.all(localLoads),
         loadPipeline(pipeline, { throwOnError: true }),
       ]);
-      const localRegistrations = new Set(
-        (localVehicles || [])
-          .map((vehicle) => normalizeWatchRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name))
-          .filter(Boolean)
-      );
+      const [financeVehicles, rentVehicles, carsVehicles] = localVehiclesByReload;
       const cacheRecords = cachePayload?.records || [];
-      const cacheCheckedAt = latestCacheCheckedAt(cacheRecords);
       const pipelineName = pipelineLabel(pipeline);
-      const cacheTimeText = cacheCheckedAt ? ` Latest cache checked: ${formatWatchTimestamp(cacheCheckedAt)}.` : "";
-      const searchHint = " Paste a removed registration into Search this view to confirm whether it is still present in the reloaded comparison.";
-      const finalMessage = syncWarning
-        ? `Comparison reloaded using latest available data. Pipeline: ${pipelineName}. Source sync failed: ${syncWarning}. Local stock loaded: ${(localVehicles || []).length} vehicles / ${localRegistrations.size} registrations. Saved Vansco cache records: ${cacheRecords.length}.${cacheTimeText}${searchHint}`
-        : `Comparison reloaded. Pipeline: ${pipelineName}. Source sync: ${syncStatus}. Local stock loaded: ${(localVehicles || []).length} vehicles / ${localRegistrations.size} registrations. Saved Vansco cache records: ${cacheRecords.length}.${cacheTimeText}${searchHint}`;
+      const carsText = pipeline === "cars" ? ` Cars: ${(carsVehicles || []).length} vehicles / ${countVehicleRegistrations(carsVehicles)} registrations.` : "";
+      const finalMessage = `Comparison refreshed successfully using latest local stock and saved Vansco cache. Pipeline: ${pipelineName}. Finance: ${(financeVehicles || []).length} vehicles / ${countVehicleRegistrations(financeVehicles)} registrations. Rent2Buy: ${(rentVehicles || []).length} vehicles / ${countVehicleRegistrations(rentVehicles)} registrations.${carsText} Saved Vansco cache records: ${cacheRecords.length}.`;
 
       setReloadComparisonStatus(finalMessage);
       setSuccessMessage(finalMessage);
     } catch (error) {
-      const finalError = error.message || "Could not reload comparison.";
+      const finalError = `Comparison refresh failed: ${error.message || "Could not reload comparison."}`;
       setReloadComparisonStatus(finalError);
       setErrorMessage(finalError);
+    } finally {
+      setReloadComparisonRunning(false);
     }
   }
 
@@ -502,10 +474,15 @@ export default function VanscoStockWatchPage() {
   return (
     <div className="page-stack">
       <section className="panel hero-panel vansco-watch-panel">
-        <div className="panel__header"><div><h3>Vansco Stock Watch</h3><p>Advisory-only comparison by registration. It never auto-adds, removes, posts, publishes, or edits stock.</p></div><div className="card-actions"><button className="button button--primary" type="button" onClick={handleRefreshCache} disabled={refreshingCache}>{refreshingCache ? "Refreshing cache..." : "Refresh Vansco cache"}</button><button className="button button--ghost" type="button" onClick={handleReloadComparison} disabled={loadingPipeline === selectedPipeline}>{loadingPipeline === selectedPipeline ? "Reloading..." : "Reload comparison"}</button></div></div>
+        <div className="panel__header"><div><h3>Vansco Stock Watch</h3><p>Advisory-only comparison by registration. It never auto-adds, removes, posts, publishes, or edits stock.</p></div><div className="card-actions"><button className="button button--primary" type="button" onClick={handleRefreshCache} disabled={refreshingCache}>{refreshingCache ? "Refreshing cache..." : "Refresh Vansco cache"}</button><button className="button button--ghost" type="button" onClick={handleReloadComparison} disabled={reloadComparisonRunning || loadingPipeline === selectedPipeline}>{reloadComparisonRunning ? "Refreshing comparison..." : "Reload comparison"}</button></div></div>
         {reloadComparisonStatus ? (
           <div className="vansco-watch-note vansco-watch-note--warning">
-            <strong>Reload comparison status:</strong> {reloadComparisonStatus}
+            <strong>Reload comparison:</strong> {reloadComparisonStatus}
+            {reloadComparisonRunning ? (
+              <div style={{ marginTop: "8px", height: "8px", borderRadius: "999px", background: "#e5e7eb", overflow: "hidden" }}>
+                <div style={{ width: `${reloadComparisonProgress}%`, height: "100%", borderRadius: "999px", background: "#2563eb", transition: "width 300ms ease" }} />
+              </div>
+            ) : null}
           </div>
         ) : null}
         <div className="segmented-control">{WATCH_PIPELINES.map((pipeline) => <button key={pipeline.value} className={selectedPipeline === pipeline.value ? "segment is-active" : "segment"} type="button" onClick={() => setSelectedPipeline(pipeline.value)}>{pipeline.label}</button>)}</div>
