@@ -73,6 +73,15 @@ function recordCheckedTimeMs(record) {
   return Number.isFinite(time) ? time : 0;
 }
 
+function latestCacheCheckedAt(records) {
+  return (records || []).reduce((latest, record) => {
+    const checked = record.lastCheckedAt || record.lastSuccessfullyCheckedAt;
+    if (!checked) return latest;
+    if (!latest) return checked;
+    return new Date(checked) > new Date(latest) ? checked : latest;
+  }, "");
+}
+
 function recordSearchText(record) {
   return [record.registration, record.title, record.sourceStatus, record.workflowStatus, record.workflow_status, record.notes, record.stockUrl, record.localStockUrl]
     .filter(Boolean)
@@ -297,6 +306,7 @@ export default function VanscoStockWatchPage() {
       const payload = await fetchVanscoCacheRecords(pipeline);
       setRecordsByPipeline((prev) => ({ ...prev, [pipeline]: payload.records || [] }));
       setCacheSummaryByPipeline((prev) => ({ ...prev, [pipeline]: payload.summary || null }));
+      return payload;
     } catch (error) {
       setErrorMessage(error.message || "Could not load Vansco Stock Watch cache.");
       if (options.throwOnError) throw error;
@@ -425,27 +435,41 @@ export default function VanscoStockWatchPage() {
     setSuccessMessage("");
 
     let syncWarning = "";
+    let syncStatus = "skipped";
+    const pipeline = selectedPipeline;
 
     try {
-      await syncLocalSourceForPipeline(selectedPipeline);
+      const syncResult = await syncLocalSourceForPipeline(pipeline);
+      syncStatus = syncResult?.skipped ? "skipped" : "success";
     } catch (error) {
       syncWarning = error.message || "Source sync failed. Reloading latest saved comparison only.";
+      syncStatus = `failed: ${syncWarning}`;
       setLocalLoadErrorByPipeline((prev) => ({
         ...prev,
-        [selectedPipeline]: syncWarning,
+        [pipeline]: syncWarning,
       }));
     }
 
     try {
-      await Promise.all([
-        loadLocalStock(selectedPipeline),
-        loadPipeline(selectedPipeline, { throwOnError: true }),
+      const [localVehicles, cachePayload] = await Promise.all([
+        loadLocalStock(pipeline),
+        loadPipeline(pipeline, { throwOnError: true }),
       ]);
+      const localRegistrations = new Set(
+        (localVehicles || [])
+          .map((vehicle) => normalizeWatchRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name))
+          .filter(Boolean)
+      );
+      const cacheRecords = cachePayload?.records || [];
+      const cacheCheckedAt = latestCacheCheckedAt(cacheRecords);
+      const pipelineName = pipelineLabel(pipeline);
+      const cacheTimeText = cacheCheckedAt ? ` Latest cache checked: ${formatWatchTimestamp(cacheCheckedAt)}.` : "";
+      const searchHint = " Paste a removed registration into Search this view to confirm whether it is still present in the reloaded comparison.";
 
       setSuccessMessage(
         syncWarning
-          ? `Comparison reloaded using latest available local stock and saved Vansco cache. Warning: ${syncWarning}`
-          : "Comparison reloaded using latest local stock and saved Vansco cache."
+          ? `Comparison reloaded using latest available data. Source sync failed: ${syncWarning}. ${pipelineName} local stock loaded: ${(localVehicles || []).length} vehicles / ${localRegistrations.size} registrations. Saved Vansco cache records: ${cacheRecords.length}.${cacheTimeText}${searchHint}`
+          : `Comparison reloaded. Source sync: ${syncStatus}. ${pipelineName} local stock loaded: ${(localVehicles || []).length} vehicles / ${localRegistrations.size} registrations. Saved Vansco cache records: ${cacheRecords.length}.${cacheTimeText}${searchHint}`
       );
     } catch (error) {
       setErrorMessage(error.message || "Could not reload comparison.");
