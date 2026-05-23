@@ -296,6 +296,7 @@ export default function VanscoStockWatchPage() {
   const [refreshingCache, setRefreshingCache] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [reloadComparisonStatus, setReloadComparisonStatus] = useState("");
   const [debugByPipeline, setDebugByPipeline] = useState({ finance: null, rent2buy: null, cars: null });
   const [showDiagnostics, setShowDiagnostics] = useState(false);
 
@@ -432,7 +433,13 @@ export default function VanscoStockWatchPage() {
 
   async function handleReloadComparison() {
     setErrorMessage("");
-    setSuccessMessage("Reload comparison started...");
+    const startedAt = new Date().toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+    setReloadComparisonStatus(`Reload comparison started at ${startedAt}...`);
+    setSuccessMessage(`Reload comparison started at ${startedAt}...`);
 
     let syncWarning = "";
     let syncStatus = "skipped";
@@ -465,14 +472,16 @@ export default function VanscoStockWatchPage() {
       const pipelineName = pipelineLabel(pipeline);
       const cacheTimeText = cacheCheckedAt ? ` Latest cache checked: ${formatWatchTimestamp(cacheCheckedAt)}.` : "";
       const searchHint = " Paste a removed registration into Search this view to confirm whether it is still present in the reloaded comparison.";
+      const finalMessage = syncWarning
+        ? `Comparison reloaded using latest available data. Pipeline: ${pipelineName}. Source sync failed: ${syncWarning}. Local stock loaded: ${(localVehicles || []).length} vehicles / ${localRegistrations.size} registrations. Saved Vansco cache records: ${cacheRecords.length}.${cacheTimeText}${searchHint}`
+        : `Comparison reloaded. Pipeline: ${pipelineName}. Source sync: ${syncStatus}. Local stock loaded: ${(localVehicles || []).length} vehicles / ${localRegistrations.size} registrations. Saved Vansco cache records: ${cacheRecords.length}.${cacheTimeText}${searchHint}`;
 
-      setSuccessMessage(
-        syncWarning
-          ? `Comparison reloaded using latest available data. Pipeline: ${pipelineName}. Source sync failed: ${syncWarning}. Local stock loaded: ${(localVehicles || []).length} vehicles / ${localRegistrations.size} registrations. Saved Vansco cache records: ${cacheRecords.length}.${cacheTimeText}${searchHint}`
-          : `Comparison reloaded. Pipeline: ${pipelineName}. Source sync: ${syncStatus}. Local stock loaded: ${(localVehicles || []).length} vehicles / ${localRegistrations.size} registrations. Saved Vansco cache records: ${cacheRecords.length}.${cacheTimeText}${searchHint}`
-      );
+      setReloadComparisonStatus(finalMessage);
+      setSuccessMessage(finalMessage);
     } catch (error) {
-      setErrorMessage(error.message || "Could not reload comparison.");
+      const finalError = error.message || "Could not reload comparison.";
+      setReloadComparisonStatus(finalError);
+      setErrorMessage(finalError);
     }
   }
 
@@ -493,6 +502,11 @@ export default function VanscoStockWatchPage() {
     <div className="page-stack">
       <section className="panel hero-panel vansco-watch-panel">
         <div className="panel__header"><div><h3>Vansco Stock Watch</h3><p>Advisory-only comparison by registration. It never auto-adds, removes, posts, publishes, or edits stock.</p></div><div className="card-actions"><button className="button button--primary" type="button" onClick={handleRefreshCache} disabled={refreshingCache}>{refreshingCache ? "Refreshing cache..." : "Refresh Vansco cache"}</button><button className="button button--ghost" type="button" onClick={handleReloadComparison} disabled={loadingPipeline === selectedPipeline}>{loadingPipeline === selectedPipeline ? "Reloading..." : "Reload comparison"}</button></div></div>
+        {reloadComparisonStatus ? (
+          <div className="vansco-watch-note vansco-watch-note--warning">
+            <strong>Reload comparison status:</strong> {reloadComparisonStatus}
+          </div>
+        ) : null}
         <div className="segmented-control">{WATCH_PIPELINES.map((pipeline) => <button key={pipeline.value} className={selectedPipeline === pipeline.value ? "segment is-active" : "segment"} type="button" onClick={() => setSelectedPipeline(pipeline.value)}>{pipeline.label}</button>)}</div>
         <div className="stat-grid stat-grid--centered">
           <SummaryCard label={`Missing from ${pipelineLabel(selectedPipeline)}`} value={summary.missing} tone="blue" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "missing" }))} />
