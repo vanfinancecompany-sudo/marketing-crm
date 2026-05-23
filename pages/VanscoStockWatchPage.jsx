@@ -18,6 +18,8 @@ import {
 } from "../services/vanscoStockCache.js";
 
 const DEFAULT_FILTERS = { finance: "missing", rent2buy: "missing", cars: "missing" };
+const FINANCE_SYNC_URL = "https://www.vanfinancecompany.co.uk/sync-vans";
+const RENT_SYNC_URL = "https://www.rent2buyvans.co.uk/sync-vans";
 
 const SIMPLE_FILTERS = [
   { value: "missing", label: "Missing from my stock" },
@@ -248,6 +250,30 @@ async function fetchLocalVehiclesForPipeline(pipeline) {
   return [];
 }
 
+async function syncLocalSourceForPipeline(pipeline) {
+  const syncUrl =
+    pipeline === "finance"
+      ? FINANCE_SYNC_URL
+      : pipeline === "rent2buy"
+        ? RENT_SYNC_URL
+        : "";
+
+  if (!syncUrl) {
+    return { skipped: true };
+  }
+
+  const response = await fetch(syncUrl, {
+    method: "GET",
+    headers: { accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Could not sync ${pipelineLabel(pipeline)} source stock.`);
+  }
+
+  return response.json().catch(() => ({}));
+}
+
 export default function VanscoStockWatchPage() {
   const [selectedPipeline, setSelectedPipeline] = useState("finance");
   const [filtersByPipeline, setFiltersByPipeline] = useState(DEFAULT_FILTERS);
@@ -264,7 +290,7 @@ export default function VanscoStockWatchPage() {
   const [debugByPipeline, setDebugByPipeline] = useState({ finance: null, rent2buy: null, cars: null });
   const [showDiagnostics, setShowDiagnostics] = useState(false);
 
-  async function loadPipeline(pipeline = selectedPipeline) {
+  async function loadPipeline(pipeline = selectedPipeline, options = {}) {
     setLoadingPipeline(pipeline);
     setErrorMessage("");
     try {
@@ -273,6 +299,7 @@ export default function VanscoStockWatchPage() {
       setCacheSummaryByPipeline((prev) => ({ ...prev, [pipeline]: payload.summary || null }));
     } catch (error) {
       setErrorMessage(error.message || "Could not load Vansco Stock Watch cache.");
+      if (options.throwOnError) throw error;
     } finally {
       setLoadingPipeline("");
     }
@@ -286,17 +313,19 @@ export default function VanscoStockWatchPage() {
       setLocalVehiclesByPipeline((prev) => ({ ...prev, [pipeline]: vehicles }));
       setLocalRegistrationsByPipeline((prev) => ({ ...prev, [pipeline]: new Set(regs) }));
       setLocalLoadErrorByPipeline((prev) => ({ ...prev, [pipeline]: "" }));
+      return vehicles;
     } catch (error) {
       if (!isActive()) return;
       setLocalVehiclesByPipeline((prev) => ({ ...prev, [pipeline]: [] }));
       setLocalRegistrationsByPipeline((prev) => ({ ...prev, [pipeline]: new Set() }));
       setLocalLoadErrorByPipeline((prev) => ({ ...prev, [pipeline]: error.message || `Could not load ${pipelineLabel(pipeline)} local stock.` }));
+      throw error;
     }
   }
 
   useEffect(() => {
     let active = true;
-    loadLocalStock(selectedPipeline, () => active);
+    loadLocalStock(selectedPipeline, () => active).catch(() => null);
     return () => { active = false; };
   }, [selectedPipeline]);
 
@@ -392,10 +421,35 @@ export default function VanscoStockWatchPage() {
   }
 
   async function handleReloadComparison() {
-    await Promise.all([
-      loadLocalStock(selectedPipeline),
-      loadPipeline(selectedPipeline),
-    ]);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    let syncWarning = "";
+
+    try {
+      await syncLocalSourceForPipeline(selectedPipeline);
+    } catch (error) {
+      syncWarning = error.message || "Source sync failed. Reloading latest saved comparison only.";
+      setLocalLoadErrorByPipeline((prev) => ({
+        ...prev,
+        [selectedPipeline]: syncWarning,
+      }));
+    }
+
+    try {
+      await Promise.all([
+        loadLocalStock(selectedPipeline),
+        loadPipeline(selectedPipeline, { throwOnError: true }),
+      ]);
+
+      setSuccessMessage(
+        syncWarning
+          ? `Comparison reloaded using latest available local stock and saved Vansco cache. Warning: ${syncWarning}`
+          : "Comparison reloaded using latest local stock and saved Vansco cache."
+      );
+    } catch (error) {
+      setErrorMessage(error.message || "Could not reload comparison.");
+    }
   }
 
   function handleRecordSaved(originalRecord, actionRecord) {
