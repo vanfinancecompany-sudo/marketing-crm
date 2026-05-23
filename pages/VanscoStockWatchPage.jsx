@@ -432,7 +432,7 @@ export default function VanscoStockWatchPage() {
 
   async function handleReloadComparison() {
     setErrorMessage("");
-    setSuccessMessage("");
+    setSuccessMessage("Reload comparison started...");
 
     let syncWarning = "";
     let syncStatus = "skipped";
@@ -468,8 +468,8 @@ export default function VanscoStockWatchPage() {
 
       setSuccessMessage(
         syncWarning
-          ? `Comparison reloaded using latest available data. Source sync failed: ${syncWarning}. ${pipelineName} local stock loaded: ${(localVehicles || []).length} vehicles / ${localRegistrations.size} registrations. Saved Vansco cache records: ${cacheRecords.length}.${cacheTimeText}${searchHint}`
-          : `Comparison reloaded. Source sync: ${syncStatus}. ${pipelineName} local stock loaded: ${(localVehicles || []).length} vehicles / ${localRegistrations.size} registrations. Saved Vansco cache records: ${cacheRecords.length}.${cacheTimeText}${searchHint}`
+          ? `Comparison reloaded using latest available data. Pipeline: ${pipelineName}. Source sync failed: ${syncWarning}. Local stock loaded: ${(localVehicles || []).length} vehicles / ${localRegistrations.size} registrations. Saved Vansco cache records: ${cacheRecords.length}.${cacheTimeText}${searchHint}`
+          : `Comparison reloaded. Pipeline: ${pipelineName}. Source sync: ${syncStatus}. Local stock loaded: ${(localVehicles || []).length} vehicles / ${localRegistrations.size} registrations. Saved Vansco cache records: ${cacheRecords.length}.${cacheTimeText}${searchHint}`
       );
     } catch (error) {
       setErrorMessage(error.message || "Could not reload comparison.");
