@@ -271,16 +271,13 @@ async function syncLocalSourceForPipeline(pipeline) {
     return { skipped: true };
   }
 
-  const response = await fetch(syncUrl, {
-    method: "GET",
-    headers: { accept: "application/json" },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Could not sync ${pipelineLabel(pipeline)} source stock.`);
+  const syncWindow = window.open(syncUrl, "_blank", "noopener,noreferrer");
+  if (!syncWindow) {
+    throw new Error("Could not open website sync URL");
   }
 
-  return response.json().catch(() => ({}));
+  await new Promise((resolve) => window.setTimeout(resolve, 3000));
+  return { skipped: false, opened: true };
 }
 
 export default function VanscoStockWatchPage() {
@@ -447,7 +444,11 @@ export default function VanscoStockWatchPage() {
 
     try {
       const syncResult = await syncLocalSourceForPipeline(pipeline);
-      syncStatus = syncResult?.skipped ? "skipped" : "success";
+      syncStatus = syncResult?.skipped
+        ? "skipped"
+        : syncResult?.opened
+          ? "opened website sync, waited 3 seconds"
+          : "success";
     } catch (error) {
       syncWarning = error.message || "Source sync failed. Reloading latest saved comparison only.";
       syncStatus = `failed: ${syncWarning}`;
