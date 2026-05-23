@@ -18,6 +18,8 @@ import {
 } from "../services/vanscoStockCache.js";
 
 const DEFAULT_FILTERS = { finance: "missing", rent2buy: "missing", cars: "missing" };
+const FINANCE_SYNC_URL = "https://www.vanfinancecompany.co.uk/sync-vans";
+const RENT_SYNC_URL = "https://www.rent2buyvans.co.uk/sync-vans";
 
 const SIMPLE_FILTERS = [
   { value: "missing", label: "Missing from my stock" },
@@ -69,6 +71,15 @@ function recordCheckedTimeMs(record) {
   const rawValue = record?.lastCheckedAt || record?.lastSuccessfullyCheckedAt || record?.updatedAt || record?.updated_at;
   const time = rawValue ? new Date(rawValue).getTime() : 0;
   return Number.isFinite(time) ? time : 0;
+}
+
+function latestCacheCheckedAt(records) {
+  return (records || []).reduce((latest, record) => {
+    const checked = record.lastCheckedAt || record.lastSuccessfullyCheckedAt;
+    if (!checked) return latest;
+    if (!latest) return checked;
+    return new Date(checked) > new Date(latest) ? checked : latest;
+  }, "");
 }
 
 function recordSearchText(record) {
@@ -248,6 +259,30 @@ async function fetchLocalVehiclesForPipeline(pipeline) {
   return [];
 }
 
+async function syncLocalSourceForPipeline(pipeline) {
+  const syncUrl =
+    pipeline === "finance"
+      ? FINANCE_SYNC_URL
+      : pipeline === "rent2buy"
+        ? RENT_SYNC_URL
+        : "";
+
+  if (!syncUrl) {
+    return { skipped: true };
+  }
+
+  const response = await fetch(syncUrl, {
+    method: "GET",
+    headers: { accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Could not sync ${pipelineLabel(pipeline)} source stock.`);
+  }
+
+  return response.json().catch(() => ({}));
+}
+
 export default function VanscoStockWatchPage() {
   const [selectedPipeline, setSelectedPipeline] = useState("finance");
   const [filtersByPipeline, setFiltersByPipeline] = useState(DEFAULT_FILTERS);
@@ -264,38 +299,43 @@ export default function VanscoStockWatchPage() {
   const [debugByPipeline, setDebugByPipeline] = useState({ finance: null, rent2buy: null, cars: null });
   const [showDiagnostics, setShowDiagnostics] = useState(false);
 
-  async function loadPipeline(pipeline = selectedPipeline) {
+  async function loadPipeline(pipeline = selectedPipeline, options = {}) {
     setLoadingPipeline(pipeline);
     setErrorMessage("");
     try {
       const payload = await fetchVanscoCacheRecords(pipeline);
       setRecordsByPipeline((prev) => ({ ...prev, [pipeline]: payload.records || [] }));
       setCacheSummaryByPipeline((prev) => ({ ...prev, [pipeline]: payload.summary || null }));
+      return payload;
     } catch (error) {
       setErrorMessage(error.message || "Could not load Vansco Stock Watch cache.");
+      if (options.throwOnError) throw error;
     } finally {
       setLoadingPipeline("");
     }
   }
 
+  async function loadLocalStock(pipeline = selectedPipeline, isActive = () => true) {
+    try {
+      const vehicles = await fetchLocalVehiclesForPipeline(pipeline);
+      if (!isActive()) return;
+      const regs = vehicles.map((vehicle) => normalizeWatchRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name)).filter(Boolean);
+      setLocalVehiclesByPipeline((prev) => ({ ...prev, [pipeline]: vehicles }));
+      setLocalRegistrationsByPipeline((prev) => ({ ...prev, [pipeline]: new Set(regs) }));
+      setLocalLoadErrorByPipeline((prev) => ({ ...prev, [pipeline]: "" }));
+      return vehicles;
+    } catch (error) {
+      if (!isActive()) return;
+      setLocalVehiclesByPipeline((prev) => ({ ...prev, [pipeline]: [] }));
+      setLocalRegistrationsByPipeline((prev) => ({ ...prev, [pipeline]: new Set() }));
+      setLocalLoadErrorByPipeline((prev) => ({ ...prev, [pipeline]: error.message || `Could not load ${pipelineLabel(pipeline)} local stock.` }));
+      throw error;
+    }
+  }
+
   useEffect(() => {
     let active = true;
-    async function loadLocalRegistrations() {
-      try {
-        const vehicles = await fetchLocalVehiclesForPipeline(selectedPipeline);
-        if (!active) return;
-        const regs = vehicles.map((vehicle) => normalizeWatchRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name)).filter(Boolean);
-        setLocalVehiclesByPipeline((prev) => ({ ...prev, [selectedPipeline]: vehicles }));
-        setLocalRegistrationsByPipeline((prev) => ({ ...prev, [selectedPipeline]: new Set(regs) }));
-        setLocalLoadErrorByPipeline((prev) => ({ ...prev, [selectedPipeline]: "" }));
-      } catch (error) {
-        if (!active) return;
-        setLocalVehiclesByPipeline((prev) => ({ ...prev, [selectedPipeline]: [] }));
-        setLocalRegistrationsByPipeline((prev) => ({ ...prev, [selectedPipeline]: new Set() }));
-        setLocalLoadErrorByPipeline((prev) => ({ ...prev, [selectedPipeline]: error.message || `Could not load ${pipelineLabel(selectedPipeline)} local stock.` }));
-      }
-    }
-    loadLocalRegistrations();
+    loadLocalStock(selectedPipeline, () => active).catch(() => null);
     return () => { active = false; };
   }, [selectedPipeline]);
 
@@ -390,6 +430,52 @@ export default function VanscoStockWatchPage() {
     }
   }
 
+  async function handleReloadComparison() {
+    setErrorMessage("");
+    setSuccessMessage("Reload comparison started...");
+
+    let syncWarning = "";
+    let syncStatus = "skipped";
+    const pipeline = selectedPipeline;
+
+    try {
+      const syncResult = await syncLocalSourceForPipeline(pipeline);
+      syncStatus = syncResult?.skipped ? "skipped" : "success";
+    } catch (error) {
+      syncWarning = error.message || "Source sync failed. Reloading latest saved comparison only.";
+      syncStatus = `failed: ${syncWarning}`;
+      setLocalLoadErrorByPipeline((prev) => ({
+        ...prev,
+        [pipeline]: syncWarning,
+      }));
+    }
+
+    try {
+      const [localVehicles, cachePayload] = await Promise.all([
+        loadLocalStock(pipeline),
+        loadPipeline(pipeline, { throwOnError: true }),
+      ]);
+      const localRegistrations = new Set(
+        (localVehicles || [])
+          .map((vehicle) => normalizeWatchRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name))
+          .filter(Boolean)
+      );
+      const cacheRecords = cachePayload?.records || [];
+      const cacheCheckedAt = latestCacheCheckedAt(cacheRecords);
+      const pipelineName = pipelineLabel(pipeline);
+      const cacheTimeText = cacheCheckedAt ? ` Latest cache checked: ${formatWatchTimestamp(cacheCheckedAt)}.` : "";
+      const searchHint = " Paste a removed registration into Search this view to confirm whether it is still present in the reloaded comparison.";
+
+      setSuccessMessage(
+        syncWarning
+          ? `Comparison reloaded using latest available data. Pipeline: ${pipelineName}. Source sync failed: ${syncWarning}. Local stock loaded: ${(localVehicles || []).length} vehicles / ${localRegistrations.size} registrations. Saved Vansco cache records: ${cacheRecords.length}.${cacheTimeText}${searchHint}`
+          : `Comparison reloaded. Pipeline: ${pipelineName}. Source sync: ${syncStatus}. Local stock loaded: ${(localVehicles || []).length} vehicles / ${localRegistrations.size} registrations. Saved Vansco cache records: ${cacheRecords.length}.${cacheTimeText}${searchHint}`
+      );
+    } catch (error) {
+      setErrorMessage(error.message || "Could not reload comparison.");
+    }
+  }
+
   function handleRecordSaved(originalRecord, actionRecord) {
     const originalRegistration = normalizeWatchRegistration(originalRecord.registration);
     const savedRegistration = normalizeWatchRegistration(actionRecord.registration);
@@ -406,7 +492,7 @@ export default function VanscoStockWatchPage() {
   return (
     <div className="page-stack">
       <section className="panel hero-panel vansco-watch-panel">
-        <div className="panel__header"><div><h3>Vansco Stock Watch</h3><p>Advisory-only comparison by registration. It never auto-adds, removes, posts, publishes, or edits stock.</p></div><div className="card-actions"><button className="button button--primary" type="button" onClick={handleRefreshCache} disabled={refreshingCache}>{refreshingCache ? "Refreshing cache..." : "Refresh Vansco cache"}</button><button className="button button--ghost" type="button" onClick={() => loadPipeline(selectedPipeline)} disabled={loadingPipeline === selectedPipeline}>{loadingPipeline === selectedPipeline ? "Reloading..." : "Reload comparison"}</button></div></div>
+        <div className="panel__header"><div><h3>Vansco Stock Watch</h3><p>Advisory-only comparison by registration. It never auto-adds, removes, posts, publishes, or edits stock.</p></div><div className="card-actions"><button className="button button--primary" type="button" onClick={handleRefreshCache} disabled={refreshingCache}>{refreshingCache ? "Refreshing cache..." : "Refresh Vansco cache"}</button><button className="button button--ghost" type="button" onClick={handleReloadComparison} disabled={loadingPipeline === selectedPipeline}>{loadingPipeline === selectedPipeline ? "Reloading..." : "Reload comparison"}</button></div></div>
         <div className="segmented-control">{WATCH_PIPELINES.map((pipeline) => <button key={pipeline.value} className={selectedPipeline === pipeline.value ? "segment is-active" : "segment"} type="button" onClick={() => setSelectedPipeline(pipeline.value)}>{pipeline.label}</button>)}</div>
         <div className="stat-grid stat-grid--centered">
           <SummaryCard label={`Missing from ${pipelineLabel(selectedPipeline)}`} value={summary.missing} tone="blue" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "missing" }))} />
