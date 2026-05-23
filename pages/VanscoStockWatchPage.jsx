@@ -278,24 +278,25 @@ export default function VanscoStockWatchPage() {
     }
   }
 
+  async function loadLocalStock(pipeline = selectedPipeline, isActive = () => true) {
+    try {
+      const vehicles = await fetchLocalVehiclesForPipeline(pipeline);
+      if (!isActive()) return;
+      const regs = vehicles.map((vehicle) => normalizeWatchRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name)).filter(Boolean);
+      setLocalVehiclesByPipeline((prev) => ({ ...prev, [pipeline]: vehicles }));
+      setLocalRegistrationsByPipeline((prev) => ({ ...prev, [pipeline]: new Set(regs) }));
+      setLocalLoadErrorByPipeline((prev) => ({ ...prev, [pipeline]: "" }));
+    } catch (error) {
+      if (!isActive()) return;
+      setLocalVehiclesByPipeline((prev) => ({ ...prev, [pipeline]: [] }));
+      setLocalRegistrationsByPipeline((prev) => ({ ...prev, [pipeline]: new Set() }));
+      setLocalLoadErrorByPipeline((prev) => ({ ...prev, [pipeline]: error.message || `Could not load ${pipelineLabel(pipeline)} local stock.` }));
+    }
+  }
+
   useEffect(() => {
     let active = true;
-    async function loadLocalRegistrations() {
-      try {
-        const vehicles = await fetchLocalVehiclesForPipeline(selectedPipeline);
-        if (!active) return;
-        const regs = vehicles.map((vehicle) => normalizeWatchRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name)).filter(Boolean);
-        setLocalVehiclesByPipeline((prev) => ({ ...prev, [selectedPipeline]: vehicles }));
-        setLocalRegistrationsByPipeline((prev) => ({ ...prev, [selectedPipeline]: new Set(regs) }));
-        setLocalLoadErrorByPipeline((prev) => ({ ...prev, [selectedPipeline]: "" }));
-      } catch (error) {
-        if (!active) return;
-        setLocalVehiclesByPipeline((prev) => ({ ...prev, [selectedPipeline]: [] }));
-        setLocalRegistrationsByPipeline((prev) => ({ ...prev, [selectedPipeline]: new Set() }));
-        setLocalLoadErrorByPipeline((prev) => ({ ...prev, [selectedPipeline]: error.message || `Could not load ${pipelineLabel(selectedPipeline)} local stock.` }));
-      }
-    }
-    loadLocalRegistrations();
+    loadLocalStock(selectedPipeline, () => active);
     return () => { active = false; };
   }, [selectedPipeline]);
 
@@ -390,6 +391,13 @@ export default function VanscoStockWatchPage() {
     }
   }
 
+  async function handleReloadComparison() {
+    await Promise.all([
+      loadLocalStock(selectedPipeline),
+      loadPipeline(selectedPipeline),
+    ]);
+  }
+
   function handleRecordSaved(originalRecord, actionRecord) {
     const originalRegistration = normalizeWatchRegistration(originalRecord.registration);
     const savedRegistration = normalizeWatchRegistration(actionRecord.registration);
@@ -406,7 +414,7 @@ export default function VanscoStockWatchPage() {
   return (
     <div className="page-stack">
       <section className="panel hero-panel vansco-watch-panel">
-        <div className="panel__header"><div><h3>Vansco Stock Watch</h3><p>Advisory-only comparison by registration. It never auto-adds, removes, posts, publishes, or edits stock.</p></div><div className="card-actions"><button className="button button--primary" type="button" onClick={handleRefreshCache} disabled={refreshingCache}>{refreshingCache ? "Refreshing cache..." : "Refresh Vansco cache"}</button><button className="button button--ghost" type="button" onClick={() => loadPipeline(selectedPipeline)} disabled={loadingPipeline === selectedPipeline}>{loadingPipeline === selectedPipeline ? "Reloading..." : "Reload comparison"}</button></div></div>
+        <div className="panel__header"><div><h3>Vansco Stock Watch</h3><p>Advisory-only comparison by registration. It never auto-adds, removes, posts, publishes, or edits stock.</p></div><div className="card-actions"><button className="button button--primary" type="button" onClick={handleRefreshCache} disabled={refreshingCache}>{refreshingCache ? "Refreshing cache..." : "Refresh Vansco cache"}</button><button className="button button--ghost" type="button" onClick={handleReloadComparison} disabled={loadingPipeline === selectedPipeline}>{loadingPipeline === selectedPipeline ? "Reloading..." : "Reload comparison"}</button></div></div>
         <div className="segmented-control">{WATCH_PIPELINES.map((pipeline) => <button key={pipeline.value} className={selectedPipeline === pipeline.value ? "segment is-active" : "segment"} type="button" onClick={() => setSelectedPipeline(pipeline.value)}>{pipeline.label}</button>)}</div>
         <div className="stat-grid stat-grid--centered">
           <SummaryCard label={`Missing from ${pipelineLabel(selectedPipeline)}`} value={summary.missing} tone="blue" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "missing" }))} />
