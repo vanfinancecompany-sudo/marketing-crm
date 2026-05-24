@@ -29,6 +29,30 @@ function getPostButtonLabel(destination) {
   return destination === "Facebook Marketplace" ? "Open Marketplace" : "Post to Facebook";
 }
 
+function getPostingPipelineLabel(destination, vehicle) {
+  if (destination === "Van Finance Facebook") return "Finance";
+  if (destination === "Rent2Buy Facebook" || destination === "Facebook Marketplace") return "Rent2Buy";
+  return vehicle.pipeline === "rent2buy" ? "Rent2Buy" : "Finance";
+}
+
+function PostingAdvertImage({ vehicle, postingDestination }) {
+  const useFinanceCreative =
+    postingDestination === "Van Finance Facebook" && vehicle.originalPipeline === "rent2buy";
+
+  if (!useFinanceCreative) {
+    return <img src={vehicle.image} alt={vehicle.name} className="posting-card__image" />;
+  }
+
+  return (
+    <div className="posting-card__image posting-card__image--finance-creative" aria-label={vehicle.name}>
+      <div className="posting-finance-creative__brand">Van Finance Company</div>
+      <div className="posting-finance-creative__offer">From £99 deposit</div>
+      <div className="posting-finance-creative__vehicle">{vehicle.name || vehicle.reg || "Finance van"}</div>
+      <div className="posting-finance-creative__meta">{vehicle.reg || "Finance available"}</div>
+    </div>
+  );
+}
+
 function PostingVehicleCard({
   vehicle,
   accent,
@@ -40,10 +64,10 @@ function PostingVehicleCard({
 }) {
   return (
     <article className={`posting-card posting-card--${accent}`}>
-      <img src={vehicle.image} alt={vehicle.name} className="posting-card__image" />
+      <PostingAdvertImage vehicle={vehicle} postingDestination={postingDestination} />
       <div className="posting-card__body">
         <div className="creative-card__tags">
-          <span className="tag">{vehicle.pipeline === "rent2buy" ? "Rent2Buy" : "Finance"}</span>
+          <span className="tag">{getPostingPipelineLabel(postingDestination, vehicle)}</span>
           <span className="tag">{vehicle.reg || vehicle.name}</span>
         </div>
         <h3>{vehicle.name}</h3>
@@ -74,14 +98,17 @@ function PostingVehicleCard({
 
 function PostedTodayCard({ item }) {
   const vehicle = item.vehicle;
-  const accent = vehicle.pipeline === "rent2buy" ? "rent" : "finance";
+  const accent = item.destination === "Rent2Buy Facebook" || item.destination === "Facebook Marketplace"
+    ? "rent"
+    : "finance";
+  const pipelineLabel = getPostingPipelineLabel(item.destination, vehicle);
 
   return (
     <article className={`posted-ready-card posted-ready-card--${accent}`}>
       <img src={vehicle.image} alt={vehicle.name} />
       <div className="posted-ready-card__body">
         <div className="creative-card__tags">
-          <span className="tag">{vehicle.pipeline === "rent2buy" ? "Rent2Buy posted" : "Finance posted"}</span>
+          <span className="tag">{pipelineLabel} posted</span>
           {item.destination ? <span className="tag">{item.destination}</span> : null}
           <span className="tag">Stock posted</span>
         </div>

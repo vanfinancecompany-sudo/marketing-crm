@@ -97,7 +97,7 @@ For more details please visit -
 ${title}`;
   }
 
-  if (destination === "Rent2Buy Facebook" || vehicle.pipeline === "rent2buy") {
+  if (destination === "Rent2Buy Facebook") {
     const rentHooks = ["No credit checks required", "Rent2Buy this van", "Own the van at the end"];
     const primaryHook = rentHooks[index % rentHooks.length];
     const supportHooks = ["Not dead money", "Work towards ownership", "Get back to work fast"];
@@ -395,7 +395,7 @@ Apply now and get approved today.
 ${rentVehicleUrl(vehicle)}`);
   }
 
-  if (destination === "Rent2Buy Facebook" || vehicle.pipeline === "rent2buy") {
+  if (destination === "Rent2Buy Facebook") {
     return sanitizePostingCaption(`NO CREDIT CHECK | ${formatMonthlyMth(vehicle.monthly || "available")}
 
 RENT IT! - DRIVE IT! - OWN IT!

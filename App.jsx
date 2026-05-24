@@ -656,7 +656,7 @@ function isRent2BuyEligible(vehicle) {
 
 function asPipelineVehicle(vehicle, pipeline) {
   if (!vehicle || vehicle.pipeline === pipeline) return vehicle;
-  return { ...vehicle, pipeline };
+  return { ...vehicle, originalPipeline: vehicle.originalPipeline || vehicle.pipeline, pipeline };
 }
 
 function getManualVehicleImage(vehicle) {
@@ -1556,7 +1556,51 @@ async function handleClearTodayReels() {
   }
 }
 
-  async function downloadAdvertImage(vehicle) {
+  function escapeSvgText(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  async function downloadFinanceAdvertImage(vehicle) {
+    const title = escapeSvgText(vehicle.name || vehicle.vanDescription || vehicle.reg || "Finance van");
+    const reg = escapeSvgText(vehicle.reg || "");
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="750" viewBox="0 0 1200 750">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="750" fill="url(#bg)"/>
+  <rect x="70" y="70" width="1060" height="610" rx="38" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.26)" stroke-width="3"/>
+  <text x="600" y="170" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" font-weight="900" fill="#ffffff" letter-spacing="5">VAN FINANCE COMPANY</text>
+  <text x="600" y="310" text-anchor="middle" font-family="Arial, sans-serif" font-size="78" font-weight="900" fill="#ffffff">FROM £99 DEPOSIT</text>
+  <text x="600" y="420" text-anchor="middle" font-family="Arial, sans-serif" font-size="38" font-weight="800" fill="#dbeafe">${title}</text>
+  <text x="600" y="500" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" font-weight="800" fill="#bfdbfe">${reg}</text>
+  <text x="600" y="600" text-anchor="middle" font-family="Arial, sans-serif" font-size="32" font-weight="900" fill="#ffffff">BAD CREDIT CONSIDERED | SELF-EMPLOYED WELCOME</text>
+</svg>`;
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    const blobUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = `${String(vehicle.description || vehicle.name || vehicle.reg || "finance-van")
+      .replace(/[^a-z0-9]+/gi, "-")
+      .toLowerCase()}-finance.svg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(blobUrl);
+  }
+
+  async function downloadAdvertImage(vehicle, destination) {
+    if (destination === "Van Finance Facebook" && vehicle.originalPipeline === "rent2buy") {
+      await downloadFinanceAdvertImage(vehicle);
+      return;
+    }
+
     const imageUrl = vehicle.image || vehicle.picture;
     if (!imageUrl) return;
 
@@ -1588,7 +1632,7 @@ async function handleClearTodayReels() {
       });
     }
 
-    await downloadAdvertImage(vehicle);
+    await downloadAdvertImage(vehicle, destination);
   }
 
   async function handlePostVehicle(vehicle, destination, preparedCaption = "") {
