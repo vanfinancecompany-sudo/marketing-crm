@@ -48,27 +48,25 @@ function getPostingPriceFields(vehicle, destination) {
   }
 
   return [
-    vehicle.originalPipeline === "rent2buy" ? "Price on request" : vehicle.price || "Price on request",
-    vehicle.salePrice || "Finance monthly available",
+    vehicle.originalPipeline === "rent2buy" ? "Finance price available" : vehicle.price || "Finance price available",
+    vehicle.salePrice || "Finance monthly options available",
   ];
 }
 
 function PostingAdvertImage({ vehicle, postingDestination }) {
-  const useFinanceCreative =
-    postingDestination === "Van Finance Facebook" && vehicle.originalPipeline === "rent2buy";
+  const imageSrc =
+    vehicle.image ||
+    vehicle.picture ||
+    vehicle.photo ||
+    vehicle.mainImage ||
+    vehicle.imageUrl ||
+    "";
 
-  if (!useFinanceCreative) {
-    return <img src={vehicle.image} alt={vehicle.name} className="posting-card__image" />;
+  if (imageSrc) {
+    return <img src={imageSrc} alt={vehicle.name} className="posting-card__image" />;
   }
 
-  return (
-    <div className="posting-card__image posting-card__image--finance-creative" aria-label={vehicle.name}>
-      <div className="posting-finance-creative__brand">Van Finance Company</div>
-      <div className="posting-finance-creative__offer">From £99 deposit</div>
-      <div className="posting-finance-creative__vehicle">{vehicle.name || vehicle.reg || "Finance van"}</div>
-      <div className="posting-finance-creative__meta">{vehicle.reg || "Finance available"}</div>
-    </div>
-  );
+  return <div className="posting-card__image posting-card__image--empty">No vehicle image</div>;
 }
 
 function PostingVehicleCard({

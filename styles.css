@@ -279,6 +279,16 @@ textarea {
   display: block;
 }
 
+.vehicle-card__image--empty,
+.posting-card__image--empty {
+  display: grid;
+  place-items: center;
+  background: #e2e8f0;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .vehicle-card__image--finance-creative {
   display: grid;
   align-content: center;

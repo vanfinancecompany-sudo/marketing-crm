@@ -1605,11 +1605,6 @@ async function handleClearTodayReels() {
   }
 
   async function downloadAdvertImage(vehicle, destination) {
-    if (destination === "Van Finance Facebook" && vehicle.originalPipeline === "rent2buy") {
-      await downloadFinanceAdvertImage(vehicle);
-      return;
-    }
-
     const imageUrl = vehicle.image || vehicle.picture;
     if (!imageUrl) return;
 

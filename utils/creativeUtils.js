@@ -42,11 +42,7 @@ function oldFormatPoundDisplay(value) {
 }
 
 function buildFinancePostingDeskPriceLine(vehicle) {
-  const priceText = String(vehicle.originalPipeline === "rent2buy" ? "" : vehicle.price || "").replace(/[^\d.,]/g, "").replace(/,/g, "");
-  const formattedPrice = priceText ? Number(priceText).toLocaleString("en-GB") : vehicle.originalPipeline === "rent2buy" ? "" : vehicle.price || "";
-  const priceWithVat = formattedPrice ? `${formatPoundDisplay(formattedPrice)} ${vehicle.vat || "+ VAT"}` : "";
-  const monthlyPart = String(vehicle.salePrice || "").trim();
-  return [priceWithVat, monthlyPart].filter(Boolean).join(" | ");
+  return buildSafeFinancePriceLine(vehicle);
 }
 
 function buildRentPostingDeskPriceLine(vehicle) {
@@ -129,8 +125,7 @@ ${vehicle.link || "https://www.rent2buyvans.co.uk"}`;
 
   const financeHooks = ["£99 deposit options", "Bad credit considered", "Self-employed welcome", "Finance the VAT"];
   const primaryHook = financeHooks[index % financeHooks.length].toUpperCase();
-  const price = formatMoneyNumber(vehicle.originalPipeline === "rent2buy" ? "" : vehicle.price || "");
-  const monthly = formatMonthlyMth(vehicle.salePrice || "monthly options");
+  const financePriceLine = buildSafeFinancePriceLine(vehicle);
 
   return `FINANCE SPECIALIST | ${primaryHook.toUpperCase()}
 
@@ -260,6 +255,40 @@ function formatMonthlyMth(value) {
   return amount ? `£${amount} MTH` : cleanCaptionValue(value).replace(/\b(P\/M|PM|PER MONTH|MTH)\b/gi, "").trim();
 }
 
+function isBrokenFinanceValue(value) {
+  return /\b(PRICE|monthly options|undefined|null|NaN)\b/i.test(String(value || ""));
+}
+
+function getFinancePrice(vehicle) {
+  if (vehicle?.originalPipeline === "rent2buy") return "";
+  const amount = formatMoneyNumber(vehicle?.price || "");
+  return amount ? `\u00a3${amount}` : "";
+}
+
+function getFinanceMonthly(vehicle) {
+  const amount = formatMoneyNumber(vehicle?.salePrice || "");
+  return amount ? `\u00a3${amount} MTH` : "";
+}
+
+function buildSafeFinancePriceLine(vehicle) {
+  const price = getFinancePrice(vehicle);
+  const monthly = getFinanceMonthly(vehicle);
+
+  if (price && monthly) {
+    return `FROM \u00a399 DEPOSIT - ${price} + VAT | FROM ${monthly}`;
+  }
+
+  if (price) {
+    return `FROM \u00a399 DEPOSIT - ${price} + VAT | Finance monthly options available`;
+  }
+
+  if (monthly) {
+    return `FROM \u00a399 DEPOSIT | FROM ${monthly}`;
+  }
+
+  return "FROM \u00a399 DEPOSIT | Finance monthly options available";
+}
+
 function formatTermLine(vehicle) {
   const term = cleanCaptionValue(vehicle?.week || vehicle?.term || "").match(/\d+/)?.[0] || "36";
   return `Over x${term} months / initial rental charges apply.`;
@@ -343,11 +372,7 @@ export function sanitizePostingCaption(caption) {
 }
 
 function buildCleanFinancePostingDeskPriceLine(vehicle) {
-  const priceText = String(vehicle.originalPipeline === "rent2buy" ? "" : vehicle.price || "").replace(/[^\d.,]/g, "").replace(/,/g, "");
-  const formattedPrice = priceText ? Number(priceText).toLocaleString("en-GB") : cleanCaptionValue(vehicle.originalPipeline === "rent2buy" ? "" : vehicle.price || "");
-  const priceWithVat = formattedPrice ? `${formatPoundDisplay(formattedPrice)} ${vehicle.vat || "+ VAT"}` : "";
-  const monthlyPart = cleanCaptionValue(vehicle.salePrice || "");
-  return [priceWithVat, monthlyPart].filter(Boolean).join(" | ");
+  return buildSafeFinancePriceLine(vehicle);
 }
 
 function buildCleanRentPostingDeskPriceLine(vehicle) {
@@ -425,10 +450,9 @@ ${rentVehicleUrl(vehicle)}`);
   const financeHooks = ["£99 deposit options", "Bad credit considered", "Self-employed welcome", "Finance the VAT"];
   const primaryHook = financeHooks[index % financeHooks.length].toUpperCase().replace(/Â£/g, "£");
   const secondaryHook = financeHooks[(index + 3) % financeHooks.length];
-  const price = formatMoneyNumber(vehicle.originalPipeline === "rent2buy" ? "" : vehicle.price || "");
-  const monthly = formatMonthlyMth(vehicle.salePrice || "monthly options");
+  const financePriceLine = buildSafeFinancePriceLine(vehicle);
 
-  return sanitizePostingCaption(`FROM Â£99 DEPOSIT - Â£${price || "PRICE"} + VAT | FROM ${monthly}
+  return sanitizePostingCaption(`${financePriceLine}
 
 VAN FINANCE COMPANY | ${primaryHook}
 
@@ -481,15 +505,15 @@ export function buildReelFilename(reel) {
 }
 
 export function buildFinanceReelContent(vehicle) {
-  const sourceIsRent = vehicle?.originalPipeline === "rent2buy";
-  const price = sourceIsRent ? "Finance price available" : vehicle?.price || "Price available";
-  const monthly = vehicle?.salePrice || "monthly options";
+  const priceLine = buildSafeFinancePriceLine(vehicle);
 
   return {
     templateName: "Finance - Deal Hook",
     sourceLabel: "Finance stock",
     subtext: "Low deposit options | Bad credit considered | Self-employed welcome",
-    priceLine: `${price} | ${monthly}`,
+    priceLine: isBrokenFinanceValue(priceLine)
+      ? "FROM \u00a399 DEPOSIT | Finance monthly options available"
+      : priceLine,
     ctaLine: "APPLY NOW",
   };
 }

@@ -17,11 +17,17 @@ export default function VehicleCard({
   const monthlyLabel = isRentDisplay ? "Monthly rental" : "Finance monthly";
   const displayPrice = isRentDisplay
     ? vehicle.initialRental || vehicle.price || "Initial rental available"
-    : vehicle.pipeline === "rent2buy" ? "Price on request" : vehicle.price || "Price on request";
+    : vehicle.pipeline === "rent2buy" ? "Finance price available" : vehicle.price || "Finance price available";
   const displayMonthly = isRentDisplay
     ? vehicle.monthly || "Monthly rental available"
-    : vehicle.salePrice || "Finance options available";
-  const useFinanceCreativeImage = !isRentDisplay && vehicle.pipeline === "rent2buy";
+    : vehicle.salePrice || "Finance monthly options available";
+  const imageSrc =
+    vehicle.image ||
+    vehicle.picture ||
+    vehicle.photo ||
+    vehicle.mainImage ||
+    vehicle.imageUrl ||
+    "";
   const reelLocked = Boolean(reelActionLock?.locked);
   const lockUntil = reelActionLock?.until ? new Date(reelActionLock.until) : null;
   const lockLabel = lockUntil
@@ -50,14 +56,12 @@ export default function VehicleCard({
         </button>
       ) : null}
 
-      {useFinanceCreativeImage ? (
-        <div className="vehicle-card__image vehicle-card__image--finance-creative" aria-label={vehicle.name}>
-          <div className="vehicle-finance-creative__brand">Van Finance Company</div>
-          <div className="vehicle-finance-creative__offer">From £99 deposit</div>
-          <div className="vehicle-finance-creative__vehicle">{vehicle.name || vehicle.reg || "Finance van"}</div>
-        </div>
+      {imageSrc ? (
+        <img src={imageSrc} alt={vehicle.name} className="vehicle-card__image" />
       ) : (
-        <img src={vehicle.image} alt={vehicle.name} className="vehicle-card__image" />
+        <div className="vehicle-card__image vehicle-card__image--empty" aria-label={vehicle.name}>
+          No vehicle image
+        </div>
       )}
 
       <div className="vehicle-card__body">
