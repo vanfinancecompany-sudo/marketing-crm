@@ -46,8 +46,9 @@ function buildFinancePostingDeskPriceLine(vehicle) {
 }
 
 function buildRentPostingDeskPriceLine(vehicle) {
-  const monthlyPart = String(vehicle.monthly || "").trim();
-  const initialPart = String(vehicle.initialRental || vehicle.price || "").trim();
+  const rentData = vehicle?.rent2buyData || vehicle || {};
+  const monthlyPart = String(rentData.monthly || "").trim();
+  const initialPart = String(rentData.initialRental || rentData.price || "").trim();
   return [monthlyPart, initialPart].filter(Boolean).join(" | ");
 }
 
@@ -260,7 +261,6 @@ function isBrokenFinanceValue(value) {
 }
 
 function getFinancePrice(vehicle) {
-  if (vehicle?.originalPipeline === "rent2buy") return "";
   const amount = formatMoneyNumber(vehicle?.price || "");
   return amount ? `\u00a3${amount}` : "";
 }
@@ -376,8 +376,9 @@ function buildCleanFinancePostingDeskPriceLine(vehicle) {
 }
 
 function buildCleanRentPostingDeskPriceLine(vehicle) {
-  const monthlyPart = cleanCaptionValue(vehicle.monthly || "");
-  const initialPart = cleanCaptionValue(vehicle.initialRental || vehicle.price || "");
+  const rentData = vehicle?.rent2buyData || vehicle || {};
+  const monthlyPart = cleanCaptionValue(rentData.monthly || "");
+  const initialPart = cleanCaptionValue(rentData.initialRental || rentData.price || "");
   return [monthlyPart, initialPart].filter(Boolean).join(" | ");
 }
 
@@ -395,16 +396,18 @@ function buildCleanPostingDeskDetailsBlock(vehicle) {
 }
 
 export function buildPostingCaption(vehicle, { destination = pipelineDestination(vehicle.pipeline), index = 0 } = {}) {
+  const rentVehicle = vehicle?.rent2buyData ? { ...vehicle, ...vehicle.rent2buyData } : vehicle;
+
   if (destination === "Facebook Marketplace") {
-    return sanitizePostingCaption(`NO CREDIT CHECK - ${formatMonthlyMth(vehicle.monthly || "available")}
+    return sanitizePostingCaption(`NO CREDIT CHECK - ${formatMonthlyMth(rentVehicle.monthly || "available")}
 
 RENT IT! - DRIVE IT! - OWN IT!
 
-${formatTermLine(vehicle)}
+${formatTermLine(rentVehicle)}
 
-${vehicleNameBlock(vehicle)}
+${vehicleNameBlock(rentVehicle)}
 
-${vehicleSpecsBlock(vehicle)}
+${vehicleSpecsBlock(rentVehicle)}
 
 Get on the road fast - no hassle.
 
@@ -417,19 +420,19 @@ Join 5,000+ drivers already driving today.
 
 Apply now and get approved today.
 
-${rentVehicleUrl(vehicle)}`);
+${rentVehicleUrl(rentVehicle)}`);
   }
 
   if (destination === "Rent2Buy Facebook") {
-    return sanitizePostingCaption(`NO CREDIT CHECK | ${formatMonthlyMth(vehicle.monthly || "available")}
+    return sanitizePostingCaption(`NO CREDIT CHECK | ${formatMonthlyMth(rentVehicle.monthly || "available")}
 
 RENT IT! - DRIVE IT! - OWN IT!
 
-${formatTermLine(vehicle)}
+${formatTermLine(rentVehicle)}
 
-${vehicleNameBlock(vehicle)}
+${vehicleNameBlock(rentVehicle)}
 
-${vehicleSpecsBlock(vehicle)}
+${vehicleSpecsBlock(rentVehicle)}
 
 Get on the road fast - no hassle.
 
@@ -444,7 +447,7 @@ Apply now and get approved today.
 JUST Â£99 FINAL PAYMENT.
 IT'S YOURS!
 
-${rentVehicleUrl(vehicle)}`);
+${rentVehicleUrl(rentVehicle)}`);
   }
 
   const financeHooks = ["£99 deposit options", "Bad credit considered", "Self-employed welcome", "Finance the VAT"];
@@ -519,11 +522,13 @@ export function buildFinanceReelContent(vehicle) {
 }
 
 export function buildRentReelContent(vehicle) {
+  const rentData = vehicle?.rent2buyData || vehicle || {};
+
   return {
     templateName: "Rent2Buy - Access Hook",
     sourceLabel: "Rent2Buy stock",
     subtext: "Rent2Buy this van | No credit checks | Own the van at the end",
-    priceLine: `${vehicle?.monthly || "Monthly options"} | ${vehicle?.price || "available"}`,
+    priceLine: `${rentData.monthly || "Monthly options"} | ${rentData.initialRental || rentData.price || "available"}`,
     ctaLine: "APPLY TODAY",
   };
 }
@@ -1554,19 +1559,22 @@ export function filterVehicles(vehicles, filters) {
   const maxPrice = parseMoney(filters.maxPrice);
 
   return vehicles.filter((vehicle) => {
-    if (filters.pipeline === "rent2buy" && vehicle.pipeline !== "rent2buy") {
+    if (filters.pipeline === "rent2buy" && !vehicle.rent2buyEligible && vehicle.pipeline !== "rent2buy") {
       return false;
     }
 
+    const rentData = vehicle.rent2buyData || {};
+    const searchVehicle = filters.pipeline === "rent2buy" ? { ...vehicle, ...rentData } : vehicle;
+
     if (query) {
       const haystack = [
-        vehicle.reg,
-        vehicle.title,
-        vehicle.name,
-        vehicle.vanDescription,
-        vehicle.description,
-        vehicle.vanSpec,
-        vehicle.spec,
+        searchVehicle.reg,
+        searchVehicle.title,
+        searchVehicle.name,
+        searchVehicle.vanDescription,
+        searchVehicle.description,
+        searchVehicle.vanSpec,
+        searchVehicle.spec,
       ]
         .filter(Boolean)
         .join(" ")
@@ -1575,7 +1583,9 @@ export function filterVehicles(vehicles, filters) {
       if (!haystack.includes(query)) return false;
     }
 
-    const price = parseMoney(vehicle.price);
+    const price = parseMoney(filters.pipeline === "rent2buy"
+      ? rentData.initialRental || rentData.price || vehicle.price
+      : vehicle.price);
     if (minPrice !== null && price !== null && price < minPrice) return false;
     if (maxPrice !== null && price !== null && price > maxPrice) return false;
 

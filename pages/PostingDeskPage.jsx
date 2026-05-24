@@ -41,29 +41,32 @@ function isRentPostingDestination(destination) {
 
 function getPostingPriceFields(vehicle, destination) {
   if (isRentPostingDestination(destination)) {
+    const rentData = vehicle.rent2buyData || vehicle;
     return [
-      vehicle.initialRental || vehicle.price || "Initial rental available",
-      vehicle.monthly || "Monthly rental available",
+      rentData.initialRental || rentData.price || "Initial rental available",
+      rentData.monthly || "Monthly rental available",
     ];
   }
 
   return [
-    vehicle.originalPipeline === "rent2buy" ? "Finance price available" : vehicle.price || "Finance price available",
+    vehicle.price || "Finance price available",
     vehicle.salePrice || "Finance monthly options available",
   ];
 }
 
 function PostingAdvertImage({ vehicle, postingDestination }) {
+  const rentData = vehicle.rent2buyData || vehicle;
+  const imageVehicle = isRentPostingDestination(postingDestination) ? rentData : vehicle;
   const imageSrc =
-    vehicle.image ||
-    vehicle.picture ||
-    vehicle.photo ||
-    vehicle.mainImage ||
-    vehicle.imageUrl ||
+    imageVehicle.image ||
+    imageVehicle.picture ||
+    imageVehicle.photo ||
+    imageVehicle.mainImage ||
+    imageVehicle.imageUrl ||
     "";
 
   if (imageSrc) {
-    return <img src={imageSrc} alt={vehicle.name} className="posting-card__image" />;
+    return <img src={imageSrc} alt={imageVehicle.name || vehicle.name} className="posting-card__image" />;
   }
 
   return <div className="posting-card__image posting-card__image--empty">No vehicle image</div>;

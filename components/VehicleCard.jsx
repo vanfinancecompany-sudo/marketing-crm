@@ -11,22 +11,24 @@ export default function VehicleCard({
 }) {
   const resolvedDisplayMode = displayMode || (vehicle.pipeline === "rent2buy" ? "rent2buy" : "finance");
   const isRentDisplay = resolvedDisplayMode === "rent2buy";
+  const rentData = vehicle.rent2buyData || {};
+  const displayVehicle = isRentDisplay ? { ...vehicle, ...rentData } : vehicle;
   const pipelineLabel = isRentDisplay ? "Rent2Buy" : "Van Finance";
-  const displayReg = vehicle.reg || "No reg";
+  const displayReg = displayVehicle.reg || "No reg";
   const priceLabel = isRentDisplay ? "Initial rental" : "Price";
   const monthlyLabel = isRentDisplay ? "Monthly rental" : "Finance monthly";
   const displayPrice = isRentDisplay
-    ? vehicle.initialRental || vehicle.price || "Initial rental available"
-    : vehicle.pipeline === "rent2buy" ? "Finance price available" : vehicle.price || "Finance price available";
+    ? displayVehicle.initialRental || displayVehicle.price || "Initial rental available"
+    : vehicle.price || "Finance price available";
   const displayMonthly = isRentDisplay
-    ? vehicle.monthly || "Monthly rental available"
+    ? displayVehicle.monthly || "Monthly rental available"
     : vehicle.salePrice || "Finance monthly options available";
   const imageSrc =
-    vehicle.image ||
-    vehicle.picture ||
-    vehicle.photo ||
-    vehicle.mainImage ||
-    vehicle.imageUrl ||
+    displayVehicle.image ||
+    displayVehicle.picture ||
+    displayVehicle.photo ||
+    displayVehicle.mainImage ||
+    displayVehicle.imageUrl ||
     "";
   const reelLocked = Boolean(reelActionLock?.locked);
   const lockUntil = reelActionLock?.until ? new Date(reelActionLock.until) : null;
@@ -57,16 +59,16 @@ export default function VehicleCard({
       ) : null}
 
       {imageSrc ? (
-        <img src={imageSrc} alt={vehicle.name} className="vehicle-card__image" />
+        <img src={imageSrc} alt={displayVehicle.name} className="vehicle-card__image" />
       ) : (
-        <div className="vehicle-card__image vehicle-card__image--empty" aria-label={vehicle.name}>
+        <div className="vehicle-card__image vehicle-card__image--empty" aria-label={displayVehicle.name}>
           No vehicle image
         </div>
       )}
 
       <div className="vehicle-card__body">
         <div className="vehicle-card__pipeline">{pipelineLabel}</div>
-        <h3>{vehicle.name}</h3>
+        <h3>{displayVehicle.name}</h3>
         <div className="vehicle-card__meta">Reg: {displayReg}</div>
         <div className="vehicle-card__meta">{priceLabel}: {displayPrice}</div>
         <div className="vehicle-card__meta">{monthlyLabel}: {displayMonthly}</div>

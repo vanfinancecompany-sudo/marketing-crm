@@ -39,6 +39,10 @@ function valueOrFallback(...values) {
   return "";
 }
 
+function normalizeRegistrationKey(value) {
+  return extractRegistration(value).replace(/\s+/g, "").toUpperCase();
+}
+
 function isActiveMarketingRow(row) {
   if (row?.is_active === false) return false;
   if (row?.active === false) return false;
@@ -70,6 +74,9 @@ export function mapFinanceVehicleRow(row, index) {
     weblink: row.weblink || "",
     link: row.weblink || "",
     pipeline: "vanFinance",
+    originalPipeline: "vanFinance",
+    rent2buyEligible: false,
+    rent2buyData: null,
   };
 }
 
@@ -122,8 +129,8 @@ export function mapCarVehicleRow(row, index) {
   };
 }
 
-export async function fetchFinanceMarketingVehicles(limitPerPipeline = 80) {
-  const safeLimit = Math.min(Number(limitPerPipeline) || 80, MARKETING_STOCK_WATCH_LIMIT);
+export async function fetchFinanceMarketingVehicles(limitPerPipeline = MARKETING_STOCK_WATCH_LIMIT) {
+  const safeLimit = Math.min(Number(limitPerPipeline) || MARKETING_STOCK_WATCH_LIMIT, MARKETING_STOCK_WATCH_LIMIT);
 
   const financeQuery = supabase
     .from("facebook_adverts")
@@ -140,8 +147,8 @@ export async function fetchFinanceMarketingVehicles(limitPerPipeline = 80) {
   return (financeResult.data || []).map(mapFinanceVehicleRow);
 }
 
-export async function fetchRentMarketingVehicles(limitPerPipeline = 80) {
-  const safeLimit = Math.min(Number(limitPerPipeline) || 80, MARKETING_STOCK_WATCH_LIMIT);
+export async function fetchRentMarketingVehicles(limitPerPipeline = MARKETING_STOCK_WATCH_LIMIT) {
+  const safeLimit = Math.min(Number(limitPerPipeline) || MARKETING_STOCK_WATCH_LIMIT, MARKETING_STOCK_WATCH_LIMIT);
 
   const rentQuery = supabase
     .from("rent_vehicles")
@@ -181,11 +188,28 @@ export async function fetchCarMarketingVehicles(limitPerPipeline = 80) {
   throw new Error(`Failed to load Cars vehicles. Tried: ${errors.join(" | ") || CAR_TABLE_CANDIDATES.join(", ")}`);
 }
 
-export async function fetchMarketingVehicles(limitPerPipeline = 80) {
+export async function fetchMarketingVehicles(limitPerPipeline = MARKETING_STOCK_WATCH_LIMIT) {
   const [financeVehicles, rentVehicles] = await Promise.all([
     fetchFinanceMarketingVehicles(limitPerPipeline),
     fetchRentMarketingVehicles(limitPerPipeline),
   ]);
 
-  return [...financeVehicles, ...rentVehicles];
+  const rentByReg = new Map(
+    rentVehicles
+      .map((vehicle) => [normalizeRegistrationKey(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name), vehicle])
+      .filter(([registration]) => registration)
+  );
+
+  return financeVehicles.map((vehicle) => {
+    const registration = normalizeRegistrationKey(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name);
+    const rentMatch = rentByReg.get(registration) || null;
+
+    return {
+      ...vehicle,
+      pipeline: "vanFinance",
+      originalPipeline: "vanFinance",
+      rent2buyEligible: Boolean(rentMatch),
+      rent2buyData: rentMatch,
+    };
+  });
 }

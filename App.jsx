@@ -651,12 +651,32 @@ function saveManualReelQueue(queueKey, queue) {
 }
 
 function isRent2BuyEligible(vehicle) {
-  return vehicle?.pipeline === "rent2buy";
+  return Boolean(vehicle?.rent2buyEligible || vehicle?.pipeline === "rent2buy");
 }
 
 function asPipelineVehicle(vehicle, pipeline) {
+  if (!pipeline) return vehicle;
   if (!vehicle || vehicle.pipeline === pipeline) return vehicle;
-  return { ...vehicle, originalPipeline: vehicle.originalPipeline || vehicle.pipeline, pipeline };
+  if (pipeline === "rent2buy") {
+    const rentData = vehicle.rent2buyData || {};
+    return {
+      ...vehicle,
+      ...rentData,
+      id: vehicle.id,
+      financeId: vehicle.id,
+      financeData: vehicle,
+      originalPipeline: vehicle.originalPipeline || vehicle.pipeline,
+      pipeline,
+      rent2buyEligible: true,
+      rent2buyData: vehicle.rent2buyData || rentData,
+    };
+  }
+
+  return {
+    ...vehicle,
+    pipeline,
+    originalPipeline: "vanFinance",
+  };
 }
 
 function getManualVehicleImage(vehicle) {
@@ -686,11 +706,10 @@ function resolveManualQueuedVehicle(queueItem, vehicles) {
 
   if (!matchedVehicle) return null;
 
-  return {
+  return asPipelineVehicle({
     ...matchedVehicle,
     image: getManualVehicleImage(matchedVehicle),
-    pipeline: normalizedItem.targetPipeline || matchedVehicle.pipeline,
-  };
+  }, normalizedItem.targetPipeline || matchedVehicle.pipeline);
 }
 
 export default function App() {
@@ -969,6 +988,7 @@ useEffect(() => {
   const rent2BuyFacebookQueue = useMemo(() => {
     const hiddenIds = new Set(hiddenPostingVehicleIds.rent2BuyFacebook);
     return rentVehicles
+      .map((vehicle) => asPipelineVehicle(vehicle, "rent2buy"))
       .filter((vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Rent2Buy Facebook")))
       .filter((vehicle) => !hiddenIds.has(normalizePostingVehicleId(vehicle)));
   }, [rentVehicles, postedPostingKeys, hiddenPostingVehicleIds.rent2BuyFacebook]);
@@ -976,6 +996,7 @@ useEffect(() => {
   const marketplaceQueue = useMemo(() => {
     const hiddenIds = new Set(hiddenPostingVehicleIds.marketplace);
     return rentVehicles
+      .map((vehicle) => asPipelineVehicle(vehicle, "rent2buy"))
       .filter((vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Facebook Marketplace")))
       .filter((vehicle) => !hiddenIds.has(normalizePostingVehicleId(vehicle)));
   }, [rentVehicles, postedPostingKeys, hiddenPostingVehicleIds.marketplace]);
@@ -1744,7 +1765,7 @@ async function handleClearTodayReels() {
       return;
     }
 
-    const targetPipeline = stockFilters.pipeline === "vanFinance" ? "vanFinance" : vehicle.pipeline;
+    const targetPipeline = stockFilters.pipeline === "rent2buy" ? "rent2buy" : "vanFinance";
     const reelVehicle = asPipelineVehicle(vehicle, targetPipeline);
     const isRent = reelVehicle.pipeline === "rent2buy";
     setSelectedVehicleId(vehicle.id);
@@ -1788,6 +1809,7 @@ async function handleClearTodayReels() {
     const selectedIds = new Set(manualStockSelectedIds);
     const selectedVehicles = vehicles
       .filter((vehicle) => selectedIds.has(getManualQueueVehicleId(vehicle)))
+      .filter((vehicle) => queueKey !== "rent2buy" || isRent2BuyEligible(vehicle))
       .filter((vehicle) => !reelActionLocks[getManualQueueVehicleId(vehicle)]?.locked);
     const selectedItems = selectedVehicles.map((vehicle) => createManualQueueItem(vehicle, queueKey));
 
