@@ -35,6 +35,24 @@ function getPostingPipelineLabel(destination, vehicle) {
   return vehicle.pipeline === "rent2buy" ? "Rent2Buy" : "Finance";
 }
 
+function isRentPostingDestination(destination) {
+  return destination === "Rent2Buy Facebook" || destination === "Facebook Marketplace";
+}
+
+function getPostingPriceFields(vehicle, destination) {
+  if (isRentPostingDestination(destination)) {
+    return [
+      vehicle.initialRental || vehicle.price || "Initial rental available",
+      vehicle.monthly || "Monthly rental available",
+    ];
+  }
+
+  return [
+    vehicle.originalPipeline === "rent2buy" ? "Price on request" : vehicle.price || "Price on request",
+    vehicle.salePrice || "Finance monthly available",
+  ];
+}
+
 function PostingAdvertImage({ vehicle, postingDestination }) {
   const useFinanceCreative =
     postingDestination === "Van Finance Facebook" && vehicle.originalPipeline === "rent2buy";
@@ -62,6 +80,8 @@ function PostingVehicleCard({
   postingDestination,
   caption,
 }) {
+  const [primaryPrice, secondaryPrice] = getPostingPriceFields(vehicle, postingDestination);
+
   return (
     <article className={`posting-card posting-card--${accent}`}>
       <PostingAdvertImage vehicle={vehicle} postingDestination={postingDestination} />
@@ -73,8 +93,8 @@ function PostingVehicleCard({
         <h3>{vehicle.name}</h3>
         <p>{vehicle.description || vehicle.spec || "Ready for today's advert cycle."}</p>
         <div className="posting-card__meta">
-          <span>{vehicle.price || "Price on request"}</span>
-          <span>{vehicle.monthly || "Monthly available"}</span>
+          <span>{primaryPrice}</span>
+          <span>{secondaryPrice}</span>
         </div>
         <div className="creative-card__tags">
           <span className={`tag posting-destination-tag posting-destination-tag--${accent}`}>
@@ -257,15 +277,17 @@ export default function PostingDeskPage({
               </button>
             </div>
             <div className="preview-modal__body">
-              {previewItem.vehicle.image ? (
-                <img
-                  src={previewItem.vehicle.image}
-                  alt={previewItem.vehicle.name}
-                  className="preview-modal__image"
-                />
-              ) : null}
+              <PostingAdvertImage
+                vehicle={previewItem.vehicle}
+                postingDestination={previewItem.destination}
+              />
               <div>
                 <h3>{previewItem.vehicle.name}</h3>
+                <div className="posting-card__meta">
+                  {getPostingPriceFields(previewItem.vehicle, previewItem.destination).map((value) => (
+                    <span key={value}>{value}</span>
+                  ))}
+                </div>
                 <pre className="preview-modal__caption">{previewItem.caption}</pre>
                 <div className="card-actions">
                   <button

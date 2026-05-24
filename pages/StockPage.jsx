@@ -94,6 +94,7 @@ export default function StockPage({
               <VehicleCard
                 key={vehicle.id}
                 vehicle={vehicle}
+                displayMode={filters.pipeline === "rent2buy" ? "rent2buy" : "finance"}
                 onGenerateReel={onGenerateReel}
                 onViewCreatives={onViewCreatives}
                 selectable

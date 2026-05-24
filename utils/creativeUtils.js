@@ -42,10 +42,10 @@ function oldFormatPoundDisplay(value) {
 }
 
 function buildFinancePostingDeskPriceLine(vehicle) {
-  const priceText = String(vehicle.price || "").replace(/[^\d.,]/g, "").replace(/,/g, "");
-  const formattedPrice = priceText ? Number(priceText).toLocaleString("en-GB") : vehicle.price || "";
+  const priceText = String(vehicle.originalPipeline === "rent2buy" ? "" : vehicle.price || "").replace(/[^\d.,]/g, "").replace(/,/g, "");
+  const formattedPrice = priceText ? Number(priceText).toLocaleString("en-GB") : vehicle.originalPipeline === "rent2buy" ? "" : vehicle.price || "";
   const priceWithVat = formattedPrice ? `${formatPoundDisplay(formattedPrice)} ${vehicle.vat || "+ VAT"}` : "";
-  const monthlyPart = String(vehicle.salePrice || vehicle.monthly || "").trim();
+  const monthlyPart = String(vehicle.salePrice || "").trim();
   return [priceWithVat, monthlyPart].filter(Boolean).join(" | ");
 }
 
@@ -129,8 +129,8 @@ ${vehicle.link || "https://www.rent2buyvans.co.uk"}`;
 
   const financeHooks = ["£99 deposit options", "Bad credit considered", "Self-employed welcome", "Finance the VAT"];
   const primaryHook = financeHooks[index % financeHooks.length].toUpperCase();
-  const price = formatMoneyNumber(vehicle.price || "");
-  const monthly = formatMonthlyMth(vehicle.salePrice || vehicle.monthly || "monthly options");
+  const price = formatMoneyNumber(vehicle.originalPipeline === "rent2buy" ? "" : vehicle.price || "");
+  const monthly = formatMonthlyMth(vehicle.salePrice || "monthly options");
 
   return `FINANCE SPECIALIST | ${primaryHook.toUpperCase()}
 
@@ -143,7 +143,7 @@ ${buildPostingDeskDetailsBlock(vehicle)}
 * ${primaryHook}
 * ${secondaryHook}
 * Finance the VAT
-* ${String(vehicle.salePrice || vehicle.monthly || "Finance tailored to you").trim()}
+* ${String(vehicle.salePrice || "Finance tailored to you").trim()}
 
 Use the dedicated finance application page to apply today.
 
@@ -343,10 +343,10 @@ export function sanitizePostingCaption(caption) {
 }
 
 function buildCleanFinancePostingDeskPriceLine(vehicle) {
-  const priceText = String(vehicle.price || "").replace(/[^\d.,]/g, "").replace(/,/g, "");
-  const formattedPrice = priceText ? Number(priceText).toLocaleString("en-GB") : cleanCaptionValue(vehicle.price || "");
+  const priceText = String(vehicle.originalPipeline === "rent2buy" ? "" : vehicle.price || "").replace(/[^\d.,]/g, "").replace(/,/g, "");
+  const formattedPrice = priceText ? Number(priceText).toLocaleString("en-GB") : cleanCaptionValue(vehicle.originalPipeline === "rent2buy" ? "" : vehicle.price || "");
   const priceWithVat = formattedPrice ? `${formatPoundDisplay(formattedPrice)} ${vehicle.vat || "+ VAT"}` : "";
-  const monthlyPart = cleanCaptionValue(vehicle.salePrice || vehicle.monthly || "");
+  const monthlyPart = cleanCaptionValue(vehicle.salePrice || "");
   return [priceWithVat, monthlyPart].filter(Boolean).join(" | ");
 }
 
@@ -425,8 +425,8 @@ ${rentVehicleUrl(vehicle)}`);
   const financeHooks = ["£99 deposit options", "Bad credit considered", "Self-employed welcome", "Finance the VAT"];
   const primaryHook = financeHooks[index % financeHooks.length].toUpperCase().replace(/Â£/g, "£");
   const secondaryHook = financeHooks[(index + 3) % financeHooks.length];
-  const price = formatMoneyNumber(vehicle.price || "");
-  const monthly = formatMonthlyMth(vehicle.salePrice || vehicle.monthly || "monthly options");
+  const price = formatMoneyNumber(vehicle.originalPipeline === "rent2buy" ? "" : vehicle.price || "");
+  const monthly = formatMonthlyMth(vehicle.salePrice || "monthly options");
 
   return sanitizePostingCaption(`FROM Â£99 DEPOSIT - Â£${price || "PRICE"} + VAT | FROM ${monthly}
 
@@ -481,11 +481,15 @@ export function buildReelFilename(reel) {
 }
 
 export function buildFinanceReelContent(vehicle) {
+  const sourceIsRent = vehicle?.originalPipeline === "rent2buy";
+  const price = sourceIsRent ? "Finance price available" : vehicle?.price || "Price available";
+  const monthly = vehicle?.salePrice || "monthly options";
+
   return {
     templateName: "Finance - Deal Hook",
     sourceLabel: "Finance stock",
     subtext: "Low deposit options | Bad credit considered | Self-employed welcome",
-    priceLine: `${vehicle?.price || "Price available"} | ${vehicle?.monthly || "monthly options"}`,
+    priceLine: `${price} | ${monthly}`,
     ctaLine: "APPLY NOW",
   };
 }

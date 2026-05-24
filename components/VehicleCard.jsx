@@ -7,9 +7,21 @@ export default function VehicleCard({
   selectable = false,
   compact = false,
   reelActionLock = null,
+  displayMode,
 }) {
-  const pipelineLabel = vehicle.pipeline === "rent2buy" ? "Rent2Buy" : "Van Finance";
+  const resolvedDisplayMode = displayMode || (vehicle.pipeline === "rent2buy" ? "rent2buy" : "finance");
+  const isRentDisplay = resolvedDisplayMode === "rent2buy";
+  const pipelineLabel = isRentDisplay ? "Rent2Buy" : "Van Finance";
   const displayReg = vehicle.reg || "No reg";
+  const priceLabel = isRentDisplay ? "Initial rental" : "Price";
+  const monthlyLabel = isRentDisplay ? "Monthly rental" : "Finance monthly";
+  const displayPrice = isRentDisplay
+    ? vehicle.initialRental || vehicle.price || "Initial rental available"
+    : vehicle.pipeline === "rent2buy" ? "Price on request" : vehicle.price || "Price on request";
+  const displayMonthly = isRentDisplay
+    ? vehicle.monthly || "Monthly rental available"
+    : vehicle.salePrice || "Finance options available";
+  const useFinanceCreativeImage = !isRentDisplay && vehicle.pipeline === "rent2buy";
   const reelLocked = Boolean(reelActionLock?.locked);
   const lockUntil = reelActionLock?.until ? new Date(reelActionLock.until) : null;
   const lockLabel = lockUntil
@@ -38,14 +50,22 @@ export default function VehicleCard({
         </button>
       ) : null}
 
-      <img src={vehicle.image} alt={vehicle.name} className="vehicle-card__image" />
+      {useFinanceCreativeImage ? (
+        <div className="vehicle-card__image vehicle-card__image--finance-creative" aria-label={vehicle.name}>
+          <div className="vehicle-finance-creative__brand">Van Finance Company</div>
+          <div className="vehicle-finance-creative__offer">From £99 deposit</div>
+          <div className="vehicle-finance-creative__vehicle">{vehicle.name || vehicle.reg || "Finance van"}</div>
+        </div>
+      ) : (
+        <img src={vehicle.image} alt={vehicle.name} className="vehicle-card__image" />
+      )}
 
       <div className="vehicle-card__body">
         <div className="vehicle-card__pipeline">{pipelineLabel}</div>
         <h3>{vehicle.name}</h3>
         <div className="vehicle-card__meta">Reg: {displayReg}</div>
-        <div className="vehicle-card__meta">Price: {vehicle.price}</div>
-        <div className="vehicle-card__meta">Monthly: {vehicle.monthly}</div>
+        <div className="vehicle-card__meta">{priceLabel}: {displayPrice}</div>
+        <div className="vehicle-card__meta">{monthlyLabel}: {displayMonthly}</div>
         {reelLocked ? <div className="vehicle-card__meta">{lockLabel}</div> : null}
 
         {!compact ? (

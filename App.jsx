@@ -901,10 +901,19 @@ useEffect(() => {
       
   const selectedVehicle =
     vehicles.find((vehicle) => vehicle.id === selectedVehicleId) || vehicles[0] || null;
-  const selectedReelFactoryVehicle =
+  const selectedReelFactorySourceVehicle =
     reelFactorySelectionMode === "stock"
       ? vehicles.find((vehicle) => vehicle.id === reelFactoryVehicleId) || null
       : null;
+  const selectedReelFactoryDisplayPipeline =
+    factoryFilters.pipeline === "vanFinance" || reelFactoryForm.reelType === "Finance"
+      ? "vanFinance"
+      : factoryFilters.pipeline === "rent2buy" || reelFactoryForm.reelType === "Rent2Buy"
+        ? "rent2buy"
+        : selectedReelFactorySourceVehicle?.pipeline;
+  const selectedReelFactoryVehicle = selectedReelFactorySourceVehicle
+    ? asPipelineVehicle(selectedReelFactorySourceVehicle, selectedReelFactoryDisplayPipeline)
+    : null;
 
   const filteredStockVehicles = useMemo(() => {
     return filterVehicles(vehicles, stockFilters);

@@ -279,6 +279,35 @@ textarea {
   display: block;
 }
 
+.vehicle-card__image--finance-creative {
+  display: grid;
+  align-content: center;
+  gap: 7px;
+  padding: 16px;
+  background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%);
+  color: #ffffff;
+  text-align: center;
+}
+
+.vehicle-finance-creative__brand {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.vehicle-finance-creative__offer {
+  font-size: 22px;
+  font-weight: 950;
+  line-height: 1.05;
+  text-transform: uppercase;
+}
+
+.vehicle-finance-creative__vehicle {
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .vehicle-card__body,
 .creative-card__body {
   padding: 13px;
