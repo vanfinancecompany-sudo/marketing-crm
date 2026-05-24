@@ -650,6 +650,15 @@ function saveManualReelQueue(queueKey, queue) {
   }
 }
 
+function isRent2BuyEligible(vehicle) {
+  return vehicle?.pipeline === "rent2buy";
+}
+
+function asPipelineVehicle(vehicle, pipeline) {
+  if (!vehicle || vehicle.pipeline === pipeline) return vehicle;
+  return { ...vehicle, pipeline };
+}
+
 function getManualVehicleImage(vehicle) {
   if (!vehicle) return "";
   if (vehicle.image) return vehicle.image;
@@ -925,11 +934,11 @@ useEffect(() => {
   }, [creatives]);
 
   const financeVehicles = useMemo(() => {
-    return vehicles.filter((vehicle) => vehicle.pipeline === "vanFinance");
+    return vehicles;
   }, [vehicles]);
 
   const rentVehicles = useMemo(() => {
-    return vehicles.filter((vehicle) => vehicle.pipeline === "rent2buy");
+    return vehicles.filter(isRent2BuyEligible);
   }, [vehicles]);
 
   const postedPostingKeys = useMemo(() => {
@@ -943,6 +952,7 @@ useEffect(() => {
   const vanFinanceFacebookQueue = useMemo(() => {
     const hiddenIds = new Set(hiddenPostingVehicleIds.vanFinanceFacebook);
     return financeVehicles
+      .map((vehicle) => asPipelineVehicle(vehicle, "vanFinance"))
       .filter((vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Van Finance Facebook")))
       .filter((vehicle) => !hiddenIds.has(normalizePostingVehicleId(vehicle)));
   }, [financeVehicles, postedPostingKeys, hiddenPostingVehicleIds.vanFinanceFacebook]);
@@ -1201,24 +1211,31 @@ useEffect(() => {
     const source = reelFactoryForm.reelSource;
     const allowedPipelines = getAllowedReelPipelines();
     const selectedReelVehicle = vehicles.find((vehicle) => vehicle.id === reelFactoryVehicleId);
+    const selectedPipeline = allowedPipelines.has("rent2buy") && isRent2BuyEligible(selectedReelVehicle)
+      ? "rent2buy"
+      : allowedPipelines.has("vanFinance")
+        ? "vanFinance"
+        : "";
 
     if (
       reelFactorySelectionMode === "stock" &&
       selectedReelVehicle &&
       source !== "Uploaded images" &&
-      allowedPipelines.has(selectedReelVehicle.pipeline)
+      selectedPipeline
     ) {
-      return [{ kind: "vehicle", vehicle: selectedReelVehicle }];
+      return [{ kind: "vehicle", vehicle: asPipelineVehicle(selectedReelVehicle, selectedPipeline) }];
     }
 
-   const visibleFilteredVehicles = filteredFactoryVehicles.filter((vehicle) =>
-  allowedPipelines.has(vehicle.pipeline)
-);
-
-const vehiclePool = visibleFilteredVehicles.filter((vehicle) => {
-  if (source === "Uploaded images") return false;
-  return true;
-});
+    const vehiclePool = source === "Uploaded images"
+      ? []
+      : [
+          ...(allowedPipelines.has("vanFinance")
+            ? filteredFactoryVehicles.map((vehicle) => asPipelineVehicle(vehicle, "vanFinance"))
+            : []),
+          ...(allowedPipelines.has("rent2buy")
+            ? filteredFactoryVehicles.filter(isRent2BuyEligible).map((vehicle) => asPipelineVehicle(vehicle, "rent2buy"))
+            : []),
+        ];
 
     const uploadPool = source === "Uploaded images" || source === "Mixed" ? uploadedReelImages : [];
     const uploadPipelines = [...allowedPipelines];
@@ -1679,12 +1696,14 @@ async function handleClearTodayReels() {
       return;
     }
 
-    const isRent = vehicle.pipeline === "rent2buy";
+    const targetPipeline = stockFilters.pipeline === "vanFinance" ? "vanFinance" : vehicle.pipeline;
+    const reelVehicle = asPipelineVehicle(vehicle, targetPipeline);
+    const isRent = reelVehicle.pipeline === "rent2buy";
     setSelectedVehicleId(vehicle.id);
     setSelectedVehicleIds([vehicle.id]);
     setReelFactoryVehicleId(vehicle.id);
     setReelFactorySelectionMode("stock");
-    setFactoryFilters((prev) => ({ ...prev, pipeline: vehicle.pipeline }));
+    setFactoryFilters((prev) => ({ ...prev, pipeline: reelVehicle.pipeline }));
     setReelFactoryForm((prev) => ({
       ...prev,
       reelSource: isRent ? "Rent2Buy stock" : "Finance stock",

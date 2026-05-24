@@ -1526,7 +1526,7 @@ export function filterVehicles(vehicles, filters) {
   const maxPrice = parseMoney(filters.maxPrice);
 
   return vehicles.filter((vehicle) => {
-    if (filters.pipeline !== "all" && vehicle.pipeline !== filters.pipeline) {
+    if (filters.pipeline === "rent2buy" && vehicle.pipeline !== "rent2buy") {
       return false;
     }
 
