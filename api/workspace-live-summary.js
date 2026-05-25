@@ -3,7 +3,7 @@ import { getSupabaseAdmin } from "./_vansco-cache-utils.js";
 // Keep this aligned with services/marketingVehicles.js fetchMarketingVehicles default.
 // The posting pages only load/count this browser-side stock window, so the workspace
 // summary must use the same limit or it will report higher numbers than the page.
-const STOCK_LIMIT = 80;
+const STOCK_LIMIT = 500;
 const POSTING_VISIBILITY_TABLE = "posting_visibility_state";
 
 function isToday(value) {
@@ -54,7 +54,10 @@ function mapFinanceVehicle(row, index) {
     title,
     name: title,
     reg: normalizeRegistration(title),
-    pipeline: "vanFinance"
+    pipeline: "vanFinance",
+    originalPipeline: "vanFinance",
+    rent2buyEligible: false,
+    rent2buyData: null
   };
 }
 
@@ -161,12 +164,30 @@ async function fetchStock(supabase) {
 
   const finance = (financeResult.data || []).map(mapFinanceVehicle);
   const rent2buy = (rentResult.data || []).map(mapRentVehicle);
+  const rentByReg = new Map(
+    rent2buy
+      .map((vehicle) => [normalizeRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name), vehicle])
+      .filter(([registration]) => registration)
+  );
+  const mergedFinance = finance.map((vehicle) => {
+    const registration = normalizeRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name);
+    const rentMatch = rentByReg.get(registration) || null;
+
+    return {
+      ...vehicle,
+      pipeline: "vanFinance",
+      originalPipeline: "vanFinance",
+      rent2buyEligible: Boolean(rentMatch),
+      rent2buyData: rentMatch
+    };
+  });
+  const rent2buyEligible = mergedFinance.filter((vehicle) => vehicle.rent2buyEligible);
 
   return {
-    finance,
-    rent2buy,
+    finance: mergedFinance,
+    rent2buy: rent2buyEligible,
     cars,
-    all: [...finance, ...rent2buy, ...cars]
+    all: mergedFinance
   };
 }
 
