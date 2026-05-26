@@ -8,6 +8,7 @@ export default function VehicleCard({
   compact = false,
   reelActionLock = null,
   displayMode,
+  ignoreReelLock = false,
 }) {
   const resolvedDisplayMode = displayMode || (vehicle.pipeline === "rent2buy" ? "rent2buy" : "finance");
   const isRentDisplay = resolvedDisplayMode === "rent2buy";
@@ -30,7 +31,8 @@ export default function VehicleCard({
     displayVehicle.mainImage ||
     displayVehicle.imageUrl ||
     "";
-  const reelLocked = Boolean(reelActionLock?.locked);
+  const lockActive = Boolean(reelActionLock?.locked);
+  const reelLocked = lockActive && !ignoreReelLock;
   const lockUntil = reelActionLock?.until ? new Date(reelActionLock.until) : null;
   const lockLabel = lockUntil
     ? `Reel locked until ${lockUntil.toLocaleString([], { dateStyle: "short", timeStyle: "short" })}`
@@ -72,7 +74,11 @@ export default function VehicleCard({
         <div className="vehicle-card__meta">Reg: {displayReg}</div>
         <div className="vehicle-card__meta">{priceLabel}: {displayPrice}</div>
         <div className="vehicle-card__meta">{monthlyLabel}: {displayMonthly}</div>
-        {reelLocked ? <div className="vehicle-card__meta">{lockLabel}</div> : null}
+        {lockActive ? (
+          <div className="vehicle-card__meta">
+            {ignoreReelLock ? "Reel lock bypass enabled" : lockLabel}
+          </div>
+        ) : null}
 
         {!compact ? (
           <div className="card-actions">

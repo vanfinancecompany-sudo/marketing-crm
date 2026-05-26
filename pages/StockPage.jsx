@@ -16,6 +16,8 @@ export default function StockPage({
   onToggleVehicle,
   onAddSelectedToQueue,
   reelActionLocks = {},
+  ignoreReelLock = false,
+  onIgnoreReelLockChange,
 }) {
   const selectedCount = selectedVehicleIds.length;
 
@@ -63,6 +65,14 @@ export default function StockPage({
           <strong>{selectedCount} selected for manual reel queue</strong>
           <span>Pick 10-15 vehicles, then send them to the Finance or Rent2Buy Premium Reel Studio queue.</span>
           <div className="card-actions">
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={ignoreReelLock}
+                onChange={(event) => onIgnoreReelLockChange?.(event.target.checked)}
+              />
+              <span>Ignore reel lock / allow reuse</span>
+            </label>
             <button
               className="button button--primary"
               type="button"
@@ -101,6 +111,7 @@ export default function StockPage({
                 selected={selectedVehicleIds.includes(String(vehicle.id || vehicle.reg || vehicle.registration || vehicle.name || ""))}
                 onSelect={onToggleVehicle}
                 reelActionLock={reelActionLocks[String(vehicle.id || vehicle.reg || vehicle.registration || vehicle.name || "")]}
+                ignoreReelLock={ignoreReelLock}
               />
             ))}
           </div>

@@ -184,16 +184,35 @@ function resolveQueuedVehicle(queueItem, vehicles) {
   if (!queueItem) return null;
   const id = String(queueItem.id || "").trim();
   const reg = queueItemRegistration(queueItem);
+  const targetPipeline = queueItem.targetPipeline || (queueItem.reelType === "rent2buy" ? "rent2buy" : "");
   const matched =
     (id ? vehicles.find((vehicle) => String(vehicle.id || "").trim() === id) : null) ||
     (reg ? vehicles.find((vehicle) => queueItemRegistration(vehicle) === reg) : null);
 
   if (!matched) return null;
 
+  const rentData = matched.rent2buyData || queueItem.rent2buyData || {};
+  const resolvedPipeline = targetPipeline || matched.pipeline;
+  const sourceVehicle =
+    resolvedPipeline === "rent2buy" && rentData
+      ? { ...matched, ...rentData, id: matched.id }
+      : matched;
+  const resolvedImage =
+    sourceVehicle.image ||
+    sourceVehicle.picture ||
+    sourceVehicle.mainImage ||
+    queueItem.image ||
+    queueItem.picture ||
+    "";
+
   return {
-    ...matched,
-    image: matched.image || matched.picture || matched.mainImage || "",
-    pipeline: queueItem.targetPipeline || matched.pipeline,
+    ...sourceVehicle,
+    image: resolvedImage,
+    picture: sourceVehicle.picture || resolvedImage,
+    pipeline: resolvedPipeline,
+    source: resolvedPipeline === "rent2buy" ? "rent2buy" : "finance",
+    reelType: resolvedPipeline === "rent2buy" ? "rent2buy" : "finance",
+    rent2buyData: matched.rent2buyData || queueItem.rent2buyData || null,
   };
 }
 
@@ -299,6 +318,7 @@ export default function PremiumReelStudioBetaPage({
   onClearManualReelQueue,
   onReelDownloadComplete,
   reelActionLocks = {},
+  ignoreReelLock = false,
 }) {
   const [formValues, setFormValues] = useState(DEFAULT_BETA_REEL_FORM);
   const [premiumUsps, setPremiumUsps] = useState(loadPremiumUsps);
@@ -381,7 +401,7 @@ export default function PremiumReelStudioBetaPage({
   const activeQueuedVehicle =
     manualReelQueueVehicles[activeQueueKey] || resolveQueuedVehicle(activeQueuedItem, vehicles || []);
   const activeQueueLock = manualReelQueueLocks[activeQueueKey] || null;
-  const activeQueueLocked = Boolean(activeQueueLock?.locked);
+  const activeQueueLocked = Boolean(activeQueueLock?.locked) && !ignoreReelLock;
   const activeQueueProgress = queueProgress[activeQueueKey] || { completed: 0, total: activeQueue.length };
   const activeProgressTotal = activeQueueProgress.total || activeQueue.length;
   const activeProgressCompleted = Math.min(activeQueueProgress.completed || 0, activeProgressTotal || 0);
@@ -674,6 +694,20 @@ export default function PremiumReelStudioBetaPage({
   async function handleGenerateCurrentQueuedReel() {
     if (isBusy || autoQueueRunning || !activeQueuedVehicle || activeQueueLocked) return;
 
+    console.log("Premium queued reel lock check", {
+      registration: activeQueuedReg || vehicleRegistration(activeQueuedVehicle),
+      selectedReelType: activeQueueKey,
+      selectedSource: activeQueuedVehicle?.source || activeQueuedVehicle?.pipeline || activeQueueKey,
+      locked: Boolean(activeQueueLock?.locked),
+      bypassed: ignoreReelLock,
+      imageFields: {
+        image: activeQueuedVehicle?.image || "",
+        picture: activeQueuedVehicle?.picture || "",
+        rent2buyDataPicture: activeQueuedVehicle?.rent2buyData?.picture || "",
+        financePicture: activeQueuedVehicle?.financePicture || "",
+      },
+    });
+
     setIsBusy(true);
     setError("");
     setCopyMessage("");
@@ -727,7 +761,20 @@ export default function PremiumReelStudioBetaPage({
         }
 
         const lock = reelActionLocks[vehicleQueueKey(queuedVehicle)];
-        if (lock?.locked) {
+        console.log("Premium auto queue lock check", {
+          registration: vehicleRegistration(queuedVehicle),
+          selectedReelType: queuedVehicle?.pipeline,
+          selectedSource: queuedVehicle?.source || queuedVehicle?.pipeline || activeQueueKey,
+          locked: Boolean(lock?.locked),
+          bypassed: ignoreReelLock,
+          imageFields: {
+            image: queuedVehicle?.image || "",
+            picture: queuedVehicle?.picture || "",
+            rent2buyDataPicture: queuedVehicle?.rent2buyData?.picture || "",
+            financePicture: queuedVehicle?.financePicture || "",
+          },
+        });
+        if (lock?.locked && !ignoreReelLock) {
           throw new Error("This vehicle is locked for reels for 72 hours after download.");
         }
 

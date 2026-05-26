@@ -607,10 +607,32 @@ function getManualQueueTargetPipeline(queueKey) {
 }
 
 function createManualQueueItem(vehicle, queueKey) {
+  const targetPipeline = getManualQueueTargetPipeline(queueKey);
+  const reelVehicle = asPipelineVehicle(vehicle, targetPipeline);
+
+  console.log("Manual reel queue payload", {
+    registration: reelVehicle?.reg || reelVehicle?.registration || vehicle?.reg || "",
+    reelType: queueKey,
+    source: targetPipeline,
+    imageFields: {
+      image: reelVehicle?.image || "",
+      picture: reelVehicle?.picture || "",
+      rent2buyDataPicture: reelVehicle?.rent2buyData?.picture || "",
+      financePicture: reelVehicle?.financePicture || "",
+    },
+  });
+
   return {
     id: String(vehicle?.id || "").trim(),
-    reg: getManualQueueRegistration(vehicle),
-    targetPipeline: getManualQueueTargetPipeline(queueKey),
+    reg: getManualQueueRegistration(reelVehicle),
+    targetPipeline,
+    source: queueKey,
+    reelType: queueKey,
+    name: reelVehicle?.name || vehicle?.name || "",
+    title: reelVehicle?.title || vehicle?.title || "",
+    image: reelVehicle?.image || "",
+    picture: reelVehicle?.picture || "",
+    rent2buyData: reelVehicle?.rent2buyData || null,
   };
 }
 
@@ -621,6 +643,13 @@ function normalizeManualQueueItem(item, queueKey) {
     id: String(item.id || "").trim(),
     reg: getManualQueueRegistration(item),
     targetPipeline: item.targetPipeline || getManualQueueTargetPipeline(queueKey),
+    source: item.source || queueKey,
+    reelType: item.reelType || queueKey,
+    name: item.name || "",
+    title: item.title || "",
+    image: item.image || "",
+    picture: item.picture || "",
+    rent2buyData: item.rent2buyData || null,
   };
 
   return normalized.id || normalized.reg ? normalized : null;
@@ -667,6 +696,8 @@ function asPipelineVehicle(vehicle, pipeline) {
       financeData: vehicle,
       originalPipeline: vehicle.originalPipeline || vehicle.pipeline,
       pipeline,
+      source: "rent2buy",
+      reelType: "rent2buy",
       rent2buyEligible: true,
       rent2buyData: vehicle.rent2buyData || rentData,
     };
@@ -675,6 +706,8 @@ function asPipelineVehicle(vehicle, pipeline) {
   return {
     ...vehicle,
     pipeline,
+    source: "finance",
+    reelType: "finance",
     originalPipeline: "vanFinance",
   };
 }
@@ -708,7 +741,9 @@ function resolveManualQueuedVehicle(queueItem, vehicles) {
 
   return asPipelineVehicle({
     ...matchedVehicle,
-    image: getManualVehicleImage(matchedVehicle),
+    image: getManualVehicleImage(matchedVehicle) || normalizedItem.image || normalizedItem.picture,
+    picture: matchedVehicle.picture || normalizedItem.picture || normalizedItem.image,
+    rent2buyData: matchedVehicle.rent2buyData || normalizedItem.rent2buyData,
   }, normalizedItem.targetPipeline || matchedVehicle.pipeline);
 }
 
@@ -954,6 +989,8 @@ useEffect(() => {
   const generatedCreatives = useMemo(() => {
     return creatives.filter((creative) => recentGeneratedIds.includes(creative.id));
   }, [creatives, recentGeneratedIds]);
+
+  const ignoreReelLock = Boolean(reelFactoryForm.ignoreVehicleCooldown);
 
   const recentCreatives = useMemo(() => {
     return [...creatives]
@@ -1211,9 +1248,25 @@ useEffect(() => {
   function createReelFromVehicle(vehicle, options = {}) {
     const hook = options.hook || pickHookForPipeline(vehicle.pipeline, todayReels.length);
     const content = buildPipelineReelContent(vehicle);
+    const imageUrl = vehicle?.image || vehicle?.picture || "";
+
+    console.log("Creating reel from vehicle", {
+      registration: vehicle?.reg || vehicle?.registration || vehicle?.name || "",
+      reelType: vehicle?.reelType || vehicle?.pipeline,
+      source: vehicle?.source || vehicle?.pipeline,
+      imageFields: {
+        image: vehicle?.image || "",
+        picture: vehicle?.picture || "",
+        rent2buyDataPicture: vehicle?.rent2buyData?.picture || "",
+        financePicture: vehicle?.financePicture || "",
+      },
+      finalImageUrl: imageUrl,
+      lockBypassed: ignoreReelLock,
+    });
 
     return createReelRecord({
       vehicle,
+      image: imageUrl,
       pipeline: vehicle.pipeline,
       hook,
       templateName: content.templateName,
@@ -1759,7 +1812,15 @@ async function handleClearTodayReels() {
   }
 
   function handleGenerateFromStock(vehicle) {
-    if (reelActionLocks[getManualQueueVehicleId(vehicle)]?.locked) {
+    const lock = reelActionLocks[getManualQueueVehicleId(vehicle)];
+    console.log("Stock reel lock check", {
+      registration: vehicle?.reg || vehicle?.registration || vehicle?.name || "",
+      pipeline: stockFilters.pipeline === "rent2buy" ? "rent2buy" : "vanFinance",
+      locked: Boolean(lock?.locked),
+      bypassed: ignoreReelLock,
+    });
+
+    if (lock?.locked && !ignoreReelLock) {
       setGenerationMessage("This vehicle is locked for reels for 72 hours after download.");
       setCreativeError("");
       return;
@@ -1791,7 +1852,14 @@ async function handleClearTodayReels() {
   function handleToggleManualStockVehicle(vehicle) {
     const vehicleId = getManualQueueVehicleId(vehicle);
     if (!vehicleId) return;
-    if (reelActionLocks[vehicleId]?.locked) {
+    const lock = reelActionLocks[vehicleId];
+    console.log("Stock manual queue lock check", {
+      registration: vehicle?.reg || vehicle?.registration || vehicle?.name || "",
+      locked: Boolean(lock?.locked),
+      bypassed: ignoreReelLock,
+    });
+
+    if (lock?.locked && !ignoreReelLock) {
       setGenerationMessage("This vehicle is locked for reels for 72 hours after download.");
       setCreativeError("");
       return;
@@ -1810,7 +1878,7 @@ async function handleClearTodayReels() {
     const selectedVehicles = vehicles
       .filter((vehicle) => selectedIds.has(getManualQueueVehicleId(vehicle)))
       .filter((vehicle) => queueKey !== "rent2buy" || isRent2BuyEligible(vehicle))
-      .filter((vehicle) => !reelActionLocks[getManualQueueVehicleId(vehicle)]?.locked);
+      .filter((vehicle) => ignoreReelLock || !reelActionLocks[getManualQueueVehicleId(vehicle)]?.locked);
     const selectedItems = selectedVehicles.map((vehicle) => createManualQueueItem(vehicle, queueKey));
 
     if (!selectedItems.length) {
@@ -1916,7 +1984,16 @@ async function handleClearTodayReels() {
       return failManualQueueGeneration("Queued vehicle has no usable image in current stock. Refresh stock or remove it.");
     }
 
-    if (getReelActionLock(vehicle, reelDownloadCooldowns).locked) {
+    const lock = getReelActionLock(vehicle, reelDownloadCooldowns);
+    console.log("Manual queued reel lock check", {
+      registration: vehicle?.reg || vehicle?.registration || vehicle?.name || "",
+      queueKey,
+      reelType: vehicle?.pipeline,
+      locked: Boolean(lock?.locked),
+      bypassed: ignoreReelLock,
+    });
+
+    if (lock.locked && !ignoreReelLock) {
       setGenerationMessage("This vehicle is locked for reels for 72 hours after download.");
       setCreativeError("");
       return failManualQueueGeneration("This vehicle is locked for reels for 72 hours after download.");
@@ -2246,6 +2323,8 @@ async function handleClearTodayReels() {
             onToggleVehicle={handleToggleManualStockVehicle}
             onAddSelectedToQueue={handleAddSelectedToManualReelQueue}
             reelActionLocks={reelActionLocks}
+            ignoreReelLock={ignoreReelLock}
+            onIgnoreReelLockChange={(value) => handleReelFactoryChange("ignoreVehicleCooldown", value)}
           />
         );
       case "Vansco Stock Watch":
@@ -2300,6 +2379,7 @@ async function handleClearTodayReels() {
             onClearManualReelQueue={handleClearManualReelQueue}
             onReelDownloadComplete={handleReelDownloadComplete}
             reelActionLocks={reelActionLocks}
+            ignoreReelLock={ignoreReelLock}
           />
         );
       case "Creative Library":
