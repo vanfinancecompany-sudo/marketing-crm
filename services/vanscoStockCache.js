@@ -121,6 +121,23 @@ function statusLabel(status) {
   return labels[status] || status || "Not run yet";
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function latestFailedDetailsFromPayload(payload) {
+  const runFailures = payload?.run?.last_result?.latestFailedDetails;
+  if (Array.isArray(payload?.latestFailedDetails)) return payload.latestFailedDetails;
+  if (Array.isArray(runFailures)) return runFailures;
+  if (Array.isArray(payload?.results)) return payload.results.filter((item) => item && item.ok === false).slice(-10).reverse();
+  return [];
+}
+
 function updateAutomaticRefreshCard(statusPayload) {
   if (typeof document === "undefined") return;
   ensureVanscoLayoutStyles();
@@ -213,6 +230,7 @@ function ensureStatusHub() {
       <div data-vansco-run-id style="font-size:12px;color:#64748b;"></div>
     </div>
     <div data-vansco-progress-detail style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;font-size:13px;color:#334155;"></div>
+    <div data-vansco-failed-details style="display:none;border:1px solid #fed7aa;background:#fff7ed;border-radius:8px;padding:9px;font-size:12px;color:#7c2d12;line-height:1.35;"></div>
     <div data-vansco-totals-note style="font-size:12px;color:#64748b;line-height:1.35;border-top:1px solid #dbeafe;padding-top:8px;">
       Action card totals are filtered per tab. They do not add up to the full Vansco URL count because already-listed, wrong-tab type, reserved-not-advertised, blocked and no-registration rows are hidden.
     </div>
@@ -258,6 +276,8 @@ function updateStatusHub(payload, fallbackStage = "processing_dragon_details", m
   const runIdEl = panel.querySelector("[data-vansco-run-id]");
   const barEl = panel.querySelector("[data-vansco-progress-bar]");
   const detailEl = panel.querySelector("[data-vansco-progress-detail]");
+  const failedDetailsEl = panel.querySelector("[data-vansco-failed-details]");
+  const latestFailedDetails = latestFailedDetailsFromPayload(payload).slice(0, 10);
 
   if (stageEl) stageEl.textContent = stageLabel(stage);
   if (messageEl) messageEl.textContent = message;
@@ -275,6 +295,25 @@ function updateStatusHub(payload, fallbackStage = "processing_dragon_details", m
       <span>Remaining: ${remaining}</span>
       <span>Stage: ${stageLabel(stage)}</span>
     `;
+  }
+  if (failedDetailsEl) {
+    if (failed > 0) {
+      const rows = latestFailedDetails.map((item) => `
+        <li style="margin:4px 0;">
+          <a href="${escapeHtml(item.stockUrl || "#")}" target="_blank" rel="noopener noreferrer" style="color:#9a3412;font-weight:700;">${escapeHtml(item.title || item.stockUrl || item.id || "Vansco detail page")}</a>
+          <div style="color:#7c2d12;overflow-wrap:anywhere;">${escapeHtml(item.error || "Detail check failed")}</div>
+        </li>
+      `).join("");
+      failedDetailsEl.style.display = "block";
+      failedDetailsEl.innerHTML = `
+        <div style="font-weight:800;margin-bottom:5px;">${failed} Vansco detail pages failed this run.</div>
+        <div>Usually this is a timeout or Dragon page issue. Refresh can be run again to retry later.</div>
+        ${rows ? `<ul style="margin:7px 0 0 16px;padding:0;">${rows}</ul>` : ""}
+      `;
+    } else {
+      failedDetailsEl.style.display = "none";
+      failedDetailsEl.innerHTML = "";
+    }
   }
 }
 
