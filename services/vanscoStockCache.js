@@ -140,40 +140,11 @@ function latestFailedDetailsFromPayload(payload) {
 
 function updateAutomaticRefreshCard(statusPayload) {
   if (typeof document === "undefined") return;
-  ensureVanscoLayoutStyles();
 
-  const panel = document.querySelector(".vansco-watch-panel");
-  if (!panel) return;
+  const existingCard = document.getElementById("vansco-auto-refresh-card");
+  if (existingCard) existingCard.remove();
 
-  let card = document.getElementById("vansco-auto-refresh-card");
-  if (!card) {
-    card = document.createElement("div");
-    card.id = "vansco-auto-refresh-card";
-    card.className = "vansco-auto-refresh-card";
-    const firstNote = panel.querySelector(".vansco-watch-note") || panel.querySelector(".stat-grid") || panel.querySelector(".segmented-control");
-    if (firstNote?.nextSibling) panel.insertBefore(card, firstNote.nextSibling);
-    else panel.appendChild(card);
-  }
-
-  const latest = statusPayload?.latestScheduledRun || null;
-  const completed = statusPayload?.latestCompletedScheduledRun || null;
-  const displayRun = latest || completed;
-  const lastSuccess = completed ? formatDateTime(runWhen(completed)) : "No completed automatic refresh yet";
-  const lastAttempt = displayRun ? formatDateTime(runWhen(displayRun)) : "No automatic refresh yet";
-
-  card.innerHTML = `
-    <div class="vansco-auto-refresh-card__title">Automatic Vansco refresh</div>
-    <div class="vansco-auto-refresh-card__grid">
-      <span><strong>Status:</strong> ${statusLabel(displayRun?.status)}</span>
-      <span><strong>Last success:</strong> ${lastSuccess}</span>
-      <span><strong>Last attempt:</strong> ${lastAttempt}</span>
-      <span><strong>Processed:</strong> ${displayRun?.processed_count ?? 0}</span>
-      <span><strong>Success:</strong> ${displayRun?.success_count ?? 0}</span>
-      <span><strong>Failed:</strong> ${displayRun?.failure_count ?? 0}</span>
-      <span><strong>Remaining:</strong> ${displayRun?.remaining_count ?? 0}</span>
-      <span><strong>Stage:</strong> ${stageLabel(displayRun?.stage)}</span>
-    </div>
-  `;
+  return;
 }
 
 function positionStatusHub(panel) {
