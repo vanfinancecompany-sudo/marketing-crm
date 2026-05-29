@@ -238,11 +238,17 @@ function updateStatusHub(payload, fallbackStage = "processing_dragon_details", m
   if (!panel) return;
 
   const run = payload?.run || {};
-  const total = Number(run.total_urls || payload?.refresh?.urlsFound || 248 || 0);
   const processed = Number(payload?.totalRunProcessedCount ?? run.processed_count ?? payload?.processedCount ?? 0);
   const success = Number(payload?.totalRunSuccessCount ?? run.success_count ?? payload?.successCount ?? 0);
   const failed = Number(payload?.totalRunFailureCount ?? run.failure_count ?? payload?.failureCount ?? 0);
-  const remaining = Number(payload?.remainingThisRunCount ?? payload?.remainingUncheckedOrMissingRegCount ?? run.remaining_count ?? Math.max(total - processed, 0));
+  const remaining = Number(payload?.remainingThisRunCount ?? payload?.remainingUncheckedOrMissingRegCount ?? run.remaining_count ?? 0);
+  const total = Math.max(
+    Number(run.total_urls || 0),
+    Number(payload?.refresh?.urlsFound || 0),
+    processed + remaining,
+    success + failed + remaining,
+    0
+  );
   const percent = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
   const stage = payload?.complete ? "complete" : run.stage || fallbackStage;
 
@@ -353,14 +359,41 @@ export async function refreshVanscoCacheUrls() {
 export async function processVanscoCacheBatch() {
   let latest = null;
   let runId = activeVanscoRunId;
-  const maxBatches = 40;
+  const maxBatches = 120;
+  let previousRemaining = null;
+  let noProgressBatches = 0;
 
   for (let batchIndex = 0; batchIndex < maxBatches; batchIndex += 1) {
     latest = await runVanscoLiveRefreshBatch({ batchSize: 10, refreshUrls: false, runId });
     runId = latest.runId || runId;
     updateStatusHub(latest, "processing_dragon_details", `Processing safe batch ${batchIndex + 1}. Keep this page open while refresh runs.`);
 
+    const remaining = Number(
+      latest?.remainingThisRunCount ??
+      latest?.remainingUncheckedOrMissingRegCount ??
+      0
+    );
+
+    if (previousRemaining !== null && remaining >= previousRemaining) {
+      noProgressBatches += 1;
+    } else {
+      noProgressBatches = 0;
+    }
+
+    previousRemaining = remaining;
+
     if (!latest.shouldContinue || latest.complete) break;
+
+    if (noProgressBatches >= 3) {
+      latest = {
+        ...latest,
+        shouldContinue: false,
+        refreshStoppedReason: "no_progress_guard",
+        message: "Refresh stopped because remaining count did not reduce after repeated safe batches.",
+      };
+      break;
+    }
+
     await wait(1000);
   }
 

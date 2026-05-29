@@ -337,6 +337,20 @@ async function refreshUrlList(supabase, runId) {
 
   if (upsertError) throw upsertError;
 
+  const { data: staleRows, error: staleUpdateError } = await supabase
+    .from(CACHE_TABLE)
+    .update({
+      is_currently_on_vansco: false,
+      updated_at: refreshedAt,
+    })
+    .eq("is_currently_on_vansco", true)
+    .lt("last_seen_in_url_list_at", refreshedAt)
+    .select("id");
+
+  if (staleUpdateError) throw staleUpdateError;
+
+  const staleRowsMarked = Array.isArray(staleRows) ? staleRows.length : 0;
+
   await updateRun(supabase, runId, {
     stage: "url_list_refreshed",
     total_urls: rows.length,
@@ -345,6 +359,11 @@ async function refreshUrlList(supabase, runId) {
     failure_count: 0,
     remaining_count: rows.length,
     last_error: null,
+    last_result: {
+      staleRowsMarked,
+      urlsFound: urls.length,
+      rowsUpserted: rows.length,
+    },
   });
 
   return {
@@ -353,7 +372,8 @@ async function refreshUrlList(supabase, runId) {
     urlsFound: urls.length,
     rowsUpserted: rows.length,
     refreshedAt,
-    staleMarkingSkipped: true,
+    staleRowsMarked,
+    staleMarkingSkipped: false,
     usedFallbackCache: false,
   };
 }
@@ -570,6 +590,7 @@ export default async function handler(request, response) {
         processedThisBatch: results.length,
         successThisBatch: results.filter((item) => item.ok).length,
         failureThisBatch: results.filter((item) => !item.ok).length,
+        staleRowsMarked: refresh?.staleRowsMarked ?? 0,
         usedFallbackCache: Boolean(refresh?.usedFallbackCache),
         cleanup,
       },
