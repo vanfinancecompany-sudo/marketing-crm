@@ -337,6 +337,20 @@ async function refreshUrlList(supabase, runId) {
 
   if (upsertError) throw upsertError;
 
+  const { data: staleRows, error: staleUpdateError } = await supabase
+    .from(CACHE_TABLE)
+    .update({
+      is_currently_on_vansco: false,
+      updated_at: refreshedAt,
+    })
+    .eq("is_currently_on_vansco", true)
+    .lt("last_seen_in_url_list_at", refreshedAt)
+    .select("id");
+
+  if (staleUpdateError) throw staleUpdateError;
+
+  const staleRowsMarked = Array.isArray(staleRows) ? staleRows.length : 0;
+
   await updateRun(supabase, runId, {
     stage: "url_list_refreshed",
     total_urls: rows.length,
@@ -345,6 +359,11 @@ async function refreshUrlList(supabase, runId) {
     failure_count: 0,
     remaining_count: rows.length,
     last_error: null,
+    last_result: {
+      staleRowsMarked,
+      urlsFound: urls.length,
+      rowsUpserted: rows.length,
+    },
   });
 
   return {
@@ -353,7 +372,8 @@ async function refreshUrlList(supabase, runId) {
     urlsFound: urls.length,
     rowsUpserted: rows.length,
     refreshedAt,
-    staleMarkingSkipped: true,
+    staleRowsMarked,
+    staleMarkingSkipped: false,
     usedFallbackCache: false,
   };
 }
@@ -386,6 +406,27 @@ async function countRemainingForRun(supabase, runStartedAt) {
 
   if (error) throw error;
   return (data || []).filter((row) => !wasAttemptedDuringRun(row, runStartedAt)).length;
+}
+
+async function getLatestFailedDetailsForRun(supabase, runStartedAt, limit = 10) {
+  const { data, error } = await supabase
+    .from(CACHE_TABLE)
+    .select("id, stock_url, title, last_error, last_attempted_at, fail_count")
+    .gte("last_attempted_at", runStartedAt)
+    .not("last_error", "is", null)
+    .order("last_attempted_at", { ascending: false })
+    .limit(limit);
+
+  if (error) throw error;
+
+  return (data || []).map((row) => ({
+    id: row.id,
+    stockUrl: row.stock_url,
+    title: row.title,
+    error: row.last_error,
+    lastAttemptedAt: row.last_attempted_at,
+    failCount: Number(row.fail_count || 0),
+  }));
 }
 
 async function processOne(supabase, row) {
@@ -536,13 +577,19 @@ export default async function handler(request, response) {
       }
 
       const remainingMidBatch = await countRemainingForRun(supabase, runStartedAt);
+      const latestFailedDetails = await getLatestFailedDetailsForRun(supabase, runStartedAt, 10);
+
       await updateRun(supabase, run.id, {
         stage: "processing_dragon_details",
         processed_count: Number(run.processed_count || 0) + results.length,
         success_count: Number(run.success_count || 0) + results.filter((item) => item.ok).length,
         failure_count: Number(run.failure_count || 0) + results.filter((item) => !item.ok).length,
         remaining_count: remainingMidBatch,
-        last_result: { stoppedReason, latestBatchResults: results.slice(-3) },
+        last_result: {
+          stoppedReason,
+          latestBatchResults: results.slice(-3),
+          latestFailedDetails,
+        },
       });
 
       if (stoppedReason === "time_guard") break;
@@ -554,6 +601,7 @@ export default async function handler(request, response) {
     const successCount = Number(run.success_count || 0) + results.filter((item) => item.ok).length;
     const failureCount = Number(run.failure_count || 0) + results.filter((item) => !item.ok).length;
     const cleanup = complete ? await cleanupOldVanscoData(supabase) : null;
+    const latestFailedDetails = await getLatestFailedDetailsForRun(supabase, runStartedAt, 10);
 
     const finalRun = await updateRun(supabase, run.id, {
       status: complete ? "complete" : "running",
@@ -570,6 +618,8 @@ export default async function handler(request, response) {
         processedThisBatch: results.length,
         successThisBatch: results.filter((item) => item.ok).length,
         failureThisBatch: results.filter((item) => !item.ok).length,
+        latestFailedDetails,
+        staleRowsMarked: refresh?.staleRowsMarked ?? 0,
         usedFallbackCache: Boolean(refresh?.usedFallbackCache),
         cleanup,
       },
@@ -598,6 +648,7 @@ export default async function handler(request, response) {
       totalRunFailureCount: failureCount,
       remainingUncheckedOrMissingRegCount: remainingCount,
       remainingThisRunCount: remainingCount,
+      latestFailedDetails,
       complete,
       shouldContinue: remainingCount > 0,
       results,
