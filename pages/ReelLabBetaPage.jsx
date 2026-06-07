@@ -205,25 +205,106 @@ function splitCsvLine(line) {
   return cells;
 }
 
+function normalizeCmsKey(key) {
+  return cleanText(key).toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function extractRegistrationFromText(value) {
+  const text = cleanText(value).toUpperCase();
+  const explicitMatch = text.match(/(?:REG(?:ISTRATION)?|VRM|NUMBER\s*PLATE|PLATE)\s*[:#-]?\s*([A-Z]{2}\s?\d{2}\s?[A-Z]{3})/i);
+  if (explicitMatch) return explicitMatch[1].replace(/\s+/g, "");
+  const looseMatch = text.match(/\b[A-Z]{2}\s?\d{2}\s?[A-Z]{3}\b/);
+  return looseMatch ? looseMatch[0].replace(/\s+/g, "") : "";
+}
+
+function getCmsField(source, keyPatterns) {
+  const entry = Object.entries(source || {}).find(([key]) => {
+    const normalKey = normalizeCmsKey(key);
+    return keyPatterns.some((pattern) => pattern.test(normalKey));
+  });
+  return entry ? entry[1] : "";
+}
+
+function normalizeCmsImageUrl(value) {
+  const text = cleanText(value);
+  if (!text) return "";
+  const wixMatch = text.match(/^(?:wix:)?image:\/\/v1\/([^/#?]+)/i);
+  if (wixMatch) return `https://static.wixstatic.com/media/${wixMatch[1]}`;
+  if (/^\/\/static\.wixstatic\.com\//i.test(text)) return `https:${text}`;
+  return text;
+}
+
+function extractImageUrlsFromValue(value) {
+  const urls = [];
+  const addUrl = (candidate) => {
+    const text = normalizeCmsImageUrl(candidate);
+    if (!text) return;
+    const matches = text.match(/https?:\/\/[^\s"'<>|;,]+/gi);
+    if (matches) {
+      matches.forEach((url) => urls.push(normalizeCmsImageUrl(url)));
+      return;
+    }
+    if (/^wix:image:\/\//i.test(text) || /^image:\/\//i.test(text) || /static\.wixstatic\.com\/media\//i.test(text)) {
+      urls.push(text);
+    }
+  };
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => {
+      if (typeof item === "object" && item) {
+        addUrl(item.url || item.src || item.fileUrl || item.image || item.uri);
+      } else {
+        addUrl(item);
+      }
+    });
+    return urls;
+  }
+
+  if (typeof value === "object" && value) {
+    addUrl(value.url || value.src || value.fileUrl || value.image || value.uri);
+    Object.values(value).forEach((nestedValue) => {
+      if (typeof nestedValue === "string") addUrl(nestedValue);
+    });
+    return urls;
+  }
+
+  String(value || "")
+    .split(/\s*[|;]\s*/)
+    .forEach((item) => addUrl(item));
+  return urls;
+}
+
 function normalizeCmsRow(row, index = 0) {
   const source = row || {};
-  const registration = vehicleRegistration({
-    reg: source.registration || source.reg || source.Registration || source.REG || source.numberPlate || source.vrm || "",
-  });
-  const title = cleanText(source.title || source.name || source.vehicleTitle || source.vehicle || source.description || source.vanDescription || "");
+  const explicitReg = getCmsField(source, [
+    /^reg$/,
+    /^registration/,
+    /vrm/,
+    /numberplate/,
+    /licenceplate/,
+    /licenseplate/,
+  ]);
+  const rowText = Object.values(source).map((value) => (typeof value === "string" ? value : JSON.stringify(value || ""))).join(" ");
+  const registration = vehicleRegistration({ reg: explicitReg }) || extractRegistrationFromText(rowText);
+  const title = cleanText(
+    getCmsField(source, [/^title$/, /^name$/, /vehicletitle/, /^vehicle$/, /description/, /vandescription/, /makemodel/])
+  );
   const imageValues = [];
-  const imageKeys = Object.keys(source).filter((key) => /^(image|images|picture|photo|gallery|mainImage|media)/i.test(key));
+  const imageKeys = Object.keys(source).filter((key) => {
+    const normalKey = normalizeCmsKey(key);
+    return /(image|images|picture|photo|gallery|mainimage|media|thumbnail|src|url)$/.test(normalKey)
+      || /(image|picture|photo|gallery|media)/.test(normalKey);
+  });
 
   imageKeys.forEach((key) => {
-    const value = source[key];
-    if (Array.isArray(value)) {
-      value.forEach((item) => imageValues.push(item?.url || item?.src || item));
-    } else {
-      String(value || "")
-        .split(/\s*[|;]\s*/)
-        .forEach((item) => imageValues.push(item));
-    }
+    extractImageUrlsFromValue(source[key]).forEach((url) => imageValues.push(url));
   });
+
+  if (!imageValues.length) {
+    Object.values(source).forEach((value) => {
+      extractImageUrlsFromValue(value).forEach((url) => imageValues.push(url));
+    });
+  }
 
   const imageRecords = buildOrderedImageRecords(
     imageValues.map((url, imageIndex) => ({ url, source: `CMS upload image ${imageIndex + 1}` }))
