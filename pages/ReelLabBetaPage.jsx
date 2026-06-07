@@ -244,11 +244,11 @@ function drawBrandPill(ctx, product, x, y) {
 }
 
 function drawPremiumHook(ctx, product, productKey, elapsedSeconds, safeLeft, safeTop, safeWidth) {
-  const alpha = stagedOpacity(elapsedSeconds, 0.25, 0.7) * fadeOut(elapsedSeconds, 2.55, 3.15);
+  const alpha = stagedOpacity(elapsedSeconds, 0.25, 0.7) * fadeOut(elapsedSeconds, 2.35, 2.9);
   if (alpha <= 0.01) return;
 
   const entrance = stagedOpacity(elapsedSeconds, 0.25, 0.7);
-  const exit = fadeOut(elapsedSeconds, 2.55, 3.15);
+  const exit = fadeOut(elapsedSeconds, 2.35, 2.9);
   const slide = (1 - entrance) * 60 - (1 - exit) * 38;
   const panelY = safeTop + 600 + slide;
   const gradient = ctx.createLinearGradient(safeLeft, panelY, safeLeft + safeWidth, panelY + 270);
@@ -390,7 +390,7 @@ function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, templateStyl
   drawBrandPill(ctx, product, safeLeft, safeTop + 24);
   drawPremiumHook(ctx, product, productKey, elapsedSeconds, safeLeft, safeTop, safeWidth);
 
-  const cardAlpha = stagedOpacity(elapsedSeconds, 3.05, 3.65) * fadeOut(elapsedSeconds, 7.0, 7.45);
+  const cardAlpha = stagedOpacity(elapsedSeconds, 3.25, 3.55) * fadeOut(elapsedSeconds, 6.7, 7.05);
   if (cardAlpha > 0.01) {
     ctx.save();
     ctx.globalAlpha = cardAlpha;
@@ -521,7 +521,10 @@ async function fetchFirstFivePageImages({ productKey, vehicle }) {
     images: Array.isArray(payload?.images) ? payload.images.slice(0, 5) : [],
     message: payload?.message || "",
     matchedRegistration: Boolean(payload?.matchedRegistration),
+    matchedTitle: Boolean(payload?.matchedTitle),
+    debug: payload?.debug || null,
     pageUrl: payload?.pageUrl || pageUrl,
+    productLabel: payload?.productLabel || PRODUCTS[productKey]?.label || productKey,
   };
 }
 
@@ -543,6 +546,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const [error, setError] = useState("");
   const [pageImageTests, setPageImageTests] = useState({ vanFinance: null, rent2buy: null });
   const fileInputRef = useRef(null);
+  const generationKeyRef = useRef("");
 
   const product = PRODUCTS[productKey];
   const productVehicles = useMemo(() => getProductVehicles(vehicles, productKey), [vehicles, productKey]);
@@ -556,13 +560,23 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const cta = ctaByProduct[productKey];
   const selectedVehicleKey = selectedVehicle ? `${productKey}:${selectedVehicle.id}:${vehicleRegistration(selectedVehicle)}` : "";
   const pageImageTest = pageImageTests[productKey]?.vehicleKey === selectedVehicleKey ? pageImageTests[productKey] : null;
+  const currentAsset = asset?.vehicleKey === selectedVehicleKey ? asset : null;
 
   useEffect(() => {
     setSelectedVehicleId("");
+    if (asset?.url) URL.revokeObjectURL(asset.url);
     setAsset(null);
     setError("");
     setStatus("");
   }, [productKey]);
+
+  useEffect(() => {
+    generationKeyRef.current = selectedVehicleKey;
+    if (asset?.url) URL.revokeObjectURL(asset.url);
+    setAsset(null);
+    setStatus("");
+    setError("");
+  }, [selectedVehicleKey]);
 
   useEffect(() => {
     return () => {
@@ -646,7 +660,10 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
           images,
           error: "",
           matchedRegistration: result.matchedRegistration,
+          matchedTitle: result.matchedTitle,
+          debug: result.debug,
           pageUrl: result.pageUrl,
+          productLabel: result.productLabel,
         },
       }));
     } catch (pageImageError) {
@@ -658,6 +675,12 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
           message: "Van page image test failed -- stock image fallback will be used.",
           images: [],
           error: pageImageError.message || "Could not test selected van page images.",
+          debug: {
+            selectedReg: vehicleRegistration(selectedVehicle),
+            selectedTitle: vehicleTitle(selectedVehicle),
+            selectedPageUrl: vehiclePageUrl(selectedVehicle),
+            product: productKey,
+          },
         },
       }));
     }
@@ -676,6 +699,8 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     }
     if (asset?.url) URL.revokeObjectURL(asset.url);
     setAsset(null);
+    const renderVehicleKey = selectedVehicleKey;
+    generationKeyRef.current = renderVehicleKey;
     try {
       const nextAsset = await generateReelLabAsset({
         productKey,
@@ -685,8 +710,12 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
         imageUrls: resolvedImages,
         onProgress: setStatus,
       });
-      setAsset(nextAsset);
-      setStatus("Preview ready. Download MP4 when you are happy with it.");
+      if (generationKeyRef.current !== renderVehicleKey) {
+        URL.revokeObjectURL(nextAsset.url);
+        return;
+      }
+      setAsset({ ...nextAsset, vehicleKey: renderVehicleKey });
+      setStatus(`Preview ready for ${vehicleRegistration(selectedVehicle) || "selected vehicle"}. Download MP4 when you are happy with it.`);
     } catch (generationError) {
       setError(generationError.message || "Could not generate Reel Lab preview.");
       setStatus("");
@@ -695,14 +724,14 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
 
   async function handleDownloadMp4() {
     setError("");
-    if (!asset?.blob) {
+    if (!currentAsset?.blob) {
       setError("Generate a Reel Lab preview before downloading MP4.");
       return;
     }
     try {
       setStatus("Converting to MP4");
       const filename = `${safeFilePart(`${product.label}-${vehicleRegistration(selectedVehicle)}-${templateStyle}`)}.mp4`;
-      await downloadMp4FromWebm(asset.blob, filename);
+      await downloadMp4FromWebm(currentAsset.blob, filename);
       setStatus("MP4 downloaded.");
     } catch (downloadError) {
       setError(downloadError.message || "Could not download MP4.");
@@ -798,7 +827,17 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
             <div className={`reel-lab__page-result reel-lab__page-result--${pageImageTest.status}`}>
               <strong>{pageImageTest.message}</strong>
               {pageImageTest.error ? <span>{pageImageTest.error}</span> : null}
-              {pageImageTest.pageUrl ? <span>{pageImageTest.pageUrl}</span> : null}
+              <div className="reel-lab__debug-grid">
+                <span><b>Selected reg</b>{pageImageTest.debug?.selectedReg || vehicleRegistration(selectedVehicle) || "No reg"}</span>
+                <span><b>Source</b>{pageImageTest.productLabel || product.label}</span>
+                <span><b>Reg match</b>{pageImageTest.matchedRegistration ? "Yes" : "No"}</span>
+                <span><b>Title match</b>{pageImageTest.matchedTitle ? "Yes" : "No"}</span>
+                <span><b>Main images refs</b>{Number(pageImageTest.debug?.mainImagesRefsFound || 0)}</span>
+                <span><b>Gallery refs</b>{Number(pageImageTest.debug?.galleryRefsFound || 0)}</span>
+                <span><b>Candidate images</b>{Number(pageImageTest.debug?.candidateImagesFound || 0)}</span>
+                <span><b>Returned</b>{pageImageTest.images?.length || 0}</span>
+              </div>
+              {pageImageTest.pageUrl ? <span>Page URL: {pageImageTest.pageUrl}</span> : null}
               {pageImageTest.images?.length ? (
                 <div className="reel-lab__page-thumbs">
                   {pageImageTest.images.map((url, index) => (
@@ -839,7 +878,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
             <button className="button button--primary" type="button" onClick={handleGenerate}>
               Generate Preview
             </button>
-            <button className="button button--ghost" type="button" onClick={handleDownloadMp4} disabled={!asset?.blob}>
+            <button className="button button--ghost" type="button" onClick={handleDownloadMp4} disabled={!currentAsset?.blob}>
               Download MP4
             </button>
           </div>
@@ -850,8 +889,8 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
 
         <div className="reel-lab__preview-panel">
           <div className="reel-lab__phone">
-            {asset?.url ? (
-              <video src={asset.url} controls playsInline />
+            {currentAsset?.url ? (
+              <video src={currentAsset.url} controls playsInline />
             ) : (
               <div className={`reel-lab__poster reel-lab__poster--${productKey === "rent2buy" ? "rent" : "finance"}`}>
                 {resolvedImages[0] ? <img src={resolvedImages[0]} alt={vehicleTitle(selectedVehicle)} /> : null}

@@ -2556,6 +2556,27 @@ textarea {
   line-height: 1.35;
 }
 
+.reel-lab__debug-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.reel-lab__debug-grid span {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.reel-lab__debug-grid b {
+  color: #111827;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
 .reel-lab__page-result--error {
   background: #fff1f2;
   border-color: #fecdd3;
@@ -2683,7 +2704,8 @@ textarea {
 @media (max-width: 560px) {
   .reel-lab__actions,
   .reel-lab__segment,
-  .reel-lab__page-test {
+  .reel-lab__page-test,
+  .reel-lab__debug-grid {
     grid-template-columns: 1fr;
   }
 }
