@@ -2434,7 +2434,8 @@ textarea {
   text-transform: uppercase;
 }
 
-.reel-lab__field select {
+.reel-lab__field select,
+.reel-lab__field input {
   width: 100%;
   min-height: 44px;
   padding: 10px 12px;

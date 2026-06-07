@@ -50,7 +50,7 @@ const VISUAL_TEMPLATES = [
 const VISUAL_TEMPLATE_CONFIG = {
   blackPremium: {
     label: "Black Premium Showcase",
-    imageArea: { x: 50, y: 92, width: REEL_WIDTH - 100, height: 1010 },
+    imageArea: { x: 50, y: 216, width: REEL_WIDTH - 100, height: 880 },
     textY: 1164,
     headlineHook: 86,
     headline: 62,
@@ -58,12 +58,12 @@ const VISUAL_TEMPLATE_CONFIG = {
     panel: false,
     sweepAlpha: 0.28,
     flash: 0.08,
-    zoom: 0.018,
-    punch: 0.022,
+    zoom: 0.004,
+    punch: 0.012,
   },
   tiktokPunch: {
     label: "TikTok Punch Showcase",
-    imageArea: { x: 42, y: 76, width: REEL_WIDTH - 84, height: 1034 },
+    imageArea: { x: 42, y: 210, width: REEL_WIDTH - 84, height: 900 },
     textY: 1152,
     headlineHook: 96,
     headline: 68,
@@ -71,12 +71,12 @@ const VISUAL_TEMPLATE_CONFIG = {
     panel: false,
     sweepAlpha: 0.42,
     flash: 0.18,
-    zoom: 0.026,
-    punch: 0.055,
+    zoom: 0.006,
+    punch: 0.026,
   },
   luxuryDealer: {
     label: "Luxury Dealer Showcase",
-    imageArea: { x: 70, y: 116, width: REEL_WIDTH - 140, height: 948 },
+    imageArea: { x: 70, y: 230, width: REEL_WIDTH - 140, height: 842 },
     textY: 1168,
     headlineHook: 76,
     headline: 56,
@@ -84,9 +84,19 @@ const VISUAL_TEMPLATE_CONFIG = {
     panel: true,
     sweepAlpha: 0.18,
     flash: 0.05,
-    zoom: 0.012,
-    punch: 0.012,
+    zoom: 0.002,
+    punch: 0.006,
   },
+};
+
+const DEFAULT_HOOKS = {
+  vanFinance: "FROM \u00a399 DEPOSIT",
+  rent2buy: "NO CREDIT CHECK",
+};
+
+const DEFAULT_SUPPORT_LINES = {
+  vanFinance: "ALL CREDIT PROFILES CONSIDERED",
+  rent2buy: "APPLY IN MINUTES",
 };
 
 function cleanText(value) {
@@ -128,7 +138,7 @@ function financeBuyLine(vehicle) {
     .replace(/^from\s+/i, "")
     .replace(/\bp\/m\b/i, "per month")
     .trim();
-  return price ? `BUY FROM ${price.toUpperCase()}` : "BUY FROM AVAILABLE FINANCE";
+  return price ? `PURCHASE THIS VAN FROM ONLY ${price.toUpperCase()}` : "PURCHASE THIS VAN WITH FLEXIBLE FINANCE";
 }
 
 function imageDedupeKey(value) {
@@ -326,25 +336,27 @@ function fillRoundRect(ctx, x, y, width, height, radius, fillStyle) {
   ctx.fill();
 }
 
-function getFrameSpec(productKey, vehicle, frameIndex) {
+function getFrameSpec(productKey, vehicle, frameIndex, hookText, supportText) {
   const price = vehiclePriceLine(vehicle, productKey);
   const title = vehicleTitle(vehicle);
+  const hook = cleanText(hookText) || DEFAULT_HOOKS[productKey];
+  const support = cleanText(supportText) || DEFAULT_SUPPORT_LINES[productKey];
 
   if (productKey === "rent2buy") {
     return [
-      { kind: "hook", eyebrow: "RENT2BUY VANS", headline: "NO CREDIT CHECK", subline: "Apply in 60 seconds" },
+      { kind: "hook", eyebrow: "RENT2BUY VANS", headline: hook, subline: support },
       { kind: "details", eyebrow: "SELECTED VAN", headline: title, subline: price },
       { kind: "statement", eyebrow: "SIMPLE VAN OWNERSHIP", headline: "RENT IT - DRIVE IT - OWN IT", subline: vehicleRegistration(vehicle) },
-      { kind: "statement", eyebrow: "FINAL PAYMENT", headline: "IT'S YOURS", subline: "Built for drivers who need a clear route forward" },
+      { kind: "statement", eyebrow: "FINAL PAYMENT", headline: "IT'S YOURS", subline: support },
       { kind: "cta", eyebrow: "READY TO START?", headline: "CHECK IF YOU QUALIFY", subline: "rent2buyvans.co.uk" },
     ][frameIndex];
   }
 
   return [
-    { kind: "hook", eyebrow: "VAN FINANCE COMPANY", headline: "FROM \u00a399 DEPOSIT", subline: "Finance available on this van" },
+    { kind: "hook", eyebrow: "VAN FINANCE COMPANY", headline: hook, subline: support },
     { kind: "details", eyebrow: "SELECTED VAN", headline: title, subline: price },
-    { kind: "statement", eyebrow: "FINANCE OFFER", headline: financeBuyLine(vehicle), subline: vehicleRegistration(vehicle) },
-    { kind: "statement", eyebrow: "NATIONWIDE", headline: "FREE UK DELIVERY", subline: "Delivered direct to your door" },
+    { kind: "statement", eyebrow: "MONTHLY PAYMENTS", headline: financeBuyLine(vehicle), subline: "FROM AS LITTLE AS \u00a399 DEPOSIT" },
+    { kind: "statement", eyebrow: "SUPPORTING USP", headline: support, subline: vehicleRegistration(vehicle) },
     { kind: "cta", eyebrow: "START TODAY", headline: "APPLY NOW", subline: "vanfinancecompany.co.uk" },
   ][frameIndex];
 }
@@ -374,6 +386,32 @@ function drawRedStreak(ctx, progress) {
   ctx.rotate(-0.18);
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 1110, 360, 92);
+  ctx.restore();
+}
+
+function drawTopBrandHeader(ctx, product, visualTemplate, imageArea) {
+  const isLuxury = visualTemplate === "luxuryDealer";
+  const isTikTok = visualTemplate === "tiktokPunch";
+  const headerY = 80;
+  const headerHeight = 110;
+  const gradient = ctx.createLinearGradient(imageArea.x, headerY, imageArea.x + imageArea.width, headerY + headerHeight);
+  gradient.addColorStop(0, isLuxury ? "rgba(255,255,255,0.08)" : "rgba(239,35,60,0.18)");
+  gradient.addColorStop(0.32, "rgba(10,10,12,0.94)");
+  gradient.addColorStop(1, isTikTok ? "rgba(239,35,60,0.28)" : "rgba(0,0,0,0.96)");
+
+  ctx.save();
+  ctx.shadowColor = isLuxury ? "rgba(255,255,255,0.12)" : "rgba(239,35,60,0.34)";
+  ctx.shadowBlur = isTikTok ? 36 : 22;
+  ctx.shadowOffsetY = 10;
+  fillRoundRect(ctx, imageArea.x, headerY, imageArea.width, headerHeight, isLuxury ? 18 : 24, gradient);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = product.accent;
+  ctx.fillRect(imageArea.x, headerY + headerHeight - 8, imageArea.width, 8);
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  ctx.font = `${isLuxury ? 850 : 950} ${isTikTok ? 50 : 46}px ${CANVAS_FONT}`;
+  drawFitText(ctx, product.brand.toUpperCase(), REEL_WIDTH / 2, headerY + 70, imageArea.width - 96, isTikTok ? 50 : 46, 32);
+  ctx.textAlign = "left";
   ctx.restore();
 }
 
@@ -449,7 +487,7 @@ function drawBottomTextFrame(ctx, product, productKey, spec, frameProgress, fram
   ctx.restore();
 }
 
-function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, elapsedSeconds }) {
+function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, hookText, supportText, elapsedSeconds }) {
   const product = PRODUCTS[productKey];
   const config = VISUAL_TEMPLATE_CONFIG[visualTemplate] || VISUAL_TEMPLATE_CONFIG.blackPremium;
   const isLuxury = visualTemplate === "luxuryDealer";
@@ -464,9 +502,9 @@ function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
   const textX = 68;
   const textY = config.textY;
   const textWidth = REEL_WIDTH - 136;
-  const containScale = 0.982 + Math.sin(frameProgress * Math.PI) * config.zoom + (frameIndex === 0 ? Math.sin(Math.min(1, frameProgress / 0.32) * Math.PI) * config.punch : 0);
-  const panX = Math.sin((frameProgress + frameIndex * 0.17) * Math.PI * 2) * (isTikTok ? 14 : isLuxury ? 5 : 9);
-  const panY = Math.cos((frameProgress + frameIndex * 0.11) * Math.PI * 2) * (isTikTok ? 10 : isLuxury ? 4 : 7);
+  const containScale = 0.988 + (frameIndex === 0 ? Math.sin(Math.min(1, frameProgress / 0.22) * Math.PI) * config.punch : Math.sin(frameProgress * Math.PI) * config.zoom);
+  const panX = frameProgress < 0.18 && frameIndex > 0 ? (1 - frameProgress / 0.18) * (isTikTok ? 18 : 8) : 0;
+  const panY = 0;
 
   ctx.clearRect(0, 0, REEL_WIDTH, REEL_HEIGHT);
   ctx.fillStyle = "#000000";
@@ -480,6 +518,8 @@ function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, REEL_WIDTH, REEL_HEIGHT);
   }
+
+  drawTopBrandHeader(ctx, product, visualTemplate, imageArea);
 
   if (image) {
     ctx.save();
@@ -520,11 +560,11 @@ function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
     ctx.fillRect(0, 0, REEL_WIDTH, REEL_HEIGHT);
   }
 
-  const spec = getFrameSpec(productKey, vehicle, frameIndex);
+  const spec = getFrameSpec(productKey, vehicle, frameIndex, hookText, supportText);
   drawBottomTextFrame(ctx, product, productKey, spec, frameProgress, frameIndex, visualTemplate, textX, textY, textWidth);
 }
 
-async function generateReelLabAsset({ productKey, vehicle, visualTemplate, imageUrls, onProgress }) {
+async function generateReelLabAsset({ productKey, vehicle, visualTemplate, hookText, supportText, imageUrls, onProgress }) {
   if (typeof HTMLCanvasElement === "undefined" || typeof MediaRecorder === "undefined") {
     throw new Error("This browser cannot record Reel Lab videos.");
   }
@@ -568,7 +608,7 @@ async function generateReelLabAsset({ productKey, vehicle, visualTemplate, image
   let frame = 0;
   const render = () => {
     const elapsedSeconds = Math.min(REEL_DURATION_SECONDS, frame / REEL_FPS);
-    drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, elapsedSeconds });
+    drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, hookText, supportText, elapsedSeconds });
     if (frame % 20 === 0) onProgress?.(`Rendering ${Math.round((frame / totalFrames) * 100)}%`);
     frame += 1;
     if (frame <= totalFrames) {
@@ -660,6 +700,8 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [imageSource, setImageSource] = useState("stock");
   const [visualTemplate, setVisualTemplate] = useState("blackPremium");
+  const [hookByProduct, setHookByProduct] = useState(DEFAULT_HOOKS);
+  const [supportByProduct, setSupportByProduct] = useState(DEFAULT_SUPPORT_LINES);
   const [uploadsByProduct, setUploadsByProduct] = useState({ vanFinance: [], rent2buy: [] });
   const [ctaByProduct, setCtaByProduct] = useState({
     vanFinance: PRODUCTS.vanFinance.ctas[0],
@@ -681,6 +723,8 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const uploadedImages = uploadsByProduct[productKey] || [];
   const stockImage = vehicleImage(selectedVehicle);
   const cta = ctaByProduct[productKey];
+  const hookText = hookByProduct[productKey] || DEFAULT_HOOKS[productKey];
+  const supportText = supportByProduct[productKey] || DEFAULT_SUPPORT_LINES[productKey];
   const selectedVehicleKey = selectedVehicle ? `${productKey}:${selectedVehicle.id}:${vehicleRegistration(selectedVehicle)}` : "";
   const pageImageTest = pageImageTests[productKey]?.vehicleKey === selectedVehicleKey ? pageImageTests[productKey] : null;
 
@@ -723,7 +767,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     return buildOrderedImageRecords(stockRecord);
   }, [imageSource, pageImageTest, uploadedImages, stockImage]);
   const resolvedImages = resolvedImageOrder.records.map((item) => item.url);
-  const currentPreviewKey = selectedVehicle ? `${selectedVehicleKey}:${visualTemplate}:${imageSource}:${resolvedImages.join("|")}` : "";
+  const currentPreviewKey = selectedVehicle ? `${selectedVehicleKey}:${visualTemplate}:${imageSource}:${hookText}:${supportText}:${resolvedImages.join("|")}` : "";
   const currentAsset = asset?.previewKey === currentPreviewKey ? asset : null;
 
   useEffect(() => {
@@ -851,6 +895,8 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
         productKey,
         vehicle: selectedVehicle,
         visualTemplate,
+        hookText,
+        supportText,
         imageUrls: resolvedImages,
         onProgress: setStatus,
       });
@@ -1023,6 +1069,26 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
                 <option key={value} value={value}>{label}</option>
               ))}
             </select>
+          </label>
+
+          <label className="reel-lab__field">
+            <span>Manual hook text</span>
+            <input
+              type="text"
+              value={hookText}
+              onChange={(event) => setHookByProduct((prev) => ({ ...prev, [productKey]: event.target.value }))}
+              placeholder={DEFAULT_HOOKS[productKey]}
+            />
+          </label>
+
+          <label className="reel-lab__field">
+            <span>Supporting line</span>
+            <input
+              type="text"
+              value={supportText}
+              onChange={(event) => setSupportByProduct((prev) => ({ ...prev, [productKey]: event.target.value }))}
+              placeholder={DEFAULT_SUPPORT_LINES[productKey]}
+            />
           </label>
 
           <label className="reel-lab__field">
