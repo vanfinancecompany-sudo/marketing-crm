@@ -75,6 +75,14 @@ function vehiclePriceLine(vehicle, productKey) {
   return cleanText(vehicle?.monthly || vehicle?.salePrice || vehicle?.price || "Finance monthly options available");
 }
 
+function financeBuyLine(vehicle) {
+  const price = vehiclePriceLine(vehicle, "vanFinance")
+    .replace(/^from\s+/i, "")
+    .replace(/\bp\/m\b/i, "per month")
+    .trim();
+  return price ? `BUY FROM ${price.toUpperCase()}` : "BUY FROM AVAILABLE FINANCE";
+}
+
 function imageDedupeKey(value) {
   const text = String(value || "").trim();
   const staticMatch = text.match(/static\.wixstatic\.com\/media\/([^/?#]+)/i);
@@ -270,176 +278,184 @@ function fillRoundRect(ctx, x, y, width, height, radius, fillStyle) {
   ctx.fill();
 }
 
-function drawBrandPill(ctx, product, x, y) {
+function getFrameSpec(productKey, vehicle, frameIndex) {
+  const price = vehiclePriceLine(vehicle, productKey);
+  const title = vehicleTitle(vehicle);
+
+  if (productKey === "rent2buy") {
+    return [
+      { kind: "hook", eyebrow: "RENT2BUY VANS", headline: "NO CREDIT CHECK", subline: "Apply in 60 seconds" },
+      { kind: "details", eyebrow: "SELECTED VAN", headline: title, subline: price },
+      { kind: "statement", eyebrow: "SIMPLE VAN OWNERSHIP", headline: "RENT IT - DRIVE IT - OWN IT", subline: vehicleRegistration(vehicle) },
+      { kind: "statement", eyebrow: "FINAL PAYMENT", headline: "IT'S YOURS", subline: "Built for drivers who need a clear route forward" },
+      { kind: "cta", eyebrow: "READY TO START?", headline: "CHECK IF YOU QUALIFY", subline: "rent2buyvans.co.uk" },
+    ][frameIndex];
+  }
+
+  return [
+    { kind: "hook", eyebrow: "VAN FINANCE COMPANY", headline: "FROM \u00a399 DEPOSIT", subline: "Finance available on this van" },
+    { kind: "details", eyebrow: "SELECTED VAN", headline: title, subline: price },
+    { kind: "statement", eyebrow: "FINANCE OFFER", headline: financeBuyLine(vehicle), subline: vehicleRegistration(vehicle) },
+    { kind: "statement", eyebrow: "NATIONWIDE", headline: "FREE UK DELIVERY", subline: "Delivered direct to your door" },
+    { kind: "cta", eyebrow: "START TODAY", headline: "APPLY NOW", subline: "vanfinancecompany.co.uk" },
+  ][frameIndex];
+}
+
+function drawLightSweep(ctx, x, y, width, height, progress, alpha = 0.35) {
+  const sweepX = x - width * 0.45 + progress * width * 1.9;
+  const gradient = ctx.createLinearGradient(sweepX - 90, y, sweepX + 90, y + height);
+  gradient.addColorStop(0, "rgba(255,255,255,0)");
+  gradient.addColorStop(0.5, `rgba(255,255,255,${alpha})`);
+  gradient.addColorStop(1, "rgba(255,255,255,0)");
   ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,0.28)";
-  ctx.shadowBlur = 18;
-  ctx.shadowOffsetY = 8;
-  fillRoundRect(ctx, x, y, 372, 70, 20, "rgba(10,12,18,0.82)");
-  fillRoundRect(ctx, x + 14, y + 14, 42, 42, 14, product.accent);
-  ctx.fillStyle = "#ffffff";
-  ctx.font = `900 27px ${CANVAS_FONT}`;
-  ctx.fillText(product.brand.toUpperCase(), x + 72, y + 45);
+  ctx.globalCompositeOperation = "screen";
+  ctx.fillStyle = gradient;
+  ctx.fillRect(x, y, width, height);
   ctx.restore();
 }
 
-function drawPremiumHook(ctx, product, productKey, elapsedSeconds, safeLeft, safeTop, safeWidth) {
-  const alpha = stagedOpacity(elapsedSeconds, 0.25, 0.7) * fadeOut(elapsedSeconds, 2.35, 2.9);
-  if (alpha <= 0.01) return;
-
-  const entrance = stagedOpacity(elapsedSeconds, 0.25, 0.7);
-  const exit = fadeOut(elapsedSeconds, 2.35, 2.9);
-  const slide = (1 - entrance) * 60 - (1 - exit) * 38;
-  const panelY = safeTop + 600 + slide;
-  const gradient = ctx.createLinearGradient(safeLeft, panelY, safeLeft + safeWidth, panelY + 270);
-  gradient.addColorStop(0, "rgba(8,10,16,0.92)");
-  gradient.addColorStop(0.62, "rgba(14,16,24,0.84)");
-  gradient.addColorStop(1, "rgba(239,35,60,0.78)");
-
+function drawRedStreak(ctx, progress) {
+  const x = -280 + progress * (REEL_WIDTH + 560);
+  const gradient = ctx.createLinearGradient(x, 0, x + 280, 0);
+  gradient.addColorStop(0, "rgba(239,35,60,0)");
+  gradient.addColorStop(0.48, "rgba(239,35,60,0.56)");
+  gradient.addColorStop(1, "rgba(239,35,60,0)");
   ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.shadowColor = "rgba(0,0,0,0.42)";
-  ctx.shadowBlur = 28;
-  ctx.shadowOffsetY = 16;
-  fillRoundRect(ctx, safeLeft + 22, panelY, safeWidth - 44, 270, 34, gradient);
-  ctx.shadowBlur = 0;
-
-  ctx.fillStyle = "rgba(255,255,255,0.72)";
-  ctx.font = `900 29px ${CANVAS_FONT}`;
-  ctx.fillText(productKey === "rent2buy" ? "RENT IT. DRIVE IT. OWN IT." : "FINANCE AVAILABLE ON THIS VAN", safeLeft + 72, panelY + 68);
-
-  ctx.fillStyle = "#ffffff";
-  drawFitText(ctx, product.hook, safeLeft + 72, panelY + 175, safeWidth - 144, 86, 54);
-
-  ctx.fillStyle = "rgba(255,255,255,0.88)";
-  ctx.font = `800 31px ${CANVAS_FONT}`;
-  ctx.fillText(productKey === "rent2buy" ? "Apply in 60 seconds" : "Approved in 60 minutes", safeLeft + 74, panelY + 228);
+  ctx.globalCompositeOperation = "screen";
+  ctx.translate(x, 0);
+  ctx.rotate(-0.18);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 1110, 360, 92);
   ctx.restore();
 }
 
-function drawVehicleCard(ctx, product, productKey, vehicle, templateStyle, safeLeft, safeBottom) {
-  const cardX = safeLeft;
-  const cardY = 1138;
-  const cardWidth = REEL_WIDTH - safeLeft * 2;
-  const cardHeight = safeBottom - cardY - 34;
+function drawBottomTextFrame(ctx, product, productKey, spec, elapsedSeconds, frameProgress, frameIndex, textX, textY, textWidth) {
+  const enter = easeOutCubic(Math.min(1, frameProgress / 0.24));
+  const slideY = (1 - enter) * 74;
+  const glowPulse = 0.72 + Math.sin(frameProgress * Math.PI * 2) * 0.12;
+  const isHook = spec.kind === "hook";
+  const isCta = spec.kind === "cta";
+  const isStatement = spec.kind === "statement";
+  const punch = isHook ? 1 + Math.sin(Math.min(1, frameProgress / 0.32) * Math.PI) * 0.035 : 1;
 
   ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,0.35)";
-  ctx.shadowBlur = 32;
-  ctx.shadowOffsetY = 18;
-  fillRoundRect(ctx, cardX, cardY, cardWidth, cardHeight, 34, "rgba(255,255,255,0.94)");
-  ctx.shadowBlur = 0;
+  ctx.translate(0, slideY);
+  ctx.globalAlpha = enter;
 
+  const panelGradient = ctx.createLinearGradient(textX, textY - 16, textX, REEL_HEIGHT - 220);
+  panelGradient.addColorStop(0, "rgba(12,12,16,0.72)");
+  panelGradient.addColorStop(1, "rgba(0,0,0,0.96)");
+  fillRoundRect(ctx, textX - 10, textY - 28, textWidth + 20, 430, 34, panelGradient);
+
+  ctx.shadowColor = `rgba(239,35,60,${isHook || isStatement ? 0.45 * glowPulse : 0.28})`;
+  ctx.shadowBlur = isHook || isStatement ? 46 : 26;
   ctx.fillStyle = product.accent;
-  ctx.font = `900 30px ${CANVAS_FONT}`;
-  ctx.fillText(templateStyle.toUpperCase(), cardX + 42, cardY + 62);
+  ctx.font = `900 27px ${CANVAS_FONT}`;
+  ctx.fillText(spec.eyebrow, textX + 28, textY + 36);
 
-  ctx.fillStyle = "#0f172a";
-  ctx.font = `900 57px ${CANVAS_FONT}`;
-  wrapText(ctx, vehicleTitle(vehicle), cardX + 42, cardY + 136, cardWidth - 84, 62, 2);
-
-  fillRoundRect(ctx, cardX + 42, cardY + 262, 242, 58, 18, "#111827");
-  ctx.fillStyle = "#ffffff";
-  drawFitText(ctx, vehicleRegistration(vehicle) || "SELECTED STOCK", cardX + 68, cardY + 300, 190, 28, 22);
-
-  ctx.fillStyle = "#475569";
-  ctx.font = `800 30px ${CANVAS_FONT}`;
-  ctx.fillText(vehiclePriceLine(vehicle, productKey).toUpperCase(), cardX + 322, cardY + 300);
-
-  product.usps.slice(0, 3).forEach((usp, index) => {
-    const pillX = cardX + 42 + index * 282;
-    fillRoundRect(ctx, pillX, cardY + 348, 256, 48, 16, "rgba(15,23,42,0.06)");
-    ctx.fillStyle = "#111827";
-    drawFitText(ctx, usp, pillX + 20, cardY + 380, 216, 23, 17, 900);
-  });
-  ctx.restore();
-}
-
-function drawFinalCta(ctx, product, productKey, cta, elapsedSeconds, safeLeft, safeTop, safeWidth, safeBottom) {
-  const alpha = stagedOpacity(elapsedSeconds, 7.25, 8.0);
-  if (alpha <= 0.01) return;
-
-  const slide = (1 - alpha) * 64;
-  const panelY = safeTop + 865 - slide;
   ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.shadowColor = "rgba(0,0,0,0.42)";
-  ctx.shadowBlur = 34;
-  ctx.shadowOffsetY = 18;
-  fillRoundRect(ctx, safeLeft + 30, panelY, safeWidth - 60, safeBottom - panelY - 18, 34, "rgba(8,10,16,0.90)");
-  ctx.shadowBlur = 0;
-
-  ctx.fillStyle = "rgba(255,255,255,0.74)";
-  ctx.font = `900 28px ${CANVAS_FONT}`;
-  ctx.fillText(productKey === "rent2buy" ? "READY TO START?" : "LIKE THIS VAN?", safeLeft + 82, panelY + 78);
-
-  fillRoundRect(ctx, safeLeft + 82, panelY + 118, safeWidth - 164, 108, 28, product.accent);
+  if (punch !== 1) {
+    ctx.translate(REEL_WIDTH / 2, textY + 150);
+    ctx.scale(punch, punch);
+    ctx.translate(-REEL_WIDTH / 2, -(textY + 150));
+  }
+  ctx.shadowColor = "rgba(0,0,0,0.64)";
+  ctx.shadowBlur = 22;
+  ctx.shadowOffsetY = 10;
   ctx.fillStyle = "#ffffff";
-  ctx.textAlign = "center";
-  drawFitText(ctx, (cta || product.finalCta).toUpperCase(), REEL_WIDTH / 2, panelY + 187, safeWidth - 230, 48, 32);
-  ctx.textAlign = "left";
+  ctx.font = `950 ${isHook ? 88 : isCta ? 78 : 62}px ${CANVAS_FONT}`;
+  if (spec.kind === "details") {
+    wrapText(ctx, spec.headline, textX + 28, textY + 128, textWidth - 56, 70, 2);
+  } else {
+    wrapText(ctx, spec.headline, textX + 28, textY + 150, textWidth - 56, isHook ? 92 : 76, 2);
+  }
+  ctx.restore();
 
-  ctx.fillStyle = "rgba(255,255,255,0.82)";
-  ctx.font = `800 30px ${CANVAS_FONT}`;
-  ctx.fillText(product.destinationUrl.replace(/^https?:\/\//, "").replace(/\/$/, ""), safeLeft + 82, panelY + 285);
+  if (isCta) {
+    fillRoundRect(ctx, textX + 28, textY + 252, textWidth - 56, 98, 30, product.accent);
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.font = `950 42px ${CANVAS_FONT}`;
+    drawFitText(ctx, spec.headline, REEL_WIDTH / 2, textY + 315, textWidth - 116, 42, 30);
+    ctx.textAlign = "left";
+    ctx.fillStyle = "rgba(255,255,255,0.82)";
+    ctx.font = `800 30px ${CANVAS_FONT}`;
+    ctx.fillText(spec.subline, textX + 52, textY + 386);
+  } else {
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = isStatement ? "rgba(255,255,255,0.86)" : "rgba(255,255,255,0.74)";
+    ctx.font = `850 ${isHook ? 34 : 31}px ${CANVAS_FONT}`;
+    wrapText(ctx, spec.subline, textX + 30, textY + 316, textWidth - 60, 40, 2);
+  }
+
+  if (isHook || isStatement || isCta) {
+    drawLightSweep(ctx, textX, textY + 68, textWidth, 184, Math.min(1, frameProgress * 1.25), isCta ? 0.28 : 0.38);
+  }
+  if (frameProgress < 0.22 && frameIndex > 0) drawRedStreak(ctx, frameProgress / 0.22);
   ctx.restore();
 }
 
 function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, templateStyle, cta, elapsedSeconds }) {
   const product = PRODUCTS[productKey];
   const images = loadedImages.length ? loadedImages : [];
-  const sceneCount = Math.max(1, images.length);
-  const sceneDuration = REEL_DURATION_SECONDS / sceneCount;
-  const sceneIndex = Math.min(sceneCount - 1, Math.floor(elapsedSeconds / sceneDuration));
-  const sceneProgress = Math.min(1, (elapsedSeconds - sceneIndex * sceneDuration) / sceneDuration);
-  const image = images[sceneIndex] || images[0];
-  const safeLeft = 60;
-  const safeTop = 120;
-  const safeBottom = REEL_HEIGHT - 280;
-  const safeWidth = REEL_WIDTH - safeLeft * 2;
-  const containScale = 0.965 + Math.sin(sceneProgress * Math.PI) * 0.015;
-  const panX = Math.sin(sceneProgress * Math.PI * 2) * 12;
-  const panY = Math.cos(sceneProgress * Math.PI * 2) * 8;
+  const frameCount = 5;
+  const frameDuration = REEL_DURATION_SECONDS / frameCount;
+  const frameIndex = Math.min(frameCount - 1, Math.floor(elapsedSeconds / frameDuration));
+  const frameProgress = Math.min(1, (elapsedSeconds - frameIndex * frameDuration) / frameDuration);
+  const image = images[Math.min(frameIndex, images.length - 1)] || images[0];
+  const imageArea = { x: 54, y: 104, width: REEL_WIDTH - 108, height: 980 };
+  const textX = 68;
+  const textY = 1150;
+  const textWidth = REEL_WIDTH - 136;
+  const containScale = 0.982 + Math.sin(frameProgress * Math.PI) * 0.018 + (frameIndex === 0 ? Math.sin(Math.min(1, frameProgress / 0.32) * Math.PI) * 0.025 : 0);
+  const panX = Math.sin((frameProgress + frameIndex * 0.17) * Math.PI * 2) * 10;
+  const panY = Math.cos((frameProgress + frameIndex * 0.11) * Math.PI * 2) * 7;
 
   ctx.clearRect(0, 0, REEL_WIDTH, REEL_HEIGHT);
-  ctx.fillStyle = product.deep;
+  ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, REEL_WIDTH, REEL_HEIGHT);
 
   if (image) {
     ctx.save();
-    ctx.globalAlpha = 0.18;
-    drawCoverImage(ctx, image, 0, 0, REEL_WIDTH, REEL_HEIGHT, 1.02, 0, 0);
+    ctx.globalAlpha = 0.16;
+    drawCoverImage(ctx, image, 0, 0, REEL_WIDTH, REEL_HEIGHT, 1.03, 0, 0);
+    ctx.fillStyle = "rgba(0,0,0,0.70)";
+    ctx.fillRect(0, 0, REEL_WIDTH, REEL_HEIGHT);
     ctx.restore();
 
     ctx.save();
-    drawRoundRect(ctx, safeLeft, safeTop, safeWidth, 900, 26);
+    ctx.shadowColor = "rgba(239,35,60,0.18)";
+    ctx.shadowBlur = 42;
+    ctx.shadowOffsetY = 16;
+    drawRoundRect(ctx, imageArea.x, imageArea.y, imageArea.width, imageArea.height, 30);
     ctx.clip();
-    ctx.fillStyle = "rgba(255,255,255,0.08)";
-    ctx.fillRect(safeLeft, safeTop, safeWidth, 900);
-    drawContainImage(ctx, image, safeLeft, safeTop, safeWidth, 900, containScale, panX, panY);
+    ctx.fillStyle = "#050505";
+    ctx.fillRect(imageArea.x, imageArea.y, imageArea.width, imageArea.height);
+    drawContainImage(ctx, image, imageArea.x, imageArea.y, imageArea.width, imageArea.height, containScale, panX, panY);
     ctx.restore();
   }
 
-  const gradient = ctx.createLinearGradient(0, 0, 0, REEL_HEIGHT);
-  gradient.addColorStop(0, "rgba(7,20,38,0.04)");
-  gradient.addColorStop(0.62, "rgba(7,20,38,0.04)");
-  gradient.addColorStop(1, "rgba(7,20,38,0.70)");
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, REEL_WIDTH, REEL_HEIGHT);
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.08)";
+  ctx.lineWidth = 2;
+  drawRoundRect(ctx, imageArea.x, imageArea.y, imageArea.width, imageArea.height, 30);
+  ctx.stroke();
+  ctx.restore();
 
-  drawBrandPill(ctx, product, safeLeft, safeTop + 24);
-  drawPremiumHook(ctx, product, productKey, elapsedSeconds, safeLeft, safeTop, safeWidth);
+  const lowerGlow = ctx.createRadialGradient(REEL_WIDTH / 2, 1340, 60, REEL_WIDTH / 2, 1340, 620);
+  lowerGlow.addColorStop(0, "rgba(239,35,60,0.20)");
+  lowerGlow.addColorStop(1, "rgba(239,35,60,0)");
+  ctx.fillStyle = lowerGlow;
+  ctx.fillRect(0, 1030, REEL_WIDTH, 660);
 
-  const cardAlpha = stagedOpacity(elapsedSeconds, 3.25, 3.55) * fadeOut(elapsedSeconds, 6.7, 7.05);
-  if (cardAlpha > 0.01) {
-    ctx.save();
-    ctx.globalAlpha = cardAlpha;
-    ctx.translate(0, (1 - cardAlpha) * 40);
-    drawVehicleCard(ctx, product, productKey, vehicle, templateStyle, safeLeft, safeBottom);
-    ctx.restore();
+  const flashAlpha = frameProgress < 0.08 && frameIndex > 0 ? (1 - frameProgress / 0.08) * 0.16 : 0;
+  if (flashAlpha > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${flashAlpha})`;
+    ctx.fillRect(0, 0, REEL_WIDTH, REEL_HEIGHT);
   }
 
-  drawFinalCta(ctx, product, productKey, cta, elapsedSeconds, safeLeft, safeTop, safeWidth, safeBottom);
+  const spec = getFrameSpec(productKey, vehicle, frameIndex);
+  drawBottomTextFrame(ctx, product, productKey, spec, elapsedSeconds, frameProgress, frameIndex, textX, textY, textWidth);
 }
 
 async function generateReelLabAsset({ productKey, vehicle, templateStyle, cta, imageUrls, onProgress }) {
