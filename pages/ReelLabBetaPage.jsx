@@ -234,6 +234,14 @@ function normalizeCmsImageUrl(value) {
   return text;
 }
 
+function isLikelyCmsImageUrl(value) {
+  const text = cleanText(value);
+  return /static\.wixstatic\.com\/media\//i.test(text)
+    || /^wix:image:\/\//i.test(text)
+    || /^image:\/\//i.test(text)
+    || /\.(?:jpe?g|png|webp)(?:[?#].*)?$/i.test(text);
+}
+
 function extractImageUrlsFromValue(value) {
   const urls = [];
   const addUrl = (candidate) => {
@@ -241,7 +249,10 @@ function extractImageUrlsFromValue(value) {
     if (!text) return;
     const matches = text.match(/https?:\/\/[^\s"'<>|;,]+/gi);
     if (matches) {
-      matches.forEach((url) => urls.push(normalizeCmsImageUrl(url)));
+      matches
+        .map((url) => normalizeCmsImageUrl(url))
+        .filter(isLikelyCmsImageUrl)
+        .forEach((url) => urls.push(url));
       return;
     }
     if (/^wix:image:\/\//i.test(text) || /^image:\/\//i.test(text) || /static\.wixstatic\.com\/media\//i.test(text)) {
@@ -268,9 +279,22 @@ function extractImageUrlsFromValue(value) {
     return urls;
   }
 
-  String(value || "")
-    .split(/\s*[|;]\s*/)
-    .forEach((item) => addUrl(item));
+  const stringValue = String(value || "").trim();
+  if (!stringValue) return urls;
+
+  try {
+    const parsed = JSON.parse(stringValue);
+    extractImageUrlsFromValue(parsed).forEach((url) => urls.push(url));
+    return urls;
+  } catch {}
+
+  const wixMatches = stringValue.match(/(?:wix:)?image:\/\/v1\/[^"'<>|\s,]+/gi);
+  if (wixMatches) {
+    wixMatches.map(normalizeCmsImageUrl).forEach((url) => urls.push(url));
+    return urls;
+  }
+
+  stringValue.split(/\s*[|;]\s*/).forEach((item) => addUrl(item));
   return urls;
 }
 
