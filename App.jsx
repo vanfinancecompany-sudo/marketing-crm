@@ -56,6 +56,7 @@ import StockPage from "./pages/StockPage.jsx";
 import VanscoStockWatchPage from "./pages/VanscoStockWatchPage.jsx";
 import ReelFactoryPage from "./pages/ReelFactoryPage.jsx";
 import PremiumReelStudioBetaPage from "./pages/PremiumReelStudioBetaPage.jsx";
+import ReelLabBetaPage from "./pages/ReelLabBetaPage.jsx";
 import CreativeLibraryPage from "./pages/CreativeLibraryPage.jsx";
 import PostingDeskPage from "./pages/PostingDeskPage.jsx";
 import {
@@ -433,6 +434,7 @@ const VIEW_PATHS = {
   "Vansco Stock Watch": "/vansco-stock-watch",
   "Reel Factory": "/reel-factory",
   "Premium Reel Studio": "/premium-reel-studio",
+  "Reel Lab Beta": "/reel-lab",
   "Creative Library": "/creative-library",
   "Van Finance Facebook": "/van-finance-facebook",
   "Rent2Buy Facebook": "/rent2buy-facebook",
@@ -450,6 +452,7 @@ function viewFromPath() {
   if (path === "/premium-reel-studio" || path === "/reel-studio-beta" || path === "/premium-reels") {
     return "Premium Reel Studio";
   }
+  if (path === "/reel-lab") return "Reel Lab Beta";
   if (path === "/creative-library") return "Creative Library";
   if (path === "/van-finance-facebook") return "Van Finance Facebook";
   if (path === "/rent2buy-facebook") return "Rent2Buy Facebook";
@@ -2380,6 +2383,14 @@ async function handleClearTodayReels() {
             onReelDownloadComplete={handleReelDownloadComplete}
             reelActionLocks={reelActionLocks}
             ignoreReelLock={ignoreReelLock}
+          />
+        );
+      case "Reel Lab Beta":
+        return (
+          <ReelLabBetaPage
+            vehicles={vehicles}
+            vehiclesLoading={vehiclesLoading}
+            vehiclesError={vehiclesError}
           />
         );
       case "Creative Library":
