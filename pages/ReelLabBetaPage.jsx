@@ -133,12 +133,33 @@ function vehiclePriceLine(vehicle, productKey) {
   return cleanText(vehicle?.monthly || vehicle?.salePrice || vehicle?.price || "Finance monthly options available");
 }
 
+function vehicleCashPriceLine(vehicle) {
+  const rawPrice = cleanText(vehicle?.price || vehicle?.cashPrice || vehicle?.cash_price || "");
+  if (!rawPrice || /\bp\/m\b|per\s+month|monthly|deposit/i.test(rawPrice)) return "";
+  const vatText = cleanText(vehicle?.vat || vehicle?.VAT || vehicle?.priceVat || vehicle?.price_vat || "");
+  const priceHasVat = /\+?\s*vat\b/i.test(rawPrice);
+  const vatApplies = priceHasVat
+    || /\+?\s*vat\b/i.test(vatText)
+    || vatText === "true"
+    || vatText === "1"
+    || vatText.toLowerCase() === "yes";
+  return `${rawPrice}${vatApplies && !priceHasVat ? " + VAT" : ""}`;
+}
+
 function financeBuyLine(vehicle) {
   const price = vehiclePriceLine(vehicle, "vanFinance")
     .replace(/^from\s+/i, "")
     .replace(/\bp\/m\b/i, "per month")
     .trim();
   return price ? `PURCHASE THIS VAN FROM ONLY ${price.toUpperCase()}` : "PURCHASE THIS VAN WITH FLEXIBLE FINANCE";
+}
+
+function displayDomain(url) {
+  try {
+    return new URL(url).hostname.replace(/^vanfinancecompany\.co\.uk$/i, "www.vanfinancecompany.co.uk");
+  } catch {
+    return cleanText(url).replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+  }
 }
 
 function imageDedupeKey(value) {
@@ -541,10 +562,13 @@ function fillRoundRect(ctx, x, y, width, height, radius, fillStyle) {
 
 function getFrameSpec(productKey, vehicle, frameIndex, hookText, supportText, ctaText) {
   const price = vehiclePriceLine(vehicle, productKey);
+  const cashPrice = vehicleCashPriceLine(vehicle);
   const title = vehicleTitle(vehicle);
   const hook = cleanText(hookText) || DEFAULT_HOOKS[productKey];
   const support = cleanText(supportText) || DEFAULT_SUPPORT_LINES[productKey];
   const finalCta = cleanText(ctaText) || PRODUCTS[productKey].finalCta;
+  const finalButton = PRODUCTS[productKey].finalCta;
+  const finalDomain = displayDomain(PRODUCTS[productKey].destinationUrl);
 
   if (productKey === "rent2buy") {
     return [
@@ -552,16 +576,16 @@ function getFrameSpec(productKey, vehicle, frameIndex, hookText, supportText, ct
       { kind: "details", eyebrow: "SELECTED VAN", headline: title, subline: "HUGE SELECTION OF VANS IN STOCK TO CHOOSE FROM" },
       { kind: "statement", eyebrow: "SIMPLE VAN OWNERSHIP", headline: "RENT IT - DRIVE IT - OWN IT", subline: vehicleRegistration(vehicle) },
       { kind: "statement", eyebrow: "RENT2BUY", headline: "FINAL PAYMENT IT'S YOURS", subline: support },
-      { kind: "cta", eyebrow: "READY TO START?", headline: finalCta, subline: "RENT2BUY VANS" },
+      { kind: "cta", eyebrow: "READY TO START?", headline: finalCta, buttonLabel: finalButton, subline: finalDomain },
     ][frameIndex];
   }
 
   return [
     { kind: "hook", eyebrow: "VAN FINANCE COMPANY", headline: hook, subline: support },
-    { kind: "details", eyebrow: "SELECTED VAN", headline: title, subline: "CHOOSE FROM OVER 200 VANS IN STOCK" },
+    { kind: "details", eyebrow: "SELECTED VAN", headline: title, subline: cashPrice || "CHOOSE FROM OVER 200 VANS IN STOCK" },
     { kind: "statement", eyebrow: "MONTHLY PAYMENTS", headline: financeBuyLine(vehicle), subline: "FROM AS LITTLE AS \u00a399 DEPOSIT" },
-    { kind: "statement", eyebrow: "VAN FINANCE", headline: support, subline: "NUMBER 1 VAN FINANCE COMPANY IN THE UK" },
-    { kind: "cta", eyebrow: "START TODAY", headline: finalCta, subline: "VAN FINANCE COMPANY" },
+    { kind: "statement", eyebrow: "VAN FINANCE", headline: support, subline: "NO.1 VAN FINANCE COMPANY IN THE UK" },
+    { kind: "cta", eyebrow: "START TODAY", headline: finalCta, buttonLabel: finalButton, subline: finalDomain },
   ][frameIndex];
 }
 
@@ -668,14 +692,16 @@ function drawBottomTextFrame(ctx, product, productKey, spec, frameProgress, fram
   ctx.restore();
 
   if (isCta) {
-    fillRoundRect(ctx, textX + 28, textY + 252, textWidth - 56, isLuxury ? 88 : 98, isLuxury ? 22 : 30, product.accent);
+    const buttonY = textY + (isLuxury ? 274 : 288);
+    const domainY = buttonY + (isLuxury ? 142 : 154);
+    fillRoundRect(ctx, textX + 28, buttonY, textWidth - 56, isLuxury ? 88 : 98, isLuxury ? 22 : 30, product.accent);
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.font = `${isLuxury ? 850 : 950} ${isLuxury ? 38 : 42}px ${CANVAS_FONT}`;
-    drawFitText(ctx, spec.headline, REEL_WIDTH / 2, textY + (isLuxury ? 308 : 315), textWidth - 116, isLuxury ? 38 : 42, 29);
-    ctx.fillStyle = "rgba(255,255,255,0.82)";
-    ctx.font = `${isLuxury ? 850 : 900} 38px ${CANVAS_FONT}`;
-    drawFitText(ctx, spec.subline, REEL_WIDTH / 2, textY + (isLuxury ? 380 : 392), textWidth - 100, 38, 28);
+    drawFitText(ctx, spec.buttonLabel || product.finalCta, REEL_WIDTH / 2, buttonY + (isLuxury ? 56 : 62), textWidth - 116, isLuxury ? 38 : 42, 29);
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.font = `${isLuxury ? 850 : 900} ${isLuxury ? 38 : 40}px ${CANVAS_FONT}`;
+    drawFitText(ctx, spec.subline, REEL_WIDTH / 2, domainY, textWidth - 100, isLuxury ? 38 : 40, 27);
     ctx.textAlign = "left";
   } else {
     ctx.shadowBlur = 0;
