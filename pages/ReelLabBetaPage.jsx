@@ -99,6 +99,11 @@ const DEFAULT_SUPPORT_LINES = {
   rent2buy: "APPLY IN MINUTES",
 };
 
+const DEFAULT_BRAND_HEADERS = {
+  vanFinance: PRODUCTS.vanFinance.brand,
+  rent2buy: PRODUCTS.rent2buy.brand,
+};
+
 function cleanText(value) {
   return String(value || "").replace(/\u00c2\u00a3/g, "\u00a3").replace(/\s+/g, " ").trim();
 }
@@ -563,6 +568,24 @@ function fadeOut(elapsedSeconds, start, end) {
   return 1 - easeInOut((elapsedSeconds - start) / (end - start));
 }
 
+function getFrameTiming(elapsedSeconds) {
+  const firstFrameDuration = 2.5;
+  const remainingFrameDuration = (REEL_DURATION_SECONDS - firstFrameDuration) / 4;
+  if (elapsedSeconds < firstFrameDuration) {
+    return {
+      frameIndex: 0,
+      frameProgress: Math.min(1, elapsedSeconds / firstFrameDuration),
+    };
+  }
+  const remainingElapsed = Math.min(REEL_DURATION_SECONDS - firstFrameDuration, elapsedSeconds - firstFrameDuration);
+  const frameIndex = Math.min(4, 1 + Math.floor(remainingElapsed / remainingFrameDuration));
+  const frameStart = firstFrameDuration + (frameIndex - 1) * remainingFrameDuration;
+  return {
+    frameIndex,
+    frameProgress: Math.min(1, (elapsedSeconds - frameStart) / remainingFrameDuration),
+  };
+}
+
 function fillRoundRect(ctx, x, y, width, height, radius, fillStyle) {
   drawRoundRect(ctx, x, y, width, height, radius);
   ctx.fillStyle = fillStyle;
@@ -586,7 +609,7 @@ function getFrameSpec(productKey, vehicle, frameIndex, hookText, supportText, ct
       { kind: "details", eyebrow: "SELECTED VAN", headline: title, subline: "HUGE SELECTION OF VANS IN STOCK TO CHOOSE FROM" },
       { kind: "statement", eyebrow: "SIMPLE VAN OWNERSHIP", headline: "RENT IT - DRIVE IT - OWN IT", subline: vehicleRegistration(vehicle) },
       { kind: "statement", eyebrow: "RENT2BUY", headline: "FINAL PAYMENT IT'S YOURS", subline: support },
-      { kind: "cta", eyebrow: "READY TO START?", headline: finalCta, buttonLabel: finalButton, subline: finalDomain },
+      { kind: "cta", eyebrow: "APPLY TODAY", headline: finalCta, buttonLabel: finalButton, subline: finalDomain },
     ][frameIndex];
   }
 
@@ -595,7 +618,7 @@ function getFrameSpec(productKey, vehicle, frameIndex, hookText, supportText, ct
     { kind: "details", eyebrow: "SELECTED VAN", headline: cashPrice ? `${cashPrice} | ${title}` : title, subline: mileage || "CHOOSE FROM OVER 200 VANS IN STOCK" },
     { kind: "statement", eyebrow: "MONTHLY PAYMENTS", headline: financeBuyLine(vehicle), subline: "FROM AS LITTLE AS \u00a399 DEPOSIT" },
     { kind: "statement", eyebrow: "VAN FINANCE", headline: support, subline: "NO.1 VAN FINANCE COMPANY IN THE UK" },
-    { kind: "cta", eyebrow: "START TODAY", headline: finalCta, buttonLabel: finalButton, subline: finalDomain },
+    { kind: "cta", eyebrow: "APPLY TODAY", headline: finalCta, buttonLabel: finalButton, subline: finalDomain },
   ][frameIndex];
 }
 
@@ -627,7 +650,7 @@ function drawRedStreak(ctx, progress) {
   ctx.restore();
 }
 
-function drawTopBrandHeader(ctx, product, visualTemplate, imageArea) {
+function drawTopBrandHeader(ctx, product, visualTemplate, imageArea, brandHeaderText) {
   const isLuxury = visualTemplate === "luxuryDealer";
   const isTikTok = visualTemplate === "tiktokPunch";
   const headerY = 56;
@@ -648,7 +671,7 @@ function drawTopBrandHeader(ctx, product, visualTemplate, imageArea) {
   ctx.fillStyle = "#ffffff";
   ctx.textAlign = "center";
   ctx.font = `${isLuxury ? 900 : 980} ${isTikTok ? 68 : 62}px ${CANVAS_FONT}`;
-  drawFitText(ctx, product.brand.toUpperCase(), REEL_WIDTH / 2, headerY + 94, imageArea.width - 86, isTikTok ? 68 : 62, 42);
+  drawFitText(ctx, cleanText(brandHeaderText || product.brand).toUpperCase(), REEL_WIDTH / 2, headerY + 94, imageArea.width - 86, isTikTok ? 68 : 62, 42);
   ctx.textAlign = "left";
   ctx.restore();
 }
@@ -657,12 +680,13 @@ function drawBottomTextFrame(ctx, product, productKey, spec, frameProgress, fram
   const config = VISUAL_TEMPLATE_CONFIG[visualTemplate] || VISUAL_TEMPLATE_CONFIG.blackPremium;
   const isTikTok = visualTemplate === "tiktokPunch";
   const isLuxury = visualTemplate === "luxuryDealer";
-  const enter = easeOutCubic(Math.min(1, frameProgress / (isTikTok ? 0.16 : isLuxury ? 0.36 : 0.24)));
-  const slideY = (1 - enter) * (isTikTok ? 96 : isLuxury ? 42 : 74);
-  const glowPulse = 0.72 + Math.sin(frameProgress * Math.PI * (isTikTok ? 4 : 2)) * (isTikTok ? 0.22 : 0.1);
   const isHook = spec.kind === "hook";
   const isCta = spec.kind === "cta";
   const isStatement = spec.kind === "statement";
+  const enterBase = easeOutCubic(Math.min(1, frameProgress / (isTikTok ? 0.16 : isLuxury ? 0.36 : 0.24)));
+  const enter = isHook && frameIndex === 0 ? Math.max(0.9, enterBase) : enterBase;
+  const slideY = (1 - enter) * (isTikTok ? 96 : isLuxury ? 42 : 74);
+  const glowPulse = 0.72 + Math.sin(frameProgress * Math.PI * (isTikTok ? 4 : 2)) * (isTikTok ? 0.22 : 0.1);
   const punch = isHook ? 1 + Math.sin(Math.min(1, frameProgress / 0.32) * Math.PI) * config.punch : 1;
   const headlineSize = isHook ? config.headlineHook : isCta ? config.cta : config.headline;
 
@@ -727,16 +751,13 @@ function drawBottomTextFrame(ctx, product, productKey, spec, frameProgress, fram
   ctx.restore();
 }
 
-function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, hookText, supportText, ctaText, elapsedSeconds }) {
+function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, brandHeaderText, hookText, supportText, ctaText, elapsedSeconds }) {
   const product = PRODUCTS[productKey];
   const config = VISUAL_TEMPLATE_CONFIG[visualTemplate] || VISUAL_TEMPLATE_CONFIG.blackPremium;
   const isLuxury = visualTemplate === "luxuryDealer";
   const isTikTok = visualTemplate === "tiktokPunch";
   const images = loadedImages.length ? loadedImages : [];
-  const frameCount = 5;
-  const frameDuration = REEL_DURATION_SECONDS / frameCount;
-  const frameIndex = Math.min(frameCount - 1, Math.floor(elapsedSeconds / frameDuration));
-  const frameProgress = Math.min(1, (elapsedSeconds - frameIndex * frameDuration) / frameDuration);
+  const { frameIndex, frameProgress } = getFrameTiming(elapsedSeconds);
   const image = images[Math.min(frameIndex, images.length - 1)] || images[0];
   const imageArea = config.imageArea;
   const textX = 68;
@@ -759,7 +780,7 @@ function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
     ctx.fillRect(0, 0, REEL_WIDTH, REEL_HEIGHT);
   }
 
-  drawTopBrandHeader(ctx, product, visualTemplate, imageArea);
+  drawTopBrandHeader(ctx, product, visualTemplate, imageArea, brandHeaderText);
 
   if (image) {
     ctx.save();
@@ -804,7 +825,7 @@ function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
   drawBottomTextFrame(ctx, product, productKey, spec, frameProgress, frameIndex, visualTemplate, textX, textY, textWidth);
 }
 
-async function generateReelLabAsset({ productKey, vehicle, visualTemplate, hookText, supportText, ctaText, imageUrls, onProgress }) {
+async function generateReelLabAsset({ productKey, vehicle, visualTemplate, brandHeaderText, hookText, supportText, ctaText, imageUrls, onProgress }) {
   if (typeof HTMLCanvasElement === "undefined" || typeof MediaRecorder === "undefined") {
     throw new Error("This browser cannot record Reel Lab videos.");
   }
@@ -848,7 +869,7 @@ async function generateReelLabAsset({ productKey, vehicle, visualTemplate, hookT
   let frame = 0;
   const render = () => {
     const elapsedSeconds = Math.min(REEL_DURATION_SECONDS, frame / REEL_FPS);
-    drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, hookText, supportText, ctaText, elapsedSeconds });
+    drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, brandHeaderText, hookText, supportText, ctaText, elapsedSeconds });
     if (frame % 20 === 0) onProgress?.(`Rendering ${Math.round((frame / totalFrames) * 100)}%`);
     frame += 1;
     if (frame <= totalFrames) {
@@ -940,6 +961,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [imageSource, setImageSource] = useState("auto");
   const [visualTemplate, setVisualTemplate] = useState("blackPremium");
+  const [brandHeaderByProduct, setBrandHeaderByProduct] = useState(DEFAULT_BRAND_HEADERS);
   const [hookByProduct, setHookByProduct] = useState(DEFAULT_HOOKS);
   const [supportByProduct, setSupportByProduct] = useState(DEFAULT_SUPPORT_LINES);
   const [uploadsByProduct, setUploadsByProduct] = useState({ vanFinance: [], rent2buy: [] });
@@ -967,6 +989,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const cmsMatch = selectedVehicle ? findCmsMatch(cmsUpload?.rows || [], selectedVehicle) : null;
   const stockImage = vehicleImage(selectedVehicle);
   const cta = ctaByProduct[productKey];
+  const brandHeaderText = brandHeaderByProduct[productKey] || DEFAULT_BRAND_HEADERS[productKey];
   const hookText = hookByProduct[productKey] || DEFAULT_HOOKS[productKey];
   const supportText = supportByProduct[productKey] || DEFAULT_SUPPORT_LINES[productKey];
   const selectedVehicleKey = selectedVehicle ? `${productKey}:${selectedVehicle.id}:${vehicleRegistration(selectedVehicle)}` : "";
@@ -1015,7 +1038,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     return buildOrderedImageRecords(stockRecord);
   }, [cmsMatch, imageSource, pageImageTest, product.label, uploadedImages, stockImage]);
   const resolvedImages = resolvedImageOrder.records.map((item) => item.url);
-  const currentPreviewKey = selectedVehicle ? `${selectedVehicleKey}:${visualTemplate}:${imageSource}:${hookText}:${supportText}:${cta}:${resolvedImages.join("|")}` : "";
+  const currentPreviewKey = selectedVehicle ? `${selectedVehicleKey}:${visualTemplate}:${imageSource}:${brandHeaderText}:${hookText}:${supportText}:${cta}:${resolvedImages.join("|")}` : "";
   const currentAsset = asset?.previewKey === currentPreviewKey ? asset : null;
 
   useEffect(() => {
@@ -1174,6 +1197,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
         productKey,
         vehicle: selectedVehicle,
         visualTemplate,
+        brandHeaderText,
         hookText,
         supportText,
         ctaText: cta,
@@ -1382,6 +1406,16 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
                 <option key={value} value={value}>{label}</option>
               ))}
             </select>
+          </label>
+
+          <label className="reel-lab__field">
+            <span>Top header text</span>
+            <input
+              type="text"
+              value={brandHeaderText}
+              onChange={(event) => setBrandHeaderByProduct((prev) => ({ ...prev, [productKey]: event.target.value }))}
+              placeholder={DEFAULT_BRAND_HEADERS[productKey]}
+            />
           </label>
 
           <label className="reel-lab__field">
