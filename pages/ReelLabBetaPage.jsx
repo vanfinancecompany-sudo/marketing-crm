@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import defaultReelAudio from "../assets/default-reel-audio.mp3";
 
 const REEL_WIDTH = 1080;
 const REEL_HEIGHT = 1920;
@@ -449,6 +450,10 @@ function findCmsMatch(rows, vehicle) {
     || null;
 }
 
+function queueVehicleKey(vehicle) {
+  return `${vehicle?.id || ""}:${vehicleRegistration(vehicle) || vehicleTitle(vehicle)}`;
+}
+
 function getProductVehicles(vehicles, productKey) {
   if (productKey === "rent2buy") {
     return (vehicles || [])
@@ -507,6 +512,45 @@ function loadImage(src) {
     image.onerror = () => reject(new Error("Could not load reel image."));
     image.src = src;
   });
+}
+
+async function createReelLabAudioStream(durationMs) {
+  if (typeof window === "undefined" || !window.AudioContext) {
+    throw new Error("This browser cannot add audio to Reel Lab.");
+  }
+
+  const audioContext = new window.AudioContext();
+  try {
+    const response = await fetch(defaultReelAudio);
+    if (!response.ok) throw new Error("Could not load existing reel audio.");
+    const audioBuffer = await audioContext.decodeAudioData(await response.arrayBuffer());
+    const destination = audioContext.createMediaStreamDestination();
+    const source = audioContext.createBufferSource();
+    const gain = audioContext.createGain();
+    source.buffer = audioBuffer;
+    source.loop = audioBuffer.duration * 1000 < durationMs;
+    gain.gain.value = 0.22;
+    source.connect(gain);
+    gain.connect(destination);
+    if (audioContext.state === "suspended") await audioContext.resume();
+    source.start(0);
+    return {
+      stream: destination.stream,
+      cleanup: () => {
+        try {
+          source.stop();
+        } catch {}
+        audioContext.close().catch(() => {});
+      },
+    };
+  } catch (error) {
+    audioContext.close().catch(() => {});
+    throw error;
+  }
+}
+
+function emptyReelLabAudioStream() {
+  return { stream: null, cleanup: () => {} };
 }
 
 function drawCoverImage(ctx, image, x, y, width, height, zoom = 1, panX = 0, panY = 0) {
@@ -860,13 +904,13 @@ function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
   drawBottomTextFrame(ctx, product, productKey, spec, frameProgress, frameIndex, visualTemplate, textX, textY, textWidth);
 }
 
-async function generateReelLabAsset({ productKey, vehicle, visualTemplate, brandHeaderText, hookText, supportText, ctaText, imageUrls, onProgress }) {
+async function generateReelLabAsset({ productKey, vehicle, visualTemplate, brandHeaderText, hookText, supportText, ctaText, imageUrls, musicOn = true, onProgress }) {
   if (typeof HTMLCanvasElement === "undefined" || typeof MediaRecorder === "undefined") {
     throw new Error("This browser cannot record Reel Lab videos.");
   }
 
   const supportedMime =
-    ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find((type) => MediaRecorder.isTypeSupported?.(type)) || "";
+    ["video/webm;codecs=vp8,opus", "video/webm;codecs=vp9,opus", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find((type) => MediaRecorder.isTypeSupported?.(type)) || "";
   if (!supportedMime) throw new Error("This browser cannot record WebM video.");
 
   onProgress?.("Loading images");
@@ -886,7 +930,23 @@ async function generateReelLabAsset({ productKey, vehicle, visualTemplate, brand
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not create Reel Lab canvas.");
 
-  const stream = canvas.captureStream(REEL_FPS);
+  let audioAsset = emptyReelLabAudioStream();
+  let audioWarning = "";
+  onProgress?.("Adding audio");
+  if (musicOn) {
+    try {
+      audioAsset = await createReelLabAudioStream(REEL_DURATION_SECONDS * 1000);
+    } catch (audioError) {
+      audioWarning = "Music could not be added. Silent MP4 fallback was used.";
+      console.warn("Reel Lab music disabled for this export:", audioError);
+    }
+  }
+
+  const canvasStream = canvas.captureStream(REEL_FPS);
+  const stream = new MediaStream([
+    ...canvasStream.getVideoTracks(),
+    ...(audioAsset.stream ? audioAsset.stream.getAudioTracks() : []),
+  ]);
   const recorder = new MediaRecorder(stream, { mimeType: supportedMime });
   const chunks = [];
   let timer = 0;
@@ -920,9 +980,10 @@ async function generateReelLabAsset({ productKey, vehicle, visualTemplate, brand
   try {
     const blob = await finished;
     const url = URL.createObjectURL(blob);
-    return { blob, url, extension: "webm" };
+    return { blob, url, extension: "webm", audioEmbedded: stream.getAudioTracks().length > 0, audioWarning };
   } finally {
     if (timer) window.clearTimeout(timer);
+    audioAsset.cleanup();
   }
 }
 
@@ -954,6 +1015,7 @@ async function downloadMp4FromWebm(blob, filename) {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return { filename, size: mp4Blob.size };
 }
 
 async function fetchFirstFivePageImages({ productKey, vehicle }) {
@@ -996,6 +1058,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [imageSource, setImageSource] = useState("auto");
   const [visualTemplate, setVisualTemplate] = useState("blackPremium");
+  const [musicOn, setMusicOn] = useState(true);
   const savedTextDefaults = useMemo(loadSavedTextDefaults, []);
   const [brandHeaderByProduct, setBrandHeaderByProduct] = useState(savedTextDefaults.brandHeaders);
   const [hookByProduct, setHookByProduct] = useState(savedTextDefaults.hooks);
@@ -1007,9 +1070,14 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [pageImageTests, setPageImageTests] = useState({ vanFinance: null, rent2buy: null });
+  const [queueByProduct, setQueueByProduct] = useState({ vanFinance: [], rent2buy: [] });
+  const [queueRunning, setQueueRunning] = useState(false);
+  const [queueProgress, setQueueProgress] = useState({ index: 0, total: 0, completed: 0, failed: 0, label: "", message: "Ready" });
+  const [queueFailures, setQueueFailures] = useState([]);
   const fileInputRef = useRef(null);
   const cmsInputRef = useRef(null);
   const generationKeyRef = useRef("");
+  const queueCancelRef = useRef(false);
 
   const product = PRODUCTS[productKey];
   const productVehicles = useMemo(() => getProductVehicles(vehicles, productKey), [vehicles, productKey]);
@@ -1018,6 +1086,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     [productVehicles, selectedVehicleId]
   );
   const uploadedImages = uploadsByProduct[productKey] || [];
+  const activeQueue = queueByProduct[productKey] || [];
   const cmsUpload = cmsUploadsByProduct[productKey] || null;
   const cmsMatch = selectedVehicle ? findCmsMatch(cmsUpload?.rows || [], selectedVehicle) : null;
   const stockImage = vehicleImage(selectedVehicle);
@@ -1050,29 +1119,36 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     };
   }, []);
 
-  const resolvedImageOrder = useMemo(() => {
+  function resolveImageOrderForVehicle(vehicle, { includeManual = false } = {}) {
     const manualRecords = uploadedImages.map((item) => ({ url: item.url, source: "manual upload" }));
-    const cmsRecords = Array.isArray(cmsMatch?.imageRecords)
-      ? cmsMatch.imageRecords.map((item) => ({ url: item.url, source: item.source || `${product.label} CMS upload` }))
+    const vehicleCmsMatch = vehicle ? findCmsMatch(cmsUpload?.rows || [], vehicle) : null;
+    const cmsRecords = Array.isArray(vehicleCmsMatch?.imageRecords)
+      ? vehicleCmsMatch.imageRecords.map((item) => ({ url: item.url, source: item.source || `${product.label} CMS upload` }))
       : [];
-    const pageRecords = Array.isArray(pageImageTest?.imageRecords)
+    const allowPageRecords = selectedVehicle && queueVehicleKey(vehicle) === queueVehicleKey(selectedVehicle);
+    const pageRecords = allowPageRecords && Array.isArray(pageImageTest?.imageRecords)
       ? pageImageTest.imageRecords.map((item) => ({ url: item.url, source: item.source || "gallery/mainImages" }))
       : [];
-    const stockRecord = stockImage ? [{ url: stockImage, source: "stock image" }] : [];
+    const vehicleStockImage = vehicleImage(vehicle);
+    const stockRecord = vehicleStockImage ? [{ url: vehicleStockImage, source: "stock image" }] : [];
 
-    if (imageSource === "upload") return buildOrderedImageRecords(manualRecords);
+    if (imageSource === "upload" && includeManual) return buildOrderedImageRecords(manualRecords.length ? manualRecords : stockRecord);
     if (imageSource === "page") return buildOrderedImageRecords(cmsRecords.length ? cmsRecords : pageRecords.length ? pageRecords : stockRecord);
     if (imageSource === "auto") {
-      if (manualRecords.length) return buildOrderedImageRecords(manualRecords);
+      if (includeManual && manualRecords.length) return buildOrderedImageRecords(manualRecords);
       if (cmsRecords.length) return buildOrderedImageRecords(cmsRecords);
       if (pageRecords.length) return buildOrderedImageRecords(pageRecords);
       return buildOrderedImageRecords(stockRecord);
     }
     return buildOrderedImageRecords(stockRecord);
+  }
+
+  const resolvedImageOrder = useMemo(() => {
+    return resolveImageOrderForVehicle(selectedVehicle, { includeManual: true });
   }, [cmsMatch, imageSource, pageImageTest, product.label, uploadedImages, stockImage]);
   const resolvedImages = resolvedImageOrder.records.map((item) => item.url);
-  const currentPreviewKey = selectedVehicle ? `${selectedVehicleKey}:${visualTemplate}:${imageSource}:${brandHeaderText}:${hookText}:${supportText}:${cta}:${resolvedImages.join("|")}` : "";
-  const currentAsset = asset?.previewKey === currentPreviewKey ? asset : null;
+  const currentPreviewKey = selectedVehicle ? `${selectedVehicleKey}:${visualTemplate}:${imageSource}:${musicOn}:${brandHeaderText}:${hookText}:${supportText}:${cta}:${resolvedImages.join("|")}` : "";
+  const currentAsset = asset?.queueAsset || asset?.previewKey === currentPreviewKey ? asset : null;
 
   useEffect(() => {
     generationKeyRef.current = currentPreviewKey;
@@ -1249,6 +1325,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
         supportText,
         ctaText: cta,
         imageUrls: resolvedImages,
+        musicOn,
         onProgress: setStatus,
       });
       if (generationKeyRef.current !== renderPreviewKey) {
@@ -1278,6 +1355,140 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
       setError(downloadError.message || "Could not download MP4.");
       setStatus("");
     }
+  }
+
+  function reelLabFilenameFor(vehicle, targetProductKey = productKey) {
+    return `${safeFilePart(`${targetProductKey === "rent2buy" ? "rent2buy" : "finance"}-${vehicleRegistration(vehicle) || vehicleTitle(vehicle)}-reel-lab`)}.mp4`;
+  }
+
+  function addVehiclesToQueue(targetProductKey, nextVehicles) {
+    setQueueByProduct((prev) => {
+      const existing = prev[targetProductKey] || [];
+      const seen = new Set(existing.map(queueVehicleKey));
+      const additions = (nextVehicles || []).filter((vehicle) => {
+        const key = queueVehicleKey(vehicle);
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      return { ...prev, [targetProductKey]: [...existing, ...additions] };
+    });
+  }
+
+  function handleAddCurrentToQueue() {
+    if (!selectedVehicle) return;
+    addVehiclesToQueue(productKey, [selectedVehicle]);
+  }
+
+  function handleAddAllToQueue(targetProductKey) {
+    addVehiclesToQueue(targetProductKey, getProductVehicles(vehicles, targetProductKey));
+    setProductKey(targetProductKey);
+  }
+
+  function handleRemoveCurrentFromQueue() {
+    const selectedKey = selectedVehicle ? queueVehicleKey(selectedVehicle) : "";
+    setQueueByProduct((prev) => ({
+      ...prev,
+      [productKey]: (prev[productKey] || []).filter((vehicle, index) => selectedKey ? queueVehicleKey(vehicle) !== selectedKey : index !== 0),
+    }));
+  }
+
+  function handleClearQueue() {
+    setQueueByProduct((prev) => ({ ...prev, [productKey]: [] }));
+    setQueueProgress({ index: 0, total: 0, completed: 0, failed: 0, label: "", message: "Ready" });
+    setQueueFailures([]);
+  }
+
+  async function generateAssetForQueueVehicle(vehicle, targetProductKey, queueIndex = 0, queueTotal = 1) {
+    const imageOrder = resolveImageOrderForVehicle(vehicle, { includeManual: false });
+    const imageUrls = imageOrder.records.map((item) => item.url);
+    if (!imageUrls.length) throw new Error("No usable image is available for this queued reel.");
+    return generateReelLabAsset({
+      productKey: targetProductKey,
+      vehicle,
+      visualTemplate,
+      brandHeaderText: brandHeaderByProduct[targetProductKey] ?? DEFAULT_BRAND_HEADERS[targetProductKey],
+      hookText: hookByProduct[targetProductKey] ?? DEFAULT_HOOKS[targetProductKey],
+      supportText: supportByProduct[targetProductKey] ?? DEFAULT_SUPPORT_LINES[targetProductKey],
+      ctaText: ctaByProduct[targetProductKey] ?? PRODUCTS[targetProductKey].finalCta,
+      imageUrls,
+      musicOn,
+      onProgress: (message) => {
+        setStatus(message);
+        setQueueProgress((prev) => ({
+          ...prev,
+          index: queueIndex,
+          total: queueTotal,
+          label: vehicleRegistration(vehicle) || vehicleTitle(vehicle),
+          message,
+        }));
+      },
+    });
+  }
+
+  async function handleGenerateCurrentQueuedReel() {
+    const queueVehicle = activeQueue[0] || selectedVehicle;
+    if (!queueVehicle || queueRunning) return;
+    setError("");
+    setStatus("Generating current Reel Lab queue item");
+    setQueueProgress({ index: 1, total: activeQueue.length || 1, completed: 0, failed: 0, label: vehicleRegistration(queueVehicle) || vehicleTitle(queueVehicle), message: "Generating" });
+    try {
+      const nextAsset = await generateAssetForQueueVehicle(queueVehicle, productKey, 1, activeQueue.length || 1);
+      if (asset?.url) URL.revokeObjectURL(asset.url);
+      const queuePreviewKey = `${productKey}:${queueVehicleKey(queueVehicle)}:queue:${Date.now()}`;
+      setAsset({ ...nextAsset, previewKey: queuePreviewKey, queueAsset: true });
+      setStatus(`Queued preview ready for ${vehicleRegistration(queueVehicle) || vehicleTitle(queueVehicle)}.`);
+    } catch (queueError) {
+      setError(queueError.message || "Could not generate queued Reel Lab preview.");
+      setQueueProgress((prev) => ({ ...prev, failed: prev.failed + 1, message: "Failed" }));
+    }
+  }
+
+  async function handleAutoGenerateQueue() {
+    if (queueRunning || !activeQueue.length) return;
+    const targetProductKey = productKey;
+    const queueSnapshot = [...activeQueue];
+    let completed = 0;
+    let failed = 0;
+    queueCancelRef.current = false;
+    setQueueRunning(true);
+    setQueueFailures([]);
+    setError("");
+    setStatus("Starting Reel Lab queue");
+    setQueueProgress({ index: 0, total: queueSnapshot.length, completed: 0, failed: 0, label: "", message: "Starting" });
+
+    try {
+      for (const [index, queueVehicle] of queueSnapshot.entries()) {
+        if (queueCancelRef.current) break;
+        const label = vehicleRegistration(queueVehicle) || vehicleTitle(queueVehicle);
+        setQueueProgress({ index: index + 1, total: queueSnapshot.length, completed, failed, label, message: "Generating" });
+        try {
+          const nextAsset = await generateAssetForQueueVehicle(queueVehicle, targetProductKey, index + 1, queueSnapshot.length);
+          setQueueProgress((prev) => ({ ...prev, message: "Converting MP4" }));
+          await downloadMp4FromWebm(nextAsset.blob, reelLabFilenameFor(queueVehicle, targetProductKey));
+          URL.revokeObjectURL(nextAsset.url);
+          completed += 1;
+          setQueueProgress({ index: index + 1, total: queueSnapshot.length, completed, failed, label, message: "Downloaded" });
+          await new Promise((resolve) => window.setTimeout(resolve, 350));
+        } catch (itemError) {
+          failed += 1;
+          setQueueFailures((prev) => [...prev, `${label}: ${itemError.message || "Failed"}`]);
+          setQueueProgress({ index: index + 1, total: queueSnapshot.length, completed, failed, label, message: "Failed - continuing" });
+        }
+      }
+      setStatus(queueCancelRef.current ? "Queue cancelled." : `Queue complete. ${completed} downloaded, ${failed} failed.`);
+      setQueueProgress((prev) => ({ ...prev, completed, failed, message: queueCancelRef.current ? "Cancelled" : "Complete" }));
+    } finally {
+      queueCancelRef.current = false;
+      setQueueRunning(false);
+    }
+  }
+
+  function handleCancelQueue() {
+    if (!queueRunning) return;
+    queueCancelRef.current = true;
+    setQueueProgress((prev) => ({ ...prev, message: "Cancelling" }));
+    setStatus("Cancelling Reel Lab queue...");
   }
 
   return (
@@ -1326,6 +1537,15 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
                 <option key={value} value={value}>{label}</option>
               ))}
             </select>
+          </label>
+
+          <label className="reel-lab__toggle">
+            <input
+              type="checkbox"
+              checked={musicOn}
+              onChange={(event) => setMusicOn(event.target.checked)}
+            />
+            <span>Use existing reel music</span>
           </label>
 
           <div className="reel-lab__upload-row">
@@ -1492,6 +1712,78 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
               Save {product.label} Text Defaults
             </button>
           </div>
+
+          <section className="reel-lab__queue">
+            <div className="reel-lab__queue-header">
+              <div>
+                <span>Reel Lab queue</span>
+                <strong>{product.label} MP4 downloads</strong>
+              </div>
+              <em>{activeQueue.length} queued</em>
+            </div>
+            <div className="reel-lab__queue-actions">
+              <button className="button button--ghost" type="button" onClick={handleAddCurrentToQueue} disabled={!selectedVehicle || queueRunning}>
+                Add Current Vehicle to Queue
+              </button>
+              <button className="button button--ghost" type="button" onClick={() => handleAddAllToQueue("vanFinance")} disabled={queueRunning}>
+                Add All Finance Stock to Queue
+              </button>
+              <button className="button button--ghost" type="button" onClick={() => handleAddAllToQueue("rent2buy")} disabled={queueRunning}>
+                Add All Rent2Buy Stock to Queue
+              </button>
+              <button className="button button--ghost" type="button" onClick={handleRemoveCurrentFromQueue} disabled={!activeQueue.length || queueRunning}>
+                Remove Current
+              </button>
+              <button className="button button--ghost" type="button" onClick={handleClearQueue} disabled={!activeQueue.length || queueRunning}>
+                Clear Queue
+              </button>
+            </div>
+            {activeQueue.length ? (
+              <div className="reel-lab__queue-list">
+                {activeQueue.slice(0, 6).map((vehicle, index) => (
+                  <span key={`${queueVehicleKey(vehicle)}-${index}`}>
+                    {index + 1}. {vehicleRegistration(vehicle) || "NO REG"} - {vehicleTitle(vehicle)}
+                  </span>
+                ))}
+                {activeQueue.length > 6 ? <span>+ {activeQueue.length - 6} more</span> : null}
+              </div>
+            ) : (
+              <div className="reel-lab__empty">No vehicles queued for {product.label}.</div>
+            )}
+            <div className="reel-lab__queue-progress">
+              <div>
+                <strong>{queueProgress.message}</strong>
+                <span>
+                  {queueProgress.total
+                    ? `${queueProgress.index || 0} of ${queueProgress.total} | Complete ${queueProgress.completed} | Failed ${queueProgress.failed}`
+                    : "Ready"}
+                </span>
+                {queueProgress.label ? <em>{queueProgress.label}</em> : null}
+              </div>
+              <div className="reel-lab__queue-bar">
+                <div style={{ width: `${queueProgress.total ? Math.round(((queueProgress.completed + queueProgress.failed) / queueProgress.total) * 100) : 0}%` }} />
+              </div>
+            </div>
+            {queueFailures.length ? (
+              <details className="reel-lab__details">
+                <summary>Queue failures ({queueFailures.length})</summary>
+                <div className="reel-lab__queue-failures">
+                  {queueFailures.map((failure, index) => <span key={`${failure}-${index}`}>{failure}</span>)}
+                </div>
+              </details>
+            ) : null}
+            <div className="reel-lab__actions">
+              <button className="button button--primary" type="button" onClick={handleGenerateCurrentQueuedReel} disabled={queueRunning || (!activeQueue.length && !selectedVehicle)}>
+                Generate Current Reel
+              </button>
+              <button className="button button--primary" type="button" onClick={handleAutoGenerateQueue} disabled={queueRunning || !activeQueue.length}>
+                Auto Generate + Download Reel Lab Queue
+              </button>
+              <button className="button button--ghost" type="button" onClick={handleCancelQueue} disabled={!queueRunning}>
+                Stop / Cancel Queue
+              </button>
+            </div>
+          </section>
 
           <div className="reel-lab__copy">
             <span>{product.label} wording preview</span>
