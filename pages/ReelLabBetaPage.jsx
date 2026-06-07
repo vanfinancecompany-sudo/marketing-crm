@@ -636,7 +636,7 @@ function getFrameSpec(productKey, vehicle, frameIndex, hookText, supportText, ct
   if (productKey === "rent2buy") {
     return [
       { kind: "hook", eyebrow: "RENT2BUY VANS", headline: hook, subline: support },
-      { kind: "details", eyebrow: "SELECTED VAN", headline: title, subline: "HUGE SELECTION OF VANS IN STOCK TO CHOOSE FROM" },
+      { kind: "details", eyebrow: "SELECTED VAN", headline: price ? `${price} | ${title}` : title, subline: "HUGE SELECTION OF VANS IN STOCK TO CHOOSE FROM" },
       { kind: "statement", eyebrow: "SIMPLE VAN OWNERSHIP", headline: "RENT IT - DRIVE IT - OWN IT", subline: vehicleRegistration(vehicle) },
       { kind: "statement", eyebrow: "RENT2BUY", headline: "FINAL PAYMENT IT'S YOURS", subline: support },
       { kind: "cta", eyebrow: "APPLY TODAY", headline: finalCta, buttonLabel: finalButton, subline: finalDomain },
