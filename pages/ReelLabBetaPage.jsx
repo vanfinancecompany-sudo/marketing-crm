@@ -75,6 +75,46 @@ function vehiclePriceLine(vehicle, productKey) {
   return cleanText(vehicle?.monthly || vehicle?.salePrice || vehicle?.price || "Finance monthly options available");
 }
 
+function imageDedupeKey(value) {
+  const text = String(value || "").trim();
+  const staticMatch = text.match(/static\.wixstatic\.com\/media\/([^/?#]+)/i);
+  if (staticMatch) return `wix:${staticMatch[1].toLowerCase()}`;
+  try {
+    const url = new URL(text);
+    url.search = "";
+    url.hash = "";
+    return url.toString().toLowerCase();
+  } catch {
+    return text.toLowerCase();
+  }
+}
+
+function buildOrderedImageRecords(records) {
+  const ordered = [];
+  const seen = new Set();
+  let dedupeHappened = false;
+
+  (records || []).forEach((record) => {
+    const url = cleanText(record?.url || record);
+    if (!url) return;
+    const key = imageDedupeKey(url);
+    if (seen.has(key)) {
+      dedupeHappened = true;
+      return;
+    }
+    seen.add(key);
+    ordered.push({
+      url,
+      source: cleanText(record?.source || "stock image"),
+    });
+  });
+
+  return {
+    records: ordered.slice(0, 5),
+    dedupeHappened,
+  };
+}
+
 function getProductVehicles(vehicles, productKey) {
   if (productKey === "rent2buy") {
     return (vehicles || [])
@@ -519,6 +559,11 @@ async function fetchFirstFivePageImages({ productKey, vehicle }) {
 
   return {
     images: Array.isArray(payload?.images) ? payload.images.slice(0, 5) : [],
+    imageRecords: Array.isArray(payload?.imageRecords)
+      ? payload.imageRecords.slice(0, 5)
+      : Array.isArray(payload?.images)
+        ? payload.images.slice(0, 5).map((url) => ({ url, source: "gallery/mainImages" }))
+        : [],
     message: payload?.message || "",
     matchedRegistration: Boolean(payload?.matchedRegistration),
     matchedTitle: Boolean(payload?.matchedTitle),
@@ -585,21 +630,33 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     };
   }, []);
 
-  const resolvedImages = useMemo(() => {
-    if (imageSource === "upload") return uploadedImages.map((item) => item.url);
-    if (imageSource === "page") return stockImage ? [stockImage] : [];
+  const resolvedImageOrder = useMemo(() => {
+    const manualRecords = uploadedImages.map((item) => ({ url: item.url, source: "manual upload" }));
+    const pageRecords = Array.isArray(pageImageTest?.imageRecords)
+      ? pageImageTest.imageRecords.map((item) => ({ url: item.url, source: item.source || "gallery/mainImages" }))
+      : [];
+    const stockRecord = stockImage ? [{ url: stockImage, source: "stock image" }] : [];
+
+    if (imageSource === "upload") return buildOrderedImageRecords(manualRecords);
+    if (imageSource === "page") return buildOrderedImageRecords(pageRecords.length ? pageRecords : stockRecord);
     if (imageSource === "auto") {
-      const manual = uploadedImages.map((item) => item.url);
-      return manual.length ? manual : stockImage ? [stockImage] : [];
+      if (manualRecords.length) return buildOrderedImageRecords(manualRecords);
+      if (pageRecords.length) return buildOrderedImageRecords(pageRecords);
+      return buildOrderedImageRecords(stockRecord);
     }
-    return stockImage ? [stockImage] : [];
-  }, [imageSource, uploadedImages, stockImage]);
+    return buildOrderedImageRecords(stockRecord);
+  }, [imageSource, pageImageTest, uploadedImages, stockImage]);
+  const resolvedImages = resolvedImageOrder.records.map((item) => item.url);
 
   const sourceNote =
     imageSource === "page"
-      ? "First 5 van page images can be tested below. Reel generation still uses stock fallback until confirmed safe."
+      ? pageImageTest?.imageRecords?.length
+        ? "Using tested van page images in the exact returned order."
+        : "Test first 5 van page images below. Stock image fallback is used until real ordered URLs are returned."
       : imageSource === "auto" && !uploadedImages.length
-        ? "Auto is using stock image because uploaded and van page images are not confirmed for this beta yet."
+        ? pageImageTest?.imageRecords?.length
+          ? "Auto is using tested van page images because no uploaded images are present."
+          : "Auto is using stock image because no uploaded or tested van page images are present."
         : "";
 
   function handleUploads(event) {
@@ -649,6 +706,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     try {
       const result = await fetchFirstFivePageImages({ productKey, vehicle: selectedVehicle });
       const images = result.images || [];
+      const imageRecords = result.imageRecords || images.map((url) => ({ url, source: "gallery/mainImages" }));
       setPageImageTests((prev) => ({
         ...prev,
         [productKey]: {
@@ -658,6 +716,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
             ? `${images.length} van page image${images.length === 1 ? "" : "s"} found. Stock image fallback remains active for generation.`
             : "No van page images found -- stock image fallback will be used.",
           images,
+          imageRecords,
           error: "",
           matchedRegistration: result.matchedRegistration,
           matchedTitle: result.matchedTitle,
@@ -836,6 +895,15 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
                 <span><b>Gallery refs</b>{Number(pageImageTest.debug?.galleryRefsFound || 0)}</span>
                 <span><b>Candidate images</b>{Number(pageImageTest.debug?.candidateImagesFound || 0)}</span>
                 <span><b>Returned</b>{pageImageTest.images?.length || 0}</span>
+                <span><b>Image 1 source</b>{pageImageTest.imageRecords?.[0]?.source || pageImageTest.debug?.image1Source || "None"}</span>
+                <span><b>Dedupe happened</b>{pageImageTest.debug?.dedupeHappened ? "Yes" : "No"}</span>
+                <span><b>Final ordered count</b>{pageImageTest.imageRecords?.length || 0}</span>
+                {[0, 1, 2, 3, 4].map((index) => (
+                  <span key={`image-debug-${index}`}>
+                    <b>{`Image ${index + 1} URL`}</b>
+                    {pageImageTest.imageRecords?.[index]?.url || pageImageTest.debug?.[`image${index + 1}Url`] || "None"}
+                  </span>
+                ))}
               </div>
               {pageImageTest.pageUrl ? <span>Page URL: {pageImageTest.pageUrl}</span> : null}
               {pageImageTest.images?.length ? (
@@ -847,6 +915,21 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
               ) : null}
             </div>
           ) : null}
+
+          <div className="reel-lab__image-order">
+            <strong>Current final image order</strong>
+            <div className="reel-lab__debug-grid">
+              <span><b>Image 1 source</b>{resolvedImageOrder.records[0]?.source || "None"}</span>
+              <span><b>Dedupe happened</b>{resolvedImageOrder.dedupeHappened ? "Yes" : "No"}</span>
+              <span><b>Final ordered count</b>{resolvedImageOrder.records.length}</span>
+              {[0, 1, 2, 3, 4].map((index) => (
+                <span key={`final-image-debug-${index}`}>
+                  <b>{`Image ${index + 1} URL`}</b>
+                  {resolvedImageOrder.records[index]?.url || "None"}
+                </span>
+              ))}
+            </div>
+          </div>
 
           <label className="reel-lab__field">
             <span>Template style</span>

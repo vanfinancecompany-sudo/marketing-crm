@@ -2544,7 +2544,21 @@ textarea {
   border-radius: 8px;
 }
 
+.reel-lab__image-order {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+}
+
 .reel-lab__page-result strong {
+  color: #111827;
+  font-size: 13px;
+}
+
+.reel-lab__image-order strong {
   color: #111827;
   font-size: 13px;
 }
