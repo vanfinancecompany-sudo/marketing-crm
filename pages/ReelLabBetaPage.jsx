@@ -37,8 +37,8 @@ const PRODUCTS = {
 const IMAGE_SOURCE_OPTIONS = [
   ["stock", "Stock image only"],
   ["upload", "Manual upload"],
-  ["page", "First 5 van page images"],
-  ["auto", "Auto: Uploaded > Van Page > Stock"],
+  ["page", "CMS / first 5 van page images"],
+  ["auto", "Auto: Uploaded > CMS > Van Page > Stock"],
 ];
 
 const VISUAL_TEMPLATES = [
@@ -144,6 +144,15 @@ function vehicleCashPriceLine(vehicle) {
     || vatText === "1"
     || vatText.toLowerCase() === "yes";
   return `${rawPrice}${vatApplies && !priceHasVat ? " + VAT" : ""}`;
+}
+
+function vehicleMileageLine(vehicle) {
+  const rawMileage = cleanText(vehicle?.mileage || vehicle?.miles || vehicle?.odometer || vehicle?.mileageText || "");
+  if (!rawMileage) return "";
+  if (/mile/i.test(rawMileage)) return rawMileage.toUpperCase();
+  const numeric = Number(String(rawMileage).replace(/[^0-9.]/g, ""));
+  if (Number.isFinite(numeric) && numeric > 0) return `${Math.round(numeric).toLocaleString("en-GB")} MILES`;
+  return rawMileage.toUpperCase();
 }
 
 function financeBuyLine(vehicle) {
@@ -563,6 +572,7 @@ function fillRoundRect(ctx, x, y, width, height, radius, fillStyle) {
 function getFrameSpec(productKey, vehicle, frameIndex, hookText, supportText, ctaText) {
   const price = vehiclePriceLine(vehicle, productKey);
   const cashPrice = vehicleCashPriceLine(vehicle);
+  const mileage = vehicleMileageLine(vehicle);
   const title = vehicleTitle(vehicle);
   const hook = cleanText(hookText) || DEFAULT_HOOKS[productKey];
   const support = cleanText(supportText) || DEFAULT_SUPPORT_LINES[productKey];
@@ -582,7 +592,7 @@ function getFrameSpec(productKey, vehicle, frameIndex, hookText, supportText, ct
 
   return [
     { kind: "hook", eyebrow: "VAN FINANCE COMPANY", headline: hook, subline: support },
-    { kind: "details", eyebrow: "SELECTED VAN", headline: title, subline: cashPrice || "CHOOSE FROM OVER 200 VANS IN STOCK" },
+    { kind: "details", eyebrow: "SELECTED VAN", headline: cashPrice ? `${cashPrice} | ${title}` : title, subline: mileage || "CHOOSE FROM OVER 200 VANS IN STOCK" },
     { kind: "statement", eyebrow: "MONTHLY PAYMENTS", headline: financeBuyLine(vehicle), subline: "FROM AS LITTLE AS \u00a399 DEPOSIT" },
     { kind: "statement", eyebrow: "VAN FINANCE", headline: support, subline: "NO.1 VAN FINANCE COMPANY IN THE UK" },
     { kind: "cta", eyebrow: "START TODAY", headline: finalCta, buttonLabel: finalButton, subline: finalDomain },
@@ -692,8 +702,8 @@ function drawBottomTextFrame(ctx, product, productKey, spec, frameProgress, fram
   ctx.restore();
 
   if (isCta) {
-    const buttonY = textY + (isLuxury ? 274 : 288);
-    const domainY = buttonY + (isLuxury ? 142 : 154);
+    const buttonY = textY + (isLuxury ? 292 : 306);
+    const domainY = buttonY + (isLuxury ? 178 : 196);
     fillRoundRect(ctx, textX + 28, buttonY, textWidth - 56, isLuxury ? 88 : 98, isLuxury ? 22 : 30, product.accent);
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
@@ -928,7 +938,7 @@ async function fetchFirstFivePageImages({ productKey, vehicle }) {
 export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false, vehiclesError = "" }) {
   const [productKey, setProductKey] = useState("vanFinance");
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
-  const [imageSource, setImageSource] = useState("stock");
+  const [imageSource, setImageSource] = useState("auto");
   const [visualTemplate, setVisualTemplate] = useState("blackPremium");
   const [hookByProduct, setHookByProduct] = useState(DEFAULT_HOOKS);
   const [supportByProduct, setSupportByProduct] = useState(DEFAULT_SUPPORT_LINES);
@@ -1069,6 +1079,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
           rows,
         },
       }));
+      if (imageSource === "stock") setImageSource("auto");
       setStatus(`${product.label} CMS upload loaded: ${rows.length} row${rows.length === 1 ? "" : "s"}.`);
       setError("");
     } catch (uploadError) {
