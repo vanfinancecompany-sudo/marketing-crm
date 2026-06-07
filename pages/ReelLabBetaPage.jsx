@@ -133,6 +133,20 @@ function drawCoverImage(ctx, image, x, y, width, height, zoom = 1, panX = 0, pan
   ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
 }
 
+function drawContainImage(ctx, image, x, y, width, height, scaleAdjust = 0.98, panX = 0, panY = 0) {
+  const baseScale = Math.min(width / image.naturalWidth, height / image.naturalHeight);
+  const scale = baseScale * scaleAdjust;
+  const drawWidth = image.naturalWidth * scale;
+  const drawHeight = image.naturalHeight * scale;
+  const maxPanX = Math.max(0, (width - drawWidth) / 2);
+  const maxPanY = Math.max(0, (height - drawHeight) / 2);
+  const safePanX = Math.max(-maxPanX, Math.min(maxPanX, panX));
+  const safePanY = Math.max(-maxPanY, Math.min(maxPanY, panY));
+  const drawX = x + (width - drawWidth) / 2 + safePanX;
+  const drawY = y + (height - drawHeight) / 2 + safePanY;
+  ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+}
+
 function drawRoundRect(ctx, x, y, width, height, radius) {
   ctx.beginPath();
   ctx.moveTo(x + radius, y);
@@ -167,6 +181,17 @@ function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 3) {
   lines.forEach((item, index) => ctx.fillText(item, x, y + index * lineHeight));
 }
 
+function drawFitText(ctx, text, x, y, maxWidth, maxFontSize, minFontSize, fontWeight = 900) {
+  const clean = cleanText(text);
+  let fontSize = maxFontSize;
+  while (fontSize > minFontSize) {
+    ctx.font = `${fontWeight} ${fontSize}px Arial`;
+    if (ctx.measureText(clean).width <= maxWidth) break;
+    fontSize -= 2;
+  }
+  ctx.fillText(clean, x, y);
+}
+
 function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, templateStyle, cta, elapsedSeconds }) {
   const product = PRODUCTS[productKey];
   const images = loadedImages.length ? loadedImages : [];
@@ -175,79 +200,99 @@ function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, templateStyl
   const sceneIndex = Math.min(sceneCount - 1, Math.floor(elapsedSeconds / sceneDuration));
   const sceneProgress = Math.min(1, (elapsedSeconds - sceneIndex * sceneDuration) / sceneDuration);
   const image = images[sceneIndex] || images[0];
-  const zoom = 1.04 + sceneProgress * 0.045;
-  const panX = (sceneProgress - 0.5) * 34;
-  const panY = (sceneProgress - 0.5) * 24;
+  const safeLeft = 60;
+  const safeTop = 120;
+  const safeBottom = REEL_HEIGHT - 280;
+  const safeWidth = REEL_WIDTH - safeLeft * 2;
+  const containScale = 0.965 + Math.sin(sceneProgress * Math.PI) * 0.015;
+  const panX = Math.sin(sceneProgress * Math.PI * 2) * 12;
+  const panY = Math.cos(sceneProgress * Math.PI * 2) * 8;
 
   ctx.clearRect(0, 0, REEL_WIDTH, REEL_HEIGHT);
   ctx.fillStyle = productKey === "rent2buy" ? "#06150d" : "#071426";
   ctx.fillRect(0, 0, REEL_WIDTH, REEL_HEIGHT);
 
   if (image) {
-    drawCoverImage(ctx, image, 52, 155, REEL_WIDTH - 104, 1040, zoom, panX, panY);
+    ctx.save();
+    ctx.globalAlpha = 0.18;
+    drawCoverImage(ctx, image, 0, 0, REEL_WIDTH, REEL_HEIGHT, 1.02, 0, 0);
+    ctx.restore();
+
+    ctx.save();
+    drawRoundRect(ctx, safeLeft, safeTop, safeWidth, 900, 26);
+    ctx.clip();
+    ctx.fillStyle = "rgba(255,255,255,0.08)";
+    ctx.fillRect(safeLeft, safeTop, safeWidth, 900);
+    drawContainImage(ctx, image, safeLeft, safeTop, safeWidth, 900, containScale, panX, panY);
+    ctx.restore();
   }
 
   const gradient = ctx.createLinearGradient(0, 0, 0, REEL_HEIGHT);
-  gradient.addColorStop(0, "rgba(7,20,38,0.08)");
-  gradient.addColorStop(0.62, "rgba(7,20,38,0.10)");
-  gradient.addColorStop(1, "rgba(7,20,38,0.82)");
+  gradient.addColorStop(0, "rgba(7,20,38,0.04)");
+  gradient.addColorStop(0.62, "rgba(7,20,38,0.04)");
+  gradient.addColorStop(1, "rgba(7,20,38,0.70)");
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, REEL_WIDTH, REEL_HEIGHT);
 
   ctx.save();
-  drawRoundRect(ctx, 68, 72, 360, 74, 20);
+  drawRoundRect(ctx, safeLeft, safeTop + 24, 360, 66, 18);
+  ctx.fillStyle = product.accent;
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  drawFitText(ctx, product.brand, safeLeft + 28, safeTop + 68, 292, 29, 22);
+  ctx.restore();
+
+  ctx.save();
+  drawRoundRect(ctx, safeLeft, 1050, safeWidth, 98, 10);
+  ctx.fillStyle = product.accent;
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  drawFitText(ctx, productKey === "vanFinance" ? "FROM \u00a399 DEPOSIT" : "NO CREDIT CHECK", REEL_WIDTH / 2, 1114, safeWidth - 80, 56, 36);
+  ctx.textAlign = "left";
+  ctx.restore();
+
+  ctx.save();
+  drawRoundRect(ctx, safeLeft, 1178, safeWidth, safeBottom - 1178, 30);
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.fill();
+  ctx.fillStyle = product.accent;
+  ctx.font = "900 36px Arial";
+  ctx.fillText(templateStyle, 105, 1240);
+
+  ctx.fillStyle = "#111827";
+  ctx.font = "900 56px Arial";
+  wrapText(ctx, vehicleTitle(vehicle), 105, 1312, 820, 62, 2);
+
+  ctx.fillStyle = "#374151";
+  ctx.font = "800 34px Arial";
+  ctx.fillText(vehicleRegistration(vehicle) || "SELECTED STOCK", 105, 1458);
+  ctx.fillText(vehiclePriceLine(vehicle, productKey), 105, 1510);
+
+  drawRoundRect(ctx, 600, 1440, 330, 96, 26);
   ctx.fillStyle = product.accent;
   ctx.fill();
   ctx.fillStyle = "#ffffff";
   ctx.font = "900 31px Arial";
-  ctx.fillText(product.brand, 92, 122);
+  wrapText(ctx, cta, 632, 1498, 266, 34, 2);
   ctx.restore();
 
-  ctx.save();
-  drawRoundRect(ctx, 68, 1215, 944, 385, 30);
-  ctx.fillStyle = "rgba(255,255,255,0.92)";
-  ctx.fill();
-  ctx.fillStyle = product.accent;
-  ctx.font = "900 44px Arial";
-  ctx.fillText(templateStyle, 105, 1282);
-
-  ctx.fillStyle = "#111827";
-  ctx.font = "900 62px Arial";
-  wrapText(ctx, vehicleTitle(vehicle), 105, 1360, 820, 70, 2);
-
-  ctx.fillStyle = "#374151";
-  ctx.font = "800 38px Arial";
-  ctx.fillText(vehicleRegistration(vehicle) || "SELECTED STOCK", 105, 1513);
-  ctx.fillText(vehiclePriceLine(vehicle, productKey), 105, 1565);
-  ctx.restore();
-
-  const uspStart = productKey === "rent2buy" ? 1650 : 1636;
+  const uspStart = 1556;
   product.usps.slice(0, 3).forEach((usp, index) => {
-    const y = uspStart + index * 62;
+    const x = index === 2 ? 105 : 105 + index * 328;
+    const y = index === 2 ? uspStart + 58 : uspStart;
     ctx.save();
-    drawRoundRect(ctx, 76, y, 560, 46, 16);
+    drawRoundRect(ctx, x, y, index === 2 ? 420 : 292, 42, 15);
     ctx.fillStyle = "rgba(255,255,255,0.88)";
     ctx.fill();
     ctx.fillStyle = "#111827";
-    ctx.font = "900 28px Arial";
-    ctx.fillText(usp, 101, y + 32);
+    drawFitText(ctx, usp, x + 20, y + 29, (index === 2 ? 380 : 252), 23, 18);
     ctx.restore();
   });
 
-  if (elapsedSeconds > REEL_DURATION_SECONDS - 2.6) {
-    ctx.save();
-    drawRoundRect(ctx, 570, 1660, 385, 112, 28);
-    ctx.fillStyle = product.accent;
-    ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "900 34px Arial";
-    wrapText(ctx, cta, 605, 1710, 300, 38, 2);
-    ctx.restore();
-  }
-
   ctx.fillStyle = "rgba(255,255,255,0.75)";
   ctx.font = "800 24px Arial";
-  ctx.fillText(product.destinationUrl.replace(/^https?:\/\//, ""), 74, 1842);
+  ctx.fillText(product.destinationUrl.replace(/^https?:\/\//, ""), safeLeft, 1678);
 }
 
 async function generateReelLabAsset({ productKey, vehicle, templateStyle, cta, imageUrls, onProgress }) {

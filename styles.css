@@ -2555,7 +2555,7 @@ textarea {
 
 .reel-lab__phone video,
 .reel-lab__poster img {
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .reel-lab__poster {
