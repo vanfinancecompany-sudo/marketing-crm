@@ -772,6 +772,11 @@ function drawBottomTextFrame(ctx, product, productKey, spec, frameProgress, fram
     ctx.fillStyle = isLuxury ? "rgba(255,255,255,0.70)" : isStatement ? "rgba(255,255,255,0.86)" : "rgba(255,255,255,0.74)";
     ctx.font = `${isLuxury ? 700 : 850} ${isHook ? 34 : 31}px ${CANVAS_FONT}`;
     wrapText(ctx, spec.subline, textX + 30, textY + 316, textWidth - 60, 40, 2);
+    ctx.fillStyle = "rgba(255,255,255,0.88)";
+    ctx.font = `${isLuxury ? 760 : 850} ${isLuxury ? 28 : 30}px ${CANVAS_FONT}`;
+    ctx.textAlign = "center";
+    drawFitText(ctx, displayDomain(product.destinationUrl).toUpperCase(), REEL_WIDTH / 2, textY + 446, textWidth - 120, isLuxury ? 28 : 30, 22);
+    ctx.textAlign = "left";
   }
 
   if (isHook || isStatement || isCta) {
