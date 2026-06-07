@@ -14,11 +14,11 @@ const PRODUCTS = {
     accent: "#ef233c",
     deep: "#090b10",
     hook: "FROM \u00a399 DEPOSIT",
-    finalCta: "VIEW THIS VAN",
+    finalCta: "APPLY NOW",
     destinationUrl: "https://www.vanfinancecompany.co.uk/",
     templateStyles: ["Premium Stock Card", "Finance Offer", "Vehicle Spotlight"],
     ctas: ["View This Van", "Check Monthly Payments", "Apply For Finance"],
-    usps: ["From £99 Deposit", "Finance Available", "Approved in 60 Minutes", "Free UK Delivery", "200+ Vans In Stock"],
+    usps: ["From £99 Deposit", "All Credit Profiles Considered", "Low Deposit Options", "Free UK Delivery", "200+ Vans In Stock"],
   },
   rent2buy: {
     label: "Rent2Buy",
@@ -181,6 +181,104 @@ function buildOrderedImageRecords(records) {
   };
 }
 
+function splitCsvLine(line) {
+  const cells = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+    if (char === '"' && next === '"') {
+      current += '"';
+      index += 1;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+function normalizeCmsRow(row, index = 0) {
+  const source = row || {};
+  const registration = vehicleRegistration({
+    reg: source.registration || source.reg || source.Registration || source.REG || source.numberPlate || source.vrm || "",
+  });
+  const title = cleanText(source.title || source.name || source.vehicleTitle || source.vehicle || source.description || source.vanDescription || "");
+  const imageValues = [];
+  const imageKeys = Object.keys(source).filter((key) => /^(image|images|picture|photo|gallery|mainImage|media)/i.test(key));
+
+  imageKeys.forEach((key) => {
+    const value = source[key];
+    if (Array.isArray(value)) {
+      value.forEach((item) => imageValues.push(item?.url || item?.src || item));
+    } else {
+      String(value || "")
+        .split(/\s*[|;]\s*/)
+        .forEach((item) => imageValues.push(item));
+    }
+  });
+
+  const imageRecords = buildOrderedImageRecords(
+    imageValues.map((url, imageIndex) => ({ url, source: `CMS upload image ${imageIndex + 1}` }))
+  ).records;
+
+  return {
+    id: `cms-${index}`,
+    registration,
+    title,
+    imageRecords,
+  };
+}
+
+function parseCmsUploadText(text) {
+  const value = String(text || "").trim();
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    const rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.items) ? parsed.items : Array.isArray(parsed?.rows) ? parsed.rows : [parsed];
+    return rows.map(normalizeCmsRow).filter((row) => row.registration || row.title || row.imageRecords.length);
+  } catch {}
+
+  const lines = value.split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length < 2) return [];
+  const headers = splitCsvLine(lines[0]).map((header) => cleanText(header));
+  return lines
+    .slice(1)
+    .map((line, index) => {
+      const cells = splitCsvLine(line);
+      const row = {};
+      headers.forEach((header, headerIndex) => {
+        row[header] = cells[headerIndex] || "";
+      });
+      return normalizeCmsRow(row, index);
+    })
+    .filter((row) => row.registration || row.title || row.imageRecords.length);
+}
+
+function titleLooksLikeMatch(rowTitle, vehicle) {
+  const title = cleanText(rowTitle).toUpperCase();
+  const vehicleText = vehicleTitle(vehicle).toUpperCase();
+  if (!title || !vehicleText) return false;
+  if (vehicleText.includes(title) || title.includes(vehicleText)) return true;
+  const parts = title.split(/\s+/).filter((part) => part.length > 2);
+  return parts.length >= 3 && parts.slice(0, 5).filter((part) => vehicleText.includes(part)).length >= 3;
+}
+
+function findCmsMatch(rows, vehicle) {
+  const registration = vehicleRegistration(vehicle);
+  return (rows || []).find((row) => row.registration && row.registration === registration)
+    || (rows || []).find((row) => titleLooksLikeMatch(row.title, vehicle))
+    || null;
+}
+
 function getProductVehicles(vehicles, productKey) {
   if (productKey === "rent2buy") {
     return (vehicles || [])
@@ -226,7 +324,7 @@ ${product.destinationUrl}`;
   return `${product.brand}
 ${title}
 
-From £99 deposit. Finance available. Approved in 60 minutes.
+From £99 deposit. All credit profiles considered. Low deposit options.
 ${cta}
 ${vehiclePageUrl(vehicle) || product.destinationUrl}${reg ? `?reg=${encodeURIComponent(reg)}` : ""}`;
 }
@@ -336,28 +434,29 @@ function fillRoundRect(ctx, x, y, width, height, radius, fillStyle) {
   ctx.fill();
 }
 
-function getFrameSpec(productKey, vehicle, frameIndex, hookText, supportText) {
+function getFrameSpec(productKey, vehicle, frameIndex, hookText, supportText, ctaText) {
   const price = vehiclePriceLine(vehicle, productKey);
   const title = vehicleTitle(vehicle);
   const hook = cleanText(hookText) || DEFAULT_HOOKS[productKey];
   const support = cleanText(supportText) || DEFAULT_SUPPORT_LINES[productKey];
+  const finalCta = cleanText(ctaText) || PRODUCTS[productKey].finalCta;
 
   if (productKey === "rent2buy") {
     return [
       { kind: "hook", eyebrow: "RENT2BUY VANS", headline: hook, subline: support },
-      { kind: "details", eyebrow: "SELECTED VAN", headline: title, subline: price },
+      { kind: "details", eyebrow: "SELECTED VAN", headline: title, subline: "HUGE SELECTION OF VANS IN STOCK TO CHOOSE FROM" },
       { kind: "statement", eyebrow: "SIMPLE VAN OWNERSHIP", headline: "RENT IT - DRIVE IT - OWN IT", subline: vehicleRegistration(vehicle) },
-      { kind: "statement", eyebrow: "FINAL PAYMENT", headline: "IT'S YOURS", subline: support },
-      { kind: "cta", eyebrow: "READY TO START?", headline: "CHECK IF YOU QUALIFY", subline: "rent2buyvans.co.uk" },
+      { kind: "statement", eyebrow: "RENT2BUY", headline: "FINAL PAYMENT IT'S YOURS", subline: support },
+      { kind: "cta", eyebrow: "READY TO START?", headline: finalCta, subline: "RENT2BUY VANS" },
     ][frameIndex];
   }
 
   return [
     { kind: "hook", eyebrow: "VAN FINANCE COMPANY", headline: hook, subline: support },
-    { kind: "details", eyebrow: "SELECTED VAN", headline: title, subline: price },
+    { kind: "details", eyebrow: "SELECTED VAN", headline: title, subline: "CHOOSE FROM OVER 200 VANS IN STOCK" },
     { kind: "statement", eyebrow: "MONTHLY PAYMENTS", headline: financeBuyLine(vehicle), subline: "FROM AS LITTLE AS \u00a399 DEPOSIT" },
-    { kind: "statement", eyebrow: "SUPPORTING USP", headline: support, subline: vehicleRegistration(vehicle) },
-    { kind: "cta", eyebrow: "START TODAY", headline: "APPLY NOW", subline: "vanfinancecompany.co.uk" },
+    { kind: "statement", eyebrow: "VAN FINANCE", headline: support, subline: "NUMBER 1 VAN FINANCE COMPANY IN THE UK" },
+    { kind: "cta", eyebrow: "START TODAY", headline: finalCta, subline: "VAN FINANCE COMPANY" },
   ][frameIndex];
 }
 
@@ -392,8 +491,8 @@ function drawRedStreak(ctx, progress) {
 function drawTopBrandHeader(ctx, product, visualTemplate, imageArea) {
   const isLuxury = visualTemplate === "luxuryDealer";
   const isTikTok = visualTemplate === "tiktokPunch";
-  const headerY = 80;
-  const headerHeight = 110;
+  const headerY = 56;
+  const headerHeight = 150;
   const gradient = ctx.createLinearGradient(imageArea.x, headerY, imageArea.x + imageArea.width, headerY + headerHeight);
   gradient.addColorStop(0, isLuxury ? "rgba(255,255,255,0.08)" : "rgba(239,35,60,0.18)");
   gradient.addColorStop(0.32, "rgba(10,10,12,0.94)");
@@ -409,8 +508,8 @@ function drawTopBrandHeader(ctx, product, visualTemplate, imageArea) {
   ctx.fillRect(imageArea.x, headerY + headerHeight - 8, imageArea.width, 8);
   ctx.fillStyle = "#ffffff";
   ctx.textAlign = "center";
-  ctx.font = `${isLuxury ? 850 : 950} ${isTikTok ? 50 : 46}px ${CANVAS_FONT}`;
-  drawFitText(ctx, product.brand.toUpperCase(), REEL_WIDTH / 2, headerY + 70, imageArea.width - 96, isTikTok ? 50 : 46, 32);
+  ctx.font = `${isLuxury ? 900 : 980} ${isTikTok ? 68 : 62}px ${CANVAS_FONT}`;
+  drawFitText(ctx, product.brand.toUpperCase(), REEL_WIDTH / 2, headerY + 94, imageArea.width - 86, isTikTok ? 68 : 62, 42);
   ctx.textAlign = "left";
   ctx.restore();
 }
@@ -469,10 +568,10 @@ function drawBottomTextFrame(ctx, product, productKey, spec, frameProgress, fram
     ctx.textAlign = "center";
     ctx.font = `${isLuxury ? 850 : 950} ${isLuxury ? 38 : 42}px ${CANVAS_FONT}`;
     drawFitText(ctx, spec.headline, REEL_WIDTH / 2, textY + (isLuxury ? 308 : 315), textWidth - 116, isLuxury ? 38 : 42, 29);
-    ctx.textAlign = "left";
     ctx.fillStyle = "rgba(255,255,255,0.82)";
-    ctx.font = `${isLuxury ? 750 : 800} 30px ${CANVAS_FONT}`;
-    ctx.fillText(spec.subline, textX + 52, textY + (isLuxury ? 376 : 386));
+    ctx.font = `${isLuxury ? 850 : 900} 38px ${CANVAS_FONT}`;
+    drawFitText(ctx, spec.subline, REEL_WIDTH / 2, textY + (isLuxury ? 380 : 392), textWidth - 100, 38, 28);
+    ctx.textAlign = "left";
   } else {
     ctx.shadowBlur = 0;
     ctx.fillStyle = isLuxury ? "rgba(255,255,255,0.70)" : isStatement ? "rgba(255,255,255,0.86)" : "rgba(255,255,255,0.74)";
@@ -487,7 +586,7 @@ function drawBottomTextFrame(ctx, product, productKey, spec, frameProgress, fram
   ctx.restore();
 }
 
-function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, hookText, supportText, elapsedSeconds }) {
+function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, hookText, supportText, ctaText, elapsedSeconds }) {
   const product = PRODUCTS[productKey];
   const config = VISUAL_TEMPLATE_CONFIG[visualTemplate] || VISUAL_TEMPLATE_CONFIG.blackPremium;
   const isLuxury = visualTemplate === "luxuryDealer";
@@ -560,11 +659,11 @@ function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
     ctx.fillRect(0, 0, REEL_WIDTH, REEL_HEIGHT);
   }
 
-  const spec = getFrameSpec(productKey, vehicle, frameIndex, hookText, supportText);
+  const spec = getFrameSpec(productKey, vehicle, frameIndex, hookText, supportText, ctaText);
   drawBottomTextFrame(ctx, product, productKey, spec, frameProgress, frameIndex, visualTemplate, textX, textY, textWidth);
 }
 
-async function generateReelLabAsset({ productKey, vehicle, visualTemplate, hookText, supportText, imageUrls, onProgress }) {
+async function generateReelLabAsset({ productKey, vehicle, visualTemplate, hookText, supportText, ctaText, imageUrls, onProgress }) {
   if (typeof HTMLCanvasElement === "undefined" || typeof MediaRecorder === "undefined") {
     throw new Error("This browser cannot record Reel Lab videos.");
   }
@@ -608,7 +707,7 @@ async function generateReelLabAsset({ productKey, vehicle, visualTemplate, hookT
   let frame = 0;
   const render = () => {
     const elapsedSeconds = Math.min(REEL_DURATION_SECONDS, frame / REEL_FPS);
-    drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, hookText, supportText, elapsedSeconds });
+    drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, hookText, supportText, ctaText, elapsedSeconds });
     if (frame % 20 === 0) onProgress?.(`Rendering ${Math.round((frame / totalFrames) * 100)}%`);
     frame += 1;
     if (frame <= totalFrames) {
@@ -703,15 +802,17 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const [hookByProduct, setHookByProduct] = useState(DEFAULT_HOOKS);
   const [supportByProduct, setSupportByProduct] = useState(DEFAULT_SUPPORT_LINES);
   const [uploadsByProduct, setUploadsByProduct] = useState({ vanFinance: [], rent2buy: [] });
+  const [cmsUploadsByProduct, setCmsUploadsByProduct] = useState({ vanFinance: null, rent2buy: null });
   const [ctaByProduct, setCtaByProduct] = useState({
-    vanFinance: PRODUCTS.vanFinance.ctas[0],
-    rent2buy: PRODUCTS.rent2buy.ctas[0],
+    vanFinance: PRODUCTS.vanFinance.finalCta,
+    rent2buy: PRODUCTS.rent2buy.finalCta,
   });
   const [asset, setAsset] = useState(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [pageImageTests, setPageImageTests] = useState({ vanFinance: null, rent2buy: null });
   const fileInputRef = useRef(null);
+  const cmsInputRef = useRef(null);
   const generationKeyRef = useRef("");
 
   const product = PRODUCTS[productKey];
@@ -721,6 +822,8 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     [productVehicles, selectedVehicleId]
   );
   const uploadedImages = uploadsByProduct[productKey] || [];
+  const cmsUpload = cmsUploadsByProduct[productKey] || null;
+  const cmsMatch = selectedVehicle ? findCmsMatch(cmsUpload?.rows || [], selectedVehicle) : null;
   const stockImage = vehicleImage(selectedVehicle);
   const cta = ctaByProduct[productKey];
   const hookText = hookByProduct[productKey] || DEFAULT_HOOKS[productKey];
@@ -752,22 +855,26 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
 
   const resolvedImageOrder = useMemo(() => {
     const manualRecords = uploadedImages.map((item) => ({ url: item.url, source: "manual upload" }));
+    const cmsRecords = Array.isArray(cmsMatch?.imageRecords)
+      ? cmsMatch.imageRecords.map((item) => ({ url: item.url, source: item.source || `${product.label} CMS upload` }))
+      : [];
     const pageRecords = Array.isArray(pageImageTest?.imageRecords)
       ? pageImageTest.imageRecords.map((item) => ({ url: item.url, source: item.source || "gallery/mainImages" }))
       : [];
     const stockRecord = stockImage ? [{ url: stockImage, source: "stock image" }] : [];
 
     if (imageSource === "upload") return buildOrderedImageRecords(manualRecords);
-    if (imageSource === "page") return buildOrderedImageRecords(pageRecords.length ? pageRecords : stockRecord);
+    if (imageSource === "page") return buildOrderedImageRecords(cmsRecords.length ? cmsRecords : pageRecords.length ? pageRecords : stockRecord);
     if (imageSource === "auto") {
       if (manualRecords.length) return buildOrderedImageRecords(manualRecords);
+      if (cmsRecords.length) return buildOrderedImageRecords(cmsRecords);
       if (pageRecords.length) return buildOrderedImageRecords(pageRecords);
       return buildOrderedImageRecords(stockRecord);
     }
     return buildOrderedImageRecords(stockRecord);
-  }, [imageSource, pageImageTest, uploadedImages, stockImage]);
+  }, [cmsMatch, imageSource, pageImageTest, product.label, uploadedImages, stockImage]);
   const resolvedImages = resolvedImageOrder.records.map((item) => item.url);
-  const currentPreviewKey = selectedVehicle ? `${selectedVehicleKey}:${visualTemplate}:${imageSource}:${hookText}:${supportText}:${resolvedImages.join("|")}` : "";
+  const currentPreviewKey = selectedVehicle ? `${selectedVehicleKey}:${visualTemplate}:${imageSource}:${hookText}:${supportText}:${cta}:${resolvedImages.join("|")}` : "";
   const currentAsset = asset?.previewKey === currentPreviewKey ? asset : null;
 
   useEffect(() => {
@@ -780,13 +887,17 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
 
   const sourceNote =
     imageSource === "page"
-      ? pageImageTest?.imageRecords?.length
+      ? cmsMatch?.imageRecords?.length
+        ? `Using ${product.label} CMS upload images in matched row order.`
+        : pageImageTest?.imageRecords?.length
         ? "Using tested van page images in the exact returned order."
-        : "Test first 5 van page images below. Stock image fallback is used until real ordered URLs are returned."
+        : "Upload matching CMS rows or test first 5 van page images below. Stock image fallback is used until real ordered URLs are returned."
       : imageSource === "auto" && !uploadedImages.length
-        ? pageImageTest?.imageRecords?.length
-          ? "Auto is using tested van page images because no uploaded images are present."
-          : "Auto is using stock image because no uploaded or tested van page images are present."
+        ? cmsMatch?.imageRecords?.length
+          ? `Auto is using matched ${product.label} CMS upload images because no manual uploads are present.`
+          : pageImageTest?.imageRecords?.length
+            ? "Auto is using tested van page images because no uploaded or CMS images are present."
+            : "Auto is using stock image because no uploaded, CMS, or tested van page images are present."
         : "";
 
   function handleUploads(event) {
@@ -812,6 +923,32 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
       if (removed) URL.revokeObjectURL(removed.url);
       return { ...prev, [productKey]: current.filter((item) => item.id !== id) };
     });
+  }
+
+  async function handleCmsUpload(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const rows = parseCmsUploadText(text);
+      setCmsUploadsByProduct((prev) => ({
+        ...prev,
+        [productKey]: {
+          fileName: file.name,
+          rows,
+        },
+      }));
+      setStatus(`${product.label} CMS upload loaded: ${rows.length} row${rows.length === 1 ? "" : "s"}.`);
+      setError("");
+    } catch (uploadError) {
+      setError(uploadError.message || `Could not read ${product.label} CMS upload.`);
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  function clearCmsUpload() {
+    setCmsUploadsByProduct((prev) => ({ ...prev, [productKey]: null }));
   }
 
   async function handleTestPageImages() {
@@ -897,6 +1034,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
         visualTemplate,
         hookText,
         supportText,
+        ctaText: cta,
         imageUrls: resolvedImages,
         onProgress: setStatus,
       });
@@ -996,6 +1134,39 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
             </div>
           ) : null}
 
+          <div className="reel-lab__cms-upload">
+            <div>
+              <span>{productKey === "rent2buy" ? "Rent2Buy CMS Upload" : "Van Finance CMS Upload"}</span>
+              <p>Session-only CMS rows for {product.label}. Matched by selected registration first, then title. Images stay in CMS row order.</p>
+            </div>
+            <div className="reel-lab__upload-row">
+              <button className="button button--ghost" type="button" onClick={() => cmsInputRef.current?.click()}>
+                Upload CMS File
+              </button>
+              {cmsUpload ? <button className="button button--ghost" type="button" onClick={clearCmsUpload}>Clear CMS</button> : null}
+              <span>{cmsUpload ? `${cmsUpload.fileName} · ${cmsUpload.rows.length} rows` : `No ${product.label} CMS file uploaded`}</span>
+              <input ref={cmsInputRef} type="file" accept=".csv,.json,.txt,application/json,text/csv,text/plain" onChange={handleCmsUpload} />
+            </div>
+            {cmsUpload ? (
+              <div className="reel-lab__page-result">
+                <strong>{cmsMatch ? `Matched CMS row for ${vehicleRegistration(selectedVehicle) || vehicleTitle(selectedVehicle)}` : "No matching CMS row for selected vehicle"}</strong>
+                <div className="reel-lab__debug-grid">
+                  <span><b>Product CMS</b>{product.label}</span>
+                  <span><b>Rows loaded</b>{cmsUpload.rows.length}</span>
+                  <span><b>Matched reg</b>{cmsMatch?.registration || "None"}</span>
+                  <span><b>CMS images</b>{cmsMatch?.imageRecords?.length || 0}</span>
+                </div>
+                {cmsMatch?.imageRecords?.length ? (
+                  <div className="reel-lab__page-thumbs">
+                    {cmsMatch.imageRecords.slice(0, 5).map((item, index) => (
+                      <img key={`${item.url}-${index}`} src={item.url} alt={`CMS image ${index + 1}`} />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
           {sourceNote ? <div className="reel-lab__note">{sourceNote}</div> : null}
 
           <div className="reel-lab__page-test">
@@ -1092,12 +1263,13 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
           </label>
 
           <label className="reel-lab__field">
-            <span>CTA</span>
-            <select value={cta} onChange={(event) => setCtaByProduct((prev) => ({ ...prev, [productKey]: event.target.value }))}>
-              {product.ctas.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
+            <span>Final CTA text</span>
+            <input
+              type="text"
+              value={cta}
+              onChange={(event) => setCtaByProduct((prev) => ({ ...prev, [productKey]: event.target.value }))}
+              placeholder={product.finalCta}
+            />
           </label>
 
           <div className="reel-lab__copy">
