@@ -5,12 +5,16 @@ const REEL_HEIGHT = 1920;
 const REEL_FPS = 30;
 const REEL_DURATION_SECONDS = 10;
 const MAX_UPLOADS = 10;
+const CANVAS_FONT = "'Inter', 'Aptos', 'Segoe UI', Arial, sans-serif";
 
 const PRODUCTS = {
   vanFinance: {
     label: "Van Finance",
     brand: "Van Finance Company",
     accent: "#ef233c",
+    deep: "#090b10",
+    hook: "FROM \u00a399 DEPOSIT",
+    finalCta: "VIEW THIS VAN",
     destinationUrl: "https://www.vanfinancecompany.co.uk/",
     templateStyles: ["Premium Stock Card", "Finance Offer", "Vehicle Spotlight"],
     ctas: ["View This Van", "Check Monthly Payments", "Apply For Finance"],
@@ -19,7 +23,10 @@ const PRODUCTS = {
   rent2buy: {
     label: "Rent2Buy",
     brand: "Rent2Buy Vans",
-    accent: "#16a34a",
+    accent: "#ef233c",
+    deep: "#080808",
+    hook: "NO CREDIT CHECK",
+    finalCta: "CHECK IF YOU QUALIFY",
     destinationUrl: "https://www.rent2buyvans.co.uk/",
     templateStyles: ["No Credit Check", "Rent It Drive It Own It", "Vehicle Spotlight"],
     ctas: ["Check If You Qualify", "View Rent2Buy Vans", "Start Application"],
@@ -35,7 +42,7 @@ const IMAGE_SOURCE_OPTIONS = [
 ];
 
 function cleanText(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
+  return String(value || "").replace(/\u00c2\u00a3/g, "\u00a3").replace(/\s+/g, " ").trim();
 }
 
 function safeFilePart(value) {
@@ -55,6 +62,10 @@ function vehicleTitle(vehicle) {
 
 function vehicleImage(vehicle) {
   return cleanText(vehicle?.image || vehicle?.picture || vehicle?.mainImage || "");
+}
+
+function vehiclePageUrl(vehicle) {
+  return cleanText(vehicle?.link || vehicle?.weblink || vehicle?.webLink || vehicle?.stockUrl || vehicle?.url || "");
 }
 
 function vehiclePriceLine(vehicle, productKey) {
@@ -111,7 +122,7 @@ ${title}
 
 From £99 deposit. Finance available. Approved in 60 minutes.
 ${cta}
-${vehicle?.link || vehicle?.weblink || product.destinationUrl}${reg ? `?reg=${encodeURIComponent(reg)}` : ""}`;
+${vehiclePageUrl(vehicle) || product.destinationUrl}${reg ? `?reg=${encodeURIComponent(reg)}` : ""}`;
 }
 
 function loadImage(src) {
@@ -185,11 +196,153 @@ function drawFitText(ctx, text, x, y, maxWidth, maxFontSize, minFontSize, fontWe
   const clean = cleanText(text);
   let fontSize = maxFontSize;
   while (fontSize > minFontSize) {
-    ctx.font = `${fontWeight} ${fontSize}px Arial`;
+    ctx.font = `${fontWeight} ${fontSize}px ${CANVAS_FONT}`;
     if (ctx.measureText(clean).width <= maxWidth) break;
     fontSize -= 2;
   }
   ctx.fillText(clean, x, y);
+}
+
+function easeOutCubic(value) {
+  return 1 - Math.pow(1 - Math.max(0, Math.min(1, value)), 3);
+}
+
+function easeInOut(value) {
+  const t = Math.max(0, Math.min(1, value));
+  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
+function stagedOpacity(elapsedSeconds, start, end) {
+  if (elapsedSeconds <= start) return 0;
+  if (elapsedSeconds >= end) return 1;
+  return easeOutCubic((elapsedSeconds - start) / (end - start));
+}
+
+function fadeOut(elapsedSeconds, start, end) {
+  if (elapsedSeconds <= start) return 1;
+  if (elapsedSeconds >= end) return 0;
+  return 1 - easeInOut((elapsedSeconds - start) / (end - start));
+}
+
+function fillRoundRect(ctx, x, y, width, height, radius, fillStyle) {
+  drawRoundRect(ctx, x, y, width, height, radius);
+  ctx.fillStyle = fillStyle;
+  ctx.fill();
+}
+
+function drawBrandPill(ctx, product, x, y) {
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.28)";
+  ctx.shadowBlur = 18;
+  ctx.shadowOffsetY = 8;
+  fillRoundRect(ctx, x, y, 372, 70, 20, "rgba(10,12,18,0.82)");
+  fillRoundRect(ctx, x + 14, y + 14, 42, 42, 14, product.accent);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `900 27px ${CANVAS_FONT}`;
+  ctx.fillText(product.brand.toUpperCase(), x + 72, y + 45);
+  ctx.restore();
+}
+
+function drawPremiumHook(ctx, product, productKey, elapsedSeconds, safeLeft, safeTop, safeWidth) {
+  const alpha = stagedOpacity(elapsedSeconds, 0.25, 0.7) * fadeOut(elapsedSeconds, 2.55, 3.15);
+  if (alpha <= 0.01) return;
+
+  const entrance = stagedOpacity(elapsedSeconds, 0.25, 0.7);
+  const exit = fadeOut(elapsedSeconds, 2.55, 3.15);
+  const slide = (1 - entrance) * 60 - (1 - exit) * 38;
+  const panelY = safeTop + 600 + slide;
+  const gradient = ctx.createLinearGradient(safeLeft, panelY, safeLeft + safeWidth, panelY + 270);
+  gradient.addColorStop(0, "rgba(8,10,16,0.92)");
+  gradient.addColorStop(0.62, "rgba(14,16,24,0.84)");
+  gradient.addColorStop(1, "rgba(239,35,60,0.78)");
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.shadowColor = "rgba(0,0,0,0.42)";
+  ctx.shadowBlur = 28;
+  ctx.shadowOffsetY = 16;
+  fillRoundRect(ctx, safeLeft + 22, panelY, safeWidth - 44, 270, 34, gradient);
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = "rgba(255,255,255,0.72)";
+  ctx.font = `900 29px ${CANVAS_FONT}`;
+  ctx.fillText(productKey === "rent2buy" ? "RENT IT. DRIVE IT. OWN IT." : "FINANCE AVAILABLE ON THIS VAN", safeLeft + 72, panelY + 68);
+
+  ctx.fillStyle = "#ffffff";
+  drawFitText(ctx, product.hook, safeLeft + 72, panelY + 175, safeWidth - 144, 86, 54);
+
+  ctx.fillStyle = "rgba(255,255,255,0.88)";
+  ctx.font = `800 31px ${CANVAS_FONT}`;
+  ctx.fillText(productKey === "rent2buy" ? "Apply in 60 seconds" : "Approved in 60 minutes", safeLeft + 74, panelY + 228);
+  ctx.restore();
+}
+
+function drawVehicleCard(ctx, product, productKey, vehicle, templateStyle, safeLeft, safeBottom) {
+  const cardX = safeLeft;
+  const cardY = 1138;
+  const cardWidth = REEL_WIDTH - safeLeft * 2;
+  const cardHeight = safeBottom - cardY - 34;
+
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.35)";
+  ctx.shadowBlur = 32;
+  ctx.shadowOffsetY = 18;
+  fillRoundRect(ctx, cardX, cardY, cardWidth, cardHeight, 34, "rgba(255,255,255,0.94)");
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = product.accent;
+  ctx.font = `900 30px ${CANVAS_FONT}`;
+  ctx.fillText(templateStyle.toUpperCase(), cardX + 42, cardY + 62);
+
+  ctx.fillStyle = "#0f172a";
+  ctx.font = `900 57px ${CANVAS_FONT}`;
+  wrapText(ctx, vehicleTitle(vehicle), cardX + 42, cardY + 136, cardWidth - 84, 62, 2);
+
+  fillRoundRect(ctx, cardX + 42, cardY + 262, 242, 58, 18, "#111827");
+  ctx.fillStyle = "#ffffff";
+  drawFitText(ctx, vehicleRegistration(vehicle) || "SELECTED STOCK", cardX + 68, cardY + 300, 190, 28, 22);
+
+  ctx.fillStyle = "#475569";
+  ctx.font = `800 30px ${CANVAS_FONT}`;
+  ctx.fillText(vehiclePriceLine(vehicle, productKey).toUpperCase(), cardX + 322, cardY + 300);
+
+  product.usps.slice(0, 3).forEach((usp, index) => {
+    const pillX = cardX + 42 + index * 282;
+    fillRoundRect(ctx, pillX, cardY + 348, 256, 48, 16, "rgba(15,23,42,0.06)");
+    ctx.fillStyle = "#111827";
+    drawFitText(ctx, usp, pillX + 20, cardY + 380, 216, 23, 17, 900);
+  });
+  ctx.restore();
+}
+
+function drawFinalCta(ctx, product, productKey, cta, elapsedSeconds, safeLeft, safeTop, safeWidth, safeBottom) {
+  const alpha = stagedOpacity(elapsedSeconds, 7.25, 8.0);
+  if (alpha <= 0.01) return;
+
+  const slide = (1 - alpha) * 64;
+  const panelY = safeTop + 865 - slide;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.shadowColor = "rgba(0,0,0,0.42)";
+  ctx.shadowBlur = 34;
+  ctx.shadowOffsetY = 18;
+  fillRoundRect(ctx, safeLeft + 30, panelY, safeWidth - 60, safeBottom - panelY - 18, 34, "rgba(8,10,16,0.90)");
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = "rgba(255,255,255,0.74)";
+  ctx.font = `900 28px ${CANVAS_FONT}`;
+  ctx.fillText(productKey === "rent2buy" ? "READY TO START?" : "LIKE THIS VAN?", safeLeft + 82, panelY + 78);
+
+  fillRoundRect(ctx, safeLeft + 82, panelY + 118, safeWidth - 164, 108, 28, product.accent);
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  drawFitText(ctx, (cta || product.finalCta).toUpperCase(), REEL_WIDTH / 2, panelY + 187, safeWidth - 230, 48, 32);
+  ctx.textAlign = "left";
+
+  ctx.fillStyle = "rgba(255,255,255,0.82)";
+  ctx.font = `800 30px ${CANVAS_FONT}`;
+  ctx.fillText(product.destinationUrl.replace(/^https?:\/\//, "").replace(/\/$/, ""), safeLeft + 82, panelY + 285);
+  ctx.restore();
 }
 
 function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, templateStyle, cta, elapsedSeconds }) {
@@ -209,7 +362,7 @@ function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, templateStyl
   const panY = Math.cos(sceneProgress * Math.PI * 2) * 8;
 
   ctx.clearRect(0, 0, REEL_WIDTH, REEL_HEIGHT);
-  ctx.fillStyle = productKey === "rent2buy" ? "#06150d" : "#071426";
+  ctx.fillStyle = product.deep;
   ctx.fillRect(0, 0, REEL_WIDTH, REEL_HEIGHT);
 
   if (image) {
@@ -234,65 +387,19 @@ function drawReelLabFrame(ctx, loadedImages, { productKey, vehicle, templateStyl
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, REEL_WIDTH, REEL_HEIGHT);
 
-  ctx.save();
-  drawRoundRect(ctx, safeLeft, safeTop + 24, 360, 66, 18);
-  ctx.fillStyle = product.accent;
-  ctx.fill();
-  ctx.fillStyle = "#ffffff";
-  drawFitText(ctx, product.brand, safeLeft + 28, safeTop + 68, 292, 29, 22);
-  ctx.restore();
+  drawBrandPill(ctx, product, safeLeft, safeTop + 24);
+  drawPremiumHook(ctx, product, productKey, elapsedSeconds, safeLeft, safeTop, safeWidth);
 
-  ctx.save();
-  drawRoundRect(ctx, safeLeft, 1050, safeWidth, 98, 10);
-  ctx.fillStyle = product.accent;
-  ctx.fill();
-  ctx.fillStyle = "#ffffff";
-  ctx.textAlign = "center";
-  drawFitText(ctx, productKey === "vanFinance" ? "FROM \u00a399 DEPOSIT" : "NO CREDIT CHECK", REEL_WIDTH / 2, 1114, safeWidth - 80, 56, 36);
-  ctx.textAlign = "left";
-  ctx.restore();
-
-  ctx.save();
-  drawRoundRect(ctx, safeLeft, 1178, safeWidth, safeBottom - 1178, 30);
-  ctx.fillStyle = "rgba(255,255,255,0.92)";
-  ctx.fill();
-  ctx.fillStyle = product.accent;
-  ctx.font = "900 36px Arial";
-  ctx.fillText(templateStyle, 105, 1240);
-
-  ctx.fillStyle = "#111827";
-  ctx.font = "900 56px Arial";
-  wrapText(ctx, vehicleTitle(vehicle), 105, 1312, 820, 62, 2);
-
-  ctx.fillStyle = "#374151";
-  ctx.font = "800 34px Arial";
-  ctx.fillText(vehicleRegistration(vehicle) || "SELECTED STOCK", 105, 1458);
-  ctx.fillText(vehiclePriceLine(vehicle, productKey), 105, 1510);
-
-  drawRoundRect(ctx, 600, 1440, 330, 96, 26);
-  ctx.fillStyle = product.accent;
-  ctx.fill();
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "900 31px Arial";
-  wrapText(ctx, cta, 632, 1498, 266, 34, 2);
-  ctx.restore();
-
-  const uspStart = 1556;
-  product.usps.slice(0, 3).forEach((usp, index) => {
-    const x = index === 2 ? 105 : 105 + index * 328;
-    const y = index === 2 ? uspStart + 58 : uspStart;
+  const cardAlpha = stagedOpacity(elapsedSeconds, 3.05, 3.65) * fadeOut(elapsedSeconds, 7.0, 7.45);
+  if (cardAlpha > 0.01) {
     ctx.save();
-    drawRoundRect(ctx, x, y, index === 2 ? 420 : 292, 42, 15);
-    ctx.fillStyle = "rgba(255,255,255,0.88)";
-    ctx.fill();
-    ctx.fillStyle = "#111827";
-    drawFitText(ctx, usp, x + 20, y + 29, (index === 2 ? 380 : 252), 23, 18);
+    ctx.globalAlpha = cardAlpha;
+    ctx.translate(0, (1 - cardAlpha) * 40);
+    drawVehicleCard(ctx, product, productKey, vehicle, templateStyle, safeLeft, safeBottom);
     ctx.restore();
-  });
+  }
 
-  ctx.fillStyle = "rgba(255,255,255,0.75)";
-  ctx.font = "800 24px Arial";
-  ctx.fillText(product.destinationUrl.replace(/^https?:\/\//, ""), safeLeft, 1678);
+  drawFinalCta(ctx, product, productKey, cta, elapsedSeconds, safeLeft, safeTop, safeWidth, safeBottom);
 }
 
 async function generateReelLabAsset({ productKey, vehicle, templateStyle, cta, imageUrls, onProgress }) {
@@ -391,6 +498,33 @@ async function downloadMp4FromWebm(blob, filename) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+async function fetchFirstFivePageImages({ productKey, vehicle }) {
+  const pageUrl = vehiclePageUrl(vehicle);
+  const params = new URLSearchParams({
+    product: productKey,
+    url: pageUrl,
+    registration: vehicleRegistration(vehicle),
+    title: vehicleTitle(vehicle),
+  });
+
+  const response = await fetch(`/api/reel-lab-page-images?${params.toString()}`);
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {}
+
+  if (!response.ok) {
+    throw new Error(payload?.error || "Could not test selected van page images.");
+  }
+
+  return {
+    images: Array.isArray(payload?.images) ? payload.images.slice(0, 5) : [],
+    message: payload?.message || "",
+    matchedRegistration: Boolean(payload?.matchedRegistration),
+    pageUrl: payload?.pageUrl || pageUrl,
+  };
+}
+
 export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false, vehiclesError = "" }) {
   const [productKey, setProductKey] = useState("vanFinance");
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
@@ -407,6 +541,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const [asset, setAsset] = useState(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [pageImageTests, setPageImageTests] = useState({ vanFinance: null, rent2buy: null });
   const fileInputRef = useRef(null);
 
   const product = PRODUCTS[productKey];
@@ -419,6 +554,8 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const stockImage = vehicleImage(selectedVehicle);
   const templateStyle = templateByProduct[productKey];
   const cta = ctaByProduct[productKey];
+  const selectedVehicleKey = selectedVehicle ? `${productKey}:${selectedVehicle.id}:${vehicleRegistration(selectedVehicle)}` : "";
+  const pageImageTest = pageImageTests[productKey]?.vehicleKey === selectedVehicleKey ? pageImageTests[productKey] : null;
 
   useEffect(() => {
     setSelectedVehicleId("");
@@ -446,9 +583,9 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
 
   const sourceNote =
     imageSource === "page"
-      ? "Van page image fetching is not connected in this safe beta yet. Using stock image fallback."
+      ? "First 5 van page images can be tested below. Reel generation still uses stock fallback until confirmed safe."
       : imageSource === "auto" && !uploadedImages.length
-        ? "Auto is using stock image because no uploaded images are present."
+        ? "Auto is using stock image because uploaded and van page images are not confirmed for this beta yet."
         : "";
 
   function handleUploads(event) {
@@ -474,6 +611,56 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
       if (removed) URL.revokeObjectURL(removed.url);
       return { ...prev, [productKey]: current.filter((item) => item.id !== id) };
     });
+  }
+
+  async function handleTestPageImages() {
+    setError("");
+    if (!selectedVehicle) {
+      setError("Select a vehicle before testing van page images.");
+      return;
+    }
+
+    const vehicleKey = selectedVehicleKey;
+    setPageImageTests((prev) => ({
+      ...prev,
+      [productKey]: {
+        vehicleKey,
+        status: "checking",
+        message: "Checking selected van page for the first 5 images...",
+        images: [],
+        error: "",
+      },
+    }));
+
+    try {
+      const result = await fetchFirstFivePageImages({ productKey, vehicle: selectedVehicle });
+      const images = result.images || [];
+      setPageImageTests((prev) => ({
+        ...prev,
+        [productKey]: {
+          vehicleKey,
+          status: images.length ? "found" : "empty",
+          message: images.length
+            ? `${images.length} van page image${images.length === 1 ? "" : "s"} found. Stock image fallback remains active for generation.`
+            : "No van page images found -- stock image fallback will be used.",
+          images,
+          error: "",
+          matchedRegistration: result.matchedRegistration,
+          pageUrl: result.pageUrl,
+        },
+      }));
+    } catch (pageImageError) {
+      setPageImageTests((prev) => ({
+        ...prev,
+        [productKey]: {
+          vehicleKey,
+          status: "error",
+          message: "Van page image test failed -- stock image fallback will be used.",
+          images: [],
+          error: pageImageError.message || "Could not test selected van page images.",
+        },
+      }));
+    }
   }
 
   async function handleGenerate() {
@@ -591,6 +778,36 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
           ) : null}
 
           {sourceNote ? <div className="reel-lab__note">{sourceNote}</div> : null}
+
+          <div className="reel-lab__page-test">
+            <div>
+              <span>Van page image test</span>
+              <p>Checks the selected {product.label} vehicle page only. Report-only; generation still falls back safely.</p>
+            </div>
+            <button
+              className="button button--ghost"
+              type="button"
+              onClick={handleTestPageImages}
+              disabled={!selectedVehicle || pageImageTest?.status === "checking"}
+            >
+              {pageImageTest?.status === "checking" ? "Checking Images..." : "Test First 5 Van Page Images"}
+            </button>
+          </div>
+
+          {pageImageTest ? (
+            <div className={`reel-lab__page-result reel-lab__page-result--${pageImageTest.status}`}>
+              <strong>{pageImageTest.message}</strong>
+              {pageImageTest.error ? <span>{pageImageTest.error}</span> : null}
+              {pageImageTest.pageUrl ? <span>{pageImageTest.pageUrl}</span> : null}
+              {pageImageTest.images?.length ? (
+                <div className="reel-lab__page-thumbs">
+                  {pageImageTest.images.map((url, index) => (
+                    <img key={`${url}-${index}`} src={url} alt={`Van page ${index + 1}`} />
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <label className="reel-lab__field">
             <span>Template style</span>
