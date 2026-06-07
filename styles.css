@@ -2554,6 +2554,19 @@ textarea {
   border-radius: 8px;
 }
 
+.reel-lab__details summary,
+.reel-lab__image-order summary {
+  cursor: pointer;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.reel-lab__details[open],
+.reel-lab__image-order[open] {
+  gap: 10px;
+}
+
 .reel-lab__page-result strong {
   color: #111827;
   font-size: 13px;
@@ -2615,6 +2628,10 @@ textarea {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.reel-lab__actions--compact {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .reel-lab__status,

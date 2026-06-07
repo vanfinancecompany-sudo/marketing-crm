@@ -104,6 +104,36 @@ const DEFAULT_BRAND_HEADERS = {
   rent2buy: PRODUCTS.rent2buy.brand,
 };
 
+const TEXT_DEFAULTS_STORAGE_KEY = "reelLabBetaTextDefaults";
+
+function defaultTextState() {
+  return {
+    brandHeaders: { ...DEFAULT_BRAND_HEADERS },
+    hooks: { ...DEFAULT_HOOKS },
+    supportLines: { ...DEFAULT_SUPPORT_LINES },
+    ctas: {
+      vanFinance: PRODUCTS.vanFinance.finalCta,
+      rent2buy: PRODUCTS.rent2buy.finalCta,
+    },
+  };
+}
+
+function loadSavedTextDefaults() {
+  const defaults = defaultTextState();
+  if (typeof window === "undefined") return defaults;
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(TEXT_DEFAULTS_STORAGE_KEY) || "{}");
+    return {
+      brandHeaders: { ...defaults.brandHeaders, ...(saved.brandHeaders || {}) },
+      hooks: { ...defaults.hooks, ...(saved.hooks || {}) },
+      supportLines: { ...defaults.supportLines, ...(saved.supportLines || {}) },
+      ctas: { ...defaults.ctas, ...(saved.ctas || {}) },
+    };
+  } catch {
+    return defaults;
+  }
+}
+
 function cleanText(value) {
   return String(value || "").replace(/\u00c2\u00a3/g, "\u00a3").replace(/\s+/g, " ").trim();
 }
@@ -597,9 +627,9 @@ function getFrameSpec(productKey, vehicle, frameIndex, hookText, supportText, ct
   const cashPrice = vehicleCashPriceLine(vehicle);
   const mileage = vehicleMileageLine(vehicle);
   const title = vehicleTitle(vehicle);
-  const hook = cleanText(hookText) || DEFAULT_HOOKS[productKey];
-  const support = cleanText(supportText) || DEFAULT_SUPPORT_LINES[productKey];
-  const finalCta = cleanText(ctaText) || PRODUCTS[productKey].finalCta;
+  const hook = cleanText(hookText);
+  const support = cleanText(supportText);
+  const finalCta = cleanText(ctaText);
   const finalButton = PRODUCTS[productKey].finalCta;
   const finalDomain = displayDomain(PRODUCTS[productKey].destinationUrl);
 
@@ -671,7 +701,7 @@ function drawTopBrandHeader(ctx, product, visualTemplate, imageArea, brandHeader
   ctx.fillStyle = "#ffffff";
   ctx.textAlign = "center";
   ctx.font = `${isLuxury ? 900 : 980} ${isTikTok ? 68 : 62}px ${CANVAS_FONT}`;
-  drawFitText(ctx, cleanText(brandHeaderText || product.brand).toUpperCase(), REEL_WIDTH / 2, headerY + 94, imageArea.width - 86, isTikTok ? 68 : 62, 42);
+  drawFitText(ctx, cleanText(brandHeaderText ?? product.brand).toUpperCase(), REEL_WIDTH / 2, headerY + 94, imageArea.width - 86, isTikTok ? 68 : 62, 42);
   ctx.textAlign = "left";
   ctx.restore();
 }
@@ -961,15 +991,13 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [imageSource, setImageSource] = useState("auto");
   const [visualTemplate, setVisualTemplate] = useState("blackPremium");
-  const [brandHeaderByProduct, setBrandHeaderByProduct] = useState(DEFAULT_BRAND_HEADERS);
-  const [hookByProduct, setHookByProduct] = useState(DEFAULT_HOOKS);
-  const [supportByProduct, setSupportByProduct] = useState(DEFAULT_SUPPORT_LINES);
+  const savedTextDefaults = useMemo(loadSavedTextDefaults, []);
+  const [brandHeaderByProduct, setBrandHeaderByProduct] = useState(savedTextDefaults.brandHeaders);
+  const [hookByProduct, setHookByProduct] = useState(savedTextDefaults.hooks);
+  const [supportByProduct, setSupportByProduct] = useState(savedTextDefaults.supportLines);
   const [uploadsByProduct, setUploadsByProduct] = useState({ vanFinance: [], rent2buy: [] });
   const [cmsUploadsByProduct, setCmsUploadsByProduct] = useState({ vanFinance: null, rent2buy: null });
-  const [ctaByProduct, setCtaByProduct] = useState({
-    vanFinance: PRODUCTS.vanFinance.finalCta,
-    rent2buy: PRODUCTS.rent2buy.finalCta,
-  });
+  const [ctaByProduct, setCtaByProduct] = useState(savedTextDefaults.ctas);
   const [asset, setAsset] = useState(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -988,10 +1016,10 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const cmsUpload = cmsUploadsByProduct[productKey] || null;
   const cmsMatch = selectedVehicle ? findCmsMatch(cmsUpload?.rows || [], selectedVehicle) : null;
   const stockImage = vehicleImage(selectedVehicle);
-  const cta = ctaByProduct[productKey];
-  const brandHeaderText = brandHeaderByProduct[productKey] || DEFAULT_BRAND_HEADERS[productKey];
-  const hookText = hookByProduct[productKey] || DEFAULT_HOOKS[productKey];
-  const supportText = supportByProduct[productKey] || DEFAULT_SUPPORT_LINES[productKey];
+  const cta = ctaByProduct[productKey] ?? PRODUCTS[productKey].finalCta;
+  const brandHeaderText = brandHeaderByProduct[productKey] ?? DEFAULT_BRAND_HEADERS[productKey];
+  const hookText = hookByProduct[productKey] ?? DEFAULT_HOOKS[productKey];
+  const supportText = supportByProduct[productKey] ?? DEFAULT_SUPPORT_LINES[productKey];
   const selectedVehicleKey = selectedVehicle ? `${productKey}:${selectedVehicle.id}:${vehicleRegistration(selectedVehicle)}` : "";
   const pageImageTest = pageImageTests[productKey]?.vehicleKey === selectedVehicleKey ? pageImageTests[productKey] : null;
 
@@ -1114,6 +1142,20 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
 
   function clearCmsUpload() {
     setCmsUploadsByProduct((prev) => ({ ...prev, [productKey]: null }));
+  }
+
+  function handleSaveTextDefaults() {
+    const nextDefaults = {
+      brandHeaders: { ...brandHeaderByProduct, [productKey]: brandHeaderText },
+      hooks: { ...hookByProduct, [productKey]: hookText },
+      supportLines: { ...supportByProduct, [productKey]: supportText },
+      ctas: { ...ctaByProduct, [productKey]: cta },
+    };
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(TEXT_DEFAULTS_STORAGE_KEY, JSON.stringify(nextDefaults));
+    }
+    setStatus(`${product.label} Reel Lab text defaults saved.`);
+    setError("");
   }
 
   async function handleTestPageImages() {
@@ -1338,7 +1380,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
           <div className="reel-lab__page-test">
             <div>
               <span>Van page image test</span>
-              <p>Checks the selected {product.label} vehicle page only. Report-only; generation still falls back safely.</p>
+              <p>Optional secondary check. CMS images stay the main source for this beta flow.</p>
             </div>
             <button
               className="button button--ghost"
@@ -1354,26 +1396,6 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
             <div className={`reel-lab__page-result reel-lab__page-result--${pageImageTest.status}`}>
               <strong>{pageImageTest.message}</strong>
               {pageImageTest.error ? <span>{pageImageTest.error}</span> : null}
-              <div className="reel-lab__debug-grid">
-                <span><b>Selected reg</b>{pageImageTest.debug?.selectedReg || vehicleRegistration(selectedVehicle) || "No reg"}</span>
-                <span><b>Source</b>{pageImageTest.productLabel || product.label}</span>
-                <span><b>Reg match</b>{pageImageTest.matchedRegistration ? "Yes" : "No"}</span>
-                <span><b>Title match</b>{pageImageTest.matchedTitle ? "Yes" : "No"}</span>
-                <span><b>Main images refs</b>{Number(pageImageTest.debug?.mainImagesRefsFound || 0)}</span>
-                <span><b>Gallery refs</b>{Number(pageImageTest.debug?.galleryRefsFound || 0)}</span>
-                <span><b>Candidate images</b>{Number(pageImageTest.debug?.candidateImagesFound || 0)}</span>
-                <span><b>Returned</b>{pageImageTest.images?.length || 0}</span>
-                <span><b>Image 1 source</b>{pageImageTest.imageRecords?.[0]?.source || pageImageTest.debug?.image1Source || "None"}</span>
-                <span><b>Dedupe happened</b>{pageImageTest.debug?.dedupeHappened ? "Yes" : "No"}</span>
-                <span><b>Final ordered count</b>{pageImageTest.imageRecords?.length || 0}</span>
-                {[0, 1, 2, 3, 4].map((index) => (
-                  <span key={`image-debug-${index}`}>
-                    <b>{`Image ${index + 1} URL`}</b>
-                    {pageImageTest.imageRecords?.[index]?.url || pageImageTest.debug?.[`image${index + 1}Url`] || "None"}
-                  </span>
-                ))}
-              </div>
-              {pageImageTest.pageUrl ? <span>Page URL: {pageImageTest.pageUrl}</span> : null}
               {pageImageTest.images?.length ? (
                 <div className="reel-lab__page-thumbs">
                   {pageImageTest.images.map((url, index) => (
@@ -1381,23 +1403,35 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
                   ))}
                 </div>
               ) : null}
+              <details className="reel-lab__details">
+                <summary>Van page test details</summary>
+                <div className="reel-lab__debug-grid">
+                  <span><b>Selected reg</b>{pageImageTest.debug?.selectedReg || vehicleRegistration(selectedVehicle) || "No reg"}</span>
+                  <span><b>Source</b>{pageImageTest.productLabel || product.label}</span>
+                  <span><b>Reg match</b>{pageImageTest.matchedRegistration ? "Yes" : "No"}</span>
+                  <span><b>Title match</b>{pageImageTest.matchedTitle ? "Yes" : "No"}</span>
+                  <span><b>Returned</b>{pageImageTest.images?.length || 0}</span>
+                </div>
+                {pageImageTest.pageUrl ? <span>Page URL: {pageImageTest.pageUrl}</span> : null}
+              </details>
             </div>
           ) : null}
 
-          <div className="reel-lab__image-order">
-            <strong>Current final image order</strong>
+          <details className="reel-lab__image-order">
+            <summary>
+              Current final image order: {resolvedImageOrder.records.length} image{resolvedImageOrder.records.length === 1 ? "" : "s"}
+              {resolvedImageOrder.records[0]?.source ? ` - Image 1 ${resolvedImageOrder.records[0].source}` : ""}
+            </summary>
             <div className="reel-lab__debug-grid">
-              <span><b>Image 1 source</b>{resolvedImageOrder.records[0]?.source || "None"}</span>
               <span><b>Dedupe happened</b>{resolvedImageOrder.dedupeHappened ? "Yes" : "No"}</span>
-              <span><b>Final ordered count</b>{resolvedImageOrder.records.length}</span>
               {[0, 1, 2, 3, 4].map((index) => (
                 <span key={`final-image-debug-${index}`}>
-                  <b>{`Image ${index + 1} URL`}</b>
-                  {resolvedImageOrder.records[index]?.url || "None"}
+                  <b>{`Image ${index + 1}`}</b>
+                  {resolvedImageOrder.records[index]?.source || "None"}
                 </span>
               ))}
             </div>
-          </div>
+          </details>
 
           <label className="reel-lab__field">
             <span>Visual template</span>
@@ -1447,6 +1481,12 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
               placeholder={product.finalCta}
             />
           </label>
+
+          <div className="reel-lab__actions reel-lab__actions--compact">
+            <button className="button button--ghost" type="button" onClick={handleSaveTextDefaults}>
+              Save {product.label} Text Defaults
+            </button>
+          </div>
 
           <div className="reel-lab__copy">
             <span>{product.label} wording preview</span>
