@@ -15,9 +15,12 @@ export default function StockPage({
   selectedVehicleIds = [],
   onToggleVehicle,
   onAddSelectedToQueue,
+  onAddSelectedToReelLabQueue,
   reelActionLocks = {},
   ignoreReelLock = false,
   onIgnoreReelLockChange,
+  generationMessage = "",
+  creativeError = "",
 }) {
   const selectedCount = selectedVehicleIds.length;
 
@@ -63,7 +66,7 @@ export default function StockPage({
 
         <div className="selection-summary stock-selection-summary">
           <strong>{selectedCount} selected for manual reel queue</strong>
-          <span>Pick 10-15 vehicles, then send them to the Finance or Rent2Buy Premium Reel Studio queue.</span>
+          <span>Pick vehicles, then send them to the Premium Reel Studio queue or the separate Reel Lab Beta queue.</span>
           <div className="card-actions">
             <label className="toggle-row">
               <input
@@ -89,7 +92,25 @@ export default function StockPage({
             >
               Add selected to Rent2Buy Premium Reel Queue
             </button>
+            <button
+              className="button button--primary"
+              type="button"
+              onClick={() => onAddSelectedToReelLabQueue?.("finance")}
+              disabled={!selectedCount}
+            >
+              Add selected to Finance Reel Lab Queue
+            </button>
+            <button
+              className="button button--ghost"
+              type="button"
+              onClick={() => onAddSelectedToReelLabQueue?.("rent2buy")}
+              disabled={!selectedCount}
+            >
+              Add selected to Rent2Buy Reel Lab Queue
+            </button>
           </div>
+          {generationMessage ? <div className="notice">{generationMessage}</div> : null}
+          {creativeError ? <div className="notice notice--error">{creativeError}</div> : null}
         </div>
 
         {vehiclesLoading ? (

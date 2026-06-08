@@ -2370,6 +2370,475 @@ textarea {
   line-height: 1.45;
 }
 
+.reel-lab {
+  display: grid;
+  gap: 18px;
+}
+
+.reel-lab__grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.95fr) minmax(340px, 0.8fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.reel-lab__panel,
+.reel-lab__preview-panel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.08);
+}
+
+.reel-lab__segment {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 5px;
+  background: #f1f5f9;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.reel-lab__segment button,
+.reel-lab__thumb button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #111827;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 900;
+}
+
+.reel-lab__segment button.is-active {
+  color: #ffffff;
+  background: #ef233c;
+}
+
+.reel-lab__field {
+  display: grid;
+  gap: 7px;
+}
+
+.reel-lab__field span,
+.reel-lab__copy span {
+  color: #374151;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.reel-lab__field select,
+.reel-lab__field input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #111827;
+  font: inherit;
+  font-weight: 800;
+}
+
+.reel-lab__upload-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.reel-lab__upload-row input {
+  display: none;
+}
+
+.reel-lab__upload-row span,
+.reel-lab__note,
+.reel-lab__safety {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.reel-lab__thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+}
+
+.reel-lab__thumb {
+  display: grid;
+  gap: 6px;
+}
+
+.reel-lab__thumb img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+}
+
+.reel-lab__thumb button {
+  min-height: 30px;
+  color: #b91c1c;
+  background: #fee2e2;
+  font-size: 12px;
+}
+
+.reel-lab__copy {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.reel-lab__copy pre {
+  margin: 0;
+  white-space: pre-wrap;
+  color: #111827;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.reel-lab__page-test {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  background: #0f172a;
+  border-radius: 8px;
+}
+
+.reel-lab__page-test span {
+  display: block;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.reel-lab__page-test p {
+  margin: 5px 0 0;
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.reel-lab__page-result {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.reel-lab__image-order {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+}
+
+.reel-lab__details summary,
+.reel-lab__image-order summary {
+  cursor: pointer;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.reel-lab__details[open],
+.reel-lab__image-order[open] {
+  gap: 10px;
+}
+
+.reel-lab__page-result strong {
+  color: #111827;
+  font-size: 13px;
+}
+
+.reel-lab__image-order strong {
+  color: #111827;
+  font-size: 13px;
+}
+
+.reel-lab__page-result span {
+  overflow-wrap: anywhere;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.reel-lab__debug-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.reel-lab__debug-grid span {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.reel-lab__debug-grid b {
+  color: #111827;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.reel-lab__page-result--error {
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
+
+.reel-lab__page-thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(82px, 1fr));
+  gap: 8px;
+}
+
+.reel-lab__page-thumbs img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+}
+
+.reel-lab__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.reel-lab__actions--compact {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.reel-lab__toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #111827;
+}
+
+.reel-lab__queue {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.reel-lab__queue-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.reel-lab__queue-header span {
+  display: block;
+  color: #ef233c;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.reel-lab__queue-header strong {
+  display: block;
+  margin-top: 2px;
+  color: #111827;
+}
+
+.reel-lab__queue-header em,
+.reel-lab__queue-progress em {
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.reel-lab__queue-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.reel-lab__queue-list,
+.reel-lab__queue-failures {
+  display: grid;
+  gap: 6px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.reel-lab__empty {
+  padding: 10px;
+  color: #64748b;
+  background: #ffffff;
+  border: 1px dashed #cbd5e1;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.reel-lab__queue-progress {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  background: #ffffff;
+  border-radius: 6px;
+}
+
+.reel-lab__queue-progress strong,
+.reel-lab__queue-progress span {
+  display: block;
+  color: #111827;
+  font-size: 12px;
+}
+
+.reel-lab__queue-bar {
+  height: 8px;
+  overflow: hidden;
+  background: #e2e8f0;
+  border-radius: 999px;
+}
+
+.reel-lab__queue-bar div {
+  height: 100%;
+  background: #ef233c;
+}
+
+.reel-lab__status,
+.reel-lab__error {
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.reel-lab__status {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.reel-lab__error {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.reel-lab__preview-panel {
+  justify-items: center;
+}
+
+.reel-lab__phone {
+  width: min(100%, 360px);
+  aspect-ratio: 9 / 16;
+  overflow: hidden;
+  background: #020617;
+  border: 8px solid #111827;
+  border-radius: 8px;
+}
+
+.reel-lab__phone video,
+.reel-lab__poster,
+.reel-lab__poster img {
+  width: 100%;
+  height: 100%;
+}
+
+.reel-lab__phone video,
+.reel-lab__poster img {
+  object-fit: contain;
+}
+
+.reel-lab__poster {
+  position: relative;
+  display: grid;
+  align-items: end;
+  background: linear-gradient(180deg, #071426 0%, #111827 100%);
+}
+
+.reel-lab__poster img {
+  position: absolute;
+  inset: 0;
+}
+
+.reel-lab__poster::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(7, 20, 38, 0.05), rgba(7, 20, 38, 0.72));
+}
+
+.reel-lab__poster-card {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 7px;
+  margin: 18px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 8px;
+}
+
+.reel-lab__poster-card span {
+  color: #ef233c;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.reel-lab__poster-card strong {
+  color: #111827;
+  font-size: 18px;
+  line-height: 1.15;
+}
+
+.reel-lab__poster-card em {
+  color: #64748b;
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+@media (max-width: 1080px) {
+  .reel-lab__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .reel-lab__actions,
+  .reel-lab__segment,
+  .reel-lab__page-test,
+  .reel-lab__debug-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .premium-reel-beta__toggle {
   display: flex;
   align-items: center;

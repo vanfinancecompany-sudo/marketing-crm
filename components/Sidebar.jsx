@@ -13,6 +13,7 @@ export default function Sidebar({ currentView, onNavigate }) {
     "Stock",
     "Vansco Stock Watch",
     "Premium Reel Studio",
+    "Reel Lab Beta",
     "Creative Library",
     "Image Suite",
     "Documents Hub",

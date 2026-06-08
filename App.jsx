@@ -56,6 +56,7 @@ import StockPage from "./pages/StockPage.jsx";
 import VanscoStockWatchPage from "./pages/VanscoStockWatchPage.jsx";
 import ReelFactoryPage from "./pages/ReelFactoryPage.jsx";
 import PremiumReelStudioBetaPage from "./pages/PremiumReelStudioBetaPage.jsx";
+import ReelLabBetaPage from "./pages/ReelLabBetaPage.jsx";
 import CreativeLibraryPage from "./pages/CreativeLibraryPage.jsx";
 import PostingDeskPage from "./pages/PostingDeskPage.jsx";
 import {
@@ -150,6 +151,10 @@ const HIDDEN_POSTING_STORAGE_KEYS = {
 const MANUAL_REEL_QUEUE_STORAGE_KEYS = {
   finance: "manualFinanceReelQueue",
   rent2buy: "manualRent2BuyReelQueue",
+};
+const REEL_LAB_QUEUE_STORAGE_KEYS = {
+  vanFinance: "reelLabQueue_vanFinance",
+  rent2buy: "reelLabQueue_rent2buy",
 };
 
 const REEL_CLICK_HISTORY_STORAGE_KEY = "marketingReelClickHistory";
@@ -433,6 +438,7 @@ const VIEW_PATHS = {
   "Vansco Stock Watch": "/vansco-stock-watch",
   "Reel Factory": "/reel-factory",
   "Premium Reel Studio": "/premium-reel-studio",
+  "Reel Lab Beta": "/reel-lab",
   "Creative Library": "/creative-library",
   "Van Finance Facebook": "/van-finance-facebook",
   "Rent2Buy Facebook": "/rent2buy-facebook",
@@ -450,6 +456,7 @@ function viewFromPath() {
   if (path === "/premium-reel-studio" || path === "/reel-studio-beta" || path === "/premium-reels") {
     return "Premium Reel Studio";
   }
+  if (path === "/reel-lab") return "Reel Lab Beta";
   if (path === "/creative-library") return "Creative Library";
   if (path === "/van-finance-facebook") return "Van Finance Facebook";
   if (path === "/rent2buy-facebook") return "Rent2Buy Facebook";
@@ -679,6 +686,54 @@ function saveManualReelQueue(queueKey, queue) {
   }
 }
 
+function getReelLabQueueKey(productKey) {
+  return productKey === "rent2buy" ? "rent2buy" : "vanFinance";
+}
+
+function getReelLabManualQueueKey(productKey) {
+  return productKey === "rent2buy" ? "rent2buy" : "finance";
+}
+
+function createReelLabQueueItem(vehicle, productKey) {
+  return {
+    ...createManualQueueItem(vehicle, getReelLabManualQueueKey(productKey)),
+    productKey: getReelLabQueueKey(productKey),
+    source: "stockReelLab",
+  };
+}
+
+function normalizeReelLabQueueItem(item, productKey) {
+  const queueKey = getReelLabManualQueueKey(productKey);
+  const normalized = normalizeManualQueueItem(item, queueKey);
+  return normalized ? { ...normalized, productKey: getReelLabQueueKey(productKey) } : null;
+}
+
+function loadReelLabQueue(productKey) {
+  const queueKey = getReelLabQueueKey(productKey);
+  if (typeof window === "undefined") return [];
+
+  try {
+    const saved = localStorage.getItem(REEL_LAB_QUEUE_STORAGE_KEYS[queueKey]);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed.map((item) => normalizeReelLabQueueItem(item, queueKey)).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveReelLabQueue(productKey, queue) {
+  const queueKey = getReelLabQueueKey(productKey);
+  const storageKey = REEL_LAB_QUEUE_STORAGE_KEYS[queueKey];
+  if (!storageKey || typeof window === "undefined") return;
+  const normalizedQueue = queue.map((item) => normalizeReelLabQueueItem(item, queueKey)).filter(Boolean);
+
+  if (normalizedQueue.length) {
+    localStorage.setItem(storageKey, JSON.stringify(normalizedQueue));
+  } else {
+    localStorage.removeItem(storageKey);
+  }
+}
+
 function isRent2BuyEligible(vehicle) {
   return Boolean(vehicle?.rent2buyEligible || vehicle?.pipeline === "rent2buy");
 }
@@ -766,6 +821,10 @@ export default function App() {
   const [manualReelQueues, setManualReelQueues] = useState(() => ({
     finance: loadManualReelQueue("finance"),
     rent2buy: loadManualReelQueue("rent2buy"),
+  }));
+  const [reelLabQueues, setReelLabQueues] = useState(() => ({
+    vanFinance: loadReelLabQueue("vanFinance"),
+    rent2buy: loadReelLabQueue("rent2buy"),
   }));
   const [reelDownloadCooldowns, setReelDownloadCooldowns] = useState(loadReelDownloadCooldowns);
   const [factoryFilters, setFactoryFilters] = useState(DEFAULT_STOCK_FILTERS);
@@ -1144,6 +1203,15 @@ useEffect(() => {
     finance: resolveManualQueuedVehicle((manualReelQueues.finance || [])[0], vehicles),
     rent2buy: resolveManualQueuedVehicle((manualReelQueues.rent2buy || [])[0], vehicles),
   }), [manualReelQueues, vehicles]);
+
+  const reelLabQueueVehicles = useMemo(() => ({
+    vanFinance: (reelLabQueues.vanFinance || [])
+      .map((item) => resolveManualQueuedVehicle(item, vehicles))
+      .filter(Boolean),
+    rent2buy: (reelLabQueues.rent2buy || [])
+      .map((item) => resolveManualQueuedVehicle(item, vehicles))
+      .filter(Boolean),
+  }), [reelLabQueues, vehicles]);
 
   const manualReelQueueLocks = useMemo(() => ({
     finance: manualReelQueueVehicles.finance
@@ -1920,6 +1988,59 @@ async function handleClearTodayReels() {
     setCurrentView("Premium Reel Studio");
   }
 
+  function updateReelLabQueue(productKey, updater) {
+    const queueKey = getReelLabQueueKey(productKey);
+    setReelLabQueues((prev) => {
+      const currentQueue = (prev[queueKey] || [])
+        .map((item) => normalizeReelLabQueueItem(item, queueKey))
+        .filter(Boolean);
+      const nextQueue = updater(currentQueue);
+      const normalizedQueue = nextQueue.map((item) => normalizeReelLabQueueItem(item, queueKey)).filter(Boolean);
+      const nextQueues = { ...prev, [queueKey]: normalizedQueue };
+      saveReelLabQueue(queueKey, normalizedQueue);
+      return nextQueues;
+    });
+  }
+
+  function handleAddSelectedToReelLabQueue(queueKey) {
+    const productQueueKey = getReelLabQueueKey(queueKey === "rent2buy" ? "rent2buy" : "vanFinance");
+    const selectedIds = new Set(manualStockSelectedIds);
+    const selectedVehicles = vehicles
+      .filter((vehicle) => selectedIds.has(getManualQueueVehicleId(vehicle)))
+      .filter((vehicle) => productQueueKey !== "rent2buy" || isRent2BuyEligible(vehicle))
+      .filter((vehicle) => ignoreReelLock || !reelActionLocks[getManualQueueVehicleId(vehicle)]?.locked);
+    const selectedItems = selectedVehicles.map((vehicle) => createReelLabQueueItem(vehicle, productQueueKey));
+
+    if (!selectedItems.length) {
+      setGenerationMessage("Select at least one stock vehicle for the Reel Lab queue.");
+      setCreativeError("");
+      return;
+    }
+
+    updateReelLabQueue(productQueueKey, (existing) => {
+      const existingIds = new Set(existing.map((item) => item.id || item.reg || item.title || item.name));
+      const additions = selectedItems.filter((item) => {
+        const key = item.id || item.reg || item.title || item.name;
+        return key && !existingIds.has(key);
+      });
+      return [...existing, ...additions];
+    });
+
+    setManualStockSelectedIds([]);
+    setGenerationMessage(
+      `${selectedItems.length} selected vehicle${selectedItems.length === 1 ? "" : "s"} added to ${
+        productQueueKey === "rent2buy" ? "Rent2Buy" : "Finance"
+      } Reel Lab Queue. Open Reel Lab Beta to download.`
+    );
+    setCreativeError("");
+  }
+
+  function handleUpdateReelLabQueue(productKey, nextVehicles) {
+    const queueKey = getReelLabQueueKey(productKey);
+    const nextItems = (nextVehicles || []).map((vehicle) => createReelLabQueueItem(vehicle, queueKey));
+    updateReelLabQueue(queueKey, () => nextItems);
+  }
+
   function updateManualReelQueue(queueKey, updater) {
     setManualReelQueues((prev) => {
       const currentQueue = (prev[queueKey] || [])
@@ -2322,9 +2443,12 @@ async function handleClearTodayReels() {
             selectedVehicleIds={manualStockSelectedIds}
             onToggleVehicle={handleToggleManualStockVehicle}
             onAddSelectedToQueue={handleAddSelectedToManualReelQueue}
+            onAddSelectedToReelLabQueue={handleAddSelectedToReelLabQueue}
             reelActionLocks={reelActionLocks}
             ignoreReelLock={ignoreReelLock}
             onIgnoreReelLockChange={(value) => handleReelFactoryChange("ignoreVehicleCooldown", value)}
+            generationMessage={generationMessage}
+            creativeError={creativeError}
           />
         );
       case "Vansco Stock Watch":
@@ -2380,6 +2504,16 @@ async function handleClearTodayReels() {
             onReelDownloadComplete={handleReelDownloadComplete}
             reelActionLocks={reelActionLocks}
             ignoreReelLock={ignoreReelLock}
+          />
+        );
+      case "Reel Lab Beta":
+        return (
+          <ReelLabBetaPage
+            vehicles={vehicles}
+            vehiclesLoading={vehiclesLoading}
+            vehiclesError={vehiclesError}
+            queueByProduct={reelLabQueueVehicles}
+            onQueueChange={handleUpdateReelLabQueue}
           />
         );
       case "Creative Library":
