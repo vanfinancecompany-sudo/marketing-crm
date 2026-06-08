@@ -2393,6 +2393,40 @@ textarea {
   box-shadow: 0 16px 42px rgba(15, 23, 42, 0.08);
 }
 
+.reel-lab__preview-panel {
+  position: sticky;
+  top: 18px;
+}
+
+.reel-lab__section {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.reel-lab__section-header {
+  display: grid;
+  gap: 4px;
+}
+
+.reel-lab__section-header span {
+  color: #ef233c;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.reel-lab__section-header p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .reel-lab__segment {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2435,7 +2469,8 @@ textarea {
 }
 
 .reel-lab__field select,
-.reel-lab__field input {
+.reel-lab__field input,
+.reel-lab__field textarea {
   width: 100%;
   min-height: 44px;
   padding: 10px 12px;
@@ -2445,6 +2480,20 @@ textarea {
   color: #111827;
   font: inherit;
   font-weight: 800;
+}
+
+.reel-lab__field textarea {
+  min-height: 138px;
+  resize: vertical;
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 700;
+}
+
+.reel-lab__text-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .reel-lab__upload-row {
@@ -2518,6 +2567,10 @@ textarea {
   padding: 14px;
   background: #0f172a;
   border-radius: 8px;
+}
+
+.reel-lab__details .reel-lab__page-test {
+  margin-top: 10px;
 }
 
 .reel-lab__page-test span {
@@ -2828,13 +2881,18 @@ textarea {
   .reel-lab__grid {
     grid-template-columns: 1fr;
   }
+
+  .reel-lab__preview-panel {
+    position: static;
+  }
 }
 
 @media (max-width: 560px) {
   .reel-lab__actions,
   .reel-lab__segment,
   .reel-lab__page-test,
-  .reel-lab__debug-grid {
+  .reel-lab__debug-grid,
+  .reel-lab__text-grid {
     grid-template-columns: 1fr;
   }
 }

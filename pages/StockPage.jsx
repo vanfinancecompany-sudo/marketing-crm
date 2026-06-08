@@ -66,7 +66,7 @@ export default function StockPage({
 
         <div className="selection-summary stock-selection-summary">
           <strong>{selectedCount} selected for manual reel queue</strong>
-          <span>Pick vehicles, then send them to the Premium Reel Studio queue or the separate Reel Lab Beta queue.</span>
+          <span>Pick vehicles, then send them to the Finance or Rent2Buy Reel Lab Beta queue.</span>
           <div className="card-actions">
             <label className="toggle-row">
               <input
@@ -76,22 +76,6 @@ export default function StockPage({
               />
               <span>Ignore reel lock / allow reuse</span>
             </label>
-            <button
-              className="button button--primary"
-              type="button"
-              onClick={() => onAddSelectedToQueue?.("finance")}
-              disabled={!selectedCount}
-            >
-              Add selected to Finance Premium Reel Queue
-            </button>
-            <button
-              className="button button--ghost"
-              type="button"
-              onClick={() => onAddSelectedToQueue?.("rent2buy")}
-              disabled={!selectedCount}
-            >
-              Add selected to Rent2Buy Premium Reel Queue
-            </button>
             <button
               className="button button--primary"
               type="button"
