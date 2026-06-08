@@ -106,6 +106,8 @@ const DEFAULT_BRAND_HEADERS = {
 };
 
 const TEXT_DEFAULTS_STORAGE_KEY = "reelLabBetaTextDefaults";
+const CMS_UPLOAD_DB_NAME = "reelLabBetaCmsUploads";
+const CMS_UPLOAD_STORE_NAME = "cmsUploads";
 
 function defaultTextState() {
   return {
@@ -133,6 +135,100 @@ function loadSavedTextDefaults() {
   } catch {
     return defaults;
   }
+}
+
+function defaultCmsUploadsState() {
+  return { vanFinance: null, rent2buy: null };
+}
+
+function openCmsUploadDb() {
+  return new Promise((resolve, reject) => {
+    if (typeof window === "undefined" || !window.indexedDB) {
+      reject(new Error("Browser storage is not available for CMS uploads."));
+      return;
+    }
+
+    const request = window.indexedDB.open(CMS_UPLOAD_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(CMS_UPLOAD_STORE_NAME)) {
+        db.createObjectStore(CMS_UPLOAD_STORE_NAME, { keyPath: "productKey" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Could not open CMS upload storage."));
+  });
+}
+
+function readCmsUploadRecord(db, productKey) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(CMS_UPLOAD_STORE_NAME, "readonly");
+    const store = transaction.objectStore(CMS_UPLOAD_STORE_NAME);
+    const request = store.get(productKey);
+    request.onsuccess = () => resolve(request.result?.upload || null);
+    request.onerror = () => reject(request.error || new Error(`Could not read ${productKey} CMS upload.`));
+  });
+}
+
+async function loadSavedCmsUploads() {
+  const uploads = defaultCmsUploadsState();
+  let db = null;
+  try {
+    db = await openCmsUploadDb();
+    const entries = await Promise.all(Object.keys(uploads).map(async (productKey) => [productKey, await readCmsUploadRecord(db, productKey)]));
+    for (const [productKey, upload] of entries) {
+      uploads[productKey] = upload;
+    }
+  } catch {
+    return uploads;
+  } finally {
+    db?.close();
+  }
+  return uploads;
+}
+
+function writeCmsUpload(productKey, upload) {
+  return new Promise(async (resolve, reject) => {
+    let db = null;
+    try {
+      db = await openCmsUploadDb();
+      const transaction = db.transaction(CMS_UPLOAD_STORE_NAME, "readwrite");
+      transaction.oncomplete = () => {
+        db?.close();
+        resolve();
+      };
+      transaction.onerror = () => {
+        db?.close();
+        reject(transaction.error || new Error("Could not save CMS upload."));
+      };
+      transaction.objectStore(CMS_UPLOAD_STORE_NAME).put({ productKey, upload });
+    } catch (error) {
+      db?.close();
+      reject(error);
+    }
+  });
+}
+
+function deleteCmsUpload(productKey) {
+  return new Promise(async (resolve, reject) => {
+    let db = null;
+    try {
+      db = await openCmsUploadDb();
+      const transaction = db.transaction(CMS_UPLOAD_STORE_NAME, "readwrite");
+      transaction.oncomplete = () => {
+        db?.close();
+        resolve();
+      };
+      transaction.onerror = () => {
+        db?.close();
+        reject(transaction.error || new Error("Could not clear CMS upload."));
+      };
+      transaction.objectStore(CMS_UPLOAD_STORE_NAME).delete(productKey);
+    } catch (error) {
+      db?.close();
+      reject(error);
+    }
+  });
 }
 
 function cleanText(value) {
@@ -1079,13 +1175,13 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [imageSource, setImageSource] = useState("auto");
   const [visualTemplate, setVisualTemplate] = useState("blackPremium");
-  const [musicOn, setMusicOn] = useState(false);
+  const [musicOn, setMusicOn] = useState(true);
   const savedTextDefaults = useMemo(loadSavedTextDefaults, []);
   const [brandHeaderByProduct, setBrandHeaderByProduct] = useState(savedTextDefaults.brandHeaders);
   const [hookByProduct, setHookByProduct] = useState(savedTextDefaults.hooks);
   const [supportByProduct, setSupportByProduct] = useState(savedTextDefaults.supportLines);
   const [uploadsByProduct, setUploadsByProduct] = useState({ vanFinance: [], rent2buy: [] });
-  const [cmsUploadsByProduct, setCmsUploadsByProduct] = useState({ vanFinance: null, rent2buy: null });
+  const [cmsUploadsByProduct, setCmsUploadsByProduct] = useState(defaultCmsUploadsState);
   const [ctaByProduct, setCtaByProduct] = useState(savedTextDefaults.ctas);
   const [asset, setAsset] = useState(null);
   const [status, setStatus] = useState("");
@@ -1172,6 +1268,17 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const currentAsset = asset?.queueAsset || asset?.previewKey === currentPreviewKey ? asset : null;
 
   useEffect(() => {
+    let cancelled = false;
+    loadSavedCmsUploads().then((savedUploads) => {
+      if (cancelled) return;
+      setCmsUploadsByProduct((prev) => ({ ...prev, ...savedUploads }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     generationKeyRef.current = currentPreviewKey;
     if (asset?.url) URL.revokeObjectURL(asset.url);
     setAsset(null);
@@ -1225,15 +1332,18 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     try {
       const text = await file.text();
       const rows = parseCmsUploadText(text);
+      const upload = {
+        fileName: file.name,
+        rows,
+        savedAt: new Date().toISOString(),
+      };
+      await writeCmsUpload(productKey, upload);
       setCmsUploadsByProduct((prev) => ({
         ...prev,
-        [productKey]: {
-          fileName: file.name,
-          rows,
-        },
+        [productKey]: upload,
       }));
       if (imageSource === "stock") setImageSource("auto");
-      setStatus(`${product.label} CMS upload loaded: ${rows.length} row${rows.length === 1 ? "" : "s"}.`);
+      setStatus(`${product.label} CMS upload loaded and saved in this browser: ${rows.length} row${rows.length === 1 ? "" : "s"}.`);
       setError("");
     } catch (uploadError) {
       setError(uploadError.message || `Could not read ${product.label} CMS upload.`);
@@ -1242,8 +1352,15 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     }
   }
 
-  function clearCmsUpload() {
-    setCmsUploadsByProduct((prev) => ({ ...prev, [productKey]: null }));
+  async function clearCmsUpload() {
+    try {
+      await deleteCmsUpload(productKey);
+      setCmsUploadsByProduct((prev) => ({ ...prev, [productKey]: null }));
+      setStatus(`${product.label} CMS upload cleared.`);
+      setError("");
+    } catch (clearError) {
+      setError(clearError.message || `Could not clear ${product.label} CMS upload.`);
+    }
   }
 
   function handleSaveTextDefaults() {
@@ -1621,14 +1738,14 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
           <div className="reel-lab__cms-upload">
             <div>
               <span>{productKey === "rent2buy" ? "Rent2Buy CMS Upload" : "Van Finance CMS Upload"}</span>
-              <p>Session-only CMS rows for {product.label}. Matched by selected registration first, then title. Images stay in CMS row order.</p>
+              <p>CMS rows are saved in this browser until you upload a replacement or use Clear CMS. Matched by selected registration first, then title. Images stay in CMS row order.</p>
             </div>
             <div className="reel-lab__upload-row">
               <button className="button button--ghost" type="button" onClick={() => cmsInputRef.current?.click()}>
                 Upload CMS File
               </button>
               {cmsUpload ? <button className="button button--ghost" type="button" onClick={clearCmsUpload}>Clear CMS</button> : null}
-              <span>{cmsUpload ? `${cmsUpload.fileName} · ${cmsUpload.rows.length} rows` : `No ${product.label} CMS file uploaded`}</span>
+              <span>{cmsUpload ? `${cmsUpload.fileName} - ${cmsUpload.rows.length} rows${cmsUpload.savedAt ? " - saved" : ""}` : `No ${product.label} CMS file uploaded`}</span>
               <input ref={cmsInputRef} type="file" accept=".csv,.json,.txt,application/json,text/csv,text/plain" onChange={handleCmsUpload} />
             </div>
             {cmsUpload ? (
