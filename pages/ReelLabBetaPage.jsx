@@ -105,9 +105,44 @@ const DEFAULT_BRAND_HEADERS = {
   rent2buy: PRODUCTS.rent2buy.brand,
 };
 
-const TEXT_DEFAULTS_STORAGE_KEY = "reelLabBetaTextDefaults";
+const MANUAL_TEXT_STORAGE_KEY = "reelLabBetaManualTextDefaults";
+const LEGACY_TEXT_DEFAULTS_STORAGE_KEY = "reelLabBetaTextDefaults";
+const TEXT_MODE_STORAGE_KEY = "reelLabBetaTextMode";
+const DEFAULT_TEXT_STORAGE_KEY = "reelLabBetaDefaultText";
 const CMS_UPLOAD_DB_NAME = "reelLabBetaCmsUploads";
 const CMS_UPLOAD_STORE_NAME = "cmsUploads";
+const REEL_LAB_DEFAULT_CAPTION_LABELS = {
+  vanFinance: ["Finance Default", "Finance Low Deposit", "My Finance Caption"],
+  rent2buy: ["Rent2Buy Default", "Rent2Buy No Credit Check", "My Rent2Buy Caption"],
+};
+const TRACK_BASE_URL = "https://marketing-crm-six.vercel.app/track?src=reel";
+
+const DEFAULT_TEXT_PRESETS = {
+  vanFinance: {
+    selectedIndex: 0,
+    brandHeader: "VAN FINANCE COMPANY",
+    hook: "FROM £99 DEPOSIT",
+    support: "APPROVED IN 60 MINUTES",
+    cta: "APPLY NOW",
+    captions: [
+      `VAN FINANCE AVAILABLE NOW\nFrom £99 deposit\nApproved in 60 minutes\n\nApply now\n${TRACK_BASE_URL}&type=finance&reel={reelId}&reg={reg}`,
+      `VAN FINANCE AVAILABLE NOW\nLow deposit options available\nFast decision\n\nApply now\n${TRACK_BASE_URL}&type=finance&reel={reelId}&reg={reg}`,
+      `VAN FINANCE AVAILABLE NOW\nFrom £99 deposit\nApproved in 60 minutes\n\nApply now\n${TRACK_BASE_URL}&type=finance&reel={reelId}&reg={reg}`,
+    ],
+  },
+  rent2buy: {
+    selectedIndex: 0,
+    brandHeader: "RENT2BUY VANS",
+    hook: "NO CREDIT CHECK",
+    support: "RENT IT - DRIVE IT - OWN IT",
+    cta: "CHECK IF YOU QUALIFY",
+    captions: [
+      `RENT TO BUY YOUR VAN\nNO CREDIT CHECK\nRENT IT - DRIVE IT - OWN IT\n\nApply now\n${TRACK_BASE_URL}&type=rent2buy&reel={reelId}`,
+      `RENT TO BUY YOUR VAN\nNO CREDIT CHECK\nFINAL PAYMENT IT'S YOURS\n\nApply now\n${TRACK_BASE_URL}&type=rent2buy&reel={reelId}`,
+      `RENT TO BUY YOUR VAN\nNO CREDIT CHECK\nRENT IT - DRIVE IT - OWN IT\n\nApply now\n${TRACK_BASE_URL}&type=rent2buy&reel={reelId}`,
+    ],
+  },
+};
 
 function defaultTextState() {
   return {
@@ -125,12 +160,70 @@ function loadSavedTextDefaults() {
   const defaults = defaultTextState();
   if (typeof window === "undefined") return defaults;
   try {
-    const saved = JSON.parse(window.localStorage.getItem(TEXT_DEFAULTS_STORAGE_KEY) || "{}");
+    const saved = JSON.parse(
+      window.localStorage.getItem(MANUAL_TEXT_STORAGE_KEY)
+        || window.localStorage.getItem(LEGACY_TEXT_DEFAULTS_STORAGE_KEY)
+        || "{}"
+    );
     return {
       brandHeaders: { ...defaults.brandHeaders, ...(saved.brandHeaders || {}) },
       hooks: { ...defaults.hooks, ...(saved.hooks || {}) },
       supportLines: { ...defaults.supportLines, ...(saved.supportLines || {}) },
       ctas: { ...defaults.ctas, ...(saved.ctas || {}) },
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function defaultTextModeState() {
+  return { vanFinance: "manual", rent2buy: "manual" };
+}
+
+function loadSavedTextModes() {
+  const defaults = defaultTextModeState();
+  if (typeof window === "undefined") return defaults;
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(TEXT_MODE_STORAGE_KEY) || "{}");
+    return { ...defaults, ...(saved || {}) };
+  } catch {
+    return defaults;
+  }
+}
+
+function cloneDefaultTextPresets() {
+  return {
+    vanFinance: {
+      ...DEFAULT_TEXT_PRESETS.vanFinance,
+      captions: [...DEFAULT_TEXT_PRESETS.vanFinance.captions],
+    },
+    rent2buy: {
+      ...DEFAULT_TEXT_PRESETS.rent2buy,
+      captions: [...DEFAULT_TEXT_PRESETS.rent2buy.captions],
+    },
+  };
+}
+
+function loadSavedDefaultText() {
+  const defaults = cloneDefaultTextPresets();
+  if (typeof window === "undefined") return defaults;
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(DEFAULT_TEXT_STORAGE_KEY) || "{}");
+    return {
+      vanFinance: {
+        ...defaults.vanFinance,
+        ...(saved.vanFinance || {}),
+        captions: defaults.vanFinance.captions.map((fallback, index) =>
+          typeof saved.vanFinance?.captions?.[index] === "string" ? saved.vanFinance.captions[index] : fallback
+        ),
+      },
+      rent2buy: {
+        ...defaults.rent2buy,
+        ...(saved.rent2buy || {}),
+        captions: defaults.rent2buy.captions.map((fallback, index) =>
+          typeof saved.rent2buy?.captions?.[index] === "string" ? saved.rent2buy.captions[index] : fallback
+        ),
+      },
     };
   } catch {
     return defaults;
@@ -1209,6 +1302,10 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const [visualTemplate, setVisualTemplate] = useState("blackPremium");
   const [musicOn, setMusicOn] = useState(true);
   const savedTextDefaults = useMemo(loadSavedTextDefaults, []);
+  const savedTextModes = useMemo(loadSavedTextModes, []);
+  const savedDefaultText = useMemo(loadSavedDefaultText, []);
+  const [textModeByProduct, setTextModeByProduct] = useState(savedTextModes);
+  const [defaultTextByProduct, setDefaultTextByProduct] = useState(savedDefaultText);
   const [brandHeaderByProduct, setBrandHeaderByProduct] = useState(savedTextDefaults.brandHeaders);
   const [hookByProduct, setHookByProduct] = useState(savedTextDefaults.hooks);
   const [supportByProduct, setSupportByProduct] = useState(savedTextDefaults.supportLines);
@@ -1241,9 +1338,19 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const cmsMatch = selectedVehicle ? findCmsMatch(cmsUpload?.rows || [], selectedVehicle) : null;
   const stockImage = vehicleImage(selectedVehicle);
   const cta = ctaByProduct[productKey] ?? PRODUCTS[productKey].finalCta;
-  const brandHeaderText = brandHeaderByProduct[productKey] ?? DEFAULT_BRAND_HEADERS[productKey];
-  const hookText = hookByProduct[productKey] ?? DEFAULT_HOOKS[productKey];
-  const supportText = supportByProduct[productKey] ?? DEFAULT_SUPPORT_LINES[productKey];
+  const textMode = textModeByProduct[productKey] === "default" ? "default" : "manual";
+  const defaultText = defaultTextByProduct[productKey] || DEFAULT_TEXT_PRESETS[productKey];
+  const defaultCaptionIndex = Math.min(Math.max(Number(defaultText.selectedIndex) || 0, 0), 2);
+  const manualBrandHeaderText = brandHeaderByProduct[productKey] ?? DEFAULT_BRAND_HEADERS[productKey];
+  const manualHookText = hookByProduct[productKey] ?? DEFAULT_HOOKS[productKey];
+  const manualSupportText = supportByProduct[productKey] ?? DEFAULT_SUPPORT_LINES[productKey];
+  const brandHeaderText = textMode === "default" ? defaultText.brandHeader : manualBrandHeaderText;
+  const hookText = textMode === "default" ? defaultText.hook : manualHookText;
+  const supportText = textMode === "default" ? defaultText.support : manualSupportText;
+  const effectiveCta = textMode === "default" ? defaultText.cta : cta;
+  const activeCaptionText = textMode === "default"
+    ? defaultText.captions?.[defaultCaptionIndex] || ""
+    : createCaption({ productKey, vehicle: selectedVehicle, cta: effectiveCta });
   const selectedVehicleKey = selectedVehicle ? `${productKey}:${selectedVehicle.id}:${vehicleRegistration(selectedVehicle)}` : "";
   const pageImageTest = pageImageTests[productKey]?.vehicleKey === selectedVehicleKey ? pageImageTests[productKey] : null;
 
@@ -1308,7 +1415,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     return resolveImageOrderForVehicle(selectedVehicle, { includeManual: true });
   }, [cmsMatch, imageSource, pageImageTest, product.label, uploadedImages, stockImage]);
   const resolvedImages = resolvedImageOrder.records.map((item) => item.url);
-  const currentPreviewKey = selectedVehicle ? `${selectedVehicleKey}:${visualTemplate}:${imageSource}:${musicOn}:${brandHeaderText}:${hookText}:${supportText}:${cta}:${resolvedImages.join("|")}` : "";
+  const currentPreviewKey = selectedVehicle ? `${selectedVehicleKey}:${visualTemplate}:${imageSource}:${musicOn}:${textMode}:${brandHeaderText}:${hookText}:${supportText}:${effectiveCta}:${resolvedImages.join("|")}` : "";
   const currentAsset = asset?.queueAsset || asset?.previewKey === currentPreviewKey ? asset : null;
 
   useEffect(() => {
@@ -1412,13 +1519,77 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
       brandHeaders: { ...brandHeaderByProduct, [productKey]: brandHeaderText },
       hooks: { ...hookByProduct, [productKey]: hookText },
       supportLines: { ...supportByProduct, [productKey]: supportText },
-      ctas: { ...ctaByProduct, [productKey]: cta },
+      ctas: { ...ctaByProduct, [productKey]: effectiveCta },
     };
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(TEXT_DEFAULTS_STORAGE_KEY, JSON.stringify(nextDefaults));
+      window.localStorage.setItem(MANUAL_TEXT_STORAGE_KEY, JSON.stringify(nextDefaults));
     }
     setStatus(`${product.label} Reel Lab text defaults saved.`);
     setError("");
+  }
+
+  function handleTextModeChange(nextMode) {
+    const next = { ...textModeByProduct, [productKey]: nextMode };
+    setTextModeByProduct(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(TEXT_MODE_STORAGE_KEY, JSON.stringify(next));
+    }
+  }
+
+  function updateDefaultText(field, value) {
+    setDefaultTextByProduct((prev) => ({
+      ...prev,
+      [productKey]: {
+        ...(prev[productKey] || DEFAULT_TEXT_PRESETS[productKey]),
+        [field]: value,
+      },
+    }));
+  }
+
+  function updateDefaultCaption(index, value) {
+    setDefaultTextByProduct((prev) => {
+      const current = prev[productKey] || DEFAULT_TEXT_PRESETS[productKey];
+      const captions = [...(current.captions || DEFAULT_TEXT_PRESETS[productKey].captions)];
+      captions[index] = value;
+      return {
+        ...prev,
+        [productKey]: {
+          ...current,
+          captions,
+        },
+      };
+    });
+  }
+
+  function handleDefaultCaptionSelect(value) {
+    updateDefaultText("selectedIndex", Math.min(Math.max(Number(value) || 0, 0), 2));
+  }
+
+  function handleSaveDefaultText() {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(DEFAULT_TEXT_STORAGE_KEY, JSON.stringify(defaultTextByProduct));
+    }
+    setStatus(`${product.label} default text saved.`);
+    setError("");
+  }
+
+  function getEffectiveTextForProduct(targetProductKey) {
+    const targetMode = textModeByProduct[targetProductKey] === "default" ? "default" : "manual";
+    if (targetMode === "default") {
+      const targetDefault = defaultTextByProduct[targetProductKey] || DEFAULT_TEXT_PRESETS[targetProductKey];
+      return {
+        brandHeaderText: targetDefault.brandHeader,
+        hookText: targetDefault.hook,
+        supportText: targetDefault.support,
+        ctaText: targetDefault.cta,
+      };
+    }
+    return {
+      brandHeaderText: brandHeaderByProduct[targetProductKey] ?? DEFAULT_BRAND_HEADERS[targetProductKey],
+      hookText: hookByProduct[targetProductKey] ?? DEFAULT_HOOKS[targetProductKey],
+      supportText: supportByProduct[targetProductKey] ?? DEFAULT_SUPPORT_LINES[targetProductKey],
+      ctaText: ctaByProduct[targetProductKey] ?? PRODUCTS[targetProductKey].finalCta,
+    };
   }
 
   async function handleTestPageImages() {
@@ -1505,7 +1676,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
         brandHeaderText,
         hookText,
         supportText,
-        ctaText: cta,
+        ctaText: effectiveCta,
         imageUrls: resolvedImages,
         musicOn,
         onProgress: setStatus,
@@ -1607,14 +1778,15 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     const imageOrder = resolveImageOrderForVehicle(vehicle, { includeManual: false, preferCms: true });
     const imageUrls = imageOrder.records.map((item) => item.url);
     if (!imageUrls.length) throw new Error("No usable image is available for this queued reel.");
+    const text = getEffectiveTextForProduct(targetProductKey);
     const asset = await generateReelLabAsset({
       productKey: targetProductKey,
       vehicle,
       visualTemplate,
-      brandHeaderText: brandHeaderByProduct[targetProductKey] ?? DEFAULT_BRAND_HEADERS[targetProductKey],
-      hookText: hookByProduct[targetProductKey] ?? DEFAULT_HOOKS[targetProductKey],
-      supportText: supportByProduct[targetProductKey] ?? DEFAULT_SUPPORT_LINES[targetProductKey],
-      ctaText: ctaByProduct[targetProductKey] ?? PRODUCTS[targetProductKey].finalCta,
+      brandHeaderText: text.brandHeaderText,
+      hookText: text.hookText,
+      supportText: text.supportText,
+      ctaText: text.ctaText,
       imageUrls,
       musicOn,
       onProgress: (message) => {
@@ -1727,50 +1899,71 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
 
       <div className="reel-lab__grid">
         <div className="reel-lab__panel">
-          <div className="reel-lab__segment">
-            {Object.entries(PRODUCTS).map(([key, item]) => (
-              <button
-                key={key}
-                className={productKey === key ? "is-active" : ""}
-                type="button"
-                onClick={() => setProductKey(key)}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-
-          <label className="reel-lab__field">
-            <span>Vehicle</span>
-            <select value={selectedVehicle ? String(selectedVehicle.id) : ""} onChange={(event) => setSelectedVehicleId(event.target.value)}>
-              {vehiclesLoading ? <option>Loading vehicles...</option> : null}
-              {vehiclesError ? <option>{vehiclesError}</option> : null}
-              {!productVehicles.length && !vehiclesLoading ? <option>No vehicles available</option> : null}
-              {productVehicles.map((vehicle) => (
-                <option key={`${productKey}-${vehicle.id}`} value={String(vehicle.id)}>
-                  {vehicleRegistration(vehicle) || "NO REG"} - {vehicleTitle(vehicle)}
-                </option>
+          <section className="reel-lab__section">
+            <div className="reel-lab__section-header">
+              <span>Reel setup</span>
+              <p>Choose the product, vehicle, template and audio for this reel.</p>
+            </div>
+            <div className="reel-lab__segment">
+              {Object.entries(PRODUCTS).map(([key, item]) => (
+                <button
+                  key={key}
+                  className={productKey === key ? "is-active" : ""}
+                  type="button"
+                  onClick={() => setProductKey(key)}
+                >
+                  {item.label}
+                </button>
               ))}
-            </select>
-          </label>
+            </div>
 
-          <label className="reel-lab__field">
-            <span>Image source</span>
-            <select value={imageSource} onChange={(event) => setImageSource(event.target.value)}>
-              {IMAGE_SOURCE_OPTIONS.map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
-          </label>
+            <label className="reel-lab__field">
+              <span>Vehicle</span>
+              <select value={selectedVehicle ? String(selectedVehicle.id) : ""} onChange={(event) => setSelectedVehicleId(event.target.value)}>
+                {vehiclesLoading ? <option>Loading vehicles...</option> : null}
+                {vehiclesError ? <option>{vehiclesError}</option> : null}
+                {!productVehicles.length && !vehiclesLoading ? <option>No vehicles available</option> : null}
+                {productVehicles.map((vehicle) => (
+                  <option key={`${productKey}-${vehicle.id}`} value={String(vehicle.id)}>
+                    {vehicleRegistration(vehicle) || "NO REG"} - {vehicleTitle(vehicle)}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="reel-lab__toggle">
-            <input
-              type="checkbox"
-              checked={musicOn}
-              onChange={(event) => setMusicOn(event.target.checked)}
-            />
-            <span>Use existing reel music</span>
-          </label>
+            <label className="reel-lab__field">
+              <span>Image source</span>
+              <select value={imageSource} onChange={(event) => setImageSource(event.target.value)}>
+                {IMAGE_SOURCE_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="reel-lab__field">
+              <span>Visual template</span>
+              <select value={visualTemplate} onChange={(event) => setVisualTemplate(event.target.value)}>
+                {VISUAL_TEMPLATES.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="reel-lab__toggle">
+              <input
+                type="checkbox"
+                checked={musicOn}
+                onChange={(event) => setMusicOn(event.target.checked)}
+              />
+              <span>Use existing reel music</span>
+            </label>
+          </section>
+
+          <section className="reel-lab__section">
+            <div className="reel-lab__section-header">
+              <span>Images / CMS</span>
+              <p>Use uploads, saved CMS rows, or safe fallback images in the original order.</p>
+            </div>
 
           <div className="reel-lab__upload-row">
             <button className="button button--ghost" type="button" onClick={() => fileInputRef.current?.click()}>
@@ -1807,12 +2000,6 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
             {cmsUpload ? (
               <div className="reel-lab__page-result">
                 <strong>{cmsMatch ? `Matched CMS row for ${vehicleRegistration(selectedVehicle) || vehicleTitle(selectedVehicle)}` : "No matching CMS row for selected vehicle"}</strong>
-                <div className="reel-lab__debug-grid">
-                  <span><b>Product CMS</b>{product.label}</span>
-                  <span><b>Rows loaded</b>{cmsUpload.rows.length}</span>
-                  <span><b>Matched reg</b>{cmsMatch?.registration || "None"}</span>
-                  <span><b>CMS images</b>{cmsMatch?.imageRecords?.length || 0}</span>
-                </div>
                 {cmsMatch?.imageRecords?.length ? (
                   <div className="reel-lab__page-thumbs">
                     {cmsMatch.imageRecords.slice(0, 5).map((item, index) => (
@@ -1820,26 +2007,38 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
                     ))}
                   </div>
                 ) : null}
+                <details className="reel-lab__details">
+                  <summary>CMS row details</summary>
+                  <div className="reel-lab__debug-grid">
+                    <span><b>Product CMS</b>{product.label}</span>
+                    <span><b>Rows loaded</b>{cmsUpload.rows.length}</span>
+                    <span><b>Matched reg</b>{cmsMatch?.registration || "None"}</span>
+                    <span><b>CMS images</b>{cmsMatch?.imageRecords?.length || 0}</span>
+                  </div>
+                </details>
               </div>
             ) : null}
           </div>
 
           {sourceNote ? <div className="reel-lab__note">{sourceNote}</div> : null}
 
-          <div className="reel-lab__page-test">
-            <div>
-              <span>Van page image test</span>
-              <p>Optional secondary check. CMS images stay the main source for this beta flow.</p>
+          <details className="reel-lab__details">
+            <summary>Van page image test</summary>
+            <div className="reel-lab__page-test">
+              <div>
+                <span>Van page image test</span>
+                <p>Optional secondary check. CMS images stay the main source for this beta flow.</p>
+              </div>
+              <button
+                className="button button--ghost"
+                type="button"
+                onClick={handleTestPageImages}
+                disabled={!selectedVehicle || pageImageTest?.status === "checking"}
+              >
+                {pageImageTest?.status === "checking" ? "Checking Images..." : "Test First 5 Van Page Images"}
+              </button>
             </div>
-            <button
-              className="button button--ghost"
-              type="button"
-              onClick={handleTestPageImages}
-              disabled={!selectedVehicle || pageImageTest?.status === "checking"}
-            >
-              {pageImageTest?.status === "checking" ? "Checking Images..." : "Test First 5 Van Page Images"}
-            </button>
-          </div>
+          </details>
 
           {pageImageTest ? (
             <div className={`reel-lab__page-result reel-lab__page-result--${pageImageTest.status}`}>
@@ -1881,61 +2080,114 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
               ))}
             </div>
           </details>
+          </section>
 
-          <label className="reel-lab__field">
-            <span>Visual template</span>
-            <select value={visualTemplate} onChange={(event) => setVisualTemplate(event.target.value)}>
-              {VISUAL_TEMPLATES.map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
-          </label>
+          <section className="reel-lab__section">
+            <div className="reel-lab__section-header">
+              <span>Text controls</span>
+              <p>Use saved default wording or switch to fully manual reel text.</p>
+            </div>
+            <div className="reel-lab__segment">
+              <button className={textMode === "default" ? "is-active" : ""} type="button" onClick={() => handleTextModeChange("default")}>
+                Default Text
+              </button>
+              <button className={textMode === "manual" ? "is-active" : ""} type="button" onClick={() => handleTextModeChange("manual")}>
+                Manual Text
+              </button>
+            </div>
 
-          <label className="reel-lab__field">
-            <span>Top header text</span>
-            <input
-              type="text"
-              value={brandHeaderText}
-              onChange={(event) => setBrandHeaderByProduct((prev) => ({ ...prev, [productKey]: event.target.value }))}
-              placeholder={DEFAULT_BRAND_HEADERS[productKey]}
-            />
-          </label>
+            {textMode === "default" ? (
+              <>
+                <label className="reel-lab__field">
+                  <span>Premium-style caption option</span>
+                  <select value={defaultCaptionIndex} onChange={(event) => handleDefaultCaptionSelect(event.target.value)}>
+                    {REEL_LAB_DEFAULT_CAPTION_LABELS[productKey].map((label, index) => (
+                      <option key={label} value={index}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="reel-lab__field">
+                  <span>Default caption text</span>
+                  <textarea
+                    value={defaultText.captions?.[defaultCaptionIndex] || ""}
+                    onChange={(event) => updateDefaultCaption(defaultCaptionIndex, event.target.value)}
+                    rows={7}
+                  />
+                </label>
+                <div className="reel-lab__text-grid">
+                  <label className="reel-lab__field">
+                    <span>Default header</span>
+                    <input type="text" value={defaultText.brandHeader || ""} onChange={(event) => updateDefaultText("brandHeader", event.target.value)} />
+                  </label>
+                  <label className="reel-lab__field">
+                    <span>Default hook</span>
+                    <input type="text" value={defaultText.hook || ""} onChange={(event) => updateDefaultText("hook", event.target.value)} />
+                  </label>
+                  <label className="reel-lab__field">
+                    <span>Default supporting line</span>
+                    <input type="text" value={defaultText.support || ""} onChange={(event) => updateDefaultText("support", event.target.value)} />
+                  </label>
+                  <label className="reel-lab__field">
+                    <span>Default CTA</span>
+                    <input type="text" value={defaultText.cta || ""} onChange={(event) => updateDefaultText("cta", event.target.value)} />
+                  </label>
+                </div>
+                <div className="reel-lab__actions reel-lab__actions--compact">
+                  <button className="button button--ghost" type="button" onClick={handleSaveDefaultText}>
+                    Save {product.label} Text Defaults
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <label className="reel-lab__field">
+                  <span>Top header text</span>
+                  <input
+                    type="text"
+                    value={manualBrandHeaderText}
+                    onChange={(event) => setBrandHeaderByProduct((prev) => ({ ...prev, [productKey]: event.target.value }))}
+                    placeholder={DEFAULT_BRAND_HEADERS[productKey]}
+                  />
+                </label>
 
-          <label className="reel-lab__field">
-            <span>Manual hook text</span>
-            <input
-              type="text"
-              value={hookText}
-              onChange={(event) => setHookByProduct((prev) => ({ ...prev, [productKey]: event.target.value }))}
-              placeholder={DEFAULT_HOOKS[productKey]}
-            />
-          </label>
+                <label className="reel-lab__field">
+                  <span>Manual hook text</span>
+                  <input
+                    type="text"
+                    value={manualHookText}
+                    onChange={(event) => setHookByProduct((prev) => ({ ...prev, [productKey]: event.target.value }))}
+                    placeholder={DEFAULT_HOOKS[productKey]}
+                  />
+                </label>
 
-          <label className="reel-lab__field">
-            <span>Supporting line</span>
-            <input
-              type="text"
-              value={supportText}
-              onChange={(event) => setSupportByProduct((prev) => ({ ...prev, [productKey]: event.target.value }))}
-              placeholder={DEFAULT_SUPPORT_LINES[productKey]}
-            />
-          </label>
+                <label className="reel-lab__field">
+                  <span>Supporting line</span>
+                  <input
+                    type="text"
+                    value={manualSupportText}
+                    onChange={(event) => setSupportByProduct((prev) => ({ ...prev, [productKey]: event.target.value }))}
+                    placeholder={DEFAULT_SUPPORT_LINES[productKey]}
+                  />
+                </label>
 
-          <label className="reel-lab__field">
-            <span>Final CTA text</span>
-            <input
-              type="text"
-              value={cta}
-              onChange={(event) => setCtaByProduct((prev) => ({ ...prev, [productKey]: event.target.value }))}
-              placeholder={product.finalCta}
-            />
-          </label>
+                <label className="reel-lab__field">
+                  <span>Final CTA text</span>
+                  <input
+                    type="text"
+                    value={cta}
+                    onChange={(event) => setCtaByProduct((prev) => ({ ...prev, [productKey]: event.target.value }))}
+                    placeholder={product.finalCta}
+                  />
+                </label>
 
-          <div className="reel-lab__actions reel-lab__actions--compact">
-            <button className="button button--ghost" type="button" onClick={handleSaveTextDefaults}>
-              Save {product.label} Text Defaults
-            </button>
-          </div>
+                <div className="reel-lab__actions reel-lab__actions--compact">
+                  <button className="button button--ghost" type="button" onClick={handleSaveTextDefaults}>
+                    Save {product.label} Manual Text
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
 
           <section className="reel-lab__queue">
             <div className="reel-lab__queue-header">
@@ -2009,11 +2261,6 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
             </div>
           </section>
 
-          <div className="reel-lab__copy">
-            <span>{product.label} wording preview</span>
-            <pre>{createCaption({ productKey, vehicle: selectedVehicle, cta })}</pre>
-          </div>
-
           <div className="reel-lab__actions">
             <button className="button button--primary" type="button" onClick={handleGenerate}>
               Generate Preview
@@ -2047,6 +2294,10 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
           </div>
           <div className="reel-lab__safety">
             Preview/download only. No posting queue, Facebook page, Creative Library, Supabase tracking, or stock record is changed.
+          </div>
+          <div className="reel-lab__copy">
+            <span>{product.label} wording preview</span>
+            <pre>{activeCaptionText}</pre>
           </div>
         </div>
       </div>
