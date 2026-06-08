@@ -343,6 +343,38 @@ function buildOrderedImageRecords(records) {
   };
 }
 
+function getVehicleStockImageRecords(vehicle, sourceLabel = "stock CMS image") {
+  if (!vehicle) return [];
+  const imageValues = [];
+  const addValue = (value) => {
+    extractImageUrlsFromValue(value).forEach((url) => imageValues.push(url));
+  };
+
+  addValue(vehicle.image);
+  addValue(vehicle.picture);
+  addValue(vehicle.mainImage);
+  addValue(vehicle.imageUrl);
+  addValue(vehicle.image_url);
+  addValue(vehicle.thumbnail);
+  addValue(vehicle.mediaGallery);
+  addValue(vehicle.mainImages);
+  addValue(vehicle.gallery);
+  addValue(vehicle.images);
+  addValue(vehicle.imageUrls);
+  addValue(vehicle.pictures);
+
+  Object.entries(vehicle).forEach(([key, value]) => {
+    const normalKey = normalizeCmsKey(key);
+    if (/^image\d+$/.test(normalKey) || /^picture\d+$/.test(normalKey) || /^photo\d+$/.test(normalKey)) {
+      addValue(value);
+    }
+  });
+
+  return buildOrderedImageRecords(
+    imageValues.map((url, imageIndex) => ({ url, source: `${sourceLabel} ${imageIndex + 1}` }))
+  ).records;
+}
+
 function splitCsvLine(line) {
   const cells = [];
   let current = "";
@@ -1237,12 +1269,13 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     };
   }, []);
 
-  function resolveImageOrderForVehicle(vehicle, { includeManual = false } = {}) {
+  function resolveImageOrderForVehicle(vehicle, { includeManual = false, preferCms = false } = {}) {
     const manualRecords = uploadedImages.map((item) => ({ url: item.url, source: "manual upload" }));
     const vehicleCmsMatch = vehicle ? findCmsMatch(cmsUpload?.rows || [], vehicle) : null;
     const cmsRecords = Array.isArray(vehicleCmsMatch?.imageRecords)
       ? vehicleCmsMatch.imageRecords.map((item) => ({ url: item.url, source: item.source || `${product.label} CMS upload` }))
       : [];
+    const stockCmsRecords = getVehicleStockImageRecords(vehicle, `${product.label} stock CMS image`);
     const allowPageRecords = selectedVehicle && queueVehicleKey(vehicle) === queueVehicleKey(selectedVehicle);
     const pageRecords = allowPageRecords && Array.isArray(pageImageTest?.imageRecords)
       ? pageImageTest.imageRecords.map((item) => ({ url: item.url, source: item.source || "gallery/mainImages" }))
@@ -1250,11 +1283,21 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     const vehicleStockImage = vehicleImage(vehicle);
     const stockRecord = vehicleStockImage ? [{ url: vehicleStockImage, source: "stock image" }] : [];
 
+    if (preferCms) {
+      return buildOrderedImageRecords([
+        ...cmsRecords,
+        ...stockCmsRecords,
+        ...pageRecords,
+        ...stockRecord,
+      ]);
+    }
+
     if (imageSource === "upload" && includeManual) return buildOrderedImageRecords(manualRecords.length ? manualRecords : stockRecord);
-    if (imageSource === "page") return buildOrderedImageRecords(cmsRecords.length ? cmsRecords : pageRecords.length ? pageRecords : stockRecord);
+    if (imageSource === "page") return buildOrderedImageRecords(cmsRecords.length ? cmsRecords : stockCmsRecords.length ? stockCmsRecords : pageRecords.length ? pageRecords : stockRecord);
     if (imageSource === "auto") {
       if (includeManual && manualRecords.length) return buildOrderedImageRecords(manualRecords);
       if (cmsRecords.length) return buildOrderedImageRecords(cmsRecords);
+      if (stockCmsRecords.length) return buildOrderedImageRecords(stockCmsRecords);
       if (pageRecords.length) return buildOrderedImageRecords(pageRecords);
       return buildOrderedImageRecords(stockRecord);
     }
@@ -1561,10 +1604,10 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   }
 
   async function generateAssetForQueueVehicle(vehicle, targetProductKey, queueIndex = 0, queueTotal = 1) {
-    const imageOrder = resolveImageOrderForVehicle(vehicle, { includeManual: false });
+    const imageOrder = resolveImageOrderForVehicle(vehicle, { includeManual: false, preferCms: true });
     const imageUrls = imageOrder.records.map((item) => item.url);
     if (!imageUrls.length) throw new Error("No usable image is available for this queued reel.");
-    return generateReelLabAsset({
+    const asset = await generateReelLabAsset({
       productKey: targetProductKey,
       vehicle,
       visualTemplate,
@@ -1585,6 +1628,11 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
         }));
       },
     });
+    return {
+      ...asset,
+      orderedImageCount: imageUrls.length,
+      orderedImageSource: imageOrder.records[0]?.source || "stock image",
+    };
   }
 
   async function handleGenerateCurrentQueuedReel() {
@@ -1598,7 +1646,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
       if (asset?.url) URL.revokeObjectURL(asset.url);
       const queuePreviewKey = `${productKey}:${queueVehicleKey(queueVehicle)}:queue:${Date.now()}`;
       setAsset({ ...nextAsset, previewKey: queuePreviewKey, queueAsset: true });
-      setStatus(`Queued preview ready for ${vehicleRegistration(queueVehicle) || vehicleTitle(queueVehicle)}.`);
+      setStatus(`Queued preview ready for ${vehicleRegistration(queueVehicle) || vehicleTitle(queueVehicle)} using ${nextAsset.orderedImageCount || 1} ordered image${(nextAsset.orderedImageCount || 1) === 1 ? "" : "s"}.`);
     } catch (queueError) {
       setError(queueError.message || "Could not generate queued Reel Lab preview.");
       setQueueProgress((prev) => ({ ...prev, failed: prev.failed + 1, message: "Failed" }));
