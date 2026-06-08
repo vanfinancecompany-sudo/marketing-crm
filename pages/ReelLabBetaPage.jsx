@@ -998,15 +998,23 @@ async function downloadMp4FromWebm(blob, filename) {
   });
 
   if (!response.ok) {
-    let message = "Could not convert Reel Lab video to MP4.";
+    let message = `MP4 conversion failed with HTTP ${response.status}.`;
     try {
       const payload = await response.json();
-      message = payload?.error || message;
+      message = payload?.error ? `MP4 conversion failed: ${payload.error}` : message;
     } catch {}
     throw new Error(message);
   }
 
+  const contentType = response.headers.get("Content-Type") || "";
   const mp4Blob = await response.blob();
+  if (!mp4Blob.size) {
+    throw new Error("MP4 conversion failed: conversion endpoint returned an empty file.");
+  }
+  if (/text\/html/i.test(contentType)) {
+    throw new Error("MP4 conversion failed: conversion endpoint returned the app page instead of an MP4 file.");
+  }
+
   const url = URL.createObjectURL(mp4Blob);
   const link = document.createElement("a");
   link.href = url;
@@ -1016,6 +1024,19 @@ async function downloadMp4FromWebm(blob, filename) {
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   return { filename, size: mp4Blob.size };
+}
+
+function downloadWebmFallback(blob, filename) {
+  if (!blob) throw new Error("No Reel Lab WebM fallback is available yet.");
+  const fallbackName = safeFilePart(String(filename || "reel-lab").replace(/\.(mp4|webm)$/i, "")) || "reel-lab";
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${fallbackName}.webm`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 async function fetchFirstFivePageImages({ productKey, vehicle }) {
@@ -1058,7 +1079,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [imageSource, setImageSource] = useState("auto");
   const [visualTemplate, setVisualTemplate] = useState("blackPremium");
-  const [musicOn, setMusicOn] = useState(true);
+  const [musicOn, setMusicOn] = useState(false);
   const savedTextDefaults = useMemo(loadSavedTextDefaults, []);
   const [brandHeaderByProduct, setBrandHeaderByProduct] = useState(savedTextDefaults.brandHeaders);
   const [hookByProduct, setHookByProduct] = useState(savedTextDefaults.hooks);
@@ -1333,7 +1354,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
         return;
       }
       setAsset({ ...nextAsset, previewKey: renderPreviewKey });
-      setStatus(`Preview ready for ${vehicleRegistration(selectedVehicle) || "selected vehicle"} using ${VISUAL_TEMPLATE_CONFIG[visualTemplate]?.label}.`);
+      setStatus(nextAsset.audioWarning || `Preview ready for ${vehicleRegistration(selectedVehicle) || "selected vehicle"} using ${VISUAL_TEMPLATE_CONFIG[visualTemplate]?.label}.`);
     } catch (generationError) {
       setError(generationError.message || "Could not generate Reel Lab preview.");
       setStatus("");
@@ -1352,8 +1373,23 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
       await downloadMp4FromWebm(currentAsset.blob, filename);
       setStatus("MP4 downloaded.");
     } catch (downloadError) {
-      setError(downloadError.message || "Could not download MP4.");
-      setStatus("");
+      setError(downloadError.message || "MP4 conversion failed: unknown error.");
+      setStatus("MP4 conversion failed. WebM fallback is available.");
+    }
+  }
+
+  function handleDownloadWebmFallback() {
+    setError("");
+    if (!currentAsset?.blob) {
+      setError("Generate a Reel Lab preview before downloading WebM fallback.");
+      return;
+    }
+    try {
+      const filename = `${safeFilePart(`${product.label}-${vehicleRegistration(selectedVehicle)}-${VISUAL_TEMPLATE_CONFIG[visualTemplate]?.label || visualTemplate}`)}.webm`;
+      downloadWebmFallback(currentAsset.blob, filename);
+      setStatus("WebM fallback downloaded.");
+    } catch (fallbackError) {
+      setError(fallbackError.message || "Could not download WebM fallback.");
     }
   }
 
@@ -1450,6 +1486,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     const queueSnapshot = [...activeQueue];
     let completed = 0;
     let failed = 0;
+    let webmFallbacks = 0;
     queueCancelRef.current = false;
     setQueueRunning(true);
     setQueueFailures([]);
@@ -1465,7 +1502,20 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
         try {
           const nextAsset = await generateAssetForQueueVehicle(queueVehicle, targetProductKey, index + 1, queueSnapshot.length);
           setQueueProgress((prev) => ({ ...prev, message: "Converting MP4" }));
-          await downloadMp4FromWebm(nextAsset.blob, reelLabFilenameFor(queueVehicle, targetProductKey));
+          const filename = reelLabFilenameFor(queueVehicle, targetProductKey);
+          try {
+            await downloadMp4FromWebm(nextAsset.blob, filename);
+          } catch (mp4Error) {
+            try {
+              downloadWebmFallback(nextAsset.blob, filename.replace(/\.mp4$/i, ".webm"));
+              webmFallbacks += 1;
+            } catch (fallbackError) {
+              URL.revokeObjectURL(nextAsset.url);
+              throw new Error(`${mp4Error.message || "MP4 conversion failed"} WebM fallback also failed: ${fallbackError.message || "unknown error"}`);
+            }
+            URL.revokeObjectURL(nextAsset.url);
+            throw new Error(`${mp4Error.message || "MP4 conversion failed"} WebM fallback downloaded.`);
+          }
           URL.revokeObjectURL(nextAsset.url);
           completed += 1;
           setQueueProgress({ index: index + 1, total: queueSnapshot.length, completed, failed, label, message: "Downloaded" });
@@ -1476,7 +1526,8 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
           setQueueProgress({ index: index + 1, total: queueSnapshot.length, completed, failed, label, message: "Failed - continuing" });
         }
       }
-      setStatus(queueCancelRef.current ? "Queue cancelled." : `Queue complete. ${completed} downloaded, ${failed} failed.`);
+      const fallbackText = webmFallbacks ? `, ${webmFallbacks} WebM fallback downloaded` : "";
+      setStatus(queueCancelRef.current ? "Queue cancelled." : `Queue complete. ${completed} MP4 downloaded${fallbackText}, ${failed} failed.`);
       setQueueProgress((prev) => ({ ...prev, completed, failed, message: queueCancelRef.current ? "Cancelled" : "Complete" }));
     } finally {
       queueCancelRef.current = false;
@@ -1796,6 +1847,9 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
             </button>
             <button className="button button--ghost" type="button" onClick={handleDownloadMp4} disabled={!currentAsset?.blob}>
               Download MP4
+            </button>
+            <button className="button button--ghost" type="button" onClick={handleDownloadWebmFallback} disabled={!currentAsset?.blob}>
+              Download WebM fallback
             </button>
           </div>
 
