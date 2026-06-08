@@ -1170,7 +1170,7 @@ async function fetchFirstFivePageImages({ productKey, vehicle }) {
   };
 }
 
-export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false, vehiclesError = "" }) {
+export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false, vehiclesError = "", queueByProduct: externalQueueByProduct = null, onQueueChange = null }) {
   const [productKey, setProductKey] = useState("vanFinance");
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [imageSource, setImageSource] = useState("auto");
@@ -1203,7 +1203,8 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     [productVehicles, selectedVehicleId]
   );
   const uploadedImages = uploadsByProduct[productKey] || [];
-  const activeQueue = queueByProduct[productKey] || [];
+  const activeQueueByProduct = externalQueueByProduct || queueByProduct;
+  const activeQueue = activeQueueByProduct[productKey] || [];
   const cmsUpload = cmsUploadsByProduct[productKey] || null;
   const cmsMatch = selectedVehicle ? findCmsMatch(cmsUpload?.rows || [], selectedVehicle) : null;
   const stockImage = vehicleImage(selectedVehicle);
@@ -1514,9 +1515,19 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
     return `${safeFilePart(`${targetProductKey === "rent2buy" ? "rent2buy" : "finance"}-${vehicleRegistration(vehicle) || vehicleTitle(vehicle)}-reel-lab`)}.mp4`;
   }
 
+  function updateQueue(targetProductKey, updater) {
+    const queueSource = externalQueueByProduct || queueByProduct;
+    const existing = queueSource[targetProductKey] || [];
+    const nextQueue = updater(existing);
+    if (onQueueChange) {
+      onQueueChange(targetProductKey, nextQueue);
+      return;
+    }
+    setQueueByProduct((prev) => ({ ...prev, [targetProductKey]: nextQueue }));
+  }
+
   function addVehiclesToQueue(targetProductKey, nextVehicles) {
-    setQueueByProduct((prev) => {
-      const existing = prev[targetProductKey] || [];
+    updateQueue(targetProductKey, (existing) => {
       const seen = new Set(existing.map(queueVehicleKey));
       const additions = (nextVehicles || []).filter((vehicle) => {
         const key = queueVehicleKey(vehicle);
@@ -1524,7 +1535,7 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
         seen.add(key);
         return true;
       });
-      return { ...prev, [targetProductKey]: [...existing, ...additions] };
+      return [...existing, ...additions];
     });
   }
 
@@ -1540,14 +1551,11 @@ export default function ReelLabBetaPage({ vehicles = [], vehiclesLoading = false
 
   function handleRemoveCurrentFromQueue() {
     const selectedKey = selectedVehicle ? queueVehicleKey(selectedVehicle) : "";
-    setQueueByProduct((prev) => ({
-      ...prev,
-      [productKey]: (prev[productKey] || []).filter((vehicle, index) => selectedKey ? queueVehicleKey(vehicle) !== selectedKey : index !== 0),
-    }));
+    updateQueue(productKey, (existing) => existing.filter((vehicle, index) => selectedKey ? queueVehicleKey(vehicle) !== selectedKey : index !== 0));
   }
 
   function handleClearQueue() {
-    setQueueByProduct((prev) => ({ ...prev, [productKey]: [] }));
+    updateQueue(productKey, () => []);
     setQueueProgress({ index: 0, total: 0, completed: 0, failed: 0, label: "", message: "Ready" });
     setQueueFailures([]);
   }
