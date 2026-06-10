@@ -4,6 +4,8 @@ export const YOUTUBE_CMS_UPLOAD_STORAGE_KEY = "youtubeGeneratorCmsUploads";
 const YOUTUBE_CMS_DB_NAME = "youtubeGeneratorCmsUploadsDb";
 const YOUTUBE_CMS_DB_VERSION = 1;
 const YOUTUBE_CMS_STORE_NAME = "uploads";
+const REEL_LAB_CMS_DB_NAME = "reelLabBetaCmsUploads";
+const REEL_LAB_CMS_STORE_NAME = "cmsUploads";
 const DEFAULT_UPLOADS = { vanFinance: null, rent2buy: null };
 
 function cleanText(value) {
@@ -328,6 +330,16 @@ function openYoutubeCmsDb() {
   });
 }
 
+function openExistingIndexedDb(dbName) {
+  if (typeof window === "undefined" || !window.indexedDB) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const request = window.indexedDB.open(dbName);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+    request.onblocked = () => resolve(null);
+  });
+}
+
 async function readYoutubeCmsDbUploads() {
   const db = await openYoutubeCmsDb();
   if (!db) return { ...DEFAULT_UPLOADS };
@@ -344,6 +356,32 @@ async function readYoutubeCmsDbUploads() {
     transaction.onerror = () => db.close();
     transaction.onabort = () => db.close();
   });
+}
+
+async function readReelLabCmsUpload(productKey) {
+  const db = await openExistingIndexedDb(REEL_LAB_CMS_DB_NAME);
+  if (!db || !db.objectStoreNames.contains(REEL_LAB_CMS_STORE_NAME)) {
+    if (db) db.close();
+    return null;
+  }
+  return new Promise((resolve) => {
+    const transaction = db.transaction(REEL_LAB_CMS_STORE_NAME, "readonly");
+    const store = transaction.objectStore(REEL_LAB_CMS_STORE_NAME);
+    const request = store.get(productKey);
+    request.onsuccess = () => resolve(request.result?.upload || null);
+    request.onerror = () => resolve(null);
+    transaction.oncomplete = () => db.close();
+    transaction.onerror = () => db.close();
+    transaction.onabort = () => db.close();
+  });
+}
+
+async function readReelLabCmsUploads() {
+  const [vanFinance, rent2buy] = await Promise.all([
+    readReelLabCmsUpload("vanFinance"),
+    readReelLabCmsUpload("rent2buy"),
+  ]);
+  return { vanFinance, rent2buy };
 }
 
 async function writeYoutubeCmsDbUploads(uploads) {
@@ -371,9 +409,10 @@ async function writeYoutubeCmsDbUploads(uploads) {
 export async function loadYouTubeCmsUploadsAsync() {
   const localUploads = loadYouTubeCmsUploads();
   const dbUploads = await readYoutubeCmsDbUploads();
+  const reelLabUploads = await readReelLabCmsUploads();
   return {
-    vanFinance: dbUploads.vanFinance || localUploads.vanFinance || null,
-    rent2buy: dbUploads.rent2buy || localUploads.rent2buy || null,
+    vanFinance: dbUploads.vanFinance || localUploads.vanFinance || reelLabUploads.vanFinance || null,
+    rent2buy: dbUploads.rent2buy || localUploads.rent2buy || reelLabUploads.rent2buy || null,
   };
 }
 

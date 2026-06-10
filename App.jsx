@@ -1005,6 +1005,17 @@ const [hiddenTodayReelIds, setHiddenTodayReelIds] = useState(() => {
   }, []);
 
   useEffect(() => {
+    if (currentView !== "Stock") return undefined;
+    let cancelled = false;
+    loadYouTubeCmsUploadsAsync().then((uploads) => {
+      if (!cancelled) setYoutubeCmsUploads(uploads);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentView, manualStockSelectedIds.length]);
+
+  useEffect(() => {
     if (!window.location.pathname.startsWith("/track")) return;
 
     const params = new URLSearchParams(window.location.search);
@@ -2204,10 +2215,11 @@ async function handleClearTodayReels() {
     });
   }
 
-  function handleAddSelectedToYouTubeQueue(queueKey) {
+  async function handleAddSelectedToYouTubeQueue(queueKey) {
     const productQueueKey = getReelLabQueueKey(queueKey === "rent2buy" ? "rent2buy" : "vanFinance");
     const requiredImageCount = YOUTUBE_DEFAULT_IMAGE_COUNT;
-    const cmsUploads = youtubeCmsUploads;
+    const cmsUploads = await loadYouTubeCmsUploadsAsync();
+    setYoutubeCmsUploads(cmsUploads);
     const selectedIds = new Set(manualStockSelectedIds);
     const eligibleVehicles = vehicles
       .filter((vehicle) => selectedIds.has(getManualQueueVehicleId(vehicle)))
