@@ -26,11 +26,6 @@ function safeBaseFilename(value) {
   return name || "youtube-short";
 }
 
-function safeDuration(value) {
-  const duration = Number(value);
-  return [20, 25, 30, 35].includes(duration) ? duration : 20;
-}
-
 function safeFps(value) {
   const fps = Number(value);
   return [24, 30].includes(fps) ? fps : 24;
@@ -75,6 +70,17 @@ function runFfmpeg(args) {
   });
 }
 
+function publicErrorMessage(error) {
+  const message = String(error?.message || "Could not convert YouTube Short to MP4.");
+  const compact = message
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-8)
+    .join(" ");
+  return compact.slice(0, 1200) || "Could not convert YouTube Short to MP4.";
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -90,7 +96,6 @@ export default async function handler(req, res) {
     return;
   }
 
-  const duration = safeDuration(req.headers["x-youtube-duration"]);
   const fps = safeFps(req.headers["x-youtube-fps"]);
   const requestedFilename = req.headers["x-reel-filename"] || "youtube-short.mp4";
   const inputExtension = contentType.includes("mp4") ? "mp4" : "webm";
@@ -108,8 +113,6 @@ export default async function handler(req, res) {
       "+genpts",
       "-i",
       inputPath,
-      "-t",
-      String(duration),
       "-vf",
       `fps=${fps},scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1,setpts=PTS-STARTPTS`,
       "-r",
@@ -156,7 +159,7 @@ export default async function handler(req, res) {
     res.end(output);
   } catch (error) {
     sendJson(res, 500, {
-      error: error.message || "Could not convert YouTube Short to MP4.",
+      error: publicErrorMessage(error),
     });
   } finally {
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
