@@ -746,7 +746,6 @@ function buildYouTubeFrameSpecs({ productKey, product = PRODUCTS[productKey], ve
 
     if (frameIndex === finalFrameIndex) {
       type = "finalCta";
-      locked = true;
     } else if (frameIndex === 1) {
       type = "vehicleDetails";
       locked = true;
@@ -755,12 +754,13 @@ function buildYouTubeFrameSpecs({ productKey, product = PRODUCTS[productKey], ve
       locked = true;
     }
 
+    const frameText = Array.isArray(text?.frames) ? text.frames[frameIndex] : null;
     const display = type === "finalCta"
       ? {
-          eyebrow: "APPLY TODAY",
-          headline: cleanText(text?.cta || product?.cta || "APPLY NOW"),
-          subline: `www.${product?.domain || ""}`,
-          cta: cleanText(text?.cta || product?.cta || "APPLY NOW"),
+          eyebrow: cleanText(frameText?.eyebrow || "APPLY TODAY"),
+          headline: cleanText(frameText?.headline || text?.cta || product?.cta || "APPLY NOW"),
+          subline: cleanText(frameText?.support || `www.${product?.domain || ""}`),
+          cta: cleanText(frameText?.cta || frameText?.headline || text?.cta || product?.cta || "APPLY NOW"),
         }
       : frameMessage({ productKey, product, vehicle, frameIndex, frameCount: totalFrameCount, text });
 
@@ -770,7 +770,7 @@ function buildYouTubeFrameSpecs({ productKey, product = PRODUCTS[productKey], ve
       frameIndex,
       frameNumber: frameIndex + 1,
       isFinal: frameIndex === finalFrameIndex,
-      text: Array.isArray(text?.frames) ? text.frames[frameIndex] : null,
+      text: frameText,
       display,
     };
   });
@@ -885,24 +885,28 @@ function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
   ctx.shadowColor = `rgba(239,35,60,${isTikTok ? 0.48 : 0.28})`;
   ctx.shadowBlur = isTikTok ? 48 : 30;
   if (isFinalCtaFrame) {
-    const finalCta = cleanText(text.cta || product.cta || "APPLY NOW");
+    const finalSpec = frameSpec?.display || {};
+    const finalEyebrow = cleanText(finalSpec.eyebrow || "APPLY TODAY");
+    const finalHeadline = cleanText(finalSpec.headline || text.cta || product.cta || "APPLY NOW");
+    const finalButton = cleanText(finalSpec.cta || finalHeadline);
+    const finalDomain = cleanText(finalSpec.subline || `www.${product.domain}`);
     ctx.textAlign = "center";
     ctx.fillStyle = product.accent;
     ctx.font = `950 32px ${CANVAS_FONT}`;
-    drawFitText(ctx, "APPLY TODAY", SHORT_WIDTH / 2, textY + 22, textWidth, 34, 24, 950);
+    drawFitText(ctx, finalEyebrow.toUpperCase(), SHORT_WIDTH / 2, textY + 22, textWidth, 34, 24, 950);
     ctx.shadowColor = "rgba(0,0,0,0.74)";
     ctx.shadowBlur = 22;
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "left";
-    wrapText(ctx, finalCta.toUpperCase(), textX, textY + 118, textWidth, 86, 2);
+    wrapText(ctx, finalHeadline.toUpperCase(), textX, textY + 118, textWidth, 86, 2);
     ctx.shadowBlur = 0;
     const buttonY = textPanelY + 278;
     fillRoundRect(ctx, 130, buttonY, SHORT_WIDTH - 260, 112, 34, product.accent);
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
-    drawFitText(ctx, finalCta.toUpperCase(), SHORT_WIDTH / 2, buttonY + 72, SHORT_WIDTH - 330, 46, 30, 950);
+    drawFitText(ctx, finalButton.toUpperCase(), SHORT_WIDTH / 2, buttonY + 72, SHORT_WIDTH - 330, 46, 30, 950);
     ctx.fillStyle = "rgba(255,255,255,0.9)";
-    drawFitText(ctx, `www.${product.domain}`.toUpperCase(), SHORT_WIDTH / 2, buttonY + 186, textWidth, 38, 26, 900);
+    drawFitText(ctx, finalDomain.toUpperCase(), SHORT_WIDTH / 2, buttonY + 186, textWidth, 38, 26, 900);
     ctx.textAlign = "left";
     drawLightSweep(ctx, textX - 20, textY + 64, textWidth + 40, 230, Math.min(1, currentFrameProgress * 1.2), isTikTok ? 0.4 : 0.26);
   } else {
