@@ -703,6 +703,9 @@ function frameMessage({ productKey, product, vehicle, frameIndex, frameCount, te
       cta: "",
     };
   }
+  if (frameIndex === frameCount - 1) {
+    return { eyebrow: "APPLY TODAY", headline: text.cta, subline: product.domain, cta: text.cta };
+  }
   const frameText = Array.isArray(text?.frames) ? text.frames[frameIndex] : null;
   if (frameText) {
     const rawHeadline = cleanText(frameText.headline);
@@ -729,9 +732,6 @@ function frameMessage({ productKey, product, vehicle, frameIndex, frameCount, te
   if (frameIndex === 0) {
     return { eyebrow: text.header, headline: text.hook, subline: text.support, cta: text.cta };
   }
-  if (frameIndex === frameCount - 1) {
-    return { eyebrow: "APPLY TODAY", headline: text.cta, subline: product.domain, cta: text.cta };
-  }
   const message = product.messages[(frameIndex - 2) % product.messages.length];
   return { eyebrow: product.brand.toUpperCase(), headline: message, subline: frameIndex % 2 ? vehicleRegistration(vehicle) : text.support, cta: "" };
 }
@@ -749,11 +749,11 @@ function drawLightSweep(ctx, x, y, width, height, progress, alpha = 0.25) {
   ctx.restore();
 }
 
-function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, text, elapsedSeconds, durationSeconds }) {
+function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, text, elapsedSeconds, durationSeconds, frameCount }) {
   const product = PRODUCTS[productKey];
   const config = TEMPLATE_CONFIG[visualTemplate] || TEMPLATE_CONFIG.blackPremium;
   const imageArea = config.imageArea;
-  const imageCount = Math.max(1, loadedImages.length);
+  const imageCount = Math.max(1, Number(frameCount) || loadedImages.length);
   const segmentDuration = durationSeconds / imageCount;
   const frameIndex = Math.min(imageCount - 1, Math.floor(elapsedSeconds / segmentDuration));
   const frameProgress = Math.min(1, (elapsedSeconds - frameIndex * segmentDuration) / segmentDuration);
@@ -889,7 +889,7 @@ function createYouTubeMediaRecorder(stream, supportedMime) {
   }
 }
 
-async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, text, imageUrls, durationSeconds, fps, musicOn, onProgress }) {
+async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, text, imageUrls, frameCount, durationSeconds, fps, musicOn, onProgress }) {
   if (typeof HTMLCanvasElement === "undefined" || typeof MediaRecorder === "undefined") {
     throw new Error("This browser cannot record YouTube Shorts.");
   }
@@ -898,6 +898,7 @@ async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, 
     ["video/webm;codecs=vp8,opus", "video/webm;codecs=vp9,opus", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find((type) => MediaRecorder.isTypeSupported?.(type)) || "";
   if (!supportedMime) throw new Error("This browser cannot record WebM video.");
 
+  const selectedFrameCount = Math.max(1, Math.min(MAX_IMAGES, Number(frameCount) || imageUrls.filter(Boolean).length || 1));
   onProgress?.("Loading images");
   const loadedImages = [];
   for (const url of imageUrls.filter(Boolean)) {
@@ -954,7 +955,7 @@ async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, 
   let frame = 0;
   const render = () => {
     const elapsedSeconds = Math.min(durationSeconds, frame / recordingFps);
-    drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, text, elapsedSeconds, durationSeconds });
+    drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, text, elapsedSeconds, durationSeconds, frameCount: selectedFrameCount });
     if (frame % recordingFps === 0) onProgress?.(`Rendering ${Math.round((frame / totalFrames) * 100)}%`);
     frame += 1;
     if (frame <= totalFrames) {
@@ -1244,6 +1245,7 @@ export default function YouTubeGeneratorPage({
         visualTemplate,
         text: activeText,
         imageUrls: resolvedImages,
+        frameCount: imageCount,
         durationSeconds,
         fps: recordingFps,
         musicOn,
@@ -1345,6 +1347,7 @@ export default function YouTubeGeneratorPage({
       visualTemplate,
       text: activeText,
       imageUrls: imageOrder.records.map((item) => item.url),
+      frameCount: imageCount,
       durationSeconds,
       fps: recordingFps,
       musicOn,
