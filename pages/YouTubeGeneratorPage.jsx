@@ -736,6 +736,46 @@ function frameMessage({ productKey, product, vehicle, frameIndex, frameCount, te
   return { eyebrow: product.brand.toUpperCase(), headline: message, subline: frameIndex % 2 ? vehicleRegistration(vehicle) : text.support, cta: "" };
 }
 
+function buildYouTubeFrameSpecs({ productKey, product = PRODUCTS[productKey], vehicle, text, frameCount }) {
+  const totalFrameCount = Math.max(1, Math.min(MAX_IMAGES, Number(frameCount) || 1));
+  const finalFrameIndex = totalFrameCount - 1;
+
+  return Array.from({ length: totalFrameCount }, (_, frameIndex) => {
+    let type = "editable";
+    let locked = false;
+
+    if (frameIndex === finalFrameIndex) {
+      type = "finalCta";
+      locked = true;
+    } else if (frameIndex === 1) {
+      type = "vehicleDetails";
+      locked = true;
+    } else if (frameIndex === 2) {
+      type = "payment";
+      locked = true;
+    }
+
+    const display = type === "finalCta"
+      ? {
+          eyebrow: "APPLY TODAY",
+          headline: cleanText(text?.cta || product?.cta || "APPLY NOW"),
+          subline: `www.${product?.domain || ""}`,
+          cta: cleanText(text?.cta || product?.cta || "APPLY NOW"),
+        }
+      : frameMessage({ productKey, product, vehicle, frameIndex, frameCount: totalFrameCount, text });
+
+    return {
+      type,
+      locked,
+      frameIndex,
+      frameNumber: frameIndex + 1,
+      isFinal: frameIndex === finalFrameIndex,
+      text: Array.isArray(text?.frames) ? text.frames[frameIndex] : null,
+      display,
+    };
+  });
+}
+
 function drawLightSweep(ctx, x, y, width, height, progress, alpha = 0.25) {
   const sweepX = x - width * 0.4 + progress * width * 1.8;
   const gradient = ctx.createLinearGradient(sweepX - 90, y, sweepX + 90, y + height);
@@ -749,15 +789,20 @@ function drawLightSweep(ctx, x, y, width, height, progress, alpha = 0.25) {
   ctx.restore();
 }
 
-function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, text, elapsedSeconds, durationSeconds, frameCount }) {
+function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, text, elapsedSeconds, durationSeconds, frameSpecs }) {
   const product = PRODUCTS[productKey];
   const config = TEMPLATE_CONFIG[visualTemplate] || TEMPLATE_CONFIG.blackPremium;
   const imageArea = config.imageArea;
-  const imageCount = Math.max(1, Number(frameCount) || loadedImages.length);
-  const segmentDuration = durationSeconds / imageCount;
-  const frameIndex = Math.min(imageCount - 1, Math.floor(elapsedSeconds / segmentDuration));
+  const specs = Array.isArray(frameSpecs) && frameSpecs.length
+    ? frameSpecs
+    : buildYouTubeFrameSpecs({ productKey, product, vehicle, text, frameCount: loadedImages.length || 1 });
+  const totalFrameCount = Math.max(1, specs.length);
+  const finalFrameIndex = totalFrameCount - 1;
+  const segmentDuration = durationSeconds / totalFrameCount;
+  const frameIndex = Math.min(finalFrameIndex, Math.floor(elapsedSeconds / segmentDuration));
+  const frameSpec = specs[frameIndex] || specs[finalFrameIndex];
   const frameProgress = Math.min(1, (elapsedSeconds - frameIndex * segmentDuration) / segmentDuration);
-  const isFinalCtaFrame = frameIndex === imageCount - 1;
+  const isFinalCtaFrame = frameSpec?.type === "finalCta";
   const image = loadedImages[Math.min(frameIndex, loadedImages.length - 1)] || loadedImages[0];
   const transition = Math.min(1, frameProgress / config.transition);
   const fade = easeInOut(transition);
@@ -862,7 +907,7 @@ function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
     ctx.textAlign = "left";
     drawLightSweep(ctx, textX - 20, textY + 64, textWidth + 40, 230, Math.min(1, frameProgress * 1.2), isTikTok ? 0.4 : 0.26);
   } else {
-    const spec = frameMessage({ productKey, product, vehicle, frameIndex, frameCount: imageCount, text });
+    const spec = frameSpec?.display || frameMessage({ productKey, product, vehicle, frameIndex, frameCount: totalFrameCount, text });
     ctx.fillStyle = product.accent;
     ctx.font = `900 28px ${CANVAS_FONT}`;
     if (spec.eyebrow) ctx.fillText(spec.eyebrow.toUpperCase(), textX, textY);
@@ -904,7 +949,7 @@ function createYouTubeMediaRecorder(stream, supportedMime) {
   }
 }
 
-async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, text, imageUrls, frameCount, durationSeconds, fps, musicOn, onProgress }) {
+async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, text, imageUrls, frameCount, frameSpecs, durationSeconds, fps, musicOn, onProgress }) {
   if (typeof HTMLCanvasElement === "undefined" || typeof MediaRecorder === "undefined") {
     throw new Error("This browser cannot record YouTube Shorts.");
   }
@@ -914,6 +959,9 @@ async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, 
   if (!supportedMime) throw new Error("This browser cannot record WebM video.");
 
   const selectedFrameCount = Math.max(1, Math.min(MAX_IMAGES, Number(frameCount) || imageUrls.filter(Boolean).length || 1));
+  const renderFrameSpecs = Array.isArray(frameSpecs) && frameSpecs.length === selectedFrameCount
+    ? frameSpecs
+    : buildYouTubeFrameSpecs({ productKey, product: PRODUCTS[productKey], vehicle, text, frameCount: selectedFrameCount });
   onProgress?.("Loading images");
   const loadedImages = [];
   for (const url of imageUrls.filter(Boolean)) {
@@ -970,7 +1018,7 @@ async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, 
   let frame = 0;
   const render = () => {
     const elapsedSeconds = Math.min(durationSeconds, frame / recordingFps);
-    drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, text, elapsedSeconds, durationSeconds, frameCount: selectedFrameCount });
+    drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, text, elapsedSeconds, durationSeconds, frameSpecs: renderFrameSpecs });
     if (frame % recordingFps === 0) onProgress?.(`Rendering ${Math.round((frame / totalFrames) * 100)}%`);
     frame += 1;
     if (frame <= totalFrames) {
@@ -1096,10 +1144,16 @@ export default function YouTubeGeneratorPage({
   const defaultText = normalizeTextStateForProduct(textDefaultsByProduct[productKey] || defaultTextState()[productKey], productKey);
   const manualText = normalizeTextStateForProduct(manualTextByProduct[productKey] || defaultTextState()[productKey], productKey);
   const activeText = normalizeTextStateForProduct(textMode === "manual" ? manualText : defaultText, productKey);
-  const visibleFrameTexts = activeText.frames.slice(0, imageCount);
+  const selectedFrameSpecs = useMemo(
+    () => buildYouTubeFrameSpecs({ productKey, product, vehicle: selectedVehicle, text: activeText, frameCount: imageCount }),
+    [activeText, imageCount, product, productKey, selectedVehicle]
+  );
   const stockRecords = useMemo(() => getVehicleStockImageRecords(selectedVehicle), [selectedVehicle]);
   const activeQueueByProduct = externalQueueByProduct || localQueueByProduct;
   const activeQueue = activeQueueByProduct[productKey] || [];
+  function buildFrameSpecsForVehicle(vehicle) {
+    return buildYouTubeFrameSpecs({ productKey, product, vehicle, text: activeText, frameCount: imageCount });
+  }
   function resolveImageOrderForVehicle(vehicle) {
     return resolveYouTubeImageOrder({ vehicle, cmsUpload, imageSource, imageCount });
   }
@@ -1261,6 +1315,7 @@ export default function YouTubeGeneratorPage({
         text: activeText,
         imageUrls: resolvedImages,
         frameCount: imageCount,
+        frameSpecs: selectedFrameSpecs,
         durationSeconds,
         fps: recordingFps,
         musicOn,
@@ -1363,6 +1418,7 @@ export default function YouTubeGeneratorPage({
       text: activeText,
       imageUrls: imageOrder.records.map((item) => item.url),
       frameCount: imageCount,
+      frameSpecs: buildFrameSpecsForVehicle(vehicle),
       durationSeconds,
       fps: recordingFps,
       musicOn,
@@ -1630,21 +1686,26 @@ export default function YouTubeGeneratorPage({
               <div className="youtube-generator__section-header">
                 <h4>Frame Text Controls</h4>
                 <span>
-                  {visibleFrameTexts.length} editable frame{visibleFrameTexts.length === 1 ? "" : "s"}
+                  {selectedFrameSpecs.length} frame{selectedFrameSpecs.length === 1 ? "" : "s"}
                 </span>
               </div>
-              {visibleFrameTexts.map((frame, frameIndex) => {
-                const locked = isLockedSystemFrame(frameIndex);
-                const displaySpec = frameMessage({ productKey, product, vehicle: selectedVehicle, frameIndex, frameCount: imageCount, text: activeText });
+              {selectedFrameSpecs.map((frameSpec) => {
+                const frameIndex = frameSpec.frameIndex;
+                const locked = frameSpec.locked;
+                const displaySpec = frameSpec.display;
                 return (
                   <details key={`youtube-frame-text-${frameIndex}`} className={`youtube-generator__frame-card${locked ? " is-locked" : ""}`} open={frameIndex === 0}>
                     <summary className="youtube-generator__frame-card-title">
                       <strong>
-                        Frame {frameIndex + 1}
+                        Frame {frameSpec.frameNumber}
                         {locked ? " (Locked)" : ""}
                       </strong>
                       <span>
-                        {locked ? "System frame - auto-filled from vehicle data" : frameIndex === visibleFrameTexts.length - 1 ? "Final CTA frame" : "Editable text block"}
+                        {frameSpec.type === "finalCta"
+                          ? "Final CTA frame"
+                          : locked
+                            ? "System frame - auto-filled from vehicle data"
+                            : "Editable text block"}
                       </span>
                     </summary>
                     {locked ? (
@@ -1659,7 +1720,7 @@ export default function YouTubeGeneratorPage({
                         {FRAME_TEXT_FIELDS.map(([field, label]) => (
                           <label key={field} className="youtube-generator__field">
                             <span>{label}</span>
-                            <input value={frame?.[field] || ""} onChange={(event) => updateActiveFrameText(frameIndex, field, event.target.value)} />
+                            <input value={frameSpec.text?.[field] || ""} onChange={(event) => updateActiveFrameText(frameIndex, field, event.target.value)} />
                           </label>
                         ))}
                       </div>
