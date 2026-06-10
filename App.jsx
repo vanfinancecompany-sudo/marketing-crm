@@ -93,6 +93,11 @@ import {
   downloadPremiumReelMp4,
   generatePremiumReelVideoAsset,
 } from "./utils/premiumReelVideoExport.js";
+import {
+  loadYouTubeCmsUploads,
+  resolveYouTubeImageOrder,
+  YOUTUBE_DEFAULT_IMAGE_COUNT,
+} from "./utils/youtubeImageResolution.js";
 import { fetchMarketingVehicles } from "./services/marketingVehicles.js";
 import {
   deleteMarketingCreative,
@@ -928,6 +933,7 @@ export default function App() {
     vanFinance: loadYouTubeQueue("vanFinance"),
     rent2buy: loadYouTubeQueue("rent2buy"),
   }));
+  const [youtubeCmsUploads, setYoutubeCmsUploads] = useState(loadYouTubeCmsUploads);
   const [reelDownloadCooldowns, setReelDownloadCooldowns] = useState(loadReelDownloadCooldowns);
   const [factoryFilters, setFactoryFilters] = useState(DEFAULT_STOCK_FILTERS);
   const [libraryFilters, setLibraryFilters] = useState(DEFAULT_LIBRARY_FILTERS);
@@ -1331,11 +1337,19 @@ useEffect(() => {
     const selectedVehicles = filteredStockVehicles
       .filter((vehicle) => selectedIds.has(getManualQueueVehicleId(vehicle)))
       .filter((vehicle) => productQueueKey !== "rent2buy" || isRent2BuyEligible(vehicle));
-    const requiredImageCount = 10;
-    const ready = selectedVehicles.filter((vehicle) => countVehicleImageCandidates(vehicle) >= requiredImageCount).length;
+    const requiredImageCount = YOUTUBE_DEFAULT_IMAGE_COUNT;
+    const ready = selectedVehicles.filter((vehicle) => {
+      const imageOrder = resolveYouTubeImageOrder({
+        vehicle,
+        cmsUpload: youtubeCmsUploads[productQueueKey],
+        imageSource: "auto",
+        imageCount: requiredImageCount,
+      });
+      return imageOrder.totalAvailable >= requiredImageCount;
+    }).length;
     const skipped = selectedVehicles.length - ready;
     return { ready, skipped, requiredImageCount };
-  }, [filteredStockVehicles, manualStockSelectedIds, stockFilters.pipeline]);
+  }, [filteredStockVehicles, manualStockSelectedIds, stockFilters.pipeline, youtubeCmsUploads]);
 
   const manualReelQueueLocks = useMemo(() => ({
     finance: manualReelQueueVehicles.finance
@@ -2181,15 +2195,25 @@ async function handleClearTodayReels() {
 
   function handleAddSelectedToYouTubeQueue(queueKey) {
     const productQueueKey = getReelLabQueueKey(queueKey === "rent2buy" ? "rent2buy" : "vanFinance");
-    const requiredImageCount = 10;
+    const requiredImageCount = YOUTUBE_DEFAULT_IMAGE_COUNT;
+    const cmsUploads = loadYouTubeCmsUploads();
     const selectedIds = new Set(manualStockSelectedIds);
     const eligibleVehicles = vehicles
       .filter((vehicle) => selectedIds.has(getManualQueueVehicleId(vehicle)))
       .filter((vehicle) => productQueueKey !== "rent2buy" || isRent2BuyEligible(vehicle));
-    const checkedVehicles = eligibleVehicles.map((vehicle) => ({
-      vehicle,
-      imageCount: countVehicleImageCandidates(vehicle),
-    }));
+    const checkedVehicles = eligibleVehicles.map((vehicle) => {
+      const imageOrder = resolveYouTubeImageOrder({
+        vehicle,
+        cmsUpload: cmsUploads[productQueueKey],
+        imageSource: "auto",
+        imageCount: requiredImageCount,
+      });
+      return {
+        vehicle,
+        imageCount: imageOrder.totalAvailable,
+        sourceLabel: imageOrder.sourceLabel || imageOrder.source || "no images found",
+      };
+    });
     const validVehicles = checkedVehicles.filter(({ imageCount }) => imageCount >= requiredImageCount);
     const skippedVehicles = checkedVehicles.filter(({ imageCount }) => imageCount < requiredImageCount);
     const selectedItems = validVehicles.map(({ vehicle }) => createYouTubeQueueItem(vehicle, productQueueKey));
@@ -2216,7 +2240,7 @@ async function handleClearTodayReels() {
     setManualStockSelectedIds([]);
     const skippedDetails = skippedVehicles
       .slice(0, 8)
-      .map(({ vehicle, imageCount }) => `${vehicleQueueLabel(vehicle)} - ${imageCount} / ${requiredImageCount} images`)
+      .map(({ vehicle, imageCount, sourceLabel }) => `${vehicleQueueLabel(vehicle)} - ${imageCount} / ${requiredImageCount} images - ${sourceLabel}`)
       .join("\n");
     const duplicateCount = selectedItems.length - addedCount;
     const summaryLines = [
@@ -2236,6 +2260,11 @@ async function handleClearTodayReels() {
     const queueKey = getReelLabQueueKey(productKey);
     const nextItems = (nextVehicles || []).map((vehicle) => createYouTubeQueueItem(vehicle, queueKey));
     updateYouTubeQueue(queueKey, () => nextItems);
+  }
+
+  function handleUpdateYouTubeCmsUpload(productKey, upload) {
+    const queueKey = getReelLabQueueKey(productKey);
+    setYoutubeCmsUploads((prev) => ({ ...prev, [queueKey]: upload || null }));
   }
 
   function updateManualReelQueue(queueKey, updater) {
@@ -2723,6 +2752,8 @@ async function handleClearTodayReels() {
             vehiclesError={vehiclesError}
             queueByProduct={youtubeQueueVehicles}
             onQueueChange={handleUpdateYouTubeQueue}
+            cmsUploadsByProduct={youtubeCmsUploads}
+            onCmsUploadChange={handleUpdateYouTubeCmsUpload}
           />
         );
       case "Creative Library":

@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import defaultReelAudio from "../assets/default-reel-audio.mp3";
+import {
+  loadYouTubeCmsUploads,
+  parseYoutubeCmsUploadText,
+  resolveYouTubeImageOrder,
+  saveYouTubeCmsUpload,
+} from "../utils/youtubeImageResolution.js";
 
 const SHORT_WIDTH = 1080;
 const SHORT_HEIGHT = 1920;
@@ -1001,7 +1007,15 @@ function downloadWebmFallback(blob, filename) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export default function YouTubeGeneratorPage({ vehicles = [], vehiclesLoading = false, vehiclesError = "", queueByProduct: externalQueueByProduct = null, onQueueChange = null }) {
+export default function YouTubeGeneratorPage({
+  vehicles = [],
+  vehiclesLoading = false,
+  vehiclesError = "",
+  queueByProduct: externalQueueByProduct = null,
+  onQueueChange = null,
+  cmsUploadsByProduct: externalCmsUploadsByProduct = null,
+  onCmsUploadChange = null,
+}) {
   const [productKey, setProductKey] = useState("vanFinance");
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [imageSource, setImageSource] = useState("auto");
@@ -1012,7 +1026,7 @@ export default function YouTubeGeneratorPage({ vehicles = [], vehiclesLoading = 
   const [textModeByProduct, setTextModeByProduct] = useState(loadSavedTextModes);
   const [textDefaultsByProduct, setTextDefaultsByProduct] = useState(loadSavedTextDefaults);
   const [manualTextByProduct, setManualTextByProduct] = useState(defaultTextState);
-  const [cmsUploadsByProduct, setCmsUploadsByProduct] = useState({ vanFinance: null, rent2buy: null });
+  const [localCmsUploadsByProduct, setLocalCmsUploadsByProduct] = useState(loadYouTubeCmsUploads);
   const [localQueueByProduct, setLocalQueueByProduct] = useState({ vanFinance: [], rent2buy: [] });
   const [queueRunning, setQueueRunning] = useState(false);
   const [queueProgress, setQueueProgress] = useState({ index: 0, total: 0, completed: 0, failed: 0, message: "Ready" });
@@ -1029,6 +1043,7 @@ export default function YouTubeGeneratorPage({ vehicles = [], vehiclesLoading = 
     () => productVehicles.find((vehicle) => String(vehicle.id) === selectedVehicleId) || productVehicles[0] || null,
     [productVehicles, selectedVehicleId]
   );
+  const cmsUploadsByProduct = externalCmsUploadsByProduct || localCmsUploadsByProduct;
   const cmsUpload = cmsUploadsByProduct[productKey] || null;
   const cmsMatch = selectedVehicle ? findCmsMatch(cmsUpload?.rows || [], selectedVehicle) : null;
   const textMode = textModeByProduct[productKey] === "manual" ? "manual" : "default";
@@ -1040,22 +1055,11 @@ export default function YouTubeGeneratorPage({ vehicles = [], vehiclesLoading = 
   const activeQueueByProduct = externalQueueByProduct || localQueueByProduct;
   const activeQueue = activeQueueByProduct[productKey] || [];
   function resolveImageOrderForVehicle(vehicle) {
-    const cmsRecords = Array.isArray(cmsMatch?.imageRecords) ? cmsMatch.imageRecords : [];
-    const vehicleCmsMatch = vehicle ? findCmsMatch(cmsUpload?.rows || [], vehicle) : null;
-    const vehicleCmsRecords = Array.isArray(vehicleCmsMatch?.imageRecords) ? vehicleCmsMatch.imageRecords : cmsRecords;
-    const vehicleStockRecords = getVehicleStockImageRecords(vehicle);
-    const stockRecord = vehicleImage(vehicle) ? [{ url: vehicleImage(vehicle), source: "stock image" }] : [];
-    if (imageSource === "cms") return buildOrderedImageRecords(vehicleCmsRecords.length ? vehicleCmsRecords : vehicleStockRecords, imageCount);
-    if (imageSource === "stock") return buildOrderedImageRecords(vehicleStockRecords.length ? vehicleStockRecords : stockRecord, imageCount);
-    return buildOrderedImageRecords(vehicleCmsRecords.length ? vehicleCmsRecords : vehicleStockRecords.length ? vehicleStockRecords : stockRecord, imageCount);
+    return resolveYouTubeImageOrder({ vehicle, cmsUpload, imageSource, imageCount });
   }
   const resolvedImageOrder = useMemo(() => {
-    const cmsRecords = Array.isArray(cmsMatch?.imageRecords) ? cmsMatch.imageRecords : [];
-    const stockRecord = vehicleImage(selectedVehicle) ? [{ url: vehicleImage(selectedVehicle), source: "stock image" }] : [];
-    if (imageSource === "cms") return buildOrderedImageRecords(cmsRecords.length ? cmsRecords : stockRecords, imageCount);
-    if (imageSource === "stock") return buildOrderedImageRecords(stockRecords.length ? stockRecords : stockRecord, imageCount);
-    return buildOrderedImageRecords(cmsRecords.length ? cmsRecords : stockRecords.length ? stockRecords : stockRecord, imageCount);
-  }, [cmsMatch, imageSource, imageCount, selectedVehicle, stockRecords]);
+    return resolveYouTubeImageOrder({ vehicle: selectedVehicle, cmsUpload, imageSource, imageCount });
+  }, [cmsUpload, imageSource, imageCount, selectedVehicle]);
   const resolvedImages = resolvedImageOrder.records.map((item) => item.url);
   const availableImageCount = resolvedImageOrder.records.length;
   const hasEnoughImages = availableImageCount >= imageCount;
@@ -1093,9 +1097,14 @@ export default function YouTubeGeneratorPage({ vehicles = [], vehiclesLoading = 
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const rows = parseCmsUploadText(await file.text());
+      const rows = parseYoutubeCmsUploadText(await file.text());
       const upload = { fileName: file.name, rows, loadedAt: new Date().toISOString() };
-      setCmsUploadsByProduct((prev) => ({ ...prev, [productKey]: upload }));
+      if (onCmsUploadChange) {
+        onCmsUploadChange(productKey, upload);
+      } else {
+        setLocalCmsUploadsByProduct((prev) => ({ ...prev, [productKey]: upload }));
+      }
+      saveYouTubeCmsUpload(productKey, upload);
       setImageSource("auto");
       setStatus(`${product.label} CMS upload loaded: ${rows.length} row${rows.length === 1 ? "" : "s"}.`);
       setError("");
@@ -1107,7 +1116,12 @@ export default function YouTubeGeneratorPage({ vehicles = [], vehiclesLoading = 
   }
 
   function clearCmsUpload() {
-    setCmsUploadsByProduct((prev) => ({ ...prev, [productKey]: null }));
+    if (onCmsUploadChange) {
+      onCmsUploadChange(productKey, null);
+    } else {
+      setLocalCmsUploadsByProduct((prev) => ({ ...prev, [productKey]: null }));
+    }
+    saveYouTubeCmsUpload(productKey, null);
     setStatus(`${product.label} CMS upload cleared.`);
   }
 
