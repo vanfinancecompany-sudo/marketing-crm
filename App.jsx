@@ -2237,9 +2237,8 @@ async function handleClearTodayReels() {
         sourceLabel: imageOrder.sourceLabel || imageOrder.source || "no images found",
       };
     });
-    const validVehicles = checkedVehicles.filter(({ imageCount }) => imageCount >= requiredImageCount);
-    const skippedVehicles = checkedVehicles.filter(({ imageCount }) => imageCount < requiredImageCount);
-    const selectedItems = validVehicles.map(({ vehicle }) => createYouTubeQueueItem(vehicle, productQueueKey));
+    const warningVehicles = checkedVehicles.filter(({ imageCount }) => imageCount < requiredImageCount);
+    const selectedItems = checkedVehicles.map(({ vehicle }) => createYouTubeQueueItem(vehicle, productQueueKey));
 
     if (!eligibleVehicles.length) {
       setGenerationMessage("Select at least one stock vehicle for the YouTube queue.");
@@ -2261,19 +2260,17 @@ async function handleClearTodayReels() {
     }
 
     setManualStockSelectedIds([]);
-    const skippedDetails = skippedVehicles
+    const warningDetails = warningVehicles
       .slice(0, 8)
       .map(({ vehicle, imageCount, sourceLabel }) => `${vehicleQueueLabel(vehicle)} - ${imageCount} / ${requiredImageCount} images - ${sourceLabel}`)
       .join("\n");
     const duplicateCount = selectedItems.length - addedCount;
     const summaryLines = [
-      `${addedCount} vehicle${addedCount === 1 ? "" : "s"} added to YouTube Queue. ${skippedVehicles.length} skipped because ${
-        skippedVehicles.length === 1 ? "it has" : "they have"
-      } fewer than ${requiredImageCount} images.`,
+      `${addedCount} vehicle${addedCount === 1 ? "" : "s"} added to YouTube Queue.`,
       duplicateCount > 0 ? `${duplicateCount} selected vehicle${duplicateCount === 1 ? " was" : "s were"} already in the YouTube Queue.` : "",
-      skippedDetails ? `Skipped:\n${skippedDetails}` : "",
-      skippedVehicles.length > 8 ? `...and ${skippedVehicles.length - 8} more skipped vehicle${skippedVehicles.length - 8 === 1 ? "" : "s"}.` : "",
-      addedCount ? "Open YouTube Generator to download." : "Upload CMS images in YouTube Generator or choose vehicles with more images.",
+      warningDetails ? `Image warnings only - YouTube Generator will validate during generation:\n${warningDetails}` : "",
+      warningVehicles.length > 8 ? `...and ${warningVehicles.length - 8} more image warning${warningVehicles.length - 8 === 1 ? "" : "s"}.` : "",
+      "Open YouTube Generator to download.",
     ].filter(Boolean);
     setGenerationMessage(summaryLines.join("\n"));
     setCreativeError("");

@@ -71,7 +71,7 @@ export default function StockPage({
           <span>Pick vehicles, then send them to Reel Lab Beta or YouTube Generator queues.</span>
           {youtubeSelectionSummary && selectedCount ? (
             <span>
-              Ready for YouTube: {youtubeSelectionSummary.ready} | Skipped: {youtubeSelectionSummary.skipped} need more images
+              Ready for YouTube: {youtubeSelectionSummary.ready} | Warning: {youtubeSelectionSummary.skipped} may need more images
             </span>
           ) : null}
           <div className="card-actions">
