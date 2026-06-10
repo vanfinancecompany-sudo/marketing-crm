@@ -1,6 +1,10 @@
 export const YOUTUBE_MAX_IMAGES = 15;
 export const YOUTUBE_DEFAULT_IMAGE_COUNT = 10;
 export const YOUTUBE_CMS_UPLOAD_STORAGE_KEY = "youtubeGeneratorCmsUploads";
+const YOUTUBE_CMS_DB_NAME = "youtubeGeneratorCmsUploadsDb";
+const YOUTUBE_CMS_DB_VERSION = 1;
+const YOUTUBE_CMS_STORE_NAME = "uploads";
+const DEFAULT_UPLOADS = { vanFinance: null, rent2buy: null };
 
 function cleanText(value) {
   return String(value || "")
@@ -296,7 +300,7 @@ export function resolveYouTubeImageOrder({ vehicle, cmsUpload, imageSource = "au
 }
 
 export function loadYouTubeCmsUploads() {
-  if (typeof window === "undefined") return { vanFinance: null, rent2buy: null };
+  if (typeof window === "undefined") return { ...DEFAULT_UPLOADS };
   try {
     const parsed = JSON.parse(window.localStorage.getItem(YOUTUBE_CMS_UPLOAD_STORAGE_KEY) || "{}");
     return {
@@ -304,18 +308,84 @@ export function loadYouTubeCmsUploads() {
       rent2buy: parsed.rent2buy || null,
     };
   } catch {
-    return { vanFinance: null, rent2buy: null };
+    return { ...DEFAULT_UPLOADS };
   }
 }
 
-export function saveYouTubeCmsUpload(productKey, upload) {
+function openYoutubeCmsDb() {
+  if (typeof window === "undefined" || !window.indexedDB) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const request = window.indexedDB.open(YOUTUBE_CMS_DB_NAME, YOUTUBE_CMS_DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(YOUTUBE_CMS_STORE_NAME)) {
+        db.createObjectStore(YOUTUBE_CMS_STORE_NAME);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+    request.onblocked = () => resolve(null);
+  });
+}
+
+async function readYoutubeCmsDbUploads() {
+  const db = await openYoutubeCmsDb();
+  if (!db) return { ...DEFAULT_UPLOADS };
+  return new Promise((resolve) => {
+    const transaction = db.transaction(YOUTUBE_CMS_STORE_NAME, "readonly");
+    const store = transaction.objectStore(YOUTUBE_CMS_STORE_NAME);
+    const request = store.get("uploads");
+    request.onsuccess = () => {
+      const value = request.result || {};
+      resolve({ vanFinance: value.vanFinance || null, rent2buy: value.rent2buy || null });
+    };
+    request.onerror = () => resolve({ ...DEFAULT_UPLOADS });
+    transaction.oncomplete = () => db.close();
+    transaction.onerror = () => db.close();
+    transaction.onabort = () => db.close();
+  });
+}
+
+async function writeYoutubeCmsDbUploads(uploads) {
+  const db = await openYoutubeCmsDb();
+  if (!db) return;
+  await new Promise((resolve) => {
+    const transaction = db.transaction(YOUTUBE_CMS_STORE_NAME, "readwrite");
+    const store = transaction.objectStore(YOUTUBE_CMS_STORE_NAME);
+    store.put(uploads || { ...DEFAULT_UPLOADS }, "uploads");
+    transaction.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onerror = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onabort = () => {
+      db.close();
+      resolve();
+    };
+  });
+}
+
+export async function loadYouTubeCmsUploadsAsync() {
+  const localUploads = loadYouTubeCmsUploads();
+  const dbUploads = await readYoutubeCmsDbUploads();
+  return {
+    vanFinance: dbUploads.vanFinance || localUploads.vanFinance || null,
+    rent2buy: dbUploads.rent2buy || localUploads.rent2buy || null,
+  };
+}
+
+export async function saveYouTubeCmsUpload(productKey, upload) {
   if (typeof window === "undefined") return;
-  const current = loadYouTubeCmsUploads();
   const queueKey = productKey === "rent2buy" ? "rent2buy" : "vanFinance";
-  const next = { ...current, [queueKey]: upload || null };
+  const dbCurrent = await readYoutubeCmsDbUploads();
+  const dbNext = { ...dbCurrent, [queueKey]: upload || null };
+  await writeYoutubeCmsDbUploads(dbNext);
   try {
-    window.localStorage.setItem(YOUTUBE_CMS_UPLOAD_STORAGE_KEY, JSON.stringify(next));
+    window.localStorage.setItem(YOUTUBE_CMS_UPLOAD_STORAGE_KEY, JSON.stringify(dbNext));
   } catch {
-    // Large Wix exports can exceed localStorage; App state still keeps this upload for the current session.
+    // Large Wix exports can exceed localStorage; IndexedDB and App state keep this upload available.
   }
 }

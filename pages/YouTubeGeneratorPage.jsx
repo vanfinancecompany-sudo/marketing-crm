@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import defaultReelAudio from "../assets/default-reel-audio.mp3";
 import {
+  loadYouTubeCmsUploadsAsync,
   loadYouTubeCmsUploads,
   parseYoutubeCmsUploadText,
   resolveYouTubeImageOrder,
@@ -1078,6 +1079,17 @@ export default function YouTubeGeneratorPage({
     setStatus("");
     setError("");
   }, [productKey]);
+
+  useEffect(() => {
+    if (externalCmsUploadsByProduct) return undefined;
+    let cancelled = false;
+    loadYouTubeCmsUploadsAsync().then((uploads) => {
+      if (!cancelled) setLocalCmsUploadsByProduct(uploads);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [externalCmsUploadsByProduct]);
 
   useEffect(() => {
     generationKeyRef.current = currentPreviewKey;

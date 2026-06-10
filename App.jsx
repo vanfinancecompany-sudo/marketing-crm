@@ -94,6 +94,7 @@ import {
   generatePremiumReelVideoAsset,
 } from "./utils/premiumReelVideoExport.js";
 import {
+  loadYouTubeCmsUploadsAsync,
   loadYouTubeCmsUploads,
   resolveYouTubeImageOrder,
   YOUTUBE_DEFAULT_IMAGE_COUNT,
@@ -991,6 +992,16 @@ const [hiddenTodayReelIds, setHiddenTodayReelIds] = useState(() => {
 
   useEffect(() => {
     loadVehicles();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadYouTubeCmsUploadsAsync().then((uploads) => {
+      if (!cancelled) setYoutubeCmsUploads(uploads);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -2196,7 +2207,7 @@ async function handleClearTodayReels() {
   function handleAddSelectedToYouTubeQueue(queueKey) {
     const productQueueKey = getReelLabQueueKey(queueKey === "rent2buy" ? "rent2buy" : "vanFinance");
     const requiredImageCount = YOUTUBE_DEFAULT_IMAGE_COUNT;
-    const cmsUploads = loadYouTubeCmsUploads();
+    const cmsUploads = youtubeCmsUploads;
     const selectedIds = new Set(manualStockSelectedIds);
     const eligibleVehicles = vehicles
       .filter((vehicle) => selectedIds.has(getManualQueueVehicleId(vehicle)))
