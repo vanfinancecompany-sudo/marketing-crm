@@ -17,6 +17,7 @@ export default function StockPage({
   onAddSelectedToQueue,
   onAddSelectedToReelLabQueue,
   onAddSelectedToYouTubeQueue,
+  youtubeSelectionSummary = null,
   reelActionLocks = {},
   ignoreReelLock = false,
   onIgnoreReelLockChange,
@@ -68,6 +69,11 @@ export default function StockPage({
         <div className="selection-summary stock-selection-summary">
           <strong>{selectedCount} selected for manual reel queue</strong>
           <span>Pick vehicles, then send them to Reel Lab Beta or YouTube Generator queues.</span>
+          {youtubeSelectionSummary && selectedCount ? (
+            <span>
+              Ready for YouTube: {youtubeSelectionSummary.ready} | Skipped: {youtubeSelectionSummary.skipped} need more images
+            </span>
+          ) : null}
           <div className="card-actions">
             <label className="toggle-row">
               <input
