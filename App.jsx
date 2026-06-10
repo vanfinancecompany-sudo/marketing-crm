@@ -57,6 +57,7 @@ import VanscoStockWatchPage from "./pages/VanscoStockWatchPage.jsx";
 import ReelFactoryPage from "./pages/ReelFactoryPage.jsx";
 import PremiumReelStudioBetaPage from "./pages/PremiumReelStudioBetaPage.jsx";
 import ReelLabBetaPage from "./pages/ReelLabBetaPage.jsx";
+import YouTubeGeneratorPage from "./pages/YouTubeGeneratorPage.jsx";
 import CreativeLibraryPage from "./pages/CreativeLibraryPage.jsx";
 import PostingDeskPage from "./pages/PostingDeskPage.jsx";
 import {
@@ -155,6 +156,10 @@ const MANUAL_REEL_QUEUE_STORAGE_KEYS = {
 const REEL_LAB_QUEUE_STORAGE_KEYS = {
   vanFinance: "reelLabQueue_vanFinance",
   rent2buy: "reelLabQueue_rent2buy",
+};
+const YOUTUBE_QUEUE_STORAGE_KEYS = {
+  vanFinance: "youtubeGeneratorQueue_vanFinance",
+  rent2buy: "youtubeGeneratorQueue_rent2buy",
 };
 
 const REEL_CLICK_HISTORY_STORAGE_KEY = "marketingReelClickHistory";
@@ -439,6 +444,7 @@ const VIEW_PATHS = {
   "Reel Factory": "/reel-factory",
   "Premium Reel Studio": "/premium-reel-studio",
   "Reel Lab Beta": "/reel-lab",
+  "YouTube Generator": "/youtube-generator",
   "Creative Library": "/creative-library",
   "Van Finance Facebook": "/van-finance-facebook",
   "Rent2Buy Facebook": "/rent2buy-facebook",
@@ -457,6 +463,7 @@ function viewFromPath() {
     return "Premium Reel Studio";
   }
   if (path === "/reel-lab") return "Reel Lab Beta";
+  if (path === "/youtube-generator" || path === "/youtube-shorts-beta") return "YouTube Generator";
   if (path === "/creative-library") return "Creative Library";
   if (path === "/van-finance-facebook") return "Van Finance Facebook";
   if (path === "/rent2buy-facebook") return "Rent2Buy Facebook";
@@ -734,6 +741,91 @@ function saveReelLabQueue(productKey, queue) {
   }
 }
 
+function createYouTubeQueueItem(vehicle, productKey) {
+  return {
+    ...createReelLabQueueItem(vehicle, productKey),
+    source: "stockYouTubeGenerator",
+  };
+}
+
+function normalizeYouTubeQueueItem(item, productKey) {
+  return normalizeReelLabQueueItem(item, productKey);
+}
+
+function loadYouTubeQueue(productKey) {
+  const queueKey = getReelLabQueueKey(productKey);
+  if (typeof window === "undefined") return [];
+
+  try {
+    const saved = localStorage.getItem(YOUTUBE_QUEUE_STORAGE_KEYS[queueKey]);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed.map((item) => normalizeYouTubeQueueItem(item, queueKey)).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveYouTubeQueue(productKey, queue) {
+  const queueKey = getReelLabQueueKey(productKey);
+  const storageKey = YOUTUBE_QUEUE_STORAGE_KEYS[queueKey];
+  if (!storageKey || typeof window === "undefined") return;
+  const normalizedQueue = queue.map((item) => normalizeYouTubeQueueItem(item, queueKey)).filter(Boolean);
+
+  if (normalizedQueue.length) {
+    localStorage.setItem(storageKey, JSON.stringify(normalizedQueue));
+  } else {
+    localStorage.removeItem(storageKey);
+  }
+}
+
+function countVehicleImageCandidates(vehicle) {
+  const seen = new Set();
+  const add = (value) => {
+    if (!value) return;
+    if (Array.isArray(value)) {
+      value.forEach(add);
+      return;
+    }
+    if (typeof value === "object") {
+      add(value.url || value.src || value.fileUrl || value.image || value.uri);
+      Object.values(value).forEach((nestedValue) => {
+        if (typeof nestedValue === "string") add(nestedValue);
+      });
+      return;
+    }
+    const text = String(value || "");
+    const matches = text.match(/https?:\/\/[^\s"'<>|;,]+|(?:wix:)?image:\/\/v1\/[^"'<>|\s,]+/gi);
+    if (matches) {
+      matches.forEach((match) => seen.add(match.toLowerCase()));
+      return;
+    }
+    if (/static\.wixstatic\.com\/media\/|\.(?:jpe?g|png|webp)(?:[?#].*)?$/i.test(text)) {
+      seen.add(text.toLowerCase());
+    }
+  };
+
+  [
+    vehicle?.image,
+    vehicle?.picture,
+    vehicle?.mainImage,
+    vehicle?.imageUrl,
+    vehicle?.image_url,
+    vehicle?.thumbnail,
+    vehicle?.mediaGallery,
+    vehicle?.mainImages,
+    vehicle?.gallery,
+    vehicle?.images,
+    vehicle?.imageUrls,
+    vehicle?.pictures,
+  ].forEach(add);
+
+  Object.entries(vehicle || {}).forEach(([key, value]) => {
+    if (/image|picture|photo|gallery|media/i.test(key)) add(value);
+  });
+
+  return seen.size;
+}
+
 function isRent2BuyEligible(vehicle) {
   return Boolean(vehicle?.rent2buyEligible || vehicle?.pipeline === "rent2buy");
 }
@@ -825,6 +917,10 @@ export default function App() {
   const [reelLabQueues, setReelLabQueues] = useState(() => ({
     vanFinance: loadReelLabQueue("vanFinance"),
     rent2buy: loadReelLabQueue("rent2buy"),
+  }));
+  const [youtubeQueues, setYoutubeQueues] = useState(() => ({
+    vanFinance: loadYouTubeQueue("vanFinance"),
+    rent2buy: loadYouTubeQueue("rent2buy"),
   }));
   const [reelDownloadCooldowns, setReelDownloadCooldowns] = useState(loadReelDownloadCooldowns);
   const [factoryFilters, setFactoryFilters] = useState(DEFAULT_STOCK_FILTERS);
@@ -1212,6 +1308,15 @@ useEffect(() => {
       .map((item) => resolveManualQueuedVehicle(item, vehicles))
       .filter(Boolean),
   }), [reelLabQueues, vehicles]);
+
+  const youtubeQueueVehicles = useMemo(() => ({
+    vanFinance: (youtubeQueues.vanFinance || [])
+      .map((item) => resolveManualQueuedVehicle(item, vehicles))
+      .filter(Boolean),
+    rent2buy: (youtubeQueues.rent2buy || [])
+      .map((item) => resolveManualQueuedVehicle(item, vehicles))
+      .filter(Boolean),
+  }), [youtubeQueues, vehicles]);
 
   const manualReelQueueLocks = useMemo(() => ({
     finance: manualReelQueueVehicles.finance
@@ -2041,6 +2146,65 @@ async function handleClearTodayReels() {
     updateReelLabQueue(queueKey, () => nextItems);
   }
 
+  function updateYouTubeQueue(productKey, updater) {
+    const queueKey = getReelLabQueueKey(productKey);
+    setYoutubeQueues((prev) => {
+      const currentQueue = (prev[queueKey] || [])
+        .map((item) => normalizeYouTubeQueueItem(item, queueKey))
+        .filter(Boolean);
+      const nextQueue = updater(currentQueue);
+      const normalizedQueue = nextQueue.map((item) => normalizeYouTubeQueueItem(item, queueKey)).filter(Boolean);
+      const nextQueues = { ...prev, [queueKey]: normalizedQueue };
+      saveYouTubeQueue(queueKey, normalizedQueue);
+      return nextQueues;
+    });
+  }
+
+  function handleAddSelectedToYouTubeQueue(queueKey) {
+    const productQueueKey = getReelLabQueueKey(queueKey === "rent2buy" ? "rent2buy" : "vanFinance");
+    const selectedIds = new Set(manualStockSelectedIds);
+    const eligibleVehicles = vehicles
+      .filter((vehicle) => selectedIds.has(getManualQueueVehicleId(vehicle)))
+      .filter((vehicle) => productQueueKey !== "rent2buy" || isRent2BuyEligible(vehicle));
+    const selectedVehicles = eligibleVehicles.filter((vehicle) => countVehicleImageCandidates(vehicle) >= 10);
+    const selectedItems = selectedVehicles.map((vehicle) => createYouTubeQueueItem(vehicle, productQueueKey));
+
+    if (!selectedItems.length) {
+      setGenerationMessage(
+        eligibleVehicles.length
+          ? "Selected vehicle does not have at least 10 stock images for the default YouTube Short setup. Upload CMS images in YouTube Generator or choose another vehicle."
+          : "Select at least one stock vehicle for the YouTube queue."
+      );
+      setCreativeError("");
+      return;
+    }
+
+    updateYouTubeQueue(productQueueKey, (existing) => {
+      const existingIds = new Set(existing.map((item) => item.id || item.reg || item.title || item.name));
+      const additions = selectedItems.filter((item) => {
+        const key = item.id || item.reg || item.title || item.name;
+        return key && !existingIds.has(key);
+      });
+      return [...existing, ...additions];
+    });
+
+    setManualStockSelectedIds([]);
+    setGenerationMessage(
+      `${selectedItems.length} selected vehicle${selectedItems.length === 1 ? "" : "s"} added to ${
+        productQueueKey === "rent2buy" ? "Rent2Buy" : "Finance"
+      } YouTube queue. Open YouTube Generator to download.${
+        eligibleVehicles.length > selectedVehicles.length ? ` ${eligibleVehicles.length - selectedVehicles.length} skipped because fewer than 10 stock images were detected.` : ""
+      }`
+    );
+    setCreativeError("");
+  }
+
+  function handleUpdateYouTubeQueue(productKey, nextVehicles) {
+    const queueKey = getReelLabQueueKey(productKey);
+    const nextItems = (nextVehicles || []).map((vehicle) => createYouTubeQueueItem(vehicle, queueKey));
+    updateYouTubeQueue(queueKey, () => nextItems);
+  }
+
   function updateManualReelQueue(queueKey, updater) {
     setManualReelQueues((prev) => {
       const currentQueue = (prev[queueKey] || [])
@@ -2444,6 +2608,7 @@ async function handleClearTodayReels() {
             onToggleVehicle={handleToggleManualStockVehicle}
             onAddSelectedToQueue={handleAddSelectedToManualReelQueue}
             onAddSelectedToReelLabQueue={handleAddSelectedToReelLabQueue}
+            onAddSelectedToYouTubeQueue={handleAddSelectedToYouTubeQueue}
             reelActionLocks={reelActionLocks}
             ignoreReelLock={ignoreReelLock}
             onIgnoreReelLockChange={(value) => handleReelFactoryChange("ignoreVehicleCooldown", value)}
@@ -2514,6 +2679,16 @@ async function handleClearTodayReels() {
             vehiclesError={vehiclesError}
             queueByProduct={reelLabQueueVehicles}
             onQueueChange={handleUpdateReelLabQueue}
+          />
+        );
+      case "YouTube Generator":
+        return (
+          <YouTubeGeneratorPage
+            vehicles={vehicles}
+            vehiclesLoading={vehiclesLoading}
+            vehiclesError={vehiclesError}
+            queueByProduct={youtubeQueueVehicles}
+            onQueueChange={handleUpdateYouTubeQueue}
           />
         );
       case "Creative Library":

@@ -16,6 +16,7 @@ export default function StockPage({
   onToggleVehicle,
   onAddSelectedToQueue,
   onAddSelectedToReelLabQueue,
+  onAddSelectedToYouTubeQueue,
   reelActionLocks = {},
   ignoreReelLock = false,
   onIgnoreReelLockChange,
@@ -66,7 +67,7 @@ export default function StockPage({
 
         <div className="selection-summary stock-selection-summary">
           <strong>{selectedCount} selected for manual reel queue</strong>
-          <span>Pick vehicles, then send them to the Finance or Rent2Buy Reel Lab Beta queue.</span>
+          <span>Pick vehicles, then send them to Reel Lab Beta or YouTube Generator queues.</span>
           <div className="card-actions">
             <label className="toggle-row">
               <input
@@ -91,6 +92,14 @@ export default function StockPage({
               disabled={!selectedCount}
             >
               Add selected to Rent2Buy Reel Lab Queue
+            </button>
+            <button
+              className="button button--primary"
+              type="button"
+              onClick={() => onAddSelectedToYouTubeQueue?.(filters.pipeline === "rent2buy" ? "rent2buy" : "vanFinance")}
+              disabled={!selectedCount}
+            >
+              Add to YouTube Queue
             </button>
           </div>
           {generationMessage ? <div className="notice">{generationMessage}</div> : null}
