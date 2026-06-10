@@ -789,7 +789,7 @@ function drawLightSweep(ctx, x, y, width, height, progress, alpha = 0.25) {
   ctx.restore();
 }
 
-function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, text, elapsedSeconds, durationSeconds, frameSpecs }) {
+function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, text, frameIndex, frameProgress, frameSpecs }) {
   const product = PRODUCTS[productKey];
   const config = TEMPLATE_CONFIG[visualTemplate] || TEMPLATE_CONFIG.blackPremium;
   const imageArea = config.imageArea;
@@ -798,19 +798,18 @@ function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
     : buildYouTubeFrameSpecs({ productKey, product, vehicle, text, frameCount: loadedImages.length || 1 });
   const totalFrameCount = Math.max(1, specs.length);
   const finalFrameIndex = totalFrameCount - 1;
-  const segmentDuration = durationSeconds / totalFrameCount;
-  const frameIndex = Math.min(finalFrameIndex, Math.floor(elapsedSeconds / segmentDuration));
-  const frameSpec = specs[frameIndex] || specs[finalFrameIndex];
-  const frameProgress = Math.min(1, (elapsedSeconds - frameIndex * segmentDuration) / segmentDuration);
+  const currentFrameIndex = Math.max(0, Math.min(finalFrameIndex, Number(frameIndex) || 0));
+  const currentFrameProgress = Math.max(0, Math.min(1, Number(frameProgress) || 0));
+  const frameSpec = specs[currentFrameIndex] || specs[finalFrameIndex];
   const isFinalCtaFrame = frameSpec?.type === "finalCta";
-  const image = loadedImages[Math.min(frameIndex, loadedImages.length - 1)] || loadedImages[0];
-  const transition = Math.min(1, frameProgress / config.transition);
+  const image = loadedImages[Math.min(currentFrameIndex, loadedImages.length - 1)] || loadedImages[0];
+  const transition = Math.min(1, currentFrameProgress / config.transition);
   const fade = easeInOut(transition);
   const isLuxury = visualTemplate === "luxuryDealer";
   const isTikTok = visualTemplate === "tiktokPunch";
-  const containScale = 0.972 + Math.sin(frameProgress * Math.PI) * Math.min(config.zoom, 0.012);
-  const panX = Math.sin((frameIndex + frameProgress) * 1.4) * (isTikTok ? 8 : 5);
-  const panY = Math.cos((frameIndex + frameProgress) * 1.1) * 4;
+  const containScale = 0.972 + Math.sin(currentFrameProgress * Math.PI) * Math.min(config.zoom, 0.012);
+  const panX = Math.sin((currentFrameIndex + currentFrameProgress) * 1.4) * (isTikTok ? 8 : 5);
+  const panY = Math.cos((currentFrameIndex + currentFrameProgress) * 1.1) * 4;
 
   ctx.clearRect(0, 0, SHORT_WIDTH, SHORT_HEIGHT);
   const bg = ctx.createLinearGradient(0, 0, 0, SHORT_HEIGHT);
@@ -905,9 +904,9 @@ function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
     ctx.fillStyle = "rgba(255,255,255,0.9)";
     drawFitText(ctx, `www.${product.domain}`.toUpperCase(), SHORT_WIDTH / 2, buttonY + 186, textWidth, 38, 26, 900);
     ctx.textAlign = "left";
-    drawLightSweep(ctx, textX - 20, textY + 64, textWidth + 40, 230, Math.min(1, frameProgress * 1.2), isTikTok ? 0.4 : 0.26);
+    drawLightSweep(ctx, textX - 20, textY + 64, textWidth + 40, 230, Math.min(1, currentFrameProgress * 1.2), isTikTok ? 0.4 : 0.26);
   } else {
-    const spec = frameSpec?.display || frameMessage({ productKey, product, vehicle, frameIndex, frameCount: totalFrameCount, text });
+    const spec = frameSpec?.display || frameMessage({ productKey, product, vehicle, frameIndex: currentFrameIndex, frameCount: totalFrameCount, text });
     ctx.fillStyle = product.accent;
     ctx.font = `900 28px ${CANVAS_FONT}`;
     if (spec.eyebrow) ctx.fillText(spec.eyebrow.toUpperCase(), textX, textY);
@@ -925,12 +924,12 @@ function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
     ctx.font = `900 34px ${CANVAS_FONT}`;
     drawFitText(ctx, `www.${product.domain}`.toUpperCase(), SHORT_WIDTH / 2, 1734, textWidth, 38, 26, 900);
     ctx.textAlign = "left";
-    drawLightSweep(ctx, textX - 20, textY + 52, textWidth + 40, 180, Math.min(1, frameProgress * 1.2), isTikTok ? 0.36 : 0.22);
+    drawLightSweep(ctx, textX - 20, textY + 52, textWidth + 40, 180, Math.min(1, currentFrameProgress * 1.2), isTikTok ? 0.36 : 0.22);
   }
   ctx.restore();
 
-  if (frameProgress < 0.08 && frameIndex > 0) {
-    ctx.fillStyle = `rgba(255,255,255,${(1 - frameProgress / 0.08) * 0.08})`;
+  if (currentFrameProgress < 0.08 && currentFrameIndex > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${(1 - currentFrameProgress / 0.08) * 0.08})`;
     ctx.fillRect(0, 0, SHORT_WIDTH, SHORT_HEIGHT);
   }
 }
@@ -1014,17 +1013,33 @@ async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, 
     recorder.onstop = () => resolve(new Blob(chunks, { type: supportedMime }));
   });
 
-  const totalFrames = durationSeconds * recordingFps;
+  const totalFrames = Math.max(1, Math.round(durationSeconds * recordingFps));
+  const totalLogicalFrames = renderFrameSpecs.length;
   let frame = 0;
   const render = () => {
-    const elapsedSeconds = Math.min(durationSeconds, frame / recordingFps);
-    drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, text, elapsedSeconds, durationSeconds, frameSpecs: renderFrameSpecs });
+    const captureFrame = Math.min(totalFrames - 1, frame);
+    const framePosition = captureFrame / totalFrames;
+    const logicalFrameIndex = Math.min(totalLogicalFrames - 1, Math.floor(framePosition * totalLogicalFrames));
+    const frameStart = logicalFrameIndex / totalLogicalFrames;
+    const frameEnd = (logicalFrameIndex + 1) / totalLogicalFrames;
+    const frameProgress = frameEnd > frameStart ? (framePosition - frameStart) / (frameEnd - frameStart) : 0;
+    drawYouTubeFrame(ctx, loadedImages, {
+      productKey,
+      vehicle,
+      visualTemplate,
+      text,
+      frameIndex: logicalFrameIndex,
+      frameProgress,
+      frameSpecs: renderFrameSpecs,
+    });
     if (frame % recordingFps === 0) onProgress?.(`Rendering ${Math.round((frame / totalFrames) * 100)}%`);
     frame += 1;
-    if (frame <= totalFrames) {
+    if (frame < totalFrames) {
       timer = window.setTimeout(render, 1000 / recordingFps);
     } else if (recorder.state !== "inactive") {
-      recorder.stop();
+      window.setTimeout(() => {
+        if (recorder.state !== "inactive") recorder.stop();
+      }, 150);
     }
   };
 
