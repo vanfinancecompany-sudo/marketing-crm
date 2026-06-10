@@ -28,7 +28,12 @@ function safeBaseFilename(value) {
 
 function safeDuration(value) {
   const duration = Number(value);
-  return [20, 25, 30, 35].includes(duration) ? duration : 25;
+  return [20, 25, 30, 35].includes(duration) ? duration : 20;
+}
+
+function safeFps(value) {
+  const fps = Number(value);
+  return [24, 30].includes(fps) ? fps : 24;
 }
 
 async function readRawBody(req) {
@@ -86,6 +91,7 @@ export default async function handler(req, res) {
   }
 
   const duration = safeDuration(req.headers["x-youtube-duration"]);
+  const fps = safeFps(req.headers["x-youtube-fps"]);
   const requestedFilename = req.headers["x-reel-filename"] || "youtube-short.mp4";
   const inputExtension = contentType.includes("mp4") ? "mp4" : "webm";
   const outputName = `${safeBaseFilename(requestedFilename)}.mp4`;
@@ -105,9 +111,9 @@ export default async function handler(req, res) {
       "-t",
       String(duration),
       "-vf",
-      "fps=30,scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1,setpts=PTS-STARTPTS",
+      `fps=${fps},scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1,setpts=PTS-STARTPTS`,
       "-r",
-      "30",
+      String(fps),
       "-c:v",
       "libx264",
       "-preset",

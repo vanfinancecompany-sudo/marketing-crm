@@ -10,10 +10,13 @@ import {
 
 const SHORT_WIDTH = 1080;
 const SHORT_HEIGHT = 1920;
-const SHORT_FPS = 30;
+const DEFAULT_SHORT_FPS = 24;
 const CANVAS_FONT = "'Inter', 'Aptos', 'Segoe UI', Arial, sans-serif";
 const IMAGE_COUNT_OPTIONS = [8, 10, 12, 15];
 const DURATION_OPTIONS = [20, 25, 30, 35];
+const FPS_OPTIONS = [24, 30];
+const YOUTUBE_VIDEO_BITRATE = 2000000;
+const YOUTUBE_AUDIO_BITRATE = 96000;
 const MAX_IMAGES = 15;
 const TEXT_DEFAULTS_STORAGE_KEY = "youtubeGeneratorTextDefaults";
 const TEXT_MODE_STORAGE_KEY = "youtubeGeneratorTextMode";
@@ -872,7 +875,21 @@ function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
   }
 }
 
-async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, text, imageUrls, durationSeconds, musicOn, onProgress }) {
+function createYouTubeMediaRecorder(stream, supportedMime) {
+  const options = {
+    mimeType: supportedMime,
+    videoBitsPerSecond: YOUTUBE_VIDEO_BITRATE,
+    audioBitsPerSecond: YOUTUBE_AUDIO_BITRATE,
+  };
+
+  try {
+    return new MediaRecorder(stream, options);
+  } catch {
+    return new MediaRecorder(stream, { mimeType: supportedMime });
+  }
+}
+
+async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, text, imageUrls, durationSeconds, fps, musicOn, onProgress }) {
   if (typeof HTMLCanvasElement === "undefined" || typeof MediaRecorder === "undefined") {
     throw new Error("This browser cannot record YouTube Shorts.");
   }
@@ -914,12 +931,13 @@ async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, 
     }
   }
 
-  const canvasStream = canvas.captureStream(SHORT_FPS);
+  const recordingFps = FPS_OPTIONS.includes(Number(fps)) ? Number(fps) : DEFAULT_SHORT_FPS;
+  const canvasStream = canvas.captureStream(recordingFps);
   const stream = new MediaStream([
     ...canvasStream.getVideoTracks(),
     ...(audioAsset.stream ? audioAsset.stream.getAudioTracks() : []),
   ]);
-  const recorder = new MediaRecorder(stream, { mimeType: supportedMime });
+  const recorder = createYouTubeMediaRecorder(stream, supportedMime);
   const chunks = [];
   let timer = 0;
 
@@ -932,15 +950,15 @@ async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, 
     recorder.onstop = () => resolve(new Blob(chunks, { type: supportedMime }));
   });
 
-  const totalFrames = durationSeconds * SHORT_FPS;
+  const totalFrames = durationSeconds * recordingFps;
   let frame = 0;
   const render = () => {
-    const elapsedSeconds = Math.min(durationSeconds, frame / SHORT_FPS);
+    const elapsedSeconds = Math.min(durationSeconds, frame / recordingFps);
     drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, text, elapsedSeconds, durationSeconds });
-    if (frame % 30 === 0) onProgress?.(`Rendering ${Math.round((frame / totalFrames) * 100)}%`);
+    if (frame % recordingFps === 0) onProgress?.(`Rendering ${Math.round((frame / totalFrames) * 100)}%`);
     frame += 1;
     if (frame <= totalFrames) {
-      timer = window.setTimeout(render, 1000 / SHORT_FPS);
+      timer = window.setTimeout(render, 1000 / recordingFps);
     } else if (recorder.state !== "inactive") {
       recorder.stop();
     }
@@ -959,22 +977,27 @@ async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, 
   }
 }
 
-async function downloadYouTubeMp4FromWebm(blob, filename, durationSeconds) {
+async function downloadYouTubeMp4FromWebm(blob, filename, durationSeconds, fps) {
   const response = await fetch("/api/convert-youtube-short-mp4", {
     method: "POST",
     headers: {
       "Content-Type": blob.type || "video/webm",
       "X-Reel-Filename": filename,
       "X-YouTube-Duration": String(durationSeconds),
+      "X-YouTube-FPS": String(fps || DEFAULT_SHORT_FPS),
     },
     body: blob,
   });
 
   if (!response.ok) {
-    let message = `MP4 conversion failed with HTTP ${response.status}.`;
+    let message = response.status === 413
+      ? "MP4 conversion failed because the video file is too large. Try 20 seconds, fewer images, or download the WebM fallback."
+      : `MP4 conversion failed with HTTP ${response.status}.`;
     try {
       const payload = await response.json();
-      message = payload?.error ? `MP4 conversion failed: ${payload.error}` : message;
+      if (response.status !== 413) {
+        message = payload?.error ? `MP4 conversion failed: ${payload.error}` : message;
+      }
     } catch {}
     throw new Error(message);
   }
@@ -1021,7 +1044,8 @@ export default function YouTubeGeneratorPage({
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [imageSource, setImageSource] = useState("auto");
   const [imageCount, setImageCount] = useState(10);
-  const [durationSeconds, setDurationSeconds] = useState(25);
+  const [durationSeconds, setDurationSeconds] = useState(20);
+  const [recordingFps, setRecordingFps] = useState(DEFAULT_SHORT_FPS);
   const [visualTemplate, setVisualTemplate] = useState("blackPremium");
   const [musicOn, setMusicOn] = useState(true);
   const [textModeByProduct, setTextModeByProduct] = useState(loadSavedTextModes);
@@ -1068,7 +1092,7 @@ export default function YouTubeGeneratorPage({
     ? `${availableImageCount} / ${imageCount} images available`
     : `${availableImageCount} / ${imageCount} images available - not enough images for selected YouTube Short setup`;
   const currentPreviewKey = selectedVehicle
-    ? `${productKey}:${selectedVehicle.id}:${vehicleRegistration(selectedVehicle)}:${imageSource}:${imageCount}:${durationSeconds}:${visualTemplate}:${musicOn}:${textMode}:${JSON.stringify(activeText)}:${resolvedImages.join("|")}`
+    ? `${productKey}:${selectedVehicle.id}:${vehicleRegistration(selectedVehicle)}:${imageSource}:${imageCount}:${durationSeconds}:${recordingFps}:${visualTemplate}:${musicOn}:${textMode}:${JSON.stringify(activeText)}:${resolvedImages.join("|")}`
     : "";
   const currentAsset = asset?.queueAsset || asset?.previewKey === currentPreviewKey ? asset : null;
 
@@ -1216,6 +1240,7 @@ export default function YouTubeGeneratorPage({
         text: activeText,
         imageUrls: resolvedImages,
         durationSeconds,
+        fps: recordingFps,
         musicOn,
         onProgress: setStatus,
       });
@@ -1244,7 +1269,7 @@ export default function YouTubeGeneratorPage({
     }
     try {
       setStatus("Converting YouTube Short to MP4...");
-      await downloadYouTubeMp4FromWebm(currentAsset.blob, mp4Filename(), durationSeconds);
+      await downloadYouTubeMp4FromWebm(currentAsset.blob, mp4Filename(), durationSeconds, recordingFps);
       setStatus("MP4 downloaded.");
     } catch (downloadError) {
       setError(downloadError.message || "Could not convert YouTube Short to MP4.");
@@ -1310,6 +1335,7 @@ export default function YouTubeGeneratorPage({
       text: activeText,
       imageUrls: imageOrder.records.map((item) => item.url),
       durationSeconds,
+      fps: recordingFps,
       musicOn,
       onProgress: setStatus,
     });
@@ -1317,7 +1343,7 @@ export default function YouTubeGeneratorPage({
     setAsset({ ...nextAsset, queueAsset: true, previewKey: `queue:${productKey}:${vehicle.id || vehicleRegistration(vehicle)}:${Date.now()}` });
     if (download) {
       const filename = `${safeFilePart(`${productKey === "rent2buy" ? "rent2buy" : "van-finance"}-${vehicleRegistration(vehicle) || vehicleTitle(vehicle)}-youtube-short`)}.mp4`;
-      await downloadYouTubeMp4FromWebm(nextAsset.blob, filename, durationSeconds);
+      await downloadYouTubeMp4FromWebm(nextAsset.blob, filename, durationSeconds, recordingFps);
     }
     return nextAsset;
   }
@@ -1441,6 +1467,14 @@ export default function YouTubeGeneratorPage({
                 <select value={durationSeconds} onChange={(event) => setDurationSeconds(Number(event.target.value))}>
                   {DURATION_OPTIONS.map((seconds) => (
                     <option key={seconds} value={seconds}>{seconds} seconds</option>
+                  ))}
+                </select>
+              </label>
+              <label className="youtube-generator__field">
+                <span>FPS</span>
+                <select value={recordingFps} onChange={(event) => setRecordingFps(Number(event.target.value))}>
+                  {FPS_OPTIONS.map((fps) => (
+                    <option key={fps} value={fps}>{fps}fps</option>
                   ))}
                 </select>
               </label>
