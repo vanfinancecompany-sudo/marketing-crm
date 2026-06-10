@@ -1031,6 +1031,10 @@ function downloadWebmFallback(blob, filename) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export default function YouTubeGeneratorPage({
   vehicles = [],
   vehiclesLoading = false,
@@ -1055,6 +1059,7 @@ export default function YouTubeGeneratorPage({
   const [localQueueByProduct, setLocalQueueByProduct] = useState({ vanFinance: [], rent2buy: [] });
   const [queueRunning, setQueueRunning] = useState(false);
   const [queueProgress, setQueueProgress] = useState({ index: 0, total: 0, completed: 0, failed: 0, message: "Ready" });
+  const [queueFailures, setQueueFailures] = useState([]);
   const [asset, setAsset] = useState(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -1320,10 +1325,16 @@ export default function YouTubeGeneratorPage({
   function clearQueue() {
     setQueueForProduct([]);
     setQueueProgress({ index: 0, total: 0, completed: 0, failed: 0, message: "Queue cleared" });
+    setQueueFailures([]);
     setStatus(`${product.label} YouTube queue cleared.`);
   }
 
-  async function generateQueuedVehicle(vehicle, { download = false } = {}) {
+  function youtubeFilenameForVehicle(vehicle, extension = "mp4") {
+    const productSlug = productKey === "rent2buy" ? "rent2buy" : "van-finance";
+    return `${safeFilePart(`${productSlug}-${vehicleRegistration(vehicle) || vehicleTitle(vehicle)}-youtube-short`)}.${extension}`;
+  }
+
+  async function generateQueuedVehicle(vehicle) {
     const imageOrder = resolveImageOrderForVehicle(vehicle);
     if (imageOrder.records.length < imageCount) {
       throw new Error(`${vehicleRegistration(vehicle) || vehicleTitle(vehicle)} has ${imageOrder.records.length} / ${imageCount} images available.`);
@@ -1341,11 +1352,34 @@ export default function YouTubeGeneratorPage({
     });
     if (asset?.url) URL.revokeObjectURL(asset.url);
     setAsset({ ...nextAsset, queueAsset: true, previewKey: `queue:${productKey}:${vehicle.id || vehicleRegistration(vehicle)}:${Date.now()}` });
-    if (download) {
-      const filename = `${safeFilePart(`${productKey === "rent2buy" ? "rent2buy" : "van-finance"}-${vehicleRegistration(vehicle) || vehicleTitle(vehicle)}-youtube-short`)}.mp4`;
-      await downloadYouTubeMp4FromWebm(nextAsset.blob, filename, durationSeconds, recordingFps);
-    }
     return nextAsset;
+  }
+
+  async function exportQueuedVehicle(vehicle, index, total, completed, failed) {
+    const label = vehicleRegistration(vehicle) || vehicleTitle(vehicle);
+    setQueueProgress({ index, total, completed, failed, message: `Generating ${label}` });
+    const nextAsset = await generateQueuedVehicle(vehicle);
+    const mp4Name = youtubeFilenameForVehicle(vehicle, "mp4");
+    setQueueProgress({ index, total, completed, failed, message: `Converting MP4 for ${label}` });
+    try {
+      await downloadYouTubeMp4FromWebm(nextAsset.blob, mp4Name, durationSeconds, recordingFps);
+      setQueueProgress({ index, total, completed, failed, message: `Downloaded MP4 for ${label}` });
+      await wait(900);
+      return { status: "complete", label };
+    } catch (mp4Error) {
+      setQueueProgress({ index, total, completed, failed, message: `MP4 failed, downloading WebM fallback for ${label}` });
+      try {
+        downloadWebmFallback(nextAsset.blob, mp4Name);
+        await wait(900);
+        return {
+          status: "fallback",
+          label,
+          error: `${label}: MP4 failed, WebM fallback downloaded. ${mp4Error.message || ""}`.trim(),
+        };
+      } catch (fallbackError) {
+        throw new Error(`${label}: ${mp4Error.message || "MP4 conversion failed"}; WebM fallback failed: ${fallbackError.message || "unknown error"}`);
+      }
+    }
   }
 
   async function generateCurrentQueuedShort() {
@@ -1357,7 +1391,7 @@ export default function YouTubeGeneratorPage({
     }
     try {
       setQueueProgress({ index: 1, total: activeQueue.length, completed: 0, failed: 0, message: "Generating current queued short" });
-      await generateQueuedVehicle(vehicle, { download: false });
+      await generateQueuedVehicle(vehicle);
       setQueueProgress({ index: 1, total: activeQueue.length, completed: 1, failed: 0, message: "Current queued short ready" });
       setStatus(`Queued YouTube Short ready for ${vehicleRegistration(vehicle) || vehicleTitle(vehicle)}.`);
     } catch (queueError) {
@@ -1374,33 +1408,48 @@ export default function YouTubeGeneratorPage({
     queueCancelRef.current = false;
     setQueueRunning(true);
     setError("");
+    setQueueFailures([]);
     let completed = 0;
     let failed = 0;
-    const remaining = [...activeQueue];
+    const failures = [];
+    const queueSnapshot = [...activeQueue];
+    let remaining = [...queueSnapshot];
 
-    for (let index = 0; index < activeQueue.length; index += 1) {
+    for (let index = 0; index < queueSnapshot.length; index += 1) {
       if (queueCancelRef.current) break;
-      const vehicle = activeQueue[index];
-      setQueueProgress({ index: index + 1, total: activeQueue.length, completed, failed, message: vehicleRegistration(vehicle) || vehicleTitle(vehicle) });
+      const vehicle = queueSnapshot[index];
       try {
-        await generateQueuedVehicle(vehicle, { download: true });
-        completed += 1;
-        remaining.shift();
-        setQueueForProduct(remaining);
+        const result = await exportQueuedVehicle(vehicle, index + 1, queueSnapshot.length, completed, failed);
+        if (result.status === "fallback") {
+          failed += 1;
+          failures.push(result.error);
+        } else {
+          completed += 1;
+        }
       } catch (queueError) {
         failed += 1;
-        setError(queueError.message || "A YouTube queue item failed.");
+        failures.push(queueError.message || "A YouTube queue item failed.");
+      } finally {
+        remaining = remaining.filter((item) => item !== vehicle);
+        setQueueForProduct(remaining);
+        setQueueFailures([...failures]);
       }
     }
 
     setQueueRunning(false);
     setQueueProgress({
-      index: Math.min(activeQueue.length, completed + failed),
-      total: activeQueue.length,
+      index: Math.min(queueSnapshot.length, completed + failed),
+      total: queueSnapshot.length,
       completed,
       failed,
       message: queueCancelRef.current ? "Queue cancelled" : "Queue complete",
     });
+    setStatus(
+      queueCancelRef.current
+        ? `YouTube queue cancelled. ${completed} MP4 downloaded. ${failed} failed or fallback-downloaded.`
+        : `YouTube queue complete. ${completed} MP4 downloaded. ${failed} failed or fallback-downloaded.`
+    );
+    setError(failures.length ? `Queue issues:\n${failures.slice(0, 8).join("\n")}${failures.length > 8 ? `\n...and ${failures.length - 8} more.` : ""}` : "");
     queueCancelRef.current = false;
   }
 
@@ -1648,6 +1697,15 @@ export default function YouTubeGeneratorPage({
             <div className="youtube-generator__status">
               {queueProgress.message} | {queueProgress.completed} complete | {queueProgress.failed} failed
             </div>
+            {queueFailures.length ? (
+              <div className="youtube-generator__error">
+                <strong>Queue issues</strong>
+                {queueFailures.slice(0, 8).map((item, index) => (
+                  <div key={`${item}-${index}`}>{item}</div>
+                ))}
+                {queueFailures.length > 8 ? <div>...and {queueFailures.length - 8} more.</div> : null}
+              </div>
+            ) : null}
             <div className="youtube-generator__actions">
               <button type="button" className="youtube-generator__button youtube-generator__button--secondary" onClick={generateCurrentQueuedShort} disabled={!activeQueue.length || queueRunning}>
                 Generate Current Queued Short
