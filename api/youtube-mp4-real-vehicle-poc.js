@@ -221,8 +221,13 @@ async function readPpm(filePath) {
   if (magic !== "P6" || !width || !height || max !== 255) {
     throw new Error(`Unsupported PPM output for ${path.basename(filePath)}.`);
   }
-  while (state.offset < file.length && file[state.offset] <= 32) state.offset += 1;
-  return { width, height, pixels: file.subarray(state.offset) };
+  if (state.offset < file.length && file[state.offset] <= 32) state.offset += 1;
+  const pixels = file.subarray(state.offset);
+  const expectedBytes = width * height * 3;
+  if (pixels.length < expectedBytes) {
+    throw new Error(`PPM output was shorter than expected for ${path.basename(filePath)}.`);
+  }
+  return { width, height, pixels: pixels.subarray(0, expectedBytes) };
 }
 
 function blitImage(target, image, x, y) {
