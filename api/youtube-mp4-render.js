@@ -32,6 +32,7 @@ const MAX_FRAME_COUNT = 15;
 const MAX_DURATION_SECONDS = 30;
 const CRF = "18";
 const PRESET = "veryfast";
+const DEFAULT_AUDIO_PATH = path.join(process.cwd(), "assets", "default-reel-audio.mp3");
 
 const FONT = {
   " ": ["00000", "00000", "00000", "00000", "00000", "00000", "00000"],
@@ -103,6 +104,15 @@ function compactError(error) {
     .slice(-10)
     .join(" ")
     .slice(0, 1600);
+}
+
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function runFfmpeg(args) {
@@ -699,6 +709,13 @@ export default async function handler(req, res) {
     concatLines.push(`file '${framePaths[framePaths.length - 1].replace(/\\/g, "/")}'`);
     await fs.writeFile(concatPath, concatLines.join("\n"), "utf8");
 
+    const audioEmbedded = await fileExists(DEFAULT_AUDIO_PATH);
+    const audioWarning = audioEmbedded ? "" : "Default reel audio was not found. Render used silent fallback audio.";
+    const audioInputArgs = audioEmbedded
+      ? ["-stream_loop", "-1", "-i", DEFAULT_AUDIO_PATH]
+      : ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"];
+    const audioFilterArgs = audioEmbedded ? ["-af", "volume=0.72"] : [];
+
     const ffmpegSettings = {
       codec: "libx264",
       crf: Number(CRF),
@@ -706,11 +723,12 @@ export default async function handler(req, res) {
       fps,
       pixelFormat: "yuv420p",
       audioCodec: "aac",
-      audioBitrate: "96k",
+      audioBitrate: "128k",
       movflags: "+faststart",
       frameCount,
       frameSeconds,
       templateKey,
+      audioSource: audioEmbedded ? "assets/default-reel-audio.mp3" : "silent fallback",
     };
 
     await runFfmpeg([
@@ -721,10 +739,7 @@ export default async function handler(req, res) {
       "0",
       "-i",
       concatPath,
-      "-f",
-      "lavfi",
-      "-i",
-      "anullsrc=channel_layout=stereo:sample_rate=44100",
+      ...audioInputArgs,
       "-t",
       String(durationSeconds),
       "-r",
@@ -740,7 +755,8 @@ export default async function handler(req, res) {
       "-c:a",
       "aac",
       "-b:a",
-      "96k",
+      "128k",
+      ...audioFilterArgs,
       "-shortest",
       "-movflags",
       "+faststart",
@@ -762,6 +778,7 @@ export default async function handler(req, res) {
       renderTimeMs: renderedAt - startedAt,
       totalTimeMs: finishedAt - startedAt,
       url: uploaded.url,
+      audioEmbedded,
     });
 
     sendJson(res, 200, {
@@ -778,6 +795,8 @@ export default async function handler(req, res) {
       sourceImageCount: imageUrls.length,
       usableImageCount: preparedImages.length,
       imageDownloadFailures,
+      audioEmbedded,
+      audioWarning,
       ffmpegSettings,
       message: "YouTube MP4 generated and uploaded to temporary Blob storage.",
     });
