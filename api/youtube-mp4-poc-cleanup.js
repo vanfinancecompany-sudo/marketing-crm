@@ -42,10 +42,10 @@ export default async function handler(req, res) {
     return;
   }
 
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  if (!process.env.BLOB_READ_WRITE_TOKEN && !process.env.BLOB_STORE_ID) {
     sendJson(res, 500, {
       ok: false,
-      error: "Vercel Blob is not configured. Missing BLOB_READ_WRITE_TOKEN.",
+      error: "Vercel Blob is not configured. Missing Blob credentials.",
     });
     return;
   }
