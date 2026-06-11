@@ -448,6 +448,25 @@ function imageDataUri(image) {
   return `data:${type};base64,${image.bytes.toString("base64")}`;
 }
 
+function renderTemplateEffects(templateKey) {
+  const normalized = String(templateKey || "blackPremium");
+  const isTikTok = normalized === "tiktokPunch";
+  const isLuxury = normalized === "luxuryDealer";
+  return {
+    isTikTok,
+    isLuxury,
+    bgOpacity: isLuxury ? 0.12 : 0.16,
+    overlayOpacity: isLuxury ? 0.76 : 0.7,
+    imageGlowBlur: isTikTok ? 36 : isLuxury ? 18 : 28,
+    imageGlowColor: isLuxury ? "#ffffff" : "#ef233c",
+    imageGlowOpacity: isTikTok ? 0.34 : isLuxury ? 0.12 : 0.24,
+    lowerGlowOpacity: isTikTok ? 0.3 : isLuxury ? 0.12 : 0.2,
+    sweepOpacity: isTikTok ? 0.12 : isLuxury ? 0.06 : 0.09,
+    flashOpacity: isTikTok ? 0.04 : isLuxury ? 0.015 : 0.025,
+    imagePunch: isTikTok ? 1.012 : isLuxury ? 1.003 : 1.006,
+  };
+}
+
 async function writeSvgFrame(filePath, svg) {
   const rendered = new Resvg(svg, {
     fitTo: { mode: "original" },
@@ -460,10 +479,11 @@ async function writeSvgFrame(filePath, svg) {
   await fs.writeFile(filePath, rendered.asPng());
 }
 
-async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults }) {
+async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults, templateKey }) {
   const finalCta = frame.finalCta;
   const accent = "#ef233c";
   const imageHref = imageDataUri(image);
+  const effects = renderTemplateEffects(templateKey);
   const eyebrow = safeText(frame.eyebrow || defaults.productName).toUpperCase();
   const headlineSize = 64;
   const headlineLines = splitVectorLines(frame.headline || defaults.hook || "", 900, headlineSize, finalCta ? 2 : 3);
@@ -477,6 +497,11 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
   const headlineLineHeight = headlineSize * 1.08;
   const supportY = finalCta ? 1588 : headlineY + headlineLines.length * headlineLineHeight + 72;
   const websiteY = finalCta ? 1740 : 1744;
+  const imageScale = effects.imagePunch;
+  const imagePanX = frameNumber > 1 ? (frameNumber % 2 === 0 ? 4 : -4) : 0;
+  const imagePanY = frameNumber % 3 === 0 ? 3 : 0;
+  const imageDrawX = IMAGE_X + imagePanX - (IMAGE_WIDTH * imageScale - IMAGE_WIDTH) / 2;
+  const imageDrawY = IMAGE_Y + imagePanY - (IMAGE_HEIGHT * imageScale - IMAGE_HEIGHT) / 2;
 
   const headlineBlock = finalCta
     ? svgTextBlock(headlineLines, { x: 96, y: headlineY, size: headlineSize, weight: 950, fill: "#ffffff", lineGap: 1.08 })
@@ -498,6 +523,20 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
       <stop offset="0" stop-color="${accent}" stop-opacity="${finalCta ? "0.28" : "0.18"}"/>
       <stop offset="1" stop-color="${accent}" stop-opacity="0"/>
     </radialGradient>
+    <radialGradient id="lowerGlow" cx="50%" cy="71%" r="48%">
+      <stop offset="0" stop-color="${accent}" stop-opacity="${effects.lowerGlowOpacity}"/>
+      <stop offset="1" stop-color="${accent}" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.48" stop-color="#ffffff" stop-opacity="${effects.sweepOpacity}"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="redStreak" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="${accent}" stop-opacity="0"/>
+      <stop offset="0.48" stop-color="${accent}" stop-opacity="0.48"/>
+      <stop offset="1" stop-color="${accent}" stop-opacity="0"/>
+    </linearGradient>
     <linearGradient id="header" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="${accent}" stop-opacity="0.24"/>
       <stop offset="0.46" stop-color="#08080a" stop-opacity="0.98"/>
@@ -511,12 +550,18 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
     <clipPath id="imageClip">
       <rect x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" rx="30" ry="30"/>
     </clipPath>
+    <clipPath id="panelClip">
+      <rect x="52" y="${panelY}" width="976" height="${panelHeight}" rx="28" ry="28"/>
+    </clipPath>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="${accent}" flood-opacity="0.16"/>
+      <feDropShadow dx="0" dy="18" stdDeviation="${effects.imageGlowBlur}" flood-color="${effects.imageGlowColor}" flood-opacity="${effects.imageGlowOpacity}"/>
     </filter>
   </defs>
   <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#bg)"/>
+  <image href="${imageHref}" x="0" y="0" width="${WIDTH}" height="${HEIGHT}" preserveAspectRatio="xMidYMid slice" opacity="${effects.bgOpacity}"/>
+  <rect width="${WIDTH}" height="${HEIGHT}" fill="#000000" opacity="${effects.overlayOpacity}"/>
   <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#glow)"/>
+  <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#lowerGlow)"/>
 
   <rect x="58" y="74" width="964" height="154" rx="26" fill="url(#header)"/>
   <rect x="58" y="220" width="964" height="8" fill="${accent}"/>
@@ -524,11 +569,12 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
 
   <rect x="${IMAGE_X - 8}" y="${IMAGE_Y - 8}" width="${IMAGE_WIDTH + 16}" height="${IMAGE_HEIGHT + 16}" rx="34" fill="#000000" filter="url(#shadow)"/>
   <rect x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" rx="30" fill="#101014"/>
-  <image href="${imageHref}" x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" preserveAspectRatio="xMidYMid meet" clip-path="url(#imageClip)"/>
+  <image href="${imageHref}" x="${imageDrawX}" y="${imageDrawY}" width="${IMAGE_WIDTH * imageScale}" height="${IMAGE_HEIGHT * imageScale}" preserveAspectRatio="xMidYMid meet" clip-path="url(#imageClip)"/>
   <rect x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" rx="30" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="2"/>
 
   <rect x="52" y="${panelY}" width="976" height="${panelHeight}" rx="28" fill="url(#panel)"/>
   <rect x="52" y="${panelY}" width="976" height="7" fill="${accent}" opacity="0.9"/>
+  ${effects.isTikTok && frameNumber > 1 ? `<rect x="-120" y="${panelY + 26}" width="470" height="82" fill="url(#redStreak)" opacity="0.9" transform="rotate(-10 115 ${panelY + 67})"/>` : ""}
   ${svgPathText(eyebrow, { x: 86, y: eyebrowY, size: 24, fill: accent })}
   ${headlineBlock}
   ${supportBlock}
@@ -539,6 +585,8 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
          ${svgPathText(website, { x: 540, y: websiteY, size: 32, fill: "rgba(255,255,255,0.9)", anchor: "middle" })}`
       : `${svgPathText(defaults.website, { x: 540, y: websiteY, size: 30, fill: "rgba(255,255,255,0.9)", anchor: "middle" })}`
   }
+  ${(finalCta || frameNumber === 1 || frameNumber >= 3) ? `<g clip-path="url(#panelClip)"><rect x="-20" y="${panelY + 20}" width="220" height="${panelHeight + 110}" fill="url(#sweep)" transform="rotate(-18 90 ${panelY + 120})"/></g>` : ""}
+  ${frameNumber > 1 ? `<rect width="${WIDTH}" height="${HEIGHT}" fill="#ffffff" opacity="${effects.flashOpacity}"/>` : ""}
 </svg>`;
 
   await writeSvgFrame(filePath, svg);
@@ -593,6 +641,7 @@ export default async function handler(req, res) {
   const fps = safeFps(body.fps || DEFAULT_FPS);
   const durationSeconds = safeDurationSeconds(body.durationSeconds || DEFAULT_DURATION_SECONDS);
   const frameSeconds = durationSeconds / frameCount;
+  const templateKey = safeText(body.templateKey, "blackPremium") || "blackPremium";
   const startedAt = Date.now();
   const stamp = new Date(startedAt).toISOString().replace(/[^0-9]/g, "");
   const registration = safeText(body.registration || body.reg || "vehicle").replace(/\s+/g, "").toLowerCase();
@@ -637,6 +686,7 @@ export default async function handler(req, res) {
         frame: frameSpecs[index],
         image,
         defaults,
+        templateKey,
       });
       framePaths.push(framePath);
     }
@@ -660,7 +710,7 @@ export default async function handler(req, res) {
       movflags: "+faststart",
       frameCount,
       frameSeconds,
-      templateKey: safeText(body.templateKey, "blackPremium") || "blackPremium",
+      templateKey,
     };
 
     await runFfmpeg([
