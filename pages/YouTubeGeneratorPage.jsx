@@ -1101,6 +1101,58 @@ async function downloadYouTubeMp4FromWebm(blob, filename, durationSeconds, fps) 
   return { filename, size: mp4Blob.size };
 }
 
+function buildServerFrameSpecs(frameSpecs) {
+  return (Array.isArray(frameSpecs) ? frameSpecs : []).map((frameSpec) => {
+    const display = frameSpec?.display || {};
+    const text = frameSpec?.text || {};
+    return {
+      type: frameSpec?.type || "editable",
+      frameNumber: frameSpec?.frameNumber,
+      finalCta: Boolean(frameSpec?.isFinal || frameSpec?.type === "finalCta"),
+      eyebrow: cleanText(display.eyebrow || text.eyebrow || ""),
+      headline: cleanText(display.headline || text.headline || ""),
+      support: cleanText(display.subline || display.support || text.support || ""),
+      cta: cleanText(display.cta || text.cta || ""),
+    };
+  });
+}
+
+async function downloadYouTubeMp4FromServer(payload, filename, onStatus) {
+  onStatus?.("Rendering MP4... Uploading temporary MP4...");
+  const response = await fetch("/api/youtube-mp4-render", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result?.downloadUrl) {
+    throw new Error(result?.error || `MP4 failed with HTTP ${response.status}. WebM fallback still available.`);
+  }
+
+  onStatus?.("MP4 ready, downloading...");
+  const fileResponse = await fetch(result.downloadUrl);
+  if (!fileResponse.ok) {
+    throw new Error(`MP4 was rendered but download failed with HTTP ${fileResponse.status}.`);
+  }
+  const mp4Blob = await fileResponse.blob();
+  if (!mp4Blob.size) throw new Error("MP4 download failed: rendered file was empty.");
+
+  const url = URL.createObjectURL(mp4Blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  return { ...result, filename, downloadedSize: mp4Blob.size };
+}
+
 function downloadWebmFallback(blob, filename) {
   if (!blob) throw new Error("No YouTube Short WebM fallback is available yet.");
   const fallbackName = safeFilePart(String(filename || "youtube-short").replace(/\.(mp4|webm)$/i, "")) || "youtube-short";
@@ -1359,17 +1411,41 @@ export default function YouTubeGeneratorPage({
 
   async function handleDownloadMp4() {
     setError("");
-    if (!currentAsset?.blob) {
-      setError("Generate a YouTube Short preview before downloading MP4.");
+    if (!selectedVehicle) {
+      setError("Select a vehicle before downloading MP4.");
+      return;
+    }
+    if (!resolvedImages.length) {
+      setError("No usable image is available. Upload CMS rows or use stock image fallback.");
       return;
     }
     try {
-      setStatus("Converting YouTube Short to MP4...");
-      await downloadYouTubeMp4FromWebm(currentAsset.blob, mp4Filename(), durationSeconds, recordingFps);
-      setStatus("MP4 downloaded.");
+      const renderResult = await downloadYouTubeMp4FromServer(
+        {
+          productKey,
+          title: vehicleTitle(selectedVehicle),
+          registration: displayRegistration(selectedVehicle) || vehicleRegistration(selectedVehicle),
+          priceText: vehiclePriceLine(selectedVehicle, productKey),
+          monthlyText: productKey === "vanFinance" ? headlinePriceText(vehicleMonthlyPriceLine(selectedVehicle)) : headlinePriceText(vehiclePriceLine(selectedVehicle, "rent2buy")),
+          imageUrls: resolvedImages.slice(0, imageCount),
+          frameSpecs: buildServerFrameSpecs(selectedFrameSpecs),
+          frameCount: imageCount,
+          durationSeconds,
+          fps: 30,
+          templateKey: visualTemplate,
+        },
+        mp4Filename(),
+        setStatus
+      );
+      const failureCount = Array.isArray(renderResult.imageDownloadFailures) ? renderResult.imageDownloadFailures.length : 0;
+      setStatus(
+        failureCount
+          ? `MP4 downloaded. ${failureCount} image URL${failureCount === 1 ? "" : "s"} failed and were skipped.`
+          : "MP4 downloaded."
+      );
     } catch (downloadError) {
-      setError(downloadError.message || "Could not convert YouTube Short to MP4.");
-      setStatus("MP4 conversion failed. WebM fallback is available.");
+      setError(downloadError.message || "Could not render YouTube Short MP4.");
+      setStatus("MP4 failed, WebM fallback still available.");
     }
   }
 
