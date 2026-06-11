@@ -1,10 +1,14 @@
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { put } from "@vercel/blob";
 import ffmpegPath from "ffmpeg-static";
 import { Resvg } from "@resvg/resvg-js";
+
+const require = createRequire(import.meta.url);
+const INTER_BOLD_FONT_PATH = require.resolve("@fontsource/inter/files/inter-latin-900-normal.woff");
 
 export const config = {
   maxDuration: 120,
@@ -383,7 +387,7 @@ function svgTextBlock(lines, { x, y, size, weight = 900, fill = "#ffffff", lineG
     .filter(Boolean)
     .map((line, index) => {
       const dy = index === 0 ? 0 : size * lineGap;
-      return `<text x="${x}" y="${y + dy}" text-anchor="${anchor}" font-family="Inter, Aptos, Segoe UI, Arial, sans-serif" font-size="${size}" font-weight="${weight}" letter-spacing="${letterSpacing}" fill="${fill}">${line}</text>`;
+      return `<text x="${x}" y="${y + dy}" text-anchor="${anchor}" font-family="Inter" font-size="${size}" font-weight="${weight}" letter-spacing="${letterSpacing}" fill="${fill}">${line}</text>`;
     })
     .join("");
 }
@@ -397,8 +401,9 @@ async function writeSvgFrame(filePath, svg) {
   const rendered = new Resvg(svg, {
     fitTo: { mode: "original" },
     font: {
-      fontFamily: "Arial",
-      loadSystemFonts: true,
+      fontFiles: [INTER_BOLD_FONT_PATH],
+      defaultFontFamily: "Inter",
+      loadSystemFonts: false,
     },
   }).render();
   await fs.writeFile(filePath, rendered.asPng());
@@ -456,7 +461,7 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
 
   <rect x="58" y="74" width="964" height="154" rx="26" fill="url(#header)"/>
   <rect x="58" y="220" width="964" height="8" fill="${accent}"/>
-  <text x="540" y="168" text-anchor="middle" font-family="Inter, Aptos, Segoe UI, Arial, sans-serif" font-size="58" font-weight="950" fill="#ffffff">${escapeXml(defaults.productName)}</text>
+  <text x="540" y="168" text-anchor="middle" font-family="Inter" font-size="58" font-weight="950" fill="#ffffff">${escapeXml(defaults.productName)}</text>
 
   <rect x="${IMAGE_X - 8}" y="${IMAGE_Y - 8}" width="${IMAGE_WIDTH + 16}" height="${IMAGE_HEIGHT + 16}" rx="34" fill="#000000" filter="url(#shadow)"/>
   <rect x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" rx="30" fill="#101014"/>
@@ -466,15 +471,15 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
 
   <rect x="52" y="${finalCta ? 1218 : 1270}" width="976" height="${finalCta ? 540 : 388}" rx="28" fill="url(#panel)"/>
   <rect x="52" y="${finalCta ? 1218 : 1270}" width="976" height="7" fill="${accent}" opacity="0.9"/>
-  <text x="86" y="${finalCta ? 1276 : 1324}" font-family="Inter, Aptos, Segoe UI, Arial, sans-serif" font-size="28" font-weight="900" fill="${accent}">${eyebrow}</text>
+  <text x="86" y="${finalCta ? 1276 : 1324}" font-family="Inter" font-size="28" font-weight="900" fill="${accent}">${eyebrow}</text>
   ${headlineBlock}
   ${supportBlock}
   ${
     finalCta
       ? `<rect x="130" y="1506" width="820" height="112" rx="32" fill="${accent}"/>
-         <text x="540" y="1578" text-anchor="middle" font-family="Inter, Aptos, Segoe UI, Arial, sans-serif" font-size="44" font-weight="950" fill="#ffffff">${buttonText}</text>
-         <text x="540" y="1706" text-anchor="middle" font-family="Inter, Aptos, Segoe UI, Arial, sans-serif" font-size="34" font-weight="900" fill="rgba(255,255,255,0.9)">${website}</text>`
-      : `<text x="540" y="1744" text-anchor="middle" font-family="Inter, Aptos, Segoe UI, Arial, sans-serif" font-size="34" font-weight="900" fill="rgba(255,255,255,0.9)">${escapeXml(defaults.website.toUpperCase())}</text>`
+         <text x="540" y="1578" text-anchor="middle" font-family="Inter" font-size="44" font-weight="950" fill="#ffffff">${buttonText}</text>
+         <text x="540" y="1706" text-anchor="middle" font-family="Inter" font-size="34" font-weight="900" fill="rgba(255,255,255,0.9)">${website}</text>`
+      : `<text x="540" y="1744" text-anchor="middle" font-family="Inter" font-size="34" font-weight="900" fill="rgba(255,255,255,0.9)">${escapeXml(defaults.website.toUpperCase())}</text>`
   }
 </svg>`;
 
