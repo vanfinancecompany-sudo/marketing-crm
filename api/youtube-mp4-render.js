@@ -148,6 +148,14 @@ function safeText(value, fallback = "") {
     .trim();
 }
 
+function safeDisplayText(value, fallback = "") {
+  return String(value || fallback)
+    .replace(/\u00c2\u00a3/g, "\u00a3")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function wrapText(text, maxChars, maxLines = 2) {
   const words = safeText(text).split(" ").filter(Boolean);
   const lines = [];
@@ -347,10 +355,10 @@ function safeFps(value) {
 function buildFrameSpecs(body, frameCount) {
   const productKey = body.productKey === "rent2buy" ? "rent2buy" : "vanFinance";
   const defaults = productDefaults(productKey);
-  const title = safeText(body.title || body.vehicleTitle, "Selected Vehicle");
-  const registration = safeText(body.registration || body.reg, "");
-  const priceText = safeText(body.priceText || body.price || body.vehiclePrice, "");
-  const monthlyText = safeText(body.monthlyText || body.monthly || body.financeMonthly || body.weeklyText, "");
+  const title = safeDisplayText(body.title || body.vehicleTitle, "Selected Vehicle");
+  const registration = safeDisplayText(body.registration || body.reg, "");
+  const priceText = safeDisplayText(body.priceText || body.price || body.vehiclePrice, "");
+  const monthlyText = safeDisplayText(body.monthlyText || body.monthly || body.financeMonthly || body.weeklyText, "");
   const paymentText = monthlyText
     ? productKey === "rent2buy"
       ? monthlyText
@@ -359,7 +367,7 @@ function buildFrameSpecs(body, frameCount) {
 
   const suppliedFrames = Array.isArray(body.frameSpecs) ? body.frameSpecs : [];
   const baseFrames = [
-    { headline: safeText(body.hook || defaults.hook), support: registration || defaults.productName },
+    { headline: safeDisplayText(body.hook || defaults.hook), support: registration || defaults.productName },
     { headline: title, support: priceText || registration || defaults.productName },
     { headline: paymentText, support: registration },
     ...defaults.featureLines.map((line) => ({ headline: line, support: defaults.website })),
@@ -376,9 +384,9 @@ function buildFrameSpecs(body, frameCount) {
     return {
       ...frame,
       ...supplied,
-      headline: safeText(supplied.headline || supplied.title || frame.headline),
-      support: safeText(supplied.support || supplied.subheading || frame.support),
-      button: finalCta ? safeText(supplied.button || supplied.cta || frame.button || defaults.finalButton) : "",
+      headline: safeDisplayText(supplied.headline || supplied.title || frame.headline),
+      support: safeDisplayText(supplied.support || supplied.subheading || frame.support),
+      button: finalCta ? safeDisplayText(supplied.button || supplied.cta || frame.button || defaults.finalButton) : "",
       finalCta,
     };
   });
@@ -397,7 +405,7 @@ function splitSvgLines(text, maxChars, maxLines = 2) {
 }
 
 function splitVectorLines(text, maxWidth, size, maxLines = 2) {
-  const words = safeText(text).toUpperCase().split(" ").filter(Boolean);
+  const words = safeDisplayText(text).toUpperCase().split(" ").filter(Boolean);
   const lines = [];
   let current = "";
 
@@ -417,7 +425,7 @@ function splitVectorLines(text, maxWidth, size, maxLines = 2) {
 }
 
 function measureVectorText(text, size, letterSpacing = 0) {
-  const normalized = safeText(text).toUpperCase();
+  const normalized = safeDisplayText(text).toUpperCase();
   let width = 0;
   for (const char of normalized) {
     const glyph = INTER_BOLD_FONT.charToGlyph(char);
@@ -427,7 +435,7 @@ function measureVectorText(text, size, letterSpacing = 0) {
 }
 
 function vectorTextPath(text, x, y, size, { anchor = "start", letterSpacing = 0 } = {}) {
-  const normalized = safeText(text).toUpperCase();
+  const normalized = safeDisplayText(text).toUpperCase();
   let cursor = anchor === "middle" ? x - measureVectorText(normalized, size, letterSpacing) / 2 : x;
   const parts = [];
   for (const char of normalized) {
@@ -438,7 +446,17 @@ function vectorTextPath(text, x, y, size, { anchor = "start", letterSpacing = 0 
   return parts.join(" ");
 }
 
+function containsEmoji(text) {
+  return /[\p{Extended_Pictographic}\u2600-\u27BF]/u.test(String(text || ""));
+}
+
+function svgFallbackText(text, { x, y, size, fill = "#ffffff", anchor = "start", letterSpacing = 0 }) {
+  const textAnchor = anchor === "middle" ? "middle" : anchor === "end" ? "end" : "start";
+  return `<text x="${x}" y="${y}" fill="${fill}" font-family="Inter, Aptos, Arial, 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif" font-size="${size}" font-weight="900" text-anchor="${textAnchor}" letter-spacing="${letterSpacing}">${escapeXml(safeDisplayText(text).toUpperCase())}</text>`;
+}
+
 function svgPathText(text, { x, y, size, fill = "#ffffff", anchor = "start", letterSpacing = 0 }) {
+  if (containsEmoji(text)) return svgFallbackText(text, { x, y, size, fill, anchor, letterSpacing });
   const d = vectorTextPath(text, x, y, size, { anchor, letterSpacing });
   return d ? `<path d="${d}" fill="${fill}"/>` : "";
 }
@@ -483,23 +501,24 @@ async function writeSvgFrame(filePath, svg) {
     font: {
       fontFiles: [INTER_BOLD_FONT_PATH],
       defaultFontFamily: "Inter",
-      loadSystemFonts: false,
+      loadSystemFonts: true,
     },
   }).render();
   await fs.writeFile(filePath, rendered.asPng());
 }
 
-async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults, templateKey }) {
+async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults, templateKey, headerText }) {
   const finalCta = frame.finalCta;
   const accent = "#ef233c";
   const imageHref = imageDataUri(image);
   const effects = renderTemplateEffects(templateKey);
-  const eyebrow = safeText(frame.eyebrow || defaults.productName).toUpperCase();
+  const header = safeDisplayText(headerText || defaults.productName).toUpperCase();
+  const eyebrow = safeDisplayText(frame.eyebrow || defaults.productName).toUpperCase();
   const headlineSize = 64;
   const headlineLines = splitVectorLines(frame.headline || defaults.hook || "", 900, headlineSize, finalCta ? 2 : 3);
   const supportLines = splitVectorLines(frame.support || defaults.website, 900, 32, finalCta ? 1 : 2);
-  const buttonText = safeText(frame.button || defaults.finalButton).toUpperCase();
-  const website = safeText(frame.support || defaults.website).toUpperCase();
+  const buttonText = safeDisplayText(frame.button || defaults.finalButton).toUpperCase();
+  const website = safeDisplayText(frame.support || defaults.website).toUpperCase();
   const panelY = finalCta ? 1178 : 1198;
   const panelHeight = finalCta ? 560 : 560;
   const eyebrowY = finalCta ? 1250 : 1290;
@@ -575,7 +594,7 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
 
   <rect x="58" y="74" width="964" height="154" rx="26" fill="url(#header)"/>
   <rect x="58" y="220" width="964" height="8" fill="${accent}"/>
-  ${svgPathText(defaults.productName, { x: 540, y: 168, size: 58, fill: "#ffffff", anchor: "middle" })}
+  ${svgPathText(header, { x: 540, y: 168, size: 58, fill: "#ffffff", anchor: "middle" })}
 
   <rect x="${IMAGE_X - 8}" y="${IMAGE_Y - 8}" width="${IMAGE_WIDTH + 16}" height="${IMAGE_HEIGHT + 16}" rx="34" fill="#000000" filter="url(#shadow)"/>
   <rect x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" rx="30" fill="#101014"/>
@@ -652,6 +671,7 @@ export default async function handler(req, res) {
   const durationSeconds = safeDurationSeconds(body.durationSeconds || DEFAULT_DURATION_SECONDS);
   const frameSeconds = durationSeconds / frameCount;
   const templateKey = safeText(body.templateKey, "blackPremium") || "blackPremium";
+  const headerText = safeDisplayText(body.headerText || body.header || defaults.productName);
   const startedAt = Date.now();
   const stamp = new Date(startedAt).toISOString().replace(/[^0-9]/g, "");
   const registration = safeText(body.registration || body.reg || "vehicle").replace(/\s+/g, "").toLowerCase();
@@ -697,6 +717,7 @@ export default async function handler(req, res) {
         image,
         defaults,
         templateKey,
+        headerText,
       });
       framePaths.push(framePath);
     }

@@ -1427,6 +1427,7 @@ export default function YouTubeGeneratorPage({
           registration: displayRegistration(selectedVehicle) || vehicleRegistration(selectedVehicle),
           priceText: vehiclePriceLine(selectedVehicle, productKey),
           monthlyText: productKey === "vanFinance" ? headlinePriceText(vehicleMonthlyPriceLine(selectedVehicle)) : headlinePriceText(vehiclePriceLine(selectedVehicle, "rent2buy")),
+          headerText: activeText.header,
           imageUrls: resolvedImages.slice(0, imageCount),
           frameSpecs: buildServerFrameSpecs(selectedFrameSpecs),
           frameCount: imageCount,
