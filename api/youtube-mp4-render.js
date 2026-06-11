@@ -451,7 +451,7 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
   const website = safeText(frame.support || defaults.website).toUpperCase();
 
   const headlineBlock = finalCta
-    ? svgTextBlock(headlineLines, { x: 96, y: 1322, size: 78, weight: 950, fill: "#ffffff", lineGap: 1.08 })
+    ? svgTextBlock(headlineLines, { x: 96, y: 1370, size: 78, weight: 950, fill: "#ffffff", lineGap: 1.08 })
     : svgTextBlock(headlineLines, { x: 86, y: 1366, size: 70, weight: 950, fill: "#ffffff", lineGap: 1.08 });
 
   const supportBlock = finalCta
@@ -507,9 +507,9 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
   ${supportBlock}
   ${
     finalCta
-      ? `<rect x="130" y="1506" width="820" height="112" rx="32" fill="${accent}"/>
-         ${svgPathText(buttonText, { x: 540, y: 1578, size: 44, fill: "#ffffff", anchor: "middle" })}
-         ${svgPathText(website, { x: 540, y: 1706, size: 34, fill: "rgba(255,255,255,0.9)", anchor: "middle" })}`
+      ? `<rect x="130" y="1540" width="820" height="112" rx="32" fill="${accent}"/>
+         ${svgPathText(buttonText, { x: 540, y: 1612, size: 44, fill: "#ffffff", anchor: "middle" })}
+         ${svgPathText(website, { x: 540, y: 1730, size: 34, fill: "rgba(255,255,255,0.9)", anchor: "middle" })}`
       : `${svgPathText(defaults.website, { x: 540, y: 1744, size: 34, fill: "rgba(255,255,255,0.9)", anchor: "middle" })}`
   }
 </svg>`;
