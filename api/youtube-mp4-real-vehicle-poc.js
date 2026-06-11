@@ -436,11 +436,24 @@ export default async function handler(req, res) {
 
   try {
     const preparedImages = [];
+    const imageDownloadFailures = [];
     for (let index = 0; index < imageUrls.length; index += 1) {
       const imagePath = path.join(workDir, `source-${index + 1}`);
       const ppmPath = path.join(workDir, `source-${index + 1}.ppm`);
-      await downloadImage(imageUrls[index], imagePath);
-      preparedImages.push(await prepareImagePpm(imagePath, ppmPath));
+      try {
+        await downloadImage(imageUrls[index], imagePath);
+        preparedImages.push(await prepareImagePpm(imagePath, ppmPath));
+      } catch (error) {
+        imageDownloadFailures.push({
+          index: index + 1,
+          url: imageUrls[index],
+          error: compactError(error),
+        });
+      }
+    }
+
+    if (!preparedImages.length) {
+      throw new Error("No supplied image URLs could be downloaded for the real vehicle POC.");
     }
 
     const framePaths = [];
@@ -541,6 +554,8 @@ export default async function handler(req, res) {
       frameCount: FRAME_COUNT,
       finalFrameConfirmed: true,
       sourceImageCount: imageUrls.length,
+      usableImageCount: preparedImages.length,
+      imageDownloadFailures,
       ffmpegSettings,
       message: "Real vehicle YouTube MP4 POC generated and uploaded to temporary Blob storage.",
     });
