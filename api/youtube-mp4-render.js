@@ -386,6 +386,26 @@ function splitSvgLines(text, maxChars, maxLines = 2) {
   return wrapText(text, maxChars, maxLines).map((line) => line.toUpperCase());
 }
 
+function splitVectorLines(text, maxWidth, size, maxLines = 2) {
+  const words = safeText(text).toUpperCase().split(" ").filter(Boolean);
+  const lines = [];
+  let current = "";
+
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (measureVectorText(next, size) <= maxWidth) {
+      current = next;
+      continue;
+    }
+    if (current) lines.push(current);
+    current = word;
+    if (lines.length >= maxLines - 1) break;
+  }
+
+  if (current && lines.length < maxLines) lines.push(current);
+  return lines.length ? lines : [""];
+}
+
 function measureVectorText(text, size, letterSpacing = 0) {
   const normalized = safeText(text).toUpperCase();
   let width = 0;
@@ -445,18 +465,25 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
   const accent = "#ef233c";
   const imageHref = imageDataUri(image);
   const eyebrow = safeText(frame.eyebrow || defaults.productName).toUpperCase();
-  const headlineLines = splitSvgLines(frame.headline || defaults.hook || "", finalCta ? 20 : 22, finalCta ? 2 : 2);
-  const supportLines = splitSvgLines(frame.support || defaults.website, finalCta ? 32 : 34, finalCta ? 1 : 2);
+  const headlineSize = 64;
+  const headlineLines = splitVectorLines(frame.headline || defaults.hook || "", 900, headlineSize, 2);
+  const supportLines = splitVectorLines(frame.support || defaults.website, 900, 32, finalCta ? 1 : 2);
   const buttonText = safeText(frame.button || defaults.finalButton).toUpperCase();
   const website = safeText(frame.support || defaults.website).toUpperCase();
+  const panelY = finalCta ? 1178 : 1218;
+  const panelHeight = finalCta ? 560 : 430;
+  const eyebrowY = finalCta ? 1250 : 1290;
+  const headlineY = finalCta ? 1378 : 1410;
+  const supportY = 1588;
+  const websiteY = finalCta ? 1740 : 1648;
 
   const headlineBlock = finalCta
-    ? svgTextBlock(headlineLines, { x: 96, y: 1370, size: 78, weight: 950, fill: "#ffffff", lineGap: 1.08 })
-    : svgTextBlock(headlineLines, { x: 86, y: 1366, size: 70, weight: 950, fill: "#ffffff", lineGap: 1.08 });
+    ? svgTextBlock(headlineLines, { x: 96, y: headlineY, size: headlineSize, weight: 950, fill: "#ffffff", lineGap: 1.08 })
+    : svgTextBlock(headlineLines, { x: 86, y: headlineY, size: headlineSize, weight: 950, fill: "#ffffff", lineGap: 1.08 });
 
   const supportBlock = finalCta
     ? ""
-    : svgTextBlock(supportLines, { x: 86, y: 1538, size: 36, weight: 850, fill: "rgba(255,255,255,0.86)", lineGap: 1.14 });
+    : svgTextBlock(supportLines, { x: 86, y: supportY, size: 32, weight: 850, fill: "rgba(255,255,255,0.86)", lineGap: 1.16 });
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
@@ -500,17 +527,17 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
   <rect x="${IMAGE_X}" y="${IMAGE_Y + IMAGE_HEIGHT}" width="${IMAGE_WIDTH}" height="8" fill="${accent}"/>
   <rect x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" rx="30" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="2"/>
 
-  <rect x="52" y="${finalCta ? 1218 : 1270}" width="976" height="${finalCta ? 540 : 388}" rx="28" fill="url(#panel)"/>
-  <rect x="52" y="${finalCta ? 1218 : 1270}" width="976" height="7" fill="${accent}" opacity="0.9"/>
-  ${svgPathText(eyebrow, { x: 86, y: finalCta ? 1276 : 1324, size: 28, fill: accent })}
+  <rect x="52" y="${panelY}" width="976" height="${panelHeight}" rx="28" fill="url(#panel)"/>
+  <rect x="52" y="${panelY}" width="976" height="7" fill="${accent}" opacity="0.9"/>
+  ${svgPathText(eyebrow, { x: 86, y: eyebrowY, size: 24, fill: accent })}
   ${headlineBlock}
   ${supportBlock}
   ${
     finalCta
       ? `<rect x="130" y="1540" width="820" height="112" rx="32" fill="${accent}"/>
          ${svgPathText(buttonText, { x: 540, y: 1612, size: 44, fill: "#ffffff", anchor: "middle" })}
-         ${svgPathText(website, { x: 540, y: 1730, size: 34, fill: "rgba(255,255,255,0.9)", anchor: "middle" })}`
-      : `${svgPathText(defaults.website, { x: 540, y: 1744, size: 34, fill: "rgba(255,255,255,0.9)", anchor: "middle" })}`
+         ${svgPathText(website, { x: 540, y: websiteY, size: 32, fill: "rgba(255,255,255,0.9)", anchor: "middle" })}`
+      : `${svgPathText(defaults.website, { x: 540, y: websiteY, size: 30, fill: "rgba(255,255,255,0.9)", anchor: "middle" })}`
   }
 </svg>`;
 
