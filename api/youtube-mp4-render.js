@@ -466,16 +466,17 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
   const imageHref = imageDataUri(image);
   const eyebrow = safeText(frame.eyebrow || defaults.productName).toUpperCase();
   const headlineSize = 64;
-  const headlineLines = splitVectorLines(frame.headline || defaults.hook || "", 900, headlineSize, 2);
+  const headlineLines = splitVectorLines(frame.headline || defaults.hook || "", 900, headlineSize, finalCta ? 2 : 3);
   const supportLines = splitVectorLines(frame.support || defaults.website, 900, 32, finalCta ? 1 : 2);
   const buttonText = safeText(frame.button || defaults.finalButton).toUpperCase();
   const website = safeText(frame.support || defaults.website).toUpperCase();
-  const panelY = finalCta ? 1178 : 1218;
-  const panelHeight = finalCta ? 560 : 430;
+  const panelY = finalCta ? 1178 : 1198;
+  const panelHeight = finalCta ? 560 : 560;
   const eyebrowY = finalCta ? 1250 : 1290;
-  const headlineY = finalCta ? 1378 : 1410;
-  const supportY = 1588;
-  const websiteY = finalCta ? 1740 : 1648;
+  const headlineY = finalCta ? 1378 : 1402;
+  const headlineLineHeight = headlineSize * 1.08;
+  const supportY = finalCta ? 1588 : headlineY + headlineLines.length * headlineLineHeight + 72;
+  const websiteY = finalCta ? 1740 : 1744;
 
   const headlineBlock = finalCta
     ? svgTextBlock(headlineLines, { x: 96, y: headlineY, size: headlineSize, weight: 950, fill: "#ffffff", lineGap: 1.08 })
@@ -524,7 +525,6 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
   <rect x="${IMAGE_X - 8}" y="${IMAGE_Y - 8}" width="${IMAGE_WIDTH + 16}" height="${IMAGE_HEIGHT + 16}" rx="34" fill="#000000" filter="url(#shadow)"/>
   <rect x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" rx="30" fill="#101014"/>
   <image href="${imageHref}" x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" preserveAspectRatio="xMidYMid meet" clip-path="url(#imageClip)"/>
-  <rect x="${IMAGE_X}" y="${IMAGE_Y + IMAGE_HEIGHT}" width="${IMAGE_WIDTH}" height="8" fill="${accent}"/>
   <rect x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" rx="30" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="2"/>
 
   <rect x="52" y="${panelY}" width="976" height="${panelHeight}" rx="28" fill="url(#panel)"/>
