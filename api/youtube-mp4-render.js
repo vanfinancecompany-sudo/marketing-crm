@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { put } from "@vercel/blob";
 import ffmpegPath from "ffmpeg-static";
+import { Resvg } from "@resvg/resvg-js";
 
 export const config = {
   maxDuration: 120,
@@ -124,7 +125,7 @@ function runFfmpeg(args) {
 
 function safeText(value, fallback = "") {
   return String(value || fallback)
-    .replace(/[^\w\s./&+-]/g, " ")
+    .replace(/[^\w\s./&+£,\-]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -250,7 +251,11 @@ async function downloadImage(url, filePath) {
   }
   const bytes = Buffer.from(await response.arrayBuffer());
   await fs.writeFile(filePath, bytes);
-  return bytes.length;
+  return {
+    bytes,
+    size: bytes.length,
+    contentType: response.headers.get("content-type") || "image/jpeg",
+  };
 }
 
 async function prepareImagePpm(imagePath, ppmPath) {
@@ -361,45 +366,119 @@ function buildFrameSpecs(body, frameCount) {
   });
 }
 
+function escapeXml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function splitSvgLines(text, maxChars, maxLines = 2) {
+  return wrapText(text, maxChars, maxLines).map((line) => escapeXml(line.toUpperCase()));
+}
+
+function svgTextBlock(lines, { x, y, size, weight = 900, fill = "#ffffff", lineGap = 1.08, anchor = "start", letterSpacing = 0 }) {
+  return lines
+    .filter(Boolean)
+    .map((line, index) => {
+      const dy = index === 0 ? 0 : size * lineGap;
+      return `<text x="${x}" y="${y + dy}" text-anchor="${anchor}" font-family="Inter, Aptos, Segoe UI, Arial, sans-serif" font-size="${size}" font-weight="${weight}" letter-spacing="${letterSpacing}" fill="${fill}">${line}</text>`;
+    })
+    .join("");
+}
+
+function imageDataUri(image) {
+  const type = /^image\//i.test(image.contentType || "") ? image.contentType : "image/jpeg";
+  return `data:${type};base64,${image.bytes.toString("base64")}`;
+}
+
+async function writeSvgFrame(filePath, svg) {
+  const rendered = new Resvg(svg, {
+    fitTo: { mode: "original" },
+    font: {
+      fontFamily: "Arial",
+      loadSystemFonts: true,
+    },
+  }).render();
+  await fs.writeFile(filePath, rendered.asPng());
+}
+
 async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults }) {
-  const buffer = Buffer.alloc(WIDTH * HEIGHT * 3);
   const finalCta = frame.finalCta;
+  const accent = "#ef233c";
+  const imageHref = imageDataUri(image);
+  const eyebrow = escapeXml(safeText(frame.eyebrow || defaults.productName).toUpperCase());
+  const headlineLines = splitSvgLines(frame.headline || defaults.hook || "", finalCta ? 20 : 22, finalCta ? 2 : 2);
+  const supportLines = splitSvgLines(frame.support || defaults.website, finalCta ? 32 : 34, finalCta ? 1 : 2);
+  const buttonText = escapeXml(safeText(frame.button || defaults.finalButton).toUpperCase());
+  const website = escapeXml(safeText(frame.support || defaults.website).toUpperCase());
 
-  for (let y = 0; y < HEIGHT; y += 1) {
-    const shade = Math.round(5 + (y / HEIGHT) * 22);
-    for (let x = 0; x < WIDTH; x += 1) {
-      const offset = (y * WIDTH + x) * 3;
-      const vignette = Math.abs(x - WIDTH / 2) / (WIDTH / 2);
-      buffer[offset] = Math.max(0, shade + (finalCta ? 32 : 10) - Math.round(vignette * 10));
-      buffer[offset + 1] = Math.max(0, shade - Math.round(vignette * 7));
-      buffer[offset + 2] = shade + 7;
-    }
+  const headlineBlock = finalCta
+    ? svgTextBlock(headlineLines, { x: 96, y: 1322, size: 78, weight: 950, fill: "#ffffff", lineGap: 1.08 })
+    : svgTextBlock(headlineLines, { x: 86, y: 1366, size: 70, weight: 950, fill: "#ffffff", lineGap: 1.08 });
+
+  const supportBlock = finalCta
+    ? ""
+    : svgTextBlock(supportLines, { x: 86, y: 1538, size: 36, weight: 850, fill: "rgba(255,255,255,0.86)", lineGap: 1.14 });
+
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#050608"/>
+      <stop offset="0.54" stop-color="#000000"/>
+      <stop offset="1" stop-color="${finalCta ? "#24070d" : "#100406"}"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="72%" r="45%">
+      <stop offset="0" stop-color="${accent}" stop-opacity="${finalCta ? "0.28" : "0.18"}"/>
+      <stop offset="1" stop-color="${accent}" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="header" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${accent}" stop-opacity="0.24"/>
+      <stop offset="0.46" stop-color="#08080a" stop-opacity="0.98"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.98"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${accent}" stop-opacity="0.16"/>
+      <stop offset="0.34" stop-color="#1c080b" stop-opacity="0.88"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.76"/>
+    </linearGradient>
+    <clipPath id="imageClip">
+      <rect x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" rx="30" ry="30"/>
+    </clipPath>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="${accent}" flood-opacity="0.16"/>
+    </filter>
+  </defs>
+  <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#bg)"/>
+  <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#glow)"/>
+
+  <rect x="58" y="74" width="964" height="154" rx="26" fill="url(#header)"/>
+  <rect x="58" y="220" width="964" height="8" fill="${accent}"/>
+  <text x="540" y="168" text-anchor="middle" font-family="Inter, Aptos, Segoe UI, Arial, sans-serif" font-size="58" font-weight="950" fill="#ffffff">${escapeXml(defaults.productName)}</text>
+
+  <rect x="${IMAGE_X - 8}" y="${IMAGE_Y - 8}" width="${IMAGE_WIDTH + 16}" height="${IMAGE_HEIGHT + 16}" rx="34" fill="#000000" filter="url(#shadow)"/>
+  <rect x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" rx="30" fill="#101014"/>
+  <image href="${imageHref}" x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" preserveAspectRatio="xMidYMid meet" clip-path="url(#imageClip)"/>
+  <rect x="${IMAGE_X}" y="${IMAGE_Y + IMAGE_HEIGHT}" width="${IMAGE_WIDTH}" height="8" fill="${accent}"/>
+  <rect x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" rx="30" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="2"/>
+
+  <rect x="52" y="${finalCta ? 1218 : 1270}" width="976" height="${finalCta ? 540 : 388}" rx="28" fill="url(#panel)"/>
+  <rect x="52" y="${finalCta ? 1218 : 1270}" width="976" height="7" fill="${accent}" opacity="0.9"/>
+  <text x="86" y="${finalCta ? 1276 : 1324}" font-family="Inter, Aptos, Segoe UI, Arial, sans-serif" font-size="28" font-weight="900" fill="${accent}">${eyebrow}</text>
+  ${headlineBlock}
+  ${supportBlock}
+  ${
+    finalCta
+      ? `<rect x="130" y="1506" width="820" height="112" rx="32" fill="${accent}"/>
+         <text x="540" y="1578" text-anchor="middle" font-family="Inter, Aptos, Segoe UI, Arial, sans-serif" font-size="44" font-weight="950" fill="#ffffff">${buttonText}</text>
+         <text x="540" y="1706" text-anchor="middle" font-family="Inter, Aptos, Segoe UI, Arial, sans-serif" font-size="34" font-weight="900" fill="rgba(255,255,255,0.9)">${website}</text>`
+      : `<text x="540" y="1744" text-anchor="middle" font-family="Inter, Aptos, Segoe UI, Arial, sans-serif" font-size="34" font-weight="900" fill="rgba(255,255,255,0.9)">${escapeXml(defaults.website.toUpperCase())}</text>`
   }
+</svg>`;
 
-  fillRect(buffer, 0, 0, WIDTH, 235, [10, 10, 15]);
-  fillRect(buffer, 0, 235, WIDTH, 10, [239, 35, 60]);
-  drawCenteredText(buffer, defaults.productName, 95, 8, [255, 255, 255]);
-  drawText(buffer, `FRAME ${frameNumber}`, 70, 178, 5, [239, 35, 60]);
-
-  fillRect(buffer, IMAGE_X - 8, IMAGE_Y - 8, IMAGE_WIDTH + 16, IMAGE_HEIGHT + 16, [0, 0, 0]);
-  blitImage(buffer, image, IMAGE_X, IMAGE_Y);
-  fillRect(buffer, IMAGE_X, IMAGE_Y + IMAGE_HEIGHT, IMAGE_WIDTH, 8, [239, 35, 60]);
-
-  if (finalCta) {
-    drawWrappedLeft(buffer, frame.headline, 110, 1190, 11, [255, 255, 255], 14, 2, 22);
-    fillRect(buffer, 110, 1450, WIDTH - 220, 145, [239, 35, 60]);
-    drawCenteredText(buffer, frame.button, 1497, 8, [255, 255, 255]);
-    drawCenteredText(buffer, frame.support || defaults.website, 1665, 5, [255, 255, 255]);
-  } else {
-    drawText(buffer, defaults.productName, 86, 1160, 4, [239, 35, 60]);
-    drawWrappedLeft(buffer, frame.headline, 86, 1225, 8, [255, 255, 255], 18, 2, 18);
-    if (frame.support) {
-      drawWrappedLeft(buffer, frame.support, 86, 1435, 5, [255, 255, 255], 30, 2, 14);
-    }
-    drawCenteredText(buffer, defaults.website, 1655, 5, [255, 255, 255]);
-  }
-
-  await writePpm(filePath, buffer);
+  await writeSvgFrame(filePath, svg);
 }
 
 export default async function handler(req, res) {
@@ -471,10 +550,8 @@ export default async function handler(req, res) {
     const imageDownloadFailures = [];
     for (let index = 0; index < imageUrls.length; index += 1) {
       const imagePath = path.join(workDir, `source-${index + 1}`);
-      const ppmPath = path.join(workDir, `source-${index + 1}.ppm`);
       try {
-        await downloadImage(imageUrls[index], imagePath);
-        preparedImages.push(await prepareImagePpm(imagePath, ppmPath));
+        preparedImages.push(await downloadImage(imageUrls[index], imagePath));
       } catch (error) {
         imageDownloadFailures.push({
           index: index + 1,
@@ -490,7 +567,7 @@ export default async function handler(req, res) {
 
     const framePaths = [];
     for (let index = 0; index < frameCount; index += 1) {
-      const framePath = path.join(workDir, `frame-${index + 1}.ppm`);
+      const framePath = path.join(workDir, `frame-${index + 1}.png`);
       const image = preparedImages[Math.min(index, preparedImages.length - 1)];
       await writeVehicleFrame(framePath, {
         frameNumber: index + 1,
