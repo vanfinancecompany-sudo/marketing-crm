@@ -1,14 +1,18 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { put } from "@vercel/blob";
 import ffmpegPath from "ffmpeg-static";
 import { Resvg } from "@resvg/resvg-js";
+import opentype from "opentype.js";
 
 const require = createRequire(import.meta.url);
 const INTER_BOLD_FONT_PATH = require.resolve("@fontsource/inter/files/inter-latin-900-normal.woff");
+const interFontBytes = readFileSync(INTER_BOLD_FONT_PATH);
+const INTER_BOLD_FONT = opentype.parse(interFontBytes.buffer.slice(interFontBytes.byteOffset, interFontBytes.byteOffset + interFontBytes.byteLength));
 
 export const config = {
   maxDuration: 120,
@@ -379,7 +383,34 @@ function escapeXml(value) {
 }
 
 function splitSvgLines(text, maxChars, maxLines = 2) {
-  return wrapText(text, maxChars, maxLines).map((line) => escapeXml(line.toUpperCase()));
+  return wrapText(text, maxChars, maxLines).map((line) => line.toUpperCase());
+}
+
+function measureVectorText(text, size, letterSpacing = 0) {
+  const normalized = safeText(text).toUpperCase();
+  let width = 0;
+  for (const char of normalized) {
+    const glyph = INTER_BOLD_FONT.charToGlyph(char);
+    width += (glyph.advanceWidth || INTER_BOLD_FONT.unitsPerEm * 0.5) * (size / INTER_BOLD_FONT.unitsPerEm) + letterSpacing;
+  }
+  return Math.max(0, width - letterSpacing);
+}
+
+function vectorTextPath(text, x, y, size, { anchor = "start", letterSpacing = 0 } = {}) {
+  const normalized = safeText(text).toUpperCase();
+  let cursor = anchor === "middle" ? x - measureVectorText(normalized, size, letterSpacing) / 2 : x;
+  const parts = [];
+  for (const char of normalized) {
+    const glyph = INTER_BOLD_FONT.charToGlyph(char);
+    parts.push(glyph.getPath(cursor, y, size).toPathData(2));
+    cursor += (glyph.advanceWidth || INTER_BOLD_FONT.unitsPerEm * 0.5) * (size / INTER_BOLD_FONT.unitsPerEm) + letterSpacing;
+  }
+  return parts.join(" ");
+}
+
+function svgPathText(text, { x, y, size, fill = "#ffffff", anchor = "start", letterSpacing = 0 }) {
+  const d = vectorTextPath(text, x, y, size, { anchor, letterSpacing });
+  return d ? `<path d="${d}" fill="${fill}"/>` : "";
 }
 
 function svgTextBlock(lines, { x, y, size, weight = 900, fill = "#ffffff", lineGap = 1.08, anchor = "start", letterSpacing = 0 }) {
@@ -387,7 +418,7 @@ function svgTextBlock(lines, { x, y, size, weight = 900, fill = "#ffffff", lineG
     .filter(Boolean)
     .map((line, index) => {
       const dy = index === 0 ? 0 : size * lineGap;
-      return `<text x="${x}" y="${y + dy}" text-anchor="${anchor}" font-family="Inter" font-size="${size}" font-weight="${weight}" letter-spacing="${letterSpacing}" fill="${fill}">${line}</text>`;
+      return svgPathText(line, { x, y: y + dy, size, fill, anchor, letterSpacing });
     })
     .join("");
 }
@@ -413,11 +444,11 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
   const finalCta = frame.finalCta;
   const accent = "#ef233c";
   const imageHref = imageDataUri(image);
-  const eyebrow = escapeXml(safeText(frame.eyebrow || defaults.productName).toUpperCase());
+  const eyebrow = safeText(frame.eyebrow || defaults.productName).toUpperCase();
   const headlineLines = splitSvgLines(frame.headline || defaults.hook || "", finalCta ? 20 : 22, finalCta ? 2 : 2);
   const supportLines = splitSvgLines(frame.support || defaults.website, finalCta ? 32 : 34, finalCta ? 1 : 2);
-  const buttonText = escapeXml(safeText(frame.button || defaults.finalButton).toUpperCase());
-  const website = escapeXml(safeText(frame.support || defaults.website).toUpperCase());
+  const buttonText = safeText(frame.button || defaults.finalButton).toUpperCase();
+  const website = safeText(frame.support || defaults.website).toUpperCase();
 
   const headlineBlock = finalCta
     ? svgTextBlock(headlineLines, { x: 96, y: 1322, size: 78, weight: 950, fill: "#ffffff", lineGap: 1.08 })
@@ -461,7 +492,7 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
 
   <rect x="58" y="74" width="964" height="154" rx="26" fill="url(#header)"/>
   <rect x="58" y="220" width="964" height="8" fill="${accent}"/>
-  <text x="540" y="168" text-anchor="middle" font-family="Inter" font-size="58" font-weight="950" fill="#ffffff">${escapeXml(defaults.productName)}</text>
+  ${svgPathText(defaults.productName, { x: 540, y: 168, size: 58, fill: "#ffffff", anchor: "middle" })}
 
   <rect x="${IMAGE_X - 8}" y="${IMAGE_Y - 8}" width="${IMAGE_WIDTH + 16}" height="${IMAGE_HEIGHT + 16}" rx="34" fill="#000000" filter="url(#shadow)"/>
   <rect x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" rx="30" fill="#101014"/>
@@ -471,15 +502,15 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
 
   <rect x="52" y="${finalCta ? 1218 : 1270}" width="976" height="${finalCta ? 540 : 388}" rx="28" fill="url(#panel)"/>
   <rect x="52" y="${finalCta ? 1218 : 1270}" width="976" height="7" fill="${accent}" opacity="0.9"/>
-  <text x="86" y="${finalCta ? 1276 : 1324}" font-family="Inter" font-size="28" font-weight="900" fill="${accent}">${eyebrow}</text>
+  ${svgPathText(eyebrow, { x: 86, y: finalCta ? 1276 : 1324, size: 28, fill: accent })}
   ${headlineBlock}
   ${supportBlock}
   ${
     finalCta
       ? `<rect x="130" y="1506" width="820" height="112" rx="32" fill="${accent}"/>
-         <text x="540" y="1578" text-anchor="middle" font-family="Inter" font-size="44" font-weight="950" fill="#ffffff">${buttonText}</text>
-         <text x="540" y="1706" text-anchor="middle" font-family="Inter" font-size="34" font-weight="900" fill="rgba(255,255,255,0.9)">${website}</text>`
-      : `<text x="540" y="1744" text-anchor="middle" font-family="Inter" font-size="34" font-weight="900" fill="rgba(255,255,255,0.9)">${escapeXml(defaults.website.toUpperCase())}</text>`
+         ${svgPathText(buttonText, { x: 540, y: 1578, size: 44, fill: "#ffffff", anchor: "middle" })}
+         ${svgPathText(website, { x: 540, y: 1706, size: 34, fill: "rgba(255,255,255,0.9)", anchor: "middle" })}`
+      : `${svgPathText(defaults.website, { x: 540, y: 1744, size: 34, fill: "rgba(255,255,255,0.9)", anchor: "middle" })}`
   }
 </svg>`;
 
