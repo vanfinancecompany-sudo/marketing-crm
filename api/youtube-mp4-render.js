@@ -450,13 +450,49 @@ function containsEmoji(text) {
   return /[\p{Extended_Pictographic}\u2600-\u27BF]/u.test(String(text || ""));
 }
 
-function svgFallbackText(text, { x, y, size, fill = "#ffffff", anchor = "start", letterSpacing = 0 }) {
-  const textAnchor = anchor === "middle" ? "middle" : anchor === "end" ? "end" : "start";
-  return `<text x="${x}" y="${y}" fill="${fill}" font-family="Inter, Aptos, Arial, 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif" font-size="${size}" font-weight="900" text-anchor="${textAnchor}" letter-spacing="${letterSpacing}">${escapeXml(safeDisplayText(text).toUpperCase())}</text>`;
+function isEmojiChar(char) {
+  return /[\p{Extended_Pictographic}\u2600-\u27BF]/u.test(char);
+}
+
+function emojiIcon(char, x, y, size) {
+  const box = size * 0.72;
+  const top = y - size * 0.76;
+  const centerY = top + box / 2;
+  if (char === "✅" || char === "✔" || char === "☑") {
+    return `<rect x="${x}" y="${top}" width="${box}" height="${box}" rx="${box * 0.2}" fill="#10b95c"/>
+      <path d="M ${x + box * 0.22} ${top + box * 0.53} L ${x + box * 0.42} ${top + box * 0.72} L ${x + box * 0.8} ${top + box * 0.28}" fill="none" stroke="#ffffff" stroke-width="${box * 0.12}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  }
+  if (char === "🔥") {
+    return `<path d="M ${x + box * 0.5} ${top} C ${x + box * 0.82} ${top + box * 0.28}, ${x + box * 0.86} ${top + box * 0.64}, ${x + box * 0.55} ${top + box} C ${x + box * 0.2} ${top + box * 0.78}, ${x + box * 0.1} ${top + box * 0.45}, ${x + box * 0.36} ${top + box * 0.18} C ${x + box * 0.34} ${top + box * 0.42}, ${x + box * 0.48} ${top + box * 0.46}, ${x + box * 0.5} ${top} Z" fill="#ff7a18"/>
+      <path d="M ${x + box * 0.48} ${top + box * 0.34} C ${x + box * 0.66} ${top + box * 0.55}, ${x + box * 0.62} ${top + box * 0.78}, ${x + box * 0.45} ${top + box * 0.92} C ${x + box * 0.28} ${top + box * 0.72}, ${x + box * 0.34} ${top + box * 0.54}, ${x + box * 0.48} ${top + box * 0.34} Z" fill="#ffe45c"/>`;
+  }
+  return `<circle cx="${x + box / 2}" cy="${centerY}" r="${box * 0.42}" fill="#ef233c"/>
+    <path d="M ${x + box * 0.26} ${centerY} H ${x + box * 0.74} M ${x + box * 0.5} ${centerY - box * 0.24} V ${centerY + box * 0.24}" stroke="#ffffff" stroke-width="${box * 0.1}" stroke-linecap="round"/>`;
+}
+
+function svgMixedText(text, { x, y, size, fill = "#ffffff", anchor = "start", letterSpacing = 0 }) {
+  const normalized = safeDisplayText(text).toUpperCase();
+  const widths = [...normalized].map((char) => {
+    if (char === " ") return size * 0.34;
+    return isEmojiChar(char) ? size * 0.82 : measureVectorText(char, size, 0);
+  });
+  const totalWidth = widths.reduce((sum, width) => sum + width + letterSpacing, 0) - letterSpacing;
+  let cursor = anchor === "middle" ? x - totalWidth / 2 : anchor === "end" ? x - totalWidth : x;
+  const parts = [];
+  [...normalized].forEach((char, index) => {
+    if (isEmojiChar(char)) {
+      parts.push(emojiIcon(char, cursor, y, size));
+    } else {
+      const glyph = INTER_BOLD_FONT.charToGlyph(char);
+      parts.push(`<path d="${glyph.getPath(cursor, y, size).toPathData(2)}" fill="${fill}"/>`);
+    }
+    cursor += widths[index] + letterSpacing;
+  });
+  return parts.join("");
 }
 
 function svgPathText(text, { x, y, size, fill = "#ffffff", anchor = "start", letterSpacing = 0 }) {
-  if (containsEmoji(text)) return svgFallbackText(text, { x, y, size, fill, anchor, letterSpacing });
+  if (containsEmoji(text)) return svgMixedText(text, { x, y, size, fill, anchor, letterSpacing });
   const d = vectorTextPath(text, x, y, size, { anchor, letterSpacing });
   return d ? `<path d="${d}" fill="${fill}"/>` : "";
 }
