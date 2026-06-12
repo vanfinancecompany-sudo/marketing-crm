@@ -458,6 +458,35 @@ function emojiIcon(char, x, y, size) {
   const box = size * 0.72;
   const top = y - size * 0.76;
   const centerY = top + box / 2;
+  if (["✅", "✔", "☑", "✓"].includes(char)) {
+    return `<rect x="${x}" y="${top}" width="${box}" height="${box}" rx="${box * 0.2}" fill="#10b95c"/>
+      <path d="M ${x + box * 0.22} ${top + box * 0.53} L ${x + box * 0.42} ${top + box * 0.72} L ${x + box * 0.8} ${top + box * 0.28}" fill="none" stroke="#ffffff" stroke-width="${box * 0.12}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  }
+  if (char === "🔥") {
+    return `<path d="M ${x + box * 0.5} ${top} C ${x + box * 0.82} ${top + box * 0.28}, ${x + box * 0.86} ${top + box * 0.64}, ${x + box * 0.55} ${top + box} C ${x + box * 0.2} ${top + box * 0.78}, ${x + box * 0.1} ${top + box * 0.45}, ${x + box * 0.36} ${top + box * 0.18} C ${x + box * 0.34} ${top + box * 0.42}, ${x + box * 0.48} ${top + box * 0.46}, ${x + box * 0.5} ${top} Z" fill="#ff7a18"/>
+      <path d="M ${x + box * 0.48} ${top + box * 0.34} C ${x + box * 0.66} ${top + box * 0.55}, ${x + box * 0.62} ${top + box * 0.78}, ${x + box * 0.45} ${top + box * 0.92} C ${x + box * 0.28} ${top + box * 0.72}, ${x + box * 0.34} ${top + box * 0.54}, ${x + box * 0.48} ${top + box * 0.34} Z" fill="#ffe45c"/>`;
+  }
+  if (["⭐", "★"].includes(char)) {
+    const cx = x + box / 2;
+    const cy = centerY;
+    const r1 = box * 0.44;
+    const r2 = box * 0.2;
+    const points = Array.from({ length: 10 }, (_, index) => {
+      const angle = -Math.PI / 2 + (index * Math.PI) / 5;
+      const r = index % 2 === 0 ? r1 : r2;
+      return `${cx + Math.cos(angle) * r},${cy + Math.sin(angle) * r}`;
+    }).join(" ");
+    return `<polygon points="${points}" fill="#ffd166"/>`;
+  }
+  if (["⚡", "🚀"].includes(char)) {
+    return `<path d="M ${x + box * 0.56} ${top} L ${x + box * 0.18} ${top + box * 0.55} H ${x + box * 0.48} L ${x + box * 0.36} ${top + box} L ${x + box * 0.82} ${top + box * 0.36} H ${x + box * 0.52} Z" fill="#ffd166"/>`;
+  }
+  if (["🚚", "🚛"].includes(char)) {
+    return `<rect x="${x + box * 0.08}" y="${top + box * 0.28}" width="${box * 0.52}" height="${box * 0.38}" rx="${box * 0.06}" fill="#ffffff"/>
+      <path d="M ${x + box * 0.6} ${top + box * 0.4} H ${x + box * 0.8} L ${x + box * 0.9} ${top + box * 0.56} V ${top + box * 0.66} H ${x + box * 0.6} Z" fill="#ffffff"/>
+      <circle cx="${x + box * 0.28}" cy="${top + box * 0.72}" r="${box * 0.09}" fill="#ef233c"/>
+      <circle cx="${x + box * 0.76}" cy="${top + box * 0.72}" r="${box * 0.09}" fill="#ef233c"/>`;
+  }
   if (char === "✅" || char === "✔" || char === "☑") {
     return `<rect x="${x}" y="${top}" width="${box}" height="${box}" rx="${box * 0.2}" fill="#10b95c"/>
       <path d="M ${x + box * 0.22} ${top + box * 0.53} L ${x + box * 0.42} ${top + box * 0.72} L ${x + box * 0.8} ${top + box * 0.28}" fill="none" stroke="#ffffff" stroke-width="${box * 0.12}" stroke-linecap="round" stroke-linejoin="round"/>`;
@@ -466,8 +495,7 @@ function emojiIcon(char, x, y, size) {
     return `<path d="M ${x + box * 0.5} ${top} C ${x + box * 0.82} ${top + box * 0.28}, ${x + box * 0.86} ${top + box * 0.64}, ${x + box * 0.55} ${top + box} C ${x + box * 0.2} ${top + box * 0.78}, ${x + box * 0.1} ${top + box * 0.45}, ${x + box * 0.36} ${top + box * 0.18} C ${x + box * 0.34} ${top + box * 0.42}, ${x + box * 0.48} ${top + box * 0.46}, ${x + box * 0.5} ${top} Z" fill="#ff7a18"/>
       <path d="M ${x + box * 0.48} ${top + box * 0.34} C ${x + box * 0.66} ${top + box * 0.55}, ${x + box * 0.62} ${top + box * 0.78}, ${x + box * 0.45} ${top + box * 0.92} C ${x + box * 0.28} ${top + box * 0.72}, ${x + box * 0.34} ${top + box * 0.54}, ${x + box * 0.48} ${top + box * 0.34} Z" fill="#ffe45c"/>`;
   }
-  return `<circle cx="${x + box / 2}" cy="${centerY}" r="${box * 0.42}" fill="#ef233c"/>
-    <path d="M ${x + box * 0.26} ${centerY} H ${x + box * 0.74} M ${x + box * 0.5} ${centerY - box * 0.24} V ${centerY + box * 0.24}" stroke="#ffffff" stroke-width="${box * 0.1}" stroke-linecap="round"/>`;
+  return "";
 }
 
 function svgMixedText(text, { x, y, size, fill = "#ffffff", anchor = "start", letterSpacing = 0 }) {
