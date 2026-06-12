@@ -31,11 +31,11 @@ const DEFAULT_FRAME_COUNT = 10;
 const MAX_FRAME_COUNT = 15;
 const MAX_DURATION_SECONDS = 30;
 const QUALITY_PRESET = "youtubeHigh";
-const CRF = "16";
 const PRESET = "medium";
-const TARGET_VIDEO_BITRATE = "10M";
+const TARGET_VIDEO_BITRATE = "12M";
+const MIN_VIDEO_BITRATE = "12M";
 const MAX_VIDEO_BITRATE = "12M";
-const VIDEO_BUFSIZE = "20M";
+const VIDEO_BUFSIZE = "24M";
 const AUDIO_BITRATE = "192k";
 const DEFAULT_AUDIO_PATH = path.join(process.cwd(), "assets", "default-reel-audio.mp3");
 
@@ -153,8 +153,21 @@ function safeText(value, fallback = "") {
     .trim();
 }
 
-function safeDisplayText(value, fallback = "") {
+function normalizeVideoText(value, fallback = "") {
   return String(value || fallback)
+    .replace(/\u00c2\u00a3/g, "\u00a3")
+    .replace(/(?:🚚|🚛)/gu, " DELIVERY ")
+    .replace(/(?:✅|✔|☑|✓)/gu, " YES ")
+    .replace(/🔥/gu, " HOT ")
+    .replace(/(?:💷|💰)/gu, " FINANCE ")
+    .replace(/(?:⏱️|⏱|⏰|⚡)/gu, " FAST ")
+    .replace(/(?:⭐|★)/gu, " ")
+    .replace(/(?:📸|📍|👉|🚀)/gu, " ")
+    .replace(/[\p{Extended_Pictographic}\u2600-\u27BF]/gu, " ");
+}
+
+function safeDisplayText(value, fallback = "") {
+  return normalizeVideoText(value, fallback)
     .replace(/\u00c2\u00a3/g, "\u00a3")
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .replace(/\s+/g, " ")
@@ -809,13 +822,14 @@ export default async function handler(req, res) {
     const ffmpegSettings = {
       qualityPreset: QUALITY_PRESET,
       codec: "libx264",
-      crf: Number(CRF),
       preset: PRESET,
       profile: "high",
       level: "4.2",
       targetVideoBitrate: TARGET_VIDEO_BITRATE,
+      minrate: MIN_VIDEO_BITRATE,
       maxrate: MAX_VIDEO_BITRATE,
       bufsize: VIDEO_BUFSIZE,
+      x264Params: "nal-hrd=cbr:force-cfr=1",
       fps,
       pixelFormat: "yuv420p",
       audioCodec: "aac",
@@ -844,18 +858,20 @@ export default async function handler(req, res) {
       "libx264",
       "-preset",
       PRESET,
-      "-crf",
-      CRF,
       "-profile:v",
       "high",
       "-level",
       "4.2",
       "-b:v",
       TARGET_VIDEO_BITRATE,
+      "-minrate",
+      MIN_VIDEO_BITRATE,
       "-maxrate",
       MAX_VIDEO_BITRATE,
       "-bufsize",
       VIDEO_BUFSIZE,
+      "-x264-params",
+      "nal-hrd=cbr:force-cfr=1",
       "-pix_fmt",
       "yuv420p",
       "-c:a",
@@ -872,6 +888,9 @@ export default async function handler(req, res) {
     const renderedAt = Date.now();
     const output = await fs.readFile(outputPath);
     const estimatedMbps = durationSeconds > 0 ? Number(((output.length * 8) / durationSeconds / 1000000).toFixed(2)) : null;
+    const qualityWarning = estimatedMbps !== null && estimatedMbps < 6
+      ? `Estimated bitrate is ${estimatedMbps} Mbps, below the 6 Mbps upload-master target.`
+      : "";
     const uploaded = await put(blobPath, output, {
       access: "public",
       contentType: "video/mp4",
@@ -908,6 +927,7 @@ export default async function handler(req, res) {
       audioWarning,
       qualityPreset: QUALITY_PRESET,
       targetVideoBitrate: TARGET_VIDEO_BITRATE,
+      qualityWarning,
       ffmpegSettings,
       message: "YouTube MP4 generated and uploaded to temporary Blob storage.",
     });
