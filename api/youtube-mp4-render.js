@@ -30,8 +30,13 @@ const DEFAULT_DURATION_SECONDS = 20;
 const DEFAULT_FRAME_COUNT = 10;
 const MAX_FRAME_COUNT = 15;
 const MAX_DURATION_SECONDS = 30;
-const CRF = "18";
-const PRESET = "veryfast";
+const QUALITY_PRESET = "youtubeHigh";
+const CRF = "16";
+const PRESET = "medium";
+const TARGET_VIDEO_BITRATE = "10M";
+const MAX_VIDEO_BITRATE = "12M";
+const VIDEO_BUFSIZE = "20M";
+const AUDIO_BITRATE = "192k";
 const DEFAULT_AUDIO_PATH = path.join(process.cwd(), "assets", "default-reel-audio.mp3");
 
 const FONT = {
@@ -802,13 +807,19 @@ export default async function handler(req, res) {
     const audioFilterArgs = audioEmbedded ? ["-af", "volume=0.72"] : [];
 
     const ffmpegSettings = {
+      qualityPreset: QUALITY_PRESET,
       codec: "libx264",
       crf: Number(CRF),
       preset: PRESET,
+      profile: "high",
+      level: "4.2",
+      targetVideoBitrate: TARGET_VIDEO_BITRATE,
+      maxrate: MAX_VIDEO_BITRATE,
+      bufsize: VIDEO_BUFSIZE,
       fps,
       pixelFormat: "yuv420p",
       audioCodec: "aac",
-      audioBitrate: "128k",
+      audioBitrate: AUDIO_BITRATE,
       movflags: "+faststart",
       frameCount,
       frameSeconds,
@@ -835,12 +846,22 @@ export default async function handler(req, res) {
       PRESET,
       "-crf",
       CRF,
+      "-profile:v",
+      "high",
+      "-level",
+      "4.2",
+      "-b:v",
+      TARGET_VIDEO_BITRATE,
+      "-maxrate",
+      MAX_VIDEO_BITRATE,
+      "-bufsize",
+      VIDEO_BUFSIZE,
       "-pix_fmt",
       "yuv420p",
       "-c:a",
       "aac",
       "-b:a",
-      "128k",
+      AUDIO_BITRATE,
       ...audioFilterArgs,
       "-shortest",
       "-movflags",
@@ -850,6 +871,7 @@ export default async function handler(req, res) {
 
     const renderedAt = Date.now();
     const output = await fs.readFile(outputPath);
+    const estimatedMbps = durationSeconds > 0 ? Number(((output.length * 8) / durationSeconds / 1000000).toFixed(2)) : null;
     const uploaded = await put(blobPath, output, {
       access: "public",
       contentType: "video/mp4",
@@ -872,6 +894,8 @@ export default async function handler(req, res) {
       url: uploaded.url,
       blobPathname: uploaded.pathname || blobPath,
       sizeBytes: output.length,
+      actualSizeBytes: output.length,
+      estimatedMbps,
       durationSeconds,
       renderTimeMs: renderedAt - startedAt,
       totalTimeMs: finishedAt - startedAt,
@@ -882,6 +906,8 @@ export default async function handler(req, res) {
       imageDownloadFailures,
       audioEmbedded,
       audioWarning,
+      qualityPreset: QUALITY_PRESET,
+      targetVideoBitrate: TARGET_VIDEO_BITRATE,
       ffmpegSettings,
       message: "YouTube MP4 generated and uploaded to temporary Blob storage.",
     });
