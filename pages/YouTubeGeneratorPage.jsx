@@ -151,6 +151,10 @@ function vehicleMonthlyPriceLine(vehicle) {
   return cleanText(vehicle?.monthly || vehicle?.financeMonthly || vehicle?.monthlyPayment || vehicle?.monthly_price || vehicle?.salePrice || "");
 }
 
+function rent2buyFrameTwoSupportLine(vehicle) {
+  return vehiclePriceLine(vehicle, "rent2buy").replace(/^from\b/i, "FOR");
+}
+
 function headlinePriceText(value) {
   return cleanText(value).replace(/^from\s+/i, "").trim();
 }
@@ -693,7 +697,7 @@ function frameMessage({ productKey, product, vehicle, frameIndex, frameCount, te
   const title = vehicleTitle(vehicle);
   const price = vehiclePriceLine(vehicle, productKey);
   if (frameIndex === 1) {
-    return { eyebrow: displayRegistration(vehicle) || "SELECTED VAN", headline: title, subline: price, cta: "" };
+    return { eyebrow: displayRegistration(vehicle) || "SELECTED VAN", headline: title, subline: productKey === "rent2buy" ? rent2buyFrameTwoSupportLine(vehicle) : price, cta: "" };
   }
   if (frameIndex === 2) {
     return {
