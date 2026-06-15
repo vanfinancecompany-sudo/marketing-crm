@@ -30,9 +30,18 @@ function triggerTextDownload(text, filename) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function isYoutubeGeneratorPage() {
+  const bodyText = cleanText(document.body?.innerText || "").toLowerCase();
+  return bodyText.includes("youtube generator")
+    || bodyText.includes("youtube queue")
+    || bodyText.includes("generate current queued short")
+    || bodyText.includes("auto generate + download queue");
+}
+
 function isYoutubeGeneratorDownload(filename) {
   const value = cleanText(filename).toLowerCase();
-  return /\.(mp4|webm)$/i.test(value)
+  return isYoutubeGeneratorPage()
+    && /\.(mp4|webm)$/i.test(value)
     && (
       value.includes("reel-lab")
       || value.includes("youtube")
