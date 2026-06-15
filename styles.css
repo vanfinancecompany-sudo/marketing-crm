@@ -461,6 +461,7 @@ textarea {
   display: grid;
   gap: 4px;
   font-size: 13px;
+  white-space: pre-line;
 }
 
 .selection-summary span {

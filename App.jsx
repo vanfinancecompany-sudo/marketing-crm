@@ -93,6 +93,12 @@ import {
   downloadPremiumReelMp4,
   generatePremiumReelVideoAsset,
 } from "./utils/premiumReelVideoExport.js";
+import {
+  loadYouTubeCmsUploadsAsync,
+  loadYouTubeCmsUploads,
+  resolveYouTubeImageOrder,
+  YOUTUBE_DEFAULT_IMAGE_COUNT,
+} from "./utils/youtubeImageResolution.js";
 import { fetchMarketingVehicles } from "./services/marketingVehicles.js";
 import {
   deleteMarketingCreative,
@@ -156,6 +162,10 @@ const MANUAL_REEL_QUEUE_STORAGE_KEYS = {
 const REEL_LAB_QUEUE_STORAGE_KEYS = {
   vanFinance: "reelLabQueue_vanFinance",
   rent2buy: "reelLabQueue_rent2buy",
+};
+const YOUTUBE_QUEUE_STORAGE_KEYS = {
+  vanFinance: "youtubeGeneratorQueue_vanFinance",
+  rent2buy: "youtubeGeneratorQueue_rent2buy",
 };
 
 const REEL_CLICK_HISTORY_STORAGE_KEY = "marketingReelClickHistory";
@@ -737,6 +747,49 @@ function saveReelLabQueue(productKey, queue) {
   }
 }
 
+function createYouTubeQueueItem(vehicle, productKey) {
+  return {
+    ...createReelLabQueueItem(vehicle, productKey),
+    source: "stockYouTubeGenerator",
+  };
+}
+
+function normalizeYouTubeQueueItem(item, productKey) {
+  return normalizeReelLabQueueItem(item, productKey);
+}
+
+function loadYouTubeQueue(productKey) {
+  const queueKey = getReelLabQueueKey(productKey);
+  if (typeof window === "undefined") return [];
+
+  try {
+    const saved = localStorage.getItem(YOUTUBE_QUEUE_STORAGE_KEYS[queueKey]);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed.map((item) => normalizeYouTubeQueueItem(item, queueKey)).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveYouTubeQueue(productKey, queue) {
+  const queueKey = getReelLabQueueKey(productKey);
+  const storageKey = YOUTUBE_QUEUE_STORAGE_KEYS[queueKey];
+  if (!storageKey || typeof window === "undefined") return;
+  const normalizedQueue = queue.map((item) => normalizeYouTubeQueueItem(item, queueKey)).filter(Boolean);
+
+  if (normalizedQueue.length) {
+    localStorage.setItem(storageKey, JSON.stringify(normalizedQueue));
+  } else {
+    localStorage.removeItem(storageKey);
+  }
+}
+
+function vehicleQueueLabel(vehicle) {
+  const reg = String(vehicle?.reg || vehicle?.registration || "").trim();
+  const title = String(vehicle?.vanDescription || vehicle?.description || vehicle?.name || vehicle?.title || "").trim();
+  return [reg, title].filter(Boolean).join(" - ") || "Selected vehicle";
+}
+
 function isRent2BuyEligible(vehicle) {
   return Boolean(vehicle?.rent2buyEligible || vehicle?.pipeline === "rent2buy");
 }
@@ -829,6 +882,11 @@ export default function App() {
     vanFinance: loadReelLabQueue("vanFinance"),
     rent2buy: loadReelLabQueue("rent2buy"),
   }));
+  const [youtubeQueues, setYoutubeQueues] = useState(() => ({
+    vanFinance: loadYouTubeQueue("vanFinance"),
+    rent2buy: loadYouTubeQueue("rent2buy"),
+  }));
+  const [youtubeCmsUploads, setYoutubeCmsUploads] = useState(loadYouTubeCmsUploads);
   const [reelDownloadCooldowns, setReelDownloadCooldowns] = useState(loadReelDownloadCooldowns);
   const [factoryFilters, setFactoryFilters] = useState(DEFAULT_STOCK_FILTERS);
   const [libraryFilters, setLibraryFilters] = useState(DEFAULT_LIBRARY_FILTERS);
@@ -887,6 +945,27 @@ const [hiddenTodayReelIds, setHiddenTodayReelIds] = useState(() => {
   useEffect(() => {
     loadVehicles();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadYouTubeCmsUploadsAsync().then((uploads) => {
+      if (!cancelled) setYoutubeCmsUploads(uploads);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (currentView !== "Stock") return undefined;
+    let cancelled = false;
+    loadYouTubeCmsUploadsAsync().then((uploads) => {
+      if (!cancelled) setYoutubeCmsUploads(uploads);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentView, manualStockSelectedIds.length]);
 
   useEffect(() => {
     if (!window.location.pathname.startsWith("/track")) return;
@@ -1215,6 +1294,36 @@ useEffect(() => {
       .map((item) => resolveManualQueuedVehicle(item, vehicles))
       .filter(Boolean),
   }), [reelLabQueues, vehicles]);
+
+  const youtubeQueueVehicles = useMemo(() => ({
+    vanFinance: (youtubeQueues.vanFinance || [])
+      .map((item) => resolveManualQueuedVehicle(item, vehicles))
+      .filter(Boolean),
+    rent2buy: (youtubeQueues.rent2buy || [])
+      .map((item) => resolveManualQueuedVehicle(item, vehicles))
+      .filter(Boolean),
+  }), [youtubeQueues, vehicles]);
+
+  const youtubeStockSelectionSummary = useMemo(() => {
+    const selectedIds = new Set(manualStockSelectedIds);
+    if (!selectedIds.size) return null;
+    const productQueueKey = stockFilters.pipeline === "rent2buy" ? "rent2buy" : "vanFinance";
+    const selectedVehicles = filteredStockVehicles
+      .filter((vehicle) => selectedIds.has(getManualQueueVehicleId(vehicle)))
+      .filter((vehicle) => productQueueKey !== "rent2buy" || isRent2BuyEligible(vehicle));
+    const requiredImageCount = YOUTUBE_DEFAULT_IMAGE_COUNT;
+    const ready = selectedVehicles.filter((vehicle) => {
+      const imageOrder = resolveYouTubeImageOrder({
+        vehicle,
+        cmsUpload: youtubeCmsUploads[productQueueKey],
+        imageSource: "auto",
+        imageCount: requiredImageCount,
+      });
+      return imageOrder.totalAvailable >= requiredImageCount;
+    }).length;
+    const skipped = selectedVehicles.length - ready;
+    return { ready, skipped, requiredImageCount };
+  }, [filteredStockVehicles, manualStockSelectedIds, stockFilters.pipeline, youtubeCmsUploads]);
 
   const manualReelQueueLocks = useMemo(() => ({
     finance: manualReelQueueVehicles.finance
@@ -2044,6 +2153,92 @@ async function handleClearTodayReels() {
     updateReelLabQueue(queueKey, () => nextItems);
   }
 
+  function updateYouTubeQueue(productKey, updater) {
+    const queueKey = getReelLabQueueKey(productKey);
+    setYoutubeQueues((prev) => {
+      const currentQueue = (prev[queueKey] || [])
+        .map((item) => normalizeYouTubeQueueItem(item, queueKey))
+        .filter(Boolean);
+      const nextQueue = updater(currentQueue);
+      const normalizedQueue = nextQueue.map((item) => normalizeYouTubeQueueItem(item, queueKey)).filter(Boolean);
+      const nextQueues = { ...prev, [queueKey]: normalizedQueue };
+      saveYouTubeQueue(queueKey, normalizedQueue);
+      return nextQueues;
+    });
+  }
+
+  async function handleAddSelectedToYouTubeQueue(queueKey) {
+    const productQueueKey = getReelLabQueueKey(queueKey === "rent2buy" ? "rent2buy" : "vanFinance");
+    const requiredImageCount = YOUTUBE_DEFAULT_IMAGE_COUNT;
+    const cmsUploads = await loadYouTubeCmsUploadsAsync();
+    setYoutubeCmsUploads(cmsUploads);
+    const selectedIds = new Set(manualStockSelectedIds);
+    const eligibleVehicles = vehicles
+      .filter((vehicle) => selectedIds.has(getManualQueueVehicleId(vehicle)))
+      .filter((vehicle) => productQueueKey !== "rent2buy" || isRent2BuyEligible(vehicle));
+    const checkedVehicles = eligibleVehicles.map((vehicle) => {
+      const imageOrder = resolveYouTubeImageOrder({
+        vehicle,
+        cmsUpload: cmsUploads[productQueueKey],
+        imageSource: "auto",
+        imageCount: requiredImageCount,
+      });
+      return {
+        vehicle,
+        imageCount: imageOrder.totalAvailable,
+        sourceLabel: imageOrder.sourceLabel || imageOrder.source || "no images found",
+      };
+    });
+    const warningVehicles = checkedVehicles.filter(({ imageCount }) => imageCount < requiredImageCount);
+    const selectedItems = checkedVehicles.map(({ vehicle }) => createYouTubeQueueItem(vehicle, productQueueKey));
+
+    if (!eligibleVehicles.length) {
+      setGenerationMessage("Select at least one stock vehicle for the YouTube queue.");
+      setCreativeError("");
+      return;
+    }
+
+    let addedCount = 0;
+    if (selectedItems.length) {
+      updateYouTubeQueue(productQueueKey, (existing) => {
+        const existingIds = new Set(existing.map((item) => item.id || item.reg || item.title || item.name));
+        const additions = selectedItems.filter((item) => {
+          const key = item.id || item.reg || item.title || item.name;
+          return key && !existingIds.has(key);
+        });
+        addedCount = additions.length;
+        return [...existing, ...additions];
+      });
+    }
+
+    setManualStockSelectedIds([]);
+    const warningDetails = warningVehicles
+      .slice(0, 8)
+      .map(({ vehicle, imageCount, sourceLabel }) => `${vehicleQueueLabel(vehicle)} - ${imageCount} / ${requiredImageCount} images - ${sourceLabel}`)
+      .join("\n");
+    const duplicateCount = selectedItems.length - addedCount;
+    const summaryLines = [
+      `${addedCount} vehicle${addedCount === 1 ? "" : "s"} added to YouTube Queue.`,
+      duplicateCount > 0 ? `${duplicateCount} selected vehicle${duplicateCount === 1 ? " was" : "s were"} already in the YouTube Queue.` : "",
+      warningDetails ? `Image warnings only - YouTube Generator will validate during generation:\n${warningDetails}` : "",
+      warningVehicles.length > 8 ? `...and ${warningVehicles.length - 8} more image warning${warningVehicles.length - 8 === 1 ? "" : "s"}.` : "",
+      "Open YouTube Generator to download.",
+    ].filter(Boolean);
+    setGenerationMessage(summaryLines.join("\n"));
+    setCreativeError("");
+  }
+
+  function handleUpdateYouTubeQueue(productKey, nextVehicles) {
+    const queueKey = getReelLabQueueKey(productKey);
+    const nextItems = (nextVehicles || []).map((vehicle) => createYouTubeQueueItem(vehicle, queueKey));
+    updateYouTubeQueue(queueKey, () => nextItems);
+  }
+
+  function handleUpdateYouTubeCmsUpload(productKey, upload) {
+    const queueKey = getReelLabQueueKey(productKey);
+    setYoutubeCmsUploads((prev) => ({ ...prev, [queueKey]: upload || null }));
+  }
+
   function updateManualReelQueue(queueKey, updater) {
     setManualReelQueues((prev) => {
       const currentQueue = (prev[queueKey] || [])
@@ -2447,6 +2642,8 @@ async function handleClearTodayReels() {
             onToggleVehicle={handleToggleManualStockVehicle}
             onAddSelectedToQueue={handleAddSelectedToManualReelQueue}
             onAddSelectedToReelLabQueue={handleAddSelectedToReelLabQueue}
+            onAddSelectedToYouTubeQueue={handleAddSelectedToYouTubeQueue}
+            youtubeSelectionSummary={youtubeStockSelectionSummary}
             reelActionLocks={reelActionLocks}
             ignoreReelLock={ignoreReelLock}
             onIgnoreReelLockChange={(value) => handleReelFactoryChange("ignoreVehicleCooldown", value)}
@@ -2525,6 +2722,10 @@ async function handleClearTodayReels() {
             vehicles={vehicles}
             vehiclesLoading={vehiclesLoading}
             vehiclesError={vehiclesError}
+            queueByProduct={youtubeQueueVehicles}
+            onQueueChange={handleUpdateYouTubeQueue}
+            cmsUploadsByProduct={youtubeCmsUploads}
+            onCmsUploadChange={handleUpdateYouTubeCmsUpload}
           />
         );
       case "Creative Library":
