@@ -57,6 +57,7 @@ import VanscoStockWatchPage from "./pages/VanscoStockWatchPage.jsx";
 import ReelFactoryPage from "./pages/ReelFactoryPage.jsx";
 import PremiumReelStudioBetaPage from "./pages/PremiumReelStudioBetaPage.jsx";
 import ReelLabBetaPage from "./pages/ReelLabBetaPage.jsx";
+import YouTubeGeneratorPage from "./pages/YouTubeGeneratorPage.jsx";
 import CreativeLibraryPage from "./pages/CreativeLibraryPage.jsx";
 import PostingDeskPage from "./pages/PostingDeskPage.jsx";
 import {
@@ -439,6 +440,7 @@ const VIEW_PATHS = {
   "Reel Factory": "/reel-factory",
   "Premium Reel Studio": "/premium-reel-studio",
   "Reel Lab Beta": "/reel-lab",
+  "YouTube Generator": "/youtube-generator",
   "Creative Library": "/creative-library",
   "Van Finance Facebook": "/van-finance-facebook",
   "Rent2Buy Facebook": "/rent2buy-facebook",
@@ -457,6 +459,7 @@ function viewFromPath() {
     return "Premium Reel Studio";
   }
   if (path === "/reel-lab") return "Reel Lab Beta";
+  if (path === "/youtube-generator" || path === "/youtube-shorts-beta") return "YouTube Generator";
   if (path === "/creative-library") return "Creative Library";
   if (path === "/van-finance-facebook") return "Van Finance Facebook";
   if (path === "/rent2buy-facebook") return "Rent2Buy Facebook";
@@ -2514,6 +2517,14 @@ async function handleClearTodayReels() {
             vehiclesError={vehiclesError}
             queueByProduct={reelLabQueueVehicles}
             onQueueChange={handleUpdateReelLabQueue}
+          />
+        );
+      case "YouTube Generator":
+        return (
+          <YouTubeGeneratorPage
+            vehicles={vehicles}
+            vehiclesLoading={vehiclesLoading}
+            vehiclesError={vehiclesError}
           />
         );
       case "Creative Library":
