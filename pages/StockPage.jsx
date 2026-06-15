@@ -32,8 +32,12 @@ export default function StockPage({
 
   function openYoutubeGenerator() {
     if (typeof window !== "undefined") {
-      window.location.assign("/reel-lab");
+      window.location.assign("/premium-reel-studio");
     }
+  }
+
+  function addSelectedToYoutubeQueue(queueKey) {
+    onAddSelectedToQueue?.(queueKey);
   }
 
   useEffect(() => {
@@ -92,7 +96,7 @@ export default function StockPage({
             <button
               className="button button--primary"
               type="button"
-              onClick={() => onAddSelectedToReelLabQueue?.("finance")}
+              onClick={() => addSelectedToYoutubeQueue("finance")}
               disabled={!selectedCount}
             >
               Add selected to Finance YouTube Queue
@@ -100,7 +104,7 @@ export default function StockPage({
             <button
               className="button button--ghost"
               type="button"
-              onClick={() => onAddSelectedToReelLabQueue?.("rent2buy")}
+              onClick={() => addSelectedToYoutubeQueue("rent2buy")}
               disabled={!selectedCount}
             >
               Add selected to Rent2Buy YouTube Queue
