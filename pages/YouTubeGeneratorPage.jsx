@@ -7,6 +7,7 @@ import {
   resolveYouTubeImageOrder,
   saveYouTubeCmsUpload,
 } from "../utils/youtubeImageResolution.js";
+import { buildPostingCaption } from "../utils/creativeUtils.js";
 
 const SHORT_WIDTH = 1080;
 const SHORT_HEIGHT = 1920;
@@ -147,36 +148,8 @@ function vehiclePriceLine(vehicle, productKey) {
   return cleanText(vehicle?.monthly || vehicle?.salePrice || vehicle?.price || "Finance options available");
 }
 
-function vehicleCashPriceLine(vehicle) {
-  const price = cleanText(vehicle?.salePrice || vehicle?.price || vehicle?.cashPrice || vehicle?.cash_price || "");
-  if (!price) return "";
-  const vatRaw = cleanText(vehicle?.vat || vehicle?.vatStatus || vehicle?.vat_status || vehicle?.plusVat || vehicle?.plus_vat || "");
-  const vatApplies = /vat/i.test(vatRaw) || vehicle?.plusVat === true || vehicle?.plus_vat === true || vehicle?.vatQualifying === true || vehicle?.vat_qualifying === true;
-  return vatApplies && !/\bvat\b/i.test(price) ? `${price} + VAT` : price;
-}
-
 function vehicleMonthlyPriceLine(vehicle) {
   return cleanText(vehicle?.monthly || vehicle?.financeMonthly || vehicle?.monthlyPayment || vehicle?.monthly_price || vehicle?.salePrice || "");
-}
-
-function vehicleFieldLine(vehicle, keys) {
-  for (const key of keys) {
-    const value = cleanText(vehicle?.[key]);
-    if (value) return value;
-  }
-  return "";
-}
-
-function vehicleYear(vehicle) {
-  return vehicleFieldLine(vehicle, ["year", "registrationYear", "regYear", "modelYear"]);
-}
-
-function vehicleMileage(vehicle) {
-  return vehicleFieldLine(vehicle, ["mileage", "miles", "odometer"]);
-}
-
-function vehicleEuro(vehicle) {
-  return vehicleFieldLine(vehicle, ["euro", "euroStatus", "euroStandard", "emissionsClass"]);
 }
 
 function rent2buyFrameTwoSupportLine(vehicle) {
@@ -1149,86 +1122,10 @@ function buildServerFrameSpecs(frameSpecs) {
   });
 }
 
-function detailLinesForDescription(vehicle) {
-  const rows = [
-    ["REGISTRATION", displayRegistration(vehicle) || vehicleRegistration(vehicle)],
-    ["YEAR", vehicleYear(vehicle)],
-    ["MILEAGE", vehicleMileage(vehicle)],
-    ["EURO", vehicleEuro(vehicle)],
-  ];
-  return rows
-    .filter(([, value]) => cleanText(value))
-    .map(([label, value]) => `${label}: ${cleanText(value)}`)
-    .join("\n");
-}
-
 function buildYouTubeDescription(vehicle, productKey) {
-  const title = vehicleTitle(vehicle);
-  const reg = vehicleRegistration(vehicle);
-  const details = detailLinesForDescription(vehicle);
-
-  if (productKey === "rent2buy") {
-    const monthly = headlinePriceText(vehiclePriceLine(vehicle, "rent2buy"));
-    return [
-      `NO CREDIT CHECK${monthly ? ` | ${monthly}` : ""}`,
-      "",
-      "RENT IT! - DRIVE IT! - OWN IT!",
-      "",
-      "Over x36 months / initial rental charges apply.",
-      "",
-      title,
-      "",
-      details,
-      "",
-      "Get on the road fast - no hassle.",
-      "",
-      "* No credit check",
-      "* Apply in 60 seconds",
-      "* Drive away fast",
-      "* Own your van from £99",
-      "",
-      "Join 5,000+ drivers already driving today.",
-      "",
-      "Apply now and get approved today.",
-      "JUST £99 FINAL PAYMENT.",
-      "IT'S YOURS!",
-      "",
-      `https://www.rent2buyvans.co.uk/van-pages/${reg}`,
-    ].filter((line, index, lines) => line || lines[index - 1]).join("\n").trim();
-  }
-
-  const cashPrice = vehicleCashPriceLine(vehicle);
-  const monthly = headlinePriceText(vehicleMonthlyPriceLine(vehicle));
-  const headlineParts = ["FROM £99 DEPOSIT"];
-  if (cashPrice) headlineParts.push(cashPrice);
-  if (monthly) headlineParts.push(`FROM ${monthly}`);
-
-  return [
-    headlineParts.join(" - ").replace(" - FROM ", " | FROM "),
-    "",
-    "VAN FINANCE COMPANY | £99 DEPOSIT OPTIONS",
-    "",
-    title,
-    "",
-    details,
-    "",
-    "Van finance from just £99 deposit.",
-    "Get your next van without tying up your cash.",
-    "",
-    "* Finance the VAT",
-    "* £99 deposit options",
-    "* 200+ vans in stock",
-    "* Free UK delivery",
-    "",
-    "All credit profiles considered - been declined elsewhere? We can help.",
-    "Built for businesses, sole traders and individuals who want to keep cash flow strong.",
-    "",
-    "Apply now - takes 60 seconds.",
-    "",
-    "FAST, SIMPLE APPLICATION, APPROVED IN JUST 60 MINUTES - APPLY TODAY",
-    "",
-    `https://www.vanfinancecompany.co.uk/van-finance/${reg}`,
-  ].filter((line, index, lines) => line || lines[index - 1]).join("\n").trim();
+  return buildPostingCaption(vehicle, {
+    destination: productKey === "rent2buy" ? "Rent2Buy Facebook" : "Van Finance Facebook",
+  });
 }
 
 function downloadTextFile(text, filename) {
