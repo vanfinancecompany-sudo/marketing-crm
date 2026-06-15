@@ -50,8 +50,8 @@ export default function Sidebar({ currentView, onNavigate }) {
             );
           }
 
-          const targetView = item === "YouTube Generator" ? "Reel Lab Beta" : item;
-          const isActive = currentView === item || (item === "YouTube Generator" && currentView === "Reel Lab Beta");
+          const targetView = item === "YouTube Generator" ? "Premium Reel Studio" : item;
+          const isActive = currentView === item || (item === "YouTube Generator" && currentView === "Premium Reel Studio");
 
           return (
             <button
