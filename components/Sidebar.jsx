@@ -12,7 +12,7 @@ export default function Sidebar({ currentView, onNavigate }) {
     "Dashboard",
     "Stock",
     "Vansco Stock Watch",
-    "YouTube Generator",
+    "Reel Lab Beta",
     "Creative Library",
     "Image Suite",
     "Documents Hub",
@@ -50,14 +50,11 @@ export default function Sidebar({ currentView, onNavigate }) {
             );
           }
 
-          const targetView = item === "YouTube Generator" ? "Premium Reel Studio" : item;
-          const isActive = currentView === item || (item === "YouTube Generator" && currentView === "Premium Reel Studio");
-
           return (
             <button
               key={item}
-              className={isActive ? "sidebar__link is-active" : "sidebar__link"}
-              onClick={() => onNavigate(targetView)}
+              className={currentView === item ? "sidebar__link is-active" : "sidebar__link"}
+              onClick={() => onNavigate(item)}
             >
               {item}
             </button>
