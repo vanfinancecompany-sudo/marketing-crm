@@ -4,7 +4,6 @@ import App from "./App.jsx";
 import "./styles.css";
 import "./utils/overnightAutoRefreshPause.js";
 import "./utils/postingVisibilityStateAutoSync.js";
-import "./utils/youtubeDescriptionAutoFiles.js";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
