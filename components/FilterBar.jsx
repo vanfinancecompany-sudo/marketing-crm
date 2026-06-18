@@ -19,6 +19,7 @@ export default function FilterBar({
           ["all", "All"],
           ["vanFinance", "Van Finance"],
           ["rent2buy", "Rent2Buy"],
+          ["cars", "Cars"],
         ].map(([value, label]) => (
           <button
             key={value}

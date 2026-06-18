@@ -189,9 +189,13 @@ export async function fetchCarMarketingVehicles(limitPerPipeline = 80) {
 }
 
 export async function fetchMarketingVehicles(limitPerPipeline = MARKETING_STOCK_WATCH_LIMIT) {
-  const [financeVehicles, rentVehicles] = await Promise.all([
+  const [financeVehicles, rentVehicles, carVehicles] = await Promise.all([
     fetchFinanceMarketingVehicles(limitPerPipeline),
     fetchRentMarketingVehicles(limitPerPipeline),
+    fetchCarMarketingVehicles(80).catch((error) => {
+      console.warn("Cars stock skipped:", error.message || error);
+      return [];
+    }),
   ]);
 
   const rentByReg = new Map(
@@ -200,7 +204,7 @@ export async function fetchMarketingVehicles(limitPerPipeline = MARKETING_STOCK_
       .filter(([registration]) => registration)
   );
 
-  return financeVehicles.map((vehicle) => {
+  const financeWithRentData = financeVehicles.map((vehicle) => {
     const registration = normalizeRegistrationKey(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name);
     const rentMatch = rentByReg.get(registration) || null;
 
@@ -212,4 +216,6 @@ export async function fetchMarketingVehicles(limitPerPipeline = MARKETING_STOCK_
       rent2buyData: rentMatch,
     };
   });
+
+  return [...financeWithRentData, ...carVehicles];
 }

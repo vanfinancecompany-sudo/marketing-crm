@@ -166,6 +166,7 @@ const REEL_LAB_QUEUE_STORAGE_KEYS = {
 const YOUTUBE_QUEUE_STORAGE_KEYS = {
   vanFinance: "youtubeGeneratorQueue_vanFinance",
   rent2buy: "youtubeGeneratorQueue_rent2buy",
+  cars: "youtubeGeneratorQueue_cars",
 };
 
 const REEL_CLICK_HISTORY_STORAGE_KEY = "marketingReelClickHistory";
@@ -707,6 +708,12 @@ function getReelLabManualQueueKey(productKey) {
   return productKey === "rent2buy" ? "rent2buy" : "finance";
 }
 
+function getYouTubeQueueKey(productKey) {
+  if (productKey === "rent2buy") return "rent2buy";
+  if (productKey === "cars") return "cars";
+  return "vanFinance";
+}
+
 function createReelLabQueueItem(vehicle, productKey) {
   return {
     ...createManualQueueItem(vehicle, getReelLabManualQueueKey(productKey)),
@@ -748,18 +755,22 @@ function saveReelLabQueue(productKey, queue) {
 }
 
 function createYouTubeQueueItem(vehicle, productKey) {
+  const queueKey = getYouTubeQueueKey(productKey);
   return {
-    ...createReelLabQueueItem(vehicle, productKey),
+    ...createManualQueueItem(vehicle, queueKey === "rent2buy" ? "rent2buy" : "finance"),
+    productKey: queueKey,
     source: "stockYouTubeGenerator",
   };
 }
 
 function normalizeYouTubeQueueItem(item, productKey) {
-  return normalizeReelLabQueueItem(item, productKey);
+  const queueKey = getYouTubeQueueKey(productKey);
+  const normalized = normalizeManualQueueItem(item, queueKey === "rent2buy" ? "rent2buy" : "finance");
+  return normalized ? { ...normalized, productKey: queueKey } : null;
 }
 
 function loadYouTubeQueue(productKey) {
-  const queueKey = getReelLabQueueKey(productKey);
+  const queueKey = getYouTubeQueueKey(productKey);
   if (typeof window === "undefined") return [];
 
   try {
@@ -772,7 +783,7 @@ function loadYouTubeQueue(productKey) {
 }
 
 function saveYouTubeQueue(productKey, queue) {
-  const queueKey = getReelLabQueueKey(productKey);
+  const queueKey = getYouTubeQueueKey(productKey);
   const storageKey = YOUTUBE_QUEUE_STORAGE_KEYS[queueKey];
   if (!storageKey || typeof window === "undefined") return;
   const normalizedQueue = queue.map((item) => normalizeYouTubeQueueItem(item, queueKey)).filter(Boolean);
@@ -885,6 +896,7 @@ export default function App() {
   const [youtubeQueues, setYoutubeQueues] = useState(() => ({
     vanFinance: loadYouTubeQueue("vanFinance"),
     rent2buy: loadYouTubeQueue("rent2buy"),
+    cars: loadYouTubeQueue("cars"),
   }));
   const [youtubeCmsUploads, setYoutubeCmsUploads] = useState(loadYouTubeCmsUploads);
   const [reelDownloadCooldowns, setReelDownloadCooldowns] = useState(loadReelDownloadCooldowns);
@@ -1302,15 +1314,19 @@ useEffect(() => {
     rent2buy: (youtubeQueues.rent2buy || [])
       .map((item) => resolveManualQueuedVehicle(item, vehicles))
       .filter(Boolean),
+    cars: (youtubeQueues.cars || [])
+      .map((item) => resolveManualQueuedVehicle(item, vehicles))
+      .filter(Boolean),
   }), [youtubeQueues, vehicles]);
 
   const youtubeStockSelectionSummary = useMemo(() => {
     const selectedIds = new Set(manualStockSelectedIds);
     if (!selectedIds.size) return null;
-    const productQueueKey = stockFilters.pipeline === "rent2buy" ? "rent2buy" : "vanFinance";
+    const productQueueKey = getYouTubeQueueKey(stockFilters.pipeline);
     const selectedVehicles = filteredStockVehicles
       .filter((vehicle) => selectedIds.has(getManualQueueVehicleId(vehicle)))
-      .filter((vehicle) => productQueueKey !== "rent2buy" || isRent2BuyEligible(vehicle));
+      .filter((vehicle) => productQueueKey !== "rent2buy" || isRent2BuyEligible(vehicle))
+      .filter((vehicle) => productQueueKey !== "cars" || vehicle.pipeline === "cars");
     const requiredImageCount = YOUTUBE_DEFAULT_IMAGE_COUNT;
     const ready = selectedVehicles.filter((vehicle) => {
       const imageOrder = resolveYouTubeImageOrder({
@@ -2154,7 +2170,7 @@ async function handleClearTodayReels() {
   }
 
   function updateYouTubeQueue(productKey, updater) {
-    const queueKey = getReelLabQueueKey(productKey);
+    const queueKey = getYouTubeQueueKey(productKey);
     setYoutubeQueues((prev) => {
       const currentQueue = (prev[queueKey] || [])
         .map((item) => normalizeYouTubeQueueItem(item, queueKey))
@@ -2168,14 +2184,15 @@ async function handleClearTodayReels() {
   }
 
   async function handleAddSelectedToYouTubeQueue(queueKey) {
-    const productQueueKey = getReelLabQueueKey(queueKey === "rent2buy" ? "rent2buy" : "vanFinance");
+    const productQueueKey = getYouTubeQueueKey(queueKey);
     const requiredImageCount = YOUTUBE_DEFAULT_IMAGE_COUNT;
     const cmsUploads = await loadYouTubeCmsUploadsAsync();
     setYoutubeCmsUploads(cmsUploads);
     const selectedIds = new Set(manualStockSelectedIds);
     const eligibleVehicles = vehicles
       .filter((vehicle) => selectedIds.has(getManualQueueVehicleId(vehicle)))
-      .filter((vehicle) => productQueueKey !== "rent2buy" || isRent2BuyEligible(vehicle));
+      .filter((vehicle) => productQueueKey !== "rent2buy" || isRent2BuyEligible(vehicle))
+      .filter((vehicle) => productQueueKey !== "cars" || vehicle.pipeline === "cars");
     const checkedVehicles = eligibleVehicles.map((vehicle) => {
       const imageOrder = resolveYouTubeImageOrder({
         vehicle,
@@ -2229,13 +2246,13 @@ async function handleClearTodayReels() {
   }
 
   function handleUpdateYouTubeQueue(productKey, nextVehicles) {
-    const queueKey = getReelLabQueueKey(productKey);
+    const queueKey = getYouTubeQueueKey(productKey);
     const nextItems = (nextVehicles || []).map((vehicle) => createYouTubeQueueItem(vehicle, queueKey));
     updateYouTubeQueue(queueKey, () => nextItems);
   }
 
   function handleUpdateYouTubeCmsUpload(productKey, upload) {
-    const queueKey = getReelLabQueueKey(productKey);
+    const queueKey = getYouTubeQueueKey(productKey);
     setYoutubeCmsUploads((prev) => ({ ...prev, [queueKey]: upload || null }));
   }
 
@@ -2643,6 +2660,7 @@ async function handleClearTodayReels() {
             onAddSelectedToQueue={handleAddSelectedToManualReelQueue}
             onAddSelectedToReelLabQueue={handleAddSelectedToReelLabQueue}
             onAddSelectedToYouTubeQueue={handleAddSelectedToYouTubeQueue}
+            onOpenYouTubeGenerator={() => handleNavigate("YouTube Generator")}
             youtubeSelectionSummary={youtubeStockSelectionSummary}
             reelActionLocks={reelActionLocks}
             ignoreReelLock={ignoreReelLock}

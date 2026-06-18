@@ -17,6 +17,7 @@ export default function StockPage({
   onAddSelectedToQueue,
   onAddSelectedToReelLabQueue,
   onAddSelectedToYouTubeQueue,
+  onOpenYouTubeGenerator,
   youtubeSelectionSummary = null,
   reelActionLocks = {},
   ignoreReelLock = false,
@@ -102,10 +103,17 @@ export default function StockPage({
             <button
               className="button button--primary"
               type="button"
-              onClick={() => onAddSelectedToYouTubeQueue?.(filters.pipeline === "rent2buy" ? "rent2buy" : "vanFinance")}
+              onClick={() => onAddSelectedToYouTubeQueue?.(filters.pipeline === "cars" ? "cars" : filters.pipeline === "rent2buy" ? "rent2buy" : "vanFinance")}
               disabled={!selectedCount}
             >
               Add to YouTube Queue
+            </button>
+            <button
+              className="button button--ghost"
+              type="button"
+              onClick={onOpenYouTubeGenerator}
+            >
+              Open YouTube Generator
             </button>
           </div>
           {generationMessage ? <div className="notice">{generationMessage}</div> : null}

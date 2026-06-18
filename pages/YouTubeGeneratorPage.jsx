@@ -53,6 +53,18 @@ const PRODUCTS = {
     cta: "CHECK IF YOU QUALIFY",
     messages: ["NO CREDIT CHECK VANS", "RENT IT - DRIVE IT - OWN IT", "APPLY IN 60 SECONDS", "FINAL PAYMENT IT'S YOURS", "CHECK IF YOU QUALIFY"],
   },
+  cars: {
+    label: "Cars",
+    brand: "Car Finance Company",
+    domain: "carfinancecompany.co.uk",
+    accent: "#ef233c",
+    header: "CAR FINANCE COMPANY",
+    topText: "CAR FINANCE COMPANY",
+    hook: "FINANCE YOUR NEXT CAR",
+    support: "FAST CAR FINANCE OPTIONS",
+    cta: "APPLY ONLINE TODAY",
+    messages: ["CAR FINANCE AVAILABLE", "FAST ONLINE APPLICATION", "LOW DEPOSIT OPTIONS", "GOOD OR BAD CREDIT", "APPLY ONLINE TODAY"],
+  },
 };
 
 const IMAGE_SOURCE_OPTIONS = [
@@ -165,6 +177,11 @@ function vanFinanceMonthlyHeadline(vehicle) {
   return monthly ? `BUY THIS VAN FROM ONLY ${monthly}` : "BUY THIS VAN WITH FLEXIBLE FINANCE";
 }
 
+function carFinanceMonthlyHeadline(vehicle) {
+  const monthly = headlinePriceText(vehicleMonthlyPriceLine(vehicle));
+  return monthly ? `BUY THIS CAR FROM ONLY ${monthly}` : "BUY THIS CAR WITH FLEXIBLE FINANCE";
+}
+
 function rent2buyPriceHeadline(vehicle) {
   const price = headlinePriceText(vehiclePriceLine(vehicle, "rent2buy"));
   return price && price !== "Flexible Rent2Buy options" ? `RENT THIS VEHICLE FROM ${price}` : "RENT THIS VEHICLE WITH FLEXIBLE OPTIONS";
@@ -185,7 +202,7 @@ function resolveFrameTemplateText(value, { productKey, vehicle }) {
       .replace(/\s+/g, " ")
       .trim();
   }
-  if (productKey !== "vanFinance") return text;
+  if (productKey !== "vanFinance" && productKey !== "cars") return text;
   return text
     .replace(/\{monthly price\}/gi, headlinePriceText(vehicleMonthlyPriceLine(vehicle)) || "")
     .replace(/\{monthly\}/gi, headlinePriceText(vehicleMonthlyPriceLine(vehicle)) || "")
@@ -205,6 +222,20 @@ function defaultFrameText(productKey, index) {
       { eyebrow: "HUGE CHOICE", headline: "VANS READY TO GO", support: "PICKUPS, LUTONS AND PANEL VANS", cta: "" },
       { eyebrow: "NO CREDIT CHECK", headline: "CHECK IF YOU QUALIFY", support: "FAST ONLINE APPLICATION", cta: "" },
       { eyebrow: "RENT2BUY VANS", headline: "APPLY TODAY", support: "DRIVE IT, THEN OWN IT", cta: "CHECK IF YOU QUALIFY" },
+    ];
+    return frames[index % frames.length];
+  }
+
+  if (productKey === "cars") {
+    const frames = [
+      { eyebrow: "CAR FINANCE COMPANY", headline: "FINANCE YOUR NEXT CAR", support: "FAST CAR FINANCE OPTIONS", cta: "APPLY NOW" },
+      { eyebrow: "SELECTED CAR", headline: "YOUR NEXT CAR", support: "LOW DEPOSIT OPTIONS", cta: "" },
+      { eyebrow: "CAR FINANCE", headline: "BUY THIS CAR FROM ONLY {monthly price}", support: "{registration}", cta: "" },
+      { eyebrow: "FAST APPLICATION", headline: "FAST ONLINE APPLICATION", support: "APPLY ONLINE TODAY", cta: "" },
+      { eyebrow: "LOW DEPOSIT", headline: "LOW DEPOSIT OPTIONS", support: "SUBJECT TO STATUS", cta: "" },
+      { eyebrow: "ALL WELCOME", headline: "GOOD OR BAD CREDIT", support: "ALL CREDIT PROFILES CONSIDERED", cta: "" },
+      { eyebrow: "CAR FINANCE", headline: "CAR FINANCE AVAILABLE", support: "FAST CAR FINANCE OPTIONS", cta: "" },
+      { eyebrow: "APPLY ONLINE", headline: "APPLY ONLINE TODAY", support: "CAR FINANCE COMPANY", cta: "APPLY NOW" },
     ];
     return frames[index % frames.length];
   }
@@ -514,7 +545,15 @@ function getProductVehicles(vehicles, productKey) {
       });
   }
 
-  return (vehicles || []).map((vehicle) => ({ ...vehicle, pipeline: "vanFinance" }));
+  if (productKey === "cars") {
+    return (vehicles || [])
+      .filter((vehicle) => vehicle?.pipeline === "cars")
+      .map((vehicle) => ({ ...vehicle, pipeline: "cars" }));
+  }
+
+  return (vehicles || [])
+    .filter((vehicle) => vehicle?.pipeline !== "cars" && vehicle?.pipeline !== "rent2buy")
+    .map((vehicle) => ({ ...vehicle, pipeline: "vanFinance" }));
 }
 
 function defaultTextState() {
@@ -533,6 +572,13 @@ function defaultTextState() {
       support: PRODUCTS.rent2buy.support,
       cta: PRODUCTS.rent2buy.cta,
     }, "rent2buy"),
+    cars: normalizeTextStateForProduct({
+      header: PRODUCTS.cars.header,
+      topText: PRODUCTS.cars.topText,
+      hook: PRODUCTS.cars.hook,
+      support: PRODUCTS.cars.support,
+      cta: PRODUCTS.cars.cta,
+    }, "cars"),
   };
 }
 
@@ -544,6 +590,7 @@ function loadSavedTextDefaults() {
     return {
       vanFinance: normalizeTextStateForProduct({ ...defaults.vanFinance, ...(saved.vanFinance || {}) }, "vanFinance"),
       rent2buy: normalizeTextStateForProduct({ ...defaults.rent2buy, ...(saved.rent2buy || {}) }, "rent2buy"),
+      cars: normalizeTextStateForProduct({ ...defaults.cars, ...(saved.cars || {}) }, "cars"),
     };
   } catch {
     return defaults;
@@ -551,15 +598,16 @@ function loadSavedTextDefaults() {
 }
 
 function loadSavedTextModes() {
-  if (typeof window === "undefined") return { vanFinance: "default", rent2buy: "default" };
+  if (typeof window === "undefined") return { vanFinance: "default", rent2buy: "default", cars: "default" };
   try {
     const saved = JSON.parse(window.localStorage.getItem(TEXT_MODE_STORAGE_KEY) || "{}");
     return {
       vanFinance: saved.vanFinance === "manual" ? "manual" : "default",
       rent2buy: saved.rent2buy === "manual" ? "manual" : "default",
+      cars: saved.cars === "manual" ? "manual" : "default",
     };
   } catch {
-    return { vanFinance: "default", rent2buy: "default" };
+    return { vanFinance: "default", rent2buy: "default", cars: "default" };
   }
 }
 
@@ -698,12 +746,12 @@ function frameMessage({ productKey, product, vehicle, frameIndex, frameCount, te
   const title = vehicleTitle(vehicle);
   const price = vehiclePriceLine(vehicle, productKey);
   if (frameIndex === 1) {
-    return { eyebrow: displayRegistration(vehicle) || "SELECTED VAN", headline: title, subline: productKey === "rent2buy" ? rent2buyFrameTwoSupportLine(vehicle) : price, cta: "" };
+    return { eyebrow: displayRegistration(vehicle) || (productKey === "cars" ? "SELECTED CAR" : "SELECTED VAN"), headline: title, subline: productKey === "rent2buy" ? rent2buyFrameTwoSupportLine(vehicle) : price, cta: "" };
   }
   if (frameIndex === 2) {
     return {
-      eyebrow: productKey === "rent2buy" ? "RENT2BUY PAYMENT" : "FINANCE PAYMENT",
-      headline: productKey === "rent2buy" ? rent2buyPriceHeadline(vehicle) : vanFinanceMonthlyHeadline(vehicle),
+      eyebrow: productKey === "rent2buy" ? "RENT2BUY PAYMENT" : productKey === "cars" ? "CAR FINANCE" : "FINANCE PAYMENT",
+      headline: productKey === "rent2buy" ? rent2buyPriceHeadline(vehicle) : productKey === "cars" ? carFinanceMonthlyHeadline(vehicle) : vanFinanceMonthlyHeadline(vehicle),
       subline: displayRegistration(vehicle),
       cta: "",
     };
@@ -720,15 +768,15 @@ function frameMessage({ productKey, product, vehicle, frameIndex, frameCount, te
     return {
       eyebrow: cleanText(frameText.eyebrow),
       headline:
-        frameIndex === 1 && rawHeadline.toUpperCase() === "YOUR NEXT VAN"
+        frameIndex === 1 && (rawHeadline.toUpperCase() === "YOUR NEXT VAN" || rawHeadline.toUpperCase() === "YOUR NEXT CAR")
           ? title
-          : productKey === "vanFinance" && frameIndex === 2 && rawHeadline.toUpperCase() === "BUY THIS VAN FROM ONLY {MONTHLY PRICE}"
-            ? vanFinanceMonthlyHeadline(vehicle)
+          : (productKey === "vanFinance" || productKey === "cars") && frameIndex === 2 && /^BUY THIS (VAN|CAR) FROM ONLY \{MONTHLY PRICE\}$/i.test(rawHeadline)
+            ? productKey === "cars" ? carFinanceMonthlyHeadline(vehicle) : vanFinanceMonthlyHeadline(vehicle)
             : headline,
       subline:
         frameIndex === 1 && rawSupport.toUpperCase().includes("OPTION")
           ? price
-          : productKey === "vanFinance" && frameIndex === 2 && rawSupport.toUpperCase() === "{REGISTRATION}"
+          : (productKey === "vanFinance" || productKey === "cars") && frameIndex === 2 && rawSupport.toUpperCase() === "{REGISTRATION}"
             ? displayRegistration(vehicle)
             : support,
       cta: cleanText(frameText.cta),
@@ -1123,6 +1171,23 @@ function buildServerFrameSpecs(frameSpecs) {
 }
 
 function buildYouTubeDescription(vehicle, productKey) {
+  if (productKey === "cars") {
+    return [
+      "CAR FINANCE AVAILABLE",
+      "",
+      vehicleTitle(vehicle),
+      "",
+      displayRegistration(vehicle) ? `REGISTRATION: ${displayRegistration(vehicle)}` : "",
+      vehiclePriceLine(vehicle, "cars"),
+      "",
+      "Fast online application.",
+      "Low deposit options available.",
+      "Good or bad credit considered.",
+      "",
+      "APPLY ONLINE TODAY",
+      `https://www.${PRODUCTS.cars.domain}`,
+    ].filter((line, index, lines) => line || lines[index - 1]).join("\n").trim();
+  }
   return buildPostingCaption(vehicle, {
     destination: productKey === "rent2buy" ? "Rent2Buy Facebook" : "Van Finance Facebook",
   });
@@ -1219,7 +1284,7 @@ export default function YouTubeGeneratorPage({
   const [textDefaultsByProduct, setTextDefaultsByProduct] = useState(loadSavedTextDefaults);
   const [manualTextByProduct, setManualTextByProduct] = useState(defaultTextState);
   const [localCmsUploadsByProduct, setLocalCmsUploadsByProduct] = useState(loadYouTubeCmsUploads);
-  const [localQueueByProduct, setLocalQueueByProduct] = useState({ vanFinance: [], rent2buy: [] });
+  const [localQueueByProduct, setLocalQueueByProduct] = useState({ vanFinance: [], rent2buy: [], cars: [] });
   const [queueRunning, setQueueRunning] = useState(false);
   const [queueProgress, setQueueProgress] = useState({ index: 0, total: 0, completed: 0, failed: 0, fallbackDownloaded: 0, skipped: 0, message: "Ready" });
   const [queueFailures, setQueueFailures] = useState([]);
@@ -1434,7 +1499,8 @@ export default function YouTubeGeneratorPage({
 
   function mp4Filename() {
     const reg = vehicleRegistration(selectedVehicle);
-    return `${safeFilePart(`${productKey === "rent2buy" ? "rent2buy" : "van-finance"}-${reg || vehicleTitle(selectedVehicle)}-youtube-short`)}.mp4`;
+    const productSlug = productKey === "rent2buy" ? "rent2buy" : productKey === "cars" ? "car-finance" : "van-finance";
+    return `${safeFilePart(`${productSlug}-${reg || vehicleTitle(selectedVehicle)}-youtube-short`)}.mp4`;
   }
 
   function buildServerRenderPayloadForVehicle(vehicle) {
@@ -1447,7 +1513,7 @@ export default function YouTubeGeneratorPage({
         title: vehicleTitle(vehicle),
         registration: displayRegistration(vehicle) || vehicleRegistration(vehicle),
         priceText: vehiclePriceLine(vehicle, productKey),
-        monthlyText: productKey === "vanFinance" ? headlinePriceText(vehicleMonthlyPriceLine(vehicle)) : headlinePriceText(vehiclePriceLine(vehicle, "rent2buy")),
+        monthlyText: productKey === "rent2buy" ? headlinePriceText(vehiclePriceLine(vehicle, "rent2buy")) : headlinePriceText(vehicleMonthlyPriceLine(vehicle)),
         headerText: activeText.header,
         imageUrls: imageOrder.records.map((item) => item.url).slice(0, imageCount),
         frameSpecs: buildServerFrameSpecs(frameSpecs),
@@ -1537,7 +1603,7 @@ export default function YouTubeGeneratorPage({
   }
 
   function youtubeFilenameForVehicle(vehicle, extension = "mp4") {
-    const productSlug = productKey === "rent2buy" ? "rent2buy" : "van-finance";
+    const productSlug = productKey === "rent2buy" ? "rent2buy" : productKey === "cars" ? "car-finance" : "van-finance";
     return `${safeFilePart(`${productSlug}-${vehicleRegistration(vehicle) || vehicleTitle(vehicle)}-youtube-short`)}.${extension}`;
   }
 
@@ -1802,6 +1868,9 @@ export default function YouTubeGeneratorPage({
                   <span>{index + 1}</span>
                 </div>
               ))}
+            </div>
+            <div className="youtube-generator__note">
+              Upload a CMS/Wix export containing cars or vans. Images are matched by registration first, then title.
             </div>
             <div className="youtube-generator__note">
               Final image order: {resolvedImageOrder.records.length} image{resolvedImageOrder.records.length === 1 ? "" : "s"}

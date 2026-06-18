@@ -6,7 +6,13 @@ const YOUTUBE_CMS_DB_VERSION = 1;
 const YOUTUBE_CMS_STORE_NAME = "uploads";
 const REEL_LAB_CMS_DB_NAME = "reelLabBetaCmsUploads";
 const REEL_LAB_CMS_STORE_NAME = "cmsUploads";
-const DEFAULT_UPLOADS = { vanFinance: null, rent2buy: null };
+const DEFAULT_UPLOADS = { vanFinance: null, rent2buy: null, cars: null };
+
+function getYouTubeProductKey(productKey) {
+  if (productKey === "rent2buy") return "rent2buy";
+  if (productKey === "cars") return "cars";
+  return "vanFinance";
+}
 
 function cleanText(value) {
   return String(value || "")
@@ -308,6 +314,7 @@ export function loadYouTubeCmsUploads() {
     return {
       vanFinance: parsed.vanFinance || null,
       rent2buy: parsed.rent2buy || null,
+      cars: parsed.cars || null,
     };
   } catch {
     return { ...DEFAULT_UPLOADS };
@@ -349,7 +356,7 @@ async function readYoutubeCmsDbUploads() {
     const request = store.get("uploads");
     request.onsuccess = () => {
       const value = request.result || {};
-      resolve({ vanFinance: value.vanFinance || null, rent2buy: value.rent2buy || null });
+      resolve({ vanFinance: value.vanFinance || null, rent2buy: value.rent2buy || null, cars: value.cars || null });
     };
     request.onerror = () => resolve({ ...DEFAULT_UPLOADS });
     transaction.oncomplete = () => db.close();
@@ -413,12 +420,13 @@ export async function loadYouTubeCmsUploadsAsync() {
   return {
     vanFinance: dbUploads.vanFinance || localUploads.vanFinance || reelLabUploads.vanFinance || null,
     rent2buy: dbUploads.rent2buy || localUploads.rent2buy || reelLabUploads.rent2buy || null,
+    cars: dbUploads.cars || localUploads.cars || null,
   };
 }
 
 export async function saveYouTubeCmsUpload(productKey, upload) {
   if (typeof window === "undefined") return;
-  const queueKey = productKey === "rent2buy" ? "rent2buy" : "vanFinance";
+  const queueKey = getYouTubeProductKey(productKey);
   const dbCurrent = await readYoutubeCmsDbUploads();
   const dbNext = { ...dbCurrent, [queueKey]: upload || null };
   await writeYoutubeCmsDbUploads(dbNext);
