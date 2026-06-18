@@ -7,7 +7,7 @@ import {
   resolveYouTubeImageOrder,
   saveYouTubeCmsUpload,
 } from "../utils/youtubeImageResolution.js";
-import { buildPostingCaption } from "../utils/creativeUtils.js";
+import { buildCarFinancePostingCaption, buildPostingCaption } from "../utils/creativeUtils.js";
 
 const SHORT_WIDTH = 1080;
 const SHORT_HEIGHT = 1920;
@@ -1208,13 +1208,7 @@ function buildServerFrameSpecs(frameSpecs) {
 
 function buildYouTubeDescription(vehicle, productKey) {
   if (productKey === "cars") {
-    return [
-      "CAR FINANCE COMPANY",
-      "FINANCE YOUR NEXT CAR",
-      "FAST CAR FINANCE OPTIONS",
-      "APPLY ONLINE TODAY",
-      productWebsite(PRODUCTS.cars),
-    ].filter((line, index, lines) => line || lines[index - 1]).join("\n").trim();
+    return buildCarFinancePostingCaption(vehicle);
   }
   return buildPostingCaption(vehicle, {
     destination: productKey === "rent2buy" ? "Rent2Buy Facebook" : "Van Finance Facebook",

@@ -270,6 +270,18 @@ function getFinanceMonthly(vehicle) {
   return amount ? `\u00a3${amount} MTH` : "";
 }
 
+function getCarFinanceMonthly(vehicle) {
+  const amount = formatMoneyNumber(
+    vehicle?.salePrice ||
+    vehicle?.monthly ||
+    vehicle?.financeMonthly ||
+    vehicle?.monthlyPrice ||
+    vehicle?.monthly_price ||
+    ""
+  );
+  return amount ? `\u00a3${amount} MTH` : "";
+}
+
 function buildSafeFinancePriceLine(vehicle) {
   const price = getFinancePrice(vehicle);
   const monthly = getFinanceMonthly(vehicle);
@@ -280,6 +292,25 @@ function buildSafeFinancePriceLine(vehicle) {
 
   if (price) {
     return `FROM \u00a399 DEPOSIT - ${price} + VAT | Finance monthly options available`;
+  }
+
+  if (monthly) {
+    return `FROM \u00a399 DEPOSIT | FROM ${monthly}`;
+  }
+
+  return "FROM \u00a399 DEPOSIT | Finance monthly options available";
+}
+
+function buildSafeCarFinancePriceLine(vehicle) {
+  const price = getFinancePrice(vehicle).replace(/\s*\+\s*VAT\b/gi, "").trim();
+  const monthly = getCarFinanceMonthly(vehicle).replace(/\s*\+\s*VAT\b/gi, "").trim();
+
+  if (price && monthly) {
+    return `FROM \u00a399 DEPOSIT - ${price} | FROM ${monthly}`;
+  }
+
+  if (price) {
+    return `FROM \u00a399 DEPOSIT - ${price} | Finance monthly options available`;
   }
 
   if (monthly) {
@@ -316,6 +347,10 @@ function vehicleSpecsBlock(vehicle) {
 
 function financeVehicleUrl(vehicle) {
   return `https://www.vanfinancecompany.co.uk/van-finance/${vehicleRegistration(vehicle)}`;
+}
+
+function carFinanceVehicleUrl(vehicle) {
+  return `https://www.vanfinancecompany.co.uk/car-finance/${vehicleRegistration(vehicle)}`;
 }
 
 function rentVehicleUrl(vehicle) {
@@ -479,6 +514,36 @@ Apply now - takes 60 seconds.
 FAST, SIMPLE APPLICATION, APPROVED IN JUST 60 MINUTES – APPLY TODAY
 
 ${financeVehicleUrl(vehicle)}`);
+}
+
+export function buildCarFinancePostingCaption(vehicle, { index = 0 } = {}) {
+  const financeHooks = ["\u00a399 deposit options", "Bad credit considered", "Self-employed welcome"];
+  const primaryHook = financeHooks[index % financeHooks.length].toUpperCase().replace(/Ã‚Â£/g, "\u00a3");
+  const carPriceLine = buildSafeCarFinancePriceLine(vehicle);
+
+  return sanitizePostingCaption(`${carPriceLine}
+
+CAR FINANCE COMPANY | ${primaryHook}
+
+${vehicleNameBlock(vehicle)}
+
+${vehicleSpecsBlock(vehicle)}
+
+Car finance from just \u00a399 deposit.
+All cars come with free UK delivery.
+
+* \u00a399 deposit options
+* 200+ vans plus 50 cars in stock
+* Free UK delivery
+
+All credit profiles considered - been declined elsewhere? We can help.
+Built for businesses, sole traders and individuals who want to keep cash flow strong.
+
+Apply now - takes 60 seconds.
+
+FAST, SIMPLE APPLICATION, APPROVED IN JUST 60 MINUTES â€“ APPLY TODAY
+
+${carFinanceVehicleUrl(vehicle)}`.replace(/\s*\+\s*VAT\b/gi, ""));
 }
 
 export function safeFilename(value) {
