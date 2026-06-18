@@ -56,7 +56,7 @@ const PRODUCTS = {
   cars: {
     label: "Cars",
     brand: "Car Finance Company",
-    domain: "carfinancecompany.co.uk",
+    domain: "vanfinancecompany.co.uk/car-finance",
     accent: "#ef233c",
     header: "CAR FINANCE COMPANY",
     topText: "CAR FINANCE COMPANY",
@@ -122,6 +122,17 @@ function cleanText(value) {
     .trim();
 }
 
+function productWebsite(product) {
+  const domain = cleanText(product?.domain || "");
+  if (!domain) return "";
+  if (/^https?:\/\//i.test(domain)) return domain;
+  return `https://www.${domain}`;
+}
+
+function productWebsiteDisplay(product) {
+  return productWebsite(product).replace(/^https?:\/\//i, "");
+}
+
 function safeFilePart(value) {
   return cleanText(value)
     .replace(/[^a-z0-9-]+/gi, "-")
@@ -157,6 +168,9 @@ function vehiclePriceLine(vehicle, productKey) {
   if (productKey === "rent2buy") {
     return cleanText(vehicle?.monthly || vehicle?.week || vehicle?.initialRental || "Flexible Rent2Buy options");
   }
+  if (productKey === "cars") {
+    return cleanText(vehicle?.monthly || vehicle?.salePrice || vehicle?.price || "CARS FROM \u00a399 DEPOSIT");
+  }
   return cleanText(vehicle?.monthly || vehicle?.salePrice || vehicle?.price || "Finance options available");
 }
 
@@ -178,8 +192,7 @@ function vanFinanceMonthlyHeadline(vehicle) {
 }
 
 function carFinanceMonthlyHeadline(vehicle) {
-  const monthly = headlinePriceText(vehicleMonthlyPriceLine(vehicle));
-  return monthly ? `BUY THIS CAR FROM ONLY ${monthly}` : "BUY THIS CAR WITH FLEXIBLE FINANCE";
+  return "GOOD OR POOR CREDIT";
 }
 
 function rent2buyPriceHeadline(vehicle) {
@@ -229,8 +242,8 @@ function defaultFrameText(productKey, index) {
   if (productKey === "cars") {
     const frames = [
       { eyebrow: "CAR FINANCE COMPANY", headline: "FINANCE YOUR NEXT CAR", support: "FAST CAR FINANCE OPTIONS", cta: "APPLY NOW" },
-      { eyebrow: "SELECTED CAR", headline: "YOUR NEXT CAR", support: "LOW DEPOSIT OPTIONS", cta: "" },
-      { eyebrow: "CAR FINANCE", headline: "BUY THIS CAR FROM ONLY {monthly price}", support: "{registration}", cta: "" },
+      { eyebrow: "SELECTED CAR", headline: "YOUR NEXT CAR", support: "CARS FROM \u00a399 DEPOSIT", cta: "" },
+      { eyebrow: "CAR FINANCE", headline: "GOOD OR POOR CREDIT", support: "{registration}", cta: "" },
       { eyebrow: "FAST APPLICATION", headline: "FAST ONLINE APPLICATION", support: "APPLY ONLINE TODAY", cta: "" },
       { eyebrow: "LOW DEPOSIT", headline: "LOW DEPOSIT OPTIONS", support: "SUBJECT TO STATUS", cta: "" },
       { eyebrow: "ALL WELCOME", headline: "GOOD OR BAD CREDIT", support: "ALL CREDIT PROFILES CONSIDERED", cta: "" },
@@ -746,7 +759,12 @@ function frameMessage({ productKey, product, vehicle, frameIndex, frameCount, te
   const title = vehicleTitle(vehicle);
   const price = vehiclePriceLine(vehicle, productKey);
   if (frameIndex === 1) {
-    return { eyebrow: displayRegistration(vehicle) || (productKey === "cars" ? "SELECTED CAR" : "SELECTED VAN"), headline: title, subline: productKey === "rent2buy" ? rent2buyFrameTwoSupportLine(vehicle) : price, cta: "" };
+    return {
+      eyebrow: displayRegistration(vehicle) || (productKey === "cars" ? "SELECTED CAR" : "SELECTED VAN"),
+      headline: title,
+      subline: productKey === "rent2buy" ? rent2buyFrameTwoSupportLine(vehicle) : productKey === "cars" ? "CARS FROM \u00a399 DEPOSIT" : price,
+      cta: "",
+    };
   }
   if (frameIndex === 2) {
     return {
@@ -757,7 +775,7 @@ function frameMessage({ productKey, product, vehicle, frameIndex, frameCount, te
     };
   }
   if (frameIndex === frameCount - 1) {
-    return { eyebrow: "APPLY TODAY", headline: text.cta, subline: product.domain, cta: text.cta };
+    return { eyebrow: "APPLY TODAY", headline: text.cta, subline: productWebsite(product), cta: text.cta };
   }
   const frameText = Array.isArray(text?.frames) ? text.frames[frameIndex] : null;
   if (frameText) {
@@ -812,7 +830,7 @@ function buildYouTubeFrameSpecs({ productKey, product = PRODUCTS[productKey], ve
       ? {
           eyebrow: cleanText(frameText?.eyebrow || "APPLY TODAY"),
           headline: cleanText(frameText?.headline || text?.cta || product?.cta || "APPLY NOW"),
-          subline: cleanText(frameText?.support || `www.${product?.domain || ""}`),
+          subline: cleanText(frameText?.support || productWebsite(product)),
           cta: cleanText(frameText?.cta || frameText?.headline || text?.cta || product?.cta || "APPLY NOW"),
         }
       : frameMessage({ productKey, product, vehicle, frameIndex, frameCount: totalFrameCount, text });
@@ -942,7 +960,7 @@ function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
     const finalEyebrow = cleanText(finalSpec.eyebrow || "APPLY TODAY");
     const finalHeadline = cleanText(finalSpec.headline || text.cta || product.cta || "APPLY NOW");
     const finalButton = cleanText(finalSpec.cta || finalHeadline);
-    const finalDomain = cleanText(finalSpec.subline || `www.${product.domain}`);
+    const finalDomain = cleanText(finalSpec.subline || productWebsite(product));
     ctx.textAlign = "center";
     ctx.fillStyle = product.accent;
     ctx.font = `950 32px ${CANVAS_FONT}`;
@@ -979,7 +997,7 @@ function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.font = `900 34px ${CANVAS_FONT}`;
-    drawFitText(ctx, `www.${product.domain}`.toUpperCase(), SHORT_WIDTH / 2, 1734, textWidth, 38, 26, 900);
+    drawFitText(ctx, productWebsiteDisplay(product).toUpperCase(), SHORT_WIDTH / 2, 1734, textWidth, 38, 26, 900);
     ctx.textAlign = "left";
     drawLightSweep(ctx, textX - 20, textY + 52, textWidth + 40, 180, Math.min(1, currentFrameProgress * 1.2), isTikTok ? 0.36 : 0.22);
   }
@@ -1185,7 +1203,7 @@ function buildYouTubeDescription(vehicle, productKey) {
       "Good or bad credit considered.",
       "",
       "APPLY ONLINE TODAY",
-      `https://www.${PRODUCTS.cars.domain}`,
+      productWebsite(PRODUCTS.cars),
     ].filter((line, index, lines) => line || lines[index - 1]).join("\n").trim();
   }
   return buildPostingCaption(vehicle, {
@@ -2103,7 +2121,7 @@ export default function YouTubeGeneratorPage({
             <p>{activeText.hook}</p>
             <p>{activeText.support}</p>
             <p>{activeText.cta}</p>
-            <p>{product.domain}</p>
+            <p>{productWebsite(product)}</p>
           </div>
         </div>
       </div>

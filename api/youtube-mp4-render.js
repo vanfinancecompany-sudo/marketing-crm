@@ -336,6 +336,25 @@ function productDefaults(productKey) {
     };
   }
 
+  if (productKey === "cars") {
+    return {
+      productName: "CAR FINANCE COMPANY",
+      hook: "FINANCE YOUR NEXT CAR",
+      website: "https://www.vanfinancecompany.co.uk/car-finance",
+      finalHeadline: "APPLY ONLINE TODAY",
+      finalButton: "APPLY NOW",
+      paymentFallback: "GOOD OR POOR CREDIT",
+      featureLines: [
+        "GOOD OR POOR CREDIT",
+        "CARS FROM £99 DEPOSIT",
+        "FAST ONLINE APPLICATION",
+        "LOW DEPOSIT OPTIONS",
+        "CAR FINANCE AVAILABLE",
+        "APPLY ONLINE TODAY",
+      ],
+    };
+  }
+
   return {
     productName: "VAN FINANCE COMPANY",
     hook: "FROM 99 DEPOSIT",
@@ -371,7 +390,7 @@ function safeFps(value) {
 }
 
 function buildFrameSpecs(body, frameCount) {
-  const productKey = body.productKey === "rent2buy" ? "rent2buy" : "vanFinance";
+  const productKey = body.productKey === "rent2buy" ? "rent2buy" : body.productKey === "cars" ? "cars" : "vanFinance";
   const defaults = productDefaults(productKey);
   const title = safeDisplayText(body.title || body.vehicleTitle, "Selected Vehicle");
   const registration = safeDisplayText(body.registration || body.reg, "");
@@ -380,6 +399,8 @@ function buildFrameSpecs(body, frameCount) {
   const paymentText = monthlyText
     ? productKey === "rent2buy"
       ? monthlyText
+      : productKey === "cars"
+        ? defaults.paymentFallback
       : `BUY THIS VAN FROM ONLY ${monthlyText}`
     : defaults.paymentFallback;
 
