@@ -9,6 +9,13 @@ const PLACEHOLDER_CAR_TEXT_PATTERNS = [
   /\bexample\b/i,
   /\bplaceholder\b/i,
 ];
+let carsStockLoadState = {
+  configured: Boolean(CARS_STOCK_TABLE),
+  tableName: CARS_STOCK_TABLE,
+  rawRows: 0,
+  loaded: 0,
+  error: "",
+};
 
 function convertWixImage(url) {
   if (!url) return "";
@@ -105,6 +112,10 @@ function isUsableCarRow(row) {
   const imageUrl = convertWixImage(row.picture || row.image || row.image_url || row.imageUrl);
 
   return isLikelyRealRegistration(registration) && Boolean(imageUrl);
+}
+
+export function getCarsStockLoadState() {
+  return { ...carsStockLoadState };
 }
 
 export function mapFinanceVehicleRow(row, index) {
@@ -225,6 +236,13 @@ export async function fetchCarMarketingVehicles(limitPerPipeline = 80) {
   const safeLimit = Math.min(Number(limitPerPipeline) || 80, MARKETING_STOCK_WATCH_LIMIT);
 
   if (!CARS_STOCK_TABLE) {
+    carsStockLoadState = {
+      configured: false,
+      tableName: "",
+      rawRows: 0,
+      loaded: 0,
+      error: "",
+    };
     console.warn("Cars stock table not configured yet.");
     return [];
   }
@@ -235,13 +253,31 @@ export async function fetchCarMarketingVehicles(limitPerPipeline = 80) {
     .limit(safeLimit);
 
   if (result.error) {
+    carsStockLoadState = {
+      configured: true,
+      tableName: CARS_STOCK_TABLE,
+      rawRows: 0,
+      loaded: 0,
+      error: result.error.message || "Unknown Cars stock table load error.",
+    };
     console.warn(`Cars stock table could not be loaded: ${result.error.message}`);
     return [];
   }
 
-  return (result.data || [])
+  const rawRows = result.data || [];
+  const vehicles = rawRows
     .filter(isUsableCarRow)
     .map(mapCarVehicleRow);
+
+  carsStockLoadState = {
+    configured: true,
+    tableName: CARS_STOCK_TABLE,
+    rawRows: rawRows.length,
+    loaded: vehicles.length,
+    error: "",
+  };
+
+  return vehicles;
 }
 
 export async function fetchMarketingVehicles(limitPerPipeline = MARKETING_STOCK_WATCH_LIMIT) {

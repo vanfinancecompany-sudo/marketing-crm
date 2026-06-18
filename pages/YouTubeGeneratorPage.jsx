@@ -1271,6 +1271,7 @@ export default function YouTubeGeneratorPage({
   onQueueChange = null,
   cmsUploadsByProduct: externalCmsUploadsByProduct = null,
   onCmsUploadChange = null,
+  carsStockStatus = null,
 }) {
   const [productKey, setProductKey] = useState("vanFinance");
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
@@ -1297,6 +1298,18 @@ export default function YouTubeGeneratorPage({
 
   const product = PRODUCTS[productKey];
   const productVehicles = useMemo(() => getProductVehicles(vehicles, productKey), [vehicles, productKey]);
+  const carsConfigured = Boolean(carsStockStatus?.configured);
+  const carsTableName = carsStockStatus?.tableName || "";
+  const carsLoaded = Number(carsStockStatus?.loaded || 0);
+  const carsRawRows = Number(carsStockStatus?.rawRows || 0);
+  const carsLoadError = carsStockStatus?.error || "";
+  const carsEmptyMessage = !carsConfigured
+    ? "Cars stock source is not configured yet. Set VITE_CARS_STOCK_TABLE to the correct Supabase table once confirmed."
+    : carsLoadError
+      ? `Cars stock table could not be loaded: ${carsLoadError}`
+      : carsRawRows === 0
+        ? `No cars found in ${carsTableName} yet. Import cars into this table to populate the Cars tab.`
+        : "No usable cars found yet. Import cars with a valid registration and image to populate the Cars tab.";
   const selectedVehicle = useMemo(
     () => productVehicles.find((vehicle) => String(vehicle.id) === selectedVehicleId) || productVehicles[0] || null,
     [productVehicles, selectedVehicleId]
@@ -1787,9 +1800,15 @@ export default function YouTubeGeneratorPage({
               ))}
             </div>
 
-            {productKey === "cars" && !vehiclesLoading && productVehicles.length === 0 ? (
+            {productKey === "cars" ? (
               <div className="youtube-generator__note">
-                Cars stock source is not configured yet. Set VITE_CARS_STOCK_TABLE to the correct Supabase table once confirmed.
+                Cars table config: {carsConfigured ? "configured" : "not configured"} | Cars table name: {carsTableName || "none"} | Cars loaded: {carsLoaded}
+                {!vehiclesLoading && productVehicles.length === 0 ? (
+                  <>
+                    <br />
+                    {carsEmptyMessage}
+                  </>
+                ) : null}
               </div>
             ) : null}
 

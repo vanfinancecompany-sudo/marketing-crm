@@ -99,7 +99,7 @@ import {
   resolveYouTubeImageOrder,
   YOUTUBE_DEFAULT_IMAGE_COUNT,
 } from "./utils/youtubeImageResolution.js";
-import { fetchMarketingVehicles } from "./services/marketingVehicles.js";
+import { fetchMarketingVehicles, getCarsStockLoadState } from "./services/marketingVehicles.js";
 import {
   deleteMarketingCreative,
   fetchMarketingCreatives,
@@ -872,6 +872,7 @@ function resolveManualQueuedVehicle(queueItem, vehicles) {
 export default function App() {
   const [currentView, setCurrentView] = useState(viewFromPath);
   const [vehicles, setVehicles] = useState([]);
+  const [carsStockStatus, setCarsStockStatus] = useState(getCarsStockLoadState);
   const [vehiclesLoading, setVehiclesLoading] = useState(true);
   const [vehiclesError, setVehiclesError] = useState("");
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
@@ -944,10 +945,12 @@ const [hiddenTodayReelIds, setHiddenTodayReelIds] = useState(() => {
     try {
       const data = await fetchMarketingVehicles();
       setVehicles(data);
+      setCarsStockStatus(getCarsStockLoadState());
       setSelectedVehicleId((prev) => prev || data[0]?.id || "");
       setSelectedVehicleIds((prev) => (prev.length ? prev : data[0]?.id ? [data[0].id] : []));
     } catch (error) {
       setVehicles([]);
+      setCarsStockStatus(getCarsStockLoadState());
       setVehiclesError(error.message || "Failed to load vehicles.");
     } finally {
       setVehiclesLoading(false);
@@ -2662,6 +2665,7 @@ async function handleClearTodayReels() {
             onAddSelectedToYouTubeQueue={handleAddSelectedToYouTubeQueue}
             onOpenYouTubeGenerator={() => handleNavigate("YouTube Generator")}
             youtubeSelectionSummary={youtubeStockSelectionSummary}
+            carsStockStatus={carsStockStatus}
             reelActionLocks={reelActionLocks}
             ignoreReelLock={ignoreReelLock}
             onIgnoreReelLockChange={(value) => handleReelFactoryChange("ignoreVehicleCooldown", value)}
@@ -2744,6 +2748,7 @@ async function handleClearTodayReels() {
             onQueueChange={handleUpdateYouTubeQueue}
             cmsUploadsByProduct={youtubeCmsUploads}
             onCmsUploadChange={handleUpdateYouTubeCmsUpload}
+            carsStockStatus={carsStockStatus}
           />
         );
       case "Creative Library":

@@ -19,6 +19,7 @@ export default function StockPage({
   onAddSelectedToYouTubeQueue,
   onOpenYouTubeGenerator,
   youtubeSelectionSummary = null,
+  carsStockStatus = null,
   reelActionLocks = {},
   ignoreReelLock = false,
   onIgnoreReelLockChange,
@@ -26,6 +27,18 @@ export default function StockPage({
   creativeError = "",
 }) {
   const selectedCount = selectedVehicleIds.length;
+  const carsConfigured = Boolean(carsStockStatus?.configured);
+  const carsTableName = carsStockStatus?.tableName || "";
+  const carsLoaded = Number(carsStockStatus?.loaded || 0);
+  const carsRawRows = Number(carsStockStatus?.rawRows || 0);
+  const carsLoadError = carsStockStatus?.error || "";
+  const carsEmptyMessage = !carsConfigured
+    ? "Cars stock source is not configured yet. Set VITE_CARS_STOCK_TABLE to the correct Supabase table once confirmed."
+    : carsLoadError
+      ? `Cars stock table could not be loaded: ${carsLoadError}`
+      : carsRawRows === 0
+        ? `No cars found in ${carsTableName} yet. Import cars into this table to populate the Cars tab.`
+        : "No usable cars found yet. Import cars with a valid registration and image to populate the Cars tab.";
 
   function refreshStockPage() {
     if (typeof window !== "undefined") {
@@ -70,6 +83,11 @@ export default function StockPage({
         <div className="selection-summary stock-selection-summary">
           <strong>{selectedCount} selected for manual reel queue</strong>
           <span>Pick vehicles, then send them to Reel Lab Beta or YouTube Generator queues.</span>
+          {filters.pipeline === "cars" ? (
+            <span>
+              Cars table config: {carsConfigured ? "configured" : "not configured"} | Cars table name: {carsTableName || "none"} | Cars loaded: {carsLoaded}
+            </span>
+          ) : null}
           {youtubeSelectionSummary && selectedCount ? (
             <span>
               Ready for YouTube: {youtubeSelectionSummary.ready} | Warning: {youtubeSelectionSummary.skipped} may need more images
@@ -125,9 +143,7 @@ export default function StockPage({
         ) : vehiclesError ? (
           <div className="empty-state">Unable to load stock: {vehiclesError}</div>
         ) : vehicles.length === 0 && filters.pipeline === "cars" ? (
-          <div className="empty-state">
-            Cars stock source is not configured yet. Set VITE_CARS_STOCK_TABLE to the correct Supabase table once confirmed.
-          </div>
+          <div className="empty-state">{carsEmptyMessage}</div>
         ) : vehicles.length === 0 ? (
           <div className="empty-state">No vehicles are ready for marketing yet.</div>
         ) : (
