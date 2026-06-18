@@ -343,7 +343,7 @@ function productDefaults(productKey) {
       website: "https://www.vanfinancecompany.co.uk/car-finance",
       finalHeadline: "APPLY ONLINE TODAY",
       finalButton: "APPLY NOW",
-      paymentFallback: "GOOD OR POOR CREDIT",
+      paymentFallback: "BUY THIS CAR WITH FLEXIBLE FINANCE",
       featureLines: [
         "GOOD OR POOR CREDIT",
         "CARS FROM £99 DEPOSIT",
@@ -400,7 +400,7 @@ function buildFrameSpecs(body, frameCount) {
     ? productKey === "rent2buy"
       ? monthlyText
       : productKey === "cars"
-        ? defaults.paymentFallback
+        ? `BUY THIS CAR FROM ONLY ${monthlyText}`
       : `BUY THIS VAN FROM ONLY ${monthlyText}`
     : defaults.paymentFallback;
 

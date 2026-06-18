@@ -192,7 +192,8 @@ function vanFinanceMonthlyHeadline(vehicle) {
 }
 
 function carFinanceMonthlyHeadline(vehicle) {
-  return "GOOD OR POOR CREDIT";
+  const price = headlinePriceText(vehiclePriceLine(vehicle, "cars"));
+  return price && price !== "CARS FROM \u00a399 DEPOSIT" ? `BUY THIS CAR FROM ONLY ${price}` : "BUY THIS CAR WITH FLEXIBLE FINANCE";
 }
 
 function rent2buyPriceHeadline(vehicle) {
@@ -243,7 +244,7 @@ function defaultFrameText(productKey, index) {
     const frames = [
       { eyebrow: "CAR FINANCE COMPANY", headline: "FINANCE YOUR NEXT CAR", support: "FAST CAR FINANCE OPTIONS", cta: "APPLY NOW" },
       { eyebrow: "SELECTED CAR", headline: "YOUR NEXT CAR", support: "CARS FROM \u00a399 DEPOSIT", cta: "" },
-      { eyebrow: "CAR FINANCE", headline: "GOOD OR POOR CREDIT", support: "{registration}", cta: "" },
+      { eyebrow: "CAR FINANCE", headline: "BUY THIS CAR FROM ONLY {monthly price}", support: "{registration}", cta: "" },
       { eyebrow: "FAST APPLICATION", headline: "FAST ONLINE APPLICATION", support: "APPLY ONLINE TODAY", cta: "" },
       { eyebrow: "LOW DEPOSIT", headline: "LOW DEPOSIT OPTIONS", support: "SUBJECT TO STATUS", cta: "" },
       { eyebrow: "ALL WELCOME", headline: "GOOD OR BAD CREDIT", support: "ALL CREDIT PROFILES CONSIDERED", cta: "" },
