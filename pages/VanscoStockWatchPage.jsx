@@ -37,6 +37,15 @@ function normalizeWatchRegistration(value) {
   return text;
 }
 
+function isPlaceholderRegistration(registration) {
+  return /^REG\d+HERE$/i.test(String(registration || ""));
+}
+
+function normalizeLocalStockRegistration(value) {
+  const registration = normalizeWatchRegistration(value);
+  return registration && !isPlaceholderRegistration(registration) ? registration : "";
+}
+
 function workflowStatusOf(record) {
   return String(record?.workflowStatus || record?.workflow_status || "").toLowerCase();
 }
@@ -93,7 +102,7 @@ function dedupeDisplayRecords(records) {
 function dedupeLocalVehiclesByRegistration(vehicles) {
   const byReg = new Map();
   vehicles.forEach((vehicle, index) => {
-    const registration = normalizeWatchRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name);
+    const registration = normalizeLocalStockRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name);
     if (!registration) return;
     if (!byReg.has(registration)) byReg.set(registration, { vehicle, index, registration });
   });
@@ -101,7 +110,7 @@ function dedupeLocalVehiclesByRegistration(vehicles) {
 }
 
 function mapLocalVehicleToWatchRecord(vehicle, index, selectedPipeline) {
-  const registration = normalizeWatchRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name);
+  const registration = normalizeLocalStockRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name);
   const title = vehicle.title || vehicle.name || vehicle.registration || vehicle.reg || "Local CRM vehicle";
   const localStockUrl = vehicle.weblink || vehicle.webLink || vehicle.link || "";
   const imageUrl = vehicle.image || vehicle.picture || vehicle.imageUrl || vehicle.image_url || "";
@@ -122,18 +131,20 @@ function mapLocalVehicleToWatchRecord(vehicle, index, selectedPipeline) {
   };
 }
 
-function classifyWatchRecord(record, localRegistrationSet, selectedPipeline) {
+function classifyWatchRecord(record, localRegistrationSet, selectedPipeline, financeRegistrationsForCars = new Set()) {
   const registration = normalizeWatchRegistration(record.registration);
   const hasExactLocalMatch = Boolean(registration && localRegistrationSet?.has(registration));
+  const hasFinanceMatchForCars = selectedPipeline === "cars" && !hasExactLocalMatch && Boolean(registration && financeRegistrationsForCars?.has(registration));
   const workflowStatus = workflowStatusOf(record);
   const reservedOnVansco = isReservedLikeStatus(record.sourceStatus);
   const currentlyOnVansco = record.isCurrentlyOnVansco !== false;
-  const baseRecord = { ...record, pipeline: selectedPipeline, workflowStatus, safeExactRegistrationMatch: hasExactLocalMatch };
+  const baseRecord = { ...record, pipeline: selectedPipeline, workflowStatus, safeExactRegistrationMatch: hasExactLocalMatch, financeStockMatchForCars: hasFinanceMatchForCars };
 
   if (!currentlyOnVansco) return { ...baseRecord, displayStatus: "hidden_not_current", matchStatus: "hidden_not_current" };
   if (!registration) return { ...baseRecord, displayStatus: "hidden_no_registration", matchStatus: "hidden_no_registration" };
   if (hasExactLocalMatch && reservedOnVansco) return { ...baseRecord, displayStatus: "reserved", matchStatus: "reserved_still_listed" };
   if (hasExactLocalMatch) return { ...baseRecord, displayStatus: "hidden_already_ok", matchStatus: "listed" };
+  if (hasFinanceMatchForCars) return { ...baseRecord, displayStatus: "advertised", matchStatus: "advertised_in_finance_awaiting_refresh" };
   if (isNeverShowStatus(workflowStatus)) return { ...baseRecord, displayStatus: "never", matchStatus: "never_show_again" };
   if (isAdvertisedStatus(workflowStatus)) return { ...baseRecord, displayStatus: "advertised", matchStatus: "advertised_awaiting_refresh" };
   if (isTemporaryHiddenStatus(workflowStatus)) {
@@ -221,6 +232,7 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
         <div className="vehicle-card__meta">Registration: {record.registration || "Not found"}</div>
         {isLocalNotVansco ? <div className="vehicle-card__meta">This registration is active in your CRM stock, but was not found in the current Vansco cache for this tab.</div> : null}
         {!isLocalNotVansco && record.safeExactRegistrationMatch ? <div className="vehicle-card__meta">This registration is currently in this CRM stock tab.</div> : null}
+        {!isLocalNotVansco && record.financeStockMatchForCars ? <div className="vehicle-card__meta">This Cars vehicle registration is already active in Van Finance stock.</div> : null}
         {!isLocalNotVansco && record.lastSuccessfullyCheckedAt ? <div className="vehicle-card__meta">Status last checked: {formatWatchTimestamp(record.lastSuccessfullyCheckedAt)}</div> : null}
         {!isLocalNotVansco && record.lastError ? <div className="vehicle-card__meta">Last detail check issue: {record.lastError}</div> : null}
         {!isLocalNotVansco && (isHiddenOrNever || isAdvertised) ? <div className="vehicle-card__meta">Current status: {workflowLabel(status)}</div> : null}
@@ -233,7 +245,8 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
           {!isLocalNotVansco && !isNeverShowStatus(status) ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("never_show_again", "Moved to Never show again")} disabled={Boolean(savingAction)}>{savingAction === "never_show_again" ? "Saving..." : "Never show again"}</button> : null}
         </div>
         {record.displayStatus === "back_in_stock" ? <div className="vehicle-card__meta">This was hidden before, but Vansco now shows it as available/unknown again.</div> : null}
-        {record.displayStatus === "advertised" ? <div className="vehicle-card__meta">You marked this as advertised during the day. Overnight refresh should remove it automatically once its registration is found in this CRM stock tab.</div> : null}
+        {record.displayStatus === "advertised" && record.financeStockMatchForCars ? <div className="vehicle-card__meta">Advisory only: counted as advertised for the Cars tab because the registration is active in Van Finance stock.</div> : null}
+        {record.displayStatus === "advertised" && !record.financeStockMatchForCars ? <div className="vehicle-card__meta">You marked this as advertised during the day. Overnight refresh should remove it automatically once its registration is found in this CRM stock tab.</div> : null}
         {isLocalNotVansco ? <div className="vehicle-card__meta">Advisory only: check whether this van has sold or needs removing from your website stock.</div> : null}
         {saveMessage ? <div className="vehicle-card__meta">{saveMessage}</div> : null}
       </div>
@@ -255,7 +268,7 @@ function wait(ms) {
 function countVehicleRegistrations(vehicles) {
   return new Set(
     (vehicles || [])
-      .map((vehicle) => normalizeWatchRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name))
+      .map((vehicle) => normalizeLocalStockRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name))
       .filter(Boolean)
   ).size;
 }
@@ -299,7 +312,7 @@ export default function VanscoStockWatchPage() {
     try {
       const vehicles = await fetchLocalVehiclesForPipeline(pipeline);
       if (!isActive()) return;
-      const regs = vehicles.map((vehicle) => normalizeWatchRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name)).filter(Boolean);
+      const regs = vehicles.map((vehicle) => normalizeLocalStockRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name)).filter(Boolean);
       setLocalVehiclesByPipeline((prev) => ({ ...prev, [pipeline]: vehicles }));
       setLocalRegistrationsByPipeline((prev) => ({ ...prev, [pipeline]: new Set(regs) }));
       setLocalLoadErrorByPipeline((prev) => ({ ...prev, [pipeline]: "" }));
@@ -316,6 +329,7 @@ export default function VanscoStockWatchPage() {
   useEffect(() => {
     let active = true;
     loadLocalStock(selectedPipeline, () => active).catch(() => null);
+    if (selectedPipeline === "cars") loadLocalStock("finance", () => active).catch(() => null);
     return () => { active = false; };
   }, [selectedPipeline]);
 
@@ -326,11 +340,12 @@ export default function VanscoStockWatchPage() {
   const rawActiveRecords = recordsByPipeline[selectedPipeline] || [];
   const currentRawRecords = useMemo(() => dedupeDisplayRecords(rawActiveRecords), [rawActiveRecords]);
   const activeLocalRegistrations = localRegistrationsByPipeline[selectedPipeline] || new Set();
+  const financeRegistrationsForCars = selectedPipeline === "cars" ? localRegistrationsByPipeline.finance || new Set() : new Set();
   const activeLocalVehicles = localVehiclesByPipeline[selectedPipeline] || [];
   const localLoadError = localLoadErrorByPipeline[selectedPipeline] || "";
   const cacheSummary = cacheSummaryByPipeline[selectedPipeline] || null;
 
-  const activeRecords = useMemo(() => currentRawRecords.map((record) => classifyWatchRecord(record, activeLocalRegistrations, selectedPipeline)), [activeLocalRegistrations, currentRawRecords, selectedPipeline]);
+  const activeRecords = useMemo(() => currentRawRecords.map((record) => classifyWatchRecord(record, activeLocalRegistrations, selectedPipeline, financeRegistrationsForCars)), [activeLocalRegistrations, currentRawRecords, financeRegistrationsForCars, selectedPipeline]);
 
   const currentVanscoRegistrationSet = useMemo(() => {
     const regs = currentRawRecords
@@ -500,13 +515,14 @@ export default function VanscoStockWatchPage() {
         <div className="vansco-watch-note"><strong>My stock not on Vansco:</strong> this is the reverse registration-only check. It shows active vehicles in your CRM stock tab where the registration is not in the current Vansco cache, helping you spot sold/removed vans that may still be advertised by you.</div>
         <div className="vansco-watch-note"><strong>Back in stock rule:</strong> hidden vehicles only appear there when Vansco is currently available/unknown, the vehicle is still on Vansco, and it is not already in this CRM stock tab. Use <strong>Never show again</strong> for vehicles you will not advertise so they do not inflate the review number.</div>
         <div className="vansco-watch-note"><strong>Accuracy check:</strong> {pipelineLabel(selectedPipeline)} has {activeLocalRegistrations.size} local CRM registrations loaded.{cacheSummary ? ` Vansco cache for this tab has ${cacheSummary.currentPipelineUrlCount ?? "?"} current URLs and ${cacheSummary.usableCachedRegistrations ?? cacheSummary.cachedRegs ?? "?"} usable registrations.` : ""}{lastCheckedAt ? ` Latest detail check: ${formatWatchTimestamp(lastCheckedAt)}.` : ""}</div>
+        {selectedPipeline === "cars" ? <div className="vansco-watch-note"><strong>Cars secondary check:</strong> Cars stay separate, but this view also checks {financeRegistrationsForCars.size} active Van Finance registrations so Cars already advertised through Van Finance do not stay in Missing.</div> : null}
         {selectedPipeline === "cars" && activeLocalRegistrations.size !== 43 ? <div className="vansco-watch-note vansco-watch-note--warning">Cars local stock expected around 43, but this page loaded {activeLocalRegistrations.size}. Check the Cars Supabase table name/fields before relying on Cars results.</div> : null}
         {localLoadError ? <div className="error-banner">{localLoadError}</div> : null}{errorMessage ? <div className="error-banner">{errorMessage}</div> : null}{successMessage ? <div className="success-banner">{successMessage}</div> : null}
         <div className="vansco-watch-note">Hidden from working cards: {summary.alreadyListed} already listed/available, {summary.hiddenReserved} reserved but not advertised in this tab, {summary.hiddenNoReg} no valid registration. Advertised, Hide and Never Show Again are stored per tab. My stock not on Vansco is advisory only and does not save actions.</div>
         <div className="segmented-control">{SIMPLE_FILTERS.map((filter) => <button key={filter.value} className={activeFilter === filter.value ? "segment is-active" : "segment"} type="button" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: filter.value }))}>{filter.label} ({filterCounts[filter.value] ?? 0})</button>)}</div>
         <label className="field"><span className="field__label">Search this view</span><input className="field__input" value={activeSearch} onChange={(event) => setSearchByPipeline((prev) => ({ ...prev, [selectedPipeline]: event.target.value }))} placeholder="Search registration, title, status or notes" /></label>
         <div className="card-actions"><button className="button button--ghost" type="button" onClick={() => setShowDiagnostics((value) => !value)}>{showDiagnostics ? "Hide accuracy details" : "Show accuracy details"}</button></div>
-        {showDiagnostics ? <pre className="diagnostics-panel">{JSON.stringify({ selectedPipeline, localRegsLoaded: activeLocalRegistrations.size, vanscoCurrentRegsLoaded: currentVanscoRegistrationSet.size, localNotVansco: summary.localNotVansco, localLoadError, cacheSummary, actionSummary: summary, debug: debugByPipeline[selectedPipeline] }, null, 2)}</pre> : null}
+        {showDiagnostics ? <pre className="diagnostics-panel">{JSON.stringify({ selectedPipeline, localRegsLoaded: activeLocalRegistrations.size, financeRegsUsedForCars: selectedPipeline === "cars" ? financeRegistrationsForCars.size : 0, vanscoCurrentRegsLoaded: currentVanscoRegistrationSet.size, localNotVansco: summary.localNotVansco, localLoadError, cacheSummary, actionSummary: summary, debug: debugByPipeline[selectedPipeline] }, null, 2)}</pre> : null}
       </section>
       <section className="panel"><div className="panel__header"><div><h3>{SIMPLE_FILTERS.find((filter) => filter.value === activeFilter)?.label || "Action cards"}</h3><p>{filteredRecords.length} advisory cards for {pipelineLabel(selectedPipeline)}.</p></div><span className="status-pill">{filteredRecords.length} shown</span></div>{loadingPipeline === selectedPipeline ? <div className="empty-state">Loading Vansco comparison...</div> : filteredRecords.length === 0 ? <div className="empty-state">No vehicles in this view.</div> : <div className="vansco-card-grid">{filteredRecords.map((record) => <WatchCard key={normalizeWatchRegistration(record.registration) || record.stockUrl || record.localStockUrl || record.id} record={record} selectedPipeline={selectedPipeline} onRecordSaved={handleRecordSaved} />)}</div>}</section>
     </div>
