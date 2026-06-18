@@ -177,6 +177,28 @@ export function mapCarVehicleRow(row, index) {
   const imageUrl = convertWixImage(row.picture || row.image || row.image_url || row.imageUrl);
   const title = valueOrFallback(row.title, row.name, row.vehicle, row.make_model, row.description, `car-${index + 1}`);
   const registration = valueOrFallback(row.registration, row.reg, row.vehicle_reg, row.number_plate, extractRegistration(title));
+  const cashPrice = valueOrFallback(
+    row.price,
+    row.cashPrice,
+    row.cash_price,
+    row.vehiclePrice,
+    row.vehicle_price,
+    row.salePrice,
+    row.saleprice,
+    row.sale_price,
+    row.priceText,
+    row.price_text
+  );
+  const monthlyPrice = valueOrFallback(
+    row.monthly,
+    row.financeMonthly,
+    row.finance_monthly,
+    row.monthlyPrice,
+    row.monthly_price,
+    row.payment,
+    row.paymentText,
+    row.payment_text
+  );
 
   return {
     id: row.id || registration || title || `car-${index}`,
@@ -186,9 +208,9 @@ export function mapCarVehicleRow(row, index) {
     registration,
     picture: imageUrl,
     image: imageUrl,
-    price: row.price || row.cashPrice || row.salePrice || "",
-    monthly: row.monthly || row.financeMonthly || "",
-    salePrice: row.salePrice || row.price || "",
+    price: cashPrice,
+    monthly: monthlyPrice,
+    salePrice: valueOrFallback(row.salePrice, row.saleprice, row.sale_price, monthlyPrice, cashPrice),
     description: row.description || row.carDescription || row.vanDescription || "",
     spec: row.spec || row.carSpec || row.vanSpec || "",
     weblink: row.weblink || row.webLink || row.link || "",

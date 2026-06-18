@@ -169,7 +169,24 @@ function vehiclePriceLine(vehicle, productKey) {
     return cleanText(vehicle?.monthly || vehicle?.week || vehicle?.initialRental || "Flexible Rent2Buy options");
   }
   if (productKey === "cars") {
-    return cleanText(vehicle?.monthly || vehicle?.salePrice || vehicle?.price || "CARS FROM \u00a399 DEPOSIT");
+    return cleanText(
+      vehicle?.monthly ||
+      vehicle?.financeMonthly ||
+      vehicle?.finance_monthly ||
+      vehicle?.monthlyPrice ||
+      vehicle?.monthly_price ||
+      vehicle?.salePrice ||
+      vehicle?.saleprice ||
+      vehicle?.sale_price ||
+      vehicle?.price ||
+      vehicle?.cashPrice ||
+      vehicle?.cash_price ||
+      vehicle?.vehiclePrice ||
+      vehicle?.vehicle_price ||
+      vehicle?.priceText ||
+      vehicle?.price_text ||
+      "CARS FROM \u00a399 DEPOSIT"
+    );
   }
   return cleanText(vehicle?.monthly || vehicle?.salePrice || vehicle?.price || "Finance options available");
 }
@@ -1545,7 +1562,11 @@ export default function YouTubeGeneratorPage({
         title: vehicleTitle(vehicle),
         registration: displayRegistration(vehicle) || vehicleRegistration(vehicle),
         priceText: vehiclePriceLine(vehicle, productKey),
-        monthlyText: productKey === "rent2buy" ? headlinePriceText(vehiclePriceLine(vehicle, "rent2buy")) : headlinePriceText(vehicleMonthlyPriceLine(vehicle)),
+        monthlyText: productKey === "rent2buy"
+          ? headlinePriceText(vehiclePriceLine(vehicle, "rent2buy"))
+          : productKey === "cars"
+            ? headlinePriceText(vehiclePriceLine(vehicle, "cars"))
+            : headlinePriceText(vehicleMonthlyPriceLine(vehicle)),
         headerText: activeText.header,
         imageUrls: imageOrder.records.map((item) => item.url).slice(0, imageCount),
         frameSpecs: buildServerFrameSpecs(frameSpecs),
