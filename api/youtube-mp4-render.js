@@ -343,7 +343,7 @@ function productDefaults(productKey) {
       website: "https://www.vanfinancecompany.co.uk/car-finance",
       finalHeadline: "APPLY ONLINE TODAY",
       finalButton: "APPLY NOW",
-      paymentFallback: "BUY THIS CAR WITH FLEXIBLE FINANCE",
+      paymentFallback: "BUY THIS CAR FROM £99 DEPOSIT",
       featureLines: [
         "GOOD OR POOR CREDIT",
         "CARS FROM £99 DEPOSIT",

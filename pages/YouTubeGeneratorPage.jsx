@@ -193,7 +193,7 @@ function vanFinanceMonthlyHeadline(vehicle) {
 
 function carFinanceMonthlyHeadline(vehicle) {
   const price = headlinePriceText(vehiclePriceLine(vehicle, "cars"));
-  return price && price !== "CARS FROM \u00a399 DEPOSIT" ? `BUY THIS CAR FROM ONLY ${price}` : "BUY THIS CAR WITH FLEXIBLE FINANCE";
+  return price && price !== "CARS FROM \u00a399 DEPOSIT" ? `BUY THIS CAR FROM ONLY ${price}` : "BUY THIS CAR FROM \u00a399 DEPOSIT";
 }
 
 function rent2buyPriceHeadline(vehicle) {
