@@ -124,6 +124,10 @@ export default function StockPage({
           <div className="empty-state">Loading live stock...</div>
         ) : vehiclesError ? (
           <div className="empty-state">Unable to load stock: {vehiclesError}</div>
+        ) : vehicles.length === 0 && filters.pipeline === "cars" ? (
+          <div className="empty-state">
+            Cars stock source is not configured yet. Set VITE_CARS_STOCK_TABLE to the correct Supabase table once confirmed.
+          </div>
         ) : vehicles.length === 0 ? (
           <div className="empty-state">No vehicles are ready for marketing yet.</div>
         ) : (

@@ -1,7 +1,14 @@
 import { supabase } from "./supabase.js";
 
-const CAR_TABLE_CANDIDATES = ["cars_stock", "car_stock", "cars", "car_vehicles", "facebook_cars", "car_adverts"];
+const CARS_STOCK_TABLE = import.meta.env.VITE_CARS_STOCK_TABLE || "";
 const MARKETING_STOCK_WATCH_LIMIT = 500;
+const PLACEHOLDER_CAR_TEXT_PATTERNS = [
+  /\bcar title here\b/i,
+  /\breg\d+here\b/i,
+  /\bregistration here\b/i,
+  /\bexample\b/i,
+  /\bplaceholder\b/i,
+];
 
 function convertWixImage(url) {
   if (!url) return "";
@@ -52,116 +59,57 @@ function isActiveMarketingRow(row) {
   return true;
 }
 
-function normalizeStockText(value) {
-  return String(value || "").trim().toLowerCase();
+function normalizeRegistrationForValidation(value) {
+  return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
-function classifyFinanceVehicleType(row) {
+function isLikelyRealRegistration(value) {
+  const rawValue = String(value || "");
+  if (PLACEHOLDER_CAR_TEXT_PATTERNS.some((pattern) => pattern.test(rawValue))) return false;
+
+  const registration = normalizeRegistrationForValidation(extractRegistration(value) || value);
+  if (!registration || registration.length < 5 || registration.length > 8) return false;
+  if (PLACEHOLDER_CAR_TEXT_PATTERNS.some((pattern) => pattern.test(registration))) return false;
+
+  return (
+    /^[A-Z]{2}[0-9]{2}[A-Z]{3}$/.test(registration) ||
+    /^[A-Z][0-9]{1,3}[A-Z]{3}$/.test(registration) ||
+    /^[A-Z]{3}[0-9]{1,3}[A-Z]$/.test(registration) ||
+    /^[0-9]{1,4}[A-Z]{1,3}$/.test(registration)
+  );
+}
+
+function isPlaceholderCarRow(row) {
   const text = [
     row?.title,
-    row?.vanDescription,
-    row?.vanSpec,
+    row?.name,
+    row?.vehicle,
+    row?.make_model,
+    row?.description,
+    row?.registration,
+    row?.reg,
+    row?.vehicle_reg,
+    row?.number_plate,
   ]
-    .map(normalizeStockText)
     .filter(Boolean)
     .join(" ");
 
-  if (!text) return "van";
+  return PLACEHOLDER_CAR_TEXT_PATTERNS.some((pattern) => pattern.test(text));
+}
 
-  const vanSignals = [
-    "van",
-    "transit",
-    "custom",
-    "vito",
-    "sprinter",
-    "vivaro",
-    "trafic",
-    "crafter",
-    "caddy",
-    "partner",
-    "berlingo",
-    "boxer",
-    "ducato",
-    "movano",
-    "master",
-    "expert",
-    "dispatch",
-    "proace",
-    "combo",
-    "doblo",
-    "tipper",
-    "luton",
-    "dropside",
-    "panel van",
-    "crew van",
-    "crew cab",
-    "lwb",
-    "mwb",
-    "swb",
-    "low loader",
-    "minibus",
-    "9 seater",
-  ];
+function isUsableCarRow(row) {
+  if (!isActiveMarketingRow(row)) return false;
+  if (isPlaceholderCarRow(row)) return false;
 
-  const carSignals = [
-    "car",
-    "petrol",
-    "hybrid",
-    "hatchback",
-    "saloon",
-    "estate",
-    "suv",
-    "coupe",
-    "convertible",
-    "mpv",
-    "dualjet",
-    "tfsi",
-    "tdi",
-    "tsi",
-    "mhev",
-    "a-class",
-    "b-class",
-    "c-class",
-    "e-class",
-    "golf",
-    "polo",
-    "focus",
-    "fiesta",
-    "qashqai",
-    "juke",
-    "ignis",
-    "audi",
-    "bmw",
-    "mercedes",
-    "suzuki",
-    "toyota",
-    "nissan",
-    "hyundai",
-    "kia",
-    "volkswagen",
-    "skoda",
-    "seat",
-    "peugeot 208",
-    "peugeot 308",
-    "renault clio",
-    "ford fiesta",
-    "ford focus",
-  ];
+  const registration = valueOrFallback(row.registration, row.reg, row.vehicle_reg, row.number_plate, extractRegistration(row.title || row.name || row.vehicle || ""));
+  const imageUrl = convertWixImage(row.picture || row.image || row.image_url || row.imageUrl);
 
-  const hasVanSignal = vanSignals.some((signal) => text.includes(signal));
-  if (hasVanSignal) return "van";
-
-  const hasCarSignal = carSignals.some((signal) => text.includes(signal));
-  if (hasCarSignal) return "car";
-
-  return "van";
+  return isLikelyRealRegistration(registration) && Boolean(imageUrl);
 }
 
 export function mapFinanceVehicleRow(row, index) {
   const imageUrl = convertWixImage(row.picture);
   const title = valueOrFallback(row.title, `finance-${index + 1}`);
-  const vehicleType = classifyFinanceVehicleType(row);
-  const isCar = vehicleType === "car";
 
   return {
     id: row.id || title || `finance-${index}`,
@@ -180,8 +128,8 @@ export function mapFinanceVehicleRow(row, index) {
     spec: row.vanSpec || "",
     weblink: row.weblink || "",
     link: row.weblink || "",
-    pipeline: isCar ? "cars" : "vanFinance",
-    vehicleType,
+    pipeline: "vanFinance",
+    vehicleType: "van",
     originalPipeline: "vanFinance",
     source: "vanFinance",
     rent2buyEligible: false,
@@ -275,32 +223,32 @@ export async function fetchRentMarketingVehicles(limitPerPipeline = MARKETING_ST
 
 export async function fetchCarMarketingVehicles(limitPerPipeline = 80) {
   const safeLimit = Math.min(Number(limitPerPipeline) || 80, MARKETING_STOCK_WATCH_LIMIT);
-  const errors = [];
 
-  for (const tableName of CAR_TABLE_CANDIDATES) {
-    const result = await supabase
-      .from(tableName)
-      .select("*")
-      .limit(safeLimit);
-
-    if (result.error) {
-      errors.push(`${tableName}: ${result.error.message}`);
-      continue;
-    }
-
-    const rows = (result.data || []).filter(isActiveMarketingRow);
-    if (rows.length) {
-      return rows.map(mapCarVehicleRow);
-    }
+  if (!CARS_STOCK_TABLE) {
+    console.warn("Cars stock table not configured yet.");
+    return [];
   }
 
-  throw new Error(`Failed to load Cars vehicles. Tried: ${errors.join(" | ") || CAR_TABLE_CANDIDATES.join(", ")}`);
+  const result = await supabase
+    .from(CARS_STOCK_TABLE)
+    .select("*")
+    .limit(safeLimit);
+
+  if (result.error) {
+    console.warn(`Cars stock table could not be loaded: ${result.error.message}`);
+    return [];
+  }
+
+  return (result.data || [])
+    .filter(isUsableCarRow)
+    .map(mapCarVehicleRow);
 }
 
 export async function fetchMarketingVehicles(limitPerPipeline = MARKETING_STOCK_WATCH_LIMIT) {
-  const [financeVehicles, rentVehicles] = await Promise.all([
+  const [financeVehicles, rentVehicles, carsVehicles] = await Promise.all([
     fetchFinanceMarketingVehicles(limitPerPipeline),
     fetchRentMarketingVehicles(limitPerPipeline),
+    fetchCarMarketingVehicles(limitPerPipeline),
   ]);
 
   const rentByReg = new Map(
@@ -323,5 +271,5 @@ export async function fetchMarketingVehicles(limitPerPipeline = MARKETING_STOCK_
     };
   });
 
-  return financeWithRentData;
+  return [...financeWithRentData, ...carsVehicles];
 }

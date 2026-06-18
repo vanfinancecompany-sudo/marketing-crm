@@ -1787,6 +1787,12 @@ export default function YouTubeGeneratorPage({
               ))}
             </div>
 
+            {productKey === "cars" && !vehiclesLoading && productVehicles.length === 0 ? (
+              <div className="youtube-generator__note">
+                Cars stock source is not configured yet. Set VITE_CARS_STOCK_TABLE to the correct Supabase table once confirmed.
+              </div>
+            ) : null}
+
             <label className="youtube-generator__field">
               <span>Vehicle</span>
               <select value={selectedVehicleId} onChange={(event) => setSelectedVehicleId(event.target.value)}>
