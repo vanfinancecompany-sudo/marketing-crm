@@ -191,7 +191,32 @@ function PipelineBadge({ pipeline }) {
   return <span className="tag">{pipelineLabel(pipeline)}</span>;
 }
 
-function WatchCard({ record, selectedPipeline, onRecordSaved }) {
+function importSelectionKey(record) {
+  return normalizeWatchRegistration(record.registration) || record.stockUrl || record.id || "";
+}
+
+function canImportCarsRecord(record, selectedPipeline) {
+  if (selectedPipeline !== "cars") return false;
+  if (record.displayStatus === "local_not_vansco") return false;
+  if (record.isCurrentlyOnVansco === false) return false;
+  if (isReservedLikeStatus(record.sourceStatus)) return false;
+  return Boolean(normalizeWatchRegistration(record.registration));
+}
+
+async function importVanscoCarsToStock(records) {
+  const response = await fetch("/api/import-vansco-cars-to-stock", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ records }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.message || "Could not import Vansco Cars to stock.");
+  }
+  return payload;
+}
+
+function WatchCard({ record, selectedPipeline, onRecordSaved, importSelectionEnabled = false, selectedForImport = false, onToggleImportSelection = null }) {
   const [notesDraft, setNotesDraft] = useState(record.notes || "");
   const [savingAction, setSavingAction] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
@@ -220,6 +245,7 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
   const isHiddenOrNever = isTemporaryHiddenStatus(status) || isNeverShowStatus(status);
   const isAdvertised = isAdvertisedStatus(status) || record.displayStatus === "advertised";
   const isLocalNotVansco = record.displayStatus === "local_not_vansco";
+  const canImportToCarsStock = canImportCarsRecord(record, selectedPipeline);
 
   return (
     <article className="vansco-card">
@@ -227,6 +253,16 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
         {record.imageUrl ? <img src={record.imageUrl} alt={record.title || "Vehicle"} className="vansco-card__image" /> : <div className="vansco-card__image vansco-card__image--placeholder">No image</div>}
       </div>
       <div className="vansco-card__body">
+        {importSelectionEnabled && canImportToCarsStock ? (
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={selectedForImport}
+              onChange={(event) => onToggleImportSelection?.(record, event.target.checked)}
+            />
+            <span>Import to Cars stock</span>
+          </label>
+        ) : null}
         <div className="vansco-card__badges"><PipelineBadge pipeline={selectedPipeline} /><DisplayStatusBadge status={record.displayStatus} /><SourceStatusBadge status={record.sourceStatus} /></div>
         <h3>{record.title || "Untitled vehicle"}</h3>
         <div className="vehicle-card__meta">Registration: {record.registration || "Not found"}</div>
@@ -291,6 +327,9 @@ export default function VanscoStockWatchPage() {
   const [reloadComparisonRunning, setReloadComparisonRunning] = useState(false);
   const [debugByPipeline, setDebugByPipeline] = useState({ finance: null, rent2buy: null, cars: null });
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [selectedCarsImportKeys, setSelectedCarsImportKeys] = useState(new Set());
+  const [importingCars, setImportingCars] = useState(false);
+  const [carsImportMessage, setCarsImportMessage] = useState("");
 
   async function loadPipeline(pipeline = selectedPipeline, options = {}) {
     setLoadingPipeline(pipeline);
@@ -344,6 +383,11 @@ export default function VanscoStockWatchPage() {
   const activeLocalVehicles = localVehiclesByPipeline[selectedPipeline] || [];
   const localLoadError = localLoadErrorByPipeline[selectedPipeline] || "";
   const cacheSummary = cacheSummaryByPipeline[selectedPipeline] || null;
+
+  useEffect(() => {
+    setSelectedCarsImportKeys(new Set());
+    setCarsImportMessage("");
+  }, [selectedPipeline, activeFilter]);
 
   const activeRecords = useMemo(() => currentRawRecords.map((record) => classifyWatchRecord(record, activeLocalRegistrations, selectedPipeline, financeRegistrationsForCars)), [activeLocalRegistrations, currentRawRecords, financeRegistrationsForCars, selectedPipeline]);
 
@@ -399,6 +443,16 @@ export default function VanscoStockWatchPage() {
     if (!searchText) return byFilter;
     return byFilter.filter((record) => recordSearchText(record).includes(searchText));
   }, [activeFilter, displayRecords, activeSearch]);
+
+  const visibleCarsImportCandidates = useMemo(
+    () => filteredRecords.filter((record) => canImportCarsRecord(record, selectedPipeline)),
+    [filteredRecords, selectedPipeline]
+  );
+
+  const selectedCarsImportRecords = useMemo(() => {
+    if (selectedPipeline !== "cars" || selectedCarsImportKeys.size === 0) return [];
+    return displayRecords.filter((record) => selectedCarsImportKeys.has(importSelectionKey(record)) && canImportCarsRecord(record, selectedPipeline));
+  }, [displayRecords, selectedCarsImportKeys, selectedPipeline]);
 
   const lastCheckedAt = useMemo(() => currentRawRecords.reduce((latest, record) => {
     const checked = record.lastCheckedAt || record.lastSuccessfullyCheckedAt;
@@ -486,6 +540,62 @@ export default function VanscoStockWatchPage() {
     }));
   }
 
+  function handleToggleCarsImportSelection(record, checked) {
+    const key = importSelectionKey(record);
+    if (!key) return;
+    setSelectedCarsImportKeys((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }
+
+  function handleSelectVisibleCarsForImport() {
+    setSelectedCarsImportKeys((prev) => {
+      const next = new Set(prev);
+      visibleCarsImportCandidates.forEach((record) => {
+        const key = importSelectionKey(record);
+        if (key) next.add(key);
+      });
+      return next;
+    });
+  }
+
+  function handleClearCarsImportSelection() {
+    setSelectedCarsImportKeys(new Set());
+  }
+
+  async function handleImportSelectedCars() {
+    setErrorMessage("");
+    setSuccessMessage("");
+    setCarsImportMessage("");
+
+    if (!selectedCarsImportRecords.length) {
+      setCarsImportMessage("Select at least one available Cars record with a valid registration.");
+      return;
+    }
+
+    setImportingCars(true);
+    try {
+      const result = await importVanscoCarsToStock(selectedCarsImportRecords);
+      const skippedDetails = Array.isArray(result.skippedDetails) ? result.skippedDetails : [];
+      const skippedText = skippedDetails.length
+        ? ` Skipped: ${skippedDetails.slice(0, 8).map((item) => `${item.registration || item.title || "Unknown"} - ${item.reason}`).join("; ")}${skippedDetails.length > 8 ? "..." : ""}`
+        : "";
+      const message = `Imported ${result.imported || 0} cars, skipped ${result.skipped || 0}. Updated ${result.updated || 0}, inserted ${result.inserted || 0}.${skippedText}`;
+      setCarsImportMessage(message);
+      setSuccessMessage(message);
+      setSelectedCarsImportKeys(new Set());
+      await loadLocalStock("cars");
+    } catch (error) {
+      setCarsImportMessage(error.message || "Could not import selected Cars.");
+      setErrorMessage(error.message || "Could not import selected Cars.");
+    } finally {
+      setImportingCars(false);
+    }
+  }
+
   return (
     <div className="page-stack">
       <section className="panel hero-panel vansco-watch-panel">
@@ -517,6 +627,17 @@ export default function VanscoStockWatchPage() {
         <div className="vansco-watch-note"><strong>Accuracy check:</strong> {pipelineLabel(selectedPipeline)} has {activeLocalRegistrations.size} local CRM registrations loaded.{cacheSummary ? ` Vansco cache for this tab has ${cacheSummary.currentPipelineUrlCount ?? "?"} current URLs and ${cacheSummary.usableCachedRegistrations ?? cacheSummary.cachedRegs ?? "?"} usable registrations.` : ""}{lastCheckedAt ? ` Latest detail check: ${formatWatchTimestamp(lastCheckedAt)}.` : ""}</div>
         {selectedPipeline === "cars" ? <div className="vansco-watch-note"><strong>Cars secondary check:</strong> Cars stay separate, but this view also checks {financeRegistrationsForCars.size} active Van Finance registrations so Cars already advertised through Van Finance do not stay in Missing.</div> : null}
         {selectedPipeline === "cars" ? <div className="vansco-watch-note vansco-watch-note--warning">Cars local stock source is not confirmed yet. This page loaded {activeLocalRegistrations.size} local Cars registrations. Check the Cars Supabase table name/fields before relying on Cars results.</div> : null}
+        {selectedPipeline === "cars" ? (
+          <div className="vansco-watch-note">
+            <strong>Manual Cars import:</strong> select available Cars below, then import them into Cars stock. This only writes to car_adverts and never posts, deletes, or changes Vansco cache.
+            <div className="card-actions" style={{ marginTop: "8px" }}>
+              <button className="button button--ghost" type="button" onClick={handleSelectVisibleCarsForImport} disabled={!visibleCarsImportCandidates.length || importingCars}>Select visible available Cars ({visibleCarsImportCandidates.length})</button>
+              <button className="button button--ghost" type="button" onClick={handleClearCarsImportSelection} disabled={!selectedCarsImportKeys.size || importingCars}>Clear selected</button>
+              <button className="button button--primary" type="button" onClick={handleImportSelectedCars} disabled={!selectedCarsImportRecords.length || importingCars}>{importingCars ? "Importing..." : `Import selected Cars to Stock (${selectedCarsImportRecords.length})`}</button>
+            </div>
+            {carsImportMessage ? <div className="vehicle-card__meta" style={{ marginTop: "8px" }}>{carsImportMessage}</div> : null}
+          </div>
+        ) : null}
         {localLoadError ? <div className="error-banner">{localLoadError}</div> : null}{errorMessage ? <div className="error-banner">{errorMessage}</div> : null}{successMessage ? <div className="success-banner">{successMessage}</div> : null}
         <div className="vansco-watch-note">Hidden from working cards: {summary.alreadyListed} already listed/available, {summary.hiddenReserved} reserved but not advertised in this tab, {summary.hiddenNoReg} no valid registration. Advertised, Hide and Never Show Again are stored per tab. My stock not on Vansco is advisory only and does not save actions.</div>
         <div className="segmented-control">{SIMPLE_FILTERS.map((filter) => <button key={filter.value} className={activeFilter === filter.value ? "segment is-active" : "segment"} type="button" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: filter.value }))}>{filter.label} ({filterCounts[filter.value] ?? 0})</button>)}</div>
@@ -524,7 +645,20 @@ export default function VanscoStockWatchPage() {
         <div className="card-actions"><button className="button button--ghost" type="button" onClick={() => setShowDiagnostics((value) => !value)}>{showDiagnostics ? "Hide accuracy details" : "Show accuracy details"}</button></div>
         {showDiagnostics ? <pre className="diagnostics-panel">{JSON.stringify({ selectedPipeline, localRegsLoaded: activeLocalRegistrations.size, financeRegsUsedForCars: selectedPipeline === "cars" ? financeRegistrationsForCars.size : 0, vanscoCurrentRegsLoaded: currentVanscoRegistrationSet.size, localNotVansco: summary.localNotVansco, localLoadError, cacheSummary, actionSummary: summary, debug: debugByPipeline[selectedPipeline] }, null, 2)}</pre> : null}
       </section>
-      <section className="panel"><div className="panel__header"><div><h3>{SIMPLE_FILTERS.find((filter) => filter.value === activeFilter)?.label || "Action cards"}</h3><p>{filteredRecords.length} advisory cards for {pipelineLabel(selectedPipeline)}.</p></div><span className="status-pill">{filteredRecords.length} shown</span></div>{loadingPipeline === selectedPipeline ? <div className="empty-state">Loading Vansco comparison...</div> : filteredRecords.length === 0 ? <div className="empty-state">No vehicles in this view.</div> : <div className="vansco-card-grid">{filteredRecords.map((record) => <WatchCard key={normalizeWatchRegistration(record.registration) || record.stockUrl || record.localStockUrl || record.id} record={record} selectedPipeline={selectedPipeline} onRecordSaved={handleRecordSaved} />)}</div>}</section>
+      <section className="panel"><div className="panel__header"><div><h3>{SIMPLE_FILTERS.find((filter) => filter.value === activeFilter)?.label || "Action cards"}</h3><p>{filteredRecords.length} advisory cards for {pipelineLabel(selectedPipeline)}.</p></div><span className="status-pill">{filteredRecords.length} shown</span></div>{loadingPipeline === selectedPipeline ? <div className="empty-state">Loading Vansco comparison...</div> : filteredRecords.length === 0 ? <div className="empty-state">No vehicles in this view.</div> : <div className="vansco-card-grid">{filteredRecords.map((record) => {
+        const key = importSelectionKey(record);
+        return (
+          <WatchCard
+            key={normalizeWatchRegistration(record.registration) || record.stockUrl || record.localStockUrl || record.id}
+            record={record}
+            selectedPipeline={selectedPipeline}
+            onRecordSaved={handleRecordSaved}
+            importSelectionEnabled={selectedPipeline === "cars"}
+            selectedForImport={Boolean(key && selectedCarsImportKeys.has(key))}
+            onToggleImportSelection={handleToggleCarsImportSelection}
+          />
+        );
+      })}</div>}</section>
     </div>
   );
 }
