@@ -1209,17 +1209,9 @@ function buildServerFrameSpecs(frameSpecs) {
 function buildYouTubeDescription(vehicle, productKey) {
   if (productKey === "cars") {
     return [
-      "CAR FINANCE AVAILABLE",
-      "",
-      vehicleTitle(vehicle),
-      "",
-      displayRegistration(vehicle) ? `REGISTRATION: ${displayRegistration(vehicle)}` : "",
-      vehiclePriceLine(vehicle, "cars"),
-      "",
-      "Fast online application.",
-      "Low deposit options available.",
-      "Good or bad credit considered.",
-      "",
+      "CAR FINANCE COMPANY",
+      "FINANCE YOUR NEXT CAR",
+      "FAST CAR FINANCE OPTIONS",
       "APPLY ONLINE TODAY",
       productWebsite(PRODUCTS.cars),
     ].filter((line, index, lines) => line || lines[index - 1]).join("\n").trim();
@@ -2139,11 +2131,17 @@ export default function YouTubeGeneratorPage({
           </div>
           <div className="youtube-generator__copy">
             <strong>{product.label} wording preview</strong>
-            <p>{activeText.header}</p>
-            <p>{activeText.hook}</p>
-            <p>{activeText.support}</p>
-            <p>{activeText.cta}</p>
-            <p>{productWebsite(product)}</p>
+            {productKey === "cars" ? (
+              buildYouTubeDescription(selectedVehicle, productKey).split("\n").map((line) => <p key={line}>{line}</p>)
+            ) : (
+              <>
+                <p>{activeText.header}</p>
+                <p>{activeText.hook}</p>
+                <p>{activeText.support}</p>
+                <p>{activeText.cta}</p>
+                <p>{productWebsite(product)}</p>
+              </>
+            )}
           </div>
         </div>
       </div>

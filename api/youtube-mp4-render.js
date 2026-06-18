@@ -741,11 +741,11 @@ export default async function handler(req, res) {
     return;
   }
 
-  const productKey = body.productKey === "rent2buy" ? "rent2buy" : body.productKey === "vanFinance" ? "vanFinance" : "";
+  const productKey = body.productKey === "rent2buy" ? "rent2buy" : body.productKey === "cars" ? "cars" : body.productKey === "vanFinance" ? "vanFinance" : "";
   if (!productKey) {
     sendJson(res, 400, {
       ok: false,
-      error: "Missing or invalid productKey. Expected vanFinance or rent2buy.",
+      error: "Missing or invalid productKey. Expected vanFinance, rent2buy or cars.",
     });
     return;
   }
