@@ -52,9 +52,116 @@ function isActiveMarketingRow(row) {
   return true;
 }
 
+function normalizeStockText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function classifyFinanceVehicleType(row) {
+  const text = [
+    row?.title,
+    row?.vanDescription,
+    row?.vanSpec,
+  ]
+    .map(normalizeStockText)
+    .filter(Boolean)
+    .join(" ");
+
+  if (!text) return "van";
+
+  const vanSignals = [
+    "van",
+    "transit",
+    "custom",
+    "vito",
+    "sprinter",
+    "vivaro",
+    "trafic",
+    "crafter",
+    "caddy",
+    "partner",
+    "berlingo",
+    "boxer",
+    "ducato",
+    "movano",
+    "master",
+    "expert",
+    "dispatch",
+    "proace",
+    "combo",
+    "doblo",
+    "tipper",
+    "luton",
+    "dropside",
+    "panel van",
+    "crew van",
+    "crew cab",
+    "lwb",
+    "mwb",
+    "swb",
+    "low loader",
+    "minibus",
+    "9 seater",
+  ];
+
+  const carSignals = [
+    "car",
+    "petrol",
+    "hybrid",
+    "hatchback",
+    "saloon",
+    "estate",
+    "suv",
+    "coupe",
+    "convertible",
+    "mpv",
+    "dualjet",
+    "tfsi",
+    "tdi",
+    "tsi",
+    "mhev",
+    "a-class",
+    "b-class",
+    "c-class",
+    "e-class",
+    "golf",
+    "polo",
+    "focus",
+    "fiesta",
+    "qashqai",
+    "juke",
+    "ignis",
+    "audi",
+    "bmw",
+    "mercedes",
+    "suzuki",
+    "toyota",
+    "nissan",
+    "hyundai",
+    "kia",
+    "volkswagen",
+    "skoda",
+    "seat",
+    "peugeot 208",
+    "peugeot 308",
+    "renault clio",
+    "ford fiesta",
+    "ford focus",
+  ];
+
+  const hasVanSignal = vanSignals.some((signal) => text.includes(signal));
+  if (hasVanSignal) return "van";
+
+  const hasCarSignal = carSignals.some((signal) => text.includes(signal));
+  if (hasCarSignal) return "car";
+
+  return "van";
+}
+
 export function mapFinanceVehicleRow(row, index) {
   const imageUrl = convertWixImage(row.picture);
   const title = valueOrFallback(row.title, `finance-${index + 1}`);
+  const vehicleType = classifyFinanceVehicleType(row);
+  const isCar = vehicleType === "car";
 
   return {
     id: row.id || title || `finance-${index}`,
@@ -73,8 +180,10 @@ export function mapFinanceVehicleRow(row, index) {
     spec: row.vanSpec || "",
     weblink: row.weblink || "",
     link: row.weblink || "",
-    pipeline: "vanFinance",
+    pipeline: isCar ? "cars" : "vanFinance",
+    vehicleType,
     originalPipeline: "vanFinance",
+    source: "vanFinance",
     rent2buyEligible: false,
     rent2buyData: null,
   };
@@ -189,13 +298,9 @@ export async function fetchCarMarketingVehicles(limitPerPipeline = 80) {
 }
 
 export async function fetchMarketingVehicles(limitPerPipeline = MARKETING_STOCK_WATCH_LIMIT) {
-  const [financeVehicles, rentVehicles, carVehicles] = await Promise.all([
+  const [financeVehicles, rentVehicles] = await Promise.all([
     fetchFinanceMarketingVehicles(limitPerPipeline),
     fetchRentMarketingVehicles(limitPerPipeline),
-    fetchCarMarketingVehicles(80).catch((error) => {
-      console.warn("Cars stock skipped:", error.message || error);
-      return [];
-    }),
   ]);
 
   const rentByReg = new Map(
@@ -210,12 +315,13 @@ export async function fetchMarketingVehicles(limitPerPipeline = MARKETING_STOCK_
 
     return {
       ...vehicle,
-      pipeline: "vanFinance",
+      pipeline: vehicle.pipeline,
+      vehicleType: vehicle.vehicleType || "van",
       originalPipeline: "vanFinance",
       rent2buyEligible: Boolean(rentMatch),
       rent2buyData: rentMatch,
     };
   });
 
-  return [...financeWithRentData, ...carVehicles];
+  return financeWithRentData;
 }

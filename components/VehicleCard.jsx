@@ -10,11 +10,12 @@ export default function VehicleCard({
   displayMode,
   ignoreReelLock = false,
 }) {
-  const resolvedDisplayMode = displayMode || (vehicle.pipeline === "rent2buy" ? "rent2buy" : "finance");
+  const resolvedDisplayMode = displayMode || (vehicle.pipeline === "rent2buy" ? "rent2buy" : vehicle.pipeline === "cars" ? "cars" : "finance");
   const isRentDisplay = resolvedDisplayMode === "rent2buy";
+  const isCarsDisplay = resolvedDisplayMode === "cars";
   const rentData = vehicle.rent2buyData || {};
   const displayVehicle = isRentDisplay ? { ...vehicle, ...rentData } : vehicle;
-  const pipelineLabel = isRentDisplay ? "Rent2Buy" : "Van Finance";
+  const pipelineLabel = isRentDisplay ? "RENT2BUY" : isCarsDisplay ? "CAR FINANCE" : "VAN FINANCE";
   const displayReg = displayVehicle.reg || "No reg";
   const priceLabel = isRentDisplay ? "Initial rental" : "Price";
   const monthlyLabel = isRentDisplay ? "Monthly rental" : "Finance monthly";
