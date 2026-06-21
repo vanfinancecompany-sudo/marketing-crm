@@ -38,6 +38,8 @@ const MAX_VIDEO_BITRATE = "12M";
 const VIDEO_BUFSIZE = "24M";
 const AUDIO_BITRATE = "192k";
 const DEFAULT_AUDIO_PATH = path.join(process.cwd(), "assets", "default-reel-audio.mp3");
+const DEFAULT_EFFECT_STYLE = "premiumMotion";
+const PREMIUM_TRANSITION_SECONDS = 0.3;
 
 const FONT = {
   " ": ["00000", "00000", "00000", "00000", "00000", "00000", "00000"],
@@ -296,6 +298,7 @@ async function downloadImage(url, filePath) {
   const bytes = Buffer.from(await response.arrayBuffer());
   await fs.writeFile(filePath, bytes);
   return {
+    filePath,
     bytes,
     size: bytes.length,
     contentType: response.headers.get("content-type") || "image/jpeg",
@@ -610,7 +613,7 @@ async function writeSvgFrame(filePath, svg) {
   await fs.writeFile(filePath, rendered.asPng());
 }
 
-async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults, templateKey, headerText }) {
+async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults, templateKey, headerText, includePhoto = true, includeSweep = true, includeCtaButton = true }) {
   const finalCta = frame.finalCta;
   const accent = "#ef233c";
   const imageHref = imageDataUri(image);
@@ -701,7 +704,7 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
 
   <rect x="${IMAGE_X - 8}" y="${IMAGE_Y - 8}" width="${IMAGE_WIDTH + 16}" height="${IMAGE_HEIGHT + 16}" rx="34" fill="#000000" filter="url(#shadow)"/>
   <rect x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" rx="30" fill="#101014"/>
-  <image href="${imageHref}" x="${imageDrawX}" y="${imageDrawY}" width="${IMAGE_WIDTH * imageScale}" height="${IMAGE_HEIGHT * imageScale}" preserveAspectRatio="xMidYMid meet" clip-path="url(#imageClip)"/>
+  ${includePhoto ? `<image href="${imageHref}" x="${imageDrawX}" y="${imageDrawY}" width="${IMAGE_WIDTH * imageScale}" height="${IMAGE_HEIGHT * imageScale}" preserveAspectRatio="xMidYMid meet" clip-path="url(#imageClip)"/>` : ""}
   <rect x="${IMAGE_X}" y="${IMAGE_Y}" width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" rx="30" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="2"/>
 
   <rect x="52" y="${panelY}" width="976" height="${panelHeight}" rx="28" fill="url(#panel)"/>
@@ -711,17 +714,254 @@ async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults
   ${headlineBlock}
   ${supportBlock}
   ${
-    finalCta
+    finalCta && includeCtaButton
       ? `<rect x="130" y="1540" width="820" height="112" rx="32" fill="${accent}"/>
          ${svgPathText(buttonText, { x: 540, y: 1612, size: 44, fill: "#ffffff", anchor: "middle" })}
          ${svgPathText(website, { x: 540, y: websiteY, size: 32, fill: "rgba(255,255,255,0.9)", anchor: "middle" })}`
+      : finalCta
+        ? `${svgPathText(website, { x: 540, y: websiteY, size: 32, fill: "rgba(255,255,255,0.9)", anchor: "middle" })}`
       : `${svgPathText(defaults.website, { x: 540, y: websiteY, size: 30, fill: "rgba(255,255,255,0.9)", anchor: "middle" })}`
   }
-  ${(finalCta || frameNumber === 1 || frameNumber >= 3) ? `<g clip-path="url(#panelClip)"><rect x="-20" y="${panelY + 20}" width="220" height="${panelHeight + 110}" fill="url(#sweep)" transform="rotate(-18 90 ${panelY + 120})"/></g>` : ""}
+  ${includeSweep && (finalCta || frameNumber === 1 || frameNumber >= 3) ? `<g clip-path="url(#panelClip)"><rect x="-20" y="${panelY + 20}" width="220" height="${panelHeight + 110}" fill="url(#sweep)" transform="rotate(-18 90 ${panelY + 120})"/></g>` : ""}
   ${frameNumber > 1 ? `<rect width="${WIDTH}" height="${HEIGHT}" fill="#ffffff" opacity="${effects.flashOpacity}"/>` : ""}
 </svg>`;
 
   await writeSvgFrame(filePath, svg);
+}
+
+async function writeSweepOverlay(filePath, { frameNumber, frame, templateKey }) {
+  const finalCta = frame.finalCta;
+  const effects = renderTemplateEffects(templateKey);
+  const panelY = finalCta ? 1178 : 1198;
+  const panelHeight = finalCta ? 560 : 560;
+  const shouldShow = finalCta || frameNumber === 1 || frameNumber >= 3;
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
+  <defs>
+    <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.48" stop-color="#ffffff" stop-opacity="${effects.sweepOpacity}"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="panelClip">
+      <rect x="52" y="${panelY}" width="976" height="${panelHeight}" rx="28" ry="28"/>
+    </clipPath>
+  </defs>
+  ${shouldShow ? `<g clip-path="url(#panelClip)"><rect x="0" y="${panelY + 20}" width="220" height="${panelHeight + 110}" fill="url(#sweep)" transform="rotate(-18 110 ${panelY + 120})"/></g>` : ""}
+</svg>`;
+  await writeSvgFrame(filePath, svg);
+}
+
+async function writeCtaButtonOverlay(filePath, { frame, defaults }) {
+  const accent = "#ef233c";
+  const buttonText = safeDisplayText(frame.button || defaults.finalButton).toUpperCase();
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="112" viewBox="0 0 820 112">
+  <rect x="0" y="0" width="820" height="112" rx="32" fill="${accent}"/>
+  ${svgPathText(buttonText, { x: 410, y: 72, size: 44, fill: "#ffffff", anchor: "middle" })}
+</svg>`;
+  await writeSvgFrame(filePath, svg);
+}
+
+function premiumMotionPattern(index) {
+  return [
+    { zoom: "in", pan: "left" },
+    { zoom: "in", pan: "right" },
+    { zoom: "out", pan: "up" },
+    { zoom: "in", pan: "down" },
+  ][index % 4];
+}
+
+function zoompanExpressions(index, frameTotal) {
+  const pattern = premiumMotionPattern(index);
+  const progressDenominator = Math.max(frameTotal - 1, 1);
+  const progress = `on/${progressDenominator}`;
+  const zoom = pattern.zoom === "out"
+    ? `1.045-0.035*${progress}`
+    : `1+0.04*${progress}`;
+
+  let x = `(iw-iw/zoom)*0.5`;
+  let y = `(ih-ih/zoom)*0.5`;
+
+  if (pattern.pan === "left") x = `(iw-iw/zoom)*(0.58-0.16*${progress})`;
+  if (pattern.pan === "right") x = `(iw-iw/zoom)*(0.42+0.16*${progress})`;
+  if (pattern.pan === "up") y = `(ih-ih/zoom)*(0.58-0.14*${progress})`;
+  if (pattern.pan === "down") y = `(ih-ih/zoom)*(0.42+0.14*${progress})`;
+
+  return { zoom, x, y };
+}
+
+function buildStaticFfmpegArgs({ concatPath, audioInputArgs, audioFilterArgs, durationSeconds, fps, outputPath }) {
+  return [
+    "-y",
+    "-f",
+    "concat",
+    "-safe",
+    "0",
+    "-i",
+    concatPath,
+    ...audioInputArgs,
+    "-t",
+    String(durationSeconds),
+    "-r",
+    String(fps),
+    "-c:v",
+    "libx264",
+    "-preset",
+    PRESET,
+    "-profile:v",
+    "high",
+    "-level",
+    "4.2",
+    "-b:v",
+    TARGET_VIDEO_BITRATE,
+    "-minrate",
+    MIN_VIDEO_BITRATE,
+    "-maxrate",
+    MAX_VIDEO_BITRATE,
+    "-bufsize",
+    VIDEO_BUFSIZE,
+    "-x264-params",
+    "nal-hrd=cbr:force-cfr=1",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-b:a",
+    AUDIO_BITRATE,
+    ...audioFilterArgs,
+    "-shortest",
+    "-movflags",
+    "+faststart",
+    outputPath,
+  ];
+}
+
+function buildPremiumMotionFfmpegArgs({ motionScenes, audioInputArgs, audioFilterArgs, transitionSeconds, durationSeconds, fps, outputPath }) {
+  const inputArgs = [];
+  const filters = [];
+  const sceneLabels = [];
+  let inputIndex = 0;
+
+  motionScenes.forEach((scene, index) => {
+    const sceneDuration = scene.duration;
+    const frameTotal = Math.max(1, Math.round(sceneDuration * fps));
+    const baseInput = inputIndex;
+    inputArgs.push("-loop", "1", "-t", String(sceneDuration), "-i", scene.basePath);
+    inputIndex += 1;
+
+    const imageInput = inputIndex;
+    inputArgs.push("-loop", "1", "-t", String(sceneDuration), "-i", scene.image.filePath);
+    inputIndex += 1;
+
+    const sweepInput = inputIndex;
+    inputArgs.push("-loop", "1", "-t", String(sceneDuration), "-i", scene.sweepPath);
+    inputIndex += 1;
+
+    const hasButton = Boolean(scene.buttonPath);
+    const buttonInput = hasButton ? inputIndex : null;
+    if (hasButton) {
+      inputArgs.push("-loop", "1", "-t", String(sceneDuration), "-i", scene.buttonPath);
+      inputIndex += 1;
+    }
+
+    const { zoom, x, y } = zoompanExpressions(index, frameTotal);
+    const photoScaleWidth = Math.ceil(IMAGE_WIDTH * 1.08);
+    const photoScaleHeight = Math.ceil(IMAGE_HEIGHT * 1.08);
+    const sceneLabel = `scene${index}`;
+    const withPhoto = `withPhoto${index}`;
+    const withSweep = `withSweep${index}`;
+
+    filters.push(
+      `[${baseInput}:v]fps=${fps},format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[base${index}]`
+    );
+    filters.push(
+      `[${imageInput}:v]scale=${photoScaleWidth}:${photoScaleHeight}:force_original_aspect_ratio=decrease,pad=${photoScaleWidth}:${photoScaleHeight}:(ow-iw)/2:(oh-ih)/2:color=0x101014,setsar=1,zoompan=z='${zoom}':x='${x}':y='${y}':d=${frameTotal}:s=${IMAGE_WIDTH}x${IMAGE_HEIGHT}:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[photo${index}]`
+    );
+    filters.push(
+      `[base${index}][photo${index}]overlay=${IMAGE_X}:${IMAGE_Y}:shortest=1[${withPhoto}]`
+    );
+    filters.push(
+      `[${sweepInput}:v]fps=${fps},format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[sweep${index}]`
+    );
+    filters.push(
+      `[${withPhoto}][sweep${index}]overlay=x='-300+min(t\\,1.0)*${WIDTH + 600}':y=0:enable='between(t\\,0.12\\,1.12)'[${withSweep}]`
+    );
+
+    if (hasButton) {
+      const pulse = "1+0.025*sin(2*PI*t/1.2)*lt(t\\,2.4)";
+      filters.push(
+        `[${buttonInput}:v]fps=${fps},format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS,scale=w='820*(${pulse})':h='112*(${pulse})':eval=frame[button${index}]`
+      );
+      filters.push(
+        `[${withSweep}][button${index}]overlay=x='130-(overlay_w-820)/2':y='1540-(overlay_h-112)/2':shortest=1,settb=AVTB[${sceneLabel}]`
+      );
+    } else {
+      filters.push(`[${withSweep}]settb=AVTB[${sceneLabel}]`);
+    }
+
+    sceneLabels.push(sceneLabel);
+  });
+
+  let videoLabel = sceneLabels[0];
+  let accumulatedDuration = motionScenes[0]?.duration || durationSeconds;
+  for (let index = 1; index < sceneLabels.length; index += 1) {
+    const offset = Math.max(0, accumulatedDuration - transitionSeconds);
+    const nextLabel = `xfade${index}`;
+    filters.push(
+      `[${videoLabel}][${sceneLabels[index]}]xfade=transition=fade:duration=${transitionSeconds}:offset=${offset.toFixed(3)}[${nextLabel}]`
+    );
+    videoLabel = nextLabel;
+    accumulatedDuration = accumulatedDuration + motionScenes[index].duration - transitionSeconds;
+  }
+  filters.push(`[${videoLabel}]trim=duration=${durationSeconds},setpts=PTS-STARTPTS,format=yuv420p[vout]`);
+
+  const audioInputIndex = inputIndex;
+
+  return [
+    "-y",
+    ...inputArgs,
+    ...audioInputArgs,
+    "-filter_complex",
+    filters.join(";"),
+    "-map",
+    "[vout]",
+    "-map",
+    `${audioInputIndex}:a`,
+    "-t",
+    String(durationSeconds),
+    "-r",
+    String(fps),
+    "-c:v",
+    "libx264",
+    "-preset",
+    PRESET,
+    "-profile:v",
+    "high",
+    "-level",
+    "4.2",
+    "-b:v",
+    TARGET_VIDEO_BITRATE,
+    "-minrate",
+    MIN_VIDEO_BITRATE,
+    "-maxrate",
+    MAX_VIDEO_BITRATE,
+    "-bufsize",
+    VIDEO_BUFSIZE,
+    "-x264-params",
+    "nal-hrd=cbr:force-cfr=1",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-b:a",
+    AUDIO_BITRATE,
+    ...audioFilterArgs,
+    "-shortest",
+    "-movflags",
+    "+faststart",
+    outputPath,
+  ];
 }
 
 export default async function handler(req, res) {
@@ -811,8 +1051,12 @@ export default async function handler(req, res) {
     }
 
     const framePaths = [];
+    const motionScenes = [];
     for (let index = 0; index < frameCount; index += 1) {
       const framePath = path.join(workDir, `frame-${index + 1}.png`);
+      const basePath = path.join(workDir, `motion-base-${index + 1}.png`);
+      const sweepPath = path.join(workDir, `motion-sweep-${index + 1}.png`);
+      const buttonPath = frameSpecs[index].finalCta ? path.join(workDir, `motion-button-${index + 1}.png`) : "";
       const image = preparedImages[Math.min(index, preparedImages.length - 1)];
       await writeVehicleFrame(framePath, {
         frameNumber: index + 1,
@@ -822,7 +1066,36 @@ export default async function handler(req, res) {
         templateKey,
         headerText,
       });
+      await writeVehicleFrame(basePath, {
+        frameNumber: index + 1,
+        frame: frameSpecs[index],
+        image,
+        defaults,
+        templateKey,
+        headerText,
+        includePhoto: false,
+        includeSweep: false,
+        includeCtaButton: !frameSpecs[index].finalCta,
+      });
+      await writeSweepOverlay(sweepPath, {
+        frameNumber: index + 1,
+        frame: frameSpecs[index],
+        templateKey,
+      });
+      if (buttonPath) {
+        await writeCtaButtonOverlay(buttonPath, {
+          frame: frameSpecs[index],
+          defaults,
+        });
+      }
       framePaths.push(framePath);
+      motionScenes.push({
+        basePath,
+        sweepPath,
+        buttonPath,
+        image,
+        duration: frameSeconds + (index < frameCount - 1 ? PREMIUM_TRANSITION_SECONDS : 0),
+      });
     }
 
     const concatLines = [];
@@ -859,52 +1132,37 @@ export default async function handler(req, res) {
       frameCount,
       frameSeconds,
       templateKey,
+      effectStyle: DEFAULT_EFFECT_STYLE,
+      transitionSeconds: PREMIUM_TRANSITION_SECONDS,
       audioSource: audioEmbedded ? "assets/default-reel-audio.mp3" : "silent fallback",
     };
 
-    await runFfmpeg([
-      "-y",
-      "-f",
-      "concat",
-      "-safe",
-      "0",
-      "-i",
-      concatPath,
-      ...audioInputArgs,
-      "-t",
-      String(durationSeconds),
-      "-r",
-      String(fps),
-      "-c:v",
-      "libx264",
-      "-preset",
-      PRESET,
-      "-profile:v",
-      "high",
-      "-level",
-      "4.2",
-      "-b:v",
-      TARGET_VIDEO_BITRATE,
-      "-minrate",
-      MIN_VIDEO_BITRATE,
-      "-maxrate",
-      MAX_VIDEO_BITRATE,
-      "-bufsize",
-      VIDEO_BUFSIZE,
-      "-x264-params",
-      "nal-hrd=cbr:force-cfr=1",
-      "-pix_fmt",
-      "yuv420p",
-      "-c:a",
-      "aac",
-      "-b:a",
-      AUDIO_BITRATE,
-      ...audioFilterArgs,
-      "-shortest",
-      "-movflags",
-      "+faststart",
-      outputPath,
-    ]);
+    let motionApplied = false;
+    let motionWarning = "";
+
+    try {
+      await runFfmpeg(buildPremiumMotionFfmpegArgs({
+        motionScenes,
+        audioInputArgs,
+        audioFilterArgs,
+        transitionSeconds: PREMIUM_TRANSITION_SECONDS,
+        durationSeconds,
+        fps,
+        outputPath,
+      }));
+      motionApplied = true;
+    } catch (motionError) {
+      motionWarning = `Premium motion render fell back to static video: ${compactError(motionError)}`;
+      console.warn("[youtube-mp4-render] premiumMotion fallback", { error: motionWarning });
+      await runFfmpeg(buildStaticFfmpegArgs({
+        concatPath,
+        audioInputArgs,
+        audioFilterArgs,
+        durationSeconds,
+        fps,
+        outputPath,
+      }));
+    }
 
     const renderedAt = Date.now();
     const output = await fs.readFile(outputPath);
@@ -926,6 +1184,7 @@ export default async function handler(req, res) {
       totalTimeMs: finishedAt - startedAt,
       url: uploaded.url,
       audioEmbedded,
+      motionApplied,
     });
 
     sendJson(res, 200, {
@@ -946,6 +1205,9 @@ export default async function handler(req, res) {
       imageDownloadFailures,
       audioEmbedded,
       audioWarning,
+      motionApplied,
+      motionWarning,
+      effectStyle: motionApplied ? DEFAULT_EFFECT_STYLE : "staticFallback",
       qualityPreset: QUALITY_PRESET,
       targetVideoBitrate: TARGET_VIDEO_BITRATE,
       qualityWarning,
