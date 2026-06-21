@@ -1232,6 +1232,45 @@ function descriptionFilenameFromMp4(filename) {
   return `${base}-description.txt`;
 }
 
+function safeServerErrorMessage(value, fallback = "MP4 render failed.") {
+  if (!value) return fallback;
+  if (typeof value === "string") return value;
+  if (value instanceof Error) return value.message || fallback;
+  if (typeof value !== "object") return String(value || fallback);
+
+  const candidates = [
+    value.error?.message,
+    value.error,
+    value.message,
+    value.details,
+    value.reason,
+    value.code,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    if (candidate && typeof candidate === "object") {
+      const nested = safeServerErrorMessage(candidate, "");
+      if (nested && nested !== "[object Object]") return nested;
+    }
+  }
+
+  const readablePairs = Object.entries(value)
+    .filter(([key]) => !/token|secret|key|env|stack/i.test(key))
+    .map(([key, item]) => {
+      if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
+        return `${key}: ${item}`;
+      }
+      return "";
+    })
+    .filter(Boolean);
+
+  if (readablePairs.length) return readablePairs.slice(0, 3).join(", ");
+
+  const stringValue = String(value);
+  return stringValue && stringValue !== "[object Object]" ? stringValue : fallback;
+}
+
 async function downloadYouTubeMp4FromServer(payload, filename, onStatus) {
   onStatus?.("Rendering MP4... Uploading temporary MP4...");
   const response = await fetch("/api/youtube-mp4-render", {
@@ -1245,7 +1284,7 @@ async function downloadYouTubeMp4FromServer(payload, filename, onStatus) {
 
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result?.downloadUrl) {
-    throw new Error(result?.error || `MP4 failed with HTTP ${response.status}. WebM fallback still available.`);
+    throw new Error(safeServerErrorMessage(result, `MP4 failed with HTTP ${response.status}. WebM fallback still available.`));
   }
 
   onStatus?.("MP4 ready, downloading...");
