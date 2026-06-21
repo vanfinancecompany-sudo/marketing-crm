@@ -319,6 +319,20 @@ async function prepareImagePpm(imagePath, ppmPath) {
   return readPpm(ppmPath);
 }
 
+async function writeMotionImage(imagePath, outputPath) {
+  await runFfmpeg([
+    "-y",
+    "-i",
+    imagePath,
+    "-vf",
+    `scale=${IMAGE_WIDTH}:${IMAGE_HEIGHT}:force_original_aspect_ratio=decrease,pad=${IMAGE_WIDTH}:${IMAGE_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=0x101014,setsar=1,format=rgba`,
+    "-frames:v",
+    "1",
+    outputPath,
+  ]);
+  return { filePath: outputPath };
+}
+
 function productDefaults(productKey) {
   if (productKey === "rent2buy") {
     return {
@@ -758,14 +772,12 @@ function zoompanExpressions(index, frameTotal) {
 function buildSceneClipArgs({ framePath, image, clipPath, sceneDuration, sceneIndex, fps, lightFade = true }) {
   const frameTotal = Math.max(1, Math.round(sceneDuration * fps));
   const { zoom, x, y } = zoompanExpressions(sceneIndex, frameTotal);
-  const photoScaleWidth = Math.ceil(IMAGE_WIDTH * 1.06);
-  const photoScaleHeight = Math.ceil(IMAGE_HEIGHT * 1.06);
   const lightFadeFilter = lightFade
     ? `,eq=brightness='0.035*max(0\\,1-t/${LIGHT_FADE_SECONDS})':contrast=1.005`
     : "";
   const filter = [
     `[0:v]fps=${fps},format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[base]`,
-    `[1:v]scale=${photoScaleWidth}:${photoScaleHeight}:force_original_aspect_ratio=decrease,pad=${photoScaleWidth}:${photoScaleHeight}:(ow-iw)/2:(oh-ih)/2:color=0x101014,setsar=1,zoompan=z='${zoom}':x='${x}':y='${y}':d=${frameTotal}:s=${IMAGE_WIDTH}x${IMAGE_HEIGHT}:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[photo]`,
+    `[1:v]format=rgba,setsar=1,zoompan=z='${zoom}':x='${x}':y='${y}':d=${frameTotal}:s=${IMAGE_WIDTH}x${IMAGE_HEIGHT}:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[photo]`,
     `[base][photo]overlay=${IMAGE_X}:${IMAGE_Y}:shortest=1${lightFadeFilter},format=yuv420p[vout]`,
   ].join(";");
 
@@ -1059,13 +1071,22 @@ export default async function handler(req, res) {
 
     if (motionEnabled) {
       const clipPaths = [];
+      const motionImagePaths = [];
       try {
         const lightFadeWarnings = [];
+        const motionImages = [];
+        for (let index = 0; index < preparedImages.length; index += 1) {
+          const motionImagePath = path.join(workDir, `motion-source-${index + 1}.png`);
+          const motionImage = await writeMotionImage(preparedImages[index].filePath, motionImagePath);
+          motionImagePaths.push(motionImagePath);
+          motionImages.push(motionImage);
+        }
+
         for (let index = 0; index < framePaths.length; index += 1) {
           const clipPath = path.join(workDir, `scene-${index + 1}.mp4`);
           const result = await renderSceneClip({
             framePath: framePaths[index],
-            image: preparedImages[Math.min(index, preparedImages.length - 1)],
+            image: motionImages[Math.min(index, motionImages.length - 1)],
             clipPath,
             sceneDuration: frameSeconds,
             sceneIndex: index,
@@ -1092,6 +1113,7 @@ export default async function handler(req, res) {
         console.warn("[youtube-mp4-render] premiumMotion fallback", { error: motionWarning });
       } finally {
         await Promise.all(clipPaths.map((clipPath) => fs.rm(clipPath, { force: true }).catch(() => {})));
+        await Promise.all(motionImagePaths.map((imagePath) => fs.rm(imagePath, { force: true }).catch(() => {})));
       }
     } else {
       motionWarning = "Premium motion disabled for this render.";
