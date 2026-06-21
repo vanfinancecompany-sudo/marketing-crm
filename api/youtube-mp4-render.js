@@ -32,6 +32,7 @@ const MAX_FRAME_COUNT = 15;
 const MAX_DURATION_SECONDS = 30;
 const QUALITY_PRESET = "youtubeHigh";
 const PRESET = "medium";
+const SCENE_CLIP_PRESET = "veryfast";
 const TARGET_VIDEO_BITRATE = "12M";
 const MIN_VIDEO_BITRATE = "12M";
 const MAX_VIDEO_BITRATE = "12M";
@@ -39,7 +40,7 @@ const VIDEO_BUFSIZE = "24M";
 const AUDIO_BITRATE = "192k";
 const DEFAULT_AUDIO_PATH = path.join(process.cwd(), "assets", "default-reel-audio.mp3");
 const DEFAULT_EFFECT_STYLE = "premiumMotion";
-const LIGHT_FADE_SECONDS = 0.2;
+const LIGHT_FADE_SECONDS = 0.25;
 
 const FONT = {
   " ": ["00000", "00000", "00000", "00000", "00000", "00000", "00000"],
@@ -772,13 +773,11 @@ function zoompanExpressions(index, frameTotal) {
 function buildSceneClipArgs({ framePath, image, clipPath, sceneDuration, sceneIndex, fps, lightFade = true }) {
   const frameTotal = Math.max(1, Math.round(sceneDuration * fps));
   const { zoom, x, y } = zoompanExpressions(sceneIndex, frameTotal);
-  const lightFadeFilter = lightFade
-    ? `,eq=brightness='0.035*max(0\\,1-t/${LIGHT_FADE_SECONDS})':contrast=1.005`
-    : "";
+  const lightFadeFilter = lightFade ? `,fade=t=in:st=0:d=${LIGHT_FADE_SECONDS}:color=white` : "";
   const filter = [
     `[0:v]fps=${fps},format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[base]`,
     `[1:v]format=rgba,setsar=1,zoompan=z='${zoom}':x='${x}':y='${y}':d=${frameTotal}:s=${IMAGE_WIDTH}x${IMAGE_HEIGHT}:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[photo]`,
-    `[base][photo]overlay=${IMAGE_X}:${IMAGE_Y}:shortest=1${lightFadeFilter},format=yuv420p[vout]`,
+    `[base][photo]overlay=${IMAGE_X}:${IMAGE_Y}:shortest=1,format=yuv420p${lightFadeFilter}[vout]`,
   ].join(";");
 
   return [
@@ -807,7 +806,7 @@ function buildSceneClipArgs({ framePath, image, clipPath, sceneDuration, sceneIn
     "-c:v",
     "libx264",
     "-preset",
-    PRESET,
+    SCENE_CLIP_PRESET,
     "-profile:v",
     "high",
     "-level",
@@ -1040,6 +1039,7 @@ export default async function handler(req, res) {
       qualityPreset: QUALITY_PRESET,
       codec: "libx264",
       preset: PRESET,
+      sceneClipPreset: SCENE_CLIP_PRESET,
       profile: "high",
       level: "4.2",
       targetVideoBitrate: TARGET_VIDEO_BITRATE,
