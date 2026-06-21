@@ -40,7 +40,8 @@ const VIDEO_BUFSIZE = "24M";
 const AUDIO_BITRATE = "192k";
 const DEFAULT_AUDIO_PATH = path.join(process.cwd(), "assets", "default-reel-audio.mp3");
 const DEFAULT_EFFECT_STYLE = "premiumMotion";
-const LIGHT_FADE_SECONDS = 0.25;
+const LIGHT_FADE_START_SECONDS = 0.05;
+const LIGHT_FADE_SECONDS = 0.2;
 
 const FONT = {
   " ": ["00000", "00000", "00000", "00000", "00000", "00000", "00000"],
@@ -773,7 +774,11 @@ function zoompanExpressions(index, frameTotal) {
 function buildSceneClipArgs({ framePath, image, clipPath, sceneDuration, sceneIndex, fps, lightFade = true }) {
   const frameTotal = Math.max(1, Math.round(sceneDuration * fps));
   const { zoom, x, y } = zoompanExpressions(sceneIndex, frameTotal);
-  const lightFadeFilter = lightFade ? `,fade=t=in:st=0:d=${LIGHT_FADE_SECONDS}:color=white` : "";
+  const lightFadeEndSeconds = LIGHT_FADE_START_SECONDS + LIGHT_FADE_SECONDS;
+  const washAmount = `between(t\\,${LIGHT_FADE_START_SECONDS}\\,${lightFadeEndSeconds})*(${lightFadeEndSeconds}-t)/${LIGHT_FADE_SECONDS}`;
+  const lightFadeFilter = lightFade && sceneIndex > 0
+    ? `,eq=brightness='0.28*${washAmount}':contrast='1+0.035*${washAmount}':saturation='1-0.08*${washAmount}':eval=frame`
+    : "";
   const filter = [
     `[0:v]fps=${fps},format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[base]`,
     `[1:v]format=rgba,setsar=1,zoompan=z='${zoom}':x='${x}':y='${y}':d=${frameTotal}:s=${IMAGE_WIDTH}x${IMAGE_HEIGHT}:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[photo]`,
@@ -1057,6 +1062,7 @@ export default async function handler(req, res) {
       templateKey,
       effectStyle: DEFAULT_EFFECT_STYLE,
       transitionSeconds: 0,
+      lightFadeStartSeconds: LIGHT_FADE_START_SECONDS,
       lightFadeSeconds: LIGHT_FADE_SECONDS,
       audioSource: audioEmbedded ? "assets/default-reel-audio.mp3" : "silent fallback",
     };
