@@ -87,6 +87,7 @@ import {
   loadReelVideoBlob,
   saveReelVideoBlob,
   sanitizePostingCaption,
+  sortVehiclesNewestAddedFirst,
 } from "./utils/creativeUtils.js";
 import { downloadFacebookMp4Reel } from "./utils/facebookMp4Export.js";
 import {
@@ -1126,7 +1127,7 @@ useEffect(() => {
     : null;
 
   const filteredStockVehicles = useMemo(() => {
-    return filterVehicles(vehicles, stockFilters);
+    return sortVehiclesNewestAddedFirst(filterVehicles(vehicles, stockFilters), stockFilters.pipeline);
   }, [vehicles, stockFilters]);
 
   const filteredFactoryVehicles = useMemo(() => {

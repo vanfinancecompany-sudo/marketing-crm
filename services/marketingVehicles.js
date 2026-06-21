@@ -145,6 +145,9 @@ export function mapFinanceVehicleRow(row, index) {
     source: "vanFinance",
     rent2buyEligible: false,
     rent2buyData: null,
+    createdAt: row.created_at || row.createdAt || "",
+    importedAt: row.imported_at || row.importedAt || "",
+    updatedAt: row.updated_at || row.updatedAt || "",
   };
 }
 
@@ -170,6 +173,9 @@ export function mapRentVehicleRow(row, index) {
     weblink: row.webLink || "",
     link: row.webLink || "",
     pipeline: "rent2buy",
+    createdAt: row.created_at || row.createdAt || "",
+    importedAt: row.imported_at || row.importedAt || "",
+    updatedAt: row.updated_at || row.updatedAt || "",
   };
 }
 
@@ -216,6 +222,9 @@ export function mapCarVehicleRow(row, index) {
     weblink: row.weblink || row.webLink || row.link || "",
     link: row.weblink || row.webLink || row.link || "",
     pipeline: "cars",
+    createdAt: row.created_at || row.createdAt || "",
+    importedAt: row.imported_at || row.importedAt || "",
+    updatedAt: row.updated_at || row.updatedAt || "",
   };
 }
 
@@ -242,7 +251,7 @@ export async function fetchRentMarketingVehicles(limitPerPipeline = MARKETING_ST
 
   const rentQuery = supabase
     .from("rent_vehicles")
-    .select("id, registration, picture, monthly, week, initialRental, vanDescription, vanSpec, webLink, is_active")
+    .select("id, created_at, registration, picture, monthly, week, initialRental, vanDescription, vanSpec, webLink, is_active")
     .eq("is_active", true)
     .limit(safeLimit);
 

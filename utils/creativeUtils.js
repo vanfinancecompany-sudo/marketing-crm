@@ -1618,6 +1618,80 @@ export function vehicleDisplayLabel(vehicle) {
   return vehicle?.reg || vehicle?.title || vehicle?.name || "Unnamed vehicle";
 }
 
+const VEHICLE_ADDED_DATE_FIELDS = [
+  "created_at",
+  "createdAt",
+  "imported_at",
+  "importedAt",
+  "added_at",
+  "addedAt",
+  "updated_at",
+  "updatedAt",
+];
+
+function parseVehicleAddedTime(record) {
+  for (const field of VEHICLE_ADDED_DATE_FIELDS) {
+    const value = record?.[field];
+    if (!value) continue;
+
+    const time = new Date(value).getTime();
+    if (!Number.isNaN(time)) return time;
+  }
+
+  return null;
+}
+
+function compareVehicleIdsNewestFirst(a, b) {
+  const aId = String(a?.id || a?.reg || a?.registration || a?.name || "");
+  const bId = String(b?.id || b?.reg || b?.registration || b?.name || "");
+  const aNumber = Number(aId);
+  const bNumber = Number(bId);
+
+  if (Number.isFinite(aNumber) && Number.isFinite(bNumber) && aNumber !== bNumber) {
+    return bNumber - aNumber;
+  }
+
+  return bId.localeCompare(aId, undefined, { numeric: true, sensitivity: "base" });
+}
+
+function getVehicleSortRecord(vehicle, pipeline) {
+  if (pipeline === "rent2buy" && vehicle?.rent2buyData) {
+    return vehicle.rent2buyData;
+  }
+
+  return vehicle;
+}
+
+export function sortVehiclesNewestAddedFirst(vehicles, pipeline) {
+  return vehicles
+    .map((vehicle, index) => {
+      const sortRecord = getVehicleSortRecord(vehicle, pipeline);
+
+      return {
+        vehicle,
+        index,
+        sortRecord,
+        addedTime: parseVehicleAddedTime(sortRecord),
+      };
+    })
+    .sort((a, b) => {
+      const aHasDate = a.addedTime !== null;
+      const bHasDate = b.addedTime !== null;
+
+      if (aHasDate && bHasDate && a.addedTime !== b.addedTime) {
+        return b.addedTime - a.addedTime;
+      }
+
+      if (aHasDate !== bHasDate) {
+        return aHasDate ? -1 : 1;
+      }
+
+      const idOrder = compareVehicleIdsNewestFirst(a.sortRecord, b.sortRecord);
+      return idOrder || a.index - b.index;
+    })
+    .map(({ vehicle }) => vehicle);
+}
+
 export function filterVehicles(vehicles, filters) {
   const query = String(filters.search || "").trim().toLowerCase();
   const minPrice = parseMoney(filters.minPrice);
