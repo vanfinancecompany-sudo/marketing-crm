@@ -1,4 +1,4 @@
-import { buildVanscoWatchSummary } from "./_vansco-watch-summary.js";
+import { buildVanscoWatchSummary } from "./_vansco-watch-summary-fixed.js";
 
 export default async function handler(request, response) {
   if (request.method !== "GET") {
