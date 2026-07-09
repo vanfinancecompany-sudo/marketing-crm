@@ -1,19 +1,34 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
+  DEFAULT_TAGS,
   PIPELINE_OPTIONS,
   SOURCE_OPTIONS,
   addContactToResult,
   buildCustomerExports,
+  buildCustomerResult,
   cleanCustomerRows,
   cleanManualContact,
+  contactName,
+  createTimelineEvent,
   filterContactsByPipeline,
+  getExportContacts,
   parseCsv,
+  updateContactRecord,
 } from "../utils/contactCleaning.js";
+
+const STORAGE_KEYS = {
+  contacts: "vfc_customer_database_contacts",
+  imports: "vfc_customer_database_imports",
+  rejected: "vfc_customer_database_rejected",
+  duplicates: "vfc_customer_database_duplicates",
+  possibleDuplicates: "vfc_customer_database_possible_duplicates",
+};
 
 const EMPTY_RESULT = {
   cleanContacts: [],
   rejectedRows: [],
   duplicateRows: [],
+  possibleDuplicates: [],
   stats: {
     rowsImported: 0,
     cleanContacts: 0,
@@ -26,18 +41,25 @@ const EMPTY_RESULT = {
 };
 
 const EMPTY_FORM = {
-  firstName: "",
-  lastName: "",
+  first_name: "",
+  last_name: "",
+  company: "",
   email: "",
   phone: "",
   postcode: "",
-  company: "",
   pipeline: "unknown",
   source: "manual",
   notes: "",
+  tags: [],
 };
 
-const IMPORT_HISTORY_KEY = "customerDatabaseImportHistory";
+const EMPTY_FILTERS = {
+  source: "all",
+  tag: "all",
+  readiness: "all",
+  postcode: "all",
+  unknownPipeline: false,
+};
 
 const pipelineLabels = {
   all: "All",
@@ -49,10 +71,11 @@ const pipelineLabels = {
 
 const sourceLabels = {
   manual: "Manual",
+  csv: "CSV",
   wix: "Wix",
-  supabase: "Supabase",
-  facebook: "Facebook",
   crm: "CRM",
+  facebook: "Facebook",
+  supabase: "Supabase",
   other: "Other",
 };
 
@@ -60,36 +83,48 @@ const exportGroups = [
   {
     title: "Facebook",
     buttons: [
-      ["Full Audience", "fullFacebook", "full-facebook-audience.csv"],
-      ["Finance", "financeFacebook", "finance-facebook-audience.csv"],
-      ["Rent2Buy", "rent2buyFacebook", "rent2buy-facebook-audience.csv"],
+      ["Full Audience", "fullFacebook", "full-facebook-audience.csv", "Facebook Full"],
+      ["Finance", "financeFacebook", "finance-facebook-audience.csv", "Facebook Finance"],
+      ["Rent2Buy", "rent2buyFacebook", "rent2buy-facebook-audience.csv", "Facebook Rent2Buy"],
     ],
   },
   {
     title: "Email",
     buttons: [
-      ["Full", "email", "email-marketing.csv"],
-      ["Finance", "financeEmail", "finance-email.csv"],
-      ["Rent2Buy", "rent2buyEmail", "rent2buy-email.csv"],
+      ["Full", "email", "email-marketing.csv", "Email Full"],
+      ["Finance", "financeEmail", "finance-email.csv", "Email Finance"],
+      ["Rent2Buy", "rent2buyEmail", "rent2buy-email.csv", "Email Rent2Buy"],
     ],
   },
   {
     title: "SMS",
     buttons: [
-      ["Full", "sms", "sms-contacts.csv"],
-      ["Finance", "financeSms", "finance-sms.csv"],
-      ["Rent2Buy", "rent2buySms", "rent2buy-sms.csv"],
+      ["Full", "sms", "sms-contacts.csv", "SMS Full"],
+      ["Finance", "financeSms", "finance-sms.csv", "SMS Finance"],
+      ["Rent2Buy", "rent2buySms", "rent2buy-sms.csv", "SMS Rent2Buy"],
     ],
   },
   {
     title: "Reports",
     buttons: [
-      ["Master Database", "master", "customer-master.csv"],
-      ["Duplicate Report", "duplicates", "duplicate-report.csv"],
-      ["Rejected Rows", "rejected", "rejected-rows.csv"],
+      ["Master Database", "master", "customer-master.csv", "Master Database"],
+      ["Duplicate Report", "duplicates", "duplicate-report.csv", "Duplicate Report"],
+      ["Rejected Rows", "rejected", "rejected-rows.csv", "Rejected Rows"],
     ],
   },
 ];
+
+function readStorage(key, fallback) {
+  try {
+    return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStorage(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
 
 function downloadCsv(filename, content) {
   const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
@@ -120,16 +155,12 @@ function formatDate(value) {
   });
 }
 
-function contactName(contact) {
-  return [contact.firstName, contact.lastName].filter(Boolean).join(" ") || "Unnamed contact";
-}
-
 function contactMatchesSearch(contact, search) {
   const query = search.trim().toLowerCase();
   if (!query) return true;
   return [
-    contact.firstName,
-    contact.lastName,
+    contact.first_name,
+    contact.last_name,
     contact.email,
     contact.phone,
     contact.postcode,
@@ -137,35 +168,6 @@ function contactMatchesSearch(contact, search) {
   ]
     .filter(Boolean)
     .some((value) => String(value).toLowerCase().includes(query));
-}
-
-function buildResult(cleanContacts, rejectedRows, duplicateRows, rowsImported) {
-  return {
-    cleanContacts,
-    rejectedRows,
-    duplicateRows,
-    stats: {
-      rowsImported,
-      cleanContacts: cleanContacts.length,
-      duplicatesRemoved: duplicateRows.length,
-      badRowsRejected: rejectedRows.length,
-      emailReadyContacts: cleanContacts.filter((contact) => contact.email).length,
-      smsReadyContacts: cleanContacts.filter((contact) => contact.phone).length,
-      facebookReadyContacts: cleanContacts.filter((contact) => contact.email || contact.phone).length,
-    },
-  };
-}
-
-function loadImportHistory() {
-  try {
-    return JSON.parse(localStorage.getItem(IMPORT_HISTORY_KEY) || "[]");
-  } catch {
-    return [];
-  }
-}
-
-function saveImportHistory(history) {
-  localStorage.setItem(IMPORT_HISTORY_KEY, JSON.stringify(history));
 }
 
 function TableShell({ children }) {
@@ -185,7 +187,7 @@ function Modal({ title, children, onClose }) {
         background: "rgba(15, 23, 42, 0.48)",
       }}
     >
-      <div className="panel" style={{ width: "min(760px, 100%)", maxHeight: "88vh", overflow: "auto" }}>
+      <div className="panel" style={{ width: "min(840px, 100%)", maxHeight: "88vh", overflow: "auto" }}>
         <div className="panel__header">
           <div>
             <div className="eyebrow">Customer Database</div>
@@ -201,98 +203,94 @@ function Modal({ title, children, onClose }) {
   );
 }
 
+function TagChips({ tags }) {
+  const safeTags = Array.isArray(tags) ? tags : [];
+  if (!safeTags.length) return <span style={{ color: "#64748b" }}>-</span>;
+  return (
+    <div className="card-actions" style={{ gap: 6 }}>
+      {safeTags.slice(0, 6).map((tag) => (
+        <span key={tag} className="tag" style={{ padding: "5px 8px", fontSize: 12 }}>
+          {tag}
+        </span>
+      ))}
+      {safeTags.length > 6 ? <span className="tag">+{safeTags.length - 6}</span> : null}
+    </div>
+  );
+}
+
 function ContactForm({ form, setForm, error, onSubmit, submitLabel }) {
+  function toggleTag(tag) {
+    setForm((current) => {
+      const tags = new Set(current.tags || []);
+      if (tags.has(tag)) tags.delete(tag);
+      else tags.add(tag);
+      return { ...current, tags: [...tags].sort() };
+    });
+  }
+
   return (
     <form onSubmit={onSubmit} className="field-grid">
       <label className="field">
         <span className="field__label">First name</span>
-        <input
-          className="field__input"
-          value={form.firstName}
-          onChange={(event) => updateFormValue(setForm, "firstName", event.target.value)}
-        />
+        <input className="field__input" value={form.first_name} onChange={(event) => updateFormValue(setForm, "first_name", event.target.value)} />
       </label>
       <label className="field">
         <span className="field__label">Last name</span>
-        <input
-          className="field__input"
-          value={form.lastName}
-          onChange={(event) => updateFormValue(setForm, "lastName", event.target.value)}
-        />
-      </label>
-      <label className="field">
-        <span className="field__label">Email</span>
-        <input
-          className="field__input"
-          value={form.email}
-          onChange={(event) => updateFormValue(setForm, "email", event.target.value)}
-        />
-      </label>
-      <label className="field">
-        <span className="field__label">Mobile</span>
-        <input
-          className="field__input"
-          value={form.phone}
-          onChange={(event) => updateFormValue(setForm, "phone", event.target.value)}
-        />
-      </label>
-      <label className="field">
-        <span className="field__label">Postcode</span>
-        <input
-          className="field__input"
-          value={form.postcode}
-          onChange={(event) => updateFormValue(setForm, "postcode", event.target.value)}
-        />
+        <input className="field__input" value={form.last_name} onChange={(event) => updateFormValue(setForm, "last_name", event.target.value)} />
       </label>
       <label className="field">
         <span className="field__label">Company</span>
-        <input
-          className="field__input"
-          value={form.company}
-          onChange={(event) => updateFormValue(setForm, "company", event.target.value)}
-        />
+        <input className="field__input" value={form.company} onChange={(event) => updateFormValue(setForm, "company", event.target.value)} />
+      </label>
+      <label className="field">
+        <span className="field__label">Email</span>
+        <input className="field__input" value={form.email} onChange={(event) => updateFormValue(setForm, "email", event.target.value)} />
+      </label>
+      <label className="field">
+        <span className="field__label">Mobile</span>
+        <input className="field__input" value={form.phone} onChange={(event) => updateFormValue(setForm, "phone", event.target.value)} />
+      </label>
+      <label className="field">
+        <span className="field__label">Postcode</span>
+        <input className="field__input" value={form.postcode} onChange={(event) => updateFormValue(setForm, "postcode", event.target.value)} />
       </label>
       <label className="field">
         <span className="field__label">Pipeline</span>
-        <select
-          className="field__input"
-          value={form.pipeline}
-          onChange={(event) => updateFormValue(setForm, "pipeline", event.target.value)}
-        >
+        <select className="field__input" value={form.pipeline} onChange={(event) => updateFormValue(setForm, "pipeline", event.target.value)}>
           {PIPELINE_OPTIONS.map((pipeline) => (
-            <option key={pipeline} value={pipeline}>
-              {pipelineLabels[pipeline]}
-            </option>
+            <option key={pipeline} value={pipeline}>{pipelineLabels[pipeline]}</option>
           ))}
         </select>
       </label>
       <label className="field">
         <span className="field__label">Source</span>
-        <select
-          className="field__input"
-          value={form.source}
-          onChange={(event) => updateFormValue(setForm, "source", event.target.value)}
-        >
+        <select className="field__input" value={form.source} onChange={(event) => updateFormValue(setForm, "source", event.target.value)}>
           {SOURCE_OPTIONS.map((source) => (
-            <option key={source} value={source}>
-              {sourceLabels[source]}
-            </option>
+            <option key={source} value={source}>{sourceLabels[source]}</option>
           ))}
         </select>
       </label>
       <label className="field" style={{ gridColumn: "1 / -1" }}>
         <span className="field__label">Notes</span>
-        <textarea
-          className="field__input"
-          rows={3}
-          value={form.notes}
-          onChange={(event) => updateFormValue(setForm, "notes", event.target.value)}
-        />
+        <textarea className="field__input" rows={3} value={form.notes} onChange={(event) => updateFormValue(setForm, "notes", event.target.value)} />
       </label>
+      <div className="field" style={{ gridColumn: "1 / -1" }}>
+        <span className="field__label">Tags</span>
+        <div className="card-actions">
+          {DEFAULT_TAGS.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              className={(form.tags || []).includes(tag) ? "button button--primary" : "button button--ghost"}
+              onClick={() => toggleTag(tag)}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="card-actions" style={{ gridColumn: "1 / -1" }}>
-        <button type="submit" className="button button--primary">
-          {submitLabel}
-        </button>
+        <button type="submit" className="button button--primary">{submitLabel}</button>
       </div>
       {error ? <div className="notice notice--error" style={{ gridColumn: "1 / -1" }}>{error}</div> : null}
     </form>
@@ -300,40 +298,43 @@ function ContactForm({ form, setForm, error, onSubmit, submitLabel }) {
 }
 
 export default function CustomerDatabasePage() {
-  const [result, setResult] = useState(EMPTY_RESULT);
+  const initialContacts = readStorage(STORAGE_KEYS.contacts, []);
+  const initialRejected = readStorage(STORAGE_KEYS.rejected, []);
+  const initialDuplicates = readStorage(STORAGE_KEYS.duplicates, []);
+  const initialPossibleDuplicates = readStorage(STORAGE_KEYS.possibleDuplicates, []);
+  const [result, setResult] = useState(() =>
+    buildCustomerResult(initialContacts, initialRejected, initialDuplicates, initialContacts.length, initialPossibleDuplicates)
+  );
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState("");
   const [manualError, setManualError] = useState("");
   const [manualForm, setManualForm] = useState(EMPTY_FORM);
   const [activeFilter, setActiveFilter] = useState("all");
+  const [advancedFilters, setAdvancedFilters] = useState(EMPTY_FILTERS);
   const [exportScope, setExportScope] = useState("all");
   const [search, setSearch] = useState("");
   const [modalMode, setModalMode] = useState("");
   const [selectedContact, setSelectedContact] = useState(null);
   const [editingIndex, setEditingIndex] = useState(-1);
-  const [importHistory, setImportHistory] = useState([]);
-
-  useEffect(() => {
-    setImportHistory(loadImportHistory());
-  }, []);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkTag, setBulkTag] = useState("lead");
+  const [bulkPipeline, setBulkPipeline] = useState("unknown");
+  const [importHistory, setImportHistory] = useState(() => readStorage(STORAGE_KEYS.imports, []));
 
   const csvExports = useMemo(
-    () =>
-      buildCustomerExports(
-        result.cleanContacts,
-        result.rejectedRows,
-        result.duplicateRows,
-        exportScope
-      ),
+    () => buildCustomerExports(result.cleanContacts, result.rejectedRows, result.duplicateRows, exportScope),
     [result, exportScope]
   );
-  const visibleContacts = useMemo(
-    () =>
-      filterContactsByPipeline(result.cleanContacts, activeFilter).filter((contact) =>
-        contactMatchesSearch(contact, search)
-      ),
-    [result.cleanContacts, activeFilter, search]
-  );
+  const visibleContacts = useMemo(() => {
+    return filterContactsByPipeline(result.cleanContacts, activeFilter)
+      .filter((contact) => contactMatchesSearch(contact, search))
+      .filter((contact) => advancedFilters.source === "all" || contact.source === advancedFilters.source)
+      .filter((contact) => advancedFilters.tag === "all" || (contact.tags || []).includes(advancedFilters.tag))
+      .filter((contact) => advancedFilters.readiness === "all" || (contact.tags || []).includes(advancedFilters.readiness))
+      .filter((contact) => advancedFilters.postcode === "all" || Boolean(contact.postcode))
+      .filter((contact) => !advancedFilters.unknownPipeline || contact.pipeline === "unknown");
+  }, [result.cleanContacts, activeFilter, search, advancedFilters]);
+  const selectedContacts = result.cleanContacts.filter((contact) => selectedIds.includes(contact.customer_id));
   const dashboardCards = useMemo(
     () => [
       ["Total Contacts", result.stats.cleanContacts],
@@ -350,6 +351,20 @@ export default function CustomerDatabasePage() {
     [result]
   );
 
+  function persist(nextResult, nextImports = importHistory) {
+    writeStorage(STORAGE_KEYS.contacts, nextResult.cleanContacts);
+    writeStorage(STORAGE_KEYS.rejected, nextResult.rejectedRows);
+    writeStorage(STORAGE_KEYS.duplicates, nextResult.duplicateRows);
+    writeStorage(STORAGE_KEYS.possibleDuplicates, nextResult.possibleDuplicates || []);
+    writeStorage(STORAGE_KEYS.imports, nextImports);
+  }
+
+  function replaceResult(nextResult, nextImports = importHistory) {
+    setResult(nextResult);
+    setImportHistory(nextImports);
+    persist(nextResult, nextImports);
+  }
+
   async function handleFileUpload(event) {
     const file = event.target.files?.[0];
     setError("");
@@ -357,7 +372,6 @@ export default function CustomerDatabasePage() {
 
     if (!file) return;
     if (!file.name.toLowerCase().endsWith(".csv")) {
-      setResult(EMPTY_RESULT);
       setError("Upload a CSV file.");
       return;
     }
@@ -365,21 +379,25 @@ export default function CustomerDatabasePage() {
     try {
       const text = await file.text();
       const rows = parseCsv(text);
-      const cleaned = cleanCustomerRows(rows);
-      const entry = {
-        id: `${Date.now()}-${file.name}`,
-        importDate: new Date().toISOString(),
+      const cleaned = cleanCustomerRows(rows, {
+        existingContacts: result.cleanContacts,
+        rejectedRows: result.rejectedRows,
+        duplicateRows: result.duplicateRows,
+        possibleDuplicates: result.possibleDuplicates,
         filename: file.name,
-        rowsImported: cleaned.stats.rowsImported,
-        duplicates: cleaned.stats.duplicatesRemoved,
-        rejected: cleaned.stats.badRowsRejected,
+      });
+      const entry = {
+        import_id: `${Date.now()}-${file.name}`,
+        filename: file.name,
+        imported_at: new Date().toISOString(),
+        rows_imported: cleaned.stats.rowsImported,
+        contacts_created: cleaned.importStats.contactsCreated || 0,
+        duplicates_merged: cleaned.importStats.duplicatesMerged || 0,
+        possible_duplicates: cleaned.importStats.possibleDuplicates || 0,
+        rejected_rows: cleaned.stats.badRowsRejected,
       };
-      const nextHistory = [entry, ...importHistory].slice(0, 10);
-      setResult(cleaned);
-      setImportHistory(nextHistory);
-      saveImportHistory(nextHistory);
+      replaceResult(cleaned, [entry, ...importHistory].slice(0, 12));
     } catch (uploadError) {
-      setResult(EMPTY_RESULT);
       setError(uploadError.message || "Could not read this CSV file.");
     }
   }
@@ -393,18 +411,19 @@ export default function CustomerDatabasePage() {
 
   function openEditModal(contact) {
     setManualForm({
-      firstName: contact.firstName || "",
-      lastName: contact.lastName || "",
+      first_name: contact.first_name || "",
+      last_name: contact.last_name || "",
+      company: contact.company || "",
       email: contact.email || "",
       phone: contact.phone || "",
       postcode: contact.postcode || "",
-      company: contact.company || "",
       pipeline: contact.pipeline || "unknown",
       source: contact.source || "manual",
       notes: contact.notes || "",
+      tags: contact.tags || [],
     });
     setManualError("");
-    setEditingIndex(result.cleanContacts.indexOf(contact));
+    setEditingIndex(result.cleanContacts.findIndex((item) => item.customer_id === contact.customer_id));
     setModalMode("edit");
   }
 
@@ -417,32 +436,24 @@ export default function CustomerDatabasePage() {
 
   function handleManualSubmit(event) {
     event.preventDefault();
-    const { contact, error: contactError } = cleanManualContact(manualForm);
-
-    if (contactError) {
-      setManualError(contactError);
-      return;
-    }
 
     if (editingIndex >= 0) {
-      setResult((current) => {
-        const currentContact = current.cleanContacts[editingIndex];
-        const cleanContacts = [...current.cleanContacts];
-        cleanContacts[editingIndex] = {
-          ...currentContact,
-          ...contact,
-          created_at: currentContact.created_at,
-          sourceRow: currentContact.sourceRow,
-        };
-        return buildResult(
-          cleanContacts,
-          current.rejectedRows,
-          current.duplicateRows,
-          current.stats.rowsImported
-        );
-      });
+      const existing = result.cleanContacts[editingIndex];
+      const { contact, error: contactError } = updateContactRecord(existing, manualForm);
+      if (contactError) {
+        setManualError(contactError);
+        return;
+      }
+      const cleanContacts = [...result.cleanContacts];
+      cleanContacts[editingIndex] = contact;
+      replaceResult(buildCustomerResult(cleanContacts, result.rejectedRows, result.duplicateRows, result.stats.rowsImported, result.possibleDuplicates));
     } else {
-      setResult((current) => addContactToResult(current, contact));
+      const { contact, error: contactError } = cleanManualContact(manualForm, result.cleanContacts);
+      if (contactError) {
+        setManualError(contactError);
+        return;
+      }
+      replaceResult(addContactToResult(result, contact));
     }
 
     setManualForm(EMPTY_FORM);
@@ -450,15 +461,93 @@ export default function CustomerDatabasePage() {
   }
 
   function handleDeleteContact(contact) {
-    setResult((current) => {
-      const cleanContacts = current.cleanContacts.filter((item) => item !== contact);
-      return buildResult(
-        cleanContacts,
-        current.rejectedRows,
-        current.duplicateRows,
-        current.stats.rowsImported
-      );
+    const cleanContacts = result.cleanContacts.filter((item) => item.customer_id !== contact.customer_id);
+    replaceResult(buildCustomerResult(cleanContacts, result.rejectedRows, result.duplicateRows, result.stats.rowsImported, result.possibleDuplicates));
+    setSelectedIds((ids) => ids.filter((id) => id !== contact.customer_id));
+  }
+
+  function toggleSelected(contactId) {
+    setSelectedIds((ids) => ids.includes(contactId) ? ids.filter((id) => id !== contactId) : [...ids, contactId]);
+  }
+
+  function updateSelectedContacts(updater) {
+    const now = new Date().toISOString();
+    const cleanContacts = result.cleanContacts.map((contact) => {
+      if (!selectedIds.includes(contact.customer_id)) return contact;
+      return updater(contact, now);
     });
+    replaceResult(buildCustomerResult(cleanContacts, result.rejectedRows, result.duplicateRows, result.stats.rowsImported, result.possibleDuplicates));
+  }
+
+  function bulkAddTag() {
+    updateSelectedContacts((contact, now) => {
+      if ((contact.tags || []).includes(bulkTag)) return contact;
+      return {
+        ...contact,
+        tags: [...(contact.tags || []), bulkTag].sort(),
+        updated_at: now,
+        timeline: [...(contact.timeline || []), createTimelineEvent("tag_added", `Tag added: ${bulkTag}`, now)],
+      };
+    });
+  }
+
+  function bulkRemoveTag() {
+    updateSelectedContacts((contact, now) => {
+      if (!(contact.tags || []).includes(bulkTag)) return contact;
+      return {
+        ...contact,
+        tags: (contact.tags || []).filter((tag) => tag !== bulkTag),
+        updated_at: now,
+        timeline: [...(contact.timeline || []), createTimelineEvent("tag_removed", `Tag removed: ${bulkTag}`, now)],
+      };
+    });
+  }
+
+  function bulkChangePipeline() {
+    updateSelectedContacts((contact, now) => {
+      if (contact.pipeline === bulkPipeline) return contact;
+      return {
+        ...contact,
+        pipeline: bulkPipeline,
+        updated_at: now,
+        timeline: [
+          ...(contact.timeline || []),
+          createTimelineEvent("pipeline_changed", `Pipeline changed from ${contact.pipeline} to ${bulkPipeline}`, now),
+        ],
+      };
+    });
+  }
+
+  function bulkDeleteSelected() {
+    const cleanContacts = result.cleanContacts.filter((contact) => !selectedIds.includes(contact.customer_id));
+    replaceResult(buildCustomerResult(cleanContacts, result.rejectedRows, result.duplicateRows, result.stats.rowsImported, result.possibleDuplicates));
+    setSelectedIds([]);
+  }
+
+  function markExported(includedContacts, label) {
+    const ids = new Set(includedContacts.map((contact) => contact.customer_id));
+    const now = new Date().toISOString();
+    const cleanContacts = result.cleanContacts.map((contact) => {
+      if (!ids.has(contact.customer_id)) return contact;
+      return {
+        ...contact,
+        last_seen_at: now,
+        timeline: [...(contact.timeline || []), createTimelineEvent("exported", `Exported to ${label}`, now)],
+      };
+    });
+    replaceResult(buildCustomerResult(cleanContacts, result.rejectedRows, result.duplicateRows, result.stats.rowsImported, result.possibleDuplicates));
+  }
+
+  function handleDownload(key, filename, label) {
+    const includedContacts = getExportContacts(result.cleanContacts, key, exportScope);
+    downloadCsv(filename, csvExports[key]);
+    markExported(includedContacts, label);
+  }
+
+  function exportSelected() {
+    const selectedExports = buildCustomerExports(selectedContacts, [], [], "all");
+    downloadCsv("selected-customers.csv", selectedExports.master);
+    markExported(selectedContacts, "Selected Contacts Export");
   }
 
   return (
@@ -471,9 +560,7 @@ export default function CustomerDatabasePage() {
             <p>Upload, clean, search, manage, and export contacts from one CRM workspace.</p>
           </div>
           <div className="card-actions">
-            <button type="button" className="button button--primary" onClick={openAddModal}>
-              + Add Contact
-            </button>
+            <button type="button" className="button button--primary" onClick={openAddModal}>+ Add Contact</button>
           </div>
         </div>
       </section>
@@ -506,52 +593,100 @@ export default function CustomerDatabasePage() {
         <div className="panel__header">
           <div>
             <h3>Contacts</h3>
-            <p>{visibleContacts.length} showing from {result.stats.cleanContacts} clean contacts.</p>
+            <p>{visibleContacts.length} showing from {result.stats.cleanContacts} clean contacts. {selectedIds.length} selected.</p>
           </div>
           <label className="field" style={{ minWidth: 260 }}>
             <span className="field__label">Search</span>
-            <input
-              className="field__input"
-              placeholder="Name, email, phone, postcode, company"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
+            <input className="field__input" placeholder="Name, email, phone, postcode, company" value={search} onChange={(event) => setSearch(event.target.value)} />
           </label>
         </div>
 
         <div className="card-actions" style={{ marginBottom: 12 }}>
           {["all", ...PIPELINE_OPTIONS].map((pipeline) => (
-            <button
-              key={pipeline}
-              type="button"
-              className={activeFilter === pipeline ? "button button--primary" : "button button--ghost"}
-              onClick={() => setActiveFilter(pipeline)}
-            >
+            <button key={pipeline} type="button" className={activeFilter === pipeline ? "button button--primary" : "button button--ghost"} onClick={() => setActiveFilter(pipeline)}>
               {pipelineLabels[pipeline]}
             </button>
           ))}
+        </div>
+
+        <div className="field-grid" style={{ marginBottom: 12 }}>
+          <label className="field">
+            <span className="field__label">Source</span>
+            <select className="field__input" value={advancedFilters.source} onChange={(event) => setAdvancedFilters((filters) => ({ ...filters, source: event.target.value }))}>
+              <option value="all">All sources</option>
+              {SOURCE_OPTIONS.map((source) => <option key={source} value={source}>{sourceLabels[source]}</option>)}
+            </select>
+          </label>
+          <label className="field">
+            <span className="field__label">Tag</span>
+            <select className="field__input" value={advancedFilters.tag} onChange={(event) => setAdvancedFilters((filters) => ({ ...filters, tag: event.target.value }))}>
+              <option value="all">All tags</option>
+              {DEFAULT_TAGS.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
+            </select>
+          </label>
+          <label className="field">
+            <span className="field__label">Readiness</span>
+            <select className="field__input" value={advancedFilters.readiness} onChange={(event) => setAdvancedFilters((filters) => ({ ...filters, readiness: event.target.value }))}>
+              <option value="all">All</option>
+              <option value="email_ready">Email Ready</option>
+              <option value="sms_ready">SMS Ready</option>
+              <option value="facebook_ready">Facebook Ready</option>
+            </select>
+          </label>
+          <label className="field">
+            <span className="field__label">Data quality</span>
+            <select className="field__input" value={advancedFilters.postcode} onChange={(event) => setAdvancedFilters((filters) => ({ ...filters, postcode: event.target.value }))}>
+              <option value="all">Any postcode</option>
+              <option value="has_postcode">Has postcode</option>
+            </select>
+          </label>
+          <label className="toggle-row" style={{ marginTop: 20 }}>
+            <input type="checkbox" checked={advancedFilters.unknownPipeline} onChange={(event) => setAdvancedFilters((filters) => ({ ...filters, unknownPipeline: event.target.checked }))} />
+            Unknown Pipeline
+          </label>
+        </div>
+
+        <div className="selection-summary" style={{ marginBottom: 12 }}>
+          <strong>Bulk actions</strong>
+          <div className="card-actions">
+            <select className="field__input" style={{ width: 180 }} value={bulkTag} onChange={(event) => setBulkTag(event.target.value)}>
+              {DEFAULT_TAGS.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
+            </select>
+            <button type="button" className="button button--ghost" disabled={!selectedIds.length} onClick={bulkAddTag}>Add Tag</button>
+            <button type="button" className="button button--ghost" disabled={!selectedIds.length} onClick={bulkRemoveTag}>Remove Tag</button>
+            <select className="field__input" style={{ width: 160 }} value={bulkPipeline} onChange={(event) => setBulkPipeline(event.target.value)}>
+              {PIPELINE_OPTIONS.map((pipeline) => <option key={pipeline} value={pipeline}>{pipelineLabels[pipeline]}</option>)}
+            </select>
+            <button type="button" className="button button--ghost" disabled={!selectedIds.length} onClick={bulkChangePipeline}>Change Pipeline</button>
+            <button type="button" className="button button--ghost" disabled={!selectedIds.length} onClick={exportSelected}>Export Selected</button>
+            <button type="button" className="button button--danger" disabled={!selectedIds.length} onClick={bulkDeleteSelected}>Delete Selected</button>
+          </div>
         </div>
 
         <TableShell>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
             <thead>
               <tr>
+                <th style={{ padding: "10px 8px", borderBottom: "1px solid #dbe2ea" }}>
+                  <input type="checkbox" checked={visibleContacts.length > 0 && visibleContacts.every((contact) => selectedIds.includes(contact.customer_id))} onChange={(event) => setSelectedIds(event.target.checked ? visibleContacts.map((contact) => contact.customer_id) : [])} />
+                </th>
                 {["Name", "Email", "Phone", "Pipeline", "Source", "Postcode", "Last Updated", "Actions"].map((heading) => (
-                  <th key={heading} style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #dbe2ea", color: "#475569" }}>
-                    {heading}
-                  </th>
+                  <th key={heading} style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #dbe2ea", color: "#475569" }}>{heading}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {visibleContacts.length === 0 ? (
-                <tr>
-                  <td colSpan={8} style={{ padding: 18, color: "#64748b" }}>No contacts match this view.</td>
-                </tr>
+                <tr><td colSpan={9} style={{ padding: 18, color: "#64748b" }}>No contacts match this view.</td></tr>
               ) : (
-                visibleContacts.map((contact, index) => (
-                  <tr key={`${contact.email || contact.phone || contact.sourceRow}-${index}`}>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7", fontWeight: 800 }}>{contactName(contact)}</td>
+                visibleContacts.map((contact) => (
+                  <tr key={contact.customer_id}>
+                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>
+                      <input type="checkbox" checked={selectedIds.includes(contact.customer_id)} onChange={() => toggleSelected(contact.customer_id)} />
+                    </td>
+                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7", fontWeight: 800 }}>
+                      {contactName(contact)}<br /><small style={{ color: "#64748b" }}>{contact.customer_id}</small><TagChips tags={contact.tags} />
+                    </td>
                     <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{contact.email || "-"}</td>
                     <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{contact.phone || "-"}</td>
                     <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{pipelineLabels[contact.pipeline] || contact.pipeline}</td>
@@ -574,37 +709,22 @@ export default function CustomerDatabasePage() {
       </section>
 
       <section className="panel" style={{ padding: 16 }}>
-        <div className="panel__header">
-          <div>
-            <h3>Import History</h3>
-            <p>Stored locally for now.</p>
-          </div>
-        </div>
+        <div className="panel__header"><div><h3>Import History</h3><p>Stored locally for now.</p></div></div>
         <TableShell>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-            <thead>
-              <tr>
-                {["Import Date", "Filename", "Rows Imported", "Duplicates", "Rejected"].map((heading) => (
-                  <th key={heading} style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #dbe2ea", color: "#475569" }}>
-                    {heading}
-                  </th>
-                ))}
-              </tr>
-            </thead>
+            <thead><tr>{["Import Date", "Filename", "Rows Imported", "Created", "Duplicates", "Possible", "Rejected"].map((heading) => <th key={heading} style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #dbe2ea", color: "#475569" }}>{heading}</th>)}</tr></thead>
             <tbody>
-              {importHistory.length === 0 ? (
-                <tr><td colSpan={5} style={{ padding: 18, color: "#64748b" }}>No imports yet.</td></tr>
-              ) : (
-                importHistory.map((item) => (
-                  <tr key={item.id}>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatDate(item.importDate)}</td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.filename}</td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.rowsImported}</td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.duplicates}</td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.rejected}</td>
-                  </tr>
-                ))
-              )}
+              {importHistory.length === 0 ? <tr><td colSpan={7} style={{ padding: 18, color: "#64748b" }}>No imports yet.</td></tr> : importHistory.map((item) => (
+                <tr key={item.import_id}>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatDate(item.imported_at)}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.filename}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.rows_imported}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.contacts_created}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.duplicates_merged}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.possible_duplicates}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.rejected_rows}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </TableShell>
@@ -612,35 +732,21 @@ export default function CustomerDatabasePage() {
 
       <section className="panel" style={{ padding: 16 }}>
         <div className="panel__header">
-          <div>
-            <h3>Export Centre</h3>
-            <p>Grouped exports for audience uploads and reports.</p>
-          </div>
+          <div><h3>Export Centre</h3><p>Grouped exports for audience uploads and reports.</p></div>
           <label className="field" style={{ minWidth: 220 }}>
             <span className="field__label">Report scope</span>
             <select className="field__input" value={exportScope} onChange={(event) => setExportScope(event.target.value)}>
-              {["all", ...PIPELINE_OPTIONS].map((pipeline) => (
-                <option key={pipeline} value={pipeline}>{pipelineLabels[pipeline]}</option>
-              ))}
+              {["all", ...PIPELINE_OPTIONS].map((pipeline) => <option key={pipeline} value={pipeline}>{pipelineLabels[pipeline]}</option>)}
             </select>
           </label>
         </div>
-
         <div className="card-grid">
           {exportGroups.map((group) => (
             <div key={group.title} className="panel panel--nested" style={{ boxShadow: "none" }}>
               <h3 style={{ marginTop: 0 }}>{group.title}</h3>
               <div className="card-actions">
-                {group.buttons.map(([label, key, filename]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    className="button button--ghost"
-                    disabled={!result.stats.rowsImported}
-                    onClick={() => downloadCsv(filename, csvExports[key])}
-                  >
-                    {label}
-                  </button>
+                {group.buttons.map(([label, key, filename, exportLabel]) => (
+                  <button key={key} type="button" className="button button--ghost" disabled={!result.stats.cleanContacts && key !== "rejected" && key !== "duplicates"} onClick={() => handleDownload(key, filename, exportLabel)}>{label}</button>
                 ))}
               </div>
             </div>
@@ -649,57 +755,36 @@ export default function CustomerDatabasePage() {
       </section>
 
       <section className="panel" style={{ padding: 16 }}>
-        <div className="panel__header">
-          <div>
-            <h3>Reports Preview</h3>
-            <p>Rejected records and duplicates remain available for review.</p>
-          </div>
-        </div>
+        <div className="panel__header"><div><h3>Reports Preview</h3><p>Rejected records, duplicates, and possible duplicates remain available for review.</p></div></div>
         <div className="card-grid">
-          <div className="panel panel--nested" style={{ boxShadow: "none" }}>
-            <h3 style={{ marginTop: 0 }}>Rejected Rows</h3>
-            <TableShell>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                <tbody>
-                  {result.rejectedRows.slice(0, 5).map((row, index) => (
-                    <tr key={`rejected-${index}`}>
-                      <td style={{ padding: 8, borderBottom: "1px solid #eef2f7" }}>{row._rowNumber}</td>
-                      <td style={{ padding: 8, borderBottom: "1px solid #eef2f7" }}>{row.rejectionReason}</td>
-                    </tr>
-                  ))}
-                  {result.rejectedRows.length === 0 ? <tr><td style={{ padding: 12, color: "#64748b" }}>No rejected rows.</td></tr> : null}
-                </tbody>
-              </table>
-            </TableShell>
-          </div>
-          <div className="panel panel--nested" style={{ boxShadow: "none" }}>
-            <h3 style={{ marginTop: 0 }}>Duplicates</h3>
-            <TableShell>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                <tbody>
-                  {result.duplicateRows.slice(0, 5).map((row, index) => (
-                    <tr key={`duplicate-${index}`}>
-                      <td style={{ padding: 8, borderBottom: "1px solid #eef2f7" }}>{row.email || row.phone}</td>
-                      <td style={{ padding: 8, borderBottom: "1px solid #eef2f7" }}>{row.duplicateReason}</td>
-                    </tr>
-                  ))}
-                  {result.duplicateRows.length === 0 ? <tr><td style={{ padding: 12, color: "#64748b" }}>No duplicates.</td></tr> : null}
-                </tbody>
-              </table>
-            </TableShell>
-          </div>
+          {[
+            ["Rejected Rows", result.rejectedRows, (row) => row.rejectionReason || "Rejected"],
+            ["Duplicates", result.duplicateRows, (row) => row.duplicateReason || "Duplicate"],
+            ["Possible Duplicates", result.possibleDuplicates || [], (row) => row.reason || "Possible duplicate"],
+          ].map(([title, rows, describe]) => (
+            <div key={title} className="panel panel--nested" style={{ boxShadow: "none" }}>
+              <h3 style={{ marginTop: 0 }}>{title}</h3>
+              <TableShell>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <tbody>
+                    {rows.slice(0, 5).map((row, index) => (
+                      <tr key={`${title}-${index}`}>
+                        <td style={{ padding: 8, borderBottom: "1px solid #eef2f7" }}>{row.customer_id || row.sourceRow || row._rowNumber || "-"}</td>
+                        <td style={{ padding: 8, borderBottom: "1px solid #eef2f7" }}>{describe(row)}</td>
+                      </tr>
+                    ))}
+                    {rows.length === 0 ? <tr><td style={{ padding: 12, color: "#64748b" }}>None.</td></tr> : null}
+                  </tbody>
+                </table>
+              </TableShell>
+            </div>
+          ))}
         </div>
       </section>
 
       {(modalMode === "add" || modalMode === "edit") ? (
         <Modal title={modalMode === "edit" ? "Edit Contact" : "Add Contact"} onClose={closeModal}>
-          <ContactForm
-            form={manualForm}
-            setForm={setManualForm}
-            error={manualError}
-            onSubmit={handleManualSubmit}
-            submitLabel={modalMode === "edit" ? "Save Contact" : "Add Contact"}
-          />
+          <ContactForm form={manualForm} setForm={setManualForm} error={manualError} onSubmit={handleManualSubmit} submitLabel={modalMode === "edit" ? "Save Contact" : "Add Contact"} />
         </Modal>
       ) : null}
 
@@ -713,18 +798,24 @@ export default function CustomerDatabasePage() {
               ["Postcode", selectedContact.postcode || "-"],
               ["Pipeline", pipelineLabels[selectedContact.pipeline] || selectedContact.pipeline],
               ["Source", sourceLabels[selectedContact.source] || selectedContact.source],
-              ["Created", formatDate(selectedContact.created_at)],
-              ["Updated", formatDate(selectedContact.updated_at)],
+              ["Created At", formatDate(selectedContact.created_at)],
+              ["Updated At", formatDate(selectedContact.updated_at)],
+              ["Last Seen At", formatDate(selectedContact.last_seen_at)],
+              ["Duplicate Count", selectedContact.duplicate_count || 0],
             ].map(([label, value]) => (
-              <div key={label} className="field">
-                <span className="field__label">{label}</span>
-                <div className="field__input">{value}</div>
-              </div>
+              <div key={label} className="field"><span className="field__label">{label}</span><div className="field__input">{value}</div></div>
             ))}
+            <div className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Tags</span><div className="field__input"><TagChips tags={selectedContact.tags} /></div></div>
+            <div className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Notes</span><div className="field__input" style={{ minHeight: 84, whiteSpace: "pre-line" }}>{selectedContact.notes || "-"}</div></div>
             <div className="field" style={{ gridColumn: "1 / -1" }}>
-              <span className="field__label">Notes</span>
-              <div className="field__input" style={{ minHeight: 84, whiteSpace: "pre-line" }}>
-                {selectedContact.notes || "-"}
+              <span className="field__label">Timeline</span>
+              <div className="field__input" style={{ display: "grid", gap: 8 }}>
+                {(selectedContact.timeline || []).slice().reverse().map((event) => (
+                  <div key={event.event_id} style={{ borderBottom: "1px solid #eef2f7", paddingBottom: 8 }}>
+                    <strong>{event.message}</strong><br /><small style={{ color: "#64748b" }}>{event.type} - {formatDate(event.created_at)}</small>
+                  </div>
+                ))}
+                {(selectedContact.timeline || []).length === 0 ? "No timeline yet." : null}
               </div>
             </div>
           </div>
