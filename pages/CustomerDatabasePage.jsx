@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_TAGS,
   PIPELINE_OPTIONS,
@@ -23,6 +23,8 @@ const STORAGE_KEYS = {
   duplicates: "vfc_customer_database_duplicates",
   possibleDuplicates: "vfc_customer_database_possible_duplicates",
 };
+
+const PAGE_SIZE = 100;
 
 const EMPTY_RESULT = {
   cleanContacts: [],
@@ -313,6 +315,7 @@ export default function CustomerDatabasePage() {
   const [advancedFilters, setAdvancedFilters] = useState(EMPTY_FILTERS);
   const [exportScope, setExportScope] = useState("all");
   const [search, setSearch] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
   const [modalMode, setModalMode] = useState("");
   const [selectedContact, setSelectedContact] = useState(null);
   const [editingIndex, setEditingIndex] = useState(-1);
@@ -323,9 +326,9 @@ export default function CustomerDatabasePage() {
 
   const csvExports = useMemo(
     () => buildCustomerExports(result.cleanContacts, result.rejectedRows, result.duplicateRows, exportScope),
-    [result, exportScope]
+    [result.cleanContacts, result.rejectedRows, result.duplicateRows, exportScope]
   );
-  const visibleContacts = useMemo(() => {
+  const filteredContacts = useMemo(() => {
     return filterContactsByPipeline(result.cleanContacts, activeFilter)
       .filter((contact) => contactMatchesSearch(contact, search))
       .filter((contact) => advancedFilters.source === "all" || contact.source === advancedFilters.source)
@@ -334,7 +337,17 @@ export default function CustomerDatabasePage() {
       .filter((contact) => advancedFilters.postcode === "all" || Boolean(contact.postcode))
       .filter((contact) => !advancedFilters.unknownPipeline || contact.pipeline === "unknown");
   }, [result.cleanContacts, activeFilter, search, advancedFilters]);
-  const selectedContacts = result.cleanContacts.filter((contact) => selectedIds.includes(contact.customer_id));
+  const totalPages = Math.max(1, Math.ceil(filteredContacts.length / PAGE_SIZE));
+  const pageStartIndex = filteredContacts.length ? (currentPage - 1) * PAGE_SIZE : 0;
+  const pageEndIndex = Math.min(pageStartIndex + PAGE_SIZE, filteredContacts.length);
+  const visiblePageContacts = useMemo(
+    () => filteredContacts.slice(pageStartIndex, pageEndIndex),
+    [filteredContacts, pageStartIndex, pageEndIndex]
+  );
+  const selectedVisibleContacts = useMemo(
+    () => visiblePageContacts.filter((contact) => selectedIds.includes(contact.customer_id)),
+    [visiblePageContacts, selectedIds]
+  );
   const dashboardCards = useMemo(
     () => [
       ["Total Contacts", result.stats.cleanContacts],
@@ -348,8 +361,17 @@ export default function CustomerDatabasePage() {
       ["Duplicates Removed", result.stats.duplicatesRemoved],
       ["Rejected Records", result.stats.badRowsRejected],
     ],
-    [result]
+    [result.cleanContacts, result.stats]
   );
+
+  useEffect(() => {
+    setCurrentPage(1);
+    setSelectedIds([]);
+  }, [search, activeFilter, advancedFilters]);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, totalPages));
+  }, [totalPages]);
 
   function persist(nextResult, nextImports = importHistory) {
     writeStorage(STORAGE_KEYS.contacts, nextResult.cleanContacts);
@@ -397,6 +419,8 @@ export default function CustomerDatabasePage() {
         rejected_rows: cleaned.stats.badRowsRejected,
       };
       replaceResult(cleaned, [entry, ...importHistory].slice(0, 12));
+      setCurrentPage(1);
+      setSelectedIds([]);
     } catch (uploadError) {
       setError(uploadError.message || "Could not read this CSV file.");
     }
@@ -471,9 +495,10 @@ export default function CustomerDatabasePage() {
   }
 
   function updateSelectedContacts(updater) {
+    const visibleSelectedIds = new Set(selectedVisibleContacts.map((contact) => contact.customer_id));
     const now = new Date().toISOString();
     const cleanContacts = result.cleanContacts.map((contact) => {
-      if (!selectedIds.includes(contact.customer_id)) return contact;
+      if (!visibleSelectedIds.has(contact.customer_id)) return contact;
       return updater(contact, now);
     });
     replaceResult(buildCustomerResult(cleanContacts, result.rejectedRows, result.duplicateRows, result.stats.rowsImported, result.possibleDuplicates));
@@ -519,7 +544,8 @@ export default function CustomerDatabasePage() {
   }
 
   function bulkDeleteSelected() {
-    const cleanContacts = result.cleanContacts.filter((contact) => !selectedIds.includes(contact.customer_id));
+    const visibleSelectedIds = new Set(selectedVisibleContacts.map((contact) => contact.customer_id));
+    const cleanContacts = result.cleanContacts.filter((contact) => !visibleSelectedIds.has(contact.customer_id));
     replaceResult(buildCustomerResult(cleanContacts, result.rejectedRows, result.duplicateRows, result.stats.rowsImported, result.possibleDuplicates));
     setSelectedIds([]);
   }
@@ -545,9 +571,9 @@ export default function CustomerDatabasePage() {
   }
 
   function exportSelected() {
-    const selectedExports = buildCustomerExports(selectedContacts, [], [], "all");
+    const selectedExports = buildCustomerExports(selectedVisibleContacts, [], [], "all");
     downloadCsv("selected-customers.csv", selectedExports.master);
-    markExported(selectedContacts, "Selected Contacts Export");
+    markExported(selectedVisibleContacts, "Selected Contacts Export");
   }
 
   return (
@@ -593,7 +619,9 @@ export default function CustomerDatabasePage() {
         <div className="panel__header">
           <div>
             <h3>Contacts</h3>
-            <p>{visibleContacts.length} showing from {result.stats.cleanContacts} clean contacts. {selectedIds.length} selected.</p>
+            <p>
+              {filteredContacts.length} showing from {result.stats.cleanContacts} clean contacts. {selectedVisibleContacts.length} selected on this page.
+            </p>
           </div>
           <label className="field" style={{ minWidth: 260 }}>
             <span className="field__label">Search</span>
@@ -652,14 +680,44 @@ export default function CustomerDatabasePage() {
             <select className="field__input" style={{ width: 180 }} value={bulkTag} onChange={(event) => setBulkTag(event.target.value)}>
               {DEFAULT_TAGS.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
             </select>
-            <button type="button" className="button button--ghost" disabled={!selectedIds.length} onClick={bulkAddTag}>Add Tag</button>
-            <button type="button" className="button button--ghost" disabled={!selectedIds.length} onClick={bulkRemoveTag}>Remove Tag</button>
+            <button type="button" className="button button--ghost" disabled={!selectedVisibleContacts.length} onClick={bulkAddTag}>Add Tag</button>
+            <button type="button" className="button button--ghost" disabled={!selectedVisibleContacts.length} onClick={bulkRemoveTag}>Remove Tag</button>
             <select className="field__input" style={{ width: 160 }} value={bulkPipeline} onChange={(event) => setBulkPipeline(event.target.value)}>
               {PIPELINE_OPTIONS.map((pipeline) => <option key={pipeline} value={pipeline}>{pipelineLabels[pipeline]}</option>)}
             </select>
-            <button type="button" className="button button--ghost" disabled={!selectedIds.length} onClick={bulkChangePipeline}>Change Pipeline</button>
-            <button type="button" className="button button--ghost" disabled={!selectedIds.length} onClick={exportSelected}>Export Selected</button>
-            <button type="button" className="button button--danger" disabled={!selectedIds.length} onClick={bulkDeleteSelected}>Delete Selected</button>
+            <button type="button" className="button button--ghost" disabled={!selectedVisibleContacts.length} onClick={bulkChangePipeline}>Change Pipeline</button>
+            <button type="button" className="button button--ghost" disabled={!selectedVisibleContacts.length} onClick={exportSelected}>Export Selected</button>
+            <button type="button" className="button button--danger" disabled={!selectedVisibleContacts.length} onClick={bulkDeleteSelected}>Delete Selected</button>
+          </div>
+        </div>
+
+        <div className="card-actions" style={{ justifyContent: "space-between", marginBottom: 12 }}>
+          <span style={{ color: "#64748b", fontWeight: 800 }}>
+            Showing {filteredContacts.length ? pageStartIndex + 1 : 0}-{pageEndIndex} of {filteredContacts.length} contacts
+          </span>
+          <div className="card-actions" style={{ alignItems: "center" }}>
+            <button type="button" className="button button--ghost" disabled={currentPage <= 1} onClick={() => { setCurrentPage((page) => Math.max(1, page - 1)); setSelectedIds([]); }}>
+              Previous
+            </button>
+            <label className="field" style={{ width: 110 }}>
+              <span className="field__label">Page</span>
+              <input
+                className="field__input"
+                type="number"
+                min="1"
+                max={totalPages}
+                value={currentPage}
+                onChange={(event) => {
+                  const nextPage = Math.min(totalPages, Math.max(1, Number(event.target.value) || 1));
+                  setCurrentPage(nextPage);
+                  setSelectedIds([]);
+                }}
+              />
+            </label>
+            <span style={{ color: "#64748b", fontWeight: 800 }}>of {totalPages}</span>
+            <button type="button" className="button button--ghost" disabled={currentPage >= totalPages} onClick={() => { setCurrentPage((page) => Math.min(totalPages, page + 1)); setSelectedIds([]); }}>
+              Next
+            </button>
           </div>
         </div>
 
@@ -668,7 +726,7 @@ export default function CustomerDatabasePage() {
             <thead>
               <tr>
                 <th style={{ padding: "10px 8px", borderBottom: "1px solid #dbe2ea" }}>
-                  <input type="checkbox" checked={visibleContacts.length > 0 && visibleContacts.every((contact) => selectedIds.includes(contact.customer_id))} onChange={(event) => setSelectedIds(event.target.checked ? visibleContacts.map((contact) => contact.customer_id) : [])} />
+                  <input type="checkbox" checked={visiblePageContacts.length > 0 && visiblePageContacts.every((contact) => selectedIds.includes(contact.customer_id))} onChange={(event) => setSelectedIds(event.target.checked ? visiblePageContacts.map((contact) => contact.customer_id) : [])} />
                 </th>
                 {["Name", "Email", "Phone", "Pipeline", "Source", "Postcode", "Last Updated", "Actions"].map((heading) => (
                   <th key={heading} style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #dbe2ea", color: "#475569" }}>{heading}</th>
@@ -676,10 +734,10 @@ export default function CustomerDatabasePage() {
               </tr>
             </thead>
             <tbody>
-              {visibleContacts.length === 0 ? (
+              {visiblePageContacts.length === 0 ? (
                 <tr><td colSpan={9} style={{ padding: 18, color: "#64748b" }}>No contacts match this view.</td></tr>
               ) : (
-                visibleContacts.map((contact) => (
+                visiblePageContacts.map((contact) => (
                   <tr key={contact.customer_id}>
                     <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>
                       <input type="checkbox" checked={selectedIds.includes(contact.customer_id)} onChange={() => toggleSelected(contact.customer_id)} />
