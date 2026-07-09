@@ -1,7 +1,12 @@
 import { useMemo, useState } from "react";
 import {
+  PIPELINE_OPTIONS,
+  SOURCE_OPTIONS,
+  addContactToResult,
   buildCustomerExports,
   cleanCustomerRows,
+  cleanManualContact,
+  filterContactsByPipeline,
   parseCsv,
 } from "../utils/contactCleaning.js";
 
@@ -20,6 +25,34 @@ const EMPTY_RESULT = {
   },
 };
 
+const EMPTY_FORM = {
+  firstName: "",
+  lastName: "",
+  email: "",
+  phone: "",
+  postcode: "",
+  pipeline: "unknown",
+  source: "manual",
+  notes: "",
+};
+
+const pipelineLabels = {
+  all: "All",
+  finance: "Finance",
+  rent2buy: "Rent2Buy",
+  both: "Both",
+  unknown: "Unknown",
+};
+
+const sourceLabels = {
+  manual: "Manual",
+  wix: "Wix",
+  supabase: "Supabase",
+  facebook: "Facebook",
+  crm: "CRM",
+  other: "Other",
+};
+
 const statCards = [
   ["Rows imported", "rowsImported"],
   ["Clean contacts", "cleanContacts"],
@@ -30,13 +63,23 @@ const statCards = [
   ["Facebook-ready contacts", "facebookReadyContacts"],
 ];
 
-const downloadButtons = [
+const scopedDownloadButtons = [
   ["Master CSV", "master", "customer-master.csv"],
   ["Facebook Audience CSV", "facebook", "facebook-audience.csv"],
   ["Email Marketing CSV", "email", "email-marketing.csv"],
   ["SMS CSV", "sms", "sms-contacts.csv"],
   ["Rejected Rows CSV", "rejected", "rejected-rows.csv"],
   ["Duplicate Report CSV", "duplicates", "duplicate-report.csv"],
+];
+
+const productDownloadButtons = [
+  ["Finance Facebook CSV", "financeFacebook", "finance-facebook-audience.csv"],
+  ["Rent2Buy Facebook CSV", "rent2buyFacebook", "rent2buy-facebook-audience.csv"],
+  ["Full Facebook CSV", "fullFacebook", "full-facebook-audience.csv"],
+  ["Finance Email CSV", "financeEmail", "finance-email.csv"],
+  ["Rent2Buy Email CSV", "rent2buyEmail", "rent2buy-email.csv"],
+  ["Finance SMS CSV", "financeSms", "finance-sms.csv"],
+  ["Rent2Buy SMS CSV", "rent2buySms", "rent2buy-sms.csv"],
 ];
 
 function downloadCsv(filename, content) {
@@ -49,6 +92,10 @@ function downloadCsv(filename, content) {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+function updateFormValue(setForm, key, value) {
+  setForm((current) => ({ ...current, [key]: value }));
 }
 
 function PreviewTable({ title, rows, columns, emptyText }) {
@@ -112,10 +159,24 @@ export default function CustomerDatabasePage() {
   const [result, setResult] = useState(EMPTY_RESULT);
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState("");
+  const [manualError, setManualError] = useState("");
+  const [manualForm, setManualForm] = useState(EMPTY_FORM);
+  const [activeFilter, setActiveFilter] = useState("all");
+  const [exportScope, setExportScope] = useState("all");
 
   const exports = useMemo(
-    () => buildCustomerExports(result.cleanContacts, result.rejectedRows, result.duplicateRows),
-    [result]
+    () =>
+      buildCustomerExports(
+        result.cleanContacts,
+        result.rejectedRows,
+        result.duplicateRows,
+        exportScope
+      ),
+    [result, exportScope]
+  );
+  const filteredContacts = useMemo(
+    () => filterContactsByPipeline(result.cleanContacts, activeFilter),
+    [result.cleanContacts, activeFilter]
   );
 
   async function handleFileUpload(event) {
@@ -140,6 +201,20 @@ export default function CustomerDatabasePage() {
     }
   }
 
+  function handleManualSubmit(event) {
+    event.preventDefault();
+    const { contact, error: contactError } = cleanManualContact(manualForm);
+
+    if (contactError) {
+      setManualError(contactError);
+      return;
+    }
+
+    setResult((current) => addContactToResult(current, contact));
+    setManualForm(EMPTY_FORM);
+    setManualError("");
+  }
+
   return (
     <div className="page-stack">
       <section className="hero-panel">
@@ -147,8 +222,9 @@ export default function CustomerDatabasePage() {
           <div className="eyebrow">Customer Data</div>
           <h2>Customer Database</h2>
           <p>
-            Upload a CSV to clean customer contact data in your browser and prepare safe
-            exports for Facebook, email, and SMS audiences.
+            Upload a CSV or add contacts manually. Contacts stay in this browser for now and
+            are structured ready for future Supabase storage with pipeline, source, notes,
+            created_at, updated_at, and last_seen_at fields.
           </p>
         </div>
       </section>
@@ -157,13 +233,112 @@ export default function CustomerDatabasePage() {
         <div className="panel__header">
           <div>
             <h3>Upload CSV</h3>
-            <p>No data is saved yet. Cleaning and downloads run locally in this browser.</p>
+            <p>
+              Old imports default to Unknown unless a clear product, source, status, or lead
+              type field says Finance or Rent2Buy.
+            </p>
           </div>
         </div>
 
         <input className="field__input" type="file" accept=".csv,text/csv" onChange={handleFileUpload} />
         {fileName ? <div className="notice">Loaded file: {fileName}</div> : null}
         {error ? <div className="notice notice--error">{error}</div> : null}
+      </section>
+
+      <section className="panel">
+        <div className="panel__header">
+          <div>
+            <h3>Add Contact</h3>
+            <p>Use this for manual Finance, Rent2Buy, Both, or Unknown contacts.</p>
+          </div>
+        </div>
+
+        <form onSubmit={handleManualSubmit} className="field-grid">
+          <label className="field">
+            <span className="field__label">First name</span>
+            <input
+              className="field__input"
+              value={manualForm.firstName}
+              onChange={(event) => updateFormValue(setManualForm, "firstName", event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span className="field__label">Last name</span>
+            <input
+              className="field__input"
+              value={manualForm.lastName}
+              onChange={(event) => updateFormValue(setManualForm, "lastName", event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span className="field__label">Email</span>
+            <input
+              className="field__input"
+              value={manualForm.email}
+              onChange={(event) => updateFormValue(setManualForm, "email", event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span className="field__label">Mobile</span>
+            <input
+              className="field__input"
+              value={manualForm.phone}
+              onChange={(event) => updateFormValue(setManualForm, "phone", event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span className="field__label">Postcode</span>
+            <input
+              className="field__input"
+              value={manualForm.postcode}
+              onChange={(event) => updateFormValue(setManualForm, "postcode", event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span className="field__label">Pipeline</span>
+            <select
+              className="field__input"
+              value={manualForm.pipeline}
+              onChange={(event) => updateFormValue(setManualForm, "pipeline", event.target.value)}
+            >
+              {PIPELINE_OPTIONS.map((pipeline) => (
+                <option key={pipeline} value={pipeline}>
+                  {pipelineLabels[pipeline]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span className="field__label">Source</span>
+            <select
+              className="field__input"
+              value={manualForm.source}
+              onChange={(event) => updateFormValue(setManualForm, "source", event.target.value)}
+            >
+              {SOURCE_OPTIONS.map((source) => (
+                <option key={source} value={source}>
+                  {sourceLabels[source]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span className="field__label">Notes</span>
+            <textarea
+              className="field__input"
+              rows={3}
+              value={manualForm.notes}
+              onChange={(event) => updateFormValue(setManualForm, "notes", event.target.value)}
+            />
+          </label>
+          <div className="card-actions" style={{ gridColumn: "1 / -1" }}>
+            <button type="submit" className="button button--primary">
+              Add Contact
+            </button>
+          </div>
+        </form>
+
+        {manualError ? <div className="notice notice--error">{manualError}</div> : null}
       </section>
 
       <section className="stats-grid">
@@ -178,13 +353,52 @@ export default function CustomerDatabasePage() {
       <section className="panel">
         <div className="panel__header">
           <div>
-            <h3>Downloads</h3>
-            <p>Exports use cleaned contacts only, with separate reports for rejects and duplicates.</p>
+            <h3>Filters</h3>
+            <p>Preview contacts by pipeline.</p>
           </div>
         </div>
 
         <div className="card-actions">
-          {downloadButtons.map(([label, key, filename]) => (
+          {["all", ...PIPELINE_OPTIONS].map((pipeline) => (
+            <button
+              key={pipeline}
+              type="button"
+              className={activeFilter === pipeline ? "button button--primary" : "button button--ghost"}
+              onClick={() => setActiveFilter(pipeline)}
+            >
+              {pipelineLabels[pipeline]}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel__header">
+          <div>
+            <h3>Downloads</h3>
+            <p>
+              General downloads use the selected export scope. Product downloads always use
+              the named Finance or Rent2Buy audience.
+            </p>
+          </div>
+          <label className="field" style={{ minWidth: 220 }}>
+            <span className="field__label">Export scope</span>
+            <select
+              className="field__input"
+              value={exportScope}
+              onChange={(event) => setExportScope(event.target.value)}
+            >
+              {["all", ...PIPELINE_OPTIONS].map((pipeline) => (
+                <option key={pipeline} value={pipeline}>
+                  {pipelineLabels[pipeline]}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="card-actions">
+          {scopedDownloadButtons.map(([label, key, filename]) => (
             <button
               key={key}
               type="button"
@@ -196,18 +410,34 @@ export default function CustomerDatabasePage() {
             </button>
           ))}
         </div>
+
+        <div className="card-actions" style={{ marginTop: 12 }}>
+          {productDownloadButtons.map(([label, key, filename]) => (
+            <button
+              key={key}
+              type="button"
+              className="button button--ghost"
+              disabled={!result.stats.rowsImported}
+              onClick={() => downloadCsv(filename, exports[key])}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </section>
 
       <PreviewTable
-        title="Clean contacts preview"
-        rows={result.cleanContacts}
-        emptyText="No clean contacts yet."
+        title={`Clean contacts preview - ${pipelineLabels[activeFilter]}`}
+        rows={filteredContacts}
+        emptyText="No clean contacts for this filter yet."
         columns={[
           { key: "firstName", label: "First name" },
           { key: "lastName", label: "Last name" },
           { key: "email", label: "Email" },
           { key: "phone", label: "Phone" },
           { key: "postcode", label: "Postcode" },
+          { key: "pipeline", label: "Pipeline" },
+          { key: "source", label: "Source" },
         ]}
       />
 
@@ -229,6 +459,8 @@ export default function CustomerDatabasePage() {
           { key: "sourceRow", label: "Source row" },
           { key: "email", label: "Email" },
           { key: "phone", label: "Phone" },
+          { key: "pipeline", label: "Pipeline" },
+          { key: "mergedPipeline", label: "Merged pipeline" },
           { key: "duplicateReason", label: "Reason" },
         ]}
       />
