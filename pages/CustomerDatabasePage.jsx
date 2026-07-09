@@ -24,7 +24,8 @@ const STORAGE_KEYS = {
   possibleDuplicates: "vfc_customer_database_possible_duplicates",
 };
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 50;
+const STORAGE_WARNING = "Browser storage limit reached.\nContacts remain available until refresh.\nSupabase storage is recommended for permanent storage.";
 
 const EMPTY_RESULT = {
   cleanContacts: [],
@@ -125,7 +126,13 @@ function readStorage(key, fallback) {
 }
 
 function writeStorage(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (storageError) {
+    console.warn("Customer Database localStorage write failed", storageError);
+    return false;
+  }
 }
 
 function downloadCsv(filename, content) {
@@ -142,6 +149,10 @@ function downloadCsv(filename, content) {
 
 function updateFormValue(setForm, key, value) {
   setForm((current) => ({ ...current, [key]: value }));
+}
+
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString("en-GB");
 }
 
 function formatDate(value) {
@@ -309,6 +320,7 @@ export default function CustomerDatabasePage() {
   );
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState("");
+  const [storageWarning, setStorageWarning] = useState("");
   const [manualError, setManualError] = useState("");
   const [manualForm, setManualForm] = useState(EMPTY_FORM);
   const [activeFilter, setActiveFilter] = useState("all");
@@ -374,11 +386,15 @@ export default function CustomerDatabasePage() {
   }, [totalPages]);
 
   function persist(nextResult, nextImports = importHistory) {
-    writeStorage(STORAGE_KEYS.contacts, nextResult.cleanContacts);
-    writeStorage(STORAGE_KEYS.rejected, nextResult.rejectedRows);
-    writeStorage(STORAGE_KEYS.duplicates, nextResult.duplicateRows);
-    writeStorage(STORAGE_KEYS.possibleDuplicates, nextResult.possibleDuplicates || []);
-    writeStorage(STORAGE_KEYS.imports, nextImports);
+    const writesSucceeded = [
+      writeStorage(STORAGE_KEYS.contacts, nextResult.cleanContacts),
+      writeStorage(STORAGE_KEYS.rejected, nextResult.rejectedRows),
+      writeStorage(STORAGE_KEYS.duplicates, nextResult.duplicateRows),
+      writeStorage(STORAGE_KEYS.possibleDuplicates, nextResult.possibleDuplicates || []),
+      writeStorage(STORAGE_KEYS.imports, nextImports),
+    ].every(Boolean);
+
+    setStorageWarning(writesSucceeded ? "" : STORAGE_WARNING);
   }
 
   function replaceResult(nextResult, nextImports = importHistory) {
@@ -550,30 +566,13 @@ export default function CustomerDatabasePage() {
     setSelectedIds([]);
   }
 
-  function markExported(includedContacts, label) {
-    const ids = new Set(includedContacts.map((contact) => contact.customer_id));
-    const now = new Date().toISOString();
-    const cleanContacts = result.cleanContacts.map((contact) => {
-      if (!ids.has(contact.customer_id)) return contact;
-      return {
-        ...contact,
-        last_seen_at: now,
-        timeline: [...(contact.timeline || []), createTimelineEvent("exported", `Exported to ${label}`, now)],
-      };
-    });
-    replaceResult(buildCustomerResult(cleanContacts, result.rejectedRows, result.duplicateRows, result.stats.rowsImported, result.possibleDuplicates));
-  }
-
-  function handleDownload(key, filename, label) {
-    const includedContacts = getExportContacts(result.cleanContacts, key, exportScope);
+  function handleDownload(key, filename) {
     downloadCsv(filename, csvExports[key]);
-    markExported(includedContacts, label);
   }
 
   function exportSelected() {
     const selectedExports = buildCustomerExports(selectedVisibleContacts, [], [], "all");
     downloadCsv("selected-customers.csv", selectedExports.master);
-    markExported(selectedVisibleContacts, "Selected Contacts Export");
   }
 
   return (
@@ -591,11 +590,13 @@ export default function CustomerDatabasePage() {
         </div>
       </section>
 
+      {storageWarning ? <div className="notice notice--error">{storageWarning}</div> : null}
+
       <section className="stats-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
         {dashboardCards.map(([label, value]) => (
           <div key={label} className="stat-card" style={{ padding: 16, borderRadius: 18 }}>
             <div className="stat-card__label">{label}</div>
-            <div className="stat-card__value" style={{ fontSize: 30 }}>{value}</div>
+            <div className="stat-card__value" style={{ fontSize: 30 }}>{formatNumber(value)}</div>
           </div>
         ))}
       </section>
@@ -620,7 +621,7 @@ export default function CustomerDatabasePage() {
           <div>
             <h3>Contacts</h3>
             <p>
-              {filteredContacts.length} showing from {result.stats.cleanContacts} clean contacts. {selectedVisibleContacts.length} selected on this page.
+              {formatNumber(filteredContacts.length)} matched contacts from {formatNumber(result.stats.cleanContacts)} clean contacts. {formatNumber(selectedVisibleContacts.length)} selected on this page.
             </p>
           </div>
           <label className="field" style={{ minWidth: 260 }}>
@@ -693,7 +694,7 @@ export default function CustomerDatabasePage() {
 
         <div className="card-actions" style={{ justifyContent: "space-between", marginBottom: 12 }}>
           <span style={{ color: "#64748b", fontWeight: 800 }}>
-            Showing {filteredContacts.length ? pageStartIndex + 1 : 0}-{pageEndIndex} of {filteredContacts.length} contacts
+            Showing {filteredContacts.length ? formatNumber(pageStartIndex + 1) : 0}-{formatNumber(pageEndIndex)} of {formatNumber(filteredContacts.length)} contacts
           </span>
           <div className="card-actions" style={{ alignItems: "center" }}>
             <button type="button" className="button button--ghost" disabled={currentPage <= 1} onClick={() => { setCurrentPage((page) => Math.max(1, page - 1)); setSelectedIds([]); }}>
@@ -714,7 +715,7 @@ export default function CustomerDatabasePage() {
                 }}
               />
             </label>
-            <span style={{ color: "#64748b", fontWeight: 800 }}>of {totalPages}</span>
+            <span style={{ color: "#64748b", fontWeight: 800 }}>of {formatNumber(totalPages)}</span>
             <button type="button" className="button button--ghost" disabled={currentPage >= totalPages} onClick={() => { setCurrentPage((page) => Math.min(totalPages, page + 1)); setSelectedIds([]); }}>
               Next
             </button>
@@ -776,11 +777,11 @@ export default function CustomerDatabasePage() {
                 <tr key={item.import_id}>
                   <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatDate(item.imported_at)}</td>
                   <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.filename}</td>
-                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.rows_imported}</td>
-                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.contacts_created}</td>
-                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.duplicates_merged}</td>
-                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.possible_duplicates}</td>
-                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.rejected_rows}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatNumber(item.rows_imported)}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatNumber(item.contacts_created)}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatNumber(item.duplicates_merged)}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatNumber(item.possible_duplicates)}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatNumber(item.rejected_rows)}</td>
                 </tr>
               ))}
             </tbody>
@@ -803,8 +804,8 @@ export default function CustomerDatabasePage() {
             <div key={group.title} className="panel panel--nested" style={{ boxShadow: "none" }}>
               <h3 style={{ marginTop: 0 }}>{group.title}</h3>
               <div className="card-actions">
-                {group.buttons.map(([label, key, filename, exportLabel]) => (
-                  <button key={key} type="button" className="button button--ghost" disabled={!result.stats.cleanContacts && key !== "rejected" && key !== "duplicates"} onClick={() => handleDownload(key, filename, exportLabel)}>{label}</button>
+                {group.buttons.map(([label, key, filename]) => (
+                  <button key={key} type="button" className="button button--ghost" disabled={!result.stats.cleanContacts && key !== "rejected" && key !== "duplicates"} onClick={() => handleDownload(key, filename)}>{label}</button>
                 ))}
               </div>
             </div>
@@ -868,8 +869,8 @@ export default function CustomerDatabasePage() {
             <div className="field" style={{ gridColumn: "1 / -1" }}>
               <span className="field__label">Timeline</span>
               <div className="field__input" style={{ display: "grid", gap: 8 }}>
-                {(selectedContact.timeline || []).slice().reverse().map((event) => (
-                  <div key={event.event_id} style={{ borderBottom: "1px solid #eef2f7", paddingBottom: 8 }}>
+                {(selectedContact.timeline || []).slice().reverse().map((event, index) => (
+                  <div key={`${event.type}-${event.created_at}-${index}`} style={{ borderBottom: "1px solid #eef2f7", paddingBottom: 8 }}>
                     <strong>{event.message}</strong><br /><small style={{ color: "#64748b" }}>{event.type} - {formatDate(event.created_at)}</small>
                   </div>
                 ))}
