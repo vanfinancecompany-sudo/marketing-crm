@@ -26,10 +26,16 @@ import {
   startMarketingImport,
   updateMarketingContact,
 } from "../services/marketingContacts.js";
+import {
+  clearMarketingCustomerApiKey,
+  getMarketingCustomerApiKey,
+  saveMarketingCustomerApiKey,
+} from "../services/marketingCustomerApi.js";
 
 const EMPTY_FORM = { first_name: "", last_name: "", company: "", email: "", phone: "", postcode: "", pipeline: "unknown", source: "manual", notes: "", tags: [] };
 const EMPTY_FILTERS = { source: "all", tag: "all", readiness: "all", postcode: "all", unknownPipeline: false };
 const EMPTY_IMPORT_PROGRESS = { importId: "", status: "idle", processed: 0, total: 0, created: 0, updated: 0, merged: 0, possible: 0, rejected: 0, currentBatch: 0, totalBatches: 0, elapsed: "", eta: "", message: "" };
+const EMPTY_STATS = { total: 0, matched: 0, finance: 0, rent2buy: 0, both: 0, unknown: 0, emailReady: 0, smsReady: 0, facebookReady: 0 };
 
 const pipelineLabels = { all: "All", finance: "Finance", rent2buy: "Rent2Buy", both: "Both", unknown: "Unknown" };
 const sourceLabels = { manual: "Manual", csv: "CSV", wix: "Wix", crm: "CRM", facebook: "Facebook", supabase: "Supabase", other: "Other" };
@@ -58,11 +64,13 @@ function ContactForm({ form, setForm, error, onSubmit, submitLabel }) {
 
 export default function SupabaseCustomerDatabasePage() {
   const [contacts, setContacts] = useState([]);
-  const [stats, setStats] = useState({ total: 0, matched: 0, finance: 0, rent2buy: 0, both: 0, unknown: 0, emailReady: 0, smsReady: 0, facebookReady: 0 });
+    const [stats, setStats] = useState(EMPTY_STATS);
   const [error, setError] = useState("");
   const [manualError, setManualError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [manualForm, setManualForm] = useState(EMPTY_FORM);
+    const [apiKeyReady, setApiKeyReady] = useState(() => Boolean(getMarketingCustomerApiKey()));
+  const [apiKeyInput, setApiKeyInput] = useState("");
+const [manualForm, setManualForm] = useState(EMPTY_FORM);
   const [activeFilter, setActiveFilter] = useState("all");
   const [advancedFilters, setAdvancedFilters] = useState(EMPTY_FILTERS);
   const [exportScope, setExportScope] = useState("all");
@@ -97,9 +105,12 @@ export default function SupabaseCustomerDatabasePage() {
   async function loadImportData(importId = "") { try { const [history, reports] = await Promise.all([fetchMarketingImportHistory(), fetchMarketingImportReports(importId)]); setImportHistory(history); setImportReports(reports); } catch (historyError) { setError(historyError.message || "Could not load import history."); } }
 
   useEffect(() => { setCurrentPage(1); setSelectedIds([]); }, [filters]);
-  useEffect(() => { loadContacts(currentPage); }, [currentPage, filters]);
-  useEffect(() => { loadImportData(); }, []);
+    useEffect(() => { if (apiKeyReady) loadContacts(currentPage); }, [apiKeyReady, currentPage, filters]);
+    useEffect(() => { if (apiKeyReady) loadImportData(); }, [apiKeyReady]);
   useEffect(() => { setCurrentPage((page) => Math.min(page, totalPages)); }, [totalPages]);
+  function handleUnlockSubmit(event) { event.preventDefault(); const apiKey = apiKeyInput.trim(); if (!apiKey) { setError("Enter the Customer Database API key."); return; } saveMarketingCustomerApiKey(apiKey); setApiKeyInput(""); setApiKeyReady(true); setError(""); setCurrentPage(1); }
+  function handleForgetApiKey() { clearMarketingCustomerApiKey(); setApiKeyReady(false); setContacts([]); setStats(EMPTY_STATS); setImportHistory([]); setImportReports({ rejectedRows: [], duplicateRows: [], possibleDuplicates: [] }); setSelectedIds([]); setError(""); }
+
 
   async function handleImportFileSelected(event) {
     const file = event.target.files?.[0];
@@ -171,8 +182,10 @@ export default function SupabaseCustomerDatabasePage() {
   async function handleDownload(key, filename) { setError(""); setExportingKey(key); try { const csv = await getMarketingExportCsv(key, exportScope, filters); downloadCsv(filename, csv); } catch (downloadError) { setError(downloadError.message || "Could not download export."); } finally { setExportingKey(""); } }
   function exportSelected() { const selectedExports = buildCustomerExports(selectedVisibleContacts, [], [], "all"); downloadCsv("selected-customers.csv", selectedExports.master); }
 
-  return <div className="page-stack" style={{ gap: 14 }}>
-    <section className="hero-panel" style={{ padding: 18 }}><div className="panel__header" style={{ marginBottom: 0 }}><div><div className="eyebrow">Customer Data</div><h2>Customer Database</h2><p>Upload, clean, search, manage, and export contacts from one CRM workspace.</p></div><div className="card-actions"><button type="button" className="button button--primary" onClick={openAddModal}>+ Add Contact</button></div></div></section>
+    if (!apiKeyReady) return <div className="page-stack" style={{ gap: 14 }}><section className="hero-panel" style={{ padding: 18 }}><div className="panel__header" style={{ marginBottom: 0 }}><div><div className="eyebrow">Customer Data</div><h2>Customer Database</h2><p>Unlock the protected Customer Database to continue.</p></div></div></section><section className="panel" style={{ padding: 16 }}><div className="panel__header"><div><h3>Unlock Customer Database</h3><p>Enter the Customer Database API key. It will be saved on this browser only.</p></div></div><form onSubmit={handleUnlockSubmit} className="field-grid"><label className="field"><span className="field__label">API key</span><input className="field__input" type="password" value={apiKeyInput} onChange={(event) => setApiKeyInput(event.target.value)} autoComplete="off" /></label><div className="card-actions" style={{ alignSelf: "end" }}><button type="submit" className="button button--primary">Unlock</button></div>{error ? <div className="notice notice--error" style={{ gridColumn: "1 / -1" }}>{error}</div> : null}</form></section></div>;
+
+return <div className="page-stack" style={{ gap: 14 }}>
+        <section className="hero-panel" style={{ padding: 18 }}><div className="panel__header" style={{ marginBottom: 0 }}><div><div className="eyebrow">Customer Data</div><h2>Customer Database</h2><p>Upload, clean, search, manage, and export contacts from one CRM workspace.</p></div><div className="card-actions"><button type="button" className="button button--ghost" onClick={handleForgetApiKey}>Lock Customer Database</button><button type="button" className="button button--primary" onClick={openAddModal}>+ Add Contact</button></div></div></section>
     <div className="notice">Supabase Customer Database mode is enabled. Imports run in protected server-side batches.</div>{loading ? <div className="notice">Loading Customer Database...</div> : null}{error ? <div className="notice notice--error">{error}</div> : null}
     <section className="stats-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>{dashboardCards.map(([label, value]) => <div key={label} className="stat-card" style={{ padding: 16, borderRadius: 18 }}><div className="stat-card__label">{label}</div><div className="stat-card__value" style={{ fontSize: 30 }}>{formatNumber(value)}</div></div>)}</section>
     <section className="panel" style={{ padding: 16 }}><div className="panel__header"><div><h3>Import</h3><p>Choose an approved Finance or Rent2Buy master CSV. Processing runs in {formatNumber(MARKETING_IMPORT_BATCH_SIZE)} row batches.</p></div><label className="field" style={{ minWidth: 280 }}><span className="field__label">Upload CSV</span><input className="field__input" type="file" accept=".csv,text/csv" disabled={importing} onChange={handleImportFileSelected} /></label></div><div className="field-grid"><label className="field"><span className="field__label">Import pipeline</span><select className="field__input" value={importPipeline} disabled={importing} onChange={(event) => setImportPipeline(event.target.value)}><option value="">Choose pipeline</option><option value="finance">Finance</option><option value="rent2buy">Rent2Buy</option></select></label><div className="field"><span className="field__label">Confirmation</span><div className="field__input">{importFileName ? `${importFileName} - ${formatNumber(importRows.length)} rows - ${pipelineLabels[importPipeline] || "No pipeline selected"}${backupInfo?.filename ? ` - backup: ${backupInfo.filename}` : ""}` : "No file selected"}</div></div></div><div className="card-actions" style={{ marginTop: 12 }}><button type="button" className="button button--primary" disabled={importing || !importRows.length || !importPipeline} onClick={() => runImport()}>Confirm and Import</button>{retryBatch ? <button type="button" className="button button--ghost" disabled={importing} onClick={() => runImport(retryBatch.batchIndex, retryBatch.importId)}>Retry Failed Batch</button> : null}</div>{importProgress.status !== "idle" ? <div className={importProgress.status === "failed" ? "notice notice--error" : "notice"} style={{ marginTop: 12 }}><strong>{importProgress.status}</strong><br />Rows processed: {formatNumber(importProgress.processed)} / {formatNumber(importProgress.total)}<br />Batch: {formatNumber(importProgress.currentBatch)} / {formatNumber(importProgress.totalBatches)} | Elapsed: {importProgress.elapsed || "0s"} | ETA: {importProgress.eta || "calculating"}<br />Created: {formatNumber(importProgress.created)} | Updated: {formatNumber(importProgress.updated)} | Merged: {formatNumber(importProgress.merged)} | Possible duplicates: {formatNumber(importProgress.possible)} | Rejected: {formatNumber(importProgress.rejected)}<br />{importProgress.message}</div> : null}</section>
