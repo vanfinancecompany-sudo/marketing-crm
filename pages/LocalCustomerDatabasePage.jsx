@@ -15,6 +15,8 @@ import {
   updateContactRecord,
 } from "../utils/contactCleaning.js";
 
+const USE_SUPABASE_CUSTOMER_DATABASE = String(import.meta.env.VITE_USE_SUPABASE_CUSTOMER_DATABASE || "").toLowerCase() === "true";
+
 const STORAGE_KEYS = {
   contacts: "vfc_customer_database_contacts",
   imports: "vfc_customer_database_imports",
@@ -132,7 +134,7 @@ export default function LocalCustomerDatabasePage() {
   useEffect(() => { setCurrentPage(1); setSelectedIds([]); }, [search, activeFilter, advancedFilters]);
   useEffect(() => { setCurrentPage((page) => Math.min(page, totalPages)); }, [totalPages]);
 
-  function persist(nextResult, nextImports = importHistory) { const writesSucceeded = [writeStorage(STORAGE_KEYS.contacts, nextResult.cleanContacts), writeStorage(STORAGE_KEYS.rejected, nextResult.rejectedRows), writeStorage(STORAGE_KEYS.duplicates, nextResult.duplicateRows), writeStorage(STORAGE_KEYS.possibleDuplicates, nextResult.possibleDuplicates || []), writeStorage(STORAGE_KEYS.imports, nextImports)].every(Boolean); setStorageWarning(writesSucceeded ? "" : STORAGE_WARNING); }
+  function persist(nextResult, nextImports = importHistory) { if (USE_SUPABASE_CUSTOMER_DATABASE) { setStorageWarning(""); return; } const writesSucceeded = [writeStorage(STORAGE_KEYS.contacts, nextResult.cleanContacts), writeStorage(STORAGE_KEYS.rejected, nextResult.rejectedRows), writeStorage(STORAGE_KEYS.duplicates, nextResult.duplicateRows), writeStorage(STORAGE_KEYS.possibleDuplicates, nextResult.possibleDuplicates || []), writeStorage(STORAGE_KEYS.imports, nextImports)].every(Boolean); setStorageWarning(writesSucceeded ? "" : STORAGE_WARNING); }
   function replaceResult(nextResult, nextImports = importHistory) { setResult(nextResult); setImportHistory(nextImports); persist(nextResult, nextImports); }
   async function handleFileUpload(event) { const file = event.target.files?.[0]; setError(""); setFileName(file?.name || ""); if (!file) return; if (!file.name.toLowerCase().endsWith(".csv")) { setError("Upload a CSV file."); return; } try { const text = await file.text(); const rows = parseCsv(text); const cleaned = cleanCustomerRows(rows, { existingContacts: result.cleanContacts, rejectedRows: result.rejectedRows, duplicateRows: result.duplicateRows, possibleDuplicates: result.possibleDuplicates, filename: file.name }); const entry = { import_id: `${Date.now()}-${file.name}`, filename: file.name, imported_at: new Date().toISOString(), rows_imported: cleaned.stats.rowsImported, contacts_created: cleaned.importStats.contactsCreated || 0, duplicates_merged: cleaned.importStats.duplicatesMerged || 0, possible_duplicates: cleaned.importStats.possibleDuplicates || 0, rejected_rows: cleaned.stats.badRowsRejected }; replaceResult(cleaned, [entry, ...importHistory].slice(0, 12)); setCurrentPage(1); setSelectedIds([]); } catch (uploadError) { setError(uploadError.message || "Could not read this CSV file."); } }
   function openAddModal() { setManualForm(EMPTY_FORM); setManualError(""); setEditingIndex(-1); setModalMode("add"); }
