@@ -13,12 +13,16 @@ function createDisabledSupabaseClient() {
     update: () => query,
     delete: () => query,
     eq: () => query,
+    neq: () => query,
     in: () => query,
+    contains: () => query,
+    or: () => query,
     gte: () => query,
     order: () => query,
+    range: () => query,
     limit: () => query,
     single: () => Promise.resolve({ data: null, error }),
-    then: (resolve) => resolve({ data: null, error }),
+    then: (resolve) => resolve({ data: null, count: 0, error }),
   };
 
   console.warn(error.message);
