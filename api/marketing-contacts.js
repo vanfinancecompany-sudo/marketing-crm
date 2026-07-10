@@ -7,11 +7,16 @@ import {
   updateContactRecord,
   withAutoTags,
 } from "../utils/contactCleaning.js";
+import {
+  cleanImportRow,
+  customerUpsert,
+} from "../lib/marketingCustomerUpsert.js";
 
 const CONTACT_COLUMNS = "id,customer_id,first_name,last_name,company,email,phone,postcode,pipeline,source,sources,tags,notes,marketing_status,email_ready,sms_ready,facebook_ready,duplicate_count,first_seen_at,last_seen_at,created_at,updated_at";
 const PAGE_SIZE = 50;
 const EXPORT_PAGE_SIZE = 1000;
 const API_KEY_HEADER = "x-marketing-customer-database-key";
+const MARKETING_PIPELINES = new Set(["finance", "rent2buy", "both", "unknown"]);
 
 function json(response, status, payload) {
   response.status(status).json(payload);
@@ -328,6 +333,42 @@ async function exportContacts(supabase, body) {
   return { csv: csvExports[body.key] || "" };
 }
 
+function normalizeMarketingPipeline(value) {
+  const pipeline = String(value || "unknown").trim().toLowerCase();
+  return MARKETING_PIPELINES.has(pipeline) ? pipeline : "unknown";
+}
+
+function buildUpsertImportRow(values = {}) {
+  return {
+    "first name": values.first_name || values.firstName || "",
+    "last name": values.last_name || values.lastName || "",
+    name: values.name || "",
+    email: values.email || "",
+    phone: values.phone || "",
+    postcode: values.postcode || values.postCode || values.postalCode || "",
+    source: values.source || "other",
+    tags: Array.isArray(values.tags) ? values.tags.join(",") : values.tags || "",
+    company: values.company || "",
+    notes: values.notes || "",
+  };
+}
+
+async function upsertContact(supabase, body) {
+  const values = body.values || {};
+  const pipeline = normalizeMarketingPipeline(values.pipeline);
+  const { contact, reason } = cleanImportRow(buildUpsertImportRow(values), pipeline);
+
+  if (!contact) {
+    throw new Error(reason || "Add a valid email or UK mobile.");
+  }
+
+  const result = await customerUpsert(supabase, contact);
+  return {
+    ...result,
+    eventType: result.mode === "created" ? "customer_created" : "customer_updated",
+  };
+}
+
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
 
@@ -354,6 +395,7 @@ export default async function handler(request, response) {
     else if (action === "delete") result = await deleteContact(supabase, body);
     else if (action === "bulk") result = await bulkUpdate(supabase, body);
     else if (action === "export") result = await exportContacts(supabase, body);
+    else if (action === "upsert") result = await upsertContact(supabase, body);
     else throw new Error("Unknown Customer Database API action.");
 
     json(response, 200, { ok: true, ...result });
