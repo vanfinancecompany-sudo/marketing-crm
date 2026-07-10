@@ -10,7 +10,7 @@ export async function requestMarketingCustomerApi(route, action, payload = {}) {
   const apiKey = getMarketingCustomerApiKey();
   const headers = {
     "Content-Type": "application/json",
-    ...(apiKey ? { [API_KEY_HEADER]: apiKey, Authorization: `Bearer ${apiKey}` } : {}),
+    ...(apiKey ? { [API_KEY_HEADER]: apiKey, "x-api-key": apiKey, Authorization: `Bearer ${apiKey}` } : {}),
   };
 
   const response = await fetch(route, {
