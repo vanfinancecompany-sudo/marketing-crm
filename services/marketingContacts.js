@@ -108,7 +108,8 @@ function toDbPayload(contact) {
 }
 
 function applyFilters(query, filters = {}) {
-  if (filters.pipeline && filters.pipeline !== "all") query = query.eq("pipeline", filters.pipeline);
+  if (Array.isArray(filters.pipeline)) query = query.in("pipeline", filters.pipeline);
+  else if (filters.pipeline && filters.pipeline !== "all") query = query.eq("pipeline", filters.pipeline);
   if (filters.source && filters.source !== "all") query = query.eq("source", filters.source);
   if (filters.tag && filters.tag !== "all") query = query.contains("tags", [filters.tag]);
   if (filters.readiness === "email_ready") query = query.eq("email_ready", true);
@@ -146,13 +147,13 @@ export async function getMarketingContactStats(filters = {}) {
   const [total, matched, finance, rent2buy, both, unknown, emailReady, smsReady, facebookReady] = await Promise.all([
     countContacts({}),
     countContacts(filters),
-    countContacts({ ...filters, pipeline: "finance", unknownPipeline: false }),
-    countContacts({ ...filters, pipeline: "rent2buy", unknownPipeline: false }),
-    countContacts({ ...filters, pipeline: "both", unknownPipeline: false }),
-    countContacts({ ...filters, pipeline: "unknown", unknownPipeline: false }),
-    countContacts({ ...filters, readiness: "email_ready" }),
-    countContacts({ ...filters, readiness: "sms_ready" }),
-    countContacts({ ...filters, readiness: "facebook_ready" }),
+    countContacts({ pipeline: "finance" }),
+    countContacts({ pipeline: "rent2buy" }),
+    countContacts({ pipeline: "both" }),
+    countContacts({ pipeline: "unknown" }),
+    countContacts({ readiness: "email_ready" }),
+    countContacts({ readiness: "sms_ready" }),
+    countContacts({ readiness: "facebook_ready" }),
   ]);
 
   return { total, matched, finance, rent2buy, both, unknown, emailReady, smsReady, facebookReady };
@@ -245,8 +246,8 @@ async function getAllExportContacts(key, scope = "all", filters = {}) {
     const from = page * EXPORT_PAGE_SIZE;
     const to = from + EXPORT_PAGE_SIZE - 1;
     const queryFilters = { ...filters };
-    if (key === "financeFacebook" || key === "financeEmail" || key === "financeSms") queryFilters.pipeline = "finance";
-    else if (key === "rent2buyFacebook" || key === "rent2buyEmail" || key === "rent2buySms") queryFilters.pipeline = "rent2buy";
+    if (key === "financeFacebook" || key === "financeEmail" || key === "financeSms") queryFilters.pipeline = ["finance", "both"];
+    else if (key === "rent2buyFacebook" || key === "rent2buyEmail" || key === "rent2buySms") queryFilters.pipeline = ["rent2buy", "both"];
     else if (key === "fullFacebook") queryFilters.pipeline = "all";
     else queryFilters.pipeline = scope;
 
