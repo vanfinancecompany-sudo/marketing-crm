@@ -1,0 +1,442 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  DEFAULT_TAGS,
+  PIPELINE_OPTIONS,
+  SOURCE_OPTIONS,
+  buildCustomerExports,
+  contactName,
+} from "../utils/contactCleaning.js";
+import {
+  MARKETING_CONTACTS_PAGE_SIZE,
+  bulkAddMarketingTag,
+  bulkChangeMarketingPipeline,
+  bulkDeleteMarketingContacts,
+  bulkRemoveMarketingTag,
+  createMarketingContact,
+  deleteMarketingContact,
+  getMarketingExportCsv,
+  listMarketingContacts,
+  updateMarketingContact,
+} from "../services/marketingContacts.js";
+
+const EMPTY_FORM = {
+  first_name: "",
+  last_name: "",
+  company: "",
+  email: "",
+  phone: "",
+  postcode: "",
+  pipeline: "unknown",
+  source: "manual",
+  notes: "",
+  tags: [],
+};
+
+const EMPTY_FILTERS = {
+  source: "all",
+  tag: "all",
+  readiness: "all",
+  postcode: "all",
+  unknownPipeline: false,
+};
+
+const pipelineLabels = {
+  all: "All",
+  finance: "Finance",
+  rent2buy: "Rent2Buy",
+  both: "Both",
+  unknown: "Unknown",
+};
+
+const sourceLabels = {
+  manual: "Manual",
+  csv: "CSV",
+  wix: "Wix",
+  crm: "CRM",
+  facebook: "Facebook",
+  supabase: "Supabase",
+  other: "Other",
+};
+
+const exportGroups = [
+  { title: "Facebook", buttons: [["Full Audience", "fullFacebook", "full-facebook-audience.csv"], ["Finance", "financeFacebook", "finance-facebook-audience.csv"], ["Rent2Buy", "rent2buyFacebook", "rent2buy-facebook-audience.csv"]] },
+  { title: "Email", buttons: [["Full", "email", "email-marketing.csv"], ["Finance", "financeEmail", "finance-email.csv"], ["Rent2Buy", "rent2buyEmail", "rent2buy-email.csv"]] },
+  { title: "SMS", buttons: [["Full", "sms", "sms-contacts.csv"], ["Finance", "financeSms", "finance-sms.csv"], ["Rent2Buy", "rent2buySms", "rent2buy-sms.csv"]] },
+  { title: "Reports", buttons: [["Master Database", "master", "customer-master.csv"], ["Duplicate Report", "duplicates", "duplicate-report.csv"], ["Rejected Rows", "rejected", "rejected-rows.csv"]] },
+];
+
+function downloadCsv(filename, content) {
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function updateFormValue(setForm, key, value) {
+  setForm((current) => ({ ...current, [key]: value }));
+}
+
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString("en-GB");
+}
+
+function formatDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function TableShell({ children }) {
+  return <div style={{ overflowX: "auto" }}>{children}</div>;
+}
+
+function Modal({ title, children, onClose }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center", padding: 18, background: "rgba(15, 23, 42, 0.48)" }}>
+      <div className="panel" style={{ width: "min(840px, 100%)", maxHeight: "88vh", overflow: "auto" }}>
+        <div className="panel__header">
+          <div>
+            <div className="eyebrow">Customer Database</div>
+            <h3>{title}</h3>
+          </div>
+          <button type="button" className="button button--ghost" onClick={onClose}>Close</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function TagChips({ tags }) {
+  const safeTags = Array.isArray(tags) ? tags : [];
+  if (!safeTags.length) return <span style={{ color: "#64748b" }}>-</span>;
+  return (
+    <div className="card-actions" style={{ gap: 6 }}>
+      {safeTags.slice(0, 6).map((tag) => <span key={tag} className="tag" style={{ padding: "5px 8px", fontSize: 12 }}>{tag}</span>)}
+      {safeTags.length > 6 ? <span className="tag">+{safeTags.length - 6}</span> : null}
+    </div>
+  );
+}
+
+function ContactForm({ form, setForm, error, onSubmit, submitLabel }) {
+  function toggleTag(tag) {
+    setForm((current) => {
+      const tags = new Set(current.tags || []);
+      if (tags.has(tag)) tags.delete(tag);
+      else tags.add(tag);
+      return { ...current, tags: [...tags].sort() };
+    });
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="field-grid">
+      <label className="field"><span className="field__label">First name</span><input className="field__input" value={form.first_name} onChange={(event) => updateFormValue(setForm, "first_name", event.target.value)} /></label>
+      <label className="field"><span className="field__label">Last name</span><input className="field__input" value={form.last_name} onChange={(event) => updateFormValue(setForm, "last_name", event.target.value)} /></label>
+      <label className="field"><span className="field__label">Company</span><input className="field__input" value={form.company} onChange={(event) => updateFormValue(setForm, "company", event.target.value)} /></label>
+      <label className="field"><span className="field__label">Email</span><input className="field__input" value={form.email} onChange={(event) => updateFormValue(setForm, "email", event.target.value)} /></label>
+      <label className="field"><span className="field__label">Mobile</span><input className="field__input" value={form.phone} onChange={(event) => updateFormValue(setForm, "phone", event.target.value)} /></label>
+      <label className="field"><span className="field__label">Postcode</span><input className="field__input" value={form.postcode} onChange={(event) => updateFormValue(setForm, "postcode", event.target.value)} /></label>
+      <label className="field"><span className="field__label">Pipeline</span><select className="field__input" value={form.pipeline} onChange={(event) => updateFormValue(setForm, "pipeline", event.target.value)}>{PIPELINE_OPTIONS.map((pipeline) => <option key={pipeline} value={pipeline}>{pipelineLabels[pipeline]}</option>)}</select></label>
+      <label className="field"><span className="field__label">Source</span><select className="field__input" value={form.source} onChange={(event) => updateFormValue(setForm, "source", event.target.value)}>{SOURCE_OPTIONS.map((source) => <option key={source} value={source}>{sourceLabels[source]}</option>)}</select></label>
+      <label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Notes</span><textarea className="field__input" rows={3} value={form.notes} onChange={(event) => updateFormValue(setForm, "notes", event.target.value)} /></label>
+      <div className="field" style={{ gridColumn: "1 / -1" }}>
+        <span className="field__label">Tags</span>
+        <div className="card-actions">
+          {DEFAULT_TAGS.map((tag) => <button key={tag} type="button" className={(form.tags || []).includes(tag) ? "button button--primary" : "button button--ghost"} onClick={() => toggleTag(tag)}>{tag}</button>)}
+        </div>
+      </div>
+      <div className="card-actions" style={{ gridColumn: "1 / -1" }}><button type="submit" className="button button--primary">{submitLabel}</button></div>
+      {error ? <div className="notice notice--error" style={{ gridColumn: "1 / -1" }}>{error}</div> : null}
+    </form>
+  );
+}
+
+export default function SupabaseCustomerDatabasePage() {
+  const [contacts, setContacts] = useState([]);
+  const [stats, setStats] = useState({ total: 0, matched: 0, finance: 0, rent2buy: 0, both: 0, unknown: 0, emailReady: 0, smsReady: 0, facebookReady: 0 });
+  const [error, setError] = useState("");
+  const [manualError, setManualError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [manualForm, setManualForm] = useState(EMPTY_FORM);
+  const [activeFilter, setActiveFilter] = useState("all");
+  const [advancedFilters, setAdvancedFilters] = useState(EMPTY_FILTERS);
+  const [exportScope, setExportScope] = useState("all");
+  const [search, setSearch] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [modalMode, setModalMode] = useState("");
+  const [selectedContact, setSelectedContact] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkTag, setBulkTag] = useState("lead");
+  const [bulkPipeline, setBulkPipeline] = useState("unknown");
+  const [exportingKey, setExportingKey] = useState("");
+
+  const filters = useMemo(() => ({
+    pipeline: activeFilter,
+    source: advancedFilters.source,
+    tag: advancedFilters.tag,
+    readiness: advancedFilters.readiness,
+    postcode: advancedFilters.postcode,
+    unknownPipeline: advancedFilters.unknownPipeline,
+    search,
+  }), [activeFilter, advancedFilters, search]);
+  const totalPages = Math.max(1, Math.ceil(stats.matched / MARKETING_CONTACTS_PAGE_SIZE));
+  const pageStartIndex = stats.matched ? (currentPage - 1) * MARKETING_CONTACTS_PAGE_SIZE : 0;
+  const pageEndIndex = Math.min(pageStartIndex + contacts.length, stats.matched);
+  const selectedVisibleContacts = useMemo(() => contacts.filter((contact) => selectedIds.includes(contact.customer_id)), [contacts, selectedIds]);
+  const dashboardCards = useMemo(() => [
+    ["Total Contacts", stats.total],
+    ["Finance Contacts", stats.finance],
+    ["Rent2Buy Contacts", stats.rent2buy],
+    ["Both", stats.both],
+    ["Unknown", stats.unknown],
+    ["Facebook Ready", stats.facebookReady],
+    ["Email Ready", stats.emailReady],
+    ["SMS Ready", stats.smsReady],
+    ["Duplicates Removed", 0],
+    ["Rejected Records", 0],
+  ], [stats]);
+
+  async function loadContacts(page = currentPage) {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await listMarketingContacts({ page, pageSize: MARKETING_CONTACTS_PAGE_SIZE, filters });
+      setContacts(response.contacts);
+      setStats(response.stats);
+    } catch (loadError) {
+      setError(loadError.message || "Could not load Customer Database from Supabase.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    setCurrentPage(1);
+    setSelectedIds([]);
+  }, [filters]);
+
+  useEffect(() => {
+    loadContacts(currentPage);
+  }, [currentPage, filters]);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, totalPages));
+  }, [totalPages]);
+
+  function openAddModal() {
+    setManualForm(EMPTY_FORM);
+    setManualError("");
+    setSelectedContact(null);
+    setModalMode("add");
+  }
+
+  function openEditModal(contact) {
+    setManualForm({
+      first_name: contact.first_name || "",
+      last_name: contact.last_name || "",
+      company: contact.company || "",
+      email: contact.email || "",
+      phone: contact.phone || "",
+      postcode: contact.postcode || "",
+      pipeline: contact.pipeline || "unknown",
+      source: contact.source || "manual",
+      notes: contact.notes || "",
+      tags: contact.tags || [],
+    });
+    setManualError("");
+    setSelectedContact(contact);
+    setModalMode("edit");
+  }
+
+  function closeModal() {
+    setModalMode("");
+    setSelectedContact(null);
+    setManualError("");
+  }
+
+  async function handleManualSubmit(event) {
+    event.preventDefault();
+    setManualError("");
+    try {
+      if (modalMode === "edit" && selectedContact) await updateMarketingContact(selectedContact, manualForm);
+      else await createMarketingContact(manualForm);
+      closeModal();
+      await loadContacts(currentPage);
+    } catch (submitError) {
+      setManualError(submitError.message || "Could not save contact.");
+    }
+  }
+
+  async function handleDeleteContact(contact) {
+    setError("");
+    try {
+      await deleteMarketingContact(contact);
+      setSelectedIds((ids) => ids.filter((id) => id !== contact.customer_id));
+      await loadContacts(currentPage);
+    } catch (deleteError) {
+      setError(deleteError.message || "Could not delete contact.");
+    }
+  }
+
+  function toggleSelected(contactId) {
+    setSelectedIds((ids) => ids.includes(contactId) ? ids.filter((id) => id !== contactId) : [...ids, contactId]);
+  }
+
+  async function runBulkAction(action) {
+    setError("");
+    try {
+      await action(selectedVisibleContacts);
+      setSelectedIds([]);
+      await loadContacts(currentPage);
+    } catch (bulkError) {
+      setError(bulkError.message || "Could not update selected contacts.");
+    }
+  }
+
+  async function handleDownload(key, filename) {
+    setError("");
+    setExportingKey(key);
+    try {
+      const csv = await getMarketingExportCsv(key, exportScope, filters);
+      downloadCsv(filename, csv);
+    } catch (downloadError) {
+      setError(downloadError.message || "Could not download export.");
+    } finally {
+      setExportingKey("");
+    }
+  }
+
+  function exportSelected() {
+    const selectedExports = buildCustomerExports(selectedVisibleContacts, [], [], "all");
+    downloadCsv("selected-customers.csv", selectedExports.master);
+  }
+
+  return (
+    <div className="page-stack" style={{ gap: 14 }}>
+      <section className="hero-panel" style={{ padding: 18 }}>
+        <div className="panel__header" style={{ marginBottom: 0 }}>
+          <div>
+            <div className="eyebrow">Customer Data</div>
+            <h2>Customer Database</h2>
+            <p>Upload, clean, search, manage, and export contacts from one CRM workspace.</p>
+          </div>
+          <div className="card-actions"><button type="button" className="button button--primary" onClick={openAddModal}>+ Add Contact</button></div>
+        </div>
+      </section>
+
+      <div className="notice">Supabase Customer Database mode is enabled. CSV imports are not enabled in this phase.</div>
+      {loading ? <div className="notice">Loading Customer Database...</div> : null}
+      {error ? <div className="notice notice--error">{error}</div> : null}
+
+      <section className="stats-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
+        {dashboardCards.map(([label, value]) => <div key={label} className="stat-card" style={{ padding: 16, borderRadius: 18 }}><div className="stat-card__label">{label}</div><div className="stat-card__value" style={{ fontSize: 30 }}>{formatNumber(value)}</div></div>)}
+      </section>
+
+      <section className="panel" style={{ padding: 16 }}>
+        <div className="panel__header">
+          <div><h3>Import</h3><p>CSV import remains disabled until the approved Supabase import phase.</p></div>
+          <label className="field" style={{ minWidth: 280 }}><span className="field__label">Upload CSV</span><input className="field__input" type="file" accept=".csv,text/csv" disabled /></label>
+        </div>
+      </section>
+
+      <section className="panel" style={{ padding: 16 }}>
+        <div className="panel__header">
+          <div><h3>Contacts</h3><p>{formatNumber(stats.matched)} matched contacts from {formatNumber(stats.total)} clean contacts. {formatNumber(selectedVisibleContacts.length)} selected on this page.</p></div>
+          <label className="field" style={{ minWidth: 260 }}><span className="field__label">Search</span><input className="field__input" placeholder="Name, email, phone, postcode, company" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+        </div>
+
+        <div className="card-actions" style={{ marginBottom: 12 }}>
+          {["all", ...PIPELINE_OPTIONS].map((pipeline) => <button key={pipeline} type="button" className={activeFilter === pipeline ? "button button--primary" : "button button--ghost"} onClick={() => setActiveFilter(pipeline)}>{pipelineLabels[pipeline]}</button>)}
+        </div>
+
+        <div className="field-grid" style={{ marginBottom: 12 }}>
+          <label className="field"><span className="field__label">Source</span><select className="field__input" value={advancedFilters.source} onChange={(event) => setAdvancedFilters((filters) => ({ ...filters, source: event.target.value }))}><option value="all">All sources</option>{SOURCE_OPTIONS.map((source) => <option key={source} value={source}>{sourceLabels[source]}</option>)}</select></label>
+          <label className="field"><span className="field__label">Tag</span><select className="field__input" value={advancedFilters.tag} onChange={(event) => setAdvancedFilters((filters) => ({ ...filters, tag: event.target.value }))}><option value="all">All tags</option>{DEFAULT_TAGS.map((tag) => <option key={tag} value={tag}>{tag}</option>)}</select></label>
+          <label className="field"><span className="field__label">Readiness</span><select className="field__input" value={advancedFilters.readiness} onChange={(event) => setAdvancedFilters((filters) => ({ ...filters, readiness: event.target.value }))}><option value="all">All</option><option value="email_ready">Email Ready</option><option value="sms_ready">SMS Ready</option><option value="facebook_ready">Facebook Ready</option></select></label>
+          <label className="field"><span className="field__label">Data quality</span><select className="field__input" value={advancedFilters.postcode} onChange={(event) => setAdvancedFilters((filters) => ({ ...filters, postcode: event.target.value }))}><option value="all">Any postcode</option><option value="has_postcode">Has postcode</option></select></label>
+          <label className="toggle-row" style={{ marginTop: 20 }}><input type="checkbox" checked={advancedFilters.unknownPipeline} onChange={(event) => setAdvancedFilters((filters) => ({ ...filters, unknownPipeline: event.target.checked }))} />Unknown Pipeline</label>
+        </div>
+
+        <div className="selection-summary" style={{ marginBottom: 12 }}>
+          <strong>Bulk actions</strong>
+          <div className="card-actions">
+            <select className="field__input" style={{ width: 180 }} value={bulkTag} onChange={(event) => setBulkTag(event.target.value)}>{DEFAULT_TAGS.map((tag) => <option key={tag} value={tag}>{tag}</option>)}</select>
+            <button type="button" className="button button--ghost" disabled={!selectedVisibleContacts.length} onClick={() => runBulkAction((items) => bulkAddMarketingTag(items, bulkTag))}>Add Tag</button>
+            <button type="button" className="button button--ghost" disabled={!selectedVisibleContacts.length} onClick={() => runBulkAction((items) => bulkRemoveMarketingTag(items, bulkTag))}>Remove Tag</button>
+            <select className="field__input" style={{ width: 160 }} value={bulkPipeline} onChange={(event) => setBulkPipeline(event.target.value)}>{PIPELINE_OPTIONS.map((pipeline) => <option key={pipeline} value={pipeline}>{pipelineLabels[pipeline]}</option>)}</select>
+            <button type="button" className="button button--ghost" disabled={!selectedVisibleContacts.length} onClick={() => runBulkAction((items) => bulkChangeMarketingPipeline(items, bulkPipeline))}>Change Pipeline</button>
+            <button type="button" className="button button--ghost" disabled={!selectedVisibleContacts.length} onClick={exportSelected}>Export Selected</button>
+            <button type="button" className="button button--danger" disabled={!selectedVisibleContacts.length} onClick={() => runBulkAction(bulkDeleteMarketingContacts)}>Delete Selected</button>
+          </div>
+        </div>
+
+        <div className="card-actions" style={{ justifyContent: "space-between", marginBottom: 12 }}>
+          <span style={{ color: "#64748b", fontWeight: 800 }}>Showing {stats.matched ? formatNumber(pageStartIndex + 1) : 0}-{formatNumber(pageEndIndex)} of {formatNumber(stats.matched)} contacts</span>
+          <div className="card-actions" style={{ alignItems: "center" }}>
+            <button type="button" className="button button--ghost" disabled={currentPage <= 1} onClick={() => { setCurrentPage((page) => Math.max(1, page - 1)); setSelectedIds([]); }}>Previous</button>
+            <label className="field" style={{ width: 110 }}><span className="field__label">Page</span><input className="field__input" type="number" min="1" max={totalPages} value={currentPage} onChange={(event) => { const nextPage = Math.min(totalPages, Math.max(1, Number(event.target.value) || 1)); setCurrentPage(nextPage); setSelectedIds([]); }} /></label>
+            <span style={{ color: "#64748b", fontWeight: 800 }}>of {formatNumber(totalPages)}</span>
+            <button type="button" className="button button--ghost" disabled={currentPage >= totalPages} onClick={() => { setCurrentPage((page) => Math.min(totalPages, page + 1)); setSelectedIds([]); }}>Next</button>
+          </div>
+        </div>
+
+        <TableShell>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+            <thead><tr><th style={{ padding: "10px 8px", borderBottom: "1px solid #dbe2ea" }}><input type="checkbox" checked={contacts.length > 0 && contacts.every((contact) => selectedIds.includes(contact.customer_id))} onChange={(event) => setSelectedIds(event.target.checked ? contacts.map((contact) => contact.customer_id) : [])} /></th>{["Name", "Email", "Phone", "Pipeline", "Source", "Postcode", "Last Updated", "Actions"].map((heading) => <th key={heading} style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #dbe2ea", color: "#475569" }}>{heading}</th>)}</tr></thead>
+            <tbody>
+              {contacts.length === 0 ? <tr><td colSpan={9} style={{ padding: 18, color: "#64748b" }}>No contacts match this view.</td></tr> : contacts.map((contact) => (
+                <tr key={contact.id || contact.customer_id}>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}><input type="checkbox" checked={selectedIds.includes(contact.customer_id)} onChange={() => toggleSelected(contact.customer_id)} /></td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7", fontWeight: 800 }}>{contactName(contact)}<br /><small style={{ color: "#64748b" }}>{contact.customer_id}</small><TagChips tags={contact.tags} /></td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{contact.email || "-"}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{contact.phone || "-"}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{pipelineLabels[contact.pipeline] || contact.pipeline}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{sourceLabels[contact.source] || contact.source}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{contact.postcode || "-"}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7", whiteSpace: "nowrap" }}>{formatDate(contact.updated_at)}</td>
+                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}><div className="card-actions" style={{ gap: 6 }}><button type="button" className="button button--ghost" onClick={() => { setSelectedContact(contact); setModalMode("view"); }}>View</button><button type="button" className="button button--ghost" onClick={() => openEditModal(contact)}>Edit</button><button type="button" className="button button--danger" onClick={() => handleDeleteContact(contact)}>Delete</button></div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableShell>
+      </section>
+
+      <section className="panel" style={{ padding: 16 }}>
+        <div className="panel__header"><div><h3>Import History</h3><p>Supabase import history will appear after the approved import phase.</p></div></div>
+        <TableShell><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}><tbody><tr><td style={{ padding: 18, color: "#64748b" }}>No imports yet.</td></tr></tbody></table></TableShell>
+      </section>
+
+      <section className="panel" style={{ padding: 16 }}>
+        <div className="panel__header"><div><h3>Export Centre</h3><p>Grouped exports for audience uploads and reports.</p></div><label className="field" style={{ minWidth: 220 }}><span className="field__label">Report scope</span><select className="field__input" value={exportScope} onChange={(event) => setExportScope(event.target.value)}>{["all", ...PIPELINE_OPTIONS].map((pipeline) => <option key={pipeline} value={pipeline}>{pipelineLabels[pipeline]}</option>)}</select></label></div>
+        <div className="card-grid">
+          {exportGroups.map((group) => <div key={group.title} className="panel panel--nested" style={{ boxShadow: "none" }}><h3 style={{ marginTop: 0 }}>{group.title}</h3><div className="card-actions">{group.buttons.map(([label, key, filename]) => <button key={key} type="button" className="button button--ghost" disabled={exportingKey === key || (!stats.total && key !== "rejected" && key !== "duplicates")} onClick={() => handleDownload(key, filename)}>{exportingKey === key ? "Preparing..." : label}</button>)}</div></div>)}
+        </div>
+      </section>
+
+      <section className="panel" style={{ padding: 16 }}>
+        <div className="panel__header"><div><h3>Reports Preview</h3><p>Rejected and duplicate reports will appear after the approved import phase.</p></div></div>
+        <div className="card-grid">{["Rejected Rows", "Duplicates", "Possible Duplicates"].map((title) => <div key={title} className="panel panel--nested" style={{ boxShadow: "none" }}><h3 style={{ marginTop: 0 }}>{title}</h3><TableShell><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}><tbody><tr><td style={{ padding: 12, color: "#64748b" }}>None.</td></tr></tbody></table></TableShell></div>)}</div>
+      </section>
+
+      {(modalMode === "add" || modalMode === "edit") ? <Modal title={modalMode === "edit" ? "Edit Contact" : "Add Contact"} onClose={closeModal}><ContactForm form={manualForm} setForm={setManualForm} error={manualError} onSubmit={handleManualSubmit} submitLabel={modalMode === "edit" ? "Save Contact" : "Add Contact"} /></Modal> : null}
+
+      {modalMode === "view" && selectedContact ? (
+        <Modal title="Customer Profile" onClose={closeModal}>
+          <div className="field-grid">
+            {[["Name", contactName(selectedContact)], ["Email", selectedContact.email || "-"], ["Phone", selectedContact.phone || "-"], ["Postcode", selectedContact.postcode || "-"], ["Pipeline", pipelineLabels[selectedContact.pipeline] || selectedContact.pipeline], ["Source", sourceLabels[selectedContact.source] || selectedContact.source], ["Created At", formatDate(selectedContact.created_at)], ["Updated At", formatDate(selectedContact.updated_at)], ["Last Seen At", formatDate(selectedContact.last_seen_at)], ["Duplicate Count", selectedContact.duplicate_count || 0]].map(([label, value]) => <div key={label} className="field"><span className="field__label">{label}</span><div className="field__input">{value}</div></div>)}
+            <div className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Tags</span><div className="field__input"><TagChips tags={selectedContact.tags} /></div></div>
+            <div className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Notes</span><div className="field__input" style={{ minHeight: 84, whiteSpace: "pre-line" }}>{selectedContact.notes || "-"}</div></div>
+            <div className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Timeline</span><div className="field__input">No timeline yet.</div></div>
+          </div>
+        </Modal>
+      ) : null}
+    </div>
+  );
+}
