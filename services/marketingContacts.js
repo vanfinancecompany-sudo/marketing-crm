@@ -1,6 +1,8 @@
 export const MARKETING_CONTACTS_PAGE_SIZE = 50;
+export const MARKETING_IMPORT_BATCH_SIZE = 750;
 
 const API_ROUTE = "/api/marketing-contacts";
+const IMPORT_API_ROUTE = "/api/marketing-contact-import";
 const API_KEY_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
 
 function getApiKey() {
@@ -8,9 +10,9 @@ function getApiKey() {
   return window.sessionStorage.getItem(API_KEY_STORAGE_KEY) || window.localStorage.getItem(API_KEY_STORAGE_KEY) || "";
 }
 
-async function requestMarketingContacts(action, payload = {}) {
+async function requestApi(route, action, payload = {}) {
   const apiKey = getApiKey();
-  const response = await fetch(API_ROUTE, {
+  const response = await fetch(route, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -25,6 +27,14 @@ async function requestMarketingContacts(action, payload = {}) {
   }
 
   return result;
+}
+
+function requestMarketingContacts(action, payload = {}) {
+  return requestApi(API_ROUTE, action, payload);
+}
+
+function requestMarketingImport(action, payload = {}) {
+  return requestApi(IMPORT_API_ROUTE, action, payload);
 }
 
 export async function getMarketingContactStats(filters = {}) {
@@ -74,4 +84,30 @@ export async function bulkDeleteMarketingContacts(contacts) {
 export async function getMarketingExportCsv(key, scope = "all", filters = {}) {
   const result = await requestMarketingContacts("export", { key, scope, filters });
   return result.csv || "";
+}
+
+export async function startMarketingImport({ filename, pipeline, totalRows }) {
+  return requestMarketingImport("start", { filename, pipeline, totalRows });
+}
+
+export async function processMarketingImportBatch({ importId, pipeline, batchIndex, rows }) {
+  return requestMarketingImport("batch", { importId, pipeline, batchIndex, rows });
+}
+
+export async function completeMarketingImport({ importId, failed = false, error = "" }) {
+  return requestMarketingImport("complete", { importId, failed, error });
+}
+
+export async function fetchMarketingImportHistory() {
+  const result = await requestMarketingImport("history");
+  return result.imports || [];
+}
+
+export async function fetchMarketingImportReports(importId = "") {
+  const result = await requestMarketingImport("reports", { importId });
+  return {
+    rejectedRows: result.rejectedRows || [],
+    duplicateRows: result.duplicateRows || [],
+    possibleDuplicates: result.possibleDuplicates || [],
+  };
 }
