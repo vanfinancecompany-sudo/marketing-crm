@@ -42,6 +42,11 @@ export async function getMarketingContactStats(filters = {}) {
   return result.stats;
 }
 
+export async function getMarketingActivityStats() {
+  const result = await requestMarketingContacts("activityStats");
+  return result.activity;
+}
+
 export async function listMarketingContacts({ page = 1, pageSize = MARKETING_CONTACTS_PAGE_SIZE, filters = {} } = {}) {
   const result = await requestMarketingContacts("list", { page, pageSize, filters });
   return {

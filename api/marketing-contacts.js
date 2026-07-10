@@ -188,6 +188,53 @@ async function countContacts(supabase, filters = {}) {
   return count || 0;
 }
 
+async function countContactsSince(supabase, field, since, includeNew = true) {
+  let query = supabase
+    .from("marketing_contacts")
+    .select("id", { count: "exact", head: true })
+    .gte(field, since);
+
+  if (!includeNew) query = query.lt("created_at", since);
+
+  const { count } = assertSupabase(await query, "Could not count marketing customer activity.");
+  return count || 0;
+}
+
+function getLondonDateParts(date) {
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const parts = Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]));
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+    second: Number(parts.second),
+  };
+}
+
+function getLondonOffsetMs(date) {
+  const parts = getLondonDateParts(date);
+  const londonAsUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return londonAsUtc - date.getTime();
+}
+
+function startOfLondonToday(now = new Date()) {
+  const parts = getLondonDateParts(now);
+  const utcApproximation = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 0, 0, 0));
+  const offset = getLondonOffsetMs(utcApproximation);
+  return new Date(utcApproximation.getTime() - offset).toISOString();
+}
+
 async function getStats(supabase, filters = {}) {
   const [total, matched, finance, rent2buy, both, unknown, emailReady, smsReady, facebookReady] = await Promise.all([
     countContacts(supabase, {}),
@@ -202,6 +249,48 @@ async function getStats(supabase, filters = {}) {
   ]);
 
   return { total, matched, finance, rent2buy, both, unknown, emailReady, smsReady, facebookReady };
+}
+
+async function getActivityStats(supabase) {
+  const now = Date.now();
+  const periods = {
+    today: startOfLondonToday(new Date(now)),
+    last24Hours: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+    last7Days: new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    last30Days: new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString(),
+  };
+
+  const [totalContacts, latestRows, todayCreated, todayUpdated, dayCreated, dayUpdated, weekCreated, weekUpdated, monthCreated, monthUpdated] = await Promise.all([
+    countContacts(supabase, {}),
+    supabase.from("marketing_contacts").select("created_at,updated_at").order("updated_at", { ascending: false }).limit(1),
+    countContactsSince(supabase, "created_at", periods.today),
+    countContactsSince(supabase, "updated_at", periods.today, false),
+    countContactsSince(supabase, "created_at", periods.last24Hours),
+    countContactsSince(supabase, "updated_at", periods.last24Hours, false),
+    countContactsSince(supabase, "created_at", periods.last7Days),
+    countContactsSince(supabase, "updated_at", periods.last7Days, false),
+    countContactsSince(supabase, "created_at", periods.last30Days),
+    countContactsSince(supabase, "updated_at", periods.last30Days, false),
+  ]);
+
+  assertSupabase(latestRows, "Could not load latest customer activity.");
+  const latest = latestRows.data?.[0] || null;
+  const lastCustomerActivity = latest
+    ? new Date(Math.max(new Date(latest.created_at || 0).getTime(), new Date(latest.updated_at || 0).getTime())).toISOString()
+    : null;
+
+  function period(created, updated) {
+    return { created, updated, totalActivity: created + updated };
+  }
+
+  return {
+    today: period(todayCreated, todayUpdated),
+    last24Hours: period(dayCreated, dayUpdated),
+    last7Days: period(weekCreated, weekUpdated),
+    last30Days: period(monthCreated, monthUpdated),
+    lastCustomerActivity,
+    totalContacts,
+  };
 }
 
 async function listContacts(supabase, body) {
@@ -390,6 +479,7 @@ export default async function handler(request, response) {
 
     if (action === "list") result = await listContacts(supabase, body);
     else if (action === "stats") result = { stats: await getStats(supabase, body.filters || {}) };
+    else if (action === "activityStats") result = { activity: await getActivityStats(supabase) };
     else if (action === "create") result = await createContact(supabase, body);
     else if (action === "update") result = await updateContact(supabase, body);
     else if (action === "delete") result = await deleteContact(supabase, body);
