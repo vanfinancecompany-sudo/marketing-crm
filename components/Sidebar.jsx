@@ -11,6 +11,7 @@ export default function Sidebar({ currentView, onNavigate }) {
   const items = [
     "Dashboard",
     "Stock",
+    "Customer Database",
     "Vansco Stock Watch",
     "Reel Lab Beta",
     "YouTube Generator",

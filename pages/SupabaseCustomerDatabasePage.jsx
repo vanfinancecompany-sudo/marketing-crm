@@ -1,0 +1,186 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  DEFAULT_TAGS,
+  PIPELINE_OPTIONS,
+  SOURCE_OPTIONS,
+  buildCustomerExports,
+  contactName,
+  parseCsv,
+} from "../utils/contactCleaning.js";
+import {
+  MARKETING_CONTACTS_PAGE_SIZE,
+  MARKETING_IMPORT_BATCH_SIZE,
+  bulkAddMarketingTag,
+  bulkChangeMarketingPipeline,
+  bulkDeleteMarketingContacts,
+  bulkRemoveMarketingTag,
+  completeMarketingImport,
+  createMarketingContact,
+  createMarketingContactsBackup,
+  deleteMarketingContact,
+  fetchMarketingImportHistory,
+  fetchMarketingImportReports,
+  getMarketingExportCsv,
+  listMarketingContacts,
+  processMarketingImportBatch,
+  startMarketingImport,
+  updateMarketingContact,
+} from "../services/marketingContacts.js";
+
+const EMPTY_FORM = { first_name: "", last_name: "", company: "", email: "", phone: "", postcode: "", pipeline: "unknown", source: "manual", notes: "", tags: [] };
+const EMPTY_FILTERS = { source: "all", tag: "all", readiness: "all", postcode: "all", unknownPipeline: false };
+const EMPTY_IMPORT_PROGRESS = { importId: "", status: "idle", processed: 0, total: 0, created: 0, updated: 0, merged: 0, possible: 0, rejected: 0, currentBatch: 0, totalBatches: 0, elapsed: "", eta: "", message: "" };
+
+const pipelineLabels = { all: "All", finance: "Finance", rent2buy: "Rent2Buy", both: "Both", unknown: "Unknown" };
+const sourceLabels = { manual: "Manual", csv: "CSV", wix: "Wix", crm: "CRM", facebook: "Facebook", supabase: "Supabase", other: "Other" };
+const exportGroups = [
+  { title: "Facebook", buttons: [["Full Audience", "fullFacebook", "full-facebook-audience.csv"], ["Finance", "financeFacebook", "finance-facebook-audience.csv"], ["Rent2Buy", "rent2buyFacebook", "rent2buy-facebook-audience.csv"]] },
+  { title: "Email", buttons: [["Full", "email", "email-marketing.csv"], ["Finance", "financeEmail", "finance-email.csv"], ["Rent2Buy", "rent2buyEmail", "rent2buy-email.csv"]] },
+  { title: "SMS", buttons: [["Full", "sms", "sms-contacts.csv"], ["Finance", "financeSms", "finance-sms.csv"], ["Rent2Buy", "rent2buySms", "rent2buy-sms.csv"]] },
+  { title: "Reports", buttons: [["Master Database", "master", "customer-master.csv"], ["Duplicate Report", "duplicates", "duplicate-report.csv"], ["Rejected Rows", "rejected", "rejected-rows.csv"]] },
+];
+
+function downloadCsv(filename, content) { const blob = new Blob([content], { type: "text/csv;charset=utf-8" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = filename; document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url); }
+function updateFormValue(setForm, key, value) { setForm((current) => ({ ...current, [key]: value })); }
+function formatNumber(value) { return Number(value || 0).toLocaleString("en-GB"); }
+function formatDate(value) { if (!value) return "-"; const date = new Date(value); if (Number.isNaN(date.getTime())) return "-"; return date.toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); }
+function checksumText(value) { let hash = 0; const text = String(value || ""); for (let index = 0; index < text.length; index += 1) hash = ((hash * 31) + text.charCodeAt(index)) >>> 0; return hash.toString(16); }
+function formatDuration(seconds) { const safeSeconds = Math.max(0, Math.round(Number(seconds || 0))); const minutes = Math.floor(safeSeconds / 60); const remainingSeconds = safeSeconds % 60; return minutes ? `${minutes}m ${remainingSeconds}s` : `${remainingSeconds}s`; }
+function estimateRemaining(startedAt, processed, total) { if (!startedAt || !processed || !total) return "calculating"; const elapsedSeconds = Math.max(1, (Date.now() - startedAt) / 1000); const remainingSeconds = (elapsedSeconds / processed) * Math.max(0, total - processed); return formatDuration(remainingSeconds); }
+function TableShell({ children }) { return <div style={{ overflowX: "auto" }}>{children}</div>; }
+function Modal({ title, children, onClose }) { return <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center", padding: 18, background: "rgba(15, 23, 42, 0.48)" }}><div className="panel" style={{ width: "min(840px, 100%)", maxHeight: "88vh", overflow: "auto" }}><div className="panel__header"><div><div className="eyebrow">Customer Database</div><h3>{title}</h3></div><button type="button" className="button button--ghost" onClick={onClose}>Close</button></div>{children}</div></div>; }
+function TagChips({ tags }) { const safeTags = Array.isArray(tags) ? tags : []; if (!safeTags.length) return <span style={{ color: "#64748b" }}>-</span>; return <div className="card-actions" style={{ gap: 6 }}>{safeTags.slice(0, 6).map((tag) => <span key={tag} className="tag" style={{ padding: "5px 8px", fontSize: 12 }}>{tag}</span>)}{safeTags.length > 6 ? <span className="tag">+{safeTags.length - 6}</span> : null}</div>; }
+
+function ContactForm({ form, setForm, error, onSubmit, submitLabel }) {
+  function toggleTag(tag) { setForm((current) => { const tags = new Set(current.tags || []); if (tags.has(tag)) tags.delete(tag); else tags.add(tag); return { ...current, tags: [...tags].sort() }; }); }
+  return <form onSubmit={onSubmit} className="field-grid"><label className="field"><span className="field__label">First name</span><input className="field__input" value={form.first_name} onChange={(event) => updateFormValue(setForm, "first_name", event.target.value)} /></label><label className="field"><span className="field__label">Last name</span><input className="field__input" value={form.last_name} onChange={(event) => updateFormValue(setForm, "last_name", event.target.value)} /></label><label className="field"><span className="field__label">Company</span><input className="field__input" value={form.company} onChange={(event) => updateFormValue(setForm, "company", event.target.value)} /></label><label className="field"><span className="field__label">Email</span><input className="field__input" value={form.email} onChange={(event) => updateFormValue(setForm, "email", event.target.value)} /></label><label className="field"><span className="field__label">Mobile</span><input className="field__input" value={form.phone} onChange={(event) => updateFormValue(setForm, "phone", event.target.value)} /></label><label className="field"><span className="field__label">Postcode</span><input className="field__input" value={form.postcode} onChange={(event) => updateFormValue(setForm, "postcode", event.target.value)} /></label><label className="field"><span className="field__label">Pipeline</span><select className="field__input" value={form.pipeline} onChange={(event) => updateFormValue(setForm, "pipeline", event.target.value)}>{PIPELINE_OPTIONS.map((pipeline) => <option key={pipeline} value={pipeline}>{pipelineLabels[pipeline]}</option>)}</select></label><label className="field"><span className="field__label">Source</span><select className="field__input" value={form.source} onChange={(event) => updateFormValue(setForm, "source", event.target.value)}>{SOURCE_OPTIONS.map((source) => <option key={source} value={source}>{sourceLabels[source]}</option>)}</select></label><label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Notes</span><textarea className="field__input" rows={3} value={form.notes} onChange={(event) => updateFormValue(setForm, "notes", event.target.value)} /></label><div className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Tags</span><div className="card-actions">{DEFAULT_TAGS.map((tag) => <button key={tag} type="button" className={(form.tags || []).includes(tag) ? "button button--primary" : "button button--ghost"} onClick={() => toggleTag(tag)}>{tag}</button>)}</div></div><div className="card-actions" style={{ gridColumn: "1 / -1" }}><button type="submit" className="button button--primary">{submitLabel}</button></div>{error ? <div className="notice notice--error" style={{ gridColumn: "1 / -1" }}>{error}</div> : null}</form>;
+}
+
+export default function SupabaseCustomerDatabasePage() {
+  const [contacts, setContacts] = useState([]);
+  const [stats, setStats] = useState({ total: 0, matched: 0, finance: 0, rent2buy: 0, both: 0, unknown: 0, emailReady: 0, smsReady: 0, facebookReady: 0 });
+  const [error, setError] = useState("");
+  const [manualError, setManualError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [manualForm, setManualForm] = useState(EMPTY_FORM);
+  const [activeFilter, setActiveFilter] = useState("all");
+  const [advancedFilters, setAdvancedFilters] = useState(EMPTY_FILTERS);
+  const [exportScope, setExportScope] = useState("all");
+  const [search, setSearch] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [modalMode, setModalMode] = useState("");
+  const [selectedContact, setSelectedContact] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkTag, setBulkTag] = useState("lead");
+  const [bulkPipeline, setBulkPipeline] = useState("unknown");
+  const [exportingKey, setExportingKey] = useState("");
+  const [importFileName, setImportFileName] = useState("");
+  const [importFileSize, setImportFileSize] = useState(0);
+  const [importChecksum, setImportChecksum] = useState("");
+  const [backupInfo, setBackupInfo] = useState(null);
+  const [importRows, setImportRows] = useState([]);
+  const [importPipeline, setImportPipeline] = useState("");
+  const [importProgress, setImportProgress] = useState(EMPTY_IMPORT_PROGRESS);
+  const [importing, setImporting] = useState(false);
+  const [retryBatch, setRetryBatch] = useState(null);
+  const [importHistory, setImportHistory] = useState([]);
+  const [importReports, setImportReports] = useState({ rejectedRows: [], duplicateRows: [], possibleDuplicates: [] });
+
+  const filters = useMemo(() => ({ pipeline: activeFilter, source: advancedFilters.source, tag: advancedFilters.tag, readiness: advancedFilters.readiness, postcode: advancedFilters.postcode, unknownPipeline: advancedFilters.unknownPipeline, search }), [activeFilter, advancedFilters, search]);
+  const totalPages = Math.max(1, Math.ceil(stats.matched / MARKETING_CONTACTS_PAGE_SIZE));
+  const pageStartIndex = stats.matched ? (currentPage - 1) * MARKETING_CONTACTS_PAGE_SIZE : 0;
+  const pageEndIndex = Math.min(pageStartIndex + contacts.length, stats.matched);
+  const selectedVisibleContacts = useMemo(() => contacts.filter((contact) => selectedIds.includes(contact.customer_id)), [contacts, selectedIds]);
+  const dashboardCards = useMemo(() => [["Total Contacts", stats.total], ["Finance Contacts", stats.finance], ["Rent2Buy Contacts", stats.rent2buy], ["Both", stats.both], ["Unknown", stats.unknown], ["Facebook Ready", stats.facebookReady], ["Email Ready", stats.emailReady], ["SMS Ready", stats.smsReady], ["Duplicates Removed", importHistory[0]?.duplicates_merged || 0], ["Rejected Records", importHistory[0]?.rejected_rows || 0]], [stats, importHistory]);
+
+  async function loadContacts(page = currentPage) { setLoading(true); setError(""); try { const response = await listMarketingContacts({ page, pageSize: MARKETING_CONTACTS_PAGE_SIZE, filters }); setContacts(response.contacts); setStats(response.stats); } catch (loadError) { setError(loadError.message || "Could not load Customer Database from Supabase."); } finally { setLoading(false); } }
+  async function loadImportData(importId = "") { try { const [history, reports] = await Promise.all([fetchMarketingImportHistory(), fetchMarketingImportReports(importId)]); setImportHistory(history); setImportReports(reports); } catch (historyError) { setError(historyError.message || "Could not load import history."); } }
+
+  useEffect(() => { setCurrentPage(1); setSelectedIds([]); }, [filters]);
+  useEffect(() => { loadContacts(currentPage); }, [currentPage, filters]);
+  useEffect(() => { loadImportData(); }, []);
+  useEffect(() => { setCurrentPage((page) => Math.min(page, totalPages)); }, [totalPages]);
+
+  async function handleImportFileSelected(event) {
+    const file = event.target.files?.[0];
+    setError(""); setRetryBatch(null); setImportProgress(EMPTY_IMPORT_PROGRESS); setImportFileName(file?.name || ""); setImportFileSize(file?.size || 0); setImportChecksum(""); setBackupInfo(null); setImportRows([]);
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".csv")) { setError("Upload a CSV file."); return; }
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      setImportChecksum(checksumText(text));
+      setImportRows(rows);
+    } catch (fileError) {
+      setError(fileError.message || "Could not read this CSV file.");
+    }
+  }
+
+  async function runImport(startAtBatch = 0, existingImportId = "") {
+    if (!importPipeline) { setError("Choose Finance or Rent2Buy before importing."); return; }
+    if (!importRows.length) { setError("Choose a CSV file before importing."); return; }
+    setImporting(true); setError(""); setRetryBatch(null);
+    let importId = existingImportId;
+    let failedBatchIndex = startAtBatch;
+    const startedAt = Date.now();
+    const totalBatches = Math.ceil(importRows.length / MARKETING_IMPORT_BATCH_SIZE);
+    try {
+      let backup = backupInfo;
+      if (!importId && !backup) {
+        setImportProgress({ ...EMPTY_IMPORT_PROGRESS, status: "backup", total: importRows.length, totalBatches, message: "Creating pre-import backup." });
+        backup = await createMarketingContactsBackup();
+        setBackupInfo(backup);
+        if (backup?.csv && backup?.filename) downloadCsv(backup.filename, backup.csv);
+      }
+      if (!importId) {
+        const started = await startMarketingImport({ filename: importFileName, fileSize: importFileSize, pipeline: importPipeline, totalRows: importRows.length, checksum: importChecksum, batchSize: MARKETING_IMPORT_BATCH_SIZE, backup: backup ? { filename: backup.filename, contactCount: backup.contactCount } : null });
+        importId = started.import?.id;
+        const metadata = started.import?.metadata || {};
+        if (started.resume) startAtBatch = Math.max(startAtBatch, Number(metadata.last_completed_batch || -1) + 1);
+      }
+      let totals = { processed: startAtBatch * MARKETING_IMPORT_BATCH_SIZE, created: 0, updated: 0, merged: 0, possible: 0, rejected: 0 };
+      for (let index = startAtBatch * MARKETING_IMPORT_BATCH_SIZE; index < importRows.length; index += MARKETING_IMPORT_BATCH_SIZE) {
+        const batchIndex = Math.floor(index / MARKETING_IMPORT_BATCH_SIZE);
+        failedBatchIndex = batchIndex;
+        const rows = importRows.slice(index, index + MARKETING_IMPORT_BATCH_SIZE);
+        const result = await processMarketingImportBatch({ importId, pipeline: importPipeline, batchIndex, rows });
+        const counts = result.counts || {};
+        totals = { processed: Math.min(index + rows.length, importRows.length), created: totals.created + Number(counts.contactsCreated || 0), updated: totals.updated + Number(counts.contactsUpdated || 0), merged: totals.merged + Number(counts.duplicatesMerged || 0), possible: totals.possible + Number(counts.possibleDuplicates || 0), rejected: totals.rejected + Number(counts.rejectedRows || 0) };
+        setImportProgress({ importId, status: "processing", processed: totals.processed, total: importRows.length, created: totals.created, updated: totals.updated, merged: totals.merged, possible: totals.possible, rejected: totals.rejected, currentBatch: batchIndex + 1, totalBatches, elapsed: formatDuration((Date.now() - startedAt) / 1000), eta: estimateRemaining(startedAt, totals.processed, importRows.length), message: `Processed batch ${formatNumber(batchIndex + 1)} of ${formatNumber(totalBatches)}.` });
+      }
+      const completed = await completeMarketingImport({ importId });
+      setImportProgress((current) => ({ ...current, status: "completed", processed: importRows.length, elapsed: formatDuration((Date.now() - startedAt) / 1000), eta: "0s", message: "Import completed." }));
+      await Promise.all([loadContacts(1), loadImportData(completed.import?.id || importId)]);
+      setCurrentPage(1);
+    } catch (importError) {
+      setRetryBatch({ importId, batchIndex: failedBatchIndex });
+      setImportProgress((current) => ({ ...current, importId, status: "failed", message: importError.message || "Import failed." }));
+      setError(importError.message || "Import failed.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  function openAddModal() { setManualForm(EMPTY_FORM); setManualError(""); setSelectedContact(null); setModalMode("add"); }
+  function openEditModal(contact) { setManualForm({ first_name: contact.first_name || "", last_name: contact.last_name || "", company: contact.company || "", email: contact.email || "", phone: contact.phone || "", postcode: contact.postcode || "", pipeline: contact.pipeline || "unknown", source: contact.source || "manual", notes: contact.notes || "", tags: contact.tags || [] }); setManualError(""); setSelectedContact(contact); setModalMode("edit"); }
+  function closeModal() { setModalMode(""); setSelectedContact(null); setManualError(""); }
+  async function handleManualSubmit(event) { event.preventDefault(); setManualError(""); try { if (modalMode === "edit" && selectedContact) await updateMarketingContact(selectedContact, manualForm); else await createMarketingContact(manualForm); closeModal(); await loadContacts(currentPage); } catch (submitError) { setManualError(submitError.message || "Could not save contact."); } }
+  async function handleDeleteContact(contact) { setError(""); try { await deleteMarketingContact(contact); setSelectedIds((ids) => ids.filter((id) => id !== contact.customer_id)); await loadContacts(currentPage); } catch (deleteError) { setError(deleteError.message || "Could not delete contact."); } }
+  function toggleSelected(contactId) { setSelectedIds((ids) => ids.includes(contactId) ? ids.filter((id) => id !== contactId) : [...ids, contactId]); }
+  async function runBulkAction(action) { setError(""); try { await action(selectedVisibleContacts); setSelectedIds([]); await loadContacts(currentPage); } catch (bulkError) { setError(bulkError.message || "Could not update selected contacts."); } }
+  async function handleDownload(key, filename) { setError(""); setExportingKey(key); try { const csv = await getMarketingExportCsv(key, exportScope, filters); downloadCsv(filename, csv); } catch (downloadError) { setError(downloadError.message || "Could not download export."); } finally { setExportingKey(""); } }
+  function exportSelected() { const selectedExports = buildCustomerExports(selectedVisibleContacts, [], [], "all"); downloadCsv("selected-customers.csv", selectedExports.master); }
+
+  return <div className="page-stack" style={{ gap: 14 }}>
+    <section className="hero-panel" style={{ padding: 18 }}><div className="panel__header" style={{ marginBottom: 0 }}><div><div className="eyebrow">Customer Data</div><h2>Customer Database</h2><p>Upload, clean, search, manage, and export contacts from one CRM workspace.</p></div><div className="card-actions"><button type="button" className="button button--primary" onClick={openAddModal}>+ Add Contact</button></div></div></section>
+    <div className="notice">Supabase Customer Database mode is enabled. Imports run in protected server-side batches.</div>{loading ? <div className="notice">Loading Customer Database...</div> : null}{error ? <div className="notice notice--error">{error}</div> : null}
+    <section className="stats-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>{dashboardCards.map(([label, value]) => <div key={label} className="stat-card" style={{ padding: 16, borderRadius: 18 }}><div className="stat-card__label">{label}</div><div className="stat-card__value" style={{ fontSize: 30 }}>{formatNumber(value)}</div></div>)}</section>
+    <section className="panel" style={{ padding: 16 }}><div className="panel__header"><div><h3>Import</h3><p>Choose an approved Finance or Rent2Buy master CSV. Processing runs in {formatNumber(MARKETING_IMPORT_BATCH_SIZE)} row batches.</p></div><label className="field" style={{ minWidth: 280 }}><span className="field__label">Upload CSV</span><input className="field__input" type="file" accept=".csv,text/csv" disabled={importing} onChange={handleImportFileSelected} /></label></div><div className="field-grid"><label className="field"><span className="field__label">Import pipeline</span><select className="field__input" value={importPipeline} disabled={importing} onChange={(event) => setImportPipeline(event.target.value)}><option value="">Choose pipeline</option><option value="finance">Finance</option><option value="rent2buy">Rent2Buy</option></select></label><div className="field"><span className="field__label">Confirmation</span><div className="field__input">{importFileName ? `${importFileName} - ${formatNumber(importRows.length)} rows - ${pipelineLabels[importPipeline] || "No pipeline selected"}${backupInfo?.filename ? ` - backup: ${backupInfo.filename}` : ""}` : "No file selected"}</div></div></div><div className="card-actions" style={{ marginTop: 12 }}><button type="button" className="button button--primary" disabled={importing || !importRows.length || !importPipeline} onClick={() => runImport()}>Confirm and Import</button>{retryBatch ? <button type="button" className="button button--ghost" disabled={importing} onClick={() => runImport(retryBatch.batchIndex, retryBatch.importId)}>Retry Failed Batch</button> : null}</div>{importProgress.status !== "idle" ? <div className={importProgress.status === "failed" ? "notice notice--error" : "notice"} style={{ marginTop: 12 }}><strong>{importProgress.status}</strong><br />Rows processed: {formatNumber(importProgress.processed)} / {formatNumber(importProgress.total)}<br />Batch: {formatNumber(importProgress.currentBatch)} / {formatNumber(importProgress.totalBatches)} | Elapsed: {importProgress.elapsed || "0s"} | ETA: {importProgress.eta || "calculating"}<br />Created: {formatNumber(importProgress.created)} | Updated: {formatNumber(importProgress.updated)} | Merged: {formatNumber(importProgress.merged)} | Possible duplicates: {formatNumber(importProgress.possible)} | Rejected: {formatNumber(importProgress.rejected)}<br />{importProgress.message}</div> : null}</section>
+    <section className="panel" style={{ padding: 16 }}><div className="panel__header"><div><h3>Contacts</h3><p>{formatNumber(stats.matched)} matched contacts from {formatNumber(stats.total)} clean contacts. {formatNumber(selectedVisibleContacts.length)} selected on this page.</p></div><label className="field" style={{ minWidth: 260 }}><span className="field__label">Search</span><input className="field__input" placeholder="Name, email, phone, postcode, company" value={search} onChange={(event) => setSearch(event.target.value)} /></label></div><div className="card-actions" style={{ marginBottom: 12 }}>{["all", ...PIPELINE_OPTIONS].map((pipeline) => <button key={pipeline} type="button" className={activeFilter === pipeline ? "button button--primary" : "button button--ghost"} onClick={() => setActiveFilter(pipeline)}>{pipelineLabels[pipeline]}</button>)}</div><div className="field-grid" style={{ marginBottom: 12 }}><label className="field"><span className="field__label">Source</span><select className="field__input" value={advancedFilters.source} onChange={(event) => setAdvancedFilters((filters) => ({ ...filters, source: event.target.value }))}><option value="all">All sources</option>{SOURCE_OPTIONS.map((source) => <option key={source} value={source}>{sourceLabels[source]}</option>)}</select></label><label className="field"><span className="field__label">Tag</span><select className="field__input" value={advancedFilters.tag} onChange={(event) => setAdvancedFilters((filters) => ({ ...filters, tag: event.target.value }))}><option value="all">All tags</option>{DEFAULT_TAGS.map((tag) => <option key={tag} value={tag}>{tag}</option>)}</select></label><label className="field"><span className="field__label">Readiness</span><select className="field__input" value={advancedFilters.readiness} onChange={(event) => setAdvancedFilters((filters) => ({ ...filters, readiness: event.target.value }))}><option value="all">All</option><option value="email_ready">Email Ready</option><option value="sms_ready">SMS Ready</option><option value="facebook_ready">Facebook Ready</option></select></label><label className="field"><span className="field__label">Data quality</span><select className="field__input" value={advancedFilters.postcode} onChange={(event) => setAdvancedFilters((filters) => ({ ...filters, postcode: event.target.value }))}><option value="all">Any postcode</option><option value="has_postcode">Has postcode</option></select></label><label className="toggle-row" style={{ marginTop: 20 }}><input type="checkbox" checked={advancedFilters.unknownPipeline} onChange={(event) => setAdvancedFilters((filters) => ({ ...filters, unknownPipeline: event.target.checked }))} />Unknown Pipeline</label></div><div className="selection-summary" style={{ marginBottom: 12 }}><strong>Bulk actions</strong><div className="card-actions"><select className="field__input" style={{ width: 180 }} value={bulkTag} onChange={(event) => setBulkTag(event.target.value)}>{DEFAULT_TAGS.map((tag) => <option key={tag} value={tag}>{tag}</option>)}</select><button type="button" className="button button--ghost" disabled={!selectedVisibleContacts.length} onClick={() => runBulkAction((items) => bulkAddMarketingTag(items, bulkTag))}>Add Tag</button><button type="button" className="button button--ghost" disabled={!selectedVisibleContacts.length} onClick={() => runBulkAction((items) => bulkRemoveMarketingTag(items, bulkTag))}>Remove Tag</button><select className="field__input" style={{ width: 160 }} value={bulkPipeline} onChange={(event) => setBulkPipeline(event.target.value)}>{PIPELINE_OPTIONS.map((pipeline) => <option key={pipeline} value={pipeline}>{pipelineLabels[pipeline]}</option>)}</select><button type="button" className="button button--ghost" disabled={!selectedVisibleContacts.length} onClick={() => runBulkAction((items) => bulkChangeMarketingPipeline(items, bulkPipeline))}>Change Pipeline</button><button type="button" className="button button--ghost" disabled={!selectedVisibleContacts.length} onClick={exportSelected}>Export Selected</button><button type="button" className="button button--danger" disabled={!selectedVisibleContacts.length} onClick={() => runBulkAction(bulkDeleteMarketingContacts)}>Delete Selected</button></div></div><div className="card-actions" style={{ justifyContent: "space-between", marginBottom: 12 }}><span style={{ color: "#64748b", fontWeight: 800 }}>Showing {stats.matched ? formatNumber(pageStartIndex + 1) : 0}-{formatNumber(pageEndIndex)} of {formatNumber(stats.matched)} contacts</span><div className="card-actions" style={{ alignItems: "center" }}><button type="button" className="button button--ghost" disabled={currentPage <= 1} onClick={() => { setCurrentPage((page) => Math.max(1, page - 1)); setSelectedIds([]); }}>Previous</button><label className="field" style={{ width: 110 }}><span className="field__label">Page</span><input className="field__input" type="number" min="1" max={totalPages} value={currentPage} onChange={(event) => { const nextPage = Math.min(totalPages, Math.max(1, Number(event.target.value) || 1)); setCurrentPage(nextPage); setSelectedIds([]); }} /></label><span style={{ color: "#64748b", fontWeight: 800 }}>of {formatNumber(totalPages)}</span><button type="button" className="button button--ghost" disabled={currentPage >= totalPages} onClick={() => { setCurrentPage((page) => Math.min(totalPages, page + 1)); setSelectedIds([]); }}>Next</button></div></div><TableShell><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}><thead><tr><th style={{ padding: "10px 8px", borderBottom: "1px solid #dbe2ea" }}><input type="checkbox" checked={contacts.length > 0 && contacts.every((contact) => selectedIds.includes(contact.customer_id))} onChange={(event) => setSelectedIds(event.target.checked ? contacts.map((contact) => contact.customer_id) : [])} /></th>{["Name", "Email", "Phone", "Pipeline", "Source", "Postcode", "Last Updated", "Actions"].map((heading) => <th key={heading} style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #dbe2ea", color: "#475569" }}>{heading}</th>)}</tr></thead><tbody>{contacts.length === 0 ? <tr><td colSpan={9} style={{ padding: 18, color: "#64748b" }}>No contacts match this view.</td></tr> : contacts.map((contact) => <tr key={contact.id || contact.customer_id}><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}><input type="checkbox" checked={selectedIds.includes(contact.customer_id)} onChange={() => toggleSelected(contact.customer_id)} /></td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7", fontWeight: 800 }}>{contactName(contact)}<br /><small style={{ color: "#64748b" }}>{contact.customer_id}</small><TagChips tags={contact.tags} /></td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{contact.email || "-"}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{contact.phone || "-"}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{pipelineLabels[contact.pipeline] || contact.pipeline}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{sourceLabels[contact.source] || contact.source}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{contact.postcode || "-"}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7", whiteSpace: "nowrap" }}>{formatDate(contact.updated_at)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}><div className="card-actions" style={{ gap: 6 }}><button type="button" className="button button--ghost" onClick={() => { setSelectedContact(contact); setModalMode("view"); }}>View</button><button type="button" className="button button--ghost" onClick={() => openEditModal(contact)}>Edit</button><button type="button" className="button button--danger" onClick={() => handleDeleteContact(contact)}>Delete</button></div></td></tr>)}</tbody></table></TableShell></section>
+    <section className="panel" style={{ padding: 16 }}><div className="panel__header"><div><h3>Import History</h3><p>Recent Supabase import runs.</p></div></div><TableShell><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}><thead><tr>{["Date", "Filename", "Pipeline", "Rows", "Created", "Updated", "Merged", "Possible", "Rejected", "Status"].map((heading) => <th key={heading} style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #dbe2ea", color: "#475569" }}>{heading}</th>)}</tr></thead><tbody>{importHistory.length === 0 ? <tr><td colSpan={10} style={{ padding: 18, color: "#64748b" }}>No imports yet.</td></tr> : importHistory.map((item) => <tr key={item.id}><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatDate(item.created_at)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.filename || "-"}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.source || item.metadata?.pipeline || "-"}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatNumber(item.rows_imported)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatNumber(item.contacts_created)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatNumber(item.contacts_updated)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatNumber(item.duplicates_merged)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatNumber(item.possible_duplicates)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatNumber(item.rejected_rows)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{item.status}</td></tr>)}</tbody></table></TableShell></section>
+    <section className="panel" style={{ padding: 16 }}><div className="panel__header"><div><h3>Export Centre</h3><p>Grouped exports for audience uploads and reports.</p></div><label className="field" style={{ minWidth: 220 }}><span className="field__label">Report scope</span><select className="field__input" value={exportScope} onChange={(event) => setExportScope(event.target.value)}>{["all", ...PIPELINE_OPTIONS].map((pipeline) => <option key={pipeline} value={pipeline}>{pipelineLabels[pipeline]}</option>)}</select></label></div><div className="card-grid">{exportGroups.map((group) => <div key={group.title} className="panel panel--nested" style={{ boxShadow: "none" }}><h3 style={{ marginTop: 0 }}>{group.title}</h3><div className="card-actions">{group.buttons.map(([label, key, filename]) => <button key={key} type="button" className="button button--ghost" disabled={exportingKey === key || (!stats.total && key !== "rejected" && key !== "duplicates")} onClick={() => handleDownload(key, filename)}>{exportingKey === key ? "Preparing..." : label}</button>)}</div></div>)}</div></section>
+    <section className="panel" style={{ padding: 16 }}><div className="panel__header"><div><h3>Reports Preview</h3><p>Rejected records, duplicate merges, and possible duplicates from Supabase import audit rows.</p></div></div><div className="card-grid">{[["Rejected Rows", importReports.rejectedRows, (row) => row.rejection_reason || row.status], ["Duplicates", importReports.duplicateRows, (row) => row.rejection_reason || row.status], ["Possible Duplicates", importReports.possibleDuplicates, (row) => row.rejection_reason || row.status]].map(([title, rows, describe]) => <div key={title} className="panel panel--nested" style={{ boxShadow: "none" }}><h3 style={{ marginTop: 0 }}>{title}</h3><TableShell><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}><tbody>{rows.slice(0, 5).map((row) => <tr key={row.id}><td style={{ padding: 8, borderBottom: "1px solid #eef2f7" }}>{row.source_row || "-"}</td><td style={{ padding: 8, borderBottom: "1px solid #eef2f7" }}>{row.customer_id || "-"}</td><td style={{ padding: 8, borderBottom: "1px solid #eef2f7" }}>{describe(row)}</td></tr>)}{rows.length === 0 ? <tr><td style={{ padding: 12, color: "#64748b" }}>None.</td></tr> : null}</tbody></table></TableShell></div>)}</div></section>
+    {(modalMode === "add" || modalMode === "edit") ? <Modal title={modalMode === "edit" ? "Edit Contact" : "Add Contact"} onClose={closeModal}><ContactForm form={manualForm} setForm={setManualForm} error={manualError} onSubmit={handleManualSubmit} submitLabel={modalMode === "edit" ? "Save Contact" : "Add Contact"} /></Modal> : null}
+    {modalMode === "view" && selectedContact ? <Modal title="Customer Profile" onClose={closeModal}><div className="field-grid">{[["Name", contactName(selectedContact)], ["Email", selectedContact.email || "-"], ["Phone", selectedContact.phone || "-"], ["Postcode", selectedContact.postcode || "-"], ["Pipeline", pipelineLabels[selectedContact.pipeline] || selectedContact.pipeline], ["Source", sourceLabels[selectedContact.source] || selectedContact.source], ["Created At", formatDate(selectedContact.created_at)], ["Updated At", formatDate(selectedContact.updated_at)], ["Last Seen At", formatDate(selectedContact.last_seen_at)], ["Duplicate Count", selectedContact.duplicate_count || 0]].map(([label, value]) => <div key={label} className="field"><span className="field__label">{label}</span><div className="field__input">{value}</div></div>)}<div className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Tags</span><div className="field__input"><TagChips tags={selectedContact.tags} /></div></div><div className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Notes</span><div className="field__input" style={{ minHeight: 84, whiteSpace: "pre-line" }}>{selectedContact.notes || "-"}</div></div><div className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Timeline</span><div className="field__input">No timeline yet.</div></div></div></Modal> : null}
+  </div>;
+}

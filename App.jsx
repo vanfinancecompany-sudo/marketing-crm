@@ -52,6 +52,7 @@ import { useEffect, useMemo, useState } from "react";
 import Sidebar from "./components/Sidebar.jsx";
 import ControlCentrePage from "./pages/ControlCentrePage.jsx";
 import DashboardPage from "./pages/DashboardPage.jsx";
+import CustomerDatabasePage from "./pages/CustomerDatabasePage.jsx";
 import StockPage from "./pages/StockPage.jsx";
 import VanscoStockWatchPage from "./pages/VanscoStockWatchPage.jsx";
 import ReelFactoryPage from "./pages/ReelFactoryPage.jsx";
@@ -448,6 +449,7 @@ function rankRandomPool(pool, recentVehicleIds = []) {
 const VIEW_PATHS = {
   Dashboard: "/",
   Stock: "/stock",
+  "Customer Database": "/customer-database",
   "Vansco Stock Watch": "/vansco-stock-watch",
   "Reel Factory": "/reel-factory",
   "Premium Reel Studio": "/premium-reel-studio",
@@ -465,6 +467,7 @@ function viewFromPath() {
   const path = window.location.pathname;
 
   if (path === "/stock") return "Stock";
+  if (path === "/customer-database") return "Customer Database";
   if (path === "/vansco-stock-watch") return "Vansco Stock Watch";
   if (path === "/reel-factory") return "Reel Factory";
   if (path === "/premium-reel-studio" || path === "/reel-studio-beta" || path === "/premium-reels") {
@@ -2674,6 +2677,8 @@ async function handleClearTodayReels() {
             creativeError={creativeError}
           />
         );
+      case "Customer Database":
+        return <CustomerDatabasePage />;
       case "Vansco Stock Watch":
         return <VanscoStockWatchPage />;
       case "Reel Factory":
