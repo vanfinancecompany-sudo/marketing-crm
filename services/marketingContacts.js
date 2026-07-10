@@ -1,5 +1,5 @@
 export const MARKETING_CONTACTS_PAGE_SIZE = 50;
-export const MARKETING_IMPORT_BATCH_SIZE = 750;
+export const MARKETING_IMPORT_BATCH_SIZE = 500;
 
 const API_ROUTE = "/api/marketing-contacts";
 const IMPORT_API_ROUTE = "/api/marketing-contact-import";
@@ -86,12 +86,17 @@ export async function getMarketingExportCsv(key, scope = "all", filters = {}) {
   return result.csv || "";
 }
 
-export async function startMarketingImport({ filename, pipeline, totalRows }) {
-  return requestMarketingImport("start", { filename, pipeline, totalRows });
+export async function createMarketingContactsBackup() {
+  const result = await requestMarketingImport("backup");
+  return result.backup;
 }
 
-export async function processMarketingImportBatch({ importId, pipeline, batchIndex, rows }) {
-  return requestMarketingImport("batch", { importId, pipeline, batchIndex, rows });
+export async function startMarketingImport({ filename, fileSize = 0, pipeline, totalRows, checksum = "", batchSize = MARKETING_IMPORT_BATCH_SIZE, backup = null }) {
+  return requestMarketingImport("start", { filename, fileSize, pipeline, totalRows, checksum, batchSize, backup });
+}
+
+export async function processMarketingImportBatch({ importId, pipeline, batchIndex, rows, batchKey = "", importFingerprint = "" }) {
+  return requestMarketingImport("batch", { importId, pipeline, batchIndex, rows, batchKey, importFingerprint });
 }
 
 export async function completeMarketingImport({ importId, failed = false, error = "" }) {
