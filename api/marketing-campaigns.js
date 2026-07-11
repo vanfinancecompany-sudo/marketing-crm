@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { DEFAULT_TAGS, SOURCE_OPTIONS } from "../utils/contactCleaning.js";
 
 const CAMPAIGN_COLUMNS = "id,name,description,channel,objective,status,tags,metadata,created_by,created_at,updated_at,archived_at";
 const API_KEY_HEADER = "x-marketing-customer-database-key";
@@ -9,7 +10,6 @@ const ACTIVE_STATUSES = ["ready", "running", "paused"];
 const PIPELINES = new Set(["all", "finance", "rent2buy", "both"]);
 const LAST_SEEN_PERIODS = new Set(["all", "last30", "last90", "last180", "last365", "more_than_180"]);
 const CREATED_PERIODS = new Set(["all", "today", "last7", "last30", "last90", "this_year"]);
-const OPTION_PAGE_SIZE = 1000;
 
 const DEFAULT_AUDIENCE_RULES = {
   pipeline: "all",
@@ -330,30 +330,10 @@ async function archiveCampaign(supabase, body) {
   return { campaign: normalizeCampaign(data), stats: await getCampaignStats(supabase) };
 }
 
-async function getAudienceOptions(supabase) {
-  const sources = new Set();
-  const tags = new Set();
-  let page = 0;
-
-  while (page < 50) {
-    const from = page * OPTION_PAGE_SIZE;
-    const to = from + OPTION_PAGE_SIZE - 1;
-    const { data } = assertSupabase(
-      await supabase.from("marketing_contacts").select("source,tags").range(from, to),
-      "Could not load audience filter options."
-    );
-    const rows = data || [];
-    rows.forEach((row) => {
-      if (row.source) sources.add(row.source);
-      if (Array.isArray(row.tags)) row.tags.forEach((tag) => { if (tag) tags.add(tag); });
-    });
-    if (rows.length < OPTION_PAGE_SIZE) break;
-    page += 1;
-  }
-
+async function getAudienceOptions() {
   return {
-    sources: Array.from(sources).sort(),
-    tags: Array.from(tags).sort(),
+    sources: Array.from(new Set(SOURCE_OPTIONS.map((source) => String(source || "").trim()).filter(Boolean))).sort(),
+    tags: Array.from(new Set(DEFAULT_TAGS.map((tag) => String(tag || "").trim()).filter(Boolean))).sort(),
   };
 }
 
@@ -427,7 +407,7 @@ export default async function handler(request, response) {
     else if (action === "create") result = await createCampaign(supabase, body);
     else if (action === "update") result = await updateCampaign(supabase, body);
     else if (action === "archive") result = await archiveCampaign(supabase, body);
-    else if (action === "audienceOptions") result = { options: await getAudienceOptions(supabase) };
+    else if (action === "audienceOptions") result = { options: await getAudienceOptions() };
     else if (action === "previewAudience") result = await previewAudience(supabase, body);
     else if (action === "saveAudience") result = await saveAudience(supabase, body);
     else throw new Error("Unknown Marketing Campaign API action.");
