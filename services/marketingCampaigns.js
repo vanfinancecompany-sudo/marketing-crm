@@ -69,3 +69,24 @@ export async function saveMarketingCampaignAudience(campaign, rules) {
     audience: result.audience,
   };
 }
+
+export async function listMarketingCampaignBatches(campaign) {
+  const result = await requestMarketingCampaigns("listBatches", { campaign });
+  return {
+    batches: result.batches || [],
+    summary: result.summary || {},
+  };
+}
+
+export async function previewMarketingCampaignBatch(campaign, requestedSize) {
+  const result = await requestMarketingCampaigns("previewNextBatch", { campaign, requestedSize });
+  return result.preview;
+}
+
+export async function generateMarketingCampaignBatch(campaign, requestedSize) {
+  const result = await requestMarketingCampaigns("generateBatch", { campaign, requestedSize });
+  return {
+    batch: result.batch,
+    summary: result.summary || {},
+  };
+}
