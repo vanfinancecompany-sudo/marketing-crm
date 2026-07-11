@@ -53,6 +53,7 @@ import Sidebar from "./components/Sidebar.jsx";
 import ControlCentrePage from "./pages/ControlCentrePage.jsx";
 import DashboardPage from "./pages/DashboardPage.jsx";
 import CustomerDatabasePage from "./pages/CustomerDatabasePage.jsx";
+import MarketingCentrePage from "./pages/MarketingCentrePage.jsx";
 import StockPage from "./pages/StockPage.jsx";
 import VanscoStockWatchPage from "./pages/VanscoStockWatchPage.jsx";
 import ReelFactoryPage from "./pages/ReelFactoryPage.jsx";
@@ -450,6 +451,7 @@ const VIEW_PATHS = {
   Dashboard: "/",
   Stock: "/stock",
   "Customer Database": "/customer-database",
+  "Marketing Centre": "/marketing-centre",
   "Vansco Stock Watch": "/vansco-stock-watch",
   "Reel Factory": "/reel-factory",
   "Premium Reel Studio": "/premium-reel-studio",
@@ -468,6 +470,7 @@ function viewFromPath() {
 
   if (path === "/stock") return "Stock";
   if (path === "/customer-database") return "Customer Database";
+  if (path === "/marketing-centre") return "Marketing Centre";
   if (path === "/vansco-stock-watch") return "Vansco Stock Watch";
   if (path === "/reel-factory") return "Reel Factory";
   if (path === "/premium-reel-studio" || path === "/reel-studio-beta" || path === "/premium-reels") {
@@ -2679,6 +2682,8 @@ async function handleClearTodayReels() {
         );
       case "Customer Database":
         return <CustomerDatabasePage />;
+      case "Marketing Centre":
+        return <MarketingCentrePage />;
       case "Vansco Stock Watch":
         return <VanscoStockWatchPage />;
       case "Reel Factory":
