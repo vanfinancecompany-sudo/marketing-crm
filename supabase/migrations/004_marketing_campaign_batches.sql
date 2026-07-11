@@ -66,7 +66,7 @@ create or replace function public.marketing_campaign_batch_eligible_customer_ids
   p_campaign_id uuid,
   p_exclude_batched boolean default true
 )
-returns table(customer_id uuid)
+returns table(customer_id uuid, last_seen_at timestamptz, created_at timestamptz)
 language plpgsql
 as $$
 declare
@@ -126,7 +126,7 @@ begin
   from jsonb_array_elements_text(coalesce(v_rules -> 'exclude_tags', '[]'::jsonb)) as value;
 
   return query
-  select c.id
+  select c.id, c.last_seen_at, c.created_at
   from public.marketing_contacts c
   where
     (
@@ -163,8 +163,7 @@ begin
         where bcx.campaign_id = p_campaign_id
           and bcx.customer_id = c.id
       )
-    )
-  order by c.last_seen_at asc, c.created_at asc, c.id asc;
+    );
 end;
 $$;
 
@@ -283,10 +282,11 @@ begin
   from public.marketing_campaign_batches mcb
   where mcb.campaign_id = p_campaign_id;
 
-  select coalesce(array_agg(candidate.customer_id), '{}') into v_customer_ids
+  select coalesce(array_agg(candidate.customer_id order by candidate.last_seen_at asc, candidate.created_at asc, candidate.customer_id asc), '{}') into v_customer_ids
   from (
-    select customer_id
+    select customer_id, last_seen_at, created_at
     from public.marketing_campaign_batch_eligible_customer_ids(p_campaign_id, true)
+    order by last_seen_at asc, created_at asc, customer_id asc
     limit p_requested_size
   ) candidate;
 
@@ -338,3 +338,18 @@ begin
   where b.id = v_batch_id;
 end;
 $$;
+
+revoke all on function public.marketing_campaign_batch_eligible_customer_ids(uuid, boolean) from public;
+revoke all on function public.marketing_campaign_batch_eligible_customer_ids(uuid, boolean) from anon;
+revoke all on function public.marketing_campaign_batch_eligible_customer_ids(uuid, boolean) from authenticated;
+grant execute on function public.marketing_campaign_batch_eligible_customer_ids(uuid, boolean) to service_role;
+
+revoke all on function public.marketing_preview_next_campaign_batch(uuid, integer) from public;
+revoke all on function public.marketing_preview_next_campaign_batch(uuid, integer) from anon;
+revoke all on function public.marketing_preview_next_campaign_batch(uuid, integer) from authenticated;
+grant execute on function public.marketing_preview_next_campaign_batch(uuid, integer) to service_role;
+
+revoke all on function public.marketing_generate_campaign_batch(uuid, integer, text) from public;
+revoke all on function public.marketing_generate_campaign_batch(uuid, integer, text) from anon;
+revoke all on function public.marketing_generate_campaign_batch(uuid, integer, text) from authenticated;
+grant execute on function public.marketing_generate_campaign_batch(uuid, integer, text) to service_role;
