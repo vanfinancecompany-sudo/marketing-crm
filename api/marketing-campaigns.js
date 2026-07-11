@@ -3,6 +3,7 @@ import { DEFAULT_TAGS, SOURCE_OPTIONS } from "../utils/contactCleaning.js";
 
 const CAMPAIGN_COLUMNS = "id,name,description,channel,objective,status,tags,metadata,created_by,created_at,updated_at,archived_at";
 const BATCH_COLUMNS = "id,campaign_id,batch_number,status,requested_size,customer_count,audience_rules,audience_calculated_at,created_by,created_at,updated_at,exported_at,exported_by,export_filename,export_count,sent_at,cancelled_at,metadata";
+const PRIVATE_BATCH_COLUMNS = `${BATCH_COLUMNS},export_csv`;
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const CHANNELS = new Set(["email", "sms", "facebook"]);
 const OBJECTIVES = new Set(["new_stock", "promotion", "finance_offer", "rent2buy", "re_engagement", "custom"]);
@@ -84,6 +85,7 @@ function isMissingBatchInfrastructure(error) {
     || message.includes("marketing_generate_campaign_batch")
     || message.includes("export_filename")
     || message.includes("export_count")
+    || message.includes("export_csv")
     || message.includes("exported_by")
     || message.includes("could not find the function")
     || message.includes("does not exist");
@@ -127,6 +129,13 @@ function normalizeBatch(row = {}) {
     sent_at: row.sent_at || "",
     cancelled_at: row.cancelled_at || "",
     metadata: row.metadata && typeof row.metadata === "object" ? row.metadata : {},
+  };
+}
+
+function normalizePrivateBatch(row = {}) {
+  return {
+    ...normalizeBatch(row),
+    export_csv: row.export_csv || "",
   };
 }
 
@@ -262,8 +271,13 @@ function arrayLiteral(value) {
   return `{${String(value).replace(/"/g, "").replace(/\\/g, "")}}`;
 }
 
-function escapeCsvValue(value) {
+function neutralizeCsvFormula(value) {
   const text = String(value ?? "");
+  return /^[=+\-@]/.test(text) ? `'${text}` : text;
+}
+
+function escapeCsvValue(value) {
+  const text = neutralizeCsvFormula(value);
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
@@ -334,6 +348,15 @@ async function loadBatch(supabase, id) {
     "Could not load campaign batch."
   );
   return normalizeBatch(data);
+}
+
+async function loadPrivateBatch(supabase, id) {
+  if (!id) throw new Error("Batch ID is required.");
+  const { data } = assertSupabase(
+    await supabase.from("marketing_campaign_batches").select(PRIVATE_BATCH_COLUMNS).eq("id", id).single(),
+    "Could not load campaign batch."
+  );
+  return normalizePrivateBatch(data);
 }
 
 async function countCampaigns(supabase, filter = {}) {
@@ -599,12 +622,11 @@ async function loadBatchCsvRows(supabase, batch) {
   return rows;
 }
 
-async function loadBatchExport(supabase, body) {
-  const batch = await loadBatch(supabase, body.batch?.id || body.batchId || body.id);
+async function buildFirstBatchExport(supabase, batch) {
   const campaign = await loadCampaign(supabase, batch.campaign_id);
   const rows = await loadBatchCsvRows(supabase, batch);
-  const filename = batch.export_filename || buildBatchExportFilename(campaign, batch);
-  return { batch, campaign, rows, filename, csv: buildBatchCsv(rows) };
+  const filename = buildBatchExportFilename(campaign, batch);
+  return { campaign, rows, filename, csv: buildBatchCsv(rows) };
 }
 
 async function listBatchHistory(supabase, body) {
@@ -612,42 +634,51 @@ async function listBatchHistory(supabase, body) {
 }
 
 async function exportBatch(supabase, body) {
-  const { batch, campaign, rows, filename, csv } = await loadBatchExport(supabase, body);
-  if (batch.status === "exported" && !body.confirmExport) {
-    throw new Error("This batch has already been exported. Confirm before exporting it again.");
+  const batch = await loadPrivateBatch(supabase, body.batch?.id || body.batchId || body.id);
+  if (batch.status === "exported") {
+    if (!body.confirmExport) throw new Error("This batch has already been exported. Confirm before exporting it again.");
+    if (!batch.export_csv) throw new Error("This batch does not have a stored export snapshot.");
+    return {
+      batch: normalizeBatch(batch),
+      csv: { filename: batch.export_filename, content: batch.export_csv, count: batch.export_count },
+      summary: await getBatchSummaryMap(supabase, [batch.campaign_id]).then((map) => map.get(batch.campaign_id) || EMPTY_BATCH_SUMMARY),
+    };
   }
 
+  const { rows, filename, csv } = await buildFirstBatchExport(supabase, batch);
   const exportedAt = new Date().toISOString();
   const { data } = assertSupabase(
     await supabase
       .from("marketing_campaign_batches")
       .update({
         status: "exported",
-        exported_at: batch.exported_at || exportedAt,
-        exported_by: cleanText(body.exportedBy || body.createdBy || batch.exported_by || ""),
+        exported_at: exportedAt,
+        exported_by: cleanText(body.exportedBy || body.createdBy || ""),
         export_filename: filename,
         export_count: rows.length,
+        export_csv: csv,
       })
       .eq("id", batch.id)
-      .select(BATCH_COLUMNS)
+      .select(PRIVATE_BATCH_COLUMNS)
       .single(),
     "Could not mark campaign batch as exported."
   );
 
-  const updatedBatch = normalizeBatch(data);
+  const updatedBatch = normalizePrivateBatch(data);
   return {
-    batch: updatedBatch,
-    csv: { filename, content: csv, count: rows.length },
-    summary: await getBatchSummaryMap(supabase, [campaign.id]).then((map) => map.get(campaign.id) || EMPTY_BATCH_SUMMARY),
+    batch: normalizeBatch(updatedBatch),
+    csv: { filename, content: updatedBatch.export_csv, count: updatedBatch.export_count },
+    summary: await getBatchSummaryMap(supabase, [updatedBatch.campaign_id]).then((map) => map.get(updatedBatch.campaign_id) || EMPTY_BATCH_SUMMARY),
   };
 }
 
 async function downloadBatchCsv(supabase, body) {
-  const { batch, rows, filename, csv } = await loadBatchExport(supabase, body);
+  const batch = await loadPrivateBatch(supabase, body.batch?.id || body.batchId || body.id);
   if (batch.status !== "exported") throw new Error("Export this batch before downloading the CSV.");
+  if (!batch.export_csv) throw new Error("This batch does not have a stored export snapshot.");
   return {
-    batch,
-    csv: { filename, content: csv, count: rows.length },
+    batch: normalizeBatch(batch),
+    csv: { filename: batch.export_filename, content: batch.export_csv, count: batch.export_count },
   };
 }
 
