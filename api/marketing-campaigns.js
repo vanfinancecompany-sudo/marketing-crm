@@ -2,7 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 import { DEFAULT_TAGS, SOURCE_OPTIONS } from "../utils/contactCleaning.js";
 
 const CAMPAIGN_COLUMNS = "id,name,description,channel,objective,status,tags,metadata,created_by,created_at,updated_at,archived_at";
-const BATCH_COLUMNS = "id,campaign_id,batch_number,status,requested_size,customer_count,audience_rules,audience_calculated_at,created_by,created_at,updated_at,exported_at,sent_at,cancelled_at,metadata";
+const BATCH_COLUMNS = "id,campaign_id,batch_number,status,requested_size,customer_count,audience_rules,audience_calculated_at,created_by,created_at,updated_at,exported_at,exported_by,export_filename,export_count,sent_at,cancelled_at,metadata";
+const PRIVATE_BATCH_COLUMNS = `${BATCH_COLUMNS},export_csv`;
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const CHANNELS = new Set(["email", "sms", "facebook"]);
 const OBJECTIVES = new Set(["new_stock", "promotion", "finance_offer", "rent2buy", "re_engagement", "custom"]);
@@ -26,6 +27,7 @@ const DEFAULT_AUDIENCE_RULES = {
 const EMPTY_BATCH_SUMMARY = {
   total_batches: 0,
   total_customers_batched: 0,
+  total_customers_exported: 0,
 };
 
 function json(response, status, payload) {
@@ -81,6 +83,10 @@ function isMissingBatchInfrastructure(error) {
     || message.includes("marketing_campaign_batch_customers")
     || message.includes("marketing_preview_next_campaign_batch")
     || message.includes("marketing_generate_campaign_batch")
+    || message.includes("export_filename")
+    || message.includes("export_count")
+    || message.includes("export_csv")
+    || message.includes("exported_by")
     || message.includes("could not find the function")
     || message.includes("does not exist");
 }
@@ -117,9 +123,19 @@ function normalizeBatch(row = {}) {
     created_at: row.created_at || "",
     updated_at: row.updated_at || "",
     exported_at: row.exported_at || "",
+    exported_by: row.exported_by || "",
+    export_filename: row.export_filename || "",
+    export_count: Number(row.export_count || 0),
     sent_at: row.sent_at || "",
     cancelled_at: row.cancelled_at || "",
     metadata: row.metadata && typeof row.metadata === "object" ? row.metadata : {},
+  };
+}
+
+function normalizePrivateBatch(row = {}) {
+  return {
+    ...normalizeBatch(row),
+    export_csv: row.export_csv || "",
   };
 }
 
@@ -255,6 +271,30 @@ function arrayLiteral(value) {
   return `{${String(value).replace(/"/g, "").replace(/\\/g, "")}}`;
 }
 
+function neutralizeCsvFormula(value) {
+  const text = String(value ?? "");
+  return /^\s*[=+\-@]/.test(text) ? `'${text}` : text;
+}
+
+function escapeCsvValue(value) {
+  const text = neutralizeCsvFormula(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function buildBatchExportFilename(campaign, batch) {
+  const safeName = String(campaign?.name || "campaign").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "campaign";
+  return `${safeName}-batch-${batch.batch_number}.csv`;
+}
+
+function buildBatchCsv(rows) {
+  const headers = ["customer_id", "name", "email", "phone", "postcode", "pipeline", "source"];
+  const lines = [headers.join(",")];
+  rows.forEach((row) => {
+    lines.push(headers.map((header) => escapeCsvValue(row[header])).join(","));
+  });
+  return lines.join("\n");
+}
+
 function applyAudienceQuery(query, rules, channel) {
   if (channel === "email") query = query.eq("email_ready", true);
   else if (channel === "sms") query = query.eq("sms_ready", true);
@@ -301,6 +341,24 @@ async function loadCampaign(supabase, id) {
   return normalizeCampaign(data);
 }
 
+async function loadBatch(supabase, id) {
+  if (!id) throw new Error("Batch ID is required.");
+  const { data } = assertSupabase(
+    await supabase.from("marketing_campaign_batches").select(BATCH_COLUMNS).eq("id", id).single(),
+    "Could not load campaign batch."
+  );
+  return normalizeBatch(data);
+}
+
+async function loadPrivateBatch(supabase, id) {
+  if (!id) throw new Error("Batch ID is required.");
+  const { data } = assertSupabase(
+    await supabase.from("marketing_campaign_batches").select(PRIVATE_BATCH_COLUMNS).eq("id", id).single(),
+    "Could not load campaign batch."
+  );
+  return normalizePrivateBatch(data);
+}
+
 async function countCampaigns(supabase, filter = {}) {
   let query = supabase.from("marketing_campaigns").select("id", { count: "exact", head: true });
   if (filter.status) query = query.eq("status", filter.status);
@@ -328,13 +386,14 @@ async function getBatchSummaryMap(supabase, campaignIds = []) {
 
   try {
     const { data } = assertSupabase(
-      await supabase.from("marketing_campaign_batches").select("campaign_id,customer_count").in("campaign_id", ids),
+      await supabase.from("marketing_campaign_batches").select("campaign_id,customer_count,status,export_count").in("campaign_id", ids),
       "Could not load campaign batch summaries."
     );
     (data || []).forEach((row) => {
       const current = summaries.get(row.campaign_id) || { ...EMPTY_BATCH_SUMMARY };
       current.total_batches += 1;
       current.total_customers_batched += Number(row.customer_count || 0);
+      if (row.status === "exported") current.total_customers_exported += Number(row.export_count || row.customer_count || 0);
       summaries.set(row.campaign_id, current);
     });
   } catch (error) {
@@ -468,6 +527,14 @@ async function saveAudience(supabase, body) {
   };
 }
 
+function summarizeBatches(batches = []) {
+  return {
+    total_batches: batches.length,
+    total_customers_batched: batches.reduce((total, batch) => total + Number(batch.customer_count || 0), 0),
+    total_customers_exported: batches.reduce((total, batch) => total + (batch.status === "exported" ? Number(batch.export_count || batch.customer_count || 0) : 0), 0),
+  };
+}
+
 async function listBatches(supabase, body) {
   const campaign = await loadCampaign(supabase, body.campaign?.id || body.id);
   try {
@@ -478,10 +545,7 @@ async function listBatches(supabase, body) {
     const batches = (data || []).map(normalizeBatch);
     return {
       batches,
-      summary: {
-        total_batches: batches.length,
-        total_customers_batched: batches.reduce((total, batch) => total + Number(batch.customer_count || 0), 0),
-      },
+      summary: summarizeBatches(batches),
     };
   } catch (error) {
     if (isMissingBatchInfrastructure(error)) return { batches: [], summary: { ...EMPTY_BATCH_SUMMARY, migration_required: true } };
@@ -519,12 +583,118 @@ async function generateBatch(supabase, body) {
       summary: {
         total_batches: Number(row.total_batches || 0),
         total_customers_batched: Number(row.total_customers_batched || 0),
+        total_customers_exported: 0,
       },
     };
   } catch (error) {
     if (isMissingBatchInfrastructure(error)) throw new Error("Campaign batch migration has not been applied yet.");
     throw error;
   }
+}
+
+async function loadBatchCsvRows(supabase, batch) {
+  const { data } = assertSupabase(
+    await supabase
+      .from("marketing_campaign_batch_customers")
+      .select("customer_id,marketing_contacts!inner(id,name,email,phone,postcode,pipeline,source)")
+      .eq("batch_id", batch.id)
+      .order("added_at", { ascending: true }),
+    "Could not load batch customers for export."
+  );
+
+  const rows = [];
+  const seen = new Set();
+  (data || []).forEach((row) => {
+    const customer = Array.isArray(row.marketing_contacts) ? row.marketing_contacts[0] : row.marketing_contacts;
+    const customerId = row.customer_id || customer?.id;
+    if (!customerId || seen.has(customerId)) return;
+    seen.add(customerId);
+    rows.push({
+      customer_id: customerId,
+      name: customer?.name || "",
+      email: customer?.email || "",
+      phone: customer?.phone || "",
+      postcode: customer?.postcode || "",
+      pipeline: customer?.pipeline || "",
+      source: customer?.source || "",
+    });
+  });
+  return rows;
+}
+
+async function buildFirstBatchExport(supabase, batch) {
+  const campaign = await loadCampaign(supabase, batch.campaign_id);
+  const rows = await loadBatchCsvRows(supabase, batch);
+  const filename = buildBatchExportFilename(campaign, batch);
+  return { campaign, rows, filename, csv: buildBatchCsv(rows) };
+}
+
+async function listBatchHistory(supabase, body) {
+  return listBatches(supabase, body);
+}
+
+async function returnStoredExport(supabase, batch) {
+  if (!batch.export_csv) throw new Error("This batch does not have a stored export snapshot.");
+  return {
+    batch: normalizeBatch(batch),
+    csv: { filename: batch.export_filename, content: batch.export_csv, count: batch.export_count },
+    summary: await getBatchSummaryMap(supabase, [batch.campaign_id]).then((map) => map.get(batch.campaign_id) || EMPTY_BATCH_SUMMARY),
+  };
+}
+
+async function exportBatch(supabase, body) {
+  const batch = await loadPrivateBatch(supabase, body.batch?.id || body.batchId || body.id);
+  if (batch.status === "exported") {
+    if (!body.confirmExport) throw new Error("This batch has already been exported. Confirm before exporting it again.");
+    return returnStoredExport(supabase, batch);
+  }
+  if (batch.status !== "pending") throw new Error(`Only pending batches can be exported. Current status: ${batch.status || "unknown"}.`);
+  if (batch.export_csv) throw new Error("This batch already has a stored export snapshot.");
+
+  const { rows, filename, csv } = await buildFirstBatchExport(supabase, batch);
+  const exportedAt = new Date().toISOString();
+  const updateResult = assertSupabase(
+    await supabase
+      .from("marketing_campaign_batches")
+      .update({
+        status: "exported",
+        exported_at: exportedAt,
+        exported_by: cleanText(body.exportedBy || body.createdBy || ""),
+        export_filename: filename,
+        export_count: rows.length,
+        export_csv: csv,
+      })
+      .eq("id", batch.id)
+      .eq("status", "pending")
+      .is("export_csv", null)
+      .select(PRIVATE_BATCH_COLUMNS),
+    "Could not mark campaign batch as exported."
+  );
+  const updatedBatch = normalizePrivateBatch((updateResult.data || [])[0]);
+
+  if (!updatedBatch.id) {
+    const currentBatch = await loadPrivateBatch(supabase, batch.id);
+    if (currentBatch.status === "exported") {
+      if (!body.confirmExport) throw new Error("This batch has already been exported. Confirm before exporting it again.");
+      return returnStoredExport(supabase, currentBatch);
+    }
+    throw new Error(`Only pending batches can be exported. Current status: ${currentBatch.status || "unknown"}.`);
+  }
+
+  return {
+    batch: normalizeBatch(updatedBatch),
+    csv: { filename: updatedBatch.export_filename, content: updatedBatch.export_csv, count: updatedBatch.export_count },
+    summary: await getBatchSummaryMap(supabase, [updatedBatch.campaign_id]).then((map) => map.get(updatedBatch.campaign_id) || EMPTY_BATCH_SUMMARY),
+  };
+}
+
+async function downloadBatchCsv(supabase, body) {
+  const batch = await loadPrivateBatch(supabase, body.batch?.id || body.batchId || body.id);
+  if (batch.status !== "exported") throw new Error("Export this batch before downloading the CSV.");
+  return {
+    batch: normalizeBatch(batch),
+    csv: { filename: batch.export_filename, content: batch.export_csv, count: batch.export_count },
+  };
 }
 
 export default async function handler(request, response) {
@@ -554,8 +724,11 @@ export default async function handler(request, response) {
     else if (action === "previewAudience") result = await previewAudience(supabase, body);
     else if (action === "saveAudience") result = await saveAudience(supabase, body);
     else if (action === "listBatches") result = await listBatches(supabase, body);
+    else if (action === "listBatchHistory") result = await listBatchHistory(supabase, body);
     else if (action === "previewNextBatch") result = await previewNextBatch(supabase, body);
     else if (action === "generateBatch") result = await generateBatch(supabase, body);
+    else if (action === "exportBatch") result = await exportBatch(supabase, body);
+    else if (action === "downloadBatchCsv") result = await downloadBatchCsv(supabase, body);
     else throw new Error("Unknown Marketing Campaign API action.");
 
     json(response, 200, { ok: true, ...result });

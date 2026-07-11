@@ -78,6 +78,14 @@ export async function listMarketingCampaignBatches(campaign) {
   };
 }
 
+export async function listMarketingCampaignBatchHistory(campaign) {
+  const result = await requestMarketingCampaigns("listBatchHistory", { campaign });
+  return {
+    batches: result.batches || [],
+    summary: result.summary || {},
+  };
+}
+
 export async function previewMarketingCampaignBatch(campaign, requestedSize) {
   const result = await requestMarketingCampaigns("previewNextBatch", { campaign, requestedSize });
   return result.preview;
@@ -88,5 +96,22 @@ export async function generateMarketingCampaignBatch(campaign, requestedSize) {
   return {
     batch: result.batch,
     summary: result.summary || {},
+  };
+}
+
+export async function exportMarketingCampaignBatch(batch, { confirmExport = false, exportedBy = "" } = {}) {
+  const result = await requestMarketingCampaigns("exportBatch", { batch, confirmExport, exportedBy });
+  return {
+    batch: result.batch,
+    summary: result.summary || {},
+    csv: result.csv || null,
+  };
+}
+
+export async function downloadMarketingCampaignBatchCsv(batch) {
+  const result = await requestMarketingCampaigns("downloadBatchCsv", { batch });
+  return {
+    batch: result.batch,
+    csv: result.csv || null,
   };
 }
