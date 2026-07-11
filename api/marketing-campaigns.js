@@ -84,6 +84,9 @@ function cleanCampaignValues(values = {}, existingCampaign = null) {
   if (!CHANNELS.has(channel)) throw new Error("Unsupported campaign channel.");
   if (!OBJECTIVES.has(objective)) throw new Error("Unsupported campaign objective.");
   if (!STATUSES.has(status)) throw new Error("Unsupported campaign status.");
+  if (existingCampaign?.status !== "archived" && requestedStatus === "archived") {
+    throw new Error("Use the dedicated Archive action to archive campaigns.");
+  }
 
   return {
     name,
