@@ -273,7 +273,7 @@ function arrayLiteral(value) {
 
 function neutralizeCsvFormula(value) {
   const text = String(value ?? "");
-  return /^[=+\-@]/.test(text) ? `'${text}` : text;
+  return /^\s*[=+\-@]/.test(text) ? `'${text}` : text;
 }
 
 function escapeCsvValue(value) {
@@ -633,21 +633,27 @@ async function listBatchHistory(supabase, body) {
   return listBatches(supabase, body);
 }
 
+async function returnStoredExport(supabase, batch) {
+  if (!batch.export_csv) throw new Error("This batch does not have a stored export snapshot.");
+  return {
+    batch: normalizeBatch(batch),
+    csv: { filename: batch.export_filename, content: batch.export_csv, count: batch.export_count },
+    summary: await getBatchSummaryMap(supabase, [batch.campaign_id]).then((map) => map.get(batch.campaign_id) || EMPTY_BATCH_SUMMARY),
+  };
+}
+
 async function exportBatch(supabase, body) {
   const batch = await loadPrivateBatch(supabase, body.batch?.id || body.batchId || body.id);
   if (batch.status === "exported") {
     if (!body.confirmExport) throw new Error("This batch has already been exported. Confirm before exporting it again.");
-    if (!batch.export_csv) throw new Error("This batch does not have a stored export snapshot.");
-    return {
-      batch: normalizeBatch(batch),
-      csv: { filename: batch.export_filename, content: batch.export_csv, count: batch.export_count },
-      summary: await getBatchSummaryMap(supabase, [batch.campaign_id]).then((map) => map.get(batch.campaign_id) || EMPTY_BATCH_SUMMARY),
-    };
+    return returnStoredExport(supabase, batch);
   }
+  if (batch.status !== "pending") throw new Error(`Only pending batches can be exported. Current status: ${batch.status || "unknown"}.`);
+  if (batch.export_csv) throw new Error("This batch already has a stored export snapshot.");
 
   const { rows, filename, csv } = await buildFirstBatchExport(supabase, batch);
   const exportedAt = new Date().toISOString();
-  const { data } = assertSupabase(
+  const updateResult = assertSupabase(
     await supabase
       .from("marketing_campaign_batches")
       .update({
@@ -659,15 +665,25 @@ async function exportBatch(supabase, body) {
         export_csv: csv,
       })
       .eq("id", batch.id)
-      .select(PRIVATE_BATCH_COLUMNS)
-      .single(),
+      .eq("status", "pending")
+      .is("export_csv", null)
+      .select(PRIVATE_BATCH_COLUMNS),
     "Could not mark campaign batch as exported."
   );
+  const updatedBatch = normalizePrivateBatch((updateResult.data || [])[0]);
 
-  const updatedBatch = normalizePrivateBatch(data);
+  if (!updatedBatch.id) {
+    const currentBatch = await loadPrivateBatch(supabase, batch.id);
+    if (currentBatch.status === "exported") {
+      if (!body.confirmExport) throw new Error("This batch has already been exported. Confirm before exporting it again.");
+      return returnStoredExport(supabase, currentBatch);
+    }
+    throw new Error(`Only pending batches can be exported. Current status: ${currentBatch.status || "unknown"}.`);
+  }
+
   return {
     batch: normalizeBatch(updatedBatch),
-    csv: { filename, content: updatedBatch.export_csv, count: updatedBatch.export_count },
+    csv: { filename: updatedBatch.export_filename, content: updatedBatch.export_csv, count: updatedBatch.export_count },
     summary: await getBatchSummaryMap(supabase, [updatedBatch.campaign_id]).then((map) => map.get(updatedBatch.campaign_id) || EMPTY_BATCH_SUMMARY),
   };
 }
@@ -675,7 +691,6 @@ async function exportBatch(supabase, body) {
 async function downloadBatchCsv(supabase, body) {
   const batch = await loadPrivateBatch(supabase, body.batch?.id || body.batchId || body.id);
   if (batch.status !== "exported") throw new Error("Export this batch before downloading the CSV.");
-  if (!batch.export_csv) throw new Error("This batch does not have a stored export snapshot.");
   return {
     batch: normalizeBatch(batch),
     csv: { filename: batch.export_filename, content: batch.export_csv, count: batch.export_count },
