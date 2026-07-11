@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { DEFAULT_TAGS, SOURCE_OPTIONS } from "../utils/contactCleaning.js";
 
 const CAMPAIGN_COLUMNS = "id,name,description,channel,objective,status,tags,metadata,created_by,created_at,updated_at,archived_at";
+const BATCH_COLUMNS = "id,campaign_id,batch_number,status,requested_size,customer_count,audience_rules,audience_calculated_at,created_by,created_at,updated_at,exported_at,sent_at,cancelled_at,metadata";
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const CHANNELS = new Set(["email", "sms", "facebook"]);
 const OBJECTIVES = new Set(["new_stock", "promotion", "finance_offer", "rent2buy", "re_engagement", "custom"]);
@@ -10,6 +11,7 @@ const ACTIVE_STATUSES = ["ready", "running", "paused"];
 const PIPELINES = new Set(["all", "finance", "rent2buy", "both"]);
 const LAST_SEEN_PERIODS = new Set(["all", "last30", "last90", "last180", "last365", "more_than_180"]);
 const CREATED_PERIODS = new Set(["all", "today", "last7", "last30", "last90", "this_year"]);
+const MAX_BATCH_SIZE = 5000;
 
 const DEFAULT_AUDIENCE_RULES = {
   pipeline: "all",
@@ -19,6 +21,11 @@ const DEFAULT_AUDIENCE_RULES = {
   last_seen_period: "all",
   created_period: "all",
   exclude_unknown_pipeline: false,
+};
+
+const EMPTY_BATCH_SUMMARY = {
+  total_batches: 0,
+  total_customers_batched: 0,
 };
 
 function json(response, status, payload) {
@@ -68,6 +75,16 @@ function assertSupabase(result, fallbackMessage) {
   return result;
 }
 
+function isMissingBatchInfrastructure(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return message.includes("marketing_campaign_batches")
+    || message.includes("marketing_campaign_batch_customers")
+    || message.includes("marketing_preview_next_campaign_batch")
+    || message.includes("marketing_generate_campaign_batch")
+    || message.includes("could not find the function")
+    || message.includes("does not exist");
+}
+
 function normalizeCampaign(row = {}) {
   return {
     id: row.id || "",
@@ -78,10 +95,44 @@ function normalizeCampaign(row = {}) {
     status: row.status || "draft",
     tags: Array.isArray(row.tags) ? row.tags : [],
     metadata: row.metadata && typeof row.metadata === "object" ? row.metadata : {},
+    batch_summary: row.batch_summary || EMPTY_BATCH_SUMMARY,
     created_by: row.created_by || "",
     created_at: row.created_at || "",
     updated_at: row.updated_at || "",
     archived_at: row.archived_at || "",
+  };
+}
+
+function normalizeBatch(row = {}) {
+  return {
+    id: row.id || "",
+    campaign_id: row.campaign_id || "",
+    batch_number: Number(row.batch_number || 0),
+    status: row.status || "pending",
+    requested_size: Number(row.requested_size || 0),
+    customer_count: Number(row.customer_count || 0),
+    audience_rules: row.audience_rules && typeof row.audience_rules === "object" ? row.audience_rules : {},
+    audience_calculated_at: row.audience_calculated_at || "",
+    created_by: row.created_by || "",
+    created_at: row.created_at || "",
+    updated_at: row.updated_at || "",
+    exported_at: row.exported_at || "",
+    sent_at: row.sent_at || "",
+    cancelled_at: row.cancelled_at || "",
+    metadata: row.metadata && typeof row.metadata === "object" ? row.metadata : {},
+  };
+}
+
+function normalizeBatchPreview(row = {}) {
+  return {
+    eligible_count: Number(row.eligible_count || 0),
+    already_batched: Number(row.already_batched || 0),
+    remaining_count: Number(row.remaining_count || 0),
+    requested_size: Number(row.requested_size || 0),
+    selected_count: Number(row.selected_count || 0),
+    next_batch_number: Number(row.next_batch_number || 1),
+    total_batches: Number(row.total_batches || 0),
+    total_customers_batched: Number(row.total_customers_batched || 0),
   };
 }
 
@@ -147,6 +198,14 @@ function getAudienceMetadata(campaign) {
     eligible_count: Number.isFinite(Number(audience.eligible_count)) ? Number(audience.eligible_count) : null,
     calculated_at: audience.calculated_at || null,
   };
+}
+
+function validateBatchSize(value) {
+  const size = Number(value || 0);
+  if (!Number.isInteger(size) || size < 1 || size > MAX_BATCH_SIZE) {
+    throw new Error("Batch size must be between 1 and 5000.");
+  }
+  return size;
 }
 
 function getLondonDateParts(date) {
@@ -262,6 +321,29 @@ async function getCampaignStats(supabase) {
   return { total, draft, active, completed, archived };
 }
 
+async function getBatchSummaryMap(supabase, campaignIds = []) {
+  const ids = campaignIds.filter(Boolean);
+  const summaries = new Map(ids.map((id) => [id, { ...EMPTY_BATCH_SUMMARY }]));
+  if (!ids.length) return summaries;
+
+  try {
+    const { data } = assertSupabase(
+      await supabase.from("marketing_campaign_batches").select("campaign_id,customer_count").in("campaign_id", ids),
+      "Could not load campaign batch summaries."
+    );
+    (data || []).forEach((row) => {
+      const current = summaries.get(row.campaign_id) || { ...EMPTY_BATCH_SUMMARY };
+      current.total_batches += 1;
+      current.total_customers_batched += Number(row.customer_count || 0);
+      summaries.set(row.campaign_id, current);
+    });
+  } catch (error) {
+    if (!isMissingBatchInfrastructure(error)) throw error;
+  }
+
+  return summaries;
+}
+
 async function listCampaigns(supabase, body) {
   const includeArchived = Boolean(body.includeArchived);
   let query = supabase
@@ -272,8 +354,10 @@ async function listCampaigns(supabase, body) {
   if (!includeArchived) query = query.neq("status", "archived");
 
   const { data } = assertSupabase(await query, "Could not load marketing campaigns.");
+  const rows = data || [];
+  const batchSummaries = await getBatchSummaryMap(supabase, rows.map((campaign) => campaign.id));
   return {
-    campaigns: (data || []).map(normalizeCampaign),
+    campaigns: rows.map((campaign) => normalizeCampaign({ ...campaign, batch_summary: batchSummaries.get(campaign.id) || EMPTY_BATCH_SUMMARY })),
     stats: await getCampaignStats(supabase),
   };
 }
@@ -384,6 +468,65 @@ async function saveAudience(supabase, body) {
   };
 }
 
+async function listBatches(supabase, body) {
+  const campaign = await loadCampaign(supabase, body.campaign?.id || body.id);
+  try {
+    const { data } = assertSupabase(
+      await supabase.from("marketing_campaign_batches").select(BATCH_COLUMNS).eq("campaign_id", campaign.id).order("batch_number", { ascending: false }),
+      "Could not load campaign batches."
+    );
+    const batches = (data || []).map(normalizeBatch);
+    return {
+      batches,
+      summary: {
+        total_batches: batches.length,
+        total_customers_batched: batches.reduce((total, batch) => total + Number(batch.customer_count || 0), 0),
+      },
+    };
+  } catch (error) {
+    if (isMissingBatchInfrastructure(error)) return { batches: [], summary: { ...EMPTY_BATCH_SUMMARY, migration_required: true } };
+    throw error;
+  }
+}
+
+async function previewNextBatch(supabase, body) {
+  const campaign = await loadCampaign(supabase, body.campaign?.id || body.id);
+  const requestedSize = validateBatchSize(body.requestedSize || body.requested_size);
+  try {
+    const { data } = assertSupabase(
+      await supabase.rpc("marketing_preview_next_campaign_batch", { p_campaign_id: campaign.id, p_requested_size: requestedSize }),
+      "Could not preview the next campaign batch."
+    );
+    return { preview: normalizeBatchPreview((data || [])[0]) };
+  } catch (error) {
+    if (isMissingBatchInfrastructure(error)) throw new Error("Campaign batch migration has not been applied yet.");
+    throw error;
+  }
+}
+
+async function generateBatch(supabase, body) {
+  const campaign = await loadCampaign(supabase, body.campaign?.id || body.id);
+  const requestedSize = validateBatchSize(body.requestedSize || body.requested_size);
+  try {
+    const { data } = assertSupabase(
+      await supabase.rpc("marketing_generate_campaign_batch", { p_campaign_id: campaign.id, p_requested_size: requestedSize, p_created_by: body.createdBy || null }),
+      "Could not generate campaign batch."
+    );
+    const row = (data || [])[0];
+    if (!row) throw new Error("No batch was generated.");
+    return {
+      batch: normalizeBatch(row),
+      summary: {
+        total_batches: Number(row.total_batches || 0),
+        total_customers_batched: Number(row.total_customers_batched || 0),
+      },
+    };
+  } catch (error) {
+    if (isMissingBatchInfrastructure(error)) throw new Error("Campaign batch migration has not been applied yet.");
+    throw error;
+  }
+}
+
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
 
@@ -410,6 +553,9 @@ export default async function handler(request, response) {
     else if (action === "audienceOptions") result = { options: await getAudienceOptions() };
     else if (action === "previewAudience") result = await previewAudience(supabase, body);
     else if (action === "saveAudience") result = await saveAudience(supabase, body);
+    else if (action === "listBatches") result = await listBatches(supabase, body);
+    else if (action === "previewNextBatch") result = await previewNextBatch(supabase, body);
+    else if (action === "generateBatch") result = await generateBatch(supabase, body);
     else throw new Error("Unknown Marketing Campaign API action.");
 
     json(response, 200, { ok: true, ...result });
