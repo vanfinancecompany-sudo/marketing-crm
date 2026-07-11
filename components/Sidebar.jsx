@@ -12,6 +12,7 @@ export default function Sidebar({ currentView, onNavigate }) {
     "Dashboard",
     "Stock",
     "Customer Database",
+    "Marketing Centre",
     "Vansco Stock Watch",
     "Reel Lab Beta",
     "YouTube Generator",
