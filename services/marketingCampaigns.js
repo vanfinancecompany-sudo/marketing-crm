@@ -51,3 +51,21 @@ export async function archiveMarketingCampaign(campaign) {
   const result = await requestMarketingCampaigns("archive", { campaign });
   return result.campaign;
 }
+
+export async function getMarketingCampaignAudienceOptions() {
+  const result = await requestMarketingCampaigns("audienceOptions");
+  return result.options || { sources: [], tags: [] };
+}
+
+export async function previewMarketingCampaignAudience(campaign, rules) {
+  const result = await requestMarketingCampaigns("previewAudience", { campaign, rules });
+  return result.audience;
+}
+
+export async function saveMarketingCampaignAudience(campaign, rules) {
+  const result = await requestMarketingCampaigns("saveAudience", { campaign, rules });
+  return {
+    campaign: result.campaign,
+    audience: result.audience,
+  };
+}

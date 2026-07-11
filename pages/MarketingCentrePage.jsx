@@ -3,12 +3,16 @@ import StatCard from "../components/StatCard.jsx";
 import {
   archiveMarketingCampaign,
   createMarketingCampaign,
+  getMarketingCampaignAudienceOptions,
   listMarketingCampaigns,
+  previewMarketingCampaignAudience,
+  saveMarketingCampaignAudience,
   updateMarketingCampaign,
 } from "../services/marketingCampaigns.js";
 
 const EMPTY_CAMPAIGN_FORM = { name: "", description: "", channel: "email", objective: "custom", status: "draft" };
 const EMPTY_CAMPAIGN_STATS = { total: 0, draft: 0, active: 0, completed: 0, archived: 0 };
+const DEFAULT_AUDIENCE_RULES = { pipeline: "all", source: "all", required_tags: [], exclude_tags: [], last_seen_period: "all", created_period: "all", exclude_unknown_pipeline: false };
 
 const readinessCards = [
   ["Email Ready", "Pending", "blue"],
@@ -39,6 +43,10 @@ const objectiveLabels = {
 const statusLabels = { draft: "Draft", ready: "Ready", running: "Running", paused: "Paused", completed: "Completed", archived: "Archived" };
 const statusTones = { draft: "default", ready: "blue", running: "green", paused: "amber", completed: "green", archived: "default" };
 const channelTones = { email: "blue", sms: "green", facebook: "default" };
+const channelRequirementLabels = { email: "Email Ready", sms: "SMS Ready", facebook: "Facebook Ready: email and/or mobile" };
+const pipelineLabels = { all: "All", finance: "Finance", rent2buy: "Rent2Buy", both: "Both" };
+const lastSeenLabels = { all: "Any time", last30: "Last 30 days", last90: "Last 90 days", last180: "Last 180 days", last365: "Last 365 days", more_than_180: "More than 180 days ago" };
+const createdLabels = { all: "Any time", today: "Today", last7: "Last 7 days", last30: "Last 30 days", last90: "Last 90 days", this_year: "This year" };
 
 const channels = [
   {
@@ -96,7 +104,7 @@ function TableShell({ children }) {
 }
 
 function Modal({ title, eyebrow = "Marketing Centre", children, onClose }) {
-  return <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center", padding: 18, background: "rgba(15, 23, 42, 0.48)" }}><div className="panel" style={{ width: "min(840px, 100%)", maxHeight: "88vh", overflow: "auto" }}><div className="panel__header"><div><div className="eyebrow">{eyebrow}</div><h3>{title}</h3></div><button type="button" className="button button--ghost" onClick={onClose}>Close</button></div>{children}</div></div>;
+  return <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center", padding: 18, background: "rgba(15, 23, 42, 0.48)" }}><div className="panel" style={{ width: "min(940px, 100%)", maxHeight: "88vh", overflow: "auto" }}><div className="panel__header"><div><div className="eyebrow">{eyebrow}</div><h3>{title}</h3></div><button type="button" className="button button--ghost" onClick={onClose}>Close</button></div>{children}</div></div>;
 }
 
 function TonePill({ children, tone = "default" }) {
@@ -105,6 +113,26 @@ function TonePill({ children, tone = "default" }) {
 
 function CampaignForm({ form, setForm, error, onSubmit, submitLabel, isArchived = false }) {
   return <form onSubmit={onSubmit} className="field-grid"><label className="field"><span className="field__label">Campaign Name</span><input className="field__input" value={form.name} onChange={(event) => updateFormValue(setForm, "name", event.target.value)} required /></label><label className="field"><span className="field__label">Channel</span><select className="field__input" value={form.channel} onChange={(event) => updateFormValue(setForm, "channel", event.target.value)}><option value="email">Email</option><option value="sms">SMS</option><option value="facebook">Facebook</option></select></label><label className="field"><span className="field__label">Objective</span><select className="field__input" value={form.objective} onChange={(event) => updateFormValue(setForm, "objective", event.target.value)}><option value="new_stock">New Stock</option><option value="promotion">Promotion</option><option value="finance_offer">Finance Offer</option><option value="rent2buy">Rent2Buy</option><option value="re_engagement">Re-engagement</option><option value="custom">Custom</option></select></label>{submitLabel === "Save Campaign" ? isArchived ? <div className="field"><span className="field__label">Status</span><div className="field__input">Archived</div></div> : <label className="field"><span className="field__label">Status</span><select className="field__input" value={form.status} onChange={(event) => updateFormValue(setForm, "status", event.target.value)}><option value="draft">Draft</option><option value="ready">Ready</option><option value="running">Running</option><option value="paused">Paused</option><option value="completed">Completed</option></select></label> : null}<label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Description</span><textarea className="field__input" rows={4} value={form.description} onChange={(event) => updateFormValue(setForm, "description", event.target.value)} /></label>{isArchived ? <div className="notice" style={{ gridColumn: "1 / -1" }}>Archived campaigns can be edited for notes and metadata, but this PR does not add restore.</div> : null}<div className="card-actions" style={{ gridColumn: "1 / -1" }}><button type="submit" className="button button--primary">{submitLabel}</button></div>{error ? <div className="notice notice--error" style={{ gridColumn: "1 / -1" }}>{error}</div> : null}</form>;
+}
+
+function getCampaignAudience(campaign) {
+  const audience = campaign?.metadata?.audience || {};
+  return {
+    rules: { ...DEFAULT_AUDIENCE_RULES, ...(audience.rules || {}) },
+    eligible_count: Number.isFinite(Number(audience.eligible_count)) ? Number(audience.eligible_count) : null,
+    calculated_at: audience.calculated_at || null,
+  };
+}
+
+function getAudienceStatus(campaign) {
+  const audience = campaign?.metadata?.audience;
+  if (!audience?.rules) return "Not Selected";
+  if (!audience.calculated_at || !Number.isFinite(Number(audience.eligible_count))) return "Needs Recalculation";
+  return `${formatNumber(audience.eligible_count)} eligible`;
+}
+
+function sameRules(first, second) {
+  return JSON.stringify(first || {}) === JSON.stringify(second || {});
 }
 
 export default function MarketingCentrePage() {
@@ -117,9 +145,18 @@ export default function MarketingCentrePage() {
   const [selectedCampaign, setSelectedCampaign] = useState(null);
   const [campaignForm, setCampaignForm] = useState(EMPTY_CAMPAIGN_FORM);
   const [formError, setFormError] = useState("");
+  const [audienceRules, setAudienceRules] = useState(DEFAULT_AUDIENCE_RULES);
+  const [audiencePreview, setAudiencePreview] = useState(null);
+  const [audienceDirty, setAudienceDirty] = useState(false);
+  const [audienceLoading, setAudienceLoading] = useState(false);
+  const [audienceError, setAudienceError] = useState("");
+  const [audienceOptions, setAudienceOptions] = useState({ sources: [], tags: [] });
 
   const hasCampaigns = campaigns.length > 0;
   const sortedCampaigns = useMemo(() => [...campaigns].sort((first, second) => new Date(second.updated_at || 0) - new Date(first.updated_at || 0)), [campaigns]);
+  const savedAudience = selectedCampaign ? getCampaignAudience(selectedCampaign) : { rules: DEFAULT_AUDIENCE_RULES, eligible_count: null, calculated_at: null };
+  const displayedAudience = audiencePreview || savedAudience;
+  const selectedIsArchived = selectedCampaign?.status === "archived";
 
   async function loadCampaigns() {
     setLoading(true);
@@ -135,7 +172,41 @@ export default function MarketingCentrePage() {
     }
   }
 
+  async function loadAudienceOptions() {
+    try {
+      setAudienceOptions(await getMarketingCampaignAudienceOptions());
+    } catch (optionsError) {
+      setAudienceError(optionsError.message || "Could not load audience filter options.");
+    }
+  }
+
   useEffect(() => { loadCampaigns(); }, [includeArchived]);
+  useEffect(() => { loadAudienceOptions(); }, []);
+
+  function setAudienceRule(key, value) {
+    setAudienceRules((current) => ({ ...current, [key]: value }));
+    setAudienceDirty(true);
+    setAudiencePreview(null);
+  }
+
+  function toggleAudienceTag(key, tag) {
+    setAudienceRules((current) => {
+      const values = new Set(current[key] || []);
+      if (values.has(tag)) values.delete(tag);
+      else values.add(tag);
+      return { ...current, [key]: [...values].sort() };
+    });
+    setAudienceDirty(true);
+    setAudiencePreview(null);
+  }
+
+  function resetAudienceState(campaign) {
+    const audience = getCampaignAudience(campaign);
+    setAudienceRules(audience.rules);
+    setAudiencePreview(null);
+    setAudienceDirty(false);
+    setAudienceError("");
+  }
 
   function openCreateCampaign(channel = "email") {
     setCampaignForm({ ...EMPTY_CAMPAIGN_FORM, channel });
@@ -153,6 +224,7 @@ export default function MarketingCentrePage() {
 
   function openViewCampaign(campaign) {
     setSelectedCampaign(campaign);
+    resetAudienceState(campaign);
     setModalMode("view");
   }
 
@@ -160,6 +232,7 @@ export default function MarketingCentrePage() {
     setModalMode("");
     setSelectedCampaign(null);
     setFormError("");
+    setAudienceError("");
   }
 
   async function handleCreateCampaign(event) {
@@ -197,6 +270,38 @@ export default function MarketingCentrePage() {
       await loadCampaigns();
     } catch (archiveError) {
       setError(archiveError.message || "Could not archive campaign.");
+    }
+  }
+
+  async function handlePreviewAudience() {
+    if (!selectedCampaign || selectedIsArchived) return;
+    setAudienceLoading(true);
+    setAudienceError("");
+    try {
+      const audience = await previewMarketingCampaignAudience(selectedCampaign, audienceRules);
+      setAudiencePreview(audience);
+      setAudienceDirty(false);
+    } catch (previewError) {
+      setAudienceError(previewError.message || "Could not preview audience.");
+    } finally {
+      setAudienceLoading(false);
+    }
+  }
+
+  async function handleSaveAudience() {
+    if (!selectedCampaign || selectedIsArchived) return;
+    setAudienceLoading(true);
+    setAudienceError("");
+    try {
+      const response = await saveMarketingCampaignAudience(selectedCampaign, audienceRules);
+      setSelectedCampaign(response.campaign);
+      setAudiencePreview(response.audience);
+      setAudienceDirty(false);
+      await loadCampaigns();
+    } catch (saveError) {
+      setAudienceError(saveError.message || "Could not save audience rules.");
+    } finally {
+      setAudienceLoading(false);
     }
   }
 
@@ -285,7 +390,7 @@ export default function MarketingCentrePage() {
             Include Archived
           </label>
         </div>
-        {!hasCampaigns ? <div className="empty-state"><strong>No campaigns yet.</strong><p>Create your first campaign to start building an audience.</p><button type="button" className="button button--primary" onClick={() => openCreateCampaign()}>Create Campaign</button></div> : <TableShell><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}><thead><tr>{["Name", "Channel", "Objective", "Status", "Created", "Last Updated", "Actions"].map((heading) => <th key={heading} style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #dbe2ea", color: "#475569" }}>{heading}</th>)}</tr></thead><tbody>{sortedCampaigns.map((campaign) => <tr key={campaign.id}><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7", fontWeight: 800 }}>{campaign.name}<br /><small style={{ color: "#64748b" }}>{campaign.description || "No description"}</small></td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}><TonePill tone={channelTones[campaign.channel]}>{channelLabels[campaign.channel] || campaign.channel}</TonePill></td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{objectiveLabels[campaign.objective] || campaign.objective}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}><TonePill tone={statusTones[campaign.status]}>{statusLabels[campaign.status] || campaign.status}</TonePill></td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7", whiteSpace: "nowrap" }}>{formatDate(campaign.created_at)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7", whiteSpace: "nowrap" }}>{formatDate(campaign.updated_at)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}><div className="card-actions" style={{ gap: 6 }}><button type="button" className="button button--ghost" onClick={() => openViewCampaign(campaign)}>View</button><button type="button" className="button button--ghost" onClick={() => openEditCampaign(campaign)}>Edit</button><button type="button" className="button button--danger" disabled={campaign.status === "archived"} onClick={() => handleArchiveCampaign(campaign)}>Archive</button></div></td></tr>)}</tbody></table></TableShell>}
+        {!hasCampaigns ? <div className="empty-state"><strong>No campaigns yet.</strong><p>Create your first campaign to start building an audience.</p><button type="button" className="button button--primary" onClick={() => openCreateCampaign()}>Create Campaign</button></div> : <TableShell><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}><thead><tr>{["Name", "Channel", "Objective", "Status", "Audience", "Created", "Last Updated", "Actions"].map((heading) => <th key={heading} style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #dbe2ea", color: "#475569" }}>{heading}</th>)}</tr></thead><tbody>{sortedCampaigns.map((campaign) => <tr key={campaign.id}><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7", fontWeight: 800 }}>{campaign.name}<br /><small style={{ color: "#64748b" }}>{campaign.description || "No description"}</small></td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}><TonePill tone={channelTones[campaign.channel]}>{channelLabels[campaign.channel] || campaign.channel}</TonePill></td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{objectiveLabels[campaign.objective] || campaign.objective}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}><TonePill tone={statusTones[campaign.status]}>{statusLabels[campaign.status] || campaign.status}</TonePill></td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{getAudienceStatus(campaign)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7", whiteSpace: "nowrap" }}>{formatDate(campaign.created_at)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7", whiteSpace: "nowrap" }}>{formatDate(campaign.updated_at)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}><div className="card-actions" style={{ gap: 6 }}><button type="button" className="button button--ghost" onClick={() => openViewCampaign(campaign)}>View</button><button type="button" className="button button--ghost" onClick={() => openEditCampaign(campaign)}>Edit</button><button type="button" className="button button--danger" disabled={campaign.status === "archived"} onClick={() => handleArchiveCampaign(campaign)}>Archive</button></div></td></tr>)}</tbody></table></TableShell>}
       </section>
 
       <section className="panel">
@@ -322,7 +427,7 @@ export default function MarketingCentrePage() {
 
       {modalMode === "create" ? <Modal title="Create Campaign" onClose={closeModal}><CampaignForm form={campaignForm} setForm={setCampaignForm} error={formError} onSubmit={handleCreateCampaign} submitLabel="Create Campaign" /></Modal> : null}
       {modalMode === "edit" && selectedCampaign ? <Modal title="Edit Campaign" onClose={closeModal}><CampaignForm form={campaignForm} setForm={setCampaignForm} error={formError} onSubmit={handleUpdateCampaign} submitLabel="Save Campaign" isArchived={selectedCampaign.status === "archived"} /></Modal> : null}
-      {modalMode === "view" && selectedCampaign ? <Modal title="Campaign Detail" onClose={closeModal}><div className="field-grid">{[["Campaign Name", selectedCampaign.name], ["Description", selectedCampaign.description || "-"], ["Channel", channelLabels[selectedCampaign.channel] || selectedCampaign.channel], ["Objective", objectiveLabels[selectedCampaign.objective] || selectedCampaign.objective], ["Status", statusLabels[selectedCampaign.status] || selectedCampaign.status], ["Audience", "Not selected"], ["Batch Size", "Not selected"], ["Provider", "Not selected"], ["Created", formatDate(selectedCampaign.created_at)], ["Last Updated", formatDate(selectedCampaign.updated_at)]].map(([label, value]) => <div key={label} className="field"><span className="field__label">{label}</span><div className="field__input">{value}</div></div>)}{selectedCampaign.archived_at ? <div className="field"><span className="field__label">Archived</span><div className="field__input">{formatDate(selectedCampaign.archived_at)}</div></div> : null}</div></Modal> : null}
+      {modalMode === "view" && selectedCampaign ? <Modal title="Campaign Detail" onClose={closeModal}><div className="field-grid">{[["Campaign Name", selectedCampaign.name], ["Description", selectedCampaign.description || "-"], ["Channel", channelLabels[selectedCampaign.channel] || selectedCampaign.channel], ["Objective", objectiveLabels[selectedCampaign.objective] || selectedCampaign.objective], ["Status", statusLabels[selectedCampaign.status] || selectedCampaign.status], ["Audience", displayedAudience.eligible_count === null ? "Not selected" : `${formatNumber(displayedAudience.eligible_count)} eligible`], ["Batch Size", "Not selected"], ["Provider", "Not selected"], ["Created", formatDate(selectedCampaign.created_at)], ["Last Updated", formatDate(selectedCampaign.updated_at)]].map(([label, value]) => <div key={label} className="field"><span className="field__label">{label}</span><div className="field__input">{value}</div></div>)}{selectedCampaign.archived_at ? <div className="field"><span className="field__label">Archived</span><div className="field__input">{formatDate(selectedCampaign.archived_at)}</div></div> : null}</div><section className="panel panel--nested" style={{ boxShadow: "none", marginTop: 16 }}><div className="panel__header"><div><h3>Audience Builder</h3><p>This is a live preview. Customers are not assigned to this campaign until a future batch is generated.</p></div>{selectedIsArchived ? <span className="status-pill">Read Only</span> : null}</div><div className="field-grid"><div className="field"><span className="field__label">Campaign Channel</span><div className="field__input">{channelLabels[selectedCampaign.channel]}</div></div><div className="field"><span className="field__label">Automatic Readiness Rule</span><div className="field__input">{channelRequirementLabels[selectedCampaign.channel]}</div></div><label className="field"><span className="field__label">Pipeline</span><select className="field__input" disabled={selectedIsArchived} value={audienceRules.pipeline} onChange={(event) => setAudienceRule("pipeline", event.target.value)}>{Object.entries(pipelineLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="field"><span className="field__label">Source</span><select className="field__input" disabled={selectedIsArchived} value={audienceRules.source} onChange={(event) => setAudienceRule("source", event.target.value)}><option value="all">All Sources</option>{audienceOptions.sources.map((source) => <option key={source} value={source}>{source}</option>)}</select></label><label className="field"><span className="field__label">Last Seen / Last Activity</span><select className="field__input" disabled={selectedIsArchived} value={audienceRules.last_seen_period} onChange={(event) => setAudienceRule("last_seen_period", event.target.value)}>{Object.entries(lastSeenLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="field"><span className="field__label">Customer Created</span><select className="field__input" disabled={selectedIsArchived} value={audienceRules.created_period} onChange={(event) => setAudienceRule("created_period", event.target.value)}>{Object.entries(createdLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="toggle-row" style={{ marginTop: 20 }}><input type="checkbox" disabled={selectedIsArchived} checked={audienceRules.exclude_unknown_pipeline} onChange={(event) => setAudienceRule("exclude_unknown_pipeline", event.target.checked)} />Exclude Unknown Pipeline</label><div className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Required Tags - matches any selected tag</span><div className="card-actions">{audienceOptions.tags.length ? audienceOptions.tags.map((tag) => <button key={tag} type="button" disabled={selectedIsArchived} className={(audienceRules.required_tags || []).includes(tag) ? "button button--primary" : "button button--ghost"} onClick={() => toggleAudienceTag("required_tags", tag)}>{tag}</button>) : <span style={{ color: "#64748b" }}>No existing tags found.</span>}</div></div><div className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Excluded Tags - removes any selected tag</span><div className="card-actions">{audienceOptions.tags.length ? audienceOptions.tags.map((tag) => <button key={tag} type="button" disabled={selectedIsArchived} className={(audienceRules.exclude_tags || []).includes(tag) ? "button button--primary" : "button button--ghost"} onClick={() => toggleAudienceTag("exclude_tags", tag)}>{tag}</button>) : <span style={{ color: "#64748b" }}>No existing tags found.</span>}</div></div></div><div className="stats-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", marginTop: 14 }}><div className="stat-card"><div className="stat-card__label">Eligible Customers</div><div className="stat-card__value">{displayedAudience.eligible_count === null ? "-" : formatNumber(displayedAudience.eligible_count)}</div></div><div className="stat-card"><div className="stat-card__label">Channel Requirement</div><div className="stat-card__value" style={{ fontSize: 22 }}>{channelRequirementLabels[selectedCampaign.channel]}</div></div><div className="stat-card"><div className="stat-card__label">Last Calculated</div><div className="stat-card__value" style={{ fontSize: 22 }}>{formatDate(displayedAudience.calculated_at)}</div></div></div>{audienceDirty || !sameRules(audienceRules, savedAudience.rules) ? <div className="notice" style={{ marginTop: 12 }}>Needs Recalculation. Preview again before using this count.</div> : null}{audienceError ? <div className="notice notice--error" style={{ marginTop: 12 }}>{audienceError}</div> : null}<div className="card-actions" style={{ marginTop: 14 }}><button type="button" className="button button--primary" disabled={selectedIsArchived || audienceLoading} onClick={handlePreviewAudience}>{audienceLoading ? "Calculating..." : "Preview Audience"}</button><button type="button" className="button button--ghost" disabled={selectedIsArchived || audienceLoading} onClick={handleSaveAudience}>Save Audience Rules</button></div></section></Modal> : null}
     </div>
   );
 }
