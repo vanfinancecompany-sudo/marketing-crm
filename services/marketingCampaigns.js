@@ -1,4 +1,5 @@
 const API_ROUTE = "/api/marketing-campaigns";
+const DRAFT_AUDIENCE_PREVIEW_ROUTE = "/api/marketing-campaign-audience-preview";
 const API_KEY_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
 
 function getApiKey() {
@@ -10,15 +11,15 @@ function getApiKey() {
   }
 }
 
-async function requestMarketingCampaigns(action, payload = {}) {
+async function requestJson(route, payload = {}) {
   const apiKey = getApiKey();
-  const response = await fetch(API_ROUTE, {
+  const response = await fetch(route, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...(apiKey ? { "x-marketing-customer-database-key": apiKey } : {}),
     },
-    body: JSON.stringify({ action, ...payload }),
+    body: JSON.stringify(payload),
   });
   const result = await response.json().catch(() => ({}));
 
@@ -27,6 +28,10 @@ async function requestMarketingCampaigns(action, payload = {}) {
   }
 
   return result;
+}
+
+async function requestMarketingCampaigns(action, payload = {}) {
+  return requestJson(API_ROUTE, { action, ...payload });
 }
 
 export async function listMarketingCampaigns({ includeArchived = false } = {}) {
@@ -68,7 +73,7 @@ export async function previewMarketingCampaignAudience(campaign, rules) {
 }
 
 export async function previewMarketingCampaignDraftAudience(channel, rules) {
-  const result = await requestMarketingCampaigns("previewAudience", { channel, rules });
+  const result = await requestJson(DRAFT_AUDIENCE_PREVIEW_ROUTE, { channel, rules });
   return result.audience;
 }
 
