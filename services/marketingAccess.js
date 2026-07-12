@@ -1,5 +1,6 @@
 export const MARKETING_ACCESS_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
 export const MARKETING_ACCESS_HEADER = "x-marketing-customer-database-key";
+export const MARKETING_ACCESS_DENIED_EVENT = "marketing-access-denied";
 
 export class MarketingAccessDeniedError extends Error {
   constructor(message = "Access key not recognised.") {
@@ -72,11 +73,24 @@ export function isMarketingAccessDenied(error) {
     || /access denied|access key not recognised|unauthorized/i.test(String(error?.message || error || ""));
 }
 
-export async function parseMarketingJsonResponse(response, fallbackMessage) {
+export function notifyMarketingAccessDenied(message = "Your saved access has expired or is no longer valid. Please unlock again.") {
+  clearMarketingAccessKey();
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new CustomEvent(MARKETING_ACCESS_DENIED_EVENT, { detail: { message } }));
+  } catch {
+    // If events are unavailable, the failed request will still surface its error.
+  }
+}
+
+export async function parseMarketingJsonResponse(response, fallbackMessage, options = {}) {
   const result = await response.json().catch(() => ({}));
+  const notifyAccessDenied = options.notifyAccessDenied !== false;
 
   if (response.status === 401) {
-    throw new MarketingAccessDeniedError(result.message || "Access key not recognised.");
+    const message = result.message || "Access key not recognised.";
+    if (notifyAccessDenied) notifyMarketingAccessDenied();
+    throw new MarketingAccessDeniedError(message);
   }
 
   if (!response.ok || result.ok === false) {
@@ -98,6 +112,6 @@ export async function validateMarketingAccessKey(apiKey) {
     body: JSON.stringify({ action: "validateAccess" }),
   });
 
-  await parseMarketingJsonResponse(response, "Could not validate Marketing access.");
+  await parseMarketingJsonResponse(response, "Could not validate Marketing access.", { notifyAccessDenied: false });
   return true;
 }
