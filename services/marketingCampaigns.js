@@ -47,6 +47,14 @@ export async function createMarketingCampaign(values) {
   return result.campaign;
 }
 
+export async function createMarketingCampaignWithAudience(values, rules) {
+  const result = await requestMarketingCampaigns("createWithAudience", { values, rules });
+  return {
+    campaign: result.campaign,
+    audience: result.audience,
+  };
+}
+
 export async function updateMarketingCampaign(campaign, values) {
   const result = await requestMarketingCampaigns("update", { campaign, values });
   return result.campaign;
