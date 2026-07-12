@@ -57,6 +57,11 @@ export async function getMarketingCampaignAudienceOptions() {
   return result.options || { sources: [], tags: [] };
 }
 
+export async function getMarketingCampaignDashboard(campaign, preferredBatchSize = 1000) {
+  const result = await requestMarketingCampaigns("campaignDashboard", { campaign, preferredBatchSize });
+  return result.dashboard || {};
+}
+
 export async function previewMarketingCampaignAudience(campaign, rules) {
   const result = await requestMarketingCampaigns("previewAudience", { campaign, rules });
   return result.audience;
