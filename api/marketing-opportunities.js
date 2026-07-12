@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { DEFAULT_AUDIENCE_RULES, normalizeAudienceRules } from "../lib/marketingCampaignAudience.js";
+import { DEFAULT_AUDIENCE_RULES, applySuppressionQuery, normalizeAudienceRules } from "../lib/marketingCampaignAudience.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const CHANNELS = new Set(["email", "sms", "facebook"]);
@@ -59,8 +59,11 @@ function buildOpportunity({ id, title, description, customerCount, channel, obje
   };
 }
 
-async function countContacts(supabase, applyQuery) {
-  let query = supabase.from("marketing_contacts").select("id", { count: "exact", head: true }).eq("marketing_status", "active");
+async function countContacts(supabase, channel, applyQuery) {
+  let query = applySuppressionQuery(
+    supabase.from("marketing_contacts").select("id", { count: "exact", head: true }),
+    channel
+  );
   if (applyQuery) query = applyQuery(query);
   const { count } = assertSupabase(await query, "Could not count marketing opportunity customers.");
   return count || 0;
@@ -123,7 +126,10 @@ async function countReadyExportedCustomers(supabase, exportedByChannel) {
     for (let index = 0; index < ids.length; index += 500) {
       const idChunk = ids.slice(index, index + 500);
       const { count } = assertSupabase(
-        await supabase.from("marketing_contacts").select("id", { count: "exact", head: true }).in("id", idChunk).eq(readyColumn, true).eq("marketing_status", "active"),
+        await applySuppressionQuery(
+          supabase.from("marketing_contacts").select("id", { count: "exact", head: true }).in("id", idChunk).eq(readyColumn, true),
+          channel
+        ),
         "Could not count exported ready marketing customers."
       );
       counts[channel] += count || 0;
@@ -135,15 +141,15 @@ async function countReadyExportedCustomers(supabase, exportedByChannel) {
 
 async function countUntaggedContacts(supabase) {
   try {
-    return await countContacts(supabase, (query) => query.or("tags.is.null,tags.eq.{}"));
+    return await countContacts(supabase, "email", (query) => query.or("tags.is.null,tags.eq.{}"));
   } catch {
-    return countContacts(supabase, (query) => query.is("tags", null));
+    return countContacts(supabase, "email", (query) => query.is("tags", null));
   }
 }
 
 async function countMultipleApplications(supabase) {
   try {
-    return await countContacts(supabase, (query) => query.gt("application_count", 1));
+    return await countContacts(supabase, "email", (query) => query.gt("application_count", 1));
   } catch {
     return null;
   }
@@ -152,13 +158,13 @@ async function countMultipleApplications(supabase) {
 async function getMarketingOpportunities(supabase) {
   const [readyCounts, exportedByChannel, dormant, recentImports, untagged, multipleApplications] = await Promise.all([
     Promise.all([
-      countContacts(supabase, (query) => query.eq("email_ready", true)),
-      countContacts(supabase, (query) => query.eq("sms_ready", true)),
-      countContacts(supabase, (query) => query.eq("facebook_ready", true)),
+      countContacts(supabase, "email", (query) => query.eq("email_ready", true)),
+      countContacts(supabase, "sms", (query) => query.eq("sms_ready", true)),
+      countContacts(supabase, "facebook", (query) => query.eq("facebook_ready", true)),
     ]),
     getExportedCustomerIdsByChannel(supabase),
-    countContacts(supabase, (query) => query.lt("last_seen_at", daysAgoIso(180)).eq("email_ready", true)),
-    countContacts(supabase, (query) => query.gte("created_at", daysAgoIso(7)).eq("email_ready", true)),
+    countContacts(supabase, "email", (query) => query.lt("last_seen_at", daysAgoIso(180)).eq("email_ready", true)),
+    countContacts(supabase, "email", (query) => query.gte("created_at", daysAgoIso(7)).eq("email_ready", true)),
     countUntaggedContacts(supabase),
     countMultipleApplications(supabase),
   ]);
