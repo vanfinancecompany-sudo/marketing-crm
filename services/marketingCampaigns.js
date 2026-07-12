@@ -1,5 +1,8 @@
 const API_ROUTE = "/api/marketing-campaigns";
+const DRAFT_AUDIENCE_PREVIEW_ROUTE = "/api/marketing-campaign-audience-preview";
 const API_KEY_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
+
+let lastDraftAudiencePreview = null;
 
 function getApiKey() {
   if (typeof window === "undefined") return "";
@@ -10,15 +13,25 @@ function getApiKey() {
   }
 }
 
-async function requestMarketingCampaigns(action, payload = {}) {
+function sameRules(first, second) {
+  return JSON.stringify(first || {}) === JSON.stringify(second || {});
+}
+
+function stripLocalCampaignFlags(campaign) {
+  if (!campaign || typeof campaign !== "object") return campaign;
+  const { __audienceAlreadySaved, __audience, ...safeCampaign } = campaign;
+  return safeCampaign;
+}
+
+async function requestJson(route, payload = {}) {
   const apiKey = getApiKey();
-  const response = await fetch(API_ROUTE, {
+  const response = await fetch(route, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...(apiKey ? { "x-marketing-customer-database-key": apiKey } : {}),
     },
-    body: JSON.stringify({ action, ...payload }),
+    body: JSON.stringify(payload),
   });
   const result = await response.json().catch(() => ({}));
 
@@ -27,6 +40,10 @@ async function requestMarketingCampaigns(action, payload = {}) {
   }
 
   return result;
+}
+
+async function requestMarketingCampaigns(action, payload = {}) {
+  return requestJson(API_ROUTE, { action, ...payload });
 }
 
 export async function listMarketingCampaigns({ includeArchived = false } = {}) {
@@ -38,8 +55,30 @@ export async function listMarketingCampaigns({ includeArchived = false } = {}) {
 }
 
 export async function createMarketingCampaign(values) {
+  if (lastDraftAudiencePreview) {
+    if (lastDraftAudiencePreview.channel !== values?.channel) {
+      throw new Error("Configure an audience before creating this campaign.");
+    }
+
+    const result = await createMarketingCampaignWithAudience(values, lastDraftAudiencePreview.rules);
+    lastDraftAudiencePreview = null;
+    return {
+      ...result.campaign,
+      __audienceAlreadySaved: true,
+      __audience: result.audience,
+    };
+  }
+
   const result = await requestMarketingCampaigns("create", { values });
   return result.campaign;
+}
+
+export async function createMarketingCampaignWithAudience(values, rules) {
+  const result = await requestMarketingCampaigns("createWithAudience", { values, rules });
+  return {
+    campaign: result.campaign,
+    audience: result.audience,
+  };
 }
 
 export async function updateMarketingCampaign(campaign, values) {
@@ -67,7 +106,28 @@ export async function previewMarketingCampaignAudience(campaign, rules) {
   return result.audience;
 }
 
+export async function previewMarketingCampaignDraftAudience(channel, rules) {
+  const result = await requestJson(DRAFT_AUDIENCE_PREVIEW_ROUTE, { channel, rules });
+  lastDraftAudiencePreview = {
+    channel,
+    rules,
+    audience: result.audience,
+  };
+  return result.audience;
+}
+
 export async function saveMarketingCampaignAudience(campaign, rules) {
+  if (campaign?.__audienceAlreadySaved) {
+    const audience = campaign.__audience || { rules, eligible_count: null, calculated_at: null };
+    if (!sameRules(audience.rules, rules)) {
+      throw new Error("Configure an audience before creating this campaign.");
+    }
+    return {
+      campaign: stripLocalCampaignFlags(campaign),
+      audience,
+    };
+  }
+
   const result = await requestMarketingCampaigns("saveAudience", { campaign, rules });
   return {
     campaign: result.campaign,
