@@ -2,6 +2,8 @@ const API_ROUTE = "/api/marketing-campaigns";
 const DRAFT_AUDIENCE_PREVIEW_ROUTE = "/api/marketing-campaign-audience-preview";
 const API_KEY_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
 
+let lastDraftAudiencePreview = null;
+
 function getApiKey() {
   if (typeof window === "undefined") return "";
   try {
@@ -9,6 +11,16 @@ function getApiKey() {
   } catch {
     return "";
   }
+}
+
+function sameRules(first, second) {
+  return JSON.stringify(first || {}) === JSON.stringify(second || {});
+}
+
+function stripLocalCampaignFlags(campaign) {
+  if (!campaign || typeof campaign !== "object") return campaign;
+  const { __audienceAlreadySaved, __audience, ...safeCampaign } = campaign;
+  return safeCampaign;
 }
 
 async function requestJson(route, payload = {}) {
@@ -43,6 +55,20 @@ export async function listMarketingCampaigns({ includeArchived = false } = {}) {
 }
 
 export async function createMarketingCampaign(values) {
+  if (lastDraftAudiencePreview) {
+    if (lastDraftAudiencePreview.channel !== values?.channel) {
+      throw new Error("Configure an audience before creating this campaign.");
+    }
+
+    const result = await createMarketingCampaignWithAudience(values, lastDraftAudiencePreview.rules);
+    lastDraftAudiencePreview = null;
+    return {
+      ...result.campaign,
+      __audienceAlreadySaved: true,
+      __audience: result.audience,
+    };
+  }
+
   const result = await requestMarketingCampaigns("create", { values });
   return result.campaign;
 }
@@ -82,10 +108,26 @@ export async function previewMarketingCampaignAudience(campaign, rules) {
 
 export async function previewMarketingCampaignDraftAudience(channel, rules) {
   const result = await requestJson(DRAFT_AUDIENCE_PREVIEW_ROUTE, { channel, rules });
+  lastDraftAudiencePreview = {
+    channel,
+    rules,
+    audience: result.audience,
+  };
   return result.audience;
 }
 
 export async function saveMarketingCampaignAudience(campaign, rules) {
+  if (campaign?.__audienceAlreadySaved) {
+    const audience = campaign.__audience || { rules, eligible_count: null, calculated_at: null };
+    if (!sameRules(audience.rules, rules)) {
+      throw new Error("Configure an audience before creating this campaign.");
+    }
+    return {
+      campaign: stripLocalCampaignFlags(campaign),
+      audience,
+    };
+  }
+
   const result = await requestMarketingCampaigns("saveAudience", { campaign, rules });
   return {
     campaign: result.campaign,
