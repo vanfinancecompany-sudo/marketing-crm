@@ -67,6 +67,11 @@ export async function previewMarketingCampaignAudience(campaign, rules) {
   return result.audience;
 }
 
+export async function previewMarketingCampaignDraftAudience(channel, rules) {
+  const result = await requestMarketingCampaigns("previewAudience", { channel, rules });
+  return result.audience;
+}
+
 export async function saveMarketingCampaignAudience(campaign, rules) {
   const result = await requestMarketingCampaigns("saveAudience", { campaign, rules });
   return {
