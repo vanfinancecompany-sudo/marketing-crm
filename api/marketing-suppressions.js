@@ -2,7 +2,6 @@ import { createClient } from "@supabase/supabase-js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const CONTACT_COLUMNS = "id,customer_id,first_name,last_name,company,email,phone,postcode,pipeline,source,marketing_status,email_ready,sms_ready,facebook_ready,suppression,suppression_history,created_at,updated_at";
-const HISTORY_LIMIT = 100;
 const SUPPRESSION_TYPES = new Set([
   "email_unsubscribed",
   "email_bounced",
@@ -11,15 +10,6 @@ const SUPPRESSION_TYPES = new Set([
   "manual_suppression",
   "global_do_not_contact",
 ]);
-
-const SUPPRESSION_LABELS = {
-  email_unsubscribed: "Email Unsubscribed",
-  email_bounced: "Email Bounced",
-  sms_opt_out: "SMS Opt-out",
-  facebook_excluded: "Facebook Excluded",
-  manual_suppression: "Manual Suppression",
-  global_do_not_contact: "Global Do Not Contact",
-};
 
 function json(response, status, payload) {
   response.status(status).json(payload);
@@ -122,67 +112,12 @@ function customerSearchQuery(query, search) {
   ].join(","));
 }
 
-function channelFlagsAfterSuppress(type, contact) {
-  const payload = {};
-  if (type === "email_unsubscribed" || type === "email_bounced") payload.email_ready = false;
-  if (type === "sms_opt_out") payload.sms_ready = false;
-  if (type === "facebook_excluded") payload.facebook_ready = false;
-  if (type === "manual_suppression" || type === "global_do_not_contact") payload.marketing_status = "suppressed";
-  return payload;
-}
-
-function channelFlagsAfterRemove(type, nextSuppression, contact) {
-  const emailSuppressed = Boolean(nextSuppression.email_unsubscribed || nextSuppression.email_bounced);
-  const smsSuppressed = Boolean(nextSuppression.sms_opt_out);
-  const facebookSuppressed = Boolean(nextSuppression.facebook_excluded);
-  const globallySuppressed = Boolean(nextSuppression.manual_suppression || nextSuppression.global_do_not_contact);
-  const hasEmail = Boolean(contact.email);
-  const hasPhone = Boolean(contact.phone);
-
-  const payload = {
-    marketing_status: globallySuppressed ? "suppressed" : "active",
-  };
-  if (type === "email_unsubscribed" || type === "email_bounced") payload.email_ready = hasEmail && !emailSuppressed;
-  if (type === "sms_opt_out") payload.sms_ready = hasPhone && !smsSuppressed;
-  if (type === "facebook_excluded") payload.facebook_ready = (hasEmail || hasPhone) && !facebookSuppressed;
-  if (!globallySuppressed && !emailSuppressed && !smsSuppressed && !facebookSuppressed) {
-    payload.email_ready = hasEmail;
-    payload.sms_ready = hasPhone;
-    payload.facebook_ready = hasEmail || hasPhone;
-  }
-  return payload;
-}
-
 async function getOverview(supabase) {
-  const [totalSuppressed, activeTotal, recentRows] = await Promise.all([
-    supabase.from("marketing_contacts").select("id", { count: "exact", head: true }).neq("marketing_status", "active"),
-    supabase.from("marketing_contacts").select("id", { count: "exact", head: true }),
-    supabase.from("marketing_contacts").select(CONTACT_COLUMNS).neq("marketing_status", "active").order("updated_at", { ascending: false }).limit(10),
-  ]);
-  assertSupabase(totalSuppressed, "Could not count suppressed contacts.");
-  assertSupabase(activeTotal, "Could not count contacts.");
-  assertSupabase(recentRows, "Could not load recent suppressions.");
-
-  const contacts = (recentRows.data || []).map(normalizeContact);
-  const breakdown = Object.fromEntries(Object.keys(SUPPRESSION_LABELS).map((key) => [key, 0]));
-  contacts.forEach((contact) => {
-    Object.keys(contact.suppression || {}).forEach((key) => {
-      if (breakdown[key] !== undefined) breakdown[key] += 1;
-    });
-    if (contact.marketing_status !== "active" && !Object.keys(contact.suppression || {}).length) breakdown.manual_suppression += 1;
-  });
-
-  return {
-    overview: {
-      total_contacts: activeTotal.count || 0,
-      suppressed_contacts: totalSuppressed.count || 0,
-      active_contacts: Math.max(0, (activeTotal.count || 0) - (totalSuppressed.count || 0)),
-    },
-    totals: breakdown,
-    recent: contacts,
-    history: contacts.flatMap((contact) => contact.suppression_history.map((entry) => ({ ...entry, customer: contact.name, customer_id: contact.customer_id }))).slice(0, HISTORY_LIMIT),
-    labels: SUPPRESSION_LABELS,
-  };
+  const { data } = assertSupabase(
+    await supabase.rpc("marketing_suppression_overview", { p_recent_limit: 10, p_history_limit: 100 }),
+    "Could not load suppression overview."
+  );
+  return data || {};
 }
 
 async function searchContacts(supabase, body) {
@@ -194,71 +129,42 @@ async function searchContacts(supabase, body) {
   return { contacts: (data || []).map(normalizeContact) };
 }
 
-async function loadContact(supabase, id) {
+function getContactId(body) {
+  const id = body.contact?.id || body.contactId || body.id;
   if (!id) throw new Error("Contact ID is required.");
-  const { data } = assertSupabase(
-    await supabase.from("marketing_contacts").select(CONTACT_COLUMNS).eq("id", id).single(),
-    "Could not load contact."
-  );
-  return normalizeContact(data);
+  return id;
 }
 
 async function applySuppression(supabase, body) {
-  const contact = await loadContact(supabase, body.contact?.id || body.contactId || body.id);
   const type = normalizeType(body.type);
-  const now = new Date().toISOString();
-  const entry = {
-    type,
-    label: SUPPRESSION_LABELS[type],
-    reason: cleanText(body.reason, SUPPRESSION_LABELS[type]),
-    added_at: now,
-    added_by: cleanText(body.addedBy || body.user, "Marketing CRM"),
-    notes: cleanText(body.notes),
-    active: true,
-  };
-  const suppression = { ...normalizeSuppression(contact.suppression), [type]: entry };
-  const history = [{ action: "suppressed", ...entry }, ...normalizeHistory(contact.suppression_history)].slice(0, HISTORY_LIMIT);
-  const payload = {
-    suppression,
-    suppression_history: history,
-    ...channelFlagsAfterSuppress(type, contact),
-  };
-
   const { data } = assertSupabase(
-    await supabase.from("marketing_contacts").update(payload).eq("id", contact.id).select(CONTACT_COLUMNS).single(),
+    await supabase.rpc("marketing_apply_suppression", {
+      p_contact_id: getContactId(body),
+      p_type: type,
+      p_reason: cleanText(body.reason, type),
+      p_added_by: cleanText(body.addedBy || body.user, "Marketing CRM"),
+      p_notes: cleanText(body.notes),
+    }),
     "Could not apply suppression."
   );
-  return { contact: normalizeContact(data), overview: await getOverview(supabase) };
+  const contact = Array.isArray(data) ? data[0] : data;
+  return { contact: normalizeContact(contact), overview: await getOverview(supabase) };
 }
 
 async function removeSuppression(supabase, body) {
-  const contact = await loadContact(supabase, body.contact?.id || body.contactId || body.id);
   const type = normalizeType(body.type);
-  const suppression = { ...normalizeSuppression(contact.suppression) };
-  const removed = suppression[type];
-  delete suppression[type];
-  const now = new Date().toISOString();
-  const history = [{
-    action: "removed",
-    type,
-    label: SUPPRESSION_LABELS[type],
-    reason: cleanText(body.reason, "Suppression removed"),
-    added_at: now,
-    added_by: cleanText(body.addedBy || body.user, "Marketing CRM"),
-    notes: cleanText(body.notes),
-    previous_reason: removed?.reason || "",
-  }, ...normalizeHistory(contact.suppression_history)].slice(0, HISTORY_LIMIT);
-  const payload = {
-    suppression,
-    suppression_history: history,
-    ...channelFlagsAfterRemove(type, suppression, contact),
-  };
-
   const { data } = assertSupabase(
-    await supabase.from("marketing_contacts").update(payload).eq("id", contact.id).select(CONTACT_COLUMNS).single(),
+    await supabase.rpc("marketing_remove_suppression", {
+      p_contact_id: getContactId(body),
+      p_type: type,
+      p_reason: cleanText(body.reason, "Suppression removed"),
+      p_added_by: cleanText(body.addedBy || body.user, "Marketing CRM"),
+      p_notes: cleanText(body.notes),
+    }),
     "Could not remove suppression."
   );
-  return { contact: normalizeContact(data), overview: await getOverview(supabase) };
+  const contact = Array.isArray(data) ? data[0] : data;
+  return { contact: normalizeContact(contact), overview: await getOverview(supabase) };
 }
 
 export default async function handler(request, response) {
