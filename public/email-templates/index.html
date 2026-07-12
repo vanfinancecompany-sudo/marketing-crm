@@ -1,0 +1,918 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Email Templates | Marketing CRM</title>
+    <style>
+      :root {
+        --bg: #f4f7fb;
+        --panel: #ffffff;
+        --ink: #172033;
+        --muted: #667085;
+        --line: #d9e2ef;
+        --blue: #2557d6;
+        --green: #0f8f5f;
+        --red: #c2413b;
+        --amber: #a86700;
+        --shadow: 0 12px 28px rgba(23, 32, 51, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--ink);
+        background: var(--bg);
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .layout {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 248px minmax(0, 1fr);
+      }
+
+      .sidebar {
+        background: #111827;
+        color: #eef2ff;
+        padding: 22px 18px;
+      }
+
+      .brand-eyebrow {
+        color: #9ca3af;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .brand-title {
+        margin: 5px 0 24px;
+        font-size: 22px;
+      }
+
+      .nav {
+        display: grid;
+        gap: 8px;
+      }
+
+      .nav a {
+        display: block;
+        padding: 10px 12px;
+        border-radius: 8px;
+        text-decoration: none;
+        color: #dbe4ff;
+      }
+
+      .nav a.active,
+      .nav a:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+      }
+
+      main {
+        min-width: 0;
+        padding: 24px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 18px;
+      }
+
+      h1, h2, h3 {
+        margin: 0;
+      }
+
+      .eyebrow {
+        margin: 0 0 4px;
+        color: var(--muted);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 700;
+      }
+
+      .hint {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 16px;
+      }
+
+      .two-col {
+        grid-template-columns: minmax(360px, 0.9fr) minmax(0, 1.1fr);
+      }
+
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        box-shadow: var(--shadow);
+        padding: 18px;
+      }
+
+      .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      button, input, select, textarea {
+        font: inherit;
+      }
+
+      button {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 9px 12px;
+        background: #fff;
+        color: var(--ink);
+        cursor: pointer;
+        font-weight: 700;
+      }
+
+      button.primary {
+        background: var(--blue);
+        border-color: var(--blue);
+        color: #fff;
+      }
+
+      button.danger {
+        border-color: #fecaca;
+        color: var(--red);
+      }
+
+      button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      label {
+        display: grid;
+        gap: 5px;
+        color: #334155;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      input, select, textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px 11px;
+        background: #fff;
+        color: var(--ink);
+      }
+
+      textarea {
+        resize: vertical;
+        min-height: 92px;
+      }
+
+      .span-2 {
+        grid-column: 1 / -1;
+      }
+
+      .templates-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .template-row {
+        width: 100%;
+        text-align: left;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+        padding: 12px;
+      }
+
+      .template-row.is-selected {
+        border-color: var(--blue);
+        box-shadow: inset 3px 0 0 var(--blue);
+      }
+
+      .meta {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        padding: 3px 8px;
+        background: #edf2ff;
+        color: #1d4ed8;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .badge.draft {
+        background: #fff7ed;
+        color: var(--amber);
+      }
+
+      .badge.active {
+        background: #ecfdf3;
+        color: var(--green);
+      }
+
+      .badge.archived {
+        background: #f3f4f6;
+        color: #4b5563;
+      }
+
+      .preview-shell {
+        display: grid;
+        gap: 14px;
+      }
+
+      .preview-frame {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #f8fafc;
+        padding: 14px;
+      }
+
+      .desktop-preview,
+      .mobile-preview {
+        width: 100%;
+        border: 0;
+        background: #fff;
+        min-height: 520px;
+      }
+
+      .mobile-preview {
+        max-width: 390px;
+        display: block;
+        margin: 0 auto;
+      }
+
+      .state-panel {
+        max-width: 560px;
+        margin: 12vh auto 0;
+      }
+
+      .message {
+        margin: 0 0 12px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: #eef4ff;
+        color: #1d4ed8;
+        font-weight: 700;
+      }
+
+      .message.error {
+        background: #fef2f2;
+        color: var(--red);
+      }
+
+      .empty {
+        border: 1px dashed var(--line);
+        border-radius: 8px;
+        padding: 18px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .placeholder-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      code {
+        background: #f1f5f9;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 3px 6px;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      @media (max-width: 1040px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          position: static;
+        }
+
+        .two-col,
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="brand-eyebrow">CRM Suite</div>
+        <h1 class="brand-title">Marketing CRM</h1>
+        <nav class="nav" aria-label="Marketing navigation">
+          <a href="/customer-database/">Customer Database</a>
+          <a href="/marketing-centre/">Marketing Centre</a>
+          <a href="/suppression-centre/">Suppression Centre</a>
+          <a href="/email-templates/" class="active">Email Templates</a>
+        </nav>
+      </aside>
+
+      <main>
+        <section id="checkingState" class="card state-panel hidden">
+          <p class="eyebrow">Protected access</p>
+          <h1>Checking protected access...</h1>
+          <p class="hint">The Email Templates engine will load after your Marketing access key is confirmed.</p>
+        </section>
+
+        <section id="lockedState" class="card state-panel hidden">
+          <p class="eyebrow">Protected access</p>
+          <h1>Unlock Email Templates</h1>
+          <p class="hint">Use the same Marketing access key as Customer Database, Marketing Centre and Suppression Centre.</p>
+          <p id="lockMessage" class="message error hidden"></p>
+          <div class="toolbar" style="margin-top: 14px;">
+            <input id="accessKeyInput" type="password" autocomplete="off" placeholder="Marketing access key" />
+            <button id="unlockButton" class="primary">Unlock</button>
+          </div>
+        </section>
+
+        <section id="appState" class="hidden">
+          <div class="topbar">
+            <div>
+              <p class="eyebrow">Marketing Centre</p>
+              <h1>Email Templates</h1>
+              <p class="hint">Build reusable email templates for future Brevo campaigns. Preview uses sample data only.</p>
+            </div>
+            <div class="toolbar">
+              <button id="newTemplateButton" class="primary">Create Template</button>
+              <button id="refreshButton">Refresh</button>
+              <button id="lockButton">Lock</button>
+            </div>
+          </div>
+
+          <p id="appMessage" class="message hidden"></p>
+
+          <div class="grid two-col">
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <h2>Templates</h2>
+                  <p id="templateCount" class="hint">0 templates</p>
+                </div>
+                <label style="display:flex;align-items:center;gap:8px;font-weight:700;">
+                  <input id="includeArchived" type="checkbox" style="width:auto;" />
+                  Include archived
+                </label>
+              </div>
+              <div id="templatesList" class="templates-list"></div>
+            </section>
+
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <h2 id="editorTitle">Create Template</h2>
+                  <p id="editorHint" class="hint">Archived templates are read only.</p>
+                </div>
+                <span id="editorStatus" class="badge draft">draft</span>
+              </div>
+
+              <form id="templateForm" class="form-grid">
+                <label>
+                  Name
+                  <input id="name" name="name" required />
+                </label>
+                <label>
+                  Category
+                  <select id="category" name="category">
+                    <option value="new_stock">New Stock</option>
+                    <option value="finance_offer">Finance Offer</option>
+                    <option value="rent2buy">Rent2Buy</option>
+                    <option value="weekend_offer">Weekend Offer</option>
+                    <option value="re_engagement">Re-engagement</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                </label>
+                <label class="span-2">
+                  Description
+                  <input id="description" name="description" />
+                </label>
+                <label>
+                  Default Subject
+                  <input id="default_subject" name="default_subject" required />
+                </label>
+                <label>
+                  Preview Text
+                  <input id="preview_text" name="preview_text" />
+                </label>
+                <label>
+                  Header Logo URL
+                  <input id="header_logo" name="header_logo" />
+                </label>
+                <label>
+                  Brand Colour
+                  <input id="brand_colour" name="brand_colour" value="#2557d6" />
+                </label>
+                <label>
+                  Hero Heading
+                  <input id="hero_heading" name="hero_heading" />
+                </label>
+                <label>
+                  Status
+                  <select id="status" name="status">
+                    <option value="draft">Draft</option>
+                    <option value="active">Active</option>
+                  </select>
+                </label>
+                <label class="span-2">
+                  Intro Text
+                  <textarea id="intro_text" name="intro_text"></textarea>
+                </label>
+                <label class="span-2">
+                  Main Body
+                  <textarea id="main_body" name="main_body"></textarea>
+                </label>
+                <label>
+                  CTA Text
+                  <input id="cta_text" name="cta_text" />
+                </label>
+                <label>
+                  CTA URL
+                  <input id="cta_url" name="cta_url" />
+                </label>
+                <label class="span-2">
+                  Footer
+                  <textarea id="footer" name="footer"></textarea>
+                </label>
+              </form>
+
+              <div class="toolbar" style="margin-top: 14px;">
+                <button id="saveButton" class="primary">Save Template</button>
+                <button id="previewButton">Preview Template</button>
+                <button id="duplicateButton">Duplicate</button>
+                <button id="archiveButton" class="danger">Archive</button>
+              </div>
+            </section>
+          </div>
+
+          <section class="card" style="margin-top: 16px;">
+            <div class="card-header">
+              <div>
+                <h2>Template Preview</h2>
+                <p class="hint">Placeholders are rendered with dummy sample data. No real customer data is used.</p>
+              </div>
+            </div>
+            <div class="placeholder-list" aria-label="Supported placeholders">
+              <code>{{vehicle_grid}}</code>
+              <code>{{vehicle_count}}</code>
+              <code>{{campaign_name}}</code>
+              <code>{{first_name}}</code>
+              <code>{{company}}</code>
+            </div>
+            <div id="previewEmpty" class="empty" style="margin-top: 14px;">Preview a template to see desktop and mobile layouts.</div>
+            <div id="previewShell" class="preview-shell hidden" style="margin-top: 14px;">
+              <div>
+                <h3>Desktop</h3>
+                <div class="preview-frame">
+                  <iframe id="desktopPreview" class="desktop-preview" title="Desktop email preview"></iframe>
+                </div>
+              </div>
+              <div>
+                <h3>Mobile</h3>
+                <div class="preview-frame">
+                  <iframe id="mobilePreview" class="mobile-preview" title="Mobile email preview"></iframe>
+                </div>
+              </div>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const ACCESS_KEY_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
+      const API_HEADER = "x-marketing-customer-database-key";
+      const ACCESS_API = "/api/marketing-campaigns";
+      const TEMPLATE_API = "/api/marketing-email-templates";
+
+      const categoryLabels = {
+        new_stock: "New Stock",
+        finance_offer: "Finance Offer",
+        rent2buy: "Rent2Buy",
+        weekend_offer: "Weekend Offer",
+        re_engagement: "Re-engagement",
+        custom: "Custom",
+      };
+
+      const emptyTemplate = {
+        id: null,
+        name: "",
+        description: "",
+        category: "new_stock",
+        default_subject: "",
+        preview_text: "",
+        header_logo: "",
+        hero_heading: "",
+        intro_text: "",
+        main_body: "",
+        cta_text: "",
+        cta_url: "",
+        footer: "",
+        brand_colour: "#2557d6",
+        status: "draft",
+      };
+
+      const state = {
+        accessStatus: "checking",
+        templates: [],
+        selectedId: null,
+        form: { ...emptyTemplate },
+        includeArchived: false,
+      };
+
+      const elements = {
+        checkingState: document.getElementById("checkingState"),
+        lockedState: document.getElementById("lockedState"),
+        appState: document.getElementById("appState"),
+        lockMessage: document.getElementById("lockMessage"),
+        appMessage: document.getElementById("appMessage"),
+        accessKeyInput: document.getElementById("accessKeyInput"),
+        unlockButton: document.getElementById("unlockButton"),
+        lockButton: document.getElementById("lockButton"),
+        refreshButton: document.getElementById("refreshButton"),
+        newTemplateButton: document.getElementById("newTemplateButton"),
+        includeArchived: document.getElementById("includeArchived"),
+        templatesList: document.getElementById("templatesList"),
+        templateCount: document.getElementById("templateCount"),
+        templateForm: document.getElementById("templateForm"),
+        editorTitle: document.getElementById("editorTitle"),
+        editorHint: document.getElementById("editorHint"),
+        editorStatus: document.getElementById("editorStatus"),
+        saveButton: document.getElementById("saveButton"),
+        previewButton: document.getElementById("previewButton"),
+        duplicateButton: document.getElementById("duplicateButton"),
+        archiveButton: document.getElementById("archiveButton"),
+        previewEmpty: document.getElementById("previewEmpty"),
+        previewShell: document.getElementById("previewShell"),
+        desktopPreview: document.getElementById("desktopPreview"),
+        mobilePreview: document.getElementById("mobilePreview"),
+      };
+
+      function getStoredKey() {
+        try {
+          return window.localStorage.getItem(ACCESS_KEY_STORAGE_KEY) || "";
+        } catch {
+          return "";
+        }
+      }
+
+      function saveStoredKey(key) {
+        try {
+          window.sessionStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
+          window.localStorage.setItem(ACCESS_KEY_STORAGE_KEY, key);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+
+      function clearStoredKey() {
+        try {
+          window.sessionStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
+          window.localStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
+        } catch {
+        }
+      }
+
+      function setAccessStatus(status, message = "") {
+        state.accessStatus = status;
+        elements.checkingState.classList.toggle("hidden", status !== "checking");
+        elements.lockedState.classList.toggle("hidden", status !== "locked");
+        elements.appState.classList.toggle("hidden", status !== "unlocked");
+        showMessage(elements.lockMessage, message, Boolean(message));
+      }
+
+      function showMessage(element, message, isError = false) {
+        element.textContent = message || "";
+        element.classList.toggle("hidden", !message);
+        element.classList.toggle("error", isError);
+      }
+
+      function headers() {
+        return {
+          "Content-Type": "application/json",
+          [API_HEADER]: getStoredKey(),
+        };
+      }
+
+      async function postJson(url, body) {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify(body),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok === false) {
+          const error = new Error(payload.error || `Request failed with status ${response.status}`);
+          error.status = response.status;
+          throw error;
+        }
+        return payload;
+      }
+
+      async function validateKey(key) {
+        const response = await fetch(ACCESS_API, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            [API_HEADER]: key,
+          },
+          body: JSON.stringify({ action: "validateAccess" }),
+        });
+        return response.ok;
+      }
+
+      async function boot() {
+        const storedKey = getStoredKey();
+        if (!storedKey) {
+          setAccessStatus("locked");
+          return;
+        }
+        setAccessStatus("checking");
+        try {
+          const valid = await validateKey(storedKey);
+          if (!valid) {
+            clearStoredKey();
+            setAccessStatus("locked", "Your saved access has expired or is no longer valid. Please unlock again.");
+            return;
+          }
+          setAccessStatus("unlocked");
+          await loadTemplates();
+        } catch {
+          setAccessStatus("locked", "Could not check protected access. Please try again.");
+        }
+      }
+
+      async function unlock() {
+        const key = elements.accessKeyInput.value.trim();
+        if (!key) {
+          showMessage(elements.lockMessage, "Enter the Marketing access key.", true);
+          return;
+        }
+        elements.unlockButton.disabled = true;
+        try {
+          const valid = await validateKey(key);
+          if (!valid) {
+            showMessage(elements.lockMessage, "Access key not recognised.", true);
+            return;
+          }
+          if (!saveStoredKey(key)) {
+            showMessage(elements.lockMessage, "Could not save the API key in this browser.", true);
+            return;
+          }
+          elements.accessKeyInput.value = "";
+          setAccessStatus("unlocked");
+          await loadTemplates();
+        } catch {
+          showMessage(elements.lockMessage, "Could not validate access. Please try again.", true);
+        } finally {
+          elements.unlockButton.disabled = false;
+        }
+      }
+
+      function lock() {
+        clearStoredKey();
+        state.templates = [];
+        state.selectedId = null;
+        state.form = { ...emptyTemplate };
+        renderAll();
+        setAccessStatus("locked");
+      }
+
+      async function loadTemplates() {
+        showMessage(elements.appMessage, "");
+        const result = await postJson(TEMPLATE_API, {
+          action: "list",
+          includeArchived: state.includeArchived,
+        });
+        state.templates = result.templates || [];
+        if (state.selectedId && !state.templates.some((template) => template.id === state.selectedId)) {
+          newTemplate();
+        }
+        renderAll();
+      }
+
+      function templateLabel(template) {
+        return categoryLabels[template.category] || template.category || "Custom";
+      }
+
+      function renderTemplates() {
+        elements.templateCount.textContent = `${state.templates.length.toLocaleString("en-GB")} template${state.templates.length === 1 ? "" : "s"}`;
+        if (!state.templates.length) {
+          elements.templatesList.innerHTML = '<div class="empty">No templates yet.</div>';
+          return;
+        }
+        elements.templatesList.innerHTML = state.templates.map((template) => `
+          <button class="template-row ${template.id === state.selectedId ? "is-selected" : ""}" data-template-id="${escapeHtml(template.id)}">
+            <span>
+              <strong>${escapeHtml(template.name || "Untitled template")}</strong>
+              <span class="meta">
+                <span>${escapeHtml(templateLabel(template))}</span>
+                <span>${escapeHtml(template.default_subject || "No subject")}</span>
+              </span>
+            </span>
+            <span class="badge ${escapeHtml(template.status || "draft")}">${escapeHtml(template.status || "draft")}</span>
+          </button>
+        `).join("");
+        elements.templatesList.querySelectorAll("[data-template-id]").forEach((button) => {
+          button.addEventListener("click", () => selectTemplate(button.dataset.templateId));
+        });
+      }
+
+      function renderForm() {
+        const form = state.form;
+        Object.keys(emptyTemplate).forEach((key) => {
+          const input = document.getElementById(key);
+          if (input) {
+            input.value = form[key] || "";
+          }
+        });
+        const isArchived = form.status === "archived";
+        elements.editorTitle.textContent = form.id ? "Edit Template" : "Create Template";
+        elements.editorHint.textContent = isArchived ? "Archived templates are read only. Duplicate to create an editable copy." : "Create and preview reusable email content.";
+        elements.editorStatus.textContent = form.status || "draft";
+        elements.editorStatus.className = `badge ${form.status || "draft"}`;
+        elements.templateForm.querySelectorAll("input, select, textarea").forEach((input) => {
+          input.disabled = isArchived;
+        });
+        elements.saveButton.disabled = isArchived;
+        elements.archiveButton.disabled = !form.id || isArchived;
+        elements.duplicateButton.disabled = !form.id;
+      }
+
+      function renderAll() {
+        renderTemplates();
+        renderForm();
+      }
+
+      function newTemplate() {
+        state.selectedId = null;
+        state.form = { ...emptyTemplate };
+        clearPreview();
+        renderAll();
+      }
+
+      function selectTemplate(id) {
+        const template = state.templates.find((item) => item.id === id);
+        if (!template) return;
+        state.selectedId = id;
+        state.form = { ...emptyTemplate, ...template };
+        clearPreview();
+        renderAll();
+      }
+
+      function readForm() {
+        const values = { ...state.form };
+        Object.keys(emptyTemplate).forEach((key) => {
+          const input = document.getElementById(key);
+          if (input) {
+            values[key] = input.value.trim();
+          }
+        });
+        values.id = state.form.id;
+        if (values.status === "archived") {
+          values.status = state.form.status;
+        }
+        return values;
+      }
+
+      async function saveTemplate() {
+        const values = readForm();
+        if (!values.name || !values.default_subject) {
+          showMessage(elements.appMessage, "Template name and default subject are required.", true);
+          return;
+        }
+        const action = values.id ? "update" : "create";
+        const result = await postJson(TEMPLATE_API, {
+          action,
+          template: values,
+          id: values.id,
+        });
+        state.selectedId = result.template.id;
+        state.form = { ...emptyTemplate, ...result.template };
+        showMessage(elements.appMessage, "Template saved.");
+        await loadTemplates();
+      }
+
+      async function archiveTemplate() {
+        if (!state.form.id || state.form.status === "archived") return;
+        if (!window.confirm("Archive this template? Archived templates are read only.")) return;
+        const result = await postJson(TEMPLATE_API, { action: "archive", id: state.form.id });
+        state.selectedId = result.template.id;
+        state.form = { ...emptyTemplate, ...result.template };
+        showMessage(elements.appMessage, "Template archived.");
+        await loadTemplates();
+      }
+
+      async function duplicateTemplate() {
+        if (!state.form.id) return;
+        const result = await postJson(TEMPLATE_API, { action: "duplicate", id: state.form.id });
+        state.includeArchived = true;
+        elements.includeArchived.checked = true;
+        state.selectedId = result.template.id;
+        state.form = { ...emptyTemplate, ...result.template };
+        showMessage(elements.appMessage, "Template duplicated.");
+        await loadTemplates();
+      }
+
+      async function previewTemplate() {
+        const values = readForm();
+        if (!values.name || !values.default_subject) {
+          showMessage(elements.appMessage, "Template name and default subject are required before preview.", true);
+          return;
+        }
+        const result = await postJson(TEMPLATE_API, {
+          action: "preview",
+          template: values,
+        });
+        const html = result.preview?.html || "";
+        elements.previewEmpty.classList.add("hidden");
+        elements.previewShell.classList.remove("hidden");
+        elements.desktopPreview.srcdoc = html;
+        elements.mobilePreview.srcdoc = html;
+        showMessage(elements.appMessage, "Preview generated with dummy sample data.");
+      }
+
+      function clearPreview() {
+        elements.previewEmpty.classList.remove("hidden");
+        elements.previewShell.classList.add("hidden");
+        elements.desktopPreview.srcdoc = "";
+        elements.mobilePreview.srcdoc = "";
+      }
+
+      function escapeHtml(value) {
+        return String(value || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      }
+
+      elements.unlockButton.addEventListener("click", unlock);
+      elements.accessKeyInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") unlock();
+      });
+      elements.lockButton.addEventListener("click", lock);
+      elements.refreshButton.addEventListener("click", () => loadTemplates().catch((error) => showMessage(elements.appMessage, error.message, true)));
+      elements.newTemplateButton.addEventListener("click", newTemplate);
+      elements.includeArchived.addEventListener("change", async () => {
+        state.includeArchived = elements.includeArchived.checked;
+        await loadTemplates();
+      });
+      elements.saveButton.addEventListener("click", () => saveTemplate().catch((error) => showMessage(elements.appMessage, error.message, true)));
+      elements.archiveButton.addEventListener("click", () => archiveTemplate().catch((error) => showMessage(elements.appMessage, error.message, true)));
+      elements.duplicateButton.addEventListener("click", () => duplicateTemplate().catch((error) => showMessage(elements.appMessage, error.message, true)));
+      elements.previewButton.addEventListener("click", () => previewTemplate().catch((error) => showMessage(elements.appMessage, error.message, true)));
+
+      boot();
+    </script>
+  </body>
+</html>
