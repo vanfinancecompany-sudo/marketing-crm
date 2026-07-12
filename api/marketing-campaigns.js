@@ -281,6 +281,185 @@ async function getCampaignStats(supabase) {
   };
 }
 
+function daysAgoIso(days) {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function buildOpportunityRules(overrides = {}) {
+  return normalizeAudienceRules({ ...DEFAULT_AUDIENCE_RULES, ...overrides });
+}
+
+function buildOpportunityName(channel, title) {
+  const month = new Date().toLocaleString("en-GB", { month: "short", year: "numeric" });
+  const channelLabel = channel === "sms" ? "SMS" : channel === "facebook" ? "Facebook" : "Email";
+  return `${channelLabel} - ${title} - ${month}`;
+}
+
+function buildOpportunity({ id, title, description, customerCount, channel, objective, rules }) {
+  return {
+    id,
+    title,
+    description,
+    customer_count: Number(customerCount || 0),
+    recommended_channel: channel,
+    recommended_objective: objective,
+    default_audience_rules: buildOpportunityRules(rules),
+    suggested_name: buildOpportunityName(channel, title),
+  };
+}
+
+async function countContacts(supabase, applyQuery) {
+  let query = supabase.from("marketing_contacts").select("id", { count: "exact", head: true });
+  if (applyQuery) query = applyQuery(query);
+  const { count } = assertSupabase(await query, "Could not count marketing opportunity customers.");
+  return count || 0;
+}
+
+async function getExportedReadyCustomerCount(supabase, channel, readyColumn) {
+  try {
+    const { data: campaigns } = assertSupabase(
+      await supabase.from("marketing_campaigns").select("id").eq("channel", channel),
+      "Could not load exported campaign channels."
+    );
+    const campaignIds = (campaigns || []).map((campaign) => campaign.id).filter(Boolean);
+    if (!campaignIds.length) return 0;
+
+    const { data: batches } = assertSupabase(
+      await supabase.from("marketing_campaign_batches").select("id").in("campaign_id", campaignIds).eq("status", "exported"),
+      "Could not load exported campaign batches."
+    );
+    const batchIds = (batches || []).map((batch) => batch.id).filter(Boolean);
+    if (!batchIds.length) return 0;
+
+    const exportedCustomerIds = new Set();
+    for (let index = 0; index < batchIds.length; index += 100) {
+      const batchChunk = batchIds.slice(index, index + 100);
+      const { data } = assertSupabase(
+        await supabase
+          .from("marketing_campaign_batch_customers")
+          .select(`customer_id,marketing_contacts!inner(${readyColumn})`)
+          .in("batch_id", batchChunk),
+        "Could not count exported marketing customers."
+      );
+      (data || []).forEach((row) => {
+        const customer = Array.isArray(row.marketing_contacts) ? row.marketing_contacts[0] : row.marketing_contacts;
+        if (customer?.[readyColumn] && row.customer_id) exportedCustomerIds.add(row.customer_id);
+      });
+    }
+    return exportedCustomerIds.size;
+  } catch (error) {
+    if (isMissingBatchInfrastructure(error)) return 0;
+    throw error;
+  }
+}
+
+async function countNeverExportedReady(supabase, channel, readyColumn) {
+  const [readyCount, exportedReadyCount] = await Promise.all([
+    countContacts(supabase, (query) => query.eq(readyColumn, true)),
+    getExportedReadyCustomerCount(supabase, channel, readyColumn),
+  ]);
+  return Math.max(0, readyCount - exportedReadyCount);
+}
+
+async function countUntaggedContacts(supabase) {
+  try {
+    return await countContacts(supabase, (query) => query.or("tags.is.null,tags.eq.{}"));
+  } catch {
+    return countContacts(supabase, (query) => query.is("tags", null));
+  }
+}
+
+async function countMultipleApplications(supabase) {
+  try {
+    return await countContacts(supabase, (query) => query.gt("application_count", 1));
+  } catch {
+    return null;
+  }
+}
+
+async function getMarketingOpportunities(supabase) {
+  const [neverMarketed, smsReady, facebookReady, dormant, recentImports, untagged, multipleApplications] = await Promise.all([
+    countNeverExportedReady(supabase, "email", "email_ready"),
+    countNeverExportedReady(supabase, "sms", "sms_ready"),
+    countNeverExportedReady(supabase, "facebook", "facebook_ready"),
+    countContacts(supabase, (query) => query.lt("last_seen_at", daysAgoIso(180))),
+    countContacts(supabase, (query) => query.gte("created_at", daysAgoIso(7))),
+    countUntaggedContacts(supabase),
+    countMultipleApplications(supabase),
+  ]);
+
+  const opportunities = [
+    buildOpportunity({
+      id: "never_marketed_email",
+      title: "Never Marketed",
+      description: "Email-ready customers who have never been exported in an Email campaign.",
+      customerCount: neverMarketed,
+      channel: "email",
+      objective: "re_engagement",
+      rules: {},
+    }),
+    buildOpportunity({
+      id: "sms_ready_never_exported",
+      title: "SMS Ready",
+      description: "SMS-ready customers who have never been exported in an SMS campaign.",
+      customerCount: smsReady,
+      channel: "sms",
+      objective: "promotion",
+      rules: {},
+    }),
+    buildOpportunity({
+      id: "facebook_ready_never_exported",
+      title: "Facebook Ready",
+      description: "Facebook-ready customers who have never been exported in a Facebook campaign.",
+      customerCount: facebookReady,
+      channel: "facebook",
+      objective: "promotion",
+      rules: {},
+    }),
+    buildOpportunity({
+      id: "dormant_customers",
+      title: "Dormant Customers",
+      description: "Customers with no recorded activity for more than 180 days.",
+      customerCount: dormant,
+      channel: "email",
+      objective: "re_engagement",
+      rules: { last_seen_period: "more_than_180" },
+    }),
+    buildOpportunity({
+      id: "recent_imports",
+      title: "Recent Imports",
+      description: "Customers created in the last 7 days.",
+      customerCount: recentImports,
+      channel: "email",
+      objective: "new_stock",
+      rules: { created_period: "last7" },
+    }),
+    buildOpportunity({
+      id: "untagged_customers",
+      title: "Untagged Customers",
+      description: "Customers with no tags, ready for future segmentation cleanup.",
+      customerCount: untagged,
+      channel: "email",
+      objective: "custom",
+      rules: {},
+    }),
+  ];
+
+  if (multipleApplications !== null) {
+    opportunities.push(buildOpportunity({
+      id: "multiple_applications",
+      title: "Multiple Applications",
+      description: "Customers with more than one recorded application.",
+      customerCount: multipleApplications,
+      channel: "email",
+      objective: "finance_offer",
+      rules: {},
+    }));
+  }
+
+  return { opportunities };
+}
+
 async function getBatchSummaryMap(supabase, campaignIds = []) {
   const ids = campaignIds.filter(Boolean);
   const summaries = new Map(ids.map((id) => [id, { ...EMPTY_BATCH_SUMMARY }]));
@@ -682,6 +861,7 @@ export default async function handler(request, response) {
     else if (action === "update") result = await updateCampaign(supabase, body);
     else if (action === "archive") result = await archiveCampaign(supabase, body);
     else if (action === "audienceOptions") result = { options: await getAudienceOptions() };
+    else if (action === "marketingOpportunities") result = await getMarketingOpportunities(supabase);
     else if (action === "previewAudience") result = await previewAudience(supabase, body);
     else if (action === "saveAudience") result = await saveAudience(supabase, body);
     else if (action === "listBatches") result = await listBatches(supabase, body);
