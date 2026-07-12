@@ -101,6 +101,11 @@ export async function getMarketingCampaignDashboard(campaign, preferredBatchSize
   return result.dashboard || {};
 }
 
+export async function getMarketingOpportunities() {
+  const result = await requestMarketingCampaigns("marketingOpportunities");
+  return result.opportunities || [];
+}
+
 export async function previewMarketingCampaignAudience(campaign, rules) {
   const result = await requestMarketingCampaigns("previewAudience", { campaign, rules });
   return result.audience;
