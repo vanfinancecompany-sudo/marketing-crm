@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Suppression Centre - Marketing CRM</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #0f172a; background: #f6f8fb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #f6f8fb; }
+    a { color: inherit; }
+    .layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 100vh; }
+    .sidebar { background: #0f172a; color: #f8fafc; padding: 24px 18px; }
+    .sidebar__eyebrow { color: #93c5fd; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .sidebar h1 { margin: 4px 0 28px; font-size: 24px; }
+    .sidebar a { display: block; padding: 10px 12px; border-radius: 8px; text-decoration: none; color: #dbeafe; font-weight: 700; }
+    .sidebar a:hover, .sidebar a.is-active { background: rgba(255,255,255,.1); color: #fff; }
+    main { padding: 24px; }
+    .page-stack { display: grid; gap: 18px; max-width: 1400px; margin: 0 auto; }
+    .panel, .hero-panel, .stat-card { background: #fff; border: 1px solid #dbe2ea; border-radius: 12px; box-shadow: 0 18px 45px rgba(15, 23, 42, .08); padding: 18px; }
+    .panel--nested { box-shadow: none; }
+    .panel__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+    .eyebrow { color: #2563eb; font-size: 12px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+    h2, h3 { margin: 0; }
+    p { color: #64748b; margin: 6px 0 0; }
+    .stats-grid, .card-grid, .field-grid { display: grid; gap: 12px; }
+    .stats-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+    .card-grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    .field-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    .stat-card__label, .field__label { color: #64748b; display: block; font-size: 12px; font-weight: 900; letter-spacing: .04em; margin-bottom: 6px; text-transform: uppercase; }
+    .stat-card__value { font-size: 30px; font-weight: 900; }
+    .field__input, textarea, select, input { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; font: inherit; background: #fff; }
+    textarea { min-height: 84px; resize: vertical; }
+    .button { border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: #0f172a; cursor: pointer; font-weight: 800; padding: 9px 12px; }
+    .button--primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+    .button--danger { background: #dc2626; border-color: #dc2626; color: #fff; }
+    .button--ghost { background: #f8fafc; }
+    .button:disabled { cursor: not-allowed; opacity: .55; }
+    .card-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .notice { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; color: #1e3a8a; padding: 12px; }
+    .notice--error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+    .status-pill { display: inline-flex; align-items: center; border-radius: 999px; background: #e2e8f0; color: #334155; font-size: 12px; font-weight: 900; padding: 5px 9px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 10px 8px; text-align: left; vertical-align: top; }
+    th { color: #475569; font-size: 12px; text-transform: uppercase; }
+    .table-shell { overflow-x: auto; }
+    .locked { max-width: 760px; margin: 8vh auto; }
+    .hidden { display: none !important; }
+    @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } .sidebar { position: static; } main { padding: 14px; } .panel__header { display: grid; } }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar__eyebrow">CRM Suite</div>
+      <h1>Marketing CRM</h1>
+      <a href="/marketing-centre">Marketing Centre</a>
+      <a href="/customer-database">Customer Database</a>
+      <a class="is-active" href="/suppression-centre/">Suppression Centre</a>
+    </aside>
+    <main>
+      <div id="checking" class="locked panel hidden">
+        <div class="eyebrow">Marketing Safety</div>
+        <h2>Suppression Centre</h2>
+        <p>Checking protected access...</p>
+      </div>
+
+      <div id="locked" class="locked panel hidden">
+        <div class="eyebrow">Marketing Safety</div>
+        <h2>Suppression Centre Locked</h2>
+        <p>Enter the same access key used for the Customer Database and Marketing Centre.</p>
+        <form id="unlockForm" class="field-grid" style="margin-top:16px">
+          <label class="field"><span class="field__label">Access Key</span><input id="accessKey" class="field__input" type="password" autocomplete="off" /></label>
+          <div class="card-actions" style="align-self:end"><button id="unlockButton" class="button button--primary" type="submit">Unlock Suppression Centre</button></div>
+        </form>
+        <div id="accessMessage" class="notice notice--error hidden" style="margin-top:12px"></div>
+      </div>
+
+      <div id="app" class="page-stack hidden">
+        <section class="hero-panel">
+          <div class="panel__header" style="margin-bottom:0">
+            <div><div class="eyebrow">Marketing Safety</div><h2>Suppression Centre</h2><p>Manage customers who must be excluded from future campaign audiences.</p></div>
+            <div class="card-actions"><button id="refresh" class="button button--ghost" type="button">Refresh</button><button id="lock" class="button button--ghost" type="button">Lock</button></div>
+          </div>
+        </section>
+
+        <section class="stats-grid" id="overviewCards"></section>
+
+        <section class="panel">
+          <div class="panel__header"><div><h3>Suppression Totals</h3><p>Live customer suppression status from existing customer records.</p></div></div>
+          <div class="stats-grid" id="suppressionTotals"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header"><div><h3>Manual Search</h3><p>Search existing customers, then apply or remove suppression state. Customers are never deleted.</p></div></div>
+          <div class="field-grid">
+            <label class="field"><span class="field__label">Search customer</span><input id="search" class="field__input" placeholder="Name, email, phone, company, postcode or customer ID" /></label>
+            <div class="card-actions" style="align-self:end"><button id="searchButton" class="button button--primary" type="button">Search</button></div>
+          </div>
+          <div id="searchError" class="notice notice--error hidden" style="margin-top:12px"></div>
+          <div class="table-shell" style="margin-top:14px"><table><thead><tr><th>Customer</th><th>Contact</th><th>Pipeline</th><th>Status</th><th>Actions</th></tr></thead><tbody id="searchResults"><tr><td colspan="5">Search for a customer to manage suppression.</td></tr></tbody></table></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header"><div><h3>Recently Suppressed</h3><p>Newest suppressed customer records.</p></div></div>
+          <div class="table-shell"><table><thead><tr><th>Customer</th><th>Reason</th><th>Date Added</th><th>Added By</th><th>Notes</th></tr></thead><tbody id="recentRows"></tbody></table></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header"><div><h3>Audit History</h3><p>Suppression changes remain visible after suppression is removed.</p></div></div>
+          <div class="table-shell"><table><thead><tr><th>Customer</th><th>Action</th><th>Reason</th><th>User</th><th>Date</th></tr></thead><tbody id="historyRows"></tbody></table></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "marketingCustomerDatabaseApiKey";
+    const API_HEADER = "x-marketing-customer-database-key";
+    const API_ROUTE = "/api/marketing-suppressions";
+    const ACCESS_ROUTE = "/api/marketing-campaigns";
+    const TYPES = {
+      email_unsubscribed: "Email Unsubscribed",
+      email_bounced: "Email Bounced",
+      sms_opt_out: "SMS Opt-out",
+      facebook_excluded: "Facebook Excluded",
+      manual_suppression: "Manual Suppression",
+      global_do_not_contact: "Global Do Not Contact",
+    };
+    let selectedContact = null;
+    let accessStatus = "locked";
+
+    function getStorage(name) { try { return window[name] || null; } catch { return null; } }
+    function getKey() {
+      const local = getStorage("localStorage");
+      const session = getStorage("sessionStorage");
+      try { return local?.getItem(STORAGE_KEY) || session?.getItem(STORAGE_KEY) || ""; } catch { return ""; }
+    }
+    function saveKey(value) {
+      const local = getStorage("localStorage");
+      const session = getStorage("sessionStorage");
+      const safeValue = String(value || "").trim();
+      if (!safeValue || !local) return false;
+      try {
+        session?.removeItem(STORAGE_KEY);
+        local.setItem(STORAGE_KEY, safeValue);
+        return local.getItem(STORAGE_KEY) === safeValue;
+      } catch { return false; }
+    }
+    function clearKey() {
+      const local = getStorage("localStorage");
+      const session = getStorage("sessionStorage");
+      try { local?.removeItem(STORAGE_KEY); session?.removeItem(STORAGE_KEY); } catch {}
+    }
+    function formatNumber(value) { return Number(value || 0).toLocaleString("en-GB"); }
+    function formatDate(value) { if (!value) return "-"; const date = new Date(value); return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString("en-GB", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" }); }
+    function escapeHtml(value) { return String(value || "").replace(/[&<>"']/g, (char) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[char])); }
+    function setAccessStatus(status, message = "") {
+      accessStatus = status;
+      document.getElementById("checking").classList.toggle("hidden", status !== "checking");
+      document.getElementById("locked").classList.toggle("hidden", status !== "locked");
+      document.getElementById("app").classList.toggle("hidden", status !== "unlocked");
+      const node = document.getElementById("accessMessage");
+      node.textContent = message;
+      node.classList.toggle("hidden", !message);
+    }
+    function lock(message = "") { clearKey(); selectedContact = null; setAccessStatus("locked", message); }
+    function buildHeaders(key = getKey()) { return { "Content-Type": "application/json", ...(key ? { [API_HEADER]: key } : {}) }; }
+
+    async function parseJsonResponse(response, fallbackMessage) {
+      const result = await response.json().catch(() => ({}));
+      if (response.status === 401) { lock("Your saved access has expired or is no longer valid. Please unlock again."); throw new Error("Access key not recognised."); }
+      if (!response.ok || result.ok === false) throw new Error(result.message || fallbackMessage || "Suppression Centre request failed.");
+      return result;
+    }
+
+    async function validateAccessKey(key = getKey()) {
+      const response = await fetch(ACCESS_ROUTE, { method: "POST", headers: buildHeaders(key), body: JSON.stringify({ action: "validateAccess" }) });
+      return parseJsonResponse(response, "Could not validate Suppression Centre access.");
+    }
+
+    async function request(action, payload = {}) {
+      if (accessStatus !== "unlocked") throw new Error("Unlock Suppression Centre before loading protected data.");
+      const response = await fetch(API_ROUTE, { method: "POST", headers: buildHeaders(), body: JSON.stringify({ action, ...payload }) });
+      return parseJsonResponse(response, "Suppression Centre request failed.");
+    }
+
+    function renderOverview(data) {
+      const overview = data.overview || {};
+      document.getElementById("overviewCards").innerHTML = [
+        ["Total Contacts", overview.total_contacts],
+        ["Suppressed", overview.suppressed_contacts],
+        ["Active Contacts", overview.active_contacts],
+      ].map(([label, value]) => `<article class="stat-card"><div class="stat-card__label">${label}</div><div class="stat-card__value">${formatNumber(value)}</div></article>`).join("");
+      document.getElementById("suppressionTotals").innerHTML = Object.entries(TYPES).map(([key, label]) => `<article class="stat-card"><div class="stat-card__label">${label}</div><div class="stat-card__value">${formatNumber(data.totals?.[key] || 0)}</div></article>`).join("");
+      document.getElementById("recentRows").innerHTML = (data.recent || []).length ? (data.recent || []).map((contact) => {
+        const entries = Object.values(contact.suppression || {});
+        const first = entries[0] || {};
+        return `<tr><td><strong>${escapeHtml(contact.name)}</strong><br><small>${escapeHtml(contact.customer_id)}</small></td><td>${escapeHtml(first.label || contact.marketing_status)}</td><td>${formatDate(first.added_at || contact.updated_at)}</td><td>${escapeHtml(first.added_by || "-")}</td><td>${escapeHtml(first.notes || first.reason || "-")}</td></tr>`;
+      }).join("") : `<tr><td colspan="5">No suppressed customers found.</td></tr>`;
+      document.getElementById("historyRows").innerHTML = (data.history || []).length ? (data.history || []).map((entry) => `<tr><td><strong>${escapeHtml(entry.customer)}</strong><br><small>${escapeHtml(entry.customer_id)}</small></td><td>${escapeHtml(entry.action || "-")} ${escapeHtml(entry.label || entry.type || "")}</td><td>${escapeHtml(entry.reason || "-")}</td><td>${escapeHtml(entry.added_by || "-")}</td><td>${formatDate(entry.added_at)}</td></tr>`).join("") : `<tr><td colspan="5">No suppression history yet.</td></tr>`;
+    }
+
+    async function loadOverview() { renderOverview(await request("overview")); }
+
+    function renderContacts(contacts) {
+      document.getElementById("searchResults").innerHTML = contacts.length ? contacts.map((contact) => `<tr><td><strong>${escapeHtml(contact.name)}</strong><br><small>${escapeHtml(contact.customer_id)}</small></td><td>${escapeHtml(contact.email || "-")}<br>${escapeHtml(contact.phone || "-")}</td><td>${escapeHtml(contact.pipeline)}</td><td>${contact.is_suppressed ? "<span class='status-pill'>Suppressed</span>" : "<span class='status-pill'>Active</span>"}</td><td><button class="button button--ghost" type="button" data-contact='${escapeHtml(JSON.stringify(contact))}'>Manage</button></td></tr>`).join("") : `<tr><td colspan="5">No matching customers.</td></tr>`;
+      document.querySelectorAll("[data-contact]").forEach((button) => button.addEventListener("click", () => { selectedContact = JSON.parse(button.getAttribute("data-contact")); renderManagePanel(); }));
+    }
+
+    function renderManagePanel() {
+      if (!selectedContact) return;
+      const existing = document.getElementById("managePanel");
+      if (existing) existing.remove();
+      const panel = document.createElement("section");
+      panel.id = "managePanel";
+      panel.className = "panel";
+      panel.innerHTML = `<div class="panel__header"><div><h3>Apply Suppression</h3><p>${escapeHtml(selectedContact.name)} - ${escapeHtml(selectedContact.customer_id)}</p></div></div><div class="field-grid"><label class="field"><span class="field__label">Suppression Type</span><select id="suppressionType" class="field__input">${Object.entries(TYPES).map(([key, label]) => `<option value="${key}">${label}</option>`).join("")}</select></label><label class="field"><span class="field__label">Reason</span><input id="reason" class="field__input" /></label><label class="field"><span class="field__label">Added by</span><input id="addedBy" class="field__input" value="Marketing CRM" /></label><label class="field" style="grid-column:1/-1"><span class="field__label">Notes</span><textarea id="notes" class="field__input"></textarea></label></div><div class="card-actions" style="margin-top:14px"><button id="applySuppression" class="button button--danger" type="button">Apply Suppression</button><button id="removeSuppression" class="button button--ghost" type="button">Remove Suppression</button></div><div class="notice" style="margin-top:12px">Current active types: ${Object.values(selectedContact.suppression || {}).map((item) => escapeHtml(item.label || item.type)).join(", ") || "None"}</div>`;
+      document.getElementById("app").insertBefore(panel, document.getElementById("app").children[4]);
+      document.getElementById("applySuppression").addEventListener("click", applySuppression);
+      document.getElementById("removeSuppression").addEventListener("click", removeSuppression);
+    }
+
+    async function runSearch() {
+      const errorNode = document.getElementById("searchError");
+      errorNode.classList.add("hidden");
+      try { renderContacts((await request("search", { search: document.getElementById("search").value })).contacts || []); }
+      catch (error) { errorNode.textContent = error.message; errorNode.classList.remove("hidden"); }
+    }
+
+    async function applySuppression() {
+      if (!selectedContact) return;
+      const type = document.getElementById("suppressionType").value;
+      if (!confirm(`Apply ${TYPES[type]} to ${selectedContact.name}?`)) return;
+      const result = await request("suppress", { contactId: selectedContact.id, type, reason: document.getElementById("reason").value, addedBy: document.getElementById("addedBy").value, notes: document.getElementById("notes").value });
+      selectedContact = result.contact;
+      renderOverview(result.overview);
+      renderManagePanel();
+      await runSearch();
+    }
+
+    async function removeSuppression() {
+      if (!selectedContact) return;
+      const type = document.getElementById("suppressionType").value;
+      if (!confirm(`Remove ${TYPES[type]} from ${selectedContact.name}?`)) return;
+      const result = await request("remove", { contactId: selectedContact.id, type, reason: document.getElementById("reason").value, addedBy: document.getElementById("addedBy").value, notes: document.getElementById("notes").value });
+      selectedContact = result.contact;
+      renderOverview(result.overview);
+      renderManagePanel();
+      await runSearch();
+    }
+
+    document.getElementById("unlockForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const key = document.getElementById("accessKey").value.trim();
+      if (!key) { setAccessStatus("locked", "Enter the Marketing access key."); return; }
+      const button = document.getElementById("unlockButton");
+      button.disabled = true;
+      setAccessStatus("checking");
+      try {
+        await validateAccessKey(key);
+        if (!saveKey(key)) { setAccessStatus("locked", "Could not save the API key in this browser."); return; }
+        document.getElementById("accessKey").value = "";
+        setAccessStatus("unlocked");
+        await loadOverview();
+      } catch (error) {
+        clearKey();
+        setAccessStatus("locked", error.message === "Access key not recognised." ? "Access key not recognised." : error.message || "Could not validate Suppression Centre access.");
+      } finally {
+        button.disabled = false;
+      }
+    });
+    document.getElementById("lock").addEventListener("click", () => { lock(); });
+    document.getElementById("refresh").addEventListener("click", loadOverview);
+    document.getElementById("searchButton").addEventListener("click", runSearch);
+    document.getElementById("search").addEventListener("keydown", (event) => { if (event.key === "Enter") runSearch(); });
+
+    (async function boot() {
+      if (!getKey()) { setAccessStatus("locked"); return; }
+      setAccessStatus("checking");
+      try {
+        await validateAccessKey();
+        setAccessStatus("unlocked");
+        await loadOverview();
+      } catch (error) {
+        clearKey();
+        setAccessStatus("locked", error.message === "Access key not recognised." ? "Your saved access has expired or is no longer valid. Please unlock again." : error.message || "Could not validate Suppression Centre access.");
+      }
+    }());
+  </script>
+</body>
+</html>

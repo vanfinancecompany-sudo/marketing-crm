@@ -13,6 +13,7 @@ export default function Sidebar({ currentView, onNavigate }) {
     "Stock",
     "Customer Database",
     "Marketing Centre",
+    "Suppression Centre",
     "Vansco Stock Watch",
     "Reel Lab Beta",
     "YouTube Generator",
@@ -37,6 +38,14 @@ export default function Sidebar({ currentView, onNavigate }) {
         </a>
 
         {items.map((item) => {
+          if (item === "Suppression Centre") {
+            return (
+              <a key={item} className="sidebar__link" href="/suppression-centre/">
+                {item}
+              </a>
+            );
+          }
+
           if (item === "Image Suite") {
             return (
               <a key={item} className="sidebar__link" href={IMAGE_SUITE_URL}>
