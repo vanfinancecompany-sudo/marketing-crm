@@ -295,7 +295,8 @@ function buildOpportunityName(channel, title) {
   return `${channelLabel} - ${title} - ${month}`;
 }
 
-function buildOpportunity({ id, title, description, customerCount, channel, objective, rules }) {
+function buildOpportunity({ id, title, description, customerCount, channel, objective, rules, campaignCreationSupported = false, unsupportedReason = "Audience filter not yet available" }) {
+  const supported = Boolean(campaignCreationSupported);
   return {
     id,
     title,
@@ -303,8 +304,10 @@ function buildOpportunity({ id, title, description, customerCount, channel, obje
     customer_count: Number(customerCount || 0),
     recommended_channel: channel,
     recommended_objective: objective,
-    default_audience_rules: buildOpportunityRules(rules),
-    suggested_name: buildOpportunityName(channel, title),
+    default_audience_rules: supported ? buildOpportunityRules(rules) : null,
+    suggested_name: supported ? buildOpportunityName(channel, title) : "",
+    campaign_creation_supported: supported,
+    unsupported_reason: supported ? "" : unsupportedReason,
   };
 }
 
@@ -315,50 +318,70 @@ async function countContacts(supabase, applyQuery) {
   return count || 0;
 }
 
-async function getExportedReadyCustomerCount(supabase, channel, readyColumn) {
+async function getExportedCustomerIdsByChannel(supabase) {
+  const exportedByChannel = { email: new Set(), sms: new Set(), facebook: new Set() };
+
   try {
     const { data: campaigns } = assertSupabase(
-      await supabase.from("marketing_campaigns").select("id").eq("channel", channel),
+      await supabase.from("marketing_campaigns").select("id,channel").in("channel", ["email", "sms", "facebook"]),
       "Could not load exported campaign channels."
     );
-    const campaignIds = (campaigns || []).map((campaign) => campaign.id).filter(Boolean);
-    if (!campaignIds.length) return 0;
+    const channelByCampaignId = new Map((campaigns || []).filter((campaign) => CHANNELS.has(campaign.channel)).map((campaign) => [campaign.id, campaign.channel]));
+    const campaignIds = [...channelByCampaignId.keys()];
+    if (!campaignIds.length) return exportedByChannel;
 
-    const { data: batches } = assertSupabase(
-      await supabase.from("marketing_campaign_batches").select("id").in("campaign_id", campaignIds).eq("status", "exported"),
-      "Could not load exported campaign batches."
-    );
-    const batchIds = (batches || []).map((batch) => batch.id).filter(Boolean);
-    if (!batchIds.length) return 0;
+    const batches = [];
+    for (let index = 0; index < campaignIds.length; index += 100) {
+      const campaignChunk = campaignIds.slice(index, index + 100);
+      const { data } = assertSupabase(
+        await supabase.from("marketing_campaign_batches").select("id,campaign_id").in("campaign_id", campaignChunk).eq("status", "exported"),
+        "Could not load exported campaign batches."
+      );
+      batches.push(...(data || []));
+    }
 
-    const exportedCustomerIds = new Set();
+    const channelByBatchId = new Map(batches.map((batch) => [batch.id, channelByCampaignId.get(batch.campaign_id)]).filter(([, channel]) => Boolean(channel)));
+    const batchIds = [...channelByBatchId.keys()];
+    if (!batchIds.length) return exportedByChannel;
+
     for (let index = 0; index < batchIds.length; index += 100) {
       const batchChunk = batchIds.slice(index, index + 100);
       const { data } = assertSupabase(
-        await supabase
-          .from("marketing_campaign_batch_customers")
-          .select(`customer_id,marketing_contacts!inner(${readyColumn})`)
-          .in("batch_id", batchChunk),
-        "Could not count exported marketing customers."
+        await supabase.from("marketing_campaign_batch_customers").select("batch_id,customer_id").in("batch_id", batchChunk),
+        "Could not load exported marketing customer membership."
       );
       (data || []).forEach((row) => {
-        const customer = Array.isArray(row.marketing_contacts) ? row.marketing_contacts[0] : row.marketing_contacts;
-        if (customer?.[readyColumn] && row.customer_id) exportedCustomerIds.add(row.customer_id);
+        const channel = channelByBatchId.get(row.batch_id);
+        if (channel && row.customer_id) exportedByChannel[channel].add(row.customer_id);
       });
     }
-    return exportedCustomerIds.size;
   } catch (error) {
-    if (isMissingBatchInfrastructure(error)) return 0;
-    throw error;
+    if (!isMissingBatchInfrastructure(error)) throw error;
   }
+
+  return exportedByChannel;
 }
 
-async function countNeverExportedReady(supabase, channel, readyColumn) {
-  const [readyCount, exportedReadyCount] = await Promise.all([
-    countContacts(supabase, (query) => query.eq(readyColumn, true)),
-    getExportedReadyCustomerCount(supabase, channel, readyColumn),
-  ]);
-  return Math.max(0, readyCount - exportedReadyCount);
+async function countReadyExportedCustomers(supabase, exportedByChannel) {
+  const readyColumns = { email: "email_ready", sms: "sms_ready", facebook: "facebook_ready" };
+  const counts = { email: 0, sms: 0, facebook: 0 };
+
+  for (const [channel, idsSet] of Object.entries(exportedByChannel)) {
+    const ids = [...idsSet];
+    const readyColumn = readyColumns[channel];
+    if (!ids.length || !readyColumn) continue;
+
+    for (let index = 0; index < ids.length; index += 500) {
+      const idChunk = ids.slice(index, index + 500);
+      const { count } = assertSupabase(
+        await supabase.from("marketing_contacts").select("id", { count: "exact", head: true }).in("id", idChunk).eq(readyColumn, true),
+        "Could not count exported ready marketing customers."
+      );
+      counts[channel] += count || 0;
+    }
+  }
+
+  return counts;
 }
 
 async function countUntaggedContacts(supabase) {
@@ -378,43 +401,51 @@ async function countMultipleApplications(supabase) {
 }
 
 async function getMarketingOpportunities(supabase) {
-  const [neverMarketed, smsReady, facebookReady, dormant, recentImports, untagged, multipleApplications] = await Promise.all([
-    countNeverExportedReady(supabase, "email", "email_ready"),
-    countNeverExportedReady(supabase, "sms", "sms_ready"),
-    countNeverExportedReady(supabase, "facebook", "facebook_ready"),
+  const [readyCounts, exportedByChannel, dormant, recentImports, untagged, multipleApplications] = await Promise.all([
+    Promise.all([
+      countContacts(supabase, (query) => query.eq("email_ready", true)),
+      countContacts(supabase, (query) => query.eq("sms_ready", true)),
+      countContacts(supabase, (query) => query.eq("facebook_ready", true)),
+    ]),
+    getExportedCustomerIdsByChannel(supabase),
     countContacts(supabase, (query) => query.lt("last_seen_at", daysAgoIso(180))),
     countContacts(supabase, (query) => query.gte("created_at", daysAgoIso(7))),
     countUntaggedContacts(supabase),
     countMultipleApplications(supabase),
   ]);
+  const exportedReadyCounts = await countReadyExportedCustomers(supabase, exportedByChannel);
+  const [emailReady, smsReadyTotal, facebookReadyTotal] = readyCounts;
 
   const opportunities = [
     buildOpportunity({
       id: "never_marketed_email",
       title: "Never Marketed",
       description: "Email-ready customers who have never been exported in an Email campaign.",
-      customerCount: neverMarketed,
+      customerCount: Math.max(0, emailReady - exportedReadyCounts.email),
       channel: "email",
       objective: "re_engagement",
       rules: {},
+      unsupportedReason: "Audience filter not yet available",
     }),
     buildOpportunity({
       id: "sms_ready_never_exported",
       title: "SMS Ready",
       description: "SMS-ready customers who have never been exported in an SMS campaign.",
-      customerCount: smsReady,
+      customerCount: Math.max(0, smsReadyTotal - exportedReadyCounts.sms),
       channel: "sms",
       objective: "promotion",
       rules: {},
+      unsupportedReason: "Audience filter not yet available",
     }),
     buildOpportunity({
       id: "facebook_ready_never_exported",
       title: "Facebook Ready",
       description: "Facebook-ready customers who have never been exported in a Facebook campaign.",
-      customerCount: facebookReady,
+      customerCount: Math.max(0, facebookReadyTotal - exportedReadyCounts.facebook),
       channel: "facebook",
       objective: "promotion",
       rules: {},
+      unsupportedReason: "Audience filter not yet available",
     }),
     buildOpportunity({
       id: "dormant_customers",
@@ -424,6 +455,7 @@ async function getMarketingOpportunities(supabase) {
       channel: "email",
       objective: "re_engagement",
       rules: { last_seen_period: "more_than_180" },
+      campaignCreationSupported: true,
     }),
     buildOpportunity({
       id: "recent_imports",
@@ -433,6 +465,7 @@ async function getMarketingOpportunities(supabase) {
       channel: "email",
       objective: "new_stock",
       rules: { created_period: "last7" },
+      campaignCreationSupported: true,
     }),
     buildOpportunity({
       id: "untagged_customers",
@@ -442,6 +475,7 @@ async function getMarketingOpportunities(supabase) {
       channel: "email",
       objective: "custom",
       rules: {},
+      unsupportedReason: "Audience filter not yet available",
     }),
   ];
 
@@ -454,6 +488,7 @@ async function getMarketingOpportunities(supabase) {
       channel: "email",
       objective: "finance_offer",
       rules: {},
+      unsupportedReason: "Audience filter not yet available",
     }));
   }
 
