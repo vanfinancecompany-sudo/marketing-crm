@@ -5,6 +5,7 @@ import {
 
 const API_ROUTE = "/api/marketing-campaigns";
 const DRAFT_AUDIENCE_PREVIEW_ROUTE = "/api/marketing-campaign-audience-preview";
+const OPPORTUNITIES_ROUTE = "/api/marketing-opportunities";
 
 let lastDraftAudiencePreview = null;
 
@@ -95,7 +96,7 @@ export async function getMarketingCampaignDashboard(campaign, preferredBatchSize
 }
 
 export async function getMarketingOpportunities() {
-  const result = await requestMarketingCampaigns("marketingOpportunities");
+  const result = await requestJson(OPPORTUNITIES_ROUTE);
   return result.opportunities || [];
 }
 
