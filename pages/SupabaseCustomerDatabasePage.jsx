@@ -76,7 +76,7 @@ export default function SupabaseCustomerDatabasePage() {
   const [error, setError] = useState("");
   const [manualError, setManualError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [apiKeyReady, setApiKeyReady] = useState(() => Boolean(getStoredMarketingAccessKey()));
+  const [accessStatus, setAccessStatus] = useState(() => getStoredMarketingAccessKey() ? "checking" : "locked");
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [manualForm, setManualForm] = useState(EMPTY_FORM);
   const [activeFilter, setActiveFilter] = useState("all");
@@ -109,6 +109,22 @@ export default function SupabaseCustomerDatabasePage() {
   const selectedVisibleContacts = useMemo(() => contacts.filter((contact) => selectedIds.includes(contact.customer_id)), [contacts, selectedIds]);
   const dashboardCards = useMemo(() => [["Total Contacts", stats.total], ["Finance Contacts", stats.finance], ["Rent2Buy Contacts", stats.rent2buy], ["Both", stats.both], ["Unknown", stats.unknown], ["Facebook Ready", stats.facebookReady], ["Email Ready", stats.emailReady], ["SMS Ready", stats.smsReady], ["Duplicates Removed", importHistory[0]?.duplicates_merged || 0], ["Rejected Records", importHistory[0]?.rejected_rows || 0]], [stats, importHistory]);
 
+  function clearProtectedCustomerDatabaseState() {
+    setContacts([]);
+    setStats(EMPTY_STATS);
+    setActivityStats(EMPTY_ACTIVITY);
+    setImportHistory([]);
+    setImportReports({ rejectedRows: [], duplicateRows: [], possibleDuplicates: [] });
+    setSelectedIds([]);
+    setSelectedContact(null);
+    setModalMode("");
+    setManualError("");
+    setImportRows([]);
+    setImportProgress(EMPTY_IMPORT_PROGRESS);
+    setRetryBatch(null);
+    setImporting(false);
+  }
+
   function handleProtectedError(errorToHandle, fallbackMessage) {
     if (isMarketingAccessDenied(errorToHandle)) return;
     setError(errorToHandle.message || fallbackMessage);
@@ -119,9 +135,38 @@ export default function SupabaseCustomerDatabasePage() {
   async function loadImportData(importId = "") { try { const [history, reports] = await Promise.all([fetchMarketingImportHistory(), fetchMarketingImportReports(importId)]); setImportHistory(history); setImportReports(reports); } catch (historyError) { handleProtectedError(historyError, "Could not load import history."); } }
 
   useEffect(() => { setCurrentPage(1); setSelectedIds([]); }, [filters]);
-  useEffect(() => { if (apiKeyReady) loadContacts(currentPage); }, [apiKeyReady, currentPage, filters]);
-  useEffect(() => { if (apiKeyReady) loadImportData(); }, [apiKeyReady]);
-  useEffect(() => { if (apiKeyReady) loadActivityData(); }, [apiKeyReady]);
+  useEffect(() => {
+    let cancelled = false;
+    async function checkStoredAccess() {
+      const storedKey = getStoredMarketingAccessKey();
+      if (!storedKey) {
+        setAccessStatus("locked");
+        return;
+      }
+
+      setAccessStatus("checking");
+      try {
+        await validateMarketingAccessKey(storedKey);
+        if (!cancelled) {
+          setAccessStatus("unlocked");
+          setError("");
+        }
+      } catch (accessError) {
+        if (!cancelled) {
+          clearMarketingAccessKey();
+          clearProtectedCustomerDatabaseState();
+          setAccessStatus("locked");
+          setError(isMarketingAccessDenied(accessError) ? "Your saved access has expired or is no longer valid. Please unlock again." : accessError.message || "Could not validate saved Customer Database access.");
+        }
+      }
+    }
+
+    checkStoredAccess();
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => { if (accessStatus === "unlocked") loadContacts(currentPage); }, [accessStatus, currentPage, filters]);
+  useEffect(() => { if (accessStatus === "unlocked") loadImportData(); }, [accessStatus]);
+  useEffect(() => { if (accessStatus === "unlocked") loadActivityData(); }, [accessStatus]);
   useEffect(() => { setCurrentPage((page) => Math.min(page, totalPages)); }, [totalPages]);
   useEffect(() => {
     function handleAccessDenied(event) {
@@ -131,8 +176,8 @@ export default function SupabaseCustomerDatabasePage() {
     return () => window.removeEventListener(MARKETING_ACCESS_DENIED_EVENT, handleAccessDenied);
   }, []);
 
-  async function handleUnlockSubmit(event) { event.preventDefault(); const apiKey = apiKeyInput.trim(); if (!apiKey) { setError("Enter the Customer Database API key."); return; } try { await validateMarketingAccessKey(apiKey); } catch (unlockError) { setError(isMarketingAccessDenied(unlockError) ? "Access key not recognised." : unlockError.message || "Could not validate the API key."); return; } if (!saveMarketingAccessKey(apiKey)) { setError("Could not save the API key in this browser."); return; } setApiKeyInput(""); setApiKeyReady(true); setError(""); setCurrentPage(1); }
-  function handleLockCustomerDatabase(message = "") { clearMarketingAccessKey(); setApiKeyReady(false); setContacts([]); setStats(EMPTY_STATS); setActivityStats(EMPTY_ACTIVITY); setImportHistory([]); setImportReports({ rejectedRows: [], duplicateRows: [], possibleDuplicates: [] }); setSelectedIds([]); setError(typeof message === "string" ? message : ""); }
+  async function handleUnlockSubmit(event) { event.preventDefault(); const apiKey = apiKeyInput.trim(); if (!apiKey) { setError("Enter the Customer Database API key."); return; } try { await validateMarketingAccessKey(apiKey); } catch (unlockError) { setError(isMarketingAccessDenied(unlockError) ? "Access key not recognised." : unlockError.message || "Could not validate the API key."); return; } if (!saveMarketingAccessKey(apiKey)) { setError("Could not save the API key in this browser."); return; } setApiKeyInput(""); setAccessStatus("unlocked"); setError(""); setCurrentPage(1); }
+  function handleLockCustomerDatabase(message = "") { clearMarketingAccessKey(); clearProtectedCustomerDatabaseState(); setAccessStatus("locked"); setError(typeof message === "string" ? message : ""); }
 
   async function handleImportFileSelected(event) {
     const file = event.target.files?.[0];
@@ -204,7 +249,9 @@ export default function SupabaseCustomerDatabasePage() {
   async function handleDownload(key, filename) { setError(""); setExportingKey(key); try { const csv = await getMarketingExportCsv(key, exportScope, filters); downloadCsv(filename, csv); } catch (downloadError) { setError(downloadError.message || "Could not download export."); } finally { setExportingKey(""); } }
   function exportSelected() { const selectedExports = buildCustomerExports(selectedVisibleContacts, [], [], "all"); downloadCsv("selected-customers.csv", selectedExports.master); }
 
-  if (!apiKeyReady) return <div className="page-stack" style={{ gap: 14 }}><section className="hero-panel" style={{ padding: 18 }}><div className="panel__header" style={{ marginBottom: 0 }}><div><div className="eyebrow">Customer Data</div><h2>Customer Database</h2><p>Unlock the protected Customer Database to continue.</p></div></div></section><section className="panel" style={{ padding: 16 }}><div className="panel__header"><div><h3>Unlock Customer Database</h3><p>Enter the Customer Database API key. It will be saved on this browser only.</p></div></div><form onSubmit={handleUnlockSubmit} className="field-grid"><label className="field"><span className="field__label">API key</span><input className="field__input" type="password" value={apiKeyInput} onChange={(event) => setApiKeyInput(event.target.value)} autoComplete="off" /></label><div className="card-actions" style={{ alignSelf: "end" }}><button type="submit" className="button button--primary">Unlock</button></div>{error ? <div className="notice notice--error" style={{ gridColumn: "1 / -1" }}>{error}</div> : null}</form></section></div>;
+  if (accessStatus === "checking") return <div className="page-stack" style={{ gap: 14 }}><section className="hero-panel" style={{ padding: 18 }}><div className="panel__header" style={{ marginBottom: 0 }}><div><div className="eyebrow">Customer Data</div><h2>Customer Database</h2><p>Checking protected access...</p></div></div></section></div>;
+
+  if (accessStatus !== "unlocked") return <div className="page-stack" style={{ gap: 14 }}><section className="hero-panel" style={{ padding: 18 }}><div className="panel__header" style={{ marginBottom: 0 }}><div><div className="eyebrow">Customer Data</div><h2>Customer Database</h2><p>Unlock the protected Customer Database to continue.</p></div></div></section><section className="panel" style={{ padding: 16 }}><div className="panel__header"><div><h3>Unlock Customer Database</h3><p>Enter the Customer Database API key. It will be saved on this browser only.</p></div></div><form onSubmit={handleUnlockSubmit} className="field-grid"><label className="field"><span className="field__label">API key</span><input className="field__input" type="password" value={apiKeyInput} onChange={(event) => setApiKeyInput(event.target.value)} autoComplete="off" /></label><div className="card-actions" style={{ alignSelf: "end" }}><button type="submit" className="button button--primary">Unlock</button></div>{error ? <div className="notice notice--error" style={{ gridColumn: "1 / -1" }}>{error}</div> : null}</form></section></div>;
 
   return <div className="page-stack" style={{ gap: 14 }}>
     <section className="hero-panel" style={{ padding: 18 }}><div className="panel__header" style={{ marginBottom: 0 }}><div><div className="eyebrow">Customer Data</div><h2>Customer Database</h2><p>Upload, clean, search, manage, and export contacts from one CRM workspace.</p></div><div className="card-actions"><button type="button" className="button button--ghost" onClick={handleLockCustomerDatabase}>Lock Customer Database</button><button type="button" className="button button--primary" onClick={openAddModal}>+ Add Contact</button></div></div></section>
