@@ -24,7 +24,7 @@ export default function StatCard({ label, value, tone = "default" }) {
           body: JSON.stringify({ action: "overview" }),
         });
         const result = await parseMarketingJsonResponse(response, "Could not load suppression totals.");
-        const count = result?.overview?.overview?.suppressed_contacts ?? 0;
+        const count = result?.overview?.suppressed_contacts ?? 0;
         if (!cancelled) setDisplayValue(Number(count || 0).toLocaleString("en-GB"));
       } catch {
         if (!cancelled) setDisplayValue(value);
