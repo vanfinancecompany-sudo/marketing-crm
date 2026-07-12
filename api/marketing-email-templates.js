@@ -48,6 +48,10 @@ function parseBody(request) {
   return request.body;
 }
 
+function templateInput(body = {}) {
+  return body.values || body.template || {};
+}
+
 function assertSupabase(result, fallbackMessage) {
   if (result.error) throw new Error(result.error.message || fallbackMessage);
   return result;
@@ -143,7 +147,7 @@ async function listTemplates(supabase, body = {}) {
 }
 
 async function createTemplate(supabase, body = {}) {
-  const values = normalizeValues(body.values || {});
+  const values = normalizeValues(templateInput(body));
   const { data } = assertSupabase(
     await supabase.from("marketing_email_templates").insert({ ...values, created_by: cleanText(body.createdBy || "Marketing CRM", 200) }).select(TEMPLATE_COLUMNS).single(),
     "Could not create email template."
@@ -154,7 +158,7 @@ async function createTemplate(supabase, body = {}) {
 async function updateTemplate(supabase, body = {}) {
   const existing = await loadTemplate(supabase, body.template?.id || body.id);
   if (existing.status === "archived") throw new Error("Archived templates are read only.");
-  const values = normalizeValues(body.values || {});
+  const values = normalizeValues(templateInput(body));
   const { data } = assertSupabase(
     await supabase.from("marketing_email_templates").update(values).eq("id", existing.id).select(TEMPLATE_COLUMNS).single(),
     "Could not update email template."
@@ -202,7 +206,7 @@ function textToHtml(value) {
 }
 
 function previewTemplate(body = {}) {
-  const values = normalizeValues(body.values || body.template || {});
+  const values = normalizeValues(templateInput(body));
   const subject = replacePlaceholders(values.default_subject);
   const html = `<!doctype html><html><body style="margin:0;background:#f3f6fb;font-family:Arial,sans-serif;color:#0f172a;"><div style="max-width:680px;margin:0 auto;background:#fff;">${values.header_logo ? `<div style="padding:20px;text-align:center;"><img src="${escapeHtml(values.header_logo)}" alt="" style="max-width:180px;max-height:80px;"></div>` : ""}<div style="background:${values.brand_colour};color:#fff;padding:28px;"><h1 style="margin:0;font-size:30px;">${escapeHtml(replacePlaceholders(values.hero_heading || values.name))}</h1></div><div style="padding:28px;"><p style="color:#64748b;margin-top:0;">${escapeHtml(replacePlaceholders(values.preview_text))}</p>${textToHtml(values.intro_text)}${textToHtml(values.main_body)}${values.cta_text ? `<p style="margin:28px 0;"><a href="${escapeHtml(values.cta_url || "#")}" style="display:inline-block;background:${values.brand_colour};color:#fff;text-decoration:none;border-radius:8px;padding:12px 18px;font-weight:700;">${escapeHtml(replacePlaceholders(values.cta_text))}</a></p>` : ""}${textToHtml(values.footer)}</div></div></body></html>`;
   return { preview: { subject, preview_text: replacePlaceholders(values.preview_text), html } };
