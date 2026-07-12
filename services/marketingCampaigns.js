@@ -1,17 +1,12 @@
+import {
+  buildMarketingAccessHeaders,
+  parseMarketingJsonResponse,
+} from "./marketingAccess.js";
+
 const API_ROUTE = "/api/marketing-campaigns";
 const DRAFT_AUDIENCE_PREVIEW_ROUTE = "/api/marketing-campaign-audience-preview";
-const API_KEY_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
 
 let lastDraftAudiencePreview = null;
-
-function getApiKey() {
-  if (typeof window === "undefined") return "";
-  try {
-    return window.localStorage.getItem(API_KEY_STORAGE_KEY) || window.sessionStorage.getItem(API_KEY_STORAGE_KEY) || "";
-  } catch {
-    return "";
-  }
-}
 
 function sameRules(first, second) {
   return JSON.stringify(first || {}) === JSON.stringify(second || {});
@@ -24,26 +19,24 @@ function stripLocalCampaignFlags(campaign) {
 }
 
 async function requestJson(route, payload = {}) {
-  const apiKey = getApiKey();
   const response = await fetch(route, {
     method: "POST",
-    headers: {
+    headers: buildMarketingAccessHeaders({
       "Content-Type": "application/json",
-      ...(apiKey ? { "x-marketing-customer-database-key": apiKey } : {}),
-    },
+    }),
     body: JSON.stringify(payload),
   });
-  const result = await response.json().catch(() => ({}));
 
-  if (!response.ok || result.ok === false) {
-    throw new Error(result.message || "Marketing Campaign request failed.");
-  }
-
-  return result;
+  return parseMarketingJsonResponse(response, "Marketing Campaign request failed.");
 }
 
 async function requestMarketingCampaigns(action, payload = {}) {
   return requestJson(API_ROUTE, { action, ...payload });
+}
+
+export async function validateMarketingCampaignAccess() {
+  await requestMarketingCampaigns("validateAccess");
+  return true;
 }
 
 export async function listMarketingCampaigns({ includeArchived = false } = {}) {

@@ -27,6 +27,14 @@ import {
   startMarketingImport,
   updateMarketingContact,
 } from "../services/marketingContacts.js";
+import {
+  MARKETING_ACCESS_DENIED_EVENT,
+  clearMarketingAccessKey,
+  getStoredMarketingAccessKey,
+  isMarketingAccessDenied,
+  saveMarketingAccessKey,
+  validateMarketingAccessKey,
+} from "../services/marketingAccess.js";
 
 const EMPTY_FORM = { first_name: "", last_name: "", company: "", email: "", phone: "", postcode: "", pipeline: "unknown", source: "manual", notes: "", tags: [] };
 const EMPTY_FILTERS = { source: "all", tag: "all", readiness: "all", postcode: "all", unknownPipeline: false };
@@ -34,7 +42,6 @@ const EMPTY_IMPORT_PROGRESS = { importId: "", status: "idle", processed: 0, tota
 const EMPTY_STATS = { total: 0, matched: 0, finance: 0, rent2buy: 0, both: 0, unknown: 0, emailReady: 0, smsReady: 0, facebookReady: 0 };
 const EMPTY_ACTIVITY_PERIOD = { created: 0, updated: 0, totalActivity: 0 };
 const EMPTY_ACTIVITY = { today: EMPTY_ACTIVITY_PERIOD, last24Hours: EMPTY_ACTIVITY_PERIOD, last7Days: EMPTY_ACTIVITY_PERIOD, last30Days: EMPTY_ACTIVITY_PERIOD, lastCustomerActivity: null, totalContacts: 0 };
-const API_KEY_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
 
 const pipelineLabels = { all: "All", finance: "Finance", rent2buy: "Rent2Buy", both: "Both", unknown: "Unknown" };
 const sourceLabels = { manual: "Manual", csv: "CSV", wix: "Wix", crm: "CRM", facebook: "Facebook", supabase: "Supabase", other: "Other" };
@@ -49,9 +56,6 @@ function downloadCsv(filename, content) { const blob = new Blob([content], { typ
 function updateFormValue(setForm, key, value) { setForm((current) => ({ ...current, [key]: value })); }
 function formatNumber(value) { return Number(value || 0).toLocaleString("en-GB"); }
 function formatDate(value) { if (!value) return "-"; const date = new Date(value); if (Number.isNaN(date.getTime())) return "-"; return date.toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); }
-function getStoredCustomerDatabaseApiKey() { if (typeof window === "undefined") return ""; try { return window.localStorage.getItem(API_KEY_STORAGE_KEY) || ""; } catch { return ""; } }
-function saveStoredCustomerDatabaseApiKey(apiKey) { if (typeof window === "undefined") return false; const value = String(apiKey || "").trim(); try { window.sessionStorage.removeItem(API_KEY_STORAGE_KEY); window.localStorage.setItem(API_KEY_STORAGE_KEY, value); return true; } catch { return false; } }
-function clearStoredCustomerDatabaseApiKey() { if (typeof window === "undefined") return; try { window.sessionStorage.removeItem(API_KEY_STORAGE_KEY); window.localStorage.removeItem(API_KEY_STORAGE_KEY); } catch {} }
 function checksumText(value) { let hash = 0; const text = String(value || ""); for (let index = 0; index < text.length; index += 1) hash = ((hash * 31) + text.charCodeAt(index)) >>> 0; return hash.toString(16); }
 function formatDuration(seconds) { const safeSeconds = Math.max(0, Math.round(Number(seconds || 0))); const minutes = Math.floor(safeSeconds / 60); const remainingSeconds = safeSeconds % 60; return minutes ? `${minutes}m ${remainingSeconds}s` : `${remainingSeconds}s`; }
 function estimateRemaining(startedAt, processed, total) { if (!startedAt || !processed || !total) return "calculating"; const elapsedSeconds = Math.max(1, (Date.now() - startedAt) / 1000); const remainingSeconds = (elapsedSeconds / processed) * Math.max(0, total - processed); return formatDuration(remainingSeconds); }
@@ -72,7 +76,7 @@ export default function SupabaseCustomerDatabasePage() {
   const [error, setError] = useState("");
   const [manualError, setManualError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [apiKeyReady, setApiKeyReady] = useState(() => Boolean(getStoredCustomerDatabaseApiKey()));
+  const [accessStatus, setAccessStatus] = useState(() => getStoredMarketingAccessKey() ? "checking" : "locked");
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [manualForm, setManualForm] = useState(EMPTY_FORM);
   const [activeFilter, setActiveFilter] = useState("all");
@@ -105,18 +109,75 @@ export default function SupabaseCustomerDatabasePage() {
   const selectedVisibleContacts = useMemo(() => contacts.filter((contact) => selectedIds.includes(contact.customer_id)), [contacts, selectedIds]);
   const dashboardCards = useMemo(() => [["Total Contacts", stats.total], ["Finance Contacts", stats.finance], ["Rent2Buy Contacts", stats.rent2buy], ["Both", stats.both], ["Unknown", stats.unknown], ["Facebook Ready", stats.facebookReady], ["Email Ready", stats.emailReady], ["SMS Ready", stats.smsReady], ["Duplicates Removed", importHistory[0]?.duplicates_merged || 0], ["Rejected Records", importHistory[0]?.rejected_rows || 0]], [stats, importHistory]);
 
-  async function loadContacts(page = currentPage) { setLoading(true); setError(""); try { const response = await listMarketingContacts({ page, pageSize: MARKETING_CONTACTS_PAGE_SIZE, filters }); setContacts(response.contacts); setStats(response.stats); } catch (loadError) { setError(loadError.message || "Could not load Customer Database from Supabase."); } finally { setLoading(false); } }
-  async function loadActivityData() { try { const response = await getMarketingActivityStats(); setActivityStats(response || EMPTY_ACTIVITY); } catch (activityError) { setError(activityError.message || "Could not load Customer Activity."); } }
-  async function loadImportData(importId = "") { try { const [history, reports] = await Promise.all([fetchMarketingImportHistory(), fetchMarketingImportReports(importId)]); setImportHistory(history); setImportReports(reports); } catch (historyError) { setError(historyError.message || "Could not load import history."); } }
+  function clearProtectedCustomerDatabaseState() {
+    setContacts([]);
+    setStats(EMPTY_STATS);
+    setActivityStats(EMPTY_ACTIVITY);
+    setImportHistory([]);
+    setImportReports({ rejectedRows: [], duplicateRows: [], possibleDuplicates: [] });
+    setSelectedIds([]);
+    setSelectedContact(null);
+    setModalMode("");
+    setManualError("");
+    setImportRows([]);
+    setImportProgress(EMPTY_IMPORT_PROGRESS);
+    setRetryBatch(null);
+    setImporting(false);
+  }
+
+  function handleProtectedError(errorToHandle, fallbackMessage) {
+    if (isMarketingAccessDenied(errorToHandle)) return;
+    setError(errorToHandle.message || fallbackMessage);
+  }
+
+  async function loadContacts(page = currentPage) { setLoading(true); setError(""); try { const response = await listMarketingContacts({ page, pageSize: MARKETING_CONTACTS_PAGE_SIZE, filters }); setContacts(response.contacts); setStats(response.stats); } catch (loadError) { handleProtectedError(loadError, "Could not load Customer Database from Supabase."); } finally { setLoading(false); } }
+  async function loadActivityData() { try { const response = await getMarketingActivityStats(); setActivityStats(response || EMPTY_ACTIVITY); } catch (activityError) { handleProtectedError(activityError, "Could not load Customer Activity."); } }
+  async function loadImportData(importId = "") { try { const [history, reports] = await Promise.all([fetchMarketingImportHistory(), fetchMarketingImportReports(importId)]); setImportHistory(history); setImportReports(reports); } catch (historyError) { handleProtectedError(historyError, "Could not load import history."); } }
 
   useEffect(() => { setCurrentPage(1); setSelectedIds([]); }, [filters]);
-  useEffect(() => { if (apiKeyReady) loadContacts(currentPage); }, [apiKeyReady, currentPage, filters]);
-  useEffect(() => { if (apiKeyReady) loadImportData(); }, [apiKeyReady]);
-  useEffect(() => { if (apiKeyReady) loadActivityData(); }, [apiKeyReady]);
-  useEffect(() => { setCurrentPage((page) => Math.min(page, totalPages)); }, [totalPages]);
+  useEffect(() => {
+    let cancelled = false;
+    async function checkStoredAccess() {
+      const storedKey = getStoredMarketingAccessKey();
+      if (!storedKey) {
+        setAccessStatus("locked");
+        return;
+      }
 
-  function handleUnlockSubmit(event) { event.preventDefault(); const apiKey = apiKeyInput.trim(); if (!apiKey) { setError("Enter the Customer Database API key."); return; } if (!saveStoredCustomerDatabaseApiKey(apiKey)) { setError("Could not save the API key in this browser."); return; } setApiKeyInput(""); setApiKeyReady(true); setError(""); setCurrentPage(1); }
-  function handleLockCustomerDatabase() { clearStoredCustomerDatabaseApiKey(); setApiKeyReady(false); setContacts([]); setStats(EMPTY_STATS); setActivityStats(EMPTY_ACTIVITY); setImportHistory([]); setImportReports({ rejectedRows: [], duplicateRows: [], possibleDuplicates: [] }); setSelectedIds([]); setError(""); }
+      setAccessStatus("checking");
+      try {
+        await validateMarketingAccessKey(storedKey);
+        if (!cancelled) {
+          setAccessStatus("unlocked");
+          setError("");
+        }
+      } catch (accessError) {
+        if (!cancelled) {
+          clearMarketingAccessKey();
+          clearProtectedCustomerDatabaseState();
+          setAccessStatus("locked");
+          setError(isMarketingAccessDenied(accessError) ? "Your saved access has expired or is no longer valid. Please unlock again." : accessError.message || "Could not validate saved Customer Database access.");
+        }
+      }
+    }
+
+    checkStoredAccess();
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => { if (accessStatus === "unlocked") loadContacts(currentPage); }, [accessStatus, currentPage, filters]);
+  useEffect(() => { if (accessStatus === "unlocked") loadImportData(); }, [accessStatus]);
+  useEffect(() => { if (accessStatus === "unlocked") loadActivityData(); }, [accessStatus]);
+  useEffect(() => { setCurrentPage((page) => Math.min(page, totalPages)); }, [totalPages]);
+  useEffect(() => {
+    function handleAccessDenied(event) {
+      handleLockCustomerDatabase(event?.detail?.message || "Your saved access has expired or is no longer valid. Please unlock again.");
+    }
+    window.addEventListener(MARKETING_ACCESS_DENIED_EVENT, handleAccessDenied);
+    return () => window.removeEventListener(MARKETING_ACCESS_DENIED_EVENT, handleAccessDenied);
+  }, []);
+
+  async function handleUnlockSubmit(event) { event.preventDefault(); const apiKey = apiKeyInput.trim(); if (!apiKey) { setError("Enter the Customer Database API key."); return; } try { await validateMarketingAccessKey(apiKey); } catch (unlockError) { setError(isMarketingAccessDenied(unlockError) ? "Access key not recognised." : unlockError.message || "Could not validate the API key."); return; } if (!saveMarketingAccessKey(apiKey)) { setError("Could not save the API key in this browser."); return; } setApiKeyInput(""); setAccessStatus("unlocked"); setError(""); setCurrentPage(1); }
+  function handleLockCustomerDatabase(message = "") { clearMarketingAccessKey(); clearProtectedCustomerDatabaseState(); setAccessStatus("locked"); setError(typeof message === "string" ? message : ""); }
 
   async function handleImportFileSelected(event) {
     const file = event.target.files?.[0];
@@ -188,7 +249,9 @@ export default function SupabaseCustomerDatabasePage() {
   async function handleDownload(key, filename) { setError(""); setExportingKey(key); try { const csv = await getMarketingExportCsv(key, exportScope, filters); downloadCsv(filename, csv); } catch (downloadError) { setError(downloadError.message || "Could not download export."); } finally { setExportingKey(""); } }
   function exportSelected() { const selectedExports = buildCustomerExports(selectedVisibleContacts, [], [], "all"); downloadCsv("selected-customers.csv", selectedExports.master); }
 
-  if (!apiKeyReady) return <div className="page-stack" style={{ gap: 14 }}><section className="hero-panel" style={{ padding: 18 }}><div className="panel__header" style={{ marginBottom: 0 }}><div><div className="eyebrow">Customer Data</div><h2>Customer Database</h2><p>Unlock the protected Customer Database to continue.</p></div></div></section><section className="panel" style={{ padding: 16 }}><div className="panel__header"><div><h3>Unlock Customer Database</h3><p>Enter the Customer Database API key. It will be saved on this browser only.</p></div></div><form onSubmit={handleUnlockSubmit} className="field-grid"><label className="field"><span className="field__label">API key</span><input className="field__input" type="password" value={apiKeyInput} onChange={(event) => setApiKeyInput(event.target.value)} autoComplete="off" /></label><div className="card-actions" style={{ alignSelf: "end" }}><button type="submit" className="button button--primary">Unlock</button></div>{error ? <div className="notice notice--error" style={{ gridColumn: "1 / -1" }}>{error}</div> : null}</form></section></div>;
+  if (accessStatus === "checking") return <div className="page-stack" style={{ gap: 14 }}><section className="hero-panel" style={{ padding: 18 }}><div className="panel__header" style={{ marginBottom: 0 }}><div><div className="eyebrow">Customer Data</div><h2>Customer Database</h2><p>Checking protected access...</p></div></div></section></div>;
+
+  if (accessStatus !== "unlocked") return <div className="page-stack" style={{ gap: 14 }}><section className="hero-panel" style={{ padding: 18 }}><div className="panel__header" style={{ marginBottom: 0 }}><div><div className="eyebrow">Customer Data</div><h2>Customer Database</h2><p>Unlock the protected Customer Database to continue.</p></div></div></section><section className="panel" style={{ padding: 16 }}><div className="panel__header"><div><h3>Unlock Customer Database</h3><p>Enter the Customer Database API key. It will be saved on this browser only.</p></div></div><form onSubmit={handleUnlockSubmit} className="field-grid"><label className="field"><span className="field__label">API key</span><input className="field__input" type="password" value={apiKeyInput} onChange={(event) => setApiKeyInput(event.target.value)} autoComplete="off" /></label><div className="card-actions" style={{ alignSelf: "end" }}><button type="submit" className="button button--primary">Unlock</button></div>{error ? <div className="notice notice--error" style={{ gridColumn: "1 / -1" }}>{error}</div> : null}</form></section></div>;
 
   return <div className="page-stack" style={{ gap: 14 }}>
     <section className="hero-panel" style={{ padding: 18 }}><div className="panel__header" style={{ marginBottom: 0 }}><div><div className="eyebrow">Customer Data</div><h2>Customer Database</h2><p>Upload, clean, search, manage, and export contacts from one CRM workspace.</p></div><div className="card-actions"><button type="button" className="button button--ghost" onClick={handleLockCustomerDatabase}>Lock Customer Database</button><button type="button" className="button button--primary" onClick={openAddModal}>+ Add Contact</button></div></div></section>

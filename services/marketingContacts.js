@@ -1,32 +1,24 @@
+import {
+  buildMarketingAccessHeaders,
+  parseMarketingJsonResponse,
+} from "./marketingAccess.js";
+
 export const MARKETING_CONTACTS_PAGE_SIZE = 50;
 export const MARKETING_IMPORT_BATCH_SIZE = 500;
 
 const API_ROUTE = "/api/marketing-contacts";
 const IMPORT_API_ROUTE = "/api/marketing-contact-import";
-const API_KEY_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
-
-function getApiKey() {
-  if (typeof window === "undefined") return "";
-  return window.sessionStorage.getItem(API_KEY_STORAGE_KEY) || window.localStorage.getItem(API_KEY_STORAGE_KEY) || "";
-}
 
 async function requestApi(route, action, payload = {}) {
-  const apiKey = getApiKey();
   const response = await fetch(route, {
     method: "POST",
-    headers: {
+    headers: buildMarketingAccessHeaders({
       "Content-Type": "application/json",
-      ...(apiKey ? { "x-marketing-customer-database-key": apiKey } : {}),
-    },
+    }),
     body: JSON.stringify({ action, ...payload }),
   });
-  const result = await response.json().catch(() => ({}));
 
-  if (!response.ok || result.ok === false) {
-    throw new Error(result.message || "Customer Database request failed.");
-  }
-
-  return result;
+  return parseMarketingJsonResponse(response, "Customer Database request failed.");
 }
 
 function requestMarketingContacts(action, payload = {}) {

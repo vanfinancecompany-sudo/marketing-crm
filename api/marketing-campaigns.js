@@ -890,7 +890,8 @@ export default async function handler(request, response) {
     const action = body.action || "list";
     let result;
 
-    if (action === "list") result = await listCampaigns(supabase, body);
+    if (action === "validateAccess") result = {};
+    else if (action === "list") result = await listCampaigns(supabase, body);
     else if (action === "create") result = await createCampaign(supabase, body);
     else if (action === "createWithAudience") result = await createCampaignWithAudience(supabase, body);
     else if (action === "update") result = await updateCampaign(supabase, body);
