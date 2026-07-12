@@ -1,4 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
+import {
+  DEFAULT_AUDIENCE_RULES,
+  buildAudienceMetadata,
+  buildAudienceResponse,
+  countAudience,
+  getAudienceMetadata,
+  normalizeAudienceRules,
+} from "../lib/marketingCampaignAudience.js";
 import { DEFAULT_TAGS, SOURCE_OPTIONS } from "../utils/contactCleaning.js";
 
 const CAMPAIGN_COLUMNS = "id,name,description,channel,objective,status,tags,metadata,created_by,created_at,updated_at,archived_at";
@@ -9,20 +17,7 @@ const CHANNELS = new Set(["email", "sms", "facebook"]);
 const OBJECTIVES = new Set(["new_stock", "promotion", "finance_offer", "rent2buy", "re_engagement", "custom"]);
 const STATUSES = new Set(["draft", "ready", "running", "paused", "completed", "archived"]);
 const ACTIVE_STATUSES = ["ready", "running", "paused"];
-const PIPELINES = new Set(["all", "finance", "rent2buy", "both"]);
-const LAST_SEEN_PERIODS = new Set(["all", "last30", "last90", "last180", "last365", "more_than_180"]);
-const CREATED_PERIODS = new Set(["all", "today", "last7", "last30", "last90", "this_year"]);
 const MAX_BATCH_SIZE = 5000;
-
-const DEFAULT_AUDIENCE_RULES = {
-  pipeline: "all",
-  source: "all",
-  required_tags: [],
-  exclude_tags: [],
-  last_seen_period: "all",
-  created_period: "all",
-  exclude_unknown_pipeline: false,
-};
 
 const EMPTY_BATCH_SUMMARY = {
   total_batches: 0,
@@ -196,95 +191,12 @@ function cleanCampaignValues(values = {}, existingCampaign = null) {
   };
 }
 
-function cleanList(values) {
-  const list = Array.isArray(values) ? values : [];
-  return Array.from(new Set(list.map((value) => String(value || "").trim()).filter(Boolean).filter((value) => value.length <= 80 && !/[{}"\\]/.test(value)))).sort();
-}
-
-function normalizeAudienceRules(values = {}) {
-  const pipeline = String(values.pipeline || "all").trim().toLowerCase();
-  const source = String(values.source || "all").trim();
-  const lastSeenPeriod = String(values.last_seen_period || "all").trim();
-  const createdPeriod = String(values.created_period || "all").trim();
-
-  if (!PIPELINES.has(pipeline)) throw new Error("Unsupported audience pipeline filter.");
-  if (!source || source.length > 120 || /[%{}"\\]/.test(source)) throw new Error("Unsupported audience source filter.");
-  if (!LAST_SEEN_PERIODS.has(lastSeenPeriod)) throw new Error("Unsupported last seen filter.");
-  if (!CREATED_PERIODS.has(createdPeriod)) throw new Error("Unsupported created date filter.");
-
-  return {
-    pipeline,
-    source,
-    required_tags: cleanList(values.required_tags),
-    exclude_tags: cleanList(values.exclude_tags),
-    last_seen_period: lastSeenPeriod,
-    created_period: createdPeriod,
-    exclude_unknown_pipeline: Boolean(values.exclude_unknown_pipeline),
-  };
-}
-
-function getAudienceMetadata(campaign) {
-  const audience = campaign.metadata?.audience || {};
-  return {
-    rules: normalizeAudienceRules({ ...DEFAULT_AUDIENCE_RULES, ...(audience.rules || {}) }),
-    eligible_count: Number.isFinite(Number(audience.eligible_count)) ? Number(audience.eligible_count) : null,
-    calculated_at: audience.calculated_at || null,
-  };
-}
-
 function validateBatchSize(value) {
   const size = Number(value || 0);
   if (!Number.isInteger(size) || size < 1 || size > MAX_BATCH_SIZE) {
     throw new Error("Batch size must be between 1 and 5000.");
   }
   return size;
-}
-
-function getLondonDateParts(date) {
-  const formatter = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/London",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-  const parts = Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]));
-  return {
-    year: Number(parts.year),
-    month: Number(parts.month),
-    day: Number(parts.day),
-    hour: Number(parts.hour),
-    minute: Number(parts.minute),
-    second: Number(parts.second),
-  };
-}
-
-function getLondonOffsetMs(date) {
-  const parts = getLondonDateParts(date);
-  const londonAsUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
-  return londonAsUtc - date.getTime();
-}
-
-function startOfLondonToday(now = new Date()) {
-  const parts = getLondonDateParts(now);
-  const utcApproximation = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 0, 0, 0));
-  const offset = getLondonOffsetMs(utcApproximation);
-  return new Date(utcApproximation.getTime() - offset).toISOString();
-}
-
-function startOfYearIso(now = new Date()) {
-  return new Date(Date.UTC(now.getUTCFullYear(), 0, 1, 0, 0, 0)).toISOString();
-}
-
-function daysAgoIso(days) {
-  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-}
-
-function arrayLiteral(value) {
-  return `{${String(value).replace(/"/g, "").replace(/\\/g, "")}}`;
 }
 
 function neutralizeCsvFormula(value) {
@@ -309,43 +221,6 @@ function buildBatchCsv(rows) {
     lines.push(headers.map((header) => escapeCsvValue(row[header])).join(","));
   });
   return lines.join("\n");
-}
-
-function applyAudienceQuery(query, rules, channel) {
-  if (channel === "email") query = query.eq("email_ready", true);
-  else if (channel === "sms") query = query.eq("sms_ready", true);
-  else if (channel === "facebook") query = query.eq("facebook_ready", true);
-  else throw new Error("Unsupported campaign channel.");
-
-  if (rules.pipeline !== "all") query = query.eq("pipeline", rules.pipeline);
-  if (rules.source !== "all") query = query.eq("source", rules.source);
-  if (rules.exclude_unknown_pipeline) query = query.neq("pipeline", "unknown").neq("pipeline", "");
-  if (rules.required_tags.length) query = query.overlaps("tags", rules.required_tags);
-  for (const tag of rules.exclude_tags) query = query.not("tags", "cs", arrayLiteral(tag));
-
-  if (rules.last_seen_period === "last30") query = query.gte("last_seen_at", daysAgoIso(30));
-  if (rules.last_seen_period === "last90") query = query.gte("last_seen_at", daysAgoIso(90));
-  if (rules.last_seen_period === "last180") query = query.gte("last_seen_at", daysAgoIso(180));
-  if (rules.last_seen_period === "last365") query = query.gte("last_seen_at", daysAgoIso(365));
-  if (rules.last_seen_period === "more_than_180") query = query.lt("last_seen_at", daysAgoIso(180));
-
-  if (rules.created_period === "today") query = query.gte("created_at", startOfLondonToday());
-  if (rules.created_period === "last7") query = query.gte("created_at", daysAgoIso(7));
-  if (rules.created_period === "last30") query = query.gte("created_at", daysAgoIso(30));
-  if (rules.created_period === "last90") query = query.gte("created_at", daysAgoIso(90));
-  if (rules.created_period === "this_year") query = query.gte("created_at", startOfYearIso());
-
-  return query;
-}
-
-async function countAudience(supabase, campaign, rules) {
-  const query = applyAudienceQuery(
-    supabase.from("marketing_contacts").select("id", { count: "exact", head: true }),
-    rules,
-    campaign.channel
-  );
-  const { count } = assertSupabase(await query, "Could not preview campaign audience.");
-  return count || 0;
 }
 
 async function loadCampaign(supabase, id) {
@@ -470,6 +345,28 @@ async function createCampaign(supabase, body) {
   return { campaign: normalizeCampaign(data), stats: await getCampaignStats(supabase) };
 }
 
+async function createCampaignWithAudience(supabase, body) {
+  const payload = cleanCampaignValues({ ...(body.values || {}), status: "draft" });
+  const rules = normalizeAudienceRules({ ...DEFAULT_AUDIENCE_RULES, ...(body.rules || {}) });
+  const calculatedAt = new Date().toISOString();
+  const eligibleCount = await countAudience(supabase, { channel: payload.channel }, rules);
+  payload.metadata = {
+    ...(body.values?.metadata && typeof body.values.metadata === "object" ? body.values.metadata : {}),
+    audience: buildAudienceMetadata(rules, eligibleCount, calculatedAt),
+  };
+
+  const { data } = assertSupabase(
+    await supabase.from("marketing_campaigns").insert(payload).select(CAMPAIGN_COLUMNS).single(),
+    "Could not create marketing campaign with audience."
+  );
+
+  return {
+    campaign: normalizeCampaign(data),
+    audience: buildAudienceResponse(rules, eligibleCount, calculatedAt),
+    stats: await getCampaignStats(supabase),
+  };
+}
+
 async function updateCampaign(supabase, body) {
   const id = body.campaign?.id || body.id;
   const existingCampaign = await loadCampaign(supabase, id);
@@ -526,14 +423,7 @@ async function previewAudience(supabase, body) {
   const rules = normalizeAudienceRules(body.rules || DEFAULT_AUDIENCE_RULES);
   const eligibleCount = await countAudience(supabase, campaign, rules);
   const calculatedAt = new Date().toISOString();
-  return {
-    audience: {
-      eligible_count: eligibleCount,
-      calculated_at: calculatedAt,
-      breakdown: { channel_ready: eligibleCount },
-      rules,
-    },
-  };
+  return { audience: buildAudienceResponse(rules, eligibleCount, calculatedAt) };
 }
 
 async function saveAudience(supabase, body) {
@@ -544,11 +434,7 @@ async function saveAudience(supabase, body) {
   const calculatedAt = new Date().toISOString();
   const metadata = {
     ...(campaign.metadata || {}),
-    audience: {
-      rules,
-      eligible_count: eligibleCount,
-      calculated_at: calculatedAt,
-    },
+    audience: buildAudienceMetadata(rules, eligibleCount, calculatedAt),
   };
 
   const { data } = assertSupabase(
@@ -558,12 +444,7 @@ async function saveAudience(supabase, body) {
 
   return {
     campaign: normalizeCampaign(data),
-    audience: {
-      rules,
-      eligible_count: eligibleCount,
-      calculated_at: calculatedAt,
-      breakdown: { channel_ready: eligibleCount },
-    },
+    audience: buildAudienceResponse(rules, eligibleCount, calculatedAt),
   };
 }
 
@@ -797,6 +678,7 @@ export default async function handler(request, response) {
 
     if (action === "list") result = await listCampaigns(supabase, body);
     else if (action === "create") result = await createCampaign(supabase, body);
+    else if (action === "createWithAudience") result = await createCampaignWithAudience(supabase, body);
     else if (action === "update") result = await updateCampaign(supabase, body);
     else if (action === "archive") result = await archiveCampaign(supabase, body);
     else if (action === "audienceOptions") result = { options: await getAudienceOptions() };
