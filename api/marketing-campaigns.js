@@ -28,6 +28,10 @@ const EMPTY_BATCH_SUMMARY = {
   total_batches: 0,
   total_customers_batched: 0,
   total_customers_exported: 0,
+  pending_batches: 0,
+  last_batch_created_at: "",
+  last_exported_at: "",
+  last_activity_at: "",
 };
 
 function json(response, status, payload) {
@@ -89,6 +93,18 @@ function isMissingBatchInfrastructure(error) {
     || message.includes("exported_by")
     || message.includes("could not find the function")
     || message.includes("does not exist");
+}
+
+function latestIso(...values) {
+  return values.filter(Boolean).sort((first, second) => new Date(second).getTime() - new Date(first).getTime())[0] || "";
+}
+
+function calculateProgress(customersBatched, customersRemaining) {
+  const batched = Number(customersBatched || 0);
+  const remaining = Number(customersRemaining || 0);
+  const denominator = batched + remaining;
+  if (!denominator) return 0;
+  return Math.round((batched / denominator) * 1000) / 10;
 }
 
 function normalizeCampaign(row = {}) {
@@ -368,15 +384,26 @@ async function countCampaigns(supabase, filter = {}) {
 }
 
 async function getCampaignStats(supabase) {
-  const [total, draft, active, completed, archived] = await Promise.all([
+  const [total, draft, active, completed, archived, allBatches] = await Promise.all([
     countCampaigns(supabase),
     countCampaigns(supabase, { status: "draft" }),
     countCampaigns(supabase, { statuses: ACTIVE_STATUSES }),
     countCampaigns(supabase, { status: "completed" }),
     countCampaigns(supabase, { status: "archived" }),
+    supabase.from("marketing_campaign_batches").select("status,customer_count,export_count"),
   ]);
 
-  return { total, draft, active, completed, archived };
+  const batchRows = allBatches.error && isMissingBatchInfrastructure(allBatches.error) ? [] : assertSupabase(allBatches, "Could not count campaign batches.").data || [];
+  return {
+    total,
+    draft,
+    active,
+    completed,
+    archived,
+    total_customers_batched: batchRows.reduce((sum, row) => sum + Number(row.customer_count || 0), 0),
+    total_customers_exported: batchRows.reduce((sum, row) => sum + (row.status === "exported" ? Number(row.export_count || row.customer_count || 0) : 0), 0),
+    pending_batches: batchRows.filter((row) => row.status === "pending").length,
+  };
 }
 
 async function getBatchSummaryMap(supabase, campaignIds = []) {
@@ -386,14 +413,18 @@ async function getBatchSummaryMap(supabase, campaignIds = []) {
 
   try {
     const { data } = assertSupabase(
-      await supabase.from("marketing_campaign_batches").select("campaign_id,customer_count,status,export_count").in("campaign_id", ids),
+      await supabase.from("marketing_campaign_batches").select("campaign_id,customer_count,status,export_count,created_at,exported_at").in("campaign_id", ids),
       "Could not load campaign batch summaries."
     );
     (data || []).forEach((row) => {
       const current = summaries.get(row.campaign_id) || { ...EMPTY_BATCH_SUMMARY };
       current.total_batches += 1;
       current.total_customers_batched += Number(row.customer_count || 0);
+      if (row.status === "pending") current.pending_batches += 1;
       if (row.status === "exported") current.total_customers_exported += Number(row.export_count || row.customer_count || 0);
+      current.last_batch_created_at = latestIso(current.last_batch_created_at, row.created_at);
+      current.last_exported_at = latestIso(current.last_exported_at, row.exported_at);
+      current.last_activity_at = latestIso(current.last_activity_at, row.created_at, row.exported_at);
       summaries.set(row.campaign_id, current);
     });
   } catch (error) {
@@ -416,7 +447,16 @@ async function listCampaigns(supabase, body) {
   const rows = data || [];
   const batchSummaries = await getBatchSummaryMap(supabase, rows.map((campaign) => campaign.id));
   return {
-    campaigns: rows.map((campaign) => normalizeCampaign({ ...campaign, batch_summary: batchSummaries.get(campaign.id) || EMPTY_BATCH_SUMMARY })),
+    campaigns: rows.map((campaign) => {
+      const batchSummary = batchSummaries.get(campaign.id) || EMPTY_BATCH_SUMMARY;
+      return normalizeCampaign({
+        ...campaign,
+        batch_summary: {
+          ...batchSummary,
+          last_activity_at: latestIso(campaign.updated_at, batchSummary.last_activity_at),
+        },
+      });
+    }),
     stats: await getCampaignStats(supabase),
   };
 }
@@ -532,6 +572,10 @@ function summarizeBatches(batches = []) {
     total_batches: batches.length,
     total_customers_batched: batches.reduce((total, batch) => total + Number(batch.customer_count || 0), 0),
     total_customers_exported: batches.reduce((total, batch) => total + (batch.status === "exported" ? Number(batch.export_count || batch.customer_count || 0) : 0), 0),
+    pending_batches: batches.filter((batch) => batch.status === "pending").length,
+    last_batch_created_at: batches.reduce((latest, batch) => latestIso(latest, batch.created_at), ""),
+    last_exported_at: batches.reduce((latest, batch) => latestIso(latest, batch.exported_at), ""),
+    last_activity_at: batches.reduce((latest, batch) => latestIso(latest, batch.created_at, batch.exported_at), ""),
   };
 }
 
@@ -590,6 +634,41 @@ async function generateBatch(supabase, body) {
     if (isMissingBatchInfrastructure(error)) throw new Error("Campaign batch migration has not been applied yet.");
     throw error;
   }
+}
+
+async function getCampaignDashboard(supabase, body) {
+  const campaign = await loadCampaign(supabase, body.campaign?.id || body.id);
+  const preferredBatchSize = validateBatchSize(body.preferredBatchSize || body.requestedSize || 1000);
+  const batchResult = await listBatches(supabase, { campaign });
+  let preview = null;
+
+  if (campaign.status !== "archived" && getAudienceMetadata(campaign).calculated_at) {
+    try {
+      preview = (await previewNextBatch(supabase, { campaign, requestedSize: preferredBatchSize })).preview;
+    } catch (error) {
+      if (!isMissingBatchInfrastructure(error)) throw error;
+    }
+  }
+
+  const remaining = Number(preview?.remaining_count ?? 0);
+  const batched = Number(batchResult.summary.total_customers_batched || 0);
+  const progressPercent = calculateProgress(batched, remaining);
+  return {
+    dashboard: {
+      eligible_now: Number(preview?.eligible_count ?? 0),
+      customers_batched: batched,
+      customers_exported: Number(batchResult.summary.total_customers_exported || 0),
+      customers_remaining: remaining,
+      batches_generated: Number(batchResult.summary.total_batches || 0),
+      pending_batches: Number(batchResult.summary.pending_batches || 0),
+      estimated_batches_left: remaining > 0 ? Math.ceil(remaining / preferredBatchSize) : 0,
+      preferred_batch_size: preferredBatchSize,
+      last_exported_at: batchResult.summary.last_exported_at || "",
+      last_activity_at: latestIso(campaign.updated_at, batchResult.summary.last_activity_at),
+      progress_percent: progressPercent,
+      preview,
+    },
+  };
 }
 
 async function loadBatchCsvRows(supabase, batch) {
@@ -725,6 +804,7 @@ export default async function handler(request, response) {
     else if (action === "saveAudience") result = await saveAudience(supabase, body);
     else if (action === "listBatches") result = await listBatches(supabase, body);
     else if (action === "listBatchHistory") result = await listBatchHistory(supabase, body);
+    else if (action === "campaignDashboard") result = await getCampaignDashboard(supabase, body);
     else if (action === "previewNextBatch") result = await previewNextBatch(supabase, body);
     else if (action === "generateBatch") result = await generateBatch(supabase, body);
     else if (action === "exportBatch") result = await exportBatch(supabase, body);
