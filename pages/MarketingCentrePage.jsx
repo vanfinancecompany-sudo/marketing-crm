@@ -16,7 +16,16 @@ import {
   previewMarketingCampaignDraftAudience,
   saveMarketingCampaignAudience,
   updateMarketingCampaign,
+  validateMarketingCampaignAccess,
 } from "../services/marketingCampaigns.js";
+import {
+  MARKETING_ACCESS_DENIED_EVENT,
+  clearMarketingAccessKey,
+  getStoredMarketingAccessKey,
+  isMarketingAccessDenied,
+  saveMarketingAccessKey,
+  validateMarketingAccessKey,
+} from "../services/marketingAccess.js";
 
 const EMPTY_CAMPAIGN_FORM = { name: "", description: "", channel: "email", objective: "custom", status: "draft" };
 const EMPTY_CAMPAIGN_STATS = { total: 0, draft: 0, active: 0, completed: 0, archived: 0, total_customers_batched: 0, total_customers_exported: 0, pending_batches: 0 };
@@ -301,6 +310,10 @@ export default function MarketingCentrePage() {
   const [opportunities, setOpportunities] = useState([]);
   const [opportunitiesLoading, setOpportunitiesLoading] = useState(false);
   const [opportunitiesError, setOpportunitiesError] = useState("");
+  const [accessStatus, setAccessStatus] = useState(() => getStoredMarketingAccessKey() ? "checking" : "locked");
+  const [accessMessage, setAccessMessage] = useState("");
+  const [accessKeyInput, setAccessKeyInput] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
 
   const hasCampaigns = campaigns.length > 0;
   const sortedCampaigns = useMemo(() => [...campaigns].sort((first, second) => new Date(getCampaignLastActivity(second) || 0) - new Date(getCampaignLastActivity(first) || 0)), [campaigns]);
@@ -308,6 +321,25 @@ export default function MarketingCentrePage() {
   const displayedAudience = audiencePreview || savedAudience;
   const selectedIsArchived = selectedCampaign?.status === "archived";
   const hasSavedAudience = Boolean(savedAudience.calculated_at && savedAudience.rules);
+
+  function clearProtectedMarketingCentreState() {
+    setCampaigns([]);
+    setCampaignStats(EMPTY_CAMPAIGN_STATS);
+    setAudienceOptions({ sources: [], tags: [] });
+    setOpportunities([]);
+    setOpportunitiesError("");
+    setSelectedCampaign(null);
+    setModalMode("");
+    resetBatchState();
+  }
+
+  function lockMarketingCentre(message = "") {
+    clearMarketingAccessKey();
+    clearProtectedMarketingCentreState();
+    setAccessStatus("locked");
+    setAccessMessage(typeof message === "string" ? message : "");
+    setError("");
+  }
 
   async function loadCampaigns() {
     setLoading(true);
@@ -317,6 +349,7 @@ export default function MarketingCentrePage() {
       setCampaigns(response.campaigns || []);
       setCampaignStats({ ...EMPTY_CAMPAIGN_STATS, ...(response.stats || {}) });
     } catch (loadError) {
+      if (isMarketingAccessDenied(loadError)) return;
       setError(loadError.message || "Could not load marketing campaigns.");
     } finally {
       setLoading(false);
@@ -327,6 +360,7 @@ export default function MarketingCentrePage() {
     try {
       setAudienceOptions(await getMarketingCampaignAudienceOptions());
     } catch (optionsError) {
+      if (isMarketingAccessDenied(optionsError)) return;
       setAudienceError(optionsError.message || "Could not load audience filter options.");
     }
   }
@@ -338,6 +372,7 @@ export default function MarketingCentrePage() {
       setOpportunities(await getMarketingOpportunities());
     } catch (loadError) {
       setOpportunities([]);
+      if (isMarketingAccessDenied(loadError)) return;
       setOpportunitiesError(loadError.message || "Could not load marketing opportunities.");
     } finally {
       setOpportunitiesLoading(false);
@@ -372,8 +407,44 @@ export default function MarketingCentrePage() {
     }
   }
 
-  useEffect(() => { loadCampaigns(); }, [includeArchived]);
-  useEffect(() => { loadAudienceOptions(); loadOpportunities(); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    async function checkStoredAccess() {
+      if (!getStoredMarketingAccessKey()) {
+        setAccessStatus("locked");
+        return;
+      }
+
+      setAccessStatus("checking");
+      try {
+        await validateMarketingCampaignAccess();
+        if (!cancelled) {
+          setAccessStatus("unlocked");
+          setAccessMessage("");
+        }
+      } catch (accessError) {
+        if (!cancelled) {
+          clearMarketingAccessKey();
+          setAccessStatus("locked");
+          setAccessMessage(isMarketingAccessDenied(accessError) ? "Your saved access has expired or is no longer valid. Please unlock again." : accessError.message || "Could not validate saved Marketing Centre access.");
+        }
+      }
+    }
+
+    checkStoredAccess();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    function handleAccessDenied(event) {
+      lockMarketingCentre(event?.detail?.message || "Your saved access has expired or is no longer valid. Please unlock again.");
+    }
+    window.addEventListener(MARKETING_ACCESS_DENIED_EVENT, handleAccessDenied);
+    return () => window.removeEventListener(MARKETING_ACCESS_DENIED_EVENT, handleAccessDenied);
+  }, []);
+
+  useEffect(() => { if (accessStatus === "unlocked") loadCampaigns(); }, [accessStatus, includeArchived]);
+  useEffect(() => { if (accessStatus === "unlocked") { loadAudienceOptions(); loadOpportunities(); } }, [accessStatus]);
 
   function setAudienceRule(key, value) {
     setAudienceRules((current) => ({ ...current, [key]: value }));
@@ -653,5 +724,38 @@ export default function MarketingCentrePage() {
     document.getElementById("campaign-list")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  return <div className="page-stack"><section className="hero-panel"><div className="panel__header" style={{ marginBottom: 0 }}><div><div className="eyebrow">Marketing Operations</div><h2>Marketing Centre</h2><p>Build audiences, manage campaigns and prepare marketing batches for email, SMS and Facebook.</p></div><div className="card-actions"><button type="button" className="button button--primary" onClick={() => openCreateCampaign()}>Create Campaign</button></div></div></section>{loading ? <div className="notice">Loading campaigns...</div> : null}{error ? <div className="notice notice--error">{error}</div> : null}<section className="stats-grid">{campaignStatCards.map(([label, key, tone]) => <StatCard key={label} label={label} value={formatNumber(campaignStats[key])} tone={tone} />)}</section><section className="stats-grid">{readinessCards.map(([label, value, tone]) => <StatCard key={label} label={label} value={value} tone={tone} />)}</section><section className="panel"><div className="panel__header"><div><h3>Campaign Channels</h3><p>Choose the marketing channel you want to prepare next.</p></div></div><div className="card-grid">{channels.map((channel) => <article key={channel.title} className="panel panel--nested" style={{ boxShadow: "none" }}><div className="panel__header"><div><h3>{channel.title}</h3><p>{channel.description}</p></div></div><div className="simple-list" style={{ marginBottom: 16 }}><div className="simple-list__item"><span>Ready Audience</span><strong>Pending</strong></div><div className="simple-list__item"><span>Last Campaign</span><strong>None</strong></div></div><button type="button" className="button button--primary" onClick={() => openCreateCampaign(channel.title.includes("SMS") ? "sms" : channel.title.includes("Facebook") ? "facebook" : "email")}>{channel.actionLabel}</button></article>)}</div></section><section id="campaign-list" className="panel"><div className="panel__header"><div><h3>Campaigns</h3><p>Campaign records are permanent. Archive campaigns instead of deleting them.</p></div><label className="toggle-row"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} />Include Archived</label></div>{!hasCampaigns ? <div className="empty-state"><strong>No campaigns yet.</strong><p>Create your first campaign to start building an audience.</p><button type="button" className="button button--primary" onClick={() => openCreateCampaign()}>Create Campaign</button></div> : <TableShell><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}><thead><tr>{["Campaign", "Channel", "Status", "Audience", "Batched", "Exported", "Progress", "Last Activity", "Actions"].map((heading) => <th key={heading} style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #dbe2ea", color: "#475569" }}>{heading}</th>)}</tr></thead><tbody>{sortedCampaigns.map((campaign) => <tr key={campaign.id}><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7", fontWeight: 800 }}>{campaign.name}<br /><small style={{ color: "#64748b" }}>{objectiveLabels[campaign.objective] || campaign.objective} - {campaign.description || "No description"}</small></td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}><TonePill tone={channelTones[campaign.channel]}>{channelLabels[campaign.channel] || campaign.channel}</TonePill></td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}><TonePill tone={statusTones[campaign.status]}>{statusLabels[campaign.status] || campaign.status}</TonePill></td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{getAudienceStatus(campaign)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatNumber(campaign.batch_summary?.total_customers_batched)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatNumber(campaign.batch_summary?.total_customers_exported)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{getCampaignProgress(campaign)}%</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7", whiteSpace: "nowrap" }}>{formatDate(getCampaignLastActivity(campaign))}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}><div className="card-actions" style={{ gap: 6 }}><button type="button" className="button button--ghost" onClick={() => openViewCampaign(campaign)}>View</button><button type="button" className="button button--ghost" onClick={() => openEditCampaign(campaign)}>Edit</button><button type="button" className="button button--danger" disabled={campaign.status === "archived"} onClick={() => handleArchiveCampaign(campaign)}>Archive</button></div></td></tr>)}</tbody></table></TableShell>}</section><section className="panel"><div className="panel__header"><div><h3>Quick Actions</h3><p>Campaign tools planned for email, SMS and Facebook audiences.</p></div></div><div className="card-grid">{quickActions.map((action) => { const onClick = action.action === "create" ? () => openCreateCampaign(action.label.includes("SMS") ? "sms" : action.label.includes("Facebook") ? "facebook" : "email") : action.action === "view" ? scrollToCampaigns : undefined; return <button key={action.label} type="button" className={action.action === "soon" ? "button button--ghost" : "button button--primary"} disabled={action.action === "soon"} onClick={onClick}>{action.action === "soon" ? `${action.label} - Coming Soon` : action.label}</button>; })}</div></section><section className="panel"><div className="panel__header"><div><h3>Marketing Opportunities</h3><p>Live, server-side opportunities from the Customer Database and campaign export history.</p></div><button type="button" className="button button--ghost" disabled={opportunitiesLoading} onClick={loadOpportunities}>{opportunitiesLoading ? "Refreshing..." : "Refresh"}</button></div>{opportunitiesError ? <div className="notice notice--error" style={{ marginBottom: 12 }}>{opportunitiesError}</div> : null}{opportunitiesLoading && !opportunities.length ? <div className="notice">Loading marketing opportunities...</div> : null}{!opportunitiesLoading && !opportunities.length && !opportunitiesError ? <div className="empty-state"><strong>No opportunities found.</strong><p>Opportunities will appear when customer groups match the live rules.</p></div> : <div className="card-grid">{opportunities.map((opportunity) => <article key={opportunity.id} className="panel panel--nested" style={{ boxShadow: "none" }}><div className="panel__header"><div><h3>{opportunity.title}</h3><p>{opportunity.description}</p></div><TonePill tone={channelTones[opportunity.recommended_channel]}>{channelLabels[opportunity.recommended_channel]}</TonePill></div><div className="stat-card" style={{ boxShadow: "none", marginBottom: 14 }}><div className="stat-card__label">Customers</div><div className="stat-card__value">{formatNumber(opportunity.customer_count)}</div></div><div className="simple-list" style={{ marginBottom: 14 }}><div className="simple-list__item"><span>Recommended Channel</span><strong>{channelLabels[opportunity.recommended_channel]}</strong></div><div className="simple-list__item"><span>Objective</span><strong>{objectiveLabels[opportunity.recommended_objective] || opportunity.recommended_objective}</strong></div></div>{opportunity.campaign_creation_supported ? <button type="button" className="button button--primary" onClick={() => openOpportunityCampaign(opportunity)}>Create Campaign</button> : <div className="notice" style={{ marginTop: 0 }}>{opportunity.unsupported_reason || "Audience filter not yet available"}</div>}</article>)}</div>}</section>{modalMode === "wizard" ? <Modal title="Campaign Creation Wizard" onClose={closeModal}><CampaignWizard form={wizardForm} setForm={setWizardForm} step={wizardStep} setStep={setWizardStep} audienceRules={wizardRules} setAudienceRules={setWizardRules} audiencePreview={wizardAudiencePreview} setAudiencePreview={setWizardAudiencePreview} audienceDirty={wizardAudienceDirty} setAudienceDirty={setWizardAudienceDirty} audienceLoading={wizardAudienceLoading} audienceError={wizardAudienceError} audienceOptions={audienceOptions} opportunity={wizardOpportunity} createdCampaign={wizardCreatedCampaign} creating={wizardCreating} createError={wizardCreateError} batchSizeMode={wizardBatchSizeMode} customBatchSize={wizardCustomBatchSize} onPreviewAudience={handlePreviewWizardAudience} onCreate={handleCreateCampaignFromWizard} onCancel={closeModal} onOpenCampaign={handleOpenWizardCampaign} /></Modal> : null}{modalMode === "edit" && selectedCampaign ? <Modal title="Edit Campaign" onClose={closeModal}><CampaignForm form={campaignForm} setForm={setCampaignForm} error={formError} onSubmit={handleUpdateCampaign} submitLabel="Save Campaign" isArchived={selectedCampaign.status === "archived"} /></Modal> : null}{modalMode === "view" && selectedCampaign ? <Modal title="Campaign Detail" onClose={closeModal}><div className="field-grid">{[["Campaign Name", selectedCampaign.name], ["Description", selectedCampaign.description || "-"], ["Channel", channelLabels[selectedCampaign.channel] || selectedCampaign.channel], ["Objective", objectiveLabels[selectedCampaign.objective] || selectedCampaign.objective], ["Status", statusLabels[selectedCampaign.status] || selectedCampaign.status], ["Audience", displayedAudience.eligible_count === null ? "Not selected" : `${formatNumber(displayedAudience.eligible_count)} eligible`], ["Batches", getBatchStatus({ ...selectedCampaign, batch_summary: batchSummary })], ["Provider", "Not selected"], ["Created", formatDate(selectedCampaign.created_at)], ["Last Updated", formatDate(selectedCampaign.updated_at)]].map(([label, value]) => <div key={label} className="field"><span className="field__label">{label}</span><div className="field__input">{value}</div></div>)}{selectedCampaign.archived_at ? <div className="field"><span className="field__label">Archived</span><div className="field__input">{formatDate(selectedCampaign.archived_at)}</div></div> : null}</div><CampaignDashboardSection campaign={selectedCampaign} dashboard={campaignDashboard} batches={batches} loading={dashboardLoading} error={dashboardError} batchSizeMode={dashboardBatchSizeMode} customBatchSize={dashboardCustomBatchSize} onSizeModeChange={handleDashboardSizeModeChange} onCustomSizeChange={handleDashboardCustomSizeChange} onRefresh={() => loadCampaignDashboard(selectedCampaign)} onPreviewAudience={handlePreviewAudience} onExportBatch={handleExportBatch} /><AudienceBuilderSection campaign={selectedCampaign} rules={audienceRules} preview={audiencePreview} savedAudience={savedAudience} dirty={audienceDirty} error={audienceError} loading={audienceLoading} options={audienceOptions} isReadOnly={selectedIsArchived} onRuleChange={setAudienceRule} onTagToggle={toggleAudienceTag} onPreview={handlePreviewAudience} onSave={handleSaveAudience} /><BatchSection batches={batches} batchSummary={batchSummary} batchPreview={batchPreview} batchSizeMode={batchSizeMode} customBatchSize={customBatchSize} batchLoading={batchLoading} batchActionId={batchActionId} batchError={batchError} batchConfirm={batchConfirm} isArchived={selectedIsArchived} hasSavedAudience={hasSavedAudience} onSizeModeChange={(value) => { setBatchSizeMode(value); setBatchPreview(null); setBatchConfirm(false); }} onCustomSizeChange={(value) => { setCustomBatchSize(value); setBatchPreview(null); setBatchConfirm(false); }} onPreview={handlePreviewBatch} onGenerate={handleGenerateBatch} onExport={handleExportBatch} onDownload={handleDownloadBatch} onConfirmChange={setBatchConfirm} /></Modal> : null}</div>;
+  async function handleUnlockMarketingCentre(event) {
+    event.preventDefault();
+    const apiKey = accessKeyInput.trim();
+    if (!apiKey) {
+      setAccessMessage("Enter the Marketing access key.");
+      return;
+    }
+
+    setUnlocking(true);
+    setAccessMessage("");
+    try {
+      await validateMarketingAccessKey(apiKey);
+      if (!saveMarketingAccessKey(apiKey)) {
+        setAccessMessage("Could not save the API key in this browser.");
+        return;
+      }
+      setAccessKeyInput("");
+      setAccessStatus("unlocked");
+    } catch (unlockError) {
+      setAccessMessage(isMarketingAccessDenied(unlockError) ? "Access key not recognised." : unlockError.message || "Could not validate Marketing Centre access.");
+    } finally {
+      setUnlocking(false);
+    }
+  }
+
+  if (accessStatus === "checking") {
+    return <div className="page-stack"><section className="hero-panel"><div className="panel__header" style={{ marginBottom: 0 }}><div><div className="eyebrow">Marketing Operations</div><h2>Marketing Centre</h2><p>Checking protected Marketing Centre access...</p></div></div></section></div>;
+  }
+
+  if (accessStatus !== "unlocked") {
+    return <div className="page-stack"><section className="hero-panel"><div className="panel__header" style={{ marginBottom: 0 }}><div><div className="eyebrow">Marketing Operations</div><h2>Marketing Centre Locked</h2><p>Enter the same access key used for the Customer Database.</p></div></div></section><section className="panel"><div className="panel__header"><div><h3>Unlock Marketing Centre</h3><p>This protects campaign, audience, batch, and export tools from loading until access is confirmed.</p></div></div><form onSubmit={handleUnlockMarketingCentre} className="field-grid"><label className="field"><span className="field__label">Access Key</span><input className="field__input" type="password" value={accessKeyInput} onChange={(event) => setAccessKeyInput(event.target.value)} autoComplete="off" /></label><div className="card-actions" style={{ alignSelf: "end" }}><button type="submit" className="button button--primary" disabled={unlocking}>{unlocking ? "Unlocking..." : "Unlock Marketing Centre"}</button><button type="button" className="button button--ghost" onClick={() => { window.location.href = "/customer-database"; }}>Open Customer Database</button></div>{accessMessage ? <div className="notice notice--error" style={{ gridColumn: "1 / -1" }}>{accessMessage}</div> : null}</form></section></div>;
+  }
+
+  return <div className="page-stack"><section className="hero-panel"><div className="panel__header" style={{ marginBottom: 0 }}><div><div className="eyebrow">Marketing Operations</div><h2>Marketing Centre</h2><p>Build audiences, manage campaigns and prepare marketing batches for email, SMS and Facebook.</p></div><div className="card-actions"><button type="button" className="button button--ghost" onClick={() => lockMarketingCentre()}>Lock Marketing Centre</button><button type="button" className="button button--primary" onClick={() => openCreateCampaign()}>Create Campaign</button></div></div></section>{loading ? <div className="notice">Loading campaigns...</div> : null}{error ? <div className="notice notice--error">{error}</div> : null}<section className="stats-grid">{campaignStatCards.map(([label, key, tone]) => <StatCard key={label} label={label} value={formatNumber(campaignStats[key])} tone={tone} />)}</section><section className="stats-grid">{readinessCards.map(([label, value, tone]) => <StatCard key={label} label={label} value={value} tone={tone} />)}</section><section className="panel"><div className="panel__header"><div><h3>Campaign Channels</h3><p>Choose the marketing channel you want to prepare next.</p></div></div><div className="card-grid">{channels.map((channel) => <article key={channel.title} className="panel panel--nested" style={{ boxShadow: "none" }}><div className="panel__header"><div><h3>{channel.title}</h3><p>{channel.description}</p></div></div><div className="simple-list" style={{ marginBottom: 16 }}><div className="simple-list__item"><span>Ready Audience</span><strong>Pending</strong></div><div className="simple-list__item"><span>Last Campaign</span><strong>None</strong></div></div><button type="button" className="button button--primary" onClick={() => openCreateCampaign(channel.title.includes("SMS") ? "sms" : channel.title.includes("Facebook") ? "facebook" : "email")}>{channel.actionLabel}</button></article>)}</div></section><section id="campaign-list" className="panel"><div className="panel__header"><div><h3>Campaigns</h3><p>Campaign records are permanent. Archive campaigns instead of deleting them.</p></div><label className="toggle-row"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} />Include Archived</label></div>{!hasCampaigns ? <div className="empty-state"><strong>No campaigns yet.</strong><p>Create your first campaign to start building an audience.</p><button type="button" className="button button--primary" onClick={() => openCreateCampaign()}>Create Campaign</button></div> : <TableShell><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}><thead><tr>{["Campaign", "Channel", "Status", "Audience", "Batched", "Exported", "Progress", "Last Activity", "Actions"].map((heading) => <th key={heading} style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #dbe2ea", color: "#475569" }}>{heading}</th>)}</tr></thead><tbody>{sortedCampaigns.map((campaign) => <tr key={campaign.id}><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7", fontWeight: 800 }}>{campaign.name}<br /><small style={{ color: "#64748b" }}>{objectiveLabels[campaign.objective] || campaign.objective} - {campaign.description || "No description"}</small></td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}><TonePill tone={channelTones[campaign.channel]}>{channelLabels[campaign.channel] || campaign.channel}</TonePill></td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}><TonePill tone={statusTones[campaign.status]}>{statusLabels[campaign.status] || campaign.status}</TonePill></td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{getAudienceStatus(campaign)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatNumber(campaign.batch_summary?.total_customers_batched)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{formatNumber(campaign.batch_summary?.total_customers_exported)}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}>{getCampaignProgress(campaign)}%</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7", whiteSpace: "nowrap" }}>{formatDate(getCampaignLastActivity(campaign))}</td><td style={{ padding: "10px 8px", borderBottom: "1px solid #eef2f7" }}><div className="card-actions" style={{ gap: 6 }}><button type="button" className="button button--ghost" onClick={() => openViewCampaign(campaign)}>View</button><button type="button" className="button button--ghost" onClick={() => openEditCampaign(campaign)}>Edit</button><button type="button" className="button button--danger" disabled={campaign.status === "archived"} onClick={() => handleArchiveCampaign(campaign)}>Archive</button></div></td></tr>)}</tbody></table></TableShell>}</section><section className="panel"><div className="panel__header"><div><h3>Quick Actions</h3><p>Campaign tools planned for email, SMS and Facebook audiences.</p></div></div><div className="card-grid">{quickActions.map((action) => { const onClick = action.action === "create" ? () => openCreateCampaign(action.label.includes("SMS") ? "sms" : action.label.includes("Facebook") ? "facebook" : "email") : action.action === "view" ? scrollToCampaigns : undefined; return <button key={action.label} type="button" className={action.action === "soon" ? "button button--ghost" : "button button--primary"} disabled={action.action === "soon"} onClick={onClick}>{action.action === "soon" ? `${action.label} - Coming Soon` : action.label}</button>; })}</div></section><section className="panel"><div className="panel__header"><div><h3>Marketing Opportunities</h3><p>Live, server-side opportunities from the Customer Database and campaign export history.</p></div><button type="button" className="button button--ghost" disabled={opportunitiesLoading} onClick={loadOpportunities}>{opportunitiesLoading ? "Refreshing..." : "Refresh"}</button></div>{opportunitiesError ? <div className="notice notice--error" style={{ marginBottom: 12 }}>{opportunitiesError}</div> : null}{opportunitiesLoading && !opportunities.length ? <div className="notice">Loading marketing opportunities...</div> : null}{!opportunitiesLoading && !opportunities.length && !opportunitiesError ? <div className="empty-state"><strong>No opportunities found.</strong><p>Opportunities will appear when customer groups match the live rules.</p></div> : <div className="card-grid">{opportunities.map((opportunity) => <article key={opportunity.id} className="panel panel--nested" style={{ boxShadow: "none" }}><div className="panel__header"><div><h3>{opportunity.title}</h3><p>{opportunity.description}</p></div><TonePill tone={channelTones[opportunity.recommended_channel]}>{channelLabels[opportunity.recommended_channel]}</TonePill></div><div className="stat-card" style={{ boxShadow: "none", marginBottom: 14 }}><div className="stat-card__label">Customers</div><div className="stat-card__value">{formatNumber(opportunity.customer_count)}</div></div><div className="simple-list" style={{ marginBottom: 14 }}><div className="simple-list__item"><span>Recommended Channel</span><strong>{channelLabels[opportunity.recommended_channel]}</strong></div><div className="simple-list__item"><span>Objective</span><strong>{objectiveLabels[opportunity.recommended_objective] || opportunity.recommended_objective}</strong></div></div>{opportunity.campaign_creation_supported ? <button type="button" className="button button--primary" onClick={() => openOpportunityCampaign(opportunity)}>Create Campaign</button> : <div className="notice" style={{ marginTop: 0 }}>{opportunity.unsupported_reason || "Audience filter not yet available"}</div>}</article>)}</div>}</section>{modalMode === "wizard" ? <Modal title="Campaign Creation Wizard" onClose={closeModal}><CampaignWizard form={wizardForm} setForm={setWizardForm} step={wizardStep} setStep={setWizardStep} audienceRules={wizardRules} setAudienceRules={setWizardRules} audiencePreview={wizardAudiencePreview} setAudiencePreview={setWizardAudiencePreview} audienceDirty={wizardAudienceDirty} setAudienceDirty={setWizardAudienceDirty} audienceLoading={wizardAudienceLoading} audienceError={wizardAudienceError} audienceOptions={audienceOptions} opportunity={wizardOpportunity} createdCampaign={wizardCreatedCampaign} creating={wizardCreating} createError={wizardCreateError} batchSizeMode={wizardBatchSizeMode} customBatchSize={wizardCustomBatchSize} onPreviewAudience={handlePreviewWizardAudience} onCreate={handleCreateCampaignFromWizard} onCancel={closeModal} onOpenCampaign={handleOpenWizardCampaign} /></Modal> : null}{modalMode === "edit" && selectedCampaign ? <Modal title="Edit Campaign" onClose={closeModal}><CampaignForm form={campaignForm} setForm={setCampaignForm} error={formError} onSubmit={handleUpdateCampaign} submitLabel="Save Campaign" isArchived={selectedCampaign.status === "archived"} /></Modal> : null}{modalMode === "view" && selectedCampaign ? <Modal title="Campaign Detail" onClose={closeModal}><div className="field-grid">{[["Campaign Name", selectedCampaign.name], ["Description", selectedCampaign.description || "-"], ["Channel", channelLabels[selectedCampaign.channel] || selectedCampaign.channel], ["Objective", objectiveLabels[selectedCampaign.objective] || selectedCampaign.objective], ["Status", statusLabels[selectedCampaign.status] || selectedCampaign.status], ["Audience", displayedAudience.eligible_count === null ? "Not selected" : `${formatNumber(displayedAudience.eligible_count)} eligible`], ["Batches", getBatchStatus({ ...selectedCampaign, batch_summary: batchSummary })], ["Provider", "Not selected"], ["Created", formatDate(selectedCampaign.created_at)], ["Last Updated", formatDate(selectedCampaign.updated_at)]].map(([label, value]) => <div key={label} className="field"><span className="field__label">{label}</span><div className="field__input">{value}</div></div>)}{selectedCampaign.archived_at ? <div className="field"><span className="field__label">Archived</span><div className="field__input">{formatDate(selectedCampaign.archived_at)}</div></div> : null}</div><CampaignDashboardSection campaign={selectedCampaign} dashboard={campaignDashboard} batches={batches} loading={dashboardLoading} error={dashboardError} batchSizeMode={dashboardBatchSizeMode} customBatchSize={dashboardCustomBatchSize} onSizeModeChange={handleDashboardSizeModeChange} onCustomSizeChange={handleDashboardCustomSizeChange} onRefresh={() => loadCampaignDashboard(selectedCampaign)} onPreviewAudience={handlePreviewAudience} onExportBatch={handleExportBatch} /><AudienceBuilderSection campaign={selectedCampaign} rules={audienceRules} preview={audiencePreview} savedAudience={savedAudience} dirty={audienceDirty} error={audienceError} loading={audienceLoading} options={audienceOptions} isReadOnly={selectedIsArchived} onRuleChange={setAudienceRule} onTagToggle={toggleAudienceTag} onPreview={handlePreviewAudience} onSave={handleSaveAudience} /><BatchSection batches={batches} batchSummary={batchSummary} batchPreview={batchPreview} batchSizeMode={batchSizeMode} customBatchSize={customBatchSize} batchLoading={batchLoading} batchActionId={batchActionId} batchError={batchError} batchConfirm={batchConfirm} isArchived={selectedIsArchived} hasSavedAudience={hasSavedAudience} onSizeModeChange={(value) => { setBatchSizeMode(value); setBatchPreview(null); setBatchConfirm(false); }} onCustomSizeChange={(value) => { setCustomBatchSize(value); setBatchPreview(null); setBatchConfirm(false); }} onPreview={handlePreviewBatch} onGenerate={handleGenerateBatch} onExport={handleExportBatch} onDownload={handleDownloadBatch} onConfirmChange={setBatchConfirm} /></Modal> : null}</div>;
 }
