@@ -6,7 +6,7 @@
     <title>Email Templates | Marketing CRM</title>
     <style>
       :root {
-        --bg: #f4f7fb;
+        --bg: #eef3f8;
         --panel: #ffffff;
         --ink: #172033;
         --muted: #667085;
@@ -15,6 +15,7 @@
         --green: #0f8f5f;
         --red: #c2413b;
         --amber: #a86700;
+        --soft: #f7f9fc;
         --shadow: 0 12px 28px rgba(23, 32, 51, 0.08);
       }
 
@@ -32,6 +33,10 @@
 
       a {
         color: inherit;
+      }
+
+      h1, h2, h3 {
+        margin: 0;
       }
 
       .layout {
@@ -79,7 +84,7 @@
 
       main {
         min-width: 0;
-        padding: 24px;
+        padding: 20px;
       }
 
       .topbar {
@@ -87,11 +92,7 @@
         align-items: flex-start;
         justify-content: space-between;
         gap: 16px;
-        margin-bottom: 18px;
-      }
-
-      h1, h2, h3 {
-        margin: 0;
+        margin-bottom: 14px;
       }
 
       .eyebrow {
@@ -100,21 +101,31 @@
         font-size: 12px;
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        font-weight: 700;
+        font-weight: 800;
       }
 
       .hint {
+        margin: 5px 0 0;
         color: var(--muted);
         font-size: 13px;
       }
 
-      .grid {
+      .designer {
         display: grid;
+        grid-template-columns: minmax(360px, 40%) minmax(0, 60%);
         gap: 16px;
+        align-items: start;
       }
 
-      .two-col {
-        grid-template-columns: minmax(360px, 0.9fr) minmax(0, 1.1fr);
+      .left-stack,
+      .right-stack {
+        display: grid;
+        gap: 14px;
+      }
+
+      .right-stack {
+        position: sticky;
+        top: 16px;
       }
 
       .card {
@@ -122,7 +133,7 @@
         border: 1px solid var(--line);
         border-radius: 10px;
         box-shadow: var(--shadow);
-        padding: 18px;
+        padding: 16px;
       }
 
       .card-header {
@@ -130,13 +141,13 @@
         justify-content: space-between;
         align-items: center;
         gap: 12px;
-        margin-bottom: 14px;
+        margin-bottom: 12px;
       }
 
       .toolbar {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
         flex-wrap: wrap;
       }
 
@@ -151,7 +162,7 @@
         background: #fff;
         color: var(--ink);
         cursor: pointer;
-        font-weight: 700;
+        font-weight: 800;
       }
 
       button.primary {
@@ -165,6 +176,16 @@
         color: var(--red);
       }
 
+      button.icon-toggle {
+        min-width: 92px;
+      }
+
+      button.is-active {
+        background: #eaf0ff;
+        border-color: var(--blue);
+        color: var(--blue);
+      }
+
       button:disabled {
         opacity: 0.55;
         cursor: not-allowed;
@@ -173,7 +194,7 @@
       .form-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
+        gap: 11px;
       }
 
       label {
@@ -181,7 +202,7 @@
         gap: 5px;
         color: #334155;
         font-size: 13px;
-        font-weight: 700;
+        font-weight: 800;
       }
 
       input, select, textarea {
@@ -202,31 +223,62 @@
         grid-column: 1 / -1;
       }
 
-      .templates-list {
-        display: grid;
-        gap: 10px;
+      details {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--soft);
+        padding: 10px 12px;
       }
 
-      .template-row {
+      summary {
+        cursor: pointer;
+        font-weight: 900;
+      }
+
+      details .form-grid {
+        margin-top: 12px;
+      }
+
+      .templates-list,
+      .master-grid {
+        display: grid;
+        gap: 8px;
+      }
+
+      .master-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .template-row,
+      .master-card {
         width: 100%;
         text-align: left;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 8px;
-        align-items: center;
-        padding: 12px;
+        gap: 5px;
+        padding: 11px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
       }
 
-      .template-row.is-selected {
+      .template-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+      }
+
+      .template-row.is-selected,
+      .master-card.is-selected {
         border-color: var(--blue);
         box-shadow: inset 3px 0 0 var(--blue);
       }
 
+      .master-card strong,
+      .template-row strong {
+        font-size: 14px;
+      }
+
+      .master-card span,
       .meta {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-        margin-top: 6px;
         color: var(--muted);
         font-size: 12px;
       }
@@ -239,7 +291,7 @@
         background: #edf2ff;
         color: #1d4ed8;
         font-size: 12px;
-        font-weight: 800;
+        font-weight: 900;
       }
 
       .badge.draft {
@@ -257,44 +309,13 @@
         color: #4b5563;
       }
 
-      .preview-shell {
-        display: grid;
-        gap: 14px;
-      }
-
-      .preview-frame {
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: #f8fafc;
-        padding: 14px;
-      }
-
-      .desktop-preview,
-      .mobile-preview {
-        width: 100%;
-        border: 0;
-        background: #fff;
-        min-height: 520px;
-      }
-
-      .mobile-preview {
-        max-width: 390px;
-        display: block;
-        margin: 0 auto;
-      }
-
-      .state-panel {
-        max-width: 560px;
-        margin: 12vh auto 0;
-      }
-
       .message {
         margin: 0 0 12px;
         padding: 10px 12px;
         border-radius: 8px;
         background: #eef4ff;
         color: #1d4ed8;
-        font-weight: 700;
+        font-weight: 800;
       }
 
       .message.error {
@@ -305,15 +326,70 @@
       .empty {
         border: 1px dashed var(--line);
         border-radius: 8px;
-        padding: 18px;
+        padding: 16px;
         color: var(--muted);
         text-align: center;
+      }
+
+      .preview-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .preview-frame {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #dfe7f1;
+        padding: 16px;
+        overflow: auto;
+      }
+
+      .preview-frame.mobile-mode {
+        display: flex;
+        justify-content: center;
+      }
+
+      .email-preview {
+        width: 100%;
+        min-height: 720px;
+        border: 0;
+        background: #fff;
+        box-shadow: 0 16px 34px rgba(15, 23, 42, 0.18);
+      }
+
+      .email-preview.mobile {
+        width: 390px;
+        max-width: 100%;
+      }
+
+      .status-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--green);
+      }
+
+      .dot.unsaved {
+        background: var(--amber);
       }
 
       .placeholder-list {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
+        gap: 7px;
+        margin-top: 10px;
       }
 
       code {
@@ -323,21 +399,29 @@
         padding: 3px 6px;
       }
 
+      .state-panel {
+        max-width: 560px;
+        margin: 12vh auto 0;
+      }
+
       .hidden {
         display: none !important;
       }
 
-      @media (max-width: 1040px) {
-        .layout {
+      @media (max-width: 1160px) {
+        .designer,
+        .form-grid,
+        .master-grid {
           grid-template-columns: 1fr;
         }
 
-        .sidebar {
+        .right-stack {
           position: static;
         }
+      }
 
-        .two-col,
-        .form-grid {
+      @media (max-width: 820px) {
+        .layout {
           grid-template-columns: 1fr;
         }
       }
@@ -360,7 +444,7 @@
         <section id="checkingState" class="card state-panel hidden">
           <p class="eyebrow">Protected access</p>
           <h1>Checking protected access...</h1>
-          <p class="hint">The Email Templates engine will load after your Marketing access key is confirmed.</p>
+          <p class="hint">The Email Templates designer will load after your Marketing access key is confirmed.</p>
         </section>
 
         <section id="lockedState" class="card state-panel hidden">
@@ -378,159 +462,222 @@
           <div class="topbar">
             <div>
               <p class="eyebrow">Marketing Centre</p>
-              <h1>Email Templates</h1>
-              <p class="hint">Build reusable email templates for future Brevo campaigns. Preview uses sample data only.</p>
+              <h1>Email Template Designer</h1>
+              <p class="hint">Design reusable marketing emails for future Brevo campaigns. Preview uses dummy sample data only.</p>
             </div>
             <div class="toolbar">
-              <button id="newTemplateButton" class="primary">Create Template</button>
-              <button id="refreshButton">Refresh</button>
+              <button id="newTemplateButton" class="primary">New Template</button>
+              <button id="saveButton" class="primary">Save</button>
+              <button id="duplicateButton">Duplicate</button>
+              <button id="archiveButton" class="danger">Archive</button>
               <button id="lockButton">Lock</button>
             </div>
           </div>
 
           <p id="appMessage" class="message hidden"></p>
 
-          <div class="grid two-col">
-            <section class="card">
-              <div class="card-header">
-                <div>
-                  <h2>Templates</h2>
-                  <p id="templateCount" class="hint">0 templates</p>
+          <div class="designer">
+            <div class="left-stack">
+              <section class="card">
+                <div class="card-header">
+                  <div>
+                    <h2>Templates</h2>
+                    <p id="templateCount" class="hint">0 templates</p>
+                  </div>
+                  <label style="display:flex;align-items:center;gap:8px;font-weight:800;">
+                    <input id="includeArchived" type="checkbox" style="width:auto;" />
+                    Archived
+                  </label>
                 </div>
-                <label style="display:flex;align-items:center;gap:8px;font-weight:700;">
-                  <input id="includeArchived" type="checkbox" style="width:auto;" />
-                  Include archived
-                </label>
-              </div>
-              <div id="templatesList" class="templates-list"></div>
-            </section>
+                <div id="templatesList" class="templates-list"></div>
+              </section>
 
-            <section class="card">
-              <div class="card-header">
-                <div>
-                  <h2 id="editorTitle">Create Template</h2>
-                  <p id="editorHint" class="hint">Archived templates are read only.</p>
+              <section class="card">
+                <div class="card-header">
+                  <div>
+                    <h2>Master Template</h2>
+                    <p class="hint">Choose a starting layout, then edit freely.</p>
+                  </div>
                 </div>
-                <span id="editorStatus" class="badge draft">draft</span>
-              </div>
+                <div id="masterGrid" class="master-grid"></div>
+              </section>
 
-              <form id="templateForm" class="form-grid">
-                <label>
-                  Name
-                  <input id="name" name="name" required />
-                </label>
-                <label>
-                  Category
-                  <select id="category" name="category">
-                    <option value="new_stock">New Stock</option>
-                    <option value="finance_offer">Finance Offer</option>
-                    <option value="rent2buy">Rent2Buy</option>
-                    <option value="weekend_offer">Weekend Offer</option>
-                    <option value="re_engagement">Re-engagement</option>
-                    <option value="custom">Custom</option>
-                  </select>
-                </label>
-                <label class="span-2">
-                  Description
-                  <input id="description" name="description" />
-                </label>
-                <label>
-                  Default Subject
-                  <input id="default_subject" name="default_subject" required />
-                </label>
-                <label>
-                  Preview Text
-                  <input id="preview_text" name="preview_text" />
-                </label>
-                <label>
-                  Header Logo URL
-                  <input id="header_logo" name="header_logo" />
-                </label>
-                <label>
-                  Brand Colour
-                  <input id="brand_colour" name="brand_colour" value="#2557d6" />
-                </label>
-                <label>
-                  Hero Heading
-                  <input id="hero_heading" name="hero_heading" />
-                </label>
-                <label>
-                  Status
-                  <select id="status" name="status">
-                    <option value="draft">Draft</option>
-                    <option value="active">Active</option>
-                  </select>
-                </label>
-                <label class="span-2">
-                  Intro Text
-                  <textarea id="intro_text" name="intro_text"></textarea>
-                </label>
-                <label class="span-2">
-                  Main Body
-                  <textarea id="main_body" name="main_body"></textarea>
-                </label>
-                <label>
-                  CTA Text
-                  <input id="cta_text" name="cta_text" />
-                </label>
-                <label>
-                  CTA URL
-                  <input id="cta_url" name="cta_url" />
-                </label>
-                <label class="span-2">
-                  Footer
-                  <textarea id="footer" name="footer"></textarea>
-                </label>
-              </form>
+              <section class="card">
+                <div class="card-header">
+                  <div>
+                    <h2 id="editorTitle">Template Settings</h2>
+                    <p id="editorHint" class="hint">Archived templates are read only.</p>
+                  </div>
+                  <span id="editorStatus" class="badge draft">draft</span>
+                </div>
 
-              <div class="toolbar" style="margin-top: 14px;">
-                <button id="saveButton" class="primary">Save Template</button>
-                <button id="previewButton">Preview Template</button>
-                <button id="duplicateButton">Duplicate</button>
-                <button id="archiveButton" class="danger">Archive</button>
-              </div>
-            </section>
+                <form id="templateForm" class="form-grid">
+                  <label class="span-2">
+                    Template Name
+                    <input id="name" name="name" required />
+                  </label>
+                  <label>
+                    Category
+                    <select id="category" name="category">
+                      <option value="new_stock">New Stock</option>
+                      <option value="finance_offer">Finance Offer</option>
+                      <option value="rent2buy">Rent2Buy</option>
+                      <option value="weekend_offer">Weekend Offer</option>
+                      <option value="re_engagement">Re-engagement</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </label>
+                  <label>
+                    Status
+                    <select id="status" name="status">
+                      <option value="draft">Draft</option>
+                      <option value="active">Active</option>
+                    </select>
+                  </label>
+                  <label class="span-2">
+                    Description
+                    <input id="description" name="description" />
+                  </label>
+                  <label class="span-2">
+                    Hero Heading
+                    <input id="hero_heading" name="hero_heading" />
+                  </label>
+                  <label class="span-2">
+                    Intro Text
+                    <textarea id="intro_text" name="intro_text"></textarea>
+                  </label>
+                  <label class="span-2">
+                    Main Body
+                    <textarea id="main_body" name="main_body"></textarea>
+                  </label>
+                  <label>
+                    CTA Text
+                    <input id="cta_text" name="cta_text" />
+                  </label>
+                  <label>
+                    CTA URL
+                    <input id="cta_url" name="cta_url" placeholder="https://..." />
+                  </label>
+                </form>
+              </section>
+
+              <section class="card">
+                <div class="card-header">
+                  <div>
+                    <h2>Brand</h2>
+                    <p class="hint">Reusable browser-saved brand defaults reflected across the live preview.</p>
+                  </div>
+                  <button id="saveBrandButton">Save Brand</button>
+                </div>
+                <div class="form-grid">
+                  <label>
+                    Company Logo
+                    <input id="brandLogo" placeholder="https://..." />
+                  </label>
+                  <label>
+                    Company Name
+                    <input id="brandCompany" />
+                  </label>
+                  <label>
+                    Primary Colour
+                    <input id="brandPrimary" />
+                  </label>
+                  <label>
+                    Secondary Colour
+                    <input id="brandSecondary" />
+                  </label>
+                  <label class="span-2">
+                    Footer
+                    <textarea id="brandFooter"></textarea>
+                  </label>
+                  <label class="span-2">
+                    Social Links
+                    <input id="brandSocial" placeholder="Facebook | Instagram | LinkedIn" />
+                  </label>
+                </div>
+              </section>
+
+              <details>
+                <summary>Advanced Settings</summary>
+                <div class="form-grid">
+                  <label>
+                    Default Subject
+                    <input id="default_subject" name="default_subject" required />
+                  </label>
+                  <label>
+                    Preview Text
+                    <input id="preview_text" name="preview_text" />
+                  </label>
+                  <label>
+                    Stored Header Logo URL
+                    <input id="header_logo" name="header_logo" placeholder="https://..." />
+                  </label>
+                  <label>
+                    Stored Brand Colour
+                    <input id="brand_colour" name="brand_colour" />
+                  </label>
+                  <label class="span-2">
+                    Stored Footer
+                    <textarea id="footer" name="footer"></textarea>
+                  </label>
+                </div>
+              </details>
+            </div>
+
+            <div class="right-stack">
+              <section class="card">
+                <div class="preview-toolbar">
+                  <div>
+                    <h2>Live Preview</h2>
+                    <div class="status-line">
+                      <span id="unsavedDot" class="dot"></span>
+                      <span id="saveStateText">No unsaved changes</span>
+                      <span id="lastSavedText">Not saved yet</span>
+                    </div>
+                  </div>
+                  <div class="toolbar" role="group" aria-label="Preview mode">
+                    <button id="desktopToggle" class="icon-toggle is-active" type="button">Desktop</button>
+                    <button id="mobileToggle" class="icon-toggle" type="button">Mobile</button>
+                  </div>
+                </div>
+                <div class="placeholder-list" aria-label="Supported placeholders">
+                  <code>{{vehicle_grid}}</code>
+                  <code>{{vehicle_count}}</code>
+                  <code>{{campaign_name}}</code>
+                  <code>{{first_name}}</code>
+                  <code>{{company}}</code>
+                </div>
+                <div id="previewFrame" class="preview-frame" style="margin-top: 14px;">
+                  <iframe id="livePreview" class="email-preview" title="Live email preview" sandbox=""></iframe>
+                </div>
+              </section>
+            </div>
           </div>
-
-          <section class="card" style="margin-top: 16px;">
-            <div class="card-header">
-              <div>
-                <h2>Template Preview</h2>
-                <p class="hint">Placeholders are rendered with dummy sample data. No real customer data is used.</p>
-              </div>
-            </div>
-            <div class="placeholder-list" aria-label="Supported placeholders">
-              <code>{{vehicle_grid}}</code>
-              <code>{{vehicle_count}}</code>
-              <code>{{campaign_name}}</code>
-              <code>{{first_name}}</code>
-              <code>{{company}}</code>
-            </div>
-            <div id="previewEmpty" class="empty" style="margin-top: 14px;">Preview a template to see desktop and mobile layouts.</div>
-            <div id="previewShell" class="preview-shell hidden" style="margin-top: 14px;">
-              <div>
-                <h3>Desktop</h3>
-                <div class="preview-frame">
-                  <iframe id="desktopPreview" class="desktop-preview" title="Desktop email preview" sandbox=""></iframe>
-                </div>
-              </div>
-              <div>
-                <h3>Mobile</h3>
-                <div class="preview-frame">
-                  <iframe id="mobilePreview" class="mobile-preview" title="Mobile email preview" sandbox=""></iframe>
-                </div>
-              </div>
-            </div>
-          </section>
         </section>
       </main>
     </div>
 
     <script>
       const ACCESS_KEY_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
+      const BRAND_STORAGE_KEY = "marketingEmailDesignerBrand";
       const API_HEADER = "x-marketing-customer-database-key";
       const ACCESS_API = "/api/marketing-campaigns";
       const TEMPLATE_API = "/api/marketing-email-templates";
+      const VEHICLE_GRID_TOKEN = "%%MARKETING_TRUSTED_VEHICLE_GRID_TOKEN%%";
+
+      const sampleData = {
+        campaign_name: "July New Stock",
+        first_name: "Alex",
+        company: "Van Finance Company",
+        vehicle_count: "3",
+        vehicle_grid: "[Vehicle grid preview]",
+      };
+
+      const sampleVehicles = [
+        { name: "Ford Transit Custom Limited", price: "16,995", mileage: "42,000 miles" },
+        { name: "Volkswagen Transporter Highline", price: "18,995", mileage: "36,500 miles" },
+        { name: "Mercedes-Benz Vito Premium", price: "21,995", mileage: "29,000 miles" },
+      ];
 
       const categoryLabels = {
         new_stock: "New Stock",
@@ -539,6 +686,114 @@
         weekend_offer: "Weekend Offer",
         re_engagement: "Re-engagement",
         custom: "Custom",
+      };
+
+      const masters = {
+        new_stock: {
+          label: "New Stock",
+          summary: "Fresh vehicle arrivals with vehicle grid first.",
+          category: "new_stock",
+          colour: "#2557d6",
+          secondary: "#ecfdf3",
+          name: "New Stock Email",
+          subject: "New vans just landed at {{company}}",
+          preview: "A quick look at this week's best new arrivals.",
+          hero: "Fresh stock just landed",
+          intro: "Hi {{first_name}},\n\nWe have added {{vehicle_count}} fresh vans that are ready to view now.",
+          body: "{{vehicle_grid}}\n\nIf one of these looks right for you, our team can help with finance options and part exchange.",
+          cta: "View latest vans",
+          footer: "You are receiving this because you contacted Van Finance Company about vans or finance.",
+        },
+        finance_offer: {
+          label: "Finance Offer",
+          summary: "Finance-led promotion with a clear application CTA.",
+          category: "finance_offer",
+          colour: "#0f766e",
+          secondary: "#e0f2fe",
+          name: "Finance Offer Email",
+          subject: "Flexible van finance options from {{company}}",
+          preview: "A simple route to funding your next van.",
+          hero: "Finance options built around your business",
+          intro: "Hi {{first_name}},\n\nIf you are planning your next van, we can help compare practical finance options.",
+          body: "Tell us what you need and we will help you understand the monthly options available.",
+          cta: "Start finance enquiry",
+          footer: "Finance is subject to status and affordability. Terms and conditions apply.",
+        },
+        rent2buy: {
+          label: "Rent2Buy",
+          summary: "Rent2Buy route for customers not ready for standard finance.",
+          category: "rent2buy",
+          colour: "#7c3aed",
+          secondary: "#f5f3ff",
+          name: "Rent2Buy Email",
+          subject: "Rent2Buy van options from {{company}}",
+          preview: "A practical way to work towards owning a van.",
+          hero: "Need a van without standard finance?",
+          intro: "Hi {{first_name}},\n\nOur Rent2Buy option can help you get moving with a clear plan.",
+          body: "Choose a suitable van, make regular payments, and work towards ownership over time.",
+          cta: "Explore Rent2Buy",
+          footer: "Availability depends on vehicle, deposit and application checks.",
+        },
+        weekend_offer: {
+          label: "Weekend Offer",
+          summary: "Urgent weekend promotion with bold CTA.",
+          category: "weekend_offer",
+          colour: "#b45309",
+          secondary: "#fff7ed",
+          name: "Weekend Offer Email",
+          subject: "Weekend van offers at {{company}}",
+          preview: "Short-term offers on selected stock.",
+          hero: "Weekend van offers",
+          intro: "Hi {{first_name}},\n\nSelected vans are available with weekend-ready offers.",
+          body: "{{vehicle_grid}}\n\nThese offers can change quickly, so speak to us if something catches your eye.",
+          cta: "Check availability",
+          footer: "Offers are subject to vehicle availability and may change without notice.",
+        },
+        re_engagement: {
+          label: "Re-engagement",
+          summary: "Friendly nudge for dormant customers.",
+          category: "re_engagement",
+          colour: "#334155",
+          secondary: "#f1f5f9",
+          name: "Re-engagement Email",
+          subject: "Still looking for a van, {{first_name}}?",
+          preview: "We can still help when the time is right.",
+          hero: "Still looking for the right van?",
+          intro: "Hi {{first_name}},\n\nWe wanted to check whether you are still looking for a van or finance options.",
+          body: "If your plans have changed, reply and tell us what would help. We can narrow the search and keep it simple.",
+          cta: "Tell us what you need",
+          footer: "You can ignore this if you are no longer looking.",
+        },
+        newsletter: {
+          label: "Newsletter",
+          summary: "Editorial update with vehicle highlights and company news.",
+          category: "custom",
+          colour: "#1d4ed8",
+          secondary: "#eef2ff",
+          name: "Newsletter Email",
+          subject: "Latest from {{company}}",
+          preview: "Stock highlights, finance notes and updates from the team.",
+          hero: "This month's van update",
+          intro: "Hi {{first_name}},\n\nHere are the latest highlights from {{company}}.",
+          body: "{{vehicle_grid}}\n\nWe have also been helping more customers compare finance and Rent2Buy options this month.",
+          cta: "Visit our website",
+          footer: "Thanks for staying connected with Van Finance Company.",
+        },
+        custom_blank: {
+          label: "Custom Blank",
+          summary: "Clean blank canvas for your own message.",
+          category: "custom",
+          colour: "#2557d6",
+          secondary: "#eef2ff",
+          name: "Custom Email",
+          subject: "A quick update from {{company}}",
+          preview: "A short message from the team.",
+          hero: "Your headline here",
+          intro: "Hi {{first_name}},",
+          body: "Write your main message here.",
+          cta: "Learn more",
+          footer: "Van Finance Company",
+        },
       };
 
       const emptyTemplate = {
@@ -559,12 +814,25 @@
         status: "draft",
       };
 
+      const defaultBrand = {
+        logo: "",
+        company: "Van Finance Company",
+        primary: "#2557d6",
+        secondary: "#eef2ff",
+        footer: "Van Finance Company Ltd. You are receiving this preview with sample data only.",
+        social: "Facebook | Instagram | LinkedIn",
+      };
+
       const state = {
         accessStatus: "checking",
         templates: [],
         selectedId: null,
         form: { ...emptyTemplate },
+        brand: loadBrand(),
         includeArchived: false,
+        selectedMaster: "new_stock",
+        previewMode: "desktop",
+        dirty: false,
       };
 
       const elements = {
@@ -576,23 +844,26 @@
         accessKeyInput: document.getElementById("accessKeyInput"),
         unlockButton: document.getElementById("unlockButton"),
         lockButton: document.getElementById("lockButton"),
-        refreshButton: document.getElementById("refreshButton"),
         newTemplateButton: document.getElementById("newTemplateButton"),
         includeArchived: document.getElementById("includeArchived"),
         templatesList: document.getElementById("templatesList"),
         templateCount: document.getElementById("templateCount"),
+        masterGrid: document.getElementById("masterGrid"),
         templateForm: document.getElementById("templateForm"),
         editorTitle: document.getElementById("editorTitle"),
         editorHint: document.getElementById("editorHint"),
         editorStatus: document.getElementById("editorStatus"),
         saveButton: document.getElementById("saveButton"),
-        previewButton: document.getElementById("previewButton"),
         duplicateButton: document.getElementById("duplicateButton"),
         archiveButton: document.getElementById("archiveButton"),
-        previewEmpty: document.getElementById("previewEmpty"),
-        previewShell: document.getElementById("previewShell"),
-        desktopPreview: document.getElementById("desktopPreview"),
-        mobilePreview: document.getElementById("mobilePreview"),
+        saveBrandButton: document.getElementById("saveBrandButton"),
+        desktopToggle: document.getElementById("desktopToggle"),
+        mobileToggle: document.getElementById("mobileToggle"),
+        previewFrame: document.getElementById("previewFrame"),
+        livePreview: document.getElementById("livePreview"),
+        unsavedDot: document.getElementById("unsavedDot"),
+        saveStateText: document.getElementById("saveStateText"),
+        lastSavedText: document.getElementById("lastSavedText"),
       };
 
       function getStoredKey() {
@@ -621,18 +892,24 @@
         }
       }
 
-      function setAccessStatus(status, message = "") {
-        state.accessStatus = status;
-        elements.checkingState.classList.toggle("hidden", status !== "checking");
-        elements.lockedState.classList.toggle("hidden", status !== "locked");
-        elements.appState.classList.toggle("hidden", status !== "unlocked");
-        showMessage(elements.lockMessage, message, Boolean(message));
+      function loadBrand() {
+        try {
+          const stored = JSON.parse(window.localStorage.getItem(BRAND_STORAGE_KEY) || "{}");
+          return { ...defaultBrand, ...stored };
+        } catch {
+          return { ...defaultBrand };
+        }
       }
 
-      function showMessage(element, message, isError = false) {
-        element.textContent = message || "";
-        element.classList.toggle("hidden", !message);
-        element.classList.toggle("error", isError);
+      function saveBrand() {
+        try {
+          window.localStorage.setItem(BRAND_STORAGE_KEY, JSON.stringify(state.brand));
+          showMessage(elements.appMessage, "Brand settings saved for this browser.");
+          return true;
+        } catch {
+          showMessage(elements.appMessage, "Could not save brand settings in this browser.", true);
+          return false;
+        }
       }
 
       function headers() {
@@ -669,7 +946,26 @@
         return response.ok;
       }
 
+      function setAccessStatus(status, message = "") {
+        state.accessStatus = status;
+        elements.checkingState.classList.toggle("hidden", status !== "checking");
+        elements.lockedState.classList.toggle("hidden", status !== "locked");
+        elements.appState.classList.toggle("hidden", status !== "unlocked");
+        showMessage(elements.lockMessage, message, Boolean(message));
+      }
+
+      function showMessage(element, message, isError = false) {
+        element.textContent = message || "";
+        element.classList.toggle("hidden", !message);
+        element.classList.toggle("error", isError);
+      }
+
       async function boot() {
+        renderMasterGrid();
+        populateBrandForm();
+        applyMaster("new_stock", false);
+        renderAll();
+
         const storedKey = getStoredKey();
         if (!storedKey) {
           setAccessStatus("locked");
@@ -721,7 +1017,6 @@
         clearStoredKey();
         state.templates = [];
         state.selectedId = null;
-        state.form = { ...emptyTemplate };
         renderAll();
         setAccessStatus("locked");
       }
@@ -739,6 +1034,47 @@
         renderAll();
       }
 
+      function categoryForMaster(masterKey) {
+        return masters[masterKey]?.category || "custom";
+      }
+
+      function renderMasterGrid() {
+        elements.masterGrid.innerHTML = Object.entries(masters).map(([key, master]) => `
+          <button type="button" class="master-card ${key === state.selectedMaster ? "is-selected" : ""}" data-master="${escapeHtml(key)}">
+            <strong>${escapeHtml(master.label)}</strong>
+            <span>${escapeHtml(master.summary)}</span>
+          </button>
+        `).join("");
+        elements.masterGrid.querySelectorAll("[data-master]").forEach((button) => {
+          button.addEventListener("click", () => applyMaster(button.dataset.master, true));
+        });
+      }
+
+      function applyMaster(masterKey, markDirty = true) {
+        const master = masters[masterKey];
+        if (!master) return;
+        state.selectedMaster = masterKey;
+        state.form = {
+          ...state.form,
+          name: state.form.id ? state.form.name : master.name,
+          category: master.category,
+          default_subject: master.subject,
+          preview_text: master.preview,
+          hero_heading: master.hero,
+          intro_text: master.intro,
+          main_body: master.body,
+          cta_text: master.cta,
+          footer: master.footer,
+          brand_colour: master.colour,
+          status: state.form.status || "draft",
+        };
+        state.brand.primary = master.colour;
+        state.brand.secondary = master.secondary;
+        if (markDirty) state.dirty = true;
+        populateBrandForm();
+        renderAll();
+      }
+
       function templateLabel(template) {
         return categoryLabels[template.category] || template.category || "Custom";
       }
@@ -753,10 +1089,7 @@
           <button class="template-row ${template.id === state.selectedId ? "is-selected" : ""}" data-template-id="${escapeHtml(template.id)}">
             <span>
               <strong>${escapeHtml(template.name || "Untitled template")}</strong>
-              <span class="meta">
-                <span>${escapeHtml(templateLabel(template))}</span>
-                <span>${escapeHtml(template.default_subject || "No subject")}</span>
-              </span>
+              <span class="meta">${escapeHtml(templateLabel(template))} - ${escapeHtml(template.default_subject || "No subject")}</span>
             </span>
             <span class="badge ${escapeHtml(template.status || "draft")}">${escapeHtml(template.status || "draft")}</span>
           </button>
@@ -766,37 +1099,67 @@
         });
       }
 
+      function populateBrandForm() {
+        document.getElementById("brandLogo").value = state.brand.logo || "";
+        document.getElementById("brandCompany").value = state.brand.company || "";
+        document.getElementById("brandPrimary").value = state.brand.primary || "";
+        document.getElementById("brandSecondary").value = state.brand.secondary || "";
+        document.getElementById("brandFooter").value = state.brand.footer || "";
+        document.getElementById("brandSocial").value = state.brand.social || "";
+      }
+
+      function readBrandForm() {
+        state.brand = {
+          logo: document.getElementById("brandLogo").value.trim(),
+          company: document.getElementById("brandCompany").value.trim() || defaultBrand.company,
+          primary: document.getElementById("brandPrimary").value.trim() || defaultBrand.primary,
+          secondary: document.getElementById("brandSecondary").value.trim() || defaultBrand.secondary,
+          footer: document.getElementById("brandFooter").value.trim() || defaultBrand.footer,
+          social: document.getElementById("brandSocial").value.trim(),
+        };
+      }
+
       function renderForm() {
         const form = state.form;
         Object.keys(emptyTemplate).forEach((key) => {
           const input = document.getElementById(key);
-          if (input) {
-            input.value = form[key] || "";
-          }
+          if (input) input.value = form[key] || "";
         });
         const isArchived = form.status === "archived";
-        elements.editorTitle.textContent = form.id ? "Edit Template" : "Create Template";
-        elements.editorHint.textContent = isArchived ? "Archived templates are read only. Duplicate to create an editable copy." : "Create and preview reusable email content.";
+        elements.editorTitle.textContent = form.id ? "Template Settings" : "New Template Settings";
+        elements.editorHint.textContent = isArchived ? "Archived templates are read only. Duplicate to create an editable copy." : "Focus on the message. Advanced settings are tucked away below.";
         elements.editorStatus.textContent = form.status || "draft";
         elements.editorStatus.className = `badge ${form.status || "draft"}`;
         elements.templateForm.querySelectorAll("input, select, textarea").forEach((input) => {
           input.disabled = isArchived;
         });
+        document.querySelectorAll("details input, details select, details textarea").forEach((input) => {
+          input.disabled = isArchived;
+        });
         elements.saveButton.disabled = isArchived;
         elements.archiveButton.disabled = !form.id || isArchived;
         elements.duplicateButton.disabled = !form.id;
+        renderMasterGrid();
+      }
+
+      function renderSaveState() {
+        elements.unsavedDot.classList.toggle("unsaved", state.dirty);
+        elements.saveStateText.textContent = state.dirty ? "Unsaved changes" : "No unsaved changes";
+        elements.lastSavedText.textContent = state.form.updated_at ? `Last saved ${formatDate(state.form.updated_at)}` : "Not saved yet";
       }
 
       function renderAll() {
         renderTemplates();
         renderForm();
+        renderSaveState();
+        renderPreview();
       }
 
       function newTemplate() {
         state.selectedId = null;
         state.form = { ...emptyTemplate };
-        clearPreview();
-        renderAll();
+        state.dirty = false;
+        applyMaster("new_stock", false);
       }
 
       function selectTemplate(id) {
@@ -804,7 +1167,8 @@
         if (!template) return;
         state.selectedId = id;
         state.form = { ...emptyTemplate, ...template };
-        clearPreview();
+        state.selectedMaster = Object.keys(masters).find((key) => categoryForMaster(key) === template.category) || "custom_blank";
+        state.dirty = false;
         renderAll();
       }
 
@@ -812,15 +1176,35 @@
         const values = { ...state.form };
         Object.keys(emptyTemplate).forEach((key) => {
           const input = document.getElementById(key);
-          if (input) {
-            values[key] = input.value.trim();
-          }
+          if (input) values[key] = input.value.trim();
         });
+        readBrandForm();
         values.id = state.form.id;
-        if (values.status === "archived") {
-          values.status = state.form.status;
-        }
+        values.header_logo = values.header_logo || state.brand.logo || "";
+        values.brand_colour = values.brand_colour || state.brand.primary || defaultBrand.primary;
+        values.footer = values.footer || state.brand.footer || "";
+        if (values.status === "archived") values.status = state.form.status;
         return values;
+      }
+
+      function syncFormFromInputs(markDirty = true) {
+        if (state.form.status === "archived") return;
+        state.form = readForm();
+        if (markDirty) state.dirty = true;
+        renderSaveState();
+        renderPreview();
+      }
+
+      function validateHttpsUrl(value, label) {
+        const text = String(value || "").trim();
+        if (!text) return "";
+        try {
+          const parsed = new URL(text);
+          if (parsed.protocol !== "https:") throw new Error("Invalid protocol");
+          return parsed.toString();
+        } catch {
+          throw new Error(`${label} must be a valid absolute HTTPS URL.`);
+        }
       }
 
       async function saveTemplate() {
@@ -829,14 +1213,13 @@
           showMessage(elements.appMessage, "Template name and default subject are required.", true);
           return;
         }
+        validateHttpsUrl(values.header_logo, "Header logo");
+        validateHttpsUrl(values.cta_url, "CTA URL");
         const action = values.id ? "update" : "create";
-        const result = await postJson(TEMPLATE_API, {
-          action,
-          template: values,
-          id: values.id,
-        });
+        const result = await postJson(TEMPLATE_API, { action, template: values, id: values.id });
         state.selectedId = result.template.id;
         state.form = { ...emptyTemplate, ...result.template };
+        state.dirty = false;
         showMessage(elements.appMessage, "Template saved.");
         await loadTemplates();
       }
@@ -847,6 +1230,7 @@
         const result = await postJson(TEMPLATE_API, { action: "archive", id: state.form.id });
         state.selectedId = result.template.id;
         state.form = { ...emptyTemplate, ...result.template };
+        state.dirty = false;
         showMessage(elements.appMessage, "Template archived.");
         await loadTemplates();
       }
@@ -858,33 +1242,140 @@
         elements.includeArchived.checked = true;
         state.selectedId = result.template.id;
         state.form = { ...emptyTemplate, ...result.template };
+        state.dirty = false;
         showMessage(elements.appMessage, "Template duplicated.");
         await loadTemplates();
       }
 
-      async function previewTemplate() {
-        const values = readForm();
-        if (!values.name || !values.default_subject) {
-          showMessage(elements.appMessage, "Template name and default subject are required before preview.", true);
-          return;
-        }
-        const result = await postJson(TEMPLATE_API, {
-          action: "preview",
-          template: values,
-        });
-        const html = result.preview?.html || "";
-        elements.previewEmpty.classList.add("hidden");
-        elements.previewShell.classList.remove("hidden");
-        elements.desktopPreview.srcdoc = html;
-        elements.mobilePreview.srcdoc = html;
-        showMessage(elements.appMessage, "Preview generated with dummy sample data.");
+      function renderPreview() {
+        const values = { ...state.form };
+        const brand = state.brand;
+        const subject = replaceTextPlaceholders(values.default_subject || values.name || "Email preview");
+        const previewText = replaceTextPlaceholders(values.preview_text || "Preview generated with sample data.");
+        const heroHeading = replaceTextPlaceholders(values.hero_heading || values.name || "Your email headline");
+        const ctaText = replaceTextPlaceholders(values.cta_text || "View more");
+        const primary = safeColour(values.brand_colour || brand.primary || defaultBrand.primary);
+        const secondary = safeColour(brand.secondary || defaultBrand.secondary);
+        const logo = values.header_logo || brand.logo;
+        const footer = values.footer || brand.footer;
+        const logoHtml = safeHttpsUrlForPreview(logo) ? `
+          <tr>
+            <td align="center" style="padding:22px 24px 14px;background:#ffffff;">
+              <img src="${escapeHtml(logo)}" alt="${escapeHtml(brand.company)}" width="180" style="display:block;max-width:180px;width:100%;height:auto;border:0;outline:none;text-decoration:none;">
+            </td>
+          </tr>
+        ` : `
+          <tr>
+            <td align="center" style="padding:24px 24px 14px;background:#ffffff;font-family:Arial,sans-serif;font-size:20px;line-height:26px;color:#0f172a;font-weight:bold;">${escapeHtml(brand.company)}</td>
+          </tr>
+        `;
+        const ctaHtml = values.cta_text ? `
+          <tr>
+            <td align="left" style="padding:4px 30px 26px;background:#ffffff;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td bgcolor="${primary}" style="border-radius:8px;">
+                    <a href="${escapeHtml(safeHttpsUrlForPreview(values.cta_url) || "https://www.vanfinancecompany.co.uk")}" style="display:inline-block;padding:13px 19px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#ffffff;text-decoration:none;font-weight:bold;">${escapeHtml(ctaText)}</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        ` : "";
+
+        const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${escapeHtml(subject)}</title>
+  </head>
+  <body style="margin:0;padding:0;background:#eef3f8;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#eef3f8" style="width:100%;background:#eef3f8;border-collapse:collapse;">
+      <tr>
+        <td align="center" style="padding:24px 12px;">
+          <table role="presentation" width="660" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:660px;background:#ffffff;border-collapse:collapse;border-radius:14px;overflow:hidden;">
+            ${logoHtml}
+            <tr>
+              <td bgcolor="${primary}" style="padding:34px 30px;background:${primary};">
+                <p style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#ffffff;font-weight:bold;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(brand.company)}</p>
+                <h1 style="margin:0;font-family:Arial,sans-serif;font-size:34px;line-height:40px;color:#ffffff;font-weight:bold;">${escapeHtml(heroHeading)}</h1>
+              </td>
+            </tr>
+            <tr>
+              <td bgcolor="${secondary}" style="padding:14px 30px;background:${secondary};font-family:Arial,sans-serif;font-size:14px;line-height:20px;color:#334155;">${escapeHtml(previewText)}</td>
+            </tr>
+            <tr>
+              <td style="padding:26px 30px 6px;background:#ffffff;">${textToHtml(values.intro_text)}</td>
+            </tr>
+            <tr>
+              <td style="padding:0 30px 6px;background:#ffffff;">${textToHtml(values.main_body)}</td>
+            </tr>
+            ${ctaHtml}
+            <tr>
+              <td style="padding:22px 30px 30px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">
+                ${textToHtml(footer)}
+                ${brand.social ? `<p style="margin:10px 0 0;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">${escapeHtml(brand.social)}</p>` : ""}
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+        elements.livePreview.srcdoc = html;
       }
 
-      function clearPreview() {
-        elements.previewEmpty.classList.remove("hidden");
-        elements.previewShell.classList.add("hidden");
-        elements.desktopPreview.srcdoc = "";
-        elements.mobilePreview.srcdoc = "";
+      function replaceTextPlaceholders(value) {
+        const replacements = { ...sampleData, company: state.brand.company || sampleData.company };
+        return String(value || "").replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (match, key) => replacements[key] ?? match);
+      }
+
+      function renderVehicleGrid() {
+        const rows = sampleVehicles.map((vehicle) => `
+          <tr>
+            <td style="padding:12px;border:1px solid #dbe2ea;background:#f8fafc;border-radius:10px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr><td style="font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#0f172a;font-weight:bold;">${escapeHtml(vehicle.name)}</td></tr>
+                <tr><td style="font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#64748b;padding-top:4px;">${escapeHtml(vehicle.mileage)}</td></tr>
+                <tr><td style="font-family:Arial,sans-serif;font-size:16px;line-height:22px;color:#0f172a;font-weight:bold;padding-top:6px;">£${escapeHtml(vehicle.price)}</td></tr>
+              </table>
+            </td>
+          </tr>
+        `).join("");
+        return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;border-spacing:0 10px;margin:18px 0;">${rows}</table>`;
+      }
+
+      function renderEscapedTextBlock(value) {
+        const normalized = String(value || "").replace(/\r\n/g, "\n");
+        if (!normalized.trim()) return "";
+        return normalized.split(/\n{2,}/).map((part) => `<p style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:15px;line-height:23px;color:#1f2937;">${part.replace(/\n/g, "<br>")}</p>`).join("");
+      }
+
+      function textToHtml(value) {
+        const withVehicleToken = String(value || "").replace(/{{\s*vehicle_grid\s*}}/g, VEHICLE_GRID_TOKEN);
+        const withTextPlaceholders = replaceTextPlaceholders(withVehicleToken);
+        return escapeHtml(withTextPlaceholders)
+          .split(VEHICLE_GRID_TOKEN)
+          .map((part, index, parts) => `${renderEscapedTextBlock(part)}${index < parts.length - 1 ? renderVehicleGrid() : ""}`)
+          .join("");
+      }
+
+      function safeColour(value) {
+        const text = String(value || "").trim();
+        return /^#[0-9a-fA-F]{6}$/.test(text) ? text : defaultBrand.primary;
+      }
+
+      function safeHttpsUrlForPreview(value) {
+        const text = String(value || "").trim();
+        if (!text) return "";
+        try {
+          const parsed = new URL(text);
+          return parsed.protocol === "https:" ? parsed.toString() : "";
+        } catch {
+          return "";
+        }
       }
 
       function escapeHtml(value) {
@@ -896,21 +1387,54 @@
           .replace(/'/g, "&#039;");
       }
 
+      function formatDate(value) {
+        if (!value) return "";
+        try {
+          return new Intl.DateTimeFormat("en-GB", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+        } catch {
+          return value;
+        }
+      }
+
+      function setPreviewMode(mode) {
+        state.previewMode = mode;
+        const mobile = mode === "mobile";
+        elements.desktopToggle.classList.toggle("is-active", !mobile);
+        elements.mobileToggle.classList.toggle("is-active", mobile);
+        elements.livePreview.classList.toggle("mobile", mobile);
+        elements.previewFrame.classList.toggle("mobile-mode", mobile);
+      }
+
       elements.unlockButton.addEventListener("click", unlock);
       elements.accessKeyInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter") unlock();
       });
       elements.lockButton.addEventListener("click", lock);
-      elements.refreshButton.addEventListener("click", () => loadTemplates().catch((error) => showMessage(elements.appMessage, error.message, true)));
       elements.newTemplateButton.addEventListener("click", newTemplate);
+      elements.saveButton.addEventListener("click", () => saveTemplate().catch((error) => showMessage(elements.appMessage, error.message, true)));
+      elements.archiveButton.addEventListener("click", () => archiveTemplate().catch((error) => showMessage(elements.appMessage, error.message, true)));
+      elements.duplicateButton.addEventListener("click", () => duplicateTemplate().catch((error) => showMessage(elements.appMessage, error.message, true)));
       elements.includeArchived.addEventListener("change", async () => {
         state.includeArchived = elements.includeArchived.checked;
         await loadTemplates();
       });
-      elements.saveButton.addEventListener("click", () => saveTemplate().catch((error) => showMessage(elements.appMessage, error.message, true)));
-      elements.archiveButton.addEventListener("click", () => archiveTemplate().catch((error) => showMessage(elements.appMessage, error.message, true)));
-      elements.duplicateButton.addEventListener("click", () => duplicateTemplate().catch((error) => showMessage(elements.appMessage, error.message, true)));
-      elements.previewButton.addEventListener("click", () => previewTemplate().catch((error) => showMessage(elements.appMessage, error.message, true)));
+      elements.desktopToggle.addEventListener("click", () => setPreviewMode("desktop"));
+      elements.mobileToggle.addEventListener("click", () => setPreviewMode("mobile"));
+      elements.saveBrandButton.addEventListener("click", () => {
+        readBrandForm();
+        saveBrand();
+        renderPreview();
+      });
+      document.querySelectorAll("#templateForm input, #templateForm select, #templateForm textarea, details input, details select, details textarea").forEach((input) => {
+        input.addEventListener("input", () => syncFormFromInputs(true));
+        input.addEventListener("change", () => syncFormFromInputs(true));
+      });
+      document.querySelectorAll("#brandLogo, #brandCompany, #brandPrimary, #brandSecondary, #brandFooter, #brandSocial").forEach((input) => {
+        input.addEventListener("input", () => {
+          readBrandForm();
+          renderPreview();
+        });
+      });
 
       boot();
     </script>
