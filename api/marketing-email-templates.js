@@ -234,13 +234,21 @@ function renderVehicleGrid() {
   `;
 }
 
+function renderEscapedTextBlock(value) {
+  const normalized = String(value || "").replace(/\r\n/g, "\n");
+  if (!normalized.trim()) return "";
+  return normalized
+    .split(/\n{2,}/)
+    .map((part) => `<p style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:15px;line-height:23px;color:#1f2937;">${part.replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
 function textToHtml(value) {
   const withVehicleToken = String(value || "").replace(/{{\s*vehicle_grid\s*}}/g, VEHICLE_GRID_TOKEN);
   const withTextPlaceholders = replaceTextPlaceholders(withVehicleToken);
   return escapeHtml(withTextPlaceholders)
-    .replace(/\r\n/g, "\n")
-    .split(/\n{2,}/)
-    .map((part) => `<p style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:15px;line-height:23px;color:#1f2937;">${part.replace(/\n/g, "<br>").replaceAll(VEHICLE_GRID_TOKEN, renderVehicleGrid())}</p>`)
+    .split(VEHICLE_GRID_TOKEN)
+    .map((part, index, parts) => `${renderEscapedTextBlock(part)}${index < parts.length - 1 ? renderVehicleGrid() : ""}`)
     .join("");
 }
 
@@ -257,13 +265,13 @@ function previewTemplate(body = {}) {
       </td>
     </tr>
   ` : "";
-  const ctaHtml = values.cta_text ? `
+  const ctaHtml = values.cta_text && values.cta_url ? `
     <tr>
       <td style="padding:6px 28px 24px;background:#ffffff;">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0">
           <tr>
             <td bgcolor="${values.brand_colour}" style="border-radius:6px;">
-              <a href="${escapeHtml(values.cta_url || "https://www.vanfinancecompany.co.uk")}" style="display:inline-block;padding:12px 18px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#ffffff;text-decoration:none;font-weight:bold;">${escapeHtml(ctaText)}</a>
+              <a href="${escapeHtml(values.cta_url)}" style="display:inline-block;padding:12px 18px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#ffffff;text-decoration:none;font-weight:bold;">${escapeHtml(ctaText)}</a>
             </td>
           </tr>
         </table>
