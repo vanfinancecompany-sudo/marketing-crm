@@ -59,13 +59,19 @@
       <a class="is-active" href="/suppression-centre/">Suppression Centre</a>
     </aside>
     <main>
-      <div id="locked" class="locked panel">
+      <div id="checking" class="locked panel hidden">
+        <div class="eyebrow">Marketing Safety</div>
+        <h2>Suppression Centre</h2>
+        <p>Checking protected access...</p>
+      </div>
+
+      <div id="locked" class="locked panel hidden">
         <div class="eyebrow">Marketing Safety</div>
         <h2>Suppression Centre Locked</h2>
         <p>Enter the same access key used for the Customer Database and Marketing Centre.</p>
         <form id="unlockForm" class="field-grid" style="margin-top:16px">
           <label class="field"><span class="field__label">Access Key</span><input id="accessKey" class="field__input" type="password" autocomplete="off" /></label>
-          <div class="card-actions" style="align-self:end"><button class="button button--primary" type="submit">Unlock Suppression Centre</button></div>
+          <div class="card-actions" style="align-self:end"><button id="unlockButton" class="button button--primary" type="submit">Unlock Suppression Centre</button></div>
         </form>
         <div id="accessMessage" class="notice notice--error hidden" style="margin-top:12px"></div>
       </div>
@@ -112,6 +118,7 @@
     const STORAGE_KEY = "marketingCustomerDatabaseApiKey";
     const API_HEADER = "x-marketing-customer-database-key";
     const API_ROUTE = "/api/marketing-suppressions";
+    const ACCESS_ROUTE = "/api/marketing-campaigns";
     const TYPES = {
       email_unsubscribed: "Email Unsubscribed",
       email_bounced: "Email Bounced",
@@ -121,23 +128,61 @@
       global_do_not_contact: "Global Do Not Contact",
     };
     let selectedContact = null;
+    let accessStatus = "locked";
 
-    function getKey() { try { return localStorage.getItem(STORAGE_KEY) || ""; } catch { return ""; } }
-    function saveKey(value) { try { localStorage.setItem(STORAGE_KEY, value); sessionStorage.removeItem(STORAGE_KEY); return true; } catch { return false; } }
-    function clearKey() { try { localStorage.removeItem(STORAGE_KEY); sessionStorage.removeItem(STORAGE_KEY); } catch {} }
+    function getStorage(name) { try { return window[name] || null; } catch { return null; } }
+    function getKey() {
+      const local = getStorage("localStorage");
+      const session = getStorage("sessionStorage");
+      try { return local?.getItem(STORAGE_KEY) || session?.getItem(STORAGE_KEY) || ""; } catch { return ""; }
+    }
+    function saveKey(value) {
+      const local = getStorage("localStorage");
+      const session = getStorage("sessionStorage");
+      const safeValue = String(value || "").trim();
+      if (!safeValue || !local) return false;
+      try {
+        session?.removeItem(STORAGE_KEY);
+        local.setItem(STORAGE_KEY, safeValue);
+        return local.getItem(STORAGE_KEY) === safeValue;
+      } catch { return false; }
+    }
+    function clearKey() {
+      const local = getStorage("localStorage");
+      const session = getStorage("sessionStorage");
+      try { local?.removeItem(STORAGE_KEY); session?.removeItem(STORAGE_KEY); } catch {}
+    }
     function formatNumber(value) { return Number(value || 0).toLocaleString("en-GB"); }
     function formatDate(value) { if (!value) return "-"; const date = new Date(value); return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString("en-GB", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" }); }
     function escapeHtml(value) { return String(value || "").replace(/[&<>"']/g, (char) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[char])); }
-    function showLocked(message = "") { document.getElementById("locked").classList.remove("hidden"); document.getElementById("app").classList.add("hidden"); const node = document.getElementById("accessMessage"); node.textContent = message; node.classList.toggle("hidden", !message); }
-    function showApp() { document.getElementById("locked").classList.add("hidden"); document.getElementById("app").classList.remove("hidden"); }
+    function setAccessStatus(status, message = "") {
+      accessStatus = status;
+      document.getElementById("checking").classList.toggle("hidden", status !== "checking");
+      document.getElementById("locked").classList.toggle("hidden", status !== "locked");
+      document.getElementById("app").classList.toggle("hidden", status !== "unlocked");
+      const node = document.getElementById("accessMessage");
+      node.textContent = message;
+      node.classList.toggle("hidden", !message);
+    }
+    function lock(message = "") { clearKey(); selectedContact = null; setAccessStatus("locked", message); }
+    function buildHeaders(key = getKey()) { return { "Content-Type": "application/json", ...(key ? { [API_HEADER]: key } : {}) }; }
+
+    async function parseJsonResponse(response, fallbackMessage) {
+      const result = await response.json().catch(() => ({}));
+      if (response.status === 401) { lock("Your saved access has expired or is no longer valid. Please unlock again."); throw new Error("Access key not recognised."); }
+      if (!response.ok || result.ok === false) throw new Error(result.message || fallbackMessage || "Suppression Centre request failed.");
+      return result;
+    }
+
+    async function validateAccessKey(key = getKey()) {
+      const response = await fetch(ACCESS_ROUTE, { method: "POST", headers: buildHeaders(key), body: JSON.stringify({ action: "validateAccess" }) });
+      return parseJsonResponse(response, "Could not validate Suppression Centre access.");
+    }
 
     async function request(action, payload = {}) {
-      const key = getKey();
-      const response = await fetch(API_ROUTE, { method: "POST", headers: { "Content-Type": "application/json", ...(key ? { [API_HEADER]: key } : {}) }, body: JSON.stringify({ action, ...payload }) });
-      const result = await response.json().catch(() => ({}));
-      if (response.status === 401) { clearKey(); showLocked("Access key not recognised."); throw new Error("Access key not recognised."); }
-      if (!response.ok || result.ok === false) throw new Error(result.message || "Suppression Centre request failed.");
-      return result;
+      if (accessStatus !== "unlocked") throw new Error("Unlock Suppression Centre before loading protected data.");
+      const response = await fetch(API_ROUTE, { method: "POST", headers: buildHeaders(), body: JSON.stringify({ action, ...payload }) });
+      return parseJsonResponse(response, "Suppression Centre request failed.");
     }
 
     function renderOverview(data) {
@@ -208,21 +253,39 @@
     document.getElementById("unlockForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       const key = document.getElementById("accessKey").value.trim();
-      if (!key) return showLocked("Enter the Marketing access key.");
-      if (!saveKey(key)) return showLocked("Could not save the API key in this browser.");
-      try { await request("validateAccess"); showApp(); await loadOverview(); }
-      catch { clearKey(); }
+      if (!key) { setAccessStatus("locked", "Enter the Marketing access key."); return; }
+      const button = document.getElementById("unlockButton");
+      button.disabled = true;
+      setAccessStatus("checking");
+      try {
+        await validateAccessKey(key);
+        if (!saveKey(key)) { setAccessStatus("locked", "Could not save the API key in this browser."); return; }
+        document.getElementById("accessKey").value = "";
+        setAccessStatus("unlocked");
+        await loadOverview();
+      } catch (error) {
+        clearKey();
+        setAccessStatus("locked", error.message === "Access key not recognised." ? "Access key not recognised." : error.message || "Could not validate Suppression Centre access.");
+      } finally {
+        button.disabled = false;
+      }
     });
-    document.getElementById("lock").addEventListener("click", () => { clearKey(); showLocked(); });
+    document.getElementById("lock").addEventListener("click", () => { lock(); });
     document.getElementById("refresh").addEventListener("click", loadOverview);
     document.getElementById("searchButton").addEventListener("click", runSearch);
     document.getElementById("search").addEventListener("keydown", (event) => { if (event.key === "Enter") runSearch(); });
 
     (async function boot() {
-      if (!getKey()) return showLocked();
-      showApp();
-      try { await request("validateAccess"); await loadOverview(); }
-      catch { clearKey(); }
+      if (!getKey()) { setAccessStatus("locked"); return; }
+      setAccessStatus("checking");
+      try {
+        await validateAccessKey();
+        setAccessStatus("unlocked");
+        await loadOverview();
+      } catch (error) {
+        clearKey();
+        setAccessStatus("locked", error.message === "Access key not recognised." ? "Your saved access has expired or is no longer valid. Please unlock again." : error.message || "Could not validate Suppression Centre access.");
+      }
     }());
   </script>
 </body>
