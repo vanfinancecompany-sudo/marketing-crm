@@ -5,13 +5,14 @@ const TEMPLATE_COLUMNS = "id,name,description,category,default_subject,preview_t
 const CATEGORIES = new Set(["new_stock", "finance_offer", "rent2buy", "weekend_offer", "re_engagement", "custom"]);
 const STATUSES = new Set(["draft", "active", "archived"]);
 const EDITABLE_STATUSES = new Set(["draft", "active"]);
+const VEHICLE_GRID_TOKEN = "%%MARKETING_TRUSTED_VEHICLE_GRID_TOKEN%%";
 
 const SAMPLE_DATA = {
   campaign_name: "July New Stock",
   first_name: "Alex",
   company: "Van Finance Company",
   vehicle_count: "3",
-  vehicle_grid: "",
+  vehicle_grid: "[Vehicle grid preview]",
 };
 
 const SAMPLE_VEHICLES = [
@@ -66,6 +67,18 @@ function cleanColour(value) {
   return /^#[0-9a-fA-F]{6}$/.test(colour) ? colour : "#2563eb";
 }
 
+function cleanHttpsUrl(value, label) {
+  const text = cleanText(value, 1000);
+  if (!text) return "";
+  try {
+    const parsed = new URL(text);
+    if (parsed.protocol !== "https:") throw new Error("Invalid protocol.");
+    return parsed.toString();
+  } catch {
+    throw new Error(`${label} must be a valid absolute HTTPS URL.`);
+  }
+}
+
 function normalizeCategory(value) {
   const category = cleanText(value || "custom", 40);
   if (!CATEGORIES.has(category)) throw new Error("Unsupported template category.");
@@ -90,12 +103,12 @@ function normalizeValues(values = {}) {
     category: normalizeCategory(values.category),
     default_subject: cleanText(values.default_subject, 300),
     preview_text: cleanText(values.preview_text, 300),
-    header_logo: cleanText(values.header_logo, 1000),
+    header_logo: cleanHttpsUrl(values.header_logo, "Header logo"),
     hero_heading: cleanText(values.hero_heading, 300),
     intro_text: cleanText(values.intro_text, 2000),
     main_body: cleanText(values.main_body, 12000),
     cta_text: cleanText(values.cta_text, 120),
-    cta_url: cleanText(values.cta_url, 1000),
+    cta_url: cleanHttpsUrl(values.cta_url, "CTA URL"),
     footer: cleanText(values.footer, 2000),
     brand_colour: cleanColour(values.brand_colour),
     status: normalizeStatus(values.status),
@@ -191,25 +204,112 @@ function escapeHtml(value) {
   return String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 }
 
-function renderVehicleGrid() {
-  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:18px 0;">${SAMPLE_VEHICLES.map((vehicle) => `<div style="border:1px solid #dbe2ea;border-radius:10px;padding:12px;background:#f8fafc;"><strong>${escapeHtml(vehicle.name)}</strong><br><span>${escapeHtml(vehicle.mileage)}</span><br><strong>£${escapeHtml(vehicle.price)}</strong></div>`).join("")}</div>`;
+function replaceTextPlaceholders(value) {
+  return String(value || "").replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (match, key) => SAMPLE_DATA[key] ?? match);
 }
 
-function replacePlaceholders(value, html = false) {
-  const replacements = { ...SAMPLE_DATA, vehicle_grid: html ? renderVehicleGrid() : "[Vehicle grid preview]" };
-  return String(value || "").replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (match, key) => replacements[key] ?? match);
+function renderVehicleGrid() {
+  const rows = SAMPLE_VEHICLES.map((vehicle) => `
+    <tr>
+      <td style="padding:12px;border:1px solid #dbe2ea;background:#f8fafc;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td style="font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#0f172a;font-weight:bold;">${escapeHtml(vehicle.name)}</td>
+          </tr>
+          <tr>
+            <td style="font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#64748b;padding-top:4px;">${escapeHtml(vehicle.mileage)}</td>
+          </tr>
+          <tr>
+            <td style="font-family:Arial,sans-serif;font-size:16px;line-height:22px;color:#0f172a;font-weight:bold;padding-top:6px;">£${escapeHtml(vehicle.price)}</td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  `).join("");
+
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;border-spacing:0 10px;margin:18px 0;">
+      ${rows}
+    </table>
+  `;
 }
 
 function textToHtml(value) {
-  const rendered = replacePlaceholders(value, true);
-  return rendered.split(/\n{2,}/).map((part) => `<p>${part.includes("<div") ? part : escapeHtml(part).replace(/\n/g, "<br>")}</p>`).join("");
+  const withVehicleToken = String(value || "").replace(/{{\s*vehicle_grid\s*}}/g, VEHICLE_GRID_TOKEN);
+  const withTextPlaceholders = replaceTextPlaceholders(withVehicleToken);
+  return escapeHtml(withTextPlaceholders)
+    .replace(/\r\n/g, "\n")
+    .split(/\n{2,}/)
+    .map((part) => `<p style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:15px;line-height:23px;color:#1f2937;">${part.replace(/\n/g, "<br>").replaceAll(VEHICLE_GRID_TOKEN, renderVehicleGrid())}</p>`)
+    .join("");
 }
 
 function previewTemplate(body = {}) {
   const values = normalizeValues(templateInput(body));
-  const subject = replacePlaceholders(values.default_subject);
-  const html = `<!doctype html><html><body style="margin:0;background:#f3f6fb;font-family:Arial,sans-serif;color:#0f172a;"><div style="max-width:680px;margin:0 auto;background:#fff;">${values.header_logo ? `<div style="padding:20px;text-align:center;"><img src="${escapeHtml(values.header_logo)}" alt="" style="max-width:180px;max-height:80px;"></div>` : ""}<div style="background:${values.brand_colour};color:#fff;padding:28px;"><h1 style="margin:0;font-size:30px;">${escapeHtml(replacePlaceholders(values.hero_heading || values.name))}</h1></div><div style="padding:28px;"><p style="color:#64748b;margin-top:0;">${escapeHtml(replacePlaceholders(values.preview_text))}</p>${textToHtml(values.intro_text)}${textToHtml(values.main_body)}${values.cta_text ? `<p style="margin:28px 0;"><a href="${escapeHtml(values.cta_url || "#")}" style="display:inline-block;background:${values.brand_colour};color:#fff;text-decoration:none;border-radius:8px;padding:12px 18px;font-weight:700;">${escapeHtml(replacePlaceholders(values.cta_text))}</a></p>` : ""}${textToHtml(values.footer)}</div></div></body></html>`;
-  return { preview: { subject, preview_text: replacePlaceholders(values.preview_text), html } };
+  const subject = replaceTextPlaceholders(values.default_subject);
+  const previewText = replaceTextPlaceholders(values.preview_text);
+  const heroHeading = replaceTextPlaceholders(values.hero_heading || values.name);
+  const ctaText = replaceTextPlaceholders(values.cta_text);
+  const logoHtml = values.header_logo ? `
+    <tr>
+      <td align="center" style="padding:20px 24px;background:#ffffff;">
+        <img src="${escapeHtml(values.header_logo)}" alt="" width="180" style="display:block;max-width:180px;width:100%;height:auto;border:0;outline:none;text-decoration:none;">
+      </td>
+    </tr>
+  ` : "";
+  const ctaHtml = values.cta_text ? `
+    <tr>
+      <td style="padding:6px 28px 24px;background:#ffffff;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td bgcolor="${values.brand_colour}" style="border-radius:6px;">
+              <a href="${escapeHtml(values.cta_url || "https://www.vanfinancecompany.co.uk")}" style="display:inline-block;padding:12px 18px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#ffffff;text-decoration:none;font-weight:bold;">${escapeHtml(ctaText)}</a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  ` : "";
+
+  const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${escapeHtml(subject)}</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f3f6fb;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f3f6fb" style="width:100%;background:#f3f6fb;border-collapse:collapse;">
+      <tr>
+        <td align="center" style="padding:24px 12px;">
+          <table role="presentation" width="660" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:660px;background:#ffffff;border-collapse:collapse;">
+            ${logoHtml}
+            <tr>
+              <td bgcolor="${values.brand_colour}" style="padding:28px;background:${values.brand_colour};">
+                <h1 style="margin:0;font-family:Arial,sans-serif;font-size:30px;line-height:36px;color:#ffffff;font-weight:bold;">${escapeHtml(heroHeading)}</h1>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px 28px 4px;background:#ffffff;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#64748b;">${escapeHtml(previewText)}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 28px 4px;background:#ffffff;">${textToHtml(values.intro_text)}</td>
+            </tr>
+            <tr>
+              <td style="padding:0 28px 4px;background:#ffffff;">${textToHtml(values.main_body)}</td>
+            </tr>
+            ${ctaHtml}
+            <tr>
+              <td style="padding:4px 28px 28px;background:#ffffff;">${textToHtml(values.footer)}</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+
+  return { preview: { subject, preview_text: previewText, html } };
 }
 
 export default async function handler(request, response) {
