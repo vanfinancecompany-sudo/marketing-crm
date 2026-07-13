@@ -52,6 +52,7 @@ create table if not exists public.marketing_email_send_recipients (
       'complained',
       'unsubscribed',
       'failed',
+      'submission_unknown',
       'skipped_suppressed',
       'skipped_duplicate'
     )),
@@ -109,7 +110,7 @@ create unique index if not exists marketing_email_send_recipients_one_production
   on public.marketing_email_send_recipients (campaign_id, customer_id)
   where send_type = 'production'
     and customer_id is not null
-    and status in ('pending', 'accepted', 'sent', 'delivered', 'opened', 'clicked');
+    and status in ('pending', 'accepted', 'sent', 'delivered', 'opened', 'clicked', 'submission_unknown');
 
 alter table public.marketing_email_sends enable row level security;
 alter table public.marketing_email_send_recipients enable row level security;
