@@ -11,10 +11,19 @@ import {
 } from "../lib/marketingCampaignTemplateRenderer.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
+const TEMPLATE_CAMPAIGN_SOURCE = "template_campaign_foundation";
 const CAMPAIGN_COLUMNS = "id,name,description,channel,objective,status,tags,metadata,created_by,created_at,updated_at,archived_at,campaign_type,template_id,template_name,template_snapshot,subject_line,preview_text,audience_snapshot";
 const TEMPLATE_COLUMNS = "id,name,description,category,default_subject,preview_text,header_logo,hero_heading,intro_text,main_body,cta_text,cta_url,footer,brand_colour,company_name,secondary_colour,social_links,master_layout,content_blocks,status,created_by,created_at,updated_at,archived_at";
 const CAMPAIGN_TYPES = new Set(["new_stock", "finance_offer", "rent2buy", "newsletter", "custom"]);
 const STATUSES = new Set(["draft", "ready", "archived"]);
+
+class CampaignNotFoundError extends Error {
+  constructor() {
+    super("Template campaign was not found.");
+    this.name = "CampaignNotFoundError";
+    this.statusCode = 404;
+  }
+}
 
 function json(response, status, payload) { response.status(status).json(payload); }
 
@@ -67,6 +76,13 @@ function normalizeEditableStatus(value) {
 
 function campaignValues(body = {}) { return body.values || body.campaign || {}; }
 
+function ownedTemplateCampaignQuery(supabase) {
+  return supabase
+    .from("marketing_campaigns")
+    .select(CAMPAIGN_COLUMNS)
+    .eq("metadata->>source", TEMPLATE_CAMPAIGN_SOURCE);
+}
+
 function normalizeCampaign(row = {}) {
   const snapshot = normalizeTemplateSnapshot(row.template_snapshot || {});
   return {
@@ -75,7 +91,7 @@ function normalizeCampaign(row = {}) {
     description: row.description || "",
     channel: row.channel || "email",
     objective: row.objective || "custom",
-    campaign_type: row.campaign_type || row.objective || "custom",
+    campaign_type: row.campaign_type || "custom",
     status: row.status || "draft",
     template_id: row.template_id || "",
     template_name: row.template_name || "",
@@ -110,13 +126,12 @@ function campaignSummary(campaign) {
   };
 }
 
-async function loadCampaign(supabase, id) {
+async function loadOwnedTemplateCampaign(supabase, id) {
   if (!id) throw new CampaignValidationError("Campaign ID is required.");
-  const { data } = assertSupabase(
-    await supabase.from("marketing_campaigns").select(CAMPAIGN_COLUMNS).eq("id", id).single(),
-    "Could not load campaign."
-  );
-  return normalizeCampaign(data);
+  const result = await ownedTemplateCampaignQuery(supabase).eq("id", id).maybeSingle();
+  assertSupabase(result, "Could not load template campaign.");
+  if (!result.data) throw new CampaignNotFoundError();
+  return normalizeCampaign(result.data);
 }
 
 async function loadTemplate(supabase, id) {
@@ -131,16 +146,16 @@ async function loadTemplate(supabase, id) {
 }
 
 async function listCampaigns(supabase, body = {}) {
-  let query = supabase.from("marketing_campaigns").select(CAMPAIGN_COLUMNS).order("updated_at", { ascending: false });
+  let query = ownedTemplateCampaignQuery(supabase).order("updated_at", { ascending: false });
   if (!body.includeArchived) query = query.neq("status", "archived");
   if (body.campaign_type && body.campaign_type !== "all") query = query.eq("campaign_type", normalizeCampaignType(body.campaign_type));
   if (body.status && body.status !== "all") query = query.eq("status", normalizeStatus(body.status));
-  const { data } = assertSupabase(await query, "Could not load campaigns.");
+  const { data } = assertSupabase(await query, "Could not load template campaigns.");
   const campaigns = (data || []).map(normalizeCampaign);
   return { campaigns: campaigns.map(campaignSummary) };
 }
 
-async function getCampaign(supabase, body = {}) { return { campaign: await loadCampaign(supabase, body.id || body.campaign?.id) }; }
+async function getCampaign(supabase, body = {}) { return { campaign: await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id) }; }
 
 async function templateOptions(supabase) {
   const { data } = assertSupabase(
@@ -173,7 +188,7 @@ async function createCampaign(supabase, body = {}) {
       campaign_type: campaignType,
       status: "draft",
       tags: [],
-      metadata: { source: "template_campaign_foundation" },
+      metadata: { source: TEMPLATE_CAMPAIGN_SOURCE },
       template_id: template.id,
       template_name: template.name || "",
       template_snapshot: snapshot,
@@ -182,13 +197,13 @@ async function createCampaign(supabase, body = {}) {
       audience_snapshot: null,
       created_by: cleanText(body.createdBy || "Marketing CRM", 200),
     }).select(CAMPAIGN_COLUMNS).single(),
-    "Could not create campaign."
+    "Could not create template campaign."
   );
   return { campaign: normalizeCampaign(data) };
 }
 
 async function updateCampaign(supabase, body = {}) {
-  const existing = await loadCampaign(supabase, body.id || body.campaign?.id);
+  const existing = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
   if (existing.status === "archived") throw new CampaignValidationError("Archived campaigns are read only.");
   const values = campaignValues(body);
   const next = {
@@ -203,14 +218,20 @@ async function updateCampaign(supabase, body = {}) {
   if (!next.name) throw new CampaignValidationError("Campaign name is required.");
   if (!next.subject_line) throw new CampaignValidationError("Subject line is required.");
   const { data } = assertSupabase(
-    await supabase.from("marketing_campaigns").update(next).eq("id", existing.id).select(CAMPAIGN_COLUMNS).single(),
-    "Could not update campaign."
+    await supabase
+      .from("marketing_campaigns")
+      .update(next)
+      .eq("id", existing.id)
+      .eq("metadata->>source", TEMPLATE_CAMPAIGN_SOURCE)
+      .select(CAMPAIGN_COLUMNS)
+      .single(),
+    "Could not update template campaign."
   );
   return { campaign: normalizeCampaign(data) };
 }
 
 async function duplicateCampaign(supabase, body = {}) {
-  const existing = await loadCampaign(supabase, body.id || body.campaign?.id);
+  const existing = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
   const { data } = assertSupabase(
     await supabase.from("marketing_campaigns").insert({
       name: `${existing.name} - Copy`,
@@ -220,7 +241,7 @@ async function duplicateCampaign(supabase, body = {}) {
       campaign_type: existing.campaign_type,
       status: "draft",
       tags: [],
-      metadata: { duplicated_from: existing.id },
+      metadata: { source: TEMPLATE_CAMPAIGN_SOURCE, duplicated_from: existing.id },
       template_id: existing.template_id || null,
       template_name: existing.template_name || "",
       template_snapshot: cloneSnapshot(existing.template_snapshot),
@@ -229,23 +250,29 @@ async function duplicateCampaign(supabase, body = {}) {
       audience_snapshot: existing.audience_snapshot,
       created_by: cleanText(body.createdBy || "Marketing CRM", 200),
     }).select(CAMPAIGN_COLUMNS).single(),
-    "Could not duplicate campaign."
+    "Could not duplicate template campaign."
   );
   return { campaign: normalizeCampaign(data) };
 }
 
 async function archiveCampaign(supabase, body = {}) {
-  const existing = await loadCampaign(supabase, body.id || body.campaign?.id);
+  const existing = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
   if (existing.status === "archived") return { campaign: existing };
   const { data } = assertSupabase(
-    await supabase.from("marketing_campaigns").update({ status: "archived", archived_at: new Date().toISOString() }).eq("id", existing.id).select(CAMPAIGN_COLUMNS).single(),
-    "Could not archive campaign."
+    await supabase
+      .from("marketing_campaigns")
+      .update({ status: "archived", archived_at: new Date().toISOString() })
+      .eq("id", existing.id)
+      .eq("metadata->>source", TEMPLATE_CAMPAIGN_SOURCE)
+      .select(CAMPAIGN_COLUMNS)
+      .single(),
+    "Could not archive template campaign."
   );
   return { campaign: normalizeCampaign(data) };
 }
 
 async function previewCampaign(supabase, body = {}) {
-  const campaign = await loadCampaign(supabase, body.id || body.campaign?.id);
+  const campaign = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
   return { preview: renderCampaignPreview(campaign) };
 }
 
@@ -276,7 +303,7 @@ export default async function handler(request, response) {
     else throw new CampaignValidationError("Unknown Marketing Campaigns API action.");
     json(response, 200, { ok: true, ...result });
   } catch (error) {
-    const status = error instanceof CampaignValidationError || error?.statusCode === 400 ? 400 : 500;
+    const status = error?.statusCode || (error instanceof CampaignValidationError ? 400 : 500);
     json(response, status, { ok: false, message: error?.message || "Marketing Campaigns API error." });
   }
 }
