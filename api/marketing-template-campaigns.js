@@ -79,6 +79,10 @@ function normalizeEditableStatus(value) {
   return status;
 }
 
+function normalizeCustomerId(value) {
+  return cleanText(value, 80).toUpperCase();
+}
+
 function ownedTemplateCampaignQuery(supabase) {
   return supabase
     .from("marketing_campaigns")
@@ -92,8 +96,8 @@ function normalizeAudienceRules(values = {}) {
   const mode = cleanText(values.mode || "standard", 60).toLowerCase();
   const search = cleanText(values.search || "", 120);
   const manualCustomerIds = Array.isArray(values.manual_customer_ids)
-    ? values.manual_customer_ids.map((id) => cleanText(id, 40).toUpperCase()).filter(Boolean)
-    : String(values.manual_customer_ids || "").split(/[\s,;]+/).map((id) => cleanText(id, 40).toUpperCase()).filter(Boolean);
+    ? values.manual_customer_ids.map(normalizeCustomerId).filter(Boolean)
+    : String(values.manual_customer_ids || "").split(/[\s,;]+/).map(normalizeCustomerId).filter(Boolean);
 
   if (!PIPELINES.has(pipeline)) throw new CampaignValidationError("Unsupported audience pipeline.");
   if (!AUDIENCE_MODES.has(mode)) throw new CampaignValidationError("Unsupported audience option.");
@@ -101,7 +105,7 @@ function normalizeAudienceRules(values = {}) {
   if (manualCustomerIds.length > 500) throw new CampaignValidationError("Manual customer ID audiences can contain a maximum of 500 IDs.");
   if (new Set(manualCustomerIds).size !== manualCustomerIds.length) throw new CampaignValidationError("Manual customer IDs must be unique.");
   for (const id of manualCustomerIds) {
-    if (!/^[A-Z0-9_-]{3,40}$/.test(id)) throw new CampaignValidationError("Manual customer IDs contain an unsupported value.");
+    if (!/^[A-Z0-9_-]{3,80}$/.test(id)) throw new CampaignValidationError("Manual customer IDs contain an unsupported value.");
   }
   if (mode === "manual_customer_ids" && !manualCustomerIds.length) throw new CampaignValidationError("Enter at least one manual customer ID.");
   if (mode === "custom_search" && !search) throw new CampaignValidationError("Enter a custom search term.");
@@ -117,9 +121,13 @@ function normalizeAudienceSnapshot(value = null) {
   const totalMatching = Number(counts.total_matching_customers ?? counts.total_matching ?? 0);
   const suppressed = Number(counts.suppressed_customers ?? counts.suppressed ?? 0);
   const deliverable = Number(counts.deliverable_customers ?? counts.final_send_count ?? counts.deliverable ?? 0);
+  const finalSendCount = Number(counts.final_send_count ?? deliverable);
   const calculatedAt = cleanText(value.calculated_at || "", 80);
-  if (![totalMatching, suppressed, deliverable].every((number) => Number.isInteger(number) && number >= 0)) {
+  if (![totalMatching, suppressed, deliverable, finalSendCount].every((number) => Number.isInteger(number) && number >= 0)) {
     throw new CampaignValidationError("Audience counts must be non-negative whole numbers.");
+  }
+  if (totalMatching < deliverable || suppressed !== totalMatching - deliverable || finalSendCount !== deliverable) {
+    throw new CampaignValidationError("Audience counts are inconsistent. Preview the audience again.");
   }
   if (!calculatedAt) throw new CampaignValidationError("Preview the audience before saving it.");
   return {
@@ -144,18 +152,20 @@ function readinessForCampaign(campaign = {}) {
   const audience = normalizeAudienceSnapshot(campaign.audience_snapshot || null);
   const selectedVehicleCount = Number(campaign.selected_vehicle_count ?? countSelectedVehicles(campaign.template_snapshot || {}));
   const requiresVehicle = campaignRequiresVehicle(campaign);
-  const checks = [
-    { id: "active_template", label: "Active template", passed: hasUsefulSnapshot(campaign.template_snapshot || {}) },
+  const substantiveChecks = [
+    { id: "active_template", label: "Valid frozen template snapshot", passed: hasUsefulSnapshot(campaign.template_snapshot || {}) },
     { id: "subject", label: "Subject entered", passed: Boolean(cleanText(campaign.subject_line, 300)) },
     { id: "preview_text", label: "Preview text entered", passed: Boolean(cleanText(campaign.preview_text, 300)) },
     { id: "vehicles", label: "Vehicle selection", passed: !requiresVehicle || selectedVehicleCount > 0, required: requiresVehicle },
     { id: "audience", label: "Audience selected", passed: Boolean(audience?.calculated_at) },
     { id: "deliverable", label: "Deliverable audience greater than zero", passed: Number(audience?.final_send_count || 0) > 0 },
-    { id: "draft", label: "Campaign still Draft", passed: campaign.status === "draft" },
   ];
+  const draftCheck = { id: "draft", label: "Campaign still Draft", passed: campaign.status === "draft" };
+  const transitionReady = substantiveChecks.every((check) => check.passed);
   return {
-    ready_to_send: checks.every((check) => check.passed),
-    checks,
+    ready_to_send: transitionReady,
+    transition_ready: transitionReady,
+    checks: [...substantiveChecks, draftCheck],
     requires_vehicle: requiresVehicle,
     selected_vehicle_count: selectedVehicleCount,
     estimated_recipients: Number(audience?.final_send_count || 0),
@@ -225,7 +235,7 @@ async function loadTemplate(supabase, id) {
     "Could not load reusable template."
   );
   if (!data) throw new CampaignValidationError("Reusable template was not found.");
-  if (data.status === "archived") throw new CampaignValidationError("Archived templates cannot be used to create campaigns.");
+  if (data.status !== "active") throw new CampaignValidationError("Only active templates can create campaigns.");
   return data;
 }
 
@@ -291,7 +301,10 @@ async function loadExportedEmailContactIds(supabase) {
         if (message.includes("marketing_campaign_batch_customers") || message.includes("does not exist")) return new Set();
         throw new Error(result.error.message || "Could not inspect exported email customers.");
       }
-      (result.data || []).forEach((row) => { if (row.customer_id) contactIds.add(row.customer_id); });
+      (result.data || []).forEach((row) => {
+        const customerId = normalizeCustomerId(row.customer_id);
+        if (customerId) contactIds.add(customerId);
+      });
       if (!result.data || result.data.length < PAGE_SIZE) break;
       from += PAGE_SIZE;
     }
@@ -305,13 +318,13 @@ async function countAudienceByScan(supabase, rules, exportedEmailIds = new Set()
   let deliverable = 0;
   while (true) {
     const result = await applyAudienceFilters(
-      supabase.from("marketing_contacts").select("id,marketing_status,suppression"),
+      supabase.from("marketing_contacts").select("customer_id,marketing_status,suppression"),
       rules
     ).range(from, from + PAGE_SIZE - 1);
     assertSupabase(result, "Could not count campaign audience.");
     const rows = result.data || [];
     rows.forEach((row) => {
-      if (rules.mode === "never_emailed" && exportedEmailIds.has(row.id)) return;
+      if (rules.mode === "never_emailed" && exportedEmailIds.has(normalizeCustomerId(row.customer_id))) return;
       totalMatching += 1;
       if (!emailSuppressed(row)) deliverable += 1;
     });
@@ -320,7 +333,7 @@ async function countAudienceByScan(supabase, rules, exportedEmailIds = new Set()
   }
   return {
     total_matching_customers: totalMatching,
-    suppressed_customers: Math.max(0, totalMatching - deliverable),
+    suppressed_customers: totalMatching - deliverable,
     deliverable_customers: deliverable,
     final_send_count: deliverable,
   };
@@ -330,7 +343,19 @@ async function buildAudienceSnapshot(supabase, rulesInput = {}) {
   const rules = normalizeAudienceRules(rulesInput);
   const exportedEmailIds = rules.mode === "never_emailed" ? await loadExportedEmailContactIds(supabase) : new Set();
   const counts = await countAudienceByScan(supabase, rules, exportedEmailIds);
-  return { rules, ...counts, calculated_at: new Date().toISOString() };
+  return normalizeAudienceSnapshot({ rules, ...counts, calculated_at: new Date().toISOString() });
+}
+
+function getAudienceRulesForReady(values, existing) {
+  if (values.audience_snapshot?.rules) return values.audience_snapshot.rules;
+  if (existing.audience_snapshot?.rules) return existing.audience_snapshot.rules;
+  throw new CampaignValidationError("Preview and save an audience before marking the campaign Ready.");
+}
+
+async function resolveAudienceForUpdate(supabase, values, existing, nextStatus) {
+  if (nextStatus === "ready") return buildAudienceSnapshot(supabase, getAudienceRulesForReady(values, existing));
+  if (values.audience_snapshot === undefined) return existing.audience_snapshot;
+  return buildAudienceSnapshot(supabase, values.audience_snapshot?.rules || values.audience_snapshot || {});
 }
 
 async function listCampaigns(supabase, body = {}) {
@@ -350,7 +375,7 @@ async function templateOptions(supabase) {
     await supabase
       .from("marketing_email_templates")
       .select("id,name,category,default_subject,preview_text,status,updated_at")
-      .neq("status", "archived")
+      .eq("status", "active")
       .order("updated_at", { ascending: false }),
     "Could not load reusable templates."
   );
@@ -394,22 +419,23 @@ async function updateCampaign(supabase, body = {}) {
   const existing = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
   if (existing.status === "archived") throw new CampaignValidationError("Archived campaigns are read only.");
   const values = campaignValues(body);
-  const nextAudience = values.audience_snapshot === undefined ? existing.audience_snapshot : await buildAudienceSnapshot(supabase, values.audience_snapshot?.rules || values.audience_snapshot || {});
+  const nextStatus = normalizeEditableStatus(values.status ?? existing.status);
+  const nextAudience = await resolveAudienceForUpdate(supabase, values, existing, nextStatus);
   const next = {
     name: cleanText(values.name ?? existing.name, 200),
     campaign_type: normalizeCampaignType(values.campaign_type ?? existing.campaign_type),
     objective: normalizeCampaignType(values.campaign_type ?? existing.campaign_type),
     subject_line: cleanText(values.subject_line ?? existing.subject_line, 300),
     preview_text: cleanText(values.preview_text ?? existing.preview_text, 300),
-    status: normalizeEditableStatus(values.status ?? existing.status),
+    status: nextStatus,
     audience_snapshot: nextAudience,
   };
   if (!next.name) throw new CampaignValidationError("Campaign name is required.");
   if (!next.subject_line) throw new CampaignValidationError("Subject line is required.");
   const candidate = { ...existing, ...next, template_snapshot: existing.template_snapshot, selected_vehicle_count: existing.selected_vehicle_count };
   candidate.readiness = readinessForCampaign(candidate);
-  if (next.status === "ready" && !candidate.readiness.ready_to_send) {
-    throw new CampaignValidationError("Campaign cannot be marked Ready until every readiness check passes.");
+  if (next.status === "ready" && !candidate.readiness.transition_ready) {
+    throw new CampaignValidationError("Campaign cannot be marked Ready until every substantive readiness check passes.");
   }
   const { data } = assertSupabase(
     await supabase
@@ -441,7 +467,7 @@ async function duplicateCampaign(supabase, body = {}) {
       template_snapshot: cloneSnapshot(existing.template_snapshot),
       subject_line: existing.subject_line,
       preview_text: existing.preview_text,
-      audience_snapshot: existing.audience_snapshot,
+      audience_snapshot: null,
       created_by: cleanText(body.createdBy || "Marketing CRM", 200),
     }).select(CAMPAIGN_COLUMNS).single(),
     "Could not duplicate template campaign."
