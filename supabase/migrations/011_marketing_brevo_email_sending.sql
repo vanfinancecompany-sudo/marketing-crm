@@ -18,6 +18,7 @@ create table if not exists public.marketing_email_sends (
   skipped_duplicate_count integer not null default 0 check (skipped_duplicate_count >= 0),
   created_by text,
   created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
   started_at timestamptz,
   completed_at timestamptz,
   confirmation_token_hash text,
