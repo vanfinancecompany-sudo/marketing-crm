@@ -707,7 +707,7 @@ function renderSelectedVehicleCard(vehicle = {}, productMode = "finance") {
   const fallbackRegistration = !vehicle.title && vehicle.registration ? vehicle.registration : "";
   const isRent2Buy = productMode === "rent2buy";
   const headline = isRent2Buy ? profile.monthly : compactLine([profile.price, profile.vat, profile.monthly]);
-  const fixedLine = isRent2Buy ? "NO CREDIT CHECK" : "FROM ?99 DEPOSIT";
+  const fixedLine = isRent2Buy ? "NO CREDIT CHECK" : `FROM ${String.fromCharCode(163)}99 DEPOSIT`;
   const supporting = isRent2Buy ? compactLine([profile.initialRental, profile.term]) : "";
   const ctaText = isRent2Buy ? "View Rent2Buy van" : "View van";
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border:1px solid #dbe2ea;background:#ffffff;">
@@ -741,7 +741,7 @@ function renderPlaceholderVehicleGrid(settings = {}) {
         <tr><td align="center" bgcolor="#e2e8f0" style="padding:22px 12px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#475569;">Vehicle image placeholder</td></tr>
         <tr><td style="padding:13px 12px 4px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#0f172a;font-weight:bold;">${escapeHtml(vehicle.name)}</td></tr>
         <tr><td style="padding:0 12px;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#64748b;">${escapeHtml(vehicle.mileage)}</td></tr>
-        <tr><td style="padding:3px 12px 10px;font-family:Arial,sans-serif;font-size:16px;line-height:22px;color:#0f172a;font-weight:bold;">?${escapeHtml(vehicle.price)}</td></tr>
+        <tr><td style="padding:3px 12px 10px;font-family:Arial,sans-serif;font-size:16px;line-height:22px;color:#0f172a;font-weight:bold;">&#163;${escapeHtml(vehicle.price)}</td></tr>
         <tr><td style="padding:0 12px 14px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#2563eb" style="border-radius:7px;"><a href="https://www.vanfinancecompany.co.uk" style="display:inline-block;padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#ffffff;text-decoration:none;font-weight:bold;">View Van</a></td></tr></table></td></tr>
       </table>
     </td>
