@@ -144,7 +144,8 @@
   }
   function updateWorkflow() {
     const node = $("campaignWorkflowSteps");
-    if (!node || detailSection?.classList.contains("hidden")) return;
+    const detail = $("detailSection");
+    if (!node || !detail || detail.classList.contains("hidden")) return;
     const hasCampaign = Boolean($("detailTitle")?.textContent?.trim());
     const audienceText = $("audienceCounts")?.innerText || "";
     const hasAudience = /Final send count/i.test(audienceText);
