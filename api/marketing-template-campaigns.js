@@ -16,6 +16,10 @@ const CAMPAIGN_COLUMNS = "id,name,description,channel,objective,status,tags,meta
 const TEMPLATE_COLUMNS = "id,name,description,category,default_subject,preview_text,header_logo,hero_heading,intro_text,main_body,cta_text,cta_url,footer,brand_colour,company_name,secondary_colour,social_links,master_layout,content_blocks,status,created_by,created_at,updated_at,archived_at";
 const CAMPAIGN_TYPES = new Set(["new_stock", "finance_offer", "rent2buy", "newsletter", "custom"]);
 const STATUSES = new Set(["draft", "ready", "archived"]);
+const PIPELINES = new Set(["all", "finance", "rent2buy", "both"]);
+const AUDIENCE_MODES = new Set(["standard", "never_emailed", "recently_imported", "manual_customer_ids", "custom_search"]);
+const EMAIL_SUPPRESSION_TYPES = ["email_unsubscribed", "email_bounced", "manual_suppression", "global_do_not_contact"];
+const PAGE_SIZE = 1000;
 
 class CampaignNotFoundError extends Error {
   constructor() {
@@ -83,9 +87,87 @@ function ownedTemplateCampaignQuery(supabase) {
     .eq("metadata->>source", TEMPLATE_CAMPAIGN_SOURCE);
 }
 
+function hasUsefulSnapshot(snapshot = {}) {
+  return Boolean(snapshot && snapshot.name && snapshot.default_subject && Array.isArray(snapshot.content_blocks));
+}
+
+function campaignRequiresVehicle(campaign = {}) {
+  return ["new_stock", "finance_offer", "rent2buy"].includes(campaign.campaign_type || campaign.objective);
+}
+
+function normalizeAudienceRules(values = {}) {
+  if (!isPlainObject(values)) throw new CampaignValidationError("Audience rules must be an object.");
+  const pipeline = cleanText(values.pipeline || "all", 40).toLowerCase();
+  const mode = cleanText(values.mode || "standard", 60).toLowerCase();
+  const search = cleanText(values.search || "", 120);
+  const manualCustomerIds = Array.isArray(values.manual_customer_ids)
+    ? values.manual_customer_ids.map((id) => cleanText(id, 40).toUpperCase()).filter(Boolean)
+    : String(values.manual_customer_ids || "").split(/[\s,;]+/).map((id) => cleanText(id, 40).toUpperCase()).filter(Boolean);
+
+  if (!PIPELINES.has(pipeline)) throw new CampaignValidationError("Unsupported audience pipeline.");
+  if (!AUDIENCE_MODES.has(mode)) throw new CampaignValidationError("Unsupported audience option.");
+  if (search && /[%{}"\\]/.test(search)) throw new CampaignValidationError("Search contains unsupported characters.");
+  if (manualCustomerIds.length > 500) throw new CampaignValidationError("Manual customer ID audiences can contain a maximum of 500 IDs.");
+  if (new Set(manualCustomerIds).size !== manualCustomerIds.length) throw new CampaignValidationError("Manual customer IDs must be unique.");
+  for (const id of manualCustomerIds) {
+    if (!/^[A-Z0-9_-]{3,40}$/.test(id)) throw new CampaignValidationError("Manual customer IDs contain an unsupported value.");
+  }
+  if (mode === "manual_customer_ids" && !manualCustomerIds.length) throw new CampaignValidationError("Enter at least one manual customer ID.");
+  if (mode === "custom_search" && !search) throw new CampaignValidationError("Enter a custom search term.");
+
+  return { pipeline, mode, manual_customer_ids: manualCustomerIds, search };
+}
+
+function normalizeAudienceSnapshot(value = null) {
+  if (!value) return null;
+  if (!isPlainObject(value)) throw new CampaignValidationError("Audience snapshot must be an object.");
+  const rules = normalizeAudienceRules(value.rules || {});
+  const counts = value.counts || value;
+  const totalMatching = Number(counts.total_matching_customers ?? counts.total_matching ?? 0);
+  const suppressed = Number(counts.suppressed_customers ?? counts.suppressed ?? 0);
+  const deliverable = Number(counts.deliverable_customers ?? counts.final_send_count ?? counts.deliverable ?? 0);
+  const calculatedAt = cleanText(value.calculated_at || "", 80);
+  if (![totalMatching, suppressed, deliverable].every((number) => Number.isInteger(number) && number >= 0)) {
+    throw new CampaignValidationError("Audience counts must be non-negative whole numbers.");
+  }
+  if (!calculatedAt) throw new CampaignValidationError("Preview the audience before saving it.");
+  return {
+    rules,
+    total_matching_customers: totalMatching,
+    suppressed_customers: suppressed,
+    deliverable_customers: deliverable,
+    final_send_count: deliverable,
+    calculated_at: calculatedAt,
+  };
+}
+
+function readinessForCampaign(campaign = {}) {
+  const audience = normalizeAudienceSnapshot(campaign.audience_snapshot || null);
+  const selectedVehicleCount = Number(campaign.selected_vehicle_count ?? countSelectedVehicles(campaign.template_snapshot || {}));
+  const requiresVehicle = campaignRequiresVehicle(campaign);
+  const checks = [
+    { id: "active_template", label: "Active template", passed: hasUsefulSnapshot(campaign.template_snapshot || {}) },
+    { id: "subject", label: "Subject entered", passed: Boolean(cleanText(campaign.subject_line, 300)) },
+    { id: "preview_text", label: "Preview text entered", passed: Boolean(cleanText(campaign.preview_text, 300)) },
+    { id: "vehicles", label: "Vehicle selection", passed: !requiresVehicle || selectedVehicleCount > 0, required: requiresVehicle },
+    { id: "audience", label: "Audience selected", passed: Boolean(audience?.calculated_at) },
+    { id: "deliverable", label: "Deliverable audience greater than zero", passed: Number(audience?.final_send_count || 0) > 0 },
+    { id: "draft", label: "Campaign still Draft", passed: campaign.status === "draft" },
+  ];
+  const readyToSend = checks.every((check) => check.passed);
+  return {
+    ready_to_send: readyToSend,
+    checks,
+    requires_vehicle: requiresVehicle,
+    selected_vehicle_count: selectedVehicleCount,
+    estimated_recipients: Number(audience?.final_send_count || 0),
+    suppressed_recipients: Number(audience?.suppressed_customers || 0),
+  };
+}
+
 function normalizeCampaign(row = {}) {
   const snapshot = normalizeTemplateSnapshot(row.template_snapshot || {});
-  return {
+  const campaign = {
     id: row.id || "",
     name: row.name || "",
     description: row.description || "",
@@ -98,7 +180,7 @@ function normalizeCampaign(row = {}) {
     template_snapshot: snapshot,
     subject_line: row.subject_line || snapshot.default_subject || "",
     preview_text: row.preview_text || snapshot.preview_text || "",
-    audience_snapshot: isPlainObject(row.audience_snapshot) ? row.audience_snapshot : null,
+    audience_snapshot: normalizeAudienceSnapshot(row.audience_snapshot || null),
     created_by: row.created_by || "",
     created_at: row.created_at || "",
     updated_at: row.updated_at || "",
@@ -106,6 +188,8 @@ function normalizeCampaign(row = {}) {
     content_block_count: Array.isArray(snapshot.content_blocks) ? snapshot.content_blocks.length : 0,
     selected_vehicle_count: countSelectedVehicles(snapshot),
   };
+  campaign.readiness = readinessForCampaign(campaign);
+  return campaign;
 }
 
 function campaignSummary(campaign) {
@@ -118,6 +202,8 @@ function campaignSummary(campaign) {
     template_name: campaign.template_name,
     subject_line: campaign.subject_line,
     preview_text: campaign.preview_text,
+    audience_snapshot: campaign.audience_snapshot,
+    readiness: campaign.readiness,
     created_at: campaign.created_at,
     updated_at: campaign.updated_at,
     archived_at: campaign.archived_at,
@@ -143,6 +229,114 @@ async function loadTemplate(supabase, id) {
   if (!data) throw new CampaignValidationError("Reusable template was not found.");
   if (data.status === "archived") throw new CampaignValidationError("Archived templates cannot be used to create campaigns.");
   return data;
+}
+
+function recentlyImportedIso() {
+  return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function activeSuppressionEntry(value) {
+  return value && typeof value === "object" && value.active !== false;
+}
+
+function emailSuppressed(row = {}) {
+  if (String(row.marketing_status || "active") !== "active") return true;
+  const suppression = row.suppression && typeof row.suppression === "object" ? row.suppression : {};
+  return EMAIL_SUPPRESSION_TYPES.some((type) => activeSuppressionEntry(suppression[type]));
+}
+
+function applyAudienceFilters(query, rules) {
+  query = query.eq("email_ready", true);
+  if (rules.pipeline !== "all") query = query.eq("pipeline", rules.pipeline);
+  if (rules.mode === "recently_imported") query = query.gte("created_at", recentlyImportedIso());
+  if (rules.mode === "manual_customer_ids") query = query.in("customer_id", rules.manual_customer_ids);
+  if (rules.mode === "custom_search") {
+    const term = rules.search.replace(/[%,]/g, "");
+    query = query.or(`customer_id.ilike.%${term}%,first_name.ilike.%${term}%,last_name.ilike.%${term}%,company.ilike.%${term}%,email.ilike.%${term}%,phone.ilike.%${term}%,postcode.ilike.%${term}%`);
+  }
+  return query;
+}
+
+async function loadExportedEmailContactIds(supabase) {
+  const campaignResult = await supabase.from("marketing_campaigns").select("id").eq("channel", "email");
+  assertSupabase(campaignResult, "Could not inspect exported email campaigns.");
+  const campaignIds = (campaignResult.data || []).map((row) => row.id).filter(Boolean);
+  if (!campaignIds.length) return new Set();
+
+  const batchIds = [];
+  for (let index = 0; index < campaignIds.length; index += 100) {
+    const result = await supabase
+      .from("marketing_campaign_batches")
+      .select("id")
+      .in("campaign_id", campaignIds.slice(index, index + 100))
+      .eq("status", "exported");
+    if (result.error) {
+      const message = String(result.error.message || "").toLowerCase();
+      if (message.includes("marketing_campaign_batches") || message.includes("does not exist")) return new Set();
+      throw new Error(result.error.message || "Could not inspect exported email batches.");
+    }
+    batchIds.push(...(result.data || []).map((row) => row.id).filter(Boolean));
+  }
+  if (!batchIds.length) return new Set();
+
+  const contactIds = new Set();
+  for (let index = 0; index < batchIds.length; index += 100) {
+    let from = 0;
+    while (true) {
+      const result = await supabase
+        .from("marketing_campaign_batch_customers")
+        .select("customer_id")
+        .in("batch_id", batchIds.slice(index, index + 100))
+        .range(from, from + PAGE_SIZE - 1);
+      if (result.error) {
+        const message = String(result.error.message || "").toLowerCase();
+        if (message.includes("marketing_campaign_batch_customers") || message.includes("does not exist")) return new Set();
+        throw new Error(result.error.message || "Could not inspect exported email customers.");
+      }
+      (result.data || []).forEach((row) => { if (row.customer_id) contactIds.add(row.customer_id); });
+      if (!result.data || result.data.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+  }
+  return contactIds;
+}
+
+async function countAudienceByScan(supabase, rules, exportedEmailIds = new Set()) {
+  let from = 0;
+  let totalMatching = 0;
+  let deliverable = 0;
+  while (true) {
+    const result = await applyAudienceFilters(
+      supabase.from("marketing_contacts").select("id,marketing_status,suppression"),
+      rules
+    ).range(from, from + PAGE_SIZE - 1);
+    assertSupabase(result, "Could not count campaign audience.");
+    const rows = result.data || [];
+    rows.forEach((row) => {
+      if (rules.mode === "never_emailed" && exportedEmailIds.has(row.id)) return;
+      totalMatching += 1;
+      if (!emailSuppressed(row)) deliverable += 1;
+    });
+    if (rows.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return {
+    total_matching_customers: totalMatching,
+    suppressed_customers: Math.max(0, totalMatching - deliverable),
+    deliverable_customers: deliverable,
+    final_send_count: deliverable,
+  };
+}
+
+async function countAudience(supabase, rules) {
+  const exportedEmailIds = rules.mode === "never_emailed" ? await loadExportedEmailContactIds(supabase) : new Set();
+  return countAudienceByScan(supabase, rules, exportedEmailIds);
+}
+
+async function buildAudienceSnapshot(supabase, rulesInput = {}) {
+  const rules = normalizeAudienceRules(rulesInput);
+  const counts = await countAudience(supabase, rules);
+  return { rules, ...counts, calculated_at: new Date().toISOString() };
 }
 
 async function listCampaigns(supabase, body = {}) {
@@ -206,6 +400,7 @@ async function updateCampaign(supabase, body = {}) {
   const existing = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
   if (existing.status === "archived") throw new CampaignValidationError("Archived campaigns are read only.");
   const values = campaignValues(body);
+  const nextAudience = values.audience_snapshot === undefined ? existing.audience_snapshot : await buildAudienceSnapshot(supabase, values.audience_snapshot?.rules || values.audience_snapshot || {});
   const next = {
     name: cleanText(values.name ?? existing.name, 200),
     campaign_type: normalizeCampaignType(values.campaign_type ?? existing.campaign_type),
@@ -214,9 +409,15 @@ async function updateCampaign(supabase, body = {}) {
     preview_text: cleanText(values.preview_text ?? existing.preview_text, 300),
     status: normalizeEditableStatus(values.status ?? existing.status),
     template_snapshot: values.template_snapshot ? normalizeTemplateSnapshot(values.template_snapshot) : existing.template_snapshot,
+    audience_snapshot: nextAudience,
   };
   if (!next.name) throw new CampaignValidationError("Campaign name is required.");
   if (!next.subject_line) throw new CampaignValidationError("Subject line is required.");
+  const candidate = { ...existing, ...next, selected_vehicle_count: countSelectedVehicles(next.template_snapshot) };
+  candidate.readiness = readinessForCampaign(candidate);
+  if (next.status === "ready" && !candidate.readiness.ready_to_send) {
+    throw new CampaignValidationError("Campaign cannot be marked Ready until every readiness check passes.");
+  }
   const { data } = assertSupabase(
     await supabase
       .from("marketing_campaigns")
@@ -276,6 +477,12 @@ async function previewCampaign(supabase, body = {}) {
   return { preview: renderCampaignPreview(campaign) };
 }
 
+async function previewAudience(supabase, body = {}) {
+  await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
+  const audience = await buildAudienceSnapshot(supabase, body.rules || body.audience || {});
+  return { audience };
+}
+
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (request.method !== "POST") {
@@ -300,6 +507,7 @@ export default async function handler(request, response) {
     else if (action === "duplicate") result = await duplicateCampaign(supabase, body);
     else if (action === "archive") result = await archiveCampaign(supabase, body);
     else if (action === "preview") result = await previewCampaign(supabase, body);
+    else if (action === "audiencePreview") result = await previewAudience(supabase, body);
     else throw new CampaignValidationError("Unknown Marketing Campaigns API action.");
     json(response, 200, { ok: true, ...result });
   } catch (error) {
