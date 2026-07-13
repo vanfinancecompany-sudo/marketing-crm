@@ -307,7 +307,7 @@
         if (type === "button") return { text: "Learn more", url: "https://www.vanfinancecompany.co.uk", alignment: "left", primary_colour: "#2563eb", text_colour: "#ffffff", width: "auto", ...settings };
         if (type === "divider") return { colour: "#d9e2ef", thickness: 1, width_percentage: 100, spacing: 16, ...settings };
         if (type === "spacer") return { height: 24, ...settings };
-        return { heading: "Featured vans", intro_text: "Dummy vans are shown for preview only.", number_of_vehicles: 3, layout: "one_column", source_mode: "selected", product_mode: "finance", selected_vehicles: [], placeholder_note: "Selected vehicles render from saved snapshots.", ...settings };
+        return { heading: "Featured vans", intro_text: "", number_of_vehicles: 3, layout: "one_column", source_mode: "selected", product_mode: "finance", selected_vehicles: [], placeholder_note: "", ...settings };
       }
       function normalizeBlockPositions(blocks) { return (blocks || []).map((block, index) => ({ ...block, position: index + 1 })); }
       function cloneBlock(block) { return { ...JSON.parse(JSON.stringify(block)), id: blockId() }; }
