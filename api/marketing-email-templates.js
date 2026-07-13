@@ -1,11 +1,19 @@
 import { createClient } from "@supabase/supabase-js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
-const TEMPLATE_COLUMNS = "id,name,description,category,default_subject,preview_text,header_logo,hero_heading,intro_text,main_body,cta_text,cta_url,footer,brand_colour,company_name,secondary_colour,social_links,master_layout,status,created_by,created_at,updated_at,archived_at";
+const TEMPLATE_COLUMNS = "id,name,description,category,default_subject,preview_text,header_logo,hero_heading,intro_text,main_body,cta_text,cta_url,footer,brand_colour,company_name,secondary_colour,social_links,master_layout,content_blocks,status,created_by,created_at,updated_at,archived_at";
 const CATEGORIES = new Set(["new_stock", "finance_offer", "rent2buy", "weekend_offer", "re_engagement", "custom"]);
 const STATUSES = new Set(["draft", "active", "archived"]);
 const EDITABLE_STATUSES = new Set(["draft", "active"]);
 const MASTER_LAYOUTS = new Set(["new_stock", "finance_offer", "rent2buy", "weekend_offer", "re_engagement", "newsletter", "custom_blank"]);
+const BLOCK_TYPES = new Set(["text", "manual_image", "button", "divider", "spacer", "vehicle_grid"]);
+const ALIGNMENTS = new Set(["left", "centre", "right"]);
+const TEXT_ALIGNMENTS = new Set(["left", "centre"]);
+const PADDING_SIZES = new Set(["small", "medium", "large"]);
+const IMAGE_WIDTHS = new Set(["full", "contained", "half"]);
+const BUTTON_WIDTHS = new Set(["auto", "full"]);
+const VEHICLE_LAYOUTS = new Set(["one_column", "two_column"]);
+const VEHICLE_SOURCE_MODES = new Set(["selected", "newest", "manual"]);
 const VEHICLE_GRID_TOKEN = "%%MARKETING_TRUSTED_VEHICLE_GRID_TOKEN%%";
 
 const SAMPLE_VEHICLES = [
@@ -96,6 +104,112 @@ function normalizeMasterLayout(value) {
   return layout;
 }
 
+function normalizeChoice(value, allowed, fallback) {
+  const text = cleanText(value || fallback, 40);
+  return allowed.has(text) ? text : fallback;
+}
+
+function normalizeNumber(value, fallback, allowed = null, min = 0, max = 1000) {
+  const number = Number.parseInt(value, 10);
+  const safe = Number.isFinite(number) ? number : fallback;
+  if (allowed && allowed.includes(safe)) return safe;
+  return Math.min(max, Math.max(min, safe));
+}
+
+function generateBlockId() {
+  if (globalThis.crypto?.randomUUID) return `block_${globalThis.crypto.randomUUID()}`;
+  return `block_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function normalizeBlockSettings(type, settings = {}, enabled = true) {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) throw new Error("Block settings must be an object.");
+  if (type === "text") {
+    return {
+      heading: cleanText(settings.heading, 300),
+      body: cleanText(settings.body, 8000),
+      alignment: normalizeChoice(settings.alignment, TEXT_ALIGNMENTS, "left"),
+      background_colour: requireColour(settings.background_colour || "#ffffff", "Text block background colour"),
+      text_colour: requireColour(settings.text_colour || "#1f2937", "Text block text colour"),
+      padding_size: normalizeChoice(settings.padding_size, PADDING_SIZES, "medium"),
+    };
+  }
+  if (type === "manual_image") {
+    const imageUrl = cleanHttpsUrl(settings.image_url, "Image URL");
+    const altText = cleanText(settings.alt_text, 200);
+    if (enabled && !imageUrl) throw new Error("Image URL is required for enabled promotional image blocks.");
+    if (enabled && !altText) throw new Error("Alt text is required for enabled promotional image blocks.");
+    return {
+      image_url: imageUrl,
+      alt_text: altText,
+      link_url: cleanHttpsUrl(settings.link_url, "Image link URL"),
+      heading: cleanText(settings.heading, 300),
+      caption: cleanText(settings.caption, 500),
+      width: normalizeChoice(settings.width, IMAGE_WIDTHS, "full"),
+      alignment: normalizeChoice(settings.alignment, ALIGNMENTS, "centre"),
+      background_colour: requireColour(settings.background_colour || "#ffffff", "Image block background colour"),
+      padding_size: normalizeChoice(settings.padding_size, PADDING_SIZES, "medium"),
+    };
+  }
+  if (type === "button") {
+    const text = cleanText(settings.text, 120);
+    const url = cleanHttpsUrl(settings.url, "Button URL");
+    if (enabled && !text) throw new Error("Button text is required for enabled button blocks.");
+    if (enabled && !url) throw new Error("Button URL is required for enabled button blocks.");
+    return {
+      text,
+      url,
+      alignment: normalizeChoice(settings.alignment, ALIGNMENTS, "left"),
+      primary_colour: requireColour(settings.primary_colour || "#2563eb", "Button colour"),
+      text_colour: requireColour(settings.text_colour || "#ffffff", "Button text colour"),
+      width: normalizeChoice(settings.width, BUTTON_WIDTHS, "auto"),
+    };
+  }
+  if (type === "divider") {
+    return {
+      colour: requireColour(settings.colour || "#d9e2ef", "Divider colour"),
+      thickness: normalizeNumber(settings.thickness, 1, [1, 2, 3]),
+      width_percentage: normalizeNumber(settings.width_percentage, 100, null, 10, 100),
+      spacing: normalizeNumber(settings.spacing, 16, [8, 16, 24, 32]),
+    };
+  }
+  if (type === "spacer") {
+    return { height: normalizeNumber(settings.height, 24, [8, 16, 24, 32, 48]) };
+  }
+  if (type === "vehicle_grid") {
+    return {
+      heading: cleanText(settings.heading, 300),
+      intro_text: cleanText(settings.intro_text, 1000),
+      number_of_vehicles: normalizeNumber(settings.number_of_vehicles, 3, null, 1, 6),
+      layout: normalizeChoice(settings.layout, VEHICLE_LAYOUTS, "one_column"),
+      source_mode: normalizeChoice(settings.source_mode, VEHICLE_SOURCE_MODES, "newest"),
+      placeholder_note: cleanText(settings.placeholder_note || "Live stock connection will be added later.", 500),
+    };
+  }
+  throw new Error("Unsupported content block type.");
+}
+
+function normalizeContentBlocks(value = []) {
+  const blocks = Array.isArray(value) ? value : [];
+  if (blocks.length > 50) throw new Error("Email templates can contain a maximum of 50 content blocks.");
+  return blocks.map((block, index) => {
+    if (!block || typeof block !== "object" || Array.isArray(block)) throw new Error("Each content block must be an object.");
+    const type = cleanText(block.type, 40);
+    if (!BLOCK_TYPES.has(type)) throw new Error("Unsupported content block type.");
+    const enabled = block.enabled !== false;
+    return {
+      id: cleanText(block.id, 120) || generateBlockId(),
+      type,
+      position: Number.isFinite(Number(block.position)) ? Number(block.position) : index + 1,
+      enabled,
+      settings: normalizeBlockSettings(type, block.settings || {}, enabled),
+    };
+  }).sort((a, b) => a.position - b.position).map((block, index) => ({ ...block, position: index + 1 }));
+}
+
+function cloneContentBlocks(blocks = []) {
+  return normalizeContentBlocks(blocks).map((block, index) => ({ ...block, id: generateBlockId(), position: index + 1 }));
+}
+
 function validateTemplate(values) {
   if (!cleanText(values.name, 200)) throw new Error("Template name is required.");
   if (!cleanText(values.default_subject, 300)) throw new Error("Default subject is required.");
@@ -121,6 +235,7 @@ function normalizeValues(values = {}) {
     secondary_colour: requireColour(values.secondary_colour || "#eef2ff", "Secondary colour"),
     social_links: cleanText(values.social_links, 1000),
     master_layout: normalizeMasterLayout(values.master_layout),
+    content_blocks: normalizeContentBlocks(values.content_blocks || []),
     status: normalizeStatus(values.status),
   };
   validateTemplate(normalized);
@@ -148,6 +263,7 @@ function normalizeTemplate(row = {}) {
     secondary_colour: row.secondary_colour || "#eef2ff",
     social_links: row.social_links || "",
     master_layout: row.master_layout || "custom_blank",
+    content_blocks: normalizeContentBlocks(row.content_blocks || []),
     status: row.status || "draft",
     created_by: row.created_by || "",
     created_at: row.created_at || "",
@@ -206,7 +322,7 @@ async function archiveTemplate(supabase, body = {}) {
 async function duplicateTemplate(supabase, body = {}) {
   const existing = await loadTemplate(supabase, body.template?.id || body.id);
   const { id, created_at, updated_at, archived_at, created_by, ...copy } = existing;
-  const values = normalizeValues({ ...copy, name: `Copy of ${existing.name}`, status: "draft" });
+  const values = normalizeValues({ ...copy, name: `Copy of ${existing.name}`, status: "draft", content_blocks: cloneContentBlocks(existing.content_blocks) });
   const { data } = assertSupabase(
     await supabase.from("marketing_email_templates").insert({ ...values, created_by: cleanText(body.createdBy || "Marketing CRM", 200) }).select(TEMPLATE_COLUMNS).single(),
     "Could not duplicate email template."
@@ -233,29 +349,36 @@ function replaceTextPlaceholders(value, values = {}) {
   return String(value || "").replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (match, key) => replacements[key] ?? match);
 }
 
-function renderVehicleGrid() {
-  const rows = SAMPLE_VEHICLES.map((vehicle) => `
-    <tr>
-      <td style="padding:12px;border:1px solid #dbe2ea;background:#f8fafc;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-          <tr><td style="font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#0f172a;font-weight:bold;">${escapeHtml(vehicle.name)}</td></tr>
-          <tr><td style="font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#64748b;padding-top:4px;">${escapeHtml(vehicle.mileage)}</td></tr>
-          <tr><td style="font-family:Arial,sans-serif;font-size:16px;line-height:22px;color:#0f172a;font-weight:bold;padding-top:6px;">£${escapeHtml(vehicle.price)}</td></tr>
-        </table>
-      </td>
-    </tr>
-  `).join("");
-
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;border-spacing:0 10px;margin:18px 0;">${rows}</table>`;
-}
-
-function renderEscapedTextBlock(value) {
+function renderEscapedTextBlock(value, colour = "#1f2937", align = "left") {
   const normalized = String(value || "").replace(/\r\n/g, "\n");
   if (!normalized.trim()) return "";
   return normalized
     .split(/\n{2,}/)
-    .map((part) => `<p style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:15px;line-height:23px;color:#1f2937;">${part.replace(/\n/g, "<br>")}</p>`)
+    .map((part) => `<p style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:15px;line-height:23px;color:${colour};text-align:${align === "centre" ? "center" : "left"};">${part.replace(/\n/g, "<br>")}</p>`)
     .join("");
+}
+
+function renderVehicleGrid(settings = {}) {
+  const count = Math.max(1, Math.min(6, Number(settings.number_of_vehicles || 3)));
+  const vehicles = SAMPLE_VEHICLES.slice(0, count);
+  while (vehicles.length < count) vehicles.push(SAMPLE_VEHICLES[vehicles.length % SAMPLE_VEHICLES.length]);
+  const twoColumn = settings.layout === "two_column";
+  const cards = vehicles.map((vehicle) => `
+    <td width="${twoColumn ? "50%" : "100%"}" valign="top" style="padding:8px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border:1px solid #dbe2ea;background:#f8fafc;">
+        <tr><td align="center" bgcolor="#e2e8f0" style="padding:22px 12px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#475569;">Vehicle image placeholder</td></tr>
+        <tr><td style="padding:13px 12px 4px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#0f172a;font-weight:bold;">${escapeHtml(vehicle.name)}</td></tr>
+        <tr><td style="padding:0 12px;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#64748b;">${escapeHtml(vehicle.mileage)}</td></tr>
+        <tr><td style="padding:3px 12px 10px;font-family:Arial,sans-serif;font-size:16px;line-height:22px;color:#0f172a;font-weight:bold;">£${escapeHtml(vehicle.price)}</td></tr>
+        <tr><td style="padding:0 12px 14px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#2563eb" style="border-radius:7px;"><a href="https://www.vanfinancecompany.co.uk" style="display:inline-block;padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#ffffff;text-decoration:none;font-weight:bold;">View Van</a></td></tr></table></td></tr>
+      </table>
+    </td>
+  `);
+  const rows = [];
+  for (let index = 0; index < cards.length; index += twoColumn ? 2 : 1) {
+    rows.push(`<tr>${cards.slice(index, index + (twoColumn ? 2 : 1)).join("")}${twoColumn && !cards[index + 1] ? '<td width="50%" style="padding:8px;"></td>' : ""}</tr>`);
+  }
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:10px 0;">${rows.join("")}</table>`;
 }
 
 function textToHtml(value, values = {}) {
@@ -263,18 +386,113 @@ function textToHtml(value, values = {}) {
   const withTextPlaceholders = replaceTextPlaceholders(withVehicleToken, values);
   return escapeHtml(withTextPlaceholders)
     .split(VEHICLE_GRID_TOKEN)
-    .map((part, index, parts) => `${renderEscapedTextBlock(part)}${index < parts.length - 1 ? renderVehicleGrid() : ""}`)
+    .map((part, index, parts) => `${renderEscapedTextBlock(part)}${index < parts.length - 1 ? renderVehicleGrid({ number_of_vehicles: 3, layout: "one_column" }) : ""}`)
     .join("");
+}
+
+function paddingPixels(size) {
+  return size === "small" ? 14 : size === "large" ? 30 : 22;
+}
+
+function renderTextBlock(block, values) {
+  const s = block.settings;
+  const padding = paddingPixels(s.padding_size);
+  const heading = replaceTextPlaceholders(s.heading, values);
+  const body = replaceTextPlaceholders(s.body, values);
+  return `<tr><td bgcolor="${s.background_colour}" style="padding:${padding}px 30px;background:${s.background_colour};">
+    ${heading ? `<h2 style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:23px;line-height:29px;color:${s.text_colour};text-align:${s.alignment === "centre" ? "center" : "left"};">${escapeHtml(heading)}</h2>` : ""}
+    ${renderEscapedTextBlock(escapeHtml(body), s.text_colour, s.alignment)}
+  </td></tr>`;
+}
+
+function renderManualImageBlock(block, values) {
+  const s = block.settings;
+  if (!s.image_url) return "";
+  const padding = paddingPixels(s.padding_size);
+  const heading = replaceTextPlaceholders(s.heading, values);
+  const caption = replaceTextPlaceholders(s.caption, values);
+  const width = s.width === "half" ? 320 : s.width === "contained" ? 520 : 600;
+  const image = `<img src="${escapeHtml(s.image_url)}" alt="${escapeHtml(s.alt_text)}" width="${width}" style="display:block;width:100%;max-width:${width}px;height:auto;border:0;outline:none;text-decoration:none;">`;
+  const linkedImage = s.link_url ? `<a href="${escapeHtml(s.link_url)}" style="text-decoration:none;border:0;">${image}</a>` : image;
+  return `<tr><td bgcolor="${s.background_colour}" align="${s.alignment === "right" ? "right" : s.alignment === "left" ? "left" : "center"}" style="padding:${padding}px 30px;background:${s.background_colour};">
+    ${heading ? `<h2 style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:22px;line-height:28px;color:#0f172a;">${escapeHtml(heading)}</h2>` : ""}
+    ${linkedImage}
+    ${caption ? `<p style="margin:10px 0 0;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#64748b;">${escapeHtml(caption)}</p>` : ""}
+  </td></tr>`;
+}
+
+function renderButtonBlock(block, values) {
+  const s = block.settings;
+  if (!s.text || !s.url) return "";
+  const text = replaceTextPlaceholders(s.text, values);
+  const full = s.width === "full";
+  return `<tr><td align="${s.alignment === "right" ? "right" : s.alignment === "centre" ? "center" : "left"}" style="padding:8px 30px 26px;background:#ffffff;">
+    <table role="presentation" ${full ? 'width="100%"' : ""} cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${s.primary_colour}" align="center" style="border-radius:8px;"><a href="${escapeHtml(s.url)}" style="display:inline-block;${full ? "width:100%;" : ""}padding:13px 19px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:${s.text_colour};text-decoration:none;font-weight:bold;">${escapeHtml(text)}</a></td></tr></table>
+  </td></tr>`;
+}
+
+function renderDividerBlock(block) {
+  const s = block.settings;
+  return `<tr><td align="center" style="padding:${s.spacing}px 30px;background:#ffffff;"><table role="presentation" width="${s.width_percentage}%" cellpadding="0" cellspacing="0" border="0"><tr><td height="${s.thickness}" bgcolor="${s.colour}" style="font-size:0;line-height:0;background:${s.colour};">&nbsp;</td></tr></table></td></tr>`;
+}
+
+function renderSpacerBlock(block) {
+  return `<tr><td height="${block.settings.height}" style="height:${block.settings.height}px;font-size:0;line-height:0;background:#ffffff;">&nbsp;</td></tr>`;
+}
+
+function renderVehicleGridBlock(block, values) {
+  const s = block.settings;
+  const heading = replaceTextPlaceholders(s.heading, values);
+  const intro = replaceTextPlaceholders(s.intro_text, values);
+  return `<tr><td style="padding:24px 22px;background:#ffffff;">
+    ${heading ? `<h2 style="margin:0 8px 8px;font-family:Arial,sans-serif;font-size:23px;line-height:29px;color:#0f172a;">${escapeHtml(heading)}</h2>` : ""}
+    ${intro ? `<p style="margin:0 8px 12px;font-family:Arial,sans-serif;font-size:15px;line-height:23px;color:#334155;">${escapeHtml(intro)}</p>` : ""}
+    ${renderVehicleGrid(s)}
+    ${s.placeholder_note ? `<p style="margin:8px 8px 0;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">${escapeHtml(s.placeholder_note)}</p>` : ""}
+  </td></tr>`;
+}
+
+function renderContentBlocks(values = {}) {
+  return (values.content_blocks || [])
+    .filter((block) => block.enabled !== false)
+    .sort((a, b) => a.position - b.position)
+    .map((block) => {
+      if (block.type === "text") return renderTextBlock(block, values);
+      if (block.type === "manual_image") return renderManualImageBlock(block, values);
+      if (block.type === "button") return renderButtonBlock(block, values);
+      if (block.type === "divider") return renderDividerBlock(block, values);
+      if (block.type === "spacer") return renderSpacerBlock(block, values);
+      if (block.type === "vehicle_grid") return renderVehicleGridBlock(block, values);
+      return "";
+    })
+    .join("");
+}
+
+function renderLegacyBody(values = {}) {
+  const ctaText = replaceTextPlaceholders(values.cta_text, values);
+  const primary = cleanColour(values.brand_colour, "#2563eb");
+  const ctaHtml = values.cta_text && values.cta_url ? `
+    <tr>
+      <td align="left" style="padding:4px 30px 26px;background:#ffffff;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${primary}" style="border-radius:8px;"><a href="${escapeHtml(values.cta_url)}" style="display:inline-block;padding:13px 19px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#ffffff;text-decoration:none;font-weight:bold;">${escapeHtml(ctaText)}</a></td></tr></table>
+      </td>
+    </tr>
+  ` : "";
+  return `
+    <tr><td style="padding:26px 30px 6px;background:#ffffff;">${textToHtml(values.intro_text, values)}</td></tr>
+    <tr><td style="padding:0 30px 6px;background:#ffffff;">${textToHtml(values.main_body, values)}</td></tr>
+    ${ctaHtml}
+  `;
 }
 
 function renderEmailHtml(values = {}) {
   const subject = replaceTextPlaceholders(values.default_subject, values);
   const previewText = replaceTextPlaceholders(values.preview_text, values);
   const heroHeading = replaceTextPlaceholders(values.hero_heading || values.name, values);
-  const ctaText = replaceTextPlaceholders(values.cta_text, values);
   const primary = cleanColour(values.brand_colour, "#2563eb");
   const secondary = cleanColour(values.secondary_colour, "#eef2ff");
   const companyName = values.company_name || "Van Finance Company";
+  const hasBlocks = Array.isArray(values.content_blocks) && values.content_blocks.length > 0;
   const logoHtml = values.header_logo ? `
     <tr>
       <td align="center" style="padding:22px 24px 14px;background:#ffffff;">
@@ -286,13 +504,6 @@ function renderEmailHtml(values = {}) {
       <td align="center" style="padding:24px 24px 14px;background:#ffffff;font-family:Arial,sans-serif;font-size:20px;line-height:26px;color:#0f172a;font-weight:bold;">${escapeHtml(companyName)}</td>
     </tr>
   `;
-  const ctaHtml = values.cta_text && values.cta_url ? `
-    <tr>
-      <td align="left" style="padding:4px 30px 26px;background:#ffffff;">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${primary}" style="border-radius:8px;"><a href="${escapeHtml(values.cta_url)}" style="display:inline-block;padding:13px 19px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#ffffff;text-decoration:none;font-weight:bold;">${escapeHtml(ctaText)}</a></td></tr></table>
-      </td>
-    </tr>
-  ` : "";
 
   return `<!doctype html>
 <html lang="en">
@@ -314,9 +525,7 @@ function renderEmailHtml(values = {}) {
               </td>
             </tr>
             <tr><td bgcolor="${secondary}" style="padding:14px 30px;background:${secondary};font-family:Arial,sans-serif;font-size:14px;line-height:20px;color:#334155;">${escapeHtml(previewText)}</td></tr>
-            <tr><td style="padding:26px 30px 6px;background:#ffffff;">${textToHtml(values.intro_text, values)}</td></tr>
-            <tr><td style="padding:0 30px 6px;background:#ffffff;">${textToHtml(values.main_body, values)}</td></tr>
-            ${ctaHtml}
+            ${hasBlocks ? renderContentBlocks(values) : renderLegacyBody(values)}
             <tr>
               <td style="padding:22px 30px 30px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">
                 ${textToHtml(values.footer, values)}
