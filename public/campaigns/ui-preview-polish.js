@@ -150,20 +150,35 @@
     card.className = "card workflow-steps";
     detail.parentNode.insertBefore(card, detail);
   }
+  function normaliseHistoryRow(send) {
+    if (!send) return null;
+    const type = String(send.send_type || send.type || "").trim().toLowerCase();
+    const status = String(send.status || "").trim().toLowerCase();
+    if (!type || !status) return null;
+    return {
+      type,
+      status,
+      requested: parseCount(send.requested_count ?? send.requested),
+      accepted: parseCount(send.sent_count ?? send.accepted),
+      failed: parseCount(send.failed_count ?? send.failed),
+    };
+  }
   function readSendHistory() {
+    const loadedHistory = window.marketingCampaignSendingState?.history;
+    if (Array.isArray(loadedHistory)) return loadedHistory.map(normaliseHistoryRow).filter(Boolean);
     return Array.from(document.querySelectorAll("#sendHistoryRows tr")).map((row) => {
       const cells = Array.from(row.cells || []);
       if (cells.length < 7) return null;
       const type = cells[0].textContent.trim().toLowerCase();
       const status = cells[1].textContent.trim().toLowerCase();
       if (!type || /no .*history|migration/i.test(type)) return null;
-      return {
+      return normaliseHistoryRow({
         type,
         status,
-        requested: parseCount(cells[2].textContent),
-        accepted: parseCount(cells[3].textContent),
-        failed: parseCount(cells[4].textContent),
-      };
+        requested: cells[2].textContent,
+        accepted: cells[3].textContent,
+        failed: cells[4].textContent,
+      });
     }).filter(Boolean);
   }
   function updateWorkflow() {
@@ -227,6 +242,7 @@
   document.addEventListener("click", (event) => {
     if (event.target?.id === "desktopPreview" || event.target?.id === "mobilePreview") setTimeout(refreshPolish, 0);
   });
+  window.addEventListener("marketingCampaignSendingStateChanged", () => setTimeout(refreshPolish, 0));
   setInterval(() => { observeSendHistory(); refreshPolish(); }, 900);
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => { observeSendHistory(); refreshPolish(); });
   else { observeSendHistory(); refreshPolish(); }
