@@ -8,8 +8,14 @@
     "Campaign Summary": false,
     "Frozen Template Snapshot": false,
   };
+  const SUCCESS_SEND_STATUSES = new Set(["accepted", "completed", "delivered", "opened", "clicked"]);
+  const WARNING_SEND_STATUSES = new Set(["partially_failed", "submission_unknown"]);
 
   function $(id) { return document.getElementById(id); }
+  function parseCount(value) {
+    const number = Number(String(value || "").replace(/[^0-9.-]/g, ""));
+    return Number.isFinite(number) ? number : 0;
+  }
   function readPrefs() {
     try { return { ...SECTION_DEFAULTS, ...JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{}") }; }
     catch { return { ...SECTION_DEFAULTS }; }
@@ -32,6 +38,8 @@
       .workflow-step.complete span { background:var(--green); color:#fff; }
       .workflow-step.current { border-color:#bfdbfe; background:#eef4ff; color:#1d4ed8; }
       .workflow-step.current span { background:var(--blue); color:#fff; }
+      .workflow-step.warning { border-color:#fed7aa; background:#fff7ed; color:#9a3412; }
+      .workflow-step.warning span { background:var(--amber); color:#fff; }
       .workflow-step.blocked { background:#f8fafc; color:#64748b; }
       .collapsible-card { display:grid; gap:12px; }
       .collapsible-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
@@ -142,25 +150,50 @@
     card.className = "card workflow-steps";
     detail.parentNode.insertBefore(card, detail);
   }
+  function readSendHistory() {
+    return Array.from(document.querySelectorAll("#sendHistoryRows tr")).map((row) => {
+      const cells = Array.from(row.cells || []);
+      if (cells.length < 7) return null;
+      const type = cells[0].textContent.trim().toLowerCase();
+      const status = cells[1].textContent.trim().toLowerCase();
+      if (!type || /no .*history|migration/i.test(type)) return null;
+      return {
+        type,
+        status,
+        requested: parseCount(cells[2].textContent),
+        accepted: parseCount(cells[3].textContent),
+        failed: parseCount(cells[4].textContent),
+      };
+    }).filter(Boolean);
+  }
   function updateWorkflow() {
     const node = $("campaignWorkflowSteps");
     const detail = $("detailSection");
     if (!node || !detail || detail.classList.contains("hidden")) return;
     const hasCampaign = Boolean($("detailTitle")?.textContent?.trim());
     const audienceText = $("audienceCounts")?.innerText || "";
-    const hasAudience = /Final send count/i.test(audienceText);
+    const finalSendCount = parseCount(audienceText.match(/Final send count\s+([\d,]+)/i)?.[1]);
+    const hasAudience = finalSendCount > 0;
     const ready = /READY TO SEND/i.test($("readyPanel")?.textContent || "");
     const brevo = $("brevoConnectionBanner")?.innerText || "";
-    const testReady = /authorised/i.test(brevo);
-    const productionReady = ready && testReady;
+    const brevoAuthorised = /authorised/i.test(brevo);
+    const history = readSendHistory();
+    const testComplete = history.some((send) => send.type.includes("test") && SUCCESS_SEND_STATUSES.has(send.status) && send.accepted > 0 && send.failed === 0);
+    const productionRows = history.filter((send) => send.type.includes("production"));
+    const productionWarning = productionRows.some((send) => WARNING_SEND_STATUSES.has(send.status));
+    const productionComplete = productionRows.some((send) => SUCCESS_SEND_STATUSES.has(send.status) && send.accepted > 0);
+    const productionLabel = productionComplete ? "Production batch sent" : "Production Send";
     const steps = [
-      ["Campaign", hasCampaign, !hasCampaign],
-      ["Audience", hasAudience, hasCampaign && !hasAudience],
-      ["Readiness", ready, hasAudience && !ready],
-      ["Test", testReady, ready && !testReady],
-      ["Production Send", productionReady, testReady && !productionReady],
+      { label: "Campaign", state: hasCampaign ? "complete" : "blocked" },
+      { label: "Audience", state: hasAudience ? "complete" : hasCampaign ? "current" : "blocked" },
+      { label: "Readiness", state: ready ? "complete" : hasAudience ? "current" : "blocked" },
+      { label: "Test", state: testComplete ? "complete" : brevoAuthorised ? "current" : "blocked" },
+      { label: productionLabel, state: productionComplete ? "complete" : productionWarning ? "warning" : ready && brevoAuthorised ? "current" : "blocked" },
     ];
-    node.innerHTML = steps.map(([label, complete, current], index) => `<div class="workflow-step ${complete ? "complete" : current ? "current" : "blocked"}"><span>${complete ? "✓" : index + 1}</span>${label}</div>`).join("");
+    node.innerHTML = steps.map((step, index) => {
+      const marker = step.state === "complete" ? "✓" : step.state === "warning" ? "!" : index + 1;
+      return `<div class="workflow-step ${step.state}"><span>${marker}</span>${step.label}</div>`;
+    }).join("");
   }
   function addPreviewLabel() {
     const shell = $("previewFrameShell");
@@ -185,10 +218,16 @@
     updatePreviewLabel();
     document.querySelectorAll("[data-section-summary]").forEach((node) => { node.textContent = sectionSummary(node.dataset.sectionSummary); });
   }
+  function observeSendHistory() {
+    const target = $("sendHistoryRows");
+    if (!target || target.dataset.workflowObserved) return;
+    target.dataset.workflowObserved = "true";
+    new MutationObserver(() => refreshPolish()).observe(target, { childList: true, subtree: true, characterData: true });
+  }
   document.addEventListener("click", (event) => {
     if (event.target?.id === "desktopPreview" || event.target?.id === "mobilePreview") setTimeout(refreshPolish, 0);
   });
-  setInterval(refreshPolish, 900);
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", refreshPolish);
-  else refreshPolish();
+  setInterval(() => { observeSendHistory(); refreshPolish(); }, 900);
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => { observeSendHistory(); refreshPolish(); });
+  else { observeSendHistory(); refreshPolish(); }
 })();
