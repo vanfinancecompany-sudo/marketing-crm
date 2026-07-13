@@ -22,6 +22,14 @@ const SAMPLE_VEHICLES = [
   { name: "Mercedes-Benz Vito Premium", price: "21995", mileage: "29,000 miles" },
 ];
 
+class ValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ValidationError";
+    this.statusCode = 400;
+  }
+}
+
 function json(response, status, payload) {
   response.status(status).json(payload);
 }
@@ -59,6 +67,10 @@ function assertSupabase(result, fallbackMessage) {
   return result;
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
+}
+
 function cleanText(value, limit = 5000) {
   return String(value || "").trim().slice(0, limit);
 }
@@ -70,7 +82,7 @@ function cleanColour(value, fallback = "#2563eb") {
 
 function requireColour(value, label) {
   const colour = cleanText(value, 20);
-  if (!/^#[0-9a-fA-F]{6}$/.test(colour)) throw new Error(`${label} must be a six-digit hex colour.`);
+  if (!/^#[0-9a-fA-F]{6}$/.test(colour)) throw new ValidationError(`${label} must be a six-digit hex colour.`);
   return colour;
 }
 
@@ -82,38 +94,53 @@ function cleanHttpsUrl(value, label) {
     if (parsed.protocol !== "https:") throw new Error("Invalid protocol.");
     return parsed.toString();
   } catch {
-    throw new Error(`${label} must be a valid absolute HTTPS URL.`);
+    throw new ValidationError(`${label} must be a valid absolute HTTPS URL.`);
   }
 }
 
 function normalizeCategory(value) {
   const category = cleanText(value || "custom", 40);
-  if (!CATEGORIES.has(category)) throw new Error("Unsupported template category.");
+  if (!CATEGORIES.has(category)) throw new ValidationError("Unsupported template category.");
   return category;
 }
 
 function normalizeStatus(value) {
   const status = cleanText(value || "draft", 40);
-  if (!STATUSES.has(status)) throw new Error("Unsupported template status.");
+  if (!STATUSES.has(status)) throw new ValidationError("Unsupported template status.");
   return status;
 }
 
 function normalizeMasterLayout(value) {
   const layout = cleanText(value || "custom_blank", 40);
-  if (!MASTER_LAYOUTS.has(layout)) throw new Error("Unsupported master layout.");
+  if (!MASTER_LAYOUTS.has(layout)) throw new ValidationError("Unsupported master layout.");
   return layout;
 }
 
-function normalizeChoice(value, allowed, fallback) {
-  const text = cleanText(value || fallback, 40);
-  return allowed.has(text) ? text : fallback;
+function requireChoice(value, allowed, label) {
+  const text = cleanText(value, 40);
+  if (!allowed.has(text)) throw new ValidationError(`${label} is not supported.`);
+  return text;
 }
 
-function normalizeNumber(value, fallback, allowed = null, min = 0, max = 1000) {
-  const number = Number.parseInt(value, 10);
-  const safe = Number.isFinite(number) ? number : fallback;
-  if (allowed && allowed.includes(safe)) return safe;
-  return Math.min(max, Math.max(min, safe));
+function requireInteger(value, label, options = {}) {
+  const { allowed = null, min = 1, max = 1000 } = options;
+  const isStringInteger = typeof value === "string" && /^\d+$/.test(value.trim());
+  const isNumberInteger = typeof value === "number" && Number.isInteger(value);
+  if (!isStringInteger && !isNumberInteger) throw new ValidationError(`${label} must be a whole number.`);
+  const number = Number(value);
+  if (!Number.isFinite(number) || !Number.isInteger(number)) throw new ValidationError(`${label} must be a whole number.`);
+  if (allowed && !allowed.includes(number)) throw new ValidationError(`${label} is not supported.`);
+  if (number < min || number > max) throw new ValidationError(`${label} must be between ${min} and ${max}.`);
+  return number;
+}
+
+function requireBlockId(value) {
+  if (typeof value !== "string") throw new ValidationError("Content block id must be a string.");
+  const id = value.trim();
+  if (!id) throw new ValidationError("Content block id is required.");
+  if (id.length > 120) throw new ValidationError("Content block id is too long.");
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new ValidationError("Content block id may only contain letters, numbers, underscores and hyphens.");
+  return id;
 }
 
 function generateBlockId() {
@@ -122,88 +149,99 @@ function generateBlockId() {
 }
 
 function normalizeBlockSettings(type, settings = {}, enabled = true) {
-  if (!settings || typeof settings !== "object" || Array.isArray(settings)) throw new Error("Block settings must be an object.");
+  if (!isPlainObject(settings)) throw new ValidationError("Block settings must be an object.");
   if (type === "text") {
     return {
       heading: cleanText(settings.heading, 300),
       body: cleanText(settings.body, 8000),
-      alignment: normalizeChoice(settings.alignment, TEXT_ALIGNMENTS, "left"),
-      background_colour: requireColour(settings.background_colour || "#ffffff", "Text block background colour"),
-      text_colour: requireColour(settings.text_colour || "#1f2937", "Text block text colour"),
-      padding_size: normalizeChoice(settings.padding_size, PADDING_SIZES, "medium"),
+      alignment: requireChoice(settings.alignment, TEXT_ALIGNMENTS, "Text block alignment"),
+      background_colour: requireColour(settings.background_colour, "Text block background colour"),
+      text_colour: requireColour(settings.text_colour, "Text block text colour"),
+      padding_size: requireChoice(settings.padding_size, PADDING_SIZES, "Text block padding"),
     };
   }
   if (type === "manual_image") {
     const imageUrl = cleanHttpsUrl(settings.image_url, "Image URL");
     const altText = cleanText(settings.alt_text, 200);
-    if (enabled && !imageUrl) throw new Error("Image URL is required for enabled promotional image blocks.");
-    if (enabled && !altText) throw new Error("Alt text is required for enabled promotional image blocks.");
+    if (enabled && !imageUrl) throw new ValidationError("Image URL is required for enabled promotional image blocks.");
+    if (enabled && !altText) throw new ValidationError("Alt text is required for enabled promotional image blocks.");
     return {
       image_url: imageUrl,
       alt_text: altText,
       link_url: cleanHttpsUrl(settings.link_url, "Image link URL"),
       heading: cleanText(settings.heading, 300),
       caption: cleanText(settings.caption, 500),
-      width: normalizeChoice(settings.width, IMAGE_WIDTHS, "full"),
-      alignment: normalizeChoice(settings.alignment, ALIGNMENTS, "centre"),
-      background_colour: requireColour(settings.background_colour || "#ffffff", "Image block background colour"),
-      padding_size: normalizeChoice(settings.padding_size, PADDING_SIZES, "medium"),
+      width: requireChoice(settings.width, IMAGE_WIDTHS, "Image block width"),
+      alignment: requireChoice(settings.alignment, ALIGNMENTS, "Image block alignment"),
+      background_colour: requireColour(settings.background_colour, "Image block background colour"),
+      padding_size: requireChoice(settings.padding_size, PADDING_SIZES, "Image block padding"),
     };
   }
   if (type === "button") {
     const text = cleanText(settings.text, 120);
     const url = cleanHttpsUrl(settings.url, "Button URL");
-    if (enabled && !text) throw new Error("Button text is required for enabled button blocks.");
-    if (enabled && !url) throw new Error("Button URL is required for enabled button blocks.");
+    if (enabled && !text) throw new ValidationError("Button text is required for enabled button blocks.");
+    if (enabled && !url) throw new ValidationError("Button URL is required for enabled button blocks.");
     return {
       text,
       url,
-      alignment: normalizeChoice(settings.alignment, ALIGNMENTS, "left"),
-      primary_colour: requireColour(settings.primary_colour || "#2563eb", "Button colour"),
-      text_colour: requireColour(settings.text_colour || "#ffffff", "Button text colour"),
-      width: normalizeChoice(settings.width, BUTTON_WIDTHS, "auto"),
+      alignment: requireChoice(settings.alignment, ALIGNMENTS, "Button alignment"),
+      primary_colour: requireColour(settings.primary_colour, "Button colour"),
+      text_colour: requireColour(settings.text_colour, "Button text colour"),
+      width: requireChoice(settings.width, BUTTON_WIDTHS, "Button width"),
     };
   }
   if (type === "divider") {
     return {
-      colour: requireColour(settings.colour || "#d9e2ef", "Divider colour"),
-      thickness: normalizeNumber(settings.thickness, 1, [1, 2, 3]),
-      width_percentage: normalizeNumber(settings.width_percentage, 100, null, 10, 100),
-      spacing: normalizeNumber(settings.spacing, 16, [8, 16, 24, 32]),
+      colour: requireColour(settings.colour, "Divider colour"),
+      thickness: requireInteger(settings.thickness, "Divider thickness", { allowed: [1, 2, 3], min: 1, max: 3 }),
+      width_percentage: requireInteger(settings.width_percentage, "Divider width percentage", { min: 10, max: 100 }),
+      spacing: requireInteger(settings.spacing, "Divider spacing", { allowed: [8, 16, 24, 32], min: 8, max: 32 }),
     };
   }
   if (type === "spacer") {
-    return { height: normalizeNumber(settings.height, 24, [8, 16, 24, 32, 48]) };
+    return { height: requireInteger(settings.height, "Spacer height", { allowed: [8, 16, 24, 32, 48], min: 8, max: 48 }) };
   }
   if (type === "vehicle_grid") {
     return {
       heading: cleanText(settings.heading, 300),
       intro_text: cleanText(settings.intro_text, 1000),
-      number_of_vehicles: normalizeNumber(settings.number_of_vehicles, 3, null, 1, 6),
-      layout: normalizeChoice(settings.layout, VEHICLE_LAYOUTS, "one_column"),
-      source_mode: normalizeChoice(settings.source_mode, VEHICLE_SOURCE_MODES, "newest"),
-      placeholder_note: cleanText(settings.placeholder_note || "Live stock connection will be added later.", 500),
+      number_of_vehicles: requireInteger(settings.number_of_vehicles, "Vehicle grid number of vehicles", { min: 1, max: 6 }),
+      layout: requireChoice(settings.layout, VEHICLE_LAYOUTS, "Vehicle grid layout"),
+      source_mode: requireChoice(settings.source_mode, VEHICLE_SOURCE_MODES, "Vehicle grid source mode"),
+      placeholder_note: cleanText(settings.placeholder_note, 500),
     };
   }
-  throw new Error("Unsupported content block type.");
+  throw new ValidationError("Unsupported content block type.");
 }
 
-function normalizeContentBlocks(value = []) {
-  const blocks = Array.isArray(value) ? value : [];
-  if (blocks.length > 50) throw new Error("Email templates can contain a maximum of 50 content blocks.");
-  return blocks.map((block, index) => {
-    if (!block || typeof block !== "object" || Array.isArray(block)) throw new Error("Each content block must be an object.");
+function normalizeContentBlocks(value = [], options = {}) {
+  const supplied = options.supplied ?? true;
+  if (!supplied) return [];
+  if (!Array.isArray(value)) throw new ValidationError("content_blocks must be an array.");
+  if (value.length > 50) throw new ValidationError("Email templates can contain a maximum of 50 content blocks.");
+  const seenIds = new Set();
+  const seenPositions = new Set();
+  const normalized = value.map((block) => {
+    if (!isPlainObject(block)) throw new ValidationError("Each content block must be an object.");
+    const id = requireBlockId(block.id);
+    if (seenIds.has(id)) throw new ValidationError("Content block ids must be unique within a template.");
+    seenIds.add(id);
     const type = cleanText(block.type, 40);
-    if (!BLOCK_TYPES.has(type)) throw new Error("Unsupported content block type.");
-    const enabled = block.enabled !== false;
+    if (!BLOCK_TYPES.has(type)) throw new ValidationError("Unsupported content block type.");
+    if (typeof block.enabled !== "boolean") throw new ValidationError("Content block enabled must be true or false.");
+    const position = requireInteger(block.position, "Content block position", { min: 1, max: 50 });
+    if (seenPositions.has(position)) throw new ValidationError("Content block positions must be unique.");
+    seenPositions.add(position);
     return {
-      id: cleanText(block.id, 120) || generateBlockId(),
+      id,
       type,
-      position: Number.isFinite(Number(block.position)) ? Number(block.position) : index + 1,
-      enabled,
-      settings: normalizeBlockSettings(type, block.settings || {}, enabled),
+      position,
+      enabled: block.enabled,
+      settings: normalizeBlockSettings(type, block.settings, block.enabled),
     };
-  }).sort((a, b) => a.position - b.position).map((block, index) => ({ ...block, position: index + 1 }));
+  });
+  return normalized.sort((a, b) => a.position - b.position).map((block, index) => ({ ...block, position: index + 1 }));
 }
 
 function cloneContentBlocks(blocks = []) {
@@ -211,12 +249,13 @@ function cloneContentBlocks(blocks = []) {
 }
 
 function validateTemplate(values) {
-  if (!cleanText(values.name, 200)) throw new Error("Template name is required.");
-  if (!cleanText(values.default_subject, 300)) throw new Error("Default subject is required.");
-  if (!cleanText(values.company_name, 200)) throw new Error("Company name is required.");
+  if (!cleanText(values.name, 200)) throw new ValidationError("Template name is required.");
+  if (!cleanText(values.default_subject, 300)) throw new ValidationError("Default subject is required.");
+  if (!cleanText(values.company_name, 200)) throw new ValidationError("Company name is required.");
 }
 
-function normalizeValues(values = {}) {
+function normalizeValues(values = {}, options = {}) {
+  const contentBlocksSupplied = Object.prototype.hasOwnProperty.call(values, "content_blocks");
   const normalized = {
     name: cleanText(values.name, 200),
     description: cleanText(values.description, 1000),
@@ -235,11 +274,11 @@ function normalizeValues(values = {}) {
     secondary_colour: requireColour(values.secondary_colour || "#eef2ff", "Secondary colour"),
     social_links: cleanText(values.social_links, 1000),
     master_layout: normalizeMasterLayout(values.master_layout),
-    content_blocks: normalizeContentBlocks(values.content_blocks || []),
+    content_blocks: normalizeContentBlocks(contentBlocksSupplied ? values.content_blocks : [], { supplied: true }),
     status: normalizeStatus(values.status),
   };
   validateTemplate(normalized);
-  if (!EDITABLE_STATUSES.has(normalized.status)) throw new Error("Use the Archive action to archive templates.");
+  if (!options.allowArchivedStatus && !EDITABLE_STATUSES.has(normalized.status)) throw new ValidationError("Use the Archive action to archive templates.");
   return normalized;
 }
 
@@ -263,7 +302,7 @@ function normalizeTemplate(row = {}) {
     secondary_colour: row.secondary_colour || "#eef2ff",
     social_links: row.social_links || "",
     master_layout: row.master_layout || "custom_blank",
-    content_blocks: normalizeContentBlocks(row.content_blocks || []),
+    content_blocks: normalizeContentBlocks(row.content_blocks || [], { supplied: true }),
     status: row.status || "draft",
     created_by: row.created_by || "",
     created_at: row.created_at || "",
@@ -273,7 +312,7 @@ function normalizeTemplate(row = {}) {
 }
 
 async function loadTemplate(supabase, id) {
-  if (!id) throw new Error("Template ID is required.");
+  if (!id) throw new ValidationError("Template ID is required.");
   const { data } = assertSupabase(
     await supabase.from("marketing_email_templates").select(TEMPLATE_COLUMNS).eq("id", id).single(),
     "Could not load email template."
@@ -300,7 +339,7 @@ async function createTemplate(supabase, body = {}) {
 
 async function updateTemplate(supabase, body = {}) {
   const existing = await loadTemplate(supabase, body.template?.id || body.id);
-  if (existing.status === "archived") throw new Error("Archived templates are read only.");
+  if (existing.status === "archived") throw new ValidationError("Archived templates are read only.");
   const values = normalizeValues(templateInput(body));
   const { data } = assertSupabase(
     await supabase.from("marketing_email_templates").update(values).eq("id", existing.id).select(TEMPLATE_COLUMNS).single(),
@@ -541,7 +580,7 @@ function renderEmailHtml(values = {}) {
 }
 
 function previewTemplate(body = {}) {
-  const values = normalizeValues(templateInput(body));
+  const values = normalizeValues(templateInput(body), { allowArchivedStatus: true });
   return {
     preview: {
       subject: replaceTextPlaceholders(values.default_subject, values),
@@ -577,10 +616,11 @@ export default async function handler(request, response) {
     else if (action === "archive") result = await archiveTemplate(supabase, body);
     else if (action === "duplicate") result = await duplicateTemplate(supabase, body);
     else if (action === "preview") result = previewTemplate(body);
-    else throw new Error("Unknown Email Templates API action.");
+    else throw new ValidationError("Unknown Email Templates API action.");
 
     json(response, 200, { ok: true, ...result });
   } catch (error) {
-    json(response, 500, { ok: false, message: error?.message || "Email Templates API error." });
+    const status = error instanceof ValidationError || error?.statusCode === 400 ? 400 : 500;
+    json(response, status, { ok: false, message: error?.message || "Email Templates API error." });
   }
 }
