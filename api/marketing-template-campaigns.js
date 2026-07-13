@@ -8,7 +8,7 @@ import {
   isPlainObject,
   normalizeTemplateSnapshot,
   renderCampaignPreview,
-} from "../lib/marketingCampaignTemplateRenderer.js";
+} from "../lib/marketingEmailTemplateRenderer.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const TEMPLATE_CAMPAIGN_SOURCE = "template_campaign_foundation";
