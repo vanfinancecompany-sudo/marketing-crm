@@ -2,16 +2,18 @@ import crypto from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
 const MAX_REASON_LENGTH = 1000;
-const TERMINAL_STATUSES = new Set(["hard_bounced", "blocked", "complained", "unsubscribed", "failed"]);
+const TERMINAL_STATUSES = new Set(["hard_bounced", "complained", "unsubscribed"]);
 const PROGRESSION_RANK = {
   pending: 0,
-  accepted: 1,
-  sent: 1,
-  delivered: 2,
-  opened: 3,
-  clicked: 4,
-  soft_bounced: 2,
-  submission_unknown: 1,
+  submission_unknown: 0,
+  failed: 1,
+  accepted: 2,
+  sent: 2,
+  delivered: 3,
+  soft_bounced: 3,
+  blocked: 3,
+  opened: 4,
+  clicked: 5,
 };
 
 function json(response, status, payload) {
@@ -92,6 +94,14 @@ function eventDate(value, fallback = new Date()) {
   return Number.isNaN(date.getTime()) ? fallback.toISOString() : date.toISOString();
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
 function arrayValue(value) {
   if (Array.isArray(value)) return value.map((item) => safeText(item, 200)).filter(Boolean);
   if (!value) return [];
@@ -115,34 +125,56 @@ function extractCorrelation(payload = {}) {
   };
 }
 
+function providerEventId({ rawEventId, providerMessageId, eventType, eventTimestampRaw, email, linkUrl, reason, payload }) {
+  const stableRawId = safeText(rawEventId, 200).toLowerCase();
+  if (stableRawId) return `brevo:event:${stableRawId}`;
+  const stableParts = {
+    providerMessageId: providerMessageId || "",
+    eventType: eventType || "unknown",
+    eventTimestamp: eventTimestampRaw === undefined || eventTimestampRaw === null ? "" : String(eventTimestampRaw),
+    email: email || "",
+    linkUrl: linkUrl || "",
+    reason: reason || "",
+  };
+  const hasStableIdentity = stableParts.providerMessageId || stableParts.email || stableParts.eventTimestamp || stableParts.linkUrl || stableParts.reason;
+  const identity = hasStableIdentity ? canonicalJson(stableParts) : canonicalJson({ eventType: stableParts.eventType, payload });
+  return `brevo:sha256:${hashValue(identity)}`;
+}
+
 function normalizeEventPayload(payload = {}) {
   const now = new Date();
   const eventType = normalizeBrevoEvent(payload.event || payload.type || payload.event_type);
   const providerMessageId = safeText(payload["message-id"] || payload.messageId || payload.message_id || payload.message_id_header || "", 500);
   const email = normalizeEmail(payload.email);
   const linkUrl = safeText(payload.link || payload.url || payload.link_url || "", 2000);
-  const reason = safeText(payload.reason || payload.message || payload.error || "", MAX_REASON_LENGTH);
-  const eventAt = eventDate(payload.ts_event ?? payload.ts_epoch ?? payload.ts ?? payload.date, now);
+  const reason = safeText(payload.reason || payload.code || payload.category || payload.message || payload.error || "", MAX_REASON_LENGTH);
+  const eventTimestampRaw = payload.ts_event ?? payload.ts_epoch ?? payload.ts ?? payload.date;
+  const eventAt = eventDate(eventTimestampRaw, now);
   const rawEventId = safeText(payload.event_id || payload.eventId || payload.uuid || payload.id || "", 200);
-  const fingerprint = hashValue(JSON.stringify({ providerMessageId, eventType, eventAt, email, linkUrl, reason, rawEventId }));
   const correlation = extractCorrelation(payload);
+  const stableProviderEventId = providerEventId({ rawEventId, providerMessageId, eventType, eventTimestampRaw, email, linkUrl, reason, payload });
   return {
     provider: "brevo",
-    provider_event_id: rawEventId ? `${rawEventId}:${fingerprint.slice(0, 24)}` : `sha256:${fingerprint}`,
+    provider_event_id: stableProviderEventId,
     provider_message_id: providerMessageId || null,
     event_type: eventType,
     event_at: eventAt,
     email_normalized: email || null,
     link_url: linkUrl || null,
     reason: reason || null,
-    campaign_id: correlation.campaignId || null,
-    send_id: correlation.sendId || null,
-    recipient_id: correlation.recipientId || null,
+    hints: {
+      campaign_id: correlation.campaignId || "",
+      send_id: correlation.sendId || "",
+      recipient_id: correlation.recipientId || "",
+      email,
+      provider_message_id: providerMessageId,
+    },
     metadata: {
       brevo_event: safeText(payload.event || payload.type || "", 80),
       subject: safeText(payload.subject, 300),
       tags: correlation.tags,
       has_custom_header: Boolean(correlation.custom),
+      has_correlation_hints: Boolean(correlation.campaignId || correlation.sendId || correlation.recipientId || providerMessageId || email),
       sending_ip_present: Boolean(payload.sending_ip),
       device_used: safeText(payload.device_used, 100),
       user_agent_present: Boolean(payload.user_agent),
@@ -150,51 +182,141 @@ function normalizeEventPayload(payload = {}) {
   };
 }
 
-async function loadRecipient(supabase, event) {
-  if (event.recipient_id) {
-    const result = await supabase.from("marketing_email_send_recipients").select("*").eq("id", event.recipient_id).maybeSingle();
-    if (result.error) throw new Error(result.error.message || "Could not load recipient.");
-    if (result.data) return result.data;
-  }
-  let query = supabase.from("marketing_email_send_recipients").select("*");
-  if (event.provider_message_id) query = query.eq("provider_message_id", event.provider_message_id);
-  else if (event.email_normalized && event.send_id) query = query.eq("send_id", event.send_id).eq("email", event.email_normalized);
-  else if (event.email_normalized && event.campaign_id) query = query.eq("campaign_id", event.campaign_id).eq("email", event.email_normalized).order("created_at", { ascending: false }).limit(1);
-  else return null;
+function recipientEmail(row = {}) {
+  return normalizeEmail(row.email);
+}
+
+function verifyRecipientHints(recipient, hints = {}) {
+  if (!recipient) return false;
+  if (hints.recipient_id && hints.recipient_id !== recipient.id) return false;
+  if (hints.send_id && hints.send_id !== recipient.send_id) return false;
+  if (hints.campaign_id && hints.campaign_id !== recipient.campaign_id) return false;
+  if (hints.email && hints.email !== recipientEmail(recipient)) return false;
+  if (hints.provider_message_id && recipient.provider_message_id && hints.provider_message_id !== recipient.provider_message_id) return false;
+  return true;
+}
+
+async function queryUniqueRecipient(query) {
   const result = await query.limit(2);
   if (result.error) throw new Error(result.error.message || "Could not load recipient.");
   const rows = result.data || [];
   return rows.length === 1 ? rows[0] : null;
 }
 
+async function loadRecipient(supabase, event) {
+  const hints = event.hints || {};
+  let recipient = null;
+
+  if (hints.provider_message_id) {
+    recipient = await queryUniqueRecipient(
+      supabase.from("marketing_email_send_recipients").select("*").eq("provider_message_id", hints.provider_message_id)
+    );
+    return verifyRecipientHints(recipient, hints) ? recipient : null;
+  }
+
+  if (hints.recipient_id) {
+    const result = await supabase.from("marketing_email_send_recipients").select("*").eq("id", hints.recipient_id).maybeSingle();
+    if (result.error) throw new Error(result.error.message || "Could not load recipient.");
+    recipient = result.data || null;
+    return verifyRecipientHints(recipient, hints) ? recipient : null;
+  }
+
+  if (hints.email && hints.send_id) {
+    recipient = await queryUniqueRecipient(
+      supabase.from("marketing_email_send_recipients").select("*").eq("send_id", hints.send_id).eq("email", hints.email)
+    );
+    return verifyRecipientHints(recipient, hints) ? recipient : null;
+  }
+
+  if (hints.email && hints.campaign_id) {
+    recipient = await queryUniqueRecipient(
+      supabase.from("marketing_email_send_recipients").select("*").eq("campaign_id", hints.campaign_id).eq("email", hints.email).order("created_at", { ascending: false })
+    );
+    return verifyRecipientHints(recipient, hints) ? recipient : null;
+  }
+
+  return null;
+}
+
 function nextRecipientStatus(currentStatus, eventType) {
+  if (eventType === "unknown" || eventType === "deferred") return currentStatus || "accepted";
   if (TERMINAL_STATUSES.has(currentStatus)) return currentStatus;
   if (eventType === "clicked") return "clicked";
   if (eventType === "opened") return PROGRESSION_RANK[currentStatus] > PROGRESSION_RANK.opened ? currentStatus : "opened";
   if (eventType === "delivered") return PROGRESSION_RANK[currentStatus] > PROGRESSION_RANK.delivered ? currentStatus : "delivered";
   if (eventType === "accepted") return PROGRESSION_RANK[currentStatus] > PROGRESSION_RANK.accepted ? currentStatus : "accepted";
   if (eventType === "soft_bounce") return PROGRESSION_RANK[currentStatus] > PROGRESSION_RANK.soft_bounced ? currentStatus : "soft_bounced";
+  if (eventType === "blocked") return PROGRESSION_RANK[currentStatus] > PROGRESSION_RANK.blocked ? currentStatus : "blocked";
   if (eventType === "hard_bounce" || eventType === "invalid_email") return "hard_bounced";
-  if (eventType === "blocked") return "blocked";
   if (eventType === "complaint") return "complained";
   if (eventType === "unsubscribed") return "unsubscribed";
-  if (eventType === "error") return "failed";
+  if (eventType === "error") return PROGRESSION_RANK[currentStatus] > PROGRESSION_RANK.failed ? currentStatus : "failed";
   return currentStatus || "accepted";
 }
 
-function timestampUpdates(eventType, eventAt, reason) {
-  const updates = { last_event_at: eventAt, last_event_type: eventType, last_event_reason: reason || null };
-  if (eventType === "delivered") updates.delivered_at = eventAt;
-  if (eventType === "opened") updates.opened_at = eventAt;
-  if (eventType === "clicked") updates.clicked_at = eventAt;
-  if (eventType === "soft_bounce") updates.soft_bounced_at = eventAt;
-  if (eventType === "hard_bounce" || eventType === "invalid_email") updates.hard_bounced_at = eventAt;
-  if (eventType === "complaint") updates.complained_at = eventAt;
-  if (eventType === "unsubscribed") updates.unsubscribed_at = eventAt;
-  if (eventType === "blocked") updates.blocked_at = eventAt;
-  if (eventType === "deferred") updates.deferred_at = eventAt;
-  if (eventType === "error") updates.failed_at = eventAt;
+function newerOrEqual(incoming, stored) {
+  if (!stored) return true;
+  return new Date(incoming).getTime() >= new Date(stored).getTime();
+}
+
+function timestampUpdates(recipient, eventType, eventAt, reason) {
+  const updates = {};
+  const setIfNewer = (field) => {
+    if (newerOrEqual(eventAt, recipient[field])) updates[field] = eventAt;
+  };
+  if (eventType === "delivered") setIfNewer("delivered_at");
+  if (eventType === "opened") setIfNewer("opened_at");
+  if (eventType === "clicked") setIfNewer("clicked_at");
+  if (eventType === "soft_bounce") setIfNewer("soft_bounced_at");
+  if (eventType === "hard_bounce" || eventType === "invalid_email") setIfNewer("hard_bounced_at");
+  if (eventType === "complaint") setIfNewer("complained_at");
+  if (eventType === "unsubscribed") setIfNewer("unsubscribed_at");
+  if (eventType === "blocked") setIfNewer("blocked_at");
+  if (eventType === "deferred") setIfNewer("deferred_at");
+  if (eventType === "error") setIfNewer("failed_at");
+  if (eventType !== "unknown" && newerOrEqual(eventAt, recipient.last_event_at)) {
+    updates.last_event_at = eventAt;
+    updates.last_event_type = eventType;
+    updates.last_event_reason = reason || null;
+  }
   return updates;
+}
+
+function blockedReasonIsPermanent(reason = "") {
+  const text = safeText(reason, 1000).toLowerCase();
+  if (!text) return false;
+  const temporarySignals = [
+    "temporary",
+    "temporarily",
+    "transient",
+    "try again",
+    "rate",
+    "throttle",
+    "quota",
+    "greylist",
+    "deferred",
+    "timeout",
+    "server busy",
+    "policy delay",
+    "technical",
+  ];
+  if (temporarySignals.some((signal) => text.includes(signal))) return false;
+  const permanentSignals = [
+    "invalid address",
+    "invalid recipient",
+    "recipient address rejected",
+    "recipient rejected",
+    "address rejected",
+    "unknown user",
+    "user unknown",
+    "no such user",
+    "mailbox not found",
+    "does not exist",
+    "prohibited address",
+    "blacklisted recipient",
+    "blocked recipient",
+  ];
+  return permanentSignals.some((signal) => text.includes(signal));
 }
 
 async function applyContactSuppression(supabase, recipient, event) {
@@ -205,9 +327,12 @@ async function applyContactSuppression(supabase, recipient, event) {
   if (event.event_type === "unsubscribed") {
     type = "email_unsubscribed";
     reason = "Brevo unsubscribe event";
-  } else if (["hard_bounce", "invalid_email", "blocked"].includes(event.event_type)) {
+  } else if (["hard_bounce", "invalid_email"].includes(event.event_type)) {
     type = "email_bounced";
     reason = `Brevo ${event.event_type.replace(/_/g, " ")} event`;
+  } else if (event.event_type === "blocked" && blockedReasonIsPermanent(event.reason)) {
+    type = "email_bounced";
+    reason = "Brevo permanent blocked event";
   } else if (event.event_type === "complaint") {
     type = "global_do_not_contact";
     reason = "Brevo spam complaint event";
@@ -221,7 +346,7 @@ async function applyContactSuppression(supabase, recipient, event) {
     p_type: type,
     p_reason: reason,
     p_added_by: "Brevo webhook",
-    p_notes: safeText(`campaign:${event.campaign_id || recipient.campaign_id || ""} send:${event.send_id || recipient.send_id || ""} recipient:${recipient.id || ""} message:${event.provider_message_id || ""}`, 500),
+    p_notes: safeText(`campaign:${recipient.campaign_id || ""} send:${recipient.send_id || ""} recipient:${recipient.id || ""} message:${event.provider_message_id || ""}`, 500),
   });
   if (rpc.error) throw new Error(rpc.error.message || "Could not apply suppression from Brevo event.");
 }
@@ -229,10 +354,22 @@ async function applyContactSuppression(supabase, recipient, event) {
 async function recordEvent(supabase, event) {
   const recipient = await loadRecipient(supabase, event);
   const eventRow = {
-    ...event,
-    campaign_id: event.campaign_id || recipient?.campaign_id || null,
-    send_id: event.send_id || recipient?.send_id || null,
-    recipient_id: event.recipient_id || recipient?.id || null,
+    provider: event.provider,
+    provider_event_id: event.provider_event_id,
+    provider_message_id: event.provider_message_id,
+    event_type: event.event_type,
+    event_at: event.event_at,
+    email_normalized: event.email_normalized,
+    link_url: event.link_url,
+    reason: event.reason,
+    metadata: {
+      ...(event.metadata || {}),
+      correlated: Boolean(recipient),
+      uncorrelated_reason: recipient ? "" : "No verified recipient match for supplied hints.",
+    },
+    campaign_id: recipient?.campaign_id || null,
+    send_id: recipient?.send_id || null,
+    recipient_id: recipient?.id || null,
     customer_id: normalizeCustomerId(recipient?.customer_id) || null,
   };
   const insert = await supabase.from("marketing_email_events").insert(eventRow).select("id").maybeSingle();
@@ -242,8 +379,8 @@ async function recordEvent(supabase, event) {
     throw new Error(insert.error.message || "Could not record Brevo event.");
   }
 
-  if (recipient?.id) {
-    const updates = timestampUpdates(event.event_type, event.event_at, event.reason);
+  if (recipient?.id && event.event_type !== "unknown") {
+    const updates = timestampUpdates(recipient, event.event_type, event.event_at, event.reason);
     updates.status = nextRecipientStatus(recipient.status, event.event_type);
     if (["soft_bounce", "hard_bounce", "invalid_email", "blocked", "complaint", "unsubscribed", "error"].includes(event.event_type)) {
       updates.failure_reason = event.reason || event.event_type.replace(/_/g, " ");
@@ -271,7 +408,7 @@ export default async function handler(request, response) {
     const body = parseBody(request);
     const payloads = Array.isArray(body) ? body : [body];
     const supabase = getSupabase();
-    const summary = { received: payloads.length, recorded: 0, duplicates: 0, correlated: 0, unknown: 0 };
+    const summary = { received: payloads.length, recorded: 0, duplicates: 0, correlated: 0, uncorrelated: 0, unknown: 0 };
 
     for (const payload of payloads) {
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -283,6 +420,7 @@ export default async function handler(request, response) {
       if (result.duplicate) summary.duplicates += 1;
       else summary.recorded += 1;
       if (result.correlated) summary.correlated += 1;
+      else summary.uncorrelated += 1;
       if (event.event_type === "unknown") summary.unknown += 1;
     }
 
