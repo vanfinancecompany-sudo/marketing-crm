@@ -146,14 +146,16 @@ function aggregateRecipients(recipients = []) {
     delivery_rate: percent(counts.delivered, counts.accepted),
     open_rate: percent(counts.opened, counts.delivered || counts.accepted),
     click_rate: percent(counts.clicked, counts.delivered || counts.accepted),
+    click_to_open_rate: percent(counts.clicked, counts.opened),
     bounce_rate: percent(counts.soft_bounced + counts.hard_bounced + counts.blocked, counts.accepted),
+    unsubscribe_rate: percent(counts.unsubscribed, counts.accepted),
   };
 }
 
-function aggregateSends(sends = []) {
+function aggregateProductionSends(sends = []) {
   return sends.reduce((acc, send) => {
-    if (send.send_type === "test") acc.test_sends += 1;
-    if (send.send_type === "production") acc.production_batches += 1;
+    if (send.send_type !== "production") return acc;
+    acc.production_batches += 1;
     acc.requested += Number(send.requested_count || 0);
     acc.accepted += Number(send.sent_count || 0);
     acc.failed += Number(send.failed_count || 0);
@@ -162,7 +164,18 @@ function aggregateSends(sends = []) {
     if (send.status === "partially_failed") acc.partially_failed += 1;
     if (send.status === "failed") acc.failed_batches += 1;
     return acc;
-  }, { test_sends: 0, production_batches: 0, requested: 0, accepted: 0, failed: 0, duplicates: 0, completed: 0, partially_failed: 0, failed_batches: 0 });
+  }, { production_batches: 0, requested: 0, accepted: 0, failed: 0, duplicates: 0, completed: 0, partially_failed: 0, failed_batches: 0 });
+}
+
+function testSendSummary(sends = []) {
+  const tests = sends.filter((send) => send.send_type === "test").sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+  const latest = tests[0] || null;
+  return {
+    count: tests.length,
+    latest_status: latest?.status || "",
+    latest_created_at: latest?.created_at || null,
+    latest_completed_at: latest?.completed_at || null,
+  };
 }
 
 function statusBreakdown(recipients = []) {
@@ -226,16 +239,19 @@ async function campaignReporting(supabase, body = {}) {
       .select(SEND_COLUMNS)
       .eq("campaign_id", campaign.id)
       .order("created_at", { ascending: false }));
+    const productionSendIds = new Set(sends.filter((send) => send.send_type === "production").map((send) => send.id));
     const recipients = await loadAllRows(() => supabase
       .from("marketing_email_send_recipients")
       .select(RECIPIENT_COLUMNS)
       .eq("campaign_id", campaign.id)
+      .eq("send_type", "production")
       .order("created_at", { ascending: false }));
-    const events = await loadAllRows(() => supabase
+    const allEvents = await loadAllRows(() => supabase
       .from("marketing_email_events")
       .select(EVENT_COLUMNS)
       .eq("campaign_id", campaign.id)
       .order("event_at", { ascending: false }));
+    const events = allEvents.filter((event) => productionSendIds.has(event.send_id));
 
     const recipientAggregate = aggregateRecipients(recipients);
     return {
@@ -243,7 +259,8 @@ async function campaignReporting(supabase, body = {}) {
         migration_required: false,
         campaign_id: campaign.id,
         generated_at: new Date().toISOString(),
-        sends: aggregateSends(sends),
+        sends: aggregateProductionSends(sends),
+        tests: testSendSummary(sends),
         recipients: recipientAggregate,
         status_breakdown: statusBreakdown(recipients),
         top_links: topClickedLinks(events),
@@ -258,7 +275,8 @@ async function campaignReporting(supabase, body = {}) {
           migration_required: true,
           campaign_id: campaign.id,
           generated_at: new Date().toISOString(),
-          sends: aggregateSends([]),
+          sends: aggregateProductionSends([]),
+          tests: testSendSummary([]),
           recipients: aggregateRecipients([]),
           status_breakdown: [],
           top_links: [],
