@@ -15,6 +15,7 @@ export default function Sidebar({ currentView, onNavigate }) {
     "Marketing Centre",
     "Suppression Centre",
     "Email Templates",
+    "Campaigns",
     "Vansco Stock Watch",
     "Reel Lab Beta",
     "YouTube Generator",
@@ -50,6 +51,14 @@ export default function Sidebar({ currentView, onNavigate }) {
           if (item === "Email Templates") {
             return (
               <a key={item} className="sidebar__link" href="/email-templates/">
+                {item}
+              </a>
+            );
+          }
+
+          if (item === "Campaigns") {
+            return (
+              <a key={item} className="sidebar__link" href="/campaigns/">
                 {item}
               </a>
             );
