@@ -9,7 +9,7 @@ import {
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const TEMPLATE_CAMPAIGN_SOURCE = "template_campaign_foundation";
 const CAMPAIGN_COLUMNS = "id,name,description,channel,objective,status,tags,metadata,created_by,created_at,updated_at,archived_at,campaign_type,template_id,template_name,template_snapshot,subject_line,preview_text,audience_snapshot";
-const SEND_COLUMNS = "id,campaign_id,send_type,status,provider,requested_count,eligible_count,suppressed_count,sent_count,failed_count,skipped_duplicate_count,created_by,created_at,started_at,completed_at,confirmation_token_hash,frozen_subject,frozen_preview_text,frozen_html_hash,metadata,error_summary";
+const SEND_COLUMNS = "id,campaign_id,send_type,status,provider,requested_count,eligible_count,suppressed_count,sent_count,failed_count,skipped_duplicate_count,created_by,created_at,updated_at,started_at,completed_at,confirmation_token_hash,frozen_subject,frozen_preview_text,frozen_html_hash,metadata,error_summary";
 const RECIPIENT_COLUMNS = "id,send_id,campaign_id,send_type,customer_id,email,status,provider_message_id,provider_event_id,failure_reason,first_sent_at,last_event_at,created_at,updated_at,metadata";
 const PIPELINES = new Set(["all", "finance", "rent2buy", "both"]);
 const AUDIENCE_MODES = new Set(["standard", "never_emailed", "recently_imported", "manual_customer_ids", "custom_search"]);
@@ -18,13 +18,21 @@ const PAGE_SIZE = 1000;
 const MAX_PRODUCTION_BATCH_SIZE = 250;
 const PREPARE_TOKEN_TTL_MS = 10 * 60 * 1000;
 const TEST_COOLDOWN_MS = 60 * 1000;
-const SUCCESSFUL_PRODUCTION_STATUSES = ["pending", "accepted", "sent", "delivered", "opened", "clicked"];
+const SUCCESSFUL_PRODUCTION_STATUSES = ["pending", "accepted", "sent", "delivered", "opened", "clicked", "submission_unknown"];
 
 class ApiError extends Error {
   constructor(statusCode, message) {
     super(message);
     this.name = "ApiError";
     this.statusCode = statusCode;
+  }
+}
+
+class AmbiguousSubmissionError extends ApiError {
+  constructor(message) {
+    super(502, message);
+    this.name = "AmbiguousSubmissionError";
+    this.ambiguous = true;
   }
 }
 
@@ -81,6 +89,11 @@ function validateEmail(value, label = "Email address") {
     throw new ApiError(400, `${label} is not valid.`);
   }
   return email;
+}
+
+function safeRecipientEmail(value) {
+  const email = normalizeEmail(value);
+  return email && email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "";
 }
 
 function normalizeCustomerId(value) {
@@ -232,12 +245,25 @@ async function callBrevoEmail({ to, name, subject, html, tags = [], headers = {}
         headers,
       }),
     });
-    const data = await response.json().catch(() => ({}));
+    const text = await response.text().catch(() => {
+      throw new AmbiguousSubmissionError("Brevo response could not be read after submission.");
+    });
+    let data = {};
+    if (text) {
+      try { data = JSON.parse(text); }
+      catch {
+        if (response.ok) throw new AmbiguousSubmissionError("Brevo accepted status but returned an unreadable response.");
+        data = { message: text.slice(0, 300) };
+      }
+    }
     if (!response.ok) throw new ApiError(502, data.message || "Brevo rejected the email request.");
-    return { messageId: data.messageId || data.messageIds?.[0] || "", response: data };
+    const messageId = data.messageId || data.messageIds?.[0] || "";
+    if (!messageId) throw new AmbiguousSubmissionError("Brevo response did not include a message id.");
+    return { messageId, response: data };
   } catch (error) {
-    if (error?.name === "AbortError") throw new ApiError(502, "Brevo request timed out.");
-    throw error;
+    if (error?.name === "AbortError") throw new AmbiguousSubmissionError("Brevo request timed out after submission was attempted.");
+    if (error instanceof ApiError) throw error;
+    throw new AmbiguousSubmissionError("Brevo submission outcome is unknown due to a network error.");
   } finally {
     clearTimeout(timeout);
   }
@@ -331,10 +357,15 @@ async function resolveRecipients(supabase, campaign, options = {}) {
   let totalMatching = 0;
   let suppressed = 0;
   let skippedDuplicate = 0;
+  let invalidEmail = 0;
   let from = 0;
   while (true) {
     const result = await applyAudienceFilters(
-      supabase.from("marketing_contacts").select("id,customer_id,first_name,last_name,company,email,email_normalized,marketing_status,email_ready,suppression,pipeline,source,created_at"),
+      supabase
+        .from("marketing_contacts")
+        .select("id,customer_id,first_name,last_name,company,email,email_normalized,marketing_status,email_ready,suppression,pipeline,source,created_at")
+        .order("customer_id", { ascending: true })
+        .order("id", { ascending: true }),
       rules
     ).range(from, from + PAGE_SIZE - 1);
     assertSupabase(result, "Could not resolve campaign recipients.");
@@ -343,24 +374,29 @@ async function resolveRecipients(supabase, campaign, options = {}) {
       const customerId = normalizeCustomerId(row.customer_id);
       if (rules.mode === "never_emailed" && exportedEmailIds.has(customerId)) continue;
       totalMatching += 1;
-      const email = validateEmail(row.email_normalized || row.email, "Customer email");
+      const email = safeRecipientEmail(row.email_normalized || row.email);
+      if (!row.email_ready || !email) {
+        suppressed += 1;
+        invalidEmail += 1;
+        continue;
+      }
       if (emailSuppressed(row)) { suppressed += 1; continue; }
-      if (!row.email_ready || !email) { suppressed += 1; continue; }
       if (alreadySent.has(customerId)) { skippedDuplicate += 1; continue; }
       if (byCustomerId.has(customerId) || byEmail.has(email)) { skippedDuplicate += 1; continue; }
       byCustomerId.add(customerId);
       byEmail.add(email);
-      recipients.push({
-        id: row.id,
-        customer_id: customerId,
-        email,
-        name: normalizedFullName(row),
-        first_name: row.first_name || "",
-        last_name: row.last_name || "",
-      });
-      if (options.limit && recipients.length >= options.limit) break;
+      if (!options.limit || recipients.length < options.limit) {
+        recipients.push({
+          id: row.id,
+          customer_id: customerId,
+          email,
+          name: normalizedFullName(row),
+          first_name: row.first_name || "",
+          last_name: row.last_name || "",
+        });
+      }
     }
-    if ((options.limit && recipients.length >= options.limit) || rows.length < PAGE_SIZE) break;
+    if (rows.length < PAGE_SIZE) break;
     from += PAGE_SIZE;
   }
   return {
@@ -370,6 +406,7 @@ async function resolveRecipients(supabase, campaign, options = {}) {
       matching_count: totalMatching,
       suppressed_count: suppressed,
       skipped_duplicate_count: skippedDuplicate,
+      invalid_email_count: invalidEmail,
       final_eligible_count: Math.max(0, totalMatching - suppressed - skippedDuplicate),
       resolved_count: recipients.length,
     },
@@ -491,6 +528,13 @@ function requestedBatchSize(value) {
   return size;
 }
 
+function countsMatch(send, counts) {
+  return Number(send.metadata?.matching_count || 0) === counts.matching_count
+    && Number(send.eligible_count || 0) === counts.final_eligible_count
+    && Number(send.suppressed_count || 0) === counts.suppressed_count
+    && Number(send.skipped_duplicate_count || 0) === counts.skipped_duplicate_count;
+}
+
 async function prepareProductionSend(supabase, body = {}) {
   const campaign = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
   if (campaign.status !== "ready") throw new ApiError(400, "Only Ready campaigns can prepare a production send.");
@@ -503,49 +547,56 @@ async function prepareProductionSend(supabase, body = {}) {
   const rendered = renderFrozenCampaign(campaign, { test: false, unsubscribeUrl: "{{unsubscribe_url}}" });
   const token = randomToken();
   const expiresAt = new Date(Date.now() + PREPARE_TOKEN_TTL_MS).toISOString();
-  const { data: send } = assertSupabase(
-    await supabase.from("marketing_email_sends").insert({
-      campaign_id: campaign.id,
-      send_type: "production",
-      status: "preparing",
-      requested_count: selectedCount,
-      eligible_count: resolved.counts.final_eligible_count,
-      suppressed_count: resolved.counts.suppressed_count,
-      sent_count: 0,
-      failed_count: 0,
-      skipped_duplicate_count: resolved.counts.skipped_duplicate_count,
-      created_by: cleanText(body.createdBy || "Marketing CRM", 200),
-      confirmation_token_hash: tokenHash(token),
-      frozen_subject: rendered.subject,
-      frozen_preview_text: rendered.preview_text,
-      frozen_html_hash: rendered.html_hash,
-      metadata: {
-        token_expires_at: expiresAt,
-        audience_rules: resolved.rules,
+  try {
+    const { data: send } = assertSupabase(
+      await supabase.from("marketing_email_sends").insert({
+        campaign_id: campaign.id,
+        send_type: "production",
+        status: "preparing",
+        requested_count: selectedCount,
+        eligible_count: resolved.counts.final_eligible_count,
+        suppressed_count: resolved.counts.suppressed_count,
+        sent_count: 0,
+        failed_count: 0,
+        skipped_duplicate_count: resolved.counts.skipped_duplicate_count,
+        created_by: cleanText(body.createdBy || "Marketing CRM", 200),
+        confirmation_token_hash: tokenHash(token),
+        frozen_subject: rendered.subject,
+        frozen_preview_text: rendered.preview_text,
+        frozen_html_hash: rendered.html_hash,
+        metadata: {
+          token_expires_at: expiresAt,
+          audience_rules: resolved.rules,
+          matching_count: resolved.counts.matching_count,
+          invalid_email_count: resolved.counts.invalid_email_count,
+          proposed_batch_size: selectedCount,
+          sender_email_configured: Boolean(process.env.BREVO_SENDER_EMAIL),
+        },
+      }).select(SEND_COLUMNS).single(),
+      "Could not create production-send preparation."
+    );
+    return {
+      preparation: {
+        send_id: send.id,
+        confirmation_token: token,
+        expires_at: expiresAt,
+        confirmation_phrase: `SEND ${selectedCount}`,
         matching_count: resolved.counts.matching_count,
+        suppressed_count: resolved.counts.suppressed_count,
+        skipped_duplicate_count: resolved.counts.skipped_duplicate_count,
+        invalid_email_count: resolved.counts.invalid_email_count,
+        final_eligible_count: resolved.counts.final_eligible_count,
         proposed_batch_size: selectedCount,
+        subject: rendered.subject,
+        html_hash: rendered.html_hash,
+        sender_name: process.env.BREVO_SENDER_NAME || "",
         sender_email_configured: Boolean(process.env.BREVO_SENDER_EMAIL),
       },
-    }).select(SEND_COLUMNS).single(),
-    "Could not create production-send preparation."
-  );
-  return {
-    preparation: {
-      send_id: send.id,
-      confirmation_token: token,
-      expires_at: expiresAt,
-      confirmation_phrase: `SEND ${selectedCount}`,
-      matching_count: resolved.counts.matching_count,
-      suppressed_count: resolved.counts.suppressed_count,
-      skipped_duplicate_count: resolved.counts.skipped_duplicate_count,
-      final_eligible_count: resolved.counts.final_eligible_count,
-      proposed_batch_size: selectedCount,
-      subject: rendered.subject,
-      html_hash: rendered.html_hash,
-      sender_name: process.env.BREVO_SENDER_NAME || "",
-      sender_email_configured: Boolean(process.env.BREVO_SENDER_EMAIL),
-    },
-  };
+    };
+  } catch (error) {
+    if (isMissingSendInfrastructure(error)) throw new ApiError(400, "Email send migration has not been applied yet.");
+    throw error;
+  }
 }
 
 async function cancelPreparedSend(supabase, body = {}) {
@@ -577,14 +628,17 @@ async function confirmProductionSend(supabase, body = {}) {
   if (!expiresAt || Date.now() > expiresAt) throw new ApiError(409, "Confirmation token has expired. Prepare the send again.");
   const campaign = await loadOwnedTemplateCampaign(supabase, send.campaign_id);
   if (campaign.status !== "ready") throw new ApiError(400, "Campaign must still be Ready before sending.");
-  const resolved = await resolveRecipients(supabase, campaign, { limit: requestedLimit });
-  const finalCount = Math.min(requestedLimit, resolved.counts.final_eligible_count, MAX_PRODUCTION_BATCH_SIZE);
+
+  const fullRecount = await resolveRecipients(supabase, campaign);
+  const finalCount = Math.min(requestedLimit, fullRecount.counts.final_eligible_count, MAX_PRODUCTION_BATCH_SIZE);
   if (finalCount <= 0) throw new ApiError(400, "No eligible recipients remain for this campaign.");
   if (phrase !== `SEND ${finalCount}`) throw new ApiError(409, `Type SEND ${finalCount} to confirm this production batch.`);
-  if (finalCount !== Number(send.requested_count || 0) || resolved.counts.final_eligible_count !== Number(send.eligible_count || 0)) {
+  if (finalCount !== Number(send.requested_count || 0) || !countsMatch(send, fullRecount.counts)) {
     await supabase.from("marketing_email_sends").update({ status: "cancelled", completed_at: new Date().toISOString(), error_summary: "Recipient counts changed before confirmation." }).eq("id", send.id);
     throw new ApiError(409, "Recipient counts changed. Prepare the send again.");
   }
+
+  const selectedRecipients = fullRecount.recipients.slice(0, finalCount);
   const claim = assertSupabase(
     await supabase.from("marketing_email_sends").update({ status: "sending", started_at: new Date().toISOString(), confirmation_token_hash: null }).eq("id", send.id).eq("status", "preparing").eq("confirmation_token_hash", tokenHash(token)).select(SEND_COLUMNS),
     "Could not claim prepared send."
@@ -595,8 +649,8 @@ async function confirmProductionSend(supabase, body = {}) {
   const renderedBase = renderFrozenCampaign(campaign, { test: false, unsubscribeUrl: "{{unsubscribe_url}}" });
   let sentCount = 0;
   let failedCount = 0;
-  let skippedDuplicate = Number(resolved.counts.skipped_duplicate_count || 0);
-  const selectedRecipients = resolved.recipients.slice(0, finalCount);
+  let unknownCount = 0;
+  let skippedDuplicate = Number(fullRecount.counts.skipped_duplicate_count || 0);
 
   for (const recipient of selectedRecipients) {
     const inserted = await supabase.from("marketing_email_send_recipients").insert({
@@ -618,7 +672,7 @@ async function confirmProductionSend(supabase, body = {}) {
       const latest = await supabase.from("marketing_contacts").select("marketing_status,suppression,email_ready,email,email_normalized").eq("customer_id", recipient.customer_id).maybeSingle();
       assertSupabase(latest, "Could not recheck recipient suppression.");
       const latestContact = latest.data || {};
-      if (!latestContact.email_ready || emailSuppressed(latestContact) || validateEmail(latestContact.email_normalized || latestContact.email) !== recipient.email) {
+      if (!latestContact.email_ready || emailSuppressed(latestContact) || safeRecipientEmail(latestContact.email_normalized || latestContact.email) !== recipient.email) {
         await supabase.from("marketing_email_send_recipients").update({ status: "skipped_suppressed", failure_reason: "Suppressed or email changed before provider submission." }).eq("id", recipientRecord.id);
         continue;
       }
@@ -631,6 +685,7 @@ async function confirmProductionSend(supabase, body = {}) {
         html,
         tags: ["marketing-crm", "production", campaign.id],
         headers: {
+          "List-Unsubscribe": `<${unsubscribeUrl}>`,
           "X-Marketing-Campaign-Id": campaign.id,
           "X-Marketing-Send-Id": send.id,
           "X-Marketing-Recipient-Id": recipientRecord.id,
@@ -644,13 +699,21 @@ async function confirmProductionSend(supabase, body = {}) {
       }).eq("id", recipientRecord.id);
       sentCount += 1;
     } catch (error) {
-      failedCount += 1;
-      await supabase.from("marketing_email_send_recipients").update({ status: "failed", failure_reason: cleanText(error.message, 1000), last_event_at: new Date().toISOString() }).eq("id", recipientRecord.id);
+      if (error?.ambiguous) {
+        unknownCount += 1;
+        await supabase.from("marketing_email_send_recipients").update({ status: "submission_unknown", failure_reason: cleanText(error.message, 1000), last_event_at: new Date().toISOString() }).eq("id", recipientRecord.id);
+      } else {
+        failedCount += 1;
+        await supabase.from("marketing_email_send_recipients").update({ status: "failed", failure_reason: cleanText(error.message, 1000), last_event_at: new Date().toISOString() }).eq("id", recipientRecord.id);
+      }
     }
   }
 
-  const finalStatus = failedCount > 0 ? (sentCount > 0 ? "partially_failed" : "failed") : "completed";
+  const finalStatus = failedCount || unknownCount ? (sentCount > 0 ? "partially_failed" : "failed") : "completed";
   const completedAt = new Date().toISOString();
+  const errorParts = [];
+  if (failedCount) errorParts.push(`${failedCount} recipient(s) failed immediate provider submission`);
+  if (unknownCount) errorParts.push(`${unknownCount} recipient submission outcome(s) unknown; reconcile in Brevo before retrying`);
   const { data: updatedSend } = assertSupabase(
     await supabase.from("marketing_email_sends").update({
       status: finalStatus,
@@ -658,7 +721,8 @@ async function confirmProductionSend(supabase, body = {}) {
       failed_count: failedCount,
       skipped_duplicate_count: skippedDuplicate,
       completed_at: completedAt,
-      error_summary: failedCount ? `${failedCount} recipient(s) failed immediate provider submission.` : "",
+      metadata: { ...(send.metadata || {}), submission_unknown_count: unknownCount, invalid_email_count: fullRecount.counts.invalid_email_count },
+      error_summary: errorParts.join("; "),
     }).eq("id", send.id).select(SEND_COLUMNS).single(),
     "Could not update send audit."
   );
