@@ -158,9 +158,34 @@ function generateBlockId() {
 }
 
 function normalizeProfileText(value, label, limit = 300) {
-  const text = cleanText(value, limit);
+  const text = String(value || "").trim();
   if (text.length > limit) throw new ValidationError(`${label} is too long.`);
   return text;
+}
+
+function frozenSelectionKey(productMode, selectionId) {
+  return `${productMode}:${selectionId}`;
+}
+
+function selectionIdForVehicle(productMode, vehicle = {}) {
+  const identity = vehicle.id || vehicle.source_id || vehicle.registration || vehicle.title || vehicle.name || "";
+  return `${productMode}:${identity}`;
+}
+
+function cloneVehicleSnapshot(snapshot = {}) {
+  return JSON.parse(JSON.stringify(snapshot));
+}
+
+function collectFrozenVehicleSnapshots(blocks = []) {
+  const snapshots = new Map();
+  (blocks || []).forEach((block) => {
+    if (block?.type !== "vehicle_grid") return;
+    const productMode = block.settings?.product_mode || "finance";
+    (block.settings?.selected_vehicles || []).forEach((vehicle) => {
+      if (vehicle?.selection_id) snapshots.set(frozenSelectionKey(productMode, vehicle.selection_id), cloneVehicleSnapshot(vehicle));
+    });
+  });
+  return snapshots;
 }
 
 function normalizeFinanceSnapshot(value, enabled) {
@@ -187,42 +212,78 @@ function normalizeRentSnapshot(value, enabled) {
   return rent2buy;
 }
 
-function normalizeSelectedVehicles(value, productMode, enabled) {
+function normalizeFrozenSelectedVehicle(vehicle, productMode, enabled, options = {}) {
+  const selectionId = normalizeProfileText(vehicle.selection_id, "Selected vehicle selection_id", 160);
+  if (!selectionId) throw new ValidationError("Selected vehicle selection_id is required.");
+  const existingSnapshot = options.existingFrozenSnapshots?.get(frozenSelectionKey(productMode, selectionId));
+  if (existingSnapshot) return { ...cloneVehicleSnapshot(existingSnapshot), snapshot_status: "frozen" };
+  if (!options.allowSubmittedFrozenSnapshots) throw new ValidationError("New selected vehicles must be selected from current stock.");
+  const snapshot = {
+    snapshot_status: "frozen",
+    selection_id: selectionId,
+    source_id: normalizeProfileText(vehicle.source_id, "Selected vehicle source_id", 160),
+    registration: normalizeProfileText(vehicle.registration, "Selected vehicle registration", 40),
+    title: normalizeProfileText(vehicle.title, "Selected vehicle title", 300),
+    description: normalizeProfileText(vehicle.description, "Selected vehicle description", 1000),
+    spec: normalizeProfileText(vehicle.spec, "Selected vehicle spec", 1000),
+    primary_image_url: cleanHttpsUrl(vehicle.primary_image_url, "Selected vehicle image URL"),
+    image_override_url: cleanHttpsUrl(vehicle.image_override_url, "Selected vehicle override image URL"),
+    finance: null,
+    rent2buy: null,
+  };
+  if (!snapshot.registration && !snapshot.title) throw new ValidationError("Selected vehicle registration or title is required.");
+  if (productMode === "finance") {
+    if (!vehicle.finance || vehicle.rent2buy) throw new ValidationError("Finance vehicle grids require finance pricing and must not include Rent2Buy pricing.");
+    snapshot.finance = normalizeFinanceSnapshot(vehicle.finance, enabled);
+  } else {
+    if (!vehicle.rent2buy || vehicle.finance) throw new ValidationError("Rent2Buy vehicle grids require Rent2Buy pricing and must not include Finance pricing.");
+    snapshot.rent2buy = normalizeRentSnapshot(vehicle.rent2buy, enabled);
+  }
+  return snapshot;
+}
+
+function shouldResolveSelectedVehicle(vehicle, options = {}) {
+  if (vehicle.snapshot_status === "unresolved" || vehicle.requires_resolution === true) return true;
+  if (vehicle.snapshot_status === "frozen") return false;
+  if (options.allowUnmarkedFrozenSnapshots && (vehicle.finance || vehicle.rent2buy)) return false;
+  return true;
+}
+
+function normalizeUnresolvedSelectedVehicle(vehicle, productMode) {
+  const selectionId = normalizeProfileText(vehicle.selection_id, "Selected vehicle selection_id", 160);
+  const sourceId = normalizeProfileText(vehicle.source_id, "Selected vehicle source_id", 160);
+  const registration = normalizeProfileText(vehicle.registration, "Selected vehicle registration", 40);
+  const lookupValue = selectionId || sourceId || registration;
+  if (!lookupValue) throw new ValidationError("Selected vehicle reference is required.");
+  return {
+    snapshot_status: "unresolved",
+    selection_id: selectionId,
+    source_id: sourceId,
+    registration,
+    product_mode: productMode,
+    image_override_url: cleanHttpsUrl(vehicle.image_override_url, "Selected vehicle override image URL"),
+  };
+}
+
+function normalizeSelectedVehicles(value, productMode, enabled, options = {}) {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) throw new ValidationError("Vehicle grid selected_vehicles must be an array.");
   if (value.length > 6) throw new ValidationError("Vehicle grid can contain a maximum of 6 selected vehicles.");
   const seen = new Set();
   return value.map((vehicle) => {
     if (!isPlainObject(vehicle)) throw new ValidationError("Each selected vehicle snapshot must be an object.");
-    const selectionId = cleanText(vehicle.selection_id, 160);
-    if (!selectionId) throw new ValidationError("Selected vehicle selection_id is required.");
-    if (seen.has(selectionId)) throw new ValidationError("Selected vehicle selection_id values must be unique.");
-    seen.add(selectionId);
-    const snapshot = {
-      selection_id: selectionId,
-      source_id: cleanText(vehicle.source_id, 160),
-      registration: normalizeProfileText(vehicle.registration, "Selected vehicle registration", 40),
-      title: normalizeProfileText(vehicle.title, "Selected vehicle title", 300),
-      description: normalizeProfileText(vehicle.description, "Selected vehicle description", 1000),
-      spec: normalizeProfileText(vehicle.spec, "Selected vehicle spec", 1000),
-      primary_image_url: cleanHttpsUrl(vehicle.primary_image_url, "Selected vehicle image URL"),
-      image_override_url: cleanHttpsUrl(vehicle.image_override_url, "Selected vehicle override image URL"),
-      finance: null,
-      rent2buy: null,
-    };
-    if (!snapshot.registration && !snapshot.title) throw new ValidationError("Selected vehicle registration or title is required.");
-    if (productMode === "finance") {
-      if (!vehicle.finance || vehicle.rent2buy) throw new ValidationError("Finance vehicle grids require finance pricing and must not include Rent2Buy pricing.");
-      snapshot.finance = normalizeFinanceSnapshot(vehicle.finance, enabled);
-    } else {
-      if (!vehicle.rent2buy || vehicle.finance) throw new ValidationError("Rent2Buy vehicle grids require Rent2Buy pricing and must not include Finance pricing.");
-      snapshot.rent2buy = normalizeRentSnapshot(vehicle.rent2buy, enabled);
-    }
-    return snapshot;
+    const normalized = shouldResolveSelectedVehicle(vehicle, options)
+      ? normalizeUnresolvedSelectedVehicle(vehicle, productMode)
+      : normalizeFrozenSelectedVehicle(vehicle, productMode, enabled, options);
+    const uniqueKey = normalized.selection_id || `${productMode}:${normalized.source_id}` || `${productMode}:${normalizeRegistrationKey(normalized.registration)}`;
+    if (!uniqueKey) throw new ValidationError("Selected vehicle reference is required.");
+    if (seen.has(uniqueKey)) throw new ValidationError("Selected vehicle references must be unique.");
+    seen.add(uniqueKey);
+    return normalized;
   });
 }
 
-function normalizeBlockSettings(type, settings = {}, enabled = true) {
+function normalizeBlockSettings(type, settings = {}, enabled = true, options = {}) {
   if (!isPlainObject(settings)) throw new ValidationError("Block settings must be an object.");
   if (type === "text") {
     return {
@@ -279,12 +340,14 @@ function normalizeBlockSettings(type, settings = {}, enabled = true) {
   if (type === "vehicle_grid") {
     const productMode = requireChoice(settings.product_mode || "finance", VEHICLE_PRODUCT_MODES, "Vehicle grid product mode");
     const sourceMode = requireChoice(settings.source_mode || "selected", VEHICLE_SOURCE_MODES, "Vehicle grid source mode");
-    const selectedVehicles = normalizeSelectedVehicles(settings.selected_vehicles || [], productMode, enabled && sourceMode === "selected");
+    const selectedVehicles = normalizeSelectedVehicles(settings.selected_vehicles || [], productMode, enabled && sourceMode === "selected", options);
     if (enabled && sourceMode === "selected" && selectedVehicles.length > 6) throw new ValidationError("Vehicle grid can contain a maximum of 6 selected vehicles.");
+    const selectedCount = selectedVehicles.length;
+    const requestedCount = selectedCount || settings.number_of_vehicles || 3;
     return {
       heading: cleanText(settings.heading, 300),
       intro_text: cleanText(settings.intro_text, 1000),
-      number_of_vehicles: requireInteger(settings.number_of_vehicles || Math.max(1, selectedVehicles.length || 3), "Vehicle grid number of vehicles", { min: 1, max: 6 }),
+      number_of_vehicles: selectedCount || requireInteger(requestedCount, "Vehicle grid number of vehicles", { min: 1, max: 6 }),
       layout: requireChoice(settings.layout || "one_column", VEHICLE_LAYOUTS, "Vehicle grid layout"),
       source_mode: sourceMode,
       product_mode: productMode,
@@ -318,14 +381,115 @@ function normalizeContentBlocks(value = [], options = {}) {
       type,
       position,
       enabled: block.enabled,
-      settings: normalizeBlockSettings(type, block.settings, block.enabled),
+      settings: normalizeBlockSettings(type, block.settings, block.enabled, options),
     };
   });
   return normalized.sort((a, b) => a.position - b.position).map((block, index) => ({ ...block, position: index + 1 }));
 }
 
 function cloneContentBlocks(blocks = []) {
-  return normalizeContentBlocks(blocks).map((block, index) => ({ ...block, id: generateBlockId(), position: index + 1 }));
+  return normalizeContentBlocks(blocks, { allowSubmittedFrozenSnapshots: true, allowUnmarkedFrozenSnapshots: true }).map((block, index) => ({ ...block, id: generateBlockId(), position: index + 1 }));
+}
+
+function vehicleLookupCandidates(productMode, reference = {}) {
+  const candidates = [];
+  if (reference.selection_id) candidates.push(reference.selection_id);
+  if (reference.source_id) candidates.push(`${productMode}:${reference.source_id}`);
+  if (reference.registration) {
+    candidates.push(`${productMode}:${reference.registration}`);
+    const registrationKey = normalizeRegistrationKey(reference.registration);
+    if (registrationKey) candidates.push(`${productMode}:reg:${registrationKey}`);
+  }
+  return candidates.filter(Boolean);
+}
+
+function buildVehicleSelectionLookup(vehicles = []) {
+  const lookup = new Map();
+  vehicles.forEach((vehicle) => {
+    ["finance", "rent2buy"].forEach((productMode) => {
+      const profile = vehicle[productMode];
+      if (!profile || profile.eligible === false) return;
+      const entries = [selectionIdForVehicle(productMode, vehicle)];
+      if (vehicle.id) entries.push(`${productMode}:${vehicle.id}`);
+      if (vehicle.registration) {
+        entries.push(`${productMode}:${vehicle.registration}`);
+        const registrationKey = normalizeRegistrationKey(vehicle.registration);
+        if (registrationKey) entries.push(`${productMode}:reg:${registrationKey}`);
+      }
+      entries.filter(Boolean).forEach((key) => {
+        if (!lookup.has(key)) lookup.set(key, vehicle);
+      });
+    });
+  });
+  return lookup;
+}
+
+function buildAuthoritativeSelectedVehicleSnapshot(reference, vehicle, productMode) {
+  const profile = vehicle[productMode];
+  if (!profile || profile.eligible === false) throw new ValidationError("Selected vehicle is not eligible for the chosen product mode.");
+  const snapshot = {
+    snapshot_status: "frozen",
+    selection_id: normalizeProfileText(reference.selection_id || selectionIdForVehicle(productMode, vehicle), "Selected vehicle selection_id", 160),
+    source_id: normalizeProfileText(vehicle.id || reference.source_id, "Selected vehicle source_id", 160),
+    registration: normalizeProfileText(vehicle.registration || reference.registration, "Selected vehicle registration", 40),
+    title: normalizeProfileText(vehicle.title || vehicle.name, "Selected vehicle title", 300),
+    description: normalizeProfileText(vehicle.description || "", "Selected vehicle description", 1000),
+    spec: normalizeProfileText(vehicle.spec || "", "Selected vehicle spec", 1000),
+    primary_image_url: cleanHttpsUrl(vehicle.primary_image_url || vehicle.image_url || "", "Selected vehicle image URL"),
+    image_override_url: cleanHttpsUrl(reference.image_override_url, "Selected vehicle override image URL"),
+    finance: null,
+    rent2buy: null,
+  };
+  if (!snapshot.registration && !snapshot.title) throw new ValidationError("Selected vehicle registration or title is required.");
+  if (productMode === "finance") {
+    snapshot.finance = normalizeFinanceSnapshot({
+      price: profile.price,
+      vat: profile.vat,
+      monthly: profile.monthly,
+      url: profile.url,
+    }, true);
+  } else {
+    snapshot.rent2buy = normalizeRentSnapshot({
+      monthly: profile.monthly,
+      initialRental: profile.initialRental,
+      term: profile.term,
+      url: profile.url,
+    }, true);
+  }
+  return snapshot;
+}
+
+async function resolveSelectedVehicleReferences(supabase, blocks = []) {
+  const needsResolution = blocks.some((block) => block.type === "vehicle_grid" && (block.settings.selected_vehicles || []).some((vehicle) => vehicle.snapshot_status === "unresolved"));
+  if (!needsResolution) return blocks;
+  if (!supabase) throw new Error("Vehicle selection resolution requires Supabase access.");
+  const { vehicles } = await vehiclesForSelection(supabase);
+  const lookup = buildVehicleSelectionLookup(vehicles);
+  return blocks.map((block) => {
+    if (block.type !== "vehicle_grid") return block;
+    const productMode = block.settings.product_mode;
+    const resolvedSeen = new Set();
+    const selectedVehicles = (block.settings.selected_vehicles || []).map((vehicle) => {
+      const resolved = vehicle.snapshot_status === "unresolved"
+        ? (() => {
+            const sourceVehicle = vehicleLookupCandidates(productMode, vehicle).map((key) => lookup.get(key)).find(Boolean);
+            if (!sourceVehicle) throw new ValidationError("Selected vehicle could not be found in current stock.");
+            return buildAuthoritativeSelectedVehicleSnapshot(vehicle, sourceVehicle, productMode);
+          })()
+        : vehicle;
+      if (resolvedSeen.has(resolved.selection_id)) throw new ValidationError("Selected vehicle references must be unique.");
+      resolvedSeen.add(resolved.selection_id);
+      return resolved;
+    });
+    return {
+      ...block,
+      settings: {
+        ...block.settings,
+        selected_vehicles: selectedVehicles,
+        number_of_vehicles: selectedVehicles.length || block.settings.number_of_vehicles || 3,
+      },
+    };
+  });
 }
 
 function validateTemplate(values) {
@@ -338,7 +502,7 @@ function validateTemplate(values) {
   }
 }
 
-function normalizeValues(values = {}, options = {}) {
+async function normalizeValues(values = {}, options = {}) {
   const contentBlocksSupplied = Object.prototype.hasOwnProperty.call(values, "content_blocks");
   const normalized = {
     name: cleanText(values.name, 200),
@@ -358,9 +522,10 @@ function normalizeValues(values = {}, options = {}) {
     secondary_colour: requireColour(values.secondary_colour || "#eef2ff", "Secondary colour"),
     social_links: cleanText(values.social_links, 1000),
     master_layout: normalizeMasterLayout(values.master_layout),
-    content_blocks: normalizeContentBlocks(contentBlocksSupplied ? values.content_blocks : [], { supplied: true }),
+    content_blocks: normalizeContentBlocks(contentBlocksSupplied ? values.content_blocks : [], { supplied: true, ...options }),
     status: normalizeStatus(values.status),
   };
+  if (options.resolveVehicleReferences) normalized.content_blocks = await resolveSelectedVehicleReferences(options.supabase, normalized.content_blocks);
   validateTemplate(normalized);
   if (!options.allowArchivedStatus && !EDITABLE_STATUSES.has(normalized.status)) throw new ValidationError("Use the Archive action to archive templates.");
   return normalized;
@@ -386,7 +551,7 @@ function normalizeTemplate(row = {}) {
     secondary_colour: row.secondary_colour || "#eef2ff",
     social_links: row.social_links || "",
     master_layout: row.master_layout || "custom_blank",
-    content_blocks: normalizeContentBlocks(row.content_blocks || [], { supplied: true }),
+    content_blocks: normalizeContentBlocks(row.content_blocks || [], { supplied: true, allowSubmittedFrozenSnapshots: true, allowUnmarkedFrozenSnapshots: true }),
     status: row.status || "draft",
     created_by: row.created_by || "",
     created_at: row.created_at || "",
@@ -413,7 +578,7 @@ async function listTemplates(supabase, body = {}) {
 }
 
 async function createTemplate(supabase, body = {}) {
-  const values = normalizeValues(templateInput(body));
+  const values = await normalizeValues(templateInput(body), { supabase, resolveVehicleReferences: true });
   const { data } = assertSupabase(
     await supabase.from("marketing_email_templates").insert({ ...values, created_by: cleanText(body.createdBy || "Marketing CRM", 200) }).select(TEMPLATE_COLUMNS).single(),
     "Could not create email template."
@@ -424,7 +589,8 @@ async function createTemplate(supabase, body = {}) {
 async function updateTemplate(supabase, body = {}) {
   const existing = await loadTemplate(supabase, body.template?.id || body.id);
   if (existing.status === "archived") throw new ValidationError("Archived templates are read only.");
-  const values = normalizeValues(templateInput(body));
+  const existingFrozenSnapshots = collectFrozenVehicleSnapshots(existing.content_blocks);
+  const values = await normalizeValues(templateInput(body), { supabase, resolveVehicleReferences: true, existingFrozenSnapshots });
   const { data } = assertSupabase(
     await supabase.from("marketing_email_templates").update(values).eq("id", existing.id).select(TEMPLATE_COLUMNS).single(),
     "Could not update email template."
@@ -444,8 +610,9 @@ async function archiveTemplate(supabase, body = {}) {
 
 async function duplicateTemplate(supabase, body = {}) {
   const existing = await loadTemplate(supabase, body.template?.id || body.id);
+  const existingFrozenSnapshots = collectFrozenVehicleSnapshots(existing.content_blocks);
   const { id, created_at, updated_at, archived_at, created_by, ...copy } = existing;
-  const values = normalizeValues({ ...copy, name: `Copy of ${existing.name}`, status: "draft", content_blocks: cloneContentBlocks(existing.content_blocks) });
+  const values = await normalizeValues({ ...copy, name: `Copy of ${existing.name}`, status: "draft", content_blocks: cloneContentBlocks(existing.content_blocks) }, { existingFrozenSnapshots });
   const { data } = assertSupabase(
     await supabase.from("marketing_email_templates").insert({ ...values, created_by: cleanText(body.createdBy || "Marketing CRM", 200) }).select(TEMPLATE_COLUMNS).single(),
     "Could not duplicate email template."
@@ -503,7 +670,8 @@ function renderEscapedTextBlock(value, colour = "#1f2937", align = "left") {
 }
 
 function renderVehicleGrid(settings = {}) {
-  const count = Math.max(1, Math.min(6, Number(settings.number_of_vehicles || settings.selected_vehicles?.length || 3)));
+  const selectedCount = Array.isArray(settings.selected_vehicles) ? settings.selected_vehicles.length : 0;
+  const count = Math.max(1, Math.min(6, selectedCount || Number(settings.number_of_vehicles || 3)));
   const vehicles = SAMPLE_VEHICLES.slice(0, count);
   while (vehicles.length < count) vehicles.push(SAMPLE_VEHICLES[vehicles.length % SAMPLE_VEHICLES.length]);
   const twoColumn = settings.layout === "two_column";
@@ -648,8 +816,8 @@ ${hasBlocks ? renderContentBlocks(values) : renderLegacyBody(values)}
 </table></td></tr></table></body></html>`;
 }
 
-function previewTemplate(body = {}) {
-  const values = normalizeValues(templateInput(body), { allowArchivedStatus: true });
+async function previewTemplate(supabase, body = {}) {
+  const values = await normalizeValues(templateInput(body), { allowArchivedStatus: true, allowSubmittedFrozenSnapshots: true, supabase, resolveVehicleReferences: true });
   return {
     preview: {
       subject: replaceTextPlaceholders(values.default_subject, values),
@@ -684,7 +852,7 @@ export default async function handler(request, response) {
     else if (action === "update") result = await updateTemplate(supabase, body);
     else if (action === "archive") result = await archiveTemplate(supabase, body);
     else if (action === "duplicate") result = await duplicateTemplate(supabase, body);
-    else if (action === "preview") result = previewTemplate(body);
+    else if (action === "preview") result = await previewTemplate(supabase, body);
     else if (action === "vehiclesForSelection") result = await vehiclesForSelection(supabase);
     else throw new ValidationError("Unknown Email Templates API action.");
 
