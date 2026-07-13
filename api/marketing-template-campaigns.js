@@ -61,6 +61,14 @@ function assertSupabase(result, fallbackMessage) {
   return result;
 }
 
+function isMissingSendInfrastructure(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return message.includes("marketing_email_sends")
+    || message.includes("marketing_email_send_recipients")
+    || message.includes("does not exist")
+    || message.includes("schema cache");
+}
+
 function normalizeCampaignType(value) {
   const type = cleanText(value || "custom", 60);
   if (!CAMPAIGN_TYPES.has(type)) throw new CampaignValidationError("Unsupported campaign type.");
@@ -346,6 +354,36 @@ async function buildAudienceSnapshot(supabase, rulesInput = {}) {
   return normalizeAudienceSnapshot({ rules, ...counts, calculated_at: new Date().toISOString() });
 }
 
+async function campaignHasProductionSendLock(supabase, campaignId) {
+  try {
+    const recipients = await supabase
+      .from("marketing_email_send_recipients")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .eq("send_type", "production");
+    if (recipients.error) {
+      if (isMissingSendInfrastructure(recipients.error)) return false;
+      throw new Error(recipients.error.message || "Could not inspect campaign send recipients.");
+    }
+    if ((recipients.count || 0) > 0) return true;
+
+    const sends = await supabase
+      .from("marketing_email_sends")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .eq("send_type", "production")
+      .in("status", ["sending", "completed", "partially_failed", "failed"]);
+    if (sends.error) {
+      if (isMissingSendInfrastructure(sends.error)) return false;
+      throw new Error(sends.error.message || "Could not inspect campaign send history.");
+    }
+    return (sends.count || 0) > 0;
+  } catch (error) {
+    if (isMissingSendInfrastructure(error)) return false;
+    throw error;
+  }
+}
+
 function getAudienceRulesForReady(values, existing) {
   if (values.audience_snapshot?.rules) return values.audience_snapshot.rules;
   if (existing.audience_snapshot?.rules) return existing.audience_snapshot.rules;
@@ -432,6 +470,17 @@ async function updateCampaign(supabase, body = {}) {
   };
   if (!next.name) throw new CampaignValidationError("Campaign name is required.");
   if (!next.subject_line) throw new CampaignValidationError("Subject line is required.");
+  if (await campaignHasProductionSendLock(supabase, existing.id)) {
+    const lockedChange = next.campaign_type !== existing.campaign_type
+      || next.objective !== existing.campaign_type
+      || next.subject_line !== existing.subject_line
+      || next.preview_text !== existing.preview_text
+      || next.status !== existing.status
+      || values.audience_snapshot !== undefined;
+    if (lockedChange) {
+      throw new CampaignValidationError("Production sending has started for this campaign. Frozen content, status and audience can no longer be changed.");
+    }
+  }
   const candidate = { ...existing, ...next, template_snapshot: existing.template_snapshot, selected_vehicle_count: existing.selected_vehicle_count };
   candidate.readiness = readinessForCampaign(candidate);
   if (next.status === "ready" && !candidate.readiness.transition_ready) {
