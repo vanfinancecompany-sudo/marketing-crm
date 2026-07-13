@@ -60,8 +60,40 @@
   }
   function statusBadge(status) {
     const safe = escapeHtml(status || "unknown");
-    const cls = status === "completed" || status === "accepted" ? "green" : status === "failed" || status === "partially_failed" ? "red" : "";
+    let cls = "";
+    if (["completed", "accepted", "delivered", "opened", "clicked"].includes(status)) cls = "green";
+    else if (["failed"].includes(status)) cls = "red";
+    else if (["partially_failed", "submission_unknown"].includes(status)) cls = "amber";
+    else if (["preparing", "sending"].includes(status)) cls = "blue";
+    else if (["cancelled"].includes(status)) cls = "neutral";
     return `<span class="badge ${cls}">${safe}</span>`;
+  }
+  function brevoState() {
+    const brevo = state.brevo || {};
+    const unsubscribeConfigured = Boolean(brevo.unsubscribe_secret_configured && brevo.public_base_url_configured);
+    const missing = [];
+    if (!brevo.api_key_configured) missing.push("API key");
+    if (!brevo.sender_email_configured) missing.push("sender email");
+    if (!brevo.sender_name) missing.push("sender name");
+    if (!unsubscribeConfigured) missing.push("unsubscribe configuration");
+    if (state.migrationRequired) missing.push("Migration 011");
+    if (brevo.connectivity === "checking") return { key: "checking", label: "Checking Brevo connection...", detail: "Refreshing sending configuration.", missing, unsubscribeConfigured };
+    if (missing.length) return { key: "not_configured", label: "Brevo is not fully configured", detail: `Missing: ${missing.join(", ")}.`, missing, unsubscribeConfigured };
+    if (brevo.connectivity === "authorised") return { key: "authorised", label: "Brevo connected and authorised", detail: "Sender name and sender email are configured.", missing, unsubscribeConfigured };
+    if (brevo.connectivity === "rejected") return { key: "rejected", label: "Brevo connection rejected", detail: "Check the API key or authorise the current server IP in Brevo.", missing, unsubscribeConfigured };
+    if (brevo.connectivity === "unreachable") return { key: "unreachable", label: "Brevo could not be reached", detail: "Refresh the connection to try again.", missing, unsubscribeConfigured };
+    return { key: "checking", label: "Checking Brevo connection...", detail: "Sending configuration has not loaded yet.", missing, unsubscribeConfigured };
+  }
+  function sendBlockReason(kind) {
+    const status = brevoState();
+    const brevo = state.brevo || {};
+    if (status.key !== "authorised") return status.label;
+    if (!brevo.sender_email_configured) return "Sender email is missing.";
+    if (!brevo.sender_name) return "Sender name is missing.";
+    if (state.migrationRequired) return "Migration 011 is required before sending is available.";
+    if (kind === "production" && !status.unsubscribeConfigured) return "Unsubscribe configuration is required for production sending.";
+    if (kind === "production" && currentCampaignStatus() !== "ready") return "Only Ready campaigns can prepare production sends.";
+    return "";
   }
   function installStyles() {
     if ($("sendFoundationStyles")) return;
@@ -72,8 +104,25 @@
       .send-item { border:1px solid var(--line); border-radius:8px; padding:10px; background:var(--soft); }
       .send-item strong { display:block; color:var(--muted); font-size:12px; text-transform:uppercase; }
       .send-warning { border:1px solid #fed7aa; background:#fff7ed; color:#9a3412; border-radius:8px; padding:10px; font-weight:800; }
-      .send-history { max-height:260px; overflow:auto; margin-top:10px; }
+      .send-danger { border:1px solid #fecaca; background:#fff7f7; color:#991b1b; border-radius:8px; padding:12px; font-weight:850; }
+      .send-area { border:1px solid var(--line); border-radius:10px; padding:12px; background:#fff; display:grid; gap:10px; }
+      .send-area h4 { margin:0; font-size:15px; }
+      .send-history { max-height:320px; overflow:auto; margin-top:10px; }
       .send-history table { font-size:13px; }
+      .brevo-banner { display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:12px; align-items:center; border-radius:10px; padding:13px; border:1px solid var(--line); background:#f8fafc; }
+      .brevo-banner strong { display:block; font-size:15px; }
+      .brevo-banner p { margin:3px 0 0; }
+      .brevo-dot { width:12px; height:12px; border-radius:999px; background:#94a3b8; box-shadow:0 0 0 4px rgba(148, 163, 184, .15); }
+      .brevo-banner.authorised { border-color:#86efac; background:#f0fdf4; color:#166534; }
+      .brevo-banner.authorised .brevo-dot { background:var(--green); box-shadow:0 0 0 4px rgba(15, 143, 95, .15); }
+      .brevo-banner.rejected, .brevo-banner.not_configured { border-color:#fecaca; background:#fff7f7; color:#991b1b; }
+      .brevo-banner.rejected .brevo-dot, .brevo-banner.not_configured .brevo-dot { background:var(--red); box-shadow:0 0 0 4px rgba(194, 65, 59, .15); }
+      .brevo-banner.unreachable, .brevo-banner.checking { border-color:#fed7aa; background:#fff7ed; color:#9a3412; }
+      .brevo-banner.unreachable .brevo-dot, .brevo-banner.checking .brevo-dot { background:var(--amber); box-shadow:0 0 0 4px rgba(168, 103, 0, .15); }
+      .send-disabled-reason { margin:0; color:var(--red); font-size:13px; font-weight:850; }
+      .badge.amber { background:#fff7ed; color:#9a3412; }
+      .badge.blue { background:#eef4ff; color:#1d4ed8; }
+      .badge.neutral { background:#f3f4f6; color:#4b5563; }
     `;
     document.head.appendChild(style);
   }
@@ -91,34 +140,43 @@
           <h3>Sending</h3>
           <p>Brevo test sending and controlled production-batch preparation. No automatic full-database sends.</p>
         </div>
-        <button id="refreshSendButton">Refresh Sending</button>
+        <button id="refreshSendButton">Refresh Connection</button>
       </div>
-      <p id="sendMessage" class="message hidden"></p>
+      <div id="brevoConnectionBanner" class="brevo-banner checking" aria-live="polite"></div>
+      <p id="sendMessage" class="message hidden" style="margin-top:12px;"></p>
       <div id="brevoStatusGrid" class="send-grid"></div>
-      <div class="send-warning" style="margin-top:12px;">Initial safety limit: 25 recipients per confirmed batch.</div>
-      <div class="form-grid" style="margin-top:14px;">
-        <label class="span-2">Internal test email address
+      <section class="send-area" style="margin-top:14px;">
+        <div>
+          <h4>Send one internal test email</h4>
+          <p class="hint">This does not contact the campaign audience.</p>
+        </div>
+        <label>Internal test email address
           <input id="testSendEmail" type="email" placeholder="name@example.com" />
         </label>
-      </div>
-      <div class="toolbar" style="margin-top:10px;">
-        <button id="sendTestButton">Send Test Email</button>
-      </div>
-      <hr style="border:0;border-top:1px solid var(--line);margin:16px 0;">
-      <div class="form-grid">
-        <label>Batch size
-          <input id="productionBatchSize" type="number" min="1" max="25" value="25" />
-        </label>
-        <label>Confirmation phrase
-          <input id="productionConfirmationPhrase" placeholder="Prepare first" />
-        </label>
-      </div>
-      <div id="preparationSummary" class="send-grid"></div>
-      <div class="toolbar" style="margin-top:10px;">
-        <button id="prepareSendButton">Prepare Send</button>
-        <button id="confirmSendButton" class="primary" disabled>Confirm and Send Batch</button>
-        <button id="cancelPreparedSendButton" disabled>Cancel Preparation</button>
-      </div>
+        <p id="testDisabledReason" class="send-disabled-reason hidden"></p>
+        <div class="toolbar">
+          <button id="sendTestButton">Send Test Email</button>
+        </div>
+      </section>
+      <section class="send-area" style="margin-top:14px;">
+        <div class="send-danger">This sends real customer email.</div>
+        <div class="send-warning">Initial safety limit: 25 recipients per confirmed batch.</div>
+        <div class="form-grid">
+          <label>Batch size
+            <input id="productionBatchSize" type="number" min="1" max="25" value="25" />
+          </label>
+          <label>Confirmation phrase
+            <input id="productionConfirmationPhrase" placeholder="Prepare first" />
+          </label>
+        </div>
+        <div id="preparationSummary" class="send-grid"></div>
+        <p id="productionDisabledReason" class="send-disabled-reason hidden"></p>
+        <div class="toolbar">
+          <button id="prepareSendButton">Prepare Send</button>
+          <button id="confirmSendButton" class="primary" disabled>Confirm and Send Batch</button>
+          <button id="cancelPreparedSendButton" disabled>Cancel Preparation</button>
+        </div>
+      </section>
       <div class="send-history">
         <table>
           <thead><tr><th>Type</th><th>Status</th><th>Requested</th><th>Accepted</th><th>Failed</th><th>Duplicates</th><th>Created</th></tr></thead>
@@ -138,13 +196,39 @@
   }
   function renderBrevoStatus() {
     const brevo = state.brevo || {};
+    const status = brevoState();
+    const banner = $("brevoConnectionBanner");
+    banner.className = `brevo-banner ${status.key}`;
+    banner.innerHTML = `
+      <span class="brevo-dot" aria-hidden="true"></span>
+      <div><strong>${escapeHtml(status.label)}</strong><p>${escapeHtml(status.detail)}</p></div>
+      <button id="refreshBrevoInlineButton" type="button">Refresh Connection</button>
+    `;
+    $("refreshBrevoInlineButton").addEventListener("click", () => refreshSending().catch((error) => setMessage(error.message, true)));
     $("brevoStatusGrid").innerHTML = [
-      ["Brevo connection", brevo.connectivity || "unknown"],
-      ["Configured", brevo.configured ? "Yes" : "No"],
+      ["Brevo connection", brevo.connectivity || "checking"],
+      ["Configured", status.missing.length ? "No" : "Yes"],
       ["Sender email", brevo.sender_email_configured ? "Configured" : "Missing"],
-      ["Sender name", brevo.sender_name || "-"],
-      ["Unsubscribe", brevo.unsubscribe_secret_configured && brevo.public_base_url_configured ? "Configured" : "Missing"],
+      ["Sender name", brevo.sender_name || "Missing"],
+      ["Unsubscribe", status.unsubscribeConfigured ? "Configured" : "Missing"],
     ].map(([label, value]) => `<div class="send-item"><strong>${escapeHtml(label)}</strong>${escapeHtml(value)}</div>`).join("");
+    renderControlStates();
+  }
+  function renderControlStates() {
+    const testReason = sendBlockReason("test");
+    const productionReason = sendBlockReason("production");
+    const testDisabled = Boolean(testReason);
+    const productionDisabled = Boolean(productionReason);
+    if ($("sendTestButton")) $("sendTestButton").disabled = testDisabled;
+    if ($("prepareSendButton")) $("prepareSendButton").disabled = productionDisabled;
+    if ($("testDisabledReason")) {
+      $("testDisabledReason").textContent = testReason;
+      $("testDisabledReason").classList.toggle("hidden", !testReason);
+    }
+    if ($("productionDisabledReason")) {
+      $("productionDisabledReason").textContent = productionReason;
+      $("productionDisabledReason").classList.toggle("hidden", !productionReason);
+    }
   }
   function renderPreparation() {
     const prep = state.preparation;
@@ -154,13 +238,14 @@
     cancel.disabled = !prep;
     $("productionConfirmationPhrase").placeholder = prep ? prep.confirmation_phrase : "Prepare first";
     $("preparationSummary").innerHTML = prep ? [
-      ["Current eligible", prep.final_eligible_count],
-      ["Suppressed", prep.suppressed_count],
-      ["Already sent / duplicates", prep.skipped_duplicate_count],
-      ["This batch", prep.proposed_batch_size],
+      ["Full eligible audience", prep.final_eligible_count],
+      ["Current suppressed count", prep.suppressed_count],
+      ["Previously sent / duplicates", prep.skipped_duplicate_count],
+      ["Proposed batch size", prep.proposed_batch_size],
       ["Subject", prep.subject],
       ["HTML hash", String(prep.html_hash || "").slice(0, 12)],
     ].map(([label, value]) => `<div class="send-item"><strong>${escapeHtml(label)}</strong>${escapeHtml(value)}</div>`).join("") : "";
+    renderControlStates();
   }
   function renderHistory() {
     const rows = state.history || [];
@@ -169,7 +254,7 @@
       return;
     }
     if (!rows.length) {
-      $("sendHistoryRows").innerHTML = `<tr><td colspan="7">No production email has been sent.</td></tr>`;
+      $("sendHistoryRows").innerHTML = `<tr><td colspan="7">No test or production email has been sent for this campaign.</td></tr>`;
       return;
     }
     $("sendHistoryRows").innerHTML = rows.map((send) => `
@@ -193,6 +278,9 @@
       return;
     }
     $("campaignSendingSection").classList.remove("hidden");
+    state.brevo = { connectivity: "checking" };
+    renderBrevoStatus();
+    renderPreparation();
     const [brevoResult, historyResult] = await Promise.all([
       sendApi("brevoStatus"),
       sendApi("sendHistory", { id }),
@@ -205,6 +293,8 @@
     renderHistory();
   }
   async function sendTest() {
+    const reason = sendBlockReason("test");
+    if (reason) throw new Error(reason);
     const id = currentCampaignId();
     if (!id) throw new Error("Open a campaign before sending a test.");
     const email = $("testSendEmail").value.trim();
@@ -213,6 +303,8 @@
     await refreshSending();
   }
   async function prepareSend() {
+    const reason = sendBlockReason("production");
+    if (reason) throw new Error(reason);
     const id = currentCampaignId();
     if (!id) throw new Error("Open a campaign before preparing a send.");
     if (currentCampaignStatus() !== "ready") throw new Error("Only Ready campaigns can prepare production sends.");
@@ -254,6 +346,7 @@
         last = id;
         refreshSending().catch((error) => setMessage(error.message, true));
       }
+      if (id) renderControlStates();
     }, 1200);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", observeCampaignChanges);
