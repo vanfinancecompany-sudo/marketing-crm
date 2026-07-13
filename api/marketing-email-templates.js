@@ -677,8 +677,12 @@ function selectedVehicleTitle(vehicle = {}) {
   return vehicle.title || vehicle.description || vehicle.registration || "Selected vehicle";
 }
 
-function selectedVehicleDetail(vehicle = {}) {
-  return compactLine([vehicle.description, vehicle.spec], " ");
+function selectedVehicleDescription(vehicle = {}) {
+  return String(vehicle.description || "").trim();
+}
+
+function selectedVehicleSpec(vehicle = {}) {
+  return String(vehicle.spec || "").trim();
 }
 
 function selectedVehicleImage(vehicle = {}) {
@@ -687,6 +691,28 @@ function selectedVehicleImage(vehicle = {}) {
 
 function selectedVehicleProfile(vehicle = {}, productMode = "finance") {
   return productMode === "rent2buy" ? vehicle.rent2buy || {} : vehicle.finance || {};
+}
+
+function financeMonthlyLine(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return /^from\b/i.test(text) ? text : `FROM ${text}`;
+}
+
+function financeHeadline(profile = {}) {
+  const price = String(profile.price || "").trim();
+  const vat = String(profile.vat || "").trim();
+  const cashLine = compactLine([price, vat], " ");
+  return compactLine([cashLine, financeMonthlyLine(profile.monthly)]);
+}
+
+function isInternalVehicleGridMessage(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return new Set([
+    "dummy vans are shown for preview only.",
+    "selected vehicle names are saved now; live card rendering will be added later.",
+    "selected vehicles render from saved snapshots.",
+  ]).has(normalized);
 }
 
 function renderVehicleImageCell(vehicle, href) {
@@ -703,10 +729,11 @@ function renderSelectedVehicleCard(vehicle = {}, productMode = "finance") {
   const profile = selectedVehicleProfile(vehicle, productMode);
   const href = profile.url || "";
   const title = selectedVehicleTitle(vehicle);
-  const detail = selectedVehicleDetail(vehicle);
+  const description = selectedVehicleDescription(vehicle);
+  const spec = selectedVehicleSpec(vehicle);
   const fallbackRegistration = !vehicle.title && vehicle.registration ? vehicle.registration : "";
   const isRent2Buy = productMode === "rent2buy";
-  const headline = isRent2Buy ? profile.monthly : compactLine([profile.price, profile.vat, profile.monthly]);
+  const headline = isRent2Buy ? profile.monthly : financeHeadline(profile);
   const fixedLine = isRent2Buy ? "NO CREDIT CHECK" : `FROM ${String.fromCharCode(163)}99 DEPOSIT`;
   const supporting = isRent2Buy ? compactLine([profile.initialRental, profile.term]) : "";
   const ctaText = isRent2Buy ? "View Rent2Buy van" : "View van";
@@ -715,7 +742,8 @@ function renderSelectedVehicleCard(vehicle = {}, productMode = "finance") {
     ${headline ? `<tr><td style="padding:14px 14px 2px;font-family:Arial,sans-serif;font-size:22px;line-height:27px;color:#0f172a;font-weight:bold;">${escapeHtml(headline)}</td></tr>` : ""}
     <tr><td style="padding:${headline ? "0" : "14px"} 14px 8px;font-family:Arial,sans-serif;font-size:12px;line-height:17px;color:#2563eb;font-weight:bold;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(fixedLine)}</td></tr>
     <tr><td style="padding:0 14px 4px;font-family:Arial,sans-serif;font-size:16px;line-height:21px;color:#0f172a;font-weight:bold;">${escapeHtml(title)}</td></tr>
-    ${detail ? `<tr><td style="padding:0 14px 8px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#475569;">${escapeHtml(detail)}</td></tr>` : ""}
+    ${description ? `<tr><td style="padding:0 14px 5px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#475569;">${escapeHtml(description)}</td></tr>` : ""}
+    ${spec ? `<tr><td style="padding:0 14px 8px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#475569;">${escapeHtml(spec)}</td></tr>` : ""}
     ${supporting ? `<tr><td style="padding:0 14px 8px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#334155;">${escapeHtml(supporting)}</td></tr>` : ""}
     ${fallbackRegistration ? `<tr><td style="padding:0 14px 8px;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">Reg: ${escapeHtml(fallbackRegistration)}</td></tr>` : ""}
     ${href ? `<tr><td style="padding:2px 14px 16px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#2563eb" style="border-radius:7px;"><a href="${escapeHtml(href)}" style="display:inline-block;padding:10px 13px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#ffffff;text-decoration:none;font-weight:bold;">${escapeHtml(ctaText)}</a></td></tr></table></td></tr>` : ""}
@@ -828,17 +856,20 @@ function renderSpacerBlock(block) {
 
 function renderVehicleGridBlock(block, values) {
   const s = block.settings;
-  const heading = replaceTextPlaceholders(s.heading, values);
-  const intro = replaceTextPlaceholders(s.intro_text, values);
   const selected = Array.isArray(s.selected_vehicles) ? s.selected_vehicles : [];
   const hasSelectedVehicles = s.source_mode === "selected" && selected.length > 0;
+  const heading = replaceTextPlaceholders(s.heading, values);
+  const rawIntro = replaceTextPlaceholders(s.intro_text, values);
+  const intro = hasSelectedVehicles && isInternalVehicleGridMessage(rawIntro) ? "" : rawIntro;
+  const rawPlaceholderNote = s.placeholder_note || "";
+  const placeholderNote = hasSelectedVehicles && isInternalVehicleGridMessage(rawPlaceholderNote) ? "" : rawPlaceholderNote;
   const previewOnlyNote = hasSelectedVehicles ? "" : "Preview only: dummy vehicle cards are shown until vehicles are selected.";
   return `<tr><td style="padding:24px 22px;background:#ffffff;">
     ${heading ? `<h2 style="margin:0 8px 8px;font-family:Arial,sans-serif;font-size:23px;line-height:29px;color:#0f172a;">${escapeHtml(heading)}</h2>` : ""}
     ${intro ? `<p style="margin:0 8px 12px;font-family:Arial,sans-serif;font-size:15px;line-height:23px;color:#334155;">${escapeHtml(intro)}</p>` : ""}
     ${renderVehicleGrid(s)}
     ${previewOnlyNote ? `<p style="margin:8px 8px 0;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">${escapeHtml(previewOnlyNote)}</p>` : ""}
-    ${s.placeholder_note ? `<p style="margin:4px 8px 0;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">${escapeHtml(s.placeholder_note)}</p>` : ""}
+    ${placeholderNote ? `<p style="margin:4px 8px 0;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">${escapeHtml(placeholderNote)}</p>` : ""}
   </td></tr>`;
 }
 
