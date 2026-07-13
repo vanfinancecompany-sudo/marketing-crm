@@ -72,6 +72,7 @@
       .reporting-table-wrap { max-height:260px; overflow:auto; }
       .reporting-table-wrap table { font-size:13px; }
       .reporting-empty { border:1px dashed var(--line); border-radius:8px; padding:12px; color:var(--muted); text-align:center; }
+      .reporting-note { margin-top:10px; color:var(--muted); font-size:12px; line-height:1.45; }
       @media (max-width: 900px) { .reporting-layout { grid-template-columns:1fr; } }
     `;
     document.head.appendChild(style);
@@ -88,27 +89,28 @@
       <div class="card-header">
         <div>
           <h3>Campaign Reporting</h3>
-          <p>Brevo delivery, engagement and suppression events captured by webhook. No customer email values are shown here.</p>
+          <p>Production-only Brevo delivery, engagement and suppression events captured by webhook. Test sends are shown separately.</p>
         </div>
         <button id="refreshReportingButton" type="button">Refresh Report</button>
       </div>
       <p id="reportingMessage" class="message hidden" style="margin-top:12px;"></p>
       <div id="reportingMetrics" class="reporting-grid"></div>
+      <p id="reportingNote" class="reporting-note"></p>
       <div class="reporting-layout">
         <section class="reporting-panel">
-          <h4>Recipient Status</h4>
+          <h4>Production Recipient Status</h4>
           <div id="reportingStatusBreakdown" class="reporting-table-wrap"></div>
         </section>
         <section class="reporting-panel">
-          <h4>Top Clicked Links</h4>
+          <h4>Top Clicked Production Links</h4>
           <div id="reportingTopLinks" class="reporting-table-wrap"></div>
         </section>
         <section class="reporting-panel">
-          <h4>Recent Events</h4>
+          <h4>Recent Production Events</h4>
           <div id="reportingRecentEvents" class="reporting-table-wrap"></div>
         </section>
         <section class="reporting-panel">
-          <h4>Recent Recipients</h4>
+          <h4>Recent Production Recipients</h4>
           <div id="reportingRecipients" class="reporting-table-wrap"></div>
         </section>
       </div>
@@ -127,23 +129,30 @@
   function renderMetricCards(reporting) {
     const recipients = reporting?.recipients || {};
     const sends = reporting?.sends || {};
+    const tests = reporting?.tests || {};
+    const latestTest = tests.latest_created_at ? `${tests.latest_status || "unknown"} · ${formatDate(tests.latest_completed_at || tests.latest_created_at)}` : "No test sends";
     const cards = [
       ["Production batches", sends.production_batches || 0, "Completed or attempted batches"],
-      ["Accepted", recipients.accepted || 0, "Provider accepted recipients"],
+      ["Requested", sends.requested || 0, "Production batch recipients requested"],
+      ["Accepted", recipients.accepted || 0, "Production recipients accepted"],
       ["Delivered", recipients.delivered || 0, `${recipients.delivery_rate || 0}% delivery rate`],
       ["Opened", recipients.opened || 0, `${recipients.open_rate || 0}% open rate`],
       ["Clicked", recipients.clicked || 0, `${recipients.click_rate || 0}% click rate`],
+      ["Click-to-open", `${recipients.click_to_open_rate || 0}%`, "Unique clicks / unique opens"],
       ["Bounced / blocked", (recipients.soft_bounced || 0) + (recipients.hard_bounced || 0) + (recipients.blocked || 0), `${recipients.bounce_rate || 0}% bounce rate`],
-      ["Unsubscribed", recipients.unsubscribed || 0, "Webhook and unsubscribe events"],
+      ["Unsubscribed", recipients.unsubscribed || 0, `${recipients.unsubscribe_rate || 0}% unsubscribe rate`],
       ["Complaints", recipients.complained || 0, "Spam complaint events"],
+      ["Submission unknown", recipients.submission_unknown || 0, "Needs Brevo reconciliation"],
+      ["Test sends", tests.count || 0, latestTest],
     ];
     $("reportingMetrics").innerHTML = cards.map(([label, value, detail]) => `
-      <div class="reporting-card"><strong>${escapeHtml(label)}</strong><b>${fmt.format(value)}</b><span>${escapeHtml(detail)}</span></div>
+      <div class="reporting-card"><strong>${escapeHtml(label)}</strong><b>${escapeHtml(value)}</b><span>${escapeHtml(detail)}</span></div>
     `).join("");
+    $("reportingNote").textContent = "Production metrics exclude internal test sends. Open counts are based on Brevo open tracking and may include privacy proxy or prefetch activity.";
   }
   function renderStatusBreakdown(rows = []) {
     if (!rows.length) {
-      $("reportingStatusBreakdown").innerHTML = `<div class="reporting-empty">No recipient statuses recorded yet.</div>`;
+      $("reportingStatusBreakdown").innerHTML = `<div class="reporting-empty">No production recipient statuses recorded yet.</div>`;
       return;
     }
     $("reportingStatusBreakdown").innerHTML = `<table><thead><tr><th>Status</th><th>Count</th></tr></thead><tbody>${rows.map((row) => `
@@ -152,7 +161,7 @@
   }
   function renderTopLinks(rows = []) {
     if (!rows.length) {
-      $("reportingTopLinks").innerHTML = `<div class="reporting-empty">No click events recorded yet.</div>`;
+      $("reportingTopLinks").innerHTML = `<div class="reporting-empty">No production click events recorded yet.</div>`;
       return;
     }
     $("reportingTopLinks").innerHTML = `<table><thead><tr><th>Link</th><th>Clicks</th><th>Unique</th></tr></thead><tbody>${rows.map((row) => `
@@ -161,7 +170,7 @@
   }
   function renderRecentEvents(rows = []) {
     if (!rows.length) {
-      $("reportingRecentEvents").innerHTML = `<div class="reporting-empty">No webhook events recorded yet.</div>`;
+      $("reportingRecentEvents").innerHTML = `<div class="reporting-empty">No production webhook events recorded yet.</div>`;
       return;
     }
     $("reportingRecentEvents").innerHTML = `<table><thead><tr><th>Event</th><th>Customer</th><th>Email</th><th>When</th></tr></thead><tbody>${rows.map((row) => `
@@ -170,7 +179,7 @@
   }
   function renderRecipients(rows = []) {
     if (!rows.length) {
-      $("reportingRecipients").innerHTML = `<div class="reporting-empty">No recipient rows recorded yet.</div>`;
+      $("reportingRecipients").innerHTML = `<div class="reporting-empty">No production recipient rows recorded yet.</div>`;
       return;
     }
     $("reportingRecipients").innerHTML = `<table><thead><tr><th>Customer</th><th>Email</th><th>Status</th><th>Last Event</th></tr></thead><tbody>${rows.map((row) => `
@@ -185,6 +194,7 @@
     }
     if (reporting.migration_required) {
       $("reportingMetrics").innerHTML = `<div class="reporting-empty">Migration 012 is required before webhook reporting is available.</div>`;
+      if ($("reportingNote")) $("reportingNote").textContent = "";
       renderStatusBreakdown([]);
       renderTopLinks([]);
       renderRecentEvents([]);
