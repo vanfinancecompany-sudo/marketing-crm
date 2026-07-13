@@ -61,6 +61,14 @@ function assertSupabase(result, fallbackMessage) {
   return result;
 }
 
+function isMissingSendInfrastructure(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return message.includes("marketing_email_sends")
+    || message.includes("marketing_email_send_recipients")
+    || message.includes("does not exist")
+    || message.includes("schema cache");
+}
+
 function normalizeCampaignType(value) {
   const type = cleanText(value || "custom", 60);
   if (!CAMPAIGN_TYPES.has(type)) throw new CampaignValidationError("Unsupported campaign type.");
@@ -346,6 +354,36 @@ async function buildAudienceSnapshot(supabase, rulesInput = {}) {
   return normalizeAudienceSnapshot({ rules, ...counts, calculated_at: new Date().toISOString() });
 }
 
+async function campaignHasProductionSendLock(supabase, campaignId) {
+  try {
+    const recipients = await supabase
+      .from("marketing_email_send_recipients")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .eq("send_type", "production");
+    if (recipients.error) {
+      if (isMissingSendInfrastructure(recipients.error)) return false;
+      throw new Error(recipients.error.message || "Could not inspect campaign send recipients.");
+    }
+    if ((recipients.count || 0) > 0) return true;
+
+    const sends = await supabase
+      .from("marketing_email_sends")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .eq("send_type", "production")
+      .in("status", ["sending", "completed", "partially_failed", "failed"]);
+    if (sends.error) {
+      if (isMissingSendInfrastructure(sends.error)) return false;
+      throw new Error(sends.error.message || "Could not inspect campaign send history.");
+    }
+    return (sends.count || 0) > 0;
+  } catch (error) {
+    if (isMissingSendInfrastructure(error)) return false;
+    throw error;
+  }
+}
+
 function getAudienceRulesForReady(values, existing) {
   if (values.audience_snapshot?.rules) return values.audience_snapshot.rules;
   if (existing.audience_snapshot?.rules) return existing.audience_snapshot.rules;
@@ -420,13 +458,27 @@ async function updateCampaign(supabase, body = {}) {
   if (existing.status === "archived") throw new CampaignValidationError("Archived campaigns are read only.");
   const values = campaignValues(body);
   const nextStatus = normalizeEditableStatus(values.status ?? existing.status);
-  const nextAudience = await resolveAudienceForUpdate(supabase, values, existing, nextStatus);
+  const sendLocked = await campaignHasProductionSendLock(supabase, existing.id);
+  const nextCampaignType = normalizeCampaignType(values.campaign_type ?? existing.campaign_type);
+  const nextSubjectLine = cleanText(values.subject_line ?? existing.subject_line, 300);
+  const nextPreviewText = cleanText(values.preview_text ?? existing.preview_text, 300);
+  if (sendLocked) {
+    const lockedChange = nextCampaignType !== existing.campaign_type
+      || nextSubjectLine !== existing.subject_line
+      || nextPreviewText !== existing.preview_text
+      || nextStatus !== existing.status
+      || values.audience_snapshot !== undefined;
+    if (lockedChange) {
+      throw new CampaignValidationError("Production sending has started for this campaign. Frozen content, status and audience can no longer be changed.");
+    }
+  }
+  const nextAudience = sendLocked ? existing.audience_snapshot : await resolveAudienceForUpdate(supabase, values, existing, nextStatus);
   const next = {
     name: cleanText(values.name ?? existing.name, 200),
-    campaign_type: normalizeCampaignType(values.campaign_type ?? existing.campaign_type),
-    objective: normalizeCampaignType(values.campaign_type ?? existing.campaign_type),
-    subject_line: cleanText(values.subject_line ?? existing.subject_line, 300),
-    preview_text: cleanText(values.preview_text ?? existing.preview_text, 300),
+    campaign_type: nextCampaignType,
+    objective: nextCampaignType,
+    subject_line: nextSubjectLine,
+    preview_text: nextPreviewText,
     status: nextStatus,
     audience_snapshot: nextAudience,
   };
