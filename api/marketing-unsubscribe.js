@@ -1,9 +1,19 @@
 import crypto from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
+function escapeHtml(value) {
+  return String(value || "").replace(/[&<>'"]/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "'": "&#39;",
+    '"': "&quot;",
+  }[char]));
+}
+
 function html(response, status, body) {
   response.status(status).setHeader("Content-Type", "text/html; charset=utf-8");
-  response.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Marketing unsubscribe</title><style>body{margin:0;background:#eef3f8;color:#172033;font-family:Inter,Arial,sans-serif}.card{max-width:620px;margin:12vh auto;padding:28px;background:#fff;border:1px solid #d9e2ef;border-radius:12px;box-shadow:0 12px 28px rgba(23,32,51,.08)}h1{margin:0 0 10px;font-size:26px}p{color:#667085;line-height:1.55}.ok{color:#0f8f5f}.bad{color:#c2413b}</style></head><body><main class="card">${body}</main></body></html>`);
+  response.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Marketing unsubscribe</title><style>body{margin:0;background:#eef3f8;color:#172033;font-family:Inter,Arial,sans-serif}.card{max-width:620px;margin:12vh auto;padding:28px;background:#fff;border:1px solid #d9e2ef;border-radius:12px;box-shadow:0 12px 28px rgba(23,32,51,.08)}h1{margin:0 0 10px;font-size:26px}p{color:#667085;line-height:1.55}button{border:1px solid #2557d6;border-radius:8px;background:#2557d6;color:#fff;font-weight:800;padding:11px 14px;cursor:pointer}.ok{color:#0f8f5f}.bad{color:#c2413b}</style></head><body><main class="card">${body}</main></body></html>`);
 }
 
 function getSupabase() {
@@ -33,6 +43,33 @@ function safeText(value, limit = 500) {
   return String(value || "").trim().slice(0, limit);
 }
 
+async function loadVerifiedContact(supabase, payload) {
+  const contactResult = await supabase
+    .from("marketing_contacts")
+    .select("id,customer_id,email,email_normalized")
+    .eq("customer_id", safeText(payload.customer_id, 80).toUpperCase())
+    .maybeSingle();
+  if (contactResult.error) throw new Error(contactResult.error.message || "Could not load contact.");
+  const contact = contactResult.data;
+  if (!contact) throw new Error("Contact was not found.");
+  const storedEmail = String(contact.email_normalized || contact.email || "").trim().toLowerCase();
+  if (storedEmail !== String(payload.email || "").trim().toLowerCase()) throw new Error("This unsubscribe link does not match the current contact email.");
+  return contact;
+}
+
+function confirmationPage(token) {
+  return `<h1>Confirm unsubscribe</h1><p>Please confirm that you want to stop receiving marketing emails from Van Finance Company.</p><form method="post"><input type="hidden" name="token" value="${escapeHtml(token)}"><button type="submit">Unsubscribe from marketing emails</button></form><p>This page does not unsubscribe you until you press the button.</p>`;
+}
+
+function parsePostToken(request) {
+  if (request.body && typeof request.body === "object") return request.body.token;
+  if (typeof request.body === "string") {
+    const params = new URLSearchParams(request.body);
+    return params.get("token");
+  }
+  return "";
+}
+
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (request.method !== "GET" && request.method !== "POST") {
@@ -40,24 +77,20 @@ export default async function handler(request, response) {
     return;
   }
   try {
-    const token = request.method === "GET" ? request.query?.token : request.body?.token;
+    const token = request.method === "GET" ? request.query?.token : parsePostToken(request);
     const payload = verifyToken(token);
     const supabase = getSupabase();
-    const contactResult = await supabase
-      .from("marketing_contacts")
-      .select("id,customer_id,email,email_normalized")
-      .eq("customer_id", safeText(payload.customer_id, 80).toUpperCase())
-      .maybeSingle();
-    if (contactResult.error) throw new Error(contactResult.error.message || "Could not load contact.");
-    const contact = contactResult.data;
-    if (!contact) throw new Error("Contact was not found.");
-    const storedEmail = String(contact.email_normalized || contact.email || "").trim().toLowerCase();
-    if (storedEmail !== String(payload.email || "").trim().toLowerCase()) throw new Error("This unsubscribe link does not match the current contact email.");
+    const contact = await loadVerifiedContact(supabase, payload);
+
+    if (request.method === "GET") {
+      html(response, 200, confirmationPage(token));
+      return;
+    }
 
     const rpc = await supabase.rpc("marketing_apply_suppression", {
       p_contact_id: contact.id,
       p_type: "email_unsubscribed",
-      p_reason: "One-click email unsubscribe",
+      p_reason: "Confirmed email unsubscribe",
       p_added_by: "Marketing unsubscribe link",
       p_notes: safeText(`campaign:${payload.campaign_id || ""} send:${payload.send_id || ""} recipient:${payload.recipient_id || ""}`, 500),
     });
@@ -70,6 +103,6 @@ export default async function handler(request, response) {
     }
     html(response, 200, `<h1 class="ok">You have been unsubscribed</h1><p>Your email address has been removed from future marketing emails. Your customer record has been retained for normal CRM purposes.</p>`);
   } catch (error) {
-    html(response, 400, `<h1 class="bad">Unsubscribe link could not be used</h1><p>${safeText(error.message || "The link is invalid or has expired.", 300)}</p>`);
+    html(response, 400, `<h1 class="bad">Unsubscribe link could not be used</h1><p>${escapeHtml(safeText(error.message || "The link is invalid or has expired.", 300))}</p>`);
   }
 }
