@@ -95,7 +95,7 @@
       </div>
       <p id="sendMessage" class="message hidden"></p>
       <div id="brevoStatusGrid" class="send-grid"></div>
-      <div class="send-warning" style="margin-top:12px;">No production email is sent until a Ready campaign is prepared, the confirmation phrase is typed exactly, and one limited batch is confirmed.</div>
+      <div class="send-warning" style="margin-top:12px;">Initial safety limit: 25 recipients per confirmed batch.</div>
       <div class="form-grid" style="margin-top:14px;">
         <label class="span-2">Internal test email address
           <input id="testSendEmail" type="email" placeholder="name@example.com" />
@@ -107,7 +107,7 @@
       <hr style="border:0;border-top:1px solid var(--line);margin:16px 0;">
       <div class="form-grid">
         <label>Batch size
-          <input id="productionBatchSize" type="number" min="1" max="250" value="25" />
+          <input id="productionBatchSize" type="number" min="1" max="25" value="25" />
         </label>
         <label>Confirmation phrase
           <input id="productionConfirmationPhrase" placeholder="Prepare first" />
