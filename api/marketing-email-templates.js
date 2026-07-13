@@ -435,7 +435,7 @@ function buildAuthoritativeSelectedVehicleSnapshot(reference, vehicle, productMo
     title: normalizeProfileText(vehicle.title || vehicle.name, "Selected vehicle title", 300),
     description: normalizeProfileText(vehicle.description || "", "Selected vehicle description", 1000),
     spec: normalizeProfileText(vehicle.spec || "", "Selected vehicle spec", 1000),
-    primary_image_url: cleanHttpsUrl(vehicle.primary_image_url || vehicle.image_url || "", "Selected vehicle image URL"),
+    primary_image_url: cleanHttpsUrl(vehicle.primaryImageUrl || vehicle.primary_image_url || vehicle.image_url || "", "Selected vehicle image URL"),
     image_override_url: cleanHttpsUrl(reference.image_override_url, "Selected vehicle override image URL"),
     finance: null,
     rent2buy: null,
@@ -669,9 +669,97 @@ function renderEscapedTextBlock(value, colour = "#1f2937", align = "left") {
     .join("");
 }
 
-function renderVehicleGrid(settings = {}) {
-  const selectedCount = Array.isArray(settings.selected_vehicles) ? settings.selected_vehicles.length : 0;
-  const count = Math.max(1, Math.min(6, selectedCount || Number(settings.number_of_vehicles || 3)));
+function compactLine(parts = [], separator = " | ") {
+  return parts.map((part) => String(part || "").trim()).filter(Boolean).join(separator);
+}
+
+function selectedVehicleTitle(vehicle = {}) {
+  return vehicle.title || vehicle.description || vehicle.registration || "Selected vehicle";
+}
+
+function selectedVehicleDescription(vehicle = {}) {
+  return String(vehicle.description || "").trim();
+}
+
+function selectedVehicleSpec(vehicle = {}) {
+  return String(vehicle.spec || "").trim();
+}
+
+function selectedVehicleImage(vehicle = {}) {
+  return vehicle.image_override_url || vehicle.primary_image_url || "";
+}
+
+function selectedVehicleProfile(vehicle = {}, productMode = "finance") {
+  return productMode === "rent2buy" ? vehicle.rent2buy || {} : vehicle.finance || {};
+}
+
+function financeMonthlyLine(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return /^from\b/i.test(text) ? text : `FROM ${text}`;
+}
+
+function financeHeadline(profile = {}) {
+  const price = String(profile.price || "").trim();
+  const vat = String(profile.vat || "").trim();
+  const cashLine = compactLine([price, vat], " ");
+  return compactLine([cashLine, financeMonthlyLine(profile.monthly)]);
+}
+
+function isInternalVehicleGridMessage(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return new Set([
+    "dummy vans are shown for preview only.",
+    "selected vehicle names are saved now; live card rendering will be added later.",
+    "selected vehicles render from saved snapshots.",
+  ]).has(normalized);
+}
+
+function renderVehicleImageCell(vehicle, href) {
+  const imageUrl = selectedVehicleImage(vehicle);
+  const alt = selectedVehicleTitle(vehicle);
+  if (!imageUrl) {
+    return `<tr><td align="center" bgcolor="#e2e8f0" style="padding:30px 12px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#475569;">Vehicle image</td></tr>`;
+  }
+  const image = `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(alt)}" width="280" style="display:block;width:100%;max-width:280px;height:auto;border:0;outline:none;text-decoration:none;">`;
+  return `<tr><td align="center" bgcolor="#f1f5f9" style="padding:0;">${href ? `<a href="${escapeHtml(href)}" style="text-decoration:none;border:0;">${image}</a>` : image}</td></tr>`;
+}
+
+function renderSelectedVehicleCard(vehicle = {}, productMode = "finance") {
+  const profile = selectedVehicleProfile(vehicle, productMode);
+  const href = profile.url || "";
+  const title = selectedVehicleTitle(vehicle);
+  const description = selectedVehicleDescription(vehicle);
+  const spec = selectedVehicleSpec(vehicle);
+  const fallbackRegistration = !vehicle.title && vehicle.registration ? vehicle.registration : "";
+  const isRent2Buy = productMode === "rent2buy";
+  const headline = isRent2Buy ? profile.monthly : financeHeadline(profile);
+  const fixedLine = isRent2Buy ? "NO CREDIT CHECK" : `FROM ${String.fromCharCode(163)}99 DEPOSIT`;
+  const supporting = isRent2Buy ? compactLine([profile.initialRental, profile.term]) : "";
+  const ctaText = isRent2Buy ? "View Rent2Buy van" : "View van";
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border:1px solid #dbe2ea;background:#ffffff;">
+    ${renderVehicleImageCell(vehicle, href)}
+    ${headline ? `<tr><td style="padding:14px 14px 2px;font-family:Arial,sans-serif;font-size:22px;line-height:27px;color:#0f172a;font-weight:bold;">${escapeHtml(headline)}</td></tr>` : ""}
+    <tr><td style="padding:${headline ? "0" : "14px"} 14px 8px;font-family:Arial,sans-serif;font-size:12px;line-height:17px;color:#2563eb;font-weight:bold;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(fixedLine)}</td></tr>
+    <tr><td style="padding:0 14px 4px;font-family:Arial,sans-serif;font-size:16px;line-height:21px;color:#0f172a;font-weight:bold;">${escapeHtml(title)}</td></tr>
+    ${description ? `<tr><td style="padding:0 14px 5px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#475569;">${escapeHtml(description)}</td></tr>` : ""}
+    ${spec ? `<tr><td style="padding:0 14px 8px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#475569;">${escapeHtml(spec)}</td></tr>` : ""}
+    ${supporting ? `<tr><td style="padding:0 14px 8px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#334155;">${escapeHtml(supporting)}</td></tr>` : ""}
+    ${fallbackRegistration ? `<tr><td style="padding:0 14px 8px;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">Reg: ${escapeHtml(fallbackRegistration)}</td></tr>` : ""}
+    ${href ? `<tr><td style="padding:2px 14px 16px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#2563eb" style="border-radius:7px;"><a href="${escapeHtml(href)}" style="display:inline-block;padding:10px 13px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#ffffff;text-decoration:none;font-weight:bold;">${escapeHtml(ctaText)}</a></td></tr></table></td></tr>` : ""}
+  </table>`;
+}
+
+function renderVehicleRows(cards, twoColumn) {
+  const rows = [];
+  for (let index = 0; index < cards.length; index += twoColumn ? 2 : 1) {
+    rows.push(`<tr>${cards.slice(index, index + (twoColumn ? 2 : 1)).join("")}${twoColumn && !cards[index + 1] ? '<td width="50%" valign="top" style="padding:8px;"></td>' : ""}</tr>`);
+  }
+  return rows.join("");
+}
+
+function renderPlaceholderVehicleGrid(settings = {}) {
+  const count = Math.max(1, Math.min(6, Number(settings.number_of_vehicles || 3)));
   const vehicles = SAMPLE_VEHICLES.slice(0, count);
   while (vehicles.length < count) vehicles.push(SAMPLE_VEHICLES[vehicles.length % SAMPLE_VEHICLES.length]);
   const twoColumn = settings.layout === "two_column";
@@ -681,16 +769,30 @@ function renderVehicleGrid(settings = {}) {
         <tr><td align="center" bgcolor="#e2e8f0" style="padding:22px 12px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#475569;">Vehicle image placeholder</td></tr>
         <tr><td style="padding:13px 12px 4px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#0f172a;font-weight:bold;">${escapeHtml(vehicle.name)}</td></tr>
         <tr><td style="padding:0 12px;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#64748b;">${escapeHtml(vehicle.mileage)}</td></tr>
-        <tr><td style="padding:3px 12px 10px;font-family:Arial,sans-serif;font-size:16px;line-height:22px;color:#0f172a;font-weight:bold;">£${escapeHtml(vehicle.price)}</td></tr>
+        <tr><td style="padding:3px 12px 10px;font-family:Arial,sans-serif;font-size:16px;line-height:22px;color:#0f172a;font-weight:bold;">&#163;${escapeHtml(vehicle.price)}</td></tr>
         <tr><td style="padding:0 12px 14px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#2563eb" style="border-radius:7px;"><a href="https://www.vanfinancecompany.co.uk" style="display:inline-block;padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#ffffff;text-decoration:none;font-weight:bold;">View Van</a></td></tr></table></td></tr>
       </table>
     </td>
   `);
-  const rows = [];
-  for (let index = 0; index < cards.length; index += twoColumn ? 2 : 1) {
-    rows.push(`<tr>${cards.slice(index, index + (twoColumn ? 2 : 1)).join("")}${twoColumn && !cards[index + 1] ? '<td width="50%" style="padding:8px;"></td>' : ""}</tr>`);
-  }
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:10px 0;">${rows.join("")}</table>`;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:10px 0;">${renderVehicleRows(cards, twoColumn)}</table>`;
+}
+
+function renderSelectedVehicleGrid(settings = {}) {
+  const selected = Array.isArray(settings.selected_vehicles) ? settings.selected_vehicles : [];
+  const productMode = settings.product_mode === "rent2buy" ? "rent2buy" : "finance";
+  const twoColumn = settings.layout === "two_column";
+  const cards = selected.map((vehicle) => `
+    <td width="${twoColumn ? "50%" : "100%"}" valign="top" style="padding:8px;">
+      ${renderSelectedVehicleCard(vehicle, productMode)}
+    </td>
+  `);
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:10px 0;">${renderVehicleRows(cards, twoColumn)}</table>`;
+}
+
+function renderVehicleGrid(settings = {}) {
+  const selected = Array.isArray(settings.selected_vehicles) ? settings.selected_vehicles : [];
+  if (settings.source_mode === "selected" && selected.length) return renderSelectedVehicleGrid(settings);
+  return renderPlaceholderVehicleGrid(settings);
 }
 
 function textToHtml(value, values = {}) {
@@ -754,16 +856,20 @@ function renderSpacerBlock(block) {
 
 function renderVehicleGridBlock(block, values) {
   const s = block.settings;
-  const heading = replaceTextPlaceholders(s.heading, values);
-  const intro = replaceTextPlaceholders(s.intro_text, values);
   const selected = Array.isArray(s.selected_vehicles) ? s.selected_vehicles : [];
-  const selectedNote = selected.length ? `${selected.length} selected ${s.product_mode === "rent2buy" ? "Rent2Buy" : "Finance"} vehicle${selected.length === 1 ? "" : "s"}: ${selected.map((vehicle) => vehicle.registration || vehicle.title).filter(Boolean).join(", ")}` : "No manual vehicles selected yet. Dummy vehicles are shown for preview only.";
+  const hasSelectedVehicles = s.source_mode === "selected" && selected.length > 0;
+  const heading = replaceTextPlaceholders(s.heading, values);
+  const rawIntro = replaceTextPlaceholders(s.intro_text, values);
+  const intro = hasSelectedVehicles && isInternalVehicleGridMessage(rawIntro) ? "" : rawIntro;
+  const rawPlaceholderNote = s.placeholder_note || "";
+  const placeholderNote = hasSelectedVehicles && isInternalVehicleGridMessage(rawPlaceholderNote) ? "" : rawPlaceholderNote;
+  const previewOnlyNote = hasSelectedVehicles ? "" : "Preview only: dummy vehicle cards are shown until vehicles are selected.";
   return `<tr><td style="padding:24px 22px;background:#ffffff;">
     ${heading ? `<h2 style="margin:0 8px 8px;font-family:Arial,sans-serif;font-size:23px;line-height:29px;color:#0f172a;">${escapeHtml(heading)}</h2>` : ""}
     ${intro ? `<p style="margin:0 8px 12px;font-family:Arial,sans-serif;font-size:15px;line-height:23px;color:#334155;">${escapeHtml(intro)}</p>` : ""}
     ${renderVehicleGrid(s)}
-    <p style="margin:8px 8px 0;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">${escapeHtml(selectedNote)}</p>
-    ${s.placeholder_note ? `<p style="margin:4px 8px 0;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">${escapeHtml(s.placeholder_note)}</p>` : ""}
+    ${previewOnlyNote ? `<p style="margin:8px 8px 0;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">${escapeHtml(previewOnlyNote)}</p>` : ""}
+    ${placeholderNote ? `<p style="margin:4px 8px 0;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">${escapeHtml(placeholderNote)}</p>` : ""}
   </td></tr>`;
 }
 
