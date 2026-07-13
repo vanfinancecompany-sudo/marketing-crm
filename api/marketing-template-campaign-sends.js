@@ -203,8 +203,9 @@ function renderFrozenCampaign(campaign = {}, options = {}) {
 }
 
 function requireProductionSendConfig() {
+  const brevoApiKey = String(process.env.BREVO_API_KEY || "").trim();
   const missing = [];
-  if (!process.env.BREVO_API_KEY) missing.push("BREVO_API_KEY");
+  if (!brevoApiKey) missing.push("BREVO_API_KEY");
   if (!process.env.BREVO_SENDER_EMAIL) missing.push("BREVO_SENDER_EMAIL");
   if (!process.env.BREVO_SENDER_NAME) missing.push("BREVO_SENDER_NAME");
   if (!process.env.MARKETING_PUBLIC_BASE_URL) missing.push("MARKETING_PUBLIC_BASE_URL");
@@ -213,9 +214,10 @@ function requireProductionSendConfig() {
 }
 
 function brevoConfigStatus() {
+  const brevoApiKey = String(process.env.BREVO_API_KEY || "").trim();
   return {
-    configured: Boolean(process.env.BREVO_API_KEY && process.env.BREVO_SENDER_EMAIL && process.env.BREVO_SENDER_NAME),
-    api_key_configured: Boolean(process.env.BREVO_API_KEY),
+    configured: Boolean(brevoApiKey && process.env.BREVO_SENDER_EMAIL && process.env.BREVO_SENDER_NAME),
+    api_key_configured: Boolean(brevoApiKey),
     sender_email_configured: Boolean(process.env.BREVO_SENDER_EMAIL),
     sender_name: process.env.BREVO_SENDER_NAME || "",
     public_base_url_configured: Boolean(process.env.MARKETING_PUBLIC_BASE_URL),
@@ -223,8 +225,26 @@ function brevoConfigStatus() {
   };
 }
 
+function brevoDiagnosticText(value, brevoApiKey) {
+  let text = String(value || "");
+  if (brevoApiKey) text = text.split(brevoApiKey).join("[redacted]");
+  return text.slice(0, 300);
+}
+
+function brevoDiagnosticMessage(text, brevoApiKey) {
+  const redactedText = brevoDiagnosticText(text, brevoApiKey);
+  if (!redactedText) return "";
+  try {
+    const data = JSON.parse(redactedText);
+    return brevoDiagnosticText(data.message || data.error || data.code || redactedText, brevoApiKey);
+  } catch {
+    return redactedText;
+  }
+}
+
 async function callBrevoEmail({ to, name, subject, html, tags = [], headers = {} }) {
-  if (!process.env.BREVO_API_KEY) throw new ApiError(400, "Brevo API key is not configured.");
+  const brevoApiKey = String(process.env.BREVO_API_KEY || "").trim();
+  if (!brevoApiKey) throw new ApiError(400, "Brevo API key is not configured.");
   if (!process.env.BREVO_SENDER_EMAIL || !process.env.BREVO_SENDER_NAME) throw new ApiError(400, "Brevo sender is not configured.");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
@@ -233,7 +253,7 @@ async function callBrevoEmail({ to, name, subject, html, tags = [], headers = {}
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "api-key": process.env.BREVO_API_KEY,
+        "api-key": brevoApiKey,
       },
       signal: controller.signal,
       body: JSON.stringify({
@@ -414,26 +434,32 @@ async function resolveRecipients(supabase, campaign, options = {}) {
 }
 
 async function brevoStatus() {
+  const brevoApiKey = String(process.env.BREVO_API_KEY || "").trim();
   const status = brevoConfigStatus();
   let connectivity = "not_configured";
   let message = "Brevo is not fully configured.";
+  let brevo_status_code = null;
+  let brevo_response = "";
   if (status.api_key_configured) {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10000);
       const response = await fetch("https://api.brevo.com/v3/account", {
-        headers: { "api-key": process.env.BREVO_API_KEY },
+        headers: { "api-key": brevoApiKey },
         signal: controller.signal,
       });
+      const text = await response.text().catch(() => "");
       clearTimeout(timeout);
+      brevo_status_code = response.status;
       connectivity = response.ok ? "authorised" : "rejected";
       message = response.ok ? "Brevo API key authorised." : "Brevo API key was rejected.";
+      if (!response.ok) brevo_response = brevoDiagnosticMessage(text, brevoApiKey);
     } catch {
       connectivity = "unreachable";
       message = "Could not reach Brevo account endpoint.";
     }
   }
-  return { brevo: { ...status, connectivity, message } };
+  return { brevo: { ...status, connectivity, message, brevo_status_code, brevo_response } };
 }
 
 async function listSendHistory(supabase, body = {}) {
