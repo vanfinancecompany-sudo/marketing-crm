@@ -30,6 +30,7 @@ class CampaignNotFoundError extends Error {
 }
 
 function json(response, status, payload) { response.status(status).json(payload); }
+function campaignValues(body = {}) { return body.values || body.campaign || {}; }
 
 function getSupabase() {
   const supabaseUrl = process.env.SUPABASE_URL;
@@ -78,21 +79,11 @@ function normalizeEditableStatus(value) {
   return status;
 }
 
-function campaignValues(body = {}) { return body.values || body.campaign || {}; }
-
 function ownedTemplateCampaignQuery(supabase) {
   return supabase
     .from("marketing_campaigns")
     .select(CAMPAIGN_COLUMNS)
     .eq("metadata->>source", TEMPLATE_CAMPAIGN_SOURCE);
-}
-
-function hasUsefulSnapshot(snapshot = {}) {
-  return Boolean(snapshot && snapshot.name && snapshot.default_subject && Array.isArray(snapshot.content_blocks));
-}
-
-function campaignRequiresVehicle(campaign = {}) {
-  return ["new_stock", "finance_offer", "rent2buy"].includes(campaign.campaign_type || campaign.objective);
 }
 
 function normalizeAudienceRules(values = {}) {
@@ -141,6 +132,14 @@ function normalizeAudienceSnapshot(value = null) {
   };
 }
 
+function hasUsefulSnapshot(snapshot = {}) {
+  return Boolean(snapshot && snapshot.name && snapshot.default_subject && Array.isArray(snapshot.content_blocks));
+}
+
+function campaignRequiresVehicle(campaign = {}) {
+  return ["new_stock", "finance_offer", "rent2buy"].includes(campaign.campaign_type || campaign.objective);
+}
+
 function readinessForCampaign(campaign = {}) {
   const audience = normalizeAudienceSnapshot(campaign.audience_snapshot || null);
   const selectedVehicleCount = Number(campaign.selected_vehicle_count ?? countSelectedVehicles(campaign.template_snapshot || {}));
@@ -154,9 +153,8 @@ function readinessForCampaign(campaign = {}) {
     { id: "deliverable", label: "Deliverable audience greater than zero", passed: Number(audience?.final_send_count || 0) > 0 },
     { id: "draft", label: "Campaign still Draft", passed: campaign.status === "draft" },
   ];
-  const readyToSend = checks.every((check) => check.passed);
   return {
-    ready_to_send: readyToSend,
+    ready_to_send: checks.every((check) => check.passed),
     checks,
     requires_vehicle: requiresVehicle,
     selected_vehicle_count: selectedVehicleCount,
@@ -328,14 +326,10 @@ async function countAudienceByScan(supabase, rules, exportedEmailIds = new Set()
   };
 }
 
-async function countAudience(supabase, rules) {
-  const exportedEmailIds = rules.mode === "never_emailed" ? await loadExportedEmailContactIds(supabase) : new Set();
-  return countAudienceByScan(supabase, rules, exportedEmailIds);
-}
-
 async function buildAudienceSnapshot(supabase, rulesInput = {}) {
   const rules = normalizeAudienceRules(rulesInput);
-  const counts = await countAudience(supabase, rules);
+  const exportedEmailIds = rules.mode === "never_emailed" ? await loadExportedEmailContactIds(supabase) : new Set();
+  const counts = await countAudienceByScan(supabase, rules, exportedEmailIds);
   return { rules, ...counts, calculated_at: new Date().toISOString() };
 }
 
@@ -408,12 +402,11 @@ async function updateCampaign(supabase, body = {}) {
     subject_line: cleanText(values.subject_line ?? existing.subject_line, 300),
     preview_text: cleanText(values.preview_text ?? existing.preview_text, 300),
     status: normalizeEditableStatus(values.status ?? existing.status),
-    template_snapshot: values.template_snapshot ? normalizeTemplateSnapshot(values.template_snapshot) : existing.template_snapshot,
     audience_snapshot: nextAudience,
   };
   if (!next.name) throw new CampaignValidationError("Campaign name is required.");
   if (!next.subject_line) throw new CampaignValidationError("Subject line is required.");
-  const candidate = { ...existing, ...next, selected_vehicle_count: countSelectedVehicles(next.template_snapshot) };
+  const candidate = { ...existing, ...next, template_snapshot: existing.template_snapshot, selected_vehicle_count: existing.selected_vehicle_count };
   candidate.readiness = readinessForCampaign(candidate);
   if (next.status === "ready" && !candidate.readiness.ready_to_send) {
     throw new CampaignValidationError("Campaign cannot be marked Ready until every readiness check passes.");
