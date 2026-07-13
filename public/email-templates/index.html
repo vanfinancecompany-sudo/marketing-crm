@@ -144,7 +144,7 @@
             <div>
               <p class="eyebrow">Marketing Centre</p>
               <h1>Email Template Designer</h1>
-              <p class="hint">Build reusable email templates from ordered content blocks. Vehicle selections are saved as safe snapshots.</p>
+              <p class="hint">Build reusable email templates from ordered content blocks. Selected vehicle snapshots render in preview.</p>
             </div>
             <div class="toolbar">
               <button id="newTemplateButton" class="primary">New Template</button>
@@ -307,7 +307,7 @@
         if (type === "button") return { text: "Learn more", url: "https://www.vanfinancecompany.co.uk", alignment: "left", primary_colour: "#2563eb", text_colour: "#ffffff", width: "auto", ...settings };
         if (type === "divider") return { colour: "#d9e2ef", thickness: 1, width_percentage: 100, spacing: 16, ...settings };
         if (type === "spacer") return { height: 24, ...settings };
-        return { heading: "Featured vans", intro_text: "Dummy vans are shown for preview only.", number_of_vehicles: 3, layout: "one_column", source_mode: "selected", product_mode: "finance", selected_vehicles: [], placeholder_note: "Selected vehicle names are saved now; live card rendering will be added later.", ...settings };
+        return { heading: "Featured vans", intro_text: "Dummy vans are shown for preview only.", number_of_vehicles: 3, layout: "one_column", source_mode: "selected", product_mode: "finance", selected_vehicles: [], placeholder_note: "Selected vehicles render from saved snapshots.", ...settings };
       }
       function normalizeBlockPositions(blocks) { return (blocks || []).map((block, index) => ({ ...block, position: index + 1 })); }
       function cloneBlock(block) { return { ...JSON.parse(JSON.stringify(block)), id: blockId() }; }
@@ -379,7 +379,7 @@
         const s = defaultSettings("vehicle_grid", block.settings || {});
         const selected = Array.isArray(s.selected_vehicles) ? s.selected_vehicles : [];
         const buttonText = selected.length ? "Change Selection" : "Select Vehicles";
-        return '<p class="block-note span-2">Manual selection saves safe snapshots now. The server preview still renders dummy vehicle cards in this PR.</p>'
+        return '<p class="block-note span-2">Selected vehicle snapshots render in preview. Empty grids show safe dummy placeholders.</p>'
           + inputHtml(index, "heading", "Heading", s.heading || "", isArchived)
           + inputHtml(index, "intro_text", "Intro text", s.intro_text || "", isArchived)
           + selectHtml(index, "product_mode", "Product mode", s.product_mode || "finance", [{ value: "finance", label: "Finance" }, { value: "rent2buy", label: "Rent2Buy" }], isArchived)
