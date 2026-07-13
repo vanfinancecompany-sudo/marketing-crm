@@ -458,29 +458,32 @@ async function updateCampaign(supabase, body = {}) {
   if (existing.status === "archived") throw new CampaignValidationError("Archived campaigns are read only.");
   const values = campaignValues(body);
   const nextStatus = normalizeEditableStatus(values.status ?? existing.status);
-  const nextAudience = await resolveAudienceForUpdate(supabase, values, existing, nextStatus);
-  const next = {
-    name: cleanText(values.name ?? existing.name, 200),
-    campaign_type: normalizeCampaignType(values.campaign_type ?? existing.campaign_type),
-    objective: normalizeCampaignType(values.campaign_type ?? existing.campaign_type),
-    subject_line: cleanText(values.subject_line ?? existing.subject_line, 300),
-    preview_text: cleanText(values.preview_text ?? existing.preview_text, 300),
-    status: nextStatus,
-    audience_snapshot: nextAudience,
-  };
-  if (!next.name) throw new CampaignValidationError("Campaign name is required.");
-  if (!next.subject_line) throw new CampaignValidationError("Subject line is required.");
-  if (await campaignHasProductionSendLock(supabase, existing.id)) {
-    const lockedChange = next.campaign_type !== existing.campaign_type
-      || next.objective !== existing.campaign_type
-      || next.subject_line !== existing.subject_line
-      || next.preview_text !== existing.preview_text
-      || next.status !== existing.status
+  const sendLocked = await campaignHasProductionSendLock(supabase, existing.id);
+  const nextCampaignType = normalizeCampaignType(values.campaign_type ?? existing.campaign_type);
+  const nextSubjectLine = cleanText(values.subject_line ?? existing.subject_line, 300);
+  const nextPreviewText = cleanText(values.preview_text ?? existing.preview_text, 300);
+  if (sendLocked) {
+    const lockedChange = nextCampaignType !== existing.campaign_type
+      || nextSubjectLine !== existing.subject_line
+      || nextPreviewText !== existing.preview_text
+      || nextStatus !== existing.status
       || values.audience_snapshot !== undefined;
     if (lockedChange) {
       throw new CampaignValidationError("Production sending has started for this campaign. Frozen content, status and audience can no longer be changed.");
     }
   }
+  const nextAudience = sendLocked ? existing.audience_snapshot : await resolveAudienceForUpdate(supabase, values, existing, nextStatus);
+  const next = {
+    name: cleanText(values.name ?? existing.name, 200),
+    campaign_type: nextCampaignType,
+    objective: nextCampaignType,
+    subject_line: nextSubjectLine,
+    preview_text: nextPreviewText,
+    status: nextStatus,
+    audience_snapshot: nextAudience,
+  };
+  if (!next.name) throw new CampaignValidationError("Campaign name is required.");
+  if (!next.subject_line) throw new CampaignValidationError("Subject line is required.");
   const candidate = { ...existing, ...next, template_snapshot: existing.template_snapshot, selected_vehicle_count: existing.selected_vehicle_count };
   candidate.readiness = readinessForCampaign(candidate);
   if (next.status === "ready" && !candidate.readiness.transition_ready) {
