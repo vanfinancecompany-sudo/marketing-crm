@@ -36,6 +36,16 @@ class AmbiguousSubmissionError extends ApiError {
   }
 }
 
+class BrevoHttpError extends ApiError {
+  constructor(statusCode, responseBody) {
+    const safeBody = cleanText(responseBody || "Empty response body.", 1000);
+    super(502, `Brevo HTTP ${statusCode}: ${safeBody}`);
+    this.name = "BrevoHttpError";
+    this.brevoStatusCode = statusCode;
+    this.brevoResponseBody = safeBody;
+  }
+}
+
 function json(response, status, payload) {
   response.status(status).json(payload);
 }
@@ -256,7 +266,7 @@ async function callBrevoEmail({ to, name, subject, html, tags = [], headers = {}
         data = { message: text.slice(0, 300) };
       }
     }
-    if (!response.ok) throw new ApiError(502, data.message || "Brevo rejected the email request.");
+    if (!response.ok) throw new BrevoHttpError(response.status, text || JSON.stringify(data));
     const messageId = data.messageId || data.messageIds?.[0] || "";
     if (!messageId) throw new AmbiguousSubmissionError("Brevo response did not include a message id.");
     return { messageId, response: data };
@@ -699,6 +709,7 @@ async function confirmProductionSend(supabase, body = {}) {
   let failedCount = 0;
   let unknownCount = 0;
   let skippedDuplicate = Number(fullRecount.counts.skipped_duplicate_count || 0);
+  const failureReasons = [];
 
   for (const recipient of selectedRecipients) {
     const inserted = await supabase.from("marketing_email_send_recipients").insert({
@@ -752,7 +763,18 @@ async function confirmProductionSend(supabase, body = {}) {
         await supabase.from("marketing_email_send_recipients").update({ status: "submission_unknown", failure_reason: cleanText(error.message, 1000), last_event_at: new Date().toISOString() }).eq("id", recipientRecord.id);
       } else {
         failedCount += 1;
-        await supabase.from("marketing_email_send_recipients").update({ status: "failed", failure_reason: cleanText(error.message, 1000), last_event_at: new Date().toISOString() }).eq("id", recipientRecord.id);
+        const failureReason = cleanText(error.message, 1000);
+        failureReasons.push(failureReason);
+        if (error instanceof BrevoHttpError) {
+          console.error("Brevo production send rejected", {
+            campaign_id: campaign.id,
+            send_id: send.id,
+            recipient_id: recipientRecord.id,
+            http_status: error.brevoStatusCode,
+            response_body: error.brevoResponseBody,
+          });
+        }
+        await supabase.from("marketing_email_send_recipients").update({ status: "failed", failure_reason: failureReason, last_event_at: new Date().toISOString() }).eq("id", recipientRecord.id);
       }
     }
   }
@@ -761,6 +783,7 @@ async function confirmProductionSend(supabase, body = {}) {
   const completedAt = new Date().toISOString();
   const errorParts = [];
   if (failedCount) errorParts.push(`${failedCount} recipient(s) failed immediate provider submission`);
+  if (failureReasons.length) errorParts.push(`First failure: ${failureReasons[0]}`);
   if (unknownCount) errorParts.push(`${unknownCount} recipient submission outcome(s) unknown; reconcile in Brevo before retrying`);
   const { data: updatedSend } = assertSupabase(
     await supabase.from("marketing_email_sends").update({
