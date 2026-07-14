@@ -26,79 +26,15 @@ textarea {
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 230px minmax(0, 1fr);
+  grid-template-columns: var(--marketing-sidebar-width, 230px) minmax(0, 1fr);
 }
 
-.sidebar {
-  background: linear-gradient(180deg, #0f172a 0%, #172554 100%);
-  color: #fff;
-  padding: 22px 16px;
-  display: grid;
-  align-content: start;
-  gap: 22px;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.sidebar__brand h1 {
-  margin: 4px 0 0;
-  font-size: 24px;
-  line-height: 1.05;
-}
-
-.sidebar__eyebrow,
 .eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.12em;
   font-size: 12px;
   opacity: 0.75;
   font-weight: 700;
-}
-
-.sidebar__nav {
-  display: grid;
-  gap: 9px;
-}
-
-.sidebar__main-crm {
-  display: block;
-  width: 100%;
-  border: 1px solid rgba(226, 232, 240, 0.22);
-  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
-  color: #ffffff;
-  padding: 13px 14px;
-  border-radius: 12px;
-  text-align: center;
-  text-decoration: none;
-  font-weight: 950;
-  letter-spacing: 0.08em;
-  box-shadow: 0 14px 28px rgba(2, 6, 23, 0.28);
-  transition: 0.2s ease;
-}
-
-.sidebar__main-crm:hover {
-  transform: translateY(-1px);
-  border-color: rgba(255, 255, 255, 0.42);
-  box-shadow: 0 18px 34px rgba(2, 6, 23, 0.38);
-}
-
-.sidebar__link {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.06);
-  color: #e2e8f0;
-  padding: 12px 14px;
-  border-radius: 12px;
-  text-align: left;
-  cursor: pointer;
-  transition: 0.2s ease;
-  font-weight: 750;
-  line-height: 1.15;
-}
-
-.sidebar__link:hover,
-.sidebar__link.is-active {
-  background: #fff;
-  color: #0f172a;
-  border-color: #fff;
 }
 
 .app-main {
@@ -1954,11 +1890,6 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .sidebar {
-    border-right: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
   .factory-layout,
   .stats-grid,
   .control-app-grid,
@@ -2086,13 +2017,6 @@ textarea {
 }
 
 /* CLOSES your media query */
-}
-
-/* ✅ ADD THIS OUTSIDE */
-.sidebar__link {
-  text-decoration: none;
-  color: inherit;
-  display: block;
 }
 
 .premium-reel-beta {

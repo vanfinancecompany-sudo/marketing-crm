@@ -2,99 +2,57 @@ const CONTROL_CENTRE_URL =
   import.meta.env.VITE_CONTROL_CENTRE_URL ||
   "https://control-centre-navy.vercel.app";
 
-const IMAGE_SUITE_URL = "https://vehicle-image-suite.vercel.app";
 const WORK_DOCUMENTS_HUB_URL =
   import.meta.env.VITE_WORK_DOCUMENTS_HUB_URL ||
   "https://work-documents-hub.vercel.app";
 
-export default function Sidebar({ currentView, onNavigate }) {
-  const items = [
-    "Dashboard",
-    "Stock",
-    "Customer Database",
-    "Marketing Centre",
-    "Suppression Centre",
-    "Email Templates",
-    "Campaigns",
-    "Vansco Stock Watch",
-    "Reel Lab Beta",
-    "YouTube Generator",
-    "Creative Library",
-    "Image Suite",
-    "Documents Hub",
-    "Van Finance Facebook",
-    "Rent2Buy Facebook",
-    "Facebook Marketplace",
-  ];
+const EXTERNAL_URL_OVERRIDES = {
+  "control-centre": CONTROL_CENTRE_URL,
+  "documents-hub": WORK_DOCUMENTS_HUB_URL,
+};
+
+export default function Sidebar({ onNavigate }) {
+  const navigation = globalThis.MarketingCrmNavigation;
+  const items = navigation?.items || [];
+  const pathname = typeof window === "undefined" ? "/" : window.location.pathname;
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar__brand">
-        <div className="sidebar__eyebrow">CRM Suite</div>
+    <aside className="marketing-sidebar">
+      <div className="marketing-sidebar__brand">
+        <div className="marketing-sidebar__eyebrow">CRM Suite</div>
         <h1>Marketing CRM</h1>
       </div>
 
-      <nav className="sidebar__nav">
-        <a className="sidebar__main-crm" href={CONTROL_CENTRE_URL}>
-          Control Centre
-        </a>
-
+      <nav className="marketing-sidebar__nav" aria-label="Marketing CRM navigation">
         {items.map((item) => {
-          if (item === "Dashboard") {
-            return (
-              <a key={item} className="sidebar__link" href="/marketing-dashboard/">
-                {item}
-              </a>
-            );
-          }
+          const active = navigation?.isItemActive(pathname, item) || false;
+          const href = EXTERNAL_URL_OVERRIDES[item.id] || item.href || item.path;
+          const className = item.variant === "primary"
+            ? "marketing-sidebar__main-crm"
+            : `marketing-sidebar__link${active ? " is-active" : ""}`;
 
-          if (item === "Suppression Centre") {
+          if (item.external || item.navigation === "document") {
             return (
-              <a key={item} className="sidebar__link" href="/suppression-centre/">
-                {item}
-              </a>
-            );
-          }
-
-          if (item === "Email Templates") {
-            return (
-              <a key={item} className="sidebar__link" href="/email-templates/">
-                {item}
-              </a>
-            );
-          }
-
-          if (item === "Campaigns") {
-            return (
-              <a key={item} className="sidebar__link" href="/campaigns/">
-                {item}
-              </a>
-            );
-          }
-
-          if (item === "Image Suite") {
-            return (
-              <a key={item} className="sidebar__link" href={IMAGE_SUITE_URL}>
-                {item}
-              </a>
-            );
-          }
-
-          if (item === "Documents Hub") {
-            return (
-              <a key={item} className="sidebar__link" href={WORK_DOCUMENTS_HUB_URL}>
-                {item}
+              <a
+                key={item.id}
+                className={className}
+                href={href}
+                aria-current={active ? "page" : undefined}
+              >
+                {item.label}
               </a>
             );
           }
 
           return (
             <button
-              key={item}
-              className={currentView === item ? "sidebar__link is-active" : "sidebar__link"}
-              onClick={() => onNavigate(item)}
+              key={item.id}
+              type="button"
+              className={className}
+              aria-current={active ? "page" : undefined}
+              onClick={() => onNavigate(item.view)}
             >
-              {item}
+              {item.label}
             </button>
           );
         })}
