@@ -9,6 +9,7 @@
     selectedCampaignId: "",
     preparation: null,
     history: [],
+    progress: null,
     migrationRequired: false,
     brevo: null,
   };
@@ -109,6 +110,15 @@
       .send-area h4 { margin:0; font-size:15px; }
       .send-history { max-height:320px; overflow:auto; margin-top:10px; }
       .send-history table { font-size:13px; }
+      .campaign-progress-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(135px, 1fr)); gap:10px; margin-top:12px; }
+      .campaign-progress-item { border:1px solid var(--line); border-radius:8px; padding:10px; background:var(--soft); }
+      .campaign-progress-item strong { display:block; color:var(--muted); font-size:12px; text-transform:uppercase; }
+      .campaign-progress-item b { display:block; margin-top:3px; font-size:22px; }
+      .campaign-progress-track { height:10px; margin-top:14px; border-radius:999px; overflow:hidden; background:#dfe7f1; }
+      .campaign-progress-fill { height:100%; border-radius:inherit; background:var(--blue); transition:none; }
+      .campaign-progress-percent { margin-top:6px; color:var(--blue); font-weight:900; text-align:right; }
+      .campaign-progress-batch { margin-top:14px; padding-top:12px; border-top:1px solid var(--line); }
+      .campaign-progress-batch h4 { margin:0; font-size:15px; }
       .brevo-banner { display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:12px; align-items:center; border-radius:10px; padding:13px; border:1px solid var(--line); background:#f8fafc; }
       .brevo-banner strong { display:block; font-size:15px; }
       .brevo-banner p { margin:3px 0 0; }
@@ -126,8 +136,63 @@
     `;
     document.head.appendChild(style);
   }
+  function ensureProgressPanel() {
+    if ($("campaignProgressSection")) return;
+    const detailStack = document.querySelector("#detailSection .detail-stack");
+    if (!detailStack) return;
+    const audienceSection = Array.from(detailStack.children).find((child) => child.querySelector("h3")?.textContent?.trim() === "Audience");
+    if (!audienceSection) return;
+    const section = document.createElement("section");
+    section.id = "campaignProgressSection";
+    section.className = "card";
+    section.innerHTML = `
+      <h3>Campaign Progress</h3>
+      <p>Read-only progress from this campaign's existing production recipient records.</p>
+      <div id="campaignProgressGrid" class="campaign-progress-grid"></div>
+      <div class="campaign-progress-track" role="progressbar" aria-label="Campaign progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="campaignProgressFill" class="campaign-progress-fill" style="width:0%;"></div>
+      </div>
+      <div id="campaignProgressPercent" class="campaign-progress-percent">0%</div>
+      <div id="campaignLastBatch" class="campaign-progress-batch"></div>
+    `;
+    detailStack.insertBefore(section, audienceSection);
+  }
+  function renderCampaignProgress() {
+    const progress = state.progress || {};
+    const totalAudience = Number(progress.total_audience || 0);
+    const alreadyProcessed = Number(progress.already_processed || 0);
+    const eligibleRemaining = Math.max(0, Number(progress.eligible_remaining || 0));
+    const nextBatchSize = Math.max(1, Math.min(25, Number($("productionBatchSize")?.value || 25)));
+    const remainingAfterBatch = Math.max(0, eligibleRemaining - nextBatchSize);
+    const progressPercent = Math.max(0, Math.min(100, Number(progress.progress_percent || 0)));
+    const items = [
+      ["Total Audience", totalAudience],
+      ["Already Processed", alreadyProcessed],
+      ["Eligible Remaining", eligibleRemaining],
+      ["Next Batch Size", nextBatchSize],
+      ["Remaining After This Batch", remainingAfterBatch],
+    ];
+    $("campaignProgressGrid").innerHTML = items.map(([label, value]) => `<div class="campaign-progress-item"><strong>${escapeHtml(label)}</strong><b>${fmt.format(value)}</b></div>`).join("");
+    $("campaignProgressFill").style.width = `${progressPercent}%`;
+    $("campaignProgressFill").parentElement.setAttribute("aria-valuenow", String(progressPercent));
+    $("campaignProgressPercent").textContent = `${progressPercent}%`;
+    const lastBatch = progress.last_batch;
+    $("campaignLastBatch").innerHTML = lastBatch ? `
+      <h4>Last Batch</h4>
+      <div class="campaign-progress-grid">
+        ${[
+          ["Processed", lastBatch.sent || 0],
+          ["Accepted", lastBatch.accepted || 0],
+          ["Failed", lastBatch.failed || 0],
+          ["Suppressed", lastBatch.suppressed || 0],
+          ["Completed", formatDate(lastBatch.completed_at)],
+        ].map(([label, value]) => `<div class="campaign-progress-item"><strong>${escapeHtml(label)}</strong><b>${escapeHtml(value)}</b></div>`).join("")}
+      </div>
+    ` : `<h4>Last Batch</h4><p class="hint">No production batches created yet.</p>`;
+  }
   function ensurePanel() {
     installStyles();
+    ensureProgressPanel();
     if ($("campaignSendingSection")) return;
     const detailStack = document.querySelector("#detailSection .detail-stack");
     if (!detailStack) return;
@@ -193,6 +258,7 @@
     $("prepareSendButton").addEventListener("click", () => prepareSend().catch((error) => setMessage(error.message, true)));
     $("confirmSendButton").addEventListener("click", () => confirmSend().catch((error) => setMessage(error.message, true)));
     $("cancelPreparedSendButton").addEventListener("click", () => cancelPreparation().catch((error) => setMessage(error.message, true)));
+    $("productionBatchSize").addEventListener("input", renderCampaignProgress);
   }
   function renderBrevoStatus() {
     const brevo = state.brevo || {};
@@ -273,11 +339,15 @@
     const id = currentCampaignId();
     state.selectedCampaignId = id;
     state.preparation = null;
+    state.progress = null;
     if (!id) {
       $("campaignSendingSection").classList.add("hidden");
+      $("campaignProgressSection").classList.add("hidden");
       return;
     }
     $("campaignSendingSection").classList.remove("hidden");
+    $("campaignProgressSection").classList.remove("hidden");
+    renderCampaignProgress();
     state.brevo = { connectivity: "checking" };
     renderBrevoStatus();
     renderPreparation();
@@ -287,10 +357,12 @@
     ]);
     state.brevo = brevoResult.brevo;
     state.history = historyResult.sends || [];
+    state.progress = historyResult.progress || null;
     state.migrationRequired = Boolean(historyResult.migration_required);
     renderBrevoStatus();
     renderPreparation();
     renderHistory();
+    renderCampaignProgress();
   }
   async function sendTest() {
     const reason = sendBlockReason("test");
