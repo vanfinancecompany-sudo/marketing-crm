@@ -163,7 +163,7 @@
     const totalAudience = Number(progress.total_audience || 0);
     const alreadyProcessed = Number(progress.already_processed || 0);
     const eligibleRemaining = Math.max(0, Number(progress.eligible_remaining || 0));
-    const nextBatchSize = Math.max(1, Math.min(25, Number($("productionBatchSize")?.value || 25)));
+    const nextBatchSize = Math.max(1, Math.min(500, Number($("productionBatchSize")?.value || 25)));
     const remainingAfterBatch = Math.max(0, eligibleRemaining - nextBatchSize);
     const progressPercent = Math.max(0, Math.min(100, Number(progress.progress_percent || 0)));
     const items = [
@@ -226,10 +226,10 @@
       </section>
       <section class="send-area" style="margin-top:14px;">
         <div class="send-danger">This sends real customer email.</div>
-        <div class="send-warning">Initial safety limit: 25 recipients per confirmed batch.</div>
+        <div class="send-warning">Maximum 500 recipients per confirmed batch.</div>
         <div class="form-grid">
           <label>Batch size
-            <input id="productionBatchSize" type="number" min="1" max="25" value="25" />
+            <input id="productionBatchSize" type="number" min="1" max="500" value="25" />
           </label>
           <label>Confirmation phrase
             <input id="productionConfirmationPhrase" placeholder="Prepare first" />
