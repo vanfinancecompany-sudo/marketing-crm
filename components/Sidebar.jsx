@@ -40,6 +40,14 @@ export default function Sidebar({ currentView, onNavigate }) {
         </a>
 
         {items.map((item) => {
+          if (item === "Dashboard") {
+            return (
+              <a key={item} className="sidebar__link" href="/marketing-dashboard/">
+                {item}
+              </a>
+            );
+          }
+
           if (item === "Suppression Centre") {
             return (
               <a key={item} className="sidebar__link" href="/suppression-centre/">
