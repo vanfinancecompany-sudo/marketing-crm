@@ -3,9 +3,10 @@ import { createClient } from "@supabase/supabase-js";
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const TEMPLATE_CAMPAIGN_SOURCE = "template_campaign_foundation";
 const PAGE_SIZE = 1000;
-const MAX_ROWS = 20000;
+const SEND_ROW_CAP = 10000;
+const EVENT_ROW_CAP = 50000;
+const CAMPAIGN_ROW_CAP = 5000;
 const SEND_COLUMNS = "id,campaign_id,send_type,status,requested_count,eligible_count,suppressed_count,sent_count,failed_count,skipped_duplicate_count,created_at,started_at,completed_at,error_summary,metadata";
-const RECIPIENT_COLUMNS = "id,send_id,campaign_id,send_type,customer_id,email,status,first_sent_at,last_event_at,created_at,delivered_at,opened_at,clicked_at,soft_bounced_at,hard_bounced_at,complained_at,unsubscribed_at,blocked_at,deferred_at,failed_at,last_event_type,last_event_reason";
 const EVENT_COLUMNS = "id,campaign_id,send_id,recipient_id,customer_id,email_normalized,event_type,event_at,link_url,reason,created_at";
 const CAMPAIGN_COLUMNS = "id,name,status,campaign_type,template_name,template_snapshot,selected_vehicle_count,metadata,created_at,updated_at,archived_at";
 
@@ -70,26 +71,40 @@ function chunk(values, size = 200) {
   return chunks;
 }
 
-async function loadAllRows(queryFactory, maxRows = MAX_ROWS) {
+async function loadAllRows(queryFactory, options = {}) {
+  const limit = options.limit || 5000;
+  const dataset = options.dataset || "data";
   const rows = [];
-  for (let from = 0; from < maxRows; from += PAGE_SIZE) {
-    const to = Math.min(from + PAGE_SIZE - 1, maxRows - 1);
+  let totalCount = null;
+  for (let from = 0; from < limit; from += PAGE_SIZE) {
+    const to = Math.min(from + PAGE_SIZE - 1, limit - 1);
     const result = await queryFactory().range(from, to);
-    if (result.error) throw new Error(result.error.message || "Could not load dashboard data.");
+    if (result.error) throw new Error(result.error.message || `Could not load ${dataset}.`);
+    if (typeof result.count === "number") totalCount = result.count;
     rows.push(...(result.data || []));
     if (!result.data || result.data.length < PAGE_SIZE) break;
   }
-  return rows;
+  return {
+    rows,
+    total_count: totalCount === null ? rows.length : totalCount,
+    partial: totalCount !== null ? totalCount > rows.length : rows.length >= limit,
+    dataset,
+    limit,
+  };
 }
 
-async function loadRowsByChunks(supabase, table, columns, field, values, extra = (query) => query) {
+async function loadRowsByChunks(supabase, table, columns, field, values, extra = (query) => query, options = {}) {
   const rows = [];
+  const partials = [];
   for (const valuesChunk of chunk(values)) {
-    const result = await extra(supabase.from(table).select(columns).in(field, valuesChunk));
-    if (result.error) throw new Error(result.error.message || `Could not load ${table}.`);
-    rows.push(...(result.data || []));
+    const result = await loadAllRows(
+      () => extra(supabase.from(table).select(columns, { count: "exact" }).in(field, valuesChunk)),
+      { dataset: options.dataset || table, limit: options.limit || EVENT_ROW_CAP }
+    );
+    rows.push(...result.rows);
+    if (result.partial) partials.push(result);
   }
-  return rows;
+  return { rows, partials };
 }
 
 function londonDateParts(date = new Date()) {
@@ -136,6 +151,12 @@ function periodRange(periodValue) {
   return { period, started_at: null, ended_at: now.toISOString() };
 }
 
+function applyPeriod(query, column, range) {
+  let next = query.lte(column, range.ended_at);
+  if (range.started_at) next = next.gte(column, range.started_at);
+  return next;
+}
+
 function isMissingTable(error, tableName) {
   const message = String(error?.message || error || "").toLowerCase();
   return message.includes(tableName.toLowerCase())
@@ -170,51 +191,6 @@ function productionSendsOnly(rows = []) {
   return rows.filter((send) => send.send_type === "production");
 }
 
-function uniqueCount(rows, field, predicate = () => true) {
-  const values = new Set();
-  rows.forEach((row) => {
-    if (predicate(row) && row[field]) values.add(row[field]);
-  });
-  return values.size;
-}
-
-function aggregateRecipients(recipients = []) {
-  const acceptedStatuses = new Set(["accepted", "sent", "delivered", "opened", "clicked", "soft_bounced", "hard_bounced", "blocked", "complained", "unsubscribed"]);
-  const deliveredStatuses = new Set(["delivered", "opened", "clicked"]);
-  const openedStatuses = new Set(["opened", "clicked"]);
-  const clickedStatuses = new Set(["clicked"]);
-  const accepted = recipients.filter((row) => acceptedStatuses.has(row.status)).length;
-  const delivered = uniqueCount(recipients, "id", (row) => deliveredStatuses.has(row.status) || Boolean(row.delivered_at));
-  const opened = uniqueCount(recipients, "id", (row) => openedStatuses.has(row.status) || Boolean(row.opened_at));
-  const clicked = uniqueCount(recipients, "id", (row) => clickedStatuses.has(row.status) || Boolean(row.clicked_at));
-  const hardBounced = uniqueCount(recipients, "id", (row) => row.status === "hard_bounced" || Boolean(row.hard_bounced_at));
-  const softBounced = uniqueCount(recipients, "id", (row) => row.status === "soft_bounced" || Boolean(row.soft_bounced_at));
-  const blocked = uniqueCount(recipients, "id", (row) => row.status === "blocked" || Boolean(row.blocked_at));
-  const complained = uniqueCount(recipients, "id", (row) => row.status === "complained" || Boolean(row.complained_at));
-  const unsubscribed = uniqueCount(recipients, "id", (row) => row.status === "unsubscribed" || Boolean(row.unsubscribed_at));
-  const submissionUnknown = recipients.filter((row) => row.status === "submission_unknown").length;
-  const failed = recipients.filter((row) => row.status === "failed").length;
-  return {
-    accepted,
-    delivered,
-    opened,
-    clicked,
-    hard_bounced: hardBounced,
-    soft_bounced: softBounced,
-    blocked,
-    complained,
-    unsubscribed,
-    submission_unknown: submissionUnknown,
-    failed,
-    delivery_rate: percent(delivered, accepted),
-    open_rate: percent(opened, delivered || accepted),
-    click_rate: percent(clicked, delivered || accepted),
-    click_to_open_rate: percent(clicked, opened),
-    bounce_rate: percent(hardBounced + softBounced + blocked, accepted),
-    unsubscribe_rate: percent(unsubscribed, accepted),
-  };
-}
-
 function aggregateProductionSends(sends = []) {
   return sends.reduce((acc, send) => {
     acc.production_batches += 1;
@@ -230,6 +206,43 @@ function aggregateProductionSends(sends = []) {
   }, { production_batches: 0, requested: 0, accepted: 0, failed: 0, duplicates: 0, completed: 0, partially_failed: 0, failed_batches: 0, submission_unknown_batches: 0 });
 }
 
+function uniqueEventCount(events = [], eventTypes = []) {
+  const types = new Set(eventTypes);
+  const ids = new Set();
+  events.forEach((event) => {
+    if (!types.has(event.event_type) || !event.recipient_id) return;
+    ids.add(event.recipient_id);
+  });
+  return ids.size;
+}
+
+function aggregateEventActivity(events = [], submissionDenominator = 0) {
+  const delivered = uniqueEventCount(events, ["delivered"]);
+  const opened = uniqueEventCount(events, ["opened"]);
+  const clicked = uniqueEventCount(events, ["clicked"]);
+  const hardBounced = uniqueEventCount(events, ["hard_bounce", "invalid_email"]);
+  const softBounced = uniqueEventCount(events, ["soft_bounce"]);
+  const blocked = uniqueEventCount(events, ["blocked"]);
+  const complained = uniqueEventCount(events, ["complaint"]);
+  const unsubscribed = uniqueEventCount(events, ["unsubscribed"]);
+  return {
+    delivered,
+    opened,
+    clicked,
+    hard_bounced: hardBounced,
+    soft_bounced: softBounced,
+    blocked,
+    complained,
+    unsubscribed,
+    delivery_rate: percent(delivered, submissionDenominator),
+    open_rate: percent(opened, delivered || submissionDenominator),
+    click_rate: percent(clicked, delivered || submissionDenominator),
+    click_to_open_rate: percent(clicked, opened),
+    bounce_rate: percent(hardBounced + softBounced + blocked, submissionDenominator),
+    unsubscribe_rate: percent(unsubscribed, submissionDenominator),
+  };
+}
+
 function testSendSummary(sends = []) {
   const tests = sends.filter((send) => send.send_type === "test").sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
   const latest = tests[0] || null;
@@ -243,44 +256,53 @@ function testSendSummary(sends = []) {
   };
 }
 
-function campaignPerformance(campaigns = [], productionSends = [], recipients = []) {
+function campaignPerformance(campaigns = [], periodProductionSends = [], periodProductionEvents = []) {
   const campaignMap = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
   const sendsByCampaign = new Map();
-  productionSends.forEach((send) => {
+  periodProductionSends.forEach((send) => {
     const rows = sendsByCampaign.get(send.campaign_id) || [];
     rows.push(send);
     sendsByCampaign.set(send.campaign_id, rows);
   });
-  const recipientsByCampaign = new Map();
-  recipients.forEach((recipient) => {
-    const rows = recipientsByCampaign.get(recipient.campaign_id) || [];
-    rows.push(recipient);
-    recipientsByCampaign.set(recipient.campaign_id, rows);
+  const eventsByCampaign = new Map();
+  periodProductionEvents.forEach((event) => {
+    const rows = eventsByCampaign.get(event.campaign_id) || [];
+    rows.push(event);
+    eventsByCampaign.set(event.campaign_id, rows);
   });
-  const campaignIds = new Set([...campaignMap.keys(), ...sendsByCampaign.keys()]);
+  const campaignIds = new Set([...campaignMap.keys(), ...sendsByCampaign.keys(), ...eventsByCampaign.keys()]);
   return Array.from(campaignIds).map((id) => {
     const campaign = campaignMap.get(id) || { id, name: "Unknown campaign" };
     const sends = sendsByCampaign.get(id) || [];
-    const latestSendAt = sends.map((send) => send.completed_at || send.started_at || send.created_at).filter(Boolean).sort().pop() || null;
-    const aggregate = aggregateRecipients(recipientsByCampaign.get(id) || []);
+    const events = eventsByCampaign.get(id) || [];
+    const latestActivityAt = [
+      ...sends.map((send) => send.completed_at || send.started_at || send.created_at),
+      ...events.map((event) => event.event_at),
+      campaign.updated_at,
+      campaign.created_at,
+    ].filter(Boolean).sort().pop() || null;
+    const sendMetrics = aggregateProductionSends(sends);
+    const eventMetrics = aggregateEventActivity(events, sendMetrics.accepted);
     return {
       id,
       name: campaign.name || "Untitled campaign",
       status: campaign.status || "",
       campaign_type: campaign.campaign_type || "",
       template_name: campaign.template_name || "",
+      updated_at: campaign.updated_at || null,
+      created_at: campaign.created_at || null,
+      period_activity_at: latestActivityAt,
       production_batches: sends.length,
-      last_production_send_at: latestSendAt,
-      requested: sends.reduce((total, send) => total + Number(send.requested_count || 0), 0),
-      accepted: aggregate.accepted,
-      delivered: aggregate.delivered,
-      opened: aggregate.opened,
-      clicked: aggregate.clicked,
-      delivery_rate: aggregate.delivery_rate,
-      open_rate: aggregate.open_rate,
-      click_rate: aggregate.click_rate,
+      requested: sendMetrics.requested,
+      accepted: sendMetrics.accepted,
+      delivered: eventMetrics.delivered,
+      opened: eventMetrics.opened,
+      clicked: eventMetrics.clicked,
+      delivery_rate: eventMetrics.delivery_rate,
+      open_rate: eventMetrics.open_rate,
+      click_rate: eventMetrics.click_rate,
     };
-  }).sort((a, b) => new Date(b.last_production_send_at || b.updated_at || 0).getTime() - new Date(a.last_production_send_at || a.updated_at || 0).getTime()).slice(0, 50);
+  }).sort((a, b) => new Date(b.period_activity_at || 0).getTime() - new Date(a.period_activity_at || 0).getTime()).slice(0, 50);
 }
 
 function isUnsubscribeUrl(url) {
@@ -344,7 +366,6 @@ function topClickedDestinations(events = [], campaigns = []) {
       const url = safeUrl(vehicle.url);
       if (!url) return;
       vehicleLookup.set(`${campaign.id}|${url}`, { ...vehicle, campaign_id: campaign.id, campaign_name: campaign.name || "" });
-      if (!vehicleLookup.has(`any|${url}`)) vehicleLookup.set(`any|${url}`, { ...vehicle, campaign_id: campaign.id, campaign_name: campaign.name || "" });
     });
   });
   const vehicleMap = new Map();
@@ -352,20 +373,20 @@ function topClickedDestinations(events = [], campaigns = []) {
   events.filter((event) => event.event_type === "clicked" && event.link_url && !isUnsubscribeUrl(event.link_url)).forEach((event) => {
     const url = safeUrl(event.link_url);
     if (!url) return;
-    const vehicle = vehicleLookup.get(`${event.campaign_id}|${url}`) || vehicleLookup.get(`any|${url}`);
+    const vehicle = vehicleLookup.get(`${event.campaign_id}|${url}`);
     const targetMap = vehicle ? vehicleMap : otherMap;
-    const key = vehicle ? `${vehicle.campaign_id}|${url}` : url;
+    const key = vehicle ? `${event.campaign_id}|${url}` : url;
     const entry = targetMap.get(key) || {
       url,
       title: vehicle?.title || "Other link",
       registration: vehicle?.registration || "",
-      campaign_id: vehicle?.campaign_id || event.campaign_id || "",
+      campaign_id: event.campaign_id || "",
       campaign_name: vehicle?.campaign_name || campaignsById.get(event.campaign_id)?.name || "",
       clicks: 0,
       unique_recipients: new Set(),
     };
     entry.clicks += 1;
-    if (event.recipient_id || event.email_normalized) entry.unique_recipients.add(event.recipient_id || event.email_normalized);
+    if (event.recipient_id) entry.unique_recipients.add(event.recipient_id);
     targetMap.set(key, entry);
   });
   const serialize = (entry) => ({ ...entry, unique_recipients: entry.unique_recipients.size });
@@ -444,6 +465,19 @@ async function loadSuppressionHealth(supabase) {
   }
 }
 
+function partialWarning(partials = []) {
+  const affected = partials.filter(Boolean);
+  return {
+    partial_data: affected.length > 0,
+    affected_datasets: affected.map((item) => ({
+      dataset: item.dataset,
+      loaded_rows: item.rows?.length || 0,
+      total_count: item.total_count,
+      limit: item.limit,
+    })),
+  };
+}
+
 async function loadDashboard(supabase, body = {}) {
   const range = periodRange(body.period);
   const brevo = await checkBrevoConnection();
@@ -466,34 +500,54 @@ async function loadDashboard(supabase, body = {}) {
   const activeTemplateCount = await safeHeadCount(supabase, "marketing_email_templates", (query) => query.eq("status", "active"));
 
   let sends = [];
-  let productionSends = [];
-  let recipients = [];
-  let events = [];
+  let periodProductionSends = [];
+  let periodEvents = [];
+  let periodProductionEvents = [];
   let campaigns = [];
   let webhook = { configured: Boolean(String(process.env.BREVO_WEBHOOK_SECRET || "").trim()), latest_event_at: null, events_last_24h: 0, events_last_7d: 0, state: "awaiting_first_event" };
   let infrastructureMessage = "";
+  const partials = [];
 
   try {
-    sends = await loadAllRows(() => {
-      let query = supabase.from("marketing_email_sends").select(SEND_COLUMNS).order("created_at", { ascending: false });
-      if (range.started_at) query = query.gte("created_at", range.started_at);
+    const sendResult = await loadAllRows(() => {
+      let query = supabase.from("marketing_email_sends").select(SEND_COLUMNS, { count: "exact" }).order("created_at", { ascending: false });
+      query = applyPeriod(query, "created_at", range);
       return query;
-    });
-    productionSends = productionSendsOnly(sends);
-    const productionSendIds = productionSends.map((send) => send.id);
-    recipients = await loadRowsByChunks(supabase, "marketing_email_send_recipients", RECIPIENT_COLUMNS, "send_id", productionSendIds, (query) => query.eq("send_type", "production"));
-    events = await loadRowsByChunks(supabase, "marketing_email_events", EVENT_COLUMNS, "send_id", productionSendIds, (query) => query.order("event_at", { ascending: false }));
+    }, { dataset: "period sends", limit: SEND_ROW_CAP });
+    sends = sendResult.rows;
+    if (sendResult.partial) partials.push(sendResult);
+    periodProductionSends = productionSendsOnly(sends);
 
-    const campaignIds = new Set(productionSends.map((send) => send.campaign_id).filter(Boolean));
+    const eventResult = await loadAllRows(() => {
+      let query = supabase.from("marketing_email_events").select(EVENT_COLUMNS, { count: "exact" }).order("event_at", { ascending: false });
+      query = applyPeriod(query, "event_at", range);
+      return query;
+    }, { dataset: "period webhook events", limit: EVENT_ROW_CAP });
+    periodEvents = eventResult.rows;
+    if (eventResult.partial) partials.push(eventResult);
+
+    const eventSendIds = new Set(periodEvents.map((event) => event.send_id).filter(Boolean));
+    const eventSendResult = await loadRowsByChunks(supabase, "marketing_email_sends", SEND_COLUMNS, "id", Array.from(eventSendIds), (query) => query, { dataset: "event send lookup", limit: SEND_ROW_CAP });
+    partials.push(...eventSendResult.partials);
+    const sendsById = new Map(eventSendResult.rows.map((send) => [send.id, send]));
+    periodProductionEvents = periodEvents.filter((event) => sendsById.get(event.send_id)?.send_type === "production");
+
+    const campaignIds = new Set([
+      ...periodProductionSends.map((send) => send.campaign_id).filter(Boolean),
+      ...periodProductionEvents.map((event) => event.campaign_id).filter(Boolean),
+    ]);
     const recentCampaigns = await loadAllRows(() => supabase
       .from("marketing_campaigns")
-      .select(CAMPAIGN_COLUMNS)
+      .select(CAMPAIGN_COLUMNS, { count: "exact" })
       .eq("metadata->>source", TEMPLATE_CAMPAIGN_SOURCE)
-      .order("updated_at", { ascending: false }), 100);
-    recentCampaigns.forEach((campaign) => campaignIds.add(campaign.id));
-    campaigns = campaignIds.size
-      ? await loadRowsByChunks(supabase, "marketing_campaigns", CAMPAIGN_COLUMNS, "id", Array.from(campaignIds), (query) => query)
-      : recentCampaigns;
+      .order("updated_at", { ascending: false }), { dataset: "recent campaigns", limit: 100 });
+    recentCampaigns.rows.forEach((campaign) => campaignIds.add(campaign.id));
+    const campaignResult = campaignIds.size
+      ? await loadRowsByChunks(supabase, "marketing_campaigns", CAMPAIGN_COLUMNS, "id", Array.from(campaignIds), (query) => query, { dataset: "campaign lookup", limit: CAMPAIGN_ROW_CAP })
+      : { rows: recentCampaigns.rows, partials: [] };
+    campaigns = campaignResult.rows;
+    partials.push(...campaignResult.partials);
+
     const latestEvent = await supabase.from("marketing_email_events").select("event_at").order("event_at", { ascending: false }).limit(1).maybeSingle();
     const last24 = await safeHeadCount(supabase, "marketing_email_events", (query) => query.gte("event_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()));
     const last7 = await safeHeadCount(supabase, "marketing_email_events", (query) => query.gte("event_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()));
@@ -513,10 +567,11 @@ async function loadDashboard(supabase, body = {}) {
   }
 
   const suppression = await loadSuppressionHealth(supabase);
-  const productionMetrics = aggregateRecipients(recipients);
-  const productionSendMetrics = aggregateProductionSends(productionSends);
-  const topClicks = topClickedDestinations(events, campaigns);
-  const recent = recentActivity({ sends, events, campaigns, suppressions: suppression.history || suppression.recent || [] });
+  const productionSendMetrics = aggregateProductionSends(periodProductionSends);
+  const productionEventMetrics = aggregateEventActivity(periodProductionEvents, productionSendMetrics.accepted);
+  const topClicks = topClickedDestinations(periodProductionEvents, campaigns);
+  const recent = recentActivity({ sends, events: periodProductionEvents, campaigns, suppressions: suppression.history || suppression.recent || [] });
+  const partial = partialWarning(partials);
   const essentialReadiness = {
     brevo_authorised: brevo.state === "authorised",
     sender_configured: sender.configured,
@@ -534,6 +589,11 @@ async function loadDashboard(supabase, body = {}) {
     dashboard: {
       generated_at: new Date().toISOString(),
       period: range,
+      semantics: {
+        campaign_table: "Period performance: send rows are counted by send created_at in the selected period; engagement is counted by production webhook event_at in the selected period.",
+        send_activity: "Production batch/requested/accepted/failed/skipped figures use production sends created within the selected period.",
+        engagement_activity: "Delivered, opens, clicks, bounces, complaints and unsubscribes use verified production webhook events whose event_at is inside the selected period, even if the original send was earlier.",
+      },
       health: {
         brevo,
         sender,
@@ -546,16 +606,19 @@ async function loadDashboard(supabase, body = {}) {
       launch_readiness: { ready_for_controlled_email_sending: readyForControlledSending, checks: essentialReadiness },
       production: {
         sends: productionSendMetrics,
-        recipients: productionMetrics,
-        production_campaigns_with_send_activity: new Set(productionSends.map((send) => send.campaign_id).filter(Boolean)).size,
+        events: productionEventMetrics,
+        production_campaigns_with_send_activity: new Set(periodProductionSends.map((send) => send.campaign_id).filter(Boolean)).size,
+        production_campaigns_with_event_activity: new Set(periodProductionEvents.map((event) => event.campaign_id).filter(Boolean)).size,
       },
       tests: testSendSummary(sends),
-      campaigns: campaignPerformance(campaigns, productionSends, recipients),
-      event_breakdown: eventSummary(events),
+      campaigns: campaignPerformance(campaigns, periodProductionSends, periodProductionEvents),
+      event_breakdown: eventSummary(periodProductionEvents),
       top_clicked_vehicles: topClicks.vehicles,
       top_clicked_links: topClicks.other,
       suppression,
       recent_activity: recent,
+      partial_data: partial.partial_data,
+      partial_data_details: partial.affected_datasets,
       privacy_note: "Open rates can be affected by privacy proxy and prefetch behaviour. Clicks are generally a stronger engagement signal.",
     },
   };
