@@ -188,7 +188,7 @@ function collectFrozenVehicleSnapshots(blocks = []) {
   return snapshots;
 }
 
-function normalizeFinanceSnapshot(value, enabled) {
+function normalizeFinanceSnapshot(value, enabled, options = {}) {
   if (!isPlainObject(value)) throw new ValidationError("Finance vehicle pricing must be an object.");
   const finance = {
     price: normalizeProfileText(value.price, "Finance price", 120),
@@ -196,11 +196,11 @@ function normalizeFinanceSnapshot(value, enabled) {
     monthly: normalizeProfileText(value.monthly, "Finance monthly payment", 120),
     url: cleanHttpsUrl(value.url, "Finance vehicle URL"),
   };
-  if (enabled && !finance.url) throw new ValidationError("Finance vehicle URL is required for selected Finance vehicles.");
+  if (enabled && !finance.url && !options.allowMissingVehicleUrls) throw new ValidationError("Finance vehicle URL is required for selected Finance vehicles.");
   return finance;
 }
 
-function normalizeRentSnapshot(value, enabled) {
+function normalizeRentSnapshot(value, enabled, options = {}) {
   if (!isPlainObject(value)) throw new ValidationError("Rent2Buy vehicle pricing must be an object.");
   const rent2buy = {
     monthly: normalizeProfileText(value.monthly, "Rent2Buy monthly payment", 120),
@@ -208,7 +208,7 @@ function normalizeRentSnapshot(value, enabled) {
     term: normalizeProfileText(value.term, "Rent2Buy term", 120),
     url: cleanHttpsUrl(value.url, "Rent2Buy vehicle URL"),
   };
-  if (enabled && !rent2buy.url) throw new ValidationError("Rent2Buy vehicle URL is required for selected Rent2Buy vehicles.");
+  if (enabled && !rent2buy.url && !options.allowMissingVehicleUrls) throw new ValidationError("Rent2Buy vehicle URL is required for selected Rent2Buy vehicles.");
   return rent2buy;
 }
 
@@ -234,10 +234,10 @@ function normalizeFrozenSelectedVehicle(vehicle, productMode, enabled, options =
   if (!snapshot.registration && !snapshot.title) throw new ValidationError("Selected vehicle registration or title is required.");
   if (productMode === "finance") {
     if (!vehicle.finance || vehicle.rent2buy) throw new ValidationError("Finance vehicle grids require finance pricing and must not include Rent2Buy pricing.");
-    snapshot.finance = normalizeFinanceSnapshot(vehicle.finance, enabled);
+    snapshot.finance = normalizeFinanceSnapshot(vehicle.finance, enabled, options);
   } else {
     if (!vehicle.rent2buy || vehicle.finance) throw new ValidationError("Rent2Buy vehicle grids require Rent2Buy pricing and must not include Finance pricing.");
-    snapshot.rent2buy = normalizeRentSnapshot(vehicle.rent2buy, enabled);
+    snapshot.rent2buy = normalizeRentSnapshot(vehicle.rent2buy, enabled, options);
   }
   return snapshot;
 }
@@ -424,7 +424,7 @@ function buildVehicleSelectionLookup(vehicles = []) {
   return lookup;
 }
 
-function buildAuthoritativeSelectedVehicleSnapshot(reference, vehicle, productMode) {
+function buildAuthoritativeSelectedVehicleSnapshot(reference, vehicle, productMode, options = {}) {
   const profile = vehicle[productMode];
   if (!profile || profile.eligible === false) throw new ValidationError("Selected vehicle is not eligible for the chosen product mode.");
   const snapshot = {
@@ -447,19 +447,19 @@ function buildAuthoritativeSelectedVehicleSnapshot(reference, vehicle, productMo
       vat: profile.vat,
       monthly: profile.monthly,
       url: profile.url,
-    }, true);
+    }, true, options);
   } else {
     snapshot.rent2buy = normalizeRentSnapshot({
       monthly: profile.monthly,
       initialRental: profile.initialRental,
       term: profile.term,
       url: profile.url,
-    }, true);
+    }, true, options);
   }
   return snapshot;
 }
 
-async function resolveSelectedVehicleReferences(supabase, blocks = []) {
+async function resolveSelectedVehicleReferences(supabase, blocks = [], options = {}) {
   const needsResolution = blocks.some((block) => block.type === "vehicle_grid" && (block.settings.selected_vehicles || []).some((vehicle) => vehicle.snapshot_status === "unresolved"));
   if (!needsResolution) return blocks;
   if (!supabase) throw new Error("Vehicle selection resolution requires Supabase access.");
@@ -474,7 +474,7 @@ async function resolveSelectedVehicleReferences(supabase, blocks = []) {
         ? (() => {
             const sourceVehicle = vehicleLookupCandidates(productMode, vehicle).map((key) => lookup.get(key)).find(Boolean);
             if (!sourceVehicle) throw new ValidationError("Selected vehicle could not be found in current stock.");
-            return buildAuthoritativeSelectedVehicleSnapshot(vehicle, sourceVehicle, productMode);
+            return buildAuthoritativeSelectedVehicleSnapshot(vehicle, sourceVehicle, productMode, options);
           })()
         : vehicle;
       if (resolvedSeen.has(resolved.selection_id)) throw new ValidationError("Selected vehicle references must be unique.");
@@ -525,7 +525,7 @@ async function normalizeValues(values = {}, options = {}) {
     content_blocks: normalizeContentBlocks(contentBlocksSupplied ? values.content_blocks : [], { supplied: true, ...options }),
     status: normalizeStatus(values.status),
   };
-  if (options.resolveVehicleReferences) normalized.content_blocks = await resolveSelectedVehicleReferences(options.supabase, normalized.content_blocks);
+  if (options.resolveVehicleReferences) normalized.content_blocks = await resolveSelectedVehicleReferences(options.supabase, normalized.content_blocks, options);
   validateTemplate(normalized);
   if (!options.allowArchivedStatus && !EDITABLE_STATUSES.has(normalized.status)) throw new ValidationError("Use the Archive action to archive templates.");
   return normalized;
@@ -943,7 +943,7 @@ ${hasBlocks ? renderContentBlocks(values) : renderLegacyBody(values)}
 }
 
 async function previewTemplate(supabase, body = {}) {
-  const values = await normalizeValues(templateInput(body), { allowArchivedStatus: true, allowSubmittedFrozenSnapshots: true, supabase, resolveVehicleReferences: true });
+  const values = await normalizeValues(templateInput(body), { allowArchivedStatus: true, allowSubmittedFrozenSnapshots: true, allowMissingVehicleUrls: true, supabase, resolveVehicleReferences: true });
   return {
     preview: {
       subject: replaceTextPlaceholders(values.default_subject, values),
