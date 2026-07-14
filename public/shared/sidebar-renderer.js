@@ -18,10 +18,27 @@
     return externalUrls[item.id] || item.href || item.path || "/";
   }
 
+  function isMountNoise(node) {
+    if (node.nodeType === 8) return true;
+    if (node.nodeType !== 3) return false;
+    return String(node.textContent || "").replace(/\\[nr]/g, "").trim() === "";
+  }
+
+  function removeLeadingMountNoise(host) {
+    let node = host.previousSibling;
+    while (node && isMountNoise(node)) {
+      const previous = node.previousSibling;
+      node.remove();
+      node = previous;
+    }
+  }
+
   function render(target, options = {}) {
     const navigation = window.MarketingCrmNavigation;
     const host = typeof target === "string" ? document.querySelector(target) : target;
     if (!navigation || !host) return null;
+
+    removeLeadingMountNoise(host);
 
     const pathname = options.pathname || window.location.pathname;
     const externalUrls = options.externalUrls || {};
