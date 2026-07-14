@@ -181,7 +181,7 @@
       <h4>Last Batch</h4>
       <div class="campaign-progress-grid">
         ${[
-          ["Sent", lastBatch.sent || 0],
+          ["Processed", lastBatch.sent || 0],
           ["Accepted", lastBatch.accepted || 0],
           ["Failed", lastBatch.failed || 0],
           ["Suppressed", lastBatch.suppressed || 0],
