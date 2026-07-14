@@ -436,6 +436,49 @@ async function brevoStatus() {
   return { brevo: { ...status, connectivity, message } };
 }
 
+async function getCampaignProgress(supabase, campaign, sends = []) {
+  const processedResult = assertSupabase(
+    await supabase
+      .from("marketing_email_send_recipients")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaign.id)
+      .eq("send_type", "production"),
+    "Could not count processed campaign recipients."
+  );
+  const totalAudience = Number(campaign.audience_snapshot?.final_send_count || 0);
+  const alreadyProcessed = Number(processedResult.count || 0);
+  const lastBatch = sends.find((send) => send.send_type === "production" && ["sending", "completed", "partially_failed", "failed"].includes(send.status)) || null;
+  let lastBatchSummary = null;
+
+  if (lastBatch) {
+    const recipientResult = assertSupabase(
+      await supabase
+        .from("marketing_email_send_recipients")
+        .select("status")
+        .eq("send_id", lastBatch.id)
+        .eq("send_type", "production"),
+      "Could not load the latest campaign batch summary."
+    );
+    const recipientRows = recipientResult.data || [];
+    const acceptedStatuses = new Set(["accepted", "sent", "delivered", "opened", "clicked"]);
+    lastBatchSummary = {
+      sent: recipientRows.length,
+      accepted: recipientRows.filter((recipient) => acceptedStatuses.has(recipient.status)).length,
+      failed: Number(lastBatch.failed_count || 0),
+      suppressed: recipientRows.filter((recipient) => recipient.status === "skipped_suppressed").length,
+      completed_at: lastBatch.completed_at || "",
+    };
+  }
+
+  return {
+    total_audience: totalAudience,
+    already_processed: alreadyProcessed,
+    eligible_remaining: Math.max(0, totalAudience - alreadyProcessed),
+    progress_percent: totalAudience > 0 ? Math.min(100, Math.round((alreadyProcessed / totalAudience) * 100)) : 0,
+    last_batch: lastBatchSummary,
+  };
+}
+
 async function listSendHistory(supabase, body = {}) {
   const campaign = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
   try {
@@ -443,9 +486,14 @@ async function listSendHistory(supabase, body = {}) {
       await supabase.from("marketing_email_sends").select(SEND_COLUMNS).eq("campaign_id", campaign.id).order("created_at", { ascending: false }).limit(25),
       "Could not load email send history."
     );
-    return { sends: data || [], migration_required: false };
+    const sends = data || [];
+    return {
+      sends,
+      progress: await getCampaignProgress(supabase, campaign, sends),
+      migration_required: false,
+    };
   } catch (error) {
-    if (isMissingSendInfrastructure(error)) return { sends: [], migration_required: true };
+    if (isMissingSendInfrastructure(error)) return { sends: [], progress: null, migration_required: true };
     throw error;
   }
 }
