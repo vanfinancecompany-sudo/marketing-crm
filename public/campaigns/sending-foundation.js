@@ -110,6 +110,7 @@
       .send-area h4 { margin:0; font-size:15px; }
       .send-history { max-height:320px; overflow:auto; margin-top:10px; }
       .send-history table { font-size:13px; }
+      .send-history .provider-error { max-width:320px; white-space:normal; color:var(--red); }
       .campaign-progress-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(135px, 1fr)); gap:10px; margin-top:12px; }
       .campaign-progress-item { border:1px solid var(--line); border-radius:8px; padding:10px; background:var(--soft); }
       .campaign-progress-item strong { display:block; color:var(--muted); font-size:12px; text-transform:uppercase; }
@@ -244,8 +245,8 @@
       </section>
       <div class="send-history">
         <table>
-          <thead><tr><th>Type</th><th>Status</th><th>Requested</th><th>Accepted</th><th>Failed</th><th>Duplicates</th><th>Created</th></tr></thead>
-          <tbody id="sendHistoryRows"><tr><td colspan="7">No send history loaded.</td></tr></tbody>
+          <thead><tr><th>Type</th><th>Status</th><th>Requested</th><th>Accepted</th><th>Failed</th><th>Duplicates</th><th>Created</th><th>Provider response</th></tr></thead>
+          <tbody id="sendHistoryRows"><tr><td colspan="8">No send history loaded.</td></tr></tbody>
         </table>
       </div>
     `;
@@ -316,11 +317,11 @@
   function renderHistory() {
     const rows = state.history || [];
     if (state.migrationRequired) {
-      $("sendHistoryRows").innerHTML = `<tr><td colspan="7">Migration 011 is required before send history is available.</td></tr>`;
+      $("sendHistoryRows").innerHTML = `<tr><td colspan="8">Migration 011 is required before send history is available.</td></tr>`;
       return;
     }
     if (!rows.length) {
-      $("sendHistoryRows").innerHTML = `<tr><td colspan="7">No test or production email has been sent for this campaign.</td></tr>`;
+      $("sendHistoryRows").innerHTML = `<tr><td colspan="8">No test or production email has been sent for this campaign.</td></tr>`;
       return;
     }
     $("sendHistoryRows").innerHTML = rows.map((send) => `
@@ -332,6 +333,7 @@
         <td>${fmt.format(send.failed_count || 0)}</td>
         <td>${fmt.format(send.skipped_duplicate_count || 0)}</td>
         <td>${formatDate(send.created_at)}</td>
+        <td class="${send.send_type === "production" && send.error_summary ? "provider-error" : ""}">${send.send_type === "production" && send.error_summary ? escapeHtml(send.error_summary) : "-"}</td>
       </tr>`).join("");
   }
   async function refreshSending() {
