@@ -347,7 +347,7 @@ function normalizeBlockSettings(type, settings = {}, enabled = true, options = {
     return {
       heading: cleanText(settings.heading, 300),
       intro_text: cleanText(settings.intro_text, 1000),
-      top_padding: requireInteger(settings.top_padding || 24, "Vehicle grid top padding", { allowed: [8, 16, 24], min: 8, max: 24 }),
+      top_padding: requireInteger(settings.top_padding ?? 24, "Vehicle grid top padding", { allowed: [0, 8, 16, 24], min: 0, max: 24 }),
       number_of_vehicles: selectedCount || requireInteger(requestedCount, "Vehicle grid number of vehicles", { min: 1, max: 6 }),
       layout: requireChoice(settings.layout || "one_column", VEHICLE_LAYOUTS, "Vehicle grid layout"),
       source_mode: sourceMode,
@@ -885,7 +885,7 @@ function renderVehicleGridBlock(block, values) {
   const rawPlaceholderNote = s.placeholder_note || "";
   const placeholderNote = hasSelectedVehicles && isInternalVehicleGridMessage(rawPlaceholderNote) ? "" : rawPlaceholderNote;
   const previewOnlyNote = hasSelectedVehicles ? "" : "Preview only: dummy vehicle cards are shown until vehicles are selected.";
-  const topPadding = [8, 16, 24].includes(Number(s.top_padding)) ? Number(s.top_padding) : 24;
+  const topPadding = [0, 8, 16, 24].includes(Number(s.top_padding)) ? Number(s.top_padding) : 24;
   return `<tr><td style="padding:${topPadding}px 22px 24px;background:#ffffff;">
     ${heading ? `<h2 style="margin:0 8px 8px;font-family:Arial,sans-serif;font-size:23px;line-height:29px;color:#0f172a;">${escapeHtml(heading)}</h2>` : ""}
     ${intro ? `<p style="margin:0 8px 12px;font-family:Arial,sans-serif;font-size:15px;line-height:23px;color:#334155;">${escapeHtml(intro)}</p>` : ""}
