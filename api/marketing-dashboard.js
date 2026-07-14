@@ -17,9 +17,7 @@ class ApiError extends Error {
   }
 }
 
-function json(response, status, payload) {
-  response.status(status).json(payload);
-}
+function json(response, status, payload) { response.status(status).json(payload); }
 
 function getSupabase() {
   const supabaseUrl = process.env.SUPABASE_URL;
@@ -45,9 +43,7 @@ function parseBody(request) {
   return request.body;
 }
 
-function cleanText(value, limit = 500) {
-  return String(value || "").trim().slice(0, limit);
-}
+function cleanText(value, limit = 500) { return String(value || "").trim().slice(0, limit); }
 
 function maskEmail(value) {
   const email = cleanText(value, 254).toLowerCase();
@@ -129,14 +125,7 @@ function londonMidnightIso(date = new Date()) {
   let guess = new Date(targetUtc);
   for (let index = 0; index < 3; index += 1) {
     const displayed = londonDateParts(guess);
-    const displayedUtc = Date.UTC(
-      Number(displayed.year),
-      Number(displayed.month) - 1,
-      Number(displayed.day),
-      Number(displayed.hour),
-      Number(displayed.minute),
-      Number(displayed.second)
-    );
+    const displayedUtc = Date.UTC(Number(displayed.year), Number(displayed.month) - 1, Number(displayed.day), Number(displayed.hour), Number(displayed.minute), Number(displayed.second));
     guess = new Date(guess.getTime() - (displayedUtc - targetUtc));
   }
   return guess.toISOString();
@@ -159,10 +148,7 @@ function applyPeriod(query, column, range) {
 
 function isMissingTable(error, tableName) {
   const message = String(error?.message || error || "").toLowerCase();
-  return message.includes(tableName.toLowerCase())
-    || message.includes("schema cache")
-    || message.includes("does not exist")
-    || message.includes("could not find");
+  return message.includes(tableName.toLowerCase()) || message.includes("schema cache") || message.includes("does not exist") || message.includes("could not find");
 }
 
 async function safeHeadCount(supabase, table, filter = (query) => query) {
@@ -187,9 +173,7 @@ async function checkBrevoConnection() {
   }
 }
 
-function productionSendsOnly(rows = []) {
-  return rows.filter((send) => send.send_type === "production");
-}
+function productionSendsOnly(rows = []) { return rows.filter((send) => send.send_type === "production"); }
 
 function aggregateProductionSends(sends = []) {
   return sends.reduce((acc, send) => {
@@ -240,6 +224,8 @@ function aggregateEventActivity(events = [], submissionDenominator = 0) {
     click_to_open_rate: percent(clicked, opened),
     bounce_rate: percent(hardBounced + softBounced + blocked, submissionDenominator),
     unsubscribe_rate: percent(unsubscribed, submissionDenominator),
+    submission_unknown: 0,
+    failed: 0,
   };
 }
 
@@ -292,6 +278,7 @@ function campaignPerformance(campaigns = [], periodProductionSends = [], periodP
       updated_at: campaign.updated_at || null,
       created_at: campaign.created_at || null,
       period_activity_at: latestActivityAt,
+      last_production_send_at: latestActivityAt,
       production_batches: sends.length,
       requested: sendMetrics.requested,
       accepted: sendMetrics.accepted,
@@ -326,21 +313,10 @@ function collectVehiclesFromSnapshot(snapshot) {
   const seen = new Set();
   function visit(value) {
     if (!value || typeof value !== "object") return;
-    if (Array.isArray(value)) {
-      value.forEach(visit);
-      return;
-    }
+    if (Array.isArray(value)) { value.forEach(visit); return; }
     const title = cleanText(value.title || value.name || value.vehicle_title || "", 250);
     const registration = cleanText(value.registration || value.reg || value.vrm || "", 80).toUpperCase();
-    const urls = [
-      value.destination_url,
-      value.url,
-      value.finance_url,
-      value.rent2buy_url,
-      value.advert_url,
-      value.link_url,
-      value.cta_url,
-    ].map(safeUrl).filter(Boolean);
+    const urls = [value.destination_url, value.url, value.finance_url, value.rent2buy_url, value.advert_url, value.link_url, value.cta_url].map(safeUrl).filter(Boolean);
     if ((title || registration) && urls.length) {
       urls.forEach((url) => {
         const key = `${url}|${title}|${registration}`;
@@ -364,8 +340,7 @@ function topClickedDestinations(events = [], campaigns = []) {
   campaigns.forEach((campaign) => {
     collectVehiclesFromSnapshot(campaign.template_snapshot).forEach((vehicle) => {
       const url = safeUrl(vehicle.url);
-      if (!url) return;
-      vehicleLookup.set(`${campaign.id}|${url}`, { ...vehicle, campaign_id: campaign.id, campaign_name: campaign.name || "" });
+      if (url) vehicleLookup.set(`${campaign.id}|${url}`, { ...vehicle, campaign_id: campaign.id, campaign_name: campaign.name || "" });
     });
   });
   const vehicleMap = new Map();
@@ -422,15 +397,7 @@ function recentActivity({ sends = [], events = [], campaigns = [], suppressions 
 }
 
 async function loadSuppressionHealth(supabase) {
-  const empty = {
-    available: false,
-    total_suppressed: 0,
-    totals: {},
-    reason_breakdown: [],
-    recent: [],
-    history: [],
-    message: "Suppression summary unavailable.",
-  };
+  const empty = { available: false, total_suppressed: 0, totals: {}, reason_breakdown: [], recent: [], history: [], message: "Suppression summary unavailable." };
   try {
     const result = await supabase.rpc("marketing_suppression_overview", { p_recent_limit: 10, p_history_limit: 30 });
     if (result.error) throw result.error;
@@ -469,13 +436,15 @@ function partialWarning(partials = []) {
   const affected = partials.filter(Boolean);
   return {
     partial_data: affected.length > 0,
-    affected_datasets: affected.map((item) => ({
-      dataset: item.dataset,
-      loaded_rows: item.rows?.length || 0,
-      total_count: item.total_count,
-      limit: item.limit,
-    })),
+    affected_datasets: affected.map((item) => ({ dataset: item.dataset, loaded_rows: item.rows?.length || 0, total_count: item.total_count, limit: item.limit })),
   };
+}
+
+function dashboardNote(partial) {
+  const base = "Send totals use production sends created in the selected period. Engagement uses verified production webhook events whose event_at is inside the selected period, so a click today from an older send counts today. Open rates can be affected by privacy proxy and prefetch behaviour; clicks are generally stronger.";
+  if (!partial.partial_data) return base;
+  const affected = partial.affected_datasets.map((item) => `${item.dataset}: loaded ${item.loaded_rows} of ${item.total_count}`).join("; ");
+  return `Partial data warning: one or more datasets reached a safety cap (${affected}). Totals for affected datasets are not authoritative. ${base}`;
 }
 
 async function loadDashboard(supabase, body = {}) {
@@ -509,20 +478,12 @@ async function loadDashboard(supabase, body = {}) {
   const partials = [];
 
   try {
-    const sendResult = await loadAllRows(() => {
-      let query = supabase.from("marketing_email_sends").select(SEND_COLUMNS, { count: "exact" }).order("created_at", { ascending: false });
-      query = applyPeriod(query, "created_at", range);
-      return query;
-    }, { dataset: "period sends", limit: SEND_ROW_CAP });
+    const sendResult = await loadAllRows(() => applyPeriod(supabase.from("marketing_email_sends").select(SEND_COLUMNS, { count: "exact" }).order("created_at", { ascending: false }), "created_at", range), { dataset: "period sends", limit: SEND_ROW_CAP });
     sends = sendResult.rows;
     if (sendResult.partial) partials.push(sendResult);
     periodProductionSends = productionSendsOnly(sends);
 
-    const eventResult = await loadAllRows(() => {
-      let query = supabase.from("marketing_email_events").select(EVENT_COLUMNS, { count: "exact" }).order("event_at", { ascending: false });
-      query = applyPeriod(query, "event_at", range);
-      return query;
-    }, { dataset: "period webhook events", limit: EVENT_ROW_CAP });
+    const eventResult = await loadAllRows(() => applyPeriod(supabase.from("marketing_email_events").select(EVENT_COLUMNS, { count: "exact" }).order("event_at", { ascending: false }), "event_at", range), { dataset: "period webhook events", limit: EVENT_ROW_CAP });
     periodEvents = eventResult.rows;
     if (eventResult.partial) partials.push(eventResult);
 
@@ -532,15 +493,8 @@ async function loadDashboard(supabase, body = {}) {
     const sendsById = new Map(eventSendResult.rows.map((send) => [send.id, send]));
     periodProductionEvents = periodEvents.filter((event) => sendsById.get(event.send_id)?.send_type === "production");
 
-    const campaignIds = new Set([
-      ...periodProductionSends.map((send) => send.campaign_id).filter(Boolean),
-      ...periodProductionEvents.map((event) => event.campaign_id).filter(Boolean),
-    ]);
-    const recentCampaigns = await loadAllRows(() => supabase
-      .from("marketing_campaigns")
-      .select(CAMPAIGN_COLUMNS, { count: "exact" })
-      .eq("metadata->>source", TEMPLATE_CAMPAIGN_SOURCE)
-      .order("updated_at", { ascending: false }), { dataset: "recent campaigns", limit: 100 });
+    const campaignIds = new Set([...periodProductionSends.map((send) => send.campaign_id).filter(Boolean), ...periodProductionEvents.map((event) => event.campaign_id).filter(Boolean)]);
+    const recentCampaigns = await loadAllRows(() => supabase.from("marketing_campaigns").select(CAMPAIGN_COLUMNS, { count: "exact" }).eq("metadata->>source", TEMPLATE_CAMPAIGN_SOURCE).order("updated_at", { ascending: false }), { dataset: "recent campaigns", limit: 100 });
     recentCampaigns.rows.forEach((campaign) => campaignIds.add(campaign.id));
     const campaignResult = campaignIds.size
       ? await loadRowsByChunks(supabase, "marketing_campaigns", CAMPAIGN_COLUMNS, "id", Array.from(campaignIds), (query) => query, { dataset: "campaign lookup", limit: CAMPAIGN_ROW_CAP })
@@ -559,11 +513,8 @@ async function loadDashboard(supabase, body = {}) {
       state: webhook.configured ? (latestEvent.data?.event_at ? "active" : "awaiting_first_event") : "not_configured",
     };
   } catch (error) {
-    if (isMissingTable(error, "marketing_email_sends") || isMissingTable(error, "marketing_email_events")) {
-      infrastructureMessage = cleanText(error.message || "Sending or reporting infrastructure is unavailable.", 300);
-    } else {
-      throw error;
-    }
+    if (isMissingTable(error, "marketing_email_sends") || isMissingTable(error, "marketing_email_events")) infrastructureMessage = cleanText(error.message || "Sending or reporting infrastructure is unavailable.", 300);
+    else throw error;
   }
 
   const suppression = await loadSuppressionHealth(supabase);
@@ -583,7 +534,6 @@ async function loadDashboard(supabase, body = {}) {
     campaign_builder_accessible: true,
     suppression_system_accessible: suppression.available,
   };
-  const readyForControlledSending = Object.values(essentialReadiness).every(Boolean);
 
   return {
     dashboard: {
@@ -603,10 +553,11 @@ async function loadDashboard(supabase, body = {}) {
         webhook,
         infrastructure_message: infrastructureMessage,
       },
-      launch_readiness: { ready_for_controlled_email_sending: readyForControlledSending, checks: essentialReadiness },
+      launch_readiness: { ready_for_controlled_email_sending: Object.values(essentialReadiness).every(Boolean), checks: essentialReadiness },
       production: {
         sends: productionSendMetrics,
         events: productionEventMetrics,
+        recipients: productionEventMetrics,
         production_campaigns_with_send_activity: new Set(periodProductionSends.map((send) => send.campaign_id).filter(Boolean)).size,
         production_campaigns_with_event_activity: new Set(periodProductionEvents.map((event) => event.campaign_id).filter(Boolean)).size,
       },
@@ -619,7 +570,7 @@ async function loadDashboard(supabase, body = {}) {
       recent_activity: recent,
       partial_data: partial.partial_data,
       partial_data_details: partial.affected_datasets,
-      privacy_note: "Open rates can be affected by privacy proxy and prefetch behaviour. Clicks are generally a stronger engagement signal.",
+      privacy_note: dashboardNote(partial),
     },
   };
 }
