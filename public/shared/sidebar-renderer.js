@@ -25,7 +25,7 @@
 
     const pathname = options.pathname || window.location.pathname;
     const externalUrls = options.externalUrls || {};
-    const aside = document.createElement("aside");
+    const aside = host.tagName === "ASIDE" ? host : document.createElement("aside");
     aside.className = "marketing-sidebar";
 
     const nav = document.createElement("nav");
@@ -44,10 +44,17 @@
       nav.appendChild(link);
     });
 
-    aside.append(createBrand(), nav);
-    host.replaceChildren(aside);
+    aside.replaceChildren(createBrand(), nav);
+    if (aside !== host) host.replaceChildren(aside);
     return aside;
   }
 
-  window.MarketingCrmSidebarRenderer = Object.freeze({ render });
+  function mountAll() {
+    document.querySelectorAll("[data-marketing-sidebar]").forEach((target) => render(target));
+  }
+
+  window.MarketingCrmSidebarRenderer = Object.freeze({ render, mountAll });
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mountAll);
+  else mountAll();
 })();
