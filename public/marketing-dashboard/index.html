@@ -1,0 +1,821 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Marketing Dashboard | Van Finance Company</title>
+    <style>
+      :root {
+        --bg: #f4f7fb;
+        --panel: #ffffff;
+        --soft: #f8fafc;
+        --line: #d9e2ef;
+        --ink: #102033;
+        --muted: #66758a;
+        --blue: #2563eb;
+        --green: #047857;
+        --red: #b42318;
+        --amber: #b45309;
+        --purple: #6d28d9;
+        --shadow: 0 16px 34px rgba(15, 23, 42, 0.08);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      a { color: inherit; }
+      button, select, input {
+        font: inherit;
+      }
+      .layout {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 256px minmax(0, 1fr);
+      }
+      .sidebar {
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 22px 18px;
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        overflow: auto;
+      }
+      .brand {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 24px;
+      }
+      .brand-mark {
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        background: #ffffff;
+        color: #0f172a;
+        font-weight: 800;
+      }
+      .brand strong { display: block; font-size: 14px; }
+      .brand span { color: #94a3b8; font-size: 12px; }
+      .nav-label {
+        margin: 20px 10px 8px;
+        color: #94a3b8;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .nav-link {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        color: #cbd5e1;
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .nav-link:hover, .nav-link.active { background: #1e293b; color: #ffffff; }
+      main {
+        min-width: 0;
+        padding: 22px;
+      }
+      .page-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+      .page-header h1 { margin: 0; font-size: 28px; line-height: 1.15; }
+      .page-header p { margin: 6px 0 0; color: var(--muted); max-width: 780px; }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        box-shadow: var(--shadow);
+      }
+      .card.pad { padding: 16px; }
+      .card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+      .card-header h2, .card-header h3 { margin: 0; font-size: 17px; }
+      .card-header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+      .section { margin-top: 16px; }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(12, minmax(0, 1fr));
+        gap: 14px;
+      }
+      .span-3 { grid-column: span 3; }
+      .span-4 { grid-column: span 4; }
+      .span-6 { grid-column: span 6; }
+      .span-8 { grid-column: span 8; }
+      .span-12 { grid-column: span 12; }
+      .metric {
+        padding: 14px;
+        min-height: 112px;
+      }
+      .metric span {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+      .metric strong {
+        display: block;
+        margin-top: 8px;
+        font-size: 28px;
+        line-height: 1;
+      }
+      .metric small {
+        display: block;
+        margin-top: 8px;
+        color: var(--muted);
+        line-height: 1.35;
+      }
+      .status-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 10px;
+        padding: 14px 16px 16px;
+      }
+      .status-item {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        background: var(--soft);
+      }
+      .status-item strong { display: block; margin-bottom: 5px; }
+      .status-item p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 4px 8px;
+        font-size: 12px;
+        font-weight: 800;
+        border: 1px solid transparent;
+        white-space: nowrap;
+      }
+      .badge.green { color: var(--green); background: #ecfdf5; border-color: #a7f3d0; }
+      .badge.red { color: var(--red); background: #fef3f2; border-color: #fecaca; }
+      .badge.amber { color: var(--amber); background: #fffbeb; border-color: #fde68a; }
+      .badge.blue { color: var(--blue); background: #eff6ff; border-color: #bfdbfe; }
+      .badge.neutral { color: #475569; background: #f1f5f9; border-color: #cbd5e1; }
+      .badge.purple { color: var(--purple); background: #f5f3ff; border-color: #ddd6fe; }
+      .period-button, .button, .ghost-button {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+        color: var(--ink);
+        padding: 9px 12px;
+        font-weight: 800;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+      }
+      .button { background: var(--blue); border-color: var(--blue); color: #ffffff; }
+      .ghost-button:hover, .period-button:hover { background: var(--soft); }
+      .period-button.active { background: #0f172a; color: #ffffff; border-color: #0f172a; }
+      .table-wrap { overflow: auto; }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+      th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; background: var(--soft); position: sticky; top: 0; z-index: 1; }
+      th.sortable { cursor: pointer; }
+      tr:last-child td { border-bottom: 0; }
+      .empty {
+        padding: 18px;
+        border: 1px dashed var(--line);
+        border-radius: 8px;
+        color: var(--muted);
+        text-align: center;
+        background: var(--soft);
+      }
+      .message {
+        padding: 12px 14px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: var(--soft);
+        color: var(--muted);
+        margin: 0 0 14px;
+      }
+      .message.error { color: var(--red); border-color: #fecaca; background: #fef3f2; }
+      .message.success { color: var(--green); border-color: #a7f3d0; background: #ecfdf5; }
+      .hidden { display: none !important; }
+      .login-shell {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .unlock-card {
+        width: min(460px, 100%);
+        padding: 22px;
+      }
+      .unlock-card h1 { margin: 0 0 8px; font-size: 24px; }
+      .unlock-card p { margin: 0 0 16px; color: var(--muted); }
+      .field { display: grid; gap: 6px; margin-bottom: 12px; }
+      .field label { font-size: 13px; font-weight: 800; color: var(--muted); }
+      .field input {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px 12px;
+      }
+      .quick-actions {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: 10px;
+        padding: 14px 16px 16px;
+      }
+      .quick-actions a {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        text-decoration: none;
+        background: var(--soft);
+        font-weight: 800;
+      }
+      .timeline {
+        display: grid;
+        gap: 8px;
+        padding: 14px 16px 16px;
+      }
+      .timeline-item {
+        display: grid;
+        grid-template-columns: 160px minmax(0, 1fr);
+        gap: 10px;
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 8px;
+      }
+      .timeline-item:last-child { border-bottom: 0; padding-bottom: 0; }
+      .muted { color: var(--muted); }
+      .mobile-note { color: var(--muted); font-size: 12px; line-height: 1.4; }
+      @media (max-width: 980px) {
+        .layout { grid-template-columns: 1fr; }
+        .sidebar { position: static; height: auto; }
+        main { padding: 16px; }
+        .span-3, .span-4, .span-6, .span-8, .span-12 { grid-column: span 12; }
+        .page-header { flex-direction: column; }
+        .timeline-item { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="lockedView" class="login-shell">
+      <section class="card unlock-card">
+        <h1>Unlock Marketing Dashboard</h1>
+        <p>Use the shared Marketing access key. No campaign, customer or send data loads until access is validated.</p>
+        <p id="unlockMessage" class="message hidden"></p>
+        <form id="unlockForm">
+          <div class="field">
+            <label for="accessKeyInput">Marketing access key</label>
+            <input id="accessKeyInput" type="password" autocomplete="current-password" />
+          </div>
+          <button class="button" type="submit">Unlock Dashboard</button>
+        </form>
+      </section>
+    </div>
+
+    <div id="checkingView" class="login-shell hidden">
+      <section class="card unlock-card">
+        <h1>Checking protected access...</h1>
+        <p>The dashboard will load once the saved Marketing access key has been validated.</p>
+      </section>
+    </div>
+
+    <div id="appView" class="layout hidden">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">V</div>
+          <div>
+            <strong>Marketing CRM</strong>
+            <span>Van Finance Company</span>
+          </div>
+        </div>
+        <div class="nav-label">Marketing</div>
+        <a class="nav-link active" href="/marketing-dashboard/">Dashboard <span>●</span></a>
+        <a class="nav-link" href="/customer-database/">Customer Database</a>
+        <a class="nav-link" href="/marketing-centre/">Marketing Centre</a>
+        <a class="nav-link" href="/campaigns/">Campaigns</a>
+        <a class="nav-link" href="/email-templates/">Email Templates</a>
+        <a class="nav-link" href="/suppression-centre/">Suppression Centre</a>
+        <div class="nav-label">Content</div>
+        <a class="nav-link" href="/stock/">Stock</a>
+        <a class="nav-link" href="/facebook/">Facebook</a>
+        <a class="nav-link" href="/youtube/">YouTube</a>
+        <a class="nav-link" href="/reels/">Reels</a>
+      </aside>
+
+      <main>
+        <header class="page-header">
+          <div>
+            <h1>Marketing Dashboard</h1>
+            <p>System health, production-only campaign performance, webhook activity, suppression safety and launch readiness in one place.</p>
+          </div>
+          <div class="toolbar">
+            <button id="refreshButton" class="button" type="button">Refresh Status</button>
+            <button id="lockButton" class="ghost-button" type="button">Lock</button>
+          </div>
+        </header>
+
+        <p id="pageMessage" class="message hidden"></p>
+
+        <section class="card section">
+          <div class="card-header">
+            <div>
+              <h2>System Health</h2>
+              <p>Configuration and infrastructure checks. Secrets are never displayed.</p>
+            </div>
+            <span id="generatedAt" class="badge neutral">Checking</span>
+          </div>
+          <div id="systemHealth" class="status-list"></div>
+        </section>
+
+        <section class="card section">
+          <div class="card-header">
+            <div>
+              <h2>Launch Readiness</h2>
+              <p>Essential checks for controlled email sending. Webhook event history is useful but does not block readiness when the secret is configured.</p>
+            </div>
+            <span id="readinessBadge" class="badge neutral">Checking</span>
+          </div>
+          <div id="launchReadiness" class="status-list"></div>
+        </section>
+
+        <section class="section">
+          <div class="card pad">
+            <div class="page-header" style="margin-bottom: 0;">
+              <div>
+                <h2 style="margin:0; font-size:20px;">Production Performance</h2>
+                <p>Test sends are excluded from these totals and shown separately.</p>
+              </div>
+              <div id="periodButtons" class="toolbar" aria-label="Date range">
+                <button class="period-button" data-period="today" type="button">Today</button>
+                <button class="period-button" data-period="last7" type="button">Last 7 Days</button>
+                <button class="period-button active" data-period="last30" type="button">Last 30 Days</button>
+                <button class="period-button" data-period="all" type="button">All Time</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="metricGrid" class="grid section"></section>
+
+        <section class="grid section">
+          <article class="card span-8">
+            <div class="card-header">
+              <div>
+                <h3>Campaign Performance</h3>
+                <p>Recent production campaigns, newest send activity first. Click a campaign to open the Campaign Builder.</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th class="sortable" data-sort="name">Campaign</th>
+                    <th class="sortable" data-sort="last_production_send_at">Last Sent</th>
+                    <th class="sortable" data-sort="accepted">Accepted</th>
+                    <th class="sortable" data-sort="delivered">Delivered</th>
+                    <th class="sortable" data-sort="opened">Opened</th>
+                    <th class="sortable" data-sort="clicked">Clicked</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="campaignRows"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="card span-4">
+            <div class="card-header">
+              <div>
+                <h3>Test Sends</h3>
+                <p>Internal tests are tracked separately from production.</p>
+              </div>
+            </div>
+            <div id="testSendPanel" class="status-list" style="grid-template-columns:1fr;"></div>
+          </article>
+        </section>
+
+        <section class="grid section">
+          <article class="card span-6">
+            <div class="card-header">
+              <div>
+                <h3>Top Clicked Vehicles</h3>
+                <p>Matched against frozen campaign snapshots. Live stock is not used.</p>
+              </div>
+            </div>
+            <div id="topVehicleLinks" class="table-wrap"></div>
+          </article>
+          <article class="card span-6">
+            <div class="card-header">
+              <div>
+                <h3>Top Clicked Links</h3>
+                <p>Verified production click events only. Unsubscribe links are excluded.</p>
+              </div>
+            </div>
+            <div id="topOtherLinks" class="table-wrap"></div>
+          </article>
+        </section>
+
+        <section class="grid section">
+          <article class="card span-6">
+            <div class="card-header">
+              <div>
+                <h3>Suppression Health</h3>
+                <p>Read-only safety totals from active suppression state.</p>
+              </div>
+            </div>
+            <div id="suppressionHealth" class="status-list"></div>
+          </article>
+          <article class="card span-6">
+            <div class="card-header">
+              <div>
+                <h3>Recent Suppression Changes</h3>
+                <p>Masked where possible. No customer records can be changed here.</p>
+              </div>
+            </div>
+            <div id="recentSuppressions" class="table-wrap"></div>
+          </article>
+        </section>
+
+        <section class="card section">
+          <div class="card-header">
+            <div>
+              <h3>Recent Activity</h3>
+              <p>Existing sends, webhook events, campaign activity and suppression history.</p>
+            </div>
+          </div>
+          <div id="recentActivity" class="timeline"></div>
+        </section>
+
+        <section class="card section">
+          <div class="card-header">
+            <div>
+              <h3>Quick Actions</h3>
+              <p>Links only. There are no direct send buttons on this dashboard.</p>
+            </div>
+          </div>
+          <div class="quick-actions">
+            <a href="/campaigns/">Create Campaign</a>
+            <a href="/email-templates/">Email Templates</a>
+            <a href="/customer-database/">Customer Database</a>
+            <a href="/suppression-centre/">Suppression Centre</a>
+            <a href="/campaigns/">View Campaign Reporting</a>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const STORAGE_KEY = "marketingCustomerDatabaseApiKey";
+      const API_HEADER = "x-marketing-customer-database-key";
+      const API_URL = "/api/marketing-dashboard";
+      const fmt = new Intl.NumberFormat("en-GB");
+      const dateFmt = new Intl.DateTimeFormat("en-GB", { dateStyle: "short", timeStyle: "short" });
+      const state = { access: "checking", period: "last30", dashboard: null, sortKey: "last_production_send_at", sortDirection: "desc" };
+
+      function $(id) { return document.getElementById(id); }
+      function escapeHtml(value) {
+        return String(value || "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
+      }
+      function formatNumber(value) { return fmt.format(Number(value || 0)); }
+      function formatDate(value) {
+        if (!value) return "-";
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? "-" : dateFmt.format(date);
+      }
+      function getStoredKey() {
+        try { return window.localStorage.getItem(STORAGE_KEY) || ""; } catch { return ""; }
+      }
+      function saveStoredKey(key) {
+        try {
+          window.sessionStorage.removeItem(STORAGE_KEY);
+          window.localStorage.setItem(STORAGE_KEY, String(key || "").trim());
+          return true;
+        } catch { return false; }
+      }
+      function clearStoredKey() {
+        try {
+          window.sessionStorage.removeItem(STORAGE_KEY);
+          window.localStorage.removeItem(STORAGE_KEY);
+        } catch {}
+      }
+      function showAccessView(view) {
+        $("lockedView").classList.toggle("hidden", view !== "locked");
+        $("checkingView").classList.toggle("hidden", view !== "checking");
+        $("appView").classList.toggle("hidden", view !== "unlocked");
+      }
+      function setMessage(text, type = "") {
+        const node = $("pageMessage");
+        node.textContent = text || "";
+        node.className = text ? `message ${type}` : "message hidden";
+      }
+      function setUnlockMessage(text, type = "") {
+        const node = $("unlockMessage");
+        node.textContent = text || "";
+        node.className = text ? `message ${type}` : "message hidden";
+      }
+      async function dashboardApi(action, payload = {}, keyOverride = "") {
+        const response = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", [API_HEADER]: keyOverride || getStoredKey() },
+          body: JSON.stringify({ action, ...payload }),
+        });
+        let data = {};
+        try { data = await response.json(); } catch {}
+        if (!response.ok || data.ok === false) {
+          const error = new Error(data.message || "Marketing Dashboard request failed.");
+          error.status = response.status;
+          throw error;
+        }
+        return data;
+      }
+      async function validateAccess(key) {
+        await dashboardApi("validateAccess", {}, key);
+      }
+      async function checkStoredAccess() {
+        const key = getStoredKey();
+        if (!key) {
+          state.access = "locked";
+          showAccessView("locked");
+          return;
+        }
+        state.access = "checking";
+        showAccessView("checking");
+        try {
+          await validateAccess(key);
+          state.access = "unlocked";
+          showAccessView("unlocked");
+          await loadDashboard();
+        } catch (error) {
+          if (error.status === 401) {
+            clearStoredKey();
+            state.access = "locked";
+            showAccessView("locked");
+            setUnlockMessage("Your saved access has expired or is no longer valid. Please unlock again.", "error");
+          } else {
+            state.access = "locked";
+            showAccessView("locked");
+            setUnlockMessage("Could not validate protected access. Please try again.", "error");
+          }
+        }
+      }
+      function badgeClass(stateValue) {
+        if (["authorised", "available", "active", "ready", "configured", "ok", "completed"].includes(stateValue)) return "green";
+        if (["rejected", "not_configured", "missing", "failed", "error"].includes(stateValue)) return "red";
+        if (["unreachable", "awaiting_first_event", "warning", "partial"].includes(stateValue)) return "amber";
+        return "neutral";
+      }
+      function statusBadge(label, stateValue) {
+        return `<span class="badge ${badgeClass(stateValue)}">${escapeHtml(label)}</span>`;
+      }
+      function renderHealth() {
+        const health = state.dashboard?.health || {};
+        const brevo = health.brevo || {};
+        const sender = health.sender || {};
+        const unsubscribe = health.unsubscribe || {};
+        const sendingDb = health.sending_database || {};
+        const reportingDb = health.reporting_database || {};
+        const webhook = health.webhook || {};
+        const items = [
+          ["Brevo connection", brevo.label || "Checking", brevo.state || "checking", brevo.status_code ? `HTTP ${brevo.status_code}` : "No secrets or API key details are shown."],
+          ["Sender config", sender.configured ? "Configured" : "Missing", sender.configured ? "configured" : "missing", sender.configured ? `${sender.name} <${sender.email}>` : "Sender email and sender name are required."],
+          ["Unsubscribe config", unsubscribe.configured ? "Configured" : "Missing", unsubscribe.configured ? "configured" : "missing", "Public base URL and unsubscribe secret are checked without revealing values."],
+          ["Sending DB", sendingDb.available ? "Available" : "Unavailable", sendingDb.available ? "available" : "missing", sendingDb.available ? `Send history records: ${formatNumber(sendingDb.record_count)}` : sendingDb.message || "Migration 011/send history unavailable."],
+          ["Reporting DB", reportingDb.available ? "Available" : "Unavailable", reportingDb.available ? "available" : "missing", reportingDb.available ? `Event records: ${formatNumber(reportingDb.record_count)}` : reportingDb.message || "Migration 012/event reporting unavailable."],
+          ["Webhook activity", webhook.configured ? (webhook.latest_event_at ? "Active" : "Awaiting event") : "Not configured", webhook.state || "checking", webhook.configured ? (webhook.latest_event_at ? `Latest event ${formatDate(webhook.latest_event_at)} · ${formatNumber(webhook.events_last_24h)} last 24h · ${formatNumber(webhook.events_last_7d)} last 7d` : "Webhook configured — awaiting first tracked event.") : "Webhook secret is required."],
+        ];
+        $("systemHealth").innerHTML = items.map(([title, label, stateValue, detail]) => `
+          <div class="status-item"><strong>${escapeHtml(title)} ${statusBadge(label, stateValue)}</strong><p>${escapeHtml(detail)}</p></div>
+        `).join("");
+      }
+      function renderReadiness() {
+        const readiness = state.dashboard?.launch_readiness || { checks: {} };
+        const checks = readiness.checks || {};
+        const rows = [
+          ["Brevo authorised", checks.brevo_authorised],
+          ["Sender configured", checks.sender_configured],
+          ["Unsubscribe configured", checks.unsubscribe_configured],
+          ["Sending infrastructure", checks.sending_infra_available],
+          ["Reporting infrastructure", checks.reporting_infra_available],
+          ["Webhook secret configured", checks.webhook_secret_configured],
+          ["Active reusable template", checks.active_template_available],
+          ["Campaign Builder accessible", checks.campaign_builder_accessible],
+          ["Suppression system accessible", checks.suppression_system_accessible],
+        ];
+        $("readinessBadge").className = readiness.ready_for_controlled_email_sending ? "badge green" : "badge amber";
+        $("readinessBadge").textContent = readiness.ready_for_controlled_email_sending ? "READY FOR CONTROLLED EMAIL SENDING" : "Needs attention";
+        $("launchReadiness").innerHTML = rows.map(([label, ok]) => `
+          <div class="status-item"><strong>${escapeHtml(label)} ${statusBadge(ok ? "Ready" : "Check", ok ? "ready" : "warning")}</strong><p>${ok ? "Verified for this dashboard refresh." : "Review before first controlled send."}</p></div>
+        `).join("");
+      }
+      function renderMetrics() {
+        const production = state.dashboard?.production || {};
+        const sends = production.sends || {};
+        const recipients = production.recipients || {};
+        const tests = state.dashboard?.tests || {};
+        const cards = [
+          ["Production campaigns", production.production_campaigns_with_send_activity || 0, "Campaigns with production send activity in range"],
+          ["Production batches", sends.production_batches || 0, "Generated/confirmed production batches"],
+          ["Requested", sends.requested || 0, "Requested production recipients"],
+          ["Accepted", recipients.accepted || 0, "Accepted by Brevo"],
+          ["Delivered", recipients.delivered || 0, `${recipients.delivery_rate || 0}% delivery rate`],
+          ["Unique opened", recipients.opened || 0, `${recipients.open_rate || 0}% open rate`],
+          ["Unique clicked", recipients.clicked || 0, `${recipients.click_rate || 0}% click rate`],
+          ["Click-to-open", `${recipients.click_to_open_rate || 0}%`, "Unique clicks / unique opens"],
+          ["Hard bounced", recipients.hard_bounced || 0, "Invalid or hard bounce events"],
+          ["Soft bounced", recipients.soft_bounced || 0, "Temporary bounce events"],
+          ["Complaints", recipients.complained || 0, "Spam complaint events"],
+          ["Unsubscribed", recipients.unsubscribed || 0, `${recipients.unsubscribe_rate || 0}% unsubscribe rate`],
+          ["Submission unknown", recipients.submission_unknown || 0, "Requires reconciliation"],
+          ["Test sends", tests.count || 0, "Excluded from production totals"],
+        ];
+        $("metricGrid").innerHTML = cards.map(([label, value, detail]) => `
+          <article class="card metric span-3"><span>${escapeHtml(label)}</span><strong>${escapeHtml(formatNumber(value).replace("NaN", value))}</strong><small>${escapeHtml(detail)}</small></article>
+        `).join("");
+      }
+      function sortedCampaigns() {
+        const rows = [...(state.dashboard?.campaigns || [])];
+        const key = state.sortKey;
+        const direction = state.sortDirection === "asc" ? 1 : -1;
+        return rows.sort((a, b) => {
+          const left = a[key] || "";
+          const right = b[key] || "";
+          if (typeof left === "number" || typeof right === "number") return (Number(left || 0) - Number(right || 0)) * direction;
+          return String(left).localeCompare(String(right)) * direction;
+        });
+      }
+      function renderCampaigns() {
+        const rows = sortedCampaigns();
+        if (!rows.length) {
+          $("campaignRows").innerHTML = `<tr><td colspan="7"><div class="empty">No production campaign activity is recorded for this range.</div></td></tr>`;
+          return;
+        }
+        $("campaignRows").innerHTML = rows.map((row) => `
+          <tr>
+            <td><strong>${escapeHtml(row.name)}</strong><br><span class="muted">${escapeHtml(row.template_name || row.campaign_type || "No production send")}</span></td>
+            <td>${formatDate(row.last_production_send_at)}</td>
+            <td>${formatNumber(row.accepted)}</td>
+            <td>${formatNumber(row.delivered)}<br><span class="muted">${row.delivery_rate || 0}%</span></td>
+            <td>${formatNumber(row.opened)}<br><span class="muted">${row.open_rate || 0}%</span></td>
+            <td>${formatNumber(row.clicked)}<br><span class="muted">${row.click_rate || 0}%</span></td>
+            <td><a class="ghost-button" href="/campaigns/?campaign=${encodeURIComponent(row.id)}">Open</a></td>
+          </tr>
+        `).join("");
+      }
+      function renderTestPanel() {
+        const tests = state.dashboard?.tests || {};
+        $("testSendPanel").innerHTML = `
+          <div class="status-item"><strong>Total tests ${statusBadge(formatNumber(tests.count || 0), "neutral")}</strong><p>Internal tests are excluded from production rates.</p></div>
+          <div class="status-item"><strong>Completed ${statusBadge(formatNumber(tests.completed || 0), "green")}</strong><p>Latest: ${escapeHtml(tests.latest_status || "No tests")} · ${formatDate(tests.latest_completed_at || tests.latest_created_at)}</p></div>
+          <div class="status-item"><strong>Failed ${statusBadge(formatNumber(tests.failed || 0), tests.failed ? "red" : "neutral")}</strong><p>Failed tests do not count as production activity.</p></div>
+        `;
+      }
+      function renderLinkTable(id, rows, type) {
+        if (!rows.length) {
+          $(id).innerHTML = `<div class="empty">No ${type} click events recorded for this range.</div>`;
+          return;
+        }
+        $(id).innerHTML = `<table><thead><tr><th>${type === "vehicle" ? "Vehicle" : "Link"}</th><th>Campaign</th><th>Clicks</th><th>Unique</th></tr></thead><tbody>${rows.map((row) => `
+          <tr>
+            <td><strong>${escapeHtml(row.title || row.url)}</strong>${row.registration ? `<br><span class="muted">${escapeHtml(row.registration)}</span>` : ""}<br><a class="muted" href="${escapeHtml(row.url)}" target="_blank" rel="noreferrer">${escapeHtml(row.url)}</a></td>
+            <td>${escapeHtml(row.campaign_name || "-")}</td>
+            <td>${formatNumber(row.clicks)}</td>
+            <td>${formatNumber(row.unique_recipients)}</td>
+          </tr>
+        `).join("")}</tbody></table>`;
+      }
+      function renderSuppression() {
+        const suppression = state.dashboard?.suppression || {};
+        const totals = suppression.totals || {};
+        const cards = [
+          ["Total suppressed", suppression.total_suppressed || 0, "Unique contacts currently suppressed"],
+          ["Email unsubscribed", totals.email_unsubscribed || 0, "Active email unsubscribe"],
+          ["Hard bounced / invalid", totals.email_bounced || 0, "Email bounce suppression"],
+          ["Complaints / global DNC", totals.global_do_not_contact || 0, "Global exclusion"],
+          ["Manual", totals.manual_suppression || 0, "Manual suppression"],
+          ["Other", totals.other || 0, "Other supported suppressions"],
+        ];
+        $("suppressionHealth").innerHTML = cards.map(([label, value, detail]) => `
+          <div class="status-item"><strong>${escapeHtml(label)} ${statusBadge(formatNumber(value), value ? "amber" : "neutral")}</strong><p>${escapeHtml(detail)}</p></div>
+        `).join("");
+        const recent = suppression.recent || [];
+        if (!recent.length) {
+          $("recentSuppressions").innerHTML = `<div class="empty">No recent suppression changes returned.</div>`;
+          return;
+        }
+        $("recentSuppressions").innerHTML = `<table><thead><tr><th>Customer</th><th>Type</th><th>Reason</th><th>Date</th></tr></thead><tbody>${recent.map((row) => `
+          <tr><td>${escapeHtml(row.email || row.customer_id || "-")}</td><td>${escapeHtml(row.type || "-")}</td><td>${escapeHtml(row.reason || row.source || "-")}</td><td>${formatDate(row.date_added)}</td></tr>
+        `).join("")}</tbody></table>`;
+      }
+      function renderTimeline() {
+        const rows = state.dashboard?.recent_activity || [];
+        if (!rows.length) {
+          $("recentActivity").innerHTML = `<div class="empty">No recent marketing activity available.</div>`;
+          return;
+        }
+        $("recentActivity").innerHTML = rows.map((row) => `
+          <div class="timeline-item"><strong>${formatDate(row.occurred_at)}</strong><div><b>${escapeHtml(row.type)}</b><br><span class="muted">${escapeHtml(row.detail || "-")}</span></div></div>
+        `).join("");
+      }
+      function render() {
+        if (!state.dashboard) return;
+        $("generatedAt").textContent = `Updated ${formatDate(state.dashboard.generated_at)}`;
+        renderHealth();
+        renderReadiness();
+        renderMetrics();
+        renderCampaigns();
+        renderTestPanel();
+        renderLinkTable("topVehicleLinks", state.dashboard.top_clicked_vehicles || [], "vehicle");
+        renderLinkTable("topOtherLinks", state.dashboard.top_clicked_links || [], "link");
+        renderSuppression();
+        renderTimeline();
+        setMessage(state.dashboard.privacy_note || "", "");
+      }
+      async function loadDashboard() {
+        if (state.access !== "unlocked") return;
+        setMessage("Loading Marketing Dashboard...", "");
+        const result = await dashboardApi("dashboard", { period: state.period });
+        state.dashboard = result.dashboard;
+        setMessage("");
+        render();
+      }
+
+      $("unlockForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const key = $("accessKeyInput").value.trim();
+        if (!key) {
+          setUnlockMessage("Enter the Marketing access key.", "error");
+          return;
+        }
+        setUnlockMessage("Checking protected access...");
+        try {
+          await validateAccess(key);
+          if (!saveStoredKey(key)) {
+            setUnlockMessage("Could not save the API key in this browser.", "error");
+            return;
+          }
+          state.access = "unlocked";
+          showAccessView("unlocked");
+          await loadDashboard();
+        } catch (error) {
+          setUnlockMessage(error.status === 401 ? "Access key not recognised." : "Could not validate protected access. Please try again.", "error");
+        }
+      });
+      $("lockButton").addEventListener("click", () => {
+        clearStoredKey();
+        state.dashboard = null;
+        state.access = "locked";
+        showAccessView("locked");
+        setUnlockMessage("Marketing Dashboard locked.");
+      });
+      $("refreshButton").addEventListener("click", () => loadDashboard().catch((error) => setMessage(error.message, "error")));
+      $("periodButtons").addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-period]");
+        if (!button) return;
+        state.period = button.dataset.period;
+        document.querySelectorAll(".period-button").forEach((node) => node.classList.toggle("active", node === button));
+        loadDashboard().catch((error) => setMessage(error.message, "error"));
+      });
+      document.querySelectorAll("th.sortable").forEach((th) => {
+        th.addEventListener("click", () => {
+          const key = th.dataset.sort;
+          state.sortDirection = state.sortKey === key && state.sortDirection === "desc" ? "asc" : "desc";
+          state.sortKey = key;
+          renderCampaigns();
+        });
+      });
+      checkStoredAccess().catch((error) => {
+        state.access = "locked";
+        showAccessView("locked");
+        setUnlockMessage(error.message || "Could not check protected access.", "error");
+      });
+    </script>
+  </body>
+</html>
