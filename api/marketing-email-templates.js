@@ -673,8 +673,16 @@ function compactLine(parts = [], separator = " | ") {
   return parts.map((part) => String(part || "").trim()).filter(Boolean).join(separator);
 }
 
+function formatUkRegistration(value) {
+  const text = String(value || "").trim();
+  const compact = text.toUpperCase().replace(/\s+/g, "");
+  return /^[A-Z]{2}\d{2}[A-Z]{3}$/.test(compact) ? `${compact.slice(0, 4)} ${compact.slice(4)}` : text;
+}
+
 function selectedVehicleTitle(vehicle = {}) {
-  return vehicle.title || vehicle.description || vehicle.registration || "Selected vehicle";
+  const title = vehicle.title || vehicle.description || vehicle.registration || "Selected vehicle";
+  const registration = String(vehicle.registration || "").trim();
+  return registration && normalizeRegistrationKey(title) === normalizeRegistrationKey(registration) ? formatUkRegistration(title) : title;
 }
 
 function selectedVehicleDescription(vehicle = {}) {
@@ -740,7 +748,7 @@ function renderSelectedVehicleCard(vehicle = {}, productMode = "finance") {
   const title = selectedVehicleTitle(vehicle);
   const description = selectedVehicleDescription(vehicle);
   const spec = selectedVehicleSpec(vehicle);
-  const fallbackRegistration = !vehicle.title && vehicle.registration ? vehicle.registration : "";
+  const fallbackRegistration = !vehicle.title && vehicle.registration ? formatUkRegistration(vehicle.registration) : "";
   const isRent2Buy = productMode === "rent2buy";
   const financePricing = isRent2Buy ? null : financePricePresentation(profile);
   const fullPrice = isRent2Buy ? profile.monthly : financePricing.fullPrice || financePricing.monthlyPayment;
@@ -753,7 +761,7 @@ function renderSelectedVehicleCard(vehicle = {}, productMode = "finance") {
     <tr><td style="padding:14px 14px 7px;font-family:Arial,sans-serif;font-size:16px;line-height:21px;color:#0f172a;font-weight:bold;">${escapeHtml(title)}</td></tr>
     ${fullPrice ? `<tr><td style="padding:0 14px 3px;font-family:Arial,sans-serif;font-size:22px;line-height:27px;color:#0f172a;font-weight:bold;">${escapeHtml(fullPrice)}</td></tr>` : ""}
     ${monthlyPayment ? `<tr><td style="padding:0 14px 8px;font-family:Arial,sans-serif;font-size:17px;line-height:22px;color:#334155;font-weight:normal;">${escapeHtml(monthlyPayment)}</td></tr>` : ""}
-    <tr><td style="padding:0 14px 9px;font-family:Arial,sans-serif;font-size:12px;line-height:17px;color:#2563eb;font-weight:bold;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(fixedLine)}</td></tr>
+    <tr><td style="padding:0 14px 10px;font-family:Arial,sans-serif;font-size:18px;line-height:24px;color:#dc2626;font-weight:bold;letter-spacing:0.02em;text-transform:uppercase;">${escapeHtml(fixedLine)}</td></tr>
     ${description ? `<tr><td style="padding:0 14px 6px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#475569;">${escapeHtml(description)}</td></tr>` : ""}
     ${spec ? `<tr><td style="padding:0 14px 9px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#475569;">${escapeHtml(spec)}</td></tr>` : ""}
     ${supporting ? `<tr><td style="padding:0 14px 9px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#334155;">${escapeHtml(supporting)}</td></tr>` : ""}
