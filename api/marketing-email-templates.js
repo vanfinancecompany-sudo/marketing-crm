@@ -706,6 +706,15 @@ function financeHeadline(profile = {}) {
   return compactLine([cashLine, financeMonthlyLine(profile.monthly)]);
 }
 
+function financePricePresentation(profile = {}) {
+  const price = String(profile.price || "").trim();
+  const vat = String(profile.vat || "").trim();
+  return {
+    fullPrice: compactLine([price, vat], " "),
+    monthlyPayment: financeMonthlyLine(profile.monthly),
+  };
+}
+
 function isInternalVehicleGridMessage(value) {
   const normalized = String(value || "").trim().toLowerCase();
   return new Set([
@@ -733,20 +742,23 @@ function renderSelectedVehicleCard(vehicle = {}, productMode = "finance") {
   const spec = selectedVehicleSpec(vehicle);
   const fallbackRegistration = !vehicle.title && vehicle.registration ? vehicle.registration : "";
   const isRent2Buy = productMode === "rent2buy";
-  const headline = isRent2Buy ? profile.monthly : financeHeadline(profile);
+  const financePricing = isRent2Buy ? null : financePricePresentation(profile);
+  const fullPrice = isRent2Buy ? profile.monthly : financePricing.fullPrice || financePricing.monthlyPayment;
+  const monthlyPayment = isRent2Buy || !financePricing.fullPrice ? "" : financePricing.monthlyPayment;
   const fixedLine = isRent2Buy ? "NO CREDIT CHECK" : `FROM ${String.fromCharCode(163)}99 DEPOSIT`;
   const supporting = isRent2Buy ? compactLine([profile.initialRental, profile.term]) : "";
   const ctaText = isRent2Buy ? "View Rent2Buy van" : "View van";
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border:1px solid #dbe2ea;background:#ffffff;">
     ${renderVehicleImageCell(vehicle, href)}
-    ${headline ? `<tr><td style="padding:14px 14px 2px;font-family:Arial,sans-serif;font-size:22px;line-height:27px;color:#0f172a;font-weight:bold;">${escapeHtml(headline)}</td></tr>` : ""}
-    <tr><td style="padding:${headline ? "0" : "14px"} 14px 8px;font-family:Arial,sans-serif;font-size:12px;line-height:17px;color:#2563eb;font-weight:bold;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(fixedLine)}</td></tr>
-    <tr><td style="padding:0 14px 4px;font-family:Arial,sans-serif;font-size:16px;line-height:21px;color:#0f172a;font-weight:bold;">${escapeHtml(title)}</td></tr>
-    ${description ? `<tr><td style="padding:0 14px 5px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#475569;">${escapeHtml(description)}</td></tr>` : ""}
-    ${spec ? `<tr><td style="padding:0 14px 8px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#475569;">${escapeHtml(spec)}</td></tr>` : ""}
-    ${supporting ? `<tr><td style="padding:0 14px 8px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#334155;">${escapeHtml(supporting)}</td></tr>` : ""}
-    ${fallbackRegistration ? `<tr><td style="padding:0 14px 8px;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">Reg: ${escapeHtml(fallbackRegistration)}</td></tr>` : ""}
-    ${href ? `<tr><td style="padding:2px 14px 16px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#2563eb" style="border-radius:7px;"><a href="${escapeHtml(href)}" style="display:inline-block;padding:10px 13px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#ffffff;text-decoration:none;font-weight:bold;">${escapeHtml(ctaText)}</a></td></tr></table></td></tr>` : ""}
+    <tr><td style="padding:14px 14px 7px;font-family:Arial,sans-serif;font-size:16px;line-height:21px;color:#0f172a;font-weight:bold;">${escapeHtml(title)}</td></tr>
+    ${fullPrice ? `<tr><td style="padding:0 14px 3px;font-family:Arial,sans-serif;font-size:22px;line-height:27px;color:#0f172a;font-weight:bold;">${escapeHtml(fullPrice)}</td></tr>` : ""}
+    ${monthlyPayment ? `<tr><td style="padding:0 14px 8px;font-family:Arial,sans-serif;font-size:17px;line-height:22px;color:#334155;font-weight:normal;">${escapeHtml(monthlyPayment)}</td></tr>` : ""}
+    <tr><td style="padding:0 14px 9px;font-family:Arial,sans-serif;font-size:12px;line-height:17px;color:#2563eb;font-weight:bold;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(fixedLine)}</td></tr>
+    ${description ? `<tr><td style="padding:0 14px 6px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#475569;">${escapeHtml(description)}</td></tr>` : ""}
+    ${spec ? `<tr><td style="padding:0 14px 9px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#475569;">${escapeHtml(spec)}</td></tr>` : ""}
+    ${supporting ? `<tr><td style="padding:0 14px 9px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#334155;">${escapeHtml(supporting)}</td></tr>` : ""}
+    ${fallbackRegistration ? `<tr><td style="padding:0 14px 9px;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">Reg: ${escapeHtml(fallbackRegistration)}</td></tr>` : ""}
+    ${href ? `<tr><td style="padding:4px 14px 16px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#2563eb" style="border-radius:7px;"><a href="${escapeHtml(href)}" style="display:inline-block;padding:10px 13px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#ffffff;text-decoration:none;font-weight:bold;">${escapeHtml(ctaText)}</a></td></tr></table></td></tr>` : ""}
   </table>`;
 }
 
@@ -767,10 +779,10 @@ function renderPlaceholderVehicleGrid(settings = {}) {
     <td width="${twoColumn ? "50%" : "100%"}" valign="top" style="padding:8px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border:1px solid #dbe2ea;background:#f8fafc;">
         <tr><td align="center" bgcolor="#e2e8f0" style="padding:22px 12px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#475569;">Vehicle image placeholder</td></tr>
-        <tr><td style="padding:13px 12px 4px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#0f172a;font-weight:bold;">${escapeHtml(vehicle.name)}</td></tr>
-        <tr><td style="padding:0 12px;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#64748b;">${escapeHtml(vehicle.mileage)}</td></tr>
-        <tr><td style="padding:3px 12px 10px;font-family:Arial,sans-serif;font-size:16px;line-height:22px;color:#0f172a;font-weight:bold;">&#163;${escapeHtml(vehicle.price)}</td></tr>
-        <tr><td style="padding:0 12px 14px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#2563eb" style="border-radius:7px;"><a href="https://www.vanfinancecompany.co.uk" style="display:inline-block;padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#ffffff;text-decoration:none;font-weight:bold;">View Van</a></td></tr></table></td></tr>
+        <tr><td style="padding:14px 12px 7px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#0f172a;font-weight:bold;">${escapeHtml(vehicle.name)}</td></tr>
+        <tr><td style="padding:0 12px 4px;font-family:Arial,sans-serif;font-size:22px;line-height:27px;color:#0f172a;font-weight:bold;">&#163;${escapeHtml(vehicle.price)}</td></tr>
+        <tr><td style="padding:0 12px 11px;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#64748b;">${escapeHtml(vehicle.mileage)}</td></tr>
+        <tr><td style="padding:0 12px 15px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#2563eb" style="border-radius:7px;"><a href="https://www.vanfinancecompany.co.uk" style="display:inline-block;padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#ffffff;text-decoration:none;font-weight:bold;">View Van</a></td></tr></table></td></tr>
       </table>
     </td>
   `);
