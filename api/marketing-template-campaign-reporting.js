@@ -102,18 +102,28 @@ async function loadAllRows(queryFactory) {
   return rows;
 }
 
-function aggregateRecipients(recipients = []) {
+function aggregateRecipients(recipients = [], events = []) {
+  const uniqueAccepted = new Set();
   const uniqueDelivered = new Set();
   const uniqueOpened = new Set();
   const uniqueClicked = new Set();
+  const uniqueSoftBounced = new Set();
+  const uniqueHardBounced = new Set();
+  const uniqueDeferred = new Set();
+  const uniqueBlocked = new Set();
+  const uniqueComplained = new Set();
+  const uniqueUnsubscribed = new Set();
   const counts = {
     recipients: recipients.length,
     accepted: 0,
     delivered: 0,
+    opens: 0,
+    unique_opens: 0,
     opened: 0,
     clicked: 0,
     soft_bounced: 0,
     hard_bounced: 0,
+    deferred: 0,
     blocked: 0,
     complained: 0,
     unsubscribed: 0,
@@ -122,31 +132,66 @@ function aggregateRecipients(recipients = []) {
     skipped_suppressed: 0,
     skipped_duplicate: 0,
   };
+
   for (const row of recipients) {
     const identity = row.id || row.customer_id || row.email;
-    if (["accepted", "sent", "delivered", "opened", "clicked"].includes(row.status)) counts.accepted += 1;
+    if (row.first_sent_at || row.provider_message_id || ["accepted", "sent", "delivered", "opened", "clicked"].includes(row.status)) uniqueAccepted.add(identity);
     if (row.delivered_at || ["delivered", "opened", "clicked"].includes(row.status)) uniqueDelivered.add(identity);
     if (row.opened_at || ["opened", "clicked"].includes(row.status)) uniqueOpened.add(identity);
     if (row.clicked_at || row.status === "clicked") uniqueClicked.add(identity);
-    if (row.status === "soft_bounced") counts.soft_bounced += 1;
-    if (row.status === "hard_bounced") counts.hard_bounced += 1;
-    if (row.status === "blocked") counts.blocked += 1;
-    if (row.status === "complained") counts.complained += 1;
-    if (row.status === "unsubscribed") counts.unsubscribed += 1;
+    if (row.soft_bounced_at || row.status === "soft_bounced") uniqueSoftBounced.add(identity);
+    if (row.hard_bounced_at || row.status === "hard_bounced") uniqueHardBounced.add(identity);
+    if (row.deferred_at || row.last_event_type === "deferred") uniqueDeferred.add(identity);
+    if (row.blocked_at || row.status === "blocked") uniqueBlocked.add(identity);
+    if (row.complained_at || row.status === "complained") uniqueComplained.add(identity);
+    if (row.unsubscribed_at || row.status === "unsubscribed") uniqueUnsubscribed.add(identity);
     if (row.status === "failed") counts.failed += 1;
     if (row.status === "submission_unknown") counts.submission_unknown += 1;
     if (row.status === "skipped_suppressed") counts.skipped_suppressed += 1;
     if (row.status === "skipped_duplicate") counts.skipped_duplicate += 1;
   }
+
+  for (const event of events) {
+    const identity = event.recipient_id || event.customer_id || event.email_normalized || event.id;
+    if (!identity) continue;
+    if (!["unknown", "error"].includes(event.event_type)) uniqueAccepted.add(identity);
+    if (event.event_type === "delivered") uniqueDelivered.add(identity);
+    if (event.event_type === "opened") {
+      counts.opens += 1;
+      uniqueDelivered.add(identity);
+      uniqueOpened.add(identity);
+    }
+    if (event.event_type === "clicked") {
+      uniqueDelivered.add(identity);
+      uniqueOpened.add(identity);
+      uniqueClicked.add(identity);
+    }
+    if (event.event_type === "soft_bounce") uniqueSoftBounced.add(identity);
+    if (["hard_bounce", "invalid_email"].includes(event.event_type)) uniqueHardBounced.add(identity);
+    if (event.event_type === "deferred") uniqueDeferred.add(identity);
+    if (event.event_type === "blocked") uniqueBlocked.add(identity);
+    if (event.event_type === "complaint") uniqueComplained.add(identity);
+    if (event.event_type === "unsubscribed") uniqueUnsubscribed.add(identity);
+  }
+
+  counts.accepted = uniqueAccepted.size;
   counts.delivered = uniqueDelivered.size;
-  counts.opened = uniqueOpened.size;
+  counts.opens = Math.max(counts.opens, uniqueOpened.size);
+  counts.unique_opens = uniqueOpened.size;
+  counts.opened = counts.unique_opens;
   counts.clicked = uniqueClicked.size;
+  counts.soft_bounced = uniqueSoftBounced.size;
+  counts.hard_bounced = uniqueHardBounced.size;
+  counts.deferred = uniqueDeferred.size;
+  counts.blocked = uniqueBlocked.size;
+  counts.complained = uniqueComplained.size;
+  counts.unsubscribed = uniqueUnsubscribed.size;
   return {
     ...counts,
     delivery_rate: percent(counts.delivered, counts.accepted),
-    open_rate: percent(counts.opened, counts.delivered || counts.accepted),
+    open_rate: percent(counts.unique_opens, counts.delivered || counts.accepted),
     click_rate: percent(counts.clicked, counts.delivered || counts.accepted),
-    click_to_open_rate: percent(counts.clicked, counts.opened),
+    click_to_open_rate: percent(counts.clicked, counts.unique_opens),
     bounce_rate: percent(counts.soft_bounced + counts.hard_bounced + counts.blocked, counts.accepted),
     unsubscribe_rate: percent(counts.unsubscribed, counts.accepted),
   };
@@ -253,7 +298,7 @@ async function campaignReporting(supabase, body = {}) {
       .order("event_at", { ascending: false }));
     const events = allEvents.filter((event) => productionSendIds.has(event.send_id));
 
-    const recipientAggregate = aggregateRecipients(recipients);
+    const recipientAggregate = aggregateRecipients(recipients, events);
     return {
       reporting: {
         migration_required: false,
@@ -277,7 +322,7 @@ async function campaignReporting(supabase, body = {}) {
           generated_at: new Date().toISOString(),
           sends: aggregateProductionSends([]),
           tests: testSendSummary([]),
-          recipients: aggregateRecipients([]),
+          recipients: aggregateRecipients([], []),
           status_breakdown: [],
           top_links: [],
           recent_events: [],
