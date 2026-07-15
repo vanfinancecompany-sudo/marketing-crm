@@ -89,7 +89,7 @@
       <div class="card-header">
         <div>
           <h3>Campaign Reporting</h3>
-          <p>Production-only Brevo delivery, engagement and suppression events captured by webhook. Test sends are shown separately.</p>
+          <p>Production-only email-provider delivery, engagement and suppression events captured by webhook. Test sends are shown separately.</p>
         </div>
         <button id="refreshReportingButton" type="button">Refresh Report</button>
       </div>

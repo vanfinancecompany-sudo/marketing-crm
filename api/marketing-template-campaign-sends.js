@@ -43,6 +43,20 @@ class BrevoHttpError extends ApiError {
     this.name = "BrevoHttpError";
     this.brevoStatusCode = statusCode;
     this.brevoResponseBody = safeBody;
+    this.provider = "brevo";
+    this.providerStatusCode = statusCode;
+    this.providerResponseBody = safeBody;
+  }
+}
+
+class SMTP2GOHttpError extends ApiError {
+  constructor(statusCode, responseBody) {
+    const safeBody = cleanText(responseBody || "Empty response body.", 1000);
+    super(502, `SMTP2GO HTTP ${statusCode}: ${safeBody}`);
+    this.name = "SMTP2GOHttpError";
+    this.provider = "smtp2go";
+    this.providerStatusCode = statusCode;
+    this.providerResponseBody = safeBody;
   }
 }
 
@@ -214,20 +228,46 @@ function renderFrozenCampaign(campaign = {}, options = {}) {
 
 function requireProductionSendConfig() {
   const missing = [];
-  if (!process.env.BREVO_API_KEY) missing.push("BREVO_API_KEY");
-  if (!process.env.BREVO_SENDER_EMAIL) missing.push("BREVO_SENDER_EMAIL");
-  if (!process.env.BREVO_SENDER_NAME) missing.push("BREVO_SENDER_NAME");
+  if (activeEmailProvider() === "smtp2go") {
+    if (!process.env.SMTP2GO_API_KEY) missing.push("SMTP2GO_API_KEY");
+    if (!process.env.SMTP2GO_SENDER_EMAIL) missing.push("SMTP2GO_SENDER_EMAIL");
+    if (!process.env.SMTP2GO_SENDER_NAME) missing.push("SMTP2GO_SENDER_NAME");
+  } else {
+    if (!process.env.BREVO_API_KEY) missing.push("BREVO_API_KEY");
+    if (!process.env.BREVO_SENDER_EMAIL) missing.push("BREVO_SENDER_EMAIL");
+    if (!process.env.BREVO_SENDER_NAME) missing.push("BREVO_SENDER_NAME");
+  }
   if (!process.env.MARKETING_PUBLIC_BASE_URL) missing.push("MARKETING_PUBLIC_BASE_URL");
   if (!process.env.MARKETING_UNSUBSCRIBE_TOKEN_SECRET) missing.push("MARKETING_UNSUBSCRIBE_TOKEN_SECRET");
   if (missing.length) throw new ApiError(400, `Production sending is not configured. Missing: ${missing.join(", ")}.`);
 }
 
-function brevoConfigStatus() {
+function smtp2goSelected() {
+  return Boolean(process.env.SMTP2GO_API_KEY || process.env.SMTP2GO_SENDER_EMAIL || process.env.SMTP2GO_SENDER_NAME);
+}
+
+function activeEmailProvider() {
+  return smtp2goSelected() ? "smtp2go" : "brevo";
+}
+
+function emailProviderConfig() {
+  const smtp2go = activeEmailProvider() === "smtp2go";
   return {
-    configured: Boolean(process.env.BREVO_API_KEY && process.env.BREVO_SENDER_EMAIL && process.env.BREVO_SENDER_NAME),
-    api_key_configured: Boolean(process.env.BREVO_API_KEY),
-    sender_email_configured: Boolean(process.env.BREVO_SENDER_EMAIL),
-    sender_name: process.env.BREVO_SENDER_NAME || "",
+    provider: smtp2go ? "SMTP2GO" : "Brevo",
+    apiKey: smtp2go ? process.env.SMTP2GO_API_KEY : process.env.BREVO_API_KEY,
+    senderEmail: smtp2go ? process.env.SMTP2GO_SENDER_EMAIL : process.env.BREVO_SENDER_EMAIL,
+    senderName: smtp2go ? process.env.SMTP2GO_SENDER_NAME : process.env.BREVO_SENDER_NAME,
+  };
+}
+
+function emailProviderConfigStatus() {
+  const config = emailProviderConfig();
+  return {
+    provider: config.provider,
+    configured: Boolean(config.apiKey && config.senderEmail && config.senderName),
+    api_key_configured: Boolean(config.apiKey),
+    sender_email_configured: Boolean(config.senderEmail),
+    sender_name: config.senderName || "",
     public_base_url_configured: Boolean(process.env.MARKETING_PUBLIC_BASE_URL),
     unsubscribe_secret_configured: Boolean(process.env.MARKETING_UNSUBSCRIBE_TOKEN_SECRET),
   };
@@ -277,6 +317,72 @@ async function callBrevoEmail({ to, name, subject, html, tags = [], headers = {}
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function smtp2goMailbox(email, name = "") {
+  const safeEmail = cleanText(email, 320).replace(/[\r\n<>]/g, "");
+  const safeName = cleanText(name, 200).replace(/[\r\n<>"]/g, "");
+  return safeName ? `${safeName} <${safeEmail}>` : safeEmail;
+}
+
+async function callSMTP2GO({ to, name, subject, html, text = "", cc = [], bcc = [], replyTo = "", attachments = [], tags = [], headers = {} }) {
+  if (!process.env.SMTP2GO_API_KEY) throw new ApiError(400, "SMTP2GO API key is not configured.");
+  if (!process.env.SMTP2GO_SENDER_EMAIL || !process.env.SMTP2GO_SENDER_NAME) throw new ApiError(400, "SMTP2GO sender is not configured.");
+  const customHeaders = Object.entries(headers).map(([header, value]) => ({ header, value: String(value) }));
+  if (replyTo) customHeaders.push({ header: "Reply-To", value: String(replyTo) });
+  if (tags.length) customHeaders.push({ header: "X-Marketing-Tags", value: tags.join(",") });
+  const payload = {
+    sender: smtp2goMailbox(process.env.SMTP2GO_SENDER_EMAIL, process.env.SMTP2GO_SENDER_NAME),
+    to: [smtp2goMailbox(to, name)],
+    subject,
+    html_body: html,
+    custom_headers: customHeaders,
+  };
+  if (text) payload.text_body = text;
+  if (cc.length) payload.cc = cc;
+  if (bcc.length) payload.bcc = bcc;
+  if (attachments.length) payload.attachments = attachments;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch("https://api.smtp2go.com/v3/email/send", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Smtp2go-Api-Key": process.env.SMTP2GO_API_KEY,
+      },
+      signal: controller.signal,
+      body: JSON.stringify(payload),
+    });
+    const responseText = await response.text().catch(() => {
+      throw new AmbiguousSubmissionError("SMTP2GO response could not be read after submission.");
+    });
+    let data = {};
+    if (responseText) {
+      try { data = JSON.parse(responseText); }
+      catch {
+        if (response.ok) throw new AmbiguousSubmissionError("SMTP2GO accepted status but returned an unreadable response.");
+        data = { error: responseText.slice(0, 300) };
+      }
+    }
+    if (!response.ok) throw new SMTP2GOHttpError(response.status, responseText || JSON.stringify(data));
+    const succeeded = Number(data?.data?.succeeded || 0);
+    const failed = Number(data?.data?.failed || 0);
+    const messageId = data?.data?.email_id || "";
+    if (failed > 0 || succeeded < 1) throw new SMTP2GOHttpError(response.status, responseText || JSON.stringify(data));
+    if (!messageId) throw new AmbiguousSubmissionError("SMTP2GO response did not include an email id.");
+    return { messageId, response: data };
+  } catch (error) {
+    if (error?.name === "AbortError") throw new AmbiguousSubmissionError("SMTP2GO request timed out after submission was attempted.");
+    if (error instanceof ApiError) throw error;
+    throw new AmbiguousSubmissionError("SMTP2GO submission outcome is unknown due to a network error.");
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function callEmailProvider(payload) {
+  return activeEmailProvider() === "smtp2go" ? callSMTP2GO(payload) : callBrevoEmail(payload);
 }
 
 function unsubscribePayload({ customerId, email, campaignId, sendId, recipientId }) {
@@ -424,23 +530,28 @@ async function resolveRecipients(supabase, campaign, options = {}) {
 }
 
 async function brevoStatus() {
-  const status = brevoConfigStatus();
+  const status = emailProviderConfigStatus();
+  const provider = activeEmailProvider();
   let connectivity = "not_configured";
-  let message = "Brevo is not fully configured.";
+  let message = `${status.provider} is not fully configured.`;
   if (status.api_key_configured) {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10000);
-      const response = await fetch("https://api.brevo.com/v3/account", {
-        headers: { "api-key": process.env.BREVO_API_KEY },
+      const response = await fetch(provider === "smtp2go" ? "https://api.smtp2go.com/v3/api_keys/permissions" : "https://api.brevo.com/v3/account", {
+        method: provider === "smtp2go" ? "POST" : "GET",
+        headers: provider === "smtp2go"
+          ? { "Content-Type": "application/json", "X-Smtp2go-Api-Key": process.env.SMTP2GO_API_KEY }
+          : { "api-key": process.env.BREVO_API_KEY },
+        body: provider === "smtp2go" ? "{}" : undefined,
         signal: controller.signal,
       });
       clearTimeout(timeout);
       connectivity = response.ok ? "authorised" : "rejected";
-      message = response.ok ? "Brevo API key authorised." : "Brevo API key was rejected.";
+      message = response.ok ? `${status.provider} API key authorised.` : `${status.provider} API key was rejected.`;
     } catch {
       connectivity = "unreachable";
-      message = "Could not reach Brevo account endpoint.";
+      message = `Could not reach ${status.provider} configuration endpoint.`;
     }
   }
   return { brevo: { ...status, connectivity, message } };
@@ -544,13 +655,13 @@ async function sendTest(supabase, body = {}) {
       frozen_subject: rendered.subject,
       frozen_preview_text: rendered.preview_text,
       frozen_html_hash: rendered.html_hash,
-      metadata: { test_recipient_domain: recipientEmail.split("@")[1] || "" },
+      metadata: { test_recipient_domain: recipientEmail.split("@")[1] || "", email_provider: activeEmailProvider() },
     }).select(SEND_COLUMNS).single(),
     "Could not create test-send audit record."
   );
   let provider;
   try {
-    provider = await callBrevoEmail({
+    provider = await callEmailProvider({
       to: recipientEmail,
       name: "Test recipient",
       subject: rendered.subject,
@@ -569,7 +680,7 @@ async function sendTest(supabase, body = {}) {
       status: "accepted",
       provider_message_id: provider.messageId || null,
       first_sent_at: completedAt,
-      metadata: { test: true },
+      metadata: { test: true, email_provider: activeEmailProvider() },
     });
     return { send: { ...send, status: "completed", sent_count: 1, completed_at: completedAt }, provider_message_id: provider.messageId || "" };
   } catch (error) {
@@ -628,7 +739,8 @@ async function prepareProductionSend(supabase, body = {}) {
           matching_count: resolved.counts.matching_count,
           invalid_email_count: resolved.counts.invalid_email_count,
           proposed_batch_size: selectedCount,
-          sender_email_configured: Boolean(process.env.BREVO_SENDER_EMAIL),
+          sender_email_configured: emailProviderConfigStatus().sender_email_configured,
+          email_provider: activeEmailProvider(),
         },
       }).select(SEND_COLUMNS).single(),
       "Could not create production-send preparation."
@@ -647,8 +759,8 @@ async function prepareProductionSend(supabase, body = {}) {
         proposed_batch_size: selectedCount,
         subject: rendered.subject,
         html_hash: rendered.html_hash,
-        sender_name: process.env.BREVO_SENDER_NAME || "",
-        sender_email_configured: Boolean(process.env.BREVO_SENDER_EMAIL),
+        sender_name: emailProviderConfigStatus().sender_name,
+        sender_email_configured: emailProviderConfigStatus().sender_email_configured,
       },
     };
   } catch (error) {
@@ -719,7 +831,7 @@ async function confirmProductionSend(supabase, body = {}) {
       customer_id: recipient.customer_id,
       email: recipient.email,
       status: "pending",
-      metadata: { name: recipient.name },
+      metadata: { name: recipient.name, email_provider: activeEmailProvider() },
     }).select(RECIPIENT_COLUMNS).maybeSingle();
     if (inserted.error) {
       const message = String(inserted.error.message || "").toLowerCase();
@@ -737,7 +849,7 @@ async function confirmProductionSend(supabase, body = {}) {
       }
       const unsubscribeUrl = publicUnsubscribeUrl(unsubscribePayload({ customerId: recipient.customer_id, email: recipient.email, campaignId: campaign.id, sendId: send.id, recipientId: recipientRecord.id }));
       const html = renderedBase.html.replace("{{unsubscribe_url}}", unsubscribeUrl);
-      const provider = await callBrevoEmail({
+      const provider = await callEmailProvider({
         to: recipient.email,
         name: recipient.name,
         subject: renderedBase.subject,
@@ -754,7 +866,7 @@ async function confirmProductionSend(supabase, body = {}) {
         status: "accepted",
         provider_message_id: provider.messageId || null,
         first_sent_at: new Date().toISOString(),
-        metadata: { name: recipient.name, provider_response: provider.response || {} },
+        metadata: { name: recipient.name, email_provider: activeEmailProvider(), provider_response: provider.response || {} },
       }).eq("id", recipientRecord.id);
       sentCount += 1;
     } catch (error) {
@@ -765,13 +877,14 @@ async function confirmProductionSend(supabase, body = {}) {
         failedCount += 1;
         const failureReason = cleanText(error.message, 1000);
         failureReasons.push(failureReason);
-        if (error instanceof BrevoHttpError) {
-          console.error("Brevo production send rejected", {
+        if (error instanceof BrevoHttpError || error instanceof SMTP2GOHttpError) {
+          console.error(`${error.provider === "smtp2go" ? "SMTP2GO" : "Brevo"} production send rejected`, {
             campaign_id: campaign.id,
             send_id: send.id,
             recipient_id: recipientRecord.id,
-            http_status: error.brevoStatusCode,
-            response_body: error.brevoResponseBody,
+            provider: error.provider,
+            http_status: error.providerStatusCode,
+            response_body: error.providerResponseBody,
           });
         }
         await supabase.from("marketing_email_send_recipients").update({ status: "failed", failure_reason: failureReason, last_event_at: new Date().toISOString() }).eq("id", recipientRecord.id);
@@ -784,7 +897,7 @@ async function confirmProductionSend(supabase, body = {}) {
   const errorParts = [];
   if (failedCount) errorParts.push(`${failedCount} recipient(s) failed immediate provider submission`);
   if (failureReasons.length) errorParts.push(`First failure: ${failureReasons[0]}`);
-  if (unknownCount) errorParts.push(`${unknownCount} recipient submission outcome(s) unknown; reconcile in Brevo before retrying`);
+  if (unknownCount) errorParts.push(`${unknownCount} recipient submission outcome(s) unknown; reconcile in ${emailProviderConfig().provider} before retrying`);
   const { data: updatedSend } = assertSupabase(
     await supabase.from("marketing_email_sends").update({
       status: finalStatus,

@@ -161,15 +161,29 @@ async function safeHeadCount(supabase, table, filter = (query) => query) {
   }
 }
 
-async function checkBrevoConnection() {
-  const brevoApiKey = String(process.env.BREVO_API_KEY || "").trim();
-  if (!brevoApiKey) return { state: "not_configured", label: "Not configured" };
+function dashboardEmailProviderConfig() {
+  const smtp2go = Boolean(process.env.SMTP2GO_API_KEY || process.env.SMTP2GO_SENDER_EMAIL || process.env.SMTP2GO_SENDER_NAME);
+  return {
+    provider: smtp2go ? "SMTP2GO" : "Brevo",
+    apiKey: String(smtp2go ? process.env.SMTP2GO_API_KEY || "" : process.env.BREVO_API_KEY || "").trim(),
+    senderEmail: String(smtp2go ? process.env.SMTP2GO_SENDER_EMAIL || "" : process.env.BREVO_SENDER_EMAIL || "").trim(),
+    senderName: String(smtp2go ? process.env.SMTP2GO_SENDER_NAME || "" : process.env.BREVO_SENDER_NAME || "").trim(),
+  };
+}
+
+async function checkEmailProviderConnection(config) {
+  if (!config.apiKey) return { provider: config.provider, state: "not_configured", label: "Not configured" };
   try {
-    const response = await fetch("https://api.brevo.com/v3/account", { headers: { "api-key": brevoApiKey } });
-    if (response.ok) return { state: "authorised", label: "Authorised", status_code: response.status };
-    return { state: "rejected", label: "Rejected", status_code: response.status };
+    const smtp2go = config.provider === "SMTP2GO";
+    const response = await fetch(smtp2go ? "https://api.smtp2go.com/v3/api_keys/permissions" : "https://api.brevo.com/v3/account", {
+      method: smtp2go ? "POST" : "GET",
+      headers: smtp2go ? { "Content-Type": "application/json", "X-Smtp2go-Api-Key": config.apiKey } : { "api-key": config.apiKey },
+      body: smtp2go ? "{}" : undefined,
+    });
+    if (response.ok) return { provider: config.provider, state: "authorised", label: "Authorised", status_code: response.status };
+    return { provider: config.provider, state: "rejected", label: "Rejected", status_code: response.status };
   } catch {
-    return { state: "unreachable", label: "Unreachable" };
+    return { provider: config.provider, state: "unreachable", label: "Unreachable" };
   }
 }
 
@@ -458,13 +472,15 @@ function dashboardNote(partial) {
 
 async function loadDashboard(supabase, body = {}) {
   const range = periodRange(body.period);
-  const brevo = await checkBrevoConnection();
+  const providerConfig = dashboardEmailProviderConfig();
+  const brevo = await checkEmailProviderConnection(providerConfig);
   const sender = {
-    configured: Boolean(String(process.env.BREVO_SENDER_EMAIL || "").trim() && String(process.env.BREVO_SENDER_NAME || "").trim()),
-    email_configured: Boolean(String(process.env.BREVO_SENDER_EMAIL || "").trim()),
-    name_configured: Boolean(String(process.env.BREVO_SENDER_NAME || "").trim()),
-    email: String(process.env.BREVO_SENDER_EMAIL || "").trim() || "",
-    name: String(process.env.BREVO_SENDER_NAME || "").trim() || "",
+    provider: providerConfig.provider,
+    configured: Boolean(providerConfig.senderEmail && providerConfig.senderName),
+    email_configured: Boolean(providerConfig.senderEmail),
+    name_configured: Boolean(providerConfig.senderName),
+    email: providerConfig.senderEmail,
+    name: providerConfig.senderName,
     provider_sender_status: "not_checked",
   };
   const unsubscribe = {
@@ -482,7 +498,10 @@ async function loadDashboard(supabase, body = {}) {
   let periodEvents = [];
   let periodProductionEvents = [];
   let campaigns = [];
-  let webhook = { configured: Boolean(String(process.env.BREVO_WEBHOOK_SECRET || "").trim()), latest_event_at: null, events_last_24h: 0, events_last_7d: 0, state: "awaiting_first_event" };
+  const webhookProvider = providerConfig.provider;
+  const webhookEventPrefix = webhookProvider === "SMTP2GO" ? "smtp2go:%" : "brevo:%";
+  const webhookSecret = webhookProvider === "SMTP2GO" ? process.env.SMTP2GO_WEBHOOK_SECRET : process.env.BREVO_WEBHOOK_SECRET;
+  let webhook = { provider: webhookProvider, configured: Boolean(String(webhookSecret || "").trim()), latest_event_at: null, events_last_24h: 0, events_last_7d: 0, state: "awaiting_first_event" };
   let infrastructureMessage = "";
   const partials = [];
 
@@ -511,11 +530,11 @@ async function loadDashboard(supabase, body = {}) {
     campaigns = campaignResult.rows;
     partials.push(...campaignResult.partials);
 
-    const latestEvent = await supabase.from("marketing_email_events").select("event_at").order("event_at", { ascending: false }).limit(1).maybeSingle();
-    const last24 = await safeHeadCount(supabase, "marketing_email_events", (query) => query.gte("event_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()));
-    const last7 = await safeHeadCount(supabase, "marketing_email_events", (query) => query.gte("event_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()));
+    const latestEvent = await supabase.from("marketing_email_events").select("event_at").like("provider_event_id", webhookEventPrefix).order("event_at", { ascending: false }).limit(1).maybeSingle();
+    const last24 = await safeHeadCount(supabase, "marketing_email_events", (query) => query.like("provider_event_id", webhookEventPrefix).gte("event_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()));
+    const last7 = await safeHeadCount(supabase, "marketing_email_events", (query) => query.like("provider_event_id", webhookEventPrefix).gte("event_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()));
     const latestEventAt = latestEvent.error ? null : latestEvent.data?.event_at || null;
-    const hasReceivedEvents = Boolean(latestEventAt || (reportingCount.ok && reportingCount.count > 0));
+    const hasReceivedEvents = Boolean(latestEventAt);
     webhook = {
       ...webhook,
       latest_event_at: latestEventAt,
