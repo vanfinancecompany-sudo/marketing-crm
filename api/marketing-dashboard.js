@@ -199,14 +199,6 @@ function reconcileEventCorrelation(event, recipientsByMessageId = new Map(), rec
   };
 }
 
-function eventBelongsToProvider(event, provider) {
-  const eventId = cleanText(event.provider_event_id, 300).toLowerCase();
-  const sourceProvider = cleanText(event.metadata?.source_provider, 80).toLowerCase();
-  return provider === "SMTP2GO"
-    ? sourceProvider === "smtp2go" || eventId.startsWith("smtp2go:")
-    : sourceProvider === "brevo" || eventId.startsWith("brevo:");
-}
-
 function dashboardEmailProviderConfig() {
   const smtp2go = Boolean(process.env.SMTP2GO_API_KEY || process.env.SMTP2GO_SENDER_EMAIL || process.env.SMTP2GO_SENDER_NAME);
   return {
@@ -621,30 +613,32 @@ async function loadDashboard(supabase, body = {}) {
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const webhookWindowResult = await loadAllRows(
       () => supabase.from("marketing_email_events")
-        .select("event_at,provider_event_id,metadata", { count: "exact" })
+        .select("event_at,event_type", { count: "exact" })
         .gte("event_at", sevenDaysAgo)
         .order("event_at", { ascending: false }),
       { dataset: "webhook health events", limit: EVENT_ROW_CAP }
     );
     if (webhookWindowResult.partial) partials.push(webhookWindowResult);
-    let providerWebhookEvents = webhookWindowResult.rows.filter((event) => eventBelongsToProvider(event, webhookProvider));
-    if (!providerWebhookEvents.length) {
+    const isTrackedEvent = (event) => !["", "unknown", "error"].includes(cleanText(event.event_type, 80).toLowerCase());
+    const trackedWebhookEvents = webhookWindowResult.rows.filter(isTrackedEvent);
+    let latestEventAt = trackedWebhookEvents[0]?.event_at || null;
+    if (!latestEventAt && reportingCount.count > 0) {
       const latestCandidates = await supabase.from("marketing_email_events")
-        .select("event_at,provider_event_id,metadata")
+        .select("event_at,event_type")
         .order("event_at", { ascending: false })
         .limit(1000);
       if (latestCandidates.error) throw new Error(latestCandidates.error.message || "Could not load webhook health.");
-      providerWebhookEvents = (latestCandidates.data || []).filter((event) => eventBelongsToProvider(event, webhookProvider));
+      latestEventAt = (latestCandidates.data || []).find(isTrackedEvent)?.event_at || null;
     }
-    const latestEventAt = providerWebhookEvents[0]?.event_at || null;
-    const eventsLast24h = providerWebhookEvents.filter((event) => event.event_at >= oneDayAgo).length;
-    const eventsLast7d = providerWebhookEvents.filter((event) => event.event_at >= sevenDaysAgo).length;
+    const eventsLast24h = trackedWebhookEvents.filter((event) => event.event_at >= oneDayAgo).length;
+    const eventsLast7d = trackedWebhookEvents.length;
+    const hasTrackedEvents = Boolean(latestEventAt || (reportingCount.ok && reportingCount.count > 0));
     webhook = {
       ...webhook,
       latest_event_at: latestEventAt,
       events_last_24h: eventsLast24h,
       events_last_7d: eventsLast7d,
-      state: webhook.configured ? (latestEventAt ? "active" : "awaiting_first_event") : "not_configured",
+      state: webhook.configured ? (hasTrackedEvents ? "active" : "awaiting_first_event") : "not_configured",
     };
   } catch (error) {
     if (isMissingTable(error, "marketing_email_sends") || isMissingTable(error, "marketing_email_events")) infrastructureMessage = cleanText(error.message || "Sending or reporting infrastructure is unavailable.", 300);
