@@ -76,8 +76,28 @@ function firstRecipient(payload = {}) {
   return String(payload.recipients || "").split(/[;,]/)[0] || "";
 }
 
+function normalizedCorrelationKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/_/g, "-");
+}
+
 function correlationValue(payload, header, fallback = "") {
-  return safeText(payload[header] || payload[header.toLowerCase()] || payload[header.replace(/-/g, "_")] || fallback, 80);
+  const target = normalizedCorrelationKey(header);
+  const sources = [payload, payload?.headers, payload?.custom_headers];
+  for (const source of sources) {
+    if (Array.isArray(source)) {
+      for (const item of source) {
+        if (!item || typeof item !== "object") continue;
+        const key = item.header || item.name || item.key;
+        if (normalizedCorrelationKey(key) === target) return safeText(item.value, 80);
+      }
+      continue;
+    }
+    if (!source || typeof source !== "object") continue;
+    for (const [key, value] of Object.entries(source)) {
+      if (normalizedCorrelationKey(key) === target) return safeText(value, 80);
+    }
+  }
+  return safeText(fallback, 80);
 }
 
 function providerEventId({ rawEventId, providerMessageId, eventType, timestamp, email, linkUrl, reason, bounce }) {
@@ -116,6 +136,11 @@ function normalizeEventPayload(payload = {}) {
       bounce_classification: safeText(payload.bounce, 20),
       subject_present: Boolean(payload.subject),
       has_correlation_hints: Boolean(campaignId || sendId || recipientId || providerMessageId || email),
+      correlation_ids: {
+        campaign_id: campaignId || null,
+        send_id: sendId || null,
+        recipient_id: recipientId || null,
+      },
     },
   };
 }
@@ -140,24 +165,25 @@ async function queryUniqueRecipient(query) {
 
 async function loadRecipient(supabase, event) {
   const hints = event.hints || {};
+  const internalHints = { ...hints, provider_message_id: "" };
   let recipient = null;
-  if (hints.provider_message_id) {
-    recipient = await queryUniqueRecipient(supabase.from("marketing_email_send_recipients").select("*").eq("provider_message_id", hints.provider_message_id));
-    return verifyRecipientHints(recipient, hints) ? recipient : null;
-  }
   if (hints.recipient_id) {
     const result = await supabase.from("marketing_email_send_recipients").select("*").eq("id", hints.recipient_id).maybeSingle();
     if (result.error) throw new Error(result.error.message || "Could not load recipient.");
     recipient = result.data || null;
-    return verifyRecipientHints(recipient, hints) ? recipient : null;
+    if (verifyRecipientHints(recipient, internalHints)) return recipient;
   }
   if (hints.email && hints.send_id) {
     recipient = await queryUniqueRecipient(supabase.from("marketing_email_send_recipients").select("*").eq("send_id", hints.send_id).eq("email", hints.email));
-    return verifyRecipientHints(recipient, hints) ? recipient : null;
+    if (verifyRecipientHints(recipient, internalHints)) return recipient;
   }
   if (hints.email && hints.campaign_id) {
     recipient = await queryUniqueRecipient(supabase.from("marketing_email_send_recipients").select("*").eq("campaign_id", hints.campaign_id).eq("email", hints.email).order("created_at", { ascending: false }));
-    return verifyRecipientHints(recipient, hints) ? recipient : null;
+    if (verifyRecipientHints(recipient, internalHints)) return recipient;
+  }
+  if (hints.provider_message_id) {
+    recipient = await queryUniqueRecipient(supabase.from("marketing_email_send_recipients").select("*").eq("provider_message_id", hints.provider_message_id));
+    if (verifyRecipientHints(recipient, hints)) return recipient;
   }
   return null;
 }
