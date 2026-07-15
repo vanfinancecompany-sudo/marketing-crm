@@ -334,11 +334,12 @@
                 <thead>
                   <tr>
                     <th class="sortable" data-sort="name">Campaign</th>
-                    <th class="sortable" data-sort="last_production_send_at">Last Sent</th>
-                    <th class="sortable" data-sort="accepted">Accepted</th>
+                    <th class="sortable" data-sort="last_production_send_at">Last Event</th>
                     <th class="sortable" data-sort="delivered">Delivered</th>
-                    <th class="sortable" data-sort="opened">Opened</th>
-                    <th class="sortable" data-sort="clicked">Clicked</th>
+                    <th class="sortable" data-sort="opens">Opens</th>
+                    <th class="sortable" data-sort="unique_opens">Unique Opens</th>
+                    <th class="sortable" data-sort="clicked">Clicks</th>
+                    <th class="sortable" data-sort="bounce_rate">Bounce %</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -434,7 +435,7 @@
       const API_URL = "/api/marketing-dashboard";
       const fmt = new Intl.NumberFormat("en-GB");
       const dateFmt = new Intl.DateTimeFormat("en-GB", { dateStyle: "short", timeStyle: "short" });
-      const state = { access: "checking", period: "last30", dashboard: null, sortKey: "last_production_send_at", sortDirection: "desc" };
+      const state = { access: "checking", period: "last30", dashboard: null, sortKey: "last_production_send_at", sortDirection: "desc", loading: false };
 
       function $(id) { return document.getElementById(id); }
       function escapeHtml(value) {
@@ -545,7 +546,7 @@
           ["Unsubscribe config", unsubscribe.configured ? "Configured" : "Missing", unsubscribe.configured ? "configured" : "missing", "Public base URL and unsubscribe secret are checked without revealing values."],
           ["Sending DB", sendingDb.available ? "Available" : "Unavailable", sendingDb.available ? "available" : "missing", sendingDb.available ? `Send history records: ${formatNumber(sendingDb.record_count)}` : sendingDb.message || "Migration 011/send history unavailable."],
           ["Reporting DB", reportingDb.available ? "Available" : "Unavailable", reportingDb.available ? "available" : "missing", reportingDb.available ? `Event records: ${formatNumber(reportingDb.record_count)}` : reportingDb.message || "Migration 012/event reporting unavailable."],
-          ["Webhook activity", webhook.configured ? (webhook.latest_event_at ? "Active" : "Awaiting event") : "Not configured", webhook.state || "checking", webhook.configured ? (webhook.latest_event_at ? `Latest event ${formatDate(webhook.latest_event_at)} · ${formatNumber(webhook.events_last_24h)} last 24h · ${formatNumber(webhook.events_last_7d)} last 7d` : "Webhook configured — awaiting first tracked event.") : "Webhook secret is required."],
+          ["Webhook Status", webhook.state === "active" ? "Connected" : (webhook.configured ? "Awaiting event" : "Not configured"), webhook.state || "checking", webhook.state === "active" ? `Last event ${formatDate(webhook.latest_event_at)} · Processing normally · ${formatNumber(webhook.events_last_24h)} last 24h · ${formatNumber(webhook.events_last_7d)} last 7d` : (webhook.configured ? "Webhook configured — awaiting first tracked event." : "Webhook secret is required.")],
         ];
         $("systemHealth").innerHTML = items.map(([title, label, stateValue, detail]) => `
           <div class="status-item"><strong>${escapeHtml(title)} ${statusBadge(label, stateValue)}</strong><p>${escapeHtml(detail)}</p></div>
@@ -577,19 +578,21 @@
         const recipients = production.recipients || {};
         const tests = state.dashboard?.tests || {};
         const cards = [
-          ["Production campaigns", production.production_campaigns_with_send_activity || 0, "Campaigns with production send activity in range"],
-          ["Production batches", sends.production_batches || 0, "Generated/confirmed production batches"],
-          ["Requested", sends.requested || 0, "Requested production recipients"],
-          ["Accepted", recipients.accepted || 0, "Accepted by Brevo"],
           ["Delivered", recipients.delivered || 0, `${recipients.delivery_rate || 0}% delivery rate`],
-          ["Unique opened", recipients.opened || 0, `${recipients.open_rate || 0}% open rate`],
-          ["Unique clicked", recipients.clicked || 0, `${recipients.click_rate || 0}% click rate`],
-          ["Click-to-open", `${recipients.click_to_open_rate || 0}%`, "Unique clicks / unique opens"],
-          ["Hard bounced", recipients.hard_bounced || 0, "Invalid or hard bounce events"],
-          ["Soft bounced", recipients.soft_bounced || 0, "Temporary bounce events"],
+          ["Opens", recipients.opens || recipients.unique_opens || recipients.opened || 0, "All tracked open events"],
+          ["Unique Opens", recipients.unique_opens || recipients.opened || 0, `${recipients.open_rate || 0}% open rate`],
+          ["Clicks", recipients.clicked || 0, `${recipients.click_rate || 0}% click rate`],
+          ["Delivery Rate", `${recipients.delivery_rate || 0}%`, "Delivered / accepted recipients"],
+          ["Open Rate", `${recipients.open_rate || 0}%`, "Unique opens / delivered recipients"],
+          ["Click Rate", `${recipients.click_rate || 0}%`, "Unique clicks / delivered recipients"],
+          ["Bounce Rate", `${recipients.bounce_rate || 0}%`, "Soft, hard and blocked recipients"],
+          ["Unsubscribe Rate", `${recipients.unsubscribe_rate || 0}%`, "Unsubscribes / accepted recipients"],
+          ["Soft Bounce", recipients.soft_bounced || 0, "Temporary delivery failures"],
+          ["Hard Bounce", recipients.hard_bounced || 0, "Permanent delivery failures"],
+          ["Deferred", recipients.deferred || 0, "Delivery deferred by provider"],
+          ["Blocked", recipients.blocked || 0, "Messages blocked by provider"],
           ["Complaints", recipients.complained || 0, "Spam complaint events"],
-          ["Unsubscribed", recipients.unsubscribed || 0, `${recipients.unsubscribe_rate || 0}% unsubscribe rate`],
-          ["Submission unknown", recipients.submission_unknown || 0, "Requires reconciliation"],
+          ["Unsubscribes", recipients.unsubscribed || 0, "Production unsubscribe events"],
           ["Test sends", tests.count || 0, "Excluded from production totals"],
         ];
         $("metricGrid").innerHTML = cards.map(([label, value, detail]) => `
@@ -610,17 +613,18 @@
       function renderCampaigns() {
         const rows = sortedCampaigns();
         if (!rows.length) {
-          $("campaignRows").innerHTML = `<tr><td colspan="7"><div class="empty">No production campaign activity is recorded for this range.</div></td></tr>`;
+          $("campaignRows").innerHTML = `<tr><td colspan="8"><div class="empty">No production campaign activity is recorded for this range.</div></td></tr>`;
           return;
         }
         $("campaignRows").innerHTML = rows.map((row) => `
           <tr>
             <td><strong>${escapeHtml(row.name)}</strong><br><span class="muted">${escapeHtml(row.template_name || row.campaign_type || "No production send")}</span></td>
             <td>${formatDate(row.last_production_send_at)}</td>
-            <td>${formatNumber(row.accepted)}</td>
             <td>${formatNumber(row.delivered)}<br><span class="muted">${row.delivery_rate || 0}%</span></td>
-            <td>${formatNumber(row.opened)}<br><span class="muted">${row.open_rate || 0}%</span></td>
+            <td>${formatNumber(row.opens || row.unique_opens || row.opened)}</td>
+            <td>${formatNumber(row.unique_opens || row.opened)}<br><span class="muted">${row.open_rate || 0}%</span></td>
             <td>${formatNumber(row.clicked)}<br><span class="muted">${row.click_rate || 0}%</span></td>
+            <td>${row.bounce_rate || 0}%</td>
             <td><a class="ghost-button" href="/campaigns/?campaign=${encodeURIComponent(row.id)}">Open</a></td>
           </tr>
         `).join("");
@@ -694,13 +698,18 @@
         renderTimeline();
         setMessage(state.dashboard.privacy_note || "", "");
       }
-      async function loadDashboard() {
-        if (state.access !== "unlocked") return;
-        setMessage("Loading Marketing Dashboard...", "");
-        const result = await dashboardApi("dashboard", { period: state.period });
-        state.dashboard = result.dashboard;
-        setMessage("");
-        render();
+      async function loadDashboard({ quiet = false } = {}) {
+        if (state.access !== "unlocked" || state.loading) return;
+        state.loading = true;
+        if (!quiet) setMessage("Loading Marketing Dashboard...", "");
+        try {
+          const result = await dashboardApi("dashboard", { period: state.period });
+          state.dashboard = result.dashboard;
+          setMessage("");
+          render();
+        } finally {
+          state.loading = false;
+        }
       }
 
       $("unlockForm").addEventListener("submit", async (event) => {
@@ -746,6 +755,14 @@
           state.sortKey = key;
           renderCampaigns();
         });
+      });
+      setInterval(() => {
+        if (state.access !== "unlocked" || document.visibilityState !== "visible") return;
+        loadDashboard({ quiet: true }).catch((error) => setMessage(error.message, "error"));
+      }, 30000);
+      window.addEventListener("focus", () => {
+        if (state.access !== "unlocked") return;
+        loadDashboard({ quiet: true }).catch((error) => setMessage(error.message, "error"));
       });
       checkStoredAccess().catch((error) => {
         state.access = "locked";
