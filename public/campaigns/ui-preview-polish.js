@@ -29,8 +29,9 @@
     style.id = "campaignUiPolishStyles";
     style.textContent = `
       body { overflow-x:hidden; }
-      .detail-grid { grid-template-columns:minmax(420px, 44%) minmax(520px, 56%); }
-      .detail-grid > .card.detail-stack { position:sticky; top:16px; }
+      .detail-grid { grid-template-columns:minmax(0, 58%) minmax(0, 42%); align-items:start; }
+      .detail-grid > * { min-width:0; }
+      .detail-grid > .card.detail-stack { position:sticky; top:16px; width:100%; max-width:100%; min-width:0; overflow:hidden; }
       .workflow-steps { display:grid; grid-template-columns:repeat(5, minmax(120px, 1fr)); gap:8px; }
       .workflow-step { border:1px solid var(--line); border-radius:9px; padding:9px 10px; background:#fff; display:flex; align-items:center; gap:8px; font-weight:900; color:#475569; }
       .workflow-step span { width:24px; height:24px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; background:#e2e8f0; color:#334155; font-size:12px; }
@@ -48,11 +49,11 @@
       .collapsible-toggle { min-width:92px; }
       .collapsible-card.is-collapsed .collapsible-body { display:none; }
       .campaign-preview-title { margin:0 0 10px; font-weight:900; color:#334155; }
-      .preview-frame { min-height:min(82vh, 940px); max-height:none; overflow:auto; }
+      .preview-frame { width:100%; max-width:100%; min-height:min(82vh, 940px); max-height:none; overflow:auto; }
       .preview-frame.mobile-mode { align-items:flex-start; overflow-x:hidden; }
-      #previewFrame { min-height:min(78vh, 900px); }
+      #previewFrame { width:100%; max-width:100%; min-height:min(78vh, 900px); }
       #previewFrame.mobile { width:390px; max-width:100%; min-height:820px; }
-      @media (max-width:1280px) {
+      @media (max-width:1040px) {
         .detail-grid { grid-template-columns:1fr; }
         .detail-grid > .card.detail-stack { position:static; }
         .workflow-steps { grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); }
