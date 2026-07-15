@@ -202,26 +202,31 @@ function uniqueEventCount(events = [], eventTypes = []) {
 
 function aggregateEventActivity(events = [], submissionDenominator = 0) {
   const delivered = uniqueEventCount(events, ["delivered"]);
-  const opened = uniqueEventCount(events, ["opened"]);
+  const opens = events.filter((event) => event.event_type === "opened").length;
+  const uniqueOpens = uniqueEventCount(events, ["opened"]);
   const clicked = uniqueEventCount(events, ["clicked"]);
   const hardBounced = uniqueEventCount(events, ["hard_bounce", "invalid_email"]);
   const softBounced = uniqueEventCount(events, ["soft_bounce"]);
+  const deferred = uniqueEventCount(events, ["deferred"]);
   const blocked = uniqueEventCount(events, ["blocked"]);
   const complained = uniqueEventCount(events, ["complaint"]);
   const unsubscribed = uniqueEventCount(events, ["unsubscribed"]);
   return {
     delivered,
-    opened,
+    opens: Math.max(opens, uniqueOpens),
+    unique_opens: uniqueOpens,
+    opened: uniqueOpens,
     clicked,
     hard_bounced: hardBounced,
     soft_bounced: softBounced,
+    deferred,
     blocked,
     complained,
     unsubscribed,
     delivery_rate: percent(delivered, submissionDenominator),
-    open_rate: percent(opened, delivered || submissionDenominator),
+    open_rate: percent(uniqueOpens, delivered || submissionDenominator),
     click_rate: percent(clicked, delivered || submissionDenominator),
-    click_to_open_rate: percent(clicked, opened),
+    click_to_open_rate: percent(clicked, uniqueOpens),
     bounce_rate: percent(hardBounced + softBounced + blocked, submissionDenominator),
     unsubscribe_rate: percent(unsubscribed, submissionDenominator),
     submission_unknown: 0,
@@ -283,11 +288,15 @@ function campaignPerformance(campaigns = [], periodProductionSends = [], periodP
       requested: sendMetrics.requested,
       accepted: sendMetrics.accepted,
       delivered: eventMetrics.delivered,
+      opens: eventMetrics.opens,
+      unique_opens: eventMetrics.unique_opens,
       opened: eventMetrics.opened,
       clicked: eventMetrics.clicked,
+      bounces: eventMetrics.hard_bounced + eventMetrics.soft_bounced + eventMetrics.blocked,
       delivery_rate: eventMetrics.delivery_rate,
       open_rate: eventMetrics.open_rate,
       click_rate: eventMetrics.click_rate,
+      bounce_rate: eventMetrics.bounce_rate,
     };
   }).sort((a, b) => new Date(b.period_activity_at || 0).getTime() - new Date(a.period_activity_at || 0).getTime()).slice(0, 50);
 }
@@ -384,7 +393,7 @@ function recentActivity({ sends = [], events = [], campaigns = [], suppressions 
     items.push({ type, detail: send.status || "", occurred_at: send.completed_at || send.started_at || send.created_at, campaign_id: send.campaign_id || "" });
   });
   events.slice(0, 30).forEach((event) => {
-    if (!["hard_bounce", "soft_bounce", "complaint", "unsubscribed", "clicked", "opened", "delivered"].includes(event.event_type)) return;
+    if (!["hard_bounce", "soft_bounce", "deferred", "blocked", "complaint", "unsubscribed", "clicked", "opened", "delivered"].includes(event.event_type)) return;
     items.push({ type: `Webhook ${event.event_type.replace(/_/g, " ")}`, detail: event.customer_id || maskEmail(event.email_normalized) || "", occurred_at: event.event_at, campaign_id: event.campaign_id || "" });
   });
   campaigns.slice(0, 20).forEach((campaign) => {
@@ -505,12 +514,14 @@ async function loadDashboard(supabase, body = {}) {
     const latestEvent = await supabase.from("marketing_email_events").select("event_at").order("event_at", { ascending: false }).limit(1).maybeSingle();
     const last24 = await safeHeadCount(supabase, "marketing_email_events", (query) => query.gte("event_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()));
     const last7 = await safeHeadCount(supabase, "marketing_email_events", (query) => query.gte("event_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()));
+    const latestEventAt = latestEvent.error ? null : latestEvent.data?.event_at || null;
+    const hasReceivedEvents = Boolean(latestEventAt || (reportingCount.ok && reportingCount.count > 0));
     webhook = {
       ...webhook,
-      latest_event_at: latestEvent.error ? null : latestEvent.data?.event_at || null,
+      latest_event_at: latestEventAt,
       events_last_24h: last24.count || 0,
       events_last_7d: last7.count || 0,
-      state: webhook.configured ? (latestEvent.data?.event_at ? "active" : "awaiting_first_event") : "not_configured",
+      state: webhook.configured ? (hasReceivedEvents ? "active" : "awaiting_first_event") : "not_configured",
     };
   } catch (error) {
     if (isMissingTable(error, "marketing_email_sends") || isMissingTable(error, "marketing_email_events")) infrastructureMessage = cleanText(error.message || "Sending or reporting infrastructure is unavailable.", 300);
