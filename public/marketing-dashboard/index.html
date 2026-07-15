@@ -536,12 +536,13 @@
         const health = state.dashboard?.health || {};
         const brevo = health.brevo || {};
         const sender = health.sender || {};
+        const provider = brevo.provider || sender.provider || "Email provider";
         const unsubscribe = health.unsubscribe || {};
         const sendingDb = health.sending_database || {};
         const reportingDb = health.reporting_database || {};
         const webhook = health.webhook || {};
         const items = [
-          ["Brevo connection", brevo.label || "Checking", brevo.state || "checking", brevo.status_code ? `HTTP ${brevo.status_code}` : "No secrets or API key details are shown."],
+          [`${provider} connection`, brevo.label || "Checking", brevo.state || "checking", brevo.status_code ? `HTTP ${brevo.status_code}` : "No secrets or API key details are shown."],
           ["Sender config", sender.configured ? "Configured" : "Missing", sender.configured ? "configured" : "missing", sender.configured ? `${sender.name} <${sender.email}>` : "Sender email and sender name are required."],
           ["Unsubscribe config", unsubscribe.configured ? "Configured" : "Missing", unsubscribe.configured ? "configured" : "missing", "Public base URL and unsubscribe secret are checked without revealing values."],
           ["Sending DB", sendingDb.available ? "Available" : "Unavailable", sendingDb.available ? "available" : "missing", sendingDb.available ? `Send history records: ${formatNumber(sendingDb.record_count)}` : sendingDb.message || "Migration 011/send history unavailable."],
@@ -555,8 +556,9 @@
       function renderReadiness() {
         const readiness = state.dashboard?.launch_readiness || { checks: {} };
         const checks = readiness.checks || {};
+        const provider = state.dashboard?.health?.brevo?.provider || "Email provider";
         const rows = [
-          ["Brevo authorised", checks.brevo_authorised],
+          [`${provider} authorised`, checks.brevo_authorised],
           ["Sender configured", checks.sender_configured],
           ["Unsubscribe configured", checks.unsubscribe_configured],
           ["Sending infrastructure", checks.sending_infra_available],
