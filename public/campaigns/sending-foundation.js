@@ -71,6 +71,7 @@
   }
   function brevoState() {
     const brevo = state.brevo || {};
+    const provider = brevo.provider || "Email provider";
     const unsubscribeConfigured = Boolean(brevo.unsubscribe_secret_configured && brevo.public_base_url_configured);
     const missing = [];
     if (!brevo.api_key_configured) missing.push("API key");
@@ -78,12 +79,12 @@
     if (!brevo.sender_name) missing.push("sender name");
     if (!unsubscribeConfigured) missing.push("unsubscribe configuration");
     if (state.migrationRequired) missing.push("Migration 011");
-    if (brevo.connectivity === "checking") return { key: "checking", label: "Checking Brevo connection...", detail: "Refreshing sending configuration.", missing, unsubscribeConfigured };
-    if (missing.length) return { key: "not_configured", label: "Brevo is not fully configured", detail: `Missing: ${missing.join(", ")}.`, missing, unsubscribeConfigured };
-    if (brevo.connectivity === "authorised") return { key: "authorised", label: "Brevo connected and authorised", detail: "Sender name and sender email are configured.", missing, unsubscribeConfigured };
-    if (brevo.connectivity === "rejected") return { key: "rejected", label: "Brevo connection rejected", detail: "Check the API key or authorise the current server IP in Brevo.", missing, unsubscribeConfigured };
-    if (brevo.connectivity === "unreachable") return { key: "unreachable", label: "Brevo could not be reached", detail: "Refresh the connection to try again.", missing, unsubscribeConfigured };
-    return { key: "checking", label: "Checking Brevo connection...", detail: "Sending configuration has not loaded yet.", missing, unsubscribeConfigured };
+    if (brevo.connectivity === "checking") return { key: "checking", label: `Checking ${provider} connection...`, detail: "Refreshing sending configuration.", missing, unsubscribeConfigured };
+    if (missing.length) return { key: "not_configured", label: `${provider} is not fully configured`, detail: `Missing: ${missing.join(", ")}.`, missing, unsubscribeConfigured };
+    if (brevo.connectivity === "authorised") return { key: "authorised", label: `${provider} connected and authorised`, detail: "Sender name and sender email are configured.", missing, unsubscribeConfigured };
+    if (brevo.connectivity === "rejected") return { key: "rejected", label: `${provider} connection rejected`, detail: "Check the API key and its sending permissions.", missing, unsubscribeConfigured };
+    if (brevo.connectivity === "unreachable") return { key: "unreachable", label: `${provider} could not be reached`, detail: "Refresh the connection to try again.", missing, unsubscribeConfigured };
+    return { key: "checking", label: `Checking ${provider} connection...`, detail: "Sending configuration has not loaded yet.", missing, unsubscribeConfigured };
   }
   function sendBlockReason(kind) {
     const status = brevoState();
@@ -204,7 +205,7 @@
       <div class="card-header">
         <div>
           <h3>Sending</h3>
-          <p>Brevo test sending and controlled production-batch preparation. No automatic full-database sends.</p>
+          <p>Email-provider test sending and controlled production-batch preparation. No automatic full-database sends.</p>
         </div>
         <button id="refreshSendButton">Refresh Connection</button>
       </div>
@@ -273,7 +274,7 @@
     `;
     $("refreshBrevoInlineButton").addEventListener("click", () => refreshSending().catch((error) => setMessage(error.message, true)));
     $("brevoStatusGrid").innerHTML = [
-      ["Brevo connection", brevo.connectivity || "checking"],
+      [`${brevo.provider || "Email provider"} connection`, brevo.connectivity || "checking"],
       ["Configured", status.missing.length ? "No" : "Yes"],
       ["Sender email", brevo.sender_email_configured ? "Configured" : "Missing"],
       ["Sender name", brevo.sender_name || "Missing"],
@@ -373,7 +374,7 @@
     if (!id) throw new Error("Open a campaign before sending a test.");
     const email = $("testSendEmail").value.trim();
     const result = await sendApi("sendTest", { id, email });
-    setMessage(`Test email accepted by Brevo${result.provider_message_id ? ` (${result.provider_message_id})` : ""}.`);
+    setMessage(`Test email accepted by ${state.brevo?.provider || "the email provider"}${result.provider_message_id ? ` (${result.provider_message_id})` : ""}.`);
     await refreshSending();
   }
   async function prepareSend() {
