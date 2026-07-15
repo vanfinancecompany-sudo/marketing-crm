@@ -29,7 +29,7 @@
     style.id = "campaignUiPolishStyles";
     style.textContent = `
       body { overflow-x:hidden; }
-      .detail-grid { grid-template-columns:minmax(0, 58%) minmax(0, 42%); align-items:start; }
+      .detail-grid { grid-template-columns:minmax(0, 3fr) minmax(320px, 2fr); align-items:start; }
       .detail-grid > * { min-width:0; }
       .detail-grid > .card.detail-stack { position:sticky; top:16px; width:100%; max-width:100%; min-width:0; overflow:hidden; }
       .workflow-steps { display:grid; grid-template-columns:repeat(5, minmax(120px, 1fr)); gap:8px; }
@@ -53,7 +53,7 @@
       .preview-frame.mobile-mode { align-items:flex-start; overflow-x:hidden; }
       #previewFrame { width:100%; max-width:100%; min-height:min(78vh, 900px); }
       #previewFrame.mobile { width:390px; max-width:100%; min-height:820px; }
-      @media (max-width:1040px) {
+      @media (max-width:1200px) {
         .detail-grid { grid-template-columns:1fr; }
         .detail-grid > .card.detail-stack { position:static; }
         .workflow-steps { grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); }
