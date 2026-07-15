@@ -66,7 +66,7 @@ function authorizeWebhook(request) {
 }
 
 function normalizeBrevoEvent(value) {
-  const event = safeText(value, 80).toLowerCase().replace(/[\s-]+/g, "_");
+  const event = safeText(value, 80).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().replace(/[\s-]+/g, "_");
   if (["request", "sent", "accepted"].includes(event)) return "accepted";
   if (event === "delivered") return "delivered";
   if (["opened", "open", "unique_opened", "proxy_open", "unique_proxy_open"].includes(event)) return "opened";
@@ -150,7 +150,7 @@ function normalizeEventPayload(payload = {}) {
   const reason = safeText(payload.reason || payload.code || payload.category || payload.message || payload.error || "", MAX_REASON_LENGTH);
   const eventTimestampRaw = payload.ts_event ?? payload.ts_epoch ?? payload.ts ?? payload.date;
   const eventAt = eventDate(eventTimestampRaw, now);
-  const rawEventId = safeText(payload.event_id || payload.eventId || payload.uuid || payload.id || "", 200);
+  const rawEventId = safeText(payload.event_id || payload.eventId || payload.uuid || "", 200);
   const correlation = extractCorrelation(payload);
   const stableProviderEventId = providerEventId({ rawEventId, providerMessageId, eventType, eventTimestampRaw, email, linkUrl, reason, payload });
   return {
@@ -171,6 +171,7 @@ function normalizeEventPayload(payload = {}) {
     },
     metadata: {
       brevo_event: safeText(payload.event || payload.type || "", 80),
+      brevo_webhook_id: safeText(payload.id, 80),
       subject: safeText(payload.subject, 300),
       tags: correlation.tags,
       has_custom_header: Boolean(correlation.custom),
