@@ -325,12 +325,28 @@ function smtp2goMailbox(email, name = "") {
   return safeName ? `${safeName} <${safeEmail}>` : safeEmail;
 }
 
+const SMTP2GO_CORRELATION_HEADERS = [
+  "X-Marketing-Campaign-Id",
+  "X-Marketing-Send-Id",
+  "X-Marketing-Recipient-Id",
+];
+
+function smtp2goCustomHeaders(headers = {}) {
+  if (!headers || typeof headers !== "object" || Array.isArray(headers)) throw new ApiError(400, "SMTP2GO correlation headers must be an object.");
+  return SMTP2GO_CORRELATION_HEADERS.flatMap((header) => {
+    const value = headers[header];
+    if (value === undefined || value === null || value === "") return [];
+    if (typeof value !== "string") throw new ApiError(400, `${header} must be a plain string ID.`);
+    const scalarId = value.trim();
+    if (!scalarId || !/^[A-Za-z0-9_-]+$/.test(scalarId)) throw new ApiError(400, `${header} must contain a plain scalar ID.`);
+    return [{ header, value: scalarId.slice(0, 255) }];
+  });
+}
+
 async function callSMTP2GO({ to, name, subject, html, text = "", cc = [], bcc = [], replyTo = "", attachments = [], tags = [], headers = {} }) {
   if (!process.env.SMTP2GO_API_KEY) throw new ApiError(400, "SMTP2GO API key is not configured.");
   if (!process.env.SMTP2GO_SENDER_EMAIL || !process.env.SMTP2GO_SENDER_NAME) throw new ApiError(400, "SMTP2GO sender is not configured.");
-  const customHeaders = Object.entries(headers).map(([header, value]) => ({ header, value: String(value) }));
-  if (replyTo) customHeaders.push({ header: "Reply-To", value: String(replyTo) });
-  if (tags.length) customHeaders.push({ header: "X-Marketing-Tags", value: tags.join(",") });
+  const customHeaders = smtp2goCustomHeaders(headers);
   const payload = {
     sender: smtp2goMailbox(process.env.SMTP2GO_SENDER_EMAIL, process.env.SMTP2GO_SENDER_NAME),
     to: [smtp2goMailbox(to, name)],
