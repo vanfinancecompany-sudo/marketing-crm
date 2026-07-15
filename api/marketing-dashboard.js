@@ -498,7 +498,10 @@ async function loadDashboard(supabase, body = {}) {
   let periodEvents = [];
   let periodProductionEvents = [];
   let campaigns = [];
-  let webhook = { configured: Boolean(String(process.env.BREVO_WEBHOOK_SECRET || "").trim()), latest_event_at: null, events_last_24h: 0, events_last_7d: 0, state: "awaiting_first_event" };
+  const webhookProvider = providerConfig.provider;
+  const webhookEventPrefix = webhookProvider === "SMTP2GO" ? "smtp2go:%" : "brevo:%";
+  const webhookSecret = webhookProvider === "SMTP2GO" ? process.env.SMTP2GO_WEBHOOK_SECRET : process.env.BREVO_WEBHOOK_SECRET;
+  let webhook = { provider: webhookProvider, configured: Boolean(String(webhookSecret || "").trim()), latest_event_at: null, events_last_24h: 0, events_last_7d: 0, state: "awaiting_first_event" };
   let infrastructureMessage = "";
   const partials = [];
 
@@ -527,11 +530,11 @@ async function loadDashboard(supabase, body = {}) {
     campaigns = campaignResult.rows;
     partials.push(...campaignResult.partials);
 
-    const latestEvent = await supabase.from("marketing_email_events").select("event_at").order("event_at", { ascending: false }).limit(1).maybeSingle();
-    const last24 = await safeHeadCount(supabase, "marketing_email_events", (query) => query.gte("event_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()));
-    const last7 = await safeHeadCount(supabase, "marketing_email_events", (query) => query.gte("event_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()));
+    const latestEvent = await supabase.from("marketing_email_events").select("event_at").like("provider_event_id", webhookEventPrefix).order("event_at", { ascending: false }).limit(1).maybeSingle();
+    const last24 = await safeHeadCount(supabase, "marketing_email_events", (query) => query.like("provider_event_id", webhookEventPrefix).gte("event_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()));
+    const last7 = await safeHeadCount(supabase, "marketing_email_events", (query) => query.like("provider_event_id", webhookEventPrefix).gte("event_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()));
     const latestEventAt = latestEvent.error ? null : latestEvent.data?.event_at || null;
-    const hasReceivedEvents = Boolean(latestEventAt || (reportingCount.ok && reportingCount.count > 0));
+    const hasReceivedEvents = Boolean(latestEventAt);
     webhook = {
       ...webhook,
       latest_event_at: latestEventAt,
