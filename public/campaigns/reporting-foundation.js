@@ -132,17 +132,21 @@
     const tests = reporting?.tests || {};
     const latestTest = tests.latest_created_at ? `${tests.latest_status || "unknown"} · ${formatDate(tests.latest_completed_at || tests.latest_created_at)}` : "No test sends";
     const cards = [
-      ["Production batches", sends.production_batches || 0, "Completed or attempted batches"],
-      ["Requested", sends.requested || 0, "Production batch recipients requested"],
-      ["Accepted", recipients.accepted || 0, "Production recipients accepted"],
       ["Delivered", recipients.delivered || 0, `${recipients.delivery_rate || 0}% delivery rate`],
-      ["Opened", recipients.opened || 0, `${recipients.open_rate || 0}% open rate`],
+      ["Opens", recipients.opens || recipients.unique_opens || recipients.opened || 0, "All tracked open events"],
+      ["Unique Opens", recipients.unique_opens || recipients.opened || 0, `${recipients.open_rate || 0}% open rate`],
       ["Clicked", recipients.clicked || 0, `${recipients.click_rate || 0}% click rate`],
-      ["Click-to-open", `${recipients.click_to_open_rate || 0}%`, "Unique clicks / unique opens"],
-      ["Bounced / blocked", (recipients.soft_bounced || 0) + (recipients.hard_bounced || 0) + (recipients.blocked || 0), `${recipients.bounce_rate || 0}% bounce rate`],
-      ["Unsubscribed", recipients.unsubscribed || 0, `${recipients.unsubscribe_rate || 0}% unsubscribe rate`],
+      ["Delivery Rate", `${recipients.delivery_rate || 0}%`, "Delivered / accepted recipients"],
+      ["Open Rate", `${recipients.open_rate || 0}%`, "Unique opens / delivered recipients"],
+      ["Click Rate", `${recipients.click_rate || 0}%`, "Unique clicks / delivered recipients"],
+      ["Bounce Rate", `${recipients.bounce_rate || 0}%`, "Soft, hard and blocked recipients"],
+      ["Soft Bounce", recipients.soft_bounced || 0, "Temporary delivery failures"],
+      ["Hard Bounce", recipients.hard_bounced || 0, "Permanent delivery failures"],
+      ["Deferred", recipients.deferred || 0, "Delivery deferred by provider"],
+      ["Blocked", recipients.blocked || 0, "Messages blocked by provider"],
       ["Complaints", recipients.complained || 0, "Spam complaint events"],
-      ["Submission unknown", recipients.submission_unknown || 0, "Needs Brevo reconciliation"],
+      ["Unsubscribes", recipients.unsubscribed || 0, `${recipients.unsubscribe_rate || 0}% unsubscribe rate`],
+      ["Production batches", sends.production_batches || 0, "Completed or attempted batches"],
       ["Test sends", tests.count || 0, latestTest],
     ];
     $("reportingMetrics").innerHTML = cards.map(([label, value, detail]) => `
@@ -208,7 +212,7 @@
     renderRecipients(reporting.recent_recipients || []);
     renderError("");
   }
-  async function refreshReporting() {
+  async function refreshReporting({ quiet = false } = {}) {
     ensurePanel();
     const id = currentCampaignId();
     state.selectedCampaignId = id;
@@ -216,13 +220,18 @@
       $("campaignReportingSection").classList.add("hidden");
       return;
     }
+    if (state.loading) return;
     $("campaignReportingSection").classList.remove("hidden");
     state.loading = true;
-    $("reportingMetrics").innerHTML = `<div class="reporting-empty">Loading campaign reporting...</div>`;
-    const result = await reportingApi("campaignReporting", { id });
-    state.reporting = result.reporting;
-    state.loading = false;
-    renderReporting();
+    if (!quiet) $("reportingMetrics").innerHTML = `<div class="reporting-empty">Loading campaign reporting...</div>`;
+    try {
+      const result = await reportingApi("campaignReporting", { id });
+      if (id !== currentCampaignId()) return;
+      state.reporting = result.reporting;
+      renderReporting();
+    } finally {
+      state.loading = false;
+    }
   }
   function observeCampaignChanges() {
     let last = "";
@@ -238,6 +247,14 @@
         if ($("campaignReportingSection")) $("campaignReportingSection").classList.add("hidden");
       }
     }, 1300);
+    setInterval(() => {
+      if (document.visibilityState !== "visible" || !currentCampaignId()) return;
+      refreshReporting({ quiet: true }).catch((error) => renderError(error.message));
+    }, 30000);
+    window.addEventListener("focus", () => {
+      if (!currentCampaignId()) return;
+      refreshReporting({ quiet: true }).catch((error) => renderError(error.message));
+    });
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", observeCampaignChanges);
   else observeCampaignChanges();
