@@ -168,12 +168,20 @@ function readinessForCampaign(campaign = {}) {
     { id: "audience", label: "Audience selected", passed: Boolean(audience?.calculated_at) },
     { id: "deliverable", label: "Deliverable audience greater than zero", passed: Number(audience?.final_send_count || 0) > 0 },
   ];
-  const draftCheck = { id: "draft", label: "Campaign still Draft", passed: campaign.status === "draft" };
+  const statusCheck = {
+    id: "status",
+    label: campaign.status === "ready"
+      ? "Campaign Ready"
+      : campaign.status === "archived"
+        ? "Campaign Archived"
+        : "Campaign still Draft",
+    passed: campaign.status === "ready",
+  };
   const transitionReady = substantiveChecks.every((check) => check.passed);
   return {
-    ready_to_send: transitionReady,
+    ready_to_send: transitionReady && statusCheck.passed,
     transition_ready: transitionReady,
-    checks: [...substantiveChecks, draftCheck],
+    checks: [...substantiveChecks, statusCheck],
     requires_vehicle: requiresVehicle,
     selected_vehicle_count: selectedVehicleCount,
     estimated_recipients: Number(audience?.final_send_count || 0),
