@@ -7,7 +7,8 @@ const SEND_ROW_CAP = 10000;
 const EVENT_ROW_CAP = 50000;
 const CAMPAIGN_ROW_CAP = 5000;
 const SEND_COLUMNS = "id,campaign_id,send_type,status,requested_count,eligible_count,suppressed_count,sent_count,failed_count,skipped_duplicate_count,created_at,started_at,completed_at,error_summary,metadata";
-const EVENT_COLUMNS = "id,campaign_id,send_id,recipient_id,customer_id,email_normalized,event_type,event_at,link_url,reason,created_at";
+const EVENT_COLUMNS = "id,campaign_id,send_id,recipient_id,customer_id,email_normalized,provider_message_id,event_type,event_at,link_url,reason,metadata,created_at";
+const RECIPIENT_CORRELATION_COLUMNS = "id,send_id,campaign_id,customer_id,provider_message_id";
 const CAMPAIGN_COLUMNS = "id,name,status,campaign_type,template_name,template_snapshot,selected_vehicle_count,metadata,created_at,updated_at,archived_at";
 
 class ApiError extends Error {
@@ -159,6 +160,33 @@ async function safeHeadCount(supabase, table, filter = (query) => query) {
   } catch (error) {
     return { ok: false, count: 0, message: cleanText(error?.message || "Unavailable.", 200) };
   }
+}
+
+function eventMetadataCorrelation(event = {}) {
+  const ids = event.metadata?.correlation_ids || {};
+  return {
+    campaign_id: cleanText(ids.campaign_id, 80),
+    send_id: cleanText(ids.send_id, 80),
+    recipient_id: cleanText(ids.recipient_id, 80),
+  };
+}
+
+function reconcileEventCorrelation(event, recipientsByMessageId = new Map()) {
+  const metadataIds = eventMetadataCorrelation(event);
+  const recipient = event.provider_message_id ? recipientsByMessageId.get(event.provider_message_id) : null;
+  return {
+    ...event,
+    campaign_id: event.campaign_id || metadataIds.campaign_id || recipient?.campaign_id || null,
+    send_id: event.send_id || metadataIds.send_id || recipient?.send_id || null,
+    recipient_id: event.recipient_id || metadataIds.recipient_id || recipient?.id || null,
+    customer_id: event.customer_id || recipient?.customer_id || null,
+  };
+}
+
+function applyWebhookProviderFilter(query, provider) {
+  return provider === "SMTP2GO"
+    ? query.eq("metadata->>source_provider", "smtp2go")
+    : query.like("provider_event_id", "brevo:%");
 }
 
 function dashboardEmailProviderConfig() {
@@ -499,7 +527,6 @@ async function loadDashboard(supabase, body = {}) {
   let periodProductionEvents = [];
   let campaigns = [];
   const webhookProvider = providerConfig.provider;
-  const webhookEventPrefix = webhookProvider === "SMTP2GO" ? "smtp2go:%" : "brevo:%";
   const webhookSecret = webhookProvider === "SMTP2GO" ? process.env.SMTP2GO_WEBHOOK_SECRET : process.env.BREVO_WEBHOOK_SECRET;
   let webhook = { provider: webhookProvider, configured: Boolean(String(webhookSecret || "").trim()), latest_event_at: null, events_last_24h: 0, events_last_7d: 0, state: "awaiting_first_event" };
   let infrastructureMessage = "";
@@ -515,10 +542,32 @@ async function loadDashboard(supabase, body = {}) {
     periodEvents = eventResult.rows;
     if (eventResult.partial) partials.push(eventResult);
 
+    const unresolvedMessageIds = new Set(periodEvents
+      .filter((event) => (!event.campaign_id || !event.send_id || !event.recipient_id) && event.provider_message_id)
+      .map((event) => event.provider_message_id));
+    const recipientCorrelationResult = unresolvedMessageIds.size
+      ? await loadRowsByChunks(
+        supabase,
+        "marketing_email_send_recipients",
+        RECIPIENT_CORRELATION_COLUMNS,
+        "provider_message_id",
+        Array.from(unresolvedMessageIds),
+        (query) => query.eq("send_type", "production"),
+        { dataset: "event recipient correlation", limit: EVENT_ROW_CAP }
+      )
+      : { rows: [], partials: [] };
+    partials.push(...recipientCorrelationResult.partials);
+    const recipientsByMessageId = new Map(recipientCorrelationResult.rows.map((recipient) => [recipient.provider_message_id, recipient]));
+    periodEvents = periodEvents.map((event) => reconcileEventCorrelation(event, recipientsByMessageId));
+
     const eventSendIds = new Set(periodEvents.map((event) => event.send_id).filter(Boolean));
     const eventSendResult = await loadRowsByChunks(supabase, "marketing_email_sends", SEND_COLUMNS, "id", Array.from(eventSendIds), (query) => query, { dataset: "event send lookup", limit: SEND_ROW_CAP });
     partials.push(...eventSendResult.partials);
     const sendsById = new Map(eventSendResult.rows.map((send) => [send.id, send]));
+    periodEvents = periodEvents.map((event) => {
+      const send = sendsById.get(event.send_id);
+      return event.campaign_id || !send?.campaign_id ? event : { ...event, campaign_id: send.campaign_id };
+    });
     periodProductionEvents = periodEvents.filter((event) => sendsById.get(event.send_id)?.send_type === "production");
 
     const campaignIds = new Set([...periodProductionSends.map((send) => send.campaign_id).filter(Boolean), ...periodProductionEvents.map((event) => event.campaign_id).filter(Boolean)]);
@@ -530,9 +579,12 @@ async function loadDashboard(supabase, body = {}) {
     campaigns = campaignResult.rows;
     partials.push(...campaignResult.partials);
 
-    const latestEvent = await supabase.from("marketing_email_events").select("event_at").like("provider_event_id", webhookEventPrefix).order("event_at", { ascending: false }).limit(1).maybeSingle();
-    const last24 = await safeHeadCount(supabase, "marketing_email_events", (query) => query.like("provider_event_id", webhookEventPrefix).gte("event_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()));
-    const last7 = await safeHeadCount(supabase, "marketing_email_events", (query) => query.like("provider_event_id", webhookEventPrefix).gte("event_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()));
+    const latestEvent = await applyWebhookProviderFilter(
+      supabase.from("marketing_email_events").select("event_at"),
+      webhookProvider
+    ).order("event_at", { ascending: false }).limit(1).maybeSingle();
+    const last24 = await safeHeadCount(supabase, "marketing_email_events", (query) => applyWebhookProviderFilter(query, webhookProvider).gte("event_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()));
+    const last7 = await safeHeadCount(supabase, "marketing_email_events", (query) => applyWebhookProviderFilter(query, webhookProvider).gte("event_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()));
     const latestEventAt = latestEvent.error ? null : latestEvent.data?.event_at || null;
     const hasReceivedEvents = Boolean(latestEventAt);
     webhook = {
