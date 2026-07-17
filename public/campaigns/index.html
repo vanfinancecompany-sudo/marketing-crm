@@ -66,11 +66,35 @@
       .empty { border: 1px dashed var(--line); border-radius: 8px; padding: 16px; color: var(--muted); text-align: center; }
       .detail-grid { display: grid; grid-template-columns: minmax(0, 58%) minmax(0, 42%); gap: 16px; align-items: start; }
       .detail-grid > * { min-width: 0; }
-      .campaign-preview-column { position: static; z-index: auto; width: 100%; max-width: 100%; min-width: 0; overflow: hidden; align-self: start; }
+      .campaign-preview-column, .detail-grid > .card.detail-stack.campaign-preview-column {
+        position: static !important;
+        inset: auto !important;
+        transform: none !important;
+        z-index: auto !important;
+        align-self: start;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+      }
       .detail-stack { display: grid; gap: 14px; }
-      #previewFrameShell, .preview-frame { position: static; width: 100%; max-width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: #dfe7f1; padding: 16px; overflow: auto; }
+      #previewFrameShell, .preview-frame {
+        position: static !important;
+        inset: auto !important;
+        transform: none !important;
+        z-index: auto !important;
+        align-self: start;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #dfe7f1;
+        padding: 16px;
+        overflow: auto;
+      }
       .preview-frame.mobile-mode { display: flex; justify-content: center; overflow-x: hidden; padding: 12px; }
-      #previewFrame { position: static; width: 100%; max-width: 100%; min-width: 0; min-height: 720px; border: 0; background: #fff; box-shadow: 0 16px 34px rgba(15, 23, 42, 0.18); }
+      #previewFrame { position: static !important; inset: auto !important; transform: none !important; z-index: auto !important; align-self: start; width: 100%; max-width: 100%; min-width: 0; min-height: 720px; border: 0; background: #fff; box-shadow: 0 16px 34px rgba(15, 23, 42, 0.18); }
       iframe.mobile { width: 375px; max-width: 100%; min-height: 760px; }
       .campaign-preview-column.preview-content-hidden #previewFrameShell, .campaign-preview-column.preview-content-hidden #campaignPreviewModeLabel { display: none; }
       .snapshot-grid, .summary-grid, .audience-counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
@@ -89,7 +113,7 @@
       dialog::backdrop { background: rgba(15, 23, 42, .55); }
       .modal-body { padding: 18px; display: grid; gap: 14px; }
       .modal-footer { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--line); padding: 14px 18px; }
-      @media (max-width: 1040px) { .detail-grid, .filters, .form-grid { grid-template-columns: 1fr; } .campaign-preview-column, #previewFrameShell, #previewFrame { position: static; width: 100%; max-width: 100%; } }
+      @media (max-width: 1040px) { .detail-grid, .filters, .form-grid { grid-template-columns: 1fr; } .campaign-preview-column, .detail-grid > .card.detail-stack.campaign-preview-column, #previewFrameShell, #previewFrame { position: static !important; inset: auto !important; transform: none !important; z-index: auto !important; align-self: start; width: 100%; min-width: 0; max-width: 100%; } }
       @media (max-width: 1080px) { .layout { grid-template-columns: 1fr; } }
       @media (max-width: 820px) { main { padding: 14px; } .topbar, .card-header { display: grid; } .preview-frame { padding: 10px; } iframe.mobile { width: 340px; } }
     </style>
@@ -768,6 +792,6 @@
     <script src="/campaigns/sendgrid-test-control.js"></script>
     <script src="/campaigns/sending-foundation.js"></script>
     <script src="/campaigns/reporting-foundation.js"></script>
-    <script src="/campaigns/ui-preview-polish.js"></script>
+    <script src="/campaigns/ui-preview-polish.js?v=20260717-static-preview"></script>
   </body>
 </html>

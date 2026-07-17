@@ -43,20 +43,28 @@ test("every Preview card, shell, wrapper and frame selector remains normal in-gr
   const page = fs.readFileSync(new URL("../public/campaigns/index.html", import.meta.url), "utf8");
   const polish = fs.readFileSync(new URL("../public/campaigns/ui-preview-polish.js", import.meta.url), "utf8");
   const combined = `${page}\n${polish}`;
-  const selectors = [".campaign-preview-column", "#previewFrameShell", ".preview-frame", ".preview-frame.mobile-mode", "#previewFrame", "#previewFrame.mobile"];
+  const selectors = [".campaign-preview-column", ".detail-grid > .card.detail-stack.campaign-preview-column", "#previewFrameShell", ".preview-frame", ".preview-frame.mobile-mode", "#previewFrame", "#previewFrame.mobile"];
 
   for (const selector of selectors) {
     const declarations = selectorDeclarations(combined, selector);
     assert.ok(declarations.length > 0, `${selector} must have an explicit layout rule`);
     for (const rule of declarations) {
       assert.doesNotMatch(rule, /position\s*:\s*(?:fixed|absolute|sticky)/i, `${selector} must not escape normal flow`);
+      assert.doesNotMatch(rule, /(?:^|;)\s*top\s*:/i, `${selector} must not use a top offset`);
       assert.doesNotMatch(rule, /(?:^|;)\s*right\s*:/i, `${selector} must not use a right offset`);
-      assert.doesNotMatch(rule, /transform\s*:/i, `${selector} must not use transforms`);
+      for (const transform of rule.matchAll(/transform\s*:\s*([^;]+)/gi)) {
+        assert.match(transform[1].trim(), /^none(?:\s*!important)?$/i, `${selector} must not use a positioning transform`);
+      }
       assert.doesNotMatch(rule, /(?:width|max-width|min-width)\s*:[^;]*vw/i, `${selector} must not use viewport width`);
+      for (const zIndex of rule.matchAll(/z-index\s*:\s*([^;]+)/gi)) {
+        assert.match(zIndex[1].trim(), /^auto(?:\s*!important)?$/i, `${selector} must not use an elevated z-index`);
+      }
     }
   }
 
   assert.match(combined, /@media \(max-width:\s*1040px\)[\s\S]*?\.campaign-preview-column[^}]*position:\s*static/);
+  assert.match(combined, /\.detail-grid > \.card\.detail-stack\.campaign-preview-column[^}]*inset:\s*auto[^}]*transform:\s*none[^}]*z-index:\s*auto/);
   assert.match(page, /id="togglePreview"[^>]*>Hide Preview<\/button>/);
   assert.match(page, /classList\.toggle\("preview-content-hidden"\)/);
+  assert.match(page, /ui-preview-polish\.js\?v=20260717-static-preview/);
 });

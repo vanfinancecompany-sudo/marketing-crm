@@ -30,7 +30,7 @@
     style.textContent = `
       .detail-grid { grid-template-columns:minmax(0, 58%) minmax(0, 42%); align-items:start; }
       .detail-grid > * { min-width:0; }
-      .campaign-preview-column { position:static; z-index:auto; width:100%; max-width:100%; min-width:0; overflow:hidden; align-self:start; }
+      .campaign-preview-column, .detail-grid > .card.detail-stack.campaign-preview-column { position:static !important; inset:auto !important; transform:none !important; z-index:auto !important; align-self:start; width:100%; min-width:0; max-width:100%; overflow:hidden; }
       .workflow-steps { display:grid; grid-template-columns:repeat(5, minmax(120px, 1fr)); gap:8px; }
       .workflow-step { border:1px solid var(--line); border-radius:9px; padding:9px 10px; background:#fff; display:flex; align-items:center; gap:8px; font-weight:900; color:#475569; }
       .workflow-step span { width:24px; height:24px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; background:#e2e8f0; color:#334155; font-size:12px; }
@@ -48,13 +48,13 @@
       .collapsible-toggle { min-width:92px; }
       .collapsible-card.is-collapsed .collapsible-body { display:none; }
       .campaign-preview-title { margin:0 0 10px; font-weight:900; color:#334155; }
-      #previewFrameShell, .preview-frame { position:static; width:100%; max-width:100%; min-width:0; min-height:min(82vh, 940px); max-height:none; overflow:auto; }
+      #previewFrameShell, .preview-frame { position:static !important; inset:auto !important; transform:none !important; z-index:auto !important; align-self:start; width:100%; max-width:100%; min-width:0; min-height:min(82vh, 940px); max-height:none; overflow:auto; }
       .preview-frame.mobile-mode { align-items:flex-start; overflow-x:hidden; }
-      #previewFrame { position:static; width:100%; max-width:100%; min-width:0; min-height:min(78vh, 900px); }
+      #previewFrame { position:static !important; inset:auto !important; transform:none !important; z-index:auto !important; align-self:start; width:100%; max-width:100%; min-width:0; min-height:min(78vh, 900px); }
       #previewFrame.mobile { width:390px; max-width:100%; min-height:820px; }
       @media (max-width:1040px) {
         .detail-grid { grid-template-columns:1fr; }
-        .campaign-preview-column, #previewFrameShell, #previewFrame { position:static; width:100%; max-width:100%; }
+        .campaign-preview-column, .detail-grid > .card.detail-stack.campaign-preview-column, #previewFrameShell, #previewFrame { position:static !important; inset:auto !important; transform:none !important; z-index:auto !important; align-self:start; width:100%; min-width:0; max-width:100%; }
         .workflow-steps { grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); }
       }
       @media (max-width:760px) {
