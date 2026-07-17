@@ -207,7 +207,7 @@ test("production workflow retains suppression, duplicate, confirmation and ambig
 test("browser assets contain no provider secret values or server variable names", () => {
   const clientSource = [
     "../public/campaigns/sending-foundation.js",
-    "../public/campaigns/ui-preview-polish.js",
+    "../public/campaigns/ui-preview-polish-v2.js",
     "../public/campaigns/reporting-foundation.js",
     "../public/marketing-dashboard/index.html",
   ].map((path) => fs.readFileSync(new URL(path, import.meta.url), "utf8")).join("\n");

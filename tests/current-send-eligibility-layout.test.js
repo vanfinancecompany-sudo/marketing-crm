@@ -94,7 +94,8 @@ test("Campaign Builder preview stays in its column and becomes static in one-col
   const source = fs.readFileSync(new URL("../public/campaigns/index.html", import.meta.url), "utf8");
   assert.match(source, /campaign-preview-column[^}]*position: static[^}]*z-index: auto/);
   assert.match(source, /@media \(max-width: 1040px\)[^{]*\{[^}]*\.detail-grid[^}]*grid-template-columns: 1fr/);
-  assert.match(source, /campaign-preview-column[^}]*#previewFrameShell[^}]*#previewFrame[^}]*position: static/);
+  assert.match(source, /#previewFrameShell[^}]*position: static/);
+  assert.match(source, /#previewFrame[^}]*position: static/);
   assert.doesNotMatch(source, /campaign-preview-column[^}]*position:\s*(?:fixed|absolute|sticky)/);
   assert.match(source, /id="previewFrameShell"/);
 });

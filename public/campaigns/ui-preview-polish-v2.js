@@ -23,51 +23,6 @@
   function writePrefs(prefs) {
     try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs)); } catch {}
   }
-  function injectStyles() {
-    if ($("campaignUiPolishStyles")) return;
-    const style = document.createElement("style");
-    style.id = "campaignUiPolishStyles";
-    style.textContent = `
-      .detail-grid { grid-template-columns:minmax(0, 58%) minmax(0, 42%); align-items:start; }
-      .detail-grid > * { min-width:0; }
-      .campaign-preview-column, .detail-grid > .card.detail-stack.campaign-preview-column { position:static !important; inset:auto !important; transform:none !important; z-index:auto !important; align-self:start; width:100%; min-width:0; max-width:100%; overflow:hidden; }
-      .workflow-steps { display:grid; grid-template-columns:repeat(5, minmax(120px, 1fr)); gap:8px; }
-      .workflow-step { border:1px solid var(--line); border-radius:9px; padding:9px 10px; background:#fff; display:flex; align-items:center; gap:8px; font-weight:900; color:#475569; }
-      .workflow-step span { width:24px; height:24px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; background:#e2e8f0; color:#334155; font-size:12px; }
-      .workflow-step.complete { border-color:#bbf7d0; background:#f0fdf4; color:#166534; }
-      .workflow-step.complete span { background:var(--green); color:#fff; }
-      .workflow-step.current { border-color:#bfdbfe; background:#eef4ff; color:#1d4ed8; }
-      .workflow-step.current span { background:var(--blue); color:#fff; }
-      .workflow-step.warning { border-color:#fed7aa; background:#fff7ed; color:#9a3412; }
-      .workflow-step.warning span { background:var(--amber); color:#fff; }
-      .workflow-step.blocked { background:#f8fafc; color:#64748b; }
-      .collapsible-card { display:grid; gap:12px; }
-      .collapsible-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
-      .collapsible-title { display:grid; gap:3px; }
-      .collapsible-summary { color:var(--muted); font-size:12px; font-weight:850; }
-      .collapsible-toggle { min-width:92px; }
-      .collapsible-card.is-collapsed .collapsible-body { display:none; }
-      .campaign-preview-title { margin:0 0 10px; font-weight:900; color:#334155; }
-      #previewFrameShell, .preview-frame { position:static !important; inset:auto !important; transform:none !important; z-index:auto !important; align-self:start; width:100%; max-width:100%; min-width:0; min-height:min(82vh, 940px); max-height:none; overflow:auto; }
-      .preview-frame.mobile-mode { align-items:flex-start; overflow-x:hidden; }
-      #previewFrame { position:static !important; inset:auto !important; transform:none !important; z-index:auto !important; align-self:start; width:100%; max-width:100%; min-width:0; min-height:min(78vh, 900px); }
-      #previewFrame.mobile { width:390px; max-width:100%; min-height:820px; }
-      @media (max-width:1040px) {
-        .detail-grid { grid-template-columns:1fr; }
-        .campaign-preview-column, .detail-grid > .card.detail-stack.campaign-preview-column, #previewFrameShell, #previewFrame { position:static !important; inset:auto !important; transform:none !important; z-index:auto !important; align-self:start; width:100%; min-width:0; max-width:100%; }
-        .workflow-steps { grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); }
-      }
-      @media (max-width:760px) {
-        main { padding:12px; }
-        .page-stack { gap:12px; }
-        .workflow-steps { grid-template-columns:1fr; }
-        .collapsible-heading { display:grid; }
-        .toolbar button { white-space:normal; }
-        #previewFrame.mobile { width:340px; }
-      }
-    `;
-    document.head.appendChild(style);
-  }
   function sectionName(section) {
     if (section.id === "campaignSendingSection") return "Sending";
     if (section.querySelector("#detailTitle")) return "Campaign Settings";
@@ -226,7 +181,6 @@
     label.textContent = $("previewFrame")?.classList.contains("mobile") ? "Mobile email preview" : "Desktop email preview";
   }
   function refreshPolish() {
-    injectStyles();
     addWorkflow();
     addPreviewLabel();
     const prefs = readPrefs();
