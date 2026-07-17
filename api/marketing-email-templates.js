@@ -6,6 +6,7 @@ import {
   normalizeRegistrationKey,
   toMarketingVehicleSelectionContract,
 } from "../services/marketingVehicleContract.js";
+import { renderEmailHtml as renderSharedEmailHtml } from "../lib/marketingCampaignTemplateRenderer.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const TEMPLATE_COLUMNS = "id,name,description,category,default_subject,preview_text,header_logo,hero_heading,intro_text,main_body,cta_text,cta_url,footer,brand_colour,company_name,secondary_colour,social_links,master_layout,content_blocks,status,created_by,created_at,updated_at,archived_at";
@@ -950,7 +951,7 @@ async function previewTemplate(supabase, body = {}) {
     preview: {
       subject: replaceTextPlaceholders(values.default_subject, values),
       preview_text: replaceTextPlaceholders(values.preview_text, values),
-      html: renderEmailHtml(values),
+      html: renderSharedEmailHtml(values),
     },
   };
 }
