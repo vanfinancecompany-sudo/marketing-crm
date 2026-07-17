@@ -76,13 +76,16 @@
     const unsubscribeConfigured = Boolean(brevo.unsubscribe_secret_configured && brevo.public_base_url_configured);
     const missing = [];
     if (!brevo.api_key_configured) missing.push("API key");
+    if (brevo.api_key_configured && brevo.api_key_valid === false) missing.push("valid API key format");
     if (!brevo.sender_email_configured) missing.push("sender email");
     if (!brevo.sender_name) missing.push("sender name");
+    if (String(brevo.provider || "").toLowerCase() === "sendgrid" && !brevo.webhook_verification_configured) missing.push("webhook verification");
     if (!unsubscribeConfigured) missing.push("unsubscribe configuration");
     if (state.migrationRequired) missing.push("Migration 011");
     if (brevo.connectivity === "checking") return { key: "checking", label: `Checking ${provider} connection...`, detail: "Refreshing sending configuration.", missing, unsubscribeConfigured };
     if (missing.length) return { key: "not_configured", label: `${provider} is not fully configured`, detail: `Missing: ${missing.join(", ")}.`, missing, unsubscribeConfigured };
     if (brevo.connectivity === "authorised") return { key: "authorised", label: `${provider} connected and authorised`, detail: "Sender name and sender email are configured.", missing, unsubscribeConfigured };
+    if (brevo.connectivity === "configured") return { key: "configured", label: `${provider} configured for Mail Send`, detail: "API key format and sender configuration are present. Acceptance is confirmed by an actual controlled send.", missing, unsubscribeConfigured };
     if (brevo.connectivity === "rejected") return { key: "rejected", label: `${provider} connection rejected`, detail: "Check the API key and its sending permissions.", missing, unsubscribeConfigured };
     if (brevo.connectivity === "unreachable") return { key: "unreachable", label: `${provider} could not be reached`, detail: "Refresh the connection to try again.", missing, unsubscribeConfigured };
     return { key: "checking", label: `Checking ${provider} connection...`, detail: "Sending configuration has not loaded yet.", missing, unsubscribeConfigured };
@@ -90,7 +93,7 @@
   function sendBlockReason(kind) {
     const status = brevoState();
     const brevo = state.brevo || {};
-    if (status.key !== "authorised") return status.label;
+    if (!["authorised", "configured"].includes(status.key)) return status.label;
     if (!brevo.sender_email_configured) return "Sender email is missing.";
     if (!brevo.sender_name) return "Sender name is missing.";
     if (state.migrationRequired) return "Migration 011 is required before sending is available.";
@@ -126,8 +129,8 @@
       .brevo-banner strong { display:block; font-size:15px; }
       .brevo-banner p { margin:3px 0 0; }
       .brevo-dot { width:12px; height:12px; border-radius:999px; background:#94a3b8; box-shadow:0 0 0 4px rgba(148, 163, 184, .15); }
-      .brevo-banner.authorised { border-color:#86efac; background:#f0fdf4; color:#166534; }
-      .brevo-banner.authorised .brevo-dot { background:var(--green); box-shadow:0 0 0 4px rgba(15, 143, 95, .15); }
+      .brevo-banner.authorised, .brevo-banner.configured { border-color:#86efac; background:#f0fdf4; color:#166534; }
+      .brevo-banner.authorised .brevo-dot, .brevo-banner.configured .brevo-dot { background:var(--green); box-shadow:0 0 0 4px rgba(15, 143, 95, .15); }
       .brevo-banner.rejected, .brevo-banner.not_configured { border-color:#fecaca; background:#fff7f7; color:#991b1b; }
       .brevo-banner.rejected .brevo-dot, .brevo-banner.not_configured .brevo-dot { background:var(--red); box-shadow:0 0 0 4px rgba(194, 65, 59, .15); }
       .brevo-banner.unreachable, .brevo-banner.checking { border-color:#fed7aa; background:#fff7ed; color:#9a3412; }
@@ -249,8 +252,8 @@
       </section>
       <div class="send-history">
         <table>
-          <thead><tr><th>Type</th><th>Status</th><th>Requested</th><th>Accepted</th><th>Failed</th><th>Duplicates</th><th>Created</th><th>Provider response</th></tr></thead>
-          <tbody id="sendHistoryRows"><tr><td colspan="8">No send history loaded.</td></tr></tbody>
+          <thead><tr><th>Type</th><th>Provider</th><th>Status</th><th>Requested</th><th>Accepted</th><th>Failed</th><th>Duplicates</th><th>Created</th><th>Provider response</th></tr></thead>
+          <tbody id="sendHistoryRows"><tr><td colspan="9">No send history loaded.</td></tr></tbody>
         </table>
       </div>
     `;
@@ -290,10 +293,17 @@
     `;
     $("refreshBrevoInlineButton").addEventListener("click", () => refreshSending().catch((error) => setMessage(error.message, true)));
     $("brevoStatusGrid").innerHTML = [
-      [`${brevo.provider || "Email provider"} connection`, brevo.connectivity || "checking"],
-      ["Configured", status.missing.length ? "No" : "Yes"],
-      ["Sender email", brevo.sender_email_configured ? "Configured" : "Missing"],
+      ["Selected provider", brevo.provider || "Email provider"],
+      ["Connection", brevo.connectivity || "checking"],
+      ["API key configured", brevo.api_key_configured ? "Yes" : "No"],
+      ...(String(brevo.provider || "").toLowerCase() === "sendgrid"
+        ? [["API key format valid", brevo.api_key_valid ? "Yes" : "No"]]
+        : []),
+      ["Sender email configured", brevo.sender_email_configured ? "Yes" : "No"],
       ["Sender name", brevo.sender_name || "Missing"],
+      ...(String(brevo.provider || "").toLowerCase() === "sendgrid"
+        ? [["Webhook verification configured", brevo.webhook_verification_configured ? "Yes" : "No"]]
+        : []),
       ["Unsubscribe", status.unsubscribeConfigured ? "Configured" : "Missing"],
     ].map(([label, value]) => `<div class="send-item"><strong>${escapeHtml(label)}</strong>${escapeHtml(value)}</div>`).join("");
     renderControlStates();
@@ -334,16 +344,17 @@
   function renderHistory() {
     const rows = state.history || [];
     if (state.migrationRequired) {
-      $("sendHistoryRows").innerHTML = `<tr><td colspan="8">Migration 011 is required before send history is available.</td></tr>`;
+      $("sendHistoryRows").innerHTML = `<tr><td colspan="9">Migration 011 is required before send history is available.</td></tr>`;
       return;
     }
     if (!rows.length) {
-      $("sendHistoryRows").innerHTML = `<tr><td colspan="8">No test or production email has been sent for this campaign.</td></tr>`;
+      $("sendHistoryRows").innerHTML = `<tr><td colspan="9">No test or production email has been sent for this campaign.</td></tr>`;
       return;
     }
     $("sendHistoryRows").innerHTML = rows.map((send) => `
       <tr>
         <td>${escapeHtml(send.send_type)}</td>
+        <td>${escapeHtml(send.metadata?.email_provider || send.provider || "-")}</td>
         <td>${statusBadge(send.status)}</td>
         <td>${fmt.format(send.requested_count || 0)}</td>
         <td>${fmt.format(send.sent_count || 0)}</td>
@@ -371,10 +382,10 @@
     renderBrevoStatus();
     renderPreparation();
     const [brevoResult, historyResult] = await Promise.all([
-      sendApi("brevoStatus"),
+      sendApi("providerStatus"),
       sendApi("sendHistory", { id }),
     ]);
-    state.brevo = brevoResult.brevo;
+    state.brevo = brevoResult.provider_status || brevoResult.brevo;
     state.history = historyResult.sends || [];
     state.progress = historyResult.progress || null;
     state.migrationRequired = Boolean(historyResult.migration_required);

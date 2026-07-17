@@ -1,11 +1,29 @@
 import crypto from "node:crypto";
+import {
+  createCurrentSendEligibilityState,
+  evaluateCurrentSendEligibility,
+  loadCurrentSendProcessedIdentities,
+  loadPermanentCurrentSendSuppressions,
+  normalizeCurrentSendCustomerId,
+  normalizeCurrentSendEmail,
+} from "../lib/marketingCurrentSendEligibility.js";
 import { createClient } from "@supabase/supabase-js";
 import {
   CampaignValidationError,
   cleanText,
   renderCampaignPreview,
 } from "../lib/marketingEmailTemplateRenderer.js";
-import { campaignRecipientIdentitySets } from "../lib/customerDatabaseCleanse.js";
+import {
+  SendGridProviderError,
+  sendSendGridEmail,
+} from "../lib/emailProviders/sendgrid.js";
+import {
+  activeEmailProvider,
+  emailProviderConfig,
+  smtp2goSelected,
+} from "../lib/emailProviders/marketingProvider.js";
+
+export { activeEmailProvider, emailProviderConfig, smtp2goSelected } from "../lib/emailProviders/marketingProvider.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const TEMPLATE_CAMPAIGN_SOURCE = "template_campaign_foundation";
@@ -19,7 +37,6 @@ const PAGE_SIZE = 1000;
 const MAX_PRODUCTION_BATCH_SIZE = 500;
 const PREPARE_TOKEN_TTL_MS = 10 * 60 * 1000;
 const TEST_COOLDOWN_MS = 60 * 1000;
-const SUCCESSFUL_PRODUCTION_STATUSES = ["pending", "accepted", "sent", "delivered", "opened", "clicked", "submission_unknown"];
 
 class ApiError extends Error {
   constructor(statusCode, message) {
@@ -117,12 +134,11 @@ function validateEmail(value, label = "Email address") {
 }
 
 function safeRecipientEmail(value) {
-  const email = normalizeEmail(value);
-  return email && email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "";
+  return normalizeCurrentSendEmail(value);
 }
 
 function normalizeCustomerId(value) {
-  return cleanText(value, 80).toUpperCase();
+  return normalizeCurrentSendCustomerId(value);
 }
 
 function hashValue(value) {
@@ -179,7 +195,6 @@ function recentlyImportedIso() {
 }
 
 function applyAudienceFilters(query, rules) {
-  query = query.eq("lifecycle_status", "active").eq("email_ready", true);
   if (rules.pipeline !== "all") query = query.eq("pipeline", rules.pipeline);
   if (rules.mode === "recently_imported") query = query.gte("created_at", recentlyImportedIso());
   if (rules.mode === "manual_customer_ids") query = query.in("customer_id", rules.manual_customer_ids);
@@ -228,68 +243,64 @@ function renderFrozenCampaign(campaign = {}, options = {}) {
   };
 }
 
-function requireProductionSendConfig() {
+function requireProductionSendConfig(provider = activeEmailProvider()) {
+  const config = emailProviderConfig(provider);
   const missing = [];
-  if (activeEmailProvider() === "smtp2go") {
+  if (provider === "smtp2go") {
     if (!process.env.SMTP2GO_API_KEY) missing.push("SMTP2GO_API_KEY");
     if (!process.env.SMTP2GO_SENDER_EMAIL) missing.push("SMTP2GO_SENDER_EMAIL");
     if (!process.env.SMTP2GO_SENDER_NAME) missing.push("SMTP2GO_SENDER_NAME");
-  } else {
+  } else if (provider === "brevo") {
     if (!process.env.BREVO_API_KEY) missing.push("BREVO_API_KEY");
     if (!process.env.BREVO_SENDER_EMAIL) missing.push("BREVO_SENDER_EMAIL");
     if (!process.env.BREVO_SENDER_NAME) missing.push("BREVO_SENDER_NAME");
+  } else {
+    if (!config.apiKey) missing.push("SENDGRID_API_KEY");
+    if (!config.senderEmail) missing.push("SendGrid verified sender email");
+    if (!config.senderName) missing.push("SendGrid sender name");
+    if (!config.webhookVerificationConfigured) missing.push("SENDGRID_WEBHOOK_VERIFICATION_KEY");
   }
   if (!process.env.MARKETING_PUBLIC_BASE_URL) missing.push("MARKETING_PUBLIC_BASE_URL");
   if (!process.env.MARKETING_UNSUBSCRIBE_TOKEN_SECRET) missing.push("MARKETING_UNSUBSCRIBE_TOKEN_SECRET");
   if (missing.length) throw new ApiError(400, `Production sending is not configured. Missing: ${missing.join(", ")}.`);
 }
 
-function smtp2goSelected() {
-  return Boolean(process.env.SMTP2GO_API_KEY || process.env.SMTP2GO_SENDER_EMAIL || process.env.SMTP2GO_SENDER_NAME);
-}
-
-function activeEmailProvider() {
-  return smtp2goSelected() ? "smtp2go" : "brevo";
-}
-
-function emailProviderConfig() {
-  const smtp2go = activeEmailProvider() === "smtp2go";
-  return {
-    provider: smtp2go ? "SMTP2GO" : "Brevo",
-    apiKey: smtp2go ? process.env.SMTP2GO_API_KEY : process.env.BREVO_API_KEY,
-    senderEmail: smtp2go ? process.env.SMTP2GO_SENDER_EMAIL : process.env.BREVO_SENDER_EMAIL,
-    senderName: smtp2go ? process.env.SMTP2GO_SENDER_NAME : process.env.BREVO_SENDER_NAME,
-  };
-}
-
-function emailProviderConfigStatus() {
-  const config = emailProviderConfig();
+function emailProviderConfigStatus(provider = activeEmailProvider(), environment = process.env) {
+  const config = emailProviderConfig(provider, environment);
   return {
     provider: config.provider,
     configured: Boolean(config.apiKey && config.senderEmail && config.senderName),
     api_key_configured: Boolean(config.apiKey),
+    api_key_valid: config.id === "sendgrid" ? config.apiKeyFormatValid : Boolean(config.apiKey),
     sender_email_configured: Boolean(config.senderEmail),
     sender_name: config.senderName || "",
+    webhook_verification_configured: config.webhookVerificationConfigured,
     public_base_url_configured: Boolean(process.env.MARKETING_PUBLIC_BASE_URL),
     unsubscribe_secret_configured: Boolean(process.env.MARKETING_UNSUBSCRIBE_TOKEN_SECRET),
   };
 }
 
-async function callBrevoEmail({ to, name, subject, html, tags = [], headers = {} }) {
-  if (!process.env.BREVO_API_KEY) throw new ApiError(400, "Brevo API key is not configured.");
-  if (!process.env.BREVO_SENDER_EMAIL || !process.env.BREVO_SENDER_NAME) throw new ApiError(400, "Brevo sender is not configured.");
+function databaseSendProvider(provider) {
+  return provider === "sendgrid" ? "sendgrid" : "brevo";
+}
+
+async function callBrevoEmail({ to, name, subject, html, tags = [], headers = {} }, options = {}) {
+  const environment = options.environment || process.env;
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  if (!environment.BREVO_API_KEY) throw new ApiError(400, "Brevo API key is not configured.");
+  if (!environment.BREVO_SENDER_EMAIL || !environment.BREVO_SENDER_NAME) throw new ApiError(400, "Brevo sender is not configured.");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+    const response = await fetchImpl("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "api-key": process.env.BREVO_API_KEY,
+        "api-key": environment.BREVO_API_KEY,
       },
       signal: controller.signal,
       body: JSON.stringify({
-        sender: { email: process.env.BREVO_SENDER_EMAIL, name: process.env.BREVO_SENDER_NAME },
+        sender: { email: environment.BREVO_SENDER_EMAIL, name: environment.BREVO_SENDER_NAME },
         to: [{ email: to, name }],
         subject,
         htmlContent: html,
@@ -345,12 +356,14 @@ function smtp2goCustomHeaders(headers = {}) {
   });
 }
 
-async function callSMTP2GO({ to, name, subject, html, text = "", cc = [], bcc = [], replyTo = "", attachments = [], tags = [], headers = {} }) {
-  if (!process.env.SMTP2GO_API_KEY) throw new ApiError(400, "SMTP2GO API key is not configured.");
-  if (!process.env.SMTP2GO_SENDER_EMAIL || !process.env.SMTP2GO_SENDER_NAME) throw new ApiError(400, "SMTP2GO sender is not configured.");
+async function callSMTP2GO({ to, name, subject, html, text = "", cc = [], bcc = [], replyTo = "", attachments = [], tags = [], headers = {} }, options = {}) {
+  const environment = options.environment || process.env;
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  if (!environment.SMTP2GO_API_KEY) throw new ApiError(400, "SMTP2GO API key is not configured.");
+  if (!environment.SMTP2GO_SENDER_EMAIL || !environment.SMTP2GO_SENDER_NAME) throw new ApiError(400, "SMTP2GO sender is not configured.");
   const customHeaders = smtp2goCustomHeaders(headers);
   const payload = {
-    sender: smtp2goMailbox(process.env.SMTP2GO_SENDER_EMAIL, process.env.SMTP2GO_SENDER_NAME),
+    sender: smtp2goMailbox(environment.SMTP2GO_SENDER_EMAIL, environment.SMTP2GO_SENDER_NAME),
     to: [smtp2goMailbox(to, name)],
     subject,
     html_body: html,
@@ -363,11 +376,11 @@ async function callSMTP2GO({ to, name, subject, html, text = "", cc = [], bcc = 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch("https://api.smtp2go.com/v3/email/send", {
+    const response = await fetchImpl("https://api.smtp2go.com/v3/email/send", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Smtp2go-Api-Key": process.env.SMTP2GO_API_KEY,
+        "X-Smtp2go-Api-Key": environment.SMTP2GO_API_KEY,
       },
       signal: controller.signal,
       body: JSON.stringify(payload),
@@ -399,8 +412,39 @@ async function callSMTP2GO({ to, name, subject, html, text = "", cc = [], bcc = 
   }
 }
 
-async function callEmailProvider(payload) {
-  return activeEmailProvider() === "smtp2go" ? callSMTP2GO(payload) : callBrevoEmail(payload);
+function sendGridCustomArguments(payload = {}) {
+  const headers = payload.headers || {};
+  return {
+    marketing_campaign_id: headers["X-Marketing-Campaign-Id"] || "",
+    marketing_send_id: headers["X-Marketing-Send-Id"] || "",
+    marketing_recipient_id: headers["X-Marketing-Recipient-Id"] || "",
+    marketing_send_type: payload.sendType || "",
+  };
+}
+
+export async function callEmailProvider(payload, options = {}) {
+  const environment = options.environment || process.env;
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const provider = options.provider || activeEmailProvider(environment);
+  if (provider === "smtp2go") return callSMTP2GO(payload, { environment, fetchImpl });
+  if (provider === "brevo") return callBrevoEmail(payload, { environment, fetchImpl });
+  if (provider === "sendgrid") {
+    const config = emailProviderConfig(provider, environment);
+    return sendSendGridEmail({
+      apiKey: config.apiKey,
+      to: payload.to,
+      toName: payload.name,
+      subject: payload.subject,
+      html: payload.html,
+      customArgs: sendGridCustomArguments(payload),
+      headers: payload.headers,
+      categories: payload.tags,
+      fromEmail: config.senderEmail,
+      fromName: config.senderName,
+      fetchImpl,
+    });
+  }
+  throw new ApiError(400, "Unsupported marketing email provider.");
 }
 
 function unsubscribePayload({ customerId, email, campaignId, sendId, recipientId }) {
@@ -422,43 +466,8 @@ function publicUnsubscribeUrl(payload) {
   return `${base}/api/marketing-unsubscribe?token=${encodeURIComponent(signUnsubscribeToken(payload))}`;
 }
 
-async function loadAlreadySentIdentities(supabase, campaignId) {
-  const rows = [];
-  let from = 0;
-  while (true) {
-    const result = await supabase
-      .from("marketing_email_send_recipients")
-      .select("customer_id,email")
-      .eq("campaign_id", campaignId)
-      .eq("send_type", "production")
-      .in("status", SUCCESSFUL_PRODUCTION_STATUSES)
-      .range(from, from + PAGE_SIZE - 1);
-    if (result.error) {
-      if (isMissingSendInfrastructure(result.error)) return { customerIds: new Set(), emails: new Set() };
-      throw new Error(result.error.message || "Could not inspect previous sends.");
-    }
-    rows.push(...(result.data || []));
-    if (!result.data || result.data.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-  return campaignRecipientIdentitySets(rows);
-}
-
 async function loadPermanentSuppressedEmails(supabase, values = []) {
-  const emails = [...new Set(values.map(safeRecipientEmail).filter(Boolean))];
-  const suppressed = new Set();
-  for (let index = 0; index < emails.length; index += 250) {
-    const result = await supabase
-      .from("marketing_suppression_identities")
-      .select("email_normalized")
-      .in("email_normalized", emails.slice(index, index + 250));
-    assertSupabase(result, "Could not check permanent email suppressions.");
-    (result.data || []).forEach((row) => {
-      const email = safeRecipientEmail(row.email_normalized);
-      if (email) suppressed.add(email);
-    });
-  }
-  return suppressed;
+  return loadPermanentCurrentSendSuppressions(supabase, values, assertSupabase);
 }
 
 async function loadExportedEmailContactIds(supabase) {
@@ -497,10 +506,9 @@ async function loadExportedEmailContactIds(supabase) {
 
 async function resolveRecipients(supabase, campaign, options = {}) {
   const rules = campaignAudienceRules(campaign);
-  const alreadySent = await loadAlreadySentIdentities(supabase, campaign.id);
+  const alreadySent = options.processed || await loadCurrentSendProcessedIdentities(supabase, campaign.id, assertSupabase);
   const exportedEmailIds = rules.mode === "never_emailed" ? await loadExportedEmailContactIds(supabase) : new Set();
-  const byEmail = new Set();
-  const byCustomerId = new Set();
+  const eligibilityState = createCurrentSendEligibilityState(alreadySent);
   const recipients = [];
   let totalMatching = 0;
   let suppressed = 0;
@@ -526,17 +534,14 @@ async function resolveRecipients(supabase, campaign, options = {}) {
       const customerId = normalizeCustomerId(row.customer_id);
       if (rules.mode === "never_emailed" && exportedEmailIds.has(customerId)) continue;
       totalMatching += 1;
-      const email = safeRecipientEmail(row.email_normalized || row.email);
-      if (!row.email_ready || !email) {
-        suppressed += 1;
-        invalidEmail += 1;
+      const decision = evaluateCurrentSendEligibility(row, { state: eligibilityState, permanentlySuppressedEmails: permanentlySuppressed });
+      const email = decision.email;
+      if (!decision.eligible) {
+        if (decision.reason === "invalid_email") invalidEmail += 1;
+        if (["inactive", "invalid_email", "suppressed"].includes(decision.reason)) suppressed += 1;
+        else skippedDuplicate += 1;
         continue;
       }
-      if (emailSuppressed(row) || permanentlySuppressed.has(email)) { suppressed += 1; continue; }
-      if (alreadySent.customerIds.has(customerId) || alreadySent.emails.has(email)) { skippedDuplicate += 1; continue; }
-      if (byCustomerId.has(customerId) || byEmail.has(email)) { skippedDuplicate += 1; continue; }
-      byCustomerId.add(customerId);
-      byEmail.add(email);
       if (!options.limit || recipients.length < options.limit) {
         recipients.push({
           id: row.id,
@@ -553,6 +558,7 @@ async function resolveRecipients(supabase, campaign, options = {}) {
   }
   return {
     rules,
+    processed: alreadySent,
     recipients,
     counts: {
       matching_count: totalMatching,
@@ -565,21 +571,43 @@ async function resolveRecipients(supabase, campaign, options = {}) {
   };
 }
 
-async function brevoStatus() {
-  const status = emailProviderConfigStatus();
-  const provider = activeEmailProvider();
+export async function providerStatus(environment = process.env, fetchImpl = globalThis.fetch) {
+  const provider = activeEmailProvider(environment);
+  const status = emailProviderConfigStatus(provider, environment);
+  const config = emailProviderConfig(provider, environment);
   let connectivity = "not_configured";
   let message = `${status.provider} is not fully configured.`;
+  if (provider === "sendgrid") {
+    const mailSendConfigured = status.api_key_valid && status.sender_email_configured && Boolean(status.sender_name);
+    connectivity = mailSendConfigured ? "configured" : "not_configured";
+    message = mailSendConfigured
+      ? "Configured for Mail Send. Provider acceptance is confirmed only by an actual controlled send."
+      : status.api_key_configured && !status.api_key_valid
+        ? "SendGrid API key format is not valid."
+        : "SendGrid Mail Send configuration is incomplete.";
+    const safeStatus = { ...status, connectivity, message };
+    return { provider_status: safeStatus, brevo: safeStatus };
+  }
   if (status.api_key_configured) {
+    const request = provider === "smtp2go"
+      ? {
+          url: "https://api.smtp2go.com/v3/api_keys/permissions",
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Smtp2go-Api-Key": config.apiKey },
+          body: "{}",
+        }
+      : {
+            url: "https://api.brevo.com/v3/account",
+            method: "GET",
+            headers: { "api-key": config.apiKey },
+          };
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10000);
-      const response = await fetch(provider === "smtp2go" ? "https://api.smtp2go.com/v3/api_keys/permissions" : "https://api.brevo.com/v3/account", {
-        method: provider === "smtp2go" ? "POST" : "GET",
-        headers: provider === "smtp2go"
-          ? { "Content-Type": "application/json", "X-Smtp2go-Api-Key": process.env.SMTP2GO_API_KEY }
-          : { "api-key": process.env.BREVO_API_KEY },
-        body: provider === "smtp2go" ? "{}" : undefined,
+      const response = await fetchImpl(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body,
         signal: controller.signal,
       });
       clearTimeout(timeout);
@@ -590,20 +618,15 @@ async function brevoStatus() {
       message = `Could not reach ${status.provider} configuration endpoint.`;
     }
   }
-  return { brevo: { ...status, connectivity, message } };
+  const safeStatus = { ...status, connectivity, message };
+  return { provider_status: safeStatus, brevo: safeStatus };
 }
 
 async function getCampaignProgress(supabase, campaign, sends = []) {
-  const processedResult = assertSupabase(
-    await supabase
-      .from("marketing_email_send_recipients")
-      .select("id", { count: "exact", head: true })
-      .eq("campaign_id", campaign.id)
-      .eq("send_type", "production"),
-    "Could not count processed campaign recipients."
-  );
-  const totalAudience = Number(campaign.audience_snapshot?.final_send_count || 0);
-  const alreadyProcessed = Number(processedResult.count || 0);
+  const resolved = await resolveRecipients(supabase, campaign);
+  const alreadyProcessed = resolved.processed.uniqueRecipientCount;
+  const eligibleRemaining = resolved.counts.final_eligible_count;
+  const totalAudience = alreadyProcessed + eligibleRemaining;
   const lastBatch = sends.find((send) => send.send_type === "production" && ["sending", "completed", "partially_failed", "failed"].includes(send.status)) || null;
   let lastBatchSummary = null;
 
@@ -630,7 +653,7 @@ async function getCampaignProgress(supabase, campaign, sends = []) {
   return {
     total_audience: totalAudience,
     already_processed: alreadyProcessed,
-    eligible_remaining: Math.max(0, totalAudience - alreadyProcessed),
+    eligible_remaining: eligibleRemaining,
     progress_percent: totalAudience > 0 ? Math.min(100, Math.round((alreadyProcessed / totalAudience) * 100)) : 0,
     last_batch: lastBatchSummary,
   };
@@ -673,12 +696,14 @@ async function sendTest(supabase, body = {}) {
     if (!isMissingSendInfrastructure(error)) throw error;
     throw new ApiError(400, "Email send migration has not been applied yet.");
   }
+  const selectedProvider = activeEmailProvider();
   const rendered = renderFrozenCampaign(campaign, { test: true });
   const now = new Date().toISOString();
   const { data: send } = assertSupabase(
     await supabase.from("marketing_email_sends").insert({
       campaign_id: campaign.id,
       send_type: "test",
+      provider: databaseSendProvider(selectedProvider),
       status: "sending",
       requested_count: 1,
       eligible_count: 1,
@@ -691,9 +716,21 @@ async function sendTest(supabase, body = {}) {
       frozen_subject: rendered.subject,
       frozen_preview_text: rendered.preview_text,
       frozen_html_hash: rendered.html_hash,
-      metadata: { test_recipient_domain: recipientEmail.split("@")[1] || "", email_provider: activeEmailProvider() },
+      metadata: { test_recipient_domain: recipientEmail.split("@")[1] || "", email_provider: selectedProvider },
     }).select(SEND_COLUMNS).single(),
     "Could not create test-send audit record."
+  );
+  const { data: recipientRecord } = assertSupabase(
+    await supabase.from("marketing_email_send_recipients").insert({
+      send_id: send.id,
+      campaign_id: campaign.id,
+      send_type: "test",
+      customer_id: null,
+      email: recipientEmail,
+      status: "pending",
+      metadata: { test: true, email_provider: selectedProvider },
+    }).select(RECIPIENT_COLUMNS).single(),
+    "Could not create test recipient audit record."
   );
   let provider;
   try {
@@ -703,29 +740,34 @@ async function sendTest(supabase, body = {}) {
       subject: rendered.subject,
       html: rendered.html,
       tags: ["marketing-crm", "test", campaign.id],
-      headers: { "X-Marketing-Campaign-Id": campaign.id, "X-Marketing-Send-Id": send.id },
-    });
+      sendType: "test",
+      headers: {
+        "X-Marketing-Campaign-Id": campaign.id,
+        "X-Marketing-Send-Id": send.id,
+        "X-Marketing-Recipient-Id": recipientRecord.id,
+      },
+    }, { provider: selectedProvider });
     const completedAt = new Date().toISOString();
     await supabase.from("marketing_email_sends").update({ status: "completed", sent_count: 1, completed_at: completedAt }).eq("id", send.id);
-    await supabase.from("marketing_email_send_recipients").insert({
-      send_id: send.id,
-      campaign_id: campaign.id,
-      send_type: "test",
-      customer_id: null,
-      email: recipientEmail,
+    await supabase.from("marketing_email_send_recipients").update({
       status: "accepted",
       provider_message_id: provider.messageId || null,
       first_sent_at: completedAt,
-      metadata: { test: true, email_provider: activeEmailProvider() },
-    });
+      metadata: { test: true, email_provider: selectedProvider, provider_response: provider.response || {} },
+    }).eq("id", recipientRecord.id);
     return { send: { ...send, status: "completed", sent_count: 1, completed_at: completedAt }, provider_message_id: provider.messageId || "" };
   } catch (error) {
+    await supabase.from("marketing_email_send_recipients").update({
+      status: error?.ambiguous ? "submission_unknown" : "failed",
+      failure_reason: cleanText(error.message, 1000),
+      last_event_at: new Date().toISOString(),
+    }).eq("id", recipientRecord.id);
     await supabase.from("marketing_email_sends").update({ status: "failed", failed_count: 1, completed_at: new Date().toISOString(), error_summary: error.message }).eq("id", send.id);
     throw error;
   }
 }
 
-function requestedBatchSize(value) {
+export function requestedBatchSize(value) {
   const size = Number(value || 25);
   if (!Number.isInteger(size) || size < 1 || size > MAX_PRODUCTION_BATCH_SIZE) {
     throw new ApiError(400, `Batch size must be between 1 and ${MAX_PRODUCTION_BATCH_SIZE}.`);
@@ -744,7 +786,8 @@ async function prepareProductionSend(supabase, body = {}) {
   const campaign = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
   if (campaign.status !== "ready") throw new ApiError(400, "Only Ready campaigns can prepare a production send.");
   if (campaign.status === "archived") throw new ApiError(400, "Archived campaigns cannot send.");
-  requireProductionSendConfig();
+  const selectedProvider = activeEmailProvider();
+  requireProductionSendConfig(selectedProvider);
   const batchSize = requestedBatchSize(body.batch_size || body.batchSize);
   const resolved = await resolveRecipients(supabase, campaign);
   if (resolved.counts.final_eligible_count <= 0) throw new ApiError(400, "No eligible recipients remain for this campaign.");
@@ -757,6 +800,7 @@ async function prepareProductionSend(supabase, body = {}) {
       await supabase.from("marketing_email_sends").insert({
         campaign_id: campaign.id,
         send_type: "production",
+        provider: databaseSendProvider(selectedProvider),
         status: "preparing",
         requested_count: selectedCount,
         eligible_count: resolved.counts.final_eligible_count,
@@ -776,7 +820,7 @@ async function prepareProductionSend(supabase, body = {}) {
           invalid_email_count: resolved.counts.invalid_email_count,
           proposed_batch_size: selectedCount,
           sender_email_configured: emailProviderConfigStatus().sender_email_configured,
-          email_provider: activeEmailProvider(),
+          email_provider: selectedProvider,
         },
       }).select(SEND_COLUMNS).single(),
       "Could not create production-send preparation."
@@ -822,12 +866,15 @@ async function confirmProductionSend(supabase, body = {}) {
   const phrase = cleanText(body.confirmation_phrase || body.confirmationPhrase || "", 80);
   const requestedLimit = requestedBatchSize(body.batch_size || body.batchSize);
   if (!sendId || !token) throw new ApiError(400, "Confirmation token is required.");
-  requireProductionSendConfig();
   const { data: send } = assertSupabase(
     await supabase.from("marketing_email_sends").select(SEND_COLUMNS).eq("id", sendId).maybeSingle(),
     "Could not load prepared send."
   );
   if (!send) throw new ApiError(404, "Prepared send was not found.");
+  const selectedProvider = activeEmailProvider();
+  const preparedProvider = String(send.metadata?.email_provider || send.provider || "brevo").toLowerCase();
+  if (preparedProvider !== selectedProvider) throw new ApiError(409, "Email provider changed after preparation. Prepare the send again.");
+  requireProductionSendConfig(preparedProvider);
   if (send.status !== "preparing") throw new ApiError(409, "This send is no longer waiting for confirmation.");
   if (send.confirmation_token_hash !== tokenHash(token)) throw new ApiError(409, "Confirmation token is invalid or has already been used.");
   const expiresAt = new Date(send.metadata?.token_expires_at || 0).getTime();
@@ -867,7 +914,7 @@ async function confirmProductionSend(supabase, body = {}) {
       customer_id: recipient.customer_id,
       email: recipient.email,
       status: "pending",
-      metadata: { name: recipient.name, email_provider: activeEmailProvider() },
+      metadata: { name: recipient.name, email_provider: preparedProvider },
     }).select(RECIPIENT_COLUMNS).maybeSingle();
     if (inserted.error) {
       const message = String(inserted.error.message || "").toLowerCase();
@@ -895,18 +942,19 @@ async function confirmProductionSend(supabase, body = {}) {
         subject: renderedBase.subject,
         html,
         tags: ["marketing-crm", "production", campaign.id],
+        sendType: "production",
         headers: {
           "List-Unsubscribe": `<${unsubscribeUrl}>`,
           "X-Marketing-Campaign-Id": campaign.id,
           "X-Marketing-Send-Id": send.id,
           "X-Marketing-Recipient-Id": recipientRecord.id,
         },
-      });
+      }, { provider: preparedProvider });
       await supabase.from("marketing_email_send_recipients").update({
         status: "accepted",
         provider_message_id: provider.messageId || null,
         first_sent_at: new Date().toISOString(),
-        metadata: { name: recipient.name, email_provider: activeEmailProvider(), provider_response: provider.response || {} },
+        metadata: { name: recipient.name, email_provider: preparedProvider, provider_response: provider.response || {} },
       }).eq("id", recipientRecord.id);
       sentCount += 1;
     } catch (error) {
@@ -917,14 +965,14 @@ async function confirmProductionSend(supabase, body = {}) {
         failedCount += 1;
         const failureReason = cleanText(error.message, 1000);
         failureReasons.push(failureReason);
-        if (error instanceof BrevoHttpError || error instanceof SMTP2GOHttpError) {
-          console.error(`${error.provider === "smtp2go" ? "SMTP2GO" : "Brevo"} production send rejected`, {
+        if (error instanceof BrevoHttpError || error instanceof SMTP2GOHttpError || error instanceof SendGridProviderError) {
+          console.error(`${emailProviderConfig(preparedProvider).provider} production send rejected`, {
             campaign_id: campaign.id,
             send_id: send.id,
             recipient_id: recipientRecord.id,
             provider: error.provider,
             http_status: error.providerStatusCode,
-            response_body: error.providerResponseBody,
+            ...(error.providerResponseBody ? { response_body: error.providerResponseBody } : {}),
           });
         }
         await supabase.from("marketing_email_send_recipients").update({ status: "failed", failure_reason: failureReason, last_event_at: new Date().toISOString() }).eq("id", recipientRecord.id);
@@ -937,7 +985,7 @@ async function confirmProductionSend(supabase, body = {}) {
   const errorParts = [];
   if (failedCount) errorParts.push(`${failedCount} recipient(s) failed immediate provider submission`);
   if (failureReasons.length) errorParts.push(`First failure: ${failureReasons[0]}`);
-  if (unknownCount) errorParts.push(`${unknownCount} recipient submission outcome(s) unknown; reconcile in ${emailProviderConfig().provider} before retrying`);
+  if (unknownCount) errorParts.push(`${unknownCount} recipient submission outcome(s) unknown; reconcile in ${emailProviderConfig(preparedProvider).provider} before retrying`);
   const { data: updatedSend } = assertSupabase(
     await supabase.from("marketing_email_sends").update({
       status: finalStatus,
@@ -969,7 +1017,7 @@ export default async function handler(request, response) {
     const action = body.action || "sendHistory";
     let result;
     if (action === "validateAccess") result = {};
-    else if (action === "brevoStatus") result = await brevoStatus();
+    else if (action === "providerStatus" || action === "brevoStatus") result = await providerStatus();
     else if (action === "sendHistory") result = await listSendHistory(supabase, body);
     else if (action === "sendTest") result = await sendTest(supabase, body);
     else if (action === "prepareProductionSend") result = await prepareProductionSend(supabase, body);

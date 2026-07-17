@@ -181,9 +181,10 @@
     function renderOverview(data) {
       const overview = data.overview || {};
       document.getElementById("overviewCards").innerHTML = [
-        ["Total Contacts", overview.total_contacts],
+        ["Total Stored Contacts", overview.total_contacts],
+        ["Verified / Active", overview.verified_active_contacts],
+        ["Awaiting Verification", overview.awaiting_verification_contacts],
         ["Suppressed", overview.suppressed_contacts],
-        ["Active Contacts", overview.active_contacts],
       ].map(([label, value]) => `<article class="stat-card"><div class="stat-card__label">${label}</div><div class="stat-card__value">${formatNumber(value)}</div></article>`).join("");
       document.getElementById("suppressionTotals").innerHTML = Object.entries(TYPES).map(([key, label]) => `<article class="stat-card"><div class="stat-card__label">${label}</div><div class="stat-card__value">${formatNumber(data.totals?.[key] || 0)}</div></article>`).join("");
       document.getElementById("recentRows").innerHTML = (data.recent || []).length ? (data.recent || []).map((contact) => {

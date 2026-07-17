@@ -23,52 +23,6 @@
   function writePrefs(prefs) {
     try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs)); } catch {}
   }
-  function injectStyles() {
-    if ($("campaignUiPolishStyles")) return;
-    const style = document.createElement("style");
-    style.id = "campaignUiPolishStyles";
-    style.textContent = `
-      body { overflow-x:hidden; }
-      .detail-grid { grid-template-columns:minmax(0, 58%) minmax(0, 42%); align-items:start; }
-      .detail-grid > * { min-width:0; }
-      .detail-grid > .card.detail-stack { position:sticky; top:16px; width:100%; max-width:100%; min-width:0; overflow:hidden; }
-      .workflow-steps { display:grid; grid-template-columns:repeat(5, minmax(120px, 1fr)); gap:8px; }
-      .workflow-step { border:1px solid var(--line); border-radius:9px; padding:9px 10px; background:#fff; display:flex; align-items:center; gap:8px; font-weight:900; color:#475569; }
-      .workflow-step span { width:24px; height:24px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; background:#e2e8f0; color:#334155; font-size:12px; }
-      .workflow-step.complete { border-color:#bbf7d0; background:#f0fdf4; color:#166534; }
-      .workflow-step.complete span { background:var(--green); color:#fff; }
-      .workflow-step.current { border-color:#bfdbfe; background:#eef4ff; color:#1d4ed8; }
-      .workflow-step.current span { background:var(--blue); color:#fff; }
-      .workflow-step.warning { border-color:#fed7aa; background:#fff7ed; color:#9a3412; }
-      .workflow-step.warning span { background:var(--amber); color:#fff; }
-      .workflow-step.blocked { background:#f8fafc; color:#64748b; }
-      .collapsible-card { display:grid; gap:12px; }
-      .collapsible-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
-      .collapsible-title { display:grid; gap:3px; }
-      .collapsible-summary { color:var(--muted); font-size:12px; font-weight:850; }
-      .collapsible-toggle { min-width:92px; }
-      .collapsible-card.is-collapsed .collapsible-body { display:none; }
-      .campaign-preview-title { margin:0 0 10px; font-weight:900; color:#334155; }
-      .preview-frame { width:100%; max-width:100%; min-height:min(82vh, 940px); max-height:none; overflow:auto; }
-      .preview-frame.mobile-mode { align-items:flex-start; overflow-x:hidden; }
-      #previewFrame { width:100%; max-width:100%; min-height:min(78vh, 900px); }
-      #previewFrame.mobile { width:390px; max-width:100%; min-height:820px; }
-      @media (max-width:1040px) {
-        .detail-grid { grid-template-columns:1fr; }
-        .detail-grid > .card.detail-stack { position:static; }
-        .workflow-steps { grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); }
-      }
-      @media (max-width:760px) {
-        main { padding:12px; }
-        .page-stack { gap:12px; }
-        .workflow-steps { grid-template-columns:1fr; }
-        .collapsible-heading { display:grid; }
-        .toolbar button { white-space:normal; }
-        #previewFrame.mobile { width:340px; }
-      }
-    `;
-    document.head.appendChild(style);
-  }
   function sectionName(section) {
     if (section.id === "campaignSendingSection") return "Sending";
     if (section.querySelector("#detailTitle")) return "Campaign Settings";
@@ -83,11 +37,13 @@
     if (name === "Readiness") return $("readyPanel")?.textContent?.trim() || "Not Ready";
     if (name === "Sending") {
       const text = $("brevoConnectionBanner")?.innerText || "";
-      if (/authorised/i.test(text)) return "Brevo Authorised";
-      if (/rejected/i.test(text)) return "Brevo Rejected";
-      if (/not fully configured/i.test(text)) return "Brevo Not Configured";
-      if (/could not be reached/i.test(text)) return "Brevo Unreachable";
-      return "Checking Brevo";
+      const provider = text.match(/^(SendGrid|SMTP2GO|Brevo)/i)?.[1] || "Email provider";
+      if (/configured for Mail Send/i.test(text)) return `${provider} Configured for Mail Send`;
+      if (/authorised/i.test(text)) return `${provider} Authorised`;
+      if (/rejected/i.test(text)) return `${provider} Rejected`;
+      if (/not fully configured/i.test(text)) return `${provider} Not Configured`;
+      if (/could not be reached/i.test(text)) return `${provider} Unreachable`;
+      return `Checking ${provider}`;
     }
     if (name === "Campaign Summary") {
       const recipients = Array.from(document.querySelectorAll("#summaryGrid .summary-item")).find((item) => /Estimated recipients/i.test(item.innerText));
@@ -169,16 +125,16 @@
     if (Array.isArray(loadedHistory)) return loadedHistory.map(normaliseHistoryRow).filter(Boolean);
     return Array.from(document.querySelectorAll("#sendHistoryRows tr")).map((row) => {
       const cells = Array.from(row.cells || []);
-      if (cells.length < 7) return null;
+      if (cells.length < 8) return null;
       const type = cells[0].textContent.trim().toLowerCase();
-      const status = cells[1].textContent.trim().toLowerCase();
+      const status = cells[2].textContent.trim().toLowerCase();
       if (!type || /no .*history|migration/i.test(type)) return null;
       return normaliseHistoryRow({
         type,
         status,
-        requested: cells[2].textContent,
-        accepted: cells[3].textContent,
-        failed: cells[4].textContent,
+        requested: cells[3].textContent,
+        accepted: cells[4].textContent,
+        failed: cells[5].textContent,
       });
     }).filter(Boolean);
   }
@@ -191,8 +147,8 @@
     const finalSendCount = parseCount(audienceText.match(/Final send count\s+([\d,]+)/i)?.[1]);
     const hasAudience = finalSendCount > 0;
     const ready = /READY TO SEND/i.test($("readyPanel")?.textContent || "");
-    const brevo = $("brevoConnectionBanner")?.innerText || "";
-    const brevoAuthorised = /authorised/i.test(brevo);
+    const providerStatus = $("brevoConnectionBanner")?.innerText || "";
+    const providerAuthorised = /authorised|configured for Mail Send/i.test(providerStatus);
     const history = readSendHistory();
     const testComplete = history.some((send) => send.type.includes("test") && SUCCESS_SEND_STATUSES.has(send.status) && send.accepted > 0 && send.failed === 0);
     const productionRows = history.filter((send) => send.type.includes("production"));
@@ -203,8 +159,8 @@
       { label: "Campaign", state: hasCampaign ? "complete" : "blocked" },
       { label: "Audience", state: hasAudience ? "complete" : hasCampaign ? "current" : "blocked" },
       { label: "Readiness", state: ready ? "complete" : hasAudience ? "current" : "blocked" },
-      { label: "Test", state: testComplete ? "complete" : brevoAuthorised ? "current" : "blocked" },
-      { label: productionLabel, state: productionComplete ? "complete" : productionWarning ? "warning" : ready && brevoAuthorised ? "current" : "blocked" },
+      { label: "Test", state: testComplete ? "complete" : providerAuthorised ? "current" : "blocked" },
+      { label: productionLabel, state: productionComplete ? "complete" : productionWarning ? "warning" : ready && providerAuthorised ? "current" : "blocked" },
     ];
     node.innerHTML = steps.map((step, index) => {
       const marker = step.state === "complete" ? "✓" : step.state === "warning" ? "!" : index + 1;
@@ -225,7 +181,6 @@
     label.textContent = $("previewFrame")?.classList.contains("mobile") ? "Mobile email preview" : "Desktop email preview";
   }
   function refreshPolish() {
-    injectStyles();
     addWorkflow();
     addPreviewLabel();
     const prefs = readPrefs();

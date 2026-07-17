@@ -119,12 +119,31 @@ function customerSearchQuery(query, search) {
   ].join(","));
 }
 
-async function getOverview(supabase) {
+export async function getOverview(supabase) {
   const { data } = assertSupabase(
     await supabase.rpc("marketing_suppression_overview", { p_recent_limit: 10, p_history_limit: 100 }),
     "Could not load suppression overview."
   );
-  return data || {};
+  const payload = data || {};
+  const countLifecycle = async (status) => {
+    const result = await supabase.from("marketing_contacts").select("id", { count: "exact", head: true }).eq("lifecycle_status", status);
+    assertSupabase(result, `Could not count ${status} contacts.`);
+    return Number(result.count || 0);
+  };
+  const [verifiedActive, awaitingVerification, suppressed] = await Promise.all([
+    countLifecycle("active"),
+    countLifecycle("awaiting_verification"),
+    countLifecycle("suppressed"),
+  ]);
+  return {
+    ...payload,
+    overview: {
+      ...(payload.overview || {}),
+      verified_active_contacts: verifiedActive,
+      awaiting_verification_contacts: awaitingVerification,
+      suppressed_contacts: suppressed,
+    },
+  };
 }
 
 async function searchContacts(supabase, body) {

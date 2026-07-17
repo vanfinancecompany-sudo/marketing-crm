@@ -9,6 +9,12 @@ import {
   normalizeTemplateSnapshot,
   renderCampaignPreview,
 } from "../lib/marketingEmailTemplateRenderer.js";
+import {
+  createCurrentSendEligibilityState,
+  evaluateCurrentSendEligibility,
+  loadCurrentSendProcessedIdentities,
+  loadPermanentCurrentSendSuppressions,
+} from "../lib/marketingCurrentSendEligibility.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const TEMPLATE_CAMPAIGN_SOURCE = "template_campaign_foundation";
@@ -18,7 +24,6 @@ const CAMPAIGN_TYPES = new Set(["new_stock", "finance_offer", "rent2buy", "newsl
 const STATUSES = new Set(["draft", "ready", "archived"]);
 const PIPELINES = new Set(["all", "finance", "rent2buy", "both"]);
 const AUDIENCE_MODES = new Set(["standard", "never_emailed", "recently_imported", "manual_customer_ids", "custom_search"]);
-const EMAIL_SUPPRESSION_TYPES = ["email_unsubscribed", "email_bounced", "manual_suppression", "global_do_not_contact"];
 const PAGE_SIZE = 1000;
 
 class CampaignNotFoundError extends Error {
@@ -128,13 +133,14 @@ function normalizeAudienceSnapshot(value = null) {
   const counts = value.counts || value;
   const totalMatching = Number(counts.total_matching_customers ?? counts.total_matching ?? 0);
   const suppressed = Number(counts.suppressed_customers ?? counts.suppressed ?? 0);
+  const skippedDuplicate = Number(counts.skipped_duplicate_customers ?? counts.skipped_duplicate ?? 0);
   const deliverable = Number(counts.deliverable_customers ?? counts.final_send_count ?? counts.deliverable ?? 0);
   const finalSendCount = Number(counts.final_send_count ?? deliverable);
   const calculatedAt = cleanText(value.calculated_at || "", 80);
-  if (![totalMatching, suppressed, deliverable, finalSendCount].every((number) => Number.isInteger(number) && number >= 0)) {
+  if (![totalMatching, suppressed, skippedDuplicate, deliverable, finalSendCount].every((number) => Number.isInteger(number) && number >= 0)) {
     throw new CampaignValidationError("Audience counts must be non-negative whole numbers.");
   }
-  if (totalMatching < deliverable || suppressed !== totalMatching - deliverable || finalSendCount !== deliverable) {
+  if (totalMatching !== suppressed + skippedDuplicate + deliverable || finalSendCount !== deliverable) {
     throw new CampaignValidationError("Audience counts are inconsistent. Preview the audience again.");
   }
   if (!calculatedAt) throw new CampaignValidationError("Preview the audience before saving it.");
@@ -142,6 +148,7 @@ function normalizeAudienceSnapshot(value = null) {
     rules,
     total_matching_customers: totalMatching,
     suppressed_customers: suppressed,
+    skipped_duplicate_customers: skippedDuplicate,
     deliverable_customers: deliverable,
     final_send_count: deliverable,
     calculated_at: calculatedAt,
@@ -259,19 +266,7 @@ function recentlyImportedIso() {
   return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 }
 
-function activeSuppressionEntry(value) {
-  return value && typeof value === "object" && value.active !== false;
-}
-
-function emailSuppressed(row = {}) {
-  if (String(row.lifecycle_status || "active") !== "active") return true;
-  if (String(row.marketing_status || "active") !== "active") return true;
-  const suppression = row.suppression && typeof row.suppression === "object" ? row.suppression : {};
-  return EMAIL_SUPPRESSION_TYPES.some((type) => activeSuppressionEntry(suppression[type]));
-}
-
 function applyAudienceFilters(query, rules) {
-  query = query.eq("lifecycle_status", "active").eq("email_ready", true);
   if (rules.pipeline !== "all") query = query.eq("pipeline", rules.pipeline);
   if (rules.mode === "recently_imported") query = query.gte("created_at", recentlyImportedIso());
   if (rules.mode === "manual_customer_ids") query = query.in("customer_id", rules.manual_customer_ids);
@@ -329,37 +324,51 @@ async function loadExportedEmailContactIds(supabase) {
   return contactIds;
 }
 
-async function countAudienceByScan(supabase, rules, exportedEmailIds = new Set()) {
+async function countAudienceByScan(supabase, campaignId, rules, exportedEmailIds = new Set()) {
   let from = 0;
   let totalMatching = 0;
   let deliverable = 0;
+  let suppressed = 0;
+  let skippedDuplicate = 0;
+  let invalidEmail = 0;
+  const processed = await loadCurrentSendProcessedIdentities(supabase, campaignId, assertSupabase);
+  const eligibilityState = createCurrentSendEligibilityState(processed);
   while (true) {
     const result = await applyAudienceFilters(
-      supabase.from("marketing_contacts").select("customer_id,marketing_status,lifecycle_status,suppression"),
+      supabase.from("marketing_contacts").select("id,customer_id,email,email_normalized,email_ready,marketing_status,lifecycle_status,suppression"),
       rules
     ).range(from, from + PAGE_SIZE - 1);
     assertSupabase(result, "Could not count campaign audience.");
     const rows = result.data || [];
+    const permanentlySuppressed = await loadPermanentCurrentSendSuppressions(supabase, rows.map((row) => row.email_normalized || row.email), assertSupabase);
     rows.forEach((row) => {
       if (rules.mode === "never_emailed" && exportedEmailIds.has(normalizeCustomerId(row.customer_id))) return;
       totalMatching += 1;
-      if (!emailSuppressed(row)) deliverable += 1;
+      const decision = evaluateCurrentSendEligibility(row, { state: eligibilityState, permanentlySuppressedEmails: permanentlySuppressed });
+      if (decision.eligible) deliverable += 1;
+      else if (["previously_processed", "duplicate"].includes(decision.reason)) skippedDuplicate += 1;
+      else {
+        suppressed += 1;
+        if (decision.reason === "invalid_email") invalidEmail += 1;
+      }
     });
     if (rows.length < PAGE_SIZE) break;
     from += PAGE_SIZE;
   }
   return {
     total_matching_customers: totalMatching,
-    suppressed_customers: totalMatching - deliverable,
+    suppressed_customers: suppressed,
+    skipped_duplicate_customers: skippedDuplicate,
+    invalid_email_customers: invalidEmail,
     deliverable_customers: deliverable,
     final_send_count: deliverable,
   };
 }
 
-async function buildAudienceSnapshot(supabase, rulesInput = {}) {
+async function buildAudienceSnapshot(supabase, campaignId, rulesInput = {}) {
   const rules = normalizeAudienceRules(rulesInput);
   const exportedEmailIds = rules.mode === "never_emailed" ? await loadExportedEmailContactIds(supabase) : new Set();
-  const counts = await countAudienceByScan(supabase, rules, exportedEmailIds);
+  const counts = await countAudienceByScan(supabase, campaignId, rules, exportedEmailIds);
   return normalizeAudienceSnapshot({ rules, ...counts, calculated_at: new Date().toISOString() });
 }
 
@@ -400,9 +409,9 @@ function getAudienceRulesForReady(values, existing) {
 }
 
 async function resolveAudienceForUpdate(supabase, values, existing, nextStatus) {
-  if (nextStatus === "ready") return buildAudienceSnapshot(supabase, getAudienceRulesForReady(values, existing));
+  if (nextStatus === "ready") return buildAudienceSnapshot(supabase, existing.id, getAudienceRulesForReady(values, existing));
   if (values.audience_snapshot === undefined) return existing.audience_snapshot;
-  return buildAudienceSnapshot(supabase, values.audience_snapshot?.rules || values.audience_snapshot || {});
+  return buildAudienceSnapshot(supabase, existing.id, values.audience_snapshot?.rules || values.audience_snapshot || {});
 }
 
 async function listCampaigns(supabase, body = {}) {
@@ -558,8 +567,8 @@ async function previewCampaign(supabase, body = {}) {
 }
 
 async function previewAudience(supabase, body = {}) {
-  await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
-  const audience = await buildAudienceSnapshot(supabase, body.rules || body.audience || {});
+  const campaign = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
+  const audience = await buildAudienceSnapshot(supabase, campaign.id, body.rules || body.audience || {});
   return { audience };
 }
 
