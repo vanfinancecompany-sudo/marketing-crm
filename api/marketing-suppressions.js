@@ -1,12 +1,18 @@
 import { createClient } from "@supabase/supabase-js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
-const CONTACT_COLUMNS = "id,customer_id,first_name,last_name,company,email,phone,postcode,pipeline,source,marketing_status,email_ready,sms_ready,facebook_ready,suppression,suppression_history,created_at,updated_at";
+const CONTACT_COLUMNS = "id,customer_id,first_name,last_name,company,email,phone,postcode,pipeline,source,marketing_status,lifecycle_status,lifecycle_changed_at,email_ready,sms_ready,facebook_ready,suppression,suppression_history,created_at,updated_at";
 const SUPPRESSION_TYPES = new Set([
   "email_unsubscribed",
   "email_bounced",
   "sms_opt_out",
   "facebook_excluded",
+  "manual_suppression",
+  "global_do_not_contact",
+]);
+const PERMANENT_EMAIL_SUPPRESSION_TYPES = new Set([
+  "email_unsubscribed",
+  "email_bounced",
   "manual_suppression",
   "global_do_not_contact",
 ]);
@@ -76,6 +82,7 @@ function normalizeContact(row = {}) {
     pipeline: row.pipeline || "unknown",
     source: row.source || "other",
     marketing_status: row.marketing_status || "active",
+    lifecycle_status: row.lifecycle_status || "active",
     email_ready: Boolean(row.email_ready),
     sms_ready: Boolean(row.sms_ready),
     facebook_ready: Boolean(row.facebook_ready),
@@ -153,6 +160,9 @@ async function applySuppression(supabase, body) {
 
 async function removeSuppression(supabase, body) {
   const type = normalizeType(body.type);
+  if (PERMANENT_EMAIL_SUPPRESSION_TYPES.has(type)) {
+    throw new Error("Permanent email suppression identities cannot be removed. The address must remain ineligible for future campaigns.");
+  }
   const { data } = assertSupabase(
     await supabase.rpc("marketing_remove_suppression", {
       p_contact_id: getContactId(body),

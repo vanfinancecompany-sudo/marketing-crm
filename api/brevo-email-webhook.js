@@ -347,7 +347,7 @@ async function applyContactSuppression(supabase, recipient, event) {
     p_type: type,
     p_reason: reason,
     p_added_by: "Brevo webhook",
-    p_notes: safeText(`campaign:${recipient.campaign_id || ""} send:${recipient.send_id || ""} recipient:${recipient.id || ""} message:${event.provider_message_id || ""}`, 500),
+    p_notes: safeText(`campaign:${recipient.campaign_id || ""} send:${recipient.send_id || ""} recipient:${recipient.id || ""} message:${event.provider_message_id || ""} email:${recipient.email || event.email_normalized || ""}`, 500),
   });
   if (rpc.error) throw new Error(rpc.error.message || "Could not apply suppression from Brevo event.");
 }

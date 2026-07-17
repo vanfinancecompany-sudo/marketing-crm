@@ -28,6 +28,8 @@ Columns:
 - `tags text[] not null default '{}'`
 - `notes text not null default ''`
 - `marketing_status text not null default 'active'`
+- `lifecycle_status text not null default 'active'`
+- `lifecycle_changed_at timestamptz`
 - `email_ready boolean generated from normalized email logic in application`
 - `sms_ready boolean generated from normalized phone logic in application`
 - `facebook_ready boolean generated from email or phone readiness in application`
@@ -50,11 +52,23 @@ Allowed marketing statuses:
 - `unsubscribed`
 - `suppressed`
 
-Deduplication order:
+Allowed lifecycle statuses:
+
+- `active`
+- `awaiting_verification`
+- `archived`
+- `suppressed`
+
+Only `active` contacts are shown in the normal Customer Database and included in active or campaign-audience totals. The protected clear workflow changes `active` to `awaiting_verification`; it does not delete the contact or change either customer identifier.
+
+Import restore and deduplication order:
 
 1. Exact normalized email match.
-2. Exact normalized phone match.
-3. Possible duplicate review using name plus postcode.
+2. Supplied existing `customer_id` match.
+3. Exact normalized phone match.
+4. Possible duplicate review using name plus postcode.
+
+An exact match updates the existing row in place, so `marketing_contacts.id`, `customer_id`, and all foreign-key and campaign-recipient history remain intact. An inactive match is restored to `active`. A CSV classification changes `pipeline` only when the file explicitly supplies that field.
 
 ## marketing_imports
 
@@ -69,8 +83,11 @@ Columns:
 - `rows_imported integer`
 - `contacts_created integer`
 - `contacts_updated integer`
+- `restored_customers integer`
 - `duplicates_merged integer`
 - `possible_duplicates integer`
+- `suppressed_emails integer`
+- `invalid_emails integer`
 - `rejected_rows integer`
 - `started_at timestamptz`
 - `completed_at timestamptz`
@@ -138,17 +155,28 @@ Columns:
 - `created_at timestamptz`
 - `updated_at timestamptz`
 
-## Future tables
+## marketing_suppression_identities
 
-Not part of the first migration:
+Permanent email-level campaign suppression. This table is deliberately separate from the customer card JSON so an archived or recreated workflow cannot erase the suppressed identity.
 
-- `marketing_campaigns`
-- `marketing_campaign_contacts`
-- `marketing_events`
-- `marketing_automation_rules`
-- `marketing_automation_runs`
-- `marketing_facebook_syncs`
-- `marketing_google_match_syncs`
+Important relationships:
+
+- `contact_id uuid references marketing_contacts(id) on delete set null`
+- `campaign_id uuid references marketing_campaigns(id) on delete set null`
+- `email_normalized text unique not null`
+
+Inserting or updating an identity immediately moves every matching contact to lifecycle `suppressed`. A database trigger rejects any attempt to activate a matching normalized email. Provider webhooks and the Suppression Centre continue to call `marketing_apply_suppression`; that RPC now maintains both the existing contact suppression JSON/history and this permanent identity.
+
+## marketing_database_clear_audit
+
+Audit and concurrency guard for the protected clear workflow. A prepared operation records the current lifecycle and safety-export counts, expires after 30 minutes, and can be completed only with the exact confirmation phrase. Completion locks contact writes, verifies that the active count is unchanged, and moves active contacts to `awaiting_verification`.
+
+## Campaign-history relationships
+
+- `marketing_campaign_batch_customers.customer_id` references the internal UUID `marketing_contacts.id` for legacy campaign batches.
+- `marketing_email_send_recipients.customer_id` stores the stable public `marketing_contacts.customer_id` text used by template email sends.
+- `marketing_email_events.recipient_id` references `marketing_email_send_recipients.id`; older events can also be correlated by `provider_message_id`.
+- Production duplicate protection checks both the public customer ID and normalized recipient email for the same campaign.
 
 ## Pagination and query rules
 

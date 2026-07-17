@@ -8,6 +8,7 @@ export const MARKETING_IMPORT_BATCH_SIZE = 500;
 
 const API_ROUTE = "/api/marketing-contacts";
 const IMPORT_API_ROUTE = "/api/marketing-contact-import";
+const DATABASE_TOOLS_API_ROUTE = "/api/marketing-database-tools";
 
 async function requestApi(route, action, payload = {}) {
   const response = await fetch(route, {
@@ -110,6 +111,44 @@ export async function fetchMarketingImportReports(importId = "") {
   return {
     rejectedRows: result.rejectedRows || [],
     duplicateRows: result.duplicateRows || [],
+    restoredRows: result.restoredRows || [],
+    suppressedRows: result.suppressedRows || [],
+    invalidEmailRows: result.invalidEmailRows || [],
     possibleDuplicates: result.possibleDuplicates || [],
   };
+}
+
+export async function getCustomerDatabaseToolsOverview() {
+  const result = await requestApi(DATABASE_TOOLS_API_ROUTE, "overview");
+  return result.counts || {};
+}
+
+export async function getCustomerDatabaseSafetyExport(action) {
+  if (action === "exportFull") {
+    const chunks = [];
+    let page = 0;
+    let current;
+    do {
+      const result = await requestApi(DATABASE_TOOLS_API_ROUTE, action, { page });
+      current = result.export || {};
+      if (current.csv) chunks.push(current.csv);
+      page += 1;
+    } while (!current.done);
+    return { ...current, page: 0, done: true, csv: chunks.join("\n") };
+  }
+  const result = await requestApi(DATABASE_TOOLS_API_ROUTE, action);
+  return result.export;
+}
+
+export async function prepareCustomerDatabaseClear(confirmedExports) {
+  return requestApi(DATABASE_TOOLS_API_ROUTE, "prepareClear", { confirmedExports });
+}
+
+export async function clearActiveCustomerDatabase(operationId, confirmation) {
+  return requestApi(DATABASE_TOOLS_API_ROUTE, "clearActive", { operationId, confirmation });
+}
+
+export async function getCustomerCampaignHistory(contact) {
+  const result = await requestApi(DATABASE_TOOLS_API_ROUTE, "contactCampaignHistory", { customerId: contact?.customer_id || "", email: contact?.email || "" });
+  return result.history || [];
 }

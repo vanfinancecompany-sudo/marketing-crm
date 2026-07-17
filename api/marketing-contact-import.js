@@ -7,6 +7,7 @@ import {
   insertContact,
   mergeContactPayload,
 } from "../lib/marketingCustomerUpsert.js";
+import { contactHasPermanentSuppression, normalizeEmailIdentity } from "../lib/customerDatabaseCleanse.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const DEFAULT_BATCH_SIZE = 500;
@@ -32,7 +33,7 @@ async function logImportRow(supabase, importId, row, status, reason, customerId 
 }
 
 async function createBackup(supabase) {
-  const columns = ["customer_id", "first_name", "last_name", "company", "email", "phone", "postcode", "pipeline", "source", "notes", "created_at", "updated_at", "last_seen_at", "duplicate_count"];
+  const columns = ["customer_id", "first_name", "last_name", "company", "email", "email_normalized", "phone", "phone_normalized", "postcode", "pipeline", "source", "notes", "marketing_status", "lifecycle_status", "lifecycle_changed_at", "suppression", "suppression_history", "created_at", "updated_at", "last_seen_at", "duplicate_count"];
   const rows = [];
   let page = 0;
   while (true) {
@@ -57,11 +58,22 @@ async function updateImport(supabase, importId, patch, metadataPatch = {}) {
   assertSupabase(await supabase.from("marketing_imports").update({ ...patch, metadata }).eq("id", importId), "Could not update import.");
 }
 
-function addCounts(a, b) { return { rowsImported: Number(a.rowsImported || 0) + Number(b.rowsImported || 0), contactsCreated: Number(a.contactsCreated || 0) + Number(b.contactsCreated || 0), contactsUpdated: Number(a.contactsUpdated || 0) + Number(b.contactsUpdated || 0), duplicatesMerged: Number(a.duplicatesMerged || 0) + Number(b.duplicatesMerged || 0), possibleDuplicates: Number(a.possibleDuplicates || 0) + Number(b.possibleDuplicates || 0), rejectedRows: Number(a.rejectedRows || 0) + Number(b.rejectedRows || 0) }; }
+function addCounts(a, b) { return { rowsImported: Number(a.rowsImported || 0) + Number(b.rowsImported || 0), contactsCreated: Number(a.contactsCreated || 0) + Number(b.contactsCreated || 0), contactsUpdated: Number(a.contactsUpdated || 0) + Number(b.contactsUpdated || 0), restoredCustomers: Number(a.restoredCustomers || 0) + Number(b.restoredCustomers || 0), duplicatesMerged: Number(a.duplicatesMerged || 0) + Number(b.duplicatesMerged || 0), possibleDuplicates: Number(a.possibleDuplicates || 0) + Number(b.possibleDuplicates || 0), suppressedEmails: Number(a.suppressedEmails || 0) + Number(b.suppressedEmails || 0), invalidEmails: Number(a.invalidEmails || 0) + Number(b.invalidEmails || 0), rejectedRows: Number(a.rejectedRows || 0) + Number(b.rejectedRows || 0) }; }
+
+async function loadSuppressedEmails(supabase, emails) {
+  const uniqueEmails = [...new Set(emails.map(normalizeEmailIdentity).filter(Boolean))];
+  if (!uniqueEmails.length) return new Set();
+  const suppressed = new Set();
+  for (let index = 0; index < uniqueEmails.length; index += 200) {
+    const { data } = assertSupabase(await supabase.from("marketing_suppression_identities").select("email_normalized").in("email_normalized", uniqueEmails.slice(index, index + 200)), "Could not check permanent suppression identities.");
+    (data || []).forEach((row) => suppressed.add(normalizeEmailIdentity(row.email_normalized)));
+  }
+  return suppressed;
+}
 
 async function startImport(supabase, body) {
-  const pipeline = body.pipeline === "rent2buy" ? "rent2buy" : body.pipeline === "finance" ? "finance" : "";
-  if (!pipeline) throw new Error("Choose Finance or Rent2Buy before importing.");
+  const pipeline = ["finance", "rent2buy", "both", "unknown"].includes(body.pipeline) ? body.pipeline : "";
+  if (!pipeline) throw new Error("Choose an import classification before importing.");
   const filename = String(body.filename || "").trim();
   const totalRows = Number(body.totalRows || 0);
   const batchSize = safeBatchSize(body.batchSize);
@@ -71,7 +83,7 @@ async function startImport(supabase, body) {
   const importFingerprint = buildFingerprint({ filename, fileSize, totalRows, pipeline, checksum });
   const existing = await supabase.from("marketing_imports").select("*").eq("metadata->>import_fingerprint", importFingerprint).order("created_at", { ascending: false }).limit(1);
   if (existing.error) throw existing.error;
-  if (existing.data?.[0]) return { import: existing.data[0], batchSize, resume: true };
+  if (existing.data?.[0] && existing.data[0].status !== "completed") return { import: existing.data[0], batchSize, resume: true };
   const totalBatches = Math.ceil(totalRows / batchSize);
   const metadata = { total_rows: totalRows, batch_size: batchSize, total_batches: totalBatches, last_completed_batch: -1, processed_rows: 0, pipeline, filename, file_size: fileSize, checksum, import_fingerprint: importFingerprint, completed_batches: [], batch_results: {}, failed_batch: null, active_batch: null, backup: body.backup || null };
   const { data } = assertSupabase(await supabase.from("marketing_imports").insert({ filename, source: pipeline, status: "pending", rows_imported: 0, started_at: new Date().toISOString(), metadata }).select("*").single(), "Could not start import.");
@@ -80,7 +92,7 @@ async function startImport(supabase, body) {
 
 async function processBatch(supabase, body) {
   const importId = body.importId;
-  const pipeline = body.pipeline === "rent2buy" ? "rent2buy" : body.pipeline === "finance" ? "finance" : "";
+  const pipeline = ["finance", "rent2buy", "both", "unknown"].includes(body.pipeline) ? body.pipeline : "";
   const batchIndex = Number(body.batchIndex || 0);
   const rows = Array.isArray(body.rows) ? body.rows : [];
   if (!importId || !pipeline) throw new Error("Import ID and pipeline are required.");
@@ -94,19 +106,25 @@ async function processBatch(supabase, body) {
   if (metadata.active_batch !== null && metadata.active_batch !== undefined && metadata.active_batch !== batchIndex) throw new Error(`Import batch ${metadata.active_batch + 1} is already active.`);
 
   await updateImport(supabase, importId, { status: "processing" }, { active_batch: batchIndex, failed_batch: null });
-  const counts = { rowsImported: rows.length, contactsCreated: 0, contactsUpdated: 0, duplicatesMerged: 0, possibleDuplicates: 0, rejectedRows: 0 };
+  const cleanedRows = rows.map((row) => ({ row, cleaned: cleanImportRow(row, pipeline) }));
+  const suppressedEmails = await loadSuppressedEmails(supabase, cleanedRows.map(({ cleaned }) => cleaned.contact?.email_normalized));
+  const counts = { rowsImported: rows.length, contactsCreated: 0, contactsUpdated: 0, restoredCustomers: 0, duplicatesMerged: 0, possibleDuplicates: 0, suppressedEmails: 0, invalidEmails: 0, rejectedRows: 0 };
 
-  for (const row of rows) {
-    const { contact, reason } = cleanImportRow(row, pipeline);
-    if (!contact) { counts.rejectedRows += 1; await logImportRow(supabase, importId, row, "rejected", reason); continue; }
-    const exact = await findExactContact(supabase, contact);
+  for (const { row, cleaned } of cleanedRows) {
+    const { contact, reason, invalidEmail, pipelineExplicit, sourceCustomerId } = cleaned;
+    if (!contact) { counts.rejectedRows += 1; if (invalidEmail) counts.invalidEmails += 1; await logImportRow(supabase, importId, row, invalidEmail ? "invalid_email" : "rejected", reason); continue; }
+    if (contact.email_normalized && suppressedEmails.has(contact.email_normalized)) { counts.suppressedEmails += 1; counts.rejectedRows += 1; await logImportRow(supabase, importId, row, "suppressed", "Email is permanently suppressed"); continue; }
+    const exact = await findExactContact(supabase, contact, sourceCustomerId);
     if (exact.contact) {
-      const payload = mergeContactPayload(exact.contact, contact);
+      if (exact.contact.lifecycle_status === "suppressed" || contactHasPermanentSuppression(exact.contact)) { counts.suppressedEmails += 1; counts.rejectedRows += 1; await logImportRow(supabase, importId, row, "suppressed", "Existing customer is permanently suppressed", exact.contact.customer_id); continue; }
+      const wasInactive = exact.contact.lifecycle_status && exact.contact.lifecycle_status !== "active";
+      const payload = mergeContactPayload(exact.contact, contact, { pipelineExplicit, matchedOn: exact.matchedOn });
       const { data: updated } = assertSupabase(await supabase.from("marketing_contacts").update(payload).eq("id", exact.contact.id).select(CONTACT_COLUMNS).single(), "Could not update duplicate contact.");
-      counts.contactsUpdated += 1;
+      if (wasInactive) counts.restoredCustomers += 1;
+      else counts.contactsUpdated += 1;
       counts.duplicatesMerged += 1;
       await supabase.from("marketing_merge_log").insert({ primary_contact_id: exact.contact.id, merged_contact_id: null, merge_reason: `Import duplicate matched by ${exact.matchedOn}`, matched_on: exact.matchedOn, merged_snapshot: { import_id: importId, batch_key: key, source_row: row._rowNumber || null, incoming: compactRawData(row) } });
-      if (updated?.customer_id) await logImportRow(supabase, importId, row, "merged", `Matched by ${exact.matchedOn}`, updated.customer_id);
+      if (updated?.customer_id) await logImportRow(supabase, importId, row, wasInactive ? "restored" : "merged", `${wasInactive ? "Restored" : "Matched"} by ${exact.matchedOn}`, updated.customer_id);
       continue;
     }
     const possible = await findPossibleDuplicate(supabase, contact);
@@ -116,11 +134,11 @@ async function processBatch(supabase, body) {
     if (inserted?.customer_id && possible) await logImportRow(supabase, importId, row, "created_with_possible_duplicate", "Created but possible duplicate exists", inserted.customer_id);
   }
 
-  const previousTotals = { rowsImported: Number(metadata.processed_rows || importRecord.rows_imported || 0), contactsCreated: Number(importRecord.contacts_created || 0), contactsUpdated: Number(importRecord.contacts_updated || 0), duplicatesMerged: Number(importRecord.duplicates_merged || 0), possibleDuplicates: Number(importRecord.possible_duplicates || 0), rejectedRows: Number(importRecord.rejected_rows || 0) };
+  const previousTotals = { rowsImported: Number(metadata.processed_rows || importRecord.rows_imported || 0), contactsCreated: Number(importRecord.contacts_created || 0), contactsUpdated: Number(importRecord.contacts_updated || 0), restoredCustomers: Number(importRecord.restored_customers || 0), duplicatesMerged: Number(importRecord.duplicates_merged || 0), possibleDuplicates: Number(importRecord.possible_duplicates || 0), suppressedEmails: Number(importRecord.suppressed_emails || 0), invalidEmails: Number(importRecord.invalid_emails || 0), rejectedRows: Number(importRecord.rejected_rows || 0) };
   const totals = addCounts(previousTotals, counts);
   const nextCompleted = [...completed, key];
   const metadataPatch = { processed_rows: totals.rowsImported, last_completed_batch: batchIndex, completed_batches: nextCompleted, batch_results: { ...batchResults, [key]: counts }, failed_batch: null, active_batch: null };
-  assertSupabase(await supabase.from("marketing_imports").update({ rows_imported: totals.rowsImported, contacts_created: totals.contactsCreated, contacts_updated: totals.contactsUpdated, duplicates_merged: totals.duplicatesMerged, possible_duplicates: totals.possibleDuplicates, rejected_rows: totals.rejectedRows, status: "processing", metadata: { ...metadata, ...metadataPatch } }).eq("id", importId), "Could not update import totals.");
+  assertSupabase(await supabase.from("marketing_imports").update({ rows_imported: totals.rowsImported, contacts_created: totals.contactsCreated, contacts_updated: totals.contactsUpdated, restored_customers: totals.restoredCustomers, duplicates_merged: totals.duplicatesMerged, possible_duplicates: totals.possibleDuplicates, suppressed_emails: totals.suppressedEmails, invalid_emails: totals.invalidEmails, rejected_rows: totals.rejectedRows, status: "processing", metadata: { ...metadata, ...metadataPatch } }).eq("id", importId), "Could not update import totals.");
   const { data: updatedImport } = assertSupabase(await supabase.from("marketing_imports").select("*").eq("id", importId).single(), "Could not reload import.");
   return { counts, import: updatedImport, skipped: false };
 }
@@ -145,7 +163,7 @@ async function markBatchFailed(supabase, body, error) {
 }
 
 async function getHistory(supabase) { const { data } = assertSupabase(await supabase.from("marketing_imports").select("*").order("created_at", { ascending: false }).limit(12), "Could not load import history."); return { imports: data || [] }; }
-async function getReports(supabase, body) { const importId = body.importId; let query = supabase.from("marketing_import_rows").select("*").order("created_at", { ascending: false }).limit(REPORT_LIMIT); if (importId) query = query.eq("import_id", importId); const { data } = assertSupabase(await query, "Could not load import reports."); const rows = data || []; return { rejectedRows: rows.filter((row) => row.status === "rejected" || row.status === "error"), duplicateRows: rows.filter((row) => row.status === "merged" || row.status === "created_with_possible_duplicate"), possibleDuplicates: rows.filter((row) => row.status === "possible_duplicate" || row.status === "created_with_possible_duplicate") }; }
+async function getReports(supabase, body) { const importId = body.importId; let query = supabase.from("marketing_import_rows").select("*").order("created_at", { ascending: false }).limit(REPORT_LIMIT); if (importId) query = query.eq("import_id", importId); const { data } = assertSupabase(await query, "Could not load import reports."); const rows = data || []; return { rejectedRows: rows.filter((row) => ["rejected", "error", "invalid_email", "suppressed"].includes(row.status)), duplicateRows: rows.filter((row) => row.status === "merged" || row.status === "created_with_possible_duplicate"), restoredRows: rows.filter((row) => row.status === "restored"), suppressedRows: rows.filter((row) => row.status === "suppressed"), invalidEmailRows: rows.filter((row) => row.status === "invalid_email"), possibleDuplicates: rows.filter((row) => row.status === "possible_duplicate" || row.status === "created_with_possible_duplicate") }; }
 
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");

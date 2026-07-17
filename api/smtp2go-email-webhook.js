@@ -226,17 +226,18 @@ function timestampUpdates(recipient, eventType, eventAt, reason) {
 
 async function applyContactSuppression(supabase, recipient, event) {
   const customerId = normalizeCustomerId(recipient?.customer_id);
-  if (!customerId || !["hard_bounce", "complaint", "unsubscribed"].includes(event.event_type)) return;
-  const type = event.event_type === "hard_bounce" ? "email_bounced" : event.event_type === "complaint" ? "global_do_not_contact" : "email_unsubscribed";
+  const permanentBlocked = event.event_type === "blocked" && /invalid|unknown user|no such user|does not exist|blacklist|blocked recipient|suppression|globally blocked/i.test(String(event.reason || ""));
+  if (!customerId || (!["hard_bounce", "complaint", "unsubscribed"].includes(event.event_type) && !permanentBlocked)) return;
+  const type = event.event_type === "hard_bounce" ? "email_bounced" : event.event_type === "unsubscribed" ? "email_unsubscribed" : "global_do_not_contact";
   const contact = await supabase.from("marketing_contacts").select("id").eq("customer_id", customerId).maybeSingle();
   if (contact.error) throw new Error(contact.error.message || "Could not load contact for suppression.");
   if (!contact.data?.id) return;
   const rpc = await supabase.rpc("marketing_apply_suppression", {
     p_contact_id: contact.data.id,
     p_type: type,
-    p_reason: `SMTP2GO ${event.event_type.replace(/_/g, " ")} event`,
+    p_reason: permanentBlocked ? "SMTP2GO permanent blocked event" : `SMTP2GO ${event.event_type.replace(/_/g, " ")} event`,
     p_added_by: "SMTP2GO webhook",
-    p_notes: safeText(`campaign:${recipient.campaign_id || ""} send:${recipient.send_id || ""} recipient:${recipient.id || ""} message:${event.provider_message_id || ""}`, 500),
+    p_notes: safeText(`campaign:${recipient.campaign_id || ""} send:${recipient.send_id || ""} recipient:${recipient.id || ""} message:${event.provider_message_id || ""} email:${recipient.email || event.email_normalized || ""}`, 500),
   });
   if (rpc.error) throw new Error(rpc.error.message || "Could not apply suppression from SMTP2GO event.");
 }

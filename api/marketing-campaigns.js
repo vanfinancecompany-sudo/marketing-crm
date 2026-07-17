@@ -312,7 +312,7 @@ function buildOpportunity({ id, title, description, customerCount, channel, obje
 }
 
 async function countContacts(supabase, applyQuery) {
-  let query = supabase.from("marketing_contacts").select("id", { count: "exact", head: true });
+  let query = supabase.from("marketing_contacts").select("id", { count: "exact", head: true }).eq("lifecycle_status", "active").eq("marketing_status", "active");
   if (applyQuery) query = applyQuery(query);
   const { count } = assertSupabase(await query, "Could not count marketing opportunity customers.");
   return count || 0;
@@ -374,7 +374,7 @@ async function countReadyExportedCustomers(supabase, exportedByChannel) {
     for (let index = 0; index < ids.length; index += 500) {
       const idChunk = ids.slice(index, index + 500);
       const { count } = assertSupabase(
-        await supabase.from("marketing_contacts").select("id", { count: "exact", head: true }).in("id", idChunk).eq(readyColumn, true),
+        await supabase.from("marketing_contacts").select("id", { count: "exact", head: true }).in("id", idChunk).eq("lifecycle_status", "active").eq("marketing_status", "active").eq(readyColumn, true),
         "Could not count exported ready marketing customers."
       );
       counts[channel] += count || 0;
@@ -766,12 +766,24 @@ async function getCampaignDashboard(supabase, body) {
   };
 }
 
-async function loadBatchCsvRows(supabase, batch) {
+function batchContactSuppressed(contact, channel) {
+  const entries = contact?.suppression && typeof contact.suppression === "object" ? contact.suppression : {};
+  const active = (type) => entries[type] && entries[type].active !== false;
+  if (active("manual_suppression") || active("global_do_not_contact")) return true;
+  if (channel === "email") return active("email_unsubscribed") || active("email_bounced");
+  if (channel === "sms") return active("sms_opt_out");
+  if (channel === "facebook") return active("facebook_excluded");
+  return true;
+}
+
+async function loadBatchCsvRows(supabase, batch, campaign) {
   const { data } = assertSupabase(
     await supabase
       .from("marketing_campaign_batch_customers")
-      .select("customer_id,marketing_contacts!inner(id,name,email,phone,postcode,pipeline,source)")
+      .select("customer_id,marketing_contacts!inner(id,first_name,last_name,email,phone,postcode,pipeline,source,marketing_status,lifecycle_status,email_ready,sms_ready,facebook_ready,suppression)")
       .eq("batch_id", batch.id)
+      .eq("marketing_contacts.lifecycle_status", "active")
+      .eq("marketing_contacts.marketing_status", "active")
       .order("added_at", { ascending: true }),
     "Could not load batch customers for export."
   );
@@ -781,11 +793,12 @@ async function loadBatchCsvRows(supabase, batch) {
   (data || []).forEach((row) => {
     const customer = Array.isArray(row.marketing_contacts) ? row.marketing_contacts[0] : row.marketing_contacts;
     const customerId = row.customer_id || customer?.id;
-    if (!customerId || seen.has(customerId)) return;
+    const ready = campaign.channel === "email" ? customer?.email_ready : campaign.channel === "sms" ? customer?.sms_ready : customer?.facebook_ready;
+    if (!customerId || seen.has(customerId) || !ready || batchContactSuppressed(customer, campaign.channel)) return;
     seen.add(customerId);
     rows.push({
       customer_id: customerId,
-      name: customer?.name || "",
+      name: [customer?.first_name, customer?.last_name].filter(Boolean).join(" "),
       email: customer?.email || "",
       phone: customer?.phone || "",
       postcode: customer?.postcode || "",
@@ -798,7 +811,7 @@ async function loadBatchCsvRows(supabase, batch) {
 
 async function buildFirstBatchExport(supabase, batch) {
   const campaign = await loadCampaign(supabase, batch.campaign_id);
-  const rows = await loadBatchCsvRows(supabase, batch);
+  const rows = await loadBatchCsvRows(supabase, batch, campaign);
   const filename = buildBatchExportFilename(campaign, batch);
   return { campaign, rows, filename, csv: buildBatchCsv(rows) };
 }
