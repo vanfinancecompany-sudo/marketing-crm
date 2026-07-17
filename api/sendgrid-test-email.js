@@ -7,6 +7,7 @@ import {
 } from "../lib/marketingEmailTemplateRenderer.js";
 import {
   SENDGRID_TEST_SENDER_EMAIL,
+  SendGridProviderError,
   sendSendGridEmail,
 } from "../lib/emailProviders/sendgrid.js";
 
@@ -74,6 +75,25 @@ export function allowedSendGridTestRecipient(requestedValue, configuredValue) {
   const configured = validateEmail(configuredValue, "Configured SendGrid test recipient email");
   const domain = configured.split("@")[1] || "";
   return INTERNAL_EMAIL_DOMAINS.has(domain) && requested === configured ? requested : "";
+}
+
+export function isSendGridTestEnvironment(environment = process.env) {
+  const vercelEnvironment = String(environment.VERCEL_ENV || "").trim().toLowerCase();
+  if (vercelEnvironment) return vercelEnvironment === "preview" || vercelEnvironment === "development";
+  const nodeEnvironment = String(environment.NODE_ENV || "").trim().toLowerCase();
+  return nodeEnvironment === "development" || nodeEnvironment === "test";
+}
+
+export function safeSendGridTestErrorMessage(error) {
+  if (error instanceof ApiError || error instanceof CampaignValidationError) {
+    return cleanText(error.message, 240) || "SendGrid test send failed.";
+  }
+  if (error instanceof SendGridProviderError) {
+    return error.ambiguous
+      ? "SendGrid test delivery could not be confirmed. Check the send record before trying again."
+      : "SendGrid rejected the test email.";
+  }
+  return "SendGrid test send failed.";
 }
 
 async function sendControlledTest(supabase, body = {}) {
@@ -187,13 +207,16 @@ async function sendControlledTest(supabase, body = {}) {
 
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
-  if (request.method !== "POST") return json(response, 405, { ok: false, message: "Method not allowed." });
+  if (!["GET", "POST"].includes(request.method)) return json(response, 405, { ok: false, message: "Method not allowed." });
   if (!authorize(request)) return json(response, 401, { ok: false, message: "SendGrid test access denied." });
+  const previewEnabled = isSendGridTestEnvironment();
+  if (request.method === "GET") return json(response, 200, { ok: true, preview_enabled: previewEnabled });
+  if (!previewEnabled) return json(response, 403, { ok: false, message: "SendGrid tests are available only in Preview." });
   try {
     const result = await sendControlledTest(getSupabase(), parseBody(request));
     return json(response, 200, { ok: true, test_only: true, ...result });
   } catch (error) {
     const status = error?.statusCode || (error instanceof CampaignValidationError ? 400 : 500);
-    return json(response, status, { ok: false, message: error?.message || "SendGrid test send failed." });
+    return json(response, status, { ok: false, message: safeSendGridTestErrorMessage(error) });
   }
 }
