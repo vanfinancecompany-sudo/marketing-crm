@@ -167,6 +167,10 @@ function cleanText(value) {
   return String(value || "").trim();
 }
 
+function normalizeEmail(value) {
+  return cleanText(value).toLowerCase();
+}
+
 function cleanCampaignValues(values = {}, existingCampaign = null) {
   const name = cleanText(values.name);
   const channel = cleanText(values.channel || existingCampaign?.channel || "email").toLowerCase();
@@ -780,7 +784,7 @@ async function loadBatchCsvRows(supabase, batch, campaign) {
   const { data } = assertSupabase(
     await supabase
       .from("marketing_campaign_batch_customers")
-      .select("customer_id,marketing_contacts!inner(id,first_name,last_name,email,phone,postcode,pipeline,source,marketing_status,lifecycle_status,email_ready,sms_ready,facebook_ready,suppression)")
+      .select("customer_id,marketing_contacts!inner(id,first_name,last_name,email,email_normalized,phone,postcode,pipeline,source,marketing_status,lifecycle_status,email_ready,sms_ready,facebook_ready,suppression)")
       .eq("batch_id", batch.id)
       .eq("marketing_contacts.lifecycle_status", "active")
       .eq("marketing_contacts.marketing_status", "active")
@@ -788,13 +792,27 @@ async function loadBatchCsvRows(supabase, batch, campaign) {
     "Could not load batch customers for export."
   );
 
+  const contactRows = (data || []).map((row) => Array.isArray(row.marketing_contacts) ? row.marketing_contacts[0] : row.marketing_contacts);
+  const permanentlySuppressed = new Set();
+  if (campaign.channel === "email") {
+    const emails = [...new Set(contactRows.map((customer) => normalizeEmail(customer?.email_normalized || customer?.email)).filter(Boolean))];
+    for (let index = 0; index < emails.length; index += 250) {
+      const identityResult = assertSupabase(
+        await supabase.from("marketing_suppression_identities").select("email_normalized").in("email_normalized", emails.slice(index, index + 250)),
+        "Could not check permanent email suppressions for batch export."
+      );
+      (identityResult.data || []).forEach((row) => permanentlySuppressed.add(normalizeEmail(row.email_normalized)));
+    }
+  }
+
   const rows = [];
   const seen = new Set();
   (data || []).forEach((row) => {
     const customer = Array.isArray(row.marketing_contacts) ? row.marketing_contacts[0] : row.marketing_contacts;
     const customerId = row.customer_id || customer?.id;
     const ready = campaign.channel === "email" ? customer?.email_ready : campaign.channel === "sms" ? customer?.sms_ready : customer?.facebook_ready;
-    if (!customerId || seen.has(customerId) || !ready || batchContactSuppressed(customer, campaign.channel)) return;
+    const email = normalizeEmail(customer?.email_normalized || customer?.email);
+    if (!customerId || seen.has(customerId) || !ready || batchContactSuppressed(customer, campaign.channel) || (campaign.channel === "email" && permanentlySuppressed.has(email))) return;
     seen.add(customerId);
     rows.push({
       customer_id: customerId,
@@ -822,9 +840,10 @@ async function listBatchHistory(supabase, body) {
 
 async function returnStoredExport(supabase, batch) {
   if (!batch.export_csv) throw new Error("This batch does not have a stored export snapshot.");
+  const { rows, filename, csv } = await buildFirstBatchExport(supabase, batch);
   return {
     batch: normalizeBatch(batch),
-    csv: { filename: batch.export_filename, content: batch.export_csv, count: batch.export_count },
+    csv: { filename: filename || batch.export_filename, content: csv, count: rows.length, historical_export_count: batch.export_count },
     summary: await getBatchSummaryMap(supabase, [batch.campaign_id]).then((map) => map.get(batch.campaign_id) || EMPTY_BATCH_SUMMARY),
   };
 }
@@ -878,10 +897,7 @@ async function exportBatch(supabase, body) {
 async function downloadBatchCsv(supabase, body) {
   const batch = await loadPrivateBatch(supabase, body.batch?.id || body.batchId || body.id);
   if (batch.status !== "exported") throw new Error("Export this batch before downloading the CSV.");
-  return {
-    batch: normalizeBatch(batch),
-    csv: { filename: batch.export_filename, content: batch.export_csv, count: batch.export_count },
-  };
+  return returnStoredExport(supabase, batch);
 }
 
 export default async function handler(request, response) {

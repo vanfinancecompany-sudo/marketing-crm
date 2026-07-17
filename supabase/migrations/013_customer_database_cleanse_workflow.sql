@@ -8,7 +8,10 @@ alter table public.marketing_contacts
 do $$
 begin
   if not exists (
-    select 1 from pg_constraint where conname = 'marketing_contacts_lifecycle_status_check'
+    select 1
+    from pg_constraint
+    where conname = 'marketing_contacts_lifecycle_status_check'
+      and conrelid = 'public.marketing_contacts'::regclass
   ) then
     alter table public.marketing_contacts
       add constraint marketing_contacts_lifecycle_status_check
@@ -83,10 +86,13 @@ select distinct on (lower(trim(coalesce(c.email_normalized, c.email))))
     'original_added_at', coalesce(entry.value ->> 'added_at', '')
   )
 from public.marketing_contacts c
-cross join lateral jsonb_each(coalesce(c.suppression, '{}'::jsonb)) as entry(type, value)
+cross join lateral jsonb_each(
+  case when jsonb_typeof(c.suppression) = 'object' then c.suppression else '{}'::jsonb end
+) as entry(type, value)
 where nullif(lower(trim(coalesce(c.email_normalized, c.email))), '') is not null
   and entry.type in ('email_unsubscribed', 'email_bounced', 'manual_suppression', 'global_do_not_contact')
-  and public.marketing_suppression_is_active(entry.value)
+  and jsonb_typeof(entry.value) = 'object'
+  and coalesce(lower(entry.value ->> 'active'), 'true') not in ('false', 'f', '0', 'no', 'off')
 order by lower(trim(coalesce(c.email_normalized, c.email))), coalesce(c.updated_at, now()) desc
 on conflict (email_normalized) do nothing;
 
@@ -115,9 +121,12 @@ where c.lifecycle_status = 'active'
     c.marketing_status in ('unsubscribed', 'suppressed')
     or exists (
       select 1
-      from jsonb_each(coalesce(c.suppression, '{}'::jsonb)) as entry(type, value)
+      from jsonb_each(
+        case when jsonb_typeof(c.suppression) = 'object' then c.suppression else '{}'::jsonb end
+      ) as entry(type, value)
       where entry.type in ('email_unsubscribed', 'email_bounced', 'manual_suppression', 'global_do_not_contact')
-        and public.marketing_suppression_is_active(entry.value)
+        and jsonb_typeof(entry.value) = 'object'
+        and coalesce(lower(entry.value ->> 'active'), 'true') not in ('false', 'f', '0', 'no', 'off')
     )
   );
 
@@ -132,13 +141,25 @@ declare
   v_email_normalized text;
 begin
   v_email_normalized := nullif(lower(trim(coalesce(new.email_normalized, new.email))), '');
-  if new.lifecycle_status = 'active'
-    and v_email_normalized is not null
-    and exists (
-      select 1 from public.marketing_suppression_identities si
-      where si.email_normalized = v_email_normalized
-    ) then
-    raise exception using errcode = '23514', message = 'Suppressed email identities cannot be activated.';
+  if new.lifecycle_status = 'active' then
+    if new.marketing_status in ('unsubscribed', 'suppressed')
+      or exists (
+        select 1
+        from jsonb_each(
+          case when jsonb_typeof(new.suppression) = 'object' then new.suppression else '{}'::jsonb end
+        ) as entry(type, value)
+        where entry.type in ('email_unsubscribed', 'email_bounced', 'manual_suppression', 'global_do_not_contact')
+          and public.marketing_suppression_is_active(entry.value)
+      )
+      or (
+        v_email_normalized is not null
+        and exists (
+          select 1 from public.marketing_suppression_identities si
+          where si.email_normalized = v_email_normalized
+        )
+      ) then
+      raise exception using errcode = '23514', message = 'Suppressed contacts and email identities cannot be activated.';
+    end if;
   end if;
   return new;
 end;
@@ -146,7 +167,7 @@ $$;
 
 drop trigger if exists marketing_contacts_guard_active_suppressed_email on public.marketing_contacts;
 create trigger marketing_contacts_guard_active_suppressed_email
-before insert or update of email, email_normalized, lifecycle_status
+before insert or update of email, email_normalized, lifecycle_status, marketing_status, suppression
 on public.marketing_contacts
 for each row execute function public.marketing_guard_active_suppressed_email();
 
@@ -203,6 +224,8 @@ declare
   v_campaign_text text;
   v_campaign_id uuid;
   v_note_email text;
+  v_recipient_text text;
+  v_recipient_id uuid;
   v_identity_email text;
 begin
   if v_type not in ('email_unsubscribed', 'email_bounced', 'sms_opt_out', 'facebook_excluded', 'manual_suppression', 'global_do_not_contact') then
@@ -244,7 +267,30 @@ begin
   where id = v_contact.id
   returning * into v_contact;
 
-  v_note_email := substring(coalesce(p_notes, '') from 'email:([^[:space:]]+)');
+  -- Provider webhooks may be processing an event for an older recipient address
+  -- after the customer card email changed. Only those trusted server callers may
+  -- override the card's current email identity through the notes field.
+  if p_added_by in ('Brevo webhook', 'SMTP2GO webhook') then
+    v_note_email := substring(coalesce(p_notes, '') from 'email:([^[:space:]]+)');
+    v_recipient_text := substring(coalesce(p_notes, '') from 'recipient:([0-9a-fA-F-]{36})');
+    if v_recipient_text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+      v_recipient_id := v_recipient_text::uuid;
+    end if;
+    if v_note_email is not null
+      and lower(trim(v_note_email)) !~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' then
+      v_note_email := null;
+    end if;
+    if v_note_email is not null
+      and not exists (
+        select 1
+        from public.marketing_email_send_recipients recipient
+        where recipient.id = v_recipient_id
+          and recipient.customer_id = v_contact.customer_id
+          and lower(trim(recipient.email)) = lower(trim(v_note_email))
+      ) then
+      v_note_email := null;
+    end if;
+  end if;
   v_identity_email := nullif(lower(trim(coalesce(nullif(v_note_email, ''), v_contact.email_normalized, v_contact.email))), '');
   if v_permanent_email and v_identity_email is not null then
     v_campaign_text := substring(coalesce(p_notes, '') from 'campaign:([0-9a-fA-F-]{36})');
@@ -307,7 +353,11 @@ begin
 
   if v_operation.prepared_at < now() - interval '30 minutes' then
     update public.marketing_database_clear_audit set status = 'cancelled' where id = p_operation_id;
-    raise exception 'The prepared clear operation has expired. Prepare the exports again.';
+    return jsonb_build_object(
+      'operation_id', p_operation_id,
+      'cancelled', true,
+      'error', 'The prepared clear operation has expired. Prepare the exports again.'
+    );
   end if;
 
   -- Block concurrent contact writes between the count check and lifecycle update.
@@ -318,7 +368,13 @@ begin
   where lifecycle_status = 'active';
   if v_current_active <> v_operation.active_count then
     update public.marketing_database_clear_audit set status = 'cancelled' where id = p_operation_id;
-    raise exception 'Active customer count changed after the safety exports. Download fresh exports and prepare again.';
+    return jsonb_build_object(
+      'operation_id', p_operation_id,
+      'cancelled', true,
+      'expected_active_count', v_operation.active_count,
+      'current_active_count', v_current_active,
+      'error', 'Active customer count changed after the safety exports. Download fresh exports and prepare again.'
+    );
   end if;
 
   update public.marketing_contacts

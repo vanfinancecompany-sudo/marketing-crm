@@ -321,8 +321,8 @@ function blockedReasonIsPermanent(reason = "") {
 }
 
 async function applyContactSuppression(supabase, recipient, event) {
+  if (recipient?.send_type !== "production") return;
   const customerId = normalizeCustomerId(recipient?.customer_id);
-  if (!customerId) return;
   let type = "";
   let reason = "";
   if (event.event_type === "unsubscribed") {
@@ -339,9 +339,39 @@ async function applyContactSuppression(supabase, recipient, event) {
     reason = "Brevo spam complaint event";
   }
   if (!type) return;
-  const contact = await supabase.from("marketing_contacts").select("id").eq("customer_id", customerId).maybeSingle();
+  const email = normalizeEmail(recipient.email || event.email_normalized);
+  const [contact, identity] = await Promise.all([
+    customerId
+      ? supabase.from("marketing_contacts").select("id,lifecycle_status").eq("customer_id", customerId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    email
+      ? supabase.from("marketing_suppression_identities").select("id").eq("email_normalized", email).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
   if (contact.error) throw new Error(contact.error.message || "Could not load contact for suppression.");
-  if (!contact.data?.id) return;
+  if (identity.error) throw new Error(identity.error.message || "Could not check permanent suppression identity.");
+  if (identity.data?.id) {
+    if (contact.data?.id && contact.data.lifecycle_status !== "suppressed") {
+      const hide = await supabase.from("marketing_contacts").update({ lifecycle_status: "suppressed", lifecycle_changed_at: new Date().toISOString() }).eq("id", contact.data.id);
+      if (hide.error) throw new Error(hide.error.message || "Could not hide permanently suppressed contact.");
+    }
+    return;
+  }
+  if (!contact.data?.id) {
+    if (!email) return;
+    const inserted = await supabase.from("marketing_suppression_identities").insert({
+      email_normalized: email,
+      suppression_type: type,
+      reason,
+      provider: "Brevo webhook",
+      campaign_id: recipient.campaign_id || null,
+      contact_id: null,
+      suppressed_at: event.event_at,
+      metadata: { orphaned_recipient_id: recipient.id || "", provider_message_id: event.provider_message_id || "" },
+    });
+    if (inserted.error && inserted.error.code !== "23505" && !/duplicate|unique/i.test(String(inserted.error.message || ""))) throw new Error(inserted.error.message || "Could not retain orphaned Brevo suppression identity.");
+    return;
+  }
   const rpc = await supabase.rpc("marketing_apply_suppression", {
     p_contact_id: contact.data.id,
     p_type: type,
@@ -374,10 +404,11 @@ async function recordEvent(supabase, event) {
     customer_id: normalizeCustomerId(recipient?.customer_id) || null,
   };
   const insert = await supabase.from("marketing_email_events").insert(eventRow).select("id").maybeSingle();
+  let duplicate = false;
   if (insert.error) {
     const message = String(insert.error.message || "").toLowerCase();
-    if (message.includes("duplicate") || message.includes("unique")) return { duplicate: true, correlated: Boolean(recipient) };
-    throw new Error(insert.error.message || "Could not record Brevo event.");
+    if (message.includes("duplicate") || message.includes("unique")) duplicate = true;
+    else throw new Error(insert.error.message || "Could not record Brevo event.");
   }
 
   if (recipient?.id && event.event_type !== "unknown") {
@@ -391,7 +422,7 @@ async function recordEvent(supabase, event) {
     await applyContactSuppression(supabase, recipient, event);
   }
 
-  return { duplicate: false, correlated: Boolean(recipient) };
+  return { duplicate, correlated: Boolean(recipient) };
 }
 
 export default async function handler(request, response) {

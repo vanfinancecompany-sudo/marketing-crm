@@ -11,7 +11,7 @@ import {
   cleanImportRow,
   customerUpsert,
 } from "../lib/marketingCustomerUpsert.js";
-import { normalizeEmailIdentity } from "../lib/customerDatabaseCleanse.js";
+import { contactHasPermanentSuppression, normalizeEmailIdentity } from "../lib/customerDatabaseCleanse.js";
 
 const CONTACT_COLUMNS = "id,customer_id,first_name,last_name,company,email,email_normalized,phone,phone_normalized,postcode,pipeline,source,sources,tags,notes,marketing_status,lifecycle_status,lifecycle_changed_at,email_ready,sms_ready,facebook_ready,duplicate_count,suppression,suppression_history,first_seen_at,last_seen_at,created_at,updated_at";
 const PAGE_SIZE = 50;
@@ -166,7 +166,7 @@ function toDbPayload(contact) {
 }
 
 function applyFilters(query, filters = {}, options = {}) {
-  if (!options.includeInactive) query = query.eq("lifecycle_status", "active");
+  if (!options.includeInactive) query = query.eq("lifecycle_status", "active").eq("marketing_status", "active");
   if (Array.isArray(filters.pipeline)) query = query.in("pipeline", filters.pipeline);
   else if (filters.pipeline && filters.pipeline !== "all") query = query.eq("pipeline", filters.pipeline);
   if (filters.source && filters.source !== "all") query = query.eq("source", filters.source);
@@ -212,6 +212,7 @@ async function countContactsSince(supabase, field, since, includeNew = true) {
     .from("marketing_contacts")
     .select("id", { count: "exact", head: true })
     .eq("lifecycle_status", "active")
+    .eq("marketing_status", "active")
     .gte(field, since);
 
   if (!includeNew) query = query.lt("created_at", since);
@@ -285,7 +286,7 @@ async function getActivityStats(supabase) {
 
   const [totalContacts, latestRows, todayCreated, todayUpdated, dayCreated, dayUpdated, weekCreated, weekUpdated, monthCreated, monthUpdated] = await Promise.all([
     countContacts(supabase, {}),
-    supabase.from("marketing_contacts").select("created_at,updated_at").eq("lifecycle_status", "active").order("updated_at", { ascending: false }).limit(1),
+    supabase.from("marketing_contacts").select("created_at,updated_at").eq("lifecycle_status", "active").eq("marketing_status", "active").order("updated_at", { ascending: false }).limit(1),
     countContactsSince(supabase, "created_at", periods.today),
     countContactsSince(supabase, "updated_at", periods.today, false),
     countContactsSince(supabase, "created_at", periods.last24Hours),
@@ -351,7 +352,13 @@ async function createContact(supabase, body) {
 }
 
 async function updateContact(supabase, body) {
-  const existingContact = body.contact || {};
+  const id = body.contact?.id || body.id;
+  if (!id) throw new Error("Contact ID is required.");
+  const existingResult = assertSupabase(await supabase.from("marketing_contacts").select(CONTACT_COLUMNS).eq("id", id).single(), "Could not load marketing contact.");
+  const existingContact = existingResult.data || {};
+  if (contactHasPermanentSuppression(existingContact) || String(existingContact.marketing_status || "active") !== "active") {
+    throw new Error("Permanently suppressed contacts cannot be edited or reactivated.");
+  }
   const { contact, error } = updateContactRecord(existingContact, body.values || {});
   if (error) throw new Error(error);
   const payload = toDbPayload(cleanDbContact(contact, existingContact));

@@ -85,8 +85,8 @@ export async function getMarketingExportCsv(key, scope = "all", filters = {}) {
 }
 
 export async function createMarketingContactsBackup() {
-  const result = await requestMarketingImport("backup");
-  return result.backup;
+  const result = await getCustomerDatabaseSafetyExport("exportFull");
+  return { filename: `pre-import-${result.filename}`, contactCount: result.count || 0, csv: result.csv || "" };
 }
 
 export async function startMarketingImport({ filename, fileSize = 0, pipeline, totalRows, checksum = "", batchSize = MARKETING_IMPORT_BATCH_SIZE, backup = null }) {

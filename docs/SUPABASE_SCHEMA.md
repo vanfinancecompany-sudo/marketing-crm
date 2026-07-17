@@ -171,6 +171,8 @@ Inserting or updating an identity immediately moves every matching contact to li
 
 Audit and concurrency guard for the protected clear workflow. A prepared operation records the current lifecycle and safety-export counts, expires after 30 minutes, and can be completed only with the exact confirmation phrase. Completion locks contact writes, verifies that the active count is unchanged, and moves active contacts to `awaiting_verification`.
 
+Migration `013_customer_database_cleanse_workflow.sql` is intentionally forward-only. Apply it with the normal transactional Supabase migration runner (or inside an explicit transaction if applying manually), so any statement failure rolls back the migration as a unit. Do not roll it back by dropping lifecycle or suppression data: that could discard the permanent identity required to keep bounced and unsubscribed email addresses ineligible. If application code must be rolled back after customers have been cleared, retain the lifecycle-aware list/audience filters or deploy a forward compatibility fix first; pre-013 application code does not understand `awaiting_verification`.
+
 ## Campaign-history relationships
 
 - `marketing_campaign_batch_customers.customer_id` references the internal UUID `marketing_contacts.id` for legacy campaign batches.

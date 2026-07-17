@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { buildPreviouslyDeliveredRows, normalizeEmailIdentity } from "../lib/customerDatabaseCleanse.js";
+import { activeSuppressionEntry, buildPreviouslyDeliveredRows, normalizeEmailIdentity } from "../lib/customerDatabaseCleanse.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const PAGE_SIZE = 1000;
@@ -58,18 +58,55 @@ async function suppressionExport(supabase) {
     () => supabase.from("marketing_suppression_identities").select("email_normalized,suppression_type,reason,provider,campaign_id,suppressed_at").order("suppressed_at", { ascending: false }),
     "Could not export permanent suppression identities."
   );
-  const campaignRows = await loadByChunks(identities.map((row) => row.campaign_id), async (ids) => {
+  const contacts = await loadAll(
+    () => supabase.from("marketing_contacts").select("id,email,email_normalized,suppression").order("id", { ascending: true }),
+    "Could not export channel suppression records."
+  );
+  const records = new Map();
+  identities.forEach((row) => {
+    const email = normalizeEmailIdentity(row.email_normalized);
+    records.set(`${email}:${row.suppression_type}`, {
+      email,
+      suppression_type: row.suppression_type,
+      reason: row.reason || "",
+      provider: row.provider || "",
+      campaign_id: row.campaign_id || "",
+      suppressed_date: row.suppressed_at || "",
+    });
+  });
+  contacts.forEach((contact) => {
+    const suppression = contact.suppression && typeof contact.suppression === "object" && !Array.isArray(contact.suppression) ? contact.suppression : {};
+    const email = normalizeEmailIdentity(contact.email_normalized || contact.email);
+    Object.entries(suppression).forEach(([type, entry]) => {
+      if (!activeSuppressionEntry(entry)) return;
+      const key = `${email || contact.id}:${type}`;
+      if (records.has(key)) return;
+      const campaignId = String(entry.notes || "").match(/campaign:([0-9a-f-]{36})/i)?.[1] || "";
+      records.set(key, {
+        email,
+        suppression_type: type,
+        reason: entry.reason || "",
+        provider: entry.added_by || "Marketing CRM",
+        campaign_id: campaignId,
+        suppressed_date: entry.added_at || "",
+      });
+    });
+  });
+  const suppressionRecords = [...records.values()];
+  const campaignRows = await loadByChunks(suppressionRecords.map((row) => row.campaign_id), async (ids) => {
     const result = assertSupabase(await supabase.from("marketing_campaigns").select("id,name").in("id", ids), "Could not load suppression campaign names.");
     return result.data || [];
   });
   const campaignNames = new Map(campaignRows.map((row) => [row.id, row.name]));
-  const rows = identities.map((row) => ({ email: row.email_normalized, suppression_type: row.suppression_type, reason: row.reason || "", provider: row.provider || "", campaign: campaignNames.get(row.campaign_id) || "", suppressed_date: row.suppressed_at || "" }));
+  const rows = suppressionRecords
+    .map((row) => ({ email: row.email, suppression_type: row.suppression_type, reason: row.reason, provider: row.provider, campaign: campaignNames.get(row.campaign_id) || "", suppressed_date: row.suppressed_date }))
+    .sort((left, right) => new Date(right.suppressed_date || 0) - new Date(left.suppressed_date || 0));
   return { filename: `suppression-list-${new Date().toISOString().slice(0, 10)}.csv`, count: rows.length, csv: toCsv(rows, SUPPRESSION_EXPORT_COLUMNS) };
 }
 
 async function previouslyDeliveredExport(supabase) {
   const recipients = await loadAll(
-    () => supabase.from("marketing_email_send_recipients").select("id,send_id,campaign_id,send_type,customer_id,email,status,provider_message_id,delivered_at,last_event_at,last_event_type").eq("send_type", "production"),
+    () => supabase.from("marketing_email_send_recipients").select("id,send_id,campaign_id,send_type,customer_id,email,status,provider_message_id,delivered_at,hard_bounced_at,complained_at,unsubscribed_at,last_event_at,last_event_type").eq("send_type", "production"),
     "Could not load production campaign recipients."
   );
   const events = await loadAll(
@@ -114,6 +151,7 @@ async function clearActive(supabase, body) {
   if (body.confirmation !== CONFIRMATION_PHRASE) throw new Error(`Type ${CONFIRMATION_PHRASE} exactly.`);
   if (!body.operationId) throw new Error("Prepare the safety exports before clearing the database.");
   const result = assertSupabase(await supabase.rpc("marketing_clear_active_customer_database", { p_operation_id: body.operationId, p_confirmation: body.confirmation }), "Could not clear the active Customer Database.");
+  if (result.data?.error) throw new Error(result.data.error);
   return { clearResult: result.data, counts: await lifecycleCounts(supabase) };
 }
 

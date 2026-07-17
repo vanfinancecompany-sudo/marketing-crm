@@ -116,7 +116,7 @@ async function processBatch(supabase, body) {
     if (contact.email_normalized && suppressedEmails.has(contact.email_normalized)) { counts.suppressedEmails += 1; counts.rejectedRows += 1; await logImportRow(supabase, importId, row, "suppressed", "Email is permanently suppressed"); continue; }
     const exact = await findExactContact(supabase, contact, sourceCustomerId);
     if (exact.contact) {
-      if (exact.contact.lifecycle_status === "suppressed" || contactHasPermanentSuppression(exact.contact)) { counts.suppressedEmails += 1; counts.rejectedRows += 1; await logImportRow(supabase, importId, row, "suppressed", "Existing customer is permanently suppressed", exact.contact.customer_id); continue; }
+      if (exact.contact.lifecycle_status === "suppressed" || contactHasPermanentSuppression(exact.contact) || String(exact.contact.marketing_status || "active") !== "active") { counts.suppressedEmails += 1; counts.rejectedRows += 1; await logImportRow(supabase, importId, row, "suppressed", "Existing customer is permanently suppressed", exact.contact.customer_id); continue; }
       const wasInactive = exact.contact.lifecycle_status && exact.contact.lifecycle_status !== "active";
       const payload = mergeContactPayload(exact.contact, contact, { pipelineExplicit, matchedOn: exact.matchedOn });
       const { data: updated } = assertSupabase(await supabase.from("marketing_contacts").update(payload).eq("id", exact.contact.id).select(CONTACT_COLUMNS).single(), "Could not update duplicate contact.");
