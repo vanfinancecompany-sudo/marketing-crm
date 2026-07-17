@@ -581,7 +581,7 @@
         const tests = state.dashboard?.tests || {};
         const cards = [
           ["Delivered", recipients.delivered || 0, `${recipients.delivery_rate || 0}% delivery rate`],
-          ["Opens", recipients.opens || recipients.unique_opens || recipients.opened || 0, "All tracked open events"],
+          ["Open Events", recipients.open_events || recipients.opens || 0, "Raw tracked open activity"],
           ["Unique Opens", recipients.unique_opens || recipients.opened || 0, `${recipients.open_rate || 0}% open rate`],
           ["Clicks", recipients.clicked || 0, `${recipients.click_rate || 0}% click rate`],
           ["Delivery Rate", `${recipients.delivery_rate || 0}%`, "Delivered / accepted recipients"],
@@ -589,12 +589,12 @@
           ["Click Rate", `${recipients.click_rate || 0}%`, "Unique clicks / delivered recipients"],
           ["Bounce Rate", `${recipients.bounce_rate || 0}%`, "Soft, hard and blocked recipients"],
           ["Unsubscribe Rate", `${recipients.unsubscribe_rate || 0}%`, "Unsubscribes / accepted recipients"],
-          ["Soft Bounce", recipients.soft_bounced || 0, "Temporary delivery failures"],
+          ["Final Soft Bounce", recipients.soft_bounced || 0, "Recipients not later delivered"],
           ["Hard Bounce", recipients.hard_bounced || 0, "Permanent delivery failures"],
-          ["Deferred", recipients.deferred || 0, "Delivery deferred by provider"],
-          ["Blocked", recipients.blocked || 0, "Messages blocked by provider"],
-          ["Complaints", recipients.complained || 0, "Spam complaint events"],
-          ["Unsubscribes", recipients.unsubscribed || 0, "Production unsubscribe events"],
+          ["Final Deferred", recipients.deferred || 0, "Recipients still awaiting a final outcome"],
+          ["Final Blocked", recipients.blocked || 0, "Recipients finally blocked or dropped"],
+          ["Complaints", recipients.complained || 0, "Unique production recipients"],
+          ["Unsubscribes", recipients.unsubscribed || 0, "Unique production recipients"],
           ["Test sends", tests.count || 0, "Excluded from production totals"],
         ];
         $("metricGrid").innerHTML = cards.map(([label, value, detail]) => `
