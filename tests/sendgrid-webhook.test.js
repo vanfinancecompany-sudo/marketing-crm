@@ -5,6 +5,7 @@ import {
   normalizeSendGridEvent,
   processSendGridEvent,
   readRawRequestBody,
+  sendGridRecipientUpdates,
   verifySendGridRecipientHints,
   verifySendGridSignature,
 } from "../lib/emailProviders/sendgridWebhook.js";
@@ -137,6 +138,26 @@ test("duplicate SendGrid webhook delivery is idempotent", async () => {
   assert.equal(repository.state.eventIds.size, 1);
   assert.equal(repository.state.updates.length, 2);
   assert.equal(repository.state.suppressions.length, 0);
+});
+
+test("SendGrid soft bounce then delivery repairs the current recipient status", () => {
+  const softBounce = normalizeSendGridEvent(eventPayload("bounce", { type: "blocked", timestamp: 1784300000 }));
+  const delivered = normalizeSendGridEvent(eventPayload("delivered", { timestamp: 1784300060 }));
+  const afterBounce = { ...recipient(), ...sendGridRecipientUpdates(recipient(), softBounce) };
+  const afterDelivery = { ...afterBounce, ...sendGridRecipientUpdates(afterBounce, delivered) };
+  assert.equal(afterBounce.status, "soft_bounced");
+  assert.equal(afterDelivery.status, "delivered");
+  assert.equal(afterDelivery.failure_reason, null);
+});
+
+test("an older deferred SendGrid event cannot overwrite a later delivery", () => {
+  const delivered = normalizeSendGridEvent(eventPayload("delivered", { timestamp: 1784300060 }));
+  const olderDeferred = normalizeSendGridEvent(eventPayload("deferred", { timestamp: 1784300000 }));
+  const afterDelivery = { ...recipient(), ...sendGridRecipientUpdates(recipient(), delivered) };
+  const afterDeferred = { ...afterDelivery, ...sendGridRecipientUpdates(afterDelivery, olderDeferred) };
+  assert.equal(afterDeferred.status, "delivered");
+  assert.equal(afterDeferred.last_event_type, "delivered");
+  assert.equal(afterDeferred.last_event_at, delivered.event_at);
 });
 
 test("duplicate permanent events repair side effects without duplicating suppression identity", async () => {

@@ -98,7 +98,7 @@
       <p id="reportingNote" class="reporting-note"></p>
       <div class="reporting-layout">
         <section class="reporting-panel">
-          <h4>Production Recipient Status</h4>
+          <h4>Final Production Recipient Outcomes</h4>
           <div id="reportingStatusBreakdown" class="reporting-table-wrap"></div>
         </section>
         <section class="reporting-panel">
@@ -133,18 +133,18 @@
     const latestTest = tests.latest_created_at ? `${tests.latest_status || "unknown"} · ${formatDate(tests.latest_completed_at || tests.latest_created_at)}` : "No test sends";
     const cards = [
       ["Delivered", recipients.delivered || 0, `${recipients.delivery_rate || 0}% delivery rate`],
-      ["Opens", recipients.opens || recipients.unique_opens || recipients.opened || 0, "All tracked open events"],
+      ["Open Events", recipients.open_events || recipients.opens || 0, "Raw tracked open activity"],
       ["Unique Opens", recipients.unique_opens || recipients.opened || 0, `${recipients.open_rate || 0}% open rate`],
       ["Clicked", recipients.clicked || 0, `${recipients.click_rate || 0}% click rate`],
       ["Delivery Rate", `${recipients.delivery_rate || 0}%`, "Delivered / accepted recipients"],
       ["Open Rate", `${recipients.open_rate || 0}%`, "Unique opens / delivered recipients"],
       ["Click Rate", `${recipients.click_rate || 0}%`, "Unique clicks / delivered recipients"],
       ["Bounce Rate", `${recipients.bounce_rate || 0}%`, "Soft, hard and blocked recipients"],
-      ["Soft Bounce", recipients.soft_bounced || 0, "Temporary delivery failures"],
+      ["Final Soft Bounce", recipients.soft_bounced || 0, "Recipients not later delivered"],
       ["Hard Bounce", recipients.hard_bounced || 0, "Permanent delivery failures"],
-      ["Deferred", recipients.deferred || 0, "Delivery deferred by provider"],
-      ["Blocked", recipients.blocked || 0, "Messages blocked by provider"],
-      ["Complaints", recipients.complained || 0, "Spam complaint events"],
+      ["Final Deferred", recipients.deferred || 0, "Recipients still awaiting a final outcome"],
+      ["Final Blocked", recipients.blocked || 0, "Recipients finally blocked or dropped"],
+      ["Complaints", recipients.complained || 0, "Unique production recipients"],
       ["Unsubscribes", recipients.unsubscribed || 0, `${recipients.unsubscribe_rate || 0}% unsubscribe rate`],
       ["Production batches", sends.production_batches || 0, "Completed or attempted batches"],
       ["Test sends", tests.count || 0, latestTest],
@@ -152,7 +152,7 @@
     $("reportingMetrics").innerHTML = cards.map(([label, value, detail]) => `
       <div class="reporting-card"><strong>${escapeHtml(label)}</strong><b>${escapeHtml(value)}</b><span>${escapeHtml(detail)}</span></div>
     `).join("");
-    $("reportingNote").textContent = "Production metrics exclude internal test sends. Open counts are based on provider tracking and may include privacy proxy or prefetch activity.";
+    $("reportingNote").textContent = "Final outcome cards count each production recipient once; recent events and open-event activity remain historical webhook events. Internal test sends are excluded.";
   }
   function renderStatusBreakdown(rows = []) {
     if (!rows.length) {

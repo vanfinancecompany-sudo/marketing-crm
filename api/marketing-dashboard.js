@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { activeEmailProvider, emailProviderConfig } from "../lib/emailProviders/marketingProvider.js";
+import { resolveProductionRecipientReporting } from "../lib/marketingRecipientOutcomes.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const TEMPLATE_CAMPAIGN_SOURCE = "template_campaign_foundation";
@@ -10,6 +11,7 @@ const CAMPAIGN_ROW_CAP = 5000;
 const SEND_COLUMNS = "id,campaign_id,send_type,status,requested_count,eligible_count,suppressed_count,sent_count,failed_count,skipped_duplicate_count,created_at,started_at,completed_at,error_summary,metadata";
 const EVENT_COLUMNS = "id,campaign_id,send_id,recipient_id,customer_id,email_normalized,provider_message_id,event_type,event_at,link_url,reason,metadata,created_at";
 const RECIPIENT_CORRELATION_COLUMNS = "id,send_id,campaign_id,customer_id,provider_message_id";
+const RECIPIENT_OUTCOME_COLUMNS = "id,send_id,campaign_id,send_type,customer_id,email,status,provider_message_id,first_sent_at,last_event_at,created_at,updated_at,delivered_at,opened_at,clicked_at,soft_bounced_at,hard_bounced_at,complained_at,unsubscribed_at,blocked_at,deferred_at,failed_at,last_event_type,last_event_reason";
 const CAMPAIGN_COLUMNS = "id,name,status,campaign_type,template_name,template_snapshot,selected_vehicle_count,metadata,created_at,updated_at,archived_at";
 
 class ApiError extends Error {
@@ -53,13 +55,6 @@ function maskEmail(value) {
   if (!user || !domain) return "";
   const visible = user.length <= 2 ? user.slice(0, 1) : `${user.slice(0, 2)}...`;
   return `${visible}@${domain}`;
-}
-
-function percent(part, total) {
-  const numerator = Number(part || 0);
-  const denominator = Number(total || 0);
-  if (!denominator || !Number.isFinite(numerator) || !Number.isFinite(denominator)) return 0;
-  return Math.round((numerator / denominator) * 1000) / 10;
 }
 
 function chunk(values, size = 200) {
@@ -242,50 +237,6 @@ function aggregateProductionSends(sends = []) {
   }, { production_batches: 0, requested: 0, accepted: 0, failed: 0, duplicates: 0, completed: 0, partially_failed: 0, failed_batches: 0, submission_unknown_batches: 0 });
 }
 
-function uniqueEventCount(events = [], eventTypes = []) {
-  const types = new Set(eventTypes);
-  const ids = new Set();
-  events.forEach((event) => {
-    if (!types.has(event.event_type) || !event.recipient_id) return;
-    ids.add(event.recipient_id);
-  });
-  return ids.size;
-}
-
-function aggregateEventActivity(events = [], submissionDenominator = 0) {
-  const delivered = uniqueEventCount(events, ["delivered"]);
-  const opens = events.filter((event) => event.event_type === "opened").length;
-  const uniqueOpens = uniqueEventCount(events, ["opened"]);
-  const clicked = uniqueEventCount(events, ["clicked"]);
-  const hardBounced = uniqueEventCount(events, ["hard_bounce", "invalid_email"]);
-  const softBounced = uniqueEventCount(events, ["soft_bounce"]);
-  const deferred = uniqueEventCount(events, ["deferred"]);
-  const blocked = uniqueEventCount(events, ["blocked"]);
-  const complained = uniqueEventCount(events, ["complaint"]);
-  const unsubscribed = uniqueEventCount(events, ["unsubscribed"]);
-  return {
-    delivered,
-    opens: Math.max(opens, uniqueOpens),
-    unique_opens: uniqueOpens,
-    opened: uniqueOpens,
-    clicked,
-    hard_bounced: hardBounced,
-    soft_bounced: softBounced,
-    deferred,
-    blocked,
-    complained,
-    unsubscribed,
-    delivery_rate: percent(delivered, submissionDenominator),
-    open_rate: percent(uniqueOpens, delivered || submissionDenominator),
-    click_rate: percent(clicked, delivered || submissionDenominator),
-    click_to_open_rate: percent(clicked, uniqueOpens),
-    bounce_rate: percent(hardBounced + softBounced + blocked, submissionDenominator),
-    unsubscribe_rate: percent(unsubscribed, submissionDenominator),
-    submission_unknown: 0,
-    failed: 0,
-  };
-}
-
 function testSendSummary(sends = []) {
   const tests = sends.filter((send) => send.send_type === "test").sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
   const latest = tests[0] || null;
@@ -299,7 +250,7 @@ function testSendSummary(sends = []) {
   };
 }
 
-function campaignPerformance(campaigns = [], periodProductionSends = [], periodProductionEvents = []) {
+function campaignPerformance(campaigns = [], periodProductionSends = [], productionRecipients = [], productionOutcomeEvents = []) {
   const campaignMap = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
   const sendsByCampaign = new Map();
   periodProductionSends.forEach((send) => {
@@ -307,16 +258,23 @@ function campaignPerformance(campaigns = [], periodProductionSends = [], periodP
     rows.push(send);
     sendsByCampaign.set(send.campaign_id, rows);
   });
+  const recipientsByCampaign = new Map();
+  productionRecipients.forEach((recipient) => {
+    const rows = recipientsByCampaign.get(recipient.campaign_id) || [];
+    rows.push(recipient);
+    recipientsByCampaign.set(recipient.campaign_id, rows);
+  });
   const eventsByCampaign = new Map();
-  periodProductionEvents.forEach((event) => {
+  productionOutcomeEvents.forEach((event) => {
     const rows = eventsByCampaign.get(event.campaign_id) || [];
     rows.push(event);
     eventsByCampaign.set(event.campaign_id, rows);
   });
-  const campaignIds = new Set([...campaignMap.keys(), ...sendsByCampaign.keys(), ...eventsByCampaign.keys()]);
+  const campaignIds = new Set([...campaignMap.keys(), ...sendsByCampaign.keys(), ...recipientsByCampaign.keys(), ...eventsByCampaign.keys()]);
   return Array.from(campaignIds).map((id) => {
     const campaign = campaignMap.get(id) || { id, name: "Unknown campaign" };
     const sends = sendsByCampaign.get(id) || [];
+    const recipients = recipientsByCampaign.get(id) || [];
     const events = eventsByCampaign.get(id) || [];
     const latestActivityAt = [
       ...sends.map((send) => send.completed_at || send.started_at || send.created_at),
@@ -325,7 +283,7 @@ function campaignPerformance(campaigns = [], periodProductionSends = [], periodP
       campaign.created_at,
     ].filter(Boolean).sort().pop() || null;
     const sendMetrics = aggregateProductionSends(sends);
-    const eventMetrics = aggregateEventActivity(events, sendMetrics.accepted);
+    const eventMetrics = resolveProductionRecipientReporting(recipients, events);
     return {
       id,
       name: campaign.name || "Untitled campaign",
@@ -338,7 +296,7 @@ function campaignPerformance(campaigns = [], periodProductionSends = [], periodP
       last_production_send_at: latestActivityAt,
       production_batches: sends.length,
       requested: sendMetrics.requested,
-      accepted: sendMetrics.accepted,
+      accepted: eventMetrics.accepted,
       delivered: eventMetrics.delivered,
       opens: eventMetrics.opens,
       unique_opens: eventMetrics.unique_opens,
@@ -502,7 +460,7 @@ function partialWarning(partials = []) {
 }
 
 function dashboardNote(partial) {
-  const base = "Send totals use production sends created in the selected period. Engagement uses verified production webhook events whose event_at is inside the selected period, so a click today from an older send counts today. Open rates can be affected by privacy proxy and prefetch behaviour; clicks are generally stronger.";
+  const base = "Recipient rates use the final/current outcome of unique production recipients from sends created in the selected period. Raw webhook event activity is reported separately by event time. Open rates can be affected by privacy proxy and prefetch behaviour; clicks are generally stronger.";
   if (!partial.partial_data) return base;
   const affected = partial.affected_datasets.map((item) => `${item.dataset}: loaded ${item.loaded_rows} of ${item.total_count}`).join("; ");
   return `Partial data warning: one or more datasets reached a safety cap (${affected}). Totals for affected datasets are not authoritative. ${base}`;
@@ -535,6 +493,8 @@ async function loadDashboard(supabase, body = {}) {
   let periodProductionSends = [];
   let periodEvents = [];
   let periodProductionEvents = [];
+  let productionRecipients = [];
+  let productionOutcomeEvents = [];
   let campaigns = [];
   const webhookProvider = providerConfig.provider;
   let webhook = { provider: webhookProvider, configured: providerConfig.webhookVerificationConfigured, latest_event_at: null, events_last_24h: 0, events_last_7d: 0, state: "awaiting_first_event" };
@@ -546,6 +506,29 @@ async function loadDashboard(supabase, body = {}) {
     sends = sendResult.rows;
     if (sendResult.partial) partials.push(sendResult);
     periodProductionSends = productionSendsOnly(sends);
+    const periodProductionSendIds = periodProductionSends.map((send) => send.id).filter(Boolean);
+    const productionRecipientResult = await loadRowsByChunks(
+      supabase,
+      "marketing_email_send_recipients",
+      RECIPIENT_OUTCOME_COLUMNS,
+      "send_id",
+      periodProductionSendIds,
+      (query) => query.eq("send_type", "production"),
+      { dataset: "period production recipients", limit: EVENT_ROW_CAP }
+    );
+    productionRecipients = productionRecipientResult.rows;
+    partials.push(...productionRecipientResult.partials);
+    const productionOutcomeEventResult = await loadRowsByChunks(
+      supabase,
+      "marketing_email_events",
+      EVENT_COLUMNS,
+      "send_id",
+      periodProductionSendIds,
+      (query) => query.lte("event_at", range.ended_at),
+      { dataset: "production recipient outcome events", limit: EVENT_ROW_CAP }
+    );
+    productionOutcomeEvents = productionOutcomeEventResult.rows;
+    partials.push(...productionOutcomeEventResult.partials);
 
     const eventResult = await loadAllRows(() => applyPeriod(supabase.from("marketing_email_events").select(EVENT_COLUMNS, { count: "exact" }).order("event_at", { ascending: false }), "event_at", range), { dataset: "period webhook events", limit: EVENT_ROW_CAP });
     periodEvents = eventResult.rows;
@@ -579,7 +562,11 @@ async function loadDashboard(supabase, body = {}) {
     });
     periodProductionEvents = periodEvents.filter((event) => sendsById.get(event.send_id)?.send_type === "production");
 
-    const campaignIds = new Set([...periodProductionSends.map((send) => send.campaign_id).filter(Boolean), ...periodProductionEvents.map((event) => event.campaign_id).filter(Boolean)]);
+    const campaignIds = new Set([
+      ...periodProductionSends.map((send) => send.campaign_id).filter(Boolean),
+      ...periodProductionEvents.map((event) => event.campaign_id).filter(Boolean),
+      ...productionRecipients.map((recipient) => recipient.campaign_id).filter(Boolean),
+    ]);
     const recentCampaigns = await loadAllRows(() => supabase.from("marketing_campaigns").select(CAMPAIGN_COLUMNS, { count: "exact" }).eq("metadata->>source", TEMPLATE_CAMPAIGN_SOURCE).order("updated_at", { ascending: false }), { dataset: "recent campaigns", limit: 100 });
     recentCampaigns.rows.forEach((campaign) => campaignIds.add(campaign.id));
     const campaignResult = campaignIds.size
@@ -610,7 +597,8 @@ async function loadDashboard(supabase, body = {}) {
 
   const suppression = await loadSuppressionHealth(supabase);
   const productionSendMetrics = aggregateProductionSends(periodProductionSends);
-  const productionEventMetrics = aggregateEventActivity(periodProductionEvents, productionSendMetrics.accepted);
+  const productionRecipientResolution = resolveProductionRecipientReporting(productionRecipients, productionOutcomeEvents);
+  const { recipient_outcomes: _recipientOutcomes, ...productionRecipientMetrics } = productionRecipientResolution;
   const topClicks = topClickedDestinations(periodProductionEvents, campaigns);
   const recent = recentActivity({ sends, events: periodProductionEvents, campaigns, suppressions: suppression.history || suppression.recent || [] });
   const partial = partialWarning(partials);
@@ -634,7 +622,7 @@ async function loadDashboard(supabase, body = {}) {
       semantics: {
         campaign_table: "Period performance: send rows are counted by send created_at in the selected period; engagement is counted by production webhook event_at in the selected period.",
         send_activity: "Production batch/requested/accepted/failed/skipped figures use production sends created within the selected period.",
-        engagement_activity: "Delivered, opens, clicks, bounces, complaints and unsubscribes use verified production webhook events whose event_at is inside the selected period, even if the original send was earlier.",
+        engagement_activity: "Recipient outcome rates use one final/current outcome for each unique production recipient accepted by sends created in the selected period. Raw webhook activity remains separately event-based.",
       },
       health: {
         brevo,
@@ -648,13 +636,13 @@ async function loadDashboard(supabase, body = {}) {
       launch_readiness: { ready_for_controlled_email_sending: Object.values(essentialReadiness).every(Boolean), checks: essentialReadiness },
       production: {
         sends: productionSendMetrics,
-        events: productionEventMetrics,
-        recipients: productionEventMetrics,
+        events: eventSummary(periodProductionEvents),
+        recipients: productionRecipientMetrics,
         production_campaigns_with_send_activity: new Set(periodProductionSends.map((send) => send.campaign_id).filter(Boolean)).size,
         production_campaigns_with_event_activity: new Set(periodProductionEvents.map((event) => event.campaign_id).filter(Boolean)).size,
       },
       tests: testSendSummary(sends),
-      campaigns: campaignPerformance(campaigns, periodProductionSends, periodProductionEvents),
+      campaigns: campaignPerformance(campaigns, periodProductionSends, productionRecipients, productionOutcomeEvents),
       event_breakdown: eventSummary(periodProductionEvents),
       top_clicked_vehicles: topClicks.vehicles,
       top_clicked_links: topClicks.other,
