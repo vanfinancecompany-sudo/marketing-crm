@@ -84,6 +84,7 @@
     if (name === "Sending") {
       const text = $("brevoConnectionBanner")?.innerText || "";
       const provider = text.match(/^(SendGrid|SMTP2GO|Brevo)/i)?.[1] || "Email provider";
+      if (/configured for Mail Send/i.test(text)) return `${provider} Configured for Mail Send`;
       if (/authorised/i.test(text)) return `${provider} Authorised`;
       if (/rejected/i.test(text)) return `${provider} Rejected`;
       if (/not fully configured/i.test(text)) return `${provider} Not Configured`;
@@ -193,7 +194,7 @@
     const hasAudience = finalSendCount > 0;
     const ready = /READY TO SEND/i.test($("readyPanel")?.textContent || "");
     const providerStatus = $("brevoConnectionBanner")?.innerText || "";
-    const providerAuthorised = /authorised/i.test(providerStatus);
+    const providerAuthorised = /authorised|configured for Mail Send/i.test(providerStatus);
     const history = readSendHistory();
     const testComplete = history.some((send) => send.type.includes("test") && SUCCESS_SEND_STATUSES.has(send.status) && send.accepted > 0 && send.failed === 0);
     const productionRows = history.filter((send) => send.type.includes("production"));

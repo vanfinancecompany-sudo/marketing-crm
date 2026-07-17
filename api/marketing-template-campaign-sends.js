@@ -261,12 +261,13 @@ function requireProductionSendConfig(provider = activeEmailProvider()) {
   if (missing.length) throw new ApiError(400, `Production sending is not configured. Missing: ${missing.join(", ")}.`);
 }
 
-function emailProviderConfigStatus() {
-  const config = emailProviderConfig();
+function emailProviderConfigStatus(provider = activeEmailProvider(), environment = process.env) {
+  const config = emailProviderConfig(provider, environment);
   return {
     provider: config.provider,
     configured: Boolean(config.apiKey && config.senderEmail && config.senderName),
     api_key_configured: Boolean(config.apiKey),
+    api_key_valid: config.id === "sendgrid" ? config.apiKeyFormatValid : Boolean(config.apiKey),
     sender_email_configured: Boolean(config.senderEmail),
     sender_name: config.senderName || "",
     webhook_verification_configured: config.webhookVerificationConfigured,
@@ -604,12 +605,23 @@ async function resolveRecipients(supabase, campaign, options = {}) {
   };
 }
 
-async function providerStatus() {
-  const status = emailProviderConfigStatus();
-  const provider = activeEmailProvider();
-  const config = emailProviderConfig(provider);
+export async function providerStatus(environment = process.env, fetchImpl = globalThis.fetch) {
+  const provider = activeEmailProvider(environment);
+  const status = emailProviderConfigStatus(provider, environment);
+  const config = emailProviderConfig(provider, environment);
   let connectivity = "not_configured";
   let message = `${status.provider} is not fully configured.`;
+  if (provider === "sendgrid") {
+    const mailSendConfigured = status.api_key_valid && status.sender_email_configured && Boolean(status.sender_name);
+    connectivity = mailSendConfigured ? "configured" : "not_configured";
+    message = mailSendConfigured
+      ? "Configured for Mail Send. Provider acceptance is confirmed only by an actual controlled send."
+      : status.api_key_configured && !status.api_key_valid
+        ? "SendGrid API key format is not valid."
+        : "SendGrid Mail Send configuration is incomplete.";
+    const safeStatus = { ...status, connectivity, message };
+    return { provider_status: safeStatus, brevo: safeStatus };
+  }
   if (status.api_key_configured) {
     const request = provider === "smtp2go"
       ? {
@@ -618,13 +630,7 @@ async function providerStatus() {
           headers: { "Content-Type": "application/json", "X-Smtp2go-Api-Key": config.apiKey },
           body: "{}",
         }
-      : provider === "sendgrid"
-        ? {
-            url: "https://api.sendgrid.com/v3/user/profile",
-            method: "GET",
-            headers: { Authorization: `Bearer ${config.apiKey}` },
-          }
-        : {
+      : {
             url: "https://api.brevo.com/v3/account",
             method: "GET",
             headers: { "api-key": config.apiKey },
@@ -632,7 +638,7 @@ async function providerStatus() {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10000);
-      const response = await fetch(request.url, {
+      const response = await fetchImpl(request.url, {
         method: request.method,
         headers: request.headers,
         body: request.body,

@@ -190,23 +190,27 @@ function applyWebhookProviderFilter(query, provider) {
   return query.like("provider_event_id", "brevo:%");
 }
 
-function dashboardEmailProviderConfig() {
-  const selected = activeEmailProvider();
-  const config = emailProviderConfig(selected);
+export function dashboardEmailProviderConfig(environment = process.env) {
+  const selected = activeEmailProvider(environment);
+  const config = emailProviderConfig(selected, environment);
   return { ...config, apiKey: String(config.apiKey || "").trim(), senderEmail: String(config.senderEmail || "").trim(), senderName: String(config.senderName || "").trim() };
 }
 
-async function checkEmailProviderConnection(config) {
+export async function checkEmailProviderConnection(config, fetchImpl = globalThis.fetch) {
   if (!config.apiKey) return { provider: config.provider, state: "not_configured", label: "Not configured" };
+  if (config.id === "sendgrid") {
+    const configured = config.apiKeyFormatValid && Boolean(config.senderEmail && config.senderName);
+    return configured
+      ? { provider: config.provider, state: "configured", label: "Configured for Mail Send" }
+      : { provider: config.provider, state: "not_configured", label: config.apiKeyFormatValid ? "Sender not configured" : "API key format invalid" };
+  }
   const request = config.id === "smtp2go"
     ? { url: "https://api.smtp2go.com/v3/api_keys/permissions", method: "POST", headers: { "Content-Type": "application/json", "X-Smtp2go-Api-Key": config.apiKey }, body: "{}" }
-    : config.id === "sendgrid"
-      ? { url: "https://api.sendgrid.com/v3/user/profile", method: "GET", headers: { Authorization: `Bearer ${config.apiKey}` } }
-      : { url: "https://api.brevo.com/v3/account", method: "GET", headers: { "api-key": config.apiKey } };
+    : { url: "https://api.brevo.com/v3/account", method: "GET", headers: { "api-key": config.apiKey } };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
   try {
-    const response = await fetch(request.url, {
+    const response = await fetchImpl(request.url, {
       method: request.method,
       headers: request.headers,
       body: request.body,
@@ -611,8 +615,8 @@ async function loadDashboard(supabase, body = {}) {
   const recent = recentActivity({ sends, events: periodProductionEvents, campaigns, suppressions: suppression.history || suppression.recent || [] });
   const partial = partialWarning(partials);
   const essentialReadiness = {
-    brevo_authorised: brevo.state === "authorised",
-    provider_authorised: brevo.state === "authorised",
+    brevo_authorised: ["authorised", "configured"].includes(brevo.state),
+    provider_authorised: ["authorised", "configured"].includes(brevo.state),
     sender_configured: sender.configured,
     unsubscribe_configured: unsubscribe.configured,
     sending_infra_available: sendingCount.ok,

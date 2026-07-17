@@ -76,6 +76,7 @@
     const unsubscribeConfigured = Boolean(brevo.unsubscribe_secret_configured && brevo.public_base_url_configured);
     const missing = [];
     if (!brevo.api_key_configured) missing.push("API key");
+    if (brevo.api_key_configured && brevo.api_key_valid === false) missing.push("valid API key format");
     if (!brevo.sender_email_configured) missing.push("sender email");
     if (!brevo.sender_name) missing.push("sender name");
     if (String(brevo.provider || "").toLowerCase() === "sendgrid" && !brevo.webhook_verification_configured) missing.push("webhook verification");
@@ -84,6 +85,7 @@
     if (brevo.connectivity === "checking") return { key: "checking", label: `Checking ${provider} connection...`, detail: "Refreshing sending configuration.", missing, unsubscribeConfigured };
     if (missing.length) return { key: "not_configured", label: `${provider} is not fully configured`, detail: `Missing: ${missing.join(", ")}.`, missing, unsubscribeConfigured };
     if (brevo.connectivity === "authorised") return { key: "authorised", label: `${provider} connected and authorised`, detail: "Sender name and sender email are configured.", missing, unsubscribeConfigured };
+    if (brevo.connectivity === "configured") return { key: "configured", label: `${provider} configured for Mail Send`, detail: "API key format and sender configuration are present. Acceptance is confirmed by an actual controlled send.", missing, unsubscribeConfigured };
     if (brevo.connectivity === "rejected") return { key: "rejected", label: `${provider} connection rejected`, detail: "Check the API key and its sending permissions.", missing, unsubscribeConfigured };
     if (brevo.connectivity === "unreachable") return { key: "unreachable", label: `${provider} could not be reached`, detail: "Refresh the connection to try again.", missing, unsubscribeConfigured };
     return { key: "checking", label: `Checking ${provider} connection...`, detail: "Sending configuration has not loaded yet.", missing, unsubscribeConfigured };
@@ -91,7 +93,7 @@
   function sendBlockReason(kind) {
     const status = brevoState();
     const brevo = state.brevo || {};
-    if (status.key !== "authorised") return status.label;
+    if (!["authorised", "configured"].includes(status.key)) return status.label;
     if (!brevo.sender_email_configured) return "Sender email is missing.";
     if (!brevo.sender_name) return "Sender name is missing.";
     if (state.migrationRequired) return "Migration 011 is required before sending is available.";
@@ -127,8 +129,8 @@
       .brevo-banner strong { display:block; font-size:15px; }
       .brevo-banner p { margin:3px 0 0; }
       .brevo-dot { width:12px; height:12px; border-radius:999px; background:#94a3b8; box-shadow:0 0 0 4px rgba(148, 163, 184, .15); }
-      .brevo-banner.authorised { border-color:#86efac; background:#f0fdf4; color:#166534; }
-      .brevo-banner.authorised .brevo-dot { background:var(--green); box-shadow:0 0 0 4px rgba(15, 143, 95, .15); }
+      .brevo-banner.authorised, .brevo-banner.configured { border-color:#86efac; background:#f0fdf4; color:#166534; }
+      .brevo-banner.authorised .brevo-dot, .brevo-banner.configured .brevo-dot { background:var(--green); box-shadow:0 0 0 4px rgba(15, 143, 95, .15); }
       .brevo-banner.rejected, .brevo-banner.not_configured { border-color:#fecaca; background:#fff7f7; color:#991b1b; }
       .brevo-banner.rejected .brevo-dot, .brevo-banner.not_configured .brevo-dot { background:var(--red); box-shadow:0 0 0 4px rgba(194, 65, 59, .15); }
       .brevo-banner.unreachable, .brevo-banner.checking { border-color:#fed7aa; background:#fff7ed; color:#9a3412; }
@@ -294,6 +296,9 @@
       ["Selected provider", brevo.provider || "Email provider"],
       ["Connection", brevo.connectivity || "checking"],
       ["API key configured", brevo.api_key_configured ? "Yes" : "No"],
+      ...(String(brevo.provider || "").toLowerCase() === "sendgrid"
+        ? [["API key format valid", brevo.api_key_valid ? "Yes" : "No"]]
+        : []),
       ["Sender email configured", brevo.sender_email_configured ? "Yes" : "No"],
       ["Sender name", brevo.sender_name || "Missing"],
       ...(String(brevo.provider || "").toLowerCase() === "sendgrid"

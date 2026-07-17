@@ -542,7 +542,7 @@
         const reportingDb = health.reporting_database || {};
         const webhook = health.webhook || {};
         const items = [
-          [`${provider} connection`, brevo.label || "Checking", brevo.state || "checking", brevo.status_code ? `HTTP ${brevo.status_code}` : "No secrets or API key details are shown."],
+          [`${provider} ${brevo.state === "configured" ? "readiness" : "connection"}`, brevo.label || "Checking", brevo.state || "checking", brevo.state === "configured" ? "Configuration is ready for Mail Send. Acceptance is confirmed only by an actual controlled send." : (brevo.status_code ? `HTTP ${brevo.status_code}` : "No secrets or API key details are shown.")],
           ["Sender config", sender.configured ? "Configured" : "Missing", sender.configured ? "configured" : "missing", sender.configured ? (sender.email ? `${sender.name} <${sender.email}>` : `${sender.name} · sender email configured`) : "Sender email and sender name are required."],
           ["Unsubscribe config", unsubscribe.configured ? "Configured" : "Missing", unsubscribe.configured ? "configured" : "missing", "Public base URL and unsubscribe secret are checked without revealing values."],
           ["Sending DB", sendingDb.available ? "Available" : "Unavailable", sendingDb.available ? "available" : "missing", sendingDb.available ? `Send history records: ${formatNumber(sendingDb.record_count)}` : sendingDb.message || "Migration 011/send history unavailable."],
@@ -558,7 +558,7 @@
         const checks = readiness.checks || {};
         const provider = state.dashboard?.health?.brevo?.provider || "Email provider";
         const rows = [
-          [`${provider} authorised`, checks.provider_authorised ?? checks.brevo_authorised],
+          [`${provider} ${state.dashboard?.health?.brevo?.state === "configured" ? "configured for Mail Send" : "authorised"}`, checks.provider_authorised ?? checks.brevo_authorised],
           ["Sender configured", checks.sender_configured],
           ["Unsubscribe configured", checks.unsubscribe_configured],
           ["Sending infrastructure", checks.sending_infra_available],

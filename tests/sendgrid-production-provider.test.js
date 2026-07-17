@@ -6,9 +6,11 @@ import {
   activeEmailProvider,
   callEmailProvider,
   emailProviderConfig,
+  providerStatus,
   requestedBatchSize,
 } from "../api/marketing-template-campaign-sends.js";
-import { SENDGRID_SENDER_EMAIL } from "../lib/emailProviders/sendgrid.js";
+import { checkEmailProviderConnection, dashboardEmailProviderConfig } from "../api/marketing-dashboard.js";
+import { SENDGRID_SENDER_EMAIL, SendGridProviderError, sendGridApiKeyFormatValid } from "../lib/emailProviders/sendgrid.js";
 
 const sendingSource = fs.readFileSync(new URL("../api/marketing-template-campaign-sends.js", import.meta.url), "utf8");
 const dashboardSource = fs.readFileSync(new URL("../api/marketing-dashboard.js", import.meta.url), "utf8");
@@ -17,7 +19,7 @@ const dashboardClientSource = fs.readFileSync(new URL("../public/marketing-dashb
 function sendGridEnvironment() {
   return {
     MARKETING_EMAIL_PROVIDER: "sendgrid",
-    SENDGRID_API_KEY: crypto.randomBytes(24).toString("base64url"),
+    SENDGRID_API_KEY: `SG.${crypto.randomBytes(16).toString("base64url")}.${crypto.randomBytes(32).toString("base64url")}`,
     SENDGRID_WEBHOOK_VERIFICATION_KEY: crypto.randomBytes(24).toString("base64url"),
     SMTP2GO_SENDER_NAME: "Van Finance Company",
   };
@@ -56,11 +58,65 @@ test("MARKETING_EMAIL_PROVIDER explicitly selects SendGrid", () => {
 });
 
 test("Campaign Builder and Marketing Dashboard share the explicit provider selection", () => {
-  assert.match(dashboardSource, /activeEmailProvider\(\)/);
-  assert.match(dashboardSource, /emailProviderConfig\(selected\)/);
-  assert.match(dashboardSource, /api\.sendgrid\.com\/v3\/user\/profile/);
+  assert.match(dashboardSource, /activeEmailProvider\(environment\)/);
+  assert.match(dashboardSource, /emailProviderConfig\(selected, environment\)/);
+  assert.doesNotMatch(dashboardSource, /api\.sendgrid\.com\/v3\/user\/profile/);
+  assert.doesNotMatch(sendingSource, /api\.sendgrid\.com\/v3\/user\/profile/);
   assert.match(dashboardSource, /query\.eq\("provider", "sendgrid"\)/);
   assert.match(dashboardClientSource, /sender email configured/);
+});
+
+test("Mail Send-only SendGrid configuration is ready without a remote permission probe", async () => {
+  const environment = sendGridEnvironment();
+  assert.equal(sendGridApiKeyFormatValid(environment.SENDGRID_API_KEY), true);
+  let healthRequests = 0;
+  const restrictedEndpoint = async () => {
+    healthRequests += 1;
+    return new Response("forbidden", { status: 403 });
+  };
+  const campaignHealth = await providerStatus(environment, restrictedEndpoint);
+  const dashboardHealth = await checkEmailProviderConnection(dashboardEmailProviderConfig(environment), restrictedEndpoint);
+  assert.equal(healthRequests, 0);
+  assert.equal(campaignHealth.provider_status.connectivity, "configured");
+  assert.equal(campaignHealth.provider_status.message, "Configured for Mail Send. Provider acceptance is confirmed only by an actual controlled send.");
+  assert.equal(campaignHealth.provider_status.webhook_verification_configured, true);
+  assert.equal(dashboardHealth.state, "configured");
+  assert.equal(dashboardHealth.label, "Configured for Mail Send");
+  assert.equal("status_code" in dashboardHealth, false);
+});
+
+test("SendGrid health diagnostics reject malformed key configuration without exposing it", async () => {
+  const malformedSecret = "not-a-sendgrid-key-private-value";
+  const environment = { ...sendGridEnvironment(), SENDGRID_API_KEY: malformedSecret };
+  const result = await providerStatus(environment, async () => {
+    throw new Error("Health checks must not make a SendGrid request.");
+  });
+  const serialized = JSON.stringify(result);
+  assert.equal(result.provider_status.connectivity, "not_configured");
+  assert.equal(result.provider_status.api_key_configured, true);
+  assert.equal(result.provider_status.api_key_valid, false);
+  assert.doesNotMatch(serialized, new RegExp(malformedSecret));
+  assert.doesNotMatch(serialized, /SENDGRID_API_KEY/);
+});
+
+test("actual SendGrid Mail Send rejection still fails safely", async () => {
+  await assert.rejects(
+    callEmailProvider(basePayload("test"), {
+      environment: sendGridEnvironment(),
+      fetchImpl: async (url) => {
+        assert.equal(url, "https://api.sendgrid.com/v3/mail/send");
+        return new Response("restricted provider detail", { status: 403 });
+      },
+    }),
+    (error) => error instanceof SendGridProviderError
+      && error.providerStatusCode === 403
+      && !error.message.includes("restricted provider detail")
+  );
+});
+
+test("configured webhook awaiting its first event does not block readiness", () => {
+  assert.match(dashboardSource, /webhook_secret_configured: webhook\.configured/);
+  assert.doesNotMatch(dashboardSource, /provider_authorised:.*hasReceivedEvents/);
 });
 
 test("invalid MARKETING_EMAIL_PROVIDER fails safely", () => {
