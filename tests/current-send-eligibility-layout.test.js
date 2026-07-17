@@ -92,9 +92,9 @@ test("Suppression Centre shows the four truthful lifecycle cards", () => {
 
 test("Campaign Builder preview stays in its column and becomes static in one-column layout", () => {
   const source = fs.readFileSync(new URL("../public/campaigns/index.html", import.meta.url), "utf8");
-  assert.match(source, /campaign-preview-column[^}]*position: sticky[^}]*z-index: 1/);
+  assert.match(source, /campaign-preview-column[^}]*position: static[^}]*z-index: auto/);
   assert.match(source, /@media \(max-width: 1040px\)[^{]*\{[^}]*\.detail-grid[^}]*grid-template-columns: 1fr/);
-  assert.match(source, /campaign-preview-column \{ position: static; \}/);
-  assert.doesNotMatch(source, /campaign-preview-column[^}]*position:\s*fixed/);
+  assert.match(source, /campaign-preview-column[^}]*#previewFrameShell[^}]*#previewFrame[^}]*position: static/);
+  assert.doesNotMatch(source, /campaign-preview-column[^}]*position:\s*(?:fixed|absolute|sticky)/);
   assert.match(source, /id="previewFrameShell"/);
 });
