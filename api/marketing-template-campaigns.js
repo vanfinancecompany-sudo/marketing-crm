@@ -264,13 +264,14 @@ function activeSuppressionEntry(value) {
 }
 
 function emailSuppressed(row = {}) {
+  if (String(row.lifecycle_status || "active") !== "active") return true;
   if (String(row.marketing_status || "active") !== "active") return true;
   const suppression = row.suppression && typeof row.suppression === "object" ? row.suppression : {};
   return EMAIL_SUPPRESSION_TYPES.some((type) => activeSuppressionEntry(suppression[type]));
 }
 
 function applyAudienceFilters(query, rules) {
-  query = query.eq("email_ready", true);
+  query = query.eq("lifecycle_status", "active").eq("email_ready", true);
   if (rules.pipeline !== "all") query = query.eq("pipeline", rules.pipeline);
   if (rules.mode === "recently_imported") query = query.gte("created_at", recentlyImportedIso());
   if (rules.mode === "manual_customer_ids") query = query.in("customer_id", rules.manual_customer_ids);
@@ -334,7 +335,7 @@ async function countAudienceByScan(supabase, rules, exportedEmailIds = new Set()
   let deliverable = 0;
   while (true) {
     const result = await applyAudienceFilters(
-      supabase.from("marketing_contacts").select("customer_id,marketing_status,suppression"),
+      supabase.from("marketing_contacts").select("customer_id,marketing_status,lifecycle_status,suppression"),
       rules
     ).range(from, from + PAGE_SIZE - 1);
     assertSupabase(result, "Could not count campaign audience.");

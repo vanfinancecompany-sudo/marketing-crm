@@ -5,6 +5,7 @@ import {
   cleanText,
   renderCampaignPreview,
 } from "../lib/marketingEmailTemplateRenderer.js";
+import { campaignRecipientIdentitySets } from "../lib/customerDatabaseCleanse.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const TEMPLATE_CAMPAIGN_SOURCE = "template_campaign_foundation";
@@ -141,6 +142,7 @@ function activeSuppressionEntry(value) {
 }
 
 function emailSuppressed(row = {}) {
+  if (String(row.lifecycle_status || "active") !== "active") return true;
   if (String(row.marketing_status || "active") !== "active") return true;
   const suppression = row.suppression && typeof row.suppression === "object" ? row.suppression : {};
   return EMAIL_SUPPRESSION_TYPES.some((type) => activeSuppressionEntry(suppression[type]));
@@ -177,7 +179,7 @@ function recentlyImportedIso() {
 }
 
 function applyAudienceFilters(query, rules) {
-  query = query.eq("email_ready", true);
+  query = query.eq("lifecycle_status", "active").eq("email_ready", true);
   if (rules.pipeline !== "all") query = query.eq("pipeline", rules.pipeline);
   if (rules.mode === "recently_imported") query = query.gte("created_at", recentlyImportedIso());
   if (rules.mode === "manual_customer_ids") query = query.in("customer_id", rules.manual_customer_ids);
@@ -420,29 +422,43 @@ function publicUnsubscribeUrl(payload) {
   return `${base}/api/marketing-unsubscribe?token=${encodeURIComponent(signUnsubscribeToken(payload))}`;
 }
 
-async function loadAlreadySentCustomerIds(supabase, campaignId) {
-  const ids = new Set();
+async function loadAlreadySentIdentities(supabase, campaignId) {
+  const rows = [];
   let from = 0;
   while (true) {
     const result = await supabase
       .from("marketing_email_send_recipients")
-      .select("customer_id")
+      .select("customer_id,email")
       .eq("campaign_id", campaignId)
       .eq("send_type", "production")
       .in("status", SUCCESSFUL_PRODUCTION_STATUSES)
       .range(from, from + PAGE_SIZE - 1);
     if (result.error) {
-      if (isMissingSendInfrastructure(result.error)) return ids;
+      if (isMissingSendInfrastructure(result.error)) return { customerIds: new Set(), emails: new Set() };
       throw new Error(result.error.message || "Could not inspect previous sends.");
     }
-    (result.data || []).forEach((row) => {
-      const customerId = normalizeCustomerId(row.customer_id);
-      if (customerId) ids.add(customerId);
-    });
+    rows.push(...(result.data || []));
     if (!result.data || result.data.length < PAGE_SIZE) break;
     from += PAGE_SIZE;
   }
-  return ids;
+  return campaignRecipientIdentitySets(rows);
+}
+
+async function loadPermanentSuppressedEmails(supabase, values = []) {
+  const emails = [...new Set(values.map(safeRecipientEmail).filter(Boolean))];
+  const suppressed = new Set();
+  for (let index = 0; index < emails.length; index += 250) {
+    const result = await supabase
+      .from("marketing_suppression_identities")
+      .select("email_normalized")
+      .in("email_normalized", emails.slice(index, index + 250));
+    assertSupabase(result, "Could not check permanent email suppressions.");
+    (result.data || []).forEach((row) => {
+      const email = safeRecipientEmail(row.email_normalized);
+      if (email) suppressed.add(email);
+    });
+  }
+  return suppressed;
 }
 
 async function loadExportedEmailContactIds(supabase) {
@@ -481,7 +497,7 @@ async function loadExportedEmailContactIds(supabase) {
 
 async function resolveRecipients(supabase, campaign, options = {}) {
   const rules = campaignAudienceRules(campaign);
-  const alreadySent = await loadAlreadySentCustomerIds(supabase, campaign.id);
+  const alreadySent = await loadAlreadySentIdentities(supabase, campaign.id);
   const exportedEmailIds = rules.mode === "never_emailed" ? await loadExportedEmailContactIds(supabase) : new Set();
   const byEmail = new Set();
   const byCustomerId = new Set();
@@ -495,13 +511,17 @@ async function resolveRecipients(supabase, campaign, options = {}) {
     const result = await applyAudienceFilters(
       supabase
         .from("marketing_contacts")
-        .select("id,customer_id,first_name,last_name,company,email,email_normalized,marketing_status,email_ready,suppression,pipeline,source,created_at")
+        .select("id,customer_id,first_name,last_name,company,email,email_normalized,marketing_status,lifecycle_status,email_ready,suppression,pipeline,source,created_at")
         .order("customer_id", { ascending: true })
         .order("id", { ascending: true }),
       rules
     ).range(from, from + PAGE_SIZE - 1);
     assertSupabase(result, "Could not resolve campaign recipients.");
     const rows = result.data || [];
+    const permanentlySuppressed = await loadPermanentSuppressedEmails(
+      supabase,
+      rows.map((row) => row.email_normalized || row.email)
+    );
     for (const row of rows) {
       const customerId = normalizeCustomerId(row.customer_id);
       if (rules.mode === "never_emailed" && exportedEmailIds.has(customerId)) continue;
@@ -512,8 +532,8 @@ async function resolveRecipients(supabase, campaign, options = {}) {
         invalidEmail += 1;
         continue;
       }
-      if (emailSuppressed(row)) { suppressed += 1; continue; }
-      if (alreadySent.has(customerId)) { skippedDuplicate += 1; continue; }
+      if (emailSuppressed(row) || permanentlySuppressed.has(email)) { suppressed += 1; continue; }
+      if (alreadySent.customerIds.has(customerId) || alreadySent.emails.has(email)) { skippedDuplicate += 1; continue; }
       if (byCustomerId.has(customerId) || byEmail.has(email)) { skippedDuplicate += 1; continue; }
       byCustomerId.add(customerId);
       byEmail.add(email);
@@ -856,10 +876,14 @@ async function confirmProductionSend(supabase, body = {}) {
     }
     const recipientRecord = inserted.data;
     try {
-      const latest = await supabase.from("marketing_contacts").select("marketing_status,suppression,email_ready,email,email_normalized").eq("customer_id", recipient.customer_id).maybeSingle();
+      const [latest, identity] = await Promise.all([
+        supabase.from("marketing_contacts").select("marketing_status,lifecycle_status,suppression,email_ready,email,email_normalized").eq("customer_id", recipient.customer_id).maybeSingle(),
+        supabase.from("marketing_suppression_identities").select("id").eq("email_normalized", recipient.email).maybeSingle(),
+      ]);
       assertSupabase(latest, "Could not recheck recipient suppression.");
+      assertSupabase(identity, "Could not recheck permanent email suppression.");
       const latestContact = latest.data || {};
-      if (!latestContact.email_ready || emailSuppressed(latestContact) || safeRecipientEmail(latestContact.email_normalized || latestContact.email) !== recipient.email) {
+      if (identity.data?.id || latestContact.lifecycle_status !== "active" || !latestContact.email_ready || emailSuppressed(latestContact) || safeRecipientEmail(latestContact.email_normalized || latestContact.email) !== recipient.email) {
         await supabase.from("marketing_email_send_recipients").update({ status: "skipped_suppressed", failure_reason: "Suppressed or email changed before provider submission." }).eq("id", recipientRecord.id);
         continue;
       }

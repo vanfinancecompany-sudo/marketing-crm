@@ -11,8 +11,9 @@ import {
   cleanImportRow,
   customerUpsert,
 } from "../lib/marketingCustomerUpsert.js";
+import { contactHasPermanentSuppression, normalizeEmailIdentity } from "../lib/customerDatabaseCleanse.js";
 
-const CONTACT_COLUMNS = "id,customer_id,first_name,last_name,company,email,phone,postcode,pipeline,source,sources,tags,notes,marketing_status,email_ready,sms_ready,facebook_ready,duplicate_count,first_seen_at,last_seen_at,created_at,updated_at";
+const CONTACT_COLUMNS = "id,customer_id,first_name,last_name,company,email,email_normalized,phone,phone_normalized,postcode,pipeline,source,sources,tags,notes,marketing_status,lifecycle_status,lifecycle_changed_at,email_ready,sms_ready,facebook_ready,duplicate_count,suppression,suppression_history,first_seen_at,last_seen_at,created_at,updated_at";
 const PAGE_SIZE = 50;
 const EXPORT_PAGE_SIZE = 1000;
 const API_KEY_HEADER = "x-marketing-customer-database-key";
@@ -81,6 +82,8 @@ function normalizeContact(row = {}) {
     tags: Array.isArray(row.tags) ? row.tags : [],
     notes: row.notes || "",
     marketing_status: row.marketing_status || "active",
+    lifecycle_status: row.lifecycle_status || "active",
+    lifecycle_changed_at: row.lifecycle_changed_at || "",
     email_ready: Boolean(row.email_ready),
     sms_ready: Boolean(row.sms_ready),
     facebook_ready: Boolean(row.facebook_ready),
@@ -91,6 +94,14 @@ function normalizeContact(row = {}) {
     updated_at: row.updated_at || "",
     timeline: [],
   };
+}
+
+async function assertEmailNotSuppressed(supabase, emailValue) {
+  const email = normalizeEmailIdentity(emailValue);
+  if (!email) return;
+  const result = await supabase.from("marketing_suppression_identities").select("id").eq("email_normalized", email).maybeSingle();
+  assertSupabase(result, "Could not check permanent suppression identities.");
+  if (result.data) throw new Error("This email is permanently suppressed and cannot be added or restored.");
 }
 
 function createMarketingCustomerId() {
@@ -144,6 +155,8 @@ function toDbPayload(contact) {
     tags,
     notes: contact.notes || "",
     marketing_status: contact.marketing_status || "active",
+    lifecycle_status: contact.lifecycle_status || "active",
+    lifecycle_changed_at: contact.lifecycle_changed_at || new Date().toISOString(),
     email_ready: Boolean(emailNormalized),
     sms_ready: Boolean(phoneNormalized),
     facebook_ready: Boolean(emailNormalized || phoneNormalized),
@@ -152,7 +165,8 @@ function toDbPayload(contact) {
   };
 }
 
-function applyFilters(query, filters = {}) {
+function applyFilters(query, filters = {}, options = {}) {
+  if (!options.includeInactive) query = query.eq("lifecycle_status", "active").eq("marketing_status", "active");
   if (Array.isArray(filters.pipeline)) query = query.in("pipeline", filters.pipeline);
   else if (filters.pipeline && filters.pipeline !== "all") query = query.eq("pipeline", filters.pipeline);
   if (filters.source && filters.source !== "all") query = query.eq("source", filters.source);
@@ -188,10 +202,17 @@ async function countContacts(supabase, filters = {}) {
   return count || 0;
 }
 
+async function countByLifecycle(supabase, lifecycleStatus) {
+  const { count } = assertSupabase(await supabase.from("marketing_contacts").select("id", { count: "exact", head: true }).eq("lifecycle_status", lifecycleStatus), "Could not count customer lifecycle status.");
+  return count || 0;
+}
+
 async function countContactsSince(supabase, field, since, includeNew = true) {
   let query = supabase
     .from("marketing_contacts")
     .select("id", { count: "exact", head: true })
+    .eq("lifecycle_status", "active")
+    .eq("marketing_status", "active")
     .gte(field, since);
 
   if (!includeNew) query = query.lt("created_at", since);
@@ -236,7 +257,7 @@ function startOfLondonToday(now = new Date()) {
 }
 
 async function getStats(supabase, filters = {}) {
-  const [total, matched, finance, rent2buy, both, unknown, emailReady, smsReady, facebookReady] = await Promise.all([
+  const [total, matched, finance, rent2buy, both, unknown, emailReady, smsReady, facebookReady, awaitingVerification, archived, suppressed] = await Promise.all([
     countContacts(supabase, {}),
     countContacts(supabase, filters),
     countContacts(supabase, { pipeline: "finance" }),
@@ -246,9 +267,12 @@ async function getStats(supabase, filters = {}) {
     countContacts(supabase, { readiness: "email_ready" }),
     countContacts(supabase, { readiness: "sms_ready" }),
     countContacts(supabase, { readiness: "facebook_ready" }),
+    countByLifecycle(supabase, "awaiting_verification"),
+    countByLifecycle(supabase, "archived"),
+    countByLifecycle(supabase, "suppressed"),
   ]);
 
-  return { total, matched, finance, rent2buy, both, unknown, emailReady, smsReady, facebookReady };
+  return { total, matched, finance, rent2buy, both, unknown, emailReady, smsReady, facebookReady, awaitingVerification, archived, suppressed };
 }
 
 async function getActivityStats(supabase) {
@@ -262,7 +286,7 @@ async function getActivityStats(supabase) {
 
   const [totalContacts, latestRows, todayCreated, todayUpdated, dayCreated, dayUpdated, weekCreated, weekUpdated, monthCreated, monthUpdated] = await Promise.all([
     countContacts(supabase, {}),
-    supabase.from("marketing_contacts").select("created_at,updated_at").order("updated_at", { ascending: false }).limit(1),
+    supabase.from("marketing_contacts").select("created_at,updated_at").eq("lifecycle_status", "active").eq("marketing_status", "active").order("updated_at", { ascending: false }).limit(1),
     countContactsSince(supabase, "created_at", periods.today),
     countContactsSince(supabase, "updated_at", periods.today, false),
     countContactsSince(supabase, "created_at", periods.last24Hours),
@@ -319,6 +343,7 @@ async function listContacts(supabase, body) {
 
 async function createContact(supabase, body) {
   const payload = toDbPayload(cleanDbContact(body.values || {}));
+  await assertEmailNotSuppressed(supabase, payload.email_normalized);
   const { data } = assertSupabase(
     await supabase.from("marketing_contacts").insert(payload).select(CONTACT_COLUMNS).single(),
     "Could not create marketing contact."
@@ -327,10 +352,17 @@ async function createContact(supabase, body) {
 }
 
 async function updateContact(supabase, body) {
-  const existingContact = body.contact || {};
+  const id = body.contact?.id || body.id;
+  if (!id) throw new Error("Contact ID is required.");
+  const existingResult = assertSupabase(await supabase.from("marketing_contacts").select(CONTACT_COLUMNS).eq("id", id).single(), "Could not load marketing contact.");
+  const existingContact = existingResult.data || {};
+  if (contactHasPermanentSuppression(existingContact) || String(existingContact.marketing_status || "active") !== "active") {
+    throw new Error("Permanently suppressed contacts cannot be edited or reactivated.");
+  }
   const { contact, error } = updateContactRecord(existingContact, body.values || {});
   if (error) throw new Error(error);
   const payload = toDbPayload(cleanDbContact(contact, existingContact));
+  await assertEmailNotSuppressed(supabase, payload.email_normalized);
   const { data } = assertSupabase(
     await supabase.from("marketing_contacts").update(payload).eq("id", existingContact.id).select(CONTACT_COLUMNS).single(),
     "Could not update marketing contact."
@@ -341,7 +373,7 @@ async function updateContact(supabase, body) {
 async function deleteContact(supabase, body) {
   const id = body.contact?.id || body.id;
   if (!id) throw new Error("Contact ID is required.");
-  assertSupabase(await supabase.from("marketing_contacts").delete().eq("id", id), "Could not delete marketing contact.");
+  assertSupabase(await supabase.from("marketing_contacts").update({ lifecycle_status: "archived", lifecycle_changed_at: new Date().toISOString() }).eq("id", id), "Could not archive marketing contact.");
   return { ok: true };
 }
 
@@ -376,7 +408,7 @@ async function bulkUpdate(supabase, body) {
   }
 
   if (action === "delete") {
-    assertSupabase(await supabase.from("marketing_contacts").delete().in("id", ids), "Could not delete selected contacts.");
+    assertSupabase(await supabase.from("marketing_contacts").update({ lifecycle_status: "archived", lifecycle_changed_at: new Date().toISOString() }).in("id", ids), "Could not archive selected contacts.");
     return { ok: true };
   }
 
@@ -439,19 +471,22 @@ function buildUpsertImportRow(values = {}) {
     tags: Array.isArray(values.tags) ? values.tags.join(",") : values.tags || "",
     company: values.company || "",
     notes: values.notes || "",
+    pipeline: values.pipeline || "",
+    customer_id: values.customer_id || values.customerId || "",
   };
 }
 
 async function upsertContact(supabase, body) {
   const values = body.values || {};
   const pipeline = normalizeMarketingPipeline(values.pipeline);
-  const { contact, reason } = cleanImportRow(buildUpsertImportRow(values), pipeline);
+  const { contact, reason, pipelineExplicit, sourceCustomerId } = cleanImportRow(buildUpsertImportRow(values), pipeline);
 
   if (!contact) {
     throw new Error(reason || "Add a valid email or UK mobile.");
   }
 
-  const result = await customerUpsert(supabase, contact);
+  await assertEmailNotSuppressed(supabase, contact.email_normalized);
+  const result = await customerUpsert(supabase, contact, { pipelineExplicit, sourceCustomerId });
   return {
     ...result,
     eventType: result.mode === "created" ? "customer_created" : "customer_updated",

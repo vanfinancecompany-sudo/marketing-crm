@@ -225,18 +225,51 @@ function timestampUpdates(recipient, eventType, eventAt, reason) {
 }
 
 async function applyContactSuppression(supabase, recipient, event) {
+  if (recipient?.send_type !== "production") return;
   const customerId = normalizeCustomerId(recipient?.customer_id);
-  if (!customerId || !["hard_bounce", "complaint", "unsubscribed"].includes(event.event_type)) return;
-  const type = event.event_type === "hard_bounce" ? "email_bounced" : event.event_type === "complaint" ? "global_do_not_contact" : "email_unsubscribed";
-  const contact = await supabase.from("marketing_contacts").select("id").eq("customer_id", customerId).maybeSingle();
+  const permanentBlocked = event.event_type === "blocked" && /invalid|unknown user|no such user|does not exist|blacklist|blocked recipient|suppression|globally blocked/i.test(String(event.reason || ""));
+  if (!["hard_bounce", "complaint", "unsubscribed"].includes(event.event_type) && !permanentBlocked) return;
+  const type = event.event_type === "hard_bounce" ? "email_bounced" : event.event_type === "unsubscribed" ? "email_unsubscribed" : "global_do_not_contact";
+  const email = normalizeEmail(recipient.email || event.email_normalized);
+  const [contact, identity] = await Promise.all([
+    customerId
+      ? supabase.from("marketing_contacts").select("id,lifecycle_status").eq("customer_id", customerId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    email
+      ? supabase.from("marketing_suppression_identities").select("id").eq("email_normalized", email).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
   if (contact.error) throw new Error(contact.error.message || "Could not load contact for suppression.");
-  if (!contact.data?.id) return;
+  if (identity.error) throw new Error(identity.error.message || "Could not check permanent suppression identity.");
+  if (identity.data?.id) {
+    if (contact.data?.id && contact.data.lifecycle_status !== "suppressed") {
+      const hide = await supabase.from("marketing_contacts").update({ lifecycle_status: "suppressed", lifecycle_changed_at: new Date().toISOString() }).eq("id", contact.data.id);
+      if (hide.error) throw new Error(hide.error.message || "Could not hide permanently suppressed contact.");
+    }
+    return;
+  }
+  if (!contact.data?.id) {
+    if (!email) return;
+    const reason = permanentBlocked ? "SMTP2GO permanent blocked event" : `SMTP2GO ${event.event_type.replace(/_/g, " ")} event`;
+    const inserted = await supabase.from("marketing_suppression_identities").insert({
+      email_normalized: email,
+      suppression_type: type,
+      reason,
+      provider: "SMTP2GO webhook",
+      campaign_id: recipient.campaign_id || null,
+      contact_id: null,
+      suppressed_at: event.event_at,
+      metadata: { orphaned_recipient_id: recipient.id || "", provider_message_id: event.provider_message_id || "" },
+    });
+    if (inserted.error && inserted.error.code !== "23505" && !/duplicate|unique/i.test(String(inserted.error.message || ""))) throw new Error(inserted.error.message || "Could not retain orphaned SMTP2GO suppression identity.");
+    return;
+  }
   const rpc = await supabase.rpc("marketing_apply_suppression", {
     p_contact_id: contact.data.id,
     p_type: type,
-    p_reason: `SMTP2GO ${event.event_type.replace(/_/g, " ")} event`,
+    p_reason: permanentBlocked ? "SMTP2GO permanent blocked event" : `SMTP2GO ${event.event_type.replace(/_/g, " ")} event`,
     p_added_by: "SMTP2GO webhook",
-    p_notes: safeText(`campaign:${recipient.campaign_id || ""} send:${recipient.send_id || ""} recipient:${recipient.id || ""} message:${event.provider_message_id || ""}`, 500),
+    p_notes: safeText(`campaign:${recipient.campaign_id || ""} send:${recipient.send_id || ""} recipient:${recipient.id || ""} message:${event.provider_message_id || ""} email:${recipient.email || event.email_normalized || ""}`, 500),
   });
   if (rpc.error) throw new Error(rpc.error.message || "Could not apply suppression from SMTP2GO event.");
 }
@@ -258,10 +291,11 @@ async function recordEvent(supabase, event) {
     recipient_id: recipient?.id || null,
     customer_id: normalizeCustomerId(recipient?.customer_id) || null,
   }).select("id").maybeSingle();
+  let duplicate = false;
   if (insert.error) {
     const message = String(insert.error.message || "").toLowerCase();
-    if (message.includes("duplicate") || message.includes("unique")) return { duplicate: true, correlated: Boolean(recipient) };
-    throw new Error(insert.error.message || "Could not record SMTP2GO event.");
+    if (message.includes("duplicate") || message.includes("unique")) duplicate = true;
+    else throw new Error(insert.error.message || "Could not record SMTP2GO event.");
   }
   if (recipient?.id && event.event_type !== "unknown") {
     const updates = timestampUpdates(recipient, event.event_type, event.event_at, event.reason);
@@ -271,7 +305,7 @@ async function recordEvent(supabase, event) {
     if (update.error) throw new Error(update.error.message || "Could not update recipient event status.");
     await applyContactSuppression(supabase, recipient, event);
   }
-  return { duplicate: false, correlated: Boolean(recipient) };
+  return { duplicate, correlated: Boolean(recipient) };
 }
 
 export default async function handler(request, response) {
