@@ -1,11 +1,18 @@
 import crypto from "node:crypto";
+import {
+  createCurrentSendEligibilityState,
+  evaluateCurrentSendEligibility,
+  loadCurrentSendProcessedIdentities,
+  loadPermanentCurrentSendSuppressions,
+  normalizeCurrentSendCustomerId,
+  normalizeCurrentSendEmail,
+} from "../lib/marketingCurrentSendEligibility.js";
 import { createClient } from "@supabase/supabase-js";
 import {
   CampaignValidationError,
   cleanText,
   renderCampaignPreview,
 } from "../lib/marketingEmailTemplateRenderer.js";
-import { campaignRecipientIdentitySets } from "../lib/customerDatabaseCleanse.js";
 import {
   SendGridProviderError,
   sendSendGridEmail,
@@ -30,7 +37,6 @@ const PAGE_SIZE = 1000;
 const MAX_PRODUCTION_BATCH_SIZE = 500;
 const PREPARE_TOKEN_TTL_MS = 10 * 60 * 1000;
 const TEST_COOLDOWN_MS = 60 * 1000;
-const SUCCESSFUL_PRODUCTION_STATUSES = ["pending", "accepted", "sent", "delivered", "opened", "clicked", "submission_unknown"];
 
 class ApiError extends Error {
   constructor(statusCode, message) {
@@ -128,12 +134,11 @@ function validateEmail(value, label = "Email address") {
 }
 
 function safeRecipientEmail(value) {
-  const email = normalizeEmail(value);
-  return email && email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "";
+  return normalizeCurrentSendEmail(value);
 }
 
 function normalizeCustomerId(value) {
-  return cleanText(value, 80).toUpperCase();
+  return normalizeCurrentSendCustomerId(value);
 }
 
 function hashValue(value) {
@@ -190,7 +195,6 @@ function recentlyImportedIso() {
 }
 
 function applyAudienceFilters(query, rules) {
-  query = query.eq("lifecycle_status", "active").eq("email_ready", true);
   if (rules.pipeline !== "all") query = query.eq("pipeline", rules.pipeline);
   if (rules.mode === "recently_imported") query = query.gte("created_at", recentlyImportedIso());
   if (rules.mode === "manual_customer_ids") query = query.in("customer_id", rules.manual_customer_ids);
@@ -462,43 +466,8 @@ function publicUnsubscribeUrl(payload) {
   return `${base}/api/marketing-unsubscribe?token=${encodeURIComponent(signUnsubscribeToken(payload))}`;
 }
 
-async function loadAlreadySentIdentities(supabase, campaignId) {
-  const rows = [];
-  let from = 0;
-  while (true) {
-    const result = await supabase
-      .from("marketing_email_send_recipients")
-      .select("customer_id,email")
-      .eq("campaign_id", campaignId)
-      .eq("send_type", "production")
-      .in("status", SUCCESSFUL_PRODUCTION_STATUSES)
-      .range(from, from + PAGE_SIZE - 1);
-    if (result.error) {
-      if (isMissingSendInfrastructure(result.error)) return { customerIds: new Set(), emails: new Set() };
-      throw new Error(result.error.message || "Could not inspect previous sends.");
-    }
-    rows.push(...(result.data || []));
-    if (!result.data || result.data.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-  return campaignRecipientIdentitySets(rows);
-}
-
 async function loadPermanentSuppressedEmails(supabase, values = []) {
-  const emails = [...new Set(values.map(safeRecipientEmail).filter(Boolean))];
-  const suppressed = new Set();
-  for (let index = 0; index < emails.length; index += 250) {
-    const result = await supabase
-      .from("marketing_suppression_identities")
-      .select("email_normalized")
-      .in("email_normalized", emails.slice(index, index + 250));
-    assertSupabase(result, "Could not check permanent email suppressions.");
-    (result.data || []).forEach((row) => {
-      const email = safeRecipientEmail(row.email_normalized);
-      if (email) suppressed.add(email);
-    });
-  }
-  return suppressed;
+  return loadPermanentCurrentSendSuppressions(supabase, values, assertSupabase);
 }
 
 async function loadExportedEmailContactIds(supabase) {
@@ -537,10 +506,9 @@ async function loadExportedEmailContactIds(supabase) {
 
 async function resolveRecipients(supabase, campaign, options = {}) {
   const rules = campaignAudienceRules(campaign);
-  const alreadySent = await loadAlreadySentIdentities(supabase, campaign.id);
+  const alreadySent = options.processed || await loadCurrentSendProcessedIdentities(supabase, campaign.id, assertSupabase);
   const exportedEmailIds = rules.mode === "never_emailed" ? await loadExportedEmailContactIds(supabase) : new Set();
-  const byEmail = new Set();
-  const byCustomerId = new Set();
+  const eligibilityState = createCurrentSendEligibilityState(alreadySent);
   const recipients = [];
   let totalMatching = 0;
   let suppressed = 0;
@@ -566,17 +534,14 @@ async function resolveRecipients(supabase, campaign, options = {}) {
       const customerId = normalizeCustomerId(row.customer_id);
       if (rules.mode === "never_emailed" && exportedEmailIds.has(customerId)) continue;
       totalMatching += 1;
-      const email = safeRecipientEmail(row.email_normalized || row.email);
-      if (!row.email_ready || !email) {
-        suppressed += 1;
-        invalidEmail += 1;
+      const decision = evaluateCurrentSendEligibility(row, { state: eligibilityState, permanentlySuppressedEmails: permanentlySuppressed });
+      const email = decision.email;
+      if (!decision.eligible) {
+        if (decision.reason === "invalid_email") invalidEmail += 1;
+        if (["inactive", "invalid_email", "suppressed"].includes(decision.reason)) suppressed += 1;
+        else skippedDuplicate += 1;
         continue;
       }
-      if (emailSuppressed(row) || permanentlySuppressed.has(email)) { suppressed += 1; continue; }
-      if (alreadySent.customerIds.has(customerId) || alreadySent.emails.has(email)) { skippedDuplicate += 1; continue; }
-      if (byCustomerId.has(customerId) || byEmail.has(email)) { skippedDuplicate += 1; continue; }
-      byCustomerId.add(customerId);
-      byEmail.add(email);
       if (!options.limit || recipients.length < options.limit) {
         recipients.push({
           id: row.id,
@@ -593,6 +558,7 @@ async function resolveRecipients(supabase, campaign, options = {}) {
   }
   return {
     rules,
+    processed: alreadySent,
     recipients,
     counts: {
       matching_count: totalMatching,
@@ -657,16 +623,10 @@ export async function providerStatus(environment = process.env, fetchImpl = glob
 }
 
 async function getCampaignProgress(supabase, campaign, sends = []) {
-  const processedResult = assertSupabase(
-    await supabase
-      .from("marketing_email_send_recipients")
-      .select("id", { count: "exact", head: true })
-      .eq("campaign_id", campaign.id)
-      .eq("send_type", "production"),
-    "Could not count processed campaign recipients."
-  );
-  const totalAudience = Number(campaign.audience_snapshot?.final_send_count || 0);
-  const alreadyProcessed = Number(processedResult.count || 0);
+  const resolved = await resolveRecipients(supabase, campaign);
+  const alreadyProcessed = resolved.processed.uniqueRecipientCount;
+  const eligibleRemaining = resolved.counts.final_eligible_count;
+  const totalAudience = alreadyProcessed + eligibleRemaining;
   const lastBatch = sends.find((send) => send.send_type === "production" && ["sending", "completed", "partially_failed", "failed"].includes(send.status)) || null;
   let lastBatchSummary = null;
 
@@ -693,7 +653,7 @@ async function getCampaignProgress(supabase, campaign, sends = []) {
   return {
     total_audience: totalAudience,
     already_processed: alreadyProcessed,
-    eligible_remaining: Math.max(0, totalAudience - alreadyProcessed),
+    eligible_remaining: eligibleRemaining,
     progress_percent: totalAudience > 0 ? Math.min(100, Math.round((alreadyProcessed / totalAudience) * 100)) : 0,
     last_batch: lastBatchSummary,
   };

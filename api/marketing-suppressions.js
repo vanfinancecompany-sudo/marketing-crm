@@ -124,7 +124,17 @@ async function getOverview(supabase) {
     await supabase.rpc("marketing_suppression_overview", { p_recent_limit: 10, p_history_limit: 100 }),
     "Could not load suppression overview."
   );
-  return data || {};
+  const overview = data || {};
+  const countLifecycle = async (status) => Number(assertSupabase(
+    await supabase.from("marketing_contacts").select("id", { count: "exact", head: true }).eq("lifecycle_status", status),
+    `Could not count ${status} contacts.`
+  ).count || 0);
+  const [verifiedActive, awaitingVerification, suppressed] = await Promise.all([
+    countLifecycle("active"),
+    countLifecycle("awaiting_verification"),
+    countLifecycle("suppressed"),
+  ]);
+  return { ...overview, verified_active_contacts: verifiedActive, awaiting_verification_contacts: awaitingVerification, suppressed_contacts: suppressed };
 }
 
 async function searchContacts(supabase, body) {
