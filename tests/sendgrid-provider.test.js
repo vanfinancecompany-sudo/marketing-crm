@@ -7,7 +7,11 @@ import {
   SendGridProviderError,
   sendSendGridEmail,
 } from "../lib/emailProviders/sendgrid.js";
-import { allowedSendGridTestRecipient } from "../api/sendgrid-test-email.js";
+import {
+  allowedSendGridTestRecipient,
+  isSendGridTestEnvironment,
+  safeSendGridTestErrorMessage,
+} from "../api/sendgrid-test-email.js";
 
 test("SendGrid test send stores the provider message ID returned on success", async () => {
   let submitted;
@@ -49,6 +53,19 @@ test("controlled test recipient must exactly match one configured internal addre
   );
   assert.equal(allowedSendGridTestRecipient("other@vanfinancecompany.co.uk", "safe@vanfinancecompany.co.uk"), "");
   assert.equal(allowedSendGridTestRecipient("safe@example.com", "safe@example.com"), "");
+});
+
+test("SendGrid test endpoint is enabled only in Preview or local non-production environments", () => {
+  assert.equal(isSendGridTestEnvironment({ VERCEL_ENV: "preview", NODE_ENV: "production" }), true);
+  assert.equal(isSendGridTestEnvironment({ VERCEL_ENV: "development" }), true);
+  assert.equal(isSendGridTestEnvironment({ VERCEL_ENV: "production", NODE_ENV: "development" }), false);
+  assert.equal(isSendGridTestEnvironment({ NODE_ENV: "test" }), true);
+  assert.equal(isSendGridTestEnvironment({ NODE_ENV: "production" }), false);
+});
+
+test("SendGrid provider response bodies are not returned by the test endpoint", () => {
+  const error = new SendGridProviderError("SendGrid HTTP 400: provider response body", { providerStatusCode: 400 });
+  assert.equal(safeSendGridTestErrorMessage(error), "SendGrid rejected the test email.");
 });
 
 test("migration 014 adds SendGrid without changing the Brevo provider default", () => {

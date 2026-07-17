@@ -12,6 +12,7 @@
     progress: null,
     migrationRequired: false,
     brevo: null,
+    sendGridTestControl: null,
   };
 
   function $(id) { return document.getElementById(id); }
@@ -223,6 +224,7 @@
         <p id="testDisabledReason" class="send-disabled-reason hidden"></p>
         <div class="toolbar">
           <button id="sendTestButton">Send Test Email</button>
+          <button id="sendSendGridTestButton" type="button" hidden>Send SendGrid Test</button>
         </div>
       </section>
       <section class="send-area" style="margin-top:14px;">
@@ -257,6 +259,18 @@
 
     $("refreshSendButton").addEventListener("click", () => refreshSending().catch((error) => setMessage(error.message, true)));
     $("sendTestButton").addEventListener("click", () => sendTest().catch((error) => setMessage(error.message, true)));
+    if (window.SendGridTestControl) {
+      state.sendGridTestControl = window.SendGridTestControl.create({
+        button: $("sendSendGridTestButton"),
+        getCampaignId: currentCampaignId,
+        getEmail: () => $("testSendEmail")?.value || "",
+        getStoredKey,
+        setMessage,
+        onAccepted: () => refreshSending().catch((error) => setMessage(error.message, true)),
+      });
+      $("sendSendGridTestButton").addEventListener("click", () => state.sendGridTestControl.send());
+      state.sendGridTestControl.checkAvailability();
+    }
     $("prepareSendButton").addEventListener("click", () => prepareSend().catch((error) => setMessage(error.message, true)));
     $("confirmSendButton").addEventListener("click", () => confirmSend().catch((error) => setMessage(error.message, true)));
     $("cancelPreparedSendButton").addEventListener("click", () => cancelPreparation().catch((error) => setMessage(error.message, true)));
