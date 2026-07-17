@@ -78,6 +78,7 @@
     if (!brevo.api_key_configured) missing.push("API key");
     if (!brevo.sender_email_configured) missing.push("sender email");
     if (!brevo.sender_name) missing.push("sender name");
+    if (String(brevo.provider || "").toLowerCase() === "sendgrid" && !brevo.webhook_verification_configured) missing.push("webhook verification");
     if (!unsubscribeConfigured) missing.push("unsubscribe configuration");
     if (state.migrationRequired) missing.push("Migration 011");
     if (brevo.connectivity === "checking") return { key: "checking", label: `Checking ${provider} connection...`, detail: "Refreshing sending configuration.", missing, unsubscribeConfigured };
@@ -249,8 +250,8 @@
       </section>
       <div class="send-history">
         <table>
-          <thead><tr><th>Type</th><th>Status</th><th>Requested</th><th>Accepted</th><th>Failed</th><th>Duplicates</th><th>Created</th><th>Provider response</th></tr></thead>
-          <tbody id="sendHistoryRows"><tr><td colspan="8">No send history loaded.</td></tr></tbody>
+          <thead><tr><th>Type</th><th>Provider</th><th>Status</th><th>Requested</th><th>Accepted</th><th>Failed</th><th>Duplicates</th><th>Created</th><th>Provider response</th></tr></thead>
+          <tbody id="sendHistoryRows"><tr><td colspan="9">No send history loaded.</td></tr></tbody>
         </table>
       </div>
     `;
@@ -290,10 +291,14 @@
     `;
     $("refreshBrevoInlineButton").addEventListener("click", () => refreshSending().catch((error) => setMessage(error.message, true)));
     $("brevoStatusGrid").innerHTML = [
-      [`${brevo.provider || "Email provider"} connection`, brevo.connectivity || "checking"],
-      ["Configured", status.missing.length ? "No" : "Yes"],
-      ["Sender email", brevo.sender_email_configured ? "Configured" : "Missing"],
+      ["Selected provider", brevo.provider || "Email provider"],
+      ["Connection", brevo.connectivity || "checking"],
+      ["API key configured", brevo.api_key_configured ? "Yes" : "No"],
+      ["Sender email configured", brevo.sender_email_configured ? "Yes" : "No"],
       ["Sender name", brevo.sender_name || "Missing"],
+      ...(String(brevo.provider || "").toLowerCase() === "sendgrid"
+        ? [["Webhook verification configured", brevo.webhook_verification_configured ? "Yes" : "No"]]
+        : []),
       ["Unsubscribe", status.unsubscribeConfigured ? "Configured" : "Missing"],
     ].map(([label, value]) => `<div class="send-item"><strong>${escapeHtml(label)}</strong>${escapeHtml(value)}</div>`).join("");
     renderControlStates();
@@ -334,16 +339,17 @@
   function renderHistory() {
     const rows = state.history || [];
     if (state.migrationRequired) {
-      $("sendHistoryRows").innerHTML = `<tr><td colspan="8">Migration 011 is required before send history is available.</td></tr>`;
+      $("sendHistoryRows").innerHTML = `<tr><td colspan="9">Migration 011 is required before send history is available.</td></tr>`;
       return;
     }
     if (!rows.length) {
-      $("sendHistoryRows").innerHTML = `<tr><td colspan="8">No test or production email has been sent for this campaign.</td></tr>`;
+      $("sendHistoryRows").innerHTML = `<tr><td colspan="9">No test or production email has been sent for this campaign.</td></tr>`;
       return;
     }
     $("sendHistoryRows").innerHTML = rows.map((send) => `
       <tr>
         <td>${escapeHtml(send.send_type)}</td>
+        <td>${escapeHtml(send.metadata?.email_provider || send.provider || "-")}</td>
         <td>${statusBadge(send.status)}</td>
         <td>${fmt.format(send.requested_count || 0)}</td>
         <td>${fmt.format(send.sent_count || 0)}</td>
@@ -371,10 +377,10 @@
     renderBrevoStatus();
     renderPreparation();
     const [brevoResult, historyResult] = await Promise.all([
-      sendApi("brevoStatus"),
+      sendApi("providerStatus"),
       sendApi("sendHistory", { id }),
     ]);
-    state.brevo = brevoResult.brevo;
+    state.brevo = brevoResult.provider_status || brevoResult.brevo;
     state.history = historyResult.sends || [];
     state.progress = historyResult.progress || null;
     state.migrationRequired = Boolean(historyResult.migration_required);

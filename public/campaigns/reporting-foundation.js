@@ -152,7 +152,7 @@
     $("reportingMetrics").innerHTML = cards.map(([label, value, detail]) => `
       <div class="reporting-card"><strong>${escapeHtml(label)}</strong><b>${escapeHtml(value)}</b><span>${escapeHtml(detail)}</span></div>
     `).join("");
-    $("reportingNote").textContent = "Production metrics exclude internal test sends. Open counts are based on Brevo open tracking and may include privacy proxy or prefetch activity.";
+    $("reportingNote").textContent = "Production metrics exclude internal test sends. Open counts are based on provider tracking and may include privacy proxy or prefetch activity.";
   }
   function renderStatusBreakdown(rows = []) {
     if (!rows.length) {

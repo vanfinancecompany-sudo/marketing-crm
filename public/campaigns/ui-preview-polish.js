@@ -83,11 +83,12 @@
     if (name === "Readiness") return $("readyPanel")?.textContent?.trim() || "Not Ready";
     if (name === "Sending") {
       const text = $("brevoConnectionBanner")?.innerText || "";
-      if (/authorised/i.test(text)) return "Brevo Authorised";
-      if (/rejected/i.test(text)) return "Brevo Rejected";
-      if (/not fully configured/i.test(text)) return "Brevo Not Configured";
-      if (/could not be reached/i.test(text)) return "Brevo Unreachable";
-      return "Checking Brevo";
+      const provider = text.match(/^(SendGrid|SMTP2GO|Brevo)/i)?.[1] || "Email provider";
+      if (/authorised/i.test(text)) return `${provider} Authorised`;
+      if (/rejected/i.test(text)) return `${provider} Rejected`;
+      if (/not fully configured/i.test(text)) return `${provider} Not Configured`;
+      if (/could not be reached/i.test(text)) return `${provider} Unreachable`;
+      return `Checking ${provider}`;
     }
     if (name === "Campaign Summary") {
       const recipients = Array.from(document.querySelectorAll("#summaryGrid .summary-item")).find((item) => /Estimated recipients/i.test(item.innerText));
@@ -169,16 +170,16 @@
     if (Array.isArray(loadedHistory)) return loadedHistory.map(normaliseHistoryRow).filter(Boolean);
     return Array.from(document.querySelectorAll("#sendHistoryRows tr")).map((row) => {
       const cells = Array.from(row.cells || []);
-      if (cells.length < 7) return null;
+      if (cells.length < 8) return null;
       const type = cells[0].textContent.trim().toLowerCase();
-      const status = cells[1].textContent.trim().toLowerCase();
+      const status = cells[2].textContent.trim().toLowerCase();
       if (!type || /no .*history|migration/i.test(type)) return null;
       return normaliseHistoryRow({
         type,
         status,
-        requested: cells[2].textContent,
-        accepted: cells[3].textContent,
-        failed: cells[4].textContent,
+        requested: cells[3].textContent,
+        accepted: cells[4].textContent,
+        failed: cells[5].textContent,
       });
     }).filter(Boolean);
   }
@@ -191,8 +192,8 @@
     const finalSendCount = parseCount(audienceText.match(/Final send count\s+([\d,]+)/i)?.[1]);
     const hasAudience = finalSendCount > 0;
     const ready = /READY TO SEND/i.test($("readyPanel")?.textContent || "");
-    const brevo = $("brevoConnectionBanner")?.innerText || "";
-    const brevoAuthorised = /authorised/i.test(brevo);
+    const providerStatus = $("brevoConnectionBanner")?.innerText || "";
+    const providerAuthorised = /authorised/i.test(providerStatus);
     const history = readSendHistory();
     const testComplete = history.some((send) => send.type.includes("test") && SUCCESS_SEND_STATUSES.has(send.status) && send.accepted > 0 && send.failed === 0);
     const productionRows = history.filter((send) => send.type.includes("production"));
@@ -203,8 +204,8 @@
       { label: "Campaign", state: hasCampaign ? "complete" : "blocked" },
       { label: "Audience", state: hasAudience ? "complete" : hasCampaign ? "current" : "blocked" },
       { label: "Readiness", state: ready ? "complete" : hasAudience ? "current" : "blocked" },
-      { label: "Test", state: testComplete ? "complete" : brevoAuthorised ? "current" : "blocked" },
-      { label: productionLabel, state: productionComplete ? "complete" : productionWarning ? "warning" : ready && brevoAuthorised ? "current" : "blocked" },
+      { label: "Test", state: testComplete ? "complete" : providerAuthorised ? "current" : "blocked" },
+      { label: productionLabel, state: productionComplete ? "complete" : productionWarning ? "warning" : ready && providerAuthorised ? "current" : "blocked" },
     ];
     node.innerHTML = steps.map((step, index) => {
       const marker = step.state === "complete" ? "✓" : step.state === "warning" ? "!" : index + 1;

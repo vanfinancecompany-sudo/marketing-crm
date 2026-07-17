@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { activeEmailProvider, emailProviderConfig } from "../lib/emailProviders/marketingProvider.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const TEMPLATE_CAMPAIGN_SOURCE = "template_campaign_foundation";
@@ -184,34 +185,39 @@ function reconcileEventCorrelation(event, recipientsByMessageId = new Map()) {
 }
 
 function applyWebhookProviderFilter(query, provider) {
-  return provider === "SMTP2GO"
-    ? query.eq("metadata->>source_provider", "smtp2go")
-    : query.like("provider_event_id", "brevo:%");
+  if (provider === "SMTP2GO") return query.eq("metadata->>source_provider", "smtp2go");
+  if (provider === "SendGrid") return query.eq("provider", "sendgrid");
+  return query.like("provider_event_id", "brevo:%");
 }
 
 function dashboardEmailProviderConfig() {
-  const smtp2go = Boolean(process.env.SMTP2GO_API_KEY || process.env.SMTP2GO_SENDER_EMAIL || process.env.SMTP2GO_SENDER_NAME);
-  return {
-    provider: smtp2go ? "SMTP2GO" : "Brevo",
-    apiKey: String(smtp2go ? process.env.SMTP2GO_API_KEY || "" : process.env.BREVO_API_KEY || "").trim(),
-    senderEmail: String(smtp2go ? process.env.SMTP2GO_SENDER_EMAIL || "" : process.env.BREVO_SENDER_EMAIL || "").trim(),
-    senderName: String(smtp2go ? process.env.SMTP2GO_SENDER_NAME || "" : process.env.BREVO_SENDER_NAME || "").trim(),
-  };
+  const selected = activeEmailProvider();
+  const config = emailProviderConfig(selected);
+  return { ...config, apiKey: String(config.apiKey || "").trim(), senderEmail: String(config.senderEmail || "").trim(), senderName: String(config.senderName || "").trim() };
 }
 
 async function checkEmailProviderConnection(config) {
   if (!config.apiKey) return { provider: config.provider, state: "not_configured", label: "Not configured" };
+  const request = config.id === "smtp2go"
+    ? { url: "https://api.smtp2go.com/v3/api_keys/permissions", method: "POST", headers: { "Content-Type": "application/json", "X-Smtp2go-Api-Key": config.apiKey }, body: "{}" }
+    : config.id === "sendgrid"
+      ? { url: "https://api.sendgrid.com/v3/user/profile", method: "GET", headers: { Authorization: `Bearer ${config.apiKey}` } }
+      : { url: "https://api.brevo.com/v3/account", method: "GET", headers: { "api-key": config.apiKey } };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
   try {
-    const smtp2go = config.provider === "SMTP2GO";
-    const response = await fetch(smtp2go ? "https://api.smtp2go.com/v3/api_keys/permissions" : "https://api.brevo.com/v3/account", {
-      method: smtp2go ? "POST" : "GET",
-      headers: smtp2go ? { "Content-Type": "application/json", "X-Smtp2go-Api-Key": config.apiKey } : { "api-key": config.apiKey },
-      body: smtp2go ? "{}" : undefined,
+    const response = await fetch(request.url, {
+      method: request.method,
+      headers: request.headers,
+      body: request.body,
+      signal: controller.signal,
     });
     if (response.ok) return { provider: config.provider, state: "authorised", label: "Authorised", status_code: response.status };
     return { provider: config.provider, state: "rejected", label: "Rejected", status_code: response.status };
   } catch {
     return { provider: config.provider, state: "unreachable", label: "Unreachable" };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -507,7 +513,7 @@ async function loadDashboard(supabase, body = {}) {
     configured: Boolean(providerConfig.senderEmail && providerConfig.senderName),
     email_configured: Boolean(providerConfig.senderEmail),
     name_configured: Boolean(providerConfig.senderName),
-    email: providerConfig.senderEmail,
+    email: providerConfig.id === "sendgrid" ? "" : providerConfig.senderEmail,
     name: providerConfig.senderName,
     provider_sender_status: "not_checked",
   };
@@ -527,8 +533,7 @@ async function loadDashboard(supabase, body = {}) {
   let periodProductionEvents = [];
   let campaigns = [];
   const webhookProvider = providerConfig.provider;
-  const webhookSecret = webhookProvider === "SMTP2GO" ? process.env.SMTP2GO_WEBHOOK_SECRET : process.env.BREVO_WEBHOOK_SECRET;
-  let webhook = { provider: webhookProvider, configured: Boolean(String(webhookSecret || "").trim()), latest_event_at: null, events_last_24h: 0, events_last_7d: 0, state: "awaiting_first_event" };
+  let webhook = { provider: webhookProvider, configured: providerConfig.webhookVerificationConfigured, latest_event_at: null, events_last_24h: 0, events_last_7d: 0, state: "awaiting_first_event" };
   let infrastructureMessage = "";
   const partials = [];
 
@@ -607,6 +612,7 @@ async function loadDashboard(supabase, body = {}) {
   const partial = partialWarning(partials);
   const essentialReadiness = {
     brevo_authorised: brevo.state === "authorised",
+    provider_authorised: brevo.state === "authorised",
     sender_configured: sender.configured,
     unsubscribe_configured: unsubscribe.configured,
     sending_infra_available: sendingCount.ok,
