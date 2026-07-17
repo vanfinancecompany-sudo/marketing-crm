@@ -226,6 +226,7 @@
           <button id="sendTestButton">Send Test Email</button>
           <button id="sendSendGridTestButton" type="button" hidden>Send SendGrid Test</button>
         </div>
+        <p id="sendGridTestConfiguration" class="hint" hidden></p>
       </section>
       <section class="send-area" style="margin-top:14px;">
         <div class="send-danger">This sends real customer email.</div>
@@ -262,6 +263,7 @@
     if (window.SendGridTestControl) {
       state.sendGridTestControl = window.SendGridTestControl.create({
         button: $("sendSendGridTestButton"),
+        configurationNode: $("sendGridTestConfiguration"),
         getCampaignId: currentCampaignId,
         getEmail: () => $("testSendEmail")?.value || "",
         getStoredKey,

@@ -15,6 +15,9 @@ const API_KEY_HEADER = "x-marketing-customer-database-key";
 const TEMPLATE_CAMPAIGN_SOURCE = "template_campaign_foundation";
 const TEST_COOLDOWN_MS = 60 * 1000;
 const INTERNAL_EMAIL_DOMAINS = new Set(["vanfinancecompany.co.uk", "rent2buyvans.co.uk"]);
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ZERO_WIDTH_EMAIL_CHARACTERS = /[\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g;
+const NON_BREAKING_SPACES = /[\u00A0\u202F]/g;
 const CAMPAIGN_COLUMNS = "id,name,description,channel,objective,status,tags,metadata,created_by,created_at,updated_at,archived_at,campaign_type,template_id,template_name,template_snapshot,subject_line,preview_text,audience_snapshot";
 const SEND_COLUMNS = "id,campaign_id,send_type,status,provider,requested_count,eligible_count,suppressed_count,sent_count,failed_count,skipped_duplicate_count,created_by,created_at,updated_at,started_at,completed_at,confirmation_token_hash,frozen_subject,frozen_preview_text,frozen_html_hash,metadata,error_summary";
 
@@ -58,16 +61,37 @@ function assertSupabase(result, fallback) {
   return result;
 }
 
-function normalizeEmail(value) {
-  return String(value || "").trim().toLowerCase();
+export function normalizeSendGridRecipientEmail(value) {
+  let email = String(value ?? "")
+    .replace(ZERO_WIDTH_EMAIL_CHARACTERS, "")
+    .replace(/[\r\n]/g, "")
+    .replace(NON_BREAKING_SPACES, "")
+    .trim();
+  if (
+    email.length >= 2
+    && ((email.startsWith('"') && email.endsWith('"')) || (email.startsWith("'") && email.endsWith("'")))
+  ) email = email.slice(1, -1).trim();
+  return email.toLowerCase();
 }
 
 function validateEmail(value, label) {
-  const email = normalizeEmail(value);
-  if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  const email = normalizeSendGridRecipientEmail(value);
+  if (!email || email.length > 254 || !EMAIL_PATTERN.test(email)) {
     throw new ApiError(400, `${label} is not valid.`);
   }
   return email;
+}
+
+export function sendGridRecipientDiagnostics(value) {
+  const normalized = normalizeSendGridRecipientEmail(value);
+  const genericValid = Boolean(normalized && normalized.length <= 254 && EMAIL_PATTERN.test(normalized));
+  const domain = genericValid ? normalized.slice(normalized.lastIndexOf("@") + 1) : "";
+  return {
+    recipient_configured: Boolean(normalized),
+    recipient_valid: genericValid && INTERNAL_EMAIL_DOMAINS.has(domain),
+    recipient_length: normalized.length,
+    recipient_domain: domain,
+  };
 }
 
 export function allowedSendGridTestRecipient(requestedValue, configuredValue) {
@@ -210,7 +234,13 @@ export default async function handler(request, response) {
   if (!["GET", "POST"].includes(request.method)) return json(response, 405, { ok: false, message: "Method not allowed." });
   if (!authorize(request)) return json(response, 401, { ok: false, message: "SendGrid test access denied." });
   const previewEnabled = isSendGridTestEnvironment();
-  if (request.method === "GET") return json(response, 200, { ok: true, preview_enabled: previewEnabled });
+  if (request.method === "GET") {
+    return json(response, 200, {
+      ok: true,
+      preview_enabled: previewEnabled,
+      ...sendGridRecipientDiagnostics(process.env.SENDGRID_TEST_RECIPIENT_EMAIL),
+    });
+  }
   if (!previewEnabled) return json(response, 403, { ok: false, message: "SendGrid tests are available only in Preview." });
   try {
     const result = await sendControlledTest(getSupabase(), parseBody(request));

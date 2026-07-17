@@ -18,8 +18,10 @@ function response(payload, status = 200) {
 function setup(fetchImpl, overrides = {}) {
   const messages = [];
   const button = { hidden: false, disabled: false };
+  const configurationNode = { hidden: false, textContent: "" };
   const control = loadControl().create({
     button,
+    configurationNode,
     fetchImpl,
     getCampaignId: () => "11111111-1111-4111-8111-111111111111",
     getEmail: () => "internal@vanfinancecompany.co.uk",
@@ -27,7 +29,19 @@ function setup(fetchImpl, overrides = {}) {
     setMessage: (message, error) => messages.push({ message, error }),
     ...overrides,
   });
-  return { button, control, messages };
+  return { button, configurationNode, control, messages };
+}
+
+function previewDiagnostics(overrides = {}) {
+  return {
+    ok: true,
+    preview_enabled: true,
+    recipient_configured: true,
+    recipient_valid: true,
+    recipient_length: 29,
+    recipient_domain: "vanfinancecompany.co.uk",
+    ...overrides,
+  };
 }
 
 test("SendGrid test button stays hidden in production", async () => {
@@ -38,9 +52,11 @@ test("SendGrid test button stays hidden in production", async () => {
 });
 
 test("SendGrid test button is visible in Vercel Preview", async () => {
-  const { button, control } = setup(async () => response({ ok: true, preview_enabled: true }));
+  const { button, configurationNode, control } = setup(async () => response(previewDiagnostics()));
   assert.equal(await control.checkAvailability(), true);
   assert.equal(button.hidden, false);
+  assert.equal(button.disabled, false);
+  assert.equal(configurationNode.textContent, "SendGrid test recipient configured for vanfinancecompany.co.uk.");
 });
 
 test("SendGrid test request uses the currently open campaign ID", async () => {
@@ -48,7 +64,7 @@ test("SendGrid test request uses the currently open campaign ID", async () => {
   const fetchImpl = async (url, options) => {
     requests.push({ url, options });
     return options.method === "GET"
-      ? response({ ok: true, preview_enabled: true })
+      ? response(previewDiagnostics())
       : response({ ok: true, send_id: "22222222-2222-4222-8222-222222222222" });
   };
   const { control } = setup(fetchImpl, { getCampaignId: () => "33333333-3333-4333-8333-333333333333" });
@@ -67,7 +83,7 @@ test("duplicate SendGrid test clicks are ignored while a request is pending", as
   let postCount = 0;
   const pendingResponse = new Promise((resolve) => { release = resolve; });
   const fetchImpl = async (_url, options) => {
-    if (options.method === "GET") return response({ ok: true, preview_enabled: true });
+    if (options.method === "GET") return response(previewDiagnostics());
     postCount += 1;
     return pendingResponse;
   };
@@ -85,7 +101,7 @@ test("duplicate SendGrid test clicks are ignored while a request is pending", as
 
 test("successful SendGrid test shows only the accepted state and safe send ID", async () => {
   const fetchImpl = async (_url, options) => options.method === "GET"
-    ? response({ ok: true, preview_enabled: true })
+    ? response(previewDiagnostics())
     : response({ ok: true, send_id: "44444444-4444-4444-8444-444444444444", provider_message_id: "provider-detail" });
   const { control, messages } = setup(fetchImpl);
   await control.checkAvailability();
@@ -98,12 +114,29 @@ test("successful SendGrid test shows only the accepted state and safe send ID", 
 
 test("unsafe endpoint failure details are not displayed", async () => {
   const fetchImpl = async (_url, options) => options.method === "GET"
-    ? response({ ok: true, preview_enabled: true })
+    ? response(previewDiagnostics())
     : response({ ok: false, message: "Provider failed\nAuthorization: Bearer do-not-render" }, 502);
   const { control, messages } = setup(fetchImpl);
   await control.checkAvailability();
   await control.send();
   assert.deepEqual(messages.at(-1), { message: "SendGrid test send failed.", error: true });
+});
+
+test("invalid Preview recipient diagnostics show safe configuration detail and disable sending", async () => {
+  const diagnostics = previewDiagnostics({
+    recipient_valid: false,
+    recipient_length: 17,
+    recipient_domain: "example.com",
+  });
+  const { button, configurationNode, control } = setup(async () => response(diagnostics));
+  await control.checkAvailability();
+  assert.equal(button.hidden, false);
+  assert.equal(button.disabled, true);
+  assert.equal(
+    configurationNode.textContent,
+    "SendGrid test recipient configuration is invalid for example.com (normalised length 17)."
+  );
+  assert.doesNotMatch(configurationNode.textContent, /sales@/i);
 });
 
 test("SendGrid client assets contain no server environment secret names or values", () => {

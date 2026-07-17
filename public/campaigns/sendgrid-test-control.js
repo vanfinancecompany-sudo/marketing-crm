@@ -15,12 +15,26 @@
     const button = options.button;
     const fetchImpl = options.fetchImpl || globalThis.fetch;
     let previewEnabled = false;
+    let recipientConfigured = false;
+    let recipientValid = false;
+    let recipientLength = 0;
+    let recipientDomain = "";
     let pending = false;
 
     function render() {
-      if (!button) return;
-      button.hidden = !previewEnabled;
-      button.disabled = pending;
+      if (button) {
+        button.hidden = !previewEnabled;
+        button.disabled = pending || !recipientValid;
+      }
+      const configurationNode = options.configurationNode;
+      if (!configurationNode) return;
+      configurationNode.hidden = !previewEnabled;
+      if (!previewEnabled) configurationNode.textContent = "";
+      else if (!recipientConfigured) configurationNode.textContent = "SendGrid test recipient is not configured for this Preview.";
+      else if (!recipientValid) {
+        const domain = recipientDomain ? ` for ${recipientDomain}` : "";
+        configurationNode.textContent = `SendGrid test recipient configuration is invalid${domain} (normalised length ${recipientLength}).`;
+      } else configurationNode.textContent = `SendGrid test recipient configured for ${recipientDomain}.`;
     }
 
     async function request(method, payload) {
@@ -47,8 +61,20 @@
       try {
         const result = await request("GET");
         previewEnabled = result.preview_enabled === true;
+        recipientConfigured = result.recipient_configured === true;
+        recipientValid = result.recipient_valid === true;
+        recipientLength = Number.isSafeInteger(result.recipient_length) && result.recipient_length >= 0
+          ? result.recipient_length
+          : 0;
+        recipientDomain = /^[a-z0-9.-]{1,253}$/i.test(String(result.recipient_domain || ""))
+          ? String(result.recipient_domain).toLowerCase()
+          : "";
       } catch {
         previewEnabled = false;
+        recipientConfigured = false;
+        recipientValid = false;
+        recipientLength = 0;
+        recipientDomain = "";
       }
       render();
       return previewEnabled;

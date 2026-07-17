@@ -10,8 +10,11 @@ import {
 import {
   allowedSendGridTestRecipient,
   isSendGridTestEnvironment,
+  normalizeSendGridRecipientEmail,
   safeSendGridTestErrorMessage,
+  sendGridRecipientDiagnostics,
 } from "../api/sendgrid-test-email.js";
+import sendGridTestEmailHandler from "../api/sendgrid-test-email.js";
 
 test("SendGrid test send stores the provider message ID returned on success", async () => {
   let submitted;
@@ -53,6 +56,95 @@ test("controlled test recipient must exactly match one configured internal addre
   );
   assert.equal(allowedSendGridTestRecipient("other@vanfinancecompany.co.uk", "safe@vanfinancecompany.co.uk"), "");
   assert.equal(allowedSendGridTestRecipient("safe@example.com", "safe@example.com"), "");
+});
+
+test("normal SendGrid recipient email is preserved and normalised to lowercase", () => {
+  assert.equal(normalizeSendGridRecipientEmail("Sales@VanFinanceCompany.co.uk"), "sales@vanfinancecompany.co.uk");
+});
+
+test("SendGrid recipient normalisation removes surrounding single and double quotes", () => {
+  assert.equal(normalizeSendGridRecipientEmail('"sales@vanfinancecompany.co.uk"'), "sales@vanfinancecompany.co.uk");
+  assert.equal(normalizeSendGridRecipientEmail("'sales@vanfinancecompany.co.uk'"), "sales@vanfinancecompany.co.uk");
+});
+
+test("SendGrid recipient normalisation removes CR and LF characters", () => {
+  assert.equal(normalizeSendGridRecipientEmail("\r\nsales@vanfinancecompany.co.uk\r\n"), "sales@vanfinancecompany.co.uk");
+});
+
+test("SendGrid recipient normalisation removes zero-width Unicode characters", () => {
+  assert.equal(
+    normalizeSendGridRecipientEmail("\u200Bsales@vanfinance\u200Ccompany.co.uk\u2060\uFEFF"),
+    "sales@vanfinancecompany.co.uk"
+  );
+});
+
+test("SendGrid recipient normalisation removes non-breaking spaces", () => {
+  assert.equal(
+    normalizeSendGridRecipientEmail("\u00A0sales@vanfinancecompany.co.uk\u202F"),
+    "sales@vanfinancecompany.co.uk"
+  );
+});
+
+test("valid external recipient configuration remains ineligible", () => {
+  assert.deepEqual(sendGridRecipientDiagnostics("sales@example.com"), {
+    recipient_configured: true,
+    recipient_valid: false,
+    recipient_length: 17,
+    recipient_domain: "example.com",
+  });
+  assert.equal(allowedSendGridTestRecipient("sales@example.com", "sales@example.com"), "");
+});
+
+test("recipient matching remains exact after robust normalisation", () => {
+  assert.equal(
+    allowedSendGridTestRecipient("\u200Bsales@vanfinancecompany.co.uk\u00A0", '"sales@vanfinancecompany.co.uk"'),
+    "sales@vanfinancecompany.co.uk"
+  );
+  assert.equal(
+    allowedSendGridTestRecipient("other@vanfinancecompany.co.uk", '"sales@vanfinancecompany.co.uk"'),
+    ""
+  );
+});
+
+test("authenticated SendGrid diagnostics expose no complete email or secrets", async () => {
+  const previous = {
+    access: process.env.MARKETING_CUSTOMER_DATABASE_API_KEY,
+    recipient: process.env.SENDGRID_TEST_RECIPIENT_EMAIL,
+    vercel: process.env.VERCEL_ENV,
+  };
+  const accessSecret = crypto.randomBytes(24).toString("base64url");
+  process.env.MARKETING_CUSTOMER_DATABASE_API_KEY = accessSecret;
+  process.env.SENDGRID_TEST_RECIPIENT_EMAIL = '"\u200Bsales@vanfinancecompany.co.uk\u00A0"\r\n';
+  process.env.VERCEL_ENV = "preview";
+  let statusCode = 0;
+  let payload;
+  const response = {
+    setHeader() {},
+    status(value) { statusCode = value; return this; },
+    json(value) { payload = value; return this; },
+  };
+  try {
+    await sendGridTestEmailHandler({ method: "GET", headers: { "x-marketing-customer-database-key": accessSecret } }, response);
+  } finally {
+    if (previous.access === undefined) delete process.env.MARKETING_CUSTOMER_DATABASE_API_KEY;
+    else process.env.MARKETING_CUSTOMER_DATABASE_API_KEY = previous.access;
+    if (previous.recipient === undefined) delete process.env.SENDGRID_TEST_RECIPIENT_EMAIL;
+    else process.env.SENDGRID_TEST_RECIPIENT_EMAIL = previous.recipient;
+    if (previous.vercel === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = previous.vercel;
+  }
+  assert.equal(statusCode, 200);
+  assert.deepEqual(payload, {
+    ok: true,
+    preview_enabled: true,
+    recipient_configured: true,
+    recipient_valid: true,
+    recipient_length: 29,
+    recipient_domain: "vanfinancecompany.co.uk",
+  });
+  const serialized = JSON.stringify(payload);
+  assert.doesNotMatch(serialized, /sales@vanfinancecompany\.co\.uk/i);
+  assert.doesNotMatch(serialized, new RegExp(accessSecret));
 });
 
 test("SendGrid test endpoint is enabled only in Preview or local non-production environments", () => {
