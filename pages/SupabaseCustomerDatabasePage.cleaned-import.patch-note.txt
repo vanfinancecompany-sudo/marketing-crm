@@ -1,1 +1,0 @@
-The tested V2 deliverable also updates pages/SupabaseCustomerDatabasePage.jsx to show separate cleaned-import outcomes and a downloadable import-results CSV. That UI-only file is intentionally pending on this draft branch and must be applied before review or merge.
