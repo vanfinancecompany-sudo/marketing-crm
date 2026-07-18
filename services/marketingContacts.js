@@ -111,10 +111,15 @@ export async function fetchMarketingImportReports(importId = "") {
   return {
     rejectedRows: result.rejectedRows || [],
     duplicateRows: result.duplicateRows || [],
+    promotedRows: result.promotedRows || [],
     restoredRows: result.restoredRows || [],
+    alreadyActiveRows: result.alreadyActiveRows || [],
+    newActiveRows: result.newActiveRows || [],
     suppressedRows: result.suppressedRows || [],
     invalidEmailRows: result.invalidEmailRows || [],
     possibleDuplicates: result.possibleDuplicates || [],
+    importResults: result.importResults || [],
+    importResultsCsv: result.importResultsCsv || "",
   };
 }
 
