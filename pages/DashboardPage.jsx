@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 1.7 seconds
-Output:
 import { useEffect, useMemo, useState } from "react";
 import { ACTIVITY_LABELS, DAILY_ACTIVITY_TYPES, DEFAULT_DAILY_TARGETS, londonDateKey, londonWeekday } from "../lib/marketingDailyOperations.js";
 import {
@@ -148,4 +145,3 @@ export default function DashboardPage() {
     </details>
   </div>;
 }
-
