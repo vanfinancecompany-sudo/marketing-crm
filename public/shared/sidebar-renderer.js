@@ -68,6 +68,31 @@
 
   function mountAll() {
     document.querySelectorAll("[data-marketing-sidebar]").forEach((target) => render(target));
+    mountDailyTargetWarning();
+  }
+
+  async function mountDailyTargetWarning() {
+    const apiKey = window.localStorage?.getItem("marketingCustomerDatabaseApiKey") || "";
+    if (!apiKey || window.location.pathname === "/") return;
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" })
+      .formatToParts(new Date()).reduce((value, part) => ({ ...value, [part.type]: part.value }), {});
+    const activityDate = `${parts.year}-${parts.month}-${parts.day}`;
+    try {
+      const response = await fetch("/api/marketing-daily-operations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-marketing-customer-database-key": apiKey },
+        body: JSON.stringify({ action: "overview", activity_date: activityDate }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.day || result.day.complete || result.day.off_day) return;
+      const warning = document.createElement("a");
+      warning.className = "marketing-daily-warning";
+      warning.href = "/";
+      warning.innerHTML = `<strong>TODAY'S MARKETING TARGET IS INCOMPLETE</strong><span>${result.day.remaining_total} actions remaining Â· ${result.day.completion_percentage}% complete</span>`;
+      document.body.appendChild(warning);
+    } catch {
+      // The warning is advisory; existing document pages must keep working if it cannot load.
+    }
   }
 
   window.MarketingCrmSidebarRenderer = Object.freeze({ render, mountAll });
@@ -75,3 +100,4 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mountAll);
   else mountAll();
 })();
+
