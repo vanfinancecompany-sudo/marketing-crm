@@ -52,7 +52,6 @@ import { useEffect, useMemo, useState } from "react";
 import Sidebar from "./components/Sidebar.jsx";
 import ControlCentrePage from "./pages/ControlCentrePage.jsx";
 import DashboardPage from "./pages/DashboardPage.jsx";
-import MarketingTotalsPage from "./pages/MarketingTotalsPage.jsx";
 import CustomerDatabasePage from "./pages/CustomerDatabasePage.jsx";
 import MarketingCentrePage from "./pages/MarketingCentrePage.jsx";
 import StockPage from "./pages/StockPage.jsx";
@@ -63,7 +62,6 @@ import ReelLabBetaPage from "./pages/ReelLabBetaPage.jsx";
 import YouTubeGeneratorPage from "./pages/YouTubeGeneratorPage.jsx";
 import CreativeLibraryPage from "./pages/CreativeLibraryPage.jsx";
 import PostingDeskPage from "./pages/PostingDeskPage.jsx";
-import DailyTargetBanner from "./components/DailyTargetBanner.jsx";
 import { londonDateKey } from "./lib/marketingDailyOperations.js";
 import { recordDailyMarketingActivity } from "./services/marketingDailyOperations.js";
 import {
@@ -452,8 +450,7 @@ function rankRandomPool(pool, recentVehicleIds = []) {
 }
 
 const VIEW_PATHS = {
-  Dashboard: "/",
-  "Marketing Totals": "/marketing-totals",
+  "Content Operations": "/",
   Stock: "/stock",
   "Customer Database": "/customer-database",
   "Marketing Centre": "/marketing-centre",
@@ -469,12 +466,11 @@ const VIEW_PATHS = {
 };
 
 function viewFromPath() {
-  if (typeof window === "undefined") return "Dashboard";
+  if (typeof window === "undefined") return "Content Operations";
 
   const path = window.location.pathname;
 
   if (path === "/stock") return "Stock";
-  if (path === "/marketing-totals") return "Marketing Totals";
   if (path === "/customer-database") return "Customer Database";
   if (path === "/marketing-centre") return "Marketing Centre";
   if (path === "/vansco-stock-watch") return "Vansco Stock Watch";
@@ -489,7 +485,7 @@ function viewFromPath() {
   if (path === "/rent2buy-facebook") return "Rent2Buy Facebook";
   if (path === "/facebook-marketplace") return "Facebook Marketplace";
 
-  return "Dashboard";
+  return "Content Operations";
 }
 
 function loadHiddenPostingIds(pageKey) {
@@ -2700,8 +2696,6 @@ async function handleClearTodayReels() {
         );
       case "Customer Database":
         return <CustomerDatabasePage />;
-      case "Marketing Totals":
-        return <MarketingTotalsPage onNavigate={handleNavigate} />;
       case "Marketing Centre":
         return <MarketingCentrePage />;
       case "Vansco Stock Watch":
@@ -2856,14 +2850,11 @@ async function handleClearTodayReels() {
             onShowHiddenAgain={handleShowHiddenAgain}
           />
         );
-      case "Dashboard":
+      case "Content Operations":
       default:
         return (
           <DashboardPage
             onNavigate={handleNavigate}
-            stats={dashboardStats}
-            recentCreatives={recentCreatives}
-            topReels={topReelsWithLabels}
           />
         );
     }
@@ -2895,7 +2886,6 @@ async function handleClearTodayReels() {
     </div>
   </div>
 </header>
-        <DailyTargetBanner currentView={currentView} onNavigate={handleNavigate} />
         {renderCurrentPage()}
       </main>
     </div>
