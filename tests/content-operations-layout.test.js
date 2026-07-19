@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 1.7 seconds
-Output:
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -48,4 +45,3 @@ test("the floating incomplete warning was removed", async () => {
   assert.doesNotMatch(renderer, /marketing-daily-warning|loadDailyTargetWarning/);
   assert.doesNotMatch(css, /marketing-daily-warning/);
 });
-
