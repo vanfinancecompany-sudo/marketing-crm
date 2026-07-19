@@ -1,5 +1,5 @@
 Exit code: 0
-Wall time: 1.4 seconds
+Wall time: 1.7 seconds
 Output:
 import { useEffect, useMemo, useState } from "react";
 import { ACTIVITY_LABELS, DAILY_ACTIVITY_TYPES, DEFAULT_DAILY_TARGETS, londonDateKey, londonWeekday } from "../lib/marketingDailyOperations.js";
@@ -119,7 +119,7 @@ export default function DashboardPage() {
 
   if (locked) return <div className="page-stack"><section className="hero-panel"><div><div className="eyebrow">Content Operations</div><h2>Unlock today&apos;s marketing plan</h2><p>Use the same access key as the Customer Database.</p></div></section><section className="panel"><form className="field-grid" onSubmit={unlock}><label className="field"><span className="field__label">Access key</span><input className="field__input" type="password" value={accessKey} onChange={(event) => setAccessKey(event.target.value)} /></label><div className="card-actions" style={{ alignSelf: "end" }}><button className="button button--primary" disabled={busy}>UNLOCK</button></div></form>{error ? <div className="notice notice--error">{error}</div> : null}</section></div>;
 
-  return <div className="page-stack content-operations-page" data-content-operations-version="clean-single-page-v2">
+  return <div className="page-stack content-operations-page">
     <section className={`operations-summary${overview?.day?.complete ? " is-complete" : ""}`}>
       <div><div className="eyebrow">TODAY Â· UK TIME</div><h2>{overview?.day?.off_day ? "No target today" : overview?.day?.complete ? "Todayâ€™s target is complete" : "What you need to do today"}</h2><p>{overview?.day?.off_day ? "This is set as an off day." : `${overview?.day?.remaining_total || 0} remaining across todayâ€™s marketing activity.`}</p></div>
       <div className="operations-summary__score"><strong>{overview?.day?.completion_percentage || 0}%</strong><span>complete</span></div>
