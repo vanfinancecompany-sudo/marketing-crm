@@ -1,5 +1,5 @@
 Exit code: 0
-Wall time: 4.5 seconds
+Wall time: 1.7 seconds
 Output:
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -31,11 +31,11 @@ test("Content Operations shows only the five daily activity cards", async () => 
   assert.doesNotMatch(page, /Top Performing Reels|Recent Reel Activity|Stock posts waiting/);
 });
 
-test("email totals use completed production sends after tracker activation", async () => {
+test("email totals use completed production sends from the selected UK day", async () => {
   const endpoint = await read("api/marketing-daily-operations.js");
   assert.match(endpoint, /from\("marketing_email_sends"\)/);
   assert.match(endpoint, /\.gte\("completed_at", startRange\.start\)/);
-  assert.match(endpoint, /dateKey === trackerStartDate \? \[\]/);
+  assert.match(endpoint, /sends\.filter\(\(row\) => sendActivityDate\(row\) === dateKey\)/);
   assert.doesNotMatch(endpoint, /first_sent_at\.is\.null,created_at/);
 });
 
