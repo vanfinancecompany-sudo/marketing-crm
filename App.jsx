@@ -1,4 +1,4 @@
-// ðŸš€ INSTANT TRACK + REDIRECT (runs before React loads)
+// 🚀 INSTANT TRACK + REDIRECT (runs before React loads)
 if (
   typeof window !== "undefined" &&
   (window.location.pathname.startsWith("/track") || window.location.pathname.startsWith("/r/"))
@@ -15,7 +15,7 @@ if (window.location.pathname.startsWith("/r/")) {
   reelId = parts[2] || "unknown";
 }
 
-    // ðŸ”¥ send tracking without blocking redirect
+    // 🔥 send tracking without blocking redirect
     const payload = JSON.stringify({ type, reelId, source });
 
     if (navigator.sendBeacon) {
@@ -1872,7 +1872,7 @@ async function handleClearTodayReels() {
   <rect width="1200" height="750" fill="url(#bg)"/>
   <rect x="70" y="70" width="1060" height="610" rx="38" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.26)" stroke-width="3"/>
   <text x="600" y="170" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" font-weight="900" fill="#ffffff" letter-spacing="5">VAN FINANCE COMPANY</text>
-  <text x="600" y="310" text-anchor="middle" font-family="Arial, sans-serif" font-size="78" font-weight="900" fill="#ffffff">FROM Â£99 DEPOSIT</text>
+  <text x="600" y="310" text-anchor="middle" font-family="Arial, sans-serif" font-size="78" font-weight="900" fill="#ffffff">FROM £99 DEPOSIT</text>
   <text x="600" y="420" text-anchor="middle" font-family="Arial, sans-serif" font-size="38" font-weight="800" fill="#dbeafe">${title}</text>
   <text x="600" y="500" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" font-weight="800" fill="#bfdbfe">${reg}</text>
   <text x="600" y="600" text-anchor="middle" font-family="Arial, sans-serif" font-size="32" font-weight="900" fill="#ffffff">BAD CREDIT CONSIDERED | SELF-EMPLOYED WELCOME</text>
