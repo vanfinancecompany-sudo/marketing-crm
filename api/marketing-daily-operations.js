@@ -1,5 +1,5 @@
 Exit code: 0
-Wall time: 5.1 seconds
+Wall time: 1.7 seconds
 Output:
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -119,17 +119,13 @@ async function buildDays(supabase, startDate, endDate) {
     loadConfiguration(supabase, startDate, endDate),
     loadActivity(supabase, startDate, endDate),
   ]);
-  const trackerStartDate = schedules.reduce((earliest, row) => {
-    const value = String(row.effective_from || "");
-    return value && (!earliest || value < earliest) ? value : earliest;
-  }, "");
   return dateKeys.map((dateKey) => {
     const noon = new Date(`${dateKey}T12:00:00Z`);
     const targets = resolveTargetsForDate({ dateKey, weekday: londonWeekday(noon), schedules, overrides });
     const summary = summarizeDailyActivity({
       targets,
       events: events.filter((event) => event.activity_date === dateKey),
-      emailSends: dateKey === trackerStartDate ? [] : sends.filter((row) => sendActivityDate(row) === dateKey),
+      emailSends: sends.filter((row) => sendActivityDate(row) === dateKey),
       generatedReels: reels.filter((row) => reelActivityDate(row) === dateKey),
     });
     return { date: dateKey, target_source: targets.source, ...summary };
