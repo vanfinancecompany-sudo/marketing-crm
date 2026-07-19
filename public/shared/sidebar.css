@@ -80,24 +80,6 @@
   border-color: #fff;
 }
 
-.marketing-daily-warning {
-  position: fixed;
-  z-index: 1000;
-  top: 12px;
-  right: 16px;
-  display: grid;
-  gap: 2px;
-  max-width: min(440px, calc(100vw - 32px));
-  padding: 11px 16px;
-  border-radius: 12px;
-  color: #fff;
-  background: #b91c1c;
-  box-shadow: 0 10px 30px rgba(127, 29, 29, 0.28);
-  text-decoration: none;
-  font: 700 12px/1.35 Inter, system-ui, sans-serif;
-}
-
-.marketing-daily-warning span { font-weight: 600; opacity: 0.9; }
 
 @media (max-width: 1080px) {
   .marketing-sidebar {
@@ -105,4 +87,3 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   }
 }
-
