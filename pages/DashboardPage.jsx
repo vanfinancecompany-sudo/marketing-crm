@@ -36,7 +36,7 @@ function TargetFields({ value, onChange, compact = false }) {
       <span className="field__label">{ACTIVITY_LABELS[type]}</span>
       <input className="field__input" type="number" min="0" max="10000" value={value[type]} disabled={value.off_day} onChange={(event) => onChange({ ...value, [type]: Math.max(0, Number(event.target.value || 0)) })} />
     </label>)}
-    {!compact ? <label className="toggle-row"><input type="checkbox" checked={Boolean(value.off_day)} onChange={(event) => onChange({ ...value, off_day: event.target.checked })} />Off day â€” no target</label> : null}
+    {!compact ? <label className="toggle-row"><input type="checkbox" checked={Boolean(value.off_day)} onChange={(event) => onChange({ ...value, off_day: event.target.checked })} />Off day — no target</label> : null}
   </div>;
 }
 
@@ -105,14 +105,14 @@ export default function DashboardPage({ onNavigate, stats = {}, recentCreatives 
 
   return <div className="page-stack daily-command-centre">
     <section className={`hero-panel daily-command-hero${overview?.day?.complete ? " is-complete" : ""}`}>
-      <div><div className="eyebrow">TODAY&apos;S REQUIRED ACTIONS Â· UK TIME</div><h2>{overview?.day?.off_day ? "TODAY IS AN OFF DAY" : overview?.day?.complete ? "DAILY TARGET COMPLETE" : "DO NOT STOP YET"}</h2><p>{overview?.day?.off_day ? "No marketing target is scheduled today." : overview?.day?.complete ? "All Facebook posts, reels and email targets have been completed." : `You still have ${overview?.day?.remaining_total || 0} actions remaining today.`}</p></div>
+      <div><div className="eyebrow">TODAY&apos;S REQUIRED ACTIONS · UK TIME</div><h2>{overview?.day?.off_day ? "TODAY IS AN OFF DAY" : overview?.day?.complete ? "DAILY TARGET COMPLETE" : "DO NOT STOP YET"}</h2><p>{overview?.day?.off_day ? "No marketing target is scheduled today." : overview?.day?.complete ? "All Facebook posts, reels and email targets have been completed." : `You still have ${overview?.day?.remaining_total || 0} actions remaining today.`}</p></div>
       <div className="daily-score"><strong>{overview?.day?.completion_percentage || 0}%</strong><span>complete</span><a className="button button--ghost" href="/marketing-totals">OPEN TOTALS</a></div>
     </section>
     {error ? <div className="notice notice--error">{error}</div> : null}{message ? <div className="notice notice--success">{message}</div> : null}
     <section className="daily-command-grid">{metrics.map((metric) => <MetricCard key={metric.type} metric={metric} busy={busy} onNavigate={onNavigate} onRecord={(type) => run(() => recordDailyMarketingActivity(type, { activityDate: today }), "Reel marked posted.")} onUndo={(type) => run(() => undoDailyMarketingActivity(type, today), "Last manual reel mark removed.")} />)}</section>
     <section className="panel"><div className="panel__header"><div><h3>Daily target settings</h3><p>Changes are effective-dated, so earlier performance is never rewritten.</p></div></div>
       <div className="field-grid"><label className="field"><span className="field__label">New targets effective from</span><input className="field__input" type="date" value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)} /></label></div>
-      <div className="weekday-targets">{schedule.map((day, index) => <details key={WEEKDAYS[index]} open={index === todayWeekday}><summary>{WEEKDAYS[index]}{day.off_day ? " Â· Off day" : ""}</summary><TargetFields value={day} onChange={(next) => setSchedule((rows) => rows.map((row, rowIndex) => rowIndex === index ? next : row))} /></details>)}</div>
+      <div className="weekday-targets">{schedule.map((day, index) => <details key={WEEKDAYS[index]} open={index === todayWeekday}><summary>{WEEKDAYS[index]}{day.off_day ? " · Off day" : ""}</summary><TargetFields value={day} onChange={(next) => setSchedule((rows) => rows.map((row, rowIndex) => rowIndex === index ? next : row))} /></details>)}</div>
       <div className="card-actions"><button className="button button--primary" type="button" disabled={busy} onClick={() => run(() => saveDailyTargetSchedule(effectiveFrom, schedule), "New weekday targets saved.")}>SAVE WEEKDAY TARGETS</button><button className="button button--ghost" type="button" disabled={busy} onClick={() => { const defaults = blankSchedule(); setSchedule(defaults); run(() => resetDailyTargetDefaults(effectiveFrom), "Default targets restored from the effective date."); }}>RESET 10 / 10 / 10 / 10 / 200</button></div>
     </section>
     <section className="panel"><div className="panel__header"><div><h3>One-day override</h3><p>Set a temporary quota or off day without changing the standard weekly schedule.</p></div></div><div className="field-grid"><label className="field"><span className="field__label">Override date</span><input className="field__input" type="date" value={overrideDate} onChange={(event) => setOverrideDate(event.target.value)} /></label></div><TargetFields value={override} onChange={setOverride} /><button className="button button--primary" type="button" disabled={busy} onClick={() => run(() => saveDailyTargetOverride(overrideDate, override), "One-day target override saved.")}>SAVE ONE-DAY OVERRIDE</button></section>
@@ -127,4 +127,3 @@ export default function DashboardPage({ onNavigate, stats = {}, recentCreatives 
     <section className="panel"><div className="panel__header"><div><h3>Recent Reel Activity</h3><p>Fresh reel assets from the existing Reel Studio workflow.</p></div></div>{recentCreatives.length === 0 ? <div className="empty-state">No reel assets generated yet.</div> : <div className="simple-list">{recentCreatives.map((creative) => <div key={creative.id} className="simple-list__item"><div><strong>{creative.vehicle.name}</strong><div>{creative.templateType} | {creative.hookStyle}</div></div><div className="status-pill">{getCreativeActivityLabel(creative)}</div></div>)}</div>}</section>
   </div>;
 }
-
