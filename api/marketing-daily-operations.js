@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 5.1 seconds
+Output:
 import { createClient } from "@supabase/supabase-js";
 import {
   DAILY_ACTIVITY_TYPES,
@@ -116,8 +119,8 @@ async function buildDays(supabase, startDate, endDate) {
     loadConfiguration(supabase, startDate, endDate),
     loadActivity(supabase, startDate, endDate),
   ]);
-  const trackerStartedAt = schedules.reduce((earliest, row) => {
-    const value = String(row.created_at || "");
+  const trackerStartDate = schedules.reduce((earliest, row) => {
+    const value = String(row.effective_from || "");
     return value && (!earliest || value < earliest) ? value : earliest;
   }, "");
   return dateKeys.map((dateKey) => {
@@ -126,7 +129,7 @@ async function buildDays(supabase, startDate, endDate) {
     const summary = summarizeDailyActivity({
       targets,
       events: events.filter((event) => event.activity_date === dateKey),
-      emailSends: sends.filter((row) => sendActivityDate(row) === dateKey && (!trackerStartedAt || row.completed_at >= trackerStartedAt)),
+      emailSends: dateKey === trackerStartDate ? [] : sends.filter((row) => sendActivityDate(row) === dateKey),
       generatedReels: reels.filter((row) => reelActivityDate(row) === dateKey),
     });
     return { date: dateKey, target_source: targets.source, ...summary };
@@ -231,3 +234,4 @@ export default async function handler(request, response) {
     response.status(error.status || 500).json({ ok: false, message: error.message || "Daily operations request failed." });
   }
 }
+
