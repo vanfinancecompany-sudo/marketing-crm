@@ -23,7 +23,15 @@ test("Content Operations shows only the five daily activity cards", async () => 
   assert.match(page, /DAILY_ACTIVITY_TYPES\.map/);
   assert.match(page, /VIEW TOTALS AND HISTORY/);
   assert.match(page, /EDIT DAILY TARGETS/);
+  assert.match(page, /generated/);
+  assert.doesNotMatch(page, /MARK ONE POSTED|POST VAN FINANCE|POST RENT2BUY|SEND EMAIL BATCH/);
   assert.doesNotMatch(page, /Top Performing Reels|Recent Reel Activity|Stock posts waiting/);
+});
+
+test("email totals use a genuine send timestamp rather than recipient creation time", async () => {
+  const endpoint = await read("api/marketing-daily-operations.js");
+  assert.match(endpoint, /\.gte\("first_sent_at", startRange\.start\)/);
+  assert.doesNotMatch(endpoint, /first_sent_at\.is\.null,created_at/);
 });
 
 test("the floating incomplete warning was removed", async () => {
