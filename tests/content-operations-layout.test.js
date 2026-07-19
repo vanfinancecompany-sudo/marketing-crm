@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 4.5 seconds
+Output:
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -32,7 +35,7 @@ test("email totals use completed production sends after tracker activation", asy
   const endpoint = await read("api/marketing-daily-operations.js");
   assert.match(endpoint, /from\("marketing_email_sends"\)/);
   assert.match(endpoint, /\.gte\("completed_at", startRange\.start\)/);
-  assert.match(endpoint, /row\.completed_at >= trackerStartedAt/);
+  assert.match(endpoint, /dateKey === trackerStartDate \? \[\]/);
   assert.doesNotMatch(endpoint, /first_sent_at\.is\.null,created_at/);
 });
 
@@ -45,3 +48,4 @@ test("the floating incomplete warning was removed", async () => {
   assert.doesNotMatch(renderer, /marketing-daily-warning|loadDailyTargetWarning/);
   assert.doesNotMatch(css, /marketing-daily-warning/);
 });
+
