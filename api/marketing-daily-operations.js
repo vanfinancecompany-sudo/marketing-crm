@@ -84,24 +84,34 @@ async function fetchPagedRows(makeQuery, pageSize = 1000) {
 async function loadActivity(supabase, startDate, endDate) {
   const startRange = londonDateRange(startDate);
   const endRange = londonDateRange(endDate);
-  const [events, recipients] = await Promise.all([
+  const [events, recipients, reels] = await Promise.all([
     fetchPagedRows(() => supabase.from("marketing_daily_activity_events").select("*").gte("activity_date", startDate).lte("activity_date", endDate).order("occurred_at", { ascending: false })),
     fetchPagedRows(() => supabase.from("marketing_email_send_recipients")
       .select("id,send_id,email,send_type,status,provider_message_id,first_sent_at,created_at")
       .eq("send_type", "production")
-      .or(`and(first_sent_at.gte.${startRange.start},first_sent_at.lt.${endRange.end}),and(first_sent_at.is.null,created_at.gte.${startRange.start},created_at.lt.${endRange.end})`)
+      .gte("first_sent_at", startRange.start)
+      .lt("first_sent_at", endRange.end)
+      .order("first_sent_at", { ascending: true })),
+    fetchPagedRows(() => supabase.from("marketing_creatives")
+      .select("id,pipeline,registration,created_at")
+      .gte("created_at", startRange.start)
+      .lt("created_at", endRange.end)
       .order("created_at", { ascending: true })),
   ]);
-  return { events, recipients };
+  return { events, recipients, reels };
 }
 
 function recipientActivityDate(row) {
-  return londonDateKey(new Date(row.first_sent_at || row.created_at));
+  return londonDateKey(new Date(row.first_sent_at));
+}
+
+function reelActivityDate(row) {
+  return londonDateKey(new Date(row.created_at));
 }
 
 async function buildDays(supabase, startDate, endDate) {
   const dateKeys = enumerateDateKeys(startDate, endDate);
-  const [{ schedules, overrides }, { events, recipients }] = await Promise.all([
+  const [{ schedules, overrides }, { events, recipients, reels }] = await Promise.all([
     loadConfiguration(supabase, startDate, endDate),
     loadActivity(supabase, startDate, endDate),
   ]);
@@ -112,6 +122,7 @@ async function buildDays(supabase, startDate, endDate) {
       targets,
       events: events.filter((event) => event.activity_date === dateKey),
       emailRecipients: recipients.filter((row) => recipientActivityDate(row) === dateKey),
+      generatedReels: reels.filter((row) => reelActivityDate(row) === dateKey),
     });
     return { date: dateKey, target_source: targets.source, ...summary };
   });
