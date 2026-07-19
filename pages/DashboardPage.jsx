@@ -33,7 +33,7 @@ function TargetFields({ value, onChange }) {
       <span className="field__label">{ACTIVITY_LABELS[type]}</span>
       <input className="field__input" type="number" min="0" max="10000" value={value[type]} disabled={value.off_day} onChange={(event) => onChange({ ...value, [type]: Math.max(0, Number(event.target.value || 0)) })} />
     </label>)}
-    <label className="toggle-row"><input type="checkbox" checked={Boolean(value.off_day)} onChange={(event) => onChange({ ...value, off_day: event.target.checked })} />Off day â€” no target</label>
+    <label className="toggle-row"><input type="checkbox" checked={Boolean(value.off_day)} onChange={(event) => onChange({ ...value, off_day: event.target.checked })} />Off day — no target</label>
   </div>;
 }
 
@@ -118,7 +118,7 @@ export default function DashboardPage() {
 
   return <div className="page-stack content-operations-page">
     <section className={`operations-summary${overview?.day?.complete ? " is-complete" : ""}`}>
-      <div><div className="eyebrow">TODAY Â· UK TIME</div><h2>{overview?.day?.off_day ? "No target today" : overview?.day?.complete ? "Todayâ€™s target is complete" : "What you need to do today"}</h2><p>{overview?.day?.off_day ? "This is set as an off day." : `${overview?.day?.remaining_total || 0} remaining across todayâ€™s marketing activity.`}</p></div>
+      <div><div className="eyebrow">TODAY · UK TIME</div><h2>{overview?.day?.off_day ? "No target today" : overview?.day?.complete ? "Today’s target is complete" : "What you need to do today"}</h2><p>{overview?.day?.off_day ? "This is set as an off day." : `${overview?.day?.remaining_total || 0} remaining across today’s marketing activity.`}</p></div>
       <div className="operations-summary__score"><strong>{overview?.day?.completion_percentage || 0}%</strong><span>complete</span></div>
     </section>
     {error ? <div className="notice notice--error">{error}</div> : null}{message ? <div className="notice notice--success">{message}</div> : null}
@@ -137,7 +137,7 @@ export default function DashboardPage() {
       <summary>EDIT DAILY TARGETS</summary>
       <div className="operations-drawer__body">
         <div className="field-grid"><label className="field"><span className="field__label">Targets effective from</span><input className="field__input" type="date" value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)} /></label></div>
-        <div className="weekday-targets">{schedule.map((day, index) => <details key={WEEKDAYS[index]} open={index === todayWeekday}><summary>{WEEKDAYS[index]}{day.off_day ? " Â· Off day" : ""}</summary><TargetFields value={day} onChange={(next) => setSchedule((rows) => rows.map((row, rowIndex) => rowIndex === index ? next : row))} /></details>)}</div>
+        <div className="weekday-targets">{schedule.map((day, index) => <details key={WEEKDAYS[index]} open={index === todayWeekday}><summary>{WEEKDAYS[index]}{day.off_day ? " · Off day" : ""}</summary><TargetFields value={day} onChange={(next) => setSchedule((rows) => rows.map((row, rowIndex) => rowIndex === index ? next : row))} /></details>)}</div>
         <div className="card-actions"><button className="button button--primary" type="button" disabled={busy} onClick={() => run(() => saveDailyTargetSchedule(effectiveFrom, schedule), "Weekday targets saved.")}>SAVE TARGETS</button><button className="button button--ghost" type="button" disabled={busy} onClick={() => { const defaults = blankSchedule(); setSchedule(defaults); run(() => resetDailyTargetDefaults(effectiveFrom), "Default targets restored."); }}>RESET DEFAULTS</button></div>
         <hr className="operations-divider" />
         <h3>One-day override</h3><div className="field-grid"><label className="field"><span className="field__label">Date</span><input className="field__input" type="date" value={overrideDate} onChange={(event) => setOverrideDate(event.target.value)} /></label></div><TargetFields value={override} onChange={setOverride} /><button className="button button--primary" type="button" disabled={busy} onClick={() => run(() => saveDailyTargetOverride(overrideDate, override), "One-day override saved.")}>SAVE ONE-DAY OVERRIDE</button>
