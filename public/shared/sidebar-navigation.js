@@ -2,6 +2,7 @@
   const items = Object.freeze([
     { id: "control-centre", label: "Control Centre", href: "https://control-centre-navy.vercel.app", external: true, variant: "primary" },
     { id: "content-operations", label: "Content Operations", path: "/", paths: ["/"], navigation: "react", view: "Dashboard" },
+    { id: "marketing-totals", label: "Totals", path: "/marketing-totals", paths: ["/marketing-totals"], navigation: "react", view: "Marketing Totals" },
     { id: "marketing-dashboard", label: "Marketing Dashboard", path: "/marketing-dashboard/", paths: ["/marketing-dashboard/"], navigation: "document" },
     { id: "stock", label: "Stock", path: "/stock", paths: ["/stock"], navigation: "react", view: "Stock" },
     { id: "customer-database", label: "Customer Database", path: "/customer-database", paths: ["/customer-database"], navigation: "react", view: "Customer Database" },
@@ -39,3 +40,4 @@
     isItemActive,
   });
 })();
+
