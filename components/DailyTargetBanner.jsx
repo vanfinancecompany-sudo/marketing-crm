@@ -14,6 +14,5 @@ export default function DailyTargetBanner({ currentView, onNavigate }) {
     return () => { active = false; window.clearInterval(timer); };
   }, [currentView]);
   if (!day || day.complete || day.off_day || currentView === "Dashboard") return null;
-  return <button className="daily-target-banner" type="button" onClick={() => onNavigate("Dashboard")}><strong>TODAY&apos;S MARKETING TARGET IS INCOMPLETE</strong><span>{day.remaining_total} actions remaining Â· {day.completion_percentage}% complete</span><b>OPEN CONTENT OPERATIONS</b></button>;
+  return <button className="daily-target-banner" type="button" onClick={() => onNavigate("Dashboard")}><strong>TODAY&apos;S MARKETING TARGET IS INCOMPLETE</strong><span>{day.remaining_total} actions remaining · {day.completion_percentage}% complete</span><b>OPEN CONTENT OPERATIONS</b></button>;
 }
-
