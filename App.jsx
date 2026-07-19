@@ -2853,9 +2853,7 @@ async function handleClearTodayReels() {
       case "Content Operations":
       default:
         return (
-          <DashboardPage
-            onNavigate={handleNavigate}
-          />
+          <DashboardPage />
         );
     }
   }
