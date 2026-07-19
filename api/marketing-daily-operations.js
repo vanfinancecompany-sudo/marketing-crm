@@ -87,7 +87,7 @@ async function loadActivity(supabase, startDate, endDate) {
   const [events, recipients] = await Promise.all([
     fetchPagedRows(() => supabase.from("marketing_daily_activity_events").select("*").gte("activity_date", startDate).lte("activity_date", endDate).order("occurred_at", { ascending: false })),
     fetchPagedRows(() => supabase.from("marketing_email_send_recipients")
-      .select("id,send_id,email,email_normalized,send_type,status,provider_message_id,first_sent_at,created_at")
+      .select("id,send_id,email,send_type,status,provider_message_id,first_sent_at,created_at")
       .eq("send_type", "production")
       .or(`and(first_sent_at.gte.${startRange.start},first_sent_at.lt.${endRange.end}),and(first_sent_at.is.null,created_at.gte.${startRange.start},created_at.lt.${endRange.end})`)
       .order("created_at", { ascending: true })),
@@ -215,4 +215,3 @@ export default async function handler(request, response) {
     response.status(error.status || 500).json({ ok: false, message: error.message || "Daily operations request failed." });
   }
 }
-
