@@ -44,7 +44,12 @@ test("daily activity counts durable social events and production submissions onc
     targets: DEFAULT_DAILY_TARGETS,
     events: [
       { activity_type: "van_finance_facebook_post", quantity: 2 },
-      { activity_type: "rent2buy_reel", quantity: 1 },
+      { activity_type: "rent2buy_reel", quantity: 99 },
+    ],
+    generatedReels: [
+      { id: "finance-reel", pipeline: "vanFinance" },
+      { id: "rent-reel", pipeline: "rent2buy" },
+      { id: "rent-reel", pipeline: "rent2buy" },
     ],
     emailRecipients: [
       { id: "one", send_type: "production", first_sent_at: "2026-07-19T10:00:00Z" },
@@ -55,8 +60,16 @@ test("daily activity counts durable social events and production submissions onc
     ],
   });
   assert.equal(summary.metrics.van_finance_facebook_post.completed, 2);
+  assert.equal(summary.metrics.van_finance_reel.completed, 1);
   assert.equal(summary.metrics.rent2buy_reel.completed, 1);
   assert.equal(summary.metrics.emails_sent.completed, 2);
+});
+
+test("overall completion gives each active target equal weight", () => {
+  const recipients = Array.from({ length: 200 }, (_, index) => ({ id: `email-${index}`, send_type: "production", first_sent_at: "2026-07-19T10:00:00Z" }));
+  const summary = summarizeDailyActivity({ targets: DEFAULT_DAILY_TARGETS, emailRecipients: recipients });
+  assert.equal(summary.metrics.emails_sent.percentage, 100);
+  assert.equal(summary.completion_percentage, 20);
 });
 
 test("period totals expose completed, target, shortfall, average and percentage", () => {
@@ -65,4 +78,3 @@ test("period totals expose completed, target, shortfall, average and percentage"
   const totals = aggregatePeriod([first, second]);
   assert.deepEqual(totals.emails_sent, { completed: 3, target: 4, shortfall: 1, daily_average: 1.5, completion_percentage: 75 });
 });
-
