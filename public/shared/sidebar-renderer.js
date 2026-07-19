@@ -88,7 +88,7 @@
       const warning = document.createElement("a");
       warning.className = "marketing-daily-warning";
       warning.href = "/";
-      warning.innerHTML = `<strong>TODAY'S MARKETING TARGET IS INCOMPLETE</strong><span>${result.day.remaining_total} actions remaining Â· ${result.day.completion_percentage}% complete</span>`;
+      warning.innerHTML = `<strong>TODAY'S MARKETING TARGET IS INCOMPLETE</strong><span>${result.day.remaining_total} actions remaining · ${result.day.completion_percentage}% complete</span>`;
       document.body.appendChild(warning);
     } catch {
       // The warning is advisory; existing document pages must keep working if it cannot load.
@@ -100,4 +100,3 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mountAll);
   else mountAll();
 })();
-
