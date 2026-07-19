@@ -3,21 +3,19 @@ import { ACTIVITY_LABELS, DAILY_ACTIVITY_TYPES, DEFAULT_DAILY_TARGETS, londonDat
 import {
   getDailyOperationsOverview,
   getDailyOperationsTotals,
-  recordDailyMarketingActivity,
   resetDailyTargetDefaults,
   saveDailyTargetOverride,
   saveDailyTargetSchedule,
-  undoDailyMarketingActivity,
 } from "../services/marketingDailyOperations.js";
 import { getStoredMarketingAccessKey, saveMarketingAccessKey, validateMarketingAccessKey } from "../services/marketingAccess.js";
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const ACTIONS = {
-  van_finance_facebook_post: { label: "POST VAN FINANCE", view: "Van Finance Facebook" },
-  rent2buy_facebook_post: { label: "POST RENT2BUY", view: "Rent2Buy Facebook" },
-  van_finance_reel: { label: "CREATE VAN FINANCE REEL", view: "Reel Factory" },
-  rent2buy_reel: { label: "CREATE RENT2BUY REEL", view: "Reel Factory" },
-  emails_sent: { label: "SEND EMAIL BATCH", href: "/campaigns/" },
+const ACTIVITY_UNITS = {
+  van_finance_facebook_post: "posted",
+  rent2buy_facebook_post: "posted",
+  van_finance_reel: "generated",
+  rent2buy_reel: "generated",
+  emails_sent: "sent",
 };
 
 function addDays(dateKey, amount) {
@@ -39,29 +37,15 @@ function TargetFields({ value, onChange }) {
   </div>;
 }
 
-function ActionButton({ action, onNavigate }) {
-  return action.href
-    ? <a className="button button--primary" href={action.href}>{action.label}</a>
-    : <button className="button button--primary" type="button" onClick={() => onNavigate(action.view)}>{action.label}</button>;
-}
-
-function ActivityCard({ metric, busy, onNavigate, onRecord, onUndo }) {
-  const action = ACTIONS[metric.type];
+function ActivityCard({ metric }) {
   return <article className={`operations-activity-card${metric.remaining === 0 ? " is-complete" : ""}`}>
     <div className="operations-activity-card__heading"><span>{ACTIVITY_LABELS[metric.type]}</span><b>{metric.remaining === 0 ? "COMPLETE" : `${metric.remaining} LEFT`}</b></div>
-    <div className="operations-activity-card__numbers"><strong>{metric.completed}</strong><span>posted / sent</span><em>Target {metric.target}</em></div>
+    <div className="operations-activity-card__numbers"><strong>{metric.completed}</strong><span>{ACTIVITY_UNITS[metric.type]}</span><em>Target {metric.target}</em></div>
     <div className="operations-progress" aria-label={`${metric.percentage}% complete`}><span style={{ width: `${metric.percentage}%` }} /></div>
-    <div className="operations-activity-card__actions">
-      <ActionButton action={action} onNavigate={onNavigate} />
-      {metric.type.includes("reel") ? <>
-        <button className="button button--ghost" type="button" disabled={busy} onClick={() => onRecord(metric.type)}>MARK ONE POSTED</button>
-        {metric.completed > 0 ? <button className="button button--ghost" type="button" disabled={busy} onClick={() => onUndo(metric.type)}>UNDO</button> : null}
-      </> : null}
-    </div>
   </article>;
 }
 
-export default function DashboardPage({ onNavigate }) {
+export default function DashboardPage() {
   const today = londonDateKey();
   const todayWeekday = londonWeekday(new Date());
   const [overview, setOverview] = useState(null);
@@ -138,7 +122,7 @@ export default function DashboardPage({ onNavigate }) {
       <div className="operations-summary__score"><strong>{overview?.day?.completion_percentage || 0}%</strong><span>complete</span></div>
     </section>
     {error ? <div className="notice notice--error">{error}</div> : null}{message ? <div className="notice notice--success">{message}</div> : null}
-    <section className="operations-activity-grid">{metrics.map((metric) => <ActivityCard key={metric.type} metric={metric} busy={busy} onNavigate={onNavigate} onRecord={(type) => run(() => recordDailyMarketingActivity(type, { activityDate: today }), "Reel marked as posted.")} onUndo={(type) => run(() => undoDailyMarketingActivity(type, today), "Last reel mark removed.")} />)}</section>
+    <section className="operations-activity-grid">{metrics.map((metric) => <ActivityCard key={metric.type} metric={metric} />)}</section>
 
     <details className="operations-drawer">
       <summary>VIEW TOTALS AND HISTORY</summary>
