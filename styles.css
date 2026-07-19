@@ -3806,3 +3806,279 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+
+/* Content Operations: one-page daily marketing command centre */
+.content-operations-page {
+  gap: 18px;
+}
+
+.operations-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px 28px;
+  color: #fff;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #111d3a 0%, #243f78 100%);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.18);
+}
+
+.operations-summary.is-complete {
+  background: linear-gradient(135deg, #064e3b 0%, #0f766e 100%);
+}
+
+.operations-summary h2 {
+  margin: 4px 0 6px;
+  font-size: clamp(24px, 3vw, 34px);
+}
+
+.operations-summary p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.operations-summary__score {
+  min-width: 120px;
+  display: grid;
+  justify-items: center;
+}
+
+.operations-summary__score strong {
+  font-size: 42px;
+  line-height: 1;
+}
+
+.operations-summary__score span {
+  margin-top: 5px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.operations-activity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.operations-activity-card {
+  display: flex;
+  min-height: 175px;
+  flex-direction: column;
+  padding: 20px;
+  border: 1px solid #dbe3ee;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
+}
+
+.operations-activity-card.is-complete {
+  border-color: #86efac;
+  background: linear-gradient(180deg, #fff 0%, #f0fdf4 100%);
+}
+
+.operations-activity-card__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  font-weight: 900;
+}
+
+.operations-activity-card__heading b {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  color: #9f1239;
+  border-radius: 999px;
+  background: #fff1f2;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.operations-activity-card.is-complete .operations-activity-card__heading b {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.operations-activity-card__numbers {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: end;
+  gap: 0 8px;
+  margin-top: 8px;
+}
+
+.operations-activity-card__numbers strong {
+  grid-row: 1 / 3;
+  color: #0f172a;
+  font-size: 46px;
+  line-height: 0.95;
+}
+
+.operations-activity-card__numbers span,
+.operations-activity-card__numbers em {
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.operations-progress {
+  height: 9px;
+  margin: 18px 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.operations-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2563eb;
+}
+
+.operations-activity-card.is-complete .operations-progress span {
+  background: #16a34a;
+}
+
+.operations-drawer {
+  overflow: hidden;
+  border: 1px solid #dbe3ee;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.05);
+}
+
+.operations-drawer > summary {
+  padding: 18px 22px;
+  cursor: pointer;
+  color: #172554;
+  font-weight: 900;
+  list-style-position: inside;
+}
+
+.operations-drawer[open] > summary {
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.operations-drawer__body {
+  padding: 20px 22px 24px;
+}
+
+.operations-period-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.operations-period-tabs button {
+  padding: 9px 15px;
+  cursor: pointer;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  font: inherit;
+  font-weight: 850;
+}
+
+.operations-period-tabs button.is-active {
+  color: #fff;
+  border-color: #172554;
+  background: #172554;
+}
+
+.operations-search {
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+.operations-table-wrap {
+  overflow-x: auto;
+}
+
+.operations-table {
+  width: 100%;
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+
+.operations-table th,
+.operations-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+}
+
+.operations-table th {
+  color: #64748b;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.operations-target-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.weekday-targets {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.weekday-targets details {
+  padding: 10px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.weekday-targets summary {
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+}
+
+.operations-divider {
+  margin: 24px 0;
+  border: 0;
+  border-top: 1px solid #e2e8f0;
+}
+
+@media (max-width: 720px) {
+  .operations-summary {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 20px;
+  }
+
+  .operations-summary__score {
+    justify-items: start;
+  }
+
+  .operations-activity-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .operations-activity-card {
+    min-height: 165px;
+  }
+
+  .operations-drawer__body {
+    padding: 16px;
+  }
+}

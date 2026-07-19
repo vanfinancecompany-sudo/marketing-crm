@@ -62,6 +62,8 @@ import ReelLabBetaPage from "./pages/ReelLabBetaPage.jsx";
 import YouTubeGeneratorPage from "./pages/YouTubeGeneratorPage.jsx";
 import CreativeLibraryPage from "./pages/CreativeLibraryPage.jsx";
 import PostingDeskPage from "./pages/PostingDeskPage.jsx";
+import { londonDateKey } from "./lib/marketingDailyOperations.js";
+import { recordDailyMarketingActivity } from "./services/marketingDailyOperations.js";
 import {
   ctaOptions,
   financeReelHooks,
@@ -448,7 +450,7 @@ function rankRandomPool(pool, recentVehicleIds = []) {
 }
 
 const VIEW_PATHS = {
-  Dashboard: "/",
+  "Content Operations": "/",
   Stock: "/stock",
   "Customer Database": "/customer-database",
   "Marketing Centre": "/marketing-centre",
@@ -464,7 +466,7 @@ const VIEW_PATHS = {
 };
 
 function viewFromPath() {
-  if (typeof window === "undefined") return "Dashboard";
+  if (typeof window === "undefined") return "Content Operations";
 
   const path = window.location.pathname;
 
@@ -483,7 +485,7 @@ function viewFromPath() {
   if (path === "/rent2buy-facebook") return "Rent2Buy Facebook";
   if (path === "/facebook-marketplace") return "Facebook Marketplace";
 
-  return "Dashboard";
+  return "Content Operations";
 }
 
 function loadHiddenPostingIds(pageKey) {
@@ -1967,6 +1969,18 @@ async function handleClearTodayReels() {
   }
 
   function handleMarkVehiclePosted(vehicle, destination = getDefaultPostingDestination(vehicle)) {
+    const activityType = destination === "Van Finance Facebook"
+      ? "van_finance_facebook_post"
+      : destination === "Rent2Buy Facebook" ? "rent2buy_facebook_post" : "";
+    if (activityType) {
+      const sourceId = `${londonDateKey()}::${getPostingActionKey(vehicle, destination)}`;
+      recordDailyMarketingActivity(activityType, {
+        activityDate: londonDateKey(),
+        source: "posting_desk",
+        sourceId,
+        metadata: { vehicle_id: vehicle.id || null, registration: vehicle.registration || vehicle.reg || "", destination },
+      }).catch((error) => setCreativeError(error.message || "The post was marked locally, but the daily total could not be updated."));
+    }
     setPostedToday((prev) => {
       const postingKey = getPostingActionKey(vehicle, destination);
       if (
@@ -2836,14 +2850,10 @@ async function handleClearTodayReels() {
             onShowHiddenAgain={handleShowHiddenAgain}
           />
         );
-      case "Dashboard":
+      case "Content Operations":
       default:
         return (
-          <DashboardPage
-            stats={dashboardStats}
-            recentCreatives={recentCreatives}
-            topReels={topReelsWithLabels}
-          />
+          <DashboardPage />
         );
     }
   }
@@ -2874,7 +2884,6 @@ async function handleClearTodayReels() {
     </div>
   </div>
 </header>
-
         {renderCurrentPage()}
       </main>
     </div>
