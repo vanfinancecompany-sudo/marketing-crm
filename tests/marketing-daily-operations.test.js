@@ -72,6 +72,20 @@ test("overall completion gives each active target equal weight", () => {
   assert.equal(summary.completion_percentage, 20);
 });
 
+test("completed production send batches provide the automatic email total", () => {
+  const summary = summarizeDailyActivity({
+    targets: DEFAULT_DAILY_TARGETS,
+    emailSends: [
+      { id: "batch-one", send_type: "production", status: "completed", sent_count: 100 },
+      { id: "batch-one", send_type: "production", status: "completed", sent_count: 100 },
+      { id: "batch-two", send_type: "production", status: "partially_failed", sent_count: 25 },
+      { id: "test", send_type: "test", status: "completed", sent_count: 99 },
+      { id: "failed", send_type: "production", status: "failed", sent_count: 50 },
+    ],
+  });
+  assert.equal(summary.metrics.emails_sent.completed, 125);
+});
+
 test("period totals expose completed, target, shortfall, average and percentage", () => {
   const first = summarizeDailyActivity({ targets: { ...DEFAULT_DAILY_TARGETS, emails_sent: 2 }, emailRecipients: [{ id: "one", send_type: "production", status: "accepted" }] });
   const second = summarizeDailyActivity({ targets: { ...DEFAULT_DAILY_TARGETS, emails_sent: 2 }, emailRecipients: [{ id: "two", send_type: "production", status: "accepted" }, { id: "three", send_type: "production", status: "delivered" }] });
