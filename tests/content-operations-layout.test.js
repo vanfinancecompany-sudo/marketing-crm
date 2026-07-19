@@ -28,9 +28,11 @@ test("Content Operations shows only the five daily activity cards", async () => 
   assert.doesNotMatch(page, /Top Performing Reels|Recent Reel Activity|Stock posts waiting/);
 });
 
-test("email totals use a genuine send timestamp rather than recipient creation time", async () => {
+test("email totals use completed production sends after tracker activation", async () => {
   const endpoint = await read("api/marketing-daily-operations.js");
-  assert.match(endpoint, /\.gte\("first_sent_at", startRange\.start\)/);
+  assert.match(endpoint, /from\("marketing_email_sends"\)/);
+  assert.match(endpoint, /\.gte\("completed_at", startRange\.start\)/);
+  assert.match(endpoint, /row\.completed_at >= trackerStartedAt/);
   assert.doesNotMatch(endpoint, /first_sent_at\.is\.null,created_at/);
 });
 
