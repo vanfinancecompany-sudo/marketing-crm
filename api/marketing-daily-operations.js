@@ -84,25 +84,26 @@ async function fetchPagedRows(makeQuery, pageSize = 1000) {
 async function loadActivity(supabase, startDate, endDate) {
   const startRange = londonDateRange(startDate);
   const endRange = londonDateRange(endDate);
-  const [events, recipients, reels] = await Promise.all([
+  const [events, sends, reels] = await Promise.all([
     fetchPagedRows(() => supabase.from("marketing_daily_activity_events").select("*").gte("activity_date", startDate).lte("activity_date", endDate).order("occurred_at", { ascending: false })),
-    fetchPagedRows(() => supabase.from("marketing_email_send_recipients")
-      .select("id,send_id,email,send_type,status,provider_message_id,first_sent_at,created_at")
+    fetchPagedRows(() => supabase.from("marketing_email_sends")
+      .select("id,send_type,status,sent_count,completed_at")
       .eq("send_type", "production")
-      .gte("first_sent_at", startRange.start)
-      .lt("first_sent_at", endRange.end)
-      .order("first_sent_at", { ascending: true })),
+      .in("status", ["completed", "partially_failed"])
+      .gte("completed_at", startRange.start)
+      .lt("completed_at", endRange.end)
+      .order("completed_at", { ascending: true })),
     fetchPagedRows(() => supabase.from("marketing_creatives")
       .select("id,pipeline,registration,created_at")
       .gte("created_at", startRange.start)
       .lt("created_at", endRange.end)
       .order("created_at", { ascending: true })),
   ]);
-  return { events, recipients, reels };
+  return { events, sends, reels };
 }
 
-function recipientActivityDate(row) {
-  return londonDateKey(new Date(row.first_sent_at));
+function sendActivityDate(row) {
+  return londonDateKey(new Date(row.completed_at));
 }
 
 function reelActivityDate(row) {
@@ -111,17 +112,21 @@ function reelActivityDate(row) {
 
 async function buildDays(supabase, startDate, endDate) {
   const dateKeys = enumerateDateKeys(startDate, endDate);
-  const [{ schedules, overrides }, { events, recipients, reels }] = await Promise.all([
+  const [{ schedules, overrides }, { events, sends, reels }] = await Promise.all([
     loadConfiguration(supabase, startDate, endDate),
     loadActivity(supabase, startDate, endDate),
   ]);
+  const trackerStartedAt = schedules.reduce((earliest, row) => {
+    const value = String(row.created_at || "");
+    return value && (!earliest || value < earliest) ? value : earliest;
+  }, "");
   return dateKeys.map((dateKey) => {
     const noon = new Date(`${dateKey}T12:00:00Z`);
     const targets = resolveTargetsForDate({ dateKey, weekday: londonWeekday(noon), schedules, overrides });
     const summary = summarizeDailyActivity({
       targets,
       events: events.filter((event) => event.activity_date === dateKey),
-      emailRecipients: recipients.filter((row) => recipientActivityDate(row) === dateKey),
+      emailSends: sends.filter((row) => sendActivityDate(row) === dateKey && (!trackerStartedAt || row.completed_at >= trackerStartedAt)),
       generatedReels: reels.filter((row) => reelActivityDate(row) === dateKey),
     });
     return { date: dateKey, target_source: targets.source, ...summary };
