@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 1.7 seconds
-Output:
 import { createClient } from "@supabase/supabase-js";
 import {
   DAILY_ACTIVITY_TYPES,
@@ -230,4 +227,3 @@ export default async function handler(request, response) {
     response.status(error.status || 500).json({ ok: false, message: error.message || "Daily operations request failed." });
   }
 }
-
