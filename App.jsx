@@ -658,7 +658,1703 @@ function createManualQueueItem(vehicle, queueKey) {
 
   return {
     id: String(vehicle?.id || "").trim(),
-    reg: getManualQueueRegistra…15601 tokens truncated…Lock,
+    reg: getManualQueueRegistration(reelVehicle),
+    targetPipeline,
+    source: queueKey,
+    reelType: queueKey,
+    name: reelVehicle?.name || vehicle?.name || "",
+    title: reelVehicle?.title || vehicle?.title || "",
+    image: reelVehicle?.image || "",
+    picture: reelVehicle?.picture || "",
+    rent2buyData: reelVehicle?.rent2buyData || null,
+  };
+}
+
+function normalizeManualQueueItem(item, queueKey) {
+  if (!item || typeof item !== "object") return null;
+
+  const normalized = {
+    id: String(item.id || "").trim(),
+    reg: getManualQueueRegistration(item),
+    targetPipeline: item.targetPipeline || getManualQueueTargetPipeline(queueKey),
+    source: item.source || queueKey,
+    reelType: item.reelType || queueKey,
+    name: item.name || "",
+    title: item.title || "",
+    image: item.image || "",
+    picture: item.picture || "",
+    rent2buyData: item.rent2buyData || null,
+  };
+
+  return normalized.id || normalized.reg ? normalized : null;
+}
+
+function loadManualReelQueue(queueKey) {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const saved = localStorage.getItem(MANUAL_REEL_QUEUE_STORAGE_KEYS[queueKey]);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed.map((item) => normalizeManualQueueItem(item, queueKey)).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveManualReelQueue(queueKey, queue) {
+  const storageKey = MANUAL_REEL_QUEUE_STORAGE_KEYS[queueKey];
+  if (!storageKey || typeof window === "undefined") return;
+  const normalizedQueue = queue.map((item) => normalizeManualQueueItem(item, queueKey)).filter(Boolean);
+
+  if (normalizedQueue.length) {
+    localStorage.setItem(storageKey, JSON.stringify(normalizedQueue));
+  } else {
+    localStorage.removeItem(storageKey);
+  }
+}
+
+function getReelLabQueueKey(productKey) {
+  return productKey === "rent2buy" ? "rent2buy" : "vanFinance";
+}
+
+function getReelLabManualQueueKey(productKey) {
+  return productKey === "rent2buy" ? "rent2buy" : "finance";
+}
+
+function getYouTubeQueueKey(productKey) {
+  if (productKey === "rent2buy") return "rent2buy";
+  if (productKey === "cars") return "cars";
+  return "vanFinance";
+}
+
+function createReelLabQueueItem(vehicle, productKey) {
+  return {
+    ...createManualQueueItem(vehicle, getReelLabManualQueueKey(productKey)),
+    productKey: getReelLabQueueKey(productKey),
+    source: "stockReelLab",
+  };
+}
+
+function normalizeReelLabQueueItem(item, productKey) {
+  const queueKey = getReelLabManualQueueKey(productKey);
+  const normalized = normalizeManualQueueItem(item, queueKey);
+  return normalized ? { ...normalized, productKey: getReelLabQueueKey(productKey) } : null;
+}
+
+function loadReelLabQueue(productKey) {
+  const queueKey = getReelLabQueueKey(productKey);
+  if (typeof window === "undefined") return [];
+
+  try {
+    const saved = localStorage.getItem(REEL_LAB_QUEUE_STORAGE_KEYS[queueKey]);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed.map((item) => normalizeReelLabQueueItem(item, queueKey)).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveReelLabQueue(productKey, queue) {
+  const queueKey = getReelLabQueueKey(productKey);
+  const storageKey = REEL_LAB_QUEUE_STORAGE_KEYS[queueKey];
+  if (!storageKey || typeof window === "undefined") return;
+  const normalizedQueue = queue.map((item) => normalizeReelLabQueueItem(item, queueKey)).filter(Boolean);
+
+  if (normalizedQueue.length) {
+    localStorage.setItem(storageKey, JSON.stringify(normalizedQueue));
+  } else {
+    localStorage.removeItem(storageKey);
+  }
+}
+
+function createYouTubeQueueItem(vehicle, productKey) {
+  const queueKey = getYouTubeQueueKey(productKey);
+  return {
+    ...createManualQueueItem(vehicle, queueKey === "rent2buy" ? "rent2buy" : "finance"),
+    productKey: queueKey,
+    source: "stockYouTubeGenerator",
+  };
+}
+
+function normalizeYouTubeQueueItem(item, productKey) {
+  const queueKey = getYouTubeQueueKey(productKey);
+  const normalized = normalizeManualQueueItem(item, queueKey === "rent2buy" ? "rent2buy" : "finance");
+  return normalized ? { ...normalized, productKey: queueKey } : null;
+}
+
+function loadYouTubeQueue(productKey) {
+  const queueKey = getYouTubeQueueKey(productKey);
+  if (typeof window === "undefined") return [];
+
+  try {
+    const saved = localStorage.getItem(YOUTUBE_QUEUE_STORAGE_KEYS[queueKey]);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed.map((item) => normalizeYouTubeQueueItem(item, queueKey)).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveYouTubeQueue(productKey, queue) {
+  const queueKey = getYouTubeQueueKey(productKey);
+  const storageKey = YOUTUBE_QUEUE_STORAGE_KEYS[queueKey];
+  if (!storageKey || typeof window === "undefined") return;
+  const normalizedQueue = queue.map((item) => normalizeYouTubeQueueItem(item, queueKey)).filter(Boolean);
+
+  if (normalizedQueue.length) {
+    localStorage.setItem(storageKey, JSON.stringify(normalizedQueue));
+  } else {
+    localStorage.removeItem(storageKey);
+  }
+}
+
+function vehicleQueueLabel(vehicle) {
+  const reg = String(vehicle?.reg || vehicle?.registration || "").trim();
+  const title = String(vehicle?.vanDescription || vehicle?.description || vehicle?.name || vehicle?.title || "").trim();
+  return [reg, title].filter(Boolean).join(" - ") || "Selected vehicle";
+}
+
+function isRent2BuyEligible(vehicle) {
+  return Boolean(vehicle?.rent2buyEligible || vehicle?.pipeline === "rent2buy");
+}
+
+function asPipelineVehicle(vehicle, pipeline) {
+  if (!pipeline) return vehicle;
+  if (!vehicle || vehicle.pipeline === pipeline) return vehicle;
+  if (pipeline === "rent2buy") {
+    const rentData = vehicle.rent2buyData || {};
+    return {
+      ...vehicle,
+      ...rentData,
+      id: vehicle.id,
+      financeId: vehicle.id,
+      financeData: vehicle,
+      originalPipeline: vehicle.originalPipeline || vehicle.pipeline,
+      pipeline,
+      source: "rent2buy",
+      reelType: "rent2buy",
+      rent2buyEligible: true,
+      rent2buyData: vehicle.rent2buyData || rentData,
+    };
+  }
+
+  return {
+    ...vehicle,
+    pipeline,
+    source: "finance",
+    reelType: "finance",
+    originalPipeline: "vanFinance",
+  };
+}
+
+function getManualVehicleImage(vehicle) {
+  if (!vehicle) return "";
+  if (vehicle.image) return vehicle.image;
+  if (vehicle.picture) return vehicle.picture;
+  if (vehicle.mainImage) return vehicle.mainImage;
+  if (Array.isArray(vehicle.mediaGallery)) {
+    const galleryItem = vehicle.mediaGallery.find(Boolean);
+    if (typeof galleryItem === "string") return galleryItem;
+    return galleryItem?.url || galleryItem?.src || galleryItem?.image || "";
+  }
+  return "";
+}
+
+function resolveManualQueuedVehicle(queueItem, vehicles) {
+  const normalizedItem = normalizeManualQueueItem(queueItem, queueItem?.targetPipeline === "rent2buy" ? "rent2buy" : "finance");
+  if (!normalizedItem) return null;
+
+  const id = normalizedItem.id;
+  const reg = normalizedItem.reg;
+  const idMatch = id ? vehicles.find((vehicle) => String(vehicle.id || "").trim() === id) : null;
+  const regMatch = !idMatch && reg
+    ? vehicles.find((vehicle) => getManualQueueRegistration(vehicle) === reg)
+    : null;
+  const matchedVehicle = idMatch || regMatch;
+
+  if (!matchedVehicle) return null;
+
+  return asPipelineVehicle({
+    ...matchedVehicle,
+    image: getManualVehicleImage(matchedVehicle) || normalizedItem.image || normalizedItem.picture,
+    picture: matchedVehicle.picture || normalizedItem.picture || normalizedItem.image,
+    rent2buyData: matchedVehicle.rent2buyData || normalizedItem.rent2buyData,
+  }, normalizedItem.targetPipeline || matchedVehicle.pipeline);
+}
+
+export default function App() {
+  const [currentView, setCurrentView] = useState(viewFromPath);
+  const [vehicles, setVehicles] = useState([]);
+  const [carsStockStatus, setCarsStockStatus] = useState(getCarsStockLoadState);
+  const [vehiclesLoading, setVehiclesLoading] = useState(true);
+  const [vehiclesError, setVehiclesError] = useState("");
+  const [selectedVehicleId, setSelectedVehicleId] = useState("");
+  const [selectedVehicleIds, setSelectedVehicleIds] = useState([]);
+  const [creatives, setCreatives] = useState([]);
+  const [recentGeneratedIds, setRecentGeneratedIds] = useState([]);
+  const [creativeError, setCreativeError] = useState("");
+  const [regeneratingCreativeId, setRegeneratingCreativeId] = useState("");
+  const [creativeRegenerationStatuses, setCreativeRegenerationStatuses] = useState({});
+  const [generationMessage, setGenerationMessage] = useState("");
+  const [stockFilters, setStockFilters] = useState(DEFAULT_STOCK_FILTERS);
+  const [manualStockSelectedIds, setManualStockSelectedIds] = useState([]);
+  const [manualReelQueueType, setManualReelQueueType] = useState("finance");
+  const [manualReelQueues, setManualReelQueues] = useState(() => ({
+    finance: loadManualReelQueue("finance"),
+    rent2buy: loadManualReelQueue("rent2buy"),
+  }));
+  const [reelLabQueues, setReelLabQueues] = useState(() => ({
+    vanFinance: loadReelLabQueue("vanFinance"),
+    rent2buy: loadReelLabQueue("rent2buy"),
+  }));
+  const [youtubeQueues, setYoutubeQueues] = useState(() => ({
+    vanFinance: loadYouTubeQueue("vanFinance"),
+    rent2buy: loadYouTubeQueue("rent2buy"),
+    cars: loadYouTubeQueue("cars"),
+  }));
+  const [youtubeCmsUploads, setYoutubeCmsUploads] = useState(loadYouTubeCmsUploads);
+  const [reelDownloadCooldowns, setReelDownloadCooldowns] = useState(loadReelDownloadCooldowns);
+  const [factoryFilters, setFactoryFilters] = useState(DEFAULT_STOCK_FILTERS);
+  const [libraryFilters, setLibraryFilters] = useState(DEFAULT_LIBRARY_FILTERS);
+  const [reelFactoryForm, setReelFactoryForm] = useState(DEFAULT_REEL_FACTORY_FORM);
+  const [reelFactoryVehicleId, setReelFactoryVehicleId] = useState("");
+  const [reelFactorySelectionMode, setReelFactorySelectionMode] = useState("");
+  const [recentRandomReelVehicleIds, setRecentRandomReelVehicleIds] = useState(loadRecentRandomReelVehicleIds);
+  const [uploadedReelImages, setUploadedReelImages] = useState([]);
+  const [todayReels, setTodayReels] = useState([]);
+const [hiddenTodayReelIds, setHiddenTodayReelIds] = useState(() => {
+  try {
+    return JSON.parse(localStorage.getItem("hiddenTodayReelIds") || "[]");
+  } catch {
+    return [];
+  }
+});
+  const [reelClickStats, setReelClickStats] = useState({
+    financeClicksToday: 0,
+    rent2BuyClicksToday: 0,
+    topReels: [],
+  });
+  const [rollingTopReels, setRollingTopReels] = useState([]);
+  const [postedToday, setPostedToday] = useState([]);
+  const [hiddenPostingVehicleIds, setHiddenPostingVehicleIds] = useState(() => ({
+    vanFinanceFacebook: loadHiddenPostingIds("vanFinanceFacebook"),
+    rent2BuyFacebook: loadHiddenPostingIds("rent2BuyFacebook"),
+    marketplace: loadHiddenPostingIds("marketplace"),
+  }));
+  const [factoryForm, setFactoryForm] = useState({
+    templateType: templateOptions[0],
+    hookStyle: hookOptions[0],
+    cta: ctaOptions[0],
+    numberOfVersions: 3,
+    templateOptions,
+    hookOptions,
+    ctaOptions,
+  });
+
+  async function loadVehicles() {
+    setVehiclesLoading(true);
+    setVehiclesError("");
+
+    try {
+      const data = await fetchMarketingVehicles();
+      setVehicles(data);
+      setCarsStockStatus(getCarsStockLoadState());
+      setSelectedVehicleId((prev) => prev || data[0]?.id || "");
+      setSelectedVehicleIds((prev) => (prev.length ? prev : data[0]?.id ? [data[0].id] : []));
+    } catch (error) {
+      setVehicles([]);
+      setCarsStockStatus(getCarsStockLoadState());
+      setVehiclesError(error.message || "Failed to load vehicles.");
+    } finally {
+      setVehiclesLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadVehicles();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadYouTubeCmsUploadsAsync().then((uploads) => {
+      if (!cancelled) setYoutubeCmsUploads(uploads);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (currentView !== "Stock") return undefined;
+    let cancelled = false;
+    loadYouTubeCmsUploadsAsync().then((uploads) => {
+      if (!cancelled) setYoutubeCmsUploads(uploads);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentView, manualStockSelectedIds.length]);
+
+  useEffect(() => {
+    if (!window.location.pathname.startsWith("/track")) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const type = params.get("type") === "rent2buy" ? "rent2buy" : "finance";
+    const reelId = params.get("reel") || "unknown";
+    const source = params.get("src") || "reel";
+
+    logReelClick({ source, type, reelId })
+      .catch(() => {})
+      .finally(() => {
+        window.location.replace(TRACK_REDIRECTS[type]);
+      });
+  }, []);
+
+useEffect(() => {
+  localStorage.setItem("hiddenTodayReelIds", JSON.stringify(hiddenTodayReelIds));
+}, [hiddenTodayReelIds]);
+
+  useEffect(() => {
+    function handlePopState() {
+      setCurrentView(viewFromPath());
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadCreatives() {
+      setCreativeError("");
+
+      try {
+        const data = await fetchMarketingCreatives();
+        if (active) {
+          setCreatives(data);
+        }
+      } catch (error) {
+        if (active) {
+          setCreativeError(error.message || "Failed to load saved creatives.");
+        }
+      }
+    }
+
+    loadCreatives();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    fetchReelClickDashboard()
+      .then((stats) => {
+        if (!active) return;
+
+        setReelClickStats(stats);
+        setRollingTopReels(Array.isArray(stats?.topReels) ? stats.topReels : []);
+      })
+      .catch(() => {
+        if (active) {
+          setRollingTopReels([]);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+
+useEffect(() => {
+  let active = true;
+
+  async function rebuildTodayReels() {
+    try {
+      const todayCreativeReels = await fetchTodayReelCreatives(20);
+
+      const rebuilt = await Promise.all(
+        todayCreativeReels.map(async (creative) => {
+          const blobData = await loadReelVideoBlob?.(creative.id).catch(() => null);
+
+          if (!blobData?.blob) return null;
+
+          return {
+            id: creative.id,
+            creativeId: creative.id,
+            createdAt: creative.createdAt,
+            url: URL.createObjectURL(blobData.blob),
+            downloadName: blobData.downloadName,
+            mimeType: blobData.mimeType,
+          };
+        })
+      );
+
+      if (!active) return;
+
+      setTodayReels((prev) => {
+        prev.forEach((reel) => {
+          if (reel?.url?.startsWith?.("blob:")) {
+            try {
+              URL.revokeObjectURL(reel.url);
+            } catch {}
+          }
+        });
+
+        return rebuilt
+  .filter(Boolean)
+  .filter((reel) => !hiddenTodayReelIds.includes(reel.id));
+      });
+    } catch {
+      if (!active) return;
+      setTodayReels([]);
+    }
+  }
+
+    rebuildTodayReels();
+
+  return () => {
+    active = false;
+  };
+}, [hiddenTodayReelIds]);
+      
+  const selectedVehicle =
+    vehicles.find((vehicle) => vehicle.id === selectedVehicleId) || vehicles[0] || null;
+  const selectedReelFactorySourceVehicle =
+    reelFactorySelectionMode === "stock"
+      ? vehicles.find((vehicle) => vehicle.id === reelFactoryVehicleId) || null
+      : null;
+  const selectedReelFactoryDisplayPipeline =
+    factoryFilters.pipeline === "vanFinance" || reelFactoryForm.reelType === "Finance"
+      ? "vanFinance"
+      : factoryFilters.pipeline === "rent2buy" || reelFactoryForm.reelType === "Rent2Buy"
+        ? "rent2buy"
+        : selectedReelFactorySourceVehicle?.pipeline;
+  const selectedReelFactoryVehicle = selectedReelFactorySourceVehicle
+    ? asPipelineVehicle(selectedReelFactorySourceVehicle, selectedReelFactoryDisplayPipeline)
+    : null;
+
+  const filteredStockVehicles = useMemo(() => {
+    return sortVehiclesNewestAddedFirst(filterVehicles(vehicles, stockFilters), stockFilters.pipeline);
+  }, [vehicles, stockFilters]);
+
+  const filteredFactoryVehicles = useMemo(() => {
+    return filterVehicles(vehicles, factoryFilters);
+  }, [vehicles, factoryFilters]);
+
+  const filteredLibraryCreatives = useMemo(() => {
+    return filterCreatives(creatives, libraryFilters)
+      .map((creative) => ({
+        ...creative,
+        currentStockVehicle: findCurrentStockVehicleForCreative(creative, vehicles),
+      }))
+      .filter((creative) => Boolean(creative.currentStockVehicle));
+  }, [creatives, libraryFilters, vehicles]);
+
+  const generatedCreatives = useMemo(() => {
+    return creatives.filter((creative) => recentGeneratedIds.includes(creative.id));
+  }, [creatives, recentGeneratedIds]);
+
+  const ignoreReelLock = Boolean(reelFactoryForm.ignoreVehicleCooldown);
+
+  const recentCreatives = useMemo(() => {
+    return [...creatives]
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 5);
+  }, [creatives]);
+
+  const financeVehicles = useMemo(() => {
+    return vehicles;
+  }, [vehicles]);
+
+  const rentVehicles = useMemo(() => {
+    return vehicles.filter(isRent2BuyEligible);
+  }, [vehicles]);
+
+  const postedPostingKeys = useMemo(() => {
+    return new Set(
+      postedToday.map((item) =>
+        getPostingActionKey(item.vehicle, item.destination || getDefaultPostingDestination(item.vehicle))
+      )
+    );
+  }, [postedToday]);
+
+  const vanFinanceFacebookQueue = useMemo(() => {
+    const hiddenIds = new Set(hiddenPostingVehicleIds.vanFinanceFacebook);
+    return financeVehicles
+      .map((vehicle) => asPipelineVehicle(vehicle, "vanFinance"))
+      .filter((vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Van Finance Facebook")))
+      .filter((vehicle) => !hiddenIds.has(normalizePostingVehicleId(vehicle)));
+  }, [financeVehicles, postedPostingKeys, hiddenPostingVehicleIds.vanFinanceFacebook]);
+
+  const rent2BuyFacebookQueue = useMemo(() => {
+    const hiddenIds = new Set(hiddenPostingVehicleIds.rent2BuyFacebook);
+    return rentVehicles
+      .map((vehicle) => asPipelineVehicle(vehicle, "rent2buy"))
+      .filter((vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Rent2Buy Facebook")))
+      .filter((vehicle) => !hiddenIds.has(normalizePostingVehicleId(vehicle)));
+  }, [rentVehicles, postedPostingKeys, hiddenPostingVehicleIds.rent2BuyFacebook]);
+
+  const marketplaceQueue = useMemo(() => {
+    const hiddenIds = new Set(hiddenPostingVehicleIds.marketplace);
+    return rentVehicles
+      .map((vehicle) => asPipelineVehicle(vehicle, "rent2buy"))
+      .filter((vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Facebook Marketplace")))
+      .filter((vehicle) => !hiddenIds.has(normalizePostingVehicleId(vehicle)));
+  }, [rentVehicles, postedPostingKeys, hiddenPostingVehicleIds.marketplace]);
+
+  const postingDeskSummary = useMemo(() => {
+    function buildDestinationSummary(destination, eligibleVehicles, pageKey) {
+      const dailyAdvertised = postedToday.filter(
+        (item) => item.destination === destination && isToday(item.postedAt)
+      ).length;
+      const hiddenIds = new Set(hiddenPostingVehicleIds[pageKey] || []);
+
+      return {
+        dailyAdvertised,
+        weeklyAdvertised: dailyAdvertised,
+        totalVisible: eligibleVehicles.length,
+        totalHidden: eligibleVehicles.filter((vehicle) => hiddenIds.has(normalizePostingVehicleId(vehicle))).length,
+      };
+    }
+
+    return {
+      vanFinanceFacebook: buildDestinationSummary("Van Finance Facebook", financeVehicles, "vanFinanceFacebook"),
+      rent2BuyFacebook: buildDestinationSummary("Rent2Buy Facebook", rentVehicles, "rent2BuyFacebook"),
+      marketplace: buildDestinationSummary("Facebook Marketplace", rentVehicles, "marketplace"),
+    };
+  }, [financeVehicles, rentVehicles, postedToday, hiddenPostingVehicleIds]);
+
+  const dashboardStats = useMemo(() => {
+    const createdToday = creatives.filter((creative) => isToday(creative.createdAt)).length;
+    const readyToPost =
+      vanFinanceFacebookQueue.length + rent2BuyFacebookQueue.length + marketplaceQueue.length;
+    const postedVehicleCount = postedToday.filter((item) => isToday(item.postedAt)).length;
+
+    return {
+      createdToday,
+      readyToPost,
+      postedToday: postedVehicleCount,
+      financeClicksToday: reelClickStats.financeClicksToday,
+      rent2BuyClicksToday: reelClickStats.rent2BuyClicksToday,
+    };
+  }, [
+    creatives,
+    vanFinanceFacebookQueue.length,
+    rent2BuyFacebookQueue.length,
+    marketplaceQueue.length,
+    postedToday,
+    reelClickStats.financeClicksToday,
+    reelClickStats.rent2BuyClicksToday,
+  ]);
+
+  const controlCentreStats = useMemo(() => {
+    const postedVehicleCount = postedToday.filter((item) => isToday(item.postedAt)).length;
+    const reelsCreatedToday = todayReels.filter((reel) => isToday(reel.createdAt)).length;
+    const totalVisibleVans =
+      vanFinanceFacebookQueue.length + rent2BuyFacebookQueue.length + marketplaceQueue.length;
+
+    return {
+      totalStock: vehicles.length,
+      postedToday: postedVehicleCount,
+      reelsCreatedToday,
+      totalVisibleVans,
+      financeVans: financeVehicles.length,
+      rentVans: rentVehicles.length,
+    };
+  }, [
+    vehicles.length,
+    postedToday,
+    todayReels,
+    vanFinanceFacebookQueue.length,
+    rent2BuyFacebookQueue.length,
+    marketplaceQueue.length,
+    financeVehicles.length,
+    rentVehicles.length,
+  ]);
+
+  const topReelsWithLabels = useMemo(() => {
+    const reelLookup = new Map();
+
+    for (const reel of todayReels) {
+      if (reel.id) reelLookup.set(reel.id, reel);
+      if (reel.creativeId) reelLookup.set(reel.creativeId, reel);
+    }
+
+    for (const creative of creatives) {
+      if (creative.id && !reelLookup.has(creative.id)) {
+        reelLookup.set(creative.id, creative);
+      }
+    }
+
+    return rollingTopReels.map((trackedReel) => {
+      const reelId = trackedReel.reelId;
+      const matchedReel = reelId && reelId !== "unknown" ? reelLookup.get(reelId) : null;
+      const label =
+        matchedReel?.hook ||
+        matchedReel?.title ||
+        matchedReel?.headline ||
+        matchedReel?.subtext ||
+        (reelId && reelId !== "unknown" ? reelId : "Unknown reel");
+
+      return {
+        ...trackedReel,
+        label,
+        isUnknown: !reelId || reelId === "unknown",
+      };
+    });
+  }, [creatives, rollingTopReels, todayReels]);
+
+  const manualReelQueueVehicles = useMemo(() => ({
+    finance: resolveManualQueuedVehicle((manualReelQueues.finance || [])[0], vehicles),
+    rent2buy: resolveManualQueuedVehicle((manualReelQueues.rent2buy || [])[0], vehicles),
+  }), [manualReelQueues, vehicles]);
+
+  const reelLabQueueVehicles = useMemo(() => ({
+    vanFinance: (reelLabQueues.vanFinance || [])
+      .map((item) => resolveManualQueuedVehicle(item, vehicles))
+      .filter(Boolean),
+    rent2buy: (reelLabQueues.rent2buy || [])
+      .map((item) => resolveManualQueuedVehicle(item, vehicles))
+      .filter(Boolean),
+  }), [reelLabQueues, vehicles]);
+
+  const youtubeQueueVehicles = useMemo(() => ({
+    vanFinance: (youtubeQueues.vanFinance || [])
+      .map((item) => resolveManualQueuedVehicle(item, vehicles))
+      .filter(Boolean),
+    rent2buy: (youtubeQueues.rent2buy || [])
+      .map((item) => resolveManualQueuedVehicle(item, vehicles))
+      .filter(Boolean),
+    cars: (youtubeQueues.cars || [])
+      .map((item) => resolveManualQueuedVehicle(item, vehicles))
+      .filter(Boolean),
+  }), [youtubeQueues, vehicles]);
+
+  const youtubeStockSelectionSummary = useMemo(() => {
+    const selectedIds = new Set(manualStockSelectedIds);
+    if (!selectedIds.size) return null;
+    const productQueueKey = getYouTubeQueueKey(stockFilters.pipeline);
+    const selectedVehicles = filteredStockVehicles
+      .filter((vehicle) => selectedIds.has(getManualQueueVehicleId(vehicle)))
+      .filter((vehicle) => productQueueKey !== "rent2buy" || isRent2BuyEligible(vehicle))
+      .filter((vehicle) => productQueueKey !== "cars" || vehicle.pipeline === "cars");
+    const requiredImageCount = YOUTUBE_DEFAULT_IMAGE_COUNT;
+    const ready = selectedVehicles.filter((vehicle) => {
+      const imageOrder = resolveYouTubeImageOrder({
+        vehicle,
+        cmsUpload: youtubeCmsUploads[productQueueKey],
+        imageSource: "auto",
+        imageCount: requiredImageCount,
+      });
+      return imageOrder.totalAvailable >= requiredImageCount;
+    }).length;
+    const skipped = selectedVehicles.length - ready;
+    return { ready, skipped, requiredImageCount };
+  }, [filteredStockVehicles, manualStockSelectedIds, stockFilters.pipeline, youtubeCmsUploads]);
+
+  const manualReelQueueLocks = useMemo(() => ({
+    finance: manualReelQueueVehicles.finance
+      ? getReelActionLock(manualReelQueueVehicles.finance, reelDownloadCooldowns)
+      : { locked: false, until: 0 },
+    rent2buy: manualReelQueueVehicles.rent2buy
+      ? getReelActionLock(manualReelQueueVehicles.rent2buy, reelDownloadCooldowns)
+      : { locked: false, until: 0 },
+  }), [manualReelQueueVehicles, reelDownloadCooldowns]);
+
+  const reelActionLocks = useMemo(() => {
+    const now = Date.now();
+    return vehicles.reduce((locks, vehicle) => {
+      const lock = getReelActionLock(vehicle, reelDownloadCooldowns, now);
+
+      if (lock.locked) {
+        locks[getManualQueueVehicleId(vehicle)] = lock;
+      }
+
+      return locks;
+    }, {});
+  }, [reelDownloadCooldowns, vehicles]);
+
+  function handleFormChange(field, value) {
+    setFactoryForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  }
+
+  function handleReelFactoryChange(field, value) {
+    setReelFactoryForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  }
+
+  function handleReelFactoryFiltersChange(nextFilters) {
+    setFactoryFilters(nextFilters);
+
+    if (nextFilters.pipeline === "vanFinance") {
+      setReelFactoryForm((prev) => ({ ...prev, reelType: "Finance" }));
+    } else if (nextFilters.pipeline === "rent2buy") {
+      setReelFactoryForm((prev) => ({ ...prev, reelType: "Rent2Buy" }));
+    } else {
+      setReelFactoryForm((prev) => ({ ...prev, reelType: "Mixed" }));
+    }
+  }
+
+  function pickHookForPipeline(pipeline, index = 0) {
+    const isRent = pipeline === "rent2buy";
+    const pipelineHooks = isRent ? rentReelHooks : financeReelHooks;
+
+    if (reelFactoryForm.hookMode === "Custom hook" && reelFactoryForm.customHook.trim()) {
+      return reelFactoryForm.customHook.trim().toUpperCase();
+    }
+
+    if (reelFactoryForm.hookMode === "Single selected hook") {
+      const selectedHook = isRent ? reelFactoryForm.rentHook : reelFactoryForm.financeHook;
+      return pipelineHooks.includes(selectedHook) ? selectedHook : pipelineHooks[0];
+    }
+
+    return pipelineHooks[index % pipelineHooks.length];
+  }
+
+  function getAllowedReelPipelines() {
+    const requested = new Set(["vanFinance", "rent2buy"]);
+
+    if (factoryFilters.pipeline === "vanFinance") {
+      requested.delete("rent2buy");
+    }
+
+    if (factoryFilters.pipeline === "rent2buy") {
+      requested.delete("vanFinance");
+    }
+
+    if (reelFactoryForm.reelType === "Finance") {
+      requested.delete("rent2buy");
+    }
+
+    if (reelFactoryForm.reelType === "Rent2Buy") {
+      requested.delete("vanFinance");
+    }
+
+    if (reelFactoryForm.reelSource === "Finance stock") {
+      requested.delete("rent2buy");
+    }
+
+    if (reelFactoryForm.reelSource === "Rent2Buy stock") {
+      requested.delete("vanFinance");
+    }
+
+    return requested;
+  }
+
+  function buildPipelineReelContent(vehicle) {
+    return vehicle.pipeline === "rent2buy"
+      ? buildRentReelContent(vehicle)
+      : buildFinanceReelContent(vehicle);
+  }
+
+  function createReelFromVehicle(vehicle, options = {}) {
+    const hook = options.hook || pickHookForPipeline(vehicle.pipeline, todayReels.length);
+    const content = buildPipelineReelContent(vehicle);
+    const imageUrl = vehicle?.image || vehicle?.picture || "";
+
+    console.log("Creating reel from vehicle", {
+      registration: vehicle?.reg || vehicle?.registration || vehicle?.name || "",
+      reelType: vehicle?.reelType || vehicle?.pipeline,
+      source: vehicle?.source || vehicle?.pipeline,
+      imageFields: {
+        image: vehicle?.image || "",
+        picture: vehicle?.picture || "",
+        rent2buyDataPicture: vehicle?.rent2buyData?.picture || "",
+        financePicture: vehicle?.financePicture || "",
+      },
+      finalImageUrl: imageUrl,
+      lockBypassed: ignoreReelLock,
+    });
+
+    return createReelRecord({
+      vehicle,
+      image: imageUrl,
+      pipeline: vehicle.pipeline,
+      hook,
+      templateName: content.templateName,
+      musicOn: reelFactoryForm.musicOn,
+      sourceType: options.sourceType || "stock",
+      sourceLabel: options.sourceLabel || content.sourceLabel,
+      subtext: content.subtext,
+      priceLine: content.priceLine,
+      ctaLine: content.ctaLine,
+    });
+  }
+
+  function handleUploadedReelImagesSelected(event) {
+    const files = Array.from(event.target.files || []);
+    const nextImages = files.map((file) => ({
+      id: `upload-${Date.now()}-${file.name}`,
+      name: file.name,
+      url: URL.createObjectURL(file),
+    }));
+
+    setUploadedReelImages((prev) => [...prev, ...nextImages]);
+  }
+
+  function buildDailyReelPool() {
+    const source = reelFactoryForm.reelSource;
+    const allowedPipelines = getAllowedReelPipelines();
+    const selectedReelVehicle = vehicles.find((vehicle) => vehicle.id === reelFactoryVehicleId);
+    const selectedPipeline = allowedPipelines.has("rent2buy") && isRent2BuyEligible(selectedReelVehicle)
+      ? "rent2buy"
+      : allowedPipelines.has("vanFinance")
+        ? "vanFinance"
+        : "";
+
+    if (
+      reelFactorySelectionMode === "stock" &&
+      selectedReelVehicle &&
+      source !== "Uploaded images" &&
+      selectedPipeline
+    ) {
+      return [{ kind: "vehicle", vehicle: asPipelineVehicle(selectedReelVehicle, selectedPipeline) }];
+    }
+
+    const vehiclePool = source === "Uploaded images"
+      ? []
+      : [
+          ...(allowedPipelines.has("vanFinance")
+            ? filteredFactoryVehicles.map((vehicle) => asPipelineVehicle(vehicle, "vanFinance"))
+            : []),
+          ...(allowedPipelines.has("rent2buy")
+            ? filteredFactoryVehicles.filter(isRent2BuyEligible).map((vehicle) => asPipelineVehicle(vehicle, "rent2buy"))
+            : []),
+        ];
+
+    const uploadPool = source === "Uploaded images" || source === "Mixed" ? uploadedReelImages : [];
+    const uploadPipelines = [...allowedPipelines];
+
+    if (!uploadPipelines.length) {
+      return [];
+    }
+
+    return [
+      ...vehiclePool.map((vehicle) => ({ kind: "vehicle", vehicle })),
+      ...uploadPool.map((image, index) => ({
+        kind: "upload",
+        image,
+        pipeline: uploadPipelines[index % uploadPipelines.length],
+      })),
+    ];
+  }
+
+  function pickRandomReelPoolItems(pool, quantity, recentVehicleIds = recentRandomReelVehicleIds) {
+    const selectedMode = reelFactorySelectionMode === "stock";
+    if (selectedMode || pool.length <= 1) {
+      return Array.from({ length: quantity }, (_, index) => pool[index % pool.length]);
+    }
+
+    const uniquePool = [];
+    const seenKeys = new Set();
+
+    rankRandomPool(pool, recentVehicleIds).forEach((item) => {
+      const key = getRandomPoolItemKey(item);
+      if (seenKeys.has(key)) return;
+      seenKeys.add(key);
+      uniquePool.push(item);
+    });
+
+    if (!uniquePool.length) {
+      return Array.from({ length: quantity }, (_, index) => pool[index % pool.length]);
+    }
+
+    const selected = [];
+    let batchRecentIds = [...recentVehicleIds];
+
+    while (selected.length < quantity) {
+      const round = rankRandomPool(uniquePool, batchRecentIds);
+      const remaining = quantity - selected.length;
+      const nextItems = round.slice(0, remaining);
+      selected.push(...nextItems);
+
+      const roundVehicleIds = nextItems
+        .filter((item) => item.kind === "vehicle")
+        .flatMap((item) => getVehicleCooldownKeys(item.vehicle).keys);
+
+      batchRecentIds = [...roundVehicleIds.reverse(), ...batchRecentIds].slice(0, MAX_RANDOM_REEL_HISTORY);
+    }
+
+    return selected;
+  }
+
+  async function addReelsToCreativeLibrary(reels) {
+    const nextCreatives = reels.map(createCreativeFromReel);
+    const savedCreatives = await saveMarketingCreatives(nextCreatives);
+    const libraryCreatives = savedCreatives.length ? savedCreatives : nextCreatives;
+
+    setCreatives((prev) => [...libraryCreatives, ...prev]);
+    setRecentGeneratedIds(libraryCreatives.map((creative) => creative.id));
+
+    return libraryCreatives;
+  }
+
+  async function handleGenerateDailyReels() {
+    setGenerationMessage("");
+    setCreativeError("");
+
+    const basePool = buildDailyReelPool();
+    const quantity = Math.max(1, Math.min(50, Number(reelFactoryForm.quantity) || 10));
+
+    if (!basePool.length) {
+      setGenerationMessage("No stock or uploaded images are available for those reel settings.");
+      return;
+    }
+
+    let pool = basePool;
+    let cooldownWarning = "";
+    let cooldownRecentVehicleIds = [...recentRandomReelVehicleIds];
+
+    if (!reelFactoryForm.ignoreVehicleCooldown) {
+      const reelTypes = [
+        ...new Set(
+          basePool
+            .filter((item) => item.kind === "vehicle")
+            .map((item) => reelTypeForPipeline(item.vehicle.pipeline)),
+        ),
+      ];
+
+      if (reelTypes.length) {
+        try {
+          const { rows, setupMissing } = await fetchRecentReelVehicleUsage(reelTypes);
+          if (setupMissing) {
+            cooldownWarning = appendCooldownWarning(
+              cooldownWarning,
+              `Vehicle cooldown tracking table is not set up yet. Local browser history is active, but the full ${REEL_VEHICLE_COOLDOWN_DAYS}-day cooldown is not fully active until reel_vehicle_usage is set up.`,
+            );
+          } else {
+            const recentUsageLookup = buildRecentUsageLookup(rows);
+            const supabaseRecentKeys = recentUsageKeysFromRows(rows);
+            cooldownRecentVehicleIds = [
+              ...new Set([...cooldownRecentVehicleIds, ...supabaseRecentKeys]),
+            ];
+
+            if (basePool.some((item) => isRecentlyUsedReelVehicle(item, recentUsageLookup))) {
+              pool = rankRandomPool(basePool, cooldownRecentVehicleIds);
+            }
+          }
+        } catch (error) {
+          cooldownWarning = appendCooldownWarning(
+            cooldownWarning,
+            `Vehicle cooldown check skipped: ${error.message || "could not load recent usage"}. Local browser history will still be used.`,
+          );
+        }
+      }
+    }
+
+    const hookCounters = {
+      vanFinance: 0,
+      rent2buy: 0,
+    };
+
+    const selectedPoolItems = pickRandomReelPoolItems(pool, quantity, cooldownRecentVehicleIds);
+    if (!reelFactoryForm.ignoreVehicleCooldown) {
+      const recentIds = new Set(cooldownRecentVehicleIds);
+      const freshVehicleCount = basePool.filter((item) => item.kind === "vehicle" && !isRecentRandomPoolVehicle(item, recentIds)).length;
+      const repeatVehicleCount = selectedPoolItems.filter((item) => isRecentRandomPoolVehicle(item, recentIds)).length;
+
+      if (repeatVehicleCount > 0) {
+        cooldownWarning = appendCooldownWarning(
+          cooldownWarning,
+          `Only ${freshVehicleCount} fresh van${freshVehicleCount === 1 ? "" : "s"} available. Added ${repeatVehicleCount} cooldown repeat${repeatVehicleCount === 1 ? "" : "s"} to reach requested quantity.`,
+        );
+      }
+    }
+    const reelDrafts = selectedPoolItems.map((item) => {
+      if (item.kind === "vehicle") {
+        const pipelineIndex = hookCounters[item.vehicle.pipeline]++;
+        return createReelFromVehicle(item.vehicle, {
+          hook: pickHookForPipeline(item.vehicle.pipeline, pipelineIndex),
+          sourceType: "stock",
+        });
+      }
+
+      const pipelineIndex = hookCounters[item.pipeline]++;
+      const hook = pickHookForPipeline(item.pipeline, pipelineIndex);
+      const content = item.pipeline === "rent2buy"
+        ? buildRentReelContent({ price: "", monthly: "" })
+        : buildFinanceReelContent({ price: "", monthly: "" });
+
+      return createReelRecord({
+        image: item.image.url,
+        sourceLabel: item.image.name,
+        pipeline: item.pipeline,
+        hook,
+        templateName: content.templateName,
+        musicOn: reelFactoryForm.musicOn,
+        sourceType: "uploaded",
+        subtext: content.subtext,
+        priceLine: content.priceLine,
+        ctaLine: content.ctaLine,
+      });
+    });
+
+    if (reelFactorySelectionMode !== "stock") {
+      const generatedVehicleIds = selectedPoolItems
+        .filter((item) => item.kind === "vehicle")
+        .flatMap((item) => getVehicleCooldownKeys(item.vehicle).keys)
+        .filter(Boolean);
+
+      if (generatedVehicleIds.length) {
+        setRecentRandomReelVehicleIds((prev) => {
+          const next = [...generatedVehicleIds.reverse(), ...prev].slice(0, MAX_RANDOM_REEL_HISTORY);
+          saveRecentRandomReelVehicleIds(next);
+          return next;
+        });
+      }
+    }
+
+    setGenerationMessage(`Generating ${reelDrafts.length} video reel(s)...`);
+    const nextReels = [];
+
+    try {
+      for (let index = 0; index < reelDrafts.length; index += 1) {
+        const reel = reelDrafts[index];
+        setGenerationMessage(`Generating video reel ${index + 1} of ${reelDrafts.length}...`);
+        const videoAsset = await generateReelVideoAsset(reel);
+        nextReels.push({
+          ...reel,
+          url: videoAsset.url,
+          downloadName: videoAsset.downloadName,
+          posterUrl: videoAsset.posterUrl,
+          extension: videoAsset.extension,
+          mimeType: videoAsset.mimeType,
+          audioEmbedded: videoAsset.audioEmbedded,
+          blob: videoAsset.blob,
+          fileName: videoAsset.downloadName,
+        });
+      }
+    } catch (error) {
+      nextReels.forEach((reel) => {
+        if (reel.url) window.URL.revokeObjectURL(reel.url);
+      });
+      setCreativeError(error.message || "Could not generate reel video.");
+      setGenerationMessage("");
+      return;
+    }
+
+    const generatedUsage = nextReels
+      .map(reelVehicleUsagePayloadFromReel)
+      .filter(Boolean);
+
+    if (generatedUsage.length) {
+      try {
+        const { setupMissing } = await logReelVehicleUsage(generatedUsage);
+        if (setupMissing && !cooldownWarning) {
+          cooldownWarning = appendCooldownWarning(
+            cooldownWarning,
+            "Vehicle usage was not logged because reel_vehicle_usage is not set up yet, so the full 5-day cooldown is not fully active.",
+          );
+        }
+      } catch (error) {
+        cooldownWarning = appendCooldownWarning(
+          cooldownWarning,
+          `Vehicle usage could not be logged: ${error.message || "unknown error"}.`,
+        );
+      }
+    }
+
+    setTodayReels((prev) => [...nextReels, ...prev].slice(0, 20));
+    try {
+      const libraryCreatives = await addReelsToCreativeLibrary(nextReels);
+      await Promise.all(
+        libraryCreatives.map((creative, index) =>
+          saveReelVideoBlob(creative.id, nextReels[index]?.blob, {
+            downloadName: nextReels[index]?.downloadName,
+            mimeType: nextReels[index]?.mimeType,
+          }).catch(() => {})
+        )
+      );
+      setTodayReels((prev) =>
+        prev.map((reel) => {
+          const reelIndex = nextReels.findIndex((nextReel) => nextReel.id === reel.id);
+          return reelIndex >= 0
+            ? {
+                ...reel,
+                creativeId: libraryCreatives[reelIndex]?.id || reel.creativeId,
+              }
+            : reel;
+        })
+      );
+      setGenerationMessage(
+        `Generated ${nextReels.length} reel(s) and saved them to Creative Library.${cooldownWarning ? ` ${cooldownWarning}` : ""}`,
+      );
+    } catch (error) {
+      setCreativeError(error.message || "Could not save generated reels to Creative Library.");
+      setGenerationMessage(
+        `Generated ${nextReels.length} reel(s) for Today's Reels.${cooldownWarning ? ` ${cooldownWarning}` : ""}`,
+      );
+    }
+  }
+
+  function handleDownloadReel(reel) {
+    downloadReelVideo(reel);
+  }
+
+  async function handleDownloadAllReels() {
+    for (const reel of todayReels) {
+      await handleDownloadReel(reel);
+    }
+  }
+
+function handleDeleteReel(reelId) {
+  setHiddenTodayReelIds((prev) => [...prev, reelId]);
+
+  setTodayReels((prev) => {
+    const reel = prev.find((item) => item.id === reelId);
+
+    if (reel?.url?.startsWith?.("blob:")) {
+      try {
+        window.URL.revokeObjectURL(reel.url);
+      } catch {}
+    }
+
+    return prev.filter((reel) => reel.id !== reelId);
+  });
+}
+
+   
+async function handleClearTodayReels() {
+  const reelsToDelete = [...todayReels];
+
+  setTodayReels((prev) => {
+    prev.forEach((reel) => {
+      if (reel?.url?.startsWith?.("blob:")) {
+        try {
+          URL.revokeObjectURL(reel.url);
+        } catch {}
+      }
+    });
+
+    return [];
+  });
+
+  const reelIds = reelsToDelete.map((reel) => reel.id).filter(Boolean);
+
+  setCreatives((prev) => prev.filter((creative) => !reelIds.includes(creative.id)));
+  setRecentGeneratedIds((prev) => prev.filter((id) => !reelIds.includes(id)));
+
+  try {
+    await Promise.all(reelIds.map((id) => deleteMarketingCreative(id)));
+  } catch (error) {
+    setCreativeError(error.message || "Could not clear today's reels.");
+  }
+}
+
+  function escapeSvgText(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  async function downloadFinanceAdvertImage(vehicle) {
+    const title = escapeSvgText(vehicle.name || vehicle.vanDescription || vehicle.reg || "Finance van");
+    const reg = escapeSvgText(vehicle.reg || "");
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="750" viewBox="0 0 1200 750">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="750" fill="url(#bg)"/>
+  <rect x="70" y="70" width="1060" height="610" rx="38" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.26)" stroke-width="3"/>
+  <text x="600" y="170" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" font-weight="900" fill="#ffffff" letter-spacing="5">VAN FINANCE COMPANY</text>
+  <text x="600" y="310" text-anchor="middle" font-family="Arial, sans-serif" font-size="78" font-weight="900" fill="#ffffff">FROM Â£99 DEPOSIT</text>
+  <text x="600" y="420" text-anchor="middle" font-family="Arial, sans-serif" font-size="38" font-weight="800" fill="#dbeafe">${title}</text>
+  <text x="600" y="500" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" font-weight="800" fill="#bfdbfe">${reg}</text>
+  <text x="600" y="600" text-anchor="middle" font-family="Arial, sans-serif" font-size="32" font-weight="900" fill="#ffffff">BAD CREDIT CONSIDERED | SELF-EMPLOYED WELCOME</text>
+</svg>`;
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    const blobUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = `${String(vehicle.description || vehicle.name || vehicle.reg || "finance-van")
+      .replace(/[^a-z0-9]+/gi, "-")
+      .toLowerCase()}-finance.svg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(blobUrl);
+  }
+
+  async function downloadAdvertImage(vehicle, destination) {
+    const imageUrl = vehicle.image || vehicle.picture;
+    if (!imageUrl) return;
+
+    try {
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `${String(vehicle.description || vehicle.name || vehicle.reg || "van")
+        .replace(/[^a-z0-9]+/gi, "-")
+        .toLowerCase()}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch {
+      window.open(imageUrl, "_blank", "noopener,noreferrer");
+    }
+  }
+
+  async function prepareVehicleAdvert(vehicle, destination, preparedCaption = "") {
+    const caption = sanitizePostingCaption(preparedCaption || buildPostingCaption(vehicle, { destination }));
+    if (!navigator.clipboard?.writeText) {
+      window.prompt("Copy caption", caption);
+    } else {
+      await navigator.clipboard.writeText(caption).catch(() => {
+        window.prompt("Copy caption", caption);
+      });
+    }
+
+    await downloadAdvertImage(vehicle, destination);
+  }
+
+  async function handlePostVehicle(vehicle, destination, preparedCaption = "") {
+    try {
+      await prepareVehicleAdvert(vehicle, destination, preparedCaption);
+      handleMarkVehiclePosted(vehicle, destination);
+      handleSkipVehicle(vehicle, destination);
+      handleOpenFacebookPage(destination);
+    } catch {
+      handleOpenFacebookPage(destination);
+    }
+  }
+
+  function getDefaultPostingDestination(vehicle) {
+    return vehicle.pipeline === "rent2buy" ? "Rent2Buy Facebook" : "Van Finance Facebook";
+  }
+
+  function getPostingActionKey(vehicle, destination) {
+    return `${normalizePostingVehicleId(vehicle)}::${destination}`;
+  }
+
+  function getPostingPageKey(destination) {
+    if (destination === "Van Finance Facebook") return "vanFinanceFacebook";
+    if (destination === "Rent2Buy Facebook") return "rent2BuyFacebook";
+    return "marketplace";
+  }
+
+  function handleOpenFacebookPage(destination) {
+    const destinationUrls = {
+      "Van Finance Facebook": FINANCE_FACEBOOK_URL,
+      "Rent2Buy Facebook": RENT_FACEBOOK_URL,
+      "Facebook Marketplace": MARKETPLACE_URL,
+    };
+    const url = destinationUrls[destination] || FINANCE_FACEBOOK_URL;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  function handleRefreshStock() {
+    loadVehicles();
+  }
+
+  function handleSyncStock(destination) {
+    const syncUrl = destination === "Van Finance Facebook" ? FINANCE_SYNC_URL : RENT_SYNC_URL;
+    window.open(syncUrl, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => {
+      loadVehicles();
+    }, 3000);
+  }
+
+  function handleMarkVehiclePosted(vehicle, destination = getDefaultPostingDestination(vehicle)) {
+    const activityType = destination === "Van Finance Facebook"
+      ? "van_finance_facebook_post"
+      : destination === "Rent2Buy Facebook" ? "rent2buy_facebook_post" : "";
+    if (activityType) {
+      const sourceId = `${londonDateKey()}::${getPostingActionKey(vehicle, destination)}`;
+      recordDailyMarketingActivity(activityType, {
+        activityDate: londonDateKey(),
+        source: "posting_desk",
+        sourceId,
+        metadata: { vehicle_id: vehicle.id || null, registration: vehicle.registration || vehicle.reg || "", destination },
+      }).catch((error) => setCreativeError(error.message || "The post was marked locally, but the daily total could not be updated."));
+    }
+    setPostedToday((prev) => {
+      const postingKey = getPostingActionKey(vehicle, destination);
+      if (
+        prev.some(
+          (item) =>
+            getPostingActionKey(
+              item.vehicle,
+              item.destination || getDefaultPostingDestination(item.vehicle)
+            ) === postingKey
+        )
+      ) {
+        return prev;
+      }
+
+      return [
+        {
+          id: `posted-${Date.now()}-${vehicle.id}-${destination}`,
+          vehicle,
+          postedAt: new Date().toISOString(),
+          destination,
+        },
+        ...prev,
+      ];
+    });
+  }
+
+  function handleSkipVehicle(vehicle, destination = getDefaultPostingDestination(vehicle)) {
+    const pageKey = getPostingPageKey(destination);
+    setHiddenPostingVehicleIds((prev) => {
+      const currentIds = prev[pageKey] || [];
+      const vehicleId = normalizePostingVehicleId(vehicle);
+      const updatedIds = currentIds.includes(vehicleId) ? currentIds : [...currentIds, vehicleId];
+      saveHiddenPostingIds(pageKey, updatedIds);
+
+      return {
+        ...prev,
+        [pageKey]: updatedIds,
+      };
+    });
+  }
+
+  function handleShowHiddenAgain(destination) {
+    const pageKey = getPostingPageKey(destination);
+    saveHiddenPostingIds(pageKey, []);
+    setHiddenPostingVehicleIds((prev) => ({
+      ...prev,
+      [pageKey]: [],
+    }));
+  }
+
+  function handleGenerateFromStock(vehicle) {
+    const lock = reelActionLocks[getManualQueueVehicleId(vehicle)];
+    console.log("Stock reel lock check", {
+      registration: vehicle?.reg || vehicle?.registration || vehicle?.name || "",
+      pipeline: stockFilters.pipeline === "rent2buy" ? "rent2buy" : "vanFinance",
+      locked: Boolean(lock?.locked),
+      bypassed: ignoreReelLock,
+    });
+
+    if (lock?.locked && !ignoreReelLock) {
+      setGenerationMessage("This vehicle is locked for reels for 72 hours after download.");
+      setCreativeError("");
+      return;
+    }
+
+    const targetPipeline = stockFilters.pipeline === "rent2buy" ? "rent2buy" : "vanFinance";
+    const reelVehicle = asPipelineVehicle(vehicle, targetPipeline);
+    const isRent = reelVehicle.pipeline === "rent2buy";
+    setSelectedVehicleId(vehicle.id);
+    setSelectedVehicleIds([vehicle.id]);
+    setReelFactoryVehicleId(vehicle.id);
+    setReelFactorySelectionMode("stock");
+    setFactoryFilters((prev) => ({ ...prev, pipeline: reelVehicle.pipeline }));
+    setReelFactoryForm((prev) => ({
+      ...prev,
+      reelSource: isRent ? "Rent2Buy stock" : "Finance stock",
+      reelType: isRent ? "Rent2Buy" : "Finance",
+      quantity: 1,
+      hookMode: "Single selected hook",
+    }));
+    setGenerationMessage(`${vehicle.name || vehicle.reg || "Selected vehicle"} is ready in Premium Reel Studio.`);
+    setCreativeError("");
+    if (typeof window !== "undefined" && window.location.pathname !== VIEW_PATHS["Premium Reel Studio"]) {
+      window.history.pushState({}, "", VIEW_PATHS["Premium Reel Studio"]);
+    }
+    setCurrentView("Premium Reel Studio");
+  }
+
+  function handleToggleManualStockVehicle(vehicle) {
+    const vehicleId = getManualQueueVehicleId(vehicle);
+    if (!vehicleId) return;
+    const lock = reelActionLocks[vehicleId];
+    console.log("Stock manual queue lock check", {
+      registration: vehicle?.reg || vehicle?.registration || vehicle?.name || "",
+      locked: Boolean(lock?.locked),
+      bypassed: ignoreReelLock,
+    });
+
+    if (lock?.locked && !ignoreReelLock) {
+      setGenerationMessage("This vehicle is locked for reels for 72 hours after download.");
+      setCreativeError("");
+      return;
+    }
+
+    setManualStockSelectedIds((prev) =>
+      prev.includes(vehicleId)
+        ? prev.filter((id) => id !== vehicleId)
+        : [...prev, vehicleId]
+    );
+  }
+
+  function handleAddSelectedToManualReelQueue(queueKey) {
+    const targetPipeline = getManualQueueTargetPipeline(queueKey);
+    const selectedIds = new Set(manualStockSelectedIds);
+    const selectedVehicles = vehicles
+      .filter((vehicle) => selectedIds.has(getManualQueueVehicleId(vehicle)))
+      .filter((vehicle) => queueKey !== "rent2buy" || isRent2BuyEligible(vehicle))
+      .filter((vehicle) => ignoreReelLock || !reelActionLocks[getManualQueueVehicleId(vehicle)]?.locked);
+    const selectedItems = selectedVehicles.map((vehicle) => createManualQueueItem(vehicle, queueKey));
+
+    if (!selectedItems.length) {
+      setGenerationMessage("Select at least one stock vehicle for the manual reel queue.");
+      return;
+    }
+
+    setManualReelQueues((prev) => {
+      const existing = (prev[queueKey] || []).map((item) => normalizeManualQueueItem(item, queueKey)).filter(Boolean);
+      const existingIds = new Set(existing.map((item) => item.id || item.reg));
+      const additions = selectedItems.filter(
+        (item) => !existingIds.has(item.id || item.reg)
+      );
+      const nextQueue = [...existing, ...additions];
+      const nextQueues = { ...prev, [queueKey]: nextQueue };
+      saveManualReelQueue(queueKey, nextQueue);
+      return nextQueues;
+    });
+
+    setManualReelQueueType(queueKey);
+    setManualStockSelectedIds([]);
+    setFactoryFilters((prev) => ({ ...prev, pipeline: targetPipeline }));
+    setReelFactoryForm((prev) => ({
+      ...prev,
+      reelSource: queueKey === "rent2buy" ? "Rent2Buy stock" : "Finance stock",
+      reelType: queueKey === "rent2buy" ? "Rent2Buy" : "Finance",
+      quantity: 1,
+      hookMode: "Single selected hook",
+    }));
+    setGenerationMessage(
+      `${selectedItems.length} vehicle${selectedItems.length === 1 ? "" : "s"} added to the ${
+        queueKey === "rent2buy" ? "Rent2Buy" : "Finance"
+      } premium reel queue.`
+    );
+    setCreativeError("");
+    if (typeof window !== "undefined" && window.location.pathname !== VIEW_PATHS["Premium Reel Studio"]) {
+      window.history.pushState({}, "", VIEW_PATHS["Premium Reel Studio"]);
+    }
+    setCurrentView("Premium Reel Studio");
+  }
+
+  function updateReelLabQueue(productKey, updater) {
+    const queueKey = getReelLabQueueKey(productKey);
+    setReelLabQueues((prev) => {
+      const currentQueue = (prev[queueKey] || [])
+        .map((item) => normalizeReelLabQueueItem(item, queueKey))
+        .filter(Boolean);
+      const nextQueue = updater(currentQueue);
+      const normalizedQueue = nextQueue.map((item) => normalizeReelLabQueueItem(item, queueKey)).filter(Boolean);
+      const nextQueues = { ...prev, [queueKey]: normalizedQueue };
+      saveReelLabQueue(queueKey, normalizedQueue);
+      return nextQueues;
+    });
+  }
+
+  function handleAddSelectedToReelLabQueue(queueKey) {
+    const productQueueKey = getReelLabQueueKey(queueKey === "rent2buy" ? "rent2buy" : "vanFinance");
+    const selectedIds = new Set(manualStockSelectedIds);
+    const selectedVehicles = vehicles
+      .filter((vehicle) => selectedIds.has(getManualQueueVehicleId(vehicle)))
+      .filter((vehicle) => productQueueKey !== "rent2buy" || isRent2BuyEligible(vehicle))
+      .filter((vehicle) => ignoreReelLock || !reelActionLocks[getManualQueueVehicleId(vehicle)]?.locked);
+    const selectedItems = selectedVehicles.map((vehicle) => createReelLabQueueItem(vehicle, productQueueKey));
+
+    if (!selectedItems.length) {
+      setGenerationMessage("Select at least one stock vehicle for the Reel Lab queue.");
+      setCreativeError("");
+      return;
+    }
+
+    updateReelLabQueue(productQueueKey, (existing) => {
+      const existingIds = new Set(existing.map((item) => item.id || item.reg || item.title || item.name));
+      const additions = selectedItems.filter((item) => {
+        const key = item.id || item.reg || item.title || item.name;
+        return key && !existingIds.has(key);
+      });
+      return [...existing, ...additions];
+    });
+
+    setManualStockSelectedIds([]);
+    setGenerationMessage(
+      `${selectedItems.length} selected vehicle${selectedItems.length === 1 ? "" : "s"} added to ${
+        productQueueKey === "rent2buy" ? "Rent2Buy" : "Finance"
+      } Reel Lab Queue. Open Reel Lab Beta to download.`
+    );
+    setCreativeError("");
+  }
+
+  function handleUpdateReelLabQueue(productKey, nextVehicles) {
+    const queueKey = getReelLabQueueKey(productKey);
+    const nextItems = (nextVehicles || []).map((vehicle) => createReelLabQueueItem(vehicle, queueKey));
+    updateReelLabQueue(queueKey, () => nextItems);
+  }
+
+  function updateYouTubeQueue(productKey, updater) {
+    const queueKey = getYouTubeQueueKey(productKey);
+    setYoutubeQueues((prev) => {
+      const currentQueue = (prev[queueKey] || [])
+        .map((item) => normalizeYouTubeQueueItem(item, queueKey))
+        .filter(Boolean);
+      const nextQueue = updater(currentQueue);
+      const normalizedQueue = nextQueue.map((item) => normalizeYouTubeQueueItem(item, queueKey)).filter(Boolean);
+      const nextQueues = { ...prev, [queueKey]: normalizedQueue };
+      saveYouTubeQueue(queueKey, normalizedQueue);
+      return nextQueues;
+    });
+  }
+
+  async function handleAddSelectedToYouTubeQueue(queueKey) {
+    const productQueueKey = getYouTubeQueueKey(queueKey);
+    const requiredImageCount = YOUTUBE_DEFAULT_IMAGE_COUNT;
+    const cmsUploads = await loadYouTubeCmsUploadsAsync();
+    setYoutubeCmsUploads(cmsUploads);
+    const selectedIds = new Set(manualStockSelectedIds);
+    const eligibleVehicles = vehicles
+      .filter((vehicle) => selectedIds.has(getManualQueueVehicleId(vehicle)))
+      .filter((vehicle) => productQueueKey !== "rent2buy" || isRent2BuyEligible(vehicle))
+      .filter((vehicle) => productQueueKey !== "cars" || vehicle.pipeline === "cars");
+    const checkedVehicles = eligibleVehicles.map((vehicle) => {
+      const imageOrder = resolveYouTubeImageOrder({
+        vehicle,
+        cmsUpload: cmsUploads[productQueueKey],
+        imageSource: "auto",
+        imageCount: requiredImageCount,
+      });
+      return {
+        vehicle,
+        imageCount: imageOrder.totalAvailable,
+        sourceLabel: imageOrder.sourceLabel || imageOrder.source || "no images found",
+      };
+    });
+    const warningVehicles = checkedVehicles.filter(({ imageCount }) => imageCount < requiredImageCount);
+    const selectedItems = checkedVehicles.map(({ vehicle }) => createYouTubeQueueItem(vehicle, productQueueKey));
+
+    if (!eligibleVehicles.length) {
+      setGenerationMessage("Select at least one stock vehicle for the YouTube queue.");
+      setCreativeError("");
+      return;
+    }
+
+    let addedCount = 0;
+    if (selectedItems.length) {
+      updateYouTubeQueue(productQueueKey, (existing) => {
+        const existingIds = new Set(existing.map((item) => item.id || item.reg || item.title || item.name));
+        const additions = selectedItems.filter((item) => {
+          const key = item.id || item.reg || item.title || item.name;
+          return key && !existingIds.has(key);
+        });
+        addedCount = additions.length;
+        return [...existing, ...additions];
+      });
+    }
+
+    setManualStockSelectedIds([]);
+    const warningDetails = warningVehicles
+      .slice(0, 8)
+      .map(({ vehicle, imageCount, sourceLabel }) => `${vehicleQueueLabel(vehicle)} - ${imageCount} / ${requiredImageCount} images - ${sourceLabel}`)
+      .join("\n");
+    const duplicateCount = selectedItems.length - addedCount;
+    const summaryLines = [
+      `${addedCount} vehicle${addedCount === 1 ? "" : "s"} added to YouTube Queue.`,
+      duplicateCount > 0 ? `${duplicateCount} selected vehicle${duplicateCount === 1 ? " was" : "s were"} already in the YouTube Queue.` : "",
+      warningDetails ? `Image warnings only - YouTube Generator will validate during generation:\n${warningDetails}` : "",
+      warningVehicles.length > 8 ? `...and ${warningVehicles.length - 8} more image warning${warningVehicles.length - 8 === 1 ? "" : "s"}.` : "",
+      "Open YouTube Generator to download.",
+    ].filter(Boolean);
+    setGenerationMessage(summaryLines.join("\n"));
+    setCreativeError("");
+  }
+
+  function handleUpdateYouTubeQueue(productKey, nextVehicles) {
+    const queueKey = getYouTubeQueueKey(productKey);
+    const nextItems = (nextVehicles || []).map((vehicle) => createYouTubeQueueItem(vehicle, queueKey));
+    updateYouTubeQueue(queueKey, () => nextItems);
+  }
+
+  function handleUpdateYouTubeCmsUpload(productKey, upload) {
+    const queueKey = getYouTubeQueueKey(productKey);
+    setYoutubeCmsUploads((prev) => ({ ...prev, [queueKey]: upload || null }));
+  }
+
+  function updateManualReelQueue(queueKey, updater) {
+    setManualReelQueues((prev) => {
+      const currentQueue = (prev[queueKey] || [])
+        .map((item) => normalizeManualQueueItem(item, queueKey))
+        .filter(Boolean);
+      const nextQueue = updater(currentQueue);
+      const nextQueues = { ...prev, [queueKey]: nextQueue };
+      saveManualReelQueue(queueKey, nextQueue);
+      return nextQueues;
+    });
+  }
+
+  function handleNextManualQueuedVehicle(queueKey) {
+    updateManualReelQueue(queueKey, (queue) =>
+      queue.length > 1 ? [...queue.slice(1), queue[0]] : queue
+    );
+  }
+
+  function handleRemoveManualQueuedVehicle(queueKey) {
+    updateManualReelQueue(queueKey, (queue) => queue.slice(1));
+  }
+
+  function handleClearManualReelQueue(queueKey) {
+    updateManualReelQueue(queueKey, () => []);
+  }
+
+  async function handleGenerateManualQueuedReel(queueKey, options = {}) {
+    const queue = manualReelQueues[queueKey] || [];
+    const queueItem = normalizeManualQueueItem(options.queueItem || queue[0], queueKey);
+    const failManualQueueGeneration = (message) => {
+      if (options.throwOnError) {
+        throw new Error(message);
+      }
+      return null;
+    };
+
+    if (!queueItem) {
+      setGenerationMessage("No vehicles are queued for that manual reel queue.");
+      return failManualQueueGeneration("No vehicles are queued for that manual reel queue.");
+    }
+
+    const vehicle = resolveManualQueuedVehicle(queueItem, vehicles);
+    if (!vehicle) {
+      console.warn("Queued vehicle no longer found in current stock.", {
+        id: queueItem.id,
+        reg: queueItem.reg,
+        targetPipeline: queueItem.targetPipeline,
+      });
+      setGenerationMessage("Queued vehicle no longer found in current stock. Remove it or refresh stock.");
+      setCreativeError("");
+      return failManualQueueGeneration("Queued vehicle no longer found in current stock. Remove it or refresh stock.");
+    }
+
+    if (!vehicle.image) {
+      console.warn("Queued vehicle has no usable image in current stock.", {
+        id: queueItem.id,
+        reg: queueItem.reg,
+        targetPipeline: queueItem.targetPipeline,
+      });
+      setGenerationMessage("Queued vehicle has no usable image in current stock. Refresh stock or remove it.");
+      setCreativeError("");
+      return failManualQueueGeneration("Queued vehicle has no usable image in current stock. Refresh stock or remove it.");
+    }
+
+    const lock = getReelActionLock(vehicle, reelDownloadCooldowns);
+    console.log("Manual queued reel lock check", {
+      registration: vehicle?.reg || vehicle?.registration || vehicle?.name || "",
+      queueKey,
+      reelType: vehicle?.pipeline,
+      locked: Boolean(lock?.locked),
+      bypassed: ignoreReelLock,
     });
 
     if (lock.locked && !ignoreReelLock) {
@@ -1205,4 +2901,3 @@ function createManualQueueItem(vehicle, queueKey) {
     </div>
   );
 }
-
