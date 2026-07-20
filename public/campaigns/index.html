@@ -292,7 +292,7 @@
                   </label>
                   <div class="span-2">
                     <strong>Exclude recipients of previous campaigns</strong>
-                    <p class="hint">Tick any earlier campaign whose recipients must not receive this one.</p>
+                    <p class="hint">Choose from the four most recent campaigns whose recipients must not receive this one.</p>
                     <div id="audienceExcludedCampaigns" class="check-list"></div>
                   </div>
                   <label id="audienceSearchWrap" class="span-2 hidden">Custom search
@@ -613,7 +613,10 @@
       function renderExcludedCampaignOptions(selectedIds = []) {
         const selected = new Set(selectedIds);
         const currentId = state.selectedCampaign?.id || "";
-        const options = state.exclusionCampaigns.filter((campaign) => campaign.id !== currentId);
+        const available = state.exclusionCampaigns.filter((campaign) => campaign.id !== currentId);
+        const selectedCampaigns = available.filter((campaign) => selected.has(campaign.id));
+        const recentCampaigns = available.filter((campaign) => !selected.has(campaign.id));
+        const options = [...selectedCampaigns, ...recentCampaigns].slice(0, 4);
         $("audienceExcludedCampaigns").innerHTML = options.length
           ? options.map((campaign) => `<label class="check-row"><span><input type="checkbox" value="${escapeHtml(campaign.id)}" ${selected.has(campaign.id) ? "checked" : ""} /> ${escapeHtml(campaign.name)}</span><small>${escapeHtml(campaign.status)}</small></label>`).join("")
           : `<div class="empty">No previous campaigns available.</div>`;
