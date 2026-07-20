@@ -619,4 +619,3 @@ export default async function handler(request, response) {
     json(response, status, { ok: false, message: error?.message || "Marketing Campaigns API error." });
   }
 }
-
