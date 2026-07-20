@@ -33,6 +33,11 @@ test("campaign contact controls reject unsupported days and invalid campaign IDs
   assert.throws(() => normalizeCampaignContactControls({ exclude_campaign_ids: ["not-a-campaign"] }), /not valid/i);
 });
 
+test("campaign contact controls allow no more than four previous campaigns", () => {
+  const campaignIds = Array.from({ length: 5 }, (_, index) => `${index + 1}1111111-1111-4111-8111-111111111111`);
+  assert.throws(() => normalizeCampaignContactControls({ exclude_campaign_ids: campaignIds }), /maximum of four/i);
+});
+
 test("contact history includes submitted production outcomes but not draft or failed recipients", () => {
   assert.ok(CONTACT_HISTORY_RECIPIENT_STATUSES.includes("accepted"));
   assert.ok(CONTACT_HISTORY_RECIPIENT_STATUSES.includes("delivered"));
@@ -96,6 +101,7 @@ test("campaign builder exposes both controls and defaults only brand-new campaig
   assert.match(source, /Exclude recipients of previous campaigns/);
   assert.match(source, /audience\?\.rules \? 0 : 7/);
   assert.match(source, /exclude_campaign_ids/);
+  assert.match(source, /\.slice\(0, 4\)/);
 });
 
 test("preview, prepare and confirmed sends all resolve the historical exclusions", () => {
