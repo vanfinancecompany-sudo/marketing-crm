@@ -330,7 +330,158 @@
 
             <section class="card detail-stack campaign-preview-column">
               <div class="card-header">
-                <div><h2>Preview</h2><p>Server-rendered from the campaign snapshot with dummy placeholder data only…1398 tokens truncated…", {}, key);
+                <div><h2>Preview</h2><p>Server-rendered from the campaign snapshot with dummy placeholder data only.</p></div>
+                <div class="toolbar">
+                  <button id="desktopPreview" class="is-active">Desktop</button>
+                  <button id="mobilePreview">Mobile</button>
+                  <button id="togglePreview" type="button" aria-expanded="true">Hide Preview</button>
+                </div>
+              </div>
+              <div id="previewFrameShell" class="preview-frame">
+                <iframe id="previewFrame" sandbox=""></iframe>
+              </div>
+            </section>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <dialog id="createDialog">
+      <form method="dialog" id="createForm">
+        <div class="modal-body">
+          <div>
+            <p class="eyebrow">New Campaign</p>
+            <h2>Create from reusable template</h2>
+            <p>This stores a frozen template snapshot on the campaign. It does not create an audience, batch or send anything.</p>
+          </div>
+          <p id="createMessage" class="message error hidden"></p>
+          <div class="form-grid">
+            <label class="span-2">Campaign Name
+              <input id="newCampaignName" required />
+            </label>
+            <label>Campaign Type
+              <select id="newCampaignType">
+                <option value="new_stock">New Stock</option>
+                <option value="finance_offer">Finance Offer</option>
+                <option value="rent2buy">Rent2Buy</option>
+                <option value="newsletter">Newsletter</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+            <label>Reusable Template
+              <select id="newTemplateId" required></select>
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button value="cancel" type="button" id="cancelCreateButton">Cancel</button>
+          <button class="primary" value="default" type="submit">Create Campaign</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script>
+      const STORAGE_KEY = "marketingCustomerDatabaseApiKey";
+      const API_HEADER = "x-marketing-customer-database-key";
+      const API_ROUTE = "/api/marketing-template-campaigns";
+      const CAMPAIGN_TYPES = {
+        new_stock: "New Stock",
+        finance_offer: "Finance Offer",
+        rent2buy: "Rent2Buy",
+        newsletter: "Newsletter",
+        custom: "Custom",
+      };
+      const AUDIENCE_MODES = {
+        standard: "Email Audience",
+        never_emailed: "Never emailed",
+        recently_imported: "Recently imported",
+        manual_customer_ids: "Manual customer IDs",
+        custom_search: "Custom search",
+      };
+
+      const state = {
+        accessStatus: "checking",
+        campaigns: [],
+        exclusionCampaigns: [],
+        templates: [],
+        selectedCampaign: null,
+        previewMode: "desktop",
+        pendingAudience: null,
+      };
+
+      const $ = (id) => document.getElementById(id);
+      const fmt = new Intl.NumberFormat("en-GB");
+      const dateFmt = new Intl.DateTimeFormat("en-GB", { dateStyle: "short", timeStyle: "short" });
+
+      function getStoredKey() {
+        try { return window.localStorage.getItem(STORAGE_KEY) || ""; } catch { return ""; }
+      }
+
+      function saveStoredKey(value) {
+        try {
+          window.sessionStorage.removeItem(STORAGE_KEY);
+          window.localStorage.setItem(STORAGE_KEY, String(value || "").trim());
+          return true;
+        } catch { return false; }
+      }
+
+      function clearStoredKey() {
+        try {
+          window.sessionStorage.removeItem(STORAGE_KEY);
+          window.localStorage.removeItem(STORAGE_KEY);
+        } catch {}
+      }
+
+      async function api(action, payload = {}, keyOverride = "") {
+        const key = String(keyOverride || getStoredKey()).trim();
+        const response = await fetch(API_ROUTE, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", [API_HEADER]: key },
+          body: JSON.stringify({ action, ...payload }),
+        });
+        let data = {};
+        try { data = await response.json(); } catch {}
+        if (!response.ok || data.ok === false) {
+          const error = new Error(data.message || "Campaigns request failed.");
+          error.status = response.status;
+          throw error;
+        }
+        return data;
+      }
+
+      function showAccess(status, message = "") {
+        state.accessStatus = status;
+        $("checkingState").classList.toggle("hidden", status !== "checking");
+        $("lockedState").classList.toggle("hidden", status !== "locked");
+        $("app").classList.toggle("hidden", status !== "unlocked");
+        $("lockMessage").classList.toggle("hidden", !message);
+        $("lockMessage").textContent = message;
+      }
+
+      function showMessage(text, isError = false) {
+        $("message").textContent = text;
+        $("message").className = text ? `message${isError ? " error" : ""}` : "message hidden";
+      }
+
+      function formatDate(value) {
+        if (!value) return "-";
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? "-" : dateFmt.format(date);
+      }
+
+      function escapeHtml(value) {
+        return String(value || "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
+      }
+
+      async function validateStoredAccess() {
+        const key = getStoredKey();
+        if (!key) {
+          showAccess("locked");
+          return;
+        }
+        showAccess("checking");
+        try {
+          await api("validateAccess", {}, key);
           showAccess("unlocked");
           await loadAll();
         } catch (error) {
@@ -431,7 +582,7 @@
             <td>${escapeHtml(CAMPAIGN_TYPES[campaign.campaign_type] || campaign.campaign_type)}</td>
             <td><span class="badge ${escapeHtml(campaign.status)}">${escapeHtml(campaign.status)}</span></td>
             <td><span class="badge ${campaign.readiness?.ready_to_send ? "green" : "red"}">${campaign.readiness?.ready_to_send ? "Ready to send" : "Needs work"}</span><br><span class="hint">${fmt.format(campaign.audience_snapshot?.final_send_count || 0)} recipients</span></td>
-            <td>${escapeHtml(campaign.template_name || "-")}<br><span class="hint">${campaign.content_block_count || 0} blocks Â· ${campaign.selected_vehicle_count || 0} selected vehicles</span></td>
+            <td>${escapeHtml(campaign.template_name || "-")}<br><span class="hint">${campaign.content_block_count || 0} blocks · ${campaign.selected_vehicle_count || 0} selected vehicles</span></td>
             <td>${formatDate(campaign.updated_at)}</td>
             <td><div class="toolbar"><button data-open="${campaign.id}">Open</button><button data-duplicate="${campaign.id}">Duplicate</button><button class="danger" data-archive="${campaign.id}" ${campaign.status === "archived" ? "disabled" : ""}>Archive</button></div></td>
           </tr>`).join("");
@@ -482,7 +633,7 @@
       function audienceLabel(audience) {
         if (!audience?.rules) return "Not selected";
         const pipeline = audience.rules.pipeline === "all" ? "All pipelines" : CAMPAIGN_TYPES[audience.rules.pipeline] || audience.rules.pipeline;
-        return `${AUDIENCE_MODES[audience.rules.mode] || "Email Audience"} Â· ${pipeline}`;
+        return `${AUDIENCE_MODES[audience.rules.mode] || "Email Audience"} · ${pipeline}`;
       }
 
       function renderAudienceModeControls() {
@@ -512,7 +663,7 @@
         $("readyPanel").textContent = readiness.ready_to_send ? "READY TO SEND" : "NOT READY";
         $("readinessChecks").innerHTML = readiness.checks.map((check) => `
           <div class="check-row ${check.passed ? "pass" : "fail"}">
-            <span>${check.passed ? "âœ“" : "Ã—"} ${escapeHtml(check.label)}${check.required === false ? " (not required)" : ""}</span>
+            <span>${check.passed ? "✓" : "×"} ${escapeHtml(check.label)}${check.required === false ? " (not required)" : ""}</span>
             <strong>${check.passed ? "Pass" : "Needs attention"}</strong>
           </div>`).join("");
       }
@@ -538,7 +689,7 @@
         if (!campaign) return;
         const archived = campaign.status === "archived";
         $("detailTitle").textContent = campaign.name || "Campaign";
-        $("detailMeta").textContent = `Created ${formatDate(campaign.created_at)} Â· Updated ${formatDate(campaign.updated_at)}`;
+        $("detailMeta").textContent = `Created ${formatDate(campaign.created_at)} · Updated ${formatDate(campaign.updated_at)}`;
         $("detailStatus").textContent = campaign.status;
         $("detailStatus").className = `badge ${campaign.status}`;
         $("campaignName").value = campaign.name || "";
@@ -698,4 +849,3 @@
     <script src="/campaigns/ui-preview-polish-v2.js?v=20260717-no-preview-injector"></script>
   </body>
 </html>
-
