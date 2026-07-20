@@ -99,4 +99,3 @@ test("Campaign Builder preview stays in its column and becomes static in one-col
   assert.doesNotMatch(source, /campaign-preview-column[^}]*position:\s*(?:fixed|absolute|sticky)/);
   assert.match(source, /id="previewFrameShell"/);
 });
-
