@@ -454,4 +454,3 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", observeCampaignChanges);
   else observeCampaignChanges();
 })();
-
