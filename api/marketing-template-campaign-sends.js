@@ -439,7 +439,240 @@ export async function callEmailProvider(payload, options = {}) {
     return sendSendGridEmail({
       apiKey: config.apiKey,
       to: payload.to,
-    …2560 tokens truncated… {}) {
+      toName: payload.name,
+      subject: payload.subject,
+      html: payload.html,
+      customArgs: sendGridCustomArguments(payload),
+      headers: payload.headers,
+      categories: payload.tags,
+      fromEmail: config.senderEmail,
+      fromName: config.senderName,
+      fetchImpl,
+    });
+  }
+  throw new ApiError(400, "Unsupported marketing email provider.");
+}
+
+function unsubscribePayload({ customerId, email, campaignId, sendId, recipientId }) {
+  const exp = Date.now() + 365 * 24 * 60 * 60 * 1000;
+  return { customer_id: customerId, email: normalizeEmail(email), campaign_id: campaignId, send_id: sendId, recipient_id: recipientId, exp };
+}
+
+function signUnsubscribeToken(payload) {
+  const secret = process.env.MARKETING_UNSUBSCRIBE_TOKEN_SECRET;
+  if (!secret) throw new ApiError(400, "Unsubscribe token secret is not configured.");
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const sig = crypto.createHmac("sha256", secret).update(body).digest("base64url");
+  return `${body}.${sig}`;
+}
+
+function publicUnsubscribeUrl(payload) {
+  const base = String(process.env.MARKETING_PUBLIC_BASE_URL || "").replace(/\/+$/, "");
+  if (!base) throw new ApiError(400, "Public base URL is not configured.");
+  return `${base}/api/marketing-unsubscribe?token=${encodeURIComponent(signUnsubscribeToken(payload))}`;
+}
+
+async function loadPermanentSuppressedEmails(supabase, values = []) {
+  return loadPermanentCurrentSendSuppressions(supabase, values, assertSupabase);
+}
+
+async function loadExportedEmailContactIds(supabase) {
+  const ids = new Set();
+  try {
+    const campaignResult = await supabase.from("marketing_campaigns").select("id").eq("channel", "email");
+    assertSupabase(campaignResult, "Could not inspect exported email campaigns.");
+    const campaignIds = (campaignResult.data || []).map((row) => row.id).filter(Boolean);
+    for (let index = 0; index < campaignIds.length; index += 100) {
+      const batchResult = await supabase
+        .from("marketing_campaign_batches")
+        .select("id")
+        .in("campaign_id", campaignIds.slice(index, index + 100))
+        .eq("status", "exported");
+      assertSupabase(batchResult, "Could not inspect exported batches.");
+      const batchIds = (batchResult.data || []).map((row) => row.id).filter(Boolean);
+      for (let batchIndex = 0; batchIndex < batchIds.length; batchIndex += 100) {
+        const customerResult = await supabase
+          .from("marketing_campaign_batch_customers")
+          .select("marketing_contacts!inner(customer_id)")
+          .in("batch_id", batchIds.slice(batchIndex, batchIndex + 100));
+        assertSupabase(customerResult, "Could not inspect exported customers.");
+        (customerResult.data || []).forEach((row) => {
+          const contact = Array.isArray(row.marketing_contacts) ? row.marketing_contacts[0] : row.marketing_contacts;
+          const customerId = normalizeCustomerId(contact?.customer_id);
+          if (customerId) ids.add(customerId);
+        });
+      }
+    }
+  } catch (error) {
+    const message = String(error?.message || "").toLowerCase();
+    if (!message.includes("marketing_campaign_batches") && !message.includes("marketing_campaign_batch_customers")) throw error;
+  }
+  return ids;
+}
+
+async function resolveRecipients(supabase, campaign, options = {}) {
+  const rules = campaignAudienceRules(campaign);
+  const alreadySent = options.processed || await loadCurrentSendProcessedIdentities(supabase, campaign.id, assertSupabase);
+  const exportedEmailIds = rules.mode === "never_emailed" ? await loadExportedEmailContactIds(supabase) : new Set();
+  const contactExclusions = await loadCampaignContactExclusions(supabase, rules, campaign.id, assertSupabase);
+  const eligibilityState = createCurrentSendEligibilityState(alreadySent);
+  const recipients = [];
+  let totalMatching = 0;
+  let suppressed = 0;
+  let skippedDuplicate = 0;
+  let invalidEmail = 0;
+  let historyExcluded = 0;
+  let from = 0;
+  while (true) {
+    const result = await applyAudienceFilters(
+      supabase
+        .from("marketing_contacts")
+        .select("id,customer_id,first_name,last_name,company,email,email_normalized,marketing_status,lifecycle_status,email_ready,suppression,pipeline,source,created_at")
+        .order("customer_id", { ascending: true })
+        .order("id", { ascending: true }),
+      rules
+    ).range(from, from + PAGE_SIZE - 1);
+    assertSupabase(result, "Could not resolve campaign recipients.");
+    const rows = result.data || [];
+    const permanentlySuppressed = await loadPermanentSuppressedEmails(
+      supabase,
+      rows.map((row) => row.email_normalized || row.email)
+    );
+    for (const row of rows) {
+      const customerId = normalizeCustomerId(row.customer_id);
+      if (rules.mode === "never_emailed" && exportedEmailIds.has(customerId)) continue;
+      totalMatching += 1;
+      if (matchesCampaignContactExclusion(row, contactExclusions)) {
+        historyExcluded += 1;
+        continue;
+      }
+      const decision = evaluateCurrentSendEligibility(row, { state: eligibilityState, permanentlySuppressedEmails: permanentlySuppressed });
+      const email = decision.email;
+      if (!decision.eligible) {
+        if (decision.reason === "invalid_email") invalidEmail += 1;
+        if (["inactive", "invalid_email", "suppressed"].includes(decision.reason)) suppressed += 1;
+        else skippedDuplicate += 1;
+        continue;
+      }
+      if (!options.limit || recipients.length < options.limit) {
+        recipients.push({
+          id: row.id,
+          customer_id: customerId,
+          email,
+          name: normalizedFullName(row),
+          first_name: row.first_name || "",
+          last_name: row.last_name || "",
+        });
+      }
+    }
+    if (rows.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return {
+    rules,
+    processed: alreadySent,
+    recipients,
+    counts: {
+      matching_count: totalMatching,
+      suppressed_count: suppressed,
+      skipped_duplicate_count: skippedDuplicate,
+      history_excluded_count: historyExcluded,
+      invalid_email_count: invalidEmail,
+      final_eligible_count: Math.max(0, totalMatching - suppressed - skippedDuplicate - historyExcluded),
+      resolved_count: recipients.length,
+    },
+  };
+}
+
+export async function providerStatus(environment = process.env, fetchImpl = globalThis.fetch) {
+  const provider = activeEmailProvider(environment);
+  const status = emailProviderConfigStatus(provider, environment);
+  const config = emailProviderConfig(provider, environment);
+  let connectivity = "not_configured";
+  let message = `${status.provider} is not fully configured.`;
+  if (provider === "sendgrid") {
+    const mailSendConfigured = status.api_key_valid && status.sender_email_configured && Boolean(status.sender_name);
+    connectivity = mailSendConfigured ? "configured" : "not_configured";
+    message = mailSendConfigured
+      ? "Configured for Mail Send. Provider acceptance is confirmed only by an actual controlled send."
+      : status.api_key_configured && !status.api_key_valid
+        ? "SendGrid API key format is not valid."
+        : "SendGrid Mail Send configuration is incomplete.";
+    const safeStatus = { ...status, connectivity, message };
+    return { provider_status: safeStatus, brevo: safeStatus };
+  }
+  if (status.api_key_configured) {
+    const request = provider === "smtp2go"
+      ? {
+          url: "https://api.smtp2go.com/v3/api_keys/permissions",
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Smtp2go-Api-Key": config.apiKey },
+          body: "{}",
+        }
+      : {
+            url: "https://api.brevo.com/v3/account",
+            method: "GET",
+            headers: { "api-key": config.apiKey },
+          };
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      const response = await fetchImpl(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body,
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      connectivity = response.ok ? "authorised" : "rejected";
+      message = response.ok ? `${status.provider} API key authorised.` : `${status.provider} API key was rejected.`;
+    } catch {
+      connectivity = "unreachable";
+      message = `Could not reach ${status.provider} configuration endpoint.`;
+    }
+  }
+  const safeStatus = { ...status, connectivity, message };
+  return { provider_status: safeStatus, brevo: safeStatus };
+}
+
+async function getCampaignProgress(supabase, campaign, sends = []) {
+  const resolved = await resolveRecipients(supabase, campaign);
+  const alreadyProcessed = resolved.processed.uniqueRecipientCount;
+  const eligibleRemaining = resolved.counts.final_eligible_count;
+  const totalAudience = alreadyProcessed + eligibleRemaining;
+  const lastBatch = sends.find((send) => send.send_type === "production" && ["sending", "completed", "partially_failed", "failed"].includes(send.status)) || null;
+  let lastBatchSummary = null;
+
+  if (lastBatch) {
+    const recipientResult = assertSupabase(
+      await supabase
+        .from("marketing_email_send_recipients")
+        .select("status")
+        .eq("send_id", lastBatch.id)
+        .eq("send_type", "production"),
+      "Could not load the latest campaign batch summary."
+    );
+    const recipientRows = recipientResult.data || [];
+    const acceptedStatuses = new Set(["accepted", "sent", "delivered", "opened", "clicked"]);
+    lastBatchSummary = {
+      sent: recipientRows.length,
+      accepted: recipientRows.filter((recipient) => acceptedStatuses.has(recipient.status)).length,
+      failed: Number(lastBatch.failed_count || 0),
+      suppressed: recipientRows.filter((recipient) => recipient.status === "skipped_suppressed").length,
+      completed_at: lastBatch.completed_at || "",
+    };
+  }
+
+  return {
+    total_audience: totalAudience,
+    already_processed: alreadyProcessed,
+    eligible_remaining: eligibleRemaining,
+    progress_percent: totalAudience > 0 ? Math.min(100, Math.round((alreadyProcessed / totalAudience) * 100)) : 0,
+    last_batch: lastBatchSummary,
+  };
+}
+
+async function listSendHistory(supabase, body = {}) {
   const campaign = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
   try {
     const { data } = assertSupabase(
@@ -815,4 +1048,3 @@ export default async function handler(request, response) {
     json(response, status, { ok: false, message: error?.message || "Campaign Sending API error." });
   }
 }
-
