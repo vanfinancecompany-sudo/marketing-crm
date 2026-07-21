@@ -15,6 +15,11 @@ import {
   loadCurrentSendProcessedIdentities,
   loadPermanentCurrentSendSuppressions,
 } from "../lib/marketingCurrentSendEligibility.js";
+import {
+  loadCampaignContactExclusions,
+  matchesCampaignContactExclusion,
+  normalizeCampaignContactControls,
+} from "../lib/marketingCampaignContactControls.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const TEMPLATE_CAMPAIGN_SOURCE = "template_campaign_foundation";
@@ -123,7 +128,8 @@ function normalizeAudienceRules(values = {}) {
   if (mode === "manual_customer_ids" && !manualCustomerIds.length) throw new CampaignValidationError("Enter at least one manual customer ID.");
   if (mode === "custom_search" && !search) throw new CampaignValidationError("Enter a custom search term.");
 
-  return { pipeline, mode, manual_customer_ids: manualCustomerIds, search };
+  const contactControls = normalizeCampaignContactControls(values, (message) => new CampaignValidationError(message));
+  return { pipeline, mode, manual_customer_ids: manualCustomerIds, search, ...contactControls };
 }
 
 function normalizeAudienceSnapshot(value = null) {
@@ -134,13 +140,14 @@ function normalizeAudienceSnapshot(value = null) {
   const totalMatching = Number(counts.total_matching_customers ?? counts.total_matching ?? 0);
   const suppressed = Number(counts.suppressed_customers ?? counts.suppressed ?? 0);
   const skippedDuplicate = Number(counts.skipped_duplicate_customers ?? counts.skipped_duplicate ?? 0);
+  const historyExcluded = Number(counts.history_excluded_customers ?? 0);
   const deliverable = Number(counts.deliverable_customers ?? counts.final_send_count ?? counts.deliverable ?? 0);
   const finalSendCount = Number(counts.final_send_count ?? deliverable);
   const calculatedAt = cleanText(value.calculated_at || "", 80);
-  if (![totalMatching, suppressed, skippedDuplicate, deliverable, finalSendCount].every((number) => Number.isInteger(number) && number >= 0)) {
+  if (![totalMatching, suppressed, skippedDuplicate, historyExcluded, deliverable, finalSendCount].every((number) => Number.isInteger(number) && number >= 0)) {
     throw new CampaignValidationError("Audience counts must be non-negative whole numbers.");
   }
-  if (totalMatching !== suppressed + skippedDuplicate + deliverable || finalSendCount !== deliverable) {
+  if (totalMatching !== suppressed + skippedDuplicate + historyExcluded + deliverable || finalSendCount !== deliverable) {
     throw new CampaignValidationError("Audience counts are inconsistent. Preview the audience again.");
   }
   if (!calculatedAt) throw new CampaignValidationError("Preview the audience before saving it.");
@@ -149,6 +156,7 @@ function normalizeAudienceSnapshot(value = null) {
     total_matching_customers: totalMatching,
     suppressed_customers: suppressed,
     skipped_duplicate_customers: skippedDuplicate,
+    history_excluded_customers: historyExcluded,
     deliverable_customers: deliverable,
     final_send_count: deliverable,
     calculated_at: calculatedAt,
@@ -331,7 +339,9 @@ async function countAudienceByScan(supabase, campaignId, rules, exportedEmailIds
   let suppressed = 0;
   let skippedDuplicate = 0;
   let invalidEmail = 0;
+  let historyExcluded = 0;
   const processed = await loadCurrentSendProcessedIdentities(supabase, campaignId, assertSupabase);
+  const contactExclusions = await loadCampaignContactExclusions(supabase, rules, campaignId, assertSupabase);
   const eligibilityState = createCurrentSendEligibilityState(processed);
   while (true) {
     const result = await applyAudienceFilters(
@@ -344,6 +354,10 @@ async function countAudienceByScan(supabase, campaignId, rules, exportedEmailIds
     rows.forEach((row) => {
       if (rules.mode === "never_emailed" && exportedEmailIds.has(normalizeCustomerId(row.customer_id))) return;
       totalMatching += 1;
+      if (matchesCampaignContactExclusion(row, contactExclusions)) {
+        historyExcluded += 1;
+        return;
+      }
       const decision = evaluateCurrentSendEligibility(row, { state: eligibilityState, permanentlySuppressedEmails: permanentlySuppressed });
       if (decision.eligible) deliverable += 1;
       else if (["previously_processed", "duplicate"].includes(decision.reason)) skippedDuplicate += 1;
@@ -359,6 +373,7 @@ async function countAudienceByScan(supabase, campaignId, rules, exportedEmailIds
     total_matching_customers: totalMatching,
     suppressed_customers: suppressed,
     skipped_duplicate_customers: skippedDuplicate,
+    history_excluded_customers: historyExcluded,
     invalid_email_customers: invalidEmail,
     deliverable_customers: deliverable,
     final_send_count: deliverable,

@@ -7,6 +7,11 @@ import {
   normalizeCurrentSendCustomerId,
   normalizeCurrentSendEmail,
 } from "../lib/marketingCurrentSendEligibility.js";
+import {
+  loadCampaignContactExclusions,
+  matchesCampaignContactExclusion,
+  normalizeCampaignContactControls,
+} from "../lib/marketingCampaignContactControls.js";
 import { createClient } from "@supabase/supabase-js";
 import {
   CampaignValidationError,
@@ -187,7 +192,8 @@ function normalizeAudienceRules(values = {}) {
   }
   if (mode === "manual_customer_ids" && !manualCustomerIds.length) throw new ApiError(400, "Enter at least one manual customer ID.");
   if (mode === "custom_search" && !search) throw new ApiError(400, "Enter a custom search term.");
-  return { pipeline, mode, manual_customer_ids: manualCustomerIds, search };
+  const contactControls = normalizeCampaignContactControls(values, (message) => new ApiError(400, message));
+  return { pipeline, mode, manual_customer_ids: manualCustomerIds, search, ...contactControls };
 }
 
 function recentlyImportedIso() {
@@ -508,12 +514,14 @@ async function resolveRecipients(supabase, campaign, options = {}) {
   const rules = campaignAudienceRules(campaign);
   const alreadySent = options.processed || await loadCurrentSendProcessedIdentities(supabase, campaign.id, assertSupabase);
   const exportedEmailIds = rules.mode === "never_emailed" ? await loadExportedEmailContactIds(supabase) : new Set();
+  const contactExclusions = await loadCampaignContactExclusions(supabase, rules, campaign.id, assertSupabase);
   const eligibilityState = createCurrentSendEligibilityState(alreadySent);
   const recipients = [];
   let totalMatching = 0;
   let suppressed = 0;
   let skippedDuplicate = 0;
   let invalidEmail = 0;
+  let historyExcluded = 0;
   let from = 0;
   while (true) {
     const result = await applyAudienceFilters(
@@ -534,6 +542,10 @@ async function resolveRecipients(supabase, campaign, options = {}) {
       const customerId = normalizeCustomerId(row.customer_id);
       if (rules.mode === "never_emailed" && exportedEmailIds.has(customerId)) continue;
       totalMatching += 1;
+      if (matchesCampaignContactExclusion(row, contactExclusions)) {
+        historyExcluded += 1;
+        continue;
+      }
       const decision = evaluateCurrentSendEligibility(row, { state: eligibilityState, permanentlySuppressedEmails: permanentlySuppressed });
       const email = decision.email;
       if (!decision.eligible) {
@@ -564,8 +576,9 @@ async function resolveRecipients(supabase, campaign, options = {}) {
       matching_count: totalMatching,
       suppressed_count: suppressed,
       skipped_duplicate_count: skippedDuplicate,
+      history_excluded_count: historyExcluded,
       invalid_email_count: invalidEmail,
-      final_eligible_count: Math.max(0, totalMatching - suppressed - skippedDuplicate),
+      final_eligible_count: Math.max(0, totalMatching - suppressed - skippedDuplicate - historyExcluded),
       resolved_count: recipients.length,
     },
   };
@@ -776,10 +789,12 @@ export function requestedBatchSize(value) {
 }
 
 function countsMatch(send, counts) {
+  const totalSkipped = counts.skipped_duplicate_count + counts.history_excluded_count;
   return Number(send.metadata?.matching_count || 0) === counts.matching_count
     && Number(send.eligible_count || 0) === counts.final_eligible_count
     && Number(send.suppressed_count || 0) === counts.suppressed_count
-    && Number(send.skipped_duplicate_count || 0) === counts.skipped_duplicate_count;
+    && Number(send.skipped_duplicate_count || 0) === totalSkipped
+    && Number(send.metadata?.history_excluded_count || 0) === counts.history_excluded_count;
 }
 
 async function prepareProductionSend(supabase, body = {}) {
@@ -793,6 +808,7 @@ async function prepareProductionSend(supabase, body = {}) {
   if (resolved.counts.final_eligible_count <= 0) throw new ApiError(400, "No eligible recipients remain for this campaign.");
   const selectedCount = Math.min(batchSize, resolved.counts.final_eligible_count, MAX_PRODUCTION_BATCH_SIZE);
   const rendered = renderFrozenCampaign(campaign, { test: false, unsubscribeUrl: "{{unsubscribe_url}}" });
+  const totalSkipped = resolved.counts.skipped_duplicate_count + resolved.counts.history_excluded_count;
   const token = randomToken();
   const expiresAt = new Date(Date.now() + PREPARE_TOKEN_TTL_MS).toISOString();
   try {
@@ -807,7 +823,7 @@ async function prepareProductionSend(supabase, body = {}) {
         suppressed_count: resolved.counts.suppressed_count,
         sent_count: 0,
         failed_count: 0,
-        skipped_duplicate_count: resolved.counts.skipped_duplicate_count,
+        skipped_duplicate_count: totalSkipped,
         created_by: cleanText(body.createdBy || "Marketing CRM", 200),
         confirmation_token_hash: tokenHash(token),
         frozen_subject: rendered.subject,
@@ -818,6 +834,7 @@ async function prepareProductionSend(supabase, body = {}) {
           audience_rules: resolved.rules,
           matching_count: resolved.counts.matching_count,
           invalid_email_count: resolved.counts.invalid_email_count,
+          history_excluded_count: resolved.counts.history_excluded_count,
           proposed_batch_size: selectedCount,
           sender_email_configured: emailProviderConfigStatus().sender_email_configured,
           email_provider: selectedProvider,
@@ -833,7 +850,8 @@ async function prepareProductionSend(supabase, body = {}) {
         confirmation_phrase: `SEND ${selectedCount}`,
         matching_count: resolved.counts.matching_count,
         suppressed_count: resolved.counts.suppressed_count,
-        skipped_duplicate_count: resolved.counts.skipped_duplicate_count,
+        skipped_duplicate_count: totalSkipped,
+        history_excluded_count: resolved.counts.history_excluded_count,
         invalid_email_count: resolved.counts.invalid_email_count,
         final_eligible_count: resolved.counts.final_eligible_count,
         proposed_batch_size: selectedCount,
@@ -903,7 +921,7 @@ async function confirmProductionSend(supabase, body = {}) {
   let sentCount = 0;
   let failedCount = 0;
   let unknownCount = 0;
-  let skippedDuplicate = Number(fullRecount.counts.skipped_duplicate_count || 0);
+  let skippedDuplicate = Number(fullRecount.counts.skipped_duplicate_count || 0) + Number(fullRecount.counts.history_excluded_count || 0);
   const failureReasons = [];
 
   for (const recipient of selectedRecipients) {
@@ -993,7 +1011,7 @@ async function confirmProductionSend(supabase, body = {}) {
       failed_count: failedCount,
       skipped_duplicate_count: skippedDuplicate,
       completed_at: completedAt,
-      metadata: { ...(send.metadata || {}), submission_unknown_count: unknownCount, invalid_email_count: fullRecount.counts.invalid_email_count },
+      metadata: { ...(send.metadata || {}), submission_unknown_count: unknownCount, invalid_email_count: fullRecount.counts.invalid_email_count, history_excluded_count: fullRecount.counts.history_excluded_count },
       error_summary: errorParts.join("; "),
     }).eq("id", send.id).select(SEND_COLUMNS).single(),
     "Could not update send audit."

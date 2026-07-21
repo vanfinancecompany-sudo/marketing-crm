@@ -280,6 +280,21 @@
                       <option value="custom_search">Custom search</option>
                     </select>
                   </label>
+                  <label>Do not email contacts reached within
+                    <select id="audienceRecentContactDays">
+                      <option value="0">No recent-contact restriction</option>
+                      <option value="3">Last 3 days</option>
+                      <option value="7">Last 7 days</option>
+                      <option value="14">Last 14 days</option>
+                      <option value="30">Last 30 days</option>
+                      <option value="60">Last 60 days</option>
+                    </select>
+                  </label>
+                  <div class="span-2">
+                    <strong>Exclude recipients of previous campaigns</strong>
+                    <p class="hint">Choose from the four most recent campaigns whose recipients must not receive this one.</p>
+                    <div id="audienceExcludedCampaigns" class="check-list"></div>
+                  </div>
                   <label id="audienceSearchWrap" class="span-2 hidden">Custom search
                     <input id="audienceSearch" placeholder="Name, email, phone, postcode or customer ID" />
                   </label>
@@ -387,6 +402,7 @@
       const state = {
         accessStatus: "checking",
         campaigns: [],
+        exclusionCampaigns: [],
         templates: [],
         selectedCampaign: null,
         previewMode: "desktop",
@@ -509,15 +525,18 @@
 
       async function loadAll() {
         showMessage("");
-        const [listResult, templateResult] = await Promise.all([
+        const [listResult, templateResult, exclusionResult] = await Promise.all([
           api("list", { includeArchived: $("includeArchived").checked }),
           api("templateOptions"),
+          api("list", { includeArchived: true }),
         ]);
         state.campaigns = listResult.campaigns || [];
+        state.exclusionCampaigns = exclusionResult.campaigns || [];
         state.templates = templateResult.templates || [];
         renderStats();
         renderCampaignRows();
         renderTemplateOptions();
+        renderExcludedCampaignOptions();
       }
 
       function filteredCampaigns() {
@@ -586,7 +605,21 @@
           mode: $("audienceMode").value,
           search: $("audienceSearch").value,
           manual_customer_ids: $("manualCustomerIds").value.split(/[\s,;]+/).map((value) => value.trim()).filter(Boolean),
+          recent_contact_days: Number($("audienceRecentContactDays").value || 0),
+          exclude_campaign_ids: Array.from($("audienceExcludedCampaigns").querySelectorAll("input:checked")).map((input) => input.value),
         };
+      }
+
+      function renderExcludedCampaignOptions(selectedIds = []) {
+        const selected = new Set(selectedIds);
+        const currentId = state.selectedCampaign?.id || "";
+        const available = state.exclusionCampaigns.filter((campaign) => campaign.id !== currentId);
+        const selectedCampaigns = available.filter((campaign) => selected.has(campaign.id));
+        const recentCampaigns = available.filter((campaign) => !selected.has(campaign.id));
+        const options = [...selectedCampaigns, ...recentCampaigns].slice(0, 4);
+        $("audienceExcludedCampaigns").innerHTML = options.length
+          ? options.map((campaign) => `<label class="check-row"><span><input type="checkbox" value="${escapeHtml(campaign.id)}" ${selected.has(campaign.id) ? "checked" : ""} /> ${escapeHtml(campaign.name)}</span><small>${escapeHtml(campaign.status)}</small></label>`).join("")
+          : `<div class="empty">No previous campaigns available.</div>`;
       }
 
       function applyAudienceToForm(audience) {
@@ -595,6 +628,8 @@
         $("audienceMode").value = rules.mode || "standard";
         $("audienceSearch").value = rules.search || "";
         $("manualCustomerIds").value = (rules.manual_customer_ids || []).join("\n");
+        $("audienceRecentContactDays").value = String(rules.recent_contact_days ?? (audience?.rules ? 0 : 7));
+        renderExcludedCampaignOptions(rules.exclude_campaign_ids || []);
         renderAudienceModeControls();
       }
 
@@ -617,6 +652,7 @@
           ["Total matching customers", audience.total_matching_customers || 0],
           ["Suppressed customers", audience.suppressed_customers || 0],
           ["Previously processed / duplicates", audience.skipped_duplicate_customers || 0],
+          ["Previous campaigns / recently contacted", audience.history_excluded_customers || 0],
           ["Deliverable customers", audience.deliverable_customers || 0],
           ["Final send count", audience.final_send_count || 0],
         ] : [];
@@ -668,7 +704,8 @@
         renderAudienceCounts(campaign.audience_snapshot);
         renderReadiness(campaign);
         renderSummary(campaign);
-        ["campaignName", "campaignType", "campaignStatus", "subjectLine", "previewText", "saveCampaignButton", "previewAudienceButton", "audiencePipeline", "audienceMode", "audienceSearch", "manualCustomerIds"].forEach((id) => { $(id).disabled = archived; });
+        ["campaignName", "campaignType", "campaignStatus", "subjectLine", "previewText", "saveCampaignButton", "previewAudienceButton", "audiencePipeline", "audienceMode", "audienceSearch", "manualCustomerIds", "audienceRecentContactDays", "audienceExcludedCampaigns"].forEach((id) => { $(id).disabled = archived; });
+        $("audienceExcludedCampaigns").querySelectorAll("input").forEach((input) => { input.disabled = archived; });
         $("archiveCampaignButton").disabled = archived;
         const snapshot = campaign.template_snapshot || {};
         $("snapshotGrid").innerHTML = [
@@ -796,7 +833,7 @@
       $("mobilePreview").addEventListener("click", () => setPreviewMode("mobile"));
       $("togglePreview").addEventListener("click", togglePreview);
       ["searchInput", "typeFilter", "statusFilter"].forEach((id) => $(id).addEventListener("input", renderCampaignRows));
-      ["audiencePipeline", "audienceMode", "audienceSearch", "manualCustomerIds"].forEach((id) => $(id).addEventListener("input", renderAudienceModeControls));
+      ["audiencePipeline", "audienceMode", "audienceSearch", "manualCustomerIds", "audienceRecentContactDays", "audienceExcludedCampaigns"].forEach((id) => $(id).addEventListener("input", renderAudienceModeControls));
       $("includeArchived").addEventListener("change", () => loadAll().catch((error) => showMessage(error.message, true)));
       $("campaignRows").addEventListener("click", (event) => {
         const openId = event.target.dataset.open;

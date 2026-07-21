@@ -334,7 +334,7 @@
     $("preparationSummary").innerHTML = prep ? [
       ["Full eligible audience", prep.final_eligible_count],
       ["Current suppressed count", prep.suppressed_count],
-      ["Previously sent / duplicates", prep.skipped_duplicate_count],
+      ["Previous campaign / recent contact / duplicates", prep.skipped_duplicate_count],
       ["Proposed batch size", prep.proposed_batch_size],
       ["Subject", prep.subject],
       ["HTML hash", String(prep.html_hash || "").slice(0, 12)],
