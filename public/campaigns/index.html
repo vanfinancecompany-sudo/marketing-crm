@@ -303,7 +303,7 @@
                   </label>
                 </div>
                 <div class="toolbar" style="margin-top: 14px;">
-                  <button id="previewAudienceButton">Preview Audience</button>
+                  <button id="previewAudienceButton" class="primary">Apply &amp; Save Audience</button>
                 </div>
                 <div id="audienceCounts" class="audience-counts" style="margin-top: 12px;"></div>
                 <p id="audienceCalculated" class="hint"></p>
@@ -730,10 +730,13 @@
       async function previewAudience() {
         if (!state.selectedCampaign) return;
         const result = await api("audiencePreview", { id: state.selectedCampaign.id, rules: getAudienceFormRules() });
-        state.pendingAudience = result.audience;
-        renderAudienceCounts(state.pendingAudience);
-        renderSummary(state.selectedCampaign);
-        showMessage("Audience preview updated. Save Builder to store these rules.");
+        const saved = await api("update", { id: state.selectedCampaign.id, values: { audience_snapshot: result.audience } });
+        state.selectedCampaign = saved.campaign;
+        state.pendingAudience = null;
+        await loadAll();
+        renderDetail();
+        window.dispatchEvent(new CustomEvent("marketing:campaign-audience-saved", { detail: { campaignId: saved.campaign.id } }));
+        showMessage("Audience rules saved and Campaign Progress refreshed.");
       }
 
       async function saveCampaign() {

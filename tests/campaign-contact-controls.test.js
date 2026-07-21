@@ -102,6 +102,14 @@ test("campaign builder exposes both controls and defaults only brand-new campaig
   assert.match(source, /audience\?\.rules \? 0 : 7/);
   assert.match(source, /exclude_campaign_ids/);
   assert.match(source, /\.slice\(0, 4\)/);
+  assert.match(source, /Apply &amp; Save Audience/);
+  assert.match(source, /marketing:campaign-audience-saved/);
+});
+
+test("saving audience controls refreshes Campaign Progress immediately", () => {
+  const source = fs.readFileSync(new URL("../public/campaigns/sending-foundation.js", import.meta.url), "utf8");
+  assert.match(source, /addEventListener\("marketing:campaign-audience-saved"/);
+  assert.match(source, /refreshSending\(\)/);
 });
 
 test("preview, prepare and confirmed sends all resolve the historical exclusions", () => {
