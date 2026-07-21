@@ -451,6 +451,10 @@
       if (id) renderControlStates();
     }, 1200);
   }
+  window.addEventListener("marketing:campaign-audience-saved", (event) => {
+    if (event.detail?.campaignId !== currentCampaignId()) return;
+    refreshSending().catch((error) => setMessage(error.message, true));
+  });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", observeCampaignChanges);
   else observeCampaignChanges();
 })();
