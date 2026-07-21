@@ -45,6 +45,17 @@ test("Application Received cleanly replaces an absent vehicle section", () => {
   assert.doesNotMatch(email.html, /£99|deposit/i);
 });
 
+test("Application Received uses the Van Finance Company phone number by default", () => {
+  const email = renderApplicationReceivedEmail({
+    lead_id: "lead-default-phone",
+    customer_name: "Jamie Example",
+    customer_email: "jamie@example.com",
+  }, {});
+
+  assert.match(email.html, /0330 133 6376/);
+  assert.match(email.html, /tel:03301336376/);
+});
+
 test("Application Received escapes customer and vehicle content", () => {
   const email = renderApplicationReceivedEmail({
     lead_id: "lead-3",
@@ -56,4 +67,3 @@ test("Application Received escapes customer and vehicle content", () => {
   assert.doesNotMatch(email.html, /<script>/);
   assert.match(email.html, /Transit &lt;Limited&gt;/);
 });
-
