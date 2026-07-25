@@ -673,13 +673,204 @@ textarea {
   background: #fef2f2;
 }
 
+.knowledge-business-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.knowledge-business-section {
+  display: grid;
+  gap: 14px;
+}
+
+.knowledge-business-content {
+  min-height: 170px;
+}
+
+.knowledge-active-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.knowledge-prompt-builder-notice {
+  border-color: #c4b5fd;
+  background: #f5f3ff;
+  color: #5b21b6;
+}
+
+.knowledge-ai-review {
+  display: grid;
+  gap: 18px;
+}
+
+.knowledge-review-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+}
+
+.knowledge-review-summary h4,
+.knowledge-review-findings h4,
+.knowledge-review-recommendations h4 {
+  margin: 0 0 6px;
+}
+
+.knowledge-review-summary p {
+  margin: 0 0 6px;
+  color: #475569;
+}
+
+.knowledge-review-summary small {
+  color: #64748b;
+}
+
+.knowledge-quality-score {
+  width: 102px;
+  height: 102px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  border: 8px solid #cbd5e1;
+  border-radius: 50%;
+  background: #f8fafc;
+}
+
+.knowledge-quality-score strong {
+  font-size: 30px;
+  line-height: 1;
+}
+
+.knowledge-quality-score span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.knowledge-quality-score.is-strong {
+  border-color: #22c55e;
+}
+
+.knowledge-quality-score.is-mixed {
+  border-color: #f59e0b;
+}
+
+.knowledge-quality-score.is-weak {
+  border-color: #ef4444;
+}
+
+.knowledge-review-categories {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.knowledge-review-categories > div {
+  padding: 13px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.knowledge-review-categories > div > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.knowledge-review-categories p,
+.knowledge-review-categories li {
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.knowledge-review-categories ul {
+  padding-left: 18px;
+}
+
+.knowledge-review-meter {
+  height: 7px;
+  margin: 9px 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.knowledge-review-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2563eb;
+}
+
+.knowledge-review-findings {
+  display: grid;
+  gap: 9px;
+}
+
+.knowledge-review-findings > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 9px;
+  padding: 12px;
+  border: 1px solid #fed7aa;
+  border-radius: 12px;
+  background: #fff7ed;
+}
+
+.knowledge-review-findings > div > span {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #ffedd5;
+  color: #9a3412;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.knowledge-review-findings p,
+.knowledge-review-findings small {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.knowledge-review-findings small {
+  color: #64748b;
+}
+
+.knowledge-review-findings .is-high {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.knowledge-review-recommendations {
+  padding: 14px;
+  border-radius: 14px;
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+
+.knowledge-review-recommendations ul {
+  margin-bottom: 0;
+}
+
 @media (max-width: 1000px) {
   .knowledge-stats-grid,
   .knowledge-two-column,
   .knowledge-editor-grid,
   .knowledge-intelligence-grid,
   .knowledge-finder-grid,
-  .knowledge-template-grid {
+  .knowledge-template-grid,
+  .knowledge-business-grid,
+  .knowledge-review-categories {
     grid-template-columns: 1fr 1fr;
   }
 }
@@ -692,8 +883,14 @@ textarea {
   .knowledge-intelligence-grid,
   .knowledge-finder-grid,
   .knowledge-template-grid,
+  .knowledge-business-grid,
+  .knowledge-review-categories,
   .knowledge-coverage-grid,
   .knowledge-breakdown-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .knowledge-review-summary {
     grid-template-columns: 1fr;
   }
 }

@@ -12,13 +12,18 @@ import {
   validateKnowledgeArticle,
 } from "../lib/knowledgeHub.js";
 import {
+  normalizeBusinessKnowledgeSections,
+} from "../lib/businessIntelligence.js";
+import {
   bulkUpdateKnowledgeArticles,
   deleteKnowledgeTopic,
   findKnowledgeTopics,
   generateKnowledgeArticle,
   loadKnowledgeHub,
   requestKnowledgeHub,
+  reviewKnowledgeArticle,
   saveKnowledgeArticle,
+  saveBusinessKnowledgeSection,
   saveKnowledgeTemplate,
   saveKnowledgeTopic,
   saveKnowledgeTopicIdeas,
@@ -30,6 +35,11 @@ import {
   PriorityStars,
   TopicFinderPanel,
 } from "../components/KnowledgeHubV2Panels.jsx";
+import {
+  ArticleQualityScore,
+  BusinessKnowledgeCentre,
+  PromptBuilderNotice,
+} from "../components/KnowledgeHubV3Panels.jsx";
 import {
   MARKETING_ACCESS_DENIED_EVENT,
   clearMarketingAccessKey,
@@ -178,6 +188,10 @@ export default function KnowledgeHubPage() {
   const [templates, setTemplates] = useState([]);
   const [articles, setArticles] = useState([]);
   const [settings, setSettings] = useState(EMPTY_SETTINGS);
+  const [businessSections, setBusinessSections] = useState(() =>
+    normalizeBusinessKnowledgeSections([], EMPTY_SETTINGS)
+  );
+  const [articleReviews, setArticleReviews] = useState([]);
   const [aiConfiguration, setAiConfiguration] = useState(null);
   const [topicForm, setTopicForm] = useState(null);
   const [generationTopic, setGenerationTopic] = useState(null);
@@ -214,7 +228,12 @@ export default function KnowledgeHubPage() {
       setTopics(result.topics || []);
       setTemplates(result.templates || []);
       setArticles(result.articles || []);
-      setSettings({ ...EMPTY_SETTINGS, ...(result.settings || {}) });
+      const loadedSettings = { ...EMPTY_SETTINGS, ...(result.settings || {}) };
+      setSettings(loadedSettings);
+      setBusinessSections(
+        normalizeBusinessKnowledgeSections(result.business_sections || [], loadedSettings)
+      );
+      setArticleReviews(result.article_reviews || []);
       setAiConfiguration(result.ai_configuration || null);
       setAccessStatus("unlocked");
     } catch (loadError) {
@@ -353,6 +372,13 @@ export default function KnowledgeHubPage() {
       }),
     [topics, articles, settings.freshness_days]
   );
+  const latestReviewByArticle = useMemo(() => {
+    const latest = new Map();
+    articleReviews.forEach((review) => {
+      if (!latest.has(review.article_id)) latest.set(review.article_id, review);
+    });
+    return latest;
+  }, [articleReviews]);
 
   async function handleSaveTopic() {
     const duplicates = findKnowledgeTopicDuplicates(topicForm, topics);
@@ -581,6 +607,65 @@ export default function KnowledgeHubPage() {
     }
   }
 
+  function updateBusinessSection(index, field, value) {
+    setBusinessSections((current) =>
+      current.map((section, sectionIndex) =>
+        sectionIndex === index ? { ...section, [field]: value } : section
+      )
+    );
+  }
+
+  async function handleSaveBusinessSection(section) {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await saveBusinessKnowledgeSection(section);
+      setBusinessSections((current) =>
+        current.map((item) =>
+          item.section_key === result.business_section.section_key
+            ? {
+                ...item,
+                ...result.business_section,
+                entryLabel: item.entryLabel,
+              }
+            : item
+        )
+      );
+      setMessage(`${result.business_section.title} saved to Business Intelligence.`);
+    } catch (sectionError) {
+      setError(sectionError.message || "Business Knowledge section could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleReviewArticle() {
+    if (!article?.id || article.status !== "draft") {
+      setError("Only a saved draft can be sent to the AI Reviewer.");
+      return;
+    }
+    if (dirty.current) {
+      setError("Save the draft before running AI Reviewer so it scores the current content.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const result = await reviewKnowledgeArticle(article.id);
+      setArticleReviews((current) => [
+        result.review,
+        ...current.filter((review) => review.id !== result.review.id),
+      ]);
+      setMessage(
+        `AI review saved. Article Quality Score: ${result.review.overall_score}/100. No content was changed.`
+      );
+    } catch (reviewError) {
+      setError(reviewError.message || "AI Reviewer could not score this draft.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleFindTopics() {
     setBusy(true);
     setError("");
@@ -747,9 +832,9 @@ export default function KnowledgeHubPage() {
       <section className="hero-panel">
         <div className="panel__header">
           <div>
-            <div className="eyebrow">Content Intelligence V2</div>
+            <div className="eyebrow">Business Intelligence V3 · Content Intelligence V2</div>
             <h2>Knowledge Hub</h2>
-            <p>Create, review and approve useful customer knowledge articles. Nothing publishes automatically.</p>
+            <p>Build from confirmed business knowledge, review drafts and approve manually. Nothing publishes automatically.</p>
           </div>
           <button
             type="button"
@@ -770,7 +855,8 @@ export default function KnowledgeHubPage() {
           ["topics", "Topic Planner"],
           ["finder", "AI Topic Finder"],
           ["articles", "Article Library"],
-          ["settings", "Business Settings"],
+          ["business", "Business Knowledge"],
+          ["settings", "Settings & Specialists"],
         ].map(([key, label]) => (
           <button
             key={key}
@@ -823,6 +909,7 @@ export default function KnowledgeHubPage() {
                 <button className="button button--primary" onClick={() => { setTopicForm({ ...EMPTY_TOPIC }); setScreen("topics"); }}>New Topic</button>
                 <button className="button button--ghost" onClick={() => navigate("finder")}>Find Topic Ideas</button>
                 <button className="button button--ghost" onClick={() => navigate("articles")}>View Library</button>
+                <button className="button button--ghost" onClick={() => navigate("business")}>Business Knowledge</button>
               </div>
             </div>
           </section>
@@ -912,15 +999,21 @@ export default function KnowledgeHubPage() {
       ) : null}
 
       {screen === "batch" ? (
-        <BatchGenerationPanel
-          topics={topics.filter((topic) => selectedTopicIds.includes(topic.id)).slice(0, 10)}
-          generation={generation}
-          setGeneration={setGeneration}
-          templates={templates}
-          progress={batchProgress}
-          busy={busy}
-          onRun={handleBatchGeneration}
-        />
+        <>
+          <PromptBuilderNotice
+            sections={businessSections}
+            specialist={templates.find((template) => template.key === generation.templateKey)}
+          />
+          <BatchGenerationPanel
+            topics={topics.filter((topic) => selectedTopicIds.includes(topic.id)).slice(0, 10)}
+            generation={generation}
+            setGeneration={setGeneration}
+            templates={templates}
+            progress={batchProgress}
+            busy={busy}
+            onRun={handleBatchGeneration}
+          />
+        </>
       ) : null}
 
       {screen === "generate" && generationTopic ? (
@@ -933,6 +1026,10 @@ export default function KnowledgeHubPage() {
             <Field label="Tone"><input className="field__input" value={generation.tone} onChange={(event) => setGeneration({ ...generation, tone: event.target.value })} /></Field>
             <Field label="Optional instructions" wide><textarea className="field__input" rows={6} value={generation.instructions} onChange={(event) => setGeneration({ ...generation, instructions: event.target.value })} /></Field>
           </div>
+          <PromptBuilderNotice
+            sections={businessSections}
+            specialist={templates.find((template) => template.key === generation.templateKey)}
+          />
           <div className="notice">Generated content always starts as a draft and must be reviewed before approval.</div>
           <div className="card-actions"><button className="button button--primary" disabled={busy} onClick={handleGenerateArticle}>{busy ? "Generating..." : "Generate Draft"}</button><button className="button button--ghost" onClick={() => navigate("topics")}>Cancel</button></div>
         </section>
@@ -947,13 +1044,18 @@ export default function KnowledgeHubPage() {
           <Filters search={search} setSearch={setSearch} category={categoryFilter} setCategory={setCategoryFilter} status={statusFilter} setStatus={setStatusFilter} type={typeFilter} setType={setTypeFilter} articleMode />
           <div className="knowledge-table-wrap">
             <table className="knowledge-table">
-              <thead><tr><th>Select</th><th>Article</th><th>Category / type</th><th>Status</th><th>Updated</th></tr></thead>
+              <thead><tr><th>Select</th><th>Article</th><th>Category / type</th><th>Quality</th><th>Status</th><th>Updated</th></tr></thead>
               <tbody>
                 {filteredArticles.map((item) => (
                   <tr key={item.id}>
                     <td><input type="checkbox" checked={selectedArticleIds.includes(item.id)} onChange={(event) => setSelectedArticleIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /></td>
                     <td><button className="knowledge-title-button" onClick={() => openArticle(item)}>{item.title}</button><small>{item.knowledge_topics?.title || ""}</small></td>
                     <td>{item.category}<small>{item.article_type}</small></td>
+                    <td>
+                      {latestReviewByArticle.has(item.id)
+                        ? `${latestReviewByArticle.get(item.id).overall_score}/100`
+                        : "Not reviewed"}
+                    </td>
                     <td><StatusPill value={item.status} /></td>
                     <td>{formatDate(item.updated_at || item.created_at)}</td>
                   </tr>
@@ -1004,7 +1106,29 @@ export default function KnowledgeHubPage() {
               </div>
             </section>
           )}
+          <ArticleQualityScore
+            review={latestReviewByArticle.get(article.id)}
+            onReview={handleReviewArticle}
+            busy={busy}
+            canReview={article.status === "draft" && !dirty.current}
+            blockedReason={
+              article.status !== "draft"
+                ? "AI Reviewer is available for saved drafts. The approval workflow remains manual."
+                : dirty.current
+                  ? "Save the current draft before reviewing so the score matches the editor."
+                  : ""
+            }
+          />
         </>
+      ) : null}
+
+      {screen === "business" ? (
+        <BusinessKnowledgeCentre
+          sections={businessSections}
+          updateSection={updateBusinessSection}
+          onSave={handleSaveBusinessSection}
+          busy={busy}
+        />
       ) : null}
 
       {screen === "settings" ? (

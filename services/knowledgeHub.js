@@ -49,3 +49,13 @@ export function bulkUpdateKnowledgeArticles(articleIds, status) {
 export function saveKnowledgeTemplate(template) {
   return requestKnowledgeHub("saveTemplate", { template });
 }
+
+export function saveBusinessKnowledgeSection(businessSection) {
+  return requestKnowledgeHub("saveBusinessSection", {
+    business_section: businessSection,
+  });
+}
+
+export function reviewKnowledgeArticle(articleId) {
+  return requestKnowledgeHub("reviewArticle", { article_id: articleId });
+}
