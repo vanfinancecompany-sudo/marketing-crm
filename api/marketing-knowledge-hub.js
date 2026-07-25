@@ -5,8 +5,10 @@ import {
   KNOWLEDGE_CATEGORIES,
   KNOWLEDGE_TOPIC_STATUSES,
   calculateKnowledgeQualityChecks,
+  findKnowledgeTopicDuplicates,
   markdownToKnowledgeHtml,
   parseKnowledgeArticleResponse,
+  parseKnowledgeTopicIdeasResponse,
   validateKnowledgeArticle,
 } from "../lib/knowledgeHub.js";
 
@@ -55,6 +57,38 @@ const ARTICLE_SCHEMA = {
       required: ["fact_review_items"],
       properties: {
         fact_review_items: { type: "array", items: { type: "string" } },
+      },
+    },
+  },
+};
+const TOPIC_IDEAS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["ideas"],
+  properties: {
+    ideas: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "title",
+          "category",
+          "primary_keyword",
+          "secondary_keywords",
+          "intent",
+          "rationale",
+          "priority",
+        ],
+        properties: {
+          title: { type: "string" },
+          category: { type: "string", enum: KNOWLEDGE_CATEGORIES },
+          primary_keyword: { type: "string" },
+          secondary_keywords: { type: "array", items: { type: "string" } },
+          intent: { type: "string" },
+          rationale: { type: "string" },
+          priority: { type: "integer" },
+        },
       },
     },
   },
@@ -132,6 +166,7 @@ function cleanJsonArray(value, maximum = 100) {
 function cleanTopic(value = {}) {
   const category = cleanText(value.category, 80);
   const status = cleanText(value.status || "idea", 30);
+  const priority = Math.min(5, Math.max(1, Number(value.priority) || 3));
   if (!cleanText(value.title, 240)) throw new ApiError(400, "Topic title is required.");
   if (!KNOWLEDGE_CATEGORIES.includes(category)) throw new ApiError(400, "Unsupported topic category.");
   if (!KNOWLEDGE_TOPIC_STATUSES.includes(status)) throw new ApiError(400, "Unsupported topic status.");
@@ -143,6 +178,12 @@ function cleanTopic(value = {}) {
     intent: cleanText(value.intent, 1000) || null,
     notes: cleanText(value.notes, 5000) || null,
     status,
+    priority,
+    source: cleanText(value.source || "manual", 80),
+    finder_metadata:
+      value.finder_metadata && typeof value.finder_metadata === "object"
+        ? value.finder_metadata
+        : {},
     updated_at: new Date().toISOString(),
   };
 }
@@ -236,6 +277,12 @@ Tone: ${generation.tone || settings?.default_tone || template.default_tone || ""
 Approximate length: ${Number(generation.approximateLength || 1000)} words
 Additional instructions: ${generation.instructions || "None"}
 Default CTA: ${settings?.default_cta || ""}
+Business description: ${settings?.business_description || ""}
+Products and services: ${settings?.products_services || ""}
+Confirmed factual guidance: ${settings?.factual_guidance || ""}
+Claims and statements to avoid: ${settings?.prohibited_claims || ""}
+Business target audiences: ${(settings?.target_audiences || []).join(", ")}
+Content goals: ${(settings?.content_goals || []).join(", ")}
 
 Prioritise helpfulness, clarity and factual restraint. Answer a real customer question or intent.
 Do not invent rates, approval guarantees, vehicle availability, prices, legal claims or company
@@ -244,7 +291,13 @@ Avoid keyword stuffing, repeated paragraphs, doorway-page variants and generic f
 Markdown and equivalent clean HTML.`;
 }
 
-async function callKnowledgeAi(input) {
+async function callKnowledgeStructuredAi({
+  input,
+  schema,
+  schemaName,
+  systemInstruction,
+  operationLabel = "content",
+}) {
   const configuration = knowledgeAiConfiguration();
   if (!configuration.configured) {
     const deployment = configuration.deployment_host
@@ -266,17 +319,16 @@ async function callKnowledgeAi(input) {
       input: [
         {
           role: "system",
-          content:
-            "You are a careful UK van-finance knowledge editor. Produce useful, non-spammy content and follow the JSON schema exactly.",
+          content: systemInstruction,
         },
         { role: "user", content: input },
       ],
       text: {
         format: {
           type: "json_schema",
-          name: "knowledge_article",
+          name: schemaName,
           strict: true,
-          schema: ARTICLE_SCHEMA,
+          schema,
         },
       },
     }),
@@ -288,7 +340,10 @@ async function callKnowledgeAi(input) {
       code: result?.error?.code,
       message: result?.error?.message,
     });
-    throw new ApiError(502, "The AI service could not generate the article. Please try again.");
+    throw new ApiError(
+      502,
+      `The AI service could not generate the ${operationLabel}. Please try again.`
+    );
   }
   if (result.status === "incomplete") {
     throw new ApiError(502, "The AI response was incomplete. Please try again.");
@@ -296,12 +351,12 @@ async function callKnowledgeAi(input) {
   const refusal = result.output
     ?.flatMap((item) => item.content || [])
     .find((item) => item.type === "refusal")?.refusal;
-  if (refusal) throw new ApiError(502, "The AI could not generate this article.");
+  if (refusal) throw new ApiError(502, `The AI could not generate the ${operationLabel}.`);
   const output =
     result.output_text ||
     result.output?.flatMap((item) => item.content || []).find((item) => item.type === "output_text")?.text;
-  if (!output) throw new ApiError(502, "The AI returned no structured article.");
-  return parseKnowledgeArticleResponse(output);
+  if (!output) throw new ApiError(502, "The AI returned no structured response.");
+  return output;
 }
 
 async function generateArticle(supabase, body) {
@@ -310,17 +365,42 @@ async function generateArticle(supabase, body) {
   const templateKey = cleanText(body.generation?.templateKey || "faq", 80);
   if (!KNOWLEDGE_ARTICLE_TYPES.includes(templateKey)) throw new ApiError(400, "Unsupported article type.");
 
-  const [topicResult, templateResult, settingsResult] = await Promise.all([
+  const [topicResult, templateResult, settingsResult, existingArticleResult] = await Promise.all([
     supabase.from("knowledge_topics").select("*").eq("id", topicId).single(),
     supabase.from("knowledge_templates").select("*").eq("key", templateKey).eq("active", true).single(),
     supabase.from("knowledge_settings").select("*").eq("settings_key", "default").maybeSingle(),
+    supabase
+      .from("knowledge_articles")
+      .select("id,title,status")
+      .eq("topic_id", topicId)
+      .neq("status", "archived")
+      .limit(1),
   ]);
   const topic = assertResult(topicResult, "Topic could not be found.").data;
   const template = assertResult(templateResult, "Template could not be found.").data;
   assertResult(settingsResult, "Knowledge settings could not be loaded.");
+  assertResult(existingArticleResult, "Existing topic coverage could not be checked.");
+  if (existingArticleResult.data?.length) {
+    throw new ApiError(
+      409,
+      `This topic already has an active article: "${existingArticleResult.data[0].title}".`
+    );
+  }
 
-  const generated = await callKnowledgeAi(
-    generationPrompt({ topic, template, generation: body.generation || {}, settings: settingsResult.data })
+  const generated = parseKnowledgeArticleResponse(
+    await callKnowledgeStructuredAi({
+      input: generationPrompt({
+        topic,
+        template,
+        generation: body.generation || {},
+        settings: settingsResult.data,
+      }),
+      schema: ARTICLE_SCHEMA,
+      schemaName: "knowledge_article",
+      operationLabel: "article",
+      systemInstruction:
+        "You are a careful UK van-finance knowledge editor. Produce useful, non-spammy content and follow the JSON schema exactly.",
+    })
   );
   const article = cleanArticle({
     ...generated,
@@ -349,6 +429,117 @@ async function generateArticle(supabase, body) {
     "The topic status could not be updated."
   );
   return saved;
+}
+
+function topicFinderPrompt({ categories, quantity, settings, topics, articles, brief }) {
+  return `Generate ${quantity} genuinely useful content topic ideas grouped across these categories:
+${categories.join(", ")}.
+
+Business: ${settings?.business_name || "Van Finance Company"}
+Website: ${settings?.website_url || ""}
+Business description: ${settings?.business_description || ""}
+Products and services: ${settings?.products_services || ""}
+Confirmed factual guidance: ${settings?.factual_guidance || ""}
+Claims to avoid: ${settings?.prohibited_claims || ""}
+Target audiences: ${(settings?.target_audiences || []).join(", ") || settings?.default_audience || ""}
+Content goals: ${(settings?.content_goals || []).join(", ")}
+Additional finder brief: ${brief || "Find unanswered, commercially useful customer questions."}
+
+Existing topics to avoid:
+${topics.map((topic) => `- ${topic.title} [${topic.category}]`).join("\n") || "- None"}
+
+Existing articles to avoid duplicating:
+${articles.map((article) => `- ${article.title} [${article.category}]`).join("\n") || "- None"}
+
+Every idea must answer a distinct real customer intent. Avoid near-duplicates, keyword variants,
+doorway pages, generic filler, invented demand data and unsupported business claims. Priority is an
+editorial value from 1 (low) to 5 (highest), based on customer usefulness and missing coverage—not
+an invented search-volume score.`;
+}
+
+async function findTopics(supabase, body) {
+  const categories = cleanStringArray(body.categories, KNOWLEDGE_CATEGORIES.length).filter(
+    (category) => KNOWLEDGE_CATEGORIES.includes(category)
+  );
+  if (!categories.length) throw new ApiError(400, "Select at least one topic category.");
+  const quantity = Math.min(30, Math.max(1, Number(body.quantity) || 12));
+  const [topicsResult, articlesResult, settingsResult] = await Promise.all([
+    supabase
+      .from("knowledge_topics")
+      .select("id,title,category,primary_keyword,secondary_keywords,status")
+      .neq("status", "archived")
+      .limit(200),
+    supabase
+      .from("knowledge_articles")
+      .select("id,title,category,article_type,status")
+      .neq("status", "archived")
+      .limit(200),
+    supabase.from("knowledge_settings").select("*").eq("settings_key", "default").maybeSingle(),
+  ]);
+  [topicsResult, articlesResult, settingsResult].forEach((result) =>
+    assertResult(result, "Topic Finder context could not be loaded.")
+  );
+  const existingTopics = topicsResult.data || [];
+  const parsed = parseKnowledgeTopicIdeasResponse(
+    await callKnowledgeStructuredAi({
+      input: topicFinderPrompt({
+        categories,
+        quantity,
+        settings: settingsResult.data,
+        topics: existingTopics,
+        articles: articlesResult.data || [],
+        brief: cleanText(body.brief, 3000),
+      }),
+      schema: TOPIC_IDEAS_SCHEMA,
+      schemaName: "knowledge_topic_ideas",
+      operationLabel: "topic ideas",
+      systemInstruction:
+        "You are a careful content planner for a UK van business. Produce distinct, useful topic ideas and follow the JSON schema exactly.",
+    })
+  );
+  const accepted = [];
+  let duplicateCount = 0;
+  parsed.forEach((idea) => {
+    const duplicate = findKnowledgeTopicDuplicates(idea, [...existingTopics, ...accepted]);
+    if (duplicate.length) duplicateCount += 1;
+    else if (categories.includes(idea.category) && accepted.length < quantity) accepted.push(idea);
+  });
+  return { ideas: accepted, duplicate_count: duplicateCount };
+}
+
+async function saveTopicIdeas(supabase, ideas) {
+  const existingResult = assertResult(
+    await supabase
+      .from("knowledge_topics")
+      .select("id,title,category,primary_keyword,secondary_keywords,status")
+      .neq("status", "archived"),
+    "Existing topics could not be checked."
+  );
+  const accepted = [];
+  const skipped = [];
+  cleanJsonArray(ideas, 30).forEach((idea) => {
+    const payload = cleanTopic({
+      ...idea,
+      status: "idea",
+      source: "ai_topic_finder",
+      finder_metadata: {
+        rationale: cleanText(idea.rationale, 2000),
+        accepted_at: new Date().toISOString(),
+      },
+    });
+    const duplicate = findKnowledgeTopicDuplicates(payload, [
+      ...(existingResult.data || []),
+      ...accepted,
+    ])[0];
+    if (duplicate) skipped.push({ title: payload.title, duplicate_of: duplicate.topic.title });
+    else accepted.push(payload);
+  });
+  if (!accepted.length) return { topics: [], skipped };
+  const saved = assertResult(
+    await supabase.from("knowledge_topics").insert(accepted).select(),
+    "Selected topic ideas could not be saved."
+  );
+  return { topics: saved.data || [], skipped };
 }
 
 async function saveArticle(supabase, body) {
@@ -390,11 +581,43 @@ async function saveSettings(supabase, settings = {}) {
     default_cta: cleanText(settings.default_cta, 2000),
     default_tone: cleanText(settings.default_tone, 300),
     default_audience: cleanText(settings.default_audience, 300),
+    business_description: cleanText(settings.business_description, 5000),
+    products_services: cleanText(settings.products_services, 10000),
+    factual_guidance: cleanText(settings.factual_guidance, 20000),
+    prohibited_claims: cleanText(settings.prohibited_claims, 10000),
+    target_audiences: cleanStringArray(settings.target_audiences, 30),
+    content_goals: cleanStringArray(settings.content_goals, 30),
+    freshness_days: Math.min(730, Math.max(30, Number(settings.freshness_days) || 180)),
     updated_at: new Date().toISOString(),
   };
   return assertResult(
     await supabase.from("knowledge_settings").upsert(payload, { onConflict: "settings_key" }).select().single(),
     "Knowledge settings could not be saved."
+  ).data;
+}
+
+async function saveTemplate(supabase, template = {}) {
+  const key = cleanText(template.key, 80);
+  if (!KNOWLEDGE_ARTICLE_TYPES.includes(key)) throw new ApiError(400, "Unsupported template.");
+  const payload = {
+    name: cleanText(template.name, 200),
+    description: cleanText(template.description, 2000),
+    prompt: cleanText(template.prompt, 20000),
+    default_tone: cleanText(template.default_tone, 500),
+    default_audience: cleanText(template.default_audience, 500),
+    updated_at: new Date().toISOString(),
+  };
+  if (!payload.name || !payload.prompt) {
+    throw new ApiError(400, "Template name and prompt are required.");
+  }
+  return assertResult(
+    await supabase
+      .from("knowledge_templates")
+      .update(payload)
+      .eq("key", key)
+      .select()
+      .single(),
+    "Template could not be saved."
   ).data;
 }
 
@@ -419,6 +642,12 @@ export default async function handler(request, response) {
       case "deleteTopic":
         data = { topic: await deleteTopic(supabase, body.topic_id) };
         break;
+      case "findTopics":
+        data = { finder: await findTopics(supabase, body) };
+        break;
+      case "saveTopicIdeas":
+        data = { finder: await saveTopicIdeas(supabase, body.ideas) };
+        break;
       case "generateArticle":
         data = { article: await generateArticle(supabase, body) };
         break;
@@ -430,6 +659,9 @@ export default async function handler(request, response) {
         break;
       case "saveSettings":
         data = { settings: await saveSettings(supabase, body.settings) };
+        break;
+      case "saveTemplate":
+        data = { template: await saveTemplate(supabase, body.template) };
         break;
       default:
         throw new ApiError(400, "Unsupported Knowledge Hub action.");

@@ -4,6 +4,7 @@ import {
   KNOWLEDGE_ARTICLE_TYPES,
   KNOWLEDGE_CATEGORIES,
   KNOWLEDGE_TOPIC_STATUSES,
+  buildKnowledgeAnalytics,
   calculateKnowledgeQualityChecks,
   findKnowledgeTopicDuplicates,
   markdownToKnowledgeHtml,
@@ -13,12 +14,22 @@ import {
 import {
   bulkUpdateKnowledgeArticles,
   deleteKnowledgeTopic,
+  findKnowledgeTopics,
   generateKnowledgeArticle,
   loadKnowledgeHub,
   requestKnowledgeHub,
   saveKnowledgeArticle,
+  saveKnowledgeTemplate,
   saveKnowledgeTopic,
+  saveKnowledgeTopicIdeas,
 } from "../services/knowledgeHub.js";
+import {
+  BatchGenerationPanel,
+  BusinessSettingsPanel,
+  ContentIntelligenceDashboard,
+  PriorityStars,
+  TopicFinderPanel,
+} from "../components/KnowledgeHubV2Panels.jsx";
 import {
   MARKETING_ACCESS_DENIED_EVENT,
   clearMarketingAccessKey,
@@ -36,6 +47,8 @@ const EMPTY_TOPIC = {
   intent: "",
   notes: "",
   status: "idea",
+  priority: 3,
+  source: "manual",
 };
 
 const EMPTY_GENERATION = {
@@ -52,6 +65,13 @@ const EMPTY_SETTINGS = {
   default_cta: "View available vans and apply when you are ready.",
   default_tone: "Helpful, clear and factual",
   default_audience: "UK van buyers",
+  business_description: "",
+  products_services: "",
+  factual_guidance: "",
+  prohibited_claims: "",
+  target_audiences: [],
+  content_goals: [],
+  freshness_days: 180,
 };
 
 function formatDate(value) {
@@ -113,6 +133,8 @@ function Filters({
   setStatus,
   type,
   setType,
+  priority,
+  setPriority,
   articleMode = false,
 }) {
   return (
@@ -138,7 +160,12 @@ function Filters({
           <option value="all">All article types</option>
           {KNOWLEDGE_ARTICLE_TYPES.map((item) => <option key={item}>{item}</option>)}
         </select>
-      ) : null}
+      ) : (
+        <select className="field__input" value={priority} onChange={(event) => setPriority(event.target.value)}>
+          <option value="all">All priorities</option>
+          {[5, 4, 3, 2, 1].map((item) => <option value={item} key={item}>{item} star{item === 1 ? "" : "s"}</option>)}
+        </select>
+      )}
     </div>
   );
 }
@@ -164,7 +191,16 @@ export default function KnowledgeHubPage() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [priorityFilter, setPriorityFilter] = useState("all");
+  const [selectedTopicIds, setSelectedTopicIds] = useState([]);
   const [selectedArticleIds, setSelectedArticleIds] = useState([]);
+  const [finderCategories, setFinderCategories] = useState(["Van Finance", "Rent2Buy"]);
+  const [finderQuantity, setFinderQuantity] = useState(12);
+  const [finderBrief, setFinderBrief] = useState("");
+  const [finderIdeas, setFinderIdeas] = useState([]);
+  const [finderSelectedIndexes, setFinderSelectedIndexes] = useState([]);
+  const [finderDuplicateCount, setFinderDuplicateCount] = useState(0);
+  const [batchProgress, setBatchProgress] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -268,6 +304,7 @@ export default function KnowledgeHubPage() {
     setCategoryFilter("all");
     setStatusFilter("all");
     setTypeFilter("all");
+    setPriorityFilter("all");
   }
 
   function navigate(nextScreen) {
@@ -287,9 +324,10 @@ export default function KnowledgeHubPage() {
       (topic) =>
         (categoryFilter === "all" || topic.category === categoryFilter) &&
         (statusFilter === "all" || topic.status === statusFilter) &&
+        (priorityFilter === "all" || Number(topic.priority || 3) === Number(priorityFilter)) &&
         `${topic.title} ${topic.primary_keyword || ""}`.toLowerCase().includes(term)
-    );
-  }, [topics, search, categoryFilter, statusFilter]);
+    ).sort((first, second) => Number(second.priority || 3) - Number(first.priority || 3));
+  }, [topics, search, categoryFilter, statusFilter, priorityFilter]);
 
   const filteredArticles = useMemo(() => {
     const term = search.toLowerCase();
@@ -305,6 +343,16 @@ export default function KnowledgeHubPage() {
           .includes(term)
     );
   }, [articles, search, categoryFilter, statusFilter, typeFilter]);
+
+  const analytics = useMemo(
+    () =>
+      buildKnowledgeAnalytics({
+        topics,
+        articles,
+        freshnessDays: settings.freshness_days,
+      }),
+    [topics, articles, settings.freshness_days]
+  );
 
   async function handleSaveTopic() {
     const duplicates = findKnowledgeTopicDuplicates(topicForm, topics);
@@ -354,6 +402,13 @@ export default function KnowledgeHubPage() {
   }
 
   function beginGeneration(topic) {
+    const existingArticle = articles.find(
+      (item) => item.topic_id === topic.id && item.status !== "archived"
+    );
+    if (existingArticle) {
+      setError(`This topic already has an active article: "${existingArticle.title}".`);
+      return;
+    }
     const duplicates = findKnowledgeTopicDuplicates(topic, topics).filter(
       (match) => match.topic.id !== topic.id
     );
@@ -494,12 +549,174 @@ export default function KnowledgeHubPage() {
     try {
       const result = await requestKnowledgeHub("saveSettings", { settings });
       setSettings({ ...EMPTY_SETTINGS, ...result.settings });
-      setMessage("Knowledge Hub settings saved.");
+      setMessage("Business Settings saved.");
     } catch (saveError) {
       setError(saveError.message || "Knowledge Hub settings could not be saved.");
     } finally {
       setBusy(false);
     }
+  }
+
+  function updateTemplate(index, field, value) {
+    setTemplates((current) =>
+      current.map((template, templateIndex) =>
+        templateIndex === index ? { ...template, [field]: value } : template
+      )
+    );
+  }
+
+  async function handleSaveTemplate(template) {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await saveKnowledgeTemplate(template);
+      setTemplates((current) =>
+        current.map((item) => (item.key === result.template.key ? result.template : item))
+      );
+      setMessage(`${result.template.name} saved.`);
+    } catch (templateError) {
+      setError(templateError.message || "Specialist template could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleFindTopics() {
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const result = await findKnowledgeTopics(
+        finderCategories,
+        Number(finderQuantity),
+        finderBrief
+      );
+      const ideas = result.finder.ideas || [];
+      setFinderIdeas(ideas);
+      setFinderSelectedIndexes(ideas.map((_, index) => index));
+      setFinderDuplicateCount(result.finder.duplicate_count || 0);
+      if (!ideas.length) setMessage("No distinct topic gaps were returned. Try a narrower brief.");
+    } catch (finderError) {
+      setError(finderError.message || "AI Topic Finder could not generate suggestions.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function updateFinderIdea(index, field, value) {
+    setFinderIdeas((current) =>
+      current.map((idea, ideaIndex) =>
+        ideaIndex === index ? { ...idea, [field]: value } : idea
+      )
+    );
+  }
+
+  async function handleSaveTopicIdeas() {
+    const selected = finderIdeas.filter((_, index) => finderSelectedIndexes.includes(index));
+    if (!selected.length) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await saveKnowledgeTopicIdeas(selected);
+      setTopics((current) => [...(result.finder.topics || []), ...current]);
+      setFinderIdeas([]);
+      setFinderSelectedIndexes([]);
+      const skipped = result.finder.skipped?.length || 0;
+      setMessage(
+        `${result.finder.topics?.length || 0} topic idea(s) saved${
+          skipped ? `; ${skipped} duplicate(s) skipped` : ""
+        }.`
+      );
+    } catch (saveError) {
+      setError(saveError.message || "Selected topic ideas could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function beginBatchGeneration() {
+    const requested = topics.filter((topic) => selectedTopicIds.includes(topic.id));
+    const eligible = requested.filter(
+      (topic) =>
+        !articles.some(
+          (item) => item.topic_id === topic.id && item.status !== "archived"
+        )
+    );
+    const selected = eligible.slice(0, 10);
+    if (!selected.length) {
+      setError("Every selected topic already has an active article.");
+      return;
+    }
+    const notes = [];
+    if (eligible.length < requested.length) notes.push("topics with an active article were excluded");
+    if (eligible.length > 10) notes.push("the batch was limited to the first 10 eligible topics");
+    setMessage(notes.length ? `${notes.join("; ")}.` : "");
+    setSelectedTopicIds(selected.map((topic) => topic.id));
+    setGeneration({
+      ...EMPTY_GENERATION,
+      templateKey: templates.some((template) => template.key === "faq")
+        ? "faq"
+        : templates[0]?.key || "faq",
+      targetAudience: settings.default_audience || EMPTY_GENERATION.targetAudience,
+      tone: settings.default_tone || EMPTY_GENERATION.tone,
+    });
+    setBatchProgress(
+      selected.map((topic) => ({ topic_id: topic.id, status: "waiting", message: "Waiting" }))
+    );
+    setScreen("batch");
+    setError("");
+  }
+
+  async function handleBatchGeneration() {
+    const selected = topics
+      .filter((topic) => selectedTopicIds.includes(topic.id))
+      .slice(0, 10);
+    setBusy(true);
+    setError("");
+    let completed = 0;
+    let failed = 0;
+    for (const topic of selected) {
+      setBatchProgress((current) =>
+        current.map((item) =>
+          item.topic_id === topic.id
+            ? { ...item, status: "running", message: "Generating..." }
+            : item
+        )
+      );
+      try {
+        const result = await generateKnowledgeArticle(topic, generation);
+        const generated = result.article;
+        completed += 1;
+        setArticles((current) => [generated, ...current]);
+        setTopics((current) =>
+          current.map((item) =>
+            item.id === topic.id ? { ...item, status: "generated" } : item
+          )
+        );
+        setBatchProgress((current) =>
+          current.map((item) =>
+            item.topic_id === topic.id
+              ? { ...item, status: "complete", message: "Draft saved" }
+              : item
+          )
+        );
+      } catch (batchError) {
+        failed += 1;
+        setBatchProgress((current) =>
+          current.map((item) =>
+            item.topic_id === topic.id
+              ? {
+                  ...item,
+                  status: "failed",
+                  message: batchError.message || "Generation failed",
+                }
+              : item
+          )
+        );
+      }
+    }
+    setBusy(false);
+    setMessage(`${completed} draft(s) generated${failed ? `; ${failed} failed` : ""}.`);
   }
 
   if (accessStatus !== "unlocked") {
@@ -530,7 +747,7 @@ export default function KnowledgeHubPage() {
       <section className="hero-panel">
         <div className="panel__header">
           <div>
-            <div className="eyebrow">AI Knowledge Engine V1</div>
+            <div className="eyebrow">Content Intelligence V2</div>
             <h2>Knowledge Hub</h2>
             <p>Create, review and approve useful customer knowledge articles. Nothing publishes automatically.</p>
           </div>
@@ -550,9 +767,10 @@ export default function KnowledgeHubPage() {
       <div className="knowledge-tabs">
         {[
           ["dashboard", "Dashboard"],
-          ["topics", "Topic Library"],
+          ["topics", "Topic Planner"],
+          ["finder", "AI Topic Finder"],
           ["articles", "Article Library"],
-          ["settings", "Settings"],
+          ["settings", "Business Settings"],
         ].map(([key, label]) => (
           <button
             key={key}
@@ -603,19 +821,27 @@ export default function KnowledgeHubPage() {
               <div className="panel__header"><div><h3>Quick actions</h3><p>Start the next content task.</p></div></div>
               <div className="knowledge-quick-actions">
                 <button className="button button--primary" onClick={() => { setTopicForm({ ...EMPTY_TOPIC }); setScreen("topics"); }}>New Topic</button>
-                <button className="button button--ghost" onClick={() => navigate("topics")}>Generate Article</button>
+                <button className="button button--ghost" onClick={() => navigate("finder")}>Find Topic Ideas</button>
                 <button className="button button--ghost" onClick={() => navigate("articles")}>View Library</button>
               </div>
             </div>
           </section>
+          <ContentIntelligenceDashboard
+            analytics={analytics}
+            onOpenArticle={openArticle}
+            onNavigate={navigate}
+          />
         </>
       ) : null}
 
       {screen === "topics" ? (
         <section className="panel">
           <div className="panel__header">
-            <div><h3>Topic Library</h3><p>Create real customer questions and useful article intents.</p></div>
-            <button className="button button--primary" onClick={() => setTopicForm({ ...EMPTY_TOPIC })}>New Topic</button>
+            <div><h3>Topic Planner</h3><p>The V1 Topic Library with priorities, coverage planning and safe draft generation.</p></div>
+            <div className="card-actions">
+              <button className="button button--primary" onClick={() => setTopicForm({ ...EMPTY_TOPIC })}>New Topic</button>
+              <button className="button button--ghost" disabled={!selectedTopicIds.length || busy} onClick={beginBatchGeneration}>Batch Generate</button>
+            </div>
           </div>
           {topicForm ? (
             <>
@@ -626,6 +852,7 @@ export default function KnowledgeHubPage() {
                 <Field label="Secondary keywords"><input className="field__input" value={(topicForm.secondary_keywords || []).join(", ")} onChange={(event) => setTopicForm({ ...topicForm, secondary_keywords: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></Field>
                 <Field label="Customer/search intent"><input className="field__input" value={topicForm.intent || ""} onChange={(event) => setTopicForm({ ...topicForm, intent: event.target.value })} /></Field>
                 <Field label="Status"><select className="field__input" value={topicForm.status} onChange={(event) => setTopicForm({ ...topicForm, status: event.target.value })}>{KNOWLEDGE_TOPIC_STATUSES.map((item) => <option key={item}>{item}</option>)}</select></Field>
+                <Field label="Priority"><PriorityStars value={topicForm.priority || 3} onChange={(priority) => setTopicForm({ ...topicForm, priority })} /></Field>
                 <Field label="Notes" wide><textarea className="field__input" rows={5} value={topicForm.notes || ""} onChange={(event) => setTopicForm({ ...topicForm, notes: event.target.value })} /></Field>
               </div>
               <div className="card-actions">
@@ -635,14 +862,16 @@ export default function KnowledgeHubPage() {
             </>
           ) : (
             <>
-              <Filters search={search} setSearch={setSearch} category={categoryFilter} setCategory={setCategoryFilter} status={statusFilter} setStatus={setStatusFilter} type={typeFilter} setType={setTypeFilter} />
+              <Filters search={search} setSearch={setSearch} category={categoryFilter} setCategory={setCategoryFilter} status={statusFilter} setStatus={setStatusFilter} type={typeFilter} setType={setTypeFilter} priority={priorityFilter} setPriority={setPriorityFilter} />
               <div className="knowledge-table-wrap">
                 <table className="knowledge-table">
-                  <thead><tr><th>Topic</th><th>Category</th><th>Keyword / intent</th><th>Status</th><th>Actions</th></tr></thead>
+                  <thead><tr><th>Select</th><th>Topic</th><th>Priority</th><th>Category</th><th>Keyword / intent</th><th>Status</th><th>Actions</th></tr></thead>
                   <tbody>
                     {filteredTopics.map((topic) => (
                       <tr key={topic.id}>
-                        <td><strong>{topic.title}</strong></td>
+                        <td><input type="checkbox" checked={selectedTopicIds.includes(topic.id)} onChange={(event) => setSelectedTopicIds((current) => event.target.checked ? [...new Set([...current, topic.id])] : current.filter((id) => id !== topic.id))} /></td>
+                        <td><strong>{topic.title}</strong><small>{topic.source === "ai_topic_finder" ? "AI Topic Finder" : "Manual"}</small></td>
+                        <td><PriorityStars value={topic.priority || 3} readOnly /></td>
                         <td>{topic.category}</td>
                         <td>{topic.primary_keyword || "-"}<small>{topic.intent || ""}</small></td>
                         <td><StatusPill value={topic.status} /></td>
@@ -655,6 +884,43 @@ export default function KnowledgeHubPage() {
             </>
           )}
         </section>
+      ) : null}
+
+      {screen === "finder" ? (
+        <TopicFinderPanel
+          categories={finderCategories}
+          setCategories={setFinderCategories}
+          quantity={finderQuantity}
+          setQuantity={setFinderQuantity}
+          brief={finderBrief}
+          setBrief={setFinderBrief}
+          ideas={finderIdeas}
+          selectedIndexes={finderSelectedIndexes}
+          toggleSelected={(index) =>
+            setFinderSelectedIndexes((current) =>
+              current.includes(index)
+                ? current.filter((item) => item !== index)
+                : [...current, index]
+            )
+          }
+          updateIdea={updateFinderIdea}
+          onFind={handleFindTopics}
+          onSave={handleSaveTopicIdeas}
+          busy={busy}
+          duplicateCount={finderDuplicateCount}
+        />
+      ) : null}
+
+      {screen === "batch" ? (
+        <BatchGenerationPanel
+          topics={topics.filter((topic) => selectedTopicIds.includes(topic.id)).slice(0, 10)}
+          generation={generation}
+          setGeneration={setGeneration}
+          templates={templates}
+          progress={batchProgress}
+          busy={busy}
+          onRun={handleBatchGeneration}
+        />
       ) : null}
 
       {screen === "generate" && generationTopic ? (
@@ -742,17 +1008,15 @@ export default function KnowledgeHubPage() {
       ) : null}
 
       {screen === "settings" ? (
-        <section className="panel knowledge-form-panel">
-          <div className="panel__header"><div><h3>Knowledge Hub Settings</h3><p>Defaults used by article generation. Existing marketing/customer settings are not changed.</p></div></div>
-          <div className="field-grid">
-            <Field label="Business name"><input className="field__input" value={settings.business_name || ""} onChange={(event) => setSettings({ ...settings, business_name: event.target.value })} /></Field>
-            <Field label="Website URL"><input className="field__input" value={settings.website_url || ""} onChange={(event) => setSettings({ ...settings, website_url: event.target.value })} /></Field>
-            <Field label="Default tone"><input className="field__input" value={settings.default_tone || ""} onChange={(event) => setSettings({ ...settings, default_tone: event.target.value })} /></Field>
-            <Field label="Default audience"><input className="field__input" value={settings.default_audience || ""} onChange={(event) => setSettings({ ...settings, default_audience: event.target.value })} /></Field>
-            <Field label="Default CTA" wide><textarea className="field__input" rows={4} value={settings.default_cta || ""} onChange={(event) => setSettings({ ...settings, default_cta: event.target.value })} /></Field>
-          </div>
-          <div className="card-actions"><button className="button button--primary" disabled={busy} onClick={handleSaveSettings}>{busy ? "Saving..." : "Save Settings"}</button></div>
-        </section>
+        <BusinessSettingsPanel
+          settings={settings}
+          setSettings={setSettings}
+          templates={templates}
+          updateTemplate={updateTemplate}
+          onSaveSettings={handleSaveSettings}
+          onSaveTemplate={handleSaveTemplate}
+          busy={busy}
+        />
       ) : null}
     </div>
   );

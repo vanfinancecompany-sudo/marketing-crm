@@ -3,8 +3,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   calculateKnowledgeQualityChecks,
+  buildKnowledgeAnalytics,
+  findKnowledgeArticleDuplicates,
   findKnowledgeTopicDuplicates,
   parseKnowledgeArticleResponse,
+  parseKnowledgeTopicIdeasResponse,
   validateKnowledgeArticle,
 } from "../lib/knowledgeHub.js";
 import knowledgeHubHandler, {
@@ -51,6 +54,77 @@ test("topic duplicate protection detects exact and obvious near matches", () => 
     )[0].topic.id,
     "topic-1"
   );
+  assert.equal(
+    findKnowledgeTopicDuplicates(
+      { title: "Vehicle inspection checklist" },
+      [{ title: "Vehicle inspection checklist" }]
+    )[0].exact,
+    true
+  );
+});
+
+test("Topic Finder parser validates and normalises structured suggestions", () => {
+  const ideas = parseKnowledgeTopicIdeasResponse({
+    ideas: [
+      {
+        title: "What documents do self-employed van buyers need?",
+        category: "Self Employed",
+        primary_keyword: "self employed van finance documents",
+        secondary_keywords: ["proof of income"],
+        intent: "Prepare for an application",
+        rationale: "Closes a practical preparation gap.",
+        priority: 5,
+      },
+    ],
+  });
+  assert.equal(ideas.length, 1);
+  assert.equal(ideas[0].priority, 5);
+  assert.equal(ideas[0].source, "ai_topic_finder");
+  assert.throws(
+    () => parseKnowledgeTopicIdeasResponse({ wrong: [] }),
+    /structured topic ideas/
+  );
+});
+
+test("content intelligence analytics explain quality, freshness, duplicates and gaps", () => {
+  const topics = [
+    { id: "t1", title: "Van finance explained", category: "Van Finance", priority: 5, status: "ready" },
+    { id: "t2", title: "Van finance explained guide", category: "Van Finance", priority: 4, status: "idea" },
+  ];
+  const articles = [
+    {
+      ...validArticle,
+      id: "a1",
+      topic_id: "t1",
+      category: "Van Finance",
+      article_type: "finance-guide",
+      status: "approved",
+      updated_at: "2025-01-01T00:00:00.000Z",
+      quality_checks: [{ key: "cta", label: "CTA", pass: false }],
+    },
+    {
+      ...validArticle,
+      id: "a2",
+      topic_id: "t2",
+      title: "How van finance works guide",
+      category: "Van Finance",
+      article_type: "finance-guide",
+      status: "draft",
+      quality_checks: [{ key: "cta", label: "CTA", pass: true }],
+    },
+  ];
+  const analytics = buildKnowledgeAnalytics({
+    topics,
+    articles,
+    freshnessDays: 180,
+    now: new Date("2026-07-25T00:00:00.000Z"),
+  });
+  assert.equal(analytics.by_status.approved, 1);
+  assert.equal(analytics.by_template["finance-guide"], 2);
+  assert.equal(analytics.quality.pass_rate, 50);
+  assert.equal(analytics.freshness.stale_articles.length, 1);
+  assert.equal(analytics.missing_coverage.some((item) => item.category === "Rent2Buy"), true);
+  assert.equal(findKnowledgeArticleDuplicates(articles).length > 0, true);
 });
 
 test("article validation and transparent quality checks expose warnings", () => {
@@ -116,6 +190,11 @@ test("route, sidebar and page expose the complete Knowledge Hub workflow", () =>
     "utf8"
   );
   const page = readFileSync(new URL("../pages/KnowledgeHubPage.jsx", import.meta.url), "utf8");
+  const panels = readFileSync(
+    new URL("../components/KnowledgeHubV2Panels.jsx", import.meta.url),
+    "utf8"
+  );
+  const workflow = `${page}\n${panels}`;
   assert.match(app, /"Knowledge Hub": "\/knowledge-hub"/);
   assert.match(app, /case "Knowledge Hub"/);
   assert.match(navigation, /label: "Knowledge Hub"/);
@@ -127,12 +206,80 @@ test("route, sidebar and page expose the complete Knowledge Hub workflow", () =>
     "Quality checklist",
     "Approve Selected",
     "Archive Selected",
-    "Knowledge Hub Settings",
+    "Business Settings",
   ]) {
-    assert.match(page, new RegExp(label));
+    assert.match(workflow, new RegExp(label));
   }
   assert.match(page, /MARKETING_ACCESS_DENIED_EVENT/);
   assert.match(page, /validateMarketingAccessKey/);
+});
+
+test("Knowledge Hub V2 exposes planning, Topic Finder, batch drafts, settings and analytics", () => {
+  const page = readFileSync(new URL("../pages/KnowledgeHubPage.jsx", import.meta.url), "utf8");
+  const panels = readFileSync(
+    new URL("../components/KnowledgeHubV2Panels.jsx", import.meta.url),
+    "utf8"
+  );
+  const api = readFileSync(
+    new URL("../api/marketing-knowledge-hub.js", import.meta.url),
+    "utf8"
+  );
+  const combined = `${page}\n${panels}\n${api}`;
+  for (const label of [
+    "Content Intelligence V2",
+    "Topic Planner",
+    "AI Topic Finder",
+    "Batch Article Generation",
+    "Business Settings",
+    "Specialist AI Prompt Templates",
+    "Quality pass rate",
+    "Freshness",
+    "Duplicate review",
+    "Missing coverage",
+  ]) {
+    assert.match(combined, new RegExp(label));
+  }
+  assert.match(page, /for \(const topic of selected\)/);
+  assert.match(api, /case "findTopics"/);
+  assert.match(api, /case "saveTopicIdeas"/);
+  assert.match(api, /case "saveTemplate"/);
+  assert.doesNotMatch(api, /case "publish/i);
+});
+
+test("V2 migration is additive and installs priorities, settings and specialist templates", () => {
+  const migration = readFileSync(
+    new URL(
+      "../supabase/migrations/017_knowledge_hub_v2_content_intelligence.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  assert.match(migration, /alter table public\.knowledge_topics/);
+  assert.match(migration, /add column if not exists priority/);
+  assert.match(migration, /alter table public\.knowledge_settings/);
+  for (const field of [
+    "business_description",
+    "products_services",
+    "factual_guidance",
+    "prohibited_claims",
+    "target_audiences",
+    "content_goals",
+    "freshness_days",
+  ]) {
+    assert.match(migration, new RegExp(`add column if not exists ${field}`));
+  }
+  for (const key of [
+    "finance-guide",
+    "rent2buy-guide",
+    "vehicle-review",
+    "comparison",
+    "buying-guide",
+    "faq",
+  ]) {
+    assert.match(migration, new RegExp(`'${key}'`));
+  }
+  assert.doesNotMatch(migration, /create policy/i);
+  assert.doesNotMatch(migration, /marketing_contacts|marketing_campaigns|vehicle_stock/i);
 });
 
 test("migration is additive, private and seeds all seven templates", () => {
