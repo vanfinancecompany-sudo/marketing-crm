@@ -13,8 +13,8 @@ import {
 } from "../lib/knowledgeHub.js";
 import {
   BUSINESS_KNOWLEDGE_SECTION_KEYS,
+  buildAiPlatformPrompt,
   buildBusinessIntelligencePrompt,
-  businessKnowledgeContext,
   parseKnowledgeArticleReviewResponse,
 } from "../lib/businessIntelligence.js";
 
@@ -85,6 +85,11 @@ const TOPIC_IDEAS_SCHEMA = {
           "intent",
           "rationale",
           "priority",
+          "estimated_value",
+          "difficulty",
+          "target_persona",
+          "seasonal",
+          "opportunity_reason",
         ],
         properties: {
           title: { type: "string" },
@@ -94,6 +99,11 @@ const TOPIC_IDEAS_SCHEMA = {
           intent: { type: "string" },
           rationale: { type: "string" },
           priority: { type: "integer" },
+          estimated_value: { type: "integer" },
+          difficulty: { type: "integer" },
+          target_persona: { type: "string" },
+          seasonal: { type: "boolean" },
+          opportunity_reason: { type: "string" },
         },
       },
     },
@@ -128,17 +138,25 @@ const ARTICLE_REVIEW_SCHEMA = {
       additionalProperties: false,
       required: [
         "brand_consistency",
+        "vocabulary",
         "readability",
         "seo",
         "cta_quality",
         "compliance",
+        "repetition",
+        "generic_wording",
+        "hallucination_risk",
       ],
       properties: {
         brand_consistency: REVIEW_CATEGORY_SCHEMA,
+        vocabulary: REVIEW_CATEGORY_SCHEMA,
         readability: REVIEW_CATEGORY_SCHEMA,
         seo: REVIEW_CATEGORY_SCHEMA,
         cta_quality: REVIEW_CATEGORY_SCHEMA,
         compliance: REVIEW_CATEGORY_SCHEMA,
+        repetition: REVIEW_CATEGORY_SCHEMA,
+        generic_wording: REVIEW_CATEGORY_SCHEMA,
+        hallucination_risk: REVIEW_CATEGORY_SCHEMA,
       },
     },
     strengths: { type: "array", items: { type: "string" } },
@@ -153,10 +171,14 @@ const ARTICLE_REVIEW_SCHEMA = {
             type: "string",
             enum: [
               "brand_consistency",
+              "vocabulary",
               "readability",
               "seo",
               "cta_quality",
               "compliance",
+              "repetition",
+              "generic_wording",
+              "hallucination_risk",
             ],
           },
           severity: { type: "string", enum: ["low", "medium", "high"] },
@@ -242,6 +264,8 @@ function cleanTopic(value = {}) {
   const category = cleanText(value.category, 80);
   const status = cleanText(value.status || "idea", 30);
   const priority = Math.min(5, Math.max(1, Number(value.priority) || 3));
+  const estimatedValue = Math.min(5, Math.max(1, Number(value.estimated_value) || 3));
+  const difficulty = Math.min(5, Math.max(1, Number(value.difficulty) || 3));
   if (!cleanText(value.title, 240)) throw new ApiError(400, "Topic title is required.");
   if (!KNOWLEDGE_CATEGORIES.includes(category)) throw new ApiError(400, "Unsupported topic category.");
   if (!KNOWLEDGE_TOPIC_STATUSES.includes(status)) throw new ApiError(400, "Unsupported topic status.");
@@ -254,6 +278,11 @@ function cleanTopic(value = {}) {
     notes: cleanText(value.notes, 5000) || null,
     status,
     priority,
+    estimated_value: estimatedValue,
+    difficulty,
+    target_persona: cleanText(value.target_persona, 500),
+    seasonal: Boolean(value.seasonal),
+    opportunity_reason: cleanText(value.opportunity_reason, 3000),
     source: cleanText(value.source || "manual", 80),
     finder_metadata:
       value.finder_metadata && typeof value.finder_metadata === "object"
@@ -516,11 +545,14 @@ function topicFinderPrompt({
   articles,
   brief,
 }) {
-  return `Generate ${quantity} genuinely useful content topic ideas grouped across these categories:
-${categories.join(", ")}.
-
-# Business Intelligence
-${businessKnowledgeContext(businessSections, settings)}
+  const assembled = buildAiPlatformPrompt({
+    sections: businessSections,
+    settings,
+    task: "topic_finder",
+    module: "topic_planner",
+    requestedTask: `Generate ${quantity} genuinely useful content topic ideas grouped across these categories: ${categories.join(", ")}.`,
+  });
+  return `${assembled.prompt}
 
 Additional finder brief: ${brief || "Find unanswered, commercially useful customer questions."}
 
@@ -533,7 +565,8 @@ ${articles.map((article) => `- ${article.title} [${article.category}]`).join("\n
 Every idea must answer a distinct real customer intent. Avoid near-duplicates, keyword variants,
 doorway pages, generic filler, invented demand data and unsupported business claims. Priority is an
 editorial value from 1 (low) to 5 (highest), based on customer usefulness and missing coverage—not
-an invented search-volume score.`;
+an invented search-volume score. Estimate value and difficulty from 1 to 5, identify a target
+persona, mark genuinely seasonal ideas and explain the opportunity without inventing demand data.`;
 }
 
 async function findTopics(supabase, body) {
@@ -541,7 +574,7 @@ async function findTopics(supabase, body) {
     (category) => KNOWLEDGE_CATEGORIES.includes(category)
   );
   if (!categories.length) throw new ApiError(400, "Select at least one topic category.");
-  const quantity = Math.min(30, Math.max(1, Number(body.quantity) || 12));
+  const quantity = Math.min(100, Math.max(1, Number(body.quantity) || 12));
   const [topicsResult, articlesResult, settingsResult, businessSectionsResult] = await Promise.all([
     supabase
       .from("knowledge_topics")
@@ -602,7 +635,7 @@ async function saveTopicIdeas(supabase, ideas) {
   );
   const accepted = [];
   const skipped = [];
-  cleanJsonArray(ideas, 30).forEach((idea) => {
+  cleanJsonArray(ideas, 100).forEach((idea) => {
     const payload = cleanTopic({
       ...idea,
       status: "idea",
@@ -796,7 +829,8 @@ ${article.content_markdown || ""}
 CTA: ${article.cta || ""}
 FAQs: ${JSON.stringify(article.faq_json || [])}
 
-Score only what is evidenced in the article and Business Intelligence. Explain each score, quote
+Score brand consistency, vocabulary, compliance, SEO, readability, repetition, CTA quality,
+generic wording and hallucination risk. Score only what is evidenced in the article and Business Intelligence. Explain each score, quote
 only short evidence snippets, and identify uncertainty as a review issue. Do not rewrite the article,
 change its status or approve it.`,
       schema: ARTICLE_REVIEW_SCHEMA,

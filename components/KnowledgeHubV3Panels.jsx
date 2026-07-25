@@ -1,6 +1,7 @@
 import {
   BUSINESS_KNOWLEDGE_SECTION_DEFINITIONS,
 } from "../lib/businessIntelligence.js";
+import { calculateBusinessBrainCompleteness } from "../lib/aiMarketingPlatform.js";
 
 function KnowledgeField({ label, children, wide = false }) {
   return (
@@ -39,6 +40,7 @@ export function BusinessKnowledgeCentre({
   onSave,
   busy,
 }) {
+  const completeness = calculateBusinessBrainCompleteness(sections);
   return (
     <section className="page-stack">
       <div className="panel">
@@ -55,6 +57,20 @@ export function BusinessKnowledgeCentre({
         <div className="notice">
           Save only confirmed information. Blank sections make the AI mark uncertainty for human
           review instead of guessing.
+        </div>
+        <div className="knowledge-review-summary" style={{ marginTop: 16 }}>
+          <div className={`knowledge-quality-score ${completeness.overall >= 80 ? "is-strong" : completeness.overall >= 50 ? "is-mixed" : "is-weak"}`}>
+            <strong>{completeness.overall}</strong><span>/ 100</span>
+          </div>
+          <div>
+            <h4>Overall Business Brain score</h4>
+            <p>Knowledge Completeness across Company, Products, Sales Knowledge, FAQs, Vocabulary, Brand Voice, Personas and the remaining shared sections.</p>
+          </div>
+        </div>
+        <div className="knowledge-breakdown-grid" style={{ marginTop: 16 }}>
+          {completeness.sections.map((section) => (
+            <div key={section.key}><strong>{section.title}</strong><span>{section.score}%</span></div>
+          ))}
         </div>
       </div>
 
@@ -139,10 +155,14 @@ export function PromptBuilderNotice({ sections = [], specialist }) {
 
 const REVIEW_CATEGORY_LABELS = {
   brand_consistency: "Brand consistency",
+  vocabulary: "Vocabulary",
   readability: "Readability",
   seo: "SEO",
   cta_quality: "CTA quality",
   compliance: "Compliance",
+  repetition: "Repetition",
+  generic_wording: "Generic wording",
+  hallucination_risk: "Hallucination risk",
 };
 
 export function ArticleQualityScore({
