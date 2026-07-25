@@ -270,10 +270,10 @@ function AssetEditor({ asset, review, articles, busy, onChange, onSave, onRegene
         </article>
       ) : (
         <div className="field-grid">
-          <label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Title</span><input className="field__input" value={asset.title} disabled={asset.status === "archived"} onChange={(event) => onChange("title", event.target.value)} /></label>
-          <label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Preview text</span><input className="field__input" value={asset.preview_text || ""} disabled={asset.status === "archived"} onChange={(event) => onChange("preview_text", event.target.value)} /></label>
-          <label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Draft asset</span><textarea className="field__input" rows="16" value={asset.body} disabled={asset.status === "archived"} onChange={(event) => onChange("body", event.target.value)} /></label>
-          <label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">CTA</span><input className="field__input" value={asset.cta || ""} disabled={asset.status === "archived"} onChange={(event) => onChange("cta", event.target.value)} /></label>
+          <label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Title</span><input className="field__input" value={asset.title} disabled={asset.status !== "draft"} onChange={(event) => onChange("title", event.target.value)} /></label>
+          <label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Preview text</span><input className="field__input" value={asset.preview_text || ""} disabled={asset.status !== "draft"} onChange={(event) => onChange("preview_text", event.target.value)} /></label>
+          <label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Draft asset</span><textarea className="field__input" rows="16" value={asset.body} disabled={asset.status !== "draft"} onChange={(event) => onChange("body", event.target.value)} /></label>
+          <label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">CTA</span><input className="field__input" value={asset.cta || ""} disabled={asset.status !== "draft"} onChange={(event) => onChange("cta", event.target.value)} /></label>
         </div>
       )}
       <div className="card-actions">
@@ -285,6 +285,7 @@ function AssetEditor({ asset, review, articles, busy, onChange, onSave, onRegene
           <button className="button button--primary" type="button" disabled={busy} onClick={() => onSave("approved")}>Approve</button>
           <button className="button button--ghost" type="button" disabled={busy} onClick={() => onSave("archived")}>Archive</button>
         </> : null}
+        {asset.status === "approved" ? <button className="button button--ghost" type="button" disabled={busy} onClick={() => onSave("archived")}>Archive</button> : null}
       </div>
       <div className="notice">Drafts are never published, posted, emailed or sent. Approval records an internal manual decision only.</div>
       {review ? (

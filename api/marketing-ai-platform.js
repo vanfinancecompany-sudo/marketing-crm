@@ -260,6 +260,25 @@ async function generateAsset(supabase, body) {
   if (article.status !== "approved") {
     throw new ApiError(400, "Content Factory only accepts approved Knowledge Articles.");
   }
+  const assetId = clean(body.asset_id, 100);
+  if (!assetId) {
+    const duplicate = assertResult(
+      await supabase
+        .from("marketing_ai_assets")
+        .select("id,title,status")
+        .eq("source_article_id", article.id)
+        .eq("channel", channel)
+        .neq("status", "archived")
+        .limit(1),
+      "Existing channel coverage could not be checked."
+    );
+    if (duplicate?.length) {
+      throw new ApiError(
+        409,
+        `This article already has an active ${channel} asset: "${duplicate[0].title}". Open it to edit or regenerate.`
+      );
+    }
+  }
   const brain = await loadBrain(supabase);
   const channelDefinition = AI_CONTENT_CHANNELS.find((item) => item.key === channel);
   const assembled = buildAiPlatformPrompt({
@@ -308,7 +327,6 @@ emailed or sent. Return the structured asset only.`,
       source_article_updated_at: article.updated_at,
     },
   };
-  const assetId = clean(body.asset_id, 100);
   if (assetId) {
     const existing = assertResult(
       await supabase.from("marketing_ai_assets").select("id,status,source_article_id,channel").eq("id", assetId).single(),
