@@ -151,6 +151,7 @@ export default function KnowledgeHubPage() {
   const [templates, setTemplates] = useState([]);
   const [articles, setArticles] = useState([]);
   const [settings, setSettings] = useState(EMPTY_SETTINGS);
+  const [aiConfiguration, setAiConfiguration] = useState(null);
   const [topicForm, setTopicForm] = useState(null);
   const [generationTopic, setGenerationTopic] = useState(null);
   const [generation, setGeneration] = useState(EMPTY_GENERATION);
@@ -178,6 +179,7 @@ export default function KnowledgeHubPage() {
       setTemplates(result.templates || []);
       setArticles(result.articles || []);
       setSettings({ ...EMPTY_SETTINGS, ...(result.settings || {}) });
+      setAiConfiguration(result.ai_configuration || null);
       setAccessStatus("unlocked");
     } catch (loadError) {
       if (isMarketingAccessDenied(loadError)) setAccessStatus("locked");
@@ -565,6 +567,13 @@ export default function KnowledgeHubPage() {
 
       {error ? <div className="notice notice--error">{error}</div> : null}
       {message ? <div className="notice knowledge-notice-success">{message}</div> : null}
+      {aiConfiguration && !aiConfiguration.configured ? (
+        <div className="notice notice--error">
+          OPENAI_API_KEY is missing from this {aiConfiguration.environment} deployment
+          {aiConfiguration.deployment_host ? ` (${aiConfiguration.deployment_host})` : ""}. Add
+          it to the Vercel project that owns this URL and redeploy before generating articles.
+        </div>
+      ) : null}
       {busy && screen === "dashboard" ? <div className="notice">Loading Knowledge Hub...</div> : null}
 
       {screen === "dashboard" ? (

@@ -105,6 +105,20 @@ function cleanText(value, max = 20000) {
   return String(value || "").trim().slice(0, max);
 }
 
+export function knowledgeAiConfiguration(environment = process.env) {
+  const deploymentHost = cleanText(
+    environment.VERCEL_URL || environment.VERCEL_PROJECT_PRODUCTION_URL,
+    500
+  );
+  return {
+    configured: Boolean(cleanText(environment.OPENAI_API_KEY, 10000)),
+    model: cleanText(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini",
+    environment: cleanText(environment.VERCEL_ENV || environment.NODE_ENV, 50) || "unknown",
+    deployment_host: deploymentHost,
+    commit_ref: cleanText(environment.VERCEL_GIT_COMMIT_REF, 200),
+  };
+}
+
 function cleanStringArray(value, maximum = 30) {
   return Array.isArray(value)
     ? value.map((item) => cleanText(item, 160)).filter(Boolean).slice(0, maximum)
@@ -231,15 +245,24 @@ Markdown and equivalent clean HTML.`;
 }
 
 async function callKnowledgeAi(input) {
-  if (!process.env.OPENAI_API_KEY) throw new ApiError(500, "The AI integration is not configured.");
+  const configuration = knowledgeAiConfiguration();
+  if (!configuration.configured) {
+    const deployment = configuration.deployment_host
+      ? ` for ${configuration.deployment_host}`
+      : "";
+    throw new ApiError(
+      500,
+      `OPENAI_API_KEY is not available to this ${configuration.environment} deployment${deployment}. Add it to the Vercel project that owns this URL, then redeploy.`
+    );
+  }
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      Authorization: `Bearer ${cleanText(process.env.OPENAI_API_KEY, 10000)}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+      model: configuration.model,
       input: [
         {
           role: "system",
@@ -385,7 +408,10 @@ export default async function handler(request, response) {
     let data;
     switch (body.action) {
       case "load":
-        data = await loadHub(supabase);
+        data = {
+          ...(await loadHub(supabase)),
+          ai_configuration: knowledgeAiConfiguration(),
+        };
         break;
       case "saveTopic":
         data = { topic: await saveTopic(supabase, body.topic) };

@@ -37,6 +37,11 @@ Generation uses the deployment's `OPENAI_API_KEY` and optional `OPENAI_MODEL`. T
 strict JSON containing title, slug, SEO fields, excerpt, Markdown, HTML, FAQ entries, CTA, internal
 link suggestions and generation metadata. The response is validated before a draft is inserted.
 
+`OPENAI_API_KEY` must exist in the Vercel project that owns the exact Preview or Production URL
+being tested. This repository may be connected to more than one Vercel project; variables configured
+on one project are not available to another project's functions. Knowledge Hub reports the current
+Vercel environment and deployment host when the key is missing, without returning the key itself.
+
 Prompts explicitly reject invented rates, approval guarantees, vehicle availability, prices, legal
 claims and company policies. Uncertain business-specific facts must be marked for review.
 

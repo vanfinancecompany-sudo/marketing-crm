@@ -7,7 +7,9 @@ import {
   parseKnowledgeArticleResponse,
   validateKnowledgeArticle,
 } from "../lib/knowledgeHub.js";
-import knowledgeHubHandler from "../api/marketing-knowledge-hub.js";
+import knowledgeHubHandler, {
+  knowledgeAiConfiguration,
+} from "../api/marketing-knowledge-hub.js";
 
 const validArticle = {
   title: "How van finance works",
@@ -85,6 +87,26 @@ test("Knowledge Hub endpoint rejects requests without Marketing CRM access", asy
   assert.equal(response.body.ok, false);
   if (previous === undefined) delete process.env.MARKETING_CUSTOMER_DATABASE_API_KEY;
   else process.env.MARKETING_CUSTOMER_DATABASE_API_KEY = previous;
+});
+
+test("AI configuration reads server variables without exposing the key", () => {
+  const configured = knowledgeAiConfiguration({
+    OPENAI_API_KEY: "  secret-value  ",
+    OPENAI_MODEL: "gpt-4.1-mini",
+    VERCEL_ENV: "preview",
+    VERCEL_URL: "marketing-preview.example",
+    VERCEL_GIT_COMMIT_REF: "agent/knowledge-hub-v1-marketing",
+  });
+  assert.deepEqual(configured, {
+    configured: true,
+    model: "gpt-4.1-mini",
+    environment: "preview",
+    deployment_host: "marketing-preview.example",
+    commit_ref: "agent/knowledge-hub-v1-marketing",
+  });
+  assert.doesNotMatch(JSON.stringify(configured), /secret-value/);
+  assert.equal(knowledgeAiConfiguration({ VERCEL_ENV: "production" }).configured, false);
+  assert.equal(knowledgeAiConfiguration({}).model, "gpt-4.1-mini");
 });
 
 test("route, sidebar and page expose the complete Knowledge Hub workflow", () => {
