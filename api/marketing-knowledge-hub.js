@@ -15,6 +15,7 @@ import {
   BUSINESS_KNOWLEDGE_SECTION_KEYS,
   buildAiPlatformPrompt,
   buildBusinessIntelligencePrompt,
+  normalizeKnowledgeArticleReviewScale,
   parseKnowledgeArticleReviewResponse,
 } from "../lib/businessIntelligence.js";
 
@@ -114,7 +115,12 @@ const REVIEW_CATEGORY_SCHEMA = {
   additionalProperties: false,
   required: ["score", "reason", "findings"],
   properties: {
-    score: { type: "integer", minimum: 0, maximum: 100 },
+    score: {
+      type: "integer",
+      minimum: 0,
+      maximum: 100,
+      description: "Whole-number percentage score from 0 to 100. Never use a 0 to 10 scale.",
+    },
     reason: { type: "string" },
     findings: { type: "array", items: { type: "string" } },
   },
@@ -131,7 +137,12 @@ const ARTICLE_REVIEW_SCHEMA = {
     "recommendations",
   ],
   properties: {
-    overall_score: { type: "integer", minimum: 0, maximum: 100 },
+    overall_score: {
+      type: "integer",
+      minimum: 0,
+      maximum: 100,
+      description: "Whole-number percentage score from 0 to 100. Never use a 0 to 10 scale.",
+    },
     summary: { type: "string" },
     categories: {
       type: "object",
@@ -357,7 +368,7 @@ async function loadHub(supabase) {
     articles: articles.data || [],
     settings: settings.data || null,
     business_sections: businessSections.data || [],
-    article_reviews: reviews.data || [],
+    article_reviews: (reviews.data || []).map(normalizeKnowledgeArticleReviewScale),
   };
 }
 
@@ -830,7 +841,8 @@ CTA: ${article.cta || ""}
 FAQs: ${JSON.stringify(article.faq_json || [])}
 
 Score brand consistency, vocabulary, compliance, SEO, readability, repetition, CTA quality,
-generic wording and hallucination risk. Score only what is evidenced in the article and Business Intelligence. Explain each score, quote
+generic wording and hallucination risk. Use a whole-number 0–100 percentage scale for the overall
+score and every category score; never use a 0–10 scale. Score only what is evidenced in the article and Business Intelligence. Explain each score, quote
 only short evidence snippets, and identify uncertainty as a review issue. Do not rewrite the article,
 change its status or approve it.`,
       schema: ARTICLE_REVIEW_SCHEMA,

@@ -12,6 +12,7 @@ import {
 } from "../lib/knowledgeHub.js";
 import {
   buildBusinessIntelligencePrompt,
+  normalizeKnowledgeArticleReviewScale,
   normalizeBusinessKnowledgeSections,
   parseKnowledgeArticleReviewResponse,
 } from "../lib/businessIntelligence.js";
@@ -232,6 +233,58 @@ test("AI Reviewer parser validates scores and keeps the result advisory", () => 
   assert.throws(() => parseKnowledgeArticleReviewResponse("{bad json"), /article was not changed/);
 });
 
+test("AI Reviewer normalises clear 0-10 category scores to the platform 0-100 scale", () => {
+  const categories = Object.fromEntries(
+    [
+      "brand_consistency",
+      "vocabulary",
+      "readability",
+      "seo",
+      "cta_quality",
+      "compliance",
+      "repetition",
+      "generic_wording",
+      "hallucination_risk",
+    ].map((key, index) => [
+      key,
+      {
+        score: 8 + (index % 3),
+        reason: "The draft performs strongly in this category.",
+        findings: [],
+      },
+    ])
+  );
+  const parsed = parseKnowledgeArticleReviewResponse({
+    overall_score: 93,
+    summary: "Strong draft.",
+    categories,
+    strengths: ["Clear and useful."],
+    issues: [],
+    recommendations: [],
+  });
+  assert.equal(parsed.overall_score, 93);
+  assert.equal(parsed.categories.brand_consistency.score, 80);
+  assert.equal(parsed.categories.vocabulary.score, 90);
+  assert.equal(parsed.categories.readability.score, 100);
+
+  const legacySnapshot = normalizeKnowledgeArticleReviewScale({
+    overall_score: 9,
+    category_scores: categories,
+  });
+  assert.equal(legacySnapshot.overall_score, 90);
+  assert.equal(legacySnapshot.category_scores.compliance.score, 100);
+
+  const genuinePercentageScores = normalizeKnowledgeArticleReviewScale({
+    overall_score: 70,
+    category_scores: {
+      ...categories,
+      compliance: { ...categories.compliance, score: 82 },
+    },
+  });
+  assert.equal(genuinePercentageScores.category_scores.brand_consistency.score, 8);
+  assert.equal(genuinePercentageScores.category_scores.compliance.score, 82);
+});
+
 test("Knowledge Hub endpoint rejects requests without Marketing CRM access", async () => {
   const previous = process.env.MARKETING_CUSTOMER_DATABASE_API_KEY;
   process.env.MARKETING_CUSTOMER_DATABASE_API_KEY = "expected-secret";
@@ -415,6 +468,8 @@ test("Knowledge Hub V3 exposes Business Knowledge, Prompt Builder and advisory d
     assert.match(combined, new RegExp(label));
   }
   assert.match(api, /case "saveBusinessSection"/);
+  assert.match(api, /0–100 percentage scale/);
+  assert.match(api, /never use a 0–10 scale/i);
   assert.match(api, /case "reviewArticle"/);
   assert.match(api, /status !== "draft"/);
   assert.match(api, /Do not rewrite the article/);
