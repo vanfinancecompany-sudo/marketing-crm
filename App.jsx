@@ -54,6 +54,7 @@ import ControlCentrePage from "./pages/ControlCentrePage.jsx";
 import DashboardPage from "./pages/DashboardPage.jsx";
 import CustomerDatabasePage from "./pages/CustomerDatabasePage.jsx";
 import MarketingCentrePage from "./pages/MarketingCentrePage.jsx";
+import KnowledgeHubPage from "./pages/KnowledgeHubPage.jsx";
 import StockPage from "./pages/StockPage.jsx";
 import VanscoStockWatchPage from "./pages/VanscoStockWatchPage.jsx";
 import ReelFactoryPage from "./pages/ReelFactoryPage.jsx";
@@ -454,6 +455,7 @@ const VIEW_PATHS = {
   Stock: "/stock",
   "Customer Database": "/customer-database",
   "Marketing Centre": "/marketing-centre",
+  "Knowledge Hub": "/knowledge-hub",
   "Vansco Stock Watch": "/vansco-stock-watch",
   "Reel Factory": "/reel-factory",
   "Premium Reel Studio": "/premium-reel-studio",
@@ -473,6 +475,7 @@ function viewFromPath() {
   if (path === "/stock") return "Stock";
   if (path === "/customer-database") return "Customer Database";
   if (path === "/marketing-centre") return "Marketing Centre";
+  if (path === "/knowledge-hub") return "Knowledge Hub";
   if (path === "/vansco-stock-watch") return "Vansco Stock Watch";
   if (path === "/reel-factory") return "Reel Factory";
   if (path === "/premium-reel-studio" || path === "/reel-studio-beta" || path === "/premium-reels") {
@@ -2449,6 +2452,13 @@ async function handleClearTodayReels() {
   }
 
   function handleNavigate(view) {
+    if (typeof window !== "undefined") {
+      const navigationEvent = new CustomEvent("marketing-before-navigate", {
+        cancelable: true,
+        detail: { view },
+      });
+      if (!window.dispatchEvent(navigationEvent)) return;
+    }
     if (view === "Reel Factory") {
       handleClearReelFactorySelection();
     }
@@ -2698,6 +2708,8 @@ async function handleClearTodayReels() {
         return <CustomerDatabasePage />;
       case "Marketing Centre":
         return <MarketingCentrePage />;
+      case "Knowledge Hub":
+        return <KnowledgeHubPage />;
       case "Vansco Stock Watch":
         return <VanscoStockWatchPage />;
       case "Reel Factory":
