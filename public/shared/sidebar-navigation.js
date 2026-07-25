@@ -6,6 +6,7 @@
     { id: "stock", label: "Stock", path: "/stock", paths: ["/stock"], navigation: "react", view: "Stock" },
     { id: "customer-database", label: "Customer Database", path: "/customer-database", paths: ["/customer-database"], navigation: "react", view: "Customer Database" },
     { id: "marketing-centre", label: "Marketing Centre", path: "/marketing-centre", paths: ["/marketing-centre"], navigation: "react", view: "Marketing Centre" },
+    { id: "knowledge-hub", label: "Knowledge Hub", path: "/knowledge-hub", paths: ["/knowledge-hub"], navigation: "react", view: "Knowledge Hub" },
     { id: "suppression-centre", label: "Suppression Centre", path: "/suppression-centre/", paths: ["/suppression-centre/"], navigation: "document" },
     { id: "email-templates", label: "Email Templates", path: "/email-templates/", paths: ["/email-templates/"], navigation: "document" },
     { id: "campaigns", label: "Campaigns", path: "/campaigns/", paths: ["/campaigns/"], navigation: "document" },
