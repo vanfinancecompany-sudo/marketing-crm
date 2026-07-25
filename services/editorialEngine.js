@@ -49,3 +49,22 @@ export const recordBusinessBrainUpdate = (sectionKey, summary) =>
     section_key: sectionKey,
     summary,
   });
+
+export const saveWebsiteIndexEntry = (entry) =>
+  requestEditorialEngine("saveWebsiteIndexEntry", { entry });
+
+export const refreshEditorialInternalLinks = (articleId) =>
+  requestEditorialEngine("refreshInternalLinks", { article_id: articleId });
+
+export const decideEditorialInternalLink = (
+  suggestionId,
+  decision,
+  anchorText,
+  reason = ""
+) =>
+  requestEditorialEngine("decideInternalLink", {
+    suggestion_id: suggestionId,
+    decision,
+    anchor_text: anchorText,
+    reason,
+  });
