@@ -30,10 +30,22 @@ export function generateKnowledgeArticle(topic, generation) {
   return requestKnowledgeHub("generateArticle", { topic, generation });
 }
 
+export function findKnowledgeTopics(categories, quantity, brief) {
+  return requestKnowledgeHub("findTopics", { categories, quantity, brief });
+}
+
+export function saveKnowledgeTopicIdeas(ideas) {
+  return requestKnowledgeHub("saveTopicIdeas", { ideas });
+}
+
 export function saveKnowledgeArticle(article, status) {
   return requestKnowledgeHub("saveArticle", { article, status });
 }
 
 export function bulkUpdateKnowledgeArticles(articleIds, status) {
   return requestKnowledgeHub("bulkUpdateArticles", { article_ids: articleIds, status });
+}
+
+export function saveKnowledgeTemplate(template) {
+  return requestKnowledgeHub("saveTemplate", { template });
 }
