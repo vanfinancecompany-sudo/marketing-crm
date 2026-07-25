@@ -1,4 +1,5 @@
 import { KNOWLEDGE_CATEGORIES } from "../lib/knowledgeHub.js";
+import { buildTopicPlannerSections } from "../lib/aiMarketingPlatform.js";
 
 function HubField({ label, children, wide = false }) {
   return (
@@ -25,6 +26,39 @@ export function PriorityStars({ value = 3, onChange, readOnly = false }) {
         </button>
       ))}
     </span>
+  );
+}
+
+export function TopicPlannerIntelligence({ topics, articles, freshnessDays }) {
+  const sections = buildTopicPlannerSections({ topics, articles, freshnessDays });
+  const definitions = [
+    ["high_priority", "High Priority"],
+    ["seasonal", "Seasonal"],
+    ["missing_coverage", "Missing Coverage"],
+    ["refresh_needed", "Refresh Needed"],
+    ["recently_published", "Recently Published"],
+    ["duplicate_risks", "Duplicate Risks"],
+    ["opportunities", "Opportunities"],
+  ];
+  return (
+    <section className="panel panel--nested" style={{ boxShadow: "none", marginBottom: 18 }}>
+      <div className="panel__header">
+        <div>
+          <div className="eyebrow">Content Planner</div>
+          <h3>Planning sections</h3>
+          <p>Prioritised editorial views. “Recently Published” reflects manual article approval; this platform does not publish.</p>
+        </div>
+      </div>
+      <div className="knowledge-breakdown-grid">
+        {definitions.map(([key, label]) => (
+          <div key={key}>
+            <strong>{label}</strong>
+            <span>{sections[key].length} item{sections[key].length === 1 ? "" : "s"}</span>
+            {sections[key].slice(0, 3).map((item) => <small key={item.id}>{item.title}</small>)}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -234,7 +268,7 @@ export function TopicFinderPanel({
               className="field__input"
               type="number"
               min="1"
-              max="30"
+              max="100"
               value={quantity}
               onChange={(event) => setQuantity(event.target.value)}
             />
@@ -274,8 +308,21 @@ export function TopicFinderPanel({
             disabled={busy || !categories.length}
             onClick={onFind}
           >
-            {busy ? "Finding topics..." : "Find Topic Ideas"}
+            {busy ? "Finding topics..." : Number(quantity) === 100 ? "Find 100 New Topics" : "Find Topic Ideas"}
           </button>
+          {Number(quantity) !== 100 ? (
+            <button
+              className="button button--ghost"
+              type="button"
+              disabled={busy || !categories.length}
+              onClick={() => {
+                setQuantity(100);
+                onFind(100);
+              }}
+            >
+              Find 100 New Topics
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -339,6 +386,26 @@ export function TopicFinderPanel({
                       value={idea.priority}
                       onChange={(value) => updateIdea(index, "priority", value)}
                     />
+                  </HubField>
+                </div>
+                <div className="field-grid">
+                  <HubField label="Estimated value">
+                    <PriorityStars
+                      value={idea.estimated_value || 3}
+                      onChange={(value) => updateIdea(index, "estimated_value", value)}
+                    />
+                  </HubField>
+                  <HubField label="Difficulty">
+                    <PriorityStars
+                      value={idea.difficulty || 3}
+                      onChange={(value) => updateIdea(index, "difficulty", value)}
+                    />
+                  </HubField>
+                  <HubField label="Target persona">
+                    <input className="field__input" value={idea.target_persona || ""} onChange={(event) => updateIdea(index, "target_persona", event.target.value)} />
+                  </HubField>
+                  <HubField label="Seasonal">
+                    <label className="toggle-row"><input type="checkbox" checked={Boolean(idea.seasonal)} onChange={(event) => updateIdea(index, "seasonal", event.target.checked)} />Seasonal topic</label>
                   </HubField>
                 </div>
                 <HubField label="Primary keyword">
