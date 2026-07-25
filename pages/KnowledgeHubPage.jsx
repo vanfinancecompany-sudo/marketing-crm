@@ -49,6 +49,7 @@ import {
   EditorialScorePanel,
   KnowledgeCoverageMap,
 } from "../components/KnowledgeHubV5Panels.jsx";
+import { EditorialAutomationPlatform } from "../components/KnowledgeHubV6Panels.jsx";
 import {
   articleContentHash,
   buildApprovalQueue,
@@ -65,6 +66,17 @@ import {
   saveArticleEditorialOverrides,
   saveBusinessIntentOverrides,
 } from "../services/editorialEngine.js";
+import {
+  approveEditorialOpportunity,
+  cancelEditorialJob,
+  dismissEditorialOpportunity,
+  loadEditorialAutomation,
+  pauseEditorialAutomation,
+  resumeEditorialAutomation,
+  retryEditorialJob,
+  saveEditorialAutomationSettings,
+  scanEditorialOpportunities,
+} from "../services/editorialAutomation.js";
 import {
   MARKETING_ACCESS_DENIED_EVENT,
   clearMarketingAccessKey,
@@ -125,6 +137,23 @@ const EMPTY_EDITORIAL = {
   business_pages: [],
   concepts: [],
   stale_article_ids: [],
+};
+
+const EMPTY_AUTOMATION = {
+  settings: {
+    paused: false,
+    max_jobs_per_run: 3,
+    max_attempts: 3,
+    minimum_draft_score: 75,
+    daily_draft_limit: 3,
+    automatic_improvement_attempts: 2,
+    scan_interval_hours: 24,
+  },
+  opportunities: [],
+  jobs: [],
+  logs: [],
+  briefings: [],
+  runs: [],
 };
 
 function formatDate(value) {
@@ -236,6 +265,8 @@ export default function KnowledgeHubPage() {
   );
   const [articleReviews, setArticleReviews] = useState([]);
   const [editorial, setEditorial] = useState(EMPTY_EDITORIAL);
+  const [automation, setAutomation] = useState(EMPTY_AUTOMATION);
+  const [automationSettings, setAutomationSettings] = useState(EMPTY_AUTOMATION.settings);
   const [intentOverrides, setIntentOverrides] = useState({});
   const [recommendationOverrides, setRecommendationOverrides] = useState({});
   const [aiConfiguration, setAiConfiguration] = useState(null);
@@ -270,9 +301,10 @@ export default function KnowledgeHubPage() {
     setBusy(true);
     setError("");
     try {
-      const [result, editorialResult] = await Promise.all([
+      const [result, editorialResult, automationResult] = await Promise.all([
         loadKnowledgeHub(),
         loadEditorialEngine(),
+        loadEditorialAutomation(),
       ]);
       setTopics(result.topics || []);
       setTemplates(result.templates || []);
@@ -284,6 +316,8 @@ export default function KnowledgeHubPage() {
       );
       setArticleReviews(result.article_reviews || []);
       setEditorial({ ...EMPTY_EDITORIAL, ...editorialResult });
+      setAutomation({ ...EMPTY_AUTOMATION, ...automationResult });
+      setAutomationSettings({ ...EMPTY_AUTOMATION.settings, ...(automationResult.settings || {}) });
       setAiConfiguration(result.ai_configuration || null);
       setAccessStatus("unlocked");
     } catch (loadError) {
@@ -969,6 +1003,85 @@ export default function KnowledgeHubPage() {
     }
   }
 
+  async function refreshAutomation() {
+    const result = await loadEditorialAutomation();
+    setAutomation({ ...EMPTY_AUTOMATION, ...result });
+    setAutomationSettings({ ...EMPTY_AUTOMATION.settings, ...(result.settings || {}) });
+    return result;
+  }
+
+  async function runAutomationAction(action, successMessage) {
+    setBusy(true);
+    setError("");
+    try {
+      await action();
+      await refreshAutomation();
+      setMessage(successMessage);
+    } catch (actionError) {
+      setError(actionError.message || "Editorial Automation action failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleSaveAutomationSettings() {
+    return runAutomationAction(
+      () => saveEditorialAutomationSettings(automationSettings),
+      "Editorial Automation settings saved."
+    );
+  }
+
+  function handlePauseAutomation() {
+    return runAutomationAction(
+      pauseEditorialAutomation,
+      "Editorial Automation paused. Queued work remains available."
+    );
+  }
+
+  function handleResumeAutomation() {
+    return runAutomationAction(
+      resumeEditorialAutomation,
+      "Editorial Automation resumed."
+    );
+  }
+
+  function handleScanAutomation() {
+    return runAutomationAction(
+      scanEditorialOpportunities,
+      "Opportunity scan, topic discovery and briefing jobs queued. The background worker will process them."
+    );
+  }
+
+  function handleApproveOpportunity(opportunityId, overrides) {
+    return runAutomationAction(
+      () => approveEditorialOpportunity(opportunityId, overrides),
+      "Opportunity approved for preparation and queued. No content was approved or published."
+    );
+  }
+
+  function handleDismissOpportunity(opportunityId) {
+    if (!window.confirm("Dismiss this opportunity? It remains logged; a materially changed source may create a new finding later.")) return;
+    return runAutomationAction(
+      () => dismissEditorialOpportunity(opportunityId, "Dismissed after user review."),
+      "Opportunity dismissed."
+    );
+  }
+
+  function handleCancelAutomationJob(jobId) {
+    if (!window.confirm("Cancel this queued automation job?")) return;
+    return runAutomationAction(
+      () => cancelEditorialJob(jobId, "Cancelled by user from the automation dashboard."),
+      "Automation job cancelled."
+    );
+  }
+
+  function handleRetryAutomationJob(jobId) {
+    return runAutomationAction(
+      () => retryEditorialJob(jobId),
+      "Automation job queued for a fresh retry."
+    );
+  }
+
   function updateTemplate(index, field, value) {
     setTemplates((current) =>
       current.map((template, templateIndex) =>
@@ -1248,7 +1361,7 @@ export default function KnowledgeHubPage() {
       <section className="hero-panel">
         <div className="panel__header">
           <div>
-            <div className="eyebrow">AI Editorial Engine · Business Intelligence V3 · Content Intelligence V2</div>
+            <div className="eyebrow">Editorial Automation V6 · AI Editorial Engine V5 · Business Intelligence V3 · Content Intelligence V2</div>
             <h2>Knowledge Hub</h2>
             <p>Understand, score and improve articles from confirmed business knowledge. Every recommendation is reviewable and nothing publishes automatically.</p>
           </div>
@@ -1268,6 +1381,7 @@ export default function KnowledgeHubPage() {
       <div className="knowledge-tabs">
         {[
           ["dashboard", "Dashboard"],
+          ["automation", "Editorial Automation"],
           ["topics", "Topic Planner"],
           ["finder", "AI Topic Finder"],
           ["articles", "Approval Queue"],
@@ -1335,6 +1449,23 @@ export default function KnowledgeHubPage() {
             onNavigate={navigate}
           />
         </>
+      ) : null}
+
+      {screen === "automation" ? (
+        <EditorialAutomationPlatform
+          automation={automation}
+          settings={automationSettings}
+          updateSettings={setAutomationSettings}
+          onSaveSettings={handleSaveAutomationSettings}
+          onPause={handlePauseAutomation}
+          onResume={handleResumeAutomation}
+          onScan={handleScanAutomation}
+          onApprove={handleApproveOpportunity}
+          onDismiss={handleDismissOpportunity}
+          onCancel={handleCancelAutomationJob}
+          onRetry={handleRetryAutomationJob}
+          busy={busy}
+        />
       ) : null}
 
       {screen === "topics" ? (

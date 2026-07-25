@@ -512,7 +512,7 @@ async function recordRevision(supabase, {
   return revision;
 }
 
-async function analyseArticle(supabase, body) {
+export async function analyseArticle(supabase, body) {
   const articleId = clean(body.article_id, 100);
   if (!articleId) throw new ApiError(400, "Article id is required.");
   const context = await loadEditorialContext(supabase, articleId);
@@ -703,7 +703,7 @@ async function saveEditorialOverrides(supabase, body) {
   );
 }
 
-async function proposeImprovement(supabase, body) {
+export async function proposeImprovement(supabase, body) {
   const articleId = clean(body.article_id, 100);
   const recommendationKey = clean(body.recommendation_key, 200);
   const [articleResult, assessmentResult, brainResult, settingsResult] = await Promise.all([
@@ -776,7 +776,7 @@ Do not invent business claims. This is a proposal for manual review and must not
   return proposal;
 }
 
-async function applyImprovement(supabase, body) {
+export async function applyImprovement(supabase, body) {
   const proposalId = clean(body.proposal_id, 100);
   const proposal = data(
     await supabase
