@@ -446,7 +446,7 @@ async function callKnowledgeStructuredAi({
   return output;
 }
 
-async function generateArticle(supabase, body) {
+export async function generateArticle(supabase, body) {
   const topicId = body.topic?.id;
   if (!topicId) throw new ApiError(400, "A saved topic is required.");
   const templateKey = cleanText(body.generation?.templateKey || "faq", 80);
@@ -569,7 +569,7 @@ an invented search-volume score. Estimate value and difficulty from 1 to 5, iden
 persona, mark genuinely seasonal ideas and explain the opportunity without inventing demand data.`;
 }
 
-async function findTopics(supabase, body) {
+export async function findTopics(supabase, body) {
   const categories = cleanStringArray(body.categories, KNOWLEDGE_CATEGORIES.length).filter(
     (category) => KNOWLEDGE_CATEGORIES.includes(category)
   );
