@@ -18,6 +18,7 @@ import {
   normalizeKnowledgeArticleReviewScale,
   parseKnowledgeArticleReviewResponse,
 } from "../lib/businessIntelligence.js";
+import { refreshArticleInternalLinks } from "../lib/internalLinkingService.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const ARTICLE_SCHEMA = {
@@ -544,6 +545,16 @@ Return useful Markdown and equivalent clean HTML. The result is a draft for huma
       .eq("id", topic.id),
     "The topic status could not be updated."
   );
+  try {
+    await refreshArticleInternalLinks(supabase, saved.id, {
+      reason: "New AI-generated draft analysed against the approved Website Index.",
+    });
+  } catch (error) {
+    console.error("INTERNAL LINK GENERATION ERROR", {
+      article_id: saved.id,
+      message: error.message,
+    });
+  }
   return saved;
 }
 
@@ -853,7 +864,7 @@ change its status or approve it.`,
     })
   );
   const configuration = knowledgeAiConfiguration();
-  return assertResult(
+  const savedReview = assertResult(
     await supabase
       .from("knowledge_article_reviews")
       .insert({
@@ -871,6 +882,17 @@ change its status or approve it.`,
       .single(),
     "The AI review could not be saved."
   ).data;
+  try {
+    await refreshArticleInternalLinks(supabase, article.id, {
+      reason: "Saved draft reviewed against the approved Website Index.",
+    });
+  } catch (error) {
+    console.error("INTERNAL LINK REVIEW ERROR", {
+      article_id: article.id,
+      message: error.message,
+    });
+  }
+  return savedReview;
 }
 
 export default async function handler(request, response) {

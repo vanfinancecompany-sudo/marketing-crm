@@ -11,6 +11,11 @@ import {
   normalizeEditorialAnalysis,
 } from "../lib/editorialIntelligence.js";
 import { markdownToKnowledgeHtml } from "../lib/knowledgeHub.js";
+import {
+  WEBSITE_INDEX_CATEGORIES,
+  isApprovedInternalUrl,
+} from "../lib/internalLinking.js";
+import { refreshArticleInternalLinks } from "../lib/internalLinkingService.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const CATEGORY_KEYS = Object.keys(EDITORIAL_CATEGORY_WEIGHTS);
@@ -195,6 +200,11 @@ class ApiError extends Error {
 }
 
 const clean = (value, max = 50000) => String(value || "").trim().slice(0, max);
+const cleanList = (value, limit = 50) =>
+  (Array.isArray(value) ? value : [])
+    .map((item) => clean(item, 200))
+    .filter(Boolean)
+    .slice(0, limit);
 
 function authorize(request) {
   const expected = process.env.MARKETING_CUSTOMER_DATABASE_API_KEY;
@@ -345,6 +355,7 @@ async function loadEditorialContext(supabase, articleId = "") {
     settings: results[2].data || {},
     brainSections: results[3].data || [],
     businessPages: deriveBusinessBrainPages(results[3].data || [], results[4].data || []),
+    websiteIndex: results[4].data || [],
     concepts: results[5].data || [],
     intent: articleId ? results[6].data : null,
   };
@@ -376,6 +387,16 @@ async function loadEditorial(supabase) {
       .select("*")
       .order("created_at", { ascending: false })
       .limit(500),
+    supabase
+      .from("knowledge_internal_link_suggestions")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(1500),
+    supabase
+      .from("knowledge_internal_link_events")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(1500),
   ]);
   results.forEach((result) => data(result, "Editorial intelligence could not be loaded."));
   const context = await contextPromise;
@@ -399,6 +420,9 @@ async function loadEditorial(supabase) {
     proposals: results[5].data || [],
     events,
     business_pages: context.businessPages,
+    website_index: context.websiteIndex,
+    link_suggestions: results[7].data || [],
+    link_events: results[8].data || [],
     concepts: context.concepts,
     stale_article_ids: context.articles
       .filter(
@@ -432,6 +456,11 @@ function allowedCtaDestinations(context) {
 
 function editorialPrompt({ article, context }) {
   const topic = context.topics.find((candidate) => candidate.id === article.topic_id) || {};
+  const indexedArticleIds = new Set(
+    context.websiteIndex
+      .filter((page) => page.knowledge_article_id)
+      .map((page) => page.knowledge_article_id)
+  );
   const assembled = buildAiPlatformPrompt({
     sections: context.brainSections,
     settings: context.settings,
@@ -443,14 +472,25 @@ function editorialPrompt({ article, context }) {
     sourceContent: JSON.stringify({
       article,
       allowed_article_targets: context.articles
-        .filter((candidate) => candidate.id !== article.id && candidate.status === "approved")
+        .filter(
+          (candidate) =>
+            candidate.id !== article.id &&
+            candidate.status === "approved" &&
+            indexedArticleIds.has(candidate.id)
+        )
         .map(({ id, title, category, article_type }) => ({ id, title, category, article_type })),
-      allowed_business_pages: context.businessPages.map(({ page_key, title, url, product, page_type }) => ({
+      allowed_business_pages: context.websiteIndex.map(({ page_key, title, url, product, page_type, category, keywords, vehicle_types, customer_intent, priority, description }) => ({
         page_key,
         title,
         url,
         product,
         page_type,
+        category,
+        keywords,
+        vehicle_types,
+        customer_intent,
+        priority,
+        description,
       })),
       allowed_cta_destinations: allowedCtaDestinations(context),
       coverage_concepts: context.concepts.map(({ concept_key, label, aliases, primary_product }) => ({
@@ -519,6 +559,11 @@ export async function analyseArticle(supabase, body) {
   const article = context.articles.find((candidate) => candidate.id === articleId);
   if (!article) throw new ApiError(404, "Article could not be found.");
   const prompt = editorialPrompt({ article, context });
+  const indexedArticleIds = new Set(
+    context.websiteIndex
+      .filter((page) => page.knowledge_article_id)
+      .map((page) => page.knowledge_article_id)
+  );
   const parsed = normalizeEditorialAnalysis(
     await callStructuredAi({
       input: prompt.prompt,
@@ -529,9 +574,12 @@ export async function analyseArticle(supabase, body) {
     }),
     {
       articles: context.articles.filter(
-        (candidate) => candidate.id !== article.id && candidate.status === "approved"
+        (candidate) =>
+          candidate.id !== article.id &&
+          candidate.status === "approved" &&
+          indexedArticleIds.has(candidate.id)
       ),
-      businessPages: context.businessPages,
+      businessPages: context.websiteIndex,
       concepts: context.concepts,
       brainSections: context.brainSections,
       allowedCtaDestinations: allowedCtaDestinations(context),
@@ -588,6 +636,10 @@ export async function analyseArticle(supabase, body) {
       .single(),
     "Editorial assessment could not be saved."
   );
+  const linkSuggestions = await refreshArticleInternalLinks(supabase, article.id, {
+    assessmentId: assessment.id,
+    reason: "Editorial assessment refreshed the approved internal-link matches.",
+  });
   const conceptByKey = new Map(context.concepts.map((concept) => [concept.concept_key, concept]));
   const conceptRows = parsed.coverage_concepts
     .map((mapping) => ({
@@ -614,7 +666,7 @@ export async function analyseArticle(supabase, body) {
     changeSource: "score_recalculation",
     changeSummary: `Editorial score recalculated: ${assessment.overall_score}/100.`,
   });
-  return { intent, assessment, article_concepts: conceptRows, revision };
+  return { intent, assessment, article_concepts: conceptRows, revision, link_suggestions: linkSuggestions };
 }
 
 async function saveIntentOverrides(supabase, body) {
@@ -654,6 +706,16 @@ async function saveEditorialOverrides(supabase, body) {
       .single(),
     "Analyse the article before overriding recommendations."
   );
+  const approvedIndexPages = data(
+    await supabase
+      .from("knowledge_business_pages")
+      .select("page_key,knowledge_article_id")
+      .eq("active", true),
+    "Approved Website Index destinations could not be checked."
+  ) || [];
+  const indexedArticleIds = approvedIndexPages
+    .map((page) => page.knowledge_article_id)
+    .filter(Boolean);
   const normalized = normalizeEditorialAnalysis(
     {
       intent: {
@@ -676,13 +738,19 @@ async function saveEditorialOverrides(supabase, body) {
     },
     {
       articles: data(
-        await supabase.from("knowledge_articles").select("id").neq("status", "archived"),
+        await supabase
+          .from("knowledge_articles")
+          .select("id")
+          .eq("status", "approved")
+          .in(
+            "id",
+            indexedArticleIds.length
+              ? indexedArticleIds
+              : ["00000000-0000-0000-0000-000000000000"]
+          ),
         "Articles could not be checked."
       ),
-      businessPages: data(
-        await supabase.from("knowledge_business_pages").select("page_key").eq("active", true),
-        "Business pages could not be checked."
-      ),
+      businessPages: approvedIndexPages,
     }
   );
   return data(
@@ -873,6 +941,177 @@ async function recordBusinessBrainUpdate(supabase, body) {
   );
 }
 
+async function saveWebsiteIndexEntry(supabase, body) {
+  const entry = body.entry && typeof body.entry === "object" ? body.entry : {};
+  const entryId = clean(entry.id, 100);
+  const title = clean(entry.title, 300);
+  const url = clean(entry.url, 2000);
+  const category = WEBSITE_INDEX_CATEGORIES.includes(entry.category)
+    ? entry.category
+    : "Products";
+  const settings = data(
+    await supabase
+      .from("knowledge_settings")
+      .select("website_url")
+      .eq("settings_key", "default")
+      .maybeSingle(),
+    "Website settings could not be loaded."
+  ) || {};
+  if (!title) throw new ApiError(400, "Website Index title is required.");
+  if (!isApprovedInternalUrl(url, settings.website_url || "")) {
+    throw new ApiError(
+      400,
+      "Website Index URL must be a relative internal path or use the configured website domain."
+    );
+  }
+  const duplicateQuery = supabase
+    .from("knowledge_business_pages")
+    .select("id,title")
+    .ilike("url", url);
+  const duplicates = data(
+    entryId ? await duplicateQuery.neq("id", entryId) : await duplicateQuery,
+    "Website Index duplicates could not be checked."
+  ) || [];
+  if (duplicates.length) {
+    throw new ApiError(409, `This destination is already indexed as "${duplicates[0].title}".`);
+  }
+  const knowledgeArticleId = clean(entry.knowledge_article_id, 100) || null;
+  if (knowledgeArticleId) {
+    const linkedArticle = data(
+      await supabase
+        .from("knowledge_articles")
+        .select("id,status")
+        .eq("id", knowledgeArticleId)
+        .single(),
+      "Linked Knowledge Hub article could not be found."
+    );
+    if (linkedArticle.status !== "approved") {
+      throw new ApiError(400, "Only approved Knowledge Hub articles can be indexed.");
+    }
+  }
+  const existing = entryId
+    ? data(
+        await supabase
+          .from("knowledge_business_pages")
+          .select("*")
+          .eq("id", entryId)
+          .single(),
+        "Website Index entry could not be found."
+      )
+    : null;
+  const payload = {
+    page_key: existing?.page_key || `website_${shortFingerprint(url)}`,
+    title,
+    url,
+    category,
+    keywords: cleanList(entry.keywords),
+    vehicle_types: cleanList(entry.vehicle_types),
+    customer_intent: cleanList(entry.customer_intent),
+    priority: Math.max(1, Math.min(5, Number(entry.priority) || 3)),
+    description: clean(entry.description, 5000),
+    knowledge_article_id: knowledgeArticleId,
+    product: ["finance", "rent2buy", "both", "general"].includes(entry.product)
+      ? entry.product
+      : "general",
+    page_type: "website_index",
+    active: entry.status !== "Hidden" && entry.active !== false,
+    source: existing?.source || "manual",
+    external_id: existing?.external_id || null,
+    sync_metadata: existing?.sync_metadata || {},
+    last_synced_at: existing?.last_synced_at || null,
+    updated_at: new Date().toISOString(),
+  };
+  const saved = data(
+    entryId
+      ? await supabase
+          .from("knowledge_business_pages")
+          .update(payload)
+          .eq("id", entryId)
+          .select()
+          .single()
+      : await supabase
+          .from("knowledge_business_pages")
+          .insert(payload)
+          .select()
+          .single(),
+    "Website Index entry could not be saved."
+  );
+  data(
+    await supabase.from("knowledge_internal_link_events").insert({
+      website_page_id: saved.id,
+      article_id: saved.knowledge_article_id,
+      action: saved.active ? "index_saved" : "index_hidden",
+      reason: "Website Index entry updated after editorial review.",
+      details: {
+        category: saved.category,
+        url: saved.url,
+        source: saved.source,
+        wix_sync_ready: true,
+      },
+    }),
+    "Website Index audit history could not be saved."
+  );
+  return saved;
+}
+
+async function decideInternalLink(supabase, body) {
+  const suggestionId = clean(body.suggestion_id, 100);
+  const decision = clean(body.decision, 40);
+  const suggestion = data(
+    await supabase
+      .from("knowledge_internal_link_suggestions")
+      .select("*")
+      .eq("id", suggestionId)
+      .single(),
+    "Internal-link suggestion could not be found."
+  );
+  if (decision === "edit_anchor") {
+    if (!["pending", "accepted"].includes(suggestion.status)) {
+      throw new ApiError(400, "This internal-link suggestion can no longer be edited.");
+    }
+  } else if (!["accept", "reject"].includes(decision) || suggestion.status !== "pending") {
+    throw new ApiError(400, "Only pending internal-link suggestions can be accepted or rejected.");
+  }
+  const anchorText = clean(body.anchor_text, 100);
+  if (anchorText.length < 2) throw new ApiError(400, "Anchor text must contain at least two characters.");
+  const now = new Date().toISOString();
+  const status =
+    decision === "accept" ? "accepted" : decision === "reject" ? "rejected" : suggestion.status;
+  const updated = data(
+    await supabase
+      .from("knowledge_internal_link_suggestions")
+      .update({
+        anchor_text: anchorText,
+        status,
+        decided_at: ["accepted", "rejected"].includes(status) ? now : suggestion.decided_at,
+        updated_at: now,
+      })
+      .eq("id", suggestion.id)
+      .select()
+      .single(),
+    "Internal-link decision could not be saved."
+  );
+  const action =
+    decision === "accept" ? "accepted" : decision === "reject" ? "rejected" : "anchor_edited";
+  data(
+    await supabase.from("knowledge_internal_link_events").insert({
+      suggestion_id: suggestion.id,
+      article_id: suggestion.article_id,
+      website_page_id: suggestion.website_page_id,
+      action,
+      reason: clean(body.reason, 1000) || `User ${action.replace("_", " ")} the suggestion.`,
+      details: {
+        previous_anchor_text: suggestion.anchor_text,
+        anchor_text: anchorText,
+        destination_url: suggestion.destination_url,
+        automatic_insertion: false,
+      },
+    }),
+    "Internal-link audit history could not be saved."
+  );
+  return updated;
+}
+
 export default async function handler(request, response) {
   if (request.method !== "POST") return response.status(405).json({ ok: false, message: "Method not allowed." });
   if (!authorize(request)) return response.status(401).json({ ok: false, message: "Access key not recognised." });
@@ -907,6 +1146,21 @@ export default async function handler(request, response) {
         break;
       case "recordBusinessBrainUpdate":
         result = { event: await recordBusinessBrainUpdate(supabase, body) };
+        break;
+      case "saveWebsiteIndexEntry":
+        result = { entry: await saveWebsiteIndexEntry(supabase, body) };
+        break;
+      case "refreshInternalLinks":
+        result = {
+          suggestions: await refreshArticleInternalLinks(
+            supabase,
+            clean(body.article_id, 100),
+            { reason: "User requested a fresh approved-destination match." }
+          ),
+        };
+        break;
+      case "decideInternalLink":
+        result = { suggestion: await decideInternalLink(supabase, body) };
         break;
       default:
         throw new ApiError(400, "Unsupported Editorial Engine action.");
