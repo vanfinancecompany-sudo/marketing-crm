@@ -33,6 +33,7 @@ import {
   BusinessSettingsPanel,
   ContentIntelligenceDashboard,
   PriorityStars,
+  TopicPlannerIntelligence,
   TopicFinderPanel,
 } from "../components/KnowledgeHubV2Panels.jsx";
 import {
@@ -58,6 +59,11 @@ const EMPTY_TOPIC = {
   notes: "",
   status: "idea",
   priority: 3,
+  estimated_value: 3,
+  difficulty: 3,
+  target_persona: "",
+  seasonal: false,
+  opportunity_reason: "",
   source: "manual",
 };
 
@@ -666,14 +672,14 @@ export default function KnowledgeHubPage() {
     }
   }
 
-  async function handleFindTopics() {
+  async function handleFindTopics(quantityOverride) {
     setBusy(true);
     setError("");
     setMessage("");
     try {
       const result = await findKnowledgeTopics(
         finderCategories,
-        Number(finderQuantity),
+        Number.isFinite(Number(quantityOverride)) ? Number(quantityOverride) : Number(finderQuantity),
         finderBrief
       );
       const ideas = result.finder.ideas || [];
@@ -930,6 +936,11 @@ export default function KnowledgeHubPage() {
               <button className="button button--ghost" disabled={!selectedTopicIds.length || busy} onClick={beginBatchGeneration}>Batch Generate</button>
             </div>
           </div>
+          <TopicPlannerIntelligence
+            topics={topics}
+            articles={articles}
+            freshnessDays={settings.freshness_days}
+          />
           {topicForm ? (
             <>
               <div className="field-grid">
@@ -940,6 +951,11 @@ export default function KnowledgeHubPage() {
                 <Field label="Customer/search intent"><input className="field__input" value={topicForm.intent || ""} onChange={(event) => setTopicForm({ ...topicForm, intent: event.target.value })} /></Field>
                 <Field label="Status"><select className="field__input" value={topicForm.status} onChange={(event) => setTopicForm({ ...topicForm, status: event.target.value })}>{KNOWLEDGE_TOPIC_STATUSES.map((item) => <option key={item}>{item}</option>)}</select></Field>
                 <Field label="Priority"><PriorityStars value={topicForm.priority || 3} onChange={(priority) => setTopicForm({ ...topicForm, priority })} /></Field>
+                <Field label="Estimated value"><PriorityStars value={topicForm.estimated_value || 3} onChange={(estimated_value) => setTopicForm({ ...topicForm, estimated_value })} /></Field>
+                <Field label="Difficulty"><PriorityStars value={topicForm.difficulty || 3} onChange={(difficulty) => setTopicForm({ ...topicForm, difficulty })} /></Field>
+                <Field label="Target persona"><input className="field__input" value={topicForm.target_persona || ""} onChange={(event) => setTopicForm({ ...topicForm, target_persona: event.target.value })} /></Field>
+                <Field label="Seasonal"><label className="toggle-row"><input type="checkbox" checked={Boolean(topicForm.seasonal)} onChange={(event) => setTopicForm({ ...topicForm, seasonal: event.target.checked })} />Seasonal opportunity</label></Field>
+                <Field label="Opportunity reason" wide><textarea className="field__input" rows={3} value={topicForm.opportunity_reason || ""} onChange={(event) => setTopicForm({ ...topicForm, opportunity_reason: event.target.value })} /></Field>
                 <Field label="Notes" wide><textarea className="field__input" rows={5} value={topicForm.notes || ""} onChange={(event) => setTopicForm({ ...topicForm, notes: event.target.value })} /></Field>
               </div>
               <div className="card-actions">
@@ -952,14 +968,15 @@ export default function KnowledgeHubPage() {
               <Filters search={search} setSearch={setSearch} category={categoryFilter} setCategory={setCategoryFilter} status={statusFilter} setStatus={setStatusFilter} type={typeFilter} setType={setTypeFilter} priority={priorityFilter} setPriority={setPriorityFilter} />
               <div className="knowledge-table-wrap">
                 <table className="knowledge-table">
-                  <thead><tr><th>Select</th><th>Topic</th><th>Priority</th><th>Category</th><th>Keyword / intent</th><th>Status</th><th>Actions</th></tr></thead>
+                  <thead><tr><th>Select</th><th>Topic</th><th>Priority</th><th>Value / Difficulty</th><th>Category / Persona</th><th>Keyword / intent</th><th>Status</th><th>Actions</th></tr></thead>
                   <tbody>
                     {filteredTopics.map((topic) => (
                       <tr key={topic.id}>
                         <td><input type="checkbox" checked={selectedTopicIds.includes(topic.id)} onChange={(event) => setSelectedTopicIds((current) => event.target.checked ? [...new Set([...current, topic.id])] : current.filter((id) => id !== topic.id))} /></td>
                         <td><strong>{topic.title}</strong><small>{topic.source === "ai_topic_finder" ? "AI Topic Finder" : "Manual"}</small></td>
                         <td><PriorityStars value={topic.priority || 3} readOnly /></td>
-                        <td>{topic.category}</td>
+                        <td>{topic.estimated_value || 3} / {topic.difficulty || 3}</td>
+                        <td>{topic.category}<small>{topic.target_persona || "All personas"}{topic.seasonal ? " · Seasonal" : ""}</small></td>
                         <td>{topic.primary_keyword || "-"}<small>{topic.intent || ""}</small></td>
                         <td><StatusPill value={topic.status} /></td>
                         <td><div className="card-actions"><button className="button button--primary" onClick={() => beginGeneration(topic)}>Generate</button><button className="button button--ghost" onClick={() => setTopicForm({ ...topic })}>Edit</button><button className="button button--danger" onClick={() => handleDeleteTopic(topic)}>Delete</button></div></td>
