@@ -50,6 +50,7 @@ import {
   KnowledgeCoverageMap,
 } from "../components/KnowledgeHubV5Panels.jsx";
 import { EditorialAutomationPlatform } from "../components/KnowledgeHubV6Panels.jsx";
+import { WebsiteIndexPanel } from "../components/KnowledgeHubInternalLinking.jsx";
 import {
   articleContentHash,
   buildApprovalQueue,
@@ -63,8 +64,11 @@ import {
   recordArticleRevision,
   recordBusinessBrainUpdate,
   rejectEditorialImprovement,
+  decideEditorialInternalLink,
+  refreshEditorialInternalLinks,
   saveArticleEditorialOverrides,
   saveBusinessIntentOverrides,
+  saveWebsiteIndexEntry,
 } from "../services/editorialEngine.js";
 import {
   approveEditorialOpportunity,
@@ -135,6 +139,9 @@ const EMPTY_EDITORIAL = {
   proposals: [],
   events: [],
   business_pages: [],
+  website_index: [],
+  link_suggestions: [],
+  link_events: [],
   concepts: [],
   stale_article_ids: [],
 };
@@ -509,6 +516,12 @@ export default function KnowledgeHubPage() {
   const currentProposals = article
     ? editorial.proposals.filter((proposal) => proposal.article_id === article.id)
     : [];
+  const currentLinkSuggestions = article
+    ? editorial.link_suggestions.filter((suggestion) => suggestion.article_id === article.id)
+    : [];
+  const currentLinkEvents = article
+    ? editorial.link_events.filter((event) => event.article_id === article.id)
+    : [];
 
   async function handleSaveTopic() {
     const duplicates = findKnowledgeTopicDuplicates(topicForm, topics);
@@ -673,6 +686,14 @@ export default function KnowledgeHubPage() {
               (next) =>
                 next.article_id === item.article_id && next.concept_id === item.concept_id
             )
+        ),
+      ],
+      link_suggestions: [
+        ...(result.link_suggestions || []),
+        ...current.link_suggestions.filter(
+          (item) =>
+            !result.link_suggestions?.some((next) => next.id === item.id) &&
+            item.article_id !== result.intent.article_id
         ),
       ],
       stale_article_ids: current.stale_article_ids.filter(
@@ -912,9 +933,82 @@ export default function KnowledgeHubPage() {
         internal_links: result.overrides.internal_links || [],
         dismissed_recommendations: result.overrides.dismissed_recommendations || [],
       });
-      setMessage("CTA and internal-link overrides saved.");
+      setMessage("CTA overrides saved.");
     } catch (saveError) {
       setError(saveError.message || "Editorial overrides could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSaveWebsiteIndexEntry(entry) {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await saveWebsiteIndexEntry(entry);
+      setEditorial((current) => ({
+        ...current,
+        website_index: [
+          result.entry,
+          ...current.website_index.filter((item) => item.id !== result.entry.id),
+        ],
+      }));
+      setMessage("Approved Website Index destination saved.");
+      return true;
+    } catch (saveError) {
+      setError(saveError.message || "Website Index destination could not be saved.");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleInternalLinkDecision(suggestionId, decision, anchorText) {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await decideEditorialInternalLink(
+        suggestionId,
+        decision,
+        anchorText
+      );
+      setEditorial((current) => ({
+        ...current,
+        link_suggestions: current.link_suggestions.map((item) =>
+          item.id === result.suggestion.id ? result.suggestion : item
+        ),
+      }));
+      setMessage(
+        decision === "edit_anchor"
+          ? "Anchor text saved. No article content was changed."
+          : `Internal-link suggestion ${decision === "accept" ? "accepted" : "rejected"}. No link was inserted.`
+      );
+    } catch (decisionError) {
+      setError(decisionError.message || "Internal-link decision could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRefreshInternalLinks() {
+    if (!article || dirty.current) {
+      setError("Save the current article before refreshing internal-link suggestions.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const result = await refreshEditorialInternalLinks(article.id);
+      setEditorial((current) => ({
+        ...current,
+        link_suggestions: [
+          ...(result.suggestions || []),
+          ...current.link_suggestions.filter((item) => item.article_id !== article.id),
+        ],
+      }));
+      setMessage(`${result.suggestions?.length || 0} approved internal-link suggestion(s) ready for review.`);
+    } catch (refreshError) {
+      setError(refreshError.message || "Internal-link suggestions could not be refreshed.");
     } finally {
       setBusy(false);
     }
@@ -1385,6 +1479,7 @@ export default function KnowledgeHubPage() {
           ["topics", "Topic Planner"],
           ["finder", "AI Topic Finder"],
           ["articles", "Approval Queue"],
+          ["website-index", "Website Index"],
           ["business", "Business Knowledge"],
           ["settings", "Settings & Specialists"],
         ].map(([key, label]) => (
@@ -1682,8 +1777,10 @@ export default function KnowledgeHubPage() {
             onApply={handleApplyImprovement}
             onReject={handleRejectImprovement}
             busy={busy}
-            articles={articles}
-            businessPages={editorial.business_pages}
+            linkSuggestions={currentLinkSuggestions}
+            linkEvents={currentLinkEvents}
+            onLinkDecision={handleInternalLinkDecision}
+            onRefreshLinks={handleRefreshInternalLinks}
           />
           <EditorialHistoryPanel
             revisions={currentRevisions}
@@ -1704,6 +1801,15 @@ export default function KnowledgeHubPage() {
             }
           />
         </>
+      ) : null}
+
+      {screen === "website-index" ? (
+        <WebsiteIndexPanel
+          entries={editorial.website_index}
+          approvedArticles={articles.filter((item) => item.status === "approved")}
+          onSave={handleSaveWebsiteIndexEntry}
+          busy={busy}
+        />
       ) : null}
 
       {screen === "business" ? (

@@ -6,6 +6,7 @@ import {
   buildArticleHealth,
   buildArticleReviewSummary,
 } from "../lib/editorialIntelligence.js";
+import { InternalLinkReviewPanel } from "./KnowledgeHubInternalLinking.jsx";
 
 const titleCase = (value) =>
   String(value || "")
@@ -214,24 +215,19 @@ export function EditorialRecommendationsPanel({
   onApply,
   onReject,
   busy,
-  articles = [],
-  businessPages = [],
+  linkSuggestions = [],
+  linkEvents = [],
+  onLinkDecision,
+  onRefreshLinks,
 }) {
   if (!assessment) return null;
   const ctas = overrides.structured_ctas ?? assessment.structured_ctas ?? [];
-  const links = overrides.internal_links ?? assessment.internal_links ?? [];
   const updateCta = (index, field, value) =>
     setOverrides({ ...overrides, structured_ctas: ctas.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item) });
-  const updateLink = (index, field, value) =>
-    setOverrides({ ...overrides, internal_links: links.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item) });
-  const targetLabels = new Map([
-    ...articles.map((item) => [item.id, item.title]),
-    ...businessPages.map((item) => [item.page_key, item.title]),
-  ]);
   return (
     <>
       <section className="panel">
-        <div className="panel__header"><div><h3>Intelligent CTAs</h3><p>Structured recommendations only. Destinations and wording are manually overridable.</p></div><button className="button button--ghost" type="button" disabled={busy} onClick={onSaveOverrides}>Save CTA & Link Overrides</button></div>
+        <div className="panel__header"><div><h3>Intelligent CTAs</h3><p>Structured recommendations only. Destinations and wording are manually overridable.</p></div><button className="button button--ghost" type="button" disabled={busy} onClick={onSaveOverrides}>Save CTA Overrides</button></div>
         <div className="card-actions" style={{ marginBottom: 12 }}>
           <button
             className="button button--ghost"
@@ -272,51 +268,13 @@ export function EditorialRecommendationsPanel({
           {!ctas.length ? <div className="notice">No supported CTA recommendation was returned.</div> : null}
         </div>
       </section>
-      <section className="panel">
-        <div className="panel__header"><div><h3>Contextual Internal Links</h3><p>Editorial suggestions only—never automatic editing, menus, link farms or keyword stuffing.</p></div></div>
-        <div className="card-actions" style={{ marginBottom: 12 }}>
-          <button
-            className="button button--ghost"
-            type="button"
-            disabled={busy || links.length >= 6}
-            onClick={() =>
-              setOverrides({
-                ...overrides,
-                internal_links: [
-                  ...links,
-                  {
-                    target_type: "article",
-                    target_id: "",
-                    anchor_text: "",
-                    context: "",
-                    relevance_score: 100,
-                  },
-                ],
-              })
-            }
-          >
-            Add Link
-          </button>
-        </div>
-        <div className="knowledge-business-grid">
-          {links.map((link, index) => (
-            <div className="notice" key={`${link.target_type}-${link.target_id}-${index}`}>
-              <strong>{titleCase(link.target_type)} · {link.relevance_score}% relevant</strong>
-              <select className="field__input" aria-label={`Link ${index + 1} type`} value={link.target_type} onChange={(event) => updateLink(index, "target_type", event.target.value)}><option value="article">Article</option><option value="business_page">Business page</option></select>
-              <input className="field__input" list="knowledge-editorial-link-targets" aria-label={`Link ${index + 1} target`} value={link.target_id} onChange={(event) => updateLink(index, "target_id", event.target.value)} />
-              <input className="field__input" aria-label={`Link ${index + 1} anchor`} value={link.anchor_text} onChange={(event) => updateLink(index, "anchor_text", event.target.value)} />
-              <input className="field__input" aria-label={`Link ${index + 1} context`} value={link.context} onChange={(event) => updateLink(index, "context", event.target.value)} />
-              <small>Target: {targetLabels.get(link.target_id) || link.target_id}</small>
-              <button className="button button--ghost" type="button" onClick={() => setOverrides({ ...overrides, internal_links: links.filter((_, itemIndex) => itemIndex !== index) })}>Remove</button>
-            </div>
-          ))}
-          {!links.length ? <div className="notice">No natural internal link passed the relevance safeguards.</div> : null}
-        </div>
-        <datalist id="knowledge-editorial-link-targets">
-          {articles.filter((item) => item.status === "approved").map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
-          {businessPages.map((item) => <option key={item.page_key} value={item.page_key}>{item.title}</option>)}
-        </datalist>
-      </section>
+      <InternalLinkReviewPanel
+        suggestions={linkSuggestions}
+        events={linkEvents}
+        onDecision={onLinkDecision}
+        onRefresh={onRefreshLinks}
+        busy={busy}
+      />
       <section className="panel">
         <div className="panel__header"><div><h3>Explain My Score</h3><p>See strengths, lost points and review-only one-click improvement proposals.</p></div></div>
         <div className="knowledge-two-column">
