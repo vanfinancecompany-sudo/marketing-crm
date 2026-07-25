@@ -2547,6 +2547,25 @@ textarea {
   padding: 18px;
 }
 
+.knowledge-v5-coverage small {
+  display: block;
+  margin-top: 8px;
+  color: #64748b;
+}
+
+.knowledge-v5-proposal {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+  background: rgba(15, 23, 42, 0.04);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
 .creative-preview__headline {
   font-size: 24px;
 }

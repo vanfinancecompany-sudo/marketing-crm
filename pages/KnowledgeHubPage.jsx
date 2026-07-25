@@ -42,6 +42,30 @@ import {
   PromptBuilderNotice,
 } from "../components/KnowledgeHubV3Panels.jsx";
 import {
+  BusinessIntentPanel,
+  EditorialApprovalQueue,
+  EditorialHistoryPanel,
+  EditorialRecommendationsPanel,
+  EditorialScorePanel,
+  KnowledgeCoverageMap,
+} from "../components/KnowledgeHubV5Panels.jsx";
+import {
+  articleContentHash,
+  buildApprovalQueue,
+  buildKnowledgeCoverageMap,
+} from "../lib/editorialIntelligence.js";
+import {
+  analyseEditorialArticle,
+  applyEditorialImprovement,
+  loadEditorialEngine,
+  proposeEditorialImprovement,
+  recordArticleRevision,
+  recordBusinessBrainUpdate,
+  rejectEditorialImprovement,
+  saveArticleEditorialOverrides,
+  saveBusinessIntentOverrides,
+} from "../services/editorialEngine.js";
+import {
   MARKETING_ACCESS_DENIED_EVENT,
   clearMarketingAccessKey,
   getStoredMarketingAccessKey,
@@ -88,6 +112,19 @@ const EMPTY_SETTINGS = {
   target_audiences: [],
   content_goals: [],
   freshness_days: 180,
+};
+
+const EMPTY_EDITORIAL = {
+  intents: [],
+  assessments: [],
+  overrides: [],
+  article_concepts: [],
+  revisions: [],
+  proposals: [],
+  events: [],
+  business_pages: [],
+  concepts: [],
+  stale_article_ids: [],
 };
 
 function formatDate(value) {
@@ -198,6 +235,9 @@ export default function KnowledgeHubPage() {
     normalizeBusinessKnowledgeSections([], EMPTY_SETTINGS)
   );
   const [articleReviews, setArticleReviews] = useState([]);
+  const [editorial, setEditorial] = useState(EMPTY_EDITORIAL);
+  const [intentOverrides, setIntentOverrides] = useState({});
+  const [recommendationOverrides, setRecommendationOverrides] = useState({});
   const [aiConfiguration, setAiConfiguration] = useState(null);
   const [topicForm, setTopicForm] = useState(null);
   const [generationTopic, setGenerationTopic] = useState(null);
@@ -230,7 +270,10 @@ export default function KnowledgeHubPage() {
     setBusy(true);
     setError("");
     try {
-      const result = await loadKnowledgeHub();
+      const [result, editorialResult] = await Promise.all([
+        loadKnowledgeHub(),
+        loadEditorialEngine(),
+      ]);
       setTopics(result.topics || []);
       setTemplates(result.templates || []);
       setArticles(result.articles || []);
@@ -240,6 +283,7 @@ export default function KnowledgeHubPage() {
         normalizeBusinessKnowledgeSections(result.business_sections || [], loadedSettings)
       );
       setArticleReviews(result.article_reviews || []);
+      setEditorial({ ...EMPTY_EDITORIAL, ...editorialResult });
       setAiConfiguration(result.ai_configuration || null);
       setAccessStatus("unlocked");
     } catch (loadError) {
@@ -385,6 +429,52 @@ export default function KnowledgeHubPage() {
     });
     return latest;
   }, [articleReviews]);
+  const latestAssessmentByArticle = useMemo(() => {
+    const latest = new Map();
+    editorial.assessments.forEach((assessment) => {
+      if (!latest.has(assessment.article_id)) latest.set(assessment.article_id, assessment);
+    });
+    return latest;
+  }, [editorial.assessments]);
+  const intentByArticle = useMemo(
+    () => new Map(editorial.intents.map((intent) => [intent.article_id, intent])),
+    [editorial.intents]
+  );
+  const editorialOverrideByArticle = useMemo(
+    () => new Map(editorial.overrides.map((item) => [item.article_id, item])),
+    [editorial.overrides]
+  );
+  const approvalQueue = useMemo(
+    () =>
+      buildApprovalQueue({
+        articles: filteredArticles,
+        assessments: editorial.assessments,
+        topics,
+        proposals: editorial.proposals,
+      }),
+    [filteredArticles, editorial.assessments, editorial.proposals, topics]
+  );
+  const coverageMap = useMemo(
+    () =>
+      buildKnowledgeCoverageMap({
+        concepts: editorial.concepts,
+        articleConcepts: editorial.article_concepts,
+        articles,
+        topics,
+      }),
+    [editorial.concepts, editorial.article_concepts, articles, topics]
+  );
+  const currentAssessment = article ? latestAssessmentByArticle.get(article.id) : null;
+  const currentIntent = article ? intentByArticle.get(article.id) : null;
+  const currentRevisions = article
+    ? editorial.revisions.filter((revision) => revision.article_id === article.id)
+    : [];
+  const currentAssessments = article
+    ? editorial.assessments.filter((assessment) => assessment.article_id === article.id)
+    : [];
+  const currentProposals = article
+    ? editorial.proposals.filter((proposal) => proposal.article_id === article.id)
+    : [];
 
   async function handleSaveTopic() {
     const duplicates = findKnowledgeTopicDuplicates(topicForm, topics);
@@ -470,6 +560,17 @@ export default function KnowledgeHubPage() {
     setOriginalArticle(JSON.stringify(editable));
     setEditorErrors({});
     setPreview(false);
+    setIntentOverrides(intentByArticle.get(item.id)?.manual_overrides || {});
+    const savedOverrides = editorialOverrideByArticle.get(item.id);
+    setRecommendationOverrides(
+      savedOverrides
+        ? {
+            structured_ctas: savedOverrides.structured_ctas || [],
+            internal_links: savedOverrides.internal_links || [],
+            dismissed_recommendations: savedOverrides.dismissed_recommendations || [],
+          }
+        : {}
+    );
     dirty.current = false;
     setScreen("editor");
   }
@@ -487,7 +588,17 @@ export default function KnowledgeHubPage() {
         )
       );
       openArticle(generated);
-      setMessage("Article generated and saved as a draft.");
+      try {
+        await refreshEditorialAnalysis(generated.id, false);
+        setMessage("Article generated as a draft and editorial analysis completed.");
+      } catch (analysisError) {
+        setEditorial((current) => ({
+          ...current,
+          stale_article_ids: [...new Set([...current.stale_article_ids, generated.id])],
+        }));
+        setMessage("Article generated as a draft. Editorial analysis needs to be retried.");
+        setError(analysisError.message || "Editorial analysis could not be completed.");
+      }
     } catch (generationError) {
       setError(generationError.message || "Article generation failed. Your inputs have been kept.");
     } finally {
@@ -509,6 +620,81 @@ export default function KnowledgeHubPage() {
     });
   }
 
+  function mergeEditorialAnalysis(result) {
+    setEditorial((current) => ({
+      ...current,
+      intents: [
+        result.intent,
+        ...current.intents.filter((item) => item.article_id !== result.intent.article_id),
+      ],
+      assessments: [result.assessment, ...current.assessments],
+      revisions: result.revision
+        ? [result.revision, ...current.revisions]
+        : current.revisions,
+      article_concepts: [
+        ...(result.article_concepts || []),
+        ...current.article_concepts.filter(
+          (item) =>
+            !result.article_concepts?.some(
+              (next) =>
+                next.article_id === item.article_id && next.concept_id === item.concept_id
+            )
+        ),
+      ],
+      stale_article_ids: current.stale_article_ids.filter(
+        (id) => id !== result.intent.article_id
+      ),
+    }));
+  }
+
+  async function refreshEditorialAnalysis(articleId, showMessage = true) {
+    const result = await analyseEditorialArticle(articleId);
+    mergeEditorialAnalysis(result);
+    if (showMessage) {
+      setMessage(
+        `Editorial analysis complete: ${result.assessment.overall_score}/100 · ${result.assessment.publication_status.replaceAll("_", " ")}.`
+      );
+    }
+    return result;
+  }
+
+  async function handleAnalyseCurrentArticle() {
+    if (!article || dirty.current) {
+      setError("Save the current article before refreshing its editorial analysis.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await refreshEditorialAnalysis(article.id);
+    } catch (analysisError) {
+      setError(analysisError.message || "Editorial analysis could not be completed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleAnalyseMissingArticles() {
+    const missing = approvalQueue.filter((item) => !item.assessment).map((item) => item.article.id);
+    if (!missing.length) return;
+    setBusy(true);
+    setError("");
+    let completed = 0;
+    for (const articleId of missing) {
+      try {
+        await refreshEditorialAnalysis(articleId, false);
+        completed += 1;
+      } catch (analysisError) {
+        setError(
+          `${completed} article(s) analysed. ${analysisError.message || "The next article could not be analysed."}`
+        );
+        break;
+      }
+    }
+    setMessage(`${completed} previously unscored article(s) analysed.`);
+    setBusy(false);
+  }
+
   async function handleSaveArticle(nextStatus = article.status) {
     const nextArticle = {
       ...article,
@@ -522,6 +708,19 @@ export default function KnowledgeHubPage() {
     const validation = validateKnowledgeArticle(nextArticle);
     setEditorErrors(validation);
     if (Object.keys(validation).length) return;
+    if (
+      nextStatus === "approved" &&
+      (
+        !currentAssessment ||
+        editorial.stale_article_ids.includes(article.id) ||
+        currentAssessment.publication_status === "blocked"
+      ) &&
+      !window.confirm(
+        "Editorial analysis is missing, out of date or blocked. Approval remains your decision. Approve anyway?"
+      )
+    ) {
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -533,13 +732,47 @@ export default function KnowledgeHubPage() {
       setArticles((current) =>
         current.map((item) => (item.id === result.article.id ? result.article : item))
       );
-      setMessage(
-        nextStatus === "approved"
-          ? "Article approved."
-          : nextStatus === "archived"
-            ? "Article archived."
-            : "Draft saved."
-      );
+      const changeSource =
+        nextStatus === "approved" ? "approval" : nextStatus === "archived" ? "archive" : "user_edit";
+      try {
+        const revisionResult = await recordArticleRevision(
+          result.article.id,
+          changeSource,
+          nextStatus === "approved"
+            ? "Article approved by user."
+            : nextStatus === "archived"
+              ? "Article archived by user."
+              : "Article draft saved by user."
+        );
+        setEditorial((current) => ({
+          ...current,
+          revisions: [revisionResult.revision, ...current.revisions],
+          stale_article_ids: nextStatus === "archived"
+            ? current.stale_article_ids.filter((id) => id !== result.article.id)
+            : [...new Set([...current.stale_article_ids, result.article.id])],
+        }));
+        if (nextStatus !== "archived") {
+          await refreshEditorialAnalysis(result.article.id, false);
+        }
+        setMessage(
+          nextStatus === "approved"
+            ? "Article approved and editorial analysis refreshed."
+            : nextStatus === "archived"
+              ? "Article archived."
+              : "Draft saved and editorial analysis refreshed."
+        );
+      } catch (editorialError) {
+        setEditorial((current) => ({
+          ...current,
+          stale_article_ids: [...new Set([...current.stale_article_ids, result.article.id])],
+        }));
+        setMessage(
+          nextStatus === "approved"
+            ? "Article approved. Editorial history or analysis needs to be retried."
+            : "Article saved. Editorial history or analysis needs to be retried."
+        );
+        setError(editorialError.message || "Editorial analysis could not be refreshed.");
+      }
     } catch (saveError) {
       setError(saveError.message || "Article could not be saved.");
     } finally {
@@ -551,25 +784,172 @@ export default function KnowledgeHubPage() {
     if (!selectedArticleIds.length) return;
     if (
       nextStatus === "approved" &&
-      !window.confirm(`Approve ${selectedArticleIds.length} selected article(s)?`)
+      !window.confirm(
+        `Approve ${selectedArticleIds.length} selected article(s)? Any editorial warnings remain advisory and should be reviewed first.`
+      )
     ) {
       return;
     }
     setBusy(true);
     setError("");
     try {
-      const result = await bulkUpdateKnowledgeArticles(selectedArticleIds, nextStatus);
+      const articleIds = [...selectedArticleIds];
+      const result = await bulkUpdateKnowledgeArticles(articleIds, nextStatus);
       setArticles((current) =>
         current.map((item) =>
           result.update.ids.includes(item.id) ? { ...item, ...result.update } : item
         )
       );
       setSelectedArticleIds([]);
-      setMessage(
-        nextStatus === "approved" ? "Selected articles approved." : "Selected articles archived."
-      );
+      try {
+        const history = [];
+        for (const articleId of articleIds) {
+          const revision = await recordArticleRevision(
+            articleId,
+            nextStatus === "approved" ? "approval" : "archive",
+            nextStatus === "approved"
+              ? "Article approved in bulk workflow by user."
+              : "Article archived in bulk workflow by user."
+          );
+          history.push(revision.revision);
+        }
+        setEditorial((current) => ({
+          ...current,
+          revisions: [...history, ...current.revisions],
+          stale_article_ids: nextStatus === "archived"
+            ? current.stale_article_ids.filter((id) => !articleIds.includes(id))
+            : current.stale_article_ids,
+        }));
+        setMessage(
+          nextStatus === "approved"
+            ? "Selected articles approved and recorded in editorial history."
+            : "Selected articles archived and recorded in editorial history."
+        );
+      } catch (historyError) {
+        setMessage(
+          nextStatus === "approved" ? "Selected articles approved." : "Selected articles archived."
+        );
+        setError(historyError.message || "Bulk editorial history needs to be retried.");
+      }
     } catch (updateError) {
       setError(updateError.message || "Articles could not be updated.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSaveIntentOverrides() {
+    if (!article) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await saveBusinessIntentOverrides(article.id, intentOverrides);
+      setEditorial((current) => ({
+        ...current,
+        intents: [
+          result.intent,
+          ...current.intents.filter((item) => item.article_id !== result.intent.article_id),
+        ],
+      }));
+      await refreshEditorialAnalysis(article.id, false);
+      setMessage("Business Intent overrides saved and the editorial score refreshed.");
+    } catch (saveError) {
+      setError(saveError.message || "Business Intent overrides could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSaveRecommendationOverrides() {
+    if (!article) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await saveArticleEditorialOverrides(article.id, recommendationOverrides);
+      setEditorial((current) => ({
+        ...current,
+        overrides: [
+          result.overrides,
+          ...current.overrides.filter((item) => item.article_id !== result.overrides.article_id),
+        ],
+      }));
+      setRecommendationOverrides({
+        structured_ctas: result.overrides.structured_ctas || [],
+        internal_links: result.overrides.internal_links || [],
+        dismissed_recommendations: result.overrides.dismissed_recommendations || [],
+      });
+      setMessage("CTA and internal-link overrides saved.");
+    } catch (saveError) {
+      setError(saveError.message || "Editorial overrides could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleProposeImprovement(recommendationKey) {
+    if (!article) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await proposeEditorialImprovement(article.id, recommendationKey);
+      setEditorial((current) => ({
+        ...current,
+        proposals: [result.proposal, ...current.proposals],
+      }));
+      setMessage("Review-only improvement proposal prepared. No article content was changed.");
+    } catch (proposalError) {
+      setError(proposalError.message || "Improvement proposal could not be prepared.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleApplyImprovement(proposalId) {
+    if (!window.confirm("Apply this reviewed proposal to the article and return it to draft?")) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await applyEditorialImprovement(proposalId);
+      setArticle(result.article);
+      setArticles((current) =>
+        current.map((item) => (item.id === result.article.id ? result.article : item))
+      );
+      setFaqDraft(JSON.stringify(result.article.faq_json || [], null, 2));
+      setOriginalArticle(JSON.stringify(result.article));
+      dirty.current = false;
+      setEditorial((current) => ({
+        ...current,
+        proposals: current.proposals.map((proposal) =>
+          proposal.id === result.proposal.id ? result.proposal : proposal
+        ),
+        revisions: result.revision
+          ? [result.revision, ...current.revisions]
+          : current.revisions,
+        stale_article_ids: [...new Set([...current.stale_article_ids, result.article.id])],
+      }));
+      await refreshEditorialAnalysis(result.article.id, false);
+      setMessage("Reviewed improvement applied to the draft and editorial analysis refreshed.");
+    } catch (applyError) {
+      setError(applyError.message || "Improvement proposal could not be applied.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRejectImprovement(proposalId) {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await rejectEditorialImprovement(proposalId);
+      setEditorial((current) => ({
+        ...current,
+        proposals: current.proposals.map((proposal) =>
+          proposal.id === result.proposal.id ? result.proposal : proposal
+        ),
+      }));
+      setMessage("Improvement proposal rejected. The article was not changed.");
+    } catch (rejectError) {
+      setError(rejectError.message || "Improvement proposal could not be rejected.");
     } finally {
       setBusy(false);
     }
@@ -637,7 +1017,20 @@ export default function KnowledgeHubPage() {
             : item
         )
       );
-      setMessage(`${result.business_section.title} saved to Business Intelligence.`);
+      const editorialEvent = await recordBusinessBrainUpdate(
+        result.business_section.section_key,
+        `${result.business_section.title} updated in the Business Brain.`
+      );
+      setEditorial((current) => ({
+        ...current,
+        events: [editorialEvent.event, ...current.events],
+        stale_article_ids: articles
+          .filter((item) => item.status !== "archived")
+          .map((item) => item.id),
+      }));
+      setMessage(
+        `${result.business_section.title} saved. Existing editorial assessments are marked for review.`
+      );
     } catch (sectionError) {
       setError(sectionError.message || "Business Knowledge section could not be saved.");
     } finally {
@@ -766,6 +1159,7 @@ export default function KnowledgeHubPage() {
     setError("");
     let completed = 0;
     let failed = 0;
+    let editorialFailed = 0;
     for (const topic of selected) {
       setBatchProgress((current) =>
         current.map((item) =>
@@ -784,13 +1178,25 @@ export default function KnowledgeHubPage() {
             item.id === topic.id ? { ...item, status: "generated" } : item
           )
         );
-        setBatchProgress((current) =>
-          current.map((item) =>
-            item.topic_id === topic.id
-              ? { ...item, status: "complete", message: "Draft saved" }
-              : item
-          )
-        );
+        try {
+          await refreshEditorialAnalysis(generated.id, false);
+          setBatchProgress((current) =>
+            current.map((item) =>
+              item.topic_id === topic.id
+                ? { ...item, status: "complete", message: "Draft saved and analysed" }
+                : item
+            )
+          );
+        } catch (analysisError) {
+          editorialFailed += 1;
+          setBatchProgress((current) =>
+            current.map((item) =>
+              item.topic_id === topic.id
+                ? { ...item, status: "complete", message: "Draft saved; analysis needs retry" }
+                : item
+            )
+          );
+        }
       } catch (batchError) {
         failed += 1;
         setBatchProgress((current) =>
@@ -807,7 +1213,11 @@ export default function KnowledgeHubPage() {
       }
     }
     setBusy(false);
-    setMessage(`${completed} draft(s) generated${failed ? `; ${failed} failed` : ""}.`);
+    setMessage(
+      `${completed} draft(s) generated${failed ? `; ${failed} failed` : ""}${
+        editorialFailed ? `; ${editorialFailed} editorial analysis retry required` : ""
+      }.`
+    );
   }
 
   if (accessStatus !== "unlocked") {
@@ -838,9 +1248,9 @@ export default function KnowledgeHubPage() {
       <section className="hero-panel">
         <div className="panel__header">
           <div>
-            <div className="eyebrow">Business Intelligence V3 · Content Intelligence V2</div>
+            <div className="eyebrow">AI Editorial Engine · Business Intelligence V3 · Content Intelligence V2</div>
             <h2>Knowledge Hub</h2>
-            <p>Build from confirmed business knowledge, review drafts and approve manually. Nothing publishes automatically.</p>
+            <p>Understand, score and improve articles from confirmed business knowledge. Every recommendation is reviewable and nothing publishes automatically.</p>
           </div>
           <button
             type="button"
@@ -860,7 +1270,7 @@ export default function KnowledgeHubPage() {
           ["dashboard", "Dashboard"],
           ["topics", "Topic Planner"],
           ["finder", "AI Topic Finder"],
-          ["articles", "Article Library"],
+          ["articles", "Approval Queue"],
           ["business", "Business Knowledge"],
           ["settings", "Settings & Specialists"],
         ].map(([key, label]) => (
@@ -1053,34 +1463,24 @@ export default function KnowledgeHubPage() {
       ) : null}
 
       {screen === "articles" ? (
-        <section className="panel">
-          <div className="panel__header">
-            <div><h3>Article Library</h3><p>Search, edit, approve and archive generated knowledge.</p></div>
-            <div className="card-actions"><button className="button button--primary" disabled={!selectedArticleIds.length || busy} onClick={() => handleBulkUpdate("approved")}>Approve Selected</button><button className="button button--ghost" disabled={!selectedArticleIds.length || busy} onClick={() => handleBulkUpdate("archived")}>Archive Selected</button></div>
-          </div>
-          <Filters search={search} setSearch={setSearch} category={categoryFilter} setCategory={setCategoryFilter} status={statusFilter} setStatus={setStatusFilter} type={typeFilter} setType={setTypeFilter} articleMode />
-          <div className="knowledge-table-wrap">
-            <table className="knowledge-table">
-              <thead><tr><th>Select</th><th>Article</th><th>Category / type</th><th>Quality</th><th>Status</th><th>Updated</th></tr></thead>
-              <tbody>
-                {filteredArticles.map((item) => (
-                  <tr key={item.id}>
-                    <td><input type="checkbox" checked={selectedArticleIds.includes(item.id)} onChange={(event) => setSelectedArticleIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /></td>
-                    <td><button className="knowledge-title-button" onClick={() => openArticle(item)}>{item.title}</button><small>{item.knowledge_topics?.title || ""}</small></td>
-                    <td>{item.category}<small>{item.article_type}</small></td>
-                    <td>
-                      {latestReviewByArticle.has(item.id)
-                        ? `${latestReviewByArticle.get(item.id).overall_score}/100`
-                        : "Not reviewed"}
-                    </td>
-                    <td><StatusPill value={item.status} /></td>
-                    <td>{formatDate(item.updated_at || item.created_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <>
+          <section className="panel">
+            <div className="panel__header">
+              <div><div className="eyebrow">Article Library</div><h3>Intelligent Approval Queue</h3><p>Prioritised by editorial readiness, business value, freshness, search opportunity and conversion potential.</p></div>
+              <div className="card-actions"><button className="button button--primary" disabled={!selectedArticleIds.length || busy} onClick={() => handleBulkUpdate("approved")}>Approve Selected</button><button className="button button--ghost" disabled={!selectedArticleIds.length || busy} onClick={() => handleBulkUpdate("archived")}>Archive Selected</button></div>
+            </div>
+            <Filters search={search} setSearch={setSearch} category={categoryFilter} setCategory={setCategoryFilter} status={statusFilter} setStatus={setStatusFilter} type={typeFilter} setType={setTypeFilter} articleMode />
+            <EditorialApprovalQueue
+              queue={approvalQueue}
+              selectedIds={selectedArticleIds}
+              setSelectedIds={setSelectedArticleIds}
+              onOpen={openArticle}
+              onAnalyseMissing={handleAnalyseMissingArticles}
+              busy={busy}
+            />
+          </section>
+          <KnowledgeCoverageMap coverage={coverageMap} />
+        </>
       ) : null}
 
       {screen === "editor" && article ? (
@@ -1091,6 +1491,24 @@ export default function KnowledgeHubPage() {
               <div className="card-actions"><button className="button button--ghost" onClick={() => setPreview((current) => !current)}>{preview ? "Edit" : "Preview"}</button><button className="button button--primary" disabled={busy} onClick={() => handleSaveArticle("draft")}>Save Draft</button><button className="button button--success" disabled={busy} onClick={() => handleSaveArticle("approved")}>Approve</button><button className="button button--danger" disabled={busy} onClick={() => handleSaveArticle("archived")}>Archive</button></div>
             </div>
           </section>
+          <EditorialScorePanel
+            article={article}
+            assessment={currentAssessment}
+            intent={currentIntent}
+            stale={
+              editorial.stale_article_ids.includes(article.id) ||
+              currentAssessment?.source_content_hash !== articleContentHash(article)
+            }
+            onAnalyse={handleAnalyseCurrentArticle}
+            busy={busy}
+          />
+          <BusinessIntentPanel
+            intent={currentIntent}
+            overrides={intentOverrides}
+            setOverrides={setIntentOverrides}
+            onSave={handleSaveIntentOverrides}
+            busy={busy}
+          />
           {preview ? (
             <article className="panel knowledge-preview">
               <h1>{article.title}</h1>
@@ -1123,6 +1541,24 @@ export default function KnowledgeHubPage() {
               </div>
             </section>
           )}
+          <EditorialRecommendationsPanel
+            assessment={currentAssessment}
+            overrides={recommendationOverrides}
+            setOverrides={setRecommendationOverrides}
+            onSaveOverrides={handleSaveRecommendationOverrides}
+            onPropose={handleProposeImprovement}
+            proposals={currentProposals}
+            onApply={handleApplyImprovement}
+            onReject={handleRejectImprovement}
+            busy={busy}
+            articles={articles}
+            businessPages={editorial.business_pages}
+          />
+          <EditorialHistoryPanel
+            revisions={currentRevisions}
+            assessments={currentAssessments}
+            events={editorial.events}
+          />
           <ArticleQualityScore
             review={latestReviewByArticle.get(article.id)}
             onReview={handleReviewArticle}
