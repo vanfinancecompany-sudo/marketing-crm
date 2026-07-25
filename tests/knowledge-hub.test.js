@@ -10,6 +10,11 @@ import {
   parseKnowledgeTopicIdeasResponse,
   validateKnowledgeArticle,
 } from "../lib/knowledgeHub.js";
+import {
+  buildBusinessIntelligencePrompt,
+  normalizeBusinessKnowledgeSections,
+  parseKnowledgeArticleReviewResponse,
+} from "../lib/businessIntelligence.js";
 import knowledgeHubHandler, {
   knowledgeAiConfiguration,
 } from "../api/marketing-knowledge-hub.js";
@@ -136,6 +141,95 @@ test("article validation and transparent quality checks expose warnings", () => 
     false
   );
   assert.equal(Boolean(validateKnowledgeArticle(shortArticle).content_markdown), true);
+});
+
+test("Business Intelligence normalises legacy settings and builds a reusable specialist prompt", () => {
+  const sections = normalizeBusinessKnowledgeSections(
+    [
+      {
+        section_key: "business_vocabulary",
+        content: "Use the business product names exactly.",
+        entries: [{ label: "Rent2Buy", value: "Preferred product spelling" }],
+        active: true,
+      },
+      {
+        section_key: "preferred_ctas",
+        content: "",
+        entries: [{ label: "Application", value: "Apply when you are ready." }],
+        active: true,
+      },
+    ],
+    {
+      business_name: "Van Finance Company",
+      business_description: "A UK van business.",
+      default_tone: "Helpful and factual",
+    }
+  );
+  const assembled = buildBusinessIntelligencePrompt({
+    sections,
+    settings: { default_audience: "UK van buyers" },
+    specialist: {
+      key: "finance-guide",
+      prompt: "Explain finance without promising approval.",
+    },
+    topic: { title: "How van finance works", category: "Van Finance" },
+    generation: { approximateLength: 1000 },
+  });
+  assert.match(assembled.prompt, /Company Profile/);
+  assert.match(assembled.prompt, /Rent2Buy: Preferred product spelling/);
+  assert.match(assembled.prompt, /Apply when you are ready/);
+  assert.match(assembled.prompt, /Explain finance without promising approval/);
+  assert.equal(assembled.metadata.prompt_version, "business_intelligence_v1");
+  assert.equal(assembled.metadata.specialist_key, "finance-guide");
+  assert.equal(
+    normalizeBusinessKnowledgeSections(
+      [{ section_key: "brand_voice", content: "", entries: [], active: true }],
+      { default_tone: "Legacy tone" }
+    ).find((section) => section.section_key === "brand_voice").content,
+    ""
+  );
+});
+
+test("AI Reviewer parser validates scores and keeps the result advisory", () => {
+  const validReview = {
+    overall_score: 82,
+    summary: "Strong draft with one compliance point to confirm.",
+    categories: Object.fromEntries(
+      [
+        "brand_consistency",
+        "readability",
+        "seo",
+        "cta_quality",
+        "compliance",
+      ].map((key) => [
+        key,
+        { score: 82, reason: "Evidence-based reason.", findings: ["Short finding."] },
+      ])
+    ),
+    strengths: ["Clear structure"],
+    issues: [
+      {
+        category: "compliance",
+        severity: "medium",
+        description: "Confirm the scheme detail.",
+        evidence: "Short evidence",
+      },
+    ],
+    recommendations: ["Confirm the marked detail before approval."],
+  };
+  const parsed = parseKnowledgeArticleReviewResponse(JSON.stringify(validReview));
+  assert.equal(parsed.overall_score, 82);
+  assert.equal(parsed.categories.compliance.score, 82);
+  assert.equal(parsed.issues[0].severity, "medium");
+  assert.throws(
+    () =>
+      parseKnowledgeArticleReviewResponse({
+        ...validReview,
+        categories: { ...validReview.categories, seo: { score: 101 } },
+      }),
+    /invalid seo score/
+  );
+  assert.throws(() => parseKnowledgeArticleReviewResponse("{bad json"), /article was not changed/);
 });
 
 test("Knowledge Hub endpoint rejects requests without Marketing CRM access", async () => {
@@ -280,6 +374,91 @@ test("V2 migration is additive and installs priorities, settings and specialist 
   }
   assert.doesNotMatch(migration, /create policy/i);
   assert.doesNotMatch(migration, /marketing_contacts|marketing_campaigns|vehicle_stock/i);
+});
+
+test("Knowledge Hub V3 exposes Business Knowledge, Prompt Builder and advisory draft reviews", () => {
+  const page = readFileSync(new URL("../pages/KnowledgeHubPage.jsx", import.meta.url), "utf8");
+  const panels = readFileSync(
+    new URL("../components/KnowledgeHubV3Panels.jsx", import.meta.url),
+    "utf8"
+  );
+  const api = readFileSync(
+    new URL("../api/marketing-knowledge-hub.js", import.meta.url),
+    "utf8"
+  );
+  const promptBuilder = readFileSync(
+    new URL("../lib/businessIntelligence.js", import.meta.url),
+    "utf8"
+  );
+  const combined = `${page}\n${panels}\n${api}\n${promptBuilder}`;
+  for (const label of [
+    "Business Intelligence V3",
+    "Business Knowledge Centre",
+    "Company Profile",
+    "Products",
+    "Brand Voice",
+    "Writing Rules",
+    "Compliance",
+    "FAQs",
+    "Customer Personas",
+    "Sales Knowledge",
+    "Business Vocabulary",
+    "Preferred CTAs",
+    "Prompt Builder",
+    "AI Reviewer",
+    "Article Quality Score",
+    "Brand consistency",
+    "Readability",
+    "SEO",
+    "CTA quality",
+  ]) {
+    assert.match(combined, new RegExp(label));
+  }
+  assert.match(api, /case "saveBusinessSection"/);
+  assert.match(api, /case "reviewArticle"/);
+  assert.match(api, /status !== "draft"/);
+  assert.match(api, /Do not rewrite the article/);
+  assert.doesNotMatch(api, /case "publish/i);
+  assert.doesNotMatch(panels, /apply recommendation|replace article|auto.?approve/i);
+});
+
+test("V3 migration is additive, private and seeds every Business Knowledge section", () => {
+  const migration = readFileSync(
+    new URL(
+      "../supabase/migrations/018_knowledge_hub_v3_business_intelligence.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  for (const table of ["knowledge_business_sections", "knowledge_article_reviews"]) {
+    assert.match(migration, new RegExp(`create table if not exists public\\.${table}`));
+    assert.match(
+      migration,
+      new RegExp(`alter table public\\.${table} enable row level security`)
+    );
+  }
+  for (const key of [
+    "company_profile",
+    "products",
+    "brand_voice",
+    "writing_rules",
+    "compliance",
+    "faqs",
+    "customer_personas",
+    "sales_knowledge",
+    "business_vocabulary",
+    "preferred_ctas",
+  ]) {
+    assert.match(migration, new RegExp(`'${key}'`));
+  }
+  assert.match(migration, /from public\.knowledge_settings/);
+  assert.match(migration, /unnest\(settings\.content_goals\)/);
+  assert.match(migration, /settings\.default_audience/);
+  assert.doesNotMatch(migration, /create policy/i);
+  assert.doesNotMatch(
+    migration,
+    /marketing_contacts|marketing_campaigns|vehicle_stock|finance_sync|rent2buy_sync/i
+  );
 });
 
 test("migration is additive, private and seeds all seven templates", () => {

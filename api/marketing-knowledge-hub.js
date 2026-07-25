@@ -11,6 +11,12 @@ import {
   parseKnowledgeTopicIdeasResponse,
   validateKnowledgeArticle,
 } from "../lib/knowledgeHub.js";
+import {
+  BUSINESS_KNOWLEDGE_SECTION_KEYS,
+  buildBusinessIntelligencePrompt,
+  businessKnowledgeContext,
+  parseKnowledgeArticleReviewResponse,
+} from "../lib/businessIntelligence.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const ARTICLE_SCHEMA = {
@@ -91,6 +97,75 @@ const TOPIC_IDEAS_SCHEMA = {
         },
       },
     },
+  },
+};
+const REVIEW_CATEGORY_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["score", "reason", "findings"],
+  properties: {
+    score: { type: "integer", minimum: 0, maximum: 100 },
+    reason: { type: "string" },
+    findings: { type: "array", items: { type: "string" } },
+  },
+};
+const ARTICLE_REVIEW_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "overall_score",
+    "summary",
+    "categories",
+    "strengths",
+    "issues",
+    "recommendations",
+  ],
+  properties: {
+    overall_score: { type: "integer", minimum: 0, maximum: 100 },
+    summary: { type: "string" },
+    categories: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "brand_consistency",
+        "readability",
+        "seo",
+        "cta_quality",
+        "compliance",
+      ],
+      properties: {
+        brand_consistency: REVIEW_CATEGORY_SCHEMA,
+        readability: REVIEW_CATEGORY_SCHEMA,
+        seo: REVIEW_CATEGORY_SCHEMA,
+        cta_quality: REVIEW_CATEGORY_SCHEMA,
+        compliance: REVIEW_CATEGORY_SCHEMA,
+      },
+    },
+    strengths: { type: "array", items: { type: "string" } },
+    issues: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["category", "severity", "description", "evidence"],
+        properties: {
+          category: {
+            type: "string",
+            enum: [
+              "brand_consistency",
+              "readability",
+              "seo",
+              "cta_quality",
+              "compliance",
+            ],
+          },
+          severity: { type: "string", enum: ["low", "medium", "high"] },
+          description: { type: "string" },
+          evidence: { type: "string" },
+        },
+      },
+    },
+    recommendations: { type: "array", items: { type: "string" } },
   },
 };
 
@@ -226,7 +301,7 @@ function cleanArticle(value = {}, requestedStatus = "") {
 }
 
 async function loadHub(supabase) {
-  const [topics, templates, articles, settings] = await Promise.all([
+  const [topics, templates, articles, settings, businessSections, reviews] = await Promise.all([
     supabase.from("knowledge_topics").select("*").order("updated_at", { ascending: false }),
     supabase.from("knowledge_templates").select("*").eq("active", true).order("name"),
     supabase
@@ -234,13 +309,26 @@ async function loadHub(supabase) {
       .select("*, knowledge_topics(title,primary_keyword)")
       .order("updated_at", { ascending: false }),
     supabase.from("knowledge_settings").select("*").eq("settings_key", "default").maybeSingle(),
+    supabase
+      .from("knowledge_business_sections")
+      .select("*")
+      .order("sort_order", { ascending: true }),
+    supabase
+      .from("knowledge_article_reviews")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(500),
   ]);
-  [topics, templates, articles, settings].forEach((result) => assertResult(result, "Knowledge Hub could not load."));
+  [topics, templates, articles, settings, businessSections, reviews].forEach((result) =>
+    assertResult(result, "Knowledge Hub could not load.")
+  );
   return {
     topics: topics.data || [],
     templates: templates.data || [],
     articles: articles.data || [],
     settings: settings.data || null,
+    business_sections: businessSections.data || [],
+    article_reviews: reviews.data || [],
   };
 }
 
@@ -259,36 +347,6 @@ async function deleteTopic(supabase, topicId) {
     "Topic could not be deleted."
   );
   return { id: topicId };
-}
-
-function generationPrompt({ topic, template, generation, settings }) {
-  return `${template.prompt}
-
-Business: ${settings?.business_name || "Van Finance Company"}
-Website: ${settings?.website_url || "https://www.vanfinancecompany.co.uk"}
-Topic: ${topic.title}
-Category: ${topic.category}
-Primary keyword: ${topic.primary_keyword || ""}
-Secondary keywords: ${(topic.secondary_keywords || []).join(", ")}
-Customer/search intent: ${topic.intent || ""}
-Topic notes: ${topic.notes || ""}
-Target audience: ${generation.targetAudience || settings?.default_audience || template.default_audience || ""}
-Tone: ${generation.tone || settings?.default_tone || template.default_tone || ""}
-Approximate length: ${Number(generation.approximateLength || 1000)} words
-Additional instructions: ${generation.instructions || "None"}
-Default CTA: ${settings?.default_cta || ""}
-Business description: ${settings?.business_description || ""}
-Products and services: ${settings?.products_services || ""}
-Confirmed factual guidance: ${settings?.factual_guidance || ""}
-Claims and statements to avoid: ${settings?.prohibited_claims || ""}
-Business target audiences: ${(settings?.target_audiences || []).join(", ")}
-Content goals: ${(settings?.content_goals || []).join(", ")}
-
-Prioritise helpfulness, clarity and factual restraint. Answer a real customer question or intent.
-Do not invent rates, approval guarantees, vehicle availability, prices, legal claims or company
-policies. Mark an uncertain business-specific fact as "[REVIEW: confirm ...]" instead of guessing.
-Avoid keyword stuffing, repeated paragraphs, doorway-page variants and generic filler. Return useful
-Markdown and equivalent clean HTML.`;
 }
 
 async function callKnowledgeStructuredAi({
@@ -365,10 +423,21 @@ async function generateArticle(supabase, body) {
   const templateKey = cleanText(body.generation?.templateKey || "faq", 80);
   if (!KNOWLEDGE_ARTICLE_TYPES.includes(templateKey)) throw new ApiError(400, "Unsupported article type.");
 
-  const [topicResult, templateResult, settingsResult, existingArticleResult] = await Promise.all([
+  const [
+    topicResult,
+    templateResult,
+    settingsResult,
+    businessSectionsResult,
+    existingArticleResult,
+  ] = await Promise.all([
     supabase.from("knowledge_topics").select("*").eq("id", topicId).single(),
     supabase.from("knowledge_templates").select("*").eq("key", templateKey).eq("active", true).single(),
     supabase.from("knowledge_settings").select("*").eq("settings_key", "default").maybeSingle(),
+    supabase
+      .from("knowledge_business_sections")
+      .select("*")
+      .eq("active", true)
+      .order("sort_order", { ascending: true }),
     supabase
       .from("knowledge_articles")
       .select("id,title,status")
@@ -379,6 +448,7 @@ async function generateArticle(supabase, body) {
   const topic = assertResult(topicResult, "Topic could not be found.").data;
   const template = assertResult(templateResult, "Template could not be found.").data;
   assertResult(settingsResult, "Knowledge settings could not be loaded.");
+  assertResult(businessSectionsResult, "Business Intelligence could not be loaded.");
   assertResult(existingArticleResult, "Existing topic coverage could not be checked.");
   if (existingArticleResult.data?.length) {
     throw new ApiError(
@@ -387,14 +457,19 @@ async function generateArticle(supabase, body) {
     );
   }
 
+  const assembledPrompt = buildBusinessIntelligencePrompt({
+    topic,
+    specialist: template,
+    generation: body.generation || {},
+    settings: settingsResult.data,
+    sections: businessSectionsResult.data || [],
+    task: "article_generation",
+  });
   const generated = parseKnowledgeArticleResponse(
     await callKnowledgeStructuredAi({
-      input: generationPrompt({
-        topic,
-        template,
-        generation: body.generation || {},
-        settings: settingsResult.data,
-      }),
+      input: `${assembledPrompt.prompt}
+
+Return useful Markdown and equivalent clean HTML. The result is a draft for human review.`,
       schema: ARTICLE_SCHEMA,
       schemaName: "knowledge_article",
       operationLabel: "article",
@@ -415,6 +490,7 @@ async function generateArticle(supabase, body) {
       tone: body.generation?.tone || "",
       approximate_length: Number(body.generation?.approximateLength || 1000),
       generated_at: new Date().toISOString(),
+      business_intelligence: assembledPrompt.metadata,
     },
   });
   const saved = assertResult(
@@ -431,18 +507,21 @@ async function generateArticle(supabase, body) {
   return saved;
 }
 
-function topicFinderPrompt({ categories, quantity, settings, topics, articles, brief }) {
+function topicFinderPrompt({
+  categories,
+  quantity,
+  settings,
+  businessSections,
+  topics,
+  articles,
+  brief,
+}) {
   return `Generate ${quantity} genuinely useful content topic ideas grouped across these categories:
 ${categories.join(", ")}.
 
-Business: ${settings?.business_name || "Van Finance Company"}
-Website: ${settings?.website_url || ""}
-Business description: ${settings?.business_description || ""}
-Products and services: ${settings?.products_services || ""}
-Confirmed factual guidance: ${settings?.factual_guidance || ""}
-Claims to avoid: ${settings?.prohibited_claims || ""}
-Target audiences: ${(settings?.target_audiences || []).join(", ") || settings?.default_audience || ""}
-Content goals: ${(settings?.content_goals || []).join(", ")}
+# Business Intelligence
+${businessKnowledgeContext(businessSections, settings)}
+
 Additional finder brief: ${brief || "Find unanswered, commercially useful customer questions."}
 
 Existing topics to avoid:
@@ -463,7 +542,7 @@ async function findTopics(supabase, body) {
   );
   if (!categories.length) throw new ApiError(400, "Select at least one topic category.");
   const quantity = Math.min(30, Math.max(1, Number(body.quantity) || 12));
-  const [topicsResult, articlesResult, settingsResult] = await Promise.all([
+  const [topicsResult, articlesResult, settingsResult, businessSectionsResult] = await Promise.all([
     supabase
       .from("knowledge_topics")
       .select("id,title,category,primary_keyword,secondary_keywords,status")
@@ -475,8 +554,13 @@ async function findTopics(supabase, body) {
       .neq("status", "archived")
       .limit(200),
     supabase.from("knowledge_settings").select("*").eq("settings_key", "default").maybeSingle(),
+    supabase
+      .from("knowledge_business_sections")
+      .select("*")
+      .eq("active", true)
+      .order("sort_order", { ascending: true }),
   ]);
-  [topicsResult, articlesResult, settingsResult].forEach((result) =>
+  [topicsResult, articlesResult, settingsResult, businessSectionsResult].forEach((result) =>
     assertResult(result, "Topic Finder context could not be loaded.")
   );
   const existingTopics = topicsResult.data || [];
@@ -486,6 +570,7 @@ async function findTopics(supabase, body) {
         categories,
         quantity,
         settings: settingsResult.data,
+        businessSections: businessSectionsResult.data || [],
         topics: existingTopics,
         articles: articlesResult.data || [],
         brief: cleanText(body.brief, 3000),
@@ -621,6 +706,127 @@ async function saveTemplate(supabase, template = {}) {
   ).data;
 }
 
+function cleanBusinessEntries(entries) {
+  return cleanJsonArray(entries, 100)
+    .map((entry) => ({
+      label: cleanText(entry?.label, 300),
+      value: cleanText(entry?.value, 5000),
+    }))
+    .filter((entry) => entry.label || entry.value);
+}
+
+async function saveBusinessSection(supabase, section = {}) {
+  const sectionKey = cleanText(section.section_key, 80);
+  if (!BUSINESS_KNOWLEDGE_SECTION_KEYS.includes(sectionKey)) {
+    throw new ApiError(400, "Unsupported Business Knowledge section.");
+  }
+  const payload = {
+    section_key: sectionKey,
+    title: cleanText(section.title, 200),
+    description: cleanText(section.description, 2000),
+    content: cleanText(section.content, 50000),
+    entries: cleanBusinessEntries(section.entries),
+    sort_order: Math.max(0, Number(section.sort_order) || 0),
+    active: section.active !== false,
+    updated_at: new Date().toISOString(),
+  };
+  if (!payload.title) throw new ApiError(400, "Business Knowledge section title is required.");
+  return assertResult(
+    await supabase
+      .from("knowledge_business_sections")
+      .upsert(payload, { onConflict: "section_key" })
+      .select()
+      .single(),
+    "Business Knowledge section could not be saved."
+  ).data;
+}
+
+async function reviewArticle(supabase, body) {
+  const articleId = cleanText(body.article_id, 100);
+  if (!articleId) throw new ApiError(400, "Article id is required.");
+  const article = assertResult(
+    await supabase.from("knowledge_articles").select("*").eq("id", articleId).single(),
+    "Article could not be found."
+  ).data;
+  if (article.status !== "draft") {
+    throw new ApiError(400, "Only a saved draft can be sent to the AI Reviewer.");
+  }
+
+  const [settingsResult, businessSectionsResult, templateResult] = await Promise.all([
+    supabase.from("knowledge_settings").select("*").eq("settings_key", "default").maybeSingle(),
+    supabase
+      .from("knowledge_business_sections")
+      .select("*")
+      .eq("active", true)
+      .order("sort_order", { ascending: true }),
+    article.article_type
+      ? supabase
+          .from("knowledge_templates")
+          .select("*")
+          .eq("key", article.article_type)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+  [settingsResult, businessSectionsResult, templateResult].forEach((result) =>
+    assertResult(result, "AI Reviewer context could not be loaded.")
+  );
+  const assembledPrompt = buildBusinessIntelligencePrompt({
+    sections: businessSectionsResult.data || [],
+    settings: settingsResult.data,
+    specialist: templateResult.data || { key: article.article_type || "" },
+    topic: {
+      title: article.title,
+      category: article.category,
+    },
+    generation: article.generation_metadata || {},
+    task: "article_review",
+  });
+  const review = parseKnowledgeArticleReviewResponse(
+    await callKnowledgeStructuredAi({
+      input: `${assembledPrompt.prompt}
+
+# Article to review
+Title: ${article.title}
+SEO title: ${article.seo_title || ""}
+Meta description: ${article.meta_description || ""}
+Excerpt: ${article.excerpt || ""}
+Content:
+${article.content_markdown || ""}
+
+CTA: ${article.cta || ""}
+FAQs: ${JSON.stringify(article.faq_json || [])}
+
+Score only what is evidenced in the article and Business Intelligence. Explain each score, quote
+only short evidence snippets, and identify uncertainty as a review issue. Do not rewrite the article,
+change its status or approve it.`,
+      schema: ARTICLE_REVIEW_SCHEMA,
+      schemaName: "knowledge_article_review",
+      operationLabel: "article review",
+      systemInstruction:
+        "You are an advisory content reviewer. Return a strict, evidence-based quality assessment and never rewrite or approve content.",
+    })
+  );
+  const configuration = knowledgeAiConfiguration();
+  return assertResult(
+    await supabase
+      .from("knowledge_article_reviews")
+      .insert({
+        article_id: article.id,
+        overall_score: review.overall_score,
+        category_scores: review.categories,
+        summary: review.summary,
+        strengths: review.strengths,
+        issues: review.issues,
+        recommendations: review.recommendations,
+        model: configuration.model,
+        prompt_metadata: assembledPrompt.metadata,
+      })
+      .select()
+      .single(),
+    "The AI review could not be saved."
+  ).data;
+}
+
 export default async function handler(request, response) {
   if (request.method !== "POST") return response.status(405).json({ ok: false, message: "Method not allowed." });
   if (!authorize(request)) return response.status(401).json({ ok: false, message: "Access key not recognised." });
@@ -662,6 +868,12 @@ export default async function handler(request, response) {
         break;
       case "saveTemplate":
         data = { template: await saveTemplate(supabase, body.template) };
+        break;
+      case "saveBusinessSection":
+        data = { business_section: await saveBusinessSection(supabase, body.business_section) };
+        break;
+      case "reviewArticle":
+        data = { review: await reviewArticle(supabase, body) };
         break;
       default:
         throw new ApiError(400, "Unsupported Knowledge Hub action.");
