@@ -55,7 +55,9 @@ async function loadAutomation(supabase) {
     supabase.from("knowledge_automation_settings").select("*").eq("settings_key", "default").single(),
     supabase
       .from("knowledge_automation_opportunities")
-      .select("*, knowledge_articles(title)")
+      .select(
+        "*, knowledge_articles:knowledge_articles!knowledge_automation_opportunities_source_article_id_fkey(title)"
+      )
       .order("priority_score", { ascending: false })
       .limit(500),
     supabase

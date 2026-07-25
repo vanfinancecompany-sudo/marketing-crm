@@ -210,6 +210,14 @@ test("Phase 6 migration, worker and UI enforce review-only automation", () => {
   assert.match(worker, /knowledge_automation_logs/);
   assert.match(management, /Only draft opportunities can be approved/);
   assert.match(management, /Automated draft preparation is disabled/);
+  assert.match(
+    management,
+    /knowledge_articles:knowledge_articles!knowledge_automation_opportunities_source_article_id_fkey/
+  );
+  assert.doesNotMatch(
+    management,
+    /from\("knowledge_automation_opportunities"\)[\s\S]{0,120}\.select\("\*, knowledge_articles\(title\)"\)/
+  );
   assert.match(ui, /Only you can approve an article/);
   assert.match(ui, /automatic publication, approval, scheduling/);
   assert.match(vercel, /marketing-editorial-automation-worker/);
