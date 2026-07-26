@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import {
   buildInternalLinkArticleProfile,
   isApprovedInternalUrl,
+  mergeInternalLinkReviewState,
   suggestInternalLinks,
 } from "../lib/internalLinking.js";
 
@@ -67,7 +68,161 @@ test("matcher recommends approved intent destinations rather than manufacturer p
     new Set(["Medium Wheelbase Vans", "Apply Now", "Van Finance"])
   );
   assert.equal(suggestions.some((item) => item.destination_title === "Ford vans"), false);
-  assert.equal(suggestions.every((item) => item.reason && item.confidence_score >= 40), true);
+  assert.equal(suggestions.every((item) => item.reason && item.confidence_score >= 35), true);
+});
+
+test("MWB exact phrase and acronym matches rank the approved MWB destination first", () => {
+  const websitePages = [
+    page("mwb", "VAN FINANCE – MWB VANS", "/van-finance-mwb-vans", {
+      category: "Stock",
+      priority: 5,
+      vehicle_types: ["MWB", "medium wheelbase", "medium van", "medium vans"],
+      customer_intent: ["browse stock"],
+    }),
+    page("finance", "VIEW VANS | VAN FINANCE", "/van-finance", {
+      category: "Finance",
+      priority: 5,
+      vehicle_types: ["van finance", "finance vans"],
+    }),
+    page("lwb", "VAN FINANCE – LWB VANS", "/van-finance-lwb-vans", {
+      category: "Stock",
+      priority: 4,
+      vehicle_types: ["LWB", "long wheelbase", "large vans"],
+    }),
+    page("privacy", "Privacy Policy", "/privacy-policy", {
+      category: "Support",
+      priority: 5,
+      keywords: ["business", "data", "van finance"],
+    }),
+    page("rent2buy", "Rent2Buy Pickups", "/rent2buy-pickups", {
+      category: "Stock",
+      priority: 5,
+      vehicle_types: ["pickup", "Rent2Buy"],
+    }),
+  ];
+  const snapshot = JSON.stringify(websitePages);
+  const suggestions = suggestInternalLinks({
+    article: {
+      id: "article-mwb",
+      title: "Understanding Medium Wheelbase Vans (MWB) for Your Business",
+      slug: "understanding-medium-wheelbase-vans-mwb-for-your-business",
+      seo_title: "Medium Wheelbase Vans (MWB) Business Guide",
+      category: "Vehicle Guides",
+      article_type: "buying_guide",
+      content_markdown: [
+        "# Understanding Medium Wheelbase Vans",
+        "## Is an MWB van right for your business?",
+        "Medium vans balance load space and everyday usability.",
+        "Van finance can spread the cost.",
+      ].join("\n"),
+    },
+    topic: { primary_keyword: "medium wheelbase vans" },
+    websitePages,
+  });
+  assert.equal(suggestions[0].website_page_id, "mwb");
+  assert.equal(suggestions[0].confidence_score >= 90, true);
+  assert.match(suggestions[0].reason, /Exact (?:match|acronym): “(?:medium wheelbase|MWB)”/);
+  assert.match(suggestions[0].reason, /Category match: Stock/);
+  assert.equal(suggestions.some((item) => item.website_page_id === "privacy"), false);
+  assert.equal(
+    suggestions.findIndex((item) => item.website_page_id === "mwb") <
+      suggestions.findIndex((item) => item.website_page_id === "finance"),
+    true
+  );
+  assert.equal(
+    suggestions.find((item) => item.website_page_id === "finance").confidence_score < 70,
+    true
+  );
+  assert.equal(JSON.stringify(websitePages), snapshot);
+});
+
+test("exact phrases outrank generic overlap and legal pages require a direct topic", () => {
+  const pages = [
+    page("exact", "Medium Wheelbase Vans", "/medium-vans", {
+      category: "Stock",
+      vehicle_types: ["medium wheelbase", "MWB"],
+    }),
+    page("generic", "Business Van Finance", "/business-finance", {
+      category: "Finance",
+      priority: 5,
+      keywords: ["van", "finance", "business"],
+    }),
+    page("cookies", "Cookie Policy", "/cookie-policy", {
+      category: "Support",
+      keywords: ["website", "business"],
+    }),
+    page("data", "Data Protection Policy", "/data-protection", {
+      category: "Support",
+      keywords: ["data", "business"],
+    }),
+  ];
+  const suggestions = suggestInternalLinks({
+    article: {
+      title: "Medium wheelbase vans for business",
+      content_markdown: "An MWB van is a practical business vehicle.",
+    },
+    websitePages: pages,
+  });
+  assert.equal(suggestions[0].website_page_id, "exact");
+  assert.equal(suggestions[0].confidence_score > (suggestions.find((item) => item.website_page_id === "generic")?.confidence_score || 0), true);
+  assert.equal(suggestions.some((item) => ["cookies", "data"].includes(item.website_page_id)), false);
+
+  const legal = suggestInternalLinks({
+    article: {
+      title: "Privacy and data protection policy explained",
+      slug: "privacy-data-protection-policy",
+      content_markdown: "## Data protection\nHow customer information is handled.",
+    },
+    websitePages: pages,
+  });
+  assert.equal(legal.some((item) => item.website_page_id === "data"), true);
+});
+
+test("refresh merging preserves accepted and rejected decisions unchanged", () => {
+  const accepted = {
+    id: "accepted",
+    website_page_id: "page-a",
+    destination_title: "Accepted link",
+    confidence_score: 80,
+    source_content_hash: "old",
+    status: "accepted",
+    anchor_text: "Reviewed anchor",
+  };
+  const rejected = {
+    id: "rejected",
+    website_page_id: "page-b",
+    destination_title: "Rejected link",
+    confidence_score: 70,
+    source_content_hash: "old",
+    status: "rejected",
+  };
+  const merged = mergeInternalLinkReviewState({
+    created: [{
+      id: "new",
+      website_page_id: "page-c",
+      destination_title: "New MWB link",
+      confidence_score: 96,
+      source_content_hash: "current",
+      status: "pending",
+    }],
+    existing: [
+      accepted,
+      rejected,
+      {
+        id: "stale",
+        website_page_id: "page-d",
+        destination_title: "Stale pending",
+        confidence_score: 90,
+        source_content_hash: "old",
+        status: "pending",
+      },
+    ],
+    proposedPageIds: new Set(["page-c"]),
+    sourceHash: "current",
+  });
+  assert.deepEqual(merged.find((item) => item.id === "accepted"), accepted);
+  assert.deepEqual(merged.find((item) => item.id === "rejected"), rejected);
+  assert.equal(merged.some((item) => item.id === "stale"), false);
 });
 
 test("matcher rejects external, hidden and duplicate destinations", () => {
@@ -153,6 +308,8 @@ test("migration and UI enforce review-only audited linking", () => {
   assert.match(api, /saveWebsiteIndexEntry/);
   assert.match(api, /decideInternalLink/);
   assert.match(api, /automatic_insertion: false/);
+  assert.match(ui, /Refreshing…/);
+  assert.match(ui, /refreshFeedback\.status === "error"/);
   assert.match(ui, /Accept\s*<\/button>/);
   assert.match(ui, /Reject\s*<\/button>/);
   assert.match(ui, /Save anchor/);

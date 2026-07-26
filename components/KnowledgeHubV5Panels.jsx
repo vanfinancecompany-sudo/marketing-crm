@@ -219,6 +219,7 @@ export function EditorialRecommendationsPanel({
   linkEvents = [],
   onLinkDecision,
   onRefreshLinks,
+  linkRefreshFeedback,
 }) {
   if (!assessment) return null;
   const ctas = overrides.structured_ctas ?? assessment.structured_ctas ?? [];
@@ -274,6 +275,7 @@ export function EditorialRecommendationsPanel({
         onDecision={onLinkDecision}
         onRefresh={onRefreshLinks}
         busy={busy}
+        refreshFeedback={linkRefreshFeedback}
       />
       <section className="panel">
         <div className="panel__header"><div><h3>Explain My Score</h3><p>See strengths, lost points and review-only one-click improvement proposals.</p></div></div>
