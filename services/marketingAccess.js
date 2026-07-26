@@ -96,6 +96,7 @@ export async function parseMarketingJsonResponse(response, fallbackMessage, opti
   if (!response.ok || result.ok === false) {
     const error = new Error(result.message || fallbackMessage || "Marketing request failed.");
     error.status = response.status;
+    if (result.error_type) error.type = result.error_type;
     throw error;
   }
 
