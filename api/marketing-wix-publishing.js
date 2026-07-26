@@ -4,6 +4,7 @@ import {
   createOrUpdateWixDraft,
   wixPublishingConfiguration,
 } from "../lib/wixPublishing.js";
+import { evaluatePublishingSafety } from "../lib/publishingSafety.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 5000) => String(value || "").trim().slice(0, limit);
@@ -102,14 +103,42 @@ export async function publishKnowledgeArticleToWix({
       "validation"
     );
   }
-  const suggestions = data(
-    await supabase
+  const [suggestionsResult, assessmentResult, businessKnowledgeResult] = await Promise.all([
+    supabase
       .from("knowledge_internal_link_suggestions")
       .select("id,status,anchor_text,destination_url")
       .eq("article_id", article.id)
       .eq("status", "accepted"),
-    "Accepted internal links could not be loaded."
+    supabase
+      .from("knowledge_article_editorial_assessments")
+      .select("*")
+      .eq("article_id", article.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("knowledge_business_sections")
+      .select("section_key,content,entries,active")
+      .eq("active", true)
+      .order("sort_order", { ascending: true }),
+  ]);
+  const suggestions = data(suggestionsResult, "Accepted internal links could not be loaded.") || [];
+  const assessment = data(assessmentResult, "Editorial assessment could not be loaded.");
+  const businessKnowledge = data(
+    businessKnowledgeResult,
+    "Business Knowledge could not be loaded."
   ) || [];
+  const safety = evaluatePublishingSafety(article, {
+    assessment,
+    businessKnowledge,
+  });
+  if (safety.hard_blocked) {
+    throw new ApiError(
+      409,
+      `Wix export is blocked. ${safety.hard_block_reasons.join(" ")}`,
+      "validation"
+    );
+  }
   const configuration = wixPublishingConfiguration(environment);
   const now = new Date().toISOString();
   data(
