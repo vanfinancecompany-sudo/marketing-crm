@@ -54,6 +54,7 @@ import {
   WebsiteIndexDiscoveryPanel,
   WebsiteIndexPanel,
 } from "../components/KnowledgeHubInternalLinking.jsx";
+import KnowledgeHubWixPublishing from "../components/KnowledgeHubWixPublishing.jsx";
 import {
   articleContentHash,
   buildApprovalQueue,
@@ -672,6 +673,16 @@ export default function KnowledgeHubPage() {
       dirty.current = JSON.stringify(next) !== originalArticle;
       return next;
     });
+  }
+
+  function handleWixSynced(savedArticle) {
+    setArticle(savedArticle);
+    setOriginalArticle(JSON.stringify(savedArticle));
+    setArticles((current) =>
+      current.map((item) => (item.id === savedArticle.id ? savedArticle : item))
+    );
+    dirty.current = false;
+    setMessage("Wix draft sync completed. The item remains unpublished in Wix.");
   }
 
   function mergeEditorialAnalysis(result) {
@@ -1769,6 +1780,7 @@ export default function KnowledgeHubPage() {
                   <Field label="Slug" error={editorErrors.slug} wide><input className="field__input" value={article.slug} onChange={(event) => updateArticle("slug", event.target.value)} /></Field>
                   <Field label="SEO title" error={editorErrors.seo_title} wide><input className="field__input" value={article.seo_title || ""} onChange={(event) => updateArticle("seo_title", event.target.value)} /></Field>
                   <Field label="Meta description" error={editorErrors.meta_description} wide><textarea className="field__input" rows={4} value={article.meta_description || ""} onChange={(event) => updateArticle("meta_description", event.target.value)} /></Field>
+                  <Field label="Featured image or Wix image reference" wide><input className="field__input" value={article.featured_image || ""} onChange={(event) => updateArticle("featured_image", event.target.value)} placeholder="wix:image://v1/... or an HTTPS image URL" /></Field>
                   <Field label="Excerpt" wide><textarea className="field__input" rows={4} value={article.excerpt || ""} onChange={(event) => updateArticle("excerpt", event.target.value)} /></Field>
                   <Field label="Category"><select className="field__input" value={article.category || ""} onChange={(event) => updateArticle("category", event.target.value)}>{KNOWLEDGE_CATEGORIES.map((item) => <option key={item}>{item}</option>)}</select></Field>
                   <Field label="Status"><select className="field__input" value={article.status} onChange={(event) => updateArticle("status", event.target.value)}>{KNOWLEDGE_ARTICLE_STATUSES.map((item) => <option key={item}>{item}</option>)}</select></Field>
@@ -1800,6 +1812,12 @@ export default function KnowledgeHubPage() {
             onLinkDecision={handleInternalLinkDecision}
             onRefreshLinks={handleRefreshInternalLinks}
             linkRefreshFeedback={linkRefreshFeedback}
+          />
+          <KnowledgeHubWixPublishing
+            article={article}
+            linkSuggestions={currentLinkSuggestions}
+            hasUnsavedChanges={dirty.current}
+            onSynced={handleWixSynced}
           />
           <EditorialHistoryPanel
             revisions={currentRevisions}

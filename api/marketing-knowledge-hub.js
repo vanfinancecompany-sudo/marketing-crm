@@ -317,6 +317,7 @@ function cleanArticle(value = {}, requestedStatus = "") {
     seo_title: cleanText(value.seo_title, 240) || null,
     meta_description: cleanText(value.meta_description, 500) || null,
     excerpt: cleanText(value.excerpt, 2000) || null,
+    featured_image: cleanText(value.featured_image, 3000) || null,
     content_markdown: cleanText(value.content_markdown, 150000) || null,
     content_html: markdownToKnowledgeHtml(value.content_markdown),
     faq_json: cleanJsonArray(value.faq_json),

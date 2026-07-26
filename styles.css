@@ -4800,3 +4800,55 @@ textarea {
     padding: 16px;
   }
 }
+.knowledge-wix-publishing {
+  display: grid;
+  gap: 16px;
+}
+
+.knowledge-wix-confirmation {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px;
+  background: var(--surface-soft, #f8fafc);
+}
+
+.knowledge-wix-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.knowledge-wix-summary > div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+}
+
+.knowledge-wix-summary dt {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.knowledge-wix-summary dd {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-wix-existing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+@media (max-width: 720px) {
+  .knowledge-wix-summary {
+    grid-template-columns: 1fr;
+  }
+}
