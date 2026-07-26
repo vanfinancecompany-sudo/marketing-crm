@@ -34,6 +34,24 @@ publish content, or call an external website API.
 - Generation, refresh, acceptance, rejection, anchor edits, supersession, and index
   changes are recorded in `knowledge_internal_link_events`.
 
+## Relevance ranking
+
+PR106 ranks approved destinations using field-specific evidence. Exact matching-term
+phrases and acronyms in the article title carry the most weight, followed by
+headings, slug, primary keyword, SEO title, and repeated natural matches in the
+article body. Category, customer-intent, and CTA compatibility provide supporting
+signals; generic word overlap and broad business relevance remain low-weight signals.
+
+Vehicle guides prefer Stock and Products destinations, finance content prefers
+Finance, Products, and Applications, and application-support content prefers
+Applications and Support. Legal and policy destinations are excluded unless the
+article directly concerns the relevant legal topic.
+
+Confidence is capped and calibrated from the evidence used for ranking. Each result
+includes concise reasons such as an exact title phrase, acronym, heading, intent, or
+category match. Refreshing suggestions preserves existing accepted and rejected
+editorial decisions. PR106 requires no database migration.
+
 ## Future Wix CMS synchronisation
 
 Website Index entries include `source`, `external_id`, `sync_metadata`, and

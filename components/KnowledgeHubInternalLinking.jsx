@@ -465,6 +465,7 @@ export function InternalLinkReviewPanel({
   onDecision,
   onRefresh,
   busy,
+  refreshFeedback = { status: "idle", message: "" },
 }) {
   const visible = suggestions.filter((item) => item.status !== "superseded");
   return (
@@ -478,9 +479,17 @@ export function InternalLinkReviewPanel({
           </p>
         </div>
         <button className="button button--ghost" type="button" disabled={busy} onClick={onRefresh}>
-          Refresh Suggestions
+          {refreshFeedback.status === "loading" ? "Refreshing…" : "Refresh Suggestions"}
         </button>
       </div>
+      {refreshFeedback.message ? (
+        <div
+          className={`notice${refreshFeedback.status === "error" ? " notice--error" : refreshFeedback.status === "success" ? " notice--success" : ""}`}
+          style={{ marginBottom: 14 }}
+        >
+          {refreshFeedback.message}
+        </div>
+      ) : null}
       <div className="knowledge-business-grid">
         {visible.map((suggestion) => (
           <LinkSuggestion

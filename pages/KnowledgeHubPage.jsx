@@ -305,6 +305,10 @@ export default function KnowledgeHubPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [linkRefreshFeedback, setLinkRefreshFeedback] = useState({
+    status: "idle",
+    message: "",
+  });
   const dirty = useRef(false);
 
   async function loadData() {
@@ -995,11 +999,17 @@ export default function KnowledgeHubPage() {
 
   async function handleRefreshInternalLinks() {
     if (!article || dirty.current) {
-      setError("Save the current article before refreshing internal-link suggestions.");
+      const feedback = "Save the current article before refreshing internal-link suggestions.";
+      setError(feedback);
+      setLinkRefreshFeedback({ status: "error", message: feedback });
       return;
     }
     setBusy(true);
     setError("");
+    setLinkRefreshFeedback({
+      status: "loading",
+      message: "Re-ranking approved destinations…",
+    });
     try {
       const result = await refreshEditorialInternalLinks(article.id);
       setEditorial((current) => ({
@@ -1009,9 +1019,14 @@ export default function KnowledgeHubPage() {
           ...current.link_suggestions.filter((item) => item.article_id !== article.id),
         ],
       }));
-      setMessage(`${result.suggestions?.length || 0} approved internal-link suggestion(s) ready for review.`);
+      const feedback = `${result.suggestions?.length || 0} approved internal-link suggestion(s) ready for review.`;
+      setMessage(feedback);
+      setLinkRefreshFeedback({ status: "success", message: feedback });
     } catch (refreshError) {
-      setError(refreshError.message || "Internal-link suggestions could not be refreshed.");
+      const feedback =
+        refreshError.message || "Internal-link suggestions could not be refreshed.";
+      setError(feedback);
+      setLinkRefreshFeedback({ status: "error", message: feedback });
     } finally {
       setBusy(false);
     }
@@ -1784,6 +1799,7 @@ export default function KnowledgeHubPage() {
             linkEvents={currentLinkEvents}
             onLinkDecision={handleInternalLinkDecision}
             onRefreshLinks={handleRefreshInternalLinks}
+            linkRefreshFeedback={linkRefreshFeedback}
           />
           <EditorialHistoryPanel
             revisions={currentRevisions}
