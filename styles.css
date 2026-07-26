@@ -317,6 +317,113 @@ textarea {
   min-width: 0;
 }
 
+.ai-visibility-widget {
+  margin-top: 4px;
+}
+
+.ai-visibility-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 10px;
+}
+
+.ai-visibility-metric,
+.ai-visibility-last-check,
+.ai-visibility-summary-card,
+.visibility-quick-row {
+  appearance: none;
+  border: 1px solid #dbe2ea;
+  background: #fff;
+  color: #0f172a;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.ai-visibility-metric {
+  min-height: 104px;
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ai-visibility-metric:hover,
+.ai-visibility-summary-card:hover,
+.visibility-quick-row:hover {
+  border-color: #2563eb;
+}
+
+.ai-visibility-metric span,
+.ai-visibility-metric small {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.ai-visibility-metric strong {
+  font-size: 28px;
+}
+
+.ai-visibility-last-check {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: #64748b;
+}
+
+.ai-visibility-last-check strong {
+  color: #0f172a;
+}
+
+.ai-visibility-summary-card {
+  border-radius: 16px;
+}
+
+.visibility-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: #eef2f7;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.visibility-status.is-positive {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.visibility-status.is-negative {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.knowledge-three-column {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.visibility-quick-row {
+  width: 100%;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  font-weight: 700;
+}
+
+.visibility-quick-row small {
+  display: block;
+  color: #64748b;
+  font-weight: 400;
+  margin-top: 4px;
+}
+
 .knowledge-tabs,
 .knowledge-quick-actions,
 .knowledge-filters {
@@ -4667,6 +4774,10 @@ textarea {
 }
 
 @media (max-width: 720px) {
+  .knowledge-three-column {
+    grid-template-columns: 1fr;
+  }
+
   .operations-summary {
     align-items: flex-start;
     flex-direction: column;
