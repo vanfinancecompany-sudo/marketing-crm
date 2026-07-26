@@ -57,7 +57,9 @@ async function recordSyncEvent(supabase, articleId, result) {
     event_type: "system",
     article_id: articleId,
     summary:
-      result.operation === "created"
+      result.recoveredMissingItem && result.operation === "created"
+        ? "Missing Wix CMS draft was recreated for editorial review."
+        : result.operation === "created"
         ? "Wix CMS draft created for editorial review."
         : "Existing Wix CMS draft updated for editorial review.",
     details: {
@@ -67,6 +69,8 @@ async function recordSyncEvent(supabase, articleId, result) {
       wix_sync_status: result.syncStatus,
       payload_version: result.payloadVersion,
       content_field_type: result.contentFieldType,
+      recovered_missing_item: result.recoveredMissingItem,
+      replaced_wix_item_id: result.replacedItemId,
       automatic_publication: false,
     },
   });
@@ -153,6 +157,8 @@ export async function publishKnowledgeArticleToWix({
         dashboard_url: result.dashboardUrl,
         content_status: "Draft",
         content_field_type: result.contentFieldType,
+        recovered_missing_item: result.recoveredMissingItem,
+        replaced_item_id: result.replacedItemId,
         published: false,
       },
     };
@@ -160,11 +166,20 @@ export async function publishKnowledgeArticleToWix({
     const type = error.type || "api";
     const message = clean(error.message, 1000) || "Wix draft creation failed.";
     const failedAt = new Date().toISOString();
+    const clearStoredItemId = error.details?.clear_stored_item_id === true;
     const failed = await supabase
       .from("knowledge_articles")
       .update({
+        ...(clearStoredItemId
+          ? {
+              wix_item_id: null,
+              wix_draft_url: null,
+            }
+          : {}),
         wix_sync_status: "error",
-        wix_last_error: message,
+        wix_last_error: clearStoredItemId
+          ? `The previous Wix item no longer exists and its stored link was cleared. ${message}`
+          : message,
         last_wix_sync_at: failedAt,
         updated_at: failedAt,
       })
@@ -174,6 +189,17 @@ export async function publishKnowledgeArticleToWix({
         article_id: article.id,
         message: failed.error.message,
       });
+    }
+    if (clearStoredItemId) {
+      throw new WixPublishingError(
+        type,
+        `The previous Wix item no longer exists and its stored link was cleared. ${message} Retry to create a new Wix draft.`,
+        error.status || 409,
+        {
+          wix_error_code: "WDE0073",
+          stored_item_cleared: true,
+        }
+      );
     }
     throw error;
   }
