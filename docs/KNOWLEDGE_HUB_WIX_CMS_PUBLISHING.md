@@ -77,6 +77,12 @@ error instead of overwriting another item.
 - For Text, the body is sent as readable formatted plain text. Headings, paragraph spacing and
   bullet lists are preserved; accepted links use `Anchor text (URL)` so their destination remains
   visible without relying on unsupported Rich Content JSON.
+- Markdown separator lines are removed from both formats. Rich Content adds consistent breathing
+  room before second- and third-level headings, and presents an appended CTA as a distinct
+  **Next step** section.
+- Wix category values are normalised to the shared controlled Knowledge Hub category list. An
+  unsupported category stops the sync with an actionable validation error rather than creating
+  inconsistent Wix categories.
 - Any missing or unsupported `content` field type stops the sync with a configuration error.
 - Headings and paragraphs remain structured where the Wix field supports structure.
 - The CTA is appended as a reviewable “Next step” section.

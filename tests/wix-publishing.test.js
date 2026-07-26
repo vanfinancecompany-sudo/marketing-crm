@@ -6,6 +6,7 @@ import {
   acceptedInternalLinks,
   buildWixArticleData,
   buildWixPlainTextContent,
+  buildWixRichContent,
   createOrUpdateWixDraft,
   isWixMissingItemError,
   resolveWixContentFieldType,
@@ -122,6 +123,59 @@ test("payload transfers rich content, image and SEO while including accepted lin
   assert.doesNotMatch(serialized, /privacy-policy/);
   assert.doesNotMatch(serialized, /\"\/apply\"/);
   assert.deepEqual(acceptedInternalLinks(suggestions).map((item) => item.url), ["/van-finance-mwb-vans"]);
+});
+
+test("Rich Content removes separators and adds consistent H2/H3 spacing", () => {
+  const content = buildWixRichContent(
+    "# Main heading\n\nOpening paragraph.\n\n---\n\n## Finance options\nDetails.\n### Documents required\nMore details.",
+    [],
+    ""
+  );
+  const visibleText = content.nodes
+    .flatMap((node) => node.nodes || [])
+    .map((node) => node.textData?.text || "")
+    .join(" ");
+  assert.doesNotMatch(visibleText, /---/);
+
+  const headings = content.nodes
+    .map((node, index) => ({ node, index }))
+    .filter(({ node }) => node.type === "HEADING" && [2, 3].includes(node.headingData.level));
+  assert.equal(headings.length, 2);
+  for (const { index } of headings) {
+    const spacer = content.nodes[index - 1];
+    assert.equal(spacer.type, "PARAGRAPH");
+    assert.equal(spacer.nodes[0].textData.text, "");
+  }
+});
+
+test("Rich Content formats an appended CTA as a spaced heading and bold paragraph", () => {
+  const content = buildWixRichContent(
+    "# Van finance\n\nChoose an option that suits your business.",
+    [],
+    "Browse Finance Vans"
+  );
+  const nextStepIndex = content.nodes.findIndex(
+    (node) =>
+      node.type === "HEADING" &&
+      node.nodes.some((child) => child.textData?.text === "Next step")
+  );
+  assert.ok(nextStepIndex > 0);
+  assert.equal(content.nodes[nextStepIndex - 1].type, "PARAGRAPH");
+  const ctaNode = content.nodes[nextStepIndex + 1];
+  assert.equal(ctaNode.type, "PARAGRAPH");
+  assert.equal(ctaNode.nodes[0].textData.text, "Browse Finance Vans");
+  assert.deepEqual(ctaNode.nodes[0].textData.decorations, [{ type: "BOLD" }]);
+});
+
+test("Wix categories use the controlled Knowledge Hub names", () => {
+  assert.equal(buildWixArticleData(approvedArticle({ category: "vehicle guide" })).category, "Vehicle Guides");
+  assert.equal(buildWixArticleData(approvedArticle({ category: "rent-to-buy" })).category, "Rent2Buy");
+  assert.throws(
+    () => buildWixArticleData(approvedArticle({ category: "Miscellaneous" })),
+    (error) =>
+      error.type === "validation" &&
+      error.details.allowed_categories.includes("Business Advice")
+  );
 });
 
 test("Wix collection schema resolves Text and Rich Content without guessing", () => {
