@@ -18,6 +18,8 @@ const page = (id, title, url, extra = {}) => ({
   priority: 3,
   description: "",
   active: true,
+  approval_status: "approved",
+  verified: true,
   ...extra,
 });
 

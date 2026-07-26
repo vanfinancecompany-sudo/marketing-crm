@@ -343,7 +343,13 @@ async function loadEditorialContext(supabase, articleId = "") {
     supabase.from("knowledge_topics").select("*").order("updated_at", { ascending: false }),
     supabase.from("knowledge_settings").select("*").eq("settings_key", "default").maybeSingle(),
     supabase.from("knowledge_business_sections").select("*").eq("active", true).order("sort_order"),
-    supabase.from("knowledge_business_pages").select("*").eq("active", true).order("title"),
+    supabase
+      .from("knowledge_business_pages")
+      .select("*")
+      .eq("active", true)
+      .eq("approval_status", "approved")
+      .eq("verified", true)
+      .order("title"),
     supabase.from("knowledge_concepts").select("*").eq("active", true).order("label"),
   ];
   if (articleId) queries.push(supabase.from("knowledge_article_intents").select("*").eq("article_id", articleId).maybeSingle());
@@ -710,7 +716,9 @@ async function saveEditorialOverrides(supabase, body) {
     await supabase
       .from("knowledge_business_pages")
       .select("page_key,knowledge_article_id")
-      .eq("active", true),
+      .eq("active", true)
+      .eq("approval_status", "approved")
+      .eq("verified", true),
     "Approved Website Index destinations could not be checked."
   ) || [];
   const indexedArticleIds = approvedIndexPages
@@ -1019,6 +1027,15 @@ async function saveWebsiteIndexEntry(supabase, body) {
     external_id: existing?.external_id || null,
     sync_metadata: existing?.sync_metadata || {},
     last_synced_at: existing?.last_synced_at || null,
+    approval_status: entry.status === "Hidden" || entry.active === false ? "hidden" : "approved",
+    verified: entry.status !== "Hidden" && entry.active !== false,
+    verification_source: existing?.verification_source || "manual",
+    verified_at:
+      entry.status !== "Hidden" && entry.active !== false
+        ? existing?.verified_at || new Date().toISOString()
+        : existing?.verified_at || null,
+    monitor_in_ai_visibility_when_published:
+      entry.monitor_in_ai_visibility_when_published !== false,
     updated_at: new Date().toISOString(),
   };
   const saved = data(
@@ -1047,6 +1064,9 @@ async function saveWebsiteIndexEntry(supabase, body) {
         url: saved.url,
         source: saved.source,
         wix_sync_ready: true,
+        verified: saved.verified,
+        monitor_in_ai_visibility_when_published:
+          saved.monitor_in_ai_visibility_when_published,
       },
     }),
     "Website Index audit history could not be saved."

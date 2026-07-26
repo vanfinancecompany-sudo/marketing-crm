@@ -50,7 +50,10 @@ import {
   KnowledgeCoverageMap,
 } from "../components/KnowledgeHubV5Panels.jsx";
 import { EditorialAutomationPlatform } from "../components/KnowledgeHubV6Panels.jsx";
-import { WebsiteIndexPanel } from "../components/KnowledgeHubInternalLinking.jsx";
+import {
+  WebsiteIndexDiscoveryPanel,
+  WebsiteIndexPanel,
+} from "../components/KnowledgeHubInternalLinking.jsx";
 import {
   articleContentHash,
   buildApprovalQueue,
@@ -1804,12 +1807,15 @@ export default function KnowledgeHubPage() {
       ) : null}
 
       {screen === "website-index" ? (
-        <WebsiteIndexPanel
-          entries={editorial.website_index}
-          approvedArticles={articles.filter((item) => item.status === "approved")}
-          onSave={handleSaveWebsiteIndexEntry}
-          busy={busy}
-        />
+        <>
+          <WebsiteIndexDiscoveryPanel onIndexChanged={loadData} />
+          <WebsiteIndexPanel
+            entries={editorial.website_index}
+            approvedArticles={articles.filter((item) => item.status === "approved")}
+            onSave={handleSaveWebsiteIndexEntry}
+            busy={busy}
+          />
+        </>
       ) : null}
 
       {screen === "business" ? (
