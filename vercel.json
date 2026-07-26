@@ -12,6 +12,9 @@
   "functions": {
     "api/marketing-editorial-automation-worker.js": {
       "maxDuration": 300
+    },
+    "api/marketing-website-index-discovery.js": {
+      "maxDuration": 300
     }
   },
   "rewrites": [
