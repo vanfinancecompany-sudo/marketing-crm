@@ -8,6 +8,7 @@ import {
   saveDailyTargetSchedule,
 } from "../services/marketingDailyOperations.js";
 import { getStoredMarketingAccessKey, saveMarketingAccessKey, validateMarketingAccessKey } from "../services/marketingAccess.js";
+import AIVisibilityWidget from "../components/AIVisibilityWidget.jsx";
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const ACTIVITY_UNITS = {
@@ -45,7 +46,7 @@ function ActivityCard({ metric }) {
   </article>;
 }
 
-export default function DashboardPage() {
+export default function DashboardPage({ onNavigate }) {
   const today = londonDateKey();
   const todayWeekday = londonWeekday(new Date());
   const [overview, setOverview] = useState(null);
@@ -123,6 +124,7 @@ export default function DashboardPage() {
     </section>
     {error ? <div className="notice notice--error">{error}</div> : null}{message ? <div className="notice notice--success">{message}</div> : null}
     <section className="operations-activity-grid">{metrics.map((metric) => <ActivityCard key={metric.type} metric={metric} />)}</section>
+    <AIVisibilityWidget onOpen={() => onNavigate?.("AI Visibility")} />
 
     <details className="operations-drawer">
       <summary>VIEW TOTALS AND HISTORY</summary>
