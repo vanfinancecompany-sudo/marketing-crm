@@ -59,6 +59,12 @@ key, Supabase service-role key or Wix authentication headers.
 If `wix_item_id` is already stored, the button becomes **Update Wix Draft**. The existing item is
 updated; a second item is not created.
 
+If Wix returns `WDE0073` because that stored item was deleted, the server verifies the error code,
+checks `crmArticleId` and slug for an existing replacement, and then recreates the missing draft
+when safe. The new Wix item ID replaces the stale one in the CRM. If replacement creation also
+fails, the stale item ID and dashboard URL are cleared so **Retry** can create a new draft instead
+of leaving the article stuck in update-only mode. Other Wix errors never trigger this recovery.
+
 If the CRM ID was not saved after an interrupted request, the service queries Wix by
 `crmArticleId`, then by slug, before creating anything. A conflicting slug produces a validation
 error instead of overwriting another item.
