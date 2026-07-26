@@ -233,6 +233,12 @@ function CandidateEditor({ candidate, pages, busy, onSave, onMerge, onClose }) {
   ));
   const [existingPageId, setExistingPageId] = useState(candidate.existing_page_id || "");
   const [mergeFields, setMergeFields] = useState([]);
+  useEffect(() => {
+    setForm(candidate);
+    setLists(Object.fromEntries(
+      CANDIDATE_LIST_FIELDS.map((field) => [field, listText(candidate[field])])
+    ));
+  }, [candidate.id, candidate.updated_at]);
   const existing = pages.find((page) => page.id === existingPageId);
   const differences = existing
     ? [
@@ -313,6 +319,34 @@ export function WebsiteIndexDiscoveryPanel({ onIndexChanged }) {
       setBusy(false);
     }
   }
+
+  async function saveReviewChanges(candidateId, changes) {
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const result = await editWebsiteIndexCandidate(candidateId, changes);
+      const saved = result.candidate;
+      setState((current) => ({
+        ...current,
+        candidates: current.candidates.map((candidate) =>
+          candidate.id === saved.id ? saved : candidate
+        ),
+      }));
+      setSelected(saved);
+      setMessage("Review changes saved. The candidate is still pending.");
+
+      const refreshed = await loadWebsiteIndexDiscovery();
+      setState(refreshed);
+      setSelected(
+        refreshed.candidates.find((candidate) => candidate.id === saved.id) || saved
+      );
+    } catch (saveError) {
+      setError(saveError.message || "Review changes could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
   const rows = state.candidates.filter((candidate) => status === "all" || candidate.status === status);
   const latestRun = state.runs[0];
   return (
@@ -340,7 +374,7 @@ export function WebsiteIndexDiscoveryPanel({ onIndexChanged }) {
           pages={state.website_index}
           busy={busy}
           onClose={() => setSelected(null)}
-          onSave={(id, changes) => act(() => editWebsiteIndexCandidate(id, changes), "Review changes saved. The candidate is still pending.")}
+          onSave={saveReviewChanges}
           onMerge={(id, pageId, fields) => act(() => mergeWebsiteIndexCandidate(id, pageId, fields), "Selected discovery fields merged into the approved destination.", true)}
         />
       ) : null}

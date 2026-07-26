@@ -1,7 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
-import { isApprovedInternalUrl } from "../lib/internalLinking.js";
+import {
+  WEBSITE_INDEX_CATEGORIES,
+  isApprovedInternalUrl,
+} from "../lib/internalLinking.js";
 import {
   DISCOVERY_ROOT_URL,
+  buildDiscoveryCandidateEdit,
   discoverySummary,
   findDuplicate,
   normalizeDiscoveryUrl,
@@ -9,11 +13,6 @@ import {
 import { fetchWebsiteDocument, scanWebsite } from "../lib/websiteIndexScanner.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
-const EDITABLE_FIELDS = new Set([
-  "title", "url", "canonical_url", "suggested_category", "suggested_priority",
-  "suggested_description", "suggested_keywords", "suggested_matching_terms",
-  "suggested_customer_intent", "review_notes", "monitor_in_ai_visibility_when_published",
-]);
 const MERGE_FIELDS = new Set([
   "title", "url", "category", "priority", "description", "keywords",
   "vehicle_types", "customer_intent", "monitor_in_ai_visibility_when_published",
@@ -198,20 +197,43 @@ async function editCandidate(supabase, body) {
     throw new ApiError(409, "Approved or merged discovery records cannot be edited.");
   }
   const changes = body.changes && typeof body.changes === "object" ? body.changes : {};
-  const payload = {};
-  for (const [field, value] of Object.entries(changes)) {
-    if (!EDITABLE_FIELDS.has(field)) continue;
-    payload[field] = ["suggested_keywords", "suggested_matching_terms", "suggested_customer_intent"].includes(field)
-      ? cleanList(value)
-      : field === "suggested_priority"
-        ? Math.max(1, Math.min(5, Number(value) || 3))
-        : field === "monitor_in_ai_visibility_when_published"
-          ? value !== false
-          : clean(value, field.includes("description") ? 5000 : 2000) || null;
+  const next = { ...candidate, ...changes };
+  const rootUrl = await configuredRoot(supabase);
+  const normalizedUrl = normalizeDiscoveryUrl(next.url, rootUrl);
+  if (!clean(next.title, 300)) throw new ApiError(400, "A destination title is required.");
+  if (!WEBSITE_INDEX_CATEGORIES.includes(next.suggested_category)) {
+    throw new ApiError(400, "Select a supported Website Index category.");
   }
-  if ("url" in payload) {
-    payload.url = normalizeDiscoveryUrl(payload.url, await configuredRoot(supabase));
-    payload.requires_manual_mapping = !payload.url;
+  const payload = buildDiscoveryCandidateEdit(candidate, changes, rootUrl);
+  if (Object.prototype.hasOwnProperty.call(changes, "url")) {
+    const [pages, candidates] = await Promise.all([
+      data(
+        await supabase.from("knowledge_business_pages").select("*"),
+        "Existing Website Index records could not be checked."
+      ),
+      data(
+        await supabase
+          .from("knowledge_website_discovery_candidates")
+          .select("*")
+          .neq("id", candidate.id)
+          .neq("status", "deleted"),
+        "Other discovery candidates could not be checked."
+      ),
+    ]);
+    payload.canonical_url = normalizedUrl;
+    payload.redirect_chain = [];
+    payload.http_status = null;
+    payload.verified = false;
+    payload.available_to_internal_linking = false;
+    const duplicate = findDuplicate(
+      { ...candidate, ...payload },
+      pages || [],
+      candidates || [],
+      rootUrl
+    );
+    payload.duplicate_type = duplicate.duplicate_type;
+    payload.existing_page_id = duplicate.existing_page_id || null;
+    payload.duplicate_of_candidate_id = duplicate.duplicate_of_candidate_id || null;
   }
   payload.status = "pending_review";
   payload.reviewed_at = null;
@@ -223,7 +245,17 @@ async function editCandidate(supabase, body) {
   await audit(supabase, {
     scan_run_id: candidate.scan_run_id, candidate_id: candidate.id, action: "edited",
     reason: "Administrator edited the pending discovery recommendation.",
-    details: { changed_fields: Object.keys(payload), automatic_approval: false },
+    details: {
+      changed_fields: [
+        "title", "url", "suggested_category", "suggested_priority",
+        "suggested_keywords", "suggested_matching_terms",
+        "suggested_customer_intent", "suggested_description",
+        "monitor_in_ai_visibility_when_published",
+      ],
+      persisted_candidate_id: updated.id,
+      approved_website_index_updated: false,
+      automatic_approval: false,
+    },
   });
   return updated;
 }

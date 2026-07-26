@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  buildDiscoveryCandidateEdit,
   classifyDiscoveredDestination,
   duplicateUrlKey,
   extractWebsitePage,
   findDuplicate,
+  normalizeNavigationLabel,
   normalizeDiscoveryUrl,
 } from "../lib/websiteIndexDiscovery.js";
 import { scanWebsite } from "../lib/websiteIndexScanner.js";
@@ -56,6 +58,54 @@ test("intent classification stores manufacturer/model language as matching terms
   assert.equal(medium.suggested_category, "Stock");
   assert.equal(medium.suggested_matching_terms.includes("Transit Custom"), true);
   assert.equal(medium.suggested_matching_terms.includes("MWB"), true);
+});
+
+test("navigation labels remove action prefixes without changing their destinations", () => {
+  assert.equal(normalizeNavigationLabel("VIEW CREW VAN"), "Crew Vans");
+  assert.equal(normalizeNavigationLabel("VIEW TIPPER"), "Tipper Vans");
+  assert.equal(normalizeNavigationLabel("VIEW VANS | VAN FINANCE"), "Vans on Finance");
+  assert.equal(normalizeNavigationLabel("BROWSE ALL STOCK"), "All Stock");
+  assert.equal(normalizeNavigationLabel("Apply Now"), "Apply Now");
+});
+
+test("pending candidate edits persist every review field on the same record", () => {
+  const candidate = {
+    id: "candidate-1",
+    title: "VIEW CREW VAN",
+    url: `${root}/van-finance-lwb-vans`,
+    suggested_category: "Stock",
+    suggested_priority: 3,
+    suggested_description: "Original",
+    suggested_keywords: ["large vans"],
+    suggested_matching_terms: ["LWB"],
+    suggested_customer_intent: ["browse"],
+    monitor_in_ai_visibility_when_published: true,
+  };
+  const updated = buildDiscoveryCandidateEdit(candidate, {
+    title: "Crew Vans",
+    url: "/van-finance-crew-vans",
+    suggested_category: "Products",
+    suggested_priority: 5,
+    suggested_description: "Crew vans on finance.",
+    suggested_keywords: ["crew van", "crew vans"],
+    suggested_matching_terms: ["double cab", "crew cab"],
+    suggested_customer_intent: ["commercial", "browse stock"],
+    monitor_in_ai_visibility_when_published: false,
+  }, root);
+  assert.deepEqual(updated, {
+    title: "Crew Vans",
+    url: `${root}/van-finance-crew-vans`,
+    suggested_category: "Products",
+    suggested_priority: 5,
+    suggested_description: "Crew vans on finance.",
+    suggested_keywords: ["crew van", "crew vans"],
+    suggested_matching_terms: ["double cab", "crew cab"],
+    suggested_customer_intent: ["commercial", "browse stock"],
+    monitor_in_ai_visibility_when_published: false,
+    review_notes: "",
+    requires_manual_mapping: false,
+  });
+  assert.equal(candidate.url, `${root}/van-finance-lwb-vans`);
 });
 
 test("duplicate detection preserves existing approved records for selective merge", () => {
@@ -109,6 +159,9 @@ test("migration and review API prohibit automatic approval and prepare AI Visibi
   assert.doesNotMatch(migration, /\bdrop\s+(table|column)\b/i);
   assert.match(api, /automatic_approval: false/);
   assert.match(api, /selectively merged discovery data/);
+  assert.match(api, /update\(payload\)\.eq\("id", candidate\.id\)\.select\(\)\.single\(\)/);
   assert.match(ui, /Monitor in AI Visibility when published/);
   assert.match(ui, /No unique URL — manual mapping required/);
+  assert.match(ui, /setSelected\(saved\)/);
+  assert.match(ui, /loadWebsiteIndexDiscovery\(\)/);
 });
