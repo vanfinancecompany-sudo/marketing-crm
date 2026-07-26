@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   CUSTOMER_JOURNEYS,
   EDITORIAL_CATEGORY_LABELS,
@@ -6,7 +7,9 @@ import {
   buildArticleHealth,
   buildArticleReviewSummary,
 } from "../lib/editorialIntelligence.js";
-import { evaluatePublishingSafety } from "../lib/publishingSafety.js";
+import { auditPublishedArticles, evaluatePublishingSafety } from "../lib/publishingSafety.js";
+import { loadKnowledgeHub } from "../services/knowledgeHub.js";
+import { loadEditorialEngine } from "../services/editorialEngine.js";
 import { InternalLinkReviewPanel } from "./KnowledgeHubInternalLinking.jsx";
 
 const titleCase = (value) =>
@@ -43,6 +46,9 @@ export function EditorialApprovalQueue({
   onAnalyseMissing,
   busy,
 }) {
+  const [auditResults, setAuditResults] = useState([]);
+  const [auditMessage, setAuditMessage] = useState("");
+  const [auditing, setAuditing] = useState(false);
   const labels = {
     ready: "★★★★★ Ready",
     review: "★★★★ Review",
@@ -50,6 +56,30 @@ export function EditorialApprovalQueue({
     rewrite: "★★ Rewrite",
     reject: "★ Reject",
   };
+
+  async function runPublishedAudit() {
+    setAuditing(true);
+    setAuditMessage("");
+    try {
+      const [hub, editorial] = await Promise.all([loadKnowledgeHub(), loadEditorialEngine()]);
+      const flagged = auditPublishedArticles({
+        articles: hub.articles || [],
+        assessments: editorial.assessments || [],
+        businessKnowledge: hub.business_sections || [],
+      });
+      setAuditResults(flagged);
+      setAuditMessage(
+        flagged.length
+          ? `${flagged.length} approved or exported article(s) require editorial review. No status or Wix content was changed.`
+          : "All approved and exported articles passed the current safety audit. No status or Wix content was changed."
+      );
+    } catch (error) {
+      setAuditMessage(error.message || "Published article audit could not be completed.");
+    } finally {
+      setAuditing(false);
+    }
+  }
+
   return (
     <div className="knowledge-table-wrap">
       <div className="card-actions" style={{ marginBottom: 16 }}>
@@ -61,7 +91,30 @@ export function EditorialApprovalQueue({
         >
           Analyse Unscored Articles
         </button>
+        <button
+          type="button"
+          className="button button--ghost"
+          disabled={busy || auditing}
+          onClick={runPublishedAudit}
+        >
+          {auditing ? "Auditing..." : "Audit Published Articles"}
+        </button>
       </div>
+      {auditMessage ? <div className="notice" style={{ marginBottom: 12 }}>{auditMessage}</div> : null}
+      {auditResults.length ? (
+        <div className="knowledge-review-findings" style={{ marginBottom: 16 }}>
+          {auditResults.map((item) => (
+            <div key={item.article.id}>
+              <strong>{item.article.title}</strong>
+              <span>{titleCase(item.article.status)}</span>
+              <p>{item.safety.hard_block_reasons.join(" ")}</p>
+              <button type="button" className="button button--ghost" onClick={() => onOpen(item.article)}>
+                Open and Correct
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <table className="knowledge-table">
         <thead>
           <tr>
@@ -173,6 +226,24 @@ export function EditorialScorePanel({ article, assessment, intent, stale, onAnal
     assessment_freshness: "Assessment freshness",
     repetition: "Repetition",
   };
+
+  useEffect(() => {
+    const actionLabels = new Set(["Approve", "Create Wix Draft", "Update Wix Draft", "Retry Wix Draft"]);
+    const buttons = [...document.querySelectorAll("button")].filter((button) =>
+      actionLabels.has(String(button.textContent || "").trim())
+    );
+    buttons.forEach((button) => {
+      button.disabled = Boolean(busy || safety.hard_blocked);
+      if (safety.hard_blocked) {
+        button.title = safety.hard_block_reasons.join(" ");
+        button.setAttribute("aria-disabled", "true");
+      } else {
+        button.removeAttribute("title");
+        button.removeAttribute("aria-disabled");
+      }
+    });
+  }, [article.id, busy, safety.hard_blocked, safety.hard_block_reasons.join("|")]);
+
   return (
     <>
       <section className="panel">
