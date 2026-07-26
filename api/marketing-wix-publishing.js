@@ -66,6 +66,7 @@ async function recordSyncEvent(supabase, articleId, result) {
       wix_collection_id: result.collectionId,
       wix_sync_status: result.syncStatus,
       payload_version: result.payloadVersion,
+      content_field_type: result.contentFieldType,
       automatic_publication: false,
     },
   });
@@ -151,6 +152,7 @@ export async function publishKnowledgeArticleToWix({
         synced_at: syncedAt,
         dashboard_url: result.dashboardUrl,
         content_status: "Draft",
+        content_field_type: result.contentFieldType,
         published: false,
       },
     };

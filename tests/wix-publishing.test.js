@@ -5,7 +5,9 @@ import {
   WixPublishingError,
   acceptedInternalLinks,
   buildWixArticleData,
+  buildWixPlainTextContent,
   createOrUpdateWixDraft,
+  resolveWixContentFieldType,
   validateWixArticle,
   wixPublishingConfiguration,
 } from "../lib/wixPublishing.js";
@@ -67,6 +69,15 @@ function jsonResponse(status, payload) {
   };
 }
 
+function collectionResponse(type = "RICH_CONTENT") {
+  return jsonResponse(200, {
+    dataCollection: {
+      id: "Import3",
+      fields: [{ key: "content", type }],
+    },
+  });
+}
+
 test("only approved and complete articles can be exported", () => {
   assert.throws(
     () => validateWixArticle(approvedArticle({ status: "draft" })),
@@ -112,10 +123,44 @@ test("payload transfers rich content, image and SEO while including accepted lin
   assert.deepEqual(acceptedInternalLinks(suggestions).map((item) => item.url), ["/van-finance-mwb-vans"]);
 });
 
+test("Wix collection schema resolves Text and Rich Content without guessing", () => {
+  assert.equal(resolveWixContentFieldType({
+    dataCollection: { fields: [{ key: "content", type: "TEXT" }] },
+  }), "TEXT");
+  assert.equal(resolveWixContentFieldType({
+    dataCollection: { fields: [{ key: "content", type: "RICH_CONTENT" }] },
+  }), "RICH_CONTENT");
+  assert.throws(
+    () => resolveWixContentFieldType({
+      dataCollection: { fields: [{ key: "content", type: "IMAGE" }] },
+    }),
+    (error) => error.type === "configuration" && /Text or Rich Content/.test(error.message)
+  );
+});
+
+test("Text content preserves readable headings, lists and accepted links as plain text", () => {
+  const article = approvedArticle({
+    content_markdown:
+      "# Medium Wheelbase Vans\n\nChoose a **medium van**.\n\n- Easy to park\n- Useful load space\n\nSee Medium Wheelbase Vans.",
+  });
+  const content = buildWixArticleData(article, suggestions, "TEXT").content;
+  assert.equal(typeof content, "string");
+  assert.match(content, /^Medium Wheelbase Vans/m);
+  assert.match(content, /• Easy to park/);
+  assert.match(content, /Medium Wheelbase Vans \(\/van-finance-mwb-vans\)/);
+  assert.match(content, /Next step\nBrowse suitable vans when you are ready\./);
+  assert.doesNotMatch(content, /privacy-policy|RichContent|\"nodes\"/);
+  assert.equal(
+    content,
+    buildWixPlainTextContent(article.content_markdown, suggestions, article.cta)
+  );
+});
+
 test("Create Wix Draft queries duplicate safeguards then inserts into Import3", async () => {
   const calls = [];
   const fetchImpl = async (url, options) => {
-    calls.push({ url, options, body: JSON.parse(options.body) });
+    calls.push({ url, options, body: options.body ? JSON.parse(options.body) : null });
+    if (url.includes("/collections/Import3")) return collectionResponse();
     if (url.endsWith("/query")) return jsonResponse(200, { dataItems: [] });
     return jsonResponse(200, { dataItem: { id: "wix-created-item" } });
   };
@@ -127,20 +172,42 @@ test("Create Wix Draft queries duplicate safeguards then inserts into Import3", 
   });
   assert.equal(result.operation, "created");
   assert.equal(result.itemId, "wix-created-item");
-  assert.equal(calls.length, 3);
-  assert.equal(calls[0].body.query.filter.crmArticleId.$eq, approvedArticle().id);
-  assert.equal(calls[1].body.query.filter.slug.$eq, approvedArticle().slug);
-  assert.equal(calls[2].body.dataCollectionId, "Import3");
-  assert.equal(calls[2].body.dataItem.id, approvedArticle().id);
-  assert.equal(calls[2].body.dataItem.data.content.nodes.length > 0, true);
-  assert.equal(calls[2].options.headers.Authorization, "secret-wix-key");
+  assert.equal(calls.length, 4);
+  assert.match(calls[0].url, /collections\/Import3$/);
+  assert.equal(calls[1].body.query.filter.crmArticleId.$eq, approvedArticle().id);
+  assert.equal(calls[2].body.query.filter.slug.$eq, approvedArticle().slug);
+  assert.equal(calls[3].body.dataCollectionId, "Import3");
+  assert.equal(calls[3].body.dataItem.id, approvedArticle().id);
+  assert.equal(calls[3].body.dataItem.data.content.nodes.length > 0, true);
+  assert.equal(calls[3].options.headers.Authorization, "secret-wix-key");
   assert.equal(JSON.stringify(result).includes("secret-wix-key"), false);
+});
+
+test("Create Wix Draft sends a string when Wix reports a Text content field", async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options, body: options.body ? JSON.parse(options.body) : null });
+    if (url.includes("/collections/Import3")) return collectionResponse("TEXT");
+    if (url.endsWith("/query")) return jsonResponse(200, { dataItems: [] });
+    return jsonResponse(200, { dataItem: { id: "wix-text-item" } });
+  };
+  const result = await createOrUpdateWixDraft({
+    article: approvedArticle(),
+    suggestions,
+    configuration,
+    fetchImpl,
+  });
+  assert.equal(result.contentFieldType, "TEXT");
+  assert.equal(typeof calls.at(-1).body.dataItem.data.content, "string");
+  assert.match(calls.at(-1).body.dataItem.data.content, /Medium Wheelbase Vans \(\/van-finance-mwb-vans\)/i);
+  assert.doesNotMatch(calls.at(-1).body.dataItem.data.content, /privacy-policy/);
 });
 
 test("Update Wix Draft uses the stored Wix item and never creates another", async () => {
   const calls = [];
   const fetchImpl = async (url, options) => {
-    calls.push({ url, options, body: JSON.parse(options.body) });
+    calls.push({ url, options, body: options.body ? JSON.parse(options.body) : null });
+    if (url.includes("/collections/Import3")) return collectionResponse();
     return jsonResponse(200, { dataItem: { id: "existing-wix-item" } });
   };
   const result = await createOrUpdateWixDraft({
@@ -150,16 +217,17 @@ test("Update Wix Draft uses the stored Wix item and never creates another", asyn
     fetchImpl,
   });
   assert.equal(result.operation, "updated");
-  assert.equal(calls.length, 1);
-  assert.match(calls[0].url, /items\/existing-wix-item$/);
-  assert.equal(calls[0].options.method, "PUT");
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].url, /items\/existing-wix-item$/);
+  assert.equal(calls[1].options.method, "PUT");
 });
 
 test("crmArticleId duplicate protection recovers an existing item before creating", async () => {
   const calls = [];
   const fetchImpl = async (url, options) => {
-    const body = JSON.parse(options.body);
+    const body = options.body ? JSON.parse(options.body) : null;
     calls.push({ url, options, body });
+    if (url.includes("/collections/Import3")) return collectionResponse();
     if (url.endsWith("/query")) {
       return jsonResponse(200, {
         dataItems: [{ id: "recovered-item", data: { crmArticleId: approvedArticle().id } }],
@@ -174,16 +242,17 @@ test("crmArticleId duplicate protection recovers an existing item before creatin
   });
   assert.equal(result.operation, "updated");
   assert.equal(result.itemId, "recovered-item");
-  assert.equal(calls.length, 2);
-  assert.equal(calls[1].options.method, "PUT");
+  assert.equal(calls.length, 3);
+  assert.equal(calls[2].options.method, "PUT");
 });
 
 test("a concurrent deterministic insert conflict updates the same Wix item", async () => {
   const calls = [];
   let queryCount = 0;
   const fetchImpl = async (url, options) => {
-    const body = JSON.parse(options.body);
+    const body = options.body ? JSON.parse(options.body) : null;
     calls.push({ url, options, body });
+    if (url.includes("/collections/Import3")) return collectionResponse();
     if (url.endsWith("/query")) {
       queryCount += 1;
       return jsonResponse(200, { dataItems: [] });
@@ -208,7 +277,10 @@ test("Wix authentication failures are classified without returning credentials",
     createOrUpdateWixDraft({
       article: approvedArticle({ wix_item_id: "existing" }),
       configuration,
-      fetchImpl: async () => jsonResponse(403, { message: "Forbidden secret-wix-key" }),
+      fetchImpl: async (url) =>
+        url.includes("/collections/Import3")
+          ? collectionResponse()
+          : jsonResponse(403, { message: "Forbidden secret-wix-key" }),
     }),
     (error) =>
       error.type === "authentication" &&
@@ -263,6 +335,7 @@ function mockSupabase(initialArticle) {
 test("successful result saves Wix item, sync state and audit event in the CRM", async () => {
   const { client, state } = mockSupabase(approvedArticle());
   const fetchImpl = async (url) => {
+    if (url.includes("/collections/Import3")) return collectionResponse("TEXT");
     if (url.endsWith("/query")) return jsonResponse(200, { dataItems: [] });
     return jsonResponse(200, { dataItem: { id: "saved-wix-item" } });
   };
@@ -281,7 +354,10 @@ test("successful result saves Wix item, sync state and audit event in the CRM", 
   assert.equal(result.article.wix_sync_status, "synced");
   assert.equal(result.article.wix_last_error, "");
   assert.equal(result.wix.published, false);
+  assert.equal(result.wix.content_field_type, "TEXT");
+  assert.equal(typeof result.wix.content_field_type, "string");
   assert.equal(state.events.length, 1);
+  assert.equal(state.events[0].details.content_field_type, "TEXT");
   assert.equal(state.events[0].details.automatic_publication, false);
 });
 

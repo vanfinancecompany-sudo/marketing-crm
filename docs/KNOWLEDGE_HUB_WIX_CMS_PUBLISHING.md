@@ -15,7 +15,7 @@ The Wix collection must keep Drafts enabled and new items must default to Draft.
 | Article title | `title` | Text |
 | Slug | `slug` | Text |
 | Excerpt | `excerpt` | Text |
-| Article body | `content` | Rich Content |
+| Article body | `content` | Text or Rich Content (detected before every sync) |
 | SEO title | `seoTitle` | Text |
 | Meta description | `metaDescription` | Text |
 | Category | `category` | Text |
@@ -32,7 +32,7 @@ Configure these as server-side variables for Preview and Production, then redepl
 
 | Variable | Required | Value |
 | --- | --- | --- |
-| `WIX_API_KEY` | Yes | Wix API key with access to this site and permission to read/write CMS data items |
+| `WIX_API_KEY` | Yes | Wix API key with access to this site, permission to read/write CMS data items, and permission to read the CMS collection schema |
 | `WIX_SITE_ID` | Yes | Wix site ID from the Wix dashboard URL |
 | `WIX_KNOWLEDGE_COLLECTION_ID` | Yes | `Import3` |
 | `WIX_KNOWLEDGE_DASHBOARD_URL` | No | Direct dashboard URL for the collection; a standard Wix dashboard URL is generated when omitted |
@@ -40,7 +40,9 @@ Configure these as server-side variables for Preview and Production, then redepl
 
 Only an account owner or co-owner can create a Wix API key. Create it in Wix API Keys Manager,
 limit it to the Van Finance Company site, and grant only the CMS data permissions required to
-query, insert and update collection items. Never prefix these variables with `VITE_`.
+query, insert and update collection items. The key must also allow **Get Data Collection**
+(`WIX_DATA.GET_COLLECTION`; shown as **Manage Data Collections** in Wix) so the server can safely
+detect the `content` field type. Never prefix these variables with `VITE_`.
 
 The browser receives item IDs and safe status information only. It never receives the Wix API
 key, Supabase service-role key or Wix authentication headers.
@@ -63,8 +65,14 @@ error instead of overwriting another item.
 
 ## Payload and formatting
 
-- Article Markdown is converted to Wix Rich Content nodes.
-- Headings and paragraphs remain structured.
+- Before every create or update, the server reads the `Import3` collection schema and detects
+  whether `content` is a Text or Rich Content field.
+- For Rich Content, article Markdown is converted to Wix Rich Content nodes.
+- For Text, the body is sent as readable formatted plain text. Headings, paragraph spacing and
+  bullet lists are preserved; accepted links use `Anchor text (URL)` so their destination remains
+  visible without relying on unsupported Rich Content JSON.
+- Any missing or unsupported `content` field type stops the sync with a configuration error.
+- Headings and paragraphs remain structured where the Wix field supports structure.
 - The CTA is appended as a reviewable “Next step” section.
 - Accepted internal links are inserted as linked rich-text spans.
 - Rejected, pending and superseded link suggestions are excluded.
