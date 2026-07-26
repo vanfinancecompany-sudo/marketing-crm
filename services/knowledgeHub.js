@@ -4,6 +4,7 @@ import {
 } from "./marketingAccess.js";
 
 const KNOWLEDGE_HUB_API = "/api/marketing-knowledge-hub";
+const KNOWLEDGE_SAFETY_APPROVAL_API = "/api/marketing-knowledge-safety-approval";
 
 export async function requestKnowledgeHub(action, payload = {}) {
   const response = await fetch(KNOWLEDGE_HUB_API, {
@@ -12,6 +13,15 @@ export async function requestKnowledgeHub(action, payload = {}) {
     body: JSON.stringify({ action, ...payload }),
   });
   return parseMarketingJsonResponse(response, "Knowledge Hub request failed.");
+}
+
+async function requestSafetyApproval(action, payload = {}) {
+  const response = await fetch(KNOWLEDGE_SAFETY_APPROVAL_API, {
+    method: "POST",
+    headers: buildMarketingAccessHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ action, ...payload }),
+  });
+  return parseMarketingJsonResponse(response, "Publishing safety approval failed.");
 }
 
 export function loadKnowledgeHub() {
@@ -39,10 +49,16 @@ export function saveKnowledgeTopicIdeas(ideas) {
 }
 
 export function saveKnowledgeArticle(article, status) {
+  if (status === "approved") {
+    return requestSafetyApproval("approveArticle", { article });
+  }
   return requestKnowledgeHub("saveArticle", { article, status });
 }
 
 export function bulkUpdateKnowledgeArticles(articleIds, status) {
+  if (status === "approved") {
+    return requestSafetyApproval("approveArticles", { article_ids: articleIds });
+  }
   return requestKnowledgeHub("bulkUpdateArticles", { article_ids: articleIds, status });
 }
 
