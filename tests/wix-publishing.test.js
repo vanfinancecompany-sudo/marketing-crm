@@ -7,6 +7,7 @@ import {
   buildWixArticleData,
   buildWixPlainTextContent,
   createOrUpdateWixDraft,
+  isWixMissingItemError,
   resolveWixContentFieldType,
   validateWixArticle,
   wixPublishingConfiguration,
@@ -222,6 +223,68 @@ test("Update Wix Draft uses the stored Wix item and never creates another", asyn
   assert.equal(calls[1].options.method, "PUT");
 });
 
+test("WDE0073 clears the stale update target and creates a replacement draft", async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options, body: options.body ? JSON.parse(options.body) : null });
+    if (url.includes("/collections/Import3")) return collectionResponse();
+    if (url.endsWith("/items/deleted-wix-item")) {
+      return jsonResponse(404, {
+        message: "Item deleted-wix-item does not exist.",
+        details: {
+          applicationError: {
+            code: "WDE0073",
+            description: "Item deleted-wix-item does not exist in collection Import3.",
+          },
+        },
+      });
+    }
+    if (url.endsWith("/query")) {
+      return jsonResponse(200, {
+        dataItems: [{
+          id: "deleted-wix-item",
+          data: {
+            crmArticleId: approvedArticle().id,
+            slug: approvedArticle().slug,
+          },
+        }],
+      });
+    }
+    return jsonResponse(200, { dataItem: { id: "replacement-wix-item" } });
+  };
+  const result = await createOrUpdateWixDraft({
+    article: approvedArticle({ wix_item_id: "deleted-wix-item" }),
+    suggestions,
+    configuration,
+    fetchImpl,
+  });
+  assert.equal(result.operation, "created");
+  assert.equal(result.itemId, "replacement-wix-item");
+  assert.equal(result.recoveredMissingItem, true);
+  assert.equal(result.replacedItemId, "deleted-wix-item");
+  assert.equal(calls.filter((call) => call.url.endsWith("/query")).length, 2);
+  assert.equal(calls.at(-1).options.method, "POST");
+});
+
+test("an ordinary Wix update failure is not mistaken for a missing item", async () => {
+  const calls = [];
+  await assert.rejects(
+    createOrUpdateWixDraft({
+      article: approvedArticle({ wix_item_id: "existing-wix-item" }),
+      suggestions,
+      configuration,
+      fetchImpl: async (url, options) => {
+        calls.push({ url, options });
+        if (url.includes("/collections/Import3")) return collectionResponse();
+        return jsonResponse(404, { message: "A different Wix failure occurred." });
+      },
+    }),
+    (error) => !isWixMissingItemError(error) && error.details?.wix_status === 404
+  );
+  assert.equal(calls.length, 2);
+  assert.equal(calls.some((call) => call.options.method === "POST"), false);
+});
+
 test("crmArticleId duplicate protection recovers an existing item before creating", async () => {
   const calls = [];
   const fetchImpl = async (url, options) => {
@@ -359,6 +422,44 @@ test("successful result saves Wix item, sync state and audit event in the CRM", 
   assert.equal(state.events.length, 1);
   assert.equal(state.events[0].details.content_field_type, "TEXT");
   assert.equal(state.events[0].details.automatic_publication, false);
+});
+
+test("failed WDE0073 recovery clears the stored Wix item so Retry can create", async () => {
+  const { client, state } = mockSupabase(approvedArticle({
+    wix_item_id: "deleted-wix-item",
+    wix_draft_url: "https://manage.wix.com/deleted-wix-item",
+  }));
+  await assert.rejects(
+    publishKnowledgeArticleToWix({
+      supabase: client,
+      articleId: approvedArticle().id,
+      environment: {
+        WIX_API_KEY: "secret",
+        WIX_SITE_ID: "site-id",
+        WIX_KNOWLEDGE_COLLECTION_ID: "Import3",
+      },
+      fetchImpl: async (url) => {
+        if (url.includes("/collections/Import3")) return collectionResponse();
+        if (url.endsWith("/items/deleted-wix-item")) {
+          return jsonResponse(404, {
+            details: {
+              applicationError: {
+                code: "WDE0073",
+                description: "Item deleted-wix-item does not exist in collection Import3.",
+              },
+            },
+          });
+        }
+        return jsonResponse(500, { message: "Replacement lookup failed." });
+      },
+    }),
+    (error) =>
+      /stored link was cleared/i.test(error.message) &&
+      /Retry to create a new Wix draft/i.test(error.message)
+  );
+  assert.equal(state.article.wix_item_id, null);
+  assert.equal(state.article.wix_draft_url, null);
+  assert.equal(state.article.wix_sync_status, "error");
 });
 
 test("publishing API rejects unauthenticated browser requests", async () => {
