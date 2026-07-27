@@ -1,26 +1,102 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { validateRent2BuySemantics, RENT2BUY_COLLECTION_SENTENCE, RENT2BUY_SEPARATION_SENTENCE, validateMarkdownStructure } from "../lib/rent2BuyRules.js";
+import {
+  classifyArticleProduct,
+  evaluateRent2BuyRule,
+  RENT2BUY_COLLECTION_SENTENCE,
+  RENT2BUY_SEPARATION_SENTENCE,
+  validateComparisonStructure,
+  validateRent2BuySemantics,
+} from "../lib/rent2BuyRules.js";
 import { buildCorrectionPreview, normalizeCorrectionProposal } from "../lib/publishingCorrections.js";
 
-const usefulContent = Array.from({ length: 220 }, (_, index) => `guidance${index + 1}`).join(" ");
-const body=`## Introduction\n\n${RENT2BUY_SEPARATION_SENTENCE}\n\n${usefulContent}\n\n## Key Features\n\n${RENT2BUY_COLLECTION_SENTENCE}\n\n## Practical Next Steps\n\n1. Apply\n2. Review eligibility\n3. Collect the vehicle\n\nApply for Rent2Buy`;
-const article=(overrides={})=>({id:"r2b",title:"Rent2Buy vans",seo_title:"Rent2Buy vans",meta_description:"Rent2Buy agreement information",excerpt:"Review eligibility and agreement terms.",category:"Rent2Buy",article_type:"guide",content_markdown:body,faq_json:[{question:"How does eligibility work?",answer:"Review the eligibility requirements before proceeding."}],cta:"Apply for Rent2Buy",internal_link_suggestions:[{id:"link-1",anchor_text:"Rent2Buy application",destination_url:"/apply",status:"accepted"}],...overrides});
+const filler = Array.from({ length: 230 }, (_, index) => `guidance${index + 1}`).join(" ");
+const pureBody = `## Introduction\n\n${RENT2BUY_SEPARATION_SENTENCE}\n\n${filler}\n\n## Key Features\n\n${RENT2BUY_COLLECTION_SENTENCE}\n\n## Practical Next Steps\n\n1. Apply\n2. Review eligibility\n3. Collect the vehicle\n\nApply for Rent2Buy`;
+const pureArticle = (overrides = {}) => ({ id: "r2b", title: "What You Need to Know About Rent2Buy Vans in the UK", seo_title: "Rent2Buy vans in the UK", meta_description: "Rent2Buy agreement information", excerpt: "Review eligibility and agreement terms.", category: "Rent2Buy", article_type: "guide", content_markdown: pureBody, faq_json: [], cta: "Apply for Rent2Buy", internal_link_suggestions: [], generation_metadata: {}, ...overrides });
+const comparisonBody = `## Introduction\n\nThis guide compares two routes clearly.\n\n## Van Finance\n\nVan finance agreements may include interest and APR. Lender assessment may apply.\n\n## Rent2Buy\n\n${RENT2BUY_SEPARATION_SENTENCE}\n\n${RENT2BUY_COLLECTION_SENTENCE}\n\n## Key Differences\n\n| Feature | Van Finance | Rent2Buy |\n| --- | --- | --- |\n| Assessment | Credit checks and lender assessment may apply. | Review eligibility and agreement terms. |\n| Vehicle handover | Terms depend on the finance agreement. | Collection only from Southampton. |\n\n${filler}`;
+const comparisonArticle = (overrides = {}) => ({ id: "both", title: "Rent2Buy vs Van Finance: Which Is Right for You?", seo_title: "Rent2Buy compared with Van Finance", meta_description: "Compare Rent2Buy and Van Finance", excerpt: "A clearly separated comparison.", category: "Comparison", article_type: "comparison", content_markdown: comparisonBody, faq_json: [], cta: "Compare your options", internal_link_suggestions: [], generation_metadata: {}, ...overrides });
 
-test("metadata, excerpt, FAQs, CTA and link anchors are scanned",()=>{const result=validateRent2BuySemantics(article({meta_description:"Traditional finance options",excerpt:"APR may apply",faq_json:[{question:"Which lender?",answer:"Ask about rates"}],cta:"Start a finance application",internal_link_suggestions:[{anchor_text:"Finance options",destination_url:"/apply"}]}));assert.equal(result.rent2buy_semantic_valid,false);assert.deepEqual(new Set(result.rent2buy_semantic_errors.map((item)=>item.section)),new Set(["Meta description","Excerpt","FAQ 1","CTA","Internal-link anchor 1"]));});
+test("pure Rent2Buy article remains strictly separated", () => {
+  const unsafe = pureArticle({ content_markdown: `${pureBody}\n\n## Extra\n\nAPR varies by lender.` });
+  assert.equal(classifyArticleProduct(unsafe), "rent2buy");
+  assert.equal(validateRent2BuySemantics(unsafe).rent2buy_semantic_valid, false);
+});
 
-test("validator evaluates corrected proposed fields rather than stale originals",()=>{const original=article({meta_description:"Traditional finance options",faq_json:[{question:"Which lender?",answer:"APR details"}],cta:"Finance application",internal_link_suggestions:[{id:"link-1",anchor_text:"Finance options",destination_url:"/apply",status:"accepted"}]});const proposed={...original,meta_description:"Rent2Buy agreement information",faq_json:[{question:"How does eligibility work?",answer:"Review the agreement terms."}],cta:"Apply for Rent2Buy",internal_link_suggestions:[{anchor_text:"Rent2Buy application",destination_url:"https://changed.invalid"}],changes:[],removed_links:[],manual_confirmation_required:[],removed_sections:[],removal_reasons:[],removed_section_word_counts:[]};const normalized=normalizeCorrectionProposal(original,proposed).corrected_article;assert.equal(validateRent2BuySemantics(normalized).rent2buy_semantic_valid,true);assert.equal(normalized.internal_link_suggestions[0].destination_url,"/apply");assert.equal(normalized.internal_link_suggestions[0].anchor_text,"Rent2Buy application");});
+test("brief not-finance clarification does not classify article as both", () => {
+  const article = { title: "How Rent2Buy works", seo_title: "Rent2Buy guide", content_markdown: RENT2BUY_SEPARATION_SENTENCE };
+  assert.equal(classifyArticleProduct(article), "rent2buy");
+});
 
-test("exact company name is allowed as identification",()=>{assert.equal(validateRent2BuySemantics(article({excerpt:"Van Finance Company provides this information for Rent2Buy customers."})).rent2buy_semantic_valid,true);});
+test("explicit comparison title classifies as both", () => {
+  assert.equal(classifyArticleProduct({ title: "Rent2Buy vs Van Finance: Which Is Right for You?", content_markdown: "" }), "both");
+});
 
-test("finance claims containing company name remain blocked",()=>{const phrases=["Van Finance Company finance application","Finance options from Van Finance Company","Lender panel available through Van Finance Company"];for(const excerpt of phrases)assert.equal(validateRent2BuySemantics(article({excerpt})).rent2buy_semantic_valid,false);});
+test("saved user scope overrides title inference", () => {
+  const article = comparisonArticle({ generation_metadata: { product_scope_override: "rent2buy" } });
+  assert.equal(classifyArticleProduct(article), "rent2buy");
+});
 
-test("required sentences appear before CTA",()=>{const ctaIndex=body.indexOf("Apply for Rent2Buy");assert.ok(body.indexOf(RENT2BUY_SEPARATION_SENTENCE)<ctaIndex);assert.ok(body.indexOf(RENT2BUY_COLLECTION_SENTENCE)<ctaIndex);});
+test("comparison articles retain legitimate finance terminology", () => {
+  const result = evaluateRent2BuyRule(comparisonArticle(), { scopeOverride: "both" });
+  assert.equal(result.product, "both");
+  assert.equal(result.rent2buy_semantic_valid, true);
+  assert.equal(result.comparison_structure_valid, true);
+});
 
-test("complete multi-field proposal can reach correction_complete true",()=>{const original=article({meta_description:"Traditional finance options",excerpt:"Test the van before buying",faq_json:[{question:"Which lender?",answer:"APR details"}],cta:"Finance application",internal_link_suggestions:[{id:"link-1",anchor_text:"Finance options",destination_url:"/apply",status:"accepted"}]});const proposed={...article(),changes:["Corrected all Rent2Buy fields"],removed_links:[],manual_confirmation_required:[],removed_sections:[],removal_reasons:[],removed_section_word_counts:[]};const preview=buildCorrectionPreview({originalArticle:original,proposed,safetyOptions:{ignoreAssessmentFreshness:true}});assert.equal(preview.rent2buy_semantic_valid,true);assert.equal(preview.markdown_structure_valid,true);assert.equal(preview.correction_complete,true);});
+test("finance terms in Van Finance sections pass", () => {
+  const result = validateRent2BuySemantics(comparisonArticle(), { scopeOverride: "both" });
+  assert.equal(result.rent2buy_semantic_valid, true);
+});
 
-test("field-specific issues are grouped without duplicate phrase spam",()=>{const result=validateRent2BuySemantics(article({meta_description:"Finance finance finance options"}));const meta=result.rent2buy_semantic_errors.filter((item)=>item.section==="Meta description");assert.ok(meta.length<=2);});
+test("finance terms in Rent2Buy sections fail with context", () => {
+  const article = comparisonArticle({ content_markdown: comparisonBody.replace(RENT2BUY_COLLECTION_SENTENCE, `${RENT2BUY_COLLECTION_SENTENCE}\n\nAPR varies by lender.`) });
+  const result = validateRent2BuySemantics(article, { scopeOverride: "both" });
+  assert.equal(result.rent2buy_semantic_valid, false);
+  assert.ok(result.rent2buy_semantic_errors.some((item) => item.product_context === "rent2buy" && item.section === "Rent2Buy"));
+});
 
-test("Markdown remains valid",()=>assert.equal(validateMarkdownStructure(body,"Apply for Rent2Buy").markdown_structure_valid,true));
+test("collection wording is required on Rent2Buy side", () => {
+  const article = comparisonArticle({ content_markdown: comparisonBody.replaceAll(RENT2BUY_COLLECTION_SENTENCE, "Vehicle collection details are provided separately.") });
+  assert.equal(evaluateRent2BuyRule(article, { scopeOverride: "both" }).passed, false);
+});
 
-test("original article remains unchanged until acceptance and no Wix approval occurs",()=>{const original=article({meta_description:"Finance options"});const snapshot=structuredClone(original);normalizeCorrectionProposal(original,{...article(),changes:[],removed_links:[],manual_confirmation_required:[],removed_sections:[],removal_reasons:[],removed_section_word_counts:[]});assert.deepEqual(original,snapshot);assert.equal(original.wix_sync_status,undefined);assert.notEqual(original.status,"approved");});
+test("trial and free-delivery wording fail on Rent2Buy side", () => {
+  for (const phrase of ["Try the van before committing.", "Free UK delivery is available."]) {
+    const article = comparisonArticle({ content_markdown: comparisonBody.replace(RENT2BUY_COLLECTION_SENTENCE, `${RENT2BUY_COLLECTION_SENTENCE}\n\n${phrase}`) });
+    assert.equal(validateRent2BuySemantics(article, { scopeOverride: "both" }).rent2buy_semantic_valid, false);
+  }
+});
+
+test("clearly separated comparison table passes", () => {
+  assert.equal(validateComparisonStructure(comparisonArticle(), { scopeOverride: "both" }).comparison_structure_valid, true);
+});
+
+test("mixed unlabelled product claims fail", () => {
+  const article = comparisonArticle({ content_markdown: `## Comparison\n\nRent2Buy uses a rent-to-own arrangement while van finance may include APR and lenders.\n\n${filler}` });
+  const result = validateComparisonStructure(article, { scopeOverride: "both" });
+  assert.equal(result.comparison_structure_valid, false);
+});
+
+test("current Rent2Buy guide remains rent2buy", () => {
+  assert.equal(classifyArticleProduct(pureArticle()), "rent2buy");
+});
+
+test("corrections preserve comparison sections only for scope both", () => {
+  const original = comparisonArticle();
+  const proposed = { ...original, changes: ["Preserved separated comparison"], removed_links: [], manual_confirmation_required: [], removed_sections: [], removal_reasons: [], removed_section_word_counts: [] };
+  const preview = buildCorrectionPreview({ originalArticle: original, proposed, safetyOptions: { ignoreAssessmentFreshness: true }, scopeOverride: "both" });
+  assert.equal(preview.product_scope, "both");
+  assert.match(preview.after.content_markdown, /## Van Finance/);
+  assert.match(preview.after.content_markdown, /APR/);
+  assert.equal(preview.comparison_structure_valid, true);
+});
+
+test("normalisation preserves saved scope, source and no Wix approval", () => {
+  const original = pureArticle({ generation_metadata: { product_scope_override: "rent2buy" } });
+  const snapshot = structuredClone(original);
+  const normalized = normalizeCorrectionProposal(original, { ...original, content_markdown: pureBody, changes: [], removed_links: [], manual_confirmation_required: [], removed_sections: [], removal_reasons: [], removed_section_word_counts: [] }).corrected_article;
+  assert.deepEqual(original, snapshot);
+  assert.equal(normalized.generation_metadata.product_scope_override, "rent2buy");
+  assert.equal(original.wix_sync_status, undefined);
+  assert.notEqual(original.status, "approved");
+});
