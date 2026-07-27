@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { articleContentHash } from "../lib/editorialIntelligence.js";
 import { evaluatePublishingSafety } from "../lib/publishingSafety.js";
+import {
+  KNOWLEDGE_CORRECTION_STATE_EVENT,
+  KNOWLEDGE_CORRECTION_STATE_STORAGE,
+  readKnowledgeCorrectionState,
+} from "../lib/knowledgeCorrectionState.js";
 import { approveAndCreateWixDraft, saveKnowledgeArticle } from "../services/knowledgeHub.js";
 import { analyseEditorialArticle } from "../services/editorialEngine.js";
 import { createOrUpdateWixDraft } from "../services/wixPublishing.js";
@@ -20,6 +25,7 @@ export default function KnowledgeHubWixPublishing({
   onSynced,
 }) {
   const [currentArticle, setCurrentArticle] = useState(article);
+  const [correctionState, setCorrectionState] = useState(() => readKnowledgeCorrectionState());
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState("");
   const [error, setError] = useState(null);
@@ -30,28 +36,55 @@ export default function KnowledgeHubWixPublishing({
 
   useEffect(() => setCurrentArticle(article), [article]);
   useEffect(() => {
-    const saved = sessionStorage.getItem("knowledgeCorrectionFeedback");
-    if (!saved) return;
-    sessionStorage.removeItem("knowledgeCorrectionFeedback");
-    try { setResult(JSON.parse(saved)); } catch { setResult({ correction_saved: true, saved_at: new Date().toISOString() }); }
-  }, []);
+    const handleCorrectionState = (event) => {
+      const next = event.detail || null;
+      setCorrectionState(next);
+      if (next?.article?.id && next.article.id === currentArticle?.id) {
+        setCurrentArticle(next.article);
+      }
+    };
+    window.addEventListener(KNOWLEDGE_CORRECTION_STATE_EVENT, handleCorrectionState);
+    return () => window.removeEventListener(KNOWLEDGE_CORRECTION_STATE_EVENT, handleCorrectionState);
+  }, [currentArticle?.id]);
 
-  const acceptedCount = useMemo(() => linkSuggestions.filter((item) => item.status === "accepted").length, [linkSuggestions]);
-  const safety = useMemo(() => evaluatePublishingSafety(currentArticle || {}, {
-    assessment,
-    businessKnowledge,
-  }), [currentArticle, assessment, businessKnowledge]);
+  const acceptedCount = useMemo(
+    () => linkSuggestions.filter((item) => item.status === "accepted").length,
+    [linkSuggestions]
+  );
+  const safety = useMemo(
+    () => evaluatePublishingSafety(currentArticle || {}, { assessment, businessKnowledge }),
+    [currentArticle, assessment, businessKnowledge]
+  );
+
   if (!currentArticle) return null;
 
+  const correctionApplies = correctionState?.article_id === currentArticle.id;
+  const correctionSaveVerified = !correctionApplies || correctionState?.correction_save_verified === true;
+  const correctionSaving = correctionApplies && correctionState?.status === "saving";
+  const correctionVerificationFailed = correctionApplies && correctionState?.correction_save_verified === false && !correctionSaving;
   const isApproved = currentArticle.status === "approved";
   const isUpdate = Boolean(currentArticle.wix_item_id);
   const combinedLabel = isApproved
     ? (isUpdate ? "Update Wix Draft" : "Create Wix Draft")
     : (isUpdate ? "Approve & Update Wix Draft" : "Approve & Create Wix Draft");
+  const actionDisabled = busy || hasUnsavedChanges || !correctionSaveVerified;
+
+  function clearVerifiedCorrectionState() {
+    if (!correctionApplies) return;
+    sessionStorage.removeItem(KNOWLEDGE_CORRECTION_STATE_STORAGE);
+    setCorrectionState(null);
+  }
 
   async function runCombined() {
     if (running.current || busy) return;
-    if (hasUnsavedChanges) { setError("Corrections are not saved. Accept corrections before continuing."); return; }
+    if (!correctionSaveVerified) {
+      setError("Corrections could not be verified after saving.");
+      return;
+    }
+    if (hasUnsavedChanges) {
+      setError("Corrections are not saved. Accept corrections before continuing.");
+      return;
+    }
     running.current = true;
     setBusy(true);
     setError(null);
@@ -74,6 +107,7 @@ export default function KnowledgeHubWixPublishing({
         setPartial(response);
         setError(`${response.message} ${response.wix_error || ""}`.trim());
       } else {
+        clearVerifiedCorrectionState();
         setStage("Complete");
         setResult({
           article_status: "Approved",
@@ -94,7 +128,7 @@ export default function KnowledgeHubWixPublishing({
   }
 
   async function retryWix() {
-    if (running.current || busy) return;
+    if (running.current || busy || !correctionSaveVerified) return;
     running.current = true;
     setBusy(true);
     setStage(isUpdate ? "Updating Wix draft…" : "Creating Wix draft…");
@@ -103,6 +137,7 @@ export default function KnowledgeHubWixPublishing({
       const response = await createOrUpdateWixDraft(currentArticle.id);
       setCurrentArticle(response.article);
       onSynced?.(response.article, response.wix);
+      clearVerifiedCorrectionState();
       setPartial(null);
       setStage("Complete");
       setResult({
@@ -122,7 +157,7 @@ export default function KnowledgeHubWixPublishing({
   }
 
   async function approveOnly() {
-    if (running.current || busy || hasUnsavedChanges) return;
+    if (running.current || busy || hasUnsavedChanges || !correctionSaveVerified) return;
     running.current = true;
     setBusy(true);
     setStage("Approving article…");
@@ -131,14 +166,23 @@ export default function KnowledgeHubWixPublishing({
       const response = await saveKnowledgeArticle(currentArticle, "approved");
       setCurrentArticle(response.article);
       onSynced?.(response.article, null);
-      setResult({ article_status: "Approved", wix_status: "Not created", timestamp: response.article.approved_at, live_published: false });
+      clearVerifiedCorrectionState();
+      setResult({
+        article_status: "Approved",
+        wix_status: "Not created",
+        timestamp: response.article.approved_at,
+        live_published: false,
+      });
     } catch (caught) {
       setError(caught.message || "Article approval failed.");
-    } finally { setBusy(false); running.current = false; }
+    } finally {
+      setBusy(false);
+      running.current = false;
+    }
   }
 
   async function reanalyse() {
-    if (running.current || busy) return;
+    if (running.current || busy || !correctionSaveVerified) return;
     running.current = true;
     setBusy(true);
     setStage("Running safety checks…");
@@ -161,31 +205,29 @@ export default function KnowledgeHubWixPublishing({
           <h3>{combinedLabel}</h3>
           <p>Runs current safety checks, approves when required, and creates a reviewable Wix draft. It never publishes live.</p>
         </div>
-        <button className="button button--success" type="button" disabled={busy || hasUnsavedChanges} onClick={runCombined}>
+        <button className="button button--success" type="button" disabled={actionDisabled} onClick={runCombined}>
           {busy ? stage || "Working…" : combinedLabel}
         </button>
       </div>
 
       {hasUnsavedChanges ? <div className="notice notice--error">Corrections are not saved. Accept corrections before continuing.</div> : null}
-      {safety.requires_manual_claim_review ? (
-        <label className="notice" style={{ display: "block" }}>
-          <input type="checkbox" checked={confirmClaims} onChange={(event) => setConfirmClaims(event.target.checked)} /> I have reviewed and confirm the flagged business or financial claim.
-        </label>
-      ) : null}
-
-      {result?.correction_saved ? (
-        <div className="notice notice--success">
-          <strong>Corrections accepted and saved as draft.</strong>
-          <div>Saved: {formatDate(result.saved_at)}</div>
-          <div>Article status: Draft</div>
-          <div>Revision created: AI safety correction</div>
-          <div>{result.analysis_stale ? "Corrections saved. Reanalyse the article before approval and Wix export." : "Corrections saved. Approve and create the Wix draft when ready."}</div>
+      {correctionSaving ? <div className="notice">Saving and verifying corrections…</div> : null}
+      {correctionVerificationFailed ? (
+        <div className="notice notice--error">
+          <strong>Corrections could not be verified after saving.</strong>
+          <div>Approval and Wix actions remain disabled.</div>
         </div>
       ) : null}
 
-      {result && !result.correction_saved ? (
+      {safety.requires_manual_claim_review ? (
+        <label className="notice" style={{ display: "block" }}>
+          <input type="checkbox" checked={confirmClaims} disabled={!correctionSaveVerified} onChange={(event) => setConfirmClaims(event.target.checked)} /> I have reviewed and confirm the flagged business or financial claim.
+        </label>
+      ) : null}
+
+      {result ? (
         <div className="notice notice--success">
-          <strong>Article approved and Wix draft {result.operation === "updated" ? "updated" : "created"} successfully.</strong>
+          <strong>{result.operation ? `Article approved and Wix draft ${result.operation === "updated" ? "updated" : "created"} successfully.` : "Article approved successfully."}</strong>
           <div>Article status: {result.article_status}</div>
           <div>Wix status: {result.wix_status}</div>
           <div>Timestamp: {formatDate(result.timestamp)}</div>
@@ -197,16 +239,16 @@ export default function KnowledgeHubWixPublishing({
         <div className="notice notice--error">
           <strong>{partial ? "Article approved, but Wix draft creation failed." : "Action could not be completed."}</strong>
           <div>{error}</div>
-          {partial?.retry_wix ? <button className="button button--ghost" type="button" disabled={busy} onClick={retryWix}>Retry Wix Draft</button> : null}
+          {partial?.retry_wix ? <button className="button button--ghost" type="button" disabled={busy || !correctionSaveVerified} onClick={retryWix}>Retry Wix Draft</button> : null}
         </div>
       ) : null}
 
       <details style={{ marginTop: 12 }}>
         <summary><strong>Advanced options</strong></summary>
         <div className="card-actions" style={{ marginTop: 10 }}>
-          {!isApproved ? <button className="button button--ghost" type="button" disabled={busy || hasUnsavedChanges} onClick={approveOnly}>Approve only</button> : null}
-          {isApproved ? <button className="button button--ghost" type="button" disabled={busy || hasUnsavedChanges} onClick={retryWix}>{isUpdate ? "Update Wix Draft" : "Create Wix Draft"}</button> : null}
-          <button className="button button--ghost" type="button" disabled={busy || hasUnsavedChanges} onClick={reanalyse}>Reanalyse</button>
+          {!isApproved ? <button className="button button--ghost" type="button" disabled={actionDisabled} onClick={approveOnly}>Approve only</button> : null}
+          {isApproved ? <button className="button button--ghost" type="button" disabled={actionDisabled} onClick={retryWix}>{isUpdate ? "Update Wix Draft" : "Create Wix Draft"}</button> : null}
+          <button className="button button--ghost" type="button" disabled={actionDisabled} onClick={reanalyse}>Reanalyse</button>
         </div>
         <small>{acceptedCount} accepted internal link{acceptedCount === 1 ? "" : "s"} will be included. Wix output remains draft-only.</small>
       </details>
