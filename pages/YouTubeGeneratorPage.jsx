@@ -7,7 +7,15 @@ import {
   resolveYouTubeImageOrder,
   saveYouTubeCmsUpload,
 } from "../utils/youtubeImageResolution.js";
-import { buildCarFinancePostingCaption, buildPostingCaption } from "../utils/creativeUtils.js";
+import {
+  buildCarFinancePostingCaption,
+  buildPostingCaption,
+} from "../utils/creativeUtils.js";
+import {
+  createYouTubeExportOperationId,
+  recordYouTubeGeneratorDownload,
+  YOUTUBE_TRACKING_WARNING,
+} from "../services/marketingDailyOperations.js";
 
 const SHORT_WIDTH = 1080;
 const SHORT_HEIGHT = 1920;
@@ -39,7 +47,13 @@ const PRODUCTS = {
     hook: "FROM \u00a399 DEPOSIT",
     support: "FREE UK DELIVERY",
     cta: "APPLY ONLINE TODAY",
-    messages: ["FREE UK DELIVERY", "FINANCE THE VAT", "APPROVED IN 60 MINUTES", "APPLY ONLINE TODAY", "200+ VANS AVAILABLE"],
+    messages: [
+      "FREE UK DELIVERY",
+      "FINANCE THE VAT",
+      "APPROVED IN 60 MINUTES",
+      "APPLY ONLINE TODAY",
+      "200+ VANS AVAILABLE",
+    ],
   },
   rent2buy: {
     label: "Rent2Buy",
@@ -51,7 +65,13 @@ const PRODUCTS = {
     hook: "NO CREDIT CHECK VANS",
     support: "RENT IT - DRIVE IT - OWN IT",
     cta: "CHECK IF YOU QUALIFY",
-    messages: ["NO CREDIT CHECK VANS", "RENT IT - DRIVE IT - OWN IT", "APPLY IN 60 SECONDS", "FINAL PAYMENT IT'S YOURS", "CHECK IF YOU QUALIFY"],
+    messages: [
+      "NO CREDIT CHECK VANS",
+      "RENT IT - DRIVE IT - OWN IT",
+      "APPLY IN 60 SECONDS",
+      "FINAL PAYMENT IT'S YOURS",
+      "CHECK IF YOU QUALIFY",
+    ],
   },
   cars: {
     label: "Cars",
@@ -63,7 +83,13 @@ const PRODUCTS = {
     hook: "FINANCE YOUR NEXT CAR",
     support: "FAST CAR FINANCE OPTIONS",
     cta: "APPLY ONLINE TODAY",
-    messages: ["CAR FINANCE AVAILABLE", "FAST ONLINE APPLICATION", "LOW DEPOSIT OPTIONS", "GOOD OR BAD CREDIT", "APPLY ONLINE TODAY"],
+    messages: [
+      "CAR FINANCE AVAILABLE",
+      "FAST ONLINE APPLICATION",
+      "LOW DEPOSIT OPTIONS",
+      "GOOD OR BAD CREDIT",
+      "APPLY ONLINE TODAY",
+    ],
   },
 };
 
@@ -134,18 +160,28 @@ function productWebsiteDisplay(product) {
 }
 
 function safeFilePart(value) {
-  return cleanText(value)
-    .replace(/[^a-z0-9-]+/gi, "-")
-    .replace(/^-+|-+$/g, "")
-    .toLowerCase() || "youtube-short";
+  return (
+    cleanText(value)
+      .replace(/[^a-z0-9-]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase() || "youtube-short"
+  );
 }
 
 function normalizeRegistration(value) {
-  return cleanText(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return cleanText(value)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
 }
 
 function vehicleRegistration(vehicle) {
-  return normalizeRegistration(vehicle?.reg || vehicle?.registration || vehicle?.title || vehicle?.name || "");
+  return normalizeRegistration(
+    vehicle?.reg ||
+      vehicle?.registration ||
+      vehicle?.title ||
+      vehicle?.name ||
+      "",
+  );
 }
 
 function displayRegistration(vehicle) {
@@ -157,42 +193,73 @@ function displayRegistration(vehicle) {
 }
 
 function vehicleTitle(vehicle) {
-  return cleanText(vehicle?.vanDescription || vehicle?.description || vehicle?.name || vehicle?.title || vehicleRegistration(vehicle) || "Selected vehicle");
+  return cleanText(
+    vehicle?.vanDescription ||
+      vehicle?.description ||
+      vehicle?.name ||
+      vehicle?.title ||
+      vehicleRegistration(vehicle) ||
+      "Selected vehicle",
+  );
 }
 
 function vehicleImage(vehicle) {
-  return cleanText(vehicle?.image || vehicle?.picture || vehicle?.mainImage || vehicle?.imageUrl || vehicle?.image_url || "");
+  return cleanText(
+    vehicle?.image ||
+      vehicle?.picture ||
+      vehicle?.mainImage ||
+      vehicle?.imageUrl ||
+      vehicle?.image_url ||
+      "",
+  );
 }
 
 function vehiclePriceLine(vehicle, productKey) {
   if (productKey === "rent2buy") {
-    return cleanText(vehicle?.monthly || vehicle?.week || vehicle?.initialRental || "Flexible Rent2Buy options");
+    return cleanText(
+      vehicle?.monthly ||
+        vehicle?.week ||
+        vehicle?.initialRental ||
+        "Flexible Rent2Buy options",
+    );
   }
   if (productKey === "cars") {
     return cleanText(
       vehicle?.monthly ||
-      vehicle?.financeMonthly ||
-      vehicle?.finance_monthly ||
-      vehicle?.monthlyPrice ||
-      vehicle?.monthly_price ||
-      vehicle?.salePrice ||
-      vehicle?.saleprice ||
-      vehicle?.sale_price ||
-      vehicle?.price ||
-      vehicle?.cashPrice ||
-      vehicle?.cash_price ||
-      vehicle?.vehiclePrice ||
-      vehicle?.vehicle_price ||
-      vehicle?.priceText ||
-      vehicle?.price_text ||
-      "CARS FROM \u00a399 DEPOSIT"
+        vehicle?.financeMonthly ||
+        vehicle?.finance_monthly ||
+        vehicle?.monthlyPrice ||
+        vehicle?.monthly_price ||
+        vehicle?.salePrice ||
+        vehicle?.saleprice ||
+        vehicle?.sale_price ||
+        vehicle?.price ||
+        vehicle?.cashPrice ||
+        vehicle?.cash_price ||
+        vehicle?.vehiclePrice ||
+        vehicle?.vehicle_price ||
+        vehicle?.priceText ||
+        vehicle?.price_text ||
+        "CARS FROM \u00a399 DEPOSIT",
     );
   }
-  return cleanText(vehicle?.monthly || vehicle?.salePrice || vehicle?.price || "Finance options available");
+  return cleanText(
+    vehicle?.monthly ||
+      vehicle?.salePrice ||
+      vehicle?.price ||
+      "Finance options available",
+  );
 }
 
 function vehicleMonthlyPriceLine(vehicle) {
-  return cleanText(vehicle?.monthly || vehicle?.financeMonthly || vehicle?.monthlyPayment || vehicle?.monthly_price || vehicle?.salePrice || "");
+  return cleanText(
+    vehicle?.monthly ||
+      vehicle?.financeMonthly ||
+      vehicle?.monthlyPayment ||
+      vehicle?.monthly_price ||
+      vehicle?.salePrice ||
+      "",
+  );
 }
 
 function rent2buyFrameTwoSupportLine(vehicle) {
@@ -200,22 +267,30 @@ function rent2buyFrameTwoSupportLine(vehicle) {
 }
 
 function headlinePriceText(value) {
-  return cleanText(value).replace(/^from\s+/i, "").trim();
+  return cleanText(value)
+    .replace(/^from\s+/i, "")
+    .trim();
 }
 
 function vanFinanceMonthlyHeadline(vehicle) {
   const monthly = headlinePriceText(vehicleMonthlyPriceLine(vehicle));
-  return monthly ? `BUY THIS VAN FROM ONLY ${monthly}` : "BUY THIS VAN WITH FLEXIBLE FINANCE";
+  return monthly
+    ? `BUY THIS VAN FROM ONLY ${monthly}`
+    : "BUY THIS VAN WITH FLEXIBLE FINANCE";
 }
 
 function carFinanceMonthlyHeadline(vehicle) {
   const price = headlinePriceText(vehiclePriceLine(vehicle, "cars"));
-  return price && price !== "CARS FROM \u00a399 DEPOSIT" ? `BUY THIS CAR FROM ONLY ${price}` : "BUY THIS CAR FROM \u00a399 DEPOSIT";
+  return price && price !== "CARS FROM \u00a399 DEPOSIT"
+    ? `BUY THIS CAR FROM ONLY ${price}`
+    : "BUY THIS CAR FROM \u00a399 DEPOSIT";
 }
 
 function rent2buyPriceHeadline(vehicle) {
   const price = headlinePriceText(vehiclePriceLine(vehicle, "rent2buy"));
-  return price && price !== "Flexible Rent2Buy options" ? `RENT THIS VEHICLE FROM ${price}` : "RENT THIS VEHICLE WITH FLEXIBLE OPTIONS";
+  return price && price !== "Flexible Rent2Buy options"
+    ? `RENT THIS VEHICLE FROM ${price}`
+    : "RENT THIS VEHICLE WITH FLEXIBLE OPTIONS";
 }
 
 function isLockedSystemFrame(frameIndex) {
@@ -227,16 +302,28 @@ function resolveFrameTemplateText(value, { productKey, vehicle }) {
   if (!text) return "";
   if (productKey === "rent2buy") {
     return text
-      .replace(/\{price\}/gi, headlinePriceText(vehiclePriceLine(vehicle, "rent2buy")) || "")
-      .replace(/\{monthly price\}/gi, headlinePriceText(vehiclePriceLine(vehicle, "rent2buy")) || "")
+      .replace(
+        /\{price\}/gi,
+        headlinePriceText(vehiclePriceLine(vehicle, "rent2buy")) || "",
+      )
+      .replace(
+        /\{monthly price\}/gi,
+        headlinePriceText(vehiclePriceLine(vehicle, "rent2buy")) || "",
+      )
       .replace(/\{registration\}/gi, displayRegistration(vehicle) || "")
       .replace(/\s+/g, " ")
       .trim();
   }
   if (productKey !== "vanFinance" && productKey !== "cars") return text;
   return text
-    .replace(/\{monthly price\}/gi, headlinePriceText(vehicleMonthlyPriceLine(vehicle)) || "")
-    .replace(/\{monthly\}/gi, headlinePriceText(vehicleMonthlyPriceLine(vehicle)) || "")
+    .replace(
+      /\{monthly price\}/gi,
+      headlinePriceText(vehicleMonthlyPriceLine(vehicle)) || "",
+    )
+    .replace(
+      /\{monthly\}/gi,
+      headlinePriceText(vehicleMonthlyPriceLine(vehicle)) || "",
+    )
     .replace(/\{registration\}/gi, displayRegistration(vehicle) || "")
     .replace(/\s+/g, " ")
     .trim();
@@ -245,49 +332,181 @@ function resolveFrameTemplateText(value, { productKey, vehicle }) {
 function defaultFrameText(productKey, index) {
   if (productKey === "rent2buy") {
     const frames = [
-      { eyebrow: "RENT2BUY VANS", headline: "NO CREDIT CHECK VANS", support: "RENT IT - DRIVE IT - OWN IT", cta: "CHECK IF YOU QUALIFY" },
-      { eyebrow: "SELECTED VAN", headline: "YOUR NEXT VAN", support: "FLEXIBLE RENT2BUY OPTIONS", cta: "" },
-      { eyebrow: "RENT2BUY PAYMENT", headline: "RENT THIS VEHICLE FROM {price}", support: "{registration}", cta: "" },
-      { eyebrow: "FAST APPLICATION", headline: "APPLY IN 60 SECONDS", support: "SIMPLE ONLINE CHECK", cta: "" },
-      { eyebrow: "OWNERSHIP ROUTE", headline: "FINAL PAYMENT IT'S YOURS", support: "CLEAR RENT2BUY PATH", cta: "" },
-      { eyebrow: "HUGE CHOICE", headline: "VANS READY TO GO", support: "PICKUPS, LUTONS AND PANEL VANS", cta: "" },
-      { eyebrow: "NO CREDIT CHECK", headline: "CHECK IF YOU QUALIFY", support: "FAST ONLINE APPLICATION", cta: "" },
-      { eyebrow: "RENT2BUY VANS", headline: "APPLY TODAY", support: "DRIVE IT, THEN OWN IT", cta: "CHECK IF YOU QUALIFY" },
+      {
+        eyebrow: "RENT2BUY VANS",
+        headline: "NO CREDIT CHECK VANS",
+        support: "RENT IT - DRIVE IT - OWN IT",
+        cta: "CHECK IF YOU QUALIFY",
+      },
+      {
+        eyebrow: "SELECTED VAN",
+        headline: "YOUR NEXT VAN",
+        support: "FLEXIBLE RENT2BUY OPTIONS",
+        cta: "",
+      },
+      {
+        eyebrow: "RENT2BUY PAYMENT",
+        headline: "RENT THIS VEHICLE FROM {price}",
+        support: "{registration}",
+        cta: "",
+      },
+      {
+        eyebrow: "FAST APPLICATION",
+        headline: "APPLY IN 60 SECONDS",
+        support: "SIMPLE ONLINE CHECK",
+        cta: "",
+      },
+      {
+        eyebrow: "OWNERSHIP ROUTE",
+        headline: "FINAL PAYMENT IT'S YOURS",
+        support: "CLEAR RENT2BUY PATH",
+        cta: "",
+      },
+      {
+        eyebrow: "HUGE CHOICE",
+        headline: "VANS READY TO GO",
+        support: "PICKUPS, LUTONS AND PANEL VANS",
+        cta: "",
+      },
+      {
+        eyebrow: "NO CREDIT CHECK",
+        headline: "CHECK IF YOU QUALIFY",
+        support: "FAST ONLINE APPLICATION",
+        cta: "",
+      },
+      {
+        eyebrow: "RENT2BUY VANS",
+        headline: "APPLY TODAY",
+        support: "DRIVE IT, THEN OWN IT",
+        cta: "CHECK IF YOU QUALIFY",
+      },
     ];
     return frames[index % frames.length];
   }
 
   if (productKey === "cars") {
     const frames = [
-      { eyebrow: "CAR FINANCE COMPANY", headline: "FINANCE YOUR NEXT CAR", support: "FAST CAR FINANCE OPTIONS", cta: "APPLY NOW" },
-      { eyebrow: "SELECTED CAR", headline: "YOUR NEXT CAR", support: "CARS FROM \u00a399 DEPOSIT", cta: "" },
-      { eyebrow: "CAR FINANCE", headline: "BUY THIS CAR FROM ONLY {monthly price}", support: "{registration}", cta: "" },
-      { eyebrow: "FAST APPLICATION", headline: "FAST ONLINE APPLICATION", support: "APPLY ONLINE TODAY", cta: "" },
-      { eyebrow: "LOW DEPOSIT", headline: "LOW DEPOSIT OPTIONS", support: "SUBJECT TO STATUS", cta: "" },
-      { eyebrow: "ALL WELCOME", headline: "GOOD OR BAD CREDIT", support: "ALL CREDIT PROFILES CONSIDERED", cta: "" },
-      { eyebrow: "CAR FINANCE", headline: "CAR FINANCE AVAILABLE", support: "FAST CAR FINANCE OPTIONS", cta: "" },
-      { eyebrow: "APPLY ONLINE", headline: "APPLY ONLINE TODAY", support: "CAR FINANCE COMPANY", cta: "APPLY NOW" },
+      {
+        eyebrow: "CAR FINANCE COMPANY",
+        headline: "FINANCE YOUR NEXT CAR",
+        support: "FAST CAR FINANCE OPTIONS",
+        cta: "APPLY NOW",
+      },
+      {
+        eyebrow: "SELECTED CAR",
+        headline: "YOUR NEXT CAR",
+        support: "CARS FROM \u00a399 DEPOSIT",
+        cta: "",
+      },
+      {
+        eyebrow: "CAR FINANCE",
+        headline: "BUY THIS CAR FROM ONLY {monthly price}",
+        support: "{registration}",
+        cta: "",
+      },
+      {
+        eyebrow: "FAST APPLICATION",
+        headline: "FAST ONLINE APPLICATION",
+        support: "APPLY ONLINE TODAY",
+        cta: "",
+      },
+      {
+        eyebrow: "LOW DEPOSIT",
+        headline: "LOW DEPOSIT OPTIONS",
+        support: "SUBJECT TO STATUS",
+        cta: "",
+      },
+      {
+        eyebrow: "ALL WELCOME",
+        headline: "GOOD OR BAD CREDIT",
+        support: "ALL CREDIT PROFILES CONSIDERED",
+        cta: "",
+      },
+      {
+        eyebrow: "CAR FINANCE",
+        headline: "CAR FINANCE AVAILABLE",
+        support: "FAST CAR FINANCE OPTIONS",
+        cta: "",
+      },
+      {
+        eyebrow: "APPLY ONLINE",
+        headline: "APPLY ONLINE TODAY",
+        support: "CAR FINANCE COMPANY",
+        cta: "APPLY NOW",
+      },
     ];
     return frames[index % frames.length];
   }
 
   const frames = [
-    { eyebrow: "VAN FINANCE COMPANY", headline: "FROM \u00a399 DEPOSIT", support: "FREE UK DELIVERY", cta: "APPLY NOW" },
-    { eyebrow: "SELECTED VAN", headline: "YOUR NEXT VAN", support: "LOW DEPOSIT OPTIONS", cta: "" },
-    { eyebrow: "FINANCE PAYMENT", headline: "BUY THIS VAN FROM ONLY {monthly price}", support: "{registration}", cta: "" },
-    { eyebrow: "FINANCE OPTIONS", headline: "FINANCE THE VAT", support: "KEEP YOUR CASH FLOW MOVING", cta: "" },
-    { eyebrow: "FAST DECISIONS", headline: "APPROVED IN 60 MINUTES", support: "APPLY ONLINE TODAY", cta: "" },
-    { eyebrow: "ALL WELCOME", headline: "GOOD OR BAD CREDIT", support: "ALL CREDIT PROFILES CONSIDERED", cta: "" },
-    { eyebrow: "LOW DEPOSIT", headline: "FROM \u00a399 DEPOSIT", support: "SUBJECT TO STATUS", cta: "" },
-    { eyebrow: "READY TO GO", headline: "200+ VANS AVAILABLE", support: "NATIONWIDE DELIVERY", cta: "" },
-    { eyebrow: "APPLY ONLINE", headline: "APPROVED IN 60 MINUTES", support: "SIMPLE FAST APPLICATION", cta: "" },
-    { eyebrow: "START TODAY", headline: "APPLY ONLINE TODAY", support: "VAN FINANCE COMPANY", cta: "APPLY NOW" },
+    {
+      eyebrow: "VAN FINANCE COMPANY",
+      headline: "FROM \u00a399 DEPOSIT",
+      support: "FREE UK DELIVERY",
+      cta: "APPLY NOW",
+    },
+    {
+      eyebrow: "SELECTED VAN",
+      headline: "YOUR NEXT VAN",
+      support: "LOW DEPOSIT OPTIONS",
+      cta: "",
+    },
+    {
+      eyebrow: "FINANCE PAYMENT",
+      headline: "BUY THIS VAN FROM ONLY {monthly price}",
+      support: "{registration}",
+      cta: "",
+    },
+    {
+      eyebrow: "FINANCE OPTIONS",
+      headline: "FINANCE THE VAT",
+      support: "KEEP YOUR CASH FLOW MOVING",
+      cta: "",
+    },
+    {
+      eyebrow: "FAST DECISIONS",
+      headline: "APPROVED IN 60 MINUTES",
+      support: "APPLY ONLINE TODAY",
+      cta: "",
+    },
+    {
+      eyebrow: "ALL WELCOME",
+      headline: "GOOD OR BAD CREDIT",
+      support: "ALL CREDIT PROFILES CONSIDERED",
+      cta: "",
+    },
+    {
+      eyebrow: "LOW DEPOSIT",
+      headline: "FROM \u00a399 DEPOSIT",
+      support: "SUBJECT TO STATUS",
+      cta: "",
+    },
+    {
+      eyebrow: "READY TO GO",
+      headline: "200+ VANS AVAILABLE",
+      support: "NATIONWIDE DELIVERY",
+      cta: "",
+    },
+    {
+      eyebrow: "APPLY ONLINE",
+      headline: "APPROVED IN 60 MINUTES",
+      support: "SIMPLE FAST APPLICATION",
+      cta: "",
+    },
+    {
+      eyebrow: "START TODAY",
+      headline: "APPLY ONLINE TODAY",
+      support: "VAN FINANCE COMPANY",
+      cta: "APPLY NOW",
+    },
   ];
   return frames[index % frames.length];
 }
 
 function defaultFrameTexts(productKey, count = MAX_IMAGES) {
-  return Array.from({ length: count }, (_, index) => ({ ...defaultFrameText(productKey, index) }));
+  return Array.from({ length: count }, (_, index) => ({
+    ...defaultFrameText(productKey, index),
+  }));
 }
 
 function normalizeTextStateForProduct(value, productKey) {
@@ -301,21 +520,24 @@ function normalizeTextStateForProduct(value, productKey) {
     frames: defaultFrameTexts(productKey, MAX_IMAGES),
   };
   const savedFrames = Array.isArray(value?.frames) ? value.frames : [];
-  const frames = defaultFrameTexts(productKey, MAX_IMAGES).map((frame, index) => {
-    const savedFrame = savedFrames[index];
-    if (!savedFrame || typeof savedFrame !== "object") return frame;
-    const merged = { ...frame, ...savedFrame };
-    if (
-      productKey === "vanFinance" &&
-      index === 2 &&
-      cleanText(savedFrame.eyebrow).toUpperCase() === "FREE UK DELIVERY" &&
-      cleanText(savedFrame.headline).toUpperCase() === "DELIVERED TO YOUR DOOR" &&
-      cleanText(savedFrame.support).toUpperCase() === "ANYWHERE IN THE UK"
-    ) {
-      return frame;
-    }
-    return merged;
-  });
+  const frames = defaultFrameTexts(productKey, MAX_IMAGES).map(
+    (frame, index) => {
+      const savedFrame = savedFrames[index];
+      if (!savedFrame || typeof savedFrame !== "object") return frame;
+      const merged = { ...frame, ...savedFrame };
+      if (
+        productKey === "vanFinance" &&
+        index === 2 &&
+        cleanText(savedFrame.eyebrow).toUpperCase() === "FREE UK DELIVERY" &&
+        cleanText(savedFrame.headline).toUpperCase() ===
+          "DELIVERED TO YOUR DOOR" &&
+        cleanText(savedFrame.support).toUpperCase() === "ANYWHERE IN THE UK"
+      ) {
+        return frame;
+      }
+      return merged;
+    },
+  );
   return { ...base, ...(value || {}), frames };
 }
 
@@ -350,7 +572,10 @@ function buildOrderedImageRecords(records, limit = MAX_IMAGES) {
     ordered.push({ url, source: cleanText(record?.source || "image") });
   });
 
-  return { records: ordered.slice(0, Math.min(MAX_IMAGES, limit)), dedupeHappened };
+  return {
+    records: ordered.slice(0, Math.min(MAX_IMAGES, limit)),
+    dedupeHappened,
+  };
 }
 
 function splitCsvLine(line) {
@@ -378,7 +603,9 @@ function splitCsvLine(line) {
 }
 
 function normalizeCmsKey(key) {
-  return cleanText(key).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return cleanText(key)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 function normalizeCmsImageUrl(value) {
@@ -392,10 +619,12 @@ function normalizeCmsImageUrl(value) {
 
 function isLikelyImageUrl(value) {
   const text = cleanText(value);
-  return /static\.wixstatic\.com\/media\//i.test(text)
-    || /^wix:image:\/\//i.test(text)
-    || /^image:\/\//i.test(text)
-    || /\.(?:jpe?g|png|webp)(?:[?#].*)?$/i.test(text);
+  return (
+    /static\.wixstatic\.com\/media\//i.test(text) ||
+    /^wix:image:\/\//i.test(text) ||
+    /^image:\/\//i.test(text) ||
+    /\.(?:jpe?g|png|webp)(?:[?#].*)?$/i.test(text)
+  );
 }
 
 function extractImageUrlsFromValue(value) {
@@ -405,17 +634,25 @@ function extractImageUrlsFromValue(value) {
     if (!text) return;
     const matches = text.match(/https?:\/\/[^\s"'<>|;,]+/gi);
     if (matches) {
-      matches.map(normalizeCmsImageUrl).filter(isLikelyImageUrl).forEach((url) => urls.push(url));
+      matches
+        .map(normalizeCmsImageUrl)
+        .filter(isLikelyImageUrl)
+        .forEach((url) => urls.push(url));
       return;
     }
-    if (/^wix:image:\/\//i.test(text) || /^image:\/\//i.test(text) || /static\.wixstatic\.com\/media\//i.test(text)) {
+    if (
+      /^wix:image:\/\//i.test(text) ||
+      /^image:\/\//i.test(text) ||
+      /static\.wixstatic\.com\/media\//i.test(text)
+    ) {
       urls.push(text);
     }
   };
 
   if (Array.isArray(value)) {
     value.forEach((item) => {
-      if (typeof item === "object" && item) addUrl(item.url || item.src || item.fileUrl || item.image || item.uri);
+      if (typeof item === "object" && item)
+        addUrl(item.url || item.src || item.fileUrl || item.image || item.uri);
       else addUrl(item);
     });
     return urls;
@@ -458,7 +695,9 @@ function getCmsField(source, keyPatterns) {
 
 function extractRegistrationFromText(value) {
   const text = cleanText(value).toUpperCase();
-  const explicitMatch = text.match(/(?:REG(?:ISTRATION)?|VRM|NUMBER\s*PLATE|PLATE)\s*[:#-]?\s*([A-Z]{2}\s?\d{2}\s?[A-Z]{3})/i);
+  const explicitMatch = text.match(
+    /(?:REG(?:ISTRATION)?|VRM|NUMBER\s*PLATE|PLATE)\s*[:#-]?\s*([A-Z]{2}\s?\d{2}\s?[A-Z]{3})/i,
+  );
   if (explicitMatch) return explicitMatch[1].replace(/\s+/g, "");
   const looseMatch = text.match(/\b[A-Z]{2}\s?\d{2}\s?[A-Z]{3}\b/);
   return looseMatch ? looseMatch[0].replace(/\s+/g, "") : "";
@@ -466,19 +705,46 @@ function extractRegistrationFromText(value) {
 
 function normalizeCmsRow(row, index = 0) {
   const source = row || {};
-  const explicitReg = getCmsField(source, [/^reg$/, /^registration/, /vrm/, /numberplate/, /licenceplate/, /licenseplate/]);
-  const rowText = Object.values(source).map((value) => (typeof value === "string" ? value : JSON.stringify(value || ""))).join(" ");
-  const registration = normalizeRegistration(explicitReg) || extractRegistrationFromText(rowText);
-  const title = cleanText(getCmsField(source, [/^title$/, /^name$/, /vehicletitle/, /^vehicle$/, /description/, /vandescription/, /makemodel/]));
+  const explicitReg = getCmsField(source, [
+    /^reg$/,
+    /^registration/,
+    /vrm/,
+    /numberplate/,
+    /licenceplate/,
+    /licenseplate/,
+  ]);
+  const rowText = Object.values(source)
+    .map((value) =>
+      typeof value === "string" ? value : JSON.stringify(value || ""),
+    )
+    .join(" ");
+  const registration =
+    normalizeRegistration(explicitReg) || extractRegistrationFromText(rowText);
+  const title = cleanText(
+    getCmsField(source, [
+      /^title$/,
+      /^name$/,
+      /vehicletitle/,
+      /^vehicle$/,
+      /description/,
+      /vandescription/,
+      /makemodel/,
+    ]),
+  );
   const imageValues = [];
   const imageKeys = Object.keys(source).filter((key) => {
     const normalKey = normalizeCmsKey(key);
-    return /(image|images|picture|photo|gallery|mainimage|media|thumbnail|src|url)$/.test(normalKey)
-      || /(image|picture|photo|gallery|media)/.test(normalKey);
+    return (
+      /(image|images|picture|photo|gallery|mainimage|media|thumbnail|src|url)$/.test(
+        normalKey,
+      ) || /(image|picture|photo|gallery|media)/.test(normalKey)
+    );
   });
 
   imageKeys.forEach((key) => {
-    extractImageUrlsFromValue(source[key]).forEach((url) => imageValues.push(url));
+    extractImageUrlsFromValue(source[key]).forEach((url) =>
+      imageValues.push(url),
+    );
   });
 
   if (!imageValues.length) {
@@ -491,7 +757,12 @@ function normalizeCmsRow(row, index = 0) {
     id: `cms-${index}`,
     registration,
     title,
-    imageRecords: buildOrderedImageRecords(imageValues.map((url, imageIndex) => ({ url, source: `CMS image ${imageIndex + 1}` }))).records,
+    imageRecords: buildOrderedImageRecords(
+      imageValues.map((url, imageIndex) => ({
+        url,
+        source: `CMS image ${imageIndex + 1}`,
+      })),
+    ).records,
   };
 }
 
@@ -501,8 +772,18 @@ function parseCmsUploadText(text) {
 
   try {
     const parsed = JSON.parse(value);
-    const rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.items) ? parsed.items : Array.isArray(parsed?.rows) ? parsed.rows : [parsed];
-    return rows.map(normalizeCmsRow).filter((row) => row.registration || row.title || row.imageRecords.length);
+    const rows = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.items)
+        ? parsed.items
+        : Array.isArray(parsed?.rows)
+          ? parsed.rows
+          : [parsed];
+    return rows
+      .map(normalizeCmsRow)
+      .filter(
+        (row) => row.registration || row.title || row.imageRecords.length,
+      );
   } catch {}
 
   const lines = value.split(/\r?\n/).filter((line) => line.trim());
@@ -527,20 +808,28 @@ function titleLooksLikeMatch(rowTitle, vehicle) {
   if (!title || !vehicleText) return false;
   if (vehicleText.includes(title) || title.includes(vehicleText)) return true;
   const parts = title.split(/\s+/).filter((part) => part.length > 2);
-  return parts.length >= 3 && parts.slice(0, 5).filter((part) => vehicleText.includes(part)).length >= 3;
+  return (
+    parts.length >= 3 &&
+    parts.slice(0, 5).filter((part) => vehicleText.includes(part)).length >= 3
+  );
 }
 
 function findCmsMatch(rows, vehicle) {
   const registration = vehicleRegistration(vehicle);
-  return (rows || []).find((row) => row.registration && row.registration === registration)
-    || (rows || []).find((row) => titleLooksLikeMatch(row.title, vehicle))
-    || null;
+  return (
+    (rows || []).find(
+      (row) => row.registration && row.registration === registration,
+    ) ||
+    (rows || []).find((row) => titleLooksLikeMatch(row.title, vehicle)) ||
+    null
+  );
 }
 
 function getVehicleStockImageRecords(vehicle) {
   if (!vehicle) return [];
   const imageValues = [];
-  const addValue = (value) => extractImageUrlsFromValue(value).forEach((url) => imageValues.push(url));
+  const addValue = (value) =>
+    extractImageUrlsFromValue(value).forEach((url) => imageValues.push(url));
 
   addValue(vehicle.image);
   addValue(vehicle.picture);
@@ -557,22 +846,41 @@ function getVehicleStockImageRecords(vehicle) {
 
   Object.entries(vehicle).forEach(([key, value]) => {
     const normalKey = normalizeCmsKey(key);
-    if (/^image\d+$/.test(normalKey) || /^picture\d+$/.test(normalKey) || /^photo\d+$/.test(normalKey)) {
+    if (
+      /^image\d+$/.test(normalKey) ||
+      /^picture\d+$/.test(normalKey) ||
+      /^photo\d+$/.test(normalKey)
+    ) {
       addValue(value);
     }
   });
 
-  return buildOrderedImageRecords(imageValues.map((url, index) => ({ url, source: `stock image ${index + 1}` }))).records;
+  return buildOrderedImageRecords(
+    imageValues.map((url, index) => ({
+      url,
+      source: `stock image ${index + 1}`,
+    })),
+  ).records;
 }
 
 function getProductVehicles(vehicles, productKey) {
   if (productKey === "rent2buy") {
     return (vehicles || [])
-      .filter((vehicle) => vehicle?.rent2buyEligible || vehicle?.pipeline === "rent2buy")
+      .filter(
+        (vehicle) =>
+          vehicle?.rent2buyEligible || vehicle?.pipeline === "rent2buy",
+      )
       .map((vehicle) => {
         const rent = vehicle.rent2buyData || {};
         const image = vehicleImage(rent) || vehicleImage(vehicle);
-        return { ...vehicle, ...rent, id: vehicle.id, image, picture: image, pipeline: "rent2buy" };
+        return {
+          ...vehicle,
+          ...rent,
+          id: vehicle.id,
+          image,
+          picture: image,
+          pipeline: "rent2buy",
+        };
       });
   }
 
@@ -583,33 +891,45 @@ function getProductVehicles(vehicles, productKey) {
   }
 
   return (vehicles || [])
-    .filter((vehicle) => vehicle?.pipeline !== "cars" && vehicle?.pipeline !== "rent2buy")
+    .filter(
+      (vehicle) =>
+        vehicle?.pipeline !== "cars" && vehicle?.pipeline !== "rent2buy",
+    )
     .map((vehicle) => ({ ...vehicle, pipeline: "vanFinance" }));
 }
 
 function defaultTextState() {
   return {
-    vanFinance: normalizeTextStateForProduct({
-      header: PRODUCTS.vanFinance.header,
-      topText: PRODUCTS.vanFinance.topText,
-      hook: PRODUCTS.vanFinance.hook,
-      support: PRODUCTS.vanFinance.support,
-      cta: PRODUCTS.vanFinance.cta,
-    }, "vanFinance"),
-    rent2buy: normalizeTextStateForProduct({
-      header: PRODUCTS.rent2buy.header,
-      topText: PRODUCTS.rent2buy.topText,
-      hook: PRODUCTS.rent2buy.hook,
-      support: PRODUCTS.rent2buy.support,
-      cta: PRODUCTS.rent2buy.cta,
-    }, "rent2buy"),
-    cars: normalizeTextStateForProduct({
-      header: PRODUCTS.cars.header,
-      topText: PRODUCTS.cars.topText,
-      hook: PRODUCTS.cars.hook,
-      support: PRODUCTS.cars.support,
-      cta: PRODUCTS.cars.cta,
-    }, "cars"),
+    vanFinance: normalizeTextStateForProduct(
+      {
+        header: PRODUCTS.vanFinance.header,
+        topText: PRODUCTS.vanFinance.topText,
+        hook: PRODUCTS.vanFinance.hook,
+        support: PRODUCTS.vanFinance.support,
+        cta: PRODUCTS.vanFinance.cta,
+      },
+      "vanFinance",
+    ),
+    rent2buy: normalizeTextStateForProduct(
+      {
+        header: PRODUCTS.rent2buy.header,
+        topText: PRODUCTS.rent2buy.topText,
+        hook: PRODUCTS.rent2buy.hook,
+        support: PRODUCTS.rent2buy.support,
+        cta: PRODUCTS.rent2buy.cta,
+      },
+      "rent2buy",
+    ),
+    cars: normalizeTextStateForProduct(
+      {
+        header: PRODUCTS.cars.header,
+        topText: PRODUCTS.cars.topText,
+        hook: PRODUCTS.cars.hook,
+        support: PRODUCTS.cars.support,
+        cta: PRODUCTS.cars.cta,
+      },
+      "cars",
+    ),
   };
 }
 
@@ -617,11 +937,22 @@ function loadSavedTextDefaults() {
   const defaults = defaultTextState();
   if (typeof window === "undefined") return defaults;
   try {
-    const saved = JSON.parse(window.localStorage.getItem(TEXT_DEFAULTS_STORAGE_KEY) || "{}");
+    const saved = JSON.parse(
+      window.localStorage.getItem(TEXT_DEFAULTS_STORAGE_KEY) || "{}",
+    );
     return {
-      vanFinance: normalizeTextStateForProduct({ ...defaults.vanFinance, ...(saved.vanFinance || {}) }, "vanFinance"),
-      rent2buy: normalizeTextStateForProduct({ ...defaults.rent2buy, ...(saved.rent2buy || {}) }, "rent2buy"),
-      cars: normalizeTextStateForProduct({ ...defaults.cars, ...(saved.cars || {}) }, "cars"),
+      vanFinance: normalizeTextStateForProduct(
+        { ...defaults.vanFinance, ...(saved.vanFinance || {}) },
+        "vanFinance",
+      ),
+      rent2buy: normalizeTextStateForProduct(
+        { ...defaults.rent2buy, ...(saved.rent2buy || {}) },
+        "rent2buy",
+      ),
+      cars: normalizeTextStateForProduct(
+        { ...defaults.cars, ...(saved.cars || {}) },
+        "cars",
+      ),
     };
   } catch {
     return defaults;
@@ -629,9 +960,12 @@ function loadSavedTextDefaults() {
 }
 
 function loadSavedTextModes() {
-  if (typeof window === "undefined") return { vanFinance: "default", rent2buy: "default", cars: "default" };
+  if (typeof window === "undefined")
+    return { vanFinance: "default", rent2buy: "default", cars: "default" };
   try {
-    const saved = JSON.parse(window.localStorage.getItem(TEXT_MODE_STORAGE_KEY) || "{}");
+    const saved = JSON.parse(
+      window.localStorage.getItem(TEXT_MODE_STORAGE_KEY) || "{}",
+    );
     return {
       vanFinance: saved.vanFinance === "manual" ? "manual" : "default",
       rent2buy: saved.rent2buy === "manual" ? "manual" : "default",
@@ -647,7 +981,8 @@ function loadImage(src) {
     const image = new Image();
     image.crossOrigin = "anonymous";
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Could not load YouTube Short image."));
+    image.onerror = () =>
+      reject(new Error("Could not load YouTube Short image."));
     image.src = src;
   });
 }
@@ -661,7 +996,9 @@ async function createAudioStream(durationMs) {
   try {
     const response = await fetch(defaultReelAudio);
     if (!response.ok) throw new Error("Could not load music.");
-    const audioBuffer = await audioContext.decodeAudioData(await response.arrayBuffer());
+    const audioBuffer = await audioContext.decodeAudioData(
+      await response.arrayBuffer(),
+    );
     const destination = audioContext.createMediaStreamDestination();
     const source = audioContext.createBufferSource();
     const gain = audioContext.createGain();
@@ -720,15 +1057,45 @@ function fillRoundRect(ctx, x, y, width, height, radius, fillStyle) {
   ctx.fill();
 }
 
-function drawCoverImage(ctx, image, x, y, width, height, zoom = 1, panX = 0, panY = 0) {
-  const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight) * zoom;
+function drawCoverImage(
+  ctx,
+  image,
+  x,
+  y,
+  width,
+  height,
+  zoom = 1,
+  panX = 0,
+  panY = 0,
+) {
+  const scale =
+    Math.max(width / image.naturalWidth, height / image.naturalHeight) * zoom;
   const drawWidth = image.naturalWidth * scale;
   const drawHeight = image.naturalHeight * scale;
-  ctx.drawImage(image, x + (width - drawWidth) / 2 + panX, y + (height - drawHeight) / 2 + panY, drawWidth, drawHeight);
+  ctx.drawImage(
+    image,
+    x + (width - drawWidth) / 2 + panX,
+    y + (height - drawHeight) / 2 + panY,
+    drawWidth,
+    drawHeight,
+  );
 }
 
-function drawContainImage(ctx, image, x, y, width, height, scaleAdjust = 0.98, panX = 0, panY = 0) {
-  const baseScale = Math.min(width / image.naturalWidth, height / image.naturalHeight);
+function drawContainImage(
+  ctx,
+  image,
+  x,
+  y,
+  width,
+  height,
+  scaleAdjust = 0.98,
+  panX = 0,
+  panY = 0,
+) {
+  const baseScale = Math.min(
+    width / image.naturalWidth,
+    height / image.naturalHeight,
+  );
   const scale = baseScale * scaleAdjust;
   const drawWidth = image.naturalWidth * scale;
   const drawHeight = image.naturalHeight * scale;
@@ -736,7 +1103,13 @@ function drawContainImage(ctx, image, x, y, width, height, scaleAdjust = 0.98, p
   const maxPanY = Math.max(0, (height - drawHeight) / 2);
   const safePanX = Math.max(-maxPanX, Math.min(maxPanX, panX));
   const safePanY = Math.max(-maxPanY, Math.min(maxPanY, panY));
-  ctx.drawImage(image, x + (width - drawWidth) / 2 + safePanX, y + (height - drawHeight) / 2 + safePanY, drawWidth, drawHeight);
+  ctx.drawImage(
+    image,
+    x + (width - drawWidth) / 2 + safePanX,
+    y + (height - drawHeight) / 2 + safePanY,
+    drawWidth,
+    drawHeight,
+  );
 }
 
 function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 3) {
@@ -757,7 +1130,16 @@ function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 3) {
   lines.forEach((item, index) => ctx.fillText(item, x, y + index * lineHeight));
 }
 
-function drawFitText(ctx, text, x, y, maxWidth, maxFontSize, minFontSize, weight = 900) {
+function drawFitText(
+  ctx,
+  text,
+  x,
+  y,
+  maxWidth,
+  maxFontSize,
+  minFontSize,
+  weight = 900,
+) {
   const clean = cleanText(text);
   let fontSize = maxFontSize;
   while (fontSize > minFontSize) {
@@ -773,60 +1155,126 @@ function easeInOut(value) {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 }
 
-function frameMessage({ productKey, product, vehicle, frameIndex, frameCount, text }) {
+function frameMessage({
+  productKey,
+  product,
+  vehicle,
+  frameIndex,
+  frameCount,
+  text,
+}) {
   const title = vehicleTitle(vehicle);
   const price = vehiclePriceLine(vehicle, productKey);
   if (frameIndex === 1) {
     return {
-      eyebrow: displayRegistration(vehicle) || (productKey === "cars" ? "SELECTED CAR" : "SELECTED VAN"),
+      eyebrow:
+        displayRegistration(vehicle) ||
+        (productKey === "cars" ? "SELECTED CAR" : "SELECTED VAN"),
       headline: title,
-      subline: productKey === "rent2buy" ? rent2buyFrameTwoSupportLine(vehicle) : productKey === "cars" ? "CARS FROM \u00a399 DEPOSIT" : price,
+      subline:
+        productKey === "rent2buy"
+          ? rent2buyFrameTwoSupportLine(vehicle)
+          : productKey === "cars"
+            ? "CARS FROM \u00a399 DEPOSIT"
+            : price,
       cta: "",
     };
   }
   if (frameIndex === 2) {
     return {
-      eyebrow: productKey === "rent2buy" ? "RENT2BUY PAYMENT" : productKey === "cars" ? "CAR FINANCE" : "FINANCE PAYMENT",
-      headline: productKey === "rent2buy" ? rent2buyPriceHeadline(vehicle) : productKey === "cars" ? carFinanceMonthlyHeadline(vehicle) : vanFinanceMonthlyHeadline(vehicle),
+      eyebrow:
+        productKey === "rent2buy"
+          ? "RENT2BUY PAYMENT"
+          : productKey === "cars"
+            ? "CAR FINANCE"
+            : "FINANCE PAYMENT",
+      headline:
+        productKey === "rent2buy"
+          ? rent2buyPriceHeadline(vehicle)
+          : productKey === "cars"
+            ? carFinanceMonthlyHeadline(vehicle)
+            : vanFinanceMonthlyHeadline(vehicle),
       subline: displayRegistration(vehicle),
       cta: "",
     };
   }
   if (frameIndex === frameCount - 1) {
-    return { eyebrow: "APPLY TODAY", headline: text.cta, subline: productWebsite(product), cta: text.cta };
+    return {
+      eyebrow: "APPLY TODAY",
+      headline: text.cta,
+      subline: productWebsite(product),
+      cta: text.cta,
+    };
   }
-  const frameText = Array.isArray(text?.frames) ? text.frames[frameIndex] : null;
+  const frameText = Array.isArray(text?.frames)
+    ? text.frames[frameIndex]
+    : null;
   if (frameText) {
     const rawHeadline = cleanText(frameText.headline);
     const rawSupport = cleanText(frameText.support);
-    const headline = resolveFrameTemplateText(rawHeadline, { productKey, vehicle });
-    const support = resolveFrameTemplateText(rawSupport, { productKey, vehicle });
+    const headline = resolveFrameTemplateText(rawHeadline, {
+      productKey,
+      vehicle,
+    });
+    const support = resolveFrameTemplateText(rawSupport, {
+      productKey,
+      vehicle,
+    });
     return {
       eyebrow: cleanText(frameText.eyebrow),
       headline:
-        frameIndex === 1 && (rawHeadline.toUpperCase() === "YOUR NEXT VAN" || rawHeadline.toUpperCase() === "YOUR NEXT CAR")
+        frameIndex === 1 &&
+        (rawHeadline.toUpperCase() === "YOUR NEXT VAN" ||
+          rawHeadline.toUpperCase() === "YOUR NEXT CAR")
           ? title
-          : (productKey === "vanFinance" || productKey === "cars") && frameIndex === 2 && /^BUY THIS (VAN|CAR) FROM ONLY \{MONTHLY PRICE\}$/i.test(rawHeadline)
-            ? productKey === "cars" ? carFinanceMonthlyHeadline(vehicle) : vanFinanceMonthlyHeadline(vehicle)
+          : (productKey === "vanFinance" || productKey === "cars") &&
+              frameIndex === 2 &&
+              /^BUY THIS (VAN|CAR) FROM ONLY \{MONTHLY PRICE\}$/i.test(
+                rawHeadline,
+              )
+            ? productKey === "cars"
+              ? carFinanceMonthlyHeadline(vehicle)
+              : vanFinanceMonthlyHeadline(vehicle)
             : headline,
       subline:
         frameIndex === 1 && rawSupport.toUpperCase().includes("OPTION")
           ? price
-          : (productKey === "vanFinance" || productKey === "cars") && frameIndex === 2 && rawSupport.toUpperCase() === "{REGISTRATION}"
+          : (productKey === "vanFinance" || productKey === "cars") &&
+              frameIndex === 2 &&
+              rawSupport.toUpperCase() === "{REGISTRATION}"
             ? displayRegistration(vehicle)
             : support,
       cta: cleanText(frameText.cta),
     };
   }
   if (frameIndex === 0) {
-    return { eyebrow: text.header, headline: text.hook, subline: text.support, cta: text.cta };
+    return {
+      eyebrow: text.header,
+      headline: text.hook,
+      subline: text.support,
+      cta: text.cta,
+    };
   }
   const message = product.messages[(frameIndex - 2) % product.messages.length];
-  return { eyebrow: product.brand.toUpperCase(), headline: message, subline: frameIndex % 2 ? vehicleRegistration(vehicle) : text.support, cta: "" };
+  return {
+    eyebrow: product.brand.toUpperCase(),
+    headline: message,
+    subline: frameIndex % 2 ? vehicleRegistration(vehicle) : text.support,
+    cta: "",
+  };
 }
 
-function buildYouTubeFrameSpecs({ productKey, product = PRODUCTS[productKey], vehicle, text, frameCount }) {
-  const totalFrameCount = Math.max(1, Math.min(MAX_IMAGES, Number(frameCount) || 1));
+function buildYouTubeFrameSpecs({
+  productKey,
+  product = PRODUCTS[productKey],
+  vehicle,
+  text,
+  frameCount,
+}) {
+  const totalFrameCount = Math.max(
+    1,
+    Math.min(MAX_IMAGES, Number(frameCount) || 1),
+  );
   const finalFrameIndex = totalFrameCount - 1;
 
   return Array.from({ length: totalFrameCount }, (_, frameIndex) => {
@@ -843,15 +1291,33 @@ function buildYouTubeFrameSpecs({ productKey, product = PRODUCTS[productKey], ve
       locked = true;
     }
 
-    const frameText = Array.isArray(text?.frames) ? text.frames[frameIndex] : null;
-    const display = type === "finalCta"
-      ? {
-          eyebrow: cleanText(frameText?.eyebrow || "APPLY TODAY"),
-          headline: cleanText(frameText?.headline || text?.cta || product?.cta || "APPLY NOW"),
-          subline: cleanText(frameText?.support || productWebsite(product)),
-          cta: cleanText(frameText?.cta || frameText?.headline || text?.cta || product?.cta || "APPLY NOW"),
-        }
-      : frameMessage({ productKey, product, vehicle, frameIndex, frameCount: totalFrameCount, text });
+    const frameText = Array.isArray(text?.frames)
+      ? text.frames[frameIndex]
+      : null;
+    const display =
+      type === "finalCta"
+        ? {
+            eyebrow: cleanText(frameText?.eyebrow || "APPLY TODAY"),
+            headline: cleanText(
+              frameText?.headline || text?.cta || product?.cta || "APPLY NOW",
+            ),
+            subline: cleanText(frameText?.support || productWebsite(product)),
+            cta: cleanText(
+              frameText?.cta ||
+                frameText?.headline ||
+                text?.cta ||
+                product?.cta ||
+                "APPLY NOW",
+            ),
+          }
+        : frameMessage({
+            productKey,
+            product,
+            vehicle,
+            frameIndex,
+            frameCount: totalFrameCount,
+            text,
+          });
 
     return {
       type,
@@ -867,7 +1333,12 @@ function buildYouTubeFrameSpecs({ productKey, product = PRODUCTS[productKey], ve
 
 function drawLightSweep(ctx, x, y, width, height, progress, alpha = 0.25) {
   const sweepX = x - width * 0.4 + progress * width * 1.8;
-  const gradient = ctx.createLinearGradient(sweepX - 90, y, sweepX + 90, y + height);
+  const gradient = ctx.createLinearGradient(
+    sweepX - 90,
+    y,
+    sweepX + 90,
+    y + height,
+  );
   gradient.addColorStop(0, "rgba(255,255,255,0)");
   gradient.addColorStop(0.5, `rgba(255,255,255,${alpha})`);
   gradient.addColorStop(1, "rgba(255,255,255,0)");
@@ -878,26 +1349,58 @@ function drawLightSweep(ctx, x, y, width, height, progress, alpha = 0.25) {
   ctx.restore();
 }
 
-function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTemplate, text, frameIndex, frameProgress, frameSpecs }) {
+function drawYouTubeFrame(
+  ctx,
+  loadedImages,
+  {
+    productKey,
+    vehicle,
+    visualTemplate,
+    text,
+    frameIndex,
+    frameProgress,
+    frameSpecs,
+  },
+) {
   const product = PRODUCTS[productKey];
-  const config = TEMPLATE_CONFIG[visualTemplate] || TEMPLATE_CONFIG.blackPremium;
+  const config =
+    TEMPLATE_CONFIG[visualTemplate] || TEMPLATE_CONFIG.blackPremium;
   const imageArea = config.imageArea;
-  const specs = Array.isArray(frameSpecs) && frameSpecs.length
-    ? frameSpecs
-    : buildYouTubeFrameSpecs({ productKey, product, vehicle, text, frameCount: loadedImages.length || 1 });
+  const specs =
+    Array.isArray(frameSpecs) && frameSpecs.length
+      ? frameSpecs
+      : buildYouTubeFrameSpecs({
+          productKey,
+          product,
+          vehicle,
+          text,
+          frameCount: loadedImages.length || 1,
+        });
   const totalFrameCount = Math.max(1, specs.length);
   const finalFrameIndex = totalFrameCount - 1;
-  const currentFrameIndex = Math.max(0, Math.min(finalFrameIndex, Number(frameIndex) || 0));
-  const currentFrameProgress = Math.max(0, Math.min(1, Number(frameProgress) || 0));
+  const currentFrameIndex = Math.max(
+    0,
+    Math.min(finalFrameIndex, Number(frameIndex) || 0),
+  );
+  const currentFrameProgress = Math.max(
+    0,
+    Math.min(1, Number(frameProgress) || 0),
+  );
   const frameSpec = specs[currentFrameIndex] || specs[finalFrameIndex];
   const isFinalCtaFrame = frameSpec?.type === "finalCta";
-  const image = loadedImages[Math.min(currentFrameIndex, loadedImages.length - 1)] || loadedImages[0];
+  const image =
+    loadedImages[Math.min(currentFrameIndex, loadedImages.length - 1)] ||
+    loadedImages[0];
   const transition = Math.min(1, currentFrameProgress / config.transition);
   const fade = easeInOut(transition);
   const isLuxury = visualTemplate === "luxuryDealer";
   const isTikTok = visualTemplate === "tiktokPunch";
-  const containScale = 0.972 + Math.sin(currentFrameProgress * Math.PI) * Math.min(config.zoom, 0.012);
-  const panX = Math.sin((currentFrameIndex + currentFrameProgress) * 1.4) * (isTikTok ? 8 : 5);
+  const containScale =
+    0.972 +
+    Math.sin(currentFrameProgress * Math.PI) * Math.min(config.zoom, 0.012);
+  const panX =
+    Math.sin((currentFrameIndex + currentFrameProgress) * 1.4) *
+    (isTikTok ? 8 : 5);
   const panY = Math.cos((currentFrameIndex + currentFrameProgress) * 1.1) * 4;
 
   ctx.clearRect(0, 0, SHORT_WIDTH, SHORT_HEIGHT);
@@ -917,16 +1420,38 @@ function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
     ctx.restore();
   }
 
-  const headerGradient = ctx.createLinearGradient(imageArea.x, config.headerY, imageArea.x + imageArea.width, config.headerY + 150);
+  const headerGradient = ctx.createLinearGradient(
+    imageArea.x,
+    config.headerY,
+    imageArea.x + imageArea.width,
+    config.headerY + 150,
+  );
   headerGradient.addColorStop(0, "rgba(239,35,60,0.26)");
   headerGradient.addColorStop(0.42, "rgba(8,8,10,0.98)");
   headerGradient.addColorStop(1, "rgba(0,0,0,0.96)");
-  fillRoundRect(ctx, imageArea.x, config.headerY, imageArea.width, 154, isLuxury ? 20 : 26, headerGradient);
+  fillRoundRect(
+    ctx,
+    imageArea.x,
+    config.headerY,
+    imageArea.width,
+    154,
+    isLuxury ? 20 : 26,
+    headerGradient,
+  );
   ctx.fillStyle = product.accent;
   ctx.fillRect(imageArea.x, config.headerY + 146, imageArea.width, 8);
   ctx.fillStyle = "#ffffff";
   ctx.textAlign = "center";
-  drawFitText(ctx, (text.header || product.header).toUpperCase(), SHORT_WIDTH / 2, config.headerY + 94, imageArea.width - 90, isTikTok ? 68 : 60, 38, 950);
+  drawFitText(
+    ctx,
+    (text.header || product.header).toUpperCase(),
+    SHORT_WIDTH / 2,
+    config.headerY + 94,
+    imageArea.width - 90,
+    isTikTok ? 68 : 60,
+    38,
+    950,
+  );
   ctx.textAlign = "left";
 
   if (image) {
@@ -935,22 +1460,53 @@ function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
     ctx.shadowColor = `rgba(239,35,60,${config.glow})`;
     ctx.shadowBlur = isTikTok ? 56 : 34;
     ctx.shadowOffsetY = 16;
-    drawRoundRect(ctx, imageArea.x, imageArea.y, imageArea.width, imageArea.height, 32);
+    drawRoundRect(
+      ctx,
+      imageArea.x,
+      imageArea.y,
+      imageArea.width,
+      imageArea.height,
+      32,
+    );
     ctx.clip();
     ctx.fillStyle = "#050505";
     ctx.fillRect(imageArea.x, imageArea.y, imageArea.width, imageArea.height);
-    drawContainImage(ctx, image, imageArea.x, imageArea.y, imageArea.width, imageArea.height, containScale, panX, panY);
+    drawContainImage(
+      ctx,
+      image,
+      imageArea.x,
+      imageArea.y,
+      imageArea.width,
+      imageArea.height,
+      containScale,
+      panX,
+      panY,
+    );
     ctx.restore();
   }
 
   ctx.save();
   ctx.strokeStyle = "rgba(255,255,255,0.10)";
   ctx.lineWidth = 2;
-  drawRoundRect(ctx, imageArea.x, imageArea.y, imageArea.width, imageArea.height, 32);
+  drawRoundRect(
+    ctx,
+    imageArea.x,
+    imageArea.y,
+    imageArea.width,
+    imageArea.height,
+    32,
+  );
   ctx.stroke();
   ctx.restore();
 
-  const lowerGlow = ctx.createRadialGradient(SHORT_WIDTH / 2, 1420, 60, SHORT_WIDTH / 2, 1420, 650);
+  const lowerGlow = ctx.createRadialGradient(
+    SHORT_WIDTH / 2,
+    1420,
+    60,
+    SHORT_WIDTH / 2,
+    1420,
+    650,
+  );
   lowerGlow.addColorStop(0, `rgba(239,35,60,${config.glow})`);
   lowerGlow.addColorStop(1, "rgba(239,35,60,0)");
   ctx.fillStyle = lowerGlow;
@@ -961,11 +1517,24 @@ function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
   const textWidth = SHORT_WIDTH - 156;
   const textPanelY = config.textY - 56;
   const textPanelHeight = isFinalCtaFrame ? 520 : 388;
-  const panelGradient = ctx.createLinearGradient(textX - 26, textPanelY, SHORT_WIDTH - 58, textPanelY + textPanelHeight);
+  const panelGradient = ctx.createLinearGradient(
+    textX - 26,
+    textPanelY,
+    SHORT_WIDTH - 58,
+    textPanelY + textPanelHeight,
+  );
   panelGradient.addColorStop(0, "rgba(239,35,60,0.16)");
   panelGradient.addColorStop(0.26, "rgba(28,8,11,0.88)");
   panelGradient.addColorStop(1, "rgba(0,0,0,0.76)");
-  fillRoundRect(ctx, textX - 26, textPanelY, textWidth + 52, textPanelHeight, 28, panelGradient);
+  fillRoundRect(
+    ctx,
+    textX - 26,
+    textPanelY,
+    textWidth + 52,
+    textPanelHeight,
+    28,
+    panelGradient,
+  );
   ctx.fillStyle = "rgba(239,35,60,0.84)";
   ctx.fillRect(textX - 26, textPanelY, textWidth + 52, 7);
 
@@ -976,30 +1545,92 @@ function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
   if (isFinalCtaFrame) {
     const finalSpec = frameSpec?.display || {};
     const finalEyebrow = cleanText(finalSpec.eyebrow || "APPLY TODAY");
-    const finalHeadline = cleanText(finalSpec.headline || text.cta || product.cta || "APPLY NOW");
+    const finalHeadline = cleanText(
+      finalSpec.headline || text.cta || product.cta || "APPLY NOW",
+    );
     const finalButton = cleanText(finalSpec.cta || finalHeadline);
     const finalDomain = cleanText(finalSpec.subline || productWebsite(product));
     ctx.textAlign = "center";
     ctx.fillStyle = product.accent;
     ctx.font = `950 32px ${CANVAS_FONT}`;
-    drawFitText(ctx, finalEyebrow.toUpperCase(), SHORT_WIDTH / 2, textY + 22, textWidth, 34, 24, 950);
+    drawFitText(
+      ctx,
+      finalEyebrow.toUpperCase(),
+      SHORT_WIDTH / 2,
+      textY + 22,
+      textWidth,
+      34,
+      24,
+      950,
+    );
     ctx.shadowColor = "rgba(0,0,0,0.74)";
     ctx.shadowBlur = 22;
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "left";
-    wrapText(ctx, finalHeadline.toUpperCase(), textX, textY + 118, textWidth, 86, 2);
+    wrapText(
+      ctx,
+      finalHeadline.toUpperCase(),
+      textX,
+      textY + 118,
+      textWidth,
+      86,
+      2,
+    );
     ctx.shadowBlur = 0;
     const buttonY = textPanelY + 278;
-    fillRoundRect(ctx, 130, buttonY, SHORT_WIDTH - 260, 112, 34, product.accent);
+    fillRoundRect(
+      ctx,
+      130,
+      buttonY,
+      SHORT_WIDTH - 260,
+      112,
+      34,
+      product.accent,
+    );
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
-    drawFitText(ctx, finalButton.toUpperCase(), SHORT_WIDTH / 2, buttonY + 72, SHORT_WIDTH - 330, 46, 30, 950);
+    drawFitText(
+      ctx,
+      finalButton.toUpperCase(),
+      SHORT_WIDTH / 2,
+      buttonY + 72,
+      SHORT_WIDTH - 330,
+      46,
+      30,
+      950,
+    );
     ctx.fillStyle = "rgba(255,255,255,0.9)";
-    drawFitText(ctx, finalDomain.toUpperCase(), SHORT_WIDTH / 2, buttonY + 186, textWidth, 38, 26, 900);
+    drawFitText(
+      ctx,
+      finalDomain.toUpperCase(),
+      SHORT_WIDTH / 2,
+      buttonY + 186,
+      textWidth,
+      38,
+      26,
+      900,
+    );
     ctx.textAlign = "left";
-    drawLightSweep(ctx, textX - 20, textY + 64, textWidth + 40, 230, Math.min(1, currentFrameProgress * 1.2), isTikTok ? 0.4 : 0.26);
+    drawLightSweep(
+      ctx,
+      textX - 20,
+      textY + 64,
+      textWidth + 40,
+      230,
+      Math.min(1, currentFrameProgress * 1.2),
+      isTikTok ? 0.4 : 0.26,
+    );
   } else {
-    const spec = frameSpec?.display || frameMessage({ productKey, product, vehicle, frameIndex: currentFrameIndex, frameCount: totalFrameCount, text });
+    const spec =
+      frameSpec?.display ||
+      frameMessage({
+        productKey,
+        product,
+        vehicle,
+        frameIndex: currentFrameIndex,
+        frameCount: totalFrameCount,
+        text,
+      });
     ctx.fillStyle = product.accent;
     ctx.font = `900 28px ${CANVAS_FONT}`;
     if (spec.eyebrow) ctx.fillText(spec.eyebrow.toUpperCase(), textX, textY);
@@ -1007,17 +1638,52 @@ function drawYouTubeFrame(ctx, loadedImages, { productKey, vehicle, visualTempla
     ctx.shadowBlur = 20;
     ctx.fillStyle = "#ffffff";
     ctx.font = `950 ${config.headline}px ${CANVAS_FONT}`;
-    if (spec.headline) wrapText(ctx, spec.headline.toUpperCase(), textX, textY + 92, textWidth, config.headline + 10, 2);
+    if (spec.headline)
+      wrapText(
+        ctx,
+        spec.headline.toUpperCase(),
+        textX,
+        textY + 92,
+        textWidth,
+        config.headline + 10,
+        2,
+      );
     ctx.shadowBlur = 0;
     ctx.fillStyle = "rgba(255,255,255,0.82)";
     ctx.font = `850 ${config.body}px ${CANVAS_FONT}`;
-    if (spec.subline) wrapText(ctx, spec.subline.toUpperCase(), textX, textY + 294, textWidth, config.body + 12, 2);
+    if (spec.subline)
+      wrapText(
+        ctx,
+        spec.subline.toUpperCase(),
+        textX,
+        textY + 294,
+        textWidth,
+        config.body + 12,
+        2,
+      );
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.font = `900 34px ${CANVAS_FONT}`;
-    drawFitText(ctx, productWebsiteDisplay(product).toUpperCase(), SHORT_WIDTH / 2, 1734, textWidth, 38, 26, 900);
+    drawFitText(
+      ctx,
+      productWebsiteDisplay(product).toUpperCase(),
+      SHORT_WIDTH / 2,
+      1734,
+      textWidth,
+      38,
+      26,
+      900,
+    );
     ctx.textAlign = "left";
-    drawLightSweep(ctx, textX - 20, textY + 52, textWidth + 40, 180, Math.min(1, currentFrameProgress * 1.2), isTikTok ? 0.36 : 0.22);
+    drawLightSweep(
+      ctx,
+      textX - 20,
+      textY + 52,
+      textWidth + 40,
+      180,
+      Math.min(1, currentFrameProgress * 1.2),
+      isTikTok ? 0.36 : 0.22,
+    );
   }
   ctx.restore();
 
@@ -1041,19 +1707,53 @@ function createYouTubeMediaRecorder(stream, supportedMime) {
   }
 }
 
-async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, text, imageUrls, frameCount, frameSpecs, durationSeconds, fps, musicOn, onProgress }) {
-  if (typeof HTMLCanvasElement === "undefined" || typeof MediaRecorder === "undefined") {
+async function generateYouTubeShortAsset({
+  productKey,
+  vehicle,
+  visualTemplate,
+  text,
+  imageUrls,
+  frameCount,
+  frameSpecs,
+  durationSeconds,
+  fps,
+  musicOn,
+  onProgress,
+}) {
+  if (
+    typeof HTMLCanvasElement === "undefined" ||
+    typeof MediaRecorder === "undefined"
+  ) {
     throw new Error("This browser cannot record YouTube Shorts.");
   }
 
   const supportedMime =
-    ["video/webm;codecs=vp8,opus", "video/webm;codecs=vp9,opus", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find((type) => MediaRecorder.isTypeSupported?.(type)) || "";
+    [
+      "video/webm;codecs=vp8,opus",
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp9",
+      "video/webm;codecs=vp8",
+      "video/webm",
+    ].find((type) => MediaRecorder.isTypeSupported?.(type)) || "";
   if (!supportedMime) throw new Error("This browser cannot record WebM video.");
 
-  const selectedFrameCount = Math.max(1, Math.min(MAX_IMAGES, Number(frameCount) || imageUrls.filter(Boolean).length || 1));
-  const renderFrameSpecs = Array.isArray(frameSpecs) && frameSpecs.length === selectedFrameCount
-    ? frameSpecs
-    : buildYouTubeFrameSpecs({ productKey, product: PRODUCTS[productKey], vehicle, text, frameCount: selectedFrameCount });
+  const selectedFrameCount = Math.max(
+    1,
+    Math.min(
+      MAX_IMAGES,
+      Number(frameCount) || imageUrls.filter(Boolean).length || 1,
+    ),
+  );
+  const renderFrameSpecs =
+    Array.isArray(frameSpecs) && frameSpecs.length === selectedFrameCount
+      ? frameSpecs
+      : buildYouTubeFrameSpecs({
+          productKey,
+          product: PRODUCTS[productKey],
+          vehicle,
+          text,
+          frameCount: selectedFrameCount,
+        });
   onProgress?.("Loading images");
   const loadedImages = [];
   for (const url of imageUrls.filter(Boolean)) {
@@ -1063,7 +1763,8 @@ async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, 
       // Optional image failures should not block the full short.
     }
   }
-  if (!loadedImages.length) throw new Error("No usable image is available for this YouTube Short.");
+  if (!loadedImages.length)
+    throw new Error("No usable image is available for this YouTube Short.");
 
   const canvas = document.createElement("canvas");
   canvas.width = SHORT_WIDTH;
@@ -1079,15 +1780,18 @@ async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, 
       audioAsset = await withTimeout(
         createAudioStream(durationSeconds * 1000),
         7000,
-        "Music setup timed out."
+        "Music setup timed out.",
       );
     } catch (audioError) {
-      audioWarning = "Music could not be added. Silent video fallback was used.";
+      audioWarning =
+        "Music could not be added. Silent video fallback was used.";
       console.warn("YouTube Generator music disabled:", audioError);
     }
   }
 
-  const recordingFps = FPS_OPTIONS.includes(Number(fps)) ? Number(fps) : DEFAULT_SHORT_FPS;
+  const recordingFps = FPS_OPTIONS.includes(Number(fps))
+    ? Number(fps)
+    : DEFAULT_SHORT_FPS;
   const canvasStream = canvas.captureStream(recordingFps);
   const stream = new MediaStream([
     ...canvasStream.getVideoTracks(),
@@ -1102,7 +1806,8 @@ async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, 
   };
 
   const finished = new Promise((resolve, reject) => {
-    recorder.onerror = (event) => reject(event?.error || new Error("YouTube Short recording failed."));
+    recorder.onerror = (event) =>
+      reject(event?.error || new Error("YouTube Short recording failed."));
     recorder.onstop = () => resolve(new Blob(chunks, { type: supportedMime }));
   });
 
@@ -1112,10 +1817,16 @@ async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, 
   const render = () => {
     const captureFrame = Math.min(totalFrames - 1, frame);
     const framePosition = captureFrame / totalFrames;
-    const logicalFrameIndex = Math.min(totalLogicalFrames - 1, Math.floor(framePosition * totalLogicalFrames));
+    const logicalFrameIndex = Math.min(
+      totalLogicalFrames - 1,
+      Math.floor(framePosition * totalLogicalFrames),
+    );
     const frameStart = logicalFrameIndex / totalLogicalFrames;
     const frameEnd = (logicalFrameIndex + 1) / totalLogicalFrames;
-    const frameProgress = frameEnd > frameStart ? (framePosition - frameStart) / (frameEnd - frameStart) : 0;
+    const frameProgress =
+      frameEnd > frameStart
+        ? (framePosition - frameStart) / (frameEnd - frameStart)
+        : 0;
     drawYouTubeFrame(ctx, loadedImages, {
       productKey,
       vehicle,
@@ -1125,7 +1836,8 @@ async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, 
       frameProgress,
       frameSpecs: renderFrameSpecs,
     });
-    if (frame % recordingFps === 0) onProgress?.(`Rendering ${Math.round((frame / totalFrames) * 100)}%`);
+    if (frame % recordingFps === 0)
+      onProgress?.(`Rendering ${Math.round((frame / totalFrames) * 100)}%`);
     frame += 1;
     if (frame < totalFrames) {
       timer = window.setTimeout(render, 1000 / recordingFps);
@@ -1142,14 +1854,25 @@ async function generateYouTubeShortAsset({ productKey, vehicle, visualTemplate, 
   try {
     const blob = await finished;
     const url = URL.createObjectURL(blob);
-    return { blob, url, extension: "webm", audioEmbedded: stream.getAudioTracks().length > 0, audioWarning };
+    return {
+      blob,
+      url,
+      extension: "webm",
+      audioEmbedded: stream.getAudioTracks().length > 0,
+      audioWarning,
+    };
   } finally {
     if (timer) window.clearTimeout(timer);
     audioAsset.cleanup();
   }
 }
 
-async function downloadYouTubeMp4FromWebm(blob, filename, durationSeconds, fps) {
+async function downloadYouTubeMp4FromWebm(
+  blob,
+  filename,
+  durationSeconds,
+  fps,
+) {
   const response = await fetch("/api/convert-youtube-short-mp4", {
     method: "POST",
     headers: {
@@ -1162,13 +1885,16 @@ async function downloadYouTubeMp4FromWebm(blob, filename, durationSeconds, fps) 
   });
 
   if (!response.ok) {
-    let message = response.status === 413
-      ? "MP4 conversion failed because the video file is too large. Try 20 seconds, fewer images, or download the WebM fallback."
-      : `MP4 conversion failed with HTTP ${response.status}.`;
+    let message =
+      response.status === 413
+        ? "MP4 conversion failed because the video file is too large. Try 20 seconds, fewer images, or download the WebM fallback."
+        : `MP4 conversion failed with HTTP ${response.status}.`;
     try {
       const payload = await response.json();
       if (response.status !== 413) {
-        message = payload?.error ? `MP4 conversion failed: ${payload.error}` : message;
+        message = payload?.error
+          ? `MP4 conversion failed: ${payload.error}`
+          : message;
       }
     } catch {}
     throw new Error(message);
@@ -1176,8 +1902,14 @@ async function downloadYouTubeMp4FromWebm(blob, filename, durationSeconds, fps) 
 
   const contentType = response.headers.get("Content-Type") || "";
   const mp4Blob = await response.blob();
-  if (!mp4Blob.size) throw new Error("MP4 conversion failed: conversion endpoint returned an empty file.");
-  if (/text\/html/i.test(contentType)) throw new Error("MP4 conversion failed: conversion endpoint returned the app page instead of an MP4 file.");
+  if (!mp4Blob.size)
+    throw new Error(
+      "MP4 conversion failed: conversion endpoint returned an empty file.",
+    );
+  if (/text\/html/i.test(contentType))
+    throw new Error(
+      "MP4 conversion failed: conversion endpoint returned the app page instead of an MP4 file.",
+    );
 
   const url = URL.createObjectURL(mp4Blob);
   const link = document.createElement("a");
@@ -1200,7 +1932,9 @@ function buildServerFrameSpecs(frameSpecs) {
       finalCta: Boolean(frameSpec?.isFinal || frameSpec?.type === "finalCta"),
       eyebrow: cleanText(display.eyebrow || text.eyebrow || ""),
       headline: cleanText(display.headline || text.headline || ""),
-      support: cleanText(display.subline || display.support || text.support || ""),
+      support: cleanText(
+        display.subline || display.support || text.support || "",
+      ),
       cta: cleanText(display.cta || text.cta || ""),
     };
   });
@@ -1211,7 +1945,8 @@ function buildYouTubeDescription(vehicle, productKey) {
     return buildCarFinancePostingCaption(vehicle);
   }
   return buildPostingCaption(vehicle, {
-    destination: productKey === "rent2buy" ? "Rent2Buy Facebook" : "Van Finance Facebook",
+    destination:
+      productKey === "rent2buy" ? "Rent2Buy Facebook" : "Van Finance Facebook",
   });
 }
 
@@ -1228,7 +1963,9 @@ function downloadTextFile(text, filename) {
 }
 
 function descriptionFilenameFromMp4(filename) {
-  const base = safeFilePart(String(filename || "youtube-short").replace(/\.(mp4|webm)$/i, ""));
+  const base = safeFilePart(
+    String(filename || "youtube-short").replace(/\.(mp4|webm)$/i, ""),
+  );
   return `${base}-description.txt`;
 }
 
@@ -1248,7 +1985,8 @@ function safeServerErrorMessage(value, fallback = "MP4 render failed.") {
   ];
 
   for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    if (typeof candidate === "string" && candidate.trim())
+      return candidate.trim();
     if (candidate && typeof candidate === "object") {
       const nested = safeServerErrorMessage(candidate, "");
       if (nested && nested !== "[object Object]") return nested;
@@ -1258,7 +1996,11 @@ function safeServerErrorMessage(value, fallback = "MP4 render failed.") {
   const readablePairs = Object.entries(value)
     .filter(([key]) => !/token|secret|key|env|stack/i.test(key))
     .map(([key, item]) => {
-      if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
+      if (
+        typeof item === "string" ||
+        typeof item === "number" ||
+        typeof item === "boolean"
+      ) {
         return `${key}: ${item}`;
       }
       return "";
@@ -1268,7 +2010,9 @@ function safeServerErrorMessage(value, fallback = "MP4 render failed.") {
   if (readablePairs.length) return readablePairs.slice(0, 3).join(", ");
 
   const stringValue = String(value);
-  return stringValue && stringValue !== "[object Object]" ? stringValue : fallback;
+  return stringValue && stringValue !== "[object Object]"
+    ? stringValue
+    : fallback;
 }
 
 async function downloadYouTubeMp4FromServer(payload, filename, onStatus) {
@@ -1284,16 +2028,24 @@ async function downloadYouTubeMp4FromServer(payload, filename, onStatus) {
 
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result?.downloadUrl) {
-    throw new Error(safeServerErrorMessage(result, `MP4 failed with HTTP ${response.status}. WebM fallback still available.`));
+    throw new Error(
+      safeServerErrorMessage(
+        result,
+        `MP4 failed with HTTP ${response.status}. WebM fallback still available.`,
+      ),
+    );
   }
 
   onStatus?.("MP4 ready, downloading...");
   const fileResponse = await fetch(result.downloadUrl);
   if (!fileResponse.ok) {
-    throw new Error(`MP4 was rendered but download failed with HTTP ${fileResponse.status}.`);
+    throw new Error(
+      `MP4 was rendered but download failed with HTTP ${fileResponse.status}.`,
+    );
   }
   const mp4Blob = await fileResponse.blob();
-  if (!mp4Blob.size) throw new Error("MP4 download failed: rendered file was empty.");
+  if (!mp4Blob.size)
+    throw new Error("MP4 download failed: rendered file was empty.");
 
   const url = URL.createObjectURL(mp4Blob);
   const link = document.createElement("a");
@@ -1308,8 +2060,12 @@ async function downloadYouTubeMp4FromServer(payload, filename, onStatus) {
 }
 
 function downloadWebmFallback(blob, filename) {
-  if (!blob) throw new Error("No YouTube Short WebM fallback is available yet.");
-  const fallbackName = safeFilePart(String(filename || "youtube-short").replace(/\.(mp4|webm)$/i, "")) || "youtube-short";
+  if (!blob)
+    throw new Error("No YouTube Short WebM fallback is available yet.");
+  const fallbackName =
+    safeFilePart(
+      String(filename || "youtube-short").replace(/\.(mp4|webm)$/i, ""),
+    ) || "youtube-short";
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -1342,13 +2098,31 @@ export default function YouTubeGeneratorPage({
   const [recordingFps, setRecordingFps] = useState(DEFAULT_SHORT_FPS);
   const [visualTemplate, setVisualTemplate] = useState("blackPremium");
   const [musicOn, setMusicOn] = useState(true);
-  const [textModeByProduct, setTextModeByProduct] = useState(loadSavedTextModes);
-  const [textDefaultsByProduct, setTextDefaultsByProduct] = useState(loadSavedTextDefaults);
-  const [manualTextByProduct, setManualTextByProduct] = useState(defaultTextState);
-  const [localCmsUploadsByProduct, setLocalCmsUploadsByProduct] = useState(loadYouTubeCmsUploads);
-  const [localQueueByProduct, setLocalQueueByProduct] = useState({ vanFinance: [], rent2buy: [], cars: [] });
+  const [textModeByProduct, setTextModeByProduct] =
+    useState(loadSavedTextModes);
+  const [textDefaultsByProduct, setTextDefaultsByProduct] = useState(
+    loadSavedTextDefaults,
+  );
+  const [manualTextByProduct, setManualTextByProduct] =
+    useState(defaultTextState);
+  const [localCmsUploadsByProduct, setLocalCmsUploadsByProduct] = useState(
+    loadYouTubeCmsUploads,
+  );
+  const [localQueueByProduct, setLocalQueueByProduct] = useState({
+    vanFinance: [],
+    rent2buy: [],
+    cars: [],
+  });
   const [queueRunning, setQueueRunning] = useState(false);
-  const [queueProgress, setQueueProgress] = useState({ index: 0, total: 0, completed: 0, failed: 0, fallbackDownloaded: 0, skipped: 0, message: "Ready" });
+  const [queueProgress, setQueueProgress] = useState({
+    index: 0,
+    total: 0,
+    completed: 0,
+    failed: 0,
+    fallbackDownloaded: 0,
+    skipped: 0,
+    message: "Ready",
+  });
   const [queueFailures, setQueueFailures] = useState([]);
   const [asset, setAsset] = useState(null);
   const [status, setStatus] = useState("");
@@ -1357,8 +2131,35 @@ export default function YouTubeGeneratorPage({
   const generationKeyRef = useRef("");
   const queueCancelRef = useRef(false);
 
+  async function trackCompletedDownload({
+    vehicle,
+    filename,
+    format,
+    queueDownload,
+    operationId,
+  }) {
+    try {
+      await recordYouTubeGeneratorDownload({
+        productKey,
+        vehicle,
+        filename,
+        format,
+        queueDownload,
+        operationId,
+      });
+      return "";
+    } catch (trackingError) {
+      console.error("YOUTUBE CONTENT OPERATIONS TRACKING ERROR", trackingError);
+      setError(YOUTUBE_TRACKING_WARNING);
+      return YOUTUBE_TRACKING_WARNING;
+    }
+  }
+
   const product = PRODUCTS[productKey];
-  const productVehicles = useMemo(() => getProductVehicles(vehicles, productKey), [vehicles, productKey]);
+  const productVehicles = useMemo(
+    () => getProductVehicles(vehicles, productKey),
+    [vehicles, productKey],
+  );
   const carsConfigured = Boolean(carsStockStatus?.configured);
   const carsTableName = carsStockStatus?.tableName || "";
   const carsLoaded = Number(carsStockStatus?.loaded || 0);
@@ -1372,31 +2173,75 @@ export default function YouTubeGeneratorPage({
         ? `No cars found in ${carsTableName} yet. Import cars into this table to populate the Cars tab.`
         : "No usable cars found yet. Import cars with a valid registration and image to populate the Cars tab.";
   const selectedVehicle = useMemo(
-    () => productVehicles.find((vehicle) => String(vehicle.id) === selectedVehicleId) || productVehicles[0] || null,
-    [productVehicles, selectedVehicleId]
+    () =>
+      productVehicles.find(
+        (vehicle) => String(vehicle.id) === selectedVehicleId,
+      ) ||
+      productVehicles[0] ||
+      null,
+    [productVehicles, selectedVehicleId],
   );
-  const cmsUploadsByProduct = externalCmsUploadsByProduct || localCmsUploadsByProduct;
+  const cmsUploadsByProduct =
+    externalCmsUploadsByProduct || localCmsUploadsByProduct;
   const cmsUpload = cmsUploadsByProduct[productKey] || null;
-  const cmsMatch = selectedVehicle ? findCmsMatch(cmsUpload?.rows || [], selectedVehicle) : null;
-  const textMode = textModeByProduct[productKey] === "manual" ? "manual" : "default";
-  const defaultText = normalizeTextStateForProduct(textDefaultsByProduct[productKey] || defaultTextState()[productKey], productKey);
-  const manualText = normalizeTextStateForProduct(manualTextByProduct[productKey] || defaultTextState()[productKey], productKey);
-  const activeText = normalizeTextStateForProduct(textMode === "manual" ? manualText : defaultText, productKey);
-  const selectedFrameSpecs = useMemo(
-    () => buildYouTubeFrameSpecs({ productKey, product, vehicle: selectedVehicle, text: activeText, frameCount: imageCount }),
-    [activeText, imageCount, product, productKey, selectedVehicle]
+  const cmsMatch = selectedVehicle
+    ? findCmsMatch(cmsUpload?.rows || [], selectedVehicle)
+    : null;
+  const textMode =
+    textModeByProduct[productKey] === "manual" ? "manual" : "default";
+  const defaultText = normalizeTextStateForProduct(
+    textDefaultsByProduct[productKey] || defaultTextState()[productKey],
+    productKey,
   );
-  const stockRecords = useMemo(() => getVehicleStockImageRecords(selectedVehicle), [selectedVehicle]);
+  const manualText = normalizeTextStateForProduct(
+    manualTextByProduct[productKey] || defaultTextState()[productKey],
+    productKey,
+  );
+  const activeText = normalizeTextStateForProduct(
+    textMode === "manual" ? manualText : defaultText,
+    productKey,
+  );
+  const selectedFrameSpecs = useMemo(
+    () =>
+      buildYouTubeFrameSpecs({
+        productKey,
+        product,
+        vehicle: selectedVehicle,
+        text: activeText,
+        frameCount: imageCount,
+      }),
+    [activeText, imageCount, product, productKey, selectedVehicle],
+  );
+  const stockRecords = useMemo(
+    () => getVehicleStockImageRecords(selectedVehicle),
+    [selectedVehicle],
+  );
   const activeQueueByProduct = externalQueueByProduct || localQueueByProduct;
   const activeQueue = activeQueueByProduct[productKey] || [];
   function buildFrameSpecsForVehicle(vehicle) {
-    return buildYouTubeFrameSpecs({ productKey, product, vehicle, text: activeText, frameCount: imageCount });
+    return buildYouTubeFrameSpecs({
+      productKey,
+      product,
+      vehicle,
+      text: activeText,
+      frameCount: imageCount,
+    });
   }
   function resolveImageOrderForVehicle(vehicle) {
-    return resolveYouTubeImageOrder({ vehicle, cmsUpload, imageSource, imageCount });
+    return resolveYouTubeImageOrder({
+      vehicle,
+      cmsUpload,
+      imageSource,
+      imageCount,
+    });
   }
   const resolvedImageOrder = useMemo(() => {
-    return resolveYouTubeImageOrder({ vehicle: selectedVehicle, cmsUpload, imageSource, imageCount });
+    return resolveYouTubeImageOrder({
+      vehicle: selectedVehicle,
+      cmsUpload,
+      imageSource,
+      imageCount,
+    });
   }, [cmsUpload, imageSource, imageCount, selectedVehicle]);
   const resolvedImages = resolvedImageOrder.records.map((item) => item.url);
   const availableImageCount = resolvedImageOrder.records.length;
@@ -1407,7 +2252,8 @@ export default function YouTubeGeneratorPage({
   const currentPreviewKey = selectedVehicle
     ? `${productKey}:${selectedVehicle.id}:${vehicleRegistration(selectedVehicle)}:${imageSource}:${imageCount}:${durationSeconds}:${recordingFps}:${visualTemplate}:${musicOn}:${textMode}:${JSON.stringify(activeText)}:${resolvedImages.join("|")}`
     : "";
-  const currentAsset = asset?.queueAsset || asset?.previewKey === currentPreviewKey ? asset : null;
+  const currentAsset =
+    asset?.queueAsset || asset?.previewKey === currentPreviewKey ? asset : null;
 
   useEffect(() => {
     setSelectedVehicleId("");
@@ -1447,18 +2293,29 @@ export default function YouTubeGeneratorPage({
     if (!file) return;
     try {
       const rows = parseYoutubeCmsUploadText(await file.text());
-      const upload = { fileName: file.name, rows, loadedAt: new Date().toISOString() };
+      const upload = {
+        fileName: file.name,
+        rows,
+        loadedAt: new Date().toISOString(),
+      };
       if (onCmsUploadChange) {
         onCmsUploadChange(productKey, upload);
       } else {
-        setLocalCmsUploadsByProduct((prev) => ({ ...prev, [productKey]: upload }));
+        setLocalCmsUploadsByProduct((prev) => ({
+          ...prev,
+          [productKey]: upload,
+        }));
       }
       saveYouTubeCmsUpload(productKey, upload);
       setImageSource("auto");
-      setStatus(`${product.label} CMS upload loaded: ${rows.length} row${rows.length === 1 ? "" : "s"}.`);
+      setStatus(
+        `${product.label} CMS upload loaded: ${rows.length} row${rows.length === 1 ? "" : "s"}.`,
+      );
       setError("");
     } catch (uploadError) {
-      setError(uploadError.message || `Could not read ${product.label} CMS upload.`);
+      setError(
+        uploadError.message || `Could not read ${product.label} CMS upload.`,
+      );
     } finally {
       event.target.value = "";
     }
@@ -1477,39 +2334,66 @@ export default function YouTubeGeneratorPage({
   function handleTextModeChange(nextMode) {
     const next = { ...textModeByProduct, [productKey]: nextMode };
     setTextModeByProduct(next);
-    if (typeof window !== "undefined") window.localStorage.setItem(TEXT_MODE_STORAGE_KEY, JSON.stringify(next));
+    if (typeof window !== "undefined")
+      window.localStorage.setItem(TEXT_MODE_STORAGE_KEY, JSON.stringify(next));
   }
 
   function updateActiveText(field, value) {
     if (textMode === "manual") {
       setManualTextByProduct((prev) => ({
         ...prev,
-        [productKey]: { ...normalizeTextStateForProduct(prev[productKey] || defaultTextState()[productKey], productKey), [field]: value },
+        [productKey]: {
+          ...normalizeTextStateForProduct(
+            prev[productKey] || defaultTextState()[productKey],
+            productKey,
+          ),
+          [field]: value,
+        },
       }));
       return;
     }
 
     setTextDefaultsByProduct((prev) => ({
       ...prev,
-      [productKey]: { ...normalizeTextStateForProduct(prev[productKey] || defaultTextState()[productKey], productKey), [field]: value },
+      [productKey]: {
+        ...normalizeTextStateForProduct(
+          prev[productKey] || defaultTextState()[productKey],
+          productKey,
+        ),
+        [field]: value,
+      },
     }));
   }
 
   function updateActiveFrameText(frameIndex, field, value) {
     if (isLockedSystemFrame(frameIndex)) return;
     const updateProductText = (current) => {
-      const base = normalizeTextStateForProduct(current || defaultTextState()[productKey], productKey);
-      const frames = defaultFrameTexts(productKey, MAX_IMAGES).map((frame, index) => ({ ...frame, ...(base.frames[index] || {}) }));
-      frames[frameIndex] = { ...(frames[frameIndex] || defaultFrameText(productKey, frameIndex)), [field]: value };
+      const base = normalizeTextStateForProduct(
+        current || defaultTextState()[productKey],
+        productKey,
+      );
+      const frames = defaultFrameTexts(productKey, MAX_IMAGES).map(
+        (frame, index) => ({ ...frame, ...(base.frames[index] || {}) }),
+      );
+      frames[frameIndex] = {
+        ...(frames[frameIndex] || defaultFrameText(productKey, frameIndex)),
+        [field]: value,
+      };
       return { ...base, frames };
     };
 
     if (textMode === "manual") {
-      setManualTextByProduct((prev) => ({ ...prev, [productKey]: updateProductText(prev[productKey]) }));
+      setManualTextByProduct((prev) => ({
+        ...prev,
+        [productKey]: updateProductText(prev[productKey]),
+      }));
       return;
     }
 
-    setTextDefaultsByProduct((prev) => ({ ...prev, [productKey]: updateProductText(prev[productKey]) }));
+    setTextDefaultsByProduct((prev) => ({
+      ...prev,
+      [productKey]: updateProductText(prev[productKey]),
+    }));
   }
 
   function saveTextDefaults() {
@@ -1519,7 +2403,10 @@ export default function YouTubeGeneratorPage({
     };
     setTextDefaultsByProduct(nextDefaults);
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(TEXT_DEFAULTS_STORAGE_KEY, JSON.stringify(nextDefaults));
+      window.localStorage.setItem(
+        TEXT_DEFAULTS_STORAGE_KEY,
+        JSON.stringify(nextDefaults),
+      );
     }
     setStatus(`${product.label} YouTube text defaults saved.`);
     setError("");
@@ -1533,11 +2420,15 @@ export default function YouTubeGeneratorPage({
       return;
     }
     if (!resolvedImages.length) {
-      setError("No usable image is available. Upload CMS rows or use stock image fallback.");
+      setError(
+        "No usable image is available. Upload CMS rows or use stock image fallback.",
+      );
       return;
     }
     if (!hasEnoughImages) {
-      setError(`Not enough images for this YouTube Short. ${imageAvailabilityText}.`);
+      setError(
+        `Not enough images for this YouTube Short. ${imageAvailabilityText}.`,
+      );
       return;
     }
     if (asset?.url) URL.revokeObjectURL(asset.url);
@@ -1564,16 +2455,26 @@ export default function YouTubeGeneratorPage({
         return;
       }
       setAsset({ ...nextAsset, previewKey: renderKey });
-      setStatus(nextAsset.audioWarning || `YouTube Short preview ready using ${resolvedImages.length} image${resolvedImages.length === 1 ? "" : "s"}.`);
+      setStatus(
+        nextAsset.audioWarning ||
+          `YouTube Short preview ready using ${resolvedImages.length} image${resolvedImages.length === 1 ? "" : "s"}.`,
+      );
     } catch (generationError) {
-      setError(generationError.message || "Could not generate YouTube Short preview.");
+      setError(
+        generationError.message || "Could not generate YouTube Short preview.",
+      );
       setStatus("");
     }
   }
 
   function mp4Filename() {
     const reg = vehicleRegistration(selectedVehicle);
-    const productSlug = productKey === "rent2buy" ? "rent2buy" : productKey === "cars" ? "car-finance" : "van-finance";
+    const productSlug =
+      productKey === "rent2buy"
+        ? "rent2buy"
+        : productKey === "cars"
+          ? "car-finance"
+          : "van-finance";
     return `${safeFilePart(`${productSlug}-${reg || vehicleTitle(selectedVehicle)}-youtube-short`)}.mp4`;
   }
 
@@ -1585,15 +2486,19 @@ export default function YouTubeGeneratorPage({
       payload: {
         productKey,
         title: vehicleTitle(vehicle),
-        registration: displayRegistration(vehicle) || vehicleRegistration(vehicle),
+        registration:
+          displayRegistration(vehicle) || vehicleRegistration(vehicle),
         priceText: vehiclePriceLine(vehicle, productKey),
-        monthlyText: productKey === "rent2buy"
-          ? headlinePriceText(vehiclePriceLine(vehicle, "rent2buy"))
-          : productKey === "cars"
-            ? headlinePriceText(vehiclePriceLine(vehicle, "cars"))
-            : headlinePriceText(vehicleMonthlyPriceLine(vehicle)),
+        monthlyText:
+          productKey === "rent2buy"
+            ? headlinePriceText(vehiclePriceLine(vehicle, "rent2buy"))
+            : productKey === "cars"
+              ? headlinePriceText(vehiclePriceLine(vehicle, "cars"))
+              : headlinePriceText(vehicleMonthlyPriceLine(vehicle)),
         headerText: activeText.header,
-        imageUrls: imageOrder.records.map((item) => item.url).slice(0, imageCount),
+        imageUrls: imageOrder.records
+          .map((item) => item.url)
+          .slice(0, imageCount),
         frameSpecs: buildServerFrameSpecs(frameSpecs),
         frameCount: imageCount,
         durationSeconds,
@@ -1610,22 +2515,38 @@ export default function YouTubeGeneratorPage({
       return;
     }
     if (!resolvedImages.length) {
-      setError("No usable image is available. Upload CMS rows or use stock image fallback.");
+      setError(
+        "No usable image is available. Upload CMS rows or use stock image fallback.",
+      );
       return;
     }
+    const filename = mp4Filename();
+    const operationId = createYouTubeExportOperationId();
     try {
       const { payload } = buildServerRenderPayloadForVehicle(selectedVehicle);
       const renderResult = await downloadYouTubeMp4FromServer(
         payload,
-        mp4Filename(),
-        setStatus
+        filename,
+        setStatus,
       );
-      downloadTextFile(buildYouTubeDescription(selectedVehicle, productKey), descriptionFilenameFromMp4(mp4Filename()));
-      const failureCount = Array.isArray(renderResult.imageDownloadFailures) ? renderResult.imageDownloadFailures.length : 0;
+      await trackCompletedDownload({
+        vehicle: selectedVehicle,
+        filename,
+        format: "mp4",
+        queueDownload: false,
+        operationId,
+      });
+      downloadTextFile(
+        buildYouTubeDescription(selectedVehicle, productKey),
+        descriptionFilenameFromMp4(filename),
+      );
+      const failureCount = Array.isArray(renderResult.imageDownloadFailures)
+        ? renderResult.imageDownloadFailures.length
+        : 0;
       setStatus(
         failureCount
           ? `MP4 downloaded. ${failureCount} image URL${failureCount === 1 ? "" : "s"} failed and were skipped.`
-          : "MP4 downloaded."
+          : "MP4 downloaded.",
       );
     } catch (downloadError) {
       setError(downloadError.message || "Could not render YouTube Short MP4.");
@@ -1633,11 +2554,20 @@ export default function YouTubeGeneratorPage({
     }
   }
 
-  function handleDownloadWebm() {
+  async function handleDownloadWebm() {
+    const filename = youtubeFilenameForVehicle(selectedVehicle, "webm");
+    const operationId = createYouTubeExportOperationId();
     try {
-      downloadWebmFallback(currentAsset?.blob, mp4Filename());
+      downloadWebmFallback(currentAsset?.blob, filename);
+      const trackingWarning = await trackCompletedDownload({
+        vehicle: selectedVehicle,
+        filename,
+        format: "webm",
+        queueDownload: false,
+        operationId,
+      });
       setStatus("WebM fallback downloaded.");
-      setError("");
+      if (!trackingWarning) setError("");
     } catch (fallbackError) {
       setError(fallbackError.message || "Could not download WebM fallback.");
     }
@@ -1661,34 +2591,61 @@ export default function YouTubeGeneratorPage({
       return;
     }
     const key = `${selectedVehicle.id || ""}:${vehicleRegistration(selectedVehicle) || vehicleTitle(selectedVehicle)}`;
-    const exists = activeQueue.some((vehicle) => `${vehicle.id || ""}:${vehicleRegistration(vehicle) || vehicleTitle(vehicle)}` === key);
+    const exists = activeQueue.some(
+      (vehicle) =>
+        `${vehicle.id || ""}:${vehicleRegistration(vehicle) || vehicleTitle(vehicle)}` ===
+        key,
+    );
     const nextQueue = exists ? activeQueue : [...activeQueue, selectedVehicle];
     setQueueForProduct(nextQueue);
-    setStatus(`${vehicleRegistration(selectedVehicle) || vehicleTitle(selectedVehicle)} added to ${product.label} YouTube queue.`);
+    setStatus(
+      `${vehicleRegistration(selectedVehicle) || vehicleTitle(selectedVehicle)} added to ${product.label} YouTube queue.`,
+    );
     setError("");
   }
 
   function removeQueueItem(vehicle) {
     const key = `${vehicle.id || ""}:${vehicleRegistration(vehicle) || vehicleTitle(vehicle)}`;
-    setQueueForProduct(activeQueue.filter((item) => `${item.id || ""}:${vehicleRegistration(item) || vehicleTitle(item)}` !== key));
+    setQueueForProduct(
+      activeQueue.filter(
+        (item) =>
+          `${item.id || ""}:${vehicleRegistration(item) || vehicleTitle(item)}` !==
+          key,
+      ),
+    );
   }
 
   function clearQueue() {
     setQueueForProduct([]);
-    setQueueProgress({ index: 0, total: 0, completed: 0, failed: 0, fallbackDownloaded: 0, skipped: 0, message: "Queue cleared" });
+    setQueueProgress({
+      index: 0,
+      total: 0,
+      completed: 0,
+      failed: 0,
+      fallbackDownloaded: 0,
+      skipped: 0,
+      message: "Queue cleared",
+    });
     setQueueFailures([]);
     setStatus(`${product.label} YouTube queue cleared.`);
   }
 
   function youtubeFilenameForVehicle(vehicle, extension = "mp4") {
-    const productSlug = productKey === "rent2buy" ? "rent2buy" : productKey === "cars" ? "car-finance" : "van-finance";
+    const productSlug =
+      productKey === "rent2buy"
+        ? "rent2buy"
+        : productKey === "cars"
+          ? "car-finance"
+          : "van-finance";
     return `${safeFilePart(`${productSlug}-${vehicleRegistration(vehicle) || vehicleTitle(vehicle)}-youtube-short`)}.${extension}`;
   }
 
   async function generateQueuedVehicle(vehicle) {
     const imageOrder = resolveImageOrderForVehicle(vehicle);
     if (imageOrder.records.length < imageCount) {
-      throw new Error(`${vehicleRegistration(vehicle) || vehicleTitle(vehicle)} has ${imageOrder.records.length} / ${imageCount} images available.`);
+      throw new Error(
+        `${vehicleRegistration(vehicle) || vehicleTitle(vehicle)} has ${imageOrder.records.length} / ${imageCount} images available.`,
+      );
     }
     const nextAsset = await generateYouTubeShortAsset({
       productKey,
@@ -1704,16 +2661,44 @@ export default function YouTubeGeneratorPage({
       onProgress: setStatus,
     });
     if (asset?.url) URL.revokeObjectURL(asset.url);
-    setAsset({ ...nextAsset, queueAsset: true, previewKey: `queue:${productKey}:${vehicle.id || vehicleRegistration(vehicle)}:${Date.now()}` });
+    setAsset({
+      ...nextAsset,
+      queueAsset: true,
+      previewKey: `queue:${productKey}:${vehicle.id || vehicleRegistration(vehicle)}:${Date.now()}`,
+    });
     return nextAsset;
   }
 
-  async function exportQueuedVehicle(vehicle, index, total, completed, failed, fallbackDownloaded, skipped) {
+  async function exportQueuedVehicle(
+    vehicle,
+    index,
+    total,
+    completed,
+    failed,
+    fallbackDownloaded,
+    skipped,
+  ) {
     const label = vehicleRegistration(vehicle) || vehicleTitle(vehicle);
-    setQueueProgress({ index, total, completed, failed, fallbackDownloaded, skipped, message: `Preparing vehicle ${index} of ${total}: ${label}` });
+    setQueueProgress({
+      index,
+      total,
+      completed,
+      failed,
+      fallbackDownloaded,
+      skipped,
+      message: `Preparing vehicle ${index} of ${total}: ${label}`,
+    });
     const { payload, imageOrder } = buildServerRenderPayloadForVehicle(vehicle);
     if (!payload.imageUrls.length) {
-      setQueueProgress({ index, total, completed, failed, fallbackDownloaded, skipped: skipped + 1, message: `Skipped ${index} of ${total}: ${label}` });
+      setQueueProgress({
+        index,
+        total,
+        completed,
+        failed,
+        fallbackDownloaded,
+        skipped: skipped + 1,
+        message: `Skipped ${index} of ${total}: ${label}`,
+      });
       await wait(1000);
       return {
         status: "skipped",
@@ -1722,33 +2707,108 @@ export default function YouTubeGeneratorPage({
       };
     }
     const mp4Name = youtubeFilenameForVehicle(vehicle, "mp4");
-    setQueueProgress({ index, total, completed, failed, fallbackDownloaded, skipped, message: `Rendering MP4 ${index} of ${total}: ${label}` });
+    const operationId = createYouTubeExportOperationId();
+    setQueueProgress({
+      index,
+      total,
+      completed,
+      failed,
+      fallbackDownloaded,
+      skipped,
+      message: `Rendering MP4 ${index} of ${total}: ${label}`,
+    });
     try {
-      const renderResult = await downloadYouTubeMp4FromServer(payload, mp4Name, (message) => {
-        const lowerMessage = String(message || "").toLowerCase();
-        const phase = lowerMessage.includes("downloading") || lowerMessage.includes("ready")
-          ? `Downloading MP4 ${index} of ${total}: ${label}`
-          : `Rendering MP4 ${index} of ${total}: ${label}`;
-        setQueueProgress({ index, total, completed, failed, fallbackDownloaded, skipped, message: phase });
+      const renderResult = await downloadYouTubeMp4FromServer(
+        payload,
+        mp4Name,
+        (message) => {
+          const lowerMessage = String(message || "").toLowerCase();
+          const phase =
+            lowerMessage.includes("downloading") ||
+            lowerMessage.includes("ready")
+              ? `Downloading MP4 ${index} of ${total}: ${label}`
+              : `Rendering MP4 ${index} of ${total}: ${label}`;
+          setQueueProgress({
+            index,
+            total,
+            completed,
+            failed,
+            fallbackDownloaded,
+            skipped,
+            message: phase,
+          });
+        },
+      );
+      setQueueProgress({
+        index,
+        total,
+        completed: completed + 1,
+        failed,
+        fallbackDownloaded,
+        skipped,
+        message: `Completed ${index} of ${total}: ${label}`,
       });
-      setQueueProgress({ index, total, completed: completed + 1, failed, fallbackDownloaded, skipped, message: `Completed ${index} of ${total}: ${label}` });
-      downloadTextFile(buildYouTubeDescription(vehicle, productKey), descriptionFilenameFromMp4(mp4Name));
+      const trackingWarning = await trackCompletedDownload({
+        vehicle,
+        filename: mp4Name,
+        format: "mp4",
+        queueDownload: true,
+        operationId,
+      });
+      downloadTextFile(
+        buildYouTubeDescription(vehicle, productKey),
+        descriptionFilenameFromMp4(mp4Name),
+      );
       await wait(1000);
-      return { status: "complete", label, imageDownloadFailures: renderResult?.imageDownloadFailures || [], imageCount: imageOrder.records.length };
+      return {
+        status: "complete",
+        label,
+        trackingWarning,
+        imageDownloadFailures: renderResult?.imageDownloadFailures || [],
+        imageCount: imageOrder.records.length,
+      };
     } catch (mp4Error) {
-      setQueueProgress({ index, total, completed, failed: failed + 1, fallbackDownloaded, skipped, message: `Failed ${index} of ${total}, trying WebM fallback: ${label}` });
+      setQueueProgress({
+        index,
+        total,
+        completed,
+        failed: failed + 1,
+        fallbackDownloaded,
+        skipped,
+        message: `Failed ${index} of ${total}, trying WebM fallback: ${label}`,
+      });
       try {
         const fallbackAsset = await generateQueuedVehicle(vehicle);
-        downloadWebmFallback(fallbackAsset.blob, youtubeFilenameForVehicle(vehicle, "webm"));
-        setQueueProgress({ index, total, completed, failed: failed + 1, fallbackDownloaded: fallbackDownloaded + 1, skipped, message: `WebM fallback downloaded ${index} of ${total}: ${label}` });
+        const webmName = youtubeFilenameForVehicle(vehicle, "webm");
+        downloadWebmFallback(fallbackAsset.blob, webmName);
+        const trackingWarning = await trackCompletedDownload({
+          vehicle,
+          filename: webmName,
+          format: "webm",
+          queueDownload: true,
+          operationId,
+        });
+        setQueueProgress({
+          index,
+          total,
+          completed,
+          failed: failed + 1,
+          fallbackDownloaded: fallbackDownloaded + 1,
+          skipped,
+          message: `WebM fallback downloaded ${index} of ${total}: ${label}`,
+        });
         await wait(1000);
         return {
           status: "fallback",
           label,
-          error: `${label}: MP4 failed, WebM fallback downloaded. ${mp4Error.message || ""}`.trim(),
+          trackingWarning,
+          error:
+            `${label}: MP4 failed, WebM fallback downloaded. ${mp4Error.message || ""}`.trim(),
         };
       } catch (fallbackError) {
-        throw new Error(`${label}: ${mp4Error.message || "MP4 render failed"}; WebM fallback failed: ${fallbackError.message || "unknown error"}`);
+        throw new Error(
+          `${label}: ${mp4Error.message || "MP4 render failed"}; WebM fallback failed: ${fallbackError.message || "unknown error"}`,
+        );
       }
     }
   }
@@ -1761,13 +2821,35 @@ export default function YouTubeGeneratorPage({
       return;
     }
     try {
-      setQueueProgress({ index: 1, total: activeQueue.length, completed: 0, failed: 0, message: "Generating current queued short" });
+      setQueueProgress({
+        index: 1,
+        total: activeQueue.length,
+        completed: 0,
+        failed: 0,
+        message: "Generating current queued short",
+      });
       await generateQueuedVehicle(vehicle);
-      setQueueProgress({ index: 1, total: activeQueue.length, completed: 1, failed: 0, message: "Current queued short ready" });
-      setStatus(`Queued YouTube Short ready for ${vehicleRegistration(vehicle) || vehicleTitle(vehicle)}.`);
+      setQueueProgress({
+        index: 1,
+        total: activeQueue.length,
+        completed: 1,
+        failed: 0,
+        message: "Current queued short ready",
+      });
+      setStatus(
+        `Queued YouTube Short ready for ${vehicleRegistration(vehicle) || vehicleTitle(vehicle)}.`,
+      );
     } catch (queueError) {
-      setQueueProgress({ index: 1, total: activeQueue.length, completed: 0, failed: 1, message: queueError.message || "Queue item failed" });
-      setError(queueError.message || "Could not generate queued YouTube Short.");
+      setQueueProgress({
+        index: 1,
+        total: activeQueue.length,
+        completed: 0,
+        failed: 1,
+        message: queueError.message || "Queue item failed",
+      });
+      setError(
+        queueError.message || "Could not generate queued YouTube Short.",
+      );
     }
   }
 
@@ -1792,18 +2874,33 @@ export default function YouTubeGeneratorPage({
       if (queueCancelRef.current) break;
       const vehicle = queueSnapshot[index];
       try {
-        const result = await exportQueuedVehicle(vehicle, index + 1, queueSnapshot.length, completed, failed, fallbackDownloaded, skipped);
+        const result = await exportQueuedVehicle(
+          vehicle,
+          index + 1,
+          queueSnapshot.length,
+          completed,
+          failed,
+          fallbackDownloaded,
+          skipped,
+        );
         if (result.status === "fallback") {
           failed += 1;
           fallbackDownloaded += 1;
           failures.push(result.error);
+          if (result.trackingWarning) failures.push(result.trackingWarning);
         } else if (result.status === "skipped") {
           skipped += 1;
           failures.push(result.error);
         } else {
           completed += 1;
-          const imageFailures = Array.isArray(result.imageDownloadFailures) ? result.imageDownloadFailures.length : 0;
-          if (imageFailures) failures.push(`${result.label}: MP4 downloaded, ${imageFailures} image URL${imageFailures === 1 ? "" : "s"} failed and were skipped.`);
+          if (result.trackingWarning) failures.push(result.trackingWarning);
+          const imageFailures = Array.isArray(result.imageDownloadFailures)
+            ? result.imageDownloadFailures.length
+            : 0;
+          if (imageFailures)
+            failures.push(
+              `${result.label}: MP4 downloaded, ${imageFailures} image URL${imageFailures === 1 ? "" : "s"} failed and were skipped.`,
+            );
         }
       } catch (queueError) {
         failed += 1;
@@ -1829,9 +2926,13 @@ export default function YouTubeGeneratorPage({
     setStatus(
       queueCancelRef.current
         ? `YouTube queue cancelled. Attempted ${attempted} of ${queueSnapshot.length}. ${completed} MP4 downloaded. ${failed} MP4 failed. ${fallbackDownloaded} WebM fallback downloaded. ${skipped} skipped.`
-        : `YouTube queue complete. Attempted ${queueSnapshot.length}. ${completed} MP4 downloaded. ${failed} MP4 failed. ${fallbackDownloaded} WebM fallback downloaded. ${skipped} skipped.`
+        : `YouTube queue complete. Attempted ${queueSnapshot.length}. ${completed} MP4 downloaded. ${failed} MP4 failed. ${fallbackDownloaded} WebM fallback downloaded. ${skipped} skipped.`,
     );
-    setError(failures.length ? `Queue issues:\n${failures.slice(0, 8).join("\n")}${failures.length > 8 ? `\n...and ${failures.length - 8} more.` : ""}` : "");
+    setError(
+      failures.length
+        ? `Queue issues:\n${failures.slice(0, 8).join("\n")}${failures.length > 8 ? `\n...and ${failures.length - 8} more.` : ""}`
+        : "",
+    );
     queueCancelRef.current = false;
   }
 
@@ -1855,11 +2956,20 @@ export default function YouTubeGeneratorPage({
           <section className="youtube-generator__section">
             <div className="youtube-generator__section-header">
               <h3>Setup</h3>
-              <span>{vehiclesLoading ? "Loading stock..." : `${productVehicles.length} vehicles`}</span>
+              <span>
+                {vehiclesLoading
+                  ? "Loading stock..."
+                  : `${productVehicles.length} vehicles`}
+              </span>
             </div>
             <div className="youtube-generator__segment">
               {Object.entries(PRODUCTS).map(([key, item]) => (
-                <button key={key} type="button" className={productKey === key ? "is-active" : ""} onClick={() => setProductKey(key)}>
+                <button
+                  key={key}
+                  type="button"
+                  className={productKey === key ? "is-active" : ""}
+                  onClick={() => setProductKey(key)}
+                >
                   {item.label}
                 </button>
               ))}
@@ -1867,7 +2977,9 @@ export default function YouTubeGeneratorPage({
 
             {productKey === "cars" ? (
               <div className="youtube-generator__note">
-                Cars table config: {carsConfigured ? "configured" : "not configured"} | Cars table name: {carsTableName || "none"} | Cars loaded: {carsLoaded}
+                Cars table config:{" "}
+                {carsConfigured ? "configured" : "not configured"} | Cars table
+                name: {carsTableName || "none"} | Cars loaded: {carsLoaded}
                 {!vehiclesLoading && productVehicles.length === 0 ? (
                   <>
                     <br />
@@ -1879,7 +2991,10 @@ export default function YouTubeGeneratorPage({
 
             <label className="youtube-generator__field">
               <span>Vehicle</span>
-              <select value={selectedVehicleId} onChange={(event) => setSelectedVehicleId(event.target.value)}>
+              <select
+                value={selectedVehicleId}
+                onChange={(event) => setSelectedVehicleId(event.target.value)}
+              >
                 {productVehicles.map((vehicle) => (
                   <option key={vehicle.id} value={vehicle.id}>
                     {vehicleRegistration(vehicle)} - {vehicleTitle(vehicle)}
@@ -1891,47 +3006,82 @@ export default function YouTubeGeneratorPage({
             <div className="youtube-generator__controls-grid">
               <label className="youtube-generator__field">
                 <span>Image source</span>
-                <select value={imageSource} onChange={(event) => setImageSource(event.target.value)}>
+                <select
+                  value={imageSource}
+                  onChange={(event) => setImageSource(event.target.value)}
+                >
                   {IMAGE_SOURCE_OPTIONS.map(([key, label]) => (
-                    <option key={key} value={key}>{label}</option>
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
                   ))}
                 </select>
               </label>
               <label className="youtube-generator__field">
                 <span>Images</span>
-                <select value={imageCount} onChange={(event) => setImageCount(Number(event.target.value))}>
+                <select
+                  value={imageCount}
+                  onChange={(event) =>
+                    setImageCount(Number(event.target.value))
+                  }
+                >
                   {IMAGE_COUNT_OPTIONS.map((count) => (
-                    <option key={count} value={count}>{count} images</option>
+                    <option key={count} value={count}>
+                      {count} images
+                    </option>
                   ))}
                 </select>
               </label>
               <label className="youtube-generator__field">
                 <span>Duration</span>
-                <select value={durationSeconds} onChange={(event) => setDurationSeconds(Number(event.target.value))}>
+                <select
+                  value={durationSeconds}
+                  onChange={(event) =>
+                    setDurationSeconds(Number(event.target.value))
+                  }
+                >
                   {DURATION_OPTIONS.map((seconds) => (
-                    <option key={seconds} value={seconds}>{seconds} seconds</option>
+                    <option key={seconds} value={seconds}>
+                      {seconds} seconds
+                    </option>
                   ))}
                 </select>
               </label>
               <label className="youtube-generator__field">
                 <span>FPS</span>
-                <select value={recordingFps} onChange={(event) => setRecordingFps(Number(event.target.value))}>
+                <select
+                  value={recordingFps}
+                  onChange={(event) =>
+                    setRecordingFps(Number(event.target.value))
+                  }
+                >
                   {FPS_OPTIONS.map((fps) => (
-                    <option key={fps} value={fps}>{fps}fps</option>
+                    <option key={fps} value={fps}>
+                      {fps}fps
+                    </option>
                   ))}
                 </select>
               </label>
               <label className="youtube-generator__field">
                 <span>Visual template</span>
-                <select value={visualTemplate} onChange={(event) => setVisualTemplate(event.target.value)}>
+                <select
+                  value={visualTemplate}
+                  onChange={(event) => setVisualTemplate(event.target.value)}
+                >
                   {VISUAL_TEMPLATES.map(([key, label]) => (
-                    <option key={key} value={key}>{label}</option>
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
                   ))}
                 </select>
               </label>
             </div>
             <label className="youtube-generator__toggle">
-              <input type="checkbox" checked={musicOn} onChange={(event) => setMusicOn(event.target.checked)} />
+              <input
+                type="checkbox"
+                checked={musicOn}
+                onChange={(event) => setMusicOn(event.target.checked)}
+              />
               <span>Music on</span>
             </label>
           </section>
@@ -1939,34 +3089,69 @@ export default function YouTubeGeneratorPage({
           <section className="youtube-generator__section">
             <div className="youtube-generator__section-header">
               <h3>CMS / Wix Images</h3>
-              <span>{cmsMatch ? `${cmsMatch.imageRecords.length} matched images` : "Registration first, then title"}</span>
+              <span>
+                {cmsMatch
+                  ? `${cmsMatch.imageRecords.length} matched images`
+                  : "Registration first, then title"}
+              </span>
             </div>
             <div className="youtube-generator__upload-row">
-              <button type="button" className="youtube-generator__button youtube-generator__button--secondary" onClick={() => cmsInputRef.current?.click()}>
+              <button
+                type="button"
+                className="youtube-generator__button youtube-generator__button--secondary"
+                onClick={() => cmsInputRef.current?.click()}
+              >
                 Upload CMS File
               </button>
-              <button type="button" className="youtube-generator__button youtube-generator__button--ghost" onClick={clearCmsUpload}>
+              <button
+                type="button"
+                className="youtube-generator__button youtube-generator__button--ghost"
+                onClick={clearCmsUpload}
+              >
                 Clear CMS
               </button>
-              <span>{cmsUpload ? `${cmsUpload.fileName} - ${cmsUpload.rows.length} rows` : "No CMS file loaded"}</span>
-              <input ref={cmsInputRef} type="file" accept=".csv,.json,.txt" hidden onChange={handleCmsUpload} />
+              <span>
+                {cmsUpload
+                  ? `${cmsUpload.fileName} - ${cmsUpload.rows.length} rows`
+                  : "No CMS file loaded"}
+              </span>
+              <input
+                ref={cmsInputRef}
+                type="file"
+                accept=".csv,.json,.txt"
+                hidden
+                onChange={handleCmsUpload}
+              />
             </div>
             <div className="youtube-generator__thumbs">
-              {resolvedImageOrder.records.slice(0, imageCount).map((item, index) => (
-                <div key={`${item.url}-${index}`} className="youtube-generator__thumb">
-                  <img src={item.url} alt={`YouTube image ${index + 1}`} />
-                  <span>{index + 1}</span>
-                </div>
-              ))}
+              {resolvedImageOrder.records
+                .slice(0, imageCount)
+                .map((item, index) => (
+                  <div
+                    key={`${item.url}-${index}`}
+                    className="youtube-generator__thumb"
+                  >
+                    <img src={item.url} alt={`YouTube image ${index + 1}`} />
+                    <span>{index + 1}</span>
+                  </div>
+                ))}
             </div>
             <div className="youtube-generator__note">
-              Upload a CMS/Wix export containing cars or vans. Images are matched by registration first, then title.
+              Upload a CMS/Wix export containing cars or vans. Images are
+              matched by registration first, then title.
             </div>
             <div className="youtube-generator__note">
-              Final image order: {resolvedImageOrder.records.length} image{resolvedImageOrder.records.length === 1 ? "" : "s"}
+              Final image order: {resolvedImageOrder.records.length} image
+              {resolvedImageOrder.records.length === 1 ? "" : "s"}
               {resolvedImageOrder.dedupeHappened ? " after dedupe." : "."}
             </div>
-            <div className={hasEnoughImages ? "youtube-generator__status" : "youtube-generator__error"}>
+            <div
+              className={
+                hasEnoughImages
+                  ? "youtube-generator__status"
+                  : "youtube-generator__error"
+              }
+            >
               {imageAvailabilityText}
             </div>
           </section>
@@ -1974,11 +3159,20 @@ export default function YouTubeGeneratorPage({
           <section className="youtube-generator__section">
             <div className="youtube-generator__section-header">
               <h3>Text Controls</h3>
-              <span>{textMode === "default" ? "Saved defaults" : "Manual current video"}</span>
+              <span>
+                {textMode === "default"
+                  ? "Saved defaults"
+                  : "Manual current video"}
+              </span>
             </div>
             <div className="youtube-generator__segment">
               {["default", "manual"].map((mode) => (
-                <button key={mode} type="button" className={textMode === mode ? "is-active" : ""} onClick={() => handleTextModeChange(mode)}>
+                <button
+                  key={mode}
+                  type="button"
+                  className={textMode === mode ? "is-active" : ""}
+                  onClick={() => handleTextModeChange(mode)}
+                >
                   {mode === "default" ? "Default Mode" : "Manual Mode"}
                 </button>
               ))}
@@ -1986,30 +3180,56 @@ export default function YouTubeGeneratorPage({
             <div className="youtube-generator__text-grid">
               <label className="youtube-generator__field">
                 <span>Default Header</span>
-                <input value={activeText.header} onChange={(event) => updateActiveText("header", event.target.value)} />
+                <input
+                  value={activeText.header}
+                  onChange={(event) =>
+                    updateActiveText("header", event.target.value)
+                  }
+                />
               </label>
               <label className="youtube-generator__field">
                 <span>Top Display Text</span>
-                <input value={activeText.topText || ""} onChange={(event) => updateActiveText("topText", event.target.value)} />
+                <input
+                  value={activeText.topText || ""}
+                  onChange={(event) =>
+                    updateActiveText("topText", event.target.value)
+                  }
+                />
               </label>
               <label className="youtube-generator__field">
                 <span>Default Hook</span>
-                <input value={activeText.hook} onChange={(event) => updateActiveText("hook", event.target.value)} />
+                <input
+                  value={activeText.hook}
+                  onChange={(event) =>
+                    updateActiveText("hook", event.target.value)
+                  }
+                />
               </label>
               <label className="youtube-generator__field">
                 <span>Default Support Line</span>
-                <input value={activeText.support} onChange={(event) => updateActiveText("support", event.target.value)} />
+                <input
+                  value={activeText.support}
+                  onChange={(event) =>
+                    updateActiveText("support", event.target.value)
+                  }
+                />
               </label>
               <label className="youtube-generator__field">
                 <span>Default CTA</span>
-                <input value={activeText.cta} onChange={(event) => updateActiveText("cta", event.target.value)} />
+                <input
+                  value={activeText.cta}
+                  onChange={(event) =>
+                    updateActiveText("cta", event.target.value)
+                  }
+                />
               </label>
             </div>
             <div className="youtube-generator__frame-text">
               <div className="youtube-generator__section-header">
                 <h4>Frame Text Controls</h4>
                 <span>
-                  {selectedFrameSpecs.length} frame{selectedFrameSpecs.length === 1 ? "" : "s"}
+                  {selectedFrameSpecs.length} frame
+                  {selectedFrameSpecs.length === 1 ? "" : "s"}
                 </span>
               </div>
               {selectedFrameSpecs.map((frameSpec) => {
@@ -2017,7 +3237,11 @@ export default function YouTubeGeneratorPage({
                 const locked = frameSpec.locked;
                 const displaySpec = frameSpec.display;
                 return (
-                  <details key={`youtube-frame-text-${frameIndex}`} className={`youtube-generator__frame-card${locked ? " is-locked" : ""}`} open={frameIndex === 0}>
+                  <details
+                    key={`youtube-frame-text-${frameIndex}`}
+                    className={`youtube-generator__frame-card${locked ? " is-locked" : ""}`}
+                    open={frameIndex === 0}
+                  >
                     <summary className="youtube-generator__frame-card-title">
                       <strong>
                         Frame {frameSpec.frameNumber}
@@ -2033,17 +3257,41 @@ export default function YouTubeGeneratorPage({
                     </summary>
                     {locked ? (
                       <div className="youtube-generator__locked-grid">
-                        <span><b>Eyebrow / Label</b>{displaySpec.eyebrow || "Blank"}</span>
-                        <span><b>Headline</b>{displaySpec.headline || "Blank"}</span>
-                        <span><b>Support Line</b>{displaySpec.subline || "Blank"}</span>
-                        <span><b>CTA / Button Text</b>{displaySpec.cta || "Blank"}</span>
+                        <span>
+                          <b>Eyebrow / Label</b>
+                          {displaySpec.eyebrow || "Blank"}
+                        </span>
+                        <span>
+                          <b>Headline</b>
+                          {displaySpec.headline || "Blank"}
+                        </span>
+                        <span>
+                          <b>Support Line</b>
+                          {displaySpec.subline || "Blank"}
+                        </span>
+                        <span>
+                          <b>CTA / Button Text</b>
+                          {displaySpec.cta || "Blank"}
+                        </span>
                       </div>
                     ) : (
                       <div className="youtube-generator__frame-grid">
                         {FRAME_TEXT_FIELDS.map(([field, label]) => (
-                          <label key={field} className="youtube-generator__field">
+                          <label
+                            key={field}
+                            className="youtube-generator__field"
+                          >
                             <span>{label}</span>
-                            <input value={frameSpec.text?.[field] || ""} onChange={(event) => updateActiveFrameText(frameIndex, field, event.target.value)} />
+                            <input
+                              value={frameSpec.text?.[field] || ""}
+                              onChange={(event) =>
+                                updateActiveFrameText(
+                                  frameIndex,
+                                  field,
+                                  event.target.value,
+                                )
+                              }
+                            />
                           </label>
                         ))}
                       </div>
@@ -2053,7 +3301,11 @@ export default function YouTubeGeneratorPage({
               })}
             </div>
             <div className="youtube-generator__actions youtube-generator__actions--compact">
-              <button type="button" className="youtube-generator__button youtube-generator__button--secondary" onClick={saveTextDefaults}>
+              <button
+                type="button"
+                className="youtube-generator__button youtube-generator__button--secondary"
+                onClick={saveTextDefaults}
+              >
                 Save {product.label} Defaults
               </button>
             </div>
@@ -2062,13 +3314,25 @@ export default function YouTubeGeneratorPage({
           <section className="youtube-generator__section">
             <div className="youtube-generator__section-header">
               <h3>YouTube Queue</h3>
-              <span>{activeQueue.length} queued for {product.label}</span>
+              <span>
+                {activeQueue.length} queued for {product.label}
+              </span>
             </div>
             <div className="youtube-generator__actions youtube-generator__actions--compact">
-              <button type="button" className="youtube-generator__button youtube-generator__button--secondary" onClick={addSelectedToQueue} disabled={!hasEnoughImages}>
+              <button
+                type="button"
+                className="youtube-generator__button youtube-generator__button--secondary"
+                onClick={addSelectedToQueue}
+                disabled={!hasEnoughImages}
+              >
                 Add Current Vehicle
               </button>
-              <button type="button" className="youtube-generator__button youtube-generator__button--ghost" onClick={clearQueue} disabled={!activeQueue.length || queueRunning}>
+              <button
+                type="button"
+                className="youtube-generator__button youtube-generator__button--ghost"
+                onClick={clearQueue}
+                disabled={!activeQueue.length || queueRunning}
+              >
                 Clear Queue
               </button>
             </div>
@@ -2078,15 +3342,26 @@ export default function YouTubeGeneratorPage({
                   const queuedOrder = resolveImageOrderForVehicle(vehicle);
                   const queuedEnough = queuedOrder.records.length >= imageCount;
                   return (
-                    <div key={`${vehicle.id || ""}-${vehicleRegistration(vehicle) || vehicleTitle(vehicle)}`} className="youtube-generator__queue-card">
+                    <div
+                      key={`${vehicle.id || ""}-${vehicleRegistration(vehicle) || vehicleTitle(vehicle)}`}
+                      className="youtube-generator__queue-card"
+                    >
                       <div>
-                        <strong>{vehicleRegistration(vehicle) || "NO REG"}</strong>
+                        <strong>
+                          {vehicleRegistration(vehicle) || "NO REG"}
+                        </strong>
                         <span>{vehicleTitle(vehicle)}</span>
                         <small className={queuedEnough ? "" : "is-warning"}>
-                          {queuedOrder.records.length} / {imageCount} images available
+                          {queuedOrder.records.length} / {imageCount} images
+                          available
                         </small>
                       </div>
-                      <button type="button" className="youtube-generator__button youtube-generator__button--ghost" onClick={() => removeQueueItem(vehicle)} disabled={queueRunning}>
+                      <button
+                        type="button"
+                        className="youtube-generator__button youtube-generator__button--ghost"
+                        onClick={() => removeQueueItem(vehicle)}
+                        disabled={queueRunning}
+                      >
                         Remove
                       </button>
                     </div>
@@ -2094,12 +3369,19 @@ export default function YouTubeGeneratorPage({
                 })}
               </div>
             ) : (
-              <div className="youtube-generator__note">No vehicles queued for {product.label}.</div>
+              <div className="youtube-generator__note">
+                No vehicles queued for {product.label}.
+              </div>
             )}
             <div className="youtube-generator__status">
-              {queueProgress.message} | {queueProgress.completed} complete | {queueProgress.failed} failed
-              {queueProgress.fallbackDownloaded ? ` | ${queueProgress.fallbackDownloaded} fallback` : ""}
-              {queueProgress.skipped ? ` | ${queueProgress.skipped} skipped` : ""}
+              {queueProgress.message} | {queueProgress.completed} complete |{" "}
+              {queueProgress.failed} failed
+              {queueProgress.fallbackDownloaded
+                ? ` | ${queueProgress.fallbackDownloaded} fallback`
+                : ""}
+              {queueProgress.skipped
+                ? ` | ${queueProgress.skipped} skipped`
+                : ""}
             </div>
             {queueFailures.length ? (
               <div className="youtube-generator__error">
@@ -2107,18 +3389,34 @@ export default function YouTubeGeneratorPage({
                 {queueFailures.slice(0, 8).map((item, index) => (
                   <div key={`${item}-${index}`}>{item}</div>
                 ))}
-                {queueFailures.length > 8 ? <div>...and {queueFailures.length - 8} more.</div> : null}
+                {queueFailures.length > 8 ? (
+                  <div>...and {queueFailures.length - 8} more.</div>
+                ) : null}
               </div>
             ) : null}
             <div className="youtube-generator__actions">
-              <button type="button" className="youtube-generator__button youtube-generator__button--secondary" onClick={generateCurrentQueuedShort} disabled={!activeQueue.length || queueRunning}>
+              <button
+                type="button"
+                className="youtube-generator__button youtube-generator__button--secondary"
+                onClick={generateCurrentQueuedShort}
+                disabled={!activeQueue.length || queueRunning}
+              >
                 Generate Current Queued Short
               </button>
-              <button type="button" className="youtube-generator__button youtube-generator__button--primary" onClick={runQueue} disabled={!activeQueue.length || queueRunning}>
+              <button
+                type="button"
+                className="youtube-generator__button youtube-generator__button--primary"
+                onClick={runQueue}
+                disabled={!activeQueue.length || queueRunning}
+              >
                 Auto Generate + Download Queue
               </button>
               {queueRunning ? (
-                <button type="button" className="youtube-generator__button youtube-generator__button--ghost" onClick={cancelQueue}>
+                <button
+                  type="button"
+                  className="youtube-generator__button youtube-generator__button--ghost"
+                  onClick={cancelQueue}
+                >
                   Cancel Queue
                 </button>
               ) : null}
@@ -2127,30 +3425,58 @@ export default function YouTubeGeneratorPage({
 
           <section className="youtube-generator__section">
             <div className="youtube-generator__actions">
-              <button type="button" className="youtube-generator__button youtube-generator__button--primary" onClick={handleGenerate} disabled={!hasEnoughImages}>
+              <button
+                type="button"
+                className="youtube-generator__button youtube-generator__button--primary"
+                onClick={handleGenerate}
+                disabled={!hasEnoughImages}
+              >
                 Generate Preview
               </button>
-              <button type="button" className="youtube-generator__button youtube-generator__button--secondary" onClick={handleDownloadMp4}>
+              <button
+                type="button"
+                className="youtube-generator__button youtube-generator__button--secondary"
+                onClick={handleDownloadMp4}
+              >
                 Download MP4
               </button>
               {currentAsset?.blob ? (
-                <button type="button" className="youtube-generator__button youtube-generator__button--ghost" onClick={handleDownloadWebm}>
+                <button
+                  type="button"
+                  className="youtube-generator__button youtube-generator__button--ghost"
+                  onClick={handleDownloadWebm}
+                >
                   Download WebM fallback
                 </button>
               ) : null}
             </div>
-            {status ? <div className="youtube-generator__status">{status}</div> : null}
-            {error || vehiclesError ? <div className="youtube-generator__error">{error || vehiclesError}</div> : null}
+            {status ? (
+              <div className="youtube-generator__status">{status}</div>
+            ) : null}
+            {error || vehiclesError ? (
+              <div className="youtube-generator__error">
+                {error || vehiclesError}
+              </div>
+            ) : null}
           </section>
         </div>
 
         <div className="youtube-generator__preview-panel">
           <div className="youtube-generator__phone">
             {currentAsset?.url ? (
-              <video className="youtube-generator__video" src={currentAsset.url} controls playsInline />
+              <video
+                className="youtube-generator__video"
+                src={currentAsset.url}
+                controls
+                playsInline
+              />
             ) : (
-              <div className={`youtube-generator__poster youtube-generator__poster--${productKey === "rent2buy" ? "rent" : "finance"}`}>
-                {resolvedImages[0] ? <img src={resolvedImages[0]} alt="Selected vehicle preview" /> : null}
+              <div
+                className={`youtube-generator__poster youtube-generator__poster--${productKey === "rent2buy" ? "rent" : "finance"}`}
+              >
+                {resolvedImages[0] ? (
+                  <img src={resolvedImages[0]} alt="Selected vehicle preview" />
+                ) : null}
                 <div className="youtube-generator__poster-copy">
                   <span>{activeText.header}</span>
                   <strong>{activeText.hook}</strong>
@@ -2160,12 +3486,15 @@ export default function YouTubeGeneratorPage({
             )}
           </div>
           <div className="youtube-generator__safety">
-            Preview/download only. No posting queue, Creative Library, Supabase tracking, stock records, or Reel Lab output is changed.
+            Preview/download only. No posting queue, Creative Library, Supabase
+            tracking, stock records, or Reel Lab output is changed.
           </div>
           <div className="youtube-generator__copy">
             <strong>{product.label} wording preview</strong>
             {productKey === "cars" ? (
-              buildYouTubeDescription(selectedVehicle, productKey).split("\n").map((line) => <p key={line}>{line}</p>)
+              buildYouTubeDescription(selectedVehicle, productKey)
+                .split("\n")
+                .map((line) => <p key={line}>{line}</p>)
             ) : (
               <>
                 <p>{activeText.header}</p>
