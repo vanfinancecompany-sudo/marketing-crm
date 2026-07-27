@@ -1,21 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { evaluatePublishingSafety } from "../lib/publishingSafety.js";
-import {
-  classifyArticleProduct,
-  ensureRent2BuyBusinessKnowledge,
-  validateComparisonStructure,
-  validateMarkdownStructure,
-  validateRent2BuySemantics,
-  withPermanentRent2BuyKnowledge,
-} from "../lib/rent2BuyRules.js";
-import {
-  assertDuplicateTitleResolved,
-  buildCorrectionPreview,
-  buildSafetyCorrectionPrompt,
-  canAcceptCorrection,
-  limitCorrectionBatch,
-  normalizeCorrectionProposal,
-} from "../lib/publishingCorrections.js";
+import { classifyArticleProduct, ensureRent2BuyBusinessKnowledge, validateComparisonStructure, validateMarkdownStructure, validateRent2BuySemantics, withPermanentRent2BuyKnowledge } from "../lib/rent2BuyRules.js";
+import { assertDuplicateTitleResolved, buildCorrectionPreview, buildSafetyCorrectionPrompt, canAcceptCorrection, limitCorrectionBatch, normalizeCorrectionProposal, validateProtectedValues, validateTargetedRepairText } from "../lib/publishingCorrections.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const VALID_SCOPES = new Set(["rent2buy", "finance", "both"]);
@@ -36,69 +22,36 @@ async function loadCorrectionContext(supabase, articleId) {
     supabase.from("knowledge_article_editorial_overrides").select("*").eq("article_id", articleId).maybeSingle(),
     supabase.from("knowledge_internal_link_suggestions").select("id,anchor_text,destination_url,status").eq("article_id", articleId).eq("status", "accepted"),
   ]);
-  const article = data(articleResult, "Article could not be found.");
-  const approvedLinks = linksResult.error ? [] : linksResult.data || [];
+  const article = data(articleResult, "Article could not be found."); const approvedLinks = linksResult.error ? [] : linksResult.data || [];
   return { article: { ...article, internal_link_suggestions: approvedLinks }, businessKnowledge: withPermanentRent2BuyKnowledge(data(businessResult, "Business Knowledge could not be loaded.") || []), assessment: assessmentResult.error ? null : assessmentResult.data, overrides: overridesResult.error ? {} : overridesResult.data || {}, approvedLinks };
 }
 
 const LINK_SCHEMA = { type: "object", additionalProperties: false, required: ["anchor_text", "destination_url"], properties: { anchor_text: { type: "string" }, destination_url: { type: "string" } } };
 const CORRECTION_SCHEMA = { type: "object", additionalProperties: false, required: ["title", "slug", "seo_title", "meta_description", "excerpt", "content_markdown", "faq_json", "cta", "category", "article_type", "featured_image", "internal_link_suggestions", "changes", "removed_links", "manual_confirmation_required", "removed_sections", "removal_reasons", "removed_section_word_counts"], properties: { title: { type: "string" }, slug: { type: "string" }, seo_title: { type: "string" }, meta_description: { type: "string" }, excerpt: { type: "string" }, content_markdown: { type: "string" }, faq_json: { type: "array", items: { type: "object", additionalProperties: false, required: ["question", "answer"], properties: { question: { type: "string" }, answer: { type: "string" } } } }, cta: { type: "string" }, category: { type: "string" }, article_type: { type: "string" }, featured_image: { type: "string" }, internal_link_suggestions: { type: "array", items: LINK_SCHEMA }, changes: { type: "array", items: { type: "string" } }, removed_links: { type: "array", items: { type: "string" } }, manual_confirmation_required: { type: "array", items: { type: "string" } }, removed_sections: { type: "array", items: { type: "string" } }, removal_reasons: { type: "array", items: { type: "string" } }, removed_section_word_counts: { type: "array", items: { type: "integer", minimum: 0 } } } };
-
-async function callAi(prompt) {
-  if (!process.env.OPENAI_API_KEY) throw new ApiError(500, "OPENAI_API_KEY is not configured.");
-  const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-4.1-mini", input: [{ role: "system", content: "Correct every supplied article field while preserving the fixed product scope. For comparison articles, keep legitimate Van Finance terminology in clearly labelled Finance context and enforce Rent2Buy rules only on the Rent2Buy side. Never change link destinations." }, { role: "user", content: prompt }], text: { format: { type: "json_schema", name: "knowledge_safety_correction", strict: true, schema: CORRECTION_SCHEMA } } }) });
-  const result = await response.json(); if (!response.ok) throw new ApiError(502, result?.error?.message || "AI correction failed."); const output = result.output_text || result.output?.flatMap((item) => item.content || []).find((item) => item.type === "output_text")?.text; if (!output) throw new ApiError(502, "The AI returned no correction proposal."); return JSON.parse(output);
-}
-
-async function saveScope(supabase, articleId, scope) {
-  const current = data(await supabase.from("knowledge_articles").select("id,generation_metadata").eq("id", articleId).single(), "Article could not be found.");
-  const generationMetadata = { ...(current.generation_metadata || {}), product_scope_override: scope };
-  const saved = data(await supabase.from("knowledge_articles").update({ generation_metadata: generationMetadata, updated_at: new Date().toISOString() }).eq("id", articleId).select("*").single(), "Product scope could not be saved.");
-  return { article: saved, product_scope: scope };
-}
+async function callAi(prompt) { if (!process.env.OPENAI_API_KEY) throw new ApiError(500, "OPENAI_API_KEY is not configured."); const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-4.1-mini", input: [{ role: "system", content: "Correct every supplied article field while preserving the fixed product scope. For comparison articles, keep legitimate Van Finance terminology in clearly labelled Finance context and enforce Rent2Buy rules only on the Rent2Buy side. Never change link destinations." }, { role: "user", content: prompt }], text: { format: { type: "json_schema", name: "knowledge_safety_correction", strict: true, schema: CORRECTION_SCHEMA } } }) }); const result = await response.json(); if (!response.ok) throw new ApiError(502, result?.error?.message || "AI correction failed."); const output = result.output_text || result.output?.flatMap((item) => item.content || []).find((item) => item.type === "output_text")?.text; if (!output) throw new ApiError(502, "The AI returned no correction proposal."); return JSON.parse(output); }
+async function saveScope(supabase, articleId, scope) { const current = data(await supabase.from("knowledge_articles").select("id,generation_metadata").eq("id", articleId).single(), "Article could not be found."); const generationMetadata = { ...(current.generation_metadata || {}), product_scope_override: scope }; const saved = data(await supabase.from("knowledge_articles").update({ generation_metadata: generationMetadata, updated_at: new Date().toISOString() }).eq("id", articleId).select("*").single(), "Product scope could not be saved."); return { article: saved, product_scope: scope }; }
 
 async function proposeOne(supabase, articleId, unresolvedReasons = [], requestedScope = "") {
-  const context = await loadCorrectionContext(supabase, articleId);
-  const storedScope = context.article.generation_metadata?.product_scope_override;
-  const scope = requestedScope ? normalizeScope(requestedScope) : classifyArticleProduct(context.article, context.assessment?.effective_intent || {});
-  if (storedScope && requestedScope && storedScope !== scope) throw new ApiError(409, "Save the changed product scope before regenerating the correction.");
-  const structuredCtas = context.overrides?.structured_ctas || context.assessment?.structured_ctas || [];
-  const safetyOptions = { assessment: context.assessment, businessKnowledge: context.businessKnowledge, structuredCtas, intent: context.assessment?.effective_intent, scopeOverride: scope };
-  const safety = evaluatePublishingSafety(context.article, safetyOptions);
-  if (!safety.hard_blocked && !Object.values(safety.checks).some((value) => value !== "passed")) throw new ApiError(400, "This article has no publishing safety issue requiring AI correction.");
-  const requestedReasons = Array.isArray(unresolvedReasons) ? unresolvedReasons.filter(Boolean) : [];
-  const proposed = await callAi(buildSafetyCorrectionPrompt({ article: context.article, safety, businessKnowledge: context.businessKnowledge, overrides: context.overrides, approvedLinks: context.approvedLinks, structuredCtas, unresolvedReasons: requestedReasons, scopeOverride: scope }));
-  const preview = buildCorrectionPreview({ originalArticle: context.article, proposed, safetyOptions, scopeOverride: scope });
-  assertDuplicateTitleResolved(preview.after);
-  return { article_id: articleId, source_updated_at: context.article.updated_at, regeneration_reasons: requestedReasons, ...preview };
+  const context = await loadCorrectionContext(supabase, articleId); const storedScope = context.article.generation_metadata?.product_scope_override; const scope = requestedScope ? normalizeScope(requestedScope) : classifyArticleProduct(context.article, context.assessment?.effective_intent || {}); if (storedScope && requestedScope && storedScope !== scope) throw new ApiError(409, "Save the changed product scope before regenerating the correction.");
+  const structuredCtas = context.overrides?.structured_ctas || context.assessment?.structured_ctas || []; const safetyOptions = { assessment: context.assessment, businessKnowledge: context.businessKnowledge, structuredCtas, intent: context.assessment?.effective_intent, scopeOverride: scope }; const safety = evaluatePublishingSafety(context.article, safetyOptions); if (!safety.hard_blocked && !Object.values(safety.checks).some((value) => value !== "passed")) throw new ApiError(400, "This article has no publishing safety issue requiring AI correction.");
+  const requestedReasons = Array.isArray(unresolvedReasons) ? unresolvedReasons.filter(Boolean) : []; const proposed = await callAi(buildSafetyCorrectionPrompt({ article: context.article, safety, businessKnowledge: context.businessKnowledge, overrides: context.overrides, approvedLinks: context.approvedLinks, structuredCtas, unresolvedReasons: requestedReasons, scopeOverride: scope })); const preview = buildCorrectionPreview({ originalArticle: context.article, proposed, safetyOptions, scopeOverride: scope }); assertDuplicateTitleResolved(preview.after); return { article_id: articleId, source_updated_at: context.article.updated_at, regeneration_reasons: requestedReasons, ...preview };
 }
 
 async function acceptCorrection(supabase, body) {
-  const articleId = clean(body.article_id, 100); if (!articleId || !body.corrected_article) throw new ApiError(400, "Article and correction are required.");
-  if (body.correction_complete !== true || (body.remaining_hard_blocks || []).length) throw new ApiError(409, "Correction incomplete. Resolve remaining publishing blocks before acceptance.");
-  if ((body.excessive_content_loss || Number(body.unexplained_content_loss_percent) > 20) && body.confirm_large_reduction !== true) throw new ApiError(409, "Large unexplained content reduction");
-  const context = await loadCorrectionContext(supabase, articleId); if (body.source_updated_at && context.article.updated_at !== body.source_updated_at) throw new ApiError(409, "The article changed after the correction was prepared. Generate a fresh proposal.");
-  const scope = normalizeScope(body.product_scope || context.article.generation_metadata?.product_scope_override || classifyArticleProduct(context.article, context.assessment?.effective_intent || {}));
+  const articleId = clean(body.article_id, 100); if (!articleId || !body.corrected_article) throw new ApiError(400, "Article and correction are required."); if (body.correction_complete !== true || (body.remaining_hard_blocks || []).length) throw new ApiError(409, "Correction incomplete. Resolve remaining publishing blocks before acceptance."); if ((body.excessive_content_loss || Number(body.unexplained_content_loss_percent) > 20) && body.confirm_large_reduction !== true) throw new ApiError(409, "Large unexplained content reduction");
+  const context = await loadCorrectionContext(supabase, articleId); if (body.source_updated_at && context.article.updated_at !== body.source_updated_at) throw new ApiError(409, "The article changed after the correction was prepared. Generate a fresh proposal."); const scope = normalizeScope(body.product_scope || context.article.generation_metadata?.product_scope_override || classifyArticleProduct(context.article, context.assessment?.effective_intent || {}));
   const normalized = normalizeCorrectionProposal(context.article, body.corrected_article).corrected_article; normalized.generation_metadata = { ...(normalized.generation_metadata || {}), product_scope_override: scope }; assertDuplicateTitleResolved(normalized);
+  const protectedValues = validateProtectedValues(context.article, normalized, { titleTargeted: true }); if (!protectedValues.protected_values_valid) throw new ApiError(409, protectedValues.protected_value_errors.join(" "));
+  const repairedText = validateTargetedRepairText(normalized); if (!repairedText.targeted_repair_text_valid) throw new ApiError(409, repairedText.targeted_repair_text_errors.join(" "));
   const structure = validateMarkdownStructure(normalized.content_markdown, normalized.cta); if (!structure.markdown_structure_valid) throw new ApiError(409, `Correction damaged article formatting. ${structure.markdown_structure_errors.join(" ")}`);
-  const semantic = validateRent2BuySemantics(normalized, { intent: context.assessment?.effective_intent, scopeOverride: scope }); if (!semantic.rent2buy_semantic_valid) throw new ApiError(409, "Rent2Buy correction still contains prohibited wording.");
-  const comparison = validateComparisonStructure(normalized, { intent: context.assessment?.effective_intent, scopeOverride: scope }); if (!comparison.comparison_structure_valid) throw new ApiError(409, "Comparison content does not clearly separate Rent2Buy and Van Finance.");
+  const semantic = validateRent2BuySemantics(normalized, { intent: context.assessment?.effective_intent, scopeOverride: scope }); if (!semantic.rent2buy_semantic_valid) throw new ApiError(409, "Rent2Buy correction still contains prohibited wording."); const comparison = validateComparisonStructure(normalized, { intent: context.assessment?.effective_intent, scopeOverride: scope }); if (!comparison.comparison_structure_valid) throw new ApiError(409, "Comparison content does not clearly separate Rent2Buy and Van Finance.");
   const finalSafety = evaluatePublishingSafety(normalized, { businessKnowledge: context.businessKnowledge, ignoreAssessmentFreshness: true, intent: context.assessment?.effective_intent, scopeOverride: scope }); if (finalSafety.hard_blocked) throw new ApiError(409, finalSafety.hard_block_reasons.join(" "));
-  if (!canAcceptCorrection({ correction_complete: true, markdown_structure_valid: true, rent2buy_semantic_valid: true, comparison_structure_valid: true, excessive_content_loss: Boolean(body.excessive_content_loss), unexplained_content_loss_percent: Number(body.unexplained_content_loss_percent) || 0 }, body.confirm_large_reduction === true)) throw new ApiError(409, "Correction incomplete.");
-  const { internal_link_suggestions, ...articleUpdate } = normalized; const saved = data(await supabase.from("knowledge_articles").update({ ...articleUpdate, status: "draft", approved_at: null, content_html: null, updated_at: new Date().toISOString() }).eq("id", articleId).select().single(), "Corrected article could not be saved.");
-  for (const link of internal_link_suggestions || []) if (link.id) await supabase.from("knowledge_internal_link_suggestions").update({ anchor_text: link.anchor_text }).eq("id", link.id).eq("destination_url", link.destination_url);
+  if (!canAcceptCorrection({ correction_complete: true, markdown_structure_valid: true, rent2buy_semantic_valid: true, comparison_structure_valid: true, protected_values_valid: true, targeted_repair_text_valid: true, excessive_content_loss: Boolean(body.excessive_content_loss), unexplained_content_loss_percent: Number(body.unexplained_content_loss_percent) || 0 }, body.confirm_large_reduction === true)) throw new ApiError(409, "Correction incomplete.");
+  const { internal_link_suggestions, ...articleUpdate } = normalized; const saved = data(await supabase.from("knowledge_articles").update({ ...articleUpdate, status: "draft", approved_at: null, content_html: null, updated_at: new Date().toISOString() }).eq("id", articleId).select().single(), "Corrected article could not be saved."); for (const link of internal_link_suggestions || []) if (link.id) await supabase.from("knowledge_internal_link_suggestions").update({ anchor_text: link.anchor_text }).eq("id", link.id).eq("destination_url", link.destination_url);
   return { article: { ...saved, internal_link_suggestions }, safety: evaluatePublishingSafety({ ...saved, internal_link_suggestions }, { stale: true, businessKnowledge: context.businessKnowledge, scopeOverride: scope }), wix_updated: false, approved: false };
 }
 
 export default async function handler(request, response) {
-  if (request.method !== "POST") return response.status(405).json({ ok: false, message: "Method not allowed." });
-  if (!authorize(request)) return response.status(401).json({ ok: false, message: "Access key not recognised." });
-  try {
-    const body = parseBody(request); const supabase = getSupabase();
-    if (body.action === "setScope") return response.status(200).json({ ok: true, ...(await saveScope(supabase, clean(body.article_id, 100), normalizeScope(body.product_scope))) });
-    if (body.action === "propose") return response.status(200).json({ ok: true, proposal: await proposeOne(supabase, clean(body.article_id, 100), body.unresolved_reasons, body.product_scope) });
-    if (body.action === "accept") return response.status(200).json({ ok: true, ...(await acceptCorrection(supabase, body)) });
-    if (body.action === "bulkPropose") { const ids = limitCorrectionBatch(body.article_ids); const results = []; for (const articleId of ids) { try { results.push({ article_id: articleId, status: "ready", proposal: await proposeOne(supabase, articleId) }); } catch (error) { results.push({ article_id: articleId, status: "failed", message: clean(error.message, 1000) }); } } return response.status(200).json({ ok: true, limit: 5, results, wix_updated: false, approved: false }); }
-    throw new ApiError(400, "Unsupported correction action.");
-  } catch (error) { return response.status(error.status || 500).json({ ok: false, message: error.message || "Article correction failed." }); }
+  if (request.method !== "POST") return response.status(405).json({ ok: false, message: "Method not allowed." }); if (!authorize(request)) return response.status(401).json({ ok: false, message: "Access key not recognised." });
+  try { const body = parseBody(request); const supabase = getSupabase(); if (body.action === "setScope") return response.status(200).json({ ok: true, ...(await saveScope(supabase, clean(body.article_id, 100), normalizeScope(body.product_scope))) }); if (body.action === "propose") return response.status(200).json({ ok: true, proposal: await proposeOne(supabase, clean(body.article_id, 100), body.unresolved_reasons, body.product_scope) }); if (body.action === "accept") return response.status(200).json({ ok: true, ...(await acceptCorrection(supabase, body)) }); if (body.action === "bulkPropose") { const ids = limitCorrectionBatch(body.article_ids); const results = []; for (const articleId of ids) { try { results.push({ article_id: articleId, status: "ready", proposal: await proposeOne(supabase, articleId) }); } catch (error) { results.push({ article_id: articleId, status: "failed", message: clean(error.message, 1000) }); } } return response.status(200).json({ ok: true, limit: 5, results, wix_updated: false, approved: false }); } throw new ApiError(400, "Unsupported correction action."); } catch (error) { return response.status(error.status || 500).json({ ok: false, message: error.message || "Article correction failed." }); }
 }
