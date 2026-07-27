@@ -1,6 +1,8 @@
 import {
   KNOWLEDGE_CORRECTION_STATE_EVENT,
+  dispatchKnowledgeCorrectionState,
   readKnowledgeCorrectionState,
+  writeKnowledgeCorrectionState,
 } from "../lib/knowledgeCorrectionState.js";
 
 const BANNER_ID = "knowledge-correction-success-banner";
@@ -53,13 +55,7 @@ function showSuccessBanner(state, { focus = true } = {}) {
   title.textContent = "Corrections accepted and saved successfully.";
   banner.appendChild(title);
 
-  const details = [
-    ["Article status", "Draft"],
-    ["Saved", formatDate(state.saved_at)],
-    ["Revision", "AI safety correction"],
-    ["Saved content verified", "Yes"],
-  ];
-  details.forEach(([label, value]) => {
+  [["Article status", "Draft"], ["Saved", formatDate(state.saved_at)], ["Revision", "AI safety correction"], ["Saved content verified", "Yes"]].forEach(([label, value]) => {
     const row = document.createElement("div");
     row.textContent = `${label}: ${value}`;
     banner.appendChild(row);
@@ -70,6 +66,12 @@ function showSuccessBanner(state, { focus = true } = {}) {
     ? "Corrections saved. Reanalyse the article before approval and Wix export."
     : "Corrections saved and verified. The article is ready for approval and Wix draft creation.";
   banner.appendChild(nextStep);
+
+  if (!state.visible_success_displayed) {
+    const displayedState = { ...state, visible_success_displayed: true };
+    writeKnowledgeCorrectionState(displayedState);
+    dispatchKnowledgeCorrectionState(displayedState);
+  }
 
   if (focus) {
     requestAnimationFrame(() => {
