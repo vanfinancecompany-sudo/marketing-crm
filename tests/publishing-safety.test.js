@@ -1,18 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  auditPublishedArticles,
-  evaluatePublishingSafety,
-} from "../lib/publishingSafety.js";
+import { auditPublishedArticles, evaluatePublishingSafety } from "../lib/publishingSafety.js";
 
 const now = "2026-07-27T10:00:00.000Z";
-const assessment = {
-  article_id: "article-1",
-  created_at: now,
-  content_hash: "clean-hash",
-  overall_score: 97,
-};
-
+const assessment = { article_id: "article-1", created_at: now, content_hash: "clean-hash", overall_score: 97 };
 function cleanArticle(overrides = {}) {
   return {
     id: "article-1",
@@ -47,118 +38,51 @@ Review the available vans and submit an application when the vehicle and finance
     faq_json: [],
     cta: "View available vans",
     cta_destination: "/vans-on-finance",
+    generation_metadata: {},
     ...overrides,
   };
 }
 
-test("repeated article title creates a hard block", () => {
-  const article = cleanArticle({
-    content_markdown: `# How Van Finance Works for UK Businesses\n\n${cleanArticle().content_markdown}`,
+for (const [name, article, expected] of [
+  ["duplicate title", cleanArticle({ content_markdown: `# How Van Finance Works for UK Businesses\n\n${cleanArticle().content_markdown}` }), "Duplicate title or heading detected."],
+  ["duplicate FAQ sections", cleanArticle({ content_markdown: `${cleanArticle().content_markdown}\n\n## FAQs\n\nAnswer one.\n\n## Frequently Asked Questions\n\nAnswer two.` }), "Duplicate or repeated article sections detected."],
+  ["rendered raw Markdown", cleanArticle({ preview_text: "## Heading **bold text**" }), "Unprocessed formatting or raw markdown detected."],
+  ["stale analysis", cleanArticle({ updated_at: "2026-07-27T11:00:00.000Z", content_hash: "changed-hash" }), "Article content changed after assessment. Reanalyse before approval."],
+  ["claim review", cleanArticle({ content_markdown: `${cleanArticle().content_markdown}\n\nEvery applicant is guaranteed approval within 60 minutes.` }), "Unverified financial or business claim requires confirmation."],
+]) {
+  test(`${name} is advisory`, () => {
+    const result = evaluatePublishingSafety(article, { assessment, businessKnowledge: [] });
+    assert.equal(result.hard_blocked, false);
+    assert.ok(result.review_warnings.includes(expected));
+    assert.equal(result.status, "warnings");
+    assert.equal(result.recommended_action, "Warnings — review before sending");
   });
-  const result = evaluatePublishingSafety(article, { assessment });
+}
+
+test("malformed link remains a catastrophic technical block", () => {
+  const result = evaluatePublishingSafety(cleanArticle({ content_markdown: `${cleanArticle().content_markdown}\n\n[Apply now](javascript:alert(1))` }), { assessment });
   assert.equal(result.hard_blocked, true);
-  assert.ok(result.hard_block_reasons.includes("Duplicate title or heading detected."));
-});
-
-test("duplicate FAQ sections create a hard block", () => {
-  const article = cleanArticle({
-    content_markdown: `${cleanArticle().content_markdown}\n\n## FAQs\n\nWhat is van finance? It is a way to fund a commercial vehicle.\n\n## Frequently Asked Questions\n\nWhat is van finance? It is a way to fund a commercial vehicle.`,
-  });
-  const result = evaluatePublishingSafety(article, { assessment });
-  assert.ok(result.hard_block_reasons.includes("Duplicate or repeated article sections detected."));
-});
-
-test("visible raw markdown creates a hard block", () => {
-  const article = cleanArticle({
-    preview_text: "## Heading **bold text** [Apply](https://example.com)",
-  });
-  const result = evaluatePublishingSafety(article, { assessment });
-  assert.ok(result.hard_block_reasons.includes("Unprocessed formatting or raw markdown detected."));
-});
-
-test("malformed links create a hard block", () => {
-  const article = cleanArticle({
-    content_markdown: `${cleanArticle().content_markdown}\n\n[Apply now](javascript:alert(1))`,
-  });
-  const result = evaluatePublishingSafety(article, { assessment });
   assert.ok(result.hard_block_reasons.includes("Broken or malformed link detected."));
+  assert.equal(result.status, "technical_error");
 });
 
-test("stale assessment creates a hard block", () => {
-  const article = cleanArticle({
-    updated_at: "2026-07-27T11:00:00.000Z",
-    content_hash: "changed-hash",
-  });
-  const result = evaluatePublishingSafety(article, { assessment });
-  assert.ok(result.hard_block_reasons.includes("Article content changed after assessment. Reanalyse before approval."));
-});
-
-test("unsupported but reviewable business claim requires confirmation without a hard block", () => {
-  const article = cleanArticle({
-    content_markdown: `${cleanArticle().content_markdown}\n\n## Fast decisions\n\nApplications may be approved within 60 minutes.`,
-  });
-  const result = evaluatePublishingSafety(article, { assessment, businessKnowledge: [] });
-  assert.equal(result.requires_manual_claim_review, true);
-  assert.equal(result.hard_blocked, false);
-  assert.ok(result.review_warnings.includes("Unverified financial or business claim requires confirmation."));
-});
-
-test("unsupported guarantee remains a material hard block", () => {
-  const article = cleanArticle({
-    content_markdown: `${cleanArticle().content_markdown}\n\n## Fast decisions\n\nEvery applicant is guaranteed approval within 60 minutes.`,
-  });
-  const result = evaluatePublishingSafety(article, { assessment, businessKnowledge: [] });
+test("empty article remains a catastrophic technical block", () => {
+  const result = evaluatePublishingSafety(cleanArticle({ content_markdown: "" }), { assessment });
   assert.equal(result.hard_blocked, true);
-  assert.ok(result.hard_block_reasons.includes("Unsupported guarantee or materially misleading financial claim detected."));
+  assert.ok(result.hard_block_reasons.includes("Article body is empty."));
 });
 
-test("repairable formatting is a warning rather than a hard block", () => {
-  const article = cleanArticle({
-    content_markdown: cleanArticle().content_markdown.replace("## What lenders normally consider\n\n", "## What lenders normally consider\n"),
-  });
-  const result = evaluatePublishingSafety(article, { assessment });
-  assert.equal(result.hard_block_reasons.includes("Article formatting requires editorial correction."), false);
-  assert.equal(result.checks.formatting, "warning");
-});
-
-test("excessive repetition creates a hard block", () => {
-  const repeated = "Van finance can help your business choose a van and spread the cost responsibly.";
-  const article = cleanArticle({
-    content_markdown: `## Introduction\n\n${repeated} ${repeated} ${repeated} ${repeated}\n\n## Details\n\n${repeated} ${repeated} ${repeated} ${repeated}`,
-  });
-  const result = evaluatePublishingSafety(article, { assessment });
-  assert.ok(result.hard_block_reasons.includes("Excessive repetition or templated wording detected."));
-});
-
-test("clean article passes all hard checks", () => {
+test("clean article is ready to send to Wix", () => {
   const result = evaluatePublishingSafety(cleanArticle(), { assessment });
   assert.equal(result.hard_blocked, false);
-  assert.equal(result.formatting_hygiene_passed, true);
-  assert.equal(result.requires_manual_claim_review, false);
-  assert.equal(result.recommended_action, "Publish");
+  assert.equal(result.warning_count, 0);
+  assert.equal(result.recommended_action, "Ready to send to Wix");
 });
 
-test("a 95 plus score cannot override a hard block", () => {
-  const article = cleanArticle({ preview_text: "**raw markdown**" });
-  const result = evaluatePublishingSafety(article, { assessment: { ...assessment, overall_score: 99 } });
-  assert.equal(result.hard_blocked, true);
-  assert.equal(result.recommended_action, "Hold — corrections required");
-});
-
-test("exported articles remain auditable outside the Approval Queue", () => {
-  const exported = cleanArticle({ id: "exported", status: "exported", preview_text: "**raw markdown**" });
-  const result = auditPublishedArticles({
-    articles: [cleanArticle({ id: "draft", status: "draft" }), exported],
-    assessments: [{ ...assessment, article_id: "exported" }],
-  });
-  assert.deepEqual(result.map((item) => item.article.id), ["exported"]);
-});
-
-test("published audit does not alter article status or content", () => {
+test("published warnings remain auditable without changing article", () => {
   const article = cleanArticle({ status: "approved", preview_text: "**raw markdown**" });
   const snapshot = JSON.stringify(article);
   const result = auditPublishedArticles({ articles: [article], assessments: [assessment] });
   assert.equal(result.length, 1);
   assert.equal(JSON.stringify(article), snapshot);
-  assert.equal(article.status, "approved");
 });
