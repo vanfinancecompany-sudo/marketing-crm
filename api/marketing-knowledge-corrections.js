@@ -72,20 +72,9 @@ const CORRECTION_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: [
-    "title",
-    "slug",
-    "seo_title",
-    "meta_description",
-    "excerpt",
-    "content_markdown",
-    "faq_json",
-    "cta",
-    "category",
-    "article_type",
-    "featured_image",
-    "changes",
-    "removed_links",
-    "manual_confirmation_required",
+    "title", "slug", "seo_title", "meta_description", "excerpt", "content_markdown",
+    "faq_json", "cta", "category", "article_type", "featured_image", "changes",
+    "removed_links", "manual_confirmation_required", "removed_sections", "removal_reasons",
   ],
   properties: {
     title: { type: "string" },
@@ -110,6 +99,8 @@ const CORRECTION_SCHEMA = {
     changes: { type: "array", items: { type: "string" } },
     removed_links: { type: "array", items: { type: "string" } },
     manual_confirmation_required: { type: "array", items: { type: "string" } },
+    removed_sections: { type: "array", items: { type: "string" } },
+    removal_reasons: { type: "array", items: { type: "string" } },
   },
 };
 
@@ -126,7 +117,7 @@ async function callAi(prompt) {
       input: [
         {
           role: "system",
-          content: "You are a careful UK van-finance editorial correction assistant. Correct only supplied safety failures, preserve confirmed facts and user overrides, and never invent links or finance claims.",
+          content: "You are a conservative UK van-finance editorial repair assistant. Make targeted repairs only. Never summarise or broadly rewrite the article. Preserve valid structure, detail, examples, headings, FAQs, links, confirmed facts and user overrides. Never invent or substitute finance claims, APR assumptions or URLs.",
         },
         { role: "user", content: prompt },
       ],
@@ -184,6 +175,9 @@ async function proposeOne(supabase, articleId) {
 async function acceptCorrection(supabase, body) {
   const articleId = clean(body.article_id, 100);
   if (!articleId || !body.corrected_article) throw new ApiError(400, "Article and correction are required.");
+  if (body.excessive_content_loss && body.confirm_large_reduction !== true) {
+    throw new ApiError(400, "Large content reduction requires explicit confirmation before acceptance.");
+  }
   const current = data(
     await supabase.from("knowledge_articles").select("*").eq("id", articleId).single(),
     "Article could not be found."
