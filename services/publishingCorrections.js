@@ -11,8 +11,8 @@ async function request(action, payload = {}) {
   return parseMarketingJsonResponse(response, "Article correction request failed.");
 }
 
-export const proposePublishingCorrection = (articleId) =>
-  request("propose", { article_id: articleId });
+export const proposePublishingCorrection = (articleId, unresolvedReasons = []) =>
+  request("propose", { article_id: articleId, unresolved_reasons: unresolvedReasons });
 
 export const acceptPublishingCorrection = (proposal, confirmLargeReduction = false) =>
   request("accept", {
@@ -21,6 +21,8 @@ export const acceptPublishingCorrection = (proposal, confirmLargeReduction = fal
     corrected_article: proposal.after,
     excessive_content_loss: Boolean(proposal.excessive_content_loss),
     confirm_large_reduction: Boolean(confirmLargeReduction),
+    correction_complete: Boolean(proposal.correction_complete),
+    remaining_hard_blocks: proposal.remaining_hard_blocks || [],
   });
 
 export const proposeBulkPublishingCorrections = (articleIds) =>
