@@ -2,14 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
+  WIX_ARTICLE_BODY_TYPOGRAPHY,
   parseMarkdownTable,
   renderKnowledgePreviewHtml,
   splitMarkdownTableSegments,
+  wixArticleBodyTypographyCss,
 } from "../lib/markdownTables.js";
 import {
   buildWixPlainTextContent,
   buildWixRichContent,
   collectMarkdownTableWarnings,
+  wixArticleBodyTextStyle,
 } from "../lib/wixPublishing.js";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
@@ -23,20 +26,20 @@ const standard = `## Comparison
 
 Final paragraph.`;
 
+function tableHtml(markdown = standard) {
+  return buildWixRichContent(markdown).nodes.find((node) => node.type === "HTML").htmlData.html;
+}
+
 test("standard Markdown table becomes responsive Wix rich content", () => {
-  const rich = buildWixRichContent(standard);
-  const htmlNode = rich.nodes.find((node) => node.type === "HTML");
-  assert.ok(htmlNode);
-  assert.match(htmlNode.htmlData.html, /<table>/);
-  assert.match(htmlNode.htmlData.html, /kh-responsive-table__mobile/);
-  assert.match(htmlNode.htmlData.html, /Deposit/);
-  assert.doesNotMatch(htmlNode.htmlData.html, /\|\s*---\s*\|/);
+  const html = tableHtml();
+  assert.match(html, /<table>/);
+  assert.match(html, /kh-responsive-table__mobile/);
+  assert.match(html, /Deposit/);
+  assert.doesNotMatch(html, /\|\s*---\s*\|/);
 });
 
 test("two-column comparison uses first cell as mobile row heading", () => {
-  const markdown = `| Vehicle | Best for |\n| --- | --- |\n| Small van | City work |`;
-  const rich = buildWixRichContent(markdown);
-  const html = rich.nodes.find((node) => node.type === "HTML").htmlData.html;
+  const html = tableHtml(`| Vehicle | Best for |\n| --- | --- |\n| Small van | City work |`);
   assert.match(html, /<h4>Small van<\/h4>/);
   assert.match(html, /<strong>Best for<\/strong>/);
 });
@@ -46,8 +49,7 @@ test("multi-column and empty cells are preserved", () => {
   const parsed = parseMarkdownTable(markdown.split("\n"), 0);
   assert.equal(parsed.headers.length, 3);
   assert.equal(parsed.rows[0][2], "");
-  const rich = buildWixRichContent(markdown);
-  assert.match(rich.nodes.find((node) => node.type === "HTML").htmlData.html, /Transit/);
+  assert.match(tableHtml(markdown), /Transit/);
 });
 
 test("multiple tables are converted independently", () => {
@@ -57,8 +59,7 @@ test("multiple tables are converted independently", () => {
 });
 
 test("bold text and links inside cells remain meaningful", () => {
-  const markdown = `| Item | Details |\n| --- | --- |\n| **Transit** | [View vans](/vans) |`;
-  const html = buildWixRichContent(markdown).nodes.find((node) => node.type === "HTML").htmlData.html;
+  const html = tableHtml(`| Item | Details |\n| --- | --- |\n| **Transit** | [View vans](/vans) |`);
   assert.match(html, /<strong>Transit<\/strong>/);
   assert.match(html, /href="\/vans"/);
 });
@@ -68,8 +69,7 @@ test("malformed table falls back to readable blocks and records warning", () => 
   const { segments, warnings } = splitMarkdownTableSegments(malformed);
   assert.equal(warnings.length, 1);
   assert.ok(segments.some((segment) => segment.type === "table_fallback"));
-  const rich = buildWixRichContent(malformed);
-  const html = rich.nodes.find((node) => node.type === "HTML").htmlData.html;
+  const html = tableHtml(malformed);
   assert.match(html, /kh-table-fallback/);
   assert.doesNotMatch(html, /\| Vehicle \|/);
   assert.equal(collectMarkdownTableWarnings(malformed).length, 1);
@@ -81,44 +81,49 @@ test("plain-text Wix fields receive stacked table content without pipe syntax", 
   assert.doesNotMatch(text, /\|\s*---\s*\|/);
 });
 
-test("converted tables inherit surrounding article typography", () => {
-  const html = buildWixRichContent(standard).nodes.find((node) => node.type === "HTML").htmlData.html;
-  assert.match(html, /font-family:inherit/);
-  assert.match(html, /font-size:inherit/);
-  assert.match(html, /line-height:inherit/);
-  assert.match(html, /color:inherit/);
-  assert.doesNotMatch(html, /font-family\s*:\s*(?!inherit)/);
-  assert.doesNotMatch(html, /font-size\s*:\s*\d+(?:\.\d+)?px/);
+test("standard Wix paragraph and table cells use the same explicit typography", () => {
+  const rich = buildWixRichContent(`Normal paragraph.\n\n${standard}`);
+  const paragraph = rich.nodes.find((node) => node.type === "PARAGRAPH" && node.nodes.some((child) => child.textData?.text === "Normal paragraph."));
+  const html = rich.nodes.find((node) => node.type === "HTML").htmlData.html;
+  const style = wixArticleBodyTextStyle();
+  assert.deepEqual(paragraph.paragraphData.textStyle, style);
+  assert.equal(style.fontFamily, WIX_ARTICLE_BODY_TYPOGRAPHY.fontFamily);
+  assert.equal(style.fontSize, WIX_ARTICLE_BODY_TYPOGRAPHY.fontSize);
+  assert.equal(style.lineHeight, WIX_ARTICLE_BODY_TYPOGRAPHY.lineHeight);
+  assert.equal(style.color, WIX_ARTICLE_BODY_TYPOGRAPHY.color);
+  assert.match(html, new RegExp(`font-family:${WIX_ARTICLE_BODY_TYPOGRAPHY.fontFamily.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.match(html, new RegExp(`font-size:${WIX_ARTICLE_BODY_TYPOGRAPHY.fontSize}`));
+  assert.match(html, new RegExp(`line-height:${WIX_ARTICLE_BODY_TYPOGRAPHY.lineHeight}`));
+  assert.match(html, new RegExp(`color:${WIX_ARTICLE_BODY_TYPOGRAPHY.color}`));
+  assert.doesNotMatch(html, /font-size:inherit/);
 });
 
-test("desktop table and mobile cards share the same typography rules", () => {
-  const html = buildWixRichContent(standard).nodes.find((node) => node.type === "HTML").htmlData.html;
-  assert.match(html, /\.kh-responsive-table,\.kh-responsive-table \*,\.kh-table-fallback,\.kh-table-fallback \*\{font-family:inherit;font-size:inherit;line-height:inherit;color:inherit\}/);
-  assert.match(html, /\.kh-responsive-table th,\.kh-responsive-table h4,\.kh-responsive-table strong/);
-  assert.match(html, /font-weight:600/);
-  assert.match(html, /font-weight:400/);
+test("labels keep article body size and line height with weight 600", () => {
+  const html = tableHtml();
+  const css = wixArticleBodyTypographyCss();
+  assert.match(html, new RegExp(css.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(html, /\.kh-responsive-table thead th,\.kh-responsive-table tbody th\{font-weight:600\}/);
+  assert.match(html, /\.kh-table-card__field strong\{font-weight:600\}/);
+  assert.doesNotMatch(html, /font-size\s*:\s*(?:small|smaller|\d+(?:\.\d+)?px)(?!18px)/);
 });
 
-test("malformed-table fallback inherits article typography", () => {
-  const malformed = `| Vehicle | Best for |\n| Transit | Builders |`;
-  const html = buildWixRichContent(malformed).nodes.find((node) => node.type === "HTML").htmlData.html;
-  assert.match(html, /kh-table-fallback/);
-  assert.match(html, /font-family:inherit/);
-  assert.match(html, /font-size:inherit/);
-  assert.match(html, /line-height:inherit/);
+test("desktop table, mobile cards and malformed fallback share article typography", () => {
+  const html = tableHtml();
+  assert.match(html, /\.kh-responsive-table,\.kh-responsive-table table,\.kh-responsive-table th,\.kh-responsive-table td,\.kh-responsive-table__mobile,\.kh-table-card,\.kh-table-card h4,\.kh-table-card__field,\.kh-table-card__field strong,\.kh-table-card__field span,\.kh-table-fallback/);
+  const malformed = tableHtml(`| Vehicle | Best for |\n| Transit | Builders |`);
+  assert.match(malformed, new RegExp(`font-size:${WIX_ARTICLE_BODY_TYPOGRAPHY.fontSize}`));
+  assert.match(malformed, new RegExp(`line-height:${WIX_ARTICLE_BODY_TYPOGRAPHY.lineHeight}`));
 });
 
-test("preview and Wix rich content use the same responsive table renderer and typography", () => {
+test("preview and Wix rich content use identical explicit table typography", () => {
   const preview = renderKnowledgePreviewHtml(standard);
-  const rich = buildWixRichContent(standard);
-  const wixHtml = rich.nodes.find((node) => node.type === "HTML").htmlData.html;
+  const wixHtml = tableHtml();
+  for (const value of Object.values(WIX_ARTICLE_BODY_TYPOGRAPHY)) {
+    assert.ok(preview.html.includes(value));
+    assert.ok(wixHtml.includes(value));
+  }
   assert.match(preview.html, /kh-responsive-table/);
   assert.match(wixHtml, /kh-responsive-table/);
-  assert.match(preview.html, /kh-table-card__field/);
-  assert.match(preview.html, /font-family:inherit/);
-  assert.match(wixHtml, /font-family:inherit/);
-  assert.match(preview.html, /font-size:inherit/);
-  assert.match(wixHtml, /font-size:inherit/);
 });
 
 test("stored Markdown is never mutated", () => {
