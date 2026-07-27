@@ -67,7 +67,6 @@ test("source-version mismatch and required confirmations block save", () => {
   const state = proposalStateForArticle({ ...proposal, claim_confirmation_required: true }, { claims: false });
   assert.equal(correctionSaveEligibility(state, article).eligible, false);
   assert.match(correctionSaveEligibility(state, article).reason, /Confirm the flagged/);
-
   const changed = { ...article, updated_at: "2026-07-27T11:00:00.000Z" };
   const versionResult = correctionSaveEligibility(proposalStateForArticle(proposal), changed);
   assert.equal(versionResult.eligible, false);
@@ -78,10 +77,9 @@ test("complete proposal fields are submitted through the existing acceptance ser
   const wix = await read("../components/KnowledgeHubWixPublishing.jsx");
   const service = await read("../services/publishingCorrections.js");
   assert.match(wix, /acceptPublishingCorrection\(activeProposal/);
-  assert.match(service, /corrected_article: proposal\.after/);
-  for (const field of ["title", "seo_title", "meta_description", "excerpt", "content_markdown", "faq_json", "cta", "internal_link_suggestions"]) {
-    assert.ok(Object.hasOwn(article, field));
-  }
+  assert.match(service, /corrected_article: correctedArticle/);
+  assert.match(service, /faq_json: normalizeFaqCollection\(proposal\.after\?\.faq_json\)/);
+  for (const field of ["title", "seo_title", "meta_description", "excerpt", "content_markdown", "faq_json", "cta", "internal_link_suggestions"]) assert.ok(Object.hasOwn(article, field));
 });
 
 test("save flow creates revision, reloads server data and verifies all fields together", async () => {
@@ -102,7 +100,8 @@ test("normalised exact verification includes structured fields, FAQs, CTA and ac
   saved.faq_json[0].answer = "Changed";
   const faqMismatch = verifyAcceptedCorrection(saved, article, saved.internal_link_suggestions);
   assert.equal(faqMismatch.correction_save_verified, false);
-  assert.equal(faqMismatch.correction_save_verification_errors[0].field, "faq_json");
+  assert.equal(faqMismatch.correction_save_verification_errors[0].exact_field, "faq_json");
+  assert.equal(faqMismatch.correction_save_verification_errors[0].mismatch_type, "answer_changed");
 
   const linkMismatch = verifyAcceptedCorrection(article, article, [
     { status: "accepted", anchor_text: "Changed anchor", destination_url: "/vans" },
