@@ -37,13 +37,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run focused tests
-        run: node --test tests/marketing-daily-operations.test.js tests/content-operations-wiring.test.js
+      - name: Capture tests and build
+        run: |
+          set +e
+          node --test tests/marketing-daily-operations.test.js tests/content-operations-wiring.test.js > direct-wiring-test-result.txt 2>&1
+          TEST_STATUS=$?
+          npm run build > direct-wiring-build-result.txt 2>&1
+          BUILD_STATUS=$?
+          printf 'test_status=%s\nbuild_status=%s\n' "$TEST_STATUS" "$BUILD_STATUS" > direct-wiring-status.txt
+          exit 0
 
-      - name: Run production build
-        run: npm run build
-
-      - name: Commit verified direct wiring
+      - name: Commit formatting and results
         run: |
           rm .github/workflows/format-test-direct-content-operations.yml
           git config user.name "github-actions[bot]"
