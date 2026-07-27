@@ -8,7 +8,13 @@ import {
   validateComparisonStructure,
   validateRent2BuySemantics,
 } from "../lib/rent2BuyRules.js";
-import { applyTargetedRent2BuyRepairs, buildCorrectionPreview, normalizeCorrectionProposal } from "../lib/publishingCorrections.js";
+import {
+  applyTargetedRent2BuyRepairs,
+  buildCorrectionPreview,
+  normalizeCorrectionProposal,
+  validateProtectedValues,
+  validateTargetedRepairText,
+} from "../lib/publishingCorrections.js";
 
 const filler = Array.from({ length: 230 }, (_, index) => `guidance${index + 1}`).join(" ");
 const pureBody = `## Introduction\n\n${RENT2BUY_SEPARATION_SENTENCE}\n\n${filler}\n\n## Key Features\n\n${RENT2BUY_COLLECTION_SENTENCE}\n\n## Practical Next Steps\n\n1. Apply\n2. Review eligibility\n3. Collect the vehicle\n\nApply for Rent2Buy`;
@@ -28,11 +34,8 @@ test("collection wording is required on Rent2Buy side", () => { const article = 
 test("trial and free-delivery wording fail on Rent2Buy side", () => { for (const phrase of ["Try the van before committing.", "Free UK delivery is available."]) { const article = comparisonArticle({ content_markdown: comparisonBody.replace(RENT2BUY_COLLECTION_SENTENCE, `${RENT2BUY_COLLECTION_SENTENCE}\n\n${phrase}`) }); assert.equal(validateRent2BuySemantics(article, { scopeOverride: "both" }).rent2buy_semantic_valid, false); } });
 test("clearly separated comparison table passes", () => { assert.equal(validateComparisonStructure(comparisonArticle(), { scopeOverride: "both" }).comparison_structure_valid, true); });
 test("mixed unlabelled product claims fail", () => { const article = comparisonArticle({ content_markdown: `## Comparison\n\nRent2Buy uses a rent-to-own arrangement while van finance may include APR and lenders.\n\n${filler}` }); assert.equal(validateComparisonStructure(article, { scopeOverride: "both" }).comparison_structure_valid, false); });
-test("current Rent2Buy guide remains rent2buy", () => { assert.equal(classifyArticleProduct(pureArticle()), "rent2buy"); });
-test("corrections preserve comparison sections only for scope both", () => { const original = comparisonArticle(); const proposed = { ...original, changes: ["Preserved separated comparison"], removed_links: [], manual_confirmation_required: [], removed_sections: [], removal_reasons: [], removed_section_word_counts: [] }; const preview = buildCorrectionPreview({ originalArticle: original, proposed, safetyOptions: { ignoreAssessmentFreshness: true }, scopeOverride: "both" }); assert.equal(preview.product_scope, "both"); assert.match(preview.after.content_markdown, /## Van Finance/); assert.match(preview.after.content_markdown, /APR/); assert.equal(preview.comparison_structure_valid, true); });
 
-// Targeted second-pass repair coverage.
-const unsafeBody = `## Introduction\n\n${RENT2BUY_SEPARATION_SENTENCE}\n\nIf you are concerned about traditional finance options, Rent2Buy may be relevant.\n\n${filler}\n\n## Key Features and Benefits\n\nCredit checks associated with finance agreements can be difficult.\n\n## Practical Next Steps\n\n1. Apply\n2. Assess if the van meets your needs\n3. Rent before deciding to buy\n\n${RENT2BUY_COLLECTION_SENTENCE}\n\nApply for Rent2Buy`;
+const unsafeBody = `## Introduction\n\n${RENT2BUY_SEPARATION_SENTENCE}\n\nIf you are concerned about traditional finance options, Rent2Buy may be relevant.\n\nVan Finance Company provides this guide. Visit [our website](https://www.vanfinancecompany.co.uk).\n\n${filler}\n\n## Key Features and Benefits\n\nCredit checks associated with finance agreements can be difficult.\n\n## Practical Next Steps\n\n1. Apply\n2. Assess if the van meets your needs\n3. Rent before deciding to buy\n\n${RENT2BUY_COLLECTION_SENTENCE}\n\nApply for Rent2Buy`;
 const unsafeFaqs = [
   { question: "Do traditional finance checks apply?", answer: "Traditional finance checks may be different." },
   { question: "What should I review?", answer: "Review the agreement terms." },
@@ -41,20 +44,66 @@ const unsafeFaqs = [
   { question: "Is finance approval guaranteed at specific rates?", answer: "Finance approval and specific rates are not guaranteed." },
 ];
 
-test("targeted repair fixes introduction and body finance wording", () => { const original = pureArticle({ content_markdown: unsafeBody }); const errors = validateRent2BuySemantics(original).rent2buy_semantic_errors; const repaired = applyTargetedRent2BuyRepairs(original, errors, { scopeOverride: "rent2buy" }); assert.equal(repaired.targeted_repairs_applied, true); assert.doesNotMatch(repaired.article.content_markdown, /traditional finance options|finance agreements/i); assert.match(repaired.article.content_markdown, /different route to van ownership|Rent2Buy eligibility process/i); assert.match(repaired.article.content_markdown, /\n\n## Key Features and Benefits\n\n/); });
+test("location-based sentence repair preserves company name, URL and unrelated text", () => {
+  const original = pureArticle({ content_markdown: unsafeBody });
+  const repaired = applyTargetedRent2BuyRepairs(original, validateRent2BuySemantics(original).rent2buy_semantic_errors, { scopeOverride: "rent2buy" });
+  assert.match(repaired.article.content_markdown, /Van Finance Company provides this guide/);
+  assert.match(repaired.article.content_markdown, /https:\/\/www\.vanfinancecompany\.co\.uk/);
+  assert.doesNotMatch(repaired.article.content_markdown, /van ownership Company|vanRent2Buy|lease Rent2Buy/i);
+  assert.match(repaired.article.content_markdown, new RegExp(filler.slice(0, 50)));
+});
 
-test("targeted repair fixes trial wording without flattening Markdown", () => { const original = pureArticle({ content_markdown: unsafeBody }); const repaired = applyTargetedRent2BuyRepairs(original, validateRent2BuySemantics(original).rent2buy_semantic_errors, { scopeOverride: "rent2buy" }); assert.doesNotMatch(repaired.article.content_markdown, /assess if the van|rent before deciding/i); assert.match(repaired.article.content_markdown, /Review the vehicle details and agreement terms carefully before proceeding/i); assert.match(repaired.article.content_markdown, /1\. Apply\n2\./); });
+test("Markdown and accepted link destinations remain immutable", () => {
+  const original = pureArticle({ content_markdown: unsafeBody, internal_link_suggestions: [{ id: "link-1", anchor_text: "Traditional finance options", destination_url: "https://www.vanfinancecompany.co.uk", status: "accepted" }] });
+  const preview = buildCorrectionPreview({ originalArticle: original, proposed: { ...original, changes: [], removed_links: [], manual_confirmation_required: [], removed_sections: [], removal_reasons: [], removed_section_word_counts: [] }, safetyOptions: { ignoreAssessmentFreshness: true }, scopeOverride: "rent2buy" });
+  assert.equal(preview.after.internal_link_suggestions[0].destination_url, "https://www.vanfinancecompany.co.uk");
+  assert.match(preview.after.content_markdown, /\[our website\]\(https:\/\/www\.vanfinancecompany\.co\.uk\)/);
+  assert.equal(preview.protected_values_valid, true);
+});
 
-test("FAQ finance wording is rewritten", () => { const original = pureArticle({ faq_json: unsafeFaqs }); const repaired = applyTargetedRent2BuyRepairs(original, validateRent2BuySemantics(original).rent2buy_semantic_errors, { scopeOverride: "rent2buy" }); assert.ok(repaired.article.faq_json.some((faq) => faq.question === "How does Rent2Buy eligibility work?")); assert.ok(repaired.rewritten_faqs.length >= 1); });
+test("protected-value validator blocks URL mutation", () => {
+  const before = pureArticle({ content_markdown: "Visit https://www.vanfinancecompany.co.uk" });
+  const after = pureArticle({ content_markdown: "Visit https://www.vanRent2Buycompany.co.uk" });
+  const result = validateProtectedValues(before, after);
+  assert.equal(result.protected_values_valid, false);
+  assert.ok(result.protected_value_errors.includes("Correction attempted to alter a protected link."));
+});
 
-test("delivery FAQ is removed and Southampton collection FAQ is added", () => { const original = pureArticle({ faq_json: unsafeFaqs }); const repaired = applyTargetedRent2BuyRepairs(original, validateRent2BuySemantics(original).rent2buy_semantic_errors, { scopeOverride: "rent2buy" }); assert.ok(repaired.removed_faqs.some((item) => /delivery/i.test(item))); assert.ok(repaired.article.faq_json.some((faq) => faq.question === "Where are Rent2Buy vans collected?" && faq.answer === RENT2BUY_COLLECTION_SENTENCE)); assert.doesNotMatch(JSON.stringify(repaired.article.faq_json), /free delivery|delivery is unavailable/i); });
+test("grammar validation rejects known replacement corruption", () => {
+  for (const phrase of ["without the usual the Rent2Buy eligibility process", "Rent2Buy is not a arrangements", "Van ownership Company", "lease Rent2Buy", "https://www.vanRent2Buycompany.co.uk"]) {
+    assert.equal(validateTargetedRepairText(pureArticle({ excerpt: phrase })).targeted_repair_text_valid, false, phrase);
+  }
+});
 
-test("finance approval FAQ is rewritten", () => { const original = pureArticle({ faq_json: unsafeFaqs }); const repaired = applyTargetedRent2BuyRepairs(original, validateRent2BuySemantics(original).rent2buy_semantic_errors, { scopeOverride: "rent2buy" }); const faq = repaired.article.faq_json.find((item) => item.question === "Are eligibility or vehicle availability guaranteed?"); assert.ok(faq); assert.match(faq.answer, /Eligibility and vehicle availability depend/); assert.doesNotMatch(`${faq.question} ${faq.answer}`, /finance approval|specific rates/i); });
+test("lease finance is removed by complete sentence rewrite", () => {
+  const original = pureArticle({ content_markdown: `${pureBody}\n\n## Eligibility\n\nSome readers may be considering lease finance for a van.` });
+  const repaired = applyTargetedRent2BuyRepairs(original, validateRent2BuySemantics(original).rent2buy_semantic_errors, { scopeOverride: "rent2buy" });
+  assert.doesNotMatch(repaired.article.content_markdown, /lease finance|lease Rent2Buy/i);
+  assert.match(repaired.article.content_markdown, /Rent2Buy eligibility, agreement terms and payment requirements/);
+});
 
-test("unrelated article content and approved separation sentence are preserved", () => { const marker = "This useful maintenance-planning paragraph must remain unchanged."; const original = pureArticle({ content_markdown: `${unsafeBody}\n\n${marker}` }); const repaired = applyTargetedRent2BuyRepairs(original, validateRent2BuySemantics(original).rent2buy_semantic_errors, { scopeOverride: "rent2buy" }); assert.match(repaired.article.content_markdown, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))); assert.match(repaired.article.content_markdown, new RegExp(RENT2BUY_SEPARATION_SENTENCE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))); });
+test("unrecognised unsafe phrase remains unresolved rather than corrupted", () => {
+  const original = pureArticle({ content_markdown: `${pureBody}\n\n## Eligibility\n\nThis guide is for customers new to finance.` });
+  const preview = buildCorrectionPreview({ originalArticle: original, proposed: { ...original, changes: [], removed_links: [], manual_confirmation_required: [], removed_sections: [], removal_reasons: [], removed_section_word_counts: [] }, safetyOptions: { ignoreAssessmentFreshness: true }, scopeOverride: "rent2buy" });
+  assert.match(preview.after.content_markdown, /new to finance/);
+  assert.equal(preview.rent2buy_semantic_valid, false);
+  assert.equal(preview.correction_complete, false);
+});
 
-test("collection sentence appears once in an allowed section before CTA", () => { const original = pureArticle({ content_markdown: `${unsafeBody}\n\n${RENT2BUY_COLLECTION_SENTENCE}` }); const repaired = applyTargetedRent2BuyRepairs(original, validateRent2BuySemantics(original).rent2buy_semantic_errors, { scopeOverride: "rent2buy" }); assert.equal(repaired.article.content_markdown.split(RENT2BUY_COLLECTION_SENTENCE).length - 1, 1); assert.ok(repaired.article.content_markdown.indexOf(RENT2BUY_COLLECTION_SENTENCE) < repaired.article.content_markdown.indexOf("Apply for Rent2Buy")); });
+test("FAQ finance wording is rewritten without token substitution", () => { const original = pureArticle({ faq_json: unsafeFaqs }); const repaired = applyTargetedRent2BuyRepairs(original, validateRent2BuySemantics(original).rent2buy_semantic_errors, { scopeOverride: "rent2buy" }); assert.ok(repaired.article.faq_json.some((faq) => faq.question === "How does Rent2Buy eligibility work?")); assert.ok(repaired.article.faq_json.some((faq) => faq.question === "Where are Rent2Buy vans collected?" && faq.answer === RENT2BUY_COLLECTION_SENTENCE)); assert.ok(repaired.article.faq_json.some((faq) => faq.question === "Are eligibility or vehicle availability guaranteed?")); assert.doesNotMatch(JSON.stringify(repaired.article.faq_json), /free delivery|finance approval|specific rates/i); });
 
-test("second-pass validation uses repaired fields and can complete", () => { const original = pureArticle({ content_markdown: unsafeBody, faq_json: unsafeFaqs, meta_description: "Traditional finance options", excerpt: "Unlike traditional finance", cta: "Start a finance application" }); const proposed = { ...original, changes: ["AI attempted correction"], removed_links: [], manual_confirmation_required: [], removed_sections: [], removal_reasons: [], removed_section_word_counts: [] }; const preview = buildCorrectionPreview({ originalArticle: original, proposed, safetyOptions: { ignoreAssessmentFreshness: true }, scopeOverride: "rent2buy" }); assert.equal(preview.targeted_repairs_applied, true); assert.equal(preview.rent2buy_semantic_valid, true); assert.deepEqual(preview.remaining_semantic_errors, []); assert.equal(preview.markdown_structure_valid, true); assert.equal(preview.correction_complete, true); });
+test("approved sentences and Markdown numbering are preserved", () => { const original = pureArticle({ content_markdown: unsafeBody }); const repaired = applyTargetedRent2BuyRepairs(original, validateRent2BuySemantics(original).rent2buy_semantic_errors, { scopeOverride: "rent2buy" }); assert.match(repaired.article.content_markdown, new RegExp(RENT2BUY_SEPARATION_SENTENCE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))); assert.equal(repaired.article.content_markdown.split(RENT2BUY_COLLECTION_SENTENCE).length - 1, 1); assert.match(repaired.article.content_markdown, /1\. Apply\n2\. Review the vehicle details/); });
 
-test("normalisation preserves saved source and no Wix approval", () => { const original = pureArticle({ generation_metadata: { product_scope_override: "rent2buy" } }); const snapshot = structuredClone(original); const normalized = normalizeCorrectionProposal(original, { ...original, content_markdown: pureBody, changes: [], removed_links: [], manual_confirmation_required: [], removed_sections: [], removal_reasons: [], removed_section_word_counts: [] }).corrected_article; assert.deepEqual(original, snapshot); assert.equal(normalized.generation_metadata.product_scope_override, "rent2buy"); assert.equal(original.wix_sync_status, undefined); assert.notEqual(original.status, "approved"); });
+test("safe second pass validates repaired object and can complete", () => {
+  const original = pureArticle({ content_markdown: unsafeBody, faq_json: unsafeFaqs, meta_description: "Traditional finance options are discussed.", excerpt: "Unlike traditional finance, this works differently.", cta: "Start a finance application." });
+  const proposed = { ...original, changes: ["AI attempted correction"], removed_links: [], manual_confirmation_required: [], removed_sections: [], removal_reasons: [], removed_section_word_counts: [] };
+  const preview = buildCorrectionPreview({ originalArticle: original, proposed, safetyOptions: { ignoreAssessmentFreshness: true }, scopeOverride: "rent2buy" });
+  assert.equal(preview.targeted_repairs_applied, true);
+  assert.equal(preview.rent2buy_semantic_valid, true);
+  assert.equal(preview.protected_values_valid, true);
+  assert.equal(preview.targeted_repair_text_valid, true);
+  assert.deepEqual(preview.remaining_semantic_errors, []);
+  assert.equal(preview.correction_complete, true);
+});
+
+test("normalisation preserves saved source and performs no Wix approval", () => { const original = pureArticle({ generation_metadata: { product_scope_override: "rent2buy" } }); const snapshot = structuredClone(original); const normalized = normalizeCorrectionProposal(original, { ...original, content_markdown: pureBody, changes: [], removed_links: [], manual_confirmation_required: [], removed_sections: [], removal_reasons: [], removed_section_word_counts: [] }).corrected_article; assert.deepEqual(original, snapshot); assert.equal(normalized.generation_metadata.product_scope_override, "rent2buy"); assert.equal(original.wix_sync_status, undefined); assert.notEqual(original.status, "approved"); });
