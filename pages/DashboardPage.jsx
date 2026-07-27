@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ACTIVITY_LABELS, DAILY_ACTIVITY_TYPES, DEFAULT_DAILY_TARGETS, londonDateKey, londonWeekday } from "../lib/marketingDailyOperations.js";
 import {
+  DAILY_OPERATIONS_REFRESH_EVENT,
   getDailyOperationsOverview,
   getDailyOperationsTotals,
   resetDailyTargetDefaults,
@@ -17,6 +18,7 @@ const ACTIVITY_UNITS = {
   van_finance_reel: "generated",
   rent2buy_reel: "generated",
   emails_sent: "sent",
+  knowledge_hub_article: "published",
 };
 
 function addDays(dateKey, amount) {
@@ -91,7 +93,12 @@ export default function DashboardPage({ onNavigate }) {
     } finally { setBusy(false); }
   }
 
-  useEffect(() => { if (!locked) load(); }, []);
+  useEffect(() => {
+    if (!locked) load();
+    const refresh = () => { if (!locked) load(); };
+    window.addEventListener(DAILY_OPERATIONS_REFRESH_EVENT, refresh);
+    return () => window.removeEventListener(DAILY_OPERATIONS_REFRESH_EVENT, refresh);
+  }, [locked]);
 
   async function unlock(event) {
     event.preventDefault(); setBusy(true); setError("");
