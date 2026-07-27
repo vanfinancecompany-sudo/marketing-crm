@@ -89,8 +89,7 @@ export async function recordYouTubeGeneratorDownload({
     vehicle?.reg || vehicle?.registration || vehicle?.title || vehicle?.name || ""
   ).toUpperCase().replace(/[^A-Z0-9]/g, "");
   const vehicleId = String(vehicle?.id || vehicle?.vehicle_id || "").trim() || null;
-
-  await recordDailyMarketingActivity(activityType, {
+  const options = {
     source: "youtube_generator",
     sourceId: `youtube-export:${productKey}:${operationId}`,
     metadata: {
@@ -102,7 +101,19 @@ export async function recordYouTubeGeneratorDownload({
       queue_download: Boolean(queueDownload),
       export_operation_id: operationId,
     },
-  });
+  };
+
+  try {
+    await recordDailyMarketingActivity(activityType, options);
+  } catch (firstError) {
+    // A lost response may follow a successful insert. Retry with the same source ID;
+    // the server's unique activity identity remains the final deduplication guard.
+    try {
+      await recordDailyMarketingActivity(activityType, options);
+    } catch {
+      throw firstError;
+    }
+  }
 
   return { recorded: true, activityType };
 }
