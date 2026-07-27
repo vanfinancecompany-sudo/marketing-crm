@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { normalizeFaqCollection } from "../lib/faqNormalization.js";
 import { evaluatePublishingSafety } from "../lib/publishingSafety.js";
 import { classifyArticleProduct, ensureRent2BuyBusinessKnowledge, validateComparisonStructure, validateMarkdownStructure, validateRent2BuySemantics, withPermanentRent2BuyKnowledge } from "../lib/rent2BuyRules.js";
 import { assertDuplicateTitleResolved, buildCorrectionPreview, buildSafetyCorrectionPrompt, canAcceptCorrection, limitCorrectionBatch, normalizeCorrectionProposal, normalizeMarkdownSpacing, validateProtectedValues, validateTargetedRepairText } from "../lib/publishingCorrections.js";
@@ -26,6 +27,7 @@ function applyKnownFinalWording(proposed = {}, scope = "") {
   ];
   replacements.forEach(([pattern, replacement]) => { markdown = markdown.replace(pattern, replacement); });
   proposed.content_markdown = markdown;
+  proposed.faq_json = normalizeFaqCollection(proposed.faq_json);
   return proposed;
 }
 
@@ -39,7 +41,7 @@ async function loadCorrectionContext(supabase, articleId) {
     supabase.from("knowledge_internal_link_suggestions").select("id,anchor_text,destination_url,status").eq("article_id", articleId).eq("status", "accepted"),
   ]);
   const article = data(articleResult, "Article could not be found."); const approvedLinks = linksResult.error ? [] : linksResult.data || [];
-  return { article: { ...article, internal_link_suggestions: approvedLinks }, businessKnowledge: withPermanentRent2BuyKnowledge(data(businessResult, "Business Knowledge could not be loaded.") || []), assessment: assessmentResult.error ? null : assessmentResult.data, overrides: overridesResult.error ? {} : overridesResult.data || {}, approvedLinks };
+  return { article: { ...article, faq_json: normalizeFaqCollection(article.faq_json), internal_link_suggestions: approvedLinks }, businessKnowledge: withPermanentRent2BuyKnowledge(data(businessResult, "Business Knowledge could not be loaded.") || []), assessment: assessmentResult.error ? null : assessmentResult.data, overrides: overridesResult.error ? {} : overridesResult.data || {}, approvedLinks };
 }
 
 const LINK_SCHEMA = { type: "object", additionalProperties: false, required: ["anchor_text", "destination_url"], properties: { anchor_text: { type: "string" }, destination_url: { type: "string" } } };
@@ -57,15 +59,17 @@ async function acceptCorrection(supabase, body) {
   const articleId = clean(body.article_id, 100); if (!articleId || !body.corrected_article) throw new ApiError(400, "Article and correction are required."); if (body.correction_complete !== true || (body.remaining_hard_blocks || []).length) throw new ApiError(409, "Correction incomplete. Resolve remaining publishing blocks before acceptance.");
   if ((body.excessive_content_loss || Number(body.unexplained_content_loss_percent) > 20) && body.confirm_large_reduction !== true) throw new ApiError(409, "Review and confirm the content reduction before acceptance.");
   const context = await loadCorrectionContext(supabase, articleId); if (body.source_updated_at && context.article.updated_at !== body.source_updated_at) throw new ApiError(409, "The article changed after the correction was prepared. Generate a fresh proposal."); const scope = normalizeScope(body.product_scope || context.article.generation_metadata?.product_scope_override || classifyArticleProduct(context.article, context.assessment?.effective_intent || {}));
-  const normalized = normalizeCorrectionProposal(context.article, body.corrected_article).corrected_article; normalized.content_markdown = normalizeMarkdownSpacing(normalized.content_markdown, normalized.cta); normalized.generation_metadata = { ...(normalized.generation_metadata || {}), product_scope_override: scope }; assertDuplicateTitleResolved(normalized);
+  const correctedArticle = { ...body.corrected_article, faq_json: normalizeFaqCollection(body.corrected_article.faq_json) };
+  const normalized = normalizeCorrectionProposal(context.article, correctedArticle).corrected_article; normalized.faq_json = normalizeFaqCollection(normalized.faq_json); normalized.content_markdown = normalizeMarkdownSpacing(normalized.content_markdown, normalized.cta); normalized.generation_metadata = { ...(normalized.generation_metadata || {}), product_scope_override: scope }; assertDuplicateTitleResolved(normalized);
   const protectedValues = validateProtectedValues(context.article, normalized, { titleTargeted: true, intent: context.assessment?.effective_intent, scopeOverride: scope }); if (!protectedValues.protected_values_valid) throw new ApiError(409, errorText([...(protectedValues.protected_value_errors || []), ...(protectedValues.approved_sentence_errors || [])]));
   const repairedText = validateTargetedRepairText(normalized); if (!repairedText.targeted_repair_text_valid) throw new ApiError(409, errorText(repairedText.targeted_repair_text_errors));
   const structure = validateMarkdownStructure(normalized.content_markdown, normalized.cta); if (!structure.markdown_structure_valid) throw new ApiError(409, `Correction damaged article formatting. ${structure.markdown_structure_errors.join(" ")}`);
   const semantic = validateRent2BuySemantics(normalized, { intent: context.assessment?.effective_intent, scopeOverride: scope }); if (!semantic.rent2buy_semantic_valid) throw new ApiError(409, "Rent2Buy correction still contains prohibited wording."); const comparison = validateComparisonStructure(normalized, { intent: context.assessment?.effective_intent, scopeOverride: scope }); if (!comparison.comparison_structure_valid) throw new ApiError(409, "Comparison content does not clearly separate Rent2Buy and Van Finance.");
   const finalSafety = evaluatePublishingSafety(normalized, { businessKnowledge: context.businessKnowledge, ignoreAssessmentFreshness: true, intent: context.assessment?.effective_intent, scopeOverride: scope }); if (finalSafety.hard_blocked) throw new ApiError(409, finalSafety.hard_block_reasons.join(" ")); if (finalSafety.requires_manual_claim_review && body.confirm_manual_claims !== true) throw new ApiError(409, "Review and confirm the unsupported claim warning before acceptance.");
   if (!canAcceptCorrection({ correction_complete: true, markdown_structure_valid: true, rent2buy_semantic_valid: true, comparison_structure_valid: true, protected_values_valid: true, approved_sentence_valid: protectedValues.approved_sentence_valid, targeted_repair_text_valid: true, content_loss_confirmation_required: Boolean(body.excessive_content_loss || Number(body.unexplained_content_loss_percent) > 20), claim_confirmation_required: finalSafety.requires_manual_claim_review }, { contentLoss: body.confirm_large_reduction === true, claims: body.confirm_manual_claims === true })) throw new ApiError(409, "Correction requires review confirmation.");
-  const { internal_link_suggestions, ...articleUpdate } = normalized; const saved = data(await supabase.from("knowledge_articles").update({ ...articleUpdate, status: "draft", approved_at: null, content_html: null, updated_at: new Date().toISOString() }).eq("id", articleId).select().single(), "Corrected article could not be saved."); for (const link of internal_link_suggestions || []) if (link.id) await supabase.from("knowledge_internal_link_suggestions").update({ anchor_text: link.anchor_text }).eq("id", link.id).eq("destination_url", link.destination_url);
-  return { article: { ...saved, internal_link_suggestions }, safety: evaluatePublishingSafety({ ...saved, internal_link_suggestions }, { stale: true, businessKnowledge: context.businessKnowledge, scopeOverride: scope }), wix_updated: false, approved: false };
+  const { internal_link_suggestions, ...articleUpdate } = normalized; const saved = data(await supabase.from("knowledge_articles").update({ ...articleUpdate, faq_json: normalizeFaqCollection(articleUpdate.faq_json), status: "draft", approved_at: null, content_html: null, updated_at: new Date().toISOString() }).eq("id", articleId).select().single(), "Corrected article could not be saved."); for (const link of internal_link_suggestions || []) if (link.id) await supabase.from("knowledge_internal_link_suggestions").update({ anchor_text: link.anchor_text }).eq("id", link.id).eq("destination_url", link.destination_url);
+  const savedArticle = { ...saved, faq_json: normalizeFaqCollection(saved.faq_json), internal_link_suggestions };
+  return { article: savedArticle, safety: evaluatePublishingSafety(savedArticle, { stale: true, businessKnowledge: context.businessKnowledge, scopeOverride: scope }), wix_updated: false, approved: false };
 }
 
 export default async function handler(request, response) {
