@@ -1,7 +1,4 @@
-import {
-  buildMarketingAccessHeaders,
-  parseMarketingJsonResponse,
-} from "./marketingAccess.js";
+import { buildMarketingAccessHeaders, parseMarketingJsonResponse } from "./marketingAccess.js";
 
 const KNOWLEDGE_HUB_API = "/api/marketing-knowledge-hub";
 const KNOWLEDGE_SAFETY_APPROVAL_API = "/api/marketing-knowledge-safety-approval";
@@ -38,16 +35,13 @@ async function requestSafetyApproval(action, payload = {}) {
   return parseMarketingJsonResponse(response, "Publishing safety approval failed.");
 }
 
-export async function loadKnowledgeHub() {
-  await ensureRent2BuyRule();
-  return requestKnowledgeHub("load");
-}
+export async function loadKnowledgeHub() { await ensureRent2BuyRule(); return requestKnowledgeHub("load"); }
 
-export function approveAndCreateWixDraft(articleId, reviewedContentHash, confirmManualClaims = false) {
+export function approveAndCreateWixDraft(articleId, reviewedContentHash, confirmWarnings = false) {
   return requestSafetyApproval("approveAndCreateWixDraft", {
     article_id: articleId,
     reviewed_content_hash: reviewedContentHash,
-    confirm_manual_claims: Boolean(confirmManualClaims),
+    confirm_warnings: Boolean(confirmWarnings),
   });
 }
 
@@ -56,8 +50,8 @@ export function deleteKnowledgeTopic(topicId) { return requestKnowledgeHub("dele
 export async function generateKnowledgeArticle(topic, generation) { await ensureRent2BuyRule(); return requestKnowledgeHub("generateArticle", { topic, generation }); }
 export async function findKnowledgeTopics(categories, quantity, brief) { await ensureRent2BuyRule(); return requestKnowledgeHub("findTopics", { categories, quantity, brief }); }
 export function saveKnowledgeTopicIdeas(ideas) { return requestKnowledgeHub("saveTopicIdeas", { ideas }); }
-export function saveKnowledgeArticle(article, status) {
-  if (status === "approved") return requestSafetyApproval("approveArticle", { article });
+export function saveKnowledgeArticle(article, status, confirmWarnings = false) {
+  if (status === "approved") return requestSafetyApproval("approveArticle", { article, confirm_warnings: Boolean(confirmWarnings) });
   return requestKnowledgeHub("saveArticle", { article, status });
 }
 export function bulkUpdateKnowledgeArticles(articleIds, status) {
@@ -69,10 +63,6 @@ export function saveBusinessKnowledgeSection(businessSection) { return requestKn
 export async function reviewKnowledgeArticle(articleId) { await ensureRent2BuyRule(); return requestKnowledgeHub("reviewArticle", { article_id: articleId }); }
 
 if (typeof window !== "undefined") {
-  import("../components/PublishingSafetyCorrections.jsx")
-    .then(({ installPublishingSafetyCorrections }) => installPublishingSafetyCorrections())
-    .catch((error) => console.error("PUBLISHING SAFETY CORRECTIONS UI ERROR", error));
-  import("../components/KnowledgeHubApprovalDomFixes.js")
-    .then(({ installKnowledgeHubApprovalDomFixes }) => installKnowledgeHubApprovalDomFixes())
-    .catch((error) => console.error("KNOWLEDGE HUB APPROVAL UI ERROR", error));
+  import("../components/PublishingSafetyCorrections.jsx").then(({ installPublishingSafetyCorrections }) => installPublishingSafetyCorrections()).catch((error) => console.error("PUBLISHING SAFETY CORRECTIONS UI ERROR", error));
+  import("../components/KnowledgeHubApprovalDomFixes.js").then(({ installKnowledgeHubApprovalDomFixes }) => installKnowledgeHubApprovalDomFixes()).catch((error) => console.error("KNOWLEDGE HUB APPROVAL UI ERROR", error));
 }
