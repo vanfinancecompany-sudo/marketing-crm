@@ -15,7 +15,7 @@ import {
 } from "../services/publishingCorrections.js";
 
 const SCOPE_LABELS = { rent2buy: "Rent2Buy", finance: "Van Finance", both: "Both / Comparison" };
-const STATUS_LABELS = { ready: "Ready to save", review: "Review and confirm", blocked: "Blocked — material corrections required" };
+const STATUS_LABELS = { ready: "Ready to save", review: "Review and confirm", blocked: "Blocked — genuine material issue remains" };
 
 function articleTitleFromPage() {
   const editor = [...document.querySelectorAll(".panel")].find(
@@ -38,6 +38,31 @@ function ListNotice({ title, items }) {
 function DiffColumn({ title, article }) {
   const faqText = (article?.faq_json || []).map((item, index) => `${index + 1}. ${item?.question || ""}\n${item?.answer || ""}`).join("\n\n");
   return <div className="notice"><h4>{title}</h4><pre style={{ whiteSpace: "pre-wrap" }}>{[article?.title, article?.seo_title, article?.meta_description, article?.excerpt, article?.content_markdown, faqText, article?.cta].filter(Boolean).join("\n\n")}</pre></div>;
+}
+
+function effectiveReviewStatus(proposal, claimsConfirmed, contentLossConfirmed) {
+  if (!proposal) return "blocked";
+  if ((proposal.remaining_hard_blocks || []).length || proposal.correction_complete !== true) return "blocked";
+  const claimPending = proposal.claim_confirmation_required && !claimsConfirmed;
+  const contentPending = proposal.content_loss_confirmation_required && !contentLossConfirmed;
+  return claimPending || contentPending ? "review" : "ready";
+}
+
+function summaryMessage(proposal, effectiveStatus, claimsConfirmed, contentLossConfirmed) {
+  if (effectiveStatus === "blocked") {
+    const count = (proposal.remaining_hard_blocks || []).length;
+    return count === 1 ? "1 genuine material issue remains." : `${count} genuine material issues remain.`;
+  }
+  if (effectiveStatus === "review") {
+    const items = [];
+    if (proposal.claim_confirmation_required && !claimsConfirmed) items.push("1 business claim needs your confirmation");
+    if (proposal.content_loss_confirmation_required && !contentLossConfirmed) items.push("the reviewed content reduction needs confirmation");
+    return `${items.join(" and ")}.`;
+  }
+  if (proposal.markdown_spacing_repaired || proposal.automatic_repairs_count) {
+    return "Formatting repaired automatically. No material blocks remain.";
+  }
+  return "No material blocks remain. Save the corrected draft when ready.";
 }
 
 export function PublishingSafetyCorrectionPanel({ initialArticle = null, initialAssessment = null, mountKey = "" }) {
@@ -71,6 +96,7 @@ export function PublishingSafetyCorrectionPanel({ initialArticle = null, initial
 
   const safety = useMemo(() => evaluatePublishingSafety(article || {}, { assessment, businessKnowledge, scopeOverride: savedScope }), [article, assessment, businessKnowledge, savedScope]);
   const needsCorrection = safety.hard_blocked || safety.requires_manual_claim_review || safety.review_warnings?.length || Object.values(safety.checks || {}).some((value) => value !== "passed");
+  const effectiveStatus = effectiveReviewStatus(proposal, claimsConfirmed, contentLossConfirmed);
 
   function shareProposal(nextProposal, nextClaims = claimsConfirmed, nextContentLoss = contentLossConfirmed) {
     if (!nextProposal) return;
@@ -109,7 +135,7 @@ export function PublishingSafetyCorrectionPanel({ initialArticle = null, initial
       const result = await proposePublishingCorrection(article.id, reasons, savedScope);
       setProposal(result.proposal);
       setStatus("ready");
-      setProgressMessage(STATUS_LABELS[result.proposal.review_status || "blocked"]);
+      setProgressMessage("");
       shareProposal(result.proposal, false, false);
     } catch (proposalError) {
       setStatus("idle");
@@ -134,14 +160,17 @@ export function PublishingSafetyCorrectionPanel({ initialArticle = null, initial
     {!proposal ? <button type="button" className="button button--primary" disabled={status !== "idle" || scope !== savedScope} onClick={() => propose()}>Fix with AI</button> : null}
     {progressMessage ? <div className="notice" aria-live="polite" style={{ marginTop: 12 }}><strong>{progressMessage}</strong></div> : null}
     {proposal ? <>
-      <div className={`notice ${proposal.review_status === "blocked" ? "notice--error" : ""}`} style={{ marginTop: 12 }}><strong>{STATUS_LABELS[proposal.review_status || "blocked"]}</strong></div>
+      <div className={`notice ${effectiveStatus === "blocked" ? "notice--error" : effectiveStatus === "ready" ? "notice--success" : ""}`} style={{ marginTop: 12 }}>
+        <strong>{STATUS_LABELS[effectiveStatus]}</strong>
+        <div>{summaryMessage(proposal, effectiveStatus, claimsConfirmed, contentLossConfirmed)}</div>
+      </div>
       {proposal.claim_confirmation_required ? <label className="notice" style={{ display: "block", marginTop: 12 }}><input type="checkbox" checked={claimsConfirmed} onChange={(event) => confirmClaims(event.target.checked)} /> I have reviewed and confirm the flagged business or financial claim.</label> : null}
       {proposal.content_loss_confirmation_required ? <label className="notice" style={{ display: "block", marginTop: 12 }}><input type="checkbox" checked={contentLossConfirmed} onChange={(event) => confirmContentLoss(event.target.checked)} /> I have reviewed and confirm the proposed content reduction.</label> : null}
       <details><summary><strong>Show technical details</strong></summary><ListNotice title="Material blocks" items={proposal.remaining_hard_blocks} /><ListNotice title="Review warnings" items={proposal.review_warnings} /><ListNotice title="Protected-value errors" items={proposal.protected_value_errors} /></details>
       <details style={{ marginTop: 12 }}><summary><strong>Show before and after comparison</strong></summary><div className="knowledge-two-column"><DiffColumn title="Before" article={proposal.before} /><DiffColumn title="After" article={proposal.after} /></div></details>
-      <div className="notice" style={{ marginTop: 12 }}><strong>Save from the main article editor</strong><div>The injected Accept Corrections action is unavailable. Use the primary <strong>Save Corrected Draft</strong> action in the main editor workflow.</div></div>
+      <div className="notice" style={{ marginTop: 12 }}><strong>Next step</strong><div>Use <strong>Save Corrected Draft</strong> in the main article editor. Formatting and confirmation-only issues do not require another AI regeneration.</div></div>
       <div className="card-actions" style={{ marginTop: 12 }}>
-        {proposal.review_status === "blocked" ? <button type="button" className="button button--primary" disabled={status === "working"} onClick={() => propose(proposal.remaining_hard_blocks || [])}>Regenerate Correction</button> : null}
+        {effectiveStatus === "blocked" ? <button type="button" className="button button--primary" disabled={status === "working"} onClick={() => propose(proposal.remaining_hard_blocks || [])}>Regenerate Correction</button> : null}
         <button type="button" className="button button--ghost" disabled={status === "working"} onClick={() => { setProposal(null); setStatus("idle"); setProgressMessage("Corrections discarded. The article was not changed."); setError(""); publishKnowledgeCorrectionState({ article_id: article.id, status: "discarded", proposal: null, correction_save_verified: false }); }}>Discard Corrections</button>
       </div>
     </> : null}
