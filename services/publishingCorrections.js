@@ -1,3 +1,4 @@
+import { normalizeFaqCollection } from "../lib/faqNormalization.js";
 import { buildMarketingAccessHeaders, parseMarketingJsonResponse } from "./marketingAccess.js";
 
 const API_ROUTE = "/api/marketing-knowledge-corrections";
@@ -21,11 +22,15 @@ export const proposePublishingCorrection = (articleId, unresolvedReasons = [], p
 export const savePublishingCorrectionScope = (articleId, productScope) =>
   request("setScope", { article_id: articleId, product_scope: productScope });
 
-export const acceptPublishingCorrection = (proposal, confirmations = {}) =>
-  request("accept", {
+export const acceptPublishingCorrection = (proposal, confirmations = {}) => {
+  const correctedArticle = {
+    ...(proposal.after || {}),
+    faq_json: normalizeFaqCollection(proposal.after?.faq_json),
+  };
+  return request("accept", {
     article_id: proposal.article_id,
     source_updated_at: proposal.source_updated_at,
-    corrected_article: proposal.after,
+    corrected_article: correctedArticle,
     product_scope: proposal.product_scope,
     excessive_content_loss: Boolean(proposal.excessive_content_loss),
     unexplained_content_loss_percent: Number(proposal.unexplained_content_loss_percent) || 0,
@@ -36,6 +41,7 @@ export const acceptPublishingCorrection = (proposal, confirmations = {}) =>
     markdown_structure_valid: Boolean(proposal.markdown_structure_valid),
     comparison_structure_valid: proposal.comparison_structure_valid !== false,
   });
+};
 
 export const proposeBulkPublishingCorrections = (articleIds) =>
   request("bulkPropose", { article_ids: articleIds });
