@@ -14,11 +14,13 @@ async function request(action, payload = {}) {
 export const proposePublishingCorrection = (articleId) =>
   request("propose", { article_id: articleId });
 
-export const acceptPublishingCorrection = (proposal) =>
+export const acceptPublishingCorrection = (proposal, confirmLargeReduction = false) =>
   request("accept", {
     article_id: proposal.article_id,
     source_updated_at: proposal.source_updated_at,
     corrected_article: proposal.after,
+    excessive_content_loss: Boolean(proposal.excessive_content_loss),
+    confirm_large_reduction: Boolean(confirmLargeReduction),
   });
 
 export const proposeBulkPublishingCorrections = (articleIds) =>
