@@ -8,6 +8,11 @@ import {
   saveYouTubeCmsUpload,
 } from "../utils/youtubeImageResolution.js";
 import { buildCarFinancePostingCaption, buildPostingCaption } from "../utils/creativeUtils.js";
+import {
+  createYouTubeExportOperationId,
+  recordYouTubeGeneratorDownload,
+  YOUTUBE_TRACKING_WARNING,
+} from "../services/marketingDailyOperations.js";
 
 const SHORT_WIDTH = 1080;
 const SHORT_HEIGHT = 1920;
@@ -1357,6 +1362,24 @@ export default function YouTubeGeneratorPage({
   const generationKeyRef = useRef("");
   const queueCancelRef = useRef(false);
 
+  async function trackCompletedDownload({ vehicle, filename, format, queueDownload, operationId }) {
+    try {
+      await recordYouTubeGeneratorDownload({
+        productKey,
+        vehicle,
+        filename,
+        format,
+        queueDownload,
+        operationId,
+      });
+      return "";
+    } catch (trackingError) {
+      console.error("YOUTUBE CONTENT OPERATIONS TRACKING ERROR", trackingError);
+      setError(YOUTUBE_TRACKING_WARNING);
+      return YOUTUBE_TRACKING_WARNING;
+    }
+  }
+
   const product = PRODUCTS[productKey];
   const productVehicles = useMemo(() => getProductVehicles(vehicles, productKey), [vehicles, productKey]);
   const carsConfigured = Boolean(carsStockStatus?.configured);
@@ -1613,14 +1636,23 @@ export default function YouTubeGeneratorPage({
       setError("No usable image is available. Upload CMS rows or use stock image fallback.");
       return;
     }
-    try {
-      const { payload } = buildServerRenderPayloadForVehicle(selectedVehicle);
-      const renderResult = await downloadYouTubeMp4FromServer(
-        payload,
-        mp4Filename(),
-        setStatus
-      );
-      downloadTextFile(buildYouTubeDescription(selectedVehicle, productKey), descriptionFilenameFromMp4(mp4Filename()));
+    const filename = mp4Filename();
+  const operationId = createYouTubeExportOperationId();
+  try {
+    const { payload } = buildServerRenderPayloadForVehicle(selectedVehicle);
+    const renderResult = await downloadYouTubeMp4FromServer(
+      payload,
+      filename,
+      setStatus
+    );
+    await trackCompletedDownload({
+      vehicle: selectedVehicle,
+      filename,
+      format: "mp4",
+      queueDownload: false,
+      operationId,
+    });
+    downloadTextFile(buildYouTubeDescription(selectedVehicle, productKey), descriptionFilenameFromMp4(filename));
       const failureCount = Array.isArray(renderResult.imageDownloadFailures) ? renderResult.imageDownloadFailures.length : 0;
       setStatus(
         failureCount
@@ -1633,15 +1665,24 @@ export default function YouTubeGeneratorPage({
     }
   }
 
-  function handleDownloadWebm() {
-    try {
-      downloadWebmFallback(currentAsset?.blob, mp4Filename());
-      setStatus("WebM fallback downloaded.");
-      setError("");
-    } catch (fallbackError) {
-      setError(fallbackError.message || "Could not download WebM fallback.");
-    }
+  async function handleDownloadWebm() {
+  const filename = youtubeFilenameForVehicle(selectedVehicle, "webm");
+  const operationId = createYouTubeExportOperationId();
+  try {
+    downloadWebmFallback(currentAsset?.blob, filename);
+    const trackingWarning = await trackCompletedDownload({
+      vehicle: selectedVehicle,
+      filename,
+      format: "webm",
+      queueDownload: false,
+      operationId,
+    });
+    setStatus("WebM fallback downloaded.");
+    if (!trackingWarning) setError("");
+  } catch (fallbackError) {
+    setError(fallbackError.message || "Could not download WebM fallback.");
   }
+}
 
   function setQueueForProduct(nextVehicles) {
     if (onQueueChange) {
@@ -1722,6 +1763,7 @@ export default function YouTubeGeneratorPage({
       };
     }
     const mp4Name = youtubeFilenameForVehicle(vehicle, "mp4");
+    const operationId = createYouTubeExportOperationId();
     setQueueProgress({ index, total, completed, failed, fallbackDownloaded, skipped, message: `Rendering MP4 ${index} of ${total}: ${label}` });
     try {
       const renderResult = await downloadYouTubeMp4FromServer(payload, mp4Name, (message) => {
@@ -1732,21 +1774,43 @@ export default function YouTubeGeneratorPage({
         setQueueProgress({ index, total, completed, failed, fallbackDownloaded, skipped, message: phase });
       });
       setQueueProgress({ index, total, completed: completed + 1, failed, fallbackDownloaded, skipped, message: `Completed ${index} of ${total}: ${label}` });
-      downloadTextFile(buildYouTubeDescription(vehicle, productKey), descriptionFilenameFromMp4(mp4Name));
-      await wait(1000);
-      return { status: "complete", label, imageDownloadFailures: renderResult?.imageDownloadFailures || [], imageCount: imageOrder.records.length };
+  const trackingWarning = await trackCompletedDownload({
+    vehicle,
+    filename: mp4Name,
+    format: "mp4",
+    queueDownload: true,
+    operationId,
+  });
+  downloadTextFile(buildYouTubeDescription(vehicle, productKey), descriptionFilenameFromMp4(mp4Name));
+  await wait(1000);
+  return {
+    status: "complete",
+    label,
+    trackingWarning,
+    imageDownloadFailures: renderResult?.imageDownloadFailures || [],
+    imageCount: imageOrder.records.length,
+  };
     } catch (mp4Error) {
       setQueueProgress({ index, total, completed, failed: failed + 1, fallbackDownloaded, skipped, message: `Failed ${index} of ${total}, trying WebM fallback: ${label}` });
       try {
         const fallbackAsset = await generateQueuedVehicle(vehicle);
-        downloadWebmFallback(fallbackAsset.blob, youtubeFilenameForVehicle(vehicle, "webm"));
-        setQueueProgress({ index, total, completed, failed: failed + 1, fallbackDownloaded: fallbackDownloaded + 1, skipped, message: `WebM fallback downloaded ${index} of ${total}: ${label}` });
-        await wait(1000);
-        return {
-          status: "fallback",
-          label,
-          error: `${label}: MP4 failed, WebM fallback downloaded. ${mp4Error.message || ""}`.trim(),
-        };
+  const webmName = youtubeFilenameForVehicle(vehicle, "webm");
+  downloadWebmFallback(fallbackAsset.blob, webmName);
+  const trackingWarning = await trackCompletedDownload({
+    vehicle,
+    filename: webmName,
+    format: "webm",
+    queueDownload: true,
+    operationId,
+  });
+  setQueueProgress({ index, total, completed, failed: failed + 1, fallbackDownloaded: fallbackDownloaded + 1, skipped, message: `WebM fallback downloaded ${index} of ${total}: ${label}` });
+  await wait(1000);
+  return {
+    status: "fallback",
+    label,
+    trackingWarning,
+    error: `${label}: MP4 failed, WebM fallback downloaded. ${mp4Error.message || ""}`.trim(),
+  };
       } catch (fallbackError) {
         throw new Error(`${label}: ${mp4Error.message || "MP4 render failed"}; WebM fallback failed: ${fallbackError.message || "unknown error"}`);
       }
@@ -1797,11 +1861,13 @@ export default function YouTubeGeneratorPage({
           failed += 1;
           fallbackDownloaded += 1;
           failures.push(result.error);
+          if (result.trackingWarning) failures.push(result.trackingWarning);
         } else if (result.status === "skipped") {
           skipped += 1;
           failures.push(result.error);
         } else {
           completed += 1;
+          if (result.trackingWarning) failures.push(result.trackingWarning);
           const imageFailures = Array.isArray(result.imageDownloadFailures) ? result.imageDownloadFailures.length : 0;
           if (imageFailures) failures.push(`${result.label}: MP4 downloaded, ${imageFailures} image URL${imageFailures === 1 ? "" : "s"} failed and were skipped.`);
         }

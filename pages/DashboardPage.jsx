@@ -18,7 +18,7 @@ const ACTIVITY_UNITS = {
   van_finance_reel: "generated",
   rent2buy_reel: "generated",
   emails_sent: "sent",
-  knowledge_hub_article: "published",
+  knowledge_hub_article: "sent to Wix",
 };
 
 function addDays(dateKey, amount) {
