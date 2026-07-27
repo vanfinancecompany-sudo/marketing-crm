@@ -93,13 +93,32 @@ test("stale assessment creates a hard block", () => {
   assert.ok(result.hard_block_reasons.includes("Article content changed after assessment. Reanalyse before approval."));
 });
 
-test("unsupported finance claim requires confirmation", () => {
+test("unsupported but reviewable business claim requires confirmation without a hard block", () => {
+  const article = cleanArticle({
+    content_markdown: `${cleanArticle().content_markdown}\n\n## Fast decisions\n\nApplications may be approved within 60 minutes.`,
+  });
+  const result = evaluatePublishingSafety(article, { assessment, businessKnowledge: [] });
+  assert.equal(result.requires_manual_claim_review, true);
+  assert.equal(result.hard_blocked, false);
+  assert.ok(result.review_warnings.includes("Unverified financial or business claim requires confirmation."));
+});
+
+test("unsupported guarantee remains a material hard block", () => {
   const article = cleanArticle({
     content_markdown: `${cleanArticle().content_markdown}\n\n## Fast decisions\n\nEvery applicant is guaranteed approval within 60 minutes.`,
   });
   const result = evaluatePublishingSafety(article, { assessment, businessKnowledge: [] });
-  assert.equal(result.requires_manual_claim_review, true);
-  assert.ok(result.hard_block_reasons.includes("Unverified financial or business claim requires confirmation."));
+  assert.equal(result.hard_blocked, true);
+  assert.ok(result.hard_block_reasons.includes("Unsupported guarantee or materially misleading financial claim detected."));
+});
+
+test("repairable formatting is a warning rather than a hard block", () => {
+  const article = cleanArticle({
+    content_markdown: cleanArticle().content_markdown.replace("## What lenders normally consider\n\n", "## What lenders normally consider\n"),
+  });
+  const result = evaluatePublishingSafety(article, { assessment });
+  assert.equal(result.hard_block_reasons.includes("Article formatting requires editorial correction."), false);
+  assert.equal(result.checks.formatting, "warning");
 });
 
 test("excessive repetition creates a hard block", () => {
