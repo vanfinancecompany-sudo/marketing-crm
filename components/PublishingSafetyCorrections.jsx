@@ -27,6 +27,29 @@ function DiffColumn({ title, article }) {
   );
 }
 
+function CorrectionSummary({ proposal }) {
+  const removedPercent = Math.max(0, -(proposal.word_count_change_percent || 0));
+  return (
+    <div className="notice" style={{ marginTop: 12 }}>
+      <strong>Correction summary</strong>
+      <div className="knowledge-breakdown-grid" style={{ marginTop: 8 }}>
+        <div><strong>Issues repaired</strong><span>{proposal.changes?.length || 0}</span></div>
+        <div><strong>Content retained</strong><span>{proposal.content_retained_percent ?? 100}%</span></div>
+        <div><strong>Original words</strong><span>{proposal.original_word_count || 0}</span></div>
+        <div><strong>Proposed words</strong><span>{proposal.proposed_word_count || 0}</span></div>
+      </div>
+      {proposal.changes?.length ? <ul>{proposal.changes.map((item) => <li key={item}>{item}</li>)}</ul> : null}
+      {proposal.removed_sections?.length ? (
+        <>
+          <strong>Removed sections</strong>
+          <ul>{proposal.removed_sections.map((section, index) => <li key={`${section}-${index}`}>{section} — {proposal.removal_reasons?.[index] || "Reason not supplied"}</li>)}</ul>
+        </>
+      ) : null}
+      {proposal.excessive_content_loss ? <small>{removedPercent}% of the original article is proposed for removal.</small> : null}
+    </div>
+  );
+}
+
 function CorrectionPanel({ articleTitle }) {
   const [article, setArticle] = useState(null);
   const [assessment, setAssessment] = useState(null);
@@ -34,6 +57,7 @@ function CorrectionPanel({ articleTitle }) {
   const [proposal, setProposal] = useState(null);
   const [status, setStatus] = useState("idle");
   const [message, setMessage] = useState("");
+  const [confirmLargeReduction, setConfirmLargeReduction] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -62,6 +86,7 @@ function CorrectionPanel({ articleTitle }) {
   async function propose() {
     setStatus("working");
     setMessage("Correction in progress");
+    setConfirmLargeReduction(false);
     try {
       const result = await proposePublishingCorrection(article.id);
       setProposal(result.proposal);
@@ -78,7 +103,7 @@ function CorrectionPanel({ articleTitle }) {
     setMessage("Saving accepted corrections and refreshing analysis…");
     try {
       await recordArticleRevision(article.id, "ai_safety_correction", "Original article preserved before accepted AI safety corrections.");
-      await acceptPublishingCorrection(proposal);
+      await acceptPublishingCorrection(proposal, confirmLargeReduction);
       await analyseEditorialArticle(article.id);
       setMessage("Corrections accepted. Safety checks and editorial analysis refreshed.");
       window.setTimeout(() => window.location.reload(), 500);
@@ -89,6 +114,7 @@ function CorrectionPanel({ articleTitle }) {
   }
 
   if (!article || !needsCorrection) return null;
+  const acceptanceBlocked = status === "working" || (proposal?.excessive_content_loss && !confirmLargeReduction);
   return (
     <div style={{ marginTop: 16 }}>
       <div className="card-actions">
@@ -101,6 +127,17 @@ function CorrectionPanel({ articleTitle }) {
       {message ? <div className="notice" style={{ marginTop: 12 }}>{message}</div> : null}
       {proposal ? (
         <>
+          <CorrectionSummary proposal={proposal} />
+          {proposal.excessive_content_loss ? (
+            <div className="notice notice--error" style={{ marginTop: 12 }}>
+              <strong>Large content reduction — review required</strong>
+              <p>Original: {proposal.original_word_count} words. Proposed: {proposal.proposed_word_count} words. Removed: {Math.max(0, -(proposal.word_count_change_percent || 0))}%.</p>
+              <label className="toggle-row">
+                <input type="checkbox" checked={confirmLargeReduction} onChange={(event) => setConfirmLargeReduction(event.target.checked)} />
+                I have reviewed the removed sections and explicitly confirm this large reduction.
+              </label>
+            </div>
+          ) : null}
           {proposal.manual_confirmation_required?.length ? (
             <div className="notice notice--error" style={{ marginTop: 12 }}>
               <strong>Manual confirmation required</strong>
@@ -124,8 +161,8 @@ function CorrectionPanel({ articleTitle }) {
             </div>
           ) : null}
           <div className="card-actions" style={{ marginTop: 12 }}>
-            <button type="button" className="button button--success" disabled={status === "working"} onClick={accept}>Accept Corrections</button>
-            <button type="button" className="button button--ghost" disabled={status === "working"} onClick={() => { setProposal(null); setStatus("idle"); setMessage("Corrections discarded. The article was not changed."); }}>Discard Corrections</button>
+            <button type="button" className="button button--success" disabled={acceptanceBlocked} onClick={accept}>Accept Corrections</button>
+            <button type="button" className="button button--ghost" disabled={status === "working"} onClick={() => { setProposal(null); setStatus("idle"); setConfirmLargeReduction(false); setMessage("Corrections discarded. The article was not changed."); }}>Discard Corrections</button>
           </div>
         </>
       ) : null}
@@ -204,7 +241,7 @@ function BulkCorrectionPanel() {
       {results.map((item) => (
         <div className={`notice ${item.status === "failed" ? "notice--error" : ""}`} key={item.article_id} style={{ marginTop: 8 }}>
           <strong>{item.status === "ready" ? "Proposed correction ready" : "Correction failed"}</strong>
-          <p>{item.status === "ready" ? `${item.proposal.safety_after?.hard_block_reasons?.length || 0} remaining block(s). Open the article to review and accept.` : item.message}</p>
+          <p>{item.status === "ready" ? `${item.proposal.safety_after?.hard_block_reasons?.length || 0} remaining block(s). ${item.proposal.excessive_content_loss ? "Large content reduction requires review. " : ""}Open the article to review and accept.` : item.message}</p>
         </div>
       ))}
     </div>
