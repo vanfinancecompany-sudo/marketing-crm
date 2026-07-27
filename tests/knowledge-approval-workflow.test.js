@@ -89,8 +89,8 @@ test("Accepting state renders before the API is awaited", async () => {
 test("all correction controls are disabled while accepting", async () => {
   const source = await read("../components/PublishingSafetyCorrections.jsx");
   assert.match(source, /acceptDisabled = status === "working" \|\| status === "accepting"/);
-  assert.match(source, /Regenerate Correction[\s\S]*status === "accepting"/);
-  assert.match(source, /Discard Corrections[\s\S]*status === "accepting"/);
+  assert.match(source, /disabled=\{status === "working" \|\| status === "accepting"\}[\s\S]{0,180}>Regenerate Correction/);
+  assert.match(source, /disabled=\{status === "working" \|\| status === "accepting"\}[\s\S]{0,260}>Discard Corrections/);
 });
 
 test("success banner is prominent, persistent, focusable and scrolled into view", async () => {
