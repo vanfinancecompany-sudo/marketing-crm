@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   CUSTOMER_JOURNEYS,
   EDITORIAL_CATEGORY_LABELS,
@@ -6,6 +7,9 @@ import {
   buildArticleHealth,
   buildArticleReviewSummary,
 } from "../lib/editorialIntelligence.js";
+import { auditPublishedArticles, evaluatePublishingSafety } from "../lib/publishingSafety.js";
+import { loadKnowledgeHub } from "../services/knowledgeHub.js";
+import { loadEditorialEngine } from "../services/editorialEngine.js";
 import { InternalLinkReviewPanel } from "./KnowledgeHubInternalLinking.jsx";
 
 const titleCase = (value) =>
@@ -24,6 +28,16 @@ function ScoreMeter({ label, score = 0 }) {
   );
 }
 
+function SafetyStatus({ label, status }) {
+  const tone = status === "passed" ? "green" : status === "warning" ? "amber" : "red";
+  return (
+    <div className={`notice stat-card--${tone}`}>
+      <strong>{label}</strong>
+      <span>{titleCase(status)}</span>
+    </div>
+  );
+}
+
 export function EditorialApprovalQueue({
   queue,
   selectedIds,
@@ -32,6 +46,9 @@ export function EditorialApprovalQueue({
   onAnalyseMissing,
   busy,
 }) {
+  const [auditResults, setAuditResults] = useState([]);
+  const [auditMessage, setAuditMessage] = useState("");
+  const [auditing, setAuditing] = useState(false);
   const labels = {
     ready: "★★★★★ Ready",
     review: "★★★★ Review",
@@ -39,6 +56,30 @@ export function EditorialApprovalQueue({
     rewrite: "★★ Rewrite",
     reject: "★ Reject",
   };
+
+  async function runPublishedAudit() {
+    setAuditing(true);
+    setAuditMessage("");
+    try {
+      const [hub, editorial] = await Promise.all([loadKnowledgeHub(), loadEditorialEngine()]);
+      const flagged = auditPublishedArticles({
+        articles: hub.articles || [],
+        assessments: editorial.assessments || [],
+        businessKnowledge: hub.business_sections || [],
+      });
+      setAuditResults(flagged);
+      setAuditMessage(
+        flagged.length
+          ? `${flagged.length} approved or exported article(s) require editorial review. No status or Wix content was changed.`
+          : "All approved and exported articles passed the current safety audit. No status or Wix content was changed."
+      );
+    } catch (error) {
+      setAuditMessage(error.message || "Published article audit could not be completed.");
+    } finally {
+      setAuditing(false);
+    }
+  }
+
   return (
     <div className="knowledge-table-wrap">
       <div className="card-actions" style={{ marginBottom: 16 }}>
@@ -50,7 +91,30 @@ export function EditorialApprovalQueue({
         >
           Analyse Unscored Articles
         </button>
+        <button
+          type="button"
+          className="button button--ghost"
+          disabled={busy || auditing}
+          onClick={runPublishedAudit}
+        >
+          {auditing ? "Auditing..." : "Audit Published Articles"}
+        </button>
       </div>
+      {auditMessage ? <div className="notice" style={{ marginBottom: 12 }}>{auditMessage}</div> : null}
+      {auditResults.length ? (
+        <div className="knowledge-review-findings" style={{ marginBottom: 16 }}>
+          {auditResults.map((item) => (
+            <div key={item.article.id}>
+              <strong>{item.article.title}</strong>
+              <span>{titleCase(item.article.status)}</span>
+              <p>{item.safety.hard_block_reasons.join(" ")}</p>
+              <button type="button" className="button button--ghost" onClick={() => onOpen(item.article)}>
+                Open and Correct
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <table className="knowledge-table">
         <thead>
           <tr>
@@ -58,40 +122,50 @@ export function EditorialApprovalQueue({
           </tr>
         </thead>
         <tbody>
-          {queue.map((item) => (
-            <tr key={item.article.id}>
-              <td>
-                <input
-                  type="checkbox"
-                  checked={selectedIds.includes(item.article.id)}
-                  onChange={(event) =>
-                    setSelectedIds((current) =>
-                      event.target.checked
-                        ? [...current, item.article.id]
-                        : current.filter((id) => id !== item.article.id)
-                    )
-                  }
-                />
-              </td>
-              <td><strong>{labels[item.queue_state]}</strong><small>Priority {item.priority_score}</small></td>
-              <td>
-                <button className="knowledge-title-button" onClick={() => onOpen(item.article)}>
-                  {item.article.title}
-                </button>
-                <small>{item.article.category} · {item.article.article_type}</small>
-              </td>
-              <td>
-                {item.assessment
-                  ? <><strong>{item.assessment.overall_score}/100</strong><small>{stars(item.assessment.grade)}</small></>
-                  : "Not analysed"}
-              </td>
-              <td>
-                {item.assessment
-                  ? titleCase(item.assessment.publication_status)
-                  : "Editorial analysis required"}
-              </td>
-            </tr>
-          ))}
+          {queue.map((item) => {
+            const safety = evaluatePublishingSafety(item.article, {
+              assessment: item.assessment,
+              stale: item.stale,
+              structuredCtas: item.assessment?.structured_ctas,
+            });
+            return (
+              <tr key={item.article.id}>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(item.article.id)}
+                    disabled={safety.hard_blocked}
+                    onChange={(event) =>
+                      setSelectedIds((current) =>
+                        event.target.checked
+                          ? [...current, item.article.id]
+                          : current.filter((id) => id !== item.article.id)
+                      )
+                    }
+                  />
+                </td>
+                <td><strong>{safety.hard_blocked ? "Hold — corrections required" : labels[item.queue_state]}</strong><small>Priority {item.priority_score}</small></td>
+                <td>
+                  <button className="knowledge-title-button" onClick={() => onOpen(item.article)}>
+                    {item.article.title}
+                  </button>
+                  <small>{item.article.category} · {item.article.article_type}</small>
+                </td>
+                <td>
+                  {item.assessment
+                    ? <><strong>{item.assessment.overall_score}/100</strong><small>{stars(item.assessment.grade)}</small></>
+                    : "Not analysed"}
+                </td>
+                <td>
+                  {safety.hard_blocked
+                    ? safety.hard_block_reasons[0]
+                    : item.assessment
+                      ? titleCase(item.assessment.publication_status)
+                      : "Editorial analysis required"}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -139,6 +213,37 @@ export function EditorialScorePanel({ article, assessment, intent, stale, onAnal
     ? assessment.review_summary
     : buildArticleReviewSummary(article, assessment);
   const health = buildArticleHealth(assessment, intent, stale);
+  const safety = evaluatePublishingSafety(article, {
+    assessment,
+    stale,
+    structuredCtas: assessment.structured_ctas,
+  });
+  const safetyLabels = {
+    formatting: "Formatting",
+    duplicate_content: "Duplicate content",
+    links: "Links",
+    finance_claims: "Finance claims",
+    assessment_freshness: "Assessment freshness",
+    repetition: "Repetition",
+  };
+
+  useEffect(() => {
+    const actionLabels = new Set(["Approve", "Create Wix Draft", "Update Wix Draft", "Retry Wix Draft"]);
+    const buttons = [...document.querySelectorAll("button")].filter((button) =>
+      actionLabels.has(String(button.textContent || "").trim())
+    );
+    buttons.forEach((button) => {
+      button.disabled = Boolean(busy || safety.hard_blocked);
+      if (safety.hard_blocked) {
+        button.title = safety.hard_block_reasons.join(" ");
+        button.setAttribute("aria-disabled", "true");
+      } else {
+        button.removeAttribute("title");
+        button.removeAttribute("aria-disabled");
+      }
+    });
+  }, [article.id, busy, safety.hard_blocked, safety.hard_block_reasons.join("|")]);
+
   return (
     <>
       <section className="panel">
@@ -157,7 +262,7 @@ export function EditorialScorePanel({ article, assessment, intent, stale, onAnal
             <strong>{assessment.overall_score}</strong><span>/ 100</span>
           </div>
           <div>
-            <h4>Recommended action: {titleCase(summary.recommended_action)}</h4>
+            <h4>Recommended action: {safety.hard_blocked ? safety.recommended_action : titleCase(summary.recommended_action)}</h4>
             <p>Reading {summary.reading_time_minutes} min · Review {summary.review_time_minutes} min · Business risk {summary.business_risk}/100 · SEO risk {summary.seo_risk}/100 · Conversion {summary.conversion_rating}/100</p>
             {stale ? <small>Article content changed after this assessment. Refresh before approval.</small> : null}
           </div>
@@ -172,7 +277,21 @@ export function EditorialScorePanel({ article, assessment, intent, stale, onAnal
         </div>
       </section>
       <section className="panel">
-        <div className="panel__header"><div><h3>Article Health</h3><p>Live publication warnings. Approval remains a user decision.</p></div></div>
+        <div className="panel__header"><div><h3>Publishing Safety Checks</h3><p>Hard safety gates are separate from the numerical article score. A high score cannot override a blocked check.</p></div></div>
+        <div className="knowledge-breakdown-grid">
+          {Object.entries(safety.checks).map(([key, status]) => (
+            <SafetyStatus key={key} label={safetyLabels[key] || titleCase(key)} status={status} />
+          ))}
+        </div>
+        {safety.hard_block_reasons.length ? (
+          <div className="notice notice--error" style={{ marginTop: 16 }}>
+            <strong>Hold — corrections required</strong>
+            <ul>{safety.hard_block_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+          </div>
+        ) : <div className="notice notice--success" style={{ marginTop: 16 }}>All hard publishing safety checks passed.</div>}
+      </section>
+      <section className="panel">
+        <div className="panel__header"><div><h3>Article Health</h3><p>Live publication warnings. Hard safety blocks must be corrected before approval or Wix export.</p></div></div>
         <div className="knowledge-breakdown-grid">
           {Object.entries(health).filter(([key]) => key !== "warnings").map(([key, score]) => (
             <div key={key}><strong>{titleCase(key)}</strong><span>{score}%</span></div>
