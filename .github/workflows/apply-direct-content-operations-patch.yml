@@ -1,0 +1,444 @@
+name: Apply direct Content Operations wiring patch
+
+on:
+  push:
+    branches:
+      - fix/content-operations-reel-knowledge-wiring
+    paths:
+      - .github/workflows/apply-direct-content-operations-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/content-operations-reel-knowledge-wiring
+          fetch-depth: 0
+
+      - name: Apply direct wiring
+        shell: python
+        run: |
+          from pathlib import Path
+
+          service = Path("services/marketingDailyOperations.js")
+          service.write_text('''import { buildMarketingAccessHeaders, parseMarketingJsonResponse } from "./marketingAccess.js";
+
+const API_ROUTE = "/api/marketing-daily-operations";
+export const DAILY_OPERATIONS_REFRESH_EVENT = "marketing-daily-operations-refresh";
+export const YOUTUBE_TRACKING_WARNING = "Video downloaded, but Content Operations could not be updated.";
+
+async function requestDailyOperations(action, payload = {}) {
+  const response = await fetch(API_ROUTE, {
+    method: "POST",
+    headers: buildMarketingAccessHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ action, ...payload }),
+  });
+  return parseMarketingJsonResponse(response, "Daily Marketing Command Centre request failed.");
+}
+
+export function getDailyOperationsOverview(activityDate) {
+  return requestDailyOperations("overview", { activity_date: activityDate });
+}
+
+export function getDailyOperationsTotals(startDate, endDate) {
+  return requestDailyOperations("totals", { start_date: startDate, end_date: endDate });
+}
+
+export function saveDailyTargetSchedule(effectiveFrom, schedule) {
+  return requestDailyOperations("saveSchedule", { effective_from: effectiveFrom, schedule });
+}
+
+export function resetDailyTargetDefaults(effectiveFrom) {
+  return requestDailyOperations("resetDefaults", { effective_from: effectiveFrom });
+}
+
+export function saveDailyTargetOverride(activityDate, targets, note = "") {
+  return requestDailyOperations("saveOverride", { activity_date: activityDate, targets, note });
+}
+
+export async function recordDailyMarketingActivity(activityType, options = {}) {
+  const result = await requestDailyOperations("recordActivity", {
+    activity_type: activityType,
+    activity_date: options.activityDate,
+    quantity: options.quantity || 1,
+    source: options.source || "command_centre",
+    source_id: options.sourceId || "",
+    metadata: options.metadata || {},
+  });
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(DAILY_OPERATIONS_REFRESH_EVENT, {
+      detail: { activityType, source: options.source || "command_centre" },
+    }));
+  }
+
+  return result;
+}
+
+export function undoDailyMarketingActivity(activityType, activityDate) {
+  return requestDailyOperations("undoManualActivity", { activity_type: activityType, activity_date: activityDate });
+}
+
+export function createYouTubeExportOperationId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `youtube-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+export function youtubeActivityTypeForProduct(productKey) {
+  if (productKey === "vanFinance") return "van_finance_reel";
+  if (productKey === "rent2buy") return "rent2buy_reel";
+  return null;
+}
+
+export async function recordYouTubeGeneratorDownload({
+  productKey,
+  vehicle,
+  filename,
+  format,
+  queueDownload,
+  operationId,
+}) {
+  const activityType = youtubeActivityTypeForProduct(productKey);
+  if (!activityType) return { recorded: false, reason: "unsupported_product" };
+
+  const normalizedFormat = String(format || "").toLowerCase();
+  if (!operationId || !["mp4", "webm"].includes(normalizedFormat)) {
+    return { recorded: false, reason: "invalid_export" };
+  }
+
+  const registration = String(
+    vehicle?.reg || vehicle?.registration || vehicle?.title || vehicle?.name || ""
+  ).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const vehicleId = String(vehicle?.id || vehicle?.vehicle_id || "").trim() || null;
+
+  await recordDailyMarketingActivity(activityType, {
+    source: "youtube_generator",
+    sourceId: `youtube-export:${productKey}:${operationId}`,
+    metadata: {
+      product_key: productKey,
+      vehicle_id: vehicleId,
+      registration,
+      filename: String(filename || ""),
+      format: normalizedFormat,
+      queue_download: Boolean(queueDownload),
+      export_operation_id: operationId,
+    },
+  });
+
+  return { recorded: true, activityType };
+}
+''', encoding="utf-8")
+
+          page = Path("pages/YouTubeGeneratorPage.jsx")
+          text = page.read_text(encoding="utf-8")
+          import_anchor = 'import { buildCarFinancePostingCaption, buildPostingCaption } from "../utils/creativeUtils.js";\n'
+          tracking_import = '''import {
+  createYouTubeExportOperationId,
+  recordYouTubeGeneratorDownload,
+  YOUTUBE_TRACKING_WARNING,
+} from "../services/marketingDailyOperations.js";
+'''
+          if tracking_import not in text:
+            text = text.replace(import_anchor, import_anchor + tracking_import)
+
+          state_anchor = '  const queueCancelRef = useRef(false);\n'
+          tracking_helper = '''  async function trackCompletedDownload({ vehicle, filename, format, queueDownload, operationId }) {
+    try {
+      await recordYouTubeGeneratorDownload({
+        productKey,
+        vehicle,
+        filename,
+        format,
+        queueDownload,
+        operationId,
+      });
+      return "";
+    } catch (trackingError) {
+      console.error("YOUTUBE CONTENT OPERATIONS TRACKING ERROR", trackingError);
+      setError(YOUTUBE_TRACKING_WARNING);
+      return YOUTUBE_TRACKING_WARNING;
+    }
+  }
+
+'''
+          if tracking_helper not in text:
+            text = text.replace(state_anchor, state_anchor + "\n" + tracking_helper)
+
+          old_single_mp4 = '''    try {
+      const { payload } = buildServerRenderPayloadForVehicle(selectedVehicle);
+      const renderResult = await downloadYouTubeMp4FromServer(
+        payload,
+        mp4Filename(),
+        setStatus
+      );
+      downloadTextFile(buildYouTubeDescription(selectedVehicle, productKey), descriptionFilenameFromMp4(mp4Filename()));
+'''
+          new_single_mp4 = '''    const filename = mp4Filename();
+    const operationId = createYouTubeExportOperationId();
+    try {
+      const { payload } = buildServerRenderPayloadForVehicle(selectedVehicle);
+      const renderResult = await downloadYouTubeMp4FromServer(
+        payload,
+        filename,
+        setStatus
+      );
+      await trackCompletedDownload({
+        vehicle: selectedVehicle,
+        filename,
+        format: "mp4",
+        queueDownload: false,
+        operationId,
+      });
+      downloadTextFile(buildYouTubeDescription(selectedVehicle, productKey), descriptionFilenameFromMp4(filename));
+'''
+          if old_single_mp4 not in text:
+            raise SystemExit("Single MP4 handler anchor not found")
+          text = text.replace(old_single_mp4, new_single_mp4, 1)
+
+          old_webm = '''  function handleDownloadWebm() {
+    try {
+      downloadWebmFallback(currentAsset?.blob, mp4Filename());
+      setStatus("WebM fallback downloaded.");
+      setError("");
+    } catch (fallbackError) {
+      setError(fallbackError.message || "Could not download WebM fallback.");
+    }
+  }
+'''
+          new_webm = '''  async function handleDownloadWebm() {
+    const filename = youtubeFilenameForVehicle(selectedVehicle, "webm");
+    const operationId = createYouTubeExportOperationId();
+    try {
+      downloadWebmFallback(currentAsset?.blob, filename);
+      const trackingWarning = await trackCompletedDownload({
+        vehicle: selectedVehicle,
+        filename,
+        format: "webm",
+        queueDownload: false,
+        operationId,
+      });
+      setStatus("WebM fallback downloaded.");
+      if (!trackingWarning) setError("");
+    } catch (fallbackError) {
+      setError(fallbackError.message || "Could not download WebM fallback.");
+    }
+  }
+'''
+          if old_webm not in text:
+            raise SystemExit("Single WebM handler anchor not found")
+          text = text.replace(old_webm, new_webm, 1)
+
+          queue_start = '''    const mp4Name = youtubeFilenameForVehicle(vehicle, "mp4");
+    setQueueProgress({ index, total, completed, failed, fallbackDownloaded, skipped, message: `Rendering MP4 ${index} of ${total}: ${label}` });
+    try {
+'''
+          queue_start_new = '''    const mp4Name = youtubeFilenameForVehicle(vehicle, "mp4");
+    const operationId = createYouTubeExportOperationId();
+    setQueueProgress({ index, total, completed, failed, fallbackDownloaded, skipped, message: `Rendering MP4 ${index} of ${total}: ${label}` });
+    try {
+'''
+          if queue_start not in text:
+            raise SystemExit("Queue operation anchor not found")
+          text = text.replace(queue_start, queue_start_new, 1)
+
+          queue_mp4 = '''      setQueueProgress({ index, total, completed: completed + 1, failed, fallbackDownloaded, skipped, message: `Completed ${index} of ${total}: ${label}` });
+      downloadTextFile(buildYouTubeDescription(vehicle, productKey), descriptionFilenameFromMp4(mp4Name));
+      await wait(1000);
+      return { status: "complete", label, imageDownloadFailures: renderResult?.imageDownloadFailures || [], imageCount: imageOrder.records.length };
+'''
+          queue_mp4_new = '''      setQueueProgress({ index, total, completed: completed + 1, failed, fallbackDownloaded, skipped, message: `Completed ${index} of ${total}: ${label}` });
+      const trackingWarning = await trackCompletedDownload({
+        vehicle,
+        filename: mp4Name,
+        format: "mp4",
+        queueDownload: true,
+        operationId,
+      });
+      downloadTextFile(buildYouTubeDescription(vehicle, productKey), descriptionFilenameFromMp4(mp4Name));
+      await wait(1000);
+      return {
+        status: "complete",
+        label,
+        trackingWarning,
+        imageDownloadFailures: renderResult?.imageDownloadFailures || [],
+        imageCount: imageOrder.records.length,
+      };
+'''
+          if queue_mp4 not in text:
+            raise SystemExit("Queue MP4 success anchor not found")
+          text = text.replace(queue_mp4, queue_mp4_new, 1)
+
+          queue_webm = '''        const fallbackAsset = await generateQueuedVehicle(vehicle);
+        downloadWebmFallback(fallbackAsset.blob, youtubeFilenameForVehicle(vehicle, "webm"));
+        setQueueProgress({ index, total, completed, failed: failed + 1, fallbackDownloaded: fallbackDownloaded + 1, skipped, message: `WebM fallback downloaded ${index} of ${total}: ${label}` });
+        await wait(1000);
+        return {
+          status: "fallback",
+          label,
+          error: `${label}: MP4 failed, WebM fallback downloaded. ${mp4Error.message || ""}`.trim(),
+        };
+'''
+          queue_webm_new = '''        const fallbackAsset = await generateQueuedVehicle(vehicle);
+        const webmName = youtubeFilenameForVehicle(vehicle, "webm");
+        downloadWebmFallback(fallbackAsset.blob, webmName);
+        const trackingWarning = await trackCompletedDownload({
+          vehicle,
+          filename: webmName,
+          format: "webm",
+          queueDownload: true,
+          operationId,
+        });
+        setQueueProgress({ index, total, completed, failed: failed + 1, fallbackDownloaded: fallbackDownloaded + 1, skipped, message: `WebM fallback downloaded ${index} of ${total}: ${label}` });
+        await wait(1000);
+        return {
+          status: "fallback",
+          label,
+          trackingWarning,
+          error: `${label}: MP4 failed, WebM fallback downloaded. ${mp4Error.message || ""}`.trim(),
+        };
+'''
+          if queue_webm not in text:
+            raise SystemExit("Queue WebM success anchor not found")
+          text = text.replace(queue_webm, queue_webm_new, 1)
+
+          queue_result = '''        if (result.status === "fallback") {
+          failed += 1;
+          fallbackDownloaded += 1;
+          failures.push(result.error);
+'''
+          queue_result_new = '''        if (result.status === "fallback") {
+          failed += 1;
+          fallbackDownloaded += 1;
+          failures.push(result.error);
+          if (result.trackingWarning) failures.push(result.trackingWarning);
+'''
+          if queue_result not in text:
+            raise SystemExit("Queue fallback result anchor not found")
+          text = text.replace(queue_result, queue_result_new, 1)
+
+          queue_complete = '''        } else {
+          completed += 1;
+          const imageFailures = Array.isArray(result.imageDownloadFailures) ? result.imageDownloadFailures.length : 0;
+'''
+          queue_complete_new = '''        } else {
+          completed += 1;
+          if (result.trackingWarning) failures.push(result.trackingWarning);
+          const imageFailures = Array.isArray(result.imageDownloadFailures) ? result.imageDownloadFailures.length : 0;
+'''
+          if queue_complete not in text:
+            raise SystemExit("Queue complete result anchor not found")
+          text = text.replace(queue_complete, queue_complete_new, 1)
+          page.write_text(text, encoding="utf-8")
+
+          dashboard = Path("pages/DashboardPage.jsx")
+          dash = dashboard.read_text(encoding="utf-8")
+          dash = dash.replace('  knowledge_hub_article: "published",', '  knowledge_hub_article: "sent to Wix",')
+          dashboard.write_text(dash, encoding="utf-8")
+
+          tests = Path("tests/content-operations-wiring.test.js")
+          tests.write_text('''import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import {
+  createYouTubeExportOperationId,
+  recordYouTubeGeneratorDownload,
+  youtubeActivityTypeForProduct,
+} from "../services/marketingDailyOperations.js";
+
+const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
+
+test("global browser anchor interception is completely removed", async () => {
+  const service = await read("../services/marketingDailyOperations.js");
+  assert.doesNotMatch(service, /HTMLAnchorElement\.prototype\.click/);
+  assert.doesNotMatch(service, /document\.querySelector\("\.youtube-generator"\)/);
+  assert.doesNotMatch(service, /pageText|originalClick|trackedDownloadClick/);
+});
+
+test("YouTube Generator directly connects all four successful video paths", async () => {
+  const page = await read("../pages/YouTubeGeneratorPage.jsx");
+  assert.match(page, /handleDownloadMp4[\s\S]*trackCompletedDownload\([\s\S]*format: "mp4"[\s\S]*queueDownload: false/);
+  assert.match(page, /handleDownloadWebm[\s\S]*trackCompletedDownload\([\s\S]*format: "webm"[\s\S]*queueDownload: false/);
+  assert.match(page, /exportQueuedVehicle[\s\S]*format: "mp4"[\s\S]*queueDownload: true/);
+  assert.match(page, /exportQueuedVehicle[\s\S]*format: "webm"[\s\S]*queueDownload: true/);
+});
+
+test("structured vehicle ID, registration and queue status are supplied directly", async () => {
+  const service = await read("../services/marketingDailyOperations.js");
+  const page = await read("../pages/YouTubeGeneratorPage.jsx");
+  assert.match(service, /vehicle_id: vehicleId/);
+  assert.match(service, /registration,/);
+  assert.match(service, /queue_download: Boolean\(queueDownload\)/);
+  assert.match(page, /vehicle: selectedVehicle/);
+  assert.match(page, /vehicle,/);
+  assert.doesNotMatch(`${service}\n${page}`, /page\.textContent|queue_download:.*includes|querySelector\("\.youtube-generator"\)/);
+});
+
+test("operation ID is created before download and reused by the success callback", async () => {
+  const page = await read("../pages/YouTubeGeneratorPage.jsx");
+  const service = await read("../services/marketingDailyOperations.js");
+  assert.match(page, /const operationId = createYouTubeExportOperationId\(\);[\s\S]*downloadYouTubeMp4FromServer[\s\S]*operationId/);
+  assert.match(service, /sourceId: `youtube-export:\$\{productKey\}:\$\{operationId\}`/);
+  assert.doesNotMatch(service, /blob:|href|createObjectURL/);
+  assert.notEqual(createYouTubeExportOperationId(), createYouTubeExportOperationId());
+});
+
+test("product mapping excludes Cars and non-video exports", () => {
+  assert.equal(youtubeActivityTypeForProduct("vanFinance"), "van_finance_reel");
+  assert.equal(youtubeActivityTypeForProduct("rent2buy"), "rent2buy_reel");
+  assert.equal(youtubeActivityTypeForProduct("cars"), null);
+});
+
+test("tracking failure is caught after download and does not enter download failure handling", async () => {
+  const page = await read("../pages/YouTubeGeneratorPage.jsx");
+  assert.match(page, /YOUTUBE CONTENT OPERATIONS TRACKING ERROR/);
+  assert.match(page, /Video downloaded, but Content Operations could not be updated\./);
+  assert.match(page, /downloadYouTubeMp4FromServer[\s\S]*await trackCompletedDownload/);
+});
+
+test("Knowledge Hub card uses first-Wix-draft wording", async () => {
+  const dashboard = await read("../pages/DashboardPage.jsx");
+  assert.match(dashboard, /knowledge_hub_article: "sent to Wix"/);
+  assert.doesNotMatch(dashboard, /knowledge_hub_article: "published"/);
+});
+
+test("Knowledge Hub activity still records only the first successful Wix draft creation", async () => {
+  const api = await read("../api/marketing-wix-publishing.js");
+  assert.match(api, /result\.operation!=="created"\|\|clean\(article\.wix_item_id\)/);
+  assert.match(api, /activity_type:"knowledge_hub_article"/);
+  assert.match(api, /source:"knowledge_hub_wix_draft"/);
+  assert.match(api, /source_id:article\.id/);
+  assert.match(api, /created_or_updated:"created"/);
+});
+
+test("migration remains required and safely defaults existing rows", async () => {
+  const migration = await read("../supabase/migrations/016_content_operations_knowledge_hub.sql");
+  assert.match(migration, /marketing_daily_target_schedules[\s\S]*knowledge_hub_article integer not null default 2/);
+  assert.match(migration, /marketing_daily_target_overrides[\s\S]*knowledge_hub_article integer not null default 2/);
+  assert.match(migration, /marketing_daily_activity_events_activity_type_check/);
+});
+
+test("Wix success remains non-live and tracking failures are non-blocking", async () => {
+  const api = await read("../api/marketing-wix-publishing.js");
+  const wixLib = await read("../lib/wixPublishing.js");
+  assert.match(api, /contentOperationsWarning="Wix draft created, but Content Operations could not be updated\."/);
+  assert.match(api, /published:false/);
+  assert.doesNotMatch(`${api}\n${wixLib}`, /publishLive|livePublish|status:\s*["']published["']/);
+});
+''', encoding="utf-8")
+
+          workflow = Path(".github/workflows/apply-direct-content-operations-patch.yml")
+          workflow.unlink()
+
+      - name: Commit direct wiring
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add services/marketingDailyOperations.js pages/YouTubeGeneratorPage.jsx pages/DashboardPage.jsx tests/content-operations-wiring.test.js .github/workflows/apply-direct-content-operations-patch.yml
+          git commit -m "Use direct download tracking for Content Operations"
+          git push origin HEAD:fix/content-operations-reel-knowledge-wiring
