@@ -1,0 +1,194 @@
+name: Finalize direct Content Operations wiring
+
+on:
+  push:
+    branches:
+      - fix/content-operations-reel-knowledge-wiring
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'fix/content-operations-reel-knowledge-wiring' || github.ref_name == 'fix/content-operations-reel-knowledge-wiring'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/content-operations-reel-knowledge-wiring
+          fetch-depth: 0
+
+      - name: Patch direct download handlers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          page = Path('pages/YouTubeGeneratorPage.jsx')
+          text = page.read_text(encoding='utf-8')
+
+          import_anchor = 'import { buildCarFinancePostingCaption, buildPostingCaption } from "../utils/creativeUtils.js";\n'
+          tracking_import = '''import {
+            createYouTubeExportOperationId,
+            recordYouTubeGeneratorDownload,
+            YOUTUBE_TRACKING_WARNING,
+          } from "../services/marketingDailyOperations.js";
+          '''.replace('          ', '')
+          if tracking_import not in text:
+              text = text.replace(import_anchor, import_anchor + tracking_import, 1)
+
+          state_anchor = '  const queueCancelRef = useRef(false);\n'
+          helper = '''
+            async function trackCompletedDownload({ vehicle, filename, format, queueDownload, operationId }) {
+              try {
+                await recordYouTubeGeneratorDownload({
+                  productKey,
+                  vehicle,
+                  filename,
+                  format,
+                  queueDownload,
+                  operationId,
+                });
+                return "";
+              } catch (trackingError) {
+                console.error("YOUTUBE CONTENT OPERATIONS TRACKING ERROR", trackingError);
+                setError(YOUTUBE_TRACKING_WARNING);
+                return YOUTUBE_TRACKING_WARNING;
+              }
+            }
+          '''.replace('            ', '  ')
+          if 'async function trackCompletedDownload' not in text:
+              text = text.replace(state_anchor, state_anchor + helper, 1)
+
+          single_mp4_pattern = re.compile(r'''    try \{\n      const \{ payload \} = buildServerRenderPayloadForVehicle\(selectedVehicle\);\n      const renderResult = await downloadYouTubeMp4FromServer\(\n        payload,\n        mp4Filename\(\),\n        setStatus\n      \);\n      downloadTextFile\(buildYouTubeDescription\(selectedVehicle, productKey\), descriptionFilenameFromMp4\(mp4Filename\(\)\)\);''')
+          single_mp4_replacement = '''    const filename = mp4Filename();
+            const operationId = createYouTubeExportOperationId();
+            try {
+              const { payload } = buildServerRenderPayloadForVehicle(selectedVehicle);
+              const renderResult = await downloadYouTubeMp4FromServer(
+                payload,
+                filename,
+                setStatus
+              );
+              await trackCompletedDownload({
+                vehicle: selectedVehicle,
+                filename,
+                format: "mp4",
+                queueDownload: false,
+                operationId,
+              });
+              downloadTextFile(buildYouTubeDescription(selectedVehicle, productKey), descriptionFilenameFromMp4(filename));'''.replace('            ', '')
+          text, count = single_mp4_pattern.subn(single_mp4_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit('single MP4 patch failed')
+
+          single_webm_pattern = re.compile(r'''  function handleDownloadWebm\(\) \{\n    try \{\n      downloadWebmFallback\(currentAsset\?\.blob, mp4Filename\(\)\);\n      setStatus\("WebM fallback downloaded\."\);\n      setError\(""\);\n    \} catch \(fallbackError\) \{\n      setError\(fallbackError\.message \|\| "Could not download WebM fallback\."\);\n    \}\n  \}''')
+          single_webm_replacement = '''  async function handleDownloadWebm() {
+            const filename = youtubeFilenameForVehicle(selectedVehicle, "webm");
+            const operationId = createYouTubeExportOperationId();
+            try {
+              downloadWebmFallback(currentAsset?.blob, filename);
+              const trackingWarning = await trackCompletedDownload({
+                vehicle: selectedVehicle,
+                filename,
+                format: "webm",
+                queueDownload: false,
+                operationId,
+              });
+              setStatus("WebM fallback downloaded.");
+              if (!trackingWarning) setError("");
+            } catch (fallbackError) {
+              setError(fallbackError.message || "Could not download WebM fallback.");
+            }
+          }'''.replace('          ', '')
+          text, count = single_webm_pattern.subn(single_webm_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit('single WebM patch failed')
+
+          queue_operation = '    const mp4Name = youtubeFilenameForVehicle(vehicle, "mp4");\n    setQueueProgress('
+          text = text.replace(queue_operation, '    const mp4Name = youtubeFilenameForVehicle(vehicle, "mp4");\n    const operationId = createYouTubeExportOperationId();\n    setQueueProgress(', 1)
+
+          queue_mp4_pattern = re.compile(r'''      setQueueProgress\(\{ index, total, completed: completed \+ 1, failed, fallbackDownloaded, skipped, message: `Completed \$\{index\} of \$\{total\}: \$\{label\}` \}\);\n      downloadTextFile\(buildYouTubeDescription\(vehicle, productKey\), descriptionFilenameFromMp4\(mp4Name\)\);\n      await wait\(1000\);\n      return \{ status: "complete", label, imageDownloadFailures: renderResult\?\.imageDownloadFailures \|\| \[\], imageCount: imageOrder\.records\.length \};''')
+          queue_mp4_replacement = '''      setQueueProgress({ index, total, completed: completed + 1, failed, fallbackDownloaded, skipped, message: `Completed ${index} of ${total}: ${label}` });
+            const trackingWarning = await trackCompletedDownload({
+              vehicle,
+              filename: mp4Name,
+              format: "mp4",
+              queueDownload: true,
+              operationId,
+            });
+            downloadTextFile(buildYouTubeDescription(vehicle, productKey), descriptionFilenameFromMp4(mp4Name));
+            await wait(1000);
+            return {
+              status: "complete",
+              label,
+              trackingWarning,
+              imageDownloadFailures: renderResult?.imageDownloadFailures || [],
+              imageCount: imageOrder.records.length,
+            };'''.replace('            ', '')
+          text, count = queue_mp4_pattern.subn(queue_mp4_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit('queue MP4 patch failed')
+
+          queue_webm_pattern = re.compile(r'''        const fallbackAsset = await generateQueuedVehicle\(vehicle\);\n        downloadWebmFallback\(fallbackAsset\.blob, youtubeFilenameForVehicle\(vehicle, "webm"\)\);\n        setQueueProgress\(\{ index, total, completed, failed: failed \+ 1, fallbackDownloaded: fallbackDownloaded \+ 1, skipped, message: `WebM fallback downloaded \$\{index\} of \$\{total\}: \$\{label\}` \}\);\n        await wait\(1000\);\n        return \{\n          status: "fallback",\n          label,\n          error: `\$\{label\}: MP4 failed, WebM fallback downloaded\. \$\{mp4Error\.message \|\| ""\}`\.trim\(\),\n        \};''')
+          queue_webm_replacement = '''        const fallbackAsset = await generateQueuedVehicle(vehicle);
+            const webmName = youtubeFilenameForVehicle(vehicle, "webm");
+            downloadWebmFallback(fallbackAsset.blob, webmName);
+            const trackingWarning = await trackCompletedDownload({
+              vehicle,
+              filename: webmName,
+              format: "webm",
+              queueDownload: true,
+              operationId,
+            });
+            setQueueProgress({ index, total, completed, failed: failed + 1, fallbackDownloaded: fallbackDownloaded + 1, skipped, message: `WebM fallback downloaded ${index} of ${total}: ${label}` });
+            await wait(1000);
+            return {
+              status: "fallback",
+              label,
+              trackingWarning,
+              error: `${label}: MP4 failed, WebM fallback downloaded. ${mp4Error.message || ""}`.trim(),
+            };'''.replace('            ', '')
+          text, count = queue_webm_pattern.subn(queue_webm_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit('queue WebM patch failed')
+
+          text = text.replace(
+              '          failures.push(result.error);\n',
+              '          failures.push(result.error);\n          if (result.trackingWarning) failures.push(result.trackingWarning);\n',
+              1,
+          )
+          text = text.replace(
+              '          completed += 1;\n          const imageFailures',
+              '          completed += 1;\n          if (result.trackingWarning) failures.push(result.trackingWarning);\n          const imageFailures',
+              1,
+          )
+
+          page.write_text(text, encoding='utf-8')
+
+          dashboard = Path('pages/DashboardPage.jsx')
+          dash = dashboard.read_text(encoding='utf-8').replace(
+              '  knowledge_hub_article: "published",',
+              '  knowledge_hub_article: "sent to Wix",',
+          )
+          dashboard.write_text(dash, encoding='utf-8')
+
+          for path in [
+              Path('.github/workflows/apply-direct-content-operations-patch.yml'),
+              Path('.github/workflows/run-direct-content-operations-patch.yml'),
+              Path('.github/workflows/finalize-direct-content-operations.yml'),
+              Path('patch-error.txt'),
+          ]:
+              path.unlink(missing_ok=True)
+          PY
+
+      - name: Commit direct wiring
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Use direct download tracking for Content Operations"
+          git push origin HEAD:fix/content-operations-reel-knowledge-wiring
