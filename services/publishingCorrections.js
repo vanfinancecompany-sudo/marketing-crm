@@ -21,7 +21,7 @@ export const proposePublishingCorrection = (articleId, unresolvedReasons = [], p
 export const savePublishingCorrectionScope = (articleId, productScope) =>
   request("setScope", { article_id: articleId, product_scope: productScope });
 
-export const acceptPublishingCorrection = (proposal, confirmLargeReduction = false) =>
+export const acceptPublishingCorrection = (proposal, confirmations = {}) =>
   request("accept", {
     article_id: proposal.article_id,
     source_updated_at: proposal.source_updated_at,
@@ -29,7 +29,8 @@ export const acceptPublishingCorrection = (proposal, confirmLargeReduction = fal
     product_scope: proposal.product_scope,
     excessive_content_loss: Boolean(proposal.excessive_content_loss),
     unexplained_content_loss_percent: Number(proposal.unexplained_content_loss_percent) || 0,
-    confirm_large_reduction: Boolean(confirmLargeReduction),
+    confirm_large_reduction: Boolean(confirmations.contentLoss),
+    confirm_manual_claims: Boolean(confirmations.claims),
     correction_complete: Boolean(proposal.correction_complete),
     remaining_hard_blocks: proposal.remaining_hard_blocks || [],
     markdown_structure_valid: Boolean(proposal.markdown_structure_valid),
