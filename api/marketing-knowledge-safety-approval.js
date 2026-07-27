@@ -6,6 +6,7 @@ import {
 } from "../lib/knowledgeHub.js";
 import { articleContentHash } from "../lib/editorialIntelligence.js";
 import { evaluatePublishingSafety } from "../lib/publishingSafety.js";
+import { publishKnowledgeArticleToWix } from "./marketing-wix-publishing.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 150000) => String(value || "").trim().slice(0, limit);
@@ -38,11 +39,8 @@ function getSupabase() {
 function parseBody(request) {
   if (!request.body) return {};
   if (typeof request.body === "string") {
-    try {
-      return JSON.parse(request.body);
-    } catch {
-      throw new ApiError(400, "The request body is not valid JSON.");
-    }
+    try { return JSON.parse(request.body); }
+    catch { throw new ApiError(400, "The request body is not valid JSON."); }
   }
   return request.body;
 }
@@ -71,51 +69,34 @@ function cleanArticlePayload(article = {}) {
     internal_link_suggestions: Array.isArray(article.internal_link_suggestions)
       ? article.internal_link_suggestions.slice(0, 100)
       : [],
-    quality_checks: calculateKnowledgeQualityChecks(
-      article,
-      article.generation_metadata?.approximate_length
-    ),
-    generation_metadata:
-      article.generation_metadata && typeof article.generation_metadata === "object"
-        ? article.generation_metadata
-        : {},
+    quality_checks: calculateKnowledgeQualityChecks(article, article.generation_metadata?.approximate_length),
+    generation_metadata: article.generation_metadata && typeof article.generation_metadata === "object"
+      ? article.generation_metadata
+      : {},
     status: "approved",
     approved_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
   const validation = validateKnowledgeArticle(payload);
-  if (Object.keys(validation).length) {
-    throw new ApiError(400, Object.values(validation).join(" "));
-  }
+  if (Object.keys(validation).length) throw new ApiError(400, Object.values(validation).join(" "));
   return payload;
 }
 
 async function loadSafetyContext(supabase, articleIds) {
   const [assessmentsResult, businessKnowledgeResult] = await Promise.all([
-    supabase
-      .from("knowledge_article_editorial_assessments")
-      .select("*")
-      .in("article_id", articleIds)
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("knowledge_business_sections")
-      .select("section_key,content,entries,active")
-      .eq("active", true)
-      .order("sort_order", { ascending: true }),
+    supabase.from("knowledge_article_editorial_assessments").select("*").in("article_id", articleIds).order("created_at", { ascending: false }),
+    supabase.from("knowledge_business_sections").select("section_key,content,entries,active").eq("active", true).order("sort_order", { ascending: true }),
   ]);
   const assessments = resultData(assessmentsResult, "Editorial assessments could not be loaded.") || [];
   const latest = new Map();
-  assessments.forEach((assessment) => {
-    if (!latest.has(assessment.article_id)) latest.set(assessment.article_id, assessment);
-  });
+  assessments.forEach((assessment) => { if (!latest.has(assessment.article_id)) latest.set(assessment.article_id, assessment); });
   return {
     latest,
-    businessKnowledge:
-      resultData(businessKnowledgeResult, "Business Knowledge could not be loaded.") || [],
+    businessKnowledge: resultData(businessKnowledgeResult, "Business Knowledge could not be loaded.") || [],
   };
 }
 
-function ensureSafe(article, context) {
+function ensureSafe(article, context, confirmManualClaims = false) {
   const contentHash = articleContentHash(article);
   const safety = evaluatePublishingSafety(
     { ...article, content_hash: contentHash },
@@ -125,27 +106,83 @@ function ensureSafe(article, context) {
       currentContentHash: contentHash,
     }
   );
-  if (safety.hard_blocked) {
-    throw new ApiError(409, safety.hard_block_reasons.join(" "), safety);
+  if (safety.hard_blocked) throw new ApiError(409, safety.hard_block_reasons.join(" "), safety);
+  if (safety.requires_manual_claim_review && !confirmManualClaims) {
+    throw new ApiError(409, "A required business or financial claim confirmation is missing.", safety);
   }
   return safety;
 }
 
-async function approveArticle(supabase, article) {
+async function loadLatestArticle(supabase, articleId) {
+  return resultData(
+    await supabase.from("knowledge_articles").select("*").eq("id", articleId).single(),
+    "Article could not be found."
+  );
+}
+
+async function approveArticle(supabase, article, confirmManualClaims = false) {
   if (!article?.id) throw new ApiError(400, "Article id is required.");
-  const context = await loadSafetyContext(supabase, [article.id]);
-  const safety = ensureSafe(article, context);
-  const payload = cleanArticlePayload(article);
+  const latest = await loadLatestArticle(supabase, article.id);
+  const context = await loadSafetyContext(supabase, [latest.id]);
+  const safety = ensureSafe(latest, context, confirmManualClaims);
+  const payload = cleanArticlePayload(latest);
   const saved = resultData(
-    await supabase
-      .from("knowledge_articles")
-      .update(payload)
-      .eq("id", article.id)
-      .select()
-      .single(),
+    await supabase.from("knowledge_articles").update(payload).eq("id", latest.id).select().single(),
     "Article could not be approved."
   );
   return { article: saved, safety };
+}
+
+async function approveAndCreateWixDraft(supabase, body) {
+  const articleId = clean(body.article_id, 100);
+  if (!articleId) throw new ApiError(400, "Article id is required.");
+  const latest = await loadLatestArticle(supabase, articleId);
+  const reviewedHash = clean(body.reviewed_content_hash, 200);
+  const savedHash = articleContentHash(latest);
+  if (!reviewedHash) throw new ApiError(409, "Corrections are not saved. Accept corrections before continuing.");
+  if (reviewedHash !== savedHash) {
+    throw new ApiError(409, "Saved content differs from the reviewed article. Reload the article before approval and Wix export.", {
+      reviewed_content_hash: reviewedHash,
+      saved_content_hash: savedHash,
+    });
+  }
+  const context = await loadSafetyContext(supabase, [articleId]);
+  const safety = ensureSafe(latest, context, body.confirm_manual_claims === true);
+  let approvedArticle = latest;
+  let approvalPerformed = false;
+  if (latest.status !== "approved") {
+    approvedArticle = resultData(
+      await supabase.from("knowledge_articles").update(cleanArticlePayload(latest)).eq("id", articleId).select().single(),
+      "Article could not be approved."
+    );
+    approvalPerformed = true;
+  }
+  try {
+    const wixResult = await publishKnowledgeArticleToWix({ supabase, articleId });
+    const refreshed = await loadLatestArticle(supabase, articleId);
+    return {
+      article: refreshed,
+      safety,
+      wix: wixResult.wix,
+      approval_performed: approvalPerformed,
+      partial: false,
+      live_published: false,
+    };
+  } catch (error) {
+    const refreshed = await loadLatestArticle(supabase, articleId);
+    return {
+      article: refreshed,
+      safety,
+      wix: null,
+      approval_performed: approvalPerformed,
+      partial: true,
+      retry_wix: true,
+      live_published: false,
+      error_type: error.type || "api",
+      message: "Article approved, but Wix draft creation failed.",
+      wix_error: clean(error.message, 1000),
+    };
+  }
 }
 
 async function approveArticles(supabase, articleIds) {
@@ -153,54 +190,32 @@ async function approveArticles(supabase, articleIds) {
     ? [...new Set(articleIds.map((id) => clean(id, 100)).filter(Boolean))].slice(0, 500)
     : [];
   if (!ids.length) throw new ApiError(400, "Select at least one article.");
-  const articles = resultData(
-    await supabase.from("knowledge_articles").select("*").in("id", ids),
-    "Articles could not be loaded."
-  ) || [];
+  const articles = resultData(await supabase.from("knowledge_articles").select("*").in("id", ids), "Articles could not be loaded.") || [];
   if (articles.length !== ids.length) throw new ApiError(404, "One or more articles could not be found.");
   const context = await loadSafetyContext(supabase, ids);
   const blocked = [];
   articles.forEach((article) => {
-    try {
-      ensureSafe(article, context);
-    } catch (error) {
-      blocked.push({ article_id: article.id, title: article.title, reasons: error.details?.hard_block_reasons || [error.message] });
-    }
+    try { ensureSafe(article, context, false); }
+    catch (error) { blocked.push({ article_id: article.id, title: article.title, reasons: error.details?.hard_block_reasons || [error.message] }); }
   });
-  if (blocked.length) {
-    throw new ApiError(
-      409,
-      `${blocked.length} selected article(s) are blocked by publishing safety checks.`,
-      { blocked }
-    );
-  }
+  if (blocked.length) throw new ApiError(409, `${blocked.length} selected article(s) are blocked by publishing safety checks.`, { blocked });
   const now = new Date().toISOString();
-  resultData(
-    await supabase
-      .from("knowledge_articles")
-      .update({ status: "approved", approved_at: now, updated_at: now })
-      .in("id", ids),
-    "Articles could not be approved."
-  );
+  resultData(await supabase.from("knowledge_articles").update({ status: "approved", approved_at: now, updated_at: now }).in("id", ids), "Articles could not be approved.");
   return { update: { ids, status: "approved", approved_at: now, updated_at: now } };
 }
 
 export default async function handler(request, response) {
-  if (request.method !== "POST") {
-    return response.status(405).json({ ok: false, message: "Method not allowed." });
-  }
-  if (!authorize(request)) {
-    return response.status(401).json({ ok: false, message: "Access key not recognised." });
-  }
+  if (request.method !== "POST") return response.status(405).json({ ok: false, message: "Method not allowed." });
+  if (!authorize(request)) return response.status(401).json({ ok: false, message: "Access key not recognised." });
   let body = {};
   try {
     body = parseBody(request);
     const supabase = getSupabase();
-    const output = body.action === "approveArticle"
-      ? await approveArticle(supabase, body.article)
-      : body.action === "approveArticles"
-        ? await approveArticles(supabase, body.article_ids)
-        : (() => { throw new ApiError(400, "Unsupported safety approval action."); })();
+    let output;
+    if (body.action === "approveArticle") output = await approveArticle(supabase, body.article, body.confirm_manual_claims === true);
+    else if (body.action === "approveAndCreateWixDraft") output = await approveAndCreateWixDraft(supabase, body);
+    else if (body.action === "approveArticles") output = await approveArticles(supabase, body.article_ids);
+    else throw new ApiError(400, "Unsupported safety approval action.");
     return response.status(200).json({ ok: true, ...output });
   } catch (error) {
     console.error("KNOWLEDGE SAFETY APPROVAL ERROR", {
