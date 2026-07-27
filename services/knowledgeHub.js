@@ -75,3 +75,9 @@ export function saveBusinessKnowledgeSection(businessSection) {
 export function reviewKnowledgeArticle(articleId) {
   return requestKnowledgeHub("reviewArticle", { article_id: articleId });
 }
+
+if (typeof window !== "undefined") {
+  import("../components/PublishingSafetyCorrections.jsx")
+    .then(({ installPublishingSafetyCorrections }) => installPublishingSafetyCorrections())
+    .catch((error) => console.error("PUBLISHING SAFETY CORRECTIONS UI ERROR", error));
+}
