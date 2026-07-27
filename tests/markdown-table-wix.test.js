@@ -81,13 +81,44 @@ test("plain-text Wix fields receive stacked table content without pipe syntax", 
   assert.doesNotMatch(text, /\|\s*---\s*\|/);
 });
 
-test("preview and Wix rich content use the same responsive table renderer", () => {
+test("converted tables inherit surrounding article typography", () => {
+  const html = buildWixRichContent(standard).nodes.find((node) => node.type === "HTML").htmlData.html;
+  assert.match(html, /font-family:inherit/);
+  assert.match(html, /font-size:inherit/);
+  assert.match(html, /line-height:inherit/);
+  assert.match(html, /color:inherit/);
+  assert.doesNotMatch(html, /font-family\s*:\s*(?!inherit)/);
+  assert.doesNotMatch(html, /font-size\s*:\s*\d+(?:\.\d+)?px/);
+});
+
+test("desktop table and mobile cards share the same typography rules", () => {
+  const html = buildWixRichContent(standard).nodes.find((node) => node.type === "HTML").htmlData.html;
+  assert.match(html, /\.kh-responsive-table,\.kh-responsive-table \*,\.kh-table-fallback,\.kh-table-fallback \*\{font-family:inherit;font-size:inherit;line-height:inherit;color:inherit\}/);
+  assert.match(html, /\.kh-responsive-table th,\.kh-responsive-table h4,\.kh-responsive-table strong/);
+  assert.match(html, /font-weight:600/);
+  assert.match(html, /font-weight:400/);
+});
+
+test("malformed-table fallback inherits article typography", () => {
+  const malformed = `| Vehicle | Best for |\n| Transit | Builders |`;
+  const html = buildWixRichContent(malformed).nodes.find((node) => node.type === "HTML").htmlData.html;
+  assert.match(html, /kh-table-fallback/);
+  assert.match(html, /font-family:inherit/);
+  assert.match(html, /font-size:inherit/);
+  assert.match(html, /line-height:inherit/);
+});
+
+test("preview and Wix rich content use the same responsive table renderer and typography", () => {
   const preview = renderKnowledgePreviewHtml(standard);
   const rich = buildWixRichContent(standard);
   const wixHtml = rich.nodes.find((node) => node.type === "HTML").htmlData.html;
   assert.match(preview.html, /kh-responsive-table/);
   assert.match(wixHtml, /kh-responsive-table/);
   assert.match(preview.html, /kh-table-card__field/);
+  assert.match(preview.html, /font-family:inherit/);
+  assert.match(wixHtml, /font-family:inherit/);
+  assert.match(preview.html, /font-size:inherit/);
+  assert.match(wixHtml, /font-size:inherit/);
 });
 
 test("stored Markdown is never mutated", () => {
@@ -101,8 +132,8 @@ test("stored Markdown is never mutated", () => {
 test("Wix export remains draft-only", async () => {
   const api = await read("../api/marketing-wix-publishing.js");
   const lib = await read("../lib/wixPublishing.js");
-  assert.match(api, /content_status:\"Draft\"/);
+  assert.match(api, /content_status:"Draft"/);
   assert.match(api, /published:false/);
-  assert.match(lib, /syncStatus: \"Draft\"/);
+  assert.match(lib, /syncStatus: "Draft"/);
   assert.doesNotMatch(`${api}\n${lib}`, /publishLive|livePublish|status:\s*["']published["']/);
 });
