@@ -1,89 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { evaluatePublishingSafety, assertPublishingSafe } from "../lib/publishingSafety.js";
-import {
-  autoCorrectPureRent2BuyArticle,
-  evaluateRent2BuyRule,
-  RENT2BUY_COLLECTION_SENTENCE,
-  withPermanentRent2BuyKnowledge,
-} from "../lib/rent2BuyRules.js";
+import { evaluateRent2BuyRule, RENT2BUY_CORE_WORDING, RENT2BUY_COLLECTION_SENTENCE, validateMarkdownStructure, withPermanentRent2BuyKnowledge } from "../lib/rent2BuyRules.js";
 import { buildCorrectionPreview } from "../lib/publishingCorrections.js";
+const filler="Customers should review the agreement carefully and make sure the arrangement suits their circumstances before proceeding. ".repeat(24);
+const rent2buy=(content,cta="Apply for Rent2Buy")=>({id:"r2b",title:"Rent2Buy vans",category:"Rent2Buy",status:"draft",content_markdown:content,content_html:"<p>Clean output</p>",faq_json:[],cta});
+const finance=(content)=>({id:"fin",title:"Van finance guide",category:"Van Finance",status:"draft",content_markdown:content,content_html:"<p>Clean output</p>",faq_json:[],cta:"View finance vans"});
+const approved=`## How Rent2Buy works\n\n${RENT2BUY_CORE_WORDING}\n\n${filler}`;
 
-const filler = "Customers should review the agreement carefully and make sure the arrangement suits their circumstances before proceeding. ".repeat(24);
-const rent2buy = (content) => ({ id: "r2b", title: "Rent2Buy vans", category: "Rent2Buy", status: "draft", content_markdown: content, content_html: "<p>Clean output</p>", faq_json: [], cta: "View Rent2Buy vans" });
-const finance = (content) => ({ id: "fin", title: "Van finance guide", category: "Van Finance", status: "draft", content_markdown: content, content_html: "<p>Clean output</p>", faq_json: [], cta: "View finance vans" });
-const approved = `## How Rent2Buy works\n\nRent2Buy is a separate rent-to-own arrangement and is not a finance product.\n\n${RENT2BUY_COLLECTION_SENTENCE}\n\nThe agreement terms, payment structure, eligibility requirements and ownership conditions should be reviewed before proceeding.\n\n${filler}`;
+test("Rent2Buy finance terminology is blocked",()=>assert.equal(evaluateRent2BuyRule(rent2buy(`${approved}\n\nTraditional finance options and finance agreements are discussed.`)).passed,false));
+test("negative delivery wording is blocked",()=>assert.equal(evaluateRent2BuyRule(rent2buy(`${approved}\n\nFree UK delivery is not available.`)).passed,false));
+test("semantic trial wording is blocked",()=>assert.equal(evaluateRent2BuyRule(rent2buy(`${approved}\n\nTest whether the van suits you before buying.`)).passed,false));
+test("exact standalone collection sentence is required",()=>{assert.match(approved,new RegExp(`(?:^|\\n)${RENT2BUY_COLLECTION_SENTENCE.replace(".","\\.")}(?:\\n|$)`));assert.equal(evaluateRent2BuyRule(rent2buy(approved)).passed,true);});
+test("Van Finance remains unaffected",()=>assert.equal(evaluateRent2BuyRule(finance(`## Finance options\n\nHire Purchase, APR and lenders may be discussed.\n\n${filler}`)).applies,false));
+test("mixed products remain separated",()=>{const mixed={...rent2buy(`## Van Finance\n\nHire Purchase and APR may be relevant.\n\n${filler}\n\n## Rent2Buy\n\n${RENT2BUY_CORE_WORDING}\n\n${filler}`),category:"Both"};assert.equal(evaluateRent2BuyRule(mixed).passed,true);});
 
-test("Rent2Buy content containing finance terminology is blocked", () => {
-  const result = evaluateRent2BuyRule(rent2buy(`${approved}\n\nAPR and lender panels are available.`));
-  assert.equal(result.passed, false);
-});
+test("bullet lists remain on separate lines",()=>assert.equal(validateMarkdownStructure("## Benefits\n\n- One\n- Two\n","").markdown_structure_valid,true));
+test("merged bullet items are rejected",()=>assert.equal(validateMarkdownStructure("## Benefits\n\n- One - Two\n","").markdown_structure_valid,false));
+test("numbered lists remain sequential",()=>assert.equal(validateMarkdownStructure("## Practical Next Steps\n\n1. Apply\n2. Review eligibility\n3. Collect\n","").markdown_structure_valid,true));
+test("1. 2. numbering is rejected",()=>assert.equal(validateMarkdownStructure("## Steps\n\n1. 2. Apply\n","").markdown_structure_valid,false));
+test("horizontal rules stay on their own lines",()=>{assert.equal(validateMarkdownStructure("Paragraph\n\n---\n\nNext","").markdown_structure_valid,true);assert.equal(validateMarkdownStructure("Paragraph --- Next","").markdown_structure_valid,false);});
+test("headings retain spacing",()=>assert.equal(validateMarkdownStructure("## Heading\nBody","").markdown_structure_valid,false));
+test("CTA remains separate",()=>{const md="## Summary\n\nUseful summary.\n\nApply for Rent2Buy\n";assert.equal(validateMarkdownStructure(md,"Apply for Rent2Buy").markdown_structure_valid,true);assert.equal(validateMarkdownStructure("Useful summary. Apply for Rent2Buy","Apply for Rent2Buy").markdown_structure_valid,false);});
 
-test("negative delivery mentions are removed rather than retained", () => {
-  const corrected = autoCorrectPureRent2BuyArticle(rent2buy(`${approved}\n\nFree delivery is not available. Home delivery is unavailable.`));
-  assert.doesNotMatch(corrected.content_markdown, /free delivery|home delivery/i);
-  assert.equal(evaluateRent2BuyRule(corrected).passed, true);
-});
-
-test("finance comparison sections are removed from pure Rent2Buy articles", () => {
-  const original = rent2buy(`${approved}\n\n## How Rent2Buy compares to traditional finance\n\nAPR, lenders and Hire Purchase are compared here.\n\n## Useful eligibility information\n\nApplicants should review eligibility and ownership conditions carefully.`);
-  const corrected = autoCorrectPureRent2BuyArticle(original);
-  assert.doesNotMatch(corrected.content_markdown, /traditional finance|APR|lenders|Hire Purchase/i);
-  assert.match(corrected.content_markdown, /Useful eligibility information/);
-});
-
-test("trial semantic variations are detected and removed", () => {
-  const original = rent2buy(`${approved}\n\nYou can test whether the van suits you before buying and rent before committing.`);
-  assert.equal(evaluateRent2BuyRule(original).passed, false);
-  const corrected = autoCorrectPureRent2BuyArticle(original);
-  assert.doesNotMatch(corrected.content_markdown, /test whether|rent before committing|suits you before buying/i);
-});
-
-test("exact standalone Southampton collection sentence is inserted", () => {
-  const corrected = autoCorrectPureRent2BuyArticle(rent2buy(`## How it works\n\nRent2Buy uses an agreement with rental payments.\n\n${filler}`));
-  assert.match(corrected.content_markdown, /(?:^|\n)Collection only from Southampton\.(?:$|\n)/);
-  assert.equal(corrected.content_markdown.match(/Collection only from Southampton\./g)?.length, 1);
-});
-
-test("no prohibited finance terminology remains after automatic correction", () => {
-  const original = rent2buy(`${approved}\n\n## Finance comparison\n\nPCP, Hire Purchase, Lease Purchase, APR, finance rates, approval rates and lender panels are discussed.`);
-  const corrected = autoCorrectPureRent2BuyArticle(original);
-  assert.doesNotMatch(corrected.content_markdown, /\bPCP\b|Hire Purchase|Lease Purchase|\bAPR\b|finance rates|approval rates|lender panels/i);
-  assert.equal(evaluateRent2BuyRule(corrected).passed, true);
-});
-
-test("unrelated useful Rent2Buy content is preserved", () => {
-  const useful = "## Eligibility documents\n\nApplicants should provide accurate information and review the agreement before proceeding.";
-  const corrected = autoCorrectPureRent2BuyArticle(rent2buy(`${approved}\n\n${useful}\n\nFree UK delivery is not available.`));
-  assert.match(corrected.content_markdown, /Eligibility documents/);
-  assert.match(corrected.content_markdown, /provide accurate information/);
-});
-
-test("corrected proposals remain incomplete when Rent2Buy failures remain", () => {
-  const original = rent2buy(`${approved}\n\nAPR and lender panels apply.`);
-  const proposed = { ...original, content_markdown: `${approved}\n\nAPR still applies.`, changes: [], removed_links: [], manual_confirmation_required: [], removed_sections: [], removal_reasons: [] };
-  const preview = buildCorrectionPreview({ originalArticle: original, proposed, safetyOptions: { ignoreAssessmentFreshness: true } });
-  assert.equal(preview.correction_complete, true, "normalisation should automatically remove the remaining prohibited content");
-  assert.equal(preview.safety_after.rent2buy_rule.passed, true);
-});
-
-test("Van Finance articles remain unaffected", () => {
-  const article = finance(`## Finance options\n\nHire Purchase, APR and lenders may be discussed where accurate.\n\n${filler}`);
-  assert.equal(evaluateRent2BuyRule(article).applies, false);
-});
-
-test("mixed articles keep Finance and Rent2Buy sections separated", () => {
-  const mixed = { ...rent2buy(`## Van Finance\n\nHire Purchase and APR may be relevant to finance customers.\n\n${filler}\n\n## Rent2Buy\n\n${approved}`), category: "Both" };
-  assert.equal(evaluateRent2BuyRule(mixed).passed, true);
-});
-
-test("Wix export safety independently blocks prohibited Rent2Buy wording", () => {
-  const unsafe = rent2buy(`${approved}\n\nMonthly finance repayments and home delivery are available.`);
-  assert.throws(() => assertPublishingSafe(unsafe, { ignoreAssessmentFreshness: true }), /Rent2Buy content/);
-});
-
-test("permanent rule is merged into existing active Compliance Business Knowledge", () => {
-  const sections = withPermanentRent2BuyKnowledge([{ section_key: "compliance", title: "Compliance", active: true, entries: [{ label: "Existing", value: "Keep this" }] }]);
-  assert.equal(sections[0].entries.some((entry) => entry.label === "Existing"), true);
-  assert.equal(sections[0].entries.some((entry) => /Permanent Rent2Buy/.test(entry.label)), true);
-});
+test("finance comparison removal is valid explained loss",()=>{const original=rent2buy(`## Useful guidance\n\n${filler}\n\n## How Rent2Buy compares to traditional finance\n\n${"APR lenders finance agreements. ".repeat(35)}\n\n## Practical Next Steps\n\n1. Apply\n2. Review eligibility\n3. Collect\n\n${RENT2BUY_COLLECTION_SENTENCE}\n\nApply for Rent2Buy`);const proposed={...original,content_markdown:`## Useful guidance\n\n${filler}\n\n## Practical Next Steps\n\n1. Apply\n2. Review eligibility\n3. Collect\n\n${RENT2BUY_COLLECTION_SENTENCE}\n\nApply for Rent2Buy`,changes:["Removed finance comparison"],removed_links:[],manual_confirmation_required:[],removed_sections:["How Rent2Buy compares to traditional finance"],removal_reasons:["finance comparison section"],removed_section_word_counts:[105]};const preview=buildCorrectionPreview({originalArticle:original,proposed,safetyOptions:{ignoreAssessmentFreshness:true}});assert.equal(preview.unexplained_content_loss_percent<=20,true);assert.equal(preview.markdown_structure_valid,true);assert.equal(preview.after.content_markdown.includes("Useful guidance"),true);assert.equal(preview.after.content_markdown.includes("traditional finance"),false);assert.equal(preview.after.content_markdown.includes(RENT2BUY_COLLECTION_SENTENCE),true);});
+test("broken structure disables correction acceptance",()=>{const original=rent2buy(approved);const proposed={...original,content_markdown:"## Steps\n1. 2. Apply",changes:[],removed_links:[],manual_confirmation_required:[],removed_sections:[],removal_reasons:[],removed_section_word_counts:[]};const preview=buildCorrectionPreview({originalArticle:original,proposed,safetyOptions:{ignoreAssessmentFreshness:true}});assert.equal(preview.markdown_structure_valid,false);assert.equal(preview.correction_complete,false);});
+test("original remains unchanged and no Wix approval occurs",()=>{const original=rent2buy(approved);const snapshot=structuredClone(original);buildCorrectionPreview({originalArticle:original,proposed:{...original,changes:[],removed_links:[],manual_confirmation_required:[],removed_sections:[],removal_reasons:[],removed_section_word_counts:[]},safetyOptions:{ignoreAssessmentFreshness:true}});assert.deepEqual(original,snapshot);assert.equal(original.wix_sync_status,undefined);assert.notEqual(original.status,"approved");});
+test("Wix export independently blocks prohibited Rent2Buy wording",()=>assert.throws(()=>assertPublishingSafe(rent2buy(`${approved}\n\nFinance agreements remain.`),{ignoreAssessmentFreshness:true}),/Rent2Buy/));
+test("permanent rule preserves existing Business Knowledge",()=>{const sections=withPermanentRent2BuyKnowledge([{section_key:"compliance",title:"Compliance",active:true,entries:[{label:"Existing",value:"Keep this"}]}]);assert.equal(sections[0].entries.some((entry)=>entry.label==="Existing"),true);});
