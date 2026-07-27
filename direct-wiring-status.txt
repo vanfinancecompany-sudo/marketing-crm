@@ -1,2 +1,0 @@
-test_status=1
-build_status=0
