@@ -5,6 +5,19 @@ import {
 
 const KNOWLEDGE_HUB_API = "/api/marketing-knowledge-hub";
 const KNOWLEDGE_SAFETY_APPROVAL_API = "/api/marketing-knowledge-safety-approval";
+const RENT2BUY_RULE_API = "/api/marketing-rent2buy-business-rule";
+let rent2BuyRuleReady;
+
+async function ensureRent2BuyRule() {
+  if (!rent2BuyRuleReady) {
+    rent2BuyRuleReady = fetch(RENT2BUY_RULE_API, {
+      method: "POST",
+      headers: buildMarketingAccessHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ action: "ensure" }),
+    }).then((response) => parseMarketingJsonResponse(response, "Rent2Buy Business Knowledge rule could not be loaded."));
+  }
+  return rent2BuyRuleReady;
+}
 
 export async function requestKnowledgeHub(action, payload = {}) {
   const response = await fetch(KNOWLEDGE_HUB_API, {
@@ -16,6 +29,7 @@ export async function requestKnowledgeHub(action, payload = {}) {
 }
 
 async function requestSafetyApproval(action, payload = {}) {
+  await ensureRent2BuyRule();
   const response = await fetch(KNOWLEDGE_SAFETY_APPROVAL_API, {
     method: "POST",
     headers: buildMarketingAccessHeaders({ "Content-Type": "application/json" }),
@@ -24,7 +38,8 @@ async function requestSafetyApproval(action, payload = {}) {
   return parseMarketingJsonResponse(response, "Publishing safety approval failed.");
 }
 
-export function loadKnowledgeHub() {
+export async function loadKnowledgeHub() {
+  await ensureRent2BuyRule();
   return requestKnowledgeHub("load");
 }
 
@@ -36,11 +51,13 @@ export function deleteKnowledgeTopic(topicId) {
   return requestKnowledgeHub("deleteTopic", { topic_id: topicId });
 }
 
-export function generateKnowledgeArticle(topic, generation) {
+export async function generateKnowledgeArticle(topic, generation) {
+  await ensureRent2BuyRule();
   return requestKnowledgeHub("generateArticle", { topic, generation });
 }
 
-export function findKnowledgeTopics(categories, quantity, brief) {
+export async function findKnowledgeTopics(categories, quantity, brief) {
+  await ensureRent2BuyRule();
   return requestKnowledgeHub("findTopics", { categories, quantity, brief });
 }
 
@@ -72,7 +89,8 @@ export function saveBusinessKnowledgeSection(businessSection) {
   });
 }
 
-export function reviewKnowledgeArticle(articleId) {
+export async function reviewKnowledgeArticle(articleId) {
+  await ensureRent2BuyRule();
   return requestKnowledgeHub("reviewArticle", { article_id: articleId });
 }
 
