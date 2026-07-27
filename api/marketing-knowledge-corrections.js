@@ -1,13 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { evaluatePublishingSafety } from "../lib/publishingSafety.js";
-import {
-  assertDuplicateTitleResolved,
-  buildCorrectionPreview,
-  buildSafetyCorrectionPrompt,
-  canAcceptCorrection,
-  limitCorrectionBatch,
-  normalizeCorrectionProposal,
-} from "../lib/publishingCorrections.js";
+import { ensureRent2BuyBusinessKnowledge, withPermanentRent2BuyKnowledge } from "../lib/rent2BuyRules.js";
+import { assertDuplicateTitleResolved, buildCorrectionPreview, buildSafetyCorrectionPrompt, canAcceptCorrection, limitCorrectionBatch, normalizeCorrectionProposal } from "../lib/publishingCorrections.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, max = 200000) => String(value || "").trim().slice(0, max);
@@ -18,63 +12,21 @@ function parseBody(request) { if (!request.body) return {}; if (typeof request.b
 function data(result, fallback) { if (result.error) throw new ApiError(500, result.error.message || fallback); return result.data; }
 
 async function loadCorrectionContext(supabase, articleId) {
+  await ensureRent2BuyBusinessKnowledge(supabase);
   const [articleResult, businessResult, assessmentResult, overridesResult, linksResult] = await Promise.all([
     supabase.from("knowledge_articles").select("*").eq("id", articleId).single(),
     supabase.from("knowledge_business_sections").select("*").eq("active", true).order("sort_order"),
-    supabase.from("knowledge_editorial_assessments").select("*").eq("article_id", articleId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
-    supabase.from("knowledge_article_overrides").select("*").eq("article_id", articleId).maybeSingle(),
+    supabase.from("knowledge_article_editorial_assessments").select("*").eq("article_id", articleId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("knowledge_article_editorial_overrides").select("*").eq("article_id", articleId).maybeSingle(),
     supabase.from("knowledge_internal_link_suggestions").select("anchor_text,destination_url,status").eq("article_id", articleId).eq("status", "accepted"),
   ]);
-  return { article: data(articleResult, "Article could not be found."), businessKnowledge: data(businessResult, "Business Knowledge could not be loaded.") || [], assessment: assessmentResult.error ? null : assessmentResult.data, overrides: overridesResult.error ? {} : overridesResult.data || {}, approvedLinks: linksResult.error ? [] : linksResult.data || [] };
+  return { article: data(articleResult, "Article could not be found."), businessKnowledge: withPermanentRent2BuyKnowledge(data(businessResult, "Business Knowledge could not be loaded.") || []), assessment: assessmentResult.error ? null : assessmentResult.data, overrides: overridesResult.error ? {} : overridesResult.data || {}, approvedLinks: linksResult.error ? [] : linksResult.data || [] };
 }
 
 const CORRECTION_SCHEMA = { type: "object", additionalProperties: false, required: ["title","slug","seo_title","meta_description","excerpt","content_markdown","faq_json","cta","category","article_type","featured_image","changes","removed_links","manual_confirmation_required","removed_sections","removal_reasons"], properties: { title:{type:"string"}, slug:{type:"string"}, seo_title:{type:"string"}, meta_description:{type:"string"}, excerpt:{type:"string"}, content_markdown:{type:"string"}, faq_json:{type:"array",items:{type:"object",additionalProperties:false,required:["question","answer"],properties:{question:{type:"string"},answer:{type:"string"}}}}, cta:{type:"string"}, category:{type:"string"}, article_type:{type:"string"}, featured_image:{type:"string"}, changes:{type:"array",items:{type:"string"}}, removed_links:{type:"array",items:{type:"string"}}, manual_confirmation_required:{type:"array",items:{type:"string"}}, removed_sections:{type:"array",items:{type:"string"}}, removal_reasons:{type:"array",items:{type:"string"}} } };
+async function callAi(prompt) { if (!process.env.OPENAI_API_KEY) throw new ApiError(500, "OPENAI_API_KEY is not configured."); const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-4.1-mini", input: [{ role: "system", content: "You are a careful UK van-business editorial correction assistant. Keep Van Finance and Rent2Buy strictly separate. Rent2Buy is not finance, is collection only from Southampton, and must follow the permanent Business Knowledge rule. Repair only supplied safety failures and never invent links or claims." }, { role: "user", content: prompt }], text: { format: { type: "json_schema", name: "knowledge_safety_correction", strict: true, schema: CORRECTION_SCHEMA } } }) }); const result = await response.json(); if (!response.ok) throw new ApiError(502, result?.error?.message || "AI correction failed."); const output = result.output_text || result.output?.flatMap((item) => item.content || []).find((item) => item.type === "output_text")?.text; if (!output) throw new ApiError(502, "The AI returned no correction proposal."); return JSON.parse(output); }
 
-async function callAi(prompt) {
-  if (!process.env.OPENAI_API_KEY) throw new ApiError(500, "OPENAI_API_KEY is not configured.");
-  const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-4.1-mini", input: [{ role: "system", content: "You are a careful UK van-finance editorial correction assistant. Repair only supplied safety failures, preserve valid content and overrides, and never invent links or finance claims." }, { role: "user", content: prompt }], text: { format: { type: "json_schema", name: "knowledge_safety_correction", strict: true, schema: CORRECTION_SCHEMA } } }) });
-  const result = await response.json();
-  if (!response.ok) throw new ApiError(502, result?.error?.message || "AI correction failed.");
-  const output = result.output_text || result.output?.flatMap((item) => item.content || []).find((item) => item.type === "output_text")?.text;
-  if (!output) throw new ApiError(502, "The AI returned no correction proposal.");
-  return JSON.parse(output);
-}
+async function proposeOne(supabase, articleId, unresolvedReasons = []) { const context = await loadCorrectionContext(supabase, articleId); const structuredCtas = context.overrides?.structured_ctas || context.assessment?.structured_ctas || []; const safetyOptions = { assessment: context.assessment, businessKnowledge: context.businessKnowledge, structuredCtas, intent: context.assessment?.effective_intent }; const safety = evaluatePublishingSafety(context.article, safetyOptions); if (!safety.hard_blocked && !Object.values(safety.checks).some((value) => value !== "passed")) throw new ApiError(400, "This article has no publishing safety issue requiring AI correction."); const requestedReasons = Array.isArray(unresolvedReasons) ? unresolvedReasons.map((item) => clean(item, 500)).filter(Boolean) : []; const proposed = await callAi(buildSafetyCorrectionPrompt({ article: context.article, safety, businessKnowledge: context.businessKnowledge, overrides: context.overrides, approvedLinks: context.approvedLinks, structuredCtas, unresolvedReasons: requestedReasons })); const preview = buildCorrectionPreview({ originalArticle: context.article, proposed, safetyOptions }); try { assertDuplicateTitleResolved(preview.after); } catch { throw new ApiError(422, "Duplicate article title remains in corrected content."); } return { article_id: articleId, source_updated_at: context.article.updated_at, regeneration_reasons: requestedReasons, ...preview }; }
+async function acceptCorrection(supabase, body) { const articleId = clean(body.article_id, 100); if (!articleId || !body.corrected_article) throw new ApiError(400, "Article and correction are required."); if (body.correction_complete !== true || (body.remaining_hard_blocks || []).length) throw new ApiError(409, "Correction incomplete. Resolve remaining publishing blocks before acceptance."); if (body.excessive_content_loss && body.confirm_large_reduction !== true) throw new ApiError(409, "Large content reduction — review required"); const current = data(await supabase.from("knowledge_articles").select("*").eq("id", articleId).single(), "Article could not be found."); if (body.source_updated_at && current.updated_at !== body.source_updated_at) throw new ApiError(409, "The article changed after the correction was prepared. Generate a fresh proposal."); const normalized = normalizeCorrectionProposal(current, body.corrected_article).corrected_article; try { assertDuplicateTitleResolved(normalized); } catch { throw new ApiError(422, "Duplicate article title remains in corrected content."); } const sections = withPermanentRent2BuyKnowledge(data(await supabase.from("knowledge_business_sections").select("*").eq("active", true), "Business Knowledge could not be loaded.") || []); const finalSafety = evaluatePublishingSafety(normalized, { businessKnowledge: sections, ignoreAssessmentFreshness: true }); if (finalSafety.hard_blocked) throw new ApiError(409, finalSafety.hard_block_reasons.join(" ")); if (!canAcceptCorrection({ correction_complete: true, excessive_content_loss: Boolean(body.excessive_content_loss) }, body.confirm_large_reduction === true)) throw new ApiError(409, "Correction incomplete. Resolve remaining publishing blocks before acceptance."); const saved = data(await supabase.from("knowledge_articles").update({ ...normalized, status: "draft", approved_at: null, content_html: null, updated_at: new Date().toISOString() }).eq("id", articleId).select().single(), "Corrected article could not be saved."); return { article: saved, safety: evaluatePublishingSafety(saved, { stale: true, businessKnowledge: sections }), wix_updated: false, approved: false }; }
 
-async function proposeOne(supabase, articleId, unresolvedReasons = []) {
-  const context = await loadCorrectionContext(supabase, articleId);
-  const structuredCtas = context.overrides?.structured_ctas || context.assessment?.structured_ctas || [];
-  const safetyOptions = { assessment: context.assessment, businessKnowledge: context.businessKnowledge, structuredCtas };
-  const safety = evaluatePublishingSafety(context.article, safetyOptions);
-  if (!safety.hard_blocked && !Object.values(safety.checks).some((value) => value !== "passed")) throw new ApiError(400, "This article has no publishing safety issue requiring AI correction.");
-  const requestedReasons = Array.isArray(unresolvedReasons) ? unresolvedReasons.map((item) => clean(item, 500)).filter(Boolean) : [];
-  const proposed = await callAi(buildSafetyCorrectionPrompt({ article: context.article, safety, businessKnowledge: context.businessKnowledge, overrides: context.overrides, approvedLinks: context.approvedLinks, structuredCtas, unresolvedReasons: requestedReasons }));
-  const preview = buildCorrectionPreview({ originalArticle: context.article, proposed, safetyOptions });
-  try { assertDuplicateTitleResolved(preview.after); } catch { throw new ApiError(422, "Duplicate article title remains in corrected content."); }
-  return { article_id: articleId, source_updated_at: context.article.updated_at, regeneration_reasons: requestedReasons, ...preview };
-}
-
-async function acceptCorrection(supabase, body) {
-  const articleId = clean(body.article_id, 100);
-  if (!articleId || !body.corrected_article) throw new ApiError(400, "Article and correction are required.");
-  if (body.correction_complete !== true || (body.remaining_hard_blocks || []).length) throw new ApiError(409, "Correction incomplete. Resolve remaining publishing blocks before acceptance.");
-  if (body.excessive_content_loss && body.confirm_large_reduction !== true) throw new ApiError(409, "Large content reduction — review required");
-  const current = data(await supabase.from("knowledge_articles").select("*").eq("id", articleId).single(), "Article could not be found.");
-  if (body.source_updated_at && current.updated_at !== body.source_updated_at) throw new ApiError(409, "The article changed after the correction was prepared. Generate a fresh proposal.");
-  const normalized = normalizeCorrectionProposal(current, body.corrected_article).corrected_article;
-  try { assertDuplicateTitleResolved(normalized); } catch { throw new ApiError(422, "Duplicate article title remains in corrected content."); }
-  if (!canAcceptCorrection({ correction_complete: true, excessive_content_loss: Boolean(body.excessive_content_loss) }, body.confirm_large_reduction === true)) throw new ApiError(409, "Correction incomplete. Resolve remaining publishing blocks before acceptance.");
-  const saved = data(await supabase.from("knowledge_articles").update({ ...normalized, status: "draft", approved_at: null, content_html: null, updated_at: new Date().toISOString() }).eq("id", articleId).select().single(), "Corrected article could not be saved.");
-  return { article: saved, safety: evaluatePublishingSafety(saved, { stale: true }), wix_updated: false, approved: false };
-}
-
-export default async function handler(request, response) {
-  if (request.method !== "POST") return response.status(405).json({ ok: false, message: "Method not allowed." });
-  if (!authorize(request)) return response.status(401).json({ ok: false, message: "Access key not recognised." });
-  try {
-    const body = parseBody(request); const supabase = getSupabase();
-    if (body.action === "propose") return response.status(200).json({ ok: true, proposal: await proposeOne(supabase, clean(body.article_id, 100), body.unresolved_reasons) });
-    if (body.action === "accept") return response.status(200).json({ ok: true, ...(await acceptCorrection(supabase, body)) });
-    if (body.action === "bulkPropose") { const ids = limitCorrectionBatch(body.article_ids); if (!ids.length) throw new ApiError(400, "Select at least one article."); const results = []; for (const articleId of ids) { try { results.push({ article_id: articleId, status: "ready", proposal: await proposeOne(supabase, articleId) }); } catch (error) { results.push({ article_id: articleId, status: "failed", message: clean(error.message, 1000) }); } } return response.status(200).json({ ok: true, limit: 5, results, wix_updated: false, approved: false }); }
-    throw new ApiError(400, "Unsupported correction action.");
-  } catch (error) { return response.status(error.status || 500).json({ ok: false, message: error.message || "Article correction failed." }); }
-}
+export default async function handler(request, response) { if (request.method !== "POST") return response.status(405).json({ ok: false, message: "Method not allowed." }); if (!authorize(request)) return response.status(401).json({ ok: false, message: "Access key not recognised." }); try { const body = parseBody(request); const supabase = getSupabase(); if (body.action === "propose") return response.status(200).json({ ok: true, proposal: await proposeOne(supabase, clean(body.article_id, 100), body.unresolved_reasons) }); if (body.action === "accept") return response.status(200).json({ ok: true, ...(await acceptCorrection(supabase, body)) }); if (body.action === "bulkPropose") { const ids = limitCorrectionBatch(body.article_ids); if (!ids.length) throw new ApiError(400, "Select at least one article."); const results = []; for (const articleId of ids) { try { results.push({ article_id: articleId, status: "ready", proposal: await proposeOne(supabase, articleId) }); } catch (error) { results.push({ article_id: articleId, status: "failed", message: clean(error.message, 1000) }); } } return response.status(200).json({ ok: true, limit: 5, results, wix_updated: false, approved: false }); } throw new ApiError(400, "Unsupported correction action."); } catch (error) { return response.status(error.status || 500).json({ ok: false, message: error.message || "Article correction failed." }); } }
