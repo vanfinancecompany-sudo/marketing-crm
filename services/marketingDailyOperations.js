@@ -2,7 +2,7 @@ import { buildMarketingAccessHeaders, parseMarketingJsonResponse } from "./marke
 
 const API_ROUTE = "/api/marketing-daily-operations";
 export const DAILY_OPERATIONS_REFRESH_EVENT = "marketing-daily-operations-refresh";
-const YOUTUBE_TRACKING_WARNING = "Video downloaded, but Content Operations could not be updated.";
+export const YOUTUBE_TRACKING_WARNING = "Video downloaded, but Content Operations could not be updated.";
 
 async function requestDailyOperations(action, payload = {}) {
   const response = await fetch(API_ROUTE, {
@@ -42,9 +42,13 @@ export async function recordDailyMarketingActivity(activityType, options = {}) {
     source_id: options.sourceId || "",
     metadata: options.metadata || {},
   });
+
   if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent(DAILY_OPERATIONS_REFRESH_EVENT, { detail: { activityType, source: options.source || "command_centre" } }));
+    window.dispatchEvent(new CustomEvent(DAILY_OPERATIONS_REFRESH_EVENT, {
+      detail: { activityType, source: options.source || "command_centre" },
+    }));
   }
+
   return result;
 }
 
@@ -52,81 +56,53 @@ export function undoDailyMarketingActivity(activityType, activityDate) {
   return requestDailyOperations("undoManualActivity", { activity_type: activityType, activity_date: activityDate });
 }
 
-function stableHash(value) {
-  let hash = 2166136261;
-  for (const character of String(value || "")) {
-    hash ^= character.charCodeAt(0);
-    hash = Math.imul(hash, 16777619);
+export function createYouTubeExportOperationId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
   }
-  return (hash >>> 0).toString(36);
+  return `youtube-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
-export function youtubeActivityFromDownload({ filename = "", href = "", pageText = "" } = {}) {
-  const lowerFilename = String(filename || "").toLowerCase();
-  const format = lowerFilename.endsWith(".webm") ? "webm" : lowerFilename.endsWith(".mp4") ? "mp4" : "";
-  const productKey = lowerFilename.startsWith("rent2buy-")
-    ? "rent2buy"
-    : lowerFilename.startsWith("van-finance-")
-      ? "vanFinance"
-      : lowerFilename.startsWith("car-finance-")
-        ? "cars"
-        : "";
-  if (!format || !productKey || productKey === "cars") return null;
-  const activityType = productKey === "rent2buy" ? "rent2buy_reel" : "van_finance_reel";
-  const registration = lowerFilename
-    .replace(productKey === "rent2buy" ? /^rent2buy-/ : /^van-finance-/, "")
-    .replace(/-youtube-short\.(?:mp4|webm)$/i, "")
-    .toUpperCase();
-  const queueDownload = /(?:rendering|downloading|completed|failed|fallback)\s+(?:mp4\s+)?\d+\s+of\s+\d+/i.test(String(pageText || ""));
-  const operationIdentity = `${productKey}|${filename}|${format}|${href}`;
-  return {
-    activityType,
-    sourceId: `youtube-export:${stableHash(operationIdentity)}`,
+export function youtubeActivityTypeForProduct(productKey) {
+  if (productKey === "vanFinance") return "van_finance_reel";
+  if (productKey === "rent2buy") return "rent2buy_reel";
+  return null;
+}
+
+export async function recordYouTubeGeneratorDownload({
+  productKey,
+  vehicle,
+  filename,
+  format,
+  queueDownload,
+  operationId,
+}) {
+  const activityType = youtubeActivityTypeForProduct(productKey);
+  if (!activityType) return { recorded: false, reason: "unsupported_product" };
+
+  const normalizedFormat = String(format || "").toLowerCase();
+  if (!operationId || !["mp4", "webm"].includes(normalizedFormat)) {
+    return { recorded: false, reason: "invalid_export" };
+  }
+
+  const registration = String(
+    vehicle?.reg || vehicle?.registration || vehicle?.title || vehicle?.name || ""
+  ).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const vehicleId = String(vehicle?.id || vehicle?.vehicle_id || "").trim() || null;
+
+  await recordDailyMarketingActivity(activityType, {
+    source: "youtube_generator",
+    sourceId: `youtube-export:${productKey}:${operationId}`,
     metadata: {
       product_key: productKey,
+      vehicle_id: vehicleId,
       registration,
-      vehicle_id: null,
-      filename,
-      format,
-      queue_download: queueDownload,
-      export_operation_id: stableHash(href || operationIdentity),
+      filename: String(filename || ""),
+      format: normalizedFormat,
+      queue_download: Boolean(queueDownload),
+      export_operation_id: operationId,
     },
-  };
-}
+  });
 
-function showYouTubeTrackingWarning(error) {
-  console.error("YOUTUBE CONTENT OPERATIONS TRACKING ERROR", error);
-  const page = document.querySelector(".youtube-generator");
-  if (!page || page.querySelector("[data-youtube-operations-warning]")) return;
-  const warning = document.createElement("div");
-  warning.className = "youtube-generator__error";
-  warning.dataset.youtubeOperationsWarning = "true";
-  warning.textContent = YOUTUBE_TRACKING_WARNING;
-  const actionsSection = [...page.querySelectorAll(".youtube-generator__section")].find((section) => section.querySelector("button")?.textContent?.includes("Generate Preview"));
-  (actionsSection || page).appendChild(warning);
+  return { recorded: true, activityType };
 }
-
-function installYouTubeDownloadActivityObserver() {
-  if (typeof window === "undefined" || typeof HTMLAnchorElement === "undefined") return;
-  const marker = "__youtubeContentOperationsObserverInstalled";
-  if (window[marker]) return;
-  window[marker] = true;
-  const originalClick = HTMLAnchorElement.prototype.click;
-  HTMLAnchorElement.prototype.click = function trackedDownloadClick(...args) {
-    const filename = String(this.download || "");
-    const href = String(this.href || "");
-    const page = document.querySelector(".youtube-generator");
-    const activity = page ? youtubeActivityFromDownload({ filename, href, pageText: page.textContent || "" }) : null;
-    const result = originalClick.apply(this, args);
-    if (activity) {
-      Promise.resolve().then(() => recordDailyMarketingActivity(activity.activityType, {
-        source: "youtube_generator",
-        sourceId: activity.sourceId,
-        metadata: activity.metadata,
-      })).catch(showYouTubeTrackingWarning);
-    }
-    return result;
-  };
-}
-
-installYouTubeDownloadActivityObserver();
