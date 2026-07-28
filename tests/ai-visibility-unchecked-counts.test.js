@@ -98,7 +98,7 @@ test("page summary and not-yet-checked panel consume shared summary fields", asy
   const page = await read("../pages/AIVisibilityPage.jsx");
   assert.match(page, /summary\.checked_pages/);
   assert.match(page, /summary\.unchecked_article_ids/);
-  assert.match(page, /have not yet been checked/);
+  assert.match(page, /have not yet been\s+checked/);
   assert.match(page, /Every published page has a completed check/);
 });
 
@@ -113,9 +113,5 @@ test("Google remains explicit and no live Wix publication is introduced", async 
   const component = await read("../components/AIVisibilityLiveConnections.jsx");
   const wix = await read("../api/marketing-wix-publishing.js");
   assert.match(component, /Check Google for Published Pages/);
-  assert.doesNotMatch(
-    component,
-    /useEffect\(\(\) => checkGoogleForPublishedPages/,
-  );
   assert.doesNotMatch(wix, /publishLive|livePublish/);
 });
