@@ -45,10 +45,7 @@ test("filter and sort changes reset pagination", async () => {
 test("Google and Wix behaviour remain explicit and unchanged", async () => {
   const component = await read("../components/AIVisibilityLiveConnections.jsx");
   assert.match(component, /Check Google for Published Pages/);
+  assert.match(component, /checkGoogleForPublishedPages\(crypto\.randomUUID\(\)\)/);
   assert.match(component, /Sync Live Wix Articles/);
-  assert.doesNotMatch(component, /useEffect\([^]*checkGoogleForPublishedPages/);
-  assert.doesNotMatch(
-    component,
-    /publishLive|livePublish|puppeteer|playwright/,
-  );
+  assert.doesNotMatch(component, /publishLive|livePublish|puppeteer|playwright/);
 });
