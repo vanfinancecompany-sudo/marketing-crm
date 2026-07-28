@@ -21,11 +21,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Run focused tests
-        run: node --test tests/ai-visibility-unchecked-counts.test.js
-      - name: Run production build
-        run: npm run build
-      - name: Remove temporary workflow
+      - name: Capture focused test result
+        continue-on-error: true
+        run: node --test tests/ai-visibility-unchecked-counts.test.js > unchecked-final-test.txt 2>&1
+      - name: Capture production build result
+        continue-on-error: true
+        run: npm run build > unchecked-final-build.txt 2>&1
+      - name: Commit diagnostics
         run: |
           rm .github/workflows/verify-ai-visibility-unchecked-counts.yml
           git config user.name "github-actions[bot]"
