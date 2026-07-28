@@ -152,8 +152,7 @@ export async function saveKnowledgeTopic(topic) {
 export function deleteKnowledgeTopic(topicId) { return requestKnowledgeHub("deleteTopic", { topic_id: topicId }); }
 export async function generateKnowledgeArticle(topic, generation) {
   await ensureRent2BuyRule();
-  const protectedTopic = await protectTopic(topic, "generation topic");
-  return requestKnowledgeHub("generateArticle", { topic: protectedTopic, generation });
+  return requestKnowledgeHub("generateArticle", { topic, generation });
 }
 export async function findKnowledgeTopics(categories, quantity, brief) { await ensureRent2BuyRule(); return requestKnowledgeHub("findTopics", { categories, quantity, brief }); }
 export async function saveKnowledgeTopicIdeas(ideas) {
