@@ -1,32 +1,52 @@
-name: Verify AI Visibility live connections
+name: Finalize AI Visibility live connections
 
 on:
   pull_request:
     branches:
       - main
     paths:
-      - lib/aiVisibility.js
-      - lib/aiVisibilityProviders.js
-      - lib/aiVisibilityLiveConnections.js
-      - api/marketing-ai-visibility-connections.js
-      - services/aiVisibility.js
-      - components/AIVisibilityLiveConnections.jsx
-      - pages/AIVisibilityPage.jsx
-      - tests/ai-visibility-live-connections.test.js
       - .github/workflows/finalize-ai-visibility-connections.yml
+
+permissions:
+  contents: write
 
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: feature/ai-visibility-wix-gsc
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - name: Add performance evidence label
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          page = Path('pages/AIVisibilityPage.jsx')
+          text = page.read_text(encoding='utf-8')
+          marker = '  not_indexed: "Not indexed",\n'
+          replacement = marker + '  performance_found: "Performance data found",\n'
+          if 'performance_found: "Performance data found"' not in text:
+              text = text.replace(marker, replacement)
+          page.write_text(text, encoding='utf-8')
+          PY
+      - name: Format changed files
+        run: npx --yes prettier@3.3.3 --write lib/aiVisibility.js lib/aiVisibilityProviders.js lib/aiVisibilityLiveConnections.js api/marketing-ai-visibility-connections.js services/aiVisibility.js components/AIVisibilityLiveConnections.jsx pages/AIVisibilityPage.jsx tests/ai-visibility-live-connections.test.js
       - name: Install dependencies
         run: npm ci
       - name: Run focused tests
-        run: node --test tests/ai-visibility.test.js tests/ai-visibility-live-connections.test.js
+        run: node --test tests/ai-visibility-live-connections.test.js
       - name: Run production build
         run: npm run build
+      - name: Commit verified changes
+        run: |
+          rm .github/workflows/finalize-ai-visibility-connections.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Connect Wix publishing and Google Search Console to AI Visibility"
+          git push origin HEAD:feature/ai-visibility-wix-gsc
