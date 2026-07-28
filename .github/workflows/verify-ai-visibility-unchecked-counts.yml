@@ -1,0 +1,35 @@
+name: Verify AI Visibility unchecked counts
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ui/ai-visibility-layout-pagination
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run focused tests
+        run: node --test tests/ai-visibility-unchecked-counts.test.js tests/ai-visibility-layout-pagination.test.js
+      - name: Run production build
+        run: npm run build
+      - name: Remove temporary workflow
+        run: |
+          rm .github/workflows/verify-ai-visibility-unchecked-counts.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix unchecked article counts in AI Visibility"
+          git push origin HEAD:ui/ai-visibility-layout-pagination
