@@ -1,6 +1,7 @@
 import { buildMarketingAccessHeaders, parseMarketingJsonResponse } from "./marketingAccess.js";
 
 const KNOWLEDGE_HUB_API = "/api/marketing-knowledge-hub";
+const KNOWLEDGE_DUPLICATES_API = "/api/knowledge-hub-duplicates";
 const KNOWLEDGE_SAFETY_APPROVAL_API = "/api/marketing-knowledge-safety-approval";
 const RENT2BUY_RULE_API = "/api/marketing-rent2buy-business-rule";
 let rent2BuyRuleReady;
@@ -35,6 +36,105 @@ async function requestSafetyApproval(action, payload = {}) {
   return parseMarketingJsonResponse(response, "Publishing safety approval failed.");
 }
 
+function normaliseTopicDuplicateFields(topic = {}) {
+  return {
+    ...topic,
+    canonical_intent: String(topic.canonical_intent || topic.intent || topic.title || "").trim(),
+    article_angle: String(topic.article_angle || "").trim(),
+    duplicate_override_reason: String(topic.duplicate_override_reason || "").trim(),
+  };
+}
+
+function normaliseArticleDuplicateFields(article = {}) {
+  return {
+    ...article,
+    canonical_intent: String(article.canonical_intent || article.title || "").trim(),
+    article_angle: String(article.article_angle || "").trim(),
+    duplicate_override_reason: String(article.duplicate_override_reason || "").trim(),
+  };
+}
+
+export async function checkKnowledgeDuplicate(type, candidate = {}) {
+  const response = await fetch(KNOWLEDGE_DUPLICATES_API, {
+    method: "POST",
+    headers: buildMarketingAccessHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      type,
+      title: candidate.title,
+      canonical_intent: candidate.canonical_intent || candidate.intent || candidate.title,
+      category: candidate.category,
+      exclude_id: candidate.id || null,
+      limit: 10,
+    }),
+  });
+  return parseMarketingJsonResponse(response, "Duplicate protection could not check this subject.");
+}
+
+function closestDuplicateMessage(result, candidateLabel = "subject") {
+  const closest = result?.matches?.[0];
+  if (!closest) return `This ${candidateLabel} appears to duplicate existing Knowledge Hub coverage.`;
+  const archiveNote = closest.status === "archived" ? " The existing item is archived but remains in duplicate history." : "";
+  return `Closest existing ${result.type}: “${closest.title}” (${closest.duplicate_risk.replaceAll("_", " ")}).${archiveNote}`;
+}
+
+function requireDuplicateDecision(result, candidate, candidateLabel) {
+  const risk = result?.summary?.highest_risk || "clear";
+  if (risk === "clear" || risk === "related") return candidate;
+
+  const message = closestDuplicateMessage(result, candidateLabel);
+  if (typeof window === "undefined") {
+    const error = new Error(`${message} Review the canonical intent and article angle before continuing.`);
+    error.code = "knowledge_duplicate_review_required";
+    throw error;
+  }
+
+  if (risk === "duplicate") {
+    const reason = window.prompt(
+      `${message}\n\nThis is blocked as the same intent. Only continue when it is genuinely a different article angle. Enter the reason for overriding the blocker, or press Cancel.`
+    );
+    if (!String(reason || "").trim()) {
+      const error = new Error(`${message} The duplicate was not saved.`);
+      error.code = "knowledge_duplicate_blocked";
+      throw error;
+    }
+    return { ...candidate, duplicate_override_reason: String(reason).trim() };
+  }
+
+  const confirmed = window.confirm(
+    `${message}\n\nThis looks like a likely duplicate. Continue only when it answers a genuinely different customer question.`
+  );
+  if (!confirmed) {
+    const error = new Error(`${message} The item was not saved.`);
+    error.code = "knowledge_duplicate_cancelled";
+    throw error;
+  }
+  const reason = window.prompt(
+    "Briefly explain the distinct article angle. This will be stored in the duplicate audit history."
+  );
+  if (!String(reason || "").trim()) {
+    const error = new Error("A distinct article angle or override reason is required for a likely duplicate.");
+    error.code = "knowledge_duplicate_reason_required";
+    throw error;
+  }
+  return {
+    ...candidate,
+    article_angle: candidate.article_angle || String(reason).trim(),
+    duplicate_override_reason: String(reason).trim(),
+  };
+}
+
+async function protectTopic(topic, label = "topic") {
+  const candidate = normaliseTopicDuplicateFields(topic);
+  const result = await checkKnowledgeDuplicate("topic", candidate);
+  return requireDuplicateDecision(result, candidate, label);
+}
+
+async function protectArticle(article, label = "article") {
+  const candidate = normaliseArticleDuplicateFields(article);
+  const result = await checkKnowledgeDuplicate("article", candidate);
+  return requireDuplicateDecision(result, candidate, label);
+}
+
 export async function loadKnowledgeHub() { await ensureRent2BuyRule(); return requestKnowledgeHub("load"); }
 
 export function approveAndCreateWixDraft(articleId, reviewedContentHash, confirmWarnings = false) {
@@ -45,17 +145,52 @@ export function approveAndCreateWixDraft(articleId, reviewedContentHash, confirm
   });
 }
 
-export function saveKnowledgeTopic(topic) { return requestKnowledgeHub("saveTopic", { topic }); }
+export async function saveKnowledgeTopic(topic) {
+  const protectedTopic = await protectTopic(topic, "topic");
+  return requestKnowledgeHub("saveTopic", { topic: protectedTopic });
+}
 export function deleteKnowledgeTopic(topicId) { return requestKnowledgeHub("deleteTopic", { topic_id: topicId }); }
-export async function generateKnowledgeArticle(topic, generation) { await ensureRent2BuyRule(); return requestKnowledgeHub("generateArticle", { topic, generation }); }
+export async function generateKnowledgeArticle(topic, generation) {
+  await ensureRent2BuyRule();
+  const protectedTopic = await protectTopic(topic, "generation topic");
+  return requestKnowledgeHub("generateArticle", { topic: protectedTopic, generation });
+}
 export async function findKnowledgeTopics(categories, quantity, brief) { await ensureRent2BuyRule(); return requestKnowledgeHub("findTopics", { categories, quantity, brief }); }
-export function saveKnowledgeTopicIdeas(ideas) { return requestKnowledgeHub("saveTopicIdeas", { ideas }); }
-export function saveKnowledgeArticle(article, status, confirmWarnings = false) {
-  if (status === "approved") return requestSafetyApproval("approveArticle", { article, confirm_warnings: Boolean(confirmWarnings) });
-  return requestKnowledgeHub("saveArticle", { article, status });
+export async function saveKnowledgeTopicIdeas(ideas) {
+  const accepted = [];
+  const skipped = [];
+  for (const idea of ideas || []) {
+    try {
+      accepted.push(await protectTopic(idea, "topic idea"));
+    } catch (error) {
+      if (error?.code?.startsWith("knowledge_duplicate")) {
+        skipped.push({ title: idea?.title || "Untitled topic", reason: error.message });
+      } else {
+        throw error;
+      }
+    }
+  }
+  if (!accepted.length) return { finder: { topics: [], skipped } };
+  const result = await requestKnowledgeHub("saveTopicIdeas", { ideas: accepted });
+  return {
+    ...result,
+    finder: {
+      ...(result.finder || {}),
+      skipped: [...skipped, ...(result.finder?.skipped || [])],
+    },
+  };
+}
+export async function saveKnowledgeArticle(article, status, confirmWarnings = false) {
+  const protectedArticle = status === "approved"
+    ? await protectArticle(article, "article")
+    : normaliseArticleDuplicateFields(article);
+  if (status === "approved") return requestSafetyApproval("approveArticle", { article: protectedArticle, confirm_warnings: Boolean(confirmWarnings) });
+  return requestKnowledgeHub("saveArticle", { article: protectedArticle, status });
 }
 export function bulkUpdateKnowledgeArticles(articleIds, status) {
-  if (status === "approved") return requestSafetyApproval("approveArticles", { article_ids: articleIds });
+  if (status === "approved") {
+    throw new Error("Bulk approval is temporarily disabled while full-catalogue duplicate protection is active. Approve each article individually so its subject can be checked.");
+  }
   return requestKnowledgeHub("bulkUpdateArticles", { article_ids: articleIds, status });
 }
 export function saveKnowledgeTemplate(template) { return requestKnowledgeHub("saveTemplate", { template }); }
