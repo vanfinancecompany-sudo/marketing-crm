@@ -15,11 +15,11 @@ alter table public.knowledge_articles
 
 -- Preserve every existing record while giving legacy topics a usable intent value.
 update public.knowledge_topics
-set canonical_intent = title
+set canonical_intent = coalesce(nullif(trim(intent), ''), title)
 where nullif(trim(canonical_intent), '') is null;
 
 update public.knowledge_articles a
-set canonical_intent = coalesce(nullif(trim(t.canonical_intent), ''), t.title, a.title),
+set canonical_intent = coalesce(nullif(trim(t.canonical_intent), ''), nullif(trim(t.intent), ''), t.title, a.title),
     article_angle = coalesce(nullif(trim(a.article_angle), ''), nullif(trim(t.article_angle), ''))
 from public.knowledge_topics t
 where a.topic_id = t.id
@@ -41,8 +41,8 @@ create index if not exists knowledge_articles_canonical_intent_idx
 create index if not exists knowledge_articles_canonical_intent_trgm_idx
   on public.knowledge_articles using gin (lower(canonical_intent) gin_trgm_ops);
 
--- Reusable read-only matcher. It deliberately includes archived topics so an old
--- subject remains visible during duplicate checks instead of silently returning.
+-- Reusable full-catalogue topic matcher. Archived topics are deliberately included so
+-- a retired subject remains visible instead of silently returning as a new idea.
 create or replace function public.find_knowledge_topic_duplicate_candidates(
   p_title text,
   p_canonical_intent text default null,
@@ -82,17 +82,17 @@ as $$
     t.canonical_intent,
     t.article_angle,
     similarity(lower(coalesce(t.title, '')), c.title_text)::real,
-    similarity(lower(coalesce(t.canonical_intent, t.title, '')), c.intent_text)::real,
+    similarity(lower(coalesce(t.canonical_intent, t.intent, t.title, '')), c.intent_text)::real,
     lower(trim(coalesce(t.title, ''))) = c.title_text,
-    lower(trim(coalesce(t.canonical_intent, t.title, ''))) = c.intent_text,
+    lower(trim(coalesce(t.canonical_intent, t.intent, t.title, ''))) = c.intent_text,
     case
       when lower(trim(coalesce(t.title, ''))) = c.title_text
-        or lower(trim(coalesce(t.canonical_intent, t.title, ''))) = c.intent_text
+        or lower(trim(coalesce(t.canonical_intent, t.intent, t.title, ''))) = c.intent_text
         then 'duplicate'
-      when similarity(lower(coalesce(t.canonical_intent, t.title, '')), c.intent_text) >= 0.82
+      when similarity(lower(coalesce(t.canonical_intent, t.intent, t.title, '')), c.intent_text) >= 0.82
         then 'likely_duplicate'
       when similarity(lower(coalesce(t.title, '')), c.title_text) >= 0.72
-        or similarity(lower(coalesce(t.canonical_intent, t.title, '')), c.intent_text) >= 0.68
+        or similarity(lower(coalesce(t.canonical_intent, t.intent, t.title, '')), c.intent_text) >= 0.68
         then 'related'
       else 'clear'
     end as duplicate_risk
@@ -101,25 +101,25 @@ as $$
   where (p_exclude_id is null or t.id <> p_exclude_id)
     and (
       lower(trim(coalesce(t.title, ''))) = c.title_text
-      or lower(trim(coalesce(t.canonical_intent, t.title, ''))) = c.intent_text
+      or lower(trim(coalesce(t.canonical_intent, t.intent, t.title, ''))) = c.intent_text
       or similarity(lower(coalesce(t.title, '')), c.title_text) >= 0.55
-      or similarity(lower(coalesce(t.canonical_intent, t.title, '')), c.intent_text) >= 0.55
+      or similarity(lower(coalesce(t.canonical_intent, t.intent, t.title, '')), c.intent_text) >= 0.55
     )
     and (
       c.category_text is null
       or t.category = c.category_text
-      or similarity(lower(coalesce(t.canonical_intent, t.title, '')), c.intent_text) >= 0.82
+      or similarity(lower(coalesce(t.canonical_intent, t.intent, t.title, '')), c.intent_text) >= 0.82
     )
   order by
     case
       when lower(trim(coalesce(t.title, ''))) = c.title_text
-        or lower(trim(coalesce(t.canonical_intent, t.title, ''))) = c.intent_text then 0
-      when similarity(lower(coalesce(t.canonical_intent, t.title, '')), c.intent_text) >= 0.82 then 1
+        or lower(trim(coalesce(t.canonical_intent, t.intent, t.title, ''))) = c.intent_text then 0
+      when similarity(lower(coalesce(t.canonical_intent, t.intent, t.title, '')), c.intent_text) >= 0.82 then 1
       else 2
     end,
     greatest(
       similarity(lower(coalesce(t.title, '')), c.title_text),
-      similarity(lower(coalesce(t.canonical_intent, t.title, '')), c.intent_text)
+      similarity(lower(coalesce(t.canonical_intent, t.intent, t.title, '')), c.intent_text)
     ) desc,
     t.updated_at desc
   limit greatest(1, least(coalesce(p_limit, 10), 50));
@@ -127,8 +127,93 @@ $$;
 
 revoke all on function public.find_knowledge_topic_duplicate_candidates(text, text, text, uuid, integer) from public;
 
--- Final database safeguard for exact duplicate intent. A deliberate exception is
--- possible only when the editor records a reason explaining the distinct angle.
+-- Equivalent article matcher for the final approval/publishing safeguard.
+create or replace function public.find_knowledge_article_duplicate_candidates(
+  p_title text,
+  p_canonical_intent text default null,
+  p_category text default null,
+  p_exclude_id uuid default null,
+  p_limit integer default 10
+)
+returns table (
+  article_id uuid,
+  title text,
+  category text,
+  status text,
+  canonical_intent text,
+  article_angle text,
+  title_similarity real,
+  intent_similarity real,
+  exact_title boolean,
+  exact_intent boolean,
+  duplicate_risk text
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with candidate as (
+    select
+      lower(trim(coalesce(p_title, ''))) as title_text,
+      lower(trim(coalesce(nullif(p_canonical_intent, ''), p_title, ''))) as intent_text,
+      nullif(trim(p_category), '') as category_text
+  )
+  select
+    a.id,
+    a.title,
+    a.category,
+    a.status,
+    a.canonical_intent,
+    a.article_angle,
+    similarity(lower(coalesce(a.title, '')), c.title_text)::real,
+    similarity(lower(coalesce(a.canonical_intent, a.title, '')), c.intent_text)::real,
+    lower(trim(coalesce(a.title, ''))) = c.title_text,
+    lower(trim(coalesce(a.canonical_intent, a.title, ''))) = c.intent_text,
+    case
+      when lower(trim(coalesce(a.title, ''))) = c.title_text
+        or lower(trim(coalesce(a.canonical_intent, a.title, ''))) = c.intent_text
+        then 'duplicate'
+      when similarity(lower(coalesce(a.canonical_intent, a.title, '')), c.intent_text) >= 0.82
+        then 'likely_duplicate'
+      when similarity(lower(coalesce(a.title, '')), c.title_text) >= 0.72
+        or similarity(lower(coalesce(a.canonical_intent, a.title, '')), c.intent_text) >= 0.68
+        then 'related'
+      else 'clear'
+    end as duplicate_risk
+  from public.knowledge_articles a
+  cross join candidate c
+  where (p_exclude_id is null or a.id <> p_exclude_id)
+    and (
+      lower(trim(coalesce(a.title, ''))) = c.title_text
+      or lower(trim(coalesce(a.canonical_intent, a.title, ''))) = c.intent_text
+      or similarity(lower(coalesce(a.title, '')), c.title_text) >= 0.55
+      or similarity(lower(coalesce(a.canonical_intent, a.title, '')), c.intent_text) >= 0.55
+    )
+    and (
+      c.category_text is null
+      or a.category = c.category_text
+      or similarity(lower(coalesce(a.canonical_intent, a.title, '')), c.intent_text) >= 0.82
+    )
+  order by
+    case
+      when lower(trim(coalesce(a.title, ''))) = c.title_text
+        or lower(trim(coalesce(a.canonical_intent, a.title, ''))) = c.intent_text then 0
+      when similarity(lower(coalesce(a.canonical_intent, a.title, '')), c.intent_text) >= 0.82 then 1
+      else 2
+    end,
+    greatest(
+      similarity(lower(coalesce(a.title, '')), c.title_text),
+      similarity(lower(coalesce(a.canonical_intent, a.title, '')), c.intent_text)
+    ) desc,
+    a.updated_at desc
+  limit greatest(1, least(coalesce(p_limit, 10), 50));
+$$;
+
+revoke all on function public.find_knowledge_article_duplicate_candidates(text, text, text, uuid, integer) from public;
+
+-- Final database safeguard for exact or extremely similar duplicate intent. A deliberate
+-- exception is possible only when the editor records why the article angle is genuinely distinct.
 create or replace function public.guard_knowledge_topic_duplicate_intent()
 returns trigger
 language plpgsql
@@ -137,24 +222,37 @@ set search_path = public
 as $$
 declare
   existing_topic public.knowledge_topics%rowtype;
+  candidate_intent text;
+  candidate_similarity real;
 begin
-  new.canonical_intent := coalesce(nullif(trim(new.canonical_intent), ''), new.title);
+  new.canonical_intent := coalesce(nullif(trim(new.canonical_intent), ''), nullif(trim(new.intent), ''), new.title);
+  candidate_intent := lower(trim(new.canonical_intent));
 
-  select * into existing_topic
+  select t.*,
+         similarity(lower(coalesce(t.canonical_intent, t.intent, t.title)), candidate_intent)
+    into existing_topic, candidate_similarity
   from public.knowledge_topics t
   where t.id <> coalesce(new.id, gen_random_uuid())
-    and lower(trim(coalesce(t.canonical_intent, t.title))) = lower(trim(new.canonical_intent))
-  order by (t.status <> 'archived') desc, t.updated_at desc
+    and (
+      lower(trim(coalesce(t.canonical_intent, t.intent, t.title))) = candidate_intent
+      or similarity(lower(coalesce(t.canonical_intent, t.intent, t.title)), candidate_intent) >= 0.92
+    )
+  order by
+    (lower(trim(coalesce(t.canonical_intent, t.intent, t.title))) = candidate_intent) desc,
+    similarity(lower(coalesce(t.canonical_intent, t.intent, t.title)), candidate_intent) desc,
+    (t.status <> 'archived') desc,
+    t.updated_at desc
   limit 1;
 
   if found and nullif(trim(new.duplicate_override_reason), '') is null then
     raise exception using
       errcode = '23505',
       message = format(
-        'Duplicate Knowledge Hub intent detected. Existing topic: "%s" (%s). Add a distinct article angle or an override reason before saving.',
+        'Duplicate Knowledge Hub intent detected. Existing topic: "%s" (%s). Add a genuinely distinct article angle and an override reason before saving.',
         existing_topic.title,
         existing_topic.status
-      );
+      ),
+      detail = format('Intent similarity: %s', round(candidate_similarity::numeric, 3));
   end if;
 
   return new;
@@ -163,12 +261,12 @@ $$;
 
 drop trigger if exists knowledge_topics_duplicate_intent_guard on public.knowledge_topics;
 create trigger knowledge_topics_duplicate_intent_guard
-before insert or update of title, canonical_intent, article_angle, duplicate_override_reason
+before insert or update of title, intent, canonical_intent, article_angle, duplicate_override_reason
 on public.knowledge_topics
 for each row execute function public.guard_knowledge_topic_duplicate_intent();
 
--- Keep article intent metadata aligned with its saved topic unless an editor has
--- deliberately supplied a more specific article-level value.
+-- Keep article intent metadata aligned with its saved topic unless an editor has deliberately
+-- supplied a more specific article-level value.
 create or replace function public.populate_knowledge_article_intent()
 returns trigger
 language plpgsql
@@ -187,6 +285,7 @@ begin
   new.canonical_intent := coalesce(
     nullif(trim(new.canonical_intent), ''),
     nullif(trim(source_topic.canonical_intent), ''),
+    nullif(trim(source_topic.intent), ''),
     source_topic.title,
     new.title
   );
