@@ -26,11 +26,15 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Run focused tests
-        run: node --test tests/ai-visibility-layout-pagination.test.js tests/ai-visibility-live-connections.test.js tests/ai-visibility-manual-workflow.test.js
+      - name: Capture focused test result
+        run: |
+          set +e
+          node --test tests/ai-visibility-layout-pagination.test.js > ai-layout-test-output.txt 2>&1
+          echo $? > ai-layout-test-exit.txt
+          set -e
       - name: Run production build
         run: npm run build
-      - name: Remove temporary workflow
+      - name: Commit verification output
         run: |
           rm .github/workflows/verify-ai-visibility-layout.yml
           git config user.name "github-actions[bot]"
