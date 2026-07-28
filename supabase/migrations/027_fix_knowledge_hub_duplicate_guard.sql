@@ -19,12 +19,8 @@ begin
   );
   candidate_intent := lower(trim(new.canonical_intent));
 
-  select t,
-         similarity(
-           lower(coalesce(t.canonical_intent, t.intent, t.title)),
-           candidate_intent
-         )
-    into existing_topic, candidate_similarity
+  select t.*
+    into existing_topic
   from public.knowledge_topics t
   where t.id <> coalesce(new.id, gen_random_uuid())
     and (
@@ -43,6 +39,13 @@ begin
     (t.status <> 'archived') desc,
     t.updated_at desc
   limit 1;
+
+  if found then
+    candidate_similarity := similarity(
+      lower(coalesce(existing_topic.canonical_intent, existing_topic.intent, existing_topic.title)),
+      candidate_intent
+    );
+  end if;
 
   if found and nullif(trim(new.duplicate_override_reason), '') is null then
     raise exception using
