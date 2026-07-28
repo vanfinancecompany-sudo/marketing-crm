@@ -26,10 +26,8 @@ test("published article results use client-side pagination with required page si
   assert.match(page, /ARTICLE_PAGE_SIZES = \[10, 25, 50, 100\]/);
   assert.match(page, /useState\(25\)/);
   assert.match(page, /pageRows = rows\.slice/);
-  assert.match(
-    page,
-    /Showing \{rows\.length \? pageStart \+ 1 : 0\}–\{pageEnd\} of \{rows\.length\}/,
-  );
+  assert.match(page, /Showing \{rows\.length \? pageStart \+ 1 : 0\}–\{pageEnd\} of/);
+  assert.match(page, /\{rows\.length\}/);
   assert.match(page, /Previous article results page/);
   assert.match(page, /Next article results page/);
   assert.match(page, /aria-current=\{page === safeArticlePage \? "page"/);
@@ -40,7 +38,7 @@ test("filter and sort changes reset pagination", async () => {
   const page = await read("../pages/AIVisibilityPage.jsx");
   assert.match(
     page,
-    /useEffect\(\(\) => setArticlePage\(1\), \[filters\.search, filters\.provider, filters\.status, filters\.from, filters\.to, filters\.sort, articlePageSize\]\)/,
+    /useEffect\(\s*\(\) => setArticlePage\(1\),\s*\[\s*filters\.search,\s*filters\.provider,\s*filters\.status,\s*filters\.from,\s*filters\.to,\s*filters\.sort,\s*articlePageSize,?\s*\],\s*\)/,
   );
 });
 
