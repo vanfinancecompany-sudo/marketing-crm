@@ -228,7 +228,7 @@ begin
   new.canonical_intent := coalesce(nullif(trim(new.canonical_intent), ''), nullif(trim(new.intent), ''), new.title);
   candidate_intent := lower(trim(new.canonical_intent));
 
-  select t.*,
+  select t,
          similarity(lower(coalesce(t.canonical_intent, t.intent, t.title)), candidate_intent)
     into existing_topic, candidate_similarity
   from public.knowledge_topics t
