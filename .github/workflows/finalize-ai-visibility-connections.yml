@@ -33,8 +33,6 @@ jobs:
               text = text.replace(marker, marker + '  performance_found: "Performance data found",\n')
           page.write_text(text, encoding='utf-8')
           PY
-      - name: Format changed files
-        run: npx --yes prettier@3.3.3 --write lib/aiVisibility.js lib/aiVisibilityProviders.js lib/aiVisibilityLiveConnections.js api/marketing-ai-visibility-connections.js services/aiVisibility.js components/AIVisibilityLiveConnections.jsx pages/AIVisibilityPage.jsx tests/ai-visibility-live-connections.test.js
       - name: Install dependencies
         run: npm ci
       - name: Run focused tests
