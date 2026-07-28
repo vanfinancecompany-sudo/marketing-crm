@@ -9,16 +9,10 @@ def replace(path, old, new):
     file.write_text(text.replace(old, new), encoding="utf-8")
 
 
-# Shared source-of-truth helper in the evidence aggregation layer.
 replace(
     "lib/aiVisibility.js",
-    '''export function buildArticleVisibility({
-''',
-    '''export function completedVisibilityResult(result = {}) {
-  return COMPLETED_RESULT_STATUSES.has(result.result_status);
-}
-
-export function publishedCheckCoverage(articleResults = []) {
+    "export function buildArticleVisibility({\n",
+    '''export function publishedCheckCoverage(articleResults = []) {
   const checkedArticleIds = new Set(
     articleResults
       .filter((item) => item.checked_successfully)
@@ -43,23 +37,17 @@ export function buildArticleVisibility({
 )
 replace(
     "lib/aiVisibility.js",
-    '''    awaiting_first_check: articleResults.length === 0,
-''',
-    '''    awaiting_first_check: !checkedSuccessfully,
-''',
+    "    awaiting_first_check: articleResults.length === 0,\n",
+    "    awaiting_first_check: !checkedSuccessfully,\n",
 )
 replace(
     "lib/aiVisibility.js",
-    '''  const aiEligible = articleResults.filter((item) => item.ai_eligible);
-''',
-    '''  const coverage = publishedCheckCoverage(articleResults);
-  const aiEligible = articleResults.filter((item) => item.ai_eligible);
-''',
+    "  const aiEligible = articleResults.filter((item) => item.ai_eligible);\n",
+    "  const coverage = publishedCheckCoverage(articleResults);\n  const aiEligible = articleResults.filter((item) => item.ai_eligible);\n",
 )
 replace(
     "lib/aiVisibility.js",
-    '''    published_pages: published.length,
-''',
+    "    published_pages: published.length,\n",
     '''    published_pages: coverage.published_count,
     checked_pages: coverage.checked_count,
     unchecked_pages: coverage.unchecked_count,
@@ -69,13 +57,10 @@ replace(
 )
 replace(
     "lib/aiVisibility.js",
-    '''    awaiting_first_check: articleResults.filter((item) => item.awaiting_first_check).length,
-''',
-    '''    awaiting_first_check: coverage.unchecked_count,
-''',
+    "    awaiting_first_check: articleResults.filter((item) => item.awaiting_first_check).length,\n",
+    "    awaiting_first_check: coverage.unchecked_count,\n",
 )
 
-# Use the shared summary counts in the page rather than recalculating independently.
 replace(
     "pages/AIVisibilityPage.jsx",
     '''              {summary.published_pages} published pages ·{" "}
@@ -90,12 +75,34 @@ replace(
 )
 replace(
     "pages/AIVisibilityPage.jsx",
-    '''            <div className="panel"><h3>Not yet checked</h3>{summary.articles.filter((item) => item.awaiting_first_check).slice(0, 5).map((item) => <button className="visibility-quick-row" type="button" key={item.article.id} onClick={() => setSelectedId(item.article.id)}>{item.article.title}</button>)}{!summary.awaiting_first_check ? <div className="notice">Every published page has a completed check.</div> : null}</div>
+    '''            <div className="panel">
+              <h3>Not yet checked</h3>
+              {summary.articles
+                .filter((item) => item.awaiting_first_check)
+                .slice(0, 5)
+                .map((item) => (
+                  <button
+                    className="visibility-quick-row"
+                    type="button"
+                    key={item.article.id}
+                    onClick={() => setSelectedId(item.article.id)}
+                  >
+                    {item.article.title}
+                  </button>
+                ))}
+              {!summary.awaiting_first_check ? (
+                <div className="notice">
+                  Every published page has a completed check.
+                </div>
+              ) : null}
+            </div>
 ''',
     '''            <div className="panel">
               <h3>Not yet checked</h3>
               {summary.awaiting_first_check ? (
-                <div className="notice">{summary.awaiting_first_check} published pages have not yet been checked.</div>
+                <div className="notice">
+                  {summary.awaiting_first_check} published pages have not yet been checked.
+                </div>
               ) : null}
               {summary.articles
                 .filter((item) => summary.unchecked_article_ids.includes(item.article.id))
@@ -115,13 +122,14 @@ replace(
                   </button>
                 ))}
               {!summary.awaiting_first_check ? (
-                <div className="notice">Every published page has a completed check.</div>
+                <div className="notice">
+                  Every published page has a completed check.
+                </div>
               ) : null}
             </div>
 ''',
 )
 
-# Focused tests exercise global unique-article coverage and final outcomes.
 Path("tests/ai-visibility-unchecked-counts.test.js").write_text(r'''import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -200,7 +208,7 @@ test("shared coverage helper deduplicates article IDs", () => {
   assert.equal(coverage.unchecked_count, 1);
 });
 
-test("page summary and not-yet-checked panel consume the shared summary fields", async () => {
+test("page summary and not-yet-checked panel consume shared summary fields", async () => {
   const page = await read("../pages/AIVisibilityPage.jsx");
   assert.match(page, /summary\.checked_pages/);
   assert.match(page, /summary\.unchecked_article_ids/);
