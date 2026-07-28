@@ -6,6 +6,7 @@ import {
 const API_ROUTE = "/api/marketing-ai-visibility";
 const CONNECTIONS_API_ROUTE = "/api/marketing-ai-visibility-connections";
 const WIX_SYNC_API_ROUTE = "/api/marketing-ai-visibility-wix-sync";
+const MANUAL_EVIDENCE_API_ROUTE = "/api/marketing-ai-visibility-manual";
 
 async function request(route, action, payload = {}) {
   const response = await fetch(route, {
@@ -39,7 +40,7 @@ export const deriveArticleVisibilityPrompts = (articleId) =>
 export const saveArticleVisibilityPrompt = (prompt) =>
   requestAiVisibility("savePrompt", { prompt });
 export const recordManualVisibilityResult = (result) =>
-  requestAiVisibility("recordManualResult", { result });
+  request(MANUAL_EVIDENCE_API_ROUTE, "recordManualEvidence", { result });
 export const runArticleVisibilityCheck = (articleId, provider, promptId = null) =>
   requestAiVisibility("runCheck", {
     article_id: articleId,
