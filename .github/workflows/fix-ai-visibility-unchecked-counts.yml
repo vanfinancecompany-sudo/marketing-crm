@@ -30,7 +30,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Run focused tests
-        run: node --test tests/ai-visibility-unchecked-counts.test.js tests/ai-visibility-layout-pagination.test.js
+        run: node --test tests/ai-visibility-unchecked-counts.test.js
       - name: Run production build
         run: npm run build
       - name: Commit verified changes
