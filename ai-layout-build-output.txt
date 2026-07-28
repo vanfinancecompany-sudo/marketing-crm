@@ -1,0 +1,24 @@
+
+> marketing-crm@1.0.0 build
+> vite build
+
+[36mvite v5.4.21 [32mbuilding for production...[36m[39m
+transforming...
+[32m✓[39m 148 modules transformed.
+rendering chunks...
+computing gzip size...
+[2mdist/[22m[32mindex.html                                       [39m[1m[2m    0.51 kB[22m[1m[22m[2m │ gzip:   0.30 kB[22m
+[2mdist/[22m[2massets/[22m[32mrent2buy-vans-DNQxZyME.png                [39m[1m[2m  841.90 kB[22m[1m[22m
+[2mdist/[22m[2massets/[22m[32mvan-finance-company-CFrMEE2g.png          [39m[1m[2m2,351.46 kB[22m[1m[22m
+[2mdist/[22m[2massets/[22m[32mdefault-reel-audio-Cz7t5-e4.mp3           [39m[1m[2m4,904.33 kB[22m[1m[22m
+[2mdist/[22m[2massets/[22m[35mindex-DgaFuZkj.css                        [39m[1m[2m   69.47 kB[22m[1m[22m[2m │ gzip:  12.39 kB[22m
+[2mdist/[22m[2massets/[22m[36mKnowledgeHubApprovalDomFixes-CgezbS1X.js  [39m[1m[2m    2.62 kB[22m[1m[22m[2m │ gzip:   1.26 kB[22m
+[2mdist/[22m[2massets/[22m[36mPublishingSafetyCorrections-C40SiFL-.js   [39m[1m[2m    9.47 kB[22m[1m[22m[2m │ gzip:   3.41 kB[22m
+[2mdist/[22m[2massets/[22m[36mAIVisibilityLiveConnections-Dy9LNF3o.js   [39m[1m[2m   15.58 kB[22m[1m[22m[2m │ gzip:   4.78 kB[22m
+[2mdist/[22m[2massets/[22m[36mindex-CBaEbzt8.js                         [39m[1m[33m  834.23 kB[39m[22m[2m │ gzip: 225.94 kB[22m
+[33m
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[39m
+[32m✓ built in 2.46s[39m
