@@ -12,7 +12,9 @@ import {
 function displaySummary(summary = {}) {
   return [
     `Wix items checked: ${summary.wix_items_checked || 0}`,
-    `Live articles matched: ${summary.live_articles_matched || 0}`,
+    `Wix LIVE items matched: ${summary.wix_live_items_matched || 0}`,
+    `Published pages verified and saved: ${summary.published_pages_verified_and_saved || 0}`,
+    `Items missing a usable live URL: ${summary.items_missing_usable_live_url || 0}`,
     `New published pages added: ${summary.new_published_pages_added || 0}`,
     `Existing records updated: ${summary.existing_records_updated || 0}`,
     `Drafts ignored: ${summary.drafts_ignored || 0}`,
@@ -23,10 +25,50 @@ function displaySummary(summary = {}) {
   ].join(" · ");
 }
 
+function SyncErrors({ summary }) {
+  if (!summary?.errors?.length) return null;
+  return (
+    <details className="notice notice--error">
+      <summary>Show sync error details ({summary.errors.length})</summary>
+      <div className="knowledge-table-wrap" style={{ marginTop: 10 }}>
+        <table className="knowledge-table">
+          <thead>
+            <tr>
+              <th>CRM article ID</th>
+              <th>Article title</th>
+              <th>Wix item ID</th>
+              <th>Slug</th>
+              <th>Dynamic link fields found</th>
+              <th>Exact error</th>
+            </tr>
+          </thead>
+          <tbody>
+            {summary.errors.map((item, index) => (
+              <tr key={`${item.article_id || "unknown"}-${item.wix_item_id || index}`}>
+                <td>{item.article_id || "—"}</td>
+                <td>{item.article_title || "—"}</td>
+                <td>{item.wix_item_id || "—"}</td>
+                <td>{item.slug || "—"}</td>
+                <td>
+                  {item.dynamic_link_fields?.length
+                    ? item.dynamic_link_fields.map((field) => `${field.key}: ${field.value}`).join(" | ")
+                    : "None returned"}
+                </td>
+                <td>{item.error || "Unknown error"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  );
+}
+
 function LiveConnectionsPanel() {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [syncSummary, setSyncSummary] = useState(null);
   const [google, setGoogle] = useState(null);
 
   useEffect(() => {
@@ -41,6 +83,7 @@ function LiveConnectionsPanel() {
     setMessage("");
     try {
       const result = await action();
+      if (label === "wix") setSyncSummary(result.summary || null);
       setMessage(success(result));
       window.dispatchEvent(new CustomEvent("ai-visibility-live-data-updated"));
     } catch (caught) {
@@ -93,6 +136,7 @@ function LiveConnectionsPanel() {
         <small>Last checked: {google?.last_successful_check_at ? new Date(google.last_successful_check_at).toLocaleString("en-GB") : "Never"}</small>
       </div>
       {message ? <div className="notice notice--success">{message}</div> : null}
+      <SyncErrors summary={syncSummary} />
       {error ? <div className="notice notice--error">{error}</div> : null}
     </section>
   );
