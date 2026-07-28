@@ -29,11 +29,19 @@ jobs:
         run: npx --yes prettier@3.3.3 --write pages/AIVisibilityPage.jsx components/AIVisibilityLiveConnections.jsx tests/ai-visibility-layout-pagination.test.js
       - name: Install dependencies
         run: npm ci
-      - name: Run focused tests
-        run: node --test tests/ai-visibility-layout-pagination.test.js tests/ai-visibility-live-connections.test.js tests/ai-visibility-manual-workflow.test.js
-      - name: Run production build
-        run: npm run build
-      - name: Commit verified UI changes
+      - name: Run focused tests and capture result
+        run: |
+          set +e
+          node --test tests/ai-visibility-layout-pagination.test.js tests/ai-visibility-live-connections.test.js tests/ai-visibility-manual-workflow.test.js > ai-layout-test-output.txt 2>&1
+          echo $? > ai-layout-test-exit.txt
+          set -e
+      - name: Run production build and capture result
+        run: |
+          set +e
+          npm run build > ai-layout-build-output.txt 2>&1
+          echo $? > ai-layout-build-exit.txt
+          set -e
+      - name: Commit UI changes and verification output
         run: |
           rm .github/workflows/apply-ai-visibility-layout-cleanup.yml
           rm scripts/apply_ai_visibility_layout_cleanup.py
