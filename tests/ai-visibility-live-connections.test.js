@@ -6,6 +6,7 @@ import {
   buildWixSyncPlan,
   googleEvidenceStatus,
   matchCrmArticleToWixItem,
+  resolveWixLiveArticleUrl,
 } from "../lib/aiVisibilityLiveConnections.js";
 import { buildVisibilitySummary, isConfirmedPublishedArticle } from "../lib/aiVisibility.js";
 
@@ -64,9 +65,41 @@ test("repeated Wix sync plan contains one deterministic match and no duplicate",
 test("existing live Wix articles can be safely backfilled by CRM article ID", () => {
   const plan = buildWixSyncPlan({
     articles: [{ id: "article-backfill", slug: "backfill" }],
-    liveItems: [{ id: "wix-backfill", data: { crmArticleId: "article-backfill", liveUrl: "https://example.com/backfill" } }],
+    liveItems: [{ id: "wix-backfill", data: { crmArticleId: "article-backfill", liveUrl: "https://www.vanfinancecompany.co.uk/knowledge-hub/backfill" } }],
   });
   assert.equal(plan.matches[0].matched_by, "crm_article_id");
+});
+
+test("Wix LIVE dynamic-page link is normalised and accepted", () => {
+  const result = resolveWixLiveArticleUrl({
+    data: {
+      slug: "live-article",
+      "link-knowledge-hub-article-title": "/knowledge-hub-article/live-article",
+    },
+  });
+  assert.equal(result.url, "https://www.vanfinancecompany.co.uk/knowledge-hub-article/live-article");
+  assert.equal(result.source, "wix_dynamic_link_field");
+});
+
+test("verified configured route safely constructs a URL from slug", () => {
+  const result = resolveWixLiveArticleUrl(
+    { data: { slug: "live-article" } },
+    { articleUrlPrefix: "https://www.vanfinancecompany.co.uk/knowledge-hub-article/" },
+  );
+  assert.equal(result.url, "https://www.vanfinancecompany.co.uk/knowledge-hub-article/live-article");
+  assert.equal(result.source, "configured_slug_route");
+});
+
+test("invalid or missing slug remains unsaved and wrong-domain URLs are rejected", () => {
+  assert.equal(resolveWixLiveArticleUrl(
+    { data: {} },
+    { articleUrlPrefix: "https://www.vanfinancecompany.co.uk/knowledge-hub-article/" },
+  ).url, "");
+  assert.equal(resolveWixLiveArticleUrl(
+    { data: { slug: "bad slug" } },
+    { articleUrlPrefix: "https://www.vanfinancecompany.co.uk/knowledge-hub-article/" },
+  ).url, "");
+  assert.equal(resolveWixLiveArticleUrl({ data: { slug: "live", dynamicLink: "https://example.com/live" } }).url, "");
 });
 
 test("Search Analytics values are stored accurately", () => {
@@ -110,12 +143,40 @@ test("evidence history is inserted, not overwritten", async () => {
   assert.doesNotMatch(api, /knowledge_visibility_results"\)\.update/);
 });
 
-test("AI providers remain manual and no rankings or live publication are fabricated", async () => {
+test("sync summary distinguishes matching, saved pages and missing URLs with details", async () => {
+  const api = await read("../api/marketing-ai-visibility-wix-sync.js");
+  const component = await read("../components/AIVisibilityLiveConnections.jsx");
+  assert.match(api, /wix_live_items_matched/);
+  assert.match(api, /published_pages_verified_and_saved/);
+  assert.match(api, /items_missing_usable_live_url/);
+  assert.match(api, /dynamic_link_fields/);
+  assert.match(component, /Wix LIVE items matched/);
+  assert.match(component, /Published pages verified and saved/);
+  assert.match(component, /Show sync error details/);
+});
+
+test("provider cards use the same refreshed stored Google connection state", async () => {
+  const service = await read("../services/aiVisibility.js");
+  const page = await read("../pages/AIVisibilityPage.jsx");
+  assert.match(service, /await loadGoogleSearchConsoleConnection\(\)/);
+  assert.match(service, /return requestAiVisibility\("load"\)/);
+  assert.match(page, /ProviderConnections providers=\{data.provider_connections\}/);
+});
+
+test("Google remains manual until clicked and no live Wix publication is introduced", async () => {
+  const component = await read("../components/AIVisibilityLiveConnections.jsx");
+  const wixSync = await read("../api/marketing-ai-visibility-wix-sync.js");
+  const wixPublishing = await read("../api/marketing-wix-publishing.js");
+  assert.match(component, /Check Google for Published Pages/);
+  assert.match(component, /Check Google now/);
+  assert.doesNotMatch(component, /useEffect\([^]*checkGoogleForPublishedPages/);
+  assert.doesNotMatch(`${wixSync}\n${wixPublishing}`, /publishLive|livePublish|status:\s*["']published["']/);
+});
+
+test("AI providers remain manual and no rankings are fabricated", async () => {
   const providers = await read("../lib/aiVisibilityProviders.js");
-  const wix = await read("../api/marketing-wix-publishing.js");
   const connections = await read("../api/marketing-ai-visibility-connections.js");
   assert.match(providers, /Manual evidence only/);
-  assert.doesNotMatch(`${connections}\n${wix}`, /publishLive|livePublish|status:\s*["']published["']/);
   assert.match(connections, /ranking_position_supplied:\s*false/);
 });
 
