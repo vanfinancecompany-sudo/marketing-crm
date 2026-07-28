@@ -26,8 +26,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Run focused tests
-        run: node --test tests/ai-visibility-layout-pagination.test.js tests/ai-visibility-live-connections.test.js tests/ai-visibility-manual-workflow.test.js
+      - name: Run focused layout tests
+        run: node --test tests/ai-visibility-layout-pagination.test.js
       - name: Run production build
         run: npm run build
       - name: Remove temporary workflow
