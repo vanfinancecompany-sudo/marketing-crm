@@ -5,6 +5,7 @@ import {
 
 const API_ROUTE = "/api/marketing-ai-visibility";
 const CONNECTIONS_API_ROUTE = "/api/marketing-ai-visibility-connections";
+const WIX_SYNC_API_ROUTE = "/api/marketing-ai-visibility-wix-sync";
 
 async function request(route, action, payload = {}) {
   const response = await fetch(route, {
@@ -17,8 +18,20 @@ async function request(route, action, payload = {}) {
 
 const requestAiVisibility = (action, payload = {}) => request(API_ROUTE, action, payload);
 const requestConnection = (action, payload = {}) => request(CONNECTIONS_API_ROUTE, action, payload);
+const requestWixSync = (action, payload = {}) => request(WIX_SYNC_API_ROUTE, action, payload);
 
-export const loadAiVisibility = () => requestAiVisibility("load");
+export const loadGoogleSearchConsoleConnection = () =>
+  requestConnection("googleConnection");
+
+export const loadAiVisibility = async () => {
+  try {
+    await loadGoogleSearchConsoleConnection();
+  } catch (error) {
+    console.warn("GOOGLE SEARCH CONSOLE CONNECTION REFRESH ERROR", error);
+  }
+  return requestAiVisibility("load");
+};
+
 export const saveVisibilityPublication = (articleId, publication) =>
   requestAiVisibility("savePublication", { article_id: articleId, publication });
 export const deriveArticleVisibilityPrompts = (articleId) =>
@@ -36,11 +49,9 @@ export const runArticleVisibilityCheck = (articleId, provider, promptId = null) 
 export const saveAiVisibilitySettings = (attentionDays) =>
   requestAiVisibility("saveSettings", { attention_days: attentionDays });
 
-export const syncLiveWixArticles = () => requestConnection("syncLiveWixArticles");
+export const syncLiveWixArticles = () => requestWixSync("syncLiveWixArticles");
 export const checkWixPublicationStatus = (articleId) =>
-  requestConnection("checkWixPublication", { article_id: articleId });
-export const loadGoogleSearchConsoleConnection = () =>
-  requestConnection("googleConnection");
+  requestWixSync("checkWixPublication", { article_id: articleId });
 export const checkGoogleForArticle = (articleId, executionId = "") =>
   requestConnection("checkGoogle", {
     article_id: articleId,
