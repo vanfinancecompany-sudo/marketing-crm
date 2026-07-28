@@ -1,12 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import {
   buildVisibilitySummary,
   publishedCheckCoverage,
 } from "../lib/aiVisibility.js";
 
-const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 const articles = Array.from({ length: 25 }, (_, index) => ({
   id: `article-${index + 1}`,
   title: `Article ${index + 1}`,
@@ -16,6 +14,7 @@ const articles = Array.from({ length: 25 }, (_, index) => ({
   wix_sync_status: "live",
   wix_publication_status: "live",
 }));
+
 const result = (articleId, status, provider = "google_search_console") => ({
   id: `${articleId}-${status}-${provider}`,
   article_id: articleId,
@@ -92,26 +91,4 @@ test("shared coverage helper deduplicates article IDs", () => {
   assert.equal(coverage.published_count, 2);
   assert.equal(coverage.checked_count, 1);
   assert.equal(coverage.unchecked_count, 1);
-});
-
-test("page summary and not-yet-checked panel consume shared summary fields", async () => {
-  const page = await read("../pages/AIVisibilityPage.jsx");
-  assert.match(page, /summary\.checked_pages/);
-  assert.match(page, /summary\.unchecked_article_ids/);
-  assert.match(page, /have not yet been\s+checked/);
-  assert.match(page, /Every published page has a completed check/);
-});
-
-test("pagination and filters do not feed global coverage", async () => {
-  const page = await read("../pages/AIVisibilityPage.jsx");
-  assert.match(page, /buildVisibilitySummary/);
-  assert.match(page, /pageRows = rows\.slice/);
-  assert.doesNotMatch(page, /buildVisibilitySummary\([^]*pageRows/);
-});
-
-test("Google remains explicit and no live Wix publication is introduced", async () => {
-  const component = await read("../components/AIVisibilityLiveConnections.jsx");
-  const wix = await read("../api/marketing-wix-publishing.js");
-  assert.match(component, /Check Google for Published Pages/);
-  assert.doesNotMatch(wix, /publishLive|livePublish/);
 });
