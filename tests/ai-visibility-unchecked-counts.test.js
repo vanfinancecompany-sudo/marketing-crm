@@ -98,7 +98,7 @@ test("page summary and not-yet-checked panel consume shared summary fields", asy
   const page = await read("../pages/AIVisibilityPage.jsx");
   assert.match(page, /summary\.checked_pages/);
   assert.match(page, /summary\.unchecked_article_ids/);
-  assert.match(page, /published pages have not yet been checked/);
+  assert.match(page, /published pages\s+have not yet been checked/);
   assert.match(page, /Every published page has a completed check/);
 });
 
