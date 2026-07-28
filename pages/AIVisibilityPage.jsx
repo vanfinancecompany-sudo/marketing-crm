@@ -29,6 +29,7 @@ const STATUS_LABELS = {
   checking: "Checking",
   indexed: "Indexed",
   not_indexed: "Not indexed",
+  performance_found: "Performance data found",
   detected: "Detected",
   mentioned: "Mentioned",
   cited: "Cited",
