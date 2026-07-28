@@ -1,9 +1,9 @@
 name: Apply AI Visibility layout cleanup
 
 on:
-  push:
+  pull_request:
     branches:
-      - ui/ai-visibility-layout-pagination
+      - main
     paths:
       - .github/workflows/apply-ai-visibility-layout-cleanup.yml
       - scripts/apply_ai_visibility_layout_cleanup.py
