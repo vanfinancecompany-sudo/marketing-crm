@@ -1,0 +1,234 @@
+name: Finalize Wix live URL resolution
+
+on:
+  push:
+    branches:
+      - feature/ai-visibility-wix-gsc
+    paths:
+      - .github/workflows/finalize-wix-live-url-resolution.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ai-visibility-wix-gsc
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply live URL and provider-state fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          api = Path('api/marketing-ai-visibility-connections.js')
+          text = api.read_text(encoding='utf-8')
+          text = text.replace('  wixItemLiveUrl,\n', '  resolveWixLiveArticleUrl,\n')
+          old = '''async function saveWixMatch(supabase, article, item, matchedBy) {
+            const now = new Date().toISOString();
+            const itemData = wixItemData(item);
+            const liveUrl = validHttpsUrl(wixItemLiveUrl(item)) || validHttpsUrl(article.live_wix_url);
+            if (!liveUrl) {
+              return { saved: false, error: "Live URL unavailable.", article_id: article.id };
+            }
+            const publishedAt = wixPublishedTimestamp(item) || article.published_at || now;'''
+          new = '''async function saveWixMatch(supabase, article, item, matchedBy) {
+            const now = new Date().toISOString();
+            const itemData = wixItemData(item);
+            const resolution = resolveWixLiveArticleUrl(item, {
+              articleUrlPrefix: process.env.WIX_KNOWLEDGE_ARTICLE_URL_PREFIX,
+            });
+            const liveUrl = resolution.url;
+            if (!liveUrl) {
+              return {
+                saved: false,
+                missing_live_url: true,
+                article_id: article.id,
+                article_title: article.title,
+                wix_item_id: wixItemId(item),
+                slug: wixItemSlug(item),
+                dynamic_link_fields: resolution.dynamic_link_fields,
+                error: "Live URL unavailable. No valid Wix dynamic-page link was returned and the configured article route could not safely construct one.",
+              };
+            }
+            const publishedAt = wixPublishedTimestamp(item) || article.published_at || now;'''
+          if old not in text:
+              raise SystemExit('saveWixMatch marker not found')
+          text = text.replace(old, new)
+          text = text.replace('''      wix_slug: wixItemSlug(item),
+      manually_verified: false,''', '''      wix_slug: wixItemSlug(item),
+      live_url_source: resolution.source,
+      manually_verified: false,''')
+          text = text.replace('''  const errors = [];
+  for (const match of plan.matches) {''', '''  const errors = [];
+  const missingLiveUrls = [];
+  for (const match of plan.matches) {''')
+          text = text.replace('''      if (!result.saved) errors.push(result);
+      else if (wasPublished) updated += 1;''', '''      if (!result.saved) {
+        errors.push(result);
+        if (result.missing_live_url) missingLiveUrls.push(result);
+      } else if (wasPublished) updated += 1;''')
+          text = text.replace('''      errors.push({ article_id: match.article.id, error: error.message });''', '''      errors.push({
+        article_id: match.article.id,
+        article_title: match.article.title,
+        wix_item_id: wixItemId(match.item),
+        slug: wixItemSlug(match.item),
+        dynamic_link_fields: resolveWixLiveArticleUrl(match.item, {
+          articleUrlPrefix: process.env.WIX_KNOWLEDGE_ARTICLE_URL_PREFIX,
+        }).dynamic_link_fields,
+        error: error.message,
+      });''')
+          text = text.replace('''    live_articles_matched: plan.matches.length,
+    new_published_pages_added: added,''', '''    wix_live_items_matched: plan.matches.length,
+    published_pages_verified_and_saved: added + updated,
+    items_missing_usable_live_url: missingLiveUrls.length,
+    new_published_pages_added: added,''')
+          api.write_text(text, encoding='utf-8')
+
+          component = Path('components/AIVisibilityLiveConnections.jsx')
+          text = component.read_text(encoding='utf-8')
+          text = text.replace('''    `Live articles matched: ${summary.live_articles_matched || 0}`,
+    `New published pages added: ${summary.new_published_pages_added || 0}`,''', '''    `Wix LIVE items matched: ${summary.wix_live_items_matched || 0}`,
+    `Published pages verified and saved: ${summary.published_pages_verified_and_saved || 0}`,
+    `Items missing a usable live URL: ${summary.items_missing_usable_live_url || 0}`,
+    `New published pages added: ${summary.new_published_pages_added || 0}`,''')
+          text = text.replace('''      .then((result) => setGoogle(result.connection))''', '''      .then((result) => {
+        setGoogle(result.connection);
+        window.dispatchEvent(new CustomEvent("ai-visibility-live-data-updated"));
+      })''')
+          text = text.replace('''      {message ? <div className="notice notice--success">{message}</div> : null}
+      {error ? <div className="notice notice--error">{error}</div> : null}''', '''      {message ? <div className="notice notice--success">{message}</div> : null}
+      {message && message.includes("Errors:") ? null : null}
+      {error ? <div className="notice notice--error">{error}</div> : null}''', 1)
+          # Replace message-only state with retained summary for detailed errors.
+          text = text.replace('''  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [google, setGoogle] = useState(null);''', '''  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [syncSummary, setSyncSummary] = useState(null);
+  const [google, setGoogle] = useState(null);''', 1)
+          text = text.replace('''      const result = await action();
+      setMessage(success(result));''', '''      const result = await action();
+      if (label === "wix") setSyncSummary(result.summary || null);
+      setMessage(success(result));''', 1)
+          marker = '''      {message ? <div className="notice notice--success">{message}</div> : null}
+      {message && message.includes("Errors:") ? null : null}
+      {error ? <div className="notice notice--error">{error}</div> : null}'''
+          replacement = '''      {message ? <div className="notice notice--success">{message}</div> : null}
+      {syncSummary?.errors?.length ? (
+        <details className="notice notice--error">
+          <summary>Show sync error details ({syncSummary.errors.length})</summary>
+          <div className="knowledge-table-wrap" style={{ marginTop: 10 }}>
+            <table className="knowledge-table">
+              <thead><tr><th>CRM article</th><th>Title</th><th>Wix item</th><th>Slug</th><th>Dynamic link fields</th><th>Error</th></tr></thead>
+              <tbody>{syncSummary.errors.map((item, index) => <tr key={`${item.article_id || "unknown"}-${item.wix_item_id || index}`}><td>{item.article_id || "—"}</td><td>{item.article_title || "—"}</td><td>{item.wix_item_id || "—"}</td><td>{item.slug || "—"}</td><td>{item.dynamic_link_fields?.length ? item.dynamic_link_fields.map((field) => `${field.key}: ${field.value}`).join(" | ") : "None returned"}</td><td>{item.error || "Unknown error"}</td></tr>)}</tbody>
+            </table>
+          </div>
+        </details>
+      ) : null}
+      {error ? <div className="notice notice--error">{error}</div> : null}'''
+          if marker not in text:
+              raise SystemExit('component error marker not found')
+          text = text.replace(marker, replacement)
+          component.write_text(text, encoding='utf-8')
+
+          page = Path('pages/AIVisibilityPage.jsx')
+          text = page.read_text(encoding='utf-8')
+          marker = '''  useEffect(() => {
+    if (locked) return;
+    const metric = (() => {'''
+          replacement = '''  useEffect(() => {
+    if (locked) return;
+    const refreshFromLiveConnection = () => load();
+    window.addEventListener("ai-visibility-live-data-updated", refreshFromLiveConnection);
+    const metric = (() => {'''
+          if marker not in text:
+              raise SystemExit('page effect marker not found')
+          text = text.replace(marker, replacement)
+          text = text.replace('''    load();
+  }, []);''', '''    load();
+    return () => window.removeEventListener("ai-visibility-live-data-updated", refreshFromLiveConnection);
+  }, []);''', 1)
+          page.write_text(text, encoding='utf-8')
+
+          tests = Path('tests/ai-visibility-live-connections.test.js')
+          text = tests.read_text(encoding='utf-8')
+          text = text.replace('''  matchCrmArticleToWixItem,
+} from "../lib/aiVisibilityLiveConnections.js";''', '''  matchCrmArticleToWixItem,
+  resolveWixLiveArticleUrl,
+} from "../lib/aiVisibilityLiveConnections.js";''')
+          text += '''
+
+test("Wix LIVE dynamic-page link is normalised and accepted", () => {
+  const result = resolveWixLiveArticleUrl({ data: { slug: "live-article", "link-knowledge-hub-article-title": "/knowledge-hub-article/live-article" } });
+  assert.equal(result.url, "https://www.vanfinancecompany.co.uk/knowledge-hub-article/live-article");
+  assert.equal(result.source, "wix_dynamic_link_field");
+});
+
+test("verified configured route safely constructs a URL from slug", () => {
+  const result = resolveWixLiveArticleUrl(
+    { data: { slug: "live-article" } },
+    { articleUrlPrefix: "https://www.vanfinancecompany.co.uk/knowledge-hub-article/" },
+  );
+  assert.equal(result.url, "https://www.vanfinancecompany.co.uk/knowledge-hub-article/live-article");
+  assert.equal(result.source, "configured_slug_route");
+});
+
+test("missing or invalid slug remains unsaved and wrong-domain links are rejected", () => {
+  assert.equal(resolveWixLiveArticleUrl({ data: {} }, { articleUrlPrefix: "https://www.vanfinancecompany.co.uk/knowledge-hub-article/" }).url, "");
+  assert.equal(resolveWixLiveArticleUrl({ data: { slug: "bad slug" } }, { articleUrlPrefix: "https://www.vanfinancecompany.co.uk/knowledge-hub-article/" }).url, "");
+  assert.equal(resolveWixLiveArticleUrl({ data: { slug: "live", dynamicLink: "https://example.com/live" } }).url, "");
+});
+
+test("sync summary and detailed error reporting use accurate wording", async () => {
+  const api = await read("../api/marketing-ai-visibility-connections.js");
+  const component = await read("../components/AIVisibilityLiveConnections.jsx");
+  assert.match(api, /wix_live_items_matched/);
+  assert.match(api, /published_pages_verified_and_saved/);
+  assert.match(api, /items_missing_usable_live_url/);
+  assert.match(component, /Wix LIVE items matched/);
+  assert.match(component, /Published pages verified and saved/);
+  assert.match(component, /Show sync error details/);
+  assert.match(component, /dynamic_link_fields/);
+});
+
+test("both provider cards reload the same stored connected state", async () => {
+  const component = await read("../components/AIVisibilityLiveConnections.jsx");
+  const page = await read("../pages/AIVisibilityPage.jsx");
+  assert.match(component, /ai-visibility-live-data-updated/);
+  assert.match(page, /addEventListener\("ai-visibility-live-data-updated", refreshFromLiveConnection\)/);
+  assert.match(page, /ProviderConnections providers=\{data.provider_connections\}/);
+});
+
+test("Google checks remain explicit and Wix publication is never automated", async () => {
+  const component = await read("../components/AIVisibilityLiveConnections.jsx");
+  const api = await read("../api/marketing-ai-visibility-connections.js");
+  assert.match(component, /Check Google for Published Pages/);
+  assert.doesNotMatch(component, /useEffect\([^]*checkGoogleForPublishedPages/);
+  assert.doesNotMatch(api, /publishLive|livePublish|status:\s*["']published["']/);
+});
+'''
+          tests.write_text(text, encoding='utf-8')
+          PY
+      - name: Format changed files
+        run: npx --yes prettier@3.3.3 --write lib/aiVisibilityLiveConnections.js api/marketing-ai-visibility-connections.js components/AIVisibilityLiveConnections.jsx pages/AIVisibilityPage.jsx tests/ai-visibility-live-connections.test.js
+      - name: Install dependencies
+        run: npm ci
+      - name: Run focused tests
+        run: node --test tests/ai-visibility-live-connections.test.js
+      - name: Run production build
+        run: npm run build
+      - name: Commit verified changes
+        run: |
+          rm .github/workflows/finalize-wix-live-url-resolution.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Resolve Wix live article URLs for AI Visibility"
+          git push origin HEAD:feature/ai-visibility-wix-gsc
