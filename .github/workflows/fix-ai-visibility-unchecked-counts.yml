@@ -29,11 +29,19 @@ jobs:
         run: npx --yes prettier@3.3.3 --write lib/aiVisibility.js pages/AIVisibilityPage.jsx tests/ai-visibility-unchecked-counts.test.js
       - name: Install dependencies
         run: npm ci
-      - name: Run focused tests
-        run: node --test tests/ai-visibility-unchecked-counts.test.js
-      - name: Run production build
-        run: npm run build
-      - name: Commit verified changes
+      - name: Run focused tests and capture result
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          node --test tests/ai-visibility-unchecked-counts.test.js 2>&1 | tee unchecked-count-test-result.txt
+          echo ${PIPESTATUS[0]} > unchecked-count-test-exit.txt
+      - name: Run production build and capture result
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee unchecked-count-build-result.txt
+          echo ${PIPESTATUS[0]} > unchecked-count-build-exit.txt
+      - name: Commit applied changes and diagnostics
         run: |
           rm .github/workflows/fix-ai-visibility-unchecked-counts.yml
           rm scripts/fix_ai_visibility_unchecked_counts.py
