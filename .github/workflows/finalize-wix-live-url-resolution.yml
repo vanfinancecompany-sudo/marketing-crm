@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/finalize-wix-live-url-resolution.yml
       - scripts/finalize_wix_live_url_resolution.py
+      - lib/aiVisibilityLiveConnections.js
 
 permissions:
   contents: write
