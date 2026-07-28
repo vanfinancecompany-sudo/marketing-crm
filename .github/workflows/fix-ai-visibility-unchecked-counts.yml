@@ -4,9 +4,9 @@ on:
   push:
     branches:
       - ui/ai-visibility-layout-pagination
-    paths:
-      - .github/workflows/fix-ai-visibility-unchecked-counts.yml
-      - scripts/fix_ai_visibility_unchecked_counts.py
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
