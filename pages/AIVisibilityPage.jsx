@@ -1060,11 +1060,7 @@ export default function AIVisibilityPage() {
             <summary>
               <strong>Published article results</strong> ·{" "}
               {summary.published_pages} published pages ·{" "}
-              {
-                summary.articles.filter((item) => item.checked_successfully)
-                  .length
-              }{" "}
-              checked
+              {summary.checked_pages} checked
             </summary>
             <div className="operations-drawer__body">
               <div className="panel__header">
@@ -1373,15 +1369,30 @@ export default function AIVisibilityPage() {
             </div>
             <div className="panel">
               <h3>Not yet checked</h3>
+              {summary.awaiting_first_check ? (
+                <div className="notice">
+                  {summary.awaiting_first_check} published pages have not yet
+                  been checked.
+                </div>
+              ) : null}
               {summary.articles
-                .filter((item) => item.awaiting_first_check)
+                .filter((item) =>
+                  summary.unchecked_article_ids.includes(item.article.id),
+                )
                 .slice(0, 5)
                 .map((item) => (
                   <button
                     className="visibility-quick-row"
                     type="button"
                     key={item.article.id}
-                    onClick={() => setSelectedId(item.article.id)}
+                    onClick={() => {
+                      setFilters((current) => ({
+                        ...current,
+                        status: "not_checked",
+                      }));
+                      setArticlePage(1);
+                      setArticlesOpen(true);
+                    }}
                   >
                     {item.article.title}
                   </button>
