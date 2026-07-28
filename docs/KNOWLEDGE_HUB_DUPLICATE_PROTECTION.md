@@ -13,6 +13,7 @@ Strengthen duplicate detection before the Knowledge Hub is expanded to hundreds 
 - indexed full-catalogue duplicate matching, including archived topics
 - database protection against exact and extremely similar duplicate topic intent across every save path
 - reusable topic and article matchers returning `duplicate`, `likely_duplicate`, `related` or `clear`
+- authenticated `/api/knowledge-hub-duplicates` endpoint for CRM preview checks
 - article metadata inheritance from the linked topic
 
 ## Deliberate rollout order
@@ -20,10 +21,27 @@ Strengthen duplicate detection before the Knowledge Hub is expanded to hundreds 
 1. Apply the additive migration in Preview Supabase.
 2. Confirm all existing topics and articles remain present.
 3. Run both duplicate-candidate functions against representative topics and articles.
-4. Add the CRM controls that display canonical intent, article angle and closest matches.
+4. Connect the CRM controls to `/api/knowledge-hub-duplicates` so canonical intent, article angle and closest matches are visible before saving.
 5. Apply the matcher visibly to manual topic saves, AI Topic Finder saves, generation and approval.
 6. Require a visible override reason for a deliberate distinct angle.
 7. Test Preview before applying the migration to Production.
+
+## Duplicate-check API
+
+Send a protected POST request using the existing Marketing CRM access-key header.
+
+```json
+{
+  "type": "topic",
+  "title": "Can I get van finance after a CCJ?",
+  "canonical_intent": "Eligibility for van finance with a CCJ",
+  "category": "Credit",
+  "exclude_id": null,
+  "limit": 10
+}
+```
+
+The response includes the candidate, closest matches, risk counts, highest risk and whether the candidate is an exact blocked duplicate. The endpoint returns a clear migration-required message when migration 026 is not present in that environment.
 
 ## Topic matcher example
 
