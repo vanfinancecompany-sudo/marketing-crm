@@ -114,11 +114,14 @@ function dedicatedPriceCandidates(html) {
 }
 
 export function extractAdvertisedPriceAndVat(html) {
-  const structured = structuredOfferCandidates(html).find((candidate) => candidate.advertised_price);
-  if (structured) return structured;
+  const structuredCandidates = structuredOfferCandidates(html);
+  const dedicatedCandidates = dedicatedPriceCandidates(html);
 
-  const dedicated = dedicatedPriceCandidates(html).find((candidate) => candidate.advertised_price);
-  if (dedicated) return dedicated;
+  const structuredKnownVat = structuredCandidates.find((candidate) => candidate.advertised_price && candidate.vat_status !== "unknown");
+  if (structuredKnownVat) return structuredKnownVat;
+
+  const dedicatedKnownVat = dedicatedCandidates.find((candidate) => candidate.advertised_price && candidate.vat_status !== "unknown");
+  if (dedicatedKnownVat) return dedicatedKnownVat;
 
   const visibleText = decodeHtml(html);
   const fallbackPatterns = [
@@ -131,6 +134,12 @@ export function extractAdvertisedPriceAndVat(html) {
     const candidate = match?.[0] ? candidateFromText(match[0], { requireVat: true }) : null;
     if (candidate) return candidate;
   }
+
+  const structuredUnknownVat = structuredCandidates.find((candidate) => candidate.advertised_price);
+  if (structuredUnknownVat) return structuredUnknownVat;
+
+  const dedicatedUnknownVat = dedicatedCandidates.find((candidate) => candidate.advertised_price);
+  if (dedicatedUnknownVat) return dedicatedUnknownVat;
 
   return {
     advertised_price: null,
