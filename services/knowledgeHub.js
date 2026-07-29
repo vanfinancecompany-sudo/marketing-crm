@@ -2,6 +2,7 @@ import { buildMarketingAccessHeaders, parseMarketingJsonResponse } from "./marke
 
 const KNOWLEDGE_HUB_API = "/api/marketing-knowledge-hub";
 const KNOWLEDGE_DUPLICATES_API = "/api/knowledge-hub-duplicates";
+const KNOWLEDGE_SEO_FIELDS_API = "/api/knowledge-hub-seo-fields";
 const KNOWLEDGE_SAFETY_APPROVAL_API = "/api/marketing-knowledge-safety-approval";
 const RENT2BUY_RULE_API = "/api/marketing-rent2buy-business-rule";
 const KNOWLEDGE_GENERATION_MAX_ATTEMPTS = 3;
@@ -37,6 +38,20 @@ async function requestSafetyApproval(action, payload = {}) {
   return parseMarketingJsonResponse(response, "Publishing safety approval failed.");
 }
 
+async function requestKnowledgeSeoFields(topic = {}) {
+  const response = await fetch(KNOWLEDGE_SEO_FIELDS_API, {
+    method: "POST",
+    headers: buildMarketingAccessHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      title: topic.title,
+      intent: topic.intent || topic.canonical_intent || topic.title,
+      category: topic.category,
+    }),
+  });
+  const result = await parseMarketingJsonResponse(response, "SEO fields could not be prepared.");
+  return result.fields;
+}
+
 function normaliseTopicDuplicateFields(topic = {}) {
   return {
     ...topic,
@@ -60,22 +75,32 @@ function isSeoLengthValidationError(error) {
   return /SEO title should be 20.?70 characters|Meta description should be 80.?180 characters/i.test(message);
 }
 
-function withSeoGenerationGuardrails(generation = {}, attempt = 1) {
-  const existingInstructions = String(generation.optional_instructions || "").trim();
+function withSeoGenerationGuardrails(generation = {}, attempt = 1, seoFields = null) {
+  const existingInstructions = String(generation.instructions || "").trim();
   const retryNote = attempt > 1
-    ? ` This is automatic retry ${attempt}; the previous response was rejected only because an SEO field missed its character limit.`
+    ? `This is automatic retry ${attempt}; the previous response was rejected only because an SEO field missed its character limit.`
     : "";
-  const seoInstructions = [
-    "STRICT SEO OUTPUT LIMITS:",
-    "- seo_title must be 30 to 60 characters, and never outside 20 to 70 characters.",
-    "- meta_description must be 120 to 160 characters, and never outside 80 to 180 characters.",
-    "Count characters before returning the final JSON and rewrite either field until it fits.",
-    retryNote,
-  ].filter(Boolean).join("\n");
+  const seoInstructions = seoFields
+    ? [
+        "SEO FIELDS ARE ALREADY APPROVED. Use these exact values without rewriting them:",
+        `seo_title: ${seoFields.seo_title}`,
+        `meta_description: ${seoFields.meta_description}`,
+        "Keep the article title and article content focused on the saved topic. Do not replace the article title with the SEO title.",
+        retryNote,
+      ]
+    : [
+        "STRICT SEO OUTPUT LIMITS:",
+        "- seo_title must be 30 to 60 characters, and never outside 20 to 70 characters.",
+        "- meta_description must be 120 to 160 characters, and never outside 80 to 180 characters.",
+        "Count characters before returning the final JSON and rewrite either field until it fits.",
+        retryNote,
+      ];
 
   return {
     ...generation,
-    optional_instructions: [existingInstructions, seoInstructions].filter(Boolean).join("\n\n"),
+    instructions: [existingInstructions, seoInstructions.filter(Boolean).join("\n")]
+      .filter(Boolean)
+      .join("\n\n"),
   };
 }
 
@@ -177,12 +202,20 @@ export async function saveKnowledgeTopic(topic) {
 export function deleteKnowledgeTopic(topicId) { return requestKnowledgeHub("deleteTopic", { topic_id: topicId }); }
 export async function generateKnowledgeArticle(topic, generation) {
   await ensureRent2BuyRule();
+
+  let seoFields = null;
+  try {
+    seoFields = await requestKnowledgeSeoFields(topic);
+  } catch (error) {
+    console.warn("KNOWLEDGE SEO PREPARATION FALLBACK", error);
+  }
+
   let lastError;
   for (let attempt = 1; attempt <= KNOWLEDGE_GENERATION_MAX_ATTEMPTS; attempt += 1) {
     try {
       return await requestKnowledgeHub("generateArticle", {
         topic,
-        generation: withSeoGenerationGuardrails(generation, attempt),
+        generation: withSeoGenerationGuardrails(generation, attempt, seoFields),
       });
     } catch (error) {
       lastError = error;
