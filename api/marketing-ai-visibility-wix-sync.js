@@ -9,6 +9,12 @@ import {
   wixItemSlug,
   wixPublishedTimestamp,
 } from "../lib/aiVisibilityLiveConnections.js";
+import {
+  articleIsPresentInLiveSet,
+  isWixKnowledgeManagedArticle,
+  stableWixIdentityForItem,
+  wasInactiveWixArticle,
+} from "../lib/aiVisibilityWixLifecycle.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
@@ -94,17 +100,28 @@ class WixLiveReader {
         query: { paging: { limit: 100, offset } },
         consistentRead: true,
       });
-      const page = payload.dataItems || [];
+      if (!Array.isArray(payload.dataItems)) {
+        throw new ApiError(
+          502,
+          "Wix returned an invalid LIVE collection response. Existing records were not deactivated.",
+          "wix_invalid_response",
+        );
+      }
+      const page = payload.dataItems;
       items.push(...page);
       if (page.length < 100) return items;
     }
   }
 }
 
-function itemError(article, item, error, resolution = null) {
-  const effectiveResolution = resolution || resolveWixLiveArticleUrl(item, {
+function resolveItemUrl(item) {
+  return resolveWixLiveArticleUrl(item, {
     articleUrlPrefix: process.env.WIX_KNOWLEDGE_ARTICLE_URL_PREFIX,
   });
+}
+
+function itemError(article, item, error, resolution = null) {
+  const effectiveResolution = resolution || resolveItemUrl(item);
   return {
     article_id: article?.id || "",
     article_title: article?.title || "",
@@ -118,9 +135,7 @@ function itemError(article, item, error, resolution = null) {
 async function saveWixMatch(supabase, article, item, matchedBy) {
   const now = new Date().toISOString();
   const itemData = wixItemData(item);
-  const resolution = resolveWixLiveArticleUrl(item, {
-    articleUrlPrefix: process.env.WIX_KNOWLEDGE_ARTICLE_URL_PREFIX,
-  });
+  const resolution = resolveItemUrl(item);
   if (!resolution.url) {
     return {
       saved: false,
@@ -136,12 +151,15 @@ async function saveWixMatch(supabase, article, item, matchedBy) {
 
   const publishedAt = wixPublishedTimestamp(item) || article.published_at || now;
   const parsedPublishedAt = new Date(publishedAt);
+  const reactivated = wasInactiveWixArticle(article);
   const changes = {
     wix_item_id: wixItemId(item),
     wix_collection_id: clean(article.wix_collection_id) || clean(process.env.WIX_KNOWLEDGE_COLLECTION_ID),
     live_wix_url: resolution.url,
     wix_sync_status: "live",
     wix_publication_status: "live",
+    is_active: true,
+    unpublished_at: null,
     published_at: Number.isNaN(parsedPublishedAt.getTime()) ? now : parsedPublishedAt.toISOString(),
     publication_verified_at: now,
     last_wix_verification_at: now,
@@ -157,8 +175,10 @@ async function saveWixMatch(supabase, article, item, matchedBy) {
 
   await supabase.from("knowledge_visibility_audit_events").insert({
     article_id: article.id,
-    action: "publication_updated",
-    reason: "Live Wix publication verified from the existing Wix Data integration.",
+    action: reactivated ? "publication_reactivated" : "publication_updated",
+    reason: reactivated
+      ? "Previously inactive Wix Knowledge Hub article was found in the LIVE collection again."
+      : "Live Wix publication verified from the existing Wix Data integration.",
     details: {
       matched_by: matchedBy,
       wix_item_id: wixItemId(item),
@@ -167,31 +187,107 @@ async function saveWixMatch(supabase, article, item, matchedBy) {
       wix_title: clean(itemData.title),
       wix_slug: wixItemSlug(item),
       manually_verified: false,
+      reactivated,
     },
   });
 
-  return { saved: true, article: saved, live_url_source: resolution.source };
+  return {
+    saved: true,
+    article: saved,
+    live_url_source: resolution.source,
+    reactivated,
+  };
+}
+
+async function deactivateMissingArticles(supabase, articles, liveItems, configuration) {
+  const liveIdentities = liveItems.map((item) =>
+    stableWixIdentityForItem(item, {
+      itemId: wixItemId,
+      liveUrl: (candidate) => resolveItemUrl(candidate).url,
+      slug: wixItemSlug,
+    }),
+  );
+  const candidates = articles.filter(
+    (article) =>
+      isWixKnowledgeManagedArticle(article, configuration.collectionId) &&
+      !articleIsPresentInLiveSet(article, liveIdentities) &&
+      (article.is_active !== false ||
+        article.wix_sync_status === "live" ||
+        article.wix_sync_status === "synced" ||
+        article.wix_publication_status === "live"),
+  );
+
+  let deactivated = 0;
+  const errors = [];
+  for (const article of candidates) {
+    const now = new Date().toISOString();
+    try {
+      data(
+        await supabase
+          .from("knowledge_articles")
+          .update({
+            is_active: false,
+            wix_sync_status: "not_live",
+            wix_publication_status: "not_live",
+            unpublished_at: now,
+            publication_verified_at: null,
+            last_wix_verification_at: now,
+            last_wix_sync_at: now,
+            publication_verification_notes:
+              "No matching stable Wix item ID, canonical URL or slug was present in the successful Wix LIVE collection fetch.",
+            updated_at: now,
+          })
+          .eq("id", article.id)
+          .select()
+          .single(),
+        "Inactive Wix publication state could not be saved.",
+      );
+      await supabase.from("knowledge_visibility_audit_events").insert({
+        article_id: article.id,
+        action: "publication_deactivated",
+        reason: "Article was no longer present in the successfully fetched Wix Knowledge Hub LIVE collection.",
+        details: {
+          wix_item_id: clean(article.wix_item_id),
+          live_url: clean(article.live_wix_url),
+          slug: clean(article.slug),
+          historical_visibility_results_preserved: true,
+        },
+      });
+      deactivated += 1;
+    } catch (error) {
+      errors.push({
+        article_id: article.id,
+        article_title: article.title,
+        wix_item_id: article.wix_item_id,
+        slug: article.slug,
+        dynamic_link_fields: [],
+        error: error.message,
+      });
+    }
+  }
+  return { deactivated, errors };
 }
 
 async function syncLiveWixArticles(supabase, articleId = "") {
   const configuration = wixPublishingConfiguration(process.env);
-  const [articles, liveItems] = await Promise.all([
-    data(
-      await supabase
-        .from("knowledge_articles")
-        .select("*")
-        .order("updated_at", { ascending: false }),
-      "Knowledge Hub articles could not be loaded.",
-    ),
-    new WixLiveReader(configuration).listLiveItems(),
-  ]);
+  const articles = data(
+    await supabase
+      .from("knowledge_articles")
+      .select("*")
+      .order("updated_at", { ascending: false }),
+    "Knowledge Hub articles could not be loaded.",
+  );
 
+  // The complete upstream fetch must succeed before any deactivation is considered.
+  const liveItems = await new WixLiveReader(configuration).listLiveItems();
   const scopedArticles = articleId ? articles.filter((article) => article.id === articleId) : articles;
   if (articleId && !scopedArticles.length) throw new ApiError(404, "Article could not be found.", "validation");
 
   const plan = buildWixSyncPlan({ articles: scopedArticles, liveItems });
   let added = 0;
   let updated = 0;
+  let active = 0;
+  let reactivated = 0;
   const errors = [];
   let missingUrls = 0;
 
@@ -202,20 +298,36 @@ async function syncLiveWixArticles(supabase, articleId = "") {
       if (!result.saved) {
         errors.push(result);
         if (result.missing_live_url) missingUrls += 1;
-      } else if (wasPublished) {
-        updated += 1;
       } else {
-        added += 1;
+        active += 1;
+        if (result.reactivated) reactivated += 1;
+        else if (wasPublished) updated += 1;
+        else added += 1;
       }
     } catch (error) {
       errors.push(itemError(match.article, match.item, error.message));
     }
   }
 
+  let deactivated = 0;
+  if (!articleId) {
+    const deactivation = await deactivateMissingArticles(
+      supabase,
+      articles,
+      liveItems,
+      configuration,
+    );
+    deactivated = deactivation.deactivated;
+    errors.push(...deactivation.errors);
+  }
+
   return {
     wix_items_checked: liveItems.length,
     wix_live_items_matched: plan.matches.length,
-    published_pages_verified_and_saved: added + updated,
+    published_pages_verified_and_saved: active,
+    active_records_updated: active,
+    previously_live_records_deactivated: deactivated,
+    reactivated_records: reactivated,
     items_missing_usable_live_url: missingUrls,
     new_published_pages_added: added,
     existing_records_updated: updated,
