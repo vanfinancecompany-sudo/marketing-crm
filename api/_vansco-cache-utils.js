@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { extractAdvertisedPriceAndVat } from "./_vansco-price-parser.js";
 
 export const SITEMAP_URLS = ["https://www.vansco.co.uk/sitemap/", "https://www.vansco.co.uk/sitemap.xml"];
 export const VANSCO_SOURCE_URL = "https://www.vansco.co.uk/all-stock/";
@@ -18,11 +19,7 @@ const VAN_KEYWORDS = /\b(transit|custom|tipper|dropside|luton|crew van|minibus|p
 export function getSupabaseAdmin() {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !supabaseKey) {
-    throw new Error("Missing Supabase environment variables for Vansco cache API.");
-  }
-
+  if (!supabaseUrl || !supabaseKey) throw new Error("Missing Supabase environment variables for Vansco cache API.");
   return createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } });
 }
 
@@ -30,20 +27,10 @@ export function isMissingOptionalTableError(error) {
   const code = String(error?.code || error?.details || "");
   const message = String(error?.message || error || "");
   const text = `${code} ${message}`.toLowerCase();
-
-  return (
-    code === "42P01" ||
-    code.startsWith("PGRST") ||
-    text.includes("relation does not exist") ||
-    text.includes("table does not exist") ||
-    text.includes("could not find the table") ||
-    text.includes("schema cache")
-  );
+  return code === "42P01" || code.startsWith("PGRST") || text.includes("relation does not exist") || text.includes("table does not exist") || text.includes("could not find the table") || text.includes("schema cache");
 }
 
-export function compactWhitespace(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
-}
+export function compactWhitespace(value) { return String(value || "").replace(/\s+/g, " ").trim(); }
 
 export function decodeHtml(value) {
   return String(value || "")
@@ -60,15 +47,12 @@ export function decodeHtml(value) {
 export function normalizeUrl(value) {
   const text = compactWhitespace(value);
   if (!text) return "";
-
   try {
     const url = new URL(text, VANSCO_SOURCE_URL);
     url.hash = "";
     ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"].forEach((key) => url.searchParams.delete(key));
     return url.toString().replace(/\/$/, "");
-  } catch {
-    return text.replace(/\/$/, "");
-  }
+  } catch { return text.replace(/\/$/, ""); }
 }
 
 export function toDragonDetailUrl(value) {
@@ -78,9 +62,7 @@ export function toDragonDetailUrl(value) {
     const parsed = new URL(stockUrl, VANSCO_SOURCE_URL);
     if (!VEHICLE_PATH_PATTERN.test(parsed.pathname)) return stockUrl;
     return `${DRAGON_SOURCE_ORIGIN}${parsed.pathname}${parsed.search}`.replace(/\/$/, "");
-  } catch {
-    return stockUrl;
-  }
+  } catch { return stockUrl; }
 }
 
 export function normalizeRegistration(value) {
@@ -101,7 +83,7 @@ export function normalizeRegistration(value) {
 }
 
 export function extractVanscoId(stockUrl) {
-  const match = normalizeUrl(stockUrl).match(/[-/]u(\d{3,8})(?:\/)?$/i);
+  const match = normalizeUrl(stockUrl).match(/[-\/]u(\d{3,8})(?:\/)?$/i);
   return match?.[1] ? `u${match[1]}`.toLowerCase() : "";
 }
 
@@ -116,9 +98,7 @@ export function vehicleTitleFromUrl(url) {
   try {
     const slug = new URL(url).pathname.split("/").filter(Boolean).pop() || "vansco-vehicle";
     return slug.replace(/^used-/i, "").replace(/-for-sale.*$/i, "").replace(/-u\d+$/i, "").replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim() || "Vansco vehicle";
-  } catch {
-    return "Vansco vehicle";
-  }
+  } catch { return "Vansco vehicle"; }
 }
 
 function timeoutSignal(timeoutMs) {
@@ -131,71 +111,23 @@ export async function fetchHtml(url, timeoutMs = 25000) {
   const startedAt = Date.now();
   const timed = timeoutSignal(timeoutMs);
   try {
-    const response = await fetch(url, {
-      signal: timed.signal,
-      redirect: "follow",
-      headers: {
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
-        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "accept-language": "en-GB,en;q=0.9",
-        referer: VANSCO_SOURCE_URL,
-        pragma: "no-cache",
-        "cache-control": "no-cache",
-      },
-    });
+    const response = await fetch(url, { signal: timed.signal, redirect: "follow", headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36", accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "accept-language": "en-GB,en;q=0.9", referer: VANSCO_SOURCE_URL, pragma: "no-cache", "cache-control": "no-cache" } });
     const html = await response.text();
-    return {
-      ok: response.ok,
-      status: response.status,
-      statusText: response.statusText,
-      finalUrl: response.url,
-      contentType: response.headers.get("content-type") || "",
-      html,
-      htmlLength: html.length,
-      elapsedMs: Date.now() - startedAt,
-    };
-  } finally {
-    timed.clear();
-  }
+    return { ok: response.ok, status: response.status, statusText: response.statusText, finalUrl: response.url, contentType: response.headers.get("content-type") || "", html, htmlLength: html.length, elapsedMs: Date.now() - startedAt };
+  } finally { timed.clear(); }
 }
 
 export async function fetchVanscoDetailHtml(stockUrl, timeoutMs = 25000) {
   const normalUrl = normalizeUrl(stockUrl);
   const dragonUrl = toDragonDetailUrl(normalUrl);
   const attempts = [];
-
   for (const candidateUrl of Array.from(new Set([dragonUrl, normalUrl].filter(Boolean)))) {
     try {
       const page = await fetchHtml(candidateUrl, timeoutMs);
-      attempts.push({
-        url: candidateUrl,
-        ok: page.ok,
-        status: page.status,
-        statusText: page.statusText,
-        finalUrl: page.finalUrl,
-        elapsedMs: page.elapsedMs,
-        htmlLength: page.htmlLength,
-      });
-
-      if (page.ok) {
-        return {
-          ...page,
-          requestedUrl: candidateUrl,
-          stockUrl: normalUrl,
-          usedHost: candidateUrl.includes("dragon2000.net") ? "dragon" : "vansco",
-          attempts,
-        };
-      }
-    } catch (error) {
-      attempts.push({
-        url: candidateUrl,
-        ok: false,
-        timeout: error?.name === "AbortError",
-        message: error?.message || "Detail fetch failed",
-      });
-    }
+      attempts.push({ url: candidateUrl, ok: page.ok, status: page.status, statusText: page.statusText, finalUrl: page.finalUrl, elapsedMs: page.elapsedMs, htmlLength: page.htmlLength });
+      if (page.ok) return { ...page, requestedUrl: candidateUrl, stockUrl: normalUrl, usedHost: candidateUrl.includes("dragon2000.net") ? "dragon" : "vansco", attempts };
+    } catch (error) { attempts.push({ url: candidateUrl, ok: false, timeout: error?.name === "AbortError", message: error?.message || "Detail fetch failed" }); }
   }
-
   const error = new Error(attempts.map((attempt) => `${attempt.url}: ${attempt.message || attempt.status || "failed"}`).join(" | ") || "Detail fetch failed");
   error.attempts = attempts;
   throw error;
@@ -206,13 +138,11 @@ export function extractVehicleUrls(html) {
   const directPattern = /https?:\/\/www\.vansco\.co\.uk\/vehicle-details\/[^\s"'<>]+/gi;
   let match;
   while ((match = directPattern.exec(String(html || "")))) urls.add(normalizeUrl(match[0]));
-
   const anchorPattern = /<a\b[^>]*href=(["'])(.*?)\1[^>]*>/gi;
   while ((match = anchorPattern.exec(String(html || "")))) {
     const href = normalizeUrl(match[2]);
     if (VEHICLE_PATH_PATTERN.test(href)) urls.add(href);
   }
-
   return Array.from(urls).filter(Boolean);
 }
 
@@ -224,9 +154,7 @@ export async function discoverVanscoUrls() {
       const urls = extractVehicleUrls(page.html);
       attempts.push({ sitemapUrl, ok: page.ok, status: page.status, elapsedMs: page.elapsedMs, htmlLength: page.htmlLength, urlsFound: urls.length });
       if (urls.length) return { sitemapUrl, attempts, urls };
-    } catch (error) {
-      attempts.push({ sitemapUrl, ok: false, errorName: error?.name || "Error", errorMessage: error?.message || "Fetch failed", timeout: error?.name === "AbortError" });
-    }
+    } catch (error) { attempts.push({ sitemapUrl, ok: false, errorName: error?.name || "Error", errorMessage: error?.message || "Fetch failed", timeout: error?.name === "AbortError" }); }
   }
   return { sitemapUrl: "", attempts, urls: [] };
 }
@@ -239,10 +167,7 @@ function extractMetaContent(html, key) {
     new RegExp(`<meta[^>]+name=["']${escaped}["'][^>]+content=["']([^"']+)["'][^>]*>`, "i"),
     new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${escaped}["'][^>]*>`, "i"),
   ];
-  for (const pattern of patterns) {
-    const match = html.match(pattern);
-    if (match?.[1]) return decodeHtml(match[1]);
-  }
+  for (const pattern of patterns) { const match = html.match(pattern); if (match?.[1]) return decodeHtml(match[1]); }
   return "";
 }
 
@@ -295,7 +220,7 @@ export function parseDetailHtml(stockUrl, html, fallbackTitle = "") {
   const subtitle = extractHeading(html, "h2");
   const title = compactWhitespace([pageTitle, subtitle].filter(Boolean).join(" - "));
   const bracket = extractBracketRegistration(title || pageTitle || fallbackTitle);
-
+  const priceData = extractAdvertisedPriceAndVat(html);
   return {
     stock_url: normalizeUrl(stockUrl),
     vansco_id: extractVanscoId(stockUrl),
@@ -304,6 +229,7 @@ export function parseDetailHtml(stockUrl, html, fallbackTitle = "") {
     image_url: extractImage(html),
     source_status: detectSourceStatus(bodyText),
     vehicle_type: detectVehicleCategory(`${title} ${bodyText}`, stockUrl),
+    ...priceData,
     rejected_registration_candidates: bracket.rejected,
   };
 }
@@ -320,6 +246,9 @@ export function normalizeCacheRow(row, actionRecord = null) {
     registration: row.registration || "",
     imageUrl: row.image_url || "",
     stockUrl: row.stock_url || "",
+    advertisedPrice: row.advertised_price == null ? null : Number(row.advertised_price),
+    vatStatus: row.vat_status || "unknown",
+    advertisedPriceText: row.advertised_price_text || "",
     price: actionRecord?.price || "",
     mileage: actionRecord?.mileage || "",
     year: actionRecord?.year || "",
@@ -342,25 +271,11 @@ export function normalizeCacheRow(row, actionRecord = null) {
 
 export function normalizeActionRecord(row) {
   return {
-    id: row.id,
-    watchRecordId: row.id,
-    pipeline: row.pipeline,
-    vehicleKey: row.vehicle_key,
-    title: row.title || "",
-    registration: row.registration || "",
-    imageUrl: row.image_url || "",
-    stockUrl: row.stock_url || "",
-    price: row.price || "",
-    mileage: row.mileage || "",
-    year: row.year || "",
-    vehicleCategory: row.vehicle_category || "unknown",
-    sourceStatus: row.source_status || "unknown",
-    matchStatus: row.match_status || "missing",
-    workflowStatus: row.workflow_status || "new",
-    notes: row.notes || "",
-    firstSeenAt: row.first_seen_at || "",
-    lastSeenAt: row.last_seen_at || "",
-    lastCheckedAt: row.last_checked_at || row.updated_at || "",
+    id: row.id, watchRecordId: row.id, pipeline: row.pipeline, vehicleKey: row.vehicle_key,
+    title: row.title || "", registration: row.registration || "", imageUrl: row.image_url || "", stockUrl: row.stock_url || "",
+    price: row.price || "", mileage: row.mileage || "", year: row.year || "", vehicleCategory: row.vehicle_category || "unknown",
+    sourceStatus: row.source_status || "unknown", matchStatus: row.match_status || "missing", workflowStatus: row.workflow_status || "new",
+    notes: row.notes || "", firstSeenAt: row.first_seen_at || "", lastSeenAt: row.last_seen_at || "", lastCheckedAt: row.last_checked_at || row.updated_at || "",
   };
 }
 
