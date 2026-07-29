@@ -32,7 +32,7 @@ test("extracts a VAT included advertised price", () => {
   assert.equal(result.advertised_price_text, "£17,495 VAT included");
 });
 
-test("uses structured offer price when available", () => {
+test("uses structured offer price when VAT wording is available", () => {
   const result = extractAdvertisedPriceAndVat(`
     <script type="application/ld+json">
       {"@type":"Vehicle","description":"Price plus VAT","offers":{"price":"18995","priceCurrency":"GBP","description":"+ VAT"}}
@@ -41,6 +41,19 @@ test("uses structured offer price when available", () => {
 
   assert.equal(result.advertised_price, 18995);
   assert.equal(result.vat_status, "plus_vat");
+});
+
+test("uses visible VAT wording when structured data omits VAT", () => {
+  const result = extractAdvertisedPriceAndVat(`
+    <script type="application/ld+json">
+      {"@type":"Vehicle","offers":{"price":"18995","priceCurrency":"GBP"}}
+    </script>
+    <div class="vehicle-price">£18,995 + VAT</div>
+  `);
+
+  assert.equal(result.advertised_price, 18995);
+  assert.equal(result.vat_status, "plus_vat");
+  assert.equal(result.advertised_price_text, "£18,995 + VAT");
 });
 
 test("does not mistake monthly finance for the advertised cash price", () => {
