@@ -4,6 +4,7 @@ const KNOWLEDGE_HUB_API = "/api/marketing-knowledge-hub";
 const KNOWLEDGE_DUPLICATES_API = "/api/knowledge-hub-duplicates";
 const KNOWLEDGE_SAFETY_APPROVAL_API = "/api/marketing-knowledge-safety-approval";
 const RENT2BUY_RULE_API = "/api/marketing-rent2buy-business-rule";
+const KNOWLEDGE_GENERATION_MAX_ATTEMPTS = 3;
 let rent2BuyRuleReady;
 
 async function ensureRent2BuyRule() {
@@ -51,6 +52,30 @@ function normaliseArticleDuplicateFields(article = {}) {
     canonical_intent: String(article.canonical_intent || article.title || "").trim(),
     article_angle: String(article.article_angle || "").trim(),
     duplicate_override_reason: String(article.duplicate_override_reason || "").trim(),
+  };
+}
+
+function isSeoLengthValidationError(error) {
+  const message = String(error?.message || "");
+  return /SEO title should be 20.?70 characters|Meta description should be 80.?180 characters/i.test(message);
+}
+
+function withSeoGenerationGuardrails(generation = {}, attempt = 1) {
+  const existingInstructions = String(generation.optional_instructions || "").trim();
+  const retryNote = attempt > 1
+    ? ` This is automatic retry ${attempt}; the previous response was rejected only because an SEO field missed its character limit.`
+    : "";
+  const seoInstructions = [
+    "STRICT SEO OUTPUT LIMITS:",
+    "- seo_title must be 30 to 60 characters, and never outside 20 to 70 characters.",
+    "- meta_description must be 120 to 160 characters, and never outside 80 to 180 characters.",
+    "Count characters before returning the final JSON and rewrite either field until it fits.",
+    retryNote,
+  ].filter(Boolean).join("\n");
+
+  return {
+    ...generation,
+    optional_instructions: [existingInstructions, seoInstructions].filter(Boolean).join("\n\n"),
   };
 }
 
@@ -152,7 +177,19 @@ export async function saveKnowledgeTopic(topic) {
 export function deleteKnowledgeTopic(topicId) { return requestKnowledgeHub("deleteTopic", { topic_id: topicId }); }
 export async function generateKnowledgeArticle(topic, generation) {
   await ensureRent2BuyRule();
-  return requestKnowledgeHub("generateArticle", { topic, generation });
+  let lastError;
+  for (let attempt = 1; attempt <= KNOWLEDGE_GENERATION_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await requestKnowledgeHub("generateArticle", {
+        topic,
+        generation: withSeoGenerationGuardrails(generation, attempt),
+      });
+    } catch (error) {
+      lastError = error;
+      if (!isSeoLengthValidationError(error) || attempt === KNOWLEDGE_GENERATION_MAX_ATTEMPTS) throw error;
+    }
+  }
+  throw lastError;
 }
 export async function findKnowledgeTopics(categories, quantity, brief) { await ensureRent2BuyRule(); return requestKnowledgeHub("findTopics", { categories, quantity, brief }); }
 export async function saveKnowledgeTopicIdeas(ideas) {
