@@ -1,7 +1,21 @@
-import { compactWhitespace, decodeHtml } from "./_vansco-cache-utils.js";
-
 const MONEY_PATTERN = /£\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})(?:\.([0-9]{2}))?/i;
 const EXCLUDED_CONTEXT = /\b(per\s+(?:month|week)|monthly|weekly|deposit|repayment|payment|finance\s+from|save|saving|warranty|admin\s+fee)\b/i;
+
+function compactWhitespace(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function decodeHtml(value) {
+  return String(value || "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'")
+    .replace(/&pound;/gi, "£")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function parseMoney(text) {
   const match = String(text || "").match(MONEY_PATTERN);
@@ -68,10 +82,11 @@ function structuredOfferCandidates(html) {
             const numericPrice = Number(String(rawPrice ?? "").replace(/[^0-9.]/g, ""));
             if (Number.isFinite(numericPrice) && numericPrice > 0) {
               const context = compactWhitespace(`${offer?.priceCurrency || "GBP"} ${offer?.description || ""} ${item?.description || ""}`);
+              const vatStatus = classifyVat(context);
               candidates.push({
                 advertised_price: numericPrice,
-                vat_status: classifyVat(context),
-                advertised_price_text: compactWhitespace(`£${numericPrice.toLocaleString("en-GB")} ${classifyVat(context) === "plus_vat" ? "+ VAT" : classifyVat(context) === "no_vat" ? "NO VAT" : classifyVat(context) === "vat_included" ? "VAT included" : ""}`),
+                vat_status: vatStatus,
+                advertised_price_text: compactWhitespace(`£${numericPrice.toLocaleString("en-GB")} ${vatStatus === "plus_vat" ? "+ VAT" : vatStatus === "no_vat" ? "NO VAT" : vatStatus === "vat_included" ? "VAT included" : ""}`),
               });
             }
           }
