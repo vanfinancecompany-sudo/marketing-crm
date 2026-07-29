@@ -9,6 +9,7 @@ import {
   recordManualVisibilityResult,
   syncLiveWixArticles,
 } from "../services/aiVisibility.js";
+import { isConfirmedPublishedArticle } from "../lib/aiVisibility.js";
 import {
   MANUAL_AI_PROVIDER_URLS,
   MANUAL_PROVIDER_EXPLANATION,
@@ -43,10 +44,9 @@ function displaySummary(summary = {}) {
   return [
     `Wix items checked: ${summary.wix_items_checked || 0}`,
     `Wix LIVE items matched: ${summary.wix_live_items_matched || 0}`,
-    `Published pages verified and saved: ${summary.published_pages_verified_and_saved || 0}`,
-    `Items missing a usable live URL: ${summary.items_missing_usable_live_url || 0}`,
-    `New published pages added: ${summary.new_published_pages_added || 0}`,
-    `Existing records updated: ${summary.existing_records_updated || 0}`,
+    `Active records updated: ${summary.active_records_updated || 0}`,
+    `Previously live records deactivated: ${summary.previously_live_records_deactivated || 0}`,
+    `Reactivated: ${summary.reactivated_records || 0}`,
     `Errors: ${summary.errors?.length || 0}`,
   ].join(" · ");
 }
@@ -109,9 +109,7 @@ function latestProviderResult(results, provider, articleId = "") {
 }
 
 function ManualCheckWorkflow({ provider, data, onClose, onSaved }) {
-  const published = (data?.articles || []).filter(
-    (article) => article.live_wix_url && article.publication_verified_at,
-  );
+  const published = (data?.articles || []).filter(isConfirmedPublishedArticle);
   const [articleId, setArticleId] = useState(published[0]?.id || "");
   const article = published.find((item) => item.id === articleId) || null;
   const [query, setQuery] = useState(suggestedVisibilityQuery(article?.title));
@@ -400,10 +398,7 @@ function LiveConnectionsPanel() {
     () =>
       new Set(
         (data?.articles || [])
-          .filter(
-            (article) =>
-              article.live_wix_url && article.publication_verified_at,
-          )
+          .filter(isConfirmedPublishedArticle)
           .map((article) => article.id),
       ),
     [data],
@@ -568,6 +563,7 @@ function ArticleConnectionActions({ article }) {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const isLive = isConfirmedPublishedArticle(article);
   async function run(label, action, success) {
     setBusy(label);
     setError("");
@@ -590,7 +586,7 @@ function ArticleConnectionActions({ article }) {
           <p>Checks do not change the CRM article or publish Wix content.</p>
         </div>
         <div className="card-actions">
-          {article.live_wix_url ? (
+          {isLive ? (
             <a
               className="button button--ghost"
               href={article.live_wix_url}
@@ -617,7 +613,7 @@ function ArticleConnectionActions({ article }) {
           <button
             className="button button--primary"
             type="button"
-            disabled={Boolean(busy) || !article.live_wix_url}
+            disabled={Boolean(busy) || !isLive}
             onClick={() =>
               run(
                 "google",
