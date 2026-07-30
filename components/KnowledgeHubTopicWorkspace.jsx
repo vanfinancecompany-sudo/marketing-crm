@@ -6,12 +6,14 @@ import {
   loadKnowledgeHub,
   saveKnowledgeTopic,
 } from "../services/knowledgeHub.js";
+import { analyseEditorialArticle } from "../services/editorialEngine.js";
 import { buildMarketingAccessHeaders, parseMarketingJsonResponse } from "../services/marketingAccess.js";
 import { findTopicDuplicateGroups, topicMatchesFilters } from "../lib/knowledgeTopicWorkspace.js";
 
 const ROUTE = "/api/knowledge-topic-workspace";
 const PAGE_SIZE = 25;
 const INSTALL_KEY = "__knowledgeHubTopicWorkspaceInstaller";
+const PENDING_ARTICLE_KEY = "knowledgeHubPendingOpenArticle";
 const EMPTY_GENERATION = {
   templateKey: "faq",
   targetAudience: "UK van buyers",
@@ -27,6 +29,54 @@ async function request(action, payload = {}) {
     body: JSON.stringify({ action, ...payload }),
   });
   return parseMarketingJsonResponse(response, "Topic workspace request failed.");
+}
+
+function articleLocation(article, analysed = false) {
+  if (article?.status === "approved") return "Approved article";
+  if (article?.status === "exported") return "Published/exported article";
+  if (article?.status === "draft") return analysed ? "Approval Queue — editorial analysis complete" : "Approval Queue — editorial analysis required";
+  return `${String(article?.status || "unknown").replaceAll("_", " ")} article`;
+}
+
+function rememberArticleForOpen(article) {
+  if (typeof window === "undefined" || !article?.id) return;
+  try {
+    window.sessionStorage.setItem(PENDING_ARTICLE_KEY, JSON.stringify({
+      id: String(article.id),
+      title: String(article.title || ""),
+    }));
+  } catch {
+    // Restricted browser storage will leave the user on the current page with the article details visible.
+  }
+}
+
+function resumePendingArticleOpen() {
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  let pending;
+  try {
+    pending = JSON.parse(window.sessionStorage.getItem(PENDING_ARTICLE_KEY) || "null");
+  } catch {
+    pending = null;
+  }
+  if (!pending?.id) return;
+
+  let attempts = 0;
+  const timer = window.setInterval(() => {
+    attempts += 1;
+    const approvalTab = [...document.querySelectorAll(".knowledge-tabs button")]
+      .find((button) => button.textContent?.trim() === "Approval Queue");
+    if (approvalTab && !approvalTab.classList.contains("button--primary")) approvalTab.click();
+
+    const articleButton = [...document.querySelectorAll("button.knowledge-title-button")]
+      .find((button) => button.textContent?.trim() === pending.title);
+    if (articleButton) {
+      window.clearInterval(timer);
+      try { window.sessionStorage.removeItem(PENDING_ARTICLE_KEY); } catch { /* no-op */ }
+      articleButton.click();
+    } else if (attempts >= 80) {
+      window.clearInterval(timer);
+    }
+  }, 100);
 }
 
 export function Modal({ title, children, confirmLabel, busy, onConfirm, onClose, danger = false }) {
@@ -56,7 +106,6 @@ function FinderWorkspace() {
   const [message, setMessage] = useState("");
 
   async function find() {
-    if (busy) return;
     setBusy(true); setError(""); setMessage("");
     try {
       const result = await request("find", { categories, quantity: Number(quantity), brief });
@@ -136,6 +185,8 @@ function PlannerWorkspace() {
   const [editingTopic, setEditingTopic] = useState(null);
   const [generationTopic, setGenerationTopic] = useState(null);
   const [generation, setGeneration] = useState(EMPTY_GENERATION);
+  const [activeArticle, setActiveArticle] = useState(null);
+  const [activeArticleAnalysed, setActiveArticleAnalysed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -162,8 +213,7 @@ function PlannerWorkspace() {
   }, []);
 
   useEffect(() => {
-    if (!generationTopic) return;
-    requestAnimationFrame(() => generationPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    if (generationTopic) generationPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [generationTopic]);
 
   const filtered = useMemo(() => topics.filter((topic) => topicMatchesFilters(topic, filters)), [topics, filters]);
@@ -183,46 +233,86 @@ function PlannerWorkspace() {
     if (!requireTopic(topic, "Article generation") || busy) return;
     const existingArticle = articles.find((item) => String(item.topic_id) === String(topic.id) && item.status !== "archived");
     if (existingArticle) {
-      setError(`This topic already has an active article: “${existingArticle.title}”.`);
+      setActiveArticle(existingArticle);
+      setActiveArticleAnalysed(false);
       setGenerationTopic(null);
+      setError("");
+      setMessage(`This topic already has an active ${existingArticle.status} article. Use Open Article to view it in the established Knowledge Hub workflow.`);
       return;
     }
-    const availableTemplate = templates.find((item) => item.key === "faq") || templates[0];
-    if (!availableTemplate?.key) {
+    if (!templates.length) {
       setError("Article generation cannot start because no active Knowledge Hub template is available.");
       return;
     }
+    const templateKey = templates.some((item) => item.key === "faq") ? "faq" : templates[0].key;
+    setActiveArticle(null);
+    setGenerationTopic(topic);
     setGeneration({
       ...EMPTY_GENERATION,
-      templateKey: availableTemplate.key,
+      templateKey,
       targetAudience: settings.default_audience || EMPTY_GENERATION.targetAudience,
       tone: settings.default_tone || EMPTY_GENERATION.tone,
     });
-    setGenerationTopic({ ...topic });
     setError("");
     setMessage(`Generation settings opened for “${topic.title}”. Review them below, then click Generate Draft.`);
   }
 
   async function confirmGenerateTopic() {
     if (!requireTopic(generationTopic, "Article generation") || busy) return;
-    if (!generation.templateKey) { setError("Choose an article template before generating."); return; }
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setMessage("Generating article draft…");
     try {
       const result = await generateKnowledgeArticle(generationTopic, generation);
       const generated = result.article;
-      if (!generated?.id) throw new Error("The generation service did not return a saved draft.");
+      if (!generated?.id || !String(generated.content_markdown || generated.content_html || "").trim()) {
+        throw new Error("Article generation did not return a complete saved draft. The topic remains available to retry.");
+      }
+      if (generated.status !== "draft") {
+        throw new Error(`Article generation returned status “${generated.status || "unknown"}” instead of a reviewable draft.`);
+      }
+
+      let analysed = false;
+      let analysisWarning = "";
+      try {
+        await analyseEditorialArticle(generated.id);
+        analysed = true;
+      } catch (analysisError) {
+        analysisWarning = analysisError.message || "Editorial analysis could not be completed.";
+      }
+
       setArticles((current) => [generated, ...current.filter((item) => item.id !== generated.id)]);
-      setTopics((current) => current.map((item) => String(item.id) === String(generationTopic.id) ? { ...item, status: "generated" } : item));
+      setTopics((current) => current.map((item) => item.id === generationTopic.id ? { ...item, status: "generated" } : item));
+      setActiveArticle(generated);
+      setActiveArticleAnalysed(analysed);
       setGenerationTopic(null);
-      setMessage(`Draft generated for “${generated.title}”. Open Approval Queue to review it.`);
+      setMessage(analysisWarning
+        ? `Article generated successfully. It is saved as a draft in Approval Queue, but editorial analysis needs to be retried: ${analysisWarning}`
+        : "Article generated successfully. Editorial analysis completed and the draft is ready in Approval Queue.");
       window.dispatchEvent(new CustomEvent("knowledge-topic-workspace-updated"));
-    } catch (caught) { setError(caught.message || "Article generation failed. Your settings have been retained."); }
-    finally { setBusy(false); }
+    } catch (caught) {
+      setError(caught.message || "Article generation failed. The topic remains available to retry and your settings have been retained.");
+      setMessage("");
+    } finally { setBusy(false); }
+  }
+
+  async function openActiveArticle() {
+    if (!activeArticle?.id || busy) return;
+    setBusy(true); setError("");
+    try {
+      if (activeArticle.status === "draft" && !activeArticleAnalysed) {
+        await analyseEditorialArticle(activeArticle.id);
+        setActiveArticleAnalysed(true);
+      }
+      rememberArticleForOpen(activeArticle);
+      window.location.reload();
+    } catch (caught) {
+      setError(`${caught.message || "Editorial analysis could not be completed."} The article remains saved as a draft and can be opened from Approval Queue after refresh.`);
+    } finally { setBusy(false); }
   }
 
   function handleEditTopic(topic) {
     if (!requireTopic(topic, "Topic editing") || busy) return;
-    setEditingTopic({ ...topic }); setError(""); setMessage("");
+    setEditingTopic({ ...topic });
+    setError(""); setMessage("");
   }
 
   async function confirmEditTopic() {
@@ -241,7 +331,9 @@ function PlannerWorkspace() {
 
   function handleDeleteTopic(topic) {
     if (!requireTopic(topic, "Topic deletion") || busy) return;
-    setSelectionMode("ids"); setSelected([topic.id]); setModal({ type: "delete", topicTitle: topic.title }); setError("");
+    setSelectionMode("ids"); setSelected([topic.id]);
+    setModal({ type: "delete", topicTitle: topic.title });
+    setError("");
   }
 
   async function applyBulk(operation, value = "") {
@@ -264,8 +356,19 @@ function PlannerWorkspace() {
     <div className="panel__header"><div><h3>Topic Planner</h3><p>Bulk actions affect Topic Planner suggestions only. Articles, Wix CMS, editorial history and Business Brain records are not deleted.</p></div><button type="button" className="button button--ghost" onClick={() => setReviewDuplicates((current) => !current)}>Review Duplicates</button></div>
     {error ? <div className="notice notice--error">{error}</div> : null}{message ? <div className="notice knowledge-notice-success">{message}</div> : null}
 
-    {generationTopic ? <section ref={generationPanelRef} className="panel panel--nested knowledge-form-panel" data-topic-generation-panel="true">
-      <div className="panel__header"><div><div className="eyebrow">Generate Article</div><h3>{generationTopic.title}</h3><p>{generationTopic.intent || generationTopic.primary_keyword || "Review the generation settings before creating the draft."}</p></div></div>
+    {activeArticle ? <div className="panel panel--nested" data-topic-active-article="true">
+      <div className="panel__header"><div><div className="eyebrow">Linked article</div><h3>{activeArticle.title}</h3><p>{articleLocation(activeArticle, activeArticleAnalysed)}</p></div></div>
+      <p><strong>Article ID:</strong> {activeArticle.id}</p>
+      <p><strong>Status:</strong> {activeArticle.status}</p>
+      <p><strong>Article type:</strong> {activeArticle.article_type || "Not recorded"}</p>
+      <div className="card-actions">
+        <button type="button" className="button button--primary" disabled={busy} onClick={openActiveArticle}>{busy ? "Preparing article…" : "Open Article"}</button>
+        <button type="button" className="button button--ghost" disabled={busy} onClick={() => setActiveArticle(null)}>Close</button>
+      </div>
+    </div> : null}
+
+    {generationTopic ? <div ref={generationPanelRef} className="panel panel--nested knowledge-form-panel" data-topic-generation-panel="true">
+      <div className="panel__header"><div><div className="eyebrow">Generate Article</div><h3>{generationTopic.title}</h3><p>{generationTopic.intent || generationTopic.canonical_intent || generationTopic.primary_keyword}</p></div></div>
       <div className="field-grid">
         <label className="field"><span className="field__label">Article type / template</span><select className="field__input" value={generation.templateKey} onChange={(event) => setGeneration({ ...generation, templateKey: event.target.value })}>{templates.map((template) => <option key={template.key} value={template.key}>{template.name}</option>)}</select></label>
         <label className="field"><span className="field__label">Approximate length</span><select className="field__input" value={generation.approximateLength} onChange={(event) => setGeneration({ ...generation, approximateLength: Number(event.target.value) })}>{[600,1000,1500,2000].map((length) => <option key={length} value={length}>About {length.toLocaleString()} words</option>)}</select></label>
@@ -273,9 +376,9 @@ function PlannerWorkspace() {
         <label className="field"><span className="field__label">Tone</span><input className="field__input" value={generation.tone} onChange={(event) => setGeneration({ ...generation, tone: event.target.value })} /></label>
         <label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Optional instructions</span><textarea className="field__input" rows={4} value={generation.instructions} onChange={(event) => setGeneration({ ...generation, instructions: event.target.value })} /></label>
       </div>
-      <div className="notice">This uses the established Knowledge Hub article-generation service. The result is saved as a draft for review.</div>
+      <div className="notice">This uses the established Knowledge Hub article-generation service. A complete article is saved as a draft, then the normal editorial analysis runs before it is opened in Approval Queue.</div>
       <div className="card-actions"><button type="button" className="button button--primary" disabled={busy} onClick={confirmGenerateTopic}>{busy ? "Generating…" : "Generate Draft"}</button><button type="button" className="button button--ghost" disabled={busy} onClick={() => setGenerationTopic(null)}>Cancel</button></div>
-    </section> : null}
+    </div> : null}
 
     <div className="knowledge-filters">
       <input className="field__input" placeholder="Search title, keyword or intent…" value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })} />
@@ -346,6 +449,7 @@ function mount() {
   mountQueued = false;
   const target = findLegacyTarget();
   if (!target) { removeWorkspace(); return; }
+
   const { heading, panel } = target;
   const mode = heading.textContent.trim() === "Topic Planner" ? "planner" : "finder";
   if (hiddenPanel !== panel) {
@@ -353,6 +457,7 @@ function mount() {
     hiddenPanel = panel;
     hiddenPanel.style.display = "none";
   }
+
   if (!host || !host.isConnected) {
     host = document.createElement("div");
     host.dataset.knowledgeTopicWorkspaceHost = "true";
@@ -367,6 +472,7 @@ function mount() {
   } else if (host.previousElementSibling !== panel) {
     panel.insertAdjacentElement("afterend", host);
   }
+
   if (mountedMode !== mode) {
     mountedMode = mode;
     root.render(mode === "finder" ? <FinderWorkspace /> : <PlannerWorkspace />);
@@ -383,6 +489,7 @@ export function installKnowledgeHubTopicWorkspace() {
   if (typeof document === "undefined" || typeof window === "undefined") return;
   if (window[INSTALL_KEY]) return;
   window[INSTALL_KEY] = true;
+  resumePendingArticleOpen();
   queueMount();
   observer = new MutationObserver(queueMount);
   observer.observe(document.body, { childList: true, subtree: true });
