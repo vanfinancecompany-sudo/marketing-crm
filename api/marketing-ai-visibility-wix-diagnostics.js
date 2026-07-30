@@ -7,7 +7,7 @@ import {
   wixItemSlug,
 } from "../lib/aiVisibilityLiveConnections.js";
 import {
-  articleIsPresentInLiveSet,
+  articleLiveSetMatch,
   deactivationSelectionReason,
   stableWixIdentityForItem,
   wixManagementClassification,
@@ -54,7 +54,7 @@ async function listLiveItems(configuration) {
   }
 }
 
-function safeRecord(article, classification, selection) {
+function safeRecord(article, classification, selection, match) {
   return {
     id: article.id,
     title: article.title,
@@ -70,6 +70,7 @@ function safeRecord(article, classification, selection) {
     is_active: article.is_active,
     wix_managed: classification.managed,
     wix_managed_reason: classification.reason,
+    live_identity_match_method: match.method,
     selected_for_deactivation: selection.selected,
     deactivation_reason: selection.selection_reason,
   };
@@ -100,17 +101,19 @@ export default async function handler(request, response) {
       }),
     );
     const currentlyPublished = articles.filter(isConfirmedPublishedArticle);
-    const unmatchedPublished = currentlyPublished.filter(
-      (article) => !articleIsPresentInLiveSet(article, liveIdentities),
-    );
-    const diagnostics = unmatchedPublished.map((article) => {
+    const matches = currentlyPublished.map((article) => ({
+      article,
+      match: articleLiveSetMatch(article, liveIdentities),
+    }));
+    const unmatchedPublished = matches.filter((entry) => !entry.match.matched);
+    const diagnostics = unmatchedPublished.map(({ article, match }) => {
       const classification = wixManagementClassification(article, configuration.collectionId);
       const selection = deactivationSelectionReason(
         article,
         liveIdentities,
         configuration.collectionId,
       );
-      return safeRecord(article, classification, selection);
+      return safeRecord(article, classification, selection, match);
     });
 
     return response.status(200).json({
@@ -120,6 +123,14 @@ export default async function handler(request, response) {
         total_article_records_loaded: articles.length,
         currently_published_records: currentlyPublished.length,
         wix_live_items: liveItems.length,
+        matched_by_wix_item_id: matches.filter((entry) => entry.match.method === "wix_item_id").length,
+        matched_by_article_specific_canonical_url: matches.filter(
+          (entry) => entry.match.method === "article_specific_canonical_url",
+        ).length,
+        matched_by_slug: matches.filter((entry) => entry.match.method === "slug").length,
+        rejected_generic_urls: matches.filter(
+          (entry) => entry.match.method === "rejected_generic_url",
+        ).length,
         unmatched_currently_published_records: diagnostics.length,
         unmatched_classified_wix_managed: diagnostics.filter((item) => item.wix_managed).length,
         unmatched_selected_for_deactivation: diagnostics.filter((item) => item.selected_for_deactivation).length,
