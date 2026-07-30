@@ -42,80 +42,38 @@ async function requestKnowledgeSeoFields(topic = {}) {
   const response = await fetch(KNOWLEDGE_SEO_FIELDS_API, {
     method: "POST",
     headers: buildMarketingAccessHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({
-      title: topic.title,
-      intent: topic.intent || topic.canonical_intent || topic.title,
-      category: topic.category,
-    }),
+    body: JSON.stringify({ title: topic.title, intent: topic.intent || topic.canonical_intent || topic.title, category: topic.category }),
   });
   const result = await parseMarketingJsonResponse(response, "SEO fields could not be prepared.");
   return result.fields;
 }
 
 function normaliseTopicDuplicateFields(topic = {}) {
-  return {
-    ...topic,
-    canonical_intent: String(topic.canonical_intent || topic.intent || topic.title || "").trim(),
-    article_angle: String(topic.article_angle || "").trim(),
-    duplicate_override_reason: String(topic.duplicate_override_reason || "").trim(),
-  };
+  return { ...topic, canonical_intent: String(topic.canonical_intent || topic.intent || topic.title || "").trim(), article_angle: String(topic.article_angle || "").trim(), duplicate_override_reason: String(topic.duplicate_override_reason || "").trim() };
 }
 
 function normaliseArticleDuplicateFields(article = {}) {
-  return {
-    ...article,
-    canonical_intent: String(article.canonical_intent || article.title || "").trim(),
-    article_angle: String(article.article_angle || "").trim(),
-    duplicate_override_reason: String(article.duplicate_override_reason || "").trim(),
-  };
+  return { ...article, canonical_intent: String(article.canonical_intent || article.title || "").trim(), article_angle: String(article.article_angle || "").trim(), duplicate_override_reason: String(article.duplicate_override_reason || "").trim() };
 }
 
 function isSeoLengthValidationError(error) {
-  const message = String(error?.message || "");
-  return /SEO title should be 20.?70 characters|Meta description should be 80.?180 characters/i.test(message);
+  return /SEO title should be 20.?70 characters|Meta description should be 80.?180 characters/i.test(String(error?.message || ""));
 }
 
 function withSeoGenerationGuardrails(generation = {}, attempt = 1, seoFields = null) {
   const existingInstructions = String(generation.instructions || "").trim();
-  const retryNote = attempt > 1
-    ? `This is automatic retry ${attempt}; the previous response was rejected only because an SEO field missed its character limit.`
-    : "";
+  const retryNote = attempt > 1 ? `This is automatic retry ${attempt}; the previous response was rejected only because an SEO field missed its character limit.` : "";
   const seoInstructions = seoFields
-    ? [
-        "SEO FIELDS ARE ALREADY APPROVED. Use these exact values without rewriting them:",
-        `seo_title: ${seoFields.seo_title}`,
-        `meta_description: ${seoFields.meta_description}`,
-        "Keep the article title and article content focused on the saved topic. Do not replace the article title with the SEO title.",
-        retryNote,
-      ]
-    : [
-        "STRICT SEO OUTPUT LIMITS:",
-        "- seo_title must be 30 to 60 characters, and never outside 20 to 70 characters.",
-        "- meta_description must be 120 to 160 characters, and never outside 80 to 180 characters.",
-        "Count characters before returning the final JSON and rewrite either field until it fits.",
-        retryNote,
-      ];
-
-  return {
-    ...generation,
-    instructions: [existingInstructions, seoInstructions.filter(Boolean).join("\n")]
-      .filter(Boolean)
-      .join("\n\n"),
-  };
+    ? ["SEO FIELDS ARE ALREADY APPROVED. Use these exact values without rewriting them:", `seo_title: ${seoFields.seo_title}`, `meta_description: ${seoFields.meta_description}`, "Keep the article title and article content focused on the saved topic. Do not replace the article title with the SEO title.", retryNote]
+    : ["STRICT SEO OUTPUT LIMITS:", "- seo_title must be 30 to 60 characters, and never outside 20 to 70 characters.", "- meta_description must be 120 to 160 characters, and never outside 80 to 180 characters.", "Count characters before returning the final JSON and rewrite either field until it fits.", retryNote];
+  return { ...generation, instructions: [existingInstructions, seoInstructions.filter(Boolean).join("\n")].filter(Boolean).join("\n\n") };
 }
 
 export async function checkKnowledgeDuplicate(type, candidate = {}) {
   const response = await fetch(KNOWLEDGE_DUPLICATES_API, {
     method: "POST",
     headers: buildMarketingAccessHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({
-      type,
-      title: candidate.title,
-      canonical_intent: candidate.canonical_intent || candidate.intent || candidate.title,
-      category: candidate.category,
-      exclude_id: candidate.id || null,
-      limit: 10,
-    }),
+    body: JSON.stringify({ type, title: candidate.title, canonical_intent: candidate.canonical_intent || candidate.intent || candidate.title, category: candidate.category, exclude_id: candidate.id || null, limit: 10 }),
   });
   return parseMarketingJsonResponse(response, "Duplicate protection could not check this subject.");
 }
@@ -130,136 +88,56 @@ function closestDuplicateMessage(result, candidateLabel = "subject") {
 function requireDuplicateDecision(result, candidate, candidateLabel) {
   const risk = result?.summary?.highest_risk || "clear";
   if (risk === "clear" || risk === "related") return candidate;
-
   const message = closestDuplicateMessage(result, candidateLabel);
-  if (typeof window === "undefined") {
-    const error = new Error(`${message} Review the canonical intent and article angle before continuing.`);
-    error.code = "knowledge_duplicate_review_required";
-    throw error;
-  }
-
+  if (typeof window === "undefined") { const error = new Error(`${message} Review the canonical intent and article angle before continuing.`); error.code = "knowledge_duplicate_review_required"; throw error; }
   if (risk === "duplicate") {
-    const reason = window.prompt(
-      `${message}\n\nThis is blocked as the same intent. Only continue when it is genuinely a different article angle. Enter the reason for overriding the blocker, or press Cancel.`
-    );
-    if (!String(reason || "").trim()) {
-      const error = new Error(`${message} The duplicate was not saved.`);
-      error.code = "knowledge_duplicate_blocked";
-      throw error;
-    }
+    const reason = window.prompt(`${message}\n\nThis is blocked as the same intent. Only continue when it is genuinely a different article angle. Enter the reason for overriding the blocker, or press Cancel.`);
+    if (!String(reason || "").trim()) { const error = new Error(`${message} The duplicate was not saved.`); error.code = "knowledge_duplicate_blocked"; throw error; }
     return { ...candidate, duplicate_override_reason: String(reason).trim() };
   }
-
-  const confirmed = window.confirm(
-    `${message}\n\nThis looks like a likely duplicate. Continue only when it answers a genuinely different customer question.`
-  );
-  if (!confirmed) {
-    const error = new Error(`${message} The item was not saved.`);
-    error.code = "knowledge_duplicate_cancelled";
-    throw error;
-  }
-  const reason = window.prompt(
-    "Briefly explain the distinct article angle. This will be stored in the duplicate audit history."
-  );
-  if (!String(reason || "").trim()) {
-    const error = new Error("A distinct article angle or override reason is required for a likely duplicate.");
-    error.code = "knowledge_duplicate_reason_required";
-    throw error;
-  }
-  return {
-    ...candidate,
-    article_angle: candidate.article_angle || String(reason).trim(),
-    duplicate_override_reason: String(reason).trim(),
-  };
+  const confirmed = window.confirm(`${message}\n\nThis looks like a likely duplicate. Continue only when it answers a genuinely different customer question.`);
+  if (!confirmed) { const error = new Error(`${message} The item was not saved.`); error.code = "knowledge_duplicate_cancelled"; throw error; }
+  const reason = window.prompt("Briefly explain the distinct article angle. This will be stored in the duplicate audit history.");
+  if (!String(reason || "").trim()) { const error = new Error("A distinct article angle or override reason is required for a likely duplicate."); error.code = "knowledge_duplicate_reason_required"; throw error; }
+  return { ...candidate, article_angle: candidate.article_angle || String(reason).trim(), duplicate_override_reason: String(reason).trim() };
 }
 
-async function protectTopic(topic, label = "topic") {
-  const candidate = normaliseTopicDuplicateFields(topic);
-  const result = await checkKnowledgeDuplicate("topic", candidate);
-  return requireDuplicateDecision(result, candidate, label);
-}
-
-async function protectArticle(article, label = "article") {
-  const candidate = normaliseArticleDuplicateFields(article);
-  const result = await checkKnowledgeDuplicate("article", candidate);
-  return requireDuplicateDecision(result, candidate, label);
-}
+async function protectTopic(topic, label = "topic") { return requireDuplicateDecision(await checkKnowledgeDuplicate("topic", normaliseTopicDuplicateFields(topic)), normaliseTopicDuplicateFields(topic), label); }
+async function protectArticle(article, label = "article") { return requireDuplicateDecision(await checkKnowledgeDuplicate("article", normaliseArticleDuplicateFields(article)), normaliseArticleDuplicateFields(article), label); }
 
 export async function loadKnowledgeHub() { await ensureRent2BuyRule(); return requestKnowledgeHub("load"); }
-
-export function approveAndCreateWixDraft(articleId, reviewedContentHash, confirmWarnings = false) {
-  return requestSafetyApproval("approveAndCreateWixDraft", {
-    article_id: articleId,
-    reviewed_content_hash: reviewedContentHash,
-    confirm_warnings: Boolean(confirmWarnings),
-  });
-}
-
-export async function saveKnowledgeTopic(topic) {
-  const protectedTopic = await protectTopic(topic, "topic");
-  return requestKnowledgeHub("saveTopic", { topic: protectedTopic });
-}
+export function approveAndCreateWixDraft(articleId, reviewedContentHash, confirmWarnings = false) { return requestSafetyApproval("approveAndCreateWixDraft", { article_id: articleId, reviewed_content_hash: reviewedContentHash, confirm_warnings: Boolean(confirmWarnings) }); }
+export async function saveKnowledgeTopic(topic) { return requestKnowledgeHub("saveTopic", { topic: await protectTopic(topic, "topic") }); }
 export function deleteKnowledgeTopic(topicId) { return requestKnowledgeHub("deleteTopic", { topic_id: topicId }); }
 export async function generateKnowledgeArticle(topic, generation) {
   await ensureRent2BuyRule();
-
   let seoFields = null;
-  try {
-    seoFields = await requestKnowledgeSeoFields(topic);
-  } catch (error) {
-    console.warn("KNOWLEDGE SEO PREPARATION FALLBACK", error);
-  }
-
+  try { seoFields = await requestKnowledgeSeoFields(topic); } catch (error) { console.warn("KNOWLEDGE SEO PREPARATION FALLBACK", error); }
   let lastError;
   for (let attempt = 1; attempt <= KNOWLEDGE_GENERATION_MAX_ATTEMPTS; attempt += 1) {
-    try {
-      return await requestKnowledgeHub("generateArticle", {
-        topic,
-        generation: withSeoGenerationGuardrails(generation, attempt, seoFields),
-      });
-    } catch (error) {
-      lastError = error;
-      if (!isSeoLengthValidationError(error) || attempt === KNOWLEDGE_GENERATION_MAX_ATTEMPTS) throw error;
-    }
+    try { return await requestKnowledgeHub("generateArticle", { topic, generation: withSeoGenerationGuardrails(generation, attempt, seoFields) }); }
+    catch (error) { lastError = error; if (!isSeoLengthValidationError(error) || attempt === KNOWLEDGE_GENERATION_MAX_ATTEMPTS) throw error; }
   }
   throw lastError;
 }
 export async function findKnowledgeTopics(categories, quantity, brief) { await ensureRent2BuyRule(); return requestKnowledgeHub("findTopics", { categories, quantity, brief }); }
 export async function saveKnowledgeTopicIdeas(ideas) {
-  const accepted = [];
-  const skipped = [];
+  const accepted = []; const skipped = [];
   for (const idea of ideas || []) {
-    try {
-      accepted.push(await protectTopic(idea, "topic idea"));
-    } catch (error) {
-      if (error?.code?.startsWith("knowledge_duplicate")) {
-        skipped.push({ title: idea?.title || "Untitled topic", reason: error.message });
-      } else {
-        throw error;
-      }
-    }
+    try { accepted.push(await protectTopic(idea, "topic idea")); }
+    catch (error) { if (error?.code?.startsWith("knowledge_duplicate")) skipped.push({ title: idea?.title || "Untitled topic", reason: error.message }); else throw error; }
   }
   if (!accepted.length) return { finder: { topics: [], skipped } };
   const result = await requestKnowledgeHub("saveTopicIdeas", { ideas: accepted });
-  return {
-    ...result,
-    finder: {
-      ...(result.finder || {}),
-      skipped: [...skipped, ...(result.finder?.skipped || [])],
-    },
-  };
+  return { ...result, finder: { ...(result.finder || {}), skipped: [...skipped, ...(result.finder?.skipped || [])] } };
 }
 export async function saveKnowledgeArticle(article, status, confirmWarnings = false) {
-  const protectedArticle = status === "approved"
-    ? await protectArticle(article, "article")
-    : normaliseArticleDuplicateFields(article);
+  const protectedArticle = status === "approved" ? await protectArticle(article, "article") : normaliseArticleDuplicateFields(article);
   if (status === "approved") return requestSafetyApproval("approveArticle", { article: protectedArticle, confirm_warnings: Boolean(confirmWarnings) });
   return requestKnowledgeHub("saveArticle", { article: protectedArticle, status });
 }
 export function bulkUpdateKnowledgeArticles(articleIds, status) {
-  if (status === "approved") {
-    throw new Error("Bulk approval is temporarily disabled while full-catalogue duplicate protection is active. Approve each article individually so its subject can be checked.");
-  }
+  if (status === "approved") throw new Error("Bulk approval is temporarily disabled while full-catalogue duplicate protection is active. Approve each article individually so its subject can be checked.");
   return requestKnowledgeHub("bulkUpdateArticles", { article_ids: articleIds, status });
 }
 export function saveKnowledgeTemplate(template) { return requestKnowledgeHub("saveTemplate", { template }); }
@@ -269,4 +147,5 @@ export async function reviewKnowledgeArticle(articleId) { await ensureRent2BuyRu
 if (typeof window !== "undefined") {
   import("../components/PublishingSafetyCorrections.jsx").then(({ installPublishingSafetyCorrections }) => installPublishingSafetyCorrections()).catch((error) => console.error("PUBLISHING SAFETY CORRECTIONS UI ERROR", error));
   import("../components/KnowledgeHubApprovalDomFixes.js").then(({ installKnowledgeHubApprovalDomFixes }) => installKnowledgeHubApprovalDomFixes()).catch((error) => console.error("KNOWLEDGE HUB APPROVAL UI ERROR", error));
+  import("../components/KnowledgeHubTopicWorkspace.jsx").then(({ installKnowledgeHubTopicWorkspace }) => installKnowledgeHubTopicWorkspace()).catch((error) => console.error("KNOWLEDGE HUB TOPIC WORKSPACE UI ERROR", error));
 }
