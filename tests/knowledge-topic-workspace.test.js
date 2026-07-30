@@ -39,21 +39,60 @@ test("duplicate groups include similar intent and preserve unrelated records", (
 });
 
 test("filtered selection matches search, category, status and priority", () => {
-  const topic = { title: "Rent2Buy mileage limits", intent: "What mileage is allowed?", category: "Rent2Buy", status: "idea", priority: 5 };
-  assert.equal(topicMatchesFilters(topic, { search: "mileage", category: "Rent2Buy", status: "idea", priority: "5" }), true);
+  const topic = {
+    title: "Rent2Buy mileage limits",
+    intent: "What mileage is allowed?",
+    category: "Rent2Buy",
+    status: "idea",
+    priority: 5,
+  };
+  assert.equal(
+    topicMatchesFilters(topic, {
+      search: "mileage",
+      category: "Rent2Buy",
+      status: "idea",
+      priority: "5",
+    }),
+    true,
+  );
   assert.equal(topicMatchesFilters(topic, { category: "Van Finance" }), false);
 });
 
 test("strict finder prompt and safe bulk boundaries are present", async () => {
   const api = await read("../api/knowledge-topic-workspace.js");
-  assert.match(api, /Additional Brief defines the strict subject boundary/);
-  assert.match(api, /Do not infer extra categories/);
-  assert.match(api, /return fewer ideas/i);
+  assert.match(api, /The Additional Brief below is a strict instruction, not loose inspiration/);
+  assert.match(api, /Do not broaden into adjacent subjects/);
+  assert.match(api, /Do not infer or add another category/);
+  assert.match(api, /Return fewer rather than weak, repetitive or off-brief ideas/);
   assert.match(api, /knowledge_articles.*topic_id/s);
   assert.match(api, /Every selected topic has article history and was left untouched/);
   assert.match(api, /selection_mode === "filtered"/);
   assert.doesNotMatch(api, /from\("knowledge_articles"\)\.delete/);
   assert.doesNotMatch(api, /from\("knowledge_business/);
+});
+
+test("workspace API reuses the established authenticated Knowledge Hub route", async () => {
+  const api = await read("../api/knowledge-topic-workspace.js");
+  assert.match(api, /\/api\/marketing-knowledge-hub/);
+  assert.match(api, /requestEstablishedKnowledgeHub\(request, "load"\)/);
+  assert.match(api, /requestEstablishedKnowledgeHub\(request, "findTopics"/);
+  assert.match(api, /requestEstablishedKnowledgeHub\(request, "saveTopicIdeas"/);
+  assert.match(api, /forwardedAccessHeaders\(request\)/);
+  assert.match(api, /x-forwarded-host/);
+});
+
+test("workspace API returns safe structured errors and request diagnostics", async () => {
+  const api = await read("../api/knowledge-topic-workspace.js");
+  assert.match(api, /TOPIC_LOAD_FAILED/);
+  assert.match(api, /TOPIC_FIND_FAILED/);
+  assert.match(api, /TOPIC_SAVE_FAILED/);
+  assert.match(api, /TOPIC_STATUS_UPDATE_FAILED/);
+  assert.match(api, /TOPIC_CATEGORY_UPDATE_FAILED/);
+  assert.match(api, /request_id/);
+  assert.match(api, /X-Topic-Workspace-Request-Id/);
+  assert.match(api, /request\.method === "OPTIONS"/);
+  assert.doesNotMatch(api, /process\.env[^\n]+json/);
+  assert.doesNotMatch(api, /stack:/);
 });
 
 test("review UI exposes required selection and bulk actions", async () => {
