@@ -71,14 +71,25 @@ test("strict finder prompt and safe bulk boundaries are present", async () => {
   assert.doesNotMatch(api, /from\("knowledge_business/);
 });
 
-test("workspace API reuses the established authenticated Knowledge Hub route", async () => {
+test("workspace API reuses the established authenticated handler without a protected preview self-fetch", async () => {
   const api = await read("../api/knowledge-topic-workspace.js");
-  assert.match(api, /\/api\/marketing-knowledge-hub/);
+  assert.match(api, /import marketingKnowledgeHubHandler from "\.\/marketing-knowledge-hub\.js"/);
+  assert.match(api, /await marketingKnowledgeHubHandler\(/);
+  assert.match(api, /headers: request\.headers/);
+  assert.match(api, /body: \{ action, \.\.\.payload \}/);
   assert.match(api, /requestEstablishedKnowledgeHub\(request, "load"\)/);
   assert.match(api, /requestEstablishedKnowledgeHub\(request, "findTopics"/);
   assert.match(api, /requestEstablishedKnowledgeHub\(request, "saveTopicIdeas"/);
-  assert.match(api, /forwardedAccessHeaders\(request\)/);
-  assert.match(api, /x-forwarded-host/);
+  assert.doesNotMatch(api, /fetch\(`\$\{deploymentOrigin\(request\)\}\/api\/marketing-knowledge-hub/);
+  assert.doesNotMatch(api, /x-forwarded-host/);
+});
+
+test("workspace API only returns 401 when its own access-key validation fails", async () => {
+  const api = await read("../api/knowledge-topic-workspace.js");
+  assert.match(api, /if \(!authorize\(request\)\)/);
+  assert.match(api, /code: "ACCESS_DENIED"/);
+  assert.match(api, /A server-to-server fetch to a protected[\s\S]*Vercel preview can receive Vercel's own 401/);
+  assert.doesNotMatch(api, /throw new ApiError\(\s*response\.status/);
 });
 
 test("workspace API returns safe structured errors and request diagnostics", async () => {
