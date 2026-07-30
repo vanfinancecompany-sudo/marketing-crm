@@ -141,10 +141,23 @@ test("individual row actions call real handlers and established services", async
   assert.doesNotMatch(component, /\.click\(\)/);
 });
 
-test("modal backdrop exists only behind active modal state", async () => {
+test("eligible idea topics open a visible inline generation workflow", async () => {
+  const component = await read("../components/KnowledgeHubTopicWorkspace.jsx");
+  assert.match(component, /data-topic-generation-panel="true"/);
+  assert.match(component, /setGenerationTopic\(\{ \.\.\.topic \}\)/);
+  assert.match(component, /Generation settings opened for/);
+  assert.match(component, /generationPanelRef\.current\?\.scrollIntoView/);
+  assert.match(component, /availableTemplate = templates\.find/);
+  assert.match(component, /no active Knowledge Hub template is available/);
+  assert.match(component, /String\(item\.topic_id\) === String\(topic\.id\)/);
+  assert.match(component, /Generate Draft/);
+  assert.match(component, /Generating…/);
+  assert.doesNotMatch(component, /generationTopic \? <Modal/);
+});
+
+test("modal backdrop exists only behind active edit and bulk modal state", async () => {
   const component = await read("../components/KnowledgeHubTopicWorkspace.jsx");
   assert.equal((component.match(/className="modal-backdrop"/g) || []).length, 1);
-  assert.match(component, /generationTopic \? <Modal/);
   assert.match(component, /editingTopic \? <Modal/);
   assert.match(component, /\(modal\?\.type === "delete" \|\| modal\?\.type === "deleteDuplicates"\) \? <Modal/);
   assert.match(component, /modal\?\.type === "status" \? <Modal/);
