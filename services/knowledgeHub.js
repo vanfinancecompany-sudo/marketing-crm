@@ -269,4 +269,5 @@ export async function reviewKnowledgeArticle(articleId) { await ensureRent2BuyRu
 if (typeof window !== "undefined") {
   import("../components/PublishingSafetyCorrections.jsx").then(({ installPublishingSafetyCorrections }) => installPublishingSafetyCorrections()).catch((error) => console.error("PUBLISHING SAFETY CORRECTIONS UI ERROR", error));
   import("../components/KnowledgeHubApprovalDomFixes.js").then(({ installKnowledgeHubApprovalDomFixes }) => installKnowledgeHubApprovalDomFixes()).catch((error) => console.error("KNOWLEDGE HUB APPROVAL UI ERROR", error));
+  import("../components/KnowledgeHubTopicWorkspace.jsx").then(({ installKnowledgeHubTopicWorkspace }) => installKnowledgeHubTopicWorkspace()).catch((error) => console.error("KNOWLEDGE HUB TOPIC WORKSPACE UI ERROR", error));
 }
