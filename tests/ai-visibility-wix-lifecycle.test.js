@@ -7,6 +7,7 @@ import {
   isWixKnowledgeManagedArticle,
   stableWixIdentityForArticle,
   wasInactiveWixArticle,
+  WIX_INACTIVE_STATUS,
 } from "../lib/aiVisibilityWixLifecycle.js";
 import { buildVisibilitySummary, isConfirmedPublishedArticle } from "../lib/aiVisibility.js";
 
@@ -53,9 +54,11 @@ test("deactivation scope is limited to Wix Knowledge Hub managed records", () =>
   }, "knowledge-hub"), false);
 });
 
-test("previously unpublished records are recognised for reactivation", () => {
+test("unpublished is the single inactive lifecycle value used for reactivation", () => {
+  assert.equal(WIX_INACTIVE_STATUS, "unpublished");
   assert.equal(wasInactiveWixArticle({ ...activeArticle, is_active: false }), true);
-  assert.equal(wasInactiveWixArticle({ ...activeArticle, wix_publication_status: "not_live" }), true);
+  assert.equal(wasInactiveWixArticle({ ...activeArticle, wix_publication_status: "unpublished" }), true);
+  assert.equal(wasInactiveWixArticle({ ...activeArticle, wix_sync_status: "unpublished" }), true);
   assert.equal(wasInactiveWixArticle(activeArticle), false);
 });
 
@@ -63,8 +66,8 @@ test("inactive Wix records are excluded from current dashboard totals", () => {
   const inactive = {
     ...activeArticle,
     is_active: false,
-    wix_sync_status: "not_live",
-    wix_publication_status: "not_live",
+    wix_sync_status: "unpublished",
+    wix_publication_status: "unpublished",
     publication_verified_at: null,
     unpublished_at: "2026-07-29T10:00:00Z",
   };
@@ -80,12 +83,29 @@ test("inactive Wix records are excluded from current dashboard totals", () => {
   assert.equal(summary.awaiting_first_check, 1);
 });
 
-test("migration adds lifecycle fields without deleting historical evidence", async () => {
+test("migration safely preserves existing constraint values and adds unpublished", async () => {
   const migration = await read("../supabase/migrations/026_ai_visibility_wix_article_lifecycle.sql");
   assert.match(migration, /is_active boolean not null default true/);
   assert.match(migration, /unpublished_at timestamptz/);
+  assert.match(migration, /pg_get_expr\(c\.conbin, c\.conrelid\)/);
+  assert.match(migration, /drop constraint if exists knowledge_articles_wix_sync_status_check/);
+  assert.match(migration, /drop constraint if exists knowledge_articles_wix_publication_status_check/);
+  assert.match(migration, /wix_sync_status = %L/);
+  assert.match(migration, /wix_publication_status = %L/);
+  assert.match(migration, /'unpublished'/);
   assert.doesNotMatch(migration, /delete\s+from\s+public\.knowledge_visibility_results/i);
   assert.doesNotMatch(migration, /truncate/i);
+});
+
+test("application and migration use the same unpublished inactive status", async () => {
+  const api = await read("../api/marketing-ai-visibility-wix-sync.js");
+  const migration = await read("../supabase/migrations/026_ai_visibility_wix_article_lifecycle.sql");
+  assert.match(api, /wix_sync_status:\s*"unpublished"/);
+  assert.match(api, /wix_publication_status:\s*"unpublished"/);
+  assert.doesNotMatch(api, /wix_sync_status:\s*"not_live"/);
+  assert.doesNotMatch(api, /wix_publication_status:\s*"not_live"/);
+  assert.match(migration, /wix_sync_status = 'unpublished'/);
+  assert.match(migration, /wix_publication_status = 'unpublished'/);
 });
 
 test("full Wix sync validates upstream data before deactivation", async () => {
