@@ -75,3 +75,23 @@ test("review UI exposes required selection and bulk actions", async () => {
   assert.match(component, /This deletes Topic Planner suggestions only/);
   assert.match(component, /setSelected\(\[\]\)/);
 });
+
+test("modal backdrop exists only behind active modal state", async () => {
+  const component = await read("../components/KnowledgeHubTopicWorkspace.jsx");
+  assert.equal((component.match(/className="modal-backdrop"/g) || []).length, 1);
+  assert.match(component, /\(modal\?\.type === "delete" \|\| modal\?\.type === "deleteDuplicates"\) \? <Modal/);
+  assert.match(component, /modal\?\.type === "status" \? <Modal/);
+  assert.match(component, /modal\?\.type === "category" \? <Modal/);
+  assert.doesNotMatch(component, /<Modal[^?]*:\s*<Modal/s);
+});
+
+test("workspace mount ignores its own rendered headings and installs once", async () => {
+  const component = await read("../components/KnowledgeHubTopicWorkspace.jsx");
+  assert.match(component, /!heading\.closest\("\[data-knowledge-topic-workspace-host\]"\)/);
+  assert.match(component, /if \(window\[INSTALL_KEY\]\) return/);
+  assert.match(component, /root\.unmount\(\)/);
+  assert.match(component, /host\.remove\(\)/);
+  assert.match(component, /host\.style\.position = "static"/);
+  assert.match(component, /host\.style\.pointerEvents = "auto"/);
+  assert.doesNotMatch(component, /appendChild\(host\)/);
+});
