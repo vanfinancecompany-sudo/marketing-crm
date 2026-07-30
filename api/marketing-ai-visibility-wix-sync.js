@@ -227,8 +227,8 @@ async function deactivateMissingArticles(supabase, articles, liveItems, configur
           .from("knowledge_articles")
           .update({
             is_active: false,
-            wix_sync_status: "not_live",
-            wix_publication_status: "not_live",
+            wix_sync_status: "unpublished",
+            wix_publication_status: "unpublished",
             unpublished_at: now,
             publication_verified_at: null,
             last_wix_verification_at: now,
@@ -250,6 +250,7 @@ async function deactivateMissingArticles(supabase, articles, liveItems, configur
           wix_item_id: clean(article.wix_item_id),
           live_url: clean(article.live_wix_url),
           slug: clean(article.slug),
+          inactive_status: "unpublished",
           historical_visibility_results_preserved: true,
         },
       });
