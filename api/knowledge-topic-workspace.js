@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import marketingKnowledgeHubHandler from "./marketing-knowledge-hub.js";
 import { KNOWLEDGE_CATEGORIES, KNOWLEDGE_TOPIC_STATUSES } from "../lib/knowledgeHub.js";
 import { findTopicDuplicateGroups, topicMatchesFilters } from "../lib/knowledgeTopicWorkspace.js";
 
@@ -87,35 +88,53 @@ async function resolveTopicIds(supabase, body) {
   return [...new Set(requested)].filter((id) => valid.has(id));
 }
 
-function forwardedAccessHeaders(request) {
-  const apiKey = clean(request.headers[API_KEY_HEADER]);
-  const authorization = clean(request.headers.authorization);
+function createInternalResponse() {
+  let statusCode = 200;
+  let body = null;
+  const headers = new Map();
+  const response = {
+    setHeader(name, value) {
+      headers.set(String(name).toLowerCase(), value);
+      return response;
+    },
+    status(code) {
+      statusCode = Number(code) || 500;
+      return response;
+    },
+    json(value) {
+      body = value;
+      return response;
+    },
+    end() {
+      return response;
+    },
+  };
   return {
-    "Content-Type": "application/json",
-    ...(apiKey ? { [API_KEY_HEADER]: apiKey } : {}),
-    ...(authorization ? { Authorization: authorization } : {}),
+    response,
+    result: () => ({ statusCode, body, headers }),
   };
 }
 
-function deploymentOrigin(request) {
-  const forwardedHost = clean(request.headers["x-forwarded-host"], 500);
-  const host = forwardedHost || clean(request.headers.host, 500);
-  if (!host) throw new ApiError(500, "The preview deployment host could not be resolved.", "TOPIC_HOST_UNAVAILABLE");
-  const protocol = clean(request.headers["x-forwarded-proto"], 20) || "https";
-  return `${protocol}://${host}`;
-}
-
 async function requestEstablishedKnowledgeHub(request, action, payload = {}) {
-  const response = await fetch(`${deploymentOrigin(request)}/api/marketing-knowledge-hub`, {
-    method: "POST",
-    headers: forwardedAccessHeaders(request),
-    body: JSON.stringify({ action, ...payload }),
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok || result.ok === false) {
-    const safeMessage = clean(result.message, 1000) || "The established Knowledge Hub API request failed.";
+  // Call the established handler in-process. A server-to-server fetch to a protected
+  // Vercel preview can receive Vercel's own 401 before the app route runs, which must
+  // never be interpreted as an expired Marketing access key.
+  const internal = createInternalResponse();
+  await marketingKnowledgeHubHandler(
+    {
+      ...request,
+      method: "POST",
+      headers: request.headers,
+      body: { action, ...payload },
+    },
+    internal.response
+  );
+
+  const { statusCode, body: result } = internal.result();
+  if (statusCode < 200 || statusCode >= 300 || result?.ok === false) {
+    const safeMessage = clean(result?.message, 1000) || "The established Knowledge Hub API request failed.";
     throw new ApiError(
-      response.status || 500,
+      statusCode || 500,
       safeMessage,
       action === "load"
         ? "TOPIC_LOAD_FAILED"
@@ -124,7 +143,7 @@ async function requestEstablishedKnowledgeHub(request, action, payload = {}) {
           : "TOPIC_SAVE_FAILED"
     );
   }
-  return result;
+  return result || {};
 }
 
 function strictFinderBrief(brief, categories, quantity) {
