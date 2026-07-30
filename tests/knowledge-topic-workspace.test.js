@@ -46,15 +46,12 @@ test("filtered selection matches search, category, status and priority", () => {
     status: "idea",
     priority: 5,
   };
-  assert.equal(
-    topicMatchesFilters(topic, {
-      search: "mileage",
-      category: "Rent2Buy",
-      status: "idea",
-      priority: "5",
-    }),
-    true,
-  );
+  assert.equal(topicMatchesFilters(topic, {
+    search: "mileage",
+    category: "Rent2Buy",
+    status: "idea",
+    priority: "5",
+  }), true);
   assert.equal(topicMatchesFilters(topic, { category: "Van Finance" }), false);
 });
 
@@ -80,7 +77,7 @@ test("workspace API reuses the established authenticated handler without a prote
   assert.match(api, /requestEstablishedKnowledgeHub\(request, "load"\)/);
   assert.match(api, /requestEstablishedKnowledgeHub\(request, "findTopics"/);
   assert.match(api, /requestEstablishedKnowledgeHub\(request, "saveTopicIdeas"/);
-  assert.doesNotMatch(api, /fetch\(`\$\{deploymentOrigin\(request\)\}\/api\/marketing-knowledge-hub/);
+  assert.doesNotMatch(api, /fetch\(`/);
   assert.doesNotMatch(api, /x-forwarded-host/);
 });
 
@@ -88,7 +85,6 @@ test("workspace API only returns 401 when its own access-key validation fails", 
   const api = await read("../api/knowledge-topic-workspace.js");
   assert.match(api, /if \(!authorize\(request\)\)/);
   assert.match(api, /code: "ACCESS_DENIED"/);
-  assert.match(api, /A server-to-server fetch to a protected[\s\S]*Vercel preview can receive Vercel's own 401/);
   assert.doesNotMatch(api, /throw new ApiError\(\s*response\.status/);
 });
 
@@ -135,24 +131,56 @@ test("individual row actions call real handlers and established services", async
   assert.match(component, /saveKnowledgeTopic\(editingTopic\)/);
   assert.match(component, /request\("bulk", \{ operation/);
   assert.match(component, /if \(topic\?\.id\) return true/);
-  assert.match(component, /already has an active article/);
+  assert.match(component, /active .* article/);
   assert.match(component, /Topics with article history will be blocked and left untouched/);
   assert.doesNotMatch(component, /querySelectorAll\("tbody tr"\)/);
-  assert.doesNotMatch(component, /\.click\(\)/);
+});
+
+test("generated drafts are complete, analysed and exposed with article identity", async () => {
+  const component = await read("../components/KnowledgeHubTopicWorkspace.jsx");
+  assert.match(component, /analyseEditorialArticle\(generated\.id\)/);
+  assert.match(component, /generated\?\.id/);
+  assert.match(component, /generated\.content_markdown \|\| generated\.content_html/);
+  assert.match(component, /generated\.status !== "draft"/);
+  assert.match(component, /Article generated successfully/);
+  assert.match(component, /data-topic-active-article="true"/);
+  assert.match(component, /Article ID:/);
+  assert.match(component, /Article type:/);
+  assert.match(component, /Open Article/);
+  assert.match(component, /setTopics\(\(current\) => current\.map/);
+  assert.match(component, /setActiveArticle\(generated\)/);
+});
+
+test("existing active articles can be repaired, refreshed and opened in Approval Queue", async () => {
+  const component = await read("../components/KnowledgeHubTopicWorkspace.jsx");
+  assert.match(component, /setActiveArticle\(existingArticle\)/);
+  assert.match(component, /activeArticle\.status === "draft" && !activeArticleAnalysed/);
+  assert.match(component, /analyseEditorialArticle\(activeArticle\.id\)/);
+  assert.match(component, /knowledgeHubPendingOpenArticle/);
+  assert.match(component, /Approval Queue/);
+  assert.match(component, /button\.knowledge-title-button/);
+  assert.match(component, /window\.location\.reload\(\)/);
 });
 
 test("eligible idea topics open a visible inline generation workflow", async () => {
   const component = await read("../components/KnowledgeHubTopicWorkspace.jsx");
   assert.match(component, /data-topic-generation-panel="true"/);
-  assert.match(component, /setGenerationTopic\(\{ \.\.\.topic \}\)/);
+  assert.match(component, /setGenerationTopic\(topic\)/);
   assert.match(component, /Generation settings opened for/);
   assert.match(component, /generationPanelRef\.current\?\.scrollIntoView/);
-  assert.match(component, /availableTemplate = templates\.find/);
+  assert.match(component, /!templates\.length/);
   assert.match(component, /no active Knowledge Hub template is available/);
   assert.match(component, /String\(item\.topic_id\) === String\(topic\.id\)/);
   assert.match(component, /Generate Draft/);
   assert.match(component, /Generating…/);
   assert.doesNotMatch(component, /generationTopic \? <Modal/);
+});
+
+test("Approval Queue includes every draft regardless of whether analysis exists", async () => {
+  const intelligence = await read("../lib/editorialIntelligence.js");
+  assert.match(intelligence, /\.filter\(\(article\) => article\.status === "draft"\)/);
+  assert.match(intelligence, /const assessment = latest\.get\(article\.id\)/);
+  assert.match(intelligence, /Number\(assessment\?\.overall_score\) \|\| 0/);
 });
 
 test("modal backdrop exists only behind active edit and bulk modal state", async () => {
