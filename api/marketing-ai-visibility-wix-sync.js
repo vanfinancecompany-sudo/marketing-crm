@@ -199,7 +199,7 @@ async function saveWixMatch(supabase, article, item, matchedBy) {
   };
 }
 
-async function deactivateMissingArticles(supabase, articles, liveItems, configuration) {
+async function deactivateMissingArticles(supabase, managedArticles, liveItems) {
   const liveIdentities = liveItems.map((item) =>
     stableWixIdentityForItem(item, {
       itemId: wixItemId,
@@ -207,9 +207,8 @@ async function deactivateMissingArticles(supabase, articles, liveItems, configur
       slug: wixItemSlug,
     }),
   );
-  const candidates = articles.filter(
+  const candidates = managedArticles.filter(
     (article) =>
-      isWixKnowledgeManagedArticle(article, configuration.collectionId) &&
       !articleIsPresentInLiveSet(article, liveIdentities) &&
       (article.is_active !== false ||
         article.wix_sync_status === "live" ||
@@ -266,7 +265,7 @@ async function deactivateMissingArticles(supabase, articles, liveItems, configur
       });
     }
   }
-  return { deactivated, errors };
+  return { deactivated, candidate_count: candidates.length, errors };
 }
 
 async function syncLiveWixArticles(supabase, articleId = "") {
@@ -283,6 +282,19 @@ async function syncLiveWixArticles(supabase, articleId = "") {
   const liveItems = await new WixLiveReader(configuration).listLiveItems();
   const scopedArticles = articleId ? articles.filter((article) => article.id === articleId) : articles;
   if (articleId && !scopedArticles.length) throw new ApiError(404, "Article could not be found.", "validation");
+
+  const managedArticles = articles.filter((article) =>
+    isWixKnowledgeManagedArticle(article, configuration.collectionId),
+  );
+  const activeManagedBeforeSync = managedArticles.filter(
+    (article) => article.is_active !== false && isConfirmedPublishedArticle(article),
+  );
+  const legacyManagedCandidates = managedArticles.filter(
+    (article) =>
+      !clean(article.wix_collection_id) ||
+      !clean(article.publication_verification_notes) ||
+      !article.last_wix_sync_at,
+  );
 
   const plan = buildWixSyncPlan({ articles: scopedArticles, liveItems });
   let added = 0;
@@ -311,14 +323,15 @@ async function syncLiveWixArticles(supabase, articleId = "") {
   }
 
   let deactivated = 0;
+  let missingLiveCandidates = 0;
   if (!articleId) {
     const deactivation = await deactivateMissingArticles(
       supabase,
-      articles,
+      managedArticles,
       liveItems,
-      configuration,
     );
     deactivated = deactivation.deactivated;
+    missingLiveCandidates = deactivation.candidate_count;
     errors.push(...deactivation.errors);
   }
 
@@ -329,6 +342,14 @@ async function syncLiveWixArticles(supabase, articleId = "") {
     active_records_updated: active,
     previously_live_records_deactivated: deactivated,
     reactivated_records: reactivated,
+    total_article_records_loaded: articles.length,
+    wix_managed_records_identified: managedArticles.length,
+    active_wix_managed_records_before_sync: activeManagedBeforeSync.length,
+    live_records_matched: plan.matches.length,
+    legacy_wix_managed_candidates: legacyManagedCandidates.length,
+    missing_live_candidates: missingLiveCandidates,
+    records_skipped_as_not_wix_managed: articles.length - managedArticles.length,
+    records_deactivated: deactivated,
     items_missing_usable_live_url: missingUrls,
     new_published_pages_added: added,
     existing_records_updated: updated,
