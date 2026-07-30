@@ -6,6 +6,7 @@ import {
 const API_ROUTE = "/api/marketing-ai-visibility";
 const CONNECTIONS_API_ROUTE = "/api/marketing-ai-visibility-connections";
 const WIX_SYNC_API_ROUTE = "/api/marketing-ai-visibility-wix-sync";
+const WIX_DIAGNOSTICS_API_ROUTE = "/api/marketing-ai-visibility-wix-diagnostics";
 const MANUAL_EVIDENCE_API_ROUTE = "/api/marketing-ai-visibility-manual";
 
 async function request(route, action, payload = {}) {
@@ -50,7 +51,30 @@ export const runArticleVisibilityCheck = (articleId, provider, promptId = null) 
 export const saveAiVisibilitySettings = (attentionDays) =>
   requestAiVisibility("saveSettings", { attention_days: attentionDays });
 
-export const syncLiveWixArticles = () => requestWixSync("syncLiveWixArticles");
+function withVisibleWixDiagnostics(result = {}) {
+  const summary = result.summary || {};
+  return {
+    ...result,
+    summary: {
+      ...summary,
+      wix_items_checked:
+        `${summary.wix_items_checked || 0} · Total article records loaded: ${summary.total_article_records_loaded || 0}`,
+      wix_live_items_matched:
+        `${summary.wix_live_items_matched || 0} · Wix-managed records identified: ${summary.wix_managed_records_identified || 0} · Live records matched: ${summary.live_records_matched || 0}`,
+      active_records_updated:
+        `${summary.active_records_updated || 0} · Active Wix-managed records before sync: ${summary.active_wix_managed_records_before_sync || 0}`,
+      previously_live_records_deactivated:
+        `${summary.previously_live_records_deactivated || 0} · Missing-live candidates: ${summary.missing_live_candidates || 0} · Records deactivated: ${summary.records_deactivated || 0}`,
+      reactivated_records:
+        `${summary.reactivated_records || 0} · Legacy Wix-managed candidates: ${summary.legacy_wix_managed_candidates || 0} · Records skipped as not Wix-managed: ${summary.records_skipped_as_not_wix_managed || 0}`,
+    },
+  };
+}
+
+export const syncLiveWixArticles = async () =>
+  withVisibleWixDiagnostics(await requestWixSync("syncLiveWixArticles"));
+export const loadWixLifecycleDiagnostics = () =>
+  request(WIX_DIAGNOSTICS_API_ROUTE, "diagnoseLegacyWixLifecycle");
 export const checkWixPublicationStatus = (articleId) =>
   requestWixSync("checkWixPublication", { article_id: articleId });
 export const checkGoogleForArticle = (articleId, executionId = "") =>
