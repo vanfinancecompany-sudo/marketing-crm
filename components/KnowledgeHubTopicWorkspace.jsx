@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { KNOWLEDGE_CATEGORIES, KNOWLEDGE_TOPIC_STATUSES } from "../lib/knowledgeHub.js";
 import {
@@ -36,8 +36,8 @@ export function Modal({ title, children, confirmLabel, busy, onConfirm, onClose,
         <div className="panel__header"><div><h3>{title}</h3></div></div>
         {children}
         <div className="card-actions">
-          <button className={`button ${danger ? "button--danger" : "button--primary"}`} disabled={busy} onClick={onConfirm}>{busy ? "Working…" : confirmLabel}</button>
-          <button className="button button--ghost" disabled={busy} onClick={onClose}>Cancel</button>
+          <button type="button" className={`button ${danger ? "button--danger" : "button--primary"}`} disabled={busy} onClick={onConfirm}>{busy ? "Working…" : confirmLabel}</button>
+          <button type="button" className="button button--ghost" disabled={busy} onClick={onClose}>Cancel</button>
         </div>
       </div>
     </div>
@@ -56,6 +56,7 @@ function FinderWorkspace() {
   const [message, setMessage] = useState("");
 
   async function find() {
+    if (busy) return;
     setBusy(true); setError(""); setMessage("");
     try {
       const result = await request("find", { categories, quantity: Number(quantity), brief });
@@ -138,6 +139,7 @@ function PlannerWorkspace() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const generationPanelRef = useRef(null);
 
   async function load() {
     try {
@@ -159,6 +161,11 @@ function PlannerWorkspace() {
     return () => window.removeEventListener("knowledge-topic-workspace-updated", listener);
   }, []);
 
+  useEffect(() => {
+    if (!generationTopic) return;
+    requestAnimationFrame(() => generationPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }, [generationTopic]);
+
   const filtered = useMemo(() => topics.filter((topic) => topicMatchesFilters(topic, filters)), [topics, filters]);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const visible = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -174,31 +181,38 @@ function PlannerWorkspace() {
 
   function handleGenerateTopic(topic) {
     if (!requireTopic(topic, "Article generation") || busy) return;
-    const existingArticle = articles.find((item) => item.topic_id === topic.id && item.status !== "archived");
+    const existingArticle = articles.find((item) => String(item.topic_id) === String(topic.id) && item.status !== "archived");
     if (existingArticle) {
       setError(`This topic already has an active article: “${existingArticle.title}”.`);
+      setGenerationTopic(null);
       return;
     }
-    const templateKey = templates.some((item) => item.key === "faq") ? "faq" : templates[0]?.key || "faq";
-    setGenerationTopic(topic);
+    const availableTemplate = templates.find((item) => item.key === "faq") || templates[0];
+    if (!availableTemplate?.key) {
+      setError("Article generation cannot start because no active Knowledge Hub template is available.");
+      return;
+    }
     setGeneration({
       ...EMPTY_GENERATION,
-      templateKey,
+      templateKey: availableTemplate.key,
       targetAudience: settings.default_audience || EMPTY_GENERATION.targetAudience,
       tone: settings.default_tone || EMPTY_GENERATION.tone,
     });
+    setGenerationTopic({ ...topic });
     setError("");
-    setMessage("");
+    setMessage(`Generation settings opened for “${topic.title}”. Review them below, then click Generate Draft.`);
   }
 
   async function confirmGenerateTopic() {
     if (!requireTopic(generationTopic, "Article generation") || busy) return;
+    if (!generation.templateKey) { setError("Choose an article template before generating."); return; }
     setBusy(true); setError("");
     try {
       const result = await generateKnowledgeArticle(generationTopic, generation);
       const generated = result.article;
-      setArticles((current) => [generated, ...current]);
-      setTopics((current) => current.map((item) => item.id === generationTopic.id ? { ...item, status: "generated" } : item));
+      if (!generated?.id) throw new Error("The generation service did not return a saved draft.");
+      setArticles((current) => [generated, ...current.filter((item) => item.id !== generated.id)]);
+      setTopics((current) => current.map((item) => String(item.id) === String(generationTopic.id) ? { ...item, status: "generated" } : item));
       setGenerationTopic(null);
       setMessage(`Draft generated for “${generated.title}”. Open Approval Queue to review it.`);
       window.dispatchEvent(new CustomEvent("knowledge-topic-workspace-updated"));
@@ -208,9 +222,7 @@ function PlannerWorkspace() {
 
   function handleEditTopic(topic) {
     if (!requireTopic(topic, "Topic editing") || busy) return;
-    setEditingTopic({ ...topic });
-    setError("");
-    setMessage("");
+    setEditingTopic({ ...topic }); setError(""); setMessage("");
   }
 
   async function confirmEditTopic() {
@@ -229,10 +241,7 @@ function PlannerWorkspace() {
 
   function handleDeleteTopic(topic) {
     if (!requireTopic(topic, "Topic deletion") || busy) return;
-    setSelectionMode("ids");
-    setSelected([topic.id]);
-    setModal({ type: "delete", topicTitle: topic.title });
-    setError("");
+    setSelectionMode("ids"); setSelected([topic.id]); setModal({ type: "delete", topicTitle: topic.title }); setError("");
   }
 
   async function applyBulk(operation, value = "") {
@@ -254,6 +263,20 @@ function PlannerWorkspace() {
   return <section className="panel" data-topic-workspace="planner">
     <div className="panel__header"><div><h3>Topic Planner</h3><p>Bulk actions affect Topic Planner suggestions only. Articles, Wix CMS, editorial history and Business Brain records are not deleted.</p></div><button type="button" className="button button--ghost" onClick={() => setReviewDuplicates((current) => !current)}>Review Duplicates</button></div>
     {error ? <div className="notice notice--error">{error}</div> : null}{message ? <div className="notice knowledge-notice-success">{message}</div> : null}
+
+    {generationTopic ? <section ref={generationPanelRef} className="panel panel--nested knowledge-form-panel" data-topic-generation-panel="true">
+      <div className="panel__header"><div><div className="eyebrow">Generate Article</div><h3>{generationTopic.title}</h3><p>{generationTopic.intent || generationTopic.primary_keyword || "Review the generation settings before creating the draft."}</p></div></div>
+      <div className="field-grid">
+        <label className="field"><span className="field__label">Article type / template</span><select className="field__input" value={generation.templateKey} onChange={(event) => setGeneration({ ...generation, templateKey: event.target.value })}>{templates.map((template) => <option key={template.key} value={template.key}>{template.name}</option>)}</select></label>
+        <label className="field"><span className="field__label">Approximate length</span><select className="field__input" value={generation.approximateLength} onChange={(event) => setGeneration({ ...generation, approximateLength: Number(event.target.value) })}>{[600,1000,1500,2000].map((length) => <option key={length} value={length}>About {length.toLocaleString()} words</option>)}</select></label>
+        <label className="field"><span className="field__label">Target audience</span><input className="field__input" value={generation.targetAudience} onChange={(event) => setGeneration({ ...generation, targetAudience: event.target.value })} /></label>
+        <label className="field"><span className="field__label">Tone</span><input className="field__input" value={generation.tone} onChange={(event) => setGeneration({ ...generation, tone: event.target.value })} /></label>
+        <label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Optional instructions</span><textarea className="field__input" rows={4} value={generation.instructions} onChange={(event) => setGeneration({ ...generation, instructions: event.target.value })} /></label>
+      </div>
+      <div className="notice">This uses the established Knowledge Hub article-generation service. The result is saved as a draft for review.</div>
+      <div className="card-actions"><button type="button" className="button button--primary" disabled={busy} onClick={confirmGenerateTopic}>{busy ? "Generating…" : "Generate Draft"}</button><button type="button" className="button button--ghost" disabled={busy} onClick={() => setGenerationTopic(null)}>Cancel</button></div>
+    </section> : null}
+
     <div className="knowledge-filters">
       <input className="field__input" placeholder="Search title, keyword or intent…" value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })} />
       <select className="field__input" value={filters.category} onChange={(event) => setFilters({ ...filters, category: event.target.value })}><option value="all">All categories</option>{KNOWLEDGE_CATEGORIES.map((item) => <option key={item}>{item}</option>)}</select>
@@ -272,17 +295,6 @@ function PlannerWorkspace() {
     {reviewDuplicates ? <div className="panel panel--nested"><h4>Likely duplicate groups</h4>{duplicates.length ? duplicates.map((group, index) => <div className="notice" key={index}><strong>Group {index + 1}</strong>{group.map((topic) => <label className="knowledge-select-row" key={topic.id}><input type="checkbox" checked={selected.includes(topic.id)} onChange={() => { setSelectionMode("ids"); setSelected((current) => current.includes(topic.id) ? current.filter((id) => id !== topic.id) : [...current, topic.id]); }} />{topic.title} — {topic.intent || topic.canonical_intent || "No intent recorded"}</label>)}</div>) : <div className="notice">No likely duplicate groups found.</div>}<button type="button" className="button button--danger" disabled={!selected.length || busy} onClick={() => setModal({ type: "deleteDuplicates" })}>Delete Selected Duplicates</button></div> : null}
     <div className="knowledge-table-wrap"><table className="knowledge-table"><thead><tr><th><input aria-label="Select all visible rows" type="checkbox" checked={allVisibleSelected} onChange={(event) => { setSelectionMode("ids"); const ids = visible.map((topic) => topic.id); setSelected((current) => event.target.checked ? [...new Set([...current, ...ids])] : current.filter((id) => !ids.includes(id))); }} /></th><th>Topic</th><th>Priority</th><th>Category</th><th>Customer question/search intent</th><th>Status</th><th>Actions</th></tr></thead><tbody>{visible.map((topic) => <tr key={topic.id}><td><input type="checkbox" checked={selectionMode === "filtered" || selected.includes(topic.id)} onChange={(event) => { setSelectionMode("ids"); setSelected((current) => event.target.checked ? [...new Set([...current, topic.id])] : current.filter((id) => id !== topic.id)); }} /></td><td><strong>{topic.title}</strong><small>{topic.source === "ai_topic_finder" ? "AI Topic Finder" : "Manual"}</small></td><td>{topic.priority || 3}</td><td>{topic.category}</td><td>{topic.intent || topic.canonical_intent || "—"}</td><td>{topic.status}</td><td><div className="card-actions"><button type="button" className="button button--primary" disabled={busy} onClick={() => handleGenerateTopic(topic)}>Generate</button><button type="button" className="button button--ghost" disabled={busy} onClick={() => handleEditTopic(topic)}>Edit</button><button type="button" className="button button--danger" disabled={busy} onClick={() => handleDeleteTopic(topic)}>Delete</button></div></td></tr>)}</tbody></table></div>
     <div className="card-actions"><button type="button" className="button button--ghost" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>Previous</button><span>Page {page} of {totalPages} · {filtered.length} filtered topics</span><button type="button" className="button button--ghost" disabled={page >= totalPages} onClick={() => setPage((current) => current + 1)}>Next</button></div>
-
-    {generationTopic ? <Modal title={`Generate article for “${generationTopic.title}”`} confirmLabel="Generate Draft" busy={busy} onConfirm={confirmGenerateTopic} onClose={() => setGenerationTopic(null)}>
-      <div className="field-grid">
-        <label className="field"><span className="field__label">Article type / template</span><select className="field__input" value={generation.templateKey} onChange={(event) => setGeneration({ ...generation, templateKey: event.target.value })}>{templates.map((template) => <option key={template.key} value={template.key}>{template.name}</option>)}</select></label>
-        <label className="field"><span className="field__label">Approximate length</span><select className="field__input" value={generation.approximateLength} onChange={(event) => setGeneration({ ...generation, approximateLength: Number(event.target.value) })}>{[600,1000,1500,2000].map((length) => <option key={length} value={length}>About {length.toLocaleString()} words</option>)}</select></label>
-        <label className="field"><span className="field__label">Target audience</span><input className="field__input" value={generation.targetAudience} onChange={(event) => setGeneration({ ...generation, targetAudience: event.target.value })} /></label>
-        <label className="field"><span className="field__label">Tone</span><input className="field__input" value={generation.tone} onChange={(event) => setGeneration({ ...generation, tone: event.target.value })} /></label>
-        <label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Optional instructions</span><textarea className="field__input" rows={4} value={generation.instructions} onChange={(event) => setGeneration({ ...generation, instructions: event.target.value })} /></label>
-      </div>
-      <div className="notice">This uses the established Knowledge Hub article-generation service. The result is saved as a draft for review.</div>
-    </Modal> : null}
 
     {editingTopic ? <Modal title={`Edit “${editingTopic.title}”`} confirmLabel="Save Topic" busy={busy} onConfirm={confirmEditTopic} onClose={() => setEditingTopic(null)}>
       <div className="field-grid">
@@ -334,7 +346,6 @@ function mount() {
   mountQueued = false;
   const target = findLegacyTarget();
   if (!target) { removeWorkspace(); return; }
-
   const { heading, panel } = target;
   const mode = heading.textContent.trim() === "Topic Planner" ? "planner" : "finder";
   if (hiddenPanel !== panel) {
@@ -342,7 +353,6 @@ function mount() {
     hiddenPanel = panel;
     hiddenPanel.style.display = "none";
   }
-
   if (!host || !host.isConnected) {
     host = document.createElement("div");
     host.dataset.knowledgeTopicWorkspaceHost = "true";
@@ -357,7 +367,6 @@ function mount() {
   } else if (host.previousElementSibling !== panel) {
     panel.insertAdjacentElement("afterend", host);
   }
-
   if (mountedMode !== mode) {
     mountedMode = mode;
     root.render(mode === "finder" ? <FinderWorkspace /> : <PlannerWorkspace />);
