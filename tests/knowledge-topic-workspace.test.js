@@ -126,13 +126,29 @@ test("review UI exposes required selection and bulk actions", async () => {
   assert.match(component, /setSelected\(\[\]\)/);
 });
 
+test("individual row actions call real handlers and established services", async () => {
+  const component = await read("../components/KnowledgeHubTopicWorkspace.jsx");
+  assert.match(component, /function handleGenerateTopic\(topic\)/);
+  assert.match(component, /function handleEditTopic\(topic\)/);
+  assert.match(component, /function handleDeleteTopic\(topic\)/);
+  assert.match(component, /generateKnowledgeArticle\(generationTopic, generation\)/);
+  assert.match(component, /saveKnowledgeTopic\(editingTopic\)/);
+  assert.match(component, /request\("bulk", \{ operation/);
+  assert.match(component, /if \(topic\?\.id\) return true/);
+  assert.match(component, /already has an active article/);
+  assert.match(component, /Topics with article history will be blocked and left untouched/);
+  assert.doesNotMatch(component, /querySelectorAll\("tbody tr"\)/);
+  assert.doesNotMatch(component, /\.click\(\)/);
+});
+
 test("modal backdrop exists only behind active modal state", async () => {
   const component = await read("../components/KnowledgeHubTopicWorkspace.jsx");
   assert.equal((component.match(/className="modal-backdrop"/g) || []).length, 1);
+  assert.match(component, /generationTopic \? <Modal/);
+  assert.match(component, /editingTopic \? <Modal/);
   assert.match(component, /\(modal\?\.type === "delete" \|\| modal\?\.type === "deleteDuplicates"\) \? <Modal/);
   assert.match(component, /modal\?\.type === "status" \? <Modal/);
   assert.match(component, /modal\?\.type === "category" \? <Modal/);
-  assert.doesNotMatch(component, /<Modal[^?]*:\s*<Modal/s);
 });
 
 test("workspace mount ignores its own rendered headings and installs once", async () => {
