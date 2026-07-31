@@ -15,6 +15,12 @@ import { isConfirmedPublishedArticle } from "../lib/aiVisibility.js";
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
+const GOOGLE_COMPLETED_STATUSES = new Set([
+  "indexed",
+  "not_indexed",
+  "performance_found",
+  "inconclusive",
+]);
 
 class ApiError extends Error {
   constructor(status, message, code = "provider_request_failed") {
@@ -269,6 +275,7 @@ async function fetchGoogleEvidence(configuration, pageUrl, fetchImpl = fetch) {
   const performance = aggregateSearchAnalytics(analytics.rows || []);
   let inspection = null;
   let inspectionError = "";
+  let inspectionErrorCode = "";
   try {
     inspection = await googleRequest(
       "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect",
@@ -281,8 +288,15 @@ async function fetchGoogleEvidence(configuration, pageUrl, fetchImpl = fetch) {
     );
   } catch (error) {
     inspectionError = error.message;
+    inspectionErrorCode = error.code || "provider_request_failed";
   }
-  return { range, performance, inspection, inspection_error: inspectionError };
+  return {
+    range,
+    performance,
+    inspection,
+    inspection_error: inspectionError,
+    inspection_error_code: inspectionErrorCode,
+  };
 }
 
 async function upsertGoogleConnection(supabase, configuration, updates = {}) {
@@ -336,6 +350,74 @@ async function upsertGoogleConnection(supabase, configuration, updates = {}) {
       .single(),
     "Google connection state could not be saved.",
   );
+}
+
+function googlePersistedState(result = {}) {
+  const structured = result.structured_evidence && typeof result.structured_evidence === "object"
+    ? result.structured_evidence
+    : {};
+  const impressions = Number(structured.impressions || 0);
+  const clicks = Number(structured.clicks || 0);
+  const inspectionError = clean(structured.inspection_error, 5000);
+  if (inspectionError && impressions <= 0 && clicks <= 0) {
+    return {
+      result_status: "error",
+      error_details: inspectionError,
+      evidence_excerpt: "Google URL Inspection failed and no Search Analytics evidence was returned. No indexing verdict was recorded.",
+    };
+  }
+  if (impressions > 0 || clicks > 0) {
+    return {
+      result_status: "performance_found",
+      error_details: null,
+      evidence_excerpt: "Search Analytics performance data was found. A verified indexing verdict was not available.",
+    };
+  }
+  return {
+    result_status: "inconclusive",
+    error_details: null,
+    evidence_excerpt: "Google APIs completed, but returned no verified indexing verdict or Search Analytics evidence.",
+  };
+}
+
+async function normalizeLegacyGoogleNotCheckedResults(supabase) {
+  const candidates = data(
+    await supabase
+      .from("knowledge_visibility_results")
+      .select("id,article_id,result_status,structured_evidence,response_metadata,error_details,evidence_excerpt")
+      .eq("provider", "google_search_console")
+      .eq("result_status", "not_checked")
+      .eq("manually_verified", false),
+    "Legacy Google result states could not be inspected.",
+  ) || [];
+  const eligible = candidates.filter(
+    (item) => item.response_metadata?.official_google_apis === true,
+  );
+  let updated = 0;
+  for (const item of eligible) {
+    const next = googlePersistedState(item);
+    data(
+      await supabase
+        .from("knowledge_visibility_results")
+        .update(next)
+        .eq("id", item.id),
+      "Legacy Google result state could not be corrected.",
+    );
+    updated += 1;
+  }
+  if (updated) {
+    await supabase.from("knowledge_visibility_audit_events").insert({
+      provider: "google_search_console",
+      action: "google_result_state_normalized",
+      reason: "Completed Google API attempts previously stored as not_checked were reclassified from their persisted evidence.",
+      details: {
+        updated_count: updated,
+        historical_rows_deleted: 0,
+        recognised_states: ["performance_found", "inconclusive", "error"],
+      },
+    });
+  }
+  return updated;
 }
 
 async function recordGoogleFailure(supabase, article, executionId, error) {
@@ -404,10 +486,32 @@ async function checkGoogleForArticle(supabase, articleId, executionId) {
       .maybeSingle(),
     "Existing Google evidence could not be checked.",
   );
-  if (duplicate) return { result: duplicate, duplicate: true };
+  if (duplicate) {
+    if (!GOOGLE_COMPLETED_STATUSES.has(duplicate.result_status)) {
+      throw new ApiError(
+        502,
+        duplicate.error_details || "The stored Google attempt did not contain a completed result.",
+        "stored_google_result_incomplete",
+      );
+    }
+    return { result: duplicate, duplicate: true };
+  }
   try {
     const evidence = await fetchGoogleEvidence(configuration, article.live_wix_url);
+    const hasPerformance =
+      Number(evidence.performance.impressions || 0) > 0 ||
+      Number(evidence.performance.clicks || 0) > 0;
+    if (evidence.inspection_error && !hasPerformance) {
+      throw new ApiError(
+        502,
+        `Google URL Inspection failed: ${evidence.inspection_error}`,
+        evidence.inspection_error_code || "provider_request_failed",
+      );
+    }
     const resultStatus = googleEvidenceStatus(evidence);
+    if (!GOOGLE_COMPLETED_STATUSES.has(resultStatus)) {
+      throw new ApiError(502, "Google completed without a recognised result state.", "unrecognised_google_result");
+    }
     const now = new Date().toISOString();
     const result = data(
       await supabase.from("knowledge_visibility_results").insert({
@@ -421,9 +525,9 @@ async function checkGoogleForArticle(supabase, articleId, executionId) {
             ? "URL Inspection returned PASS."
             : resultStatus === "not_indexed"
               ? "URL Inspection returned FAIL."
-              : evidence.performance.impressions > 0
-                ? "Performance data found. Indexing status was not asserted."
-                : "No reliable indexing verdict or performance evidence was returned.",
+              : resultStatus === "performance_found"
+                ? "Search Analytics performance data was found. Indexing status was not asserted."
+                : "Google APIs completed, but returned no verified indexing verdict or Search Analytics evidence.",
         structured_evidence: {
           page_url: article.live_wix_url,
           indexed_status: ["indexed", "not_indexed"].includes(resultStatus) ? resultStatus : "not_determined",
@@ -464,6 +568,7 @@ async function checkGoogleForArticle(supabase, articleId, executionId) {
 }
 
 async function bulkGoogleCheck(supabase, body) {
+  await normalizeLegacyGoogleNotCheckedResults(supabase);
   const articles = data(
     await supabase.from("knowledge_articles").select("*").order("published_at", { ascending: true }),
     "Published pages could not be loaded.",
@@ -486,21 +591,35 @@ async function bulkGoogleCheck(supabase, body) {
     );
     batchResults.forEach((outcome, offset) => {
       const article = batch[offset];
-      results.push(
-        outcome.status === "fulfilled"
-          ? { article_id: article.id, ok: true, duplicate: outcome.value.duplicate }
-          : {
-              article_id: article.id,
-              ok: false,
-              code: outcome.reason.code || "provider_request_failed",
-              error: outcome.reason.message,
-            },
-      );
+      if (outcome.status === "fulfilled") {
+        const resultStatus = outcome.value.result?.result_status || "";
+        const ok = GOOGLE_COMPLETED_STATUSES.has(resultStatus);
+        results.push({
+          article_id: article.id,
+          ok,
+          result_status: resultStatus,
+          duplicate: outcome.value.duplicate,
+          ...(ok ? {} : { error: "A recognised non-error Google result was not persisted." }),
+        });
+      } else {
+        results.push({
+          article_id: article.id,
+          ok: false,
+          result_status: "error",
+          code: outcome.reason.code || "provider_request_failed",
+          error: outcome.reason.message,
+        });
+      }
     });
   }
   const completedAt = new Date().toISOString();
   const successful = results.filter((item) => item.ok).length;
   const failed = results.length - successful;
+  const status_counts = results.reduce((counts, item) => {
+    const key = item.result_status || "unknown";
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
   await upsertGoogleConnection(supabase, configuration, {
     ...(successful ? { last_successful_check_at: completedAt } : {}),
     last_error: failed
@@ -513,6 +632,7 @@ async function bulkGoogleCheck(supabase, body) {
         published_pages_checked: articles.length,
         successful,
         failed,
+        status_counts,
       },
     },
   });
@@ -523,6 +643,7 @@ async function bulkGoogleCheck(supabase, body) {
     published_pages_checked: articles.length,
     successful,
     failed,
+    status_counts,
     results,
   };
 }
@@ -542,7 +663,11 @@ export default async function handler(request, response) {
       const summary = await syncLiveWixArticles(supabase);
       result = { summary, article_id: articleId };
     } else if (body.action === "googleConnection") {
-      result = { connection: await upsertGoogleConnection(supabase, googleConfiguration()) };
+      const normalized_results = await normalizeLegacyGoogleNotCheckedResults(supabase);
+      result = {
+        connection: await upsertGoogleConnection(supabase, googleConfiguration()),
+        normalized_results,
+      };
     } else if (body.action === "checkGoogle") {
       result = await checkGoogleForArticle(supabase, clean(body.article_id, 100), body.execution_id);
     } else if (body.action === "bulkGoogleCheck") result = { summary: await bulkGoogleCheck(supabase, body) };
