@@ -676,8 +676,10 @@ function ArticleDetail({
           ["Platforms checked", item.platforms_checked.length],
           ["First detected", displayDate(item.first_detected_at)],
           ["Last detected", displayDate(item.last_detected_at)],
+          ["Last Wix synced", displayDate(item.last_wix_synced_at)],
+          ["Last Google checked", displayDate(item.last_google_checked_at)],
+          ["Last AI-provider checked", displayDate(item.last_ai_provider_checked_at)],
           ["Total detections", item.total_detections],
-          ["Last checked", displayDate(item.last_checked_at)],
         ].map(([label, value]) => (
           <div className="stat-card" key={label}>
             <span className="stat-card__label">{label}</span>
@@ -873,6 +875,26 @@ export default function AIVisibilityPage() {
     if (metric) setFilters((current) => filtersForMetric(metric, current));
     load();
   }, []);
+  useEffect(() => {
+    if (locked) return undefined;
+    let refreshPromise = null;
+    const refreshFromLiveAction = () => {
+      if (!refreshPromise) {
+        refreshPromise = load().finally(() => {
+          refreshPromise = null;
+        });
+      }
+    };
+    window.addEventListener(
+      "ai-visibility-live-data-updated",
+      refreshFromLiveAction,
+    );
+    return () =>
+      window.removeEventListener(
+        "ai-visibility-live-data-updated",
+        refreshFromLiveAction,
+      );
+  }, [locked]);
 
   async function unlock(event) {
     event.preventDefault();
@@ -1067,8 +1089,8 @@ export default function AIVisibilityPage() {
                 <div>
                   <h3>Published article results</h3>
                   <p>
-                    Visibility rate excludes unchecked articles and provider
-                    errors.
+                    Wix sync, Google checks and AI-provider checks use separate
+                    timestamps below.
                   </p>
                 </div>
                 <label className="field" style={{ minWidth: 150 }}>
@@ -1201,7 +1223,9 @@ export default function AIVisibilityPage() {
                       <th>Platforms checked</th>
                       <th>AI status</th>
                       <th>Detections</th>
-                      <th>Last checked</th>
+                      <th>Last Wix synced</th>
+                      <th>Last Google checked</th>
+                      <th>Last AI-provider checked</th>
                       <th>Action</th>
                     </tr>
                   </thead>
@@ -1240,7 +1264,9 @@ export default function AIVisibilityPage() {
                           </span>
                         </td>
                         <td>{item.total_detections}</td>
-                        <td>{displayDate(item.last_checked_at)}</td>
+                        <td>{displayDate(item.last_wix_synced_at)}</td>
+                        <td>{displayDate(item.last_google_checked_at)}</td>
+                        <td>{displayDate(item.last_ai_provider_checked_at)}</td>
                         <td>
                           <button
                             className="button button--ghost"
@@ -1254,7 +1280,7 @@ export default function AIVisibilityPage() {
                     ))}
                     {!rows.length ? (
                       <tr>
-                        <td colSpan="8">
+                        <td colSpan="10">
                           No published articles match these evidence filters.
                         </td>
                       </tr>
@@ -1426,6 +1452,9 @@ export default function AIVisibilityPage() {
               ) : null}
             </div>
           </section>
+          {data?.provider_connections?.length ? (
+            <ProviderConnections providers={data.provider_connections} />
+          ) : null}
           {data ? (
             <PublicationForm
               articles={data.articles}
