@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
+  VISIBILITY_RESULT_STATUSES,
   buildArticleVisibility,
   buildVisibilitySummary,
 } from "../lib/aiVisibility.js";
@@ -90,6 +91,38 @@ test("Google reconciliation never writes null required text fields", async () =>
   assert.doesNotMatch(googleApi, /error_details: null/);
   assert.match(manualApi, /error_details: ""/);
   assert.match(googleApi, /const normalization = await normalizeCompletedGoogleRows\(supabase\);[\s\S]*await connectionsHandler/);
+});
+
+test("result-status migration permits the complete authoritative application set", async () => {
+  const migration = await read("../supabase/migrations/029_ai_visibility_result_status_compatibility.sql");
+  const expected = new Set(VISIBILITY_RESULT_STATUSES);
+
+  for (const status of expected) {
+    assert.match(migration, new RegExp(`'${status}'`), `migration must permit ${status}`);
+  }
+
+  assert.deepEqual(
+    [...expected].sort(),
+    [
+      "checking",
+      "cited",
+      "detected",
+      "error",
+      "inconclusive",
+      "indexed",
+      "mentioned",
+      "not_checked",
+      "not_detected",
+      "not_indexed",
+      "performance_found",
+    ].sort(),
+  );
+  assert.match(migration, /drop constraint if exists knowledge_visibility_results_result_status_check/);
+  assert.match(migration, /add constraint knowledge_visibility_results_result_status_check/);
+  assert.match(migration, /not valid/);
+  assert.match(migration, /validate constraint knowledge_visibility_results_result_status_check/);
+  assert.doesNotMatch(migration, /delete\s+from\s+public\.knowledge_visibility_results/i);
+  assert.doesNotMatch(migration, /update\s+public\.knowledge_visibility_results/i);
 });
 
 test("Google service uses one effective connection endpoint for both panels", async () => {
