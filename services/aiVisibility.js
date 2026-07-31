@@ -89,4 +89,7 @@ if (typeof window !== "undefined") {
   import("../components/AIVisibilityLiveConnections.jsx")
     .then(({ installAiVisibilityLiveConnections }) => installAiVisibilityLiveConnections())
     .catch((error) => console.error("AI VISIBILITY LIVE CONNECTIONS UI ERROR", error));
+  import("../components/AIVisibilityErrorDetails.jsx")
+    .then(({ installAiVisibilityErrorDetails }) => installAiVisibilityErrorDetails())
+    .catch((error) => console.error("AI VISIBILITY ERROR DETAILS UI ERROR", error));
 }
