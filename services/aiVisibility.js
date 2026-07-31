@@ -4,7 +4,7 @@ import {
 } from "./marketingAccess.js";
 
 const API_ROUTE = "/api/marketing-ai-visibility";
-const CONNECTIONS_API_ROUTE = "/api/marketing-ai-visibility-connections";
+const CONNECTIONS_API_ROUTE = "/api/marketing-ai-visibility-google";
 const WIX_SYNC_API_ROUTE = "/api/marketing-ai-visibility-wix-sync";
 const WIX_DIAGNOSTICS_API_ROUTE = "/api/marketing-ai-visibility-wix-diagnostics";
 const MANUAL_EVIDENCE_API_ROUTE = "/api/marketing-ai-visibility-manual";
@@ -89,4 +89,10 @@ if (typeof window !== "undefined") {
   import("../components/AIVisibilityLiveConnections.jsx")
     .then(({ installAiVisibilityLiveConnections }) => installAiVisibilityLiveConnections())
     .catch((error) => console.error("AI VISIBILITY LIVE CONNECTIONS UI ERROR", error));
+  import("../components/AIVisibilityErrorDetails.jsx")
+    .then(({ installAiVisibilityErrorDetails }) => installAiVisibilityErrorDetails())
+    .catch((error) => console.error("AI VISIBILITY ERROR DETAILS UI ERROR", error));
+  import("../components/AIVisibilityPendingState.jsx")
+    .then(({ installAiVisibilityPendingState }) => installAiVisibilityPendingState())
+    .catch((error) => console.error("AI VISIBILITY PENDING STATE UI ERROR", error));
 }

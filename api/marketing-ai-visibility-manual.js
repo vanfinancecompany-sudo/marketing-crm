@@ -97,6 +97,7 @@ export default async function handler(request, response) {
         result_status: status,
         source_url: sourceUrl,
         evidence_excerpt: clean(entry.evidence_excerpt, 10000),
+        error_details: "",
         structured_evidence: {
           ...structured,
           public_manual_check: true,
