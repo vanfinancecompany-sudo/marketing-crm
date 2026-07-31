@@ -92,4 +92,7 @@ if (typeof window !== "undefined") {
   import("../components/AIVisibilityErrorDetails.jsx")
     .then(({ installAiVisibilityErrorDetails }) => installAiVisibilityErrorDetails())
     .catch((error) => console.error("AI VISIBILITY ERROR DETAILS UI ERROR", error));
+  import("../components/AIVisibilityPendingState.jsx")
+    .then(({ installAiVisibilityPendingState }) => installAiVisibilityPendingState())
+    .catch((error) => console.error("AI VISIBILITY PENDING STATE UI ERROR", error));
 }
