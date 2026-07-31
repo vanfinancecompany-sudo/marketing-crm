@@ -123,12 +123,13 @@ export default async function handler(request, response) {
   let body = {};
   try {
     body = parseBody(request);
+    const supabase = getSupabase();
+    const normalization = await normalizeCompletedGoogleRows(supabase);
     const { capture, response: capturedResponse } = captureResponse();
     await connectionsHandler(request, capturedResponse);
     if (capture.statusCode >= 400 || capture.payload?.ok === false) {
       return response.status(capture.statusCode).json(capture.payload || { ok: false, message: "Google request failed." });
     }
-    const normalization = await normalizeCompletedGoogleRows(getSupabase());
     const payload = { ...capture.payload, google_state_normalization: normalization };
     if (body.action === "bulkGoogleCheck") {
       payload.summary = reconcileBulkSummary(payload.summary || {});
