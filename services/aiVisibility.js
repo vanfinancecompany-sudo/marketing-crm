@@ -4,7 +4,7 @@ import {
 } from "./marketingAccess.js";
 
 const API_ROUTE = "/api/marketing-ai-visibility";
-const CONNECTIONS_API_ROUTE = "/api/marketing-ai-visibility-connections";
+const CONNECTIONS_API_ROUTE = "/api/marketing-ai-visibility-google";
 const WIX_SYNC_API_ROUTE = "/api/marketing-ai-visibility-wix-sync";
 const WIX_DIAGNOSTICS_API_ROUTE = "/api/marketing-ai-visibility-wix-diagnostics";
 const MANUAL_EVIDENCE_API_ROUTE = "/api/marketing-ai-visibility-manual";
