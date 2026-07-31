@@ -39,6 +39,15 @@ function correctedGoogleState(row = {}) {
     : {};
   const impressions = Number(structured.impressions || 0);
   const clicks = Number(structured.clicks || 0);
+  const inspectionError = clean(structured.inspection_error) || clean(row.error_details);
+  if (inspectionError) {
+    return {
+      result_status: "error",
+      error_details: inspectionError,
+      evidence_excerpt: clean(row.evidence_excerpt) ||
+        "Google check failed before a usable indexing verdict was returned.",
+    };
+  }
   if (impressions > 0 || clicks > 0) {
     return {
       result_status: "performance_found",
@@ -46,14 +55,10 @@ function correctedGoogleState(row = {}) {
       evidence_excerpt: "Search Analytics performance data was found. A verified indexing verdict was not available.",
     };
   }
-  const limitation = clean(structured.inspection_error) ||
-    clean(row.error_details) ||
-    "Google completed without a usable URL Inspection verdict or Search Analytics evidence.";
   return {
-    result_status: "error",
-    error_details: limitation,
-    evidence_excerpt: clean(row.evidence_excerpt) ||
-      "Google check completed without usable indexing evidence. No indexing verdict was recorded.",
+    result_status: "inconclusive",
+    error_details: "",
+    evidence_excerpt: "Google completed successfully but has not returned an indexing verdict or Search Analytics activity yet.",
   };
 }
 
@@ -66,7 +71,7 @@ async function normalizeCompletedGoogleRows(supabase) {
     .eq("manually_verified", false);
   if (error) throw new Error(error.message || "Google result states could not be inspected.");
   const candidates = (data || []).filter((row) => row.response_metadata?.official_google_apis === true);
-  const counts = { performance_found: 0, error: 0 };
+  const counts = { performance_found: 0, inconclusive: 0, error: 0 };
   for (const row of candidates) {
     const next = correctedGoogleState(row);
     const update = await supabase
@@ -84,11 +89,12 @@ async function normalizeCompletedGoogleRows(supabase) {
     await supabase.from("knowledge_visibility_audit_events").insert({
       provider: "google_search_console",
       action: "google_result_state_normalized",
-      reason: "Completed Google attempts were reclassified so not_checked means no attempt exists.",
+      reason: "Completed Google attempts were classified as performance found, pending or genuine technical failure.",
       details: {
         corrected_count: candidates.length,
         status_counts: counts,
         historical_rows_deleted: 0,
+        customer_label_for_inconclusive: "Pending",
       },
     });
   }
@@ -97,23 +103,31 @@ async function normalizeCompletedGoogleRows(supabase) {
 
 function reconcileBulkSummary(summary = {}) {
   const results = (summary.results || []).map((item) => {
-    if (!["not_checked", "inconclusive"].includes(item.result_status)) return item;
+    if (item.result_status !== "inconclusive") return item;
     return {
       ...item,
-      ok: false,
-      result_status: "error",
-      code: item.code || "google_evidence_unavailable",
-      error: item.error || "Google completed without usable indexing evidence.",
+      ok: true,
+      customer_status: "pending",
+      customer_label: "Pending",
+      error: undefined,
+      code: undefined,
     };
   });
   const successful = results.filter((item) => item.ok).length;
   const failed = results.length - successful;
   const status_counts = results.reduce((counts, item) => {
-    const key = item.result_status || "unknown";
+    const key = item.customer_status || item.result_status || "unknown";
     counts[key] = (counts[key] || 0) + 1;
     return counts;
   }, {});
-  return { ...summary, successful, failed, status_counts, results };
+  return {
+    ...summary,
+    successful,
+    failed,
+    pending: status_counts.pending || 0,
+    status_counts,
+    results,
+  };
 }
 
 export default async function handler(request, response) {
@@ -134,12 +148,13 @@ export default async function handler(request, response) {
     if (body.action === "bulkGoogleCheck") {
       payload.summary = reconcileBulkSummary(payload.summary || {});
     }
-    if (body.action === "checkGoogle" && ["not_checked", "inconclusive"].includes(payload.result?.result_status)) {
-      return response.status(502).json({
-        ok: false,
-        code: "google_evidence_unavailable",
-        message: "Google completed without usable indexing evidence. The attempt was stored as an error for review.",
-      });
+    if (body.action === "checkGoogle" && payload.result?.result_status === "inconclusive") {
+      payload.result = {
+        ...payload.result,
+        customer_status: "pending",
+        customer_label: "Pending",
+      };
+      payload.message = "Google completed successfully. Indexing verdict pending.";
     }
     return response.status(200).json(payload);
   } catch (error) {
