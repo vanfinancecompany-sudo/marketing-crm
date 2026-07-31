@@ -5,6 +5,8 @@ import {
   VISIBILITY_RESULT_STATUSES,
   buildArticleVisibility,
   buildVisibilitySummary,
+  filterVisibilityArticles,
+  googleCustomerStatus,
 } from "../lib/aiVisibility.js";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
@@ -72,6 +74,52 @@ test("Google failure attempts have their own timestamp and visible error status"
   assert.equal(visibility.last_wix_synced_at, article.last_wix_sync_at);
 });
 
+test("completed Google checks with no verdict are customer-facing Pending", () => {
+  const pendingArticle = publishedArticle();
+  const indexedArticle = publishedArticle({
+    id: "article-2",
+    title: "Indexed article",
+    live_wix_url: "https://www.vanfinancecompany.co.uk/knowledge-hub/indexed",
+  });
+  const results = [
+    {
+      id: "pending-1",
+      article_id: pendingArticle.id,
+      provider: "google_search_console",
+      checked_at: "2026-07-31T12:00:00.000Z",
+      result_status: "inconclusive",
+      error_details: "",
+      structured_evidence: { impressions: 0, clicks: 0, inspection_error: "" },
+    },
+    {
+      id: "indexed-1",
+      article_id: indexedArticle.id,
+      provider: "google_search_console",
+      checked_at: "2026-07-31T12:00:00.000Z",
+      result_status: "indexed",
+    },
+  ];
+  const summary = buildVisibilitySummary({
+    articles: [pendingArticle, indexedArticle],
+    results,
+    prompts: [],
+  });
+  const pending = summary.articles.find((item) => item.article.id === pendingArticle.id);
+
+  assert.equal(googleCustomerStatus(results[0]), "pending");
+  assert.equal(pending.google_indexing_status, "pending");
+  assert.equal(pending.awaiting_first_check, false);
+  assert.equal(pending.needs_attention, false);
+  assert.match(pending.recommended_action, /has not returned an indexing verdict yet/i);
+  assert.equal(summary.google_indexed, 1);
+  assert.equal(summary.google_pending, 1);
+  assert.equal(summary.awaiting_first_check, 0);
+  assert.deepEqual(
+    filterVisibilityArticles(summary.articles, { status: "pending" }).map((item) => item.article.id),
+    [pendingArticle.id],
+  );
+});
+
 test("provider connection refresh preserves successful timestamps and stores failures", async () => {
   const api = await read("../api/marketing-ai-visibility-connections.js");
   assert.match(api, /existing\.last_successful_check_at \|\| null/);
@@ -83,9 +131,14 @@ test("provider connection refresh preserves successful timestamps and stores fai
   assert.doesNotMatch(api, /last_successful_check_at: updates\.last_successful_check_at \|\| null/);
 });
 
-test("Google reconciliation never writes null required text fields", async () => {
+test("Google reconciliation distinguishes Pending from genuine failures", async () => {
   const googleApi = await read("../api/marketing-ai-visibility-google.js");
   const manualApi = await read("../api/marketing-ai-visibility-manual.js");
+  assert.match(googleApi, /result_status: "inconclusive"/);
+  assert.match(googleApi, /customer_status: "pending"/);
+  assert.match(googleApi, /customer_label: "Pending"/);
+  assert.match(googleApi, /inspectionError/);
+  assert.match(googleApi, /result_status: "error"/);
   assert.match(googleApi, /error_details: ""/);
   assert.match(googleApi, /evidence_excerpt: clean\(next\.evidence_excerpt\)/);
   assert.doesNotMatch(googleApi, /error_details: null/);
@@ -130,6 +183,18 @@ test("Google service uses one effective connection endpoint for both panels", as
   assert.match(service, /CONNECTIONS_API_ROUTE = "\/api\/marketing-ai-visibility-google"/);
   assert.match(service, /loadGoogleSearchConsoleConnection/);
   assert.match(service, /await loadGoogleSearchConsoleConnection\(\)/);
+  assert.match(service, /AIVisibilityPendingState/);
+});
+
+test("pending UI enhancer covers cards, filters, table and evidence detail", async () => {
+  const component = await read("../components/AIVisibilityPendingState.jsx");
+  assert.match(component, /Google pending/);
+  assert.match(component, /Google completed the check but has not returned an indexing verdict yet/);
+  assert.match(component, /option\.value = "pending"/);
+  assert.match(component, /patchArticleTable/);
+  assert.match(component, /patchArticleDetail/);
+  assert.match(component, /patchCurrentProviderCards/);
+  assert.match(component, /data-ai-visibility-pending-state/);
 });
 
 test("AI Visibility page refetches every data source after live actions", async () => {
