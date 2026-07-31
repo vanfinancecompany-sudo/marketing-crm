@@ -42,23 +42,25 @@ function correctedGoogleState(row = {}) {
   if (impressions > 0 || clicks > 0) {
     return {
       result_status: "performance_found",
-      error_details: null,
+      error_details: "",
       evidence_excerpt: "Search Analytics performance data was found. A verified indexing verdict was not available.",
     };
   }
   const limitation = clean(structured.inspection_error) ||
+    clean(row.error_details) ||
     "Google completed without a usable URL Inspection verdict or Search Analytics evidence.";
   return {
     result_status: "error",
     error_details: limitation,
-    evidence_excerpt: "Google check completed without usable indexing evidence. No indexing verdict was recorded.",
+    evidence_excerpt: clean(row.evidence_excerpt) ||
+      "Google check completed without usable indexing evidence. No indexing verdict was recorded.",
   };
 }
 
 async function normalizeCompletedGoogleRows(supabase) {
   const { data, error } = await supabase
     .from("knowledge_visibility_results")
-    .select("id,article_id,result_status,structured_evidence,response_metadata")
+    .select("id,article_id,result_status,structured_evidence,response_metadata,error_details,evidence_excerpt")
     .eq("provider", "google_search_console")
     .in("result_status", ["not_checked", "inconclusive"])
     .eq("manually_verified", false);
@@ -69,7 +71,11 @@ async function normalizeCompletedGoogleRows(supabase) {
     const next = correctedGoogleState(row);
     const update = await supabase
       .from("knowledge_visibility_results")
-      .update(next)
+      .update({
+        ...next,
+        error_details: clean(next.error_details),
+        evidence_excerpt: clean(next.evidence_excerpt),
+      })
       .eq("id", row.id);
     if (update.error) throw new Error(update.error.message || "Google result state could not be corrected.");
     counts[next.result_status] += 1;
