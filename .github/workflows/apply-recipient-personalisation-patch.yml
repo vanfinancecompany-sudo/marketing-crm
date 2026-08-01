@@ -1,9 +1,9 @@
 name: Apply recipient personalisation patch
 
 on:
-  push:
-    branches: [fix/recipient-first-name-personalisation]
-    paths: [.github/workflows/apply-recipient-personalisation-patch.yml]
+  pull_request:
+    branches: [main]
+    types: [opened]
 
 permissions:
   contents: write
@@ -24,18 +24,15 @@ jobs:
           from pathlib import Path
           import re
 
-          def replace_once(text, pattern, replacement, label, flags=0):
-            updated, count = re.subn(pattern, replacement, text, count=1, flags=flags)
+          def replace_once(text, pattern, replacement, label):
+            updated, count = re.subn(pattern, replacement, text, count=1)
             if count == 0 and replacement.strip() not in text:
               raise SystemExit(f"patch target not found: {label}")
             return updated
 
           renderer = Path("lib/marketingCampaignTemplateRenderer.js")
           text = renderer.read_text()
-          text = replace_once(
-            text,
-            r'''function sampleData\(values = \{\}\) \{\n  return \{\n    campaign_name: values\.campaign_name \|\| "July New Stock",\n    first_name: "Alex",\n    company: values\.company_name \|\| "Van Finance Company",\n    vehicle_count: "3",\n    vehicle_grid: "\[Vehicle grid preview\]",\n  \};\n\}''',
-            '''function sampleData(values = {}) {
+          text = replace_once(text, r'''function sampleData\(values = \{\}\) \{\n  return \{\n    campaign_name: values\.campaign_name \|\| "July New Stock",\n    first_name: "Alex",\n    company: values\.company_name \|\| "Van Finance Company",\n    vehicle_count: "3",\n    vehicle_grid: "\[Vehicle grid preview\]",\n  \};\n\}''', '''function sampleData(values = {}) {
   return {
     campaign_name: cleanText(values.campaign_name || "July New Stock", 300),
     first_name: cleanText(values.first_name || "there", 200),
@@ -43,9 +40,7 @@ jobs:
     vehicle_count: cleanText(values.vehicle_count || "3", 20),
     vehicle_grid: cleanText(values.vehicle_grid || "[Vehicle grid preview]", 500),
   };
-}''',
-            "sampleData",
-          )
+}''', "sampleData")
           renderer.write_text(text)
 
           sends = Path("api/marketing-template-campaign-sends.js")
