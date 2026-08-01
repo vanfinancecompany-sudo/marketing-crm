@@ -7,7 +7,7 @@ import {
   countSelectedVehicles,
   isPlainObject,
   normalizeTemplateSnapshot,
-  renderCampaignPreview,
+  renderRecipientCampaignPreview,
 } from "../lib/marketingEmailTemplateRenderer.js";
 import {
   createCurrentSendEligibilityState,
@@ -576,9 +576,13 @@ async function archiveCampaign(supabase, body = {}) {
   return { campaign: normalizeCampaign(data) };
 }
 
+export function renderDesignerCampaignPreview(campaign = {}) {
+  return renderRecipientCampaignPreview(campaign, {}, { mode: "designer_preview" });
+}
+
 async function previewCampaign(supabase, body = {}) {
   const campaign = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
-  return { preview: renderCampaignPreview(campaign) };
+  return { preview: renderDesignerCampaignPreview(campaign) };
 }
 
 async function previewAudience(supabase, body = {}) {

@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
   assertProductionPersonalization,
+  renderCampaignPreview,
   renderRecipientCampaignPreview,
   replaceRecipientPlaceholders,
 } from "../lib/marketingEmailTemplateRenderer.js";
-import { renderFrozenCampaign } from "../api/marketing-template-campaign-sends.js";
+import { callEmailProvider, renderFrozenCampaign } from "../api/marketing-template-campaign-sends.js";
+import { renderDesignerCampaignPreview } from "../api/marketing-template-campaigns.js";
+import { renderLegacySendGridTestCampaign } from "../api/sendgrid-test-email.js";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
@@ -160,6 +163,49 @@ test("blank first names use there and never leak Alex", () => {
   assert.doesNotMatch(rendered.html, /\bAlex\b/);
 });
 
+test("base and explicit designer previews use Alex", () => {
+  const base = renderCampaignPreview(campaign());
+  const explicit = renderRecipientCampaignPreview(campaign(), {}, { mode: "designer_preview" });
+  assert.equal(base.subject, "New vans for Alex");
+  assert.match(base.html, /Hi Alex/);
+  assert.equal(explicit.subject, "New vans for Alex");
+  assert.match(explicit.html, /Hi Alex/);
+  assert.equal(explicit.personalization.mode, "designer_preview");
+});
+
+test("test mode with a blank first name defaults to Stuart", () => {
+  const rendered = renderRecipientCampaignPreview(campaign(), { first_name: "   " }, { mode: "test" });
+  assert.equal(rendered.subject, "New vans for Stuart");
+  assert.match(rendered.html, /Hi Stuart/);
+  assert.equal(rendered.personalization.first_name, "Stuart");
+  assertProductionPersonalization(rendered);
+});
+
+test("a genuine recipient named Alex remains valid", () => {
+  const rendered = renderRecipientCampaignPreview(campaign(), { first_name: "Alex" }, { mode: "recipient" });
+  assert.equal(rendered.subject, "New vans for Alex");
+  assert.equal(rendered.personalization.designer_sample_used, false);
+  assertProductionPersonalization(rendered);
+});
+
+test("campaign preview endpoint explicitly uses designer preview mode", () => {
+  const rendered = renderDesignerCampaignPreview(campaign());
+  assert.equal(rendered.subject, "New vans for Alex");
+  assert.match(rendered.html, /Hi Alex/);
+  assert.equal(rendered.personalization.mode, "designer_preview");
+});
+
+test("legacy SendGrid test rendering accepts a name and defaults to Stuart", () => {
+  const fallback = renderLegacySendGridTestCampaign(campaign(), { test_first_name: "   " });
+  const named = renderLegacySendGridTestCampaign(campaign(), { test_first_name: "Jane" });
+  assert.equal(fallback.subject, "[SENDGRID TEST] New vans for Stuart");
+  assert.match(fallback.html, /Hi Stuart/);
+  assert.equal(fallback.test_first_name, "Stuart");
+  assert.equal(named.subject, "[SENDGRID TEST] New vans for Jane");
+  assert.match(named.html, /Hi Jane/);
+  assert.doesNotMatch(named.html, /Hi Alex/);
+});
+
 test("explicit test first name is independent of destination email", () => {
   const rendered = renderRecipientCampaignPreview(
     campaign(),
@@ -224,3 +270,75 @@ test("placeholder helper trims supplied first names", () => {
   assert.equal(replaceRecipientPlaceholders("Hi {{first_name}}", { first_name: " Jane " }), "Hi Jane");
   assert.equal(replaceRecipientPlaceholders("Hi {{first_name}}", {}), "Hi there");
 });
+
+function providerResponse(provider, index) {
+  if (provider === "sendgrid") {
+    return {
+      ok: true,
+      status: 202,
+      headers: { get: (name) => name.toLowerCase() === "x-message-id" ? `sendgrid-${index}` : "" },
+      text: async () => "",
+    };
+  }
+  if (provider === "brevo") {
+    return { ok: true, status: 201, text: async () => JSON.stringify({ messageId: `brevo-${index}` }) };
+  }
+  return {
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({ data: { succeeded: 1, failed: 0, email_id: `smtp2go-${index}` } }),
+  };
+}
+
+const providerEnvironment = {
+  SENDGRID_API_KEY: "SG.abcdefghijklmnop.abcdefghijklmnopqrstuvwxyz123456",
+  BREVO_API_KEY: "brevo-mocked-key",
+  BREVO_SENDER_EMAIL: "sender@example.test",
+  BREVO_SENDER_NAME: "Mock Sender",
+  SMTP2GO_API_KEY: "smtp2go-mocked-key",
+  SMTP2GO_SENDER_EMAIL: "sender@example.test",
+  SMTP2GO_SENDER_NAME: "Mock Sender",
+};
+
+for (const provider of ["sendgrid", "brevo", "smtp2go"]) {
+  test(`${provider} adapter submits distinct final recipient subject and HTML using mocked fetch`, async () => {
+    const requests = [];
+    const fetchImpl = async (url, options) => {
+      requests.push({ url, body: JSON.parse(options.body) });
+      return providerResponse(provider, requests.length);
+    };
+    for (const firstName of ["Jane", "John"]) {
+      const rendered = renderFrozenCampaign(campaign(), {
+        mode: "recipient",
+        unsubscribeUrl: `https://example.test/unsubscribe?token=${firstName.toLowerCase()}`,
+        values: { first_name: firstName, customer_id: `CUST-${firstName.toUpperCase()}` },
+      });
+      assertProductionPersonalization(rendered);
+      await callEmailProvider({
+        to: `${firstName.toLowerCase()}@example.test`,
+        name: firstName,
+        subject: rendered.subject,
+        html: rendered.html,
+        tags: ["marketing-crm", "test"],
+        sendType: "test",
+        headers: {
+          "X-Marketing-Campaign-Id": "campaign-test",
+          "X-Marketing-Send-Id": `send-${firstName.toLowerCase()}`,
+          "X-Marketing-Recipient-Id": `recipient-${firstName.toLowerCase()}`,
+        },
+      }, { provider, environment: providerEnvironment, fetchImpl });
+    }
+
+    assert.equal(requests.length, 2);
+    const submitted = requests.map(({ body }) => provider === "brevo"
+      ? { subject: body.subject, html: body.htmlContent }
+      : provider === "smtp2go"
+        ? { subject: body.subject, html: body.html_body }
+        : { subject: body.subject, html: body.content[0].value });
+    assert.equal(submitted[0].subject, "New vans for Jane");
+    assert.equal(submitted[1].subject, "New vans for John");
+    assert.match(submitted[0].html, /Hi Jane/);
+    assert.match(submitted[1].html, /Hi John/);
+    assert.notEqual(submitted[0].html, submitted[1].html);
+  });
+}

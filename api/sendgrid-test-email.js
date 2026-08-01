@@ -2,8 +2,9 @@ import crypto from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import {
   CampaignValidationError,
+  assertProductionPersonalization,
   cleanText,
-  renderCampaignPreview,
+  renderRecipientCampaignPreview,
 } from "../lib/marketingEmailTemplateRenderer.js";
 import {
   SENDGRID_TEST_SENDER_EMAIL,
@@ -120,6 +121,33 @@ export function safeSendGridTestErrorMessage(error) {
   return "SendGrid test send failed.";
 }
 
+export function renderLegacySendGridTestCampaign(campaign = {}, values = {}) {
+  const testFirstName = cleanText(
+    values.test_first_name || values.testFirstName || values.first_name || "Stuart",
+    200,
+  ) || "Stuart";
+  const preview = renderRecipientCampaignPreview(
+    campaign,
+    {
+      first_name: testFirstName,
+      last_name: cleanText(values.test_last_name || values.testLastName || values.last_name || "", 200),
+      company: cleanText(values.test_company || values.testCompany || values.company || "Van Finance Company", 300),
+      customer_id: "TEST",
+      campaign_name: campaign.name,
+    },
+    { mode: "test" },
+  );
+  assertProductionPersonalization(preview);
+  const subject = `[SENDGRID TEST] ${preview.subject || campaign.subject_line || "Marketing email"}`;
+  const notice = `<p style="margin:18px 0 0;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;text-align:center;">SendGrid test email only. No production unsubscribe or suppression action is included.</p>`;
+  return {
+    ...preview,
+    subject,
+    html: String(preview.html || "").replace("</body>", `${notice}</body>`),
+    test_first_name: testFirstName,
+  };
+}
+
 async function sendControlledTest(supabase, body = {}) {
   if (!process.env.SENDGRID_API_KEY) throw new ApiError(400, "SendGrid API key is not configured.");
   if (!process.env.SENDGRID_TEST_RECIPIENT_EMAIL) throw new ApiError(400, "SendGrid test recipient is not configured.");
@@ -143,10 +171,9 @@ async function sendControlledTest(supabase, body = {}) {
   );
   if ((cooldown.count || 0) > 0) throw new ApiError(429, "Please wait before sending another SendGrid test email for this campaign.");
 
-  const preview = renderCampaignPreview(campaign);
-  const subject = `[SENDGRID TEST] ${preview.subject || campaign.subject_line || "Marketing email"}`;
-  const notice = `<p style="margin:18px 0 0;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;text-align:center;">SendGrid test email only. No production unsubscribe or suppression action is included.</p>`;
-  const html = String(preview.html || "").replace("</body>", `${notice}</body>`);
+  const preview = renderLegacySendGridTestCampaign(campaign, body);
+  const subject = preview.subject;
+  const html = preview.html;
   const now = new Date().toISOString();
   const sendResult = assertSupabase(
     await supabase.from("marketing_email_sends").insert({
@@ -168,6 +195,7 @@ async function sendControlledTest(supabase, body = {}) {
       metadata: {
         email_provider: "sendgrid",
         preview_only: true,
+        test_first_name: preview.test_first_name,
         test_recipient_domain: recipientEmail.split("@")[1],
         sender_email: SENDGRID_TEST_SENDER_EMAIL,
       },
@@ -183,7 +211,7 @@ async function sendControlledTest(supabase, body = {}) {
       customer_id: null,
       email: recipientEmail,
       status: "pending",
-      metadata: { test: true, preview_only: true, email_provider: "sendgrid" },
+      metadata: { test: true, preview_only: true, test_first_name: preview.test_first_name, email_provider: "sendgrid" },
     }).select("*").single(),
     "Could not create SendGrid test recipient record."
   );
@@ -211,7 +239,7 @@ async function sendControlledTest(supabase, body = {}) {
         status: "accepted",
         provider_message_id: provider.messageId,
         first_sent_at: completedAt,
-        metadata: { test: true, preview_only: true, email_provider: "sendgrid", provider_response: provider.response },
+        metadata: { test: true, preview_only: true, test_first_name: preview.test_first_name, email_provider: "sendgrid", provider_response: provider.response },
       }).eq("id", recipient.id),
       "Could not update SendGrid test recipient."
     );
