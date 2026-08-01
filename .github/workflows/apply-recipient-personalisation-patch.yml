@@ -5,6 +5,7 @@ on:
     branches: [fix/recipient-first-name-personalisation]
     paths:
       - docs/recipient-personalisation-trigger.txt
+      - .github/workflows/apply-recipient-personalisation-patch.yml
 
 permissions:
   contents: write
@@ -16,6 +17,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: fix/recipient-first-name-personalisation
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -26,14 +28,17 @@ jobs:
           import re
 
           def replace_once(text, pattern, replacement, label):
-            updated, count = re.subn(pattern, replacement, text, count=1)
+            updated, count = re.subn(pattern, replacement, text, count=1, flags=re.MULTILINE)
             if count == 0 and replacement.strip() not in text:
               raise SystemExit(f"patch target not found: {label}")
             return updated
 
           renderer = Path("lib/marketingCampaignTemplateRenderer.js")
           text = renderer.read_text()
-          text = replace_once(text, r'''function sampleData\(values = \{\}\) \{\n  return \{\n    campaign_name: values\.campaign_name \|\| "July New Stock",\n    first_name: "Alex",\n    company: values\.company_name \|\| "Van Finance Company",\n    vehicle_count: "3",\n    vehicle_grid: "\[Vehicle grid preview\]",\n  \};\n\}''', '''function sampleData(values = {}) {
+          text = replace_once(
+            text,
+            r'function sampleData\(values = \{\}\) \{\n\s*return \{\n\s*campaign_name: values\.campaign_name \|\| "July New Stock",\n\s*first_name: "Alex",\n\s*company: values\.company_name \|\| "Van Finance Company",\n\s*vehicle_count: "3",\n\s*vehicle_grid: "\[Vehicle grid preview\]",\n\s*\};\n\}',
+            '''function sampleData(values = {}) {
   return {
     campaign_name: cleanText(values.campaign_name || "July New Stock", 300),
     first_name: cleanText(values.first_name || "there", 200),
@@ -41,29 +46,54 @@ jobs:
     vehicle_count: cleanText(values.vehicle_count || "3", 20),
     vehicle_grid: cleanText(values.vehicle_grid || "[Vehicle grid preview]", 500),
   };
-}''', "sampleData")
+}''',
+            "sampleData",
+          )
           renderer.write_text(text)
 
           sends = Path("api/marketing-template-campaign-sends.js")
           text = sends.read_text()
-          text = replace_once(text, r'''  CampaignValidationError,\n  cleanText,\n  renderCampaignPreview,''', '''  CampaignValidationError,
+          text = replace_once(
+            text,
+            r'  CampaignValidationError,\n\s*cleanText,\n\s*renderCampaignPreview,',
+            '''  CampaignValidationError,
   assertProductionPersonalization,
   cleanText,
-  renderRecipientCampaignPreview,''', "renderer imports")
-          text = replace_once(text, r'''  const preview = renderCampaignPreview\(campaign\);''', '''  const preview = renderRecipientCampaignPreview(
+  renderRecipientCampaignPreview,''',
+            "renderer imports",
+          )
+          text = replace_once(
+            text,
+            r'  const preview = renderCampaignPreview\(campaign\);',
+            '''  const preview = renderRecipientCampaignPreview(
     campaign,
     options.values || {},
     { mode: options.mode || (options.test ? "test" : "recipient") },
-  );''', "renderFrozenCampaign preview")
-          text = replace_once(text, r'''    html,\n    html_hash: hashValue\(`\$\{subject\}\\n\$\{html\}`\),\n  \};''', '''    html,
+  );''',
+            "renderFrozenCampaign preview",
+          )
+          text = replace_once(
+            text,
+            r'    html,\n\s*html_hash: hashValue\(`\$\{subject\}\\n\$\{html\}`\),\n\s*\};',
+            '''    html,
     html_hash: hashValue(`${subject}\\n${html}`),
     personalization: preview.personalization,
-  };''', "renderFrozenCampaign metadata")
-          text = replace_once(text, r'''          first_name: row\.first_name \|\| "",\n          last_name: row\.last_name \|\| "",\n        \}\);''', '''          first_name: String(row.first_name || "").trim(),
+  };''',
+            "renderFrozenCampaign metadata",
+          )
+          text = replace_once(
+            text,
+            r'          first_name: row\.first_name \|\| "",\n\s*last_name: row\.last_name \|\| "",\n\s*\}\);',
+            '''          first_name: String(row.first_name || "").trim(),
           last_name: String(row.last_name || "").trim(),
           company: String(row.company || "").trim(),
-        });''', "recipient fields")
-          text = replace_once(text, r'''  const selectedProvider = activeEmailProvider\(\);\n  const rendered = renderFrozenCampaign\(campaign, \{ test: true \}\);''', '''  const selectedProvider = activeEmailProvider();
+        });''',
+            "recipient fields",
+          )
+          text = replace_once(
+            text,
+            r'  const selectedProvider = activeEmailProvider\(\);\n\s*const rendered = renderFrozenCampaign\(campaign, \{ test: true \}\);',
+            '''  const selectedProvider = activeEmailProvider();
   const testFirstName = cleanText(body.test_first_name || body.testFirstName || "Stuart", 200) || "Stuart";
   const rendered = renderFrozenCampaign(campaign, {
     test: true,
@@ -76,10 +106,25 @@ jobs:
       campaign_name: campaign.name,
     },
   });
-  assertProductionPersonalization(rendered);''', "test personalisation")
-          text = replace_once(text, r'''metadata: \{ test_recipient_domain: recipientEmail\.split\("@"\)\[1\] \|\| "", email_provider: selectedProvider \}''', '''metadata: { test_recipient_domain: recipientEmail.split("@")[1] || "", test_first_name: testFirstName, email_provider: selectedProvider }''', "test audit metadata")
-          text = replace_once(text, r'''  const renderedBase = renderFrozenCampaign\(campaign, \{ test: false, unsubscribeUrl: "\{\{unsubscribe_url\}\}" \}\);\n''', '''''', "shared production render")
-          text = replace_once(text, r'''      const unsubscribeUrl = publicUnsubscribeUrl\(unsubscribePayload\(\{ customerId: recipient\.customer_id, email: recipient\.email, campaignId: campaign\.id, sendId: send\.id, recipientId: recipientRecord\.id \}\)\);\n      const html = renderedBase\.html\.replace\("\{\{unsubscribe_url\}\}", unsubscribeUrl\);\n      const provider = await callEmailProvider\(\{\n        to: recipient\.email,\n        name: recipient\.name,\n        subject: renderedBase\.subject,\n        html,''', '''      const unsubscribeUrl = publicUnsubscribeUrl(unsubscribePayload({ customerId: recipient.customer_id, email: recipient.email, campaignId: campaign.id, sendId: send.id, recipientId: recipientRecord.id }));
+  assertProductionPersonalization(rendered);''',
+            "test personalisation",
+          )
+          text = replace_once(
+            text,
+            r'metadata: \{ test_recipient_domain: recipientEmail\.split\("@"\)\[1\] \|\| "", email_provider: selectedProvider \}',
+            'metadata: { test_recipient_domain: recipientEmail.split("@")[1] || "", test_first_name: testFirstName, email_provider: selectedProvider }',
+            "test audit metadata",
+          )
+          text = replace_once(
+            text,
+            r'  const renderedBase = renderFrozenCampaign\(campaign, \{ test: false, unsubscribeUrl: "\{\{unsubscribe_url\}\}" \}\);\n',
+            '',
+            "shared production render",
+          )
+          text = replace_once(
+            text,
+            r'      const unsubscribeUrl = publicUnsubscribeUrl\(unsubscribePayload\(\{ customerId: recipient\.customer_id, email: recipient\.email, campaignId: campaign\.id, sendId: send\.id, recipientId: recipientRecord\.id \}\)\);\n\s*const html = renderedBase\.html\.replace\("\{\{unsubscribe_url\}\}", unsubscribeUrl\);\n\s*const provider = await callEmailProvider\(\{\n\s*to: recipient\.email,\n\s*name: recipient\.name,\n\s*subject: renderedBase\.subject,\n\s*html,',
+            '''      const unsubscribeUrl = publicUnsubscribeUrl(unsubscribePayload({ customerId: recipient.customer_id, email: recipient.email, campaignId: campaign.id, sendId: send.id, recipientId: recipientRecord.id }));
       const rendered = renderFrozenCampaign(campaign, {
         test: false,
         mode: "recipient",
@@ -97,14 +142,23 @@ jobs:
         to: recipient.email,
         name: recipient.name,
         subject: rendered.subject,
-        html: rendered.html,''', "per-recipient production render")
+        html: rendered.html,''',
+            "per-recipient production render",
+          )
           sends.write_text(text)
       - name: Run focused tests
         run: node --test tests/marketing-recipient-personalisation.test.js
-      - name: Commit patch
+      - name: Run complete test suite
+        run: npm test -- --runInBand
+      - name: Remove temporary patch workflow and trigger
+        run: |
+          rm -f .github/workflows/apply-recipient-personalisation-patch.yml
+          rm -f .github/workflows/apply-recipient-personalisation.yml
+          rm -f docs/recipient-personalisation-trigger.txt
+      - name: Commit implementation
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add lib/marketingCampaignTemplateRenderer.js api/marketing-template-campaign-sends.js
-          git commit -m "Personalise campaign sends per recipient" || exit 0
+          git add -A
+          git commit -m "Personalise campaign sends per recipient"
           git push origin HEAD:fix/recipient-first-name-personalisation
