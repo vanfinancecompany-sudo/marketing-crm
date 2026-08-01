@@ -1,11 +1,10 @@
 name: Apply recipient personalisation patch
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/recipient-first-name-personalisation
-    paths:
-      - .github/workflows/apply-recipient-personalisation-patch.yml
+      - main
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
@@ -45,9 +44,11 @@ jobs:
               vehicle_grid: cleanText(values.vehicle_grid || "[Vehicle grid preview]", 500),
             };
           }'''
-          if old not in text:
+          if old in text:
+            text = text.replace(old, new, 1)
+            renderer.write_text(text)
+          elif new not in text:
             raise SystemExit("renderer sampleData target not found")
-          renderer.write_text(text.replace(old, new, 1))
 
           sends = Path("api/marketing-template-campaign-sends.js")
           text = sends.read_text()
@@ -145,11 +146,15 @@ jobs:
                       html: rendered.html,''',
             ),
           ]
+          changed = False
           for old_value, new_value in replacements:
-            if old_value not in text:
+            if old_value in text:
+              text = text.replace(old_value, new_value, 1)
+              changed = True
+            elif new_value not in text:
               raise SystemExit(f"send patch target not found: {old_value[:80]!r}")
-            text = text.replace(old_value, new_value, 1)
-          sends.write_text(text)
+          if changed:
+            sends.write_text(text)
       - name: Run focused tests
         run: node --test tests/marketing-recipient-personalisation.test.js
       - name: Commit patch
