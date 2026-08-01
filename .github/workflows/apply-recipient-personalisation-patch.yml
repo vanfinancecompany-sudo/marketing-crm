@@ -1,0 +1,147 @@
+name: Apply recipient personalisation patch
+
+on:
+  push:
+    branches:
+      - fix/recipient-first-name-personalisation
+    paths:
+      - .github/workflows/apply-recipient-personalisation-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/recipient-first-name-personalisation
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Patch renderer and sending flow
+        shell: python
+        run: |
+          from pathlib import Path
+
+          renderer = Path("lib/marketingCampaignTemplateRenderer.js")
+          text = renderer.read_text()
+          old = '''function sampleData(values = {}) {
+            return {
+              campaign_name: values.campaign_name || "July New Stock",
+              first_name: "Alex",
+              company: values.company_name || "Van Finance Company",
+              vehicle_count: "3",
+              vehicle_grid: "[Vehicle grid preview]",
+            };
+          }'''
+          new = '''function sampleData(values = {}) {
+            return {
+              campaign_name: cleanText(values.campaign_name || "July New Stock", 300),
+              first_name: cleanText(values.first_name || "there", 200),
+              company: cleanText(values.company || values.company_name || "Van Finance Company", 300),
+              vehicle_count: cleanText(values.vehicle_count || "3", 20),
+              vehicle_grid: cleanText(values.vehicle_grid || "[Vehicle grid preview]", 500),
+            };
+          }'''
+          if old not in text:
+            raise SystemExit("renderer sampleData target not found")
+          renderer.write_text(text.replace(old, new, 1))
+
+          sends = Path("api/marketing-template-campaign-sends.js")
+          text = sends.read_text()
+          text = text.replace(
+          '''  CampaignValidationError,
+            cleanText,
+            renderCampaignPreview,
+          } from "../lib/marketingEmailTemplateRenderer.js";''',
+          '''  CampaignValidationError,
+            assertProductionPersonalization,
+            cleanText,
+            renderRecipientCampaignPreview,
+          } from "../lib/marketingEmailTemplateRenderer.js";''', 1)
+          text = text.replace(
+          '''  const preview = renderCampaignPreview(campaign);''',
+          '''  const preview = renderRecipientCampaignPreview(
+            campaign,
+            options.values || {},
+            { mode: options.mode || (options.test ? "test" : "recipient") },
+          );''', 1)
+          text = text.replace(
+          '''    html,
+            html_hash: hashValue(`${subject}\\n${html}`),
+          };''',
+          '''    html,
+            html_hash: hashValue(`${subject}\\n${html}`),
+            personalization: preview.personalization,
+          };''', 1)
+          text = text.replace(
+          '''          first_name: row.first_name || "",
+                    last_name: row.last_name || "",
+                  });''',
+          '''          first_name: String(row.first_name || "").trim(),
+                    last_name: String(row.last_name || "").trim(),
+                    company: String(row.company || "").trim(),
+                  });''', 1)
+          text = text.replace(
+          '''  const selectedProvider = activeEmailProvider();
+            const rendered = renderFrozenCampaign(campaign, { test: true });''',
+          '''  const selectedProvider = activeEmailProvider();
+            const testFirstName = cleanText(body.test_first_name || body.testFirstName || "Stuart", 200) || "Stuart";
+            const rendered = renderFrozenCampaign(campaign, {
+              test: true,
+              mode: "test",
+              values: {
+                first_name: testFirstName,
+                last_name: cleanText(body.test_last_name || body.testLastName || "", 200),
+                company: cleanText(body.test_company || body.testCompany || "Van Finance Company", 300),
+                customer_id: "TEST",
+                campaign_name: campaign.name,
+              },
+            });
+            assertProductionPersonalization(rendered);''', 1)
+          text = text.replace(
+          '''      metadata: { test_recipient_domain: recipientEmail.split("@")[1] || "", email_provider: selectedProvider },''',
+          '''      metadata: { test_recipient_domain: recipientEmail.split("@")[1] || "", test_first_name: testFirstName, email_provider: selectedProvider },''', 1)
+          text = text.replace(
+          '''  const renderedBase = renderFrozenCampaign(campaign, { test: false, unsubscribeUrl: "{{unsubscribe_url}}" });
+            let sentCount = 0;''',
+          '''  let sentCount = 0;''', 1)
+          text = text.replace(
+          '''      const unsubscribeUrl = publicUnsubscribeUrl(unsubscribePayload({ customerId: recipient.customer_id, email: recipient.email, campaignId: campaign.id, sendId: send.id, recipientId: recipientRecord.id }));
+                const html = renderedBase.html.replace("{{unsubscribe_url}}", unsubscribeUrl);
+                const provider = await callEmailProvider({
+                  to: recipient.email,
+                  name: recipient.name,
+                  subject: renderedBase.subject,
+                  html,''',
+          '''      const unsubscribeUrl = publicUnsubscribeUrl(unsubscribePayload({ customerId: recipient.customer_id, email: recipient.email, campaignId: campaign.id, sendId: send.id, recipientId: recipientRecord.id }));
+                const rendered = renderFrozenCampaign(campaign, {
+                  test: false,
+                  mode: "recipient",
+                  unsubscribeUrl,
+                  values: {
+                    first_name: recipient.first_name,
+                    last_name: recipient.last_name,
+                    company: recipient.company,
+                    customer_id: recipient.customer_id,
+                    campaign_name: campaign.name,
+                  },
+                });
+                assertProductionPersonalization(rendered);
+                const provider = await callEmailProvider({
+                  to: recipient.email,
+                  name: recipient.name,
+                  subject: rendered.subject,
+                  html: rendered.html,''', 1)
+          sends.write_text(text)
+      - name: Run focused tests
+        run: node --test tests/marketing-recipient-personalisation.test.js
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/marketingCampaignTemplateRenderer.js api/marketing-template-campaign-sends.js
+          git commit -m "Personalise campaign sends per recipient" || exit 0
+          git push origin HEAD:fix/recipient-first-name-personalisation
