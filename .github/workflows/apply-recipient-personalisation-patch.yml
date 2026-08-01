@@ -1,9 +1,9 @@
 name: Apply recipient personalisation patch
 
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened]
+  push:
+    branches: [fix/recipient-first-name-personalisation]
+    paths: [.github/workflows/apply-recipient-personalisation-patch.yml]
 
 permissions:
   contents: write
@@ -50,47 +50,24 @@ jobs:
 
           sends = Path("api/marketing-template-campaign-sends.js")
           text = sends.read_text()
-          text = replace_once(
-            text,
-            r'''  CampaignValidationError,\n  cleanText,\n  renderCampaignPreview,''',
-            '''  CampaignValidationError,
+          text = replace_once(text, r'''  CampaignValidationError,\n  cleanText,\n  renderCampaignPreview,''', '''  CampaignValidationError,
   assertProductionPersonalization,
   cleanText,
-  renderRecipientCampaignPreview,''',
-            "renderer imports",
-          )
-          text = replace_once(
-            text,
-            r'''  const preview = renderCampaignPreview\(campaign\);''',
-            '''  const preview = renderRecipientCampaignPreview(
+  renderRecipientCampaignPreview,''', "renderer imports")
+          text = replace_once(text, r'''  const preview = renderCampaignPreview\(campaign\);''', '''  const preview = renderRecipientCampaignPreview(
     campaign,
     options.values || {},
     { mode: options.mode || (options.test ? "test" : "recipient") },
-  );''',
-            "renderFrozenCampaign preview",
-          )
-          text = replace_once(
-            text,
-            r'''    html,\n    html_hash: hashValue\(`\$\{subject\}\\n\$\{html\}`\),\n  \};''',
-            '''    html,
+  );''', "renderFrozenCampaign preview")
+          text = replace_once(text, r'''    html,\n    html_hash: hashValue\(`\$\{subject\}\\n\$\{html\}`\),\n  \};''', '''    html,
     html_hash: hashValue(`${subject}\\n${html}`),
     personalization: preview.personalization,
-  };''',
-            "renderFrozenCampaign metadata",
-          )
-          text = replace_once(
-            text,
-            r'''          first_name: row\.first_name \|\| "",\n          last_name: row\.last_name \|\| "",\n        \}\);''',
-            '''          first_name: String(row.first_name || "").trim(),
+  };''', "renderFrozenCampaign metadata")
+          text = replace_once(text, r'''          first_name: row\.first_name \|\| "",\n          last_name: row\.last_name \|\| "",\n        \}\);''', '''          first_name: String(row.first_name || "").trim(),
           last_name: String(row.last_name || "").trim(),
           company: String(row.company || "").trim(),
-        });''',
-            "recipient fields",
-          )
-          text = replace_once(
-            text,
-            r'''  const selectedProvider = activeEmailProvider\(\);\n  const rendered = renderFrozenCampaign\(campaign, \{ test: true \}\);''',
-            '''  const selectedProvider = activeEmailProvider();
+        });''', "recipient fields")
+          text = replace_once(text, r'''  const selectedProvider = activeEmailProvider\(\);\n  const rendered = renderFrozenCampaign\(campaign, \{ test: true \}\);''', '''  const selectedProvider = activeEmailProvider();
   const testFirstName = cleanText(body.test_first_name || body.testFirstName || "Stuart", 200) || "Stuart";
   const rendered = renderFrozenCampaign(campaign, {
     test: true,
@@ -103,25 +80,10 @@ jobs:
       campaign_name: campaign.name,
     },
   });
-  assertProductionPersonalization(rendered);''',
-            "test personalisation",
-          )
-          text = replace_once(
-            text,
-            r'''metadata: \{ test_recipient_domain: recipientEmail\.split\("@"\)\[1\] \|\| "", email_provider: selectedProvider \}''',
-            '''metadata: { test_recipient_domain: recipientEmail.split("@")[1] || "", test_first_name: testFirstName, email_provider: selectedProvider }''',
-            "test audit metadata",
-          )
-          text = replace_once(
-            text,
-            r'''  const renderedBase = renderFrozenCampaign\(campaign, \{ test: false, unsubscribeUrl: "\{\{unsubscribe_url\}\}" \}\);\n''',
-            '''''',
-            "shared production render",
-          )
-          text = replace_once(
-            text,
-            r'''      const unsubscribeUrl = publicUnsubscribeUrl\(unsubscribePayload\(\{ customerId: recipient\.customer_id, email: recipient\.email, campaignId: campaign\.id, sendId: send\.id, recipientId: recipientRecord\.id \}\)\);\n      const html = renderedBase\.html\.replace\("\{\{unsubscribe_url\}\}", unsubscribeUrl\);\n      const provider = await callEmailProvider\(\{\n        to: recipient\.email,\n        name: recipient\.name,\n        subject: renderedBase\.subject,\n        html,''',
-            '''      const unsubscribeUrl = publicUnsubscribeUrl(unsubscribePayload({ customerId: recipient.customer_id, email: recipient.email, campaignId: campaign.id, sendId: send.id, recipientId: recipientRecord.id }));
+  assertProductionPersonalization(rendered);''', "test personalisation")
+          text = replace_once(text, r'''metadata: \{ test_recipient_domain: recipientEmail\.split\("@"\)\[1\] \|\| "", email_provider: selectedProvider \}''', '''metadata: { test_recipient_domain: recipientEmail.split("@")[1] || "", test_first_name: testFirstName, email_provider: selectedProvider }''', "test audit metadata")
+          text = replace_once(text, r'''  const renderedBase = renderFrozenCampaign\(campaign, \{ test: false, unsubscribeUrl: "\{\{unsubscribe_url\}\}" \}\);\n''', '''''', "shared production render")
+          text = replace_once(text, r'''      const unsubscribeUrl = publicUnsubscribeUrl\(unsubscribePayload\(\{ customerId: recipient\.customer_id, email: recipient\.email, campaignId: campaign\.id, sendId: send\.id, recipientId: recipientRecord\.id \}\)\);\n      const html = renderedBase\.html\.replace\("\{\{unsubscribe_url\}\}", unsubscribeUrl\);\n      const provider = await callEmailProvider\(\{\n        to: recipient\.email,\n        name: recipient\.name,\n        subject: renderedBase\.subject,\n        html,''', '''      const unsubscribeUrl = publicUnsubscribeUrl(unsubscribePayload({ customerId: recipient.customer_id, email: recipient.email, campaignId: campaign.id, sendId: send.id, recipientId: recipientRecord.id }));
       const rendered = renderFrozenCampaign(campaign, {
         test: false,
         mode: "recipient",
@@ -139,9 +101,7 @@ jobs:
         to: recipient.email,
         name: recipient.name,
         subject: rendered.subject,
-        html: rendered.html,''',
-            "per-recipient production render",
-          )
+        html: rendered.html,''', "per-recipient production render")
           sends.write_text(text)
       - name: Run focused tests
         run: node --test tests/marketing-recipient-personalisation.test.js
