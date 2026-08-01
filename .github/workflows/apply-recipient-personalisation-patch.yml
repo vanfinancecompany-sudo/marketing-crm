@@ -6,6 +6,9 @@ on:
     paths:
       - docs/recipient-personalisation-trigger.txt
       - .github/workflows/apply-recipient-personalisation-patch.yml
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
 
 permissions:
   contents: write
