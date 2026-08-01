@@ -6,6 +6,7 @@ import {
   renderRecipientCampaignPreview,
   replaceRecipientPlaceholders,
 } from "../lib/marketingEmailTemplateRenderer.js";
+import { renderFrozenCampaign } from "../api/marketing-template-campaign-sends.js";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
@@ -104,6 +105,51 @@ test("Jane and John receive different recipient-specific renders", () => {
   assert.match(jane.html, /Vehicle image placeholder/);
 });
 
+test("mock provider receives independently rendered Jane and John payloads", async () => {
+  const calls = [];
+  const mockProvider = async (payload) => {
+    calls.push(structuredClone(payload));
+    return { messageId: `mock-${calls.length}` };
+  };
+  const recipients = [
+    { email: "jane@example.test", first_name: "Jane", last_name: "Jones", company: "Jane Ltd", customer_id: "CUST-JANE", unsubscribe: "https://example.test/unsubscribe?token=jane" },
+    { email: "john@example.test", first_name: "John", last_name: "Smith", company: "John Ltd", customer_id: "CUST-JOHN", unsubscribe: "https://example.test/unsubscribe?token=john" },
+  ];
+
+  for (const recipient of recipients) {
+    const rendered = renderFrozenCampaign(campaign(), {
+      mode: "recipient",
+      unsubscribeUrl: recipient.unsubscribe,
+      values: {
+        first_name: recipient.first_name,
+        last_name: recipient.last_name,
+        company: recipient.company,
+        customer_id: recipient.customer_id,
+        campaign_name: campaign().name,
+      },
+    });
+    assertProductionPersonalization(rendered);
+    await mockProvider({
+      to: recipient.email,
+      subject: rendered.subject,
+      preview_text: rendered.preview_text,
+      html: rendered.html,
+    });
+  }
+
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].html, /Hi Jane/);
+  assert.match(calls[1].html, /Hi John/);
+  assert.notEqual(calls[0].html, calls[1].html);
+  assert.equal(calls[0].subject, "New vans for Jane");
+  assert.equal(calls[1].subject, "New vans for John");
+  assert.equal(calls[0].preview_text, "Jane, three vans are ready");
+  assert.equal(calls[1].preview_text, "John, three vans are ready");
+  assert.match(calls[0].html, /token=jane/);
+  assert.doesNotMatch(calls[0].html, /token=john/);
+  assert.match(calls[1].html, /token=john/);
+});
+
 test("blank first names use there and never leak Alex", () => {
   const rendered = renderRecipientCampaignPreview(campaign(), {
     first_name: "   ", company: "Van Finance Company", customer_id: "CUST-EMPTY",
@@ -150,8 +196,16 @@ test("designer sample mode is rejected for provider submission", () => {
 test("recipient unsubscribe URLs remain independently replaceable", () => {
   const janeUrl = "https://example.test/unsubscribe?token=jane";
   const johnUrl = "https://example.test/unsubscribe?token=john";
-  const jane = `${renderRecipientCampaignPreview(campaign(), { first_name: "Jane" }).html}<a href="${janeUrl}">unsubscribe</a>`;
-  const john = `${renderRecipientCampaignPreview(campaign(), { first_name: "John" }).html}<a href="${johnUrl}">unsubscribe</a>`;
+  const jane = renderFrozenCampaign(campaign(), {
+    mode: "recipient",
+    unsubscribeUrl: janeUrl,
+    values: { first_name: "Jane", customer_id: "CUST-JANE" },
+  }).html;
+  const john = renderFrozenCampaign(campaign(), {
+    mode: "recipient",
+    unsubscribeUrl: johnUrl,
+    values: { first_name: "John", customer_id: "CUST-JOHN" },
+  }).html;
   assert.match(jane, /token=jane/);
   assert.doesNotMatch(jane, /token=john/);
   assert.match(john, /token=john/);
