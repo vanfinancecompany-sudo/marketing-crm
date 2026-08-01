@@ -1,9 +1,10 @@
 name: Apply recipient personalisation patch
 
 on:
-  pull_request:
-    branches: [main]
-    types: [opened]
+  push:
+    branches: [fix/recipient-first-name-personalisation]
+    paths:
+      - docs/recipient-personalisation-trigger.txt
 
 permissions:
   contents: write
