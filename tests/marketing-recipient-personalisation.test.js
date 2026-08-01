@@ -216,7 +216,7 @@ test("production send route renders inside the recipient loop and guards provide
   assert.match(sends, /for \(const recipient of selectedRecipients\)[\s\S]*renderFrozenCampaign\(campaign,[\s\S]*first_name: recipient\.first_name/);
   assert.match(sends, /assertProductionPersonalization\(rendered\)[\s\S]*callEmailProvider/);
   assert.doesNotMatch(sends, /const renderedBase = renderFrozenCampaign/);
-  assert.match(sends, /test_first_name \|\| body\.testFirstName \|\| "Stuart"/);
+  assert.match(sends, /body\.test_first_name \|\| body\.testFirstName \|\| "Stuart"/);
   assert.match(sends, /unsubscribeUrl/);
 });
 
