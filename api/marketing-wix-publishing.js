@@ -12,6 +12,20 @@ function getSupabase() { const url = clean(process.env.SUPABASE_URL, 2000); cons
 function parseBody(request) { if (!request.body) return {}; if (typeof request.body === "string") { try { return JSON.parse(request.body); } catch { throw new ApiError(400, "The request body is not valid JSON.", "validation"); } } return request.body; }
 function data(result, fallback) { if (result.error) throw new ApiError(500, result.error.message || fallback); return result.data; }
 
+function linkDiagnosticMessage(error, article = {}) {
+  const skipped = Array.isArray(error?.details?.suggestions_skipped) ? error.details.suggestions_skipped : [];
+  if (!skipped.length) return clean(error?.message, 1000) || "Wix draft creation failed.";
+  const reasonLabels = {
+    anchor_text_not_found: "anchor text is not present in the current saved article",
+    anchor_already_linked: "anchor text is already linked to a different URL",
+    unsafe_or_malformed_url: "destination URL is unsafe or malformed",
+    empty_anchor_text: "anchor text is empty",
+  };
+  const summary = skipped.slice(0, 5).map((item) => `“${clean(item.anchor_text, 160) || "(empty anchor)"}” — ${reasonLabels[item.reason] || clean(item.reason, 120) || "not inserted"}`).join("; ");
+  const articleLabel = clean(article.title, 180) ? ` for “${clean(article.title, 180)}”` : "";
+  return `Accepted link suggestions produced zero Wix LINK decorations${articleLabel}. Skipped: ${summary}. Reanalyse the current saved article, review the new suggestions, then retry the Wix draft.`;
+}
+
 async function recordSyncEvent(supabase, articleId, result) {
   const event = await supabase.from("knowledge_editorial_events").insert({
     event_type: "system",
@@ -77,13 +91,14 @@ export async function publishKnowledgeArticleToWix({ supabase, articleId, enviro
     return { article: savedArticle, content_operations_warning: contentOperationsWarning, diagnostics: result.diagnostics, wix: { operation: result.operation, item_id: result.itemId, collection_id: result.collectionId, sync_status: result.syncStatus, synced_at: syncedAt, dashboard_url: result.dashboardUrl, content_status: "Draft", content_field_type: result.contentFieldType, content_field_id: result.contentFieldId, final_link_decoration_count: result.diagnostics?.final_link_decoration_count || 0, recovered_missing_item: result.recoveredMissingItem, replaced_item_id: result.replacedItemId, table_conversion_warnings: result.tableConversionWarnings || [], published: false } };
   } catch (error) {
     const type = error.type || "api";
-    const message = clean(error.message, 1000) || "Wix draft creation failed.";
+    const message = linkDiagnosticMessage(error, article);
     const failedAt = new Date().toISOString();
     const clearStoredItemId = error.details?.clear_stored_item_id === true;
+    const diagnostics = { ...(error.details || {}), article_id: clean(article.id, 200), article_title: clean(article.title, 500) };
     const failed = await supabase.from("knowledge_articles").update({ ...(clearStoredItemId ? { wix_item_id: null, wix_draft_url: null } : {}), wix_sync_status: "error", wix_last_error: clearStoredItemId ? `The previous Wix item no longer exists and its stored link was cleared. ${message}` : message, last_wix_sync_at: failedAt, updated_at: failedAt }).eq("id", article.id);
     if (failed.error) console.error("WIX FAILURE STATUS ERROR", { article_id: article.id, message: failed.error.message });
-    if (clearStoredItemId) throw new WixPublishingError(type, `The previous Wix item no longer exists and its stored link was cleared. ${message} Retry to create a new Wix draft.`, error.status || 409, { wix_error_code: "WDE0073", stored_item_cleared: true });
-    throw error;
+    if (clearStoredItemId) throw new WixPublishingError(type, `The previous Wix item no longer exists and its stored link was cleared. ${message} Retry to create a new Wix draft.`, error.status || 409, { ...diagnostics, wix_error_code: "WDE0073", stored_item_cleared: true });
+    throw new WixPublishingError(type, message, error.status || 500, diagnostics);
   }
 }
 
