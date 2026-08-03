@@ -55,6 +55,16 @@ test("anchor text not found is skipped with a clear reason", () => {
   assert.deepEqual(applied.suggestions_skipped, [{ id: "missing", anchor_text: "available vans", destination_url: "/vans-on-finance", reason: "anchor_text_not_found" }]);
 });
 
+test("unmatched accepted contextual links remain optional and do not alter article content", () => {
+  const original = "## Buying another van\n\nA second vehicle may help when workloads increase.";
+  const result = build(original, [{ id: "optional", anchor_text: "VAN FINANCE - APPLICATION FORM", destination_url: "/apply" }]);
+  assert.equal(result.diagnostics.final_link_decoration_count, 0);
+  assert.equal(result.diagnostics.contextual_links_optional, true);
+  assert.match(result.diagnostics.contextual_link_warning, /published without those optional links/i);
+  assert.deepEqual(result.diagnostics.suggestions_skipped.map((item) => item.reason), ["anchor_text_not_found"]);
+  assert.match(textNodes(result.richContent).map((node) => node.textData.text).join(" "), /A second vehicle may help/);
+});
+
 test("existing Markdown hyperlink remains a Wix link", () => {
   const result = build("Read our [van finance guide](/van-finance-guide).");
   assert.deepEqual(links(result.richContent).map(({ text, url }) => ({ text, url })), [{ text: "van finance guide", url: "/van-finance-guide" }]);
