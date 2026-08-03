@@ -88,10 +88,33 @@ function articleMarkdownFromPage() {
   return bodyField?.querySelector("textarea")?.value || "";
 }
 
+function replaceStatusContent(status, validation) {
+  status.replaceChildren();
+  const heading = document.createElement("strong");
+  const detail = document.createElement("div");
+  heading.textContent = validation.found ? "Found in article" : "Not found in article";
+  detail.textContent = validation.found
+    ? validation.match_count === 1
+      ? "Found once in the current article."
+      : `Found ${validation.match_count} times in the current article. The first safe occurrence will be linked.`
+    : "Use wording that already appears in the current article body. The link cannot be applied until a match is found.";
+  status.append(heading, detail);
+
+  const excerpt = validation.excerpts?.[0]?.excerpt;
+  if (validation.found && excerpt) {
+    const preview = document.createElement("small");
+    preview.textContent = `“…${excerpt}…”`;
+    preview.style.display = "block";
+    preview.style.marginTop = "6px";
+    status.append(preview);
+  }
+}
+
 function renderAnchorStatus(card, input, acceptButton) {
   const markdown = articleMarkdownFromPage();
   if (!markdown || !input) return;
   const validation = findInternalLinkAnchorMatches(markdown, input.value);
+  const fingerprint = `${validation.reason}|${validation.match_count}|${validation.excerpts?.[0]?.index ?? -1}|${input.value}`;
   let status = card.querySelector("[data-anchor-match-status]");
   if (!status) {
     status = document.createElement("div");
@@ -100,22 +123,21 @@ function renderAnchorStatus(card, input, acceptButton) {
     input.closest("label")?.insertAdjacentElement("afterend", status);
   }
 
-  if (validation.found) {
-    status.className = "notice notice--success";
-    status.innerHTML = `<strong>Found in article</strong><div>${validation.match_count === 1 ? "Found once" : `Found ${validation.match_count} times`} in the current saved article.</div>${validation.excerpts[0]?.excerpt ? `<small>…${validation.excerpts[0].excerpt}…</small>` : ""}`;
-    if (acceptButton) {
-      acceptButton.disabled = false;
-      acceptButton.title = validation.match_count > 1 ? "This wording appears more than once. The first safe occurrence will be linked." : "This wording is present in the article and can be linked.";
-      acceptButton.textContent = "Apply link";
-    }
-  } else {
-    status.className = "notice notice--error";
-    status.innerHTML = "<strong>Not found in article</strong><div>Use wording that already appears in the current article body. The link cannot be applied until a match is found.</div>";
-    if (acceptButton) {
-      acceptButton.disabled = true;
-      acceptButton.title = "Anchor text is not present in the current article.";
-      acceptButton.textContent = "Apply link";
-    }
+  if (status.dataset.anchorFingerprint !== fingerprint) {
+    status.dataset.anchorFingerprint = fingerprint;
+    status.className = validation.found ? "notice notice--success" : "notice notice--error";
+    replaceStatusContent(status, validation);
+  }
+
+  if (acceptButton) {
+    const nextLabel = "Apply link";
+    if (acceptButton.textContent !== nextLabel) acceptButton.textContent = nextLabel;
+    acceptButton.disabled = !validation.found;
+    acceptButton.title = validation.found
+      ? validation.match_count > 1
+        ? "This wording appears more than once. The first safe occurrence will be linked."
+        : "This wording is present in the article and can be linked."
+      : "Anchor text is not present in the current article.";
   }
 }
 
@@ -132,7 +154,9 @@ function enhanceInternalLinkCards() {
     if (!input || !acceptButton) continue;
 
     const label = input.closest("label")?.querySelector(".field__label");
-    if (label) label.textContent = "Existing words in the article to link";
+    if (label && label.textContent !== "Existing words in the article to link") {
+      label.textContent = "Existing words in the article to link";
+    }
     renderAnchorStatus(card, input, acceptButton);
 
     if (!input.dataset.anchorValidationBound) {
@@ -144,8 +168,17 @@ function enhanceInternalLinkCards() {
 
 if (typeof window !== "undefined" && typeof MutationObserver !== "undefined") {
   const start = () => {
-    enhanceInternalLinkCards();
-    const observer = new MutationObserver(() => enhanceInternalLinkCards());
+    let scheduled = false;
+    const scheduleEnhancement = () => {
+      if (scheduled) return;
+      scheduled = true;
+      window.requestAnimationFrame(() => {
+        scheduled = false;
+        enhanceInternalLinkCards();
+      });
+    };
+    scheduleEnhancement();
+    const observer = new MutationObserver(scheduleEnhancement);
     observer.observe(document.body, { childList: true, subtree: true });
   };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
