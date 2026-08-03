@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node --test tests/marketing-recipient-personalisation.test.js && vite build",
+    "build": "node --test tests/marketing-recipient-personalisation.test.js tests/wix-knowledge-rich-content-links.test.js tests/internal-link-anchor-validation.test.js && vite build",
     "test": "node --test",
     "preview": "vite preview"
   },
