@@ -14,3 +14,12 @@ export async function createOrUpdateWixDraft(articleId) {
   });
   return parseMarketingJsonResponse(response, "Wix draft creation failed.");
 }
+
+export async function resetAcceptedInternalLinks(articleId) {
+  const response = await fetch("/api/marketing-internal-link-reset", {
+    method: "POST",
+    headers: buildMarketingAccessHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ article_id: articleId }),
+  });
+  return parseMarketingJsonResponse(response, "Accepted internal links could not be reset.");
+}
