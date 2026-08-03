@@ -2,7 +2,10 @@ import {
   buildMarketingAccessHeaders,
   parseMarketingJsonResponse,
 } from "./marketingAccess.js";
-import { findInternalLinkAnchorMatches } from "../lib/internalLinkAnchorValidation.js";
+import {
+  findInternalLinkAnchorMatches,
+  suggestInternalLinkAnchor,
+} from "../lib/internalLinkAnchorValidation.js";
 
 const API_ROUTE = "/api/marketing-editorial-engine";
 
@@ -88,16 +91,16 @@ function articleMarkdownFromPage() {
   return bodyField?.querySelector("textarea")?.value || "";
 }
 
-function replaceStatusContent(status, validation) {
+function replaceStatusContent(status, validation, suggested = false) {
   status.replaceChildren();
   const heading = document.createElement("strong");
   const detail = document.createElement("div");
-  heading.textContent = validation.found ? "Found in article" : "Not found in article";
+  heading.textContent = validation.found ? (suggested ? "Matching wording selected" : "Found in article") : "No usable wording found";
   detail.textContent = validation.found
     ? validation.match_count === 1
-      ? "Found once in the current article."
-      : `Found ${validation.match_count} times in the current article. The first safe occurrence will be linked.`
-    : "Use wording that already appears in the current article body. The link cannot be applied until a match is found.";
+      ? "This wording appears once in the current article and is ready to link."
+      : `This wording appears ${validation.match_count} times. The first safe occurrence will be linked.`
+    : "This destination is relevant, but the current article does not contain suitable wording to link. Do not apply this suggestion unless the article is edited first.";
   status.append(heading, detail);
 
   const excerpt = validation.excerpts?.[0]?.excerpt;
@@ -110,11 +113,45 @@ function replaceStatusContent(status, validation) {
   }
 }
 
+function setReactInputValue(input, value) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+  if (setter) setter.call(input, value);
+  else input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function cardSuggestionText(card) {
+  return [...card.querySelectorAll("p, small")]
+    .map((item) => item.textContent || "")
+    .join(" · ");
+}
+
+function cardDestinationTitle(card) {
+  return card.querySelector(".panel__header strong")?.textContent?.trim() || "";
+}
+
 function renderAnchorStatus(card, input, acceptButton) {
   const markdown = articleMarkdownFromPage();
   if (!markdown || !input) return;
-  const validation = findInternalLinkAnchorMatches(markdown, input.value);
-  const fingerprint = `${validation.reason}|${validation.match_count}|${validation.excerpts?.[0]?.index ?? -1}|${input.value}`;
+
+  let validation = findInternalLinkAnchorMatches(markdown, input.value);
+  let suggested = false;
+  if (!validation.found && !input.dataset.anchorUserEdited && !input.dataset.anchorAutoSuggested) {
+    const recommendation = suggestInternalLinkAnchor(
+      markdown,
+      cardSuggestionText(card),
+      cardDestinationTitle(card)
+    );
+    if (recommendation.found && recommendation.anchor_text) {
+      input.dataset.anchorAutoSuggested = "true";
+      setReactInputValue(input, recommendation.anchor_text);
+      validation = recommendation.validation;
+      suggested = true;
+    }
+  }
+
+  const fingerprint = `${validation.reason}|${validation.match_count}|${validation.excerpts?.[0]?.index ?? -1}|${input.value}|${suggested}`;
   let status = card.querySelector("[data-anchor-match-status]");
   if (!status) {
     status = document.createElement("div");
@@ -126,18 +163,17 @@ function renderAnchorStatus(card, input, acceptButton) {
   if (status.dataset.anchorFingerprint !== fingerprint) {
     status.dataset.anchorFingerprint = fingerprint;
     status.className = validation.found ? "notice notice--success" : "notice notice--error";
-    replaceStatusContent(status, validation);
+    replaceStatusContent(status, validation, suggested);
   }
 
   if (acceptButton) {
-    const nextLabel = "Apply link";
-    if (acceptButton.textContent !== nextLabel) acceptButton.textContent = nextLabel;
+    acceptButton.textContent = "Apply link";
     acceptButton.disabled = !validation.found;
     acceptButton.title = validation.found
       ? validation.match_count > 1
         ? "This wording appears more than once. The first safe occurrence will be linked."
         : "This wording is present in the article and can be linked."
-      : "Anchor text is not present in the current article.";
+      : "No suitable anchor wording is present in the current article.";
   }
 }
 
@@ -161,7 +197,11 @@ function enhanceInternalLinkCards() {
 
     if (!input.dataset.anchorValidationBound) {
       input.dataset.anchorValidationBound = "true";
-      input.addEventListener("input", () => renderAnchorStatus(card, input, acceptButton));
+      input.addEventListener("input", () => {
+        if (input.dataset.anchorAutoSuggested !== "true") input.dataset.anchorUserEdited = "true";
+        delete input.dataset.anchorAutoSuggested;
+        renderAnchorStatus(card, input, acceptButton);
+      });
     }
   }
 }
