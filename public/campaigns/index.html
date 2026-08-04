@@ -282,8 +282,6 @@
                   </label>
                   <label>Do not email contacts reached within
                     <select id="audienceRecentContactDays">
-                      <option value="0">No recent-contact restriction</option>
-                      <option value="3">Last 3 days</option>
                       <option value="7">Last 7 days</option>
                       <option value="14">Last 14 days</option>
                       <option value="30">Last 30 days</option>
@@ -605,7 +603,7 @@
           mode: $("audienceMode").value,
           search: $("audienceSearch").value,
           manual_customer_ids: $("manualCustomerIds").value.split(/[\s,;]+/).map((value) => value.trim()).filter(Boolean),
-          recent_contact_days: Number($("audienceRecentContactDays").value || 0),
+          recent_contact_days: Number($("audienceRecentContactDays").value || 7),
           exclude_campaign_ids: Array.from($("audienceExcludedCampaigns").querySelectorAll("input:checked")).map((input) => input.value),
         };
       }
@@ -628,7 +626,7 @@
         $("audienceMode").value = rules.mode || "standard";
         $("audienceSearch").value = rules.search || "";
         $("manualCustomerIds").value = (rules.manual_customer_ids || []).join("\n");
-        $("audienceRecentContactDays").value = String(rules.recent_contact_days ?? (audience?.rules ? 0 : 7));
+        $("audienceRecentContactDays").value = String(Math.max(7, Number(rules.recent_contact_days || 7)));
         renderExcludedCampaignOptions(rules.exclude_campaign_ids || []);
         renderAudienceModeControls();
       }
@@ -648,13 +646,16 @@
       }
 
       function renderAudienceCounts(audience, stale = false) {
+        const recentDays = Math.max(7, Number(audience?.rules?.recent_contact_days || 7));
         const counts = audience ? [
           ["Total matching customers", audience.total_matching_customers || 0],
           ["Suppressed customers", audience.suppressed_customers || 0],
           ["Previously processed / duplicates", audience.skipped_duplicate_customers || 0],
-          ["Previous campaigns / recently contacted", audience.history_excluded_customers || 0],
-          ["Deliverable customers", audience.deliverable_customers || 0],
-          ["Final send count", audience.final_send_count || 0],
+          ["Excluded by selected previous campaigns", audience.previous_campaign_excluded_customers || 0],
+          ["Eligible before recent-contact restriction", audience.eligible_before_recent_contact_restriction || 0],
+          ["Excluded because emailed within the last 7 days", audience.minimum_frequency_lock_excluded_customers || 0],
+          ...(recentDays > 7 ? [[`Additional exclusions from the selected ${recentDays}-day restriction`, audience.additional_recent_contact_excluded_customers || 0]] : []),
+          ["Final eligible audience", audience.final_send_count || 0],
         ] : [];
         $("audienceCounts").innerHTML = counts.length ? counts.map(([label, value]) => `<div class="audience-count"><strong>${label}</strong><b>${fmt.format(value)}</b></div>`).join("") : `<div class="empty span-2">Preview an audience to see live counts.</div>`;
         $("audienceCalculated").textContent = audience?.calculated_at ? `${stale ? "Saved preview" : "Last calculated"}: ${formatDate(audience.calculated_at)}` : "";

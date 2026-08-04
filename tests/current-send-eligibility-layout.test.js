@@ -77,7 +77,8 @@ test("preview, progress, prepare and confirm use the shared current-send resolve
   const previewSource = fs.readFileSync(new URL("../api/marketing-template-campaigns.js", import.meta.url), "utf8");
   const sendSource = fs.readFileSync(new URL("../api/marketing-template-campaign-sends.js", import.meta.url), "utf8");
   assert.match(previewSource, /evaluateCurrentSendEligibility/);
-  assert.match(previewSource, /totalMatching !== suppressed \+ skippedDuplicate \+ historyExcluded \+ deliverable/);
+  assert.match(previewSource, /totalMatching !== suppressed \+ skippedDuplicate \+ previousCampaignExcluded \+ eligibleBeforeRecentContact/);
+  assert.match(previewSource, /eligibleBeforeRecentContact !== recentContactExcluded \+ deliverable/);
   assert.match(sendSource, /const resolved = await resolveRecipients\(supabase, campaign\)/);
   assert.match(sendSource, /const fullRecount = await resolveRecipients\(supabase, campaign\)/);
   assert.match(sendSource, /async function getCampaignProgress[\s\S]*?await resolveRecipients\(supabase, campaign\)/);
