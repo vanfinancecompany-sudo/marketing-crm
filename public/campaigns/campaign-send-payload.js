@@ -1,9 +1,8 @@
 (() => {
-  function build({ id, email, testFirstName } = {}) {
+  function build({ id, email } = {}) {
     return {
       id: String(id || ""),
       email: String(email || "").trim(),
-      test_first_name: String(testFirstName || "").trim(),
     };
   }
 

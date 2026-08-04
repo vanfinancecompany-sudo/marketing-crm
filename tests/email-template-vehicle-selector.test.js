@@ -155,6 +155,33 @@ test("Rent2Buy preview cards use Rent2Buy payments and advert URL, never Finance
   assert.doesNotMatch(html, /£18,995|NO VAT|FROM £399 per month/);
 });
 
+test("Rent2Buy payment wording removes repeated labels without changing stored values", () => {
+  const rent2buy = {
+    monthly: "£875 + VAT",
+    initialRental: "INITIAL RENTAL £1755 +VAT",
+    term: "x36",
+    url: "https://www.rent2buyvans.co.uk/van-pages/xy23zzz",
+  };
+  const html = renderVehicleEmail(selectedVehicleBlock("rent2buy", {
+    selection_id: "rent2buy:rent-1",
+    registration: "XY23 ZZZ",
+    title: "Ford Transit Custom Rent2Buy",
+    rent2buy,
+    finance: null,
+  }));
+
+  assert.match(html, /£875 \+ VAT monthly rental/);
+  assert.match(html, />Initial rental: £1,755 \+ VAT<\/td>/);
+  assert.match(html, />Term: 36 months<\/td>/);
+  assert.doesNotMatch(html, /Initial rental:\s*INITIAL RENTAL|\|\s*Term: x36/i);
+  assert.deepEqual(rent2buy, {
+    monthly: "£875 + VAT",
+    initialRental: "INITIAL RENTAL £1755 +VAT",
+    term: "x36",
+    url: "https://www.rent2buyvans.co.uk/van-pages/xy23zzz",
+  });
+});
+
 test("existing Finance vehicle cards retain their cash, VAT and monthly presentation", () => {
   const html = renderVehicleEmail(selectedVehicleBlock("finance", {
     selection_id: "finance:finance-1",
@@ -237,4 +264,71 @@ test("test and final recipient email HTML preserve the Primary Colour on vehicle
     assert.match(rendered.html, /bgcolor="#8B0000" style="border-radius:7px;"[^>]*><a[^>]*color:#ffffff[^>]*>View van<\/a>/);
     assert.doesNotMatch(rendered.html, /bgcolor="#2563eb" style="border-radius:7px;"/);
   }
+});
+
+for (const productMode of ["finance", "rent2buy"]) {
+  test(`${productMode} Email Templates HTML includes readable mobile typography`, () => {
+    const vehicle = productMode === "finance" ? {
+      selection_id: "finance:finance-1",
+      title: "Ford Transit Custom",
+      description: "Practical van details",
+      primary_image_url: "https://images.example/finance-mobile.jpg",
+      finance: { price: "£18,995", vat: "NO VAT", monthly: "£399 per month", url: "https://www.vanfinancecompany.co.uk/finance-van" },
+      rent2buy: null,
+    } : {
+      selection_id: "rent2buy:rent-1",
+      title: "Ford Transit Custom Rent2Buy",
+      description: "Flexible Rent2Buy details",
+      primary_image_url: "https://images.example/rent2buy-mobile.jpg",
+      finance: null,
+      rent2buy: { monthly: "£795", initialRental: "£1,590", term: "48 months", url: "https://www.rent2buyvans.co.uk/van-pages/xy23zzz" },
+    };
+    const block = selectedVehicleBlock(productMode, vehicle);
+    const snapshot = vehicleEmailTemplate(block);
+    const campaign = { subject_line: "Vehicle offer", preview_text: "Supporting copy", template_snapshot: snapshot };
+    const htmlVariants = [
+      renderEmailHtml(snapshot),
+      renderRecipientCampaignPreview(campaign, {}, { mode: "test" }).html,
+      renderRecipientCampaignPreview(campaign, {}, { mode: "recipient" }).html,
+    ];
+
+    for (const html of htmlVariants) {
+      assert.match(html, /@media only screen and \(max-width:600px\)/);
+      assert.match(html, /\.email-body-copy,[\s\S]*font-size:16px !important;\s*line-height:24px !important;/);
+      assert.match(html, /\.email-support-copy\s*\{\s*font-size:15px !important;\s*line-height:23px !important;/);
+      assert.match(html, /\.email-vehicle-detail, \.email-vehicle-terms\s*\{\s*font-size:15px !important;\s*line-height:22px !important;/);
+      assert.match(html, /\.email-button-text\s*\{\s*font-size:16px !important;\s*line-height:22px !important;/);
+      assert.match(html, /\.email-vehicle-row, \.email-vehicle-card-cell\s*\{[^}]*display:block !important;[^}]*width:100% !important;/);
+      assert.match(html, /\.email-vehicle-payment\s*\{\s*font-size:21px !important;\s*line-height:29px !important;/);
+      assert.match(html, /\.email-hero-heading\s*\{\s*font-size:32px !important;\s*line-height:38px !important;/);
+      assert.match(html, /\.email-section-heading\s*\{\s*font-size:24px !important;\s*line-height:31px !important;/);
+      assert.match(html, /\.email-vehicle-button-table\s*\{[^}]*width:100% !important;/);
+      assert.match(html, /\.email-vehicle-image\s*\{[^}]*width:100% !important;[^}]*max-width:none !important;/);
+      assert.match(html, /class="email-body-copy"/);
+      assert.match(html, /class="email-vehicle-detail"/);
+      assert.match(html, /class="email-vehicle-image"/);
+      assert.match(html, /max-width:660px/);
+    }
+  });
+}
+
+test("desktop two-column vehicle markup remains two columns", () => {
+  const first = {
+    selection_id: "finance:finance-1",
+    title: "Ford Transit Custom",
+    finance: { price: "£18,995", monthly: "£399 per month", url: "https://example.test/one" },
+    rent2buy: null,
+  };
+  const second = {
+    ...first,
+    selection_id: "finance:finance-2",
+    title: "Ford Transit",
+    finance: { ...first.finance, url: "https://example.test/two" },
+  };
+  const block = selectedVehicleBlock("finance", first);
+  block.settings.selected_vehicles = [first, second];
+  const html = renderVehicleEmail(block);
+
+  assert.match(html, /class="email-vehicle-row"><td class="email-vehicle-card-cell" width="50%"/);
+  assert.equal((html.match(/class="email-vehicle-card-cell" width="50%"/g) || []).length, 2);
 });
