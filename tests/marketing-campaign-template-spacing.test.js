@@ -101,5 +101,5 @@ test("button followed by text splits the boundary spacing between adjacent table
 test("Email Template Live Preview uses the shared campaign and send renderer", () => {
   const source = fs.readFileSync(new URL("../api/marketing-email-templates.js", import.meta.url), "utf8");
   assert.match(source, /renderEmailHtml as renderSharedEmailHtml/);
-  assert.match(source, /html: renderSharedEmailHtml\(values\)/);
+  assert.match(source, /html: renderSharedEmailHtml\(\{ \.\.\.values, first_name: "Alex" \}\)/);
 });
