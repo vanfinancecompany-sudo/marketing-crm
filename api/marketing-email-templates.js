@@ -962,7 +962,8 @@ async function previewTemplate(supabase, body = {}) {
     preview: {
       subject: replaceTextPlaceholders(values.default_subject, values),
       preview_text: replaceTextPlaceholders(values.preview_text, values),
-      html: renderSharedEmailHtml(values),
+      // Alex is explicit designer-only sample data here; provider paths use recipient rendering.
+      html: renderSharedEmailHtml({ ...values, first_name: "Alex" }),
     },
   };
 }
