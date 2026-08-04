@@ -102,26 +102,53 @@ function originalTemplateSource() {
   };
 }
 
-test("Jane and John receive different recipient-specific renders", () => {
+function assertFixedProviderGreeting(rendered) {
+  const greeting = rendered.html.match(/Hi\s+[\p{L}\p{M}'’.-]+,/u)?.[0];
+  assert.equal(greeting, "Hi there,");
+  assert.doesNotMatch(rendered.html, /Hi (?:Alex|Stuart|Tim|Sarah|Jane|John),/i);
+}
+
+test("all Email Templates provider modes render exactly Hi there", () => {
+  for (const [mode, productMode, suppliedFirstName] of [
+    ["test", "finance", "Stuart"],
+    ["test", "rent2buy", "Tim"],
+    ["recipient", "finance", "Sarah"],
+    ["recipient", "rent2buy", "Alex"],
+  ]) {
+    const productCampaign = campaign();
+    productCampaign.campaign_type = productMode;
+    productCampaign.template_snapshot.category = productMode === "finance" ? "finance_offer" : "rent2buy";
+    productCampaign.template_snapshot.content_blocks[2].settings.product_mode = productMode;
+    const rendered = renderFrozenCampaign(productCampaign, {
+      test: mode === "test",
+      mode,
+      values: { first_name: suppliedFirstName },
+    });
+    assertFixedProviderGreeting(rendered);
+    assertProductionPersonalization(rendered);
+  }
+});
+
+test("provider renders ignore recipient first names while preserving other substitutions", () => {
   const jane = renderRecipientCampaignPreview(campaign(), {
     first_name: "  Jane  ", company: "Jane Ltd", customer_id: "CUST-JANE",
   });
   const john = renderRecipientCampaignPreview(campaign(), {
     first_name: "John", company: "John Ltd", customer_id: "CUST-JOHN",
   });
-  assert.match(jane.html, /Hi Jane/);
-  assert.match(john.html, /Hi John/);
+  assert.match(jane.html, /Hi there,/);
+  assert.match(john.html, /Hi there,/);
   assert.notEqual(jane.html, john.html);
-  assert.equal(jane.subject, "New vans for Jane");
-  assert.equal(john.subject, "New vans for John");
-  assert.equal(jane.preview_text, "Jane, three vans are ready");
-  assert.equal(john.preview_text, "John, three vans are ready");
+  assert.equal(jane.subject, "New vans for there");
+  assert.equal(john.subject, "New vans for there");
+  assert.equal(jane.preview_text, "there, three vans are ready");
+  assert.equal(john.preview_text, "there, three vans are ready");
   assert.match(jane.html, /customer=CUST-JANE/);
   assert.match(john.html, /customer=CUST-JOHN/);
   assert.match(jane.html, /Vehicle image placeholder/);
 });
 
-test("mock provider receives independently rendered Stuart and Jane payloads", async () => {
+test("mock provider receives the fixed greeting for every recipient", async () => {
   const calls = [];
   const mockProvider = async (payload) => {
     calls.push(structuredClone(payload));
@@ -154,13 +181,13 @@ test("mock provider receives independently rendered Stuart and Jane payloads", a
   }
 
   assert.equal(calls.length, 2);
-  assert.match(calls[0].html, /Hi Stuart/);
-  assert.match(calls[1].html, /Hi Jane/);
+  assert.match(calls[0].html, /Hi there,/);
+  assert.match(calls[1].html, /Hi there,/);
   assert.notEqual(calls[0].html, calls[1].html);
-  assert.equal(calls[0].subject, "New vans for Stuart");
-  assert.equal(calls[1].subject, "New vans for Jane");
-  assert.equal(calls[0].preview_text, "Stuart, three vans are ready");
-  assert.equal(calls[1].preview_text, "Jane, three vans are ready");
+  assert.equal(calls[0].subject, "New vans for there");
+  assert.equal(calls[1].subject, "New vans for there");
+  assert.equal(calls[0].preview_text, "there, three vans are ready");
+  assert.equal(calls[1].preview_text, "there, three vans are ready");
   assert.match(calls[0].html, /token=stuart/);
   assert.doesNotMatch(calls[0].html, /token=jane/);
   assert.match(calls[1].html, /token=jane/);
@@ -187,21 +214,21 @@ test("only explicit designer previews use Alex", () => {
   assert.equal(explicit.personalization.mode, "designer_preview");
 });
 
-test("test mode with a blank first name defaults to Stuart", () => {
+test("test mode always uses the fixed greeting", () => {
   const rendered = renderRecipientCampaignPreview(campaign(), { first_name: "   " }, { mode: "test" });
-  assert.equal(rendered.subject, "New vans for Stuart");
-  assert.match(rendered.html, /Hi Stuart/);
-  assert.equal(rendered.personalization.first_name, "Stuart");
+  assert.equal(rendered.subject, "New vans for there");
+  assert.match(rendered.html, /Hi there,/);
+  assert.equal(rendered.personalization.first_name, "there");
   assertProductionPersonalization(rendered);
 });
 
-test("internal tests render explicitly supplied Stuart and Sarah names", () => {
+test("internal tests ignore supplied names and render the fixed greeting", () => {
   const stuart = renderFrozenCampaign(campaign(), { test: true, mode: "test", values: { first_name: "Stuart" } });
   const sarah = renderFrozenCampaign(campaign(), { test: true, mode: "test", values: { first_name: "Sarah" } });
-  assert.match(stuart.html, /Hi Stuart/);
-  assert.doesNotMatch(stuart.html, /Hi Alex/);
-  assert.match(sarah.html, /Hi Sarah/);
-  assert.doesNotMatch(sarah.html, /Hi Alex/);
+  assert.match(stuart.html, /Hi there,/);
+  assert.doesNotMatch(stuart.html, /Hi Stuart|Hi Alex/);
+  assert.match(sarah.html, /Hi there,/);
+  assert.doesNotMatch(sarah.html, /Hi Sarah|Hi Alex/);
   assertProductionPersonalization(stuart);
   assertProductionPersonalization(sarah);
 });
@@ -215,14 +242,14 @@ test("blank and malformed production first names use there", () => {
   }
 });
 
-test("consecutive recipients cannot inherit the previous first name", () => {
+test("consecutive recipients all receive the fixed greeting", () => {
   const first = renderFrozenCampaign(campaign(), { mode: "recipient", values: { first_name: "Stuart" } });
   const blank = renderFrozenCampaign(campaign(), { mode: "recipient", values: { first_name: "" } });
   const third = renderFrozenCampaign(campaign(), { mode: "recipient", values: { first_name: "Jane" } });
-  assert.match(first.html, /Hi Stuart/);
+  assert.match(first.html, /Hi there,/);
   assert.match(blank.html, /Hi there/);
   assert.doesNotMatch(blank.html, /Hi Stuart|Hi Jane|Hi Alex/);
-  assert.match(third.html, /Hi Jane/);
+  assert.match(third.html, /Hi there,/);
   assert.doesNotMatch(third.html, /Hi Stuart|Hi Alex/);
 });
 
@@ -263,9 +290,10 @@ test("designer sample location scan covers every provider-bound envelope field w
   ]);
 });
 
-test("a genuine recipient named Alex remains valid", () => {
+test("a supplied recipient name is ignored even when it matches the designer sample", () => {
   const rendered = renderRecipientCampaignPreview(campaign(), { first_name: "Alex" }, { mode: "recipient" });
-  assert.equal(rendered.subject, "New vans for Alex");
+  assert.equal(rendered.subject, "New vans for there");
+  assert.match(rendered.html, /Hi there,/);
   assert.equal(rendered.personalization.designer_sample_used, false);
   assertProductionPersonalization(rendered);
 });
@@ -302,16 +330,16 @@ test("provider test discards materialised designer preview data and freshly rend
     values: { first_name: "tim" },
   });
   const greeting = providerBound.html.match(/Hi [\p{L}\p{M}'’.-]+,/u)?.[0];
-  assert.equal(greeting, "Hi Tim,");
+  assert.equal(greeting, "Hi there,");
   assert.doesNotMatch(providerBound.html, /\bAlex\b/);
   assert.equal(providerBound.personalization.designer_sample_leaked, false);
   assert.doesNotThrow(() => assertProductionPersonalization(providerBound));
 
   const sarah = renderFrozenCampaign(recovered.campaign, { test: true, mode: "test", values: { first_name: "Sarah" } });
   const blank = renderFrozenCampaign(recovered.campaign, { test: true, mode: "test", values: { first_name: "" } });
-  assert.match(sarah.html, /Hi Sarah,/);
+  assert.match(sarah.html, /Hi there,/);
   assert.doesNotMatch(sarah.html, /\bAlex\b/);
-  assert.match(blank.html, /Hi Stuart,/);
+  assert.match(blank.html, /Hi there,/);
   assert.doesNotMatch(blank.html, /\bAlex\b/);
   assert.doesNotThrow(() => assertProductionPersonalization(sarah));
   assert.doesNotThrow(() => assertProductionPersonalization(blank));
@@ -349,7 +377,7 @@ test("provider source loader reads the original template row rather than preview
   assert.equal(providerSource.campaign.template_snapshot.content_blocks[0].settings.body, "Hi {{first_name}},\n\nSelected for {{company}}");
   assert.equal(Object.prototype.hasOwnProperty.call(providerSource.campaign, "preview"), false);
   const rendered = renderFrozenCampaign(providerSource.campaign, { test: true, mode: "test", values: { first_name: "Tim" } });
-  assert.match(rendered.html, /Hi Tim,/);
+  assert.match(rendered.html, /Hi there,/);
   assert.doesNotMatch(rendered.html, /\bAlex\b/);
 });
 
@@ -395,24 +423,24 @@ test("source-version mismatch blocks with the exact source-load error instead of
   );
 });
 
-test("legacy SendGrid test rendering accepts a name and defaults to Stuart", () => {
+test("legacy SendGrid test rendering ignores names and uses the fixed greeting", () => {
   const fallback = renderLegacySendGridTestCampaign(campaign(), { test_first_name: "   " });
   const named = renderLegacySendGridTestCampaign(campaign(), { test_first_name: "Jane" });
-  assert.equal(fallback.subject, "[SENDGRID TEST] New vans for Stuart");
-  assert.match(fallback.html, /Hi Stuart/);
-  assert.equal(fallback.test_first_name, "Stuart");
-  assert.equal(named.subject, "[SENDGRID TEST] New vans for Jane");
-  assert.match(named.html, /Hi Jane/);
+  assert.equal(fallback.subject, "[SENDGRID TEST] New vans for there");
+  assert.match(fallback.html, /Hi there,/);
+  assert.equal(Object.prototype.hasOwnProperty.call(fallback, "test_first_name"), false);
+  assert.equal(named.subject, "[SENDGRID TEST] New vans for there");
+  assert.match(named.html, /Hi there,/);
   assert.doesNotMatch(named.html, /Hi Alex/);
 });
 
-test("explicit test first name is independent of destination email", () => {
+test("explicit test first name is ignored", () => {
   const rendered = renderRecipientCampaignPreview(
     campaign(),
     { first_name: "Stuart", customer_id: "TEST" },
     { mode: "test" },
   );
-  assert.match(rendered.html, /Hi Stuart/);
+  assert.match(rendered.html, /Hi there,/);
   assert.equal(rendered.personalization.mode, "test");
   assertProductionPersonalization(rendered);
 });
@@ -459,15 +487,15 @@ test("recipient unsubscribe URLs remain independently replaceable", () => {
 
 test("production send route renders inside the recipient loop and guards providers", async () => {
   const sends = await read("../api/marketing-template-campaign-sends.js");
-  assert.match(sends, /for \(const recipient of selectedRecipients\)[\s\S]*renderFrozenCampaign\(campaign,[\s\S]*first_name: recipient\.first_name/);
+  assert.match(sends, /for \(const recipient of selectedRecipients\)[\s\S]*renderFrozenCampaign\(campaign,/);
   assert.match(sends, /assertProductionPersonalization\(rendered\)[\s\S]*callEmailProvider/);
   assert.doesNotMatch(sends, /const renderedBase = renderFrozenCampaign/);
-  assert.match(sends, /test_first_name \|\| body\.testFirstName \|\| "Stuart"/);
+  assert.doesNotMatch(sends, /test_first_name|testFirstName|first_name: recipient\.first_name/);
   assert.match(sends, /unsubscribeUrl/);
 });
 
-test("placeholder helper trims supplied first names", () => {
-  assert.equal(replaceRecipientPlaceholders("Hi {{first_name}}", { first_name: " Jane " }), "Hi Jane");
+test("provider placeholder helper ignores supplied first names", () => {
+  assert.equal(replaceRecipientPlaceholders("Hi {{first_name}}", { first_name: " Jane " }), "Hi there");
   assert.equal(replaceRecipientPlaceholders("Hi {{first_name}}", {}), "Hi there");
   assert.equal(normalizeRecipientFirstName("  Sarah  "), "Sarah");
   assert.equal(normalizeRecipientFirstName("tim"), "Tim");
@@ -481,7 +509,7 @@ for (const productMode of ["finance", "rent2buy"]) {
     productCampaign.template_snapshot.category = productMode === "finance" ? "finance_offer" : "rent2buy";
     productCampaign.template_snapshot.content_blocks[2].settings.product_mode = productMode;
     const rendered = renderFrozenCampaign(productCampaign, { mode: "recipient", values: { first_name: "Jane" } });
-    assert.match(rendered.html, /Hi Jane/);
+    assert.match(rendered.html, /Hi there,/);
     assert.doesNotMatch(rendered.html, /Hi Alex/);
     assertProductionPersonalization(rendered);
   });
@@ -551,10 +579,10 @@ for (const provider of ["sendgrid", "brevo", "smtp2go"]) {
       : provider === "smtp2go"
         ? { subject: body.subject, html: body.html_body }
         : { subject: body.subject, html: body.content[0].value });
-    assert.equal(submitted[0].subject, "New vans for Jane");
-    assert.equal(submitted[1].subject, "New vans for John");
-    assert.match(submitted[0].html, /Hi Jane/);
-    assert.match(submitted[1].html, /Hi John/);
+    assert.equal(submitted[0].subject, "New vans for there");
+    assert.equal(submitted[1].subject, "New vans for there");
+    assert.match(submitted[0].html, /Hi there,/);
+    assert.match(submitted[1].html, /Hi there,/);
     assert.notEqual(submitted[0].html, submitted[1].html);
   });
 }

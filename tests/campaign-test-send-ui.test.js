@@ -23,54 +23,33 @@ function loadPayloadBuilder() {
   };
 }
 
-const input = (testFirstName, email = "internal@vanfinancecompany.co.uk") => ({
+const input = (email = "internal@vanfinancecompany.co.uk") => ({
   id: "11111111-1111-4111-8111-111111111111",
   email,
-  testFirstName,
 });
 
-test("campaign test send submits an explicitly supplied Stuart first name", () => {
+test("campaign test send payload contains no first-name value", () => {
   const { build } = loadPayloadBuilder();
-  assert.equal(build(input("Stuart")).test_first_name, "Stuart");
-});
-
-test("campaign test send trims whitespace around the test first name", () => {
-  const { build } = loadPayloadBuilder();
-  assert.equal(build(input("  Jane  ")).test_first_name, "Jane");
-});
-
-test("campaign test send leaves a blank first name empty for the backend Stuart fallback", () => {
-  const { build } = loadPayloadBuilder();
-  assert.equal(build(input("   ")).test_first_name, "");
-});
-
-test("campaign test send accepts Alex as a genuine supplied test first name", () => {
-  const { build } = loadPayloadBuilder();
-  assert.equal(build(input("Alex")).test_first_name, "Alex");
-});
-
-test("campaign test destination email remains independent from the first name", () => {
-  const { build } = loadPayloadBuilder();
-  const jane = build(input("Jane", "jane@vanfinancecompany.co.uk"));
-  const john = build(input("John", "john@vanfinancecompany.co.uk"));
-  assert.deepEqual({ ...jane }, {
+  assert.deepEqual({ ...build(input()) }, {
     id: "11111111-1111-4111-8111-111111111111",
-    email: "jane@vanfinancecompany.co.uk",
-    test_first_name: "Jane",
+    email: "internal@vanfinancecompany.co.uk",
   });
-  assert.deepEqual({ ...john }, {
+  assert.doesNotMatch(payloadSource, /first_name|firstName/i);
+});
+
+test("campaign test destination email remains configurable", () => {
+  const { build } = loadPayloadBuilder();
+  const payload = build(input("internal-test@vanfinancecompany.co.uk"));
+  assert.deepEqual({ ...payload }, {
     id: "11111111-1111-4111-8111-111111111111",
-    email: "john@vanfinancecompany.co.uk",
-    test_first_name: "John",
+    email: "internal-test@vanfinancecompany.co.uk",
   });
 });
 
-test("campaign test-send UI exposes the optional Stuart field and uses the existing endpoint", () => {
-  assert.match(sendingSource, /Test first name[\s\S]*id="testSendFirstName"[\s\S]*placeholder="Stuart"/);
-  assert.match(sendingSource, /Optional\. Leave blank to use Stuart\./);
-  assert.match(sendingSource, /CampaignTestSendPayload\.build\([\s\S]*testFirstName: \$\("testSendFirstName"\)\.value/);
+test("campaign test-send UI removes the unused first-name field and uses the existing endpoint", () => {
+  assert.doesNotMatch(sendingSource, /Test first name|testSendFirstName|Leave blank to use Stuart/);
+  assert.match(sendingSource, /CampaignTestSendPayload\.build\([\s\S]*email: \$\("testSendEmail"\)\.value/);
   assert.match(sendingSource, /sendApi\("sendTest", payload\)/);
-  assert.doesNotMatch(sendingSource, /sendApi\("sendTest",[\s\S]*Alex/);
   assert.ok(campaignsSource.indexOf("/campaigns/campaign-send-payload.js") < campaignsSource.indexOf("/campaigns/sending-foundation.js"));
 });
 
@@ -83,9 +62,7 @@ test("production campaign-send preparation and confirmation remain independent o
 
 test("campaign UI payload tests make no provider or external network call", () => {
   const { build, networkCalls } = loadPayloadBuilder();
-  build(input("Stuart"));
-  build(input(""));
-  build(input("Alex"));
+  build(input());
   assert.equal(networkCalls(), 0);
   assert.doesNotMatch(payloadSource, /fetch\(|SendGrid|Brevo|SMTP2GO|smtp2go/i);
 });

@@ -785,12 +785,10 @@ async function sendTest(supabase, body = {}) {
     throw new ApiError(400, "Email send migration has not been applied yet.");
   }
   const selectedProvider = activeEmailProvider();
-  const testFirstName = cleanText(body.test_first_name || body.testFirstName || "Stuart", 200) || "Stuart";
   const rendered = renderFrozenCampaign(campaign, {
     test: true,
     mode: "test",
     values: {
-      first_name: testFirstName,
       last_name: cleanText(body.test_last_name || body.testLastName || "", 200),
       company: cleanText(body.test_company || body.testCompany || "Van Finance Company", 300),
       customer_id: "TEST",
@@ -817,7 +815,7 @@ async function sendTest(supabase, body = {}) {
       frozen_subject: rendered.subject,
       frozen_preview_text: rendered.preview_text,
       frozen_html_hash: rendered.html_hash,
-      metadata: { test_recipient_domain: recipientEmail.split("@")[1] || "", test_first_name: testFirstName, email_provider: selectedProvider },
+      metadata: { test_recipient_domain: recipientEmail.split("@")[1] || "", email_provider: selectedProvider },
     }).select(SEND_COLUMNS).single(),
     "Could not create test-send audit record."
   );
@@ -829,7 +827,7 @@ async function sendTest(supabase, body = {}) {
       customer_id: null,
       email: recipientEmail,
       status: "pending",
-      metadata: { test: true, test_first_name: testFirstName, email_provider: selectedProvider },
+      metadata: { test: true, email_provider: selectedProvider },
     }).select(RECIPIENT_COLUMNS).single(),
     "Could not create test recipient audit record."
   );
@@ -854,7 +852,7 @@ async function sendTest(supabase, body = {}) {
       status: "accepted",
       provider_message_id: provider.messageId || null,
       first_sent_at: completedAt,
-      metadata: { test: true, test_first_name: testFirstName, email_provider: selectedProvider, provider_response: provider.response || {} },
+      metadata: { test: true, email_provider: selectedProvider, provider_response: provider.response || {} },
     }).eq("id", recipientRecord.id);
     return { send: { ...send, status: "completed", sent_count: 1, completed_at: completedAt }, provider_message_id: provider.messageId || "" };
   } catch (error) {
@@ -897,7 +895,7 @@ async function prepareProductionSend(supabase, body = {}) {
   const resolved = await resolveRecipients(supabase, campaign);
   if (resolved.counts.final_eligible_count <= 0) throw new ApiError(400, "No eligible recipients remain for this campaign.");
   const selectedCount = Math.min(batchSize, resolved.counts.final_eligible_count, MAX_PRODUCTION_BATCH_SIZE);
-  const rendered = renderFrozenCampaign(campaign, { test: false, mode: "recipient", values: { first_name: "there", campaign_name: campaign.name }, unsubscribeUrl: "{{unsubscribe_url}}" });
+  const rendered = renderFrozenCampaign(campaign, { test: false, mode: "recipient", values: { campaign_name: campaign.name }, unsubscribeUrl: "{{unsubscribe_url}}" });
   const totalSkipped = resolved.counts.skipped_duplicate_count + resolved.counts.history_excluded_count;
   const token = randomToken();
   const expiresAt = new Date(Date.now() + PREPARE_TOKEN_TTL_MS).toISOString();
@@ -1023,7 +1021,7 @@ async function confirmProductionSend(supabase, body = {}) {
       customer_id: recipient.customer_id,
       email: recipient.email,
       status: "pending",
-      metadata: { name: recipient.name, first_name: recipient.first_name, email_provider: preparedProvider },
+      metadata: { name: recipient.name, email_provider: preparedProvider },
     }).select(RECIPIENT_COLUMNS).maybeSingle();
     if (inserted.error) {
       const message = String(inserted.error.message || "").toLowerCase();
@@ -1049,7 +1047,6 @@ async function confirmProductionSend(supabase, body = {}) {
         mode: "recipient",
         unsubscribeUrl,
         values: {
-          first_name: recipient.first_name,
           last_name: recipient.last_name,
           company: recipient.company,
           customer_id: recipient.customer_id,
@@ -1076,7 +1073,7 @@ async function confirmProductionSend(supabase, body = {}) {
         status: "accepted",
         provider_message_id: provider.messageId || null,
         first_sent_at: new Date().toISOString(),
-        metadata: { name: recipient.name, first_name: recipient.first_name, email_provider: preparedProvider, provider_response: provider.response || {} },
+        metadata: { name: recipient.name, email_provider: preparedProvider, provider_response: provider.response || {} },
       }).eq("id", recipientRecord.id);
       sentCount += 1;
     } catch (error) {
