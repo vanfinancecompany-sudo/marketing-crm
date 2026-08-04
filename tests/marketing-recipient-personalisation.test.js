@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
   assertProductionPersonalization,
+  normalizeRecipientFirstName,
   renderCampaignPreview,
   renderRecipientCampaignPreview,
   replaceRecipientPlaceholders,
@@ -108,15 +109,15 @@ test("Jane and John receive different recipient-specific renders", () => {
   assert.match(jane.html, /Vehicle image placeholder/);
 });
 
-test("mock provider receives independently rendered Jane and John payloads", async () => {
+test("mock provider receives independently rendered Stuart and Jane payloads", async () => {
   const calls = [];
   const mockProvider = async (payload) => {
     calls.push(structuredClone(payload));
     return { messageId: `mock-${calls.length}` };
   };
   const recipients = [
+    { email: "stuart@example.test", first_name: "Stuart", last_name: "Weston", company: "Van Finance Company", customer_id: "CUST-STUART", unsubscribe: "https://example.test/unsubscribe?token=stuart" },
     { email: "jane@example.test", first_name: "Jane", last_name: "Jones", company: "Jane Ltd", customer_id: "CUST-JANE", unsubscribe: "https://example.test/unsubscribe?token=jane" },
-    { email: "john@example.test", first_name: "John", last_name: "Smith", company: "John Ltd", customer_id: "CUST-JOHN", unsubscribe: "https://example.test/unsubscribe?token=john" },
   ];
 
   for (const recipient of recipients) {
@@ -141,16 +142,16 @@ test("mock provider receives independently rendered Jane and John payloads", asy
   }
 
   assert.equal(calls.length, 2);
-  assert.match(calls[0].html, /Hi Jane/);
-  assert.match(calls[1].html, /Hi John/);
+  assert.match(calls[0].html, /Hi Stuart/);
+  assert.match(calls[1].html, /Hi Jane/);
   assert.notEqual(calls[0].html, calls[1].html);
-  assert.equal(calls[0].subject, "New vans for Jane");
-  assert.equal(calls[1].subject, "New vans for John");
-  assert.equal(calls[0].preview_text, "Jane, three vans are ready");
-  assert.equal(calls[1].preview_text, "John, three vans are ready");
-  assert.match(calls[0].html, /token=jane/);
-  assert.doesNotMatch(calls[0].html, /token=john/);
-  assert.match(calls[1].html, /token=john/);
+  assert.equal(calls[0].subject, "New vans for Stuart");
+  assert.equal(calls[1].subject, "New vans for Jane");
+  assert.equal(calls[0].preview_text, "Stuart, three vans are ready");
+  assert.equal(calls[1].preview_text, "Jane, three vans are ready");
+  assert.match(calls[0].html, /token=stuart/);
+  assert.doesNotMatch(calls[0].html, /token=jane/);
+  assert.match(calls[1].html, /token=jane/);
 });
 
 test("blank first names use there and never leak Alex", () => {
@@ -163,11 +164,12 @@ test("blank first names use there and never leak Alex", () => {
   assert.doesNotMatch(rendered.html, /\bAlex\b/);
 });
 
-test("base and explicit designer previews use Alex", () => {
+test("only explicit designer previews use Alex", () => {
   const base = renderCampaignPreview(campaign());
   const explicit = renderRecipientCampaignPreview(campaign(), {}, { mode: "designer_preview" });
-  assert.equal(base.subject, "New vans for Alex");
-  assert.match(base.html, /Hi Alex/);
+  assert.equal(base.subject, "New vans for there");
+  assert.match(base.html, /Hi there/);
+  assert.doesNotMatch(base.html, /Hi Alex/);
   assert.equal(explicit.subject, "New vans for Alex");
   assert.match(explicit.html, /Hi Alex/);
   assert.equal(explicit.personalization.mode, "designer_preview");
@@ -179,6 +181,47 @@ test("test mode with a blank first name defaults to Stuart", () => {
   assert.match(rendered.html, /Hi Stuart/);
   assert.equal(rendered.personalization.first_name, "Stuart");
   assertProductionPersonalization(rendered);
+});
+
+test("internal tests render explicitly supplied Stuart and Sarah names", () => {
+  const stuart = renderFrozenCampaign(campaign(), { test: true, mode: "test", values: { first_name: "Stuart" } });
+  const sarah = renderFrozenCampaign(campaign(), { test: true, mode: "test", values: { first_name: "Sarah" } });
+  assert.match(stuart.html, /Hi Stuart/);
+  assert.doesNotMatch(stuart.html, /Hi Alex/);
+  assert.match(sarah.html, /Hi Sarah/);
+  assert.doesNotMatch(sarah.html, /Hi Alex/);
+  assertProductionPersonalization(stuart);
+  assertProductionPersonalization(sarah);
+});
+
+test("blank and malformed production first names use there", () => {
+  for (const firstName of ["", "   ", null, "jane@example.test", "https://example.test/name", "12345", "<script>"]) {
+    const rendered = renderFrozenCampaign(campaign(), { mode: "recipient", values: { first_name: firstName } });
+    assert.match(rendered.html, /Hi there/);
+    assert.doesNotMatch(rendered.html, /Hi Alex/);
+    assertProductionPersonalization(rendered);
+  }
+});
+
+test("consecutive recipients cannot inherit the previous first name", () => {
+  const first = renderFrozenCampaign(campaign(), { mode: "recipient", values: { first_name: "Stuart" } });
+  const blank = renderFrozenCampaign(campaign(), { mode: "recipient", values: { first_name: "" } });
+  const third = renderFrozenCampaign(campaign(), { mode: "recipient", values: { first_name: "Jane" } });
+  assert.match(first.html, /Hi Stuart/);
+  assert.match(blank.html, /Hi there/);
+  assert.doesNotMatch(blank.html, /Hi Stuart|Hi Jane|Hi Alex/);
+  assert.match(third.html, /Hi Jane/);
+  assert.doesNotMatch(third.html, /Hi Stuart|Hi Alex/);
+});
+
+test("designer sample data is rejected if it leaks into a test or recipient render", () => {
+  const staleSampleCampaign = campaign();
+  staleSampleCampaign.template_snapshot.content_blocks[0].settings.body = "Hi Alex,\n\nThis stale designer preview must not be sent.";
+  for (const [mode, firstName] of [["test", "Stuart"], ["recipient", "Jane"]]) {
+    const rendered = renderRecipientCampaignPreview(staleSampleCampaign, { first_name: firstName }, { mode });
+    assert.equal(rendered.personalization.designer_sample_leaked, true);
+    assert.throws(() => assertProductionPersonalization(rendered), /designer sample data/i);
+  }
 });
 
 test("a genuine recipient named Alex remains valid", () => {
@@ -269,7 +312,22 @@ test("production send route renders inside the recipient loop and guards provide
 test("placeholder helper trims supplied first names", () => {
   assert.equal(replaceRecipientPlaceholders("Hi {{first_name}}", { first_name: " Jane " }), "Hi Jane");
   assert.equal(replaceRecipientPlaceholders("Hi {{first_name}}", {}), "Hi there");
+  assert.equal(normalizeRecipientFirstName("  Sarah  "), "Sarah");
+  assert.equal(normalizeRecipientFirstName("sarah@example.test"), "there");
 });
+
+for (const productMode of ["finance", "rent2buy"]) {
+  test(`${productMode} campaign snapshots use corrected recipient personalisation`, () => {
+    const productCampaign = campaign();
+    productCampaign.campaign_type = productMode;
+    productCampaign.template_snapshot.category = productMode === "finance" ? "finance_offer" : "rent2buy";
+    productCampaign.template_snapshot.content_blocks[2].settings.product_mode = productMode;
+    const rendered = renderFrozenCampaign(productCampaign, { mode: "recipient", values: { first_name: "Jane" } });
+    assert.match(rendered.html, /Hi Jane/);
+    assert.doesNotMatch(rendered.html, /Hi Alex/);
+    assertProductionPersonalization(rendered);
+  });
+}
 
 function providerResponse(provider, index) {
   if (provider === "sendgrid") {
