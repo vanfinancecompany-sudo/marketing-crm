@@ -1,6 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
 import {
-  composeFinanceVehicleWithRent2Buy,
   mapFinanceVehicleRow,
   mapRentVehicleRow,
   normalizeRegistrationKey,
@@ -465,7 +464,11 @@ async function resolveSelectedVehicleReferences(supabase, blocks = [], options =
   const needsResolution = blocks.some((block) => block.type === "vehicle_grid" && (block.settings.selected_vehicles || []).some((vehicle) => vehicle.snapshot_status === "unresolved"));
   if (!needsResolution) return blocks;
   if (!supabase) throw new Error("Vehicle selection resolution requires Supabase access.");
-  const { vehicles } = await vehiclesForSelection(supabase);
+  const productModes = [...new Set(blocks
+    .filter((block) => block.type === "vehicle_grid" && (block.settings.selected_vehicles || []).some((vehicle) => vehicle.snapshot_status === "unresolved"))
+    .map((block) => block.settings.product_mode || "finance"))];
+  const selectionResults = await Promise.all(productModes.map((productMode) => vehiclesForSelection(supabase, productMode)));
+  const vehicles = selectionResults.flatMap((result) => result.vehicles || []);
   const lookup = buildVehicleSelectionLookup(vehicles);
   return blocks.map((block) => {
     if (block.type !== "vehicle_grid") return block;
@@ -622,25 +625,33 @@ async function duplicateTemplate(supabase, body = {}) {
   return { template: normalizeTemplate(data) };
 }
 
-async function vehiclesForSelection(supabase) {
-  const [financeResult, rentResult] = await Promise.all([
-    supabase.from("facebook_adverts").select("id, title, picture, price, vat, salePrice, vanDescription, vanSpec, weblink, is_active").eq("is_active", true).limit(STOCK_LIMIT),
-    supabase.from("rent_vehicles").select("id, created_at, registration, picture, monthly, week, initialRental, vanDescription, vanSpec, webLink, is_active").eq("is_active", true).limit(STOCK_LIMIT),
-  ]);
+export async function vehiclesForSelection(supabase, requestedProductMode = "finance") {
+  const productMode = String(requestedProductMode || "finance").trim().toLowerCase();
+  if (!VEHICLE_PRODUCT_MODES.has(productMode)) throw new ValidationError("Vehicle selector product mode is not supported.");
+
+  if (productMode === "rent2buy") {
+    const rentResult = await supabase
+      .from("rent_vehicles")
+      .select("id, created_at, registration, picture, monthly, week, initialRental, vanDescription, vanSpec, webLink, is_active")
+      .eq("is_active", true)
+      .limit(STOCK_LIMIT);
+    assertSupabase(rentResult, "Could not load Rent2Buy stock.");
+    return {
+      productMode,
+      vehicles: (rentResult.data || []).map(mapRentVehicleRow).map(toMarketingVehicleSelectionContract),
+    };
+  }
+
+  const financeResult = await supabase
+    .from("facebook_adverts")
+    .select("id, title, picture, price, vat, salePrice, vanDescription, vanSpec, weblink, is_active")
+    .eq("is_active", true)
+    .limit(STOCK_LIMIT);
   assertSupabase(financeResult, "Could not load Finance stock.");
-  assertSupabase(rentResult, "Could not load Rent2Buy stock.");
-  const financeVehicles = (financeResult.data || []).map(mapFinanceVehicleRow);
-  const rentVehicles = (rentResult.data || []).map(mapRentVehicleRow);
-  const rentByReg = new Map(
-    rentVehicles
-      .map((vehicle) => [normalizeRegistrationKey(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name), vehicle])
-      .filter(([registration]) => registration)
-  );
-  const vehicles = financeVehicles.map((vehicle) => {
-    const registration = normalizeRegistrationKey(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name);
-    return composeFinanceVehicleWithRent2Buy(vehicle, rentByReg.get(registration) || null);
-  });
-  return { vehicles: vehicles.map(toMarketingVehicleSelectionContract) };
+  return {
+    productMode,
+    vehicles: (financeResult.data || []).map(mapFinanceVehicleRow).map(toMarketingVehicleSelectionContract),
+  };
 }
 
 function escapeHtml(value) {
@@ -982,7 +993,7 @@ export default async function handler(request, response) {
     else if (action === "archive") result = await archiveTemplate(supabase, body);
     else if (action === "duplicate") result = await duplicateTemplate(supabase, body);
     else if (action === "preview") result = await previewTemplate(supabase, body);
-    else if (action === "vehiclesForSelection") result = await vehiclesForSelection(supabase);
+    else if (action === "vehiclesForSelection") result = await vehiclesForSelection(supabase, body.productMode);
     else throw new ValidationError("Unknown Email Templates API action.");
 
     json(response, 200, { ok: true, ...result });
