@@ -238,3 +238,30 @@ test("test and final recipient email HTML preserve the Primary Colour on vehicle
     assert.doesNotMatch(rendered.html, /bgcolor="#2563eb" style="border-radius:7px;"/);
   }
 });
+
+for (const productMode of ["finance", "rent2buy"]) {
+  test(`${productMode} Email Templates HTML includes readable mobile typography`, () => {
+    const vehicle = productMode === "finance" ? {
+      selection_id: "finance:finance-1",
+      title: "Ford Transit Custom",
+      description: "Practical van details",
+      finance: { price: "£18,995", vat: "NO VAT", monthly: "£399 per month", url: "https://www.vanfinancecompany.co.uk/finance-van" },
+      rent2buy: null,
+    } : {
+      selection_id: "rent2buy:rent-1",
+      title: "Ford Transit Custom Rent2Buy",
+      description: "Flexible Rent2Buy details",
+      finance: null,
+      rent2buy: { monthly: "£795", initialRental: "£1,590", term: "48 months", url: "https://www.rent2buyvans.co.uk/van-pages/xy23zzz" },
+    };
+    const html = renderVehicleEmail(selectedVehicleBlock(productMode, vehicle));
+
+    assert.match(html, /@media only screen and \(max-width:600px\)/);
+    assert.match(html, /\.email-body-copy,[\s\S]*font-size:16px !important;\s*line-height:24px !important;/);
+    assert.match(html, /\.email-support-copy\s*\{\s*font-size:15px !important;\s*line-height:23px !important;/);
+    assert.match(html, /\.email-vehicle-detail\s*\{\s*font-size:14px !important;\s*line-height:21px !important;/);
+    assert.match(html, /class="email-body-copy"/);
+    assert.match(html, /class="email-vehicle-detail"/);
+    assert.match(html, /max-width:660px/);
+  });
+}

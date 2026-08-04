@@ -225,10 +225,6 @@
           <label>Internal test email address
             <input id="testSendEmail" type="email" placeholder="name@example.com" />
           </label>
-          <label>Test first name
-            <input id="testSendFirstName" type="text" placeholder="Stuart" />
-            <span class="hint">Optional. Leave blank to use Stuart.</span>
-          </label>
         </div>
         <p id="testDisabledReason" class="send-disabled-reason hidden"></p>
         <div class="toolbar">
@@ -408,7 +404,6 @@
     const payload = window.CampaignTestSendPayload.build({
       id,
       email: $("testSendEmail").value,
-      testFirstName: $("testSendFirstName").value,
     });
     const result = await sendApi("sendTest", payload);
     setMessage(`Test email accepted by ${state.brevo?.provider || "the email provider"}${result.provider_message_id ? ` (${result.provider_message_id})` : ""}.`);

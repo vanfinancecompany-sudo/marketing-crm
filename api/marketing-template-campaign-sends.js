@@ -17,7 +17,9 @@ import {
   CampaignValidationError,
   assertProductionPersonalization,
   cleanText,
+  finalizeProviderEmailTemplate,
   renderRecipientCampaignPreview,
+  unresolvedMarketingPlaceholders,
 } from "../lib/marketingEmailTemplateRenderer.js";
 import {
   SendGridProviderError,
@@ -246,13 +248,13 @@ export function renderFrozenCampaign(campaign = {}, options = {}) {
       ? `<p style="margin:18px 0 0;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;text-align:center;">Test email only. No production unsubscribe action is included.</p>`
       : "";
   const html = String(preview.html || "").replace("</body>", `${unsubscribeHtml}</body>`);
-  return {
+  const finalized = finalizeProviderEmailTemplate({
     subject,
     preview_text: preview.preview_text || campaign.preview_text || "",
     html,
-    html_hash: hashValue(`${subject}\n${html}`),
     personalization: preview.personalization,
-  };
+  });
+  return { ...finalized, html_hash: hashValue(`${finalized.subject}\n${finalized.html}`) };
 }
 
 function requireProductionSendConfig(provider = activeEmailProvider()) {
@@ -296,7 +298,7 @@ function databaseSendProvider(provider) {
   return provider === "sendgrid" ? "sendgrid" : "brevo";
 }
 
-async function callBrevoEmail({ to, name, subject, html, tags = [], headers = {} }, options = {}) {
+async function callBrevoEmail({ to, name, subject, html, text = "", tags = [], headers = {} }, options = {}) {
   const environment = options.environment || process.env;
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   if (!environment.BREVO_API_KEY) throw new ApiError(400, "Brevo API key is not configured.");
@@ -316,22 +318,23 @@ async function callBrevoEmail({ to, name, subject, html, tags = [], headers = {}
         to: [{ email: to, name }],
         subject,
         htmlContent: html,
+        textContent: text,
         tags,
         headers,
       }),
     });
-    const text = await response.text().catch(() => {
+    const responseText = await response.text().catch(() => {
       throw new AmbiguousSubmissionError("Brevo response could not be read after submission.");
     });
     let data = {};
-    if (text) {
-      try { data = JSON.parse(text); }
+    if (responseText) {
+      try { data = JSON.parse(responseText); }
       catch {
         if (response.ok) throw new AmbiguousSubmissionError("Brevo accepted status but returned an unreadable response.");
-        data = { message: text.slice(0, 300) };
+        data = { message: responseText.slice(0, 300) };
       }
     }
-    if (!response.ok) throw new BrevoHttpError(response.status, text || JSON.stringify(data));
+    if (!response.ok) throw new BrevoHttpError(response.status, responseText || JSON.stringify(data));
     const messageId = data.messageId || data.messageIds?.[0] || "";
     if (!messageId) throw new AmbiguousSubmissionError("Brevo response did not include a message id.");
     return { messageId, response: data };
@@ -438,19 +441,24 @@ export async function callEmailProvider(payload, options = {}) {
   const environment = options.environment || process.env;
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const provider = options.provider || activeEmailProvider(environment);
-  if (provider === "smtp2go") return callSMTP2GO(payload, { environment, fetchImpl });
-  if (provider === "brevo") return callBrevoEmail(payload, { environment, fetchImpl });
+  const providerPayload = finalizeProviderEmailTemplate(payload);
+  if (unresolvedMarketingPlaceholders(providerPayload).length) {
+    throw new CampaignValidationError("Email contains an unresolved marketing placeholder and was not submitted.");
+  }
+  if (provider === "smtp2go") return callSMTP2GO(providerPayload, { environment, fetchImpl });
+  if (provider === "brevo") return callBrevoEmail(providerPayload, { environment, fetchImpl });
   if (provider === "sendgrid") {
     const config = emailProviderConfig(provider, environment);
     return sendSendGridEmail({
       apiKey: config.apiKey,
-      to: payload.to,
-      toName: payload.name,
-      subject: payload.subject,
-      html: payload.html,
-      customArgs: sendGridCustomArguments(payload),
-      headers: payload.headers,
-      categories: payload.tags,
+      to: providerPayload.to,
+      toName: providerPayload.name,
+      subject: providerPayload.subject,
+      html: providerPayload.html,
+      text: providerPayload.text,
+      customArgs: sendGridCustomArguments(providerPayload),
+      headers: providerPayload.headers,
+      categories: providerPayload.tags,
       fromEmail: config.senderEmail,
       fromName: config.senderName,
       fetchImpl,
@@ -717,12 +725,10 @@ async function sendTest(supabase, body = {}) {
     throw new ApiError(400, "Email send migration has not been applied yet.");
   }
   const selectedProvider = activeEmailProvider();
-  const testFirstName = cleanText(body.test_first_name || body.testFirstName || "Stuart", 200) || "Stuart";
   const rendered = renderFrozenCampaign(campaign, {
     test: true,
     mode: "test",
     values: {
-      first_name: testFirstName,
       last_name: cleanText(body.test_last_name || body.testLastName || "", 200),
       company: cleanText(body.test_company || body.testCompany || "Van Finance Company", 300),
       customer_id: "TEST",
@@ -748,7 +754,7 @@ async function sendTest(supabase, body = {}) {
       frozen_subject: rendered.subject,
       frozen_preview_text: rendered.preview_text,
       frozen_html_hash: rendered.html_hash,
-      metadata: { test_recipient_domain: recipientEmail.split("@")[1] || "", test_first_name: testFirstName, email_provider: selectedProvider },
+      metadata: { test_recipient_domain: recipientEmail.split("@")[1] || "", email_provider: selectedProvider },
     }).select(SEND_COLUMNS).single(),
     "Could not create test-send audit record."
   );
@@ -760,7 +766,7 @@ async function sendTest(supabase, body = {}) {
       customer_id: null,
       email: recipientEmail,
       status: "pending",
-      metadata: { test: true, test_first_name: testFirstName, email_provider: selectedProvider },
+      metadata: { test: true, email_provider: selectedProvider },
     }).select(RECIPIENT_COLUMNS).single(),
     "Could not create test recipient audit record."
   );
@@ -771,6 +777,7 @@ async function sendTest(supabase, body = {}) {
       name: "Test recipient",
       subject: rendered.subject,
       html: rendered.html,
+      text: rendered.text,
       tags: ["marketing-crm", "test", campaign.id],
       sendType: "test",
       headers: {
@@ -785,7 +792,7 @@ async function sendTest(supabase, body = {}) {
       status: "accepted",
       provider_message_id: provider.messageId || null,
       first_sent_at: completedAt,
-      metadata: { test: true, test_first_name: testFirstName, email_provider: selectedProvider, provider_response: provider.response || {} },
+      metadata: { test: true, email_provider: selectedProvider, provider_response: provider.response || {} },
     }).eq("id", recipientRecord.id);
     return { send: { ...send, status: "completed", sent_count: 1, completed_at: completedAt }, provider_message_id: provider.messageId || "" };
   } catch (error) {
@@ -826,7 +833,7 @@ async function prepareProductionSend(supabase, body = {}) {
   const resolved = await resolveRecipients(supabase, campaign);
   if (resolved.counts.final_eligible_count <= 0) throw new ApiError(400, "No eligible recipients remain for this campaign.");
   const selectedCount = Math.min(batchSize, resolved.counts.final_eligible_count, MAX_PRODUCTION_BATCH_SIZE);
-  const rendered = renderFrozenCampaign(campaign, { test: false, mode: "recipient", values: { first_name: "there", campaign_name: campaign.name }, unsubscribeUrl: "{{unsubscribe_url}}" });
+  const rendered = renderFrozenCampaign(campaign, { test: false, mode: "recipient", values: { campaign_name: campaign.name }, unsubscribeUrl: "{{unsubscribe_url}}" });
   const totalSkipped = resolved.counts.skipped_duplicate_count + resolved.counts.history_excluded_count;
   const token = randomToken();
   const expiresAt = new Date(Date.now() + PREPARE_TOKEN_TTL_MS).toISOString();
@@ -976,7 +983,6 @@ async function confirmProductionSend(supabase, body = {}) {
         mode: "recipient",
         unsubscribeUrl,
         values: {
-          first_name: recipient.first_name,
           last_name: recipient.last_name,
           company: recipient.company,
           customer_id: recipient.customer_id,
@@ -989,6 +995,7 @@ async function confirmProductionSend(supabase, body = {}) {
         name: recipient.name,
         subject: rendered.subject,
         html: rendered.html,
+        text: rendered.text,
         tags: ["marketing-crm", "production", campaign.id],
         sendType: "production",
         headers: {
