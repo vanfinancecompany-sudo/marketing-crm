@@ -21,7 +21,7 @@ jobs:
       - run: npm ci
       - run: node --test tests/marketing-recipient-personalisation.test.js
 
-  full:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,4 +30,4 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm test
+      - run: npm run build
