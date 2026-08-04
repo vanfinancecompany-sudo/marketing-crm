@@ -3,10 +3,13 @@ import { createClient } from "@supabase/supabase-js";
 import {
   CampaignValidationError,
   assertProductionPersonalization,
-  campaignFromOriginalTemplateSource,
   cleanText,
   renderRecipientCampaignPreview,
 } from "../lib/marketingEmailTemplateRenderer.js";
+import {
+  loadProviderCampaignSource,
+  logProviderPersonalizationGuard,
+} from "./marketing-template-campaign-sends.js";
 import {
   SENDGRID_TEST_SENDER_EMAIL,
   SendGridProviderError,
@@ -21,7 +24,6 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ZERO_WIDTH_EMAIL_CHARACTERS = /[\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g;
 const NON_BREAKING_SPACES = /[\u00A0\u202F]/g;
 const CAMPAIGN_COLUMNS = "id,name,description,channel,objective,status,tags,metadata,created_by,created_at,updated_at,archived_at,campaign_type,template_id,template_name,template_snapshot,subject_line,preview_text,audience_snapshot";
-const TEMPLATE_SOURCE_COLUMNS = "id,name,category,default_subject,preview_text,header_logo,hero_heading,intro_text,main_body,cta_text,cta_url,footer,brand_colour,company_name,secondary_colour,social_links,master_layout,content_blocks,updated_at";
 const SEND_COLUMNS = "id,campaign_id,send_type,status,provider,requested_count,eligible_count,suppressed_count,sent_count,failed_count,skipped_duplicate_count,created_by,created_at,updated_at,started_at,completed_at,confirmation_token_hash,frozen_subject,frozen_preview_text,frozen_html_hash,metadata,error_summary";
 
 class ApiError extends Error {
@@ -123,7 +125,7 @@ export function safeSendGridTestErrorMessage(error) {
   return "SendGrid test send failed.";
 }
 
-export function renderLegacySendGridTestCampaign(campaign = {}, values = {}) {
+export function renderLegacySendGridTestCampaign(campaign = {}, values = {}, sourceDiagnostics = {}) {
   const testFirstName = cleanText(
     values.test_first_name || values.testFirstName || values.first_name || "Stuart",
     200,
@@ -139,6 +141,7 @@ export function renderLegacySendGridTestCampaign(campaign = {}, values = {}) {
     },
     { mode: "test" },
   );
+  logProviderPersonalizationGuard(preview, sourceDiagnostics, "legacy_internal_test");
   assertProductionPersonalization(preview);
   const subject = `[SENDGRID TEST] ${preview.subject || campaign.subject_line || "Marketing email"}`;
   const notice = `<p style="margin:18px 0 0;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;text-align:center;">SendGrid test email only. No production unsubscribe or suppression action is included.</p>`;
@@ -165,13 +168,8 @@ async function sendControlledTest(supabase, body = {}) {
   const storedCampaign = campaignResult.data;
   if (!storedCampaign) throw new ApiError(404, "Template campaign was not found.");
   if (storedCampaign.status === "archived") throw new ApiError(400, "Archived campaigns cannot send test emails.");
-  const templateId = storedCampaign.template_snapshot?.source_template_id || storedCampaign.template_id;
-  const templateResult = assertSupabase(
-    await supabase.from("marketing_email_templates").select(TEMPLATE_SOURCE_COLUMNS).eq("id", templateId).maybeSingle(),
-    "Could not load the original email template source."
-  );
-  if (!templateResult.data) throw new CampaignValidationError("The original email template source is unavailable.");
-  const campaign = campaignFromOriginalTemplateSource(storedCampaign, templateResult.data).campaign;
+  const providerSource = await loadProviderCampaignSource(supabase, storedCampaign);
+  const campaign = providerSource.campaign;
 
   const since = new Date(Date.now() - TEST_COOLDOWN_MS).toISOString();
   const cooldown = assertSupabase(
@@ -180,7 +178,7 @@ async function sendControlledTest(supabase, body = {}) {
   );
   if ((cooldown.count || 0) > 0) throw new ApiError(429, "Please wait before sending another SendGrid test email for this campaign.");
 
-  const preview = renderLegacySendGridTestCampaign(campaign, body);
+  const preview = renderLegacySendGridTestCampaign(campaign, body, providerSource.diagnostics);
   const subject = preview.subject;
   const html = preview.html;
   const now = new Date().toISOString();

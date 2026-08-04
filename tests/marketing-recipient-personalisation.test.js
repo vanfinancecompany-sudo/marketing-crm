@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import {
   assertProductionPersonalization,
   campaignFromOriginalTemplateSource,
+  findLiteralTokenLocations,
   normalizeRecipientFirstName,
   renderCampaignPreview,
   renderRecipientCampaignPreview,
@@ -231,8 +232,35 @@ test("designer sample data is rejected if it leaks into a test or recipient rend
   for (const [mode, firstName] of [["test", "Stuart"], ["recipient", "Jane"]]) {
     const rendered = renderRecipientCampaignPreview(staleSampleCampaign, { first_name: firstName }, { mode });
     assert.equal(rendered.personalization.designer_sample_leaked, true);
+    assert.ok(rendered.personalization.designer_sample_locations.includes("source.template_snapshot.content_blocks[0].settings.body"));
+    assert.ok(rendered.personalization.designer_sample_locations.includes("provider.html"));
     assert.throws(() => assertProductionPersonalization(rendered), /designer sample data/i);
   }
+});
+
+test("designer sample location scan covers every provider-bound envelope field without logging values", () => {
+  const locations = findLiteralTokenLocations({
+    subject: "Alex subject",
+    preview_text: "Alex preview",
+    html: "<p>Alex body</p>",
+    plain_text: "Alex plain text",
+    header_text: "Alex header",
+    footer: "Alex footer",
+    vehicle_cards: [{ title: "Alex vehicle" }],
+    company_name: "Alex company",
+    metadata_html: "Alex metadata",
+  });
+  assert.deepEqual(locations, [
+    "subject",
+    "preview_text",
+    "html",
+    "plain_text",
+    "header_text",
+    "footer",
+    "vehicle_cards[0].title",
+    "company_name",
+    "metadata_html",
+  ]);
 });
 
 test("a genuine recipient named Alex remains valid", () => {
@@ -295,8 +323,8 @@ test("a changed reusable template cannot replace the frozen provider source", ()
   const changedTemplate = { ...originalTemplateSource(), updated_at: "2026-08-02T00:00:00.000Z" };
   const recovered = campaignFromOriginalTemplateSource(contaminatedCampaign, changedTemplate);
   assert.equal(recovered.refreshed, false);
-  const rendered = renderFrozenCampaign(recovered.campaign, { test: true, mode: "test", values: { first_name: "Tim" } });
-  assert.throws(() => assertProductionPersonalization(rendered), /designer sample data/i);
+  assert.equal(recovered.campaign, null);
+  assert.equal(recovered.diagnostics.source_version_match, false);
 });
 
 test("provider source loader reads the original template row rather than preview HTML", async () => {
@@ -316,11 +344,55 @@ test("provider source loader reads the original template row rather than preview
   contaminatedCampaign.preview = { html: "<p>Hi Alex,</p>" };
   const providerSource = await loadProviderCampaignSource(supabase, contaminatedCampaign);
   assert.deepEqual(selectedTables, ["marketing_email_templates"]);
-  assert.equal(providerSource.template_snapshot.content_blocks[0].settings.body, "Hi {{first_name}},\n\nSelected for {{company}}");
-  assert.equal(Object.prototype.hasOwnProperty.call(providerSource, "preview"), false);
-  const rendered = renderFrozenCampaign(providerSource, { test: true, mode: "test", values: { first_name: "Tim" } });
+  assert.equal(providerSource.diagnostics.source_used, "original_template_source");
+  assert.equal(providerSource.diagnostics.source_version_match, true);
+  assert.equal(providerSource.campaign.template_snapshot.content_blocks[0].settings.body, "Hi {{first_name}},\n\nSelected for {{company}}");
+  assert.equal(Object.prototype.hasOwnProperty.call(providerSource.campaign, "preview"), false);
+  const rendered = renderFrozenCampaign(providerSource.campaign, { test: true, mode: "test", values: { first_name: "Tim" } });
   assert.match(rendered.html, /Hi Tim,/);
   assert.doesNotMatch(rendered.html, /\bAlex\b/);
+});
+
+test("denied or unavailable clean source blocks with the exact source-load error and never uses the contaminated snapshot", async () => {
+  const contaminatedCampaign = campaign();
+  contaminatedCampaign.template_snapshot.content_blocks[0].settings.body = "Hi Alex,";
+  let templateQueries = 0;
+  const supabase = {
+    from() {
+      templateQueries += 1;
+      return {
+        select() { return this; },
+        eq() { return this; },
+        async maybeSingle() { return { data: null, error: { message: "permission denied" } }; },
+      };
+    },
+  };
+  await assert.rejects(
+    () => loadProviderCampaignSource(supabase, contaminatedCampaign),
+    (error) => error.message === "Unable to load matching original template source."
+      && !/designer sample data/i.test(error.message),
+  );
+  assert.equal(templateQueries, 1);
+});
+
+test("source-version mismatch blocks with the exact source-load error instead of falling back to Alex", async () => {
+  const contaminatedCampaign = campaign();
+  contaminatedCampaign.template_snapshot.content_blocks[0].settings.body = "Hi Alex,";
+  const mismatchedTemplate = { ...originalTemplateSource(), updated_at: "2026-08-02T00:00:00.000Z" };
+  const supabase = {
+    from() {
+      return {
+        select() { return this; },
+        eq() { return this; },
+        async maybeSingle() { return { data: mismatchedTemplate, error: null }; },
+      };
+    },
+  };
+  await assert.rejects(
+    () => loadProviderCampaignSource(supabase, contaminatedCampaign),
+    (error) => error.message === "Unable to load matching original template source."
+      && !/designer sample data/i.test(error.message),
+  );
 });
 
 test("legacy SendGrid test rendering accepts a name and defaults to Stuart", () => {

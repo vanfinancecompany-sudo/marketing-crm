@@ -7,6 +7,12 @@ import { renderRecipientCampaignPreview } from "../lib/marketingRecipientPersona
 
 const selectorSource = fs.readFileSync(new URL("../public/email-templates/index.html", import.meta.url), "utf8");
 
+test("Email Templates validates access against its own API rather than the legacy Campaign API", () => {
+  assert.match(selectorSource, /const TEMPLATE_API = "\/api\/marketing-email-templates";/);
+  assert.match(selectorSource, /const ACCESS_API = TEMPLATE_API;/);
+  assert.doesNotMatch(selectorSource, /const ACCESS_API = "\/api\/marketing-campaigns";/);
+});
+
 function createSupabaseFixture() {
   const calls = [];
   const rows = {

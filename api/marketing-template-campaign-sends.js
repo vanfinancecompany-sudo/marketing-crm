@@ -15,9 +15,12 @@ import {
 import { createClient } from "@supabase/supabase-js";
 import {
   CampaignValidationError,
+  PROVIDER_SOURCE_LOAD_ERROR,
   assertProductionPersonalization,
+  campaignSourceDiagnostics,
   campaignFromOriginalTemplateSource,
   cleanText,
+  findLiteralTokenLocations,
   renderRecipientCampaignPreview,
 } from "../lib/marketingEmailTemplateRenderer.js";
 import {
@@ -229,15 +232,63 @@ async function loadOwnedTemplateCampaign(supabase, id) {
 
 export async function loadProviderCampaignSource(supabase, campaign = {}) {
   const templateId = campaign.template_snapshot?.source_template_id || campaign.template_id;
-  if (!templateId) return campaign;
-  const result = await supabase
-    .from("marketing_email_templates")
-    .select(TEMPLATE_SOURCE_COLUMNS)
-    .eq("id", templateId)
-    .maybeSingle();
-  assertSupabase(result, "Could not load the original email template source.");
-  if (!result.data) throw new CampaignValidationError("The original email template source is unavailable.");
-  return campaignFromOriginalTemplateSource(campaign, result.data).campaign;
+  const campaignRecordLocations = findLiteralTokenLocations({
+    subject_line: campaign.subject_line,
+    preview_text: campaign.preview_text,
+    template_snapshot: campaign.template_snapshot,
+  });
+  if (!templateId) {
+    const diagnostics = { ...campaignSourceDiagnostics(campaign), source_used: "none", source_error: "missing_template_id", campaign_record_locations: campaignRecordLocations };
+    console.warn(JSON.stringify({ event: "marketing_provider_source_blocked", ...diagnostics }));
+    throw new CampaignValidationError(PROVIDER_SOURCE_LOAD_ERROR);
+  }
+  let result;
+  try {
+    result = await supabase
+      .from("marketing_email_templates")
+      .select(TEMPLATE_SOURCE_COLUMNS)
+      .eq("id", templateId)
+      .maybeSingle();
+  } catch (error) {
+    const diagnostics = { ...campaignSourceDiagnostics(campaign), source_used: "none", source_error: "template_query_failed", campaign_record_locations: campaignRecordLocations };
+    console.warn(JSON.stringify({ event: "marketing_provider_source_blocked", ...diagnostics }));
+    throw new CampaignValidationError(PROVIDER_SOURCE_LOAD_ERROR);
+  }
+  if (result?.error || !result?.data) {
+    const diagnostics = { ...campaignSourceDiagnostics(campaign), source_used: "none", source_error: result?.error ? "template_query_denied_or_failed" : "template_not_found", campaign_record_locations: campaignRecordLocations };
+    console.warn(JSON.stringify({ event: "marketing_provider_source_blocked", ...diagnostics }));
+    throw new CampaignValidationError(PROVIDER_SOURCE_LOAD_ERROR);
+  }
+  const resolved = campaignFromOriginalTemplateSource(campaign, result.data);
+  const diagnostics = {
+    ...resolved.diagnostics,
+    source_used: resolved.refreshed ? "original_template_source" : "none",
+    source_error: resolved.refreshed ? "" : resolved.reason,
+    campaign_record_locations: campaignRecordLocations,
+    template_record_locations: findLiteralTokenLocations(result.data),
+  };
+  if (!resolved.refreshed || !resolved.campaign) {
+    console.warn(JSON.stringify({ event: "marketing_provider_source_blocked", ...diagnostics }));
+    throw new CampaignValidationError(PROVIDER_SOURCE_LOAD_ERROR);
+  }
+  return { campaign: resolved.campaign, diagnostics };
+}
+
+export function logProviderPersonalizationGuard(rendered = {}, sourceDiagnostics = {}, phase = "provider") {
+  if (!sourceDiagnostics.template_id && !sourceDiagnostics.source_used) return;
+  console.info(JSON.stringify({
+    event: "marketing_provider_personalization_guard",
+    phase,
+    source_used: sourceDiagnostics.source_used || "unknown",
+    template_id: sourceDiagnostics.template_id || "",
+    expected_source_updated_at: sourceDiagnostics.expected_source_updated_at || "",
+    actual_source_updated_at: sourceDiagnostics.actual_source_updated_at || "",
+    source_version_match: sourceDiagnostics.source_version_match === true,
+    designer_sample_token: rendered.personalization?.designer_sample_token || "",
+    designer_sample_locations: rendered.personalization?.designer_sample_locations || [],
+    campaign_record_locations: sourceDiagnostics.campaign_record_locations || [],
+    template_record_locations: sourceDiagnostics.template_record_locations || [],
+  }));
 }
 
 function campaignAudienceRules(campaign = {}) {
@@ -715,7 +766,8 @@ async function listSendHistory(supabase, body = {}) {
 
 async function sendTest(supabase, body = {}) {
   const storedCampaign = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
-  const campaign = await loadProviderCampaignSource(supabase, storedCampaign);
+  const providerSource = await loadProviderCampaignSource(supabase, storedCampaign);
+  const campaign = providerSource.campaign;
   if (campaign.status === "archived") throw new ApiError(400, "Archived campaigns cannot send test emails.");
   const recipientEmail = validateEmail(body.email || body.recipient_email, "Test recipient email");
   const since = new Date(Date.now() - TEST_COOLDOWN_MS).toISOString();
@@ -745,6 +797,7 @@ async function sendTest(supabase, body = {}) {
       campaign_name: campaign.name,
     },
   });
+  logProviderPersonalizationGuard(rendered, providerSource.diagnostics, "internal_test");
   assertProductionPersonalization(rendered);
   const now = new Date().toISOString();
   const { data: send } = assertSupabase(
@@ -834,7 +887,8 @@ function countsMatch(send, counts) {
 
 async function prepareProductionSend(supabase, body = {}) {
   const storedCampaign = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
-  const campaign = await loadProviderCampaignSource(supabase, storedCampaign);
+  const providerSource = await loadProviderCampaignSource(supabase, storedCampaign);
+  const campaign = providerSource.campaign;
   if (campaign.status !== "ready") throw new ApiError(400, "Only Ready campaigns can prepare a production send.");
   if (campaign.status === "archived") throw new ApiError(400, "Archived campaigns cannot send.");
   const selectedProvider = activeEmailProvider();
@@ -934,7 +988,8 @@ async function confirmProductionSend(supabase, body = {}) {
   const expiresAt = new Date(send.metadata?.token_expires_at || 0).getTime();
   if (!expiresAt || Date.now() > expiresAt) throw new ApiError(409, "Confirmation token has expired. Prepare the send again.");
   const storedCampaign = await loadOwnedTemplateCampaign(supabase, send.campaign_id);
-  const campaign = await loadProviderCampaignSource(supabase, storedCampaign);
+  const providerSource = await loadProviderCampaignSource(supabase, storedCampaign);
+  const campaign = providerSource.campaign;
   if (campaign.status !== "ready") throw new ApiError(400, "Campaign must still be Ready before sending.");
 
   const fullRecount = await resolveRecipients(supabase, campaign);
@@ -1001,6 +1056,7 @@ async function confirmProductionSend(supabase, body = {}) {
           campaign_name: campaign.name,
         },
       });
+      logProviderPersonalizationGuard(rendered, providerSource.diagnostics, "production_recipient");
       assertProductionPersonalization(rendered);
       const provider = await callEmailProvider({
         to: recipient.email,
