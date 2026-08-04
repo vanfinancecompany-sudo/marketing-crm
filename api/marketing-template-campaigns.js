@@ -17,7 +17,9 @@ import {
 } from "../lib/marketingCurrentSendEligibility.js";
 import {
   loadCampaignContactExclusions,
-  matchesCampaignContactExclusion,
+  matchesMinimumFrequencyLock,
+  matchesPreviousCampaignContactExclusion,
+  matchesRecentContactExclusion,
   normalizeCampaignContactControls,
 } from "../lib/marketingCampaignContactControls.js";
 
@@ -143,11 +145,22 @@ function normalizeAudienceSnapshot(value = null) {
   const historyExcluded = Number(counts.history_excluded_customers ?? 0);
   const deliverable = Number(counts.deliverable_customers ?? counts.final_send_count ?? counts.deliverable ?? 0);
   const finalSendCount = Number(counts.final_send_count ?? deliverable);
+  const hasDetailedRecentCounts = counts.eligible_before_recent_contact_restriction !== undefined
+    || counts.minimum_frequency_lock_excluded_customers !== undefined
+    || counts.additional_recent_contact_excluded_customers !== undefined;
+  const previousCampaignExcluded = Number(counts.previous_campaign_excluded_customers ?? (hasDetailedRecentCounts ? 0 : historyExcluded));
+  const minimumFrequencyLockExcluded = Number(counts.minimum_frequency_lock_excluded_customers ?? 0);
+  const additionalRecentContactExcluded = Number(counts.additional_recent_contact_excluded_customers ?? 0);
+  const recentContactExcluded = minimumFrequencyLockExcluded + additionalRecentContactExcluded;
+  const eligibleBeforeRecentContact = Number(counts.eligible_before_recent_contact_restriction ?? (deliverable + recentContactExcluded));
   const calculatedAt = cleanText(value.calculated_at || "", 80);
-  if (![totalMatching, suppressed, skippedDuplicate, historyExcluded, deliverable, finalSendCount].every((number) => Number.isInteger(number) && number >= 0)) {
+  if (![totalMatching, suppressed, skippedDuplicate, historyExcluded, deliverable, finalSendCount, previousCampaignExcluded, minimumFrequencyLockExcluded, additionalRecentContactExcluded, eligibleBeforeRecentContact].every((number) => Number.isInteger(number) && number >= 0)) {
     throw new CampaignValidationError("Audience counts must be non-negative whole numbers.");
   }
-  if (totalMatching !== suppressed + skippedDuplicate + historyExcluded + deliverable || finalSendCount !== deliverable) {
+  if (totalMatching !== suppressed + skippedDuplicate + previousCampaignExcluded + eligibleBeforeRecentContact
+    || eligibleBeforeRecentContact !== recentContactExcluded + deliverable
+    || historyExcluded !== previousCampaignExcluded + recentContactExcluded
+    || finalSendCount !== deliverable) {
     throw new CampaignValidationError("Audience counts are inconsistent. Preview the audience again.");
   }
   if (!calculatedAt) throw new CampaignValidationError("Preview the audience before saving it.");
@@ -157,6 +170,11 @@ function normalizeAudienceSnapshot(value = null) {
     suppressed_customers: suppressed,
     skipped_duplicate_customers: skippedDuplicate,
     history_excluded_customers: historyExcluded,
+    previous_campaign_excluded_customers: previousCampaignExcluded,
+    eligible_before_recent_contact_restriction: eligibleBeforeRecentContact,
+    minimum_frequency_lock_excluded_customers: minimumFrequencyLockExcluded,
+    additional_recent_contact_excluded_customers: additionalRecentContactExcluded,
+    recent_contact_excluded_customers: recentContactExcluded,
     deliverable_customers: deliverable,
     final_send_count: deliverable,
     calculated_at: calculatedAt,
@@ -339,7 +357,10 @@ async function countAudienceByScan(supabase, campaignId, rules, exportedEmailIds
   let suppressed = 0;
   let skippedDuplicate = 0;
   let invalidEmail = 0;
-  let historyExcluded = 0;
+  let previousCampaignExcluded = 0;
+  let eligibleBeforeRecentContact = 0;
+  let minimumFrequencyLockExcluded = 0;
+  let additionalRecentContactExcluded = 0;
   const processed = await loadCurrentSendProcessedIdentities(supabase, campaignId, assertSupabase);
   const contactExclusions = await loadCampaignContactExclusions(supabase, rules, campaignId, assertSupabase);
   const eligibilityState = createCurrentSendEligibilityState(processed);
@@ -354,16 +375,25 @@ async function countAudienceByScan(supabase, campaignId, rules, exportedEmailIds
     rows.forEach((row) => {
       if (rules.mode === "never_emailed" && exportedEmailIds.has(normalizeCustomerId(row.customer_id))) return;
       totalMatching += 1;
-      if (matchesCampaignContactExclusion(row, contactExclusions)) {
-        historyExcluded += 1;
+      const decision = evaluateCurrentSendEligibility(row, { state: eligibilityState, permanentlySuppressedEmails: permanentlySuppressed });
+      if (!decision.eligible) {
+        if (["previously_processed", "duplicate"].includes(decision.reason)) skippedDuplicate += 1;
+        else {
+          suppressed += 1;
+          if (decision.reason === "invalid_email") invalidEmail += 1;
+        }
         return;
       }
-      const decision = evaluateCurrentSendEligibility(row, { state: eligibilityState, permanentlySuppressedEmails: permanentlySuppressed });
-      if (decision.eligible) deliverable += 1;
-      else if (["previously_processed", "duplicate"].includes(decision.reason)) skippedDuplicate += 1;
-      else {
-        suppressed += 1;
-        if (decision.reason === "invalid_email") invalidEmail += 1;
+      if (matchesPreviousCampaignContactExclusion(row, contactExclusions)) {
+        previousCampaignExcluded += 1;
+        return;
+      }
+      eligibleBeforeRecentContact += 1;
+      if (matchesRecentContactExclusion(row, contactExclusions)) {
+        if (matchesMinimumFrequencyLock(row, contactExclusions)) minimumFrequencyLockExcluded += 1;
+        else additionalRecentContactExcluded += 1;
+      } else {
+        deliverable += 1;
       }
     });
     if (rows.length < PAGE_SIZE) break;
@@ -373,7 +403,12 @@ async function countAudienceByScan(supabase, campaignId, rules, exportedEmailIds
     total_matching_customers: totalMatching,
     suppressed_customers: suppressed,
     skipped_duplicate_customers: skippedDuplicate,
-    history_excluded_customers: historyExcluded,
+    history_excluded_customers: previousCampaignExcluded + minimumFrequencyLockExcluded + additionalRecentContactExcluded,
+    previous_campaign_excluded_customers: previousCampaignExcluded,
+    eligible_before_recent_contact_restriction: eligibleBeforeRecentContact,
+    minimum_frequency_lock_excluded_customers: minimumFrequencyLockExcluded,
+    additional_recent_contact_excluded_customers: additionalRecentContactExcluded,
+    recent_contact_excluded_customers: minimumFrequencyLockExcluded + additionalRecentContactExcluded,
     invalid_email_customers: invalidEmail,
     deliverable_customers: deliverable,
     final_send_count: deliverable,

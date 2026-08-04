@@ -334,7 +334,12 @@
     cancel.disabled = !prep;
     $("productionConfirmationPhrase").placeholder = prep ? prep.confirmation_phrase : "Prepare first";
     $("preparationSummary").innerHTML = prep ? [
-      ["Full eligible audience", prep.final_eligible_count],
+      ["Eligible before recent-contact restriction", prep.eligible_before_recent_contact_restriction],
+      ["Excluded because emailed within the last 7 days", prep.minimum_frequency_lock_excluded_count],
+      ...(Number(prep.additional_recent_contact_excluded_count || 0) > 0
+        ? [["Additional selected recent-contact exclusions", prep.additional_recent_contact_excluded_count]]
+        : []),
+      ["Final eligible audience", prep.final_eligible_count],
       ["Current suppressed count", prep.suppressed_count],
       ["Previous campaign / recent contact / duplicates", prep.skipped_duplicate_count],
       ["Proposed batch size", prep.proposed_batch_size],

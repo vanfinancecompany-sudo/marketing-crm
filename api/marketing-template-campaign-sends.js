@@ -9,7 +9,9 @@ import {
 } from "../lib/marketingCurrentSendEligibility.js";
 import {
   loadCampaignContactExclusions,
-  matchesCampaignContactExclusion,
+  matchesMinimumFrequencyLock,
+  matchesPreviousCampaignContactExclusion,
+  matchesRecentContactExclusion,
   normalizeCampaignContactControls,
 } from "../lib/marketingCampaignContactControls.js";
 import { createClient } from "@supabase/supabase-js";
@@ -535,7 +537,10 @@ async function resolveRecipients(supabase, campaign, options = {}) {
   let suppressed = 0;
   let skippedDuplicate = 0;
   let invalidEmail = 0;
-  let historyExcluded = 0;
+  let previousCampaignExcluded = 0;
+  let eligibleBeforeRecentContact = 0;
+  let minimumFrequencyLockExcluded = 0;
+  let additionalRecentContactExcluded = 0;
   let from = 0;
   while (true) {
     const result = await applyAudienceFilters(
@@ -556,16 +561,22 @@ async function resolveRecipients(supabase, campaign, options = {}) {
       const customerId = normalizeCustomerId(row.customer_id);
       if (rules.mode === "never_emailed" && exportedEmailIds.has(customerId)) continue;
       totalMatching += 1;
-      if (matchesCampaignContactExclusion(row, contactExclusions)) {
-        historyExcluded += 1;
-        continue;
-      }
       const decision = evaluateCurrentSendEligibility(row, { state: eligibilityState, permanentlySuppressedEmails: permanentlySuppressed });
       const email = decision.email;
       if (!decision.eligible) {
         if (decision.reason === "invalid_email") invalidEmail += 1;
         if (["inactive", "invalid_email", "suppressed"].includes(decision.reason)) suppressed += 1;
         else skippedDuplicate += 1;
+        continue;
+      }
+      if (matchesPreviousCampaignContactExclusion(row, contactExclusions)) {
+        previousCampaignExcluded += 1;
+        continue;
+      }
+      eligibleBeforeRecentContact += 1;
+      if (matchesRecentContactExclusion(row, contactExclusions)) {
+        if (matchesMinimumFrequencyLock(row, contactExclusions)) minimumFrequencyLockExcluded += 1;
+        else additionalRecentContactExcluded += 1;
         continue;
       }
       if (!options.limit || recipients.length < options.limit) {
@@ -591,9 +602,14 @@ async function resolveRecipients(supabase, campaign, options = {}) {
       matching_count: totalMatching,
       suppressed_count: suppressed,
       skipped_duplicate_count: skippedDuplicate,
-      history_excluded_count: historyExcluded,
+      history_excluded_count: previousCampaignExcluded + minimumFrequencyLockExcluded + additionalRecentContactExcluded,
+      previous_campaign_excluded_count: previousCampaignExcluded,
+      eligible_before_recent_contact_restriction: eligibleBeforeRecentContact,
+      minimum_frequency_lock_excluded_count: minimumFrequencyLockExcluded,
+      additional_recent_contact_excluded_count: additionalRecentContactExcluded,
+      recent_contact_excluded_count: minimumFrequencyLockExcluded + additionalRecentContactExcluded,
       invalid_email_count: invalidEmail,
-      final_eligible_count: Math.max(0, totalMatching - suppressed - skippedDuplicate - historyExcluded),
+      final_eligible_count: Math.max(0, eligibleBeforeRecentContact - minimumFrequencyLockExcluded - additionalRecentContactExcluded),
       resolved_count: recipients.length,
     },
   };
@@ -820,7 +836,10 @@ function countsMatch(send, counts) {
     && Number(send.eligible_count || 0) === counts.final_eligible_count
     && Number(send.suppressed_count || 0) === counts.suppressed_count
     && Number(send.skipped_duplicate_count || 0) === totalSkipped
-    && Number(send.metadata?.history_excluded_count || 0) === counts.history_excluded_count;
+    && Number(send.metadata?.history_excluded_count || 0) === counts.history_excluded_count
+    && Number(send.metadata?.eligible_before_recent_contact_restriction || 0) === counts.eligible_before_recent_contact_restriction
+    && Number(send.metadata?.minimum_frequency_lock_excluded_count || 0) === counts.minimum_frequency_lock_excluded_count
+    && Number(send.metadata?.additional_recent_contact_excluded_count || 0) === counts.additional_recent_contact_excluded_count;
 }
 
 async function prepareProductionSend(supabase, body = {}) {
@@ -861,6 +880,11 @@ async function prepareProductionSend(supabase, body = {}) {
           matching_count: resolved.counts.matching_count,
           invalid_email_count: resolved.counts.invalid_email_count,
           history_excluded_count: resolved.counts.history_excluded_count,
+          previous_campaign_excluded_count: resolved.counts.previous_campaign_excluded_count,
+          eligible_before_recent_contact_restriction: resolved.counts.eligible_before_recent_contact_restriction,
+          minimum_frequency_lock_excluded_count: resolved.counts.minimum_frequency_lock_excluded_count,
+          additional_recent_contact_excluded_count: resolved.counts.additional_recent_contact_excluded_count,
+          recent_contact_excluded_count: resolved.counts.recent_contact_excluded_count,
           proposed_batch_size: selectedCount,
           sender_email_configured: emailProviderConfigStatus().sender_email_configured,
           email_provider: selectedProvider,
@@ -878,6 +902,11 @@ async function prepareProductionSend(supabase, body = {}) {
         suppressed_count: resolved.counts.suppressed_count,
         skipped_duplicate_count: totalSkipped,
         history_excluded_count: resolved.counts.history_excluded_count,
+        previous_campaign_excluded_count: resolved.counts.previous_campaign_excluded_count,
+        eligible_before_recent_contact_restriction: resolved.counts.eligible_before_recent_contact_restriction,
+        minimum_frequency_lock_excluded_count: resolved.counts.minimum_frequency_lock_excluded_count,
+        additional_recent_contact_excluded_count: resolved.counts.additional_recent_contact_excluded_count,
+        recent_contact_excluded_count: resolved.counts.recent_contact_excluded_count,
         invalid_email_count: resolved.counts.invalid_email_count,
         final_eligible_count: resolved.counts.final_eligible_count,
         proposed_batch_size: selectedCount,
@@ -1048,7 +1077,17 @@ async function confirmProductionSend(supabase, body = {}) {
       failed_count: failedCount,
       skipped_duplicate_count: skippedDuplicate,
       completed_at: completedAt,
-      metadata: { ...(send.metadata || {}), submission_unknown_count: unknownCount, invalid_email_count: fullRecount.counts.invalid_email_count, history_excluded_count: fullRecount.counts.history_excluded_count },
+      metadata: {
+        ...(send.metadata || {}),
+        submission_unknown_count: unknownCount,
+        invalid_email_count: fullRecount.counts.invalid_email_count,
+        history_excluded_count: fullRecount.counts.history_excluded_count,
+        previous_campaign_excluded_count: fullRecount.counts.previous_campaign_excluded_count,
+        eligible_before_recent_contact_restriction: fullRecount.counts.eligible_before_recent_contact_restriction,
+        minimum_frequency_lock_excluded_count: fullRecount.counts.minimum_frequency_lock_excluded_count,
+        additional_recent_contact_excluded_count: fullRecount.counts.additional_recent_contact_excluded_count,
+        recent_contact_excluded_count: fullRecount.counts.recent_contact_excluded_count,
+      },
       error_summary: errorParts.join("; "),
     }).eq("id", send.id).select(SEND_COLUMNS).single(),
     "Could not update send audit."
