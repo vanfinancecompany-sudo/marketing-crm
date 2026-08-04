@@ -7,6 +7,12 @@ import { renderRecipientCampaignPreview } from "../lib/marketingRecipientPersona
 
 const selectorSource = fs.readFileSync(new URL("../public/email-templates/index.html", import.meta.url), "utf8");
 
+test("Email Templates validates access against its own API rather than the legacy Campaign API", () => {
+  assert.match(selectorSource, /const TEMPLATE_API = "\/api\/marketing-email-templates";/);
+  assert.match(selectorSource, /const ACCESS_API = TEMPLATE_API;/);
+  assert.doesNotMatch(selectorSource, /const ACCESS_API = "\/api\/marketing-campaigns";/);
+});
+
 function createSupabaseFixture() {
   const calls = [];
   const rows = {
@@ -238,3 +244,81 @@ test("test and final recipient email HTML preserve the Primary Colour on vehicle
     assert.doesNotMatch(rendered.html, /bgcolor="#2563eb" style="border-radius:7px;"/);
   }
 });
+
+function assertMobileEmailTypography(html) {
+  assert.match(html, /@media only screen and \(max-width:600px\)/);
+  assert.match(
+    html,
+    /\.email-body-copy,\s*\.email-body-copy p,\s*\.email-body-copy ul,\s*\.email-body-copy ol,\s*\.email-body-copy li\s*\{\s*font-size:16px !important;\s*line-height:24px !important;/,
+  );
+  assert.match(html, /\.email-support-copy\s*\{\s*font-size:15px !important;\s*line-height:23px !important;/);
+  assert.match(html, /\.email-vehicle-detail\s*\{\s*font-size:14px !important;\s*line-height:21px !important;/);
+  assert.match(html, /\.email-button-text\s*\{\s*font-size:15px !important;\s*line-height:20px !important;/);
+  assert.match(html, /class="email-body-copy"/);
+  assert.match(html, /class="email-vehicle-detail"/);
+  assert.match(html, /class="email-button-text"/);
+  assert.match(html, /max-width:660px/);
+  assert.doesNotMatch(html, /@media[\s\S]*\.email-vehicle[^{}]*display\s*:\s*block/i);
+}
+
+for (const productMode of ["finance", "rent2buy"]) {
+  test(`${productMode} designer, test and final HTML share readable mobile typography`, () => {
+    const selectedVehicle = productMode === "finance" ? {
+      selection_id: "finance:finance-1",
+      source_id: "finance-1",
+      registration: "AB22 CDE",
+      title: "2022 Ford Transit Custom AB22 CDE",
+      description: "A clean and practical van for daily work.",
+      spec: "Air conditioning | Bluetooth | Parking sensors",
+      primary_image_url: "https://images.example/finance.jpg",
+      finance: { price: "£18,995", vat: "NO VAT", monthly: "£399 per month", url: "https://www.vanfinancecompany.co.uk/finance-van" },
+      rent2buy: null,
+    } : {
+      selection_id: "rent2buy:rent-1",
+      source_id: "rent-1",
+      registration: "XY23 ZZZ",
+      title: "Ford Transit Custom Rent2Buy",
+      description: "A flexible Rent2Buy van for your business.",
+      spec: "Air conditioning | Bluetooth | Cruise control",
+      primary_image_url: "https://images.example/rent.jpg",
+      finance: null,
+      rent2buy: { monthly: "£795", initialRental: "£1,590", term: "48 months", url: "https://www.rent2buyvans.co.uk/van-pages/xy23zzz" },
+    };
+    const snapshot = vehicleEmailTemplate(selectedVehicleBlock(productMode, selectedVehicle), "#8B0000");
+    snapshot.content_blocks[0].position = 2;
+    snapshot.content_blocks.unshift({
+      id: "body-copy",
+      type: "text",
+      position: 1,
+      enabled: true,
+      settings: {
+        heading: "Available now",
+        body: "Hi {{first_name}},\n\nClear body copy for mobile readers.\n• First readable point\n• Second readable point",
+        alignment: "left",
+        background_colour: "#ffffff",
+        text_colour: "#1f2937",
+        padding_size: "medium",
+      },
+    });
+    snapshot.content_blocks.push({
+      id: "main-button",
+      type: "button",
+      position: 3,
+      enabled: true,
+      settings: {
+        text: "View available vans",
+        url: "https://www.vanfinancecompany.co.uk",
+        alignment: "left",
+        primary_colour: "#8B0000",
+        text_colour: "#ffffff",
+        width: "auto",
+      },
+    });
+    const campaign = { subject_line: "Vehicle offer", preview_text: "Readable supporting copy", template_snapshot: snapshot };
+    const designerHtml = renderEmailHtml({ ...snapshot, first_name: "Alex" });
+    const testHtml = renderRecipientCampaignPreview(campaign, {}, { mode: "test" }).html;
+    const finalHtml = renderRecipientCampaignPreview(campaign, {}, { mode: "recipient" }).html;
+
+    for (const html of [designerHtml, testHtml, finalHtml]) assertMobileEmailTypography(html);
+  });
+}
