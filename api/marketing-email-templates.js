@@ -1,6 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
 import {
-  composeFinanceVehicleWithRent2Buy,
   mapFinanceVehicleRow,
   mapRentVehicleRow,
   normalizeRegistrationKey,
@@ -465,7 +464,11 @@ async function resolveSelectedVehicleReferences(supabase, blocks = [], options =
   const needsResolution = blocks.some((block) => block.type === "vehicle_grid" && (block.settings.selected_vehicles || []).some((vehicle) => vehicle.snapshot_status === "unresolved"));
   if (!needsResolution) return blocks;
   if (!supabase) throw new Error("Vehicle selection resolution requires Supabase access.");
-  const { vehicles } = await vehiclesForSelection(supabase);
+  const productModes = [...new Set(blocks
+    .filter((block) => block.type === "vehicle_grid" && (block.settings.selected_vehicles || []).some((vehicle) => vehicle.snapshot_status === "unresolved"))
+    .map((block) => block.settings.product_mode || "finance"))];
+  const selectionResults = await Promise.all(productModes.map((productMode) => vehiclesForSelection(supabase, productMode)));
+  const vehicles = selectionResults.flatMap((result) => result.vehicles || []);
   const lookup = buildVehicleSelectionLookup(vehicles);
   return blocks.map((block) => {
     if (block.type !== "vehicle_grid") return block;
@@ -622,25 +625,33 @@ async function duplicateTemplate(supabase, body = {}) {
   return { template: normalizeTemplate(data) };
 }
 
-async function vehiclesForSelection(supabase) {
-  const [financeResult, rentResult] = await Promise.all([
-    supabase.from("facebook_adverts").select("id, title, picture, price, vat, salePrice, vanDescription, vanSpec, weblink, is_active").eq("is_active", true).limit(STOCK_LIMIT),
-    supabase.from("rent_vehicles").select("id, created_at, registration, picture, monthly, week, initialRental, vanDescription, vanSpec, webLink, is_active").eq("is_active", true).limit(STOCK_LIMIT),
-  ]);
+export async function vehiclesForSelection(supabase, requestedProductMode = "finance") {
+  const productMode = String(requestedProductMode || "finance").trim().toLowerCase();
+  if (!VEHICLE_PRODUCT_MODES.has(productMode)) throw new ValidationError("Vehicle selector product mode is not supported.");
+
+  if (productMode === "rent2buy") {
+    const rentResult = await supabase
+      .from("rent_vehicles")
+      .select("id, created_at, registration, picture, monthly, week, initialRental, vanDescription, vanSpec, webLink, is_active")
+      .eq("is_active", true)
+      .limit(STOCK_LIMIT);
+    assertSupabase(rentResult, "Could not load Rent2Buy stock.");
+    return {
+      productMode,
+      vehicles: (rentResult.data || []).map(mapRentVehicleRow).map(toMarketingVehicleSelectionContract),
+    };
+  }
+
+  const financeResult = await supabase
+    .from("facebook_adverts")
+    .select("id, title, picture, price, vat, salePrice, vanDescription, vanSpec, weblink, is_active")
+    .eq("is_active", true)
+    .limit(STOCK_LIMIT);
   assertSupabase(financeResult, "Could not load Finance stock.");
-  assertSupabase(rentResult, "Could not load Rent2Buy stock.");
-  const financeVehicles = (financeResult.data || []).map(mapFinanceVehicleRow);
-  const rentVehicles = (rentResult.data || []).map(mapRentVehicleRow);
-  const rentByReg = new Map(
-    rentVehicles
-      .map((vehicle) => [normalizeRegistrationKey(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name), vehicle])
-      .filter(([registration]) => registration)
-  );
-  const vehicles = financeVehicles.map((vehicle) => {
-    const registration = normalizeRegistrationKey(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name);
-    return composeFinanceVehicleWithRent2Buy(vehicle, rentByReg.get(registration) || null);
-  });
-  return { vehicles: vehicles.map(toMarketingVehicleSelectionContract) };
+  return {
+    productMode,
+    vehicles: (financeResult.data || []).map(mapFinanceVehicleRow).map(toMarketingVehicleSelectionContract),
+  };
 }
 
 function escapeHtml(value) {
@@ -744,7 +755,7 @@ function renderVehicleImageCell(vehicle, href) {
   return `<tr><td align="center" bgcolor="#f1f5f9" style="padding:0;">${href ? `<a href="${escapeHtml(href)}" style="text-decoration:none;border:0;">${image}</a>` : image}</td></tr>`;
 }
 
-function renderSelectedVehicleCard(vehicle = {}, productMode = "finance") {
+function renderSelectedVehicleCard(vehicle = {}, productMode = "finance", primaryColour) {
   const profile = selectedVehicleProfile(vehicle, productMode);
   const href = profile.url || "";
   const title = selectedVehicleTitle(vehicle);
@@ -768,7 +779,7 @@ function renderSelectedVehicleCard(vehicle = {}, productMode = "finance") {
     ${spec ? `<tr><td style="padding:0 14px 9px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#475569;">${escapeHtml(spec)}</td></tr>` : ""}
     ${supporting ? `<tr><td style="padding:0 14px 9px;font-family:Arial,sans-serif;font-size:13px;line-height:19px;color:#334155;">${escapeHtml(supporting)}</td></tr>` : ""}
     ${fallbackRegistration ? `<tr><td style="padding:0 14px 9px;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">Reg: ${escapeHtml(fallbackRegistration)}</td></tr>` : ""}
-    ${href ? `<tr><td style="padding:4px 14px 16px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#2563eb" style="border-radius:7px;"><a href="${escapeHtml(href)}" style="display:inline-block;padding:10px 13px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#ffffff;text-decoration:none;font-weight:bold;">${escapeHtml(ctaText)}</a></td></tr></table></td></tr>` : ""}
+    ${href ? `<tr><td style="padding:4px 14px 16px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${primaryColour}" style="border-radius:7px;"><a href="${escapeHtml(href)}" style="display:inline-block;padding:10px 13px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#ffffff;text-decoration:none;font-weight:bold;">${escapeHtml(ctaText)}</a></td></tr></table></td></tr>` : ""}
   </table>`;
 }
 
@@ -780,7 +791,7 @@ function renderVehicleRows(cards, twoColumn) {
   return rows.join("");
 }
 
-function renderPlaceholderVehicleGrid(settings = {}) {
+function renderPlaceholderVehicleGrid(settings = {}, primaryColour) {
   const count = Math.max(1, Math.min(6, Number(settings.number_of_vehicles || 3)));
   const vehicles = SAMPLE_VEHICLES.slice(0, count);
   while (vehicles.length < count) vehicles.push(SAMPLE_VEHICLES[vehicles.length % SAMPLE_VEHICLES.length]);
@@ -792,29 +803,29 @@ function renderPlaceholderVehicleGrid(settings = {}) {
         <tr><td style="padding:14px 12px 7px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#0f172a;font-weight:bold;">${escapeHtml(vehicle.name)}</td></tr>
         <tr><td style="padding:0 12px 4px;font-family:Arial,sans-serif;font-size:22px;line-height:27px;color:#0f172a;font-weight:bold;">&#163;${escapeHtml(vehicle.price)}</td></tr>
         <tr><td style="padding:0 12px 11px;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#64748b;">${escapeHtml(vehicle.mileage)}</td></tr>
-        <tr><td style="padding:0 12px 15px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#2563eb" style="border-radius:7px;"><a href="https://www.vanfinancecompany.co.uk" style="display:inline-block;padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#ffffff;text-decoration:none;font-weight:bold;">View Van</a></td></tr></table></td></tr>
+        <tr><td style="padding:0 12px 15px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${primaryColour}" style="border-radius:7px;"><a href="https://www.vanfinancecompany.co.uk" style="display:inline-block;padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#ffffff;text-decoration:none;font-weight:bold;">View Van</a></td></tr></table></td></tr>
       </table>
     </td>
   `);
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:10px 0;">${renderVehicleRows(cards, twoColumn)}</table>`;
 }
 
-function renderSelectedVehicleGrid(settings = {}) {
+function renderSelectedVehicleGrid(settings = {}, primaryColour) {
   const selected = Array.isArray(settings.selected_vehicles) ? settings.selected_vehicles : [];
   const productMode = settings.product_mode === "rent2buy" ? "rent2buy" : "finance";
   const twoColumn = settings.layout === "two_column";
   const cards = selected.map((vehicle) => `
     <td width="${twoColumn ? "50%" : "100%"}" valign="top" style="padding:8px;">
-      ${renderSelectedVehicleCard(vehicle, productMode)}
+      ${renderSelectedVehicleCard(vehicle, productMode, primaryColour)}
     </td>
   `);
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:10px 0;">${renderVehicleRows(cards, twoColumn)}</table>`;
 }
 
-function renderVehicleGrid(settings = {}) {
+function renderVehicleGrid(settings = {}, primaryColour) {
   const selected = Array.isArray(settings.selected_vehicles) ? settings.selected_vehicles : [];
-  if (settings.source_mode === "selected" && selected.length) return renderSelectedVehicleGrid(settings);
-  return renderPlaceholderVehicleGrid(settings);
+  if (settings.source_mode === "selected" && selected.length) return renderSelectedVehicleGrid(settings, primaryColour);
+  return renderPlaceholderVehicleGrid(settings, primaryColour);
 }
 
 function textToHtml(value, values = {}) {
@@ -822,7 +833,7 @@ function textToHtml(value, values = {}) {
   const withTextPlaceholders = replaceTextPlaceholders(withVehicleToken, values);
   return escapeHtml(withTextPlaceholders)
     .split(VEHICLE_GRID_TOKEN)
-    .map((part, index, parts) => `${renderEscapedTextBlock(part)}${index < parts.length - 1 ? renderVehicleGrid({ number_of_vehicles: 3, layout: "one_column" }) : ""}`)
+    .map((part, index, parts) => `${renderEscapedTextBlock(part)}${index < parts.length - 1 ? renderVehicleGrid({ number_of_vehicles: 3, layout: "one_column" }, cleanColour(values.brand_colour, "#2563eb")) : ""}`)
     .join("");
 }
 
@@ -890,7 +901,7 @@ function renderVehicleGridBlock(block, values) {
   return `<tr><td style="padding:${topPadding}px 22px 24px;background:#ffffff;">
     ${heading ? `<h2 style="margin:0 8px 8px;font-family:Arial,sans-serif;font-size:23px;line-height:29px;color:#0f172a;">${escapeHtml(heading)}</h2>` : ""}
     ${intro ? `<p style="margin:0 8px 12px;font-family:Arial,sans-serif;font-size:15px;line-height:23px;color:#334155;">${escapeHtml(intro)}</p>` : ""}
-    ${renderVehicleGrid(s)}
+    ${renderVehicleGrid(s, cleanColour(values.brand_colour, "#2563eb"))}
     ${previewOnlyNote ? `<p style="margin:8px 8px 0;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">${escapeHtml(previewOnlyNote)}</p>` : ""}
     ${placeholderNote ? `<p style="margin:4px 8px 0;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">${escapeHtml(placeholderNote)}</p>` : ""}
   </td></tr>`;
@@ -982,7 +993,7 @@ export default async function handler(request, response) {
     else if (action === "archive") result = await archiveTemplate(supabase, body);
     else if (action === "duplicate") result = await duplicateTemplate(supabase, body);
     else if (action === "preview") result = await previewTemplate(supabase, body);
-    else if (action === "vehiclesForSelection") result = await vehiclesForSelection(supabase);
+    else if (action === "vehiclesForSelection") result = await vehiclesForSelection(supabase, body.productMode);
     else throw new ValidationError("Unknown Email Templates API action.");
 
     json(response, 200, { ok: true, ...result });
