@@ -3,12 +3,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
   assertProductionPersonalization,
+  campaignFromOriginalTemplateSource,
   normalizeRecipientFirstName,
   renderCampaignPreview,
   renderRecipientCampaignPreview,
   replaceRecipientPlaceholders,
 } from "../lib/marketingEmailTemplateRenderer.js";
-import { callEmailProvider, renderFrozenCampaign } from "../api/marketing-template-campaign-sends.js";
+import { callEmailProvider, loadProviderCampaignSource, renderFrozenCampaign } from "../api/marketing-template-campaign-sends.js";
 import { renderDesignerCampaignPreview } from "../api/marketing-template-campaigns.js";
 import { renderLegacySendGridTestCampaign } from "../api/sendgrid-test-email.js";
 
@@ -47,7 +48,7 @@ function campaign() {
           enabled: true,
           settings: {
             heading: "Hi {{first_name}}",
-            body: "Selected for {{company}}",
+            body: "Hi {{first_name}},\n\nSelected for {{company}}",
             alignment: "left",
             background_colour: "#ffffff",
             text_colour: "#1f2937",
@@ -87,6 +88,16 @@ function campaign() {
         },
       ],
     },
+  };
+}
+
+function originalTemplateSource() {
+  const sourceCampaign = campaign();
+  const snapshot = sourceCampaign.template_snapshot;
+  return {
+    ...snapshot,
+    id: snapshot.source_template_id,
+    updated_at: snapshot.source_template_updated_at,
   };
 }
 
@@ -238,6 +249,80 @@ test("campaign preview endpoint explicitly uses designer preview mode", () => {
   assert.equal(rendered.personalization.mode, "designer_preview");
 });
 
+test("provider test discards materialised designer preview data and freshly renders Tim from original source", () => {
+  const sourceCampaign = campaign();
+  const designerPreview = renderDesignerCampaignPreview(sourceCampaign);
+  assert.match(designerPreview.html, /Hi Alex/);
+
+  const contaminatedCampaign = structuredClone(sourceCampaign);
+  contaminatedCampaign.subject_line = "New vans for Alex";
+  contaminatedCampaign.preview_text = "Alex, three vans are ready";
+  contaminatedCampaign.template_snapshot.hero_heading = "Hi Alex";
+  contaminatedCampaign.template_snapshot.content_blocks[0].settings.heading = "Hi Alex";
+  contaminatedCampaign.template_snapshot.content_blocks[0].settings.body = "Hi Alex,\n\nSelected for Van Finance Company";
+  contaminatedCampaign.template_snapshot.footer = "Thanks Alex";
+
+  const recovered = campaignFromOriginalTemplateSource(contaminatedCampaign, originalTemplateSource());
+  assert.equal(recovered.refreshed, true);
+  assert.equal(recovered.campaign.template_snapshot.content_blocks[0].settings.heading, "Hi {{first_name}}");
+  assert.equal(Object.prototype.hasOwnProperty.call(recovered.campaign, "preview"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(recovered.campaign.template_snapshot, "html"), false);
+
+  const providerBound = renderFrozenCampaign(recovered.campaign, {
+    test: true,
+    mode: "test",
+    values: { first_name: "tim" },
+  });
+  const greeting = providerBound.html.match(/Hi [\p{L}\p{M}'’.-]+,/u)?.[0];
+  assert.equal(greeting, "Hi Tim,");
+  assert.doesNotMatch(providerBound.html, /\bAlex\b/);
+  assert.equal(providerBound.personalization.designer_sample_leaked, false);
+  assert.doesNotThrow(() => assertProductionPersonalization(providerBound));
+
+  const sarah = renderFrozenCampaign(recovered.campaign, { test: true, mode: "test", values: { first_name: "Sarah" } });
+  const blank = renderFrozenCampaign(recovered.campaign, { test: true, mode: "test", values: { first_name: "" } });
+  assert.match(sarah.html, /Hi Sarah,/);
+  assert.doesNotMatch(sarah.html, /\bAlex\b/);
+  assert.match(blank.html, /Hi Stuart,/);
+  assert.doesNotMatch(blank.html, /\bAlex\b/);
+  assert.doesNotThrow(() => assertProductionPersonalization(sarah));
+  assert.doesNotThrow(() => assertProductionPersonalization(blank));
+});
+
+test("a changed reusable template cannot replace the frozen provider source", () => {
+  const contaminatedCampaign = campaign();
+  contaminatedCampaign.template_snapshot.content_blocks[0].settings.heading = "Hi Alex";
+  const changedTemplate = { ...originalTemplateSource(), updated_at: "2026-08-02T00:00:00.000Z" };
+  const recovered = campaignFromOriginalTemplateSource(contaminatedCampaign, changedTemplate);
+  assert.equal(recovered.refreshed, false);
+  const rendered = renderFrozenCampaign(recovered.campaign, { test: true, mode: "test", values: { first_name: "Tim" } });
+  assert.throws(() => assertProductionPersonalization(rendered), /designer sample data/i);
+});
+
+test("provider source loader reads the original template row rather than preview HTML", async () => {
+  const selectedTables = [];
+  const supabase = {
+    from(table) {
+      selectedTables.push(table);
+      return {
+        select() { return this; },
+        eq() { return this; },
+        async maybeSingle() { return { data: originalTemplateSource(), error: null }; },
+      };
+    },
+  };
+  const contaminatedCampaign = campaign();
+  contaminatedCampaign.template_snapshot.content_blocks[0].settings.body = "Hi Alex,";
+  contaminatedCampaign.preview = { html: "<p>Hi Alex,</p>" };
+  const providerSource = await loadProviderCampaignSource(supabase, contaminatedCampaign);
+  assert.deepEqual(selectedTables, ["marketing_email_templates"]);
+  assert.equal(providerSource.template_snapshot.content_blocks[0].settings.body, "Hi {{first_name}},\n\nSelected for {{company}}");
+  assert.equal(Object.prototype.hasOwnProperty.call(providerSource, "preview"), false);
+  const rendered = renderFrozenCampaign(providerSource, { test: true, mode: "test", values: { first_name: "Tim" } });
+  assert.match(rendered.html, /Hi Tim,/);
+  assert.doesNotMatch(rendered.html, /\bAlex\b/);
+});
+
 test("legacy SendGrid test rendering accepts a name and defaults to Stuart", () => {
   const fallback = renderLegacySendGridTestCampaign(campaign(), { test_first_name: "   " });
   const named = renderLegacySendGridTestCampaign(campaign(), { test_first_name: "Jane" });
@@ -313,6 +398,7 @@ test("placeholder helper trims supplied first names", () => {
   assert.equal(replaceRecipientPlaceholders("Hi {{first_name}}", { first_name: " Jane " }), "Hi Jane");
   assert.equal(replaceRecipientPlaceholders("Hi {{first_name}}", {}), "Hi there");
   assert.equal(normalizeRecipientFirstName("  Sarah  "), "Sarah");
+  assert.equal(normalizeRecipientFirstName("tim"), "Tim");
   assert.equal(normalizeRecipientFirstName("sarah@example.test"), "there");
 });
 

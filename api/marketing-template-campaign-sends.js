@@ -16,6 +16,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   CampaignValidationError,
   assertProductionPersonalization,
+  campaignFromOriginalTemplateSource,
   cleanText,
   renderRecipientCampaignPreview,
 } from "../lib/marketingEmailTemplateRenderer.js";
@@ -34,6 +35,7 @@ export { activeEmailProvider, emailProviderConfig, smtp2goSelected } from "../li
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const TEMPLATE_CAMPAIGN_SOURCE = "template_campaign_foundation";
 const CAMPAIGN_COLUMNS = "id,name,description,channel,objective,status,tags,metadata,created_by,created_at,updated_at,archived_at,campaign_type,template_id,template_name,template_snapshot,subject_line,preview_text,audience_snapshot";
+const TEMPLATE_SOURCE_COLUMNS = "id,name,category,default_subject,preview_text,header_logo,hero_heading,intro_text,main_body,cta_text,cta_url,footer,brand_colour,company_name,secondary_colour,social_links,master_layout,content_blocks,updated_at";
 const SEND_COLUMNS = "id,campaign_id,send_type,status,provider,requested_count,eligible_count,suppressed_count,sent_count,failed_count,skipped_duplicate_count,created_by,created_at,updated_at,started_at,completed_at,confirmation_token_hash,frozen_subject,frozen_preview_text,frozen_html_hash,metadata,error_summary";
 const RECIPIENT_COLUMNS = "id,send_id,campaign_id,send_type,customer_id,email,status,provider_message_id,provider_event_id,failure_reason,first_sent_at,last_event_at,created_at,updated_at,metadata";
 const PIPELINES = new Set(["all", "finance", "rent2buy", "both"]);
@@ -223,6 +225,19 @@ async function loadOwnedTemplateCampaign(supabase, id) {
   assertSupabase(result, "Could not load template campaign.");
   if (!result.data) throw new ApiError(404, "Template campaign was not found.");
   return result.data;
+}
+
+export async function loadProviderCampaignSource(supabase, campaign = {}) {
+  const templateId = campaign.template_snapshot?.source_template_id || campaign.template_id;
+  if (!templateId) return campaign;
+  const result = await supabase
+    .from("marketing_email_templates")
+    .select(TEMPLATE_SOURCE_COLUMNS)
+    .eq("id", templateId)
+    .maybeSingle();
+  assertSupabase(result, "Could not load the original email template source.");
+  if (!result.data) throw new CampaignValidationError("The original email template source is unavailable.");
+  return campaignFromOriginalTemplateSource(campaign, result.data).campaign;
 }
 
 function campaignAudienceRules(campaign = {}) {
@@ -699,7 +714,8 @@ async function listSendHistory(supabase, body = {}) {
 }
 
 async function sendTest(supabase, body = {}) {
-  const campaign = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
+  const storedCampaign = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
+  const campaign = await loadProviderCampaignSource(supabase, storedCampaign);
   if (campaign.status === "archived") throw new ApiError(400, "Archived campaigns cannot send test emails.");
   const recipientEmail = validateEmail(body.email || body.recipient_email, "Test recipient email");
   const since = new Date(Date.now() - TEST_COOLDOWN_MS).toISOString();
@@ -817,7 +833,8 @@ function countsMatch(send, counts) {
 }
 
 async function prepareProductionSend(supabase, body = {}) {
-  const campaign = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
+  const storedCampaign = await loadOwnedTemplateCampaign(supabase, body.id || body.campaign?.id);
+  const campaign = await loadProviderCampaignSource(supabase, storedCampaign);
   if (campaign.status !== "ready") throw new ApiError(400, "Only Ready campaigns can prepare a production send.");
   if (campaign.status === "archived") throw new ApiError(400, "Archived campaigns cannot send.");
   const selectedProvider = activeEmailProvider();
@@ -916,7 +933,8 @@ async function confirmProductionSend(supabase, body = {}) {
   if (send.confirmation_token_hash !== tokenHash(token)) throw new ApiError(409, "Confirmation token is invalid or has already been used.");
   const expiresAt = new Date(send.metadata?.token_expires_at || 0).getTime();
   if (!expiresAt || Date.now() > expiresAt) throw new ApiError(409, "Confirmation token has expired. Prepare the send again.");
-  const campaign = await loadOwnedTemplateCampaign(supabase, send.campaign_id);
+  const storedCampaign = await loadOwnedTemplateCampaign(supabase, send.campaign_id);
+  const campaign = await loadProviderCampaignSource(supabase, storedCampaign);
   if (campaign.status !== "ready") throw new ApiError(400, "Campaign must still be Ready before sending.");
 
   const fullRecount = await resolveRecipients(supabase, campaign);
