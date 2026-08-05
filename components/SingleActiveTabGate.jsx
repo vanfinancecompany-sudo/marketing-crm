@@ -1,51 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-
-const LOCK_KEY = "marketing-crm-active-tab";
-const CHANNEL_NAME = "marketing-crm-active-tab";
-const HEARTBEAT_MS = 2000;
-const STALE_AFTER_MS = 8000;
-
-function createTabId() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function readLock() {
-  try {
-    const value = localStorage.getItem(LOCK_KEY);
-    if (!value) return null;
-    const parsed = JSON.parse(value);
-    if (!parsed?.tabId || !Number.isFinite(parsed?.updatedAt)) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function isFresh(lock) {
-  return Boolean(lock && Date.now() - lock.updatedAt < STALE_AFTER_MS);
-}
-
-function writeLock(tabId) {
-  const lock = { tabId, updatedAt: Date.now() };
-  localStorage.setItem(LOCK_KEY, JSON.stringify(lock));
-  return lock;
-}
+import {
+  ACTIVE_TAB_CHANNEL_NAME,
+  ACTIVE_TAB_HEARTBEAT_MS,
+  ACTIVE_TAB_LOCK_KEY,
+  getTabId,
+  isActiveTabLockFresh,
+  readActiveTabLock,
+  writeActiveTabLock,
+} from "../utils/activeTabLock.js";
 
 export default function SingleActiveTabGate({ children }) {
-  const tabIdRef = useRef(createTabId());
+  const tabIdRef = useRef(getTabId());
   const channelRef = useRef(null);
   const [active, setActive] = useState(false);
 
   const claim = useCallback((force = false) => {
-    const current = readLock();
-    if (!force && isFresh(current) && current.tabId !== tabIdRef.current) {
+    const current = readActiveTabLock();
+    if (!force && isActiveTabLockFresh(current) && current.tabId !== tabIdRef.current) {
       setActive(false);
       return false;
     }
 
-    writeLock(tabIdRef.current);
-    const confirmed = readLock()?.tabId === tabIdRef.current;
+    writeActiveTabLock(tabIdRef.current);
+    const confirmed = readActiveTabLock()?.tabId === tabIdRef.current;
     setActive(confirmed);
     if (confirmed) {
       channelRef.current?.postMessage({ type: "claimed", tabId: tabIdRef.current });
@@ -56,7 +33,7 @@ export default function SingleActiveTabGate({ children }) {
   useEffect(() => {
     const tabId = tabIdRef.current;
     if (typeof BroadcastChannel !== "undefined") {
-      channelRef.current = new BroadcastChannel(CHANNEL_NAME);
+      channelRef.current = new BroadcastChannel(ACTIVE_TAB_CHANNEL_NAME);
       channelRef.current.onmessage = (event) => {
         if (event.data?.type === "claimed" && event.data.tabId !== tabId) {
           setActive(false);
@@ -67,26 +44,26 @@ export default function SingleActiveTabGate({ children }) {
     claim(false);
 
     const heartbeat = window.setInterval(() => {
-      const current = readLock();
+      const current = readActiveTabLock();
       if (current?.tabId === tabId) {
-        writeLock(tabId);
+        writeActiveTabLock(tabId);
         setActive(true);
         return;
       }
-      if (!isFresh(current)) claim(false);
+      if (!isActiveTabLockFresh(current)) claim(false);
       else setActive(false);
-    }, HEARTBEAT_MS);
+    }, ACTIVE_TAB_HEARTBEAT_MS);
 
     const onStorage = (event) => {
-      if (event.key !== LOCK_KEY) return;
-      const current = readLock();
+      if (event.key !== ACTIVE_TAB_LOCK_KEY) return;
+      const current = readActiveTabLock();
       setActive(current?.tabId === tabId);
     };
     window.addEventListener("storage", onStorage);
 
     const release = () => {
-      const current = readLock();
-      if (current?.tabId === tabId) localStorage.removeItem(LOCK_KEY);
+      const current = readActiveTabLock();
+      if (current?.tabId === tabId) localStorage.removeItem(ACTIVE_TAB_LOCK_KEY);
     };
     window.addEventListener("pagehide", release);
     window.addEventListener("beforeunload", release);
@@ -136,13 +113,3 @@ export default function SingleActiveTabGate({ children }) {
     </main>
   );
 }
-
-export {
-  CHANNEL_NAME,
-  HEARTBEAT_MS,
-  LOCK_KEY,
-  STALE_AFTER_MS,
-  isFresh,
-  readLock,
-  writeLock,
-};
