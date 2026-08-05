@@ -10,7 +10,7 @@ import {
   rankKnowledge,
   splitArticleMarkdown,
 } from "../lib/aiAssistantCompetence.js";
-import { competenceAuthorize } from "../api/marketing-ai-assistant-competence.js";
+import { competenceAuthorize, parseOpenAIAnswer, requestOpenAIAnswer } from "../api/marketing-ai-assistant-competence.js";
 
 const sections = [
   { id: "brain-1", section_key: "products", title: "Products", active: true, content: "Finance is lender assessed. Rent2Buy has no credit check and is based on affordability.", entries: [] },
@@ -101,4 +101,24 @@ test("competence endpoint uses the established Marketing CRM header or Bearer ke
   assert.equal(competenceAuthorize({ headers: {} }, environment), false);
   assert.equal(competenceAuthorize({ headers: { "x-marketing-customer-database-key": "wrong" } }, environment), false);
   assert.equal(competenceAuthorize({ headers: { "x-marketing-customer-database-key": "preview-secret" } }, {}), false);
+});
+
+test("Responses API schema uses supported array constraints and keeps source de-duplication", async () => {
+  let requestBody;
+  const fetchImplementation = async (_url, options) => {
+    requestBody = JSON.parse(options.body);
+    return { ok: true, status: 200, statusText: "OK", json: async () => ({ output_text: JSON.stringify({ answer: "Apply and a lender will assess your circumstances.", confidence: 80, confidence_reason: "Supported by finance guidance.", product_detected: "finance", knowledge_gap: false, conflict_detected: false, source_ids: ["S1", "S1", "invalid"] }) }) };
+  };
+  const requested = await requestOpenAIAnswer("prompt", { OPENAI_API_KEY: "test-key", OPENAI_MODEL: "gpt-4.1-mini" }, fetchImplementation);
+  assert.equal(requestBody.text.format.schema.properties.source_ids.uniqueItems, undefined);
+  assert.equal(requestBody.text.format.schema.properties.source_ids.maxItems, 8);
+  assert.deepEqual(parseOpenAIAnswer(requested.payload, requested.model).answer.source_ids, ["S1"]);
+});
+
+test("Responses API preserves the original OpenAI error and diagnostic metadata", async () => {
+  const fetchImplementation = async () => ({ ok: false, status: 400, statusText: "Bad Request", json: async () => ({ error: { type: "invalid_request_error", code: "invalid_json_schema", message: "Unsupported keyword: uniqueItems" } }) });
+  await assert.rejects(
+    requestOpenAIAnswer("prompt", { OPENAI_API_KEY: "test-key", OPENAI_MODEL: "gpt-4.1-mini" }, fetchImplementation),
+    (error) => error.message.includes("Unsupported keyword: uniqueItems") && error.details.openai_status === 400 && error.details.model === "gpt-4.1-mini",
+  );
 });
