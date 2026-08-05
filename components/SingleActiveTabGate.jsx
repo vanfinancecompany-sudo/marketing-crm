@@ -32,6 +32,9 @@ export default function SingleActiveTabGate({ children }) {
 
   useEffect(() => {
     const tabId = tabIdRef.current;
+    let stopped = false;
+    let heartbeatTimer = null;
+
     if (typeof BroadcastChannel !== "undefined") {
       channelRef.current = new BroadcastChannel(ACTIVE_TAB_CHANNEL_NAME);
       channelRef.current.onmessage = (event) => {
@@ -43,21 +46,26 @@ export default function SingleActiveTabGate({ children }) {
 
     claim(false);
 
-    const heartbeat = window.setInterval(() => {
+    const heartbeat = () => {
+      if (stopped) return;
       const current = readActiveTabLock();
       if (current?.tabId === tabId) {
         writeActiveTabLock(tabId);
         setActive(true);
-        return;
+      } else if (!isActiveTabLockFresh(current)) {
+        claim(false);
+      } else {
+        setActive(false);
       }
-      if (!isActiveTabLockFresh(current)) claim(false);
-      else setActive(false);
-    }, ACTIVE_TAB_HEARTBEAT_MS);
+      heartbeatTimer = window.setTimeout(heartbeat, ACTIVE_TAB_HEARTBEAT_MS);
+    };
+    heartbeatTimer = window.setTimeout(heartbeat, ACTIVE_TAB_HEARTBEAT_MS);
 
     const onStorage = (event) => {
       if (event.key !== ACTIVE_TAB_LOCK_KEY) return;
       const current = readActiveTabLock();
-      setActive(current?.tabId === tabId);
+      if (!isActiveTabLockFresh(current)) claim(false);
+      else setActive(current?.tabId === tabId);
     };
     window.addEventListener("storage", onStorage);
 
@@ -69,7 +77,8 @@ export default function SingleActiveTabGate({ children }) {
     window.addEventListener("beforeunload", release);
 
     return () => {
-      window.clearInterval(heartbeat);
+      stopped = true;
+      if (heartbeatTimer) window.clearTimeout(heartbeatTimer);
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("pagehide", release);
       window.removeEventListener("beforeunload", release);
