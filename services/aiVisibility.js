@@ -8,31 +8,92 @@ const CONNECTIONS_API_ROUTE = "/api/marketing-ai-visibility-google";
 const WIX_SYNC_API_ROUTE = "/api/marketing-ai-visibility-wix-sync";
 const WIX_DIAGNOSTICS_API_ROUTE = "/api/marketing-ai-visibility-wix-diagnostics";
 const MANUAL_EVIDENCE_API_ROUTE = "/api/marketing-ai-visibility-manual";
+const REQUEST_TIMEOUT_MS = 12000;
+const LOAD_CACHE_MS = 30000;
+const FAILURE_COOLDOWN_MS = 60000;
 
-async function request(route, action, payload = {}) {
-  const response = await fetch(route, {
-    method: "POST",
-    headers: buildMarketingAccessHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ action, ...payload }),
-  });
-  return parseMarketingJsonResponse(response, "AI Visibility request failed.");
+const inFlightRequests = new Map();
+const responseCache = new Map();
+const failureCooldowns = new Map();
+
+function requestKey(route, action, payload = {}) {
+  return `${route}:${action}:${JSON.stringify(payload)}`;
 }
 
-const requestAiVisibility = (action, payload = {}) => request(API_ROUTE, action, payload);
-const requestConnection = (action, payload = {}) => request(CONNECTIONS_API_ROUTE, action, payload);
+function cachedResult(key) {
+  const cached = responseCache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.savedAt > LOAD_CACHE_MS) {
+    responseCache.delete(key);
+    return null;
+  }
+  return cached.value;
+}
+
+function cooldownError(key) {
+  const failedAt = failureCooldowns.get(key);
+  if (!failedAt || Date.now() - failedAt > FAILURE_COOLDOWN_MS) {
+    failureCooldowns.delete(key);
+    return null;
+  }
+  const error = new Error("AI Visibility is temporarily unavailable. Please wait a minute before trying again.");
+  error.status = 503;
+  return error;
+}
+
+async function request(route, action, payload = {}, options = {}) {
+  const key = requestKey(route, action, payload);
+  if (options.cache) {
+    const cached = cachedResult(key);
+    if (cached) return cached;
+  }
+  const coolingDown = cooldownError(key);
+  if (coolingDown) throw coolingDown;
+  if (inFlightRequests.has(key)) return inFlightRequests.get(key);
+
+  const pending = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(route, {
+        method: "POST",
+        headers: buildMarketingAccessHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ action, ...payload }),
+        signal: controller.signal,
+      });
+      const result = await parseMarketingJsonResponse(response, "AI Visibility request failed.");
+      failureCooldowns.delete(key);
+      if (options.cache) responseCache.set(key, { value: result, savedAt: Date.now() });
+      return result;
+    } catch (error) {
+      failureCooldowns.set(key, Date.now());
+      if (error?.name === "AbortError") {
+        const timeoutError = new Error("AI Visibility request timed out. Please try again shortly.");
+        timeoutError.status = 503;
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      inFlightRequests.delete(key);
+    }
+  })();
+
+  inFlightRequests.set(key, pending);
+  return pending;
+}
+
+const requestAiVisibility = (action, payload = {}, options = {}) =>
+  request(API_ROUTE, action, payload, options);
+const requestConnection = (action, payload = {}, options = {}) =>
+  request(CONNECTIONS_API_ROUTE, action, payload, options);
 const requestWixSync = (action, payload = {}) => request(WIX_SYNC_API_ROUTE, action, payload);
 
 export const loadGoogleSearchConsoleConnection = () =>
-  requestConnection("googleConnection");
+  requestConnection("googleConnection", {}, { cache: true });
 
-export const loadAiVisibility = async () => {
-  try {
-    await loadGoogleSearchConsoleConnection();
-  } catch (error) {
-    console.warn("GOOGLE SEARCH CONSOLE CONNECTION REFRESH ERROR", error);
-  }
-  return requestAiVisibility("load");
-};
+export const loadAiVisibility = () =>
+  requestAiVisibility("load", {}, { cache: true });
 
 export const saveVisibilityPublication = (articleId, publication) =>
   requestAiVisibility("savePublication", { article_id: articleId, publication });
