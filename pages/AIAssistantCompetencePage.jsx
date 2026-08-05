@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AI_ASSISTANT_TEST_LIBRARY, COMPETENCE_REVIEW_OUTCOMES } from "../lib/aiAssistantCompetence.js";
 import { completeCompetenceRun, loadCompetenceReport, saveCompetenceReview, startCompetenceRun, testAssistantAnswer } from "../services/aiAssistantCompetence.js";
+import { clearMarketingAccessKey, getStoredMarketingAccessKey, isMarketingAccessDenied, saveMarketingAccessKey, validateMarketingAccessKey } from "../services/marketingAccess.js";
 
 const OUTCOME_LABELS = { pass: "Pass", needs_adjustment: "Needs Adjustment", incorrect: "Incorrect", unsafe: "Unsafe", too_long: "Too Long", too_vague: "Too Vague" };
 const RATING_LABELS = { accuracy: "Accuracy", helpfulness: "Helpfulness", conversion: "Conversion", brevity: "Brevity" };
@@ -54,6 +55,9 @@ function ResultPanel({ payload, review, setReview, onSaveReview, reviewBusy }) {
 function ReportList({ title, rows, render }) { return <section className="panel"><h3>{title}</h3>{rows?.length ? <div className="competence-report-list">{rows.slice(0, 12).map((row, index) => <div key={row.id || `${row[0]}-${index}`}>{render(row)}</div>)}</div> : <p>No evidence recorded yet.</p>}</section>; }
 
 export default function AIAssistantCompetencePage() {
+  const [accessStatus, setAccessStatus] = useState(() => getStoredMarketingAccessKey() ? "checking" : "locked");
+  const [accessKey, setAccessKey] = useState("");
+  const [accessError, setAccessError] = useState("");
   const [mode, setMode] = useState("single");
   const [question, setQuestion] = useState("Can I get a van if I have poor credit?");
   const [messages, setMessages] = useState([]);
@@ -68,6 +72,35 @@ export default function AIAssistantCompetencePage() {
   const [report, setReport] = useState(null);
   const categories = useMemo(() => ["all", ...new Set(AI_ASSISTANT_TEST_LIBRARY.map((item) => item.category))], []);
   const questions = libraryFilter === "all" ? AI_ASSISTANT_TEST_LIBRARY : AI_ASSISTANT_TEST_LIBRARY.filter((item) => item.category === libraryFilter);
+
+  useEffect(() => {
+    let active = true;
+    const stored = getStoredMarketingAccessKey();
+    if (!stored) { setAccessStatus("locked"); return () => { active = false; }; }
+    validateMarketingAccessKey(stored).then(() => {
+      if (active) setAccessStatus("unlocked");
+    }).catch((caught) => {
+      clearMarketingAccessKey();
+      if (active) { setAccessStatus("locked"); setAccessError(isMarketingAccessDenied(caught) ? "Your saved access has expired or is not valid for this Preview deployment." : caught.message || "Could not validate saved Marketing CRM access."); }
+    });
+    return () => { active = false; };
+  }, []);
+
+  async function unlock(event) {
+    event.preventDefault();
+    const key = accessKey.trim();
+    if (!key) { setAccessError("Enter the Marketing CRM access key."); return; }
+    setAccessStatus("checking"); setAccessError("");
+    try {
+      await validateMarketingAccessKey(key);
+      if (!saveMarketingAccessKey(key)) throw new Error("The access key could not be saved in this browser.");
+      setAccessKey(""); setAccessStatus("unlocked");
+    } catch (caught) {
+      clearMarketingAccessKey();
+      setAccessStatus("locked");
+      setAccessError(isMarketingAccessDenied(caught) ? "Access key not recognised." : caught.message || "Could not validate Marketing CRM access.");
+    }
+  }
 
   async function runQuestion(item = null, runId = null, runMode = mode) {
     const submitted = item?.question || question;
@@ -111,6 +144,8 @@ export default function AIAssistantCompetencePage() {
   }
 
   function chooseQuestion(item) { setQuestion(item.question); setMode("single"); setPayload(null); window.scrollTo({ top: 0, behavior: "smooth" }); }
+
+  if (accessStatus !== "unlocked") return <div className="page-stack competence-page"><section className="operations-summary competence-hero"><div><div className="eyebrow">Protected internal tool</div><h2>AI Assistant Competence Test</h2><p>Unlock this page with the same Marketing CRM access key used by the Knowledge Hub, Content Factory and Customer Database.</p></div></section><section className="panel"><div className="panel__header"><div><h3>{accessStatus === "checking" ? "Checking saved access..." : "Unlock AI Assistant Test"}</h3><p>The key is validated by the established Marketing CRM access endpoint and saved in this browser only.</p></div></div>{accessStatus === "checking" ? <div className="notice">Validating protected access…</div> : <form className="field-grid" onSubmit={unlock}><label className="field"><span className="field__label">Marketing CRM access key</span><input className="field__input" type="password" autoComplete="off" value={accessKey} onChange={(event) => setAccessKey(event.target.value)} /></label><div className="card-actions" style={{ alignSelf: "end" }}><button className="button button--primary" type="submit">Unlock</button></div>{accessError ? <div className="notice notice--error" style={{ gridColumn: "1 / -1" }}>{accessError}</div> : null}</form>}</section></div>;
 
   return <div className="page-stack competence-page">
     <section className="operations-summary competence-hero"><div><div className="eyebrow">Internal evidence tool</div><h2>AI Assistant Competence Test</h2><p>This does not test how clever the model is. It proves or disproves whether the existing Business Brain, approved FAQs and Knowledge Hub contain enough reliable information for a future customer-facing assistant.</p></div><div className="competence-target"><strong>90%+</strong><span>correct-answer target</span></div></section>
