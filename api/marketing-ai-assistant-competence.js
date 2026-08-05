@@ -37,6 +37,11 @@ import {
   naturalSalesReply,
   stripRepeatedDisclaimer,
 } from "../lib/salesConversationEngine.js";
+import {
+  applicationModeReply,
+  buildJourneyState,
+  detectRepetitiveAssistantWording,
+} from "../lib/applicationJourneyEngine.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
@@ -280,10 +285,10 @@ function conversationRetrievalQuery(intent, memory, messages) {
   return clean(`${recent} ${intent.normalised_message} ${facts}`, 6000);
 }
 
-export function conversationPrompt({ question, messages, sources, sections, settings, productContext, comparison, intent, memory, buyingSignals = {}, lengthTarget = {}, contextualResolution = "" }) {
+export function conversationPrompt({ question, messages, sources, sections, settings, productContext, comparison, intent, memory, buyingSignals = {}, lengthTarget = {}, contextualResolution = "", journey = {} }) {
   const base = buildCompetencePrompt({ question, messages, sources, sections, settings, productContext, comparison });
   const disclaimer = disclaimerControl(messages);
-  return `${base}\n\n# Locked V3 sales conversation intelligence\nThe server classified this as ${intent.primary_intent}. Secondary intents: ${intent.secondary_intents.join(", ") || "none"}. The locked product remains ${productContext} and must never be cross-sold. Remembered structured customer facts: ${JSON.stringify(memory.remembered_facts)}. Corrections: ${JSON.stringify(memory.corrections)}. Buying signal: ${buyingSignals.detected_buying_signal || "none"} (${buyingSignals.signal_strength || "low"}); recommended action: ${buyingSignals.recommended_next_action || "answer directly"}. Context resolution: ${contextualResolution || "none required"}. Target reply band: ${lengthTarget.band || "normal"}, maximum ${lengthTarget.maximum_words || 90} words. Answer only what is needed, then ask at most one genuinely useful question. Do not ask a follow-up after a complete straightforward factual answer. ${disclaimer.instruction} Never invent approval likelihood, stock, rates, payment figures, affordability outcomes or a delivery date. Deterministic evidence is the highest-priority fact and overrides every article, Business Brain passage and model inference. If approved evidence is insufficient, use a plain, honest fallback and do not infer a business fact.`;
+  return `${base}\n\n# Locked V4 conversion and application journey\nThe server classified this as ${intent.primary_intent}. Secondary intents: ${intent.secondary_intents.join(", ") || "none"}. The locked product remains ${productContext} and must never be cross-sold. Remembered structured customer facts: ${JSON.stringify(memory.remembered_facts)}. Corrections: ${JSON.stringify(memory.corrections)}. Buying signal: ${buyingSignals.detected_buying_signal || "none"} (${buyingSignals.signal_strength || "low"}). Buying intent level: ${journey.buying_intent_level || "Research"}. Current customer goal: ${journey.conversation_goal || "Research"}. Journey stage: ${journey.journey_stage || "Research"}. Recommended single action: ${journey.recommended_cta || buyingSignals.recommended_next_action || "Continue conversation"}. Next best question: ${journey.next_best_question || "none"}. Context resolution: ${contextualResolution || "none required"}. Target reply band: ${lengthTarget.band || "normal"}, maximum ${lengthTarget.maximum_words || 90} words. Listen, answer, reassure, progress, then stop. Ask at most one useful question, never ask for a known fact, and ask none when the factual answer or natural closing is complete. Avoid repeating openings such as “Would you like”, “Can I help” or “Does that help”. ${disclaimer.instruction} Never invent approval likelihood, stock, rates, payment figures, affordability outcomes or a delivery date. Deterministic evidence is the highest-priority fact and overrides every article, Business Brain passage and model inference. If approved evidence is insufficient, use a plain, honest fallback and do not infer a business fact.`;
 }
 
 export async function simulateCustomerConversation(supabase, body) {
@@ -308,6 +313,8 @@ export async function simulateCustomerConversation(supabase, body) {
   const buyingSignals = await runStage("Buying signal detection", context, async () => detectBuyingSignals(question, memory.remembered_facts));
   const lengthTarget = responseLengthTarget(question, intent);
   const updatedFacts = Object.fromEntries(Object.entries(memory.remembered_facts).filter(([key, value]) => clean(body.remembered_facts?.[key]) !== clean(value)));
+  const journey = await runStage("Application journey", context, async () => buildJourneyState({ message: question, messages, intent, facts: memory.remembered_facts, factMetadata: memory.fact_metadata, productContext, priorJourney: body.journey_state, updatedFacts }));
+  if (journey.application_mode_active) { intent.retrieval_required = false; intent.clarification_required = false; intent.suggested_clarification_question = ""; }
   const comparison = isExplicitProductComparison(question, messages);
   let sources = [];
   let sourcesUsed = [];
@@ -340,7 +347,7 @@ export async function simulateCustomerConversation(supabase, body) {
       response = insufficientKnowledgeReply(productContext);
     } else {
       const generationStart = performance.now();
-      const prompt = await runStage("Conversation prompt creation", { ...context, source_count: sources.length }, async () => conversationPrompt({ question, messages, sources, sections: bounded.sections, settings: knowledge.settings, productContext, comparison, intent, memory, buyingSignals, lengthTarget, contextualResolution }));
+      const prompt = await runStage("Conversation prompt creation", { ...context, source_count: sources.length }, async () => conversationPrompt({ question, messages, sources, sections: bounded.sections, settings: knowledge.settings, productContext, comparison, intent, memory, buyingSignals, lengthTarget, contextualResolution, journey }));
       const requested = await runStage("Conversation OpenAI request", { ...context, source_count: sources.length }, () => requestOpenAIConversationReply(prompt));
       const generated = await runStage("Conversation structured response parsing", { ...context, model: requested.model }, async () => parseOpenAIConversationReply(requested.payload, requested.model));
       response = generated.reply;
@@ -356,8 +363,13 @@ export async function simulateCustomerConversation(supabase, body) {
     }
   }
 
+  if (journey.application_mode_active) {
+    response = { ...response, reply: applicationModeReply(productContext, journey.application_state), insufficient_knowledge: false, human_handoff_recommended: false, recommended_action: productContext === "finance" ? "apply_finance" : "apply_rent2buy", confidence: 100, confidence_reason: "Server-side V4 Application Mode triggered by explicit customer progression.", source_ids: [] };
+  }
+
   const learningDiagnosis = conversationLearningDiagnosis({ intent, coverage, insufficientKnowledge: response.insufficient_knowledge });
-  const quality = conversationQualityDiagnostics({ message: question, reply: response.reply, intent, messages, followUpAppropriate: Boolean(intent.clarification_required || buyingSignals.detected_buying_signal !== "none") });
+  const repetitiveWording = detectRepetitiveAssistantWording(messages, response.reply);
+  const quality = conversationQualityDiagnostics({ message: question, reply: response.reply, intent, messages, followUpAppropriate: !journey.application_mode_active && Boolean(intent.clarification_required || journey.next_best_question) });
   const readiness = applicationReadiness({ intent, buyingSignals, facts: memory.remembered_facts, insufficientKnowledge: response.insufficient_knowledge, contradiction: memory.corrections.length > 0 && intent.primary_intent === "customer_correction" });
   const conversationSummary = buildConversationSummary({ productContext, facts: memory.remembered_facts, buyingSignals, intent, insufficientKnowledge: response.insufficient_knowledge, humanHandoff: response.human_handoff_recommended });
   const structured = {
@@ -395,14 +407,31 @@ export async function simulateCustomerConversation(supabase, body) {
     response_length_target: quality.response_length_target,
     response_word_count: quality.actual_word_count,
     repeated_disclaimer: quality.repeated_disclaimer,
-    next_best_question: conversationSummary.next_best_question,
-    application_readiness: readiness,
-    conversation_summary: { ...conversationSummary, application_readiness: readiness },
+    next_best_question: journey.next_best_question || conversationSummary.next_best_question,
+    application_readiness: journey.application_readiness || readiness,
+    conversation_summary: { ...conversationSummary, application_readiness: journey.application_readiness || readiness, conversation_goal: journey.conversation_goal, journey_stage: journey.journey_stage, lead_completeness: journey.lead_completeness, recommended_cta: journey.recommended_cta },
     frustration_state: intent.primary_intent === "frustration" ? "active" : "none",
     sounded_article_like: quality.sounded_article_like,
     follow_up_question_appropriate: quality.follow_up_question_appropriate,
     one_question_at_a_time: quality.one_question_at_a_time,
     contextual_resolution: contextualResolution,
+    buying_intent_level: journey.buying_intent_level,
+    buying_intent_score: journey.buying_intent_score,
+    buying_intent_confidence: journey.buying_intent_confidence,
+    buying_intent_reasons: journey.buying_intent_reasons,
+    conversation_goal: journey.conversation_goal,
+    journey_stage: journey.journey_stage,
+    lead_completeness: journey.lead_completeness,
+    application_mode_active: journey.application_mode_active,
+    application_state: journey.application_state,
+    application_cta: journey.application_cta,
+    application_cta_generated: Boolean(journey.application_cta),
+    recommended_cta: journey.recommended_cta,
+    conversation_progressing: journey.conversation_progressing,
+    conversation_stalled: journey.conversation_stalled,
+    journey_next_best_question: journey.next_best_question,
+    repeated_assistant_wording: repetitiveWording.repeated,
+    repeated_assistant_phrase: repetitiveWording.phrase,
   };
   const resultPayload = {
     run_id: body.run_id || null,
