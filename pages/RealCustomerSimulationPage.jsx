@@ -48,12 +48,19 @@ function ResultDiagnostics({ result }) {
         <Diagnostic label="Recommended CTA" value={result.recommended_cta} />
         <Diagnostic label="Progressing" value={result.conversation_progressing ? "Yes" : "No"} />
         <Diagnostic label="Stalled" value={result.conversation_stalled ? "Yes" : "No"} />
+        <Diagnostic label="Universal message type" value={result.universal_message_type} />
+        <Diagnostic label="Message confidence" value={result.universal_message_confidence == null ? "—" : `${result.universal_message_confidence}%`} />
+        <Diagnostic label="Recovery used" value={result.recovery_rule_used ? "Yes" : "No"} />
+        <Diagnostic label="Customer emotion" value={result.customer_emotion} />
+        <Diagnostic label="Objection" value={result.objection_detected ? result.objection_type : "None"} />
+        <Diagnostic label="Repeated phrase" value={result.repeated_phrase_detected ? "Detected" : "No"} />
         <Diagnostic label="Confidence" value={`${result.confidence}%`} />
         <Diagnostic label="Response time" value={`${result.response_time_ms} ms`} />
       </div>
       <div className="notice"><strong>Intent reason:</strong> {result.intent_reason}<br /><strong>Learning diagnosis:</strong> {result.learning_diagnosis}<br /><strong>Clarification question:</strong> {result.clarification_question || "None"}</div>
       <div className="notice"><strong>Buying-signal reason:</strong> {result.buying_signal_reason || "None"}<br /><strong>Recommended action:</strong> {result.recommended_next_conversational_action || "None"}<br /><strong>Next best question:</strong> {result.next_best_question || "None"}<br /><strong>Context resolution:</strong> {result.contextual_resolution || "None"}</div>
       <div className="notice"><strong>V4 journey reasons:</strong> {result.buying_intent_reasons?.join(" ") || "None"}<br /><strong>Journey next question:</strong> {result.journey_next_best_question || "None"}<br /><strong>Repeated assistant wording:</strong> {result.repeated_assistant_wording ? result.repeated_assistant_phrase : "No"}</div>
+      <div className="notice"><strong>V5 classification:</strong> {result.universal_message_reason || "None"}<br /><strong>Emotion:</strong> {result.customer_emotion_reason || "None"}<br /><strong>Objection:</strong> {result.objection_reason || "None"}<br /><strong>Low-confidence stop:</strong> {result.conversation_confidence_below_threshold ? "Yes — clarification used" : "No"}</div>
       {result.application_cta ? <div className="notice notice--success"><strong>{result.application_cta.label}</strong><br />Internal action: {result.application_cta.action_key}<br />URL: Not configured — future Wix abstraction only</div> : null}
       {Object.keys(coverage).length ? <div className="notice"><strong>Deterministic rule:</strong><br />Location: {coverage.detected_location || "Not supplied"}<br />Resolved: {coverage.resolved_postcode || (coverage.resolved_coordinates ? `${coverage.resolved_coordinates.latitude}, ${coverage.resolved_coordinates.longitude}` : "No")}<br />Distance: {coverage.distance_miles == null ? "Not calculated" : `${coverage.distance_miles} miles`}<br />Result: {coverage.coverage_result}<br />Certainty: {coverage.certainty}</div> : null}
       <h3>Remembered facts</h3>
@@ -171,7 +178,7 @@ export default function RealCustomerSimulationPage() {
   if (accessStatus !== "unlocked") return <main className="page-stack"><section className="panel"><h2>Real Customer Simulation</h2><p>This internal page uses the existing Marketing CRM access check.</p><form onSubmit={unlock}><label className="field"><span className="field__label">Marketing CRM access key</span><input className="field__input" type="password" value={accessKey} onChange={(event) => setAccessKey(event.target.value)} /></label><button className="button button--primary">Unlock</button></form>{error ? <div className="notice notice--error">{error}</div> : null}</section></main>;
 
   return <div className="page-stack">
-    <section className="panel"><div className="panel__header"><div><div className="eyebrow">AI Sales Assistant V4</div><h2>Conversion & Application Journey Simulation</h2><p>Test grounded progression from enquiry to application without building or exposing a public Wix assistant. Use synthetic test wording only; do not enter real customer personal data.</p></div><button className="button button--ghost" type="button" disabled={busy || batch.running} onClick={() => resetConversation()}>Reset Conversation</button></div>
+    <section className="panel"><div className="panel__header"><div><div className="eyebrow">AI Sales Assistant V5</div><h2>Human Conversation & Recovery Simulation</h2><p>Test natural recovery, emotion-aware replies and grounded application progression without exposing a public Wix assistant. Use synthetic test wording only; do not enter real customer personal data.</p></div><button className="button button--ghost" type="button" disabled={busy || batch.running} onClick={() => resetConversation()}>Reset Conversation</button></div>
       <div className="competence-metrics"><Diagnostic label="Locked product" value={productContext} /><Diagnostic label="Session" value={sessionId} /><Diagnostic label="Messages" value={messages.length} /></div>
       <div className="competence-context"><button type="button" disabled={busy || batch.running} className={productContext === "finance" ? "is-selected" : ""} onClick={() => resetConversation("finance")}>Finance</button><button type="button" disabled={busy || batch.running} className={productContext === "rent2buy" ? "is-selected" : ""} onClick={() => resetConversation("rent2buy")}>Rent2Buy</button></div>
     </section>
