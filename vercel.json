@@ -15,6 +15,12 @@
     },
     "api/marketing-website-index-discovery.js": {
       "maxDuration": 300
+    },
+    "api/marketing-ai-visibility.js": {
+      "maxDuration": 15
+    },
+    "api/marketing-ai-visibility-google.js": {
+      "maxDuration": 15
     }
   },
   "rewrites": [
