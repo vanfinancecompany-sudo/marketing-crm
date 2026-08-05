@@ -20,7 +20,7 @@
       "maxDuration": 15
     },
     "api/marketing-ai-visibility-google.js": {
-      "maxDuration": 15
+      "maxDuration": 300
     }
   },
   "rewrites": [
