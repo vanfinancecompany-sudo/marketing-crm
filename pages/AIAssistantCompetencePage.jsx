@@ -34,6 +34,8 @@ function ResultPanel({ payload, review, setReview, onSaveReview, reviewBusy }) {
         <Metric label="Retrieval Time" value={`${result.retrieval_time_ms} ms`} />
         <Metric label="Generation Time" value={`${result.generation_time_ms} ms`} />
         <Metric label="Confidence" value={`${result.confidence}%`} tone={result.confidence >= 80 ? "is-good" : "is-warning"} />
+        <Metric label="Test Context" value={result.product_context} />
+        <Metric label="Category Filter" value={result.category_filter} />
         <Metric label="Product" value={result.product_detected} />
         <Metric label="Knowledge Gap" value={result.knowledge_gap ? "Yes" : "No"} tone={result.knowledge_gap ? "is-danger" : "is-good"} />
         <Metric label="Conflict" value={result.conflict_detected ? "Detected" : "None"} tone={result.conflict_detected ? "is-danger" : "is-good"} />
@@ -60,6 +62,7 @@ export default function AIAssistantCompetencePage() {
   const [accessError, setAccessError] = useState("");
   const [mode, setMode] = useState("single");
   const [question, setQuestion] = useState("Can I get a van if I have poor credit?");
+  const [productContext, setProductContext] = useState("finance");
   const [messages, setMessages] = useState([]);
   const [payload, setPayload] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -104,10 +107,11 @@ export default function AIAssistantCompetencePage() {
 
   async function runQuestion(item = null, runId = null, runMode = mode) {
     const submitted = item?.question || question;
+    const submittedContext = item ? (/rent\s*2\s*buy/i.test(item.question) || item.category === "rent2buy" ? "rent2buy" : "finance") : productContext;
     if (!submitted.trim()) return;
     setBusy(true); setError(""); setReviewMessage("");
     try {
-      const result = await testAssistantAnswer({ question: submitted, messages: runMode === "conversation" ? messages : [], mode: runMode, run_id: runId, test_question_id: item?.id || null });
+      const result = await testAssistantAnswer({ question: submitted, product_context: submittedContext, messages: runMode === "conversation" ? messages : [], mode: runMode, run_id: runId, test_question_id: item?.id || null });
       setPayload(result); setReview(initialReview);
       if (runMode === "conversation") setMessages((current) => [...current, { role: "user", content: submitted }, { role: "assistant", content: result.result.answer }]);
       return result;
@@ -143,7 +147,7 @@ export default function AIAssistantCompetencePage() {
     finally { setBusy(false); }
   }
 
-  function chooseQuestion(item) { setQuestion(item.question); setMode("single"); setPayload(null); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function chooseQuestion(item) { setQuestion(item.question); setProductContext(/rent\s*2\s*buy/i.test(item.question) || item.category === "rent2buy" ? "rent2buy" : "finance"); setMode("single"); setPayload(null); window.scrollTo({ top: 0, behavior: "smooth" }); }
 
   if (accessStatus !== "unlocked") return <div className="page-stack competence-page"><section className="operations-summary competence-hero"><div><div className="eyebrow">Protected internal tool</div><h2>AI Assistant Competence Test</h2><p>Unlock this page with the same Marketing CRM access key used by the Knowledge Hub, Content Factory and Customer Database.</p></div></section><section className="panel"><div className="panel__header"><div><h3>{accessStatus === "checking" ? "Checking saved access..." : "Unlock AI Assistant Test"}</h3><p>The key is validated by the established Marketing CRM access endpoint and saved in this browser only.</p></div></div>{accessStatus === "checking" ? <div className="notice">Validating protected access…</div> : <form className="field-grid" onSubmit={unlock}><label className="field"><span className="field__label">Marketing CRM access key</span><input className="field__input" type="password" autoComplete="off" value={accessKey} onChange={(event) => setAccessKey(event.target.value)} /></label><div className="card-actions" style={{ alignSelf: "end" }}><button className="button button--primary" type="submit">Unlock</button></div>{accessError ? <div className="notice notice--error" style={{ gridColumn: "1 / -1" }}>{accessError}</div> : null}</form>}</section></div>;
 
@@ -158,7 +162,7 @@ export default function AIAssistantCompetencePage() {
     {error ? <div className="notice notice--error">{error}</div> : null}{reviewMessage ? <div className="notice notice--success">{reviewMessage}</div> : null}
     {mode === "single" || mode === "conversation" ? <>
       {mode === "conversation" && messages.length ? <section className="panel competence-conversation">{messages.map((message, index) => <div className={`is-${message.role}`} key={index}><strong>{message.role === "user" ? "Customer" : "Assistant"}</strong><p>{message.content}</p></div>)}</section> : null}
-      <section className="panel"><label className="field"><span className="field__label">Customer Question</span><textarea className="field__input competence-question" rows={5} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Can I get a van if I have poor credit?" /></label><div className="card-actions"><button className="button button--primary" type="button" disabled={busy || !question.trim()} onClick={() => runQuestion()}>{busy ? "Testing..." : "Test Answer"}</button>{mode === "conversation" && messages.length ? <button className="button button--ghost" type="button" onClick={() => { setMessages([]); setPayload(null); }}>New Conversation</button> : null}</div></section>
+      <section className="panel"><div className="field-grid"><label className="field"><span className="field__label">Product Context</span><select className="field__input" value={productContext} onChange={(event) => { setProductContext(event.target.value); setPayload(null); }} required><option value="finance">Finance</option><option value="rent2buy">Rent2Buy</option></select></label><label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Customer Question</span><textarea className="field__input competence-question" rows={5} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Can I get a van if I have poor credit?" /></label></div><div className="card-actions"><button className="button button--primary" type="button" disabled={busy || !question.trim()} onClick={() => runQuestion()}>{busy ? "Testing..." : "Test Answer"}</button>{mode === "conversation" && messages.length ? <button className="button button--ghost" type="button" onClick={() => { setMessages([]); setPayload(null); }}>New Conversation</button> : null}</div></section>
       <ResultPanel payload={payload} review={review} setReview={setReview} onSaveReview={saveReview} reviewBusy={reviewBusy} />
     </> : null}
     {mode === "library" ? <section className="panel"><div className="panel__header"><div><div className="eyebrow">50 built-in checks</div><h3>Customer question library</h3><p>Run questions individually or execute the complete evidence set.</p></div><button className="button button--primary" type="button" disabled={batch.running} onClick={runEntireSet}>{batch.running ? `Running ${batch.completed}/${batch.total}` : "Run Entire Test Set"}</button></div>{batch.running || batch.completed ? <div className="competence-progress"><i style={{ width: `${Math.round(batch.completed / batch.total * 100)}%` }} /><span>{batch.completed} of {batch.total} complete</span></div> : null}<div className="competence-filters">{categories.map((category) => <button className={libraryFilter === category ? "is-selected" : ""} onClick={() => setLibraryFilter(category)} key={category}>{category.replaceAll("_", " ")}</button>)}</div><div className="competence-library">{questions.map((item) => <article key={item.id}><span>{item.id} · {item.category.replaceAll("_", " ")}</span><p>{item.question}</p><button type="button" onClick={() => chooseQuestion(item)}>Run individually</button></article>)}</div></section> : null}
