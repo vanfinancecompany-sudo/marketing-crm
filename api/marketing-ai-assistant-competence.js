@@ -14,6 +14,17 @@ import {
 import { assessSavedCompetenceResult } from "./_knowledgeOpportunityStore.js";
 import { resolveProductCoverage } from "./_productCoverage.js";
 import { coverageConflictDetected, detectCoverageConflicts } from "../lib/productCoverageRules.js";
+import {
+  CONVERSATION_RATING_FIELDS,
+  CONVERSATION_REVIEW_OUTCOMES,
+  buildConversationMemory,
+  classifyConversationIntent,
+  conversationLearningDiagnosis,
+  enforceGroundedConversationReply,
+  insufficientKnowledgeReply,
+  naturalConversationReply,
+} from "../lib/conversationIntelligence.js";
+import { REAL_CUSTOMER_SCENARIOS } from "../lib/customerSimulationScenarios.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
@@ -60,6 +71,21 @@ const ANSWER_SCHEMA = {
     product_detected: { type: "string", enum: ["finance", "rent2buy", "both", "unknown"] },
     knowledge_gap: { type: "boolean" },
     conflict_detected: { type: "boolean" },
+    source_ids: { type: "array", items: { type: "string", pattern: "^S[1-8]$" }, maxItems: 8 },
+  },
+};
+
+const CONVERSATION_REPLY_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["reply", "insufficient_knowledge", "human_handoff_recommended", "recommended_action", "confidence", "confidence_reason", "source_ids"],
+  properties: {
+    reply: { type: "string" },
+    insufficient_knowledge: { type: "boolean" },
+    human_handoff_recommended: { type: "boolean" },
+    recommended_action: { type: "string", enum: ["continue", "clarify", "apply_finance", "apply_rent2buy", "human_handoff", "none"] },
+    confidence: { type: "integer", minimum: 0, maximum: 100 },
+    confidence_reason: { type: "string" },
     source_ids: { type: "array", items: { type: "string", pattern: "^S[1-8]$" }, maxItems: 8 },
   },
 };
@@ -118,6 +144,40 @@ export function parseOpenAIAnswer(payload, model) {
   if (!answer || typeof answer !== "object" || Array.isArray(answer) || missing.length) throw new ApiError(502, `The structured answer is missing required fields: ${missing.join(", ") || "invalid object"}.`, "validation", { model });
   answer.source_ids = [...new Set((Array.isArray(answer.source_ids) ? answer.source_ids : []).filter((id) => /^S[1-8]$/.test(id)))];
   return { answer, model };
+}
+
+export async function requestOpenAIConversationReply(prompt, environment = process.env, fetchImplementation = fetch) {
+  const apiKey = clean(environment.OPENAI_API_KEY);
+  if (!apiKey) throw new ApiError(500, "OPENAI_API_KEY is not configured.", "configuration", { openai_api_key_present: false });
+  const model = clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini";
+  const response = await fetchImplementation("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      input: [
+        { role: "system", content: "You are the grounded internal simulation of a UK van website assistant. Compose only the customer-facing reply. Never override product context, deterministic rules, remembered facts or supplied evidence." },
+        { role: "user", content: prompt },
+      ],
+      text: { format: { type: "json_schema", name: "conversation_simulation_reply", strict: true, schema: CONVERSATION_REPLY_SCHEMA } },
+    }),
+  });
+  let payload;
+  try { payload = await response.json(); } catch (error) { throw new ApiError(502, `OpenAI returned a non-JSON conversation response (${response.status} ${response.statusText}).`, "ai", { model, cause: clean(error.message, 500) }); }
+  if (!response.ok) throw new ApiError(502, openAIErrorMessage(payload, response), "ai", { model, openai_status: response.status });
+  return { payload, model };
+}
+
+export function parseOpenAIConversationReply(payload, model) {
+  const output = payload.output_text || payload.output?.flatMap((item) => item.content || []).find((item) => item.type === "output_text")?.text;
+  if (!output) throw new ApiError(502, "The AI returned no conversation reply.", "ai", { model });
+  let parsed;
+  try { parsed = JSON.parse(output); } catch (error) { throw new ApiError(502, `The AI returned invalid conversation JSON: ${error.message}`, "validation", { model }); }
+  const missing = CONVERSATION_REPLY_SCHEMA.required.filter((key) => !(key in (parsed || {})));
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || missing.length) throw new ApiError(502, `The conversation reply is missing required fields: ${missing.join(", ") || "invalid object"}.`, "validation", { model });
+  if (!CONVERSATION_REPLY_SCHEMA.properties.recommended_action.enum.includes(parsed.recommended_action)) throw new ApiError(502, "The conversation reply contains an unsupported recommended action.", "validation", { model });
+  parsed.source_ids = [...new Set((Array.isArray(parsed.source_ids) ? parsed.source_ids : []).filter((id) => /^S[1-8]$/.test(id)))];
+  return { reply: parsed, model };
 }
 
 function cleanMessages(messages) {
@@ -202,6 +262,140 @@ export async function testCompetenceAnswer(supabase, body) {
   return { result: { ...saved, product_context: productContext, category_filter: boundedKnowledge.categoryFilter, comparison_mode: comparison, coverage_diagnostics: coverage?.diagnostics || {} }, retrieved_sources: sources, word_count: resultPayload.answer.split(/\s+/).filter(Boolean).length, request_trace: requestTrace };
 }
 
+function conversationRetrievalQuery(intent, memory, messages) {
+  const recent = messages.filter((item) => item.role === "user").slice(-3).map((item) => item.content).join(" ");
+  const facts = Object.entries(memory.remembered_facts).map(([key, value]) => `${key.replace(/_/g, " ")} ${value}`).join(" ");
+  return clean(`${recent} ${intent.normalised_message} ${facts}`, 6000);
+}
+
+function conversationPrompt({ question, messages, sources, sections, settings, productContext, comparison, intent, memory }) {
+  const base = buildCompetencePrompt({ question, messages, sources, sections, settings, productContext, comparison });
+  return `${base}\n\n# Locked conversation intelligence\nThe server classified this as ${intent.primary_intent}. Secondary intents: ${intent.secondary_intents.join(", ") || "none"}. The locked product remains ${productContext}. Remembered customer facts: ${JSON.stringify(memory.remembered_facts)}. Corrections: ${JSON.stringify(memory.corrections)}. Address every supported part of a multi-part question. Do not repeat a question already answered in the conversation. Return a natural reply of approximately 100 words or fewer. If approved evidence is insufficient, use a plain, honest fallback and do not infer a business fact.`;
+}
+
+export async function simulateCustomerConversation(supabase, body) {
+  const totalStart = performance.now();
+  const question = clean(body.message || body.question, 3000);
+  if (!question) throw new ApiError(400, "Enter a customer message.", "validation");
+  const productContext = clean(body.product_context, 20).toLowerCase();
+  if (!COMPETENCE_PRODUCT_CONTEXTS.includes(productContext)) throw new ApiError(400, "Choose a locked product context: finance or rent2buy.", "validation");
+  const messages = cleanMessages(body.messages);
+  const requestId = clean(body.request_id, 100) || createRequestId();
+  const sessionId = clean(body.session_id, 100) || requestId;
+  const context = { request_id: requestId, session_id: sessionId, scenario_id: clean(body.scenario_id, 50) || null, product_context: productContext };
+  const intent = await runStage("Conversation intent", context, async () => classifyConversationIntent({ message: question, history: messages, productContext }));
+  const conversationWithCurrent = [...messages, { role: "user", content: question }];
+  const memory = await runStage("Conversation memory", context, async () => buildConversationMemory(conversationWithCurrent, body.remembered_facts));
+  const priorQuestion = messages.filter((item) => item.role === "user").at(-1)?.content;
+  const priorAnswer = messages.filter((item) => item.role === "assistant").at(-1)?.content;
+  if (priorQuestion) memory.remembered_facts.prior_question = priorQuestion;
+  if (priorAnswer) memory.remembered_facts.prior_answer = priorAnswer;
+  const updatedFacts = Object.fromEntries(Object.entries(memory.remembered_facts).filter(([key, value]) => clean(body.remembered_facts?.[key]) !== clean(value)));
+  const comparison = isExplicitProductComparison(question, messages);
+  let sources = [];
+  let sourcesUsed = [];
+  let coverage = null;
+  let coverageConflicts = [];
+  let categoryFilter = productContext === "rent2buy" ? "Rent2Buy only" : "All approved Finance categories; exclude Rent2Buy";
+  let retrievalTime = 0;
+  let generationTime = 0;
+  let model = "deterministic-conversation-rules";
+  let response;
+
+  if (!intent.retrieval_required) {
+    response = naturalConversationReply(intent, productContext);
+  } else {
+    const retrievalStart = performance.now();
+    const knowledge = await loadKnowledge(supabase);
+    const bounded = await runStage("Apply conversation product boundary", { ...context, comparison }, async () => filterKnowledgeForProduct(knowledge, productContext, { comparison }));
+    categoryFilter = bounded.categoryFilter;
+    const corpus = await runStage("Build conversation article chunks", { ...context, article_count: bounded.articles.length }, async () => buildRetrievalCorpus(bounded));
+    const retrievalQuery = conversationRetrievalQuery(intent, memory, conversationWithCurrent);
+    const location = memory.remembered_facts.location;
+    const coverageQuestion = intent.secondary_intents.includes("coverage") && location ? `coverage for ${location}` : question;
+    coverage = await runStage("Resolve conversation deterministic coverage", context, () => resolveProductCoverage({ question: coverageQuestion, productContext, settings: knowledge.settings }));
+    const lexical = await runStage("Conversation lexical ranking", { ...context, retrieval_query: retrievalQuery }, async () => rankKnowledge(retrievalQuery, corpus, { messages, limit: coverage ? 7 : 8 }));
+    coverageConflicts = await runStage("Check conversation coverage conflicts", context, async () => detectCoverageConflicts(coverage, corpus, knowledge.settings));
+    if (coverage) coverage.diagnostics.conflicting_sources = coverageConflicts;
+    sources = coverage ? [coverage.source, ...lexical].slice(0, 8) : lexical;
+    retrievalTime = elapsed(retrievalStart);
+    if (!sources.length) {
+      response = insufficientKnowledgeReply(productContext);
+    } else {
+      const generationStart = performance.now();
+      const prompt = await runStage("Conversation prompt creation", { ...context, source_count: sources.length }, async () => conversationPrompt({ question, messages, sources, sections: bounded.sections, settings: knowledge.settings, productContext, comparison, intent, memory }));
+      const requested = await runStage("Conversation OpenAI request", { ...context, source_count: sources.length }, () => requestOpenAIConversationReply(prompt));
+      const generated = await runStage("Conversation structured response parsing", { ...context, model: requested.model }, async () => parseOpenAIConversationReply(requested.payload, requested.model));
+      response = generated.reply;
+      model = generated.model;
+      response = enforceGroundedConversationReply(response, { deterministicRuleUsed: Boolean(coverage), productContext });
+      const selected = new Set(response.source_ids || []);
+      if (coverage) selected.add("S1");
+      sourcesUsed = sources.filter((_source, index) => selected.has(`S${index + 1}`));
+      generationTime = elapsed(generationStart);
+    }
+  }
+
+  const learningDiagnosis = conversationLearningDiagnosis({ intent, coverage, insufficientKnowledge: response.insufficient_knowledge });
+  const structured = {
+    reply: clean(response.reply, 5000),
+    conversation_intent: intent.primary_intent,
+    original_message: question,
+    normalised_message: intent.normalised_message,
+    secondary_intents: intent.secondary_intents,
+    detected_product: intent.detected_product,
+    product_context: productContext,
+    retrieval_required: intent.retrieval_required,
+    retrieval_used: intent.retrieval_required && sources.length > 0,
+    clarification_required: intent.clarification_required,
+    clarification_question: intent.suggested_clarification_question,
+    remembered_facts: memory.remembered_facts,
+    updated_facts: updatedFacts,
+    corrections: memory.corrections,
+    deterministic_rules_used: coverage ? [coverage.source.source_id] : [],
+    knowledge_sources_used: sourcesUsed,
+    insufficient_knowledge: Boolean(response.insufficient_knowledge),
+    human_handoff_recommended: Boolean(response.human_handoff_recommended),
+    recommended_action: response.recommended_action,
+    confidence: Math.min(100, Math.max(0, Number(response.confidence) || 0)),
+    confidence_reason: clean(response.confidence_reason, 2000),
+    intent_confidence: intent.confidence,
+    intent_reason: intent.reason,
+    coverage_diagnostics: coverage?.diagnostics || {},
+    conflict_detected: coverageConflictDetected(false, coverageConflicts),
+    learning_diagnosis: learningDiagnosis,
+  };
+  const resultPayload = {
+    run_id: body.run_id || null,
+    test_question_id: clean(body.scenario_id, 50) || null,
+    mode: "conversation",
+    product_context: productContext,
+    question,
+    conversation: messages,
+    answer: structured.reply,
+    product_detected: ["finance", "rent2buy", "both"].includes(intent.detected_product) ? intent.detected_product : productContext,
+    confidence: structured.confidence,
+    confidence_reason: structured.confidence_reason,
+    knowledge_gap: structured.insufficient_knowledge,
+    conflict_detected: structured.conflict_detected,
+    sources_used: sourcesUsed,
+    response_time_ms: elapsed(totalStart),
+    retrieval_time_ms: retrievalTime,
+    generation_time_ms: generationTime,
+    model,
+    coverage_diagnostics: structured.coverage_diagnostics,
+    conversation_intent: intent.primary_intent,
+    secondary_intents: intent.secondary_intents,
+    conversation_diagnostics: structured,
+    learning_diagnosis: learningDiagnosis,
+    simulation_session_id: sessionId,
+  };
+  const saved = await runStage("Save conversation simulation", context, async () => data(await supabase.from("knowledge_competence_results").insert(resultPayload).select().single(), "The conversation simulation could not be saved."));
+  await assessSavedCompetenceResult(supabase, saved.id);
+  const trace = { request_id: requestId, session_id: sessionId, submitted_question: question, result_question: saved.question, result_id: saved.id, selected_product: productContext, generated_at: new Date().toISOString(), cached_value_used: false, previous_value_used: false };
+  return { result: { ...structured, id: saved.id, response_time_ms: resultPayload.response_time_ms, retrieval_time_ms: retrievalTime, generation_time_ms: generationTime, model, category_filter: categoryFilter }, request_trace: trace };
+}
+
 async function startRun(supabase, body) {
   const total = Math.max(0, Number(body.total_questions) || 0);
   return data(await supabase.from("knowledge_competence_runs").insert({ mode: body.mode === "test_set" ? "test_set" : body.mode === "conversation" ? "conversation" : "single", total_questions: total }).select().single(), "The test run could not be started.");
@@ -229,6 +423,18 @@ async function saveReview(supabase, body) {
   return saved;
 }
 
+async function saveConversationReview(supabase, body) {
+  const resultId = clean(body.result_id, 100);
+  if (!resultId) throw new ApiError(400, "Result id is required.", "validation");
+  if (!CONVERSATION_REVIEW_OUTCOMES.includes(body.outcome)) throw new ApiError(400, "Choose a valid conversation review outcome.", "validation");
+  const rating = (value) => value == null || value === "" ? null : Math.min(5, Math.max(1, Number(value)));
+  const payload = { result_id: resultId, outcome: body.outcome, reviewer_notes: clean(body.reviewer_notes, 5000), updated_at: new Date().toISOString() };
+  for (const field of CONVERSATION_RATING_FIELDS) payload[field] = rating(body[field]);
+  const saved = await runStage("Save conversation review", { result_id: resultId }, async () => data(await supabase.from("knowledge_competence_reviews").upsert(payload, { onConflict: "result_id" }).select().single(), "The conversation review could not be saved."));
+  await assessSavedCompetenceResult(supabase, resultId);
+  return saved;
+}
+
 async function loadReport(supabase) {
   const [runsResult, resultsResult, reviewsResult] = await Promise.all([
     supabase.from("knowledge_competence_runs").select("*").order("started_at", { ascending: false }).limit(20),
@@ -251,11 +457,13 @@ export default async function handler(request, response) {
     const supabase = getSupabase();
     let result;
     if (body.action === "testAnswer") result = await testCompetenceAnswer(supabase, body);
+    else if (body.action === "simulateConversation") result = await simulateCustomerConversation(supabase, body);
     else if (body.action === "startRun") result = { run: await startRun(supabase, body) };
     else if (body.action === "completeRun") result = { run: await completeRun(supabase, body) };
     else if (body.action === "saveReview") result = { review: await saveReview(supabase, body) };
+    else if (body.action === "saveConversationReview") result = { review: await saveConversationReview(supabase, body) };
     else if (body.action === "loadReport") result = await loadReport(supabase);
-    else if (body.action === "loadTestLibrary") result = { questions: AI_ASSISTANT_TEST_LIBRARY };
+    else if (body.action === "loadTestLibrary") result = { questions: AI_ASSISTANT_TEST_LIBRARY, scenarios: REAL_CUSTOMER_SCENARIOS };
     else throw new ApiError(400, "Unsupported competence-test action.", "validation");
     return await runStage("Return response", { action: clean(body.action, 100), run_id: body.run_id || null, result_id: body.result_id || null }, async () => response.status(200).json({ ok: true, ...result }));
   } catch (error) {
