@@ -11,6 +11,7 @@
     { id: "ai-visibility", label: "AI Visibility", path: "/ai-visibility", paths: ["/ai-visibility"], navigation: "react", view: "AI Visibility" },
     { id: "ai-assistant-competence", label: "AI Assistant Test", path: "/ai-assistant-competence", paths: ["/ai-assistant-competence"], navigation: "react", view: "AI Assistant Competence Test" },
     { id: "ai-knowledge-opportunities", label: "AI Knowledge Opportunities", path: "/ai-knowledge-opportunities", paths: ["/ai-knowledge-opportunities"], navigation: "react", view: "AI Knowledge Opportunities" },
+    { id: "ai-customer-simulation", label: "Real Customer Simulation", path: "/ai-customer-simulation", paths: ["/ai-customer-simulation"], navigation: "react", view: "Real Customer Simulation" },
     { id: "suppression-centre", label: "Suppression Centre", path: "/suppression-centre/", paths: ["/suppression-centre/"], navigation: "document" },
     { id: "email-templates", label: "Email Templates", path: "/email-templates/", paths: ["/email-templates/"], navigation: "document" },
     { id: "campaigns", label: "Campaigns", path: "/campaigns/", paths: ["/campaigns/"], navigation: "document" },

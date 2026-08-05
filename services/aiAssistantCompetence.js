@@ -26,3 +26,6 @@ export const startCompetenceRun = (mode, totalQuestions) => requestAssistantComp
 export const completeCompetenceRun = (runId) => requestAssistantCompetence("completeRun", { run_id: runId });
 export const saveCompetenceReview = (payload) => requestAssistantCompetence("saveReview", payload);
 export const loadCompetenceReport = () => requestAssistantCompetence("loadReport");
+export const simulateCustomerConversation = (payload, fetchImplementation) => requestAssistantCompetence("simulateConversation", payload, fetchImplementation);
+export const saveConversationReview = (payload, fetchImplementation) => requestAssistantCompetence("saveConversationReview", payload, fetchImplementation);
+export const loadCustomerSimulationLibrary = (fetchImplementation) => requestAssistantCompetence("loadTestLibrary", {}, fetchImplementation);
