@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { openAIModelConfiguration } from "../lib/openAIModelConfiguration.js";
 import { buildAiPlatformPrompt } from "../lib/businessIntelligence.js";
 import {
   CUSTOMER_JOURNEYS,
@@ -243,7 +244,7 @@ function data(result, fallback) {
 function aiConfiguration() {
   return {
     configured: Boolean(clean(process.env.OPENAI_API_KEY, 10000)),
-    model: clean(process.env.OPENAI_MODEL, 200) || "gpt-4.1-mini",
+    model: openAIModelConfiguration(process.env).default_model,
   };
 }
 

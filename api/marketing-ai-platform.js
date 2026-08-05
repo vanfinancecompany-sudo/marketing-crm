@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { openAIModelConfiguration } from "../lib/openAIModelConfiguration.js";
 import {
   AI_CONTENT_CHANNELS,
   AI_REVIEW_CATEGORY_KEYS,
@@ -139,7 +140,7 @@ function assertResult(result, fallback) {
 function aiConfiguration(environment = process.env) {
   return {
     configured: Boolean(clean(environment.OPENAI_API_KEY, 10000)),
-    model: clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini",
+    model: openAIModelConfiguration(environment).default_model,
     environment: clean(environment.VERCEL_ENV, 50) || "local",
   };
 }
