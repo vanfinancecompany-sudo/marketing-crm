@@ -13,6 +13,7 @@ import {
   splitArticleMarkdown,
 } from "../lib/aiAssistantCompetence.js";
 import { competenceAuthorize, parseOpenAIAnswer, requestOpenAIAnswer } from "../api/marketing-ai-assistant-competence.js";
+import { acceptCompetenceResponse, testAssistantAnswer } from "../services/aiAssistantCompetence.js";
 
 const sections = [
   { id: "brain-1", section_key: "products", title: "Products", active: true, content: "Finance is lender assessed. Rent2Buy has no credit check and is based on affordability.", entries: [] },
@@ -145,4 +146,50 @@ test("Responses API preserves the original OpenAI error and diagnostic metadata"
     requestOpenAIAnswer("prompt", { OPENAI_API_KEY: "test-key", OPENAI_MODEL: "gpt-4.1-mini" }, fetchImplementation),
     (error) => error.message.includes("Unsupported keyword: uniqueItems") && error.details.openai_status === 400 && error.details.model === "gpt-4.1-mini",
   );
+});
+
+test("three sequential single-question requests cannot reuse an earlier answer or retrieval trace", async () => {
+  const questions = [
+    "I've seen a Transit Custom I like. What's the next step?",
+    "I've been trading for six months and need a van quickly. Is there any point applying?",
+    "I'm a plumber and do not know what my options are.",
+  ];
+  const seenRequests = [];
+  let resultSequence = 0;
+  const fetchImplementation = async (_url, options) => {
+    const request = JSON.parse(options.body);
+    seenRequests.push({ request, options });
+    resultSequence += 1;
+    const resultId = `result-${resultSequence}`;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        result: { id: resultId, question: request.question, answer: `Answer for: ${request.question}`, sources_used: [{ source_id: `source-${resultSequence}` }] },
+        retrieved_sources: [{ source_id: `source-${resultSequence}`, passage: request.question }],
+        request_trace: { request_id: request.request_id, submitted_question: request.question, result_question: request.question, result_id: resultId, retrieved_source_ids: [`source-${resultSequence}`], cached_value_used: false, previous_value_used: false },
+      }),
+    };
+  };
+  let renderedPayload = null;
+  const resultIds = [];
+  for (let index = 0; index < questions.length; index += 1) {
+    const requestId = `request-${index + 1}`;
+    renderedPayload = null;
+    const response = await testAssistantAnswer({ request_id: requestId, question: questions[index], product_context: "finance", mode: "single", messages: [] }, fetchImplementation);
+    renderedPayload = acceptCompetenceResponse(requestId, response);
+    resultIds.push(renderedPayload.result.id);
+    assert.equal(renderedPayload.result.question, questions[index]);
+    assert.equal(renderedPayload.result.answer, `Answer for: ${questions[index]}`);
+    assert.deepEqual(renderedPayload.request_trace.retrieved_source_ids, [`source-${index + 1}`]);
+  }
+  assert.deepEqual(seenRequests.map(({ request }) => request.question), questions);
+  assert.deepEqual(seenRequests.map(({ request }) => request.messages), [[], [], []]);
+  assert.deepEqual(seenRequests.map(({ options }) => options.cache), ["no-store", "no-store", "no-store"]);
+  assert.deepEqual(seenRequests.map(({ request }) => request.request_id), ["request-1", "request-2", "request-3"]);
+  assert.equal(new Set(seenRequests.map(({ request }) => request.request_id)).size, 3);
+  assert.deepEqual(resultIds, ["result-1", "result-2", "result-3"]);
+  assert.equal(renderedPayload.result.id, "result-3");
+  assert.equal(acceptCompetenceResponse("request-3", { request_trace: { request_id: "request-1" } }), null);
 });
