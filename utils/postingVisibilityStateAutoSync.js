@@ -5,6 +5,7 @@ import {
   savePostingHiddenIds,
   savePostingVisibilityState,
 } from "./postingVisibilityStateSync.js";
+import { isThisMarketingCrmTabActive } from "./activeTabLock.js";
 
 const SYNC_INTERVAL_MS = 2500;
 const INITIAL_BACKFILL_DELAYS_MS = [500, 2000, 5000, 10000];
@@ -41,14 +42,18 @@ function snapshotState(state) {
 }
 
 async function pushState(state) {
+  if (!isThisMarketingCrmTabActive()) return;
   for (const pageKey of PAGE_KEYS) {
+    if (!isThisMarketingCrmTabActive()) return;
     await savePostingVisibilityState(pageKey, state[pageKey]).catch(() => {});
   }
   lastSnapshot = snapshotState(state);
 }
 
 async function hydrateOnce() {
+  if (!isThisMarketingCrmTabActive()) return;
   const serverState = await fetchPostingVisibilityState();
+  if (!isThisMarketingCrmTabActive()) return;
 
   for (const pageKey of PAGE_KEYS) {
     const storageKey = POSTING_HIDDEN_STORAGE_KEYS[pageKey];
@@ -63,7 +68,7 @@ async function hydrateOnce() {
 }
 
 async function forceBrowserBackfill() {
-  if (syncRunning) return;
+  if (syncRunning || !isThisMarketingCrmTabActive()) return;
 
   syncRunning = true;
   try {
@@ -74,7 +79,7 @@ async function forceBrowserBackfill() {
 }
 
 async function pushChangesIfNeeded() {
-  if (syncRunning) return;
+  if (syncRunning || !isThisMarketingCrmTabActive()) return;
 
   const state = currentLocalState();
   const nextSnapshot = snapshotState(state);
@@ -89,9 +94,12 @@ async function pushChangesIfNeeded() {
 }
 
 if (typeof window !== "undefined" && window.localStorage) {
-  hydrateOnce().catch(() => {
-    lastSnapshot = snapshotState(currentLocalState());
-  });
+  window.setTimeout(() => {
+    if (!isThisMarketingCrmTabActive()) return;
+    hydrateOnce().catch(() => {
+      lastSnapshot = snapshotState(currentLocalState());
+    });
+  }, 0);
 
   for (const delay of INITIAL_BACKFILL_DELAYS_MS) {
     window.setTimeout(() => {

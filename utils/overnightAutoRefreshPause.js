@@ -1,3 +1,5 @@
+import { isThisMarketingCrmTabActive } from "./activeTabLock.js";
+
 const QUIET_START_HOUR = 21;
 const QUIET_END_HOUR = 7;
 
@@ -15,7 +17,7 @@ function installOvernightAutoRefreshPause() {
 
   window.setInterval = (handler, timeout, ...args) => {
     const guardedHandler = () => {
-      if (isQuietHours()) return;
+      if (isQuietHours() || !isThisMarketingCrmTabActive()) return;
 
       if (typeof handler === "function") {
         handler(...args);
