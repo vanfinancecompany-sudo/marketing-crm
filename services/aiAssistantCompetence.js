@@ -2,16 +2,26 @@ import { buildMarketingAccessHeaders, parseMarketingJsonResponse } from "./marke
 
 const API_ROUTE = "/api/marketing-ai-assistant-competence";
 
-export async function requestAssistantCompetence(action, payload = {}) {
-  const response = await fetch(API_ROUTE, {
+export function createCompetenceRequestId() {
+  return globalThis.crypto?.randomUUID?.() || `competence-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+export function acceptCompetenceResponse(activeRequestId, responsePayload) {
+  return responsePayload?.request_trace?.request_id === activeRequestId ? responsePayload : null;
+}
+
+export async function requestAssistantCompetence(action, payload = {}, fetchImplementation = fetch) {
+  const requestId = payload.request_id || createCompetenceRequestId();
+  const response = await fetchImplementation(API_ROUTE, {
     method: "POST",
-    headers: buildMarketingAccessHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ action, ...payload }),
+    cache: "no-store",
+    headers: buildMarketingAccessHeaders({ "Content-Type": "application/json", "Cache-Control": "no-store", "X-Competence-Request-ID": requestId }),
+    body: JSON.stringify({ action, ...payload, request_id: requestId }),
   });
   return parseMarketingJsonResponse(response, "AI Assistant Competence Test request failed.");
 }
 
-export const testAssistantAnswer = (payload) => requestAssistantCompetence("testAnswer", payload);
+export const testAssistantAnswer = (payload, fetchImplementation) => requestAssistantCompetence("testAnswer", payload, fetchImplementation);
 export const startCompetenceRun = (mode, totalQuestions) => requestAssistantCompetence("startRun", { mode, total_questions: totalQuestions });
 export const completeCompetenceRun = (runId) => requestAssistantCompetence("completeRun", { run_id: runId });
 export const saveCompetenceReview = (payload) => requestAssistantCompetence("saveReview", payload);
