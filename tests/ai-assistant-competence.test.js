@@ -10,6 +10,7 @@ import {
   rankKnowledge,
   splitArticleMarkdown,
 } from "../lib/aiAssistantCompetence.js";
+import { competenceAuthorize } from "../api/marketing-ai-assistant-competence.js";
 
 const sections = [
   { id: "brain-1", section_key: "products", title: "Products", active: true, content: "Finance is lender assessed. Rent2Buy has no credit check and is based on affordability.", entries: [] },
@@ -90,4 +91,14 @@ test("internal page and API are wired without a public Wix assistant", () => {
   assert.match(api, /content_markdown/);
   assert.match(api, /OPENAI_API_KEY/);
   assert.doesNotMatch(api, /WIX_API_KEY|WIX_SITE_ID/);
+  assert.match(readFileSync(new URL("../pages/AIAssistantCompetencePage.jsx", import.meta.url), "utf8"), /validateMarketingAccessKey/);
+});
+
+test("competence endpoint uses the established Marketing CRM header or Bearer key", () => {
+  const environment = { MARKETING_CUSTOMER_DATABASE_API_KEY: "preview-secret" };
+  assert.equal(competenceAuthorize({ headers: { "x-marketing-customer-database-key": "preview-secret" } }, environment), true);
+  assert.equal(competenceAuthorize({ headers: { authorization: "Bearer preview-secret" } }, environment), true);
+  assert.equal(competenceAuthorize({ headers: {} }, environment), false);
+  assert.equal(competenceAuthorize({ headers: { "x-marketing-customer-database-key": "wrong" } }, environment), false);
+  assert.equal(competenceAuthorize({ headers: { "x-marketing-customer-database-key": "preview-secret" } }, {}), false);
 });
