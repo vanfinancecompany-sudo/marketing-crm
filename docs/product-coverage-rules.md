@@ -39,7 +39,7 @@ If the location is absent, invalid, unmatched, the base postcode cannot resolve,
 
 1. no distance is calculated or inferred;
 2. diagnostics return `coverage_result: "unresolved"` and `certainty: "unresolved"`;
-3. deterministic evidence tells the assistant to ask for the customer's full home postcode and not confirm coverage;
+3. deterministic evidence tells the assistant not to confirm coverage; it asks for a full postcode when none was supplied, or asks the customer to confirm the supplied postcode and obtain manual confirmation/retry when lookup is unavailable;
 4. the competence request continues gracefully to answer generation.
 
 Town/city matches are always `indicative`, even when clearly inside or outside the normal area, and require a full home postcode before confirmation. Full postcode matches are `confirmed` except that any distance in the inclusive borderline band is `borderline` and requires manual confirmation.

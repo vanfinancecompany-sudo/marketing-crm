@@ -73,7 +73,7 @@ test("unknown locations and provider failures return unresolved evidence without
   for (const result of [unknown, unavailable]) {
     assert.equal(result.diagnostics.certainty, "unresolved");
     assert.equal(result.diagnostics.distance_miles, null);
-    assert.match(result.source.passage, /ask for their full home postcode/i);
+    assert.match(result.source.passage, /ask for (?:their|the customer's) full home postcode/i);
   }
 });
 
