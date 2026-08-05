@@ -25,6 +25,18 @@ import {
   naturalConversationReply,
 } from "../lib/conversationIntelligence.js";
 import { REAL_CUSTOMER_SCENARIOS } from "../lib/customerSimulationScenarios.js";
+import {
+  applicationReadiness,
+  buildConversationSummary,
+  contextualClarification,
+  conversationQualityDiagnostics,
+  detectBuyingSignals,
+  deterministicDeliveryReply,
+  disclaimerControl,
+  responseLengthTarget,
+  naturalSalesReply,
+  stripRepeatedDisclaimer,
+} from "../lib/salesConversationEngine.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
@@ -268,9 +280,10 @@ function conversationRetrievalQuery(intent, memory, messages) {
   return clean(`${recent} ${intent.normalised_message} ${facts}`, 6000);
 }
 
-function conversationPrompt({ question, messages, sources, sections, settings, productContext, comparison, intent, memory }) {
+export function conversationPrompt({ question, messages, sources, sections, settings, productContext, comparison, intent, memory, buyingSignals = {}, lengthTarget = {}, contextualResolution = "" }) {
   const base = buildCompetencePrompt({ question, messages, sources, sections, settings, productContext, comparison });
-  return `${base}\n\n# Locked conversation intelligence\nThe server classified this as ${intent.primary_intent}. Secondary intents: ${intent.secondary_intents.join(", ") || "none"}. The locked product remains ${productContext}. Remembered customer facts: ${JSON.stringify(memory.remembered_facts)}. Corrections: ${JSON.stringify(memory.corrections)}. Address every supported part of a multi-part question. Do not repeat a question already answered in the conversation. Return a natural reply of approximately 100 words or fewer. If approved evidence is insufficient, use a plain, honest fallback and do not infer a business fact.`;
+  const disclaimer = disclaimerControl(messages);
+  return `${base}\n\n# Locked V3 sales conversation intelligence\nThe server classified this as ${intent.primary_intent}. Secondary intents: ${intent.secondary_intents.join(", ") || "none"}. The locked product remains ${productContext} and must never be cross-sold. Remembered structured customer facts: ${JSON.stringify(memory.remembered_facts)}. Corrections: ${JSON.stringify(memory.corrections)}. Buying signal: ${buyingSignals.detected_buying_signal || "none"} (${buyingSignals.signal_strength || "low"}); recommended action: ${buyingSignals.recommended_next_action || "answer directly"}. Context resolution: ${contextualResolution || "none required"}. Target reply band: ${lengthTarget.band || "normal"}, maximum ${lengthTarget.maximum_words || 90} words. Answer only what is needed, then ask at most one genuinely useful question. Do not ask a follow-up after a complete straightforward factual answer. ${disclaimer.instruction} Never invent approval likelihood, stock, rates, payment figures, affordability outcomes or a delivery date. Deterministic evidence is the highest-priority fact and overrides every article, Business Brain passage and model inference. If approved evidence is insufficient, use a plain, honest fallback and do not infer a business fact.`;
 }
 
 export async function simulateCustomerConversation(supabase, body) {
@@ -286,10 +299,14 @@ export async function simulateCustomerConversation(supabase, body) {
   const intent = await runStage("Conversation intent", context, async () => classifyConversationIntent({ message: question, history: messages, productContext }));
   const conversationWithCurrent = [...messages, { role: "user", content: question }];
   const memory = await runStage("Conversation memory", context, async () => buildConversationMemory(conversationWithCurrent, body.remembered_facts));
-  const priorQuestion = messages.filter((item) => item.role === "user").at(-1)?.content;
-  const priorAnswer = messages.filter((item) => item.role === "assistant").at(-1)?.content;
-  if (priorQuestion) memory.remembered_facts.prior_question = priorQuestion;
-  if (priorAnswer) memory.remembered_facts.prior_answer = priorAnswer;
+  const contextualResolution = contextualClarification(question, messages, memory.remembered_facts);
+  if (/^how long\??$/i.test(question) && contextualResolution) {
+    intent.clarification_required = true;
+    intent.retrieval_required = false;
+    intent.suggested_clarification_question = contextualResolution;
+  }
+  const buyingSignals = await runStage("Buying signal detection", context, async () => detectBuyingSignals(question, memory.remembered_facts));
+  const lengthTarget = responseLengthTarget(question, intent);
   const updatedFacts = Object.fromEntries(Object.entries(memory.remembered_facts).filter(([key, value]) => clean(body.remembered_facts?.[key]) !== clean(value)));
   const comparison = isExplicitProductComparison(question, messages);
   let sources = [];
@@ -303,7 +320,7 @@ export async function simulateCustomerConversation(supabase, body) {
   let response;
 
   if (!intent.retrieval_required) {
-    response = naturalConversationReply(intent, productContext);
+    response = naturalSalesReply(intent, productContext, buyingSignals, memory.remembered_facts) || naturalConversationReply(intent, productContext, memory.remembered_facts);
   } else {
     const retrievalStart = performance.now();
     const knowledge = await loadKnowledge(supabase);
@@ -323,12 +340,15 @@ export async function simulateCustomerConversation(supabase, body) {
       response = insufficientKnowledgeReply(productContext);
     } else {
       const generationStart = performance.now();
-      const prompt = await runStage("Conversation prompt creation", { ...context, source_count: sources.length }, async () => conversationPrompt({ question, messages, sources, sections: bounded.sections, settings: knowledge.settings, productContext, comparison, intent, memory }));
+      const prompt = await runStage("Conversation prompt creation", { ...context, source_count: sources.length }, async () => conversationPrompt({ question, messages, sources, sections: bounded.sections, settings: knowledge.settings, productContext, comparison, intent, memory, buyingSignals, lengthTarget, contextualResolution }));
       const requested = await runStage("Conversation OpenAI request", { ...context, source_count: sources.length }, () => requestOpenAIConversationReply(prompt));
       const generated = await runStage("Conversation structured response parsing", { ...context, model: requested.model }, async () => parseOpenAIConversationReply(requested.payload, requested.model));
       response = generated.reply;
       model = generated.model;
       response = enforceGroundedConversationReply(response, { deterministicRuleUsed: Boolean(coverage), productContext });
+      const deterministicDelivery = deterministicDeliveryReply(productContext, question, coverage);
+      if (deterministicDelivery) response = { ...response, reply: deterministicDelivery, insufficient_knowledge: false, confidence: 100, confidence_reason: "Server-side approved delivery rule.", source_ids: ["S1"] };
+      response.reply = stripRepeatedDisclaimer(response.reply, messages);
       const selected = new Set(response.source_ids || []);
       if (coverage) selected.add("S1");
       sourcesUsed = sources.filter((_source, index) => selected.has(`S${index + 1}`));
@@ -337,6 +357,9 @@ export async function simulateCustomerConversation(supabase, body) {
   }
 
   const learningDiagnosis = conversationLearningDiagnosis({ intent, coverage, insufficientKnowledge: response.insufficient_knowledge });
+  const quality = conversationQualityDiagnostics({ message: question, reply: response.reply, intent, messages, followUpAppropriate: Boolean(intent.clarification_required || buyingSignals.detected_buying_signal !== "none") });
+  const readiness = applicationReadiness({ intent, buyingSignals, facts: memory.remembered_facts, insufficientKnowledge: response.insufficient_knowledge, contradiction: memory.corrections.length > 0 && intent.primary_intent === "customer_correction" });
+  const conversationSummary = buildConversationSummary({ productContext, facts: memory.remembered_facts, buyingSignals, intent, insufficientKnowledge: response.insufficient_knowledge, humanHandoff: response.human_handoff_recommended });
   const structured = {
     reply: clean(response.reply, 5000),
     conversation_intent: intent.primary_intent,
@@ -350,6 +373,7 @@ export async function simulateCustomerConversation(supabase, body) {
     clarification_required: intent.clarification_required,
     clarification_question: intent.suggested_clarification_question,
     remembered_facts: memory.remembered_facts,
+    remembered_fact_metadata: memory.fact_metadata,
     updated_facts: updatedFacts,
     corrections: memory.corrections,
     deterministic_rules_used: coverage ? [coverage.source.source_id] : [],
@@ -364,6 +388,21 @@ export async function simulateCustomerConversation(supabase, body) {
     coverage_diagnostics: coverage?.diagnostics || {},
     conflict_detected: coverageConflictDetected(false, coverageConflicts),
     learning_diagnosis: learningDiagnosis,
+    buying_signal: buyingSignals.detected_buying_signal,
+    buying_signal_strength: buyingSignals.signal_strength,
+    buying_signal_reason: buyingSignals.reason,
+    recommended_next_conversational_action: buyingSignals.recommended_next_action,
+    response_length_target: quality.response_length_target,
+    response_word_count: quality.actual_word_count,
+    repeated_disclaimer: quality.repeated_disclaimer,
+    next_best_question: conversationSummary.next_best_question,
+    application_readiness: readiness,
+    conversation_summary: { ...conversationSummary, application_readiness: readiness },
+    frustration_state: intent.primary_intent === "frustration" ? "active" : "none",
+    sounded_article_like: quality.sounded_article_like,
+    follow_up_question_appropriate: quality.follow_up_question_appropriate,
+    one_question_at_a_time: quality.one_question_at_a_time,
+    contextual_resolution: contextualResolution,
   };
   const resultPayload = {
     run_id: body.run_id || null,

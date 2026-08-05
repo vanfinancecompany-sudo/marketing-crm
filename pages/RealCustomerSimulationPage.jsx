@@ -30,15 +30,27 @@ function ResultDiagnostics({ result }) {
         <Diagnostic label="Action" value={result.recommended_action} />
         <Diagnostic label="Handoff" value={result.human_handoff_recommended ? "Recommended" : "No"} />
         <Diagnostic label="Knowledge gap" value={result.insufficient_knowledge ? "Yes" : "No"} />
+        <Diagnostic label="Buying signal" value={`${result.buying_signal || "none"} · ${result.buying_signal_strength || "low"}`} />
+        <Diagnostic label="Length target" value={result.response_length_target ? `${result.response_length_target.band}: max ${result.response_length_target.maximum_words} words` : "—"} />
+        <Diagnostic label="Actual length" value={result.response_word_count == null ? "—" : `${result.response_word_count} words`} />
+        <Diagnostic label="Repeated disclaimer" value={result.repeated_disclaimer ? "Yes" : "No"} />
+        <Diagnostic label="Readiness" value={result.application_readiness} />
+        <Diagnostic label="Frustration" value={result.frustration_state} />
+        <Diagnostic label="Article-like" value={result.sounded_article_like ? "Yes" : "No"} />
+        <Diagnostic label="Follow-up appropriate" value={result.follow_up_question_appropriate ? "Yes" : "No"} />
+        <Diagnostic label="One question only" value={result.one_question_at_a_time ? "Yes" : "No"} />
         <Diagnostic label="Confidence" value={`${result.confidence}%`} />
         <Diagnostic label="Response time" value={`${result.response_time_ms} ms`} />
       </div>
       <div className="notice"><strong>Intent reason:</strong> {result.intent_reason}<br /><strong>Learning diagnosis:</strong> {result.learning_diagnosis}<br /><strong>Clarification question:</strong> {result.clarification_question || "None"}</div>
+      <div className="notice"><strong>Buying-signal reason:</strong> {result.buying_signal_reason || "None"}<br /><strong>Recommended action:</strong> {result.recommended_next_conversational_action || "None"}<br /><strong>Next best question:</strong> {result.next_best_question || "None"}<br /><strong>Context resolution:</strong> {result.contextual_resolution || "None"}</div>
       {Object.keys(coverage).length ? <div className="notice"><strong>Deterministic rule:</strong><br />Location: {coverage.detected_location || "Not supplied"}<br />Resolved: {coverage.resolved_postcode || (coverage.resolved_coordinates ? `${coverage.resolved_coordinates.latitude}, ${coverage.resolved_coordinates.longitude}` : "No")}<br />Distance: {coverage.distance_miles == null ? "Not calculated" : `${coverage.distance_miles} miles`}<br />Result: {coverage.coverage_result}<br />Certainty: {coverage.certainty}</div> : null}
       <h3>Remembered facts</h3>
       <pre className="notice" style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(result.remembered_facts || {}, null, 2)}</pre>
       <h3>Corrections</h3>
       <pre className="notice" style={{ whiteSpace: "pre-wrap" }}>{result.corrections?.length ? JSON.stringify(result.corrections, null, 2) : "No corrected or overridden facts."}</pre>
+      <h3>Live conversation summary</h3>
+      <pre className="notice" style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(result.conversation_summary || {}, null, 2)}</pre>
       <h3>Knowledge sources used</h3>
       <div className="competence-sources">{result.knowledge_sources_used?.length ? result.knowledge_sources_used.map((source, index) => <article className="competence-source" key={`${source.source_id}-${index}`}><div><span className="badge">{source.type === "coverage_rule" ? "Coverage Rule" : source.type?.startsWith("article") ? "Article" : "Business Brain"}</span><strong>{source.title}</strong><b>{source.score}</b></div><h4>{source.heading}</h4><p>{source.passage}</p></article>) : <p>No business source was required or selected.</p>}</div>
     </section>
@@ -145,7 +157,7 @@ export default function RealCustomerSimulationPage() {
   if (accessStatus !== "unlocked") return <main className="page-stack"><section className="panel"><h2>Real Customer Simulation</h2><p>This internal page uses the existing Marketing CRM access check.</p><form onSubmit={unlock}><label className="field"><span className="field__label">Marketing CRM access key</span><input className="field__input" type="password" value={accessKey} onChange={(event) => setAccessKey(event.target.value)} /></label><button className="button button--primary">Unlock</button></form>{error ? <div className="notice notice--error">{error}</div> : null}</section></main>;
 
   return <div className="page-stack">
-    <section className="panel"><div className="panel__header"><div><div className="eyebrow">AI Assistant V2.5</div><h2>Real Customer Simulation</h2><p>Test natural conversation without building or exposing a public Wix assistant. Use synthetic test wording only; do not enter real customer personal data.</p></div><button className="button button--ghost" type="button" disabled={busy || batch.running} onClick={() => resetConversation()}>Reset Conversation</button></div>
+    <section className="panel"><div className="panel__header"><div><div className="eyebrow">AI Sales Conversation Engine V3</div><h2>Real Customer Simulation</h2><p>Test concise, grounded sales conversation without building or exposing a public Wix assistant. Use synthetic test wording only; do not enter real customer personal data.</p></div><button className="button button--ghost" type="button" disabled={busy || batch.running} onClick={() => resetConversation()}>Reset Conversation</button></div>
       <div className="competence-metrics"><Diagnostic label="Locked product" value={productContext} /><Diagnostic label="Session" value={sessionId} /><Diagnostic label="Messages" value={messages.length} /></div>
       <div className="competence-context"><button type="button" disabled={busy || batch.running} className={productContext === "finance" ? "is-selected" : ""} onClick={() => resetConversation("finance")}>Finance</button><button type="button" disabled={busy || batch.running} className={productContext === "rent2buy" ? "is-selected" : ""} onClick={() => resetConversation("rent2buy")}>Rent2Buy</button></div>
     </section>
