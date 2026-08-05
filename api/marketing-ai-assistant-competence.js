@@ -11,6 +11,9 @@ import {
   isExplicitProductComparison,
   rankKnowledge,
 } from "../lib/aiAssistantCompetence.js";
+import { assessSavedCompetenceResult } from "./_knowledgeOpportunityStore.js";
+import { resolveProductCoverage } from "./_productCoverage.js";
+import { coverageConflictDetected, detectCoverageConflicts } from "../lib/productCoverageRules.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
@@ -137,7 +140,11 @@ export async function testCompetenceAnswer(supabase, body) {
   const knowledge = await loadKnowledge(supabase);
   const boundedKnowledge = await runStage("Apply product boundary", { ...context, comparison }, async () => filterKnowledgeForProduct(knowledge, productContext, { comparison }));
   const corpus = await runStage("Build temporary article chunks", { ...context, category_filter: boundedKnowledge.categoryFilter, article_ids: boundedKnowledge.articles.map((item) => item.id), article_count: boundedKnowledge.articles.length }, async () => buildRetrievalCorpus(boundedKnowledge));
-  const sources = await runStage("Lexical ranking", { ...context, corpus_size: corpus.length }, async () => rankKnowledge(question, corpus, { messages, limit: 8 }));
+  const coverage = await runStage("Resolve deterministic coverage", context, () => resolveProductCoverage({ question, productContext, settings: knowledge.settings }));
+  const lexicalSources = await runStage("Lexical ranking", { ...context, corpus_size: corpus.length }, async () => rankKnowledge(question, corpus, { messages, limit: coverage ? 7 : 8 }));
+  const coverageConflicts = await runStage("Check coverage conflicts", context, async () => detectCoverageConflicts(coverage, corpus, knowledge.settings));
+  if (coverage) coverage.diagnostics.conflicting_sources = coverageConflicts;
+  const sources = coverage ? [coverage.source, ...lexicalSources].slice(0, 8) : lexicalSources;
   if (!sources.length) console.warn("AI ASSISTANT COMPETENCE RETRIEVAL WARNING", { stage: "Lexical ranking", relevant_ids: context, corpus_size: corpus.length, message: "No relevant sources were retrieved; the assistant must report a knowledge gap." });
   const retrievalTime = elapsed(retrievalStart);
   const generationStart = performance.now();
@@ -148,19 +155,22 @@ export async function testCompetenceAnswer(supabase, body) {
   const generated = await runStage("Structured response parsing", { ...context, model: requested.model }, async () => parseOpenAIAnswer(requested.payload, requested.model));
   const generationTime = elapsed(generationStart);
   const selected = new Set(generated.answer.source_ids || []);
+  if (coverage) selected.add("S1");
   const sourcesUsed = sources.filter((_source, index) => selected.has(`S${index + 1}`));
   const resultPayload = {
     run_id: body.run_id || null,
     test_question_id: clean(body.test_question_id, 40) || null,
     mode,
+    product_context: productContext,
     question,
     conversation: messages,
     answer: clean(generated.answer.answer, 5000),
     product_detected: generated.answer.product_detected || detectProduct(question, messages),
     confidence: Number(generated.answer.confidence) || 0,
     confidence_reason: clean(generated.answer.confidence_reason, 2000),
-    knowledge_gap: Boolean(generated.answer.knowledge_gap || sources.length === 0),
-    conflict_detected: Boolean(generated.answer.conflict_detected),
+    knowledge_gap: coverage ? coverage.diagnostics.certainty === "unresolved" : Boolean(generated.answer.knowledge_gap || sources.length === 0),
+    conflict_detected: coverageConflictDetected(generated.answer.conflict_detected, coverageConflicts),
+    coverage_diagnostics: coverage?.diagnostics || {},
     sources_used: sourcesUsed,
     response_time_ms: elapsed(totalStart),
     retrieval_time_ms: retrievalTime,
@@ -169,6 +179,7 @@ export async function testCompetenceAnswer(supabase, body) {
   };
   const saved = await runStage("Save test result", context, async () => data(await supabase.from("knowledge_competence_results").insert(resultPayload).select().single(), "The competence result could not be saved."));
   if (!saved?.id || clean(saved.question, 3000) !== question) throw new ApiError(500, "Saved competence result does not match the current request.", "validation", { request_id: requestId, result_id: saved?.id || null });
+  await assessSavedCompetenceResult(supabase, saved.id);
   if (body.run_id) await supabase.rpc("increment_competence_run_progress", { target_run_id: body.run_id }).then(() => {}, () => {});
   const generatedAt = new Date().toISOString();
   const requestTrace = {
@@ -188,7 +199,7 @@ export async function testCompetenceAnswer(supabase, body) {
     used_source_ids: sourcesUsed.map((source) => source.source_id),
   };
   console.info("AI ASSISTANT COMPETENCE REQUEST TRACE", { stage: "Return response", ...requestTrace });
-  return { result: { ...saved, product_context: productContext, category_filter: boundedKnowledge.categoryFilter, comparison_mode: comparison }, retrieved_sources: sources, word_count: resultPayload.answer.split(/\s+/).filter(Boolean).length, request_trace: requestTrace };
+  return { result: { ...saved, product_context: productContext, category_filter: boundedKnowledge.categoryFilter, comparison_mode: comparison, coverage_diagnostics: coverage?.diagnostics || {} }, retrieved_sources: sources, word_count: resultPayload.answer.split(/\s+/).filter(Boolean).length, request_trace: requestTrace };
 }
 
 async function startRun(supabase, body) {
@@ -213,7 +224,9 @@ async function saveReview(supabase, body) {
   if (!clean(body.result_id, 100)) throw new ApiError(400, "Result id is required.", "validation");
   if (!COMPETENCE_REVIEW_OUTCOMES.includes(body.outcome)) throw new ApiError(400, "Choose a valid review outcome.", "validation");
   const rating = (value) => value == null || value === "" ? null : Math.min(5, Math.max(1, Number(value)));
-  return runStage("Save review", { result_id: clean(body.result_id, 100) }, async () => data(await supabase.from("knowledge_competence_reviews").upsert({ result_id: body.result_id, outcome: body.outcome, accuracy: rating(body.accuracy), helpfulness: rating(body.helpfulness), conversion: rating(body.conversion), brevity: rating(body.brevity), reviewer_notes: clean(body.reviewer_notes, 5000), updated_at: new Date().toISOString() }, { onConflict: "result_id" }).select().single(), "The review could not be saved."));
+  const saved = await runStage("Save review", { result_id: clean(body.result_id, 100) }, async () => data(await supabase.from("knowledge_competence_reviews").upsert({ result_id: body.result_id, outcome: body.outcome, accuracy: rating(body.accuracy), helpfulness: rating(body.helpfulness), conversion: rating(body.conversion), brevity: rating(body.brevity), reviewer_notes: clean(body.reviewer_notes, 5000), updated_at: new Date().toISOString() }, { onConflict: "result_id" }).select().single(), "The review could not be saved."));
+  await assessSavedCompetenceResult(supabase, body.result_id);
+  return saved;
 }
 
 async function loadReport(supabase) {
