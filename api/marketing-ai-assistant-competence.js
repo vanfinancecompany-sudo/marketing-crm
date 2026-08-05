@@ -14,6 +14,7 @@ import {
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
+const createRequestId = () => globalThis.crypto?.randomUUID?.() || `competence-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 class ApiError extends Error { constructor(status, message, type = "api", details = {}) { super(message); this.name = "ApiError"; this.status = status; this.type = type; this.details = details; } }
 export function competenceAuthorize(request, environment = process.env) { const expected = clean(environment.MARKETING_CUSTOMER_DATABASE_API_KEY); const header = clean(request.headers?.[API_KEY_HEADER]); const bearer = clean(request.headers?.authorization).replace(/^Bearer\s+/i, ""); return Boolean(expected && (header === expected || bearer === expected)); }
 function getSupabase() { if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) throw new ApiError(500, "Supabase is not configured.", "configuration"); return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } }); }
@@ -130,7 +131,9 @@ export async function testCompetenceAnswer(supabase, body) {
   if (!COMPETENCE_PRODUCT_CONTEXTS.includes(productContext)) throw new ApiError(400, "Choose a product context: finance or rent2buy.", "validation");
   const messages = cleanMessages(body.messages);
   const comparison = isExplicitProductComparison(question, messages);
-  const context = { run_id: body.run_id || null, test_question_id: clean(body.test_question_id, 40) || null, product_context: productContext };
+  const requestId = clean(body.request_id, 100) || createRequestId();
+  const context = { request_id: requestId, run_id: body.run_id || null, test_question_id: clean(body.test_question_id, 40) || null, product_context: productContext };
+  console.info("AI ASSISTANT COMPETENCE REQUEST TRACE", { stage: "Backend request body", request_id: requestId, submitted_question: question, selected_product: productContext, mode, cached_value_used: false, previous_value_used: false });
   const knowledge = await loadKnowledge(supabase);
   const boundedKnowledge = await runStage("Apply product boundary", { ...context, comparison }, async () => filterKnowledgeForProduct(knowledge, productContext, { comparison }));
   const corpus = await runStage("Build temporary article chunks", { ...context, category_filter: boundedKnowledge.categoryFilter, article_ids: boundedKnowledge.articles.map((item) => item.id), article_count: boundedKnowledge.articles.length }, async () => buildRetrievalCorpus(boundedKnowledge));
@@ -139,6 +142,7 @@ export async function testCompetenceAnswer(supabase, body) {
   const retrievalTime = elapsed(retrievalStart);
   const generationStart = performance.now();
   const prompt = await runStage("Prompt creation", { ...context, category_filter: boundedKnowledge.categoryFilter, source_count: sources.length }, async () => buildCompetencePrompt({ question, messages, sources, sections: boundedKnowledge.sections, settings: knowledge.settings, productContext, comparison }));
+  if (!prompt.includes(`# Customer question\n${question}\n`)) throw new ApiError(500, "Generated prompt does not contain the current submitted question.", "validation");
   const model = clean(process.env.OPENAI_MODEL, 200) || "gpt-4.1-mini";
   const requested = await runStage("OpenAI request", { ...context, model, openai_api_key_present: Boolean(clean(process.env.OPENAI_API_KEY)), source_count: sources.length }, () => requestOpenAIAnswer(prompt));
   const generated = await runStage("Structured response parsing", { ...context, model: requested.model }, async () => parseOpenAIAnswer(requested.payload, requested.model));
@@ -164,8 +168,27 @@ export async function testCompetenceAnswer(supabase, body) {
     model: generated.model,
   };
   const saved = await runStage("Save test result", context, async () => data(await supabase.from("knowledge_competence_results").insert(resultPayload).select().single(), "The competence result could not be saved."));
+  if (!saved?.id || clean(saved.question, 3000) !== question) throw new ApiError(500, "Saved competence result does not match the current request.", "validation", { request_id: requestId, result_id: saved?.id || null });
   if (body.run_id) await supabase.rpc("increment_competence_run_progress", { target_run_id: body.run_id }).then(() => {}, () => {});
-  return { result: { ...saved, product_context: productContext, category_filter: boundedKnowledge.categoryFilter, comparison_mode: comparison }, retrieved_sources: sources, word_count: resultPayload.answer.split(/\s+/).filter(Boolean).length };
+  const generatedAt = new Date().toISOString();
+  const requestTrace = {
+    request_id: requestId,
+    submitted_question: question,
+    selected_product: productContext,
+    backend_question: question,
+    retrieval_query: question,
+    prompt_question: question,
+    openai_response_id: clean(requested.payload?.id, 100) || null,
+    result_id: saved.id,
+    result_question: saved.question,
+    generated_at: generatedAt,
+    cached_value_used: false,
+    previous_value_used: false,
+    retrieved_source_ids: sources.map((source) => source.source_id),
+    used_source_ids: sourcesUsed.map((source) => source.source_id),
+  };
+  console.info("AI ASSISTANT COMPETENCE REQUEST TRACE", { stage: "Return response", ...requestTrace });
+  return { result: { ...saved, product_context: productContext, category_filter: boundedKnowledge.categoryFilter, comparison_mode: comparison }, retrieved_sources: sources, word_count: resultPayload.answer.split(/\s+/).filter(Boolean).length, request_trace: requestTrace };
 }
 
 async function startRun(supabase, body) {
@@ -206,6 +229,7 @@ async function loadReport(supabase) {
 }
 
 export default async function handler(request, response) {
+  response.setHeader?.("Cache-Control", "no-store, max-age=0");
   if (request.method !== "POST") return response.status(405).json({ ok: false, message: "Method not allowed." });
   if (!competenceAuthorize(request)) return response.status(401).json({ ok: false, message: "Access key not recognised." });
   let body = {};
