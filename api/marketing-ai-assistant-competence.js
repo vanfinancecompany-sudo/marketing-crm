@@ -47,6 +47,12 @@ import {
   humanRecoveryReply,
   recentAssistantPhraseDiagnostics,
 } from "../lib/humanConversationRecovery.js";
+import {
+  appendJourneyResume,
+  completeKnowledgeOrchestration,
+  orchestrateConversationTurn,
+  preserveJourneyAcrossOrchestration,
+} from "../lib/conversationKnowledgeOrchestrator.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
@@ -319,12 +325,16 @@ export async function simulateCustomerConversation(supabase, body) {
   const buyingSignals = await runStage("Buying signal detection", context, async () => detectBuyingSignals(question, memory.remembered_facts));
   const lengthTarget = responseLengthTarget(question, intent);
   const updatedFacts = Object.fromEntries(Object.entries(memory.remembered_facts).filter(([key, value]) => clean(body.remembered_facts?.[key]) !== clean(value)));
-  const journey = await runStage("Application journey", context, async () => buildJourneyState({ message: question, messages, intent, facts: memory.remembered_facts, factMetadata: memory.fact_metadata, productContext, priorJourney: body.journey_state, updatedFacts }));
-  if (journey.application_mode_active) { intent.retrieval_required = false; intent.clarification_required = false; intent.suggested_clarification_question = ""; }
-  const recoveryTypes = new Set(["confusion", "frustration", "humour", "positive_feedback", "agreement", "disagreement", "random_text", "unknown_intent", "off_topic", "nonsense_input"]);
-  const recoveryRequired = human.recovery_required || recoveryTypes.has(human.message_type);
-  if (recoveryRequired && !journey.application_mode_active && intent.primary_intent !== "product_clarification_required") { intent.retrieval_required = false; intent.clarification_required = false; intent.suggested_clarification_question = ""; }
   if (human.message_type === "objection" && !["uncertainty"].includes(human.objection.objection) && intent.primary_intent !== "product_clarification_required") intent.retrieval_required = true;
+  let journey = await runStage("Application journey", context, async () => buildJourneyState({ message: question, messages, intent, facts: memory.remembered_facts, factMetadata: memory.fact_metadata, productContext, priorJourney: body.journey_state, updatedFacts }));
+  let orchestration = await runStage("Conversation and knowledge orchestration", context, async () => orchestrateConversationTurn({ message: question, intent, human, journey, priorJourney: body.journey_state, buyingSignals }));
+  journey = preserveJourneyAcrossOrchestration(journey, body.journey_state, orchestration);
+  intent.retrieval_required = orchestration.retrieval_required;
+  if (orchestration.retrieval_required || orchestration.recovery_required || orchestration.application_continuation) {
+    intent.clarification_required = false;
+    intent.suggested_clarification_question = "";
+  }
+  const recoveryRequired = orchestration.recovery_required;
   const comparison = isExplicitProductComparison(question, messages);
   let sources = [];
   let sourcesUsed = [];
@@ -376,9 +386,16 @@ export async function simulateCustomerConversation(supabase, body) {
     }
   }
 
-  if (journey.application_mode_active) {
+  if (journey.application_mode_active && !intent.retrieval_required && !recoveryRequired && !orchestration.product_boundary_blocked) {
     response = { ...response, reply: applicationModeReply(productContext, journey.application_state), insufficient_knowledge: false, human_handoff_recommended: false, recommended_action: productContext === "finance" ? "apply_finance" : "apply_rent2buy", confidence: 100, confidence_reason: "Server-side V4 Application Mode triggered by explicit customer progression.", source_ids: [] };
   }
+
+  orchestration = completeKnowledgeOrchestration(orchestration, {
+    retrievalPerformed: intent.retrieval_required && sources.length > 0,
+    journey,
+    sourceIds: sources.map((source) => source.source_id),
+  });
+  response.reply = appendJourneyResume(response.reply, productContext, orchestration);
 
   const learningDiagnosis = conversationLearningDiagnosis({ intent, coverage, insufficientKnowledge: response.insufficient_knowledge });
   const repetitiveWording = detectRepetitiveAssistantWording(messages, response.reply);
@@ -460,6 +477,17 @@ export async function simulateCustomerConversation(supabase, body) {
     objection_reason: human.objection.reason,
     repeated_phrase_detected: phraseDiagnostics.repeated_phrase_detected,
     recent_phrase_matches: phraseDiagnostics.recent_phrase_matches,
+    detected_intents: orchestration.detected_intents,
+    retrieval_performed: orchestration.retrieval_performed,
+    conversation_paused: orchestration.conversation_paused,
+    conversation_resumed: orchestration.conversation_resumed,
+    resume_reason: orchestration.resume_reason,
+    knowledge_source_ids: orchestration.knowledge_source_ids,
+    journey_stage_before_retrieval: orchestration.journey_stage_before_retrieval,
+    journey_stage_after_retrieval: orchestration.journey_stage_after_retrieval,
+    application_mode_paused: orchestration.application_mode_paused,
+    application_mode_resumed: orchestration.application_mode_resumed,
+    priority_path_taken: orchestration.priority_path_taken,
   };
   const resultPayload = {
     run_id: body.run_id || null,

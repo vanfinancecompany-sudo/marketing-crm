@@ -24,7 +24,10 @@ function ResultDiagnostics({ result }) {
       <div className="competence-metrics">
         <Diagnostic label="Intent" value={result.conversation_intent} />
         <Diagnostic label="Sub-intents" value={result.secondary_intents?.join(", ") || "None"} />
+        <Diagnostic label="V6 detected intents" value={result.detected_intents?.join(", ") || "None"} />
         <Diagnostic label="Product lock" value={result.product_context} />
+        <Diagnostic label="Retrieval required" value={result.retrieval_required ? "Yes" : "No"} />
+        <Diagnostic label="Retrieval performed" value={result.retrieval_performed ? "Yes" : "No"} />
         <Diagnostic label="Retrieval used" value={result.retrieval_used ? "Yes" : "No"} />
         <Diagnostic label="Clarification" value={result.clarification_required ? "Required" : "Not required"} />
         <Diagnostic label="Action" value={result.recommended_action} />
@@ -44,6 +47,8 @@ function ResultDiagnostics({ result }) {
         <Diagnostic label="Journey stage" value={result.journey_stage} />
         <Diagnostic label="Lead completeness" value={result.lead_completeness ? `${result.lead_completeness.percentage}% (${result.lead_completeness.known_count}/${result.lead_completeness.total_count})` : "—"} />
         <Diagnostic label="Application mode" value={result.application_mode_active ? "Active" : "Inactive"} />
+        <Diagnostic label="Application mode paused" value={result.application_mode_paused ? "Yes" : "No"} />
+        <Diagnostic label="Application mode resumed" value={result.application_mode_resumed ? "Yes" : "No"} />
         <Diagnostic label="Application CTA" value={result.application_cta_generated ? result.application_cta?.label : "Not generated"} />
         <Diagnostic label="Recommended CTA" value={result.recommended_cta} />
         <Diagnostic label="Progressing" value={result.conversation_progressing ? "Yes" : "No"} />
@@ -61,6 +66,7 @@ function ResultDiagnostics({ result }) {
       <div className="notice"><strong>Buying-signal reason:</strong> {result.buying_signal_reason || "None"}<br /><strong>Recommended action:</strong> {result.recommended_next_conversational_action || "None"}<br /><strong>Next best question:</strong> {result.next_best_question || "None"}<br /><strong>Context resolution:</strong> {result.contextual_resolution || "None"}</div>
       <div className="notice"><strong>V4 journey reasons:</strong> {result.buying_intent_reasons?.join(" ") || "None"}<br /><strong>Journey next question:</strong> {result.journey_next_best_question || "None"}<br /><strong>Repeated assistant wording:</strong> {result.repeated_assistant_wording ? result.repeated_assistant_phrase : "No"}</div>
       <div className="notice"><strong>V5 classification:</strong> {result.universal_message_reason || "None"}<br /><strong>Emotion:</strong> {result.customer_emotion_reason || "None"}<br /><strong>Objection:</strong> {result.objection_reason || "None"}<br /><strong>Low-confidence stop:</strong> {result.conversation_confidence_below_threshold ? "Yes — clarification used" : "No"}</div>
+      <div className="notice"><strong>V6 priority path:</strong> {result.priority_path_taken?.join(" → ") || "None"}<br /><strong>Conversation paused:</strong> {result.conversation_paused ? "Yes" : "No"}<br /><strong>Conversation resumed:</strong> {result.conversation_resumed ? "Yes" : "No"}<br /><strong>Resume reason:</strong> {result.resume_reason || "None"}<br /><strong>Journey stage:</strong> {result.journey_stage_before_retrieval || "—"} → {result.journey_stage_after_retrieval || "—"}<br /><strong>Knowledge source IDs:</strong> {result.knowledge_source_ids?.join(", ") || "None"}</div>
       {result.application_cta ? <div className="notice notice--success"><strong>{result.application_cta.label}</strong><br />Internal action: {result.application_cta.action_key}<br />URL: Not configured — future Wix abstraction only</div> : null}
       {Object.keys(coverage).length ? <div className="notice"><strong>Deterministic rule:</strong><br />Location: {coverage.detected_location || "Not supplied"}<br />Resolved: {coverage.resolved_postcode || (coverage.resolved_coordinates ? `${coverage.resolved_coordinates.latitude}, ${coverage.resolved_coordinates.longitude}` : "No")}<br />Distance: {coverage.distance_miles == null ? "Not calculated" : `${coverage.distance_miles} miles`}<br />Result: {coverage.coverage_result}<br />Certainty: {coverage.certainty}</div> : null}
       <h3>Remembered facts</h3>
