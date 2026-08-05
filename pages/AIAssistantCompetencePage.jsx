@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AI_ASSISTANT_TEST_LIBRARY, COMPETENCE_REVIEW_OUTCOMES } from "../lib/aiAssistantCompetence.js";
-import { completeCompetenceRun, loadCompetenceReport, saveCompetenceReview, startCompetenceRun, testAssistantAnswer } from "../services/aiAssistantCompetence.js";
+import { acceptCompetenceResponse, completeCompetenceRun, createCompetenceRequestId, loadCompetenceReport, saveCompetenceReview, startCompetenceRun, testAssistantAnswer } from "../services/aiAssistantCompetence.js";
 import { clearMarketingAccessKey, getStoredMarketingAccessKey, isMarketingAccessDenied, saveMarketingAccessKey, validateMarketingAccessKey } from "../services/marketingAccess.js";
 
 const OUTCOME_LABELS = { pass: "Pass", needs_adjustment: "Needs Adjustment", incorrect: "Incorrect", unsafe: "Unsafe", too_long: "Too Long", too_vague: "Too Vague" };
@@ -41,6 +41,7 @@ function ResultPanel({ payload, review, setReview, onSaveReview, reviewBusy }) {
         <Metric label="Conflict" value={result.conflict_detected ? "Detected" : "None"} tone={result.conflict_detected ? "is-danger" : "is-good"} />
       </div>
       <div className="notice"><strong>Confidence reason:</strong> {result.confidence_reason}</div>
+      {payload.request_trace ? <div className="notice"><strong>Request trace:</strong><br />Request ID: {payload.request_trace.request_id}<br />Submitted question: {payload.request_trace.submitted_question}<br />Selected product: {payload.request_trace.selected_product}<br />Result question: {payload.request_trace.result_question}<br />Generated: {payload.request_trace.generated_at}<br />Cached/previous value used: {payload.request_trace.cached_value_used || payload.request_trace.previous_value_used ? "Yes" : "No"}</div> : null}
       <h3>Sources used</h3>
       <div className="competence-sources">{result.sources_used?.length ? result.sources_used.map((source, index) => <SourceCard source={source} key={`${source.source_id}-${source.heading}-${index}`} />) : <p>No source was strong enough to support an answer.</p>}</div>
     </section>
@@ -73,6 +74,7 @@ export default function AIAssistantCompetencePage() {
   const [libraryFilter, setLibraryFilter] = useState("all");
   const [batch, setBatch] = useState({ running: false, completed: 0, total: AI_ASSISTANT_TEST_LIBRARY.length, results: [] });
   const [report, setReport] = useState(null);
+  const activeRequestRef = useRef(null);
   const categories = useMemo(() => ["all", ...new Set(AI_ASSISTANT_TEST_LIBRARY.map((item) => item.category))], []);
   const questions = libraryFilter === "all" ? AI_ASSISTANT_TEST_LIBRARY : AI_ASSISTANT_TEST_LIBRARY.filter((item) => item.category === libraryFilter);
 
@@ -109,14 +111,18 @@ export default function AIAssistantCompetencePage() {
     const submitted = item?.question || question;
     const submittedContext = item ? (/rent\s*2\s*buy/i.test(item.question) || item.category === "rent2buy" ? "rent2buy" : "finance") : productContext;
     if (!submitted.trim()) return;
-    setBusy(true); setError(""); setReviewMessage("");
+    const requestId = createCompetenceRequestId();
+    activeRequestRef.current = requestId;
+    setPayload(null); setBusy(true); setError(""); setReviewMessage("");
     try {
-      const result = await testAssistantAnswer({ question: submitted, product_context: submittedContext, messages: runMode === "conversation" ? messages : [], mode: runMode, run_id: runId, test_question_id: item?.id || null });
+      const response = await testAssistantAnswer({ request_id: requestId, question: submitted, product_context: submittedContext, messages: runMode === "conversation" ? messages : [], mode: runMode, run_id: runId, test_question_id: item?.id || null });
+      const result = acceptCompetenceResponse(activeRequestRef.current, response);
+      if (!result || result.request_trace.submitted_question !== submitted || result.result.question !== submitted) throw new Error("The returned competence result does not match the current request.");
       setPayload(result); setReview(initialReview);
       if (runMode === "conversation") setMessages((current) => [...current, { role: "user", content: submitted }, { role: "assistant", content: result.result.answer }]);
       return result;
-    } catch (caught) { setError(caught.message); throw caught; }
-    finally { setBusy(false); }
+    } catch (caught) { if (activeRequestRef.current === requestId) { setPayload(null); setError(caught.message); } throw caught; }
+    finally { if (activeRequestRef.current === requestId) setBusy(false); }
   }
 
   async function runEntireSet() {
@@ -154,15 +160,15 @@ export default function AIAssistantCompetencePage() {
   return <div className="page-stack competence-page">
     <section className="operations-summary competence-hero"><div><div className="eyebrow">Internal evidence tool</div><h2>AI Assistant Competence Test</h2><p>This does not test how clever the model is. It proves or disproves whether the existing Business Brain, approved FAQs and Knowledge Hub contain enough reliable information for a future customer-facing assistant.</p></div><div className="competence-target"><strong>90%+</strong><span>correct-answer target</span></div></section>
     <div className="competence-tabs">
-      <button className={mode === "single" ? "is-active" : ""} onClick={() => setMode("single")}>Single Question</button>
-      <button className={mode === "conversation" ? "is-active" : ""} onClick={() => setMode("conversation")}>Conversation</button>
+      <button className={mode === "single" ? "is-active" : ""} onClick={() => { activeRequestRef.current = null; setPayload(null); setMode("single"); }}>Single Question</button>
+      <button className={mode === "conversation" ? "is-active" : ""} onClick={() => { activeRequestRef.current = null; setPayload(null); setMode("conversation"); }}>Conversation</button>
       <button className={mode === "library" ? "is-active" : ""} onClick={() => setMode("library")}>Test Library</button>
       <button className={mode === "report" ? "is-active" : ""} onClick={openReport}>Knowledge Gap Report</button>
     </div>
     {error ? <div className="notice notice--error">{error}</div> : null}{reviewMessage ? <div className="notice notice--success">{reviewMessage}</div> : null}
     {mode === "single" || mode === "conversation" ? <>
       {mode === "conversation" && messages.length ? <section className="panel competence-conversation">{messages.map((message, index) => <div className={`is-${message.role}`} key={index}><strong>{message.role === "user" ? "Customer" : "Assistant"}</strong><p>{message.content}</p></div>)}</section> : null}
-      <section className="panel"><div className="field-grid"><label className="field"><span className="field__label">Product Context</span><select className="field__input" value={productContext} onChange={(event) => { setProductContext(event.target.value); setPayload(null); }} required><option value="finance">Finance</option><option value="rent2buy">Rent2Buy</option></select></label><label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Customer Question</span><textarea className="field__input competence-question" rows={5} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Can I get a van if I have poor credit?" /></label></div><div className="card-actions"><button className="button button--primary" type="button" disabled={busy || !question.trim()} onClick={() => runQuestion()}>{busy ? "Testing..." : "Test Answer"}</button>{mode === "conversation" && messages.length ? <button className="button button--ghost" type="button" onClick={() => { setMessages([]); setPayload(null); }}>New Conversation</button> : null}</div></section>
+      <section className="panel"><div className="field-grid"><label className="field"><span className="field__label">Product Context</span><select className="field__input" value={productContext} onChange={(event) => { setProductContext(event.target.value); setPayload(null); }} required><option value="finance">Finance</option><option value="rent2buy">Rent2Buy</option></select></label><label className="field" style={{ gridColumn: "1 / -1" }}><span className="field__label">Customer Question</span><textarea className="field__input competence-question" rows={5} value={question} onChange={(event) => { setQuestion(event.target.value); setPayload(null); }} placeholder="Can I get a van if I have poor credit?" /></label></div><div className="card-actions"><button className="button button--primary" type="button" disabled={busy || !question.trim()} onClick={() => runQuestion()}>{busy ? "Testing..." : "Test Answer"}</button>{mode === "conversation" && messages.length ? <button className="button button--ghost" type="button" onClick={() => { setMessages([]); setPayload(null); }}>New Conversation</button> : null}</div></section>
       <ResultPanel payload={payload} review={review} setReview={setReview} onSaveReview={saveReview} reviewBusy={reviewBusy} />
     </> : null}
     {mode === "library" ? <section className="panel"><div className="panel__header"><div><div className="eyebrow">50 built-in checks</div><h3>Customer question library</h3><p>Run questions individually or execute the complete evidence set.</p></div><button className="button button--primary" type="button" disabled={batch.running} onClick={runEntireSet}>{batch.running ? `Running ${batch.completed}/${batch.total}` : "Run Entire Test Set"}</button></div>{batch.running || batch.completed ? <div className="competence-progress"><i style={{ width: `${Math.round(batch.completed / batch.total * 100)}%` }} /><span>{batch.completed} of {batch.total} complete</span></div> : null}<div className="competence-filters">{categories.map((category) => <button className={libraryFilter === category ? "is-selected" : ""} onClick={() => setLibraryFilter(category)} key={category}>{category.replaceAll("_", " ")}</button>)}</div><div className="competence-library">{questions.map((item) => <article key={item.id}><span>{item.id} · {item.category.replaceAll("_", " ")}</span><p>{item.question}</p><button type="button" onClick={() => chooseQuestion(item)}>Run individually</button></article>)}</div></section> : null}
