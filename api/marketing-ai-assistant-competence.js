@@ -47,6 +47,16 @@ import {
   humanRecoveryReply,
   recentAssistantPhraseDiagnostics,
 } from "../lib/humanConversationRecovery.js";
+import {
+  estimateOpenAICost,
+  openAIModelConfiguration,
+  publicModelComparisonConfiguration,
+  resolveServerModel,
+  responseTokenUsage,
+} from "../lib/openAIModelConfiguration.js";
+import { MODEL_COMPARISON_OUTCOMES, MODEL_COMPARISON_RATING_FIELDS, modelComparisonSummary, stableComparisonInput } from "../lib/modelComparison.js";
+import { MODEL_COMPARISON_SCENARIOS } from "../lib/modelComparisonScenarios.js";
+import { createHash } from "node:crypto";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
@@ -137,7 +147,7 @@ function openAIErrorMessage(payload, response) {
 export async function requestOpenAIAnswer(prompt, environment = process.env, fetchImplementation = fetch) {
   const apiKey = clean(environment.OPENAI_API_KEY);
   if (!apiKey) throw new ApiError(500, "OPENAI_API_KEY is not configured.", "configuration", { openai_api_key_present: false });
-  const model = clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini";
+  const model = openAIModelConfiguration(environment).default_model;
   const response = await fetchImplementation("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -168,26 +178,30 @@ export function parseOpenAIAnswer(payload, model) {
   return { answer, model };
 }
 
-export async function requestOpenAIConversationReply(prompt, environment = process.env, fetchImplementation = fetch) {
+export function buildConversationOpenAIRequest(prompt, model) {
+  return {
+    model,
+    input: [
+      { role: "system", content: "You are the grounded internal simulation of a UK van website assistant. Compose only the customer-facing reply. Never override product context, deterministic rules, remembered facts or supplied evidence." },
+      { role: "user", content: prompt },
+    ],
+    text: { format: { type: "json_schema", name: "conversation_simulation_reply", strict: true, schema: CONVERSATION_REPLY_SCHEMA } },
+  };
+}
+
+export async function requestOpenAIConversationReply(prompt, environment = process.env, fetchImplementation = fetch, modelSelection = "default") {
   const apiKey = clean(environment.OPENAI_API_KEY);
   if (!apiKey) throw new ApiError(500, "OPENAI_API_KEY is not configured.", "configuration", { openai_api_key_present: false });
-  const model = clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini";
+  const model = resolveServerModel(modelSelection, environment);
   const response = await fetchImplementation("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model,
-      input: [
-        { role: "system", content: "You are the grounded internal simulation of a UK van website assistant. Compose only the customer-facing reply. Never override product context, deterministic rules, remembered facts or supplied evidence." },
-        { role: "user", content: prompt },
-      ],
-      text: { format: { type: "json_schema", name: "conversation_simulation_reply", strict: true, schema: CONVERSATION_REPLY_SCHEMA } },
-    }),
+    body: JSON.stringify(buildConversationOpenAIRequest(prompt, model)),
   });
   let payload;
   try { payload = await response.json(); } catch (error) { throw new ApiError(502, `OpenAI returned a non-JSON conversation response (${response.status} ${response.statusText}).`, "ai", { model, cause: clean(error.message, 500) }); }
   if (!response.ok) throw new ApiError(502, openAIErrorMessage(payload, response), "ai", { model, openai_status: response.status });
-  return { payload, model };
+  return { payload, model, usage: responseTokenUsage(payload) };
 }
 
 export function parseOpenAIConversationReply(payload, model) {
@@ -232,7 +246,7 @@ export async function testCompetenceAnswer(supabase, body) {
   const generationStart = performance.now();
   const prompt = await runStage("Prompt creation", { ...context, category_filter: boundedKnowledge.categoryFilter, source_count: sources.length }, async () => buildCompetencePrompt({ question, messages, sources, sections: boundedKnowledge.sections, settings: knowledge.settings, productContext, comparison }));
   if (!prompt.includes(`# Customer question\n${question}\n`)) throw new ApiError(500, "Generated prompt does not contain the current submitted question.", "validation");
-  const model = clean(process.env.OPENAI_MODEL, 200) || "gpt-4.1-mini";
+  const model = openAIModelConfiguration(process.env).default_model;
   const requested = await runStage("OpenAI request", { ...context, model, openai_api_key_present: Boolean(clean(process.env.OPENAI_API_KEY)), source_count: sources.length }, () => requestOpenAIAnswer(prompt));
   const generated = await runStage("Structured response parsing", { ...context, model: requested.model }, async () => parseOpenAIAnswer(requested.payload, requested.model));
   const generationTime = elapsed(generationStart);
@@ -294,6 +308,192 @@ export function conversationPrompt({ question, messages, sources, sections, sett
   const base = buildCompetencePrompt({ question, messages, sources, sections, settings, productContext, comparison });
   const disclaimer = disclaimerControl(messages);
   return `${base}\n\n# Locked V5 human conversation and recovery\nUniversal message type: ${human.message_type || "question"} (${human.confidence || 0}% confidence). Customer emotion: ${human.emotion?.emotion || "neutral"}. Objection: ${human.objection?.objection || "none"}. The server conversation intent is ${intent.primary_intent}; secondary intents: ${intent.secondary_intents.join(", ") || "none"}. The locked product remains ${productContext} and must never be cross-sold. Remembered structured customer facts: ${JSON.stringify(memory.remembered_facts)}. Corrections: ${JSON.stringify(memory.corrections)}. Buying signal: ${buyingSignals.detected_buying_signal || "none"} (${buyingSignals.signal_strength || "low"}). Buying intent level: ${journey.buying_intent_level || "Research"}. Current customer goal: ${journey.conversation_goal || "Research"}. Journey stage: ${journey.journey_stage || "Research"}. Recommended single action: ${journey.recommended_cta || buyingSignals.recommended_next_action || "Continue conversation"}. Next best question: ${journey.next_best_question || "none"}. Context resolution: ${contextualResolution || "none required"}. Recently used terms to avoid repeating mechanically: ${(phraseDiagnostics.recently_used_terms || []).join(", ") || "none"}. Target reply band: ${lengthTarget.band || "normal"}, maximum ${lengthTarget.maximum_words || 90} words. Be helpful, friendly, patient and professional. Acknowledge an objection or emotion naturally before progressing. Listen, answer, reassure, progress, then stop. Ask at most one useful question, never ask for a known fact, and ask none when the factual answer or natural closing is complete. Never expose classifications, scores, rules or internal reasoning. Avoid repeated openings and unnecessary full disclaimers. ${disclaimer.instruction} Never invent approval likelihood, stock, rates, payment figures, affordability outcomes or a delivery date. Deterministic evidence is the highest-priority fact and overrides every article, Business Brain passage and model inference. If approved evidence is insufficient, use a plain, honest fallback and do not infer a business fact.`;
+}
+
+function sha256(value) {
+  return createHash("sha256").update(JSON.stringify(stableComparisonInput(value))).digest("hex");
+}
+
+export function comparisonInputHashes({ question, messages, productContext, prompt, sources, coverage }) {
+  const historyHash = sha256(messages);
+  const sharedInput = {
+    submitted_message: question,
+    conversation_history: messages,
+    product_context: productContext,
+    prompt: prompt || null,
+    retrieved_source_ids: sources.map((_source, index) => `S${index + 1}`),
+    deterministic_rule_result: coverage?.diagnostics || {},
+  };
+  return { conversation_history_hash: historyHash, input_hash: sha256(sharedInput), shared_input: sharedInput };
+}
+
+async function prepareModelComparisonConversation(supabase, body) {
+  const question = clean(body.message || body.question, 3000);
+  if (!question) throw new ApiError(400, "Enter a customer message.", "validation");
+  const productContext = clean(body.product_context, 20).toLowerCase();
+  if (!COMPETENCE_PRODUCT_CONTEXTS.includes(productContext)) throw new ApiError(400, "Choose a locked product context: finance or rent2buy.", "validation");
+  const messages = cleanMessages(body.messages);
+  const context = { comparison_id: clean(body.comparison_id, 100) || createRequestId(), product_context: productContext, scenario_id: clean(body.scenario_id, 50) || null };
+  const human = await runStage("Comparison universal message classification", context, async () => classifyUniversalMessage({ message: question, messages, journey: body.journey_state }));
+  const intent = await runStage("Comparison conversation intent", context, async () => classifyConversationIntent({ message: question, history: messages, productContext }));
+  const conversationWithCurrent = [...messages, { role: "user", content: question }];
+  const memory = await runStage("Comparison conversation memory", context, async () => buildConversationMemory(conversationWithCurrent, body.remembered_facts));
+  const contextualResolution = contextualClarification(question, messages, memory.remembered_facts);
+  if (/^how long\??$/i.test(question) && contextualResolution) { intent.clarification_required = true; intent.retrieval_required = false; intent.suggested_clarification_question = contextualResolution; }
+  const buyingSignals = await runStage("Comparison buying signal detection", context, async () => detectBuyingSignals(question, memory.remembered_facts));
+  const lengthTarget = responseLengthTarget(question, intent);
+  const updatedFacts = Object.fromEntries(Object.entries(memory.remembered_facts).filter(([key, value]) => clean(body.remembered_facts?.[key]) !== clean(value)));
+  const journey = await runStage("Comparison application journey", context, async () => buildJourneyState({ message: question, messages, intent, facts: memory.remembered_facts, factMetadata: memory.fact_metadata, productContext, priorJourney: body.journey_state, updatedFacts }));
+  if (journey.application_mode_active) { intent.retrieval_required = false; intent.clarification_required = false; intent.suggested_clarification_question = ""; }
+  const recoveryTypes = new Set(["confusion", "frustration", "humour", "positive_feedback", "agreement", "disagreement", "random_text", "unknown_intent", "off_topic", "nonsense_input"]);
+  const recoveryRequired = human.recovery_required || recoveryTypes.has(human.message_type);
+  if (recoveryRequired && !journey.application_mode_active && intent.primary_intent !== "product_clarification_required") { intent.retrieval_required = false; intent.clarification_required = false; intent.suggested_clarification_question = ""; }
+  if (human.message_type === "objection" && human.objection.objection !== "uncertainty" && intent.primary_intent !== "product_clarification_required") intent.retrieval_required = true;
+  const comparison = isExplicitProductComparison(question, messages);
+  let sources = [];
+  let coverage = null;
+  let prompt = null;
+  let deterministicResponse = null;
+  let retrievalTime = 0;
+  if (!intent.retrieval_required) {
+    deterministicResponse = recoveryRequired && intent.primary_intent !== "product_clarification_required"
+      ? humanRecoveryReply(human, { messages, facts: memory.remembered_facts, productContext, journey })
+      : naturalSalesReply(intent, productContext, buyingSignals, memory.remembered_facts) || naturalConversationReply(intent, productContext, memory.remembered_facts);
+  } else {
+    const retrievalStart = performance.now();
+    const knowledge = await loadKnowledge(supabase);
+    const bounded = await runStage("Comparison product boundary", { ...context, comparison }, async () => filterKnowledgeForProduct(knowledge, productContext, { comparison }));
+    const corpus = await runStage("Comparison temporary article chunks", { ...context, article_count: bounded.articles.length }, async () => buildRetrievalCorpus(bounded));
+    const retrievalQuery = conversationRetrievalQuery(intent, memory, conversationWithCurrent);
+    const location = memory.remembered_facts.location;
+    const coverageQuestion = intent.secondary_intents.includes("coverage") && location ? `coverage for ${location}` : question;
+    coverage = await runStage("Comparison deterministic coverage", context, () => resolveProductCoverage({ question: coverageQuestion, productContext, settings: knowledge.settings }));
+    const lexical = await runStage("Comparison lexical ranking", { ...context, retrieval_query: retrievalQuery }, async () => rankKnowledge(retrievalQuery, corpus, { messages, limit: coverage ? 7 : 8 }));
+    const coverageConflicts = await runStage("Comparison coverage conflicts", context, async () => detectCoverageConflicts(coverage, corpus, knowledge.settings));
+    if (coverage) coverage.diagnostics.conflicting_sources = coverageConflicts;
+    sources = coverage ? [coverage.source, ...lexical].slice(0, 8) : lexical;
+    retrievalTime = elapsed(retrievalStart);
+    if (!sources.length) deterministicResponse = insufficientKnowledgeReply(productContext);
+    else prompt = await runStage("Comparison shared prompt creation", { ...context, source_count: sources.length }, async () => conversationPrompt({ question, messages, sources, sections: bounded.sections, settings: knowledge.settings, productContext, comparison, intent, memory, buyingSignals, lengthTarget, contextualResolution, journey, human, phraseDiagnostics: recentAssistantPhraseDiagnostics(messages) }));
+  }
+  if (journey.application_mode_active) deterministicResponse = { ...(deterministicResponse || {}), reply: applicationModeReply(productContext, journey.application_state), insufficient_knowledge: false, human_handoff_recommended: false, recommended_action: productContext === "finance" ? "apply_finance" : "apply_rent2buy", confidence: 100, confidence_reason: "Server-side V4 Application Mode triggered by explicit customer progression.", source_ids: [] };
+  const hashes = comparisonInputHashes({ question, messages, productContext, prompt, sources, coverage });
+  return { ...context, question, messages, productContext, human, intent, memory, buyingSignals, journey, contextualResolution, sources, coverage, prompt, deterministicResponse, retrievalTime, hashes };
+}
+
+export async function runPreparedComparisonModel(prepared, selection, environment = process.env, fetchImplementation = fetch) {
+  const requestedModel = resolveServerModel(selection, environment);
+  const started = performance.now();
+  const generatedAt = new Date().toISOString();
+  try {
+    let response = prepared.deterministicResponse;
+    let usage = { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+    let generationMode = "deterministic";
+    if (prepared.prompt) {
+      const requested = await requestOpenAIConversationReply(prepared.prompt, environment, fetchImplementation, selection);
+      response = parseOpenAIConversationReply(requested.payload, requested.model).reply;
+      usage = requested.usage;
+      generationMode = "openai";
+      response = enforceGroundedConversationReply(response, { deterministicRuleUsed: Boolean(prepared.coverage), productContext: prepared.productContext });
+      const deterministicDelivery = deterministicDeliveryReply(prepared.productContext, prepared.question, prepared.coverage);
+      if (deterministicDelivery) response = { ...response, reply: deterministicDelivery, insufficient_knowledge: false, confidence: 100, confidence_reason: "Server-side approved delivery rule.", source_ids: ["S1"] };
+      response.reply = stripRepeatedDisclaimer(response.reply, prepared.messages);
+    }
+    const selected = new Set(response?.source_ids || []);
+    if (prepared.coverage) selected.add("S1");
+    const sourcesUsed = prepared.sources.filter((_source, index) => selected.has(`S${index + 1}`));
+    const cost = estimateOpenAICost(requestedModel, usage);
+    return {
+      status: "completed", model_identifier: requestedModel, generation_mode: generationMode,
+      assistant_response: clean(response?.reply, 5000), response_time_ms: elapsed(started), ...usage, ...cost,
+      generated_at: generatedAt, intent_classification: prepared.intent.primary_intent,
+      clarification_decision: { required: prepared.intent.clarification_required, question: prepared.intent.suggested_clarification_question || null },
+      remembered_facts: prepared.memory.remembered_facts, buying_signal: prepared.buyingSignals,
+      application_readiness: prepared.journey.application_readiness, recommended_cta: prepared.journey.recommended_cta,
+      application_cta: prepared.journey.application_cta, knowledge_sources_used: sourcesUsed,
+      error: null, fallback_behavior: generationMode === "deterministic" ? "Server-side deterministic response; no model inference used." : null,
+    };
+  } catch (error) {
+    return {
+      status: "error", model_identifier: requestedModel, generation_mode: "error", assistant_response: "", response_time_ms: elapsed(started),
+      input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, total_tokens: 0, estimated_cost_usd: 0,
+      generated_at: generatedAt, intent_classification: prepared.intent.primary_intent,
+      clarification_decision: { required: prepared.intent.clarification_required, question: prepared.intent.suggested_clarification_question || null },
+      remembered_facts: prepared.memory.remembered_facts, buying_signal: prepared.buyingSignals,
+      application_readiness: prepared.journey.application_readiness, recommended_cta: prepared.journey.recommended_cta,
+      application_cta: prepared.journey.application_cta, knowledge_sources_used: [],
+      error: { type: error?.name || "Error", message: clean(error?.message, 2000), stage: error?.stage || "OpenAI request" },
+      fallback_behavior: "The affected model failed independently; the other result was preserved.",
+    };
+  }
+}
+
+async function compareConversationModels(supabase, body) {
+  const configuration = openAIModelConfiguration(process.env);
+  if (!configuration.preview) throw new ApiError(404, "Model comparison is not available on this deployment.", "security");
+  if (!configuration.comparison_available) throw new ApiError(503, publicModelComparisonConfiguration(process.env).comparison_error || "Comparison model is unavailable.", "configuration");
+  if (body.model || body.model_id || body.default_model || body.comparison_model) throw new ApiError(400, "Model identifiers cannot be supplied by the browser.", "validation");
+  const mode = ["default", "comparison", "both"].includes(body.comparison_mode) ? body.comparison_mode : "both";
+  const comparisonId = clean(body.comparison_id, 100) || `comparison-${createRequestId()}`;
+  const prepared = await prepareModelComparisonConversation(supabase, { ...body, comparison_id: comparisonId });
+  const selections = mode === "both" ? ["default", "comparison"] : [mode];
+  const outputs = await Promise.all(selections.map((selection) => runPreparedComparisonModel(prepared, selection)));
+  const defaultResult = mode === "comparison" ? {} : outputs[selections.indexOf("default")];
+  const comparisonResult = mode === "default" ? {} : outputs[selections.indexOf("comparison")];
+  const defaultInput = buildConversationOpenAIRequest(prepared.prompt || "", configuration.default_model);
+  const comparisonInput = buildConversationOpenAIRequest(prepared.prompt || "", configuration.comparison_model);
+  const { model: _defaultModel, ...defaultModelAgnostic } = defaultInput;
+  const { model: _comparisonModel, ...comparisonModelAgnostic } = comparisonInput;
+  const inputsEquivalent = sha256(defaultModelAgnostic) === sha256(comparisonModelAgnostic) && prepared.hashes.input_hash === sha256(prepared.hashes.shared_input);
+  const payload = {
+    comparison_id: comparisonId, submitted_message: prepared.question, product_context: prepared.productContext,
+    scenario_category: clean(body.scenario_category, 100) || null, conversation_history: prepared.messages,
+    conversation_history_hash: prepared.hashes.conversation_history_hash, input_hash: prepared.hashes.input_hash,
+    inputs_equivalent: inputsEquivalent, retrieved_source_ids: prepared.sources.map((_source, index) => `S${index + 1}`),
+    source_evidence: prepared.sources, deterministic_rule_result: prepared.coverage?.diagnostics || {},
+    default_model: configuration.default_model, comparison_model: configuration.comparison_model,
+    default_result: defaultResult || {}, comparison_result: comparisonResult || {},
+    default_generated_at: defaultResult?.generated_at || null, comparison_generated_at: comparisonResult?.generated_at || null,
+  };
+  const saved = data(await supabase.from("knowledge_model_comparisons").insert(payload).select().single(), "Model comparison could not be saved.");
+  return { comparison: { ...saved, retrieval_time_ms: prepared.retrievalTime }, request_trace: { request_id: clean(body.request_id, 100), comparison_id: comparisonId, submitted_question: prepared.question, generated_at: new Date().toISOString(), cached_value_used: false, previous_value_used: false } };
+}
+
+export async function validateConfiguredModel(model, environment = process.env, fetchImplementation = fetch) {
+  if (!clean(environment.OPENAI_API_KEY)) return { available: false, reason: "OPENAI_API_KEY is not configured in this runtime." };
+  try {
+    const response = await fetchImplementation(`https://api.openai.com/v1/models/${encodeURIComponent(model)}`, { method: "GET", cache: "no-store", headers: { Authorization: `Bearer ${clean(environment.OPENAI_API_KEY)}`, "Cache-Control": "no-store" } });
+    const payload = await response.json();
+    return response.ok ? { available: true, model: payload.id || model } : { available: false, reason: clean(payload?.error?.message || `${response.status} ${response.statusText}`, 1000) };
+  } catch (error) { return { available: false, reason: clean(error?.message, 1000) }; }
+}
+
+async function getModelComparisonConfiguration() {
+  const publicConfiguration = publicModelComparisonConfiguration(process.env);
+  if (!publicConfiguration.preview) throw new ApiError(404, "Model comparison is not available on this deployment.", "security");
+  const availability = {};
+  for (const model of [publicConfiguration.default_model, publicConfiguration.comparison_model].filter(Boolean)) availability[model] = await validateConfiguredModel(model);
+  return { ...publicConfiguration, project_availability: availability, test_scenarios: MODEL_COMPARISON_SCENARIOS };
+}
+
+export async function saveModelComparisonReview(supabase, body, environment = process.env) {
+  if (!openAIModelConfiguration(environment).preview) throw new ApiError(404, "Model comparison is not available on this deployment.", "security");
+  const comparisonId = clean(body.comparison_id, 100);
+  if (!comparisonId) throw new ApiError(400, "Comparison record is required.", "validation");
+  if (!MODEL_COMPARISON_OUTCOMES.includes(body.outcome)) throw new ApiError(400, "Choose a valid comparison outcome.", "validation");
+  const ratingSet = (value = {}) => Object.fromEntries(MODEL_COMPARISON_RATING_FIELDS.map((field) => [field, Math.min(5, Math.max(1, Number(value[field]) || 1))]));
+  return data(await supabase.from("knowledge_model_comparison_reviews").upsert({ comparison_id: comparisonId, outcome: body.outcome, default_ratings: ratingSet(body.default_ratings), comparison_ratings: ratingSet(body.comparison_ratings), reviewer_notes: clean(body.reviewer_notes, 5000), updated_at: new Date().toISOString() }, { onConflict: "comparison_id" }).select().single(), "Model comparison review could not be saved.");
+}
+
+async function loadModelComparisonSummary(supabase) {
+  if (!openAIModelConfiguration(process.env).preview) throw new ApiError(404, "Model comparison is not available on this deployment.", "security");
+  const [comparisonResult, reviewResult] = await Promise.all([
+    supabase.from("knowledge_model_comparisons").select("*").order("created_at", { ascending: false }).limit(1000),
+    supabase.from("knowledge_model_comparison_reviews").select("*").order("updated_at", { ascending: false }).limit(1000),
+  ]);
+  const comparisons = data(comparisonResult, "Model comparisons could not be loaded.") || [];
+  const reviews = data(reviewResult, "Model comparison reviews could not be loaded.") || [];
+  return { comparisons, reviews, summary: modelComparisonSummary(comparisons, reviews) };
 }
 
 export async function simulateCustomerConversation(supabase, body) {
@@ -554,12 +754,16 @@ export default async function handler(request, response) {
     let result;
     if (body.action === "testAnswer") result = await testCompetenceAnswer(supabase, body);
     else if (body.action === "simulateConversation") result = await simulateCustomerConversation(supabase, body);
+    else if (body.action === "compareModels") result = await compareConversationModels(supabase, body);
+    else if (body.action === "getModelComparisonConfiguration") result = { configuration: await getModelComparisonConfiguration() };
+    else if (body.action === "saveModelComparisonReview") result = { review: await saveModelComparisonReview(supabase, body) };
+    else if (body.action === "loadModelComparisonSummary") result = await loadModelComparisonSummary(supabase);
     else if (body.action === "startRun") result = { run: await startRun(supabase, body) };
     else if (body.action === "completeRun") result = { run: await completeRun(supabase, body) };
     else if (body.action === "saveReview") result = { review: await saveReview(supabase, body) };
     else if (body.action === "saveConversationReview") result = { review: await saveConversationReview(supabase, body) };
     else if (body.action === "loadReport") result = await loadReport(supabase);
-    else if (body.action === "loadTestLibrary") result = { questions: AI_ASSISTANT_TEST_LIBRARY, scenarios: REAL_CUSTOMER_SCENARIOS };
+    else if (body.action === "loadTestLibrary") result = { questions: AI_ASSISTANT_TEST_LIBRARY, scenarios: REAL_CUSTOMER_SCENARIOS, model_comparison_scenarios: MODEL_COMPARISON_SCENARIOS };
     else throw new ApiError(400, "Unsupported competence-test action.", "validation");
     return await runStage("Return response", { action: clean(body.action, 100), run_id: body.run_id || null, result_id: body.result_id || null }, async () => response.status(200).json({ ok: true, ...result }));
   } catch (error) {

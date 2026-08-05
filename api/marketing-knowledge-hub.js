@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { openAIModelConfiguration } from "../lib/openAIModelConfiguration.js";
 import {
   KNOWLEDGE_ARTICLE_STATUSES,
   KNOWLEDGE_ARTICLE_TYPES,
@@ -255,7 +256,7 @@ export function knowledgeAiConfiguration(environment = process.env) {
   );
   return {
     configured: Boolean(cleanText(environment.OPENAI_API_KEY, 10000)),
-    model: cleanText(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini",
+    model: openAIModelConfiguration(environment).default_model,
     environment: cleanText(environment.VERCEL_ENV || environment.NODE_ENV, 50) || "unknown",
     deployment_host: deploymentHost,
     commit_ref: cleanText(environment.VERCEL_GIT_COMMIT_REF, 200),

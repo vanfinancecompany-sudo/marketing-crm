@@ -29,3 +29,7 @@ export const loadCompetenceReport = () => requestAssistantCompetence("loadReport
 export const simulateCustomerConversation = (payload, fetchImplementation) => requestAssistantCompetence("simulateConversation", payload, fetchImplementation);
 export const saveConversationReview = (payload, fetchImplementation) => requestAssistantCompetence("saveConversationReview", payload, fetchImplementation);
 export const loadCustomerSimulationLibrary = (fetchImplementation) => requestAssistantCompetence("loadTestLibrary", {}, fetchImplementation);
+export const loadModelComparisonConfiguration = (fetchImplementation) => requestAssistantCompetence("getModelComparisonConfiguration", {}, fetchImplementation);
+export const compareAssistantModels = (payload, fetchImplementation) => requestAssistantCompetence("compareModels", payload, fetchImplementation);
+export const saveModelComparisonReview = (payload, fetchImplementation) => requestAssistantCompetence("saveModelComparisonReview", payload, fetchImplementation);
+export const loadModelComparisonSummary = (fetchImplementation) => requestAssistantCompetence("loadModelComparisonSummary", {}, fetchImplementation);

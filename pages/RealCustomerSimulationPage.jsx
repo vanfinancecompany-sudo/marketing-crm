@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CONVERSATION_RATING_FIELDS, CONVERSATION_REVIEW_OUTCOMES } from "../lib/conversationIntelligence.js";
 import { REAL_CUSTOMER_SCENARIOS } from "../lib/customerSimulationScenarios.js";
-import { createCompetenceRequestId, saveConversationReview, simulateCustomerConversation } from "../services/aiAssistantCompetence.js";
+import { MODEL_COMPARISON_RATING_FIELDS } from "../lib/modelComparison.js";
+import { compareAssistantModels, createCompetenceRequestId, loadModelComparisonConfiguration, loadModelComparisonSummary, saveConversationReview, saveModelComparisonReview, simulateCustomerConversation } from "../services/aiAssistantCompetence.js";
 import { clearMarketingAccessKey, getStoredMarketingAccessKey, saveMarketingAccessKey, validateMarketingAccessKey } from "../services/marketingAccess.js";
 
 const labels = {
@@ -12,8 +13,18 @@ const labels = {
 const outcomeLabel = (value) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const newSessionId = () => globalThis.crypto?.randomUUID?.() || `simulation-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const initialRatings = Object.fromEntries(CONVERSATION_RATING_FIELDS.map((field) => [field, 5]));
+const initialComparisonRatings = Object.fromEntries(MODEL_COMPARISON_RATING_FIELDS.map((field) => [field, 5]));
 
 function Diagnostic({ label, value }) { return <div className="competence-metric"><span>{label}</span><strong>{value == null || value === "" ? "—" : String(value)}</strong></div>; }
+
+function ModelResultCard({ title, result }) {
+  if (!result || !Object.keys(result).length) return null;
+  return <article className="panel panel--nested"><div className="panel__header"><div><div className="eyebrow">{title}</div><h3>{result.model_identifier}</h3></div><span className="badge">{result.status}</span></div>
+    {result.error ? <div className="notice notice--error"><strong>{result.error.type}</strong><br />{result.error.message}<br />Fallback: {result.fallback_behavior}</div> : <div className="notice notice--success"><strong>Assistant response</strong><p>{result.assistant_response}</p></div>}
+    <div className="competence-metrics"><Diagnostic label="Response time" value={`${result.response_time_ms || 0} ms`} /><Diagnostic label="Input tokens" value={result.input_tokens || 0} /><Diagnostic label="Output tokens" value={result.output_tokens || 0} /><Diagnostic label="Total tokens" value={result.total_tokens || 0} /><Diagnostic label="Estimated cost" value={result.estimated_cost_usd == null ? "Unavailable" : `$${Number(result.estimated_cost_usd).toFixed(6)}`} /><Diagnostic label="Intent" value={result.intent_classification} /><Diagnostic label="Clarification" value={result.clarification_decision?.required ? result.clarification_decision.question || "Required" : "Not required"} /><Diagnostic label="Application readiness" value={result.application_readiness} /><Diagnostic label="Recommended CTA" value={result.recommended_cta} /></div>
+    <details><summary>Facts, buying signal and evidence</summary><pre className="notice" style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify({ remembered_facts: result.remembered_facts, buying_signal: result.buying_signal, application_cta: result.application_cta, knowledge_sources_used: result.knowledge_sources_used }, null, 2)}</pre></details>
+  </article>;
+}
 
 function ResultDiagnostics({ result }) {
   if (!result) return <div className="competence-empty"><strong>No simulated response yet</strong><p>Send a message or run a realistic scenario.</p></div>;
@@ -96,6 +107,13 @@ export default function RealCustomerSimulationPage() {
   const [scenarioId, setScenarioId] = useState(REAL_CUSTOMER_SCENARIOS[0]?.id || "");
   const [category, setCategory] = useState("greetings");
   const [batch, setBatch] = useState({ running: false, completed: 0, total: 0, failures: [] });
+  const [modelConfiguration, setModelConfiguration] = useState(null);
+  const [comparisonMode, setComparisonMode] = useState("both");
+  const [comparisonResult, setComparisonResult] = useState(null);
+  const [comparisonScenarioId, setComparisonScenarioId] = useState("");
+  const [comparisonSummary, setComparisonSummary] = useState(null);
+  const [comparisonReview, setComparisonReview] = useState({ outcome: "equivalent", default_ratings: { ...initialComparisonRatings }, comparison_ratings: { ...initialComparisonRatings }, reviewer_notes: "" });
+  const [comparisonMessage, setComparisonMessage] = useState("");
   const activeRequest = useRef(null);
   const categories = useMemo(() => [...new Set(scenarios.map((item) => item.category))], [scenarios]);
 
@@ -106,6 +124,18 @@ export default function RealCustomerSimulationPage() {
     return () => { active = false; };
   }, []);
 
+  useEffect(() => {
+    if (accessStatus !== "unlocked") return;
+    let active = true;
+    loadModelComparisonConfiguration().then((payload) => {
+      if (!active) return;
+      setModelConfiguration(payload.configuration);
+      setComparisonScenarioId(payload.configuration?.test_scenarios?.[0]?.id || "");
+      return loadModelComparisonSummary();
+    }).then((payload) => { if (active && payload?.summary) setComparisonSummary(payload.summary); }).catch(() => { if (active) setModelConfiguration(null); });
+    return () => { active = false; };
+  }, [accessStatus]);
+
   async function unlock(event) {
     event.preventDefault(); setError("");
     try { await validateMarketingAccessKey(accessKey.trim()); saveMarketingAccessKey(accessKey.trim()); setAccessStatus("unlocked"); setAccessKey(""); }
@@ -114,7 +144,44 @@ export default function RealCustomerSimulationPage() {
 
   function resetConversation(nextProduct = productContext) {
     activeRequest.current = null;
-    setProductContext(nextProduct); setSessionId(newSessionId()); setMessages([]); setRememberedFacts({}); setJourneyState({}); setResult(null); setReviewMessage(""); setError("");
+    setProductContext(nextProduct); setSessionId(newSessionId()); setMessages([]); setRememberedFacts({}); setJourneyState({}); setResult(null); setComparisonResult(null); setReviewMessage(""); setError("");
+  }
+
+  async function runModelComparison(overrides = {}) {
+    if (!modelConfiguration?.comparison_available || busy || batch.running) return;
+    const submitted = String(overrides.message ?? message).trim();
+    if (!submitted) return;
+    setBusy(true); setError(""); setComparisonMessage(""); setComparisonResult(null);
+    try {
+      const requestId = createCompetenceRequestId(); activeRequest.current = requestId;
+      const response = await compareAssistantModels({
+        request_id: requestId, comparison_id: `comparison-${requestId}`, comparison_mode: comparisonMode,
+        message: submitted, product_context: overrides.product_context || productContext,
+        messages: overrides.history || messages, remembered_facts: overrides.remembered_facts || rememberedFacts,
+        journey_state: overrides.journey_state || journeyState, scenario_id: overrides.scenario_id || null,
+        scenario_category: overrides.scenario_category || "manual",
+      });
+      if (activeRequest.current !== requestId || response.request_trace?.request_id !== requestId || response.request_trace?.submitted_question !== submitted) throw new Error("A stale or mismatched model comparison was rejected.");
+      setComparisonResult(response.comparison);
+    } catch (caught) { setError(caught.message || "Model comparison failed."); }
+    finally { setBusy(false); }
+  }
+
+  async function runControlledComparisonScenario() {
+    const scenario = modelConfiguration?.test_scenarios?.find((item) => item.id === comparisonScenarioId);
+    if (!scenario) return;
+    setProductContext(scenario.product_context);
+    await runModelComparison({ message: scenario.message, history: scenario.history, product_context: scenario.product_context, scenario_id: scenario.id, scenario_category: scenario.category });
+  }
+
+  async function handleComparisonReview() {
+    if (!comparisonResult?.id) return;
+    setComparisonMessage("");
+    try {
+      await saveModelComparisonReview({ comparison_id: comparisonResult.id, ...comparisonReview });
+      const report = await loadModelComparisonSummary();
+      setComparisonSummary(report.summary); setComparisonMessage("Model comparison review saved.");
+    } catch (caught) { setError(caught.message || "Comparison review could not be saved."); }
   }
 
   async function sendOne(content, transcript = messages, facts = rememberedFacts, scenario = null, activeSession = sessionId) {
@@ -186,6 +253,16 @@ export default function RealCustomerSimulationPage() {
       <form onSubmit={handleSend}><label className="field"><span className="field__label">Customer message</span><textarea className="field__input" rows={4} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Type exactly as a real customer might..." /></label><button className="button button--primary" disabled={busy || batch.running}>{busy || batch.running ? "Testing..." : "Send Message"}</button></form>
       {error ? <div className="notice notice--error">{error}</div> : null}
     </section>
+    {modelConfiguration?.comparison_available ? <section className="panel"><div className="panel__header"><div><div className="eyebrow">Preview only</div><h3>OpenAI model comparison</h3><p>Runs a non-mutating snapshot. Both models receive the same message, history, product lock, prompt, deterministic result and retrieved evidence. Neither response enters the other model’s history.</p></div><span className="badge">No store</span></div>
+      <div className="field-grid"><label className="field"><span className="field__label">Model run</span><select className="field__input" value={comparisonMode} onChange={(event) => setComparisonMode(event.target.value)}><option value="default">Default model</option><option value="comparison">Comparison model</option><option value="both">Run both models</option></select></label><label className="field"><span className="field__label">Controlled comparison scenario</span><select className="field__input" value={comparisonScenarioId} onChange={(event) => setComparisonScenarioId(event.target.value)}>{modelConfiguration.test_scenarios?.map((scenario) => <option value={scenario.id} key={scenario.id}>{scenario.id} · {outcomeLabel(scenario.category)}</option>)}</select></label></div>
+      <div className="competence-metrics"><Diagnostic label="Default model" value={modelConfiguration.default_model} /><Diagnostic label="Comparison model" value={modelConfiguration.comparison_model} /><Diagnostic label="Default available to project" value={modelConfiguration.project_availability?.[modelConfiguration.default_model]?.available ? "Yes" : modelConfiguration.project_availability?.[modelConfiguration.default_model]?.reason || "Unverified"} /><Diagnostic label="Comparison available to project" value={modelConfiguration.project_availability?.[modelConfiguration.comparison_model]?.available ? "Yes" : modelConfiguration.project_availability?.[modelConfiguration.comparison_model]?.reason || "Unverified"} /></div>
+      <div className="card-actions"><button type="button" className="button button--primary" disabled={busy} onClick={() => runModelComparison()}>{busy ? "Running…" : "Compare Current Message"}</button><button type="button" className="button button--ghost" disabled={busy || !comparisonScenarioId} onClick={runControlledComparisonScenario}>Run Controlled Scenario</button></div>
+      {comparisonResult ? <><div className="notice"><strong>Comparison ID:</strong> {comparisonResult.comparison_id}<br /><strong>Inputs equivalent:</strong> {comparisonResult.inputs_equivalent ? "Verified" : "Failed"}<br /><strong>History hash:</strong> {comparisonResult.conversation_history_hash}<br /><strong>Input hash:</strong> {comparisonResult.input_hash}<br /><strong>Shared source IDs:</strong> {comparisonResult.retrieved_source_ids?.join(", ") || "None"}<br /><strong>Retrieval time:</strong> {comparisonResult.retrieval_time_ms || 0} ms</div><div className="card-grid"><ModelResultCard title="Default model" result={comparisonResult.default_result} /><ModelResultCard title="Comparison model" result={comparisonResult.comparison_result} /></div>
+        {comparisonResult.default_result?.status && comparisonResult.comparison_result?.status ? <div className="panel panel--nested"><h3>Comparison review</h3><div className="competence-outcomes">{[["default_better","Default model better"],["comparison_better","Comparison model better"],["equivalent","Equivalent"],["both_poor","Both poor"]].map(([value,label]) => <button type="button" key={value} className={comparisonReview.outcome === value ? "is-selected" : ""} onClick={() => setComparisonReview({ ...comparisonReview, outcome: value })}>{label}</button>)}</div>
+          <div className="card-grid">{[["default_ratings","Default model"],["comparison_ratings","Comparison model"]].map(([side,title]) => <div key={side}><h4>{title}</h4><div className="competence-ratings">{MODEL_COMPARISON_RATING_FIELDS.map((field) => <label key={`${side}-${field}`}><span>{outcomeLabel(field)}</span><select value={comparisonReview[side][field]} onChange={(event) => setComparisonReview({ ...comparisonReview, [side]: { ...comparisonReview[side], [field]: Number(event.target.value) } })}>{[1,2,3,4,5].map((value) => <option value={value} key={value}>{value}/5</option>)}</select></label>)}</div></div>)}</div>
+          <label className="field"><span className="field__label">Reviewer notes</span><textarea className="field__input" rows={3} value={comparisonReview.reviewer_notes} onChange={(event) => setComparisonReview({ ...comparisonReview, reviewer_notes: event.target.value })} /></label><button type="button" className="button button--primary" onClick={handleComparisonReview}>Save Comparison Review</button>{comparisonMessage ? <div className="notice">{comparisonMessage}</div> : null}</div> : null}</> : null}
+      {comparisonSummary ? <details><summary><strong>Comparison summary ({comparisonSummary.total_comparisons || 0} completed)</strong></summary><div className="competence-metrics"><Diagnostic label="Default wins" value={comparisonSummary.default_wins} /><Diagnostic label="Comparison wins" value={comparisonSummary.comparison_wins} /><Diagnostic label="Ties" value={comparisonSummary.ties} /><Diagnostic label="Both poor" value={comparisonSummary.both_poor} /><Diagnostic label="Average cost / response" value={comparisonSummary.average_estimated_cost_per_response_usd == null ? "Unavailable" : `$${comparisonSummary.average_estimated_cost_per_response_usd}`} /><Diagnostic label="Estimated / 1,000" value={comparisonSummary.estimated_cost_per_1000_conversations_usd == null ? "Unavailable" : `$${comparisonSummary.estimated_cost_per_1000_conversations_usd}`} /></div><pre className="notice" style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(comparisonSummary, null, 2)}</pre><p>No statistical-significance claim is made.</p></details> : null}
+    </section> : null}
     <ResultDiagnostics result={result} />
     <section className="panel"><div className="panel__header"><div><div className="eyebrow">Manual review</div><h3>Score this behaviour</h3></div></div>
       <div className="competence-outcomes">{CONVERSATION_REVIEW_OUTCOMES.map((outcome) => <button type="button" className={review.outcome === outcome ? "is-selected" : ""} onClick={() => setReview({ ...review, outcome })} key={outcome}>{outcomeLabel(outcome)}</button>)}</div>

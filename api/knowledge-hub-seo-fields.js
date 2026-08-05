@@ -1,3 +1,5 @@
+import { openAIModelConfiguration } from "../lib/openAIModelConfiguration.js";
+
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 
 const SEO_FIELDS_SCHEMA = {
@@ -56,7 +58,7 @@ function validSeoFields(fields) {
 async function generateSeoFields({ title, intent, category }) {
   const apiKey = cleanText(process.env.OPENAI_API_KEY, 10000);
   if (!apiKey) throw new ApiError(500, "OPENAI_API_KEY is not available to this deployment.");
-  const model = cleanText(process.env.OPENAI_MODEL, 200) || "gpt-4.1-mini";
+  const model = openAIModelConfiguration(process.env).default_model;
 
   let lastFields = null;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
