@@ -1,11 +1,14 @@
 import { createClient } from "@supabase/supabase-js";
 import {
   AI_ASSISTANT_TEST_LIBRARY,
+  COMPETENCE_PRODUCT_CONTEXTS,
   COMPETENCE_REVIEW_OUTCOMES,
   buildCompetencePrompt,
   buildKnowledgeGapReport,
   buildRetrievalCorpus,
   detectProduct,
+  filterKnowledgeForProduct,
+  isExplicitProductComparison,
   rankKnowledge,
 } from "../lib/aiAssistantCompetence.js";
 
@@ -123,15 +126,19 @@ export async function testCompetenceAnswer(supabase, body) {
   const question = clean(body.question, 3000);
   if (!question) throw new ApiError(400, "Enter a customer question.", "validation");
   const mode = ["single", "conversation", "test_set"].includes(body.mode) ? body.mode : "single";
+  const productContext = clean(body.product_context, 20).toLowerCase();
+  if (!COMPETENCE_PRODUCT_CONTEXTS.includes(productContext)) throw new ApiError(400, "Choose a product context: finance or rent2buy.", "validation");
   const messages = cleanMessages(body.messages);
-  const context = { run_id: body.run_id || null, test_question_id: clean(body.test_question_id, 40) || null };
+  const comparison = isExplicitProductComparison(question, messages);
+  const context = { run_id: body.run_id || null, test_question_id: clean(body.test_question_id, 40) || null, product_context: productContext };
   const knowledge = await loadKnowledge(supabase);
-  const corpus = await runStage("Build temporary article chunks", { ...context, article_ids: knowledge.articles.map((item) => item.id), article_count: knowledge.articles.length }, async () => buildRetrievalCorpus(knowledge));
+  const boundedKnowledge = await runStage("Apply product boundary", { ...context, comparison }, async () => filterKnowledgeForProduct(knowledge, productContext, { comparison }));
+  const corpus = await runStage("Build temporary article chunks", { ...context, category_filter: boundedKnowledge.categoryFilter, article_ids: boundedKnowledge.articles.map((item) => item.id), article_count: boundedKnowledge.articles.length }, async () => buildRetrievalCorpus(boundedKnowledge));
   const sources = await runStage("Lexical ranking", { ...context, corpus_size: corpus.length }, async () => rankKnowledge(question, corpus, { messages, limit: 8 }));
   if (!sources.length) console.warn("AI ASSISTANT COMPETENCE RETRIEVAL WARNING", { stage: "Lexical ranking", relevant_ids: context, corpus_size: corpus.length, message: "No relevant sources were retrieved; the assistant must report a knowledge gap." });
   const retrievalTime = elapsed(retrievalStart);
   const generationStart = performance.now();
-  const prompt = await runStage("Prompt creation", { ...context, source_count: sources.length }, async () => buildCompetencePrompt({ question, messages, sources, sections: knowledge.sections, settings: knowledge.settings }));
+  const prompt = await runStage("Prompt creation", { ...context, category_filter: boundedKnowledge.categoryFilter, source_count: sources.length }, async () => buildCompetencePrompt({ question, messages, sources, sections: boundedKnowledge.sections, settings: knowledge.settings, productContext, comparison }));
   const model = clean(process.env.OPENAI_MODEL, 200) || "gpt-4.1-mini";
   const requested = await runStage("OpenAI request", { ...context, model, openai_api_key_present: Boolean(clean(process.env.OPENAI_API_KEY)), source_count: sources.length }, () => requestOpenAIAnswer(prompt));
   const generated = await runStage("Structured response parsing", { ...context, model: requested.model }, async () => parseOpenAIAnswer(requested.payload, requested.model));
@@ -158,7 +165,7 @@ export async function testCompetenceAnswer(supabase, body) {
   };
   const saved = await runStage("Save test result", context, async () => data(await supabase.from("knowledge_competence_results").insert(resultPayload).select().single(), "The competence result could not be saved."));
   if (body.run_id) await supabase.rpc("increment_competence_run_progress", { target_run_id: body.run_id }).then(() => {}, () => {});
-  return { result: saved, retrieved_sources: sources, word_count: resultPayload.answer.split(/\s+/).filter(Boolean).length };
+  return { result: { ...saved, product_context: productContext, category_filter: boundedKnowledge.categoryFilter, comparison_mode: comparison }, retrieved_sources: sources, word_count: resultPayload.answer.split(/\s+/).filter(Boolean).length };
 }
 
 async function startRun(supabase, body) {
