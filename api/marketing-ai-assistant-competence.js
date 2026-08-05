@@ -12,7 +12,7 @@ import {
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
 class ApiError extends Error { constructor(status, message, type = "api") { super(message); this.status = status; this.type = type; } }
-function authorize(request) { const expected = clean(process.env.MARKETING_CUSTOMER_DATABASE_API_KEY); const header = clean(request.headers?.[API_KEY_HEADER]); const bearer = clean(request.headers?.authorization).replace(/^Bearer\s+/i, ""); return Boolean(expected && (header === expected || bearer === expected)); }
+export function competenceAuthorize(request, environment = process.env) { const expected = clean(environment.MARKETING_CUSTOMER_DATABASE_API_KEY); const header = clean(request.headers?.[API_KEY_HEADER]); const bearer = clean(request.headers?.authorization).replace(/^Bearer\s+/i, ""); return Boolean(expected && (header === expected || bearer === expected)); }
 function getSupabase() { if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) throw new ApiError(500, "Supabase is not configured.", "configuration"); return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } }); }
 function parseBody(request) { if (!request.body) return {}; if (typeof request.body === "object") return request.body; try { return JSON.parse(request.body); } catch { throw new ApiError(400, "The request body is not valid JSON.", "validation"); } }
 function data(result, fallback) { if (result.error) throw new ApiError(500, result.error.message || fallback); return result.data; }
@@ -150,7 +150,7 @@ async function loadReport(supabase) {
 
 export default async function handler(request, response) {
   if (request.method !== "POST") return response.status(405).json({ ok: false, message: "Method not allowed." });
-  if (!authorize(request)) return response.status(401).json({ ok: false, message: "Access key not recognised." });
+  if (!competenceAuthorize(request)) return response.status(401).json({ ok: false, message: "Access key not recognised." });
   let body = {};
   try {
     body = parseBody(request);
