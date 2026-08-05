@@ -1,5 +1,6 @@
 import {
   buildFinanceCoverageEvidence,
+  buildRent2BuyDeliveryEvidence,
   buildRent2BuyCoverageEvidence,
   extractUkLocation,
   isCoverageQuestion,
@@ -45,6 +46,8 @@ export async function resolveProductCoverage({ question, productContext, setting
   if (!isCoverageQuestion(question)) return null;
   if (productContext === "finance") return buildFinanceCoverageEvidence(question, settings);
   if (productContext !== "rent2buy") return null;
+  const deliveryRule = buildRent2BuyDeliveryEvidence(question, settings);
+  if (deliveryRule) return deliveryRule;
   const rules = normaliseCoverageSettings(settings);
   const location = extractUkLocation(question);
   if (!location) return buildRent2BuyCoverageEvidence({ location, settings: rules });
