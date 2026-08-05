@@ -7,6 +7,8 @@ import {
   buildKnowledgeGapReport,
   buildRetrievalCorpus,
   detectProduct,
+  filterKnowledgeForProduct,
+  isExplicitProductComparison,
   rankKnowledge,
   splitArticleMarkdown,
 } from "../lib/aiAssistantCompetence.js";
@@ -18,6 +20,7 @@ const sections = [
   { id: "brain-3", section_key: "compliance", title: "Compliance", active: false, content: "This inactive rule must not enter retrieval.", entries: [] },
 ];
 const articles = [{ id: "article-1", title: "Van finance with poor credit", category: "Van Finance", status: "approved", live_wix_url: "https://example.com/poor-credit", content_markdown: "## Can I apply?\n\nCustomers with poor credit can submit an application. A lender makes the decision.\n\n## Documents\n\nProof of identity and income may be requested.", faq_json: [{ question: "Is approval guaranteed?", answer: "No." }] }];
+const rent2buyArticle = { id: "article-rent", title: "Rent2Buy eligibility", category: "Rent2Buy", status: "approved", content_markdown: "## Eligibility\n\nRent2Buy eligibility is based on affordability and uses a monthly rental agreement.", faq_json: [] };
 
 test("built-in competence library contains 50 broad internal tests", () => {
   assert.equal(AI_ASSISTANT_TEST_LIBRARY.length, 50);
@@ -40,6 +43,27 @@ test("lexical ranking prioritises authoritative Business Brain and relevant FAQs
   assert.equal(["business_brain", "business_faq"].includes(ranked[0].type), true);
   assert.equal(ranked.some((item) => item.title === "Van finance with poor credit"), true);
   assert.equal(ranked.every((item) => typeof item.score === "number"), true);
+});
+
+test("finance context excludes Rent2Buy articles and Business Knowledge before ranking", () => {
+  const bounded = filterKnowledgeForProduct({ sections, articles: [...articles, rent2buyArticle] }, "finance");
+  const corpus = buildRetrievalCorpus(bounded);
+  const ranked = rankKnowledge("Can I apply with poor credit or use a monthly rental agreement?", corpus);
+  assert.equal(bounded.articles.some((article) => article.category === "Rent2Buy"), false);
+  assert.equal(corpus.some((source) => source.source_id === "article-rent" || /Rent2Buy|monthly rental/i.test(source.passage)), false);
+  assert.equal(ranked.some((source) => source.source_id === "article-rent"), false);
+  assert.match(bounded.categoryFilter, /exclude Rent2Buy/);
+});
+
+test("rent2buy context excludes Finance articles and Business Knowledge before ranking", () => {
+  const bounded = filterKnowledgeForProduct({ sections, articles: [...articles, rent2buyArticle] }, "rent2buy");
+  const corpus = buildRetrievalCorpus(bounded);
+  const ranked = rankKnowledge("Can I use Rent2Buy if a lender declined me?", corpus);
+  assert.deepEqual(bounded.articles.map((article) => article.id), ["article-rent"]);
+  assert.equal(corpus.some((source) => source.source_id === "article-1" || /lender assessed/i.test(source.passage)), false);
+  assert.equal(ranked.some((source) => source.source_id === "article-1"), false);
+  assert.equal(isExplicitProductComparison("How does Rent2Buy compare with finance?"), true);
+  assert.equal(isExplicitProductComparison("Does Rent2Buy require a credit check?"), false);
 });
 
 test("product detection separates Finance, Rent2Buy, both and unknown", () => {
