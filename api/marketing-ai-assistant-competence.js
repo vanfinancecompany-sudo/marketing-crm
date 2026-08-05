@@ -11,6 +11,7 @@ import {
   isExplicitProductComparison,
   rankKnowledge,
 } from "../lib/aiAssistantCompetence.js";
+import { assessSavedCompetenceResult } from "./_knowledgeOpportunityStore.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
@@ -153,6 +154,7 @@ export async function testCompetenceAnswer(supabase, body) {
     run_id: body.run_id || null,
     test_question_id: clean(body.test_question_id, 40) || null,
     mode,
+    product_context: productContext,
     question,
     conversation: messages,
     answer: clean(generated.answer.answer, 5000),
@@ -169,6 +171,7 @@ export async function testCompetenceAnswer(supabase, body) {
   };
   const saved = await runStage("Save test result", context, async () => data(await supabase.from("knowledge_competence_results").insert(resultPayload).select().single(), "The competence result could not be saved."));
   if (!saved?.id || clean(saved.question, 3000) !== question) throw new ApiError(500, "Saved competence result does not match the current request.", "validation", { request_id: requestId, result_id: saved?.id || null });
+  await assessSavedCompetenceResult(supabase, saved.id);
   if (body.run_id) await supabase.rpc("increment_competence_run_progress", { target_run_id: body.run_id }).then(() => {}, () => {});
   const generatedAt = new Date().toISOString();
   const requestTrace = {
@@ -213,7 +216,9 @@ async function saveReview(supabase, body) {
   if (!clean(body.result_id, 100)) throw new ApiError(400, "Result id is required.", "validation");
   if (!COMPETENCE_REVIEW_OUTCOMES.includes(body.outcome)) throw new ApiError(400, "Choose a valid review outcome.", "validation");
   const rating = (value) => value == null || value === "" ? null : Math.min(5, Math.max(1, Number(value)));
-  return runStage("Save review", { result_id: clean(body.result_id, 100) }, async () => data(await supabase.from("knowledge_competence_reviews").upsert({ result_id: body.result_id, outcome: body.outcome, accuracy: rating(body.accuracy), helpfulness: rating(body.helpfulness), conversion: rating(body.conversion), brevity: rating(body.brevity), reviewer_notes: clean(body.reviewer_notes, 5000), updated_at: new Date().toISOString() }, { onConflict: "result_id" }).select().single(), "The review could not be saved."));
+  const saved = await runStage("Save review", { result_id: clean(body.result_id, 100) }, async () => data(await supabase.from("knowledge_competence_reviews").upsert({ result_id: body.result_id, outcome: body.outcome, accuracy: rating(body.accuracy), helpfulness: rating(body.helpfulness), conversion: rating(body.conversion), brevity: rating(body.brevity), reviewer_notes: clean(body.reviewer_notes, 5000), updated_at: new Date().toISOString() }, { onConflict: "result_id" }).select().single(), "The review could not be saved."));
+  await assessSavedCompetenceResult(supabase, body.result_id);
+  return saved;
 }
 
 async function loadReport(supabase) {
