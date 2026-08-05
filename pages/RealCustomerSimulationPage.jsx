@@ -39,14 +39,27 @@ function ResultDiagnostics({ result }) {
         <Diagnostic label="Article-like" value={result.sounded_article_like ? "Yes" : "No"} />
         <Diagnostic label="Follow-up appropriate" value={result.follow_up_question_appropriate ? "Yes" : "No"} />
         <Diagnostic label="One question only" value={result.one_question_at_a_time ? "Yes" : "No"} />
+        <Diagnostic label="Buying intent level" value={result.buying_intent_level} />
+        <Diagnostic label="Conversation goal" value={result.conversation_goal} />
+        <Diagnostic label="Journey stage" value={result.journey_stage} />
+        <Diagnostic label="Lead completeness" value={result.lead_completeness ? `${result.lead_completeness.percentage}% (${result.lead_completeness.known_count}/${result.lead_completeness.total_count})` : "—"} />
+        <Diagnostic label="Application mode" value={result.application_mode_active ? "Active" : "Inactive"} />
+        <Diagnostic label="Application CTA" value={result.application_cta_generated ? result.application_cta?.label : "Not generated"} />
+        <Diagnostic label="Recommended CTA" value={result.recommended_cta} />
+        <Diagnostic label="Progressing" value={result.conversation_progressing ? "Yes" : "No"} />
+        <Diagnostic label="Stalled" value={result.conversation_stalled ? "Yes" : "No"} />
         <Diagnostic label="Confidence" value={`${result.confidence}%`} />
         <Diagnostic label="Response time" value={`${result.response_time_ms} ms`} />
       </div>
       <div className="notice"><strong>Intent reason:</strong> {result.intent_reason}<br /><strong>Learning diagnosis:</strong> {result.learning_diagnosis}<br /><strong>Clarification question:</strong> {result.clarification_question || "None"}</div>
       <div className="notice"><strong>Buying-signal reason:</strong> {result.buying_signal_reason || "None"}<br /><strong>Recommended action:</strong> {result.recommended_next_conversational_action || "None"}<br /><strong>Next best question:</strong> {result.next_best_question || "None"}<br /><strong>Context resolution:</strong> {result.contextual_resolution || "None"}</div>
+      <div className="notice"><strong>V4 journey reasons:</strong> {result.buying_intent_reasons?.join(" ") || "None"}<br /><strong>Journey next question:</strong> {result.journey_next_best_question || "None"}<br /><strong>Repeated assistant wording:</strong> {result.repeated_assistant_wording ? result.repeated_assistant_phrase : "No"}</div>
+      {result.application_cta ? <div className="notice notice--success"><strong>{result.application_cta.label}</strong><br />Internal action: {result.application_cta.action_key}<br />URL: Not configured — future Wix abstraction only</div> : null}
       {Object.keys(coverage).length ? <div className="notice"><strong>Deterministic rule:</strong><br />Location: {coverage.detected_location || "Not supplied"}<br />Resolved: {coverage.resolved_postcode || (coverage.resolved_coordinates ? `${coverage.resolved_coordinates.latitude}, ${coverage.resolved_coordinates.longitude}` : "No")}<br />Distance: {coverage.distance_miles == null ? "Not calculated" : `${coverage.distance_miles} miles`}<br />Result: {coverage.coverage_result}<br />Certainty: {coverage.certainty}</div> : null}
       <h3>Remembered facts</h3>
       <pre className="notice" style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(result.remembered_facts || {}, null, 2)}</pre>
+      <h3>Lead completeness</h3>
+      <pre className="notice" style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(result.lead_completeness?.fields || {}, null, 2)}</pre>
       <h3>Corrections</h3>
       <pre className="notice" style={{ whiteSpace: "pre-wrap" }}>{result.corrections?.length ? JSON.stringify(result.corrections, null, 2) : "No corrected or overridden facts."}</pre>
       <h3>Live conversation summary</h3>
@@ -65,6 +78,7 @@ export default function RealCustomerSimulationPage() {
   const [message, setMessage] = useState("Can u help");
   const [messages, setMessages] = useState([]);
   const [rememberedFacts, setRememberedFacts] = useState({});
+  const [journeyState, setJourneyState] = useState({});
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -93,12 +107,12 @@ export default function RealCustomerSimulationPage() {
 
   function resetConversation(nextProduct = productContext) {
     activeRequest.current = null;
-    setProductContext(nextProduct); setSessionId(newSessionId()); setMessages([]); setRememberedFacts({}); setResult(null); setReviewMessage(""); setError("");
+    setProductContext(nextProduct); setSessionId(newSessionId()); setMessages([]); setRememberedFacts({}); setJourneyState({}); setResult(null); setReviewMessage(""); setError("");
   }
 
   async function sendOne(content, transcript = messages, facts = rememberedFacts, scenario = null, activeSession = sessionId) {
     const requestId = createCompetenceRequestId(); activeRequest.current = requestId;
-    const response = await simulateCustomerConversation({ request_id: requestId, session_id: activeSession, scenario_id: scenario, message: content, product_context: productContext, messages: transcript, remembered_facts: facts });
+    const response = await simulateCustomerConversation({ request_id: requestId, session_id: activeSession, scenario_id: scenario, message: content, product_context: productContext, messages: transcript, remembered_facts: facts, journey_state: journeyState });
     if (activeRequest.current !== requestId || response.request_trace?.request_id !== requestId || response.request_trace?.submitted_question !== content) throw new Error("A stale or mismatched simulation response was rejected.");
     return response.result;
   }
@@ -108,20 +122,20 @@ export default function RealCustomerSimulationPage() {
     const before = [...messages]; setMessages([...before, { role: "user", content: submitted }]); setBusy(true); setError(""); setResult(null);
     try {
       const next = await sendOne(submitted, before);
-      setResult(next); setRememberedFacts(next.remembered_facts || {}); setMessages([...before, { role: "user", content: submitted }, { role: "assistant", content: next.reply }]); setMessage("");
+      setResult(next); setRememberedFacts(next.remembered_facts || {}); setJourneyState(next); setMessages([...before, { role: "user", content: submitted }, { role: "assistant", content: next.reply }]); setMessage("");
     } catch (caught) { setMessages(before); setError(caught.message || "Conversation simulation failed."); }
     finally { setBusy(false); }
   }
 
   async function runScenario(scenario) {
-    const nextSession = newSessionId(); setSessionId(nextSession); setProductContext(scenario.product_context); setMessages([]); setRememberedFacts({}); setResult(null); setError("");
-    let transcript = []; let facts = {}; let latest = null;
+    const nextSession = newSessionId(); setSessionId(nextSession); setProductContext(scenario.product_context); setMessages([]); setRememberedFacts({}); setJourneyState({}); setResult(null); setError("");
+    let transcript = []; let facts = {}; let journey = {}; let latest = null;
     for (const content of scenario.messages) {
       const requestId = createCompetenceRequestId(); activeRequest.current = requestId;
-      const response = await simulateCustomerConversation({ request_id: requestId, session_id: nextSession, scenario_id: scenario.id, message: content, product_context: scenario.product_context, messages: transcript, remembered_facts: facts });
+      const response = await simulateCustomerConversation({ request_id: requestId, session_id: nextSession, scenario_id: scenario.id, message: content, product_context: scenario.product_context, messages: transcript, remembered_facts: facts, journey_state: journey });
       if (activeRequest.current !== requestId || response.request_trace?.request_id !== requestId || response.request_trace?.submitted_question !== content) throw new Error("Scenario returned a stale or mismatched result.");
-      latest = response.result; facts = latest.remembered_facts || {}; transcript = [...transcript, { role: "user", content }, { role: "assistant", content: latest.reply }];
-      setMessages([...transcript]); setRememberedFacts({ ...facts }); setResult(latest);
+      latest = response.result; facts = latest.remembered_facts || {}; journey = latest; transcript = [...transcript, { role: "user", content }, { role: "assistant", content: latest.reply }];
+      setMessages([...transcript]); setRememberedFacts({ ...facts }); setJourneyState({ ...journey }); setResult(latest);
     }
     return latest;
   }
@@ -157,7 +171,7 @@ export default function RealCustomerSimulationPage() {
   if (accessStatus !== "unlocked") return <main className="page-stack"><section className="panel"><h2>Real Customer Simulation</h2><p>This internal page uses the existing Marketing CRM access check.</p><form onSubmit={unlock}><label className="field"><span className="field__label">Marketing CRM access key</span><input className="field__input" type="password" value={accessKey} onChange={(event) => setAccessKey(event.target.value)} /></label><button className="button button--primary">Unlock</button></form>{error ? <div className="notice notice--error">{error}</div> : null}</section></main>;
 
   return <div className="page-stack">
-    <section className="panel"><div className="panel__header"><div><div className="eyebrow">AI Sales Conversation Engine V3</div><h2>Real Customer Simulation</h2><p>Test concise, grounded sales conversation without building or exposing a public Wix assistant. Use synthetic test wording only; do not enter real customer personal data.</p></div><button className="button button--ghost" type="button" disabled={busy || batch.running} onClick={() => resetConversation()}>Reset Conversation</button></div>
+    <section className="panel"><div className="panel__header"><div><div className="eyebrow">AI Sales Assistant V4</div><h2>Conversion & Application Journey Simulation</h2><p>Test grounded progression from enquiry to application without building or exposing a public Wix assistant. Use synthetic test wording only; do not enter real customer personal data.</p></div><button className="button button--ghost" type="button" disabled={busy || batch.running} onClick={() => resetConversation()}>Reset Conversation</button></div>
       <div className="competence-metrics"><Diagnostic label="Locked product" value={productContext} /><Diagnostic label="Session" value={sessionId} /><Diagnostic label="Messages" value={messages.length} /></div>
       <div className="competence-context"><button type="button" disabled={busy || batch.running} className={productContext === "finance" ? "is-selected" : ""} onClick={() => resetConversation("finance")}>Finance</button><button type="button" disabled={busy || batch.running} className={productContext === "rent2buy" ? "is-selected" : ""} onClick={() => resetConversation("rent2buy")}>Rent2Buy</button></div>
     </section>
