@@ -132,6 +132,11 @@ const EMPTY_SETTINGS = {
   target_audiences: [],
   content_goals: [],
   freshness_days: 180,
+  finance_covered_nations: ["England", "Wales", "Scotland"],
+  rent2buy_base_postcode: "SO40 2NN",
+  rent2buy_max_radius_miles: 100,
+  coverage_borderline_tolerance_miles: 10,
+  coverage_distance_method: "straight_line",
 };
 
 const EMPTY_EDITORIAL = {

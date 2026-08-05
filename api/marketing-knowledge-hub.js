@@ -729,6 +729,11 @@ async function saveSettings(supabase, settings = {}) {
     target_audiences: cleanStringArray(settings.target_audiences, 30),
     content_goals: cleanStringArray(settings.content_goals, 30),
     freshness_days: Math.min(730, Math.max(30, Number(settings.freshness_days) || 180)),
+    finance_covered_nations: cleanStringArray(settings.finance_covered_nations, 10),
+    rent2buy_base_postcode: cleanText(settings.rent2buy_base_postcode, 20).toUpperCase() || "SO40 2NN",
+    rent2buy_max_radius_miles: Math.min(500, Math.max(1, Number(settings.rent2buy_max_radius_miles) || 100)),
+    coverage_borderline_tolerance_miles: Math.min(100, Math.max(0, Number(settings.coverage_borderline_tolerance_miles) || 10)),
+    coverage_distance_method: settings.coverage_distance_method === "straight_line" ? "straight_line" : "straight_line",
     updated_at: new Date().toISOString(),
   };
   return assertResult(

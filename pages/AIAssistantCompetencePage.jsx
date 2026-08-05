@@ -11,7 +11,7 @@ function Metric({ label, value, tone = "" }) { return <div className={`competenc
 
 function SourceCard({ source }) {
   return <article className="competence-source">
-    <div><span className="badge">{source.type?.startsWith("article") ? "Article" : "Business Brain"}</span><strong>{source.title}</strong><b>{source.score}</b></div>
+    <div><span className="badge">{source.type === "coverage_rule" ? "Coverage Rule" : source.type?.startsWith("article") ? "Article" : "Business Brain"}</span><strong>{source.title}</strong><b>{source.score}</b></div>
     <h4>{source.heading}</h4>
     <p>{source.passage}</p>
     {source.public_url ? <a href={source.public_url} target="_blank" rel="noreferrer">Open public Wix article</a> : null}
@@ -21,6 +21,7 @@ function SourceCard({ source }) {
 function ResultPanel({ payload, review, setReview, onSaveReview, reviewBusy }) {
   if (!payload?.result) return <div className="competence-empty"><strong>No answer tested yet</strong><p>Enter a realistic customer question or choose one from the test library.</p></div>;
   const result = payload.result;
+  const coverage = result.coverage_diagnostics || {};
   return <div className="page-stack">
     <section className="panel competence-answer">
       <div className="eyebrow">Customer Answer</div>
@@ -41,6 +42,7 @@ function ResultPanel({ payload, review, setReview, onSaveReview, reviewBusy }) {
         <Metric label="Conflict" value={result.conflict_detected ? "Detected" : "None"} tone={result.conflict_detected ? "is-danger" : "is-good"} />
       </div>
       <div className="notice"><strong>Confidence reason:</strong> {result.confidence_reason}</div>
+      {Object.keys(coverage).length ? <div className="notice"><strong>Deterministic coverage:</strong><br />Detected location: {coverage.detected_location || "Not supplied"}<br />Resolved postcode/coordinates: {coverage.resolved_postcode || (coverage.resolved_coordinates ? `${coverage.resolved_coordinates.latitude}, ${coverage.resolved_coordinates.longitude}` : "Not resolved")}<br />Distance from {coverage.base_postcode || "approved base"}: {coverage.distance_miles == null ? "Not calculated" : `${coverage.distance_miles} miles`}<br />Calculation type: {coverage.calculation_type}<br />Coverage result: {coverage.coverage_result}<br />Certainty: {coverage.certainty}{coverage.conflicting_sources?.length ? <><br />Conflicting knowledge: {coverage.conflicting_sources.map((item) => item.title).join(", ")}</> : null}</div> : null}
       {payload.request_trace ? <div className="notice"><strong>Request trace:</strong><br />Request ID: {payload.request_trace.request_id}<br />Submitted question: {payload.request_trace.submitted_question}<br />Selected product: {payload.request_trace.selected_product}<br />Result question: {payload.request_trace.result_question}<br />Generated: {payload.request_trace.generated_at}<br />Cached/previous value used: {payload.request_trace.cached_value_used || payload.request_trace.previous_value_used ? "Yes" : "No"}</div> : null}
       <h3>Sources used</h3>
       <div className="competence-sources">{result.sources_used?.length ? result.sources_used.map((source, index) => <SourceCard source={source} key={`${source.source_id}-${source.heading}-${index}`} />) : <p>No source was strong enough to support an answer.</p>}</div>
