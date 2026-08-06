@@ -26,6 +26,14 @@ test("real-customer normalisation improves interpretation without replacing orig
     "how much down": "how much deposit",
     "own it end": "own it at the end",
     "eu licence ok": "is an eu licence accepted",
+    "can u explane finace": "can you explain finance",
+    "wat docs do i ned": "what documents do i need",
+    "ned van quik": "need van quickly",
+    "can u hlp": "can you help",
+    "depost wat nxt": "deposit what next",
+    "self emplyd 6 mnths aply now": "self employed 6 months apply now",
+    "bad credt declind stil worth it": "bad credit declined still worth it",
+    "delivry glasgow how lng ok thx": "delivery glasgow how long ok thanks",
   };
   for (const [original, normalised] of Object.entries(cases)) {
     assert.equal(normaliseCustomerMessage(original), normalised);

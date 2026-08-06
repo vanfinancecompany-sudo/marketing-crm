@@ -13,8 +13,10 @@ import {
   representativeScenarioAt,
   summariseHealth,
   syntheticScenarioAt,
+  unsafePromiseDetected,
 } from "../lib/aiAssistantHealth.js";
 import { runDeterministicHealthBatch, runLiveHealthBatch } from "../api/marketing-ai-assistant-competence.js";
+import { REAL_CUSTOMER_SCENARIOS } from "../lib/customerSimulationScenarios.js";
 
 const scenario = { id: "fixture-1", name: "Finance fixture", category: "health", product_context: "finance", messages: ["Need a van", "Ready to apply"] };
 
@@ -64,6 +66,21 @@ test("deterministic evidence response uses approved evidence without model gener
   assert.equal(response.source_ids[0], "S1");
   assert.match(response.reply, /Finance covers England/);
   assert.doesNotMatch(response.reply, /Do not mention/);
+});
+
+test("unsafe promise detection distinguishes a promise from explicit non-guarantee wording", () => {
+  assert.equal(unsafePromiseDetected("You will be approved."), true);
+  assert.equal(unsafePromiseDetected("We guarantee approval."), true);
+  assert.equal(unsafePromiseDetected("There is no guaranteed approval."), false);
+  assert.equal(unsafePromiseDetected("Approval cannot be guaranteed and depends on assessment."), false);
+  assert.equal(unsafePromiseDetected("We do not promise delivery tomorrow."), false);
+});
+
+test("explicit comparison evidence is not misreported as a product-separation leak", () => {
+  const comparison = evaluateHealthConversation({ scenario, turns: [
+    { message: "Compare Finance and Rent2Buy", result: result({ reply: "Finance and Rent2Buy are different routes.", knowledge_sources_used: [{ type: "article", category: "Rent2Buy", title: "Rent2Buy" }] }) },
+  ] });
+  assert.equal(comparison.failures.some((item) => item.rule === "product_separation"), false);
 });
 
 test("health evaluation reports product, retrieval, context, application and recovery checks", () => {
@@ -152,6 +169,48 @@ test("deterministic server batch executes the real orchestration path without wr
   assert.equal(payload.validation.openai_calls, 0);
   assert.equal(payload.validation.database_writes, 0);
   assert.equal(writes, 0);
+});
+
+test("the complete deterministic scenario library clears corrected failure classes above 97 health", async () => {
+  const content = `# Applications and eligibility
+
+Application eligibility, next steps, self-employed and limited-company trading, poor credit, declined applications, documents, bank statements, licences, deposits, budgets, monthly payments, costs, affordability and accounts.
+
+# Vehicles and service
+
+Vans and vehicles including Transit Custom, Sprinter, tipper, electric, large, medium and small vans. Insurance, vehicle tax, warranty, mileage, collection, delivery and location coverage.
+
+# Safety
+
+Approval is subject to assessment. Delivery timing and vehicle availability must be confirmed.`;
+  const articles = ["Van Finance", "Rent2Buy"].map((category, index) => ({ id: `health-${index}`, title: `${category} applications, vehicles and customer guidance`, category, content_markdown: content, faq_json: [], status: "approved", is_active: true }));
+  const tableData = {
+    knowledge_settings: { finance_covered_nations: ["England", "Wales", "Scotland"], rent2buy_base_postcode: "SO40 2NN", rent2buy_max_radius_miles: 100, coverage_borderline_tolerance_miles: 10, coverage_distance_method: "straight_line" },
+    knowledge_business_sections: [],
+    knowledge_articles: articles,
+  };
+  const supabase = { from(table) {
+    const query = {
+      select() { return query; },
+      eq() { return query; },
+      order() { return Promise.resolve({ data: tableData[table] || [], error: null }); },
+      maybeSingle() { return Promise.resolve({ data: tableData[table] || null, error: null }); },
+      insert() { throw new Error("Deterministic health validation must remain write-free."); },
+    };
+    return query;
+  } };
+  let accumulator = emptyHealthAccumulator();
+  for (let start = 0; start < REAL_CUSTOMER_SCENARIOS.length; start += 100) {
+    const batch = await runDeterministicHealthBatch(supabase, { start_index: start, count: Math.min(100, REAL_CUSTOMER_SCENARIOS.length - start), total_conversations: REAL_CUSTOMER_SCENARIOS.length });
+    accumulator = mergeHealthAccumulators(accumulator, batch.report);
+  }
+  const report = summariseHealth(accumulator);
+  const correctedRules = new Set(["product_separation", "knowledge_retrieval", "unsafe_promise", "awkward_clarification"]);
+  const correctedFailures = report.failed_scenarios.flatMap((item) => item.failures).filter((item) => correctedRules.has(item.rule));
+  assert.ok(report.overall_ai_health_score >= 97, `health score ${report.overall_ai_health_score}`);
+  assert.equal(report.product_separation_accuracy, 100);
+  assert.equal(report.knowledge_retrieval_accuracy, 100);
+  assert.deepEqual(correctedFailures, []);
 });
 
 test("dashboard uses no-store protected service and is wired into internal navigation", async () => {

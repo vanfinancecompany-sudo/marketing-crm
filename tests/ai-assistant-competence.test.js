@@ -46,6 +46,18 @@ test("lexical ranking prioritises authoritative Business Brain and relevant FAQs
   assert.equal(ranked.every((item) => typeof item.score === "number"), true);
 });
 
+test("lexical ranking normalises customer misspellings and keeps van as a useful term", () => {
+  const corpus = buildRetrievalCorpus({
+    sections: [],
+    articles: [{ id: "vehicle", title: "Van applications and delivery", category: "Van Finance", content_markdown: "## Delivery\n\nVan delivery information and application documents.", faq_json: [] }],
+  });
+  for (const query of ["ned van quik", "wat docs do i ned", "delivry glasgow", "which van"]) {
+    const ranked = rankKnowledge(query, corpus);
+    assert.equal(ranked[0]?.source_id, "vehicle", query);
+    assert.ok(ranked[0].matched_terms.length > 0, query);
+  }
+});
+
 test("finance context excludes Rent2Buy articles and Business Knowledge before ranking", () => {
   const bounded = filterKnowledgeForProduct({ sections, articles: [...articles, rent2buyArticle] }, "finance");
   const corpus = buildRetrievalCorpus(bounded);
