@@ -83,6 +83,11 @@ import {
   summariseHealth,
   syntheticScenarioAt,
 } from "../lib/aiAssistantHealth.js";
+import {
+  ASSISTANT_MODEL_POLICY,
+  buildAssistantResponseModelParameters,
+  chooseAssistantModel,
+} from "../lib/aiAssistantModelRouter.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
@@ -204,15 +209,16 @@ export function parseOpenAIAnswer(payload, model) {
   return { answer, model };
 }
 
-export async function requestOpenAIConversationReply(prompt, environment = process.env, fetchImplementation = fetch) {
+export async function requestOpenAIConversationReply(prompt, route = {}, environment = process.env, fetchImplementation = fetch) {
   const apiKey = clean(environment.OPENAI_API_KEY);
   if (!apiKey) throw new ApiError(500, "OPENAI_API_KEY is not configured.", "configuration", { openai_api_key_present: false });
-  const model = clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini";
+  const modelParameters = buildAssistantResponseModelParameters(route);
+  const model = modelParameters.model;
   const response = await fetchImplementation("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model,
+      ...modelParameters,
       input: [
         { role: "system", content: "You are the grounded internal simulation of a UK van website assistant. Compose only the customer-facing reply. Never override product context, deterministic rules, remembered facts or supplied evidence." },
         { role: "user", content: prompt },
@@ -223,7 +229,16 @@ export async function requestOpenAIConversationReply(prompt, environment = proce
   let payload;
   try { payload = await response.json(); } catch (error) { throw new ApiError(502, `OpenAI returned a non-JSON conversation response (${response.status} ${response.statusText}).`, "ai", { model, cause: clean(error.message, 500) }); }
   if (!response.ok) throw new ApiError(502, openAIErrorMessage(payload, response), "ai", { model, openai_status: response.status });
-  return { payload, model };
+  return {
+    payload,
+    model,
+    route: {
+      ...route,
+      model,
+      temperature: modelParameters.temperature,
+      reasoning_effort: modelParameters.reasoning?.effort || null,
+    },
+  };
 }
 
 export function parseOpenAIConversationReply(payload, model) {
@@ -374,6 +389,13 @@ export async function simulateCustomerConversation(supabase, body, options = {})
   let retrievalTime = 0;
   let generationTime = 0;
   let model = "deterministic-conversation-rules";
+  let modelRoute = {
+    model,
+    tier: "deterministic",
+    temperature: null,
+    reasoning_effort: null,
+    reason: "The turn was handled by canonical server-side conversation rules without an OpenAI generation call.",
+  };
   let tokenUsage = { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
   let openAIResponseId = null;
   let response;
@@ -405,10 +427,25 @@ export async function simulateCustomerConversation(supabase, body, options = {})
       response = deterministicEvidenceReply(sources, productContext);
       sourcesUsed = sources.slice(0, 1);
       model = "deterministic-health-engine";
+      modelRoute = {
+        model,
+        tier: "deterministic",
+        temperature: null,
+        reasoning_effort: null,
+        reason: "The deterministic health engine generated the evidence response without an OpenAI call.",
+      };
     } else {
       const generationStart = performance.now();
       const prompt = await runStage("Conversation prompt creation", { ...context, source_count: sources.length }, async () => conversationPrompt({ question, messages, sources, sections: bounded.sections, settings: knowledge.settings, productContext, comparison, intent, memory, buyingSignals, lengthTarget, contextualResolution, journey, human, phraseDiagnostics: priorPhraseDiagnostics }));
-      const requested = await runStage("Conversation OpenAI request", { ...context, source_count: sources.length }, () => requestOpenAIConversationReply(prompt));
+      const selectedModelRoute = chooseAssistantModel({
+        message: question,
+        intent,
+        human,
+        orchestration,
+        sourceCount: sources.length,
+      });
+      const requested = await runStage("Conversation OpenAI request", { ...context, source_count: sources.length, model: selectedModelRoute.model, model_tier: selectedModelRoute.tier }, () => requestOpenAIConversationReply(prompt, selectedModelRoute));
+      modelRoute = requested.route;
       const generated = await runStage("Conversation structured response parsing", { ...context, model: requested.model }, async () => parseOpenAIConversationReply(requested.payload, requested.model));
       response = generated.reply;
       model = generated.model;
@@ -567,6 +604,7 @@ export async function simulateCustomerConversation(supabase, body, options = {})
     polish_transition_applied: polish.transition_applied,
     polish_transition_type: polish.transition_type,
     factual_reply_preserved: polish.factual_reply_preserved,
+    model_route: modelRoute,
     token_usage: tokenUsage,
     estimated_cost_usd: options.generationMode === "deterministic" ? 0 : estimateOpenAICost(tokenUsage),
     openai_response_id: openAIResponseId,
@@ -601,7 +639,7 @@ export async function simulateCustomerConversation(supabase, body, options = {})
     : await runStage("Save conversation simulation", context, async () => data(await supabase.from("knowledge_competence_results").insert(resultPayload).select().single(), "The conversation simulation could not be saved."));
   if (options.persist !== false) await assessSavedCompetenceResult(supabase, saved.id);
   const trace = { request_id: requestId, session_id: sessionId, submitted_question: question, result_question: saved.question, result_id: saved.id, selected_product: productContext, generated_at: new Date().toISOString(), cached_value_used: false, previous_value_used: false };
-  return { result: { ...structured, id: saved.id, response_time_ms: resultPayload.response_time_ms, retrieval_time_ms: retrievalTime, generation_time_ms: generationTime, model, category_filter: categoryFilter }, request_trace: trace };
+  return { result: { ...structured, id: saved.id, response_time_ms: resultPayload.response_time_ms, retrieval_time_ms: retrievalTime, generation_time_ms: generationTime, model, model_route: modelRoute, category_filter: categoryFilter }, request_trace: trace };
 }
 
 function deterministicHealthCoverage({ question, productContext, settings = {} } = {}) {
@@ -699,7 +737,7 @@ export async function runLiveHealthBatch(supabase, body, environment = process.e
     try {
       evaluated = await executeHealthConversation(supabase, scenario, { generationMode: "live", knowledge });
     } catch (error) {
-      logStageError("Live health scenario", error, performance.now(), { scenario_id: scenario.id, source_scenario_id: scenario.source_scenario_id, model: clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini" });
+      logStageError("Live health scenario", error, performance.now(), { scenario_id: scenario.id, source_scenario_id: scenario.source_scenario_id, model: ASSISTANT_MODEL_POLICY.full });
       evaluated = failedHealthConversation(scenario, "live", error);
     }
     accumulator = addHealthConversation(accumulator, evaluated);
@@ -707,7 +745,7 @@ export async function runLiveHealthBatch(supabase, body, environment = process.e
   return {
     report: summariseHealth(accumulator),
     batch: { start_index: startIndex, count, requested_total: sampleSize, next_index: startIndex + count },
-    validation: { openai_calls_enabled: true, database_writes: 0, customer_records_created: 0, model: clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini", pricing_configured: estimateOpenAICost({}, environment) !== null },
+    validation: { openai_calls_enabled: true, database_writes: 0, customer_records_created: 0, model: ASSISTANT_MODEL_POLICY.full, pricing_configured: estimateOpenAICost({}, environment) !== null },
     generated_at: new Date().toISOString(),
     commit: clean(environment.VERCEL_GIT_COMMIT_SHA, 100) || null,
   };
@@ -722,7 +760,7 @@ function loadHealthConfiguration(environment = process.env) {
     live_max_conversations: LIVE_VALIDATION_MAX,
     live_batch_limit: LIVE_VALIDATION_BATCH_LIMIT,
     scenario_library_size: REAL_CUSTOMER_SCENARIOS.length,
-    model: clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini",
+    model: ASSISTANT_MODEL_POLICY.full,
     pricing_configured: estimateOpenAICost({}, environment) !== null,
     pricing_environment_variables: ["OPENAI_INPUT_COST_PER_MILLION_USD", "OPENAI_OUTPUT_COST_PER_MILLION_USD"],
     commit: clean(environment.VERCEL_GIT_COMMIT_SHA, 100) || null,
