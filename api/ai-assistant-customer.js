@@ -160,6 +160,30 @@ function assertPageContext(session, supplied) {
   }
 }
 
+function explicitHomepageProduct(message, requestedChoice) {
+  const choice = clean(requestedChoice, 20).toLowerCase();
+  if (["finance", "rent2buy"].includes(choice)) return choice;
+  const normalised = clean(message, 200).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (/^(?:van )?finance$/.test(normalised)) return "finance";
+  if (/^(?:rent ?2 ?buy|rent to buy)$/.test(normalised)) return "rent2buy";
+  return null;
+}
+
+function isHomepageComparisonQuestion(message) {
+  const normalised = clean(message, 500).toLowerCase();
+  return /(?:what(?:'s| is) the difference|difference between|compare (?:them|both)|explain both|not sure (?:which|what)|which (?:one|option)|how are they different)/i.test(normalised);
+}
+
+function productSelectionReply(product) {
+  return product === "rent2buy"
+    ? "Great — I’ll keep this conversation focused on Rent2Buy. What would you like to know?"
+    : "Great — I’ll keep this conversation focused on Van Finance. What would you like to know?";
+}
+
+function homepageComparisonReply() {
+  return "Van Finance is a standard finance route where approval and terms depend on the lender. Rent2Buy is based on affordability rather than a credit check, with an initial rental followed by monthly payments before ownership transfers at the end. Which option would you like help with?";
+}
+
 async function startConversation(supabase, body, environment) {
   const pageContext = normalisePageContext(body.page_context);
   const { conversationId, greeting } = await createSession(supabase, pageContext, environment);
@@ -191,8 +215,17 @@ async function continueConversation(supabase, body, environment, simulateConvers
 
   let productLock = session.product_lock;
   if (!productLock && session.page_type === "homepage") {
-    const requestedChoice = clean(body.product_choice, 20).toLowerCase();
-    productLock = ["finance", "rent2buy"].includes(requestedChoice) ? requestedChoice : determineHomepageProduct(message, history);
+    if (isHomepageComparisonQuestion(message)) {
+      const reply = homepageComparisonReply();
+      await updateSession(supabase, session, {
+        conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
+        message_count: Number(session.message_count || 0) + 1,
+      });
+      return safeCustomerPayload({ reply, conversationId, status: "needs_product" });
+    }
+
+    const explicitChoice = explicitHomepageProduct(message, body.product_choice);
+    productLock = explicitChoice || determineHomepageProduct(message, history);
     if (!productLock) {
       const reply = productChoiceReply();
       await updateSession(supabase, session, {
@@ -200,6 +233,17 @@ async function continueConversation(supabase, body, environment, simulateConvers
         message_count: Number(session.message_count || 0) + 1,
       });
       return safeCustomerPayload({ reply, conversationId, status: "needs_product" });
+    }
+
+    if (explicitChoice) {
+      const reply = productSelectionReply(productLock);
+      await updateSession(supabase, session, {
+        product_lock: productLock,
+        remembered_facts: { ...(session.remembered_facts || {}), product_context: productLock },
+        conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
+        message_count: Number(session.message_count || 0) + 1,
+      });
+      return safeCustomerPayload({ reply, conversationId, status: "ready" });
     }
   }
 
@@ -218,7 +262,7 @@ async function continueConversation(supabase, body, environment, simulateConvers
     journey_state: session.journey_state || {},
   });
   const result = generated.result;
-  const nextFacts = publicRememberedFacts(result);
+  const nextFacts = { ...publicRememberedFacts(result), product_context: productLock };
   const nextJourney = publicJourneyState(result);
   const reply = clean(result.reply, 5000);
   const nextHistory = boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]);
