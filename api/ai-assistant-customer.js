@@ -184,6 +184,22 @@ function homepageComparisonReply() {
   return "Van Finance is a standard finance route where approval and terms depend on the lender. Rent2Buy is based on affordability rather than a credit check, with an initial rental followed by monthly payments before ownership transfers at the end. Which option would you like help with?";
 }
 
+function contextualiseShortFactualMessage(message, productLock) {
+  const original = clean(message, 3000);
+  if (!["finance", "rent2buy"].includes(productLock)) return original;
+  const normalised = original.toLowerCase().replace(/[’‘]/g, "'").replace(/[^a-z0-9£?+]+/g, " ").trim();
+  const productName = productLock === "rent2buy" ? "Rent2Buy" : "Van Finance";
+
+  if (/^(?:(?:is|are) )?(?:the )?(?:price|prices|payments?|costs?)?\s*(?:vat|tax)\s*(?:included|inclusive)?\??$/.test(normalised)
+    || /^(?:is )?vat included\??$/.test(normalised)
+    || /^(?:are )?(?:the )?prices? (?:plus|excluding|exclusive of) vat\??$/.test(normalised)
+    || /^(?:what about )?(?:vat|tax)\??$/.test(normalised)) {
+    return `For ${productName}, are the advertised prices and payments inclusive of VAT, or are they plus VAT?`;
+  }
+
+  return original;
+}
+
 async function startConversation(supabase, body, environment) {
   const pageContext = normalisePageContext(body.page_context);
   const { conversationId, greeting } = await createSession(supabase, pageContext, environment);
@@ -251,11 +267,12 @@ async function continueConversation(supabase, body, environment, simulateConvers
     ...(session.remembered_facts || {}),
     product_context: productLock,
   };
+  const resolvedMessage = contextualiseShortFactualMessage(message, productLock);
   const requestId = `public-${randomUUID()}`;
   const generated = await simulateConversation(supabase, {
     request_id: requestId,
     session_id: session.id,
-    message,
+    message: resolvedMessage,
     product_context: productLock,
     messages: history,
     remembered_facts: rememberedFacts,
