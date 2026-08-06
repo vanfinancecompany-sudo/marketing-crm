@@ -57,6 +57,9 @@ import MarketingCentrePage from "./pages/MarketingCentrePage.jsx";
 import KnowledgeHubPage from "./pages/KnowledgeHubPage.jsx";
 import ContentFactoryPage from "./pages/ContentFactoryPage.jsx";
 import AIVisibilityPage from "./pages/AIVisibilityPage.jsx";
+import AIAssistantCompetencePage from "./pages/AIAssistantCompetencePage.jsx";
+import AIKnowledgeOpportunitiesPage from "./pages/AIKnowledgeOpportunitiesPage.jsx";
+import RealCustomerSimulationPage from "./pages/RealCustomerSimulationPage.jsx";
 import StockPage from "./pages/StockPage.jsx";
 import VanscoStockWatchPage from "./pages/VanscoStockWatchPage.jsx";
 import ReelFactoryPage from "./pages/ReelFactoryPage.jsx";
@@ -460,6 +463,9 @@ const VIEW_PATHS = {
   "Knowledge Hub": "/knowledge-hub",
   "Content Factory": "/content-factory",
   "AI Visibility": "/ai-visibility",
+  "AI Assistant Competence Test": "/ai-assistant-competence",
+  "AI Knowledge Opportunities": "/ai-knowledge-opportunities",
+  "Real Customer Simulation": "/ai-customer-simulation",
   "Vansco Stock Watch": "/vansco-stock-watch",
   "Reel Factory": "/reel-factory",
   "Premium Reel Studio": "/premium-reel-studio",
@@ -482,6 +488,9 @@ function viewFromPath() {
   if (path === "/knowledge-hub") return "Knowledge Hub";
   if (path === "/content-factory") return "Content Factory";
   if (path === "/ai-visibility") return "AI Visibility";
+  if (path === "/ai-assistant-competence") return "AI Assistant Competence Test";
+  if (path === "/ai-knowledge-opportunities") return "AI Knowledge Opportunities";
+  if (path === "/ai-customer-simulation") return "Real Customer Simulation";
   if (path === "/vansco-stock-watch") return "Vansco Stock Watch";
   if (path === "/reel-factory") return "Reel Factory";
   if (path === "/premium-reel-studio" || path === "/reel-studio-beta" || path === "/premium-reels") {
@@ -2720,6 +2729,12 @@ async function handleClearTodayReels() {
         return <ContentFactoryPage />;
       case "AI Visibility":
         return <AIVisibilityPage />;
+      case "AI Assistant Competence Test":
+        return <AIAssistantCompetencePage />;
+      case "AI Knowledge Opportunities":
+        return <AIKnowledgeOpportunitiesPage />;
+      case "Real Customer Simulation":
+        return <RealCustomerSimulationPage />;
       case "Vansco Stock Watch":
         return <VanscoStockWatchPage />;
       case "Reel Factory":

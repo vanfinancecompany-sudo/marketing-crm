@@ -585,6 +585,23 @@ export function BusinessSettingsPanel({
           <HubField label="Freshness threshold (days)">
             <input className="field__input" type="number" min="30" max="730" value={settings.freshness_days || 180} onChange={(event) => setSettings({ ...settings, freshness_days: event.target.value })} />
           </HubField>
+          <HubField label="Finance covered nations (one per line)">
+            <textarea className="field__input" rows={4} value={(settings.finance_covered_nations || []).join("\n")} onChange={(event) => setSettings({ ...settings, finance_covered_nations: event.target.value.split("\n").map((item) => item.trim()).filter(Boolean) })} />
+          </HubField>
+          <HubField label="Rent2Buy base postcode">
+            <input className="field__input" value={settings.rent2buy_base_postcode || ""} onChange={(event) => setSettings({ ...settings, rent2buy_base_postcode: event.target.value.toUpperCase() })} />
+          </HubField>
+          <HubField label="Rent2Buy maximum radius (miles)">
+            <input className="field__input" type="number" min="1" max="500" step="1" value={settings.rent2buy_max_radius_miles ?? 100} onChange={(event) => setSettings({ ...settings, rent2buy_max_radius_miles: event.target.value })} />
+          </HubField>
+          <HubField label="Coverage borderline tolerance (miles)">
+            <input className="field__input" type="number" min="0" max="100" step="1" value={settings.coverage_borderline_tolerance_miles ?? 10} onChange={(event) => setSettings({ ...settings, coverage_borderline_tolerance_miles: event.target.value })} />
+          </HubField>
+          <HubField label="Coverage distance method">
+            <select className="field__input" value={settings.coverage_distance_method || "straight_line"} onChange={(event) => setSettings({ ...settings, coverage_distance_method: event.target.value })}>
+              <option value="straight_line">Straight-line (Haversine)</option>
+            </select>
+          </HubField>
           <HubField label="Default CTA" wide>
             <textarea className="field__input" rows={4} value={settings.default_cta || ""} onChange={(event) => setSettings({ ...settings, default_cta: event.target.value })} />
           </HubField>
