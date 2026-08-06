@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
 import { simulateCustomerConversation } from "./marketing-ai-assistant-competence.js";
+import { isExplicitProductComparison } from "../lib/aiAssistantCompetence.js";
 import {
   createPublicConversationId,
   determineHomepageProduct,
@@ -171,11 +172,6 @@ function explicitHomepageProduct(message, requestedChoice) {
   return null;
 }
 
-function isHomepageComparisonQuestion(message) {
-  const normalised = clean(message, 500).toLowerCase();
-  return /(?:what(?:'s| is) the difference|difference between|compare (?:them|both)|explain both|not sure (?:which|what)|which (?:one|option)|how are they different)/i.test(normalised);
-}
-
 function productSelectionReply(product) {
   return product === "rent2buy"
     ? "Great — I’ll keep this conversation focused on Rent2Buy. What would you like to know?"
@@ -213,7 +209,7 @@ async function continueConversation(supabase, body, environment, simulateConvers
 
   let productLock = session.product_lock;
   if (!productLock && session.page_type === "homepage") {
-    if (isHomepageComparisonQuestion(message)) {
+    if (isExplicitProductComparison(message, history)) {
       const requestId = `public-${randomUUID()}`;
       const comparisonInput = buildCanonicalConversationInput({
         session: { ...session, product_lock: "finance" },
