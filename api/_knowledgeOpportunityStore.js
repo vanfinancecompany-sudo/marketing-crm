@@ -4,6 +4,12 @@ import {
   groupCompetenceCandidates,
   recommendOpportunityContent,
 } from "../lib/knowledgeLearningEngine.js";
+import {
+  hasMeaningfulNewOpportunityEvidence,
+  knowledgeOpportunityClusterFingerprint,
+  knowledgeOpportunityEvidenceFingerprint,
+  workflowReopenReason,
+} from "../lib/knowledgeOpportunityWorkflow.js";
 
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
 function data(result, fallback) { if (result.error) throw new Error(result.error.message || fallback); return result.data; }
@@ -34,6 +40,13 @@ export async function upsertOpportunityGroup(supabase, group, knowledge) {
   const recommendation = recommendOpportunityContent({ ...group, recommended_action: diagnosis.recommendedAction });
   const priority = calculateOpportunityPriority({ ...group, title: group.title, normalised_intent: group.normalised_intent, existing_article_count: diagnosis.relatedArticles.length });
   const suggestion = suggestionFor(group, diagnosis, recommendation);
+  const existingResult = await supabase.from("knowledge_assistant_opportunities").select("*").eq("product", group.product).eq("normalised_intent", group.normalised_intent).maybeSingle();
+  const existing = data(existingResult, "Existing knowledge opportunity could not be checked.");
+  const clusterFingerprint = knowledgeOpportunityClusterFingerprint(group);
+  const evidenceFingerprint = knowledgeOpportunityEvidenceFingerprint(group);
+  const reopenable = ["closed", "no_action_required", "resolved", "dismissed", "completed"].includes(existing?.status);
+  const automaticallyReopened = reopenable && hasMeaningfulNewOpportunityEvidence(existing, group);
+  const reopenReason = automaticallyReopened ? workflowReopenReason(existing, group) : "";
   const payload = {
     product: group.product,
     title: clean(group.title, 300),
@@ -58,10 +71,24 @@ export async function upsertOpportunityGroup(supabase, group, knowledge) {
     diagnosis: diagnosis.diagnosis,
     related_article_ids: diagnosis.relatedArticles.map((item) => item.id),
     related_business_section_ids: diagnosis.relatedSections.map((item) => item.id),
+    cluster_fingerprint: clusterFingerprint,
+    evidence_fingerprint: evidenceFingerprint,
     ...suggestion,
     updated_at: new Date().toISOString(),
   };
+  if (automaticallyReopened) Object.assign(payload, { status: "reopened", reopened_at: payload.updated_at, reopen_reason: reopenReason });
   const opportunity = data(await supabase.from("knowledge_assistant_opportunities").upsert(payload, { onConflict: "product,normalised_intent", ignoreDuplicates: false }).select().single(), "Knowledge opportunity could not be saved.");
+  if (automaticallyReopened) {
+    data(await supabase.from("knowledge_assistant_opportunity_events").insert({
+      opportunity_id: opportunity.id,
+      event_type: "automatically_reopened",
+      from_status: existing.status,
+      to_status: "reopened",
+      user_action: "Knowledge Learning Engine",
+      notes: reopenReason,
+      details: { previous_evidence_fingerprint: existing.evidence_fingerprint, evidence_fingerprint: evidenceFingerprint, cluster_fingerprint: clusterFingerprint, automatic: true },
+    }), "Automatic reopen audit event could not be saved.");
+  }
   for (const question of group.questions) {
     data(await supabase.from("knowledge_assistant_opportunity_questions").upsert({ opportunity_id: opportunity.id, ...question }, { onConflict: "competence_result_id", ignoreDuplicates: true }), "Opportunity question could not be linked.");
   }

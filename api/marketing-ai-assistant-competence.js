@@ -13,7 +13,15 @@ import {
 } from "../lib/aiAssistantCompetence.js";
 import { assessSavedCompetenceResult } from "./_knowledgeOpportunityStore.js";
 import { resolveProductCoverage } from "./_productCoverage.js";
-import { coverageConflictDetected, detectCoverageConflicts } from "../lib/productCoverageRules.js";
+import {
+  buildFinanceCoverageEvidence,
+  buildRent2BuyCoverageEvidence,
+  buildRent2BuyDeliveryEvidence,
+  coverageConflictDetected,
+  detectCoverageConflicts,
+  extractUkLocation,
+  isCoverageQuestion,
+} from "../lib/productCoverageRules.js";
 import {
   CONVERSATION_RATING_FIELDS,
   CONVERSATION_REVIEW_OUTCOMES,
@@ -59,6 +67,22 @@ import {
   polishConversationPresentation,
   serialisePolishReviewRatings,
 } from "../lib/conversationPolish.js";
+import {
+  DETERMINISTIC_BATCH_LIMIT,
+  LIVE_VALIDATION_BATCH_LIMIT,
+  LIVE_VALIDATION_MAX,
+  LIVE_VALIDATION_MIN,
+  MAX_DETERMINISTIC_CONVERSATIONS,
+  addHealthConversation,
+  deterministicEvidenceReply,
+  emptyHealthAccumulator,
+  estimateOpenAICost,
+  evaluateHealthConversation,
+  liveValidationAllowed,
+  representativeScenarioAt,
+  summariseHealth,
+  syntheticScenarioAt,
+} from "../lib/aiAssistantHealth.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
@@ -308,7 +332,7 @@ export function conversationPrompt({ question, messages, sources, sections, sett
   return `${base}\n\n# Locked V5 human conversation and recovery\nUniversal message type: ${human.message_type || "question"} (${human.confidence || 0}% confidence). Customer emotion: ${human.emotion?.emotion || "neutral"}. Objection: ${human.objection?.objection || "none"}. The server conversation intent is ${intent.primary_intent}; secondary intents: ${intent.secondary_intents.join(", ") || "none"}. The locked product remains ${productContext} and must never be cross-sold. Remembered structured customer facts: ${JSON.stringify(memory.remembered_facts)}. Corrections: ${JSON.stringify(memory.corrections)}. Buying signal: ${buyingSignals.detected_buying_signal || "none"} (${buyingSignals.signal_strength || "low"}). Buying intent level: ${journey.buying_intent_level || "Research"}. Current customer goal: ${journey.conversation_goal || "Research"}. Journey stage: ${journey.journey_stage || "Research"}. Recommended single action: ${journey.recommended_cta || buyingSignals.recommended_next_action || "Continue conversation"}. Next best question: ${journey.next_best_question || "none"}. Context resolution: ${contextualResolution || "none required"}. Recently used terms to avoid repeating mechanically: ${(phraseDiagnostics.recently_used_terms || []).join(", ") || "none"}. Target reply band: ${lengthTarget.band || "normal"}, maximum ${lengthTarget.maximum_words || 90} words. Be helpful, friendly, patient and professional. Acknowledge an objection or emotion naturally before progressing. Listen, answer, reassure, progress, then stop. Ask at most one useful question, never ask for a known fact, and ask none when the factual answer or natural closing is complete. Never expose classifications, scores, rules or internal reasoning. Avoid repeated openings and unnecessary full disclaimers. ${disclaimer.instruction} Never invent approval likelihood, stock, rates, payment figures, affordability outcomes or a delivery date. Deterministic evidence is the highest-priority fact and overrides every article, Business Brain passage and model inference. If approved evidence is insufficient, use a plain, honest fallback and do not infer a business fact.`;
 }
 
-export async function simulateCustomerConversation(supabase, body) {
+export async function simulateCustomerConversation(supabase, body, options = {}) {
   const totalStart = performance.now();
   const question = clean(body.message || body.question, 3000);
   if (!question) throw new ApiError(400, "Enter a customer message.", "validation");
@@ -350,6 +374,8 @@ export async function simulateCustomerConversation(supabase, body) {
   let retrievalTime = 0;
   let generationTime = 0;
   let model = "deterministic-conversation-rules";
+  let tokenUsage = { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+  let openAIResponseId = null;
   let response;
   const priorPhraseDiagnostics = recentAssistantPhraseDiagnostics(messages);
 
@@ -359,14 +385,15 @@ export async function simulateCustomerConversation(supabase, body) {
       : naturalSalesReply(intent, productContext, buyingSignals, memory.remembered_facts) || naturalConversationReply(intent, productContext, memory.remembered_facts);
   } else {
     const retrievalStart = performance.now();
-    const knowledge = await loadKnowledge(supabase);
+    const knowledge = options.knowledge || await loadKnowledge(supabase);
     const bounded = await runStage("Apply conversation product boundary", { ...context, comparison }, async () => filterKnowledgeForProduct(knowledge, productContext, { comparison }));
     categoryFilter = bounded.categoryFilter;
     const corpus = await runStage("Build conversation article chunks", { ...context, article_count: bounded.articles.length }, async () => buildRetrievalCorpus(bounded));
     const retrievalQuery = conversationRetrievalQuery(intent, memory, conversationWithCurrent);
     const location = memory.remembered_facts.location;
     const coverageQuestion = intent.secondary_intents.includes("coverage") && location ? `coverage for ${location}` : question;
-    coverage = await runStage("Resolve conversation deterministic coverage", context, () => resolveProductCoverage({ question: coverageQuestion, productContext, settings: knowledge.settings }));
+    const coverageResolver = options.coverageResolver || resolveProductCoverage;
+    coverage = await runStage("Resolve conversation deterministic coverage", context, () => coverageResolver({ question: coverageQuestion, productContext, settings: knowledge.settings }));
     const lexical = await runStage("Conversation lexical ranking", { ...context, retrieval_query: retrievalQuery }, async () => rankKnowledge(retrievalQuery, corpus, { messages, limit: coverage ? 7 : 8 }));
     coverageConflicts = await runStage("Check conversation coverage conflicts", context, async () => detectCoverageConflicts(coverage, corpus, knowledge.settings));
     if (coverage) coverage.diagnostics.conflicting_sources = coverageConflicts;
@@ -374,6 +401,10 @@ export async function simulateCustomerConversation(supabase, body) {
     retrievalTime = elapsed(retrievalStart);
     if (!sources.length) {
       response = insufficientKnowledgeReply(productContext);
+    } else if (options.generationMode === "deterministic") {
+      response = deterministicEvidenceReply(sources, productContext);
+      sourcesUsed = sources.slice(0, 1);
+      model = "deterministic-health-engine";
     } else {
       const generationStart = performance.now();
       const prompt = await runStage("Conversation prompt creation", { ...context, source_count: sources.length }, async () => conversationPrompt({ question, messages, sources, sections: bounded.sections, settings: knowledge.settings, productContext, comparison, intent, memory, buyingSignals, lengthTarget, contextualResolution, journey, human, phraseDiagnostics: priorPhraseDiagnostics }));
@@ -381,6 +412,12 @@ export async function simulateCustomerConversation(supabase, body) {
       const generated = await runStage("Conversation structured response parsing", { ...context, model: requested.model }, async () => parseOpenAIConversationReply(requested.payload, requested.model));
       response = generated.reply;
       model = generated.model;
+      tokenUsage = {
+        input_tokens: Number(requested.payload?.usage?.input_tokens) || 0,
+        output_tokens: Number(requested.payload?.usage?.output_tokens) || 0,
+        total_tokens: Number(requested.payload?.usage?.total_tokens) || (Number(requested.payload?.usage?.input_tokens) || 0) + (Number(requested.payload?.usage?.output_tokens) || 0),
+      };
+      openAIResponseId = clean(requested.payload?.id, 100) || null;
       response = enforceGroundedConversationReply(response, { deterministicRuleUsed: Boolean(coverage), productContext });
       const deterministicDelivery = deterministicDeliveryReply(productContext, question, coverage);
       if (deterministicDelivery) response = { ...response, reply: deterministicDelivery, insufficient_knowledge: false, confidence: 100, confidence_reason: "Server-side approved delivery rule.", source_ids: ["S1"] };
@@ -530,6 +567,9 @@ export async function simulateCustomerConversation(supabase, body) {
     polish_transition_applied: polish.transition_applied,
     polish_transition_type: polish.transition_type,
     factual_reply_preserved: polish.factual_reply_preserved,
+    token_usage: tokenUsage,
+    estimated_cost_usd: options.generationMode === "deterministic" ? 0 : estimateOpenAICost(tokenUsage),
+    openai_response_id: openAIResponseId,
   };
   const resultPayload = {
     run_id: body.run_id || null,
@@ -556,10 +596,138 @@ export async function simulateCustomerConversation(supabase, body) {
     learning_diagnosis: learningDiagnosis,
     simulation_session_id: sessionId,
   };
-  const saved = await runStage("Save conversation simulation", context, async () => data(await supabase.from("knowledge_competence_results").insert(resultPayload).select().single(), "The conversation simulation could not be saved."));
-  await assessSavedCompetenceResult(supabase, saved.id);
+  const saved = options.persist === false
+    ? { ...resultPayload, id: `health-${requestId}` }
+    : await runStage("Save conversation simulation", context, async () => data(await supabase.from("knowledge_competence_results").insert(resultPayload).select().single(), "The conversation simulation could not be saved."));
+  if (options.persist !== false) await assessSavedCompetenceResult(supabase, saved.id);
   const trace = { request_id: requestId, session_id: sessionId, submitted_question: question, result_question: saved.question, result_id: saved.id, selected_product: productContext, generated_at: new Date().toISOString(), cached_value_used: false, previous_value_used: false };
   return { result: { ...structured, id: saved.id, response_time_ms: resultPayload.response_time_ms, retrieval_time_ms: retrievalTime, generation_time_ms: generationTime, model, category_filter: categoryFilter }, request_trace: trace };
+}
+
+function deterministicHealthCoverage({ question, productContext, settings = {} } = {}) {
+  if (!isCoverageQuestion(question)) return null;
+  if (productContext === "finance") return buildFinanceCoverageEvidence(question, settings);
+  if (productContext !== "rent2buy") return null;
+  const delivery = buildRent2BuyDeliveryEvidence(question, settings);
+  if (delivery) return delivery;
+  return buildRent2BuyCoverageEvidence({ location: extractUkLocation(question), settings });
+}
+
+async function executeHealthConversation(supabase, scenario, { generationMode, knowledge }) {
+  let messages = [];
+  let rememberedFacts = {};
+  let journeyState = {};
+  const turns = [];
+  for (let turnIndex = 0; turnIndex < scenario.messages.length; turnIndex += 1) {
+    const message = scenario.messages[turnIndex];
+    const requestId = `health-${scenario.id}-${turnIndex + 1}`;
+    const response = await simulateCustomerConversation(supabase, {
+      request_id: requestId,
+      session_id: `health-${scenario.id}`,
+      scenario_id: scenario.source_scenario_id || scenario.id,
+      message,
+      product_context: scenario.product_context,
+      messages,
+      remembered_facts: rememberedFacts,
+      journey_state: journeyState,
+    }, {
+      persist: false,
+      generationMode,
+      knowledge,
+      coverageResolver: generationMode === "deterministic" ? deterministicHealthCoverage : resolveProductCoverage,
+    });
+    turns.push({ message, result: response.result });
+    messages = [...messages, { role: "user", content: message }, { role: "assistant", content: response.result.reply }];
+    rememberedFacts = response.result.remembered_facts || rememberedFacts;
+    journeyState = response.result;
+  }
+  return evaluateHealthConversation({ scenario, turns, mode: generationMode === "deterministic" ? "deterministic" : "live" });
+}
+
+function failedHealthConversation(scenario, mode, error) {
+  const evaluated = evaluateHealthConversation({ scenario, turns: [], mode });
+  const failure = {
+    rule: mode === "live" ? "live_generation_error" : "simulation_error",
+    turn: 0,
+    message: "",
+    detail: clean(error?.message || error, 1000),
+  };
+  return { ...evaluated, rule_violations: 1, failures: [failure] };
+}
+
+export async function runDeterministicHealthBatch(supabase, body) {
+  const startIndex = Math.max(0, Math.floor(Number(body.start_index) || 0));
+  const count = Math.min(DETERMINISTIC_BATCH_LIMIT, Math.max(1, Math.floor(Number(body.count) || 1)));
+  const requestedTotal = Math.min(MAX_DETERMINISTIC_CONVERSATIONS, Math.max(1, Math.floor(Number(body.total_conversations) || count)));
+  if (startIndex >= requestedTotal) throw new ApiError(400, "The deterministic batch starts beyond the requested run size.", "validation");
+  const boundedCount = Math.min(count, requestedTotal - startIndex);
+  const knowledge = await loadKnowledge(supabase);
+  let accumulator = emptyHealthAccumulator("deterministic");
+  for (let offset = 0; offset < boundedCount; offset += 1) {
+    const scenario = syntheticScenarioAt(startIndex + offset);
+    let evaluated;
+    try {
+      evaluated = await executeHealthConversation(supabase, scenario, { generationMode: "deterministic", knowledge });
+    } catch (error) {
+      logStageError("Deterministic health scenario", error, performance.now(), { scenario_id: scenario.id, source_scenario_id: scenario.source_scenario_id });
+      evaluated = failedHealthConversation(scenario, "deterministic", error);
+    }
+    accumulator = addHealthConversation(accumulator, evaluated);
+  }
+  return {
+    report: summariseHealth(accumulator),
+    batch: { start_index: startIndex, count: boundedCount, requested_total: requestedTotal, next_index: startIndex + boundedCount },
+    validation: { openai_calls: 0, database_writes: 0, geocoding_calls: 0, source_library_size: REAL_CUSTOMER_SCENARIOS.length },
+    generated_at: new Date().toISOString(),
+    commit: clean(process.env.VERCEL_GIT_COMMIT_SHA, 100) || null,
+  };
+}
+
+export async function runLiveHealthBatch(supabase, body, environment = process.env) {
+  if (!liveValidationAllowed(environment)) throw new ApiError(403, "Live AI Validation is available only on protected Preview deployments.", "authorization");
+  const sampleSize = Math.floor(Number(body.total_conversations) || 0);
+  if (sampleSize < LIVE_VALIDATION_MIN || sampleSize > LIVE_VALIDATION_MAX) throw new ApiError(400, `Choose ${LIVE_VALIDATION_MIN}–${LIVE_VALIDATION_MAX} live validation conversations.`, "validation");
+  if (body.confirm_live_validation !== true) throw new ApiError(400, "Confirm the live validation run before calling OpenAI.", "validation");
+  const startIndex = Math.max(0, Math.floor(Number(body.start_index) || 0));
+  if (startIndex >= sampleSize) throw new ApiError(400, "The live batch starts beyond the selected sample.", "validation");
+  const count = Math.min(LIVE_VALIDATION_BATCH_LIMIT, Math.max(1, Math.floor(Number(body.count) || 1)), sampleSize - startIndex);
+  const knowledge = await loadKnowledge(supabase);
+  let accumulator = emptyHealthAccumulator("live");
+  for (let offset = 0; offset < count; offset += 1) {
+    const scenario = representativeScenarioAt(startIndex + offset, sampleSize);
+    let evaluated;
+    try {
+      evaluated = await executeHealthConversation(supabase, scenario, { generationMode: "live", knowledge });
+    } catch (error) {
+      logStageError("Live health scenario", error, performance.now(), { scenario_id: scenario.id, source_scenario_id: scenario.source_scenario_id, model: clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini" });
+      evaluated = failedHealthConversation(scenario, "live", error);
+    }
+    accumulator = addHealthConversation(accumulator, evaluated);
+  }
+  return {
+    report: summariseHealth(accumulator),
+    batch: { start_index: startIndex, count, requested_total: sampleSize, next_index: startIndex + count },
+    validation: { openai_calls_enabled: true, database_writes: 0, customer_records_created: 0, model: clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini", pricing_configured: estimateOpenAICost({}, environment) !== null },
+    generated_at: new Date().toISOString(),
+    commit: clean(environment.VERCEL_GIT_COMMIT_SHA, 100) || null,
+  };
+}
+
+function loadHealthConfiguration(environment = process.env) {
+  return {
+    preview_live_validation_available: liveValidationAllowed(environment),
+    deterministic_max_conversations: MAX_DETERMINISTIC_CONVERSATIONS,
+    deterministic_batch_limit: DETERMINISTIC_BATCH_LIMIT,
+    live_min_conversations: LIVE_VALIDATION_MIN,
+    live_max_conversations: LIVE_VALIDATION_MAX,
+    live_batch_limit: LIVE_VALIDATION_BATCH_LIMIT,
+    scenario_library_size: REAL_CUSTOMER_SCENARIOS.length,
+    model: clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini",
+    pricing_configured: estimateOpenAICost({}, environment) !== null,
+    pricing_environment_variables: ["OPENAI_INPUT_COST_PER_MILLION_USD", "OPENAI_OUTPUT_COST_PER_MILLION_USD"],
+    commit: clean(environment.VERCEL_GIT_COMMIT_SHA, 100) || null,
+    guarantees: { openai_api_key_exposed: false, deterministic_openai_calls: 0, database_writes: 0, customer_records_created: 0 },
+  };
 }
 
 async function startRun(supabase, body) {
@@ -625,6 +793,9 @@ export default async function handler(request, response) {
     let result;
     if (body.action === "testAnswer") result = await testCompetenceAnswer(supabase, body);
     else if (body.action === "simulateConversation") result = await simulateCustomerConversation(supabase, body);
+    else if (body.action === "runDeterministicHealthBatch") result = await runDeterministicHealthBatch(supabase, body);
+    else if (body.action === "runLiveHealthBatch") result = await runLiveHealthBatch(supabase, body);
+    else if (body.action === "loadHealthConfiguration") result = { configuration: loadHealthConfiguration() };
     else if (body.action === "startRun") result = { run: await startRun(supabase, body) };
     else if (body.action === "completeRun") result = { run: await completeRun(supabase, body) };
     else if (body.action === "saveReview") result = { review: await saveReview(supabase, body) };

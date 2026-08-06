@@ -29,3 +29,6 @@ export const loadCompetenceReport = () => requestAssistantCompetence("loadReport
 export const simulateCustomerConversation = (payload, fetchImplementation) => requestAssistantCompetence("simulateConversation", payload, fetchImplementation);
 export const saveConversationReview = (payload, fetchImplementation) => requestAssistantCompetence("saveConversationReview", payload, fetchImplementation);
 export const loadCustomerSimulationLibrary = (fetchImplementation) => requestAssistantCompetence("loadTestLibrary", {}, fetchImplementation);
+export const loadAssistantHealthConfiguration = (fetchImplementation) => requestAssistantCompetence("loadHealthConfiguration", {}, fetchImplementation);
+export const runDeterministicHealthBatch = (payload, fetchImplementation) => requestAssistantCompetence("runDeterministicHealthBatch", payload, fetchImplementation);
+export const runLiveHealthBatch = (payload, fetchImplementation) => requestAssistantCompetence("runLiveHealthBatch", payload, fetchImplementation);

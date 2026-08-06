@@ -61,6 +61,24 @@ test("verified taxation knowledge outranks a competing recovery classification",
   assert.ok(!result.orchestration.priority_path_taken.includes("conversation_recovery"));
 });
 
+test("sales statements and hesitation stay in conversation instead of forcing factual retrieval", () => {
+  for (const message of ["Need a van quickly", "I like this van", "Looking for a van", "Halfway through applying", "Not sure yet"]) {
+    const result = decision(message, { priorJourney: {} });
+    assert.equal(result.orchestration.retrieval_required, false, message);
+  }
+  assert.equal(decision("What documents do I need?", { priorJourney: {} }).orchestration.retrieval_required, true);
+});
+
+test("V6-001 treats bare employment status as conversation state, not a knowledge request", () => {
+  for (const message of ["Self employed", "Limited company", "Only trading six months"]) {
+    const result = decision(message, { priorJourney: { buying_intent_level: "High Intent", journey_stage: "Employment known" } });
+    assert.equal(result.orchestration.retrieval_required, false, message);
+    assert.ok(!result.orchestration.priority_path_taken.includes("verified_business_knowledge"), message);
+  }
+  assert.equal(decision("Does being self employed affect eligibility?", { priorJourney: {} }).orchestration.retrieval_required, true);
+  assert.equal(decision("Is being a limited company a problem?", { priorJourney: {} }).orchestration.retrieval_required, true);
+});
+
 test("product separation blocks retrieval before every lower priority", () => {
   const orchestration = orchestrateConversationTurn({
     message: "Tell me about Rent2Buy insurance",
