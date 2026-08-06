@@ -84,10 +84,10 @@ test("broad clusters recommend articles while narrow gaps recommend FAQs", () =>
 
 test("status changes, article links and FAQ drafts are auditable manual actions", () => {
   const api = readFileSync(new URL("../api/marketing-ai-knowledge-opportunities.js", import.meta.url), "utf8");
-  assert.match(api, /event_type: status !== existing\.status \? "status_changed"/);
-  assert.match(api, /event_type: eventType/);
+  assert.match(api, /status !== existing\.status \? "status_changed" : "notes_updated"/);
+  assert.match(api, /article_linked_and_resolved/);
   assert.match(api, /event_type: "faq_draft_created"/);
-  assert.match(api, /automatic_completion: false/);
+  assert.match(api, /automatic_completion: resolved/);
   assert.match(api, /automatic_activation: false/);
 });
 

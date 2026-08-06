@@ -15,6 +15,7 @@ export async function requestKnowledgeOpportunities(action, payload = {}) {
 export const loadKnowledgeOpportunities = () => requestKnowledgeOpportunities("load");
 export const analyseExistingCompetenceResults = () => requestKnowledgeOpportunities("analyseExisting");
 export const updateKnowledgeOpportunity = (payload) => requestKnowledgeOpportunities("updateOpportunity", payload);
+export const bulkUpdateKnowledgeOpportunities = (payload) => requestKnowledgeOpportunities("bulkUpdateOpportunities", payload);
 export const createOpportunityArticleDraft = (payload) => requestKnowledgeOpportunities("createArticleDraft", payload);
 export const createOpportunityFaqDraft = (payload) => requestKnowledgeOpportunities("createFaqDraft", payload);
 export const linkOpportunityArticle = (payload) => requestKnowledgeOpportunities("linkArticle", payload);
