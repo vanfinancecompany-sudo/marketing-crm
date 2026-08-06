@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import {
   FINANCE_APPLICATION_URL,
   RENT2BUY_APPLICATION_URL,
+  createWidgetReadyHandshake,
   createWidgetState,
   endpointPageContext,
   escapeHtml,
@@ -54,6 +55,58 @@ test("restart clears visible conversation state before requesting a new session"
   assert.equal(restarted.conversationId, null);
   assert.deepEqual(restarted.messages, []);
   assert.equal(request.action, "restart");
+});
+
+test("initialisation is idempotent when Wix replies to repeated readiness messages", () => {
+  const initial = createWidgetState();
+  const first = reduceWidgetState(initial, { type: "initialise", pageContext: financeVehicle, conversationId: "conversation-1" });
+  const duplicate = reduceWidgetState(first, { type: "initialise", pageContext: financeVehicle, conversationId: "different-conversation" });
+  assert.equal(duplicate, first);
+  assert.equal(duplicate.conversationId, "conversation-1");
+});
+
+test("delayed Wix parent registration still receives widget readiness and initialises once", () => {
+  let retry = null;
+  let cancelled = 0;
+  let parentAdapter = null;
+  let widgetState = createWidgetState();
+  let initialisations = 0;
+  const messages = [];
+  const handshake = createWidgetReadyHandshake({
+    announce(message) { parentAdapter?.(message); },
+    schedule(callback) { retry = callback; return 1; },
+    cancel() { cancelled += 1; },
+  });
+
+  handshake.start();
+  assert.equal(messages.length, 0, "the first readiness message may precede Wix page-code registration");
+  parentAdapter = (message) => {
+    messages.push(message);
+    const nextState = reduceWidgetState(widgetState, { type: "initialise", pageContext: financeVehicle, conversationId: "conversation-1" });
+    if (nextState !== widgetState) initialisations += 1;
+    widgetState = nextState;
+    handshake.acknowledge();
+  };
+  retry();
+  retry();
+
+  assert.deepEqual(messages, [{ channel: "vfc-ai-assistant-widget-v1", type: "widget_ready" }]);
+  assert.equal(widgetState.initialised, true);
+  assert.equal(initialisations, 1);
+  assert.equal(handshake.acknowledged, true);
+  assert.equal(cancelled, 1);
+});
+
+test("already-registered Wix parent initialises on the first readiness message without scheduling retries", () => {
+  let scheduled = 0;
+  let handshake;
+  handshake = createWidgetReadyHandshake({
+    announce() { handshake.acknowledge(); },
+    schedule() { scheduled += 1; return 1; },
+  });
+  handshake.start();
+  assert.equal(handshake.acknowledged, true);
+  assert.equal(scheduled, 0);
 });
 
 test("loading and retry state retain one safe retry request", () => {
@@ -134,6 +187,9 @@ test("entry point includes responsive mobile layout, accessible controls and key
   assert.match(widget, /Assistant is typing/);
   assert.match(widget, /Please do not send bank details, passwords or card information/);
   assert.match(embed, /window\.parent\.postMessage/);
+  assert.match(embed, /await import\("\.\/widget\.mjs"\)/);
+  assert.ok(embed.indexOf("addEventListener(\"vfc-ai-request\"") < embed.indexOf("await import(\"./widget.mjs\")"));
+  assert.match(embed, /handshake\.acknowledge\(\)/);
 });
 
 test("hosted embed route has a Wix-only frame policy without weakening other CRM routes", async () => {

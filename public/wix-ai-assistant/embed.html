@@ -9,16 +9,23 @@
 <body>
   <vfc-ai-assistant></vfc-ai-assistant>
   <script type="module">
-    import "./widget.mjs";
-    import { WIDGET_CHANNEL } from "./widget-core.mjs";
+    import { WIDGET_CHANNEL, createWidgetReadyHandshake } from "./widget-core.mjs";
 
     const widget = document.querySelector("vfc-ai-assistant");
+    const handshake = createWidgetReadyHandshake({
+      announce: (message) => window.parent.postMessage(message, "*"),
+    });
     widget.addEventListener("vfc-ai-request", (event) => {
       if (event.detail?.channel === WIDGET_CHANNEL) window.parent.postMessage(event.detail, "*");
     });
     window.addEventListener("message", (event) => {
-      if (event.data?.channel === WIDGET_CHANNEL) widget.receive(event.data);
+      if (event.data?.channel !== WIDGET_CHANNEL) return;
+      if (event.data.type === "initialise") handshake.acknowledge();
+      widget.receive(event.data);
     });
+
+    await import("./widget.mjs");
+    handshake.start();
   </script>
 </body>
 </html>

@@ -60,6 +60,7 @@ export class VfcAiAssistantWidget extends HTMLElementBase {
   receive(message = {}) {
     if (message.channel !== WIDGET_CHANNEL) return;
     if (message.type === "initialise") {
+      if (this.state.initialised) return;
       this.state = reduceWidgetState(this.state, { type: "initialise", pageContext: message.pageContext, conversationId: message.conversationId, privacyUrl: message.privacyUrl });
       this.render();
       if (!this.state.conversationId) this.request("start");

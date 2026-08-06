@@ -7,6 +7,29 @@ const SAFE_STATUSES = new Set(["ready", "needs_product", "rate_limited", "invali
 
 const clean = (value, limit = 5000) => String(value || "").trim().slice(0, limit);
 
+export function createWidgetReadyHandshake({ announce, schedule = globalThis.setInterval, cancel = globalThis.clearInterval, retryMs = 750 } = {}) {
+  if (typeof announce !== "function") throw new Error("Widget readiness requires an announce function.");
+  let timer = null;
+  let acknowledged = false;
+  const notify = () => {
+    if (!acknowledged) announce({ channel: WIDGET_CHANNEL, type: "widget_ready" });
+  };
+  return {
+    start() {
+      if (acknowledged || timer !== null) return;
+      notify();
+      if (!acknowledged) timer = schedule(notify, retryMs);
+    },
+    acknowledge() {
+      if (acknowledged) return;
+      acknowledged = true;
+      if (timer !== null) cancel(timer);
+      timer = null;
+    },
+    get acknowledged() { return acknowledged; },
+  };
+}
+
 export function escapeHtml(value) {
   return clean(value).replace(/[&<>'"]/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -121,6 +144,7 @@ export function reduceWidgetState(state, event = {}) {
   if (event.type === "open") return { ...state, open: true };
   if (event.type === "close") return { ...state, open: false };
   if (event.type === "initialise") {
+    if (state.initialised) return state;
     const pageContext = normaliseWidgetPageContext(event.pageContext);
     const conversationId = clean(event.conversationId, 100) || null;
     return {
