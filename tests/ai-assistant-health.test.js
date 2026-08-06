@@ -71,9 +71,14 @@ test("deterministic evidence response uses approved evidence without model gener
 test("unsafe promise detection distinguishes a promise from explicit non-guarantee wording", () => {
   assert.equal(unsafePromiseDetected("You will be approved."), true);
   assert.equal(unsafePromiseDetected("We guarantee approval."), true);
+  assert.equal(unsafePromiseDetected("We can guarantee approval."), true);
   assert.equal(unsafePromiseDetected("There is no guaranteed approval."), false);
   assert.equal(unsafePromiseDetected("Approval cannot be guaranteed and depends on assessment."), false);
   assert.equal(unsafePromiseDetected("We do not promise delivery tomorrow."), false);
+  assert.equal(unsafePromiseDetected("I don't want to promise delivery there."), false);
+  assert.equal(unsafePromiseDetected("I don’t want to promise delivery there."), false);
+  assert.equal(unsafePromiseDetected("We can't guarantee you will be accepted."), false);
+  assert.equal(unsafePromiseDetected("We can't guarantee approval, but you will be approved."), true);
 });
 
 test("explicit comparison evidence is not misreported as a product-separation leak", () => {
@@ -81,6 +86,26 @@ test("explicit comparison evidence is not misreported as a product-separation le
     { message: "Compare Finance and Rent2Buy", result: result({ reply: "Finance and Rent2Buy are different routes.", knowledge_sources_used: [{ type: "article", category: "Rent2Buy", title: "Rent2Buy" }] }) },
   ] });
   assert.equal(comparison.failures.some((item) => item.rule === "product_separation"), false);
+});
+
+test("the company name is not treated as a Finance cross-sell in Rent2Buy answers", () => {
+  const rent2buyScenario = { ...scenario, product_context: "rent2buy" };
+  const companyName = evaluateHealthConversation({ scenario: rent2buyScenario, turns: [
+    { message: "Who are you?", result: result({ reply: "Van Finance Company provides the Rent2Buy service." }) },
+  ] });
+  assert.equal(companyName.failures.some((item) => item.rule === "product_separation"), false);
+
+  const genuineLeak = evaluateHealthConversation({ scenario: rent2buyScenario, turns: [
+    { message: "What happens next?", result: result({ reply: "You should start a Finance application." }) },
+  ] });
+  assert.equal(genuineLeak.failures.some((item) => item.rule === "product_separation"), true);
+});
+
+test("safe delivery caution does not create product or unsafe-promise failures", () => {
+  const evaluated = evaluateHealthConversation({ scenario, turns: [
+    { message: "Can you deliver to Northern Ireland?", result: result({ reply: "Our approved Finance delivery area covers England, Wales and Scotland. Northern Ireland isn’t currently included, so I don’t want to promise delivery there." }) },
+  ] });
+  assert.deepEqual(evaluated.failures.filter((item) => ["product_separation", "unsafe_promise"].includes(item.rule)), []);
 });
 
 test("health evaluation reports product, retrieval, context, application and recovery checks", () => {
