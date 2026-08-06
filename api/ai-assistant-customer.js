@@ -11,13 +11,15 @@ import {
   productChoiceReply,
   promptLeakageReply,
   publicApplicationCta,
-  publicJourneyState,
-  publicRememberedFacts,
   redactSensitiveCustomerData,
   safeCustomerPayload,
   secureHash,
   validateWixOrigin,
 } from "../lib/publicAssistantFoundation.js";
+import {
+  buildCanonicalConversationInput,
+  canonicalSessionState,
+} from "../lib/canonicalPublicAssistantSession.js";
 
 const MAX_SESSION_MESSAGES = 100;
 const MAX_HISTORY_MESSAGES = 60;
@@ -184,22 +186,6 @@ function homepageComparisonReply() {
   return "Van Finance is a standard finance route where approval and terms depend on the lender. Rent2Buy is based on affordability rather than a credit check, with an initial rental followed by monthly payments before ownership transfers at the end. Which option would you like help with?";
 }
 
-function contextualiseShortFactualMessage(message, productLock) {
-  const original = clean(message, 3000);
-  if (!["finance", "rent2buy"].includes(productLock)) return original;
-  const normalised = original.toLowerCase().replace(/[’‘]/g, "'").replace(/[^a-z0-9£?+]+/g, " ").trim();
-  const productName = productLock === "rent2buy" ? "Rent2Buy" : "Van Finance";
-
-  if (/^(?:(?:is|are) )?(?:the )?(?:price|prices|payments?|costs?)?\s*(?:vat|tax)\s*(?:included|inclusive)?\??$/.test(normalised)
-    || /^(?:is )?vat included\??$/.test(normalised)
-    || /^(?:are )?(?:the )?prices? (?:plus|excluding|exclusive of) vat\??$/.test(normalised)
-    || /^(?:what about )?(?:vat|tax)\??$/.test(normalised)) {
-    return `For ${productName}, are the advertised prices and payments inclusive of VAT, or are they plus VAT?`;
-  }
-
-  return original;
-}
-
 async function startConversation(supabase, body, environment) {
   const pageContext = normalisePageContext(body.page_context);
   const { conversationId, greeting } = await createSession(supabase, pageContext, environment);
@@ -263,36 +249,22 @@ async function continueConversation(supabase, body, environment, simulateConvers
     }
   }
 
-  const rememberedFacts = {
-    ...(session.remembered_facts || {}),
-    product_context: productLock,
-  };
-  const resolvedMessage = contextualiseShortFactualMessage(message, productLock);
   const requestId = `public-${randomUUID()}`;
-  const generated = await simulateConversation(supabase, {
-    request_id: requestId,
-    session_id: session.id,
-    message: resolvedMessage,
-    product_context: productLock,
-    messages: history,
-    remembered_facts: rememberedFacts,
-    journey_state: session.journey_state || {},
+  const canonicalInput = buildCanonicalConversationInput({
+    session: { ...session, product_lock: productLock },
+    message,
+    requestId,
+    history,
   });
+  const generated = await simulateConversation(supabase, canonicalInput);
   const result = generated.result;
-  const nextFacts = { ...publicRememberedFacts(result), product_context: productLock };
-  const nextJourney = publicJourneyState(result);
   const reply = clean(result.reply, 5000);
   const nextHistory = boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]);
+  const state = canonicalSessionState({ session, result, productLock });
   await updateSession(supabase, session, {
-    product_lock: productLock,
+    ...state,
     conversation_history: nextHistory,
-    remembered_facts: nextFacts,
-    journey_state: nextJourney,
-    application_readiness: clean(result.application_readiness, 100) || "Exploring",
-    budget: clean(nextFacts.budget_monthly_gbp ?? nextFacts.budget, 100) || null,
-    employment: clean(nextFacts.employment_status, 100) || null,
     message_count: Number(session.message_count || 0) + 1,
-    last_competence_result_id: result.id || null,
   });
   return safeCustomerPayload({
     reply,
