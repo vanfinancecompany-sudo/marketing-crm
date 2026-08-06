@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Van Finance Assistant</title>
+  <style>html,body{margin:0;width:100%;height:100%;background:transparent}body{overflow:hidden}</style>
+</head>
+<body>
+  <vfc-ai-assistant></vfc-ai-assistant>
+  <script type="module">
+    import "./widget.mjs";
+    import { WIDGET_CHANNEL } from "./widget-core.mjs";
+
+    const widget = document.querySelector("vfc-ai-assistant");
+    widget.addEventListener("vfc-ai-request", (event) => {
+      if (event.detail?.channel === WIDGET_CHANNEL) window.parent.postMessage(event.detail, "*");
+    });
+    window.addEventListener("message", (event) => {
+      if (event.data?.channel === WIDGET_CHANNEL) widget.receive(event.data);
+    });
+  </script>
+</body>
+</html>
