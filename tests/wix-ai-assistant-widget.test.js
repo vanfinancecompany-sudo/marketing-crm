@@ -136,6 +136,21 @@ test("entry point includes responsive mobile layout, accessible controls and key
   assert.match(embed, /window\.parent\.postMessage/);
 });
 
+test("hosted embed route has a Wix-only frame policy without weakening other CRM routes", async () => {
+  const configuration = JSON.parse(await readFile(new URL("../vercel.json", import.meta.url), "utf8"));
+  const embedPolicy = configuration.headers?.find((entry) => entry.source === "/wix-ai-assistant/embed.html");
+  assert.ok(embedPolicy, "the hosted widget must have an explicit route-scoped frame policy");
+
+  const configuredHeaders = new Map(embedPolicy.headers.map((header) => [header.key.toLowerCase(), header.value]));
+  assert.equal(configuredHeaders.has("x-frame-options"), false, "X-Frame-Options must not conflict with the multi-origin CSP policy");
+  assert.equal(
+    configuredHeaders.get("content-security-policy"),
+    "frame-ancestors 'self' https://vanfinancecompany.co.uk https://www.vanfinancecompany.co.uk https://editor.wix.com https://manage.wix.com https://www.wix.com https://*.wixsite.com",
+  );
+  assert.equal(configuredHeaders.get("content-security-policy").includes("frame-ancestors *"), false);
+  assert.equal(configuration.headers.length, 1, "the framing exception must not apply to other CRM routes");
+});
+
 test("Wix adapter calls only the public endpoint, stores only conversation IDs and validates CTA actions twice", async () => {
   const [adapter, configurations] = await Promise.all([
     readFile(new URL("../wix/aiAssistantPageAdapter.js", import.meta.url), "utf8"),
