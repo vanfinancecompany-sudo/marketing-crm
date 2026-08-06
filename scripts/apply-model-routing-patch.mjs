@@ -84,23 +84,9 @@ replaceOnce(
   `generation_time_ms: generationTime, model, model_route: modelRoute, category_filter: categoryFilter }, request_trace: trace };`,
 );
 
-replaceOnce(
-  "live health model logging",
-  `model: clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini"`,
-  `model: ASSISTANT_MODEL_POLICY.full`,
-);
-
-replaceOnce(
-  "live health model configuration",
-  `validation: { openai_calls_enabled: true, database_writes: 0, customer_records_created: 0, model: clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini", pricing_configured: estimateOpenAICost({}, environment) !== null }`,
-  `validation: { openai_calls_enabled: true, database_writes: 0, customer_records_created: 0, model_policy: ASSISTANT_MODEL_POLICY, pricing_configured: estimateOpenAICost({}, environment) !== null }`,
-);
-
-replaceOnce(
-  "health configuration model policy",
-  `    model: clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini",`,
-  `    model_policy: ASSISTANT_MODEL_POLICY,`,
-);
+const legacyHealthModel = `model: clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini"`;
+if (!source.includes(legacyHealthModel)) throw new Error("Legacy live-health model diagnostics were not found");
+source = source.replaceAll(legacyHealthModel, `model: ASSISTANT_MODEL_POLICY.full`);
 
 await writeFile(apiPath, source);
 console.log("Canonical model routing patch applied.");
