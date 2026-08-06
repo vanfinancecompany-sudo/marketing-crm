@@ -182,10 +182,6 @@ function productSelectionReply(product) {
     : "Great — I’ll keep this conversation focused on Van Finance. What would you like to know?";
 }
 
-function homepageComparisonReply() {
-  return "Van Finance is a standard finance route where approval and terms depend on the lender. Rent2Buy is based on affordability rather than a credit check, with an initial rental followed by monthly payments before ownership transfers at the end. Which option would you like help with?";
-}
-
 async function startConversation(supabase, body, environment) {
   const pageContext = normalisePageContext(body.page_context);
   const { conversationId, greeting } = await createSession(supabase, pageContext, environment);
@@ -218,7 +214,16 @@ async function continueConversation(supabase, body, environment, simulateConvers
   let productLock = session.product_lock;
   if (!productLock && session.page_type === "homepage") {
     if (isHomepageComparisonQuestion(message)) {
-      const reply = homepageComparisonReply();
+      const requestId = `public-${randomUUID()}`;
+      const comparisonInput = buildCanonicalConversationInput({
+        session: { ...session, product_lock: "finance" },
+        message,
+        requestId,
+        history,
+      });
+      const generated = await simulateConversation(supabase, comparisonInput);
+      const result = generated.result;
+      const reply = clean(result.reply, 5000);
       await updateSession(supabase, session, {
         conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
         message_count: Number(session.message_count || 0) + 1,
@@ -241,7 +246,9 @@ async function continueConversation(supabase, body, environment, simulateConvers
       const reply = productSelectionReply(productLock);
       await updateSession(supabase, session, {
         product_lock: productLock,
-        remembered_facts: { ...(session.remembered_facts || {}), product_context: productLock },
+        remembered_facts: { product_context: productLock },
+        journey_state: {},
+        conversation_history: [],
         message_count: Number(session.message_count || 0) + 1,
       });
       return safeCustomerPayload({ reply, conversationId, status: "ready" });
