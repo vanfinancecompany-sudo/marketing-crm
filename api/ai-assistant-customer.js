@@ -1,0 +1,284 @@
+import { createClient } from "@supabase/supabase-js";
+import { randomUUID } from "node:crypto";
+import { simulateCustomerConversation } from "./marketing-ai-assistant-competence.js";
+import {
+  createPublicConversationId,
+  determineHomepageProduct,
+  initialCustomerReply,
+  isPromptLeakageAttempt,
+  normalisePageContext,
+  pageProductLock,
+  productChoiceReply,
+  promptLeakageReply,
+  publicApplicationCta,
+  publicJourneyState,
+  publicRememberedFacts,
+  redactSensitiveCustomerData,
+  safeCustomerPayload,
+  secureHash,
+  validateWixOrigin,
+} from "../lib/publicAssistantFoundation.js";
+
+const MAX_SESSION_MESSAGES = 100;
+const MAX_HISTORY_MESSAGES = 60;
+const MINUTE_LIMIT = 15;
+const DAILY_LIMIT = 200;
+const SESSION_HOURS = 24;
+const clean = (value, limit = 5000) => String(value || "").trim().slice(0, limit);
+
+class PublicAssistantError extends Error {
+  constructor(statusCode, safeStatus, safeReply) {
+    super(safeReply);
+    this.name = "PublicAssistantError";
+    this.statusCode = statusCode;
+    this.safeStatus = safeStatus;
+    this.safeReply = safeReply;
+  }
+}
+
+function getSupabase(environment = process.env) {
+  if (!environment.SUPABASE_URL || !environment.SUPABASE_SERVICE_ROLE_KEY) throw new PublicAssistantError(503, "unavailable", "The assistant is temporarily unavailable. Please try again shortly.");
+  return createClient(environment.SUPABASE_URL, environment.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+}
+
+function parseBody(request) {
+  if (!request.body) return {};
+  if (typeof request.body === "object") return request.body;
+  try { return JSON.parse(request.body); } catch { throw new PublicAssistantError(400, "invalid_request", "Please send that request again."); }
+}
+
+function requestOrigin(request) {
+  return clean(request.headers?.origin || request.headers?.Origin, 500);
+}
+
+function requestIp(request) {
+  const forwarded = clean(request.headers?.["x-forwarded-for"], 500).split(",")[0].trim();
+  return forwarded || clean(request.headers?.["x-real-ip"], 100) || "unknown";
+}
+
+function setCors(response, origin) {
+  response.setHeader?.("Access-Control-Allow-Origin", origin);
+  response.setHeader?.("Access-Control-Allow-Methods", "POST, OPTIONS");
+  response.setHeader?.("Access-Control-Allow-Headers", "Content-Type");
+  response.setHeader?.("Access-Control-Max-Age", "600");
+  response.setHeader?.("Cache-Control", "no-store, max-age=0");
+  response.setHeader?.("Vary", "Origin");
+}
+
+function data(result, fallback) {
+  if (result?.error) throw new Error(result.error.message || fallback);
+  return result?.data;
+}
+
+function rateWindow(now, durationMs) {
+  return new Date(Math.floor(now.getTime() / durationMs) * durationMs).toISOString();
+}
+
+async function consumeRateLimit(supabase, keyHash, scope, windowStart, limit) {
+  const result = await supabase.rpc("consume_ai_assistant_rate_limit", {
+    p_key_hash: keyHash,
+    p_scope: scope,
+    p_window_start: windowStart,
+    p_limit: limit,
+  });
+  const allowed = data(result, "Rate limiting is unavailable.");
+  if (allowed !== true) throw new PublicAssistantError(429, "rate_limited", "You’ve sent several messages quickly. Please wait a moment and try again.");
+}
+
+async function enforceRateLimits(supabase, request, environment = process.env) {
+  const secret = clean(environment.AI_ASSISTANT_SESSION_SECRET, 1000);
+  const keyHash = secureHash(`ip:${requestIp(request)}`, secret);
+  const now = new Date();
+  await consumeRateLimit(supabase, keyHash, "minute", rateWindow(now, 60_000), MINUTE_LIMIT);
+  await consumeRateLimit(supabase, keyHash, "day", rateWindow(now, 86_400_000), DAILY_LIMIT);
+}
+
+function sessionExpiry() {
+  return new Date(Date.now() + SESSION_HOURS * 60 * 60 * 1000).toISOString();
+}
+
+async function createSession(supabase, pageContext, environment = process.env) {
+  const conversationId = createPublicConversationId();
+  const productLock = pageProductLock(pageContext.page_type);
+  const greeting = initialCustomerReply(pageContext.page_type);
+  const rememberedFacts = {
+    ...(productLock ? { product_context: productLock } : {}),
+    ...(pageContext.vehicle?.title || pageContext.vehicle?.registration
+      ? { vehicle_interest: pageContext.vehicle.title || pageContext.vehicle.registration }
+      : {}),
+  };
+  const payload = {
+    public_token_hash: secureHash(conversationId, environment.AI_ASSISTANT_SESSION_SECRET),
+    page_type: pageContext.page_type,
+    product_lock: productLock,
+    vehicle_context: pageContext.vehicle,
+    conversation_history: [{ role: "assistant", content: greeting }],
+    remembered_facts: rememberedFacts,
+    journey_state: {},
+    application_readiness: "Exploring",
+    budget: null,
+    employment: null,
+    message_count: 0,
+    status: "active",
+    expires_at: sessionExpiry(),
+  };
+  const session = data(await supabase.from("ai_customer_sessions").insert(payload).select("*").single(), "Anonymous assistant session could not be created.");
+  return { session, conversationId, greeting };
+}
+
+async function loadSession(supabase, conversationId, environment = process.env) {
+  const token = clean(conversationId, 100);
+  if (!token) throw new PublicAssistantError(400, "invalid_request", "Please start a new assistant conversation.");
+  const tokenHash = secureHash(token, environment.AI_ASSISTANT_SESSION_SECRET);
+  const session = data(await supabase.from("ai_customer_sessions").select("*").eq("public_token_hash", tokenHash).eq("status", "active").maybeSingle(), "Assistant session could not be loaded.");
+  if (!session || new Date(session.expires_at).getTime() <= Date.now()) throw new PublicAssistantError(410, "invalid_request", "This conversation has expired. Please start a new one.");
+  if (Number(session.message_count || 0) >= MAX_SESSION_MESSAGES) throw new PublicAssistantError(429, "rate_limited", "This conversation has reached its message limit. Please start a new conversation.");
+  return session;
+}
+
+function boundedHistory(history = []) {
+  return (Array.isArray(history) ? history : []).slice(-MAX_HISTORY_MESSAGES).map((item) => ({
+    role: item?.role === "assistant" ? "assistant" : "user",
+    content: clean(item?.content, 5000),
+  })).filter((item) => item.content);
+}
+
+async function updateSession(supabase, session, changes) {
+  return data(await supabase.from("ai_customer_sessions").update({
+    ...changes,
+    last_activity_at: new Date().toISOString(),
+    expires_at: sessionExpiry(),
+  }).eq("id", session.id).select("*").single(), "Assistant session could not be updated.");
+}
+
+function assertPageContext(session, supplied) {
+  if (session.page_type !== supplied.page_type) throw new PublicAssistantError(409, "invalid_request", "The page context changed. Please start a new conversation on this page.");
+  if (session.page_type === "finance_vehicle") {
+    const storedRegistration = clean(session.vehicle_context?.registration, 20);
+    const suppliedRegistration = clean(supplied.vehicle?.registration, 20);
+    if (storedRegistration && suppliedRegistration && storedRegistration !== suppliedRegistration) throw new PublicAssistantError(409, "invalid_request", "The vehicle changed. Please start a new conversation for this van.");
+  }
+}
+
+async function startConversation(supabase, body, environment) {
+  const pageContext = normalisePageContext(body.page_context);
+  const { conversationId, greeting } = await createSession(supabase, pageContext, environment);
+  return safeCustomerPayload({
+    reply: greeting,
+    cta: null,
+    conversationId,
+    status: pageContext.page_type === "homepage" ? "needs_product" : "ready",
+  });
+}
+
+async function continueConversation(supabase, body, environment, simulateConversation = simulateCustomerConversation) {
+  const conversationId = clean(body.conversation_id, 100);
+  const session = await loadSession(supabase, conversationId, environment);
+  const pageContext = normalisePageContext(body.page_context);
+  assertPageContext(session, pageContext);
+  const message = redactSensitiveCustomerData(body.message);
+  if (!message) throw new PublicAssistantError(400, "invalid_request", "Please enter a message.");
+  const history = boundedHistory(session.conversation_history);
+
+  if (isPromptLeakageAttempt(message)) {
+    const reply = promptLeakageReply();
+    await updateSession(supabase, session, {
+      conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
+      message_count: Number(session.message_count || 0) + 1,
+    });
+    return safeCustomerPayload({ reply, conversationId, status: "ready" });
+  }
+
+  let productLock = session.product_lock;
+  if (!productLock && session.page_type === "homepage") {
+    const requestedChoice = clean(body.product_choice, 20).toLowerCase();
+    productLock = ["finance", "rent2buy"].includes(requestedChoice) ? requestedChoice : determineHomepageProduct(message, history);
+    if (!productLock) {
+      const reply = productChoiceReply();
+      await updateSession(supabase, session, {
+        conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
+        message_count: Number(session.message_count || 0) + 1,
+      });
+      return safeCustomerPayload({ reply, conversationId, status: "needs_product" });
+    }
+  }
+
+  const rememberedFacts = {
+    ...(session.remembered_facts || {}),
+    product_context: productLock,
+  };
+  const requestId = `public-${randomUUID()}`;
+  const generated = await simulateConversation(supabase, {
+    request_id: requestId,
+    session_id: session.id,
+    message,
+    product_context: productLock,
+    messages: history,
+    remembered_facts: rememberedFacts,
+    journey_state: session.journey_state || {},
+  });
+  const result = generated.result;
+  const nextFacts = publicRememberedFacts(result);
+  const nextJourney = publicJourneyState(result);
+  const reply = clean(result.reply, 5000);
+  const nextHistory = boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]);
+  await updateSession(supabase, session, {
+    product_lock: productLock,
+    conversation_history: nextHistory,
+    remembered_facts: nextFacts,
+    journey_state: nextJourney,
+    application_readiness: clean(result.application_readiness, 100) || "Exploring",
+    budget: clean(nextFacts.budget_monthly_gbp ?? nextFacts.budget, 100) || null,
+    employment: clean(nextFacts.employment_status, 100) || null,
+    message_count: Number(session.message_count || 0) + 1,
+    last_competence_result_id: result.id || null,
+  });
+  return safeCustomerPayload({
+    reply,
+    cta: publicApplicationCta(session.page_type, productLock, result),
+    conversationId,
+    status: "ready",
+  });
+}
+
+export async function handleCustomerAssistantRequest(request, response, dependencies = {}) {
+  const environment = dependencies.environment || process.env;
+  const origin = requestOrigin(request);
+  response.setHeader?.("Cache-Control", "no-store, max-age=0");
+  if (!validateWixOrigin(origin, environment)) return response.status(403).json(safeCustomerPayload({ status: "invalid_request", reply: "This assistant request is not available from this website." }));
+  setCors(response, origin);
+  if (request.method === "OPTIONS") return response.status(204).end();
+  if (request.method !== "POST") return response.status(405).json(safeCustomerPayload({ status: "invalid_request", reply: "That request method is not supported." }));
+  let body = {};
+  let conversationId = null;
+  try {
+    body = parseBody(request);
+    conversationId = clean(body.conversation_id, 100) || null;
+    const supabase = dependencies.supabase || getSupabase(environment);
+    await enforceRateLimits(supabase, request, environment);
+    const payload = body.action === "start"
+      ? await startConversation(supabase, body, environment)
+      : body.action === "message"
+        ? await continueConversation(supabase, body, environment, dependencies.simulateConversation || simulateCustomerConversation)
+        : (() => { throw new PublicAssistantError(400, "invalid_request", "Please start or continue an assistant conversation."); })();
+    return response.status(200).json(payload);
+  } catch (error) {
+    const known = error instanceof PublicAssistantError;
+    console.error("PUBLIC AI ASSISTANT ERROR", {
+      request_id: `public-${randomUUID()}`,
+      action: clean(body.action, 40) || null,
+      conversation_present: Boolean(conversationId),
+      exception_type: error?.name || "Error",
+      message: clean(error?.message, 1000),
+    });
+    return response.status(known ? error.statusCode : 503).json(safeCustomerPayload({
+      conversationId,
+      status: known ? error.safeStatus : "unavailable",
+      reply: known ? error.safeReply : "The assistant is temporarily unavailable. Please try again shortly.",
+    }));
+  }
+}
+
+export default async function handler(request, response) {
+  return handleCustomerAssistantRequest(request, response);
+}
