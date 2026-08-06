@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { classifyConversationIntent } from "../lib/conversationIntelligence.js";
+import { rankKnowledge } from "../lib/aiAssistantCompetence.js";
 import { buildJourneyState } from "../lib/applicationJourneyEngine.js";
 import { classifyUniversalMessage } from "../lib/humanConversationRecovery.js";
 import { orchestrateConversationTurn } from "../lib/conversationKnowledgeOrchestrator.js";
@@ -41,6 +42,32 @@ test("canonical Finance VAT follow-ups require approved knowledge retrieval", ()
     assert.equal(result.orchestration.retrieval_required, true, message);
     assert.ok(result.orchestration.priority_path_taken.includes("verified_business_knowledge"), message);
   }
+});
+
+test("canonical VAT wording ranks approved Finance evidence without rewriting the original turn", () => {
+  const sources = rankKnowledge("Tax included?", [
+    {
+      type: "business_brain",
+      source_id: "finance-vat",
+      title: "Van Finance pricing",
+      heading: "VAT treatment",
+      passage: "Advertised Finance vehicle prices are shown plus VAT unless the individual vehicle advert explicitly states otherwise.",
+      product: "finance",
+    },
+    {
+      type: "business_brain",
+      source_id: "delivery",
+      title: "Finance delivery",
+      heading: "Delivery",
+      passage: "Qualifying Finance vehicles include mainland delivery.",
+      product: "finance",
+    },
+  ], {
+    messages: [{ role: "user", content: "Finance" }],
+    limit: 8,
+  });
+  assert.equal(sources[0].source_id, "finance-vat");
+  assert.ok(sources[0].matched_terms.includes("vat"));
 });
 
 test("canonical Rent2Buy VAT follow-ups retain the Rent2Buy boundary", () => {
