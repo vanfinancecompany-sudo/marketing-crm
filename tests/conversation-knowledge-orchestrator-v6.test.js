@@ -69,6 +69,16 @@ test("sales statements and hesitation stay in conversation instead of forcing fa
   assert.equal(decision("What documents do I need?", { priorJourney: {} }).orchestration.retrieval_required, true);
 });
 
+test("V6-001 treats bare employment status as conversation state, not a knowledge request", () => {
+  for (const message of ["Self employed", "Limited company", "Only trading six months"]) {
+    const result = decision(message, { priorJourney: { buying_intent_level: "High Intent", journey_stage: "Employment known" } });
+    assert.equal(result.orchestration.retrieval_required, false, message);
+    assert.ok(!result.orchestration.priority_path_taken.includes("verified_business_knowledge"), message);
+  }
+  assert.equal(decision("Does being self employed affect eligibility?", { priorJourney: {} }).orchestration.retrieval_required, true);
+  assert.equal(decision("Is being a limited company a problem?", { priorJourney: {} }).orchestration.retrieval_required, true);
+});
+
 test("product separation blocks retrieval before every lower priority", () => {
   const orchestration = orchestrateConversationTurn({
     message: "Tell me about Rent2Buy insurance",
