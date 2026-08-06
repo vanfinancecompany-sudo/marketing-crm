@@ -89,7 +89,22 @@ function activeFinanceSession() {
   };
 }
 
-function messageRequest(message) {
+function homepageSession() {
+  return {
+    id: "homepage-session-id",
+    page_type: "homepage",
+    product_lock: null,
+    vehicle_context: {},
+    conversation_history: [],
+    remembered_facts: {},
+    journey_state: {},
+    message_count: 0,
+    status: "active",
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+  };
+}
+
+function messageRequest(message, { pageType = "finance_general", productChoice } = {}) {
   return {
     method: "POST",
     headers: {
@@ -99,8 +114,9 @@ function messageRequest(message) {
     body: {
       action: "message",
       conversation_id: "opaque-public-conversation-id",
-      page_context: { pageType: "finance_general" },
+      page_context: { pageType },
       message,
+      ...(productChoice ? { product_choice: productChoice } : {}),
     },
   };
 }
@@ -145,6 +161,48 @@ test("canonical session state persists the runner result rather than a reduced p
   assert.deepEqual(state.remembered_facts, result.remembered_facts);
   assert.equal(state.budget, "350");
   assert.equal(state.last_competence_result_id, "result-1");
+});
+
+test("homepage product selection sets transport state without polluting canonical history", async () => {
+  const { client, state } = statefulSupabase(homepageSession());
+  const canonicalInputs = [];
+  const simulateConversation = async (_supabase, input) => {
+    canonicalInputs.push(structuredClone(input));
+    return { result: {
+      id: "result-homepage-1",
+      reply: "Finance prices are shown plus VAT.",
+      remembered_facts: { product_context: "finance" },
+      journey_stage: "Research",
+      retrieval_performed: true,
+      confidence: 94,
+    } };
+  };
+
+  const selectionResponse = responseRecorder();
+  await handleCustomerAssistantRequest(
+    messageRequest("finance", { pageType: "homepage", productChoice: "finance" }),
+    selectionResponse,
+    { environment, supabase: client, simulateConversation },
+  );
+
+  assert.equal(selectionResponse.statusCode, 200);
+  assert.equal(state.session.product_lock, "finance");
+  assert.deepEqual(state.session.conversation_history, []);
+  assert.equal(canonicalInputs.length, 0);
+
+  const factualResponse = responseRecorder();
+  await handleCustomerAssistantRequest(
+    messageRequest("tax included?", { pageType: "homepage" }),
+    factualResponse,
+    { environment, supabase: client, simulateConversation },
+  );
+
+  assert.equal(factualResponse.statusCode, 200);
+  assert.equal(canonicalInputs.length, 1);
+  assert.equal(canonicalInputs[0].message, "tax included?");
+  assert.equal(canonicalInputs[0].product_context, "finance");
+  assert.deepEqual(canonicalInputs[0].messages, []);
+  assert.deepEqual(canonicalInputs[0].remembered_facts, { product_context: "finance" });
 });
 
 test("public endpoint carries canonical remembered facts and journey state into the following turn", async () => {
