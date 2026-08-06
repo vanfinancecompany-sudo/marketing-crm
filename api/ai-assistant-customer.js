@@ -114,7 +114,7 @@ async function createSession(supabase, pageContext, environment = process.env) {
     page_type: pageContext.page_type,
     product_lock: productLock,
     vehicle_context: pageContext.vehicle,
-    conversation_history: [{ role: "assistant", content: greeting }],
+    conversation_history: [],
     remembered_facts: rememberedFacts,
     journey_state: {},
     application_readiness: "Exploring",
@@ -242,7 +242,6 @@ async function continueConversation(supabase, body, environment, simulateConvers
       await updateSession(supabase, session, {
         product_lock: productLock,
         remembered_facts: { ...(session.remembered_facts || {}), product_context: productLock },
-        conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
         message_count: Number(session.message_count || 0) + 1,
       });
       return safeCustomerPayload({ reply, conversationId, status: "ready" });
