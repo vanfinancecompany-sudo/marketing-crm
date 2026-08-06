@@ -53,6 +53,12 @@ import {
   orchestrateConversationTurn,
   preserveJourneyAcrossOrchestration,
 } from "../lib/conversationKnowledgeOrchestrator.js";
+import {
+  CONVERSATION_POLISH_REVIEW_FIELDS,
+  assessCtaTiming,
+  polishConversationPresentation,
+  serialisePolishReviewRatings,
+} from "../lib/conversationPolish.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
@@ -396,6 +402,26 @@ export async function simulateCustomerConversation(supabase, body) {
     sourceIds: sources.map((source) => source.source_id),
   });
   response.reply = appendJourneyResume(response.reply, productContext, orchestration);
+  const ctaTiming = assessCtaTiming({
+    journey,
+    facts: memory.remembered_facts,
+    productContext,
+    insufficientKnowledge: response.insufficient_knowledge,
+    conflictDetected: coverageConflictDetected(false, coverageConflicts),
+  });
+  const polish = polishConversationPresentation({
+    reply: response.reply,
+    question,
+    messages,
+    productContext,
+    orchestration,
+    intent,
+    journey,
+    ctaTiming,
+    insufficientKnowledge: response.insufficient_knowledge,
+  });
+  response.reply = polish.reply;
+  const applicationCta = journey.application_cta || ctaTiming.cta;
 
   const learningDiagnosis = conversationLearningDiagnosis({ intent, coverage, insufficientKnowledge: response.insufficient_knowledge });
   const repetitiveWording = detectRepetitiveAssistantWording(messages, response.reply);
@@ -440,7 +466,7 @@ export async function simulateCustomerConversation(supabase, body) {
     repeated_disclaimer: quality.repeated_disclaimer,
     next_best_question: journey.next_best_question || conversationSummary.next_best_question,
     application_readiness: journey.application_readiness || readiness,
-    conversation_summary: { ...conversationSummary, application_readiness: journey.application_readiness || readiness, conversation_goal: journey.conversation_goal, journey_stage: journey.journey_stage, lead_completeness: journey.lead_completeness, recommended_cta: journey.recommended_cta },
+    conversation_summary: { ...conversationSummary, application_readiness: journey.application_readiness || readiness, conversation_goal: journey.conversation_goal, journey_stage: journey.journey_stage, lead_completeness: journey.lead_completeness, recommended_cta: ctaTiming.generated_early ? "Show application button" : journey.recommended_cta },
     frustration_state: intent.primary_intent === "frustration" ? "active" : "none",
     sounded_article_like: quality.sounded_article_like,
     follow_up_question_appropriate: quality.follow_up_question_appropriate,
@@ -455,9 +481,13 @@ export async function simulateCustomerConversation(supabase, body) {
     lead_completeness: journey.lead_completeness,
     application_mode_active: journey.application_mode_active,
     application_state: journey.application_state,
-    application_cta: journey.application_cta,
-    application_cta_generated: Boolean(journey.application_cta),
-    recommended_cta: journey.recommended_cta,
+    application_cta: applicationCta,
+    application_cta_generated: Boolean(applicationCta),
+    recommended_cta: ctaTiming.generated_early ? "Show application button" : journey.recommended_cta,
+    cta_generated_early: ctaTiming.generated_early,
+    cta_timing_eligible: ctaTiming.eligible,
+    cta_timing_reason: ctaTiming.reason,
+    cta_missing_required_facts: ctaTiming.missing_required_facts || [],
     conversation_progressing: journey.conversation_progressing,
     conversation_stalled: journey.conversation_stalled,
     journey_next_best_question: journey.next_best_question,
@@ -488,6 +518,18 @@ export async function simulateCustomerConversation(supabase, body) {
     application_mode_paused: orchestration.application_mode_paused,
     application_mode_resumed: orchestration.application_mode_resumed,
     priority_path_taken: orchestration.priority_path_taken,
+    repeated_fact_score: polish.repeated_fact_score,
+    repeated_fact_keys: polish.repeated_fact_keys,
+    recently_communicated_facts: polish.recently_communicated_facts,
+    recent_phrase_similarity: polish.recent_phrase_similarity,
+    conversation_variety_score: polish.conversation_variety_score,
+    redundancy_score: polish.redundancy_score,
+    human_feel_rating: polish.human_feel_rating,
+    response_sentence_count: polish.response_sentence_count,
+    preferred_sentence_range_met: polish.preferred_sentence_range_met,
+    polish_transition_applied: polish.transition_applied,
+    polish_transition_type: polish.transition_type,
+    factual_reply_preserved: polish.factual_reply_preserved,
   };
   const resultPayload = {
     run_id: body.run_id || null,
@@ -552,7 +594,8 @@ async function saveConversationReview(supabase, body) {
   if (!resultId) throw new ApiError(400, "Result id is required.", "validation");
   if (!CONVERSATION_REVIEW_OUTCOMES.includes(body.outcome)) throw new ApiError(400, "Choose a valid conversation review outcome.", "validation");
   const rating = (value) => value == null || value === "" ? null : Math.min(5, Math.max(1, Number(value)));
-  const payload = { result_id: resultId, outcome: body.outcome, reviewer_notes: clean(body.reviewer_notes, 5000), updated_at: new Date().toISOString() };
+  const polishRatings = Object.fromEntries(CONVERSATION_POLISH_REVIEW_FIELDS.map((field) => [field, rating(body.polish_ratings?.[field])]).filter(([, value]) => value !== null));
+  const payload = { result_id: resultId, outcome: body.outcome, reviewer_notes: serialisePolishReviewRatings(body.reviewer_notes, polishRatings), updated_at: new Date().toISOString() };
   for (const field of CONVERSATION_RATING_FIELDS) payload[field] = rating(body[field]);
   const saved = await runStage("Save conversation review", { result_id: resultId }, async () => data(await supabase.from("knowledge_competence_reviews").upsert(payload, { onConflict: "result_id" }).select().single(), "The conversation review could not be saved."));
   await assessSavedCompetenceResult(supabase, resultId);

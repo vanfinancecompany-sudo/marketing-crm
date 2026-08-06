@@ -1,17 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CONVERSATION_RATING_FIELDS, CONVERSATION_REVIEW_OUTCOMES } from "../lib/conversationIntelligence.js";
+import { CONVERSATION_POLISH_REVIEW_FIELDS } from "../lib/conversationPolish.js";
 import { REAL_CUSTOMER_SCENARIOS } from "../lib/customerSimulationScenarios.js";
 import { createCompetenceRequestId, saveConversationReview, simulateCustomerConversation } from "../services/aiAssistantCompetence.js";
 import { clearMarketingAccessKey, getStoredMarketingAccessKey, saveMarketingAccessKey, validateMarketingAccessKey } from "../services/marketingAccess.js";
 
 const labels = {
-  intent_understood: "Intent understood", conversation_naturalness: "Conversation naturalness", context_memory: "Context memory",
+  intent_understood: "Intent understood", conversation_naturalness: "Conversation Naturalness", context_memory: "Context memory",
   clarification_quality: "Clarification quality", accuracy: "Answer accuracy", product_separation: "Product separation",
   helpfulness: "Helpfulness", brevity: "Brevity", conversion_value: "Conversion value", safety: "Safety",
+  sales_flow_quality: "Sales Flow Quality", transition_quality: "Transition Quality", knowledge_integration: "Knowledge Integration",
+  conversation_smoothness: "Conversation Smoothness", cta_timing: "CTA Timing", conversation_confidence: "Conversation Confidence",
+  redundancy_score: "Redundancy Score", human_feel_rating: "Human Feel Rating",
 };
 const outcomeLabel = (value) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const newSessionId = () => globalThis.crypto?.randomUUID?.() || `simulation-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const initialRatings = Object.fromEntries(CONVERSATION_RATING_FIELDS.map((field) => [field, 5]));
+const initialPolishRatings = Object.fromEntries(CONVERSATION_POLISH_REVIEW_FIELDS.map((field) => [field, 5]));
+const coreRatingFields = CONVERSATION_RATING_FIELDS.filter((field) => field !== "conversation_naturalness");
+const polishRatingFields = ["conversation_naturalness", ...CONVERSATION_POLISH_REVIEW_FIELDS];
 
 function Diagnostic({ label, value }) { return <div className="competence-metric"><span>{label}</span><strong>{value == null || value === "" ? "—" : String(value)}</strong></div>; }
 
@@ -59,6 +66,13 @@ function ResultDiagnostics({ result }) {
         <Diagnostic label="Customer emotion" value={result.customer_emotion} />
         <Diagnostic label="Objection" value={result.objection_detected ? result.objection_type : "None"} />
         <Diagnostic label="Repeated phrase" value={result.repeated_phrase_detected ? "Detected" : "No"} />
+        <Diagnostic label="Repeated Fact Score" value={result.repeated_fact_score == null ? "—" : `${result.repeated_fact_score}/100`} />
+        <Diagnostic label="Recent Phrase Similarity" value={result.recent_phrase_similarity == null ? "—" : `${result.recent_phrase_similarity}%`} />
+        <Diagnostic label="Conversation Variety Score" value={result.conversation_variety_score == null ? "—" : `${result.conversation_variety_score}/100`} />
+        <Diagnostic label="Redundancy Score" value={result.redundancy_score == null ? "—" : `${result.redundancy_score}/100`} />
+        <Diagnostic label="Human Feel Rating" value={result.human_feel_rating == null ? "—" : `${result.human_feel_rating}/100`} />
+        <Diagnostic label="Sentence range" value={result.preferred_sentence_range_met ? "2–5 sentences" : `${result.response_sentence_count || 0} sentences`} />
+        <Diagnostic label="CTA timing" value={result.cta_generated_early ? "Shown early" : result.cta_timing_eligible ? "Existing CTA" : "Held back"} />
         <Diagnostic label="Confidence" value={`${result.confidence}%`} />
         <Diagnostic label="Response time" value={`${result.response_time_ms} ms`} />
       </div>
@@ -67,6 +81,7 @@ function ResultDiagnostics({ result }) {
       <div className="notice"><strong>V4 journey reasons:</strong> {result.buying_intent_reasons?.join(" ") || "None"}<br /><strong>Journey next question:</strong> {result.journey_next_best_question || "None"}<br /><strong>Repeated assistant wording:</strong> {result.repeated_assistant_wording ? result.repeated_assistant_phrase : "No"}</div>
       <div className="notice"><strong>V5 classification:</strong> {result.universal_message_reason || "None"}<br /><strong>Emotion:</strong> {result.customer_emotion_reason || "None"}<br /><strong>Objection:</strong> {result.objection_reason || "None"}<br /><strong>Low-confidence stop:</strong> {result.conversation_confidence_below_threshold ? "Yes — clarification used" : "No"}</div>
       <div className="notice"><strong>V6 priority path:</strong> {result.priority_path_taken?.join(" → ") || "None"}<br /><strong>Conversation paused:</strong> {result.conversation_paused ? "Yes" : "No"}<br /><strong>Conversation resumed:</strong> {result.conversation_resumed ? "Yes" : "No"}<br /><strong>Resume reason:</strong> {result.resume_reason || "None"}<br /><strong>Journey stage:</strong> {result.journey_stage_before_retrieval || "—"} → {result.journey_stage_after_retrieval || "—"}<br /><strong>Knowledge source IDs:</strong> {result.knowledge_source_ids?.join(", ") || "None"}</div>
+      <div className="notice"><strong>Conversation polish:</strong> {result.polish_transition_type || "none"}<br /><strong>Transition applied:</strong> {result.polish_transition_applied ? "Yes" : "No"}<br /><strong>CTA timing reason:</strong> {result.cta_timing_reason || "None"}<br /><strong>Recently communicated facts:</strong> {result.recently_communicated_facts?.join(", ") || "None"}<br /><strong>Repeated facts:</strong> {result.repeated_fact_keys?.join(", ") || "None"}</div>
       {result.application_cta ? <div className="notice notice--success"><strong>{result.application_cta.label}</strong><br />Internal action: {result.application_cta.action_key}<br />URL: Not configured — future Wix abstraction only</div> : null}
       {Object.keys(coverage).length ? <div className="notice"><strong>Deterministic rule:</strong><br />Location: {coverage.detected_location || "Not supplied"}<br />Resolved: {coverage.resolved_postcode || (coverage.resolved_coordinates ? `${coverage.resolved_coordinates.latitude}, ${coverage.resolved_coordinates.longitude}` : "No")}<br />Distance: {coverage.distance_miles == null ? "Not calculated" : `${coverage.distance_miles} miles`}<br />Result: {coverage.coverage_result}<br />Certainty: {coverage.certainty}</div> : null}
       <h3>Remembered facts</h3>
@@ -95,7 +110,7 @@ export default function RealCustomerSimulationPage() {
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [review, setReview] = useState({ outcome: "pass", ...initialRatings, reviewer_notes: "" });
+  const [review, setReview] = useState({ outcome: "pass", ...initialRatings, polish_ratings: initialPolishRatings, reviewer_notes: "" });
   const [reviewMessage, setReviewMessage] = useState("");
   const [scenarios, setScenarios] = useState([...REAL_CUSTOMER_SCENARIOS]);
   const [scenarioDraft, setScenarioDraft] = useState(() => JSON.stringify(REAL_CUSTOMER_SCENARIOS, null, 2));
@@ -184,7 +199,7 @@ export default function RealCustomerSimulationPage() {
   if (accessStatus !== "unlocked") return <main className="page-stack"><section className="panel"><h2>Real Customer Simulation</h2><p>This internal page uses the existing Marketing CRM access check.</p><form onSubmit={unlock}><label className="field"><span className="field__label">Marketing CRM access key</span><input className="field__input" type="password" value={accessKey} onChange={(event) => setAccessKey(event.target.value)} /></label><button className="button button--primary">Unlock</button></form>{error ? <div className="notice notice--error">{error}</div> : null}</section></main>;
 
   return <div className="page-stack">
-    <section className="panel"><div className="panel__header"><div><div className="eyebrow">AI Sales Assistant V5</div><h2>Human Conversation & Recovery Simulation</h2><p>Test natural recovery, emotion-aware replies and grounded application progression without exposing a public Wix assistant. Use synthetic test wording only; do not enter real customer personal data.</p></div><button className="button button--ghost" type="button" disabled={busy || batch.running} onClick={() => resetConversation()}>Reset Conversation</button></div>
+    <section className="panel"><div className="panel__header"><div><div className="eyebrow">AI Sales Assistant · Salesperson Polish</div><h2>Conversation & Application Experience Simulation</h2><p>The V5 Human Conversation & Recovery Simulation remains intact while reviewers assess natural transitions, concise grounded answers and well-timed application guidance. Use synthetic test wording only; do not enter real customer personal data.</p></div><button className="button button--ghost" type="button" disabled={busy || batch.running} onClick={() => resetConversation()}>Reset Conversation</button></div>
       <div className="competence-metrics"><Diagnostic label="Locked product" value={productContext} /><Diagnostic label="Session" value={sessionId} /><Diagnostic label="Messages" value={messages.length} /></div>
       <div className="competence-context"><button type="button" disabled={busy || batch.running} className={productContext === "finance" ? "is-selected" : ""} onClick={() => resetConversation("finance")}>Finance</button><button type="button" disabled={busy || batch.running} className={productContext === "rent2buy" ? "is-selected" : ""} onClick={() => resetConversation("rent2buy")}>Rent2Buy</button></div>
     </section>
@@ -195,7 +210,8 @@ export default function RealCustomerSimulationPage() {
     <ResultDiagnostics result={result} />
     <section className="panel"><div className="panel__header"><div><div className="eyebrow">Manual review</div><h3>Score this behaviour</h3></div></div>
       <div className="competence-outcomes">{CONVERSATION_REVIEW_OUTCOMES.map((outcome) => <button type="button" className={review.outcome === outcome ? "is-selected" : ""} onClick={() => setReview({ ...review, outcome })} key={outcome}>{outcomeLabel(outcome)}</button>)}</div>
-      <div className="competence-ratings">{CONVERSATION_RATING_FIELDS.map((field) => <label key={field}><span>{labels[field]}</span><select value={review[field]} onChange={(event) => setReview({ ...review, [field]: Number(event.target.value) })}>{[1,2,3,4,5].map((value) => <option value={value} key={value}>{value}/5</option>)}</select></label>)}</div>
+      <h4>Core behaviour</h4><div className="competence-ratings">{coreRatingFields.map((field) => <label key={field}><span>{labels[field]}</span><select value={review[field]} onChange={(event) => setReview({ ...review, [field]: Number(event.target.value) })}>{[1,2,3,4,5].map((value) => <option value={value} key={value}>{value}/5</option>)}</select></label>)}</div>
+      <h4>Conversation polish</h4><div className="competence-ratings">{polishRatingFields.map((field) => <label key={field}><span>{labels[field]}</span><select value={field === "conversation_naturalness" ? review[field] : review.polish_ratings[field]} onChange={(event) => field === "conversation_naturalness" ? setReview({ ...review, [field]: Number(event.target.value) }) : setReview({ ...review, polish_ratings: { ...review.polish_ratings, [field]: Number(event.target.value) } })}>{[1,2,3,4,5].map((value) => <option value={value} key={value}>{value}/5</option>)}</select></label>)}</div>
       <label className="field"><span className="field__label">Reviewer notes</span><textarea className="field__input" rows={4} value={review.reviewer_notes} onChange={(event) => setReview({ ...review, reviewer_notes: event.target.value })} /></label><button className="button button--primary" type="button" disabled={!result?.id} onClick={handleReview}>Save Review</button>{reviewMessage ? <div className="notice">{reviewMessage}</div> : null}
     </section>
     <section className="panel"><div className="panel__header"><div><div className="eyebrow">Scenario library</div><h3>{scenarios.length} realistic scenarios</h3><p>Edit this working library, run one scenario, or run the selected product/category group.</p></div></div>
