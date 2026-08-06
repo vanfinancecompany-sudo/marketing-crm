@@ -34,6 +34,9 @@ test("real-customer normalisation improves interpretation without replacing orig
     "self emplyd 6 mnths aply now": "self employed 6 months apply now",
     "bad credt declind stil worth it": "bad credit declined still worth it",
     "delivry glasgow how lng ok thx": "delivery glasgow how long ok thanks",
+    "tax included": "vat included",
+    "inc VAT": "vat included",
+    "ex VAT": "vat excluded",
   };
   for (const [original, normalised] of Object.entries(cases)) {
     assert.equal(normaliseCustomerMessage(original), normalised);
@@ -57,6 +60,28 @@ test("ambiguous phrases clarify once while clear phrases retrieve", () => {
   const contextualMonthly = classify("Monthly?", "finance", [{ role: "user", content: "How much deposit do I need?" }, { role: "assistant", content: "It depends." }]);
   assert.equal(contextualMonthly.clarification_required, false);
   assert.equal(contextualMonthly.retrieval_required, true);
+});
+
+test("short VAT and pricing questions use canonical retrieval without rewriting the customer message", () => {
+  const variants = [
+    "Tax included?",
+    "VAT included?",
+    "Are prices plus VAT?",
+    "inc VAT?",
+    "Are the payments excluding tax?",
+  ];
+  for (const message of variants) {
+    const finance = classify(message, "finance", [{ role: "user", content: "I’m looking at van finance" }]);
+    assert.equal(finance.original_message, message, message);
+    assert.equal(finance.secondary_intents.includes("vat_pricing"), true, message);
+    assert.equal(finance.retrieval_required, true, message);
+    assert.equal(finance.clarification_required, false, message);
+    assert.notEqual(finance.primary_intent, "incomplete_business_question", message);
+  }
+  const rent2buy = classify("Is tax included?", "rent2buy", [{ role: "user", content: "Tell me about Rent2Buy" }]);
+  assert.equal(rent2buy.product_context, "rent2buy");
+  assert.equal(rent2buy.secondary_intents.includes("vat_pricing"), true);
+  assert.equal(rent2buy.retrieval_required, true);
 });
 
 test("locked product cannot be overridden by classifier or customer wording", () => {
