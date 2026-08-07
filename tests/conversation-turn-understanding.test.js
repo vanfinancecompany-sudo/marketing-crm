@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { classifyConversationIntent } from "../lib/conversationIntelligence.js";
 import { classifyUniversalMessage, contextualRecoveryQuestion } from "../lib/humanConversationRecovery.js";
 import { orchestrateConversationTurn } from "../lib/conversationKnowledgeOrchestrator.js";
+import { polishConversationPresentation } from "../lib/conversationPolish.js";
 
 function understand(message, messages, { product = "finance", priorJourney = {} } = {}) {
   const human = classifyUniversalMessage({ message, messages, journey: priorJourney });
@@ -58,6 +59,51 @@ test("an explicit conversational instruction is allowed through to knowledge rea
   assert.equal(result.intent.retrieval_required, true);
   assert.equal(result.orchestration.retrieval_required, true);
   assert.equal(result.orchestration.recovery_required, false);
+});
+
+test("please explain uses the previous factual answer as the subject instead of generic recovery", () => {
+  const messages = [{
+    role: "assistant",
+    content: "Finance delivery is free across England, Wales and Scotland once the vehicle is ready.",
+  }];
+  const result = understand("please explain", messages, { product: "finance" });
+  assert.equal(result.human.message_type, "follow_up_question");
+  assert.equal(result.human.recovery_required, false);
+  assert.equal(result.human.contextual_requires_knowledge, true);
+  assert.match(result.human.contextual_anchor, /delivery is free/i);
+  assert.equal(result.orchestration.contextual_turn, true);
+  assert.equal(result.orchestration.retrieval_required, true);
+  assert.equal(result.orchestration.recovery_required, false);
+  assert.match(result.intent.normalised_message, /delivery is free/i);
+});
+
+test("a direct answer to an assistant question is treated as conversational context", () => {
+  const messages = [{ role: "assistant", content: "Are you already looking at a specific van?" }];
+  const result = understand("yes a Ford Transit", messages, { product: "finance" });
+  assert.equal(result.human.message_type, "clarification");
+  assert.equal(result.human.recovery_required, false);
+  assert.match(result.human.contextual_anchor, /specific van/i);
+  assert.equal(result.orchestration.contextual_turn, true);
+  assert.equal(result.orchestration.recovery_required, false);
+  assert.equal(result.orchestration.retrieval_required, false);
+  assert.match(result.intent.normalised_message, /ford transit/i);
+});
+
+test("factual answers stop after answering instead of adding a sales-discovery question", () => {
+  const polished = polishConversationPresentation({
+    reply: "An initial decision can sometimes be available quickly, but timing depends on the lender and checks. Are you already looking at a specific van?",
+    question: "How long does the application take?",
+    messages: [],
+    productContext: "finance",
+    intent: { retrieval_required: true, clarification_required: false },
+    orchestration: { recovery_required: false, product_boundary_blocked: false, application_mode_resumed: false },
+    journey: { buying_intent_level: "High Intent", next_best_question: "Are you already looking at a specific van?" },
+    ctaTiming: { generated_early: true },
+  });
+  assert.match(polished.reply, /timing depends on the lender and checks\.$/i);
+  assert.doesNotMatch(polished.reply, /specific van/i);
+  assert.doesNotMatch(polished.reply, /application below/i);
+  assert.equal(polished.transition_type, "answer_only");
 });
 
 test("a polite yes to an active application prompt remains application continuation, not factual retrieval", () => {
