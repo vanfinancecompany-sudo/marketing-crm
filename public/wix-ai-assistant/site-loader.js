@@ -105,7 +105,7 @@
         :host { all: initial; }
         .layer { position:fixed; inset:0; z-index:2147483000; pointer-events:none; font-family:Arial,sans-serif; }
         .launcher {
-          pointer-events:auto; position:absolute; right:18px; bottom:60px; width:82px; height:32px;
+          pointer-events:auto; position:absolute; right:18px; bottom:58px; width:82px; height:44px;
           border:0; border-radius:999px; background:#d71920; color:#fff; cursor:pointer;
           display:flex; align-items:center; justify-content:center; padding:0 10px;
           font:700 11px/1 Arial,sans-serif; letter-spacing:.15px; white-space:nowrap;
@@ -119,7 +119,7 @@
         }
         .hidden { display:none !important; }
         @media (max-width:520px) {
-          .launcher { right:12px; bottom:58px; width:80px; height:32px; font-size:10.5px; }
+          .launcher { right:12px; bottom:56px; width:80px; height:44px; font-size:10.5px; }
           .panel-frame {
             right:12px; bottom:84px; width:calc(100vw - 24px);
             height:min(560px, calc(100vh - 120px)); height:min(560px, calc(100dvh - 120px));
