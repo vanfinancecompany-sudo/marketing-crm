@@ -1,18 +1,41 @@
-// Copy this file into the Wix site's Public files as aiAssistantPageAdapter.js.
+// Copy this file and aiAssistantCmsVehicleContext.js into the Wix site's Public files.
 import { local } from "wix-storage-frontend";
 import { fetch } from "wix-fetch";
+import {
+  FINANCE_VEHICLE_COLLECTION_ID,
+  RENT2BUY_VEHICLE_COLLECTION_ID,
+  buildCmsVehiclePageContext,
+} from "./aiAssistantCmsVehicleContext.js";
+
+export { FINANCE_VEHICLE_COLLECTION_ID, RENT2BUY_VEHICLE_COLLECTION_ID, buildCmsVehiclePageContext };
 
 const CHANNEL = "vfc-ai-assistant-widget-v1";
 const STORAGE_KEY_PREFIX = "vfc_ai_assistant_conversation_id";
 const PAGE_TYPES = ["finance_vehicle", "finance_general", "rent2buy_general", "homepage"];
 const PRODUCTS = ["finance", "rent2buy"];
+const SAFE_PRICE_WORDS = new Set([
+  "from", "vat", "inc", "incl", "including", "inclusive", "ex", "excl", "excluding", "exclusive",
+  "plus", "before", "with", "per", "month", "monthly", "pcm", "pm", "p", "m",
+]);
 
 const clean = (value, limit = 5000) => String(value || "").trim().slice(0, limit);
 
 function normalisePrice(value) {
-  const text = clean(value, 80).replace(/\s+/g, " ");
-  if (!text) return null;
-  return /^(?:from\s+)?£?\s*\d{1,6}(?:,\d{3})*(?:\.\d{1,2})?(?:\s*(?:\+|plus|inc(?:luding)?|incl\.?|excl\.?|excluding)?\s*vat)?(?:\s*(?:per month|pcm|p\/m|monthly))?$/i.test(text) ? text : null;
+  const text = clean(value, 160).replace(/\s+/g, " ");
+  if (!text || !/\d/.test(text) || !/^[£0-9A-Za-z\s,./()+\-:&|]+$/.test(text)) return null;
+  const words = text.toLowerCase().match(/[a-z]+/g) || [];
+  return words.some((word) => !SAFE_PRICE_WORDS.has(word)) ? null : text;
+}
+
+function normaliseTermMonths(value) {
+  const text = clean(value, 40).replace(/\s+/g, " ");
+  if (!/^\d{1,3}(?:\s*months?)?$/i.test(text)) return null;
+  const months = Number.parseInt(text, 10);
+  return months >= 1 && months <= 120 ? months : null;
+}
+
+function compactObject(input = {}) {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== null && value !== undefined && value !== ""));
 }
 
 function safeFormAnchor(value) {
@@ -28,6 +51,7 @@ function normaliseContext(input = {}) {
   if (["finance_vehicle", "finance_general"].includes(pageType) && productContext && productContext !== "finance") throw new Error("Finance page context cannot be overridden.");
   if (pageType === "rent2buy_general" && productContext && productContext !== "rent2buy") throw new Error("Rent2Buy page context cannot be overridden.");
   const applicationMode = clean(input.vehicle?.applicationMode, 20) || (pageType === "finance_vehicle" ? "page_form" : "generic");
+  if (!["page_form", "generic"].includes(applicationMode)) throw new Error("AI Assistant applicationMode is invalid.");
   if (pageType === "finance_vehicle" && applicationMode !== "page_form") throw new Error("Finance vehicle pages must use the existing page application.");
   return {
     pageType,
@@ -38,9 +62,11 @@ function normaliseContext(input = {}) {
       title: clean(input.vehicle?.title, 200) || null,
       pricing: {
         financeMonthly: normalisePrice(input.vehicle?.pricing?.financeMonthly ?? input.vehicle?.pricing?.finance_monthly),
+        retailPriceVat: normalisePrice(input.vehicle?.pricing?.retailPriceVat ?? input.vehicle?.pricing?.finance_retail_vat),
         monthlyRental: normalisePrice(input.vehicle?.pricing?.monthlyRental ?? input.vehicle?.pricing?.rent2buy_monthly),
         initialRental: normalisePrice(input.vehicle?.pricing?.initialRental ?? input.vehicle?.pricing?.rent2buy_initial),
       },
+      termMonths: normaliseTermMonths(input.vehicle?.termMonths ?? input.vehicle?.term_months),
       applicationMode,
       formAnchor: safeFormAnchor(input.vehicle?.formAnchor),
     },
@@ -48,21 +74,39 @@ function normaliseContext(input = {}) {
 }
 
 function endpointContext(context) {
+  const hasVehicle = context.pageType === "finance_vehicle" || (
+    context.pageType === "rent2buy_general"
+    && Boolean(context.vehicle.registration || context.vehicle.stockId || context.vehicle.title)
+  );
+  if (!hasVehicle) return { pageType: context.pageType, vehicle: {} };
+
+  const pricing = context.productContext === "rent2buy"
+    ? compactObject({
+      rent2buy_monthly: context.vehicle.pricing.monthlyRental,
+      rent2buy_initial: context.vehicle.pricing.initialRental,
+    })
+    : compactObject({
+      finance_monthly: context.vehicle.pricing.financeMonthly,
+      finance_retail_vat: context.vehicle.pricing.retailPriceVat,
+    });
+
   return {
     pageType: context.pageType,
-    vehicle: context.pageType === "finance_vehicle" ? {
+    vehicle: compactObject({
       registration: context.vehicle.registration,
       vehicle_id: context.vehicle.stockId,
       title: context.vehicle.title,
-      pricing: {
-        finance_monthly: context.vehicle.pricing.financeMonthly,
-      },
-    } : {},
+      pricing,
+      term_months: context.productContext === "rent2buy" ? context.vehicle.termMonths : null,
+    }),
   };
 }
 
 function sessionStorageKey(context) {
-  const pageIdentity = context.pageType === "finance_vehicle" ? clean(context.vehicle.stockId || context.vehicle.registration, 100) || "vehicle" : context.pageType;
+  const hasVehicleIdentity = Boolean(context.vehicle?.stockId || context.vehicle?.registration);
+  const pageIdentity = hasVehicleIdentity
+    ? `${context.pageType}:${clean(context.vehicle.stockId || context.vehicle.registration, 100)}`
+    : context.pageType;
   return `${STORAGE_KEY_PREFIX}:${pageIdentity}`;
 }
 
@@ -160,4 +204,15 @@ export function installAiAssistantWidget({
     restart() { return callAssistant({ action: "restart" }); },
     clearSession() { local.removeItem(storageKey); },
   };
+}
+
+export function installCmsVehicleAiAssistantWidget({
+  collectionId,
+  currentItem,
+  ...options
+}) {
+  return installAiAssistantWidget({
+    ...options,
+    pageContext: buildCmsVehiclePageContext(collectionId, currentItem),
+  });
 }
