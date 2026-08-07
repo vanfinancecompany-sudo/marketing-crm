@@ -14,6 +14,7 @@ const STYLES = `
   button, textarea { font:inherit; }
   .launcher { position:fixed; right:18px; bottom:18px; width:60px; height:60px; border:0; border-radius:50%; background:var(--vfc-red); color:#fff; box-shadow:0 6px 22px rgba(0,0,0,.24); cursor:pointer; font-weight:700; }
   .panel { position:fixed; right:18px; bottom:18px; width:min(380px,calc(100vw - 24px)); height:min(610px,calc(100vh - 24px)); background:#fff; border:1px solid var(--vfc-border); border-radius:16px; box-shadow:0 10px 36px rgba(0,0,0,.25); display:flex; flex-direction:column; overflow:hidden; }
+  :host([panel-only]) .panel { position:absolute; inset:0; width:100%; height:100%; max-height:none; border-radius:16px; }
   .header { background:var(--vfc-black); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:10px; }
   .title { flex:1; font-weight:700; }
   .header button { border:0; background:transparent; color:#fff; cursor:pointer; padding:6px; border-radius:6px; }
@@ -37,6 +38,7 @@ const STYLES = `
   @media (max-width:520px) {
     .launcher { right:12px; bottom:12px; width:56px; height:56px; }
     .panel { inset:0; width:100vw; height:100vh; max-height:none; border:0; border-radius:0; }
+    :host([panel-only]) .panel { inset:0; width:100%; height:100%; border:1px solid var(--vfc-border); border-radius:14px; }
     .message { max-width:92%; }
   }
 `;
@@ -53,6 +55,7 @@ export class VfcAiAssistantWidget extends HTMLElementBase {
   }
 
   connectedCallback() {
+    if (this.hasAttribute("panel-only")) this.state = reduceWidgetState(this.state, { type: "open" });
     this.render();
     this.dispatchEvent(new CustomEvent("vfc-ai-request", { detail: { channel: WIDGET_CHANNEL, type: "widget_ready" }, bubbles: true, composed: true }));
   }
@@ -62,6 +65,7 @@ export class VfcAiAssistantWidget extends HTMLElementBase {
     if (message.type === "initialise") {
       if (this.state.initialised) return;
       this.state = reduceWidgetState(this.state, { type: "initialise", pageContext: message.pageContext, conversationId: message.conversationId, privacyUrl: message.privacyUrl });
+      if (this.hasAttribute("panel-only")) this.state = { ...this.state, open: true };
       this.render();
       if (!this.state.conversationId) this.request("start");
       return;
@@ -84,6 +88,7 @@ export class VfcAiAssistantWidget extends HTMLElementBase {
     const request = widgetRequest({ action, message, productChoice, conversationId: this.state.conversationId, pageContext: this.state.pageContext });
     if (action === "restart") this.state = reduceWidgetState(this.state, { type: "restart" });
     this.state = reduceWidgetState(this.state, { type: "request", request, customerMessage: action === "message" && !retry ? message : "" });
+    if (this.hasAttribute("panel-only")) this.state = { ...this.state, open: true };
     this.render();
     this.dispatchEvent(new CustomEvent("vfc-ai-request", { detail: request, bubbles: true, composed: true }));
     this.scrollToLatest();
@@ -109,10 +114,20 @@ export class VfcAiAssistantWidget extends HTMLElementBase {
     this.dispatchEvent(new CustomEvent("vfc-ai-request", { detail: { channel: WIDGET_CHANNEL, type: "cta", cta: this.state.cta }, bubbles: true, composed: true }));
   }
 
+  close() {
+    if (this.hasAttribute("panel-only")) {
+      this.dispatchEvent(new CustomEvent("vfc-ai-ui", { detail: { channel: WIDGET_CHANNEL, type: "ui_close" }, bubbles: true, composed: true }));
+      return;
+    }
+    this.state = reduceWidgetState(this.state, { type: "close" });
+    this.render();
+    this.shadowRoot?.querySelector(".launcher")?.focus();
+  }
+
   render() {
     if (!this.shadowRoot) return;
-    if (!this.state.open) {
-      this.shadowRoot.innerHTML = `<style>${STYLES}</style><button class="launcher" type="button" aria-label="Open Van Finance assistant">Chat</button>`;
+    if (!this.state.open && !this.hasAttribute("panel-only")) {
+      this.shadowRoot.innerHTML = `<style>${STYLES}</style><button class="launcher" type="button" aria-label="Open Live Chat">Live Chat</button>`;
       this.shadowRoot.querySelector(".launcher")?.addEventListener("click", () => { this.state = reduceWidgetState(this.state, { type: "open" }); this.render(); this.shadowRoot?.querySelector("#customerMessage")?.focus(); });
       return;
     }
@@ -122,12 +137,12 @@ export class VfcAiAssistantWidget extends HTMLElementBase {
     const typing = this.state.loading ? `<div class="typing" role="status">Assistant is typing…</div>` : "";
     const privacy = this.state.privacyUrl ? ` <a href="${escapeHtml(this.state.privacyUrl)}" target="_top" rel="noopener">Privacy notice</a>.` : "";
     this.shadowRoot.innerHTML = `<style>${STYLES}</style>
-      <section class="panel" role="dialog" aria-label="Van Finance assistant" aria-modal="false">
-        <header class="header"><span class="title">Van Finance Assistant</span><button class="restart" type="button" aria-label="Restart conversation">Restart</button><button class="close" type="button" aria-label="Close assistant">Close</button></header>
+      <section class="panel" role="dialog" aria-label="Live Chat" aria-modal="false">
+        <header class="header"><span class="title">Live Chat</span><button class="restart" type="button" aria-label="Restart conversation">Restart</button><button class="close" type="button" aria-label="Close Live Chat">Close</button></header>
         <div class="messages" aria-live="polite" aria-busy="${this.state.loading}">${messageMarkup(this.state.messages)}${typing}${choices}${cta}${retry}</div>
         <div class="composer"><div class="input-row"><textarea id="customerMessage" aria-label="Type your message" placeholder="Type your message…" ${this.state.loading ? "disabled" : ""}></textarea><button class="send" type="button" aria-label="Send message" ${this.state.loading ? "disabled" : ""}>Send</button></div><p class="notice">Please do not send bank details, passwords or card information in chat.${privacy}</p></div>
       </section>`;
-    this.shadowRoot.querySelector(".close")?.addEventListener("click", () => { this.state = reduceWidgetState(this.state, { type: "close" }); this.render(); this.shadowRoot?.querySelector(".launcher")?.focus(); });
+    this.shadowRoot.querySelector(".close")?.addEventListener("click", () => this.close());
     this.shadowRoot.querySelector(".restart")?.addEventListener("click", () => this.request("restart"));
     this.shadowRoot.querySelector(".send")?.addEventListener("click", () => this.sendMessage());
     this.shadowRoot.querySelector("#customerMessage")?.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); this.sendMessage(); } });
