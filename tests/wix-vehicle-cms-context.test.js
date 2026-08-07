@@ -1,10 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  VEHICLE_DATASET_ID,
   FINANCE_VEHICLE_COLLECTION_ID,
   RENT2BUY_VEHICLE_COLLECTION_ID,
   buildCmsVehiclePageContext,
 } from "../wix/aiAssistantCmsVehicleContext.js";
+
+test("both full vehicle page templates use the confirmed Wix dynamic dataset id", () => {
+  assert.equal(VEHICLE_DATASET_ID, "#dynamicDataset");
+});
 
 test("VANFINANCEPAGES maps the live Finance vehicle fields exactly", () => {
   const context = buildCmsVehiclePageContext(FINANCE_VEHICLE_COLLECTION_ID, {
