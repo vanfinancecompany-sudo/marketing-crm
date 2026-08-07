@@ -1,11 +1,15 @@
 export const WIDGET_CHANNEL = "vfc-ai-assistant-widget-v1";
 export const PAGE_TYPES = Object.freeze(["finance_vehicle", "finance_general", "rent2buy_general", "homepage"]);
 export const PRODUCT_CONTEXTS = Object.freeze(["finance", "rent2buy"]);
-export const FINANCE_APPLICATION_URL = "https://www.vanfinancecompany.co.uk/apply-by-reg-finance/application-form";
-export const RENT2BUY_APPLICATION_URL = "https://www.vanfinancecompany.co.uk/rent2buy-application";
 const SAFE_STATUSES = new Set(["ready", "needs_product", "rate_limited", "invalid_request", "unavailable"]);
 
 const clean = (value, limit = 5000) => String(value || "").trim().slice(0, limit);
+
+function normalisePrice(value) {
+  const text = clean(value, 80).replace(/\s+/g, " ");
+  if (!text) return null;
+  return /^(?:from\s+)?£?\s*\d{1,6}(?:,\d{3})*(?:\.\d{1,2})?(?:\s*(?:\+|plus|inc(?:luding)?|incl\.?|excl\.?|excluding)?\s*vat)?(?:\s*(?:per month|pcm|p\/m|monthly))?$/i.test(text) ? text : null;
+}
 
 export function createWidgetReadyHandshake({ announce, schedule = globalThis.setInterval, cancel = globalThis.clearInterval, retryMs = 750 } = {}) {
   if (typeof announce !== "function") throw new Error("Widget readiness requires an announce function.");
@@ -58,6 +62,11 @@ export function normaliseWidgetPageContext(input = {}) {
       registration: clean(input.vehicle?.registration, 20).toUpperCase() || null,
       stockId: clean(input.vehicle?.stockId, 100) || null,
       title: clean(input.vehicle?.title, 200) || null,
+      pricing: {
+        financeMonthly: normalisePrice(input.vehicle?.pricing?.financeMonthly ?? input.vehicle?.pricing?.finance_monthly),
+        monthlyRental: normalisePrice(input.vehicle?.pricing?.monthlyRental ?? input.vehicle?.pricing?.rent2buy_monthly),
+        initialRental: normalisePrice(input.vehicle?.pricing?.initialRental ?? input.vehicle?.pricing?.rent2buy_initial),
+      },
       applicationMode,
       formAnchor: safeFormAnchor(input.vehicle?.formAnchor),
     },
@@ -72,6 +81,9 @@ export function endpointPageContext(context) {
       registration: safe.vehicle.registration,
       vehicle_id: safe.vehicle.stockId,
       title: safe.vehicle.title,
+      pricing: {
+        finance_monthly: safe.vehicle.pricing.financeMonthly,
+      },
     } : {},
   };
 }
@@ -85,27 +97,9 @@ export function safePrivacyUrl(value) {
   } catch { return null; }
 }
 
-export function safeWidgetCta(serverCta, pageContext) {
-  if (!serverCta || typeof serverCta !== "object") return null;
-  const context = normaliseWidgetPageContext(pageContext);
-  const label = clean(serverCta.label, 100);
-  if (serverCta.action === "open_current_page_finance_application"
-    && serverCta.behavior === "same_page"
-    && context.pageType === "finance_vehicle"
-    && context.vehicle.applicationMode === "page_form") {
-    return { type: "scroll_to_form", target: context.vehicle.formAnchor, label: label || "Apply for this van" };
-  }
-  if (serverCta.action !== "navigate" || serverCta.behavior !== "same_window") return null;
-  if (serverCta.url === FINANCE_APPLICATION_URL
-    && ["finance_general", "homepage"].includes(context.pageType)
-    && context.productContext !== "rent2buy") {
-    return { type: "navigate_same_window", url: FINANCE_APPLICATION_URL, label: label || "Start Finance Application" };
-  }
-  if (serverCta.url === RENT2BUY_APPLICATION_URL
-    && ["rent2buy_general", "homepage"].includes(context.pageType)
-    && context.productContext !== "finance") {
-    return { type: "navigate_same_window", url: RENT2BUY_APPLICATION_URL, label: label || "Start Rent2Buy Application" };
-  }
+export function safeWidgetCta(_serverCta, _pageContext) {
+  // Applications are deliberately not actioned from inside chat. The assistant tells the customer to use
+  // the existing APPLY NOW button on the Wix page, which remains the single application control.
   return null;
 }
 
