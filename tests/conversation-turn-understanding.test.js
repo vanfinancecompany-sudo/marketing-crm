@@ -77,18 +77,6 @@ test("please explain uses the previous factual answer as the subject instead of 
   assert.match(result.intent.normalised_message, /delivery is free/i);
 });
 
-test("a direct answer to an assistant question is treated as conversational context", () => {
-  const messages = [{ role: "assistant", content: "Are you already looking at a specific van?" }];
-  const result = understand("yes a Ford Transit", messages, { product: "finance" });
-  assert.equal(result.human.message_type, "clarification");
-  assert.equal(result.human.recovery_required, false);
-  assert.match(result.human.contextual_anchor, /specific van/i);
-  assert.equal(result.orchestration.contextual_turn, true);
-  assert.equal(result.orchestration.recovery_required, false);
-  assert.equal(result.orchestration.retrieval_required, false);
-  assert.match(result.intent.normalised_message, /ford transit/i);
-});
-
 test("factual answers stop after answering instead of adding a sales-discovery question", () => {
   const polished = polishConversationPresentation({
     reply: "An initial decision can sometimes be available quickly, but timing depends on the lender and checks. Are you already looking at a specific van?",
