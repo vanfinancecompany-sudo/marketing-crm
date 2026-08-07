@@ -1,16 +1,19 @@
 // Copy this file into the Wix site's Public files as aiAssistantPageAdapter.js.
 import { local } from "wix-storage-frontend";
 import { fetch } from "wix-fetch";
-import wixLocationFrontend from "wix-location-frontend";
 
 const CHANNEL = "vfc-ai-assistant-widget-v1";
 const STORAGE_KEY_PREFIX = "vfc_ai_assistant_conversation_id";
 const PAGE_TYPES = ["finance_vehicle", "finance_general", "rent2buy_general", "homepage"];
 const PRODUCTS = ["finance", "rent2buy"];
-const FINANCE_APPLICATION_URL = "https://www.vanfinancecompany.co.uk/apply-by-reg-finance/application-form";
-const RENT2BUY_APPLICATION_URL = "https://www.vanfinancecompany.co.uk/rent2buy-application";
 
 const clean = (value, limit = 5000) => String(value || "").trim().slice(0, limit);
+
+function normalisePrice(value) {
+  const text = clean(value, 80).replace(/\s+/g, " ");
+  if (!text) return null;
+  return /^(?:from\s+)?£?\s*\d{1,6}(?:,\d{3})*(?:\.\d{1,2})?(?:\s*(?:\+|plus|inc(?:luding)?|incl\.?|excl\.?|excluding)?\s*vat)?(?:\s*(?:per month|pcm|p\/m|monthly))?$/i.test(text) ? text : null;
+}
 
 function safeFormAnchor(value) {
   const candidate = clean(value, 80) || "#finance-application";
@@ -33,6 +36,11 @@ function normaliseContext(input = {}) {
       registration: clean(input.vehicle?.registration, 20).toUpperCase() || null,
       stockId: clean(input.vehicle?.stockId, 100) || null,
       title: clean(input.vehicle?.title, 200) || null,
+      pricing: {
+        financeMonthly: normalisePrice(input.vehicle?.pricing?.financeMonthly ?? input.vehicle?.pricing?.finance_monthly),
+        monthlyRental: normalisePrice(input.vehicle?.pricing?.monthlyRental ?? input.vehicle?.pricing?.rent2buy_monthly),
+        initialRental: normalisePrice(input.vehicle?.pricing?.initialRental ?? input.vehicle?.pricing?.rent2buy_initial),
+      },
       applicationMode,
       formAnchor: safeFormAnchor(input.vehicle?.formAnchor),
     },
@@ -46,6 +54,9 @@ function endpointContext(context) {
       registration: context.vehicle.registration,
       vehicle_id: context.vehicle.stockId,
       title: context.vehicle.title,
+      pricing: {
+        finance_monthly: context.vehicle.pricing.financeMonthly,
+      },
     } : {},
   };
 }
@@ -63,18 +74,8 @@ function safePrivacyUrl(value) {
   } catch { return null; }
 }
 
-function safeServerCta(cta, context) {
-  if (!cta || typeof cta !== "object") return null;
-  if (cta.action === "open_current_page_finance_application" && cta.behavior === "same_page" && context.pageType === "finance_vehicle") {
-    return { type: "scroll_to_form", target: context.vehicle.formAnchor, label: "Apply for this van" };
-  }
-  if (cta.action !== "navigate" || cta.behavior !== "same_window") return null;
-  if (cta.url === FINANCE_APPLICATION_URL && ["finance_general", "homepage"].includes(context.pageType) && context.productContext !== "rent2buy") {
-    return { type: "navigate_same_window", url: FINANCE_APPLICATION_URL, label: "Start Finance Application" };
-  }
-  if (cta.url === RENT2BUY_APPLICATION_URL && ["rent2buy_general", "homepage"].includes(context.pageType) && context.productContext !== "finance") {
-    return { type: "navigate_same_window", url: RENT2BUY_APPLICATION_URL, label: "Start Rent2Buy Application" };
-  }
+function safeServerCta(_cta, _context) {
+  // The Wix page's own APPLY NOW control is the only application action. Chat never creates a second CTA.
   return null;
 }
 
@@ -85,16 +86,6 @@ function safeResponse(payload, context) {
     conversation_id: clean(payload?.conversation_id, 100) || null,
     status: ["ready", "needs_product", "rate_limited", "invalid_request", "unavailable"].includes(payload?.status) ? payload.status : "unavailable",
   };
-}
-
-async function executeCta($w, cta, context) {
-  if (cta?.type === "scroll_to_form" && context.pageType === "finance_vehicle" && cta.target === context.vehicle.formAnchor) {
-    const form = $w(context.vehicle.formAnchor);
-    if (form?.collapsed && typeof form.expand === "function") await form.expand();
-    if (typeof form?.scrollTo === "function") await form.scrollTo();
-    return;
-  }
-  if (cta?.type === "navigate_same_window" && [FINANCE_APPLICATION_URL, RENT2BUY_APPLICATION_URL].includes(cta.url)) wixLocationFrontend.to(cta.url);
 }
 
 export function installAiAssistantWidget({
@@ -162,9 +153,7 @@ export function installAiAssistantWidget({
     }
     if (message.type === "assistant_request" && ["start", "message", "restart"].includes(message.action)) {
       await callAssistant(message);
-      return;
     }
-    if (message.type === "cta") await executeCta($w, message.cta, context);
   });
 
   return {
