@@ -2,8 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
-  FINANCE_APPLICATION_URL,
-  RENT2BUY_APPLICATION_URL,
   createWidgetReadyHandshake,
   createWidgetState,
   endpointPageContext,
@@ -18,7 +16,14 @@ import {
 const financeVehicle = {
   pageType: "finance_vehicle",
   productContext: "finance",
-  vehicle: { registration: "AB12 CDE", stockId: "stock-1", title: "Transit Custom", applicationMode: "page_form", formAnchor: "#finance-application" },
+  vehicle: {
+    registration: "AB12 CDE",
+    stockId: "stock-1",
+    title: "Transit Custom",
+    pricing: { financeMonthly: "£399 + VAT" },
+    applicationMode: "page_form",
+    formAnchor: "#finance-application",
+  },
 };
 
 test("widget opens and closes without discarding conversation state", () => {
@@ -36,6 +41,7 @@ test("session start request contains the immutable Wix page context", () => {
   assert.equal(request.action, "start");
   assert.equal(request.pageContext.pageType, "finance_vehicle");
   assert.equal(request.pageContext.productContext, "finance");
+  assert.equal(request.pageContext.vehicle.pricing.financeMonthly, "£399 + VAT");
   assert.equal(request.conversationId, null);
 });
 
@@ -119,26 +125,10 @@ test("loading and retry state retain one safe retry request", () => {
   assert.deepEqual(failed.retryRequest, request);
 });
 
-test("Finance vehicle CTA can only scroll to the configured current-page form", () => {
-  const cta = safeWidgetCta({ label: "Apply for this van", action: "open_current_page_finance_application", behavior: "same_page", url: null }, financeVehicle);
-  assert.deepEqual(cta, { type: "scroll_to_form", target: "#finance-application", label: "Apply for this van" });
-  assert.equal(safeWidgetCta({ label: "Start", action: "navigate", behavior: "same_window", url: FINANCE_APPLICATION_URL }, financeVehicle), null);
-});
-
-test("general Finance CTA uses the approved same-window URL only", () => {
-  const context = { pageType: "finance_general", productContext: "finance", vehicle: { applicationMode: "generic" } };
-  assert.deepEqual(safeWidgetCta({ label: "Start Finance Application", action: "navigate", behavior: "same_window", url: FINANCE_APPLICATION_URL }, context), {
-    type: "navigate_same_window", url: FINANCE_APPLICATION_URL, label: "Start Finance Application",
-  });
-  assert.equal(safeWidgetCta({ label: "Unsafe", action: "navigate", behavior: "same_window", url: "https://evil.example/apply" }, context), null);
-});
-
-test("general Rent2Buy CTA uses the approved same-window URL only", () => {
-  const context = { pageType: "rent2buy_general", productContext: "rent2buy", vehicle: { applicationMode: "generic" } };
-  assert.deepEqual(safeWidgetCta({ label: "Start Rent2Buy Application", action: "navigate", behavior: "same_window", url: RENT2BUY_APPLICATION_URL }, context), {
-    type: "navigate_same_window", url: RENT2BUY_APPLICATION_URL, label: "Start Rent2Buy Application",
-  });
-  assert.equal(safeWidgetCta({ label: "Wrong", action: "navigate", behavior: "same_window", url: FINANCE_APPLICATION_URL }, context), null);
+test("widget rejects every server application CTA because APPLY NOW belongs to the page", () => {
+  assert.equal(safeWidgetCta({ label: "Apply", action: "navigate", behavior: "same_window", url: "https://www.vanfinancecompany.co.uk/application" }, financeVehicle), null);
+  assert.equal(safeWidgetCta({ label: "Apply", action: "open_current_page_finance_application", behavior: "same_page", url: null }, financeVehicle), null);
+  assert.equal(safeWidgetCta({ label: "Unsafe", action: "run_javascript", behavior: "same_window", url: "javascript:alert(1)" }, financeVehicle), null);
 });
 
 test("homepage exposes product choice and preserves the chosen product in subsequent requests", () => {
@@ -150,13 +140,23 @@ test("homepage exposes product choice and preserves the chosen product in subseq
   assert.equal(choice.pageContext.productContext, "rent2buy");
 });
 
-test("page context cannot be guessed, switched or leak client-only application controls to the API", () => {
+test("page context cannot be guessed or switched and exposes only bounded page-visible pricing", () => {
   assert.throws(() => normaliseWidgetPageContext({}), /pageType/);
   assert.throws(() => normaliseWidgetPageContext({ pageType: "finance_general", productContext: "rent2buy" }), /cannot be changed/);
   const endpoint = endpointPageContext(financeVehicle);
-  assert.deepEqual(endpoint, { pageType: "finance_vehicle", vehicle: { registration: "AB12 CDE", vehicle_id: "stock-1", title: "Transit Custom" } });
+  assert.deepEqual(endpoint, {
+    pageType: "finance_vehicle",
+    vehicle: {
+      registration: "AB12 CDE",
+      vehicle_id: "stock-1",
+      title: "Transit Custom",
+      pricing: { finance_monthly: "£399 + VAT" },
+    },
+  });
   assert.equal("formAnchor" in endpoint.vehicle, false);
   assert.equal("applicationMode" in endpoint.vehicle, false);
+  const unsafe = endpointPageContext({ ...financeVehicle, vehicle: { ...financeVehicle.vehicle, pricing: { financeMonthly: "<script>alert(1)</script>" } } });
+  assert.equal(unsafe.vehicle.pricing.finance_monthly, null);
 });
 
 test("assistant response strips unknown fields and rejects arbitrary CTA actions", () => {
@@ -207,14 +207,15 @@ test("hosted embed route has a Wix-only frame policy without weakening other CRM
   assert.equal(configuration.headers.length, 1, "the framing exception must not apply to other CRM routes");
 });
 
-test("Wix adapter calls only the public endpoint, stores only conversation IDs and validates CTA actions twice", async () => {
+test("Wix adapter calls only the public endpoint, stores only conversation IDs, passes bounded pricing and never navigates applications", async () => {
   const [adapter, configurations] = await Promise.all([
     readFile(new URL("../wix/aiAssistantPageAdapter.js", import.meta.url), "utf8"),
     readFile(new URL("../wix/aiAssistantConfigurations.js", import.meta.url), "utf8"),
   ]);
   assert.match(configurations, /\/api\/ai-assistant-customer/);
   assert.match(adapter, /local\.setItem\(storageKey, safe\.conversation_id\)/);
-  assert.match(adapter, /open_current_page_finance_application/);
-  assert.match(adapter, /\[FINANCE_APPLICATION_URL, RENT2BUY_APPLICATION_URL\]\.includes/);
+  assert.match(adapter, /finance_monthly/);
+  assert.match(adapter, /APPLY NOW/);
+  assert.doesNotMatch(adapter, /wixLocationFrontend|FINANCE_APPLICATION_URL|RENT2BUY_APPLICATION_URL|navigate_same_window/);
   assert.doesNotMatch(adapter, /AI_ASSISTANT_SESSION_SECRET|OPENAI_API_KEY|Business Brain|diagnostics|sources/);
 });
