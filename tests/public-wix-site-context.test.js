@@ -20,6 +20,14 @@ function wixResponse(dataItems) {
   };
 }
 
+function htmlResponse(html) {
+  return {
+    ok: true,
+    status: 200,
+    async text() { return html; },
+  };
+}
+
 test("site-wide route inference recognises Finance and Rent2Buy vehicle URLs without page Velo", () => {
   const finance = inferPublicWixPageContext("https://www.vanfinancecompany.co.uk/van-finance/ab12cde");
   assert.equal(finance.page_type, "finance_vehicle");
@@ -106,9 +114,64 @@ test("Rent2Buy vehicle context is read server-side from VANPAGES with exact live
   });
 });
 
+test("Finance vehicle context falls back to the trusted live page when Wix Data lookup fails", async () => {
+  clearPublicWixVehicleContextCache();
+  const pageUrl = "https://www.vanfinancecompany.co.uk/van-finance/hx24zgr";
+  const fetchImpl = async (url) => {
+    if (url === pageUrl) {
+      return htmlResponse(`
+        <html><body>
+          <h5>Ford Ranger 2.0 TD Wild Track</h5>
+          <div>£29,995 +VAT</div>
+          <div>FINANCE FROM ONLY</div><div>MONTH</div><h2>£625</h2>
+          <div>REGISTRATION: HX24 ZGR</div>
+        </body></html>
+      `);
+    }
+    return { ok: false, status: 403, async json() { return {}; } };
+  };
+
+  const context = await resolvePublicWixPageContext(pageUrl, { environment, fetchImpl });
+  assert.equal(context.page_type, "finance_vehicle");
+  assert.equal(context.vehicle.registration, "HX24ZGR");
+  assert.equal(context.vehicle.pricing.finance_monthly, "£625");
+  assert.equal(context.vehicle.pricing.finance_retail_vat, "£29,995 +VAT");
+});
+
+test("Rent2Buy vehicle context falls back to the trusted live page with exact initial, monthly and term", async () => {
+  clearPublicWixVehicleContextCache();
+  const pageUrl = "https://www.vanfinancecompany.co.uk/guaranteed-rent2buy-vans/lj23apm";
+  const fetchImpl = async (url) => {
+    if (url === pageUrl) {
+      return htmlResponse(`
+        <html><body>
+          <h5>2023/73 MAXUS eDeliver 3 ELECTRIC / AUTO</h5>
+          <div>REGISTRATION: LJ23 APM</div>
+          <h5>INITIAL RENTAL CHARGE</h5><h5>£1176 +VAT (£1412 INC VAT)</h5>
+          <h5>MONTHLY PAYMENTS</h5><h5>£392 +VAT (£471 INC VAT)</h5>
+          <h5>36X MONTHLY PAYMENTS</h5>
+        </body></html>
+      `);
+    }
+    return { ok: false, status: 503, async json() { return {}; } };
+  };
+
+  const context = await resolvePublicWixPageContext(pageUrl, { environment, fetchImpl });
+  assert.equal(context.page_type, "rent2buy_general");
+  assert.equal(context.vehicle.registration, "LJ23APM");
+  assert.equal(context.vehicle.pricing.rent2buy_initial, "£1176 +VAT (£1412 INC VAT)");
+  assert.equal(context.vehicle.pricing.rent2buy_monthly, "£392 +VAT (£471 INC VAT)");
+  assert.equal(context.vehicle.term_months, 36);
+});
+
 test("vehicle lookup failure degrades safely to identity-only context rather than inventing prices", async () => {
   clearPublicWixVehicleContextCache();
-  const fetchImpl = async () => ({ ok: false, status: 503, async json() { return {}; } });
+  const fetchImpl = async (url) => {
+    if (url.startsWith("https://www.wixapis.com")) {
+      return { ok: false, status: 503, async json() { return {}; } };
+    }
+    return { ok: false, status: 503, async text() { return ""; } };
+  };
   const context = await resolvePublicWixPageContext("https://www.vanfinancecompany.co.uk/van-finance/ab12cde", { environment, fetchImpl });
   assert.equal(context.page_type, "finance_vehicle");
   assert.equal(context.vehicle.registration, "AB12CDE");
