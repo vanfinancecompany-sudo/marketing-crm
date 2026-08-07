@@ -30,4 +30,5 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: node --test tests/rent2buy-location-health-diagnostic.test.js
       - run: npm run build
