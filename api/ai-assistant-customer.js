@@ -17,6 +17,7 @@ import {
   secureHash,
   validateWixOrigin,
 } from "../lib/publicAssistantFoundation.js";
+import { publicApplicationGuidanceReply } from "../lib/publicApplicationGuidance.js";
 import { publicVehiclePricingReply } from "../lib/publicVehiclePricing.js";
 import {
   buildCanonicalConversationInput,
@@ -259,6 +260,19 @@ async function continueConversation(supabase, body, environment, simulateConvers
         return safeCustomerPayload({ reply, conversationId, status: "needs_product" });
       }
     }
+  }
+
+  const applicationGuidanceReply = publicApplicationGuidanceReply({
+    message,
+    pageType: session.page_type,
+    productLock,
+  });
+  if (applicationGuidanceReply) {
+    await updateSession(supabase, session, {
+      conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: applicationGuidanceReply }]),
+      message_count: Number(session.message_count || 0) + 1,
+    });
+    return safeCustomerPayload({ reply: applicationGuidanceReply, cta: null, conversationId, status: "ready" });
   }
 
   const pricingReply = publicVehiclePricingReply({
