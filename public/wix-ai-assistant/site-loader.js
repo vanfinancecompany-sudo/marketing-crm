@@ -105,20 +105,21 @@
         :host { all: initial; }
         .layer { position:fixed; inset:0; z-index:2147483000; pointer-events:none; font-family:Arial,sans-serif; }
         .launcher {
-          pointer-events:auto; position:absolute; right:18px; bottom:88px; width:58px; height:58px;
-          border:0; border-radius:50%; background:#d71920; color:#fff; cursor:pointer;
-          display:grid; place-items:center; box-shadow:0 6px 22px rgba(0,0,0,.28);
+          pointer-events:auto; position:absolute; right:18px; bottom:60px; width:82px; height:32px;
+          border:0; border-radius:999px; background:#d71920; color:#fff; cursor:pointer;
+          display:flex; align-items:center; justify-content:center; padding:0 10px;
+          font:700 11px/1 Arial,sans-serif; letter-spacing:.15px; white-space:nowrap;
+          box-shadow:0 4px 14px rgba(0,0,0,.25); transition:transform .15s ease, box-shadow .15s ease;
         }
-        .launcher:hover { transform:translateY(-1px); }
+        .launcher:hover { transform:translateY(-1px); box-shadow:0 5px 16px rgba(0,0,0,.3); }
         .launcher:focus-visible { outline:3px solid #fff; outline-offset:3px; box-shadow:0 0 0 6px #d71920; }
-        .launcher svg { width:27px; height:27px; fill:currentColor; }
         .panel-frame {
           pointer-events:auto; position:absolute; right:18px; bottom:88px; width:380px; height:610px;
           border:0; border-radius:16px; background:transparent; box-shadow:0 10px 36px rgba(0,0,0,.25);
         }
         .hidden { display:none !important; }
         @media (max-width:520px) {
-          .launcher { right:12px; bottom:84px; width:56px; height:56px; }
+          .launcher { right:12px; bottom:58px; width:80px; height:32px; font-size:10.5px; }
           .panel-frame {
             right:12px; bottom:84px; width:calc(100vw - 24px);
             height:min(560px, calc(100vh - 120px)); height:min(560px, calc(100dvh - 120px));
@@ -127,9 +128,7 @@
         }
       </style>
       <div class="layer">
-        <button class="launcher" type="button" aria-label="Open Live Chat" title="Live Chat">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm2.5 7.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm5.5 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm5.5 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"/></svg>
-        </button>
+        <button class="launcher" type="button" aria-label="Open Live Chat" title="Live Chat">Live Chat</button>
       </div>`;
     launcher = shadow.querySelector(".launcher");
     launcher.addEventListener("click", showPanel);
