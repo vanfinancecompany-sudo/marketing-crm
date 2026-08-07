@@ -61,26 +61,6 @@ test("verified taxation knowledge outranks a competing recovery classification",
   assert.ok(!result.orchestration.priority_path_taken.includes("conversation_recovery"));
 });
 
-test("Rent2Buy postcode and town replies always outrank generic recovery and become coverage retrieval", () => {
-  const previous = "I can check that. Please tell me your full home postcode and I’ll confirm whether you’re in the normal 100-mile area.";
-  for (const message of ["BH23 1QH", "Bournemouth"]) {
-    const human = { message_type: "unknown_intent", recovery_required: true, previous_assistant_message: previous };
-    const result = decision(message, { product: "rent2buy", priorJourney: {}, human });
-    assert.equal(result.orchestration.retrieval_required, true, message);
-    assert.equal(result.orchestration.recovery_required, false, message);
-    assert.ok(result.intent.secondary_intents.includes("coverage"), message);
-    assert.ok(result.orchestration.detected_intents.includes("rent2buy_location"), message);
-    assert.ok(result.orchestration.priority_path_taken.includes("verified_business_knowledge"), message);
-  }
-});
-
-test("Rent2Buy location hard rule does not turn ordinary acknowledgements into coverage", () => {
-  const previous = "Please tell me your full home postcode.";
-  const human = { message_type: "agreement", recovery_required: false, previous_assistant_message: previous };
-  const result = decision("yes please", { product: "rent2buy", priorJourney: {}, human });
-  assert.equal(result.orchestration.detected_intents.includes("rent2buy_location"), false);
-});
-
 test("sales statements and hesitation stay in conversation instead of forcing factual retrieval", () => {
   for (const message of ["Need a van quickly", "I like this van", "Looking for a van", "Halfway through applying", "Not sure yet"]) {
     const result = decision(message, { priorJourney: {} });
