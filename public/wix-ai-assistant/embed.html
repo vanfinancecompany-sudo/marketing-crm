@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>Van Finance Assistant</title>
+  <title>Live Chat</title>
   <style>html,body{margin:0;width:100%;height:100%;background:transparent}body{overflow:hidden}</style>
 </head>
 <body>
@@ -12,11 +12,17 @@
     import { WIDGET_CHANNEL, createWidgetReadyHandshake } from "./widget-core.mjs";
 
     const widget = document.querySelector("vfc-ai-assistant");
-    const handshake = createWidgetReadyHandshake({
-      announce: (message) => window.parent.postMessage(message, "*"),
-    });
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("mode") === "panel") widget.setAttribute("panel-only", "");
+
+    const postToParent = (message) => window.parent.postMessage(message, "*");
+    const handshake = createWidgetReadyHandshake({ announce: postToParent });
+
     widget.addEventListener("vfc-ai-request", (event) => {
-      if (event.detail?.channel === WIDGET_CHANNEL) window.parent.postMessage(event.detail, "*");
+      if (event.detail?.channel === WIDGET_CHANNEL) postToParent(event.detail);
+    });
+    widget.addEventListener("vfc-ai-ui", (event) => {
+      if (event.detail?.channel === WIDGET_CHANNEL) postToParent(event.detail);
     });
     window.addEventListener("message", (event) => {
       if (event.data?.channel !== WIDGET_CHANNEL) return;
