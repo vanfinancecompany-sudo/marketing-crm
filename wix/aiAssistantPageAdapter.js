@@ -2,12 +2,18 @@
 import { local } from "wix-storage-frontend";
 import { fetch } from "wix-fetch";
 import {
+  VEHICLE_DATASET_ID,
   FINANCE_VEHICLE_COLLECTION_ID,
   RENT2BUY_VEHICLE_COLLECTION_ID,
   buildCmsVehiclePageContext,
 } from "./aiAssistantCmsVehicleContext.js";
 
-export { FINANCE_VEHICLE_COLLECTION_ID, RENT2BUY_VEHICLE_COLLECTION_ID, buildCmsVehiclePageContext };
+export {
+  VEHICLE_DATASET_ID,
+  FINANCE_VEHICLE_COLLECTION_ID,
+  RENT2BUY_VEHICLE_COLLECTION_ID,
+  buildCmsVehiclePageContext,
+};
 
 const CHANNEL = "vfc-ai-assistant-widget-v1";
 const STORAGE_KEY_PREFIX = "vfc_ai_assistant_conversation_id";
@@ -214,5 +220,30 @@ export function installCmsVehicleAiAssistantWidget({
   return installAiAssistantWidget({
     ...options,
     pageContext: buildCmsVehiclePageContext(collectionId, currentItem),
+  });
+}
+
+export function installDynamicVehicleAiAssistantWidget({
+  $w,
+  collectionId,
+  datasetId = VEHICLE_DATASET_ID,
+  ...options
+}) {
+  const dataset = $w(datasetId);
+  return new Promise((resolve, reject) => {
+    dataset.onReady(() => {
+      try {
+        const currentItem = dataset.getCurrentItem();
+        if (!currentItem?._id) throw new Error(`AI Assistant could not read the current vehicle from ${datasetId}.`);
+        resolve(installCmsVehicleAiAssistantWidget({
+          $w,
+          collectionId,
+          currentItem,
+          ...options,
+        }));
+      } catch (error) {
+        reject(error);
+      }
+    });
   });
 }
