@@ -1,6 +1,7 @@
 // Copy this file into the Wix site's Public files alongside aiAssistantPageAdapter.js.
 // These are the live Van Finance Company CMS collection/field mappings supplied for the full vehicle pages.
 
+export const VEHICLE_DATASET_ID = "#dynamicDataset";
 export const FINANCE_VEHICLE_COLLECTION_ID = "VANFINANCEPAGES";
 export const RENT2BUY_VEHICLE_COLLECTION_ID = "VANPAGES";
 
