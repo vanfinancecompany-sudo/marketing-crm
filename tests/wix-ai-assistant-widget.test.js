@@ -175,21 +175,38 @@ test("customer and assistant HTML is escaped before rendering", () => {
   assert.equal(escapeHtml("Tom & Co's"), "Tom &amp; Co&#39;s");
 });
 
-test("entry point includes responsive mobile layout, accessible controls and keyboard send", async () => {
+test("entry point includes responsive mobile layout, Live Chat controls and keyboard send", async () => {
   const [widget, embed] = await Promise.all([
     readFile(new URL("../public/wix-ai-assistant/widget.mjs", import.meta.url), "utf8"),
     readFile(new URL("../public/wix-ai-assistant/embed.html", import.meta.url), "utf8"),
   ]);
   assert.match(widget, /@media \(max-width:520px\)/);
-  assert.match(widget, /aria-label="Open Van Finance assistant"/);
+  assert.match(widget, /aria-label="Open Live Chat"/);
+  assert.match(widget, />Live Chat<\/span>/);
+  assert.match(widget, /panel-only/);
+  assert.match(widget, /ui_close/);
   assert.match(widget, /role="dialog"/);
   assert.match(widget, /event\.key === "Enter" && !event\.shiftKey/);
   assert.match(widget, /Assistant is typing/);
   assert.match(widget, /Please do not send bank details, passwords or card information/);
   assert.match(embed, /window\.parent\.postMessage/);
+  assert.match(embed, /params\.get\("mode"\) === "panel"/);
+  assert.match(embed, /addEventListener\("vfc-ai-ui"/);
   assert.match(embed, /await import\("\.\/widget\.mjs"\)/);
   assert.ok(embed.indexOf("addEventListener(\"vfc-ai-request\"") < embed.indexOf("await import(\"./widget.mjs\")"));
   assert.match(embed, /handshake\.acknowledge\(\)/);
+});
+
+test("site-wide loader is layout-independent, sits above WhatsApp and sends only page URL to the trusted bridge", async () => {
+  const loader = await readFile(new URL("../public/wix-ai-assistant/site-loader.js", import.meta.url), "utf8");
+  assert.match(loader, /attachShadow\(\{ mode: "open" \}\)/);
+  assert.match(loader, /position:fixed/);
+  assert.match(loader, /bottom:88px/);
+  assert.match(loader, /pointer-events:none/);
+  assert.match(loader, /\/api\/ai-assistant-sitewide/);
+  assert.match(loader, /page_url: window\.location\.href/);
+  assert.match(loader, /mode=panel/);
+  assert.doesNotMatch(loader, /#dynamicDataset|VANFINANCEPAGES|VANPAGES|installDynamicVehicleAiAssistantWidget/);
 });
 
 test("hosted embed route has a Wix-only frame policy without weakening other CRM routes", async () => {
@@ -207,7 +224,7 @@ test("hosted embed route has a Wix-only frame policy without weakening other CRM
   assert.equal(configuration.headers.length, 1, "the framing exception must not apply to other CRM routes");
 });
 
-test("Wix adapter calls only the public endpoint, stores only conversation IDs, passes bounded pricing and never navigates applications", async () => {
+test("legacy Wix adapter remains transport-only and never navigates applications", async () => {
   const [adapter, configurations] = await Promise.all([
     readFile(new URL("../wix/aiAssistantPageAdapter.js", import.meta.url), "utf8"),
     readFile(new URL("../wix/aiAssistantConfigurations.js", import.meta.url), "utf8"),
