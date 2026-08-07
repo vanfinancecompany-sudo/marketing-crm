@@ -208,47 +208,55 @@ async function continueConversation(supabase, body, environment, simulateConvers
   }
 
   let productLock = session.product_lock;
-  if (!productLock && session.page_type === "homepage") {
+  if (session.page_type === "homepage") {
     const explicitChoice = explicitHomepageProduct(message, body.product_choice);
     if (explicitChoice) {
-      productLock = explicitChoice;
-      const reply = productSelectionReply(productLock);
-      await updateSession(supabase, session, {
-        product_lock: productLock,
-        remembered_facts: { product_context: productLock },
-        journey_state: {},
-        conversation_history: [],
-        message_count: Number(session.message_count || 0) + 1,
-      });
+      const reply = productSelectionReply(explicitChoice);
+      if (productLock !== explicitChoice) {
+        productLock = explicitChoice;
+        await updateSession(supabase, session, {
+          product_lock: productLock,
+          remembered_facts: { product_context: productLock },
+          journey_state: {},
+          conversation_history: [],
+          message_count: Number(session.message_count || 0) + 1,
+        });
+      } else {
+        await updateSession(supabase, session, {
+          message_count: Number(session.message_count || 0) + 1,
+        });
+      }
       return safeCustomerPayload({ reply, conversationId, status: "ready" });
     }
 
-    if (isExplicitProductComparison(message, history)) {
-      const requestId = `public-${randomUUID()}`;
-      const comparisonInput = buildCanonicalConversationInput({
-        session: { ...session, product_lock: "finance" },
-        message,
-        requestId,
-        history,
-      });
-      const generated = await simulateConversation(supabase, comparisonInput);
-      const result = generated.result;
-      const reply = clean(result.reply, 5000);
-      await updateSession(supabase, session, {
-        conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
-        message_count: Number(session.message_count || 0) + 1,
-      });
-      return safeCustomerPayload({ reply, conversationId, status: "needs_product" });
-    }
-
-    productLock = determineHomepageProduct(message, history);
     if (!productLock) {
-      const reply = productChoiceReply();
-      await updateSession(supabase, session, {
-        conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
-        message_count: Number(session.message_count || 0) + 1,
-      });
-      return safeCustomerPayload({ reply, conversationId, status: "needs_product" });
+      if (isExplicitProductComparison(message, history)) {
+        const requestId = `public-${randomUUID()}`;
+        const comparisonInput = buildCanonicalConversationInput({
+          session: { ...session, product_lock: "finance" },
+          message,
+          requestId,
+          history,
+        });
+        const generated = await simulateConversation(supabase, comparisonInput);
+        const result = generated.result;
+        const reply = clean(result.reply, 5000);
+        await updateSession(supabase, session, {
+          conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
+          message_count: Number(session.message_count || 0) + 1,
+        });
+        return safeCustomerPayload({ reply, conversationId, status: "needs_product" });
+      }
+
+      productLock = determineHomepageProduct(message, history);
+      if (!productLock) {
+        const reply = productChoiceReply();
+        await updateSession(supabase, session, {
+          conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
+          message_count: Number(session.message_count || 0) + 1,
+        });
+        return safeCustomerPayload({ reply, conversationId, status: "needs_product" });
+      }
     }
   }
 
