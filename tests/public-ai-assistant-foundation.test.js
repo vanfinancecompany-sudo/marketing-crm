@@ -64,7 +64,9 @@ function mockSupabase(session = null) {
 }
 
 test("Wix page context is required and deterministically locks non-homepage products", () => {
-  assert.equal(normalisePageContext({ pageType: "finance_vehicle", vehicle: { registration: "AB12 CDE" } }).vehicle.registration, "AB12 CDE");
+  const context = normalisePageContext({ pageType: "finance_vehicle", vehicle: { registration: "AB12 CDE", pricing: { finance_monthly: "£399 + VAT" } } });
+  assert.equal(context.vehicle.registration, "AB12 CDE");
+  assert.equal(context.vehicle.pricing.finance_monthly, "£399 + VAT");
   assert.equal(pageProductLock("finance_vehicle"), "finance");
   assert.equal(pageProductLock("finance_general"), "finance");
   assert.equal(pageProductLock("rent2buy_general"), "rent2buy");
@@ -73,19 +75,12 @@ test("Wix page context is required and deterministically locks non-homepage prod
   assert.throws(() => normalisePageContext({ pageType: "unknown" }), /page type is required/i);
 });
 
-test("application CTAs obey page-specific same-window and same-page rules", () => {
-  const ready = { application_mode_active: true };
-  assert.deepEqual(publicApplicationCta("finance_vehicle", "finance", ready), {
-    label: "Apply for this van", action: "open_current_page_finance_application", behavior: "same_page", url: null,
-  });
-  assert.deepEqual(publicApplicationCta("finance_general", "finance", ready), {
-    label: "Start Finance Application", action: "navigate", behavior: "same_window", url: "https://www.vanfinancecompany.co.uk/apply-by-reg-finance/application-form",
-  });
-  assert.deepEqual(publicApplicationCta("rent2buy_general", "rent2buy", ready), {
-    label: "Start Rent2Buy Application", action: "navigate", behavior: "same_window", url: "https://www.vanfinancecompany.co.uk/rent2buy-application",
-  });
-  assert.equal(publicApplicationCta("finance_vehicle", "rent2buy", ready), null);
-  assert.equal(publicApplicationCta("finance_general", "finance", {}), null);
+test("public assistant never creates an application CTA inside chat", () => {
+  const ready = { application_mode_active: true, application_cta_generated: true, recommended_action: "apply_finance" };
+  assert.equal(publicApplicationCta("finance_vehicle", "finance", ready), null);
+  assert.equal(publicApplicationCta("finance_general", "finance", ready), null);
+  assert.equal(publicApplicationCta("rent2buy_general", "rent2buy", { ...ready, recommended_action: "apply_rent2buy" }), null);
+  assert.equal(publicApplicationCta("homepage", "finance", ready), null);
 });
 
 test("origin allowlist rejects lookalike domains and accepts configured Wix production origin", () => {
@@ -98,7 +93,7 @@ test("origin allowlist rejects lookalike domains and accepts configured Wix prod
 test("public payload exposes only reply, CTA, conversation id and safe status", () => {
   const payload = safeCustomerPayload({
     reply: "Hello", conversationId: "opaque", status: "ready",
-    cta: { label: "Start Finance Application", action: "navigate", behavior: "same_window", url: "https://www.vanfinancecompany.co.uk/apply-by-reg-finance/application-form", diagnostics: "hidden" },
+    cta: { label: "Unused", action: "navigate", behavior: "same_window", url: "https://www.vanfinancecompany.co.uk/example", diagnostics: "hidden" },
     sources: [{ id: "secret" }], prompt: "secret", confidence: 100,
   });
   assert.deepEqual(Object.keys(payload).sort(), ["conversation_id", "cta", "reply", "status"]);
@@ -123,26 +118,27 @@ test("session identifiers are stored as keyed hashes", () => {
   assert.notEqual(hash, "public-conversation-token");
 });
 
-test("start endpoint creates an anonymous locked Finance session with no-store CORS", async () => {
+test("start endpoint creates an anonymous locked Finance session with bounded current-page pricing", async () => {
   const { client, state } = mockSupabase();
   const response = responseRecorder();
   await handleCustomerAssistantRequest({
     method: "POST",
     headers: { origin: "https://www.vanfinancecompany.co.uk", "x-forwarded-for": "192.0.2.1" },
-    body: { action: "start", page_context: { pageType: "finance_vehicle", vehicle: { registration: "AB12 CDE", title: "Ford Transit Custom" } } },
+    body: { action: "start", page_context: { pageType: "finance_vehicle", vehicle: { registration: "AB12 CDE", title: "Ford Transit Custom", pricing: { finance_monthly: "£399 + VAT" } } } },
   }, response, { environment, supabase: client });
   assert.equal(response.statusCode, 200);
   assert.equal(response.payload.status, "ready");
   assert.equal(response.payload.conversation_id.length >= 40, true);
   assert.equal(state.inserted.product_lock, "finance");
   assert.equal(state.inserted.vehicle_context.registration, "AB12 CDE");
+  assert.equal(state.inserted.vehicle_context.pricing.finance_monthly, "£399 + VAT");
   assert.equal(state.inserted.remembered_facts.vehicle_interest, "Ford Transit Custom");
   assert.equal(state.rpcCalls.length, 2);
   assert.equal(response.headers["Cache-Control"], "no-store, max-age=0");
   assert.equal(response.headers["Access-Control-Allow-Origin"], "https://www.vanfinancecompany.co.uk");
 });
 
-test("message endpoint reuses the existing assistant and cannot cross the locked product", async () => {
+test("message endpoint reuses the existing assistant, cannot cross product, and returns no chat application button", async () => {
   const conversationId = "opaque-public-conversation-id";
   const session = {
     id: "session-internal-id",
@@ -162,7 +158,7 @@ test("message endpoint reuses the existing assistant and cannot cross the locked
     assistantInput = body;
     return { result: {
       id: "competence-result-id",
-      reply: "Great. The next step is to start your Finance application below.",
+      reply: "Great. When you’re ready, use the APPLY NOW button on this page to start your Finance application.",
       remembered_facts: { product_context: "finance", employment_status: "self-employed" },
       journey_stage: "Application ready",
       application_readiness: "Ready for application CTA",
@@ -181,11 +177,40 @@ test("message endpoint reuses the existing assistant and cannot cross the locked
   assert.equal(response.statusCode, 200);
   assert.equal(assistantInput.product_context, "finance");
   assert.equal(assistantInput.session_id, "session-internal-id");
-  assert.equal(response.payload.cta.label, "Start Finance Application");
-  assert.equal(response.payload.cta.behavior, "same_window");
+  assert.match(response.payload.reply, /APPLY NOW button on this page/i);
+  assert.equal(response.payload.cta, null);
   assert.equal(state.updated.product_lock, "finance");
   assert.equal(state.updated.employment, "self-employed");
   assert.deepEqual(Object.keys(response.payload).sort(), ["conversation_id", "cta", "reply", "status"]);
+});
+
+test("current Finance vehicle pricing is answered from stored page context without calling the model", async () => {
+  const conversationId = "opaque-public-conversation-id";
+  const session = {
+    id: "session-internal-id",
+    page_type: "finance_vehicle",
+    product_lock: "finance",
+    vehicle_context: { registration: "AB12 CDE", title: "Ford Transit Custom", pricing: { finance_monthly: "£399 + VAT" } },
+    conversation_history: [],
+    remembered_facts: { product_context: "finance", vehicle_interest: "Ford Transit Custom" },
+    journey_state: {},
+    message_count: 0,
+    status: "active",
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+  };
+  const { client } = mockSupabase(session);
+  let modelCalls = 0;
+  const response = responseRecorder();
+  await handleCustomerAssistantRequest({
+    method: "POST",
+    headers: { origin: "https://www.vanfinancecompany.co.uk", "x-forwarded-for": "192.0.2.3" },
+    body: { action: "message", conversation_id: conversationId, page_context: { pageType: "finance_vehicle", vehicle: { registration: "AB12 CDE" } }, message: "How much is this van per month?" },
+  }, response, { environment, supabase: client, simulateConversation: async () => { modelCalls += 1; throw new Error("should not run"); } });
+  assert.equal(response.statusCode, 200);
+  assert.equal(modelCalls, 0);
+  assert.match(response.payload.reply, /£399 \+ VAT/i);
+  assert.match(response.payload.reply, /current vehicle page/i);
+  assert.equal(response.payload.cta, null);
 });
 
 test("migration creates private anonymous sessions and atomic database rate limiting", async () => {
