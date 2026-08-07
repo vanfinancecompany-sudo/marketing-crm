@@ -2,6 +2,7 @@ import {
   buildFinanceCoverageEvidence,
   buildRent2BuyDeliveryEvidence,
   buildRent2BuyCoverageEvidence,
+  extractBareRent2BuyLocationCandidate,
   extractUkLocation,
   isCoverageQuestion,
   normaliseCoverageSettings,
@@ -43,13 +44,15 @@ async function geocodePlace(place, environment, fetchImplementation) {
 }
 
 export async function resolveProductCoverage({ question, productContext, settings = {}, environment = process.env, fetchImplementation = fetch } = {}) {
-  if (!isCoverageQuestion(question)) return null;
+  const directLocation = extractUkLocation(question);
+  const bareRent2BuyLocation = productContext === "rent2buy" ? extractBareRent2BuyLocationCandidate(question) : null;
+  const location = directLocation || bareRent2BuyLocation;
+  if (!isCoverageQuestion(question) && !(productContext === "rent2buy" && location)) return null;
   if (productContext === "finance") return buildFinanceCoverageEvidence(question, settings);
   if (productContext !== "rent2buy") return null;
   const deliveryRule = buildRent2BuyDeliveryEvidence(question, settings);
   if (deliveryRule) return deliveryRule;
   const rules = normaliseCoverageSettings(settings);
-  const location = extractUkLocation(question);
   if (!location) return buildRent2BuyCoverageEvidence({ location, settings: rules });
   try {
     const [base, resolved] = await Promise.all([
