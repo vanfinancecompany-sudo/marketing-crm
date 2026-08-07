@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { classifyConversationIntent } from "../lib/conversationIntelligence.js";
-import { classifyUniversalMessage } from "../lib/humanConversationRecovery.js";
+import { classifyUniversalMessage, contextualRecoveryQuestion } from "../lib/humanConversationRecovery.js";
 import { orchestrateConversationTurn } from "../lib/conversationKnowledgeOrchestrator.js";
 
 function understand(message, messages, { product = "finance", priorJourney = {} } = {}) {
@@ -24,8 +24,9 @@ test("yes please accepts the assistant's immediately preceding knowledge offer",
     content: "Rent2Buy is based on affordability. If you'd like, I can help explain the application process next.",
   }];
   const result = understand("yes please", messages, { product: "rent2buy" });
-  assert.equal(result.human.message_type, "contextual_acceptance");
+  assert.equal(result.human.message_type, "agreement");
   assert.equal(result.human.contextual_requires_knowledge, true);
+  assert.match(result.human.contextual_anchor, /explain the application process next/i);
   assert.equal(result.human.recovery_required, false);
   assert.equal(result.orchestration.contextual_turn, true);
   assert.equal(result.orchestration.retrieval_required, true);
@@ -33,15 +34,17 @@ test("yes please accepts the assistant's immediately preceding knowledge offer",
   assert.match(result.intent.normalised_message, /explain the application process next/);
 });
 
-test("a short answer to the assistant's clarification question keeps that question as context", () => {
+test("a short answer to an explicit assistant clarification choice keeps that question as context", () => {
   const messages = [{
     role: "assistant",
     content: "Bank information can be requested for a finance application. Is it asking you to upload bank statements or enter account details on a form?",
   }];
   const result = understand("ON THE FORM", messages, { product: "finance" });
-  assert.equal(result.human.message_type, "contextual_answer");
+  assert.equal(result.human.message_type, "follow_up_question");
   assert.equal(result.human.contextual_requires_knowledge, true);
+  assert.match(result.human.contextual_anchor, /account details on a form/i);
   assert.equal(result.human.recovery_required, false);
+  assert.equal(result.orchestration.contextual_turn, true);
   assert.equal(result.orchestration.retrieval_required, true);
   assert.equal(result.orchestration.recovery_required, false);
   assert.match(result.intent.normalised_message, /account details on a form/);
@@ -57,7 +60,7 @@ test("an explicit conversational instruction is allowed through to knowledge rea
   assert.equal(result.orchestration.recovery_required, false);
 });
 
-test("a plain yes to an active application prompt remains application continuation, not factual retrieval", () => {
+test("a polite yes to an active application prompt remains application continuation, not factual retrieval", () => {
   const priorJourney = {
     buying_intent_level: "Ready To Apply",
     journey_stage: "Application ready",
@@ -67,9 +70,25 @@ test("a plain yes to an active application prompt remains application continuati
   const messages = [{ role: "assistant", content: "Would you like to start your Finance application?" }];
   const result = understand("yes please", messages, { product: "finance", priorJourney });
   assert.equal(result.human.message_type, "agreement");
+  assert.equal(result.human.contextual_anchor, "");
   assert.equal(result.orchestration.retrieval_required, false);
   assert.equal(result.orchestration.application_continuation, true);
   assert.equal(result.orchestration.recovery_required, false);
+});
+
+test("existing short-duration recovery is preserved and is not swallowed by generic context anchoring", () => {
+  const messages = [
+    { role: "user", content: "I am self employed" },
+    { role: "assistant", content: "How long have you been trading?" },
+  ];
+  const human = classifyUniversalMessage({ message: "Two weeks", messages });
+  assert.equal(human.contextual_anchor, "");
+  assert.match(contextualRecoveryQuestion("Two weeks", messages, { employment_status: "self-employed" }, "finance"), /how long you.ve been trading/i);
+});
+
+test("a bare application-status statement still does not force knowledge retrieval", () => {
+  const result = understand("Halfway through applying", [], { product: "finance" });
+  assert.equal(result.orchestration.retrieval_required, false);
 });
 
 test("context-first routing does not weaken genuine nonsense recovery", () => {
