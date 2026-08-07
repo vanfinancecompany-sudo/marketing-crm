@@ -36,7 +36,7 @@ test("approved factual wording is preserved while article-style framing is remov
   assert.doesNotMatch(result.reply, /Knowledge Hub|article/i);
 });
 
-test("knowledge interruption bridges naturally back to the exact locked application", () => {
+test("knowledge interruption answers the factual question without pushing the application", () => {
   const result = polishConversationPresentation({
     reply: "Insurance is not included.\n\nWhen you’re ready, you can continue with your Rent2Buy application below.",
     question: "Does insurance come with it?",
@@ -45,14 +45,13 @@ test("knowledge interruption bridges naturally back to the exact locked applicat
     intent: { retrieval_required: true },
     journey: { buying_intent_level: "Ready To Apply" },
   });
-  assert.match(result.reply, /^Insurance is not included\./);
-  assert.match(result.reply, /Rent2Buy application/);
-  assert.doesNotMatch(result.reply, /Finance application/);
-  assert.equal(result.transition_type, "resume_application");
-  assert.equal(result.response_sentence_count, 2);
+  assert.equal(result.reply, "Insurance is not included.");
+  assert.doesNotMatch(result.reply, /application/i);
+  assert.equal(result.transition_type, "answer_only");
+  assert.equal(result.response_sentence_count, 1);
 });
 
-test("Finance application transitions never introduce Rent2Buy", () => {
+test("Finance factual answers do not add product application transitions", () => {
   const result = polishConversationPresentation({
     reply: "The vehicle tax position is explained in the approved evidence.\n\nWhen you’re ready, you can continue with your Finance application below.",
     question: "Is it taxed?",
@@ -60,11 +59,11 @@ test("Finance application transitions never introduce Rent2Buy", () => {
     orchestration: { application_mode_resumed: true },
     intent: { retrieval_required: true },
   });
-  assert.match(result.reply, /Finance application/);
-  assert.doesNotMatch(result.reply, /Rent2Buy/);
+  assert.equal(result.reply, "The vehicle tax position is explained in the approved evidence.");
+  assert.doesNotMatch(result.reply, /application/i);
 });
 
-test("missing knowledge stays natural and never exposes the Learning Engine", () => {
+test("missing knowledge stays natural and does not add an application prompt", () => {
   const result = polishConversationPresentation({
     reply: "I don’t have enough approved information to confirm that.\n\nWhen you’re ready, you can continue with your Finance application below.",
     question: "Is a specialist accessory included?",
@@ -73,9 +72,8 @@ test("missing knowledge stays natural and never exposes the Learning Engine", ()
     intent: { retrieval_required: true },
     insufficientKnowledge: true,
   });
-  assert.match(result.reply, /team can confirm|needs confirming|need the team/i);
-  assert.match(result.reply, /Finance application/);
-  assert.doesNotMatch(result.reply, /Learning|opportunity|internal|retrieval/i);
+  assert.match(result.reply, /don.t have enough approved information/i);
+  assert.doesNotMatch(result.reply, /application below|Learning|opportunity|internal|retrieval/i);
 });
 
 test("high intent, high readiness and sufficient facts expose the existing Finance CTA abstraction", () => {
@@ -101,7 +99,7 @@ test("CTA is held back for lower intent, incomplete facts, conflicts and missing
   for (const result of [lower, incomplete, conflict, missing]) assert.equal(result.generated_early, false);
 });
 
-test("proactive CTA transition is concise and non-binding", () => {
+test("proactive CTA is not injected into a factual answer", () => {
   const result = polishConversationPresentation({
     reply: "Your document list is covered by the approved guidance.",
     question: "What documents do I need?",
@@ -110,9 +108,9 @@ test("proactive CTA transition is concise and non-binding", () => {
     journey: highIntentJourney(),
     ctaTiming: { generated_early: true },
   });
-  assert.match(result.reply, /start your Finance application|application is ready to start|start your Finance application/i);
-  assert.doesNotMatch(result.reply, /guaranteed|accepted/i);
-  assert.ok(result.response_sentence_count <= 5);
+  assert.equal(result.reply, "Your document list is covered by the approved guidance.");
+  assert.doesNotMatch(result.reply, /start your Finance application|application is ready/i);
+  assert.equal(result.transition_type, "answer_only");
 });
 
 test("repeated-fact diagnostics exclude facts the customer explicitly asked to revisit", () => {
