@@ -119,10 +119,13 @@
         }
         .hidden { display:none !important; }
         @media (max-width:520px) {
-          .launcher { right:12px; bottom:56px; width:80px; height:44px; font-size:10.5px; }
+          .launcher {
+            right:12px; bottom:58px; width:76px; height:38px; padding:0 8px;
+            font-size:10.5px; box-shadow:0 4px 12px rgba(0,0,0,.24);
+          }
           .panel-frame {
-            right:12px; bottom:84px; width:calc(100vw - 24px);
-            height:min(560px, calc(100vh - 120px)); height:min(560px, calc(100dvh - 120px));
+            right:12px; bottom:96px; width:min(340px, calc(100vw - 32px));
+            height:min(500px, calc(100vh - 180px)); height:min(500px, calc(100dvh - 180px));
             border-radius:14px;
           }
         }
