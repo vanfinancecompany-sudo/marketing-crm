@@ -100,14 +100,14 @@ export function endpointPageContext(context) {
   if (!hasVehicle) return { pageType: safe.pageType, vehicle: {} };
 
   const pricing = safe.productContext === "rent2buy"
-    ? compactObject({
+    ? {
       rent2buy_monthly: safe.vehicle.pricing.monthlyRental,
       rent2buy_initial: safe.vehicle.pricing.initialRental,
-    })
-    : compactObject({
+    }
+    : {
       finance_monthly: safe.vehicle.pricing.financeMonthly,
-      finance_retail_vat: safe.vehicle.pricing.retailPriceVat,
-    });
+      ...(safe.vehicle.pricing.retailPriceVat ? { finance_retail_vat: safe.vehicle.pricing.retailPriceVat } : {}),
+    };
 
   return {
     pageType: safe.pageType,
