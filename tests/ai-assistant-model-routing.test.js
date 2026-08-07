@@ -89,15 +89,18 @@ test("uncategorised turns do not fall through to the cheaper model", () => {
   assert.match(selected.reason, /default|contextual|stronger|reasoning/i);
 });
 
-test("Responses API parameters use the official model IDs and temperature 0.2", () => {
+test("GPT-5 Responses API parameters omit unsupported temperature", () => {
   const mini = buildAssistantResponseModelParameters({ model: ASSISTANT_MODEL_POLICY.mini, temperature: 0.2 });
-  assert.deepEqual(mini, { model: "gpt-5-mini", temperature: 0.2 });
+  assert.deepEqual(mini, { model: "gpt-5-mini" });
 
   const full = buildAssistantResponseModelParameters({ model: ASSISTANT_MODEL_POLICY.full, temperature: 0.2, reasoning_effort: "low" });
-  assert.deepEqual(full, { model: "gpt-5.1", temperature: 0.2, reasoning: { effort: "low" } });
+  assert.deepEqual(full, { model: "gpt-5.1", reasoning: { effort: "low" } });
+
+  const legacy = buildAssistantResponseModelParameters({ model: "gpt-4.1", temperature: 0.2 });
+  assert.deepEqual(legacy, { model: "gpt-4.1", temperature: 0.2 });
 });
 
-test("the canonical conversation request sends the selected route to OpenAI", async () => {
+test("the canonical conversation request sends a supported gpt-5.1 payload", async () => {
   let requestBody;
   const selected = route("Are prices plus VAT?", { intent: { secondary_intents: ["vat_pricing"] } });
   const fetchImplementation = async (_url, options) => {
@@ -118,9 +121,10 @@ test("the canonical conversation request sends the selected route to OpenAI", as
   );
 
   assert.equal(requestBody.model, "gpt-5.1");
-  assert.equal(requestBody.temperature, 0.2);
+  assert.equal("temperature" in requestBody, false);
   assert.deepEqual(requestBody.reasoning, { effort: "low" });
   assert.equal(requested.model, "gpt-5.1");
   assert.equal(requested.route.tier, "full");
-  assert.equal(requested.route.temperature, 0.2);
+  assert.equal(requested.route.temperature, undefined);
+  assert.equal(requested.route.reasoning_effort, "low");
 });
