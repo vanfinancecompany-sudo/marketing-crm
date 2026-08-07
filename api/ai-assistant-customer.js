@@ -17,6 +17,7 @@ import {
   secureHash,
   validateWixOrigin,
 } from "../lib/publicAssistantFoundation.js";
+import { publicVehiclePricingReply } from "../lib/publicVehiclePricing.js";
 import {
   buildCanonicalConversationInput,
   canonicalSessionState,
@@ -258,6 +259,21 @@ async function continueConversation(supabase, body, environment, simulateConvers
         return safeCustomerPayload({ reply, conversationId, status: "needs_product" });
       }
     }
+  }
+
+  const pricingReply = publicVehiclePricingReply({
+    message,
+    pageType: session.page_type,
+    productLock,
+    vehicleContext: session.vehicle_context,
+    rememberedFacts: session.remembered_facts,
+  });
+  if (pricingReply) {
+    await updateSession(supabase, session, {
+      conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: pricingReply }]),
+      message_count: Number(session.message_count || 0) + 1,
+    });
+    return safeCustomerPayload({ reply: pricingReply, cta: null, conversationId, status: "ready" });
   }
 
   const requestId = `public-${randomUUID()}`;
