@@ -1,0 +1,31 @@
+name: AI Assistant production smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Optional deployed base URL override
+        required: false
+        default: https://marketing-crm-github-work.vercel.app
+
+concurrency:
+  group: ai-assistant-production-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run live assistant smoke test
+        env:
+          ASSISTANT_SMOKE_BASE_URL: ${{ inputs.base_url }}
+        run: node scripts/assistant-production-smoke.mjs
