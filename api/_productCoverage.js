@@ -2,11 +2,11 @@ import {
   buildFinanceCoverageEvidence,
   buildRent2BuyDeliveryEvidence,
   buildRent2BuyCoverageEvidence,
-  extractBareRent2BuyLocationCandidate,
   extractUkLocation,
   isCoverageQuestion,
   normaliseCoverageSettings,
 } from "../lib/productCoverageRules.js";
+import { detectRent2BuyLocationInput } from "../lib/rent2buyLocationInput.js";
 
 const clean = (value, limit = 500) => String(value || "").trim().slice(0, limit);
 
@@ -43,17 +43,48 @@ async function geocodePlace(place, environment, fetchImplementation) {
   return { label: result.name_1 || result.local_type || place, outcode: result.outcode || null, latitude: Number(result.latitude), longitude: Number(result.longitude) };
 }
 
+function invalidPostcodeEvidence(location, settings = {}) {
+  const rules = normaliseCoverageSettings(settings);
+  return {
+    source: {
+      type: "coverage_rule",
+      source_id: "coverage:rent2buy:invalid-postcode",
+      title: "Approved Rent2Buy coverage",
+      heading: "Postcode needs checking",
+      passage: `The customer appears to have entered a postcode (${clean(location?.query, 40)}), but it is not in a full UK postcode format that can be verified. Ask them to check and resend their full home postcode, for example SO40 2NN. Do not guess a location, distance or coverage result. Rent2Buy applicants normally need to live within ${rules.rent2buy_max_radius_miles} miles of ${rules.rent2buy_base_postcode}. Do not mention Finance.`,
+      public_url: "",
+      score: 1000,
+      product: "rent2buy",
+    },
+    diagnostics: {
+      detected_location: clean(location?.query, 40) || null,
+      resolved_postcode: null,
+      resolved_coordinates: null,
+      distance_miles: null,
+      calculation_type: rules.coverage_distance_method,
+      base_postcode: rules.rent2buy_base_postcode,
+      coverage_result: "invalid_postcode",
+      certainty: "unresolved",
+    },
+  };
+}
+
 export async function resolveProductCoverage({ question, productContext, settings = {}, environment = process.env, fetchImplementation = fetch } = {}) {
   const directLocation = extractUkLocation(question);
-  const bareRent2BuyLocation = productContext === "rent2buy" ? extractBareRent2BuyLocationCandidate(question) : null;
-  const location = directLocation || bareRent2BuyLocation;
+  const tolerantRent2BuyLocation = productContext === "rent2buy" ? detectRent2BuyLocationInput(question) : null;
+  const location = directLocation || tolerantRent2BuyLocation;
+
   if (!isCoverageQuestion(question) && !(productContext === "rent2buy" && location)) return null;
   if (productContext === "finance") return buildFinanceCoverageEvidence(question, settings);
   if (productContext !== "rent2buy") return null;
+
   const deliveryRule = buildRent2BuyDeliveryEvidence(question, settings);
   if (deliveryRule) return deliveryRule;
+
   const rules = normaliseCoverageSettings(settings);
+  if (location?.type === "postcode_attempt") return invalidPostcodeEvidence(location, rules);
   if (!location) return buildRent2BuyCoverageEvidence({ location, settings: rules });
+
   try {
     const [base, resolved] = await Promise.all([
       geocodePostcode(rules.rent2buy_base_postcode, environment, fetchImplementation),

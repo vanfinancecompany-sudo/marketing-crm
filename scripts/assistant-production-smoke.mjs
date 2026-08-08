@@ -1,0 +1,122 @@
+import assert from "node:assert/strict";
+
+const baseUrl = String(process.env.ASSISTANT_SMOKE_BASE_URL || "https://marketing-crm-github-work.vercel.app").replace(/\/$/, "");
+const endpoint = `${baseUrl}/api/ai-assistant-sitewide`;
+const timeoutMs = Math.max(3000, Number(process.env.ASSISTANT_SMOKE_TIMEOUT_MS) || 15000);
+
+const VFC_ORIGIN = "https://www.vanfinancecompany.co.uk";
+const VFC_HOME = "https://www.vanfinancecompany.co.uk/";
+const R2B_ORIGIN = "https://www.rent2buyvans.co.uk";
+const R2B_HOME = "https://www.rent2buyvans.co.uk/";
+
+function safeReply(payload) {
+  return String(payload?.reply || "").replace(/\s+/g, " ").trim();
+}
+
+function rejectGenericFailure(label, reply) {
+  assert.doesNotMatch(reply, /not quite sure what you mean|could you explain that another way|don.?t have enough verified|temporarily unavailable/i, `${label}: generic failure reply: ${reply}`);
+}
+
+async function post(origin, body) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Origin": origin,
+        "User-Agent": "VFC-Production-Smoke-Test/1.0",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => ({}));
+    assert.equal(response.status, 200, `HTTP ${response.status}: ${JSON.stringify(payload)}`);
+    assert.ok(payload?.conversation_id, `Missing conversation_id: ${JSON.stringify(payload)}`);
+    assert.ok(safeReply(payload), `Missing reply: ${JSON.stringify(payload)}`);
+    return payload;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function start(origin, pageUrl) {
+  return post(origin, { action: "start", page_url: pageUrl });
+}
+
+async function message(origin, pageUrl, conversationId, text, productChoice) {
+  return post(origin, {
+    action: "message",
+    page_url: pageUrl,
+    conversation_id: conversationId,
+    message: text,
+    ...(productChoice ? { product_choice: productChoice } : {}),
+  });
+}
+
+function report(label, payload) {
+  const reply = safeReply(payload);
+  console.log(`✓ ${label}: ${reply.slice(0, 240)}`);
+  return reply;
+}
+
+async function financeSmoke() {
+  const started = await start(VFC_ORIGIN, VFC_HOME);
+  const conversationId = started.conversation_id;
+  assert.match(report("VFC homepage start", started), /finance|rent2buy/i);
+
+  const selected = await message(VFC_ORIGIN, VFC_HOME, conversationId, "finance", "finance");
+  assert.match(report("Finance selection", selected), /finance/i);
+
+  const vat = await message(VFC_ORIGIN, VFC_HOME, conversationId, "Is VAT included?");
+  const vatReply = report("Finance VAT", vat);
+  rejectGenericFailure("Finance VAT", vatReply);
+  assert.match(vatReply, /vat/i);
+
+  const delivery = await message(VFC_ORIGIN, VFC_HOME, conversationId, "Do you offer delivery?");
+  const deliveryReply = report("Finance delivery", delivery);
+  rejectGenericFailure("Finance delivery", deliveryReply);
+  assert.match(deliveryReply, /deliver|delivery/i);
+
+  const apply = await message(VFC_ORIGIN, VFC_HOME, conversationId, "How do I apply?");
+  const applyReply = report("Finance application", apply);
+  rejectGenericFailure("Finance application", applyReply);
+  assert.match(applyReply, /apply|application/i);
+}
+
+async function rent2BuySmoke() {
+  const started = await start(R2B_ORIGIN, R2B_HOME);
+  const conversationId = started.conversation_id;
+  assert.match(report("Rent2Buy standalone start", started), /rent2buy/i);
+
+  const eligibility = await message(R2B_ORIGIN, R2B_HOME, conversationId, "Can I get a van?");
+  const eligibilityReply = report("Rent2Buy eligibility", eligibility);
+  rejectGenericFailure("Rent2Buy eligibility", eligibilityReply);
+  assert.match(eligibilityReply, /no credit check|affordab/i);
+
+  const compactPostcode = await message(R2B_ORIGIN, R2B_HOME, conversationId, "BH23-1QH");
+  const postcodeReply = report("Rent2Buy tolerant postcode", compactPostcode);
+  rejectGenericFailure("Rent2Buy tolerant postcode", postcodeReply);
+  assert.match(postcodeReply, /mile|within|area/i);
+
+  const outside = await message(R2B_ORIGIN, R2B_HOME, conversationId, "M1 1AE");
+  const outsideReply = report("Rent2Buy outside postcode", outside);
+  rejectGenericFailure("Rent2Buy outside postcode", outsideReply);
+  assert.match(outsideReply, /outside|mile|area/i);
+
+  const town = await message(R2B_ORIGIN, R2B_HOME, conversationId, "Bournemouth");
+  const townReply = report("Rent2Buy standalone town", town);
+  rejectGenericFailure("Rent2Buy standalone town", townReply);
+  assert.match(townReply, /bournemouth|mile|postcode|area/i);
+
+  const delivery = await message(R2B_ORIGIN, R2B_HOME, conversationId, "Do you deliver?");
+  const deliveryReply = report("Rent2Buy collection", delivery);
+  rejectGenericFailure("Rent2Buy collection", deliveryReply);
+  assert.match(deliveryReply, /collect|southampton/i);
+}
+
+console.log(`Running production assistant smoke test against ${endpoint}`);
+await financeSmoke();
+await rent2BuySmoke();
+console.log("✓ Production assistant smoke test passed");
