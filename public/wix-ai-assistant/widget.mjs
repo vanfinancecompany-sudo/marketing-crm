@@ -47,6 +47,14 @@ function messageMarkup(messages) {
   return messages.map((message) => `<div class="message ${message.role === "customer" ? "customer" : "assistant"}">${escapeHtml(message.content)}</div>`).join("");
 }
 
+export function assistantTitle(pageContext = {}) {
+  const pageType = String(pageContext?.pageType || pageContext?.page_type || "").trim().toLowerCase();
+  const productContext = String(pageContext?.productContext || pageContext?.product_context || "").trim().toLowerCase();
+  if (pageType === "finance_vehicle" || pageType === "finance_general" || productContext === "finance") return "Finance Assistant";
+  if (pageType === "rent2buy_general" || productContext === "rent2buy") return "Rent2Buy Assistant";
+  return "Finance & Rent2Buy";
+}
+
 export class VfcAiAssistantWidget extends HTMLElementBase {
   constructor() {
     super();
@@ -127,18 +135,19 @@ export class VfcAiAssistantWidget extends HTMLElementBase {
   render() {
     if (!this.shadowRoot) return;
     if (!this.state.open && !this.hasAttribute("panel-only")) {
-      this.shadowRoot.innerHTML = `<style>${STYLES}</style><button class="launcher" type="button" aria-label="Open Live Chat">Live Chat</button>`;
+      this.shadowRoot.innerHTML = `<style>${STYLES}</style><button class="launcher" type="button" aria-label="Ask a question">Ask Me</button>`;
       this.shadowRoot.querySelector(".launcher")?.addEventListener("click", () => { this.state = reduceWidgetState(this.state, { type: "open" }); this.render(); this.shadowRoot?.querySelector("#customerMessage")?.focus(); });
       return;
     }
+    const title = assistantTitle(this.state.pageContext);
     const choices = this.state.status === "needs_product" ? `<div class="choices" aria-label="Choose a product"><button class="choice" data-product="finance" type="button">Finance</button><button class="choice" data-product="rent2buy" type="button">Rent2Buy</button></div>` : "";
     const cta = this.state.cta ? `<button class="cta" type="button">${escapeHtml(this.state.cta.label)}</button>` : "";
     const retry = !this.state.loading && this.state.retryRequest ? `<div><div class="message assistant">Sorry, I couldn’t send that. Please try again.</div><button class="retry" type="button">Try again</button></div>` : "";
     const typing = this.state.loading ? `<div class="typing" role="status">Assistant is typing…</div>` : "";
     const privacy = this.state.privacyUrl ? ` <a href="${escapeHtml(this.state.privacyUrl)}" target="_top" rel="noopener">Privacy notice</a>.` : "";
     this.shadowRoot.innerHTML = `<style>${STYLES}</style>
-      <section class="panel" role="dialog" aria-label="Live Chat" aria-modal="false">
-        <header class="header"><span class="title">Live Chat</span><button class="restart" type="button" aria-label="Restart conversation">Restart</button><button class="close" type="button" aria-label="Close Live Chat">Close</button></header>
+      <section class="panel" role="dialog" aria-label="${escapeHtml(title)}" aria-modal="false">
+        <header class="header"><span class="title">${escapeHtml(title)}</span><button class="restart" type="button" aria-label="Restart conversation">Restart</button><button class="close" type="button" aria-label="Close ${escapeHtml(title)}">Close</button></header>
         <div class="messages" aria-live="polite" aria-busy="${this.state.loading}">${messageMarkup(this.state.messages)}${typing}${choices}${cta}${retry}</div>
         <div class="composer"><div class="input-row"><textarea id="customerMessage" aria-label="Type your message" placeholder="Type your message…" ${this.state.loading ? "disabled" : ""}></textarea><button class="send" type="button" aria-label="Send message" ${this.state.loading ? "disabled" : ""}>Send</button></div><p class="notice">Please do not send bank details, passwords or card information in chat.${privacy}</p></div>
       </section>`;
