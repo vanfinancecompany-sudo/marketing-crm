@@ -28,24 +28,28 @@ test("full, compact and hyphenated UK postcodes route to Rent2Buy coverage befor
     assert.equal(orchestration.retrieval_required, true, postcode);
     assert.equal(orchestration.recovery_required, false, postcode);
     assert.equal(orchestration.rent2buy_location_turn, true, postcode);
-    assert.ok(intent.secondary_intents.includes("coverage"), postcode);
+    assert.equal(intent.secondary_intents.includes("coverage"), false, postcode);
+    assert.ok(orchestration.detected_intents.includes("coverage"), postcode);
     assert.ok(orchestration.detected_intents.includes("rent2buy_location"), postcode);
   }
 });
 
-test("postcode-looking input with a formatting error is still routed to safe coverage handling", () => {
-  const { orchestration } = route("BH23 1Q");
+test("postcode-looking input with a formatting error is routed using the current message rather than stale location context", () => {
+  const { intent, orchestration } = route("BH23 1Q", "", { intent: { secondary_intents: ["coverage"] } });
   assert.equal(orchestration.retrieval_required, true);
   assert.equal(orchestration.recovery_required, false);
   assert.equal(orchestration.rent2buy_location_turn, true);
+  assert.equal(intent.secondary_intents.includes("coverage"), false);
+  assert.ok(orchestration.detected_intents.includes("coverage"));
 });
 
 test("a bare town or city routes to Rent2Buy coverage even without a preceding location prompt", () => {
-  for (const place of ["Bournemouth", "New Forest", "Christchurch", "Milton Keynes", "St Albans"]) {
-    const { intent, orchestration } = route(place);
+  for (const place of ["Bournemouth", "New Forest", "Christchurch", "Milton Keynes", "St Albans", "Salisbury"]) {
+    const { intent, orchestration } = route(place, "", { intent: { secondary_intents: ["coverage"] } });
     assert.equal(orchestration.retrieval_required, true, place);
     assert.equal(orchestration.recovery_required, false, place);
-    assert.ok(intent.secondary_intents.includes("coverage"), place);
+    assert.equal(intent.secondary_intents.includes("coverage"), false, place);
+    assert.ok(orchestration.detected_intents.includes("coverage"), place);
     assert.ok(orchestration.detected_intents.includes("rent2buy_location"), place);
   }
 });
