@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { resolveProductCoverage } from "../api/_productCoverage.js";
 import { buildCompetencePrompt } from "../lib/aiAssistantCompetence.js";
-import { coverageConflictDetected, detectCoverageConflicts } from "../lib/productCoverageRules.js";
+import {
+  coverageConflictDetected,
+  detectCoverageConflicts,
+  detectRent2BuyLocationTurn,
+  extractBareRent2BuyLocationCandidate,
+} from "../lib/productCoverageRules.js";
 
 const settings = {
   finance_covered_nations: ["England", "Wales", "Scotland"],
@@ -15,6 +20,7 @@ const settings = {
 const locations = {
   "SO40 2NN": { postcode: "SO40 2NN", latitude: 50.918, longitude: -1.495 },
   "PO1 2AA": { postcode: "PO1 2AA", latitude: 50.8198, longitude: -1.088 },
+  "BH23 1QH": { postcode: "BH23 1QH", latitude: 50.735, longitude: -1.778 },
   "M1 1AE": { postcode: "M1 1AE", latitude: 53.4808, longitude: -2.2426 },
   "BH20 6EQ": { postcode: "BH20 6EQ", latitude: 52.365, longitude: -1.495 },
 };
@@ -32,7 +38,9 @@ function providerFetch(url, options = {}) {
     ? { name_1: "Manchester", latitude: 53.4808, longitude: -2.2426, outcode: "M1" }
     : query === "Portsmouth"
       ? { name_1: "Portsmouth", latitude: 50.8198, longitude: -1.088, outcode: "PO1" }
-      : null;
+      : query === "Bournemouth"
+        ? { name_1: "Bournemouth", latitude: 50.7192, longitude: -1.8808, outcode: "BH1" }
+        : null;
   return Promise.resolve({ ok: Boolean(place), json: async () => ({ result: place ? [place] : [] }) });
 }
 
@@ -49,6 +57,30 @@ test("Portsmouth is an indicative in-range Rent2Buy place result", async () => {
   assert.equal(result.diagnostics.detected_location, "Portsmouth");
   assert.equal(result.diagnostics.certainty, "indicative");
   assert.equal(result.diagnostics.coverage_result, "within_normal_area");
+});
+
+test("bare Rent2Buy postcode is treated as a coverage request and calculated immediately", async () => {
+  const result = await resolveProductCoverage({ question: "BH23 1QH", productContext: "rent2buy", settings, fetchImplementation: providerFetch });
+  assert.equal(result.diagnostics.detected_location, "BH23 1QH");
+  assert.equal(result.diagnostics.certainty, "confirmed");
+  assert.equal(result.diagnostics.coverage_result, "within_normal_area");
+  assert.ok(result.diagnostics.distance_miles > 0);
+  assert.match(result.source.passage, /server-calculated straight-line distance/i);
+});
+
+test("bare Rent2Buy town or city is geocoded and calculated rather than sent to generic recovery", async () => {
+  const result = await resolveProductCoverage({ question: "Bournemouth", productContext: "rent2buy", settings, fetchImplementation: providerFetch });
+  assert.equal(result.diagnostics.detected_location, "Bournemouth");
+  assert.equal(result.diagnostics.certainty, "indicative");
+  assert.equal(result.diagnostics.coverage_result, "within_normal_area");
+  assert.ok(result.diagnostics.distance_miles > 0);
+});
+
+test("location-turn detection accepts postcodes and bare places but not ordinary acknowledgements", () => {
+  assert.deepEqual(detectRent2BuyLocationTurn("BH23 1QH"), { query: "BH23 1QH", type: "full_postcode" });
+  assert.equal(detectRent2BuyLocationTurn("Bournemouth", "Please tell me your full home postcode.").query, "Bournemouth");
+  assert.equal(extractBareRent2BuyLocationCandidate("yes please"), null);
+  assert.equal(extractBareRent2BuyLocationCandidate("bad credit"), null);
 });
 
 test("full in-range and out-of-range postcodes are confirmed", async () => {
