@@ -8,6 +8,7 @@ const VFC_ORIGIN = "https://www.vanfinancecompany.co.uk";
 const VFC_HOME = "https://www.vanfinancecompany.co.uk/";
 const R2B_ORIGIN = "https://www.rent2buyvans.co.uk";
 const R2B_HOME = "https://www.rent2buyvans.co.uk/";
+const CALCULATED_DISTANCE = /approximately\s+\d+(?:\.\d+)?\s+miles?\s+in\s+a\s+straight\s+line\s+from\s+SO40\s+2NN/i;
 
 function safeReply(payload) {
   return String(payload?.reply || "").replace(/\s+/g, " ").trim();
@@ -57,7 +58,7 @@ async function message(origin, pageUrl, conversationId, text, productChoice) {
 
 function report(label, payload) {
   const reply = safeReply(payload);
-  console.log(`✓ ${label}: ${reply.slice(0, 240)}`);
+  console.log(`✓ ${label}: ${reply.slice(0, 300)}`);
   return reply;
 }
 
@@ -98,17 +99,28 @@ async function rent2BuySmoke() {
   const compactPostcode = await message(R2B_ORIGIN, R2B_HOME, conversationId, "BH23-1QH");
   const postcodeReply = report("Rent2Buy tolerant postcode", compactPostcode);
   rejectGenericFailure("Rent2Buy tolerant postcode", postcodeReply);
-  assert.match(postcodeReply, /mile|within|area/i);
+  assert.match(postcodeReply, CALCULATED_DISTANCE);
+  assert.match(postcodeReply, /within our normal 100-mile Rent2Buy area/i);
 
   const outside = await message(R2B_ORIGIN, R2B_HOME, conversationId, "M1 1AE");
   const outsideReply = report("Rent2Buy outside postcode", outside);
   rejectGenericFailure("Rent2Buy outside postcode", outsideReply);
-  assert.match(outsideReply, /outside|mile|area/i);
+  assert.match(outsideReply, CALCULATED_DISTANCE);
+  assert.match(outsideReply, /outside our normal 100-mile Rent2Buy area/i);
 
   const town = await message(R2B_ORIGIN, R2B_HOME, conversationId, "Bournemouth");
   const townReply = report("Rent2Buy standalone town", town);
   rejectGenericFailure("Rent2Buy standalone town", townReply);
-  assert.match(townReply, /bournemouth|mile|postcode|area/i);
+  assert.match(townReply, CALCULATED_DISTANCE);
+  assert.match(townReply, /indicative town\/city result/i);
+  assert.match(townReply, /full home postcode/i);
+
+  const invalidPostcode = await message(R2B_ORIGIN, R2B_HOME, conversationId, "BH23 1Q");
+  const invalidReply = report("Rent2Buy invalid postcode correction", invalidPostcode);
+  rejectGenericFailure("Rent2Buy invalid postcode correction", invalidReply);
+  assert.match(invalidReply, /looks like a postcode/i);
+  assert.match(invalidReply, /can.?t verify/i);
+  assert.match(invalidReply, /full home postcode/i);
 
   const delivery = await message(R2B_ORIGIN, R2B_HOME, conversationId, "Do you deliver?");
   const deliveryReply = report("Rent2Buy collection", delivery);
