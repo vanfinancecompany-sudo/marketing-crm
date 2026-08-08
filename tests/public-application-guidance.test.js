@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
   isDirectApplicationNavigationQuestion,
+  isRent2BuyEligibilityQuestion,
   publicApplicationGuidanceReply,
 } from "../lib/publicApplicationGuidance.js";
 
@@ -35,7 +36,53 @@ test("Rent2Buy application navigation uses the page APPLY NOW control without cr
   assert.doesNotMatch(reply, /https?:|link|navigate/i);
 });
 
-test("eligibility and application-document questions are not swallowed by the navigation guard", () => {
+test("common Rent2Buy eligibility questions are deterministic regardless of question order", () => {
+  for (const message of [
+    "Can I get a van?",
+    "Can I get one?",
+    "Will I qualify?",
+    "Do I qualify?",
+    "Am I eligible?",
+    "Could I get accepted?",
+  ]) {
+    assert.equal(isRent2BuyEligibilityQuestion(message), true, message);
+    const reply = publicApplicationGuidanceReply({
+      message,
+      pageType: "rent2buy_general",
+      productLock: "rent2buy",
+    });
+    assert.match(reply, /Potentially, yes/i, message);
+    assert.match(reply, /no credit check/i, message);
+    assert.match(reply, /affordability/i, message);
+    assert.match(reply, /100 miles of Southampton/i, message);
+    assert.doesNotMatch(reply, /not enough verified|explain that another way/i, message);
+  }
+
+  for (const message of ["Is it easy to get?", "How easy is it to get?"]) {
+    const reply = publicApplicationGuidanceReply({
+      message,
+      pageType: "rent2buy_general",
+      productLock: "rent2buy",
+    });
+    assert.match(reply, /straightforward/i, message);
+    assert.match(reply, /isn.t automatic/i, message);
+    assert.match(reply, /no credit check/i, message);
+    assert.match(reply, /100 miles of Southampton/i, message);
+    assert.doesNotMatch(reply, /explain|not enough verified/i, message);
+  }
+});
+
+test("Rent2Buy eligibility hard route does not leak into Finance conversations", () => {
+  for (const message of ["Can I get a van?", "Is it easy to get?", "Will I qualify?"]) {
+    assert.equal(publicApplicationGuidanceReply({
+      message,
+      pageType: "finance_general",
+      productLock: "finance",
+    }), null, message);
+  }
+});
+
+test("eligibility and application-document questions are not swallowed by the Finance navigation guard", () => {
   for (const message of [
     "Can I apply if I'm self-employed?",
     "What documents do I need to apply?",
@@ -47,7 +94,7 @@ test("eligibility and application-document questions are not swallowed by the na
   }
 });
 
-test("public endpoint checks direct application guidance before canonical model generation", async () => {
+test("public endpoint checks direct application and Rent2Buy eligibility guidance before canonical model generation", async () => {
   const source = await readFile(new URL("../api/ai-assistant-customer.js", import.meta.url), "utf8");
   const guidanceIndex = source.indexOf("publicApplicationGuidanceReply({");
   const canonicalIndex = source.indexOf("buildCanonicalConversationInput({", guidanceIndex);
