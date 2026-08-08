@@ -20,7 +20,7 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,6 +29,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Allow production deployment to settle
+        if: github.event_name == 'push'
+        run: sleep 90
 
       - name: Run live assistant smoke test
         env:
