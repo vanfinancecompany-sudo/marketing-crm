@@ -175,20 +175,24 @@ test("customer and assistant HTML is escaped before rendering", () => {
   assert.equal(escapeHtml("Tom & Co's"), "Tom &amp; Co&#39;s");
 });
 
-test("entry point includes responsive mobile layout, Live Chat controls and keyboard send", async () => {
+test("entry point includes responsive mobile layout, Ask Me controls and product-aware titles", async () => {
   const [widget, embed] = await Promise.all([
     readFile(new URL("../public/wix-ai-assistant/widget.mjs", import.meta.url), "utf8"),
     readFile(new URL("../public/wix-ai-assistant/embed.html", import.meta.url), "utf8"),
   ]);
   assert.match(widget, /@media \(max-width:520px\)/);
-  assert.match(widget, /aria-label="Open Live Chat"/);
-  assert.match(widget, />Live Chat<\/span>/);
+  assert.match(widget, /aria-label="Ask a question"/);
+  assert.match(widget, />Ask Me<\/button>/);
+  assert.match(widget, /Finance Assistant/);
+  assert.match(widget, /Rent2Buy Assistant/);
+  assert.match(widget, /Finance & Rent2Buy/);
   assert.match(widget, /panel-only/);
   assert.match(widget, /ui_close/);
   assert.match(widget, /role="dialog"/);
   assert.match(widget, /event\.key === "Enter" && !event\.shiftKey/);
   assert.match(widget, /Assistant is typing/);
   assert.match(widget, /Please do not send bank details, passwords or card information/);
+  assert.match(embed, /Finance &amp; Rent2Buy Assistant/);
   assert.match(embed, /window\.parent\.postMessage/);
   assert.match(embed, /params\.get\("mode"\) === "panel"/);
   assert.match(embed, /addEventListener\("vfc-ai-ui"/);
@@ -203,6 +207,7 @@ test("site-wide loader is layout-independent, sits above WhatsApp and sends only
   assert.match(loader, /position:fixed/);
   assert.match(loader, /bottom:88px/);
   assert.match(loader, /pointer-events:none/);
+  assert.match(loader, />Ask Me<\/button>/);
   assert.match(loader, /\/api\/ai-assistant-sitewide/);
   assert.match(loader, /page_url: window\.location\.href/);
   assert.match(loader, /mode=panel/);
