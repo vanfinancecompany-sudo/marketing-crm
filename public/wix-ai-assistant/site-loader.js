@@ -80,17 +80,6 @@
     return `${STORAGE_PREFIX}:${context.pageType}:${clean(identity, 100)}`;
   }
 
-  function vehiclePageGreeting(context) {
-    if (!clean(context?.vehicle?.registration, 40)) return null;
-    if (context.productContext === "finance") {
-      return "Hi — I can help with finance, pricing and applying for this van. What would you like to know?";
-    }
-    if (context.productContext === "rent2buy") {
-      return "Hi — I can help with Rent2Buy costs, terms and applying for this van. What would you like to know?";
-    }
-    return null;
-  }
-
   function storedConversationId() {
     try { return clean(window.localStorage.getItem(storageKey), 100) || null; }
     catch { return null; }
@@ -142,7 +131,7 @@
         }
       </style>
       <div class="layer">
-        <button class="launcher" type="button" aria-label="Open Live Chat" title="Live Chat">Live Chat</button>
+        <button class="launcher" type="button" aria-label="Ask a question" title="Ask Me">Ask Me</button>
       </div>`;
     launcher = shadow.querySelector(".launcher");
     launcher.addEventListener("click", showPanel);
@@ -154,7 +143,7 @@
     frame = document.createElement("iframe");
     frame.className = "panel-frame hidden";
     frame.src = EMBED_URL;
-    frame.title = "Live Chat";
+    frame.title = "Finance and Rent2Buy Assistant";
     frame.setAttribute("allow", "clipboard-write");
     frame.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
     shadow.querySelector(".layer").appendChild(frame);
@@ -202,10 +191,6 @@
         credentials: "omit",
       });
       const payload = await response.json();
-      if (action === "start") {
-        const greeting = vehiclePageGreeting(activeContext);
-        if (greeting && payload && typeof payload === "object") payload.reply = greeting;
-      }
       if (payload?.conversation_id) storeConversationId(payload.conversation_id);
       if (!response.ok && !payload?.reply) throw new Error("Assistant request failed.");
       postToWidget({ type: "assistant_response", payload });
