@@ -6,6 +6,7 @@
 
   const CHANNEL = "vfc-ai-assistant-widget-v1";
   const STORAGE_PREFIX = "vfc_ai_assistant_sitewide";
+  const RENT2BUY_ONLY_HOSTS = new Set(["rent2buyvans.co.uk", "www.rent2buyvans.co.uk"]);
   const SCRIPT_ORIGIN = (() => {
     try {
       return new URL(document.currentScript?.src || "https://marketing-crm-github-work.vercel.app").origin;
@@ -35,13 +36,32 @@
     return compact;
   }
 
+  function rent2BuyVehicleRegistration(first, second) {
+    if (!["van-pages", "van-page", "guaranteed-rent2buy-vans", "guaranteed-rent2buy-van"].includes(first) || !second) return "";
+    return compactRegistration(second);
+  }
+
   function inferPageContext(href) {
     let url;
     try { url = new URL(href, window.location.origin); }
     catch { url = new URL(window.location.href); }
+    const hostname = url.hostname.toLowerCase();
+    const rent2BuyOnly = RENT2BUY_ONLY_HOSTS.has(hostname);
     const segments = url.pathname.split("/").map((part) => decodeURIComponent(part).trim()).filter(Boolean);
     const first = clean(segments[0], 120).toLowerCase();
     const second = clean(segments[1], 80);
+
+    // The standalone Rent2Buy website is always Rent2Buy. It never offers a Finance product choice.
+    if (rent2BuyOnly) {
+      const registration = rent2BuyVehicleRegistration(first, second);
+      return {
+        pageType: "rent2buy_general",
+        productContext: "rent2buy",
+        vehicle: registration
+          ? { registration, stockId: null, title: null, applicationMode: "generic" }
+          : { applicationMode: "generic" },
+      };
+    }
 
     if (first === "van-finance" && second) {
       const registration = compactRegistration(second);
@@ -138,12 +158,18 @@
     document.body.appendChild(host);
   }
 
+  function assistantFrameTitle(context) {
+    if (context?.productContext === "rent2buy") return "Rent2Buy Assistant";
+    if (context?.productContext === "finance") return "Finance Assistant";
+    return "Finance and Rent2Buy Assistant";
+  }
+
   function ensureFrame() {
     if (frame) return frame;
     frame = document.createElement("iframe");
     frame.className = "panel-frame hidden";
     frame.src = EMBED_URL;
-    frame.title = "Finance and Rent2Buy Assistant";
+    frame.title = assistantFrameTitle(activeContext);
     frame.setAttribute("allow", "clipboard-write");
     frame.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
     shadow.querySelector(".layer").appendChild(frame);
@@ -174,6 +200,10 @@
       const restarting = message.action === "restart";
       if (restarting) storeConversationId(null);
       const action = message.action === "message" ? "message" : "start";
+      const homepageChoice = activeContext.pageType === "homepage"
+        && ["finance", "rent2buy"].includes(message.productChoice)
+        ? message.productChoice
+        : null;
       const body = action === "start"
         ? { action: "start", page_url: window.location.href }
         : {
@@ -181,7 +211,7 @@
             conversation_id: storedConversationId(),
             page_url: window.location.href,
             message: clean(message.message, 3000),
-            product_choice: ["finance", "rent2buy"].includes(message.productChoice) ? message.productChoice : null,
+            product_choice: homepageChoice,
           };
 
       const response = await fetch(API_URL, {

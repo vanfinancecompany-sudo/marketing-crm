@@ -83,10 +83,16 @@ test("public assistant never creates an application CTA inside chat", () => {
   assert.equal(publicApplicationCta("homepage", "finance", ready), null);
 });
 
-test("origin allowlist rejects lookalike domains and accepts configured Wix production origin", () => {
-  assert.deepEqual(allowedWixOrigins(environment), ["https://www.vanfinancecompany.co.uk"]);
+test("origin allowlist keeps both production sites trusted and rejects lookalikes", () => {
+  const allowed = allowedWixOrigins(environment);
+  assert.ok(allowed.includes("https://www.vanfinancecompany.co.uk"));
+  assert.ok(allowed.includes("https://vanfinancecompany.co.uk"));
+  assert.ok(allowed.includes("https://www.rent2buyvans.co.uk"));
+  assert.ok(allowed.includes("https://rent2buyvans.co.uk"));
   assert.equal(validateWixOrigin("https://www.vanfinancecompany.co.uk", environment), true);
+  assert.equal(validateWixOrigin("https://www.rent2buyvans.co.uk", environment), true);
   assert.equal(validateWixOrigin("https://www.vanfinancecompany.co.uk.evil.example", environment), false);
+  assert.equal(validateWixOrigin("https://www.rent2buyvans.co.uk.evil.example", environment), false);
   assert.equal(validateWixOrigin("", environment), false);
 });
 

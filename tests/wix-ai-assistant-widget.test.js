@@ -211,6 +211,8 @@ test("site-wide loader is layout-independent, sits above WhatsApp and sends only
   assert.match(loader, /\/api\/ai-assistant-sitewide/);
   assert.match(loader, /page_url: window\.location\.href/);
   assert.match(loader, /mode=panel/);
+  assert.match(loader, /rent2buyvans\.co\.uk/);
+  assert.match(loader, /van-pages/);
   assert.doesNotMatch(loader, /#dynamicDataset|VANFINANCEPAGES|VANPAGES|installDynamicVehicleAiAssistantWidget/);
 });
 
@@ -223,7 +225,7 @@ test("hosted embed route has a Wix-only frame policy without weakening other CRM
   assert.equal(configuredHeaders.has("x-frame-options"), false, "X-Frame-Options must not conflict with the multi-origin CSP policy");
   assert.equal(
     configuredHeaders.get("content-security-policy"),
-    "frame-ancestors 'self' https://vanfinancecompany.co.uk https://www.vanfinancecompany.co.uk https://editor.wix.com https://manage.wix.com https://www.wix.com https://*.wixsite.com",
+    "frame-ancestors 'self' https://vanfinancecompany.co.uk https://www.vanfinancecompany.co.uk https://rent2buyvans.co.uk https://www.rent2buyvans.co.uk https://editor.wix.com https://manage.wix.com https://www.wix.com https://*.wixsite.com",
   );
   assert.equal(configuredHeaders.get("content-security-policy").includes("frame-ancestors *"), false);
   assert.equal(configuration.headers.length, 1, "the framing exception must not apply to other CRM routes");
