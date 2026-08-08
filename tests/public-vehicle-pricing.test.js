@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { applicationModeReply } from "../lib/applicationJourneyEngine.js";
 import {
   isSpecificVehiclePricingQuestion,
+  isVehicleSpecificationQuestion,
   normalisePublicVehiclePricing,
   normaliseVehicleTermMonths,
   publicVehiclePricingReply,
@@ -97,6 +98,43 @@ test("current Rent2Buy vehicle context answers initial rental, monthly payments 
     rememberedFacts,
   });
   assert.match(termReply, /48 months/i);
+});
+
+test("vehicle specification questions stay inside the supported Finance and Rent2Buy scope", () => {
+  assert.equal(isVehicleSpecificationQuestion("Is this vehicle automatic?"), true);
+  assert.equal(isVehicleSpecificationQuestion("Does it have air con?"), true);
+  assert.equal(isVehicleSpecificationQuestion("What is the mileage?"), true);
+  assert.equal(isVehicleSpecificationQuestion("Can I finance a diesel van?"), false);
+
+  const financeReply = publicVehiclePricingReply({
+    message: "Is this vehicle automatic?",
+    pageType: "finance_vehicle",
+    productLock: "finance",
+    vehicleContext: { registration: "AB12CDE", title: "Ford Transit Custom", pricing: {} },
+    rememberedFacts: { product_context: "finance", vehicle_interest: "Ford Transit Custom" },
+  });
+  assert.match(financeReply, /finance, pricing and application/i);
+  assert.match(financeReply, /don.t reliably have the full vehicle specification/i);
+  assert.match(financeReply, /Vehicle Information/i);
+
+  const rent2buyReply = publicVehiclePricingReply({
+    message: "Does it have air con?",
+    pageType: "rent2buy_general",
+    productLock: "rent2buy",
+    vehicleContext: { registration: "AB12CDE", title: "Ford Transit Connect", pricing: {} },
+    rememberedFacts: { product_context: "rent2buy", vehicle_interest: "Ford Transit Connect" },
+  });
+  assert.match(rent2buyReply, /Rent2Buy costs, agreement terms and application/i);
+  assert.match(rent2buyReply, /Vehicle Information/i);
+
+  const generalReply = publicVehiclePricingReply({
+    message: "Is it automatic?",
+    pageType: "rent2buy_general",
+    productLock: "rent2buy",
+    vehicleContext: {},
+    rememberedFacts: { product_context: "rent2buy" },
+  });
+  assert.equal(generalReply, null);
 });
 
 test("specific Rent2Buy pricing points to exact website figures when no page pricing is trusted", () => {
