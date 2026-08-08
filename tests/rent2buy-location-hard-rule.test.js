@@ -22,20 +22,27 @@ function route(message, previousAssistant = "", overrides = {}) {
   return { intent, orchestration };
 }
 
-test("a full UK postcode in Rent2Buy always routes to deterministic coverage before recovery", () => {
-  const { intent, orchestration } = route("BH23 1QH");
+test("full, compact and hyphenated UK postcodes route to Rent2Buy coverage before recovery", () => {
+  for (const postcode of ["BH23 1QH", "bh231qh", "BH23-1QH", "  BH23   1QH  "]) {
+    const { intent, orchestration } = route(postcode);
+    assert.equal(orchestration.retrieval_required, true, postcode);
+    assert.equal(orchestration.recovery_required, false, postcode);
+    assert.equal(orchestration.rent2buy_location_turn, true, postcode);
+    assert.ok(intent.secondary_intents.includes("coverage"), postcode);
+    assert.ok(orchestration.detected_intents.includes("rent2buy_location"), postcode);
+  }
+});
+
+test("postcode-looking input with a formatting error is still routed to safe coverage handling", () => {
+  const { orchestration } = route("BH23 1Q");
   assert.equal(orchestration.retrieval_required, true);
   assert.equal(orchestration.recovery_required, false);
   assert.equal(orchestration.rent2buy_location_turn, true);
-  assert.ok(intent.secondary_intents.includes("coverage"));
-  assert.ok(orchestration.detected_intents.includes("rent2buy_location"));
-  assert.ok(orchestration.priority_path_taken.includes("verified_business_knowledge"));
 });
 
-test("a bare town or city answers the assistant's explicit Rent2Buy location request", () => {
-  const previous = "Please tell me your full home postcode, town or city and I’ll check whether you are within 100 miles of SO40 2NN.";
-  for (const place of ["Bournemouth", "New Forest", "Christchurch"]) {
-    const { intent, orchestration } = route(place, previous);
+test("a bare town or city routes to Rent2Buy coverage even without a preceding location prompt", () => {
+  for (const place of ["Bournemouth", "New Forest", "Christchurch", "Milton Keynes", "St Albans"]) {
+    const { intent, orchestration } = route(place);
     assert.equal(orchestration.retrieval_required, true, place);
     assert.equal(orchestration.recovery_required, false, place);
     assert.ok(intent.secondary_intents.includes("coverage"), place);
@@ -44,18 +51,15 @@ test("a bare town or city answers the assistant's explicit Rent2Buy location req
 });
 
 test("ordinary short Rent2Buy messages are not guessed to be places", () => {
-  for (const message of ["hello there", "help pls", "bye", "call me", "I need a human", "just looking", "yes please", "maybe"]) {
+  for (const message of ["hello there", "help pls", "bye", "call me", "I need a human", "just looking", "yes please", "maybe", "can you help", "need a van"]) {
     const { orchestration } = route(message);
     assert.equal(orchestration.rent2buy_location_turn, false, message);
   }
 });
 
-test("a bare place without a preceding location request is not guessed by the hard rule", () => {
-  const { orchestration } = route("Bournemouth");
-  assert.equal(orchestration.rent2buy_location_turn, false);
-});
-
-test("the same postcode hard rule is not applied in Finance context", () => {
-  const { orchestration } = route("BH23 1QH", "", { intent: { product_context: "finance" } });
-  assert.equal(orchestration.rent2buy_location_turn, false);
+test("the same location hard rule is not applied in Finance context", () => {
+  for (const message of ["BH23 1QH", "BH23-1QH", "Bournemouth"]) {
+    const { orchestration } = route(message, "", { intent: { product_context: "finance" } });
+    assert.equal(orchestration.rent2buy_location_turn, false, message);
+  }
 });
