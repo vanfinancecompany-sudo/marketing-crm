@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "knowledge_version": "1.0.0",
+  "source_commit": "c70cd78f0995aaa6237f443346e373cd4981b698",
+  "system": "Marketing CRM",
+  "principles": {
+    "read_only_now": true,
+    "live_state_outranks_static_knowledge": true,
+    "finance_and_rent2buy_separate_by_default": true,
+    "never_bypass_suppression": true,
+    "never_equate_provider_acceptance_with_delivery": true,
+    "never_invent_ai_visibility": true
+  },
+  "provenance_priority": [
+    "live-marketing-crm",
+    "user-confirmed",
+    "application-owned",
+    "repo-derived",
+    "historical"
+  ],
+  "areas": [
+    {"id":"content_operations","label":"Content Operations","path":"/","purpose":"Daily targets versus completed marketing output.","read_now":["daily target progress","period totals","activity mix"],"future_prepare":["priority action list"],"future_write":["target schedules","overrides","manual activity"],"approval":"required_for_write"},
+    {"id":"marketing_dashboard","label":"Marketing Dashboard","path":"/marketing-dashboard/","purpose":"Campaign and email performance reporting.","read_now":["send counts","recipient outcomes","opens","clicks","bounces","complaints","unsubscribes"],"future_prepare":["performance diagnosis","campaign recommendations"],"future_write":[],"approval":"none_for_read"},
+    {"id":"stock","label":"Stock","path":"/stock","purpose":"Current Finance, Rent2Buy and configured Cars marketing stock.","read_now":["counts","bounded vehicle search","Rent2Buy eligibility by registration match"],"future_prepare":["stock marketing priorities"],"future_write":["stock mutations"],"approval":"required_for_write"},
+    {"id":"customer_database","label":"Customer Database","path":"/customer-database","purpose":"Master marketing contact, segmentation and readiness database.","read_now":["contact stats","pipeline counts","readiness counts","bounded contact search","suppression counts"],"future_prepare":["audience/filter plan"],"future_write":["create/update/delete contacts","bulk changes","imports","clear database"],"approval":"required_for_write"},
+    {"id":"marketing_centre","label":"Marketing Centre","path":"/marketing-centre","purpose":"General campaign/audience workflow.","read_now":["campaign status","recent campaigns","batch summary"],"future_prepare":["campaign brief","audience plan"],"future_write":["create/update/archive campaigns","generate/export batches"],"approval":"required_for_write"},
+    {"id":"suppression_centre","label":"Suppression Centre","path":"/suppression-centre/","purpose":"Protect unsubscribe, bounce and do-not-contact identities.","read_now":["suppression totals","suppression types"],"future_prepare":[],"future_write":["suppression changes"],"approval":"high_stakes_approval"},
+    {"id":"email_templates","label":"Email Templates","path":"/email-templates/","purpose":"Build branded template campaigns and recipient sends.","read_now":["templates","template campaigns","audience snapshots","send outcomes"],"future_prepare":["email draft","campaign draft","candidate audience"],"future_write":["test send","production send","campaign mutation"],"approval":"production_send_explicit_approval"},
+    {"id":"campaigns","label":"Campaigns","path":"/campaigns/","purpose":"Campaign management, status and batching history.","read_now":["recent campaigns","status","channel","objective","batch/send history"],"future_prepare":["campaign recommendation"],"future_write":["campaign/batch changes"],"approval":"required_for_write"},
+    {"id":"knowledge_hub","label":"Knowledge Hub","path":"/knowledge-hub","purpose":"Editorial, SEO and business-knowledge production system.","read_now":["topic counts","article status","recent articles","review/publication status"],"future_prepare":["topic ideas","article drafts","content improvements"],"future_write":["approve","publish","delete","Wix sync"],"approval":"publishing_explicit_approval"},
+    {"id":"content_factory","label":"Content Factory","path":"/content-factory","purpose":"Content/editorial production using business knowledge and Knowledge Hub workflows.","read_now":["production context"],"future_prepare":["content drafts","content plan"],"future_write":["automation/publishing"],"approval":"required_for_execution"},
+    {"id":"ai_visibility","label":"AI Visibility","path":"/ai-visibility","purpose":"Evidence-backed indexing/detection/mention/citation monitoring.","read_now":["provider connection state","prompt count","verified results","evidence status"],"future_prepare":["visibility improvement plan"],"future_write":["record manual evidence","change prompts/connections/settings"],"approval":"required_for_write"},
+    {"id":"ai_assistant_test","label":"AI Assistant Test","path":"/ai-assistant-competence","purpose":"Competence testing for the public website AI assistant.","read_now":["test/quality evidence"],"future_prepare":["knowledge fixes"],"future_write":["run/accept corrective workflows"],"approval":"required_for_write"},
+    {"id":"ai_knowledge_opportunities","label":"AI Knowledge Opportunities","path":"/ai-knowledge-opportunities","purpose":"Identify business/knowledge gaps affecting assistant/content quality.","read_now":["opportunity summaries"],"future_prepare":["prioritised knowledge plan"],"future_write":["accept/change opportunity state"],"approval":"required_for_write"},
+    {"id":"real_customer_simulation","label":"Real Customer Simulation","path":"/ai-customer-simulation","purpose":"Simulate realistic customer conversations against the public AI assistant.","read_now":["simulation findings"],"future_prepare":["fix recommendations"],"future_write":["run/update simulations"],"approval":"required_for_write"},
+    {"id":"ai_assistant_health","label":"AI Assistant Health","path":"/ai-assistant-health","purpose":"Operational and quality health of the public website AI assistant.","read_now":["health signals"],"future_prepare":["remediation plan"],"future_write":[],"approval":"none_for_read"},
+    {"id":"vansco_stock_watch","label":"Vansco Stock Watch","path":"/vansco-stock-watch","purpose":"Manual supplier-stock comparison and review workflow.","read_now":["watch counts","match/source/workflow status","review-needed items"],"future_prepare":["review list"],"future_write":["workflow decisions","stock changes"],"approval":"required_for_write"},
+    {"id":"youtube_generator","label":"YouTube Generator","path":"/youtube-generator","purpose":"Generate downloadable vehicle video/short-form assets.","read_now":["related creative/activity output"],"future_prepare":["vehicle/video queue"],"future_write":["generate/export activity"],"approval":"required_for_execution"},
+    {"id":"creative_library","label":"Creative Library","path":"/creative-library","purpose":"Persisted library of marketing creative assets and their destination/status.","read_now":["recent creatives","pipeline","registration","status","destination"],"future_prepare":["reuse/gap recommendations"],"future_write":["create/update/delete creatives"],"approval":"required_for_write"},
+    {"id":"van_finance_facebook","label":"Van Finance Facebook","path":"/van-finance-facebook","purpose":"Finance social preparation/posting queue.","read_now":["queue count","candidate stock"],"future_prepare":["post draft"],"future_write":["external publishing","queue visibility state"],"approval":"publishing_explicit_approval"},
+    {"id":"rent2buy_facebook","label":"Rent2Buy Facebook","path":"/rent2buy-facebook","purpose":"Rent2Buy social preparation/posting queue.","read_now":["queue count","eligible stock"],"future_prepare":["post draft"],"future_write":["external publishing","queue visibility state"],"approval":"publishing_explicit_approval"},
+    {"id":"facebook_marketplace","label":"Facebook Marketplace","path":"/facebook-marketplace","purpose":"Marketplace preparation/posting workflow.","read_now":["queue count","eligible stock"],"future_prepare":["listing draft"],"future_write":["external publishing","queue visibility state"],"approval":"publishing_explicit_approval"}
+  ],
+  "external_links": [
+    {"id":"control_centre","label":"Control Centre","kind":"external_navigation"},
+    {"id":"image_suite","label":"Image Suite","kind":"external_application"},
+    {"id":"documents_hub","label":"Documents Hub","kind":"external_application"}
+  ]
+}
