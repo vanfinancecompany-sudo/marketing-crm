@@ -51,6 +51,17 @@ test('finance bank inputs are hard-limited and sort code is formatted as 12-34-5
   assert.match(app, /digitsOnly\(state\.bank_account_number\)\.length!==8/);
 });
 
+test('finance draft storage excludes bank details and consent', async () => {
+  const html = await read('../public/finance-application-overlay/index.html');
+  const privacyGuard = await read('../public/finance-application-overlay/privacy-storage-guard.js');
+  assert.match(html, /privacy-storage-guard\.js/);
+  assert.match(privacyGuard, /financeApplicationOverlayV1/);
+  assert.match(privacyGuard, /delete draft\.bank_account_name/);
+  assert.match(privacyGuard, /delete draft\.bank_sort_code/);
+  assert.match(privacyGuard, /delete draft\.bank_account_number/);
+  assert.match(privacyGuard, /delete draft\.agree_submit/);
+});
+
 test('vehicle and general Finance routes remain explicit', async () => {
   const html = await read('../public/finance-application-overlay/index.html');
   const routeContext = await read('../public/finance-application-overlay/route-context.js');
