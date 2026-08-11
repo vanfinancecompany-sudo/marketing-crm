@@ -13,8 +13,10 @@ One Wix site-wide Custom Code snippet loads:
 The loader:
 
 - adds a fixed red Live Chat launcher above the existing WhatsApp control
+- hides the competing fixed WhatsApp control while the Ask Me panel is open, then restores it when the panel closes
 - uses a Shadow DOM shell so it does not participate in Wix page layout
 - opens the existing hosted assistant in a fixed iframe panel
+- expands the open panel by about 10% and reclaims the lower-right space normally reserved for WhatsApp
 - survives normal Wix pages without adding an HTML Component to each page
 - resets page-specific chat context when Wix navigation changes the pathname
 - stores only the opaque anonymous conversation ID in browser local storage
@@ -69,12 +71,19 @@ Do not add `installDynamicVehicleAiAssistantWidget()` to Finance or Rent2Buy veh
 
 ## Positioning
 
-The launcher is fixed at the bottom-right and intentionally offset upward from WhatsApp:
+When closed, the launcher remains fixed at the bottom-right and intentionally offset upward from WhatsApp.
 
-- desktop: `bottom: 88px; right: 18px`
-- mobile: `bottom: 84px; right: 12px`
+When Ask Me is opened:
 
-The open panel uses the same lower-right anchor and overlays the page. It never pushes or resizes Wix content.
+- the competing fixed WhatsApp launcher is temporarily hidden
+- the assistant panel moves down into the lower-right space that WhatsApp normally occupies
+- desktop open height grows from `610px` to a maximum of `671px`
+- mobile open height grows from `620px` to a maximum of `682px`
+- viewport caps keep the panel on-screen on shorter devices
+
+When the assistant closes, WhatsApp is restored to its previous styles and the Ask Me launcher returns.
+
+The panel overlays the page. It never pushes or resizes Wix content.
 
 ## Security and trust boundary
 
@@ -104,13 +113,15 @@ After the branch is deployed to Preview, temporarily use the Preview deployment 
 
 Before Production rollout, verify:
 
-1. Live Chat launcher appears above WhatsApp and does not move page layout.
-2. Open/Close works on desktop and mobile.
-3. Homepage asks Finance or Rent2Buy.
-4. Finance page is locked to Finance.
-5. Rent2Buy page is locked to Rent2Buy.
-6. Finance vehicle page can answer exact current-page monthly/retail price when CMS lookup succeeds.
-7. Rent2Buy vehicle page can answer exact initial rental/monthly payment/term when CMS lookup succeeds.
-8. Vehicle pages' custom mobile galleries and quick-look popups remain unchanged.
-9. Application intent tells the customer to use the page APPLY NOW control.
-10. Restart creates a fresh anonymous conversation.
+1. Ask Me launcher appears above WhatsApp and does not move page layout.
+2. Opening Ask Me hides the fixed WhatsApp launcher and closing Ask Me restores it.
+3. The open panel is taller on desktop and mobile without leaving the viewport.
+4. Open/Close works on desktop and mobile.
+5. Homepage asks Finance or Rent2Buy.
+6. Finance page is locked to Finance.
+7. Rent2Buy page is locked to Rent2Buy.
+8. Finance vehicle page can answer exact current-page monthly/retail price when CMS lookup succeeds.
+9. Rent2Buy vehicle page can answer exact initial rental/monthly payment/term when CMS lookup succeeds.
+10. Vehicle pages' custom mobile galleries and quick-look popups remain unchanged.
+11. Application intent tells the customer to use the page APPLY NOW control.
+12. Restart creates a fresh anonymous conversation.

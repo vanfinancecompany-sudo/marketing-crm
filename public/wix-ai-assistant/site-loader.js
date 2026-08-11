@@ -7,6 +7,17 @@
   const CHANNEL = "vfc-ai-assistant-widget-v1";
   const STORAGE_PREFIX = "vfc_ai_assistant_sitewide";
   const RENT2BUY_ONLY_HOSTS = new Set(["rent2buyvans.co.uk", "www.rent2buyvans.co.uk"]);
+  const WHATSAPP_SELECTOR = [
+    'a[href*="wa.me" i]',
+    'a[href*="whatsapp" i]',
+    'iframe[src*="whatsapp" i]',
+    'iframe[title*="whatsapp" i]',
+    '[aria-label*="whatsapp" i]',
+    '[title*="whatsapp" i]',
+    '[data-hook*="whatsapp" i]',
+    '[id*="whatsapp" i]',
+    '[class*="whatsapp" i]',
+  ].join(",");
   const SCRIPT_ORIGIN = (() => {
     try {
       return new URL(document.currentScript?.src || "https://marketing-crm-github-work.vercel.app").origin;
@@ -25,6 +36,8 @@
   let activeHref = window.location.href;
   let activeContext = inferPageContext(activeHref);
   let storageKey = buildStorageKey(activeContext);
+  let whatsappObserver = null;
+  const hiddenWhatsAppControls = new Map();
 
   function clean(value, limit = 5000) {
     return String(value || "").trim().slice(0, limit);
@@ -135,6 +148,12 @@
         .panel-frame {
           pointer-events:auto; position:absolute; right:18px; bottom:88px; width:380px; height:610px;
           border:0; border-radius:16px; background:transparent; box-shadow:0 10px 36px rgba(0,0,0,.25);
+          transition:height .18s ease, bottom .18s ease;
+        }
+        .panel-frame.is-open {
+          bottom:18px;
+          height:min(671px, calc(100vh - 110px));
+          height:min(671px, calc(100dvh - 110px));
         }
         .hidden { display:none !important; }
         @media (max-width:520px) {
@@ -146,6 +165,11 @@
             right:8px; bottom:84px; width:calc(100vw - 16px);
             height:min(620px, calc(100vh - 130px)); height:min(620px, calc(100dvh - 130px));
             border-radius:15px;
+          }
+          .panel-frame.is-open {
+            bottom:12px;
+            height:min(682px, calc(100vh - 112px));
+            height:min(682px, calc(100dvh - 112px));
           }
         }
       </style>
@@ -175,13 +199,85 @@
     return frame;
   }
 
+  function fixedControlContainer(candidate) {
+    if (!(candidate instanceof Element) || candidate === host || host?.contains(candidate)) return null;
+    let current = candidate;
+    while (current && current !== document.body && current !== document.documentElement) {
+      try {
+        const position = window.getComputedStyle(current).position;
+        if (position === "fixed" || position === "sticky") return current;
+      } catch {
+        return null;
+      }
+      current = current.parentElement;
+    }
+    return candidate.tagName === "IFRAME" ? candidate : null;
+  }
+
+  function rememberStyleProperty(element, property) {
+    return {
+      value: element.style.getPropertyValue(property),
+      priority: element.style.getPropertyPriority(property),
+    };
+  }
+
+  function restoreStyleProperty(element, property, previous) {
+    if (previous?.value) element.style.setProperty(property, previous.value, previous.priority || "");
+    else element.style.removeProperty(property);
+  }
+
+  function hideWhatsAppTarget(target) {
+    if (!target || hiddenWhatsAppControls.has(target)) return;
+    hiddenWhatsAppControls.set(target, {
+      visibility: rememberStyleProperty(target, "visibility"),
+      opacity: rememberStyleProperty(target, "opacity"),
+      pointerEvents: rememberStyleProperty(target, "pointer-events"),
+    });
+    target.setAttribute("data-vfc-ai-whatsapp-hidden", "true");
+    target.style.setProperty("visibility", "hidden", "important");
+    target.style.setProperty("opacity", "0", "important");
+    target.style.setProperty("pointer-events", "none", "important");
+  }
+
+  function scanAndHideWhatsAppControls() {
+    if (!frame || frame.classList.contains("hidden")) return;
+    let candidates = [];
+    try { candidates = [...document.querySelectorAll(WHATSAPP_SELECTOR)]; }
+    catch { return; }
+    candidates.forEach((candidate) => hideWhatsAppTarget(fixedControlContainer(candidate)));
+  }
+
+  function hideCompetingWhatsAppControl() {
+    scanAndHideWhatsAppControls();
+    if (whatsappObserver || typeof MutationObserver !== "function") return;
+    whatsappObserver = new MutationObserver(() => scanAndHideWhatsAppControls());
+    whatsappObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function restoreCompetingWhatsAppControl() {
+    whatsappObserver?.disconnect();
+    whatsappObserver = null;
+    hiddenWhatsAppControls.forEach((previous, target) => {
+      if (!(target instanceof Element)) return;
+      restoreStyleProperty(target, "visibility", previous.visibility);
+      restoreStyleProperty(target, "opacity", previous.opacity);
+      restoreStyleProperty(target, "pointer-events", previous.pointerEvents);
+      target.removeAttribute("data-vfc-ai-whatsapp-hidden");
+    });
+    hiddenWhatsAppControls.clear();
+  }
+
   function showPanel() {
     const currentFrame = ensureFrame();
     launcher.classList.add("hidden");
     currentFrame.classList.remove("hidden");
+    currentFrame.classList.add("is-open");
+    hideCompetingWhatsAppControl();
   }
 
   function hidePanel() {
+    restoreCompetingWhatsAppControl();
+    frame?.classList.remove("is-open");
     frame?.classList.add("hidden");
     launcher?.classList.remove("hidden");
     launcher?.focus();
