@@ -15,6 +15,24 @@ function updateLiveField(widget, text) {
   }
 }
 
+function restoreLiveTranscript(widget, text) {
+  const fallback = String(text || "").trim().slice(0, 3000);
+  if (!fallback) return false;
+  widget.voiceError = "";
+  widget.render();
+  const input = widget.shadowRoot?.querySelector("#customerMessage");
+  if (input) {
+    input.value = fallback;
+    input.focus();
+  }
+  const status = widget.shadowRoot?.querySelector(".voice-status");
+  if (status) {
+    status.textContent = "Voice captured. Please check the text, then press Send.";
+    status.classList.remove("error");
+  }
+  return true;
+}
+
 if (WidgetClass && !WidgetClass.prototype.__vfcLiveVoiceFeedbackInstalled) {
   const prototype = WidgetClass.prototype;
   prototype.__vfcLiveVoiceFeedbackInstalled = true;
@@ -63,7 +81,7 @@ if (WidgetClass && !WidgetClass.prototype.__vfcLiveVoiceFeedbackInstalled) {
       };
 
       recognition.onerror = () => {
-        // OpenAI transcription after Stop remains authoritative. Live words are only visual feedback.
+        // OpenAI transcription after Stop remains preferred. Live words are also retained as a fallback.
       };
       recognition.onend = () => {
         if (this.voiceRecording && this.voiceRecognition === recognition) {
@@ -82,8 +100,13 @@ if (WidgetClass && !WidgetClass.prototype.__vfcLiveVoiceFeedbackInstalled) {
   };
 
   prototype.finishVoiceRecording = async function finishVoiceRecordingWithFeedback(...args) {
+    const liveTranscript = String(this.voiceRecognitionLive || this.voiceRecognitionFinal || "").trim();
     this.stopLiveVoiceRecognition();
-    return originalFinish.apply(this, args);
+    await originalFinish.apply(this, args);
+
+    if (this.voiceError && liveTranscript) {
+      restoreLiveTranscript(this, liveTranscript);
+    }
   };
 
   prototype.cancelVoiceCapture = function cancelVoiceCaptureWithFeedback(...args) {
