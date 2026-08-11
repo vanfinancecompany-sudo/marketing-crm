@@ -7,41 +7,41 @@ const CONTINUE_CUE_STYLES = `
 
   @keyframes vfcContinueChatPulse {
     0%, 100% {
-      border-color:#9aa1a7;
-      box-shadow:0 0 0 0 rgba(215,25,32,0);
+      border-color:#d71920;
+      box-shadow:0 0 0 1px rgba(215,25,32,.08);
       background:#fff;
     }
     50% {
-      border-color:#d71920;
-      box-shadow:0 0 0 4px rgba(215,25,32,.11);
-      background:#fffafa;
+      border-color:#c9141b;
+      box-shadow:0 0 0 6px rgba(215,25,32,.16), 0 0 12px rgba(215,25,32,.12);
+      background:#fff9f9;
     }
   }
 
   @keyframes vfcContinueChatText {
-    0%, 100% { color:#59626a; }
+    0%, 100% { color:#4d555c; }
     50% { color:#17191b; }
   }
 
   @media (max-width:520px) {
     .composer.mobile-compact .input-row textarea {
-      border-color:#9aa1a7 !important;
-      box-shadow:0 0 0 0 rgba(215,25,32,0);
-      animation:vfcContinueChatPulse 2.4s ease-in-out infinite;
+      border:2px solid #d71920 !important;
+      box-shadow:0 0 0 1px rgba(215,25,32,.08);
+      animation:vfcContinueChatPulse 2.2s ease-in-out infinite;
     }
     .composer.mobile-compact .input-row textarea::placeholder {
-      color:#59626a;
+      color:#4d555c;
       opacity:1;
       font-weight:700;
-      animation:vfcContinueChatText 2.4s ease-in-out infinite;
+      animation:vfcContinueChatText 2.2s ease-in-out infinite;
     }
   }
 
   @media (max-width:520px) and (prefers-reduced-motion:reduce) {
     .composer.mobile-compact .input-row textarea {
       animation:none;
-      border-color:#d71920 !important;
-      box-shadow:0 0 0 2px rgba(215,25,32,.12);
+      border:2px solid #d71920 !important;
+      box-shadow:0 0 0 3px rgba(215,25,32,.12);
     }
     .composer.mobile-compact .input-row textarea::placeholder {
       animation:none;
