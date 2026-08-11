@@ -51,7 +51,27 @@ test('finance bank inputs are hard-limited and sort code is formatted as 12-34-5
   assert.match(app, /digitsOnly\(state\.bank_account_number\)\.length!==8/);
 });
 
-test('successful live overlay submission redirects to the existing thank-you page', async () => {
+test('vehicle and general Finance routes remain explicit', async () => {
+  const html = await read('../public/finance-application-overlay/index.html');
+  const routeContext = await read('../public/finance-application-overlay/route-context.js');
+  assert.match(html, /route-context\.js/);
+  assert.match(routeContext, /General Finance Application/);
+  assert.match(routeContext, /applicationRoute/);
+  assert.match(routeContext, /Apply before choosing your van/);
+});
+
+test('secure live mode posts only when a Wix launch token is present', async () => {
+  const html = await read('../public/finance-application-overlay/index.html');
+  const liveSubmit = await read('../public/finance-application-overlay/live-submit.js');
+  assert.match(html, /live-submit\.js/);
+  assert.match(liveSubmit, /launchToken/);
+  assert.match(liveSubmit, /if \(!launchToken \|\| isPreview\) return/);
+  assert.match(liveSubmit, /Authorization.*Bearer/);
+  assert.match(liveSubmit, /_functions\/financeOverlaySubmit/);
+  assert.match(liveSubmit, /finance-application-received/);
+});
+
+test('successful legacy overlay submission retains the existing thank-you route', async () => {
   const app = await read('../public/finance-application-overlay/app.js');
   const loader = await read('../public/finance-application-overlay/site-loader.js');
   assert.match(app, /finance-form-submitted/);
@@ -63,8 +83,13 @@ test('successful live overlay submission redirects to the existing thank-you pag
 
 test('prototype does not recreate Wix CMS, email, Meta or CRM submission logic', async () => {
   const app = await read('../public/finance-application-overlay/app.js');
+  const liveSubmit = await read('../public/finance-application-overlay/live-submit.js');
   assert.doesNotMatch(app, /wixData/);
   assert.doesNotMatch(app, /sendgrid/i);
   assert.doesNotMatch(app, /create-finance-lead/);
   assert.doesNotMatch(app, /sendMetaLead/);
+  assert.doesNotMatch(liveSubmit, /wixData/);
+  assert.doesNotMatch(liveSubmit, /sendgrid/i);
+  assert.doesNotMatch(liveSubmit, /create-finance-lead/);
+  assert.doesNotMatch(liveSubmit, /sendMetaLead/);
 });
