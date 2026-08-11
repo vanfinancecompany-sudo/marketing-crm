@@ -39,6 +39,24 @@ test('finance overlay is responsive and launcher is opt-in only', async () => {
   assert.match(loader, /height:100dvh/);
 });
 
+test('viewport-fit mode removes whole-page scrolling and compacts mobile steps', async () => {
+  const html = await read('../public/finance-application-overlay/index.html');
+  const css = await read('../public/finance-application-overlay/viewport-fit.css');
+  const embedContext = await read('../public/finance-application-overlay/embed-context.js');
+  assert.match(html, /viewport-fit\.css/);
+  assert.match(html, /embed-context\.js/);
+  assert.match(css, /overflow:hidden/);
+  assert.match(css, /height:100dvh/);
+  assert.match(css, /\.step-card\{flex:1 1 auto;min-height:0;overflow-y:auto/);
+  assert.match(css, /scrollbar-width:none/);
+  assert.match(css, /\.vehicle-detail\{display:none\}/);
+  assert.match(css, /\.trust-strip\{display:none\}/);
+  assert.match(css, /\.choices\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(css, /body\.finance-embedded \.icon-button\{display:none\}/);
+  assert.match(embedContext, /embedded/);
+  assert.match(embedContext, /finance-embedded/);
+});
+
 test('finance bank inputs are hard-limited and sort code is formatted as 12-34-56', async () => {
   const html = await read('../public/finance-application-overlay/index.html');
   const guards = await read('../public/finance-application-overlay/bank-input-guards.js');
