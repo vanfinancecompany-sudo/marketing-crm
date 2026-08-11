@@ -4,6 +4,7 @@
 
   const HOST = 'https://marketing-crm-github-work.vercel.app';
   const FRAME_PATH = '/finance-application-overlay/index.html';
+  const DEFAULT_THANK_YOU_URL = 'https://www.vanfinancecompany.co.uk/finance-application-received';
   let shell;
   let frame;
   let lastFocus;
@@ -54,10 +55,16 @@
     try { lastFocus?.focus?.(); } catch (_) {}
   }
 
+  function redirectAfterSubmission(url) {
+    const target = typeof url === 'string' && url.trim() ? url.trim() : DEFAULT_THANK_YOU_URL;
+    window.location.assign(target);
+  }
+
   window.addEventListener('message', event => {
     if (!frame || event.source !== frame.contentWindow) return;
     const data = event.data || {};
     if (data.type === 'finance-overlay-close') close();
+    if (data.type === 'finance-form-submitted') redirectAfterSubmission(data.redirectUrl);
   });
 
   window.VFCFinanceApplication = { open, close };
