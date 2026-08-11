@@ -85,6 +85,13 @@ const POLISH_STYLES = `
     .mic { flex:1 1 38% !important; min-width:0 !important; width:auto !important; height:46px !important; justify-content:center; padding:0 10px !important; }
     .mic.recording { min-width:0 !important; }
     .send { flex:1 1 56% !important; width:auto !important; min-width:0 !important; height:46px !important; }
+    .composer.mobile-compact { padding:9px 11px !important; }
+    .composer.mobile-compact .input-row { gap:0 !important; }
+    .composer.mobile-compact .input-row textarea { min-height:50px; max-height:72px; }
+    .composer.mobile-compact .mic,
+    .composer.mobile-compact .send,
+    .composer.mobile-compact .voice-status,
+    .composer.mobile-compact .notice { display:none !important; }
   }
 `;
 
@@ -185,12 +192,30 @@ function polishVehicleApplyPrompt(widget) {
   node.append(heading, copy, cta, note);
 }
 
+function applyMobileComposerState(widget) {
+  const root = widget.shadowRoot;
+  const composer = root?.querySelector(".composer");
+  const input = root?.querySelector("#customerMessage");
+  if (!composer || !input) return;
+
+  composer.classList.toggle("mobile-compact", Boolean(widget.mobileComposerCollapsed));
+  if (input.dataset.mobileComposerBound === "true") return;
+  input.dataset.mobileComposerBound = "true";
+  const expand = () => {
+    widget.mobileComposerCollapsed = false;
+    composer.classList.remove("mobile-compact");
+  };
+  input.addEventListener("focus", expand);
+  input.addEventListener("click", expand);
+}
+
 function polishWidget(widget) {
   ensurePolishStyle(widget);
   polishHeader(widget);
   polishMic(widget);
   addStarterReplies(widget);
   polishVehicleApplyPrompt(widget);
+  applyMobileComposerState(widget);
 }
 
 if (WidgetClass && !WidgetClass.prototype.__vfcVisualPolishInstalled) {
@@ -202,6 +227,15 @@ if (WidgetClass && !WidgetClass.prototype.__vfcVisualPolishInstalled) {
     const result = originalRender.apply(this, args);
     polishWidget(this);
     return result;
+  };
+
+  const originalSendMessage = prototype.sendMessage;
+  prototype.sendMessage = function sendMessageWithMobileCollapse(productChoice = null) {
+    const input = this.shadowRoot?.querySelector("#customerMessage");
+    const message = productChoice || String(input?.value || "").trim();
+    const canSend = Boolean(message) && !this.state?.loading && !this.voiceRecording && !this.voiceTranscribing;
+    if (canSend) this.mobileComposerCollapsed = true;
+    return originalSendMessage.call(this, productChoice);
   };
 
   const currentFinish = prototype.finishVoiceRecording;
