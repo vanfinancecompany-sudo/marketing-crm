@@ -1,0 +1,204 @@
+/* Restore the natural, richer mobile flow of the original Finance form. */
+
+/* The embedded shield must render as a whole image, never crop. */
+.brand-lockup:before{
+  background-size:contain!important;
+  background-repeat:no-repeat!important;
+  background-position:center!important;
+}
+
+/* When Back is hidden on the first step, Continue should own the row. */
+.form-footer:has(#backButton[style*="visibility: hidden"]){
+  grid-template-columns:1fr!important;
+}
+.form-footer:has(#backButton[style*="visibility: hidden"]) #backButton{
+  display:none!important;
+}
+
+@media(max-width:600px){
+  /* Do not stretch short steps to the height of the phone. */
+  html,body{
+    height:auto!important;
+    min-height:100%!important;
+    overflow-x:hidden!important;
+    overflow-y:auto!important;
+    background:#fff!important;
+  }
+
+  .application-shell{
+    height:auto!important;
+    min-height:100dvh!important;
+    overflow:visible!important;
+    display:block!important;
+  }
+
+  #financeForm{
+    display:block!important;
+    min-height:0!important;
+    overflow:visible!important;
+  }
+
+  .step-card{
+    display:block!important;
+    min-height:0!important;
+    overflow:visible!important;
+    padding:18px 16px 8px!important;
+  }
+
+  .step-inner{
+    max-width:none!important;
+  }
+
+  /* Give the top lockup proper presence without wasting vertical room. */
+  .application-header{
+    min-height:72px!important;
+    padding:11px 16px!important;
+  }
+
+  .brand-lockup:before{
+    width:48px!important;
+    height:48px!important;
+    flex-basis:48px!important;
+  }
+
+  .brand-name{
+    font-size:17px!important;
+    line-height:1.15!important;
+  }
+
+  .brand-subtitle{
+    font-size:11px!important;
+    margin-top:3px!important;
+  }
+
+  /* Compact the vehicle/progress area, but keep it clearly branded. */
+  .vehicle-card{
+    width:calc(100% - 24px)!important;
+    margin:10px 12px 0!important;
+    padding:11px 13px 11px 16px!important;
+    border-radius:15px!important;
+  }
+
+  .vehicle-kicker{
+    font-size:9px!important;
+  }
+
+  .vehicle-title{
+    font-size:17px!important;
+    margin-top:4px!important;
+  }
+
+  .progress-panel{
+    padding:10px 14px 10px!important;
+  }
+
+  .progress-copy{
+    font-size:11px!important;
+    margin-bottom:7px!important;
+  }
+
+  /* Richer, more deliberate content spacing. */
+  .step-eyebrow{
+    font-size:9px!important;
+    margin-bottom:6px!important;
+  }
+
+  .step-title{
+    font-size:27px!important;
+    line-height:1.06!important;
+  }
+
+  .step-subtitle{
+    font-size:13px!important;
+    line-height:1.45!important;
+    margin-top:7px!important;
+  }
+
+  .field-grid{
+    margin-top:18px!important;
+    gap:12px!important;
+  }
+
+  .field{
+    gap:7px!important;
+  }
+
+  .field label,.field-label{
+    font-size:12px!important;
+  }
+
+  .choices{
+    gap:11px!important;
+    margin-top:8px!important;
+  }
+
+  .choice{
+    min-height:58px!important;
+    padding:12px 10px!important;
+    border-radius:15px!important;
+    font-size:14px!important;
+    font-weight:850!important;
+    box-shadow:0 5px 14px rgba(15,23,42,.055)!important;
+  }
+
+  .choice.active{
+    box-shadow:0 10px 22px rgba(17,24,39,.20),inset 0 1px 0 rgba(255,255,255,.08)!important;
+  }
+
+  .control{
+    min-height:54px!important;
+    padding:12px 13px!important;
+    border-radius:14px!important;
+    font-size:16px!important;
+  }
+
+  /* Bring back the useful reassurance cards rather than leaving empty space. */
+  .trust-strip{
+    display:grid!important;
+    grid-template-columns:repeat(3,minmax(0,1fr))!important;
+    gap:7px!important;
+    margin-top:16px!important;
+  }
+
+  .trust-item{
+    min-width:0!important;
+    padding:9px 5px!important;
+    border-radius:12px!important;
+    font-size:10px!important;
+    line-height:1.2!important;
+  }
+
+  .trust-item strong{
+    font-size:14px!important;
+    margin-bottom:3px!important;
+  }
+
+  /* Footer now follows the content instead of living at the bottom of the viewport. */
+  .form-footer{
+    position:static!important;
+    margin-top:8px!important;
+    padding:10px 16px 8px!important;
+    background:#fff!important;
+    border-top:0!important;
+    box-shadow:none!important;
+    backdrop-filter:none!important;
+    -webkit-backdrop-filter:none!important;
+  }
+
+  .button{
+    min-height:56px!important;
+    border-radius:15px!important;
+    font-size:16px!important;
+  }
+
+  .button.primary{
+    box-shadow:0 12px 24px rgba(182,0,0,.22),inset 0 1px 0 rgba(255,255,255,.14)!important;
+  }
+
+  .secure-note{
+    display:block!important;
+    padding:4px 18px calc(18px + env(safe-area-inset-bottom))!important;
+    font-size:10px!important;
+    line-height:1.4!important;
+  }
+}
