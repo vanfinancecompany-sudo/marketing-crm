@@ -23,6 +23,15 @@
     }
   }
 
+  function readLiveFinalFields() {
+    return {
+      bank_account_name: document.getElementById('bank_account_name')?.value || '',
+      bank_sort_code: document.getElementById('bank_sort_code')?.value || '',
+      bank_account_number: document.getElementById('bank_account_number')?.value || '',
+      agree_submit: Boolean(document.querySelector('[data-state="agree_submit"]')?.checked)
+    };
+  }
+
   function totalAddressMonths(state) {
     return (
       months(state.time_at_address_years, state.time_at_address_months) +
@@ -34,16 +43,19 @@
 
   function buildPayload() {
     const state = readDraft();
+    const finalFields = readLiveFinalFields();
+
     return {
       ...state,
+      ...finalFields,
       submitted_at: new Date().toLocaleString('en-GB'),
       application_route: document.getElementById('applicationRoute')?.value || '',
       total_address_months: String(totalAddressMonths(state)),
       vehicle_info: document.getElementById('vehicleInfo')?.value || '',
       vehicle_title: document.getElementById('vehicleTitle')?.value || '',
       vehicle_page_url: document.getElementById('vehiclePageUrl')?.value || '',
-      bank_sort_code: digitsOnly(state.bank_sort_code),
-      bank_account_number: digitsOnly(state.bank_account_number)
+      bank_sort_code: digitsOnly(finalFields.bank_sort_code),
+      bank_account_number: digitsOnly(finalFields.bank_account_number)
     };
   }
 
