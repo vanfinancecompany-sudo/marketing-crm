@@ -1,0 +1,66 @@
+name: Inline Finance shield logo
+
+on:
+  push:
+    branches:
+      - fix/finance-overlay-inline-shield
+
+permissions:
+  contents: write
+
+jobs:
+  inline-logo:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/finance-overlay-inline-shield
+          fetch-depth: 0
+
+      - name: Embed shield and remove temporary workflow
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64, re
+
+          root = Path('.')
+          index = root / 'public/finance-application-overlay/index.html'
+          css = root / 'public/finance-application-overlay/brand-polish.css'
+          logo = root / 'public/finance-application-overlay/vfc-shield.png'
+
+          html = index.read_text(encoding='utf-8')
+          html = re.sub(
+              r'<img class="brand-logo"[^>]*>',
+              '<span class="brand-logo" role="img" aria-label="VFC"></span>',
+              html,
+              count=1,
+          )
+          index.write_text(html, encoding='utf-8')
+
+          data = base64.b64encode(logo.read_bytes()).decode('ascii')
+          css_text = css.read_text(encoding='utf-8')
+          replacement = f'''\.brand-logo{{
+  display:block;
+  width:44px;
+  height:44px;
+  flex:0 0 auto;
+  background-image:url("data:image/png;base64,{data}");
+  background-position:center;
+  background-repeat:no-repeat;
+  background-size:contain;
+}}'''
+          css_text, count = re.subn(r'\.brand-logo\{.*?\}', replacement, css_text, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit('Could not replace .brand-logo rule')
+          css.write_text(css_text, encoding='utf-8')
+
+          Path('.github/workflows/inline-finance-logo.yml').unlink()
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/finance-application-overlay/index.html public/finance-application-overlay/brand-polish.css .github/workflows/inline-finance-logo.yml
+          git commit -m "Inline VFC shield in Finance overlay header"
+          git push origin HEAD:fix/finance-overlay-inline-shield
