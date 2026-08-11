@@ -54,7 +54,14 @@ const POLISH_STYLES = `
   .message { border-radius:17px !important; padding:10px 13px !important; line-height:1.5 !important; box-shadow:0 1px 2px rgba(17,24,39,.04); }
   .message.assistant { background:var(--vfc-assistant) !important; border:1px solid var(--vfc-assistant-border) !important; color:#17212b !important; border-bottom-left-radius:6px !important; }
   .message.customer { background:var(--vfc-customer) !important; color:#fff !important; border-bottom-right-radius:6px !important; padding:9px 12px !important; }
-  .typing { color:var(--vfc-muted) !important; padding-left:3px; }
+  .typing { align-self:flex-start; display:flex !important; align-items:center; gap:9px; max-width:82%; color:#41515e !important; background:var(--vfc-assistant); border:1px solid var(--vfc-assistant-border); border-radius:17px 17px 17px 6px; padding:9px 12px !important; box-shadow:0 1px 2px rgba(17,24,39,.04); font-size:11px !important; font-weight:700; }
+  .typing-label { white-space:nowrap; }
+  .typing-dots { display:inline-flex; align-items:center; gap:4px; height:14px; }
+  .typing-dot { width:6px; height:6px; border-radius:50%; background:#667784; animation:vfcTypingDot 1.15s ease-in-out infinite; }
+  .typing-dot:nth-child(2) { animation-delay:.16s; }
+  .typing-dot:nth-child(3) { animation-delay:.32s; }
+  @keyframes vfcTypingDot { 0%, 60%, 100% { transform:translateY(0); opacity:.38; } 30% { transform:translateY(-4px); opacity:1; } }
+  @media (prefers-reduced-motion:reduce) { .typing-dot { animation:none; opacity:.7; } }
   .composer { background:#fff !important; padding:10px 11px 9px !important; }
   textarea { border-color:#cbd2d8 !important; border-radius:12px !important; background:#fff; line-height:1.35; }
   .mic { width:auto !important; min-width:65px; flex:0 0 auto !important; padding:0 10px !important; border-radius:12px !important; gap:5px; font-size:13px !important; font-weight:700; }
@@ -76,6 +83,7 @@ const POLISH_STYLES = `
   @media (max-width:520px) {
     .messages { padding:13px !important; }
     .message { max-width:90% !important; }
+    .typing { max-width:90%; font-size:11.5px !important; padding:10px 12px !important; }
     .vehicle-apply-card { max-width:96% !important; }
     .quick-replies { gap:6px; }
     .quick-reply { padding:7px 9px; font-size:10.5px; }
@@ -87,7 +95,7 @@ const POLISH_STYLES = `
     .send { flex:1 1 56% !important; width:auto !important; min-width:0 !important; height:46px !important; }
     .composer.mobile-compact { padding:9px 11px !important; }
     .composer.mobile-compact .input-row { gap:0 !important; }
-    .composer.mobile-compact .input-row textarea { min-height:50px; max-height:72px; }
+    .composer.mobile-compact .input-row textarea { min-height:50px; max-height:72px; cursor:text; }
     .composer.mobile-compact .mic,
     .composer.mobile-compact .send,
     .composer.mobile-compact .voice-status,
@@ -135,6 +143,14 @@ function polishMic(widget) {
   if (!mic) return;
   const recording = Boolean(widget.voiceRecording);
   mic.innerHTML = `<span class="mic-icon" aria-hidden="true">${recording ? "■" : "🎙"}</span><span>${recording ? "Stop" : "Talk"}</span>`;
+}
+
+function polishTypingIndicator(widget) {
+  const typing = widget.shadowRoot?.querySelector(".typing");
+  if (!typing || typing.dataset.vfcTypingPolished === "true") return;
+  typing.dataset.vfcTypingPolished = "true";
+  typing.setAttribute("aria-label", "Assistant is replying");
+  typing.innerHTML = `<span class="typing-label">Assistant is replying</span><span class="typing-dots" aria-hidden="true"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></span>`;
 }
 
 function addStarterReplies(widget) {
@@ -198,12 +214,15 @@ function applyMobileComposerState(widget) {
   const input = root?.querySelector("#customerMessage");
   if (!composer || !input) return;
 
-  composer.classList.toggle("mobile-compact", Boolean(widget.mobileComposerCollapsed));
+  const collapsed = Boolean(widget.mobileComposerCollapsed);
+  composer.classList.toggle("mobile-compact", collapsed);
+  input.placeholder = collapsed ? "Tap here to continue chatting…" : "Type your message…";
   if (input.dataset.mobileComposerBound === "true") return;
   input.dataset.mobileComposerBound = "true";
   const expand = () => {
     widget.mobileComposerCollapsed = false;
     composer.classList.remove("mobile-compact");
+    input.placeholder = "Type your message…";
   };
   input.addEventListener("focus", expand);
   input.addEventListener("click", expand);
@@ -213,6 +232,7 @@ function polishWidget(widget) {
   ensurePolishStyle(widget);
   polishHeader(widget);
   polishMic(widget);
+  polishTypingIndicator(widget);
   addStarterReplies(widget);
   polishVehicleApplyPrompt(widget);
   applyMobileComposerState(widget);
