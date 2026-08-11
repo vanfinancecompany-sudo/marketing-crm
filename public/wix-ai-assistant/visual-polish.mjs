@@ -79,7 +79,12 @@ const POLISH_STYLES = `
     .vehicle-apply-card { max-width:96% !important; }
     .quick-replies { gap:6px; }
     .quick-reply { padding:7px 9px; font-size:10.5px; }
-    .mic { min-width:60px; padding:0 8px !important; }
+    .composer { padding:10px 11px 9px !important; }
+    .input-row { flex-wrap:wrap; align-items:stretch !important; gap:8px !important; }
+    .input-row textarea { flex:1 0 100% !important; width:100% !important; min-height:58px; max-height:105px; resize:none; }
+    .mic { flex:1 1 38% !important; min-width:0 !important; width:auto !important; height:46px !important; justify-content:center; padding:0 10px !important; }
+    .mic.recording { min-width:0 !important; }
+    .send { flex:1 1 56% !important; width:auto !important; min-width:0 !important; height:46px !important; }
   }
 `;
 

@@ -143,9 +143,9 @@
             font-size:10.5px; box-shadow:0 4px 12px rgba(0,0,0,.24);
           }
           .panel-frame {
-            right:12px; bottom:96px; width:min(340px, calc(100vw - 32px));
-            height:min(500px, calc(100vh - 180px)); height:min(500px, calc(100dvh - 180px));
-            border-radius:14px;
+            right:8px; bottom:84px; width:calc(100vw - 16px);
+            height:min(620px, calc(100vh - 130px)); height:min(620px, calc(100dvh - 130px));
+            border-radius:15px;
           }
         }
       </style>

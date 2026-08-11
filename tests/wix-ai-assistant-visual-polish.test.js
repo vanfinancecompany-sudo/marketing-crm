@@ -57,6 +57,20 @@ test("visual layer softens chat while preserving VFC red for actions", async () 
   assert.match(visual, /✓ Voice captured\. Check the text, then press Send\./);
 });
 
+test("mobile composer stacks message field above Talk and Send controls", async () => {
+  const [visual, loader] = await Promise.all([
+    readFile(new URL("../public/wix-ai-assistant/visual-polish.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../public/wix-ai-assistant/site-loader.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(visual, /@media \(max-width:520px\)/);
+  assert.match(visual, /\.input-row \{ flex-wrap:wrap/);
+  assert.match(visual, /\.input-row textarea \{ flex:1 0 100%/);
+  assert.match(visual, /\.mic \{ flex:1 1 38%/);
+  assert.match(visual, /\.send \{ flex:1 1 56%/);
+  assert.match(loader, /right:8px; bottom:84px; width:calc\(100vw - 16px\)/);
+  assert.match(loader, /height:min\(620px, calc\(100dvh - 130px\)\)/);
+});
+
 test("visual polish loads after the existing voice resilience layer", async () => {
   const embed = await readFile(new URL("../public/wix-ai-assistant/embed.html", import.meta.url), "utf8");
   const voiceIndex = embed.indexOf('await import("./voice-live-feedback.mjs")');
