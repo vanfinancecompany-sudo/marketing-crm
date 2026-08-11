@@ -1,0 +1,35 @@
+/* Lower-edge protection for the hosted finance application.
+   Keeps sticky controls and supporting copy clear of rounded corners,
+   mobile browser chrome and device safe-area insets. */
+
+.form-footer {
+  padding-bottom: max(20px, calc(14px + env(safe-area-inset-bottom, 0px)));
+}
+
+.secure-note {
+  padding-bottom: max(20px, calc(14px + env(safe-area-inset-bottom, 0px)));
+}
+
+@media (min-width: 760px) {
+  .form-footer {
+    padding-bottom: 24px;
+  }
+
+  .secure-note {
+    padding-bottom: 22px;
+  }
+}
+
+@media (max-width: 600px) {
+  .form-footer {
+    padding-left: max(14px, env(safe-area-inset-left, 0px));
+    padding-right: max(14px, env(safe-area-inset-right, 0px));
+    padding-bottom: max(18px, calc(10px + env(safe-area-inset-bottom, 0px)));
+  }
+
+  .secure-note {
+    padding-left: max(14px, env(safe-area-inset-left, 0px));
+    padding-right: max(14px, env(safe-area-inset-right, 0px));
+    padding-bottom: max(20px, calc(12px + env(safe-area-inset-bottom, 0px)));
+  }
+}
