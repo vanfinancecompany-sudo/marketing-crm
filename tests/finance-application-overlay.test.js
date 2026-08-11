@@ -57,6 +57,22 @@ test('viewport-fit mode removes whole-page scrolling and compacts mobile steps',
   assert.match(embedContext, /finance-embedded/);
 });
 
+test('final Finance polish keeps desktop compact and mobile branding clearer', async () => {
+  const css = await read('../public/finance-application-overlay/viewport-fit.css');
+  assert.match(css, /max-width:1180px/);
+  assert.match(css, /\.step-inner\{max-width:680px\}/);
+  assert.match(css, /box-shadow:none/);
+  assert.match(css, /\.brand-name\{font-size:16px/);
+  assert.match(css, /\.brand-subtitle\{font-size:11px/);
+  assert.match(css, /\.control\{border-width:1px/);
+});
+
+test('sitewide Ask Me widget remains behind Wix application modals', async () => {
+  const sitewideLoader = await read('../public/wix-ai-assistant/site-loader.js');
+  assert.match(sitewideLoader, /\.layer \{ position:fixed; inset:0; z-index:900;/);
+  assert.doesNotMatch(sitewideLoader, /z-index:2147483000/);
+});
+
 test('finance bank inputs are hard-limited and sort code is formatted as 12-34-56', async () => {
   const html = await read('../public/finance-application-overlay/index.html');
   const guards = await read('../public/finance-application-overlay/bank-input-guards.js');
