@@ -1,0 +1,72 @@
+html,body{width:100%;height:100%;min-height:0;overflow:hidden;background:#fff}
+body{padding:0!important}
+.application-shell{width:100%;max-width:none;height:100dvh;min-height:0;margin:0;border:0!important;border-radius:0!important;box-shadow:none!important;display:flex;flex-direction:column;overflow:hidden;background:#fff}
+.application-header,.vehicle-card,.progress-panel,.form-footer,.secure-note{flex:0 0 auto}
+.vehicle-card{width:min(872px,calc(100% - 48px));margin:16px auto 0}
+.progress-panel{padding-top:11px;padding-bottom:10px}
+#financeForm{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.step-card{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
+.step-card::-webkit-scrollbar{display:none}
+.form-footer{position:static}
+.secure-note{padding-bottom:10px}
+body.finance-embedded .icon-button{display:none}
+
+@media(min-width:760px){
+  .application-shell{height:100dvh;min-height:0}
+  .application-header{padding:14px 24px}
+  .vehicle-card{margin-top:14px;padding:13px 17px}
+  .progress-panel{padding:10px max(24px,calc((100% - 872px)/2 + 24px)) 9px}
+  .step-card{padding:22px 34px 16px}
+  .field-grid{margin-top:18px;gap:12px}
+  .choice{min-height:50px}
+  .form-footer{padding:10px max(34px,calc((100% - 872px)/2 + 34px)) 12px}
+  .secure-note{padding:0 22px 8px}
+}
+
+@media(max-width:600px){
+  .application-header{padding:8px 10px;min-height:58px}
+  .brand-lockup{gap:9px}
+  .brand-mark{width:34px;height:34px;border-radius:10px;font-size:11px}
+  .brand-name{font-size:13px}
+  .brand-subtitle{font-size:9px;margin-top:1px}
+  .icon-button{width:34px;height:34px;font-size:21px}
+
+  .vehicle-card{width:calc(100% - 20px);margin:7px 10px 0;padding:8px 11px 8px 13px;border-radius:12px;box-shadow:0 3px 10px rgba(15,23,42,.045)}
+  .vehicle-kicker{font-size:8px;letter-spacing:.12em}
+  .vehicle-title{margin-top:3px;font-size:15px;line-height:1.15}
+  .vehicle-detail{display:none}
+
+  .progress-panel{padding:7px 11px 7px}
+  .progress-copy{margin-bottom:5px;font-size:10px}
+  .progress-track{height:5px}
+
+  .step-card{padding:11px 11px 7px}
+  .step-eyebrow{font-size:8px;margin-bottom:4px}
+  .step-title{font-size:22px;line-height:1.04;letter-spacing:-.025em}
+  .step-subtitle{font-size:12px;line-height:1.35;margin-top:4px}
+  .field-grid{margin-top:11px;gap:8px}
+  .field{gap:5px}
+  .field label,.field-label{font-size:11px}
+  .field-hint{font-size:10px;line-height:1.3}
+  .control{min-height:44px;padding:9px 11px;border-radius:11px;font-size:15px}
+  textarea.control{min-height:70px}
+  .choices{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:6px}
+  .choices.single{grid-template-columns:1fr}
+  .choice{min-height:43px;border-radius:11px;padding:8px 8px;font-size:12px;line-height:1.2}
+  .address-row{grid-template-columns:1fr 96px;gap:7px}
+  .lookup-button{min-height:44px;border-radius:11px;font-size:12px}
+  .checkbox-box{padding:9px;border-radius:11px;font-size:11px;line-height:1.35}
+  .validation-message{min-height:14px;margin-top:6px;font-size:10px}
+  .trust-strip{display:none}
+
+  .form-footer{grid-template-columns:34% 1fr;gap:7px;padding:7px 10px calc(8px + env(safe-area-inset-bottom))}
+  .button{min-height:44px;border-radius:11px;padding:8px 11px;font-size:13px}
+  .secure-note{display:none}
+}
+
+@media(max-width:380px){
+  .choices{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .choices.single{grid-template-columns:1fr}
+  .address-row{grid-template-columns:1fr 88px}
+  .step-title{font-size:21px}
+}
