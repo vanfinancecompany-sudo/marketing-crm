@@ -2,6 +2,7 @@ html,body{width:100%;height:100%;min-height:0;overflow:hidden;background:#fff}
 body{padding:0!important}
 .application-shell{width:100%;max-width:none;height:100dvh;min-height:0;margin:0;border:0!important;border-radius:0!important;box-shadow:none!important;display:flex;flex-direction:column;overflow:hidden;background:#fff}
 .application-header,.vehicle-card,.progress-panel,.form-footer,.secure-note{flex:0 0 auto}
+.application-header{margin:-1px -1px 0;width:calc(100% + 2px);border-left:0!important;border-right:0!important;border-top:0!important;box-shadow:none!important}
 .vehicle-card{width:min(872px,calc(100% - 48px));margin:16px auto 0;border:1px solid #d9dee5;box-shadow:none}
 .progress-panel{padding-top:11px;padding-bottom:10px}
 #financeForm{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden}
@@ -14,15 +15,16 @@ body.finance-embedded .icon-button{display:none}
 .choice{border-width:1px;border-color:#d6dce3}
 
 @media(min-width:760px){
-  .application-shell{height:100dvh;min-height:0;max-width:1180px;margin:0 auto}
+  html,body{background:#fff}
+  .application-shell{height:100dvh;min-height:0;max-width:920px;margin:0 auto}
   .application-header{padding:14px 24px}
-  .vehicle-card{width:min(760px,calc(100% - 48px));margin-top:14px;padding:13px 17px}
-  .progress-panel{padding:10px max(24px,calc((100% - 760px)/2 + 24px)) 9px}
+  .vehicle-card{width:calc(100% - 48px);max-width:none;margin-top:14px;padding:13px 17px}
+  .progress-panel{padding:10px 24px 9px}
   .step-card{padding:22px 34px 16px}
-  .step-inner{max-width:680px}
+  .step-inner{max-width:760px}
   .field-grid{margin-top:18px;gap:12px}
   .choice{min-height:50px}
-  .form-footer{padding:10px max(34px,calc((100% - 760px)/2 + 34px)) 12px}
+  .form-footer{padding:10px 34px 12px}
   .secure-note{padding:0 22px 8px}
   body:not(.finance-embedded) .icon-button{width:44px;height:44px;font-size:28px;border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.14)}
 }
