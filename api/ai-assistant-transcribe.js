@@ -3,7 +3,6 @@ import { createClient } from "@supabase/supabase-js";
 
 const MAX_AUDIO_BYTES = 2_500_000;
 const MAX_TRANSCRIPT_CHARS = 3000;
-const MINUTE_LIMIT = 20;
 const DAILY_LIMIT = 200;
 const DEFAULT_MODEL = "gpt-4o-mini-transcribe";
 const ALLOWED_MIME_TYPES = new Map([
@@ -102,7 +101,7 @@ async function consumeRateLimit(supabase, keyHash, scope, windowStart, limit) {
     p_limit: limit,
   });
   if (result?.error) throw new VoiceInputError(503, "Voice input is temporarily unavailable. Please type your question instead.");
-  if (result?.data !== true) throw new VoiceInputError(429, "You’ve used voice input very frequently. Please wait up to a minute, or type your question.");
+  if (result?.data !== true) throw new VoiceInputError(429, "You’ve reached today’s voice-input limit. Please type your question for now.");
 }
 
 async function enforceVoiceRateLimits(supabase, request, environment = process.env) {
@@ -110,7 +109,6 @@ async function enforceVoiceRateLimits(supabase, request, environment = process.e
   if (!secret) throw new VoiceInputError(503, "Voice input is temporarily unavailable. Please type your question instead.");
   const keyHash = secureHash(`voice:${requestIp(request)}`, secret);
   const now = new Date();
-  await consumeRateLimit(supabase, keyHash, "voice_minute", rateWindow(now, 60_000), MINUTE_LIMIT);
   await consumeRateLimit(supabase, keyHash, "voice_day", rateWindow(now, 86_400_000), DAILY_LIMIT);
 }
 

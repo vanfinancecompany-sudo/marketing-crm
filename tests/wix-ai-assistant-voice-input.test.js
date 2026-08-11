@@ -77,7 +77,7 @@ test("OpenAI transcription sends audio only to the transcription endpoint", asyn
   assert.ok(request.options.body.get("file") instanceof Blob);
 });
 
-test("voice endpoint keeps abuse protection without blocking normal retry behaviour", async () => {
+test("voice endpoint keeps a daily abuse cap without a short-term retry bucket", async () => {
   const calls = [];
   const supabase = {
     async rpc(name, payload) {
@@ -101,17 +101,17 @@ test("voice endpoint keeps abuse protection without blocking normal retry behavi
   });
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.payload, { text: "What deposit do I need?" });
-  assert.equal(calls.length, 2);
-  assert.equal(calls[0].payload.p_scope, "voice_minute");
-  assert.equal(calls[0].payload.p_limit, 20);
-  assert.equal(calls[1].payload.p_scope, "voice_day");
-  assert.equal(calls[1].payload.p_limit, 200);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].payload.p_scope, "voice_day");
+  assert.equal(calls[0].payload.p_limit, 200);
 });
 
 test("website widget adds microphone recording without auto-sending the transcript", async () => {
-  const [widget, loader] = await Promise.all([
+  const [widget, loader, embed, liveFeedback] = await Promise.all([
     readFile(new URL("../public/wix-ai-assistant/widget.mjs", import.meta.url), "utf8"),
     readFile(new URL("../public/wix-ai-assistant/site-loader.js", import.meta.url), "utf8"),
+    readFile(new URL("../public/wix-ai-assistant/embed.html", import.meta.url), "utf8"),
+    readFile(new URL("../public/wix-ai-assistant/voice-live-feedback.mjs", import.meta.url), "utf8"),
   ]);
   assert.match(loader, /clipboard-write; microphone/);
   assert.match(widget, /navigator\.mediaDevices\.getUserMedia/);
@@ -122,4 +122,10 @@ test("website widget adds microphone recording without auto-sending the transcri
   assert.match(widget, /Tap the microphone to speak, then check the text before sending/);
   assert.match(widget, /input\.value = transcript/);
   assert.doesNotMatch(widget, /input\.value = transcript;\s*this\.sendMessage\(/);
+  assert.match(embed, /voice-live-feedback\.mjs/);
+  assert.match(liveFeedback, /SpeechRecognition/);
+  assert.match(liveFeedback, /webkitSpeechRecognition/);
+  assert.match(liveFeedback, /interimResults = true/);
+  assert.match(liveFeedback, /input\.value = String\(text/);
+  assert.match(liveFeedback, /I can hear you/);
 });
