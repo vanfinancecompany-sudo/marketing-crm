@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="color-scheme" content="light" />
+  <title>Van Finance Application Design Preview</title>
+  <link rel="stylesheet" href="/finance-application-overlay/styles.css" />
+  <link rel="stylesheet" href="/finance-application-overlay/safe-area.css" />
+  <link rel="stylesheet" href="/finance-application-overlay/viewport-fit.css" />
+  <link rel="stylesheet" href="/finance-application-overlay/brand-polish.css" />
+  <link rel="stylesheet" href="/finance-application-overlay/rich-form.css" />
+</head>
+<body>
+  <main class="application-shell" id="applicationShell">
+    <header class="application-header">
+      <div class="brand-lockup">
+        <span class="brand-logo" aria-hidden="true"></span>
+        <div>
+          <div class="brand-name">Van Finance Company</div>
+          <div class="brand-subtitle">Secure finance application</div>
+        </div>
+      </div>
+      <button class="icon-button" id="closeApplication" type="button" aria-label="Close application">×</button>
+    </header>
+
+    <section class="vehicle-card" aria-live="polite">
+      <div class="vehicle-kicker">You’re applying for</div>
+      <div class="vehicle-title" id="vehicleTitleDisplay">Your selected van</div>
+      <div class="vehicle-detail" id="vehicleInfoDisplay">Vehicle details will be attached automatically.</div>
+    </section>
+
+    <section class="progress-panel">
+      <div class="progress-copy">
+        <span id="stepLabel">Step 1</span>
+        <span id="progressLabel">0%</span>
+      </div>
+      <div class="progress-track" aria-hidden="true"><div class="progress-fill" id="progressFill"></div></div>
+    </section>
+
+    <form id="financeForm" novalidate>
+      <input type="hidden" name="vehicle_info" id="vehicleInfo" />
+      <input type="hidden" name="vehicle_title" id="vehicleTitle" />
+      <input type="hidden" name="vehicle_page_url" id="vehiclePageUrl" />
+      <input type="hidden" name="application_route" id="applicationRoute" value="Finance Overlay" />
+      <input type="hidden" name="total_address_months" id="totalAddressMonths" />
+
+      <section class="step-card" id="stepRoot" aria-live="polite"></section>
+
+      <footer class="form-footer" id="formFooter">
+        <button class="button secondary" id="backButton" type="button">Back</button>
+        <button class="button primary" id="continueButton" type="button">Continue</button>
+      </footer>
+      <div class="secure-note">🔒 Your information is secure and encrypted.</div>
+    </form>
+
+    <section class="success-layer" id="successLayer" hidden>
+      <div class="success-card">
+        <div class="success-icon">✓</div>
+        <div class="success-kicker">Application received</div>
+        <h1>Thank you</h1>
+        <p>Your finance application has been submitted successfully.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="/finance-application-overlay/embed-context.js"></script>
+  <script src="/finance-application-overlay/privacy-storage-guard.js"></script>
+  <script src="/finance-application-overlay/bank-input-guards.js"></script>
+  <script src="/finance-application-overlay/autofill-sync.js"></script>
+  <script type="module" src="/finance-application-overlay/app.js"></script>
+  <script type="module" src="/finance-application-overlay/route-context.js"></script>
+  <script src="/finance-application-overlay/live-submit.js"></script>
+  <script src="/finance-application-overlay/validation-polish.js"></script>
+</body>
+</html>
