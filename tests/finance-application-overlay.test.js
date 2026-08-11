@@ -39,6 +39,28 @@ test('finance overlay is responsive and launcher is opt-in only', async () => {
   assert.match(loader, /height:100dvh/);
 });
 
+test('finance bank inputs are hard-limited and sort code is formatted as 12-34-56', async () => {
+  const html = await read('../public/finance-application-overlay/index.html');
+  const guards = await read('../public/finance-application-overlay/bank-input-guards.js');
+  const app = await read('../public/finance-application-overlay/app.js');
+  assert.match(html, /bank-input-guards\.js/);
+  assert.match(guards, /slice\(0, 6\)/);
+  assert.match(guards, /join\('-'\)/);
+  assert.match(guards, /slice\(0, 8\)/);
+  assert.match(app, /digitsOnly\(state\.bank_sort_code\)\.length!==6/);
+  assert.match(app, /digitsOnly\(state\.bank_account_number\)\.length!==8/);
+});
+
+test('successful live overlay submission redirects to the existing thank-you page', async () => {
+  const app = await read('../public/finance-application-overlay/app.js');
+  const loader = await read('../public/finance-application-overlay/site-loader.js');
+  assert.match(app, /finance-form-submitted/);
+  assert.match(app, /redirectUrl:THANK_YOU_URL/);
+  assert.match(loader, /finance-form-submitted/);
+  assert.match(loader, /window\.location\.assign\(target\)/);
+  assert.match(loader, /finance-application-received/);
+});
+
 test('prototype does not recreate Wix CMS, email, Meta or CRM submission logic', async () => {
   const app = await read('../public/finance-application-overlay/app.js');
   assert.doesNotMatch(app, /wixData/);
