@@ -57,19 +57,32 @@ test('viewport-fit mode removes whole-page scrolling and compacts mobile steps',
   assert.match(embedContext, /finance-embedded/);
 });
 
-test('final Finance polish keeps desktop compact and mobile branding clearer', async () => {
+test('Finance overlay aligns the full desktop application to the black header width', async () => {
   const css = await read('../public/finance-application-overlay/viewport-fit.css');
-  assert.match(css, /max-width:1180px/);
-  assert.match(css, /\.step-inner\{max-width:680px\}/);
+  assert.match(css, /max-width:920px/);
+  assert.match(css, /\.application-header\{margin:-1px -1px 0;width:calc\(100% \+ 2px\)/);
+  assert.match(css, /\.step-inner\{max-width:760px\}/);
   assert.match(css, /box-shadow:none/);
   assert.match(css, /\.brand-name\{font-size:16px/);
   assert.match(css, /\.brand-subtitle\{font-size:11px/);
-  assert.match(css, /\.control\{border-width:1px/);
+});
+
+test('Finance application hard-limits UK phone and duration values', async () => {
+  const app = await read('../public/finance-application-overlay/app.js');
+  assert.match(app, /digitsOnly\(value\)\.slice\(0,11\)/);
+  assert.match(app, /maxlength:11/);
+  assert.match(app, /\^\(0\[12378\]\\d\{9\}\)\$/);
+  assert.match(app, /durationYearKeys/);
+  assert.match(app, /durationMonthKeys/);
+  assert.match(app, /Math\.min\(12,numberValue\(digits\)\)/);
+  assert.match(app, /numberValue\(yy\)<=99/);
+  assert.match(app, /numberValue\(mm\)<=12/);
+  assert.match(app, /valid 11-digit UK phone number/);
 });
 
 test('sitewide Ask Me widget remains behind Wix application modals', async () => {
   const sitewideLoader = await read('../public/wix-ai-assistant/site-loader.js');
-  assert.match(sitewideLoader, /\.layer \{ position:fixed; inset:0; z-index:900;/);
+  assert.match(sitewideLoader, /\.layer \{ position:fixed; inset:0; z-index:100;/);
   assert.doesNotMatch(sitewideLoader, /z-index:2147483000/);
 });
 

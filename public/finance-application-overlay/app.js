@@ -30,6 +30,19 @@ const digitsOnly = value => String(value || '').replace(/\D/g,'');
 const numberValue = value => Number.parseInt(String(value || '0'),10) || 0;
 const months = (y,m) => numberValue(y)*12 + numberValue(m);
 const addressMonths = () => months(state.time_at_address_years,state.time_at_address_months)+months(state.previous_address_years,state.previous_address_months)+months(state.previous2_address_years,state.previous2_address_months)+months(state.previous3_address_years,state.previous3_address_months);
+const durationYearKeys = new Set(['time_at_address_years','previous_address_years','previous2_address_years','previous3_address_years','current_job_years']);
+const durationMonthKeys = new Set(['time_at_address_months','previous_address_months','previous2_address_months','previous3_address_months','current_job_months']);
+
+function normaliseBoundValue(key,value){
+  if(key==='phone') return digitsOnly(value).slice(0,11);
+  if(durationYearKeys.has(key)) return digitsOnly(value).slice(0,2);
+  if(durationMonthKeys.has(key)){
+    const digits=digitsOnly(value).slice(0,2);
+    if(digits==='') return '';
+    return String(Math.min(12,numberValue(digits)));
+  }
+  return value;
+}
 
 function choice(name,label,options,single=false){return {type:'choice',name,label,options,single};}
 function input(name,label,type='text',attrs={}){return {type:'input',name,label,inputType:type,attrs};}
@@ -54,17 +67,17 @@ function allSteps(){
       {id:'business_address',eyebrow:'Company',title:'Registered address',subtitle:'Use postcode lookup, then select the registered business address.',fields:[address('business','Business address')]}
     ] : []),
     {id:'applicant_details',eyebrow:'About you',title:'Tell us about you',subtitle:'Please complete your personal details.',fields:[choice('title','Title',['Mr','Mrs','Miss','Ms']),input('first_name','First Name'),input('last_name','Last Name')]},
-    {id:'contact_details',eyebrow:'About you',title:'Contact details',subtitle:'Use the details you want us to contact you on.',fields:[input('email','Email','email'),input('phone','Phone','tel')]},
+    {id:'contact_details',eyebrow:'About you',title:'Contact details',subtitle:'Use the details you want us to contact you on.',fields:[input('email','Email','email'),input('phone','Phone','tel',{maxlength:11,inputmode:'numeric',autocomplete:'tel'})]},
     {id:'marital_status',eyebrow:'About you',title:'Marital status',subtitle:'Please confirm your marital status.',fields:[choice('maritalStatus','Marital status',['Married','Single','Living with Partner','Widowed','Divorced','Other'],true)]},
     {id:'licence_type',eyebrow:'About you',title:'Driving licence',subtitle:'Please confirm your driving licence type.',fields:[choice('licenceType','Licence type',['Full UK','EU Licence','Provisional','None','Other'],true)]},
     {id:'dob',eyebrow:'About you',title:'Date of birth',subtitle:'Applicants must be at least 18 years old.',fields:[input('dob_day','Day','text',{maxlength:2,inputmode:'numeric'}),input('dob_month','Month','text',{maxlength:2,inputmode:'numeric'}),input('dob_year','Year','text',{maxlength:4,inputmode:'numeric'})],layout:'three'},
     {id:'current_address',eyebrow:'Address history',title:'Where do you live now?',subtitle:'Use postcode lookup, then select your address.',fields:[address('current','Current address')]},
-    {id:'time_at_address',eyebrow:'Address history',title:'Time at address',subtitle:'Please confirm how long you have lived there.',fields:[input('time_at_address_years','Years','text',{inputmode:'numeric'}),input('time_at_address_months','Months','text',{inputmode:'numeric'})],layout:'two'},
+    {id:'time_at_address',eyebrow:'Address history',title:'Time at address',subtitle:'Please confirm how long you have lived there.',fields:[input('time_at_address_years','Years','text',{inputmode:'numeric',maxlength:2}),input('time_at_address_months','Months','text',{inputmode:'numeric',maxlength:2})],layout:'two'},
     {id:'residential_status',eyebrow:'Address history',title:'Residential status',subtitle:'Please confirm your current residential status.',fields:[choice('residentialStatus','Residential status',['Homeowner','Private Tenant','Council Tenant','Living with Parents','Other'],true)]},
-    ...(need1 ? [{id:'previous_address_1',eyebrow:'Address history',title:'Previous address',subtitle:'We need a little more address history to reach 3 years.',fields:[address('prev1','Previous address')]},{id:'previous_time_1',eyebrow:'Address history',title:'Time at previous address',subtitle:'Please confirm how long you lived there.',fields:[input('previous_address_years','Years','text',{inputmode:'numeric'}),input('previous_address_months','Months','text',{inputmode:'numeric'})],layout:'two'}] : []),
-    ...(need2 ? [{id:'previous_address_2',eyebrow:'Address history',title:'Previous address 2',subtitle:'We still need more address history.',fields:[address('prev2','Previous address 2')]},{id:'previous_time_2',eyebrow:'Address history',title:'Time at previous address 2',subtitle:'Please confirm how long you lived there.',fields:[input('previous2_address_years','Years','text',{inputmode:'numeric'}),input('previous2_address_months','Months','text',{inputmode:'numeric'})],layout:'two'}] : []),
-    ...(need3 ? [{id:'previous_address_3',eyebrow:'Address history',title:'Previous address 3',subtitle:'One final previous address may be required.',fields:[address('prev3','Previous address 3')]},{id:'previous_time_3',eyebrow:'Address history',title:'Time at previous address 3',subtitle:'Please confirm how long you lived there.',fields:[input('previous3_address_years','Years','text',{inputmode:'numeric'}),input('previous3_address_months','Months','text',{inputmode:'numeric'})],layout:'two'}] : []),
-    {id:'work_income',eyebrow:'Employment',title:'Work and income',subtitle:'Share your employment details and time in your current role.',fields:[choice('employmentStatus','Employment Status',['Full Time Employed','Self Employed']),...(state.employmentStatus==='Full Time Employed'?[input('employer_name','Employer Name')]:[]),input('occupation','Occupation'),input('current_job_years','Years in current job','text',{inputmode:'numeric'}),input('current_job_months','Months in current job','text',{inputmode:'numeric'})]},
+    ...(need1 ? [{id:'previous_address_1',eyebrow:'Address history',title:'Previous address',subtitle:'We need a little more address history to reach 3 years.',fields:[address('prev1','Previous address')]},{id:'previous_time_1',eyebrow:'Address history',title:'Time at previous address',subtitle:'Please confirm how long you lived there.',fields:[input('previous_address_years','Years','text',{inputmode:'numeric',maxlength:2}),input('previous_address_months','Months','text',{inputmode:'numeric',maxlength:2})],layout:'two'}] : []),
+    ...(need2 ? [{id:'previous_address_2',eyebrow:'Address history',title:'Previous address 2',subtitle:'We still need more address history.',fields:[address('prev2','Previous address 2')]},{id:'previous_time_2',eyebrow:'Address history',title:'Time at previous address 2',subtitle:'Please confirm how long you lived there.',fields:[input('previous2_address_years','Years','text',{inputmode:'numeric',maxlength:2}),input('previous2_address_months','Months','text',{inputmode:'numeric',maxlength:2})],layout:'two'}] : []),
+    ...(need3 ? [{id:'previous_address_3',eyebrow:'Address history',title:'Previous address 3',subtitle:'One final previous address may be required.',fields:[address('prev3','Previous address 3')]},{id:'previous_time_3',eyebrow:'Address history',title:'Time at previous address 3',subtitle:'Please confirm how long you lived there.',fields:[input('previous3_address_years','Years','text',{inputmode:'numeric',maxlength:2}),input('previous3_address_months','Months','text',{inputmode:'numeric',maxlength:2})],layout:'two'}] : []),
+    {id:'work_income',eyebrow:'Employment',title:'Work and income',subtitle:'Share your employment details and time in your current role.',fields:[choice('employmentStatus','Employment Status',['Full Time Employed','Self Employed']),...(state.employmentStatus==='Full Time Employed'?[input('employer_name','Employer Name')]:[]),input('occupation','Occupation'),input('current_job_years','Years in current job','text',{inputmode:'numeric',maxlength:2}),input('current_job_months','Months in current job','text',{inputmode:'numeric',maxlength:2})]},
     {id:'budget_deposit',eyebrow:'Finance',title:'Budget and deposit',subtitle:'Please confirm your income and available deposit.',fields:[input('annual_net_salary','Annual Net Salary','text',{inputmode:'numeric'}),input('available_deposit','Available Deposit','text',{inputmode:'numeric'}),choice('partExchange','Do you have a vehicle to part exchange?',['Yes','No'])]},
     ...(wantsPX ? [{id:'vehicle_details',eyebrow:'Part exchange',title:'Vehicle details',subtitle:'Add the part exchange vehicle details.',fields:[input('vehicle_registration','Vehicle Registration'),input('vehicle_make','Make'),input('vehicle_model','Model'),input('vehicle_mileage','Mileage','text',{inputmode:'numeric'})]},{id:'vehicle_condition_value',eyebrow:'Part exchange',title:'Condition and value',subtitle:'Tell us about the part exchange vehicle.',fields:[textarea('part_exchange_condition','Condition'),input('part_exchange_value','Estimated Part Exchange Value','text',{inputmode:'numeric'})]}] : []),
     {id:'referral',eyebrow:'Nearly there',title:'How did you hear about us?',subtitle:'Please tell us how you found Van Finance Company.',fields:[choice('hearAboutUs','Source',['Google','Bing','Ebay','Facebook','Radio','Other']),...(state.hearAboutUs==='Other'?[input('hear_about_us_other','Please tell us where you heard about us')]:[])]},
@@ -113,7 +126,15 @@ function render(){
 function bindRenderedControls(step){
   root.querySelectorAll('[data-state]').forEach(el=>{
     const key=el.dataset.state;
-    const sync=()=>{state[key]=el.type==='checkbox'?el.checked:el.value; validationText=''; saveDraft(); if(['employmentStatus','partExchange','hearAboutUs'].includes(key)) render();};
+    const sync=()=>{
+      if(el.type==='checkbox') state[key]=el.checked;
+      else {
+        const normalised=normaliseBoundValue(key,el.value);
+        if(normalised!==el.value) el.value=normalised;
+        state[key]=normalised;
+      }
+      validationText=''; saveDraft(); if(['employmentStatus','partExchange','hearAboutUs'].includes(key)) render();
+    };
     el.addEventListener('input',sync); el.addEventListener('change',sync);
   });
   root.querySelectorAll('[data-choice]').forEach(group=>group.querySelectorAll('.choice').forEach(btn=>btn.addEventListener('click',()=>{
@@ -125,10 +146,10 @@ function bindRenderedControls(step){
 }
 
 function validEmail(v){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v||'').trim());}
-function validPhone(v){return /^(0[12378]\d{8,9})$/.test(digitsOnly(v));}
+function validPhone(v){return /^(0[12378]\d{9})$/.test(digitsOnly(v));}
 function adult(){const d=numberValue(state.dob_day),m=numberValue(state.dob_month),y=numberValue(state.dob_year);if(!d||!m||!y)return false;const dob=new Date(y,m-1,d);if(dob.getFullYear()!==y||dob.getMonth()!==m-1||dob.getDate()!==d)return false;const today=new Date();let age=today.getFullYear()-y;const had=today.getMonth()>m-1||(today.getMonth()===m-1&&today.getDate()>=d);if(!had)age--;return age>=18;}
 function requireValue(key,msg){if(!String(state[key]||'').trim()){validationText=msg;return false;}return true;}
-function validDuration(y,m){const yy=String(state[y]||'').trim(),mm=String(state[m]||'').trim();if(yy===''||mm==='')return false;return numberValue(yy)>=0&&numberValue(mm)>=0&&numberValue(mm)<=11;}
+function validDuration(y,m){const yy=String(state[y]||'').trim(),mm=String(state[m]||'').trim();if(yy===''||mm==='')return false;return numberValue(yy)>=0&&numberValue(yy)<=99&&numberValue(mm)>=0&&numberValue(mm)<=12;}
 
 function validateStep(step){
   validationText='';
@@ -138,7 +159,7 @@ function validateStep(step){
   if(id==='company_registration') return requireValue('company_registration_number','Please enter the company registration number.')&&requireValue('businessProperty','Please choose the business property status.');
   if(id==='business_address') return requireValue('business_full_address','Please enter the registered business address.');
   if(id==='applicant_details') return requireValue('title','Please choose your title.')&&requireValue('first_name','Please enter your first name.')&&requireValue('last_name','Please enter your last name.');
-  if(id==='contact_details'){if(!validEmail(state.email)){validationText='Please enter a valid email address.';return false;}if(!validPhone(state.phone)){validationText='Please enter a valid UK phone number.';return false;}return true;}
+  if(id==='contact_details'){if(!validEmail(state.email)){validationText='Please enter a valid email address.';return false;}if(!validPhone(state.phone)){validationText='Please enter a valid 11-digit UK phone number.';return false;}return true;}
   if(id==='marital_status') return requireValue('maritalStatus','Please choose your marital status.');
   if(id==='licence_type') return requireValue('licenceType','Please choose your licence type.');
   if(id==='dob'){if(!adult()){validationText='Please enter a valid date of birth. Applicant must be at least 18.';return false;}return true;}
