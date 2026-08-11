@@ -60,7 +60,9 @@ test('viewport-fit mode removes whole-page scrolling and compacts mobile steps',
 test('Finance overlay aligns the full desktop application to the black header width', async () => {
   const css = await read('../public/finance-application-overlay/viewport-fit.css');
   assert.match(css, /max-width:920px/);
-  assert.match(css, /\.application-header\{margin:-1px -1px 0;width:calc\(100% \+ 2px\)/);
+  assert.match(css, /html,body\{width:100%;height:100%;min-height:0;overflow:hidden;background:#101114\}/);
+  assert.match(css, /\.application-header\{margin:0;width:100%/);
+  assert.match(css, /background:#101114!important/);
   assert.match(css, /\.step-inner\{max-width:760px\}/);
   assert.match(css, /box-shadow:none/);
   assert.match(css, /\.brand-name\{font-size:16px/);
