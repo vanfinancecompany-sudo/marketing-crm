@@ -51,7 +51,6 @@
     const first = clean(segments[0], 120).toLowerCase();
     const second = clean(segments[1], 80);
 
-    // The standalone Rent2Buy website is always Rent2Buy. It never offers a Finance product choice.
     if (rent2BuyOnly) {
       const registration = rent2BuyVehicleRegistration(first, second);
       return {
@@ -170,7 +169,7 @@
     frame.className = "panel-frame hidden";
     frame.src = EMBED_URL;
     frame.title = assistantFrameTitle(activeContext);
-    frame.setAttribute("allow", "clipboard-write");
+    frame.setAttribute("allow", "clipboard-write; microphone");
     frame.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
     shadow.querySelector(".layer").appendChild(frame);
     return frame;
