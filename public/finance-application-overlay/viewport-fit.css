@@ -2,7 +2,7 @@ html,body{width:100%;height:100%;min-height:0;overflow:hidden;background:#fff}
 body{padding:0!important}
 .application-shell{width:100%;max-width:none;height:100dvh;min-height:0;margin:0;border:0!important;border-radius:0!important;box-shadow:none!important;display:flex;flex-direction:column;overflow:hidden;background:#fff}
 .application-header,.vehicle-card,.progress-panel,.form-footer,.secure-note{flex:0 0 auto}
-.vehicle-card{width:min(872px,calc(100% - 48px));margin:16px auto 0}
+.vehicle-card{width:min(872px,calc(100% - 48px));margin:16px auto 0;border:1px solid #d9dee5;box-shadow:none}
 .progress-panel{padding-top:11px;padding-bottom:10px}
 #financeForm{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .step-card{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
@@ -10,28 +10,32 @@ body{padding:0!important}
 .form-footer{position:static}
 .secure-note{padding-bottom:10px}
 body.finance-embedded .icon-button{display:none}
+.control{border-width:1px;border-color:#d9dee5}
+.choice{border-width:1px;border-color:#d6dce3}
 
 @media(min-width:760px){
-  .application-shell{height:100dvh;min-height:0}
+  .application-shell{height:100dvh;min-height:0;max-width:1180px;margin:0 auto}
   .application-header{padding:14px 24px}
-  .vehicle-card{margin-top:14px;padding:13px 17px}
-  .progress-panel{padding:10px max(24px,calc((100% - 872px)/2 + 24px)) 9px}
+  .vehicle-card{width:min(760px,calc(100% - 48px));margin-top:14px;padding:13px 17px}
+  .progress-panel{padding:10px max(24px,calc((100% - 760px)/2 + 24px)) 9px}
   .step-card{padding:22px 34px 16px}
+  .step-inner{max-width:680px}
   .field-grid{margin-top:18px;gap:12px}
   .choice{min-height:50px}
-  .form-footer{padding:10px max(34px,calc((100% - 872px)/2 + 34px)) 12px}
+  .form-footer{padding:10px max(34px,calc((100% - 760px)/2 + 34px)) 12px}
   .secure-note{padding:0 22px 8px}
+  body:not(.finance-embedded) .icon-button{width:44px;height:44px;font-size:28px;border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.14)}
 }
 
 @media(max-width:600px){
-  .application-header{padding:8px 10px;min-height:58px}
-  .brand-lockup{gap:9px}
-  .brand-mark{width:34px;height:34px;border-radius:10px;font-size:11px}
-  .brand-name{font-size:13px}
-  .brand-subtitle{font-size:9px;margin-top:1px}
-  .icon-button{width:34px;height:34px;font-size:21px}
+  .application-header{padding:9px 12px;min-height:62px}
+  .brand-lockup{gap:10px}
+  .brand-mark{width:36px;height:36px;border-radius:10px;font-size:11px}
+  .brand-name{font-size:16px;line-height:1.15}
+  .brand-subtitle{font-size:11px;line-height:1.2;margin-top:2px;color:#d2d6dc}
+  .icon-button{width:40px;height:40px;font-size:26px;border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.14)}
 
-  .vehicle-card{width:calc(100% - 20px);margin:7px 10px 0;padding:8px 11px 8px 13px;border-radius:12px;box-shadow:0 3px 10px rgba(15,23,42,.045)}
+  .vehicle-card{width:calc(100% - 20px);margin:7px 10px 0;padding:8px 11px 8px 13px;border-radius:12px;border-color:#d9dee5;box-shadow:none}
   .vehicle-kicker{font-size:8px;letter-spacing:.12em}
   .vehicle-title{margin-top:3px;font-size:15px;line-height:1.15}
   .vehicle-detail{display:none}
@@ -48,11 +52,11 @@ body.finance-embedded .icon-button{display:none}
   .field{gap:5px}
   .field label,.field-label{font-size:11px}
   .field-hint{font-size:10px;line-height:1.3}
-  .control{min-height:44px;padding:9px 11px;border-radius:11px;font-size:15px}
+  .control{min-height:44px;padding:9px 11px;border-radius:11px;font-size:15px;border-width:1px}
   textarea.control{min-height:70px}
   .choices{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:6px}
   .choices.single{grid-template-columns:1fr}
-  .choice{min-height:43px;border-radius:11px;padding:8px 8px;font-size:12px;line-height:1.2}
+  .choice{min-height:43px;border-radius:11px;padding:8px 8px;font-size:12px;line-height:1.2;border-width:1px}
   .address-row{grid-template-columns:1fr 96px;gap:7px}
   .lookup-button{min-height:44px;border-radius:11px;font-size:12px}
   .checkbox-box{padding:9px;border-radius:11px;font-size:11px;line-height:1.35}

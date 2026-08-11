@@ -122,7 +122,7 @@
     shadow.innerHTML = `
       <style>
         :host { all: initial; }
-        .layer { position:fixed; inset:0; z-index:2147483000; pointer-events:none; font-family:Arial,sans-serif; }
+        .layer { position:fixed; inset:0; z-index:900; pointer-events:none; font-family:Arial,sans-serif; }
         .launcher {
           pointer-events:auto; position:absolute; right:18px; bottom:58px; width:82px; height:44px;
           border:0; border-radius:999px; background:#d71920; color:#fff; cursor:pointer;
