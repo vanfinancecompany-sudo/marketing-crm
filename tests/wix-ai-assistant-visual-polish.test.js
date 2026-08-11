@@ -71,6 +71,18 @@ test("mobile composer stacks message field above Talk and Send controls", async 
   assert.match(loader, /height:min\(620px, calc\(100dvh - 130px\)\)/);
 });
 
+test("mobile composer collapses after Send and expands when the message box is focused", async () => {
+  const visual = await readFile(new URL("../public/wix-ai-assistant/visual-polish.mjs", import.meta.url), "utf8");
+  assert.match(visual, /\.composer\.mobile-compact \.mic/);
+  assert.match(visual, /\.composer\.mobile-compact \.send/);
+  assert.match(visual, /\.composer\.mobile-compact \.voice-status/);
+  assert.match(visual, /\.composer\.mobile-compact \.notice/);
+  assert.match(visual, /if \(canSend\) this\.mobileComposerCollapsed = true/);
+  assert.match(visual, /widget\.mobileComposerCollapsed = false/);
+  assert.match(visual, /input\.addEventListener\("focus", expand\)/);
+  assert.match(visual, /input\.addEventListener\("click", expand\)/);
+});
+
 test("visual polish loads after the existing voice resilience layer", async () => {
   const embed = await readFile(new URL("../public/wix-ai-assistant/embed.html", import.meta.url), "utf8");
   const voiceIndex = embed.indexOf('await import("./voice-live-feedback.mjs")');
