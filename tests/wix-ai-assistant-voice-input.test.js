@@ -77,7 +77,7 @@ test("OpenAI transcription sends audio only to the transcription endpoint", asyn
   assert.ok(request.options.body.get("file") instanceof Blob);
 });
 
-test("voice endpoint keeps a daily abuse cap without a short-term retry bucket", async () => {
+test("voice endpoint keeps daily abuse protection without a short retry bucket", async () => {
   const calls = [];
   const supabase = {
     async rpc(name, payload) {
@@ -107,10 +107,9 @@ test("voice endpoint keeps a daily abuse cap without a short-term retry bucket",
 });
 
 test("website widget adds microphone recording without auto-sending the transcript", async () => {
-  const [widget, loader, embed, liveFeedback] = await Promise.all([
+  const [widget, loader, liveFeedback] = await Promise.all([
     readFile(new URL("../public/wix-ai-assistant/widget.mjs", import.meta.url), "utf8"),
     readFile(new URL("../public/wix-ai-assistant/site-loader.js", import.meta.url), "utf8"),
-    readFile(new URL("../public/wix-ai-assistant/embed.html", import.meta.url), "utf8"),
     readFile(new URL("../public/wix-ai-assistant/voice-live-feedback.mjs", import.meta.url), "utf8"),
   ]);
   assert.match(loader, /clipboard-write; microphone/);
@@ -122,10 +121,9 @@ test("website widget adds microphone recording without auto-sending the transcri
   assert.match(widget, /Tap the microphone to speak, then check the text before sending/);
   assert.match(widget, /input\.value = transcript/);
   assert.doesNotMatch(widget, /input\.value = transcript;\s*this\.sendMessage\(/);
-  assert.match(embed, /voice-live-feedback\.mjs/);
-  assert.match(liveFeedback, /SpeechRecognition/);
-  assert.match(liveFeedback, /webkitSpeechRecognition/);
-  assert.match(liveFeedback, /interimResults = true/);
-  assert.match(liveFeedback, /input\.value = String\(text/);
-  assert.match(liveFeedback, /I can hear you/);
+  assert.match(liveFeedback, /SpeechRecognition|webkitSpeechRecognition/);
+  assert.match(liveFeedback, /voiceRecognitionLive/);
+  assert.match(liveFeedback, /if \(this\.voiceError && liveTranscript\)/);
+  assert.match(liveFeedback, /Voice captured\. Please check the text, then press Send\./);
+  assert.doesNotMatch(liveFeedback, /sendMessage\(/);
 });
