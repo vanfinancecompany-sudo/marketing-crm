@@ -81,6 +81,18 @@ test("mobile composer collapses after Send and expands when the message box is f
   assert.match(visual, /widget\.mobileComposerCollapsed = false/);
   assert.match(visual, /input\.addEventListener\("focus", expand\)/);
   assert.match(visual, /input\.addEventListener\("click", expand\)/);
+  assert.match(visual, /Tap here to continue chatting…/);
+  assert.match(visual, /input\.placeholder = "Type your message…"/);
+});
+
+test("assistant typing state is presented as a clear animated reply bubble", async () => {
+  const visual = await readFile(new URL("../public/wix-ai-assistant/visual-polish.mjs", import.meta.url), "utf8");
+  assert.match(visual, /Assistant is replying/);
+  assert.match(visual, /typing-dots/);
+  assert.match(visual, /typing-dot:nth-child\(2\)/);
+  assert.match(visual, /@keyframes vfcTypingDot/);
+  assert.match(visual, /prefers-reduced-motion:reduce/);
+  assert.match(visual, /polishTypingIndicator\(widget\)/);
 });
 
 test("visual polish loads after the existing voice resilience layer", async () => {
