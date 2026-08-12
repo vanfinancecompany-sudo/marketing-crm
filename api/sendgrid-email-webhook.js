@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { DEFAULT_MAIN_CRM_EVENT_URL, forwardApplicationReceivedCrmEvent } from "../lib/applicationReceivedEventForwarder.js";
 import {
   normalizeSendGridEvent,
   processSendGridEvent,
@@ -155,7 +156,17 @@ export default async function handler(request, response) {
     catch { return json(response, 400, { ok: false, message: "SendGrid webhook body is not valid JSON." }); }
     const payloads = Array.isArray(parsed) ? parsed : [parsed];
     const repository = createSendGridRepository(getSupabase());
-    const summary = { received: payloads.length, recorded: 0, duplicates: 0, correlated: 0, uncorrelated: 0, suppressed: 0, unknown: 0 };
+    const summary = {
+      received: payloads.length,
+      recorded: 0,
+      duplicates: 0,
+      correlated: 0,
+      uncorrelated: 0,
+      suppressed: 0,
+      unknown: 0,
+      crm_forwarded: 0,
+      crm_forward_failed: 0,
+    };
     for (const payload of payloads) {
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
         summary.unknown += 1;
@@ -169,6 +180,25 @@ export default async function handler(request, response) {
       else summary.uncorrelated += 1;
       if (result.suppressed) summary.suppressed += 1;
       if (event.event_type === "unknown") summary.unknown += 1;
+
+      if (!result.duplicate) {
+        try {
+          const forwarded = await forwardApplicationReceivedCrmEvent({
+            payload,
+            event,
+            endpoint: process.env.MAIN_CRM_APPLICATION_EMAIL_EVENT_URL || DEFAULT_MAIN_CRM_EVENT_URL,
+            apiKey: process.env.MARKETING_CUSTOMER_DATABASE_API_KEY,
+          });
+          if (forwarded.forwarded) summary.crm_forwarded += 1;
+          else if (!forwarded.skipped) {
+            summary.crm_forward_failed += 1;
+            console.warn("APPLICATION RECEIVED EVENT FORWARD FAILED:", forwarded.reason);
+          }
+        } catch (error) {
+          summary.crm_forward_failed += 1;
+          console.warn("APPLICATION RECEIVED EVENT FORWARD FAILED:", error?.message || "forward_failed");
+        }
+      }
     }
     return json(response, 200, { ok: true, ...summary });
   } catch {
