@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Van Finance Company Jasmin Knowledge Hub
-  version: 1.0.0
+  version: 1.0.1
   description: Scoped API for reading and managing Marketing CRM Knowledge Hub content. Wix actions create or update drafts only and do not publish live.
 servers:
   - url: https://marketing-crm-six.vercel.app
@@ -22,7 +22,23 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/KnowledgeRequest'
+              type: object
+              additionalProperties: true
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [load, createTopic, createDraft, updateDraft, approveArticle, sendToWixDraft]
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 250
+                article_id:
+                  type: string
+                topic:
+                  $ref: '#/components/schemas/TopicInput'
+                article:
+                  $ref: '#/components/schemas/ArticleInput'
       responses:
         '200':
           description: Successful Knowledge Hub operation
@@ -49,83 +65,6 @@ components:
       in: header
       name: x-jasmin-marketing-key
   schemas:
-    KnowledgeRequest:
-      oneOf:
-        - $ref: '#/components/schemas/LoadRequest'
-        - $ref: '#/components/schemas/CreateTopicRequest'
-        - $ref: '#/components/schemas/CreateDraftRequest'
-        - $ref: '#/components/schemas/UpdateDraftRequest'
-        - $ref: '#/components/schemas/ApproveRequest'
-        - $ref: '#/components/schemas/WixDraftRequest'
-    LoadRequest:
-      type: object
-      additionalProperties: false
-      required: [action]
-      properties:
-        action:
-          type: string
-          const: load
-        limit:
-          type: integer
-          minimum: 1
-          maximum: 250
-          default: 100
-    CreateTopicRequest:
-      type: object
-      additionalProperties: false
-      required: [action, topic]
-      properties:
-        action:
-          type: string
-          const: createTopic
-        topic:
-          $ref: '#/components/schemas/TopicInput'
-    CreateDraftRequest:
-      type: object
-      additionalProperties: false
-      required: [action, article]
-      properties:
-        action:
-          type: string
-          const: createDraft
-        article:
-          $ref: '#/components/schemas/ArticleInput'
-    UpdateDraftRequest:
-      type: object
-      additionalProperties: false
-      required: [action, article]
-      properties:
-        action:
-          type: string
-          const: updateDraft
-        article:
-          allOf:
-            - $ref: '#/components/schemas/ArticleInput'
-            - type: object
-              required: [id]
-              properties:
-                id:
-                  type: string
-    ApproveRequest:
-      type: object
-      additionalProperties: false
-      required: [action, article_id]
-      properties:
-        action:
-          type: string
-          const: approveArticle
-        article_id:
-          type: string
-    WixDraftRequest:
-      type: object
-      additionalProperties: false
-      required: [action, article_id]
-      properties:
-        action:
-          type: string
-          const: sendToWixDraft
-        article_id:
-          type: string
     TopicInput:
       type: object
       additionalProperties: false
@@ -139,7 +78,8 @@ components:
           type: string
         secondary_keywords:
           type: array
-          items: { type: string }
+          items:
+            type: string
         intent:
           type: string
         notes:
@@ -165,14 +105,6 @@ components:
     ArticleInput:
       type: object
       additionalProperties: true
-      required:
-        - title
-        - category
-        - seo_title
-        - meta_description
-        - excerpt
-        - content_markdown
-        - cta
       properties:
         id:
           type: string
@@ -189,7 +121,6 @@ components:
         article_type:
           type: string
           enum: [faq, finance-guide, rent2buy-guide, buying-guide, vehicle-guide, vehicle-review, comparison, checklist]
-          default: faq
         seo_title:
           type: string
         meta_description:
@@ -204,10 +135,11 @@ components:
           type: array
           items:
             type: object
-            required: [question, answer]
             properties:
-              question: { type: string }
-              answer: { type: string }
+              question:
+                type: string
+              answer:
+                type: string
         cta:
           type: string
         internal_link_suggestions:
