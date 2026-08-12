@@ -1,0 +1,163 @@
+openapi: 3.1.0
+info:
+  title: Van Finance Company Jasmin Knowledge Hub
+  version: 1.0.1
+  description: Scoped API for reading and managing Marketing CRM Knowledge Hub content. Wix actions create or update drafts only and do not publish live.
+servers:
+  - url: https://marketing-crm-six.vercel.app
+paths:
+  /api/jasmin-knowledge:
+    post:
+      operationId: manageKnowledgeHub
+      summary: Manage Marketing CRM Knowledge Hub content
+      description: >-
+        Use this action to load Knowledge Hub context, create topics, create or edit draft articles,
+        approve a reviewed draft, or send an approved article to Wix as a CMS draft. Never approve or
+        send to Wix unless the user has explicitly asked for that action in the current conversation.
+      x-openai-isConsequential: true
+      security:
+        - JasminApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [load, createTopic, createDraft, updateDraft, approveArticle, sendToWixDraft]
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 250
+                article_id:
+                  type: string
+                topic:
+                  $ref: '#/components/schemas/TopicInput'
+                article:
+                  $ref: '#/components/schemas/ArticleInput'
+      responses:
+        '200':
+          description: Successful Knowledge Hub operation
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  ok:
+                    type: boolean
+                  action:
+                    type: string
+        '400':
+          description: Validation error
+        '401':
+          description: Invalid Jasmin API key
+        '409':
+          description: Conflict such as duplicate topic/article or invalid lifecycle transition
+components:
+  securitySchemes:
+    JasminApiKey:
+      type: apiKey
+      in: header
+      name: x-jasmin-marketing-key
+  schemas:
+    TopicInput:
+      type: object
+      additionalProperties: false
+      required: [title, category]
+      properties:
+        title:
+          type: string
+        category:
+          $ref: '#/components/schemas/Category'
+        primary_keyword:
+          type: string
+        secondary_keywords:
+          type: array
+          items:
+            type: string
+        intent:
+          type: string
+        notes:
+          type: string
+        priority:
+          type: integer
+          minimum: 1
+          maximum: 5
+        estimated_value:
+          type: integer
+          minimum: 1
+          maximum: 5
+        difficulty:
+          type: integer
+          minimum: 1
+          maximum: 5
+        target_persona:
+          type: string
+        seasonal:
+          type: boolean
+        opportunity_reason:
+          type: string
+    ArticleInput:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        topic_id:
+          type: string
+        template_id:
+          type: string
+        title:
+          type: string
+        slug:
+          type: string
+        category:
+          $ref: '#/components/schemas/Category'
+        article_type:
+          type: string
+          enum: [faq, finance-guide, rent2buy-guide, buying-guide, vehicle-guide, vehicle-review, comparison, checklist]
+        seo_title:
+          type: string
+        meta_description:
+          type: string
+        excerpt:
+          type: string
+        featured_image:
+          type: string
+        content_markdown:
+          type: string
+        faq_json:
+          type: array
+          items:
+            type: object
+            properties:
+              question:
+                type: string
+              answer:
+                type: string
+        cta:
+          type: string
+        internal_link_suggestions:
+          type: array
+          items: {}
+        generation_metadata:
+          type: object
+          additionalProperties: true
+    Category:
+      type: string
+      enum:
+        - Van Finance
+        - Rent2Buy
+        - Credit
+        - Self Employed
+        - Limited Company
+        - Vehicle Guides
+        - Comparisons
+        - Trades
+        - FAQs
+        - Business Advice
