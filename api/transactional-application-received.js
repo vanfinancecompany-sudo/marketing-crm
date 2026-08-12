@@ -47,17 +47,20 @@ export default async function handler(request, response) {
         transactional_template: email.templateName,
         crm_lead_id: payload.leadId,
         application_ref: payload.applicationRef,
+        application_type: payload.applicationType,
       },
     });
     return json(response, 200, {
       ok: true,
       template_name: email.templateName,
+      application_type: payload.applicationType,
       provider: "sendgrid",
       provider_message_id: provider.messageId,
     });
   } catch (error) {
     console.error("APPLICATION RECEIVED EMAIL FAILED:", {
       leadId: payload.leadId,
+      applicationType: payload.applicationType,
       provider: "sendgrid",
       ambiguous: Boolean(error?.ambiguous),
       message: error?.message || "send_failed",
@@ -71,4 +74,3 @@ export default async function handler(request, response) {
     });
   }
 }
-
