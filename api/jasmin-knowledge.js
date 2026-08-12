@@ -3,7 +3,6 @@ import {
   KNOWLEDGE_ARTICLE_TYPES,
   KNOWLEDGE_CATEGORIES,
   calculateKnowledgeQualityChecks,
-  findKnowledgeTopicDuplicates,
   markdownToKnowledgeHtml,
   slugifyKnowledgeArticle,
   validateKnowledgeArticle,
@@ -12,6 +11,26 @@ import { publishKnowledgeArticleToWix } from "./marketing-wix-publishing.js";
 
 const JASMIN_KEY_HEADER = "x-jasmin-marketing-key";
 const clean = (value, max = 20000) => String(value || "").trim().slice(0, max);
+const TOPIC_DUPLICATE_STOP_WORDS = new Set([
+  "and",
+  "are",
+  "can",
+  "does",
+  "for",
+  "from",
+  "get",
+  "how",
+  "into",
+  "need",
+  "the",
+  "this",
+  "van",
+  "finance",
+  "what",
+  "when",
+  "with",
+  "your",
+]);
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -63,6 +82,49 @@ function strings(value, max = 30) {
 
 function jsonArray(value, max = 100) {
   return Array.isArray(value) ? value.slice(0, max) : [];
+}
+
+function normalizeTopicText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function distinctiveTopicWords(topic = {}) {
+  const secondary = Array.isArray(topic.secondary_keywords) ? topic.secondary_keywords.join(" ") : "";
+  const categoryWords = new Set(normalizeTopicText(topic.category).split(" ").filter(Boolean));
+  return new Set(
+    normalizeTopicText(`${topic.title || ""} ${topic.primary_keyword || ""} ${secondary}`)
+      .split(" ")
+      .filter(
+        (word) =>
+          word.length > 2 &&
+          !TOPIC_DUPLICATE_STOP_WORDS.has(word) &&
+          !categoryWords.has(word)
+      )
+  );
+}
+
+function findJasminTopicDuplicate(candidate, topics = []) {
+  const candidateTitle = normalizeTopicText(candidate.title);
+  const exact = topics.find((topic) => candidateTitle && candidateTitle === normalizeTopicText(topic.title));
+  if (exact) return { topic: exact, exact: true, overlap: 1 };
+
+  const candidateWords = distinctiveTopicWords(candidate);
+  if (!candidateWords.size) return null;
+
+  return topics
+    .filter((topic) => topic.category === candidate.category)
+    .map((topic) => {
+      const topicWords = distinctiveTopicWords(topic);
+      const shared = [...candidateWords].filter((word) => topicWords.has(word)).length;
+      const overlap = shared / Math.max(1, Math.min(candidateWords.size, topicWords.size));
+      return { topic, exact: false, overlap, shared };
+    })
+    .filter((match) => match.shared >= 2 && match.overlap >= 0.75)
+    .sort((first, second) => second.overlap - first.overlap)[0] || null;
 }
 
 async function loadKnowledge(supabase, body) {
@@ -144,7 +206,7 @@ async function createTopic(supabase, body) {
     primary_keyword: clean(topic.primary_keyword, 200) || null,
     secondary_keywords: strings(topic.secondary_keywords),
   };
-  const duplicate = findKnowledgeTopicDuplicates(candidate, existing)[0];
+  const duplicate = findJasminTopicDuplicate(candidate, existing);
   if (duplicate) {
     throw new ApiError(409, `A similar topic already exists: “${duplicate.topic.title}”.`);
   }
