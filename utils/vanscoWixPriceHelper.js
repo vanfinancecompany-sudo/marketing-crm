@@ -11,12 +11,13 @@ function cleanRegistration(value) {
 }
 
 function parseCardDetails(card) {
-  const text = String(card?.textContent || "");
-  const registrationMatch = text.match(/Registration:\s*([A-Z0-9 ]{5,12})/i);
-  const priceMatch = text.match(/Vansco price:\s*£\s*([0-9][0-9,]*(?:\.\d+)?)/i);
-  const registration = cleanRegistration(registrationMatch?.[1]);
+  const metaLines = Array.from(card?.querySelectorAll?.(".vehicle-card__meta") || []).map((node) => String(node.textContent || "").trim());
+  const registrationLine = metaLines.find((line) => /^Registration:/i.test(line)) || "";
+  const vanscoPriceLine = metaLines.find((line) => /^Vansco price:/i.test(line)) || "";
+  const registration = cleanRegistration(registrationLine.replace(/^Registration:\s*/i, ""));
+  const priceMatch = vanscoPriceLine.match(/£\s*([0-9][0-9,]*(?:\.\d+)?)/i);
   const retailPrice = priceMatch ? Number(priceMatch[1].replace(/,/g, "")) : NaN;
-  if (!registration || !Number.isFinite(retailPrice) || retailPrice <= 0) return null;
+  if (!registration || registration.length < 5 || registration.length > 8 || !Number.isFinite(retailPrice) || retailPrice <= 0) return null;
   return { registration, retailPrice };
 }
 
