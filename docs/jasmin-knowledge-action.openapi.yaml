@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Van Finance Company Jasmin Knowledge Hub
-  version: 1.1.0
+  version: 1.1.1
   description: Scoped API for reading and managing Marketing CRM Knowledge Hub content. Wix actions create or update drafts only and do not publish live.
 servers:
   - url: https://marketing-crm-six.vercel.app
@@ -11,11 +11,9 @@ paths:
       operationId: manageKnowledgeHub
       summary: Manage Marketing CRM Knowledge Hub content
       description: >-
-        Use load for a compact index of Knowledge Hub topics, articles and Business Knowledge sections.
-        Use getArticle to fetch one full article and getBusinessKnowledge to fetch full Business Knowledge
-        content. Create or edit draft articles in the Marketing CRM, approve a reviewed draft, or send an
-        approved article to Wix as a CMS draft. Never approve or send to Wix unless the user has explicitly
-        asked for that action in the current conversation.
+        Read Knowledge Hub indexes or full records, create or edit drafts, approve reviewed drafts,
+        and send approved articles to Wix as CMS drafts. Never approve or send to Wix unless the user
+        explicitly asks for that action in the current conversation.
       x-openai-isConsequential: true
       security:
         - JasminApiKey: []
