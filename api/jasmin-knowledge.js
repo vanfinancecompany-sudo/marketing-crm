@@ -67,36 +67,61 @@ function jsonArray(value, max = 100) {
 
 async function loadKnowledge(supabase, body) {
   const limit = Math.min(250, Math.max(1, Number(body.limit) || 100));
-  const [topics, articles, businessSections, reviews] = await Promise.all([
+  const [topics, articles, businessSections] = await Promise.all([
     supabase
       .from("knowledge_topics")
-      .select("*")
+      .select("id,title,status,category,primary_keyword,secondary_keywords,priority,estimated_value,difficulty,target_persona,source,updated_at")
       .neq("status", "archived")
       .order("updated_at", { ascending: false })
       .limit(limit),
     supabase
       .from("knowledge_articles")
-      .select("*")
+      .select("id,topic_id,title,slug,category,article_type,status,seo_title,excerpt,live_wix_url,published_at,wix_sync_status,approved_at,updated_at")
       .neq("status", "archived")
       .order("updated_at", { ascending: false })
       .limit(limit),
     supabase
       .from("knowledge_business_sections")
-      .select("section_key,title,description,content,entries,sort_order,active,updated_at")
+      .select("section_key,title,description,sort_order,updated_at")
       .eq("active", true)
       .order("sort_order", { ascending: true }),
-    supabase
-      .from("knowledge_article_reviews")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(limit),
   ]);
+  const topicRows = resultData(topics, "Knowledge topics could not be loaded.") || [];
+  const articleRows = resultData(articles, "Knowledge articles could not be loaded.") || [];
+  const sectionRows = resultData(businessSections, "Business Knowledge could not be loaded.") || [];
   return {
-    topics: resultData(topics, "Knowledge topics could not be loaded.") || [],
-    articles: resultData(articles, "Knowledge articles could not be loaded.") || [],
-    business_sections: resultData(businessSections, "Business Knowledge could not be loaded.") || [],
-    article_reviews: resultData(reviews, "Article reviews could not be loaded.") || [],
+    compact: true,
+    limit,
+    counts: {
+      topics_returned: topicRows.length,
+      articles_returned: articleRows.length,
+      business_sections_returned: sectionRows.length,
+    },
+    topics: topicRows,
+    articles: articleRows,
+    business_sections: sectionRows,
+    guidance: "Use getArticle for one full article and getBusinessKnowledge for full Business Knowledge content.",
   };
+}
+
+async function getArticle(supabase, body) {
+  const id = clean(body.article_id, 100);
+  if (!id) throw new ApiError(400, "Article id is required.");
+  return resultData(
+    await supabase.from("knowledge_articles").select("*").eq("id", id).single(),
+    "Article could not be found."
+  );
+}
+
+async function getBusinessKnowledge(supabase, body) {
+  const sectionKey = clean(body.section_key, 160);
+  let query = supabase
+    .from("knowledge_business_sections")
+    .select("section_key,title,description,content,entries,sort_order,active,updated_at")
+    .eq("active", true)
+    .order("sort_order", { ascending: true });
+  if (sectionKey) query = query.eq("section_key", sectionKey);
+  return resultData(await query, "Business Knowledge could not be loaded.") || [];
 }
 
 async function createTopic(supabase, body) {
@@ -298,6 +323,12 @@ export default async function handler(request, response) {
     switch (body.action) {
       case "load":
         data = await loadKnowledge(supabase, body);
+        break;
+      case "getArticle":
+        data = { article: await getArticle(supabase, body) };
+        break;
+      case "getBusinessKnowledge":
+        data = { business_sections: await getBusinessKnowledge(supabase, body) };
         break;
       case "createTopic":
         data = { topic: await createTopic(supabase, body) };
