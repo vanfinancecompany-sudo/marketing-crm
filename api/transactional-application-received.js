@@ -48,12 +48,14 @@ export default async function handler(request, response) {
         crm_lead_id: payload.leadId,
         application_ref: payload.applicationRef,
         application_type: payload.applicationType,
+        acknowledgement_send_id: payload.acknowledgementSendId,
       },
     });
     return json(response, 200, {
       ok: true,
       template_name: email.templateName,
       application_type: payload.applicationType,
+      acknowledgement_send_id: payload.acknowledgementSendId,
       provider: "sendgrid",
       provider_message_id: provider.messageId,
     });
@@ -61,6 +63,7 @@ export default async function handler(request, response) {
     console.error("APPLICATION RECEIVED EMAIL FAILED:", {
       leadId: payload.leadId,
       applicationType: payload.applicationType,
+      acknowledgementSendId: payload.acknowledgementSendId,
       provider: "sendgrid",
       ambiguous: Boolean(error?.ambiguous),
       message: error?.message || "send_failed",
