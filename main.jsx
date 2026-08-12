@@ -5,6 +5,7 @@ import SingleActiveTabGate from "./components/SingleActiveTabGate.jsx";
 import "./styles.css";
 import "./utils/overnightAutoRefreshPause.js";
 import "./utils/postingVisibilityStateAutoSync.js";
+import "./utils/vanscoWixPriceHelper.js";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
