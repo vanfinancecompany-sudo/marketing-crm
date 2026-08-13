@@ -25,6 +25,15 @@ test("revision edits keep the temporary slug and source linkage", () => {
 test("stale revisions are blocked before replacing the approved source article", () => {
   assert.match(api, /revision_source_updated_at/);
   assert.match(api, /source article changed after this revision draft was created/i);
+  assert.match(api, /Discard this stale revision draft, then create a fresh revision draft/i);
+});
+
+test("an open stale revision can be discarded without touching its source", () => {
+  assert.match(api, /async function discardRevisionDraft/);
+  assert.match(api, /Only open revision drafts can be discarded through this action/);
+  assert.match(api, /revision_state: "discarded"/);
+  assert.match(api, /revision_discarded_at: now/);
+  assert.doesNotMatch(api, /discardRevisionDraft[\s\S]*?\.update\([\s\S]*?\.eq\("id", source/i);
 });
 
 test("approving a revision updates the original article and leaves Wix as a separate explicit step", () => {
@@ -35,11 +44,12 @@ test("approving a revision updates the original article and leaves Wix as a sepa
   assert.doesNotMatch(api, /publishKnowledgeArticleToWix|sendToWixDraft\(/);
 });
 
-test("OpenAPI exposes revision actions without a live Wix publish action", () => {
-  assert.match(schema, /version: 1\.2\.0/);
+test("OpenAPI exposes revision recovery actions without a live Wix publish action", () => {
+  assert.match(schema, /version: 1\.2\.1/);
   assert.match(schema, /operationId: manageKnowledgeRevision/);
   assert.match(schema, /createRevisionDraft/);
   assert.match(schema, /updateRevisionDraft/);
+  assert.match(schema, /discardRevisionDraft/);
   assert.match(schema, /approveRevision/);
   assert.doesNotMatch(schema, /publishLive|sendToWixLive/);
 });
