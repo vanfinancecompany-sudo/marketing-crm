@@ -63,7 +63,8 @@ async function prepareHistoricBatch(supabase, body) {
   const completed = await completedArticleIds(supabase);
   const excluded = new Set([...HISTORIC_LINK_RETROFIT_SEED_EXCLUSIONS, ...completed]);
   const inventory = data(await supabase.from("knowledge_articles").select("id,title,category,status,created_at,content_markdown,wix_sync_status").eq("status", "approved").order("created_at", { ascending: true }).limit(250), "Approved Knowledge Hub inventory could not be loaded.") || [];
-  const selected = inventory.filter((article) => !excluded.has(article.id)).slice(0, limit);
+  const eligible = inventory.filter((article) => !excluded.has(article.id));
+  const selected = eligible.slice(0, limit);
   if (!selected.length) return { batch_token: null, article_ids: [], articles: [], remaining_candidates: 0, complete: true };
 
   const articles = await mapWithConcurrency(selected, 4, async (article) => {
@@ -85,7 +86,7 @@ async function prepareHistoricBatch(supabase, body) {
     batch_token: batchToken(articleIds),
     article_ids: articleIds,
     articles,
-    remaining_candidates: Math.max(0, inventory.filter((article) => !excluded.has(article.id)).length - selected.length),
+    remaining_candidates: Math.max(0, eligible.length - selected.length),
     complete: false,
     instructions: {
       new_pending: "Decide every pending suggestion: accept with an exact existing anchor, or reject.",
@@ -138,14 +139,8 @@ async function markCompleted(supabase, article, wixResult, batchId) {
   }), "Historic retrofit completion marker could not be saved.");
 }
 
-async function applyHistoricBatch(supabase, body) {
-  const requestedArticles = Array.isArray(body.articles) ? body.articles : [];
-  if (!requestedArticles.length || requestedArticles.length > 20) throw new ApiError(400, "Provide between 1 and 20 prepared batch articles.");
-  const articleIds = requestedArticles.map((item) => clean(item.article_id, 100));
-  if (body.batch_token !== batchToken(articleIds)) throw new ApiError(409, "Historic batch token does not match the supplied article order. Prepare the batch again before applying decisions.");
-
-  const results = [];
-  for (const requestArticle of requestedArticles) {
+async function processHistoricArticle(supabase, requestArticle, batchId) {
+  try {
     const article = data(await supabase.from("knowledge_articles").select("*").eq("id", requestArticle.article_id).single(), "Historic batch article could not be loaded.", 404);
     if (article.status !== "approved") throw new ApiError(409, `Article ${article.id} is no longer approved.`);
     const suggestions = await currentSuggestions(supabase, article.id);
@@ -167,8 +162,9 @@ async function applyHistoricBatch(supabase, body) {
     const wixResult = await publishKnowledgeArticleToWix({ supabase, articleId: article.id });
     const skipped = wixResult?.diagnostics?.suggestions_skipped || [];
     if (skipped.length) throw new ApiError(409, `Wix skipped surviving accepted links for article ${article.id}.`, { skipped });
-    await markCompleted(supabase, article, wixResult, body.batch_token);
-    results.push({
+    await markCompleted(supabase, article, wixResult, batchId);
+    return {
+      ok: true,
       article_id: article.id,
       title: article.title,
       category: article.category,
@@ -181,9 +177,36 @@ async function applyHistoricBatch(supabase, body) {
       wix_sync_status: wixResult?.wix?.sync_status || null,
       content_status: wixResult?.wix?.content_status || "Draft",
       published: false,
-    });
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      article_id: clean(requestArticle?.article_id, 100),
+      message: clean(error.message, 1000) || "Historic article processing failed.",
+      details: error.details || null,
+      published: false,
+    };
   }
-  return { batch_token: body.batch_token, completed: results.length, results, published_live_count: 0 };
+}
+
+async function applyHistoricBatch(supabase, body) {
+  const requestedArticles = Array.isArray(body.articles) ? body.articles : [];
+  if (!requestedArticles.length || requestedArticles.length > 20) throw new ApiError(400, "Provide between 1 and 20 prepared batch articles.");
+  const articleIds = requestedArticles.map((item) => clean(item.article_id, 100));
+  if (body.batch_token !== batchToken(articleIds)) throw new ApiError(409, "Historic batch token does not match the supplied article order. Prepare the batch again before applying decisions.");
+
+  const results = await mapWithConcurrency(requestedArticles, 3, (requestArticle) => processHistoricArticle(supabase, requestArticle, body.batch_token));
+  const successes = results.filter((item) => item.ok);
+  const failures = results.filter((item) => !item.ok);
+  return {
+    batch_token: body.batch_token,
+    requested: requestedArticles.length,
+    completed: successes.length,
+    failed: failures.length,
+    results,
+    retry_article_ids: failures.map((item) => item.article_id),
+    published_live_count: 0,
+  };
 }
 
 export default async function handler(request, response) {
