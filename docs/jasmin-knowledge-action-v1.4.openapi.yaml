@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Van Finance Company Jasmin Knowledge Hub
   version: 1.4.0
-  description: Scoped API for reading and managing Marketing CRM Knowledge Hub content, including persistent historic internal-link retrofit batches. Wix actions create or update drafts only and do not publish live.
+  description: Scoped API for reading and managing Marketing CRM Knowledge Hub content, revisions, internal links and historic retrofit batches. Wix actions create or update drafts only and never publish live.
 servers:
   - url: https://marketing-crm-six.vercel.app
 paths:
@@ -10,7 +10,7 @@ paths:
     post:
       operationId: manageKnowledgeHub
       summary: Manage Marketing CRM Knowledge Hub content
-      description: Read Knowledge Hub indexes or full records, create or edit drafts, approve reviewed drafts, and send approved articles to Wix as CMS drafts.
+      description: Read Knowledge Hub records, create or edit drafts, approve reviewed drafts, and send approved articles to Wix CMS drafts.
       x-openai-isConsequential: true
       security: [{ JasminApiKey: [] }]
       requestBody:
@@ -39,7 +39,7 @@ paths:
     post:
       operationId: manageKnowledgeRevision
       summary: Safely revise an approved Knowledge Hub article
-      description: Open a hidden revision draft from an approved article, edit or discard that revision, and apply it back to the original CRM article only after explicit approval. This endpoint never sends or publishes Wix content.
+      description: Create, edit, discard or approve a hidden revision draft. This endpoint never sends or publishes Wix content.
       x-openai-isConsequential: true
       security: [{ JasminApiKey: [] }]
       requestBody:
@@ -65,7 +65,7 @@ paths:
     post:
       operationId: manageKnowledgeLinks
       summary: Review individual Knowledge Hub internal-link suggestions
-      description: Read or refresh contextual internal-link suggestions and record explicit accept, reject or anchor-edit decisions. These actions never change article copy, send to Wix or publish live content.
+      description: Read or refresh internal-link suggestions and record accept, reject or anchor-edit decisions. These actions never change article copy or publish live.
       x-openai-isConsequential: true
       security: [{ JasminApiKey: [] }]
       requestBody:
@@ -97,11 +97,7 @@ paths:
     post:
       operationId: manageHistoricKnowledgeLinks
       summary: Prepare and apply persistent historic Knowledge Hub link batches
-      description: >-
-        Server-side historic retrofit workflow. prepareHistoricLinkBatch selects the next oldest eligible approved articles,
-        refreshes their current suggestions and returns compact editorial evidence without sending to Wix. applyHistoricLinkBatch
-        validates the complete editorial decision set, retires or re-anchors legacy accepts, sends successful articles to Wix drafts,
-        records persistent completion markers and returns per-article diagnostics. It never changes article copy or publishes live.
+      description: Prepare and apply historic internal-link batches, validate decisions, update Wix drafts and record completion. Never changes article copy or publishes live.
       x-openai-isConsequential: true
       security: [{ JasminApiKey: [] }]
       requestBody:
@@ -127,14 +123,14 @@ paths:
                 articles:
                   type: array
                   maxItems: 20
-                  description: Exact prepared articles in the original order, with the editorial decisions for each current suggestion.
+                  description: Exact prepared articles in original order with editorial decisions.
                   items:
                     $ref: '#/components/schemas/HistoricBatchArticleDecision'
       responses:
-        '200': { description: Historic batch prepared or applied successfully. Individual apply failures are returned per article and can be retried. }
+        '200': { description: Historic batch prepared or applied successfully }
         '400': { description: Validation error }
         '401': { description: Invalid Jasmin API key }
-        '409': { description: Batch token mismatch, incomplete decisions, invalid anchors or stale article state }
+        '409': { description: Batch or decision conflict }
 components:
   securitySchemes:
     JasminApiKey:

@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Van Finance Company Jasmin Knowledge Hub
-  version: 1.3.0
-  description: Scoped API for reading and managing Marketing CRM Knowledge Hub content. Wix actions create or update drafts only and do not publish live.
+  version: 1.4.0
+  description: Scoped API for reading and managing Marketing CRM Knowledge Hub content, revisions, internal links and historic retrofit batches. Wix actions create or update drafts only and never publish live.
 servers:
   - url: https://marketing-crm-six.vercel.app
 paths:
@@ -10,13 +10,9 @@ paths:
     post:
       operationId: manageKnowledgeHub
       summary: Manage Marketing CRM Knowledge Hub content
-      description: >-
-        Read Knowledge Hub indexes or full records, create or edit drafts, approve reviewed drafts,
-        and send approved articles to Wix as CMS drafts. Never approve or send to Wix unless the user
-        explicitly asks for that action in the current conversation.
+      description: Read Knowledge Hub records, create or edit drafts, approve reviewed drafts, and send approved articles to Wix CMS drafts.
       x-openai-isConsequential: true
-      security:
-        - JasminApiKey: []
+      security: [{ JasminApiKey: [] }]
       requestBody:
         required: true
         content:
@@ -29,47 +25,23 @@ paths:
                 action:
                   type: string
                   enum: [load, getArticle, getBusinessKnowledge, createTopic, createDraft, updateDraft, approveArticle, sendToWixDraft]
-                limit:
-                  type: integer
-                  minimum: 1
-                  maximum: 250
-                article_id:
-                  type: string
-                section_key:
-                  type: string
-                topic:
-                  $ref: '#/components/schemas/TopicInput'
-                article:
-                  $ref: '#/components/schemas/ArticleInput'
+                limit: { type: integer, minimum: 1, maximum: 250 }
+                article_id: { type: string }
+                section_key: { type: string }
+                topic: { $ref: '#/components/schemas/TopicInput' }
+                article: { $ref: '#/components/schemas/ArticleInput' }
       responses:
-        '200':
-          description: Successful Knowledge Hub operation
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-                properties:
-                  ok:
-                    type: boolean
-                  action:
-                    type: string
-        '400':
-          description: Validation error
-        '401':
-          description: Invalid Jasmin API key
-        '409':
-          description: Conflict such as duplicate topic/article or invalid lifecycle transition
+        '200': { description: Successful Knowledge Hub operation }
+        '400': { description: Validation error }
+        '401': { description: Invalid Jasmin API key }
+        '409': { description: Conflict }
   /api/jasmin-knowledge-revision:
     post:
       operationId: manageKnowledgeRevision
       summary: Safely revise an approved Knowledge Hub article
-      description: >-
-        Open a hidden revision draft from an approved article, edit or discard that revision, and apply it back to
-        the original CRM article only after explicit approval. This endpoint never sends or publishes Wix content.
+      description: Create, edit, discard or approve a hidden revision draft. This endpoint never sends or publishes Wix content.
       x-openai-isConsequential: true
-      security:
-        - JasminApiKey: []
+      security: [{ JasminApiKey: [] }]
       requestBody:
         required: true
         content:
@@ -82,40 +54,20 @@ paths:
                 action:
                   type: string
                   enum: [createRevisionDraft, updateRevisionDraft, discardRevisionDraft, approveRevision]
-                article_id:
-                  type: string
-                  description: Source article ID for createRevisionDraft, or revision ID for discardRevisionDraft and approveRevision.
-                article:
-                  $ref: '#/components/schemas/ArticleInput'
+                article_id: { type: string }
+                article: { $ref: '#/components/schemas/ArticleInput' }
       responses:
-        '200':
-          description: Successful Knowledge Hub revision operation
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-                properties:
-                  ok:
-                    type: boolean
-                  action:
-                    type: string
-        '400':
-          description: Validation error
-        '401':
-          description: Invalid Jasmin API key
-        '409':
-          description: Conflict such as an existing revision, stale source article or invalid lifecycle transition
+        '200': { description: Successful Knowledge Hub revision operation }
+        '400': { description: Validation error }
+        '401': { description: Invalid Jasmin API key }
+        '409': { description: Conflict }
   /api/jasmin-knowledge-links:
     post:
       operationId: manageKnowledgeLinks
-      summary: Review Knowledge Hub internal-link suggestions
-      description: >-
-        Read or refresh contextual internal-link suggestions and record explicit accept, reject or anchor-edit decisions.
-        These actions never change article copy, send to Wix or publish live content.
+      summary: Review individual Knowledge Hub internal-link suggestions
+      description: Read or refresh internal-link suggestions and record accept, reject or anchor-edit decisions. These actions never change article copy or publish live.
       x-openai-isConsequential: true
-      security:
-        - JasminApiKey: []
+      security: [{ JasminApiKey: [] }]
       requestBody:
         required: true
         content:
@@ -128,47 +80,57 @@ paths:
                 action:
                   type: string
                   enum: [loadArticleLinks, refreshArticleLinks, decideInternalLink]
-                article_id:
-                  type: string
-                  description: Required for loadArticleLinks and refreshArticleLinks.
-                suggestion_id:
-                  type: string
-                  description: Required for decideInternalLink.
+                article_id: { type: string }
+                suggestion_id: { type: string }
                 decision:
                   type: string
                   enum: [accept, reject, edit_anchor]
-                  description: Required for decideInternalLink.
-                anchor_text:
-                  type: string
-                  description: Existing article wording to use as the clickable anchor. Required for accept or edit_anchor.
-                reason:
-                  type: string
-                  description: Optional editorial reason recorded in the internal-link audit history.
+                anchor_text: { type: string }
+                reason: { type: string }
       responses:
-        '200':
-          description: Successful internal-link operation
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-                properties:
-                  ok:
-                    type: boolean
-                  action:
-                    type: string
-                  article_content_changed:
-                    type: boolean
-                  wix_action_performed:
-                    type: boolean
-        '400':
-          description: Validation error
-        '401':
-          description: Invalid Jasmin API key
-        '404':
-          description: Article or suggestion not found
-        '409':
-          description: Link decision conflict or anchor text not found in current article
+        '200': { description: Successful internal-link operation }
+        '400': { description: Validation error }
+        '401': { description: Invalid Jasmin API key }
+        '404': { description: Article or suggestion not found }
+        '409': { description: Link decision conflict or anchor text not found }
+  /api/jasmin-knowledge-bulk-links:
+    post:
+      operationId: manageHistoricKnowledgeLinks
+      summary: Prepare and apply persistent historic Knowledge Hub link batches
+      description: Prepare and apply historic internal-link batches, validate decisions, update Wix drafts and record completion. Never changes article copy or publishes live.
+      x-openai-isConsequential: true
+      security: [{ JasminApiKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [prepareHistoricLinkBatch, applyHistoricLinkBatch]
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 20
+                  description: Batch size for prepareHistoricLinkBatch. Default 20.
+                batch_token:
+                  type: string
+                  description: Exact token returned by prepareHistoricLinkBatch. Required for applyHistoricLinkBatch.
+                articles:
+                  type: array
+                  maxItems: 20
+                  description: Exact prepared articles in original order with editorial decisions.
+                  items:
+                    $ref: '#/components/schemas/HistoricBatchArticleDecision'
+      responses:
+        '200': { description: Historic batch prepared or applied successfully }
+        '400': { description: Validation error }
+        '401': { description: Invalid Jasmin API key }
+        '409': { description: Batch or decision conflict }
 components:
   securitySchemes:
     JasminApiKey:
@@ -176,83 +138,74 @@ components:
       in: header
       name: x-jasmin-marketing-key
   schemas:
+    HistoricBatchArticleDecision:
+      type: object
+      additionalProperties: false
+      required: [article_id, decisions]
+      properties:
+        article_id: { type: string }
+        decisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoricLinkDecision'
+    HistoricLinkDecision:
+      type: object
+      additionalProperties: false
+      required: [suggestion_id, decision]
+      properties:
+        suggestion_id: { type: string }
+        decision:
+          type: string
+          enum: [accept, reject, edit_anchor, keep]
+        anchor_text:
+          type: string
+          description: Exact existing source-article wording. Required for accept or edit_anchor.
+        reason: { type: string }
     TopicInput:
       type: object
       additionalProperties: false
       required: [title, category]
       properties:
-        title:
-          type: string
-        category:
-          $ref: '#/components/schemas/Category'
-        primary_keyword:
-          type: string
+        title: { type: string }
+        category: { $ref: '#/components/schemas/Category' }
+        primary_keyword: { type: string }
         secondary_keywords:
           type: array
-          items:
-            type: string
-        intent:
-          type: string
-        notes:
-          type: string
-        priority:
-          type: integer
-          minimum: 1
-          maximum: 5
-        estimated_value:
-          type: integer
-          minimum: 1
-          maximum: 5
-        difficulty:
-          type: integer
-          minimum: 1
-          maximum: 5
-        target_persona:
-          type: string
-        seasonal:
-          type: boolean
-        opportunity_reason:
-          type: string
+          items: { type: string }
+        intent: { type: string }
+        notes: { type: string }
+        priority: { type: integer, minimum: 1, maximum: 5 }
+        estimated_value: { type: integer, minimum: 1, maximum: 5 }
+        difficulty: { type: integer, minimum: 1, maximum: 5 }
+        target_persona: { type: string }
+        seasonal: { type: boolean }
+        opportunity_reason: { type: string }
     ArticleInput:
       type: object
       additionalProperties: true
       properties:
-        id:
-          type: string
-        topic_id:
-          type: string
-        template_id:
-          type: string
-        title:
-          type: string
-        slug:
-          type: string
-        category:
-          $ref: '#/components/schemas/Category'
+        id: { type: string }
+        topic_id: { type: string }
+        template_id: { type: string }
+        title: { type: string }
+        slug: { type: string }
+        category: { $ref: '#/components/schemas/Category' }
         article_type:
           type: string
           enum: [faq, finance-guide, rent2buy-guide, buying-guide, vehicle-guide, vehicle-review, comparison, checklist]
-        seo_title:
-          type: string
-        meta_description:
-          type: string
-        excerpt:
-          type: string
-        featured_image:
-          type: string
-        content_markdown:
-          type: string
+        seo_title: { type: string }
+        meta_description: { type: string }
+        excerpt: { type: string }
+        featured_image: { type: string }
+        content_markdown: { type: string }
         faq_json:
           type: array
           items:
             type: object
             properties:
-              question:
-                type: string
-              answer:
-                type: string
-        cta:
-          type: string
+              question: { type: string }
+              answer: { type: string }
+        cta: { type: string }
         internal_link_suggestions:
           type: array
           items: {}
