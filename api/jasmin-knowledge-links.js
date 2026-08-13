@@ -77,12 +77,18 @@ async function listSuggestions(supabase, articleId) {
 
 export function prepareJasminLinkDecision({ suggestion = {}, articleMarkdown = "", decision = "", anchorText = "", now = new Date().toISOString() }) {
   const action = clean(decision, 40);
+  const currentStatus = clean(suggestion.status, 40);
+
   if (action === "edit_anchor") {
-    if (!["pending", "accepted"].includes(suggestion.status)) {
+    if (!["pending", "accepted"].includes(currentStatus)) {
       throw new ApiError(409, "This internal-link suggestion can no longer be edited.");
     }
-  } else if (!["accept", "reject"].includes(action) || suggestion.status !== "pending") {
-    throw new ApiError(409, "Only pending internal-link suggestions can be accepted or rejected.");
+  } else if (action === "reject") {
+    if (!["pending", "accepted"].includes(currentStatus)) {
+      throw new ApiError(409, "Only pending or accepted internal-link suggestions can be rejected.");
+    }
+  } else if (action !== "accept" || currentStatus !== "pending") {
+    throw new ApiError(409, "Only pending internal-link suggestions can be accepted. Accepted suggestions may be edited or rejected when an editorial review retires the link.");
   }
 
   const requestedAnchor = clean(anchorText || suggestion.anchor_text, 500);
@@ -100,18 +106,23 @@ export function prepareJasminLinkDecision({ suggestion = {}, articleMarkdown = "
     }
   }
 
-  const status = action === "accept" ? "accepted" : action === "reject" ? "rejected" : suggestion.status;
+  const status = action === "accept" ? "accepted" : action === "reject" ? "rejected" : currentStatus;
   const eventAction = action === "accept" ? "accepted" : action === "reject" ? "rejected" : "anchor_edited";
+  const decidedAt = action === "edit_anchor"
+    ? suggestion.decided_at
+    : ["accepted", "rejected"].includes(status) ? now : suggestion.decided_at;
 
   return {
     update: {
       anchor_text: requestedAnchor,
       status,
-      decided_at: ["accepted", "rejected"].includes(status) ? now : suggestion.decided_at,
+      decided_at: decidedAt,
       updated_at: now,
     },
     eventAction,
     validation,
+    previousStatus: currentStatus,
+    retiredAcceptedLink: action === "reject" && currentStatus === "accepted",
   };
 }
 
@@ -166,8 +177,13 @@ async function decideLink(supabase, body) {
       article_id: suggestion.article_id,
       website_page_id: suggestion.website_page_id,
       action: prepared.eventAction,
-      reason: clean(body.reason, 1000) || `Jasmin ${prepared.eventAction.replace("_", " ")} the suggestion after editorial instruction.`,
+      reason: clean(body.reason, 1000) || (prepared.retiredAcceptedLink
+        ? "Jasmin rejected a previously accepted suggestion after a fresh editorial review retired the legacy link."
+        : `Jasmin ${prepared.eventAction.replace("_", " ")} the suggestion after editorial instruction.`),
       details: {
+        previous_status: prepared.previousStatus,
+        status: updated.status,
+        retired_accepted_link: prepared.retiredAcceptedLink,
         previous_anchor_text: suggestion.anchor_text,
         anchor_text: updated.anchor_text,
         destination_url: suggestion.destination_url,
@@ -188,6 +204,8 @@ async function decideLink(supabase, body) {
     },
     suggestion: updated,
     validation: prepared.validation,
+    previous_status: prepared.previousStatus,
+    retired_accepted_link: prepared.retiredAcceptedLink,
     article_content_changed: false,
     wix_action_performed: false,
   };

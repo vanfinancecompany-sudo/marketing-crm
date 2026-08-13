@@ -22,6 +22,7 @@ test("accept requires anchor wording that exists in the current article", () => 
   assert.equal(prepared.update.anchor_text, "credit profile");
   assert.equal(prepared.eventAction, "accepted");
   assert.equal(prepared.validation.found, true);
+  assert.equal(prepared.retiredAcceptedLink, false);
 });
 
 test("accept blocks anchor wording that is absent from the saved article", () => {
@@ -53,6 +54,7 @@ test("accepted suggestion anchor can be edited only when the new wording exists"
   assert.equal(prepared.update.anchor_text, "credit scores");
   assert.equal(prepared.update.decided_at, "2026-08-13T09:00:00.000Z");
   assert.equal(prepared.eventAction, "anchor_edited");
+  assert.equal(prepared.previousStatus, "accepted");
 });
 
 test("rejection keeps the current anchor and records rejected status", () => {
@@ -67,9 +69,33 @@ test("rejection keeps the current anchor and records rejected status", () => {
   assert.equal(prepared.update.anchor_text, "credit profile");
   assert.equal(prepared.eventAction, "rejected");
   assert.equal(prepared.validation, null);
+  assert.equal(prepared.previousStatus, "pending");
+  assert.equal(prepared.retiredAcceptedLink, false);
 });
 
-test("decided suggestions cannot be accepted or rejected again", () => {
+test("accepted suggestion can be rejected to retire a legacy editorial decision", () => {
+  const prepared = prepareJasminLinkDecision({
+    suggestion: {
+      ...pendingSuggestion,
+      status: "accepted",
+      anchor_text: "VIEW VANS | VAN FINANCE",
+      decided_at: "2026-07-01T09:00:00.000Z",
+    },
+    articleMarkdown: "Current article copy no longer contains the legacy anchor label.",
+    decision: "reject",
+    now: "2026-08-13T10:00:00.000Z",
+  });
+
+  assert.equal(prepared.update.status, "rejected");
+  assert.equal(prepared.update.anchor_text, "VIEW VANS | VAN FINANCE");
+  assert.equal(prepared.update.decided_at, "2026-08-13T10:00:00.000Z");
+  assert.equal(prepared.eventAction, "rejected");
+  assert.equal(prepared.validation, null);
+  assert.equal(prepared.previousStatus, "accepted");
+  assert.equal(prepared.retiredAcceptedLink, true);
+});
+
+test("accepted suggestion cannot be accepted again", () => {
   assert.throws(
     () => prepareJasminLinkDecision({
       suggestion: { ...pendingSuggestion, status: "accepted" },
@@ -77,6 +103,19 @@ test("decided suggestions cannot be accepted or rejected again", () => {
       decision: "accept",
       anchorText: "credit profile",
     }),
-    /Only pending internal-link suggestions/i
+    /Only pending internal-link suggestions can be accepted/i
   );
+});
+
+test("rejected and superseded suggestions cannot be rejected again", () => {
+  for (const status of ["rejected", "superseded"]) {
+    assert.throws(
+      () => prepareJasminLinkDecision({
+        suggestion: { ...pendingSuggestion, status },
+        articleMarkdown: "credit profile",
+        decision: "reject",
+      }),
+      /Only pending or accepted internal-link suggestions can be rejected/i
+    );
+  }
 });
