@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   HISTORIC_LINK_RETROFIT_SEED_EXCLUSIONS,
   compactHistoricSuggestion,
+  reviewableHistoricSuggestions,
   sourceSnippetsForSuggestion,
   validateHistoricBatchDecisions,
 } from "../lib/historicLinkBulkWorkflow.js";
@@ -13,8 +14,18 @@ test("seed exclusions contain the five new articles and completed historic Batch
   assert.equal(HISTORIC_LINK_RETROFIT_SEED_EXCLUSIONS.includes("7c47fb62-22d5-4aab-a6ca-fa5b1aa5db7b"), true);
 });
 
-test("compact suggestion reports exact anchor state and useful source snippets", () => {
-  const markdown = "Choosing the right van matters for payload and load space.\n\nCompare available vans before making a final choice.";
+test("prepare payload excludes rejected and superseded suggestions", () => {
+  const reviewable = reviewableHistoricSuggestions([
+    { id: "p1", status: "pending" },
+    { id: "a1", status: "accepted" },
+    { id: "r1", status: "rejected" },
+    { id: "s1", status: "superseded" },
+  ]);
+  assert.deepEqual(reviewable.map((item) => item.id), ["p1", "a1"]);
+});
+
+test("compact suggestion reports anchor state with one bounded source snippet", () => {
+  const markdown = "Choosing the right van matters for payload and load space.\n\nCompare available vans before making a final choice.\n\nBrowse other available stock after comparing your requirements.";
   const compact = compactHistoricSuggestion(markdown, {
     id: "s1",
     status: "pending",
@@ -27,7 +38,10 @@ test("compact suggestion reports exact anchor state and useful source snippets",
   });
   assert.equal(compact.anchor_found, true);
   assert.equal(compact.anchor_match_count, 1);
-  assert.ok(compact.source_snippets.some((item) => item.includes("Compare available vans")));
+  assert.equal(compact.source_snippets.length, 1);
+  assert.ok(compact.source_snippets[0].length <= 220);
+  assert.equal(Object.hasOwn(compact, "reason"), false);
+  assert.equal(Object.hasOwn(compact, "confidence_score"), false);
 });
 
 test("source snippets omit headings, tables and fully formatted CTA lines", () => {
