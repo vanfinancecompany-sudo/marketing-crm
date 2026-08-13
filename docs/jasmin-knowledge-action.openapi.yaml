@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Van Finance Company Jasmin Knowledge Hub
-  version: 1.2.0
+  version: 1.2.1
   description: Scoped API for reading and managing Marketing CRM Knowledge Hub content. Wix actions create or update drafts only and do not publish live.
 servers:
   - url: https://marketing-crm-six.vercel.app
@@ -65,7 +65,7 @@ paths:
       operationId: manageKnowledgeRevision
       summary: Safely revise an approved Knowledge Hub article
       description: >-
-        Open a hidden revision draft from an approved article, edit that revision, and apply it back to
+        Open a hidden revision draft from an approved article, edit or discard that revision, and apply it back to
         the original CRM article only after explicit approval. This endpoint never sends or publishes Wix content.
       x-openai-isConsequential: true
       security:
@@ -81,10 +81,10 @@ paths:
               properties:
                 action:
                   type: string
-                  enum: [createRevisionDraft, updateRevisionDraft, approveRevision]
+                  enum: [createRevisionDraft, updateRevisionDraft, discardRevisionDraft, approveRevision]
                 article_id:
                   type: string
-                  description: Source article ID for createRevisionDraft, or revision ID for approveRevision.
+                  description: Source article ID for createRevisionDraft, or revision ID for discardRevisionDraft and approveRevision.
                 article:
                   $ref: '#/components/schemas/ArticleInput'
       responses:
