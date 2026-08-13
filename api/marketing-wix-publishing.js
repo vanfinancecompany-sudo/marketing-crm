@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { WixPublishingError, wixPublishingConfiguration } from "../lib/wixPublishing.js";
+import "../lib/wixDraftPublishPluginSupport.js";
 import { createOrUpdateKnowledgeRichContentDraft } from "../lib/wixKnowledgeRichContentPublishing.js";
 import { evaluatePublishingSafety } from "../lib/publishingSafety.js";
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
