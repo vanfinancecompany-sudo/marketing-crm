@@ -41,6 +41,13 @@ async function completedArticleIds(supabase) {
   return new Set(rows.filter((row) => row?.details?.action === HISTORIC_LINK_RETROFIT_ACTION).map((row) => row.article_id).filter(Boolean));
 }
 
+async function eligibleHistoricArticles(supabase) {
+  const completed = await completedArticleIds(supabase);
+  const excluded = new Set([...HISTORIC_LINK_RETROFIT_SEED_EXCLUSIONS, ...completed]);
+  const inventory = data(await supabase.from("knowledge_articles").select("id,title,category,status,created_at,content_markdown,wix_sync_status").eq("status", "approved").order("created_at", { ascending: true }).limit(1000), "Approved Knowledge Hub inventory could not be loaded.") || [];
+  return inventory.filter((article) => !excluded.has(article.id));
+}
+
 async function currentSuggestions(supabase, articleId) {
   return data(await supabase.from("knowledge_internal_link_suggestions").select("*").eq("article_id", articleId).neq("status", "superseded").order("confidence_score", { ascending: false }).order("created_at", { ascending: true }), "Internal-link suggestions could not be loaded.") || [];
 }
@@ -61,10 +68,7 @@ async function mapWithConcurrency(items, concurrency, worker) {
 
 async function prepareHistoricBatch(supabase, body) {
   const limit = Math.max(1, Math.min(20, Number(body.limit) || 20));
-  const completed = await completedArticleIds(supabase);
-  const excluded = new Set([...HISTORIC_LINK_RETROFIT_SEED_EXCLUSIONS, ...completed]);
-  const inventory = data(await supabase.from("knowledge_articles").select("id,title,category,status,created_at,content_markdown,wix_sync_status").eq("status", "approved").order("created_at", { ascending: true }).limit(1000), "Approved Knowledge Hub inventory could not be loaded.") || [];
-  const eligible = inventory.filter((article) => !excluded.has(article.id));
+  const eligible = await eligibleHistoricArticles(supabase);
   const selected = eligible.slice(0, limit);
   if (!selected.length) return { batch_token: null, article_ids: [], articles: [], remaining_candidates: 0, complete: true };
 
@@ -185,12 +189,31 @@ async function processHistoricArticle(supabase, requestArticle, batchId) {
   }
 }
 
-async function applyHistoricBatch(supabase, body) {
-  const requestedArticles = Array.isArray(body.articles) ? body.articles : [];
-  if (!requestedArticles.length || requestedArticles.length > 20) throw new ApiError(400, "Provide between 1 and 20 prepared batch articles.");
-  const articleIds = requestedArticles.map((item) => clean(item.article_id, 100));
-  if (body.batch_token !== batchToken(articleIds)) throw new ApiError(409, "Historic batch token does not match the supplied article order. Prepare the batch again before applying decisions.");
+async function resolvePreparedBatchArticleIds(supabase, suppliedToken) {
+  const eligible = await eligibleHistoricArticles(supabase);
+  const candidates = eligible.slice(0, 20).map((article) => article.id);
+  for (let size = 1; size <= candidates.length; size += 1) {
+    const articleIds = candidates.slice(0, size);
+    if (batchToken(articleIds) === suppliedToken) return articleIds;
+  }
+  throw new ApiError(409, "Historic batch token is stale or does not match the current prepared candidate set. Prepare the batch again before applying decisions.");
+}
 
+async function applyHistoricBatch(supabase, body) {
+  const suppliedArticles = Array.isArray(body.articles) ? body.articles : [];
+  if (suppliedArticles.length > 20) throw new ApiError(400, "Provide no more than 20 prepared batch article decision records.");
+
+  const expectedArticleIds = await resolvePreparedBatchArticleIds(supabase, clean(body.batch_token, 100));
+  const expectedSet = new Set(expectedArticleIds);
+  const byArticleId = new Map();
+  for (const item of suppliedArticles) {
+    const articleId = clean(item?.article_id, 100);
+    if (!articleId || !expectedSet.has(articleId)) throw new ApiError(409, `Article ${articleId || "(blank)"} is not part of this prepared historic batch.`);
+    if (byArticleId.has(articleId)) throw new ApiError(400, `Article ${articleId} was supplied more than once.`);
+    byArticleId.set(articleId, { article_id: articleId, decisions: Array.isArray(item.decisions) ? item.decisions : [] });
+  }
+
+  const requestedArticles = expectedArticleIds.map((articleId) => byArticleId.get(articleId) || { article_id: articleId, decisions: [] });
   const results = await mapWithConcurrency(requestedArticles, 3, (requestArticle) => processHistoricArticle(supabase, requestArticle, body.batch_token));
   const successes = results.filter((item) => item.ok);
   const failures = results.filter((item) => !item.ok);
