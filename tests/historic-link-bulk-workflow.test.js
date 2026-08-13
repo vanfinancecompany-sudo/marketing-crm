@@ -31,14 +31,14 @@ test("compact suggestion reports exact anchor state and useful source snippets",
 });
 
 test("source snippets omit headings, tables and fully formatted CTA lines", () => {
-  const markdown = "# Used Van Guide\n\n| Type | Payload |\n| --- | --- |\n| Luton | High |\n\n**Browse available vans now.**\n\nA compact van can be easier to park while still carrying the tools you need.";
+  const markdown = "# Used Van Guide\n\n| Type | Payload |\n| --- | --- |\n| Luton | High |\n\n**Browse available vans now.**\n\nA small van can be easier to park while still carrying the tools you need.";
   const snippets = sourceSnippetsForSuggestion(markdown, {
     destination_title: "Small and Medium Vans for Business",
     destination_url: "/knowledge-hub-articles/small-vs-medium-vans-business",
   });
   assert.equal(snippets.some((item) => item.includes("Browse available vans")), false);
   assert.equal(snippets.some((item) => item.includes("Payload")), false);
-  assert.equal(snippets.some((item) => item.includes("compact van")), true);
+  assert.equal(snippets.some((item) => item.includes("small van")), true);
 });
 
 test("batch decisions require suggestion ownership and legal transitions", () => {
