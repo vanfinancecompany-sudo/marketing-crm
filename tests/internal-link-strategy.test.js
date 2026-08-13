@@ -87,6 +87,66 @@ test("Knowledge Hub relevance requires real topic overlap rather than generic va
   );
 });
 
+test("editorial topic families reject the known semantically weak production matches", () => {
+  const rejectedPairs = [
+    [
+      "Can You Buy a Used Van Without Seeing It First? A Guide for UK Buyers",
+      "Can a Newly Formed Limited Company Get Van Finance Without Two Years of Accounts?",
+    ],
+    [
+      "Van Payload, Load Space and Gross Vehicle Weight Explained for Buyers",
+      "Choosing the Right Van for Electricians and Plumbers",
+    ],
+    [
+      "Diesel or Electric Van: Which Makes More Sense for Your Business?",
+      "Van Finance for CIS Subcontractors: What Should You Prepare Before Applying?",
+    ],
+  ];
+
+  for (const [sourceTitle, destinationTitle] of rejectedPairs) {
+    assert.equal(
+      hasStrongKnowledgeTopicOverlap({
+        sourceArticle: { title: sourceTitle },
+        linkedArticle: { title: destinationTitle },
+      }),
+      false,
+      `${sourceTitle} should not match ${destinationTitle}`
+    );
+  }
+});
+
+test("editorial topic families retain explicit natural Knowledge Hub relationships", () => {
+  const eligiblePairs = [
+    [
+      "Buying a Used Van From a Dealer vs a Private Seller: What Should You Consider?",
+      "Can I Use Van Finance Company Finance to Buy a Van From Another Dealer?",
+    ],
+    [
+      "Van Payload, Load Space and Gross Vehicle Weight Explained for Buyers",
+      "Choosing the Right Van Body Type and Carrying Capacity",
+    ],
+    [
+      "Diesel or Electric Van: Which Makes More Sense for Your Business?",
+      "Electric Van Charging, Range and Running Costs Explained",
+    ],
+    [
+      "Can You Buy a Used Van Without Seeing It First? A Guide for UK Buyers",
+      "Remote Van Inspection, Reservation and Delivery Explained",
+    ],
+  ];
+
+  for (const [sourceTitle, destinationTitle] of eligiblePairs) {
+    assert.equal(
+      hasStrongKnowledgeTopicOverlap({
+        sourceArticle: { title: sourceTitle },
+        linkedArticle: { title: destinationTitle },
+      }),
+      true,
+      `${sourceTitle} should match ${destinationTitle}`
+    );
+  }
+});
+
 test("finance buying articles exclude Rent2Buy, unrelated Knowledge Hub pages and routine application links", () => {
   const financeArticle = {
     id: "source",
