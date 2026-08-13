@@ -197,6 +197,38 @@ async function updateRevisionDraft(supabase, body) {
   );
 }
 
+async function discardRevisionDraft(supabase, body) {
+  const revisionId = clean(body.article_id, 100);
+  if (!revisionId) throw new ApiError(400, "Revision article id is required.");
+
+  const revision = resultData(
+    await supabase.from("knowledge_articles").select("*").eq("id", revisionId).single(),
+    "Revision draft could not be found."
+  );
+  if (!isOpenRevision(revision)) throw new ApiError(409, "Only open revision drafts can be discarded through this action.");
+
+  const now = new Date().toISOString();
+  return resultData(
+    await supabase
+      .from("knowledge_articles")
+      .update({
+        status: "archived",
+        approved_at: null,
+        updated_at: now,
+        generation_metadata: {
+          ...revisionMetadata(revision),
+          revision_state: "discarded",
+          revision_discarded_at: now,
+          created_or_updated_via: "jasmin_knowledge_revision_action",
+        },
+      })
+      .eq("id", revision.id)
+      .select()
+      .single(),
+    "Revision draft could not be discarded."
+  );
+}
+
 async function approveRevision(supabase, body) {
   const revisionId = clean(body.article_id, 100);
   if (!revisionId) throw new ApiError(400, "Revision article id is required.");
@@ -218,7 +250,7 @@ async function approveRevision(supabase, body) {
 
   const expectedUpdatedAt = clean(revisionMetadata(revision).revision_source_updated_at, 100);
   if (expectedUpdatedAt && clean(source.updated_at, 100) !== expectedUpdatedAt) {
-    throw new ApiError(409, "The source article changed after this revision draft was created. Create a fresh revision draft before approving.");
+    throw new ApiError(409, "The source article changed after this revision draft was created. Discard this stale revision draft, then create a fresh revision draft before approving.");
   }
 
   const validation = validateKnowledgeArticle(revision);
@@ -291,6 +323,9 @@ export default async function handler(request, response) {
         break;
       case "updateRevisionDraft":
         data = { article: await updateRevisionDraft(supabase, body) };
+        break;
+      case "discardRevisionDraft":
+        data = { article: await discardRevisionDraft(supabase, body) };
         break;
       case "approveRevision":
         data = await approveRevision(supabase, body);
