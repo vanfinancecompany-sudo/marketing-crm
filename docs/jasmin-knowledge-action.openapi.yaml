@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Van Finance Company Jasmin Knowledge Hub
-  version: 1.2.1
+  version: 1.3.0
   description: Scoped API for reading and managing Marketing CRM Knowledge Hub content. Wix actions create or update drafts only and do not publish live.
 servers:
   - url: https://marketing-crm-six.vercel.app
@@ -106,6 +106,69 @@ paths:
           description: Invalid Jasmin API key
         '409':
           description: Conflict such as an existing revision, stale source article or invalid lifecycle transition
+  /api/jasmin-knowledge-links:
+    post:
+      operationId: manageKnowledgeLinks
+      summary: Review Knowledge Hub internal-link suggestions
+      description: >-
+        Read or refresh contextual internal-link suggestions and record explicit accept, reject or anchor-edit decisions.
+        These actions never change article copy, send to Wix or publish live content.
+      x-openai-isConsequential: true
+      security:
+        - JasminApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [loadArticleLinks, refreshArticleLinks, decideInternalLink]
+                article_id:
+                  type: string
+                  description: Required for loadArticleLinks and refreshArticleLinks.
+                suggestion_id:
+                  type: string
+                  description: Required for decideInternalLink.
+                decision:
+                  type: string
+                  enum: [accept, reject, edit_anchor]
+                  description: Required for decideInternalLink.
+                anchor_text:
+                  type: string
+                  description: Existing article wording to use as the clickable anchor. Required for accept or edit_anchor.
+                reason:
+                  type: string
+                  description: Optional editorial reason recorded in the internal-link audit history.
+      responses:
+        '200':
+          description: Successful internal-link operation
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  ok:
+                    type: boolean
+                  action:
+                    type: string
+                  article_content_changed:
+                    type: boolean
+                  wix_action_performed:
+                    type: boolean
+        '400':
+          description: Validation error
+        '401':
+          description: Invalid Jasmin API key
+        '404':
+          description: Article or suggestion not found
+        '409':
+          description: Link decision conflict or anchor text not found in current article
 components:
   securitySchemes:
     JasminApiKey:
