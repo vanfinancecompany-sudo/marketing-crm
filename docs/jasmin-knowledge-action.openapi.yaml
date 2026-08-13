@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Van Finance Company Jasmin Knowledge Hub
-  version: 1.1.1
+  version: 1.2.0
   description: Scoped API for reading and managing Marketing CRM Knowledge Hub content. Wix actions create or update drafts only and do not publish live.
 servers:
   - url: https://marketing-crm-six.vercel.app
@@ -60,6 +60,52 @@ paths:
           description: Invalid Jasmin API key
         '409':
           description: Conflict such as duplicate topic/article or invalid lifecycle transition
+  /api/jasmin-knowledge-revision:
+    post:
+      operationId: manageKnowledgeRevision
+      summary: Safely revise an approved Knowledge Hub article
+      description: >-
+        Open a hidden revision draft from an approved article, edit that revision, and apply it back to
+        the original CRM article only after explicit approval. This endpoint never sends or publishes Wix content.
+      x-openai-isConsequential: true
+      security:
+        - JasminApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [createRevisionDraft, updateRevisionDraft, approveRevision]
+                article_id:
+                  type: string
+                  description: Source article ID for createRevisionDraft, or revision ID for approveRevision.
+                article:
+                  $ref: '#/components/schemas/ArticleInput'
+      responses:
+        '200':
+          description: Successful Knowledge Hub revision operation
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  ok:
+                    type: boolean
+                  action:
+                    type: string
+        '400':
+          description: Validation error
+        '401':
+          description: Invalid Jasmin API key
+        '409':
+          description: Conflict such as an existing revision, stale source article or invalid lifecycle transition
 components:
   securitySchemes:
     JasminApiKey:
