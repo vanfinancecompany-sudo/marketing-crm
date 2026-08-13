@@ -108,12 +108,15 @@ export function prepareJasminLinkDecision({ suggestion = {}, articleMarkdown = "
 
   const status = action === "accept" ? "accepted" : action === "reject" ? "rejected" : currentStatus;
   const eventAction = action === "accept" ? "accepted" : action === "reject" ? "rejected" : "anchor_edited";
+  const decidedAt = action === "edit_anchor"
+    ? suggestion.decided_at
+    : ["accepted", "rejected"].includes(status) ? now : suggestion.decided_at;
 
   return {
     update: {
       anchor_text: requestedAnchor,
       status,
-      decided_at: ["accepted", "rejected"].includes(status) ? now : suggestion.decided_at,
+      decided_at: decidedAt,
       updated_at: now,
     },
     eventAction,
