@@ -6,6 +6,7 @@ import {
   HISTORIC_LINK_RETROFIT_ACTION,
   HISTORIC_LINK_RETROFIT_SEED_EXCLUSIONS,
   compactHistoricSuggestion,
+  reviewableHistoricSuggestions,
   validateHistoricBatchDecisions,
 } from "../lib/historicLinkBulkWorkflow.js";
 import { prepareJasminLinkDecision } from "./jasmin-knowledge-links.js";
@@ -62,20 +63,19 @@ async function prepareHistoricBatch(supabase, body) {
   const limit = Math.max(1, Math.min(20, Number(body.limit) || 20));
   const completed = await completedArticleIds(supabase);
   const excluded = new Set([...HISTORIC_LINK_RETROFIT_SEED_EXCLUSIONS, ...completed]);
-  const inventory = data(await supabase.from("knowledge_articles").select("id,title,category,status,created_at,content_markdown,wix_sync_status").eq("status", "approved").order("created_at", { ascending: true }).limit(250), "Approved Knowledge Hub inventory could not be loaded.") || [];
+  const inventory = data(await supabase.from("knowledge_articles").select("id,title,category,status,created_at,content_markdown,wix_sync_status").eq("status", "approved").order("created_at", { ascending: true }).limit(1000), "Approved Knowledge Hub inventory could not be loaded.") || [];
   const eligible = inventory.filter((article) => !excluded.has(article.id));
   const selected = eligible.slice(0, limit);
   if (!selected.length) return { batch_token: null, article_ids: [], articles: [], remaining_candidates: 0, complete: true };
 
   const articles = await mapWithConcurrency(selected, 4, async (article) => {
     await refreshArticleInternalLinks(supabase, article.id, { reason: "Historic bulk retrofit prepared for precision-first editorial review." });
-    const suggestions = await currentSuggestions(supabase, article.id);
+    const suggestions = reviewableHistoricSuggestions(await currentSuggestions(supabase, article.id));
     const compact = suggestions.map((suggestion) => compactHistoricSuggestion(article.content_markdown, suggestion));
     return {
       id: article.id,
-      title: article.title,
-      category: article.category,
-      created_at: article.created_at,
+      title: clean(article.title, 140),
+      category: clean(article.category, 60),
       suggestions: compact,
       pending_decision_ids: compact.filter((item) => item.status === "pending").map((item) => item.id),
       legacy_cleanup_ids: compact.filter((item) => item.status === "accepted" && !item.anchor_found).map((item) => item.id),
@@ -88,13 +88,9 @@ async function prepareHistoricBatch(supabase, body) {
     articles,
     remaining_candidates: Math.max(0, eligible.length - selected.length),
     complete: false,
-    instructions: {
-      new_pending: "Decide every pending suggestion: accept with an exact existing anchor, or reject.",
-      legacy_missing_anchor: "Every accepted suggestion with anchor_found=false must be re-anchored with edit_anchor or retired with reject.",
-      precision_first: true,
-      article_copy_changes_allowed: false,
-      wix_action_performed: false,
-    },
+    precision_first: true,
+    article_copy_changes_allowed: false,
+    wix_action_performed: false,
   };
 }
 
