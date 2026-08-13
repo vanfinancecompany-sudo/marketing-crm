@@ -1,0 +1,21 @@
+name: Focused V4 links
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: node --test tests/internal-link-strategy.test.js tests/internal-link-strategy-v4.test.js tests/knowledge-article-website-index.test.js
+      - run: npm run build
