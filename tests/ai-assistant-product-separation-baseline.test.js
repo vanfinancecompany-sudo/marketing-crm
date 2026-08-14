@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { evaluateHealthConversation } from "../lib/aiAssistantHealth.js";
-import { filterKnowledgeForProduct, isExplicitProductComparison } from "../lib/aiAssistantCompetence.js";
+import { buildRetrievalCorpus, filterKnowledgeForProduct, isExplicitProductComparison } from "../lib/aiAssistantCompetence.js";
 
 const result = (overrides = {}) => ({
   reply: "I can help with the current product.",
@@ -59,6 +59,51 @@ test("natural comparison wording deliberately unlocks both product knowledge poo
   const bounded = filterKnowledgeForProduct(knowledge, "finance", { comparison });
   assert.deepEqual(bounded.articles.map((article) => article.id), ["finance", "rent"]);
   assert.match(bounded.categoryFilter, /both product categories allowed/);
+});
+
+test("retrieval removes cross-product passages hidden inside an otherwise allowed article", () => {
+  const rentKnowledge = filterKnowledgeForProduct({
+    sections: [],
+    articles: [{
+      id: "rent-mixed",
+      title: "Rent2Buy customer guide",
+      category: "Rent2Buy",
+      content_markdown: "# Rent2Buy basics\nRent2Buy uses rental payments and does not require a credit check.\n\n# Finance comparison\nChoose traditional van finance if you want lender-backed funding, or apply for a finance quotation.",
+      faq_json: [{ question: "Are deposits always £99 for traditional van finance?", answer: "No, finance deposits vary by lender and application." }],
+    }],
+  }, "rent2buy");
+  const rentCorpus = buildRetrievalCorpus(rentKnowledge);
+  assert.equal(rentCorpus.some((source) => /traditional van finance|finance quotation|finance deposits/i.test(`${source.heading} ${source.passage}`)), false);
+  assert.equal(rentCorpus.some((source) => /Rent2Buy uses rental payments/i.test(source.passage)), true);
+
+  const financeKnowledge = filterKnowledgeForProduct({
+    sections: [],
+    articles: [{
+      id: "finance-mixed",
+      title: "Finance customer guide",
+      category: "Van Finance",
+      content_markdown: "# Finance basics\nFinance is subject to lender assessment.\n\n# Rent2Buy comparison\nRent2Buy is a separate rental-to-ownership route.",
+      faq_json: [],
+    }],
+  }, "finance");
+  const financeCorpus = buildRetrievalCorpus(financeKnowledge);
+  assert.equal(financeCorpus.some((source) => /Rent2Buy/i.test(`${source.heading} ${source.passage}`)), false);
+  assert.equal(financeCorpus.some((source) => /lender assessment/i.test(source.passage)), true);
+});
+
+test("comparison mode keeps deliberately mixed passages available", () => {
+  const knowledge = filterKnowledgeForProduct({
+    sections: [],
+    articles: [{
+      id: "comparison",
+      title: "Finance and Rent2Buy comparison",
+      category: "Van Finance",
+      content_markdown: "# Compare the routes\nFinance and Rent2Buy are different products with different structures.",
+      faq_json: [],
+    }],
+  }, "finance", { comparison: true });
+  const corpus = buildRetrievalCorpus(knowledge);
+  assert.equal(corpus.some((source) => /Finance and Rent2Buy/i.test(`${source.title} ${source.passage}`)), true);
 });
 
 test("health scoring does not call an explicit better-than comparison a product leak", () => {
