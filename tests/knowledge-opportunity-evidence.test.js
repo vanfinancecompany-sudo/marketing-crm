@@ -30,7 +30,7 @@ test("live assistant evidence retains redacted customer wording without double-c
   assert.equal(channels.live_assistant.question_variations.length, 2);
 });
 
-test("question wording can classify an assistant turn even when no secondary intent label is supplied", () => {
+test("question wording can form a fallback evidence cluster even when no secondary intent label is supplied", () => {
   const evidence = aggregateKnowledgeOpportunityEvidence({
     assistantEvents: [{
       event_type: "assistant_response",
@@ -43,10 +43,12 @@ test("question wording can classify an assistant turn even when no secondary int
       created_at: "2026-08-10T10:00:00Z",
     }],
   });
-  const group = evidence.groups.find((item) => item.key === "finance:documents");
+  const group = evidence.groups[0];
   assert.ok(group);
+  assert.equal(group.product, "finance");
   assert.equal(group.live_assistant_question_count, 1);
   assert.equal(group.assistant_questions[0].query, "What documents do I need for a van finance application?");
+  assert.equal(shouldCreateEvidenceOpportunity(group), false);
 });
 
 test("unsupported labels stay conservative while novel customer wording can form a guarded fallback cluster", () => {
