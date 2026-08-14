@@ -38,6 +38,53 @@ function baselineSummary(item) {
   };
 }
 
+function assistantSummary(value = {}) {
+  return {
+    assistant: value.assistant || {},
+    knowledge: {
+      responses_with_retrieval: Number(value.knowledge?.responses_with_retrieval || 0),
+      retrieval_rate: Number(value.knowledge?.retrieval_rate || 0),
+      knowledge_gaps: Number(value.knowledge?.knowledge_gaps || 0),
+      knowledge_gap_rate: Number(value.knowledge?.knowledge_gap_rate || 0),
+      top_sources: (value.knowledge?.top_sources || []).slice(0, 5).map((item) => ({
+        source_id: clean(item.source_id, 160),
+        title: clean(item.title, 160) || null,
+        type: clean(item.type, 60) || null,
+        retrieval_count: Number(item.retrieval_count || 0),
+      })),
+    },
+    knowledge_hub_search: {
+      searches: Number(value.knowledge_hub_search?.searches || 0),
+      no_result_searches: Number(value.knowledge_hub_search?.no_result_searches || 0),
+      result_selections: Number(value.knowledge_hub_search?.result_selections || 0),
+      selection_rate: Number(value.knowledge_hub_search?.selection_rate || 0),
+    },
+    by_page_type: (value.by_page_type || []).slice(0, 8),
+  };
+}
+
+function visibilitySummary(value = {}) {
+  return {
+    published_pages: Number(value.published_pages || 0),
+    checked_pages: Number(value.checked_pages || 0),
+    unchecked_pages: Number(value.unchecked_pages || 0),
+    google_indexed: Number(value.google_indexed || 0),
+    google_pending: Number(value.google_pending || 0),
+    ai_visible: Number(value.ai_visible || 0),
+    chatgpt_detections: Number(value.chatgpt_detections || 0),
+    gemini_detections: Number(value.gemini_detections || 0),
+    perplexity_detections: Number(value.perplexity_detections || 0),
+    google_ai_overview_detections: Number(value.google_ai_overview_detections || 0),
+    awaiting_first_check: Number(value.awaiting_first_check || 0),
+    needs_attention: Number(value.needs_attention || 0),
+    total_verified_detections: Number(value.total_verified_detections || 0),
+    visibility_rate: Number(value.visibility_rate || 0),
+    visibility_rate_numerator: Number(value.visibility_rate_numerator || 0),
+    visibility_rate_denominator: Number(value.visibility_rate_denominator || 0),
+    last_checked_at: value.last_checked_at || null,
+  };
+}
+
 async function main() {
   if (!shouldRun()) {
     marker("AI_CONTROL_CENTRE_STATE_SKIPPED", {
@@ -74,9 +121,9 @@ async function main() {
   marker("AI_CONTROL_CENTRE_STATE", {
     generated_at: payload.generated_at || null,
     days: payload.days || 28,
-    assistant: payload.assistant || {},
+    assistant: assistantSummary(payload.assistant),
     assistant_active_users: payload.assistant_active_users || {},
-    visibility: payload.visibility || {},
+    visibility: visibilitySummary(payload.visibility),
     opportunities: payload.opportunities || {},
     baselines: {
       latest: baselineSummary(payload.assistant_health_baseline),
