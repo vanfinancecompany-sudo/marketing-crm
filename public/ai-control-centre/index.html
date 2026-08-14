@@ -138,6 +138,12 @@
         const gateError = document.getElementById("gateError");
 
         const clean = (value, limit = 500) => String(value == null ? "" : value).trim().slice(0, limit);
+        const escapeHtml = (value, limit = 500) => clean(value, limit)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
         const key = () => { try { return clean(localStorage.getItem(STORAGE_KEY), 1000); } catch { return ""; } };
         const saveKey = (value) => { try { localStorage.setItem(STORAGE_KEY, value); return true; } catch { return false; } };
         const clearKey = () => { try { localStorage.removeItem(STORAGE_KEY); sessionStorage.removeItem(STORAGE_KEY); } catch {} };
@@ -164,7 +170,9 @@
 
         function renderRows(targetId, rows, emptyText) {
           const target = document.getElementById(targetId);
-          target.innerHTML = rows.length ? rows.map((item) => `<div class="row"><strong>${clean(item.title || item.query || item.source_id, 240)}</strong><small>${clean(item.detail, 240)}</small></div>`).join("") : `<div class="row"><small>${emptyText}</small></div>`;
+          target.innerHTML = rows.length
+            ? rows.map((item) => `<div class="row"><strong>${escapeHtml(item.title || item.query || item.source_id, 240)}</strong><small>${escapeHtml(item.detail, 240)}</small></div>`).join("")
+            : `<div class="row"><small>${escapeHtml(emptyText, 240)}</small></div>`;
         }
 
         function render(payload) {
