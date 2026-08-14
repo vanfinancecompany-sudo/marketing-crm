@@ -39,19 +39,25 @@ test("AI Control Centre escapes dynamic source titles and search-gap queries bef
   assert.match(page, /escapeHtml\(emptyText/);
 });
 
-test("aggregate Control Centre API is protected and read-only", () => {
+test("Control Centre API stays protected and restricts writes to explicit Assistant Health baseline snapshots", () => {
   assert.match(api, /MARKETING_CUSTOMER_DATABASE_API_KEY/);
-  assert.match(api, /request\.method !== "GET"/);
+  assert.match(api, /\["GET", "POST"\]\.includes\(request\.method\)/);
+  assert.match(api, /body\.action === "loadHealthBaselines"/);
+  assert.match(api, /body\.action === "saveHealthBaseline"/);
+  assert.match(api, /ai_assistant_health_baselines/);
   assert.match(api, /buildAssistantMeasurementSummary/);
   assert.match(api, /buildVisibilitySummary/);
-  assert.doesNotMatch(api, /\.insert\(/);
   assert.doesNotMatch(api, /\.update\(/);
   assert.doesNotMatch(api, /\.delete\(/);
+  const saveFunction = api.match(/async function saveHealthBaseline[\s\S]*?\n}\n/)?.[0] || "";
+  assert.match(saveFunction, /\.insert\(/);
+  assert.equal((api.match(/\.insert\(/g) || []).length, 1);
 });
 
-test("aggregate Control Centre API keeps new telemetry tables optional during staged deployment", () => {
+test("aggregate Control Centre API keeps staged measurement and baseline tables optional for reads", () => {
   assert.match(api, /ai_assistant_events/);
   assert.match(api, /knowledge_hub_search_events/);
+  assert.match(api, /ai_assistant_health_baselines/);
   assert.match(api, /optional:\s*true/);
   assert.match(api, /missingTable/);
 });

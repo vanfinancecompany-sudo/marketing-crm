@@ -112,7 +112,7 @@
             </section>
 
             <section class="card">
-              <div class="card-head"><div><div class="eyebrow">Assistant Health</div><h2>Saved regression baseline</h2><p>Quality is measured separately from public adoption. A new run is only created deliberately in Assistant Health.</p></div><a class="button" href="/ai-assistant-health">Open Assistant Health</a></div>
+              <div class="card-head"><div><div class="eyebrow">Assistant Health</div><h2>Saved regression baseline</h2><p>The latest protected server baseline is shown here. Browser-local data is used only as a fallback.</p></div><a class="button" href="/ai-assistant-health">Open Assistant Health</a></div>
               <div id="healthMetrics" class="metrics"></div>
               <div id="healthNotice" class="notice hidden"></div>
             </section>
@@ -189,7 +189,8 @@
           const search = payload.assistant?.knowledge_hub_search || {};
           const visibility = payload.visibility || {};
           const opportunities = payload.opportunities || {};
-          const health = healthBaseline();
+          const serverHealthBaseline = payload.assistant_health_baseline || null;
+          const health = serverHealthBaseline?.report || healthBaseline();
 
           document.getElementById("assistantMetrics").innerHTML = [
             metric("Unique exposures", assistant.unique_exposed_visitors), metric("Unique opens", assistant.unique_open_visitors), metric("Open rate", assistant.open_rate, "%"), metric("Conversations", assistant.conversations_started), metric("2+ message conversations", assistant.conversations_with_2_plus_messages), metric("Customer messages", assistant.customer_messages), metric("CTA clicks", assistant.cta_clicks),
@@ -206,7 +207,13 @@
             metric("Overall health", health?.overall_ai_health_score, "%"), metric("Product separation", health?.product_separation_accuracy, "%"), metric("Knowledge retrieval", health?.knowledge_retrieval_accuracy, "%"), metric("Context retention", health?.context_retention, "%"), metric("Failed scenarios", health?.failed_scenario_count), metric("Baseline conversations", health?.conversations),
           ].join("");
           const healthNotice = document.getElementById("healthNotice");
-          healthNotice.textContent = health ? `Saved baseline: ${clean(health.commit || "local run", 80)} · ${clean(health.mode || "validation", 40)}` : "No saved Assistant Health baseline is available in this browser yet.";
+          if (serverHealthBaseline) {
+            healthNotice.textContent = `Protected baseline: ${clean(serverHealthBaseline.name, 160)} · ${clean(serverHealthBaseline.mode, 40)} · ${Number(serverHealthBaseline.conversations || 0).toLocaleString()} conversations${serverHealthBaseline.commit_sha ? ` · commit ${clean(serverHealthBaseline.commit_sha, 80).slice(0, 7)}` : ""}.`;
+          } else if (health) {
+            healthNotice.textContent = `Browser fallback baseline: ${clean(health.commit || "local run", 80)} · ${clean(health.mode || "validation", 40)}.`;
+          } else {
+            healthNotice.textContent = "No saved Assistant Health baseline is available yet.";
+          }
           show(healthNotice, true);
           document.getElementById("opportunityMetrics").innerHTML = [
             metric("New", opportunities.new), metric("High priority", opportunities.high_priority), metric("Evidence-backed", opportunities.evidence_backed), metric("Live assistant questions", opportunities.live_assistant_questions), metric("Live assistant gaps", opportunities.live_assistant_gaps), metric("Retrieval misses", opportunities.live_assistant_retrieval_misses), metric("Hub searches", opportunities.hub_searches), metric("Hub no results", opportunities.hub_no_results), metric("GSC impressions", opportunities.gsc_impressions), metric("Create article", opportunities.create_article), metric("Resolved", opportunities.resolved),
