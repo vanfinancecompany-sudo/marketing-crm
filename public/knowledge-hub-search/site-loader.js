@@ -2,8 +2,6 @@
   "use strict";
 
   if (window.__VFC_KNOWLEDGE_HUB_SEARCH__) return;
-  const normalisedPath = String(window.location.pathname || "/").replace(/\/+$/, "") || "/";
-  if (normalisedPath !== "/knowledge-hub") return;
   window.__VFC_KNOWLEDGE_HUB_SEARCH__ = true;
 
   const ANALYTICS_SESSION_KEY = "vfc_ai_assistant_analytics_session_v1";
@@ -35,10 +33,16 @@
   let timer = null;
   let requestSequence = 0;
   let activeSearch = null;
+  let targetObserver = null;
   const visitorId = analyticsVisitorId();
 
   function clean(value, limit = 5000) {
     return String(value || "").trim().slice(0, limit);
+  }
+
+  function isKnowledgeHubPath() {
+    const normalisedPath = String(window.location.pathname || "/").replace(/\/+$/, "") || "/";
+    return normalisedPath === "/knowledge-hub";
   }
 
   function analyticsVisitorId() {
@@ -70,7 +74,10 @@
   }
 
   function createHost(target) {
-    if (host || !target) return;
+    if (!target || !isKnowledgeHubPath()) return;
+    if (host?.isConnected) return;
+    if (host && !host.isConnected) host = null;
+
     host = document.createElement("section");
     host.id = "vfc-knowledge-hub-search";
     host.setAttribute("aria-label", "Search the Knowledge Hub");
@@ -88,7 +95,6 @@
         .eyebrow { margin:0 0 7px; color:#b30d14; font-size:12px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; }
         h2 { margin:0; font-size:clamp(24px,3vw,34px); line-height:1.12; letter-spacing:-.025em; }
         .intro { margin:9px 0 18px; color:#565656; font-size:16px; line-height:1.5; }
-        .search-row { display:flex; gap:10px; }
         .search-input {
           width:100%; min-height:52px; padding:0 16px; border:1.5px solid #cfcfcf; border-radius:12px;
           font:500 16px/1.2 Arial,Helvetica,sans-serif; color:#111; background:#fff; outline:none;
@@ -126,9 +132,7 @@
         <p class="eyebrow">Knowledge Hub</p>
         <h2>What do you need help with?</h2>
         <p class="intro">Ask a question or search by keyword to find practical guides from Van Finance Company.</p>
-        <div class="search-row">
-          <input class="search-input" type="search" autocomplete="off" inputmode="search" aria-label="Search Knowledge Hub" placeholder="Ask a question or search by keyword..." />
-        </div>
+        <input class="search-input" type="search" autocomplete="off" inputmode="search" aria-label="Search Knowledge Hub" placeholder="Ask a question or search by keyword..." />
         <div class="chips" role="group" aria-label="Filter Knowledge Hub category">
           ${CATEGORIES.map((item) => `<button class="chip${item === "all" ? " is-active" : ""}" type="button" data-category="${escapeHtml(item)}">${item === "all" ? "All" : escapeHtml(item)}</button>`).join("")}
         </div>
@@ -158,13 +162,13 @@
   function clearSearch() {
     requestSequence += 1;
     activeSearch = null;
-    status.textContent = "";
-    results.innerHTML = "";
+    if (status) status.textContent = "";
+    if (results) results.innerHTML = "";
   }
 
   function scheduleSearch() {
     window.clearTimeout(timer);
-    const query = clean(input.value, 200);
+    const query = clean(input?.value, 200);
     if (query.length < 2) {
       clearSearch();
       return;
@@ -173,6 +177,7 @@
   }
 
   async function runSearch() {
+    if (!input || !results || !status || !isKnowledgeHubPath()) return;
     const query = clean(input.value, 200);
     if (query.length < 2) return clearSearch();
     const sequence = ++requestSequence;
@@ -186,12 +191,12 @@
         credentials: "omit",
       });
       const payload = await response.json();
-      if (sequence !== requestSequence) return;
+      if (sequence !== requestSequence || !isKnowledgeHubPath()) return;
       if (!response.ok) throw new Error(payload?.error || "Search failed.");
       activeSearch = payload;
       renderResults(payload);
     } catch {
-      if (sequence !== requestSequence) return;
+      if (sequence !== requestSequence || !isKnowledgeHubPath()) return;
       activeSearch = null;
       status.textContent = "Search is temporarily unavailable. Please try again.";
       results.innerHTML = "";
@@ -221,7 +226,7 @@
     const body = {
       action: "select",
       search_request_id: activeSearch.search_request_id,
-      query: clean(input.value, 200),
+      query: clean(input?.value, 200),
       category,
       article_id: link.dataset.articleId,
       rank: Number(link.dataset.rank),
@@ -240,22 +245,54 @@
     }
   }
 
-  function install() {
+  function resetRefs() {
+    host = null;
+    shadow = null;
+    input = null;
+    results = null;
+    status = null;
+    activeSearch = null;
+    category = "all";
+  }
+
+  function teardown() {
+    window.clearTimeout(timer);
+    targetObserver?.disconnect();
+    targetObserver = null;
+    requestSequence += 1;
+    host?.remove();
+    resetRefs();
+  }
+
+  function mount() {
+    if (!isKnowledgeHubPath() || host?.isConnected) return;
+    if (host && !host.isConnected) resetRefs();
     const target = pageTarget();
     if (target) {
       createHost(target);
       return;
     }
-    const observer = new MutationObserver(() => {
+    if (targetObserver) return;
+    targetObserver = new MutationObserver(() => {
+      if (!isKnowledgeHubPath()) return;
       const next = pageTarget();
       if (!next) return;
-      observer.disconnect();
+      targetObserver.disconnect();
+      targetObserver = null;
       createHost(next);
     });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-    window.setTimeout(() => observer.disconnect(), 10_000);
+    targetObserver.observe(document.documentElement, { childList: true, subtree: true });
   }
 
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", install, { once: true });
-  else install();
+  function syncRoute() {
+    if (isKnowledgeHubPath()) mount();
+    else if (host || targetObserver) teardown();
+  }
+
+  window.addEventListener("popstate", syncRoute);
+  window.addEventListener("hashchange", syncRoute);
+  window.setInterval(syncRoute, 700);
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", syncRoute, { once: true });
+  else syncRoute();
 })();
