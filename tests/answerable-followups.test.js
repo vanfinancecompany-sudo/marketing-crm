@@ -12,15 +12,26 @@ test("unsupported capability offer is removed when there is no server-selected n
   assert.equal(result.unsupported_offer_removed, true);
 });
 
-test("invented offer is replaced by the exact server-selected question", () => {
+test("unsupported offer is removed without manufacturing another question", () => {
   const supported = "What type of van are you looking for?";
   const result = enforceAnswerableFollowUp(
     "Your £350 monthly budget is noted. Would you like me to find a van for you?",
     { journey: { next_best_question: supported }, intent: {}, orchestration: {} },
   );
-  assert.equal(result.reply, `Your £350 monthly budget is noted. ${supported}`);
+  assert.equal(result.reply, "Your £350 monthly budget is noted.");
   assert.equal(result.supported_question, supported);
-  assert.equal((result.reply.match(/\?/g) || []).length, 1);
+  assert.equal((result.reply.match(/\?/g) || []).length, 0);
+});
+
+test("normal qualifying questions remain untouched", () => {
+  const reply = "What type of van are you looking for?";
+  const result = enforceAnswerableFollowUp(reply, {
+    journey: { next_best_question: reply },
+    intent: {},
+    orchestration: {},
+  });
+  assert.equal(result.reply, reply);
+  assert.equal(result.guard_applied, false);
 });
 
 test("unsupported external action statement and dangling offer are both removed", () => {
