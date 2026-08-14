@@ -37,26 +37,6 @@ Approval is subject to assessment. Delivery timing and vehicle availability must
     accumulator = mergeHealthAccumulators(accumulator, batch.report);
   }
   const report = summariseHealth(accumulator);
-  const compactFailures = (report.failed_scenarios || []).map((item) => ({
-    scenario_id: item.scenario_id,
-    name: item.name,
-    category: item.category,
-    product_context: item.product_context,
-    failures: (item.failures || []).map((failure) => ({ rule: failure.rule, turn: failure.turn, message: failure.message, detail: failure.detail })),
-  }));
-  throw new Error(`DETERMINISTIC_HEALTH_DEBUG ${JSON.stringify({
-    health: report.overall_ai_health_score,
-    progression: report.conversation_progression,
-    context: report.context_retention,
-    product: report.product_separation_accuracy,
-    retrieval: report.knowledge_retrieval_accuracy,
-    application: report.application_progression_accuracy,
-    recovery: report.recovery_success,
-    missed_applications: report.missed_application_opportunities,
-    repeated_wording_rate: report.repeated_wording_rate,
-    clarification_rate: report.clarification_rate,
-    rule_violations: report.rule_violations,
-    failed_scenario_count: report.failed_scenario_count,
-    failed_scenarios: compactFailures,
-  })}`);
+  const failures = (report.failed_scenarios || []).flatMap((item) => (item.failures || []).map((failure) => `${item.scenario_id}|${item.product_context}|${failure.turn}|${failure.message}|${failure.rule}`));
+  throw new Error(`DETERMINISTIC_HEALTH_DEBUG health=${report.overall_ai_health_score} retrieval=${report.knowledge_retrieval_accuracy} failures=${JSON.stringify(failures)}`);
 });
