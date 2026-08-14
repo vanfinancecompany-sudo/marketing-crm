@@ -8,6 +8,7 @@
     { id: "marketing-centre", label: "Marketing Centre", path: "/marketing-centre", paths: ["/marketing-centre"], navigation: "react", view: "Marketing Centre" },
     { id: "knowledge-hub", label: "Knowledge Hub", path: "/knowledge-hub", paths: ["/knowledge-hub"], navigation: "react", view: "Knowledge Hub" },
     { id: "content-factory", label: "Content Factory", path: "/content-factory", paths: ["/content-factory"], navigation: "react", view: "Content Factory" },
+    { id: "ai-control-centre", label: "AI Control Centre", path: "/ai-control-centre/", paths: ["/ai-control-centre/"], navigation: "document" },
     { id: "ai-visibility", label: "AI Visibility", path: "/ai-visibility", paths: ["/ai-visibility"], navigation: "react", view: "AI Visibility" },
     { id: "ai-assistant-competence", label: "AI Assistant Test", path: "/ai-assistant-competence", paths: ["/ai-assistant-competence"], navigation: "react", view: "AI Assistant Competence Test" },
     { id: "ai-knowledge-opportunities", label: "AI Knowledge Opportunities", path: "/ai-knowledge-opportunities", paths: ["/ai-knowledge-opportunities"], navigation: "react", view: "AI Knowledge Opportunities" },
