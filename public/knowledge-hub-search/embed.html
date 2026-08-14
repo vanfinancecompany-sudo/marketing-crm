@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Knowledge Hub Search</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; width: 100%; min-height: 100%; background: transparent; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #161616; overflow-y: auto; }
+    .shell {
+      width: 100%;
+      margin: 0;
+      padding: 22px 24px;
+      border: 1px solid #e2e2e2;
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: 0 10px 28px rgba(0,0,0,.07);
+    }
+    .eyebrow { margin: 0 0 5px; color: #b30d14; font-size: 12px; line-height: 1.2; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    h2 { margin: 0; font-size: 28px; line-height: 1.12; letter-spacing: -.02em; }
+    .intro { margin: 7px 0 14px; color: #565656; font-size: 15px; line-height: 1.45; }
+    .search-input {
+      width: 100%; min-height: 48px; padding: 0 15px; border: 1.5px solid #cfcfcf; border-radius: 11px;
+      font: 500 16px/1.2 Arial, Helvetica, sans-serif; color: #111; background: #fff; outline: none;
+    }
+    .search-input:focus { border-color: #b30d14; box-shadow: 0 0 0 3px rgba(179,13,20,.11); }
+    .chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0 0; }
+    .chip {
+      border: 1px solid #d6d6d6; border-radius: 999px; background: #fff; color: #333; padding: 7px 10px;
+      font: 700 12px/1 Arial, Helvetica, sans-serif; cursor: pointer;
+    }
+    .chip:hover, .chip:focus-visible { border-color: #b30d14; outline: none; }
+    .chip.is-active { background: #151515; color: #fff; border-color: #151515; }
+    .status { margin: 14px 0 0; color: #666; font-size: 13px; }
+    .status:empty, .results:empty { display: none; margin: 0; padding: 0; }
+    .results { display: grid; gap: 9px; margin-top: 8px; }
+    .result {
+      display: block; padding: 14px 15px; border: 1px solid #e1e1e1; border-radius: 12px;
+      color: inherit; text-decoration: none; background: #fff; transition: border-color .14s ease, box-shadow .14s ease;
+    }
+    .result:hover, .result:focus-visible { border-color: #b30d14; box-shadow: 0 6px 18px rgba(0,0,0,.06); outline: none; }
+    .result-meta { color: #b30d14; font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+    .result-title { margin: 4px 0; font-size: 17px; line-height: 1.28; font-weight: 800; }
+    .result-excerpt { margin: 0; color: #5b5b5b; font-size: 13px; line-height: 1.45; }
+    .empty { padding: 14px; border-radius: 11px; background: #f7f7f7; color: #4a4a4a; font-size: 13px; line-height: 1.4; }
+    @media (max-width: 640px) {
+      .shell { padding: 18px 14px; border-radius: 14px; }
+      h2 { font-size: 24px; }
+      .intro { font-size: 14px; }
+      .search-input { min-height: 48px; }
+      .chip { font-size: 11px; padding: 7px 9px; }
+      .result-title { font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <section class="shell" aria-label="Search the Knowledge Hub">
+    <p class="eyebrow">Knowledge Hub</p>
+    <h2>What do you need help with?</h2>
+    <p class="intro">Ask a question or search by keyword to find practical guides from Van Finance Company.</p>
+    <input id="query" class="search-input" type="search" autocomplete="off" inputmode="search" aria-label="Search Knowledge Hub" placeholder="Ask a question or search by keyword..." />
+    <div id="chips" class="chips" role="group" aria-label="Filter Knowledge Hub category"></div>
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+    <div id="results" class="results"></div>
+  </section>
+  <script>
+    (() => {
+      "use strict";
+
+      const API_URL = "https://marketing-crm-github-work.vercel.app/api/public-knowledge-hub-search";
+      const SESSION_KEY = "vfc_knowledge_hub_embed_visitor_v1";
+      const CATEGORIES = ["all", "Van Finance", "Rent2Buy", "Credit", "Vehicle Guides", "FAQs", "Business Advice", "Self Employed"];
+      const input = document.getElementById("query");
+      const chips = document.getElementById("chips");
+      const status = document.getElementById("status");
+      const results = document.getElementById("results");
+      let category = "all";
+      let timer = null;
+      let requestSequence = 0;
+      let activeSearch = null;
+
+      function clean(value, limit = 5000) {
+        return String(value || "").trim().slice(0, limit);
+      }
+
+      function escapeHtml(value) {
+        return clean(value, 2000)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      }
+
+      function visitorId() {
+        try {
+          const existing = clean(sessionStorage.getItem(SESSION_KEY), 160);
+          if (existing) return existing;
+          const generated = crypto?.randomUUID?.() || `knowledge-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          sessionStorage.setItem(SESSION_KEY, generated);
+          return generated;
+        } catch {
+          return crypto?.randomUUID?.() || `knowledge-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        }
+      }
+
+      const visitor = visitorId();
+
+      chips.innerHTML = CATEGORIES.map((item) => `<button class="chip${item === "all" ? " is-active" : ""}" type="button" data-category="${escapeHtml(item)}">${item === "all" ? "All" : escapeHtml(item)}</button>`).join("");
+
+      chips.querySelectorAll(".chip").forEach((button) => {
+        button.addEventListener("click", () => {
+          category = button.dataset.category || "all";
+          chips.querySelectorAll(".chip").forEach((item) => item.classList.toggle("is-active", item === button));
+          if (clean(input.value, 200).length >= 2) runSearch();
+        });
+      });
+
+      input.addEventListener("input", () => {
+        clearTimeout(timer);
+        const query = clean(input.value, 200);
+        if (query.length < 2) return clearSearch();
+        timer = setTimeout(runSearch, 280);
+      });
+
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          input.value = "";
+          clearSearch();
+        }
+      });
+
+      function clearSearch() {
+        requestSequence += 1;
+        activeSearch = null;
+        status.textContent = "";
+        results.innerHTML = "";
+      }
+
+      async function runSearch() {
+        const query = clean(input.value, 200);
+        if (query.length < 2) return clearSearch();
+        const sequence = ++requestSequence;
+        status.textContent = "Searching…";
+        results.innerHTML = "";
+        try {
+          const response = await fetch(API_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "search", query, category, visitor_id: visitor }),
+            credentials: "omit"
+          });
+          const payload = await response.json();
+          if (sequence !== requestSequence) return;
+          if (!response.ok) throw new Error(payload?.error || "Search failed.");
+          activeSearch = payload;
+          renderResults(payload);
+        } catch {
+          if (sequence !== requestSequence) return;
+          activeSearch = null;
+          status.textContent = "Search is temporarily unavailable. Please try again.";
+          results.innerHTML = "";
+        }
+      }
+
+      function renderResults(payload) {
+        const items = Array.isArray(payload?.results) ? payload.results : [];
+        if (!items.length) {
+          status.textContent = "No close matches found.";
+          results.innerHTML = '<div class="empty">Try a shorter phrase, a different keyword, or choose another category.</div>';
+          return;
+        }
+        status.textContent = `${items.length} helpful ${items.length === 1 ? "result" : "results"}`;
+        results.innerHTML = items.map((item, index) => `
+          <a class="result" target="_top" href="${escapeHtml(item.url)}" data-article-id="${escapeHtml(item.id)}" data-rank="${index + 1}">
+            <div class="result-meta">${escapeHtml(item.category)}</div>
+            <div class="result-title">${escapeHtml(item.title)}</div>
+            ${item.excerpt ? `<p class="result-excerpt">${escapeHtml(item.excerpt)}</p>` : ""}
+          </a>`).join("");
+        results.querySelectorAll(".result").forEach((link) => link.addEventListener("click", recordSelection));
+      }
+
+      function recordSelection(event) {
+        const link = event.currentTarget;
+        if (!activeSearch?.search_request_id) return;
+        const body = {
+          action: "select",
+          search_request_id: activeSearch.search_request_id,
+          query: clean(input.value, 200),
+          category,
+          article_id: link.dataset.articleId,
+          rank: Number(link.dataset.rank),
+          visitor_id: visitor
+        };
+        try {
+          fetch(API_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            credentials: "omit",
+            keepalive: true
+          }).catch(() => {});
+        } catch {}
+      }
+    })();
+  </script>
+</body>
+</html>
