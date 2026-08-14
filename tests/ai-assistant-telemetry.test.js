@@ -68,7 +68,7 @@ test("assistant-result telemetry falls back to source IDs when full source diagn
     type: "unknown",
     title: null,
     heading: null,
-    score: 0,
+    score: null,
   }]);
 });
 
