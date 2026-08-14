@@ -8,15 +8,6 @@ const MAX_ROWS = 25000;
 const PAGE_SIZE = 1000;
 const clean = (value, limit = 1000) => String(value || "").trim().slice(0, limit);
 
-function escapeHtml(value, limit = 500) {
-  return clean(value, limit)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
 function authorize(request, environment = process.env) {
   const expected = environment.MARKETING_CUSTOMER_DATABASE_API_KEY;
   const header = request.headers?.[API_KEY_HEADER] || "";
@@ -86,29 +77,6 @@ function buildOpportunitySummary(rows = []) {
   };
 }
 
-function safeAssistantSummary(events, searchEvents) {
-  const summary = buildAssistantMeasurementSummary(events, searchEvents);
-  return {
-    ...summary,
-    knowledge: {
-      ...summary.knowledge,
-      top_sources: (summary.knowledge?.top_sources || []).map((item) => ({
-        ...item,
-        source_id: escapeHtml(item.source_id, 160),
-        type: escapeHtml(item.type, 60),
-        title: escapeHtml(item.title, 240),
-      })),
-    },
-    knowledge_hub_search: {
-      ...summary.knowledge_hub_search,
-      top_no_result_queries: (summary.knowledge_hub_search?.top_no_result_queries || []).map((item) => ({
-        ...item,
-        query: escapeHtml(item.query, 500),
-      })),
-    },
-  };
-}
-
 export async function handleAiControlCentreRequest(request, response, dependencies = {}) {
   const environment = dependencies.environment || process.env;
   response.setHeader?.("Cache-Control", "no-store, max-age=0");
@@ -147,7 +115,7 @@ export async function handleAiControlCentreRequest(request, response, dependenci
       generated_at: new Date().toISOString(),
       days,
       since,
-      assistant: safeAssistantSummary(assistantEvents, searchEvents),
+      assistant: buildAssistantMeasurementSummary(assistantEvents, searchEvents),
       visibility: buildVisibilitySummary({
         articles,
         results: visibilityResult,
