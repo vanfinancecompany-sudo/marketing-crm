@@ -9,6 +9,8 @@ import { loadLearningKnowledge, upsertOpportunityGroup } from "./_knowledgeOppor
 const DEFAULT_DAYS = 90;
 const MIN_DAYS = 7;
 const MAX_DAYS = 180;
+const PAGE_SIZE = 1000;
+const MAX_ROWS = 25000;
 const clean = (value, limit = 1000) => String(value || "").trim().slice(0, limit);
 
 function data(result, fallback) {
@@ -93,37 +95,54 @@ function syntheticGroup(evidence, days) {
   };
 }
 
+async function loadPagedRows(buildQuery, fallback) {
+  const rows = [];
+  for (let from = 0; from < MAX_ROWS; from += PAGE_SIZE) {
+    const result = await buildQuery().range(from, from + PAGE_SIZE - 1);
+    const page = data(result, fallback) || [];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+  }
+  return rows;
+}
+
 async function loadEvidenceInputs(supabase, since) {
   const [opportunities, assistantEvents, searchEvents, visibilityResults, knowledge] = await Promise.all([
-    supabase.from("knowledge_assistant_opportunities").select("*"),
-    supabase
-      .from("ai_assistant_events")
-      .select("event_type,product_context,conversation_intent,secondary_intents,retrieval_required,retrieval_performed,retrieval_used,knowledge_gap,created_at")
-      .eq("event_type", "assistant_response")
-      .gte("created_at", since)
-      .order("created_at", { ascending: true }),
-    supabase
-      .from("knowledge_hub_search_events")
-      .select("event_type,query_text,normalised_query,result_count,category,created_at")
-      .eq("event_type", "search_submitted")
-      .gte("created_at", since)
-      .order("created_at", { ascending: true }),
-    supabase
-      .from("knowledge_visibility_results")
-      .select("article_id,provider,checked_at,structured_evidence")
-      .eq("provider", "google_search_console")
-      .gte("checked_at", since)
-      .order("checked_at", { ascending: false }),
+    loadPagedRows(
+      () => supabase.from("knowledge_assistant_opportunities").select("*").order("updated_at", { ascending: true }),
+      "Knowledge opportunities could not be loaded.",
+    ),
+    loadPagedRows(
+      () => supabase
+        .from("ai_assistant_events")
+        .select("event_type,product_context,conversation_intent,secondary_intents,retrieval_required,retrieval_performed,retrieval_used,knowledge_gap,created_at")
+        .eq("event_type", "assistant_response")
+        .gte("created_at", since)
+        .order("created_at", { ascending: true }),
+      "Assistant evidence could not be loaded.",
+    ),
+    loadPagedRows(
+      () => supabase
+        .from("knowledge_hub_search_events")
+        .select("event_type,query_text,normalised_query,result_count,category,created_at")
+        .eq("event_type", "search_submitted")
+        .gte("created_at", since)
+        .order("created_at", { ascending: true }),
+      "Knowledge Hub search evidence could not be loaded.",
+    ),
+    loadPagedRows(
+      () => supabase
+        .from("knowledge_visibility_results")
+        .select("article_id,provider,checked_at,structured_evidence")
+        .eq("provider", "google_search_console")
+        .gte("checked_at", since)
+        .order("checked_at", { ascending: false }),
+      "Google Search Console evidence could not be loaded.",
+    ),
     loadLearningKnowledge(supabase),
   ]);
 
-  return {
-    opportunities: data(opportunities, "Knowledge opportunities could not be loaded.") || [],
-    assistantEvents: data(assistantEvents, "Assistant evidence could not be loaded.") || [],
-    searchEvents: data(searchEvents, "Knowledge Hub search evidence could not be loaded.") || [],
-    visibilityResults: data(visibilityResults, "Google Search Console evidence could not be loaded.") || [],
-    knowledge,
-  };
+  return { opportunities, assistantEvents, searchEvents, visibilityResults, knowledge };
 }
 
 export async function refreshKnowledgeOpportunityEvidence(supabase, options = {}) {
