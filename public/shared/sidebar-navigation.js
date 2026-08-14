@@ -23,6 +23,13 @@
     { id: "facebook-marketplace", label: "Facebook Marketplace", path: "/facebook-marketplace", paths: ["/facebook-marketplace"], navigation: "react", view: "Facebook Marketplace" },
   ]);
 
+  const advancedRoutes = Object.freeze([
+    "/ai-visibility",
+    "/ai-assistant-competence",
+    "/ai-customer-simulation",
+    "/ai-assistant-health",
+  ]);
+
   function normalizePathname(value) {
     const raw = String(value || "/").split(/[?#]/, 1)[0] || "/";
     const withLeadingSlash = raw.startsWith("/") ? raw : `/${raw}`;
@@ -39,6 +46,7 @@
 
   window.MarketingCrmNavigation = Object.freeze({
     items,
+    advancedRoutes,
     normalizePathname,
     isItemActive,
   });
