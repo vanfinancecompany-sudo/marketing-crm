@@ -10,6 +10,7 @@ const migration = fs.readFileSync(path.join(root, "supabase/migrations/042_ai_as
 const api = fs.readFileSync(path.join(root, "api/marketing-ai-control-centre.js"), "utf8");
 const service = fs.readFileSync(path.join(root, "services/aiAssistantHealthBaselines.js"), "utf8");
 const healthPage = fs.readFileSync(path.join(root, "pages/AIAssistantHealthPage.jsx"), "utf8");
+const controlCentrePage = fs.readFileSync(path.join(root, "public/ai-control-centre/index.html"), "utf8");
 
 function report(overrides = {}) {
   return {
@@ -83,4 +84,12 @@ test("latest server baselines are used for comparison before browser fallback", 
   assert.match(healthPage, /serverBaselines\.find\(\(item\) => item\.mode === mode\)/);
   assert.match(healthPage, /latestServerBaseline\?\.report \|\|/);
   assert.match(healthPage, /BaselineLibrary/);
+});
+
+test("AI Control Centre renders the latest protected server baseline before browser fallback", () => {
+  assert.match(api, /assistant_health_baseline:\s*healthBaselines\[0\] \|\| null/);
+  assert.match(controlCentrePage, /serverHealthBaseline = payload\.assistant_health_baseline \|\| null/);
+  assert.match(controlCentrePage, /serverHealthBaseline\?\.report \|\| healthBaseline\(\)/);
+  assert.match(controlCentrePage, /Protected baseline:/);
+  assert.match(controlCentrePage, /Browser fallback baseline:/);
 });
