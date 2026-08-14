@@ -18,6 +18,18 @@ def remap(url,anchor):
 
 def link_deco(url): return {"type":"LINK","linkData":{"link":{"url":url,"target":"SELF"}}}
 
+def node_text(node):
+    if not isinstance(node,dict): return ""
+    out=[]
+    def walk(n):
+        if isinstance(n,dict):
+            td=n.get("textData")
+            if isinstance(td,dict): out.append(td.get("text",""))
+            for x in n.get("nodes",[]) or []: walk(x)
+        elif isinstance(n,list):
+            for x in n: walk(x)
+    walk(node); return "".join(out)
+
 def links(doc):
     out=[]
     def walk(n):
@@ -28,12 +40,33 @@ def links(doc):
                 for d in td.get("decorations",[]) or []:
                     if d.get("type")=="LINK":
                         u=(((d.get("linkData") or {}).get("link") or {}).get("url"))
-                        if u: out.append((t,u))
+                        if u: out.append((t,u,n.get("id","")))
             for v in n.values():
                 if isinstance(v,(dict,list)): walk(v)
         elif isinstance(n,list):
             for v in n: walk(v)
     walk(doc); return out
+
+def remove_generated_links(doc,changes):
+    """Remove only links created by the first retrofit pass. Preserve text and all other decorations."""
+    def walk(n):
+        if isinstance(n,dict):
+            td=n.get("textData")
+            nid=n.get("id","")
+            if isinstance(td,dict) and "-r2b" in nid:
+                old_decs=td.get("decorations",[]) or []
+                keep=[]
+                for d in old_decs:
+                    if d.get("type")=="LINK":
+                        u=(((d.get("linkData") or {}).get("link") or {}).get("url"))
+                        changes.append(("remove_generated",td.get("text",""),u or "",""))
+                    else: keep.append(d)
+                td["decorations"]=keep
+            for v in n.values():
+                if isinstance(v,(dict,list)): walk(v)
+        elif isinstance(n,list):
+            for v in n: walk(v)
+    walk(doc)
 
 def replace_old(doc,changes):
     def walk(n):
@@ -93,31 +126,41 @@ def convert_markdown(doc,changes):
             for x in n: walk(x)
     walk(doc)
 
+def body_paragraphs(doc):
+    """Return actual Article Body paragraphs first, then FAQ paragraphs. Ignore CMS metadata-style preamble."""
+    body=[]; faq=[]; section="preamble"
+    for top in doc.get("nodes",[]) or []:
+        if isinstance(top,dict) and top.get("type")=="HEADING":
+            h=node_text(top).strip().lower()
+            if h=="article body" or h.startswith("article body"):
+                section="body"; continue
+            if "frequently asked questions" in h:
+                section="faq"; continue
+        if section not in ("body","faq"): continue
+        target=body if section=="body" else faq
+        def collect(n):
+            if isinstance(n,dict):
+                if n.get("type")=="PARAGRAPH": target.append(n)
+                else:
+                    for x in n.get("nodes",[]) or []: collect(x)
+            elif isinstance(n,list):
+                for x in n: collect(x)
+        collect(top)
+    return body,faq
+
 def add_exact(doc,anchor,url,allow_styled=False):
-    paragraphs=[]; faq=[False]; counter=[0]
-    def walk(n):
-        if isinstance(n,dict):
-            if n.get("type")=="HEADING":
-                h="".join((x.get("textData") or {}).get("text","") for x in n.get("nodes",[]) if isinstance(x,dict))
-                if "frequently asked" in h.lower(): faq[0]=True
-            if n.get("type")=="PARAGRAPH": paragraphs.append((n,faq[0]))
-            for x in n.get("nodes",[]) or []: walk(x)
-        elif isinstance(n,list):
-            for x in n: walk(x)
-    walk(doc)
-    for want_faq in (False,True):
-        for p,isfaq in paragraphs:
-            if isfaq!=want_faq: continue
-            kids=p.get("nodes",[]) or []
-            for i,n in enumerate(kids):
-                if not isinstance(n,dict) or n.get("type")!="TEXT": continue
-                td=n.get("textData") or {}; txt=td.get("text",""); ds=td.get("decorations",[]) or []
-                if any(d.get("type")=="LINK" for d in ds): continue
-                if not allow_styled and any(d.get("type") in ("BOLD","ITALIC","UNDERLINE") for d in ds): continue
-                m=re.search(re.escape(anchor),txt,re.I)
-                if m:
-                    counter[0]+=1; p["nodes"]=kids[:i]+split_link(n,m.start(),m.end(),url,f"r2b{counter[0]}")+kids[i+1:]
-                    return txt[m.start():m.end()]
+    body,faq=body_paragraphs(doc); counter=[0]
+    for p in body+faq:
+        kids=p.get("nodes",[]) or []
+        for i,n in enumerate(kids):
+            if not isinstance(n,dict) or n.get("type")!="TEXT": continue
+            td=n.get("textData") or {}; txt=td.get("text",""); ds=td.get("decorations",[]) or []
+            if any(d.get("type")=="LINK" for d in ds): continue
+            if not allow_styled and any(d.get("type") in ("BOLD","ITALIC","UNDERLINE") for d in ds): continue
+            m=re.search(re.escape(anchor),txt,re.I)
+            if m:
+                counter[0]+=1; p["nodes"]=kids[:i]+split_link(n,m.start(),m.end(),url,f"r2bbody{counter[0]}")+kids[i+1:]
+                return txt[m.start():m.end()]
     return None
 
 def visible_text(doc):
@@ -132,37 +175,61 @@ def visible_text(doc):
             for v in n: walk(v)
     walk(doc); return "".join(out)
 
+def link_is_after_article_body(doc,target_url):
+    body,faq=body_paragraphs(doc)
+    ids=set()
+    def collect_ids(n):
+        if isinstance(n,dict):
+            ids.add(n.get("id",""))
+            for x in n.get("nodes",[]) or []: collect_ids(x)
+    for p in body+faq: collect_ids(p)
+    for _,u,nid in links(doc):
+        if u==target_url and nid in ids: return True
+    return False
+
 def main(src,dst,logfile):
     with open(src,encoding="utf-8-sig",newline="") as f:
         rd=csv.DictReader(f); fields=rd.fieldnames; rows=list(rd)
     assert len(rows)==52, len(rows)
-    slugs={r["slug"] for r in rows}; logs=[]; stats={"articles":52,"replace_old":0,"convert_markdown":0,"add_article":0,"add_stock":0,"articles_with_kh_links":0,"articles_with_commercial_links":0}
+    slugs={r["slug"] for r in rows}; logs=[]
+    stats={"articles":52,"remove_generated":0,"replace_old":0,"convert_markdown":0,"add_article":0,"add_stock":0,"planned_anchor_skips":0,"articles_with_kh_links":0,"articles_with_commercial_links":0,"old_domain_links":0,"self_links":0,"bad_article_targets":0}
     for r in rows:
         rid=r["ID"]; old=json.loads(r["content"]); new=copy.deepcopy(old); changes=[]
-        replace_old(new,changes); convert_markdown(new,changes)
-        existing=links(new); kh=sum(u.startswith("/knowledge-hub-articles/") for _,u in existing)
+        remove_generated_links(new,changes)
+        replace_old(new,changes)
+        convert_markdown(new,changes)
+        existing=links(new); kh=sum(u.startswith("/knowledge-hub-articles/") for _,u,_ in existing)
         for anchor,url in PLAN.get(rid,[]):
             existing=links(new)
             if kh>=2: break
-            if url in [u for _,u in existing]: continue
+            if url in [u for _,u,_ in existing]: continue
             found=add_exact(new,anchor,url,False)
-            if found: changes.append(("add_article",found,"",url)); kh+=1
-        existing=links(new); commercial=sum(u in COMMERCIAL for _,u in existing)
-        if rid in STOCK_IDS and STOCK not in [u for _,u in existing] and commercial<2:
+            if found:
+                changes.append(("add_article",found,"",url)); kh+=1
+            else:
+                stats["planned_anchor_skips"]+=1
+        existing=links(new); commercial=sum(u in COMMERCIAL for _,u,_ in existing)
+        if rid in STOCK_IDS and STOCK not in [u for _,u,_ in existing] and commercial<2:
             found=add_exact(new,"View available Rent2Buy vans",STOCK,True)
             if found: changes.append(("add_stock",found,"",STOCK))
-        expected=re.sub(r"\[([^\]]+)\]\((https?://[^)]+|/[^)]+)\)",r"\1",visible_text(old))
-        if visible_text(new)!=expected: raise RuntimeError(f"Visible text changed: {r['Title']}")
+        if visible_text(new)!=visible_text(old): raise RuntimeError(f"Visible text changed: {r['Title']}")
         ls=links(new)
-        if any("vanfinancecompany.co.uk" in u for _,u in ls): raise RuntimeError(f"Old domain remains: {r['Title']}")
-        if any(u==f"/knowledge-hub-articles/{r['slug']}" for _,u in ls): raise RuntimeError(f"Self link: {r['Title']}")
-        bad=[u for _,u in ls if u.startswith("/knowledge-hub-articles/") and u.rsplit("/",1)[-1] not in slugs]
+        olddom=[u for _,u,_ in ls if "vanfinancecompany.co.uk" in u]
+        selflinks=[u for _,u,_ in ls if u==f"/knowledge-hub-articles/{r['slug']}"]
+        bad=[u for _,u,_ in ls if u.startswith("/knowledge-hub-articles/") and u.rsplit("/",1)[-1] not in slugs]
+        if olddom: raise RuntimeError(f"Old domain remains: {r['Title']} {olddom}")
+        if selflinks: raise RuntimeError(f"Self link: {r['Title']}")
         if bad: raise RuntimeError(f"Bad article destination {bad}: {r['Title']}")
-        if any(u.startswith("/knowledge-hub-articles/") for _,u in ls): stats["articles_with_kh_links"]+=1
-        if any(u in COMMERCIAL for _,u in ls): stats["articles_with_commercial_links"]+=1
+        # Any newly generated contextual/stock link must be in Article Body or FAQ.
+        for c in changes:
+            if c[0] in ("add_article","add_stock") and not link_is_after_article_body(new,c[3]):
+                raise RuntimeError(f"Generated link outside Article Body/FAQ: {r['Title']} {c[3]}")
+        if any(u.startswith("/knowledge-hub-articles/") for _,u,_ in ls): stats["articles_with_kh_links"]+=1
+        if any(u in COMMERCIAL for _,u,_ in ls): stats["articles_with_commercial_links"]+=1
         r["content"]=json.dumps(new,ensure_ascii=False,separators=(",",":"))
         for c in changes:
-            logs.append([rid,r["Title"],*c]); stats[c[0]]+=1
+            logs.append([rid,r["Title"],*c])
+            if c[0] in stats: stats[c[0]]+=1
     outfields=['_id' if x=='ID' else x for x in fields]
     for r in rows: r['_id']=r.pop('ID')
     with open(dst,"w",encoding="utf-8-sig",newline="") as f:
