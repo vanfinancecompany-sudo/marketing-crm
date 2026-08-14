@@ -64,17 +64,12 @@ async function main() {
     ...(Array.isArray(row.related_article_ids) ? row.related_article_ids : []),
     row.linked_article_id,
   ]).filter(Boolean))];
-  const relatedSectionIds = [...new Set(rows.flatMap((row) => Array.isArray(row.related_business_section_ids) ? row.related_business_section_ids : []).filter(Boolean))];
 
   const articles = relatedArticleIds.length
     ? check(await supabase.from("knowledge_articles").select("id,title,category,status,live_wix_url").in("id", relatedArticleIds), "Related articles could not be read")
     : [];
-  const sections = relatedSectionIds.length
-    ? check(await supabase.from("knowledge_business_sections").select("id,title,category,is_active").in("id", relatedSectionIds), "Related business sections could not be read")
-    : [];
 
   const articleById = new Map(articles.map((item) => [item.id, item]));
-  const sectionById = new Map(sections.map((item) => [item.id, item]));
   const touched = new Set(OPPORTUNITY_IDS);
   const safeRows = rows
     .filter((row) => touched.has(row.id))
@@ -112,7 +107,7 @@ async function main() {
         last_refreshed_at: row.evidence_last_refreshed_at,
       },
       related_articles: (row.related_article_ids || []).map((id) => articleById.get(id)).filter(Boolean).map((item) => ({ id: item.id, title: item.title, category: item.category, status: item.status, live: Boolean(item.live_wix_url) })),
-      related_business_sections: (row.related_business_section_ids || []).map((id) => sectionById.get(id)).filter(Boolean).map((item) => ({ id: item.id, title: item.title, category: item.category, active: item.is_active !== false })),
+      related_business_section_count: Array.isArray(row.related_business_section_ids) ? row.related_business_section_ids.length : 0,
       linked_article: row.linked_article_id ? articleById.get(row.linked_article_id) || { id: row.linked_article_id } : null,
     }));
 
