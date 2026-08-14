@@ -39,6 +39,7 @@
   let activeContext = inferPageContext(activeHref);
   let storageKey = buildStorageKey(activeContext);
   let whatsappObserver = null;
+  let pageScrollLock = null;
   const hiddenWhatsAppControls = new Map();
   const analyticsVisitorId = loadAnalyticsVisitorId();
 
@@ -173,7 +174,7 @@
     shadow.innerHTML = `
       <style>
         :host { all: initial; }
-        .layer { position:fixed; inset:0; z-index:100; pointer-events:none; font-family:Arial,sans-serif; }
+        .layer { position:fixed; inset:0; z-index:2147483000; pointer-events:none; font-family:Arial,sans-serif; }
         .launcher {
           pointer-events:auto; position:absolute; right:18px; bottom:58px; width:82px; height:44px;
           border:0; border-radius:999px; background:#d71920; color:#fff; cursor:pointer;
@@ -199,15 +200,19 @@
             right:12px; bottom:58px; width:76px; height:38px; padding:0 8px;
             font-size:10.5px; box-shadow:0 4px 12px rgba(0,0,0,.24);
           }
-          .panel-frame {
-            right:8px; bottom:84px; width:calc(100vw - 16px);
-            height:min(620px, calc(100vh - 130px)); height:min(620px, calc(100dvh - 130px));
-            border-radius:15px;
-          }
+          .panel-frame,
           .panel-frame.is-open {
-            bottom:12px;
-            height:min(682px, calc(100vh - 112px));
-            height:min(682px, calc(100dvh - 112px));
+            inset:0;
+            right:0;
+            bottom:0;
+            width:100vw;
+            max-width:none;
+            height:100vh;
+            height:100dvh;
+            max-height:none;
+            border-radius:0;
+            box-shadow:none;
+            transition:none;
           }
         }
       </style>
@@ -265,6 +270,31 @@
     else element.style.removeProperty(property);
   }
 
+  function lockPageScroll() {
+    if (pageScrollLock || !document.documentElement || !document.body) return;
+    const html = document.documentElement;
+    const body = document.body;
+    pageScrollLock = {
+      htmlOverflow: rememberStyleProperty(html, "overflow"),
+      htmlOverscroll: rememberStyleProperty(html, "overscroll-behavior"),
+      bodyOverflow: rememberStyleProperty(body, "overflow"),
+      bodyOverscroll: rememberStyleProperty(body, "overscroll-behavior"),
+    };
+    html.style.setProperty("overflow", "hidden", "important");
+    html.style.setProperty("overscroll-behavior", "none", "important");
+    body.style.setProperty("overflow", "hidden", "important");
+    body.style.setProperty("overscroll-behavior", "none", "important");
+  }
+
+  function unlockPageScroll() {
+    if (!pageScrollLock || !document.documentElement || !document.body) return;
+    restoreStyleProperty(document.documentElement, "overflow", pageScrollLock.htmlOverflow);
+    restoreStyleProperty(document.documentElement, "overscroll-behavior", pageScrollLock.htmlOverscroll);
+    restoreStyleProperty(document.body, "overflow", pageScrollLock.bodyOverflow);
+    restoreStyleProperty(document.body, "overscroll-behavior", pageScrollLock.bodyOverscroll);
+    pageScrollLock = null;
+  }
+
   function hideWhatsAppTarget(target) {
     if (!target || hiddenWhatsAppControls.has(target)) return;
     hiddenWhatsAppControls.set(target, {
@@ -311,6 +341,7 @@
     launcher.classList.add("hidden");
     currentFrame.classList.remove("hidden");
     currentFrame.classList.add("is-open");
+    lockPageScroll();
     hideCompetingWhatsAppControl();
     sendTelemetry("launcher_open");
   }
@@ -318,6 +349,7 @@
   function hidePanel() {
     const wasOpen = Boolean(frame && !frame.classList.contains("hidden"));
     restoreCompetingWhatsAppControl();
+    unlockPageScroll();
     frame?.classList.remove("is-open");
     frame?.classList.add("hidden");
     launcher?.classList.remove("hidden");
