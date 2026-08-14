@@ -57,7 +57,7 @@ test("visual layer softens chat while preserving VFC red for actions", async () 
   assert.match(visual, /✓ Voice captured\. Check the text, then press Send\./);
 });
 
-test("mobile composer stacks message field above Talk and Send controls", async () => {
+test("mobile composer stacks message field above permanently visible Talk and Send controls", async () => {
   const [visual, loader] = await Promise.all([
     readFile(new URL("../public/wix-ai-assistant/visual-polish.mjs", import.meta.url), "utf8"),
     readFile(new URL("../public/wix-ai-assistant/site-loader.js", import.meta.url), "utf8"),
@@ -67,22 +67,23 @@ test("mobile composer stacks message field above Talk and Send controls", async 
   assert.match(visual, /\.input-row textarea \{ flex:1 0 100%/);
   assert.match(visual, /\.mic \{ flex:1 1 38%/);
   assert.match(visual, /\.send \{ flex:1 1 56%/);
-  assert.match(loader, /right:8px; bottom:84px; width:calc\(100vw - 16px\)/);
-  assert.match(loader, /height:min\(620px, calc\(100dvh - 130px\)\)/);
+  assert.doesNotMatch(visual, /mobile-compact/);
+  assert.doesNotMatch(visual, /Tap here to continue chatting/);
+  assert.match(loader, /\.panel-frame,\s*\.panel-frame\.is-open\s*\{/);
+  assert.match(loader, /width:100vw/);
+  assert.match(loader, /height:100dvh/);
 });
 
-test("mobile composer collapses after Send and expands when the message box is focused", async () => {
+test("mobile assistant keeps controls visible and provides a prominent close button", async () => {
   const visual = await readFile(new URL("../public/wix-ai-assistant/visual-polish.mjs", import.meta.url), "utf8");
-  assert.match(visual, /\.composer\.mobile-compact \.mic/);
-  assert.match(visual, /\.composer\.mobile-compact \.send/);
-  assert.match(visual, /\.composer\.mobile-compact \.voice-status/);
-  assert.match(visual, /\.composer\.mobile-compact \.notice/);
-  assert.match(visual, /if \(canSend\) this\.mobileComposerCollapsed = true/);
-  assert.match(visual, /widget\.mobileComposerCollapsed = false/);
-  assert.match(visual, /input\.addEventListener\("focus", expand\)/);
-  assert.match(visual, /input\.addEventListener\("click", expand\)/);
-  assert.match(visual, /Tap here to continue chatting…/);
-  assert.match(visual, /input\.placeholder = "Type your message…"/);
+  assert.doesNotMatch(visual, /if \(canSend\) this\.mobileComposerCollapsed = true/);
+  assert.doesNotMatch(visual, /widget\.mobileComposerCollapsed = false/);
+  assert.doesNotMatch(visual, /input\.addEventListener\("focus", expand\)/);
+  assert.match(visual, /close\.textContent = "✕ Close"/);
+  assert.match(visual, /\.header \.close \{/);
+  assert.match(visual, /min-width:78px; min-height:40px/);
+  assert.match(visual, /env\(safe-area-inset-top\)/);
+  assert.match(visual, /env\(safe-area-inset-bottom\)/);
 });
 
 test("assistant typing state is presented as a clear animated reply bubble", async () => {
@@ -101,4 +102,5 @@ test("visual polish loads after the existing voice resilience layer", async () =
   const polishIndex = embed.indexOf('await import("./visual-polish.mjs")');
   assert.ok(voiceIndex >= 0);
   assert.ok(polishIndex > voiceIndex);
+  assert.doesNotMatch(embed, /mobile-attention-cue\.mjs/);
 });
