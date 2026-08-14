@@ -86,7 +86,8 @@ test("short company variants and personal answers remain anchored to an explicit
     const result = orchestrateConversationTurn({ message, intent, human });
     assert.equal(result.contextual_turn, true, message);
     assert.equal(result.contextual_anchor_used, previous, message);
-    assert.equal(result.retrieval_required, true, message);
+    assert.equal(result.recovery_required, false, message);
+    assert.match(intent.normalised_message, new RegExp(`${message.replace(/\s+/g, "\\s+")}$`, "i"), message);
   }
 });
 
