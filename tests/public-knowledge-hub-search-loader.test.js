@@ -9,8 +9,15 @@ const source = fs.readFileSync(path.join(root, "public/knowledge-hub-search/site
 const apiSource = fs.readFileSync(path.join(root, "api/public-knowledge-hub-search.js"), "utf8");
 
 test("Knowledge Hub search loader is exact-path gated and cannot appear on article or stock pages", () => {
-  assert.match(source, /normalisedPath !== "\/knowledge-hub"/);
+  assert.match(source, /return normalisedPath === "\/knowledge-hub"/);
   assert.doesNotMatch(source, /startsWith\("\/knowledge-hub"\)/);
+});
+
+test("Knowledge Hub search survives Wix client-side navigation without remaining on other pages", () => {
+  assert.match(source, /function syncRoute\(\)/);
+  assert.match(source, /if \(isKnowledgeHubPath\(\)\) mount\(\)/);
+  assert.match(source, /else if \(host \|\| targetObserver\) teardown\(\)/);
+  assert.match(source, /setInterval\(syncRoute, 700\)/);
 });
 
 test("Knowledge Hub search loader uses isolated UI and customer-facing category filters", () => {
