@@ -6,6 +6,7 @@
 
   const CHANNEL = "vfc-ai-assistant-widget-v1";
   const STORAGE_PREFIX = "vfc_ai_assistant_sitewide";
+  const ANALYTICS_SESSION_KEY = "vfc_ai_assistant_analytics_session_v1";
   const RENT2BUY_ONLY_HOSTS = new Set(["rent2buyvans.co.uk", "www.rent2buyvans.co.uk"]);
   const WHATSAPP_SELECTOR = [
     'a[href*="wa.me" i]',
@@ -26,6 +27,7 @@
     }
   })();
   const API_URL = `${SCRIPT_ORIGIN}/api/ai-assistant-sitewide`;
+  const TELEMETRY_URL = `${SCRIPT_ORIGIN}/api/ai-assistant-telemetry`;
   const EMBED_URL = `${SCRIPT_ORIGIN}/wix-ai-assistant/embed.html?mode=panel&v=sitewide-1`;
 
   let host = null;
@@ -38,9 +40,22 @@
   let storageKey = buildStorageKey(activeContext);
   let whatsappObserver = null;
   const hiddenWhatsAppControls = new Map();
+  const analyticsVisitorId = loadAnalyticsVisitorId();
 
   function clean(value, limit = 5000) {
     return String(value || "").trim().slice(0, limit);
+  }
+
+  function loadAnalyticsVisitorId() {
+    try {
+      const existing = clean(window.sessionStorage.getItem(ANALYTICS_SESSION_KEY), 160);
+      if (existing) return existing;
+      const generated = globalThis.crypto?.randomUUID?.() || `analytics-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      window.sessionStorage.setItem(ANALYTICS_SESSION_KEY, generated);
+      return generated;
+    } catch {
+      return globalThis.crypto?.randomUUID?.() || `analytics-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
   }
 
   function compactRegistration(value) {
@@ -126,6 +141,29 @@
     }
   }
 
+  function sendTelemetry(eventType, options = {}) {
+    const body = {
+      event_type: eventType,
+      visitor_id: analyticsVisitorId,
+      conversation_id: options.conversationId === undefined ? storedConversationId() : options.conversationId,
+      page_type: activeContext.pageType,
+      product_context: activeContext.productContext,
+      cta_action_key: options.cta?.action_key || null,
+      cta_label: options.cta?.label || null,
+    };
+    try {
+      fetch(TELEMETRY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        credentials: "omit",
+        keepalive: true,
+      }).catch(() => {});
+    } catch {
+      // Measurement must never interfere with the customer assistant.
+    }
+  }
+
   function createUi() {
     if (host) return;
     host = document.createElement("div");
@@ -179,6 +217,7 @@
     launcher = shadow.querySelector(".launcher");
     launcher.addEventListener("click", showPanel);
     document.body.appendChild(host);
+    sendTelemetry("launcher_impression");
   }
 
   function assistantFrameTitle(context) {
@@ -273,14 +312,17 @@
     currentFrame.classList.remove("hidden");
     currentFrame.classList.add("is-open");
     hideCompetingWhatsAppControl();
+    sendTelemetry("launcher_open");
   }
 
   function hidePanel() {
+    const wasOpen = Boolean(frame && !frame.classList.contains("hidden"));
     restoreCompetingWhatsAppControl();
     frame?.classList.remove("is-open");
     frame?.classList.add("hidden");
     launcher?.classList.remove("hidden");
     launcher?.focus();
+    if (wasOpen) sendTelemetry("launcher_close");
   }
 
   function postToWidget(message) {
@@ -300,13 +342,14 @@
         ? message.productChoice
         : null;
       const body = action === "start"
-        ? { action: "start", page_url: window.location.href }
+        ? { action: "start", page_url: window.location.href, analytics_visitor_id: analyticsVisitorId }
         : {
             action: "message",
             conversation_id: storedConversationId(),
             page_url: window.location.href,
             message: clean(message.message, 3000),
             product_choice: homepageChoice,
+            analytics_visitor_id: analyticsVisitorId,
           };
 
       const response = await fetch(API_URL, {
@@ -345,6 +388,10 @@
       callAssistant(message);
       return;
     }
+    if (message.type === "cta") {
+      sendTelemetry("cta_click", { cta: message.cta });
+      return;
+    }
     if (message.type === "ui_close") hidePanel();
   }
 
@@ -362,6 +409,7 @@
     requestInFlight = false;
     activeContext = inferPageContext(nextHref);
     storageKey = buildStorageKey(activeContext);
+    sendTelemetry("launcher_impression");
   }
 
   window.addEventListener("message", handleWidgetMessage);
