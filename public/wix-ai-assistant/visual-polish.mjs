@@ -50,6 +50,17 @@ const POLISH_STYLES = `
   .header-copy .title { font-size:15px; line-height:1.2; font-weight:700; }
   .header-subtitle { color:#cfd3d7; font-size:10.5px; line-height:1.25; font-weight:400; }
   .header > button { font-size:11px; opacity:.9; }
+  .header .restart { opacity:.72; }
+  .header .close {
+    min-height:34px;
+    border:1px solid rgba(255,255,255,.55) !important;
+    background:#fff !important;
+    color:#151719 !important;
+    border-radius:999px !important;
+    padding:0 11px !important;
+    font-weight:800 !important;
+    opacity:1 !important;
+  }
   .messages { background:var(--vfc-soft-bg) !important; gap:11px !important; padding:15px !important; }
   .message { border-radius:17px !important; padding:10px 13px !important; line-height:1.5 !important; box-shadow:0 1px 2px rgba(17,24,39,.04); }
   .message.assistant { background:var(--vfc-assistant) !important; border:1px solid var(--vfc-assistant-border) !important; color:#17212b !important; border-bottom-left-radius:6px !important; }
@@ -81,25 +92,21 @@ const POLISH_STYLES = `
   .apply-card-cta { display:inline-block; margin-top:10px; background:var(--vfc-red); color:#fff; border-radius:9px; padding:9px 12px; font-size:11px; line-height:1; font-weight:800; letter-spacing:.15px; }
   .apply-card-note { margin-top:7px; color:#68727b; font-size:10.5px; line-height:1.3; }
   @media (max-width:520px) {
+    :host([panel-only]) .panel { border:0 !important; border-radius:0 !important; }
+    .header { padding:calc(12px + env(safe-area-inset-top)) 12px 11px !important; }
+    .header .close { min-width:78px; min-height:40px; font-size:12px !important; padding:0 13px !important; }
     .messages { padding:13px !important; }
     .message { max-width:90% !important; }
     .typing { max-width:90%; font-size:11.5px !important; padding:10px 12px !important; }
     .vehicle-apply-card { max-width:96% !important; }
     .quick-replies { gap:6px; }
     .quick-reply { padding:7px 9px; font-size:10.5px; }
-    .composer { padding:10px 11px 9px !important; }
+    .composer { padding:10px 11px calc(9px + env(safe-area-inset-bottom)) !important; }
     .input-row { flex-wrap:wrap; align-items:stretch !important; gap:8px !important; }
     .input-row textarea { flex:1 0 100% !important; width:100% !important; min-height:58px; max-height:105px; resize:none; }
     .mic { flex:1 1 38% !important; min-width:0 !important; width:auto !important; height:46px !important; justify-content:center; padding:0 10px !important; }
     .mic.recording { min-width:0 !important; }
     .send { flex:1 1 56% !important; width:auto !important; min-width:0 !important; height:46px !important; }
-    .composer.mobile-compact { padding:9px 11px !important; }
-    .composer.mobile-compact .input-row { gap:0 !important; }
-    .composer.mobile-compact .input-row textarea { min-height:50px; max-height:72px; cursor:text; }
-    .composer.mobile-compact .mic,
-    .composer.mobile-compact .send,
-    .composer.mobile-compact .voice-status,
-    .composer.mobile-compact .notice { display:none !important; }
   }
 `;
 
@@ -116,7 +123,11 @@ function polishHeader(widget) {
   const root = widget.shadowRoot;
   const header = root?.querySelector(".header");
   const title = header?.querySelector(".title");
-  if (!header || !title || header.querySelector(".header-copy")) return;
+  if (!header || !title) return;
+
+  const close = header.querySelector(".close");
+  if (close) close.textContent = "✕ Close";
+  if (header.querySelector(".header-copy")) return;
 
   const pageType = String(widget.state?.pageContext?.pageType || "").toLowerCase();
   if (pageType === "finance_vehicle" || pageType === "finance_general") title.textContent = "Van Finance Assistant";
@@ -208,26 +219,6 @@ function polishVehicleApplyPrompt(widget) {
   node.append(heading, copy, cta, note);
 }
 
-function applyMobileComposerState(widget) {
-  const root = widget.shadowRoot;
-  const composer = root?.querySelector(".composer");
-  const input = root?.querySelector("#customerMessage");
-  if (!composer || !input) return;
-
-  const collapsed = Boolean(widget.mobileComposerCollapsed);
-  composer.classList.toggle("mobile-compact", collapsed);
-  input.placeholder = collapsed ? "Tap here to continue chatting…" : "Type your message…";
-  if (input.dataset.mobileComposerBound === "true") return;
-  input.dataset.mobileComposerBound = "true";
-  const expand = () => {
-    widget.mobileComposerCollapsed = false;
-    composer.classList.remove("mobile-compact");
-    input.placeholder = "Type your message…";
-  };
-  input.addEventListener("focus", expand);
-  input.addEventListener("click", expand);
-}
-
 function polishWidget(widget) {
   ensurePolishStyle(widget);
   polishHeader(widget);
@@ -235,7 +226,6 @@ function polishWidget(widget) {
   polishTypingIndicator(widget);
   addStarterReplies(widget);
   polishVehicleApplyPrompt(widget);
-  applyMobileComposerState(widget);
 }
 
 if (WidgetClass && !WidgetClass.prototype.__vfcVisualPolishInstalled) {
@@ -247,15 +237,6 @@ if (WidgetClass && !WidgetClass.prototype.__vfcVisualPolishInstalled) {
     const result = originalRender.apply(this, args);
     polishWidget(this);
     return result;
-  };
-
-  const originalSendMessage = prototype.sendMessage;
-  prototype.sendMessage = function sendMessageWithMobileCollapse(productChoice = null) {
-    const input = this.shadowRoot?.querySelector("#customerMessage");
-    const message = productChoice || String(input?.value || "").trim();
-    const canSend = Boolean(message) && !this.state?.loading && !this.voiceRecording && !this.voiceTranscribing;
-    if (canSend) this.mobileComposerCollapsed = true;
-    return originalSendMessage.call(this, productChoice);
   };
 
   const currentFinish = prototype.finishVoiceRecording;
