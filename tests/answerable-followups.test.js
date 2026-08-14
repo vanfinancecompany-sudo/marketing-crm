@@ -53,7 +53,7 @@ test("application mode does not invent an additional question", () => {
   assert.equal(result.supported_question, "");
 });
 
-test("conversation polish keeps an answerable journey question while removing a made-up offer", () => {
+test("conversation polish removes a made-up offer from a completed factual answer", () => {
   const result = polishConversationPresentation({
     reply: "Yes, self-employed applicants can apply subject to the normal assessment. Would you like me to check your eligibility?",
     question: "Can I apply if I am self employed?",
@@ -62,7 +62,19 @@ test("conversation polish keeps an answerable journey question while removing a 
     journey: { next_best_question: "How long have you been trading?" },
     orchestration: {},
   });
-  assert.equal(result.reply, "Yes, self-employed applicants can apply subject to the normal assessment. How long have you been trading?");
-  assert.equal(result.supported_follow_up_question, "How long have you been trading?");
-  assert.equal(result.unsupported_offer_removed, true);
+  assert.equal(result.reply, "Yes, self-employed applicants can apply subject to the normal assessment.");
+  assert.doesNotMatch(result.reply, /would you like me|check your eligibility/i);
+});
+
+test("a clean answer is not forced to ask a question merely because one is available", () => {
+  const result = enforceAnswerableFollowUp(
+    "An initial decision can sometimes be available quickly, but timing depends on the lender and checks.",
+    {
+      intent: {},
+      journey: { next_best_question: "Are you already looking at a specific van?" },
+      orchestration: {},
+    },
+  );
+  assert.equal(result.reply, "An initial decision can sometimes be available quickly, but timing depends on the lender and checks.");
+  assert.equal((result.reply.match(/\?/g) || []).length, 0);
 });
