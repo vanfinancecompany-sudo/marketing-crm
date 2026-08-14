@@ -9,11 +9,7 @@
     { id: "knowledge-hub", label: "Knowledge Hub", path: "/knowledge-hub", paths: ["/knowledge-hub"], navigation: "react", view: "Knowledge Hub" },
     { id: "content-factory", label: "Content Factory", path: "/content-factory", paths: ["/content-factory"], navigation: "react", view: "Content Factory" },
     { id: "ai-control-centre", label: "AI Control Centre", path: "/ai-control-centre/", paths: ["/ai-control-centre/"], navigation: "document" },
-    { id: "ai-visibility", label: "AI Visibility", path: "/ai-visibility", paths: ["/ai-visibility"], navigation: "react", view: "AI Visibility" },
-    { id: "ai-assistant-competence", label: "AI Assistant Test", path: "/ai-assistant-competence", paths: ["/ai-assistant-competence"], navigation: "react", view: "AI Assistant Competence Test" },
-    { id: "ai-knowledge-opportunities", label: "AI Knowledge Opportunities", path: "/ai-knowledge-opportunities", paths: ["/ai-knowledge-opportunities"], navigation: "react", view: "AI Knowledge Opportunities" },
-    { id: "ai-customer-simulation", label: "Real Customer Simulation", path: "/ai-customer-simulation", paths: ["/ai-customer-simulation"], navigation: "react", view: "Real Customer Simulation" },
-    { id: "ai-assistant-health", label: "AI Assistant Health", path: "/ai-assistant-health", paths: ["/ai-assistant-health"], navigation: "react", view: "AI Assistant Health" },
+    { id: "ai-knowledge-opportunities", label: "Knowledge Opportunities", path: "/ai-knowledge-opportunities", paths: ["/ai-knowledge-opportunities"], navigation: "react", view: "AI Knowledge Opportunities" },
     { id: "suppression-centre", label: "Suppression Centre", path: "/suppression-centre/", paths: ["/suppression-centre/"], navigation: "document" },
     { id: "email-templates", label: "Email Templates", path: "/email-templates/", paths: ["/email-templates/"], navigation: "document" },
     { id: "campaigns", label: "Campaigns", path: "/campaigns/", paths: ["/campaigns/"], navigation: "document" },
@@ -25,6 +21,13 @@
     { id: "van-finance-facebook", label: "Van Finance Facebook", path: "/van-finance-facebook", paths: ["/van-finance-facebook"], navigation: "react", view: "Van Finance Facebook" },
     { id: "rent2buy-facebook", label: "Rent2Buy Facebook", path: "/rent2buy-facebook", paths: ["/rent2buy-facebook"], navigation: "react", view: "Rent2Buy Facebook" },
     { id: "facebook-marketplace", label: "Facebook Marketplace", path: "/facebook-marketplace", paths: ["/facebook-marketplace"], navigation: "react", view: "Facebook Marketplace" },
+  ]);
+
+  const advancedRoutes = Object.freeze([
+    { id: "ai-visibility", label: "AI Visibility", path: "/ai-visibility", view: "AI Visibility" },
+    { id: "ai-assistant-competence", label: "AI Assistant Test", path: "/ai-assistant-competence", view: "AI Assistant Competence Test" },
+    { id: "ai-customer-simulation", label: "Real Customer Simulation", path: "/ai-customer-simulation", view: "Real Customer Simulation" },
+    { id: "ai-assistant-health", label: "AI Assistant Health", path: "/ai-assistant-health", view: "AI Assistant Health" },
   ]);
 
   function normalizePathname(value) {
@@ -43,6 +46,7 @@
 
   window.MarketingCrmNavigation = Object.freeze({
     items,
+    advancedRoutes,
     normalizePathname,
     isItemActive,
   });
