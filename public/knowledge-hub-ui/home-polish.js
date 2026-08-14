@@ -25,6 +25,8 @@
     style.textContent = `
       #vfc-knowledge-hub-search {
         margin: 0 !important;
+        min-height: 0 !important;
+        height: auto !important;
       }
       [data-vfc-kh-card-root="true"],
       [data-vfc-kh-card-wrap="true"] {
@@ -56,6 +58,25 @@
       .vfc-kh-modern-card__count {
         font-size: 16px !important;
       }
+      [data-vfc-kh-category-link="true"] {
+        width: auto !important;
+        max-width: none !important;
+        min-width: 0 !important;
+        margin: 6px 8px !important;
+        padding: 9px 15px !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        text-decoration: none !important;
+      }
+      [data-vfc-kh-category-link="true"] *,
+      [data-vfc-kh-category-link="true"] span {
+        width: auto !important;
+        max-width: none !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        text-decoration: none !important;
+        white-space: nowrap !important;
+      }
       @media (max-width: 768px) {
         .vfc-kh-modern-card__title { font-size: 18px !important; }
         .vfc-kh-modern-card__excerpt { font-size: 16px !important; }
@@ -70,28 +91,51 @@
   }
 
   function findIntroRoot() {
-    const candidates = Array.from(document.querySelectorAll("h1,h2,h3,h4,div,p,section"));
-    const heading = candidates.find((element) => {
-      const text = clean(element.textContent, 120).toLowerCase();
-      return text.includes("van finance company") && text.includes("knowledge hub") && text.length <= 90;
-    });
-    if (!heading) return null;
+    const candidates = Array.from(document.querySelectorAll("h1,h2,h3,h4,div,p,section"))
+      .filter((element) => !element.closest("#vfc-knowledge-hub-search"))
+      .filter((element) => /welcome to the van finance company knowledge hub/i.test(clean(element.textContent, 1000)))
+      .sort((a, b) => clean(a.textContent, 1000).length - clean(b.textContent, 1000).length);
 
-    let current = heading;
+    const welcome = candidates[0] || null;
+    if (!welcome) return null;
+
+    let current = welcome;
     for (let depth = 0; current && depth < 7; depth += 1, current = current.parentElement) {
       const text = clean(current.innerText || current.textContent, 1400);
-      if (text.length > 1200) continue;
-      const hasWelcome = /welcome to the van finance company knowledge hub/i.test(text);
+      if (!text || text.length > 1200) continue;
+      const hasHeading = /van finance company\s*[-–]?\s*knowledge hub/i.test(text);
       const categoryLinks = current.querySelectorAll?.('a[href*="/knowledge-hub-category/"]').length || 0;
-      if (hasWelcome && categoryLinks === 0) return current;
+      const articleLinks = current.querySelectorAll?.('a[href*="/knowledge-hub-articles/"]').length || 0;
+      const containsSearch = Boolean(current.querySelector?.("#vfc-knowledge-hub-search"));
+      if (hasHeading && categoryLinks === 0 && articleLinks === 0 && !containsSearch) return current;
     }
-    return null;
+    return welcome.parentElement || welcome;
+  }
+
+  function findBackControl(root) {
+    const candidates = Array.from((root || document).querySelectorAll?.("a,button,[role=\"button\"]") || []);
+    return candidates.find((element) => /^\s*(?:←\s*)?back\s*$/i.test(clean(element.textContent, 40))) || null;
+  }
+
+  function tightBackWrap(control, boundary) {
+    if (!control) return null;
+    let current = control;
+    let best = control;
+    for (let depth = 0; current && current !== boundary && depth < 4; depth += 1, current = current.parentElement) {
+      const text = clean(current.innerText || current.textContent, 100);
+      if (text && text.length <= 45) best = current;
+      else break;
+    }
+    return best;
   }
 
   function tuneSearch(host) {
     const shadow = host?.shadowRoot;
     const shell = shadow?.querySelector?.(".shell");
     if (!shadow || !shell) return false;
+
+    host.style.setProperty("min-height", "0", "important");
+    host.style.setProperty("height", "auto", "important");
 
     let style = shadow.getElementById?.(SEARCH_STYLE_ID);
     if (!style) {
@@ -100,18 +144,28 @@
       style.textContent = `
         .shell {
           width: min(820px, calc(100% - 32px)) !important;
-          margin: 28px auto !important;
-          padding: 28px !important;
+          margin: 24px auto 26px !important;
+          padding: 24px 28px 18px !important;
           min-height: 0 !important;
+          height: auto !important;
+          max-height: none !important;
+        }
+        .chips {
+          margin: 12px 0 0 !important;
         }
         .status:empty {
           display: none !important;
           min-height: 0 !important;
+          height: 0 !important;
           margin: 0 !important;
+          padding: 0 !important;
         }
         .results:empty {
           display: none !important;
+          min-height: 0 !important;
+          height: 0 !important;
           margin: 0 !important;
+          padding: 0 !important;
         }
       `;
       shadow.appendChild(style);
@@ -124,9 +178,14 @@
     const intro = findIntroRoot();
     if (!host || !intro || intro.contains(host)) return false;
 
-    if (intro.nextElementSibling !== host) {
+    const back = findBackControl(intro);
+    const backWrap = tightBackWrap(back, intro);
+    if (backWrap && backWrap !== intro) {
+      if (backWrap.previousElementSibling !== host) backWrap.insertAdjacentElement("beforebegin", host);
+    } else if (intro.nextElementSibling !== host) {
       intro.insertAdjacentElement("afterend", host);
     }
+
     tuneSearch(host);
     return true;
   }
