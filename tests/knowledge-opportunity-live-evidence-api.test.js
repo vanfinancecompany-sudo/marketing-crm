@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const endpoint = fs.readFileSync(path.join(root, "api/marketing-ai-knowledge-opportunity-evidence.js"), "utf8");
 const refresh = fs.readFileSync(path.join(root, "api/_knowledgeOpportunityEvidenceRefresh.js"), "utf8");
+const controlCentreApi = fs.readFileSync(path.join(root, "api/marketing-ai-control-centre.js"), "utf8");
 const page = fs.readFileSync(path.join(root, "public/ai-control-centre/index.html"), "utf8");
 const migration = fs.readFileSync(path.join(root, "supabase/migrations/041_knowledge_opportunity_live_evidence.sql"), "utf8");
 const publicTelemetry = fs.readFileSync(path.join(root, "api/ai-assistant-telemetry.js"), "utf8");
@@ -49,6 +50,12 @@ test("the public browser telemetry endpoint has no customer-question ingestion c
   assert.doesNotMatch(publicTelemetry, /customer_question/);
   assert.doesNotMatch(publicTelemetry, /conversation_history/);
   assert.doesNotMatch(publicTelemetry, /body\.message/);
+});
+
+test("the aggregate Control Centre does not select or expose customer question wording", () => {
+  const assistantSelect = controlCentreApi.match(/loadPagedRows\(supabase, "ai_assistant_events", "([^"]+)"/)?.[1] || "";
+  assert.ok(assistantSelect);
+  assert.doesNotMatch(assistantSelect, /customer_question/);
 });
 
 test("evidence worker reads assistant, Hub search and GSC channels with pagination", () => {
