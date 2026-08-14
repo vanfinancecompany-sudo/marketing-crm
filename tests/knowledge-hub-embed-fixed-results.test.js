@@ -32,3 +32,9 @@ test("mobile input stays at 16px and mobile actions do not programmatically refo
   assert.match(source, /input\.focus\(\{ preventScroll: true \}\)/);
   assert.match(source, /input\.blur\(\);/);
 });
+
+test("embedded document is hard-locked against its own mobile scroll range", async () => {
+  const source = await embedSource();
+  assert.match(source, /html, body \{[^}]*height: 100%;[^}]*min-height: 0;[^}]*overflow: hidden;[^}]*overscroll-behavior: none;/s);
+  assert.match(source, /body \{[^}]*position: fixed;[^}]*inset: 0;[^}]*overflow: hidden;/s);
+});
