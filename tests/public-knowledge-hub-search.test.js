@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { handlePublicKnowledgeHubSearchRequest } from "../api/public-knowledge-hub-search.js";
 import {
   isPublicKnowledgeHubArticle,
   normaliseKnowledgeHubSearchText,
@@ -90,4 +91,21 @@ test("stored search text redacts common customer contact and financial identifie
 
 test("query normalisation keeps intent words while removing punctuation noise", () => {
   assert.equal(normaliseKnowledgeHubSearchText("  MOT-history: failures & advisories?!  "), "mot history failures and advisories");
+});
+
+test("production Knowledge Hub embed origin is allowed without broadening Wix origins", async () => {
+  const headers = {};
+  const response = {
+    statusCode: 200,
+    setHeader(name, value) { headers[name] = value; },
+    status(code) { this.statusCode = code; return this; },
+    json(payload) { this.payload = payload; return this; },
+    end() { this.ended = true; return this; },
+  };
+  await handlePublicKnowledgeHubSearchRequest({
+    method: "OPTIONS",
+    headers: { origin: "https://marketing-crm-github-work.vercel.app" },
+  }, response, { environment: {} });
+  assert.equal(response.statusCode, 204);
+  assert.equal(headers["Access-Control-Allow-Origin"], "https://marketing-crm-github-work.vercel.app");
 });
