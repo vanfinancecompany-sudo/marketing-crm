@@ -96,7 +96,7 @@
 
           <div id="content" class="hidden">
             <section class="card">
-              <div class="card-head"><div><div class="eyebrow">Customer Assistant</div><h2>Adoption and conversation funnel</h2><p>Separates whether customers use Ask Me from whether the assistant answers well.</p></div><a class="button" href="/ai-assistant-competence">Open Assistant Test</a></div>
+              <div class="card-head"><div><div class="eyebrow">Customer Assistant</div><h2>Adoption and conversation funnel</h2><p>Shows rolling unique assistant users for the last 24 hours, 7 days and 30 days, then the detailed funnel for the selected reporting window. Unique users are anonymous visitor IDs with session fallback.</p></div><a class="button" href="/ai-assistant-competence">Open Assistant Test</a></div>
               <div id="assistantMetrics" class="metrics"></div>
             </section>
 
@@ -185,6 +185,10 @@
 
         function render(payload) {
           const assistant = payload.assistant?.assistant || {};
+          const activeUsers = payload.assistant_active_users || {};
+          const active24 = activeUsers.last_24_hours || {};
+          const active7 = activeUsers.last_7_days || {};
+          const active30 = activeUsers.last_30_days || {};
           const knowledge = payload.assistant?.knowledge || {};
           const search = payload.assistant?.knowledge_hub_search || {};
           const visibility = payload.visibility || {};
@@ -193,7 +197,7 @@
           const health = serverHealthBaseline?.report || healthBaseline();
 
           document.getElementById("assistantMetrics").innerHTML = [
-            metric("Unique exposures", assistant.unique_exposed_visitors), metric("Unique opens", assistant.unique_open_visitors), metric("Open rate", assistant.open_rate, "%"), metric("Conversations", assistant.conversations_started), metric("2+ message conversations", assistant.conversations_with_2_plus_messages), metric("Customer messages", assistant.customer_messages), metric("CTA clicks", assistant.cta_clicks),
+            metric("AI users · 24h", active24.active_users), metric("AI users · 7 days", active7.active_users), metric("AI users · 30 days", active30.active_users), metric("Unique exposures", assistant.unique_exposed_visitors), metric("Unique opens", assistant.unique_open_visitors), metric("Open rate", assistant.open_rate, "%"), metric("Conversations", assistant.conversations_started), metric("2+ message conversations", assistant.conversations_with_2_plus_messages), metric("Customer messages", assistant.customer_messages), metric("CTA clicks", assistant.cta_clicks),
           ].join("");
           document.getElementById("knowledgeMetrics").innerHTML = [
             metric("Assistant responses", assistant.assistant_responses), metric("Responses using retrieval", knowledge.responses_with_retrieval), metric("Retrieval rate", knowledge.retrieval_rate, "%"), metric("Knowledge gaps", knowledge.knowledge_gaps), metric("Gap rate", knowledge.knowledge_gap_rate, "%"), metric("Hub searches", search.searches), metric("No-result searches", search.no_result_searches), metric("Article selections", search.result_selections),
