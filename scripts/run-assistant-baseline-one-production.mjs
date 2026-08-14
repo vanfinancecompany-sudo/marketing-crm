@@ -9,6 +9,7 @@ import {
 import { normaliseHealthBaselineInput } from "../api/marketing-ai-control-centre.js";
 
 const TOTAL_CONVERSATIONS = 10000;
+const TARGET_PROJECT_ID = "prj_zD76dAe2MHZdBTO08GNFSqOb9UHf";
 const SOURCE_MAIN_COMMIT = "7fe4e8b2b5bb0d1396d71b5b45b71c3702195023";
 
 function marker(name, payload = {}) {
@@ -17,6 +18,7 @@ function marker(name, payload = {}) {
 
 function shouldRun() {
   return process.env.VERCEL_ENV === "production"
+    && process.env.VERCEL_PROJECT_ID === TARGET_PROJECT_ID
     && process.env.VERCEL_GIT_COMMIT_REF === "main";
 }
 
@@ -56,6 +58,7 @@ async function main() {
   if (!shouldRun()) {
     marker("BASELINE_ONE_PRODUCTION_SKIPPED", {
       environment: process.env.VERCEL_ENV || null,
+      project_id: process.env.VERCEL_PROJECT_ID || null,
       branch: process.env.VERCEL_GIT_COMMIT_REF || null,
     });
     return;
