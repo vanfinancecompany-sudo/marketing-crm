@@ -106,6 +106,43 @@ test("comparison mode keeps deliberately mixed passages available", () => {
   assert.equal(corpus.some((source) => /Finance and Rent2Buy/i.test(`${source.title} ${source.passage}`)), true);
 });
 
+test("health scoring treats neutral vehicle guidance as shared rather than Finance", () => {
+  const sharedSource = {
+    type: "article",
+    category: "Vehicle Guides",
+    product: "Vehicle Guides",
+    title: "Can You Buy a Used Van Without Seeing It First? A Guide for UK Buyers",
+    heading: "Choosing the right van",
+    passage: "Check the vehicle description, condition, history and suitability for the work you need it to do.",
+    matched_terms: ["van"],
+  };
+  for (const scenario of [financeScenario, rent2buyScenario]) {
+    const evaluated = evaluateHealthConversation({ scenario, turns: [{
+      message: "Can you help me narrow it down?",
+      result: result({ knowledge_sources_used: [sharedSource] }),
+    }] });
+    assert.deepEqual(productFailures(evaluated), [], scenario.product_context);
+  }
+});
+
+test("health scoring still rejects product-specific wording inside a neutral category", () => {
+  const evaluated = evaluateHealthConversation({ scenario: rent2buyScenario, turns: [{
+    message: "What should I choose?",
+    result: result({
+      knowledge_sources_used: [{
+        type: "article",
+        category: "Vehicle Guides",
+        product: "Vehicle Guides",
+        title: "Vehicle guide",
+        heading: "Funding",
+        passage: "A van finance lender may assess the application and APR before offering terms.",
+        matched_terms: ["van"],
+      }],
+    }),
+  }] });
+  assert.equal(productFailures(evaluated).length, 1);
+});
+
 test("health scoring does not call an explicit better-than comparison a product leak", () => {
   for (const scenario of [financeScenario, rent2buyScenario]) {
     const evaluated = evaluateHealthConversation({ scenario, turns: [{
