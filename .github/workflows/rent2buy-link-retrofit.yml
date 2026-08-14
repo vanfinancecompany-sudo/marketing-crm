@@ -1,4 +1,4 @@
-name: Rent2Buy link retrofit upload
+name: Rent2Buy ID preservation test
 
 on:
   push:
@@ -8,40 +8,31 @@ on:
       - .github/workflows/rent2buy-link-retrofit.yml
 
 jobs:
-  retrofit:
+  test-id:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download current Wix backup
+      - name: Download one current Wix item
         env:
-          BACKUP_URL: "https://wix-data-exported-data.s3.amazonaws.com/tmp-uploads-2026-08/tf-1786703733-8890336922208430335.csv?response-content-disposition=attachment%3B%20filename%3D%22rent2buy_knowledge_hub_pre_link_retrofit_backup.csv%22%3B%20filename%2A%3D%20UTF-8%27%27rent2buy-knowledge-hub-pre-link-retrofit-backup.csv%3B&X-Amz-Security-Token=IQoJb3JpZ2luX2VjEDMaCXVzLWVhc3QtMSJHMEUCIBwCm%2FVosgSMPgX00ikBqdjtBdQYG%2FB0R0tSCCxg1uU9AiEAq3axxQ7JbTG%2Bpj6uKud5cf%2FexF9BVa1OkRl39%2FEIpJsqogUI%2B%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAFGgw0MTUyMDg3NTY1NjEiDCEfJV8OMWUwu1LCByr2BGxpd%2FJsjhhlzZ92npxLinSKAWjV1abWs7I%2F3IhqL9MRP%2B4pd7BFgL0oOKTdiwLqBH%2Bf2vBwE9yVokBeyt6vqHCX5gm7%2BydL6qfrJ7HcVt9G8Lf72wUYn3MKEmkCSQEYOmUT1SizpXl5h%2BqqSB3CbG%2BReUCB6tgCIsHPeJiizafjhPS2lmCDAs3JkZCljpjT%2FMJv%2BNVHpTQsWm%2FCGoqy4k22mKP25sWPFC2hir1vWKo0Q5aBlySRXrnBLXZVm1PSAipsSG3QPyzh%2B9zdrJBghUtLDLyXWn4hBHRaEyDC9G13RaGdZqoYqeC1Cjktos2U4t6U4X4ab0FxFocWHITJvKkwmxRt2iRcs68tgn2cVP9%2BrtyAldBTtLVSqfqt6glebEZpk1P6yFgJie2o%2BU7LdwHnnrloQEWqedMq%2FlJXVg8Sf%2F0h1TIjsXuBX8PFOpdL%2BpzKKQgk2n5D8eV1LymnD%2Bbz%2FzmyfLkFvT7IJn28RoWbXFdxlXT99z%2BissTZEDQQPUHQS4FKvyH3T4%2BWHLpSWsRIE%2BvaoVLK8VF4Qqyy%2BclCgBi%2F%2FcUHo4Mn9ESIa7CY5eX5eTdAn36Ycmm%2B0OsS0N3pMwR3ixrLZZ4QYfUbjbyZwuP6Zs36vMWNtr2Ye6gpdeF%2FrnuinqnH4wxbnaDCSvg7c%2BpF9OtcO7AIF1%2BpxP4arbX0TLxpP447QfTywblVPbH2twIeOc7bb1LhwTQMOuBVRZ5vnf0Fz%2FKKEjnzasXVb30kjZvGkH%2BCaXKbk4GMhKZVLR%2BB%2B2Fy2Bsbk3szot4iabXkP23ex2gm8l1k%2B2F05wUT3RZGJSf7laxo%2FXJtZ9eMaH9%2BwzCT1%2FvTBjqZAUfL%2BcsKAEzrt4iSX4v8j2J%2B18Jq11V%2B93%2F4Cf5dJg6SmVjybUQQXdyXYz0OET8Adlu4faR7DJwYP8tEvx5YWC3NtkwTVpJV7i88nveop0nFKeB%2FuFdAxrz5e67tqxs1PtoS4AsMLZeCU5%2BnfBmJk80f9tFnGFMTdoFfxCHyKolIKMrePa64JI%2FvImSuQe0VPrmnsK7XME0KYA%3D%3D&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20260814T104530Z&X-Amz-SignedHeaders=host&X-Amz-Credential=ASIAWBLC62VIYXQSRNUA%2F20260814%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Expires=86400&X-Amz-Signature=c10194c349363c204f8c551a3ad5e7cd1708e247eb761c4025b80aaeafb88abf"
+          SOURCE_URL: "https://wix-data-exported-data.s3.amazonaws.com/tmp-uploads-2026-08/tf-1786704663-7835384168867222119.csv?response-content-disposition=attachment%3B%20filename%3D%22rent2buy_id_preservation_test.csv%22%3B%20filename%2A%3D%20UTF-8%27%27rent2buy-id-preservation-test.csv%3B&X-Amz-Security-Token=IQoJb3JpZ2luX2VjEDIaCXVzLWVhc3QtMSJHMEUCIQCGjnO9W9GOohijb8UPpGh7J0DIfo25khLdlBc6GHvB9AIgcel5kWwlyGkW5iKPJysNXDizDk3Mk0Qk5%2BIJe7TsTYMqogUI%2B%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAFGgw0MTUyMDg3NTY1NjEiDEWasuOi7A4Ms94%2BpCr2BMpj%2FQU8Mha97MiUmR6JW31ggZY7lyVfA6CdrVaQQOUKZymqn4JpuRCJUoGLHesLDk8GGNm0r3Xk0Yep91qre61rwpsXNuorxf0fySWymtSYjymaoieU2T6lgD%2FlapmyKuggg07VWKIFdPdbbo8aKPmm2d8kPK%2FBKDj17uj9rR18GftjM%2Bke7ReExJCMzGefTxqY46lpWk1zFDA7G1BYyj1k9HXPWgHnE3CAjy%2Fdf%2FHQ4ruOTTdL%2B431I2bLpAe7ROsiXq%2BcmM5WsfDcp1XKh1ERcg1NBLfV3jh%2BDbpRsvfXBmFslME68uXeJlXin7X4r5n1HH2OouKTG%2Fbs%2BX2Civunt44ngfBhoG3rM1XUPtQuLa2ruH9gdXXcgaWMyQPdsphOJ3Sx8SsIZgfjkrPyuQyp9QCOoJUHHJVoB58lgmDKZ%2B90OJdZZYRBwUzs9HCb0Un4Z6ATxRXAojAGNA%2BWCh%2FFxrEQFkePpyKNlzLO9PuLCP%2BUt%2B4CPn99jmZCEjbPiRqx5q1WFTXSpsEO1jaAXhVM4siE0RjbBqC3RyuFJ1ZG4DBBPdTK6rsbw5w3HZPZf9WFMnghTzx6bACzYUdZjZ618L845zgekVtcNXNg8dExTTjbOG%2BhspSaVTWBGoGrzU2nR5cu6chwflfgXpjK56dCefqnlN4ByXhSp8ZlXB9atFaDairoQgePXQkB4ZS8RqWaVIRb88CoT8%2BbDPaUFjQydGUyAnjkfeBCkHBXKMQpi%2FyModAXIJp%2BtI8ZbRN0EiHWiEtiTpVYRCLtR7v0SNNKZevBUM00wOosqSIu4qy9C2NO%2B664XisFw4SjZ9BZIveYWJI0OzCtzfvTBjqZAXX5vMjZ3OplwwG8oFxmWZYgPX2tqxzkmVaftILxOBu0ZkRQRCfWCQJNktU5KBSA%2FCx%2B2Kp6OeJJf2LR35jMMZaQFQwj1zyF6jOQR12kkB6qyMg3c7mLWuoQz2nsq9b1HwXJGGDbOAWUSGiywdp%2FFCwpeUabjBip2EkWau%2FK%2BxSgpe%2FdrrqKKUVW03TJIjiUbf%2B8UikvHmLL3w%3D%3D&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20260814T105110Z&X-Amz-SignedHeaders=host&X-Amz-Credential=ASIAWBLC62VIZLJK5DPF%2F20260814%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Expires=86400&X-Amz-Signature=fefff86963f8425e4f6a50b4dacf8c7c1559e4f7eec50d34fb83189441890caf"
         run: |
-          curl --fail --location "$BACKUP_URL" --output source.csv
-          test "$(wc -c < source.csv)" -gt 1000000
-          echo "source_bytes=$(wc -c < source.csv)"
-
-      - name: Transform and validate all 52 articles
-        run: |
-          python tmp/rent2buy-link-retrofit/transform.py source.csv corrected.csv changes.csv tmp/rent2buy-link-retrofit/article_plan.json
-          test "$(wc -l < changes.csv)" -gt 100
-          grep -q 'add_article' changes.csv
-          ! grep -q 'vanfinancecompany.co.uk' corrected.csv
-          echo "corrected_bytes=$(wc -c < corrected.csv)"
-          sha256sum corrected.csv
-
-      - name: Upload corrected CSV to Wix temporary file
+          curl --fail --location "$SOURCE_URL" --output source.csv
+          python - <<'PY'
+          import csv
+          with open('source.csv', encoding='utf-8-sig', newline='') as f:
+              r=csv.DictReader(f); fields=r.fieldnames; rows=list(r)
+          assert len(rows)==1, len(rows)
+          assert 'ID' in fields, fields
+          fields=['_id' if x=='ID' else x for x in fields]
+          rows[0]['_id']=rows[0].pop('ID')
+          with open('test.csv','w',encoding='utf-8-sig',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=fields); w.writeheader(); w.writerows(rows)
+          print(fields)
+          print(rows[0]['_id'])
+          PY
+      - name: Upload one-row _id test CSV
         env:
-          UPLOAD_URL: "https://wix-data-exported-data.s3.amazonaws.com/tmp-uploads-2026-08/tf-1786704318-4928823588458732867.data?X-Amz-Security-Token=IQoJb3JpZ2luX2VjEDMaCXVzLWVhc3QtMSJHMEUCIQDAK9NbOJryl9CXKPJXAfEunX9uuW2YgwEBbmmsFSynGwIgUxURII2PDkXgaaP5SYccw4FICZ%2B27b7NDI6y7nYwfpIqogUI%2B%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAFGgw0MTUyMDg3NTY1NjEiDCi6CSjuqsgNzdQEuCr2BFSBPVcgXSe4rZVubgNtJ3Vz8MoZw6EXfOblyz5kP%2BOdHEUjzPABTp%2BAX%2Bjpp8decgPH75A%2B3HcfDDK3p3rVBeq%2Fy9rvp%2B5sPc0lTay27vgms4RkpySqs3JdOqO8HXEvnE9S5eW5s%2F9Ev64KBsEeRXp4cWzik%2FHYY9R4zbfIlGotJuorc9V%2BYrsr8frs%2BWF5XxvMx9rLVzlMIxyEFGqGkVt8tl3uEr08AF4PfHBLUEiuYyKSnNfdFg7yfFSHBWPx4PGD8Fp7Sozk%2BBLOevSAY05%2FWGTyz%2FAqpC1C17Yjsd%2BBDs6ql0tNfO4mPm6s25PkVqU7KD8GQiBGTXHps8O6DdSZ0a8BXNioas0ZypHj8%2Fx8Hr1azU8smXuU7NY%2BnZfHA%2FQ%2FBDVFJT15EHlGAzbTck9sHJ6v0qEgKppFYSI%2BQ4JbkHPYo%2BleEZ9zHRnu%2BNUf18C64z2Lq3mLpTFVILbt7Qcf9JxbqD1weY4QK4oC0u0rKQzLcwh%2F55iRc348EiQcRRQ9boMIQXp2IHEMvPmNUsD4PSjHutKfo4I%2Fp%2F%2FNd3o7aWVC00xar4I97bvsItbrunOuNYa2vAO8K0M0jfaS8sTysyMIDY5BUPRx7QHcAJUO4Ky3yLT4klgKZZ5HBzpRpxiFNN0VAKcPXwIAU1oZhVVqkbFo95VFhGdWdsyqOPg4Fou4kBFzrSW0M8Ek2BaO7NUfKMVRSGdkPuPWyLyKWXwRft2zRhyBysXJvpd4HRxVJPfWX2TWF7wZBxlKmrVHuY6F%2Ba%2BMZmcm%2FULOWpsFuu6c101l8u2jQXuwPDkkC6WxIHgE1x6akDkDVRWFwu1bBfIhdirFyjD00fvTBjqZAcEWkspl0bo9xLTBKFNaSXkI8lQtBtDr1gDwxiY3Msx3t9a1TIoWnGAl0NFmdMUDu4ddo4186ZctykJ7jPwXLARR1s003fjZeanhY4KUkghI4qFTuY9jxQ%2Bylv1MV%2Fd8yd7Hw1Th6G%2FgZQVMYhCWG2%2BdRKNXqmg9YWmaptNNHP1gCy7TM%2BTRRrN638hxHxjyqa%2Fkds8amZMoHg%3D%3D&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20260814T104518Z&X-Amz-SignedHeaders=host&X-Amz-Credential=ASIAWBLC62VIXNRFIBXU%2F20260814%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Expires=900&X-Amz-Signature=3120cd2fa6d25cb809464e4dc08bdc1f037b165dc5b99218dc1bc6e095e46946"
+          UPLOAD_URL: "https://wix-data-exported-data.s3.amazonaws.com/tmp-uploads-2026-08/tf-1786704683-3307795319010422864.data?X-Amz-Security-Token=IQoJb3JpZ2luX2VjEDIaCXVzLWVhc3QtMSJHMEUCIQCGjnO9W9GOohijb8UPpGh7J0DIfo25khLdlBc6GHvB9AIgcel5kWwlyGkW5iKPJysNXDizDk3Mk0Qk5%2BIJe7TsTYMqogUI%2B%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAFGgw0MTUyMDg3NTY1NjEiDEWasuOi7A4Ms94%2BpCr2BMpj%2FQU8Mha97MiUmR6JW31ggZY7lyVfA6CdrVaQQOUKZymqn4JpuRCJUoGLHesLDk8GGNm0r3Xk0Yep91qre61rwpsXNuorxf0fySWymtSYjymaoieU2T6lgD%2FlapmyKuggg07VWKIFdPdbbo8aKPmm2d8kPK%2FBKDj17uj9rR18GftjM%2Bke7ReExJCMzGefTxqY46lpWk1zFDA7G1BYyj1k9HXPWgHnE3CAjy%2Fdf%2FHQ4ruOTTdL%2B431I2bLpAe7ROsiXq%2BcmM5WsfDcp1XKh1ERcg1NBLfV3jh%2BDbpRsvfXBmFslME68uXeJlXin7X4r5n1HH2OouKTG%2Fbs%2BX2Civunt44ngfBhoG3rM1XUPtQuLa2ruH9gdXXcgaWMyQPdsphOJ3Sx8SsIZgfjkrPyuQyp9QCOoJUHHJVoB58lgmDKZ%2B90OJdZZYRBwUzs9HCb0Un4Z6ATxRXAojAGNA%2BWCh%2FFxrEQFkePpyKNlzLO9PuLCP%2BUt%2B4CPn99jmZCEjbPiRqx5q1WFTXSpsEO1jaAXhVM4siE0RjbBqC3RyuFJ1ZG4DBBPdTK6rsbw5w3HZPZf9WFMnghTzx6bACzYUdZjZ618L845zgekVtcNXNg8dExTTjbOG%2BhspSaVTWBGoGrzU2nR5cu6chwflfgXpjK56dCefqnlN4ByXhSp8ZlXB9atFaDairoQgePXQkB4ZS8RqWaVIRb88CoT8%2BbDPaUFjQydGUyAnjkfeBCkHBXKMQpi%2FyModAXIJp%2BtI8ZbRN0EiHWiEtiTpVYRCLtR7v0SNNKZevBUM00wOosqSIu4qy9C2NO%2B664XisFw4SjZ9BZIveYWJI0OzCtzfvTBjqZAXX5vMjZ3OplwwG8oFxmWZYgPX2tqxzkmVaftILxOBu0ZkRQRCfWCQJNktU5KBSA%2FCx%2B2Kp6OeJJf2LR35jMMZaQFQwj1zyF6jOQR12kkB6qyMg3c7mLWuoQz2nsq9b1HwXJGGDbOAWUSGiywdp%2FFCwpeUabjBip2EkWau%2FK%2BxSgpe%2FdrrqKKUVW03TJIjiUbf%2B8UikvHmLL3w%3D%3D&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20260814T105124Z&X-Amz-SignedHeaders=host&X-Amz-Credential=ASIAWBLC62VIZLJK5DPF%2F20260814%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Expires=900&X-Amz-Signature=d8ceee0568b745f4d5624c4f0ad2455de4c5898c583c6145c3a4b3b0197847a0"
         run: |
-          curl --fail --request PUT --upload-file corrected.csv "$UPLOAD_URL"
-          echo "Wix temporary upload completed"
-
-      - name: Save audit artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rent2buy-link-retrofit-output
-          path: |
-            corrected.csv
-            changes.csv
-          retention-days: 1
+          curl --fail --request PUT --upload-file test.csv "$UPLOAD_URL"
+          echo uploaded
