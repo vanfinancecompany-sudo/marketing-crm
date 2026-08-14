@@ -115,7 +115,7 @@ async function loadEvidenceInputs(supabase, since) {
     loadPagedRows(
       () => supabase
         .from("ai_assistant_events")
-        .select("event_type,product_context,conversation_intent,secondary_intents,retrieval_required,retrieval_performed,retrieval_used,knowledge_gap,created_at")
+        .select("event_type,product_context,conversation_intent,secondary_intents,customer_question,retrieval_required,retrieval_performed,retrieval_used,knowledge_gap,created_at")
         .eq("event_type", "assistant_response")
         .gte("created_at", since)
         .order("created_at", { ascending: true }),
@@ -219,6 +219,7 @@ export async function refreshKnowledgeOpportunityEvidence(supabase, options = {}
     gsc_impressions: 0,
     gsc_clicks: 0,
     gsc_query_count: 0,
+    assistant_questions: [],
     assistant_intents: [],
     hub_queries: [],
     gsc_queries: [],
