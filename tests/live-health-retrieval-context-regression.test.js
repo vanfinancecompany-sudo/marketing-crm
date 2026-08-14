@@ -15,7 +15,7 @@ const activeApplication = (product = "rent2buy") => ({
 });
 
 function orchestrate(message, { product = "finance", messages = [], priorJourney = {}, journey = priorJourney } = {}) {
-  const intent = classifyConversationIntent({ message, messages, productContext: product });
+  const intent = classifyConversationIntent({ message, history: messages, productContext: product });
   const human = classifyUniversalMessage({ message, messages, journey: priorJourney });
   const result = orchestrateConversationTurn({ message, intent, human, journey, priorJourney, buyingSignals: { detected_buying_signal: "none" } });
   return { intent, human, result };
@@ -41,11 +41,27 @@ test("current taxation terms outrank stale finance application history", () => {
   const query = "Need a van Transit Custom Budget £350 Ready to apply Is the van taxed? vehicle interest Transit Custom budget monthly gbp 350";
   const ranked = rankKnowledge(query, [
     { type: "business_faq", source_id: "generic", title: "Finance FAQ", heading: "Can I get finance for any type or size of van?", passage: "Lender criteria and vehicle suitability affect a finance application." },
-    { type: "business_faq", source_id: "tax", title: "Vehicle FAQ", heading: "Is road tax included?", passage: "Vehicle tax and taxed status must be confirmed from approved vehicle information." },
+    { type: "business_faq", source_id: "tax", title: "Vehicle FAQ", heading: "Is road tax included?", passage: "Vehicle tax status must be confirmed from approved vehicle information." },
   ], { messages });
   assert.equal(ranked[0]?.source_id, "tax");
   assert.ok(ranked[0]?.matched_terms.includes("tax"));
   assert.equal(ranked.some((source) => source.source_id === "generic"), false);
+});
+
+test("taxed matches approved text written as vehicle tax", () => {
+  const ranked = rankKnowledge("Is the van taxed?", [
+    { type: "article", source_id: "tax", title: "Vehicle guidance", heading: "Vehicle status", passage: "Insurance, vehicle tax, warranty and mileage must be confirmed." },
+  ]);
+  assert.equal(ranked[0]?.source_id, "tax");
+  assert.ok(ranked[0]?.matched_terms.includes("taxed") || ranked[0]?.matched_terms.includes("tax"));
+});
+
+test("licence matches approved text written in plural", () => {
+  const ranked = rankKnowledge("do I need my licence", [
+    { type: "article", source_id: "docs", title: "Application documents", heading: "Documents", passage: "Applications may require bank statements, documents and licences." },
+  ]);
+  assert.equal(ranked[0]?.source_id, "docs");
+  assert.ok(ranked[0]?.matched_terms.includes("licence"));
 });
 
 test("application question confusion asks for the actual wording instead of retrieving unrelated knowledge", () => {
@@ -84,6 +100,41 @@ test("OK continue is also an application continuation rather than an unknown que
   const { human, result } = orchestrate("OK continue", { product: "rent2buy", priorJourney });
   assert.equal(human.message_type, "agreement");
   assert.equal(result.application_continuation, true);
+  assert.equal(result.retrieval_required, false);
+});
+
+test("can you switch is handled as a product-lock clarification without retrieval", () => {
+  const { intent, result } = orchestrate("can you switch", { product: "finance" });
+  assert.equal(intent.primary_intent, "product_clarification_required");
+  assert.equal(intent.clarification_required, true);
+  assert.equal(result.product_boundary_blocked, true);
+  assert.equal(result.retrieval_required, false);
+  assert.equal(result.conversation_control, "product_switch");
+});
+
+test("narrowing a vehicle choice stays conversational and does not retrieve unrelated facts", () => {
+  const messages = [
+    { role: "user", content: "My current van is unreliable" },
+    { role: "assistant", content: "I can help you narrow down what you need." },
+    { role: "user", content: "Need something soon" },
+    { role: "assistant", content: "Have you chosen a van yet?" },
+    { role: "user", content: "Haven't chosen one" },
+  ];
+  const { intent, result } = orchestrate("Can you help me narrow it down?", { product: "finance", messages });
+  assert.equal(intent.primary_intent, "general_help_request");
+  assert.equal(result.retrieval_required, false);
+  assert.equal(result.conversation_control, "narrow_choice");
+});
+
+test("Fine is an acknowledgement and cannot be mistaken for Finedon coverage", () => {
+  const messages = [
+    { role: "user", content: "do you want to proceed" },
+    { role: "assistant", content: "You can continue when you're ready." },
+    { role: "user", content: "OK" },
+  ];
+  const { human, result } = orchestrate("Fine", { product: "rent2buy", messages, priorJourney: activeApplication() });
+  assert.equal(human.message_type, "agreement");
+  assert.equal(result.rent2buy_location_turn, false);
   assert.equal(result.retrieval_required, false);
 });
 
