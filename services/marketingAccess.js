@@ -2,6 +2,9 @@ export const MARKETING_ACCESS_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
 export const MARKETING_ACCESS_HEADER = "x-marketing-customer-database-key";
 export const MARKETING_ACCESS_DENIED_EVENT = "marketing-access-denied";
 
+let validatedAccessKey = "";
+let validationPromise = null;
+
 export class MarketingAccessDeniedError extends Error {
   constructor(message = "Access key not recognised.") {
     super(message);
@@ -50,6 +53,8 @@ export function saveMarketingAccessKey(apiKey) {
 export function clearMarketingAccessKey() {
   const localStorage = getBrowserStorage("localStorage");
   const sessionStorage = getBrowserStorage("sessionStorage");
+  validatedAccessKey = "";
+  validationPromise = null;
 
   try {
     sessionStorage?.removeItem(MARKETING_ACCESS_STORAGE_KEY);
@@ -88,13 +93,13 @@ export async function parseMarketingJsonResponse(response, fallbackMessage, opti
   const notifyAccessDenied = options.notifyAccessDenied !== false;
 
   if (response.status === 401) {
-    const message = result.message || "Access key not recognised.";
+    const message = result.message || result.error || "Access key not recognised.";
     if (notifyAccessDenied) notifyMarketingAccessDenied();
     throw new MarketingAccessDeniedError(message);
   }
 
   if (!response.ok || result.ok === false) {
-    const error = new Error(result.message || fallbackMessage || "Marketing request failed.");
+    const error = new Error(result.message || result.error || fallbackMessage || "Marketing request failed.");
     error.status = response.status;
     if (result.error_type) error.type = result.error_type;
     if (result.diagnostics && typeof result.diagnostics === "object") error.diagnostics = result.diagnostics;
@@ -105,15 +110,28 @@ export async function parseMarketingJsonResponse(response, fallbackMessage, opti
 }
 
 export async function validateMarketingAccessKey(apiKey) {
-  const response = await fetch("/api/marketing-campaigns", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(apiKey ? { [MARKETING_ACCESS_HEADER]: String(apiKey).trim() } : {}),
-    },
-    body: JSON.stringify({ action: "validateAccess" }),
+  const key = String(apiKey || "").trim();
+  if (!key) throw new MarketingAccessDeniedError("Access key not recognised.");
+  if (validatedAccessKey === key) return true;
+  if (validationPromise?.key === key) return validationPromise.promise;
+
+  const promise = (async () => {
+    const response = await fetch("/api/marketing-campaigns", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        [MARKETING_ACCESS_HEADER]: key,
+      },
+      body: JSON.stringify({ action: "validateAccess" }),
+    });
+
+    await parseMarketingJsonResponse(response, "Could not validate Marketing access.", { notifyAccessDenied: false });
+    validatedAccessKey = key;
+    return true;
+  })().finally(() => {
+    if (validationPromise?.key === key) validationPromise = null;
   });
 
-  await parseMarketingJsonResponse(response, "Could not validate Marketing access.", { notifyAccessDenied: false });
-  return true;
+  validationPromise = { key, promise };
+  return promise;
 }
