@@ -1,4 +1,4 @@
-name: Rent2Buy body-only link correction
+name: Rent2Buy final link verification
 
 on:
   push:
@@ -8,55 +8,90 @@ on:
       - .github/workflows/rent2buy-link-retrofit.yml
 
 jobs:
-  correction:
+  audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Download current 52-item Wix backup
+      - name: Download final Wix export
         env:
-          SOURCE_URL: "https://wix-data-exported-data.s3.amazonaws.com/tmp-uploads-2026-08/tf-1786704961-8293556100102706545.csv?response-content-disposition=attachment%3B%20filename%3D%22rent2buy_post_pass_before_body_link_correction.csv%22%3B%20filename%2A%3D%20UTF-8%27%27rent2buy-post-pass-before-body-link-correction.csv%3B&X-Amz-Security-Token=IQoJb3JpZ2luX2VjEDMaCXVzLWVhc3QtMSJHMEUCIEEkSe%2FyYOf%2BvRhJuAce353jzWmD9t%2B0EJzvdQS7fv8uAiEA4JfzizMhVPQ4ckq3Ms4tBdGKs1uKQcre2QfUeii9o7QqogUI%2B%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAFGgw0MTUyMDg3NTY1NjEiDIZeieMRPrKSxjmhDSr2BCg5Yff89RpfNJttcK2VfT8rChm7SIV0O%2Bf5uhC5VJvp%2BD5B7%2BZEsen4uRyluAzoSdGRpZJEsO9JI1KyGN76A0IWct%2FPt8vqdE89PvI1figO3jiHXfK4o1hTFAF5qEFnUedj0uzwuhRL869Tl0zVXa1WFgFYQS93EJ7tsW6zOlJjhIcGvaHOhOLOEoqbHp%2Fz2fdzndGaqUEPOqYvTEa3Ai2GYOwmqVGCnQ2hj4GsmdFKvIQcGkp%2FJ1PhPKuHPhLQR6UoCq1zbXr5WeqDosL%2BO%2Bp8ZAAthexoitCV%2BoHH13uTZ7qEpSMBogSKxl66KzhNbVYWEiU5QLL7ao1urf2j52Agjkn8Ncx2c3d0w2o9%2BPc9SWNhJ5VcNFy%2Fi2If80fzPXCv08LFAhCW3j4R%2BEvPotTwtAEmvy%2Fcsr%2BfzyeNf5zsDTD421eSyMEhJwyZfhiIQve4g6ovkp7l%2BVkuwe3CmAZclSeVfid4RghIiDjY4Oa3Hs1fEVW1XDDLiDvk0XaBdC%2Bm6uSj1Z3dWz3pQr4FTmQ9v3PRyi%2Bmh0BC30ChXjQxDAlhzG9t7HCa5MG2jjqO3nnyYyx0Xy0iq99VQa52YYOE0Z%2BUsni%2BXKDQD00t97jcEnmn3wqz3%2FFPPhlxIVicQVyrwWXn1Fxwh68dFq4jtTxlp5c7NfFyisonkz1yVSIWKpwauzD0OdqlIC2Qvl6YWV9XHNB4EYXaIhCHKp5bCKOcsMmbY2HygbjLBA5f199jU1WxJobQ0CJxIyMKnezLFKGBaAqQubBxMTXNDCJU7AWwL5vdbh8nhQkr62b%2BNNVtJyuDD3gsCpB9%2F5M1Qazr3tc5iwG%2BEzDp0vvTBjqZAZ83NgG1fyssJK9Kx4%2BrZAmc4qPGfLKMkRz%2B6BGfnCVISXxfBWc7ua3MN46VCa%2B1mO%2B%2FGN97%2FzAkgjkyyz0k1nTsTwjcP9SU52rfFgkJiibALGqLp6PsK5%2BL1ohuUvwGLxDa%2F57WF21Zv5Ol%2F%2B%2Bjysd5MA%2FjEnECGdD9c7XpUDxdhTCDAa0vcxVT3mGTO%2BoosmF1YhYs%2BSFe1A%3D%3D&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20260814T105703Z&X-Amz-SignedHeaders=host&X-Amz-Credential=ASIAWBLC62VITBIJQCBM%2F20260814%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Expires=86400&X-Amz-Signature=e5444b6ac63833fc39bc238771f556fed28fd7409b24a3806f17534180f4c603"
+          SOURCE_URL: "https://wix-data-exported-data.s3.amazonaws.com/tmp-uploads-2026-08/tf-1786705200-5821091740464153922.csv?response-content-disposition=attachment%3B%20filename%3D%22rent2buy_post_retrofit_verification.csv%22%3B%20filename%2A%3D%20UTF-8%27%27rent2buy-post-retrofit-verification.csv%3B&X-Amz-Security-Token=IQoJb3JpZ2luX2VjEDMaCXVzLWVhc3QtMSJHMEUCIQDAK9NbOJryl9CXKPJXAfEunX9uuW2YgwEBbmmsFSynGwIgUxURII2PDkXgaaP5SYccw4FICZ%2B27b7NDI6y7nYwfpIqogUI%2B%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAFGgw0MTUyMDg3NTY1NjEiDCi6CSjuqsgNzdQEuCr2BFSBPVcgXSe4rZVubgNtJ3Vz8MoZw6EXfOblyz5kP%2BOdHEUjzPABTp%2BAX%2Bjpp8decgPH75A%2B3HcfDDK3p3rVBeq%2Fy9rvp%2B5sPc0lTay27vgms4RkpySqs3JdOqO8HXEvnE9S5eW5s%2F9Ev64KBsEeRXp4cWzik%2FHYY9R4zbfIlGotJuorc9V%2BYrsr8frs%2BWF5XxvMx9rLVzlMIxyEFGqGkVt8tl3uEr08AF4PfHBLUEiuYyKSnNfdFg7yfFSHBWPx4PGD8Fp7Sozk%2BBLOevSAY05%2FWGTyz%2FAqpC1C17Yjsd%2BBDs6ql0tNfO4mPm6s25PkVqU7KD8GQiBGTXHps8O6DdSZ0a8BXNioas0ZypHj8%2Fx8Hr1azU8smXuU7NY%2BnZfHA%2FQ%2FBDVFJT15EHlGAzbTck9sHJ6v0qEgKppFYSI%2BQ4JbkHPYo%2BleEZ9zHRnu%2BNUf18C64z2Lq3mLpTFVILbt7Qcf9JxbqD1weY4QK4oC0u0rKQzLcwh%2F55iRc348EiQcRRQ9boMIQXp2IHEMvPmNUsD4PSjHutKfo4I%2Fp%2F%2FNd3o7aWVC00xar4I97bvsItbrunOuNYa2vAO8K0M0jfaS8sTysyMIDY5BUPRx7QHcAJUO4Ky3yLT4klgKZZ5HBzpRpxiFNN0VAKcPXwIAU1oZhVVqkbFo95VFhGdWdsyqOPg4Fou4kBFzrSW0M8Ek2BaO7NUfKMVRSGdkPuPWyLyKWXwRft2zRhyBysXJvpd4HRxVJPfWX2TWF7wZBxlKmrVHuY6F%2Ba%2BMZmcm%2FULOWpsFuu6c101l8u2jQXuwPDkkC6WxIHgE1x6akDkDVRWFwu1bBfIhdirFyjD00fvTBjqZAcEWkspl0bo9xLTBKFNaSXkI8lQtBtDr1gDwxiY3Msx3t9a1TIoWnGAl0NFmdMUDu4ddo4186ZctykJ7jPwXLARR1s003fjZeanhY4KUkghI4qFTuY9jxQ%2Bylv1MV%2Fd8yd7Hw1Th6G%2FgZQVMYhCWG2%2BdRKNXqmg9YWmaptNNHP1gCy7TM%2BTRRrN638hxHxjyqa%2Fkds8amZMoHg%3D%3D&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20260814T110007Z&X-Amz-SignedHeaders=host&X-Amz-Credential=ASIAWBLC62VIXNRFIBXU%2F20260814%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Expires=86400&X-Amz-Signature=522bfa00a4851df225f8f5b1a0a900da2458e4805e2286d3e2f607045d5fd698"
         run: |
-          curl --fail --location "$SOURCE_URL" --output source.csv
+          curl --fail --location "$SOURCE_URL" --output final.csv
+      - name: Audit all 52 CMS articles
+        id: audit
+        run: |
           python - <<'PY'
-          import csv
-          with open('source.csv',encoding='utf-8-sig',newline='') as f:
+          import csv,json,collections,os
+          COMMERCIAL={"/apply-for-no-credit-check-rent2buy-vans","/view-all-vans","/what-is-rent2buy-vans"}
+          with open('final.csv',encoding='utf-8-sig',newline='') as f:
               rows=list(csv.DictReader(f))
           assert len(rows)==52, len(rows)
-          print('source_articles=52')
+          slugs={r['slug'] for r in rows}
+          stats=collections.Counter()
+          article_rows=[]
+          def txt(n):
+              if not isinstance(n,dict): return ''
+              out=[]
+              def w(x):
+                  if isinstance(x,dict):
+                      td=x.get('textData')
+                      if isinstance(td,dict): out.append(td.get('text',''))
+                      for c in x.get('nodes',[]) or []: w(c)
+              w(n); return ''.join(out)
+          for r in rows:
+              doc=json.loads(r['content']); all_links=[]; generated_body_ids=set(); generated_old_ids=set(); body_ids=set(); section='preamble'
+              for top in doc.get('nodes',[]) or []:
+                  if isinstance(top,dict) and top.get('type')=='HEADING':
+                      h=txt(top).strip().lower()
+                      if h=='article body' or h.startswith('article body'): section='body'; continue
+                      if 'frequently asked questions' in h: section='faq'; continue
+                  def walk(n,sec):
+                      if not isinstance(n,dict): return
+                      nid=n.get('id','')
+                      if sec in ('body','faq'): body_ids.add(nid)
+                      td=n.get('textData')
+                      if isinstance(td,dict):
+                          for d in td.get('decorations',[]) or []:
+                              if d.get('type')=='LINK':
+                                  u=(((d.get('linkData') or {}).get('link') or {}).get('url'))
+                                  if u: all_links.append((td.get('text',''),u,nid,sec))
+                                  if '-r2bbody' in nid: generated_body_ids.add(nid)
+                                  elif '-r2b' in nid: generated_old_ids.add(nid)
+                      for c in n.get('nodes',[]) or []: walk(c,sec)
+                  walk(top,section)
+              old=[x for x in all_links if 'vanfinancecompany.co.uk' in x[1]]
+              selflinks=[x for x in all_links if x[1]==f"/knowledge-hub-articles/{r['slug']}"]
+              bad=[x for x in all_links if x[1].startswith('/knowledge-hub-articles/') and x[1].rsplit('/',1)[-1] not in slugs]
+              kh=[x for x in all_links if x[1].startswith('/knowledge-hub-articles/')]
+              comm=[x for x in all_links if x[1] in COMMERCIAL]
+              misplaced_generated=[x for x in all_links if '-r2bbody' in x[2] and x[3] not in ('body','faq')]
+              stats['total_links']+=len(all_links); stats['kh_links']+=len(kh); stats['commercial_links']+=len(comm)
+              stats['old_domain']+=len(old); stats['self_links']+=len(selflinks); stats['bad_targets']+=len(bad)
+              stats['old_generated_links']+=len(generated_old_ids); stats['misplaced_generated']+=len(misplaced_generated)
+              stats['generated_body_links']+=len(generated_body_ids)
+              if kh: stats['articles_with_kh']+=1
+              if comm: stats['articles_with_commercial']+=1
+              if all_links: stats['articles_with_any']+=1
+              article_rows.append((r['ID'],r['Title'],len(all_links),len(kh),len(comm)))
+          assert stats['old_domain']==0, stats
+          assert stats['self_links']==0, stats
+          assert stats['bad_targets']==0, stats
+          assert stats['old_generated_links']==0, stats
+          assert stats['misplaced_generated']==0, stats
+          assert stats['articles_with_kh']>=35, stats
+          with open('post_audit.csv','w',encoding='utf-8',newline='') as f:
+              w=csv.writer(f); w.writerow(['id','title','all_links','knowledge_hub_links','commercial_links']); w.writerows(article_rows)
+          with open('post_audit_stats.json','w',encoding='utf-8') as f: json.dump(dict(stats),f,indent=2,sort_keys=True)
+          print(dict(stats))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              for k in ['articles_with_any','articles_with_kh','articles_with_commercial','total_links','kh_links','commercial_links','generated_body_links','old_domain','self_links','bad_targets','old_generated_links','misplaced_generated']:
+                  f.write(f"{k}={stats[k]}\n")
           PY
-      - name: Rebuild generated links inside Article Body or FAQ only
-        run: |
-          python tmp/rent2buy-link-retrofit/transform.py source.csv corrected.csv changes.csv tmp/rent2buy-link-retrofit/article_plan.json | tee stats.json
-          python - <<'PY'
-          import csv,json
-          with open('corrected.csv',encoding='utf-8-sig',newline='') as f:
-              r=csv.DictReader(f); rows=list(r); fields=r.fieldnames
-          assert len(rows)==52
-          assert '_id' in fields and 'ID' not in fields
-          assert len({x['_id'] for x in rows})==52
-          assert not any('vanfinancecompany.co.uk' in x['content'] for x in rows)
-          s=json.load(open('stats.json'))
-          assert s['articles']==52
-          assert s['remove_generated']>0
-          assert s['articles_with_kh_links']>=35
-          assert s['old_domain_links']==0
-          assert s['self_links']==0
-          assert s['bad_article_targets']==0
-          print(s)
-          PY
-          sha256sum corrected.csv
-      - name: Upload validated body-only corrected CSV
-        env:
-          UPLOAD_URL: "https://wix-data-exported-data.s3.amazonaws.com/tmp-uploads-2026-08/tf-1786705081-6843560086706008155.data?X-Amz-Security-Token=IQoJb3JpZ2luX2VjEDMaCXVzLWVhc3QtMSJIMEYCIQCQoPPZ%2BjabvdKWY%2B0fdJkAOpQx08v7Q2HBfMyY2yKFgwIhAKqaZYumac9iJjcqpC3v1N3E13vST5kP3lRhibBddWtOKqIFCPz%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEQBRoMNDE1MjA4NzU2NTYxIgyoznQhm1PEFvMqPnMq9gTdys6GpfyJRJoDjYiK7w2ny8xZ65o7Cvg1IOspqcv%2FQyc2umSIV%2BZXtPtrDPNU6pEE76Kba%2BFB4Ey%2FyZuARyWEDDwoQZStJukBw3octaAkYiFTZW81NxhWs8GDeZd9e3e2F6%2FhuiCwKPZsVUKNA758aLYv33az0tlp7%2BBFTUSbYV8dIYMwDYpCU32MGx10MGzfqof4GLtqFNSgi6Zw%2F5Xzrbt69RrxiczWWL3BBmGPwqmhdQmsK4aIjgtTnJvVvLrPVXUfHEeaNup%2BiBJNwAFg32hUeuVRTDyItGfsnCFPXnhERJFuBIqKl5P0DhGyBvFRgr1HIH%2FnNQsq58nwtB4B152Z7kS6yzPPIBIYX5LmeH9hQyFeJjy%2BHkAZ9GVJm6IU9mHk5b9VxMbMsjTx7eSlHFlS0ShCh5cBBqPxn%2F9vzrO7g2YxFLfHBjMww%2F8vn4O1n8I4jW%2Fr6AeNIhBKEKObqeglsY2AoeOHMCtDYebf%2FmxythLvQCmKTNK9WJV62G52sEdJOhes%2FozX%2FNWLripanzokuV1GZefDLBmlD7NPTpTUSqzqj4xP8ypqCKJQz7RDRKEe%2BEU5JEXxpSuGfYu4VjAcYBPNU3XESQSJ1QYHQhekZqLRcmAdWNTpTUVL4bYACLInki3Ldffx9NQhwlM%2FljESNi6TGgPAbSGD4%2FX0ulbyfPEUdg1LLBPYhAp9KFHe%2F5tmWG0LRNzSj8XgXym7ePDIJgN6leXpRQMcmvPJyz%2B1x4zlkCGTd5XwKIoeiehufBbetKEainTNlWMYVWQAoSXjDAAhkOaetqhKbQV%2B9UDM5xjYMGT83d6iJbXQQQn01BAfO8wwwej70wY6mAGgXueWPYnv0K0vyuFY%2FDHqlAM9l2ucXKoZhPsi11uQ55snUjkJpMcY%2FWbjeuhTcC5sRINsIOQ9Mb9EOmZ1AaLZWVVV%2FrHdp0XMXjFq99HVbo7YWLjYA%2FMsfIIIjnNpHYggZS7aHpBuBVt9H2PPB8kBiFRYZ0L0HusT3GP5dmZ4Eb9zERM6e0Kg4wVdA%2FcZHhJGuXCFxKeqnQ%3D%3D&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20260814T105801Z&X-Amz-SignedHeaders=host&X-Amz-Credential=ASIAWBLC62VIQ6UXX6VY%2F20260814%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Expires=900&X-Amz-Signature=cd096187970647b33498da00221ffc96b6c66cf7fd1996bf8d0337f11138f22e"
-        run: |
-          curl --fail --request PUT --upload-file corrected.csv "$UPLOAD_URL"
-          echo upload_complete
-      - name: Save correction audit artifact
+      - name: Save final audit proof
         uses: actions/upload-artifact@v4
         with:
-          name: rent2buy-body-only-link-correction
+          name: r2b-audit-any${{ steps.audit.outputs.articles_with_any }}-kharticles${{ steps.audit.outputs.articles_with_kh }}-khlinks${{ steps.audit.outputs.kh_links }}-commercial${{ steps.audit.outputs.commercial_links }}-old${{ steps.audit.outputs.old_domain }}-self${{ steps.audit.outputs.self_links }}-bad${{ steps.audit.outputs.bad_targets }}-misplaced${{ steps.audit.outputs.misplaced_generated }}
           path: |
-            corrected.csv
-            changes.csv
-            stats.json
+            post_audit.csv
+            post_audit_stats.json
           retention-days: 1
