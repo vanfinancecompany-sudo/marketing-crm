@@ -9,6 +9,7 @@ const endpoint = fs.readFileSync(path.join(root, "api/marketing-ai-knowledge-opp
 const refresh = fs.readFileSync(path.join(root, "api/_knowledgeOpportunityEvidenceRefresh.js"), "utf8");
 const page = fs.readFileSync(path.join(root, "public/ai-control-centre/index.html"), "utf8");
 const migration = fs.readFileSync(path.join(root, "supabase/migrations/041_knowledge_opportunity_live_evidence.sql"), "utf8");
+const publicTelemetry = fs.readFileSync(path.join(root, "api/ai-assistant-telemetry.js"), "utf8");
 
 test("live evidence refresh is an explicit protected POST action", () => {
   assert.match(endpoint, /request\.method !== "POST"/);
@@ -33,11 +34,21 @@ test("AI Control Centre uses a fixed 90-day decision window for evidence refresh
   assert.match(page, /Nothing was created or published automatically/);
 });
 
-test("live assistant evidence migration stores intent labels but not raw question text", () => {
+test("assistant question wording is captured server-side from already-redacted session history", () => {
   assert.match(migration, /secondary_intents text\[\]/);
-  assert.match(migration, /Raw public assistant question text is not stored/);
-  assert.doesNotMatch(migration, /raw_question\s+text/i);
-  assert.doesNotMatch(migration, /customer_message\s+text/i);
+  assert.match(migration, /customer_question text/);
+  assert.match(migration, /capture_ai_assistant_event_question/);
+  assert.match(migration, /ai_customer_sessions/);
+  assert.match(migration, /conversation_history/);
+  assert.match(migration, /history_item\.elem ->> 'role' = 'user'/);
+  assert.match(migration, /Public\/browser telemetry cannot write this field/);
+  assert.match(refresh, /customer_question/);
+});
+
+test("the public browser telemetry endpoint has no customer-question ingestion contract", () => {
+  assert.doesNotMatch(publicTelemetry, /customer_question/);
+  assert.doesNotMatch(publicTelemetry, /conversation_history/);
+  assert.doesNotMatch(publicTelemetry, /body\.message/);
 });
 
 test("evidence worker reads assistant, Hub search and GSC channels with pagination", () => {
