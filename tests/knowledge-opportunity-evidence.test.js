@@ -49,13 +49,16 @@ test("question wording can classify an assistant turn even when no secondary int
   assert.equal(group.assistant_questions[0].query, "What documents do I need for a van finance application?");
 });
 
-test("unsupported assistant labels and unclassified wording remain diagnostic instead of being forced into the wrong intent", () => {
+test("unsupported labels stay conservative while novel customer wording can form a guarded fallback cluster", () => {
   assert.equal(classifyAssistantEvidenceIntent("self_employed", "finance"), null);
   const evidence = aggregateKnowledgeOpportunityEvidence({
-    assistantEvents: [{ event_type: "assistant_response", product_context: "finance", customer_question: "I am self employed", secondary_intents: ["self_employed"], created_at: "2026-08-10T10:00:00Z" }],
+    assistantEvents: [{ event_type: "assistant_response", product_context: "finance", customer_question: "I am self employed", secondary_intents: ["self_employed"], knowledge_gap: true, retrieval_required: true, retrieval_used: false, created_at: "2026-08-10T10:00:00Z" }],
   });
-  assert.equal(evidence.groups.length, 0);
-  assert.equal(evidence.diagnostics.unclassified_assistant_events, 1);
+  const group = evidence.groups.find((item) => item.key === "finance:self_employed");
+  assert.ok(group);
+  assert.equal(group.live_assistant_question_count, 1);
+  assert.equal(shouldCreateEvidenceOpportunity(group), false);
+  assert.equal(evidence.diagnostics.unclassified_assistant_events, 0);
 });
 
 test("two repeated no-result Hub searches can create a review opportunity", () => {
