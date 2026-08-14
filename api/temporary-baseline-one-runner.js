@@ -6,7 +6,6 @@ import {
   summariseHealth,
 } from "../lib/aiAssistantHealth.js";
 import { normaliseHealthBaselineInput } from "./marketing-ai-control-centre.js";
-import { BASELINE_ONE_REPORT } from "./_temporary-baseline-one-report.js";
 
 const TARGET_PROJECT_ID = "prj_zD76dAe2MHZdBTO08GNFSqOb9UHf";
 const TARGET_BRANCH = "agent/run-assistant-baseline-one";
@@ -27,6 +26,12 @@ function getSupabase(environment = process.env) {
   return createClient(environment.SUPABASE_URL, environment.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+}
+
+function parseBody(request) {
+  if (!request.body) return {};
+  if (typeof request.body === "object") return request.body;
+  try { return JSON.parse(request.body); } catch { throw new Error("Request body is not valid JSON."); }
 }
 
 async function existingBaseline(supabase) {
@@ -75,11 +80,23 @@ async function runChunk(supabase, startIndex, requestedCount) {
   };
 }
 
-async function saveStaticBaseline(supabase) {
+async function saveAccumulatorBaseline(supabase, body) {
   const alreadySaved = await existingBaseline(supabase);
   if (alreadySaved) return { baseline: alreadySaved, already_existed: true };
-  const report = BASELINE_ONE_REPORT;
-  if (!report || typeof report !== "object") throw new Error("Completed Baseline One report has not been staged yet.");
+  if (!body.accumulator || typeof body.accumulator !== "object") {
+    throw new Error("Completed deterministic accumulator is required.");
+  }
+  const report = {
+    ...summariseHealth(body.accumulator),
+    generated_at: new Date().toISOString(),
+    commit: SOURCE_MAIN_COMMIT,
+    validation: {
+      openai_calls: 0,
+      database_writes: 0,
+      geocoding_calls: 0,
+      source_library_size: Number(body.source_library_size) || 0,
+    },
+  };
   if (report.mode !== "deterministic" || Number(report.conversations) !== TOTAL_CONVERSATIONS) {
     throw new Error(`Incomplete Baseline One report: ${report.conversations || 0}/${TOTAL_CONVERSATIONS} conversations.`);
   }
@@ -106,20 +123,22 @@ async function saveStaticBaseline(supabase) {
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (!allowed()) return response.status(404).json({ ok: false, message: "Not found." });
-  if (request.method !== "GET") return response.status(405).json({ ok: false, message: "Method not allowed." });
+  if (!["GET", "POST"].includes(request.method)) return response.status(405).json({ ok: false, message: "Method not allowed." });
 
   try {
     const supabase = getSupabase();
-    const action = String(request.query?.action || "existing");
+    const action = request.method === "POST"
+      ? String(parseBody(request).action || "")
+      : String(request.query?.action || "existing");
 
-    if (action === "existing") {
+    if (request.method === "GET" && action === "existing") {
       return response.status(200).json({ ok: true, baseline: await existingBaseline(supabase) });
     }
-    if (action === "chunk") {
+    if (request.method === "GET" && action === "chunk") {
       return response.status(200).json({ ok: true, ...(await runChunk(supabase, request.query?.start, request.query?.count)) });
     }
-    if (action === "save-static") {
-      return response.status(200).json({ ok: true, ...(await saveStaticBaseline(supabase)) });
+    if (request.method === "POST" && action === "save-accumulator") {
+      return response.status(200).json({ ok: true, ...(await saveAccumulatorBaseline(supabase, parseBody(request))) });
     }
     return response.status(400).json({ ok: false, message: "Unsupported action." });
   } catch (error) {
