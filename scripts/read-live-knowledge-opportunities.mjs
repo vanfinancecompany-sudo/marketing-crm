@@ -111,14 +111,16 @@ async function main() {
       linked_article: row.linked_article_id ? articleById.get(row.linked_article_id) || { id: row.linked_article_id } : null,
     }));
 
-  console.log("KNOWLEDGE_OPPORTUNITY_REVIEW_SNAPSHOT", JSON.stringify({
+  console.log("KNOWLEDGE_OPPORTUNITY_REVIEW_SUMMARY", JSON.stringify({
     target_count: OPPORTUNITY_IDS.length,
     rows_found: safeRows.length,
     automatic_content_creation: false,
     database_writes: 0,
     customer_question_text_logged: false,
-    opportunities: safeRows,
   }));
+  for (const opportunity of safeRows) {
+    console.log("KNOWLEDGE_OPPORTUNITY_REVIEW_ITEM", JSON.stringify(opportunity));
+  }
 }
 
 main().catch((error) => {
