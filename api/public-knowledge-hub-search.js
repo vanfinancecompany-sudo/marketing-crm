@@ -11,6 +11,7 @@ import { secureHash, validateWixOrigin } from "../lib/publicAssistantFoundation.
 
 const SEARCH_LIMIT_PER_MINUTE = 30;
 const SEARCH_LIMIT_PER_DAY = 500;
+const KNOWLEDGE_HUB_EMBED_ORIGIN = "https://marketing-crm-github-work.vercel.app";
 const ARTICLE_FIELDS = [
   "id", "title", "slug", "category", "article_type", "seo_title", "meta_description", "excerpt",
   "content_markdown", "faq_json", "status", "live_wix_url", "published_at", "publication_verified_at",
@@ -28,9 +29,11 @@ function requestOrigin(request) {
 }
 
 function isAllowedKnowledgeHubOrigin(origin, environment = process.env) {
-  if (!validateWixOrigin(origin, environment)) return false;
   try {
-    return ["vanfinancecompany.co.uk", "www.vanfinancecompany.co.uk"].includes(new URL(origin).hostname.toLowerCase());
+    const parsed = new URL(clean(origin, 500));
+    if (parsed.origin === KNOWLEDGE_HUB_EMBED_ORIGIN) return true;
+    return validateWixOrigin(parsed.origin, environment)
+      && ["vanfinancecompany.co.uk", "www.vanfinancecompany.co.uk"].includes(parsed.hostname.toLowerCase());
   } catch {
     return false;
   }
