@@ -152,7 +152,6 @@
     const links = Array.from(root.querySelectorAll("a"));
     links.forEach((link) => {
       link.dataset.vfcKhCategoryLink = "true";
-      link.removeAttribute("style");
     });
     hideArrowOnlyElements(root);
     return links.length > 0;
