@@ -37,7 +37,14 @@ Approval is subject to assessment. Delivery timing and vehicle availability must
     accumulator = mergeHealthAccumulators(accumulator, batch.report);
   }
   const report = summariseHealth(accumulator);
-  console.error("DETERMINISTIC_HEALTH_DEBUG", JSON.stringify({
+  const compactFailures = (report.failed_scenarios || []).map((item) => ({
+    scenario_id: item.scenario_id,
+    name: item.name,
+    category: item.category,
+    product_context: item.product_context,
+    failures: (item.failures || []).map((failure) => ({ rule: failure.rule, turn: failure.turn, message: failure.message, detail: failure.detail })),
+  }));
+  throw new Error(`DETERMINISTIC_HEALTH_DEBUG ${JSON.stringify({
     health: report.overall_ai_health_score,
     progression: report.conversation_progression,
     context: report.context_retention,
@@ -50,6 +57,6 @@ Approval is subject to assessment. Delivery timing and vehicle availability must
     clarification_rate: report.clarification_rate,
     rule_violations: report.rule_violations,
     failed_scenario_count: report.failed_scenario_count,
-    failed_scenarios: report.failed_scenarios,
-  }));
+    failed_scenarios: compactFailures,
+  })}`);
 });
