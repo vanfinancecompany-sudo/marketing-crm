@@ -8,63 +8,101 @@
     :root { color-scheme: light; }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; width: 100%; min-height: 100%; background: transparent; }
-    body { font-family: Arial, Helvetica, sans-serif; color: #161616; overflow-y: auto; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #161616; overflow: hidden; }
     .shell {
       width: 100%;
       margin: 0;
-      padding: 22px 24px;
+      padding: 20px 24px;
       border: 2px solid #111;
       border-radius: 16px;
       background: #fff;
       box-shadow: 0 4px 14px rgba(0,0,0,.28);
     }
-    .eyebrow { margin: 0 0 5px; color: #b30d14; font-size: 12px; line-height: 1.2; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-    h2 { margin: 0; font-size: 28px; line-height: 1.12; letter-spacing: -.02em; }
-    .intro { margin: 7px 0 14px; color: #565656; font-size: 15px; line-height: 1.45; }
+    .hidden { display: none !important; }
+    .eyebrow { margin: 0 0 4px; color: #b30d14; font-size: 12px; line-height: 1.2; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    h2 { margin: 0; font-size: 27px; line-height: 1.1; letter-spacing: -.02em; }
+    .intro { margin: 6px 0 12px; color: #565656; font-size: 15px; line-height: 1.4; }
+    .search-row { display: flex; gap: 8px; align-items: stretch; }
     .search-input {
-      width: 100%; min-height: 48px; padding: 0 15px; border: 1.5px solid #cfcfcf; border-radius: 11px;
+      flex: 1 1 auto; min-width: 0; min-height: 46px; padding: 0 15px; border: 1.5px solid #cfcfcf; border-radius: 11px;
       font: 500 16px/1.2 Arial, Helvetica, sans-serif; color: #111; background: #fff; outline: none;
     }
     .search-input:focus { border-color: #b30d14; box-shadow: 0 0 0 3px rgba(179,13,20,.11); }
-    .chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0 0; }
+    .search-button, .action-button {
+      border: 0; border-radius: 999px; background: #111; color: #fff; font: 800 13px/1 Arial, Helvetica, sans-serif;
+      padding: 0 18px; cursor: pointer; min-height: 40px;
+    }
+    .search-button:hover, .search-button:focus-visible, .action-button:hover, .action-button:focus-visible { background: #b30d14; outline: none; }
+    .chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0 0; }
     .chip {
       border: 1px solid #d6d6d6; border-radius: 999px; background: #fff; color: #333; padding: 7px 10px;
       font: 700 12px/1 Arial, Helvetica, sans-serif; cursor: pointer;
     }
     .chip:hover, .chip:focus-visible { border-color: #b30d14; outline: none; }
     .chip.is-active { background: #151515; color: #fff; border-color: #151515; }
-    .status { margin: 14px 0 0; color: #666; font-size: 13px; }
-    .status:empty, .results:empty { display: none; margin: 0; padding: 0; }
-    .results { display: grid; gap: 9px; margin-top: 8px; }
-    .result {
-      display: block; padding: 14px 15px; border: 1px solid #e1e1e1; border-radius: 12px;
-      color: inherit; text-decoration: none; background: #fff; transition: border-color .14s ease, box-shadow .14s ease;
+    .inline-status { min-height: 18px; margin: 7px 0 0; color: #666; font-size: 12px; }
+    .inline-status:empty { display: none; }
+    .results-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 7px; }
+    .results-heading h2 { font-size: 22px; }
+    .query-label { margin: 3px 0 0; color: #666; font-size: 12px; line-height: 1.3; }
+    .match-list { border-top: 1px solid #e1e1e1; }
+    .match {
+      display: flex; align-items: center; min-height: 41px; padding: 7px 2px; border-bottom: 1px solid #e1e1e1;
+      color: #161616; text-decoration: none; font-size: 14px; line-height: 1.25; font-weight: 800;
     }
-    .result:hover, .result:focus-visible { border-color: #b30d14; box-shadow: 0 6px 18px rgba(0,0,0,.06); outline: none; }
-    .result-meta { color: #b30d14; font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
-    .result-title { margin: 4px 0; font-size: 17px; line-height: 1.28; font-weight: 800; }
-    .result-excerpt { margin: 0; color: #5b5b5b; font-size: 13px; line-height: 1.45; }
-    .empty { padding: 14px; border-radius: 11px; background: #f7f7f7; color: #4a4a4a; font-size: 13px; line-height: 1.4; }
+    .match::after { content: "›"; margin-left: auto; padding-left: 12px; color: #b30d14; font-size: 20px; line-height: 1; }
+    .match:hover, .match:focus-visible { color: #b30d14; outline: none; }
+    .match-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+    .results-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 9px; }
+    .action-button.secondary { background: #fff; color: #111; border: 1px solid #cfcfcf; }
+    .action-button.secondary:hover, .action-button.secondary:focus-visible { border-color: #b30d14; color: #b30d14; background: #fff; }
+    .empty-state { min-height: 112px; display: flex; align-items: center; justify-content: center; text-align: center; color: #555; font-size: 14px; line-height: 1.4; }
     @media (max-width: 640px) {
-      .shell { padding: 18px 14px; border-radius: 14px; }
-      h2 { font-size: 24px; }
+      .shell { padding: 16px 14px; border-radius: 14px; }
+      h2 { font-size: 23px; }
       .intro { font-size: 14px; }
-      .search-input { min-height: 48px; }
-      .chip { font-size: 11px; padding: 7px 9px; }
-      .result-title { font-size: 16px; }
+      .search-row { gap: 6px; }
+      .search-input { min-height: 44px; font-size: 15px; }
+      .search-button { padding: 0 13px; font-size: 12px; }
+      .chips { gap: 6px; margin-top: 9px; }
+      .chip { font-size: 11px; padding: 6px 8px; }
+      .results-heading h2 { font-size: 20px; }
+      .match { min-height: 40px; font-size: 13px; }
+      .action-button { min-height: 36px; padding: 0 13px; font-size: 12px; }
     }
   </style>
 </head>
 <body>
   <section class="shell" aria-label="Search the Knowledge Hub">
-    <p class="eyebrow">Knowledge Hub</p>
-    <h2>What do you need help with?</h2>
-    <p class="intro">Ask a question or search by keyword to find practical guides from Van Finance Company.</p>
-    <input id="query" class="search-input" type="search" autocomplete="off" inputmode="search" aria-label="Search Knowledge Hub" placeholder="Ask a question or search by keyword..." />
-    <div id="chips" class="chips" role="group" aria-label="Filter Knowledge Hub category"></div>
-    <div id="status" class="status" role="status" aria-live="polite"></div>
-    <div id="results" class="results"></div>
+    <div id="searchView">
+      <p class="eyebrow">Knowledge Hub</p>
+      <h2>What do you need help with?</h2>
+      <p class="intro">Ask a question or search by keyword to find practical guides from Van Finance Company.</p>
+      <div class="search-row">
+        <input id="query" class="search-input" type="search" autocomplete="off" inputmode="search" aria-label="Search Knowledge Hub" placeholder="Ask a question or search by keyword..." />
+        <button id="searchButton" class="search-button" type="button">Search</button>
+      </div>
+      <div id="chips" class="chips" role="group" aria-label="Filter Knowledge Hub category"></div>
+      <div id="inlineStatus" class="inline-status" role="status" aria-live="polite"></div>
+    </div>
+
+    <div id="resultsView" class="hidden">
+      <div class="results-heading">
+        <div>
+          <p class="eyebrow">Top Matches</p>
+          <h2>Choose a helpful guide</h2>
+          <p id="queryLabel" class="query-label"></p>
+        </div>
+      </div>
+      <div id="matchList" class="match-list"></div>
+      <div id="emptyState" class="empty-state hidden">No close matches found. Try a shorter phrase or a different category.</div>
+      <div class="results-actions">
+        <button id="searchAgain" class="action-button" type="button">Search again</button>
+        <button id="cancelResults" class="action-button secondary" type="button">Cancel</button>
+      </div>
+    </div>
   </section>
+
   <script>
     (() => {
       "use strict";
@@ -72,12 +110,18 @@
       const API_URL = "https://marketing-crm-github-work.vercel.app/api/public-knowledge-hub-search";
       const SESSION_KEY = "vfc_knowledge_hub_embed_visitor_v1";
       const CATEGORIES = ["all", "Van Finance", "Rent2Buy", "Credit", "Vehicle Guides", "FAQs", "Business Advice", "Self Employed"];
+      const searchView = document.getElementById("searchView");
+      const resultsView = document.getElementById("resultsView");
       const input = document.getElementById("query");
+      const searchButton = document.getElementById("searchButton");
       const chips = document.getElementById("chips");
-      const status = document.getElementById("status");
-      const results = document.getElementById("results");
+      const inlineStatus = document.getElementById("inlineStatus");
+      const queryLabel = document.getElementById("queryLabel");
+      const matchList = document.getElementById("matchList");
+      const emptyState = document.getElementById("emptyState");
+      const searchAgain = document.getElementById("searchAgain");
+      const cancelResults = document.getElementById("cancelResults");
       let category = "all";
-      let timer = null;
       let requestSequence = 0;
       let activeSearch = null;
 
@@ -114,37 +158,45 @@
         button.addEventListener("click", () => {
           category = button.dataset.category || "all";
           chips.querySelectorAll(".chip").forEach((item) => item.classList.toggle("is-active", item === button));
-          if (clean(input.value, 200).length >= 2) runSearch();
         });
       });
 
-      input.addEventListener("input", () => {
-        clearTimeout(timer);
-        const query = clean(input.value, 200);
-        if (query.length < 2) return clearSearch();
-        timer = setTimeout(runSearch, 280);
-      });
-
+      searchButton.addEventListener("click", runSearch);
       input.addEventListener("keydown", (event) => {
-        if (event.key === "Escape") {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          runSearch();
+        } else if (event.key === "Escape") {
           input.value = "";
-          clearSearch();
+          inlineStatus.textContent = "";
         }
       });
 
-      function clearSearch() {
+      searchAgain.addEventListener("click", () => showSearch(false));
+      cancelResults.addEventListener("click", () => showSearch(true));
+
+      function showSearch(clear) {
         requestSequence += 1;
         activeSearch = null;
-        status.textContent = "";
-        results.innerHTML = "";
+        searchView.classList.remove("hidden");
+        resultsView.classList.add("hidden");
+        matchList.innerHTML = "";
+        emptyState.classList.add("hidden");
+        inlineStatus.textContent = "";
+        if (clear) input.value = "";
+        input.focus();
       }
 
       async function runSearch() {
         const query = clean(input.value, 200);
-        if (query.length < 2) return clearSearch();
+        if (query.length < 2) {
+          inlineStatus.textContent = "Enter at least two characters.";
+          input.focus();
+          return;
+        }
         const sequence = ++requestSequence;
-        status.textContent = "Searching…";
-        results.innerHTML = "";
+        searchButton.disabled = true;
+        inlineStatus.textContent = "Searching…";
         try {
           const response = await fetch(API_URL, {
             method: "POST",
@@ -156,30 +208,29 @@
           if (sequence !== requestSequence) return;
           if (!response.ok) throw new Error(payload?.error || "Search failed.");
           activeSearch = payload;
-          renderResults(payload);
+          renderResults(payload, query);
         } catch {
           if (sequence !== requestSequence) return;
           activeSearch = null;
-          status.textContent = "Search is temporarily unavailable. Please try again.";
-          results.innerHTML = "";
+          inlineStatus.textContent = "Search is temporarily unavailable. Please try again.";
+        } finally {
+          if (sequence === requestSequence) searchButton.disabled = false;
         }
       }
 
-      function renderResults(payload) {
-        const items = Array.isArray(payload?.results) ? payload.results : [];
-        if (!items.length) {
-          status.textContent = "No close matches found.";
-          results.innerHTML = '<div class="empty">Try a shorter phrase, a different keyword, or choose another category.</div>';
-          return;
-        }
-        status.textContent = `${items.length} helpful ${items.length === 1 ? "result" : "results"}`;
-        results.innerHTML = items.map((item, index) => `
-          <a class="result" target="_top" href="${escapeHtml(item.url)}" data-article-id="${escapeHtml(item.id)}" data-rank="${index + 1}">
-            <div class="result-meta">${escapeHtml(item.category)}</div>
-            <div class="result-title">${escapeHtml(item.title)}</div>
-            ${item.excerpt ? `<p class="result-excerpt">${escapeHtml(item.excerpt)}</p>` : ""}
+      function renderResults(payload, query) {
+        const items = (Array.isArray(payload?.results) ? payload.results : []).slice(0, 3);
+        queryLabel.textContent = category === "all" ? `For “${query}”` : `For “${query}” in ${category}`;
+        searchView.classList.add("hidden");
+        resultsView.classList.remove("hidden");
+        matchList.innerHTML = "";
+        emptyState.classList.toggle("hidden", items.length > 0);
+        if (!items.length) return;
+        matchList.innerHTML = items.map((item, index) => `
+          <a class="match" target="_top" href="${escapeHtml(item.url)}" data-article-id="${escapeHtml(item.id)}" data-rank="${index + 1}">
+            <span class="match-title">${escapeHtml(item.title)}</span>
           </a>`).join("");
-        results.querySelectorAll(".result").forEach((link) => link.addEventListener("click", recordSelection));
+        matchList.querySelectorAll(".match").forEach((link) => link.addEventListener("click", recordSelection));
       }
 
       function recordSelection(event) {
