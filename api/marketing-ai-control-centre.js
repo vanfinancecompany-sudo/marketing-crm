@@ -56,12 +56,26 @@ async function loadPagedRows(supabase, table, fields, options = {}) {
   return rows;
 }
 
+function total(rows, field) {
+  return rows.reduce((sum, item) => sum + Math.max(0, Number(item?.[field] || 0)), 0);
+}
+
+function latestEvidenceRefresh(rows) {
+  return rows.map((item) => item.evidence_last_refreshed_at).filter(Boolean).sort().at(-1) || null;
+}
+
 function buildOpportunitySummary(rows = []) {
   const hydrated = rows.map((item) => ({
     ...item,
     recommended_workflow_action: recommendedKnowledgeWorkflowAction(item),
   }));
   const active = hydrated.filter(isDefaultActiveKnowledgeOpportunity);
+  const evidenceBacked = active.filter((item) => Boolean(
+    item.evidence_last_refreshed_at
+      && (Number(item.live_assistant_question_count || 0)
+        || Number(item.hub_search_count || 0)
+        || Number(item.gsc_impressions || 0)),
+  ));
   return {
     new: hydrated.filter((item) => item.status === "new").length,
     high_priority: active.filter((item) => ["critical", "high"].includes(item.priority_level)).length,
@@ -74,6 +88,15 @@ function buildOpportunitySummary(rows = []) {
     review_later: hydrated.filter((item) => item.status === "review_later").length,
     draft_created: hydrated.filter((item) => item.status === "draft_created").length,
     resolved: hydrated.filter((item) => item.status === "resolved").length,
+    evidence_backed: evidenceBacked.length,
+    live_assistant_questions: total(active, "live_assistant_question_count"),
+    live_assistant_gaps: total(active, "live_assistant_gap_count"),
+    live_assistant_retrieval_misses: total(active, "live_assistant_retrieval_miss_count"),
+    hub_searches: total(active, "hub_search_count"),
+    hub_no_results: total(active, "hub_no_result_count"),
+    gsc_impressions: Math.round(total(active, "gsc_impressions")),
+    gsc_clicks: Math.round(total(active, "gsc_clicks")),
+    evidence_last_refreshed_at: latestEvidenceRefresh(hydrated),
   };
 }
 
@@ -101,7 +124,7 @@ export async function handleAiControlCentreRequest(request, response, dependenci
       supabase.from("knowledge_visibility_prompts").select("*").limit(10000),
       supabase.from("knowledge_visibility_settings").select("attention_days").eq("settings_key", "default").maybeSingle(),
       supabase.from("knowledge_assistant_opportunities").select("*").limit(5000),
-      loadPagedRows(supabase, "ai_assistant_events", "event_type,visitor_hash,customer_session_id,page_type,product_context,conversation_intent,retrieval_required,retrieval_performed,retrieval_used,knowledge_gap,knowledge_sources,cta_action_key,cta_label,message_number,response_mode,created_at", { since, orderField: "created_at", optional: true }),
+      loadPagedRows(supabase, "ai_assistant_events", "event_type,visitor_hash,customer_session_id,page_type,product_context,conversation_intent,secondary_intents,retrieval_required,retrieval_performed,retrieval_used,knowledge_gap,knowledge_sources,cta_action_key,cta_label,message_number,response_mode,created_at", { since, orderField: "created_at", optional: true }),
       loadPagedRows(supabase, "knowledge_hub_search_events", "event_type,search_request_id,query_text,normalised_query,result_count,selected_article_id,selected_rank,category,created_at", { since, orderField: "created_at", optional: true }),
     ]);
 
