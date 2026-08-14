@@ -23,6 +23,13 @@ import {
   buildCanonicalConversationInput,
   canonicalSessionState,
 } from "../lib/canonicalPublicAssistantSession.js";
+import {
+  assistantTelemetryVisitorHash,
+  isMissingAssistantTelemetryTableError,
+  recordAssistantTelemetryEvent,
+  recordAssistantTelemetryEvents,
+  telemetryFromAssistantResult,
+} from "../lib/aiAssistantTelemetry.js";
 
 const MAX_SESSION_MESSAGES = 100;
 const MAX_HISTORY_MESSAGES = 60;
@@ -180,9 +187,70 @@ function productSelectionReply(product) {
     : "Great — I’ll keep this conversation focused on Van Finance. What would you like to know?";
 }
 
+async function recordTelemetrySafely(supabase, payload) {
+  try {
+    if (Array.isArray(payload)) await recordAssistantTelemetryEvents(supabase, payload);
+    else await recordAssistantTelemetryEvent(supabase, payload);
+  } catch (error) {
+    if (!isMissingAssistantTelemetryTableError(error)) {
+      console.error("PUBLIC AI ASSISTANT TELEMETRY WRITE ERROR", {
+        event_type: Array.isArray(payload) ? payload.map((item) => item?.event_type).filter(Boolean).join(",") : payload?.event_type || null,
+        exception_type: error?.name || "Error",
+        message: clean(error?.message, 500),
+      });
+    }
+  }
+}
+
+async function recordResponseTelemetry({ supabase, body, environment, session, productContext, messageNumber, result = null, responseMode, cta = null }) {
+  const diagnostics = result
+    ? telemetryFromAssistantResult(result)
+    : {
+        conversation_intent: null,
+        retrieval_required: false,
+        retrieval_performed: false,
+        retrieval_used: false,
+        knowledge_gap: false,
+        knowledge_sources: [],
+      };
+  const base = {
+    visitor_hash: assistantTelemetryVisitorHash(body.analytics_visitor_id, environment),
+    customer_session_id: session.id,
+    page_type: session.page_type,
+    product_context: productContext || session.product_lock,
+    message_number: messageNumber,
+  };
+  const events = [
+    {
+      ...base,
+      event_type: "customer_message",
+    },
+    {
+      ...base,
+      event_type: "assistant_response",
+      ...diagnostics,
+      response_mode: responseMode,
+    },
+  ];
+  if (cta) events.push({
+    ...base,
+    event_type: "cta_shown",
+    cta_action_key: cta.action_key,
+    cta_label: cta.label,
+  });
+  await recordTelemetrySafely(supabase, events);
+}
+
 async function startConversation(supabase, body, environment) {
   const pageContext = normalisePageContext(body.page_context);
-  const { conversationId, greeting } = await createSession(supabase, pageContext, environment);
+  const { session, conversationId, greeting } = await createSession(supabase, pageContext, environment);
+  await recordTelemetrySafely(supabase, {
+    event_type: "conversation_start",
+    visitor_hash: assistantTelemetryVisitorHash(body.analytics_visitor_id, environment),
+    customer_session_id: session.id,
+    page_type: pageContext.page_type,
+    product_context: session.product_lock,
+  });
   return safeCustomerPayload({
     reply: greeting,
     cta: null,
@@ -199,13 +267,15 @@ async function continueConversation(supabase, body, environment, simulateConvers
   const message = redactSensitiveCustomerData(body.message);
   if (!message) throw new PublicAssistantError(400, "invalid_request", "Please enter a message.");
   const history = boundedHistory(session.conversation_history);
+  const messageNumber = Number(session.message_count || 0) + 1;
 
   if (isPromptLeakageAttempt(message)) {
     const reply = promptLeakageReply();
     await updateSession(supabase, session, {
       conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
-      message_count: Number(session.message_count || 0) + 1,
+      message_count: messageNumber,
     });
+    await recordResponseTelemetry({ supabase, body, environment, session, productContext: session.product_lock, messageNumber, responseMode: "prompt_leakage" });
     return safeCustomerPayload({ reply, conversationId, status: "ready" });
   }
 
@@ -221,13 +291,14 @@ async function continueConversation(supabase, body, environment, simulateConvers
           remembered_facts: { product_context: productLock },
           journey_state: {},
           conversation_history: [],
-          message_count: Number(session.message_count || 0) + 1,
+          message_count: messageNumber,
         });
       } else {
         await updateSession(supabase, session, {
-          message_count: Number(session.message_count || 0) + 1,
+          message_count: messageNumber,
         });
       }
+      await recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, responseMode: "product_selection" });
       return safeCustomerPayload({ reply, conversationId, status: "ready" });
     }
 
@@ -245,8 +316,9 @@ async function continueConversation(supabase, body, environment, simulateConvers
         const reply = clean(result.reply, 5000);
         await updateSession(supabase, session, {
           conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
-          message_count: Number(session.message_count || 0) + 1,
+          message_count: messageNumber,
         });
+        await recordResponseTelemetry({ supabase, body, environment, session, productContext: "finance", messageNumber, result, responseMode: "ai_product_comparison" });
         return safeCustomerPayload({ reply, conversationId, status: "needs_product" });
       }
 
@@ -255,8 +327,9 @@ async function continueConversation(supabase, body, environment, simulateConvers
         const reply = productChoiceReply();
         await updateSession(supabase, session, {
           conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
-          message_count: Number(session.message_count || 0) + 1,
+          message_count: messageNumber,
         });
+        await recordResponseTelemetry({ supabase, body, environment, session, productContext: null, messageNumber, responseMode: "product_clarification" });
         return safeCustomerPayload({ reply, conversationId, status: "needs_product" });
       }
     }
@@ -270,8 +343,9 @@ async function continueConversation(supabase, body, environment, simulateConvers
   if (applicationGuidanceReply) {
     await updateSession(supabase, session, {
       conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: applicationGuidanceReply }]),
-      message_count: Number(session.message_count || 0) + 1,
+      message_count: messageNumber,
     });
+    await recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, responseMode: "application_guidance" });
     return safeCustomerPayload({ reply: applicationGuidanceReply, cta: null, conversationId, status: "ready" });
   }
 
@@ -285,8 +359,9 @@ async function continueConversation(supabase, body, environment, simulateConvers
   if (pricingReply) {
     await updateSession(supabase, session, {
       conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: pricingReply }]),
-      message_count: Number(session.message_count || 0) + 1,
+      message_count: messageNumber,
     });
+    await recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, responseMode: "vehicle_pricing" });
     return safeCustomerPayload({ reply: pricingReply, cta: null, conversationId, status: "ready" });
   }
 
@@ -305,11 +380,13 @@ async function continueConversation(supabase, body, environment, simulateConvers
   await updateSession(supabase, session, {
     ...state,
     conversation_history: nextHistory,
-    message_count: Number(session.message_count || 0) + 1,
+    message_count: messageNumber,
   });
+  const cta = publicApplicationCta(session.page_type, productLock, result);
+  await recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, result, responseMode: "ai_generated", cta });
   return safeCustomerPayload({
     reply,
-    cta: publicApplicationCta(session.page_type, productLock, result),
+    cta,
     conversationId,
     status: "ready",
   });
