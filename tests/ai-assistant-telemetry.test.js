@@ -5,6 +5,7 @@ import {
   buildAssistantMeasurementSummary,
   normaliseAssistantKnowledgeSources,
   normaliseAssistantTelemetryEvent,
+  recordAssistantTelemetryEvents,
   telemetryFromAssistantResult,
 } from "../lib/aiAssistantTelemetry.js";
 
@@ -53,6 +54,49 @@ test("assistant-result telemetry carries retrieval decisions and knowledge sourc
   assert.equal(telemetry.retrieval_used, true);
   assert.equal(telemetry.knowledge_gap, false);
   assert.equal(telemetry.knowledge_sources[0].source_id, "article-7");
+});
+
+test("assistant-result telemetry falls back to source IDs when full source diagnostics are absent", () => {
+  const telemetry = telemetryFromAssistantResult({
+    retrieval_required: true,
+    retrieval_performed: true,
+    retrieval_used: true,
+    knowledge_source_ids: ["fallback-article-1"],
+  });
+  assert.deepEqual(telemetry.knowledge_sources, [{
+    source_id: "fallback-article-1",
+    type: "unknown",
+    title: null,
+    heading: null,
+    score: 0,
+  }]);
+});
+
+test("bulk assistant telemetry writes a completed turn in one insert", async () => {
+  const calls = [];
+  const supabase = {
+    from(table) {
+      assert.equal(table, "ai_assistant_events");
+      return {
+        insert(payload) {
+          calls.push(payload);
+          return {
+            async select() {
+              return { data: payload.map((_, index) => ({ id: `event-${index + 1}` })), error: null };
+            },
+          };
+        },
+      };
+    },
+  };
+  const rows = await recordAssistantTelemetryEvents(supabase, [
+    { event_type: "customer_message", customer_session_id: "session-1", message_number: 1 },
+    { event_type: "assistant_response", customer_session_id: "session-1", message_number: 1, retrieval_used: true },
+    { event_type: "cta_shown", customer_session_id: "session-1", message_number: 1, cta_label: "Apply" },
+  ]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].length, 3);
+  assert.equal(rows.length, 3);
 });
 
 test("unsupported public-style event names are rejected before storage", () => {
