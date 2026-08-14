@@ -1,6 +1,7 @@
 import { handleAiControlCentreRequest } from "../api/marketing-ai-control-centre.js";
 
 const TARGET_PROJECT_ID = "prj_zD76dAe2MHZdBTO08GNFSqOb9UHf";
+const INTERNAL_ACCESS_KEY = "build-time-read-only-control-centre-probe";
 
 function clean(value, limit = 200) {
   return String(value || "").trim().slice(0, limit);
@@ -47,16 +48,19 @@ async function main() {
     return;
   }
 
-  const accessKey = required("MARKETING_CUSTOMER_DATABASE_API_KEY");
   required("SUPABASE_URL");
   required("SUPABASE_SERVICE_ROLE_KEY");
+  const environment = {
+    ...process.env,
+    MARKETING_CUSTOMER_DATABASE_API_KEY: INTERNAL_ACCESS_KEY,
+  };
 
   let statusCode = 200;
   let payload = null;
   const request = {
     method: "GET",
     query: { days: "28" },
-    headers: { "x-marketing-customer-database-key": accessKey },
+    headers: { "x-marketing-customer-database-key": INTERNAL_ACCESS_KEY },
   };
   const response = {
     setHeader() {},
@@ -64,7 +68,7 @@ async function main() {
     json(body) { payload = body; return body; },
   };
 
-  await handleAiControlCentreRequest(request, response, { environment: process.env });
+  await handleAiControlCentreRequest(request, response, { environment });
   if (statusCode !== 200 || !payload) throw new Error(`AI Control Centre read failed with status ${statusCode}.`);
 
   marker("AI_CONTROL_CENTRE_STATE", {
