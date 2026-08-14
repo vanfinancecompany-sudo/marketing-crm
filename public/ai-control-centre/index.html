@@ -22,6 +22,7 @@
       .button { border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); padding:9px 12px; font-weight:800; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; }
       .button.primary { background:#0f172a; color:#fff; border-color:#0f172a; }
       .button.active { background:var(--blue); color:#fff; border-color:var(--blue); }
+      .button:disabled { opacity:.55; cursor:wait; }
       .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); }
       .card + .card { margin-top:14px; }
       .card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; padding:16px; border-bottom:1px solid var(--line); }
@@ -39,6 +40,7 @@
       .row strong { display:block; }
       .row small { color:var(--muted); }
       .notice { margin:0 16px 16px; padding:12px 13px; border:1px solid var(--line); border-radius:9px; background:var(--soft); color:var(--muted); font-size:13px; line-height:1.45; }
+      .notice.success { color:#065f46; background:#ecfdf5; border-color:#a7f3d0; }
       .notice.error { color:#991b1b; background:#fef2f2; border-color:#fecaca; }
       .gate { max-width:620px; margin:48px auto; padding:22px; }
       .gate h2 { margin:0; font-size:24px; }
@@ -50,7 +52,7 @@
       .hidden { display:none !important; }
       .loading { padding:18px; color:var(--muted); }
       @media (max-width:900px) { .split { grid-template-columns:1fr; } }
-      @media (max-width:760px) { .layout { display:block; } main { padding:14px; } .header { display:block; } .toolbar { margin-top:12px; } }
+      @media (max-width:760px) { .layout { display:block; } main { padding:14px; } .header { display:block; } .toolbar { margin-top:12px; } .card-head { display:block; } .card-head .toolbar { margin-top:12px; } }
     </style>
   </head>
   <body>
@@ -116,8 +118,12 @@
             </section>
 
             <section class="card">
-              <div class="card-head"><div><div class="eyebrow">Knowledge Opportunities</div><h2>Where evidence says the knowledge base needs work</h2><p>Highlights unresolved gaps and weak-answer clusters without automatically creating content.</p></div><a class="button" href="/ai-knowledge-opportunities">Open Opportunities</a></div>
+              <div class="card-head">
+                <div><div class="eyebrow">Knowledge Opportunities</div><h2>Where evidence says the knowledge base needs work</h2><p>Refresh uses a stable 90-day evidence window. It can reprioritise or create review opportunities, but never creates or publishes content automatically.</p></div>
+                <div class="toolbar"><button id="refreshEvidence" class="button primary" type="button">Refresh Live Evidence</button><a class="button" href="/ai-knowledge-opportunities">Open Opportunities</a></div>
+              </div>
               <div id="opportunityMetrics" class="metrics"></div>
+              <div id="evidenceRefreshNotice" class="notice hidden"></div>
             </section>
           </div>
         </div>
@@ -136,6 +142,8 @@
         const loading = document.getElementById("loading");
         const loadError = document.getElementById("loadError");
         const gateError = document.getElementById("gateError");
+        const evidenceButton = document.getElementById("refreshEvidence");
+        const evidenceNotice = document.getElementById("evidenceRefreshNotice");
 
         const clean = (value, limit = 500) => String(value == null ? "" : value).trim().slice(0, limit);
         const escapeHtml = (value, limit = 500) => clean(value, limit)
@@ -154,7 +162,7 @@
           const response = await fetch(url, { ...options, headers: { ...(options.headers || {}), ...(key() ? { [HEADER]: key() } : {}) } });
           const payload = await response.json().catch(() => ({}));
           if (response.status === 401) { clearKey(); throw Object.assign(new Error("Access key not recognised."), { status: 401 }); }
-          if (!response.ok) throw new Error(payload.error || payload.message || "Request failed.");
+          if (!response.ok || payload.ok === false) throw new Error(payload.error || payload.message || "Request failed.");
           return payload;
         }
 
@@ -201,8 +209,13 @@
           healthNotice.textContent = health ? `Saved baseline: ${clean(health.commit || "local run", 80)} · ${clean(health.mode || "validation", 40)}` : "No saved Assistant Health baseline is available in this browser yet.";
           show(healthNotice, true);
           document.getElementById("opportunityMetrics").innerHTML = [
-            metric("New", opportunities.new), metric("High priority", opportunities.high_priority), metric("Unanswered clusters", opportunities.unanswered), metric("Weak-answer clusters", opportunities.weak), metric("Conflict clusters", opportunities.conflicts), metric("Create article", opportunities.create_article), metric("Resolved", opportunities.resolved),
+            metric("New", opportunities.new), metric("High priority", opportunities.high_priority), metric("Evidence-backed", opportunities.evidence_backed), metric("Live assistant questions", opportunities.live_assistant_questions), metric("Live assistant gaps", opportunities.live_assistant_gaps), metric("Retrieval misses", opportunities.live_assistant_retrieval_misses), metric("Hub searches", opportunities.hub_searches), metric("Hub no results", opportunities.hub_no_results), metric("GSC impressions", opportunities.gsc_impressions), metric("Create article", opportunities.create_article), metric("Resolved", opportunities.resolved),
           ].join("");
+          if (opportunities.evidence_last_refreshed_at) {
+            evidenceNotice.textContent = `Opportunity evidence last refreshed ${new Date(opportunities.evidence_last_refreshed_at).toLocaleString("en-GB")}.`;
+            evidenceNotice.className = "notice";
+            show(evidenceNotice, true);
+          }
         }
 
         async function load() {
@@ -215,6 +228,34 @@
             if (error.status === 401) return locked(error.message);
             loadError.textContent = error.message || "AI Control Centre could not be loaded."; show(loadError, true);
           } finally { show(loading, false); }
+        }
+
+        async function refreshEvidence() {
+          if (!key()) return locked();
+          evidenceButton.disabled = true;
+          evidenceButton.textContent = "Refreshing…";
+          evidenceNotice.textContent = "";
+          show(evidenceNotice, false);
+          try {
+            const payload = await request("/api/marketing-ai-knowledge-opportunity-evidence", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "refreshEvidence", days: 90 }),
+            });
+            const refresh = payload.refresh || {};
+            evidenceNotice.textContent = `90-day evidence refreshed: ${refresh.existing_updated || 0} existing updated, ${refresh.new_created || 0} new review opportunities, ${refresh.stale_cleared || 0} stale evidence sets cleared. Nothing was created or published automatically.`;
+            evidenceNotice.className = "notice success";
+            show(evidenceNotice, true);
+            await load();
+          } catch (error) {
+            if (error.status === 401) return locked(error.message);
+            evidenceNotice.textContent = error.message || "Live evidence could not be refreshed.";
+            evidenceNotice.className = "notice error";
+            show(evidenceNotice, true);
+          } finally {
+            evidenceButton.disabled = false;
+            evidenceButton.textContent = "Refresh Live Evidence";
+          }
         }
 
         function locked(message = "") {
@@ -240,6 +281,7 @@
           load();
         }));
         document.getElementById("refresh").addEventListener("click", load);
+        evidenceButton.addEventListener("click", refreshEvidence);
         document.getElementById("lock").addEventListener("click", () => { clearKey(); locked(); });
 
         if (key()) load(); else locked();
