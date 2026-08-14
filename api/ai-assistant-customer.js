@@ -27,6 +27,7 @@ import {
   assistantTelemetryVisitorHash,
   isMissingAssistantTelemetryTableError,
   recordAssistantTelemetryEvent,
+  recordAssistantTelemetryEvents,
   telemetryFromAssistantResult,
 } from "../lib/aiAssistantTelemetry.js";
 
@@ -188,11 +189,12 @@ function productSelectionReply(product) {
 
 async function recordTelemetrySafely(supabase, payload) {
   try {
-    await recordAssistantTelemetryEvent(supabase, payload);
+    if (Array.isArray(payload)) await recordAssistantTelemetryEvents(supabase, payload);
+    else await recordAssistantTelemetryEvent(supabase, payload);
   } catch (error) {
     if (!isMissingAssistantTelemetryTableError(error)) {
       console.error("PUBLIC AI ASSISTANT TELEMETRY WRITE ERROR", {
-        event_type: payload?.event_type || null,
+        event_type: Array.isArray(payload) ? payload.map((item) => item?.event_type).filter(Boolean).join(",") : payload?.event_type || null,
         exception_type: error?.name || "Error",
         message: clean(error?.message, 500),
       });
@@ -218,20 +220,25 @@ async function recordResponseTelemetry({ supabase, body, environment, session, p
     product_context: productContext || session.product_lock,
     message_number: messageNumber,
   };
-  await recordTelemetrySafely(supabase, {
-    ...base,
-    event_type: "assistant_response",
-    ...diagnostics,
-    response_mode: responseMode,
-  });
-  if (cta) {
-    await recordTelemetrySafely(supabase, {
+  const events = [
+    {
       ...base,
-      event_type: "cta_shown",
-      cta_action_key: cta.action_key,
-      cta_label: cta.label,
-    });
-  }
+      event_type: "customer_message",
+    },
+    {
+      ...base,
+      event_type: "assistant_response",
+      ...diagnostics,
+      response_mode: responseMode,
+    },
+  ];
+  if (cta) events.push({
+    ...base,
+    event_type: "cta_shown",
+    cta_action_key: cta.action_key,
+    cta_label: cta.label,
+  });
+  await recordTelemetrySafely(supabase, events);
 }
 
 async function startConversation(supabase, body, environment) {
@@ -261,16 +268,6 @@ async function continueConversation(supabase, body, environment, simulateConvers
   if (!message) throw new PublicAssistantError(400, "invalid_request", "Please enter a message.");
   const history = boundedHistory(session.conversation_history);
   const messageNumber = Number(session.message_count || 0) + 1;
-  const visitorHash = assistantTelemetryVisitorHash(body.analytics_visitor_id, environment);
-
-  await recordTelemetrySafely(supabase, {
-    event_type: "customer_message",
-    visitor_hash: visitorHash,
-    customer_session_id: session.id,
-    page_type: session.page_type,
-    product_context: session.product_lock,
-    message_number: messageNumber,
-  });
 
   if (isPromptLeakageAttempt(message)) {
     const reply = promptLeakageReply();
