@@ -30,10 +30,39 @@ test("greeting, questions and follow-ups are separated", () => {
 });
 
 test("short human replies retain their distinct meaning", () => {
-  for (const message of ["Yes", "Yep", "OK", "Correct", "Exactly", "Fine"]) assert.equal(classify(message).message_type, "agreement", message);
+  for (const message of ["Yes", "Yep", "OK", "Correct", "Exactly", "Fine", "Alright", "Sounds good", "That's fine"]) assert.equal(classify(message).message_type, "agreement", message);
   for (const message of ["No", "Nope", "Not really"]) assert.equal(classify(message).message_type, "disagreement", message);
   for (const message of ["Maybe", "Possibly", "Not sure", "Whatever", "Don't know"]) assert.equal(classify(message).message_type, "clarification", message);
-  assert.equal(classify("Thanks").message_type, "positive_feedback");
+  for (const message of ["Thanks", "Got it", "Makes sense", "That's useful", "All good"]) assert.equal(classify(message).message_type, "positive_feedback", message);
+  for (const message of ["Carry on", "Go on", "Keep going", "Okay go on"]) assert.equal(classify(message).message_type, "agreement", message);
+});
+
+test("short natural answers to an assistant question never become generic misunderstandings", () => {
+  const cases = [
+    ["Ford Transit Custom", "What type of van are you looking for?"],
+    ["Southampton", "Where are you based?"],
+    ["Three years", "How long have you been trading?"],
+    ["About £400 a month", "What monthly budget are you aiming for?"],
+  ];
+
+  for (const [message, question] of cases) {
+    const result = classify(message, [{ role: "assistant", content: question }]);
+    assert.equal(result.message_type, "clarification", message);
+    assert.equal(result.recovery_required, false, message);
+    assert.equal(result.low_confidence, false, message);
+  }
+});
+
+test("natural acknowledgements and continuation replies do not generate misunderstanding apologies", () => {
+  for (const message of ["Got it", "That's useful", "Carry on", "Go on", "Keep going", "Sounds good"]) {
+    const classification = classify(message, [{ role: "assistant", content: "I can explain the next step if you'd like." }]);
+    const reply = humanRecoveryReply(classification, {
+      productContext: "finance",
+      messages: [{ role: "assistant", content: "I can explain the next step if you'd like." }],
+      journey: { next_best_question: "What type of van are you looking for?" },
+    }).reply;
+    assert.doesNotMatch(reply, /didn.t understand|not quite sure|explain that another way/i, message);
+  }
 });
 
 test("humour, random text, off-topic and nonsense are not business answers", () => {
