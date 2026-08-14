@@ -24,10 +24,10 @@
   ]);
 
   const advancedRoutes = Object.freeze([
-    "/ai-visibility",
-    "/ai-assistant-competence",
-    "/ai-customer-simulation",
-    "/ai-assistant-health",
+    { id: "ai-visibility", label: "AI Visibility", path: "/ai-visibility", view: "AI Visibility" },
+    { id: "ai-assistant-competence", label: "AI Assistant Test", path: "/ai-assistant-competence", view: "AI Assistant Competence Test" },
+    { id: "ai-customer-simulation", label: "Real Customer Simulation", path: "/ai-customer-simulation", view: "Real Customer Simulation" },
+    { id: "ai-assistant-health", label: "AI Assistant Health", path: "/ai-assistant-health", view: "AI Assistant Health" },
   ]);
 
   function normalizePathname(value) {
