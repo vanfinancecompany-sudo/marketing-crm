@@ -13,17 +13,24 @@ test("Knowledge Hub home polish is exact-path gated and removable on route chang
   assert.match(source, /removeStyle\(\)/);
 });
 
-test("intro block is moved above the search by placing search immediately after the welcome section", () => {
+test("welcome block is found independently of search and search is inserted immediately after it", () => {
   assert.match(source, /welcome to the van finance company knowledge hub/i);
+  assert.match(source, /filter\(\(element\) => !element\.closest\("#vfc-knowledge-hub-search"\)\)/);
+  assert.match(source, /categoryLinks === 0 && articleLinks === 0 && !containsSearch/);
   assert.match(source, /intro\.insertAdjacentElement\("afterend", host\)/);
-  assert.match(source, /categoryLinks === 0/);
 });
 
-test("empty search status and results do not create a large blank footer", () => {
+test("Back control does not prevent search sitting under the welcome copy", () => {
+  assert.match(source, /function findBackControl\(root\)/);
+  assert.match(source, /backWrap\.insertAdjacentElement\("beforebegin", host\)/);
+});
+
+test("empty search footer collapses and shell height is explicitly auto", () => {
+  assert.match(source, /padding: 24px 28px 18px !important/);
+  assert.match(source, /height: auto !important/);
   assert.match(source, /\.status:empty/);
-  assert.match(source, /min-height: 0 !important/);
   assert.match(source, /\.results:empty/);
-  assert.match(source, /margin: 28px auto !important/);
+  assert.match(source, /height: 0 !important/);
 });
 
 test("landing-page cards use border-box geometry, stronger shadow and no hover translation", () => {
@@ -33,8 +40,16 @@ test("landing-page cards use border-box geometry, stronger shadow and no hover t
   assert.doesNotMatch(source, /translateY\(/);
 });
 
-test("desktop card text is upsized to match the prominent welcome copy", () => {
+test("desktop card text remains prominent", () => {
   assert.match(source, /vfc-kh-modern-card__title[\s\S]*font-size: 20px !important/);
   assert.match(source, /vfc-kh-modern-card__excerpt[\s\S]*font-size: 18px !important/);
   assert.match(source, /vfc-kh-modern-card__count[\s\S]*font-size: 16px !important/);
+});
+
+test("footer category pills have spacing, no underlines and no ellipsis clipping", () => {
+  assert.match(source, /data-vfc-kh-category-link/);
+  assert.match(source, /margin: 6px 8px !important/);
+  assert.match(source, /text-decoration: none !important/);
+  assert.match(source, /text-overflow: clip !important/);
+  assert.match(source, /white-space: nowrap !important/);
 });
