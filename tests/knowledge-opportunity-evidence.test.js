@@ -4,16 +4,17 @@ import {
   aggregateKnowledgeOpportunityEvidence,
   calculateEvidenceAdjustedPriority,
   classifyAssistantEvidenceIntent,
+  evidenceChannelPayload,
   evidencePriorityComponents,
   shouldCreateEvidenceOpportunity,
 } from "../lib/knowledgeOpportunityEvidence.js";
 import { telemetryFromAssistantResult } from "../lib/aiAssistantTelemetry.js";
 
-test("live assistant evidence groups privacy-safe secondary intents without raw questions", () => {
+test("live assistant evidence retains redacted customer wording without double-counting the same intent", () => {
   const evidence = aggregateKnowledgeOpportunityEvidence({
     assistantEvents: [
-      { event_type: "assistant_response", product_context: "finance", secondary_intents: ["deposit"], knowledge_gap: true, retrieval_required: true, retrieval_used: false, created_at: "2026-08-10T10:00:00Z" },
-      { event_type: "assistant_response", product_context: "finance", secondary_intents: ["deposit"], knowledge_gap: false, retrieval_required: true, retrieval_used: true, created_at: "2026-08-11T10:00:00Z" },
+      { event_type: "assistant_response", product_context: "finance", customer_question: "How much deposit do I need? stu@example.com 07123 456 789", secondary_intents: ["deposit"], knowledge_gap: true, retrieval_required: true, retrieval_used: false, created_at: "2026-08-10T10:00:00Z" },
+      { event_type: "assistant_response", product_context: "finance", customer_question: "Is there an upfront payment for finance?", secondary_intents: ["deposit"], knowledge_gap: false, retrieval_required: true, retrieval_used: true, created_at: "2026-08-11T10:00:00Z" },
     ],
   });
   const group = evidence.groups.find((item) => item.key === "finance:upfront_costs");
@@ -22,13 +23,36 @@ test("live assistant evidence groups privacy-safe secondary intents without raw 
   assert.equal(group.live_assistant_gap_count, 1);
   assert.equal(group.live_assistant_retrieval_miss_count, 1);
   assert.deepEqual(group.assistant_intents[0], { query: "deposit", count: 2, impressions: 0, clicks: 0 });
-  assert.equal("question" in group, false);
+  assert.match(group.assistant_questions[0].query, /deposit/i);
+  assert.doesNotMatch(group.assistant_questions[0].query, /stu@example\.com/i);
+  assert.doesNotMatch(group.assistant_questions[0].query, /07123/);
+  const channels = evidenceChannelPayload(group, 90);
+  assert.equal(channels.live_assistant.question_variations.length, 2);
 });
 
-test("unsupported assistant labels remain diagnostic instead of being forced into the wrong intent", () => {
+test("question wording can classify an assistant turn even when no secondary intent label is supplied", () => {
+  const evidence = aggregateKnowledgeOpportunityEvidence({
+    assistantEvents: [{
+      event_type: "assistant_response",
+      product_context: "finance",
+      customer_question: "What documents do I need for a van finance application?",
+      secondary_intents: [],
+      knowledge_gap: true,
+      retrieval_required: true,
+      retrieval_used: false,
+      created_at: "2026-08-10T10:00:00Z",
+    }],
+  });
+  const group = evidence.groups.find((item) => item.key === "finance:documents");
+  assert.ok(group);
+  assert.equal(group.live_assistant_question_count, 1);
+  assert.equal(group.assistant_questions[0].query, "What documents do I need for a van finance application?");
+});
+
+test("unsupported assistant labels and unclassified wording remain diagnostic instead of being forced into the wrong intent", () => {
   assert.equal(classifyAssistantEvidenceIntent("self_employed", "finance"), null);
   const evidence = aggregateKnowledgeOpportunityEvidence({
-    assistantEvents: [{ event_type: "assistant_response", product_context: "finance", secondary_intents: ["self_employed"], created_at: "2026-08-10T10:00:00Z" }],
+    assistantEvents: [{ event_type: "assistant_response", product_context: "finance", customer_question: "I am self employed", secondary_intents: ["self_employed"], created_at: "2026-08-10T10:00:00Z" }],
   });
   assert.equal(evidence.groups.length, 0);
   assert.equal(evidence.diagnostics.unclassified_assistant_events, 1);
@@ -100,7 +124,7 @@ test("evidence priority boosts are bounded and overall score remains capped", ()
   assert.equal(priority.level, "critical");
 });
 
-test("stored text evidence is redacted before it reaches opportunity provenance", () => {
+test("Hub text evidence is redacted before it reaches opportunity provenance", () => {
   const evidence = aggregateKnowledgeOpportunityEvidence({
     searchEvents: [{
       event_type: "search_submitted",
@@ -117,7 +141,7 @@ test("stored text evidence is redacted before it reaches opportunity provenance"
   assert.doesNotMatch(group.hub_queries[0].query, /07123/);
 });
 
-test("assistant telemetry carries normalized secondary intent labels without copying a raw message", () => {
+test("assistant telemetry carries normalized intent labels without copying browser message fields", () => {
   const telemetry = telemetryFromAssistantResult({
     conversation_intent: "product_question",
     secondary_intents: ["Poor Credit", "deposit", "Poor Credit"],
@@ -126,4 +150,5 @@ test("assistant telemetry carries normalized secondary intent labels without cop
   assert.deepEqual(telemetry.secondary_intents, ["poor_credit", "deposit"]);
   assert.equal("message" in telemetry, false);
   assert.equal("question" in telemetry, false);
+  assert.equal("customer_question" in telemetry, false);
 });
