@@ -54,8 +54,10 @@ test("unsupported labels stay conservative while novel customer wording can form
   const evidence = aggregateKnowledgeOpportunityEvidence({
     assistantEvents: [{ event_type: "assistant_response", product_context: "finance", customer_question: "I am self employed", secondary_intents: ["self_employed"], knowledge_gap: true, retrieval_required: true, retrieval_used: false, created_at: "2026-08-10T10:00:00Z" }],
   });
-  const group = evidence.groups.find((item) => item.key === "finance:self_employed");
+  const group = evidence.groups[0];
   assert.ok(group);
+  assert.equal(group.product, "finance");
+  assert.match(group.normalised_intent, /self.*employed/);
   assert.equal(group.live_assistant_question_count, 1);
   assert.equal(shouldCreateEvidenceOpportunity(group), false);
   assert.equal(evidence.diagnostics.unclassified_assistant_events, 0);
