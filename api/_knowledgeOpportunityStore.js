@@ -5,6 +5,10 @@ import {
   recommendOpportunityContent,
 } from "../lib/knowledgeLearningEngine.js";
 import {
+  calculateEvidenceAdjustedPriority,
+  evidenceChannelPayload,
+} from "../lib/knowledgeOpportunityEvidence.js";
+import {
   hasMeaningfulNewOpportunityEvidence,
   knowledgeOpportunityClusterFingerprint,
   knowledgeOpportunityEvidenceFingerprint,
@@ -24,28 +28,37 @@ export async function loadLearningKnowledge(supabase) {
 }
 
 function suggestionFor(group, diagnosis, recommendation) {
-  const questions = [...new Set(group.questions.map((item) => item.original_question))];
+  const questions = [...new Set((group.questions || []).map((item) => item.original_question).filter(Boolean))];
+  const evidenceHint = group.external_evidence
+    ? "Use the live assistant, Knowledge Hub search and Google Search Console evidence as demand signals only; verify the underlying business facts before changing content."
+    : "";
   return {
     suggested_article_title: group.title,
-    suggested_article_brief: `Answer the grouped ${group.product} intent rather than creating separate content for each wording. Cover: ${questions.slice(0, 6).join(" | ")}. Diagnosis: ${diagnosis.diagnosis}.`,
+    suggested_article_brief: questions.length
+      ? `Answer the grouped ${group.product} intent rather than creating separate content for each wording. Cover: ${questions.slice(0, 6).join(" | ")}. Diagnosis: ${diagnosis.diagnosis}.`
+      : `Review the existing ${group.product} knowledge for this evidence-backed intent. Diagnosis: ${diagnosis.diagnosis}. ${evidenceHint}`.trim(),
     suggested_headings: ["Direct answer", "Who this applies to", "What customers need to know", "Practical next steps", "Frequently asked questions"],
-    suggested_factual_points: group.candidate_reasons,
+    suggested_factual_points: group.candidate_reasons || [],
     suggested_faq: { question: questions[0] || group.title, answer: "Draft answer requires review against the linked Business Knowledge before activation." },
     recommended_action: recommendation.action,
   };
 }
 
-export async function upsertOpportunityGroup(supabase, group, knowledge) {
+export async function upsertOpportunityGroup(supabase, group, knowledge, options = {}) {
   const diagnosis = diagnoseExistingKnowledge(group, knowledge);
   const recommendation = recommendOpportunityContent({ ...group, recommended_action: diagnosis.recommendedAction });
-  const priority = calculateOpportunityPriority({ ...group, title: group.title, normalised_intent: group.normalised_intent, existing_article_count: diagnosis.relatedArticles.length });
+  const priorityInput = { ...group, title: group.title, normalised_intent: group.normalised_intent, existing_article_count: diagnosis.relatedArticles.length };
+  const priority = group.external_evidence
+    ? calculateEvidenceAdjustedPriority(priorityInput, group.external_evidence)
+    : calculateOpportunityPriority(priorityInput);
   const suggestion = suggestionFor(group, diagnosis, recommendation);
   const existingResult = await supabase.from("knowledge_assistant_opportunities").select("*").eq("product", group.product).eq("normalised_intent", group.normalised_intent).maybeSingle();
   const existing = data(existingResult, "Existing knowledge opportunity could not be checked.");
   const clusterFingerprint = knowledgeOpportunityClusterFingerprint(group);
   const evidenceFingerprint = knowledgeOpportunityEvidenceFingerprint(group);
   const reopenable = ["closed", "no_action_required", "resolved", "dismissed", "completed"].includes(existing?.status);
-  const automaticallyReopened = reopenable && hasMeaningfulNewOpportunityEvidence(existing, group);
+  const allowAutomaticReopen = options.allowAutomaticReopen !== false && !group.external_evidence;
+  const automaticallyReopened = allowAutomaticReopen && reopenable && hasMeaningfulNewOpportunityEvidence(existing, group);
   const reopenReason = automaticallyReopened ? workflowReopenReason(existing, group) : "";
   const payload = {
     product: group.product,
@@ -76,6 +89,20 @@ export async function upsertOpportunityGroup(supabase, group, knowledge) {
     ...suggestion,
     updated_at: new Date().toISOString(),
   };
+  if (group.external_evidence) {
+    Object.assign(payload, {
+      live_assistant_question_count: Number(group.external_evidence.live_assistant_question_count || 0),
+      live_assistant_gap_count: Number(group.external_evidence.live_assistant_gap_count || 0),
+      live_assistant_retrieval_miss_count: Number(group.external_evidence.live_assistant_retrieval_miss_count || 0),
+      hub_search_count: Number(group.external_evidence.hub_search_count || 0),
+      hub_no_result_count: Number(group.external_evidence.hub_no_result_count || 0),
+      gsc_impressions: Math.round(Number(group.external_evidence.gsc_impressions || 0)),
+      gsc_clicks: Math.round(Number(group.external_evidence.gsc_clicks || 0)),
+      gsc_query_count: Number(group.external_evidence.gsc_query_count || 0),
+      evidence_channels: evidenceChannelPayload(group.external_evidence, options.evidenceWindowDays || 90),
+      evidence_last_refreshed_at: payload.updated_at,
+    });
+  }
   if (automaticallyReopened) Object.assign(payload, { status: "reopened", reopened_at: payload.updated_at, reopen_reason: reopenReason });
   const opportunity = data(await supabase.from("knowledge_assistant_opportunities").upsert(payload, { onConflict: "product,normalised_intent", ignoreDuplicates: false }).select().single(), "Knowledge opportunity could not be saved.");
   if (automaticallyReopened) {
@@ -89,7 +116,7 @@ export async function upsertOpportunityGroup(supabase, group, knowledge) {
       details: { previous_evidence_fingerprint: existing.evidence_fingerprint, evidence_fingerprint: evidenceFingerprint, cluster_fingerprint: clusterFingerprint, automatic: true },
     }), "Automatic reopen audit event could not be saved.");
   }
-  for (const question of group.questions) {
+  for (const question of group.questions || []) {
     data(await supabase.from("knowledge_assistant_opportunity_questions").upsert({ opportunity_id: opportunity.id, ...question }, { onConflict: "competence_result_id", ignoreDuplicates: true }), "Opportunity question could not be linked.");
   }
   return opportunity;
