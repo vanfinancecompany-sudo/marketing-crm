@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { buildAssistantMeasurementSummary } from "../lib/aiAssistantTelemetry.js";
+import { buildAssistantActiveUserWindows, buildAssistantMeasurementSummary } from "../lib/aiAssistantTelemetry.js";
 import { buildVisibilitySummary } from "../lib/aiVisibility.js";
 import { isDefaultActiveKnowledgeOpportunity, recommendedKnowledgeWorkflowAction } from "../lib/knowledgeOpportunityWorkflow.js";
 
@@ -107,6 +107,14 @@ function validIsoDate(value) {
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
 }
 
+function filterSince(rows = [], since) {
+  const threshold = new Date(since || 0).getTime();
+  return (Array.isArray(rows) ? rows : []).filter((item) => {
+    const created = new Date(item?.created_at || 0).getTime();
+    return Number.isFinite(created) && created >= threshold;
+  });
+}
+
 export function normaliseHealthBaselineInput(body = {}, environment = process.env) {
   const mode = clean(body.mode, 30).toLowerCase();
   if (!["deterministic", "live"].includes(mode)) throw new Error("Baseline mode must be deterministic or live.");
@@ -193,6 +201,8 @@ export async function handleAiControlCentreRequest(request, response, dependenci
 
     const days = requestedDays(request);
     const since = new Date(Date.now() - days * 86_400_000).toISOString();
+    const assistantLoadDays = Math.max(days, 30);
+    const assistantSince = new Date(Date.now() - assistantLoadDays * 86_400_000).toISOString();
     const [
       articleResult,
       visibilityResult,
@@ -208,7 +218,7 @@ export async function handleAiControlCentreRequest(request, response, dependenci
       supabase.from("knowledge_visibility_prompts").select("*").limit(10000),
       supabase.from("knowledge_visibility_settings").select("attention_days").eq("settings_key", "default").maybeSingle(),
       supabase.from("knowledge_assistant_opportunities").select("*").limit(5000),
-      loadPagedRows(supabase, "ai_assistant_events", "event_type,visitor_hash,customer_session_id,page_type,product_context,conversation_intent,secondary_intents,retrieval_required,retrieval_performed,retrieval_used,knowledge_gap,knowledge_sources,cta_action_key,cta_label,message_number,response_mode,created_at", { since, orderField: "created_at", optional: true }),
+      loadPagedRows(supabase, "ai_assistant_events", "event_type,visitor_hash,customer_session_id,page_type,product_context,conversation_intent,secondary_intents,retrieval_required,retrieval_performed,retrieval_used,knowledge_gap,knowledge_sources,cta_action_key,cta_label,message_number,response_mode,created_at", { since: assistantSince, orderField: "created_at", optional: true }),
       loadPagedRows(supabase, "knowledge_hub_search_events", "event_type,search_request_id,query_text,normalised_query,result_count,selected_article_id,selected_rank,category,created_at", { since, orderField: "created_at", optional: true }),
       loadHealthBaselines(supabase, { optional: true }),
     ]);
@@ -216,6 +226,7 @@ export async function handleAiControlCentreRequest(request, response, dependenci
     const articles = resultData(articleResult, "Knowledge articles could not be loaded.");
     const prompts = resultData(promptResult, "Visibility prompts could not be loaded.");
     const opportunities = resultData(opportunityResult, "Knowledge opportunities could not be loaded.");
+    const selectedAssistantEvents = filterSince(assistantEvents, since);
     if (settingResult?.error && !missingTable(settingResult.error, "knowledge_visibility_settings")) throw settingResult.error;
     const attentionDays = Number(settingResult?.data?.attention_days || 30);
 
@@ -223,13 +234,16 @@ export async function handleAiControlCentreRequest(request, response, dependenci
       generated_at: new Date().toISOString(),
       days,
       since,
-      assistant: buildAssistantMeasurementSummary(assistantEvents, searchEvents),
+      assistant: buildAssistantMeasurementSummary(selectedAssistantEvents, searchEvents),
+      assistant_active_users: buildAssistantActiveUserWindows(assistantEvents),
       visibility: buildVisibilitySummary({ articles, results: visibilityResult, prompts, attentionDays }),
       opportunities: buildOpportunitySummary(opportunities),
       assistant_health_baseline: healthBaselines[0] || null,
       assistant_health_baselines_by_mode: baselinePayload(healthBaselines).latest_by_mode,
       rows_loaded: {
         assistant_events: assistantEvents.length,
+        assistant_events_selected_window: selectedAssistantEvents.length,
+        assistant_event_load_days: assistantLoadDays,
         knowledge_hub_search_events: searchEvents.length,
         knowledge_articles: articles.length,
         visibility_results: visibilityResult.length,
