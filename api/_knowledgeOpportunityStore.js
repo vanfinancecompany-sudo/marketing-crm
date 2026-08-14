@@ -28,14 +28,18 @@ export async function loadLearningKnowledge(supabase) {
 }
 
 function suggestionFor(group, diagnosis, recommendation) {
-  const questions = [...new Set((group.questions || []).map((item) => item.original_question).filter(Boolean))];
+  const competenceQuestions = [...new Set((group.questions || []).map((item) => item.original_question).filter(Boolean))];
+  const liveQuestions = (group.external_evidence?.assistant_questions || []).map((item) => clean(item.query, 500)).filter(Boolean);
+  const hubQueries = (group.external_evidence?.hub_queries || []).map((item) => clean(item.query, 500)).filter(Boolean);
+  const observedQuestions = [...new Set([...liveQuestions, ...hubQueries])].slice(0, 6);
+  const questions = competenceQuestions.length ? competenceQuestions : observedQuestions;
   const evidenceHint = group.external_evidence
-    ? "Use the live assistant, Knowledge Hub search and Google Search Console evidence as demand signals only; verify the underlying business facts before changing content."
+    ? `Use live assistant, Knowledge Hub search and Google Search Console evidence as demand signals only; verify underlying business facts before changing content.${observedQuestions.length ? ` Observed customer wording: ${observedQuestions.join(" | ")}.` : ""}`
     : "";
   return {
     suggested_article_title: group.title,
-    suggested_article_brief: questions.length
-      ? `Answer the grouped ${group.product} intent rather than creating separate content for each wording. Cover: ${questions.slice(0, 6).join(" | ")}. Diagnosis: ${diagnosis.diagnosis}.`
+    suggested_article_brief: competenceQuestions.length
+      ? `Answer the grouped ${group.product} intent rather than creating separate content for each wording. Cover: ${competenceQuestions.slice(0, 6).join(" | ")}. Diagnosis: ${diagnosis.diagnosis}.`
       : `Review the existing ${group.product} knowledge for this evidence-backed intent. Diagnosis: ${diagnosis.diagnosis}. ${evidenceHint}`.trim(),
     suggested_headings: ["Direct answer", "Who this applies to", "What customers need to know", "Practical next steps", "Frequently asked questions"],
     suggested_factual_points: group.candidate_reasons || [],
