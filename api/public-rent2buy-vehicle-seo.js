@@ -2,8 +2,19 @@ import { RENT2BUY_WIX_SITE_ID } from "../lib/rent2buyMonthlyPriceSync.js";
 import { buildRent2BuyVehicleSeoTitle, normalizeRent2BuyRegistration } from "../lib/rent2buyVehicleSeo.js";
 
 const clean = (value, limit = 10000) => String(value ?? "").trim().slice(0, limit);
+const ALLOWED_ORIGINS = new Set(["https://rent2buyvans.co.uk", "https://www.rent2buyvans.co.uk"]);
+
+function setCors(request, response) {
+  const origin = clean(request.headers?.origin || request.headers?.Origin, 500);
+  if (ALLOWED_ORIGINS.has(origin)) response.setHeader("Access-Control-Allow-Origin", origin);
+  response.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  response.setHeader("Vary", "Origin");
+}
 
 export default async function handler(request, response) {
+  setCors(request, response);
+  if (request.method === "OPTIONS") return response.status(204).end();
   if (request.method !== "GET") return response.status(405).json({ ok: false, message: "Method not allowed." });
 
   const registration = normalizeRent2BuyRegistration(request.query?.registration);

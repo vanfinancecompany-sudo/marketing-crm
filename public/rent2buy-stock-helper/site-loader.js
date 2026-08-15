@@ -6,10 +6,7 @@
 
   const HOSTS = new Set(["rent2buyvans.co.uk", "www.rent2buyvans.co.uk"]);
   const PATH = "/view-all-vans";
-  const API_URL = (() => {
-    try { return `${new URL(document.currentScript?.src || "https://marketing-crm-github-work.vercel.app").origin}/api/public-rent2buy-stock-count`; }
-    catch { return "https://marketing-crm-github-work.vercel.app/api/public-rent2buy-stock-count"; }
-  })();
+  const API_URL = "https://marketing-crm-six.vercel.app/api/public-rent2buy-stock-count";
 
   let cachedCount = null;
   let countRequested = false;
