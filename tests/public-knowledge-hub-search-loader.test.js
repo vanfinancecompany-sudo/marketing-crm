@@ -52,13 +52,15 @@ test("result selection analytics never block article navigation", () => {
   assert.doesNotMatch(source, /event\.preventDefault\(\)/);
 });
 
-test("public search API strips internal ranking scores and has explicit VFC and Rent2Buy origin scopes", () => {
+test("public search API strips ranking scores and has explicit VFC and Rent2Buy origin scopes", () => {
   assert.match(apiSource, /results\.map\(\(\{ score: _score, \.\.\.result \}\) => result\)/);
   assert.match(apiSource, /vanfinancecompany\.co\.uk/);
   assert.match(apiSource, /rent2buyvans\.co\.uk/);
   assert.match(apiSource, /if \(VFC_HOSTS\.has\(hostname\)\) return "vfc"/);
   assert.match(apiSource, /if \(RENT2BUY_HOSTS\.has\(hostname\)\) return "rent2buy"/);
-  assert.match(apiSource, /loadRent2BuyKnowledgeHubArticles/);
+  assert.match(apiSource, /RENT2BUY_KNOWLEDGE_HUB_INDEX/);
+  assert.doesNotMatch(apiSource, /WIX_API_KEY/);
+  assert.doesNotMatch(apiSource, /loadRent2BuyKnowledgeHubArticles/);
 });
 
 test("public search API rate limits with a search-specific hashed key", () => {

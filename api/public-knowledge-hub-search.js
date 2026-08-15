@@ -7,7 +7,7 @@ import {
   sanitiseKnowledgeHubSearchQuery,
   searchPublicKnowledgeHubArticles,
 } from "../lib/publicKnowledgeHubSearch.js";
-import { loadRent2BuyKnowledgeHubArticles } from "../lib/rent2BuyKnowledgeHubCms.js";
+import { RENT2BUY_KNOWLEDGE_HUB_INDEX } from "../lib/rent2BuyKnowledgeHubIndex.js";
 import { secureHash, validateWixOrigin } from "../lib/publicAssistantFoundation.js";
 
 const SEARCH_LIMIT_PER_MINUTE = 30;
@@ -128,10 +128,11 @@ async function loadVfcPublishedArticles(supabase) {
   return (Array.isArray(result?.data) ? result.data : []).filter((article) => isPublicKnowledgeHubArticle(article, "vfc"));
 }
 
-async function loadPublishedArticles({ scope, supabase, environment, dependencies }) {
+async function loadPublishedArticles({ scope, supabase, dependencies }) {
   if (scope === "rent2buy") {
-    const loader = dependencies.loadRent2BuyArticles || loadRent2BuyKnowledgeHubArticles;
-    return loader({ environment, fetchImpl: dependencies.fetchImpl || fetch });
+    return Array.isArray(dependencies.rent2BuyArticles)
+      ? dependencies.rent2BuyArticles
+      : RENT2BUY_KNOWLEDGE_HUB_INDEX;
   }
   return loadVfcPublishedArticles(supabase);
 }
@@ -151,7 +152,7 @@ async function searchKnowledgeHub({ supabase, body, environment, scope, dependen
   const normalisedQuery = normaliseKnowledgeHubSearchText(query);
   if (normalisedQuery.length < 2) return { status: 400, payload: { error: "Enter at least 2 characters to search." } };
   const category = scope === "rent2buy" ? "all" : (clean(body.category, 100) || "all");
-  const articles = await loadPublishedArticles({ scope, supabase, environment, dependencies });
+  const articles = await loadPublishedArticles({ scope, supabase, dependencies });
   const results = searchPublicKnowledgeHubArticles(articles, { query, category, limit: 8, scope });
   const searchRequestId = randomUUID();
   const storedQuery = sanitiseKnowledgeHubSearchQuery(query);
@@ -193,7 +194,7 @@ async function selectKnowledgeHubResult({ supabase, body, environment, scope, de
 
   let available = false;
   if (scope === "rent2buy") {
-    const articles = await loadPublishedArticles({ scope, supabase, environment, dependencies });
+    const articles = await loadPublishedArticles({ scope, supabase, dependencies });
     available = articles.some((article) => article.id === articleId && isPublicKnowledgeHubArticle(article, "rent2buy"));
   } else {
     const result = await supabase.from("knowledge_articles").select(ARTICLE_FIELDS).eq("id", articleId).maybeSingle();
