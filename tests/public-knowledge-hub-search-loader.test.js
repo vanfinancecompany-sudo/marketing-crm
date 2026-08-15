@@ -61,9 +61,10 @@ test("Knowledge Hub search reuses the session-only anonymous analytics id and pe
 });
 
 test("result selection analytics never block article navigation", () => {
-  assert.match(source, /keepalive: true/);
-  assert.match(source, /Search analytics must never block navigation to an article/);
-  assert.doesNotMatch(source, /event\.preventDefault\(\)/);
+  const selectionHandler = source.slice(source.indexOf("function recordSelection"), source.indexOf("function resetRefs"));
+  assert.match(selectionHandler, /keepalive: true/);
+  assert.match(selectionHandler, /Search analytics must never block navigation to an article/);
+  assert.doesNotMatch(selectionHandler, /event\.preventDefault\(\)/);
 });
 
 test("public search API strips ranking scores and has explicit VFC and Rent2Buy origin scopes", () => {
