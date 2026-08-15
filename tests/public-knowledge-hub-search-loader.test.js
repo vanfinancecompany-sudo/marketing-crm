@@ -29,10 +29,16 @@ test("Knowledge Hub search loader uses isolated UI and customer-facing category 
   assert.match(source, /Ask a question or search by keyword/);
 });
 
-test("Knowledge Hub search reuses the session-only anonymous analytics id and does not store search data locally", () => {
+test("Knowledge Hub search reuses the session-only anonymous analytics id and persists only the internal-test marker", () => {
   assert.match(source, /vfc_ai_assistant_analytics_session_v1/);
   assert.match(source, /sessionStorage/);
-  assert.doesNotMatch(source, /localStorage/);
+  assert.match(source, /vfc_internal_analytics_v1/);
+  assert.match(source, /vfc_internal_test/);
+  assert.match(source, /localStorage\.setItem\(INTERNAL_ANALYTICS_STORAGE_KEY, "1"\)/);
+  assert.match(source, /localStorage\.removeItem\(INTERNAL_ANALYTICS_STORAGE_KEY\)/);
+  assert.match(source, /visitor_id: analyticsVisitorForRequest\(\)/);
+  assert.doesNotMatch(source, /localStorage\.setItem\([^,]+,\s*query/);
+  assert.doesNotMatch(source, /localStorage\.setItem\([^,]+,\s*activeSearch/);
 });
 
 test("result selection analytics never block article navigation", () => {
