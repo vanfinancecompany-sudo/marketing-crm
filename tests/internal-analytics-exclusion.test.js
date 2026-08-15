@@ -66,12 +66,18 @@ test("customer measurement excludes internal assistant and Knowledge Hub activit
   assert.equal(summary.measurement.trusted_since, CUSTOMER_ANALYTICS_TRUSTED_SINCE);
 });
 
-test("public test marker is explicit, anonymous and persistent for Knowledge Hub search", () => {
-  const sitewide = source("api/ai-assistant-sitewide.js");
+test("public test marker is explicit, anonymous and persistent across Ask Me and Knowledge Hub", () => {
+  const sitewideApi = source("api/ai-assistant-sitewide.js");
+  const sitewideLoader = source("public/wix-ai-assistant/site-loader.js");
   const searchEmbed = source("public/knowledge-hub-search/embed.html");
-  assert.match(sitewide, /vfc_internal_test/);
-  assert.match(sitewide, /INTERNAL_ANALYTICS_PREFIX/);
-  assert.match(sitewide, /analytics_visitor_id:\s*analyticsVisitorId/);
+  assert.match(sitewideApi, /vfc_internal_test/);
+  assert.match(sitewideApi, /INTERNAL_ANALYTICS_PREFIX/);
+  assert.match(sitewideApi, /analytics_visitor_id:\s*analyticsVisitorId/);
+  assert.match(sitewideLoader, /vfc_internal_analytics_v1/);
+  assert.match(sitewideLoader, /vfc_internal_test/);
+  assert.match(sitewideLoader, /localStorage\.setItem\(INTERNAL_ANALYTICS_STORAGE_KEY, "1"\)/);
+  assert.match(sitewideLoader, /visitor_id:\s*analyticsVisitorForRequest\(\)/);
+  assert.match(sitewideLoader, /analytics_visitor_id:\s*analyticsVisitorForRequest\(\)/);
   assert.match(searchEmbed, /vfc_internal_analytics_v1/);
   assert.match(searchEmbed, /document\.referrer/);
   assert.match(searchEmbed, /localStorage\.setItem\(INTERNAL_TEST_STORAGE_KEY, "1"\)/);
