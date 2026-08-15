@@ -5,10 +5,7 @@
   window.__RENT2BUY_VEHICLE_SEO__ = true;
 
   const HOSTS = new Set(["rent2buyvans.co.uk", "www.rent2buyvans.co.uk"]);
-  const API_URL = (() => {
-    try { return `${new URL(document.currentScript?.src || "https://marketing-crm-github-work.vercel.app").origin}/api/public-rent2buy-vehicle-seo`; }
-    catch { return "https://marketing-crm-github-work.vercel.app/api/public-rent2buy-vehicle-seo"; }
-  })();
+  const API_URL = "https://marketing-crm-six.vercel.app/api/public-rent2buy-vehicle-seo";
 
   let activeRegistration = "";
   let desiredTitle = "";
