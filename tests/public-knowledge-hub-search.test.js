@@ -12,11 +12,9 @@ import {
   searchPublicKnowledgeHubArticles,
 } from "../lib/publicKnowledgeHubSearch.js";
 import {
-  loadRent2BuyKnowledgeHubArticles,
-  normaliseRent2BuyKnowledgeHubItem,
-  RENT2BUY_KNOWLEDGE_COLLECTION_ID,
-  RENT2BUY_KNOWLEDGE_SITE_ID,
-} from "../lib/rent2BuyKnowledgeHubCms.js";
+  RENT2BUY_KNOWLEDGE_HUB_INDEX,
+  RENT2BUY_KNOWLEDGE_HUB_INDEX_VERIFIED_AT,
+} from "../lib/rent2BuyKnowledgeHubIndex.js";
 
 function article(overrides = {}) {
   return {
@@ -40,18 +38,22 @@ function article(overrides = {}) {
 }
 
 function rent2BuyArticle(overrides = {}) {
-  return article({
+  return {
     id: "00e89fb6-2672-402e-bde2-6b8c1361a726",
     title: "What Happens If Your Rent2Buy Van Is Stolen or Written Off?",
     slug: "rent2buy-van-stolen-total-loss-guide",
     category: "Rent2Buy",
     seo_title: "Rent2Buy Van Stolen or Written Off Guide",
+    meta_description: "",
     excerpt: "Learn what happens when a Rent2Buy van is stolen or written off.",
     content_markdown: "",
     faq_json: null,
     live_wix_url: "https://www.rent2buyvans.co.uk/knowledge-hub-articles/rent2buy-van-stolen-total-loss-guide",
+    is_active: true,
+    source_verified: true,
+    source_verified_at: RENT2BUY_KNOWLEDGE_HUB_INDEX_VERIFIED_AT,
     ...overrides,
-  });
+  };
 }
 
 function responseRecorder() {
@@ -76,14 +78,18 @@ function telemetrySupabase() {
   };
 }
 
-test("public search eligibility requires a confirmed site-matching Knowledge Hub URL", () => {
+test("public search eligibility requires the correct site-specific publication evidence", () => {
   assert.equal(isPublicKnowledgeHubArticle(article()), true);
   assert.equal(isPublicKnowledgeHubArticle(article({ publication_verified_at: null })), false);
   assert.equal(isPublicKnowledgeHubArticle(article({ wix_publication_status: "draft" })), false);
   assert.equal(isPublicKnowledgeHubArticle(article({ is_active: false })), false);
   assert.equal(isPublicKnowledgeHubArticle(article({ live_wix_url: "https://example.com/knowledge-hub-articles/test" })), false);
   assert.equal(isPublicKnowledgeHubArticle(article({ live_wix_url: "https://www.vanfinancecompany.co.uk/vans-on-finance" })), false);
+
   assert.equal(isPublicKnowledgeHubArticle(rent2BuyArticle(), "rent2buy"), true);
+  assert.equal(isPublicKnowledgeHubArticle(rent2BuyArticle({ source_verified: false }), "rent2buy"), false);
+  assert.equal(isPublicKnowledgeHubArticle(rent2BuyArticle({ is_active: false }), "rent2buy"), false);
+  assert.equal(isPublicKnowledgeHubArticle(rent2BuyArticle({ category: "Van Finance" }), "rent2buy"), false);
   assert.equal(isPublicKnowledgeHubArticle(rent2BuyArticle(), "vfc"), false);
   assert.equal(isPublicKnowledgeHubArticle(article(), "rent2buy"), false);
 });
@@ -96,7 +102,7 @@ test("title and exact-intent matches outrank incidental body mentions", () => {
   assert.equal(results[0].id, strong.id);
 });
 
-test("category filtering never leaks a different category into results", () => {
+test("category filtering never leaks a different category into VFC results", () => {
   const vehicle = article();
   const finance = article({
     id: "44444444-4444-4444-8444-444444444444",
@@ -121,7 +127,7 @@ test("brand scope prevents VFC and Rent2Buy article leakage", () => {
   assert.ok(vfcResults.every((item) => /vanfinancecompany\.co\.uk/.test(item.url)));
 });
 
-test("unverified and inactive articles are excluded even when they are the strongest text match", () => {
+test("unverified and inactive VFC articles are excluded even when they are the strongest text match", () => {
   const hidden = article({
     id: "55555555-5555-4555-8555-555555555555",
     title: "Bad Credit Van Finance",
@@ -152,60 +158,27 @@ test("query normalisation keeps intent words while removing punctuation noise", 
   assert.equal(normaliseKnowledgeHubSearchText("  MOT-history: failures & advisories?!  "), "mot history failures and advisories");
 });
 
-test("Rent2Buy Wix CMS items normalise only published Rent2Buy article routes", () => {
-  const item = {
-    id: "00e89fb6-2672-402e-bde2-6b8c1361a726",
-    createdDate: "2026-08-10T10:00:00.000Z",
-    updatedDate: "2026-08-14T10:00:00.000Z",
-    data: {
-      title: "What Happens If Your Rent2Buy Van Is Stolen or Written Off?",
-      slug: "rent2buy-van-stolen-total-loss-guide",
-      excerpt: "Stolen and written-off guidance.",
-      seoTitle: "Rent2Buy Stolen Van Guide",
-      metaDescription: "What happens after theft or total loss.",
-      category: "Rent2Buy",
-      publishDate: "2026-08-10T10:00:00.000Z",
-      _publishStatus: "PUBLISHED",
-      "link-knowledge-hub-articles-title": "/knowledge-hub-articles/rent2buy-van-stolen-total-loss-guide",
-    },
-  };
-  const normalised = normaliseRent2BuyKnowledgeHubItem(item);
-  assert.equal(normalised.id, item.id);
-  assert.equal(normalised.category, "Rent2Buy");
-  assert.equal(normalised.live_wix_url, "https://www.rent2buyvans.co.uk/knowledge-hub-articles/rent2buy-van-stolen-total-loss-guide");
-  assert.equal(isPublicKnowledgeHubArticle(normalised, "rent2buy"), true);
-  assert.equal(normaliseRent2BuyKnowledgeHubItem({ ...item, data: { ...item.data, _publishStatus: "DRAFT" } }), null);
+test("dedicated Rent2Buy index is exactly the 52-record published Wix source set", () => {
+  assert.equal(RENT2BUY_KNOWLEDGE_HUB_INDEX.length, 52);
+  assert.equal(new Set(RENT2BUY_KNOWLEDGE_HUB_INDEX.map((item) => item.id)).size, 52);
+  assert.equal(new Set(RENT2BUY_KNOWLEDGE_HUB_INDEX.map((item) => item.slug)).size, 52);
+  assert.ok(RENT2BUY_KNOWLEDGE_HUB_INDEX.every((item) => item.category === "Rent2Buy"));
+  assert.ok(RENT2BUY_KNOWLEDGE_HUB_INDEX.every((item) => item.source_verified === true));
+  assert.ok(RENT2BUY_KNOWLEDGE_HUB_INDEX.every((item) => item.source_verified_at === RENT2BUY_KNOWLEDGE_HUB_INDEX_VERIFIED_AT));
+  assert.ok(RENT2BUY_KNOWLEDGE_HUB_INDEX.every((item) => /^https:\/\/www\.rent2buyvans\.co\.uk\/knowledge-hub-articles\//.test(item.live_wix_url)));
 });
 
-test("Rent2Buy CMS reader uses the exact Rent2Buy site and Import3 collection", async () => {
-  let request = null;
-  const item = {
-    id: "00e89fb6-2672-402e-bde2-6b8c1361a726",
-    createdDate: "2026-08-10T10:00:00.000Z",
-    updatedDate: "2026-08-14T10:00:00.000Z",
-    data: {
-      title: "Rent2Buy stolen van guide",
-      slug: "rent2buy-van-stolen-total-loss-guide",
-      excerpt: "What to do after theft.",
-      _publishStatus: "PUBLISHED",
-      "link-knowledge-hub-articles-title": "/knowledge-hub-articles/rent2buy-van-stolen-total-loss-guide",
-    },
-  };
-  const articles = await loadRent2BuyKnowledgeHubArticles({
-    environment: { WIX_API_KEY: "test-key" },
-    useCache: false,
-    fetchImpl: async (url, options) => {
-      request = { url, options };
-      return { ok: true, status: 200, async json() { return { dataItems: [item] }; } };
-    },
+test("Rent2Buy index contains the current 100-mile location guidance and searches it naturally", () => {
+  const locationArticle = RENT2BUY_KNOWLEDGE_HUB_INDEX.find((item) => item.id === "64ab8687-6a4b-401d-8cfb-b8e217ae0fd8");
+  assert.ok(locationArticle);
+  assert.match(locationArticle.excerpt, /100-mile radius/i);
+  const results = searchPublicKnowledgeHubArticles(RENT2BUY_KNOWLEDGE_HUB_INDEX, {
+    query: "do I qualify based on location 100 miles Southampton",
+    scope: "rent2buy",
   });
-  assert.equal(request.options.headers["wix-site-id"], RENT2BUY_KNOWLEDGE_SITE_ID);
-  assert.equal(request.options.headers.Authorization, "test-key");
-  const payload = JSON.parse(request.options.body);
-  assert.equal(payload.dataCollectionId, RENT2BUY_KNOWLEDGE_COLLECTION_ID);
-  assert.equal(payload.query.paging.limit, 100);
-  assert.equal(articles.length, 1);
-  assert.match(articles[0].live_wix_url, /rent2buyvans\.co\.uk/);
+  assert.ok(results.length > 0);
+  assert.equal(results[0].id, locationArticle.id);
+  assert.ok(results.every((item) => /rent2buyvans\.co\.uk/.test(item.url)));
 });
 
 test("request origin determines Knowledge Hub scope and cannot be client-switched", () => {
@@ -215,7 +188,7 @@ test("request origin determines Knowledge Hub scope and cannot be client-switche
   assert.equal(knowledgeHubScopeForOrigin("https://example.com"), null);
 });
 
-test("Rent2Buy origin searches the injected Rent2Buy CMS pool and returns only Rent2Buy URLs", async () => {
+test("Rent2Buy origin searches the permanent 52-record index and ignores a client VFC switch", async () => {
   const response = responseRecorder();
   await handlePublicKnowledgeHubSearchRequest({
     method: "POST",
@@ -224,13 +197,33 @@ test("Rent2Buy origin searches the injected Rent2Buy CMS pool and returns only R
   }, response, {
     environment: { AI_ASSISTANT_SESSION_SECRET: "test-secret" },
     supabase: telemetrySupabase(),
-    loadRent2BuyArticles: async () => [rent2BuyArticle()],
   });
   assert.equal(response.statusCode, 200);
   assert.equal(response.payload.scope, "rent2buy");
-  assert.equal(response.payload.result_count, 1);
+  assert.ok(response.payload.result_count > 0);
   assert.match(response.payload.results[0].url, /rent2buyvans\.co\.uk/);
   assert.doesNotMatch(response.payload.results[0].url, /vanfinancecompany\.co\.uk/);
+});
+
+test("Rent2Buy result selections are validated against the permanent index", async () => {
+  const response = responseRecorder();
+  await handlePublicKnowledgeHubSearchRequest({
+    method: "POST",
+    headers: { origin: "https://www.rent2buyvans.co.uk", "x-forwarded-for": "203.0.113.10" },
+    body: {
+      action: "select",
+      search_request_id: "12345678-1234-4123-8123-123456789012",
+      query: "stolen written off",
+      article_id: "00e89fb6-2672-402e-bde2-6b8c1361a726",
+      rank: 1,
+      visitor_id: "visitor-1",
+    },
+  }, response, {
+    environment: { AI_ASSISTANT_SESSION_SECRET: "test-secret" },
+    supabase: telemetrySupabase(),
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.payload, { ok: true });
 });
 
 test("production Knowledge Hub embed origin is allowed without broadening untrusted origins", async () => {
