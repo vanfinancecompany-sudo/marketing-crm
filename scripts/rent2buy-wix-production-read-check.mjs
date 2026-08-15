@@ -1,57 +1,48 @@
-import { createClient } from "@supabase/supabase-js";
-
+const SITE_ID = "548f025b-673c-47f7-9bb6-383ab5d946e4";
+const COLLECTION_ID = "Import3";
 const productionUrl = String(process.env.VERCEL_PROJECT_PRODUCTION_URL || "").toLowerCase();
 const isTargetProduction = process.env.VERCEL_ENV === "production"
   && productionUrl.includes("marketing-crm-github-work.vercel.app");
 
 if (!isTargetProduction) {
-  console.log("RENT2BUY_MIRROR_CHECK_SKIPPED", {
+  console.log("RENT2BUY_PUBLIC_WIX_READ_SKIPPED", {
     vercel_env: process.env.VERCEL_ENV || null,
     project_production_url: productionUrl || null,
   });
   process.exit(0);
 }
 
-const supabaseUrl = String(process.env.SUPABASE_URL || "").trim();
-const serviceKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
-if (!supabaseUrl || !serviceKey) {
-  console.log("RENT2BUY_MIRROR_CHECK_RESULT", { configured: false });
-  process.exit(0);
-}
-
 try {
-  const supabase = createClient(supabaseUrl, serviceKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
+  const response = await fetch("https://www.wixapis.com/wix-data/v2/items/query", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "wix-site-id": SITE_ID,
+    },
+    body: JSON.stringify({
+      dataCollectionId: COLLECTION_ID,
+      query: {
+        paging: { limit: 100 },
+        fields: ["title", "slug", "excerpt", "_publishStatus", "link-knowledge-hub-articles-title"],
+      },
+      returnTotalCount: true,
+    }),
   });
-  const result = await supabase
-    .from("knowledge_articles")
-    .select("id,category,status,live_wix_url,published_at,publication_verified_at,wix_sync_status,wix_publication_status,is_active")
-    .ilike("live_wix_url", "https://%rent2buyvans.co.uk/knowledge-hub-articles/%")
-    .limit(500);
-  if (result.error) throw result.error;
-
-  const rows = Array.isArray(result.data) ? result.data : [];
-  const verified = rows.filter((row) => row.is_active === true
-    && row.wix_publication_status === "live"
-    && ["live", "synced"].includes(String(row.wix_sync_status || "").toLowerCase())
-    && row.published_at
-    && row.publication_verified_at
-    && /^https:\/\/(?:www\.)?rent2buyvans\.co\.uk\/knowledge-hub-articles\//i.test(String(row.live_wix_url || "")));
-
-  console.log("RENT2BUY_MIRROR_CHECK_RESULT", {
-    configured: true,
-    rent2buy_url_records: rows.length,
-    verified_public_records: verified.length,
-    rent2buy_category_records: verified.filter((row) => String(row.category || "").toLowerCase() === "rent2buy").length,
-    unique_verified_ids: new Set(verified.map((row) => row.id)).size,
-    usable_as_exact_52_article_index: verified.length === 52
-      && verified.every((row) => String(row.category || "").toLowerCase() === "rent2buy"),
+  const payload = await response.json().catch(() => ({}));
+  const items = Array.isArray(payload?.dataItems) ? payload.dataItems : [];
+  console.log("RENT2BUY_PUBLIC_WIX_READ_RESULT", {
+    status: response.status,
+    ok: response.ok,
+    returned_items: items.length,
+    reported_total: Number(payload?.pagingMetadata?.total || 0),
+    usable: response.ok && items.length === 52,
+    error_code: String(payload?.details?.applicationError?.code || payload?.errorCode || "").slice(0, 100) || null,
   });
 } catch (error) {
-  console.log("RENT2BUY_MIRROR_CHECK_RESULT", {
-    configured: true,
-    usable_as_exact_52_article_index: false,
+  console.log("RENT2BUY_PUBLIC_WIX_READ_RESULT", {
+    ok: false,
+    usable: false,
     exception_type: error?.name || "Error",
-    message: String(error?.message || "Supabase read failed").slice(0, 300),
+    message: String(error?.message || "Anonymous Wix read failed").slice(0, 300),
   });
 }
