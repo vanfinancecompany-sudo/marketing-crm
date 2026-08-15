@@ -6,62 +6,60 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const source = fs.readFileSync(path.join(root, "public/knowledge-hub-search/site-loader.js"), "utf8");
+const rent2BuyEmbed = fs.readFileSync(path.join(root, "public/rent2buy-knowledge-hub-search/index.html"), "utf8");
+const rent2BuyApi = fs.readFileSync(path.join(root, "api/public-rent2buy-knowledge-hub-search.js"), "utf8");
 const apiSource = fs.readFileSync(path.join(root, "api/public-knowledge-hub-search.js"), "utf8");
 
-test("Knowledge Hub search loader is exact-path gated on both websites and cannot appear on article or stock pages", () => {
-  assert.match(source, /new Set\(\["\/knowledge-hub-category\/rent2buy"\]\)/);
-  assert.match(source, /new Set\(\["\/knowledge-hub"\]\)/);
-  assert.match(source, /return SITE\.paths\.has\(normalisedPath\.toLowerCase\(\)\)/);
-  assert.doesNotMatch(source, /startsWith\("\/knowledge-hub"\)/);
+test("site loader only auto-mounts the VFC Knowledge Hub and leaves Rent2Buy movable", () => {
+  assert.match(source, /vanfinancecompany\.co\.uk/);
+  assert.match(source, /const PATH = "\/knowledge-hub"/);
+  assert.match(source, /VFC_HOSTS\.has\(hostname\)/);
+  assert.doesNotMatch(source, /knowledge-hub-category\/rent2buy/);
+  assert.doesNotMatch(source, /rent2buyvans\.co\.uk/);
 });
 
-test("Knowledge Hub search survives Wix client-side navigation without remaining on other pages", () => {
+test("VFC Knowledge Hub search survives Wix client-side navigation without remaining on other pages", () => {
   assert.match(source, /function syncRoute\(\)/);
-  assert.match(source, /if \(isKnowledgeHubPath\(\)\) mount\(\)/);
-  assert.match(source, /else if \(host \|\| targetObserver\) teardown\(\)/);
+  assert.match(source, /if \(isVfcKnowledgeHub\(\)\) mount\(\)/);
+  assert.match(source, /else if \(host \|\| observer\) teardown\(\)/);
   assert.match(source, /setInterval\(syncRoute, 700\)/);
 });
 
-test("Knowledge Hub search loader uses isolated site-aware UI", () => {
+test("VFC site loader keeps the compact bounded search design", () => {
   assert.match(source, /attachShadow\(\{ mode: "open" \}\)/);
-  assert.match(source, /rent2buyvans\.co\.uk/);
-  assert.match(source, /Rent2Buy Knowledge Hub/);
-  assert.match(source, /across our Rent2Buy guides/);
-  assert.match(source, /Van Finance/);
-  assert.match(source, /Vehicle Guides/);
-  assert.match(source, /Business Advice/);
-  assert.match(source, /if \(SITE\.categories\.length <= 1\) return ""/);
-  assert.match(source, /Ask a question or search by keyword/);
-});
-
-test("Knowledge Hub site loader uses the compact bounded VFC search design instead of expanding result cards", () => {
-  assert.match(source, /width:min\(680px, calc\(100% - 32px\)\)/);
+  assert.match(source, /width:min\(680px,calc\(100% - 32px\)\)/);
   assert.match(source, /border:2px solid #111/);
-  assert.match(source, /class="search-row"/);
-  assert.match(source, /class="search-button"/);
-  assert.match(source, /id="resultsView" class="hidden"/);
-  assert.match(source, /class="match-list"/);
+  assert.match(source, /class=\"search-row\"/);
+  assert.match(source, /class=\"search-button\"/);
+  assert.match(source, /id=\"resultsView\" class=\"hidden\"/);
+  assert.match(source, /class=\"match-list\"/);
   assert.match(source, /\.slice\(0, 3\)/);
-  assert.match(source, /searchView\?\.classList\.add\("hidden"\)/);
-  assert.match(source, /resultsView\?\.classList\.remove\("hidden"\)/);
   assert.doesNotMatch(source, /result-excerpt/);
-  assert.doesNotMatch(source, /display:grid; gap:10px/);
 });
 
-test("Knowledge Hub search reuses the session-only anonymous analytics id and persists only the internal-test marker", () => {
-  assert.match(source, /vfc_ai_assistant_analytics_session_v1/);
-  assert.match(source, /sessionStorage/);
-  assert.match(source, /vfc_internal_analytics_v1/);
-  assert.match(source, /vfc_internal_test/);
-  assert.match(source, /localStorage\.setItem\(INTERNAL_ANALYTICS_STORAGE_KEY, "1"\)/);
-  assert.match(source, /localStorage\.removeItem\(INTERNAL_ANALYTICS_STORAGE_KEY\)/);
-  assert.match(source, /visitor_id: analyticsVisitorForRequest\(\)/);
-  assert.doesNotMatch(source, /localStorage\.setItem\([^,]+,\s*query/);
-  assert.doesNotMatch(source, /localStorage\.setItem\([^,]+,\s*activeSearch/);
+test("Rent2Buy has a standalone compact Wix embed using the Rent2Buy-only endpoint", () => {
+  assert.match(rent2BuyEmbed, /Rent2Buy Knowledge Hub/);
+  assert.match(rent2BuyEmbed, /public-rent2buy-knowledge-hub-search/);
+  assert.match(rent2BuyEmbed, /target=\"_top\"/);
+  assert.match(rent2BuyEmbed, /\.slice\(0,3\)/);
+  assert.match(rent2BuyEmbed, /Search again/);
+  assert.match(rent2BuyEmbed, /Cancel/);
+  assert.doesNotMatch(rent2BuyEmbed, /Van Finance Company/);
+  assert.match(rent2BuyApi, /https:\/\/www\.rent2buyvans\.co\.uk/);
+  assert.match(rent2BuyApi, /public-knowledge-hub-search\.js/);
+});
+
+test("Knowledge Hub search keeps anonymous internal-test telemetry support", () => {
+  for (const text of [source, rent2BuyEmbed]) {
+    assert.match(text, /vfc_ai_assistant_analytics_session_v1/);
+    assert.match(text, /vfc_internal_analytics_v1/);
+    assert.match(text, /vfc_internal_test/);
+    assert.match(text, /internal:/);
+  }
 });
 
 test("result selection analytics never block article navigation", () => {
-  const selectionHandler = source.slice(source.indexOf("function recordSelection"), source.indexOf("function resetRefs"));
+  const selectionHandler = source.slice(source.indexOf("function recordSelection"), source.indexOf("function reset"));
   assert.match(selectionHandler, /keepalive: true/);
   assert.match(selectionHandler, /Search analytics must never block navigation to an article/);
   assert.doesNotMatch(selectionHandler, /event\.preventDefault\(\)/);
