@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handlePublicKnowledgeHubSearchRequest } from "../api/public-knowledge-hub-search.js";
+import {
+  handlePublicKnowledgeHubSearchRequest,
+  knowledgeHubScopeForOrigin,
+} from "../api/public-knowledge-hub-search.js";
 import {
   isPublicKnowledgeHubArticle,
   normaliseKnowledgeHubSearchText,
@@ -8,6 +11,12 @@ import {
   scorePublicKnowledgeHubArticle,
   searchPublicKnowledgeHubArticles,
 } from "../lib/publicKnowledgeHubSearch.js";
+import {
+  loadRent2BuyKnowledgeHubArticles,
+  normaliseRent2BuyKnowledgeHubItem,
+  RENT2BUY_KNOWLEDGE_COLLECTION_ID,
+  RENT2BUY_KNOWLEDGE_SITE_ID,
+} from "../lib/rent2BuyKnowledgeHubCms.js";
 
 function article(overrides = {}) {
   return {
@@ -30,13 +39,53 @@ function article(overrides = {}) {
   };
 }
 
-test("public search eligibility requires a confirmed VFC Knowledge Hub article URL", () => {
+function rent2BuyArticle(overrides = {}) {
+  return article({
+    id: "00e89fb6-2672-402e-bde2-6b8c1361a726",
+    title: "What Happens If Your Rent2Buy Van Is Stolen or Written Off?",
+    slug: "rent2buy-van-stolen-total-loss-guide",
+    category: "Rent2Buy",
+    seo_title: "Rent2Buy Van Stolen or Written Off Guide",
+    excerpt: "Learn what happens when a Rent2Buy van is stolen or written off.",
+    content_markdown: "",
+    faq_json: null,
+    live_wix_url: "https://www.rent2buyvans.co.uk/knowledge-hub-articles/rent2buy-van-stolen-total-loss-guide",
+    ...overrides,
+  });
+}
+
+function responseRecorder() {
+  const headers = {};
+  return {
+    headers,
+    statusCode: 200,
+    setHeader(name, value) { headers[name] = value; },
+    status(code) { this.statusCode = code; return this; },
+    json(payload) { this.payload = payload; return this; },
+    end() { this.ended = true; return this; },
+  };
+}
+
+function telemetrySupabase() {
+  return {
+    async rpc() { return { data: true, error: null }; },
+    from(table) {
+      assert.equal(table, "knowledge_hub_search_events");
+      return { async insert() { return { error: null }; } };
+    },
+  };
+}
+
+test("public search eligibility requires a confirmed site-matching Knowledge Hub URL", () => {
   assert.equal(isPublicKnowledgeHubArticle(article()), true);
   assert.equal(isPublicKnowledgeHubArticle(article({ publication_verified_at: null })), false);
   assert.equal(isPublicKnowledgeHubArticle(article({ wix_publication_status: "draft" })), false);
   assert.equal(isPublicKnowledgeHubArticle(article({ is_active: false })), false);
   assert.equal(isPublicKnowledgeHubArticle(article({ live_wix_url: "https://example.com/knowledge-hub-articles/test" })), false);
   assert.equal(isPublicKnowledgeHubArticle(article({ live_wix_url: "https://www.vanfinancecompany.co.uk/vans-on-finance" })), false);
+  assert.equal(isPublicKnowledgeHubArticle(rent2BuyArticle(), "rent2buy"), true);
+  assert.equal(isPublicKnowledgeHubArticle(rent2BuyArticle(), "vfc"), false);
+  assert.equal(isPublicKnowledgeHubArticle(article(), "rent2buy"), false);
 });
 
 test("title and exact-intent matches outrank incidental body mentions", () => {
@@ -60,6 +109,16 @@ test("category filtering never leaks a different category into results", () => {
   const results = searchPublicKnowledgeHubArticles([vehicle, finance], { query: "van finance", category: "Van Finance" });
   assert.ok(results.length > 0);
   assert.ok(results.every((item) => item.category === "Van Finance"));
+});
+
+test("brand scope prevents VFC and Rent2Buy article leakage", () => {
+  const vfc = article({ title: "Rent2Buy comparison on VFC", content_markdown: "stolen written off" });
+  const rent2buy = rent2BuyArticle();
+  const rentResults = searchPublicKnowledgeHubArticles([vfc, rent2buy], { query: "stolen written off", scope: "rent2buy" });
+  assert.deepEqual(rentResults.map((item) => item.id), [rent2buy.id]);
+  assert.ok(rentResults.every((item) => /rent2buyvans\.co\.uk/.test(item.url)));
+  const vfcResults = searchPublicKnowledgeHubArticles([vfc, rent2buy], { query: "stolen written off", scope: "vfc" });
+  assert.ok(vfcResults.every((item) => /vanfinancecompany\.co\.uk/.test(item.url)));
 });
 
 test("unverified and inactive articles are excluded even when they are the strongest text match", () => {
@@ -93,19 +152,93 @@ test("query normalisation keeps intent words while removing punctuation noise", 
   assert.equal(normaliseKnowledgeHubSearchText("  MOT-history: failures & advisories?!  "), "mot history failures and advisories");
 });
 
-test("production Knowledge Hub embed origin is allowed without broadening Wix origins", async () => {
-  const headers = {};
-  const response = {
-    statusCode: 200,
-    setHeader(name, value) { headers[name] = value; },
-    status(code) { this.statusCode = code; return this; },
-    json(payload) { this.payload = payload; return this; },
-    end() { this.ended = true; return this; },
+test("Rent2Buy Wix CMS items normalise only published Rent2Buy article routes", () => {
+  const item = {
+    id: "00e89fb6-2672-402e-bde2-6b8c1361a726",
+    createdDate: "2026-08-10T10:00:00.000Z",
+    updatedDate: "2026-08-14T10:00:00.000Z",
+    data: {
+      title: "What Happens If Your Rent2Buy Van Is Stolen or Written Off?",
+      slug: "rent2buy-van-stolen-total-loss-guide",
+      excerpt: "Stolen and written-off guidance.",
+      seoTitle: "Rent2Buy Stolen Van Guide",
+      metaDescription: "What happens after theft or total loss.",
+      category: "Rent2Buy",
+      publishDate: "2026-08-10T10:00:00.000Z",
+      _publishStatus: "PUBLISHED",
+      "link-knowledge-hub-articles-title": "/knowledge-hub-articles/rent2buy-van-stolen-total-loss-guide",
+    },
   };
+  const normalised = normaliseRent2BuyKnowledgeHubItem(item);
+  assert.equal(normalised.id, item.id);
+  assert.equal(normalised.category, "Rent2Buy");
+  assert.equal(normalised.live_wix_url, "https://www.rent2buyvans.co.uk/knowledge-hub-articles/rent2buy-van-stolen-total-loss-guide");
+  assert.equal(isPublicKnowledgeHubArticle(normalised, "rent2buy"), true);
+  assert.equal(normaliseRent2BuyKnowledgeHubItem({ ...item, data: { ...item.data, _publishStatus: "DRAFT" } }), null);
+});
+
+test("Rent2Buy CMS reader uses the exact Rent2Buy site and Import3 collection", async () => {
+  let request = null;
+  const item = {
+    id: "00e89fb6-2672-402e-bde2-6b8c1361a726",
+    createdDate: "2026-08-10T10:00:00.000Z",
+    updatedDate: "2026-08-14T10:00:00.000Z",
+    data: {
+      title: "Rent2Buy stolen van guide",
+      slug: "rent2buy-van-stolen-total-loss-guide",
+      excerpt: "What to do after theft.",
+      _publishStatus: "PUBLISHED",
+      "link-knowledge-hub-articles-title": "/knowledge-hub-articles/rent2buy-van-stolen-total-loss-guide",
+    },
+  };
+  const articles = await loadRent2BuyKnowledgeHubArticles({
+    environment: { WIX_API_KEY: "test-key" },
+    useCache: false,
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return { ok: true, status: 200, async json() { return { dataItems: [item] }; } };
+    },
+  });
+  assert.equal(request.options.headers["wix-site-id"], RENT2BUY_KNOWLEDGE_SITE_ID);
+  assert.equal(request.options.headers.Authorization, "test-key");
+  const payload = JSON.parse(request.options.body);
+  assert.equal(payload.dataCollectionId, RENT2BUY_KNOWLEDGE_COLLECTION_ID);
+  assert.equal(payload.query.paging.limit, 100);
+  assert.equal(articles.length, 1);
+  assert.match(articles[0].live_wix_url, /rent2buyvans\.co\.uk/);
+});
+
+test("request origin determines Knowledge Hub scope and cannot be client-switched", () => {
+  assert.equal(knowledgeHubScopeForOrigin("https://www.vanfinancecompany.co.uk"), "vfc");
+  assert.equal(knowledgeHubScopeForOrigin("https://www.rent2buyvans.co.uk"), "rent2buy");
+  assert.equal(knowledgeHubScopeForOrigin("https://rent2buyvans.co.uk"), "rent2buy");
+  assert.equal(knowledgeHubScopeForOrigin("https://example.com"), null);
+});
+
+test("Rent2Buy origin searches the injected Rent2Buy CMS pool and returns only Rent2Buy URLs", async () => {
+  const response = responseRecorder();
+  await handlePublicKnowledgeHubSearchRequest({
+    method: "POST",
+    headers: { origin: "https://www.rent2buyvans.co.uk", "x-forwarded-for": "203.0.113.10" },
+    body: { action: "search", query: "stolen written off", visitor_id: "visitor-1", scope: "vfc" },
+  }, response, {
+    environment: { AI_ASSISTANT_SESSION_SECRET: "test-secret" },
+    supabase: telemetrySupabase(),
+    loadRent2BuyArticles: async () => [rent2BuyArticle()],
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.payload.scope, "rent2buy");
+  assert.equal(response.payload.result_count, 1);
+  assert.match(response.payload.results[0].url, /rent2buyvans\.co\.uk/);
+  assert.doesNotMatch(response.payload.results[0].url, /vanfinancecompany\.co\.uk/);
+});
+
+test("production Knowledge Hub embed origin is allowed without broadening untrusted origins", async () => {
+  const response = responseRecorder();
   await handlePublicKnowledgeHubSearchRequest({
     method: "OPTIONS",
     headers: { origin: "https://marketing-crm-github-work.vercel.app" },
   }, response, { environment: {} });
   assert.equal(response.statusCode, 204);
-  assert.equal(headers["Access-Control-Allow-Origin"], "https://marketing-crm-github-work.vercel.app");
+  assert.equal(response.headers["Access-Control-Allow-Origin"], "https://marketing-crm-github-work.vercel.app");
 });
