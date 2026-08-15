@@ -20,7 +20,7 @@ function authorize(request) {
 
 function configuration(environment = process.env) {
   const apiKey = clean(environment.WIX_API_KEY);
-  if (!apiKey) throw new Error("WIX_API_KEY is not configured.");
+  if (!apiKey) return null;
   return {
     apiKey,
     siteId: clean(environment.WIX_RENT2BUY_SITE_ID, 500) || RENT2BUY_WIX_SITE_ID,
@@ -99,6 +99,15 @@ export default async function handler(request, response) {
 
   try {
     const config = configuration();
+    if (!config) {
+      console.info("RENT2BUY MONTHLY PRICE SYNC SKIPPED", { reason: "WIX_API_KEY is not configured for this deployment." });
+      return response.status(200).json({
+        ok: true,
+        skipped: true,
+        reason: "Wix API is not configured for this deployment.",
+      });
+    }
+
     const items = await loadAllVans(config);
     const { patches, skipped } = summarizeMonthlyPriceSync(items);
     const applied = patches.length ? await applyPatches(config, patches) : { successes: 0, failures: [] };
