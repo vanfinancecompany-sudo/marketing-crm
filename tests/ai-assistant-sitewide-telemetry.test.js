@@ -13,7 +13,8 @@ test("sitewide assistant records exposure/open/close and carries a session-only 
   assert.match(source, /sendTelemetry\("launcher_impression"\)/);
   assert.match(source, /sendTelemetry\("launcher_open"\)/);
   assert.match(source, /sendTelemetry\("launcher_close"\)/);
-  assert.match(source, /analytics_visitor_id: analyticsVisitorId/);
+  assert.match(source, /analytics_visitor_id: analyticsVisitorForRequest\(\)/);
+  assert.match(source, /visitor_id: analyticsVisitorForRequest\(\)/);
 });
 
 test("sitewide telemetry has a dedicated endpoint and records CTA clicks without exposing assistant diagnostics", () => {
