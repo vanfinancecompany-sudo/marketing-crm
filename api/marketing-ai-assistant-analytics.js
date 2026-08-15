@@ -74,7 +74,7 @@ export async function handleMarketingAssistantAnalyticsRequest(request, response
       loadRows(
         supabase,
         "knowledge_hub_search_events",
-        "event_type,search_request_id,query_text,normalised_query,result_count,selected_article_id,selected_rank,category,created_at",
+        "event_type,search_request_id,visitor_hash,query_text,normalised_query,result_count,selected_article_id,selected_rank,category,created_at",
         since,
       ),
     ]);
