@@ -4,6 +4,7 @@ import {
   evidenceChannelPayload,
   shouldCreateEvidenceOpportunity,
 } from "../lib/knowledgeOpportunityEvidence.js";
+import { filterTrustedCustomerAnalyticsEvents } from "../lib/aiAssistantTelemetry.js";
 import { loadLearningKnowledge, upsertOpportunityGroup } from "./_knowledgeOpportunityStore.js";
 
 const DEFAULT_DAYS = 90;
@@ -115,7 +116,7 @@ async function loadEvidenceInputs(supabase, since) {
     loadPagedRows(
       () => supabase
         .from("ai_assistant_events")
-        .select("event_type,product_context,conversation_intent,secondary_intents,customer_question,retrieval_required,retrieval_performed,retrieval_used,knowledge_gap,created_at")
+        .select("event_type,visitor_hash,product_context,conversation_intent,secondary_intents,customer_question,retrieval_required,retrieval_performed,retrieval_used,knowledge_gap,created_at")
         .eq("event_type", "assistant_response")
         .gte("created_at", since)
         .order("created_at", { ascending: true }),
@@ -124,7 +125,7 @@ async function loadEvidenceInputs(supabase, since) {
     loadPagedRows(
       () => supabase
         .from("knowledge_hub_search_events")
-        .select("event_type,query_text,normalised_query,result_count,category,created_at")
+        .select("event_type,visitor_hash,query_text,normalised_query,result_count,category,created_at")
         .eq("event_type", "search_submitted")
         .gte("created_at", since)
         .order("created_at", { ascending: true }),
@@ -150,9 +151,11 @@ export async function refreshKnowledgeOpportunityEvidence(supabase, options = {}
   const refreshedAt = new Date().toISOString();
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
   const inputs = await loadEvidenceInputs(supabase, since);
+  const trustedAssistantEvents = filterTrustedCustomerAnalyticsEvents(inputs.assistantEvents);
+  const trustedSearchEvents = filterTrustedCustomerAnalyticsEvents(inputs.searchEvents);
   const aggregated = aggregateKnowledgeOpportunityEvidence({
-    assistantEvents: inputs.assistantEvents,
-    searchEvents: inputs.searchEvents,
+    assistantEvents: trustedAssistantEvents,
+    searchEvents: trustedSearchEvents,
     visibilityResults: inputs.visibilityResults,
     articles: inputs.knowledge.articles,
   });
@@ -167,6 +170,10 @@ export async function refreshKnowledgeOpportunityEvidence(supabase, options = {}
     stale_cleared: 0,
     below_creation_threshold: 0,
     diagnostics: aggregated.diagnostics,
+    excluded_analytics: {
+      assistant_events: inputs.assistantEvents.length - trustedAssistantEvents.length,
+      hub_searches: inputs.searchEvents.length - trustedSearchEvents.length,
+    },
     created_ids: [],
     updated_ids: [],
   };
