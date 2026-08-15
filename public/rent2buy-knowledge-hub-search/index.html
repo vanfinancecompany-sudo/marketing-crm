@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Rent2Buy Knowledge Hub Search</title>
+  <style>
+    *{box-sizing:border-box}html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent;font-family:Arial,Helvetica,sans-serif;color:#161616}
+    body{position:fixed;inset:0}.hidden{display:none!important}.shell{width:100%;height:100%;padding:20px 24px;border:2px solid #111;border-radius:16px;background:#fff;box-shadow:0 4px 14px rgba(0,0,0,.28);overflow:hidden}
+    .eyebrow{margin:0 0 4px;color:#b30d14;font-size:12px;line-height:1.2;font-weight:800;letter-spacing:.08em;text-transform:uppercase}h2{margin:0;font-size:27px;line-height:1.1;letter-spacing:-.02em}.intro{margin:6px 0 12px;color:#565656;font-size:15px;line-height:1.4}
+    .search-row{display:flex;gap:8px;align-items:stretch}.search-input{flex:1 1 auto;min-width:0;min-height:46px;padding:0 15px;border:1.5px solid #cfcfcf;border-radius:11px;font:500 16px/1.2 Arial,Helvetica,sans-serif;color:#111;background:#fff;outline:none}.search-input:focus{border-color:#b30d14;box-shadow:0 0 0 3px rgba(179,13,20,.11)}
+    .search-button,.action-button{border:0;border-radius:999px;background:#111;color:#fff;font:800 13px/1 Arial,Helvetica,sans-serif;padding:0 18px;cursor:pointer;min-height:40px}.search-button:hover,.action-button:hover{background:#b30d14}.search-button:disabled{opacity:.6;cursor:wait}.status{min-height:18px;margin:7px 0 0;color:#666;font-size:12px}.status:empty{display:none}
+    .results-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:7px}.results-copy{min-width:0;flex:1 1 auto}.results-heading h2{font-size:22px}.query-label{margin:3px 0 0;color:#666;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.results-actions{display:flex;gap:7px}.action-button{min-height:36px;padding:0 14px;font-size:12px}.action-button.secondary{background:#fff;color:#111;border:1px solid #cfcfcf}
+    .match-list{border-top:1px solid #e1e1e1}.match{display:flex;align-items:center;height:41px;padding:7px 2px;border-bottom:1px solid #e1e1e1;color:#161616;text-decoration:none;font-size:14px;line-height:1.25;font-weight:800}.match::after{content:"›";margin-left:auto;padding-left:12px;color:#b30d14;font-size:20px}.match-title{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty-state{height:123px;display:flex;align-items:center;justify-content:center;text-align:center;color:#555;font-size:14px;line-height:1.4}
+    @media(max-width:640px){.shell{padding:16px 14px;border-radius:14px}h2{font-size:23px}.intro{font-size:14px}.search-row{gap:6px}.search-button{padding:0 13px;font-size:12px}.results-heading h2{font-size:18px}.results-actions{gap:5px}.action-button{padding:0 10px;font-size:11px}.match{height:40px;font-size:13px}}
+  </style>
+</head>
+<body>
+  <section class="shell" aria-label="Search the Rent2Buy Knowledge Hub">
+    <div id="searchView">
+      <p class="eyebrow">Rent2Buy Knowledge Hub</p>
+      <h2>What do you need help with?</h2>
+      <p class="intro">Ask a question or search by keyword across our Rent2Buy guides.</p>
+      <div class="search-row">
+        <input id="query" class="search-input" type="search" autocomplete="off" inputmode="search" aria-label="Search the Rent2Buy Knowledge Hub" placeholder="Ask a question or search by keyword...">
+        <button id="searchButton" class="search-button" type="button">Search</button>
+      </div>
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+    </div>
+    <div id="resultsView" class="hidden">
+      <div class="results-heading">
+        <div class="results-copy"><p class="eyebrow">Top Matches</p><h2>Choose a helpful guide</h2><p id="queryLabel" class="query-label"></p></div>
+        <div class="results-actions"><button id="searchAgain" class="action-button" type="button">Search again</button><button id="cancelResults" class="action-button secondary" type="button">Cancel</button></div>
+      </div>
+      <div id="matchList" class="match-list"></div>
+      <div id="emptyState" class="empty-state hidden">No close matches found. Try a shorter phrase or a different keyword.</div>
+    </div>
+  </section>
+  <script>
+    (()=>{
+      "use strict";
+      const API_URL="/api/public-rent2buy-knowledge-hub-search";
+      const SESSION_KEY="vfc_ai_assistant_analytics_session_v1";
+      const INTERNAL_KEY="vfc_internal_analytics_v1";
+      const INTERNAL_PARAM="vfc_internal_test";
+      const INTERNAL_PREFIX="internal:";
+      const input=document.getElementById("query"),searchButton=document.getElementById("searchButton"),status=document.getElementById("status"),searchView=document.getElementById("searchView"),resultsView=document.getElementById("resultsView"),queryLabel=document.getElementById("queryLabel"),matchList=document.getElementById("matchList"),emptyState=document.getElementById("emptyState"),searchAgain=document.getElementById("searchAgain"),cancelResults=document.getElementById("cancelResults");
+      let requestSequence=0,activeSearch=null;
+      const clean=(v,l=5000)=>String(v||"").trim().slice(0,l);
+      const escapeHtml=(v)=>clean(v,2000).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
+      function visitorId(){try{const e=clean(sessionStorage.getItem(SESSION_KEY),160);if(e)return e;const g=crypto?.randomUUID?.()||`knowledge-${Date.now()}-${Math.random().toString(16).slice(2)}`;sessionStorage.setItem(SESSION_KEY,g);return g}catch{return crypto?.randomUUID?.()||`knowledge-${Date.now()}-${Math.random().toString(16).slice(2)}`}}
+      const visitor=visitorId();
+      function internalTestEnabled(){let requested="";try{requested=clean(new URL(location.href).searchParams.get(INTERNAL_PARAM),20).toLowerCase()}catch{}try{if(!requested&&document.referrer)requested=clean(new URL(document.referrer).searchParams.get(INTERNAL_PARAM),20).toLowerCase()}catch{}try{if(["1","true","yes","on"].includes(requested))localStorage.setItem(INTERNAL_KEY,"1");if(["0","false","no","off"].includes(requested))localStorage.removeItem(INTERNAL_KEY);return localStorage.getItem(INTERNAL_KEY)==="1"}catch{return ["1","true","yes","on"].includes(requested)}}
+      function analyticsVisitor(){return internalTestEnabled()&&!visitor.startsWith(INTERNAL_PREFIX)?`${INTERNAL_PREFIX}${visitor}`:visitor}
+      function showSearch(clear){requestSequence++;activeSearch=null;searchView.classList.remove("hidden");resultsView.classList.add("hidden");matchList.innerHTML="";emptyState.classList.add("hidden");status.textContent="";if(clear)input.value=""}
+      async function runSearch(){const query=clean(input.value,200);if(query.length<2){status.textContent="Enter at least two characters.";return}const sequence=++requestSequence;searchButton.disabled=true;status.textContent="Searching…";try{const response=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"search",query,category:"all",visitor_id:analyticsVisitor()}),credentials:"same-origin"});const payload=await response.json();if(sequence!==requestSequence)return;if(!response.ok)throw new Error();activeSearch=payload;renderResults(payload,query)}catch{if(sequence===requestSequence)status.textContent="Search is temporarily unavailable. Please try again."}finally{if(sequence===requestSequence)searchButton.disabled=false}}
+      function renderResults(payload,query){const items=(Array.isArray(payload?.results)?payload.results:[]).slice(0,3);queryLabel.textContent=`For “${query}”`;input.blur();searchView.classList.add("hidden");resultsView.classList.remove("hidden");matchList.innerHTML="";emptyState.classList.toggle("hidden",items.length>0);if(!items.length)return;matchList.innerHTML=items.map((item,index)=>`<a class="match" target="_top" href="${escapeHtml(item.url)}" data-article-id="${escapeHtml(item.id)}" data-rank="${index+1}"><span class="match-title">${escapeHtml(item.title)}</span></a>`).join("");matchList.querySelectorAll(".match").forEach(link=>link.addEventListener("click",recordSelection))}
+      function recordSelection(event){const link=event.currentTarget;if(!activeSearch?.search_request_id)return;try{fetch(API_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"select",search_request_id:activeSearch.search_request_id,query:clean(input.value,200),category:"all",article_id:link.dataset.articleId,rank:Number(link.dataset.rank),visitor_id:analyticsVisitor()}),credentials:"same-origin",keepalive:true}).catch(()=>{})}catch{}}
+      searchButton.addEventListener("click",runSearch);input.addEventListener("keydown",e=>{if(e.key==="Enter")runSearch();else if(e.key==="Escape"){input.value="";status.textContent=""}});searchAgain.addEventListener("click",()=>showSearch(false));cancelResults.addEventListener("click",()=>showSearch(true));internalTestEnabled();
+    })();
+  </script>
+</body>
+</html>
