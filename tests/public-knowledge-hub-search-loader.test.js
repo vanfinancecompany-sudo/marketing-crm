@@ -34,6 +34,20 @@ test("Knowledge Hub search loader uses isolated site-aware UI", () => {
   assert.match(source, /Ask a question or search by keyword/);
 });
 
+test("Knowledge Hub site loader uses the compact bounded VFC search design instead of expanding result cards", () => {
+  assert.match(source, /width:min\(680px, calc\(100% - 32px\)\)/);
+  assert.match(source, /border:2px solid #111/);
+  assert.match(source, /class="search-row"/);
+  assert.match(source, /class="search-button"/);
+  assert.match(source, /id="resultsView" class="hidden"/);
+  assert.match(source, /class="match-list"/);
+  assert.match(source, /\.slice\(0, 3\)/);
+  assert.match(source, /searchView\?\.classList\.add\("hidden"\)/);
+  assert.match(source, /resultsView\?\.classList\.remove\("hidden"\)/);
+  assert.doesNotMatch(source, /result-excerpt/);
+  assert.doesNotMatch(source, /display:grid; gap:10px/);
+});
+
 test("Knowledge Hub search reuses the session-only anonymous analytics id and persists only the internal-test marker", () => {
   assert.match(source, /vfc_ai_assistant_analytics_session_v1/);
   assert.match(source, /sessionStorage/);
