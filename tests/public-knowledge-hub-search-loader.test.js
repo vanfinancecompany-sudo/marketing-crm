@@ -8,8 +8,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const source = fs.readFileSync(path.join(root, "public/knowledge-hub-search/site-loader.js"), "utf8");
 const apiSource = fs.readFileSync(path.join(root, "api/public-knowledge-hub-search.js"), "utf8");
 
-test("Knowledge Hub search loader is exact-path gated and cannot appear on article or stock pages", () => {
-  assert.match(source, /return normalisedPath === "\/knowledge-hub"/);
+test("Knowledge Hub search loader is exact-path gated on both websites and cannot appear on article or stock pages", () => {
+  assert.match(source, /new Set\(\["\/knowledge-hub-category\/rent2buy"\]\)/);
+  assert.match(source, /new Set\(\["\/knowledge-hub"\]\)/);
+  assert.match(source, /return SITE\.paths\.has\(normalisedPath\.toLowerCase\(\)\)/);
   assert.doesNotMatch(source, /startsWith\("\/knowledge-hub"\)/);
 });
 
@@ -20,12 +22,15 @@ test("Knowledge Hub search survives Wix client-side navigation without remaining
   assert.match(source, /setInterval\(syncRoute, 700\)/);
 });
 
-test("Knowledge Hub search loader uses isolated UI and customer-facing category filters", () => {
+test("Knowledge Hub search loader uses isolated site-aware UI", () => {
   assert.match(source, /attachShadow\(\{ mode: "open" \}\)/);
+  assert.match(source, /rent2buyvans\.co\.uk/);
+  assert.match(source, /Rent2Buy Knowledge Hub/);
+  assert.match(source, /across our Rent2Buy guides/);
   assert.match(source, /Van Finance/);
-  assert.match(source, /Rent2Buy/);
   assert.match(source, /Vehicle Guides/);
   assert.match(source, /Business Advice/);
+  assert.match(source, /if \(SITE\.categories\.length <= 1\) return ""/);
   assert.match(source, /Ask a question or search by keyword/);
 });
 
@@ -47,11 +52,13 @@ test("result selection analytics never block article navigation", () => {
   assert.doesNotMatch(source, /event\.preventDefault\(\)/);
 });
 
-test("public search API strips internal ranking scores and only allows the VFC site origin", () => {
+test("public search API strips internal ranking scores and has explicit VFC and Rent2Buy origin scopes", () => {
   assert.match(apiSource, /results\.map\(\(\{ score: _score, \.\.\.result \}\) => result\)/);
   assert.match(apiSource, /vanfinancecompany\.co\.uk/);
-  assert.match(apiSource, /www\.vanfinancecompany\.co\.uk/);
-  assert.doesNotMatch(apiSource, /rent2buyvans\.co\.uk/);
+  assert.match(apiSource, /rent2buyvans\.co\.uk/);
+  assert.match(apiSource, /if \(VFC_HOSTS\.has\(hostname\)\) return "vfc"/);
+  assert.match(apiSource, /if \(RENT2BUY_HOSTS\.has\(hostname\)\) return "rent2buy"/);
+  assert.match(apiSource, /loadRent2BuyKnowledgeHubArticles/);
 });
 
 test("public search API rate limits with a search-specific hashed key", () => {

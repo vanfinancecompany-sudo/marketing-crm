@@ -7,11 +7,14 @@ import {
   sanitiseKnowledgeHubSearchQuery,
   searchPublicKnowledgeHubArticles,
 } from "../lib/publicKnowledgeHubSearch.js";
+import { loadRent2BuyKnowledgeHubArticles } from "../lib/rent2BuyKnowledgeHubCms.js";
 import { secureHash, validateWixOrigin } from "../lib/publicAssistantFoundation.js";
 
 const SEARCH_LIMIT_PER_MINUTE = 30;
 const SEARCH_LIMIT_PER_DAY = 500;
 const KNOWLEDGE_HUB_EMBED_ORIGIN = "https://marketing-crm-github-work.vercel.app";
+const VFC_HOSTS = new Set(["vanfinancecompany.co.uk", "www.vanfinancecompany.co.uk"]);
+const RENT2BUY_HOSTS = new Set(["rent2buyvans.co.uk", "www.rent2buyvans.co.uk"]);
 const ARTICLE_FIELDS = [
   "id", "title", "slug", "category", "article_type", "seo_title", "meta_description", "excerpt",
   "content_markdown", "faq_json", "status", "live_wix_url", "published_at", "publication_verified_at",
@@ -28,14 +31,17 @@ function requestOrigin(request) {
   return clean(request.headers?.origin || request.headers?.Origin, 500);
 }
 
-function isAllowedKnowledgeHubOrigin(origin, environment = process.env) {
+export function knowledgeHubScopeForOrigin(origin, environment = process.env) {
   try {
     const parsed = new URL(clean(origin, 500));
-    if (parsed.origin === KNOWLEDGE_HUB_EMBED_ORIGIN) return true;
-    return validateWixOrigin(parsed.origin, environment)
-      && ["vanfinancecompany.co.uk", "www.vanfinancecompany.co.uk"].includes(parsed.hostname.toLowerCase());
+    if (parsed.origin === KNOWLEDGE_HUB_EMBED_ORIGIN) return "vfc";
+    if (!validateWixOrigin(parsed.origin, environment)) return null;
+    const hostname = parsed.hostname.toLowerCase();
+    if (VFC_HOSTS.has(hostname)) return "vfc";
+    if (RENT2BUY_HOSTS.has(hostname)) return "rent2buy";
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -107,7 +113,7 @@ async function recordSearchEvent(supabase, payload) {
   }
 }
 
-async function loadPublishedArticles(supabase) {
+async function loadVfcPublishedArticles(supabase) {
   const result = await supabase
     .from("knowledge_articles")
     .select(ARTICLE_FIELDS)
@@ -119,7 +125,15 @@ async function loadPublishedArticles(supabase) {
     .not("publication_verified_at", "is", null)
     .limit(1000);
   if (result?.error) throw result.error;
-  return (Array.isArray(result?.data) ? result.data : []).filter(isPublicKnowledgeHubArticle);
+  return (Array.isArray(result?.data) ? result.data : []).filter((article) => isPublicKnowledgeHubArticle(article, "vfc"));
+}
+
+async function loadPublishedArticles({ scope, supabase, environment, dependencies }) {
+  if (scope === "rent2buy") {
+    const loader = dependencies.loadRent2BuyArticles || loadRent2BuyKnowledgeHubArticles;
+    return loader({ environment, fetchImpl: dependencies.fetchImpl || fetch });
+  }
+  return loadVfcPublishedArticles(supabase);
 }
 
 function uuid(value) {
@@ -127,13 +141,18 @@ function uuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(candidate) ? candidate : "";
 }
 
-async function searchKnowledgeHub(supabase, body, environment) {
+function telemetryCategory(scope, category) {
+  if (scope === "rent2buy") return "Rent2Buy";
+  return category === "all" ? null : category;
+}
+
+async function searchKnowledgeHub({ supabase, body, environment, scope, dependencies }) {
   const query = clean(body.query, 200);
   const normalisedQuery = normaliseKnowledgeHubSearchText(query);
   if (normalisedQuery.length < 2) return { status: 400, payload: { error: "Enter at least 2 characters to search." } };
-  const category = clean(body.category, 100) || "all";
-  const articles = await loadPublishedArticles(supabase);
-  const results = searchPublicKnowledgeHubArticles(articles, { query, category, limit: 8 });
+  const category = scope === "rent2buy" ? "all" : (clean(body.category, 100) || "all");
+  const articles = await loadPublishedArticles({ scope, supabase, environment, dependencies });
+  const results = searchPublicKnowledgeHubArticles(articles, { query, category, limit: 8, scope });
   const searchRequestId = randomUUID();
   const storedQuery = sanitiseKnowledgeHubSearchQuery(query);
   const storedNormalised = normaliseKnowledgeHubSearchText(storedQuery) || "redacted";
@@ -145,7 +164,7 @@ async function searchKnowledgeHub(supabase, body, environment) {
     query_text: storedQuery || "[redacted]",
     normalised_query: storedNormalised,
     result_count: results.length,
-    category: category === "all" ? null : category,
+    category: telemetryCategory(scope, category),
   });
 
   return {
@@ -154,13 +173,14 @@ async function searchKnowledgeHub(supabase, body, environment) {
       search_request_id: searchRequestId,
       query,
       category,
+      scope,
       result_count: results.length,
       results: results.map(({ score: _score, ...result }) => result),
     },
   };
 }
 
-async function selectKnowledgeHubResult(supabase, body, environment) {
+async function selectKnowledgeHubResult({ supabase, body, environment, scope, dependencies }) {
   const searchRequestId = uuid(body.search_request_id);
   const articleId = uuid(body.article_id);
   const rank = Number.parseInt(body.rank, 10);
@@ -171,9 +191,16 @@ async function selectKnowledgeHubResult(supabase, body, environment) {
     return { status: 400, payload: { error: "Invalid search selection." } };
   }
 
-  const result = await supabase.from("knowledge_articles").select(ARTICLE_FIELDS).eq("id", articleId).maybeSingle();
-  if (result?.error) throw result.error;
-  if (!isPublicKnowledgeHubArticle(result?.data || {})) return { status: 404, payload: { error: "Article is not available." } };
+  let available = false;
+  if (scope === "rent2buy") {
+    const articles = await loadPublishedArticles({ scope, supabase, environment, dependencies });
+    available = articles.some((article) => article.id === articleId && isPublicKnowledgeHubArticle(article, "rent2buy"));
+  } else {
+    const result = await supabase.from("knowledge_articles").select(ARTICLE_FIELDS).eq("id", articleId).maybeSingle();
+    if (result?.error) throw result.error;
+    available = isPublicKnowledgeHubArticle(result?.data || {}, "vfc");
+  }
+  if (!available) return { status: 404, payload: { error: "Article is not available." } };
 
   await recordSearchEvent(supabase, {
     event_type: "result_selected",
@@ -184,7 +211,7 @@ async function selectKnowledgeHubResult(supabase, body, environment) {
     result_count: null,
     selected_article_id: articleId,
     selected_rank: rank,
-    category: clean(body.category, 100) || null,
+    category: telemetryCategory(scope, clean(body.category, 100) || "all"),
   });
   return { status: 200, payload: { ok: true } };
 }
@@ -192,8 +219,9 @@ async function selectKnowledgeHubResult(supabase, body, environment) {
 export async function handlePublicKnowledgeHubSearchRequest(request, response, dependencies = {}) {
   const environment = dependencies.environment || process.env;
   const origin = requestOrigin(request);
+  const scope = knowledgeHubScopeForOrigin(origin, environment);
   response.setHeader?.("Cache-Control", "no-store, max-age=0");
-  if (!isAllowedKnowledgeHubOrigin(origin, environment)) return response.status(403).json({ error: "Unavailable from this website." });
+  if (!scope) return response.status(403).json({ error: "Unavailable from this website." });
   setCors(response, origin);
   if (request.method === "OPTIONS") return response.status(204).end();
   if (request.method !== "POST") return response.status(405).json({ error: "Method not allowed." });
@@ -205,13 +233,14 @@ export async function handlePublicKnowledgeHubSearchRequest(request, response, d
     const body = bodyObject(request);
     const action = clean(body.action, 20) || "search";
     const result = action === "search"
-      ? await searchKnowledgeHub(supabase, body, environment)
+      ? await searchKnowledgeHub({ supabase, body, environment, scope, dependencies })
       : action === "select"
-        ? await selectKnowledgeHubResult(supabase, body, environment)
+        ? await selectKnowledgeHubResult({ supabase, body, environment, scope, dependencies })
         : { status: 400, payload: { error: "Unsupported search action." } };
     return response.status(result.status).json(result.payload);
   } catch (error) {
     console.error("PUBLIC KNOWLEDGE HUB SEARCH ERROR", {
+      scope,
       exception_type: error?.name || "Error",
       message: clean(error?.message, 500),
     });

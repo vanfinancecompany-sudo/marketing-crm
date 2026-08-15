@@ -16,7 +16,8 @@
     }
   })();
   const API_URL = `${SCRIPT_ORIGIN}/api/public-knowledge-hub-search`;
-  const CATEGORIES = [
+  const RENT2BUY_HOSTS = new Set(["rent2buyvans.co.uk", "www.rent2buyvans.co.uk"]);
+  const VFC_CATEGORIES = [
     "all",
     "Van Finance",
     "Rent2Buy",
@@ -26,6 +27,7 @@
     "Business Advice",
     "Self Employed",
   ];
+  const SITE = siteConfiguration();
 
   let host = null;
   let shadow = null;
@@ -43,9 +45,33 @@
     return String(value || "").trim().slice(0, limit);
   }
 
+  function siteConfiguration() {
+    const hostname = String(window.location.hostname || "").toLowerCase();
+    if (RENT2BUY_HOSTS.has(hostname)) {
+      return {
+        brand: "rent2buy",
+        paths: new Set(["/knowledge-hub-category/rent2buy"]),
+        categories: ["all"],
+        eyebrow: "Rent2Buy Knowledge Hub",
+        title: "What do you need help with?",
+        intro: "Ask a question or search by keyword across our Rent2Buy guides.",
+        ariaLabel: "Search the Rent2Buy Knowledge Hub",
+      };
+    }
+    return {
+      brand: "vfc",
+      paths: new Set(["/knowledge-hub"]),
+      categories: VFC_CATEGORIES,
+      eyebrow: "Knowledge Hub",
+      title: "What do you need help with?",
+      intro: "Ask a question or search by keyword to find practical guides from Van Finance Company.",
+      ariaLabel: "Search the Knowledge Hub",
+    };
+  }
+
   function isKnowledgeHubPath() {
     const normalisedPath = String(window.location.pathname || "/").replace(/\/+$/, "") || "/";
-    return normalisedPath === "/knowledge-hub";
+    return SITE.paths.has(normalisedPath.toLowerCase());
   }
 
   function analyticsVisitorId() {
@@ -97,6 +123,13 @@
       || document.querySelector("#PAGES_CONTAINER");
   }
 
+  function categoryControls() {
+    if (SITE.categories.length <= 1) return "";
+    return `<div class="chips" role="group" aria-label="Filter Knowledge Hub category">
+      ${SITE.categories.map((item) => `<button class="chip${item === "all" ? " is-active" : ""}" type="button" data-category="${escapeHtml(item)}">${item === "all" ? "All" : escapeHtml(item)}</button>`).join("")}
+    </div>`;
+  }
+
   function createHost(target) {
     if (!target || !isKnowledgeHubPath()) return;
     if (host?.isConnected) return;
@@ -104,7 +137,8 @@
 
     host = document.createElement("section");
     host.id = "vfc-knowledge-hub-search";
-    host.setAttribute("aria-label", "Search the Knowledge Hub");
+    host.setAttribute("aria-label", SITE.ariaLabel);
+    host.dataset.brand = SITE.brand;
     shadow = host.attachShadow({ mode: "open" });
     shadow.innerHTML = `
       <style>
@@ -153,13 +187,11 @@
         }
       </style>
       <div class="shell">
-        <p class="eyebrow">Knowledge Hub</p>
-        <h2>What do you need help with?</h2>
-        <p class="intro">Ask a question or search by keyword to find practical guides from Van Finance Company.</p>
-        <input class="search-input" type="search" autocomplete="off" inputmode="search" aria-label="Search Knowledge Hub" placeholder="Ask a question or search by keyword..." />
-        <div class="chips" role="group" aria-label="Filter Knowledge Hub category">
-          ${CATEGORIES.map((item) => `<button class="chip${item === "all" ? " is-active" : ""}" type="button" data-category="${escapeHtml(item)}">${item === "all" ? "All" : escapeHtml(item)}</button>`).join("")}
-        </div>
+        <p class="eyebrow">${escapeHtml(SITE.eyebrow)}</p>
+        <h2>${escapeHtml(SITE.title)}</h2>
+        <p class="intro">${escapeHtml(SITE.intro)}</p>
+        <input class="search-input" type="search" autocomplete="off" inputmode="search" aria-label="${escapeHtml(SITE.ariaLabel)}" placeholder="Ask a question or search by keyword..." />
+        ${categoryControls()}
         <div class="status" role="status" aria-live="polite"></div>
         <div class="results"></div>
       </div>`;
@@ -231,7 +263,7 @@
     const items = Array.isArray(payload?.results) ? payload.results : [];
     if (!items.length) {
       status.textContent = "No close matches found.";
-      results.innerHTML = '<div class="empty">Try a shorter phrase, a different keyword, or choose another category.</div>';
+      results.innerHTML = '<div class="empty">Try a shorter phrase or a different keyword.</div>';
       return;
     }
     status.textContent = `${items.length} helpful ${items.length === 1 ? "result" : "results"}`;
