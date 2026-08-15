@@ -1,6 +1,7 @@
 import { handleCustomerAssistantRequest } from "./ai-assistant-customer.js";
 import { safeCustomerPayload, validateWixOrigin } from "../lib/publicAssistantFoundation.js";
 import { resolvePublicWixPageContext } from "../lib/publicWixSiteContext.js";
+import { personaliseCustomerPayload } from "../lib/customerAssistantPersonality.js";
 
 const INTERNAL_ANALYTICS_PREFIX = "internal:";
 const INTERNAL_TEST_PARAM = "vfc_internal_test";
@@ -31,6 +32,15 @@ function analyticsVisitorId(body, pageUrl) {
   return value.startsWith(INTERNAL_ANALYTICS_PREFIX) ? value : `${INTERNAL_ANALYTICS_PREFIX}${value}`;
 }
 
+function installCustomerVoice(response, body = {}) {
+  if (response.__customerAssistantVoiceInstalled || typeof response.json !== "function") return;
+  response.__customerAssistantVoiceInstalled = true;
+  const originalJson = response.json.bind(response);
+  response.json = (payload) => originalJson(personaliseCustomerPayload(payload, {
+    message: clean(body.message, 3000),
+  }));
+}
+
 export async function handleSitewideAssistantRequest(request, response, dependencies = {}) {
   const environment = dependencies.environment || process.env;
 
@@ -40,6 +50,7 @@ export async function handleSitewideAssistantRequest(request, response, dependen
   }
 
   const body = bodyObject(request);
+  installCustomerVoice(response, body);
   const pageUrl = clean(body.page_url, 2000);
   if (!pageUrl) {
     response.setHeader?.("Cache-Control", "no-store, max-age=0");
