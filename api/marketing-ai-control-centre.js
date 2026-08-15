@@ -219,7 +219,7 @@ export async function handleAiControlCentreRequest(request, response, dependenci
       supabase.from("knowledge_visibility_settings").select("attention_days").eq("settings_key", "default").maybeSingle(),
       supabase.from("knowledge_assistant_opportunities").select("*").limit(5000),
       loadPagedRows(supabase, "ai_assistant_events", "event_type,visitor_hash,customer_session_id,page_type,product_context,conversation_intent,secondary_intents,retrieval_required,retrieval_performed,retrieval_used,knowledge_gap,knowledge_sources,cta_action_key,cta_label,message_number,response_mode,created_at", { since: assistantSince, orderField: "created_at", optional: true }),
-      loadPagedRows(supabase, "knowledge_hub_search_events", "event_type,search_request_id,query_text,normalised_query,result_count,selected_article_id,selected_rank,category,created_at", { since, orderField: "created_at", optional: true }),
+      loadPagedRows(supabase, "knowledge_hub_search_events", "event_type,search_request_id,visitor_hash,query_text,normalised_query,result_count,selected_article_id,selected_rank,category,created_at", { since, orderField: "created_at", optional: true }),
       loadHealthBaselines(supabase, { optional: true }),
     ]);
 
