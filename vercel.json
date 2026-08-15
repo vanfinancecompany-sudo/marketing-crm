@@ -32,21 +32,10 @@
           "value": "frame-ancestors 'self' https://vanfinancecompany.co.uk https://www.vanfinancecompany.co.uk https://rent2buyvans.co.uk https://www.rent2buyvans.co.uk https://editor.wix.com https://manage.wix.com https://www.wix.com https://*.wixsite.com"
         }
       ]
-    },
-    {
-      "source": "/rent2buy-knowledge-hub-search/(.*)",
-      "headers": [
-        {
-          "key": "Content-Security-Policy",
-          "value": "frame-ancestors 'self' https://rent2buyvans.co.uk https://www.rent2buyvans.co.uk https://editor.wix.com https://manage.wix.com https://www.wix.com https://*.wixsite.com"
-        }
-      ]
     }
   ],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/rent2buy-knowledge-hub-search", "destination": "/rent2buy-knowledge-hub-search/index.html" },
-    { "source": "/rent2buy-knowledge-hub-search/", "destination": "/rent2buy-knowledge-hub-search/index.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
