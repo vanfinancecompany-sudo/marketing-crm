@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { buildAssistantMeasurementSummary } from "../lib/aiAssistantTelemetry.js";
+import { CUSTOMER_ANALYTICS_TRUSTED_SINCE, buildAssistantMeasurementSummary } from "../lib/aiAssistantTelemetry.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const PAGE_SIZE = 1000;
@@ -26,6 +26,12 @@ function requestedDays(request) {
   const raw = Number.parseInt(request.query?.days, 10);
   if (!Number.isInteger(raw)) return 28;
   return Math.min(90, Math.max(1, raw));
+}
+
+function laterIso(first, second) {
+  const firstMs = new Date(first || 0).getTime();
+  const secondMs = new Date(second || 0).getTime();
+  return new Date(Math.max(Number.isFinite(firstMs) ? firstMs : 0, Number.isFinite(secondMs) ? secondMs : 0)).toISOString();
 }
 
 function missingTable(error, table) {
@@ -62,7 +68,8 @@ export async function handleMarketingAssistantAnalyticsRequest(request, response
 
   try {
     const days = requestedDays(request);
-    const since = new Date(Date.now() - days * 86_400_000).toISOString();
+    const requestedSince = new Date(Date.now() - days * 86_400_000).toISOString();
+    const since = laterIso(requestedSince, CUSTOMER_ANALYTICS_TRUSTED_SINCE);
     const supabase = dependencies.supabase || getSupabase(environment);
     const [events, searchEvents] = await Promise.all([
       loadRows(
@@ -82,7 +89,8 @@ export async function handleMarketingAssistantAnalyticsRequest(request, response
     return response.status(200).json({
       generated_at: new Date().toISOString(),
       since,
-      days,
+      requested_days: days,
+      customer_measurement_reset_at: CUSTOMER_ANALYTICS_TRUSTED_SINCE,
       rows_loaded: {
         assistant_events: events.length,
         knowledge_hub_search_events: searchEvents.length,
