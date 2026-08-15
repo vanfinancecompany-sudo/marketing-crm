@@ -2,6 +2,8 @@ import { handleCustomerAssistantRequest } from "./ai-assistant-customer.js";
 import { safeCustomerPayload, validateWixOrigin } from "../lib/publicAssistantFoundation.js";
 import { resolvePublicWixPageContext } from "../lib/publicWixSiteContext.js";
 
+const INTERNAL_ANALYTICS_PREFIX = "internal:";
+const INTERNAL_TEST_PARAM = "vfc_internal_test";
 const clean = (value, limit = 5000) => String(value || "").trim().slice(0, limit);
 
 function bodyObject(request) {
@@ -12,6 +14,21 @@ function bodyObject(request) {
 
 function requestOrigin(request) {
   return clean(request.headers?.origin || request.headers?.Origin, 500);
+}
+
+function internalTestRequested(pageUrl) {
+  try {
+    const value = clean(new URL(pageUrl).searchParams.get(INTERNAL_TEST_PARAM), 20).toLowerCase();
+    return ["1", "true", "yes", "on"].includes(value);
+  } catch {
+    return false;
+  }
+}
+
+function analyticsVisitorId(body, pageUrl) {
+  const value = clean(body.analytics_visitor_id, 160);
+  if (!value || !internalTestRequested(pageUrl)) return value || null;
+  return value.startsWith(INTERNAL_ANALYTICS_PREFIX) ? value : `${INTERNAL_ANALYTICS_PREFIX}${value}`;
 }
 
 export async function handleSitewideAssistantRequest(request, response, dependencies = {}) {
@@ -43,6 +60,7 @@ export async function handleSitewideAssistantRequest(request, response, dependen
     // with server-resolved context from the current VFC URL and, on vehicle pages, the Wix CMS.
     request.body = {
       ...body,
+      analytics_visitor_id: analyticsVisitorId(body, pageUrl),
       page_context: pageContext,
     };
 
