@@ -4,7 +4,7 @@ import {
   evidenceChannelPayload,
   shouldCreateEvidenceOpportunity,
 } from "../lib/knowledgeOpportunityEvidence.js";
-import { filterTrustedCustomerAnalyticsEvents } from "../lib/aiAssistantTelemetry.js";
+import { CUSTOMER_ANALYTICS_TRUSTED_SINCE, filterTrustedCustomerAnalyticsEvents } from "../lib/aiAssistantTelemetry.js";
 import { loadLearningKnowledge, upsertOpportunityGroup } from "./_knowledgeOpportunityStore.js";
 
 const DEFAULT_DAYS = 90;
@@ -22,6 +22,12 @@ function data(result, fallback) {
 function requestedDays(value) {
   const number = Number.parseInt(value, 10);
   return Number.isInteger(number) ? Math.min(MAX_DAYS, Math.max(MIN_DAYS, number)) : DEFAULT_DAYS;
+}
+
+function laterIso(first, second) {
+  const firstMs = new Date(first || 0).getTime();
+  const secondMs = new Date(second || 0).getTime();
+  return new Date(Math.max(Number.isFinite(firstMs) ? firstMs : 0, Number.isFinite(secondMs) ? secondMs : 0)).toISOString();
 }
 
 function later(first, second) {
@@ -107,7 +113,7 @@ async function loadPagedRows(buildQuery, fallback) {
   return rows;
 }
 
-async function loadEvidenceInputs(supabase, since) {
+async function loadEvidenceInputs(supabase, customerSince, gscSince) {
   const [opportunities, assistantEvents, searchEvents, visibilityResults, knowledge] = await Promise.all([
     loadPagedRows(
       () => supabase.from("knowledge_assistant_opportunities").select("*").order("updated_at", { ascending: true }),
@@ -118,7 +124,7 @@ async function loadEvidenceInputs(supabase, since) {
         .from("ai_assistant_events")
         .select("event_type,visitor_hash,product_context,conversation_intent,secondary_intents,customer_question,retrieval_required,retrieval_performed,retrieval_used,knowledge_gap,created_at")
         .eq("event_type", "assistant_response")
-        .gte("created_at", since)
+        .gte("created_at", customerSince)
         .order("created_at", { ascending: true }),
       "Assistant evidence could not be loaded.",
     ),
@@ -127,7 +133,7 @@ async function loadEvidenceInputs(supabase, since) {
         .from("knowledge_hub_search_events")
         .select("event_type,visitor_hash,query_text,normalised_query,result_count,category,created_at")
         .eq("event_type", "search_submitted")
-        .gte("created_at", since)
+        .gte("created_at", customerSince)
         .order("created_at", { ascending: true }),
       "Knowledge Hub search evidence could not be loaded.",
     ),
@@ -136,7 +142,7 @@ async function loadEvidenceInputs(supabase, since) {
         .from("knowledge_visibility_results")
         .select("article_id,provider,checked_at,structured_evidence")
         .eq("provider", "google_search_console")
-        .gte("checked_at", since)
+        .gte("checked_at", gscSince)
         .order("checked_at", { ascending: false }),
       "Google Search Console evidence could not be loaded.",
     ),
@@ -150,7 +156,8 @@ export async function refreshKnowledgeOpportunityEvidence(supabase, options = {}
   const days = requestedDays(options.days);
   const refreshedAt = new Date().toISOString();
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
-  const inputs = await loadEvidenceInputs(supabase, since);
+  const customerSince = laterIso(since, CUSTOMER_ANALYTICS_TRUSTED_SINCE);
+  const inputs = await loadEvidenceInputs(supabase, customerSince, since);
   const trustedAssistantEvents = filterTrustedCustomerAnalyticsEvents(inputs.assistantEvents);
   const trustedSearchEvents = filterTrustedCustomerAnalyticsEvents(inputs.searchEvents);
   const aggregated = aggregateKnowledgeOpportunityEvidence({
@@ -164,6 +171,8 @@ export async function refreshKnowledgeOpportunityEvidence(supabase, options = {}
   const result = {
     window_days: days,
     since,
+    customer_analytics_since: customerSince,
+    customer_analytics_reset_at: CUSTOMER_ANALYTICS_TRUSTED_SINCE,
     evidence_groups: aggregated.groups.length,
     existing_updated: 0,
     new_created: 0,
