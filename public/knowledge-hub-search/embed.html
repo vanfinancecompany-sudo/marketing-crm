@@ -94,6 +94,9 @@
 
       const API_URL = "https://marketing-crm-github-work.vercel.app/api/public-knowledge-hub-search";
       const SESSION_KEY = "vfc_knowledge_hub_embed_visitor_v1";
+      const INTERNAL_TEST_STORAGE_KEY = "vfc_internal_analytics_v1";
+      const INTERNAL_TEST_PARAM = "vfc_internal_test";
+      const INTERNAL_ANALYTICS_PREFIX = "internal:";
       const CATEGORIES = ["all", "Van Finance", "Rent2Buy", "Credit", "Vehicle Guides", "FAQs", "Business Advice", "Self Employed"];
       const searchView = document.getElementById("searchView");
       const resultsView = document.getElementById("resultsView");
@@ -125,6 +128,29 @@
         }
       }
 
+      function requestedInternalTestMode() {
+        const candidates = [];
+        try { candidates.push(new URL(window.location.href).searchParams.get(INTERNAL_TEST_PARAM)); } catch {}
+        try { candidates.push(new URL(document.referrer).searchParams.get(INTERNAL_TEST_PARAM)); } catch {}
+        return candidates.map((value) => clean(value, 20).toLowerCase()).find((value) => value) || "";
+      }
+
+      function loadInternalTestMode() {
+        const requested = requestedInternalTestMode();
+        try {
+          if (["1", "true", "yes", "on"].includes(requested)) localStorage.setItem(INTERNAL_TEST_STORAGE_KEY, "1");
+          if (["0", "false", "no", "off"].includes(requested)) localStorage.removeItem(INTERNAL_TEST_STORAGE_KEY);
+          return localStorage.getItem(INTERNAL_TEST_STORAGE_KEY) === "1";
+        } catch {
+          return ["1", "true", "yes", "on"].includes(requested);
+        }
+      }
+
+      function analyticsVisitorId(visitor, internalTest) {
+        if (!internalTest || visitor.startsWith(INTERNAL_ANALYTICS_PREFIX)) return visitor;
+        return `${INTERNAL_ANALYTICS_PREFIX}${visitor}`;
+      }
+
       function canFocusWithoutMobileJump() {
         return window.innerWidth > 640 && Boolean(window.matchMedia?.("(pointer: fine)")?.matches);
       }
@@ -135,6 +161,8 @@
       }
 
       const visitor = visitorId();
+      const internalTest = loadInternalTestMode();
+      const analyticsVisitor = analyticsVisitorId(visitor, internalTest);
       chips.innerHTML = CATEGORIES.map((item) => `<button class="chip${item === "all" ? " is-active" : ""}" type="button" data-category="${escapeHtml(item)}">${item === "all" ? "All" : escapeHtml(item)}</button>`).join("");
 
       chips.querySelectorAll(".chip").forEach((button) => {
@@ -184,7 +212,7 @@
           const response = await fetch(API_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "search", query, category, visitor_id: visitor }),
+            body: JSON.stringify({ action: "search", query, category, visitor_id: analyticsVisitor }),
             credentials: "omit"
           });
           const payload = await response.json();
@@ -227,7 +255,7 @@
           category,
           article_id: link.dataset.articleId,
           rank: Number(link.dataset.rank),
-          visitor_id: visitor
+          visitor_id: analyticsVisitor
         };
         try {
           fetch(API_URL, {

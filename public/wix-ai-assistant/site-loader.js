@@ -7,6 +7,9 @@
   const CHANNEL = "vfc-ai-assistant-widget-v1";
   const STORAGE_PREFIX = "vfc_ai_assistant_sitewide";
   const ANALYTICS_SESSION_KEY = "vfc_ai_assistant_analytics_session_v1";
+  const INTERNAL_ANALYTICS_STORAGE_KEY = "vfc_internal_analytics_v1";
+  const INTERNAL_TEST_PARAM = "vfc_internal_test";
+  const INTERNAL_ANALYTICS_PREFIX = "internal:";
   const RENT2BUY_ONLY_HOSTS = new Set(["rent2buyvans.co.uk", "www.rent2buyvans.co.uk"]);
   const WHATSAPP_SELECTOR = [
     'a[href*="wa.me" i]',
@@ -42,6 +45,7 @@
   let pageScrollLock = null;
   const hiddenWhatsAppControls = new Map();
   const analyticsVisitorId = loadAnalyticsVisitorId();
+  let internalAnalyticsTest = loadInternalAnalyticsTest(activeHref);
 
   function clean(value, limit = 5000) {
     return String(value || "").trim().slice(0, limit);
@@ -57,6 +61,27 @@
     } catch {
       return globalThis.crypto?.randomUUID?.() || `analytics-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     }
+  }
+
+  function requestedInternalTestMode(href) {
+    try { return clean(new URL(href, window.location.origin).searchParams.get(INTERNAL_TEST_PARAM), 20).toLowerCase(); }
+    catch { return ""; }
+  }
+
+  function loadInternalAnalyticsTest(href = window.location.href) {
+    const requested = requestedInternalTestMode(href);
+    try {
+      if (["1", "true", "yes", "on"].includes(requested)) window.localStorage.setItem(INTERNAL_ANALYTICS_STORAGE_KEY, "1");
+      if (["0", "false", "no", "off"].includes(requested)) window.localStorage.removeItem(INTERNAL_ANALYTICS_STORAGE_KEY);
+      return window.localStorage.getItem(INTERNAL_ANALYTICS_STORAGE_KEY) === "1";
+    } catch {
+      return ["1", "true", "yes", "on"].includes(requested);
+    }
+  }
+
+  function analyticsVisitorForRequest() {
+    if (!internalAnalyticsTest || analyticsVisitorId.startsWith(INTERNAL_ANALYTICS_PREFIX)) return analyticsVisitorId;
+    return `${INTERNAL_ANALYTICS_PREFIX}${analyticsVisitorId}`;
   }
 
   function compactRegistration(value) {
@@ -145,7 +170,7 @@
   function sendTelemetry(eventType, options = {}) {
     const body = {
       event_type: eventType,
-      visitor_id: analyticsVisitorId,
+      visitor_id: analyticsVisitorForRequest(),
       conversation_id: options.conversationId === undefined ? storedConversationId() : options.conversationId,
       page_type: activeContext.pageType,
       product_context: activeContext.productContext,
@@ -374,14 +399,14 @@
         ? message.productChoice
         : null;
       const body = action === "start"
-        ? { action: "start", page_url: window.location.href, analytics_visitor_id: analyticsVisitorId }
+        ? { action: "start", page_url: window.location.href, analytics_visitor_id: analyticsVisitorForRequest() }
         : {
             action: "message",
             conversation_id: storedConversationId(),
             page_url: window.location.href,
             message: clean(message.message, 3000),
             product_choice: homepageChoice,
-            analytics_visitor_id: analyticsVisitorId,
+            analytics_visitor_id: analyticsVisitorForRequest(),
           };
 
       const response = await fetch(API_URL, {
@@ -433,6 +458,7 @@
     const previousUrl = new URL(activeHref);
     const nextUrl = new URL(nextHref);
     activeHref = nextHref;
+    internalAnalyticsTest = loadInternalAnalyticsTest(nextHref);
     if (previousUrl.pathname === nextUrl.pathname) return;
 
     hidePanel();

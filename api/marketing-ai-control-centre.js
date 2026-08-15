@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { buildAssistantActiveUserWindows, buildAssistantMeasurementSummary } from "../lib/aiAssistantTelemetry.js";
+import { CUSTOMER_ANALYTICS_TRUSTED_SINCE, buildAssistantActiveUserWindows, buildAssistantMeasurementSummary } from "../lib/aiAssistantTelemetry.js";
 import { buildVisibilitySummary } from "../lib/aiVisibility.js";
 import { isDefaultActiveKnowledgeOpportunity, recommendedKnowledgeWorkflowAction } from "../lib/knowledgeOpportunityWorkflow.js";
 
@@ -32,6 +32,12 @@ function requestedDays(request) {
   const raw = Number.parseInt(request.query?.days, 10);
   if (!Number.isInteger(raw)) return 28;
   return Math.min(90, Math.max(1, raw));
+}
+
+function laterIso(first, second) {
+  const firstMs = new Date(first || 0).getTime();
+  const secondMs = new Date(second || 0).getTime();
+  return new Date(Math.max(Number.isFinite(firstMs) ? firstMs : 0, Number.isFinite(secondMs) ? secondMs : 0)).toISOString();
 }
 
 function missingTable(error, table) {
@@ -200,9 +206,11 @@ export async function handleAiControlCentreRequest(request, response, dependenci
     if (request.method === "POST") return await handleBaselineAction(request, response, supabase, environment);
 
     const days = requestedDays(request);
-    const since = new Date(Date.now() - days * 86_400_000).toISOString();
+    const requestedSince = new Date(Date.now() - days * 86_400_000).toISOString();
+    const customerSince = laterIso(requestedSince, CUSTOMER_ANALYTICS_TRUSTED_SINCE);
     const assistantLoadDays = Math.max(days, 30);
-    const assistantSince = new Date(Date.now() - assistantLoadDays * 86_400_000).toISOString();
+    const requestedAssistantSince = new Date(Date.now() - assistantLoadDays * 86_400_000).toISOString();
+    const assistantSince = laterIso(requestedAssistantSince, CUSTOMER_ANALYTICS_TRUSTED_SINCE);
     const [
       articleResult,
       visibilityResult,
@@ -219,21 +227,23 @@ export async function handleAiControlCentreRequest(request, response, dependenci
       supabase.from("knowledge_visibility_settings").select("attention_days").eq("settings_key", "default").maybeSingle(),
       supabase.from("knowledge_assistant_opportunities").select("*").limit(5000),
       loadPagedRows(supabase, "ai_assistant_events", "event_type,visitor_hash,customer_session_id,page_type,product_context,conversation_intent,secondary_intents,retrieval_required,retrieval_performed,retrieval_used,knowledge_gap,knowledge_sources,cta_action_key,cta_label,message_number,response_mode,created_at", { since: assistantSince, orderField: "created_at", optional: true }),
-      loadPagedRows(supabase, "knowledge_hub_search_events", "event_type,search_request_id,query_text,normalised_query,result_count,selected_article_id,selected_rank,category,created_at", { since, orderField: "created_at", optional: true }),
+      loadPagedRows(supabase, "knowledge_hub_search_events", "event_type,search_request_id,visitor_hash,query_text,normalised_query,result_count,selected_article_id,selected_rank,category,created_at", { since: customerSince, orderField: "created_at", optional: true }),
       loadHealthBaselines(supabase, { optional: true }),
     ]);
 
     const articles = resultData(articleResult, "Knowledge articles could not be loaded.");
     const prompts = resultData(promptResult, "Visibility prompts could not be loaded.");
     const opportunities = resultData(opportunityResult, "Knowledge opportunities could not be loaded.");
-    const selectedAssistantEvents = filterSince(assistantEvents, since);
+    const selectedAssistantEvents = filterSince(assistantEvents, customerSince);
     if (settingResult?.error && !missingTable(settingResult.error, "knowledge_visibility_settings")) throw settingResult.error;
     const attentionDays = Number(settingResult?.data?.attention_days || 30);
 
     return response.status(200).json({
       generated_at: new Date().toISOString(),
       days,
-      since,
+      since: requestedSince,
+      customer_measurement_since: customerSince,
+      customer_measurement_reset_at: CUSTOMER_ANALYTICS_TRUSTED_SINCE,
       assistant: buildAssistantMeasurementSummary(selectedAssistantEvents, searchEvents),
       assistant_active_users: buildAssistantActiveUserWindows(assistantEvents),
       visibility: buildVisibilitySummary({ articles, results: visibilityResult, prompts, attentionDays }),
