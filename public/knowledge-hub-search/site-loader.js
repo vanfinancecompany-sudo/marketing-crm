@@ -5,6 +5,9 @@
   window.__VFC_KNOWLEDGE_HUB_SEARCH__ = true;
 
   const ANALYTICS_SESSION_KEY = "vfc_ai_assistant_analytics_session_v1";
+  const INTERNAL_ANALYTICS_STORAGE_KEY = "vfc_internal_analytics_v1";
+  const INTERNAL_TEST_PARAM = "vfc_internal_test";
+  const INTERNAL_ANALYTICS_PREFIX = "internal:";
   const SCRIPT_ORIGIN = (() => {
     try {
       return new URL(document.currentScript?.src || "https://marketing-crm-six.vercel.app").origin;
@@ -55,6 +58,27 @@
     } catch {
       return globalThis.crypto?.randomUUID?.() || `knowledge-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     }
+  }
+
+  function requestedInternalTestMode() {
+    try { return clean(new URL(window.location.href).searchParams.get(INTERNAL_TEST_PARAM), 20).toLowerCase(); }
+    catch { return ""; }
+  }
+
+  function internalAnalyticsTestEnabled() {
+    const requested = requestedInternalTestMode();
+    try {
+      if (["1", "true", "yes", "on"].includes(requested)) window.localStorage.setItem(INTERNAL_ANALYTICS_STORAGE_KEY, "1");
+      if (["0", "false", "no", "off"].includes(requested)) window.localStorage.removeItem(INTERNAL_ANALYTICS_STORAGE_KEY);
+      return window.localStorage.getItem(INTERNAL_ANALYTICS_STORAGE_KEY) === "1";
+    } catch {
+      return ["1", "true", "yes", "on"].includes(requested);
+    }
+  }
+
+  function analyticsVisitorForRequest() {
+    if (!internalAnalyticsTestEnabled() || visitorId.startsWith(INTERNAL_ANALYTICS_PREFIX)) return visitorId;
+    return `${INTERNAL_ANALYTICS_PREFIX}${visitorId}`;
   }
 
   function escapeHtml(value) {
@@ -187,7 +211,7 @@
       const response = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "search", query, category, visitor_id: visitorId }),
+        body: JSON.stringify({ action: "search", query, category, visitor_id: analyticsVisitorForRequest() }),
         credentials: "omit",
       });
       const payload = await response.json();
@@ -230,7 +254,7 @@
       category,
       article_id: link.dataset.articleId,
       rank: Number(link.dataset.rank),
-      visitor_id: visitorId,
+      visitor_id: analyticsVisitorForRequest(),
     };
     try {
       fetch(API_URL, {
@@ -285,6 +309,7 @@
   }
 
   function syncRoute() {
+    internalAnalyticsTestEnabled();
     if (isKnowledgeHubPath()) mount();
     else if (host || targetObserver) teardown();
   }
