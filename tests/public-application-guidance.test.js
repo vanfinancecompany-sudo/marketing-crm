@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
   isDirectApplicationNavigationQuestion,
+  isRent2BuyCoreExplanationQuestion,
   isRent2BuyEligibilityQuestion,
   publicApplicationGuidanceReply,
 } from "../lib/publicApplicationGuidance.js";
@@ -34,6 +35,32 @@ test("Rent2Buy application navigation uses the page APPLY NOW control without cr
   assert.match(reply, /Rent2Buy application/i);
   assert.match(reply, /APPLY NOW button on this page/i);
   assert.doesNotMatch(reply, /https?:|link|navigate/i);
+});
+
+test("Rent2Buy core starter is deterministic and cannot invent Finance delivery or unsupported agreement details", () => {
+  for (const message of ["How does Rent2Buy work?", "What is Rent2Buy?", "Tell me about Rent2Buy"]) {
+    assert.equal(isRent2BuyCoreExplanationQuestion(message), true, message);
+    const reply = publicApplicationGuidanceReply({
+      message,
+      pageType: "rent2buy_general",
+      productLock: "rent2buy",
+    });
+    assert.match(reply, /separate rent-to-own arrangement and is not a finance product/i, message);
+    assert.match(reply, /no credit check/i, message);
+    assert.match(reply, /affordability/i, message);
+    assert.match(reply, /100 miles of Southampton/i, message);
+    assert.match(reply, /Collection only from Southampton/i, message);
+    assert.match(reply, /APPLY NOW/i, message);
+    assert.doesNotMatch(reply, /free (?:UK )?delivery|home delivery|mileage limit|fully comprehensive|insurance|early return|upgrade|optional final|final amount|final payment/i, message);
+  }
+});
+
+test("Rent2Buy core starter route does not intercept Finance conversations", () => {
+  assert.equal(publicApplicationGuidanceReply({
+    message: "How does Rent2Buy work?",
+    pageType: "finance_general",
+    productLock: "finance",
+  }), null);
 });
 
 test("common Rent2Buy eligibility questions are deterministic regardless of question order", () => {
@@ -94,7 +121,7 @@ test("eligibility and application-document questions are not swallowed by the Fi
   }
 });
 
-test("public endpoint checks direct application and Rent2Buy eligibility guidance before canonical model generation", async () => {
+test("public endpoint checks deterministic product guidance before canonical model generation", async () => {
   const source = await readFile(new URL("../api/ai-assistant-customer.js", import.meta.url), "utf8");
   const guidanceIndex = source.indexOf("publicApplicationGuidanceReply({");
   const canonicalIndex = source.indexOf("buildCanonicalConversationInput({", guidanceIndex);
