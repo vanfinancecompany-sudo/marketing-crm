@@ -58,7 +58,7 @@ async function message(origin, pageUrl, conversationId, text, productChoice) {
 
 function report(label, payload) {
   const reply = safeReply(payload);
-  console.log(`✓ ${label}: ${reply.slice(0, 300)}`);
+  console.log(`✓ ${label}: ${reply.slice(0, 500)}`);
   return reply;
 }
 
@@ -84,6 +84,51 @@ async function financeSmoke() {
   const applyReply = report("Finance application", apply);
   rejectGenericFailure("Finance application", applyReply);
   assert.match(applyReply, /apply|application/i);
+
+  const inspection = await message(VFC_ORIGIN, VFC_HOME, conversationId, "Are your vans inspected before delivery?");
+  const inspectionReply = report("VFC 101-point inspection", inspection);
+  rejectGenericFailure("VFC 101-point inspection", inspectionReply);
+  assert.match(inspectionReply, /101[- ]?point/i);
+  assert.match(inspectionReply, /driver|second|walk[- ]?around/i);
+
+  const wetBelt = await message(VFC_ORIGIN, VFC_HOME, conversationId, "On a Ford Transit Custom, when would you normally not replace the wet belt?");
+  const wetBeltReply = report("VFC Ford wet-belt exception", wetBelt);
+  rejectGenericFailure("VFC Ford wet-belt exception", wetBeltReply);
+  assert.match(wetBeltReply, /wet belt/i);
+  assert.match(wetBeltReply, /1,?000\s*miles/i);
+  assert.match(wetBeltReply, /6\s*months/i);
+
+  const warranty = await message(VFC_ORIGIN, VFC_HOME, conversationId, "What warranty do I get, and do I have to bring the van back to you if it needs a repair?");
+  const warrantyReply = report("VFC in-house warranty", warranty);
+  rejectGenericFailure("VFC in-house warranty", warrantyReply);
+  assert.match(warrantyReply, /3\s*months/i);
+  assert.match(warrantyReply, /3,?000\s*miles/i);
+  assert.match(warrantyReply, /local garage|garage local/i);
+
+  const afterSales = await message(VFC_ORIGIN, VFC_HOME, conversationId, "What should I do if there is a problem with my van after delivery?");
+  const afterSalesReply = report("VFC after-sales", afterSales);
+  rejectGenericFailure("VFC after-sales", afterSalesReply);
+  assert.match(afterSalesReply, /after[- ]?sales|contact us|email|whatsapp/i);
+  assert.match(afterSalesReply, /photo|video|local garage|garage local/i);
+
+  const reservation = await message(VFC_ORIGIN, VFC_HOME, conversationId, "How much do I pay to reserve a van, and when is the rest of my deposit due?");
+  const reservationReply = report("VFC reservation deposit", reservation);
+  rejectGenericFailure("VFC reservation deposit", reservationReply);
+  assert.match(reservationReply, /£?100/);
+  assert.match(reservationReply, /day before delivery/i);
+
+  const turnaround = await message(VFC_ORIGIN, VFC_HOME, conversationId, "How long does remote van delivery usually take?");
+  const turnaroundReply = report("VFC remote delivery timeframe", turnaround);
+  rejectGenericFailure("VFC remote delivery timeframe", turnaroundReply);
+  assert.match(turnaroundReply, /7\s*(?:–|-|to)\s*10\s*working days/i);
+  assert.match(turnaroundReply, /typical|usually|subject|not guaranteed/i);
+
+  const cancellation = await message(VFC_ORIGIN, VFC_HOME, conversationId, "If I cancel my finance agreement within 14 days, does that automatically cancel the vehicle sale too?");
+  const cancellationReply = report("VFC cancellation-rights separation", cancellation);
+  rejectGenericFailure("VFC cancellation-rights separation", cancellationReply);
+  assert.match(cancellationReply, /separate|does not automatically|doesn't automatically|not automatically/i);
+  assert.match(cancellationReply, /finance|credit/i);
+  assert.match(cancellationReply, /vehicle|sale/i);
 }
 
 async function rent2BuySmoke() {
