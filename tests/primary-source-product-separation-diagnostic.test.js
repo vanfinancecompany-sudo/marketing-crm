@@ -2,7 +2,7 @@ import test from "node:test";
 import { runDeterministicHealthBatch } from "../api/marketing-ai-assistant-competence.js";
 import { REAL_CUSTOMER_SCENARIOS } from "../lib/customerSimulationScenarios.js";
 
-test("diagnose primary-source product separation", async () => {
+function fixture() {
   const content = `# Applications and eligibility
 
 Application eligibility, next steps, self-employed and limited-company trading, poor credit, declined applications, documents, bank statements, licences, deposits, budgets, monthly payments, costs, affordability and accounts.
@@ -20,7 +20,7 @@ Approval is subject to assessment. Delivery timing and vehicle availability must
     knowledge_business_sections: [],
     knowledge_articles: articles,
   };
-  const supabase = { from(table) {
+  return { from(table) {
     const query = {
       select() { return query; },
       eq() { return query; },
@@ -30,18 +30,35 @@ Approval is subject to assessment. Delivery timing and vehicle availability must
     };
     return query;
   } };
+}
 
-  const failures = [];
-  for (let index = 0; index < REAL_CUSTOMER_SCENARIOS.length; index += 1) {
-    const batch = await runDeterministicHealthBatch(supabase, { start_index: index, count: 1, total_conversations: REAL_CUSTOMER_SCENARIOS.length });
+test("diagnose primary-source product separation", async () => {
+  const total = REAL_CUSTOMER_SCENARIOS.length;
+  const windows = [];
+  for (let start = 0; start < total; start += 100) {
+    const count = Math.min(100, total - start);
+    const batch = await runDeterministicHealthBatch(fixture(), { start_index: start, count, total_conversations: total });
+    windows.push({ start, count, accuracy: batch.report.product_separation_accuracy, checks: batch.report.checks.product_separation });
+  }
+  console.error("PRIMARY_SOURCE_PRODUCT_SEPARATION_WINDOWS", JSON.stringify(windows));
+
+  const badWindow = windows.find((window) => window.accuracy < 100);
+  if (!badWindow) return;
+  let firstBadPrefix = null;
+  for (let count = 1; count <= badWindow.count; count += 1) {
+    const batch = await runDeterministicHealthBatch(fixture(), { start_index: badWindow.start, count, total_conversations: total });
     if (batch.report.product_separation_accuracy < 100) {
-      failures.push({
-        index,
-        scenario: REAL_CUSTOMER_SCENARIOS[index],
-        product_separation_accuracy: batch.report.product_separation_accuracy,
+      firstBadPrefix = {
+        start: badWindow.start,
+        count,
+        scenario_index: badWindow.start + count - 1,
+        scenario: REAL_CUSTOMER_SCENARIOS[badWindow.start + count - 1],
+        accuracy: batch.report.product_separation_accuracy,
+        checks: batch.report.checks.product_separation,
         failed_scenarios: batch.report.failed_scenarios,
-      });
+      };
+      break;
     }
   }
-  console.error("PRIMARY_SOURCE_PRODUCT_SEPARATION_DIAGNOSTIC", JSON.stringify(failures));
+  console.error("PRIMARY_SOURCE_PRODUCT_SEPARATION_FIRST_BAD_PREFIX", JSON.stringify(firstBadPrefix));
 });
