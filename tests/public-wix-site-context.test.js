@@ -89,6 +89,78 @@ test("Finance vehicle context is read server-side from VANFINANCEPAGES with desc
   assert.equal(body.query.filter.title.$eq, "AB12CDE");
 });
 
+test("compact Finance URL resolves a complete CMS record stored with a display-space registration", async () => {
+  clearPublicWixVehicleContextCache();
+  const candidates = [];
+  const fetchImpl = async (url, options) => {
+    assert.match(url, /\/wix-data\/v2\/items\/query$/);
+    const candidate = JSON.parse(options.body).query.filter.title.$eq;
+    candidates.push(candidate);
+    if (candidate === "CK24NRO") return wixResponse([]);
+    if (candidate === "CK24 NRO") {
+      return wixResponse([{
+        id: "finance-ck24nro",
+        data: {
+          title: "CK24 NRO",
+          titleText: "Ford Transit Trend CREW VAN",
+          year: "2024/24",
+          descriptionLine: "CREW VAN - AIR CON - PARKING SENSORS",
+          vehicleDescriptionTextClick: "Ford Transit 350 EcoBlue Trend crew van.",
+          vehicleSpecificationText: "REGISTRATION: CK24 NRO\nMILEAGE: 27,000\nFUEL TYPE: DIESEL\nTRANSMISSION: MANUAL",
+          applyLink: "/van-finance-application/ck24nro",
+          mthPrice: "£480",
+          priceVat: "£22,995 +VAT",
+        },
+      }]);
+    }
+    throw new Error(`Unexpected registration candidate: ${candidate}`);
+  };
+
+  const context = await resolvePublicWixPageContext(
+    "https://www.vanfinancecompany.co.uk/van-finance/ck24nro",
+    { environment, fetchImpl },
+  );
+
+  assert.deepEqual(candidates, ["CK24NRO", "CK24 NRO"]);
+  assert.equal(context.vehicle.registration, "CK24NRO");
+  assert.equal(context.vehicle.vehicle_id, "finance-ck24nro");
+  assert.equal(context.vehicle.title, "Ford Transit Trend CREW VAN");
+  assert.equal(context.vehicle.year, "2024/24");
+  assert.match(context.vehicle.description, /EcoBlue Trend/i);
+  assert.match(context.vehicle.highlights, /AIR CON/i);
+  assert.match(context.vehicle.specification, /27,000/);
+  assert.equal(context.vehicle.pricing.finance_retail_vat, "£22,995 +VAT");
+  assert.equal(context.vehicle.pricing.finance_monthly, "£480");
+  assert.equal(context.vehicle.apply_link, "/van-finance-application/ck24nro");
+});
+
+test("vehicle lookup rejects a different normalised registration even if Wix returns it", async () => {
+  clearPublicWixVehicleContextCache();
+  let cmsCalls = 0;
+  const pageUrl = "https://www.vanfinancecompany.co.uk/van-finance/ab12cde";
+  const fetchImpl = async (url) => {
+    if (String(url).startsWith("https://www.wixapis.com")) {
+      cmsCalls += 1;
+      return wixResponse([{
+        id: "wrong-vehicle",
+        data: {
+          title: "ZZ99 ZZZ",
+          titleText: "Wrong vehicle",
+          vehicleSpecificationText: "REGISTRATION: ZZ99 ZZZ\nMILEAGE: 1",
+          mthPrice: "£1",
+        },
+      }]);
+    }
+    return { ok: false, status: 503, async text() { return ""; } };
+  };
+
+  const context = await resolvePublicWixPageContext(pageUrl, { environment, fetchImpl });
+  assert.equal(cmsCalls, 2);
+  assert.equal(context.vehicle.registration, "AB12CDE");
+  assert.equal(context.vehicle.title, null);
+  assert.deepEqual(context.vehicle.pricing, {});
+});
+
 test("Rent2Buy vehicle context is read CMS-first from mirrored VANPAGES with rich details and fixed pricing", async () => {
   clearPublicWixVehicleContextCache();
   let cmsCalls = 0;
@@ -151,6 +223,37 @@ test("Finance vehicle context falls back to the trusted live page when Wix Data 
   assert.equal(context.vehicle.registration, "HX24ZGR");
   assert.equal(context.vehicle.pricing.finance_monthly, "£625");
   assert.equal(context.vehicle.pricing.finance_retail_vat, "£29,995 +VAT");
+});
+
+test("missing Wix credentials retain a rich registration-bound Finance profile from the trusted live page", async () => {
+  clearPublicWixVehicleContextCache();
+  const pageUrl = "https://www.vanfinancecompany.co.uk/van-finance/ck24nro";
+  const fetchImpl = async (url) => {
+    assert.equal(url, pageUrl);
+    return htmlResponse(`
+      <html><body>
+        <h5>VAN FINANCE COMPANY</h5><h5>0330 133 6376</h5>
+        <h5>Ford Transit Trend CREW VAN</h5><h5>2024/24</h5><h5>£22,995 +VAT</h5>
+        <h5>FINANCE FROM ONLY</h5><h5>MONTH</h5><h2>£480</h2>
+        <h5>2024/24 Ford Transit 350 EcoBlue Trend L3 H2 CREW VAN - AIR CON - PARKING SENSORS FREE UK DELIVERY</h5>
+        <h5>REGISTRATION: CK24 NRO<br>YEAR: 2024/24<br>MILLAGE: 27,000<br>EURO: 6<br>ENGINE SIZE: 2.0<br>FUEL TYPE: DIESEL<br>COLOUR: WHITE<br>TRANSMISSION: MANUAL<br>BHP: 128</h5>
+        <h5>✓ Ford Transit ✓ Trend ✓ Crew Van ✓ AIR CON ✓ CRUISE CONTROL ✓ PARKING SENSORS ALSO INCLUDES: ✅ Service</h5>
+        <a href="/van-finance-application/ck24nro">APPLY NOW</a>
+      </body></html>
+    `);
+  };
+
+  const context = await resolvePublicWixPageContext(pageUrl, { environment: {}, fetchImpl });
+  assert.equal(context.vehicle.registration, "CK24NRO");
+  assert.equal(context.vehicle.title, "Ford Transit Trend CREW VAN");
+  assert.equal(context.vehicle.year, "2024/24");
+  assert.match(context.vehicle.description, /EcoBlue Trend/i);
+  assert.match(context.vehicle.highlights, /CRUISE CONTROL/i);
+  assert.match(context.vehicle.specification, /MILEAGE: 27,000/);
+  assert.match(context.vehicle.specification, /TRANSMISSION: MANUAL/);
+  assert.equal(context.vehicle.pricing.finance_retail_vat, "£22,995 +VAT");
+  assert.equal(context.vehicle.pricing.finance_monthly, "£480");
+  assert.equal(context.vehicle.apply_link, "https://www.vanfinancecompany.co.uk/van-finance-application/ck24nro");
 });
 
 test("Rent2Buy fallback reads fixed initial and monthly pricing without exposing agreement length", async () => {
