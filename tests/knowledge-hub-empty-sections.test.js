@@ -74,10 +74,11 @@ Introduction content.
   assert.equal(check?.pass, false);
 });
 
-test("explicit non-guarantee wording is not mistaken for an unsupported guarantee", () => {
+test("explicit non-guarantee wording and safety questions are not mistaken for a guarantee", () => {
   assert.equal(qualityCheck("## Approval\n\nApproval is never guaranteed and remains subject to lender criteria.", "unsupported_claim")?.pass, true);
   assert.equal(qualityCheck("## Approval\n\nApproval is not guaranteed and remains subject to lender criteria.", "unsupported_claim")?.pass, true);
   assert.equal(qualityCheck("## Approval\n\nThere is no guarantee of approval.", "unsupported_claim")?.pass, true);
+  assert.equal(qualityCheck("## Frequently Asked Questions\n\n### Is approval guaranteed?\n\nNo. Approval is never guaranteed.", "unsupported_claim")?.pass, true);
 });
 
 test("a positive guaranteed-approval claim remains blocked", () => {
