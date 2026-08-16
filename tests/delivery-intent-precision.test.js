@@ -4,7 +4,7 @@ import { deterministicDeliveryReply, isDirectDeliveryLogisticsQuestion } from ".
 import { buildFinanceCoverageEvidence, buildRent2BuyDeliveryEvidence } from "../lib/productCoverageRules.js";
 
 test("delivery logistics questions still use deterministic coverage replies", () => {
-  for (const question of ["Do you deliver?", "Do you offer delivery?", "Can you deliver to Glasgow?", "Is delivery free?"]) {
+  for (const question of ["Do you deliver?", "Do you offer delivery?", "Can you deliver to Glasgow?", "Is free delivery available?"]) {
     assert.equal(isDirectDeliveryLogisticsQuestion(question), true, question);
     const reply = deterministicDeliveryReply("finance", question, buildFinanceCoverageEvidence(question));
     assert.match(reply, /delivery|deliver/i, question);
