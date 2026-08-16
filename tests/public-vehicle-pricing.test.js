@@ -100,7 +100,7 @@ test("current Rent2Buy vehicle context answers fixed initial rental and monthly 
   assert.equal(termReply, null);
 });
 
-test("Tell me about this van uses the trusted Finance CMS profile", () => {
+test("Tell me about this van uses the trusted Finance vehicle profile in natural customer language", () => {
   const reply = publicVehiclePricingReply({
     message: "Tell me about this van",
     pageType: "finance_vehicle",
@@ -116,15 +116,21 @@ test("Tell me about this van uses the trusted Finance CMS profile", () => {
     rememberedFacts: {},
   });
   assert.match(reply, /Ford Transit Custom Limited/i);
-  assert.match(reply, /AB12CDE/i);
+  assert.match(reply, /AB12 CDE/i);
+  assert.doesNotMatch(reply, /AB12CDE/);
   assert.match(reply, /42,000 miles/i);
-  assert.match(reply, /DIESEL/i);
-  assert.match(reply, /MANUAL/i);
-  assert.match(reply, /retail price £18,995 \+ VAT/i);
-  assert.match(reply, /Finance from £399 \+ VAT/i);
+  assert.match(reply, /2\.0 diesel engine/i);
+  assert.match(reply, /manual gearbox/i);
+  assert.match(reply, /128 BHP/i);
+  assert.match(reply, /Euro 6 compliant/i);
+  assert.match(reply, /air conditioning/i);
+  assert.match(reply, /cruise control/i);
+  assert.match(reply, /priced at £18,995 \+ VAT/i);
+  assert.match(reply, /Finance from £399 \+ VAT per month/i);
+  assert.doesNotMatch(reply, /CMS specification|Current page pricing/i);
 });
 
-test("vehicle specification questions use CMS facts when present and never invent missing features", () => {
+test("vehicle specification questions use vehicle facts when present and never invent missing features", () => {
   assert.equal(isVehicleSpecificationQuestion("Is this vehicle automatic?"), true);
   assert.equal(isVehicleSpecificationQuestion("Does it have air con?"), true);
   assert.equal(isVehicleSpecificationQuestion("What is the mileage?"), true);
@@ -142,7 +148,8 @@ test("vehicle specification questions use CMS facts when present and never inven
     },
     rememberedFacts: { product_context: "finance", vehicle_interest: "Ford Transit Custom" },
   });
-  assert.match(transmissionReply, /transmission as MANUAL/i);
+  assert.match(transmissionReply, /manual gearbox/i);
+  assert.doesNotMatch(transmissionReply, /CMS/i);
 
   const airConReply = publicVehiclePricingReply({
     message: "Does it have air con?",
