@@ -33,13 +33,6 @@ function normalisePrice(value) {
   return words.some((word) => !SAFE_PRICE_WORDS.has(word)) ? null : text;
 }
 
-function normaliseTermMonths(value) {
-  const text = clean(value, 40).replace(/\s+/g, " ");
-  if (!/^\d{1,3}(?:\s*months?)?$/i.test(text)) return null;
-  const months = Number.parseInt(text, 10);
-  return months >= 1 && months <= 120 ? months : null;
-}
-
 function compactObject(input = {}) {
   return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== null && value !== undefined && value !== ""));
 }
@@ -66,13 +59,17 @@ function normaliseContext(input = {}) {
       registration: clean(input.vehicle?.registration, 20).toUpperCase() || null,
       stockId: clean(input.vehicle?.stockId, 100) || null,
       title: clean(input.vehicle?.title, 200) || null,
+      year: clean(input.vehicle?.year, 80) || null,
+      description: clean(input.vehicle?.description, 7000) || null,
+      highlights: clean(input.vehicle?.highlights, 7000) || null,
+      specification: clean(input.vehicle?.specification, 7000) || null,
+      applyLink: clean(input.vehicle?.applyLink, 1000) || null,
       pricing: {
         financeMonthly: normalisePrice(input.vehicle?.pricing?.financeMonthly ?? input.vehicle?.pricing?.finance_monthly),
         retailPriceVat: normalisePrice(input.vehicle?.pricing?.retailPriceVat ?? input.vehicle?.pricing?.finance_retail_vat),
         monthlyRental: normalisePrice(input.vehicle?.pricing?.monthlyRental ?? input.vehicle?.pricing?.rent2buy_monthly),
         initialRental: normalisePrice(input.vehicle?.pricing?.initialRental ?? input.vehicle?.pricing?.rent2buy_initial),
       },
-      termMonths: normaliseTermMonths(input.vehicle?.termMonths ?? input.vehicle?.term_months),
       applicationMode,
       formAnchor: safeFormAnchor(input.vehicle?.formAnchor),
     },
@@ -102,8 +99,12 @@ function endpointContext(context) {
       registration: context.vehicle.registration,
       vehicle_id: context.vehicle.stockId,
       title: context.vehicle.title,
+      year: context.vehicle.year,
+      description: context.vehicle.description,
+      highlights: context.vehicle.highlights,
+      specification: context.vehicle.specification,
+      apply_link: context.vehicle.applyLink,
       pricing,
-      term_months: context.productContext === "rent2buy" ? context.vehicle.termMonths : null,
     }),
   };
 }

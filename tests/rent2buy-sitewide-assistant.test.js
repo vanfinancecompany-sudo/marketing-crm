@@ -8,14 +8,6 @@ import {
 } from "../lib/publicWixSiteContext.js";
 import { initialCustomerReply } from "../lib/publicAssistantFoundation.js";
 
-function htmlResponse(html) {
-  return {
-    ok: true,
-    status: 200,
-    async text() { return html; },
-  };
-}
-
 test("standalone Rent2Buy homepage is locked to Rent2Buy without a product choice", () => {
   for (const url of [
     "https://www.rent2buyvans.co.uk/",
@@ -30,49 +22,66 @@ test("standalone Rent2Buy homepage is locked to Rent2Buy without a product choic
   }
 });
 
-test("standalone Rent2Buy vehicle route resolves VANPAGES identity without page Velo", () => {
+test("standalone Rent2Buy vehicle route resolves mirrored VANPAGES identity without page Velo", () => {
   const context = inferPublicWixPageContext("https://www.rent2buyvans.co.uk/van-pages/bl72vff");
   assert.equal(context.page_type, "rent2buy_general");
   assert.equal(context.product, "rent2buy");
   assert.equal(context.collection_id, "VANPAGES");
   assert.equal(context.registration, "BL72VFF");
-  assert.equal(context.public_page_first, true);
+  assert.equal(context.public_page_first, false);
 });
 
-test("standalone Rent2Buy vehicle pricing is read from its trusted live page before any Wix API lookup", async () => {
+test("standalone Rent2Buy vehicle profile is read from mirrored VANPAGES CMS before public HTML", async () => {
   clearPublicWixVehicleContextCache();
   const pageUrl = "https://www.rent2buyvans.co.uk/van-pages/bl72vff";
   const requests = [];
   const fetchImpl = async (url) => {
     requests.push(url);
-    if (url === pageUrl) {
-      return htmlResponse(`
-        <html><body>
-          <div>REGISTRATION: BL72 VFF</div>
-          <h5>INITIAL RENTAL CHARGE</h5><h5>£2350 +VAT (£2820 INC VAT)</h5>
-          <h5>MONTHLY PAYMENTS</h5><h5>£745 +VAT (£894 INC VAT)</h5>
-          <h5>48X MONTHLY PAYMENTS</h5>
-        </body></html>
-      `);
+    if (String(url).startsWith("https://www.wixapis.com")) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            dataItems: [{
+              id: "r2b-bl72vff",
+              data: {
+                title: "BL72VFF",
+                titleText: "Ford Transit Custom Trend",
+                year: "2022/72",
+                descriptionText: "Ford Transit Custom prepared for Rent2Buy.",
+                vehcleTickDescription: "AIR CONDITIONING - CRUISE CONTROL - PARKING SENSORS",
+                specText: "REGISTRATION: BL72 VFF\nMILEAGE: 61,000\nFUEL TYPE: DIESEL\nTRANSMISSION: MANUAL",
+                intialRentalCharge: "£2350 +VAT (£2820 INC VAT)",
+                monthlyPayments: "£745 +VAT (£894 INC VAT)",
+                numberOfMonths: 48,
+              },
+            }],
+          };
+        },
+      };
     }
-    throw new Error(`Unexpected request: ${url}`);
+    throw new Error(`Public HTML should not be requested: ${url}`);
   };
 
   const context = await resolvePublicWixPageContext(pageUrl, {
     environment: {
-      WIX_API_KEY: "main-site-key-must-not-be-used",
-      WIX_SITE_ID: "main-site-id-must-not-be-used",
+      WIX_API_KEY: "main-site-key",
+      WIX_SITE_ID: "main-site-id",
     },
     fetchImpl,
   });
 
   assert.equal(context.page_type, "rent2buy_general");
   assert.equal(context.vehicle.registration, "BL72VFF");
+  assert.equal(context.vehicle.title, "Ford Transit Custom Trend");
+  assert.match(context.vehicle.specification, /61,000/);
+  assert.match(context.vehicle.highlights, /AIR CONDITIONING/);
   assert.equal(context.vehicle.pricing.rent2buy_initial, "£2350 +VAT (£2820 INC VAT)");
   assert.equal(context.vehicle.pricing.rent2buy_monthly, "£745 +VAT (£894 INC VAT)");
-  assert.equal(context.vehicle.term_months, 48);
-  assert.deepEqual(requests, [pageUrl]);
-  assert.equal(requests.some((url) => String(url).startsWith("https://www.wixapis.com")), false);
+  assert.equal("term_months" in context.vehicle, false);
+  assert.equal(requests.length, 1);
+  assert.equal(requests.every((url) => String(url).startsWith("https://www.wixapis.com")), true);
 });
 
 test("standalone Rent2Buy loader is hard locked to Rent2Buy and contains no Wix page hooks", async () => {

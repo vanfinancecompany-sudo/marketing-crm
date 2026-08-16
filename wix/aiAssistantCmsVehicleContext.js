@@ -12,6 +12,7 @@ function vehicleIdentity(item = {}) {
     registration: clean(item.title, 20).toUpperCase() || null,
     stockId: clean(item._id, 100) || null,
     title: clean(item.titleText, 200) || null,
+    year: clean(item.year, 80) || null,
   };
 }
 
@@ -25,6 +26,10 @@ export function buildCmsVehiclePageContext(collectionId, item = {}) {
       productContext: "finance",
       vehicle: {
         ...identity,
+        description: clean(item.vehicleDescriptionTextClick || item.descriptionLine, 7000) || null,
+        highlights: clean(item.descriptionLine, 2000) || null,
+        specification: clean(item.vehicleSpecificationText, 7000) || null,
+        applyLink: clean(item.applyLink, 1000) || null,
         pricing: {
           retailPriceVat: item.priceVat ?? null,
           financeMonthly: item.mthPrice ?? null,
@@ -36,17 +41,20 @@ export function buildCmsVehiclePageContext(collectionId, item = {}) {
 
   if (collection === RENT2BUY_VEHICLE_COLLECTION_ID) {
     return {
-      // The public API already has a locked Rent2Buy page context. Supplying vehicle identity/pricing makes
-      // this instance vehicle-specific without creating a second conversational product path.
       pageType: "rent2buy_general",
       productContext: "rent2buy",
       vehicle: {
         ...identity,
+        description: clean(item.descriptionText, 7000) || null,
+        highlights: clean(item.vehcleTickDescription, 7000) || null,
+        specification: clean(item.specText, 7000) || null,
+        applyLink: clean(item.applyLink, 1000) || null,
         pricing: {
           initialRental: item.intialRentalCharge ?? null,
           monthlyRental: item.monthlyPayments ?? null,
         },
-        termMonths: item.numberOfMonths ?? null,
+        // Agreement length is deliberately not passed into customer chat. Rent2Buy term details
+        // must come from approved Rent2Buy Business Knowledge rather than a stock-page field.
         applicationMode: "generic",
       },
     };
