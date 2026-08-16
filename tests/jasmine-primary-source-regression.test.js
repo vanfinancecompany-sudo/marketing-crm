@@ -65,6 +65,25 @@ for (const regression of regressions) {
   });
 }
 
+test("live retrieval boundary injects code-backed VFC evidence into raw persisted sections", () => {
+  const rawPersistedSections = [
+    { id: "sales", section_key: "sales_knowledge", title: "Sales Knowledge", content: "", entries: [], active: true, sort_order: 8 },
+    { id: "faqs", section_key: "faqs", title: "FAQs", content: "", entries: [], active: true, sort_order: 6 },
+    { id: "compliance", section_key: "compliance", title: "Compliance", content: "", entries: [], active: true, sort_order: 5 },
+  ];
+  const bounded = filterKnowledgeForProduct({ sections: rawPersistedSections, articles: [], settings: {} }, "finance");
+  const corpus = buildRetrievalCorpus(bounded);
+  const inspection = rankKnowledge("Are your vans inspected before delivery?", corpus).slice(0, 6)
+    .map((source) => `${source.heading || ""} ${source.passage || ""}`).join("\n");
+  assert.match(inspection, /101-point/i);
+  assert.match(inspection, /second walk-around/i);
+
+  const warranty = rankKnowledge("What warranty comes with a used van?", corpus).slice(0, 6)
+    .map((source) => `${source.heading || ""} ${source.passage || ""}`).join("\n");
+  assert.match(warranty, /3 months/i);
+  assert.match(warranty, /3,000 miles/i);
+});
+
 test("Jasmine Finance regression corpus contains the owner-supplied after-sales and preparation evidence", () => {
   const text = financeCorpus.map((source) => source.passage).join("\n");
   assert.match(text, /101-point/i);
