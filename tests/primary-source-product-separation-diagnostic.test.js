@@ -32,33 +32,33 @@ Approval is subject to assessment. Delivery timing and vehicle availability must
   } };
 }
 
-test("diagnose primary-source product separation", async () => {
+test("diagnose primary-source retrieval health", async () => {
   const total = REAL_CUSTOMER_SCENARIOS.length;
   const windows = [];
   for (let start = 0; start < total; start += 100) {
     const count = Math.min(100, total - start);
     const batch = await runDeterministicHealthBatch(fixture(), { start_index: start, count, total_conversations: total });
-    windows.push({ start, count, accuracy: batch.report.product_separation_accuracy, checks: batch.report.checks.product_separation });
+    windows.push({ start, count, accuracy: batch.report.knowledge_retrieval_accuracy, checks: batch.report.checks.knowledge_retrieval });
   }
-  console.error("PRIMARY_SOURCE_PRODUCT_SEPARATION_WINDOWS", JSON.stringify(windows));
+  console.error("PRIMARY_SOURCE_RETRIEVAL_WINDOWS", JSON.stringify(windows));
 
   const badWindow = windows.find((window) => window.accuracy < 100);
   if (!badWindow) return;
   let firstBadPrefix = null;
   for (let count = 1; count <= badWindow.count; count += 1) {
     const batch = await runDeterministicHealthBatch(fixture(), { start_index: badWindow.start, count, total_conversations: total });
-    if (batch.report.product_separation_accuracy < 100) {
+    if (batch.report.knowledge_retrieval_accuracy < 100) {
       firstBadPrefix = {
         start: badWindow.start,
         count,
         scenario_index: badWindow.start + count - 1,
         scenario: REAL_CUSTOMER_SCENARIOS[badWindow.start + count - 1],
-        accuracy: batch.report.product_separation_accuracy,
-        checks: batch.report.checks.product_separation,
+        accuracy: batch.report.knowledge_retrieval_accuracy,
+        checks: batch.report.checks.knowledge_retrieval,
         failed_scenarios: batch.report.failed_scenarios,
       };
       break;
     }
   }
-  console.error("PRIMARY_SOURCE_PRODUCT_SEPARATION_FIRST_BAD_PREFIX", JSON.stringify(firstBadPrefix));
+  console.error("PRIMARY_SOURCE_RETRIEVAL_FIRST_BAD_PREFIX", JSON.stringify(firstBadPrefix));
 });
