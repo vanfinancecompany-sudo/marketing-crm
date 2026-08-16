@@ -124,7 +124,7 @@ test("Tell me about this van uses the trusted Finance CMS profile", () => {
   assert.match(reply, /Finance from £399 \+ VAT/i);
 });
 
-test("vehicle specification questions use CMS facts when present and stay bounded when absent", () => {
+test("vehicle specification questions use CMS facts when present and never invent missing features", () => {
   assert.equal(isVehicleSpecificationQuestion("Is this vehicle automatic?"), true);
   assert.equal(isVehicleSpecificationQuestion("Does it have air con?"), true);
   assert.equal(isVehicleSpecificationQuestion("What is the mileage?"), true);
@@ -166,8 +166,8 @@ test("vehicle specification questions use CMS facts when present and stay bounde
     vehicleContext: { registration: "AB12CDE", title: "Ford Transit Custom", pricing: {} },
     rememberedFacts: { product_context: "finance", vehicle_interest: "Ford Transit Custom" },
   });
-  assert.match(boundedReply, /don.t have a reliable specification/i);
-  assert.match(boundedReply, /Vehicle Information/i);
+  assert.match(boundedReply, /can.t confirm air conditioning/i);
+  assert.match(boundedReply, /won.t guess/i);
 
   const generalReply = publicVehiclePricingReply({
     message: "Is it automatic?",
