@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { evaluateHealthConversation } from "../lib/aiAssistantHealth.js";
-import { buildRetrievalCorpus, filterKnowledgeForProduct, isExplicitProductComparison } from "../lib/aiAssistantCompetence.js";
+import {
+  buildCompetencePrompt,
+  buildRetrievalCorpus,
+  filterKnowledgeForProduct,
+  isExplicitProductComparison,
+} from "../lib/aiAssistantCompetence.js";
+import { RENT2BUY_RULE_LABEL } from "../lib/rent2BuyRules.js";
 
 const result = (overrides = {}) => ({
   reply: "I can help with the current product.",
@@ -47,7 +53,7 @@ test("natural comparison wording recognises Baseline One Finance versus Rent2Buy
   assert.equal(isExplicitProductComparison("I have poor credit. Is it still worth applying?"), false);
 });
 
-test("natural comparison wording deliberately unlocks both product knowledge pools", () => {
+test("natural comparison wording deliberately combines two already-sealed product knowledge pools", () => {
   const knowledge = {
     sections: [],
     articles: [
@@ -58,10 +64,11 @@ test("natural comparison wording deliberately unlocks both product knowledge poo
   const comparison = isExplicitProductComparison("Is Finance better than Rent2Buy?");
   const bounded = filterKnowledgeForProduct(knowledge, "finance", { comparison });
   assert.deepEqual(bounded.articles.map((article) => article.id), ["finance", "rent"]);
-  assert.match(bounded.categoryFilter, /both product categories allowed/);
+  assert.equal(bounded.brainId, "comparison");
+  assert.match(bounded.categoryFilter, /both product categories allowed/i);
 });
 
-test("retrieval removes cross-product passages hidden inside an otherwise allowed article", () => {
+test("normal product brains reject an entire article when the article itself crosses the product boundary", () => {
   const rentKnowledge = filterKnowledgeForProduct({
     sections: [],
     articles: [{
@@ -69,12 +76,10 @@ test("retrieval removes cross-product passages hidden inside an otherwise allowe
       title: "Rent2Buy customer guide",
       category: "Rent2Buy",
       content_markdown: "# Rent2Buy basics\nRent2Buy uses rental payments and does not require a credit check.\n\n# Finance comparison\nChoose traditional van finance if you want lender-backed funding, or apply for a finance quotation.",
-      faq_json: [{ question: "Are deposits always £99 for traditional van finance?", answer: "No, finance deposits vary by lender and application." }],
+      faq_json: [],
     }],
   }, "rent2buy");
-  const rentCorpus = buildRetrievalCorpus(rentKnowledge);
-  assert.equal(rentCorpus.some((source) => /traditional van finance|finance quotation|finance deposits/i.test(`${source.heading} ${source.passage}`)), false);
-  assert.equal(rentCorpus.some((source) => /Rent2Buy uses rental payments/i.test(source.passage)), true);
+  assert.deepEqual(rentKnowledge.articles, []);
 
   const financeKnowledge = filterKnowledgeForProduct({
     sections: [],
@@ -86,24 +91,94 @@ test("retrieval removes cross-product passages hidden inside an otherwise allowe
       faq_json: [],
     }],
   }, "finance");
-  const financeCorpus = buildRetrievalCorpus(financeKnowledge);
-  assert.equal(financeCorpus.some((source) => /Rent2Buy/i.test(`${source.heading} ${source.passage}`)), false);
-  assert.equal(financeCorpus.some((source) => /lender assessment/i.test(source.passage)), true);
+  assert.deepEqual(financeKnowledge.articles, []);
 });
 
-test("comparison mode keeps deliberately mixed passages available", () => {
+test("Rent2Buy brain blocks Finance delivery contamination even when it is hidden in a Rent2Buy article", () => {
+  const bounded = filterKnowledgeForProduct({
+    sections: [],
+    articles: [{
+      id: "poisoned-r2b",
+      title: "How Rent2Buy works",
+      category: "Rent2Buy",
+      content_markdown: "## Collection\n\nFree UK delivery is included.",
+      faq_json: [],
+    }],
+  }, "rent2buy");
+  assert.deepEqual(bounded.articles, []);
+  const corpus = buildRetrievalCorpus(bounded);
+  assert.equal(corpus.some((source) => /free uk delivery/i.test(source.passage)), false);
+});
+
+test("Rent2Buy article passages cannot become authority for restricted contract details", () => {
+  const bounded = filterKnowledgeForProduct({
+    sections: [{
+      id: "r2b-business",
+      section_key: "sales_knowledge",
+      title: "Sales Knowledge",
+      active: true,
+      content: "",
+      entries: [{ label: "Rent2Buy insurance", value: "The current approved insurance requirement is confirmed by the team." }],
+    }],
+    articles: [{
+      id: "r2b-contract",
+      title: "Rent2Buy agreement guide",
+      category: "Rent2Buy",
+      content_markdown: "## Agreement\n\nFully comprehensive insurance and a mileage limit apply. Early returns and upgrades depend on the agreement.",
+      faq_json: [],
+    }],
+  }, "rent2buy");
+  const corpus = buildRetrievalCorpus(bounded);
+  assert.equal(corpus.some((source) => source.type.startsWith("article") && /insurance|mileage|early returns|upgrades/i.test(source.passage)), false);
+  assert.equal(corpus.some((source) => source.type === "business_brain" && /Rent2Buy insurance/i.test(source.passage)), true);
+});
+
+test("unlabelled product facts are not treated as shared across the two brains", () => {
+  const knowledge = {
+    sections: [{
+      id: "products",
+      section_key: "products",
+      title: "Products",
+      active: true,
+      content: "",
+      entries: [
+        { label: "Delivery", value: "Free UK delivery is included." },
+        { label: "Collection", value: "Collection only from Southampton." },
+      ],
+    }],
+    articles: [],
+  };
+  const financeCorpus = buildRetrievalCorpus(filterKnowledgeForProduct(knowledge, "finance"));
+  const rentCorpus = buildRetrievalCorpus(filterKnowledgeForProduct(knowledge, "rent2buy"));
+  assert.equal(financeCorpus.some((source) => /Free UK delivery/i.test(source.passage)), true);
+  assert.equal(financeCorpus.some((source) => /Collection only from Southampton/i.test(source.passage)), false);
+  assert.equal(rentCorpus.some((source) => /Free UK delivery/i.test(source.passage)), false);
+  assert.equal(rentCorpus.some((source) => /Collection only from Southampton/i.test(source.passage)), true);
+});
+
+test("Rent2Buy brain always carries the permanent product rule and prompt boundary", () => {
+  const bounded = filterKnowledgeForProduct({ sections: [], articles: [] }, "rent2buy");
+  const corpus = buildRetrievalCorpus(bounded);
+  assert.equal(corpus.some((source) => source.heading === RENT2BUY_RULE_LABEL), true);
+  const prompt = buildCompetencePrompt({ question: "How does Rent2Buy work?", sources: corpus.slice(0, 2), sections: bounded.sections, productContext: "rent2buy" });
+  assert.match(prompt, /Non-overridable Rent2Buy brain rules/);
+  assert.match(prompt, /Collection only from Southampton/);
+  assert.match(prompt, /Never fill the gap from an article, Finance evidence or model inference/);
+});
+
+test("comparison mode does not reopen a deliberately contaminated mixed article", () => {
   const knowledge = filterKnowledgeForProduct({
     sections: [],
     articles: [{
       id: "comparison",
       title: "Finance and Rent2Buy comparison",
       category: "Van Finance",
-      content_markdown: "# Compare the routes\nFinance and Rent2Buy are different products with different structures.",
+      content_markdown: "# Compare the routes\nFinance and Rent2Buy are different products. Free UK delivery is included for Rent2Buy.",
       faq_json: [],
     }],
   }, "finance", { comparison: true });
   const corpus = buildRetrievalCorpus(knowledge);
-  assert.equal(corpus.some((source) => /Finance and Rent2Buy/i.test(`${source.title} ${source.passage}`)), true);
+  assert.equal(corpus.some((source) => source.source_id === "comparison"), false);
 });
 
 test("health scoring treats neutral vehicle guidance as shared rather than Finance", () => {
