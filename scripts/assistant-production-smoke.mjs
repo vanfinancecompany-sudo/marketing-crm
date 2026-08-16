@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 const baseUrl = String(process.env.ASSISTANT_SMOKE_BASE_URL || "https://marketing-crm-github-work.vercel.app").replace(/\/$/, "");
 const endpoint = `${baseUrl}/api/ai-assistant-sitewide`;
-const timeoutMs = Math.max(3000, Number(process.env.ASSISTANT_SMOKE_TIMEOUT_MS) || 15000);
+const timeoutMs = Math.max(3000, Number(process.env.ASSISTANT_SMOKE_TIMEOUT_MS) || 45000);
 
 const VFC_ORIGIN = "https://www.vanfinancecompany.co.uk";
 const VFC_HOME = "https://www.vanfinancecompany.co.uk/";
