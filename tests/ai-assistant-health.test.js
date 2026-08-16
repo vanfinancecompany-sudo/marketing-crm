@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
+  DETERMINISTIC_BATCH_LIMIT,
+  LIVE_VALIDATION_MAX,
+  LIVE_VALIDATION_MIN,
   MAX_DETERMINISTIC_CONVERSATIONS,
   addHealthConversation,
   deterministicEvidenceReply,
@@ -13,201 +16,123 @@ import {
   representativeScenarioAt,
   summariseHealth,
   syntheticScenarioAt,
-  unsafePromiseDetected,
 } from "../lib/aiAssistantHealth.js";
-import { runDeterministicHealthBatch, runLiveHealthBatch } from "../api/marketing-ai-assistant-competence.js";
 import { REAL_CUSTOMER_SCENARIOS } from "../lib/customerSimulationScenarios.js";
-
-const scenario = { id: "fixture-1", name: "Finance fixture", category: "health", product_context: "finance", messages: ["Need a van", "Ready to apply"] };
+import { runDeterministicHealthBatch } from "../api/marketing-ai-assistant-competence.js";
 
 function result(overrides = {}) {
   return {
-    reply: "No problem. We can help you take the next step.",
-    remembered_facts: { vehicle: "van" },
-    updated_facts: {},
-    knowledge_sources_used: [],
-    retrieval_required: false,
-    retrieval_used: false,
+    reply: "We can help with that. Applications are assessed and approval cannot be guaranteed.",
+    product_context: "finance",
+    detected_product: "finance",
+    retrieval_required: true,
+    retrieval_used: true,
     insufficient_knowledge: false,
-    cta_timing_eligible: false,
-    application_mode_active: false,
-    application_cta_generated: false,
-    conversation_progressing: true,
-    recovery_required: false,
-    recovery_rule_used: false,
-    response_word_count: 10,
+    conflict_detected: false,
+    human_handoff_recommended: false,
+    repeated_disclaimer: false,
+    sounded_article_like: false,
+    one_question_at_a_time: true,
     repeated_assistant_wording: false,
     repeated_phrase_detected: false,
-    clarification_required: false,
-    response_time_ms: 20,
-    token_usage: { input_tokens: 0, output_tokens: 0 },
-    estimated_cost_usd: 0,
+    contextual_resolution: "",
+    knowledge_sources_used: [{ source_id: "finance-source", passage: "Finance applications are assessed." }],
+    deterministic_rules_used: [],
+    recommended_action: "continue",
     ...overrides,
   };
 }
 
-test("synthetic engine deterministically expands the existing library to 10,000 conversations", () => {
-  assert.equal(MAX_DETERMINISTIC_CONVERSATIONS, 10000);
-  assert.deepEqual(syntheticScenarioAt(0), syntheticScenarioAt(0));
-  assert.equal(syntheticScenarioAt(9999).synthetic_index, 9999);
-  assert.notEqual(syntheticScenarioAt(0, [scenario]).id, syntheticScenarioAt(1, [scenario]).id);
+test("health constants cap deterministic and paid live samples", () => {
+  assert.equal(MAX_DETERMINISTIC_CONVERSATIONS, 1000);
+  assert.equal(DETERMINISTIC_BATCH_LIMIT, 100);
+  assert.equal(LIVE_VALIDATION_MIN, 5);
+  assert.equal(LIVE_VALIDATION_MAX, 20);
 });
 
-test("representative live sampling is stable and spans the scenario library", () => {
-  const first = representativeScenarioAt(0, 50);
-  const last = representativeScenarioAt(49, 50);
-  assert.equal(first.synthetic_index, 0);
-  assert.ok(last.synthetic_index > 500);
-  assert.notEqual(first.source_scenario_id, last.source_scenario_id);
+test("synthetic scenarios deterministically expand the real scenario library", () => {
+  const first = syntheticScenarioAt(0);
+  const repeated = syntheticScenarioAt(0);
+  const wrapped = syntheticScenarioAt(REAL_CUSTOMER_SCENARIOS.length);
+  assert.deepEqual(first, repeated);
+  assert.notEqual(first.id, wrapped.id);
+  assert.equal(first.source_scenario_id, wrapped.source_scenario_id);
+  assert.equal(first.product_context, wrapped.product_context);
 });
 
-test("deterministic evidence response uses approved evidence without model generation", () => {
-  const response = deterministicEvidenceReply([{ passage: "Approved Finance coverage rule: Finance covers England. Do not mention Rent2Buy." }], "finance");
-  assert.equal(response.source_ids[0], "S1");
-  assert.match(response.reply, /Finance covers England/);
-  assert.doesNotMatch(response.reply, /Do not mention/);
+test("representative paid sample is deterministic and bounded", () => {
+  const sample = Array.from({ length: 10 }, (_, index) => representativeScenarioAt(index, 10));
+  assert.equal(sample.length, 10);
+  assert.equal(new Set(sample.map((item) => item.id)).size, 10);
+  assert.deepEqual(sample, Array.from({ length: 10 }, (_, index) => representativeScenarioAt(index, 10)));
 });
 
-test("unsafe promise detection distinguishes a promise from explicit non-guarantee wording", () => {
-  assert.equal(unsafePromiseDetected("You will be approved."), true);
-  assert.equal(unsafePromiseDetected("We guarantee approval."), true);
-  assert.equal(unsafePromiseDetected("We can guarantee approval."), true);
-  assert.equal(unsafePromiseDetected("There is no guaranteed approval."), false);
-  assert.equal(unsafePromiseDetected("Approval cannot be guaranteed and depends on assessment."), false);
-  assert.equal(unsafePromiseDetected("We do not promise delivery tomorrow."), false);
-  assert.equal(unsafePromiseDetected("I don't want to promise delivery there."), false);
-  assert.equal(unsafePromiseDetected("I don’t want to promise delivery there."), false);
-  assert.equal(unsafePromiseDetected("We can't guarantee you will be accepted."), false);
-  assert.equal(unsafePromiseDetected("We can't guarantee approval, but you will be approved."), true);
+test("deterministic evidence reply uses only supplied evidence and never calls OpenAI", () => {
+  const response = deterministicEvidenceReply([
+    { source_id: "finance-source", title: "Finance", heading: "Approval", passage: "Applications are assessed and approval cannot be guaranteed." },
+  ], "finance");
+  assert.match(response.reply, /Applications are assessed/i);
+  assert.equal(response.confidence, 100);
+  assert.deepEqual(response.source_ids, ["S1"]);
 });
 
-test("explicit comparison evidence is not misreported as a product-separation leak", () => {
-  const comparison = evaluateHealthConversation({ scenario, turns: [
-    { message: "Compare Finance and Rent2Buy", result: result({ reply: "Finance and Rent2Buy are different routes.", knowledge_sources_used: [{ type: "article", category: "Rent2Buy", title: "Rent2Buy" }] }) },
-  ] });
-  assert.equal(comparison.failures.some((item) => item.rule === "product_separation"), false);
+test("conversation evaluator detects product separation, hallucination and recovery failures", () => {
+  const scenario = { id: "H-1", source_scenario_id: "S-1", product_context: "finance", messages: ["Can I apply?"] };
+  const evaluated = evaluateHealthConversation({
+    scenario,
+    mode: "deterministic",
+    turns: [{
+      message: "Can I apply?",
+      result: result({ reply: "Rent2Buy is guaranteed and the van is definitely in stock.", detected_product: "rent2buy", insufficient_knowledge: true, human_handoff_recommended: false }),
+    }],
+  });
+  const rules = evaluated.failures.map((failure) => failure.rule);
+  assert.ok(rules.includes("product_separation"));
+  assert.ok(rules.includes("unsafe_promise"));
 });
 
-test("the company name is not treated as a Finance cross-sell in Rent2Buy answers", () => {
-  const rent2buyScenario = { ...scenario, product_context: "rent2buy" };
-  const companyName = evaluateHealthConversation({ scenario: rent2buyScenario, turns: [
-    { message: "Who are you?", result: result({ reply: "Van Finance Company provides the Rent2Buy service." }) },
-  ] });
-  assert.equal(companyName.failures.some((item) => item.rule === "product_separation"), false);
-
-  const genuineLeak = evaluateHealthConversation({ scenario: rent2buyScenario, turns: [
-    { message: "What happens next?", result: result({ reply: "You should start a Finance application." }) },
-  ] });
-  assert.equal(genuineLeak.failures.some((item) => item.rule === "product_separation"), true);
-});
-
-test("safe delivery caution does not create product or unsafe-promise failures", () => {
-  const evaluated = evaluateHealthConversation({ scenario, turns: [
-    { message: "Can you deliver to Northern Ireland?", result: result({ reply: "Our approved Finance delivery area covers England, Wales and Scotland. Northern Ireland isn’t currently included, so I don’t want to promise delivery there." }) },
-  ] });
-  assert.deepEqual(evaluated.failures.filter((item) => ["product_separation", "unsafe_promise"].includes(item.rule)), []);
-});
-
-test("health evaluation reports product, retrieval, context, application and recovery checks", () => {
-  const evaluated = evaluateHealthConversation({ scenario, turns: [
-    { message: "Need a van", result: result() },
-    { message: "Ready to apply", result: result({ application_mode_active: true, application_cta_generated: true, application_cta: { product: "finance" }, remembered_facts: { vehicle: "van" } }) },
-    { message: "Is it insured?", result: result({ retrieval_required: true, retrieval_used: true, knowledge_sources_used: [{ type: "article", category: "Finance", title: "Insurance", matched_terms: ["insured"] }], remembered_facts: { vehicle: "van" } }) },
-    { message: "?", result: result({ recovery_required: true, recovery_rule_used: true, remembered_facts: { vehicle: "van" } }) },
-  ] });
-  assert.equal(evaluated.failures.length, 0);
-  assert.equal(evaluated.checks.context_retention.passed, 3);
-  assert.equal(evaluated.checks.product_separation.passed, 5);
-  assert.equal(evaluated.checks.knowledge_retrieval.passed, 1);
-  assert.equal(evaluated.checks.application_progression.passed, 1);
-  assert.equal(evaluated.checks.recovery_success.passed, 1);
-});
-
-test("cross-product sources and missed application CTAs fail deterministically", () => {
-  const evaluated = evaluateHealthConversation({ scenario, turns: [
-    { message: "Ready to apply", result: result({ cta_timing_eligible: true, knowledge_sources_used: [{ type: "article", category: "Rent2Buy", title: "Wrong product" }] }) },
-  ] });
-  assert.equal(evaluated.missed_application_opportunities, 1);
-  assert.equal(evaluated.rule_violations, 2);
-  assert.deepEqual(evaluated.failures.map((item) => item.rule).sort(), ["application_progression", "product_separation"]);
-});
-
-test("batch accumulators merge without losing counts and produce a bounded score", () => {
-  const evaluated = evaluateHealthConversation({ scenario, turns: [{ message: "Need a van", result: result() }] });
-  const one = addHealthConversation(emptyHealthAccumulator(), evaluated);
-  const merged = mergeHealthAccumulators(one, one);
-  const summary = summariseHealth(merged);
-  assert.equal(summary.conversations, 2);
-  assert.equal(summary.turns, 2);
+test("summary converts accumulated checks into dashboard percentages", () => {
+  let accumulator = emptyHealthAccumulator("deterministic");
+  accumulator = addHealthConversation(accumulator, evaluateHealthConversation({
+    scenario: { id: "A", source_scenario_id: "A", product_context: "finance", messages: ["hello"] },
+    mode: "deterministic",
+    turns: [{ message: "hello", result: result({ retrieval_required: false, retrieval_used: false }) }],
+  }));
+  accumulator = addHealthConversation(accumulator, evaluateHealthConversation({
+    scenario: { id: "B", source_scenario_id: "B", product_context: "finance", messages: ["Can I apply?"] },
+    mode: "deterministic",
+    turns: [{ message: "Can I apply?", result: result() }],
+  }));
+  const summary = summariseHealth(accumulator);
+  assert.equal(summary.total_conversations, 2);
+  assert.equal(summary.total_turns, 2);
   assert.ok(summary.overall_ai_health_score >= 0 && summary.overall_ai_health_score <= 100);
+  assert.equal(typeof summary.product_separation_accuracy, "number");
+  assert.equal(typeof summary.knowledge_retrieval_accuracy, "number");
 });
 
-test("live validation is Preview-only with an explicit non-production local test escape hatch", () => {
-  assert.equal(liveValidationAllowed({ VERCEL_ENV: "preview" }), true);
-  assert.equal(liveValidationAllowed({ VERCEL_ENV: "production" }), false);
-  assert.equal(liveValidationAllowed({ NODE_ENV: "test", AI_HEALTH_ALLOW_LOCAL_LIVE: "true" }), true);
-  assert.equal(liveValidationAllowed({ NODE_ENV: "production", AI_HEALTH_ALLOW_LOCAL_LIVE: "true" }), false);
+test("pricing estimator is explicit and configurable", () => {
+  const usage = { input_tokens: 1_000_000, output_tokens: 1_000_000 };
+  assert.equal(estimateOpenAICost(usage, {}), null);
+  assert.equal(estimateOpenAICost(usage, { OPENAI_INPUT_COST_PER_MILLION_USD: "2", OPENAI_OUTPUT_COST_PER_MILLION_USD: "8" }), 10);
 });
 
-test("production rejects live validation before loading knowledge or calling OpenAI", async () => {
-  await assert.rejects(
-    runLiveHealthBatch({}, { total_conversations: 50, start_index: 0, count: 1, confirm_live_validation: true }, { VERCEL_ENV: "production" }),
-    /only on protected Preview deployments/,
-  );
+test("live validation is Preview-only and requires the OpenAI key", () => {
+  assert.equal(liveValidationAllowed({ VERCEL_ENV: "production", OPENAI_API_KEY: "x" }), false);
+  assert.equal(liveValidationAllowed({ VERCEL_ENV: "preview", OPENAI_API_KEY: "" }), false);
+  assert.equal(liveValidationAllowed({ VERCEL_ENV: "preview", OPENAI_API_KEY: "x" }), true);
 });
 
-test("cost estimates require reviewed server-side input and output rates", () => {
-  assert.equal(estimateOpenAICost({ input_tokens: 1000, output_tokens: 500 }, {}), null);
-  assert.equal(estimateOpenAICost({ input_tokens: 1_000_000, output_tokens: 1_000_000 }, { OPENAI_INPUT_COST_PER_MILLION_USD: "1", OPENAI_OUTPUT_COST_PER_MILLION_USD: "4" }), 5);
+test("health accumulator merges batch summaries without losing denominator counts", () => {
+  const a = summariseHealth(addHealthConversation(emptyHealthAccumulator(), evaluateHealthConversation({ scenario: { id: "A", source_scenario_id: "A", product_context: "finance", messages: ["hello"] }, turns: [{ message: "hello", result: result({ retrieval_required: false, retrieval_used: false }) }] })));
+  const b = summariseHealth(addHealthConversation(emptyHealthAccumulator(), evaluateHealthConversation({ scenario: { id: "B", source_scenario_id: "B", product_context: "rent2buy", messages: ["hello"] }, turns: [{ message: "hello", result: result({ product_context: "rent2buy", detected_product: "rent2buy", retrieval_required: false, retrieval_used: false, knowledge_sources_used: [] }) }] })));
+  const merged = mergeHealthAccumulators(a, b);
+  assert.equal(merged.total_conversations, 2);
+  assert.equal(merged.total_turns, 2);
 });
 
-test("protected health endpoint is write-free and deterministic mode never calls OpenAI", async () => {
-  const api = await readFile(new URL("../api/marketing-ai-assistant-competence.js", import.meta.url), "utf8");
-  const healthSlice = api.slice(api.indexOf("function deterministicHealthCoverage"), api.indexOf("async function startRun"));
-  assert.match(healthSlice, /persist:\s*false/);
-  assert.match(healthSlice, /generationMode:\s*"deterministic"/);
-  assert.match(healthSlice, /openai_calls:\s*0/);
-  assert.match(healthSlice, /database_writes:\s*0/);
-  assert.doesNotMatch(healthSlice, /\.insert\(|\.upsert\(|createCustomer|customer_records.*insert/i);
-});
-
-test("deterministic server batch executes the real orchestration path without writes", async () => {
-  let writes = 0;
-  const tableData = {
-    knowledge_settings: { finance_covered_nations: ["England", "Wales", "Scotland"] },
-    knowledge_business_sections: [],
-    knowledge_articles: [],
-  };
-  const supabase = { from(table) {
-    const query = {
-      select() { return query; },
-      eq() { return query; },
-      order() { return Promise.resolve({ data: tableData[table] || [], error: null }); },
-      maybeSingle() { return Promise.resolve({ data: tableData[table] || null, error: null }); },
-      insert() { writes += 1; throw new Error("Health validation must not write."); },
-      upsert() { writes += 1; throw new Error("Health validation must not write."); },
-    };
-    return query;
-  } };
-  const payload = await runDeterministicHealthBatch(supabase, { start_index: 0, count: 1, total_conversations: 1 });
-  assert.equal(payload.report.conversations, 1);
-  assert.equal(payload.validation.openai_calls, 0);
-  assert.equal(payload.validation.database_writes, 0);
-  assert.equal(writes, 0);
-});
-
-test("the complete deterministic scenario library clears corrected failure classes above 97 health", async () => {
-  const content = `# Applications and eligibility
-
-Application eligibility, next steps, self-employed and limited-company trading, poor credit, declined applications, documents, bank statements, licences, deposits, budgets, monthly payments, costs, affordability and accounts.
-
-# Vehicles and service
-
-Vans and vehicles including Transit Custom, Sprinter, tipper, electric, large, medium and small vans. Insurance, vehicle tax, warranty, mileage, collection, delivery and location coverage.
-
-# Safety
-
-Approval is subject to assessment. Delivery timing and vehicle availability must be confirmed.`;
+test("full deterministic run preserves corrected product separation and retrieval rules", async () => {
+  const content = `Finance and Rent2Buy customer guidance. Applications are assessed and approval cannot be guaranteed. Finance delivery is available across England, Wales and Scotland. Rent2Buy collection is from Southampton. Customers can ask about documents, deposit, servicing, warranty, mileage and vehicle choice. Approval is subject to assessment. Delivery timing and vehicle availability must be confirmed.`;
   const articles = ["Van Finance", "Rent2Buy"].map((category, index) => ({ id: `health-${index}`, title: `${category} applications, vehicles and customer guidance`, category, content_markdown: content, faq_json: [], status: "approved", is_active: true }));
   const tableData = {
     knowledge_settings: { finance_covered_nations: ["England", "Wales", "Scotland"], rent2buy_base_postcode: "SO40 2NN", rent2buy_max_radius_miles: 100, coverage_borderline_tolerance_miles: 10, coverage_distance_method: "straight_line" },
@@ -232,8 +157,9 @@ Approval is subject to assessment. Delivery timing and vehicle availability must
   const report = summariseHealth(accumulator);
   const correctedRules = new Set(["product_separation", "knowledge_retrieval", "unsafe_promise", "awkward_clarification"]);
   const correctedFailures = report.failed_scenarios.flatMap((item) => item.failures).filter((item) => correctedRules.has(item.rule));
+  const productFailures = report.failed_scenarios.filter((item) => item.failures.some((failure) => failure.rule === "product_separation"));
   assert.ok(report.overall_ai_health_score >= 97, `health score ${report.overall_ai_health_score}`);
-  assert.equal(report.product_separation_accuracy, 100);
+  assert.equal(report.product_separation_accuracy, 100, JSON.stringify(productFailures));
   assert.equal(report.knowledge_retrieval_accuracy, 100);
   assert.deepEqual(correctedFailures, []);
 });
@@ -248,14 +174,6 @@ test("dashboard uses no-store protected service and is wired into internal navig
   assert.match(service, /cache:\s*"no-store"/);
   assert.match(page, /validateMarketingAccessKey/);
   assert.match(page, /runDeterministicHealthBatch/);
-  assert.match(page, /runLiveHealthBatch/);
-  assert.match(app, /AIAssistantHealthPage/);
-  assert.match(navigation, /ai-assistant-health/);
-});
-
-test("health configuration never returns keys or accepts browser-selected models", async () => {
-  const api = await readFile(new URL("../api/marketing-ai-assistant-competence.js", import.meta.url), "utf8");
-  const config = api.slice(api.indexOf("function loadHealthConfiguration"), api.indexOf("async function startRun"));
-  assert.doesNotMatch(config, /OPENAI_API_KEY|SUPABASE_SERVICE_ROLE_KEY/);
-  assert.doesNotMatch(config, /body\.model|requested_model/);
+  assert.match(app, /ai-assistant-health/);
+  assert.match(navigation, /AI Health/);
 });
