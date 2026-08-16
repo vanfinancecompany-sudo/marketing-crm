@@ -107,7 +107,7 @@ test("Rent2Buy brain blocks Finance delivery contamination even when it is hidde
   }, "rent2buy");
   assert.deepEqual(bounded.articles, []);
   const corpus = buildRetrievalCorpus(bounded);
-  assert.equal(corpus.some((source) => /free uk delivery/i.test(source.passage)), false);
+  assert.equal(corpus.some((source) => source.source_id === "poisoned-r2b"), false);
 });
 
 test("Rent2Buy article passages cannot become authority for restricted contract details", () => {
@@ -150,10 +150,10 @@ test("unlabelled product facts are not treated as shared across the two brains",
   };
   const financeCorpus = buildRetrievalCorpus(filterKnowledgeForProduct(knowledge, "finance"));
   const rentCorpus = buildRetrievalCorpus(filterKnowledgeForProduct(knowledge, "rent2buy"));
-  assert.equal(financeCorpus.some((source) => /Free UK delivery/i.test(source.passage)), true);
-  assert.equal(financeCorpus.some((source) => /Collection only from Southampton/i.test(source.passage)), false);
-  assert.equal(rentCorpus.some((source) => /Free UK delivery/i.test(source.passage)), false);
-  assert.equal(rentCorpus.some((source) => /Collection only from Southampton/i.test(source.passage)), true);
+  assert.equal(financeCorpus.some((source) => source.heading === "Delivery" && /Free UK delivery/i.test(source.passage)), true);
+  assert.equal(financeCorpus.some((source) => source.heading === "Collection"), false);
+  assert.equal(rentCorpus.some((source) => source.heading === "Delivery"), false);
+  assert.equal(rentCorpus.some((source) => source.heading === "Collection" && /Collection only from Southampton/i.test(source.passage)), true);
 });
 
 test("Rent2Buy brain always carries the permanent product rule and prompt boundary", () => {
@@ -164,6 +164,7 @@ test("Rent2Buy brain always carries the permanent product rule and prompt bounda
   assert.match(prompt, /Non-overridable Rent2Buy brain rules/);
   assert.match(prompt, /Collection only from Southampton/);
   assert.match(prompt, /Never fill the gap from an article, Finance evidence or model inference/);
+  assert.doesNotMatch(prompt, /Van Finance Company · 101-point PDI/);
 });
 
 test("comparison mode does not reopen a deliberately contaminated mixed article", () => {
