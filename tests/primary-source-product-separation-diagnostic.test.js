@@ -1,6 +1,5 @@
 import test from "node:test";
 import { runDeterministicHealthBatch } from "../api/marketing-ai-assistant-competence.js";
-import { emptyHealthAccumulator, mergeHealthAccumulators, summariseHealth } from "../lib/aiAssistantHealth.js";
 import { REAL_CUSTOMER_SCENARIOS } from "../lib/customerSimulationScenarios.js";
 
 test("diagnose primary-source product separation", async () => {
@@ -32,14 +31,17 @@ Approval is subject to assessment. Delivery timing and vehicle availability must
     return query;
   } };
 
-  let accumulator = emptyHealthAccumulator();
-  for (let start = 0; start < REAL_CUSTOMER_SCENARIOS.length; start += 100) {
-    const batch = await runDeterministicHealthBatch(supabase, { start_index: start, count: Math.min(100, REAL_CUSTOMER_SCENARIOS.length - start), total_conversations: REAL_CUSTOMER_SCENARIOS.length });
-    accumulator = mergeHealthAccumulators(accumulator, batch.report);
+  const failures = [];
+  for (let index = 0; index < REAL_CUSTOMER_SCENARIOS.length; index += 1) {
+    const batch = await runDeterministicHealthBatch(supabase, { start_index: index, count: 1, total_conversations: REAL_CUSTOMER_SCENARIOS.length });
+    if (batch.report.product_separation_accuracy < 100) {
+      failures.push({
+        index,
+        scenario: REAL_CUSTOMER_SCENARIOS[index],
+        product_separation_accuracy: batch.report.product_separation_accuracy,
+        failed_scenarios: batch.report.failed_scenarios,
+      });
+    }
   }
-  const report = summariseHealth(accumulator);
-  const failures = report.failed_scenarios
-    .map((item) => ({ ...item, failures: item.failures.filter((failure) => failure.rule === "product_separation") }))
-    .filter((item) => item.failures.length);
   console.error("PRIMARY_SOURCE_PRODUCT_SEPARATION_DIAGNOSTIC", JSON.stringify(failures));
 });
