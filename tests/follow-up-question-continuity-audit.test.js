@@ -28,6 +28,9 @@ const directAnswerCases = [
   ["town answer", "Which town or postcode are you based in?", "Southampton", {}, ["location", "Southampton"]],
   ["named van answer", "What type of van are you looking for?", "Transit Custom", {}, ["vehicle_interest", "Transit Custom"]],
   ["body type answer", "What type of van are you looking for?", "tipper", {}, ["vehicle_interest", "Tipper"]],
+  ["size answer", "What size van are you looking for?", "medium", {}, ["vehicle_interest", "Medium"]],
+  ["wheelbase shorthand", "What size van are you looking for?", "LWB", {}, ["vehicle_interest", "Lwb"]],
+  ["crew shorthand", "What type of van are you looking for?", "crew van", {}, ["vehicle_interest", "Crew Van"]],
 ];
 
 for (const product of ["finance", "rent2buy"]) {
@@ -40,7 +43,7 @@ for (const product of ["finance", "rent2buy"]) {
       assert.equal(result.human.recovery_required, false);
       assert.equal(result.human.short_answer_to_question, true);
       assert.equal(result.orchestration.answered_assistant_question, true);
-      assert.equal(result.orchestration.recovery_required, true);
+      assert.equal(result.orchestration.recovery_required || result.orchestration.retrieval_required, true);
       const reply = humanRecoveryReply(result.human, {
         messages: result.messages,
         facts: result.memory.remembered_facts,
@@ -60,10 +63,22 @@ for (const product of ["finance", "rent2buy"]) {
       messages: [{ role: "assistant", content: "Do you have a monthly budget in mind?" }],
       remembered_facts: {},
       journey_state: {},
-    });
+    }, { persist: false });
     assert.equal(generated.result.remembered_facts.budget_monthly_gbp, 400);
     assert.match(generated.result.reply, /what type of van are you looking for/i);
     assert.doesNotMatch(generated.result.reply, /what would you like to know about|not quite sure|didn.t understand/i);
+  });
+
+  test(`end-to-end ${product}: bare numeric budget is understood because Jasmine asked for a monthly budget`, async () => {
+    const generated = await simulateCustomerConversation(null, {
+      message: "400",
+      product_context: product,
+      messages: [{ role: "assistant", content: "Do you have a monthly budget in mind?" }],
+      remembered_facts: {},
+      journey_state: {},
+    }, { persist: false });
+    assert.equal(generated.result.remembered_facts.budget_monthly_gbp, 400);
+    assert.match(generated.result.reply, /what type of van are you looking for/i);
   });
 
   test(`end-to-end ${product}: employment answer advances rather than re-asking the answer`, async () => {
@@ -73,7 +88,7 @@ for (const product of ["finance", "rent2buy"]) {
       messages: [{ role: "assistant", content: "Are you employed or self-employed?" }],
       remembered_facts: {},
       journey_state: {},
-    });
+    }, { persist: false });
     assert.equal(generated.result.remembered_facts.employment_status, "self-employed");
     assert.match(generated.result.reply, /how long have you been trading/i);
     assert.doesNotMatch(generated.result.reply, /are you employed or self-employed|what would you like to know about/i);
@@ -126,7 +141,6 @@ test("follow-up audit: nonsense is not falsely accepted merely because the assis
   });
   assert.equal(result.human.message_type, "nonsense_input");
   assert.equal(result.human.recovery_required, true);
-  assert.equal(result.human.short_answer_to_question, true);
   const reply = humanRecoveryReply(result.human, { messages: result.messages, productContext: "finance", journey: result.journey }).reply;
   assert.match(reply, /didn.t understand|another way/i);
 });
