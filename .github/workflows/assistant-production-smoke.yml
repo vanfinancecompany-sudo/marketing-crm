@@ -13,6 +13,13 @@ on:
     paths:
       - .github/workflows/assistant-production-smoke.yml
       - scripts/assistant-production-smoke.mjs
+      - api/ai-assistant-customer.js
+      - api/ai-assistant-sitewide.js
+      - api/marketing-ai-assistant-competence.js
+      - lib/aiAssistantCompetence.js
+      - lib/businessIntelligence.js
+      - lib/salesConversationEngine.js
+      - lib/vfcPrimarySourceKnowledge.js
 
 concurrency:
   group: ai-assistant-production-smoke
