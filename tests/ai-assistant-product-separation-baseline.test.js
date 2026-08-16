@@ -156,10 +156,12 @@ test("unlabelled product facts are not treated as shared across the two brains",
   assert.equal(rentCorpus.some((source) => source.heading === "Collection" && /Collection only from Southampton/i.test(source.passage)), true);
 });
 
-test("Rent2Buy brain always carries the permanent product rule and prompt boundary", () => {
+test("Rent2Buy brain keeps the permanent product rule in the control plane, never answer retrieval", () => {
   const bounded = filterKnowledgeForProduct({ sections: [], articles: [] }, "rent2buy");
+  const compliance = bounded.sections.find((section) => section.section_key === "compliance");
+  assert.equal(compliance.entries.some((entry) => entry.label === RENT2BUY_RULE_LABEL), true);
   const corpus = buildRetrievalCorpus(bounded);
-  assert.equal(corpus.some((source) => source.heading === RENT2BUY_RULE_LABEL), true);
+  assert.equal(corpus.some((source) => source.heading === RENT2BUY_RULE_LABEL), false);
   const prompt = buildCompetencePrompt({ question: "How does Rent2Buy work?", sources: corpus.slice(0, 2), sections: bounded.sections, productContext: "rent2buy" });
   assert.match(prompt, /Non-overridable Rent2Buy brain rules/);
   assert.match(prompt, /Collection only from Southampton/);
