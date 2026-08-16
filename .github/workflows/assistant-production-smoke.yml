@@ -12,6 +12,7 @@ on:
       - main
     paths:
       - .github/workflows/assistant-production-smoke.yml
+      - scripts/assistant-production-smoke.mjs
 
 concurrency:
   group: ai-assistant-production-smoke
