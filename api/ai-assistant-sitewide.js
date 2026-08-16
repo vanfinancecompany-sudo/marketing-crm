@@ -1,5 +1,6 @@
+import { createClient } from "@supabase/supabase-js";
 import { handleCustomerAssistantRequest } from "./ai-assistant-customer.js";
-import { safeCustomerPayload, validateWixOrigin } from "../lib/publicAssistantFoundation.js";
+import { safeCustomerPayload, secureHash, validateWixOrigin } from "../lib/publicAssistantFoundation.js";
 import { resolvePublicWixPageContext } from "../lib/publicWixSiteContext.js";
 import { personaliseCustomerPayload } from "../lib/customerAssistantPersonality.js";
 
@@ -41,6 +42,72 @@ function installCustomerVoice(response, body = {}) {
   }));
 }
 
+function sameVehicleIdentity(stored = {}, supplied = {}) {
+  const storedRegistration = clean(stored.registration, 20).toUpperCase().replace(/\s+/g, "");
+  const suppliedRegistration = clean(supplied.registration, 20).toUpperCase().replace(/\s+/g, "");
+  if (storedRegistration && suppliedRegistration) return storedRegistration === suppliedRegistration;
+
+  const storedId = clean(stored.vehicle_id, 100);
+  const suppliedId = clean(supplied.vehicle_id, 100);
+  if (storedId && suppliedId) return storedId === suppliedId;
+
+  const storedTitle = clean(stored.title, 200).toLowerCase();
+  const suppliedTitle = clean(supplied.title, 200).toLowerCase();
+  return !storedTitle || !suppliedTitle || storedTitle === suppliedTitle;
+}
+
+function hasUsefulVehicleRefresh(vehicle = {}) {
+  const pricing = vehicle.pricing || {};
+  return Boolean(
+    clean(vehicle.title, 200)
+    || clean(vehicle.description, 500)
+    || clean(vehicle.highlights, 500)
+    || clean(vehicle.specification, 500)
+    || clean(pricing.finance_monthly, 160)
+    || clean(pricing.finance_retail_vat, 160)
+    || clean(pricing.rent2buy_monthly, 160)
+    || clean(pricing.rent2buy_initial, 160)
+  );
+}
+
+async function refreshTrustedVehicleSession({ body, pageContext, environment, dependencies }) {
+  if (body.action !== "message" || !clean(body.conversation_id, 100) || !hasUsefulVehicleRefresh(pageContext.vehicle)) return;
+  if (!environment.SUPABASE_URL || !environment.SUPABASE_SERVICE_ROLE_KEY || !environment.AI_ASSISTANT_SESSION_SECRET) return;
+
+  const supabase = dependencies.supabase || createClient(
+    environment.SUPABASE_URL,
+    environment.SUPABASE_SERVICE_ROLE_KEY,
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  const tokenHash = secureHash(clean(body.conversation_id, 100), environment.AI_ASSISTANT_SESSION_SECRET);
+  const loaded = await supabase
+    .from("ai_customer_sessions")
+    .select("id,page_type,vehicle_context,remembered_facts")
+    .eq("public_token_hash", tokenHash)
+    .eq("status", "active")
+    .maybeSingle();
+  if (loaded.error) throw loaded.error;
+  const session = loaded.data;
+  if (!session || session.page_type !== pageContext.page_type) return;
+  if (!sameVehicleIdentity(session.vehicle_context || {}, pageContext.vehicle || {})) return;
+
+  const rememberedFacts = session.remembered_facts && typeof session.remembered_facts === "object"
+    ? session.remembered_facts
+    : {};
+  const vehicleInterest = clean(pageContext.vehicle?.title || pageContext.vehicle?.registration, 200);
+  const refreshed = await supabase
+    .from("ai_customer_sessions")
+    .update({
+      vehicle_context: pageContext.vehicle,
+      remembered_facts: vehicleInterest
+        ? { ...rememberedFacts, vehicle_interest: vehicleInterest }
+        : rememberedFacts,
+      last_activity_at: new Date().toISOString(),
+    })
+    .eq("id", session.id);
+  if (refreshed.error) throw refreshed.error;
+}
+
 export async function handleSitewideAssistantRequest(request, response, dependencies = {}) {
   const environment = dependencies.environment || process.env;
 
@@ -66,6 +133,19 @@ export async function handleSitewideAssistantRequest(request, response, dependen
       environment,
       fetchImpl: dependencies.fetchImpl || fetch,
     });
+
+    // Existing browser conversations can outlive a deployment. Refresh the stored vehicle context from the
+    // trusted server-side Wix lookup before the canonical handler loads the session, but only for the same vehicle.
+    try {
+      await refreshTrustedVehicleSession({ body, pageContext, environment, dependencies });
+    } catch (error) {
+      console.warn("SITEWIDE AI ASSISTANT SESSION CONTEXT REFRESH FAILED", {
+        page_type: pageContext.page_type,
+        vehicle_present: Boolean(pageContext.vehicle?.registration || pageContext.vehicle?.vehicle_id || pageContext.vehicle?.title),
+        exception_type: error?.name || "Error",
+        message: clean(error?.message, 500),
+      });
+    }
 
     // The browser cannot provide product, vehicle or pricing context in site-wide mode. It is replaced here
     // with server-resolved context from the current VFC URL and, on vehicle pages, the Wix CMS.
