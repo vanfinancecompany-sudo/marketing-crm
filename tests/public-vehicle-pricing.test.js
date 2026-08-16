@@ -52,7 +52,7 @@ test("current Finance vehicle page answers mthPrice and priceVat without model e
     },
     rememberedFacts: { vehicle_interest: "Ford Transit Custom" },
   });
-  assert.match(monthlyReply, /Finance monthly figure of £399 \+ VAT pcm/i);
+  assert.match(monthlyReply, /Finance from £399 \+ VAT pcm/i);
   assert.match(monthlyReply, /Ford Transit Custom/i);
 
   const retailReply = publicVehiclePricingReply({
@@ -68,14 +68,14 @@ test("current Finance vehicle page answers mthPrice and priceVat without model e
   assert.match(retailReply, /retail price of £18,995 \+ VAT/i);
 });
 
-test("current Rent2Buy vehicle context answers initial rental, monthly payments and term exactly", () => {
+test("current Rent2Buy vehicle context answers fixed initial rental and monthly payments but does not expose stock-page agreement length", () => {
   const vehicleContext = {
     title: "Ford Transit Connect",
     pricing: {
       rent2buy_initial: "£2,000 + VAT / £2,400 inc VAT",
       rent2buy_monthly: "£499 + VAT / £598.80 inc VAT",
     },
-    term_months: 48,
+    term_months: null,
   };
   const rememberedFacts = { product_context: "rent2buy", vehicle_interest: "Ford Transit Connect" };
 
@@ -88,7 +88,7 @@ test("current Rent2Buy vehicle context answers initial rental, monthly payments 
   });
   assert.match(priceReply, /initial rental of £2,000 \+ VAT \/ £2,400 inc VAT/i);
   assert.match(priceReply, /monthly payments of £499 \+ VAT \/ £598.80 inc VAT/i);
-  assert.match(priceReply, /48 months/i);
+  assert.doesNotMatch(priceReply, /48 months/i);
 
   const termReply = publicVehiclePricingReply({
     message: "How many months is this over?",
@@ -97,35 +97,77 @@ test("current Rent2Buy vehicle context answers initial rental, monthly payments 
     vehicleContext,
     rememberedFacts,
   });
-  assert.match(termReply, /48 months/i);
+  assert.equal(termReply, null);
 });
 
-test("vehicle specification questions stay inside the supported Finance and Rent2Buy scope", () => {
+test("Tell me about this van uses the trusted Finance CMS profile", () => {
+  const reply = publicVehiclePricingReply({
+    message: "Tell me about this van",
+    pageType: "finance_vehicle",
+    productLock: "finance",
+    vehicleContext: {
+      registration: "AB12CDE",
+      title: "Ford Transit Custom Limited",
+      year: "2022/22",
+      description: "LIMITED MODEL WITH AIR CONDITIONING AND CRUISE CONTROL.",
+      specification: "REGISTRATION: AB12 CDE\nYEAR: 2022/22\nMILEAGE: 42,000\nEURO: 6\nENGINE SIZE: 2.0\nFUEL TYPE: DIESEL\nCOLOUR: WHITE\nTRANSMISSION: MANUAL\nBHP: 128",
+      pricing: { finance_monthly: "£399 + VAT", finance_retail_vat: "£18,995 + VAT" },
+    },
+    rememberedFacts: {},
+  });
+  assert.match(reply, /Ford Transit Custom Limited/i);
+  assert.match(reply, /AB12CDE/i);
+  assert.match(reply, /42,000 miles/i);
+  assert.match(reply, /DIESEL/i);
+  assert.match(reply, /MANUAL/i);
+  assert.match(reply, /retail price £18,995 \+ VAT/i);
+  assert.match(reply, /Finance from £399 \+ VAT/i);
+});
+
+test("vehicle specification questions use CMS facts when present and stay bounded when absent", () => {
   assert.equal(isVehicleSpecificationQuestion("Is this vehicle automatic?"), true);
   assert.equal(isVehicleSpecificationQuestion("Does it have air con?"), true);
   assert.equal(isVehicleSpecificationQuestion("What is the mileage?"), true);
   assert.equal(isVehicleSpecificationQuestion("Can I finance a diesel van?"), false);
 
-  const financeReply = publicVehiclePricingReply({
+  const transmissionReply = publicVehiclePricingReply({
     message: "Is this vehicle automatic?",
+    pageType: "finance_vehicle",
+    productLock: "finance",
+    vehicleContext: {
+      registration: "AB12CDE",
+      title: "Ford Transit Custom",
+      specification: "MILEAGE: 42,000\nTRANSMISSION: MANUAL",
+      pricing: {},
+    },
+    rememberedFacts: { product_context: "finance", vehicle_interest: "Ford Transit Custom" },
+  });
+  assert.match(transmissionReply, /transmission as MANUAL/i);
+
+  const airConReply = publicVehiclePricingReply({
+    message: "Does it have air con?",
+    pageType: "rent2buy_general",
+    productLock: "rent2buy",
+    vehicleContext: {
+      registration: "AB12CDE",
+      title: "Ford Transit Connect",
+      highlights: "AIR CONDITIONING - BLUETOOTH - PARKING SENSORS",
+      pricing: {},
+    },
+    rememberedFacts: { product_context: "rent2buy", vehicle_interest: "Ford Transit Connect" },
+  });
+  assert.match(airConReply, /Yes/i);
+  assert.match(airConReply, /air conditioning/i);
+
+  const boundedReply = publicVehiclePricingReply({
+    message: "Does it have air con?",
     pageType: "finance_vehicle",
     productLock: "finance",
     vehicleContext: { registration: "AB12CDE", title: "Ford Transit Custom", pricing: {} },
     rememberedFacts: { product_context: "finance", vehicle_interest: "Ford Transit Custom" },
   });
-  assert.match(financeReply, /finance, pricing and application/i);
-  assert.match(financeReply, /don.t reliably have the full vehicle specification/i);
-  assert.match(financeReply, /Vehicle Information/i);
-
-  const rent2buyReply = publicVehiclePricingReply({
-    message: "Does it have air con?",
-    pageType: "rent2buy_general",
-    productLock: "rent2buy",
-    vehicleContext: { registration: "AB12CDE", title: "Ford Transit Connect", pricing: {} },
-    rememberedFacts: { product_context: "rent2buy", vehicle_interest: "Ford Transit Connect" },
-  });
-  assert.match(rent2buyReply, /Rent2Buy costs, agreement terms and application/i);
-  assert.match(rent2buyReply, /Vehicle Information/i);
+  assert.match(boundedReply, /don.t have a reliable specification/i);
+  assert.match(boundedReply, /Vehicle Information/i);
 
   const generalReply = publicVehiclePricingReply({
     message: "Is it automatic?",
