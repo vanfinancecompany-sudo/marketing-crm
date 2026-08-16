@@ -39,15 +39,13 @@ for (const product of ["finance", "rent2buy"]) {
     const state = { product, messages: [], facts: {}, journey: {} };
 
     const opening = await turn(state, "I need a van");
-    assert.match(opening.reply, /found a van|help choosing/i);
-
-    const choosing = await turn(state, "need help choosing");
-    assert.match(choosing.reply, /what type of van are you looking for/i);
-    assert.doesNotMatch(choosing.reply, /what would you like to know about.*need help choosing|not quite sure/i);
+    assert.match(opening.reply, /size or type of van/i);
+    assert.doesNotMatch(opening.reply, /what would you like help with/i);
 
     const vehicle = await turn(state, "medium");
     assert.equal(vehicle.remembered_facts.vehicle_interest, "Medium");
     assert.match(vehicle.reply, /monthly budget/i);
+    assert.doesNotMatch(vehicle.reply, /what would you like to know about.*medium|not quite sure/i);
 
     const budget = await turn(state, "400");
     assert.equal(budget.remembered_facts.budget_monthly_gbp, 400);
@@ -57,12 +55,13 @@ for (const product of ["finance", "rent2buy"]) {
     const employment = await turn(state, "self employed");
     assert.equal(employment.remembered_facts.employment_status, "self-employed");
     assert.match(employment.reply, /how long have you been trading/i);
+    assert.doesNotMatch(employment.reply, /are you employed or self-employed|what would you like to know about/i);
 
     const trading = await turn(state, "2 years");
     assert.equal(trading.remembered_facts.trading_history, "2 years");
     assert.doesNotMatch(trading.reply, /what would you like to know about.*2 years|not quite sure|didn.t understand/i);
 
-    for (const result of [opening, choosing, vehicle, budget, employment, trading]) {
+    for (const result of [opening, vehicle, budget, employment, trading]) {
       assert.equal(result.one_question_at_a_time, true);
       assert.equal(result.repeated_assistant_wording, false);
     }
