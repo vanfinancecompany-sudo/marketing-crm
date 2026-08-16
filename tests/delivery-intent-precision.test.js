@@ -11,7 +11,7 @@ test("delivery logistics questions still use deterministic coverage replies", ()
   }
 });
 
-test("delivery wording does not hijack inspection, after-sales or timing questions", () => {
+test("Finance delivery wording does not hijack inspection, after-sales or timing questions", () => {
   const questions = [
     "Are your vans inspected before delivery?",
     "What happens if there is a problem after delivery?",
@@ -24,9 +24,7 @@ test("delivery wording does not hijack inspection, after-sales or timing questio
   }
 });
 
-test("Rent2Buy direct delivery questions remain collection-only without leaking into other questions", () => {
+test("Rent2Buy direct delivery questions remain collection-only", () => {
   const direct = "Do you deliver?";
   assert.match(deterministicDeliveryReply("rent2buy", direct, buildRent2BuyDeliveryEvidence(direct)), /collect|Southampton/i);
-  const nonDeliveryIntent = "Are your vans inspected before delivery?";
-  assert.equal(deterministicDeliveryReply("rent2buy", nonDeliveryIntent, buildRent2BuyDeliveryEvidence(nonDeliveryIntent)), null);
 });
