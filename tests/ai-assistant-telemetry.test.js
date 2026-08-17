@@ -8,6 +8,7 @@ import {
   recordAssistantTelemetryEvents,
   telemetryFromAssistantResult,
 } from "../lib/aiAssistantTelemetry.js";
+import { buildAssistantCostSummary } from "../api/marketing-ai-assistant-analytics.js";
 
 test("assistant telemetry hashes a browser-session id without returning the raw value", () => {
   const environment = { AI_ASSISTANT_SESSION_SECRET: "measurement-test-secret-1234567890" };
@@ -150,4 +151,42 @@ test("measurement summary separates adoption, conversation depth, retrieval and 
   assert.equal(summary.knowledge.top_sources[0].source_id, "article-1");
   assert.equal(summary.knowledge_hub_search.no_result_searches, 2);
   assert.deepEqual(summary.knowledge_hub_search.top_no_result_queries[0], { query: "IVA finance", count: 2 });
+});
+
+test("cost summary reports model mix, tokens and estimated spend from saved conversation diagnostics", () => {
+  const summary = buildAssistantCostSummary([
+    {
+      model: "gpt-5-mini",
+      conversation_diagnostics: {
+        model_route: { model: "gpt-5-mini", tier: "mini" },
+        token_usage: { input_tokens: 1000, output_tokens: 100 },
+        estimated_cost_usd: 0.002,
+      },
+    },
+    {
+      model: "gpt-5.1",
+      conversation_diagnostics: {
+        model_route: { model: "gpt-5.1", tier: "full" },
+        token_usage: { input_tokens: 2000, output_tokens: 200 },
+        estimated_cost_usd: 0.02,
+      },
+    },
+    {
+      model: "deterministic-conversation-rules",
+      conversation_diagnostics: {
+        model_route: { model: "deterministic-conversation-rules", tier: "deterministic" },
+        token_usage: { input_tokens: 0, output_tokens: 0 },
+        estimated_cost_usd: 0,
+      },
+    },
+  ]);
+
+  assert.equal(summary.measured_conversation_responses, 3);
+  assert.equal(summary.ai_generated_responses, 2);
+  assert.equal(summary.deterministic_responses, 1);
+  assert.equal(summary.mini_responses, 1);
+  assert.equal(summary.full_responses, 1);
+  assert.equal(summary.total_tokens, 3300);
+  assert.equal(summary.estimated_cost_usd, 0.022);
+  assert.equal(summary.pricing_coverage_rate, 100);
 });
