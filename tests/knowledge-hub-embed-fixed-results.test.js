@@ -38,3 +38,8 @@ test("embedded document is hard-locked against its own mobile scroll range", asy
   assert.match(source, /html, body \{[^}]*height: 100%;[^}]*min-height: 0;[^}]*overflow: hidden;[^}]*overscroll-behavior: none;/s);
   assert.match(source, /body \{[^}]*position: fixed;[^}]*inset: 0;[^}]*overflow: hidden;/s);
 });
+
+test("embed shell fills and clips the iframe viewport like the stable Rent2Buy embed", async () => {
+  const source = await embedSource();
+  assert.match(source, /\.shell \{[^}]*height: 100%;[^}]*min-height: 0;[^}]*overflow: hidden;[^}]*overscroll-behavior: none;/s);
+});
