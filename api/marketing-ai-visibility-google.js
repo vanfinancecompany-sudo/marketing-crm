@@ -101,6 +101,18 @@ async function normalizeCompletedGoogleRows(supabase) {
   return { corrected: candidates.length, counts };
 }
 
+async function normalizationForAction(supabase, action) {
+  if (action === "checkGoogle") {
+    return {
+      corrected: 0,
+      counts: { performance_found: 0, inconclusive: 0, error: 0 },
+      skipped: true,
+    };
+  }
+  const normalization = await normalizeCompletedGoogleRows(supabase);
+  return normalization;
+}
+
 function reconcileBulkSummary(summary = {}) {
   const results = (summary.results || []).map((item) => {
     if (item.result_status !== "inconclusive") return item;
@@ -138,7 +150,7 @@ export default async function handler(request, response) {
   try {
     body = parseBody(request);
     const supabase = getSupabase();
-    const normalization = await normalizeCompletedGoogleRows(supabase);
+    const normalization = await normalizationForAction(supabase, body.action);
     const { capture, response: capturedResponse } = captureResponse();
     await connectionsHandler(request, capturedResponse);
     if (capture.statusCode >= 400 || capture.payload?.ok === false) {
