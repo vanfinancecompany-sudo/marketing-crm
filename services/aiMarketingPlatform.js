@@ -3,7 +3,7 @@ import {
   parseMarketingJsonResponse,
 } from "./marketingAccess.js";
 
-const API_ROUTE = "/api/marketing-ai-platform";
+const API_ROUTE = "/api/marketing-centre-ai-platform";
 
 export async function requestAiMarketingPlatform(action, payload = {}) {
   const response = await fetch(API_ROUTE, {
