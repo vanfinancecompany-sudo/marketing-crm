@@ -2,6 +2,7 @@ export const MARKETING_ACCESS_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
 export const MARKETING_ACCESS_HEADER = "x-marketing-customer-database-key";
 export const MARKETING_ACCESS_DENIED_EVENT = "marketing-access-denied";
 export const MARKETING_CENTRE_NO_LOCK_KEY = "__marketing_centre_no_lock__";
+export const KNOWLEDGE_HUB_NO_LOCK_KEY = "__knowledge_hub_no_lock__";
 
 let validatedAccessKey = "";
 let validationPromise = null;
@@ -23,14 +24,30 @@ function getBrowserStorage(storageName) {
   }
 }
 
+function normalizedPathname() {
+  if (typeof window === "undefined") return "/";
+  return String(window.location?.pathname || "").replace(/\/+$/, "") || "/";
+}
+
 export function isMarketingCentreRoute() {
-  if (typeof window === "undefined") return false;
-  const pathname = String(window.location?.pathname || "").replace(/\/+$/, "") || "/";
-  return pathname === "/marketing-centre";
+  return normalizedPathname() === "/marketing-centre";
+}
+
+export function isKnowledgeHubRoute() {
+  return normalizedPathname() === "/knowledge-hub";
+}
+
+export function isNoLockMarketingToolRoute() {
+  return isMarketingCentreRoute() || isKnowledgeHubRoute();
+}
+
+export function knowledgeHubApiRoute(protectedRoute, noLockRoute) {
+  return isKnowledgeHubRoute() ? noLockRoute : protectedRoute;
 }
 
 export function getStoredMarketingAccessKey() {
   if (isMarketingCentreRoute()) return MARKETING_CENTRE_NO_LOCK_KEY;
+  if (isKnowledgeHubRoute()) return KNOWLEDGE_HUB_NO_LOCK_KEY;
 
   const localStorage = getBrowserStorage("localStorage");
   const sessionStorage = getBrowserStorage("sessionStorage");
@@ -48,9 +65,11 @@ export function saveMarketingAccessKey(apiKey) {
   const localStorage = getBrowserStorage("localStorage");
   const sessionStorage = getBrowserStorage("sessionStorage");
   const value = String(apiKey || "").trim();
-  if (!value || !localStorage) return false;
+  if (!value) return false;
 
   if (value === MARKETING_CENTRE_NO_LOCK_KEY && isMarketingCentreRoute()) return true;
+  if (value === KNOWLEDGE_HUB_NO_LOCK_KEY && isKnowledgeHubRoute()) return true;
+  if (!localStorage) return false;
 
   try {
     sessionStorage?.removeItem(MARKETING_ACCESS_STORAGE_KEY);
@@ -65,7 +84,7 @@ export function clearMarketingAccessKey() {
   validatedAccessKey = "";
   validationPromise = null;
 
-  if (isMarketingCentreRoute()) {
+  if (isNoLockMarketingToolRoute()) {
     if (typeof window !== "undefined" && typeof window.setTimeout === "function") {
       window.setTimeout(() => window.location?.reload?.(), 0);
     }
@@ -98,7 +117,7 @@ export function isMarketingAccessDenied(error) {
 }
 
 export function notifyMarketingAccessDenied(message = "Your saved access has expired or is no longer valid. Please unlock again.") {
-  if (isMarketingCentreRoute()) return;
+  if (isNoLockMarketingToolRoute()) return;
 
   clearMarketingAccessKey();
   if (typeof window === "undefined") return;
@@ -134,6 +153,10 @@ export async function validateMarketingAccessKey(apiKey) {
   const key = String(apiKey || "").trim();
   if (!key) throw new MarketingAccessDeniedError("Access key not recognised.");
   if (key === MARKETING_CENTRE_NO_LOCK_KEY && isMarketingCentreRoute()) {
+    validatedAccessKey = key;
+    return true;
+  }
+  if (key === KNOWLEDGE_HUB_NO_LOCK_KEY && isKnowledgeHubRoute()) {
     validatedAccessKey = key;
     return true;
   }
