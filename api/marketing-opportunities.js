@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { DEFAULT_AUDIENCE_RULES, applySuppressionQuery, normalizeAudienceRules } from "../lib/marketingCampaignAudience.js";
+import { prioritiseMarketingOpportunities } from "../lib/marketingOpportunityPriority.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const CHANNELS = new Set(["email", "sms", "facebook"]);
@@ -184,7 +185,7 @@ async function getMarketingOpportunities(supabase) {
     opportunities.push(buildOpportunity({ id: "multiple_applications", title: "Multiple Applications", description: "Customers with more than one recorded application.", customerCount: multipleApplications, channel: "email", objective: "finance_offer", rules: {}, unsupportedReason: "Audience filter not yet available" }));
   }
 
-  return { opportunities };
+  return { opportunities: prioritiseMarketingOpportunities(opportunities) };
 }
 
 export default async function handler(request, response) {
