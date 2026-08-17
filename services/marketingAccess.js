@@ -2,9 +2,27 @@ export const MARKETING_ACCESS_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
 export const MARKETING_ACCESS_HEADER = "x-marketing-customer-database-key";
 export const MARKETING_ACCESS_DENIED_EVENT = "marketing-access-denied";
 export const MARKETING_CENTRE_NO_LOCK_KEY = "__marketing_centre_no_lock__";
+export const KNOWLEDGE_HUB_NO_LOCK_KEY = "__knowledge_hub_no_lock__";
+
+const KNOWLEDGE_HUB_API_REWRITES = Object.freeze({
+  "/api/marketing-knowledge-hub": "/api/knowledge-hub-ui",
+  "/api/knowledge-hub-duplicates": "/api/knowledge-hub-ui-duplicates",
+  "/api/knowledge-hub-seo-fields": "/api/knowledge-hub-ui-seo-fields",
+  "/api/marketing-knowledge-safety-approval": "/api/knowledge-hub-ui-safety-approval",
+  "/api/marketing-rent2buy-business-rule": "/api/knowledge-hub-ui-rent2buy-rule",
+  "/api/marketing-editorial-engine": "/api/knowledge-hub-ui-editorial-engine",
+  "/api/marketing-internal-link-validate": "/api/knowledge-hub-ui-internal-link-validate",
+  "/api/marketing-editorial-automation": "/api/knowledge-hub-ui-editorial-automation",
+  "/api/marketing-knowledge-corrections": "/api/knowledge-hub-ui-corrections",
+  "/api/marketing-wix-publishing": "/api/knowledge-hub-ui-wix-publishing",
+  "/api/marketing-internal-link-reset": "/api/knowledge-hub-ui-internal-link-reset",
+  "/api/marketing-website-index-discovery": "/api/knowledge-hub-ui-website-index-discovery",
+  "/api/knowledge-topic-workspace": "/api/knowledge-hub-ui-topic-workspace",
+});
 
 let validatedAccessKey = "";
 let validationPromise = null;
+let knowledgeHubFetchInstalled = false;
 
 export class MarketingAccessDeniedError extends Error {
   constructor(message = "Access key not recognised.") {
@@ -23,14 +41,48 @@ function getBrowserStorage(storageName) {
   }
 }
 
+function normalizedPathname() {
+  if (typeof window === "undefined") return "/";
+  return String(window.location?.pathname || "").replace(/\/+$/, "") || "/";
+}
+
 export function isMarketingCentreRoute() {
-  if (typeof window === "undefined") return false;
-  const pathname = String(window.location?.pathname || "").replace(/\/+$/, "") || "/";
-  return pathname === "/marketing-centre";
+  return normalizedPathname() === "/marketing-centre";
+}
+
+export function isKnowledgeHubRoute() {
+  return normalizedPathname() === "/knowledge-hub";
+}
+
+export function isNoLockMarketingToolRoute() {
+  return isMarketingCentreRoute() || isKnowledgeHubRoute();
+}
+
+export function knowledgeHubApiRoute(protectedRoute, noLockRoute) {
+  return isKnowledgeHubRoute() ? noLockRoute : protectedRoute;
+}
+
+export function rewriteKnowledgeHubApiUrl(input) {
+  if (!isKnowledgeHubRoute() || typeof input !== "string") return input;
+  const [path, suffix = ""] = input.split(/(?=[?#])/u, 2);
+  const rewritten = KNOWLEDGE_HUB_API_REWRITES[path];
+  return rewritten ? `${rewritten}${suffix}` : input;
+}
+
+export function installKnowledgeHubNoLockFetch() {
+  if (knowledgeHubFetchInstalled || typeof globalThis?.fetch !== "function") return false;
+  const originalFetch = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = (input, init) => originalFetch(rewriteKnowledgeHubApiUrl(input), init);
+  knowledgeHubFetchInstalled = true;
+  return true;
 }
 
 export function getStoredMarketingAccessKey() {
   if (isMarketingCentreRoute()) return MARKETING_CENTRE_NO_LOCK_KEY;
+  if (isKnowledgeHubRoute()) {
+    installKnowledgeHubNoLockFetch();
+    return KNOWLEDGE_HUB_NO_LOCK_KEY;
+  }
 
   const localStorage = getBrowserStorage("localStorage");
   const sessionStorage = getBrowserStorage("sessionStorage");
@@ -48,9 +100,11 @@ export function saveMarketingAccessKey(apiKey) {
   const localStorage = getBrowserStorage("localStorage");
   const sessionStorage = getBrowserStorage("sessionStorage");
   const value = String(apiKey || "").trim();
-  if (!value || !localStorage) return false;
+  if (!value) return false;
 
   if (value === MARKETING_CENTRE_NO_LOCK_KEY && isMarketingCentreRoute()) return true;
+  if (value === KNOWLEDGE_HUB_NO_LOCK_KEY && isKnowledgeHubRoute()) return true;
+  if (!localStorage) return false;
 
   try {
     sessionStorage?.removeItem(MARKETING_ACCESS_STORAGE_KEY);
@@ -65,7 +119,7 @@ export function clearMarketingAccessKey() {
   validatedAccessKey = "";
   validationPromise = null;
 
-  if (isMarketingCentreRoute()) {
+  if (isNoLockMarketingToolRoute()) {
     if (typeof window !== "undefined" && typeof window.setTimeout === "function") {
       window.setTimeout(() => window.location?.reload?.(), 0);
     }
@@ -98,7 +152,7 @@ export function isMarketingAccessDenied(error) {
 }
 
 export function notifyMarketingAccessDenied(message = "Your saved access has expired or is no longer valid. Please unlock again.") {
-  if (isMarketingCentreRoute()) return;
+  if (isNoLockMarketingToolRoute()) return;
 
   clearMarketingAccessKey();
   if (typeof window === "undefined") return;
@@ -134,6 +188,11 @@ export async function validateMarketingAccessKey(apiKey) {
   const key = String(apiKey || "").trim();
   if (!key) throw new MarketingAccessDeniedError("Access key not recognised.");
   if (key === MARKETING_CENTRE_NO_LOCK_KEY && isMarketingCentreRoute()) {
+    validatedAccessKey = key;
+    return true;
+  }
+  if (key === KNOWLEDGE_HUB_NO_LOCK_KEY && isKnowledgeHubRoute()) {
+    installKnowledgeHubNoLockFetch();
     validatedAccessKey = key;
     return true;
   }
