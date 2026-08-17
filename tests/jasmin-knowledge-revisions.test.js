@@ -16,6 +16,25 @@ test("only one open revision is allowed for a source article", () => {
   assert.match(api, /revisionSourceId\(article\) === sourceId/);
 });
 
+test("legacy overlong card fields can be cloned but remain strict on edit and approval", () => {
+  assert.match(api, /KNOWLEDGE_CARD_TITLE_MAX/);
+  assert.match(api, /KNOWLEDGE_CARD_EXCERPT_MAX/);
+  assert.match(api, /function cleanArticleInput\(value = \{\}, \{ allowLegacyCardLengths = false \} = \{\}\)/);
+  assert.match(api, /if \(title && title\.length > KNOWLEDGE_CARD_TITLE_MAX\) delete validation\.title/);
+  assert.match(api, /if \(article\.excerpt\.length > KNOWLEDGE_CARD_EXCERPT_MAX\) delete validation\.excerpt/);
+
+  const createBlock = api.match(/async function createRevisionDraft[\s\S]*?async function updateRevisionDraft/)?.[0] || "";
+  assert.match(createBlock, /allowLegacyCardLengths: true/);
+
+  const updateBlock = api.match(/async function updateRevisionDraft[\s\S]*?async function discardRevisionDraft/)?.[0] || "";
+  assert.doesNotMatch(updateBlock, /allowLegacyCardLengths: true/);
+  assert.match(updateBlock, /const article = cleanArticleInput/);
+
+  const approveBlock = api.match(/async function approveRevision[\s\S]*?export default async function handler/)?.[0] || "";
+  assert.match(approveBlock, /const validation = validateKnowledgeArticle\(revision\)/);
+  assert.doesNotMatch(approveBlock, /allowLegacyCardLengths: true/);
+});
+
 test("revision edits keep the temporary slug and source linkage", () => {
   assert.match(api, /slug: current\.slug/);
   assert.match(api, /revision_of: revisionSourceId\(current\)/);
