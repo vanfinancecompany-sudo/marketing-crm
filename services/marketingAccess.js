@@ -1,6 +1,7 @@
 export const MARKETING_ACCESS_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
 export const MARKETING_ACCESS_HEADER = "x-marketing-customer-database-key";
 export const MARKETING_ACCESS_DENIED_EVENT = "marketing-access-denied";
+export const MARKETING_CENTRE_NO_LOCK_KEY = "__marketing_centre_no_lock__";
 
 let validatedAccessKey = "";
 let validationPromise = null;
@@ -22,7 +23,15 @@ function getBrowserStorage(storageName) {
   }
 }
 
+export function isMarketingCentreRoute() {
+  if (typeof window === "undefined") return false;
+  const pathname = String(window.location?.pathname || "").replace(/\/+$/, "") || "/";
+  return pathname === "/marketing-centre";
+}
+
 export function getStoredMarketingAccessKey() {
+  if (isMarketingCentreRoute()) return MARKETING_CENTRE_NO_LOCK_KEY;
+
   const localStorage = getBrowserStorage("localStorage");
   const sessionStorage = getBrowserStorage("sessionStorage");
 
@@ -41,6 +50,8 @@ export function saveMarketingAccessKey(apiKey) {
   const value = String(apiKey || "").trim();
   if (!value || !localStorage) return false;
 
+  if (value === MARKETING_CENTRE_NO_LOCK_KEY && isMarketingCentreRoute()) return true;
+
   try {
     sessionStorage?.removeItem(MARKETING_ACCESS_STORAGE_KEY);
     localStorage.setItem(MARKETING_ACCESS_STORAGE_KEY, value);
@@ -51,10 +62,18 @@ export function saveMarketingAccessKey(apiKey) {
 }
 
 export function clearMarketingAccessKey() {
-  const localStorage = getBrowserStorage("localStorage");
-  const sessionStorage = getBrowserStorage("sessionStorage");
   validatedAccessKey = "";
   validationPromise = null;
+
+  if (isMarketingCentreRoute()) {
+    if (typeof window !== "undefined" && typeof window.setTimeout === "function") {
+      window.setTimeout(() => window.location?.reload?.(), 0);
+    }
+    return;
+  }
+
+  const localStorage = getBrowserStorage("localStorage");
+  const sessionStorage = getBrowserStorage("sessionStorage");
 
   try {
     sessionStorage?.removeItem(MARKETING_ACCESS_STORAGE_KEY);
@@ -79,6 +98,8 @@ export function isMarketingAccessDenied(error) {
 }
 
 export function notifyMarketingAccessDenied(message = "Your saved access has expired or is no longer valid. Please unlock again.") {
+  if (isMarketingCentreRoute()) return;
+
   clearMarketingAccessKey();
   if (typeof window === "undefined") return;
   try {
@@ -112,6 +133,10 @@ export async function parseMarketingJsonResponse(response, fallbackMessage, opti
 export async function validateMarketingAccessKey(apiKey) {
   const key = String(apiKey || "").trim();
   if (!key) throw new MarketingAccessDeniedError("Access key not recognised.");
+  if (key === MARKETING_CENTRE_NO_LOCK_KEY && isMarketingCentreRoute()) {
+    validatedAccessKey = key;
+    return true;
+  }
   if (validatedAccessKey === key) return true;
   if (validationPromise?.key === key) return validationPromise.promise;
 
