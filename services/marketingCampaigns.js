@@ -3,9 +3,9 @@ import {
   parseMarketingJsonResponse,
 } from "./marketingAccess.js";
 
-const API_ROUTE = "/api/marketing-campaigns";
-const DRAFT_AUDIENCE_PREVIEW_ROUTE = "/api/marketing-campaign-audience-preview";
-const OPPORTUNITIES_ROUTE = "/api/marketing-opportunities";
+const API_ROUTE = "/api/marketing-centre-campaigns";
+const DRAFT_AUDIENCE_PREVIEW_ROUTE = "/api/marketing-centre-campaign-audience-preview";
+const OPPORTUNITIES_ROUTE = "/api/marketing-centre-opportunities";
 
 let lastDraftAudiencePreview = null;
 
