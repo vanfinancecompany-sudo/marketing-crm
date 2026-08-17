@@ -4,8 +4,25 @@ export const MARKETING_ACCESS_DENIED_EVENT = "marketing-access-denied";
 export const MARKETING_CENTRE_NO_LOCK_KEY = "__marketing_centre_no_lock__";
 export const KNOWLEDGE_HUB_NO_LOCK_KEY = "__knowledge_hub_no_lock__";
 
+const KNOWLEDGE_HUB_API_REWRITES = Object.freeze({
+  "/api/marketing-knowledge-hub": "/api/knowledge-hub-ui",
+  "/api/knowledge-hub-duplicates": "/api/knowledge-hub-ui-duplicates",
+  "/api/knowledge-hub-seo-fields": "/api/knowledge-hub-ui-seo-fields",
+  "/api/marketing-knowledge-safety-approval": "/api/knowledge-hub-ui-safety-approval",
+  "/api/marketing-rent2buy-business-rule": "/api/knowledge-hub-ui-rent2buy-rule",
+  "/api/marketing-editorial-engine": "/api/knowledge-hub-ui-editorial-engine",
+  "/api/marketing-internal-link-validate": "/api/knowledge-hub-ui-internal-link-validate",
+  "/api/marketing-editorial-automation": "/api/knowledge-hub-ui-editorial-automation",
+  "/api/marketing-knowledge-corrections": "/api/knowledge-hub-ui-corrections",
+  "/api/marketing-wix-publishing": "/api/knowledge-hub-ui-wix-publishing",
+  "/api/marketing-internal-link-reset": "/api/knowledge-hub-ui-internal-link-reset",
+  "/api/marketing-website-index-discovery": "/api/knowledge-hub-ui-website-index-discovery",
+  "/api/knowledge-topic-workspace": "/api/knowledge-hub-ui-topic-workspace",
+});
+
 let validatedAccessKey = "";
 let validationPromise = null;
+let knowledgeHubFetchInstalled = false;
 
 export class MarketingAccessDeniedError extends Error {
   constructor(message = "Access key not recognised.") {
@@ -45,9 +62,27 @@ export function knowledgeHubApiRoute(protectedRoute, noLockRoute) {
   return isKnowledgeHubRoute() ? noLockRoute : protectedRoute;
 }
 
+export function rewriteKnowledgeHubApiUrl(input) {
+  if (!isKnowledgeHubRoute() || typeof input !== "string") return input;
+  const [path, suffix = ""] = input.split(/(?=[?#])/u, 2);
+  const rewritten = KNOWLEDGE_HUB_API_REWRITES[path];
+  return rewritten ? `${rewritten}${suffix}` : input;
+}
+
+export function installKnowledgeHubNoLockFetch() {
+  if (knowledgeHubFetchInstalled || typeof globalThis?.fetch !== "function") return false;
+  const originalFetch = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = (input, init) => originalFetch(rewriteKnowledgeHubApiUrl(input), init);
+  knowledgeHubFetchInstalled = true;
+  return true;
+}
+
 export function getStoredMarketingAccessKey() {
   if (isMarketingCentreRoute()) return MARKETING_CENTRE_NO_LOCK_KEY;
-  if (isKnowledgeHubRoute()) return KNOWLEDGE_HUB_NO_LOCK_KEY;
+  if (isKnowledgeHubRoute()) {
+    installKnowledgeHubNoLockFetch();
+    return KNOWLEDGE_HUB_NO_LOCK_KEY;
+  }
 
   const localStorage = getBrowserStorage("localStorage");
   const sessionStorage = getBrowserStorage("sessionStorage");
@@ -157,6 +192,7 @@ export async function validateMarketingAccessKey(apiKey) {
     return true;
   }
   if (key === KNOWLEDGE_HUB_NO_LOCK_KEY && isKnowledgeHubRoute()) {
+    installKnowledgeHubNoLockFetch();
     validatedAccessKey = key;
     return true;
   }
