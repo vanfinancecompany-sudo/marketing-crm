@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { WixCmsClient } from "../lib/wixPublishing.js";
-import "../lib/wixDraftPublishPluginSupport.js";
+import {
+  createWixDraftFromPublished,
+  resolveWixDraftItemsCollectionId,
+  wixClientForCollection,
+} from "../lib/wixDraftPublishPluginSupport.js";
 
 function makeClient(responsePayload) {
   const calls = [];
@@ -13,17 +17,30 @@ function makeClient(responsePayload) {
   return { client, calls };
 }
 
-test("query includes draft Publish plugin option", async () => {
-  const { client, calls } = makeClient({ dataItems: [{ id: "draft-1" }] });
-  await client.find("crmArticleId", "article-1");
-  assert.deepEqual(calls[0].body.publishPluginOptions, { includeDraftItems: true });
-  assert.equal(calls[0].body.consistentRead, true);
+test("resolves the paired Draft Items collection from Wix collection plugins", () => {
+  const payload = { dataCollection: { plugins: [{ type: "DRAFT_ITEMS", draftItemsOptions: { draftsCollectionId: "Import3__drafts" } }] } };
+  assert.equal(resolveWixDraftItemsCollectionId(payload, "Import3"), "Import3__drafts");
 });
 
-test("update includes draft Publish plugin option", async () => {
-  const { client, calls } = makeClient({ dataItem: { id: "draft-1" } });
-  await client.update("draft-1", { title: "Updated" });
-  assert.equal(calls[0].options.method, "PUT");
-  assert.deepEqual(calls[0].body.publishPluginOptions, { includeDraftItems: true });
-  assert.deepEqual(calls[0].body.dataItem, { id: "draft-1", data: { title: "Updated" } });
+test("refuses live writes when the Draft Items workflow is absent", () => {
+  assert.throws(
+    () => resolveWixDraftItemsCollectionId({ dataCollection: { plugins: [] } }, "Import3"),
+    (error) => error.type === "configuration" && /Save changes as draft first/.test(error.message)
+  );
+});
+
+test("creates a draft copy of a published item using the published collection id", async () => {
+  const { client, calls } = makeClient({ dataItem: { id: "published-1" } });
+  const result = await createWixDraftFromPublished(client, "published-1");
+  assert.equal(result.id, "published-1");
+  assert.equal(calls[0].options.method, "POST");
+  assert.match(calls[0].url, /items\/create-draft$/);
+  assert.deepEqual(calls[0].body, { dataCollectionId: "Import3", dataItemId: "published-1" });
+});
+
+test("creates a client scoped to the paired drafts collection", () => {
+  const { client } = makeClient({});
+  const draftClient = wixClientForCollection(client, "Import3__drafts");
+  assert.equal(draftClient.configuration.collectionId, "Import3__drafts");
+  assert.equal(draftClient.fetchImpl, client.fetchImpl);
 });
