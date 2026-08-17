@@ -24,15 +24,16 @@ test("London dates and day ranges respect summer and winter time", () => {
   });
 });
 
-test("Knowledge Hub target defaults to 2 and participates in completion", () => {
-  assert.equal(DEFAULT_DAILY_TARGETS.knowledge_hub_article, 2);
+test("Knowledge Hub defaults to maintenance mode instead of a forced daily production target", () => {
+  assert.equal(DEFAULT_DAILY_TARGETS.knowledge_hub_article, 0);
   const summary = summarizeDailyActivity({
     targets: DEFAULT_DAILY_TARGETS,
     events: [{ activity_type: "knowledge_hub_article", quantity: 1 }],
   });
   assert.equal(summary.metrics.knowledge_hub_article.completed, 1);
-  assert.equal(summary.metrics.knowledge_hub_article.target, 2);
-  assert.equal(summary.metrics.knowledge_hub_article.percentage, 50);
+  assert.equal(summary.metrics.knowledge_hub_article.target, 0);
+  assert.equal(summary.metrics.knowledge_hub_article.remaining, 0);
+  assert.equal(summary.metrics.knowledge_hub_article.percentage, 100);
 });
 
 test("effective schedules preserve history and a one-day override wins", () => {
@@ -140,7 +141,7 @@ test("legacy creative reels and explicit YouTube reel events are counted without
   assert.equal(summary.metrics.emails_sent.completed, 2);
 });
 
-test("period totals include Knowledge Hub articles", () => {
+test("period totals still record Knowledge Hub output without creating a target shortfall", () => {
   const first = summarizeDailyActivity({
     targets: DEFAULT_DAILY_TARGETS,
     events: [{ activity_type: "knowledge_hub_article", quantity: 1 }],
@@ -151,8 +152,9 @@ test("period totals include Knowledge Hub articles", () => {
   });
   const totals = aggregatePeriod([first, second]);
   assert.equal(totals.knowledge_hub_article.completed, 3);
-  assert.equal(totals.knowledge_hub_article.target, 4);
-  assert.equal(totals.knowledge_hub_article.completion_percentage, 75);
+  assert.equal(totals.knowledge_hub_article.target, 0);
+  assert.equal(totals.knowledge_hub_article.shortfall, 0);
+  assert.equal(totals.knowledge_hub_article.completion_percentage, 100);
 });
 
 test("completed production send batches keep existing email totals", () => {
