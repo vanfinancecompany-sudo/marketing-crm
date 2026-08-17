@@ -2,6 +2,7 @@ import {
   buildMarketingAccessHeaders,
   parseMarketingJsonResponse,
 } from "./marketingAccess.js";
+import { isConfirmedPublishedArticle } from "../lib/aiVisibility.js";
 
 const API_ROUTE = "/api/marketing-ai-visibility";
 const CONNECTIONS_API_ROUTE = "/api/marketing-ai-visibility-google";
@@ -11,7 +12,7 @@ const MANUAL_EVIDENCE_API_ROUTE = "/api/marketing-ai-visibility-manual";
 const PASSIVE_REQUEST_TIMEOUT_MS = 12000;
 const STANDARD_ACTION_TIMEOUT_MS = 30000;
 const SINGLE_GOOGLE_CHECK_TIMEOUT_MS = 90000;
-const BULK_GOOGLE_CHECK_TIMEOUT_MS = 240000;
+const GOOGLE_BULK_CONCURRENCY = 5;
 const WIX_SYNC_TIMEOUT_MS = 180000;
 const LOAD_CACHE_MS = 30000;
 const FAILURE_COOLDOWN_MS = 60000;
@@ -163,12 +164,65 @@ export const checkGoogleForArticle = (articleId, executionId = "") =>
     cooldown: false,
     timeoutMessage: "The Google check took too long and was stopped safely.",
   });
-export const checkGoogleForPublishedPages = (executionId = "") =>
-  requestConnection("bulkGoogleCheck", { execution_id: executionId }, {
-    timeoutMs: BULK_GOOGLE_CHECK_TIMEOUT_MS,
-    cooldown: false,
-    timeoutMessage: "The published-pages Google check exceeded four minutes and was stopped safely.",
-  });
+
+export const checkGoogleForPublishedPages = async (executionId = "") => {
+  const runId = executionId || globalThis.crypto?.randomUUID?.() || `google-bulk-${Date.now()}`;
+  const visibility = await loadAiVisibility();
+  const published = (visibility?.articles || []).filter(isConfirmedPublishedArticle);
+  const results = [];
+
+  for (let index = 0; index < published.length; index += GOOGLE_BULK_CONCURRENCY) {
+    const batch = published.slice(index, index + GOOGLE_BULK_CONCURRENCY);
+    const outcomes = await Promise.allSettled(
+      batch.map((article) => checkGoogleForArticle(article.id, `${runId}:${article.id}`)),
+    );
+
+    outcomes.forEach((outcome, offset) => {
+      const article = batch[offset];
+      if (outcome.status === "fulfilled") {
+        const result = outcome.value?.result || {};
+        const resultStatus = result.result_status || "unknown";
+        const customerStatus = result.customer_status || resultStatus;
+        results.push({
+          article_id: article.id,
+          ok: !["error", "unknown"].includes(resultStatus),
+          result_status: resultStatus,
+          customer_status: customerStatus,
+          duplicate: Boolean(outcome.value?.duplicate),
+        });
+      } else {
+        results.push({
+          article_id: article.id,
+          ok: false,
+          result_status: "error",
+          code: outcome.reason?.code || "provider_request_failed",
+          error: outcome.reason?.message || "Google provider request failed.",
+        });
+      }
+    });
+  }
+
+  const successful = results.filter((item) => item.ok).length;
+  const failed = results.length - successful;
+  const status_counts = results.reduce((counts, item) => {
+    const key = item.customer_status || item.result_status || "unknown";
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
+
+  return {
+    ok: true,
+    summary: {
+      execution_id: runId,
+      published_pages_checked: results.length,
+      successful,
+      failed,
+      pending: status_counts.pending || 0,
+      status_counts,
+      results,
+    },
+  };
+};
 
 if (typeof window !== "undefined") {
   import("../components/AIVisibilityLiveConnections.jsx")
