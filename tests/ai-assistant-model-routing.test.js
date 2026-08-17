@@ -45,52 +45,26 @@ test("harmless simple conversation qualifies for the mini model", () => {
   }
 });
 
-test("high-confidence single-fact approved lookups can use the mini model", () => {
+test("all evidence-backed business questions use gpt-5.1", () => {
   const cases = [
     ["Are prices plus VAT?", ["vat_pricing"]],
     ["Which documents are required?", ["documents"]],
     ["Who owns the van at the end?", ["ownership"]],
     ["Do you offer delivery?", ["delivery_collection"]],
     ["Can I use the van for my business?", ["business_use"]],
-  ];
-  for (const [message, secondary_intents] of cases) {
-    const selected = route(message, { intent: { secondary_intents } });
-    assert.equal(selected.model, "gpt-5-mini", message);
-    assert.equal(selected.tier, "mini", message);
-    assert.match(selected.reason, /high-confidence|approved retrieval|lower-cost/i);
-  }
-});
-
-test("decision-sensitive topics stay on gpt-5.1", () => {
-  const cases = [
     ["Can I apply with poor credit?", ["poor_credit"]],
     ["How much deposit do I need?", ["deposit"]],
     ["What would my monthly payment be?", ["monthly_cost"]],
-    ["Can I apply now?", ["application"]],
-    ["Can I have three vans?", ["multiple_vehicles"]],
   ];
   for (const [message, secondary_intents] of cases) {
     const selected = route(message, { intent: { secondary_intents } });
     assert.equal(selected.model, "gpt-5.1", message);
     assert.equal(selected.tier, "full", message);
+    assert.match(selected.reason, /quality-first|strongest/i);
   }
 });
 
-test("safe lookup requires strong confidence and approved evidence", () => {
-  const noEvidence = route("Are prices plus VAT?", {
-    intent: { secondary_intents: ["vat_pricing"] },
-    sourceCount: 0,
-  });
-  assert.equal(noEvidence.model, "gpt-5.1");
-
-  const lowConfidence = route("Are prices plus VAT?", {
-    intent: { secondary_intents: ["vat_pricing"], confidence: 70 },
-    human: { confidence: 70, low_confidence: true },
-  });
-  assert.equal(lowConfidence.model, "gpt-5.1");
-});
-
-test("ambiguous, explanatory and multi-step turns default to the stronger model", () => {
+test("ambiguous and multi-step turns use stronger reasoning", () => {
   const ambiguous = route("What about that?", {
     intent: { primary_intent: "incomplete_business_question", retrieval_required: false, clarification_required: true, confidence: 60 },
     human: { confidence: 60, low_confidence: true },
@@ -100,11 +74,6 @@ test("ambiguous, explanatory and multi-step turns default to the stronger model"
   assert.equal(ambiguous.model, "gpt-5.1");
   assert.equal(ambiguous.reasoning_effort, "medium");
 
-  const explanatory = route("Can you explain how delivery works?", {
-    intent: { secondary_intents: ["delivery_collection"] },
-  });
-  assert.equal(explanatory.model, "gpt-5.1");
-
   const multiStep = route("How does it work, what documents do I need, and what happens next?", {
     intent: { primary_intent: "multi_part_question", secondary_intents: ["documents", "application"] },
   });
@@ -112,7 +81,7 @@ test("ambiguous, explanatory and multi-step turns default to the stronger model"
   assert.equal(multiStep.reasoning_effort, "medium");
 });
 
-test("uncategorised turns do not fall through to the cheaper model", () => {
+test("uncategorised turns default to the stronger model", () => {
   const selected = route("Please explain this properly", {
     intent: { primary_intent: "unknown", retrieval_required: false, secondary_intents: [] },
     orchestration: { retrieval_required: false },
@@ -132,7 +101,7 @@ test("GPT-5 Responses API parameters omit unsupported temperature", () => {
   assert.deepEqual(legacy, { model: "gpt-4.1", temperature: 0.2 });
 });
 
-test("the canonical conversation request sends a supported mini payload for a safe lookup", async () => {
+test("the canonical conversation request sends gpt-5.1 for a factual lookup", async () => {
   let requestBody;
   const selected = route("Are prices plus VAT?", { intent: { secondary_intents: ["vat_pricing"] } });
   const fetchImplementation = async (_url, options) => {
@@ -152,10 +121,9 @@ test("the canonical conversation request sends a supported mini payload for a sa
     fetchImplementation,
   );
 
-  assert.equal(requestBody.model, "gpt-5-mini");
+  assert.equal(requestBody.model, "gpt-5.1");
   assert.equal("temperature" in requestBody, false);
-  assert.equal("reasoning" in requestBody, false);
-  assert.equal(requested.model, "gpt-5-mini");
-  assert.equal(requested.route.tier, "mini");
-  assert.equal(requested.route.reasoning_effort, null);
+  assert.deepEqual(requestBody.reasoning, { effort: "low" });
+  assert.equal(requested.model, "gpt-5.1");
+  assert.equal(requested.route.tier, "full");
 });
