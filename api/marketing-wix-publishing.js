@@ -1,6 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
 import { WixPublishingError, wixPublishingConfiguration } from "../lib/wixPublishing.js";
-import "../lib/wixDraftPublishPluginSupport.js";
 import { createOrUpdateKnowledgeRichContentDraft } from "../lib/wixKnowledgeRichContentPublishing.js";
 import { evaluatePublishingSafety } from "../lib/publishingSafety.js";
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
@@ -31,11 +30,13 @@ async function recordSyncEvent(supabase, articleId, result) {
   const event = await supabase.from("knowledge_editorial_events").insert({
     event_type: "system",
     article_id: articleId,
-    summary: result.recoveredMissingItem && result.operation === "created" ? "Missing Wix CMS draft was recreated for editorial review." : result.operation === "created" ? "Wix CMS draft created for editorial review." : "Existing Wix CMS draft updated for editorial review.",
+    summary: result.operation === "created" ? "Wix CMS draft created for editorial review." : "Existing Wix CMS item staged as a pending draft for editorial review.",
     details: {
       action: result.operation === "created" ? "wix_draft_created" : "wix_draft_updated",
       wix_item_id: result.itemId,
       wix_collection_id: result.collectionId,
+      wix_draft_collection_id: result.draftCollectionId,
+      wix_server_state: result.serverState,
       wix_sync_status: result.syncStatus,
       payload_version: result.payloadVersion,
       content_field_type: result.contentFieldType,
@@ -44,10 +45,11 @@ async function recordSyncEvent(supabase, articleId, result) {
       suggestions_successfully_inserted: result.diagnostics?.suggestions_successfully_inserted || [],
       suggestions_skipped: result.diagnostics?.suggestions_skipped || [],
       final_link_decoration_count: result.diagnostics?.final_link_decoration_count || 0,
-      recovered_missing_item: result.recoveredMissingItem,
-      replaced_wix_item_id: result.replacedItemId,
+      duplicate_next_step_prevented: result.diagnostics?.duplicate_next_step_prevented === true,
+      preserved_manual_featured_image: result.diagnostics?.preserved_manual_featured_image === true,
       table_conversion_warnings: result.tableConversionWarnings || [],
       automatic_publication: false,
+      pending_draft: true,
     },
   });
   if (event.error) console.error("WIX EDITORIAL EVENT ERROR", { article_id: articleId, message: event.error.message });
@@ -55,7 +57,7 @@ async function recordSyncEvent(supabase, articleId, result) {
 
 async function recordKnowledgeActivity(supabase, article, result) {
   if (result.operation !== "created" || clean(article.wix_item_id)) return null;
-  const payload = { activity_date: londonDateKey(), activity_type: "knowledge_hub_article", quantity: 1, source: "knowledge_hub_wix_draft", source_id: article.id, metadata: { article_id: article.id, article_title: article.title, wix_item_id: result.itemId, wix_sync_status: result.syncStatus, created_or_updated: "created" } };
+  const payload = { activity_date: londonDateKey(), activity_type: "knowledge_hub_article", quantity: 1, source: "knowledge_hub_wix_draft", source_id: article.id, metadata: { article_id: article.id, article_title: article.title, wix_item_id: result.itemId, wix_sync_status: result.syncStatus, created_or_updated: "created", wix_server_state: result.serverState } };
   const existing = await supabase.from("marketing_daily_activity_events").select("id").eq("activity_type", payload.activity_type).eq("source", payload.source).eq("source_id", payload.source_id).limit(1).maybeSingle();
   if (existing.error) throw existing.error;
   if (!existing.data) { const inserted = await supabase.from("marketing_daily_activity_events").insert(payload); if (inserted.error) throw inserted.error; }
@@ -89,16 +91,39 @@ export async function publishKnowledgeArticleToWix({ supabase, articleId, enviro
     await recordSyncEvent(supabase, article.id, result);
     let contentOperationsWarning = "";
     try { await recordKnowledgeActivity(supabase, article, result); } catch (activityError) { contentOperationsWarning = "Wix draft created, but Content Operations could not be updated."; console.error("KNOWLEDGE CONTENT OPERATIONS ERROR", { article_id: article.id, message: activityError.message }); }
-    return { article: savedArticle, content_operations_warning: contentOperationsWarning, diagnostics: result.diagnostics, wix: { operation: result.operation, item_id: result.itemId, collection_id: result.collectionId, sync_status: result.syncStatus, synced_at: syncedAt, dashboard_url: result.dashboardUrl, content_status: "Draft", content_field_type: result.contentFieldType, content_field_id: result.contentFieldId, final_link_decoration_count: result.diagnostics?.final_link_decoration_count || 0, recovered_missing_item: result.recoveredMissingItem, replaced_item_id: result.replacedItemId, table_conversion_warnings: result.tableConversionWarnings || [], published: false } };
+    return {
+      article: savedArticle,
+      content_operations_warning: contentOperationsWarning,
+      diagnostics: result.diagnostics,
+      wix: {
+        operation: result.operation,
+        item_id: result.itemId,
+        collection_id: result.collectionId,
+        draft_collection_id: result.draftCollectionId,
+        server_state: result.serverState,
+        sync_status: result.syncStatus,
+        synced_at: syncedAt,
+        dashboard_url: result.dashboardUrl,
+        content_status: result.serverState,
+        content_field_type: result.contentFieldType,
+        content_field_id: result.contentFieldId,
+        final_link_decoration_count: result.diagnostics?.final_link_decoration_count || 0,
+        duplicate_next_step_prevented: result.diagnostics?.duplicate_next_step_prevented === true,
+        preserved_manual_featured_image: result.diagnostics?.preserved_manual_featured_image === true,
+        table_conversion_warnings: result.tableConversionWarnings || [],
+        pending_draft: true,
+        published_by_this_action: false,
+        live_copy_exists: result.serverState === "CHANGED",
+        published: false,
+      },
+    };
   } catch (error) {
     const type = error.type || "api";
     const message = linkDiagnosticMessage(error, article);
     const failedAt = new Date().toISOString();
-    const clearStoredItemId = error.details?.clear_stored_item_id === true;
     const diagnostics = { ...(error.details || {}), article_id: clean(article.id, 200), article_title: clean(article.title, 500) };
-    const failed = await supabase.from("knowledge_articles").update({ ...(clearStoredItemId ? { wix_item_id: null, wix_draft_url: null } : {}), wix_sync_status: "error", wix_last_error: clearStoredItemId ? `The previous Wix item no longer exists and its stored link was cleared. ${message}` : message, last_wix_sync_at: failedAt, updated_at: failedAt }).eq("id", article.id);
+    const failed = await supabase.from("knowledge_articles").update({ wix_sync_status: "error", wix_last_error: message, last_wix_sync_at: failedAt, updated_at: failedAt }).eq("id", article.id);
     if (failed.error) console.error("WIX FAILURE STATUS ERROR", { article_id: article.id, message: failed.error.message });
-    if (clearStoredItemId) throw new WixPublishingError(type, `The previous Wix item no longer exists and its stored link was cleared. ${message} Retry to create a new Wix draft.`, error.status || 409, { ...diagnostics, wix_error_code: "WDE0073", stored_item_cleared: true });
     throw new WixPublishingError(type, message, error.status || 500, diagnostics);
   }
 }
