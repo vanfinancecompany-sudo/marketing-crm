@@ -201,7 +201,11 @@ export default async function handler(request, response) {
       }
     }
     return json(response, 200, { ok: true, ...summary });
-  } catch {
+  } catch (error) {
+    console.error("SENDGRID EMAIL WEBHOOK ERROR", {
+      exception_type: safeText(error?.name || "Error", 120),
+      message: safeText(error?.message || "SendGrid webhook processing failed.", 500),
+    });
     return json(response, 500, { ok: false, message: "SendGrid webhook processing failed." });
   }
 }
