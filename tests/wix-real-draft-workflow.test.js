@@ -97,6 +97,38 @@ test("existing published Knowledge Hub article is copied to draft then edited on
   assert.equal(calls.some((call) => call.method === "PUT" && call.body?.dataCollectionId === "Import3"), false);
 });
 
+test("manual Wix featured image survives a CRM draft refresh", async () => {
+  const calls = [];
+  const manualImage = "wix:image://v1/manual-image/article.jpg";
+  const draftRecord = {
+    id: article().id,
+    data: {
+      crmArticleId: article().id,
+      slug: article().slug,
+      featuredImage: manualImage,
+    },
+  };
+  const fetchImpl = async (url, options = {}) => {
+    const body = callBody(options);
+    calls.push({ url, method: options.method || "GET", body });
+    if (url.endsWith("/collections/Import3")) return schemaResponse();
+    if (url.endsWith("/items/query")) {
+      if (body.dataCollectionId === "Import3__drafts" && body.query.filter.crmArticleId) return jsonResponse(200, { dataItems: [draftRecord] });
+      if (body.dataCollectionId === "Import3") return jsonResponse(200, { dataItems: [{ id: article().id, data: { crmArticleId: article().id, slug: article().slug } }] });
+      return jsonResponse(200, { dataItems: [] });
+    }
+    if (url.endsWith(`/items/${article().id}`) && options.method === "PUT") return jsonResponse(200, { dataItem: { id: article().id } });
+    throw new Error(`Unexpected request ${options.method} ${url}`);
+  };
+
+  const result = await createOrUpdateKnowledgeRichContentDraft({ article: article({ featured_image: "" }), configuration, fetchImpl });
+  const update = calls.find((call) => call.url.endsWith(`/items/${article().id}`) && call.method === "PUT");
+  assert.equal(update.body.dataCollectionId, "Import3__drafts");
+  assert.equal(update.body.dataItem.data.featuredImage, manualImage);
+  assert.equal(result.diagnostics.preserved_manual_featured_image, true);
+  assert.equal(result.serverState, "CHANGED");
+});
+
 test("draft sender refuses to write when Wix draft-first workflow is not enabled", async () => {
   const fetchImpl = async (url) => {
     if (url.endsWith("/collections/Import3")) {
