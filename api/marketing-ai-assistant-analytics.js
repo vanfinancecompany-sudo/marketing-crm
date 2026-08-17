@@ -88,7 +88,7 @@ export function buildAssistantCostSummary(rows = []) {
   let inputTokens = 0;
   let outputTokens = 0;
   let estimatedCostUsd = 0;
-  let pricedResponses = 0;
+  let pricedAiResponses = 0;
 
   for (const row of Array.isArray(rows) ? rows : []) {
     const diagnostics = row?.conversation_diagnostics && typeof row.conversation_diagnostics === "object"
@@ -106,7 +106,7 @@ export function buildAssistantCostSummary(rows = []) {
     outputTokens += Math.max(0, Number(usage.output_tokens) || 0);
     if (Number.isFinite(cost)) {
       estimatedCostUsd += Math.max(0, cost);
-      pricedResponses += 1;
+      if (isAi) pricedAiResponses += 1;
     }
 
     const key = `${tier}:${model}`;
@@ -133,10 +133,10 @@ export function buildAssistantCostSummary(rows = []) {
     output_tokens: outputTokens,
     total_tokens: inputTokens + outputTokens,
     estimated_cost_usd: Number(estimatedCostUsd.toFixed(6)),
-    average_cost_per_ai_response_usd: aiResponses && pricedResponses
+    average_cost_per_ai_response_usd: aiResponses && pricedAiResponses
       ? Number((estimatedCostUsd / aiResponses).toFixed(6))
       : null,
-    pricing_coverage_rate: aiResponses ? Math.round((pricedResponses / aiResponses) * 1000) / 10 : 0,
+    pricing_coverage_rate: aiResponses ? Math.round((pricedAiResponses / aiResponses) * 1000) / 10 : 0,
     models,
   };
 }
