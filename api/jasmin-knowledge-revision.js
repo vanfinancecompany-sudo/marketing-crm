@@ -1,5 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import {
+  KNOWLEDGE_CARD_EXCERPT_MAX,
+  KNOWLEDGE_CARD_TITLE_MAX,
   calculateKnowledgeQualityChecks,
   markdownToKnowledgeHtml,
   slugifyKnowledgeArticle,
@@ -68,7 +70,7 @@ function isOpenRevision(article) {
   return article?.status === "archived" && revisionSourceId(article) && revisionMetadata(article).revision_state === "draft";
 }
 
-function cleanArticleInput(value = {}) {
+function cleanArticleInput(value = {}, { allowLegacyCardLengths = false } = {}) {
   const title = clean(value.title, 240);
   const markdown = clean(value.content_markdown, 150000);
   const article = {
@@ -94,6 +96,10 @@ function cleanArticleInput(value = {}) {
     article.generation_metadata?.approximate_length
   );
   const validation = validateKnowledgeArticle(article);
+  if (allowLegacyCardLengths) {
+    if (title && title.length > KNOWLEDGE_CARD_TITLE_MAX) delete validation.title;
+    if (article.excerpt.length > KNOWLEDGE_CARD_EXCERPT_MAX) delete validation.excerpt;
+  }
   if (Object.keys(validation).length) throw new ApiError(400, Object.values(validation).join(" "));
   return article;
 }
@@ -142,7 +148,7 @@ async function createRevisionDraft(supabase, body) {
       revision_created_at: now,
       created_or_updated_via: "jasmin_knowledge_revision_action",
     },
-  });
+  }, { allowLegacyCardLengths: true });
 
   return resultData(
     await supabase
