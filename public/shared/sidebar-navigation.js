@@ -3,6 +3,7 @@
     { id: "control-centre", label: "Control Centre", href: "https://control-centre-navy.vercel.app", external: true, variant: "primary" },
     { id: "content-operations", label: "Content Operations", path: "/", paths: ["/", "/marketing-totals"], navigation: "react", view: "Content Operations" },
     { id: "marketing-dashboard", label: "Marketing Dashboard", path: "/marketing-dashboard/", paths: ["/marketing-dashboard/"], navigation: "document" },
+    { id: "website-analytics", label: "Website Analytics", path: "/website-analytics/", paths: ["/website-analytics/", "/website-analytics"], navigation: "document" },
     { id: "stock", label: "Stock", path: "/stock", paths: ["/stock"], navigation: "react", view: "Stock" },
     { id: "customer-database", label: "Customer Database", path: "/customer-database", paths: ["/customer-database"], navigation: "react", view: "Customer Database" },
     { id: "marketing-centre", label: "Marketing Centre", path: "/marketing-centre", paths: ["/marketing-centre"], navigation: "react", view: "Marketing Centre" },
