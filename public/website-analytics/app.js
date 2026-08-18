@@ -1,4 +1,5 @@
 const ENDPOINT = 'https://www.vanfinancecompany.co.uk/_functions/marketingWebsiteAnalytics';
+const FUNNEL_ENDPOINT = 'https://www.vanfinancecompany.co.uk/_functions/marketingApplicationFunnel';
 
 const $ = (id) => document.getElementById(id);
 
@@ -85,6 +86,37 @@ function renderMetrics(data) {
   $('metricGrid').innerHTML = metrics.map((m) => metricCard(...m)).join('');
 }
 
+function renderFunnel(funnel) {
+  const current = funnel?.current || {};
+  const previous = funnel?.previous || {};
+  const finance = current.finance || {};
+  const oldFinance = previous.finance || {};
+  const rent = current.rent2buy || {};
+  const oldRent = previous.rent2buy || {};
+
+  const financeReached = finance.reachedApplication?.sessions || 0;
+  const financeCompleted = finance.completed?.sessions || 0;
+  const financeRate = finance.completionRate || 0;
+  const oldRate = oldFinance.completionRate || 0;
+  const rateDelta = delta(financeRate, oldRate);
+
+  $('applicationFunnel').innerHTML = `
+    <article class="funnel-card finance">
+      <div class="funnel-title">Van Finance</div>
+      <div class="funnel-line"><span>Reached application</span><strong>${whole(financeReached)}</strong><small>${delta(financeReached, oldFinance.reachedApplication?.sessions || 0).text} vs prior week</small></div>
+      <div class="funnel-arrow">↓</div>
+      <div class="funnel-line completed"><span>Completed</span><strong>${whole(financeCompleted)}</strong><small>${delta(financeCompleted, oldFinance.completed?.sessions || 0).text} vs prior week</small></div>
+      <div class="funnel-rate"><strong>${pct(financeRate)}</strong><span>application-page session → completion signal</span><em class="delta ${rateDelta.tone}">${rateDelta.text}</em></div>
+    </article>
+    <article class="funnel-card rent">
+      <div class="funnel-title">Rent2Buy</div>
+      <div class="funnel-line"><span>Reached application</span><strong>${whole(rent.reachedApplication?.sessions || 0)}</strong><small>${delta(rent.reachedApplication?.sessions || 0, oldRent.reachedApplication?.sessions || 0).text} vs prior week</small></div>
+      <div class="funnel-arrow muted">↓</div>
+      <div class="funnel-line muted"><span>Completed</span><strong>Not claimed</strong><small>Waiting for a distinct completion signal</small></div>
+      <div class="funnel-rate muted"><strong>—</strong><span>No invented conversion rate</span></div>
+    </article>`;
+}
+
 function rowPage(item, cols) {
   return `<tr><td class="page-cell" title="${escapeHtml(item.url)}">${escapeHtml(shortUrl(item.url))}</td>${cols.map((c) => `<td>${c(item)}</td>`).join('')}</tr>`;
 }
@@ -121,11 +153,21 @@ function previousByUrl(items = []) {
   return new Map(items.map((item) => [shortUrl(item.url), item]));
 }
 
-function buildWatchlist(data) {
+function buildWatchlist(data, funnel) {
   const current = data.current || {};
   const previous = data.previous || {};
   const previousPages = previousByUrl(previous.pages || []);
   const findings = [];
+
+  const finance = funnel?.current?.finance;
+  if (finance?.reachedApplication?.sessions) {
+    findings.push({
+      score: 12000,
+      tone: finance.completionRate < 0.5 ? 'warn' : 'info',
+      title: 'Finance application funnel is measurable',
+      detail: `${whole(finance.reachedApplication.sessions)} sessions reached a Finance application route and ${whole(finance.completed?.sessions || 0)} reached the completion signal, ${pct(finance.completionRate)} on this session-based funnel.`
+    });
+  }
 
   for (const page of current.pages || []) {
     if ((page.views || 0) < 25) continue;
@@ -144,23 +186,28 @@ function buildWatchlist(data) {
     if (share > 0.8) findings.push({ score: 10000, tone: 'info', title: 'Mobile is the website', detail: `${pct(share)} of sessions are mobile. Conversion fixes should be judged mobile-first.` });
   }
 
-  const application = (current.pages || []).find((x) => String(x.url || '').includes('finance-application-received'));
-  if (application) findings.push({ score: 9000, tone: 'info', title: 'Completed application signal', detail: `${whole(application.views)} views reached the finance application received page in the settled seven-day window.` });
-
   return findings.sort((a, b) => b.score - a.score).slice(0, 8);
 }
 
-function renderWatchlist(data) {
-  const list = buildWatchlist(data);
+function renderWatchlist(data, funnel) {
+  const list = buildWatchlist(data, funnel);
   $('watchlist').innerHTML = list.length ? list.map((item) => `<div class="watch-item ${item.tone}"><div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.detail)}</p></div></div>`).join('') : '<div class="empty">No obvious high-volume leaks detected in this window.</div>';
 }
 
-function render(data) {
+function render(data, funnel) {
   renderMetrics(data);
+  renderFunnel(funnel);
   renderTables(data);
   renderFlows(data);
-  renderWatchlist(data);
-  $('settledLabel').textContent = `Settled through ${data.settledThrough || 'yesterday'}`;
+  renderWatchlist(data, funnel);
+  $('settledLabel').textContent = `Settled through ${data.settledThrough || funnel?.settledThrough || 'yesterday'}`;
+}
+
+async function getJson(url) {
+  const response = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store' });
+  const data = await response.json();
+  if (!response.ok || data.error) throw new Error(data.error || `Request returned ${response.status}`);
+  return data;
 }
 
 async function load() {
@@ -168,10 +215,8 @@ async function load() {
   $('statusDot').className = 'status-dot loading';
   $('statusText').textContent = 'Loading Wix Analytics...';
   try {
-    const response = await fetch(`${ENDPOINT}?t=${Date.now()}`, { cache: 'no-store' });
-    const data = await response.json();
-    if (!response.ok || data.error) throw new Error(data.error || `Analytics returned ${response.status}`);
-    render(data);
+    const [data, funnel] = await Promise.all([getJson(ENDPOINT), getJson(FUNNEL_ENDPOINT)]);
+    render(data, funnel);
     $('statusDot').className = 'status-dot ready';
     $('statusText').textContent = 'Wix Analytics connected';
   } catch (error) {
