@@ -99,6 +99,10 @@ function renderFunnel(funnel) {
   const financeRate = finance.completionRate || 0;
   const oldRate = oldFinance.completionRate || 0;
   const rateDelta = delta(financeRate, oldRate);
+  const rentGate = rent.reachedPostcodeGate?.sessions || 0;
+  const oldRentGate = oldRent.reachedPostcodeGate?.sessions || 0;
+  const rentPostcode = rent.postcodeSupplied?.sessions || 0;
+  const oldRentPostcode = oldRent.postcodeSupplied?.sessions || 0;
 
   $('applicationFunnel').innerHTML = `
     <article class="funnel-card finance">
@@ -110,10 +114,12 @@ function renderFunnel(funnel) {
     </article>
     <article class="funnel-card rent">
       <div class="funnel-title">Rent2Buy</div>
-      <div class="funnel-line"><span>Reached application</span><strong>${whole(rent.reachedApplication?.sessions || 0)}</strong><small>${delta(rent.reachedApplication?.sessions || 0, oldRent.reachedApplication?.sessions || 0).text} vs prior week</small></div>
+      <div class="funnel-line"><span>Reached postcode gate</span><strong>${whole(rentGate)}</strong><small>${delta(rentGate, oldRentGate).text} vs prior week</small></div>
+      <div class="funnel-arrow">↓</div>
+      <div class="funnel-line"><span>Postcode supplied</span><strong>${whole(rentPostcode)}</strong><small>${delta(rentPostcode, oldRentPostcode).text} vs prior week</small></div>
       <div class="funnel-arrow muted">↓</div>
-      <div class="funnel-line muted"><span>Completed</span><strong>Not claimed</strong><small>Waiting for a distinct completion signal</small></div>
-      <div class="funnel-rate muted"><strong>—</strong><span>No invented conversion rate</span></div>
+      <div class="funnel-line muted"><span>Pass / fail / full form</span><strong>Not claimed</strong><small>Needs explicit postcode-gate events</small></div>
+      <div class="funnel-rate muted"><strong>—</strong><span>Outside-area filtering is not counted as form abandonment</span></div>
     </article>`;
 }
 
@@ -166,6 +172,16 @@ function buildWatchlist(data, funnel) {
       tone: finance.completionRate < 0.5 ? 'warn' : 'info',
       title: 'Finance application funnel is measurable',
       detail: `${whole(finance.reachedApplication.sessions)} sessions reached a Finance application route and ${whole(finance.completed?.sessions || 0)} reached the completion signal, ${pct(finance.completionRate)} on this session-based funnel.`
+    });
+  }
+
+  const rent = funnel?.current?.rent2buy;
+  if (rent?.reachedPostcodeGate?.sessions) {
+    findings.push({
+      score: 11000,
+      tone: 'info',
+      title: 'Rent2Buy postcode gate is now separated',
+      detail: `${whole(rent.reachedPostcodeGate.sessions)} sessions reached the postcode gate and ${whole(rent.postcodeSupplied?.sessions || 0)} supplied a postcode. Pass/fail is deliberately excluded until explicit gate events are available.`
     });
   }
 
