@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Website Analytics | Marketing CRM</title>
+    <link rel="stylesheet" href="/shared/sidebar.css" />
+    <link rel="stylesheet" href="/website-analytics/styles.css" />
+    <script src="/shared/sidebar-navigation.js"></script>
+  </head>
+  <body>
+    <div class="analytics-shell">
+      <aside class="marketing-sidebar" id="sidebar">
+        <div class="marketing-sidebar__brand">
+          <div class="marketing-sidebar__eyebrow">CRM Suite</div>
+          <h1>Marketing CRM</h1>
+        </div>
+        <nav class="marketing-sidebar__nav" id="sidebarNav" aria-label="Marketing CRM navigation"></nav>
+      </aside>
+
+      <main class="analytics-main">
+        <header class="analytics-hero">
+          <div>
+            <div class="eyebrow">CONVERSION INTELLIGENCE</div>
+            <h1>Website Analytics</h1>
+            <p>Seven settled days versus the previous seven. Wix stays the source of truth, this page turns the numbers into practical conversion evidence.</p>
+          </div>
+          <button class="refresh-button" id="refreshButton" type="button">Refresh analytics</button>
+        </header>
+
+        <section class="status-panel" aria-live="polite">
+          <span class="status-dot" id="statusDot"></span>
+          <strong id="statusText">Loading Wix Analytics...</strong>
+          <span class="settled-label" id="settledLabel"></span>
+        </section>
+
+        <section class="metric-grid" id="metricGrid"></section>
+
+        <section class="insight-card">
+          <div class="section-head">
+            <div>
+              <div class="eyebrow">WHERE TO LOOK FIRST</div>
+              <h2>Conversion watchlist</h2>
+            </div>
+          </div>
+          <div class="watchlist" id="watchlist"></div>
+        </section>
+
+        <section class="two-col">
+          <article class="panel">
+            <div class="section-head"><div><div class="eyebrow">ENTRY</div><h2>Top landing pages</h2></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Page</th><th>Sessions</th><th>Bounce</th></tr></thead><tbody id="landingRows"></tbody></table></div>
+          </article>
+          <article class="panel">
+            <div class="section-head"><div><div class="eyebrow">LEAKS</div><h2>Top exit pages</h2></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Page</th><th>Sessions</th><th>Exit</th></tr></thead><tbody id="exitRows"></tbody></table></div>
+          </article>
+        </section>
+
+        <section class="panel">
+          <div class="section-head"><div><div class="eyebrow">CONTENT & STOCK</div><h2>Most viewed pages</h2></div></div>
+          <div class="table-wrap"><table><thead><tr><th>Page</th><th>Views</th><th>Avg time</th><th>Bounce</th><th>Exit</th></tr></thead><tbody id="pageRows"></tbody></table></div>
+        </section>
+
+        <section class="two-col">
+          <article class="panel">
+            <div class="section-head"><div><div class="eyebrow">ACQUISITION</div><h2>Traffic sources</h2></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Source</th><th>Sessions</th><th>Bounce</th></tr></thead><tbody id="sourceRows"></tbody></table></div>
+          </article>
+          <article class="panel">
+            <div class="section-head"><div><div class="eyebrow">EXPERIENCE</div><h2>Device split</h2></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Device</th><th>Sessions</th><th>Visitors</th><th>Bounce</th></tr></thead><tbody id="deviceRows"></tbody></table></div>
+          </article>
+        </section>
+
+        <section class="panel">
+          <div class="section-head"><div><div class="eyebrow">JOURNEYS</div><h2>Common visitor flows</h2></div></div>
+          <div class="flow-list" id="flowRows"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head"><div><div class="eyebrow">APPLICATION SIGNAL</div><h2>Wix form activity</h2></div></div>
+          <div class="table-wrap"><table><thead><tr><th>Form</th><th>Views</th><th>Starts</th><th>Submissions</th><th>Completion</th></tr></thead><tbody id="formRows"></tbody></table></div>
+          <p class="quiet-note">Custom application flows that are not Wix Forms are measured separately through page/application tracking. This table only reports Wix Forms where Wix has data.</p>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/website-analytics/app.js"></script>
+  </body>
+</html>
