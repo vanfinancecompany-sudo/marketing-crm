@@ -7,6 +7,10 @@ const YOUTUBE_CMS_STORE_NAME = "uploads";
 const REEL_LAB_CMS_DB_NAME = "reelLabBetaCmsUploads";
 const REEL_LAB_CMS_STORE_NAME = "cmsUploads";
 const DEFAULT_UPLOADS = { vanFinance: null, rent2buy: null, cars: null };
+const LIVE_WIX_CMS_ENDPOINTS = {
+  vanFinance: "https://www.vanfinancecompany.co.uk/_functions/marketingVanFinanceImages",
+  rent2buy: "https://www.vanfinancecompany.co.uk/_functions/marketingRent2BuyImages",
+};
 
 function getYouTubeProductKey(productKey) {
   if (productKey === "rent2buy") return "rent2buy";
@@ -292,17 +296,18 @@ export function resolveYouTubeImageOrder({ vehicle, cmsUpload, imageSource = "au
   const cmsRecords = Array.isArray(cmsMatch?.imageRecords) ? cmsMatch.imageRecords : [];
   const stockRecords = getYoutubeVehicleStockImageRecords(vehicle);
   const stockRecord = vehicleImage(vehicle) ? [{ url: vehicleImage(vehicle), source: "stock image only" }] : [];
+  const cmsSourceLabel = cmsUpload?.source === "live-wix" ? "Live Wix CMS" : "CMS upload";
 
   if (imageSource === "cms") {
     const sourceRecords = cmsRecords.length ? cmsRecords : stockRecords;
-    return { ...buildOrderedImageRecords(sourceRecords, imageCount), cmsMatch, sourceLabel: cmsRecords.length ? "CMS upload" : stockRecords.length ? "stock CMS fields" : "no images found" };
+    return { ...buildOrderedImageRecords(sourceRecords, imageCount), cmsMatch, sourceLabel: cmsRecords.length ? cmsSourceLabel : stockRecords.length ? "stock CMS fields" : "no images found" };
   }
   if (imageSource === "stock") {
     const sourceRecords = stockRecords.length ? stockRecords : stockRecord;
     return { ...buildOrderedImageRecords(sourceRecords, imageCount), cmsMatch, sourceLabel: stockRecords.length ? "stock CMS fields" : stockRecord.length ? "stock image only" : "no images found" };
   }
 
-  if (cmsRecords.length) return { ...buildOrderedImageRecords(cmsRecords, imageCount), cmsMatch, sourceLabel: "CMS upload" };
+  if (cmsRecords.length) return { ...buildOrderedImageRecords(cmsRecords, imageCount), cmsMatch, sourceLabel: cmsSourceLabel };
   if (stockRecords.length) return { ...buildOrderedImageRecords(stockRecords, imageCount), cmsMatch, sourceLabel: "stock CMS fields" };
   return { ...buildOrderedImageRecords(stockRecord, imageCount), cmsMatch, sourceLabel: stockRecord.length ? "stock image only" : "no images found" };
 }
@@ -318,6 +323,32 @@ export function loadYouTubeCmsUploads() {
     };
   } catch {
     return { ...DEFAULT_UPLOADS };
+  }
+}
+
+async function loadLiveWixCmsUpload(productKey) {
+  const endpoint = LIVE_WIX_CMS_ENDPOINTS[productKey];
+  if (!endpoint || typeof fetch !== "function") return null;
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "GET",
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+
+    const payload = await response.json();
+    const rows = parseYoutubeCmsUploadText(JSON.stringify(payload));
+    if (!rows.length) return null;
+
+    return {
+      name: `Live Wix CMS - ${productKey}`,
+      source: "live-wix",
+      refreshedAt: cleanText(payload?.refreshedAt) || new Date().toISOString(),
+      rows,
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -415,11 +446,16 @@ async function writeYoutubeCmsDbUploads(uploads) {
 
 export async function loadYouTubeCmsUploadsAsync() {
   const localUploads = loadYouTubeCmsUploads();
-  const dbUploads = await readYoutubeCmsDbUploads();
-  const reelLabUploads = await readReelLabCmsUploads();
+  const [dbUploads, reelLabUploads, liveVanFinance, liveRent2buy] = await Promise.all([
+    readYoutubeCmsDbUploads(),
+    readReelLabCmsUploads(),
+    loadLiveWixCmsUpload("vanFinance"),
+    loadLiveWixCmsUpload("rent2buy"),
+  ]);
+
   return {
-    vanFinance: dbUploads.vanFinance || localUploads.vanFinance || reelLabUploads.vanFinance || null,
-    rent2buy: dbUploads.rent2buy || localUploads.rent2buy || reelLabUploads.rent2buy || null,
+    vanFinance: liveVanFinance || dbUploads.vanFinance || localUploads.vanFinance || reelLabUploads.vanFinance || null,
+    rent2buy: liveRent2buy || dbUploads.rent2buy || localUploads.rent2buy || reelLabUploads.rent2buy || null,
     cars: dbUploads.cars || localUploads.cars || null,
   };
 }
