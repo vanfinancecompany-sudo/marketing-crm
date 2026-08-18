@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Daily Reels | Marketing CRM</title>
+    <link rel="stylesheet" href="/shared/sidebar.css" />
+    <link rel="stylesheet" href="/daily-reels/styles.css" />
+    <script src="/shared/sidebar-navigation.js"></script>
+  </head>
+  <body>
+    <div class="daily-shell">
+      <aside class="marketing-sidebar" id="sidebar">
+        <div class="marketing-sidebar__brand">
+          <div class="marketing-sidebar__eyebrow">CRM Suite</div>
+          <h1>Marketing CRM</h1>
+        </div>
+        <nav class="marketing-sidebar__nav" id="sidebarNav" aria-label="Marketing CRM navigation"></nav>
+      </aside>
+
+      <main class="daily-main">
+        <header class="daily-hero">
+          <div>
+            <div class="eyebrow">YOUTUBE GENERATOR</div>
+            <h1>Daily Reels</h1>
+            <p>One click prepares today's Finance and Rent2Buy reel batches. TikTok format is locked in, every vehicle needs at least 10 live Wix images, and a registration cannot repeat inside 48 hours.</p>
+          </div>
+          <div class="hero-actions">
+            <button class="primary-button" id="prepareButton" type="button">Prepare Today's 10 + 10</button>
+            <a class="secondary-button button-link" href="/youtube-generator">Open YouTube Generator</a>
+          </div>
+        </header>
+
+        <section class="status-panel" aria-live="polite">
+          <div class="status-row">
+            <span class="status-dot" id="statusDot"></span>
+            <strong id="statusText">Loading today's reel tray...</strong>
+          </div>
+          <div class="progress-track" id="progressTrack" hidden>
+            <div class="progress-bar" id="progressBar"></div>
+          </div>
+          <div class="error-box" id="errorBox" hidden></div>
+        </section>
+
+        <section class="rules-strip">
+          <span>10 Finance</span>
+          <span>10 Rent2Buy</span>
+          <span>10+ images only</span>
+          <span>TikTok Punch</span>
+          <span>48h no-repeat</span>
+        </section>
+
+        <section class="batch-grid">
+          <article class="batch-card" data-product="vanFinance">
+            <div class="batch-card__head">
+              <div>
+                <div class="eyebrow">VAN FINANCE</div>
+                <h2>Finance Reels</h2>
+              </div>
+              <div class="count-pill" id="financeCount">0 / 10</div>
+            </div>
+            <p class="batch-note" id="financeNote">Checking today's batch...</p>
+            <div class="reel-list" id="financeList"></div>
+            <div class="batch-actions">
+              <button class="primary-button" id="financeZip" type="button" disabled>Download Finance ZIP</button>
+              <button class="danger-button" id="financeClear" type="button" disabled>Delete Finance Reels</button>
+            </div>
+          </article>
+
+          <article class="batch-card" data-product="rent2buy">
+            <div class="batch-card__head">
+              <div>
+                <div class="eyebrow">RENT2BUY</div>
+                <h2>Rent2Buy Reels</h2>
+              </div>
+              <div class="count-pill" id="rentCount">0 / 10</div>
+            </div>
+            <p class="batch-note" id="rentNote">Checking today's batch...</p>
+            <div class="reel-list" id="rentList"></div>
+            <div class="batch-actions">
+              <button class="primary-button" id="rentZip" type="button" disabled>Download Rent2Buy ZIP</button>
+              <button class="danger-button" id="rentClear" type="button" disabled>Delete Rent2Buy Reels</button>
+            </div>
+          </article>
+        </section>
+
+        <section class="footnote-card">
+          <strong>Daily tray, not an archive.</strong>
+          <span>Download the two ZIPs, move them into your usual desktop folders, use the reels, then delete them here. The tiny 48-hour registration history stays behind so tomorrow's batch rotates the stock properly.</span>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/daily-reels/app.js"></script>
+  </body>
+</html>
