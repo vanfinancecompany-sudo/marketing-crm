@@ -15,6 +15,7 @@
     { id: "campaigns", label: "Campaigns", path: "/campaigns/", paths: ["/campaigns/"], navigation: "document" },
     { id: "vansco-stock-watch", label: "Vansco Stock Watch", path: "/vansco-stock-watch", paths: ["/vansco-stock-watch"], navigation: "react", view: "Vansco Stock Watch" },
     { id: "youtube-generator", label: "YouTube Generator", path: "/youtube-generator", paths: ["/youtube-generator", "/youtube-shorts-beta"], navigation: "react", view: "YouTube Generator" },
+    { id: "daily-reels", label: "Daily Reels", path: "/daily-reels/", paths: ["/daily-reels/", "/daily-reels"], navigation: "document" },
     { id: "creative-library", label: "Creative Library", path: "/creative-library", paths: ["/creative-library"], navigation: "react", view: "Creative Library" },
     { id: "image-suite", label: "Image Suite", href: "https://vehicle-image-suite.vercel.app", external: true },
     { id: "documents-hub", label: "Documents Hub", href: "https://work-documents-hub.vercel.app", external: true },
