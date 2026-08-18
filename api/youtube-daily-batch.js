@@ -12,6 +12,7 @@ import {
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const HISTORY_LOOKBACK_DAYS = 30;
+const HISTORY_SOURCES = [DAILY_YOUTUBE_SOURCE, "youtube_generator"];
 const WIX_FEEDS = {
   vanFinance: "https://www.vanfinancecompany.co.uk/_functions/marketingVanFinanceImages",
   rent2buy: "https://www.vanfinancecompany.co.uk/_functions/marketingRent2BuyImages",
@@ -80,6 +81,10 @@ function eventProduct(row) {
   return row?.metadata?.product_key === "rent2buy" ? "rent2buy" : "vanFinance";
 }
 
+function isDailyBatchRow(row) {
+  return row?.source === DAILY_YOUTUBE_SOURCE;
+}
+
 function activeRow(row) {
   return Boolean(row?.metadata?.download_url) && !row?.metadata?.deleted_at;
 }
@@ -101,11 +106,13 @@ function toReadyReel(row) {
 }
 
 async function loadHistoryRows(supabase) {
-  const since = new Date(Date.now() - HISTORY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const since = new Date(
+    Date.now() - HISTORY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString();
   const result = await supabase
     .from("marketing_daily_activity_events")
     .select("id,activity_date,activity_type,source,source_id,metadata,occurred_at")
-    .eq("source", DAILY_YOUTUBE_SOURCE)
+    .in("source", HISTORY_SOURCES)
     .gte("occurred_at", since)
     .order("occurred_at", { ascending: false })
     .limit(1000);
@@ -120,11 +127,12 @@ function todayRows(historyRows) {
 
 function summarizeProduct(historyRows, key) {
   const today = todayRows(historyRows).filter((row) => eventProduct(row) === key);
+  const dailyBatchToday = today.filter(isDailyBatchRow);
   return {
     generatedToday: today.length,
     target: DAILY_YOUTUBE_TARGET_PER_PRODUCT,
-    ready: today.filter(activeRow).map(toReadyReel),
-    clearedToday: today.filter((row) => row?.metadata?.deleted_at).length,
+    ready: dailyBatchToday.filter(activeRow).map(toReadyReel),
+    clearedToday: dailyBatchToday.filter((row) => row?.metadata?.deleted_at).length,
   };
 }
 
@@ -142,21 +150,34 @@ async function fetchWixFeed(key) {
     .map((item) => ({
       registration: normalizeDailyYouTubeRegistration(item?.registration),
       title: clean(item?.title),
-      images: [...new Set((Array.isArray(item?.images) ? item.images : []).map(clean).filter(Boolean))],
+      images: [
+        ...new Set(
+          (Array.isArray(item?.images) ? item.images : [])
+            .map(clean)
+            .filter(Boolean),
+        ),
+      ],
     }))
-    .filter((item) => item.registration && item.images.length >= DAILY_YOUTUBE_MIN_IMAGES);
+    .filter(
+      (item) =>
+        item.registration && item.images.length >= DAILY_YOUTUBE_MIN_IMAGES,
+    );
 }
 
 async function loadStockRows(supabase) {
   const [finance, rent2buy] = await Promise.all([
     supabase
       .from("facebook_adverts")
-      .select("id,title,picture,price,vat,salePrice,vanDescription,vanSpec,weblink,is_active")
+      .select(
+        "id,title,picture,price,vat,salePrice,vanDescription,vanSpec,weblink,is_active",
+      )
       .eq("is_active", true)
       .limit(500),
     supabase
       .from("rent_vehicles")
-      .select("id,registration,picture,monthly,week,initialRental,vanDescription,vanSpec,webLink,is_active")
+      .select(
+        "id,registration,picture,monthly,week,initialRental,vanDescription,vanSpec,webLink,is_active",
+      )
       .eq("is_active", true)
       .limit(500),
   ]);
@@ -177,7 +198,9 @@ function buildFinanceCandidates(feedItems, stockRows) {
   return feedItems.flatMap((feed) => {
     const stock = stockByRegistration.get(feed.registration);
     if (!stock) return [];
-    const title = clean(stock.vanDescription || feed.title || stock.title || feed.registration);
+    const title = clean(
+      stock.vanDescription || feed.title || stock.title || feed.registration,
+    );
     return [
       {
         productKey: "vanFinance",
@@ -256,8 +279,12 @@ async function candidateOverview(supabase, historyRows) {
   ]);
   const [financeFeed, rentFeed] = feeds;
   const today = todayRows(historyRows);
-  const financeToday = today.filter((row) => eventProduct(row) === "vanFinance").length;
-  const rentToday = today.filter((row) => eventProduct(row) === "rent2buy").length;
+  const financeToday = today.filter(
+    (row) => eventProduct(row) === "vanFinance",
+  ).length;
+  const rentToday = today.filter(
+    (row) => eventProduct(row) === "rent2buy",
+  ).length;
 
   const finance = selectDailyYouTubeCandidates({
     candidates: buildFinanceCandidates(financeFeed, stock.finance),
@@ -284,18 +311,34 @@ async function recordRenderedReel(supabase, body) {
   const key = productKey(body.productKey);
   const registration = normalizeDailyYouTubeRegistration(body.registration);
   const downloadUrl = clean(body.downloadUrl);
-  if (!registration || !downloadUrl) {
-    throw new ApiError(400, "Registration and rendered download URL are required.");
+  const operationId = clean(body.operationId).slice(0, 120);
+  if (!registration || !downloadUrl || !operationId) {
+    throw new ApiError(
+      400,
+      "Registration, rendered download URL and operation ID are required.",
+    );
   }
 
+  const sourceId = `youtube-daily:${key}:${registration}:${operationId}`;
+  const existing = await supabase
+    .from("marketing_daily_activity_events")
+    .select("id,activity_date,activity_type,source,source_id,metadata,occurred_at")
+    .eq("source", DAILY_YOUTUBE_SOURCE)
+    .eq("source_id", sourceId)
+    .limit(1)
+    .maybeSingle();
+  if (existing.error) throw existing.error;
+  if (existing.data) return toReadyReel(existing.data);
+
   const renderedAt = new Date();
-  const sourceId = `youtube-daily:${key}:${registration}:${renderedAt.getTime()}`;
-  const activityType = key === "rent2buy" ? "rent2buy_reel" : "van_finance_reel";
+  const activityType =
+    key === "rent2buy" ? "rent2buy_reel" : "van_finance_reel";
   const metadata = {
     product_key: key,
     registration,
     title: clean(body.title),
-    filename: clean(body.filename) || `${registration.toLowerCase()}-${key}.mp4`,
+    filename:
+      clean(body.filename) || `${registration.toLowerCase()}-${key}.mp4`,
     download_url: downloadUrl,
     blob_pathname: clean(body.blobPathname),
     size_bytes: Math.max(0, Number(body.sizeBytes || 0)),
@@ -315,18 +358,22 @@ async function recordRenderedReel(supabase, body) {
       metadata,
       occurred_at: renderedAt.toISOString(),
     })
-    .select("id,activity_date,metadata,occurred_at")
+    .select("id,activity_date,activity_type,source,source_id,metadata,occurred_at")
     .single();
   if (inserted.error) throw inserted.error;
   return toReadyReel(inserted.data);
 }
 
 async function clearReadyReels(supabase, historyRows, key) {
-  const selected = todayRows(historyRows)
-    .filter((row) => eventProduct(row) === key && activeRow(row));
+  const selected = todayRows(historyRows).filter(
+    (row) =>
+      isDailyBatchRow(row) && eventProduct(row) === key && activeRow(row),
+  );
   if (!selected.length) return { deleted: 0 };
 
-  const urls = selected.map((row) => clean(row?.metadata?.download_url)).filter(Boolean);
+  const urls = selected
+    .map((row) => clean(row?.metadata?.download_url))
+    .filter(Boolean);
   if (urls.length) await del(urls);
 
   const deletedAt = new Date().toISOString();
@@ -349,10 +396,14 @@ async function clearReadyReels(supabase, historyRows, key) {
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (request.method !== "POST") {
-    return response.status(405).json({ ok: false, message: "Method not allowed." });
+    return response
+      .status(405)
+      .json({ ok: false, message: "Method not allowed." });
   }
   if (!authorize(request)) {
-    return response.status(401).json({ ok: false, message: "Marketing access key not recognised." });
+    return response
+      .status(401)
+      .json({ ok: false, message: "Marketing access key not recognised." });
   }
 
   try {
