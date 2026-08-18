@@ -311,15 +311,17 @@ async function recordRenderedReel(supabase, body) {
   const key = productKey(body.productKey);
   const registration = normalizeDailyYouTubeRegistration(body.registration);
   const downloadUrl = clean(body.downloadUrl);
-  const operationId = clean(body.operationId).slice(0, 120);
-  if (!registration || !downloadUrl || !operationId) {
+  const renderIdentity = clean(
+    body.operationId || body.blobPathname || body.downloadUrl,
+  ).slice(-120);
+  if (!registration || !downloadUrl || !renderIdentity) {
     throw new ApiError(
       400,
-      "Registration, rendered download URL and operation ID are required.",
+      "Registration and rendered download identity are required.",
     );
   }
 
-  const sourceId = `youtube-daily:${key}:${registration}:${operationId}`;
+  const sourceId = `youtube-daily:${key}:${registration}:${renderIdentity}`;
   const existing = await supabase
     .from("marketing_daily_activity_events")
     .select("id,activity_date,activity_type,source,source_id,metadata,occurred_at")
