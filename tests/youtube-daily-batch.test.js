@@ -5,6 +5,7 @@ import {
   DAILY_YOUTUBE_MIN_IMAGES,
   DAILY_YOUTUBE_TARGET_PER_PRODUCT,
   DAILY_YOUTUBE_TEMPLATE_KEY,
+  normalizeDailyYouTubeImageUrl,
   selectDailyYouTubeCandidates,
 } from "../lib/youtubeDailyBatch.js";
 
@@ -27,6 +28,21 @@ test("daily YouTube batch locks TikTok, 10 images and 10 per product defaults", 
   assert.equal(DAILY_YOUTUBE_MIN_IMAGES, 10);
   assert.equal(DAILY_YOUTUBE_TARGET_PER_PRODUCT, 10);
   assert.equal(DAILY_YOUTUBE_COOLDOWN_HOURS, 48);
+});
+
+test("daily batch converts Wix gallery references into downloadable public URLs", () => {
+  assert.equal(
+    normalizeDailyYouTubeImageUrl("wix:image://v1/abc123/photo.jpg#originWidth=1600&originHeight=1200"),
+    "https://static.wixstatic.com/media/abc123",
+  );
+  assert.equal(
+    normalizeDailyYouTubeImageUrl("//static.wixstatic.com/media/xyz789"),
+    "https://static.wixstatic.com/media/xyz789",
+  );
+  assert.equal(
+    normalizeDailyYouTubeImageUrl("https://static.wixstatic.com/media/live123"),
+    "https://static.wixstatic.com/media/live123",
+  );
 });
 
 test("daily YouTube batch rejects fewer than 10 images and registrations used inside 48 hours", () => {

@@ -6,6 +6,7 @@ import {
   DAILY_YOUTUBE_SOURCE,
   DAILY_YOUTUBE_TARGET_PER_PRODUCT,
   DAILY_YOUTUBE_TEMPLATE_KEY,
+  normalizeDailyYouTubeImageUrl,
   normalizeDailyYouTubeRegistration,
   selectDailyYouTubeCandidates,
 } from "../lib/youtubeDailyBatch.js";
@@ -153,7 +154,7 @@ async function fetchWixFeed(key) {
       images: [
         ...new Set(
           (Array.isArray(item?.images) ? item.images : [])
-            .map(clean)
+            .map(normalizeDailyYouTubeImageUrl)
             .filter(Boolean),
         ),
       ],
