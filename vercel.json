@@ -5,15 +5,26 @@
       "schedule": "0 2 * * *"
     },
     {
+      "path": "/api/buffer-facebook-automation-worker",
+      "schedule": "5 * * * *"
+    },
+    {
       "path": "/api/marketing-editorial-automation-worker",
       "schedule": "17 * * * *"
     },
     {
       "path": "/api/rent2buy-monthly-price-sync",
       "schedule": "23 * * * *"
+    },
+    {
+      "path": "/api/buffer-publish-status",
+      "schedule": "35 * * * *"
     }
   ],
   "functions": {
+    "api/buffer-facebook-automation-worker.js": {
+      "maxDuration": 300
+    },
     "api/marketing-editorial-automation-worker.js": {
       "maxDuration": 300
     },
