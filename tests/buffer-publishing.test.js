@@ -61,6 +61,22 @@ test("builds a safe Facebook reel draft", () => {
   ]);
 });
 
+test("builds an explicitly queued Facebook Reel", () => {
+  const input = buildBufferCreatePostInput({
+    destination: "Rent2Buy Facebook",
+    text: "Queued Reel",
+    mediaUrl: "https://example.public.blob.vercel-storage.com/reel.mp4",
+    mediaKind: "video",
+    draft: false,
+  });
+
+  assert.equal(input.channelId, "6a8722ffccaf649a67e22bc6");
+  assert.equal(input.saveToDraft, false);
+  assert.equal(input.schedulingType, "automatic");
+  assert.equal(input.mode, "addToQueue");
+  assert.deepEqual(input.metadata, { facebook: { type: "reel" } });
+});
+
 test("rejects unsafe media URLs and unsupported destinations", () => {
   assert.throws(() => buildBufferCreatePostInput({
     destination: "Van Finance Facebook",
