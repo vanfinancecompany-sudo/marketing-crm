@@ -296,10 +296,15 @@ async function internalJson(request, path, body, authenticated = true) {
 async function generateOneReel(request, productKey, dateKey, packIndex, excludedRegistrations) {
   const candidates = await internalJson(request, "/api/youtube-daily-batch", {
     action: "candidates",
-    reservedRegistrations: excludedRegistrations,
   });
   const list = productKey === "rent2buy" ? candidates.rent2buy : candidates.finance;
-  const candidate = Array.isArray(list) ? list[0] : null;
+  const excluded = new Set((excludedRegistrations || []).map(normalizeReg).filter(Boolean));
+  const candidate = Array.isArray(list)
+    ? list.find((item) => {
+        const registration = normalizeReg(item?.registration);
+        return registration && !excluded.has(registration);
+      })
+    : null;
   if (!candidate) return null;
 
   const vehicle = candidate.vehicle || {};
