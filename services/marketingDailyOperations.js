@@ -34,6 +34,12 @@ export function getDailyOperationsTotals(startDate, endDate) {
   });
 }
 
+export function getRecentPostingHistory(days = 180) {
+  return requestDailyOperations("postingHistory", {
+    days: Math.max(1, Math.min(365, Number(days) || 180)),
+  });
+}
+
 export function saveDailyTargetSchedule(effectiveFrom, schedule) {
   return requestDailyOperations("saveSchedule", {
     effective_from: effectiveFrom,
