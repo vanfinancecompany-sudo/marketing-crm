@@ -34,13 +34,25 @@ function setPageStatus(message, error = false) {
   if (dot) dot.className = `status-dot ${error ? "is-error" : "is-ready"}`;
 }
 
-async function createReelDraft(row, button) {
+async function bufferRequest(payload) {
   const accessKey = storedAccessKey();
-  if (!accessKey) {
-    setPageStatus("Open and unlock the Marketing CRM first, then try Buffer again.", true);
-    return;
+  if (!accessKey) throw new Error("Open and unlock the Marketing CRM first, then try Buffer again.");
+  const response = await fetch("/api/buffer-publishing", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      [ACCESS_HEADER]: accessKey,
+    },
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.ok === false) {
+    throw new Error(result.error || result.message || `Buffer returned HTTP ${response.status}.`);
   }
+  return result;
+}
 
+async function createReelDraft(row, button) {
   const registration = normalizeRegistration(row.querySelector(".reel-reg")?.textContent);
   const title = row.querySelector(".reel-title")?.textContent?.trim() || "Vehicle reel";
   const videoUrl = row.querySelector('a[href*=".mp4"], a.reel-link')?.href || "";
@@ -57,25 +69,13 @@ async function createReelDraft(row, button) {
   setPageStatus(`Sending ${registration} to Buffer Drafts...`);
 
   try {
-    const response = await fetch("/api/buffer-publishing", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        [ACCESS_HEADER]: accessKey,
-      },
-      body: JSON.stringify({
-        action: "createFacebookReelDraft",
-        productKey,
-        text: buildCaption({ productKey, registration, title }),
-        mediaUrl: videoUrl,
-        registration,
-      }),
+    const result = await bufferRequest({
+      action: "createFacebookReelDraft",
+      productKey,
+      text: buildCaption({ productKey, registration, title }),
+      mediaUrl: videoUrl,
+      registration,
     });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok || result.ok === false) {
-      throw new Error(result.error || result.message || `Buffer returned HTTP ${response.status}.`);
-    }
-
     button.textContent = "Buffer Draft ✓";
     button.dataset.bufferPostId = result.bufferPostId || "";
     setPageStatus(`${registration} is safely sitting in Buffer Drafts.`);
@@ -83,6 +83,75 @@ async function createReelDraft(row, button) {
     button.disabled = false;
     button.textContent = originalText;
     setPageStatus(error.message || "Buffer reel draft creation failed.", true);
+  }
+}
+
+async function runSingleRent2BuyReelProof(button) {
+  const accessKey = storedAccessKey();
+  if (!accessKey) {
+    setPageStatus("Open and unlock the Marketing CRM first, then try Buffer again.", true);
+    return;
+  }
+
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "Building one test Reel...";
+  setPageStatus("Preparing one Rent2Buy Reel for the Buffer proof. This does not change today's 10 + 10 totals.");
+
+  try {
+    const candidateResponse = await fetch("/api/buffer-reel-test-candidate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        [ACCESS_HEADER]: accessKey,
+      },
+      body: JSON.stringify({ productKey: "rent2buy" }),
+    });
+    const candidate = await candidateResponse.json().catch(() => ({}));
+    if (!candidateResponse.ok || candidate.ok === false) {
+      throw new Error(candidate.error || candidate.message || `Candidate request returned HTTP ${candidateResponse.status}.`);
+    }
+
+    const renderResponse = await fetch("/api/youtube-mp4-render", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        productKey: "rent2buy",
+        registration: candidate.registration,
+        title: candidate.title,
+        imageUrls: candidate.images,
+        frameCount: 10,
+        durationSeconds: 20,
+        fps: 24,
+        templateKey: "tiktokPunch",
+        premiumMotion: true,
+      }),
+    });
+    const rendered = await renderResponse.json().catch(() => ({}));
+    if (!renderResponse.ok || !rendered.downloadUrl) {
+      throw new Error(rendered.error || rendered.message || `MP4 render returned HTTP ${renderResponse.status}.`);
+    }
+
+    button.textContent = "Sending to Buffer...";
+    const result = await bufferRequest({
+      action: "createFacebookReelDraft",
+      productKey: "rent2buy",
+      text: buildCaption({
+        productKey: "rent2buy",
+        registration: candidate.registration,
+        title: candidate.title,
+      }),
+      mediaUrl: rendered.downloadUrl,
+      registration: candidate.registration,
+    });
+
+    button.textContent = "Reel Proof Sent ✓";
+    button.dataset.bufferPostId = result.bufferPostId || "";
+    setPageStatus(`${candidate.registration} Reel sent safely to Buffer. Check RENT to BUY VANS in Buffer.`);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = originalText;
+    setPageStatus(error.message || "Single Buffer Reel proof failed.", true);
   }
 }
 
@@ -100,7 +169,28 @@ function decorateRows() {
   }
 }
 
-const observer = new MutationObserver(decorateRows);
+function addSingleProofButton() {
+  if (document.getElementById("singleBufferReelProof")) return;
+  const footnote = document.querySelector(".footnote-card");
+  if (!footnote) return;
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.id = "singleBufferReelProof";
+  button.className = "primary-button";
+  button.textContent = "Create 1 Buffer Reel Test";
+  button.addEventListener("click", () => runSingleRent2BuyReelProof(button));
+  footnote.appendChild(button);
+}
+
+const observer = new MutationObserver(() => {
+  decorateRows();
+  addSingleProofButton();
+});
 observer.observe(document.documentElement, { childList: true, subtree: true });
-setInterval(decorateRows, 1500);
+setInterval(() => {
+  decorateRows();
+  addSingleProofButton();
+}, 1500);
 decorateRows();
+addSingleProofButton();
