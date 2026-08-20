@@ -21,30 +21,31 @@ function source(relative) {
   return fs.readFileSync(path.join(ROOT, relative), "utf8");
 }
 
-test("final automation is armed for 21 August with five posts and five Reels per Page", () => {
+test("final automation is armed for 21 August with ten posts and ten Reels per Page", () => {
   const config = normalizeBufferAutomationConfig(DEFAULT_BUFFER_AUTOMATION_CONFIG);
   assert.equal(config.enabled, true);
   assert.equal(config.startDate, "2026-08-21");
-  assert.equal(config.vanFinancePostsPerDay, 5);
-  assert.equal(config.vanFinanceReelsPerDay, 5);
-  assert.equal(config.rent2buyPostsPerDay, 5);
-  assert.equal(config.rent2buyReelsPerDay, 5);
+  assert.equal(config.vanFinancePostsPerDay, 10);
+  assert.equal(config.vanFinanceReelsPerDay, 10);
+  assert.equal(config.rent2buyPostsPerDay, 10);
+  assert.equal(config.rent2buyReelsPerDay, 10);
+  assert.equal(config.slotGapMinutes, 38);
 });
 
-test("Finance schedule alternates across twelve hours and Rent2Buy is offset ten minutes", () => {
+test("Finance schedule alternates 10 posts and 10 Reels across twelve hours with Rent2Buy offset ten minutes", () => {
   const finance = bufferAutomationSlots(DEFAULT_BUFFER_AUTOMATION_CONFIG, "vanFinance", "2026-08-21");
   const rent = bufferAutomationSlots(DEFAULT_BUFFER_AUTOMATION_CONFIG, "rent2buy", "2026-08-21");
   assert.deepEqual(finance.map((slot) => slot.localTime), [
-    "08:00", "09:20", "10:40", "12:00", "13:20", "14:40", "16:00", "17:20", "18:40", "20:00",
+    "08:00", "08:38", "09:16", "09:54", "10:32", "11:10", "11:48", "12:26", "13:04", "13:42",
+    "14:20", "14:58", "15:36", "16:14", "16:52", "17:30", "18:08", "18:46", "19:24", "20:02",
   ]);
   assert.deepEqual(rent.map((slot) => slot.localTime), [
-    "08:10", "09:30", "10:50", "12:10", "13:30", "14:50", "16:10", "17:30", "18:50", "20:10",
+    "08:10", "08:48", "09:26", "10:04", "10:42", "11:20", "11:58", "12:36", "13:14", "13:52",
+    "14:30", "15:08", "15:46", "16:24", "17:02", "17:40", "18:18", "18:56", "19:34", "20:12",
   ]);
-  assert.deepEqual(finance.map((slot) => slot.mediaKind), [
-    "image", "video", "image", "video", "image", "video", "image", "video", "image", "video",
-  ]);
-  assert.equal(finance.filter((slot) => slot.mediaKind === "image").length, 5);
-  assert.equal(finance.filter((slot) => slot.mediaKind === "video").length, 5);
+  assert.deepEqual(finance.map((slot) => slot.mediaKind), Array.from({ length: 20 }, (_, index) => index % 2 === 0 ? "image" : "video"));
+  assert.equal(finance.filter((slot) => slot.mediaKind === "image").length, 10);
+  assert.equal(finance.filter((slot) => slot.mediaKind === "video").length, 10);
 });
 
 test("London schedule conversion handles BST and winter correctly", () => {
@@ -84,7 +85,7 @@ test("automated captions keep direct website URLs and add no tracking redirect",
   assert.match(rent, /https:\/\/www\.rent2buyvans\.co\.uk\/van-pages\/AB12CDE/);
 });
 
-test("worker has queue, lead-time, start-date and Reel cooldown safety guards", () => {
+test("worker keeps the Buffer Free queue cap while filling the larger daily target gradually", () => {
   const worker = source("api/buffer-facebook-automation-worker.js");
   assert.match(worker, /CHANNEL_QUEUE_LIMIT = 10/);
   assert.match(worker, /MIN_SCHEDULE_LEAD_MS/);
@@ -94,6 +95,19 @@ test("worker has queue, lead-time, start-date and Reel cooldown safety guards", 
   assert.match(worker, /!excluded\.has\(registration\)/);
   assert.doesNotMatch(worker, /shareNow/);
   assert.match(worker, /customScheduled|createBufferScheduledPost/);
+});
+
+test("legacy five-plus-five settings are superseded without losing the pause state", () => {
+  const configSource = source("lib/bufferAutomationConfig.js");
+  assert.match(configSource, /buffer-automation-v3\/config-/);
+  assert.match(configSource, /buffer-automation-v2\/config-/);
+  assert.match(configSource, /enabled: legacyConfig\.enabled/);
+});
+
+test("Daily Reels live-status observer cannot rerender its own status mutation forever", () => {
+  const liveStatus = source("public/buffer-live-status.js");
+  assert.match(liveStatus, /MutationObserver/);
+  assert.match(liveStatus, /lastPayload && !document\.getElementById\(STATUS_ID\)/);
 });
 
 test("temporary ten-Reel proof control is removed", () => {
