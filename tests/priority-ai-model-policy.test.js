@@ -6,13 +6,13 @@ import {
   resolvePriorityAiModels,
 } from "../lib/priorityAiModelPolicy.js";
 
-test("priority AI defaults favour quality for customer and knowledge work", () => {
+test("priority AI defaults use Terra for normal work and Sol only for Wix escalation", () => {
   assert.deepEqual(resolvePriorityAiModels({}), PRIORITY_AI_MODEL_DEFAULTS);
   assert.equal(PRIORITY_AI_MODEL_DEFAULTS.wix_fast, "gpt-5.6-terra");
-  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.wix_main, "gpt-5.6-sol");
+  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.wix_main, "gpt-5.6-terra");
   assert.equal(PRIORITY_AI_MODEL_DEFAULTS.wix_escalation, "gpt-5.6-sol");
-  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.knowledge, "gpt-5.6-sol");
-  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.knowledge_review, "gpt-5.6-sol");
+  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.knowledge, "gpt-5.6-terra");
+  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.knowledge_review, "gpt-5.6-terra");
 });
 
 test("priority AI model settings can be changed independently", () => {
@@ -34,7 +34,7 @@ test("priority AI model settings can be changed independently", () => {
   });
 });
 
-test("knowledge endpoints ignore the generic OPENAI_MODEL and use their dedicated policy", () => {
+test("knowledge endpoints ignore the generic OPENAI_MODEL and default to Terra", () => {
   const generationEnvironment = { OPENAI_MODEL: "gpt-4.1-mini" };
   const reviewEnvironment = {
     OPENAI_MODEL: "gpt-4.1-mini",
@@ -42,8 +42,8 @@ test("knowledge endpoints ignore the generic OPENAI_MODEL and use their dedicate
     OPENAI_KNOWLEDGE_REVIEW_MODEL: "review-model",
   };
 
-  assert.equal(applyKnowledgeModelOverride(generationEnvironment), "gpt-5.6-sol");
-  assert.equal(generationEnvironment.OPENAI_MODEL, "gpt-5.6-sol");
+  assert.equal(applyKnowledgeModelOverride(generationEnvironment), "gpt-5.6-terra");
+  assert.equal(generationEnvironment.OPENAI_MODEL, "gpt-5.6-terra");
   assert.equal(applyKnowledgeModelOverride(reviewEnvironment, "review"), "review-model");
   assert.equal(reviewEnvironment.OPENAI_MODEL, "review-model");
 });
