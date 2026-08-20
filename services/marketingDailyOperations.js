@@ -1,7 +1,9 @@
+import { londonDateKey } from "../lib/marketingDailyOperations.js";
 import {
   buildMarketingAccessHeaders,
   parseMarketingJsonResponse,
 } from "./marketingAccess.js";
+import { syncBufferPublishStatus } from "./bufferPublishStatus.js";
 
 const API_ROUTE = "/api/marketing-daily-operations";
 export const DAILY_OPERATIONS_REFRESH_EVENT =
@@ -23,7 +25,41 @@ async function requestDailyOperations(action, payload = {}) {
   );
 }
 
-export function getDailyOperationsOverview(activityDate) {
+async function refreshBufferStatusSafely() {
+  try {
+    return await syncBufferPublishStatus();
+  } catch {
+    return null;
+  }
+}
+
+function bufferHistoryRow(item) {
+  const destination = item?.destination || "";
+  const activityType = destination === "Rent2Buy Facebook"
+    ? "rent2buy_facebook_post"
+    : "van_finance_facebook_post";
+  const registration = String(item?.registration || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return {
+    id: `buffer-${item?.id || registration}`,
+    activity_date: londonDateKey(new Date(item?.sentAt || Date.now())),
+    activity_type: activityType,
+    source: "buffer_publish",
+    source_id: `buffer:${item?.id || registration}`,
+    metadata: {
+      registration,
+      destination,
+      buffer_post_id: item?.id || "",
+      buffer_status: "sent",
+      facebook_live: true,
+      media_kind: "image",
+      external_link: item?.externalLink || "",
+    },
+    occurred_at: item?.sentAt || new Date().toISOString(),
+  };
+}
+
+export async function getDailyOperationsOverview(activityDate) {
+  await refreshBufferStatusSafely();
   return requestDailyOperations("overview", { activity_date: activityDate });
 }
 
@@ -34,10 +70,23 @@ export function getDailyOperationsTotals(startDate, endDate) {
   });
 }
 
-export function getRecentPostingHistory(days = 180) {
-  return requestDailyOperations("postingHistory", {
+export async function getRecentPostingHistory(days = 180) {
+  const status = await refreshBufferStatusSafely();
+  const result = await requestDailyOperations("postingHistory", {
     days: Math.max(1, Math.min(365, Number(days) || 180)),
   });
+  const existing = Array.isArray(result?.history) ? result.history : [];
+  const seen = new Set(existing.map((row) => String(row?.source_id || "")).filter(Boolean));
+  const bufferRows = (status?.recent || [])
+    .filter((item) => item?.mediaKind === "image")
+    .map(bufferHistoryRow)
+    .filter((row) => !seen.has(row.source_id));
+  return {
+    ...result,
+    history: [...bufferRows, ...existing].sort(
+      (a, b) => new Date(b?.occurred_at || 0) - new Date(a?.occurred_at || 0),
+    ),
+  };
 }
 
 export function saveDailyTargetSchedule(effectiveFrom, schedule) {
