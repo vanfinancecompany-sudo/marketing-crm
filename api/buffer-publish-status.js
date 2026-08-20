@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { del } from "@vercel/blob";
 import { BUFFER_API_URL } from "../lib/bufferPublishing.js";
 import {
   BUFFER_SENT_POSTS_QUERY,
@@ -87,7 +88,7 @@ function registrationKey(row) {
 
 async function syncSentPosts(supabase, posts) {
   const descriptors = (posts || []).map(trackingDescriptor).filter(Boolean);
-  if (!descriptors.length) return { inserted: 0, matchedManual: 0 };
+  if (!descriptors.length) return { inserted: 0, matchedManual: 0, descriptors: [] };
 
   const dates = descriptors.map((item) => item.activityDate).sort();
   const startDate = dates[0];
@@ -150,13 +151,68 @@ async function syncSentPosts(supabase, posts) {
     const inserted = await supabase.from("marketing_daily_activity_events").insert(inserts);
     if (inserted.error) throw inserted.error;
   }
-  return { inserted: inserts.length, matchedManual };
+  return { inserted: inserts.length, matchedManual, descriptors };
+}
+
+async function cleanDeliveredReelBlobs(supabase, descriptors) {
+  const sentReels = (descriptors || []).filter(
+    (item) => item.mediaKind === "video" && item.registration && item.sentAt,
+  );
+  if (!sentReels.length) return { cleaned: 0 };
+
+  const since = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
+  const result = await supabase
+    .from("marketing_daily_activity_events")
+    .select("id,source,metadata,occurred_at")
+    .eq("source", "youtube_daily_batch")
+    .gte("occurred_at", since)
+    .order("occurred_at", { ascending: false })
+    .limit(500);
+  if (result.error) throw result.error;
+
+  const rows = result.data || [];
+  let cleaned = 0;
+  const alreadyHandled = new Set();
+  for (const item of sentReels) {
+    const row = rows.find((candidate) => {
+      if (alreadyHandled.has(candidate.id)) return false;
+      if (candidate?.metadata?.deleted_at) return false;
+      return registrationKey(candidate) === item.registration && candidate?.metadata?.download_url;
+    });
+    if (!row) continue;
+
+    const url = String(row.metadata.download_url || "").trim();
+    if (!url) continue;
+    try {
+      await del(url);
+      const updated = await supabase
+        .from("marketing_daily_activity_events")
+        .update({
+          metadata: {
+            ...(row.metadata || {}),
+            deleted_at: item.sentAt,
+            buffer_post_id: item.bufferPostId,
+            facebook_live: true,
+          },
+        })
+        .eq("id", row.id);
+      if (updated.error) throw updated.error;
+      alreadyHandled.add(row.id);
+      cleaned += 1;
+    } catch (error) {
+      console.warn("[buffer-publish-status] Reel blob cleanup deferred", {
+        registration: item.registration,
+        message: error?.message || String(error),
+      });
+    }
+  }
+  return { cleaned };
 }
 
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
-  if (request.method !== "POST") {
-    response.setHeader("Allow", "POST");
+  if (!["GET", "POST"].includes(request.method)) {
+    response.setHeader("Allow", "GET, POST");
     response.status(405).json({ ok: false, error: "Method not allowed." });
     return;
   }
@@ -169,12 +225,14 @@ export default async function handler(request, response) {
     const posts = await loadSentBufferPosts();
     const supabase = getSupabase();
     const sync = await syncSentPosts(supabase, posts);
+    const cleanup = await cleanDeliveredReelBlobs(supabase, sync.descriptors);
     const todayKey = londonDateKey();
     response.status(200).json({
       ok: true,
       checked_at: new Date().toISOString(),
       synced: sync.inserted,
       matched_manual: sync.matchedManual,
+      cleaned_reel_blobs: cleanup.cleaned,
       today: summarizeBufferPublishedToday(posts, todayKey, londonDateKey),
       recent: bufferPublishedItems(posts),
     });
