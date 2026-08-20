@@ -27,6 +27,18 @@ function clean(value) {
   return String(value ?? "").trim();
 }
 
+function parseBody(request) {
+  if (request.body && typeof request.body === "object") return request.body;
+  if (typeof request.body === "string") {
+    try {
+      return JSON.parse(request.body);
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
 async function createBufferDraft({ destination, text, mediaUrl, mediaKind }) {
   const token = clean(process.env.BUFFER_API_KEY);
   if (!token) throw new Error("BUFFER_API_KEY is not configured on the server.");
@@ -74,7 +86,7 @@ export default async function handler(request, response) {
   }
 
   try {
-    const body = request.body && typeof request.body === "object" ? request.body : {};
+    const body = parseBody(request);
     const action = clean(body.action);
 
     let destination = clean(body.destination);
@@ -100,7 +112,7 @@ export default async function handler(request, response) {
       mode: "draft",
       destination,
       bufferPostId: post.id,
-      status: post.status || "draft",
+      status: "draft",
       text: post.text || clean(body.text),
       assets: post.assets || [],
     });
