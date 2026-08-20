@@ -6,6 +6,7 @@ import {
   bufferPostMediaKind,
   bufferProductKeyForDestination,
   bufferPublishedActivityType,
+  bufferPublishedItems,
   bufferSentTimestamp,
   normalizeBufferRegistration,
   parseBufferSentPostsPayload,
@@ -75,7 +76,6 @@ function trackingDescriptor(post) {
     registration,
     sentAt,
     externalLink: String(post?.externalLink || ""),
-    text: String(post?.text || ""),
   };
 }
 
@@ -89,7 +89,6 @@ async function syncSentPosts(supabase, posts) {
   const descriptors = (posts || []).map(trackingDescriptor).filter(Boolean);
   if (!descriptors.length) return { inserted: 0, matchedManual: 0 };
 
-  const sourceIds = descriptors.map((item) => item.sourceId);
   const dates = descriptors.map((item) => item.activityDate).sort();
   const startDate = dates[0];
   const endDate = dates[dates.length - 1];
@@ -177,6 +176,7 @@ export default async function handler(request, response) {
       synced: sync.inserted,
       matched_manual: sync.matchedManual,
       today: summarizeBufferPublishedToday(posts, todayKey, londonDateKey),
+      recent: bufferPublishedItems(posts),
     });
   } catch (error) {
     console.error("[buffer-publish-status] sync failed", {
