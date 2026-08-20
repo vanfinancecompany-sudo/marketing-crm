@@ -84,11 +84,14 @@ test("automated captions keep direct website URLs and add no tracking redirect",
   assert.match(rent, /https:\/\/www\.rent2buyvans\.co\.uk\/van-pages\/AB12CDE/);
 });
 
-test("worker has queue, lead-time and start-date safety guards", () => {
+test("worker has queue, lead-time, start-date and Reel cooldown safety guards", () => {
   const worker = source("api/buffer-facebook-automation-worker.js");
   assert.match(worker, /CHANNEL_QUEUE_LIMIT = 10/);
   assert.match(worker, /MIN_SCHEDULE_LEAD_MS/);
   assert.match(worker, /dateKey < automationConfig\.startDate/);
+  assert.match(worker, /REEL_COOLDOWN_MS = 48/);
+  assert.match(worker, /recentBufferReelRegistrations/);
+  assert.match(worker, /!excluded\.has\(registration\)/);
   assert.doesNotMatch(worker, /shareNow/);
   assert.match(worker, /customScheduled|createBufferScheduledPost/);
 });
