@@ -158,7 +158,7 @@ async function refresh(force = false) {
     if (!payload) return;
     renderStatus(payload);
     window.dispatchEvent(new CustomEvent("buffer-facebook-live-status", { detail: payload }));
-    if (pageKind() === "operations") {
+    if (pageKind() === "operations" && Number(payload.synced || 0) > 0) {
       window.dispatchEvent(new CustomEvent("marketing-daily-operations-refresh", {
         detail: { source: "buffer_publish" },
       }));
