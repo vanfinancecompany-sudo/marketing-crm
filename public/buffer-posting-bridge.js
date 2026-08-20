@@ -4,6 +4,8 @@ const SUPPORTED_DESTINATIONS = new Set([
   "Van Finance Facebook",
   "Rent2Buy Facebook",
 ]);
+let automationConfig = null;
+let automationLoading = false;
 
 function storedAccessKey() {
   try {
@@ -40,7 +42,6 @@ function registrationForCard(card) {
     const registration = normalizeRegistration(tag.textContent);
     if (registration) return registration;
   }
-
   return normalizeRegistration(card.textContent);
 }
 
@@ -72,7 +73,6 @@ function showToast(message, isError = false) {
     });
     document.body.appendChild(toast);
   }
-
   toast.textContent = message;
   toast.style.background = isError ? "#5b1720" : "#13251a";
   toast.style.border = `1px solid ${isError ? "#a63a49" : "#2f6f45"}`;
@@ -82,13 +82,25 @@ function showToast(message, isError = false) {
   showToast.timer = setTimeout(() => { toast.hidden = true; }, 5000);
 }
 
-async function createBufferDraft(card, button) {
+async function authenticatedJson(path, options = {}) {
   const accessKey = storedAccessKey();
-  if (!accessKey) {
-    showToast("Open and unlock the Marketing CRM first, then try Buffer again.", true);
-    return;
+  if (!accessKey) throw new Error("Open and unlock the Marketing CRM first.");
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      [ACCESS_HEADER]: accessKey,
+      ...(options.headers || {}),
+    },
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.ok === false) {
+    throw new Error(result.error || result.message || `Request returned HTTP ${response.status}.`);
   }
+  return result;
+}
 
+async function createBufferDraft(card, button) {
   const destination = currentDestination();
   if (!SUPPORTED_DESTINATIONS.has(destination)) return;
 
@@ -109,12 +121,8 @@ async function createBufferDraft(card, button) {
   button.textContent = "Sending to Buffer...";
 
   try {
-    const response = await fetch("/api/buffer-publishing", {
+    const result = await authenticatedJson("/api/buffer-publishing", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        [ACCESS_HEADER]: accessKey,
-      },
       body: JSON.stringify({
         action: "createFacebookImageDraft",
         destination,
@@ -123,11 +131,6 @@ async function createBufferDraft(card, button) {
         registration,
       }),
     });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok || result.ok === false) {
-      throw new Error(result.error || result.message || `Buffer returned HTTP ${response.status}.`);
-    }
-
     button.textContent = "Buffer Draft ✓";
     button.dataset.bufferPostId = result.bufferPostId || "";
     showToast(`${registration || "Vehicle"} is safely sitting in Buffer Drafts.`);
@@ -138,7 +141,88 @@ async function createBufferDraft(card, button) {
   }
 }
 
-function decorate() {
+function automationScheduleText(destination) {
+  return destination === "Rent2Buy Facebook"
+    ? "08:10 → 20:10 · 80-minute spacing"
+    : "08:00 → 20:00 · 80-minute spacing";
+}
+
+function automationPanelMarkup(destination) {
+  const enabled = Boolean(automationConfig?.enabled);
+  const status = enabled ? "LIVE AUTOMATION" : "PAUSED";
+  const statusColour = enabled ? "#58d68d" : "#f6c85f";
+  const startDate = automationConfig?.startDate || "2026-08-21";
+  return `
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 14px;margin:12px 0;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(255,255,255,.035)">
+      <strong>Buffer Automation</strong>
+      <span style="font-weight:900;color:${statusColour}">${status}</span>
+      <span>5 vehicle posts + 5 Reels daily</span>
+      <span>${automationScheduleText(destination)}</span>
+      <span style="opacity:.72">Starts ${startDate} · Buffer confirms delivery</span>
+      <button type="button" data-buffer-toggle-automation>${enabled ? "Pause Automation" : "Resume Automation"}</button>
+    </div>
+  `;
+}
+
+async function loadAutomationSettings() {
+  if (automationLoading || automationConfig) return;
+  automationLoading = true;
+  try {
+    const result = await authenticatedJson("/api/buffer-automation-settings", { method: "GET" });
+    automationConfig = result.config || { enabled: true };
+  } catch (error) {
+    console.warn("[buffer-automation] settings unavailable", error);
+  } finally {
+    automationLoading = false;
+    decorateAutomationPanel();
+  }
+}
+
+async function toggleAutomation(panel) {
+  if (!automationConfig) return;
+  const nextEnabled = !automationConfig.enabled;
+  if (nextEnabled && !window.confirm("Resume fully automated Facebook scheduling through Buffer?")) return;
+  const button = panel.querySelector("[data-buffer-toggle-automation]");
+  if (button) {
+    button.disabled = true;
+    button.textContent = nextEnabled ? "Resuming..." : "Pausing...";
+  }
+  try {
+    const result = await authenticatedJson("/api/buffer-automation-settings", {
+      method: "POST",
+      body: JSON.stringify({
+        config: { ...automationConfig, enabled: nextEnabled },
+        confirmEnable: nextEnabled ? "ENABLE_BUFFER_AUTOMATION" : "",
+      }),
+    });
+    automationConfig = result.config;
+    showToast(nextEnabled ? "Buffer automation resumed." : "Buffer automation paused. Existing scheduled Buffer posts are unchanged.");
+    panel.remove();
+    decorateAutomationPanel();
+  } catch (error) {
+    showToast(error.message || "Could not update Buffer automation.", true);
+    if (button) button.disabled = false;
+  }
+}
+
+function decorateAutomationPanel() {
+  const destination = currentDestination();
+  if (!SUPPORTED_DESTINATIONS.has(destination)) return;
+  if (!automationConfig) {
+    loadAutomationSettings();
+    return;
+  }
+  if (document.querySelector("[data-buffer-automation-panel]")) return;
+  const host = document.querySelector(".posting-destination-hero") || document.querySelector("main");
+  if (!host) return;
+  const panel = document.createElement("div");
+  panel.dataset.bufferAutomationPanel = "true";
+  panel.innerHTML = automationPanelMarkup(destination);
+  panel.querySelector("[data-buffer-toggle-automation]")?.addEventListener("click", () => toggleAutomation(panel));
+  host.appendChild(panel);
+}
+
+function decorateDraftButtons() {
   const destination = currentDestination();
   if (!SUPPORTED_DESTINATIONS.has(destination)) return;
 
@@ -162,8 +246,17 @@ function decorate() {
   }
 }
 
+function decorate() {
+  decorateDraftButtons();
+  decorateAutomationPanel();
+}
+
 const observer = new MutationObserver(() => decorate());
 observer.observe(document.documentElement, { childList: true, subtree: true });
-window.addEventListener("popstate", decorate);
+window.addEventListener("popstate", () => {
+  automationConfig = null;
+  document.querySelector("[data-buffer-automation-panel]")?.remove();
+  decorate();
+});
 setInterval(decorate, 1500);
 decorate();
