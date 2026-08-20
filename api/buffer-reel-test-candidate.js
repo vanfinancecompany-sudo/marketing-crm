@@ -1,5 +1,6 @@
 const ACCESS_HEADER = "x-marketing-customer-database-key";
 const MIN_IMAGES = 10;
+const MAX_BATCH = 10;
 const WIX_FEEDS = {
   vanFinance: "https://www.vanfinancecompany.co.uk/_functions/marketingVanFinanceImages",
   rent2buy: "https://www.vanfinancecompany.co.uk/_functions/marketingRent2BuyImages",
@@ -52,6 +53,15 @@ export default async function handler(request, response) {
       ? request.body
       : JSON.parse(String(request.body || "{}"));
     const productKey = body.productKey === "vanFinance" ? "vanFinance" : "rent2buy";
+    const requestedLimit = Number.parseInt(body.limit, 10);
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.max(1, Math.min(MAX_BATCH, requestedLimit))
+      : 1;
+    const excluded = new Set(
+      (Array.isArray(body.excludeRegistrations) ? body.excludeRegistrations : [])
+        .map(normalizeRegistration)
+        .filter(Boolean),
+    );
     const feedUrl = WIX_FEEDS[productKey];
 
     const feedResponse = await fetch(feedUrl, {
@@ -64,7 +74,8 @@ export default async function handler(request, response) {
 
     const payload = await feedResponse.json();
     const items = Array.isArray(payload?.items) ? payload.items : [];
-    const candidate = items
+    const seen = new Set();
+    const candidates = items
       .map((item) => ({
         registration: normalizeRegistration(item?.registration),
         title: clean(item?.title) || normalizeRegistration(item?.registration) || "Vehicle reel",
@@ -74,21 +85,32 @@ export default async function handler(request, response) {
             .filter((url) => /^https:\/\//i.test(url)),
         )],
       }))
-      .find((item) => item.registration && item.images.length >= MIN_IMAGES);
+      .filter((item) => {
+        if (!item.registration || item.images.length < MIN_IMAGES) return false;
+        if (excluded.has(item.registration) || seen.has(item.registration)) return false;
+        seen.add(item.registration);
+        return true;
+      })
+      .slice(0, limit)
+      .map((item) => ({ ...item, images: item.images.slice(0, MIN_IMAGES) }));
 
-    if (!candidate) {
+    if (!candidates.length) {
       response.status(404).json({ ok: false, error: "No live vehicle with 10 usable images is available for the Buffer Reel test." });
       return;
     }
 
+    const first = candidates[0];
     response.status(200).json({
       ok: true,
       productKey,
-      registration: candidate.registration,
-      title: candidate.title,
-      images: candidate.images.slice(0, MIN_IMAGES),
+      requested: limit,
+      count: candidates.length,
+      candidates,
+      registration: first.registration,
+      title: first.title,
+      images: first.images,
     });
   } catch (error) {
-    response.status(500).json({ ok: false, error: error?.message || "Could not prepare a Buffer Reel test candidate." });
+    response.status(500).json({ ok: false, error: error?.message || "Could not prepare Buffer Reel test candidates." });
   }
 }

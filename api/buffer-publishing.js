@@ -39,7 +39,7 @@ function parseBody(request) {
   return {};
 }
 
-async function createBufferDraft({ destination, text, mediaUrl, mediaKind }) {
+async function createBufferPost({ destination, text, mediaUrl, mediaKind, draft }) {
   const token = clean(process.env.BUFFER_API_KEY);
   if (!token) throw new Error("BUFFER_API_KEY is not configured on the server.");
 
@@ -48,7 +48,7 @@ async function createBufferDraft({ destination, text, mediaUrl, mediaKind }) {
     text,
     mediaUrl,
     mediaKind,
-    draft: true,
+    draft,
   });
 
   const response = await fetch(BUFFER_API_URL, {
@@ -91,38 +91,49 @@ export default async function handler(request, response) {
 
     let destination = clean(body.destination);
     let mediaKind = "image";
+    let draft = true;
 
     if (action === "createFacebookReelDraft") {
       destination = bufferDestinationForProduct(clean(body.productKey));
       mediaKind = "video";
+    } else if (action === "createFacebookReelQueue") {
+      if (body.confirmQueue !== true) {
+        sendJson(response, 400, { ok: false, error: "Explicit Buffer queue confirmation is required." });
+        return;
+      }
+      destination = bufferDestinationForProduct(clean(body.productKey));
+      mediaKind = "video";
+      draft = false;
     } else if (action !== "createFacebookImageDraft") {
       sendJson(response, 400, { ok: false, error: "Unsupported Buffer publishing action." });
       return;
     }
 
-    const post = await createBufferDraft({
+    const post = await createBufferPost({
       destination,
       text: body.text,
       mediaUrl: body.mediaUrl,
       mediaKind,
+      draft,
     });
 
+    const mode = draft ? "draft" : "queue";
     sendJson(response, 200, {
       ok: true,
-      mode: "draft",
+      mode,
       destination,
       bufferPostId: post.id,
-      status: "draft",
+      status: post.status || (draft ? "draft" : "scheduled"),
       text: post.text || clean(body.text),
       assets: post.assets || [],
     });
   } catch (error) {
-    console.error("[buffer-publishing] draft failed", {
+    console.error("[buffer-publishing] request failed", {
       message: error?.message || String(error),
     });
     sendJson(response, 500, {
       ok: false,
-      error: error?.message || "Buffer draft creation failed.",
+      error: error?.message || "Buffer publishing request failed.",
     });
   }
 }
