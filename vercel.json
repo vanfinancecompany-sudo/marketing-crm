@@ -11,10 +11,17 @@
     {
       "path": "/api/rent2buy-monthly-price-sync",
       "schedule": "23 * * * *"
+    },
+    {
+      "path": "/api/buffer-facebook-automation-worker",
+      "schedule": "41 * * * *"
     }
   ],
   "functions": {
     "api/marketing-editorial-automation-worker.js": {
+      "maxDuration": 300
+    },
+    "api/buffer-facebook-automation-worker.js": {
       "maxDuration": 300
     },
     "api/marketing-website-index-discovery.js": {
