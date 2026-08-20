@@ -1,0 +1,27 @@
+.reel-row {
+  grid-template-columns: minmax(90px, .7fr) minmax(0, 1.7fr) auto auto;
+}
+
+.buffer-reel-button {
+  appearance: none;
+  border: 1px solid #5a2830;
+  border-radius: 8px;
+  background: rgba(239,35,60,.08);
+  padding: 7px 9px;
+  cursor: pointer;
+}
+
+.buffer-reel-button:hover:not(:disabled) {
+  background: rgba(239,35,60,.16);
+}
+
+@media (max-width: 760px) {
+  .reel-row {
+    grid-template-columns: 1fr auto auto;
+  }
+
+  .reel-title {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
