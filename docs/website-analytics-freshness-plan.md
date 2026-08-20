@@ -1,0 +1,1 @@
+Permanent fix target: the CRM must use completed Wix data through yesterday in Europe/London, while preserving the rolling seven-day versus previous-seven-day comparison and all existing application-funnel semantics. Do not relabel stale data as current. If the direct Wix API route is adopted, remove the temporary health probe after validation.
