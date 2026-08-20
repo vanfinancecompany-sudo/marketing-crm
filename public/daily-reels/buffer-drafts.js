@@ -120,6 +120,7 @@ async function runSingleRent2BuyReelProof(button) {
         registration: candidate.registration,
         title: candidate.title,
         imageUrls: candidate.images,
+        frameSpecs: Array.from({ length: 10 }, () => ({})),
         frameCount: 10,
         durationSeconds: 20,
         fps: 24,
