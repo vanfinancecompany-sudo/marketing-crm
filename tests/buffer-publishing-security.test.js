@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-test("Buffer secret stays server-side", async () => {
+test("Buffer secret stays server-side and queue mode requires confirmation", async () => {
   const clientFiles = [
     "index.html",
     "public/buffer-posting-bridge.js",
@@ -19,5 +19,7 @@ test("Buffer secret stays server-side", async () => {
   const apiSource = await readFile(new URL("../api/buffer-publishing.js", import.meta.url), "utf8");
   assert.match(apiSource, /process\.env\.BUFFER_API_KEY/);
   assert.match(apiSource, /Authorization: `Bearer \$\{token\}`/);
-  assert.match(apiSource, /draft: true/);
+  assert.match(apiSource, /createFacebookReelQueue/);
+  assert.match(apiSource, /body\.confirmQueue !== true/);
+  assert.equal(apiSource.includes("shareNow"), false);
 });
