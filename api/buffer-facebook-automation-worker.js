@@ -114,20 +114,30 @@ function queuedCount(posts, productKey) {
   return postsForProduct(posts, productKey).filter(isBufferPostReserved).length;
 }
 
-function dayKindCount(posts, productKey, dateKey, mediaKind) {
-  return postsForProduct(posts, productKey).filter(
-    (post) => liveOrReserved(post) && bufferPostDateKey(post) === dateKey && bufferPostMediaKind(post) === mediaKind,
-  ).length;
+function postDueIso(post) {
+  const value = post?.dueAt || post?.sentAt || post?.createdAt;
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
 }
 
 function nextFutureSlot({ posts, automationConfig, productKey, dateKey, mediaKind, now }) {
   const slots = bufferAutomationSlots(automationConfig, productKey, dateKey).filter(
     (slot) => slot.mediaKind === mediaKind,
   );
-  const existing = dayKindCount(posts, productKey, dateKey, mediaKind);
+  const existingPosts = postsForProduct(posts, productKey).filter(
+    (post) => liveOrReserved(post) && bufferPostDateKey(post) === dateKey && bufferPostMediaKind(post) === mediaKind,
+  );
+  const existing = existingPosts.length;
   const missed = slots.filter((slot) => new Date(slot.dueAt).getTime() <= now + MIN_SCHEDULE_LEAD_MS).length;
-  const index = Math.max(existing, missed);
-  const slot = slots[index] || null;
+  if (existing >= slots.length) return { slot: null, existing, missed, target: slots.length };
+
+  const occupiedDueAt = new Set(existingPosts.map(postDueIso).filter(Boolean));
+  const slot = slots.find(
+    (candidate) =>
+      new Date(candidate.dueAt).getTime() > now + MIN_SCHEDULE_LEAD_MS &&
+      !occupiedDueAt.has(candidate.dueAt),
+  ) || null;
   return { slot, existing, missed, target: slots.length };
 }
 
