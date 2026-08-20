@@ -4,6 +4,7 @@ import {
 } from "./marketingAccess.js";
 
 const API_ROUTE = "/api/marketing-daily-operations";
+const BUFFER_HISTORY_ROUTE = "/api/buffer-posting-history";
 export const DAILY_OPERATIONS_REFRESH_EVENT =
   "marketing-daily-operations-refresh";
 export const YOUTUBE_TRACKING_WARNING =
@@ -23,6 +24,20 @@ async function requestDailyOperations(action, payload = {}) {
   );
 }
 
+async function requestBufferPostingHistory(days) {
+  const response = await fetch(BUFFER_HISTORY_ROUTE, {
+    method: "POST",
+    headers: buildMarketingAccessHeaders({
+      "Content-Type": "application/json",
+    }),
+    body: JSON.stringify({ days }),
+  });
+  return parseMarketingJsonResponse(
+    response,
+    "Buffer posting history request failed.",
+  );
+}
+
 export function getDailyOperationsOverview(activityDate) {
   return requestDailyOperations("overview", { activity_date: activityDate });
 }
@@ -34,10 +49,21 @@ export function getDailyOperationsTotals(startDate, endDate) {
   });
 }
 
-export function getRecentPostingHistory(days = 180) {
-  return requestDailyOperations("postingHistory", {
-    days: Math.max(1, Math.min(365, Number(days) || 180)),
-  });
+export async function getRecentPostingHistory(days = 180) {
+  const safeDays = Math.max(1, Math.min(365, Number(days) || 180));
+  const [manual, automated] = await Promise.all([
+    requestDailyOperations("postingHistory", { days: safeDays }),
+    requestBufferPostingHistory(safeDays),
+  ]);
+  const history = [
+    ...(Array.isArray(manual?.history) ? manual.history : []),
+    ...(Array.isArray(automated?.history) ? automated.history : []),
+  ].sort(
+    (first, second) =>
+      new Date(second?.occurred_at || 0).getTime() -
+      new Date(first?.occurred_at || 0).getTime(),
+  );
+  return { ...manual, history };
 }
 
 export function saveDailyTargetSchedule(effectiveFrom, schedule) {
