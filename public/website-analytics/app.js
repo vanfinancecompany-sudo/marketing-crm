@@ -1,5 +1,6 @@
 const ENDPOINT = 'https://www.vanfinancecompany.co.uk/_functions/marketingWebsiteAnalytics';
 const FUNNEL_ENDPOINT = 'https://www.vanfinancecompany.co.uk/_functions/marketingApplicationFunnel';
+const SUMMARY_ENDPOINT = '/api/website-analytics-summary';
 
 const $ = (id) => document.getElementById(id);
 
@@ -72,9 +73,9 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 }
 
-function renderMetrics(data) {
-  const c = data.current?.summary || {};
-  const p = data.previous?.summary || {};
+function renderMetrics(data, summaryData) {
+  const c = summaryData?.current?.summary || data.current?.summary || {};
+  const p = summaryData?.previous?.summary || data.previous?.summary || {};
   const metrics = [
     ['Sessions', field(c, 'traffic.sessions_count'), field(p, 'traffic.sessions_count'), whole, false, 'Visits to the site'],
     ['Unique visitors', field(c, 'traffic.visitors_count'), field(p, 'traffic.visitors_count'), whole, false, 'People rather than page loads'],
@@ -210,19 +211,27 @@ function renderWatchlist(data, funnel) {
   $('watchlist').innerHTML = list.length ? list.map((item) => `<div class="watch-item ${item.tone}"><div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.detail)}</p></div></div>`).join('') : '<div class="empty">No obvious high-volume leaks detected in this window.</div>';
 }
 
-function render(data, funnel) {
-  renderMetrics(data);
+function render(data, funnel, summaryData) {
+  renderMetrics(data, summaryData);
   renderFunnel(funnel);
   renderTables(data);
   renderFlows(data);
   renderWatchlist(data, funnel);
-  $('settledLabel').textContent = `Settled through ${data.settledThrough || funnel?.settledThrough || 'yesterday'}`;
+
+  const trafficDate = summaryData?.settledThrough;
+  const detailDate = data?.settledThrough || funnel?.settledThrough;
+  if (trafficDate && detailDate && trafficDate !== detailDate) {
+    $('settledLabel').textContent = `Traffic through ${trafficDate} · detailed tables through ${detailDate}`;
+  } else {
+    $('settledLabel').textContent = `Settled through ${trafficDate || detailDate || 'yesterday'}`;
+  }
 }
 
 async function getJson(url) {
-  const response = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store' });
+  const separator = url.includes('?') ? '&' : '?';
+  const response = await fetch(`${url}${separator}t=${Date.now()}`, { cache: 'no-store' });
   const data = await response.json();
-  if (!response.ok || data.error) throw new Error(data.error || `Request returned ${response.status}`);
+  if (!response.ok || data.error || data.ok === false) throw new Error(data.error || data.message || `Request returned ${response.status}`);
   return data;
 }
 
@@ -231,8 +240,12 @@ async function load() {
   $('statusDot').className = 'status-dot loading';
   $('statusText').textContent = 'Loading Wix Analytics...';
   try {
-    const [data, funnel] = await Promise.all([getJson(ENDPOINT), getJson(FUNNEL_ENDPOINT)]);
-    render(data, funnel);
+    const [data, funnel, summaryData] = await Promise.all([
+      getJson(ENDPOINT),
+      getJson(FUNNEL_ENDPOINT),
+      getJson(SUMMARY_ENDPOINT),
+    ]);
+    render(data, funnel, summaryData);
     $('statusDot').className = 'status-dot ready';
     $('statusText').textContent = 'Wix Analytics connected';
   } catch (error) {
