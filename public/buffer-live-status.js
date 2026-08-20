@@ -172,7 +172,7 @@ async function refresh(force = false) {
 }
 
 const observer = new MutationObserver(() => {
-  if (lastPayload) renderStatus(lastPayload);
+  if (lastPayload && !document.getElementById(STATUS_ID)) renderStatus(lastPayload);
 });
 observer.observe(document.documentElement, { childList: true, subtree: true });
 window.addEventListener("popstate", () => setTimeout(() => refresh(true), 50));
