@@ -1,6 +1,5 @@
-const ENDPOINT = 'https://www.vanfinancecompany.co.uk/_functions/marketingWebsiteAnalytics';
-const FUNNEL_ENDPOINT = 'https://www.vanfinancecompany.co.uk/_functions/marketingApplicationFunnel';
 const SUMMARY_ENDPOINT = '/api/website-analytics-summary';
+const DETAILS_ENDPOINT = '/api/website-analytics-details';
 
 const $ = (id) => document.getElementById(id);
 
@@ -24,6 +23,10 @@ function field(summary, name) {
 
 function pct(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`;
+}
+
+function ratio(value) {
+  return value === null || value === undefined ? '—' : pct(value);
 }
 
 function whole(value) {
@@ -73,9 +76,9 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 }
 
-function renderMetrics(data, summaryData) {
-  const c = summaryData?.current?.summary || data.current?.summary || {};
-  const p = summaryData?.previous?.summary || data.previous?.summary || {};
+function renderMetrics(summaryData) {
+  const c = summaryData?.current?.summary || {};
+  const p = summaryData?.previous?.summary || {};
   const metrics = [
     ['Sessions', field(c, 'traffic.sessions_count'), field(p, 'traffic.sessions_count'), whole, false, 'Visits to the site'],
     ['Unique visitors', field(c, 'traffic.visitors_count'), field(p, 'traffic.visitors_count'), whole, false, 'People rather than page loads'],
@@ -102,8 +105,6 @@ function renderFunnel(funnel) {
   const rateDelta = delta(financeRate, oldRate);
   const rentGate = rent.reachedPostcodeGate?.sessions || 0;
   const oldRentGate = oldRent.reachedPostcodeGate?.sessions || 0;
-  const rentPostcode = rent.postcodeSupplied?.sessions || 0;
-  const oldRentPostcode = oldRent.postcodeSupplied?.sessions || 0;
 
   $('applicationFunnel').innerHTML = `
     <article class="funnel-card finance">
@@ -116,8 +117,8 @@ function renderFunnel(funnel) {
     <article class="funnel-card rent">
       <div class="funnel-title">Rent2Buy</div>
       <div class="funnel-line"><span>Reached postcode gate</span><strong>${whole(rentGate)}</strong><small>${delta(rentGate, oldRentGate).text} vs prior week</small></div>
-      <div class="funnel-arrow">↓</div>
-      <div class="funnel-line"><span>Postcode supplied</span><strong>${whole(rentPostcode)}</strong><small>${delta(rentPostcode, oldRentPostcode).text} vs prior week</small></div>
+      <div class="funnel-arrow muted">↓</div>
+      <div class="funnel-line muted"><span>Postcode supplied</span><strong>Not measured</strong><small>Wix page-path analytics do not expose the postcode query state</small></div>
       <div class="funnel-arrow muted">↓</div>
       <div class="funnel-line muted"><span>Pass / fail / full form</span><strong>Not claimed</strong><small>Needs explicit postcode-gate events</small></div>
       <div class="funnel-rate muted"><strong>—</strong><span>Outside-area filtering is not counted as form abandonment</span></div>
@@ -135,32 +136,38 @@ function renderTables(data) {
   ])).join('') || '<tr><td colspan="3">No data yet.</td></tr>';
 
   $('exitRows').innerHTML = (c.exitPages || []).map((item) => rowPage(item, [
-    (x) => whole(x.sessions), (x) => pct(x.exitRate)
+    (x) => whole(x.sessions), (x) => ratio(x.exitRate)
   ])).join('') || '<tr><td colspan="3">No data yet.</td></tr>';
 
   $('pageRows').innerHTML = (c.pages || []).map((item) => rowPage(item, [
-    (x) => whole(x.views), (x) => seconds(x.avgTimeSeconds), (x) => pct(x.bounceRate), (x) => pct(x.exitRate)
+    (x) => whole(x.views), (x) => seconds(x.avgTimeSeconds), (x) => pct(x.bounceRate), (x) => ratio(x.exitRate)
   ])).join('') || '<tr><td colspan="5">No data yet.</td></tr>';
 
   $('sourceRows').innerHTML = (c.sources || []).map((item) => `<tr><td>${escapeHtml(item.source)}</td><td>${whole(item.sessions)}</td><td>${pct(item.bounceRate)}</td></tr>`).join('') || '<tr><td colspan="3">No data yet.</td></tr>';
   $('deviceRows').innerHTML = (c.devices || []).map((item) => `<tr><td>${escapeHtml(item.device || 'Unknown')}</td><td>${whole(item.sessions)}</td><td>${whole(item.visitors)}</td><td>${pct(item.bounceRate)}</td></tr>`).join('') || '<tr><td colspan="4">No data yet.</td></tr>';
 
-  $('formRows').innerHTML = (c.forms || []).map((item) => `<tr><td title="${escapeHtml(item.url)}">${escapeHtml(item.name || shortUrl(item.url))}</td><td>${whole(item.views)}</td><td>${whole(item.starts)}</td><td>${whole(item.submissions)}</td><td>${pct(item.completionRate)}</td></tr>`).join('') || '<tr><td colspan="5">No Wix Form activity in this period.</td></tr>';
+  const formsUnavailable = c.sectionStatus?.forms === 'error';
+  $('formRows').innerHTML = (c.forms || []).map((item) => `<tr><td title="${escapeHtml(item.url)}">${escapeHtml(item.name || shortUrl(item.url))}</td><td>${whole(item.views)}</td><td>${whole(item.starts)}</td><td>${whole(item.submissions)}</td><td>${pct(item.completionRate)}</td></tr>`).join('') || `<tr><td colspan="5">${formsUnavailable ? 'Wix Forms analytics are temporarily unavailable.' : 'No Wix Form activity in this period.'}</td></tr>`;
 }
 
 function renderFlows(data) {
-  const flows = data.current?.userFlows || [];
-  $('flowRows').innerHTML = flows.length ? flows.map((flow) => {
+  const c = data.current || {};
+  const flows = c.userFlows || [];
+  if (!flows.length) {
+    $('flowRows').innerHTML = `<div class="empty">${c.sectionStatus?.userFlows === 'error' ? 'Visitor-flow analytics are temporarily unavailable.' : 'No user-flow data yet.'}</div>`;
+    return;
+  }
+  $('flowRows').innerHTML = flows.map((flow) => {
     const steps = [flow.entry, flow.first, flow.second, flow.third, flow.fourth].filter(Boolean);
     return `<div class="flow-row"><div class="flow-count">${whole(flow.sessions)} sessions</div><div class="flow-steps">${steps.map((s) => `<span>${escapeHtml(shortUrl(s))}</span>`).join('<b>→</b>')}</div></div>`;
-  }).join('') : '<div class="empty">No user-flow data yet.</div>';
+  }).join('');
 }
 
 function previousByUrl(items = []) {
   return new Map(items.map((item) => [shortUrl(item.url), item]));
 }
 
-function buildWatchlist(data, funnel) {
+function buildWatchlist(data, funnel, summaryData) {
   const current = data.current || {};
   const previous = data.previous || {};
   const previousPages = previousByUrl(previous.pages || []);
@@ -181,8 +188,8 @@ function buildWatchlist(data, funnel) {
     findings.push({
       score: 11000,
       tone: 'info',
-      title: 'Rent2Buy postcode gate is now separated',
-      detail: `${whole(rent.reachedPostcodeGate.sessions)} sessions reached the postcode gate and ${whole(rent.postcodeSupplied?.sessions || 0)} supplied a postcode. Pass/fail is deliberately excluded until explicit gate events are available.`
+      title: 'Rent2Buy postcode gate is measurable',
+      detail: `${whole(rent.reachedPostcodeGate.sessions)} sessions reached the postcode gate. Postcode supplied, pass/fail and full-form completion are not claimed because Wix page-path analytics do not expose those stages reliably.`
     });
   }
 
@@ -198,28 +205,29 @@ function buildWatchlist(data, funnel) {
   }
 
   const mobile = (current.devices || []).find((x) => String(x.device).toLowerCase() === 'mobile');
-  if (mobile && mobile.sessions > 0) {
-    const share = mobile.sessions / Math.max(1, field(current.summary, 'traffic.sessions_count'));
+  const totalSessions = field(summaryData?.current?.summary || {}, 'traffic.sessions_count');
+  if (mobile && mobile.sessions > 0 && totalSessions > 0) {
+    const share = mobile.sessions / totalSessions;
     if (share > 0.8) findings.push({ score: 10000, tone: 'info', title: 'Mobile is the website', detail: `${pct(share)} of sessions are mobile. Conversion fixes should be judged mobile-first.` });
   }
 
   return findings.sort((a, b) => b.score - a.score).slice(0, 8);
 }
 
-function renderWatchlist(data, funnel) {
-  const list = buildWatchlist(data, funnel);
+function renderWatchlist(data, funnel, summaryData) {
+  const list = buildWatchlist(data, funnel, summaryData);
   $('watchlist').innerHTML = list.length ? list.map((item) => `<div class="watch-item ${item.tone}"><div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.detail)}</p></div></div>`).join('') : '<div class="empty">No obvious high-volume leaks detected in this window.</div>';
 }
 
-function render(data, funnel, summaryData) {
-  renderMetrics(data, summaryData);
-  renderFunnel(funnel);
+function render(data, summaryData) {
+  renderMetrics(summaryData);
+  renderFunnel(data.funnel);
   renderTables(data);
   renderFlows(data);
-  renderWatchlist(data, funnel);
+  renderWatchlist(data, data.funnel, summaryData);
 
   const trafficDate = summaryData?.settledThrough;
-  const detailDate = data?.settledThrough || funnel?.settledThrough;
+  const detailDate = data?.settledThrough || data?.funnel?.settledThrough;
   if (trafficDate && detailDate && trafficDate !== detailDate) {
     $('settledLabel').textContent = `Traffic through ${trafficDate} · detailed tables through ${detailDate}`;
   } else {
@@ -240,12 +248,11 @@ async function load() {
   $('statusDot').className = 'status-dot loading';
   $('statusText').textContent = 'Loading Wix Analytics...';
   try {
-    const [data, funnel, summaryData] = await Promise.all([
-      getJson(ENDPOINT),
-      getJson(FUNNEL_ENDPOINT),
+    const [summaryData, detailsData] = await Promise.all([
       getJson(SUMMARY_ENDPOINT),
+      getJson(DETAILS_ENDPOINT),
     ]);
-    render(data, funnel, summaryData);
+    render(detailsData, summaryData);
     $('statusDot').className = 'status-dot ready';
     $('statusText').textContent = 'Wix Analytics connected';
   } catch (error) {
