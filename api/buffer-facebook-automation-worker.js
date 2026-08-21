@@ -37,6 +37,7 @@ const PRODUCTS = ["vanFinance", "rent2buy"];
 const MIN_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 const REEL_COOLDOWN_MS = 48 * 60 * 60 * 1000;
 const CHANNEL_QUEUE_LIMIT = 10;
+const PUBLIC_PRODUCTION_ORIGIN = "https://marketing-crm-six.vercel.app";
 
 function errorText(value, fallback = "Automation request failed.") {
   if (value instanceof Error) {
@@ -302,6 +303,10 @@ async function loadReadyReels(supabase, productKey, dateKey) {
 }
 
 function internalBaseUrl(request) {
+  const configured = String(process.env.MARKETING_CRM_PUBLIC_ORIGIN || "").trim();
+  if (configured) return configured.replace(/\/$/, "");
+  if (process.env.VERCEL_ENV === "production") return PUBLIC_PRODUCTION_ORIGIN;
+
   const host = String(request.headers["x-forwarded-host"] || request.headers.host || process.env.VERCEL_URL || "").trim();
   if (!host) throw new Error("Could not resolve the Marketing CRM host for Reel automation.");
   return `${host.includes("localhost") ? "http" : "https"}://${host}`;
