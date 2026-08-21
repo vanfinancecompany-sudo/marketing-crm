@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { del } from "@vercel/blob";
 import { loadBufferAutomationConfig } from "../lib/bufferAutomationConfig.js";
 import {
   bufferAutomationSlots,
@@ -18,12 +19,17 @@ import {
   buildBufferCreatePostInput,
   parseBufferAutomationPostsPayload,
   parseBufferCreatePostPayload,
+  readableBufferError,
 } from "../lib/bufferPublishing.js";
 import {
   automatedReelFrameSpecs,
   buildAutomatedFacebookCaption,
-  buildAutomatedReelCaption,
 } from "../lib/facebookAutomationContent.js";
+import {
+  buildDefaultFacebookPostCaption,
+  buildDefaultReelCaption,
+  facebookHomepage,
+} from "../lib/facebookDefaultContent.js";
 import {
   mapFinanceVehicleRow,
   mapRentVehicleRow,
@@ -36,6 +42,13 @@ const PRODUCTS = ["vanFinance", "rent2buy"];
 const MIN_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 const REEL_COOLDOWN_MS = 48 * 60 * 60 * 1000;
 const CHANNEL_QUEUE_LIMIT = 10;
+const MIN_REEL_IMAGES = 10;
+const DEFAULT_COPY_START_DATE = "2026-08-22";
+
+function errorText(value, fallback = "Request failed.") {
+  if (value instanceof Error && value.message) return readableBufferError(value.message, fallback);
+  return readableBufferError(value, fallback);
+}
 
 function authorize(request) {
   const cronSecret = String(process.env.CRON_SECRET || "");
@@ -74,7 +87,7 @@ async function bufferGraphql(query, variables = undefined) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload?.errors?.[0]?.message || `Buffer returned HTTP ${response.status}.`);
+    throw new Error(errorText(payload?.errors?.[0]?.message || payload?.errors?.[0] || payload, `Buffer returned HTTP ${response.status}.`));
   }
   return payload;
 }
@@ -217,6 +230,27 @@ async function loadVehicles(supabase, productKey) {
   return (result.data || []).map(mapFinanceVehicleRow);
 }
 
+function vehiclePageUrl(vehicle, productKey) {
+  const value = String(vehicle?.link || vehicle?.weblink || vehicle?.webLink || "").trim();
+  if (!/^https:\/\//i.test(value)) return "";
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    const allowed = productKey === "rent2buy"
+      ? new Set(["rent2buyvans.co.uk", "vanfinancecompany.co.uk"])
+      : new Set(["vanfinancecompany.co.uk"]);
+    if (!allowed.has(host)) return "";
+    if (!url.pathname || url.pathname === "/") return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function defaultCopyActive(dateKey) {
+  return String(dateKey || "") >= DEFAULT_COPY_START_DATE;
+}
+
 async function createNextImagePost({ supabase, posts, automationConfig, productKey, dateKey, now }) {
   if (queuedCount(posts, productKey) >= CHANNEL_QUEUE_LIMIT) {
     return { skipped: "buffer_queue_full" };
@@ -238,7 +272,11 @@ async function createNextImagePost({ supabase, posts, automationConfig, productK
   if (!vehicle) return { skipped: "no_candidate", ...slotInfo };
 
   const destination = bufferDestinationForProduct(productKey);
-  const text = buildAutomatedFacebookCaption(vehicle, productKey);
+  const realUrl = vehiclePageUrl(vehicle, productKey);
+  const postUrl = realUrl || facebookHomepage(productKey);
+  const text = defaultCopyActive(dateKey)
+    ? buildDefaultFacebookPostCaption(vehicle, productKey, { url: postUrl, index: slotInfo.existing })
+    : buildAutomatedFacebookCaption(vehicle, productKey);
   const post = await createBufferScheduledPost({
     destination,
     text,
@@ -254,6 +292,7 @@ async function createNextImagePost({ supabase, posts, automationConfig, productK
     bufferPostId: post.id,
     dueAt: post.dueAt || slotInfo.slot.dueAt,
     localTime: slotInfo.slot.localTime,
+    usedHomepageFallback: !realUrl,
   };
 }
 
@@ -270,12 +309,16 @@ async function loadReadyReels(supabase, productKey, dateKey) {
   if (result.error) throw result.error;
   return (result.data || [])
     .filter((row) => row?.metadata?.download_url && !row?.metadata?.deleted_at)
+    .filter((row) => Number(row?.metadata?.image_count || 0) >= MIN_REEL_IMAGES)
     .map((row) => ({
       registration: normalizeReg(row?.metadata?.registration),
       title: String(row?.metadata?.title || "Vehicle reel").trim(),
       downloadUrl: String(row?.metadata?.download_url || "").trim(),
+      imageCount: Number(row?.metadata?.image_count || 0),
+      usableImageCount: Number(row?.metadata?.usable_image_count || row?.metadata?.image_count || 0),
       row,
-    }));
+    }))
+    .filter((reel) => reel.usableImageCount >= MIN_REEL_IMAGES);
 }
 
 function internalBaseUrl(request) {
@@ -298,9 +341,18 @@ async function internalJson(request, path, body, authenticated = true) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.ok === false) {
-    throw new Error(payload?.error || payload?.message || `${path} returned HTTP ${response.status}.`);
+    throw new Error(errorText(payload?.error || payload?.message || payload, `${path} returned HTTP ${response.status}.`));
   }
   return payload;
+}
+
+function uniqueHttpsImages(images) {
+  return [...new Set((Array.isArray(images) ? images : []).map((url) => String(url || "").trim()).filter((url) => /^https:\/\//i.test(url)))];
+}
+
+function findVehicleByRegistration(vehicles, registration) {
+  const target = normalizeReg(registration);
+  return (vehicles || []).find((vehicle) => normalizeReg(vehicle?.registration || vehicle?.reg || vehicle?.title) === target) || null;
 }
 
 async function generateOneReel(request, productKey, dateKey, packIndex, excludedRegistrations) {
@@ -312,12 +364,18 @@ async function generateOneReel(request, productKey, dateKey, packIndex, excluded
   const candidate = Array.isArray(list)
     ? list.find((item) => {
         const registration = normalizeReg(item?.registration);
-        return registration && !excluded.has(registration);
+        const images = uniqueHttpsImages(item?.images);
+        const url = vehiclePageUrl(item?.vehicle || {}, productKey);
+        return registration && !excluded.has(registration) && images.length >= MIN_REEL_IMAGES && url;
       })
     : null;
   if (!candidate) return null;
 
   const vehicle = candidate.vehicle || {};
+  const vehicleUrl = vehiclePageUrl(vehicle, productKey);
+  const images = uniqueHttpsImages(candidate.images).slice(0, MIN_REEL_IMAGES);
+  if (!vehicleUrl || images.length < MIN_REEL_IMAGES) return null;
+  const frameSpecs = automatedReelFrameSpecs(productKey, packIndex);
   const rendered = await internalJson(
     request,
     "/api/youtube-mp4-render",
@@ -327,9 +385,9 @@ async function generateOneReel(request, productKey, dateKey, packIndex, excluded
       title: candidate.title,
       priceText: vehicle.price || vehicle.initialRental || "",
       monthlyText: vehicle.monthly || vehicle.salePrice || vehicle.week || "",
-      imageUrls: (candidate.images || []).slice(0, 10),
-      frameSpecs: automatedReelFrameSpecs(productKey, packIndex),
-      frameCount: 10,
+      imageUrls: images,
+      frameSpecs,
+      frameCount: MIN_REEL_IMAGES,
       durationSeconds: 20,
       fps: 24,
       templateKey: "tiktokPunch",
@@ -338,6 +396,14 @@ async function generateOneReel(request, productKey, dateKey, packIndex, excluded
     false,
   );
 
+  const usableImageCount = Number(rendered?.usableImageCount || 0);
+  if (usableImageCount < MIN_REEL_IMAGES) {
+    if (rendered?.downloadUrl) await del(rendered.downloadUrl).catch(() => {});
+    throw new Error(`Reel safeguard blocked ${candidate.registration}: only ${usableImageCount} usable images were rendered; 10 are required.`);
+  }
+
+  const hook = String(frameSpecs?.[0]?.headline || "").trim();
+  const defaultCaption = buildDefaultReelCaption(vehicle, productKey, { url: vehicleUrl, hook });
   const operationId = `buffer-auto:${dateKey}:${productKey}:${candidate.registration}`;
   await internalJson(request, "/api/youtube-daily-batch", {
     action: "record",
@@ -348,13 +414,29 @@ async function generateOneReel(request, productKey, dateKey, packIndex, excluded
     downloadUrl: rendered.downloadUrl,
     blobPathname: rendered.blobPathname,
     sizeBytes: rendered.sizeBytes,
+    imageCount: MIN_REEL_IMAGES,
+    usableImageCount,
+    vehicleUrl,
+    caption: defaultCaption,
     operationId,
   });
   return {
     registration: normalizeReg(candidate.registration),
     title: candidate.title,
     downloadUrl: rendered.downloadUrl,
+    imageCount: MIN_REEL_IMAGES,
+    usableImageCount,
+    vehicle,
+    vehicleUrl,
+    hook,
   };
+}
+
+function legacyReelCaption(reel, productKey) {
+  if (productKey === "rent2buy") {
+    return `${reel.title}\n\nREGISTRATION: ${reel.registration}\n\nRENT IT! - DRIVE IT! - OWN IT!\nCheck if you qualify online.\n\n${reel.vehicleUrl}`.trim();
+  }
+  return `${reel.title}\n\nREGISTRATION: ${reel.registration}\n\nVan finance available. Free UK delivery. Apply online today.\n\n${reel.vehicleUrl}`.trim();
 }
 
 async function createNextReel({ request, supabase, posts, automationConfig, productKey, dateKey, now }) {
@@ -370,18 +452,30 @@ async function createNextReel({ request, supabase, posts, automationConfig, prod
   const recentReelReserved = recentBufferReelRegistrations(posts, productKey, now);
   const excluded = [...new Set([...currentDayReserved, ...recentReelReserved])];
   const excludedSet = new Set(excluded);
-  const ready = (await loadReadyReels(supabase, productKey, dateKey)).find(
-    (reel) => reel.registration && !excludedSet.has(reel.registration),
-  );
+  const [readyReels, vehicles] = await Promise.all([
+    loadReadyReels(supabase, productKey, dateKey),
+    loadVehicles(supabase, productKey),
+  ]);
+  const ready = readyReels
+    .map((candidate) => {
+      const vehicle = findVehicleByRegistration(vehicles, candidate.registration);
+      const vehicleUrl = vehiclePageUrl(vehicle, productKey);
+      return { ...candidate, vehicle, vehicleUrl, hook: "" };
+    })
+    .find((reel) => reel.registration && !excludedSet.has(reel.registration) && reel.vehicle && reel.vehicleUrl);
   const reel = ready || (await generateOneReel(request, productKey, dateKey, slotInfo.existing, excluded));
   if (!reel) return { skipped: "no_candidate", ...slotInfo };
+  if (Number(reel.usableImageCount || reel.imageCount || 0) < MIN_REEL_IMAGES) {
+    return { skipped: "fewer_than_10_images", registration: reel.registration, ...slotInfo };
+  }
+  if (!reel.vehicleUrl) {
+    return { skipped: "no_vehicle_url", registration: reel.registration, ...slotInfo };
+  }
 
   const destination = bufferDestinationForProduct(productKey);
-  const text = buildAutomatedReelCaption({
-    productKey,
-    registration: reel.registration,
-    title: reel.title,
-  });
+  const text = defaultCopyActive(dateKey)
+    ? buildDefaultReelCaption(reel.vehicle, productKey, { url: reel.vehicleUrl, hook: reel.hook })
+    : legacyReelCaption(reel, productKey);
   const post = await createBufferScheduledPost({
     destination,
     text,
@@ -398,6 +492,7 @@ async function createNextReel({ request, supabase, posts, automationConfig, prod
     dueAt: post.dueAt || slotInfo.slot.dueAt,
     localTime: slotInfo.slot.localTime,
     reusedReadyReel: Boolean(ready),
+    imageCount: Number(reel.usableImageCount || reel.imageCount || 0),
   };
 }
 
@@ -405,10 +500,9 @@ async function safeStep(label, action) {
   try {
     return await action();
   } catch (error) {
-    console.error(`[buffer-facebook-automation] ${label} failed`, {
-      message: error?.message || String(error),
-    });
-    return { error: error?.message || String(error) };
+    const message = errorText(error, `${label} failed.`);
+    console.error(`[buffer-facebook-automation] ${label} failed`, { message });
+    return { error: message };
   }
 }
 
@@ -489,12 +583,11 @@ export default async function handler(request, response) {
       elapsedMs: Date.now() - startedAt,
     });
   } catch (error) {
-    console.error("[buffer-facebook-automation] worker failed", {
-      message: error?.message || String(error),
-    });
+    const message = errorText(error, "Buffer Facebook automation worker failed.");
+    console.error("[buffer-facebook-automation] worker failed", { message });
     response.status(500).json({
       ok: false,
-      error: error?.message || "Buffer Facebook automation worker failed.",
+      error: message,
       elapsedMs: Date.now() - startedAt,
     });
   }
