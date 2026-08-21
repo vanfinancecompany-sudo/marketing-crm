@@ -2,8 +2,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { addDays, londonMidnightUtcIso, summaryFrom } from '../api/website-analytics-summary.js';
+import { mapExitPages } from '../api/website-analytics-details.js';
 
-describe('Website Analytics fresh summary', () => {
+describe('Website Analytics fresh data', () => {
   it('builds rolling date keys safely', () => {
     assert.equal(addDays('2026-08-20', -6), '2026-08-14');
     assert.equal(addDays('2026-08-14', -7), '2026-08-07');
@@ -27,11 +28,25 @@ describe('Website Analytics fresh summary', () => {
     assert.equal(result['traffic.views_count'], 615);
   });
 
-  it('uses the fresh summary only for headline metrics and labels stale detail separately', () => {
+  it('keeps exit-session ranking but restores the true page exit rate', () => {
+    const exitPayload = { results: [{ fields: {
+      'traffic.page_url_from': { stringValue: '/' },
+      'traffic.sessions_count': { numericValue: 468 },
+    } }] };
+    const pageRatePayload = { results: [{ fields: {
+      'traffic.page_url_from': { stringValue: '/' },
+      'traffic.exit_ratio': { numericValue: 0.54 },
+    } }] };
+    assert.deepEqual(mapExitPages(exitPayload, pageRatePayload), [{ url: '/', sessions: 468, exitRate: 0.54 }]);
+  });
+
+  it('loads headline and detail data directly from Marketing CRM Wix API routes', () => {
     const source = fs.readFileSync(new URL('../public/website-analytics/app.js', import.meta.url), 'utf8');
     assert.match(source, /SUMMARY_ENDPOINT = '\/api\/website-analytics-summary'/);
-    assert.match(source, /summaryData\?\.current\?\.summary/);
-    assert.match(source, /Traffic through \$\{trafficDate\} · detailed tables through \$\{detailDate\}/);
-    assert.match(source, /Promise\.all\(\[/);
+    assert.match(source, /DETAILS_ENDPOINT = '\/api\/website-analytics-details'/);
+    assert.doesNotMatch(source, /_functions\/marketingWebsiteAnalytics/);
+    assert.doesNotMatch(source, /_functions\/marketingApplicationFunnel/);
+    assert.match(source, /Postcode supplied<\/span><strong>Not measured/);
+    assert.match(source, /renderWatchlist\(data, data\.funnel, summaryData\)/);
   });
 });
