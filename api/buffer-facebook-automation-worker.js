@@ -18,6 +18,7 @@ import {
   buildBufferCreatePostInput,
   parseBufferAutomationPostsPayload,
   parseBufferCreatePostPayload,
+  readableBufferError,
 } from "../lib/bufferPublishing.js";
 import {
   automatedReelFrameSpecs,
@@ -36,6 +37,18 @@ const PRODUCTS = ["vanFinance", "rent2buy"];
 const MIN_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 const REEL_COOLDOWN_MS = 48 * 60 * 60 * 1000;
 const CHANNEL_QUEUE_LIMIT = 10;
+
+function errorText(value, fallback = "Automation request failed.") {
+  if (value instanceof Error) {
+    if (typeof value.message === "string" && value.message.trim()) {
+      return value.message.trim();
+    }
+    if (value.message && typeof value.message === "object") {
+      return readableBufferError(value.message, fallback);
+    }
+  }
+  return readableBufferError(value, fallback);
+}
 
 function authorize(request) {
   const cronSecret = String(process.env.CRON_SECRET || "");
@@ -74,7 +87,12 @@ async function bufferGraphql(query, variables = undefined) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload?.errors?.[0]?.message || `Buffer returned HTTP ${response.status}.`);
+    throw new Error(
+      errorText(
+        payload?.errors?.[0]?.message || payload,
+        `Buffer returned HTTP ${response.status}.`,
+      ),
+    );
   }
   return payload;
 }
@@ -267,7 +285,12 @@ async function loadReadyReels(supabase, productKey, dateKey) {
     .eq("source", "youtube_daily_batch")
     .order("occurred_at", { ascending: true })
     .limit(100);
-  if (result.error) throw result.error;
+  if (result.error) {
+    console.error(`[buffer-facebook-automation] ${productKey} ready Reel lookup failed; falling back to fresh render`, {
+      message: errorText(result.error, "Ready Reel lookup failed."),
+    });
+    return [];
+  }
   return (result.data || [])
     .filter((row) => row?.metadata?.download_url && !row?.metadata?.deleted_at)
     .map((row) => ({
@@ -298,7 +321,12 @@ async function internalJson(request, path, body, authenticated = true) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.ok === false) {
-    throw new Error(payload?.error || payload?.message || `${path} returned HTTP ${response.status}.`);
+    throw new Error(
+      errorText(
+        payload?.error || payload?.message || payload,
+        `${path} returned HTTP ${response.status}.`,
+      ),
+    );
   }
   return payload;
 }
@@ -405,10 +433,9 @@ async function safeStep(label, action) {
   try {
     return await action();
   } catch (error) {
-    console.error(`[buffer-facebook-automation] ${label} failed`, {
-      message: error?.message || String(error),
-    });
-    return { error: error?.message || String(error) };
+    const message = errorText(error, `${label} failed.`);
+    console.error(`[buffer-facebook-automation] ${label} failed`, { message });
+    return { error: message };
   }
 }
 
@@ -489,12 +516,11 @@ export default async function handler(request, response) {
       elapsedMs: Date.now() - startedAt,
     });
   } catch (error) {
-    console.error("[buffer-facebook-automation] worker failed", {
-      message: error?.message || String(error),
-    });
+    const message = errorText(error, "Buffer Facebook automation worker failed.");
+    console.error("[buffer-facebook-automation] worker failed", { message });
     response.status(500).json({
       ok: false,
-      error: error?.message || "Buffer Facebook automation worker failed.",
+      error: message,
       elapsedMs: Date.now() - startedAt,
     });
   }
