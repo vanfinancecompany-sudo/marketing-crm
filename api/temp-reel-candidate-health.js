@@ -1,5 +1,16 @@
 import { del } from "@vercel/blob";
 import { automatedReelFrameSpecs } from "../lib/facebookAutomationContent.js";
+import {
+  BUFFER_API_URL,
+  BUFFER_CREATE_POST_MUTATION,
+  buildBufferCreatePostInput,
+} from "../lib/bufferPublishing.js";
+
+const DELETE_POST_MUTATION = `
+  mutation DeletePost($input: DeletePostInput!) {
+    deletePost(input: $input) { __typename }
+  }
+`;
 
 function safe(value) {
   if (typeof value === "string") return value;
@@ -17,12 +28,30 @@ async function readJson(response) {
   catch { return { payload: {}, raw: text }; }
 }
 
+async function bufferGraphql(query, variables) {
+  const token = String(process.env.BUFFER_API_KEY || "").trim();
+  const response = await fetch(BUFFER_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  const read = await readJson(response);
+  return { response, ...read };
+}
+
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   if (req.method !== "GET") return res.status(405).json({ ok: false, error: "Method not allowed" });
+  let renderUrl = "";
+  let createdPostId = "";
   try {
     const key = String(process.env.MARKETING_CUSTOMER_DATABASE_API_KEY || "").trim();
-    if (!key) return res.status(200).json({ ok: false, stage: "config", error: "marketing key missing" });
+    const bufferKey = String(process.env.BUFFER_API_KEY || "").trim();
+    if (!key || !bufferKey) return res.status(200).json({ ok: false, stage: "config", error: "required server key missing" });
 
     const candidatesResponse = await fetch(`${baseUrl(req)}/api/youtube-daily-batch`, {
       method: "POST",
@@ -36,24 +65,11 @@ export default async function handler(req, res) {
     const candidatesRead = await readJson(candidatesResponse);
     const candidates = candidatesRead.payload;
     if (!candidatesResponse.ok || candidates?.ok === false) {
-      return res.status(200).json({
-        ok: false,
-        stage: "candidates",
-        status: candidatesResponse.status,
-        error: safe(candidates?.error || candidates?.message || candidatesRead.raw),
-      });
+      return res.status(200).json({ ok: false, stage: "candidates", status: candidatesResponse.status, error: safe(candidates?.error || candidates?.message || candidatesRead.raw) });
     }
 
     const candidate = Array.isArray(candidates?.finance) ? candidates.finance[0] : null;
-    if (!candidate) {
-      return res.status(200).json({
-        ok: false,
-        stage: "candidate-selection",
-        error: "No Finance Reel candidate available",
-        financeCount: Array.isArray(candidates?.finance) ? candidates.finance.length : null,
-        rent2buyCount: Array.isArray(candidates?.rent2buy) ? candidates.rent2buy.length : null,
-      });
-    }
+    if (!candidate) return res.status(200).json({ ok: false, stage: "candidate-selection", error: "No Finance Reel candidate available" });
 
     const vehicle = candidate.vehicle || {};
     const renderResponse = await fetch(`${baseUrl(req)}/api/youtube-mp4-render`, {
@@ -76,25 +92,46 @@ export default async function handler(req, res) {
     });
     const renderRead = await readJson(renderResponse);
     const render = renderRead.payload;
+    renderUrl = String(render?.downloadUrl || "");
+    if (!renderResponse.ok || render?.ok === false || !renderUrl) {
+      return res.status(200).json({ ok: false, stage: "render", status: renderResponse.status, error: safe(render?.error || render?.message || renderRead.raw) });
+    }
 
-    if (render?.downloadUrl) {
-      await del(render.downloadUrl).catch(() => {});
+    const input = buildBufferCreatePostInput({
+      destination: "Van Finance Facebook",
+      text: `DIAGNOSTIC REEL - ${candidate.registration}`,
+      mediaUrl: renderUrl,
+      mediaKind: "video",
+      draft: true,
+    });
+    const create = await bufferGraphql(BUFFER_CREATE_POST_MUTATION, { input });
+    createdPostId = String(create?.payload?.data?.createPost?.post?.id || "");
+
+    let deleteResult = null;
+    if (createdPostId) {
+      const deleted = await bufferGraphql(DELETE_POST_MUTATION, { input: { id: createdPostId } });
+      deleteResult = {
+        status: deleted.response.status,
+        payload: deleted.payload,
+      };
     }
 
     return res.status(200).json({
-      ok: renderResponse.ok && render?.ok !== false,
-      stage: "render",
-      status: renderResponse.status,
-      error: safe(render?.error || render?.message || (!renderResponse.ok ? renderRead.raw : "")),
+      ok: Boolean(createdPostId),
+      stage: "buffer-create",
       registration: candidate.registration,
-      candidateImages: Array.isArray(candidate.images) ? candidate.images.length : null,
       sourceImageCount: render?.sourceImageCount ?? null,
       usableImageCount: render?.usableImageCount ?? null,
       renderTimeMs: render?.renderTimeMs ?? null,
-      totalTimeMs: render?.totalTimeMs ?? null,
-      cleanedUp: Boolean(render?.downloadUrl),
+      bufferHttpStatus: create.response.status,
+      bufferPayload: create.payload,
+      createdPostId: createdPostId || null,
+      deletedDraft: Boolean(createdPostId && deleteResult),
+      deleteResult,
     });
   } catch (error) {
     return res.status(200).json({ ok: false, stage: "exception", error: safe(error?.message || error) });
+  } finally {
+    if (renderUrl) await del(renderUrl).catch(() => {});
   }
 }
