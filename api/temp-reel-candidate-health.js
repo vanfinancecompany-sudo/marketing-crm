@@ -97,12 +97,14 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: false, stage: "render", status: renderResponse.status, error: safe(render?.error || render?.message || renderRead.raw) });
     }
 
+    const dueAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
     const input = buildBufferCreatePostInput({
       destination: "Van Finance Facebook",
-      text: `DIAGNOSTIC REEL - ${candidate.registration}`,
+      text: `DIAGNOSTIC SCHEDULED REEL - ${candidate.registration}`,
       mediaUrl: renderUrl,
       mediaKind: "video",
-      draft: true,
+      draft: false,
+      dueAt,
     });
     const create = await bufferGraphql(BUFFER_CREATE_POST_MUTATION, { input });
     createdPostId = String(create?.payload?.data?.createPost?.post?.id || "");
@@ -118,15 +120,16 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       ok: Boolean(createdPostId),
-      stage: "buffer-create",
+      stage: "buffer-create-scheduled",
       registration: candidate.registration,
+      dueAt,
       sourceImageCount: render?.sourceImageCount ?? null,
       usableImageCount: render?.usableImageCount ?? null,
       renderTimeMs: render?.renderTimeMs ?? null,
       bufferHttpStatus: create.response.status,
       bufferPayload: create.payload,
       createdPostId: createdPostId || null,
-      deletedDraft: Boolean(createdPostId && deleteResult),
+      deletedScheduledPost: Boolean(createdPostId && deleteResult),
       deleteResult,
     });
   } catch (error) {
