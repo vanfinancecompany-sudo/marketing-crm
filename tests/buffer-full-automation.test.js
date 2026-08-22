@@ -117,11 +117,21 @@ test("temporary ten-Reel proof control is removed", () => {
   assert.match(reelBridge, /Buffer Draft/);
 });
 
-test("Vercel runs automation and delivery reconciliation hourly", () => {
+test("Vercel runs automation through the guarded retry cron and reconciles delivery hourly", () => {
   const vercel = JSON.parse(source("vercel.json"));
   const schedules = new Map(vercel.crons.map((entry) => [entry.path, entry.schedule]));
-  assert.equal(schedules.get("/api/buffer-facebook-automation-worker"), "5 * * * *");
+  assert.equal(schedules.get("/api/buffer-facebook-automation-cron"), "5 * * * *");
+  assert.equal(schedules.has("/api/buffer-facebook-automation-worker"), false);
   assert.equal(schedules.get("/api/buffer-publish-status"), "35 * * * *");
+});
+
+test("cron wrapper retries only transient Reel transport failures", () => {
+  const cron = source("api/buffer-facebook-automation-cron.js");
+  assert.match(cron, /MAX_ATTEMPTS = 2/);
+  assert.match(cron, /terminated\|fetch failed\|und_err_socket/);
+  assert.match(cron, /\/api\/buffer-facebook-automation-worker/);
+  assert.match(cron, /retrying transient Reel failure/);
+  assert.doesNotMatch(cron, /createBufferScheduledPost|BUFFER_CREATE_POST_MUTATION/);
 });
 
 test("delivery status route supports cron GET and cleans delivered Reel blobs", () => {
