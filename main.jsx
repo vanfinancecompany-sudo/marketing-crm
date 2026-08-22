@@ -37,15 +37,13 @@ function loadActiveBrowserIntegrations() {
 
 function ActiveApp() {
   React.useEffect(() => {
-    // The safety gate must win the browser startup race. Buffer observers and
-    // polling are deliberately attached only after this tab owns the CRM lock.
+    // The safety gate wins startup. Buffer integrations are loaded once after
+    // the real CRM mounts, then again only when browser navigation changes.
     const startupTimer = window.setTimeout(loadActiveBrowserIntegrations, 350);
-    const routeTimer = window.setInterval(loadActiveBrowserIntegrations, 1000);
     window.addEventListener("popstate", loadActiveBrowserIntegrations);
 
     return () => {
       window.clearTimeout(startupTimer);
-      window.clearInterval(routeTimer);
       window.removeEventListener("popstate", loadActiveBrowserIntegrations);
     };
   }, []);
