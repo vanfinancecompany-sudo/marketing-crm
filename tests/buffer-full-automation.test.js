@@ -69,20 +69,26 @@ test("Buffer custom schedule uses dueAt without draft or share-now behaviour", (
   assert.equal("shareNow" in input, false);
 });
 
-test("automated captions keep direct website URLs and add no tracking redirect", () => {
-  const vehicle = {
+test("automated captions keep direct live vehicle URLs and add no tracking redirect", () => {
+  const financeVehicle = {
     registration: "AB12CDE",
     vanDescription: "Ford Transit Custom",
+    weblink: "https://www.vanfinancecompany.co.uk/van-finance/live-ab12cde",
   };
-  const finance = buildAutomatedFacebookCaption(vehicle, "vanFinance");
-  const rent = buildAutomatedFacebookCaption(vehicle, "rent2buy");
-  const reel = buildAutomatedReelCaption({ productKey: "rent2buy", registration: "AB12CDE", title: "Ford Transit Custom" });
+  const rentVehicle = {
+    registration: "AB12CDE",
+    vanDescription: "Ford Transit Custom",
+    webLink: "https://www.rent2buyvans.co.uk/van-pages/live-ab12cde",
+  };
+  const finance = buildAutomatedFacebookCaption(financeVehicle, "vanFinance");
+  const rent = buildAutomatedFacebookCaption(rentVehicle, "rent2buy");
+  const reel = buildAutomatedReelCaption({ productKey: "rent2buy", vehicle: rentVehicle, registration: "AB12CDE", title: "Ford Transit Custom" });
   for (const text of [finance, rent, reel]) {
     assert.doesNotMatch(text, /utm_/i);
     assert.doesNotMatch(text, /\/track|\/r\//i);
   }
-  assert.match(finance, /https:\/\/www\.vanfinancecompany\.co\.uk\/van-finance\/AB12CDE/);
-  assert.match(rent, /https:\/\/www\.rent2buyvans\.co\.uk\/van-pages\/AB12CDE/);
+  assert.match(finance, /https:\/\/www\.vanfinancecompany\.co\.uk\/van-finance\/live-ab12cde/);
+  assert.match(rent, /https:\/\/www\.rent2buyvans\.co\.uk\/van-pages\/live-ab12cde/);
 });
 
 test("worker keeps the Buffer Free queue cap while filling the larger daily target gradually", () => {
@@ -104,10 +110,11 @@ test("legacy five-plus-five settings are superseded without losing the pause sta
   assert.match(configSource, /enabled: legacyConfig\.enabled/);
 });
 
-test("Daily Reels live-status observer cannot rerender its own status mutation forever", () => {
+test("Daily Reels live status uses bounded refreshes instead of a document-wide mutation observer", () => {
   const liveStatus = source("public/buffer-live-status.js");
-  assert.match(liveStatus, /MutationObserver/);
-  assert.match(liveStatus, /lastPayload && !document\.getElementById\(STATUS_ID\)/);
+  assert.doesNotMatch(liveStatus, /MutationObserver/);
+  assert.match(liveStatus, /REFRESH_MS = 60 \* 1000/);
+  assert.match(liveStatus, /setInterval\(\(\) => refresh\(true\), REFRESH_MS\)/);
 });
 
 test("temporary ten-Reel proof control is removed", () => {
