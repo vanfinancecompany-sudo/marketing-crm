@@ -3,7 +3,7 @@ import {
   parseMarketingJsonResponse,
 } from "./marketingAccess.js";
 
-const API_ROUTE = "/api/buffer-publish-status";
+const API_ROUTE = "/api/buffer-publish-status-ui";
 
 export async function syncBufferPublishStatus() {
   const response = await fetch(API_ROUTE, {
