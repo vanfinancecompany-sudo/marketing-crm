@@ -1,18 +1,8 @@
-const ACCESS_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
-const ACCESS_HEADER = "x-marketing-customer-database-key";
 const STATUS_ID = "bufferFacebookLiveStatus";
 const REFRESH_MS = 60 * 1000;
 let lastCheckedAt = 0;
 let lastPayload = null;
 let inFlight = null;
-
-function storedAccessKey() {
-  try {
-    return localStorage.getItem(ACCESS_STORAGE_KEY) || sessionStorage.getItem(ACCESS_STORAGE_KEY) || "";
-  } catch {
-    return "";
-  }
-}
 
 function pageKind() {
   const path = window.location.pathname;
@@ -35,18 +25,13 @@ function formatCheckedAt(value) {
 }
 
 async function requestStatus(force = false) {
-  const key = storedAccessKey();
-  if (!key) return null;
   const now = Date.now();
   if (!force && lastPayload && now - lastCheckedAt < 20_000) return lastPayload;
   if (inFlight) return inFlight;
 
-  inFlight = fetch("/api/buffer-publish-status", {
+  inFlight = fetch("/api/buffer-publish-status-ui", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      [ACCESS_HEADER]: key,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "sync" }),
   })
     .then(async (response) => {
@@ -151,12 +136,18 @@ function renderStatus(payload) {
   }
 }
 
+function renderWhenReady(payload) {
+  [0, 400, 1200, 2500].forEach((delay) => {
+    setTimeout(() => renderStatus(payload), delay);
+  });
+}
+
 async function refresh(force = false) {
   if (!pageKind()) return;
   try {
     const payload = await requestStatus(force);
     if (!payload) return;
-    renderStatus(payload);
+    renderWhenReady(payload);
     window.dispatchEvent(new CustomEvent("buffer-facebook-live-status", { detail: payload }));
     if (pageKind() === "operations" && Number(payload.synced || 0) > 0) {
       window.dispatchEvent(new CustomEvent("marketing-daily-operations-refresh", {
@@ -171,10 +162,7 @@ async function refresh(force = false) {
   }
 }
 
-const observer = new MutationObserver(() => {
-  if (lastPayload && !document.getElementById(STATUS_ID)) renderStatus(lastPayload);
-});
-observer.observe(document.documentElement, { childList: true, subtree: true });
-window.addEventListener("popstate", () => setTimeout(() => refresh(true), 50));
+window.addEventListener("popstate", () => setTimeout(() => refresh(true), 100));
+window.addEventListener("focus", () => refresh(false));
 setInterval(() => refresh(true), REFRESH_MS);
-setTimeout(() => refresh(true), 250);
+setTimeout(() => refresh(true), 600);

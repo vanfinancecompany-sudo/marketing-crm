@@ -1,19 +1,10 @@
-const ACCESS_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
-const ACCESS_HEADER = "x-marketing-customer-database-key";
 const SUPPORTED_DESTINATIONS = new Set([
   "Van Finance Facebook",
   "Rent2Buy Facebook",
 ]);
 let automationConfig = null;
 let automationLoading = false;
-
-function storedAccessKey() {
-  try {
-    return localStorage.getItem(ACCESS_STORAGE_KEY) || sessionStorage.getItem(ACCESS_STORAGE_KEY) || "";
-  } catch {
-    return "";
-  }
-}
+let decorateTimers = [];
 
 function normalizeRegistration(value) {
   const text = String(value || "").toUpperCase();
@@ -22,14 +13,9 @@ function normalizeRegistration(value) {
 }
 
 function currentDestination() {
-  const visibleTag = [...document.querySelectorAll(".posting-destination-tag")]
-    .map((node) => node.textContent?.trim())
-    .find((value) => SUPPORTED_DESTINATIONS.has(value));
-  if (visibleTag) return visibleTag;
-
-  const bodyText = document.body?.innerText || "";
-  if (bodyText.includes("Rent2Buy Facebook")) return "Rent2Buy Facebook";
-  if (bodyText.includes("Van Finance Facebook")) return "Van Finance Facebook";
+  const path = window.location.pathname;
+  if (path === "/van-finance-facebook") return "Van Finance Facebook";
+  if (path === "/rent2buy-facebook") return "Rent2Buy Facebook";
   return "";
 }
 
@@ -82,14 +68,11 @@ function showToast(message, isError = false) {
   showToast.timer = setTimeout(() => { toast.hidden = true; }, 5000);
 }
 
-async function authenticatedJson(path, options = {}) {
-  const accessKey = storedAccessKey();
-  if (!accessKey) throw new Error("Open and unlock the Marketing CRM first.");
+async function uiJson(path, options = {}) {
   const response = await fetch(path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      [ACCESS_HEADER]: accessKey,
       ...(options.headers || {}),
     },
   });
@@ -111,8 +94,8 @@ async function createBufferDraft(card, button) {
     || "";
   const imageUrl = card.querySelector("img.posting-card__image")?.src || "";
 
-  if (!text || !imageUrl) {
-    showToast(`Could not find the existing caption or image${registration ? ` for ${registration}` : ""}.`, true);
+  if (!registration || !imageUrl) {
+    showToast(`Could not find the registration or image${registration ? ` for ${registration}` : ""}.`, true);
     return;
   }
 
@@ -121,7 +104,7 @@ async function createBufferDraft(card, button) {
   button.textContent = "Sending to Buffer...";
 
   try {
-    const result = await authenticatedJson("/api/buffer-publishing", {
+    const result = await uiJson("/api/buffer-publishing-ui", {
       method: "POST",
       body: JSON.stringify({
         action: "createFacebookImageDraft",
@@ -133,7 +116,7 @@ async function createBufferDraft(card, button) {
     });
     button.textContent = "Buffer Draft ✓";
     button.dataset.bufferPostId = result.bufferPostId || "";
-    showToast(`${registration || "Vehicle"} is safely sitting in Buffer Drafts.`);
+    showToast(`${registration} is safely sitting in Buffer Drafts.`);
   } catch (error) {
     button.disabled = false;
     button.textContent = originalText;
@@ -168,7 +151,7 @@ async function loadAutomationSettings() {
   if (automationLoading || automationConfig) return;
   automationLoading = true;
   try {
-    const result = await authenticatedJson("/api/buffer-automation-settings", { method: "GET" });
+    const result = await uiJson("/api/buffer-automation-settings-ui", { method: "GET" });
     automationConfig = result.config || { enabled: true };
   } catch (error) {
     console.warn("[buffer-automation] settings unavailable", error);
@@ -188,7 +171,7 @@ async function toggleAutomation(panel) {
     button.textContent = nextEnabled ? "Resuming..." : "Pausing...";
   }
   try {
-    const result = await authenticatedJson("/api/buffer-automation-settings", {
+    const result = await uiJson("/api/buffer-automation-settings-ui", {
       method: "POST",
       body: JSON.stringify({
         config: { ...automationConfig, enabled: nextEnabled },
@@ -251,12 +234,17 @@ function decorate() {
   decorateAutomationPanel();
 }
 
-const observer = new MutationObserver(() => decorate());
-observer.observe(document.documentElement, { childList: true, subtree: true });
+function scheduleDecorate() {
+  for (const timer of decorateTimers) clearTimeout(timer);
+  decorateTimers = [0, 250, 750, 1500, 3000, 6000].map((delay) =>
+    setTimeout(decorate, delay),
+  );
+}
+
 window.addEventListener("popstate", () => {
   automationConfig = null;
   document.querySelector("[data-buffer-automation-panel]")?.remove();
-  decorate();
+  scheduleDecorate();
 });
-setInterval(decorate, 1500);
-decorate();
+window.addEventListener("focus", decorate);
+scheduleDecorate();

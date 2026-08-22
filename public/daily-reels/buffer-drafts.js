@@ -1,14 +1,3 @@
-const ACCESS_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
-const ACCESS_HEADER = "x-marketing-customer-database-key";
-
-function storedAccessKey() {
-  try {
-    return localStorage.getItem(ACCESS_STORAGE_KEY) || sessionStorage.getItem(ACCESS_STORAGE_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-
 function normalizeRegistration(value) {
   return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
@@ -16,14 +5,6 @@ function normalizeRegistration(value) {
 function productKeyForRow(row) {
   const list = row.closest("#financeList, #rentList");
   return list?.id === "rentList" ? "rent2buy" : "vanFinance";
-}
-
-function buildCaption({ productKey, registration, title }) {
-  const cleanTitle = String(title || "Vehicle reel").replace(/\s*·\s*[0-9.]+\s*(?:KB|MB|GB).*$/i, "").trim();
-  if (productKey === "rent2buy") {
-    return `${cleanTitle}\n\nREGISTRATION: ${registration}\n\nRENT IT! - DRIVE IT! - OWN IT!\nCheck if you qualify online.\n\nhttps://www.rent2buyvans.co.uk/van-pages/${registration}`;
-  }
-  return `${cleanTitle}\n\nREGISTRATION: ${registration}\n\nVan finance available. Free UK delivery. Apply online today.\n\nhttps://www.vanfinancecompany.co.uk/van-finance/${registration}`;
 }
 
 function setPageStatus(message, error = false) {
@@ -34,14 +15,9 @@ function setPageStatus(message, error = false) {
 }
 
 async function bufferRequest(payload) {
-  const accessKey = storedAccessKey();
-  if (!accessKey) throw new Error("Open and unlock the Marketing CRM first, then try Buffer again.");
-  const response = await fetch("/api/buffer-publishing", {
+  const response = await fetch("/api/buffer-publishing-ui", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      [ACCESS_HEADER]: accessKey,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   const result = await response.json().catch(() => ({}));
@@ -71,13 +47,13 @@ async function createReelDraft(row, button) {
     const result = await bufferRequest({
       action: "createFacebookReelDraft",
       productKey,
-      text: buildCaption({ productKey, registration, title }),
+      title,
       mediaUrl: videoUrl,
       registration,
     });
     button.textContent = "Buffer Draft ✓";
     button.dataset.bufferPostId = result.bufferPostId || "";
-    setPageStatus(`${registration} is safely sitting in Buffer Drafts.`);
+    setPageStatus(`${registration} is safely sitting in Buffer Drafts with the full vehicle advert copy.`);
   } catch (error) {
     button.disabled = false;
     button.textContent = originalText;
@@ -98,7 +74,20 @@ function decorateRows() {
   }
 }
 
-const observer = new MutationObserver(() => decorateRows());
-observer.observe(document.documentElement, { childList: true, subtree: true });
-setInterval(decorateRows, 1500);
+let decorateQueued = false;
+function queueDecorate() {
+  if (decorateQueued) return;
+  decorateQueued = true;
+  setTimeout(() => {
+    decorateQueued = false;
+    decorateRows();
+  }, 50);
+}
+
+for (const list of [document.getElementById("financeList"), document.getElementById("rentList")]) {
+  if (!list) continue;
+  const observer = new MutationObserver(queueDecorate);
+  observer.observe(list, { childList: true });
+}
+
 decorateRows();
