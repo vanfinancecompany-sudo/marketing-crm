@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
   clearMarketingAccessKey,
   validateMarketingAccessKey,
@@ -63,4 +64,17 @@ test("Marketing access validation does not cache a rejected key", async () => {
     clearMarketingAccessKey();
     globalThis.fetch = originalFetch;
   }
+});
+
+test("Buffer browser integrations cannot start before the active-tab safety gate", () => {
+  const index = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const main = fs.readFileSync(new URL("../main.jsx", import.meta.url), "utf8");
+
+  assert.doesNotMatch(index, /buffer-posting-bridge\.js/);
+  assert.doesNotMatch(index, /buffer-live-status\.js/);
+  assert.match(main, /<SingleActiveTabGate>/);
+  assert.match(main, /<ActiveApp\s*\/>/);
+  assert.match(main, /setTimeout\(loadActiveBrowserIntegrations, 350\)/);
+  assert.match(main, /isFacebookPosting/);
+  assert.match(main, /activeBufferPostingBridge/);
 });
