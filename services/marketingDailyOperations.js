@@ -5,7 +5,7 @@ import {
 } from "./marketingAccess.js";
 import { syncBufferPublishStatus } from "./bufferPublishStatus.js";
 
-const API_ROUTE = "/api/marketing-daily-operations";
+const API_ROUTE = "/api/marketing-daily-operations-ui";
 export const DAILY_OPERATIONS_REFRESH_EVENT =
   "marketing-daily-operations-refresh";
 export const YOUTUBE_TRACKING_WARNING =
