@@ -9,6 +9,10 @@
       "schedule": "5 * * * *"
     },
     {
+      "path": "/api/buffer-instagram-mirror",
+      "schedule": "14 * * * *"
+    },
+    {
       "path": "/api/marketing-editorial-automation-worker",
       "schedule": "17 * * * *"
     },
@@ -27,6 +31,9 @@
     },
     "api/buffer-facebook-automation-cron.js": {
       "maxDuration": 300
+    },
+    "api/buffer-instagram-mirror.js": {
+      "maxDuration": 120
     },
     "api/marketing-editorial-automation-worker.js": {
       "maxDuration": 300
