@@ -1,3 +1,4 @@
+import { createClient } from "@supabase/supabase-js";
 import {
   BUFFER_API_URL,
   BUFFER_CREATE_POST_MUTATION,
@@ -5,6 +6,11 @@ import {
   buildBufferCreatePostInput,
   parseBufferCreatePostPayload,
 } from "../lib/bufferPublishing.js";
+import { buildAutomatedFacebookCaption } from "../lib/facebookAutomationContent.js";
+import {
+  mapFinanceVehicleRow,
+  mapRentVehicleRow,
+} from "../services/marketingVehicleContract.js";
 
 const ACCESS_HEADER = "x-marketing-customer-database-key";
 
@@ -27,6 +33,10 @@ function clean(value) {
   return String(value ?? "").trim();
 }
 
+function normalizeRegistration(value) {
+  return clean(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
 function parseBody(request) {
   if (request.body && typeof request.body === "object") return request.body;
   if (typeof request.body === "string") {
@@ -37,6 +47,59 @@ function parseBody(request) {
     }
   }
   return {};
+}
+
+function getSupabase() {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("Missing server Supabase environment variables.");
+  }
+  return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false },
+  });
+}
+
+async function loadVehicle(productKey, registration) {
+  const wanted = normalizeRegistration(registration);
+  if (!wanted) return null;
+  const supabase = getSupabase();
+
+  if (productKey === "rent2buy") {
+    const result = await supabase
+      .from("rent_vehicles")
+      .select("id,created_at,registration,picture,monthly,week,initialRental,vanDescription,vanSpec,webLink,is_active")
+      .eq("is_active", true)
+      .limit(500);
+    if (result.error) throw result.error;
+    return (result.data || [])
+      .map(mapRentVehicleRow)
+      .find((vehicle) => normalizeRegistration(vehicle.registration || vehicle.reg) === wanted) || null;
+  }
+
+  const result = await supabase
+    .from("facebook_adverts")
+    .select("id,title,picture,price,vat,salePrice,vanDescription,vanSpec,weblink,is_active")
+    .eq("is_active", true)
+    .limit(500);
+  if (result.error) throw result.error;
+  return (result.data || [])
+    .map(mapFinanceVehicleRow)
+    .find((vehicle) => normalizeRegistration(vehicle.registration || vehicle.reg || vehicle.title) === wanted) || null;
+}
+
+async function canonicalCaption(body, destination, productKey) {
+  const registration = normalizeRegistration(body.registration);
+  if (!registration) return clean(body.text);
+
+  const vehicle = await loadVehicle(productKey, registration);
+  if (vehicle) return buildAutomatedFacebookCaption(vehicle, productKey);
+
+  return buildAutomatedFacebookCaption({
+    registration,
+    reg: registration,
+    title: clean(body.title) || registration,
+    name: clean(body.title) || registration,
+    vanDescription: clean(body.title) || registration,
+  }, productKey);
 }
 
 async function createBufferPost({ destination, text, mediaUrl, mediaKind, draft }) {
@@ -90,18 +153,21 @@ export default async function handler(request, response) {
     const action = clean(body.action);
 
     let destination = clean(body.destination);
+    let productKey = destination === "Rent2Buy Facebook" ? "rent2buy" : "vanFinance";
     let mediaKind = "image";
     let draft = true;
 
     if (action === "createFacebookReelDraft") {
-      destination = bufferDestinationForProduct(clean(body.productKey));
+      productKey = clean(body.productKey) === "rent2buy" ? "rent2buy" : "vanFinance";
+      destination = bufferDestinationForProduct(productKey);
       mediaKind = "video";
     } else if (action === "createFacebookReelQueue") {
       if (body.confirmQueue !== true) {
         sendJson(response, 400, { ok: false, error: "Explicit Buffer queue confirmation is required." });
         return;
       }
-      destination = bufferDestinationForProduct(clean(body.productKey));
+      productKey = clean(body.productKey) === "rent2buy" ? "rent2buy" : "vanFinance";
+      destination = bufferDestinationForProduct(productKey);
       mediaKind = "video";
       draft = false;
     } else if (action !== "createFacebookImageDraft") {
@@ -109,9 +175,10 @@ export default async function handler(request, response) {
       return;
     }
 
+    const text = await canonicalCaption(body, destination, productKey);
     const post = await createBufferPost({
       destination,
-      text: body.text,
+      text,
       mediaUrl: body.mediaUrl,
       mediaKind,
       draft,
@@ -124,7 +191,7 @@ export default async function handler(request, response) {
       destination,
       bufferPostId: post.id,
       status: post.status || (draft ? "draft" : "scheduled"),
-      text: post.text || clean(body.text),
+      text: post.text || text,
       assets: post.assets || [],
     });
   } catch (error) {
