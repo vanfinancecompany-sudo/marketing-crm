@@ -16,6 +16,7 @@ import {
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
 
 const ACCESS_HEADER = "x-marketing-customer-database-key";
+const REEL_BLOB_MIN_SENT_AGE_MS = 30 * 60 * 1000;
 
 function authorize(request) {
   const marketingKey = String(process.env.MARKETING_CUSTOMER_DATABASE_API_KEY || "");
@@ -174,6 +175,9 @@ async function cleanDeliveredReelBlobs(supabase, descriptors) {
   let cleaned = 0;
   const alreadyHandled = new Set();
   for (const item of sentReels) {
+    const sentAtMs = new Date(item.sentAt || 0).getTime();
+    if (!Number.isFinite(sentAtMs) || Date.now() - sentAtMs < REEL_BLOB_MIN_SENT_AGE_MS) continue;
+
     const row = rows.find((candidate) => {
       if (alreadyHandled.has(candidate.id)) return false;
       if (candidate?.metadata?.deleted_at) return false;
@@ -190,7 +194,7 @@ async function cleanDeliveredReelBlobs(supabase, descriptors) {
         .update({
           metadata: {
             ...(row.metadata || {}),
-            deleted_at: item.sentAt,
+            deleted_at: new Date().toISOString(),
             buffer_post_id: item.bufferPostId,
             facebook_live: true,
           },
