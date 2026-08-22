@@ -236,6 +236,14 @@ async function loadVehicles(supabase, productKey) {
   return (result.data || []).map(mapFinanceVehicleRow);
 }
 
+function findVehicleByRegistration(vehicles, registration) {
+  const wanted = normalizeReg(registration);
+  if (!wanted) return null;
+  return (vehicles || []).find((vehicle) => normalizeReg(
+    vehicle?.registration || vehicle?.reg || vehicle?.title || vehicle?.name,
+  ) === wanted) || null;
+}
+
 async function createNextImagePost({ supabase, posts, automationConfig, productKey, dateKey, now }) {
   if (queuedCount(posts, productKey) >= CHANNEL_QUEUE_LIMIT) {
     return { skipped: "buffer_queue_full" };
@@ -387,6 +395,7 @@ async function generateOneReel(request, productKey, dateKey, packIndex, excluded
     registration: normalizeReg(candidate.registration),
     title: candidate.title,
     downloadUrl: rendered.downloadUrl,
+    vehicle,
   };
 }
 
@@ -409,9 +418,16 @@ async function createNextReel({ request, supabase, posts, automationConfig, prod
   const reel = ready || (await generateOneReel(request, productKey, dateKey, slotInfo.existing, excluded));
   if (!reel) return { skipped: "no_candidate", ...slotInfo };
 
+  let captionVehicle = reel.vehicle || null;
+  if (!captionVehicle) {
+    const vehicles = await loadVehicles(supabase, productKey);
+    captionVehicle = findVehicleByRegistration(vehicles, reel.registration);
+  }
+
   const destination = bufferDestinationForProduct(productKey);
   const text = buildAutomatedReelCaption({
     productKey,
+    vehicle: captionVehicle,
     registration: reel.registration,
     title: reel.title,
   });
