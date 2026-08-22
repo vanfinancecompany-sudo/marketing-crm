@@ -1,16 +1,11 @@
-import {
-  buildMarketingAccessHeaders,
-  parseMarketingJsonResponse,
-} from "./marketingAccess.js";
+import { parseMarketingJsonResponse } from "./marketingAccess.js";
 
 const API_ROUTE = "/api/buffer-publish-status-ui";
 
 export async function syncBufferPublishStatus() {
   const response = await fetch(API_ROUTE, {
     method: "POST",
-    headers: buildMarketingAccessHeaders({
-      "Content-Type": "application/json",
-    }),
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "sync" }),
   });
   return parseMarketingJsonResponse(
