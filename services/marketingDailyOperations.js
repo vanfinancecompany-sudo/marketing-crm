@@ -1,8 +1,5 @@
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
-import {
-  buildMarketingAccessHeaders,
-  parseMarketingJsonResponse,
-} from "./marketingAccess.js";
+import { parseMarketingJsonResponse } from "./marketingAccess.js";
 import { syncBufferPublishStatus } from "./bufferPublishStatus.js";
 
 const API_ROUTE = "/api/marketing-daily-operations-ui";
@@ -14,9 +11,7 @@ export const YOUTUBE_TRACKING_WARNING =
 async function requestDailyOperations(action, payload = {}) {
   const response = await fetch(API_ROUTE, {
     method: "POST",
-    headers: buildMarketingAccessHeaders({
-      "Content-Type": "application/json",
-    }),
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, ...payload }),
   });
   return parseMarketingJsonResponse(
