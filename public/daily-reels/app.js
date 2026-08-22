@@ -1,5 +1,3 @@
-const ACCESS_STORAGE_KEY = "marketingCustomerDatabaseApiKey";
-const ACCESS_HEADER = "x-marketing-customer-database-key";
 const TARGET_PER_PRODUCT = 10;
 const FRAME_COUNT = 10;
 const TEMPLATE_KEY = "tiktokPunch";
@@ -153,25 +151,10 @@ function renderSidebar() {
   }
 }
 
-function storedAccessKey() {
-  try {
-    return localStorage.getItem(ACCESS_STORAGE_KEY) || sessionStorage.getItem(ACCESS_STORAGE_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-
 async function api(action, payload = {}) {
-  const key = storedAccessKey();
-  if (!key) {
-    throw new Error("Marketing CRM access is not unlocked in this browser. Open the main CRM once, unlock it, then return to Daily Reels.");
-  }
-  const response = await fetch("/api/youtube-daily-batch", {
+  const response = await fetch("/api/youtube-daily-batch-ui", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      [ACCESS_HEADER]: key,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, ...payload }),
   });
   const result = await response.json().catch(() => ({}));
