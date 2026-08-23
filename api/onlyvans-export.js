@@ -4,35 +4,85 @@ const WIX_FINANCE_CMS_ENDPOINT =
   "https://www.vanfinancecompany.co.uk/_functions/marketingVanFinanceImages";
 
 const ONLYVANS_COLUMNS = [
-  "title","make","model","year","registration","mileage","price","fuel_type","transmission",
-  "engine_size_cc","location","postcode","description","image_urls","features",
-  "price_includes_vat","price_negotiable","v5c_logbook_available","hpi_clear","ulez_compliant",
-  "seller_type","service_history","condition","is_camper_van","berths","seatbelts","kitchen",
-  "shower","toilet","cooker","water_tank_size","electric_power","height","pop_top","insulation_level",
+  "title",
+  "make",
+  "model",
+  "year",
+  "registration",
+  "mileage",
+  "price",
+  "fuel_type",
+  "transmission",
+  "engine_size_cc",
+  "location",
+  "postcode",
+  "description",
+  "image_urls",
+  "features",
+  "price_includes_vat",
+  "price_negotiable",
+  "v5c_logbook_available",
+  "hpi_clear",
+  "ulez_compliant",
+  "seller_type",
+  "service_history",
+  "condition",
+  "is_camper_van",
+  "berths",
+  "seatbelts",
+  "kitchen",
+  "shower",
+  "toilet",
+  "cooker",
+  "water_tank_size",
+  "electric_power",
+  "height",
+  "pop_top",
+  "insulation_level",
 ];
+
+const MODEL_RULES = {
+  "Mercedes-Benz": ["Sprinter", "Vito", "Citan"],
+  Renault: ["Trafic", "Master", "Kangoo"],
+  Volkswagen: ["Transporter", "Caddy", "Crafter", "Amarok"],
+  Fiat: ["Ducato", "Doblo", "Talento", "Scudo"],
+  Peugeot: ["Partner", "Expert", "Boxer"],
+  Citroen: ["Berlingo", "Dispatch", "Relay"],
+  Vauxhall: ["Vivaro", "Combo", "Movano"],
+  Nissan: ["Primastar", "NV200", "NV300", "NV400", "Interstar", "Navara"],
+  Iveco: ["Daily"],
+  MAN: ["TGE"],
+  MAXUS: ["eDeliver 9", "eDeliver 3", "Deliver 9", "Deliver 3"],
+  Toyota: ["Proace", "Hilux"],
+  Isuzu: ["D-Max"],
+  Mitsubishi: ["L200"],
+  Hyundai: ["iLoad", "H350"],
+  LDV: ["V80"],
+};
 
 const SUPPORTED_MAKES = new Set([
-  "Ford","Mercedes-Benz","Renault","Volkswagen","Fiat","Peugeot","Citroen","Vauxhall","Nissan",
-  "Iveco","MAN","MAXUS","Dacia","DFSK","Hyundai","Suzuki","Mitsubishi","Kia","Toyota","LDV",
-  "Isuzu","Elddis","Leisuredrive","Auto-Sleepers","Bailey","Dethleffs","Hymer","Knaus",
-  "Roller Team","Weinsberg","Adria","Chausson","Pilote","Rapido","Bürstner",
+  "Ford",
+  "Mercedes-Benz",
+  "Renault",
+  "Volkswagen",
+  "Fiat",
+  "Peugeot",
+  "Citroen",
+  "Vauxhall",
+  "Nissan",
+  "Iveco",
+  "MAN",
+  "MAXUS",
+  "Dacia",
+  "DFSK",
+  "Hyundai",
+  "Suzuki",
+  "Mitsubishi",
+  "Kia",
+  "Toyota",
+  "LDV",
+  "Isuzu",
 ]);
-
-const MODEL_RULES = [
-  ["Mercedes-Benz", ["Sprinter", "Vito", "Citan"]],
-  ["Renault", ["Trafic", "Master", "Kangoo"]],
-  ["Volkswagen", ["Transporter", "Caddy", "Crafter", "Amarok"]],
-  ["Fiat", ["Ducato", "Doblo", "Talento", "Scudo"]],
-  ["Peugeot", ["Partner", "Expert", "Boxer"]],
-  ["Citroen", ["Berlingo", "Dispatch", "Relay"]],
-  ["Vauxhall", ["Vivaro", "Combo", "Movano"]],
-  ["Nissan", ["Primastar", "NV200", "NV300", "NV400", "Interstar", "Navara"]],
-  ["Iveco", ["Daily"]],
-  ["MAN", ["TGE"]],
-  ["MAXUS", ["eDeliver 9", "eDeliver 3", "Deliver 9", "Deliver 3"]],
-  ["Toyota", ["Proace", "Hilux"]],
-  ["Isuzu", ["D-Max"]],
-];
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -51,7 +101,9 @@ function registrationKey(value) {
 
 function extractRegistration(...values) {
   const text = values.map(clean).join(" ").toUpperCase();
-  const match = text.match(/\b([A-Z]{2}[0-9]{2}\s?[A-Z]{3}|[A-Z][0-9]{1,3}\s?[A-Z]{3}|[A-Z]{3}\s?[0-9]{1,3}[A-Z]|[0-9]{1,4}\s?[A-Z]{1,3})\b/);
+  const match = text.match(
+    /\b([A-Z]{2}[0-9]{2}\s?[A-Z]{3}|[A-Z][0-9]{1,3}\s?[A-Z]{3}|[A-Z]{3}\s?[0-9]{1,3}[A-Z]|[0-9]{1,4}\s?[A-Z]{1,3})\b/,
+  );
   return match ? registrationKey(match[1]) : "";
 }
 
@@ -65,26 +117,49 @@ function csvLine(values) {
 }
 
 function parseMoney(value) {
-  const match = String(value || "").replace(/,/g, "").match(/-?\d+(?:\.\d+)?/);
+  const match = String(value || "").replace(/,/g, "").match(/\d+(?:\.\d+)?/);
   return match ? String(Math.round(Number(match[0]))) : "";
 }
 
-function extractYear(registration, ...values) {
-  const text = values.map(clean).join(" ");
-  const explicit = text.match(/\b(20[0-3][0-9])\b/);
-  if (explicit) return explicit[1];
-  const age = registrationKey(registration).match(/^[A-Z]{2}([0-9]{2})[A-Z]{3}$/);
-  if (!age) return "";
-  const n = Number(age[1]);
-  if (!Number.isFinite(n)) return "";
-  return n >= 50 ? String(2000 + n - 50) : String(2000 + n);
+function labelledSpecValue(spec, label) {
+  const lines = String(spec || "")
+    .replace(/\r/g, "\n")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const wanted = String(label || "").toUpperCase();
+  const line = lines.find((item) => item.toUpperCase().startsWith(`${wanted}:`));
+  if (line) return line.slice(line.indexOf(":") + 1).trim();
+
+  const flattened = String(spec || "").replace(/\s+/g, " ");
+  const match = flattened.match(new RegExp(`${wanted}\\s*:\\s*([^_]{1,40})`, "i"));
+  return match ? clean(match[1]) : "";
 }
 
-function extractMileage(...values) {
-  const text = values.map(clean).join(" ");
-  const explicit = text.match(/(?:MILEAGE|MILES?)\s*[:\-]?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})/i)
-    || text.match(/\b([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})\s*(?:MILES?|MLS)\b/i);
-  return explicit ? explicit[1].replace(/,/g, "") : "";
+function parseYear(spec, registration, ...fallbacks) {
+  const labelled = labelledSpecValue(spec, "YEAR");
+  const labelledYear = labelled.match(/\b(20[0-3][0-9])\b/);
+  if (labelledYear) return labelledYear[1];
+
+  const fallbackText = fallbacks.map(clean).join(" ");
+  const explicit = fallbackText.match(/\b(20[0-3][0-9])\b/);
+  if (explicit) return explicit[1];
+
+  const age = registrationKey(registration).match(/^[A-Z]{2}([0-9]{2})[A-Z]{3}$/);
+  if (!age) return "";
+  const number = Number(age[1]);
+  if (!Number.isFinite(number)) return "";
+  return number >= 50 ? String(2000 + number - 50) : String(2000 + number);
+}
+
+function parseMileage(spec, ...fallbacks) {
+  const labelled = labelledSpecValue(spec, "MILEAGE");
+  const labelledDigits = labelled.replace(/[^0-9]/g, "");
+  if (labelledDigits) return labelledDigits;
+
+  const text = fallbacks.map(clean).join(" ");
+  const match = text.match(/\b([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})\s*(?:MILES?|MLS)\b/i);
+  return match ? match[1].replace(/,/g, "") : "";
 }
 
 function extractEngineSizeCc(...values) {
@@ -133,14 +208,16 @@ function detectMake(text) {
     ["Mitsubishi", /\bmitsubishi\b/i],
     ["Suzuki", /\bsuzuki\b/i],
     ["Dacia", /\bdacia\b/i],
+    ["DFSK", /\bdfsk\b/i],
   ];
   return rules.find(([, pattern]) => pattern.test(value))?.[0] || "";
 }
 
 function detectModel(make, text) {
   const value = clean(text);
+  const lower = value.toLowerCase();
+
   if (make === "Ford") {
-    const lower = value.toLowerCase();
     if (/transit\s+custom|\bcustom\b/.test(lower)) return "Transit Custom";
     if (/transit\s+connect|\bconnect\b/.test(lower)) return "Transit Connect";
     if (/transit\s+courier|\bcourier\b/.test(lower)) return "Transit Courier";
@@ -153,18 +230,9 @@ function detectModel(make, text) {
     if (/\btransit\b/.test(lower)) return "Transit";
     return "";
   }
-  const rule = MODEL_RULES.find(([ruleMake]) => ruleMake === make);
-  if (!rule) return "";
-  return rule[1].find((model) => new RegExp(`\\b${model.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\ /g, "\\s+")}\\b`, "i").test(value)) || "";
-}
 
-function stripRegistration(text, registration) {
-  let value = clean(text);
-  if (!registration) return value;
-  const compact = registrationKey(registration);
-  const spaced = compact.replace(/^([A-Z]{2}[0-9]{2})([A-Z]{3})$/, "$1 $2");
-  value = value.replace(new RegExp(compact, "ig"), "").replace(new RegExp(spaced, "ig"), "");
-  return clean(value.replace(/^[\s\-–|:]+|[\s\-–|:]+$/g, ""));
+  const candidates = MODEL_RULES[make] || [];
+  return candidates.find((model) => lower.includes(model.toLowerCase())) || "";
 }
 
 function normalizeImage(value) {
@@ -172,35 +240,38 @@ function normalizeImage(value) {
   if (!text) return "";
   if (/^https?:\/\//i.test(text)) return text;
   const match = text.match(/wix:image:\/\/v1\/([^/#?]+)/i);
-  return match ? `https://static.wixstatic.com/media/${match[1]}` : text;
+  return match ? `https://static.wixstatic.com/media/${match[1]}` : "";
 }
 
 function uniqueImages(values) {
   const seen = new Set();
-  const output = [];
+  const images = [];
   for (const raw of values || []) {
     const url = normalizeImage(raw);
     if (!url || seen.has(url)) continue;
     seen.add(url);
-    output.push(url);
-    if (output.length === 10) break;
+    images.push(url);
+    if (images.length === 10) break;
   }
-  return output;
+  return images;
 }
 
 function cleanFeatures(value) {
-  const raw = String(value || "")
+  const lines = String(value || "")
     .replace(/\r/g, "\n")
-    .split(/\n|,|•|\||\s+-\s+/)
+    .split(/\n|,|•|\|/)
     .map((item) => clean(item).replace(/^[-–]+\s*/, ""))
+    .filter(Boolean)
+    .filter((item) => !/^(REGISTRATION|YEAR|MILEAGE|EURO)\s*:/i.test(item))
+    .filter((item) => !/^_+$/.test(item))
     .filter((item) => item.length >= 3 && item.length <= 80);
-  return [...new Set(raw)].slice(0, 30).join(",");
+  return [...new Set(lines)].slice(0, 30).join(",");
 }
 
-function priceIncludesVat(row, wix) {
-  const text = [row?.vat, row?.price, wix?.price].map(clean).join(" ").toLowerCase();
+function priceIncludesVat(row) {
+  const text = [row?.vat, row?.price, row?.vanDescription].map(clean).join(" ").toLowerCase();
   if (/\+\s*vat|plus vat|ex(?:cluding)?\.?\s*vat|ex vat/.test(text)) return "false";
-  if (/inc(?:luding)?\.?\s*vat|includes vat|no vat/.test(text)) return "true";
+  if (/inc(?:luding)?\.?\s*vat|includes vat/.test(text)) return "true";
   return "false";
 }
 
@@ -222,7 +293,7 @@ async function loadLiveWixFinanceCms() {
       byRegistration: new Map(
         items
           .map((item) => [registrationKey(item?.registration), item])
-          .filter(([registration]) => registration)
+          .filter(([registration]) => registration),
       ),
     };
   } finally {
@@ -231,50 +302,49 @@ async function loadLiveWixFinanceCms() {
 }
 
 function buildOnlyVansRow(row, wix) {
-  const registration = extractRegistration(row?.title, row?.weblink, row?.vanDescription);
+  const registration = extractRegistration(row?.title, row?.weblink, row?.vanDescription, row?.vanSpec);
   if (!registration || !wix) return null;
 
   const cmsTitle = clean(wix?.title);
-  const crmTitle = clean(row?.title);
-  const combined = [
-    cmsTitle,
-    crmTitle,
-    row?.vanDescription,
-    row?.vanSpec,
-    row?.weblink,
-  ].map(clean).join(" ");
-
+  const crmDescription = clean(row?.vanDescription);
+  const crmSpec = String(row?.vanSpec || "").trim();
+  const combined = [cmsTitle, crmDescription, crmSpec].join(" ");
   const make = detectMake(combined);
   const model = detectModel(make, combined);
   if (!make || !model || !SUPPORTED_MAKES.has(make)) return null;
 
-  const title = stripRegistration(cmsTitle || crmTitle, registration) || `${make} ${model}`;
+  const title = cmsTitle || `${make} ${model}`;
   const images = uniqueImages([...(Array.isArray(wix?.images) ? wix.images : []), row?.picture]);
+  const year = parseYear(crmSpec, registration, cmsTitle, crmDescription);
+  const mileage = parseMileage(crmSpec, crmDescription, cmsTitle);
 
   const description = [
     title,
-    clean(row?.vanDescription),
-    clean(row?.vanSpec),
+    crmDescription,
+    crmSpec,
     clean(row?.weblink),
-  ].filter(Boolean).join("\n\n").slice(0, 5000);
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+    .slice(0, 5000);
 
   return {
     title,
     make,
     model,
-    year: extractYear(registration, cmsTitle, row?.vanDescription, row?.vanSpec),
+    year,
     registration,
-    mileage: extractMileage(row?.vanSpec, row?.vanDescription, cmsTitle),
-    price: parseMoney(row?.price || wix?.price),
-    fuel_type: detectFuel(cmsTitle, row?.vanDescription, row?.vanSpec),
-    transmission: detectTransmission(cmsTitle, row?.vanDescription, row?.vanSpec),
-    engine_size_cc: extractEngineSizeCc(cmsTitle, row?.vanDescription, row?.vanSpec),
+    mileage,
+    price: parseMoney(row?.price),
+    fuel_type: detectFuel(cmsTitle, crmDescription, crmSpec),
+    transmission: detectTransmission(cmsTitle, crmDescription, crmSpec),
+    engine_size_cc: extractEngineSizeCc(cmsTitle, crmDescription, crmSpec),
     location: "Southampton",
     postcode: "SO40 2NN",
     description,
     image_urls: images.join(","),
-    features: cleanFeatures(row?.vanSpec),
-    price_includes_vat: priceIncludesVat(row, wix),
+    features: cleanFeatures(crmSpec),
+    price_includes_vat: priceIncludesVat(row),
     price_negotiable: "false",
     v5c_logbook_available: "true",
     hpi_clear: "true",
@@ -298,8 +368,9 @@ function buildOnlyVansRow(row, wix) {
 }
 
 function missingRequired(row) {
-  return ["title","make","model","year","price","mileage","postcode","condition"]
-    .filter((field) => !clean(row?.[field]));
+  return ["title", "make", "model", "year", "price", "mileage", "postcode", "condition"].filter(
+    (field) => !clean(row?.[field]),
+  );
 }
 
 export default async function handler(request, response) {
@@ -331,7 +402,12 @@ export default async function handler(request, response) {
     const seen = new Set();
 
     for (const sourceRow of stockResult.data || []) {
-      const registration = extractRegistration(sourceRow?.title, sourceRow?.weblink, sourceRow?.vanDescription);
+      const registration = extractRegistration(
+        sourceRow?.title,
+        sourceRow?.weblink,
+        sourceRow?.vanDescription,
+        sourceRow?.vanSpec,
+      );
       if (!registration) {
         skipped.push({ id: sourceRow?.id, reason: "Missing registration in current Marketing CRM stock." });
         continue;
@@ -372,7 +448,6 @@ export default async function handler(request, response) {
     ].join("\r\n");
 
     const filename = `onlyvans-current-stock-${new Date().toISOString().slice(0, 10)}.csv`;
-
     response.setHeader("Content-Type", "text/csv; charset=utf-8");
     response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     response.setHeader("X-OnlyVans-Exported-Rows", String(rows.length));
