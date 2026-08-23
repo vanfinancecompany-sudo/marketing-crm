@@ -1,37 +1,54 @@
-const WIX_FEED = "https://www.vanfinancecompany.co.uk/_functions/marketingVanFinanceImages";
-
-const TARGETS = new Set(["CV69WKD", "BL71PNF", "YG73AMF", "BU72XZC", "DT18TVU", "FL19OFN"]);
+const TARGETS = ["SJ71HSK", "NX18YGL", "BG74MWY", "LC68YKZ", "GF71OMG"];
 
 function clean(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
-function regKey(value) {
-  return clean(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+function wixConfig() {
+  const apiKey = clean(process.env.WIX_API_KEY);
+  const siteId = clean(process.env.WIX_SITE_ID);
+  if (!apiKey || !siteId) throw new Error("Missing Wix API configuration");
+  return { apiKey, siteId };
 }
 
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   try {
-    const response = await fetch(WIX_FEED, { headers: { Accept: "application/json" }, cache: "no-store" });
-    if (!response.ok) throw new Error(`Wix feed HTTP ${response.status}`);
+    const { apiKey, siteId } = wixConfig();
+    const response = await fetch("https://www.wixapis.com/wix-data/v2/items/query", {
+      method: "POST",
+      headers: {
+        Authorization: apiKey,
+        "wix-site-id": siteId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        dataCollectionId: "VANFINANCEPAGES",
+        query: {
+          filter: { title: { $in: TARGETS } },
+          paging: { limit: 20 },
+          fields: [
+            "title","titleText","year","mileage","priceVat","descriptionLine",
+            "vehicleDescriptionTextClick","vehicleSpecificationText","mainImages"
+          ],
+        },
+      }),
+    });
     const payload = await response.json();
-    const matches = (payload.items || [])
-      .filter((item) => TARGETS.has(regKey(item.registration)))
-      .map((item) => ({
-        registration: item.registration,
-        keys: Object.keys(item).sort(),
-        title: item.title,
-        year: item.year,
-        mileage: item.mileage,
-        priceVat: item.priceVat,
-        descriptionLine: item.descriptionLine,
-        vehicleDescriptionTextClick: item.vehicleDescriptionTextClick,
-        vehicleSpecificationText: item.vehicleSpecificationText,
-        imagesCount: Array.isArray(item.images) ? item.images.length : null,
-      }));
-    res.status(200).json({ ok: true, count: payload.items?.length || 0, matches });
+    if (!response.ok) throw new Error(payload?.message || `Wix HTTP ${response.status}`);
+    const matches = (payload.dataItems || []).map(({ data }) => ({
+      title: data?.title,
+      titleText: data?.titleText,
+      year: data?.year,
+      mileage: data?.mileage,
+      priceVat: data?.priceVat,
+      descriptionLine: data?.descriptionLine,
+      vehicleDescriptionTextClick: data?.vehicleDescriptionTextClick,
+      vehicleSpecificationText: data?.vehicleSpecificationText,
+      imagesCount: Array.isArray(data?.mainImages) ? data.mainImages.length : 0,
+    }));
+    return res.status(200).json({ ok: true, matches });
   } catch (error) {
-    res.status(500).json({ ok: false, error: error?.message || String(error) });
+    return res.status(500).json({ ok: false, error: error?.message || String(error) });
   }
 }
