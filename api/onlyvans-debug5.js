@@ -1,11 +1,37 @@
-import { createClient } from "@supabase/supabase-js";
-export default async function handler(req,res){
-  const url=process.env.SUPABASE_URL||process.env.VITE_SUPABASE_URL; const key=process.env.SUPABASE_SERVICE_ROLE_KEY||process.env.VITE_SUPABASE_ANON_KEY;
-  const sb=createClient(url,key,{auth:{persistSession:false}});
-  const stock=await sb.from("facebook_adverts").select("title,vanSpec,is_active").eq("is_active",true).limit(1);
-  const value=stock.data?.[0]?.vanSpec;
-  const text=String(value??"");
-  const compact=text.normalize("NFKD").toUpperCase().replace(/[^A-Z0-9]/g,"");
-  res.setHeader("Cache-Control","no-store");
-  res.status(200).json({ok:true,error:stock.error?.message||null,type:typeof value,text,length:text.length,indexOfMileage:text.toUpperCase().indexOf("MILEAGE"),compact,compactIndex:compact.indexOf("MILEAGE"),chars:Array.from(text).slice(0,100).map(c=>({c,code:c.codePointAt(0)}))});
+const WIX_FEED = "https://www.vanfinancecompany.co.uk/_functions/marketingVanFinanceImages";
+
+const TARGETS = new Set(["CV69WKD", "BL71PNF", "YG73AMF", "BU72XZC", "DT18TVU", "FL19OFN"]);
+
+function clean(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function regKey(value) {
+  return clean(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+export default async function handler(req, res) {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const response = await fetch(WIX_FEED, { headers: { Accept: "application/json" }, cache: "no-store" });
+    if (!response.ok) throw new Error(`Wix feed HTTP ${response.status}`);
+    const payload = await response.json();
+    const matches = (payload.items || [])
+      .filter((item) => TARGETS.has(regKey(item.registration)))
+      .map((item) => ({
+        registration: item.registration,
+        keys: Object.keys(item).sort(),
+        title: item.title,
+        year: item.year,
+        mileage: item.mileage,
+        priceVat: item.priceVat,
+        descriptionLine: item.descriptionLine,
+        vehicleDescriptionTextClick: item.vehicleDescriptionTextClick,
+        vehicleSpecificationText: item.vehicleSpecificationText,
+        imagesCount: Array.isArray(item.images) ? item.images.length : null,
+      }));
+    res.status(200).json({ ok: true, count: payload.items?.length || 0, matches });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error?.message || String(error) });
+  }
 }
