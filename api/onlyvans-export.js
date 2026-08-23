@@ -59,9 +59,32 @@ function yearFrom(spec, reg, ...fallbacks) {
   return age >= 50 ? String(1950 + age) : String(2000 + age);
 }
 
+function digitsAfterLabel(value, label, maxChars = 32) {
+  const text = String(value || "");
+  const upper = text.toUpperCase();
+  const wanted = String(label || "").toUpperCase();
+  const index = upper.indexOf(wanted);
+  if (index < 0) return "";
+
+  const tail = text.slice(index + wanted.length, index + wanted.length + maxChars);
+  let digits = "";
+  let started = false;
+  for (const ch of tail) {
+    if (ch >= "0" && ch <= "9") {
+      digits += ch;
+      started = true;
+      continue;
+    }
+    if (!started) continue;
+    if (ch === "," || ch === " " || ch === "\t") continue;
+    break;
+  }
+  return digits;
+}
+
 function mileageFrom(spec, ...fallbacks) {
-  const direct = String(spec || "").match(/MILEAGE\s*:\s*([0-9][0-9,]*)/i);
-  if (direct) return direct[1].replace(/,/g, "");
+  const direct = digitsAfterLabel(spec, "MILEAGE", 32);
+  if (direct) return direct;
   const fallback = fallbacks.map(clean).join(" ").match(/\b([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})\s*(?:MILES?|MLS)\b/i);
   return fallback ? fallback[1].replace(/,/g, "") : "";
 }
