@@ -43,16 +43,21 @@ function registration(...values) {
   return match ? regKey(match[1]) : "";
 }
 
+function activeRegistration(row) {
+  return registration(row?.weblink) || registration(row?.title) || registration(row?.vanDescription) || registration(row?.vanSpec);
+}
+
 function numberFromMoney(value) {
   const match = String(value || "").replace(/,/g, "").match(/\d+(?:\.\d+)?/);
   return match ? String(Math.round(Number(match[0]))) : "";
 }
 
-function yearFrom(spec, reg, ...fallbacks) {
-  const direct = String(spec || "").match(/YEAR\s*:\s*(20[0-3][0-9])/i);
+function yearFromWix(wix, reg) {
+  const topLevel = clean(wix?.year).match(/\b(20[0-3][0-9])\b/);
+  if (topLevel) return topLevel[1];
+  const spec = String(wix?.vehicleSpecificationText || "");
+  const direct = spec.match(/YEAR\s*:\s*(20[0-3][0-9])/i);
   if (direct) return direct[1];
-  const fallback = fallbacks.map(clean).join(" ").match(/\b(20[0-3][0-9])\b/);
-  if (fallback) return fallback[1];
   const plate = regKey(reg).match(/^[A-Z]{2}([0-9]{2})[A-Z]{3}$/);
   if (!plate) return "";
   const age = Number(plate[1]);
@@ -82,11 +87,11 @@ function digitsAfterLabel(value, label, maxChars = 32) {
   return digits;
 }
 
-function mileageFrom(spec, ...fallbacks) {
-  const direct = digitsAfterLabel(spec, "MILLAGE", 32) || digitsAfterLabel(spec, "MILEAGE", 32);
-  if (direct) return direct;
-  const fallback = fallbacks.map(clean).join(" ").match(/\b([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})\s*(?:MILES?|MLS)\b/i);
-  return fallback ? fallback[1].replace(/,/g, "") : "";
+function mileageFromWix(wix) {
+  const topLevel = clean(wix?.mileage).replace(/[^0-9]/g, "");
+  if (topLevel) return topLevel;
+  const spec = String(wix?.vehicleSpecificationText || "");
+  return digitsAfterLabel(spec, "MILLAGE", 32) || digitsAfterLabel(spec, "MILEAGE", 32);
 }
 
 function engineCc(...values) {
@@ -99,7 +104,7 @@ function engineCc(...values) {
 
 function fuel(...values) {
   const text = values.map(clean).join(" ").toLowerCase();
-  if (/\b(electric|bev|ev)\b|e[-\s]?(transit|deliver)/.test(text)) return "electric";
+  if (/\b(electric|bev|full ev|fully electric|e-tech|e-vito|evito|e-expert|eexpert)\b|e[-\s]?(transit|deliver)/.test(text)) return "electric";
   if (/\b(hybrid|phev|mhev)\b/.test(text)) return "hybrid";
   if (/\bpetrol\b|\becoboost\b/.test(text)) return "petrol";
   return "diesel";
@@ -163,19 +168,20 @@ function firstTenImages(wix, fallback) {
   return result;
 }
 
-function featureText(spec) {
+function featureText(...values) {
   return [...new Set(
-    String(spec || "").replace(/\r/g, "\n").split(/\n|,|•|\|/)
-      .map(clean)
-      .filter((value) => value && !/^(REGISTRATION|YEAR|MILLAGE|MILEAGE|EURO)\s*:/i.test(value) && !/^_+$/.test(value))
+    values.flatMap((value) => String(value || "").replace(/\r/g, "\n").split(/\n|,|•|\|/))
+      .map((value) => clean(value).replace(/^[✓✅✔︎✔\-]+\s*/, ""))
+      .filter((value) => value && !/^(REGISTRATION|YEAR|MILLAGE|MILEAGE|EURO|ENGINE SIZE|FUEL TYPE|COLOUR|TRANSMISSION|BHP|MPG)\s*:/i.test(value))
+      .filter((value) => !/^ALSO INCLUDES:?$/i.test(value) && !/^_+$/.test(value))
       .filter((value) => value.length >= 3 && value.length <= 80),
   )].slice(0, 30).join(",");
 }
 
-function includesVat(row) {
-  const text = [row?.vat, row?.price, row?.vanDescription].map(clean).join(" ").toLowerCase();
+function includesVat(...values) {
+  const text = values.map(clean).join(" ").toLowerCase();
   if (/\+\s*vat|plus vat|ex(?:cluding)?\.?\s*vat|ex vat/.test(text)) return "false";
-  if (/inc(?:luding)?\.?\s*vat|includes vat|no vat/.test(text)) return "true";
+  if (/inc(?:luding)?\.?\s*vat|includes vat|no vat|\bn\/?a\b/.test(text)) return "true";
   return "false";
 }
 
@@ -203,25 +209,38 @@ async function wixByRegistration() {
 }
 
 function mapRow(row, wix) {
-  const reg = registration(row.title, row.weblink, row.vanDescription, row.vanSpec);
-  if (!reg || !wix) return null;
-  const title = clean(wix.title);
-  const description = clean(row.vanDescription);
-  const spec = String(row.vanSpec || "").trim();
-  const combined = [title, description, spec].join(" ");
+  if (!wix) return null;
+
+  const sourceReg = activeRegistration(row);
+  const reg = regKey(wix.registration) || sourceReg;
+  if (!sourceReg || !reg || reg !== sourceReg) return null;
+
+  const title = clean(wix.titleText) || clean(wix.title);
+  const descriptionLine = clean(wix.descriptionLine);
+  const sellingPoints = String(wix.vehicleDescriptionTextClick || "").trim();
+  const spec = String(wix.vehicleSpecificationText || "").trim();
+  const combined = [title, descriptionLine, sellingPoints, spec].join(" ");
   const make = makeFrom(combined);
   const model = modelFrom(make, combined);
   if (!SUPPORTED_MAKES.has(make) || !model) return null;
+
   const images = firstTenImages(wix, row.picture);
+  const pageUrl = clean(row.weblink) || `https://www.vanfinancecompany.co.uk/van-finance/${reg}`;
+  const price = numberFromMoney(wix.priceVat) || numberFromMoney(row.price);
+  const mileage = mileageFromWix(wix);
 
   return {
     title: title || `${make} ${model}`, make, model,
-    year: yearFrom(spec, reg, title, description), registration: reg,
-    mileage: mileageFrom(spec, description, title), price: numberFromMoney(row.price),
-    fuel_type: fuel(title, description, spec), transmission: transmission(title, description, spec),
-    engine_size_cc: engineCc(title, description, spec), location: "Southampton", postcode: "SO40 2NN",
-    description: [title, description, spec, clean(row.weblink)].filter(Boolean).join("\n\n").slice(0, 5000),
-    image_urls: images.join(","), features: featureText(spec), price_includes_vat: includesVat(row),
+    year: yearFromWix(wix, reg), registration: reg,
+    mileage, price,
+    fuel_type: fuel(title, descriptionLine, sellingPoints, spec),
+    transmission: transmission(title, descriptionLine, sellingPoints, spec),
+    engine_size_cc: engineCc(title, descriptionLine, spec),
+    location: "Southampton", postcode: "SO40 2NN",
+    description: [title, descriptionLine, sellingPoints, spec, pageUrl].filter(Boolean).join("\n\n").slice(0, 5000),
+    image_urls: images.join(","),
+    features: featureText(sellingPoints),
+    price_includes_vat: includesVat(wix.priceVat, descriptionLine, sellingPoints),
     price_negotiable: "false", v5c_logbook_available: "true", hpi_clear: "true", ulez_compliant: "true",
     seller_type: "trade", service_history: "partial", condition: "used", is_camper_van: "false",
     berths: "", seatbelts: "", kitchen: "false", shower: "false", toilet: "false", cooker: "false",
@@ -247,7 +266,7 @@ export default async function handler(request, response) {
     const seen = new Set();
     let skipped = 0;
     for (const source of stock.data || []) {
-      const reg = registration(source.title, source.weblink, source.vanDescription, source.vanSpec);
+      const reg = activeRegistration(source);
       const mapped = mapRow(source, wixMap.get(regKey(reg)));
       const required = mapped && ["title","make","model","year","price","mileage","postcode","condition","image_urls"]
         .every((key) => clean(mapped[key]));
