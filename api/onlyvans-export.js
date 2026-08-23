@@ -37,10 +37,17 @@ function registration(...values) {
   const match = text.match(/\b([A-Z]{2}[0-9]{2}\s?[A-Z]{3}|[A-Z][0-9]{1,3}\s?[A-Z]{3}|[A-Z]{3}\s?[0-9]{1,3}[A-Z]|[0-9]{1,4}\s?[A-Z]{1,3})\b/);
   return match ? regKey(match[1]) : "";
 }
+function moneyValue(value) {
+  const text = String(value || "").trim();
+  const thousands = text.match(/\b(\d{1,3}(?:[,.]\d{3})+)\b/);
+  if (thousands) return Number(thousands[1].replace(/[,.]/g, ""));
+  const normal = text.replace(/,/g, "").match(/\d+(?:\.\d+)?/);
+  return normal ? Math.round(Number(normal[0])) : 0;
+}
 function numberFromMoney(...values) {
   for (const value of values) {
-    const match = String(value || "").replace(/,/g, "").match(/\d+(?:\.\d+)?/);
-    if (match) return String(Math.round(Number(match[0])));
+    const amount = moneyValue(value);
+    if (amount >= 1000 && amount <= 100000) return String(amount);
   }
   return "";
 }
@@ -72,11 +79,34 @@ function yearFrom(wix, reg, safeSpec) {
   const spec = String(safeSpec || "").match(/YEAR\s*:\s*(20[0-3][0-9])/i);
   return spec ? spec[1] : "";
 }
-function mileageFrom(wix, safeSpec) {
-  const structured = numericText(wix?.mileage);
-  if (structured) return structured;
+function customerMileage(description, features) {
+  const featureText = clean(features);
+  const descriptionText = clean(description);
+  const exactFeature = featureText.match(/\bONLY\s+([0-9][0-9,]*)\s+MILES?\b/i);
+  if (exactFeature) return exactFeature[1].replace(/,/g, "");
+  const exactDescription = descriptionText.match(/\bMILEAGE\s+(?:OF\s+)?([0-9][0-9,]*)\b/i);
+  if (exactDescription) return exactDescription[1].replace(/,/g, "");
+  const onlyK = descriptionText.match(/\bONLY\s+([0-9]{1,3})K\b/i);
+  if (onlyK) return String(Number(onlyK[1]) * 1000);
+  const onlyMiles = descriptionText.match(/\bONLY\s+([0-9][0-9,]*)\s+MILES?\b/i);
+  if (onlyMiles) return onlyMiles[1].replace(/,/g, "");
+  return "";
+}
+function mileageFrom(wix, safeSpec, description, features) {
+  const customer = Number(customerMileage(description, features)) || 0;
+  const structured = Number(numericText(wix?.mileage)) || 0;
   const direct = String(safeSpec || "").match(/MIL(?:E|L)AGE\s*:\s*([0-9][0-9,]*)/i);
-  return direct ? direct[1].replace(/,/g, "") : "";
+  const specification = direct ? Number(direct[1].replace(/,/g, "")) : 0;
+  const lowMileageSignal = /\bLESS\s+THAN\s+\d+\s+MILES?\b/i.test(clean(description));
+  if (customer && (lowMileageSignal || customer < 1000)) return String(customer);
+  if (structured && specification) {
+    const ratio = Math.max(structured, specification) / Math.max(1, Math.min(structured, specification));
+    if (ratio >= 9.5 && ratio <= 10.5) return String(specification);
+  }
+  if (structured) return String(structured);
+  if (customer) return String(customer);
+  if (specification) return String(specification);
+  return "";
 }
 function makeFrom(text) {
   const rules = [
@@ -108,8 +138,15 @@ function modelFrom(make, text) {
   return (MODEL_RULES[make] || []).find((model) => lower.includes(model.toLowerCase())) || "";
 }
 function isElectric(title, description, features, safeSpec) {
-  const primary = [title, description, safeSpec].map(clean).join(" ").toLowerCase();
-  if (/\belectric\b|\bfull\s+ev\b|\be-tech\b|\bkwh\b|\bevito\b|\be-expert\b|\be-transit\b|\bedeliver\b|\b(?:kangoo|master)\s+(?:maxi\s+)?ze\b/.test(primary)) return true;
+  const strong = [title, description].map(clean).join(" ").toLowerCase()
+    .replace(/electric\s+front\s+windows?/g, "")
+    .replace(/electric\s+windows?/g, "")
+    .replace(/electric\s+mirrors?/g, "")
+    .replace(/electric\s+power\s+steering/g, "")
+    .replace(/electric\s+adjust(?:able|ment)?/g, "");
+  if (/\bfully\s+electric\b|\bfull\s+ev\b|\be-tech\b|\bkwh\b|\bevito\b|\be-expert\b|\be-transit\b|\bedeliver\b|\b(?:kangoo|master)\s+(?:maxi\s+)?ze\b|\belectric\b/.test(strong)) return true;
+  const specFuel = String(safeSpec || "").match(/FUEL\s+TYPE\s*:\s*([^\r\n]+)/i)?.[1]?.trim().toLowerCase() || "";
+  if (specFuel === "electric") return true;
   const extras = clean(features).toLowerCase();
   return /\bfully\s+electric\b|\belectric\s+van\b|\bfull\s+ev\b/.test(extras);
 }
@@ -250,12 +287,12 @@ function mapRow(row, wix, reg) {
   return {
     title: title || `${make} ${model}`, make, model,
     year: yearFrom(wix, reg, safeSpec), registration: reg,
-    mileage: mileageFrom(wix, safeSpec), price: numberFromMoney(wix.priceVat, row.salePrice, row.price),
+    mileage: mileageFrom(wix, safeSpec, descriptionLine, rawFeatures), price: numberFromMoney(wix.priceVat, row.salePrice, row.price),
     fuel_type: fuel, transmission, engine_size_cc: engineCc(safeSpec, title, descriptionLine, fuel),
     location: "Southampton", postcode: "SO40 2NN", description,
     image_urls: images.join(","), features, price_includes_vat: includesVat(wix, row),
     price_negotiable: "false", v5c_logbook_available: "", hpi_clear: "",
-    ulez_compliant: fuel === "electric" || euro >= 6 ? "true" : "false",
+    ulez_compliant: fuel === "electric" ? "true" : euro ? (euro >= 6 ? "true" : "false") : "",
     seller_type: "trade", service_history: "", condition: "used", is_camper_van: "false",
     berths: "", seatbelts: "", kitchen: "false", shower: "false", toilet: "false", cooker: "false",
     water_tank_size: "", electric_power: "", height: "", pop_top: "false", insulation_level: "",
