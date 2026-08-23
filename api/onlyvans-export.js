@@ -83,7 +83,7 @@ function digitsAfterLabel(value, label, maxChars = 32) {
 }
 
 function mileageFrom(spec, ...fallbacks) {
-  const direct = digitsAfterLabel(spec, "MILEAGE", 32);
+  const direct = digitsAfterLabel(spec, "MILLAGE", 32) || digitsAfterLabel(spec, "MILEAGE", 32);
   if (direct) return direct;
   const fallback = fallbacks.map(clean).join(" ").match(/\b([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})\s*(?:MILES?|MLS)\b/i);
   return fallback ? fallback[1].replace(/,/g, "") : "";
@@ -167,7 +167,7 @@ function featureText(spec) {
   return [...new Set(
     String(spec || "").replace(/\r/g, "\n").split(/\n|,|•|\|/)
       .map(clean)
-      .filter((value) => value && !/^(REGISTRATION|YEAR|MILEAGE|EURO)\s*:/i.test(value) && !/^_+$/.test(value))
+      .filter((value) => value && !/^(REGISTRATION|YEAR|MILLAGE|MILEAGE|EURO)\s*:/i.test(value) && !/^_+$/.test(value))
       .filter((value) => value.length >= 3 && value.length <= 80),
   )].slice(0, 30).join(",");
 }
