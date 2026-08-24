@@ -1,5 +1,6 @@
-const CARSLINK_ENDPOINT = "https://api.carslink.ai/api/v1/stock";
-const FULL_STOCK_LIMIT = 500;
+import { runCarslinkProductionSync } from "../lib/carslinkProductionSync.js";
+
+export const config = { maxDuration: 300 };
 
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
@@ -15,72 +16,19 @@ export default async function handler(request, response) {
     });
   }
 
-  const productionKey = String(process.env.CARSLINK_PRODUCTION_API_KEY || "").trim();
-  if (!productionKey) {
-    return response.status(503).json({
-      ok: false,
-      error: "CARSLINK_PRODUCTION_API_KEY is not configured in the deployment environment.",
-    });
-  }
-
   try {
-    const protocol = request.headers?.["x-forwarded-proto"] || "https";
-    const host = request.headers?.host;
-    if (!host) throw new Error("Unable to determine deployment host for Carslink payload preview.");
-
-    const previewUrl = `${protocol}://${host}/api/carslink-sandbox-sync?limit=${FULL_STOCK_LIMIT}`;
-    const previewResponse = await fetch(previewUrl, {
-      method: "GET",
-      headers: { Accept: "application/json" },
+    const result = await runCarslinkProductionSync({
+      request,
+      trigger: "manual",
+      force: true,
     });
-    const preview = await previewResponse.json().catch(() => ({}));
-
-    if (!previewResponse.ok) {
-      throw new Error(preview?.error || `Carslink payload preview returned HTTP ${previewResponse.status}.`);
-    }
-
-    const payload = preview?.payload;
-    const listings = Array.isArray(payload?.listings) ? payload.listings : [];
-    if (!payload || listings.length < 1) {
-      return response.status(422).json({
-        ok: false,
-        error: "No valid listings were available for the Carslink production sync.",
-        local_skipped: preview?.skipped || [],
-      });
-    }
-
-    const carslinkResponse = await fetch(CARSLINK_ENDPOINT, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${productionKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-    const carslink = await carslinkResponse.json().catch(() => ({}));
-
-    if (!carslinkResponse.ok) {
-      return response.status(carslinkResponse.status).json({
-        ok: false,
-        error: carslink?.message || carslink?.error || `Carslink returned HTTP ${carslinkResponse.status}.`,
-        carslink,
-        local_skipped: preview?.skipped || [],
-      });
-    }
-
-    return response.status(200).json({
-      ok: true,
-      environment: "production",
-      source_count: preview?.source_count || 0,
-      sent_count: listings.length,
-      local_skipped: preview?.skipped || [],
-      carslink,
-    });
+    return response.status(200).json(result);
   } catch (error) {
     console.error("[carslink-production-sync] failed", error);
-    return response.status(500).json({
+    return response.status(error?.statusCode || 500).json({
       ok: false,
-      error: error?.message || "Carslink production sync failed.",
+      error: error?.message || "CarsLink production sync failed.",
+      carslink: error?.carslink,
     });
   }
 }
