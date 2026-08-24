@@ -32,11 +32,13 @@ const MODEL_RULES = {
 
 function clean(value) { return String(value ?? "").replace(/\s+/g, " ").trim(); }
 function regKey(value) { return clean(value).toUpperCase().replace(/[^A-Z0-9]/g, ""); }
+
 function registration(...values) {
   const text = values.map(clean).join(" ").toUpperCase();
   const match = text.match(/\b([A-Z]{2}[0-9]{2}\s?[A-Z]{3}|[A-Z][0-9]{1,3}\s?[A-Z]{3}|[A-Z]{3}\s?[0-9]{1,3}[A-Z]|[0-9]{1,4}\s?[A-Z]{1,3})\b/);
   return match ? regKey(match[1]) : "";
 }
+
 function moneyValue(value) {
   const text = String(value || "").trim();
   const thousands = text.match(/\b(\d{1,3}(?:[,.]\d{3})+)\b/);
@@ -44,6 +46,7 @@ function moneyValue(value) {
   const normal = text.replace(/,/g, "").match(/\d+(?:\.\d+)?/);
   return normal ? Math.round(Number(normal[0])) : 0;
 }
+
 function numberFromMoney(...values) {
   for (const value of values) {
     const amount = moneyValue(value);
@@ -51,10 +54,12 @@ function numberFromMoney(...values) {
   }
   return "";
 }
+
 function numericText(value) {
   const match = String(value || "").replace(/,/g, "").match(/\b\d{1,6}\b/);
   return match ? match[0] : "";
 }
+
 function safeSpecification(wix, reg) {
   const spec = String(wix?.vehicleSpecificationText || "").trim();
   if (!spec) return "";
@@ -65,6 +70,7 @@ function safeSpecification(wix, reg) {
   }
   return spec;
 }
+
 function yearFrom(wix, reg, safeSpec) {
   const plate = regKey(reg).match(/^[A-Z]{2}([0-9]{2})[A-Z]{3}$/);
   if (plate) {
@@ -79,6 +85,7 @@ function yearFrom(wix, reg, safeSpec) {
   const spec = String(safeSpec || "").match(/YEAR\s*:\s*(20[0-3][0-9])/i);
   return spec ? spec[1] : "";
 }
+
 function customerMileage(description, features) {
   const featureText = clean(features);
   const descriptionText = clean(description);
@@ -92,6 +99,7 @@ function customerMileage(description, features) {
   if (onlyMiles) return onlyMiles[1].replace(/,/g, "");
   return "";
 }
+
 function mileageFrom(wix, safeSpec, description, features) {
   const customer = Number(customerMileage(description, features)) || 0;
   const structured = Number(numericText(wix?.mileage)) || 0;
@@ -108,6 +116,7 @@ function mileageFrom(wix, safeSpec, description, features) {
   if (specification) return String(specification);
   return "";
 }
+
 function makeFrom(text) {
   const rules = [
     ["Mercedes-Benz", /\b(mercedes|mercedes-benz|benz)\b/i], ["Volkswagen", /\b(volkswagen|vw)\b/i],
@@ -120,6 +129,7 @@ function makeFrom(text) {
   ];
   return rules.find(([, pattern]) => pattern.test(clean(text)))?.[0] || "";
 }
+
 function volkswagenTransporterModel(text, year) {
   const lower = clean(text).toLowerCase();
   if (/\be[ -]?transporter\b/.test(lower)) return "E Transporter";
@@ -138,6 +148,7 @@ function volkswagenTransporterModel(text, year) {
   if (numericYear > 0) return "Transporter T1";
   return "";
 }
+
 function modelFrom(make, text, year) {
   const lower = clean(text).toLowerCase();
   if (make === "Ford") {
@@ -164,6 +175,7 @@ function modelFrom(make, text, year) {
   }
   return (MODEL_RULES[make] || []).find((model) => lower.includes(model.toLowerCase())) || "";
 }
+
 function isElectric(title, description, features, safeSpec) {
   const strong = [title, description].map(clean).join(" ").toLowerCase()
     .replace(/electric\s+front\s+windows?/g, "")
@@ -177,6 +189,7 @@ function isElectric(title, description, features, safeSpec) {
   const extras = clean(features).toLowerCase();
   return /\bfully\s+electric\b|\belectric\s+van\b|\bfull\s+ev\b/.test(extras);
 }
+
 function fuelType(title, description, features, safeSpec) {
   if (isElectric(title, description, features, safeSpec)) return "electric";
   const liveText = [title, description, features].map(clean).join(" ").toLowerCase();
@@ -188,6 +201,7 @@ function fuelType(title, description, features, safeSpec) {
   if (specFuel.includes("hybrid")) return "hybrid";
   return "diesel";
 }
+
 function transmissionType(title, description, features, safeSpec, fuel) {
   if (fuel === "electric") return "automatic";
   const titleText = clean(title).toLowerCase();
@@ -198,6 +212,7 @@ function transmissionType(title, description, features, safeSpec, fuel) {
   if (/\bautomatic\b|\bauto\b/.test(titleText) || /\bautomatic\b/.test(descriptionText) || /^(auto|automatic)$/.test(specTransmission.trim()) || /(?:^|,)\s*(?:auto|automatic)\s*(?:,|$)/.test(featureText)) return "automatic";
   return "manual";
 }
+
 function engineCc(safeSpec, title, description, fuel) {
   if (fuel === "electric") return "";
   const labelled = String(safeSpec || "").match(/ENGINE\s+SIZE\s*:\s*([1-9](?:\.[0-9])?)/i);
@@ -208,6 +223,7 @@ function engineCc(safeSpec, title, description, fuel) {
   const litres = text.match(/\b([1-9](?:\.[0-9])?)\s*(?:L|LITRE|LITER)\b/i);
   return litres ? String(Math.round(Number(litres[1]) * 1000)) : "";
 }
+
 function imageUrl(value) {
   const raw = typeof value === "object" && value ? (value.src || value.url || value.id || "") : value;
   const text = clean(raw);
@@ -215,6 +231,7 @@ function imageUrl(value) {
   const wix = text.match(/wix:image:\/\/v1\/([^/#?]+)/i);
   return wix ? `https://static.wixstatic.com/media/${wix[1]}` : "";
 }
+
 function firstTenImages(wix, fallback) {
   const seen = new Set();
   const result = [];
@@ -228,6 +245,7 @@ function firstTenImages(wix, fallback) {
   }
   return result;
 }
+
 function featureText(value) {
   const excluded = /^(also includes:?|\d+ months? warranty|price checked|service$|101[- ]point check|new 12 months mot|fully valeted|\d+ year aa breakdown)/i;
   return [...new Set(
@@ -236,33 +254,155 @@ function featureText(value) {
       .filter((item) => item && !excluded.test(item) && item.length >= 2 && item.length <= 100),
   )].slice(0, 30).join(",");
 }
+
+function cleanFeatureItems(value) {
+  return [...new Set(
+    String(value || "")
+      .replace(/\r/g, "\n")
+      .replace(/[✅✔☑☒]/g, " ")
+      .split(/\n|•|\|/)
+      .map((item) => clean(item.replace(/^[✓\-–—*]+\s*/, "")))
+      .map((item) => item.replace(/^also includes\s*:?\s*/i, ""))
+      .map((item) => item.replace(/https?:\/\/\S+/gi, "").trim())
+      .filter((item) => item && item.length >= 2 && item.length <= 120)
+  )];
+}
+
+function naturalList(items) {
+  if (!items.length) return "";
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+}
+
+function naturalFeature(value) {
+  const text = clean(value).replace(/[.;,:]+$/, "");
+  const lower = text.toLowerCase();
+  const mappings = [
+    [/^alloys?$/, "alloy wheels"],
+    [/^roof bars?$/, "roof bars"],
+    [/^(coded|colour coded|color coded) bumpers?$/, "colour-coded bumpers"],
+    [/^(air con|air conditioning)$/, "air conditioning"],
+    [/^bluetooth$/, "Bluetooth"],
+    [/^cruise control$/, "cruise control"],
+    [/^dab( radio)?$/, "DAB radio"],
+    [/^(rear|reversing) camera$/, "reversing camera"],
+    [/^parking sensors?$/, "parking sensors"],
+    [/^heated seats?$/, "heated seats"],
+    [/^(heated|heated front) screen$/, "heated front screen"],
+    [/^apple car ?play$/, "Apple CarPlay"],
+    [/^android auto$/, "Android Auto"],
+    [/^sat nav$/, "sat nav"],
+    [/^electric windows?$/, "electric windows"],
+    [/^tow ?bar$/, "tow bar"],
+    [/^(ply lined|plylined)$/, "ply lining"],
+    [/^(side|sliding) door$/, "side loading door"],
+  ];
+  for (const [pattern, label] of mappings) {
+    if (pattern.test(lower)) return label;
+  }
+  if (/^[A-Z0-9 /&+-]+$/.test(text)) return text.toLowerCase();
+  return text.charAt(0).toLowerCase() + text.slice(1);
+}
+
+function preparationItem(value) {
+  const lower = clean(value).toLowerCase();
+  if (/\bprice checked\b/.test(lower)) return "";
+  const warranty = lower.match(/\b(\d+)\s*months?\s*warranty\b/);
+  if (warranty) return `a ${warranty[1]}-month warranty`;
+  if (/^service$|\bserviced\b/.test(lower)) return "a service";
+  const points = lower.match(/\b(\d+)[- ]?point\s*(?:check|inspection)\b/);
+  if (points) return `${points[1]}-point inspection`;
+  const mot = lower.match(/\b(?:new\s*)?(\d+)\s*months?\s*mot\b/);
+  if (mot) return `a new ${mot[1]}-month MOT`;
+  if (/\bfully valeted\b|\bfull valet\b/.test(lower)) return "a full valet";
+  return "";
+}
+
+function cleanDescription(year, title, descriptionLine, rawFeatures, vehicleUrl) {
+  const titleText = clean(title).replace(/\s*[|]+\s*/g, " ");
+  const raw = cleanFeatureItems(rawFeatures);
+  const titleLower = titleText.toLowerCase();
+  const equipment = [];
+  const preparation = [];
+  const seenEquipment = new Set();
+  const seenPreparation = new Set();
+
+  for (const item of raw) {
+    const lower = item.toLowerCase();
+    if (!item || lower.includes(titleLower) || /^20\d{2}(?:\/\d{2})?\b/.test(lower)) continue;
+    if (/\bno vat\b|\bfree uk delivery\b|\bprice checked\b/.test(lower)) continue;
+
+    const prep = preparationItem(item);
+    if (prep) {
+      const key = prep.toLowerCase();
+      if (!seenPreparation.has(key)) {
+        seenPreparation.add(key);
+        preparation.push(prep);
+      }
+      continue;
+    }
+
+    const feature = naturalFeature(item);
+    const key = feature.toLowerCase();
+    if (feature && !seenEquipment.has(key)) {
+      seenEquipment.add(key);
+      equipment.push(feature);
+    }
+  }
+
+  const sourceText = `${descriptionLine} ${rawFeatures}`;
+  const noVat = /\bno vat\b/i.test(sourceText);
+  const freeDelivery = /\bfree\s+(?:uk\s+)?delivery\b/i.test(sourceText);
+  const sentences = [`${year ? `${year} ` : ""}${titleText}.`];
+
+  if (equipment.length) sentences.push(`Equipped with ${naturalList(equipment.slice(0, 12))}.`);
+  if (preparation.length) sentences.push(`Supplied with ${naturalList(preparation.slice(0, 5))}.`);
+  if (freeDelivery) sentences.push("Free UK delivery.");
+  if (noVat) sentences.push("No VAT.");
+
+  const prose = sentences
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .replace(/\.{2,}/g, ".")
+    .trim()
+    .slice(0, 2500);
+
+  return vehicleUrl ? `${prose}\n\nView this van: ${vehicleUrl}` : prose;
+}
+
 function includesVat(wix, row) {
   const text = [wix?.priceVat, wix?.descriptionLine, wix?.vehicleDescriptionTextClick, row?.vat, row?.price].map(clean).join(" ").toLowerCase();
   if (/no\s*vat|inc(?:luding)?\.?\s*vat|includes vat/.test(text)) return "true";
   if (/\+\s*vat|plus vat|ex(?:cluding)?\.?\s*vat|ex vat/.test(text)) return "false";
   return "false";
 }
+
 function euroValue(safeSpec, description) {
   const match = [safeSpec, description].map(clean).join(" ").match(/\bEURO\s*:?[ ]*([0-9])/i);
   return match ? Number(match[1]) : 0;
 }
+
 function csvEscape(value) {
   const text = String(value ?? "");
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 function csvLine(values) { return values.map(csvEscape).join(","); }
+
 function supabase() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
   if (!url || !key) throw new Error("Missing Supabase environment variables.");
   return createClient(url, key, { auth: { persistSession: false } });
 }
+
 function wixConfiguration() {
   const apiKey = clean(process.env.WIX_API_KEY);
   const siteId = clean(process.env.WIX_SITE_ID);
   if (!apiKey || !siteId) throw new Error("Missing Wix API configuration.");
   return { apiKey, siteId };
 }
+
 async function wixQuery(registrations) {
   const { apiKey, siteId } = wixConfiguration();
   const response = await fetch(`${WIX_API_BASE_URL}/wix-data/v2/items/query`, {
@@ -281,6 +421,7 @@ async function wixQuery(registrations) {
   if (!response.ok) throw new Error(payload?.message || `Wix CMS query returned HTTP ${response.status}.`);
   return payload.dataItems || [];
 }
+
 async function wixByRegistration(registrations) {
   const unique = [...new Set(registrations.map(regKey).filter(Boolean))];
   const chunks = [];
@@ -294,6 +435,7 @@ async function wixByRegistration(registrations) {
   }
   return map;
 }
+
 function mapRow(row, wix, reg) {
   if (!reg || !wix) return null;
   const title = clean(wix.titleText) || clean(wix.title);
@@ -306,12 +448,14 @@ function mapRow(row, wix, reg) {
   const year = yearFrom(wix, reg, safeSpec);
   const model = modelFrom(make, combined, year);
   if (!SUPPORTED_MAKES.has(make) || !model) return null;
+
   const fuel = fuelType(title, descriptionLine, features, safeSpec);
   const transmission = transmissionType(title, descriptionLine, features, safeSpec, fuel);
   const images = firstTenImages(wix, row.picture);
   const vehicleUrl = `https://www.vanfinancecompany.co.uk/van-finance/${reg}`;
-  const description = [title, descriptionLine, rawFeatures, vehicleUrl].filter(Boolean).join("\n\n").slice(0, 5000);
+  const description = cleanDescription(year, title, descriptionLine, rawFeatures, vehicleUrl);
   const euro = euroValue(safeSpec, descriptionLine);
+
   return {
     title: title || `${make} ${model}`, make, model,
     year, registration: reg,
@@ -336,12 +480,14 @@ export default async function handler(request, response) {
       .select("id,title,picture,price,vat,salePrice,vanDescription,vanSpec,weblink,is_active")
       .eq("is_active", true).limit(limit);
     if (stock.error) throw stock.error;
+
     const sources = stock.data || [];
     const sourceRegistrations = sources.map((source) => registration(source.title, source.weblink, source.vanDescription, source.vanSpec));
     const wixMap = await wixByRegistration(sourceRegistrations);
     const rows = [];
     const seen = new Set();
     let skipped = 0;
+
     for (let index = 0; index < sources.length; index += 1) {
       const source = sources[index];
       const reg = regKey(sourceRegistrations[index]);
@@ -351,6 +497,7 @@ export default async function handler(request, response) {
       seen.add(mapped.registration);
       rows.push(mapped);
     }
+
     const csv = [csvLine(COLUMNS), ...rows.map((row) => csvLine(COLUMNS.map((key) => row[key] ?? "")))].join("\r\n");
     response.setHeader("Content-Type", "text/csv; charset=utf-8");
     response.setHeader("Content-Disposition", `attachment; filename="onlyvans-current-stock-${new Date().toISOString().slice(0, 10)}.csv"`);
