@@ -4,7 +4,7 @@ const CARSLINK_ENDPOINT = "https://api.carslink.ai/api/v1/stock";
 const WIX_API_BASE_URL = "https://www.wixapis.com";
 const WIX_COLLECTION_ID = "VANFINANCEPAGES";
 const DEFAULT_LIMIT = 10;
-const MAX_SANDBOX_LIMIT = 25;
+const MAX_SANDBOX_LIMIT = 500;
 
 function clean(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
