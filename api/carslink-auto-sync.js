@@ -2,6 +2,7 @@ import { runCarslinkProductionSync } from "../lib/carslinkProductionSync.js";
 
 const ACCESS_HEADER = "x-marketing-customer-database-key";
 const PUBLIC_PRODUCTION_ORIGIN = "https://marketing-crm-six.vercel.app";
+const PRIMARY_VERCEL_PROJECT_ID = "prj_UA8X61RmObkTDVp8cCkZ5X4oPlHl";
 
 export const config = { maxDuration: 300 };
 
@@ -32,6 +33,12 @@ function publicOrigin() {
 }
 
 function isPrimaryProduction(request) {
+  const expectedProjectId = String(
+    process.env.CARSLINK_PRIMARY_VERCEL_PROJECT_ID || PRIMARY_VERCEL_PROJECT_ID,
+  ).trim();
+  const currentProjectId = String(process.env.VERCEL_PROJECT_ID || "").trim();
+  if (currentProjectId && expectedProjectId) return currentProjectId === expectedProjectId;
+
   const primaryHost = normalizeHost(publicOrigin());
   const projectHost = normalizeHost(process.env.VERCEL_PROJECT_PRODUCTION_URL || "");
   if (projectHost) return projectHost === primaryHost;
@@ -49,8 +56,8 @@ export default async function handler(request, response) {
     return response.status(401).json({ ok: false, error: "CarsLink automation access not recognised." });
   }
 
-  // The repository is deployed to two Vercel projects. Only the public Marketing CRM
-  // project is allowed to send CarsLink feeds, preventing duplicate scheduled pushes.
+  // The repository is deployed to more than one Vercel project. Only the public
+  // Marketing CRM project may send CarsLink feeds, preventing duplicate cron pushes.
   if (!isPrimaryProduction(request)) {
     return response.status(200).json({
       ok: true,
