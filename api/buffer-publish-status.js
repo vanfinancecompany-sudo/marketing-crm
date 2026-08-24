@@ -16,7 +16,7 @@ import {
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
 
 const ACCESS_HEADER = "x-marketing-customer-database-key";
-const REEL_BLOB_MIN_SENT_AGE_MS = 30 * 60 * 1000;
+const REEL_BLOB_MIN_SENT_AGE_MS = 72 * 60 * 60 * 1000;
 
 function authorize(request) {
   const marketingKey = String(process.env.MARKETING_CUSTOMER_DATABASE_API_KEY || "");
