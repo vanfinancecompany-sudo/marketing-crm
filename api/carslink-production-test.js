@@ -1,4 +1,4 @@
-import sandboxHandler from "./carslink-sandbox-sync.js";
+const CARSLINK_ENDPOINT = "https://api.carslink.ai/api/v1/stock";
 
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
@@ -22,34 +22,63 @@ export default async function handler(request, response) {
     });
   }
 
-  // Reuse the tested sandbox mapping, but do not mutate Vercel's request object.
-  // Some request properties are read-only in the runtime, which caused the first
-  // production test to fail before the Carslink call was made.
-  const productionRequest = {
-    method: "POST",
-    query: { ...(request.query || {}), limit: "5" },
-    body: { ...(request.body || {}), limit: 5, confirmSandbox: true },
-  };
-
-  const previousSandboxKey = process.env.CARSLINK_SANDBOX_API_KEY;
-  process.env.CARSLINK_SANDBOX_API_KEY = productionKey;
-
   try {
-    return await sandboxHandler(productionRequest, response);
-  } catch (error) {
-    console.error("[carslink-production-test] failed", error);
-    if (!response.headersSent) {
-      return response.status(500).json({
+    const protocol = request.headers?.["x-forwarded-proto"] || "https";
+    const host = request.headers?.host;
+    if (!host) throw new Error("Unable to determine deployment host for Carslink payload preview.");
+
+    const previewUrl = `${protocol}://${host}/api/carslink-sandbox-sync?limit=5`;
+    const previewResponse = await fetch(previewUrl, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+    });
+    const preview = await previewResponse.json().catch(() => ({}));
+
+    if (!previewResponse.ok) {
+      throw new Error(preview?.error || `Carslink payload preview returned HTTP ${previewResponse.status}.`);
+    }
+
+    const payload = preview?.payload;
+    const listings = Array.isArray(payload?.listings) ? payload.listings : [];
+    if (!payload || listings.length < 1) {
+      return response.status(422).json({
         ok: false,
-        error: error?.message || "Carslink production test failed.",
+        error: "No valid listings were available for the Carslink production test.",
+        local_skipped: preview?.skipped || [],
       });
     }
-    throw error;
-  } finally {
-    if (previousSandboxKey === undefined) {
-      delete process.env.CARSLINK_SANDBOX_API_KEY;
-    } else {
-      process.env.CARSLINK_SANDBOX_API_KEY = previousSandboxKey;
+
+    const carslinkResponse = await fetch(CARSLINK_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${productionKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    const carslink = await carslinkResponse.json().catch(() => ({}));
+
+    if (!carslinkResponse.ok) {
+      return response.status(carslinkResponse.status).json({
+        ok: false,
+        error: carslink?.message || carslink?.error || `Carslink returned HTTP ${carslinkResponse.status}.`,
+        carslink,
+        local_skipped: preview?.skipped || [],
+      });
     }
+
+    return response.status(200).json({
+      ok: true,
+      environment: "production",
+      sent_count: listings.length,
+      local_skipped: preview?.skipped || [],
+      carslink,
+    });
+  } catch (error) {
+    console.error("[carslink-production-test] failed", error);
+    return response.status(500).json({
+      ok: false,
+      error: error?.message || "Carslink production test failed.",
+    });
   }
 }
