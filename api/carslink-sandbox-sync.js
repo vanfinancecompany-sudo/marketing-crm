@@ -246,14 +246,103 @@ function optionsFrom(value) {
   return cleanFeatureItems(value).slice(0, 30).join(", ");
 }
 
-function cleanDescription(title, descriptionLine, rawFeatures) {
-  const leadParts = [clean(title), clean(descriptionLine)].filter(Boolean);
-  const lead = [...new Set(leadParts)].join(". ");
-  const features = cleanFeatureItems(rawFeatures).slice(0, 18);
-  const featureText = features.length ? ` Features include ${features.join(", ")}.` : "";
-  return `${lead}${lead ? "." : ""}${featureText}`
-    .replace(/\.{2,}/g, ".")
+function naturalList(items) {
+  if (!items.length) return "";
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+}
+
+function naturalFeature(value) {
+  const text = clean(value).replace(/[.;,:]+$/, "");
+  const lower = text.toLowerCase();
+  const mappings = [
+    [/^alloys?$/, "alloy wheels"],
+    [/^roof bars?$/, "roof bars"],
+    [/^(coded|colour coded|color coded) bumpers?$/, "colour-coded bumpers"],
+    [/^(air con|air conditioning)$/, "air conditioning"],
+    [/^bluetooth$/, "Bluetooth"],
+    [/^cruise control$/, "cruise control"],
+    [/^dab( radio)?$/, "DAB radio"],
+    [/^(rear|reversing) camera$/, "reversing camera"],
+    [/^parking sensors?$/, "parking sensors"],
+    [/^heated seats?$/, "heated seats"],
+    [/^(heated|heated front) screen$/, "heated front screen"],
+    [/^apple car ?play$/, "Apple CarPlay"],
+    [/^android auto$/, "Android Auto"],
+    [/^sat nav$/, "sat nav"],
+    [/^electric windows?$/, "electric windows"],
+    [/^tow ?bar$/, "tow bar"],
+    [/^(ply lined|plylined)$/, "ply lining"],
+    [/^(side|sliding) door$/, "side loading door"],
+  ];
+  for (const [pattern, label] of mappings) {
+    if (pattern.test(lower)) return label;
+  }
+  if (/^[A-Z0-9 /&+-]+$/.test(text)) return text.toLowerCase();
+  return text.charAt(0).toLowerCase() + text.slice(1);
+}
+
+function preparationItem(value) {
+  const lower = clean(value).toLowerCase();
+  if (/\bprice checked\b/.test(lower)) return "";
+  const warranty = lower.match(/\b(\d+)\s*months?\s*warranty\b/);
+  if (warranty) return `a ${warranty[1]}-month warranty`;
+  if (/^service$|\bserviced\b/.test(lower)) return "a service";
+  const points = lower.match(/\b(\d+)[- ]?point\s*(?:check|inspection)\b/);
+  if (points) return `${points[1]}-point inspection`;
+  const mot = lower.match(/\b(?:new\s*)?(\d+)\s*months?\s*mot\b/);
+  if (mot) return `a new ${mot[1]}-month MOT`;
+  if (/\bfully valeted\b|\bfull valet\b/.test(lower)) return "a full valet";
+  return "";
+}
+
+function cleanDescription(year, title, descriptionLine, rawFeatures) {
+  const titleText = clean(title).replace(/\s*[|]+\s*/g, " ");
+  const raw = cleanFeatureItems(rawFeatures);
+  const titleLower = titleText.toLowerCase();
+  const equipment = [];
+  const preparation = [];
+  const seenEquipment = new Set();
+  const seenPreparation = new Set();
+
+  for (const item of raw) {
+    const lower = item.toLowerCase();
+    if (!item || lower.includes(titleLower) || /^20\d{2}(?:\/\d{2})?\b/.test(lower)) continue;
+    if (/\bno vat\b|\bfree uk delivery\b|\bprice checked\b/.test(lower)) continue;
+
+    const prep = preparationItem(item);
+    if (prep) {
+      const key = prep.toLowerCase();
+      if (!seenPreparation.has(key)) {
+        seenPreparation.add(key);
+        preparation.push(prep);
+      }
+      continue;
+    }
+
+    const feature = naturalFeature(item);
+    const key = feature.toLowerCase();
+    if (feature && !seenEquipment.has(key)) {
+      seenEquipment.add(key);
+      equipment.push(feature);
+    }
+  }
+
+  const sourceText = `${descriptionLine} ${rawFeatures}`;
+  const noVat = /\bno vat\b/i.test(sourceText);
+  const freeDelivery = /\bfree\s+(?:uk\s+)?delivery\b/i.test(sourceText);
+  const sentences = [`${year ? `${year} ` : ""}${titleText}.`];
+
+  if (equipment.length) sentences.push(`Equipped with ${naturalList(equipment.slice(0, 12))}.`);
+  if (preparation.length) sentences.push(`Supplied with ${naturalList(preparation.slice(0, 5))}.`);
+  if (freeDelivery) sentences.push("Free UK delivery.");
+  if (noVat) sentences.push("No VAT.");
+
+  return sentences
+    .join(" ")
     .replace(/\s+/g, " ")
+    .replace(/\.{2,}/g, ".")
     .trim()
     .slice(0, 2500);
 }
@@ -362,7 +451,7 @@ function mapListing(row, wix, reg) {
     service_history: "Partial",
   };
 
-  const description = cleanDescription(title, descriptionLine, rawFeatures);
+  const description = cleanDescription(year, title, descriptionLine, rawFeatures);
   const listing = {
     vehicle_type: "van",
     make,
