@@ -100,8 +100,8 @@ export default function StockPage({
               className="button button--ghost"
               type="button"
               onClick={runCarslinkSandboxTest}
-              disabled={carslinkSyncing || filters.pipeline !== "finance"}
-              title={filters.pipeline !== "finance" ? "Switch to Finance stock to run the Carslink sandbox test." : "Send 10 current Finance vans to Carslink sandbox."}
+              disabled={carslinkSyncing || filters.pipeline !== "vanFinance"}
+              title={filters.pipeline !== "vanFinance" ? "Switch to Finance stock to run the Carslink sandbox test." : "Send 10 current Finance vans to Carslink sandbox."}
             >
               {carslinkSyncing ? "Sending Carslink Test..." : "Carslink Sandbox: Send 10"}
             </button>
