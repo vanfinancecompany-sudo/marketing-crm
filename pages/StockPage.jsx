@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import VehicleCard from "../components/VehicleCard.jsx";
 import FilterBar from "../components/FilterBar.jsx";
 
@@ -27,6 +27,9 @@ export default function StockPage({
   creativeError = "",
 }) {
   const selectedCount = selectedVehicleIds.length;
+  const [carslinkSyncing, setCarslinkSyncing] = useState(false);
+  const [carslinkMessage, setCarslinkMessage] = useState("");
+  const [carslinkError, setCarslinkError] = useState("");
   const carsConfigured = Boolean(carsStockStatus?.configured);
   const carsTableName = carsStockStatus?.tableName || "";
   const carsLoaded = Number(carsStockStatus?.loaded || 0);
@@ -43,6 +46,34 @@ export default function StockPage({
   function refreshStockPage() {
     if (typeof window !== "undefined") {
       window.location.reload();
+    }
+  }
+
+  async function runCarslinkSandboxTest() {
+    if (carslinkSyncing) return;
+    setCarslinkSyncing(true);
+    setCarslinkMessage("");
+    setCarslinkError("");
+
+    try {
+      const response = await fetch("/api/carslink-sandbox-sync?limit=10", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmSandbox: true }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || `Carslink sandbox returned HTTP ${response.status}.`);
+      }
+
+      const syncId = payload?.carslink?.sync_id || payload?.sync_id || "accepted";
+      const queued = payload?.carslink?.queued_count ?? payload?.queued_count ?? payload?.validCount ?? 0;
+      const skipped = payload?.carslink?.feed?.skipped ?? payload?.skippedCount ?? 0;
+      setCarslinkMessage(`Carslink sandbox accepted. Sync ID: ${syncId} | queued: ${queued} | skipped: ${skipped}`);
+    } catch (error) {
+      setCarslinkError(error?.message || "Carslink sandbox test failed.");
+    } finally {
+      setCarslinkSyncing(false);
     }
   }
 
@@ -68,6 +99,15 @@ export default function StockPage({
             <button
               className="button button--ghost"
               type="button"
+              onClick={runCarslinkSandboxTest}
+              disabled={carslinkSyncing || filters.pipeline !== "finance"}
+              title={filters.pipeline !== "finance" ? "Switch to Finance stock to run the Carslink sandbox test." : "Send 10 current Finance vans to Carslink sandbox."}
+            >
+              {carslinkSyncing ? "Sending Carslink Test..." : "Carslink Sandbox: Send 10"}
+            </button>
+            <button
+              className="button button--ghost"
+              type="button"
               onClick={refreshStockPage}
               disabled={vehiclesLoading}
             >
@@ -77,6 +117,9 @@ export default function StockPage({
             <span className="status-pill">Auto-refresh 30 mins</span>
           </div>
         </div>
+
+        {carslinkMessage ? <div className="notice">{carslinkMessage}</div> : null}
+        {carslinkError ? <div className="notice notice--error">{carslinkError}</div> : null}
 
         <FilterBar filters={filters} onChange={onFiltersChange} />
 
