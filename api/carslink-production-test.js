@@ -22,17 +22,29 @@ export default async function handler(request, response) {
     });
   }
 
-  // Reuse the already-tested sandbox payload builder and mapping logic, but inject
-  // the production key only for this request. Production is currently empty, so
-  // full_replace with a five-vehicle batch is a safe controlled first live test.
+  // Reuse the tested sandbox mapping, but do not mutate Vercel's request object.
+  // Some request properties are read-only in the runtime, which caused the first
+  // production test to fail before the Carslink call was made.
+  const productionRequest = {
+    method: "POST",
+    query: { ...(request.query || {}), limit: "5" },
+    body: { ...(request.body || {}), limit: 5, confirmSandbox: true },
+  };
+
   const previousSandboxKey = process.env.CARSLINK_SANDBOX_API_KEY;
   process.env.CARSLINK_SANDBOX_API_KEY = productionKey;
 
-  request.query = { ...(request.query || {}), limit: "5" };
-  request.body = { ...(request.body || {}), confirmSandbox: true };
-
   try {
-    return await sandboxHandler(request, response);
+    return await sandboxHandler(productionRequest, response);
+  } catch (error) {
+    console.error("[carslink-production-test] failed", error);
+    if (!response.headersSent) {
+      return response.status(500).json({
+        ok: false,
+        error: error?.message || "Carslink production test failed.",
+      });
+    }
+    throw error;
   } finally {
     if (previousSandboxKey === undefined) {
       delete process.env.CARSLINK_SANDBOX_API_KEY;
