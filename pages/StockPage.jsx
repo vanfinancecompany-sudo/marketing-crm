@@ -49,7 +49,7 @@ export default function StockPage({
     }
   }
 
-  async function runCarslinkProductionTest() {
+  async function runCarslinkProductionSync() {
     if (carslinkSyncing) return;
     setCarslinkSyncing(true);
     setCarslinkMessage("");
@@ -67,11 +67,12 @@ export default function StockPage({
       }
 
       const syncId = payload?.carslink?.sync_id || payload?.sync_id || "accepted";
-      const queued = payload?.carslink?.queued_count ?? payload?.queued_count ?? payload?.validCount ?? 0;
-      const skipped = payload?.carslink?.feed?.skipped ?? payload?.skippedCount ?? 0;
-      setCarslinkMessage(`Carslink LIVE test accepted. Sync ID: ${syncId} | queued: ${queued} | skipped: ${skipped}`);
+      const queued = payload?.carslink?.queued_count ?? payload?.queued_count ?? payload?.sent_count ?? 0;
+      const localSkipped = Array.isArray(payload?.local_skipped) ? payload.local_skipped.length : 0;
+      const sourceCount = Number(payload?.source_count || 0);
+      setCarslinkMessage(`Carslink LIVE full sync accepted. Sync ID: ${syncId} | source: ${sourceCount} | queued: ${queued} | local skipped: ${localSkipped}`);
     } catch (error) {
-      setCarslinkError(error?.message || "Carslink live test failed.");
+      setCarslinkError(error?.message || "Carslink live sync failed.");
     } finally {
       setCarslinkSyncing(false);
     }
@@ -99,11 +100,11 @@ export default function StockPage({
             <button
               className="button button--ghost"
               type="button"
-              onClick={runCarslinkProductionTest}
+              onClick={runCarslinkProductionSync}
               disabled={carslinkSyncing || filters.pipeline !== "vanFinance"}
-              title={filters.pipeline !== "vanFinance" ? "Switch to Finance stock to run the Carslink live test." : "Send five current Finance vans to live Carslink for final production verification."}
+              title={filters.pipeline !== "vanFinance" ? "Switch to Finance stock to sync Carslink." : "Send the complete current Finance stock feed to live Carslink using full replace."}
             >
-              {carslinkSyncing ? "Sending Carslink Live Test..." : "Carslink LIVE: Send 5"}
+              {carslinkSyncing ? "Syncing Carslink Live..." : "Carslink LIVE: Sync All"}
             </button>
             <button
               className="button button--ghost"
