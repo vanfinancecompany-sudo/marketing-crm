@@ -1,4 +1,5 @@
 const CARSLINK_ENDPOINT = "https://api.carslink.ai/api/v1/stock";
+const FULL_STOCK_LIMIT = 500;
 
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
@@ -27,7 +28,7 @@ export default async function handler(request, response) {
     const host = request.headers?.host;
     if (!host) throw new Error("Unable to determine deployment host for Carslink payload preview.");
 
-    const previewUrl = `${protocol}://${host}/api/carslink-sandbox-sync?limit=5`;
+    const previewUrl = `${protocol}://${host}/api/carslink-sandbox-sync?limit=${FULL_STOCK_LIMIT}`;
     const previewResponse = await fetch(previewUrl, {
       method: "GET",
       headers: { Accept: "application/json" },
@@ -43,7 +44,7 @@ export default async function handler(request, response) {
     if (!payload || listings.length < 1) {
       return response.status(422).json({
         ok: false,
-        error: "No valid listings were available for the Carslink production test.",
+        error: "No valid listings were available for the Carslink production sync.",
         local_skipped: preview?.skipped || [],
       });
     }
@@ -70,15 +71,16 @@ export default async function handler(request, response) {
     return response.status(200).json({
       ok: true,
       environment: "production",
+      source_count: preview?.source_count || 0,
       sent_count: listings.length,
       local_skipped: preview?.skipped || [],
       carslink,
     });
   } catch (error) {
-    console.error("[carslink-production-test] failed", error);
+    console.error("[carslink-production-sync] failed", error);
     return response.status(500).json({
       ok: false,
-      error: error?.message || "Carslink production test failed.",
+      error: error?.message || "Carslink production sync failed.",
     });
   }
 }
