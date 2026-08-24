@@ -16,9 +16,9 @@ const SUPPORTED_MAKES = new Set([
 ]);
 
 const MODEL_RULES = {
-  "Mercedes-Benz": ["Sprinter","Vito","Citan"],
+  "Mercedes-Benz": ["Sprinter","Citan"],
   Renault: ["Trafic","Master","Kangoo"],
-  Volkswagen: ["Transporter","Caddy","Crafter","Amarok"],
+  Volkswagen: ["Caddy","Crafter","Amarok","Caravelle","ID. Buzz"],
   Fiat: ["Ducato","Doblo","Talento","Scudo"],
   Peugeot: ["Partner","Expert","Boxer"],
   Citroen: ["Berlingo","Dispatch","Relay"],
@@ -120,7 +120,25 @@ function makeFrom(text) {
   ];
   return rules.find(([, pattern]) => pattern.test(clean(text)))?.[0] || "";
 }
-function modelFrom(make, text) {
+function volkswagenTransporterModel(text, year) {
+  const lower = clean(text).toLowerCase();
+  if (/\be[ -]?transporter\b/.test(lower)) return "E Transporter";
+  if (/\btransport(er)?\s+t28\b.*\bstartline\b|\bt28\b.*\bstartline\b/.test(lower)) return "Transporter T28 Startline";
+  const weight = lower.match(/\bt(28|30|32)\b/);
+  if (weight) return `Transporter T${weight[1]}`;
+  const generation = lower.match(/\bt([1-7])(?:\.1)?\b/);
+  if (generation) return `Transporter T${generation[1]}`;
+  const numericYear = Number(year) || 0;
+  if (numericYear >= 2025) return "Transporter T7";
+  if (numericYear >= 2015) return "Transporter T6";
+  if (numericYear >= 2003) return "Transporter T5";
+  if (numericYear >= 1990) return "Transporter T4";
+  if (numericYear >= 1979) return "Transporter T3";
+  if (numericYear >= 1967) return "Transporter T2";
+  if (numericYear > 0) return "Transporter T1";
+  return "";
+}
+function modelFrom(make, text, year) {
   const lower = clean(text).toLowerCase();
   if (make === "Ford") {
     if (/transit\s+custom|\bcustom\b/.test(lower)) return "Transit Custom";
@@ -134,6 +152,15 @@ function modelFrom(make, text) {
     if (/\btourneo\b/.test(lower)) return "Tourneo";
     if (/\btransit\b/.test(lower)) return "Transit";
     return "";
+  }
+  if (make === "Volkswagen" && /\btransport(er)?\b|\be[ -]?transporter\b/.test(lower)) {
+    return volkswagenTransporterModel(lower, year);
+  }
+  if (make === "Mercedes-Benz") {
+    if (/\bevito\b|\be[ -]?vito\b/.test(lower)) return "eVito";
+    if (/\bvito\b.*\bmixto\b|\bmixto\b.*\bvito\b/.test(lower)) return "Vito Mixto";
+    if (/\bvito\b.*\btourer\b|\btourer\b.*\bvito\b/.test(lower)) return "Vito Tourer";
+    if (/\bvito\b/.test(lower)) return "Vito Panel";
   }
   return (MODEL_RULES[make] || []).find((model) => lower.includes(model.toLowerCase())) || "";
 }
@@ -276,7 +303,8 @@ function mapRow(row, wix, reg) {
   const safeSpec = safeSpecification(wix, reg);
   const combined = [title, descriptionLine, features, safeSpec].join(" ");
   const make = makeFrom(combined);
-  const model = modelFrom(make, combined);
+  const year = yearFrom(wix, reg, safeSpec);
+  const model = modelFrom(make, combined, year);
   if (!SUPPORTED_MAKES.has(make) || !model) return null;
   const fuel = fuelType(title, descriptionLine, features, safeSpec);
   const transmission = transmissionType(title, descriptionLine, features, safeSpec, fuel);
@@ -286,7 +314,7 @@ function mapRow(row, wix, reg) {
   const euro = euroValue(safeSpec, descriptionLine);
   return {
     title: title || `${make} ${model}`, make, model,
-    year: yearFrom(wix, reg, safeSpec), registration: reg,
+    year, registration: reg,
     mileage: mileageFrom(wix, safeSpec, descriptionLine, rawFeatures), price: numberFromMoney(wix.priceVat, row.salePrice, row.price),
     fuel_type: fuel, transmission, engine_size_cc: engineCc(safeSpec, title, descriptionLine, fuel),
     location: "Southampton", postcode: "SO40 2NN", description,
