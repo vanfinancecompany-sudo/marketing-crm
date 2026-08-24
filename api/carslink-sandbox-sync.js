@@ -229,14 +229,33 @@ function listingUrlFrom(wix, reg) {
   return `https://vanfinance.co/van-finance/${encodeURIComponent(regKey(reg).toLowerCase())}`;
 }
 
-function optionsFrom(value) {
+function cleanFeatureItems(value) {
   return [...new Set(
     String(value || "")
       .replace(/\r/g, "\n")
+      .replace(/[✅✔☑☒]/g, " ")
       .split(/\n|•|\|/)
-      .map((item) => clean(item.replace(/^[✓✅✔-]+\s*/, "")))
-      .filter((item) => item && item.length >= 2 && item.length <= 100)
-  )].slice(0, 30).join(", ");
+      .map((item) => clean(item.replace(/^[✓\-–—*]+\s*/, "")))
+      .map((item) => item.replace(/^also includes\s*:?\s*/i, ""))
+      .map((item) => item.replace(/https?:\/\/\S+/gi, "").trim())
+      .filter((item) => item && item.length >= 2 && item.length <= 120)
+  )];
+}
+
+function optionsFrom(value) {
+  return cleanFeatureItems(value).slice(0, 30).join(", ");
+}
+
+function cleanDescription(title, descriptionLine, rawFeatures) {
+  const leadParts = [clean(title), clean(descriptionLine)].filter(Boolean);
+  const lead = [...new Set(leadParts)].join(". ");
+  const features = cleanFeatureItems(rawFeatures).slice(0, 18);
+  const featureText = features.length ? ` Features include ${features.join(", ")}.` : "";
+  return `${lead}${lead ? "." : ""}${featureText}`
+    .replace(/\.{2,}/g, ".")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 2500);
 }
 
 function supabase() {
@@ -343,7 +362,7 @@ function mapListing(row, wix, reg) {
     service_history: "Partial",
   };
 
-  const description = [title, descriptionLine, rawFeatures].filter(Boolean).join("\n\n").slice(0, 6000);
+  const description = cleanDescription(title, descriptionLine, rawFeatures);
   const listing = {
     vehicle_type: "van",
     make,
