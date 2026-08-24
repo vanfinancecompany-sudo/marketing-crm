@@ -23,6 +23,10 @@
     {
       "path": "/api/buffer-publish-status",
       "schedule": "35 * * * *"
+    },
+    {
+      "path": "/api/carslink-auto-sync",
+      "schedule": "47 * * * *"
     }
   ],
   "functions": {
@@ -45,6 +49,12 @@
       "maxDuration": 15
     },
     "api/marketing-ai-visibility-google.js": {
+      "maxDuration": 300
+    },
+    "api/carslink-auto-sync.js": {
+      "maxDuration": 300
+    },
+    "api/carslink-production-test.js": {
       "maxDuration": 300
     }
   },
