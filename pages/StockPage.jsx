@@ -49,29 +49,29 @@ export default function StockPage({
     }
   }
 
-  async function runCarslinkSandboxTest() {
+  async function runCarslinkProductionTest() {
     if (carslinkSyncing) return;
     setCarslinkSyncing(true);
     setCarslinkMessage("");
     setCarslinkError("");
 
     try {
-      const response = await fetch("/api/carslink-sandbox-sync?limit=10", {
+      const response = await fetch("/api/carslink-production-test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirmSandbox: true }),
+        body: JSON.stringify({ confirmProduction: true }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(payload?.error || `Carslink sandbox returned HTTP ${response.status}.`);
+        throw new Error(payload?.error || `Carslink production returned HTTP ${response.status}.`);
       }
 
       const syncId = payload?.carslink?.sync_id || payload?.sync_id || "accepted";
       const queued = payload?.carslink?.queued_count ?? payload?.queued_count ?? payload?.validCount ?? 0;
       const skipped = payload?.carslink?.feed?.skipped ?? payload?.skippedCount ?? 0;
-      setCarslinkMessage(`Carslink sandbox accepted. Sync ID: ${syncId} | queued: ${queued} | skipped: ${skipped}`);
+      setCarslinkMessage(`Carslink LIVE test accepted. Sync ID: ${syncId} | queued: ${queued} | skipped: ${skipped}`);
     } catch (error) {
-      setCarslinkError(error?.message || "Carslink sandbox test failed.");
+      setCarslinkError(error?.message || "Carslink live test failed.");
     } finally {
       setCarslinkSyncing(false);
     }
@@ -99,11 +99,11 @@ export default function StockPage({
             <button
               className="button button--ghost"
               type="button"
-              onClick={runCarslinkSandboxTest}
+              onClick={runCarslinkProductionTest}
               disabled={carslinkSyncing || filters.pipeline !== "vanFinance"}
-              title={filters.pipeline !== "vanFinance" ? "Switch to Finance stock to run the Carslink sandbox test." : "Send 10 current Finance vans to Carslink sandbox."}
+              title={filters.pipeline !== "vanFinance" ? "Switch to Finance stock to run the Carslink live test." : "Send five current Finance vans to live Carslink for final production verification."}
             >
-              {carslinkSyncing ? "Sending Carslink Test..." : "Carslink Sandbox: Send 10"}
+              {carslinkSyncing ? "Sending Carslink Live Test..." : "Carslink LIVE: Send 5"}
             </button>
             <button
               className="button button--ghost"
