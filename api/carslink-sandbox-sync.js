@@ -117,6 +117,23 @@ const MODEL_RULES = {
   LDV: ["V80"],
 };
 
+const COLOUR_RULES = [
+  ["Black", /\b(?:black|panther black|shadow black|agate black)\b/i],
+  ["White", /\b(?:white|frozen white|arctic white|polar white|diamond white|ice white)\b/i],
+  ["Silver", /\b(?:silver|moondust silver|metallic silver)\b/i],
+  ["Grey", /\b(?:grey|gray|magnetic grey|magnetic gray|graphite grey|graphite gray|nardo grey|nardo gray)\b/i],
+  ["Blue", /\b(?:blue|blazer blue|chrome blue|deep impact blue|navy blue)\b/i],
+  ["Red", /\b(?:red|race red|solid red)\b/i],
+  ["Green", /\b(?:green|british racing green)\b/i],
+  ["Orange", /\borange\b/i],
+  ["Yellow", /\byellow\b/i],
+  ["Brown", /\bbrown\b/i],
+  ["Beige", /\bbeige\b/i],
+  ["Bronze", /\bbronze\b/i],
+  ["Gold", /\bgold\b/i],
+  ["Purple", /\bpurple\b/i],
+];
+
 function makeFrom(text) {
   return MAKE_RULES.find(([, pattern]) => pattern.test(clean(text)))?.[0] || "";
 }
@@ -130,6 +147,21 @@ function modelFrom(make, text) {
 function labelledSpecValue(spec, labelPattern) {
   const match = String(spec || "").match(new RegExp(`${labelPattern}\\s*:\\s*([^\\r\\n]+)`, "i"));
   return clean(match?.[1] || "");
+}
+
+function normalisedColour(value) {
+  const text = clean(value);
+  if (!text) return "";
+  for (const [colour, pattern] of COLOUR_RULES) {
+    if (pattern.test(text)) return colour;
+  }
+  return "";
+}
+
+function colourFrom(wix, spec) {
+  const structured = normalisedColour(wix?.colour || wix?.color);
+  if (structured) return structured;
+  return normalisedColour(labelledSpecValue(spec, "COL(?:OU)?R"));
 }
 
 function fuelFrom(text, spec) {
@@ -406,6 +438,8 @@ async function wixQuery(registrations) {
           "descriptionLine",
           "vehicleDescriptionTextClick",
           "vehicleSpecificationText",
+          "colour",
+          "color",
           "mainImages",
           "applyLink",
           "link-van-finance-title",
@@ -463,6 +497,7 @@ function mapListing(row, wix, reg) {
     variant: variantFrom(title, make, model),
     fuel,
     transmission,
+    colour: colourFrom(wix, spec),
     van_type: vanTypeFrom(combined),
     roof_height: roofHeightFrom(combined),
     load_length: loadLengthFrom(combined),
