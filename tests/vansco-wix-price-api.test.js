@@ -98,11 +98,11 @@ test("update rechecks the preview then patches only matched price fields", async
     const patches = calls.filter((call) => call.method === "PATCH");
     assert.equal(patches.length, 2);
     assert.deepEqual(patches[0].body.patch.fieldModifications.map((field) => [field.fieldPath, field.setFieldOptions.value]), [
-      ["price", "£9,995"],
+      ["price", "£9,995 [Was £10,995]"],
       ["salePrice", "FROM £209 P/M"],
     ]);
     assert.deepEqual(patches[1].body.patch.fieldModifications.map((field) => [field.fieldPath, field.setFieldOptions.value]), [
-      ["priceVat", "£9,995 +VAT"],
+      ["priceVat", "£9,995 +VAT [Was £10,995]"],
       ["mthPrice", "£209"],
     ]);
   });
