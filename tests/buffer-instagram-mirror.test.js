@@ -151,7 +151,7 @@ test("Instagram mirror runs after Facebook and Blob cleanup keeps a safety windo
   assert.equal(schedules.get("/api/buffer-instagram-mirror"), "14 * * * *");
 
   const status = source("api/buffer-publish-status.js");
-  assert.match(status, /REEL_BLOB_MIN_SENT_AGE_MS = 30 \* 60 \* 1000/);
+  assert.match(status, /REEL_BLOB_MIN_SENT_AGE_MS = 72 \* 60 \* 60 \* 1000/);
   assert.match(status, /Date\.now\(\) - sentAtMs < REEL_BLOB_MIN_SENT_AGE_MS/);
   assert.match(status, /await del\(url\)/);
 });
