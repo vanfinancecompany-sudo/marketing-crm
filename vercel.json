@@ -17,6 +17,10 @@
       "schedule": "17 * * * *"
     },
     {
+      "path": "/api/buffer-facebook-story-automation",
+      "schedule": "25 * * * *"
+    },
+    {
       "path": "/api/rent2buy-monthly-price-sync",
       "schedule": "23 * * * *"
     },
@@ -35,6 +39,9 @@
     },
     "api/buffer-facebook-automation-cron.js": {
       "maxDuration": 300
+    },
+    "api/buffer-facebook-story-automation.js": {
+      "maxDuration": 120
     },
     "api/buffer-instagram-mirror.js": {
       "maxDuration": 120
