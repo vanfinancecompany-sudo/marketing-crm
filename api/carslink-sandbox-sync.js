@@ -127,21 +127,43 @@ function modelFrom(make, text) {
   return candidates.find((model) => lower.includes(model.toLowerCase())) || "";
 }
 
+function labelledSpecValue(spec, labelPattern) {
+  const match = String(spec || "").match(new RegExp(`${labelPattern}\\s*:\\s*([^\\r\\n]+)`, "i"));
+  return clean(match?.[1] || "");
+}
+
 function fuelFrom(text, spec) {
-  const combined = `${clean(text)} ${clean(spec)}`.toLowerCase();
-  if (/\belectric\b|\bevito\b|\be-transit\b|\be-tech\b|\bedeliver\b|\bkwh\b/.test(combined)) return "Electric";
-  if (/\bplug[- ]?in hybrid\b|\bphev\b/.test(combined)) return "Plug-in Hybrid";
-  if (/\bhybrid\b|\bmhev\b/.test(combined)) return "Hybrid";
-  if (/\bpetrol\b|\becoboost\b/.test(combined)) return "Petrol";
+  const labelled = labelledSpecValue(spec, "FUEL(?:\\s+TYPE)?").toLowerCase();
+  if (labelled) {
+    if (/\bplug[- ]?in hybrid\b|\bphev\b/.test(labelled)) return "Plug-in Hybrid";
+    if (/\bhybrid\b|\bmhev\b/.test(labelled)) return "Hybrid";
+    if (/\belectric\b|\bev\b/.test(labelled)) return "Electric";
+    if (/\bpetrol\b|\bgasoline\b/.test(labelled)) return "Petrol";
+    if (/\bdiesel\b/.test(labelled)) return "Diesel";
+  }
+
+  const identity = clean(text).toLowerCase();
+  if (/\bevito\b|\be-transit\b|\be-tech\b|\bedeliver\b|\bid\.?\s*buzz\b/.test(identity)) return "Electric";
+  if (/\bplug[- ]?in hybrid\b|\bphev\b/.test(identity)) return "Plug-in Hybrid";
+  if (/\bhybrid\b|\bmhev\b/.test(identity)) return "Hybrid";
+  if (/\bpetrol\b|\becoboost\b/.test(identity)) return "Petrol";
   return "Diesel";
 }
 
 function transmissionFrom(text, spec, fuel) {
+  const labelled = labelledSpecValue(spec, "TRANSMISSION").toLowerCase();
+  if (labelled) {
+    if (/\bsemi[- ]?automatic\b|\bsemi auto\b/.test(labelled)) return "Semi-Automatic";
+    if (/\bcvt\b/.test(labelled)) return "CVT";
+    if (/\bautomatic\b|\bauto\b/.test(labelled)) return "Automatic";
+    if (/\bmanual\b/.test(labelled)) return "Manual";
+  }
+
   if (fuel === "Electric") return "Automatic";
-  const combined = `${clean(text)} ${clean(spec)}`.toLowerCase();
-  if (/\bsemi[- ]?automatic\b|\bsemi auto\b/.test(combined)) return "Semi-Automatic";
-  if (/\bcvt\b/.test(combined)) return "CVT";
-  if (/\bautomatic\b|\bauto\b/.test(combined)) return "Automatic";
+  const identity = clean(text).toLowerCase();
+  if (/\bsemi[- ]?automatic\b|\bsemi auto\b/.test(identity)) return "Semi-Automatic";
+  if (/\bcvt\b/.test(identity)) return "CVT";
+  if (/\bautomatic\b|\bauto\b/.test(identity)) return "Automatic";
   return "Manual";
 }
 
@@ -435,8 +457,8 @@ function mapListing(row, wix, reg) {
   if (images.length < 4) missing.push("minimum 4 HTTPS images");
   if (missing.length) return { listing: null, reason: `Missing ${missing.join(", ")}` };
 
-  const fuel = fuelFrom(combined, spec);
-  const transmission = transmissionFrom(combined, spec, fuel);
+  const fuel = fuelFrom(title, spec);
+  const transmission = transmissionFrom(title, spec, fuel);
   const optional = {
     variant: variantFrom(title, make, model),
     fuel,
