@@ -5,6 +5,10 @@
       "schedule": "0 2 * * *"
     },
     {
+      "path": "/api/marketing-template-campaign-send-worker",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/buffer-facebook-automation-cron",
       "schedule": "5 * * * *"
     },
@@ -47,6 +51,9 @@
       "maxDuration": 120
     },
     "api/marketing-editorial-automation-worker.js": {
+      "maxDuration": 300
+    },
+    "api/marketing-template-campaign-send-worker.js": {
       "maxDuration": 300
     },
     "api/marketing-website-index-discovery.js": {
