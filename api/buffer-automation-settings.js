@@ -35,7 +35,10 @@ export default async function handler(request, response) {
   }
 
   if (request.method === "GET") {
-    response.status(200).json({ ok: true, config: await loadBufferAutomationConfig() });
+    response.status(200).json({
+      ok: true,
+      config: await loadBufferAutomationConfig({ useDailyTargets: false }),
+    });
     return;
   }
 
@@ -47,7 +50,7 @@ export default async function handler(request, response) {
 
   try {
     const body = parseBody(request);
-    const current = await loadBufferAutomationConfig();
+    const current = await loadBufferAutomationConfig({ useDailyTargets: false });
     const next = normalizeBufferAutomationConfig({ ...current, ...(body.config || body) });
     if (next.enabled && !current.enabled && body.confirmEnable !== "ENABLE_BUFFER_AUTOMATION") {
       response.status(400).json({ ok: false, error: "Enabling live automation requires explicit confirmation." });

@@ -6,6 +6,7 @@ import {
   BUFFER_SENT_POSTS_QUERY,
   bufferDestinationForChannel,
   bufferPostMediaKind,
+  bufferPublishedActivityType,
   bufferPublishedItems,
   normalizeBufferRegistration,
   parseBufferSentPostsPayload,
@@ -21,6 +22,7 @@ test("Buffer sent-post query is read-only and restricted to the two Facebook cha
   assert.match(BUFFER_SENT_POSTS_QUERY, /status:\s*\[sent\]/);
   assert.match(BUFFER_SENT_POSTS_QUERY, /6a8721fbccaf649a67e227a3/);
   assert.match(BUFFER_SENT_POSTS_QUERY, /6a8722ffccaf649a67e22bc6/);
+  assert.match(BUFFER_SENT_POSTS_QUERY, /schedulingType/);
   assert.doesNotMatch(BUFFER_SENT_POSTS_QUERY, /mutation/i);
 });
 
@@ -30,9 +32,15 @@ test("maps Buffer channels, registrations and media kinds correctly", () => {
   assert.equal(normalizeBufferRegistration("REGISTRATION: AB12 CDE"), "AB12CDE");
   assert.equal(bufferPostMediaKind({ assets: [{ mimeType: "video/mp4" }] }), "video");
   assert.equal(bufferPostMediaKind({ assets: [{ mimeType: "image/jpeg" }] }), "image");
+  assert.equal(bufferPostMediaKind({
+    schedulingType: "notification",
+    assets: [{ mimeType: "image/jpeg" }],
+  }), "story");
+  assert.equal(bufferPublishedActivityType("Van Finance Facebook", "story"), "van_finance_facebook_post");
+  assert.equal(bufferPublishedActivityType("Rent2Buy Facebook", "story"), "rent2buy_facebook_post");
 });
 
-test("parses and summarizes Buffer sent posts by London day", () => {
+test("parses and summarizes Buffer sent feed posts, Stories and Reels by London day", () => {
   const sentAt = "2026-08-20T18:00:00Z";
   const posts = parseBufferSentPostsPayload({
     data: {
@@ -40,16 +48,18 @@ test("parses and summarizes Buffer sent posts by London day", () => {
         edges: [
           { node: { id: "p1", text: "REGISTRATION: AB12CDE", sentAt, channelId: "6a8721fbccaf649a67e227a3", assets: [{ mimeType: "image/jpeg" }] } },
           { node: { id: "p2", text: "REGISTRATION: CD34EFG", sentAt, channelId: "6a8722ffccaf649a67e22bc6", assets: [{ mimeType: "video/mp4" }] } },
+          { node: { id: "p3", text: "REGISTRATION: EF56HIJ", sentAt, schedulingType: "notification", channelId: "6a8722ffccaf649a67e22bc6", assets: [{ mimeType: "image/jpeg" }] } },
         ],
       },
     },
   });
   const items = bufferPublishedItems(posts);
-  assert.equal(items.length, 2);
+  assert.equal(items.length, 3);
+  assert.equal(items.find((item) => item.id === "p3")?.mediaKind, "story");
   const summary = summarizeBufferPublishedToday(posts, "2026-08-20", londonDateKey);
   assert.equal(summary.vanFinance.posts, 1);
   assert.equal(summary.vanFinance.reels, 0);
-  assert.equal(summary.rent2buy.posts, 0);
+  assert.equal(summary.rent2buy.posts, 1);
   assert.equal(summary.rent2buy.reels, 1);
 });
 
@@ -84,4 +94,5 @@ test("client surfaces live Buffer confirmation in all three CRM areas", async ()
   assert.match(endpoint, /source:\s*"buffer_publish"/);
   assert.match(endpoint, /facebook_published/);
   assert.match(endpoint, /facebook_live:\s*true/);
+  assert.match(endpoint, /item\.mediaKind === "image"/);
 });
