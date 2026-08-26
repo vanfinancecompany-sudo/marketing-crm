@@ -57,6 +57,12 @@
     "api/marketing-editorial-automation-worker.js": {
       "maxDuration": 300
     },
+    "api/marketing-template-campaign-sends-hardened.js": {
+      "maxDuration": 300
+    },
+    "api/marketing-template-campaign-sends-router.js": {
+      "maxDuration": 300
+    },
     "api/marketing-template-campaign-send-orphan-worker.js": {
       "maxDuration": 60
     },
