@@ -10,6 +10,13 @@ test("pending campaign recipients are reserved from future campaign batches", ()
   assert.equal(CURRENT_SEND_PROCESSED_RECIPIENT_STATUSES.includes("pending"), true);
 });
 
+test("processed campaign history uses deterministic pagination beyond 1000 recipients", () => {
+  const eligibility = fs.readFileSync(new URL("../lib/marketingCurrentSendEligibility.js", import.meta.url), "utf8");
+  assert.match(eligibility, /\.select\("id,customer_id,email"\)/);
+  assert.match(eligibility, /\.order\("id", \{ ascending: true \}\)/);
+  assert.match(eligibility, /\.range\(from, from \+ 999\)/);
+});
+
 test("queued campaign progress distinguishes pending, accepted, failed and unknown recipients", () => {
   const summary = summarizeRecipientRows([
     { status: "pending" },
