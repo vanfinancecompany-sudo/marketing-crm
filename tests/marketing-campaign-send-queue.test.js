@@ -3,6 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import { CURRENT_SEND_PROCESSED_RECIPIENT_STATUSES } from "../lib/marketingCurrentSendEligibility.js";
 import { summarizeRecipientRows } from "../api/marketing-template-campaign-send-worker.js";
+import { inspectOrphanReservation } from "../api/marketing-template-campaign-send-orphan-worker.js";
 import { reservationIsSafeToRecover } from "../api/marketing-template-campaign-sends-hardened.js";
 
 test("pending campaign recipients are reserved from future campaign batches", () => {
@@ -68,6 +69,65 @@ test("stranded reservation recovery requires a fully queued, never-attempted bat
   );
 });
 
+test("orphan worker queues a complete pristine reservation and releases an incomplete pristine one", () => {
+  const now = new Date("2026-08-26T13:00:00.000Z").getTime();
+  const send = {
+    id: "send-2",
+    campaign_id: "campaign-2",
+    send_type: "production",
+    status: "sending",
+    requested_count: 2,
+    created_at: "2026-08-26T12:50:00.000Z",
+    metadata: {
+      queue_state: "reserving",
+      campaign_snapshot: { id: "campaign-2" },
+    },
+  };
+  const pristine = [
+    { status: "pending", provider_message_id: null, provider_event_id: null, first_sent_at: null, last_event_at: null, metadata: {} },
+    { status: "pending", provider_message_id: null, provider_event_id: null, first_sent_at: null, last_event_at: null, metadata: {} },
+  ];
+
+  assert.deepEqual(inspectOrphanReservation(send, pristine, now), {
+    action: "queue",
+    reason: "fully_reserved_pristine",
+    reserved: 2,
+    requested: 2,
+  });
+  assert.deepEqual(inspectOrphanReservation(send, pristine.slice(0, 1), now), {
+    action: "release",
+    reason: "incomplete_pristine_reservation",
+    reserved: 1,
+    requested: 2,
+  });
+});
+
+test("orphan worker never retries recipient state with provider evidence", () => {
+  const now = new Date("2026-08-26T13:00:00.000Z").getTime();
+  const send = {
+    id: "send-3",
+    campaign_id: "campaign-3",
+    send_type: "production",
+    status: "sending",
+    requested_count: 1,
+    created_at: "2026-08-26T12:50:00.000Z",
+    metadata: {
+      queue_state: "reserving",
+      campaign_snapshot: { id: "campaign-3" },
+    },
+  };
+  const decision = inspectOrphanReservation(send, [{
+    status: "pending",
+    provider_message_id: null,
+    provider_event_id: null,
+    first_sent_at: null,
+    last_event_at: "2026-08-26T12:51:00.000Z",
+    metadata: { provider_attempt_started_at: "2026-08-26T12:51:00.000Z" },
+  }], now);
+  assert.equal(decision.action, "attention");
+  assert.equal(decision.reason, "provider_evidence_present");
+});
+
 test("hardened dispatcher repairs only safe queue-finalisation failures", () => {
   const hardened = fs.readFileSync(new URL("../api/marketing-template-campaign-sends-hardened.js", import.meta.url), "utf8");
   assert.match(hardened, /capture\.statusCode >= 500/);
@@ -77,15 +137,20 @@ test("hardened dispatcher repairs only safe queue-finalisation failures", () => 
   assert.doesNotMatch(hardened, /callEmailProvider/);
 });
 
-test("Vercel routes campaign sends through the hardened queue dispatcher and runs the worker every minute", () => {
+test("Vercel runs both orphan repair and queued sender every minute", () => {
   const config = JSON.parse(fs.readFileSync(new URL("../vercel.json", import.meta.url), "utf8"));
   assert.equal(
     config.rewrites.some((entry) => entry.source === "/api/marketing-template-campaign-sends" && entry.destination === "/api/marketing-template-campaign-sends-hardened"),
     true,
   );
   assert.equal(
+    config.crons.some((entry) => entry.path === "/api/marketing-template-campaign-send-orphan-worker" && entry.schedule === "* * * * *"),
+    true,
+  );
+  assert.equal(
     config.crons.some((entry) => entry.path === "/api/marketing-template-campaign-send-worker" && entry.schedule === "* * * * *"),
     true,
   );
+  assert.equal(config.functions["api/marketing-template-campaign-send-orphan-worker.js"]?.maxDuration, 60);
   assert.equal(config.functions["api/marketing-template-campaign-send-worker.js"]?.maxDuration, 300);
 });
