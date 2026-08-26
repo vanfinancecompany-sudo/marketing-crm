@@ -9,6 +9,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/marketing-template-campaign-reconcile-legacy-sends",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/buffer-facebook-automation-cron",
       "schedule": "5 * * * *"
     },
@@ -55,6 +59,9 @@
     },
     "api/marketing-template-campaign-send-worker.js": {
       "maxDuration": 300
+    },
+    "api/marketing-template-campaign-reconcile-legacy-sends.js": {
+      "maxDuration": 120
     },
     "api/marketing-website-index-discovery.js": {
       "maxDuration": 300
