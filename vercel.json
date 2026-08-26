@@ -84,7 +84,7 @@
     }
   ],
   "rewrites": [
-    { "source": "/api/marketing-template-campaign-sends", "destination": "/api/marketing-template-campaign-sends-router" },
+    { "source": "/api/marketing-template-campaign-sends", "destination": "/api/marketing-template-campaign-sends-hardened" },
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
