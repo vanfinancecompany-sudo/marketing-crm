@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const MAX_BATCH_SIZE = 500;
-const MIN_ORPHAN_AGE_MS = 2 * 60 * 1000;
+const MIN_ORPHAN_AGE_MS = 10 * 60 * 1000;
 const SEND_COLUMNS = "id,campaign_id,send_type,status,provider,requested_count,eligible_count,suppressed_count,sent_count,failed_count,skipped_duplicate_count,created_by,created_at,updated_at,started_at,completed_at,confirmation_token_hash,frozen_subject,frozen_preview_text,frozen_html_hash,metadata,error_summary";
 const RECIPIENT_COLUMNS = "id,status,provider_message_id,provider_event_id,first_sent_at,last_event_at,metadata";
 
@@ -48,10 +48,6 @@ export function inspectOrphanReservation(send = {}, recipients = [], nowMs = Dat
     return { action: "ignore", reason: "not_sending_production" };
   }
   if (metadata.dispatch_mode === "queued_worker") return { action: "ignore", reason: "already_queued" };
-  if (metadata.queue_state !== "reserving") return { action: "ignore", reason: "not_reserving" };
-  if (!metadata.campaign_snapshot || metadata.campaign_snapshot.id !== send.campaign_id) {
-    return { action: "ignore", reason: "missing_campaign_snapshot" };
-  }
   if (!Number.isInteger(requested) || requested < 1 || requested > MAX_BATCH_SIZE) {
     return { action: "ignore", reason: "invalid_requested_count" };
   }
@@ -73,11 +69,17 @@ export function inspectOrphanReservation(send = {}, recipients = [], nowMs = Dat
     return { action: "attention", reason: "provider_evidence_present", reserved: recipients.length, requested };
   }
 
-  if (recipients.length === requested) {
+  const hasUsableSnapshot = Boolean(metadata.campaign_snapshot && metadata.campaign_snapshot.id === send.campaign_id);
+  if (recipients.length === requested && hasUsableSnapshot) {
     return { action: "queue", reason: "fully_reserved_pristine", reserved: recipients.length, requested };
   }
-  if (recipients.length < requested) {
-    return { action: "release", reason: "incomplete_pristine_reservation", reserved: recipients.length, requested };
+  if (recipients.length <= requested) {
+    return {
+      action: "release",
+      reason: recipients.length === requested ? "missing_campaign_snapshot" : "incomplete_pristine_reservation",
+      reserved: recipients.length,
+      requested,
+    };
   }
   return { action: "attention", reason: "reservation_count_exceeds_request", reserved: recipients.length, requested };
 }
@@ -93,10 +95,7 @@ async function loadOrphans(supabase) {
       .limit(20),
     "Could not inspect sending campaign rows."
   );
-  return (result.data || []).filter((send) => {
-    const metadata = metadataObject(send.metadata);
-    return metadata.dispatch_mode !== "queued_worker" && metadata.queue_state === "reserving";
-  });
+  return (result.data || []).filter((send) => metadataObject(send.metadata).dispatch_mode !== "queued_worker");
 }
 
 async function loadRecipients(supabase, sendId) {
@@ -129,7 +128,6 @@ async function queuePristineReservation(supabase, send, decision, now) {
       .update({ metadata, error_summary: "" })
       .eq("id", send.id)
       .eq("status", "sending")
-      .contains("metadata", { queue_state: "reserving" })
       .select("id")
       .maybeSingle(),
     "Could not hand the pristine reservation to the background worker."
@@ -148,7 +146,7 @@ async function releaseIncompleteReservation(supabase, send, decision, now) {
     assertSupabase(removal, "Could not release incomplete pending reservations.");
   }
 
-  const message = `Queue reservation stopped before provider submission (${decision.reserved}/${decision.requested} recipients reserved). No email was submitted by this batch; it is safe to retry.`;
+  const message = `Queue reservation stopped before provider submission (${decision.reserved}/${decision.requested} recipients reserved; ${decision.reason}). No email was submitted by this batch; it is safe to retry.`;
   const result = assertSupabase(
     await supabase
       .from("marketing_email_sends")
@@ -165,6 +163,7 @@ async function releaseIncompleteReservation(supabase, send, decision, now) {
           processed_count: 0,
           pending_count: 0,
           orphan_released_at: now,
+          orphan_release_reason: decision.reason,
           retry_safe: true,
         },
       })
@@ -234,7 +233,7 @@ export default async function handler(request, response) {
     const sends = await loadOrphans(supabase);
     const results = [];
     for (const send of sends) results.push(await repairOne(supabase, send));
-    if (results.length) console.warn("[campaign-orphan-worker] inspected stranded sends", results);
+    console.warn("[campaign-orphan-worker] scan", { inspected: sends.length, results });
     json(response, 200, { ok: true, inspected: sends.length, results });
   } catch (error) {
     console.error("[campaign-orphan-worker] failed", { message: error?.message || String(error) });
