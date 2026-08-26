@@ -57,6 +57,9 @@
     "api/marketing-editorial-automation-worker.js": {
       "maxDuration": 300
     },
+    "api/marketing-template-campaign-sends-resilient.js": {
+      "maxDuration": 300
+    },
     "api/marketing-template-campaign-sends-hardened.js": {
       "maxDuration": 300
     },
@@ -97,9 +100,8 @@
     }
   ],
   "rewrites": [
-    { "source": "/api/marketing-template-campaign-sends", "destination": "/api/marketing-template-campaign-sends-hardened" },
+    { "source": "/api/marketing-template-campaign-sends", "destination": "/api/marketing-template-campaign-sends-resilient" },
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
-

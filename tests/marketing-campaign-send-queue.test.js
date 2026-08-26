@@ -140,7 +140,7 @@ test("hardened dispatcher repairs only safe queue-finalisation failures", () => 
 test("Vercel runs orphan repair and queued sender every minute", () => {
   const config = JSON.parse(fs.readFileSync(new URL("../vercel.json", import.meta.url), "utf8"));
   assert.equal(
-    config.rewrites.some((entry) => entry.source === "/api/marketing-template-campaign-sends" && entry.destination === "/api/marketing-template-campaign-sends-hardened"),
+    config.rewrites.some((entry) => entry.source === "/api/marketing-template-campaign-sends" && entry.destination === "/api/marketing-template-campaign-sends-resilient"),
     true,
   );
   assert.equal(
