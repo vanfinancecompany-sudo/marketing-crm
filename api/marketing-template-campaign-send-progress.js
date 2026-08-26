@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const SEND_COLUMNS = "id,campaign_id,send_type,status,provider,requested_count,eligible_count,suppressed_count,sent_count,failed_count,skipped_duplicate_count,created_at,updated_at,started_at,completed_at,metadata,error_summary";
+const ACCEPTED_STATUSES = new Set(["accepted", "sent", "delivered", "opened", "clicked"]);
 
 function json(response, status, payload) {
   response.status(status).json(payload);
@@ -43,22 +44,51 @@ function safeCount(value) {
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
 }
 
-export function summarizeSendProgress(send = {}) {
+export function summarizeRecipientStatuses(rows = []) {
+  const summary = {
+    total: rows.length,
+    processed: 0,
+    pending: 0,
+    accepted: 0,
+    failed: 0,
+    suppressed: 0,
+    unknown: 0,
+  };
+  for (const row of rows) {
+    const status = String(row?.status || "").toLowerCase();
+    if (status === "pending") {
+      summary.pending += 1;
+      continue;
+    }
+    summary.processed += 1;
+    if (ACCEPTED_STATUSES.has(status)) summary.accepted += 1;
+    if (status === "failed") summary.failed += 1;
+    if (status === "skipped_suppressed") summary.suppressed += 1;
+    if (status === "submission_unknown") summary.unknown += 1;
+  }
+  return summary;
+}
+
+export function summarizeSendProgress(send = {}, liveRecipients = null) {
   const metadata = send.metadata && typeof send.metadata === "object" ? send.metadata : {};
   const requested = safeCount(send.requested_count);
-  const accepted = safeCount(send.sent_count);
-  const failed = safeCount(send.failed_count);
-  const suppressed = safeCount(metadata.skipped_suppressed_count);
-  const unknown = safeCount(metadata.submission_unknown_count);
+  const live = liveRecipients && typeof liveRecipients === "object" ? liveRecipients : null;
+  const accepted = live ? safeCount(live.accepted) : safeCount(send.sent_count);
+  const failed = live ? safeCount(live.failed) : safeCount(send.failed_count);
+  const suppressed = live ? safeCount(live.suppressed) : safeCount(metadata.skipped_suppressed_count);
+  const unknown = live ? safeCount(live.unknown) : safeCount(metadata.submission_unknown_count);
   const durableProcessed = safeCount(metadata.processed_count);
+  const liveProcessed = live ? safeCount(live.processed) : 0;
   const processed = Math.min(
     requested || Number.MAX_SAFE_INTEGER,
-    Math.max(durableProcessed, accepted + failed + suppressed + unknown)
+    Math.max(liveProcessed, durableProcessed, accepted + failed + suppressed + unknown)
   );
   const pendingFromMetadata = Number(metadata.pending_count);
-  const pending = Number.isFinite(pendingFromMetadata) && pendingFromMetadata >= 0
-    ? Math.floor(pendingFromMetadata)
-    : Math.max(0, requested - processed);
+  const pending = live
+    ? Math.max(0, requested - processed)
+    : Number.isFinite(pendingFromMetadata) && pendingFromMetadata >= 0
+      ? Math.floor(pendingFromMetadata)
+      : Math.max(0, requested - processed);
   const progressPercent = requested > 0
     ? Math.max(0, Math.min(100, Math.round((processed / requested) * 100)))
     : 0;
@@ -115,6 +145,20 @@ async function loadSend(supabase, body) {
   return result.data || null;
 }
 
+async function loadLiveRecipientProgress(supabase, send) {
+  if (!send?.id || String(send.status || "") !== "sending") return null;
+  const result = assertSupabase(
+    await supabase
+      .from("marketing_email_send_recipients")
+      .select("status")
+      .eq("send_id", send.id)
+      .eq("send_type", "production")
+      .limit(500),
+    "Could not load live recipient progress."
+  );
+  return summarizeRecipientStatuses(result.data || []);
+}
+
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (!authorize(request)) {
@@ -127,12 +171,14 @@ export default async function handler(request, response) {
   }
 
   try {
-    const send = await loadSend(getSupabase(), parseBody(request));
+    const supabase = getSupabase();
+    const send = await loadSend(supabase, parseBody(request));
+    const liveRecipients = send ? await loadLiveRecipientProgress(supabase, send) : null;
     json(response, 200, {
       ok: true,
       found: Boolean(send),
       send: send || null,
-      progress: send ? summarizeSendProgress(send) : null,
+      progress: send ? summarizeSendProgress(send, liveRecipients) : null,
     });
   } catch (error) {
     json(response, error?.statusCode || 500, {
