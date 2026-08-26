@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { summarizeSendProgress } from "../api/marketing-template-campaign-send-progress.js";
+import {
+  summarizeRecipientStatuses,
+  summarizeSendProgress,
+} from "../api/marketing-template-campaign-send-progress.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
@@ -35,6 +38,32 @@ test("send progress uses durable worker counters", () => {
   assert.equal(progress.accepted, 118);
   assert.equal(progress.progress_percent, 24);
   assert.equal(progress.phase, "sending");
+});
+
+test("live recipient states advance the progress bar before the parent row refreshes", () => {
+  const live = summarizeRecipientStatuses([
+    { status: "accepted" },
+    { status: "delivered" },
+    { status: "skipped_suppressed" },
+    { status: "failed" },
+    { status: "pending" },
+  ]);
+  const progress = summarizeSendProgress({
+    id: "send-2",
+    campaign_id: "campaign-1",
+    status: "sending",
+    requested_count: 5,
+    sent_count: 0,
+    failed_count: 0,
+    metadata: { queue_state: "sending", processed_count: 0, pending_count: 5 },
+  }, live);
+
+  assert.equal(progress.processed, 4);
+  assert.equal(progress.pending, 1);
+  assert.equal(progress.accepted, 2);
+  assert.equal(progress.failed, 1);
+  assert.equal(progress.suppressed, 1);
+  assert.equal(progress.progress_percent, 80);
 });
 
 test("one-click send automatically prepares then confirms the same batch", () => {
