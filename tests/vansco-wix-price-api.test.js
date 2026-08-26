@@ -30,10 +30,10 @@ function wixResponse(payload, status = 200) {
 
 function wixItemFor(collectionId) {
   if (collectionId === "VANFINANCE-ALLVANS") {
-    return { id: "all-item", data: { title: "LA23FHK", price: "£10,995", salePrice: "FROM £230 P/M" } };
+    return { id: "all-item", data: { title: "LA23FHK", price: "£10,995", vat: "+VAT", salePrice: "FROM £230 P/M", wasPriceVat: "" } };
   }
   if (collectionId === "VANFINANCEPAGES") {
-    return { id: "page-item", data: { title: "LA23FHK", priceVat: "£10,995 +VAT", mthPrice: "£230" } };
+    return { id: "page-item", data: { title: "LA23FHK", priceVat: "£10,995 +VAT", mthPrice: "£230", wasPriceVat: "" } };
   }
   return null;
 }
@@ -82,7 +82,7 @@ test("preview queries the finance allowlist but never patches Wix", async () => 
   });
 });
 
-test("update rechecks the preview then patches only matched price fields", async () => {
+test("update keeps VFC display prices clean and stores VanFinance.co Was prices separately", async () => {
   await withWixMock(async (calls) => {
     const previewResponse = appResponse();
     await handler(appRequest({ action: "preview", pipeline: "finance", registration: "LA23FHK", retail_price: 9995 }), previewResponse);
@@ -98,12 +98,14 @@ test("update rechecks the preview then patches only matched price fields", async
     const patches = calls.filter((call) => call.method === "PATCH");
     assert.equal(patches.length, 2);
     assert.deepEqual(patches[0].body.patch.fieldModifications.map((field) => [field.fieldPath, field.setFieldOptions.value]), [
-      ["price", "£9,995 [Was £10,995]"],
+      ["price", "£9,995"],
       ["salePrice", "FROM £209 P/M"],
+      ["wasPriceVat", "£10,995 +VAT"],
     ]);
     assert.deepEqual(patches[1].body.patch.fieldModifications.map((field) => [field.fieldPath, field.setFieldOptions.value]), [
-      ["priceVat", "£9,995 +VAT [Was £10,995]"],
+      ["priceVat", "£9,995 +VAT"],
       ["mthPrice", "£209"],
+      ["wasPriceVat", "£10,995 +VAT"],
     ]);
   });
 });
