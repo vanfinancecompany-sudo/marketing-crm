@@ -4,9 +4,14 @@ import {
   bufferDestinationForProduct,
   readableBufferError,
 } from "../lib/bufferPublishing.js";
+import { loadBufferAutomationConfig } from "../lib/bufferAutomationConfig.js";
 import {
+  FACEBOOK_STORY_TARGET_PER_DAY,
   bufferPostDateKey,
   extractBufferRegistration,
+  facebookPostTargetForProduct,
+  facebookStoryTargetForProduct,
+  isBufferFacebookStory,
   isBufferPostReserved,
   londonDateKeyForValue,
   londonLocalMinutesToUtcIso,
@@ -17,7 +22,6 @@ export const config = { maxDuration: 120 };
 const ACCESS_HEADER = "x-marketing-customer-database-key";
 const PRODUCTS = ["vanFinance", "rent2buy"];
 const CHANNEL_QUEUE_LIMIT = 10;
-const STORY_TARGET_PER_DAY = 3;
 const STORY_LOCAL_MINUTES = [10 * 60 + 30, 14 * 60 + 30, 18 * 60 + 30];
 const RENT2BUY_OFFSET_MINUTES = 10;
 const MIN_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
@@ -160,10 +164,6 @@ function isImagePost(post) {
   return Boolean(imageSource(post));
 }
 
-function isStoryPost(post) {
-  return isImagePost(post) && String(post?.schedulingType || "").toLowerCase() === "notification";
-}
-
 function queuedCount(posts, productKey) {
   return postsForProduct(posts, productKey).filter(isBufferPostReserved).length;
 }
@@ -176,14 +176,14 @@ function postTimestamp(post) {
 
 function storyPostsForDay(posts, productKey, dateKey) {
   return postsForProduct(posts, productKey).filter(
-    (post) => livePost(post) && isStoryPost(post) && bufferPostDateKey(post) === dateKey,
+    (post) => livePost(post) && isBufferFacebookStory(post) && bufferPostDateKey(post) === dateKey,
   );
 }
 
-function storySlotForRun(posts, productKey, dateKey, now) {
+function storySlotForRun(posts, productKey, dateKey, now, storyTarget) {
   const existingStories = storyPostsForDay(posts, productKey, dateKey);
-  if (existingStories.length >= STORY_TARGET_PER_DAY) {
-    return { slot: null, existing: existingStories.length, target: STORY_TARGET_PER_DAY, reason: "target_met" };
+  if (existingStories.length >= storyTarget) {
+    return { slot: null, existing: existingStories.length, target: storyTarget, reason: "target_met" };
   }
 
   const occupied = new Set(
@@ -196,7 +196,7 @@ function storySlotForRun(posts, productKey, dateKey, now) {
       .filter(Boolean),
   );
   const offset = productKey === "rent2buy" ? RENT2BUY_OFFSET_MINUTES : 0;
-  const slots = STORY_LOCAL_MINUTES.map((minutes, index) => {
+  const slots = STORY_LOCAL_MINUTES.slice(0, storyTarget).map((minutes, index) => {
     const dueAt = londonLocalMinutesToUtcIso(dateKey, minutes + offset);
     return {
       index,
@@ -215,7 +215,7 @@ function storySlotForRun(posts, productKey, dateKey, now) {
   return {
     slot,
     existing: existingStories.length,
-    target: STORY_TARGET_PER_DAY,
+    target: storyTarget,
     reason: slot ? "ready" : "no_story_slot_due_soon",
   };
 }
@@ -230,7 +230,7 @@ function sourceImageCandidate(posts, productKey, dateKey, storyDueAt) {
 
   return postsForProduct(posts, productKey)
     .filter((post) => livePost(post))
-    .filter((post) => isImagePost(post) && !isStoryPost(post))
+    .filter((post) => isImagePost(post) && !isBufferFacebookStory(post))
     .filter((post) => bufferPostDateKey(post) === dateKey)
     .filter((post) => postTimestamp(post) <= dueMs)
     .filter((post) => {
@@ -265,12 +265,15 @@ async function createStory({ productKey, sourcePost, dueAt }) {
   return parseCreatedPost(await bufferGraphql(CREATE_POST_MUTATION, { input }));
 }
 
-async function createNextStory({ posts, productKey, dateKey, now }) {
+async function createNextStory({ posts, productKey, dateKey, now, storyTarget }) {
+  if (storyTarget <= 0) {
+    return { skipped: "target_met", existing: 0, target: 0 };
+  }
   if (queuedCount(posts, productKey) >= CHANNEL_QUEUE_LIMIT) {
     return { skipped: "buffer_queue_full", queued: queuedCount(posts, productKey) };
   }
 
-  const slotInfo = storySlotForRun(posts, productKey, dateKey, now);
+  const slotInfo = storySlotForRun(posts, productKey, dateKey, now, storyTarget);
   if (!slotInfo.slot) {
     return { skipped: slotInfo.reason, existing: slotInfo.existing, target: slotInfo.target };
   }
@@ -321,21 +324,42 @@ export default async function handler(request, response) {
   }
 
   try {
-    const posts = parsePosts(await bufferGraphql(POSTS_QUERY));
     const dateKey = londonDateKeyForValue();
+    const automationConfig = await loadBufferAutomationConfig({ dateKey });
+
+    if (!automationConfig.enabled || dateKey < automationConfig.startDate) {
+      response.status(200).json({
+        ok: true,
+        enabled: automationConfig.enabled,
+        date: dateKey,
+        message: automationConfig.enabled
+          ? "Story automation is waiting for the Buffer automation start date."
+          : "Buffer automation is paused. No Stories were created.",
+      });
+      return;
+    }
+
+    const posts = parsePosts(await bufferGraphql(POSTS_QUERY));
     const now = Date.now();
     const results = {};
+    const storyTargets = {};
+    const facebookTargets = {};
 
     for (const productKey of PRODUCTS) {
+      const storyTarget = facebookStoryTargetForProduct(automationConfig, productKey);
+      storyTargets[productKey] = storyTarget;
+      facebookTargets[productKey] = facebookPostTargetForProduct(automationConfig, productKey);
       results[productKey] = await safeStep(productKey, () =>
-        createNextStory({ posts, productKey, dateKey, now }),
+        createNextStory({ posts, productKey, dateKey, now, storyTarget }),
       );
     }
 
     response.status(200).json({
       ok: true,
       date: dateKey,
-      targetStoriesPerChannel: STORY_TARGET_PER_DAY,
+      configuredStoryMaximumPerChannel: FACEBOOK_STORY_TARGET_PER_DAY,
+      targetStoriesPerChannel: storyTargets,
+      facebookTargetPerChannel: facebookTargets,
       storyTimesLondon: {
         vanFinance: STORY_LOCAL_MINUTES.map((minutes) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`),
         rent2buy: STORY_LOCAL_MINUTES.map((minutes) => `${String(Math.floor((minutes + RENT2BUY_OFFSET_MINUTES) / 60)).padStart(2, "0")}:${String((minutes + RENT2BUY_OFFSET_MINUTES) % 60).padStart(2, "0")}`),
