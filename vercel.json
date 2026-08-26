@@ -5,6 +5,10 @@
       "schedule": "0 2 * * *"
     },
     {
+      "path": "/api/marketing-template-campaign-send-orphan-worker",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/marketing-template-campaign-send-worker",
       "schedule": "* * * * *"
     },
@@ -52,6 +56,9 @@
     },
     "api/marketing-editorial-automation-worker.js": {
       "maxDuration": 300
+    },
+    "api/marketing-template-campaign-send-orphan-worker.js": {
+      "maxDuration": 60
     },
     "api/marketing-template-campaign-send-worker.js": {
       "maxDuration": 300
