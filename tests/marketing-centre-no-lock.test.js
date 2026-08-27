@@ -6,6 +6,7 @@ import {
   validateMarketingAccessKey,
 } from "../services/marketingAccess.js";
 import { validateMarketingCampaignAccess } from "../services/marketingCampaigns.js";
+import { previewVanscoWixPrice } from "../services/vanscoWixPrice.js";
 import { withMarketingCentreNoLock } from "../lib/marketingCentreNoLock.js";
 
 test("Marketing Centre does not require the Customer Database access key", async () => {
@@ -51,6 +52,38 @@ test("Marketing Centre campaign service uses the dedicated no-lock server route"
   try {
     await validateMarketingCampaignAccess();
     assert.equal(requestedUrl, "/api/marketing-centre-campaigns");
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Stock Watch Wix price service uses the Marketing Centre no-lock route", async () => {
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+  let requestedBody = null;
+
+  globalThis.window = {
+    location: { pathname: "/marketing-centre" },
+  };
+  globalThis.fetch = async (url, options = {}) => {
+    requestedUrl = url;
+    requestedBody = JSON.parse(options.body || "{}");
+    return {
+      ok: true,
+      status: 200,
+      async json() { return { ok: true, preview: {} }; },
+    };
+  };
+
+  try {
+    await previewVanscoWixPrice({ registration: "HJ68KXF", retailPrice: 7995 });
+    assert.equal(requestedUrl, "/api/marketing-centre-vansco-wix-price");
+    assert.equal(requestedBody.action, "preview");
+    assert.equal(requestedBody.pipeline, "finance");
+    assert.equal(requestedBody.registration, "HJ68KXF");
+    assert.equal(requestedBody.retail_price, 7995);
   } finally {
     globalThis.window = originalWindow;
     globalThis.fetch = originalFetch;

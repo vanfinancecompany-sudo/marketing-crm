@@ -4,7 +4,7 @@ import {
 } from "./marketingAccess.js";
 
 async function requestWixPrice(action, { registration, retailPrice, confirmation = null }) {
-  const response = await fetch("/api/vansco-wix-price", {
+  const response = await fetch("/api/marketing-centre-vansco-wix-price", {
     method: "POST",
     headers: buildMarketingAccessHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
