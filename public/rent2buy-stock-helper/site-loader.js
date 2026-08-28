@@ -11,6 +11,7 @@
   let cachedCount = null;
   let countRequested = false;
   let observer = null;
+  let routeTimer = null;
 
   function isAllVansPage() {
     const host = String(window.location.hostname || "").toLowerCase();
@@ -67,9 +68,27 @@
     else if (observer) unmount();
   }
 
+  function startRouteMonitoring() {
+    if (routeTimer !== null || document.hidden) return;
+    routeTimer = window.setInterval(syncRoute, 900);
+  }
+
+  function stopRouteMonitoring() {
+    if (routeTimer === null) return;
+    window.clearInterval(routeTimer);
+    routeTimer = null;
+  }
+
+  function syncPageVisibility() {
+    if (document.hidden) return stopRouteMonitoring();
+    syncRoute();
+    startRouteMonitoring();
+  }
+
   window.addEventListener("popstate", syncRoute);
   window.addEventListener("hashchange", syncRoute);
-  window.setInterval(syncRoute, 900);
+  document.addEventListener("visibilitychange", syncPageVisibility);
+  startRouteMonitoring();
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", syncRoute, { once: true });
   else syncRoute();
 })();

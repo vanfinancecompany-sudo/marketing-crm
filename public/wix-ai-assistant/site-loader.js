@@ -43,6 +43,7 @@
   let storageKey = buildStorageKey(activeContext);
   let whatsappObserver = null;
   let pageScrollLock = null;
+  let routeTimer = null;
   const hiddenWhatsAppControls = new Map();
   const analyticsVisitorId = loadAnalyticsVisitorId();
   let internalAnalyticsTest = loadInternalAnalyticsTest(activeHref);
@@ -470,11 +471,43 @@
     sendTelemetry("launcher_impression");
   }
 
+  function startRouteMonitoring() {
+    if (routeTimer !== null || document.hidden) return;
+    routeTimer = window.setInterval(resetForNavigation, 750);
+  }
+
+  function stopRouteMonitoring() {
+    if (routeTimer === null) return;
+    window.clearInterval(routeTimer);
+    routeTimer = null;
+  }
+
+  function syncPageVisibility() {
+    if (document.hidden) {
+      stopRouteMonitoring();
+      return;
+    }
+    resetForNavigation();
+    startRouteMonitoring();
+  }
+
+  function scheduleCreateUi() {
+    const schedule = () => {
+      if (typeof window.requestIdleCallback === "function") {
+        window.requestIdleCallback(createUi, { timeout: 1200 });
+        return;
+      }
+      window.setTimeout(createUi, 0);
+    };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", schedule, { once: true });
+    else schedule();
+  }
+
   window.addEventListener("message", handleWidgetMessage);
   window.addEventListener("popstate", resetForNavigation);
   window.addEventListener("hashchange", resetForNavigation);
-  window.setInterval(resetForNavigation, 750);
+  document.addEventListener("visibilitychange", syncPageVisibility);
+  startRouteMonitoring();
 
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", createUi, { once: true });
-  else createUi();
+  scheduleCreateUi();
 })();

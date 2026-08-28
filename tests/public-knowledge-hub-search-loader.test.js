@@ -23,6 +23,8 @@ test("VFC Knowledge Hub search survives Wix client-side navigation without remai
   assert.match(source, /if \(isVfcKnowledgeHub\(\)\) mount\(\)/);
   assert.match(source, /else if \(host \|\| observer\) teardown\(\)/);
   assert.match(source, /setInterval\(syncRoute, 700\)/);
+  assert.match(source, /visibilitychange/);
+  assert.match(source, /clearInterval\(routeTimer\)/);
 });
 
 test("VFC site loader keeps the compact bounded search design", () => {
