@@ -30,6 +30,7 @@
   let requestSequence = 0;
   let activeSearch = null;
   let observer = null;
+  let routeTimer = null;
 
   const clean = (value, limit = 5000) => String(value || "").trim().slice(0, limit);
   const escapeHtml = (value) => clean(value, 2000).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
@@ -134,6 +135,10 @@
   function mount() { if (!isVfcKnowledgeHub() || host?.isConnected) return; const target = pageTarget(); if (target) return createHost(target); if (observer) return; observer = new MutationObserver(() => { const next = pageTarget(); if (next && isVfcKnowledgeHub()) { observer.disconnect(); observer = null; createHost(next); } }); observer.observe(document.documentElement, { childList: true, subtree: true }); }
   function syncRoute() { internalTestEnabled(); if (isVfcKnowledgeHub()) mount(); else if (host || observer) teardown(); }
 
-  window.addEventListener("popstate", syncRoute); window.addEventListener("hashchange", syncRoute); window.setInterval(syncRoute, 700);
+  function startRouteMonitoring() { if (routeTimer !== null || document.hidden) return; routeTimer = window.setInterval(syncRoute, 700); }
+  function stopRouteMonitoring() { if (routeTimer === null) return; window.clearInterval(routeTimer); routeTimer = null; }
+  function syncPageVisibility() { if (document.hidden) return stopRouteMonitoring(); syncRoute(); startRouteMonitoring(); }
+
+  window.addEventListener("popstate", syncRoute); window.addEventListener("hashchange", syncRoute); document.addEventListener("visibilitychange", syncPageVisibility); startRouteMonitoring();
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", syncRoute, { once: true }); else syncRoute();
 })();

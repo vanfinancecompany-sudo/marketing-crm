@@ -213,6 +213,9 @@ test("site-wide loader is layout-independent, sits above WhatsApp and sends only
   assert.match(loader, /mode=panel/);
   assert.match(loader, /rent2buyvans\.co\.uk/);
   assert.match(loader, /van-pages/);
+  assert.match(loader, /requestIdleCallback\(createUi, \{ timeout: 1200 \}\)/);
+  assert.match(loader, /visibilitychange/);
+  assert.match(loader, /clearInterval\(routeTimer\)/);
   assert.doesNotMatch(loader, /#dynamicDataset|VANFINANCEPAGES|VANPAGES|installDynamicVehicleAiAssistantWidget/);
 });
 
@@ -228,7 +231,29 @@ test("hosted embed route has a Wix-only frame policy without weakening other CRM
     "frame-ancestors 'self' https://vanfinancecompany.co.uk https://www.vanfinancecompany.co.uk https://rent2buyvans.co.uk https://www.rent2buyvans.co.uk https://editor.wix.com https://manage.wix.com https://www.wix.com https://*.wixsite.com",
   );
   assert.equal(configuredHeaders.get("content-security-policy").includes("frame-ancestors *"), false);
-  assert.equal(configuration.headers.length, 1, "the framing exception must not apply to other CRM routes");
+  const framingPolicies = configuration.headers.filter((entry) =>
+    entry.headers.some((header) => header.key.toLowerCase() === "content-security-policy"),
+  );
+  assert.equal(framingPolicies.length, 1, "the framing exception must not apply to other CRM routes");
+});
+
+test("public Wix loaders use bounded browser and CDN caching", async () => {
+  const configuration = JSON.parse(await readFile(new URL("../vercel.json", import.meta.url), "utf8"));
+  const expectedSources = [
+    "/wix-ai-assistant/(.*)",
+    "/knowledge-hub-search/site-loader.js",
+    "/rent2buy-stock-helper/site-loader.js",
+    "/rent2buy-vehicle-seo/site-loader.js",
+  ];
+
+  for (const source of expectedSources) {
+    const policy = configuration.headers?.find((entry) => entry.source === source);
+    const cacheControl = policy?.headers?.find((header) => header.key.toLowerCase() === "cache-control")?.value || "";
+    assert.match(cacheControl, /public/);
+    assert.match(cacheControl, /max-age=3600/);
+    assert.match(cacheControl, /s-maxage=86400/);
+    assert.match(cacheControl, /stale-while-revalidate=604800/);
+  }
 });
 
 test("legacy Wix adapter remains transport-only and never navigates applications", async () => {

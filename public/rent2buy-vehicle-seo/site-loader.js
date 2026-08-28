@@ -10,6 +10,7 @@
   let activeRegistration = "";
   let desiredTitle = "";
   let requestSequence = 0;
+  let routeTimer = null;
 
   function registrationFromPage() {
     const host = String(window.location.hostname || "").toLowerCase();
@@ -58,9 +59,27 @@
     applyTitle();
   }
 
+  function startRouteMonitoring() {
+    if (routeTimer !== null || document.hidden) return;
+    routeTimer = window.setInterval(syncRoute, 1200);
+  }
+
+  function stopRouteMonitoring() {
+    if (routeTimer === null) return;
+    window.clearInterval(routeTimer);
+    routeTimer = null;
+  }
+
+  function syncPageVisibility() {
+    if (document.hidden) return stopRouteMonitoring();
+    syncRoute();
+    startRouteMonitoring();
+  }
+
   window.addEventListener("popstate", syncRoute);
   window.addEventListener("hashchange", syncRoute);
-  window.setInterval(syncRoute, 1200);
+  document.addEventListener("visibilitychange", syncPageVisibility);
+  startRouteMonitoring();
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", syncRoute, { once: true });
   else syncRoute();
 })();
