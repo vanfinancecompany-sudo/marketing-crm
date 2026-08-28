@@ -28,6 +28,11 @@ function normaliseRegistration(value) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
+function ageMs(value) {
+  const timestamp = new Date(value || 0).getTime();
+  return Number.isFinite(timestamp) && timestamp > 0 ? Date.now() - timestamp : Number.POSITIVE_INFINITY;
+}
+
 async function checkSupabase() {
   const supabase = supabaseClient();
   const result = await supabase
@@ -77,7 +82,7 @@ async function checkBuffer() {
 
 async function checkRecentAutomationActivity() {
   const supabase = supabaseClient();
-  const since = new Date(Date.now() - 2 * DAY).toISOString();
+  const since = new Date(Date.now() - 3 * DAY).toISOString();
   const result = await supabase
     .from("marketing_daily_activity_events")
     .select("activity_type,source,occurred_at,metadata")
@@ -89,23 +94,34 @@ async function checkRecentAutomationActivity() {
       "rent2buy_reel",
     ])
     .order("occurred_at", { ascending: false })
-    .limit(1000);
+    .limit(1500);
   if (result.error) throw result.error;
 
-  const rows = result.data || [];
-  const published = rows.filter((row) => row?.source === "buffer_publish" || row?.metadata?.facebook_live === true);
-  const latest = published[0]?.occurred_at || null;
+  const rows = (result.data || []).filter(
+    (row) => row?.source === "buffer_publish" || row?.metadata?.facebook_live === true,
+  );
+  const latestByProduct = {
+    vanFinance: rows.find((row) => String(row.activity_type || "").startsWith("van_finance_"))?.occurred_at || null,
+    rent2buy: rows.find((row) => String(row.activity_type || "").startsWith("rent2buy_"))?.occurred_at || null,
+  };
 
-  // This is deliberately a wide threshold. The watchdog should catch a silent halt,
-  // not complain merely because there was no suitable stock to publish for a few hours.
-  if (!latest || Date.now() - new Date(latest).getTime() > 48 * HOUR) {
+  const stale = [];
+  if (!latestByProduct.vanFinance || ageMs(latestByProduct.vanFinance) > 48 * HOUR) stale.push("Van Finance");
+  if (!latestByProduct.rent2buy || ageMs(latestByProduct.rent2buy) > 48 * HOUR) stale.push("Rent2Buy");
+
+  if (stale.length) {
     return {
       ok: false,
       issue: issue(
         "facebook-automation-stale",
         "Facebook automation",
-        "No confirmed Finance or Rent2Buy Facebook publish has been recorded for more than 48 hours.",
-        { last_success_at: latest },
+        `No confirmed Facebook publish has been recorded for more than 48 hours for: ${stale.join(", ")}.`,
+        {
+          last_success_at: [latestByProduct.vanFinance, latestByProduct.rent2buy]
+            .filter(Boolean)
+            .sort()
+            .at(-1) || null,
+        },
       ),
     };
   }
@@ -150,6 +166,92 @@ async function checkDuplicateReels() {
   return { ok: true };
 }
 
+async function checkEmailCampaigns() {
+  const supabase = supabaseClient();
+  const since = new Date(Date.now() - 2 * DAY).toISOString();
+  const result = await supabase
+    .from("marketing_email_sends")
+    .select("id,status,created_at,updated_at,started_at,completed_at,error_summary,failed_count,sent_count,metadata")
+    .eq("send_type", "production")
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (result.error) throw result.error;
+
+  const rows = result.data || [];
+  const attention = rows.find((row) => String(row?.metadata?.queue_state || "") === "attention");
+  if (attention) {
+    return {
+      ok: false,
+      issue: issue(
+        "email-queue-attention",
+        "Email campaign worker",
+        attention.error_summary || "An email campaign queue requires reconciliation before retrying.",
+        { last_success_at: attention.updated_at || attention.started_at || null },
+      ),
+    };
+  }
+
+  const staleSending = rows.find((row) => {
+    if (String(row.status || "") !== "sending") return false;
+    const heartbeat = row?.metadata?.worker_last_run_at || row.updated_at || row.started_at || row.created_at;
+    return ageMs(heartbeat) > 20 * 60 * 1000;
+  });
+  if (staleSending) {
+    return {
+      ok: false,
+      issue: issue(
+        "email-worker-stale",
+        "Email campaign worker",
+        "A production email campaign is still marked sending but its worker has not updated for more than 20 minutes.",
+        { last_success_at: staleSending?.metadata?.worker_last_run_at || staleSending.updated_at || null },
+      ),
+    };
+  }
+
+  const failedSend = rows.find((row) => String(row.status || "") === "failed" && ageMs(row.updated_at || row.completed_at || row.created_at) < DAY);
+  if (failedSend) {
+    return {
+      ok: false,
+      issue: issue(
+        "email-send-failed",
+        "Email campaigns",
+        failedSend.error_summary || "A production email campaign has failed within the last 24 hours.",
+        { last_success_at: failedSend.updated_at || failedSend.completed_at || null },
+      ),
+    };
+  }
+
+  return { ok: true };
+}
+
+async function checkUnknownEmailSubmissions() {
+  const supabase = supabaseClient();
+  const since = new Date(Date.now() - DAY).toISOString();
+  const result = await supabase
+    .from("marketing_email_send_recipients")
+    .select("id,last_event_at,failure_reason")
+    .eq("send_type", "production")
+    .eq("status", "submission_unknown")
+    .gte("last_event_at", since)
+    .order("last_event_at", { ascending: false })
+    .limit(20);
+  if (result.error) throw result.error;
+  const rows = result.data || [];
+  if (rows.length) {
+    return {
+      ok: false,
+      issue: issue(
+        "email-submission-unknown",
+        "Email delivery",
+        `${rows.length} email submission${rows.length === 1 ? " has" : "s have"} an unknown provider outcome and need checking before retry.`,
+        { last_success_at: rows[0]?.last_event_at || null },
+      ),
+    };
+  }
+  return { ok: true };
+}
+
 async function runCheck(name, task) {
   try {
     return await task();
@@ -173,6 +275,8 @@ export default async function handler(request, response) {
     runCheck("Buffer", checkBuffer),
     runCheck("Facebook automation", checkRecentAutomationActivity),
     runCheck("Reel duplicate protection", checkDuplicateReels),
+    runCheck("Email campaign worker", checkEmailCampaigns),
+    runCheck("Email delivery", checkUnknownEmailSubmissions),
   ]);
   const issues = checks.filter((check) => !check.ok && check.issue).map((check) => check.issue);
 
@@ -185,6 +289,8 @@ export default async function handler(request, response) {
       buffer: checks[1].ok,
       facebook_automation: checks[2].ok,
       reel_duplicate_protection: checks[3].ok,
+      email_campaign_worker: checks[4].ok,
+      email_delivery: checks[5].ok,
     },
     issues,
   });
