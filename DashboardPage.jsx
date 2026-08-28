@@ -25,11 +25,7 @@ function issueFingerprint(payload) {
 
 function formatHealthDetails(payload) {
   const checkedAt = payload?.checked_at ? new Date(payload.checked_at).toLocaleString() : "Unknown";
-  const lines = [
-    "Marketing CRM system warning",
-    `Checked: ${checkedAt}`,
-    "",
-  ];
+  const lines = ["Marketing CRM system warning", `Checked: ${checkedAt}`, ""];
 
   for (const issue of payload?.issues || []) {
     lines.push(`${issue.label}: ${String(issue.status || "issue").toUpperCase()}`);
@@ -47,6 +43,7 @@ function formatHealthDetails(payload) {
 function SystemHealthIndicator() {
   const [health, setHealth] = useState(null);
   const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const lastAutoOpenedRef = useRef("");
 
   const refresh = useCallback(async () => {
@@ -109,6 +106,8 @@ function SystemHealthIndicator() {
       document.execCommand("copy");
       textarea.remove();
     }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
   };
 
   return (
@@ -225,7 +224,7 @@ function SystemHealthIndicator() {
 
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
               <button type="button" className="button button--primary" onClick={copyDetails}>
-                Copy warning details
+                {copied ? "Copied" : "Copy warning details"}
               </button>
               <button type="button" className="button" onClick={refresh}>
                 Check again
