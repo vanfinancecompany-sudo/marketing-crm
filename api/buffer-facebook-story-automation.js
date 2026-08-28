@@ -50,6 +50,11 @@ const POSTS_QUERY = `
           dueAt
           sentAt
           channelId
+          metadata {
+            ... on FacebookPostMetadata {
+              type
+            }
+          }
           assets {
             id
             mimeType
@@ -74,6 +79,11 @@ const CREATE_POST_MUTATION = `
           dueAt
           sentAt
           channelId
+          metadata {
+            ... on FacebookPostMetadata {
+              type
+            }
+          }
           assets {
             id
             mimeType
@@ -249,7 +259,7 @@ async function createStory({ productKey, sourcePost, dueAt }) {
   const input = {
     text,
     channelId: channelForProduct(productKey),
-    schedulingType: "notification",
+    schedulingType: "automatic",
     mode: "customScheduled",
     dueAt: new Date(dueAt).toISOString(),
     saveToDraft: false,
@@ -298,7 +308,7 @@ async function createNextStory({ posts, productKey, dateKey, now, storyTarget })
     bufferPostId: post.id,
     dueAt: post.dueAt || slotInfo.slot.dueAt,
     localTime: slotInfo.slot.localTime,
-    publishing: "notification",
+    publishing: "automatic",
   };
 }
 

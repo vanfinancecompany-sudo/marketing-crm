@@ -8,6 +8,7 @@ import {
   FACEBOOK_STORY_TARGET_PER_DAY,
   bufferAutomationSlots,
   bufferPostMediaKind,
+  extractBufferRegistration,
   facebookStoryTargetForProduct,
   londonLocalMinutesToUtcIso,
   normalizeBufferAutomationConfig,
@@ -78,17 +79,36 @@ test("an eight-post Content Operations target becomes five feed posts plus three
 
 test("Stories are a distinct Buffer media kind instead of accidental image posts", () => {
   assert.equal(bufferPostMediaKind({
+    schedulingType: "automatic",
+    metadata: { type: "story" },
+    assets: [{ mimeType: "image/jpeg" }],
+  }), "story");
+  assert.equal(bufferPostMediaKind({
     schedulingType: "notification",
     assets: [{ mimeType: "image/jpeg" }],
   }), "story");
   assert.equal(bufferPostMediaKind({
     schedulingType: "automatic",
+    metadata: { type: "post" },
     assets: [{ mimeType: "image/jpeg" }],
   }), "image");
   assert.equal(bufferPostMediaKind({
     schedulingType: "automatic",
     assets: [{ mimeType: "video/mp4" }],
   }), "video");
+});
+
+test("labelled Northern Ireland registrations are kept for Buffer cooldown and dedupe", () => {
+  assert.equal(extractBufferRegistration("REGISTRATION: XGZ4865\nYEAR: 2022"), "XGZ4865");
+  assert.equal(extractBufferRegistration("REGISTRATION: AB12 CDE\nYEAR: 2022"), "AB12CDE");
+});
+
+test("Facebook Story worker uses Buffer automatic publishing with story metadata", () => {
+  const storyWorker = source("api/buffer-facebook-story-automation.js");
+  assert.match(storyWorker, /schedulingType:\s*"automatic"/);
+  assert.doesNotMatch(storyWorker, /schedulingType:\s*"notification"/);
+  assert.match(storyWorker, /type:\s*"story"/);
+  assert.match(storyWorker, /FacebookPostMetadata/);
 });
 
 test("London schedule conversion handles BST and winter correctly", () => {
