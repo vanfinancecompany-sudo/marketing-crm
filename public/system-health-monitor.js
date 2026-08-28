@@ -3,25 +3,27 @@
   const MODAL_ID = "marketing-system-health-modal";
   const STORAGE_KEY = "marketingSystemHealthLastAutoOpened";
   let health = null;
-  let timer = null;
+  let healthTimer = null;
+  let pageTimer = null;
 
-  function issueFingerprint(payload) {
-    return JSON.stringify(
-      (payload?.issues || []).map((issue) => [
-        issue.key,
-        issue.status,
-        issue.message,
-        issue.last_success_at,
-      ]),
-    );
+  function dashboardRoot() {
+    return document.querySelector(".content-operations-page");
   }
 
-  function formatHealthDetails(payload) {
+  function fingerprint(payload) {
+    return JSON.stringify((payload?.issues || []).map((issue) => [
+      issue.key,
+      issue.status,
+      issue.message,
+      issue.last_success_at,
+    ]));
+  }
+
+  function formatDetails(payload) {
     const checkedAt = payload?.checked_at
       ? new Date(payload.checked_at).toLocaleString()
       : "Unknown";
     const lines = ["Marketing CRM system warning", `Checked: ${checkedAt}`, ""];
-
     for (const issue of payload?.issues || []) {
       lines.push(`${issue.label}: ${String(issue.status || "issue").toUpperCase()}`);
       if (issue.message) lines.push(issue.message);
@@ -30,21 +32,38 @@
       }
       lines.push("");
     }
-
     lines.push("Please investigate the Marketing CRM health warning above.");
     return lines.join("\n");
   }
 
-  function dashboardRoot() {
-    return document.querySelector(".content-operations-page");
-  }
-
-  function removeMonitor() {
-    document.getElementById(ROW_ID)?.remove();
+  function closeModal() {
     document.getElementById(MODAL_ID)?.remove();
   }
 
-  function makeButton() {
+  function removeIndicator() {
+    document.getElementById(ROW_ID)?.remove();
+    closeModal();
+  }
+
+  function ensureIndicator() {
+    const root = dashboardRoot();
+    if (!root) {
+      removeIndicator();
+      return null;
+    }
+
+    let row = document.getElementById(ROW_ID);
+    if (row) return row;
+
+    row = document.createElement("div");
+    row.id = ROW_ID;
+    Object.assign(row.style, {
+      display: "flex",
+      justifyContent: "flex-end",
+      alignItems: "center",
+      minHeight: "36px",
+    });
+
     const button = document.createElement("button");
     button.type = "button";
     button.dataset.role = "health-button";
@@ -83,37 +102,17 @@
     button.addEventListener("click", () => {
       if (health?.status === "red") openModal();
     });
-    return button;
-  }
-
-  function ensureMonitor() {
-    const root = dashboardRoot();
-    if (!root) {
-      removeMonitor();
-      return null;
-    }
-
-    let row = document.getElementById(ROW_ID);
-    if (!row) {
-      row = document.createElement("div");
-      row.id = ROW_ID;
-      Object.assign(row.style, {
-        display: "flex",
-        justifyContent: "flex-end",
-        alignItems: "center",
-        minHeight: "36px",
-      });
-      row.appendChild(makeButton());
-      root.prepend(row);
-    }
+    row.appendChild(button);
+    root.prepend(row);
     return row;
   }
 
-  function updateButton() {
-    const row = ensureMonitor();
-    const button = row?.querySelector('[data-role="health-button"]');
-    const dot = row?.querySelector('[data-role="health-dot"]');
-    const label = row?.querySelector('[data-role="health-label"]');
+  function updateIndicator() {
+    const row = ensureIndicator();
+    if (!row) return;
+    const button = row.querySelector('[data-role="health-button"]');
+    const dot = row.querySelector('[data-role="health-dot"]');
+    const label = row.querySelector('[data-role="health-label"]');
     if (!button || !dot || !label) return;
 
     if (!health) {
@@ -124,18 +123,14 @@
       return;
     }
 
-    const isRed = health.status === "red";
-    label.textContent = isRed ? "System issue" : "System good";
-    dot.style.background = isRed ? "#ea4d4d" : "#28c76f";
-    dot.style.boxShadow = isRed
+    const red = health.status === "red";
+    label.textContent = red ? "System issue" : "System good";
+    dot.style.background = red ? "#ea4d4d" : "#28c76f";
+    dot.style.boxShadow = red
       ? "0 0 0 3px rgba(234,77,77,0.18)"
       : "0 0 0 3px rgba(40,199,111,0.16)";
-    button.style.cursor = isRed ? "pointer" : "default";
-    button.title = isRed ? "Open system warning" : "System good";
-  }
-
-  function closeModal() {
-    document.getElementById(MODAL_ID)?.remove();
+    button.style.cursor = red ? "pointer" : "default";
+    button.title = red ? "Open system warning" : "System good";
   }
 
   function openModal() {
@@ -171,20 +166,11 @@
     });
 
     const heading = document.createElement("div");
-    heading.innerHTML = `
-      <div style="color:#ff7474;font-weight:900;text-transform:uppercase;letter-spacing:.08em;font-size:12px">System warning</div>
-      <h3 style="margin:6px 0">Marketing CRM needs attention</h3>
-      <p style="margin:0;opacity:.8">Copy the warning below and paste it into ChatGPT so the fault can be investigated quickly.</p>
-    `;
+    heading.innerHTML = '<div style="color:#ff7474;font-weight:900;text-transform:uppercase;letter-spacing:.08em;font-size:12px">System warning</div><h3 style="margin:6px 0">Marketing CRM needs attention</h3><p style="margin:0;opacity:.8">Copy the warning below and paste it into ChatGPT so the fault can be investigated quickly.</p>';
     card.appendChild(heading);
 
-    const issues = document.createElement("div");
-    Object.assign(issues.style, {
-      marginTop: "18px",
-      display: "grid",
-      gap: "10px",
-    });
-
+    const issuesWrap = document.createElement("div");
+    Object.assign(issuesWrap.style, { marginTop: "18px", display: "grid", gap: "10px" });
     for (const issue of health.issues || []) {
       const item = document.createElement("div");
       Object.assign(item.style, {
@@ -202,31 +188,22 @@
       if (issue.last_success_at) {
         const last = document.createElement("div");
         last.textContent = `Last success: ${new Date(issue.last_success_at).toLocaleString()}`;
-        Object.assign(last.style, {
-          marginTop: "4px",
-          opacity: ".62",
-          fontSize: "13px",
-        });
+        Object.assign(last.style, { marginTop: "4px", opacity: ".62", fontSize: "13px" });
         item.appendChild(last);
       }
-      issues.appendChild(item);
+      issuesWrap.appendChild(item);
     }
-    card.appendChild(issues);
+    card.appendChild(issuesWrap);
 
     const actions = document.createElement("div");
-    Object.assign(actions.style, {
-      display: "flex",
-      gap: "10px",
-      flexWrap: "wrap",
-      marginTop: "18px",
-    });
+    Object.assign(actions.style, { display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "18px" });
 
     const copy = document.createElement("button");
     copy.type = "button";
     copy.className = "button button--primary";
     copy.textContent = "Copy warning details";
     copy.addEventListener("click", async () => {
-      const text = formatHealthDetails(health);
+      const text = formatDetails(health);
       try {
         await navigator.clipboard.writeText(text);
       } catch {
@@ -238,7 +215,7 @@
         textarea.remove();
       }
       copy.textContent = "Copied";
-      setTimeout(() => (copy.textContent = "Copy warning details"), 1600);
+      setTimeout(() => { copy.textContent = "Copy warning details"; }, 1600);
     });
 
     const again = document.createElement("button");
@@ -270,65 +247,66 @@
 
   async function refreshHealth(autoOpen = true) {
     if (!dashboardRoot()) return;
-    ensureMonitor();
+    ensureIndicator();
     try {
       const response = await fetch("/api/system-health", {
         cache: "no-store",
         headers: { Accept: "application/json" },
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload?.error || `Health check HTTP ${response.status}`);
-      }
+      if (!response.ok) throw new Error(payload?.error || `Health check HTTP ${response.status}`);
       health = payload;
     } catch (error) {
       health = {
         status: "red",
         checked_at: new Date().toISOString(),
-        issues: [
-          {
-            key: "health-endpoint",
-            label: "System monitor",
-            status: "failed",
-            message: error?.message || "The system monitor could not complete its checks.",
-          },
-        ],
+        issues: [{
+          key: "health-endpoint",
+          label: "System monitor",
+          status: "failed",
+          message: error?.message || "The system monitor could not complete its checks.",
+        }],
       };
     }
 
-    updateButton();
+    updateIndicator();
 
     if (autoOpen && health?.status === "red") {
-      const fingerprint = issueFingerprint(health);
+      const key = fingerprint(health);
       const previous = sessionStorage.getItem(STORAGE_KEY) || "";
-      if (fingerprint && fingerprint !== previous) {
-        sessionStorage.setItem(STORAGE_KEY, fingerprint);
+      if (key && key !== previous) {
+        sessionStorage.setItem(STORAGE_KEY, key);
         openModal();
       }
     }
   }
 
-  function syncToPage() {
+  function syncPage() {
     if (dashboardRoot()) {
-      const wasMissing = !document.getElementById(ROW_ID);
-      ensureMonitor();
-      updateButton();
-      if (wasMissing) refreshHealth(true);
-      if (!timer) {
-        timer = window.setInterval(() => refreshHealth(true), 5 * 60 * 1000);
+      const newlyMounted = !document.getElementById(ROW_ID);
+      ensureIndicator();
+      updateIndicator();
+      if (newlyMounted) refreshHealth(true);
+      if (!healthTimer) {
+        healthTimer = window.setInterval(() => refreshHealth(true), 5 * 60 * 1000);
       }
     } else {
-      removeMonitor();
-      if (timer) {
-        window.clearInterval(timer);
-        timer = null;
+      removeIndicator();
+      if (healthTimer) {
+        window.clearInterval(healthTimer);
+        healthTimer = null;
       }
     }
   }
 
-  const observer = new MutationObserver(syncToPage);
-  window.addEventListener("DOMContentLoaded", () => {
-    observer.observe(document.body, { childList: true, subtree: true });
-    syncToPage();
-  });
+  function start() {
+    syncPage();
+    pageTimer = window.setInterval(syncPage, 1500);
+  }
+
+  if (document.readyState === "loading") {
+    window.addEventListener("DOMContentLoaded", start, { once: true });
+  } else {
+    start();
+  }
 })();
