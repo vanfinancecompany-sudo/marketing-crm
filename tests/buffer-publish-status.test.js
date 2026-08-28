@@ -23,6 +23,7 @@ test("Buffer sent-post query is read-only and restricted to the two Facebook cha
   assert.match(BUFFER_SENT_POSTS_QUERY, /6a8721fbccaf649a67e227a3/);
   assert.match(BUFFER_SENT_POSTS_QUERY, /6a8722ffccaf649a67e22bc6/);
   assert.match(BUFFER_SENT_POSTS_QUERY, /schedulingType/);
+  assert.match(BUFFER_SENT_POSTS_QUERY, /FacebookPostMetadata/);
   assert.doesNotMatch(BUFFER_SENT_POSTS_QUERY, /mutation/i);
 });
 
@@ -30,10 +31,12 @@ test("maps Buffer channels, registrations and media kinds correctly", () => {
   assert.equal(bufferDestinationForChannel("6a8721fbccaf649a67e227a3"), "Van Finance Facebook");
   assert.equal(bufferDestinationForChannel("6a8722ffccaf649a67e22bc6"), "Rent2Buy Facebook");
   assert.equal(normalizeBufferRegistration("REGISTRATION: AB12 CDE"), "AB12CDE");
+  assert.equal(normalizeBufferRegistration("REGISTRATION: XGZ4865"), "XGZ4865");
   assert.equal(bufferPostMediaKind({ assets: [{ mimeType: "video/mp4" }] }), "video");
   assert.equal(bufferPostMediaKind({ assets: [{ mimeType: "image/jpeg" }] }), "image");
   assert.equal(bufferPostMediaKind({
-    schedulingType: "notification",
+    schedulingType: "automatic",
+    metadata: { type: "story" },
     assets: [{ mimeType: "image/jpeg" }],
   }), "story");
   assert.equal(bufferPublishedActivityType("Van Finance Facebook", "story"), "van_finance_facebook_post");
@@ -48,7 +51,7 @@ test("parses and summarizes Buffer sent feed posts, Stories and Reels by London 
         edges: [
           { node: { id: "p1", text: "REGISTRATION: AB12CDE", sentAt, channelId: "6a8721fbccaf649a67e227a3", assets: [{ mimeType: "image/jpeg" }] } },
           { node: { id: "p2", text: "REGISTRATION: CD34EFG", sentAt, channelId: "6a8722ffccaf649a67e22bc6", assets: [{ mimeType: "video/mp4" }] } },
-          { node: { id: "p3", text: "REGISTRATION: EF56HIJ", sentAt, schedulingType: "notification", channelId: "6a8722ffccaf649a67e22bc6", assets: [{ mimeType: "image/jpeg" }] } },
+          { node: { id: "p3", text: "REGISTRATION: XGZ4865", sentAt, schedulingType: "automatic", metadata: { type: "story" }, channelId: "6a8722ffccaf649a67e22bc6", assets: [{ mimeType: "image/jpeg" }] } },
         ],
       },
     },
@@ -56,6 +59,7 @@ test("parses and summarizes Buffer sent feed posts, Stories and Reels by London 
   const items = bufferPublishedItems(posts);
   assert.equal(items.length, 3);
   assert.equal(items.find((item) => item.id === "p3")?.mediaKind, "story");
+  assert.equal(items.find((item) => item.id === "p3")?.registration, "XGZ4865");
   const summary = summarizeBufferPublishedToday(posts, "2026-08-20", londonDateKey);
   assert.equal(summary.vanFinance.posts, 1);
   assert.equal(summary.vanFinance.reels, 0);
