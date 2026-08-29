@@ -174,7 +174,6 @@ async function updateExistingAnalytics(supabase, payload) {
   const now = payload.occurredAt;
   const live = await supabase.from('site_live_sessions').upsert({
     session_id: payload.sessionId,
-    source: payload.source,
     last_seen_at: now,
   }, { onConflict: 'session_id' });
   if (live.error && !isMissingOptionalTableError(live.error)) throw live.error;
@@ -182,7 +181,6 @@ async function updateExistingAnalytics(supabase, payload) {
   if (payload.eventName === 'vehicle_view' && payload.vehicleRegistration) {
     const view = await supabase.from('vehicle_views').insert({
       registration: payload.vehicleRegistration,
-      source: payload.source,
     });
     if (view.error && !isMissingOptionalTableError(view.error)) throw view.error;
   }
