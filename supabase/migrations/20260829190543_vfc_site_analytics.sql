@@ -144,15 +144,22 @@ begin
 
   get diagnostics inserted_rows = row_count;
   if inserted_rows = 0 then
+    delete from public.site_analytics_sessions session_row
+    where session_row.session_id = p_session_id
+      and not exists (
+        select 1 from public.site_analytics_events event_row
+        where event_row.session_id = session_row.session_id
+      );
     return false;
   end if;
 
   update public.site_analytics_sessions
   set
     visitor_id = p_visitor_id,
+    started_at = least(started_at, p_occurred_at),
+    last_path = case when p_occurred_at >= last_activity_at then p_path else last_path end,
     last_activity_at = greatest(last_activity_at, p_occurred_at),
-    ended_at = case when p_event_name = 'session_end' then p_occurred_at else ended_at end,
-    last_path = p_path,
+    ended_at = case when p_event_name = 'session_end' then greatest(coalesce(ended_at, p_occurred_at), p_occurred_at) else ended_at end,
     page_view_count = page_view_count + is_page_view,
     meaningful_event_count = meaningful_event_count + is_meaningful,
     source = coalesce(source, p_source),
