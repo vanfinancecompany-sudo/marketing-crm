@@ -1,4 +1,13 @@
 import { addDays, londonDateKey, londonMidnightUtcIso } from './website-analytics-summary.js';
+import { getSupabaseServiceAdmin } from './_vansco-cache-utils.js';
+import {
+  ANALYTICS_CUTOVER_DATE,
+  loadFirstPartyPeriod,
+  mergeDetails,
+  mergeFunnels,
+  sourceForSegments,
+  splitAnalyticsRange,
+} from './_first-party-analytics.js';
 
 const TRAFFIC_MODEL_ID = 'cad7fd34-2c8b-4dda-8296-3f9d47fb484d';
 const USER_FLOW_MODEL_ID = '239e36da-d6a4-425b-9a7e-7955f8805889';
@@ -236,12 +245,35 @@ async function loadFunnelPeriod({ apiKey, siteId, startDate, endDate }) {
   };
 }
 
+async function loadDetailRange({ apiKey, siteId, startDate, endExclusive }) {
+  const segments = splitAnalyticsRange(startDate, endExclusive);
+  const needsWix = segments.some((segment) => segment.source === 'wix');
+  const needsFirstParty = segments.some((segment) => segment.source === 'first_party');
+  if (needsWix && (!apiKey || !siteId)) throw new Error('Wix analytics credentials are required for the historical portion of this date range.');
+  const supabase = needsFirstParty ? getSupabaseServiceAdmin() : null;
+  const periods = await Promise.all(segments.map(async (segment) => {
+    if (segment.source === 'wix') {
+      const [details, funnel] = await Promise.all([
+        loadCurrentDetails({ apiKey, siteId, startDate: segment.startDate, endDate: segment.endExclusive }),
+        loadFunnelPeriod({ apiKey, siteId, startDate: segment.startDate, endDate: segment.endExclusive }),
+      ]);
+      return { details, funnel };
+    }
+    return loadFirstPartyPeriod({ supabase, startDate: segment.startDate, endExclusive: segment.endExclusive });
+  }));
+  return {
+    details: mergeDetails(periods.map((period) => period.details)),
+    funnel: mergeFunnels(periods.map((period) => period.funnel)),
+    segments,
+    source: sourceForSegments(segments),
+  };
+}
+
 export default async function handler(request, response) {
   if (request.method !== 'GET') return response.status(405).json({ ok: false, message: 'Method not allowed.' });
 
   const apiKey = clean(process.env.WIX_API_KEY);
   const siteId = clean(process.env.WIX_SITE_ID, 500);
-  if (!apiKey || !siteId) return response.status(500).json({ ok: false, message: 'Wix analytics credentials are not configured.' });
 
   const today = londonDateKey();
   const settledThrough = addDays(today, -1);
@@ -250,28 +282,29 @@ export default async function handler(request, response) {
   const previousEnd = addDays(currentStart, -1);
 
   try {
-    const [current, previousPages, currentFunnel, previousFunnel] = await Promise.all([
-      loadCurrentDetails({ apiKey, siteId, startDate: currentStart, endDate: today }),
-      loadPreviousPages({ apiKey, siteId, startDate: previousStart, endDate: currentStart }),
-      loadFunnelPeriod({ apiKey, siteId, startDate: currentStart, endDate: today }),
-      loadFunnelPeriod({ apiKey, siteId, startDate: previousStart, endDate: currentStart }),
+    const [currentPeriod, previousPeriod] = await Promise.all([
+      loadDetailRange({ apiKey, siteId, startDate: currentStart, endExclusive: today }),
+      loadDetailRange({ apiKey, siteId, startDate: previousStart, endExclusive: currentStart }),
     ]);
+    const dashboardSource = sourceForSegments([...currentPeriod.segments, ...previousPeriod.segments]);
 
     response.setHeader('Cache-Control', 'no-store');
     return response.status(200).json({
       ok: true,
       settledThrough,
-      current: { startDate: currentStart, endDate: settledThrough, ...current },
-      previous: { startDate: previousStart, endDate: previousEnd, pages: previousPages },
+      cutoverDate: ANALYTICS_CUTOVER_DATE,
+      source: dashboardSource,
+      current: { startDate: currentStart, endDate: settledThrough, ...currentPeriod.details, source: currentPeriod.source, segments: currentPeriod.segments },
+      previous: { startDate: previousStart, endDate: previousEnd, ...previousPeriod.details, source: previousPeriod.source, segments: previousPeriod.segments },
       funnel: {
         settledThrough,
-        current: currentFunnel,
-        previous: previousFunnel,
+        current: currentPeriod.funnel,
+        previous: previousPeriod.funnel,
       },
     });
   } catch (error) {
-    return response.status(error.status || 500).json({ ok: false, message: clean(error?.message || 'Wix analytics detail request failed.', 500) });
+    return response.status(error.status || 500).json({ ok: false, message: clean(error?.message || 'Website analytics detail request failed.', 500) });
   }
 }
 
-export { fieldValue, mapExitPages, mapPages, resultRows };
+export { fieldValue, loadCurrentDetails, loadDetailRange, loadFunnelPeriod, mapExitPages, mapPages, resultRows };

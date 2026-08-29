@@ -105,6 +105,13 @@ function renderFunnel(funnel) {
   const rateDelta = delta(financeRate, oldRate);
   const rentGate = rent.reachedPostcodeGate?.sessions || 0;
   const oldRentGate = oldRent.reachedPostcodeGate?.sessions || 0;
+  const rentMeasured = rent.postcodeSupplied !== null && rent.postcodeSupplied !== undefined;
+  const rentSupplied = rent.postcodeSupplied?.sessions || 0;
+  const rentPass = rent.postcodePass?.sessions || 0;
+  const rentFail = rent.postcodeFail?.sessions || 0;
+  const rentOpened = rent.fullApplicationOpened?.sessions || 0;
+  const rentCompleted = rent.completed?.sessions || 0;
+  const rentRate = rent.completionRate;
 
   $('applicationFunnel').innerHTML = `
     <article class="funnel-card finance">
@@ -117,11 +124,11 @@ function renderFunnel(funnel) {
     <article class="funnel-card rent">
       <div class="funnel-title">Rent2Buy</div>
       <div class="funnel-line"><span>Reached postcode gate</span><strong>${whole(rentGate)}</strong><small>${delta(rentGate, oldRentGate).text} vs prior week</small></div>
-      <div class="funnel-arrow muted">↓</div>
-      <div class="funnel-line muted"><span>Postcode supplied</span><strong>Not measured</strong><small>Wix page-path analytics do not expose the postcode query state</small></div>
-      <div class="funnel-arrow muted">↓</div>
-      <div class="funnel-line muted"><span>Pass / fail / full form</span><strong>Not claimed</strong><small>Needs explicit postcode-gate events</small></div>
-      <div class="funnel-rate muted"><strong>—</strong><span>Outside-area filtering is not counted as form abandonment</span></div>
+      <div class="funnel-arrow${rentMeasured ? '' : ' muted'}">↓</div>
+      <div class="funnel-line${rentMeasured ? '' : ' muted'}"><span>Postcode supplied</span><strong>${rentMeasured ? whole(rentSupplied) : 'Not measured'}</strong><small>${rentMeasured ? `${whole(rentPass)} pass · ${whole(rentFail)} outside area` : 'Historical Wix data do not expose postcode state'}</small></div>
+      <div class="funnel-arrow${rentMeasured ? '' : ' muted'}">↓</div>
+      <div class="funnel-line${rentMeasured ? '' : ' muted'}"><span>Full application / completed</span><strong>${rentMeasured ? `${whole(rentOpened)} / ${whole(rentCompleted)}` : 'Not claimed'}</strong><small>${rentMeasured ? 'Explicit first-party events' : 'Available from cutover onward'}</small></div>
+      <div class="funnel-rate${rentMeasured ? '' : ' muted'}"><strong>${rentMeasured && rentRate !== null ? pct(rentRate) : '—'}</strong><span>full application opened → completed</span></div>
     </article>`;
 }
 
@@ -147,7 +154,7 @@ function renderTables(data) {
   $('deviceRows').innerHTML = (c.devices || []).map((item) => `<tr><td>${escapeHtml(item.device || 'Unknown')}</td><td>${whole(item.sessions)}</td><td>${whole(item.visitors)}</td><td>${pct(item.bounceRate)}</td></tr>`).join('') || '<tr><td colspan="4">No data yet.</td></tr>';
 
   const formsUnavailable = c.sectionStatus?.forms === 'error';
-  $('formRows').innerHTML = (c.forms || []).map((item) => `<tr><td title="${escapeHtml(item.url)}">${escapeHtml(item.name || shortUrl(item.url))}</td><td>${whole(item.views)}</td><td>${whole(item.starts)}</td><td>${whole(item.submissions)}</td><td>${pct(item.completionRate)}</td></tr>`).join('') || `<tr><td colspan="5">${formsUnavailable ? 'Wix Forms analytics are temporarily unavailable.' : 'No Wix Form activity in this period.'}</td></tr>`;
+  $('formRows').innerHTML = (c.forms || []).map((item) => `<tr><td title="${escapeHtml(item.url)}">${escapeHtml(item.name || shortUrl(item.url))}</td><td>${whole(item.views)}</td><td>${whole(item.starts)}</td><td>${whole(item.submissions)}</td><td>${pct(item.completionRate)}</td></tr>`).join('') || `<tr><td colspan="5">${formsUnavailable ? 'Form analytics are temporarily unavailable.' : 'No form activity in this period.'}</td></tr>`;
 }
 
 function renderFlows(data) {
@@ -185,11 +192,14 @@ function buildWatchlist(data, funnel, summaryData) {
 
   const rent = funnel?.current?.rent2buy;
   if (rent?.reachedPostcodeGate?.sessions) {
+    const hasExplicitStages = rent.postcodeSupplied !== null && rent.postcodeSupplied !== undefined;
     findings.push({
       score: 11000,
       tone: 'info',
       title: 'Rent2Buy postcode gate is measurable',
-      detail: `${whole(rent.reachedPostcodeGate.sessions)} sessions reached the postcode gate. Postcode supplied, pass/fail and full-form completion are not claimed because Wix page-path analytics do not expose those stages reliably.`
+      detail: hasExplicitStages
+        ? `${whole(rent.reachedPostcodeGate.sessions)} sessions reached the gate, ${whole(rent.postcodePass?.sessions || 0)} passed and ${whole(rent.completed?.sessions || 0)} completed the application.`
+        : `${whole(rent.reachedPostcodeGate.sessions)} sessions reached the postcode gate. Historical Wix page-path data cannot reliably provide the later stages.`
     });
   }
 
@@ -246,7 +256,7 @@ async function getJson(url) {
 async function load() {
   $('refreshButton').disabled = true;
   $('statusDot').className = 'status-dot loading';
-  $('statusText').textContent = 'Loading Wix Analytics...';
+  $('statusText').textContent = 'Loading website analytics...';
   try {
     const [summaryData, detailsData] = await Promise.all([
       getJson(SUMMARY_ENDPOINT),
@@ -254,7 +264,8 @@ async function load() {
     ]);
     render(detailsData, summaryData);
     $('statusDot').className = 'status-dot ready';
-    $('statusText').textContent = 'Wix Analytics connected';
+    const sourceLabel = { wix: 'Historical Wix', first_party: 'First-party', mixed: 'Mixed Wix + first-party' }[summaryData.source] || 'Website';
+    $('statusText').textContent = `${sourceLabel} analytics connected`;
   } catch (error) {
     $('statusDot').className = 'status-dot error';
     $('statusText').textContent = `Analytics unavailable: ${error.message}`;

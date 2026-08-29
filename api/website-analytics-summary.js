@@ -1,3 +1,12 @@
+import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
+import {
+  ANALYTICS_CUTOVER_DATE,
+  combineSummaries,
+  loadFirstPartyPeriod,
+  sourceForSegments,
+  splitAnalyticsRange,
+} from "./_first-party-analytics.js";
+
 const TRAFFIC_MODEL_ID = "cad7fd34-2c8b-4dda-8296-3f9d47fb484d";
 const WIX_ANALYTICS_QUERY_URL = "https://www.wixapis.com/analytics/semantic-model/v3/semantic-models/query-data";
 const TIME_ZONE = "Europe/London";
@@ -82,12 +91,26 @@ async function querySummary({ apiKey, siteId, startDate, endDate }) {
   return summaryFrom(payload);
 }
 
+async function loadSummaryRange({ apiKey, siteId, startDate, endExclusive }) {
+  const segments = splitAnalyticsRange(startDate, endExclusive);
+  const needsWix = segments.some((segment) => segment.source === "wix");
+  const needsFirstParty = segments.some((segment) => segment.source === "first_party");
+  if (needsWix && (!apiKey || !siteId)) throw new Error("Wix analytics credentials are required for the historical portion of this date range.");
+  const supabase = needsFirstParty ? getSupabaseServiceAdmin() : null;
+  const parts = await Promise.all(segments.map(async (segment) => {
+    if (segment.source === "wix") {
+      return querySummary({ apiKey, siteId, startDate: segment.startDate, endDate: segment.endExclusive });
+    }
+    return (await loadFirstPartyPeriod({ supabase, startDate: segment.startDate, endExclusive: segment.endExclusive })).summary;
+  }));
+  return { summary: combineSummaries(parts), segments, source: sourceForSegments(segments) };
+}
+
 export default async function handler(request, response) {
   if (request.method !== "GET") return response.status(405).json({ ok: false, message: "Method not allowed." });
 
   const apiKey = clean(process.env.WIX_API_KEY);
   const siteId = clean(process.env.WIX_SITE_ID, 500);
-  if (!apiKey || !siteId) return response.status(500).json({ ok: false, message: "Wix analytics credentials are not configured." });
 
   const today = londonDateKey();
   const settledThrough = addDays(today, -1);
@@ -95,21 +118,27 @@ export default async function handler(request, response) {
   const previousStart = addDays(currentStart, -7);
 
   try {
-    const [currentSummary, previousSummary] = await Promise.all([
-      querySummary({ apiKey, siteId, startDate: currentStart, endDate: today }),
-      querySummary({ apiKey, siteId, startDate: previousStart, endDate: currentStart }),
+    const [currentPeriod, previousPeriod] = await Promise.all([
+      loadSummaryRange({ apiKey, siteId, startDate: currentStart, endExclusive: today }),
+      loadSummaryRange({ apiKey, siteId, startDate: previousStart, endExclusive: currentStart }),
     ]);
+    const dashboardSource = sourceForSegments([...currentPeriod.segments, ...previousPeriod.segments]);
 
     response.setHeader("Cache-Control", "no-store");
     return response.status(200).json({
       ok: true,
       settledThrough,
-      current: { startDate: currentStart, endDate: settledThrough, summary: currentSummary },
-      previous: { startDate: previousStart, endDate: addDays(currentStart, -1), summary: previousSummary },
+      cutoverDate: ANALYTICS_CUTOVER_DATE,
+      source: dashboardSource,
+      current: { startDate: currentStart, endDate: settledThrough, summary: currentPeriod.summary, source: currentPeriod.source, segments: currentPeriod.segments },
+      previous: { startDate: previousStart, endDate: addDays(currentStart, -1), summary: previousPeriod.summary, source: previousPeriod.source, segments: previousPeriod.segments },
+      notes: dashboardSource === "mixed"
+        ? ["Visitor totals across the cutover are additive approximations because Wix and first-party visitor identifiers cannot be reconciled."]
+        : [],
     });
   } catch (error) {
-    return response.status(error.status || 500).json({ ok: false, message: clean(error?.message || "Wix analytics request failed.", 500) });
+    return response.status(error.status || 500).json({ ok: false, message: clean(error?.message || "Website analytics request failed.", 500) });
   }
 }
 
-export { addDays, londonDateKey, londonMidnightUtcIso, summaryFrom };
+export { addDays, loadSummaryRange, londonDateKey, londonMidnightUtcIso, querySummary, summaryFrom };

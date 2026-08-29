@@ -23,11 +23,27 @@ export function getSupabaseAdmin() {
   return createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } });
 }
 
+export function getSupabaseServiceAdmin() {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+  if (!supabaseUrl || !supabaseKey) throw new Error("Missing server-only Supabase service credentials.");
+  return createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false, autoRefreshToken: false } });
+}
+
 export function isMissingOptionalTableError(error) {
   const code = String(error?.code || error?.details || "");
   const message = String(error?.message || error || "");
   const text = `${code} ${message}`.toLowerCase();
   return code === "42P01" || code.startsWith("PGRST") || text.includes("relation does not exist") || text.includes("table does not exist") || text.includes("could not find the table") || text.includes("schema cache");
+}
+
+export function isMissingSupabaseObjectError(error) {
+  const code = String(error?.code || "").toUpperCase();
+  const message = String(error?.message || error || "").toLowerCase();
+  return code === "42P01" || ["PGRST202", "PGRST204", "PGRST205"].includes(code)
+    || message.includes("relation does not exist")
+    || message.includes("could not find the table")
+    || message.includes("could not find the function");
 }
 
 export function compactWhitespace(value) { return String(value || "").replace(/\s+/g, " ").trim(); }
