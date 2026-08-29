@@ -1,5 +1,6 @@
 import { addDays, londonDateKey, londonMidnightUtcIso } from './website-analytics-summary.js';
 import { getSupabaseServiceAdmin } from './_vansco-cache-utils.js';
+import { effectiveAnalyticsCutoverDate, resolveAnalyticsCutoverDate } from './_analytics-rollout.js';
 import {
   ANALYTICS_CUTOVER_DATE,
   loadFirstPartyPeriod,
@@ -245,8 +246,8 @@ async function loadFunnelPeriod({ apiKey, siteId, startDate, endDate }) {
   };
 }
 
-async function loadDetailRange({ apiKey, siteId, startDate, endExclusive }) {
-  const segments = splitAnalyticsRange(startDate, endExclusive);
+async function loadDetailRange({ apiKey, siteId, startDate, endExclusive, cutoverDate = ANALYTICS_CUTOVER_DATE }) {
+  const segments = splitAnalyticsRange(startDate, endExclusive, cutoverDate);
   const needsWix = segments.some((segment) => segment.source === 'wix');
   const needsFirstParty = segments.some((segment) => segment.source === 'first_party');
   if (needsWix && (!apiKey || !siteId)) throw new Error('Wix analytics credentials are required for the historical portion of this date range.');
@@ -274,6 +275,8 @@ export default async function handler(request, response) {
 
   const apiKey = clean(process.env.WIX_API_KEY);
   const siteId = clean(process.env.WIX_SITE_ID, 500);
+  const configuredCutoverDate = resolveAnalyticsCutoverDate();
+  const effectiveCutoverDate = effectiveAnalyticsCutoverDate();
 
   const today = londonDateKey();
   const settledThrough = addDays(today, -1);
@@ -283,8 +286,8 @@ export default async function handler(request, response) {
 
   try {
     const [currentPeriod, previousPeriod] = await Promise.all([
-      loadDetailRange({ apiKey, siteId, startDate: currentStart, endExclusive: today }),
-      loadDetailRange({ apiKey, siteId, startDate: previousStart, endExclusive: currentStart }),
+      loadDetailRange({ apiKey, siteId, startDate: currentStart, endExclusive: today, cutoverDate: effectiveCutoverDate }),
+      loadDetailRange({ apiKey, siteId, startDate: previousStart, endExclusive: currentStart, cutoverDate: effectiveCutoverDate }),
     ]);
     const dashboardSource = sourceForSegments([...currentPeriod.segments, ...previousPeriod.segments]);
 
@@ -292,7 +295,7 @@ export default async function handler(request, response) {
     return response.status(200).json({
       ok: true,
       settledThrough,
-      cutoverDate: ANALYTICS_CUTOVER_DATE,
+      cutoverDate: configuredCutoverDate,
       source: dashboardSource,
       current: { startDate: currentStart, endDate: settledThrough, ...currentPeriod.details, source: currentPeriod.source, segments: currentPeriod.segments },
       previous: { startDate: previousStart, endDate: previousEnd, ...previousPeriod.details, source: previousPeriod.source, segments: previousPeriod.segments },
