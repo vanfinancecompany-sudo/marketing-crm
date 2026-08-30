@@ -112,18 +112,18 @@ describe('first-party website analytics', () => {
     assert.equal(period.summary['traffic.sessions_count'], 0);
   });
 
-  it('sanitizes the public event envelope and drops arbitrary form data', () => {
+  it('sanitizes the public event envelope and drops arbitrary form data and referrer paths', () => {
     const payload = sanitizeAnalyticsPayload({
       eventId: 'f70df4b4-92a1-4c8c-b3b6-26d740f503fc',
       sessionId: 'session-abcdefghijklmnop', visitorId: 'visitor-abcdefghijklmnop', eventName: 'page_view',
       path: '/vans/AB12CDE?email=private@example.com#stock',
       pageUrl: 'https://www.vanfinancecompany.co.uk/vans/AB12CDE?email=private@example.com',
-      referrer: 'https://google.com/search?q=private',
+      referrer: 'https://google.com/customer/private@example.com?q=private',
       metadata: { product: 'finance', interaction: 'route', email: 'private@example.com', postcode: 'SO40 2NN' },
     }, Date.parse('2026-08-29T12:00:00Z'));
     assert.equal(payload.path, '/vans/AB12CDE');
     assert.equal(payload.pageUrl, 'https://www.vanfinancecompany.co.uk/vans/AB12CDE');
-    assert.equal(payload.referrer, 'https://google.com/search');
+    assert.equal(payload.referrer, 'https://google.com');
     assert.deepEqual(payload.metadata, { product: 'finance', interaction: 'route' });
     assert.doesNotMatch(JSON.stringify(payload), /private@example|SO40/);
   });
