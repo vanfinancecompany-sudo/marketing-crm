@@ -46,7 +46,7 @@ describe('Website Analytics fresh data', () => {
     assert.match(source, /DETAILS_ENDPOINT = '\/api\/website-analytics-details'/);
     assert.doesNotMatch(source, /_functions\/marketingWebsiteAnalytics/);
     assert.doesNotMatch(source, /_functions\/marketingApplicationFunnel/);
-    assert.match(source, /Postcode supplied<\/span><strong>Not measured/);
+    assert.match(source, /rentMeasured \? whole\(rentSupplied\) : 'Not measured'/);
     assert.match(source, /renderWatchlist\(data, data\.funnel, summaryData\)/);
   });
 });
