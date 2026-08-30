@@ -14,6 +14,13 @@ import {
   summarizeBufferPublishedToday,
 } from "../lib/bufferPublishStatus.js";
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
+import {
+  bufferDeferredPayload,
+  guardedBufferGraphql,
+  isBufferRateLimitCooldownError,
+  loadBufferStatusSnapshot,
+  saveBufferStatusSnapshot,
+} from "../lib/bufferRuntimeGuard.js";
 
 const ACCESS_HEADER = "x-marketing-customer-database-key";
 const REEL_BLOB_MIN_SENT_AGE_MS = 72 * 60 * 60 * 1000;
@@ -45,18 +52,11 @@ function bufferToken() {
 }
 
 async function loadSentBufferPosts() {
-  const response = await fetch(BUFFER_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${bufferToken()}`,
-    },
-    body: JSON.stringify({ query: BUFFER_SENT_POSTS_QUERY }),
+  const payload = await guardedBufferGraphql({
+    url: BUFFER_API_URL,
+    token: bufferToken(),
+    query: BUFFER_SENT_POSTS_QUERY,
   });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload?.errors?.[0]?.message || `Buffer returned HTTP ${response.status}.`);
-  }
   return parseBufferSentPostsPayload(payload);
 }
 
@@ -231,7 +231,7 @@ export default async function handler(request, response) {
     const sync = await syncSentPosts(supabase, posts);
     const cleanup = await cleanDeliveredReelBlobs(supabase, sync.descriptors);
     const todayKey = londonDateKey();
-    response.status(200).json({
+    const result = {
       ok: true,
       checked_at: new Date().toISOString(),
       synced: sync.inserted,
@@ -239,8 +239,33 @@ export default async function handler(request, response) {
       cleaned_reel_blobs: cleanup.cleaned,
       today: summarizeBufferPublishedToday(posts, todayKey, londonDateKey),
       recent: bufferPublishedItems(posts),
-    });
+    };
+    await saveBufferStatusSnapshot(result);
+    response.status(200).json(result);
   } catch (error) {
+    if (isBufferRateLimitCooldownError(error)) {
+      const cached = await loadBufferStatusSnapshot();
+      console.warn("[buffer-publish-status] serving cached status during cooldown", {
+        retryAfterMs: error.retryAfterMs,
+        cached: Boolean(cached),
+      });
+      response.status(200).json(cached
+        ? {
+            ...cached,
+            ...bufferDeferredPayload(error),
+            stale: true,
+            checked_at: new Date().toISOString(),
+            last_success_at: cached.checked_at || cached.cached_at || null,
+          }
+        : bufferDeferredPayload(error, {
+            stale: true,
+            checked_at: new Date().toISOString(),
+            last_success_at: null,
+            today: null,
+            recent: [],
+          }));
+      return;
+    }
     console.error("[buffer-publish-status] sync failed", {
       message: error?.message || String(error),
     });
