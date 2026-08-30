@@ -4,6 +4,11 @@ import {
   bufferDestinationForProduct,
   readableBufferError,
 } from "../lib/bufferPublishing.js";
+import {
+  bufferDeferredPayload,
+  guardedBufferGraphql,
+  isBufferRateLimitCooldownError,
+} from "../lib/bufferRuntimeGuard.js";
 import { loadBufferAutomationConfig } from "../lib/bufferAutomationConfig.js";
 import {
   FACEBOOK_STORY_TARGET_PER_DAY,
@@ -116,24 +121,12 @@ function bufferToken() {
 }
 
 async function bufferGraphql(query, variables = undefined) {
-  const response = await fetch(BUFFER_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${bufferToken()}`,
-    },
-    body: JSON.stringify(variables ? { query, variables } : { query }),
+  return guardedBufferGraphql({
+    url: BUFFER_API_URL,
+    token: bufferToken(),
+    query,
+    variables,
   });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(
-      readableBufferError(
-        payload?.errors?.[0]?.message || payload,
-        `Buffer returned HTTP ${response.status}.`,
-      ),
-    );
-  }
-  return payload;
 }
 
 function parsePosts(payload) {
@@ -377,6 +370,13 @@ export default async function handler(request, response) {
       results,
     });
   } catch (error) {
+    if (isBufferRateLimitCooldownError(error)) {
+      console.warn("[buffer-facebook-story-automation] deferred during Buffer cooldown", {
+        retryAfterMs: error.retryAfterMs,
+      });
+      response.status(202).json(bufferDeferredPayload(error));
+      return;
+    }
     const message = readableBufferError(error?.message || error, "Buffer Facebook Story automation failed.");
     console.error("[buffer-facebook-story-automation] failed", { message });
     response.status(500).json({ ok: false, error: message });
