@@ -6,6 +6,11 @@ import {
   BUFFER_FACEBOOK_CHANNELS,
   parseBufferAutomationPostsPayload,
 } from "../lib/bufferPublishing.js";
+import {
+  bufferDeferredPayload,
+  guardedBufferGraphql,
+  isBufferRateLimitCooldownError,
+} from "../lib/bufferRuntimeGuard.js";
 
 function hasVideo(post) {
   return (post?.assets || []).some((asset) => /^video\//i.test(String(asset?.mimeType || "")));
@@ -34,16 +39,11 @@ async function loadReady(productKey, dateKey) {
 }
 
 async function loadBuffer() {
-  const response = await fetch(BUFFER_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${String(process.env.BUFFER_API_KEY || "").trim()}`,
-    },
-    body: JSON.stringify({ query: BUFFER_AUTOMATION_POSTS_QUERY }),
+  const payload = await guardedBufferGraphql({
+    url: BUFFER_API_URL,
+    token: String(process.env.BUFFER_API_KEY || "").trim(),
+    query: BUFFER_AUTOMATION_POSTS_QUERY,
   });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`Buffer HTTP ${response.status}`);
   const posts = parseBufferAutomationPostsPayload(payload);
   const output = {};
   for (const [key, channelId] of [
@@ -72,6 +72,11 @@ export default async function handler(request, response) {
     ]);
     return response.status(200).json({ ok: true, dateKey, ready: { vanFinance, rent2buy }, buffer });
   } catch (error) {
+    if (isBufferRateLimitCooldownError(error)) {
+      return response.status(200).json(bufferDeferredPayload(error, {
+        buffer: null,
+      }));
+    }
     return response.status(500).json({ ok: false, error: String(error?.message || error) });
   }
 }

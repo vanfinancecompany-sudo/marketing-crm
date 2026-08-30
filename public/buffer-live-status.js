@@ -1,6 +1,8 @@
 const STATUS_ID = "bufferFacebookLiveStatus";
-const REFRESH_MS = 60 * 1000;
+const REFRESH_MS = 5 * 60 * 1000;
+const MIN_REQUEST_GAP_MS = 5 * 60 * 1000;
 let lastCheckedAt = 0;
+let lastAttemptAt = 0;
 let lastPayload = null;
 let inFlight = null;
 
@@ -26,8 +28,9 @@ function formatCheckedAt(value) {
 
 async function requestStatus(force = false) {
   const now = Date.now();
-  if (!force && lastPayload && now - lastCheckedAt < 20_000) return lastPayload;
   if (inFlight) return inFlight;
+  if (!force && now - lastAttemptAt < MIN_REQUEST_GAP_MS) return lastPayload;
+  lastAttemptAt = now;
 
   inFlight = fetch("/api/buffer-publish-status-ui", {
     method: "POST",
@@ -99,7 +102,8 @@ function ensureDailyReelsNotice() {
 function renderStatus(payload) {
   const kind = pageKind();
   if (!kind || !payload?.today) return;
-  const checked = formatCheckedAt(payload.checked_at);
+  const checked = formatCheckedAt(payload.last_success_at || payload.checked_at);
+  const confirmationLabel = payload.degraded ? "Buffer last confirmed" : "Buffer confirmed";
   const finance = payload.today.vanFinance || {};
   const rent = payload.today.rent2buy || {};
 
@@ -112,7 +116,7 @@ function renderStatus(payload) {
           <h3>Facebook live today</h3>
           <p>Confirmed from Buffer, so you do not need to cross-check Facebook manually.</p>
         </div>
-        <span class="status-pill">Buffer confirmed${checked ? ` · ${checked}` : ""}</span>
+        <span class="status-pill">${confirmationLabel}${checked ? ` · ${checked}` : ""}</span>
       </div>
       <div class="notice notice--success">${countsLine("Van Finance", finance)}</div>
       <div class="notice notice--success">${countsLine("Rent2Buy", rent)}</div>
@@ -125,7 +129,7 @@ function renderStatus(payload) {
     if (!notice) return;
     const group = kind === "finance" ? finance : rent;
     const label = kind === "finance" ? "Van Finance" : "Rent2Buy";
-    notice.textContent = `✓ Buffer confirmed live today · ${countsLine(label, group)}${checked ? ` · checked ${checked}` : ""}`;
+    notice.textContent = `✓ ${confirmationLabel} live today · ${countsLine(label, group)}${checked ? ` · checked ${checked}` : ""}`;
     return;
   }
 
@@ -162,7 +166,6 @@ async function refresh(force = false) {
   }
 }
 
-window.addEventListener("popstate", () => setTimeout(() => refresh(true), 100));
-window.addEventListener("focus", () => refresh(false));
-setInterval(() => refresh(true), REFRESH_MS);
-setTimeout(() => refresh(true), 600);
+window.addEventListener("popstate", () => setTimeout(() => refresh(false), 100));
+setInterval(() => refresh(false), REFRESH_MS);
+setTimeout(() => refresh(false), 600);

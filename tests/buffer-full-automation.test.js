@@ -187,8 +187,10 @@ test("legacy five-plus-five settings are superseded without losing the pause sta
 test("Daily Reels live status uses bounded refreshes instead of a document-wide mutation observer", () => {
   const liveStatus = source("public/buffer-live-status.js");
   assert.doesNotMatch(liveStatus, /MutationObserver/);
-  assert.match(liveStatus, /REFRESH_MS = 60 \* 1000/);
-  assert.match(liveStatus, /setInterval\(\(\) => refresh\(true\), REFRESH_MS\)/);
+  assert.match(liveStatus, /REFRESH_MS = 5 \* 60 \* 1000/);
+  assert.match(liveStatus, /MIN_REQUEST_GAP_MS = 5 \* 60 \* 1000/);
+  assert.match(liveStatus, /setInterval\(\(\) => refresh\(false\), REFRESH_MS\)/);
+  assert.doesNotMatch(liveStatus, /addEventListener\("focus"/);
 });
 
 test("temporary ten-Reel proof control is removed", () => {

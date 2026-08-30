@@ -17,8 +17,10 @@ test("Buffer secret stays server-side and queue mode requires confirmation", asy
   }
 
   const apiSource = await readFile(new URL("../api/buffer-publishing.js", import.meta.url), "utf8");
+  const guardSource = await readFile(new URL("../lib/bufferRuntimeGuard.js", import.meta.url), "utf8");
   assert.match(apiSource, /process\.env\.BUFFER_API_KEY/);
-  assert.match(apiSource, /Authorization: `Bearer \$\{token\}`/);
+  assert.match(apiSource, /guardedBufferGraphql/);
+  assert.match(guardSource, /Authorization: `Bearer \$\{token\}`/);
   assert.match(apiSource, /createFacebookReelQueue/);
   assert.match(apiSource, /body\.confirmQueue !== true/);
   assert.equal(apiSource.includes("shareNow"), false);
