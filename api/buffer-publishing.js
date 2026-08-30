@@ -6,6 +6,10 @@ import {
   buildBufferCreatePostInput,
   parseBufferCreatePostPayload,
 } from "../lib/bufferPublishing.js";
+import {
+  guardedBufferGraphql,
+  isBufferRateLimitCooldownError,
+} from "../lib/bufferRuntimeGuard.js";
 import { buildAutomatedFacebookCaption } from "../lib/facebookAutomationContent.js";
 import {
   mapFinanceVehicleRow,
@@ -114,23 +118,12 @@ async function createBufferPost({ destination, text, mediaUrl, mediaKind, draft 
     draft,
   });
 
-  const response = await fetch(BUFFER_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      query: BUFFER_CREATE_POST_MUTATION,
-      variables: { input },
-    }),
+  const payload = await guardedBufferGraphql({
+    url: BUFFER_API_URL,
+    token,
+    query: BUFFER_CREATE_POST_MUTATION,
+    variables: { input },
   });
-
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload?.errors?.[0]?.message || `Buffer returned HTTP ${response.status}.`);
-  }
-
   return parseBufferCreatePostPayload(payload);
 }
 
@@ -195,6 +188,19 @@ export default async function handler(request, response) {
       assets: post.assets || [],
     });
   } catch (error) {
+    if (isBufferRateLimitCooldownError(error)) {
+      console.warn("[buffer-publishing] request deferred during Buffer cooldown", {
+        retryAfterMs: error.retryAfterMs,
+      });
+      sendJson(response, 429, {
+        ok: false,
+        deferred: true,
+        reason: "buffer_rate_limit_cooldown",
+        retry_after_ms: error.retryAfterMs,
+        error: "Buffer is temporarily rate limited. Please try again shortly.",
+      });
+      return;
+    }
     console.error("[buffer-publishing] request failed", {
       message: error?.message || String(error),
     });
