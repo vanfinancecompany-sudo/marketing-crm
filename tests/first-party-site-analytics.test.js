@@ -137,12 +137,17 @@ describe('first-party website analytics', () => {
     assert.equal(rateLimited('test-rate-key', 1_000), true);
   });
 
-  it('locks ingestion to a service-only RPC and a strict event allowlist', () => {
-    const migration = fs.readFileSync(new URL('../supabase/migrations/20260829190543_vfc_site_analytics.sql', import.meta.url), 'utf8');
+  it('locks ingestion to a service-only RPC and enforces 13-month retention', () => {
+    const migration = fs.readFileSync(new URL('../supabase/migrations/20260830074642_vfc_site_analytics.sql', import.meta.url), 'utf8');
+    const retention = fs.readFileSync(new URL('../supabase/migrations/20260830074735_vfc_site_analytics_retention_13_months.sql', import.meta.url), 'utf8');
     const endpoint = fs.readFileSync(new URL('../api/track-site-analytics.js', import.meta.url), 'utf8');
     assert.match(migration, /enable row level security/i);
     assert.match(migration, /revoke all on function public\.ingest_site_analytics_event[\s\S]+from public, anon, authenticated/i);
     assert.match(migration, /grant execute on function public\.ingest_site_analytics_event[\s\S]+to service_role/i);
+    assert.match(retention, /create extension if not exists pg_cron/i);
+    assert.match(retention, /interval '13 months'/i);
+    assert.match(retention, /vfc_site_analytics_retention_13m/i);
+    assert.doesNotMatch(retention, /site_live_sessions|vehicle_views/i);
     assert.doesNotMatch(endpoint, /email|phone|first_name|last_name/i);
     assert.match(endpoint, /VFC_ANALYTICS_ALLOWED_ORIGINS/);
     assert.match(endpoint, /MAX_BODY_BYTES = 16 \* 1024/);
