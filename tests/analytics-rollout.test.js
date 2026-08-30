@@ -35,7 +35,7 @@ describe('first-party analytics rollout safeguards',()=>{
   });
 
   it('keeps session state stable when events replay or arrive out of order',()=>{
-    const migration=fs.readFileSync(new URL('../supabase/migrations/20260829190543_vfc_site_analytics.sql',import.meta.url),'utf8');
+    const migration=fs.readFileSync(new URL('../supabase/migrations/20260830074642_vfc_site_analytics.sql',import.meta.url),'utf8');
     assert.match(migration,/delete from public\.site_analytics_sessions[\s\S]+not exists[\s\S]+site_analytics_events/i);
     assert.match(migration,/started_at\s*=\s*least\(started_at,\s*p_occurred_at\)/i);
     assert.match(migration,/last_path\s*=\s*case when p_occurred_at >= last_activity_at then p_path else last_path end/i);
