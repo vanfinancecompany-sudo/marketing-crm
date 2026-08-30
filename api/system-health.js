@@ -5,6 +5,10 @@ import {
   BUFFER_FACEBOOK_CHANNELS,
   parseBufferAutomationPostsPayload,
 } from "../lib/bufferPublishing.js";
+import {
+  guardedBufferGraphql,
+  isBufferRateLimitCooldownError,
+} from "../lib/bufferRuntimeGuard.js";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -48,16 +52,24 @@ async function checkBuffer() {
   const token = String(process.env.BUFFER_API_KEY || "").trim();
   if (!token) throw new Error("Buffer API key is not configured.");
 
-  const response = await fetch(BUFFER_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ query: BUFFER_AUTOMATION_POSTS_QUERY }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload?.errors?.[0]?.message || `Buffer returned HTTP ${response.status}.`);
+  let payload;
+  try {
+    payload = await guardedBufferGraphql({
+      url: BUFFER_API_URL,
+      token,
+      query: BUFFER_AUTOMATION_POSTS_QUERY,
+    });
+  } catch (error) {
+    if (isBufferRateLimitCooldownError(error)) {
+      return {
+        ok: true,
+        degraded: true,
+        reason: "buffer_rate_limit_cooldown",
+        retry_after_ms: error.retryAfterMs,
+      };
+    }
+    throw error;
+  }
 
   const posts = parseBufferAutomationPostsPayload(payload);
   const channelIds = new Set([
@@ -280,10 +292,20 @@ export default async function handler(request, response) {
   ]);
   const issues = checks.filter((check) => !check.ok && check.issue).map((check) => check.issue);
 
+  const degraded = checks
+    .map((check, index) => ({ check, index }))
+    .filter(({ check }) => check?.degraded)
+    .map(({ check, index }) => ({
+      key: ["Supabase", "Buffer", "Facebook automation", "Reel duplicate protection", "Email campaign worker", "Email delivery"][index],
+      reason: check.reason || "temporarily_degraded",
+      retry_after_ms: check.retry_after_ms || null,
+    }));
+
   return response.status(200).json({
     ok: issues.length === 0,
     status: issues.length ? "red" : "green",
     checked_at: new Date().toISOString(),
+    degraded,
     checks: {
       supabase: checks[0].ok,
       buffer: checks[1].ok,
