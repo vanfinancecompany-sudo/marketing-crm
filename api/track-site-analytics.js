@@ -59,8 +59,7 @@ function cleanEnum(value, allowed) {
 
 function cleanReferrer(value) {
   try {
-    const parsed = new URL(String(value || ''));
-    return `${parsed.origin}${parsed.pathname}`.slice(0, 500);
+    return new URL(String(value || '')).origin.slice(0, 300);
   } catch {
     return null;
   }
