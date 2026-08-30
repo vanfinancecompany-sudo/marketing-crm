@@ -1,15 +1,25 @@
 import {describe,it} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {effectiveAnalyticsCutoverDate,resolveAnalyticsCutoverDate,SAFE_WIX_ONLY_CUTOVER} from '../api/_analytics-rollout.js';
+import {DEFAULT_FIRST_PARTY_CUTOVER,effectiveAnalyticsCutoverDate,resolveAnalyticsCutoverDate,SAFE_WIX_ONLY_CUTOVER} from '../api/_analytics-rollout.js';
 import {splitAnalyticsRange} from '../api/_first-party-analytics.js';
 
 describe('first-party analytics rollout safeguards',()=>{
-  it('fails safe to Wix when no real cutover date is configured',()=>{
-    assert.equal(resolveAnalyticsCutoverDate(''),null);
-    assert.equal(effectiveAnalyticsCutoverDate(''),SAFE_WIX_ONLY_CUTOVER);
+  it('uses the reviewed 1 September production cutover when no env override is present',()=>{
+    assert.equal(DEFAULT_FIRST_PARTY_CUTOVER,'2026-09-01');
+    assert.equal(resolveAnalyticsCutoverDate(),DEFAULT_FIRST_PARTY_CUTOVER);
+    assert.equal(effectiveAnalyticsCutoverDate(''),DEFAULT_FIRST_PARTY_CUTOVER);
     assert.deepEqual(splitAnalyticsRange('2026-08-29','2026-09-05',effectiveAnalyticsCutoverDate('')),[
-      {source:'wix',startDate:'2026-08-29',endExclusive:'2026-09-05'},
+      {source:'wix',startDate:'2026-08-29',endExclusive:'2026-09-01'},
+      {source:'first_party',startDate:'2026-09-01',endExclusive:'2026-09-05'},
+    ]);
+  });
+
+  it('fails safe to Wix if an explicit cutover override is invalid',()=>{
+    assert.equal(resolveAnalyticsCutoverDate('2026-02-31'),null);
+    assert.equal(effectiveAnalyticsCutoverDate('2026-02-31'),SAFE_WIX_ONLY_CUTOVER);
+    assert.deepEqual(splitAnalyticsRange('2026-09-01','2026-09-05',effectiveAnalyticsCutoverDate('2026-02-31')),[
+      {source:'wix',startDate:'2026-09-01',endExclusive:'2026-09-05'},
     ]);
   });
 
@@ -19,7 +29,7 @@ describe('first-party analytics rollout safeguards',()=>{
     assert.equal(resolveAnalyticsCutoverDate('31-08-2026'),null);
   });
 
-  it('uses a configured cutover to split Wix and first-party periods',()=>{
+  it('uses a configured cutover to override the scheduled default',()=>{
     assert.deepEqual(splitAnalyticsRange('2026-08-29','2026-09-03',effectiveAnalyticsCutoverDate('2026-08-31')),[
       {source:'wix',startDate:'2026-08-29',endExclusive:'2026-08-31'},
       {source:'first_party',startDate:'2026-08-31',endExclusive:'2026-09-03'},
