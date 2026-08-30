@@ -21,6 +21,11 @@ import {
   readableBufferError,
 } from "../lib/bufferPublishing.js";
 import {
+  bufferDeferredPayload,
+  guardedBufferGraphql,
+  isBufferRateLimitCooldownError,
+} from "../lib/bufferRuntimeGuard.js";
+import {
   automatedReelFrameSpecs,
   buildAutomatedFacebookCaption,
   buildAutomatedReelCaption,
@@ -78,24 +83,12 @@ function bufferToken() {
 }
 
 async function bufferGraphql(query, variables = undefined) {
-  const response = await fetch(BUFFER_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${bufferToken()}`,
-    },
-    body: JSON.stringify(variables ? { query, variables } : { query }),
+  return guardedBufferGraphql({
+    url: BUFFER_API_URL,
+    token: bufferToken(),
+    query,
+    variables,
   });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(
-      errorText(
-        payload?.errors?.[0]?.message || payload,
-        `Buffer returned HTTP ${response.status}.`,
-      ),
-    );
-  }
-  return payload;
 }
 
 async function loadBufferPosts() {
@@ -537,6 +530,16 @@ export default async function handler(request, response) {
       elapsedMs: Date.now() - startedAt,
     });
   } catch (error) {
+    if (isBufferRateLimitCooldownError(error)) {
+      console.warn("[buffer-facebook-automation] worker deferred during Buffer cooldown", {
+        retryAfterMs: error.retryAfterMs,
+      });
+      response.status(202).json(bufferDeferredPayload(error, {
+        enabled: true,
+        elapsedMs: Date.now() - startedAt,
+      }));
+      return;
+    }
     const message = errorText(error, "Buffer Facebook automation worker failed.");
     console.error("[buffer-facebook-automation] worker failed", { message });
     response.status(500).json({
