@@ -34,14 +34,14 @@ function route(message, overrides = {}) {
   });
 }
 
-test("harmless simple conversation uses Terra", () => {
+test("harmless simple conversation uses Luna", () => {
   for (const primary_intent of ["greeting", "thanks", "goodbye", "general_help_request"]) {
     const selected = route("Hi", {
       intent: { primary_intent, retrieval_required: false },
       orchestration: { retrieval_required: false },
       sourceCount: 0,
     });
-    assert.equal(selected.model, "gpt-5.6-terra", primary_intent);
+    assert.equal(selected.model, "gpt-5.6-luna", primary_intent);
     assert.equal(selected.tier, "mini", primary_intent);
   }
 });
@@ -120,7 +120,7 @@ test("Wix model tiers can be overridden independently", () => {
 
 test("GPT-5.6 Responses API parameters omit temperature and include reasoning", () => {
   const fast = buildAssistantResponseModelParameters({ model: ASSISTANT_MODEL_POLICY.mini, temperature: 0.2 });
-  assert.deepEqual(fast, { model: "gpt-5.6-terra" });
+  assert.deepEqual(fast, { model: "gpt-5.6-luna" });
 
   const full = buildAssistantResponseModelParameters({ model: ASSISTANT_MODEL_POLICY.full, temperature: 0.2, reasoning_effort: "low" });
   assert.deepEqual(full, { model: "gpt-5.6-terra", reasoning: { effort: "low" } });
