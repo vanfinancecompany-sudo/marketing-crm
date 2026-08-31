@@ -21,7 +21,7 @@
       "schedule": "14 * * * *"
     },
     {
-      "path": "/api/marketing-editorial-automation-worker",
+      "path": "/api/marketing-editorial-automation-worker-routed",
       "schedule": "17 * * * *"
     },
     {
@@ -55,6 +55,9 @@
       "maxDuration": 120
     },
     "api/marketing-editorial-automation-worker.js": {
+      "maxDuration": 300
+    },
+    "api/marketing-editorial-automation-worker-routed.js": {
       "maxDuration": 300
     },
     "api/marketing-template-campaign-sends-resilient.js": {
