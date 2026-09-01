@@ -128,9 +128,25 @@ describe('first-party website analytics', () => {
     assert.doesNotMatch(JSON.stringify(payload), /private@example|SO40/);
   });
 
+  it('binds page URLs to the accepted request origin instead of the body host', () => {
+    const payload = sanitizeAnalyticsPayload({
+      eventId: 'f70df4b4-92a1-4c8c-b3b6-26d740f503fc',
+      sessionId: 'session-abcdefghijklmnop',
+      visitorId: 'visitor-abcdefghijklmnop',
+      eventName: 'page_view',
+      path: '/view-all-vans',
+      pageUrl: 'https://www.vanfinancecompany.co.uk/view-all-vans?spoofed=1',
+      metadata: { product: 'rent2buy' },
+    }, Date.parse('2026-09-01T12:00:00Z'), 'https://www.rent2buyvans.co.uk');
+    assert.equal(payload.pageUrl, 'https://www.rent2buyvans.co.uk/view-all-vans');
+    assert.equal(payload.metadata.product, 'rent2buy');
+  });
+
   it('limits approved browser origins and obvious per-session abuse', () => {
     const origins = allowedOrigins('https://preview.example.test');
     assert.equal(origins.has('https://www.vanfinancecompany.co.uk'), true);
+    assert.equal(origins.has('https://www.rent2buyvans.co.uk'), true);
+    assert.equal(origins.has('https://rent2buyvans.co.uk'), true);
     assert.equal(origins.has('https://vanfinance.co'), false);
     assert.equal(origins.has('https://preview.example.test'), true);
     for (let count = 0; count < 120; count += 1) assert.equal(rateLimited('test-rate-key', 1_000), false);
