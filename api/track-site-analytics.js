@@ -11,7 +11,10 @@ export const ANALYTICS_EVENTS = new Set([
 const DEFAULT_ORIGINS = new Set([
   'https://www.vanfinancecompany.co.uk',
   'https://vanfinancecompany.co.uk',
+  'https://www.rent2buyvans.co.uk',
+  'https://rent2buyvans.co.uk',
 ]);
+const DEFAULT_PAGE_ORIGIN = 'https://www.vanfinancecompany.co.uk';
 const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT = 120;
 const IP_RATE_LIMIT = 300;
@@ -29,10 +32,16 @@ function cleanPath(value) {
   return text.split(/[?#]/)[0] || '/';
 }
 
-function cleanPageUrl(value, path) {
+function cleanOrigin(value) {
+  const origin = String(value || '').trim().replace(/\/$/, '');
+  return allowedOrigins().has(origin) ? origin : DEFAULT_PAGE_ORIGIN;
+}
+
+function cleanPageUrl(value, path, requestOrigin = '') {
+  const origin = cleanOrigin(requestOrigin);
   let pagePath = path;
-  try { if (value) pagePath = new URL(String(value), 'https://www.vanfinancecompany.co.uk').pathname; } catch {}
-  return `https://www.vanfinancecompany.co.uk${cleanPath(pagePath)}`.slice(0, 800);
+  try { if (value) pagePath = new URL(String(value), origin).pathname; } catch {}
+  return `${origin}${cleanPath(pagePath)}`.slice(0, 800);
 }
 
 function cleanId(value) {
@@ -71,7 +80,7 @@ function cleanAttribution(value, limit) {
   return text.replace(/[^a-z0-9._ /:-]/gi, '').trim() || null;
 }
 
-export function sanitizeAnalyticsPayload(body = {}, now = Date.now()) {
+export function sanitizeAnalyticsPayload(body = {}, now = Date.now(), requestOrigin = '') {
   const eventName = String(body.eventName || '').trim();
   const sessionId = cleanId(body.sessionId);
   const visitorId = cleanId(body.visitorId);
@@ -91,7 +100,7 @@ export function sanitizeAnalyticsPayload(body = {}, now = Date.now()) {
     eventName,
     occurredAt: cleanOccurredAt(body.occurredAt, now),
     path,
-    pageUrl: cleanPageUrl(body.pageUrl, path),
+    pageUrl: cleanPageUrl(body.pageUrl, path, requestOrigin),
     landingPath: cleanPath(body.landingPath),
     referrer: cleanReferrer(body.referrer),
     source: cleanAttribution(body.source, 120),
@@ -196,7 +205,8 @@ export default async function handler(request, response) {
   if (request.method !== 'POST') return sendJson(response, 405, { ok: false, message: 'Method not allowed.' });
 
   try {
-    const payload = sanitizeAnalyticsPayload(await readBody(request));
+    const requestOrigin = String(request.headers?.origin || '').replace(/\/$/, '');
+    const payload = sanitizeAnalyticsPayload(await readBody(request), Date.now(), requestOrigin);
     if (!payload) return sendJson(response, 400, { ok: false, message: 'Invalid analytics event.' });
     const ip = clientIp(request);
     if (rateLimited(`ip:${ip}`, Date.now(), IP_RATE_LIMIT) || rateLimited(`session:${ip}:${payload.sessionId}`)) {
