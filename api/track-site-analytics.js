@@ -1,4 +1,5 @@
 import { getSupabaseServiceAdmin, isMissingOptionalTableError, isMissingSupabaseObjectError, normalizeRegistration } from './_vansco-cache-utils.js';
+import { ANALYTICS_SITE_ORIGINS, canonicalAnalyticsSiteOrigin } from '../lib/analyticsSiteOrigins.js';
 
 export const ANALYTICS_EVENTS = new Set([
   'session_start', 'session_activity', 'session_end', 'page_view', 'engagement', 'vehicle_view',
@@ -14,7 +15,7 @@ const DEFAULT_ORIGINS = new Set([
   'https://www.rent2buyvans.co.uk',
   'https://rent2buyvans.co.uk',
 ]);
-const DEFAULT_PAGE_ORIGIN = 'https://www.vanfinancecompany.co.uk';
+const DEFAULT_PAGE_ORIGIN = ANALYTICS_SITE_ORIGINS.vfc;
 const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT = 120;
 const IP_RATE_LIMIT = 300;
@@ -102,6 +103,7 @@ export function sanitizeAnalyticsPayload(body = {}, now = Date.now(), requestOri
     path,
     pageUrl: cleanPageUrl(body.pageUrl, path, requestOrigin),
     landingPath: cleanPath(body.landingPath),
+    siteOrigin: canonicalAnalyticsSiteOrigin(requestOrigin),
     referrer: cleanReferrer(body.referrer),
     source: cleanAttribution(body.source, 120),
     utmSource: cleanAttribution(body.utmSource, 120),
@@ -178,7 +180,12 @@ export function rateLimited(key, now = Date.now(), limit = RATE_LIMIT) {
   return bucket.count > limit;
 }
 
+export function shouldUpdateLegacyAnalytics(payload) {
+  return payload?.siteOrigin === ANALYTICS_SITE_ORIGINS.vfc;
+}
+
 async function updateExistingAnalytics(supabase, payload) {
+  if (!shouldUpdateLegacyAnalytics(payload)) return;
   const now = payload.occurredAt;
   const live = await supabase.from('site_live_sessions').upsert({
     session_id: payload.sessionId,
@@ -223,6 +230,7 @@ export default async function handler(request, response) {
       p_path: payload.path,
       p_page_url: payload.pageUrl,
       p_landing_path: payload.landingPath,
+      p_site_origin: payload.siteOrigin,
       p_referrer: payload.referrer,
       p_source: payload.source,
       p_utm_source: payload.utmSource,
