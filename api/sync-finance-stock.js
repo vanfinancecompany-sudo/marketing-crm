@@ -163,7 +163,13 @@ async function syncFinanceStock() {
     const keeper = group[0];
     if (keeper?.id != null) {
       updates.push({ id: keeper.id, payload: vehicle });
-      duplicateIds.push(...group.slice(1).map((row) => row.id).filter((id) => id != null));
+      duplicateIds.push(
+        ...group
+          .slice(1)
+          .filter((row) => row.is_active !== false)
+          .map((row) => row.id)
+          .filter((id) => id != null)
+      );
     } else {
       inserts.push(vehicle);
     }
