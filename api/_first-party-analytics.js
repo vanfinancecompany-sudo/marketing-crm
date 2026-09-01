@@ -1,4 +1,5 @@
 import { isMissingSupabaseObjectError } from './_vansco-cache-utils.js';
+import { ANALYTICS_SITE_ORIGINS, canonicalAnalyticsSiteOrigin } from '../lib/analyticsSiteOrigins.js';
 
 export const ANALYTICS_CUTOVER_DATE = '2026-08-29';
 export const SESSION_TIMEOUT_SECONDS = 30 * 60;
@@ -338,13 +339,15 @@ export function mergeFunnels(parts = []) {
   };
 }
 
-async function fetchRows(supabase, table, columns, timestampColumn, startDate, endExclusive, maxRows = 50000) {
+async function fetchRows(supabase, table, columns, timestampColumn, startDate, endExclusive, maxRows = 50000, siteOrigin = ANALYTICS_SITE_ORIGINS.vfc) {
   const output = [];
   const pageSize = 1000;
+  const canonicalSiteOrigin = canonicalAnalyticsSiteOrigin(siteOrigin);
   for (let from = 0; from < maxRows; from += pageSize) {
-    const result = await supabase.from(table).select(columns)
-      .gte(timestampColumn, londonBoundaryIso(startDate)).lt(timestampColumn, londonBoundaryIso(endExclusive))
-      .order(timestampColumn, { ascending: true }).range(from, from + pageSize - 1);
+    let query = supabase.from(table).select(columns)
+      .gte(timestampColumn, londonBoundaryIso(startDate)).lt(timestampColumn, londonBoundaryIso(endExclusive));
+    if (typeof query.eq === 'function') query = query.eq('site_origin', canonicalSiteOrigin);
+    const result = await query.order(timestampColumn, { ascending: true }).range(from, from + pageSize - 1);
     if (result.error) throw result.error;
     output.push(...(result.data || []));
     if (!result.data || result.data.length < pageSize) break;
@@ -352,15 +355,15 @@ async function fetchRows(supabase, table, columns, timestampColumn, startDate, e
   return output;
 }
 
-export async function loadFirstPartyPeriod({ supabase, startDate, endExclusive }) {
+export async function loadFirstPartyPeriod({ supabase, startDate, endExclusive, siteOrigin = ANALYTICS_SITE_ORIGINS.vfc }) {
   try {
     const [sessions, events] = await Promise.all([
-      fetchRows(supabase, 'site_analytics_sessions', 'session_id,visitor_id,started_at,last_activity_at,ended_at,landing_path,last_path,page_view_count,meaningful_event_count,referrer,source,utm_source,utm_medium,utm_campaign,device_category,browser_category,viewport_width', 'started_at', startDate, endExclusive),
-      fetchRows(supabase, 'site_analytics_events', 'event_id,session_id,visitor_id,event_name,occurred_at,path,page_url,vehicle_registration,metadata', 'occurred_at', startDate, endExclusive),
+      fetchRows(supabase, 'site_analytics_sessions', 'session_id,visitor_id,started_at,last_activity_at,ended_at,landing_path,last_path,page_view_count,meaningful_event_count,referrer,source,utm_source,utm_medium,utm_campaign,device_category,browser_category,viewport_width', 'started_at', startDate, endExclusive, 50000, siteOrigin),
+      fetchRows(supabase, 'site_analytics_events', 'event_id,session_id,visitor_id,event_name,occurred_at,path,page_url,vehicle_registration,metadata', 'occurred_at', startDate, endExclusive, 50000, siteOrigin),
     ]);
-    return { ok: true, skipped: false, sessions, events, summary: summarizeFirstParty(sessions, events), details: buildFirstPartyDetails(sessions, events), funnel: buildFirstPartyFunnel(events) };
+    return { ok: true, skipped: false, siteOrigin: canonicalAnalyticsSiteOrigin(siteOrigin), sessions, events, summary: summarizeFirstParty(sessions, events), details: buildFirstPartyDetails(sessions, events), funnel: buildFirstPartyFunnel(events) };
   } catch (error) {
     if (!isMissingSupabaseObjectError(error)) throw error;
-    return { ok: true, skipped: true, reason: 'analytics tables missing', sessions: [], events: [], summary: { ...EMPTY_SUMMARY }, details: buildFirstPartyDetails([], []), funnel: buildFirstPartyFunnel([]) };
+    return { ok: true, skipped: true, reason: 'analytics tables missing', siteOrigin: canonicalAnalyticsSiteOrigin(siteOrigin), sessions: [], events: [], summary: { ...EMPTY_SUMMARY }, details: buildFirstPartyDetails([], []), funnel: buildFirstPartyFunnel([]) };
   }
 }
