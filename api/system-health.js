@@ -38,6 +38,64 @@ function ageMs(value) {
   return Number.isFinite(timestamp) && timestamp > 0 ? Date.now() - timestamp : Number.POSITIVE_INFINITY;
 }
 
+function durationMs(start, end) {
+  const startMs = new Date(start || 0).getTime();
+  const endMs = new Date(end || 0).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || !startMs || !endMs || endMs < startMs) return null;
+  return endMs - startMs;
+}
+
+function nextHourlyAt(minute, now = new Date()) {
+  const next = new Date(now);
+  next.setUTCSeconds(0, 0);
+  if (next.getUTCMinutes() >= minute) next.setUTCHours(next.getUTCHours() + 1);
+  next.setUTCMinutes(minute);
+  return next.toISOString();
+}
+
+function nextMinuteAt(now = new Date()) {
+  const next = new Date(now);
+  next.setUTCSeconds(0, 0);
+  next.setUTCMinutes(next.getUTCMinutes() + 1);
+  return next.toISOString();
+}
+
+function nextDailyAt(hour, minute = 0, now = new Date()) {
+  const next = new Date(now);
+  next.setUTCSeconds(0, 0);
+  next.setUTCHours(hour, minute, 0, 0);
+  if (next.getTime() <= now.getTime()) next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString();
+}
+
+function automationItem({
+  key,
+  label,
+  cadence,
+  status = "scheduled",
+  lastAttemptAt = null,
+  lastSuccessAt = null,
+  duration = null,
+  nextExpectedAt = null,
+  lastError = "",
+  telemetry = "live",
+  detail = "",
+}) {
+  return {
+    key,
+    label,
+    cadence,
+    status,
+    last_attempt_at: lastAttemptAt,
+    last_success_at: lastSuccessAt,
+    duration_ms: duration,
+    next_expected_at: nextExpectedAt,
+    last_error: lastError || "",
+    telemetry,
+    detail,
+  };
+}
+
 async function checkSupabase() {
   const supabase = supabaseClient();
   const result = await supabase
@@ -136,10 +194,11 @@ async function checkRecentAutomationActivity() {
             .at(-1) || null,
         },
       ),
+      latestByProduct,
     };
   }
 
-  return { ok: true };
+  return { ok: true, latestByProduct };
 }
 
 async function checkDuplicateReels() {
@@ -204,6 +263,7 @@ async function checkCarslink() {
         "CarsLink automatic stock checking is disabled.",
         { last_success_at: lastSuccessAt },
       ),
+      status,
     };
   }
 
@@ -216,6 +276,7 @@ async function checkCarslink() {
         status?.lastError || "CarsLink is reporting a stock sync error.",
         { last_success_at: lastSuccessAt },
       ),
+      status,
     };
   }
 
@@ -228,6 +289,7 @@ async function checkCarslink() {
         "CarsLink automatic stock checking has not completed for more than 3 hours.",
         { last_success_at: lastSuccessAt },
       ),
+      status,
     };
   }
 
@@ -240,10 +302,11 @@ async function checkCarslink() {
         "CarsLink has not completed a successful production stock sync for more than 18 hours.",
         { last_success_at: lastSuccessAt },
       ),
+      status,
     };
   }
 
-  return { ok: true };
+  return { ok: true, status };
 }
 
 async function checkEmailCampaigns() {
@@ -269,6 +332,7 @@ async function checkEmailCampaigns() {
         attention.error_summary || "An email campaign queue requires reconciliation before retrying.",
         { last_success_at: attention.updated_at || attention.started_at || null },
       ),
+      latest: rows[0] || null,
     };
   }
 
@@ -286,6 +350,7 @@ async function checkEmailCampaigns() {
         "A production email campaign is still marked sending but its worker has not updated for more than 20 minutes.",
         { last_success_at: staleSending?.metadata?.worker_last_run_at || staleSending.updated_at || null },
       ),
+      latest: rows[0] || null,
     };
   }
 
@@ -299,10 +364,11 @@ async function checkEmailCampaigns() {
         failedSend.error_summary || "A production email campaign has failed within the last 24 hours.",
         { last_success_at: failedSend.updated_at || failedSend.completed_at || null },
       ),
+      latest: rows[0] || null,
     };
   }
 
-  return { ok: true };
+  return { ok: true, latest: rows[0] || null };
 }
 
 async function checkUnknownEmailSubmissions() {
@@ -330,6 +396,185 @@ async function checkUnknownEmailSubmissions() {
     };
   }
   return { ok: true };
+}
+
+async function loadAutomationEvidence() {
+  const supabase = supabaseClient();
+  const [vanscoResult, editorialResult, activityResult, emailResult, carslink] = await Promise.all([
+    supabase
+      .from("vansco_refresh_runs")
+      .select("status,stage,started_at,updated_at,completed_at,last_error,success_count,failure_count")
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("knowledge_automation_runs")
+      .select("status,started_at,completed_at,duration_ms,error_message,jobs_claimed,jobs_succeeded,jobs_failed")
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("marketing_daily_activity_events")
+      .select("activity_type,source,occurred_at,metadata")
+      .gte("occurred_at", new Date(Date.now() - 7 * DAY).toISOString())
+      .order("occurred_at", { ascending: false })
+      .limit(2000),
+    supabase
+      .from("marketing_email_sends")
+      .select("status,created_at,updated_at,started_at,completed_at,error_summary,metadata")
+      .eq("send_type", "production")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    loadCarslinkSyncStatus(),
+  ]);
+
+  if (vanscoResult.error) throw vanscoResult.error;
+  if (editorialResult.error) throw editorialResult.error;
+  if (activityResult.error) throw activityResult.error;
+  if (emailResult.error) throw emailResult.error;
+
+  return {
+    vansco: vanscoResult.data || null,
+    editorial: editorialResult.data || null,
+    activity: activityResult.data || [],
+    email: emailResult.data || null,
+    carslink,
+  };
+}
+
+function latestActivity(rows, predicate) {
+  return (rows || []).find(predicate)?.occurred_at || null;
+}
+
+function buildAutomationCentre(evidence, checkMap) {
+  const now = new Date();
+  const activity = evidence?.activity || [];
+  const facebookLast = latestActivity(
+    activity,
+    (row) => row?.source === "buffer_publish" && ["van_finance_facebook_post", "rent2buy_facebook_post", "van_finance_reel", "rent2buy_reel"].includes(String(row?.activity_type || "")),
+  );
+  const instagramLast = latestActivity(activity, (row) => /instagram/i.test(`${row?.activity_type || ""} ${row?.source || ""}`));
+  const storyLast = latestActivity(activity, (row) => /story/i.test(`${row?.activity_type || ""} ${row?.source || ""}`));
+  const priceSyncLast = latestActivity(activity, (row) => /rent2buy.*price|price.*rent2buy/i.test(`${row?.activity_type || ""} ${row?.source || ""}`));
+
+  const vansco = evidence?.vansco || {};
+  const vanscoStatus = String(vansco.status || "").toLowerCase();
+  const vanscoOk = !["failed", "error"].includes(vanscoStatus) && ageMs(vansco.started_at) < 36 * HOUR;
+  const editorial = evidence?.editorial || {};
+  const editorialStatus = String(editorial.status || "").toLowerCase();
+  const editorialOk = !["failed", "error"].includes(editorialStatus) && (!editorial.started_at || ageMs(editorial.started_at) < 4 * HOUR);
+  const carslink = evidence?.carslink || {};
+  const email = evidence?.email || {};
+
+  return [
+    automationItem({
+      key: "vansco_stock_refresh",
+      label: "Vansco overnight stock refresh",
+      cadence: "Daily at 02:00 UTC",
+      status: vansco.started_at ? (vanscoOk ? (vanscoStatus === "running" ? "running" : "healthy") : "failed") : "waiting",
+      lastAttemptAt: vansco.started_at || null,
+      lastSuccessAt: vanscoStatus === "complete" ? (vansco.completed_at || vansco.updated_at || null) : null,
+      duration: durationMs(vansco.started_at, vansco.completed_at),
+      nextExpectedAt: nextDailyAt(2, 0, now),
+      lastError: vansco.last_error || "",
+      detail: "Current Dragon/Vansco cache refresh. Advisory stock comparison only.",
+    }),
+    automationItem({
+      key: "facebook_automation",
+      label: "Facebook publishing automation",
+      cadence: "Hourly at :05",
+      status: checkMap.facebook ? "healthy" : "failed",
+      lastSuccessAt: facebookLast,
+      nextExpectedAt: nextHourlyAt(5, now),
+      lastError: checkMap.facebookIssue || "",
+      detail: "Van Finance and Rent2Buy Facebook publishing via Buffer.",
+    }),
+    automationItem({
+      key: "instagram_mirror",
+      label: "Instagram mirror",
+      cadence: "Hourly at :14",
+      status: instagramLast ? "healthy" : "scheduled",
+      lastSuccessAt: instagramLast,
+      nextExpectedAt: nextHourlyAt(14, now),
+      telemetry: instagramLast ? "live" : "schedule_only",
+      detail: instagramLast ? "Recent Instagram activity found." : "Schedule is monitored; this worker does not yet emit its own heartbeat record.",
+    }),
+    automationItem({
+      key: "editorial_automation",
+      label: "Editorial automation",
+      cadence: "Hourly at :17",
+      status: editorial.started_at ? (editorialOk ? (editorialStatus === "running" ? "running" : "healthy") : "failed") : "waiting",
+      lastAttemptAt: editorial.started_at || null,
+      lastSuccessAt: editorialStatus === "complete" || editorialStatus === "completed" || editorialStatus === "success" ? (editorial.completed_at || null) : null,
+      duration: editorial.duration_ms || durationMs(editorial.started_at, editorial.completed_at),
+      nextExpectedAt: nextHourlyAt(17, now),
+      lastError: editorial.error_message || "",
+      detail: `Latest run: ${editorial.jobs_succeeded || 0} succeeded, ${editorial.jobs_failed || 0} failed.`,
+    }),
+    automationItem({
+      key: "rent2buy_price_sync",
+      label: "Rent2Buy monthly-price sync",
+      cadence: "Hourly at :23",
+      status: priceSyncLast ? "healthy" : "scheduled",
+      lastSuccessAt: priceSyncLast,
+      nextExpectedAt: nextHourlyAt(23, now),
+      telemetry: priceSyncLast ? "live" : "schedule_only",
+      detail: priceSyncLast ? "Recent price-sync activity found." : "Schedule is monitored; dedicated heartbeat telemetry will be added only if this sync becomes operationally critical.",
+    }),
+    automationItem({
+      key: "facebook_story",
+      label: "Facebook Story automation",
+      cadence: "Hourly at :25",
+      status: storyLast ? "healthy" : "scheduled",
+      lastSuccessAt: storyLast,
+      nextExpectedAt: nextHourlyAt(25, now),
+      telemetry: storyLast ? "live" : "schedule_only",
+      detail: storyLast ? "Recent Story activity found." : "Schedule is monitored; this worker does not yet emit its own heartbeat record.",
+    }),
+    automationItem({
+      key: "buffer_status",
+      label: "Buffer publish-status reconciliation",
+      cadence: "Hourly at :35",
+      status: checkMap.buffer ? "healthy" : "failed",
+      nextExpectedAt: nextHourlyAt(35, now),
+      lastError: checkMap.bufferIssue || "",
+      detail: "Checks Buffer publishing outcomes and reconciles delivery state.",
+    }),
+    automationItem({
+      key: "carslink_stock_sync",
+      label: "CarsLink production stock sync",
+      cadence: "Hourly at :47",
+      status: checkMap.carslink ? "healthy" : "failed",
+      lastAttemptAt: carslink.lastAttemptAt || carslink.lastCheckedAt || null,
+      lastSuccessAt: carslink.lastSuccessAt || null,
+      nextExpectedAt: nextHourlyAt(47, now),
+      lastError: carslink.lastError || checkMap.carslinkIssue || "",
+      detail: "Change-detection sync with a forced refresh at least every 12 hours.",
+    }),
+    automationItem({
+      key: "email_campaign_worker",
+      label: "Email campaign worker",
+      cadence: "Every minute",
+      status: checkMap.email ? "healthy" : "failed",
+      lastAttemptAt: email?.metadata?.worker_last_run_at || email.updated_at || email.started_at || null,
+      lastSuccessAt: String(email.status || "").toLowerCase() === "completed" ? (email.completed_at || email.updated_at || null) : null,
+      duration: durationMs(email.started_at, email.completed_at),
+      nextExpectedAt: nextMinuteAt(now),
+      lastError: email.error_summary || checkMap.emailIssue || "",
+      detail: "Production campaign queue and worker state.",
+    }),
+    automationItem({
+      key: "email_orphan_worker",
+      label: "Email orphan recovery worker",
+      cadence: "Every minute",
+      status: checkMap.email ? "healthy" : "failed",
+      nextExpectedAt: nextMinuteAt(now),
+      lastError: checkMap.emailIssue || "",
+      telemetry: "shared",
+      detail: "Shares campaign queue health until a dedicated orphan-worker heartbeat is needed.",
+    }),
+  ];
 }
 
 async function runCheck(name, task) {
@@ -370,6 +615,32 @@ export default async function handler(request, response) {
       retry_after_ms: check.retry_after_ms || null,
     }));
 
+  let automations = [];
+  try {
+    const evidence = await loadAutomationEvidence();
+    automations = buildAutomationCentre(evidence, {
+      buffer: checks[1].ok,
+      bufferIssue: checks[1]?.issue?.message || "",
+      facebook: checks[2].ok,
+      facebookIssue: checks[2]?.issue?.message || "",
+      carslink: checks[4].ok,
+      carslinkIssue: checks[4]?.issue?.message || "",
+      email: checks[5].ok && checks[6].ok,
+      emailIssue: checks[5]?.issue?.message || checks[6]?.issue?.message || "",
+    });
+  } catch (error) {
+    automations = [
+      automationItem({
+        key: "automation_centre",
+        label: "Automation Health Centre",
+        cadence: "Live",
+        status: "failed",
+        lastError: error?.message || "Could not assemble automation telemetry.",
+        detail: "Core System Health checks still continue independently.",
+      }),
+    ];
+  }
+
   return response.status(200).json({
     ok: issues.length === 0,
     status: issues.length ? "red" : "green",
@@ -384,6 +655,7 @@ export default async function handler(request, response) {
       email_campaign_worker: checks[5].ok,
       email_delivery: checks[6].ok,
     },
+    automations,
     issues,
   });
 }
