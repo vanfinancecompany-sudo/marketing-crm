@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import SingleActiveTabGate from "./components/SingleActiveTabGate.jsx";
 import OnlyVansQuickAction from "./components/OnlyVansQuickAction.jsx";
+import AutomationHealthCentre from "./components/AutomationHealthCentre.jsx";
 import "./styles.css";
 import "./utils/overnightAutoRefreshPause.js";
 import "./utils/postingVisibilityStateAutoSync.js";
@@ -53,6 +54,7 @@ function ActiveApp() {
     <>
       <App />
       <OnlyVansQuickAction />
+      <AutomationHealthCentre />
     </>
   );
 }
