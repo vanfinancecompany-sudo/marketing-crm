@@ -9,6 +9,7 @@ import {
   guardedBufferGraphql,
   isBufferRateLimitCooldownError,
 } from "../lib/bufferRuntimeGuard.js";
+import { loadCarslinkSyncStatus } from "../lib/carslinkSyncState.js";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -178,6 +179,73 @@ async function checkDuplicateReels() {
   return { ok: true };
 }
 
+async function checkCarslink() {
+  const configured = Boolean(String(process.env.CARSLINK_PRODUCTION_API_KEY || "").trim());
+  if (!configured) {
+    return {
+      ok: false,
+      issue: issue(
+        "carslink-not-configured",
+        "CarsLink stock sync",
+        "CarsLink production is not configured.",
+      ),
+    };
+  }
+
+  const status = await loadCarslinkSyncStatus();
+  const lastSuccessAt = status?.lastSuccessAt || null;
+
+  if (status?.automaticEnabled === false) {
+    return {
+      ok: false,
+      issue: issue(
+        "carslink-automatic-disabled",
+        "CarsLink stock sync",
+        "CarsLink automatic stock checking is disabled.",
+        { last_success_at: lastSuccessAt },
+      ),
+    };
+  }
+
+  if (status?.state === "error" || status?.lastError) {
+    return {
+      ok: false,
+      issue: issue(
+        "carslink-error",
+        "CarsLink stock sync",
+        status?.lastError || "CarsLink is reporting a stock sync error.",
+        { last_success_at: lastSuccessAt },
+      ),
+    };
+  }
+
+  if (ageMs(status?.lastCheckedAt) > 3 * HOUR) {
+    return {
+      ok: false,
+      issue: issue(
+        "carslink-check-stale",
+        "CarsLink stock sync",
+        "CarsLink automatic stock checking has not completed for more than 3 hours.",
+        { last_success_at: lastSuccessAt },
+      ),
+    };
+  }
+
+  if (ageMs(lastSuccessAt) > 18 * HOUR) {
+    return {
+      ok: false,
+      issue: issue(
+        "carslink-sync-stale",
+        "CarsLink stock sync",
+        "CarsLink has not completed a successful production stock sync for more than 18 hours.",
+        { last_success_at: lastSuccessAt },
+      ),
+    };
+  }
+
+  return { ok: true };
+}
+
 async function checkEmailCampaigns() {
   const supabase = supabaseClient();
   const since = new Date(Date.now() - 2 * DAY).toISOString();
@@ -287,6 +355,7 @@ export default async function handler(request, response) {
     runCheck("Buffer", checkBuffer),
     runCheck("Facebook automation", checkRecentAutomationActivity),
     runCheck("Reel duplicate protection", checkDuplicateReels),
+    runCheck("CarsLink stock sync", checkCarslink),
     runCheck("Email campaign worker", checkEmailCampaigns),
     runCheck("Email delivery", checkUnknownEmailSubmissions),
   ]);
@@ -296,7 +365,7 @@ export default async function handler(request, response) {
     .map((check, index) => ({ check, index }))
     .filter(({ check }) => check?.degraded)
     .map(({ check, index }) => ({
-      key: ["Supabase", "Buffer", "Facebook automation", "Reel duplicate protection", "Email campaign worker", "Email delivery"][index],
+      key: ["Supabase", "Buffer", "Facebook automation", "Reel duplicate protection", "CarsLink stock sync", "Email campaign worker", "Email delivery"][index],
       reason: check.reason || "temporarily_degraded",
       retry_after_ms: check.retry_after_ms || null,
     }));
@@ -311,8 +380,9 @@ export default async function handler(request, response) {
       buffer: checks[1].ok,
       facebook_automation: checks[2].ok,
       reel_duplicate_protection: checks[3].ok,
-      email_campaign_worker: checks[4].ok,
-      email_delivery: checks[5].ok,
+      carslink_stock_sync: checks[4].ok,
+      email_campaign_worker: checks[5].ok,
+      email_delivery: checks[6].ok,
     },
     issues,
   });
