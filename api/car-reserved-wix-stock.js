@@ -12,12 +12,19 @@ const MAX_ROWS_PER_COLLECTION = 2000;
 const TASK_POLL_DELAY_MS = 350;
 const TASK_MAX_POLLS = 24;
 
+export const PROTECTED_CAR_COLLECTION_ID = "CARPAGES";
+
 export const CAR_WIX_STOCK_COLLECTIONS = Object.freeze([
   { id: "CARFINANCE", label: "CAR FINANCE" },
-  { id: "CARPAGES", label: "CAR PAGES" },
+]);
+
+export const CAR_WIX_CHECK_COLLECTIONS = Object.freeze([
+  ...CAR_WIX_STOCK_COLLECTIONS,
+  { id: PROTECTED_CAR_COLLECTION_ID, label: "CAR PAGES", protected: true },
 ]);
 
 const ALLOWED_COLLECTION_IDS = new Set(CAR_WIX_STOCK_COLLECTIONS.map((collection) => collection.id));
+const READABLE_COLLECTION_IDS = new Set(CAR_WIX_CHECK_COLLECTIONS.map((collection) => collection.id));
 const RESERVED_SOURCE_STATUSES = new Set(["reserved", "sold", "deposit_taken"]);
 
 function clean(value) {
@@ -40,8 +47,19 @@ function sleep(ms) {
 
 export function assertCarWixStockCollection(collectionId) {
   const id = clean(collectionId);
+  if (id === PROTECTED_CAR_COLLECTION_ID) {
+    throw new Error("CAR PAGES is hard protected and can never be moved to draft by Stock Watch.");
+  }
   if (!ALLOWED_COLLECTION_IDS.has(id)) {
     throw new Error(`Collection ${id || "(blank)"} is not an approved car stock collection.`);
+  }
+  return id;
+}
+
+function assertCarWixReadableCollection(collectionId) {
+  const id = clean(collectionId);
+  if (!READABLE_COLLECTION_IDS.has(id)) {
+    throw new Error(`Collection ${id || "(blank)"} is not an approved car collection for Stock Watch checks.`);
   }
   return id;
 }
@@ -56,12 +74,12 @@ function itemPublishStatus(item) {
 }
 
 async function queryCollectionPage(collectionId, offset) {
-  assertCarWixStockCollection(collectionId);
+  const readableCollectionId = assertCarWixReadableCollection(collectionId);
   const response = await fetch(WIX_QUERY_URL, {
     method: "POST",
     headers: wixHeaders(),
     body: JSON.stringify({
-      dataCollectionId: collectionId,
+      dataCollectionId: readableCollectionId,
       query: { paging: { limit: PAGE_SIZE, offset } },
       consistentRead: true,
     }),
@@ -70,7 +88,7 @@ async function queryCollectionPage(collectionId, offset) {
 
   if (!response.ok) {
     const detail = clean(await response.text()).slice(0, 500);
-    throw new Error(`Could not read ${collectionId} (${response.status})${detail ? `: ${detail}` : ""}`);
+    throw new Error(`Could not read ${readableCollectionId} (${response.status})${detail ? `: ${detail}` : ""}`);
   }
 
   const payload = await response.json();
@@ -78,7 +96,7 @@ async function queryCollectionPage(collectionId, offset) {
 }
 
 async function findRegistrationInCollection(collection, registration) {
-  const collectionId = assertCarWixStockCollection(collection.id);
+  const collectionId = assertCarWixReadableCollection(collection.id);
   const matches = [];
 
   for (let offset = 0; offset < MAX_ROWS_PER_COLLECTION; offset += PAGE_SIZE) {
@@ -92,6 +110,7 @@ async function findRegistrationInCollection(collection, registration) {
         collectionLabel: collection.label,
         itemId: clean(item?.id || item?.data?._id),
         publishStatus: status || "PUBLISHED",
+        protected: collectionId === PROTECTED_CAR_COLLECTION_ID,
       });
     }
     if (page.length < PAGE_SIZE) break;
@@ -105,18 +124,20 @@ export async function previewCarWixStock(registrationValue) {
   if (!registration) throw new Error("A valid vehicle registration is required.");
 
   const settled = await Promise.allSettled(
-    CAR_WIX_STOCK_COLLECTIONS.map(async (collection) => ({
+    CAR_WIX_CHECK_COLLECTIONS.map(async (collection) => ({
       collection,
       matches: await findRegistrationInCollection(collection, registration),
     }))
   );
 
   const collections = settled.map((result, index) => {
-    const collection = CAR_WIX_STOCK_COLLECTIONS[index];
+    const collection = CAR_WIX_CHECK_COLLECTIONS[index];
+    const protectedCollection = collection.id === PROTECTED_CAR_COLLECTION_ID;
     if (result.status === "rejected") {
       return {
         id: collection.id,
         label: collection.label,
+        protected: protectedCollection,
         live: false,
         error: clean(result.reason?.message || result.reason || "Could not check collection."),
         matches: [],
@@ -125,22 +146,38 @@ export async function previewCarWixStock(registrationValue) {
     return {
       id: collection.id,
       label: collection.label,
+      protected: protectedCollection,
       live: result.value.matches.length > 0,
       error: "",
       matches: result.value.matches,
     };
   });
 
-  const matches = collections.flatMap((collection) => collection.matches);
+  const matches = collections
+    .filter((collection) => !collection.protected)
+    .flatMap((collection) => collection.matches);
+  const protectedMatches = collections
+    .filter((collection) => collection.protected)
+    .flatMap((collection) => collection.matches);
+
   return {
     ok: true,
     registration,
     collections,
     matches,
+    protectedMatches,
     liveCollectionCount: collections.filter((collection) => collection.live).length,
+    actionableLiveCollectionCount: collections.filter((collection) => collection.live && !collection.protected).length,
+    protectedCollection: {
+      id: PROTECTED_CAR_COLLECTION_ID,
+      label: "CAR PAGES",
+      protected: true,
+      message: "Hard protected: the full car advert remains live so existing Google/indexed links are preserved.",
+    },
     safety: {
       allowedCollectionIds: CAR_WIX_STOCK_COLLECTIONS.map((collection) => collection.id),
-      message: "Car Stock Watch can only move CARFINANCE and CARPAGES records to draft.",
+      protectedCollectionId: PROTECTED_CAR_COLLECTION_ID,
+      message: "Car Stock Watch can only move CARFINANCE records to draft. CARPAGES is read-only and hard protected.",
     },
   };
 }
@@ -265,7 +302,8 @@ export async function unpublishReservedCarWixStock(registrationValue) {
       vansco,
       changed: 0,
       results: [],
-      message: "This registration is not live in either approved car Wix stock collection.",
+      message: "This registration is not live in CAR FINANCE. CAR PAGES remains protected and unchanged.",
+      protectedCollection: preview.protectedCollection,
       safety: preview.safety,
     };
   }
@@ -291,10 +329,11 @@ export async function unpublishReservedCarWixStock(registrationValue) {
     changed: results.filter((result) => result.ok).length,
     results,
     failures: failures.length,
+    protectedCollection: preview.protectedCollection,
     safety: preview.safety,
     message: failures.length
-      ? `${failures.length} car collection action(s) failed. Successful collections remain in draft; review the results before retrying.`
-      : `Moved ${results.length} matching car Wix record(s) to draft.`,
+      ? `${failures.length} CAR FINANCE action(s) failed. CAR PAGES remained protected and unchanged.`
+      : `Moved ${results.length} matching CAR FINANCE record(s) to draft. CAR PAGES remained live and protected.`,
   };
 }
 
@@ -315,7 +354,7 @@ export default async function handler(request, response) {
     }
     if (action === "unpublish") {
       if (request.body?.confirmed !== true) {
-        return response.status(400).json({ ok: false, message: "Confirmation is required before moving car Wix records to draft." });
+        return response.status(400).json({ ok: false, message: "Confirmation is required before moving the CAR FINANCE record to draft." });
       }
       const result = await unpublishReservedCarWixStock(registration);
       return response.status(result.ok ? 200 : 207).json(result);
