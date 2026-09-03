@@ -97,7 +97,15 @@ import {
   replaceOnce(
 `  const showCarReservedWix = selectedPipeline === "cars" && record.displayStatus === "reserved" && Boolean(normalizeWatchRegistration(record.registration));`,
 `  const showCarReservedWix = selectedPipeline === "cars" && record.displayStatus === "reserved" && Boolean(normalizeWatchRegistration(record.registration));
-  const showRent2BuyReservedWix = selectedPipeline === "rent2buy" && record.displayStatus === "reserved" && Boolean(normalizeWatchRegistration(record.registration));`,
+  const showRent2BuyReservedWix = selectedPipeline === "rent2buy" && record.displayStatus === "reserved" && Boolean(normalizeWatchRegistration(record.registration));
+  const rentWixLiveSignatures = (rentWixPreview?.sites || [])
+    .filter((site) => !site.error)
+    .map((site) => (site.collections || [])
+      .filter((collection) => !collection.protected && !collection.error && collection.live)
+      .map((collection) => collection.id)
+      .sort()
+      .join("|"));
+  const rentWixSitesOutOfSync = rentWixLiveSignatures.length > 1 && new Set(rentWixLiveSignatures).size > 1;`,
     "WatchCard Rent2Buy reserved flag"
   );
 
@@ -113,6 +121,11 @@ import {
               </button>
             ) : (
               <>
+                {rentWixSitesOutOfSync ? (
+                  <div style={{ border: "1px solid #f59e0b", borderRadius: 8, padding: "7px 8px", background: "#fffbeb", color: "#92400e", fontSize: 10, lineHeight: 1.45, fontWeight: 800 }}>
+                    <strong>⚠ Wix sites out of sync.</strong> This registration has different live listing/category states across the two Wix sites. Review the rows below before moving anything to Draft.
+                  </div>
+                ) : null}
                 <div style={{ display: "grid", gap: 8 }}>
                   {(rentWixPreview.sites || []).map((site) => (
                     <div key={site.id} style={{ border: "1px solid #e5e7eb", borderRadius: 9, padding: 7, background: "#ffffff", display: "grid", gap: 4 }}>
@@ -159,4 +172,4 @@ import {
 }
 
 fs.writeFileSync(targetPath, source);
-console.log("Applied dual-site Rent2Buy reserved Wix Stock Watch controls with VAN PAGES hard protection.");
+console.log("Applied dual-site Rent2Buy reserved Wix Stock Watch controls with VAN PAGES hard protection and mismatch warning.");
