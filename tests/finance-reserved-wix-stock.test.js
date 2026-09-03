@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import "./car-reserved-wix-stock.test.js";
 import {
   FINANCE_WIX_STOCK_COLLECTIONS,
   PROTECTED_FINANCE_COLLECTION_ID,
@@ -54,4 +55,5 @@ test("Stock Watch UI transform exposes preview before the draft action", () => {
   assert.match(source, /Set .* live Finance record/);
   assert.match(source, /VAN FINANCE PAGES.*HARD PROTECTED/);
   assert.match(source, /record\.displayStatus === \"reserved\"/);
+  assert.match(source, /apply-car-reserved-wix-stock-watch\.mjs/);
 });
