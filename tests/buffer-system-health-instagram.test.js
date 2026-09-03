@@ -26,3 +26,13 @@ test("Automation Health Centre shows live Buffer attempt, duration and Instagram
   assert.match(health, /key: "buffer_status"/);
   assert.match(health, /label: "Buffer channel health"/);
 });
+
+test("sold or unadvertised Finance vehicles do not keep Buffer health red", () => {
+  const health = source("api/system-health.js");
+  assert.match(health, /loadActiveFinanceRegistrations/);
+  assert.match(health, /filterInactiveFinanceFailures/);
+  assert.match(health, /\.eq\("is_active", true\)/);
+  assert.match(health, /ignored_inactive_failures/);
+  assert.match(health, /ignored_inactive_registrations/);
+  assert.match(health, /no longer in active stock are ignored as non-actionable history/);
+});
