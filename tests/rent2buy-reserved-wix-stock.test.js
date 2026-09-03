@@ -29,6 +29,7 @@ const EXPECTED_STOCK_COLLECTIONS = [
 
 test("Rent2Buy Stock Watch is restricted to exactly the two traced Wix sites", () => {
   assert.deepEqual(RENT2BUY_WIX_SITES.map((site) => site.id), EXPECTED_SITE_IDS);
+  assert.deepEqual(RENT2BUY_WIX_SITES.map((site) => site.label), ["VAN FINANCE Wix", "RENT2BUY VANS Wix"]);
   assert.equal(new Set(EXPECTED_SITE_IDS).size, 2);
   assert.throws(() => assertRent2BuyWixSite("8277e317-1387-463d-91d6-b7191bc12624"), /not approved/i);
   assert.throws(() => assertRent2BuyWixSite("anything-else"), /not approved/i);
@@ -77,8 +78,8 @@ test("Rent2Buy Stock Watch UI is reserved-only, dual-site and makes VAN PAGES pr
   assert.match(source, /selectedPipeline === \"rent2buy\"/);
   assert.match(source, /record\.displayStatus === \"reserved\"/);
   assert.match(source, /Check Rent2Buy Wix collections/);
-  assert.match(source, /VAN FINANCE Wix/);
-  assert.match(source, /RENT2BUY VANS Wix/);
+  assert.match(source, /rentWixPreview\.sites/);
+  assert.match(source, /site\.label/);
   assert.match(source, /VAN PAGES is HARD PROTECTED on both Wix sites/);
   assert.match(source, /LIVE • PROTECTED/);
   assert.match(source, /Set .*live Rent2Buy listing record/);
