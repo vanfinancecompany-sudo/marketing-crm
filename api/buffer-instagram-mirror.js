@@ -139,9 +139,9 @@ async function loadInstagramPosts(channelId) {
   ));
 }
 
-async function resolveOriginalImageUrl(supabase, registration) {
+async function loadActiveFinanceVehicle(supabase, registration) {
   const wanted = normalizeRegistration(registration);
-  if (!wanted) return "";
+  if (!wanted) return null;
   const result = await supabase
     .from("facebook_adverts")
     .select("id,title,picture,is_active")
@@ -149,9 +149,13 @@ async function resolveOriginalImageUrl(supabase, registration) {
     .ilike("title", `%${registration}%`)
     .limit(25);
   if (result.error) throw result.error;
-  const vehicle = (result.data || [])
+  return (result.data || [])
     .map((row, index) => mapFinanceVehicleRow(row, index))
-    .find((item) => normalizeRegistration(item?.reg || item?.title) === wanted);
+    .find((item) => normalizeRegistration(item?.reg || item?.title) === wanted) || null;
+}
+
+async function resolveOriginalImageUrl(supabase, registration) {
+  const vehicle = await loadActiveFinanceVehicle(supabase, registration);
   return String(vehicle?.image || vehicle?.picture || "").trim();
 }
 
@@ -307,6 +311,23 @@ export default async function handler(request, response) {
     const results = [];
     for (const mirror of mirrors) {
       try {
+        const activeVehicle = await loadActiveFinanceVehicle(supabase, mirror.registration);
+        if (!activeVehicle) {
+          console.info("[buffer-instagram-mirror] inactive stock skipped", {
+            registration: mirror.registration,
+            recovery: Boolean(mirror.recovery),
+          });
+          results.push({
+            created: false,
+            skipped: true,
+            skipReason: "inactive_stock",
+            registration: mirror.registration,
+            mediaKind: mirror.mediaKind,
+            recovery: Boolean(mirror.recovery),
+          });
+          continue;
+        }
+
         const media = await resolveUsableMedia(supabase, mirror);
         const post = await createInstagramPost(channelId, {
           ...mirror,
@@ -340,7 +361,8 @@ export default async function handler(request, response) {
       }
     }
 
-    const failed = results.filter((item) => !item.created).length;
+    const failed = results.filter((item) => !item.created && !item.skipped).length;
+    const skippedInactive = results.filter((item) => item.skipped && item.skipReason === "inactive_stock").length;
     response.status(200).json({
       ok: failed === 0,
       attention: failed > 0,
@@ -349,6 +371,7 @@ export default async function handler(request, response) {
       candidates: mirrors.length,
       created: results.filter((item) => item.created).length,
       failed,
+      skippedInactive,
       recovered: results.filter((item) => item.created && item.recovery).length,
       delayMinutes: automationConfig.instagramDelayMinutes,
       results,
