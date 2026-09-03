@@ -84,7 +84,7 @@ import {
       const refreshed = await previewReservedCarWixStock(record.registration);
       setCarWixPreview(refreshed);
     } catch (error) {
-      setCarWixActionError(error?.message || "Could not move car Wix records to draft.");
+      setCarWixActionError(error?.message || "Could not move CAR FINANCE record to draft.");
     } finally {
       setCarWixDrafting(false);
     }
@@ -106,7 +106,7 @@ import {
 `        {showCarReservedWix ? (
           <div style={{ marginTop: 4, border: "1px solid #bfdbfe", borderRadius: 12, padding: 10, background: "#eff6ff", display: "grid", gap: 8 }}>
             <div style={{ fontWeight: 900, fontSize: 12, color: "#1d4ed8" }}>Car Wix stock check</div>
-            <div className="vehicle-card__meta">Read-only first: check this registration in the two approved car collections shared by Van Finance Company and Car Finance Company.</div>
+            <div className="vehicle-card__meta">Read-only first: check the CAR FINANCE listing and confirm the protected CAR PAGES full advert for this registration.</div>
             {!carWixPreview ? (
               <button className="button button--primary" type="button" onClick={checkCarWixCollections} disabled={carWixChecking || carWixDrafting}>
                 {carWixChecking ? "Checking Wix..." : "Check car Wix collections"}
@@ -115,23 +115,23 @@ import {
               <>
                 <div style={{ display: "grid", gap: 4 }}>
                   {(carWixPreview.collections || []).map((collection) => (
-                    <div key={collection.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", fontSize: 11, padding: "4px 6px", borderRadius: 7, background: collection.live ? "#dbeafe" : "#f8fafc" }}>
+                    <div key={collection.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", fontSize: 11, padding: "4px 6px", borderRadius: 7, background: collection.protected ? "#111827" : collection.live ? "#dbeafe" : "#f8fafc", color: collection.protected ? "#ffffff" : "inherit" }}>
                       <span style={{ fontWeight: 800 }}>{collection.label}</span>
-                      <span style={{ color: collection.error ? "#b45309" : collection.live ? "#1d4ed8" : "#64748b", fontWeight: 900 }}>
-                        {collection.error ? "CHECK FAILED" : collection.live ? ("LIVE" + (collection.matches?.length > 1 ? " × " + collection.matches.length : "")) : "Not live"}
+                      <span style={{ color: collection.protected ? "#ffffff" : collection.error ? "#b45309" : collection.live ? "#1d4ed8" : "#64748b", fontWeight: 900 }}>
+                        {collection.error ? "CHECK FAILED" : collection.protected ? (collection.live ? "LIVE • PROTECTED" : "PROTECTED") : collection.live ? ("LIVE" + (collection.matches?.length > 1 ? " × " + collection.matches.length : "")) : "Not live"}
                       </span>
                     </div>
                   ))}
                 </div>
                 <div style={{ borderRadius: 8, padding: "7px 8px", background: "#111827", color: "#ffffff", fontSize: 10, lineHeight: 1.4 }}>
-                  <strong>CAR-ONLY SAFETY.</strong> This action can only change <strong>CARFINANCE</strong> and <strong>CARPAGES</strong>. Van Finance van collections and Rent2Buy collections are outside the allowlist.
+                  <strong>CAR PAGES is HARD PROTECTED.</strong> It contains the full vehicle advert and stays live to preserve existing Google/indexed links. This action can only move <strong>CAR FINANCE</strong> to Draft.
                 </div>
                 {(carWixPreview.matches || []).length > 0 ? (
                   <button className="button button--primary" type="button" onClick={moveCarWixMatchesToDraft} disabled={carWixDrafting || carWixChecking}>
-                    {carWixDrafting ? "Moving to Draft..." : ("Set " + (carWixPreview.matches || []).length + " live car record" + ((carWixPreview.matches || []).length === 1 ? "" : "s") + " to Draft")}
+                    {carWixDrafting ? "Moving CAR FINANCE to Draft..." : ("Set " + (carWixPreview.matches || []).length + " CAR FINANCE record" + ((carWixPreview.matches || []).length === 1 ? "" : "s") + " to Draft")}
                   </button>
                 ) : (
-                  <div className="vehicle-card__meta">No live matches remain in the approved car stock collections.</div>
+                  <div className="vehicle-card__meta">No live CAR FINANCE match remains. CAR PAGES stays protected.</div>
                 )}
                 <button className="button button--ghost" type="button" onClick={checkCarWixCollections} disabled={carWixChecking || carWixDrafting}>
                   {carWixChecking ? "Rechecking..." : "Recheck car collections"}
@@ -140,7 +140,7 @@ import {
             )}
             {carWixDraftResult ? (
               <div style={{ borderRadius: 8, padding: "7px 8px", background: carWixDraftResult.ok ? "#ecfdf5" : "#fff7ed", color: carWixDraftResult.ok ? "#047857" : "#9a3412", fontSize: 10, lineHeight: 1.45, fontWeight: 800 }}>
-                {carWixDraftResult.message || ((carWixDraftResult.changed || 0) + " car record(s) moved to draft.")}
+                {carWixDraftResult.message || ((carWixDraftResult.changed || 0) + " CAR FINANCE record(s) moved to draft. CAR PAGES remained protected.")}
                 {(carWixDraftResult.results || []).length ? (" " + carWixDraftResult.results.map((item) => item.collectionLabel + ": " + (item.ok ? "Draft ✓" : "Failed")).join(" · ")) : ""}
               </div>
             ) : null}
@@ -153,4 +153,4 @@ import {
 }
 
 fs.writeFileSync(targetPath, source);
-console.log("Applied Car reserved Wix Stock Watch controls.");
+console.log("Applied Car reserved Wix Stock Watch controls with CAR PAGES hard protection.");
