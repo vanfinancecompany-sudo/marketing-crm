@@ -158,3 +158,4 @@ import {
 
 fs.writeFileSync(targetPath, source);
 console.log("Applied Finance reserved Wix Stock Watch controls.");
+await import("./apply-car-reserved-wix-stock-watch.mjs");
