@@ -1,8 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
+import { loadBufferAutomationConfig } from "../lib/bufferAutomationConfig.js";
+import { extractBufferRegistration } from "../lib/bufferAutomation.js";
 import {
   BUFFER_API_URL,
-  BUFFER_AUTOMATION_POSTS_QUERY,
   BUFFER_FACEBOOK_CHANNELS,
+  BUFFER_ORGANIZATION_ID,
   parseBufferAutomationPostsPayload,
 } from "../lib/bufferPublishing.js";
 import {
@@ -13,6 +15,43 @@ import { loadCarslinkSyncStatus } from "../lib/carslinkSyncState.js";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
+
+function bufferHealthPostsQuery(channelIds) {
+  const ids = [...new Set((channelIds || []).map((value) => String(value || "").trim()).filter(Boolean))];
+  const channelList = ids.map((value) => JSON.stringify(value)).join(", ");
+  return `
+    query GetSystemHealthBufferPosts {
+      posts(
+        first: 100
+        input: {
+          organizationId: ${JSON.stringify(BUFFER_ORGANIZATION_ID)}
+          sort: [{ field: createdAt, direction: desc }]
+          filter: {
+            status: [draft, scheduled, sending, sent, error]
+            channelIds: [${channelList}]
+          }
+        }
+      ) {
+        edges {
+          node {
+            id
+            text
+            status
+            schedulingType
+            createdAt
+            dueAt
+            sentAt
+            channelId
+            metadata {
+              ... on FacebookPostMetadata { type }
+            }
+            assets { id mimeType source }
+          }
+        }
+      }
+    }
+  `;
+}
 
 function supabaseClient() {
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -107,21 +146,62 @@ async function checkSupabase() {
   return { ok: true };
 }
 
+function bufferFailureLabel(post, channelLabels) {
+  const channel = channelLabels.get(String(post?.channelId || "")) || "Buffer channel";
+  const registration = extractBufferRegistration(post?.text);
+  return `${channel}${registration ? ` ${registration}` : ""}`;
+}
+
 async function checkBuffer() {
+  const startedAt = Date.now();
+  const checkedAt = () => new Date().toISOString();
   const token = String(process.env.BUFFER_API_KEY || "").trim();
   if (!token) throw new Error("Buffer API key is not configured.");
+
+  const config = await loadBufferAutomationConfig({ useDailyTargets: false });
+  const instagramEnabled = config?.vanFinanceInstagramEnabled !== false;
+  const instagramChannelId = String(config?.vanFinanceInstagramChannelId || "").trim();
+  if (instagramEnabled && !instagramChannelId) {
+    const timestamp = checkedAt();
+    return {
+      ok: false,
+      facebook_ok: true,
+      instagram_ok: false,
+      instagram_issue: "Van Finance Instagram is enabled but its Buffer channel ID has not been persisted, so failures cannot be monitored safely.",
+      checked_at: timestamp,
+      duration_ms: Date.now() - startedAt,
+      issue: issue(
+        "buffer-instagram-monitoring",
+        "Buffer Instagram monitoring",
+        "Van Finance Instagram is enabled but its Buffer channel ID has not been persisted, so failures cannot be monitored safely.",
+      ),
+    };
+  }
+
+  const financeFacebook = BUFFER_FACEBOOK_CHANNELS["Van Finance Facebook"];
+  const rentFacebook = BUFFER_FACEBOOK_CHANNELS["Rent2Buy Facebook"];
+  const channelIds = [financeFacebook, rentFacebook, instagramEnabled ? instagramChannelId : ""].filter(Boolean);
+  const channelLabels = new Map([
+    [financeFacebook, "Van Finance Facebook"],
+    [rentFacebook, "Rent2Buy Facebook"],
+    ...(instagramEnabled && instagramChannelId ? [[instagramChannelId, "Van Finance Instagram"]] : []),
+  ]);
 
   let payload;
   try {
     payload = await guardedBufferGraphql({
       url: BUFFER_API_URL,
       token,
-      query: BUFFER_AUTOMATION_POSTS_QUERY,
+      query: bufferHealthPostsQuery(channelIds),
     });
   } catch (error) {
     if (isBufferRateLimitCooldownError(error)) {
       return {
         ok: true,
+        facebook_ok: true,
+        instagram_ok: true,
+        checked_at: checkedAt(),
+        duration_ms: Date.now() - startedAt,
         degraded: true,
         reason: "buffer_rate_limit_cooldown",
         retry_after_ms: error.retryAfterMs,
@@ -131,24 +211,36 @@ async function checkBuffer() {
   }
 
   const posts = parseBufferAutomationPostsPayload(payload);
-  const channelIds = new Set([
-    BUFFER_FACEBOOK_CHANNELS["Van Finance Facebook"],
-    BUFFER_FACEBOOK_CHANNELS["Rent2Buy Facebook"],
-  ].filter(Boolean));
-  const relevant = posts.filter((post) => channelIds.has(post?.channelId));
-  const failed = relevant.filter((post) => ["failed", "error"].includes(String(post?.status || "").toLowerCase()));
+  const failed = posts.filter((post) => ["failed", "error"].includes(String(post?.status || "").toLowerCase()));
+  const facebookFailed = failed.filter((post) => post?.channelId === financeFacebook || post?.channelId === rentFacebook);
+  const instagramFailed = instagramEnabled
+    ? failed.filter((post) => post?.channelId === instagramChannelId)
+    : [];
+  const timestamp = checkedAt();
+  const base = {
+    facebook_ok: facebookFailed.length === 0,
+    instagram_ok: instagramFailed.length === 0,
+    instagram_issue: instagramFailed.length
+      ? `${instagramFailed.length} Van Finance Instagram post${instagramFailed.length === 1 ? " is" : "s are"} currently marked failed in Buffer.`
+      : "",
+    checked_at: timestamp,
+    duration_ms: Date.now() - startedAt,
+  };
 
   if (failed.length) {
+    const descriptions = failed.slice(0, 5).map((post) => bufferFailureLabel(post, channelLabels));
+    const extra = failed.length > descriptions.length ? `, plus ${failed.length - descriptions.length} more` : "";
     return {
+      ...base,
       ok: false,
       issue: issue(
         "buffer-publishing",
         "Buffer publishing",
-        `${failed.length} Facebook post${failed.length === 1 ? " is" : "s are"} currently marked failed in Buffer.`,
+        `${failed.length} Buffer publish failure${failed.length === 1 ? " is" : "s are"} currently marked failed: ${descriptions.join(", ")}${extra}.`,
       ),
     };
   }
-  return { ok: true };
+  return { ...base, ok: true };
 }
 
 async function checkRecentAutomationActivity() {
@@ -494,11 +586,16 @@ function buildAutomationCentre(evidence, checkMap) {
       key: "instagram_mirror",
       label: "Instagram mirror",
       cadence: "Hourly at :14",
-      status: instagramLast ? "healthy" : "scheduled",
-      lastSuccessAt: instagramLast,
+      status: checkMap.instagram ? "healthy" : "failed",
+      lastAttemptAt: checkMap.bufferCheckedAt || null,
+      lastSuccessAt: checkMap.instagram ? (instagramLast || checkMap.bufferCheckedAt || null) : instagramLast,
+      duration: checkMap.bufferDuration,
       nextExpectedAt: nextHourlyAt(14, now),
-      telemetry: instagramLast ? "live" : "schedule_only",
-      detail: instagramLast ? "Recent Instagram activity found." : "Schedule is monitored; this worker does not yet emit its own heartbeat record.",
+      lastError: checkMap.instagramIssue || "",
+      telemetry: "live",
+      detail: checkMap.instagram
+        ? "Van Finance Instagram Buffer outcomes are checked live; failed mirrors are surfaced here."
+        : "Buffer is reporting a Van Finance Instagram publishing or monitoring failure.",
     }),
     automationItem({
       key: "editorial_automation",
@@ -534,12 +631,15 @@ function buildAutomationCentre(evidence, checkMap) {
     }),
     automationItem({
       key: "buffer_status",
-      label: "Buffer publish-status reconciliation",
-      cadence: "Hourly at :35",
+      label: "Buffer channel health",
+      cadence: "Live health check",
       status: checkMap.buffer ? "healthy" : "failed",
+      lastAttemptAt: checkMap.bufferCheckedAt || null,
+      lastSuccessAt: checkMap.buffer ? (checkMap.bufferCheckedAt || null) : null,
+      duration: checkMap.bufferDuration,
       nextExpectedAt: nextHourlyAt(35, now),
       lastError: checkMap.bufferIssue || "",
-      detail: "Checks Buffer publishing outcomes and reconciles delivery state.",
+      detail: "Checks current Facebook and Instagram Buffer outcomes; publish-status reconciliation still runs hourly at :35.",
     }),
     automationItem({
       key: "carslink_stock_sync",
@@ -621,6 +721,10 @@ export default async function handler(request, response) {
     automations = buildAutomationCentre(evidence, {
       buffer: checks[1].ok,
       bufferIssue: checks[1]?.issue?.message || "",
+      bufferCheckedAt: checks[1]?.checked_at || null,
+      bufferDuration: checks[1]?.duration_ms ?? null,
+      instagram: checks[1]?.instagram_ok !== false,
+      instagramIssue: checks[1]?.instagram_issue || "",
       facebook: checks[2].ok,
       facebookIssue: checks[2]?.issue?.message || "",
       carslink: checks[4].ok,
@@ -649,6 +753,7 @@ export default async function handler(request, response) {
     checks: {
       supabase: checks[0].ok,
       buffer: checks[1].ok,
+      instagram_mirror: checks[1]?.instagram_ok !== false,
       facebook_automation: checks[2].ok,
       reel_duplicate_protection: checks[3].ok,
       carslink_stock_sync: checks[4].ok,

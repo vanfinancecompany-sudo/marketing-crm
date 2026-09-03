@@ -101,7 +101,7 @@ test("Instagram caption keeps the advert but removes the dead vehicle URL", () =
   assert.match(caption, /VIEW THIS VAN & APPLY: VANFINANCECOMPANY\.CO\.UK$/);
 });
 
-test("Instagram mirrors reuse Facebook media ten minutes later and do not duplicate", () => {
+test("Instagram mirrors select Facebook media ten minutes later and do not duplicate", () => {
   const facebookChannelId = "finance-facebook";
   const facebookPosts = [
     imagePost({ id: "fb-image", channelId: facebookChannelId, dueAt: "2026-08-22T13:00:00.000Z" }),
@@ -135,6 +135,63 @@ test("Instagram mirrors reuse Facebook media ten minutes later and do not duplic
   });
   assert.equal(remaining.length, 1);
   assert.equal(remaining[0].registration, "CD34EFG");
+});
+
+test("A recent failed Instagram mirror is requeued once after Facebook succeeds", () => {
+  const facebookChannelId = "finance-facebook";
+  const facebook = imagePost({
+    id: "fb-sent",
+    channelId: facebookChannelId,
+    dueAt: "2026-09-03T08:16:00.000Z",
+    registration: "YX73XWA",
+    status: "sent",
+  });
+  const failedInstagram = {
+    ...facebook,
+    id: "ig-error",
+    channelId: "instagram-channel",
+    dueAt: "2026-09-03T08:26:00.000Z",
+    status: "error",
+  };
+
+  const mirrors = selectVanFinanceInstagramMirrors({
+    facebookPosts: [facebook],
+    instagramPosts: [failedInstagram],
+    facebookChannelId,
+    delayMinutes: 10,
+    now: new Date("2026-09-03T08:40:00.000Z"),
+  });
+  assert.equal(mirrors.length, 1);
+  assert.equal(mirrors[0].registration, "YX73XWA");
+  assert.equal(mirrors[0].recovery, true);
+  assert.equal(mirrors[0].dueAt, "2026-09-03T08:45:00.000Z");
+
+  const activeReplacement = {
+    ...facebook,
+    id: "ig-replacement",
+    channelId: "instagram-channel",
+    dueAt: "2026-09-03T08:45:00.000Z",
+    status: "scheduled",
+  };
+  const noDuplicate = selectVanFinanceInstagramMirrors({
+    facebookPosts: [facebook],
+    instagramPosts: [failedInstagram, activeReplacement],
+    facebookChannelId,
+    delayMinutes: 10,
+    now: new Date("2026-09-03T08:41:00.000Z"),
+  });
+  assert.equal(noDuplicate.length, 0);
+});
+
+test("Instagram worker resolves original media and preflights it before Buffer", () => {
+  const worker = source("api/buffer-instagram-mirror.js");
+  assert.match(worker, /resolveOriginalImageUrl/);
+  assert.match(worker, /resolveOriginalReelUrl/);
+  assert.match(worker, /preflightPublicMedia/);
+  assert.match(worker, /mediaSource: media\.source/);
+  assert.match(worker, /original_crm/);
+  assert.match(worker, /console\.error\("\[buffer-instagram-mirror\] Instagram item failed"/);
+  assert.match(worker, /ok: failed === 0/);
 });
 
 test("Instagram delay helper preserves ISO scheduling", () => {
