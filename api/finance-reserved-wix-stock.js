@@ -1,0 +1,288 @@
+import {
+  CACHE_TABLE,
+  getSupabaseServiceAdmin,
+  normalizeRegistration,
+} from "./_vansco-cache-utils.js";
+
+const WIX_QUERY_URL = "https://www.wixapis.com/wix-data/v2/items/query";
+const WIX_UNPUBLISH_URL = "https://www.wixapis.com/wix-data/v2/items/unpublish";
+const DEFAULT_WIX_SITE_ID = "85f11c52-ee54-495d-aaec-a351831709b5";
+const PAGE_SIZE = 100;
+const MAX_ROWS_PER_COLLECTION = 2000;
+
+export const PROTECTED_FINANCE_COLLECTION_ID = "VANFINANCEPAGES";
+
+export const FINANCE_WIX_STOCK_COLLECTIONS = Object.freeze([
+  { id: "VANFINANCE-ALLVANS", label: "ALL VANS" },
+  { id: "VANFINANCE-MWB", label: "MWB" },
+  { id: "VANFINANCE-PICKUPS", label: "PICKUPS" },
+  { id: "VANFINANCE-SMALLVANS", label: "SMALL" },
+  { id: "VANFINANCE-TIPPERSDROPSIDEL", label: "TIPPER" },
+  { id: "VANFINANCE-LWBVANS", label: "LWB" },
+  { id: "VANFINANCE-ELECTRIC", label: "ELECTRIC" },
+  { id: "FINANCE-CREWVANS", label: "CREW" },
+  { id: "AUTOMATIC", label: "AUTOMATIC" },
+]);
+
+const ALLOWED_COLLECTION_IDS = new Set(FINANCE_WIX_STOCK_COLLECTIONS.map((collection) => collection.id));
+const RESERVED_SOURCE_STATUSES = new Set(["reserved", "sold", "deposit_taken"]);
+
+function clean(value) {
+  return String(value ?? "").trim();
+}
+
+function wixHeaders() {
+  const headers = {
+    "Content-Type": "application/json",
+    "wix-site-id": clean(process.env.WIX_FINANCE_SITE_ID) || DEFAULT_WIX_SITE_ID,
+  };
+  const apiKey = clean(process.env.WIX_FINANCE_API_KEY || process.env.WIX_API_KEY);
+  if (apiKey) headers.Authorization = apiKey;
+  return headers;
+}
+
+export function assertFinanceWixStockCollection(collectionId) {
+  const id = clean(collectionId);
+  if (id === PROTECTED_FINANCE_COLLECTION_ID) {
+    throw new Error("VAN FINANCE PAGES is protected and can never be moved to draft by Stock Watch.");
+  }
+  if (!ALLOWED_COLLECTION_IDS.has(id)) {
+    throw new Error(`Collection ${id || "(blank)"} is not an approved Van Finance stock collection.`);
+  }
+  return id;
+}
+
+function itemRegistration(item) {
+  const data = item?.data || {};
+  return normalizeRegistration(data.title || data.registration || data.reg || "");
+}
+
+function itemPublishStatus(item) {
+  return clean(item?.data?._publishStatus || item?._publishStatus || "").toUpperCase();
+}
+
+async function queryCollectionPage(collectionId, offset) {
+  assertFinanceWixStockCollection(collectionId);
+  const response = await fetch(WIX_QUERY_URL, {
+    method: "POST",
+    headers: wixHeaders(),
+    body: JSON.stringify({
+      dataCollectionId: collectionId,
+      query: { paging: { limit: PAGE_SIZE, offset } },
+      consistentRead: true,
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const detail = clean(await response.text()).slice(0, 500);
+    throw new Error(`Could not read ${collectionId} (${response.status})${detail ? `: ${detail}` : ""}`);
+  }
+
+  const payload = await response.json();
+  return Array.isArray(payload?.dataItems) ? payload.dataItems : [];
+}
+
+async function findRegistrationInCollection(collection, registration) {
+  const collectionId = assertFinanceWixStockCollection(collection.id);
+  const matches = [];
+
+  for (let offset = 0; offset < MAX_ROWS_PER_COLLECTION; offset += PAGE_SIZE) {
+    const page = await queryCollectionPage(collectionId, offset);
+    for (const item of page) {
+      if (itemRegistration(item) !== registration) continue;
+      const status = itemPublishStatus(item);
+      if (status && status !== "PUBLISHED") continue;
+      matches.push({
+        collectionId,
+        collectionLabel: collection.label,
+        itemId: clean(item?.id || item?.data?._id),
+        publishStatus: status || "PUBLISHED",
+      });
+    }
+    if (page.length < PAGE_SIZE) break;
+  }
+
+  return matches.filter((match) => match.itemId);
+}
+
+export async function previewFinanceWixStock(registrationValue) {
+  const registration = normalizeRegistration(registrationValue);
+  if (!registration) throw new Error("A valid vehicle registration is required.");
+
+  const settled = await Promise.allSettled(
+    FINANCE_WIX_STOCK_COLLECTIONS.map(async (collection) => ({
+      collection,
+      matches: await findRegistrationInCollection(collection, registration),
+    }))
+  );
+
+  const collections = settled.map((result, index) => {
+    const collection = FINANCE_WIX_STOCK_COLLECTIONS[index];
+    if (result.status === "rejected") {
+      return {
+        id: collection.id,
+        label: collection.label,
+        live: false,
+        error: clean(result.reason?.message || result.reason || "Could not check collection."),
+        matches: [],
+      };
+    }
+    return {
+      id: collection.id,
+      label: collection.label,
+      live: result.value.matches.length > 0,
+      error: "",
+      matches: result.value.matches,
+    };
+  });
+
+  const matches = collections.flatMap((collection) => collection.matches);
+  return {
+    ok: true,
+    registration,
+    collections,
+    matches,
+    liveCollectionCount: collections.filter((collection) => collection.live).length,
+    protectedCollection: {
+      id: PROTECTED_FINANCE_COLLECTION_ID,
+      label: "VAN FINANCE PAGES",
+      protected: true,
+      message: "Hard protected: Stock Watch never moves this collection to draft.",
+    },
+  };
+}
+
+async function verifyReservedInVansco(registration) {
+  const supabase = getSupabaseServiceAdmin();
+  const { data, error } = await supabase
+    .from(CACHE_TABLE)
+    .select("registration,source_status,is_currently_on_vansco,last_successfully_checked_at,updated_at")
+    .eq("registration", registration)
+    .order("last_successfully_checked_at", { ascending: false, nullsFirst: false })
+    .limit(10);
+
+  if (error) throw new Error(`Could not verify Vansco status: ${error.message || error}`);
+  const latest = (data || []).find((row) => row?.is_currently_on_vansco !== false) || (data || [])[0] || null;
+  const sourceStatus = clean(latest?.source_status).toLowerCase();
+  if (!latest || !RESERVED_SOURCE_STATUSES.has(sourceStatus)) {
+    throw new Error("Safety stop: Vansco no longer shows this registration as Reserved/Sold/Deposit Taken. Nothing was changed in Wix.");
+  }
+  return {
+    registration,
+    sourceStatus,
+    checkedAt: latest.last_successfully_checked_at || latest.updated_at || "",
+  };
+}
+
+async function unpublishMatch(match) {
+  const collectionId = assertFinanceWixStockCollection(match.collectionId);
+  const itemId = clean(match.itemId);
+  if (!itemId) throw new Error(`Missing Wix item ID for ${match.collectionLabel || collectionId}.`);
+
+  const response = await fetch(WIX_UNPUBLISH_URL, {
+    method: "POST",
+    headers: wixHeaders(),
+    body: JSON.stringify({
+      dataCollectionId: collectionId,
+      dataItemId: itemId,
+      copyToDraft: true,
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const detail = clean(await response.text()).slice(0, 500);
+    throw new Error(`${match.collectionLabel || collectionId} could not be moved to draft (${response.status})${detail ? `: ${detail}` : ""}`);
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  return {
+    collectionId,
+    collectionLabel: match.collectionLabel || collectionId,
+    itemId,
+    draftItemId: clean(payload?.dataItem?.id || itemId),
+  };
+}
+
+export async function unpublishReservedFinanceWixStock(registrationValue) {
+  const registration = normalizeRegistration(registrationValue);
+  if (!registration) throw new Error("A valid vehicle registration is required.");
+
+  const vansco = await verifyReservedInVansco(registration);
+  const preview = await previewFinanceWixStock(registration);
+  if (!preview.matches.length) {
+    return {
+      ok: true,
+      registration,
+      vansco,
+      changed: 0,
+      results: [],
+      message: "This registration is not live in any approved Van Finance Wix stock collection.",
+      protectedCollection: preview.protectedCollection,
+    };
+  }
+
+  const settled = await Promise.allSettled(preview.matches.map(unpublishMatch));
+  const results = settled.map((result, index) => {
+    const match = preview.matches[index];
+    if (result.status === "fulfilled") return { ok: true, ...result.value };
+    return {
+      ok: false,
+      collectionId: match.collectionId,
+      collectionLabel: match.collectionLabel,
+      itemId: match.itemId,
+      error: clean(result.reason?.message || result.reason || "Could not move item to draft."),
+    };
+  });
+  const failures = results.filter((result) => !result.ok);
+
+  return {
+    ok: failures.length === 0,
+    registration,
+    vansco,
+    changed: results.filter((result) => result.ok).length,
+    results,
+    failures: failures.length,
+    protectedCollection: preview.protectedCollection,
+    message: failures.length
+      ? `${failures.length} collection action(s) failed. Successful collections remain in draft; review the results before retrying.`
+      : `Moved ${results.length} matching Van Finance Wix record(s) to draft.`,
+  };
+}
+
+export default async function handler(request, response) {
+  response.setHeader("Cache-Control", "no-store, max-age=0");
+  if (request.method !== "POST") {
+    response.setHeader("Allow", "POST");
+    return response.status(405).json({ ok: false, message: "Method not allowed." });
+  }
+
+  const action = clean(request.body?.action).toLowerCase();
+  const registration = request.body?.registration;
+
+  try {
+    if (action === "preview") {
+      const result = await previewFinanceWixStock(registration);
+      return response.status(200).json(result);
+    }
+    if (action === "unpublish") {
+      if (request.body?.confirmed !== true) {
+        return response.status(400).json({ ok: false, message: "Confirmation is required before moving Wix records to draft." });
+      }
+      const result = await unpublishReservedFinanceWixStock(registration);
+      return response.status(result.ok ? 200 : 207).json(result);
+    }
+    return response.status(400).json({ ok: false, message: "Unknown action." });
+  } catch (error) {
+    console.error("FINANCE RESERVED WIX STOCK ACTION ERROR", {
+      action,
+      registration: normalizeRegistration(registration),
+      message: clean(error?.message).slice(0, 1000),
+    });
+    return response.status(500).json({
+      ok: false,
+      message: error?.message || "Could not check Van Finance Wix stock.",
+    });
+  }
+}
