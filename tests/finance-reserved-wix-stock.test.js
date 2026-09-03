@@ -38,11 +38,14 @@ test("arbitrary and Rent2Buy collection IDs are rejected", () => {
   assert.throws(() => assertFinanceWixStockCollection("SOMETHING-ELSE"), /not an approved/i);
 });
 
-test("server endpoint has no CMS delete operation and always keeps a draft copy", () => {
+test("server endpoint uses legacy Publish-plugin draft status task and never deletes CMS records", () => {
   const source = fs.readFileSync(new URL("../api/finance-reserved-wix-stock.js", import.meta.url), "utf8");
   assert.doesNotMatch(source, /method:\s*["']DELETE["']/i);
-  assert.match(source, /copyToDraft:\s*true/);
-  assert.match(source, /WIX_UNPUBLISH_URL/);
+  assert.doesNotMatch(source, /wix-data\/v2\/items\/unpublish/i);
+  assert.match(source, /type:\s*["']UPDATE_PUBLISH_STATUS["']/);
+  assert.match(source, /operation:\s*["']SET_DRAFT_STATUS["']/);
+  assert.match(source, /environment:\s*["']LIVE["']/);
+  assert.match(source, /_id:\s*\{\s*\$eq:\s*itemId\s*\}/);
 });
 
 test("Stock Watch UI transform exposes preview before the draft action", () => {
