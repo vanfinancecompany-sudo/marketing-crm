@@ -194,6 +194,15 @@ test("Instagram worker resolves original media and preflights it before Buffer",
   assert.match(worker, /ok: failed === 0/);
 });
 
+test("Instagram worker skips sold or unadvertised Finance stock instead of recovering it", () => {
+  const worker = source("api/buffer-instagram-mirror.js");
+  assert.match(worker, /loadActiveFinanceVehicle/);
+  assert.match(worker, /\[buffer-instagram-mirror\] inactive stock skipped/);
+  assert.match(worker, /skipReason: "inactive_stock"/);
+  assert.match(worker, /!item\.created && !item\.skipped/);
+  assert.match(worker, /skippedInactive/);
+});
+
 test("Instagram delay helper preserves ISO scheduling", () => {
   assert.equal(
     shiftBufferDueAt("2026-08-22T13:38:00.000Z", 10),
