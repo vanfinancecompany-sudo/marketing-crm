@@ -13,6 +13,14 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/sync-finance-stock?auto=true",
+      "schedule": "1 * * * *"
+    },
+    {
+      "path": "/api/sync-rent2buy-stock?auto=true",
+      "schedule": "3 * * * *"
+    },
+    {
       "path": "/api/buffer-facebook-automation-cron",
       "schedule": "5 * * * *"
     },
@@ -83,6 +91,12 @@
     },
     "api/marketing-ai-visibility-google.js": {
       "maxDuration": 300
+    },
+    "api/sync-finance-stock.js": {
+      "maxDuration": 120
+    },
+    "api/sync-rent2buy-stock.js": {
+      "maxDuration": 120
     },
     "api/carslink-auto-sync.js": {
       "maxDuration": 300
