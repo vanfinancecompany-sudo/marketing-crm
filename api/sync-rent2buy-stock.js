@@ -1,9 +1,9 @@
 import {
   RENT2BUY_ALL_VANS_COLLECTION_ID,
-  RENT2BUY_WIX_SITE_ID,
 } from "../lib/rent2buyMonthlyPriceSync.js";
 
 const WIX_QUERY_URL = "https://www.wixapis.com/wix-data/v2/items/query";
+const LIVE_RENT2BUY_STOCK_SITE_ID = "85f11c52-ee54-495d-aaec-a351831709b5";
 const DEFAULT_SYNC_ENDPOINT = "https://crm-roan-rho.vercel.app/api/sync-rent-vehicles";
 const PAGE_SIZE = 100;
 const MAX_ROWS = 2000;
@@ -35,9 +35,12 @@ function updatedMillis(data = {}) {
 function wixHeaders() {
   const headers = {
     "Content-Type": "application/json",
-    "wix-site-id": clean(process.env.WIX_RENT2BUY_SITE_ID) || RENT2BUY_WIX_SITE_ID,
+    "wix-site-id":
+      clean(process.env.WIX_RENT2BUY_STOCK_SITE_ID) ||
+      clean(process.env.WIX_FINANCE_SITE_ID) ||
+      LIVE_RENT2BUY_STOCK_SITE_ID,
   };
-  const apiKey = clean(process.env.WIX_API_KEY);
+  const apiKey = clean(process.env.WIX_FINANCE_API_KEY || process.env.WIX_API_KEY);
   if (apiKey) headers.Authorization = apiKey;
   return headers;
 }
@@ -182,7 +185,7 @@ export default async function handler(request, response) {
 
     return response.status(200).json({
       ok: true,
-      source: "wix-cms",
+      source: "live-rent2buy-wix-cms",
       collection:
         clean(process.env.WIX_RENT2BUY_STOCK_COLLECTION) || RENT2BUY_ALL_VANS_COLLECTION_ID,
       wixRows,
