@@ -122,7 +122,7 @@ import {
                     <div key={collection.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", fontSize: 11, padding: "4px 6px", borderRadius: 7, background: collection.live ? "#fee2e2" : "#f8fafc" }}>
                       <span style={{ fontWeight: 800 }}>{collection.label}</span>
                       <span style={{ color: collection.error ? "#b45309" : collection.live ? "#b91c1c" : "#64748b", fontWeight: 900 }}>
-                        {collection.error ? "CHECK FAILED" : collection.live ? `LIVE${collection.matches?.length > 1 ? ` × ${collection.matches.length}` : ""}` : "Not live"}
+                        {collection.error ? "CHECK FAILED" : collection.live ? ("LIVE" + (collection.matches?.length > 1 ? " × " + collection.matches.length : "")) : "Not live"}
                       </span>
                     </div>
                   ))}
@@ -132,7 +132,7 @@ import {
                 </div>
                 {(wixPreview.matches || []).length > 0 ? (
                   <button className="button button--primary" type="button" onClick={moveFinanceWixMatchesToDraft} disabled={wixDrafting || wixChecking}>
-                    {wixDrafting ? "Moving to Draft..." : `Set ${(wixPreview.matches || []).length} live Finance record${(wixPreview.matches || []).length === 1 ? "" : "s"} to Draft`}
+                    {wixDrafting ? "Moving to Draft..." : ("Set " + (wixPreview.matches || []).length + " live Finance record" + ((wixPreview.matches || []).length === 1 ? "" : "s") + " to Draft")}
                   </button>
                 ) : (
                   <div className="vehicle-card__meta">No live matches remain in the approved Finance stock collections.</div>
@@ -144,8 +144,8 @@ import {
             )}
             {wixDraftResult ? (
               <div style={{ borderRadius: 8, padding: "7px 8px", background: wixDraftResult.ok ? "#ecfdf5" : "#fff7ed", color: wixDraftResult.ok ? "#047857" : "#9a3412", fontSize: 10, lineHeight: 1.45, fontWeight: 800 }}>
-                {wixDraftResult.message || `${wixDraftResult.changed || 0} record(s) moved to draft.`}
-                {(wixDraftResult.results || []).length ? ` ${wixDraftResult.results.map((item) => `${item.collectionLabel}: ${item.ok ? "Draft ✓" : "Failed"}`).join(" · ")}` : ""}
+                {wixDraftResult.message || ((wixDraftResult.changed || 0) + " record(s) moved to draft.")}
+                {(wixDraftResult.results || []).length ? (" " + wixDraftResult.results.map((item) => item.collectionLabel + ": " + (item.ok ? "Draft ✓" : "Failed")).join(" · ")) : ""}
               </div>
             ) : null}
             {wixActionError ? <div style={{ borderRadius: 8, padding: "7px 8px", background: "#fff7ed", color: "#9a3412", fontSize: 10, lineHeight: 1.45, fontWeight: 800 }}>{wixActionError}</div> : null}
