@@ -152,6 +152,36 @@ function bufferFailureLabel(post, channelLabels) {
   return `${channel}${registration ? ` ${registration}` : ""}`;
 }
 
+async function loadActiveFinanceRegistrations() {
+  const supabase = supabaseClient();
+  const result = await supabase
+    .from("facebook_adverts")
+    .select("title")
+    .eq("is_active", true)
+    .limit(5000);
+  if (result.error) throw result.error;
+  return new Set((result.data || [])
+    .map((row) => normaliseRegistration(extractBufferRegistration(row?.title) || row?.title))
+    .filter(Boolean));
+}
+
+async function filterInactiveFinanceFailures(failedPosts, financeChannelIds) {
+  const relevantChannels = new Set((financeChannelIds || []).filter(Boolean));
+  const candidates = (failedPosts || []).filter((post) => relevantChannels.has(post?.channelId));
+  if (!candidates.length) return { actionable: failedPosts || [], ignored: [] };
+
+  const activeRegistrations = await loadActiveFinanceRegistrations();
+  const ignored = [];
+  const actionable = (failedPosts || []).filter((post) => {
+    if (!relevantChannels.has(post?.channelId)) return true;
+    const registration = normaliseRegistration(extractBufferRegistration(post?.text));
+    if (!registration || activeRegistrations.has(registration)) return true;
+    ignored.push(post);
+    return false;
+  });
+  return { actionable, ignored };
+}
+
 async function checkBuffer() {
   const startedAt = Date.now();
   const checkedAt = () => new Date().toISOString();
@@ -211,7 +241,19 @@ async function checkBuffer() {
   }
 
   const posts = parseBufferAutomationPostsPayload(payload);
-  const failed = posts.filter((post) => ["failed", "error"].includes(String(post?.status || "").toLowerCase()));
+  const rawFailed = posts.filter((post) => ["failed", "error"].includes(String(post?.status || "").toLowerCase()));
+  let failed = rawFailed;
+  let ignoredInactive = [];
+  try {
+    const filtered = await filterInactiveFinanceFailures(rawFailed, [financeFacebook, instagramChannelId]);
+    failed = filtered.actionable;
+    ignoredInactive = filtered.ignored;
+  } catch (error) {
+    console.warn("[system-health] inactive Finance failure filter deferred", {
+      message: error?.message || String(error),
+    });
+  }
+
   const facebookFailed = failed.filter((post) => post?.channelId === financeFacebook || post?.channelId === rentFacebook);
   const instagramFailed = instagramEnabled
     ? failed.filter((post) => post?.channelId === instagramChannelId)
@@ -223,6 +265,10 @@ async function checkBuffer() {
     instagram_issue: instagramFailed.length
       ? `${instagramFailed.length} Van Finance Instagram post${instagramFailed.length === 1 ? " is" : "s are"} currently marked failed in Buffer.`
       : "",
+    ignored_inactive_failures: ignoredInactive.length,
+    ignored_inactive_registrations: ignoredInactive
+      .map((post) => extractBufferRegistration(post?.text))
+      .filter(Boolean),
     checked_at: timestamp,
     duration_ms: Date.now() - startedAt,
   };
@@ -594,7 +640,7 @@ function buildAutomationCentre(evidence, checkMap) {
       lastError: checkMap.instagramIssue || "",
       telemetry: "live",
       detail: checkMap.instagram
-        ? "Van Finance Instagram Buffer outcomes are checked live; failed mirrors are surfaced here."
+        ? "Van Finance Instagram Buffer outcomes are checked live; failed mirrors for vehicles no longer in active stock are treated as resolved history."
         : "Buffer is reporting a Van Finance Instagram publishing or monitoring failure.",
     }),
     automationItem({
@@ -639,7 +685,7 @@ function buildAutomationCentre(evidence, checkMap) {
       duration: checkMap.bufferDuration,
       nextExpectedAt: nextHourlyAt(35, now),
       lastError: checkMap.bufferIssue || "",
-      detail: "Checks current Facebook and Instagram Buffer outcomes; publish-status reconciliation still runs hourly at :35.",
+      detail: "Checks current Facebook and Instagram Buffer outcomes; failures for Finance vehicles no longer in active stock are ignored as non-actionable history.",
     }),
     automationItem({
       key: "carslink_stock_sync",
@@ -760,6 +806,8 @@ export default async function handler(request, response) {
       email_campaign_worker: checks[5].ok,
       email_delivery: checks[6].ok,
     },
+    buffer_ignored_inactive_failures: checks[1]?.ignored_inactive_failures || 0,
+    buffer_ignored_inactive_registrations: checks[1]?.ignored_inactive_registrations || [],
     automations,
     issues,
   });
