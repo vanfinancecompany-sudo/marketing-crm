@@ -5,10 +5,12 @@ import {
 } from "./_vansco-cache-utils.js";
 
 const WIX_QUERY_URL = "https://www.wixapis.com/wix-data/v2/items/query";
-const WIX_UNPUBLISH_URL = "https://www.wixapis.com/wix-data/v2/items/unpublish";
+const WIX_TASKS_URL = "https://www.wixapis.com/cms/v1/tasks";
 const DEFAULT_WIX_SITE_ID = "85f11c52-ee54-495d-aaec-a351831709b5";
 const PAGE_SIZE = 100;
 const MAX_ROWS_PER_COLLECTION = 2000;
+const TASK_POLL_DELAY_MS = 350;
+const TASK_MAX_POLLS = 24;
 
 export const PROTECTED_FINANCE_COLLECTION_ID = "VANFINANCEPAGES";
 
@@ -39,6 +41,10 @@ function wixHeaders() {
   const apiKey = clean(process.env.WIX_FINANCE_API_KEY || process.env.WIX_API_KEY);
   if (apiKey) headers.Authorization = apiKey;
   return headers;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function assertFinanceWixStockCollection(collectionId) {
@@ -175,33 +181,88 @@ async function verifyReservedInVansco(registration) {
   };
 }
 
-async function unpublishMatch(match) {
+async function getWixTask(taskId) {
+  const response = await fetch(`${WIX_TASKS_URL}/${encodeURIComponent(taskId)}`, {
+    method: "GET",
+    headers: wixHeaders(),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const detail = clean(await response.text()).slice(0, 500);
+    throw new Error(`Could not read Wix draft task ${taskId} (${response.status})${detail ? `: ${detail}` : ""}`);
+  }
+  const payload = await response.json();
+  return payload?.task || {};
+}
+
+async function waitForWixTask(taskId, label) {
+  for (let poll = 0; poll < TASK_MAX_POLLS; poll += 1) {
+    const task = await getWixTask(taskId);
+    const status = clean(task?.status).toUpperCase();
+    if (status === "COMPLETED") {
+      const failed = Number(task?.itemsFailed || 0);
+      const succeeded = Number(task?.itemsSucceeded || 0);
+      if (failed > 0 || succeeded < 1) {
+        const failures = Array.isArray(task?.failures)
+          ? task.failures.map((failure) => clean(failure?.description || failure?.code)).filter(Boolean).join("; ")
+          : "";
+        throw new Error(`${label} draft task completed without changing the expected item${failures ? `: ${failures}` : ""}.`);
+      }
+      return task;
+    }
+    if (status === "FAILED") {
+      const failures = Array.isArray(task?.failures)
+        ? task.failures.map((failure) => clean(failure?.description || failure?.code)).filter(Boolean).join("; ")
+        : "";
+      throw new Error(`${label} draft task failed${failures ? `: ${failures}` : ""}.`);
+    }
+    await sleep(TASK_POLL_DELAY_MS);
+  }
+  throw new Error(`${label} draft task did not finish in time. Recheck the collection before retrying.`);
+}
+
+async function setDraftMatch(match) {
   const collectionId = assertFinanceWixStockCollection(match.collectionId);
   const itemId = clean(match.itemId);
-  if (!itemId) throw new Error(`Missing Wix item ID for ${match.collectionLabel || collectionId}.`);
+  const label = match.collectionLabel || collectionId;
+  if (!itemId) throw new Error(`Missing Wix item ID for ${label}.`);
 
-  const response = await fetch(WIX_UNPUBLISH_URL, {
+  const response = await fetch(WIX_TASKS_URL, {
     method: "POST",
     headers: wixHeaders(),
     body: JSON.stringify({
-      dataCollectionId: collectionId,
-      dataItemId: itemId,
-      copyToDraft: true,
+      task: {
+        type: "UPDATE_PUBLISH_STATUS",
+        updatePublishStatusOptions: {
+          dataCollectionId: collectionId,
+          environment: "LIVE",
+          filter: {
+            _id: { $eq: itemId },
+          },
+          operation: "SET_DRAFT_STATUS",
+        },
+      },
     }),
     cache: "no-store",
   });
 
   if (!response.ok) {
-    const detail = clean(await response.text()).slice(0, 500);
-    throw new Error(`${match.collectionLabel || collectionId} could not be moved to draft (${response.status})${detail ? `: ${detail}` : ""}`);
+    const detail = clean(await response.text()).slice(0, 700);
+    throw new Error(`${label} could not start its Draft task (${response.status})${detail ? `: ${detail}` : ""}`);
   }
 
-  const payload = await response.json().catch(() => ({}));
+  const payload = await response.json();
+  const taskId = clean(payload?.task?.id);
+  if (!taskId) throw new Error(`${label} did not return a Wix Draft task ID.`);
+
+  const task = await waitForWixTask(taskId, label);
   return {
     collectionId,
-    collectionLabel: match.collectionLabel || collectionId,
+    collectionLabel: label,
     itemId,
-    draftItemId: clean(payload?.dataItem?.id || itemId),
+    taskId,
+    taskStatus: clean(task?.status) || "COMPLETED",
+    itemsSucceeded: Number(task?.itemsSucceeded || 0),
   };
 }
 
@@ -223,7 +284,7 @@ export async function unpublishReservedFinanceWixStock(registrationValue) {
     };
   }
 
-  const settled = await Promise.allSettled(preview.matches.map(unpublishMatch));
+  const settled = await Promise.allSettled(preview.matches.map(setDraftMatch));
   const results = settled.map((result, index) => {
     const match = preview.matches[index];
     if (result.status === "fulfilled") return { ok: true, ...result.value };
