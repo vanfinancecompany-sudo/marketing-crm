@@ -1,3 +1,4 @@
+import { createClient } from "@supabase/supabase-js";
 import {
   loadBufferAutomationConfig,
   saveBufferAutomationConfig,
@@ -22,9 +23,12 @@ import {
   isBufferRateLimitCooldownError,
 } from "../lib/bufferRuntimeGuard.js";
 import { selectVanFinanceInstagramMirrors } from "../lib/bufferInstagramMirror.js";
+import { mapFinanceVehicleRow } from "../services/marketingVehicleContract.js";
 
 const ACCESS_HEADER = "x-marketing-customer-database-key";
 const CHANNEL_QUEUE_LIMIT = 10;
+const MEDIA_PREFLIGHT_TIMEOUT_MS = 8000;
+const REEL_LOOKBACK_MS = 3 * 24 * 60 * 60 * 1000;
 
 function errorText(value, fallback = "Instagram mirror failed.") {
   if (value instanceof Error && String(value.message || "").trim()) return value.message.trim();
@@ -40,6 +44,19 @@ function authorize(request) {
     (cronSecret && authorization === `Bearer ${cronSecret}`) ||
     (marketingKey && (supplied === marketingKey || authorization === `Bearer ${marketingKey}`)),
   );
+}
+
+function getSupabase() {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("Missing server Supabase environment variables.");
+  }
+  return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false },
+  });
+}
+
+function normalizeRegistration(value) {
+  return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
 function bufferToken() {
@@ -122,6 +139,117 @@ async function loadInstagramPosts(channelId) {
   ));
 }
 
+async function resolveOriginalImageUrl(supabase, registration) {
+  const wanted = normalizeRegistration(registration);
+  if (!wanted) return "";
+  const result = await supabase
+    .from("facebook_adverts")
+    .select("id,title,picture,is_active")
+    .eq("is_active", true)
+    .ilike("title", `%${registration}%`)
+    .limit(25);
+  if (result.error) throw result.error;
+  const vehicle = (result.data || [])
+    .map((row, index) => mapFinanceVehicleRow(row, index))
+    .find((item) => normalizeRegistration(item?.reg || item?.title) === wanted);
+  return String(vehicle?.image || vehicle?.picture || "").trim();
+}
+
+async function resolveOriginalReelUrl(supabase, registration) {
+  const wanted = normalizeRegistration(registration);
+  if (!wanted) return "";
+  const result = await supabase
+    .from("marketing_daily_activity_events")
+    .select("metadata,occurred_at")
+    .eq("activity_type", "van_finance_reel")
+    .eq("source", "youtube_daily_batch")
+    .gte("occurred_at", new Date(Date.now() - REEL_LOOKBACK_MS).toISOString())
+    .order("occurred_at", { ascending: false })
+    .limit(150);
+  if (result.error) throw result.error;
+  const row = (result.data || []).find((item) => {
+    if (item?.metadata?.deleted_at) return false;
+    return normalizeRegistration(item?.metadata?.registration) === wanted
+      && String(item?.metadata?.download_url || "").trim();
+  });
+  return String(row?.metadata?.download_url || "").trim();
+}
+
+async function resolveOriginalMediaUrl(supabase, mirror) {
+  return mirror.mediaKind === "video"
+    ? resolveOriginalReelUrl(supabase, mirror.registration)
+    : resolveOriginalImageUrl(supabase, mirror.registration);
+}
+
+async function preflightPublicMedia(url, mediaKind) {
+  const value = String(url || "").trim();
+  if (!/^https:\/\//i.test(value)) throw new Error("Instagram media URL must be public HTTPS.");
+  const expectedPrefix = mediaKind === "video" ? "video/" : "image/";
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), MEDIA_PREFLIGHT_TIMEOUT_MS);
+
+  try {
+    let response = await fetch(value, {
+      method: "HEAD",
+      redirect: "follow",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    let contentType = String(response.headers.get("content-type") || "").toLowerCase();
+
+    if (!response.ok || !contentType.startsWith(expectedPrefix)) {
+      response = await fetch(value, {
+        method: "GET",
+        headers: { Range: "bytes=0-0" },
+        redirect: "follow",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      contentType = String(response.headers.get("content-type") || "").toLowerCase();
+    }
+
+    if (!response.ok) {
+      throw new Error(`Media preflight returned HTTP ${response.status}.`);
+    }
+    if (!contentType.startsWith(expectedPrefix)) {
+      throw new Error(`Media preflight returned ${contentType || "an unknown content type"}, expected ${expectedPrefix}`);
+    }
+    return { url: value, contentType, status: response.status };
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("Media preflight timed out.");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function resolveUsableMedia(supabase, mirror) {
+  const original = await resolveOriginalMediaUrl(supabase, mirror).catch((error) => {
+    console.warn("[buffer-instagram-mirror] original media lookup deferred", {
+      registration: mirror.registration,
+      mediaKind: mirror.mediaKind,
+      message: errorText(error, "Original media lookup failed."),
+    });
+    return "";
+  });
+  const candidates = [...new Set([original, mirror.mediaUrl].map((value) => String(value || "").trim()).filter(Boolean))];
+  const failures = [];
+
+  for (const candidate of candidates) {
+    try {
+      const checked = await preflightPublicMedia(candidate, mirror.mediaKind);
+      return {
+        ...checked,
+        source: original && candidate === original ? "original_crm" : "buffer_asset_fallback",
+      };
+    } catch (error) {
+      failures.push(errorText(error, "Media preflight failed."));
+    }
+  }
+
+  throw new Error(`No publicly usable ${mirror.mediaKind} source passed preflight${failures.length ? `: ${failures.join("; ")}` : "."}`);
+}
+
 async function createInstagramPost(channelId, mirror) {
   const input = buildBufferCreatePostInput({
     channelId,
@@ -175,40 +303,53 @@ export default async function handler(request, response) {
       queueLimit: CHANNEL_QUEUE_LIMIT,
     });
 
+    const supabase = getSupabase();
     const results = [];
     for (const mirror of mirrors) {
       try {
-        const post = await createInstagramPost(channelId, mirror);
+        const media = await resolveUsableMedia(supabase, mirror);
+        const post = await createInstagramPost(channelId, {
+          ...mirror,
+          mediaUrl: media.url,
+        });
         results.push({
           created: true,
           registration: mirror.registration,
           mediaKind: mirror.mediaKind,
+          mediaSource: media.source,
+          mediaContentType: media.contentType,
+          recovery: Boolean(mirror.recovery),
           bufferPostId: post.id,
           dueAt: post.dueAt || mirror.dueAt,
         });
       } catch (error) {
         const message = errorText(error);
-        console.warn("[buffer-instagram-mirror] Instagram item skipped", {
+        console.error("[buffer-instagram-mirror] Instagram item failed", {
           registration: mirror.registration,
           mediaKind: mirror.mediaKind,
+          recovery: Boolean(mirror.recovery),
           message,
         });
         results.push({
           created: false,
           registration: mirror.registration,
           mediaKind: mirror.mediaKind,
+          recovery: Boolean(mirror.recovery),
           error: message,
         });
       }
     }
 
+    const failed = results.filter((item) => !item.created).length;
     response.status(200).json({
-      ok: true,
+      ok: failed === 0,
+      attention: failed > 0,
       enabled: true,
       channelId,
       candidates: mirrors.length,
       created: results.filter((item) => item.created).length,
-      failed: results.filter((item) => !item.created).length,
+      failed,
+      recovered: results.filter((item) => item.created && item.recovery).length,
       delayMinutes: automationConfig.instagramDelayMinutes,
       results,
       elapsedMs: Date.now() - startedAt,
