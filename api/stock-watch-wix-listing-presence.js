@@ -5,7 +5,6 @@ const PAGE_SIZE = 100;
 const MAX_ROWS_PER_COLLECTION = 2000;
 
 const FINANCE_WIX_SITE_ID = "85f11c52-ee54-495d-aaec-a351831709b5";
-const RENT2BUY_WIX_SITE_ID = "548f025b-673c-47f7-9bb6-383ab5d946e4";
 
 const CAR_SOURCES = Object.freeze([
   { siteId: FINANCE_WIX_SITE_ID, siteLabel: "VAN FINANCE Wix", collectionId: "CARFINANCE", collectionLabel: "CAR FINANCE" },
@@ -23,15 +22,16 @@ const RENT2BUY_COLLECTIONS = Object.freeze([
   { id: "AUTOMATICVANS", label: "AUTOMATIC" },
 ]);
 
+// Both public Rent2Buy experiences now consume the VAN FINANCE Wix Rent2Buy CMS.
+// The old standalone RENT2BUY VANS Wix CMS is intentionally excluded so stale
+// published rows there cannot resurrect vehicles already drafted in the live CMS.
 const RENT2BUY_SOURCES = Object.freeze(
-  [
-    { siteId: FINANCE_WIX_SITE_ID, siteLabel: "VAN FINANCE Wix" },
-    { siteId: RENT2BUY_WIX_SITE_ID, siteLabel: "RENT2BUY VANS Wix" },
-  ].flatMap((site) => RENT2BUY_COLLECTIONS.map((collection) => ({
-    ...site,
+  RENT2BUY_COLLECTIONS.map((collection) => ({
+    siteId: FINANCE_WIX_SITE_ID,
+    siteLabel: "VAN FINANCE Wix · Rent2Buy CMS",
     collectionId: collection.id,
     collectionLabel: collection.label,
-  })))
+  }))
 );
 
 function clean(value) {
@@ -43,7 +43,7 @@ function wixHeaders(siteId) {
     "Content-Type": "application/json",
     "wix-site-id": siteId,
   };
-  const apiKey = clean(process.env.WIX_API_KEY || process.env.WIX_FINANCE_API_KEY || process.env.WIX_RENT2BUY_API_KEY);
+  const apiKey = clean(process.env.WIX_FINANCE_API_KEY || process.env.WIX_API_KEY);
   if (apiKey) headers.Authorization = apiKey;
   return headers;
 }
@@ -147,6 +147,6 @@ export default async function handler(request, response) {
     errors: errors.map((item) => ({ siteLabel: item.siteLabel, collectionLabel: item.collectionLabel, error: item.error })),
     authority: pipeline === "cars"
       ? "Live CARFINANCE Wix listing state"
-      : "Union of live Rent2Buy listing/category records across both Wix mirrors",
+      : "Live Rent2Buy listing/category state in the VAN FINANCE Wix CMS only",
   });
 }
