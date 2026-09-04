@@ -10,29 +10,17 @@ const CAR_SOURCES = Object.freeze([
   { siteId: FINANCE_WIX_SITE_ID, siteLabel: "VAN FINANCE Wix", collectionId: "CARFINANCE", collectionLabel: "CAR FINANCE" },
 ]);
 
-const RENT2BUY_COLLECTIONS = Object.freeze([
-  { id: "ALLRENT2BUYVANS", label: "ALL VANS" },
-  { id: "MEDIUMVANS", label: "MWB" },
-  { id: "PICKUPS", label: "PICKUPS" },
-  { id: "SmallVans", label: "SMALL" },
-  { id: "TIPPERS-LUTONS-DROPSDIES", label: "TIPPER" },
-  { id: "LWBVANS", label: "LWB" },
-  { id: "ELECTRICVANS", label: "ELECTRIC" },
-  { id: "CREWVANS", label: "CREW" },
-  { id: "AUTOMATICVANS", label: "AUTOMATIC" },
-]);
-
-// Both public Rent2Buy experiences now consume the VAN FINANCE Wix Rent2Buy CMS.
-// The old standalone RENT2BUY VANS Wix CMS is intentionally excluded so stale
-// published rows there cannot resurrect vehicles already drafted in the live CMS.
-const RENT2BUY_SOURCES = Object.freeze(
-  RENT2BUY_COLLECTIONS.map((collection) => ({
+// ALLRENT2BUYVANS is the canonical live-card source for both current Rent2Buy
+// frontends. Category collections are membership/detail helpers only and must not
+// resurrect a vehicle that is already Draft in ALLRENT2BUYVANS.
+const RENT2BUY_SOURCES = Object.freeze([
+  {
     siteId: FINANCE_WIX_SITE_ID,
     siteLabel: "VAN FINANCE Wix · Rent2Buy CMS",
-    collectionId: collection.id,
-    collectionLabel: collection.label,
-  }))
-);
+    collectionId: "ALLRENT2BUYVANS",
+    collectionLabel: "ALL VANS",
+  },
+]);
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -147,6 +135,6 @@ export default async function handler(request, response) {
     errors: errors.map((item) => ({ siteLabel: item.siteLabel, collectionLabel: item.collectionLabel, error: item.error })),
     authority: pipeline === "cars"
       ? "Live CARFINANCE Wix listing state"
-      : "Live Rent2Buy listing/category state in the VAN FINANCE Wix CMS only",
+      : "Published ALLRENT2BUYVANS rows in the VAN FINANCE Wix CMS only",
   });
 }
