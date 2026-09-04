@@ -10,10 +10,8 @@ import {
   assertRent2BuyWixStockCollection,
 } from "../api/rent2buy-reserved-wix-stock.js";
 
-const EXPECTED_SITE_IDS = [
-  "85f11c52-ee54-495d-aaec-a351831709b5",
-  "548f025b-673c-47f7-9bb6-383ab5d946e4",
-];
+const FINANCE_WIX_SITE_ID = "85f11c52-ee54-495d-aaec-a351831709b5";
+const LEGACY_RENT2BUY_WIX_SITE_ID = "548f025b-673c-47f7-9bb6-383ab5d946e4";
 
 const EXPECTED_STOCK_COLLECTIONS = [
   "ALLRENT2BUYVANS",
@@ -27,12 +25,11 @@ const EXPECTED_STOCK_COLLECTIONS = [
   "AUTOMATICVANS",
 ];
 
-test("Rent2Buy Stock Watch is restricted to exactly the two traced Wix sites", () => {
-  assert.deepEqual(RENT2BUY_WIX_SITES.map((site) => site.id), EXPECTED_SITE_IDS);
-  assert.deepEqual(RENT2BUY_WIX_SITES.map((site) => site.label), ["VAN FINANCE Wix", "RENT2BUY VANS Wix"]);
-  assert.equal(new Set(EXPECTED_SITE_IDS).size, 2);
-  assert.throws(() => assertRent2BuyWixSite("8277e317-1387-463d-91d6-b7191bc12624"), /not approved/i);
-  assert.throws(() => assertRent2BuyWixSite("anything-else"), /not approved/i);
+test("Rent2Buy Stock Watch uses only the authoritative VAN FINANCE Wix CMS", () => {
+  assert.deepEqual(RENT2BUY_WIX_SITES.map((site) => site.id), [FINANCE_WIX_SITE_ID]);
+  assert.match(RENT2BUY_WIX_SITES[0].label, /VAN FINANCE Wix.*Rent2Buy CMS/i);
+  assert.throws(() => assertRent2BuyWixSite(LEGACY_RENT2BUY_WIX_SITE_ID), /not the authoritative Rent2Buy CMS/i);
+  assert.throws(() => assertRent2BuyWixSite("anything-else"), /not the authoritative Rent2Buy CMS/i);
 });
 
 test("Rent2Buy Stock Watch can mutate exactly nine listing/category collections", () => {
@@ -55,7 +52,7 @@ test("Finance, car and arbitrary collection IDs are rejected by Rent2Buy mutatio
   assert.throws(() => assertRent2BuyWixStockCollection("SOMETHING-ELSE"), /not an approved/i);
 });
 
-test("Rent2Buy endpoint uses direct unpublish with a legacy Draft-status fallback and never deletes CMS records", () => {
+test("Rent2Buy endpoint uses direct unpublish with a publish-status fallback and never deletes CMS records", () => {
   const source = fs.readFileSync(new URL("../api/rent2buy-reserved-wix-stock.js", import.meta.url), "utf8");
   assert.doesNotMatch(source, /method:\s*["']DELETE["']/i);
   assert.match(source, /wix-data\/v2\/items\/unpublish/i);
@@ -67,6 +64,13 @@ test("Rent2Buy endpoint uses direct unpublish with a legacy Draft-status fallbac
   assert.match(source, /WDE0308\|Draft items are not enabled/);
 });
 
+test("Rent2Buy draft actions are deterministic and do not use the historic standalone Wix CMS", () => {
+  const source = fs.readFileSync(new URL("../api/rent2buy-reserved-wix-stock.js", import.meta.url), "utf8");
+  assert.match(source, /for \(const match of preview\.matches\)/);
+  assert.match(source, /authority: "VAN FINANCE Wix Rent2Buy CMS only"/);
+  assert.doesNotMatch(source, new RegExp(LEGACY_RENT2BUY_WIX_SITE_ID.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
 test("preview reads VANPAGES but actionable matches exclude protected records", () => {
   const source = fs.readFileSync(new URL("../api/rent2buy-reserved-wix-stock.js", import.meta.url), "utf8");
   assert.match(source, /RENT2BUY_WIX_CHECK_COLLECTIONS/);
@@ -75,14 +79,13 @@ test("preview reads VANPAGES but actionable matches exclude protected records", 
   assert.match(source, /VAN PAGES is hard protected and can never be moved to draft/);
 });
 
-test("Rent2Buy Stock Watch UI is reserved-only, dual-site and makes VAN PAGES protection explicit", () => {
+test("Rent2Buy Stock Watch UI is reserved-only and labels the one authoritative CMS", () => {
   const source = fs.readFileSync(new URL("../scripts/apply-rent2buy-reserved-wix-stock-watch.mjs", import.meta.url), "utf8");
+  const singleAuthorityTransform = fs.readFileSync(new URL("../scripts/apply-rent2buy-legacy-draft-stability.mjs", import.meta.url), "utf8");
   assert.match(source, /selectedPipeline === \"rent2buy\"/);
   assert.match(source, /record\.displayStatus === \"reserved\"/);
   assert.match(source, /Check Rent2Buy Wix collections/);
-  assert.match(source, /rentWixPreview\.sites/);
-  assert.match(source, /site\.label/);
-  assert.match(source, /VAN PAGES is HARD PROTECTED on both Wix sites/);
-  assert.match(source, /LIVE • PROTECTED/);
+  assert.match(singleAuthorityTransform, /authoritative VAN FINANCE Wix CMS/);
+  assert.match(singleAuthorityTransform, /VAN PAGES is HARD PROTECTED in the authoritative Rent2Buy CMS/);
   assert.match(source, /Set .*live Rent2Buy listing record/);
 });
