@@ -55,15 +55,16 @@ test("Finance, car and arbitrary collection IDs are rejected by Rent2Buy mutatio
   assert.throws(() => assertRent2BuyWixStockCollection("SOMETHING-ELSE"), /not an approved/i);
 });
 
-test("Rent2Buy endpoint uses direct item unpublish and never deletes CMS records", () => {
+test("Rent2Buy endpoint uses direct unpublish with a legacy Draft-status fallback and never deletes CMS records", () => {
   const source = fs.readFileSync(new URL("../api/rent2buy-reserved-wix-stock.js", import.meta.url), "utf8");
   assert.doesNotMatch(source, /method:\s*["']DELETE["']/i);
   assert.match(source, /wix-data\/v2\/items\/unpublish/i);
   assert.match(source, /dataCollectionId:\s*collectionId/);
   assert.match(source, /dataItemId:\s*itemId/);
-  assert.doesNotMatch(source, /UPDATE_PUBLISH_STATUS/);
-  assert.doesNotMatch(source, /SET_DRAFT_STATUS/);
-  assert.doesNotMatch(source, /cms\/v1\/tasks/);
+  assert.match(source, /UPDATE_PUBLISH_STATUS/);
+  assert.match(source, /SET_DRAFT_STATUS/);
+  assert.match(source, /cms\/v1\/tasks/);
+  assert.match(source, /WDE0308\|Draft items are not enabled/);
 });
 
 test("preview reads VANPAGES but actionable matches exclude protected records", () => {
