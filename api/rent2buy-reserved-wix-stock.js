@@ -5,11 +5,9 @@ import {
 } from "./_vansco-cache-utils.js";
 
 const WIX_QUERY_URL = "https://www.wixapis.com/wix-data/v2/items/query";
-const WIX_TASKS_URL = "https://www.wixapis.com/cms/v1/tasks";
+const WIX_UNPUBLISH_ITEM_URL = "https://www.wixapis.com/wix-data/v2/items/unpublish";
 const PAGE_SIZE = 100;
 const MAX_ROWS_PER_COLLECTION = 2000;
-const TASK_POLL_DELAY_MS = 500;
-const TASK_MAX_POLLS = 90;
 
 export const RENT2BUY_WIX_SITES = Object.freeze([
   { id: "85f11c52-ee54-495d-aaec-a351831709b5", label: "VAN FINANCE Wix" },
@@ -42,10 +40,6 @@ const RESERVED_SOURCE_STATUSES = new Set(["reserved", "sold", "deposit_taken"]);
 
 function clean(value) {
   return String(value ?? "").trim();
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function assertRent2BuyWixSite(siteId) {
@@ -230,75 +224,30 @@ async function verifyReservedInVansco(registration) {
   return { registration, sourceStatus, checkedAt: latest.last_successfully_checked_at || latest.updated_at || "" };
 }
 
-async function getWixTask(siteId, taskId, apiKey) {
-  const response = await fetch(`${WIX_TASKS_URL}/${encodeURIComponent(taskId)}`, {
-    method: "GET",
-    headers: wixHeaders(siteId, apiKey),
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    const detail = clean(await response.text()).slice(0, 500);
-    throw new Error(`Could not read Wix draft task ${taskId} (${response.status})${detail ? `: ${detail}` : ""}`);
-  }
-  const payload = await response.json();
-  return payload?.task || {};
-}
-
-async function waitForWixTask(siteId, taskId, label, apiKey) {
-  for (let poll = 0; poll < TASK_MAX_POLLS; poll += 1) {
-    const task = await getWixTask(siteId, taskId, apiKey);
-    const status = clean(task?.status).toUpperCase();
-    if (status === "COMPLETED") {
-      const failed = Number(task?.itemsFailed || 0);
-      const succeeded = Number(task?.itemsSucceeded || 0);
-      if (failed > 0 || succeeded < 1) {
-        const failures = Array.isArray(task?.failures)
-          ? task.failures.map((failure) => clean(failure?.description || failure?.code)).filter(Boolean).join("; ")
-          : "";
-        throw new Error(`${label} draft task completed without changing the expected item${failures ? `: ${failures}` : ""}.`);
-      }
-      return task;
-    }
-    if (status === "FAILED") {
-      const failures = Array.isArray(task?.failures)
-        ? task.failures.map((failure) => clean(failure?.description || failure?.code)).filter(Boolean).join("; ")
-        : "";
-      throw new Error(`${label} draft task failed${failures ? `: ${failures}` : ""}.`);
-    }
-    await sleep(TASK_POLL_DELAY_MS);
-  }
-  throw new Error(`${label} draft task did not finish in time. Recheck before retrying.`);
-}
-
-async function startDraftTask(siteId, collectionId, itemId, label, candidate) {
-  const response = await fetch(WIX_TASKS_URL, {
+async function unpublishItem(siteId, collectionId, itemId, label, candidate) {
+  const response = await fetch(WIX_UNPUBLISH_ITEM_URL, {
     method: "POST",
     headers: wixHeaders(siteId, candidate.value),
     body: JSON.stringify({
-      task: {
-        type: "UPDATE_PUBLISH_STATUS",
-        updatePublishStatusOptions: {
-          dataCollectionId: collectionId,
-          environment: "LIVE",
-          filter: { _id: { $eq: itemId } },
-          operation: "SET_DRAFT_STATUS",
-        },
-      },
+      dataCollectionId: collectionId,
+      dataItemId: itemId,
     }),
     cache: "no-store",
   });
 
   if (!response.ok) {
     const detail = clean(await response.text()).slice(0, 700);
-    const error = new Error(`${label} could not start its Draft task (${response.status})${detail ? `: ${detail}` : ""}`);
+    const error = new Error(`${label} could not be moved to Draft (${response.status})${detail ? `: ${detail}` : ""}`);
     error.status = response.status;
     throw error;
   }
 
   const payload = await response.json();
-  const taskId = clean(payload?.task?.id);
-  if (!taskId) throw new Error(`${label} did not return a Wix Draft task ID.`);
-  return taskId;
+  const draftItemId = clean(payload?.dataItem?.id || payload?.dataItem?.data?._id);
+  if (draftItemId && draftItemId !== itemId) {
+    throw new Error(`${label} returned an unexpected Wix draft item ID.`);
+  }
+  return payload?.dataItem || null;
 }
 
 async function setDraftMatch(match) {
@@ -315,17 +264,16 @@ async function setDraftMatch(match) {
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index];
     try {
-      const taskId = await startDraftTask(siteId, collectionId, itemId, label, candidate);
-      const task = await waitForWixTask(siteId, taskId, label, candidate.value);
+      const draftItem = await unpublishItem(siteId, collectionId, itemId, label, candidate);
       return {
         siteId,
         siteLabel: match.siteLabel,
         collectionId,
         collectionLabel: match.collectionLabel,
         itemId,
-        taskId,
-        taskStatus: clean(task?.status) || "COMPLETED",
-        itemsSucceeded: Number(task?.itemsSucceeded || 0),
+        draftItemId: clean(draftItem?.id || draftItem?.data?._id) || itemId,
+        operation: "UNPUBLISH_DATA_ITEM",
+        itemsSucceeded: 1,
         authSource: candidate.source,
       };
     } catch (error) {
