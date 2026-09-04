@@ -73,14 +73,32 @@ function assertRent2BuyWixReadableCollection(collectionId) {
   return id;
 }
 
-function wixHeaders(siteId) {
+function apiKeyCandidates(siteId) {
   const approvedSiteId = assertRent2BuyWixSite(siteId);
   const rent2buySiteId = RENT2BUY_WIX_SITES[1].id;
-  const apiKey = approvedSiteId === rent2buySiteId
-    ? clean(process.env.WIX_RENT2BUY_API_KEY || process.env.WIX_API_KEY || process.env.WIX_FINANCE_API_KEY)
-    : clean(process.env.WIX_FINANCE_API_KEY || process.env.WIX_API_KEY || process.env.WIX_RENT2BUY_API_KEY);
+  const candidates = approvedSiteId === rent2buySiteId
+    ? [
+        ["WIX_RENT2BUY_API_KEY", process.env.WIX_RENT2BUY_API_KEY],
+        ["WIX_API_KEY", process.env.WIX_API_KEY],
+        ["WIX_FINANCE_API_KEY", process.env.WIX_FINANCE_API_KEY],
+      ]
+    : [
+        ["WIX_FINANCE_API_KEY", process.env.WIX_FINANCE_API_KEY],
+        ["WIX_API_KEY", process.env.WIX_API_KEY],
+        ["WIX_RENT2BUY_API_KEY", process.env.WIX_RENT2BUY_API_KEY],
+      ];
+
+  const seen = new Set();
+  return candidates
+    .map(([source, value]) => ({ source, value: clean(value) }))
+    .filter(({ value }) => value && !seen.has(value) && seen.add(value));
+}
+
+function wixHeaders(siteId, apiKey) {
+  const approvedSiteId = assertRent2BuyWixSite(siteId);
   const headers = { "Content-Type": "application/json", "wix-site-id": approvedSiteId };
-  if (apiKey) headers.Authorization = apiKey;
+  const key = clean(apiKey) || apiKeyCandidates(approvedSiteId)[0]?.value || "";
+  if (key) headers.Authorization = key;
   return headers;
 }
 
@@ -212,10 +230,10 @@ async function verifyReservedInVansco(registration) {
   return { registration, sourceStatus, checkedAt: latest.last_successfully_checked_at || latest.updated_at || "" };
 }
 
-async function getWixTask(siteId, taskId) {
+async function getWixTask(siteId, taskId, apiKey) {
   const response = await fetch(`${WIX_TASKS_URL}/${encodeURIComponent(taskId)}`, {
     method: "GET",
-    headers: wixHeaders(siteId),
+    headers: wixHeaders(siteId, apiKey),
     cache: "no-store",
   });
   if (!response.ok) {
@@ -226,34 +244,36 @@ async function getWixTask(siteId, taskId) {
   return payload?.task || {};
 }
 
-async function waitForWixTask(siteId, taskId, label) {
+async function waitForWixTask(siteId, taskId, label, apiKey) {
   for (let poll = 0; poll < TASK_MAX_POLLS; poll += 1) {
-    const task = await getWixTask(siteId, taskId);
+    const task = await getWixTask(siteId, taskId, apiKey);
     const status = clean(task?.status).toUpperCase();
     if (status === "COMPLETED") {
       const failed = Number(task?.itemsFailed || 0);
       const succeeded = Number(task?.itemsSucceeded || 0);
       if (failed > 0 || succeeded < 1) {
-        const failures = Array.isArray(task?.failures) ? task.failures.map((failure) => clean(failure?.description || failure?.code)).filter(Boolean).join("; ") : "";
+        const failures = Array.isArray(task?.failures)
+          ? task.failures.map((failure) => clean(failure?.description || failure?.code)).filter(Boolean).join("; ")
+          : "";
         throw new Error(`${label} draft task completed without changing the expected item${failures ? `: ${failures}` : ""}.`);
       }
       return task;
     }
-    if (status === "FAILED") throw new Error(`${label} draft task failed.`);
+    if (status === "FAILED") {
+      const failures = Array.isArray(task?.failures)
+        ? task.failures.map((failure) => clean(failure?.description || failure?.code)).filter(Boolean).join("; ")
+        : "";
+      throw new Error(`${label} draft task failed${failures ? `: ${failures}` : ""}.`);
+    }
     await sleep(TASK_POLL_DELAY_MS);
   }
   throw new Error(`${label} draft task did not finish in time. Recheck before retrying.`);
 }
 
-async function setDraftMatch(match) {
-  const siteId = assertRent2BuyWixSite(match.siteId);
-  const collectionId = assertRent2BuyWixStockCollection(match.collectionId);
-  const itemId = clean(match.itemId);
-  const label = `${match.siteLabel || siteId} / ${match.collectionLabel || collectionId}`;
-  if (!itemId) throw new Error(`Missing Wix item ID for ${label}.`);
+async function startDraftTask(siteId, collectionId, itemId, label, candidate) {
   const response = await fetch(WIX_TASKS_URL, {
     method: "POST",
-    headers: wixHeaders(siteId),
+    headers: wixHeaders(siteId, candidate.value),
     body: JSON.stringify({
       task: {
         type: "UPDATE_PUBLISH_STATUS",
@@ -267,15 +287,55 @@ async function setDraftMatch(match) {
     }),
     cache: "no-store",
   });
+
   if (!response.ok) {
     const detail = clean(await response.text()).slice(0, 700);
-    throw new Error(`${label} could not start its Draft task (${response.status})${detail ? `: ${detail}` : ""}`);
+    const error = new Error(`${label} could not start its Draft task (${response.status})${detail ? `: ${detail}` : ""}`);
+    error.status = response.status;
+    throw error;
   }
+
   const payload = await response.json();
   const taskId = clean(payload?.task?.id);
   if (!taskId) throw new Error(`${label} did not return a Wix Draft task ID.`);
-  const task = await waitForWixTask(siteId, taskId, label);
-  return { siteId, siteLabel: match.siteLabel, collectionId, collectionLabel: match.collectionLabel, itemId, taskId, taskStatus: clean(task?.status) || "COMPLETED", itemsSucceeded: Number(task?.itemsSucceeded || 0) };
+  return taskId;
+}
+
+async function setDraftMatch(match) {
+  const siteId = assertRent2BuyWixSite(match.siteId);
+  const collectionId = assertRent2BuyWixStockCollection(match.collectionId);
+  const itemId = clean(match.itemId);
+  const label = `${match.siteLabel || siteId} / ${match.collectionLabel || collectionId}`;
+  if (!itemId) throw new Error(`Missing Wix item ID for ${label}.`);
+
+  const candidates = apiKeyCandidates(siteId);
+  if (!candidates.length) throw new Error(`${label} has no configured Wix API key.`);
+
+  let lastError = null;
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    try {
+      const taskId = await startDraftTask(siteId, collectionId, itemId, label, candidate);
+      const task = await waitForWixTask(siteId, taskId, label, candidate.value);
+      return {
+        siteId,
+        siteLabel: match.siteLabel,
+        collectionId,
+        collectionLabel: match.collectionLabel,
+        itemId,
+        taskId,
+        taskStatus: clean(task?.status) || "COMPLETED",
+        itemsSucceeded: Number(task?.itemsSucceeded || 0),
+        authSource: candidate.source,
+      };
+    } catch (error) {
+      lastError = error;
+      const authFailure = Number(error?.status || 0) === 401 || Number(error?.status || 0) === 403;
+      if (!authFailure || index === candidates.length - 1) break;
+    }
+  }
+
+  throw lastError || new Error(`${label} could not move to Draft.`);
 }
 
 export async function unpublishReservedRent2BuyWixStock(registrationValue) {
@@ -286,13 +346,35 @@ export async function unpublishReservedRent2BuyWixStock(registrationValue) {
   if (!preview.matches.length) {
     return { ok: true, registration, vansco, changed: 0, results: [], failures: 0, message: "No live Rent2Buy listing/category matches remain. VAN PAGES stays protected on both Wix sites.", protectedCollection: preview.protectedCollection };
   }
+
   const settled = await Promise.allSettled(preview.matches.map(setDraftMatch));
   const results = settled.map((result, index) => {
     const match = preview.matches[index];
     if (result.status === "fulfilled") return { ok: true, ...result.value };
-    return { ok: false, siteId: match.siteId, siteLabel: match.siteLabel, collectionId: match.collectionId, collectionLabel: match.collectionLabel, itemId: match.itemId, error: clean(result.reason?.message || result.reason || "Could not move item to draft.") };
+    return {
+      ok: false,
+      siteId: match.siteId,
+      siteLabel: match.siteLabel,
+      collectionId: match.collectionId,
+      collectionLabel: match.collectionLabel,
+      itemId: match.itemId,
+      error: clean(result.reason?.message || result.reason || "Could not move item to draft."),
+    };
   });
   const failures = results.filter((result) => !result.ok);
+
+  if (failures.length) {
+    console.error("RENT2BUY WIX DRAFT PARTIAL FAILURE", {
+      registration,
+      failures: failures.map((failure) => ({
+        siteId: failure.siteId,
+        collectionId: failure.collectionId,
+        itemId: failure.itemId,
+        error: clean(failure.error).slice(0, 1000),
+      })),
+    });
+  }
+
   return {
     ok: failures.length === 0,
     registration,
