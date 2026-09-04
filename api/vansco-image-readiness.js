@@ -4,6 +4,7 @@ const REFRESH_RUNS_TABLE = "vansco_refresh_runs";
 const CACHE_TABLE = "vansco_vehicle_cache";
 const STOCK_LIMIT = 1000;
 const CMS_TIMEOUT_MS = 12000;
+export const MIN_VANSCO_IMAGE_COUNT = 5;
 
 const CMS_ENDPOINTS = {
   finance: "https://www.vanfinancecompany.co.uk/_functions/marketingVanFinanceImages",
@@ -82,7 +83,7 @@ export function buildImageReadinessAlerts({ pipeline, localVehicles = [], cmsIte
     if (pageImageCount !== 1) continue;
 
     const sourceImageCount = sourceCountForRegistration(sourceImageCounts, registration);
-    if (sourceImageCount === null || sourceImageCount <= 1) continue;
+    if (sourceImageCount === null || sourceImageCount < MIN_VANSCO_IMAGE_COUNT) continue;
 
     const cacheRow = cacheByRegistration.get(registration);
     if (!cacheRow) continue;
@@ -237,7 +238,8 @@ export default async function handler(request, response) {
         snapshotUpdatedAt: sourceSnapshot.updatedAt,
         cmsRefreshedAt: cmsFeed.refreshedAt,
         complete: snapshotComplete,
-        rule: "Alert only when the registration is active in this CRM, the matching main CMS vehicle page has exactly one image, and Vansco has more than one vehicle image.",
+        minimumVanscoImageCount: MIN_VANSCO_IMAGE_COUNT,
+        rule: "Alert only when the registration is active in this CRM, the matching main CMS vehicle page has exactly one image, and Vansco has at least 5 vehicle images.",
       },
     });
   } catch (error) {
