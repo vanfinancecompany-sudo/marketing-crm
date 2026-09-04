@@ -5,6 +5,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/stock-watch-monitor-agent",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/marketing-template-campaign-send-orphan-worker",
       "schedule": "* * * * *"
     },
@@ -50,6 +54,9 @@
     }
   ],
   "functions": {
+    "api/stock-watch-monitor-agent.js": {
+      "maxDuration": 60
+    },
     "api/buffer-facebook-automation-worker.js": {
       "maxDuration": 300
     },
