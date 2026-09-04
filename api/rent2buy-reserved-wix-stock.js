@@ -8,8 +8,8 @@ const WIX_QUERY_URL = "https://www.wixapis.com/wix-data/v2/items/query";
 const WIX_TASKS_URL = "https://www.wixapis.com/cms/v1/tasks";
 const PAGE_SIZE = 100;
 const MAX_ROWS_PER_COLLECTION = 2000;
-const TASK_POLL_DELAY_MS = 350;
-const TASK_MAX_POLLS = 24;
+const TASK_POLL_DELAY_MS = 500;
+const TASK_MAX_POLLS = 90;
 
 export const RENT2BUY_WIX_SITES = Object.freeze([
   { id: "85f11c52-ee54-495d-aaec-a351831709b5", label: "VAN FINANCE Wix" },
