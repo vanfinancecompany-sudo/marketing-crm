@@ -6,8 +6,11 @@ import {
 
 const WIX_QUERY_URL = "https://www.wixapis.com/wix-data/v2/items/query";
 const WIX_UNPUBLISH_ITEM_URL = "https://www.wixapis.com/wix-data/v2/items/unpublish";
+const WIX_TASKS_URL = "https://www.wixapis.com/cms/v1/tasks";
 const PAGE_SIZE = 100;
 const MAX_ROWS_PER_COLLECTION = 2000;
+const TASK_MAX_POLLS = 12;
+const TASK_POLL_DELAY_MS = 1000;
 
 export const RENT2BUY_WIX_SITES = Object.freeze([
   { id: "85f11c52-ee54-495d-aaec-a351831709b5", label: "VAN FINANCE Wix" },
@@ -40,6 +43,10 @@ const RESERVED_SOURCE_STATUSES = new Set(["reserved", "sold", "deposit_taken"]);
 
 function clean(value) {
   return String(value ?? "").trim();
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 export function assertRent2BuyWixSite(siteId) {
@@ -250,6 +257,73 @@ async function unpublishItem(siteId, collectionId, itemId, label, candidate) {
   return payload?.dataItem || null;
 }
 
+async function startLegacyDraftTask(siteId, collectionId, itemId, label, candidate) {
+  const response = await fetch(WIX_TASKS_URL, {
+    method: "POST",
+    headers: wixHeaders(siteId, candidate.value),
+    body: JSON.stringify({
+      task: {
+        type: "UPDATE_PUBLISH_STATUS",
+        updatePublishStatusOptions: {
+          dataCollectionId: collectionId,
+          environment: "LIVE",
+          filter: { _id: { $eq: itemId } },
+          operation: "SET_DRAFT_STATUS",
+        },
+      },
+    }),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const detail = clean(await response.text()).slice(0, 700);
+    const error = new Error(`${label} could not start its legacy Wix Draft task (${response.status})${detail ? `: ${detail}` : ""}`);
+    error.status = response.status;
+    throw error;
+  }
+  const payload = await response.json();
+  const taskId = clean(payload?.task?.id);
+  if (!taskId) throw new Error(`${label} did not return a Wix Draft task ID.`);
+  return taskId;
+}
+
+async function waitForLegacyDraftTask(siteId, taskId, label, candidate) {
+  for (let poll = 0; poll < TASK_MAX_POLLS; poll += 1) {
+    const response = await fetch(`${WIX_TASKS_URL}/${encodeURIComponent(taskId)}`, {
+      method: "GET",
+      headers: wixHeaders(siteId, candidate.value),
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      const detail = clean(await response.text()).slice(0, 500);
+      const error = new Error(`${label} could not read Wix Draft task ${taskId} (${response.status})${detail ? `: ${detail}` : ""}`);
+      error.status = response.status;
+      throw error;
+    }
+    const payload = await response.json();
+    const task = payload?.task || {};
+    const status = clean(task?.status).toUpperCase();
+    if (status === "COMPLETED") {
+      const failed = Number(task?.itemsFailed || 0);
+      const succeeded = Number(task?.itemsSucceeded || 0);
+      if (failed > 0 || succeeded < 1) throw new Error(`${label} legacy Wix Draft task completed without changing the expected item.`);
+      return task;
+    }
+    if (status === "FAILED") throw new Error(`${label} legacy Wix Draft task failed.`);
+    await sleep(TASK_POLL_DELAY_MS);
+  }
+  throw new Error(`${label} Wix Draft task did not finish in time. Recheck before retrying.`);
+}
+
+async function setDraftWithLegacyTask(siteId, collectionId, itemId, label, candidate) {
+  const taskId = await startLegacyDraftTask(siteId, collectionId, itemId, label, candidate);
+  const task = await waitForLegacyDraftTask(siteId, taskId, label, candidate);
+  return {
+    taskId,
+    taskStatus: clean(task?.status) || "COMPLETED",
+    itemsSucceeded: Number(task?.itemsSucceeded || 0),
+  };
+}
+
 async function setDraftMatch(match) {
   const siteId = assertRent2BuyWixSite(match.siteId);
   const collectionId = assertRent2BuyWixStockCollection(match.collectionId);
@@ -264,7 +338,14 @@ async function setDraftMatch(match) {
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index];
     try {
-      const draftItem = await unpublishItem(siteId, collectionId, itemId, label, candidate);
+      let draftItem = null;
+      let legacyTask = null;
+      try {
+        draftItem = await unpublishItem(siteId, collectionId, itemId, label, candidate);
+      } catch (error) {
+        if (Number(error?.status || 0) !== 428 || !/WDE0308|Draft items are not enabled/i.test(clean(error?.message))) throw error;
+        legacyTask = await setDraftWithLegacyTask(siteId, collectionId, itemId, label, candidate);
+      }
       return {
         siteId,
         siteLabel: match.siteLabel,
@@ -272,8 +353,9 @@ async function setDraftMatch(match) {
         collectionLabel: match.collectionLabel,
         itemId,
         draftItemId: clean(draftItem?.id || draftItem?.data?._id) || itemId,
-        operation: "UNPUBLISH_DATA_ITEM",
+        operation: legacyTask ? "UPDATE_PUBLISH_STATUS" : "UNPUBLISH_DATA_ITEM",
         itemsSucceeded: 1,
+        ...(legacyTask || {}),
         authSource: candidate.source,
       };
     } catch (error) {
