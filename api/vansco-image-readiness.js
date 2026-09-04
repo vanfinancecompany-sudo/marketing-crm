@@ -219,6 +219,7 @@ export default async function handler(request, response) {
     const localRegistrationCount = new Set(localVehicles.map((row) => localRegistration(row, pipeline)).filter(Boolean)).size;
     const cmsPageCount = new Set(cmsFeed.items.map(cmsRegistration).filter(Boolean)).size;
     const singleImageCmsPageCount = cmsFeed.items.filter((row) => cmsRegistration(row) && cmsImageCount(row) === 1).length;
+    const snapshotComplete = sourceSnapshot.status === "complete";
 
     response.setHeader("Cache-Control", "no-store, max-age=0");
     response.status(200).json({
@@ -235,7 +236,7 @@ export default async function handler(request, response) {
         snapshotStatus: sourceSnapshot.status,
         snapshotUpdatedAt: sourceSnapshot.updatedAt,
         cmsRefreshedAt: cmsFeed.refreshedAt,
-        complete: Boolean(sourceSnapshot.runId),
+        complete: snapshotComplete,
         rule: "Alert only when the registration is active in this CRM, the matching main CMS vehicle page has exactly one image, and Vansco has more than one vehicle image.",
       },
     });

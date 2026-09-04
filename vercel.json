@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/vansco-cache-live-refresh?auto=true&batchSize=15&maxMs=45000",
-      "schedule": "0 2 * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/marketing-template-campaign-send-orphan-worker",
