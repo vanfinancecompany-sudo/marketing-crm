@@ -6,11 +6,8 @@ function clean(value) {
 }
 
 function safeJson(value) {
-  try {
-    return JSON.parse(JSON.stringify(value ?? null));
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(JSON.stringify(value ?? null)); }
+  catch { return null; }
 }
 
 export function createStockWatchTraceId() {
@@ -58,8 +55,25 @@ export async function writeStockWatchActionLog({
 
   try {
     const supabase = getSupabaseServiceAdmin();
-    const { error: insertError } = await supabase.from("stock_watch_action_logs").insert(payload);
-    if (insertError) throw insertError;
+    if (payload.status === "started") {
+      const { error: insertError } = await supabase.from("stock_watch_action_logs").insert(payload);
+      if (insertError) throw insertError;
+    } else {
+      const finalValues = { ...payload };
+      delete finalValues.created_at;
+      const { data: updated, error: updateError } = await supabase
+        .from("stock_watch_action_logs")
+        .update(finalValues)
+        .eq("trace_id", payload.trace_id)
+        .eq("status", "started")
+        .select("id")
+        .limit(1);
+      if (updateError) throw updateError;
+      if (!updated?.length) {
+        const { error: insertError } = await supabase.from("stock_watch_action_logs").insert(payload);
+        if (insertError) throw insertError;
+      }
+    }
   } catch (logError) {
     console.warn("STOCK WATCH ACTION LOG WRITE FAILED", {
       traceId: payload.trace_id,
