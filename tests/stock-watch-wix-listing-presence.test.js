@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { sourcesForPipeline } from "../api/stock-watch-wix-listing-presence.js";
 import { countVanscoVehicleImages, extractVanscoVehicleImageUrls } from "../api/_vansco-image-gallery.js";
-import { buildImageReadinessAlerts } from "../api/vansco-image-readiness.js";
+import { buildImageReadinessAlerts, MIN_VANSCO_IMAGE_COUNT } from "../api/vansco-image-readiness.js";
 
 const FINANCE_WIX_SITE_ID = "85f11c52-ee54-495d-aaec-a351831709b5";
 const RENT2BUY_WIX_SITE_ID = "548f025b-673c-47f7-9bb6-383ab5d946e4";
@@ -49,6 +49,14 @@ test("Stock Watch replaces stale Cars and Rent2Buy CRM flags only after a comple
   assert.match(source, /Marketing CRM stock fallback/);
 });
 
+test("Stock Watch follow-up intersects Rent2Buy Wix presence with active CRM registrations", () => {
+  const source = fs.readFileSync(new URL("../scripts/apply-vansco-stock-watch-followups.mjs", import.meta.url), "utf8");
+  assert.match(source, /const liveRegistrationSet = new Set\(\(presence\.registrations \|\| \[\]\)/);
+  assert.match(source, /effectiveRegistrations = vehicleRegistrations\.filter\(\(registration\) => liveRegistrationSet\.has\(registration\)\)/);
+  assert.match(source, /const percent = complete \? 100/);
+  assert.match(source, /Vansco now has at least 5 vehicle images/);
+});
+
 test("Vansco gallery counter keeps unique vehicle photos for the matching stock ID", () => {
   const stockUrl = "https://www.vansco.co.uk/vehicle-details/used-ford-transit-for-sale-u12345";
   const html = `
@@ -64,7 +72,7 @@ test("Vansco gallery counter keeps unique vehicle photos for the matching stock 
   assert.equal(countVanscoVehicleImages(html, stockUrl), 2);
 });
 
-test("image readiness alerts only when CRM match + one-image CMS page + multiple Vansco images all agree", () => {
+test("image readiness requires CRM match + one-image CMS page + at least five Vansco images", () => {
   const base = {
     pipeline: "finance",
     localVehicles: [{ id: 1, title: "Ford Transit AB24CDE", weblink: "https://www.vanfinancecompany.co.uk/vehicle/ab24cde", is_active: true }],
@@ -73,13 +81,16 @@ test("image readiness alerts only when CRM match + one-image CMS page + multiple
     sourceImageCounts: { AB24CDE: 12 },
   };
 
+  assert.equal(MIN_VANSCO_IMAGE_COUNT, 5);
+
   const alerts = buildImageReadinessAlerts(base);
   assert.equal(alerts.length, 1);
   assert.equal(alerts[0].displayStatus, "images_ready");
   assert.equal(alerts[0].cmsImageCount, 1);
   assert.equal(alerts[0].sourceImageCount, 12);
 
-  assert.equal(buildImageReadinessAlerts({ ...base, sourceImageCounts: { AB24CDE: 1 } }).length, 0, "one Vansco image must not alert");
+  assert.equal(buildImageReadinessAlerts({ ...base, sourceImageCounts: { AB24CDE: 4 } }).length, 0, "four Vansco images must not alert");
+  assert.equal(buildImageReadinessAlerts({ ...base, sourceImageCounts: { AB24CDE: 5 } }).length, 1, "five Vansco images must alert");
   assert.equal(buildImageReadinessAlerts({ ...base, cmsItems: [{ ...base.cmsItems[0], imageCount: 2, images: ["one.jpg", "two.jpg"] }] }).length, 0, "completed CMS gallery must suppress later source changes");
   assert.equal(buildImageReadinessAlerts({ ...base, localVehicles: [] }).length, 0, "vehicle not advertised in this CRM must not alert");
   assert.equal(buildImageReadinessAlerts({ ...base, cacheRows: [] }).length, 0, "vehicle without a current Vansco match must not alert");
@@ -108,6 +119,6 @@ test("Stock Watch build transform wires image counts and never relies on Due In 
   assert.match(transform, /New Vansco photos ready/);
   assert.doesNotMatch(apiSource, /due\s+in/i);
   assert.match(apiSource, /pageImageCount !== 1/);
-  assert.match(apiSource, /sourceImageCount === null \|\| sourceImageCount <= 1/);
+  assert.match(apiSource, /sourceImageCount === null \|\| sourceImageCount < MIN_VANSCO_IMAGE_COUNT/);
   assert.match(apiSource, /localVehicle = localByRegistration\.get\(registration\)/);
 });
