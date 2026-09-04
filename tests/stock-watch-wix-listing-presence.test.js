@@ -7,17 +7,6 @@ import { buildImageReadinessAlerts, MIN_VANSCO_IMAGE_COUNT } from "../api/vansco
 
 const FINANCE_WIX_SITE_ID = "85f11c52-ee54-495d-aaec-a351831709b5";
 const LEGACY_RENT2BUY_WIX_SITE_ID = "548f025b-673c-47f7-9bb6-383ab5d946e4";
-const RENT2BUY_COLLECTIONS = [
-  "ALLRENT2BUYVANS",
-  "MEDIUMVANS",
-  "PICKUPS",
-  "SmallVans",
-  "TIPPERS-LUTONS-DROPSDIES",
-  "LWBVANS",
-  "ELECTRICVANS",
-  "CREWVANS",
-  "AUTOMATICVANS",
-];
 
 test("Cars live-presence authority is CARFINANCE only", () => {
   const sources = sourcesForPipeline("cars");
@@ -26,19 +15,19 @@ test("Cars live-presence authority is CARFINANCE only", () => {
   assert.equal(sources[0].collectionId, "CARFINANCE");
 });
 
-test("Rent2Buy live-presence authority is the nine listing collections on VAN FINANCE Wix only", () => {
+test("Rent2Buy live-presence authority is ALLRENT2BUYVANS on VAN FINANCE Wix only", () => {
   const sources = sourcesForPipeline("rent2buy");
-  assert.equal(sources.length, 9);
-  assert.deepEqual(new Set(sources.map((source) => source.siteId)), new Set([FINANCE_WIX_SITE_ID]));
-  assert.deepEqual(new Set(sources.map((source) => source.collectionId)), new Set(RENT2BUY_COLLECTIONS));
+  assert.equal(sources.length, 1);
+  assert.equal(sources[0].siteId, FINANCE_WIX_SITE_ID);
+  assert.equal(sources[0].collectionId, "ALLRENT2BUYVANS");
   assert.equal(sources.some((source) => source.siteId === LEGACY_RENT2BUY_WIX_SITE_ID), false);
 });
 
 test("historic standalone Rent2Buy Wix CMS can never resurrect drafted vehicles", () => {
   const source = fs.readFileSync(new URL("../api/stock-watch-wix-listing-presence.js", import.meta.url), "utf8");
   assert.doesNotMatch(source, new RegExp(LEGACY_RENT2BUY_WIX_SITE_ID.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(source, /VAN FINANCE Wix CMS only/);
-  assert.match(source, /stale[\s\S]*cannot resurrect vehicles already drafted/i);
+  assert.match(source, /Published ALLRENT2BUYVANS rows in the VAN FINANCE Wix CMS only/);
+  assert.match(source, /must not[\s\S]*resurrect a vehicle that is already Draft/i);
 });
 
 test("full-page SEO collections are never part of listing presence authority", () => {
