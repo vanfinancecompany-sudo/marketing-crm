@@ -26,11 +26,11 @@
     },
     {
       "path": "/api/buffer-facebook-automation-cron",
-      "schedule": "5 * * * *"
+      "schedule": "5 */2 * * *"
     },
     {
       "path": "/api/buffer-instagram-mirror",
-      "schedule": "14 * * * *"
+      "schedule": "14 */2 * * *"
     },
     {
       "path": "/api/marketing-editorial-automation-worker-routed",
@@ -46,7 +46,7 @@
     },
     {
       "path": "/api/buffer-publish-status",
-      "schedule": "35 * * * *"
+      "schedule": "35 */4 * * *"
     },
     {
       "path": "/api/carslink-auto-sync",
