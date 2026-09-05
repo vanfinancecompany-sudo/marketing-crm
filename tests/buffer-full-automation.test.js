@@ -200,12 +200,13 @@ test("temporary ten-Reel proof control is removed", () => {
   assert.match(reelBridge, /Buffer Draft/);
 });
 
-test("Vercel runs automation through the guarded retry cron and reconciles delivery hourly", () => {
+test("Vercel runs Buffer jobs at quota-safe cadence while keeping Story lookahead hourly", () => {
   const vercel = JSON.parse(source("vercel.json"));
   const schedules = new Map(vercel.crons.map((entry) => [entry.path, entry.schedule]));
-  assert.equal(schedules.get("/api/buffer-facebook-automation-cron"), "5 * * * *");
+  assert.equal(schedules.get("/api/buffer-facebook-automation-cron"), "5 */2 * * *");
   assert.equal(schedules.has("/api/buffer-facebook-automation-worker"), false);
-  assert.equal(schedules.get("/api/buffer-publish-status"), "35 * * * *");
+  assert.equal(schedules.get("/api/buffer-facebook-story-automation"), "25 * * * *");
+  assert.equal(schedules.get("/api/buffer-publish-status"), "35 */4 * * *");
 });
 
 test("cron wrapper retries only transient Reel transport failures", () => {
