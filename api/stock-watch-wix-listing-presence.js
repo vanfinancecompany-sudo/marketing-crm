@@ -6,6 +6,15 @@ const MAX_ROWS_PER_COLLECTION = 2000;
 
 const FINANCE_WIX_SITE_ID = "85f11c52-ee54-495d-aaec-a351831709b5";
 
+const FINANCE_SOURCES = Object.freeze([
+  {
+    siteId: FINANCE_WIX_SITE_ID,
+    siteLabel: "VAN FINANCE Wix · Finance CMS",
+    collectionId: "VANFINANCE-ALLVANS",
+    collectionLabel: "VAN FINANCE - ALL VANS",
+  },
+]);
+
 const CAR_SOURCES = Object.freeze([
   { siteId: FINANCE_WIX_SITE_ID, siteLabel: "VAN FINANCE Wix", collectionId: "CARFINANCE", collectionLabel: "CAR FINANCE" },
 ]);
@@ -24,6 +33,11 @@ const RENT2BUY_SOURCES = Object.freeze([
 
 function clean(value) {
   return String(value ?? "").trim();
+}
+
+function parsePrice(value) {
+  const numeric = Number(String(value ?? "").replace(/[^0-9.]/g, ""));
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
 }
 
 function wixHeaders(siteId) {
@@ -45,8 +59,20 @@ function itemPublishStatus(item) {
   return clean(item?.data?._publishStatus || item?._publishStatus || "").toUpperCase();
 }
 
+function itemPrice(item) {
+  const data = item?.data || {};
+  return parsePrice(data.price ?? data.priceVat ?? data.salePrice ?? null);
+}
+
+function itemUpdatedAt(item) {
+  const value = item?.data?._updatedDate?.$date || item?.data?._updatedDate || item?._updatedDate?.$date || item?._updatedDate || null;
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+}
+
 async function loadSource(source) {
-  const registrations = new Set();
+  const vehiclesByRegistration = new Map();
   let scanned = 0;
 
   for (let offset = 0; offset < MAX_ROWS_PER_COLLECTION; offset += PAGE_SIZE) {
@@ -74,24 +100,90 @@ async function loadSource(source) {
       const status = itemPublishStatus(item);
       if (status && status !== "PUBLISHED") continue;
       const registration = itemRegistration(item);
-      if (registration) registrations.add(registration);
+      if (!registration) continue;
+      vehiclesByRegistration.set(registration, {
+        registration,
+        title: clean(item?.data?.vanDescription || item?.data?.title || registration),
+        price: itemPrice(item),
+        updated_at: itemUpdatedAt(item),
+        collection_id: source.collectionId,
+      });
     }
 
     if (page.length < PAGE_SIZE) break;
   }
 
+  const vehicles = Array.from(vehiclesByRegistration.values());
   return {
     ...source,
-    registrations: Array.from(registrations),
+    registrations: vehicles.map((vehicle) => vehicle.registration),
+    vehicles,
     scanned,
   };
 }
 
 export function sourcesForPipeline(pipelineValue) {
   const pipeline = clean(pipelineValue).toLowerCase();
+  if (pipeline === "finance") return FINANCE_SOURCES;
   if (pipeline === "cars") return CAR_SOURCES;
   if (pipeline === "rent2buy") return RENT2BUY_SOURCES;
   return [];
+}
+
+export async function loadLiveWixListingPresence(pipelineValue) {
+  const pipeline = clean(pipelineValue).toLowerCase();
+  const sources = sourcesForPipeline(pipeline);
+  if (!sources.length) {
+    return {
+      ok: false,
+      pipeline,
+      complete: false,
+      registrations: [],
+      vehicles: [],
+      registrationCount: 0,
+      sources: [],
+      errors: [{ error: "Live Wix listing presence is not configured for this pipeline." }],
+      authority: "Not configured",
+    };
+  }
+
+  const settled = await Promise.allSettled(sources.map(loadSource));
+  const vehiclesByRegistration = new Map();
+  const results = settled.map((result, index) => {
+    const source = sources[index];
+    if (result.status === "rejected") {
+      return {
+        ...source,
+        ok: false,
+        scanned: 0,
+        registrations: [],
+        vehicles: [],
+        error: clean(result.reason?.message || result.reason || "Wix listing check failed."),
+      };
+    }
+    result.value.vehicles.forEach((vehicle) => vehiclesByRegistration.set(vehicle.registration, vehicle));
+    return { ...result.value, ok: true, error: "" };
+  });
+
+  const errors = results.filter((result) => !result.ok);
+  const vehicles = Array.from(vehiclesByRegistration.values()).sort((a, b) => a.registration.localeCompare(b.registration));
+  const authority = pipeline === "cars"
+    ? "Live CARFINANCE Wix listing state"
+    : pipeline === "finance"
+      ? "Published VANFINANCE-ALLVANS rows in the VAN FINANCE Wix CMS only"
+      : "Published ALLRENT2BUYVANS rows in the VAN FINANCE Wix CMS only";
+
+  return {
+    ok: true,
+    pipeline,
+    complete: errors.length === 0,
+    registrations: vehicles.map((vehicle) => vehicle.registration),
+    vehicles,
+    registrationCount: vehicles.length,
+    sources: results,
+    errors: errors.map((item) => ({ siteLabel: item.siteLabel, collectionLabel: item.collectionLabel, error: item.error })),
+    authority,
+  };
 }
 
 export default async function handler(request, response) {
@@ -102,39 +194,9 @@ export default async function handler(request, response) {
   }
 
   const pipeline = clean(request.query?.pipeline).toLowerCase();
-  const sources = sourcesForPipeline(pipeline);
-  if (!sources.length) {
-    return response.status(400).json({ ok: false, message: "Live Wix listing presence is only available for Cars and Rent2Buy." });
+  const presence = await loadLiveWixListingPresence(pipeline);
+  if (!presence.ok && presence.authority === "Not configured") {
+    return response.status(400).json({ ok: false, message: "Live Wix listing presence is only available for Finance, Cars and Rent2Buy." });
   }
-
-  const settled = await Promise.allSettled(sources.map(loadSource));
-  const registrations = new Set();
-  const results = settled.map((result, index) => {
-    const source = sources[index];
-    if (result.status === "rejected") {
-      return {
-        ...source,
-        ok: false,
-        scanned: 0,
-        registrations: [],
-        error: clean(result.reason?.message || result.reason || "Wix listing check failed."),
-      };
-    }
-    result.value.registrations.forEach((registration) => registrations.add(registration));
-    return { ...result.value, ok: true, error: "" };
-  });
-
-  const errors = results.filter((result) => !result.ok);
-  return response.status(200).json({
-    ok: true,
-    pipeline,
-    complete: errors.length === 0,
-    registrations: Array.from(registrations).sort(),
-    registrationCount: registrations.size,
-    sources: results,
-    errors: errors.map((item) => ({ siteLabel: item.siteLabel, collectionLabel: item.collectionLabel, error: item.error })),
-    authority: pipeline === "cars"
-      ? "Live CARFINANCE Wix listing state"
-      : "Published ALLRENT2BUYVANS rows in the VAN FINANCE Wix CMS only",
-  });
+  return response.status(200).json(presence);
 }
