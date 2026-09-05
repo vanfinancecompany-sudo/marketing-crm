@@ -71,6 +71,61 @@ test("stalled and stale provider refreshes are caught without an AI call", () =>
   assert.ok(issues.some((item) => item.code === "STOCK_SOURCE_REFRESH_STALLED"));
 });
 
+test("a long refresh that is still making progress is not reported as stalled", () => {
+  const snapshot = healthySnapshot({
+    provider: {
+      ...healthySnapshot().provider,
+      checkedAt: "2026-09-04T18:55:00.000Z",
+      refresh: {
+        status: "running",
+        stage: "waiting_next_batch",
+        startedAt: "2026-09-04T15:00:00.000Z",
+        updatedAt: "2026-09-04T18:55:00.000Z",
+        succeeded: 12,
+        failed: 6,
+        remaining: 120,
+      },
+    },
+  });
+  const issues = buildStockWatchMonitorIssues({ snapshot, previousSnapshot: healthySnapshot(), actionLogs: [], now: NOW });
+  assert.equal(issues.some((item) => item.code === "STOCK_SOURCE_REFRESH_STALLED"), false);
+  const failures = issues.find((item) => item.code === "STOCK_SOURCE_REFRESH_FAILURES");
+  assert.ok(failures);
+  assert.equal(failures.severity, "warning");
+});
+
+test("failed Wix authority reads do not become fake live-stock collapse alarms", () => {
+  const snapshot = healthySnapshot({
+    counts: { ...healthySnapshot().counts, financeLive: 0, rent2buyLive: 0, financeReserved: 0, rent2buyReserved: 0 },
+    registrations: { financeLive: [], rent2buyLive: [] },
+    queries: {
+      crm: { ok: true },
+      rent2buy: { ok: false, pipeline: "rent2buy", error: "MetaSite not found", collectionId: "ALLRENT2BUYVANS" },
+      finance: { ok: false, pipeline: "finance", error: "MetaSite not found", collectionId: "VANFINANCE-ALLVANS" },
+      actionLogs: { ok: true },
+    },
+  });
+  const previous = healthySnapshot({ counts: { ...healthySnapshot().counts, financeLive: 142, rent2buyLive: 55, rent2buyReserved: 8 } });
+  const issues = buildStockWatchMonitorIssues({ snapshot, previousSnapshot: previous, actionLogs: [], now: NOW });
+  assert.equal(issues.filter((item) => item.code === "AUTHORITY_QUERY_FAILED").length, 2);
+  assert.equal(issues.some((item) => item.code === "COUNT_JUMP_FINANCE_LIVE"), false);
+  assert.equal(issues.some((item) => item.code === "COUNT_JUMP_RENT2BUY_LIVE"), false);
+  assert.equal(issues.some((item) => item.code === "RENT2BUY_LIVE_ZERO"), false);
+  assert.equal(issues.some((item) => item.code === "RENT2BUY_RESERVED_JUMP"), false);
+});
+
+test("provider read failure does not become a fake provider vehicle-count collapse", () => {
+  const snapshot = healthySnapshot({
+    providerError: "Provider unavailable",
+    provider: { providerId: "vansco_dragon", providerLabel: "Vansco / Dragon2000", vehicleCount: 0, vehicles: [], refresh: {} },
+    counts: { ...healthySnapshot().counts, providerVehicles: 0 },
+  });
+  const previous = healthySnapshot({ counts: { ...healthySnapshot().counts, providerVehicles: 290 } });
+  const issues = buildStockWatchMonitorIssues({ snapshot, previousSnapshot: previous, actionLogs: [], now: NOW });
+  assert.ok(issues.some((item) => item.code === "STOCK_SOURCE_UNAVAILABLE"));
+  assert.equal(issues.some((item) => item.code === "COUNT_JUMP_PROVIDER"), false);
+});
+
 test("provider config is swappable without changing monitor business rules", () => {
   assert.deepEqual(stockSourceProviderConfig({ STOCK_SOURCE_PROVIDER_ID: "vansco" }), { id: "vansco_dragon", label: "Vansco / Dragon2000", kind: "supabase_cache", switchReady: true });
   assert.deepEqual(stockSourceProviderConfig({ STOCK_SOURCE_PROVIDER_ID: "normalized_http", STOCK_SOURCE_PROVIDER_LABEL: "Monday Provider" }), { id: "normalized_http", label: "Monday Provider", kind: "normalized_http", switchReady: true });

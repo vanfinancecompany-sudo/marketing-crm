@@ -50,6 +50,9 @@ export function buildStockWatchMonitorIssues({ snapshot, previousSnapshot = null
   const counts = snapshot?.counts || {};
   const previousCounts = previousSnapshot?.counts || {};
   const queries = snapshot?.queries || {};
+  const providerHealthy = !snapshot?.providerError;
+  const rent2buyAuthorityHealthy = queries.rent2buy?.ok !== false;
+  const financeAuthorityHealthy = queries.finance?.ok !== false;
 
   if (snapshot?.providerError) {
     issues.push(issue({
@@ -68,12 +71,16 @@ export function buildStockWatchMonitorIssues({ snapshot, previousSnapshot = null
   } else {
     const updatedMs = millis(refresh.updatedAt || provider.checkedAt);
     const ageHours = updatedMs ? (nowMs - updatedMs) / 3_600_000 : Infinity;
-    if (refresh.status === "running" && refresh.startedAt && nowMs - millis(refresh.startedAt) > 2 * 3_600_000) {
+    const runAgeHours = refresh.startedAt ? (nowMs - millis(refresh.startedAt)) / 3_600_000 : 0;
+    const progressAgeMinutes = millis(refresh.updatedAt) ? (nowMs - millis(refresh.updatedAt)) / 60_000 : Infinity;
+    const runningAndProgressing = refresh.status === "running" && progressAgeMinutes <= 20;
+
+    if (refresh.status === "running" && refresh.startedAt && runAgeHours > 2 && progressAgeMinutes > 20) {
       issues.push(issue({
         severity: "critical",
         code: "STOCK_SOURCE_REFRESH_STALLED",
-        title: "Stock-source refresh has been running for more than two hours",
-        evidence: { refresh, ageHours: Number(ageHours.toFixed(2)) },
+        title: "Stock-source refresh has stopped progressing for more than 20 minutes",
+        evidence: { refresh, runAgeHours: Number(runAgeHours.toFixed(2)), progressAgeMinutes: Number(progressAgeMinutes.toFixed(1)) },
         likelyCause: "The source scan stopped progressing, a provider request is hanging, or continuation scheduling is not advancing the run.",
         lookHere: "api/vansco-cache-live-refresh.js (current provider) or the active provider adapter refresh path",
         directions: [
@@ -104,11 +111,14 @@ export function buildStockWatchMonitorIssues({ snapshot, previousSnapshot = null
       }));
     }
     if (Number(refresh.failed || 0) > 0 || refresh.error) {
+      const failed = Number(refresh.failed || 0);
+      const succeeded = Number(refresh.succeeded || 0);
+      const severity = failed >= 5 && (!runningAndProgressing || succeeded === 0) ? "critical" : "warning";
       issues.push(issue({
-        severity: Number(refresh.failed || 0) >= 5 ? "critical" : "warning",
+        severity,
         code: "STOCK_SOURCE_REFRESH_FAILURES",
         title: "Stock-source refresh contains failed records",
-        evidence: { failed: refresh.failed, remaining: refresh.remaining, error: refresh.error },
+        evidence: { failed, succeeded, remaining: refresh.remaining, error: refresh.error, progressAgeMinutes: Number(progressAgeMinutes.toFixed(1)) },
         likelyCause: "One or more source detail requests failed or returned an unexpected payload.",
         lookHere: "Latest provider refresh run and failing source records",
         directions: ["Inspect the latest refresh last_error and failed source URLs.", "Check whether the provider changed HTML/API fields.", "Avoid broad CMS changes until failed registrations are understood."],
@@ -141,7 +151,7 @@ export function buildStockWatchMonitorIssues({ snapshot, previousSnapshot = null
     }));
   }
 
-  if (Number(counts.rent2buyLive || 0) === 0 && queries.rent2buy?.ok !== false) {
+  if (Number(counts.rent2buyLive || 0) === 0 && rent2buyAuthorityHealthy) {
     issues.push(issue({
       severity: "critical",
       code: "RENT2BUY_LIVE_ZERO",
@@ -155,17 +165,19 @@ export function buildStockWatchMonitorIssues({ snapshot, previousSnapshot = null
   }
 
   const deltaSpecs = [
-    ["rent2buy_live", "Rent2Buy live stock", counts.rent2buyLive, previousCounts.rent2buyLive, "rent2buy", "VAN FINANCE Wix / ALLRENT2BUYVANS"],
-    ["finance_live", "Van Finance live stock", counts.financeLive, previousCounts.financeLive, "finance", "VAN FINANCE Wix / VANFINANCE-ALLVANS"],
-    ["provider", "Stock-source vehicle count", counts.providerVehicles, previousCounts.providerVehicles, "system", "Active stock-source adapter"],
+    ["rent2buy_live", "Rent2Buy live stock", counts.rent2buyLive, previousCounts.rent2buyLive, "rent2buy", "VAN FINANCE Wix / ALLRENT2BUYVANS", rent2buyAuthorityHealthy],
+    ["finance_live", "Van Finance live stock", counts.financeLive, previousCounts.financeLive, "finance", "VAN FINANCE Wix / VANFINANCE-ALLVANS", financeAuthorityHealthy],
+    ["provider", "Stock-source vehicle count", counts.providerVehicles, previousCounts.providerVehicles, "system", "Active stock-source adapter", providerHealthy],
   ];
-  for (const [key, label, current, previous, pipeline, lookHere] of deltaSpecs) {
+  for (const [key, label, current, previous, pipeline, lookHere, authorityHealthy] of deltaSpecs) {
+    if (!authorityHealthy) continue;
     const found = countDeltaIssue({ key, label, current, previous, pipeline, lookHere, directions: ["Compare this monitor run with the previous run.", "Check whether a bulk publish/draft/import happened.", "Check the relevant source/collection before changing records manually."] });
     if (found) issues.push(found);
   }
 
+  const previousRent2buyAuthorityHealthy = previousSnapshot?.queries?.rent2buy?.ok !== false;
   const reservedDelta = Number(counts.rent2buyReserved || 0) - Number(previousCounts.rent2buyReserved || 0);
-  if (previousSnapshot && reservedDelta >= 3) {
+  if (previousSnapshot && rent2buyAuthorityHealthy && previousRent2buyAuthorityHealthy && reservedDelta >= 3) {
     issues.push(issue({
       severity: reservedDelta >= 6 ? "critical" : "warning",
       code: "RENT2BUY_RESERVED_JUMP",
