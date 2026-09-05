@@ -281,6 +281,7 @@
     $("prepareSendButton").addEventListener("click", () => prepareSend().catch((error) => setMessage(error.message, true)));
     $("confirmSendButton").addEventListener("click", () => confirmSend().catch((error) => setMessage(error.message, true)));
     $("cancelPreparedSendButton").addEventListener("click", () => cancelPreparation().catch((error) => setMessage(error.message, true)));
+    $("productionConfirmationPhrase").addEventListener("input", renderControlStates);
     $("productionBatchSize").addEventListener("input", renderCampaignProgress);
   }
   function renderBrevoStatus() {
@@ -315,8 +316,12 @@
     const productionReason = sendBlockReason("production");
     const testDisabled = Boolean(testReason);
     const productionDisabled = Boolean(productionReason);
+    const prep = state.preparation;
+    const confirmationMatches = Boolean(prep && $("productionConfirmationPhrase")?.value.trim() === prep.confirmation_phrase);
     if ($("sendTestButton")) $("sendTestButton").disabled = testDisabled;
-    if ($("prepareSendButton")) $("prepareSendButton").disabled = productionDisabled;
+    if ($("prepareSendButton")) $("prepareSendButton").disabled = productionDisabled || Boolean(prep);
+    if ($("confirmSendButton")) $("confirmSendButton").disabled = productionDisabled || !confirmationMatches;
+    if ($("cancelPreparedSendButton")) $("cancelPreparedSendButton").disabled = !prep;
     if ($("testDisabledReason")) {
       $("testDisabledReason").textContent = testReason;
       $("testDisabledReason").classList.toggle("hidden", !testReason);
@@ -328,10 +333,6 @@
   }
   function renderPreparation() {
     const prep = state.preparation;
-    const button = $("confirmSendButton");
-    const cancel = $("cancelPreparedSendButton");
-    button.disabled = !prep;
-    cancel.disabled = !prep;
     $("productionConfirmationPhrase").placeholder = prep ? prep.confirmation_phrase : "Prepare first";
     $("preparationSummary").innerHTML = prep ? [
       ["Eligible before recent-contact restriction", prep.eligible_before_recent_contact_restriction],
