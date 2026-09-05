@@ -83,11 +83,23 @@ export default async function handler(request, response) {
     return;
   }
 
+  const code = firstQueryValue(request.query?.code);
+  const state = firstQueryValue(request.query?.state);
+
+  // The callback URL is occasionally opened directly by health checks, browsers,
+  // or copied links. That is not an OAuth failure, so handle it without logging a
+  // production error. A real Buffer callback always includes both values.
+  if (!code || !state) {
+    response.status(400).send(renderPage({
+      ok: false,
+      title: "Buffer connection callback",
+      message: "This page only completes a Buffer connection after authorization. No connection attempt was made.",
+    }));
+    return;
+  }
+
   try {
-    const result = await exchangeBufferOAuthCode({
-      code: firstQueryValue(request.query?.code),
-      state: firstQueryValue(request.query?.state),
-    });
+    const result = await exchangeBufferOAuthCode({ code, state });
     response.status(200).send(renderPage({
       ok: true,
       title: "Buffer connected",
