@@ -15,8 +15,10 @@ import {
   bufferCooldownRemainingMs,
   bufferDeferredPayload,
   bufferRetryAfterMs,
+  bufferThirtyDayQuota,
   isBufferRateLimitCooldownError,
   isBufferRateLimitMessage,
+  parseBufferRateLimitHeaders,
 } from "../lib/bufferRuntimeGuard.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -68,6 +70,30 @@ test("honours Buffer Retry-After seconds and exposes a non-failing deferred payl
   );
 });
 
+test("parses Buffer rolling-window headers and identifies the 30-day budget", () => {
+  const headers = new Map([
+    ["ratelimit", '"100-in-15min"; r=98; t=897, "250-in-1day"; r=248; t=86397, "3000-in-30days"; r=2969; t=696980'],
+    ["ratelimit-policy", '"100-in-15min"; q=100; w=900; pk=:one:, "250-in-1day"; q=250; w=86400; pk=:two:, "3000-in-30days"; q=3000; w=2592000; pk=:three:'],
+  ]);
+  const response = {
+    headers: {
+      get(name) {
+        return headers.get(String(name).toLowerCase()) || "";
+      },
+    },
+  };
+  const parsed = parseBufferRateLimitHeaders(response);
+  assert.equal(parsed.length, 3);
+  assert.deepEqual(bufferThirtyDayQuota({ rateLimits: parsed }), {
+    name: "3000-in-30days",
+    remaining: 2969,
+    resetSeconds: 696980,
+    quota: 3000,
+    windowSeconds: 2592000,
+    partitionKey: ":three:",
+  });
+});
+
 test("App Client cooldowns are isolated from the exhausted personal-access bucket", () => {
   const appClientError = new BufferRateLimitCooldownError(
     "app client cooling down",
@@ -81,6 +107,17 @@ test("App Client cooldowns are isolated from the exhausted personal-access bucke
   assert.match(runtime, /buffer-runtime-v2\/rate-limit-app-client\.json/);
   assert.match(runtime, /resolveBufferCredential/);
   assert.match(runtime, /source: credential\.source/);
+});
+
+test("monitoring queries are throttled before they can burn the monthly Buffer bucket", () => {
+  const runtime = source("lib/bufferRuntimeGuard.js");
+  assert.match(runtime, /GetSystemHealthBufferPosts/);
+  assert.match(runtime, /GetFacebookSentPosts/);
+  assert.match(runtime, /GetFacebookStoryAutomationPosts/);
+  assert.match(runtime, /GetVanFinanceInstagramPosts/);
+  assert.match(runtime, /buffer_request_throttle/);
+  assert.match(runtime, /buffer_quota_reserve/);
+  assert.match(runtime, /quotaUpdatedAt/);
 });
 
 test("Buffer OAuth uses PKCE, offline access and encrypted token storage", () => {

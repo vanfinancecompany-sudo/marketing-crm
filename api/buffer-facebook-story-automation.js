@@ -30,7 +30,7 @@ const CHANNEL_QUEUE_LIMIT = 10;
 const STORY_LOCAL_MINUTES = [10 * 60 + 30, 14 * 60 + 30, 18 * 60 + 30];
 const RENT2BUY_OFFSET_MINUTES = 10;
 const MIN_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
-const STORY_LOOKAHEAD_MS = 90 * 60 * 1000;
+const STORY_LOOKAHEAD_MS = 5 * 60 * 60 * 1000;
 
 const POSTS_QUERY = `
   query GetFacebookStoryAutomationPosts {
