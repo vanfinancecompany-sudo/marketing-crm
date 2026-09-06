@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import handler, { normalizeRent2BuyProofRequestPayload } from "../api/transactional-rent2buy-proof-request.js";
+import approvalHandler, { normalizeRent2BuyApprovalChasePayload } from "../api/transactional-rent2buy-approval-chase.js";
 
 function responseHarness() {
   const result = { statusCode: 200, payload: null, headers: {} };
@@ -98,6 +99,69 @@ test("rejects unauthorised proof request sends", async () => {
     assert.equal(result.statusCode, 401);
     assert.equal(result.payload.ok, false);
   } finally {
+    if (originalApiKey === undefined) delete process.env.MARKETING_CUSTOMER_DATABASE_API_KEY;
+    else process.env.MARKETING_CUSTOMER_DATABASE_API_KEY = originalApiKey;
+    if (originalSendGrid === undefined) delete process.env.SENDGRID_API_KEY;
+    else process.env.SENDGRID_API_KEY = originalSendGrid;
+  }
+});
+
+test("approval chase endpoint validates and sends CRM-rendered chase content", async () => {
+  const normalized = normalizeRent2BuyApprovalChasePayload({
+    lead_id: "lead-456",
+    application_ref: "r2b-def456",
+    customer_name: "Jordan Example",
+    customer_email: " JORDAN@EXAMPLE.COM ",
+    approval_chase_send_id: "approval-send-1",
+    chase_number: 2,
+    subject: "Final approval check",
+    html: "<p>Approval chase</p>",
+    text: "Approval chase",
+  });
+  assert.equal(normalized.customerEmail, "jordan@example.com");
+  assert.equal(normalized.chaseNumber, 2);
+
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.MARKETING_CUSTOMER_DATABASE_API_KEY;
+  const originalSendGrid = process.env.SENDGRID_API_KEY;
+  let providerRequest;
+  process.env.MARKETING_CUSTOMER_DATABASE_API_KEY = "marketing-secret";
+  process.env.SENDGRID_API_KEY = "SG.abcdefghijklmnop.qrstuvwxyzABCDEFGHIJKLMN";
+  globalThis.fetch = async (url, options) => {
+    providerRequest = { url, options };
+    return {
+      ok: true,
+      status: 202,
+      text: async () => "",
+      headers: { get: (name) => name.toLowerCase() === "x-message-id" ? "sg-approval-message-1" : "" },
+    };
+  };
+
+  try {
+    const { response, result } = responseHarness();
+    await approvalHandler({
+      method: "POST",
+      headers: { "x-marketing-customer-database-key": "marketing-secret" },
+      body: {
+        lead_id: "lead-456",
+        application_ref: "R2B-DEF456",
+        customer_name: "Jordan Example",
+        customer_email: "jordan@example.com",
+        approval_chase_send_id: "approval-send-1",
+        chase_number: 2,
+        subject: "Final approval check",
+        html: "<p>Approval chase</p>",
+        text: "Approval chase",
+      },
+    }, response);
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.payload.provider_message_id, "sg-approval-message-1");
+    const body = JSON.parse(providerRequest.options.body);
+    assert.deepEqual(body.categories, ["transactional", "rent2buy-approval-chase"]);
+    assert.equal(body.personalizations[0].custom_args.approval_chase_send_id, "approval-send-1");
+    assert.equal(body.personalizations[0].custom_args.approval_chase_number, "2");
+  } finally {
+    globalThis.fetch = originalFetch;
     if (originalApiKey === undefined) delete process.env.MARKETING_CUSTOMER_DATABASE_API_KEY;
     else process.env.MARKETING_CUSTOMER_DATABASE_API_KEY = originalApiKey;
     if (originalSendGrid === undefined) delete process.env.SENDGRID_API_KEY;
