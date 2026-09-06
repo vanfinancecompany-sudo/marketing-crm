@@ -72,8 +72,8 @@ test("honours Buffer Retry-After seconds and exposes a non-failing deferred payl
 
 test("parses Buffer rolling-window headers and identifies the 30-day budget", () => {
   const headers = new Map([
-    ["ratelimit", '"100-in-15min"; r=98; t=897, "250-in-1day"; r=248; t=86397, "3000-in-30days"; r=2969; t=696980'],
-    ["ratelimit-policy", '"100-in-15min"; q=100; w=900; pk=:one:, "250-in-1day"; q=250; w=86400; pk=:two:, "3000-in-30days"; q=3000; w=2592000; pk=:three:'],
+    ["ratelimit", '\"100-in-15min\"; r=98; t=897, \"250-in-1day\"; r=248; t=86397, \"3000-in-30days\"; r=2969; t=696980'],
+    ["ratelimit-policy", '\"100-in-15min\"; q=100; w=900; pk=:one:, \"250-in-1day\"; q=250; w=86400; pk=:two:, \"3000-in-30days\"; q=3000; w=2592000; pk=:three:'],
   ]);
   const response = {
     headers: {
@@ -159,6 +159,17 @@ test("Buffer OAuth uses PKCE, offline access and encrypted token storage", () =>
   const start = source("api/buffer-oauth/start.js");
   assert.match(start, /x-marketing-customer-database-key/);
   assert.match(start, /createBufferOAuthAuthorization/);
+});
+
+test("single-use Buffer refresh tokens are serialized across Vercel runtimes", () => {
+  const oauth = source("lib/bufferOAuth.js");
+  assert.match(oauth, /REFRESH_LOCK_PREFIX/);
+  assert.match(oauth, /refreshLockPath/);
+  assert.match(oauth, /allowOverwrite: false/);
+  assert.match(oauth, /waitForRotatedGrant/);
+  assert.match(oauth, /BUFFER_OAUTH_REFRESH_IN_PROGRESS/);
+  assert.match(oauth, /latestBeforeLock/);
+  assert.match(oauth, /latestAfterLock/);
 });
 
 test("all live Buffer readers share the runtime guard", () => {
