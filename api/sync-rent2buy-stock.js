@@ -2,6 +2,7 @@ import {
   RENT2BUY_ALL_VANS_COLLECTION_ID,
   RENT2BUY_WIX_SITE_ID,
 } from "../lib/rent2buyMonthlyPriceSync.js";
+import { loadCompleteWixStockSnapshot } from "../lib/wixStockSnapshot.js";
 
 const WIX_QUERY_URL = "https://www.wixapis.com/wix-data/v2/items/query";
 const DEFAULT_SYNC_ENDPOINT = "https://crm-roan-rho.vercel.app/api/sync-rent-vehicles";
@@ -50,6 +51,7 @@ async function queryWixPage(offset) {
       dataCollectionId: RENT2BUY_ALL_VANS_COLLECTION_ID,
       query: { paging: { limit: PAGE_SIZE, offset } },
       consistentRead: true,
+      returnTotalCount: true,
     }),
     cache: "no-store",
   });
@@ -61,17 +63,16 @@ async function queryWixPage(offset) {
     );
   }
 
-  const payload = await response.json();
-  return Array.isArray(payload?.dataItems) ? payload.dataItems : [];
+  return response.json();
 }
 
 async function loadCurrentRent2BuyStock() {
-  const rows = [];
-  for (let offset = 0; offset < MAX_ROWS; offset += PAGE_SIZE) {
-    const page = await queryWixPage(offset);
-    rows.push(...page);
-    if (page.length < PAGE_SIZE) break;
-  }
+  const { items: rows } = await loadCompleteWixStockSnapshot({
+    queryPage: queryWixPage,
+    source: "Rent2Buy Wix stock",
+    pageSize: PAGE_SIZE,
+    maxRows: MAX_ROWS,
+  });
 
   const latest = new Map();
   for (const item of rows) {
