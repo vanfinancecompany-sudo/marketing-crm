@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import {
+  loadCompleteWixStockSnapshot,
+  validateWixStockPage,
+} from "../lib/wixStockSnapshot.js";
 
 const FINANCE_WIX_SITE_ID = "85f11c52-ee54-495d-aaec-a351831709b5";
 const LEGACY_RENT2BUY_WIX_SITE_ID = "548f025b-673c-47f7-9bb6-383ab5d946e4";
@@ -10,6 +14,7 @@ const transformSource = () => fs.readFileSync(new URL("../scripts/apply-rent2buy
 const monthlyPriceLibSource = () => fs.readFileSync(new URL("../lib/rent2buyMonthlyPriceSync.js", import.meta.url), "utf8");
 const monthlyPriceApiSource = () => fs.readFileSync(new URL("../api/rent2buy-monthly-price-sync.js", import.meta.url), "utf8");
 const downstreamSyncSource = () => fs.readFileSync(new URL("../api/sync-rent2buy-stock.js", import.meta.url), "utf8");
+const financeSyncSource = () => fs.readFileSync(new URL("../api/sync-finance-stock.js", import.meta.url), "utf8");
 
 test("authoritative Rent2Buy API contains Finance Wix and excludes the historic standalone site", () => {
   const source = apiSource();
@@ -41,6 +46,70 @@ test("monthly price and downstream stock jobs share the Finance Wix authority", 
   assert.match(downstream, /dataCollectionId:\s*RENT2BUY_ALL_VANS_COLLECTION_ID/);
   assert.doesNotMatch(downstream, /WIX_RENT2BUY_STOCK_SITE_ID/);
   assert.doesNotMatch(downstream, /WIX_RENT2BUY_STOCK_COLLECTION/);
+});
+
+test("finance and Rent2Buy downstream syncs require complete consistent Wix snapshots", () => {
+  for (const source of [financeSyncSource(), downstreamSyncSource()]) {
+    assert.match(source, /loadCompleteWixStockSnapshot/);
+    assert.match(source, /consistentRead:\s*true/);
+    assert.match(source, /returnTotalCount:\s*true/);
+  }
+});
+
+test("Wix snapshot validation rejects malformed and premature pages", () => {
+  assert.throws(
+    () => validateWixStockPage({ pagingMetadata: { total: 150 } }, {
+      source: "Test stock",
+      offset: 0,
+      pageSize: 100,
+      maxRows: 2000,
+    }),
+    /snapshot is incomplete/
+  );
+
+  assert.throws(
+    () => validateWixStockPage({ dataItems: Array(20).fill({}), pagingMetadata: { total: 150 } }, {
+      source: "Test stock",
+      offset: 100,
+      pageSize: 100,
+      maxRows: 2000,
+      expectedTotal: 150,
+    }),
+    /ended early/
+  );
+
+  assert.throws(
+    () => validateWixStockPage({ dataItems: [], pagingMetadata: { total: 2001 } }, {
+      source: "Test stock",
+      offset: 0,
+      pageSize: 100,
+      maxRows: 2000,
+    }),
+    /safety limit/
+  );
+});
+
+test("Wix snapshot validation accepts only the exact final page and rejects changing totals", async () => {
+  const finalPage = validateWixStockPage(
+    { dataItems: Array(50).fill({}), pagingMetadata: { total: 150 } },
+    { source: "Test stock", offset: 100, pageSize: 100, maxRows: 2000, expectedTotal: 150 }
+  );
+  assert.equal(finalPage.complete, true);
+
+  let calls = 0;
+  await assert.rejects(
+    loadCompleteWixStockSnapshot({
+      source: "Test stock",
+      pageSize: 100,
+      maxRows: 2000,
+      queryPage: async () => {
+        calls += 1;
+        if (calls === 1) return { dataItems: Array(100).fill({}), pagingMetadata: { total: 150 } };
+        return { dataItems: Array(20).fill({}), pagingMetadata: { total: 120 } };
+      },
+    }),
+    /total changed from 150 to 120/
+  );
 });
 
 test("single-CMS build guard refuses any reintroduction of the old standalone Wix site", () => {
