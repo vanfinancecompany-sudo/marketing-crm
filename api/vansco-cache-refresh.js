@@ -1,12 +1,16 @@
 import {
   CACHE_TABLE,
-  discoverVanscoUrls,
   extractVanscoId,
   getSupabaseAdmin,
   normalizeUrl,
   vehicleTitleFromUrl,
   detectVehicleCategory,
 } from "./_vansco-cache-utils.js";
+import {
+  discoverAllVanscoUrls,
+  getPreviousVanscoUrlSnapshot,
+  markConfirmedAbsentVanscoRows,
+} from "./_vansco-url-snapshot-safety.js";
 
 export default async function handler(request, response) {
   if (!["GET", "POST"].includes(request.method)) {
@@ -16,14 +20,15 @@ export default async function handler(request, response) {
 
   try {
     const supabase = getSupabaseAdmin();
-    const discovery = await discoverVanscoUrls();
+    const previousSnapshot = await getPreviousVanscoUrlSnapshot(supabase);
+    const discovery = await discoverAllVanscoUrls();
     const now = new Date().toISOString();
     const urls = Array.from(new Set(discovery.urls.map(normalizeUrl).filter(Boolean)));
 
     if (!urls.length) {
       response.status(502).json({
         ok: false,
-        message: "Could not find current Vansco vehicle URLs from sitemap.",
+        message: "Could not find current Vansco vehicle URLs from sitemap. Existing cached stock was left unchanged.",
         discoveryAttempts: discovery.attempts,
       });
       return;
@@ -49,21 +54,24 @@ export default async function handler(request, response) {
 
     if (upsertError) throw upsertError;
 
-    const { error: staleError } = await supabase
-      .from(CACHE_TABLE)
-      .update({ is_currently_on_vansco: false, updated_at: now })
-      .not("stock_url", "in", `(${urls.map((url) => `"${url.replace(/"/g, "\\\"")}"`).join(",")})`);
-
-    if (staleError) throw staleError;
+    const stale = await markConfirmedAbsentVanscoRows(supabase, {
+      previousSnapshotAt: previousSnapshot.snapshotAt,
+      refreshedAt: now,
+    });
 
     response.setHeader("Cache-Control", "no-store, max-age=0");
     response.status(200).json({
       ok: true,
       fetchedAt: now,
       sitemapUrl: discovery.sitemapUrl,
+      sitemapUrls: discovery.sitemapUrls,
       discoveryAttempts: discovery.attempts,
       urlsFound: urls.length,
       rowsUpserted: rows.length,
+      previousActiveCount: previousSnapshot.activeCount,
+      staleRowsMarked: stale.staleRowsMarked,
+      staleMarkingSkipped: stale.staleMarkingSkipped,
+      staleMarkingReason: stale.reason,
     });
   } catch (error) {
     response.status(500).json({ ok: false, message: error?.message || "Could not refresh Vansco cache URL list." });

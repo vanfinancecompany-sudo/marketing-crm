@@ -150,6 +150,29 @@ test("build transform adds persistent action tracing and a visible Monitor panel
   assert.match(source, /Run health check now/);
 });
 
+test("Vansco URL discovery unions all configured sources instead of trusting the first nonempty response", () => {
+  const source = fs.readFileSync(new URL("../api/_vansco-url-snapshot-safety.js", import.meta.url), "utf8");
+  assert.match(source, /for \(const sitemapUrl of SITEMAP_URLS\)/);
+  assert.match(source, /for \(const url of urls\)/);
+  assert.match(source, /discovered\.add\(normalized\)/);
+  assert.doesNotMatch(source, /if \(urls\.length\) return/);
+});
+
+test("Vansco URL removals require absence from two successful snapshots", () => {
+  const helper = fs.readFileSync(new URL("../api/_vansco-url-snapshot-safety.js", import.meta.url), "utf8");
+  const manual = fs.readFileSync(new URL("../api/vansco-cache-refresh.js", import.meta.url), "utf8");
+  const transform = fs.readFileSync(new URL("../scripts/apply-vansco-stock-watch-followups.mjs", import.meta.url), "utf8");
+
+  assert.match(helper, /previousSnapshotAt/);
+  assert.match(helper, /\.lt\("last_seen_in_url_list_at", previousSnapshotAt\)/);
+  assert.match(helper, /two consecutive successful snapshots/i);
+  assert.match(manual, /getPreviousVanscoUrlSnapshot/);
+  assert.match(manual, /markConfirmedAbsentVanscoRows/);
+  assert.doesNotMatch(manual, /\.not\("stock_url", "in"/);
+  assert.match(transform, /two-snapshot stale confirmation/);
+  assert.match(transform, /markConfirmedAbsentVanscoRows/);
+});
+
 test("action logger closes a started trace instead of leaving a false stalled row", () => {
   const source = fs.readFileSync(new URL("../api/_stock-watch-action-log.js", import.meta.url), "utf8");
   assert.match(source, /\.eq\("trace_id", payload\.trace_id\)/);

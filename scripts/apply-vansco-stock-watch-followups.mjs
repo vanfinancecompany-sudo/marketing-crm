@@ -57,4 +57,43 @@ patchFile("../pages/VanscoStockWatchPage.jsx", [
   },
 ]);
 
-console.log("Applied Vansco Stock Watch follow-ups: completed scans show 100%, Rent2Buy authority is CRM ∩ live Wix, and image-readiness wording uses the five-photo threshold.");
+patchFile("../api/vansco-cache-live-refresh.js", [
+  {
+    label: "safe Vansco discovery import",
+    already: "discoverAllVanscoUrls,",
+    before: `  discoverVanscoUrls,\n`,
+    after: "",
+  },
+  {
+    label: "safe Vansco snapshot helper import",
+    already: `from "./_vansco-url-snapshot-safety.js";`,
+    before: `} from "./_vansco-cache-utils.js";\n`,
+    after: `} from "./_vansco-cache-utils.js";\nimport {\n  discoverAllVanscoUrls,\n  getPreviousVanscoUrlSnapshot,\n  markConfirmedAbsentVanscoRows,\n} from "./_vansco-url-snapshot-safety.js";\n`,
+  },
+  {
+    label: "safe all-source discovery",
+    already: "const discovery = await discoverAllVanscoUrls();",
+    before: "const discovery = await discoverVanscoUrls();",
+    after: "const discovery = await discoverAllVanscoUrls();",
+  },
+  {
+    label: "previous successful URL snapshot",
+    already: "const previousSnapshot = await getPreviousVanscoUrlSnapshot(supabase);",
+    before: `  const discovery = await discoverVanscoUrlsWithRetries();\n  const refreshedAt = nowIso();`,
+    after: `  const previousSnapshot = await getPreviousVanscoUrlSnapshot(supabase);\n  const discovery = await discoverVanscoUrlsWithRetries();\n  const refreshedAt = nowIso();`,
+  },
+  {
+    label: "two-snapshot stale confirmation",
+    already: "const stale = await markConfirmedAbsentVanscoRows(supabase,",
+    before: `  const { data: staleRows, error: staleUpdateError } = await supabase\n    .from(CACHE_TABLE)\n    .update({\n      is_currently_on_vansco: false,\n      updated_at: refreshedAt,\n    })\n    .eq("is_currently_on_vansco", true)\n    .lt("last_seen_in_url_list_at", refreshedAt)\n    .select("id");\n\n  if (staleUpdateError) throw staleUpdateError;\n\n  const staleRowsMarked = Array.isArray(staleRows) ? staleRows.length : 0;`,
+    after: `  const stale = await markConfirmedAbsentVanscoRows(supabase, {\n    previousSnapshotAt: previousSnapshot.snapshotAt,\n    refreshedAt,\n  });\n  const staleRowsMarked = stale.staleRowsMarked;`,
+  },
+  {
+    label: "stale confirmation diagnostics",
+    already: "staleMarkingReason: stale.reason",
+    before: `    staleRowsMarked,\n    staleMarkingSkipped: false,\n    usedFallbackCache: false,`,
+    after: `    staleRowsMarked,\n    staleMarkingSkipped: stale.staleMarkingSkipped,\n    staleMarkingReason: stale.reason,\n    previousActiveCount: previousSnapshot.activeCount,\n    usedFallbackCache: false,`,
+  },
+]);
+
+console.log("Applied Vansco Stock Watch follow-ups: completed scans show 100%, Rent2Buy authority is CRM ∩ live Wix, image-readiness uses the five-photo threshold, and URL removals require two successful snapshots.");

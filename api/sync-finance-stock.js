@@ -1,4 +1,5 @@
 import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
+import { loadCompleteWixStockSnapshot } from "../lib/wixStockSnapshot.js";
 
 const WIX_QUERY_URL = "https://www.wixapis.com/wix-data/v2/items/query";
 const DEFAULT_WIX_SITE_ID = "85f11c52-ee54-495d-aaec-a351831709b5";
@@ -41,6 +42,8 @@ async function queryWixPage(offset) {
     body: JSON.stringify({
       dataCollectionId: clean(process.env.WIX_FINANCE_STOCK_COLLECTION) || DEFAULT_COLLECTION,
       query: { paging: { limit: PAGE_SIZE, offset } },
+      consistentRead: true,
+      returnTotalCount: true,
     }),
     cache: "no-store",
   });
@@ -50,17 +53,16 @@ async function queryWixPage(offset) {
     throw new Error(`Wix stock query failed (${response.status})${detail ? `: ${detail}` : ""}`);
   }
 
-  const payload = await response.json();
-  return Array.isArray(payload?.dataItems) ? payload.dataItems : [];
+  return response.json();
 }
 
 async function fetchPublishedFinanceStock() {
-  const rows = [];
-  for (let offset = 0; offset < MAX_ROWS; offset += PAGE_SIZE) {
-    const page = await queryWixPage(offset);
-    rows.push(...page);
-    if (page.length < PAGE_SIZE) break;
-  }
+  const { items: rows } = await loadCompleteWixStockSnapshot({
+    queryPage: queryWixPage,
+    source: "Van Finance Wix stock",
+    pageSize: PAGE_SIZE,
+    maxRows: MAX_ROWS,
+  });
 
   const byRegistration = new Map();
   for (const item of rows) {
