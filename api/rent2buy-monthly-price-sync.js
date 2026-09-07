@@ -18,12 +18,12 @@ function authorize(request) {
   );
 }
 
-function configuration(environment = process.env) {
-  const apiKey = clean(environment.WIX_API_KEY);
+export function configuration(environment = process.env) {
+  const apiKey = clean(environment.WIX_FINANCE_API_KEY || environment.WIX_API_KEY);
   if (!apiKey) return null;
   return {
     apiKey,
-    siteId: clean(environment.WIX_RENT2BUY_SITE_ID, 500) || RENT2BUY_WIX_SITE_ID,
+    siteId: RENT2BUY_WIX_SITE_ID,
     apiBaseUrl: clean(environment.WIX_API_BASE_URL, 1000) || "https://www.wixapis.com",
   };
 }
@@ -100,11 +100,11 @@ export default async function handler(request, response) {
   try {
     const config = configuration();
     if (!config) {
-      console.info("RENT2BUY MONTHLY PRICE SYNC SKIPPED", { reason: "WIX_API_KEY is not configured for this deployment." });
+      console.info("RENT2BUY MONTHLY PRICE SYNC SKIPPED", { reason: "VAN FINANCE Wix API key is not configured for this deployment." });
       return response.status(200).json({
         ok: true,
         skipped: true,
-        reason: "Wix API is not configured for this deployment.",
+        reason: "VAN FINANCE Wix API key is not configured for this deployment.",
       });
     }
 
