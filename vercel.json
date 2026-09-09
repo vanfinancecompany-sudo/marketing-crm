@@ -1,4 +1,5 @@
 {
+  "ignoreCommand": "test \"$VERCEL_PROJECT_ID\" = \"prj_zD76dAe2MHZdBTO08GNFSqOb9UHf\"",
   "crons": [
     {
       "path": "/api/vansco-cache-live-refresh?auto=true&batchSize=15&maxMs=45000",
