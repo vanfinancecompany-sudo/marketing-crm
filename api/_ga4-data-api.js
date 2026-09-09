@@ -10,7 +10,20 @@ export const GA4_SITE_CONFIGS=[
 ];
 
 function clean(value,limit=10000){return String(value||'').trim().slice(0,limit);}
-function normalizePrivateKey(value){return clean(value).replace(/\\n/g,'\n');}
+function normalizePrivateKey(value){
+ let raw=String(value||'').trim();
+ if(!raw)return '';
+ const begin='-----BEGIN PRIVATE KEY-----';
+ const end='-----END PRIVATE KEY-----';
+ const beginIndex=raw.indexOf(begin);
+ const endIndex=raw.indexOf(end);
+ if(beginIndex!==-1&&endIndex!==-1&&endIndex>=beginIndex){
+  raw=raw.slice(beginIndex,endIndex+end.length);
+ }else if(raw.startsWith('"')&&raw.endsWith('"')){
+  try{raw=JSON.parse(raw);}catch{raw=raw.slice(1,-1);}
+ }
+ return String(raw).replace(/\\r\\n/g,'\n').replace(/\\n/g,'\n').replace(/\\r/g,'').replace(/\r\n/g,'\n').trim();
+}
 function normalizePropertyId(value){return clean(value,200).replace(/^properties\//,'');}
 function propertyIdFor(site){return normalizePropertyId(process.env[site.propertyEnv]||site.defaultPropertyId);}
 function base64url(input){return Buffer.from(input).toString('base64').replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');}
