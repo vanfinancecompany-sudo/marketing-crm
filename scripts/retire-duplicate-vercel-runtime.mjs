@@ -3,14 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DUPLICATE_PROJECT_ID = "prj_zD76dAe2MHZdBTO08GNFSqOb9UHf";
-const projectId = String(process.env.VERCEL_PROJECT_ID || "").trim();
-
-if (projectId !== DUPLICATE_PROJECT_ID) {
-  console.log("Primary/non-duplicate Vercel project detected; cron handlers remain unchanged.");
-  process.exit(0);
-}
-
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
 const cronHandlers = [
   "api/vansco-cache-live-refresh.js",
   "api/stock-watch-monitor-agent.js",
@@ -34,12 +28,26 @@ const retiredHandler = `export default async function handler(request, response)
 }
 `;
 
-for (const relativePath of cronHandlers) {
-  const filePath = path.join(root, relativePath);
-  if (!fs.existsSync(filePath)) {
-    throw new Error(`Duplicate-project retirement could not find ${relativePath}`);
+export function retireDuplicateVercelRuntime(environment = process.env) {
+  const projectId = String(environment.VERCEL_PROJECT_ID || "").trim();
+  if (projectId !== DUPLICATE_PROJECT_ID) {
+    console.log("Primary/non-duplicate Vercel project detected; cron handlers remain unchanged.");
+    return false;
   }
-  fs.writeFileSync(filePath, retiredHandler, "utf8");
+
+  for (const relativePath of cronHandlers) {
+    const filePath = path.join(root, relativePath);
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`Duplicate-project retirement could not find ${relativePath}`);
+    }
+    fs.writeFileSync(filePath, retiredHandler, "utf8");
+  }
+
+  console.log(`Retired ${cronHandlers.length} cron/runtime handlers for duplicate Vercel project ${DUPLICATE_PROJECT_ID}.`);
+  return true;
 }
 
-console.log(`Retired ${cronHandlers.length} cron/runtime handlers for duplicate Vercel project ${DUPLICATE_PROJECT_ID}.`);
+const currentFile = fileURLToPath(import.meta.url);
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(currentFile)) {
+  retireDuplicateVercelRuntime();
+}
