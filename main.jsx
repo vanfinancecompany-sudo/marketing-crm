@@ -7,6 +7,7 @@ import AutomationHealthCentre from "./components/AutomationHealthCentre.jsx";
 import StockReconciliationAgent from "./components/StockReconciliationAgent.jsx";
 import "./styles.css";
 import "./styles/stock-control-centre.css";
+import "./styles/stock-control-centre-layout-fix.css";
 import "./utils/overnightAutoRefreshPause.js";
 import "./utils/postingVisibilityStateAutoSync.js";
 import "./utils/vanscoWixPriceHelper.js";
