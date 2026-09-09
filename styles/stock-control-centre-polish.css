@@ -36,6 +36,13 @@
   font-size: 31px;
 }
 
+/* Keep every summary card visually consistent. Status is conveyed by copy/counts,
+ * not an arbitrary coloured top stripe on only some cards. */
+.stock-control-centre-page .stat-grid.stat-grid--centered .stat-card--blue,
+.stock-control-centre-page .stat-grid.stat-grid--centered .stat-card--amber {
+  border-top: 1px solid var(--scc-line) !important;
+}
+
 /* Workflow rail: spacious enough to read but still compact. */
 .stock-control-centre-page .stock-control-workflow {
   padding: 18px;
