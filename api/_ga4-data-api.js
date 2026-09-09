@@ -5,13 +5,14 @@ const DATA_API_BASE='https://analyticsdata.googleapis.com/v1beta';
 const SCOPE='https://www.googleapis.com/auth/analytics.readonly';
 
 export const GA4_SITE_CONFIGS=[
- {key:'vanFinance',label:'Van Finance Company',propertyEnv:'GA4_VFC_PROPERTY_ID'},
- {key:'rent2buy',label:'Rent2Buy Vans',propertyEnv:'GA4_RENT2BUY_PROPERTY_ID'},
+ {key:'vanFinance',label:'Van Finance Company',propertyEnv:'GA4_VFC_PROPERTY_ID',defaultPropertyId:'553434975'},
+ {key:'rent2buy',label:'Rent2Buy Vans',propertyEnv:'GA4_RENT2BUY_PROPERTY_ID',defaultPropertyId:'553487068'},
 ];
 
 function clean(value,limit=10000){return String(value||'').trim().slice(0,limit);}
 function normalizePrivateKey(value){return clean(value).replace(/\\n/g,'\n');}
 function normalizePropertyId(value){return clean(value,200).replace(/^properties\//,'');}
+function propertyIdFor(site){return normalizePropertyId(process.env[site.propertyEnv]||site.defaultPropertyId);}
 function base64url(input){return Buffer.from(input).toString('base64').replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');}
 function number(value){const parsed=Number(value);return Number.isFinite(parsed)?parsed:0;}
 
@@ -47,8 +48,8 @@ export function ga4EnvironmentStatus(){
   hasServiceAccount,
   sites:GA4_SITE_CONFIGS.map((site)=>({
    ...site,
-   propertyId:normalizePropertyId(process.env[site.propertyEnv]),
-   configured:Boolean(hasServiceAccount&&normalizePropertyId(process.env[site.propertyEnv])),
+   propertyId:propertyIdFor(site),
+   configured:Boolean(hasServiceAccount&&propertyIdFor(site)),
   })),
  };
 }
@@ -82,7 +83,7 @@ function firstMetricRow(report){return rowsByDimension(report)[0]?.metrics||{};}
 function pctChange(today,average){return average>0?Math.round(((today-average)/average)*100):null;}
 
 async function loadSiteSummary({accessToken,site}){
- const propertyId=normalizePropertyId(process.env[site.propertyEnv]);
+ const propertyId=propertyIdFor(site);
  if(!propertyId){
   return {...site,configured:false,source:'ga4',message:`Missing ${site.propertyEnv}.`,propertyId:''};
  }
