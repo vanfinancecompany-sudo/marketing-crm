@@ -160,6 +160,26 @@
     }
   ],
   "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "has": [{ "type": "host", "value": "marketing-crm-github-work.vercel.app" }],
+      "destination": "/duplicate-project-retired.json"
+    },
+    {
+      "source": "/api/(.*)",
+      "has": [{ "type": "host", "value": "marketing-crm-github-work-stuart-westons-projects.vercel.app" }],
+      "destination": "/duplicate-project-retired.json"
+    },
+    {
+      "source": "/api/(.*)",
+      "has": [{ "type": "host", "value": "marketing-crm-github-work-git-main-stuart-westons-projects.vercel.app" }],
+      "destination": "/duplicate-project-retired.json"
+    },
+    {
+      "source": "/api/(.*)",
+      "has": [{ "type": "host", "value": "marketing-crm-github-work-95nxmsvdy-stuart-westons-projects.vercel.app" }],
+      "destination": "/duplicate-project-retired.json"
+    },
     { "source": "/api/marketing-template-campaign-sends", "destination": "/api/marketing-template-campaign-sends-resilient" },
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
