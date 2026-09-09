@@ -1,0 +1,203 @@
+/*
+ * Second-pass Stock Control Centre polish.
+ *
+ * UI only. This deliberately changes no Stock Watch data, cache, comparison,
+ * action, Wix-price or future DealerKit behaviour.
+ */
+
+/* Let the summary cards use the full available width rather than clustering. */
+.stock-control-centre-page .stat-grid.stat-grid--centered {
+  width: 100%;
+  max-width: none;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  justify-content: stretch;
+  align-items: stretch;
+}
+
+.stock-control-centre-page .stat-grid.stat-grid--centered .stat-card {
+  width: 100%;
+  min-width: 0;
+  min-height: 102px;
+  padding: 16px 17px;
+}
+
+.stock-control-centre-page .stat-grid.stat-grid--centered .stat-card__label {
+  min-height: 30px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.stock-control-centre-page .stat-grid.stat-grid--centered .stat-card__value {
+  margin-top: 8px;
+  font-size: 30px;
+}
+
+/* Give the workflow rail a little more breathing room without making it tall. */
+.stock-control-centre-page .stock-control-workflow {
+  padding: 18px;
+  gap: 14px;
+}
+
+.stock-control-centre-page .stock-control-workflow__steps {
+  gap: 10px;
+}
+
+.stock-control-centre-page .stock-control-workflow__step {
+  min-height: 62px;
+  padding: 13px 14px;
+  display: grid;
+  align-content: center;
+}
+
+/*
+ * Vehicle cards now prioritise recognition of the vehicle.
+ * Full-width image first, details beneath. object-fit: contain prevents the
+ * narrow crop/slit effect and makes branded or unsuitable source images easy
+ * to spot before the future image-review controls are wired in.
+ */
+.stock-control-centre-page .vansco-card-grid {
+  grid-template-columns: repeat(auto-fit, minmax(390px, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.stock-control-centre-page .vansco-card {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.07);
+}
+
+.stock-control-centre-page .vansco-card__image-wrap {
+  width: 100%;
+  min-height: 0;
+  aspect-ratio: 16 / 10;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-bottom: 1px solid var(--scc-line);
+  background:
+    linear-gradient(180deg, #f8fafc 0%, #eef2f6 100%);
+}
+
+.stock-control-centre-page .vansco-card__image {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+  background: #f8fafc;
+}
+
+.stock-control-centre-page .vansco-card__image--placeholder {
+  min-height: 230px;
+}
+
+.stock-control-centre-page .vansco-card__body {
+  padding: 18px;
+  gap: 10px;
+}
+
+.stock-control-centre-page .vansco-card__body h3 {
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.stock-control-centre-page .vansco-card__badges {
+  gap: 6px;
+}
+
+.stock-control-centre-page .vansco-card__badges .tag,
+.stock-control-centre-page .vansco-card__badges .status-pill {
+  padding: 6px 9px;
+  font-size: 10px;
+}
+
+.stock-control-centre-page .vansco-card .field__textarea {
+  min-height: 76px;
+  background: #fbfcfe;
+}
+
+.stock-control-centre-page .vansco-card .card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.stock-control-centre-page .vansco-card .button {
+  flex: 0 1 auto;
+  min-height: 36px;
+  padding: 8px 11px;
+  line-height: 1.2;
+  white-space: normal;
+}
+
+/* Make the action-list section feel less like a wall of cards. */
+.stock-control-centre-page > .panel:not(.vansco-watch-panel) {
+  padding: 22px;
+}
+
+.stock-control-centre-page > .panel:not(.vansco-watch-panel) > .panel__header h3 {
+  font-size: 22px;
+}
+
+.stock-control-centre-page > .panel:not(.vansco-watch-panel) > .panel__header p {
+  margin-top: 5px;
+}
+
+/* Keep explanatory notes useful but visually secondary. */
+.stock-control-centre-page .vansco-watch-note {
+  padding: 9px 11px;
+  color: #667085;
+  background: #fafbfc;
+}
+
+@media (max-width: 1320px) {
+  .stock-control-centre-page .stat-grid.stat-grid--centered {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1080px) {
+  .stock-control-centre-page .stat-grid.stat-grid--centered {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .stock-control-centre-page .vansco-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 820px) {
+  .stock-control-centre-page .vansco-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .stock-control-centre-page .stat-grid.stat-grid--centered {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stock-control-centre-page .vansco-card__image-wrap {
+    aspect-ratio: 4 / 3;
+  }
+}
+
+@media (max-width: 520px) {
+  .stock-control-centre-page .stat-grid.stat-grid--centered {
+    grid-template-columns: 1fr;
+  }
+
+  .stock-control-centre-page .vansco-card__body {
+    padding: 15px;
+  }
+}
