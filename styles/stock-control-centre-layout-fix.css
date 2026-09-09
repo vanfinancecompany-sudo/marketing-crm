@@ -1,0 +1,62 @@
+/* Layout correction for Stock Control Centre preview.
+ * Keeps the UI-only migration shell while preventing vehicle cards from
+ * collapsing into narrow columns on wide desktop layouts.
+ */
+
+.stock-control-centre-page .vansco-card-grid {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 18px !important;
+  align-items: stretch;
+}
+
+.stock-control-centre-page .vansco-card {
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 160px minmax(0, 1fr) !important;
+  grid-template-rows: 1fr !important;
+}
+
+.stock-control-centre-page .vansco-card__image-wrap,
+.stock-control-centre-page .vansco-card__body {
+  min-width: 0;
+}
+
+.stock-control-centre-page .vansco-card__image {
+  width: 100%;
+  height: 100%;
+  min-height: 230px;
+  object-fit: cover;
+}
+
+.stock-control-centre-page .vansco-card .card-actions {
+  flex-wrap: wrap;
+}
+
+.stock-control-centre-page .vansco-card .button {
+  flex: 0 1 auto;
+  white-space: normal;
+}
+
+@media (max-width: 1560px) {
+  .stock-control-centre-page .vansco-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 1080px) {
+  .stock-control-centre-page .vansco-card-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .stock-control-centre-page .vansco-card {
+    grid-template-columns: 1fr !important;
+  }
+
+  .stock-control-centre-page .vansco-card__image {
+    height: 210px;
+    min-height: 210px;
+  }
+}

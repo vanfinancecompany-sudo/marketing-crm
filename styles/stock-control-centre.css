@@ -1,0 +1,466 @@
+/*
+ * Stock Control Centre UI preparation
+ *
+ * Presentation-only layer for the existing Vansco Stock Watch. The current
+ * cache, crawler, comparison, action and Wix price-update behaviour remains
+ * untouched. This shell is intentionally source-agnostic so DealerKit can be
+ * wired in later without another interface rebuild.
+ */
+
+.stock-control-centre-page {
+  --scc-ink: #101828;
+  --scc-muted: #667085;
+  --scc-line: #e4e7ec;
+  --scc-soft: #f8fafc;
+  --scc-red: #d71920;
+  --scc-dark: #141414;
+  --scc-green: #16803c;
+  --scc-amber: #b54708;
+  gap: 20px;
+}
+
+.stock-control-centre-page .vansco-watch-panel {
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid rgba(16, 24, 40, 0.08);
+  border-radius: 20px;
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+}
+
+.stock-control-centre-page .vansco-watch-panel > .panel__header {
+  position: relative;
+  align-items: flex-start;
+  margin: 0;
+  padding: 26px 28px 24px;
+  color: #ffffff;
+  background: linear-gradient(125deg, #101010 0%, #1d1d1f 64%, #43090c 100%);
+}
+
+.stock-control-centre-page .vansco-watch-panel > .panel__header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--scc-red), #ef4444 48%, transparent 82%);
+}
+
+.stock-control-centre-page .vansco-watch-panel > .panel__header h3 {
+  margin: 4px 0 6px;
+  font-size: clamp(26px, 3vw, 38px);
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+}
+
+.stock-control-centre-page .vansco-watch-panel > .panel__header p {
+  max-width: 700px;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.stock-control-centre-page .stock-control-eyebrow {
+  display: block;
+  margin-bottom: 4px;
+  color: #fca5a5;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.stock-control-centre-page .vansco-watch-panel > .panel__header .card-actions {
+  justify-content: flex-end;
+  max-width: 390px;
+}
+
+.stock-control-centre-page .vansco-watch-panel > .panel__header .button {
+  min-height: 42px;
+  border-radius: 10px;
+}
+
+.stock-control-centre-page .vansco-watch-panel > .panel__header .button--primary {
+  background: var(--scc-red);
+  border-color: var(--scc-red);
+  box-shadow: 0 10px 24px rgba(215, 25, 32, 0.24);
+}
+
+.stock-control-centre-page .vansco-watch-panel > .panel__header .button--ghost {
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.stock-control-centre-page .vansco-watch-panel > :not(.panel__header) {
+  margin-left: 24px;
+  margin-right: 24px;
+}
+
+.stock-control-centre-page .vansco-watch-panel > :last-child {
+  margin-bottom: 24px;
+}
+
+.stock-control-centre-page .vansco-watch-panel > .segmented-control:first-of-type {
+  margin-top: 22px;
+}
+
+.stock-control-centre-page .segmented-control {
+  width: fit-content;
+  max-width: calc(100% - 48px);
+  overflow-x: auto;
+  grid-auto-flow: column;
+  grid-template-columns: none;
+  justify-content: start;
+  padding: 4px;
+  border: 1px solid var(--scc-line);
+  border-radius: 12px;
+  background: #f2f4f7;
+  scrollbar-width: thin;
+}
+
+.stock-control-centre-page .segment {
+  white-space: nowrap;
+  min-height: 36px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: #475467;
+}
+
+.stock-control-centre-page .segment.is-active {
+  color: #ffffff;
+  background: var(--scc-dark);
+  box-shadow: 0 4px 12px rgba(16, 24, 40, 0.15);
+}
+
+.stock-control-centre-page .stock-control-workflow {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid var(--scc-line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #fafafa 100%);
+}
+
+.stock-control-centre-page .stock-control-workflow__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.stock-control-centre-page .stock-control-workflow__top strong {
+  display: block;
+  color: var(--scc-ink);
+  font-size: 14px;
+}
+
+.stock-control-centre-page .stock-control-workflow__top span {
+  display: block;
+  margin-top: 3px;
+  color: var(--scc-muted);
+  font-size: 12px;
+}
+
+.stock-control-centre-page .stock-control-workflow__badge {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  color: #991b1b !important;
+  background: #fff1f2;
+  font-size: 10px !important;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.stock-control-centre-page .stock-control-workflow__steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.stock-control-centre-page .stock-control-workflow__step {
+  position: relative;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--scc-line);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.stock-control-centre-page .stock-control-workflow__step::before {
+  content: attr(data-step);
+  display: block;
+  margin-bottom: 4px;
+  color: #98a2b3;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.stock-control-centre-page .stock-control-workflow__step strong {
+  display: block;
+  overflow: hidden;
+  color: #344054;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stock-control-centre-page .stock-control-workflow__step.is-live {
+  border-color: #d1fadf;
+  background: #f6fef9;
+}
+
+.stock-control-centre-page .stock-control-workflow__step.is-live strong {
+  color: var(--scc-green);
+}
+
+.stock-control-centre-page .stat-grid {
+  gap: 10px;
+  margin-top: 18px;
+  margin-bottom: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+}
+
+.stock-control-centre-page .stat-card {
+  min-height: 92px;
+  padding: 14px 15px;
+  border: 1px solid var(--scc-line);
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: none;
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.stock-control-centre-page .stat-card[role="button"]:hover {
+  transform: translateY(-1px);
+  border-color: #cbd5e1;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.07);
+}
+
+.stock-control-centre-page .stat-card__label {
+  color: var(--scc-muted);
+  font-size: 11px;
+  line-height: 1.3;
+  text-transform: none;
+}
+
+.stock-control-centre-page .stat-card__value {
+  margin-top: 7px;
+  color: var(--scc-ink);
+  font-size: 26px;
+  line-height: 1;
+}
+
+.stock-control-centre-page .stat-card--blue {
+  border-top: 3px solid #2563eb;
+}
+
+.stock-control-centre-page .stat-card--amber {
+  border-top: 3px solid #f59e0b;
+}
+
+.stock-control-centre-page .vansco-watch-note {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid #eaecf0;
+  border-radius: 10px;
+  color: #475467;
+  background: #f9fafb;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.stock-control-centre-page .vansco-watch-note--warning {
+  border-color: #fedf89;
+  color: #7a2e0e;
+  background: #fffaeb;
+}
+
+.stock-control-centre-page .vansco-watch-panel .field {
+  margin-top: 14px;
+}
+
+.stock-control-centre-page .vansco-watch-panel .field__input {
+  min-height: 42px;
+  border-radius: 10px;
+}
+
+.stock-control-centre-page > .panel:not(.vansco-watch-panel) {
+  padding: 20px;
+  border: 1px solid rgba(16, 24, 40, 0.08);
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.06);
+}
+
+.stock-control-centre-page > .panel:not(.vansco-watch-panel) > .panel__header {
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--scc-line);
+}
+
+.stock-control-centre-page .vansco-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(390px, 1fr));
+  gap: 14px;
+}
+
+.stock-control-centre-page .vansco-card {
+  grid-template-columns: 150px minmax(0, 1fr);
+  grid-template-rows: 1fr;
+  min-height: 220px;
+  border: 1px solid var(--scc-line);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+}
+
+.stock-control-centre-page .vansco-card__image-wrap {
+  min-height: 100%;
+  background: #f2f4f7;
+}
+
+.stock-control-centre-page .vansco-card__image {
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+  object-fit: cover;
+}
+
+.stock-control-centre-page .vansco-card__body {
+  min-width: 0;
+  padding: 16px;
+  gap: 8px;
+}
+
+.stock-control-centre-page .vansco-card__body h3 {
+  color: var(--scc-ink);
+  font-size: 17px;
+}
+
+.stock-control-centre-page .vansco-card__badges .tag,
+.stock-control-centre-page .vansco-card__badges .status-pill {
+  padding: 5px 8px;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.stock-control-centre-page .vehicle-card__meta {
+  color: #475467;
+  font-size: 12px;
+  line-height: 1.42;
+}
+
+.stock-control-centre-page .vansco-card .card-actions {
+  gap: 7px;
+  margin-top: 3px;
+}
+
+.stock-control-centre-page .vansco-card .button {
+  min-height: 34px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.stock-control-centre-page .vansco-card .field__textarea {
+  min-height: 70px;
+  border-radius: 9px;
+}
+
+.stock-control-centre-page [data-vansco-wix-price-helper] {
+  padding-top: 10px;
+  border-top: 1px solid var(--scc-line);
+}
+
+.stock-control-centre-page [data-vansco-wix-price-helper] > .button--primary {
+  background: var(--scc-dark);
+  border-color: var(--scc-dark);
+}
+
+.stock-control-centre-page .diagnostics-panel {
+  max-height: 360px;
+  overflow: auto;
+  border-radius: 10px;
+  background: #101828;
+  color: #d0d5dd;
+}
+
+@media (max-width: 1120px) {
+  .stock-control-centre-page .stock-control-workflow__steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .stock-control-centre-page .vansco-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .stock-control-centre-page .vansco-watch-panel > .panel__header {
+    padding: 22px 18px;
+  }
+
+  .stock-control-centre-page .vansco-watch-panel > .panel__header .card-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .stock-control-centre-page .vansco-watch-panel > .panel__header .button {
+    flex: 1 1 150px;
+  }
+
+  .stock-control-centre-page .vansco-watch-panel > :not(.panel__header) {
+    margin-left: 16px;
+    margin-right: 16px;
+  }
+
+  .stock-control-centre-page .stock-control-workflow__top {
+    display: grid;
+  }
+
+  .stock-control-centre-page .stock-control-workflow__badge {
+    width: fit-content;
+  }
+
+  .stock-control-centre-page .stock-control-workflow__steps {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .stock-control-centre-page .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stock-control-centre-page .vansco-card {
+    grid-template-columns: 108px minmax(0, 1fr);
+    min-height: 190px;
+  }
+
+  .stock-control-centre-page .vansco-card__image {
+    min-height: 190px;
+  }
+}
+
+@media (max-width: 520px) {
+  .stock-control-centre-page .stock-control-workflow__steps,
+  .stock-control-centre-page .stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stock-control-centre-page .vansco-card {
+    grid-template-columns: 1fr;
+  }
+
+  .stock-control-centre-page .vansco-card__image {
+    height: 190px;
+    min-height: 190px;
+  }
+}
