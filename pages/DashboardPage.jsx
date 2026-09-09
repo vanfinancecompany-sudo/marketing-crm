@@ -20,6 +20,7 @@ import {
   validateMarketingAccessKey,
 } from "../services/marketingAccess.js";
 import AIVisibilityWidget from "../components/AIVisibilityWidget.jsx";
+import Ga4PipelinePanel from "../components/Ga4PipelinePanel.jsx";
 
 const WEEKDAYS = [
   "Sunday",
@@ -299,6 +300,7 @@ export default function DashboardPage({ onNavigate }) {
         ))}
       </section>
       <AIVisibilityWidget onOpen={() => onNavigate?.("AI Visibility")} />
+      <Ga4PipelinePanel />
 
       <details className="operations-drawer">
         <summary>VIEW TOTALS AND HISTORY</summary>
