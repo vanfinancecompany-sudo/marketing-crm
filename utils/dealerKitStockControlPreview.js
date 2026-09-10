@@ -51,7 +51,8 @@ function renderSummary(panel, payload) {
   const issues = summary.issues || {};
   const issueCount = Number(issues.failedPositionCount || 0)
     + Number(issues.invalidRecordCount || 0)
-    + Number(issues.duplicateRegistrationCount || 0);
+    + Number(issues.duplicateRegistrationCount || 0)
+    + (issues.stableReportedTotal === false ? 1 : 0);
   const checkedText = formatCheckedAt(summary.checkedAt);
 
   if (summary.complete) {
@@ -65,7 +66,7 @@ function renderSummary(panel, payload) {
   badge.textContent = "SOURCE INCOMPLETE";
   badge.classList.remove("is-good");
   badge.classList.add("is-warning");
-  message.textContent = `DealerKit is connected, but this snapshot is not safe for cutover${checkedText ? ` (${checkedText})` : ""}. ${issueCount} source record issue${issueCount === 1 ? "" : "s"} detected. Existing Vansco/Dragon stock remains authoritative.`;
+  message.textContent = `DealerKit is connected, but this snapshot is not safe for cutover${checkedText ? ` (${checkedText})` : ""}. ${issueCount} source issue${issueCount === 1 ? "" : "s"} detected. Existing Vansco/Dragon stock remains authoritative.`;
 }
 
 function createPanel() {
@@ -139,12 +140,16 @@ function createPanel() {
 function installPanel() {
   if (typeof window === "undefined" || window.location.pathname !== "/vansco-stock-watch") return;
   const host = document.querySelector(".vansco-watch-panel");
-  if (!host || host.querySelector(`[${PANEL_ATTRIBUTE}]`)) return;
+  if (!host) return;
 
   const workflow = host.querySelector("[data-stock-control-workflow]");
-  const panel = createPanel();
-  if (workflow) workflow.insertAdjacentElement("afterend", panel);
-  else host.querySelector(":scope > .panel__header")?.insertAdjacentElement("afterend", panel);
+  const header = host.querySelector(":scope > .panel__header");
+  const anchor = workflow || header;
+  if (!anchor) return;
+
+  let panel = host.querySelector(`[${PANEL_ATTRIBUTE}]`);
+  if (!panel) panel = createPanel();
+  if (panel.previousElementSibling !== anchor) anchor.insertAdjacentElement("afterend", panel);
 }
 
 function scheduleScan() {
