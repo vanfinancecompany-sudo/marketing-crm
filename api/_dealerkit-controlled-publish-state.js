@@ -6,6 +6,7 @@ import { DEALERKIT_MANUAL_MEDIA_TABLE, WIX_MEDIA_GET_FILE_URL, manualMediaRowToC
 import { buildDealerKitWixManualMediaReadiness } from "../lib/dealerKitWixManualMediaReadiness.js";
 import { DEALERKIT_IMPORTED_MEDIA_TABLE, buildProductImageSets, importedMediaRowToClient } from "../lib/dealerKitWixVehicleMedia.js";
 import { RENT2BUY_CATEGORY_COLLECTIONS } from "../lib/dealerKitRent2BuyPlan.js";
+import { VAN_FINANCE_RENT2BUY_WIX_SITE_ID, STANDALONE_RENT2BUY_WIX_SITE_ID } from "../lib/dealerKitRent2BuyWixPlan.js";
 import { buildControlledPublishConfirmation, buildControlledVehiclePublishPlan } from "../lib/dealerKitControlledPublishPlan.js";
 
 const clean = (value, limit = 10000) => String(value ?? "").trim().slice(0, limit);
@@ -23,6 +24,28 @@ export function controlledWixConfiguration(environment = process.env) {
   const siteId = clean(environment.WIX_SITE_ID, 500);
   if (!apiKey || !siteId) throw new ControlledPublishError(500, "Controlled Wix publishing is not configured.");
   return { apiKey, siteId, apiBaseUrl: clean(environment.WIX_API_BASE_URL, 1000) || "https://www.wixapis.com" };
+}
+
+function firstConfiguredKey(environment, names = []) {
+  for (const name of names) {
+    const value = clean(environment?.[name], 4000);
+    if (value) return { apiKey: value, apiKeySource: name };
+  }
+  return null;
+}
+
+export function controlledRent2BuyWixConfigurations(environment = process.env, primaryConfiguration = null) {
+  const primary = primaryConfiguration || controlledWixConfiguration(environment);
+  const apiBaseUrl = clean(environment.WIX_API_BASE_URL, 1000) || primary.apiBaseUrl || "https://www.wixapis.com";
+  const financeKey = firstConfiguredKey(environment, ["WIX_FINANCE_API_KEY", "WIX_API_KEY", "WIX_RENT2BUY_API_KEY"])
+    || (primary.siteId === VAN_FINANCE_RENT2BUY_WIX_SITE_ID ? { apiKey: primary.apiKey, apiKeySource: "WIX_API_KEY" } : null);
+  const standaloneKey = firstConfiguredKey(environment, ["WIX_RENT2BUY_API_KEY", "WIX_API_KEY", "WIX_FINANCE_API_KEY"]);
+  if (!financeKey?.apiKey) throw new ControlledPublishError(500, "Van Finance Wix publishing credentials are not configured.");
+  if (!standaloneKey?.apiKey) throw new ControlledPublishError(500, "Standalone Rent2Buy Wix publishing credentials are not configured.");
+  return [
+    { ...financeKey, apiBaseUrl, siteId: VAN_FINANCE_RENT2BUY_WIX_SITE_ID, siteLabel: "VAN FINANCE Wix · Rent2Buy", siteRole: "authoritative" },
+    { ...standaloneKey, apiBaseUrl, siteId: STANDALONE_RENT2BUY_WIX_SITE_ID, siteLabel: "RENT2BUY VANS Wix", siteRole: "mirror" },
+  ];
 }
 
 export async function controlledWixRequest(configuration, path, { method = "POST", body } = {}) {
@@ -43,7 +66,7 @@ export async function controlledWixRequest(configuration, path, { method = "POST
   const payload = await result.json().catch(() => ({}));
   if (!result.ok) {
     const message = clean(payload?.message || payload?.details?.applicationError?.description || payload?.details?.validationError?.fieldViolations?.[0]?.description, 1000);
-    throw new ControlledPublishError(result.status === 401 || result.status === 403 ? 502 : result.status, message || `Wix returned status ${result.status}.`, { wixStatus: result.status });
+    throw new ControlledPublishError(result.status === 401 || result.status === 403 ? 502 : result.status, message || `Wix returned status ${result.status}.`, { wixStatus: result.status, wixSiteId: configuration.siteId });
   }
   return payload;
 }
@@ -61,7 +84,14 @@ async function queryRegistration(configuration, collectionId, registration, coll
     method: "POST",
     body: { dataCollectionId: collectionId, query: { filter: { title: { $eq: registration } }, paging: { limit: 3, offset: 0 } }, consistentRead: true },
   });
-  return { collectionId, collection: collection || { id: collectionId }, items: Array.isArray(payload.dataItems) ? payload.dataItems : [] };
+  return {
+    siteId: configuration.siteId,
+    siteLabel: configuration.siteLabel || null,
+    siteRole: configuration.siteRole || null,
+    collectionId,
+    collection: collection || { id: collectionId },
+    items: Array.isArray(payload.dataItems) ? payload.dataItems : [],
+  };
 }
 
 async function verifyManualRow(row) {
@@ -116,13 +146,15 @@ export async function buildFreshControlledPublishState(registrationInput, enviro
   const vehicle = await fetchDealerKitStockDetail(decision.supplierStockId, { specifications: true });
   if (normalizeFinanceRegistration(vehicle?.registration || "") !== registration) throw new ControlledPublishError(409, "DealerKit registration changed. Re-open and save the review again.");
   const configuration = controlledWixConfiguration(environment);
+  const rent2buyConfigurations = controlledRent2BuyWixConfigurations(environment, configuration);
 
-  const [manualMediaReadiness, importedDealerKitMedia, vfcWixResults, rent2buyWixResults] = await Promise.all([
+  const [manualMediaReadiness, importedDealerKitMedia, vfcWixResults, rent2buyNestedResults] = await Promise.all([
     loadManualReadiness(supabase, registration),
     loadImportedReadiness(supabase, configuration, vehicle),
     Promise.all(VAN_FINANCE_WIX_COLLECTIONS.map((collection) => queryRegistration(configuration, collection.id, registration, collection))),
-    Promise.all(allRent2BuyCollectionIds().map((collectionId) => queryRegistration(configuration, collectionId, registration))),
+    Promise.all(rent2buyConfigurations.map((siteConfiguration) => Promise.all(allRent2BuyCollectionIds().map((collectionId) => queryRegistration(siteConfiguration, collectionId, registration))))),
   ]);
+  const rent2buyWixResults = rent2buyNestedResults.flat();
   const effectiveDecision = {
     ...decision,
     ...(productMode === "finance" ? { financeEnabled: true, rent2buyEnabled: false } : {}),
@@ -130,8 +162,10 @@ export async function buildFreshControlledPublishState(registrationInput, enviro
     ...(productMode === "both" ? { financeEnabled: true, rent2buyEnabled: true } : {}),
   };
   const imageSets = buildProductImageSets({ vehicle, decision: effectiveDecision, importedDealerKitMedia, manualMediaReadiness });
-  const plan = buildControlledVehiclePublishPlan({ vehicle, decision: effectiveDecision, imageSets, vfcWixResults, rent2buyWixResults, productMode });
+  const rent2buySites = rent2buyConfigurations.map(({ siteId, siteLabel, siteRole }) => ({ siteId, siteLabel, siteRole }));
+  const plan = buildControlledVehiclePublishPlan({ vehicle, decision: effectiveDecision, imageSets, vfcWixResults, rent2buyWixResults, rent2buySites, productMode });
   plan.confirmation = buildControlledPublishConfirmation(plan);
+  const configurationsBySiteId = Object.fromEntries([configuration, ...rent2buyConfigurations].map((item) => [item.siteId, item]));
 
-  return { registration, supabase, configuration, decision: effectiveDecision, vehicle, manualMediaReadiness, importedDealerKitMedia, imageSets, vfcWixResults, rent2buyWixResults, plan };
+  return { registration, supabase, configuration, rent2buyConfigurations, configurationsBySiteId, decision: effectiveDecision, vehicle, manualMediaReadiness, importedDealerKitMedia, imageSets, vfcWixResults, rent2buyWixResults, plan };
 }
