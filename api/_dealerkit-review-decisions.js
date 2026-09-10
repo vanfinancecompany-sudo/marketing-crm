@@ -1,4 +1,5 @@
 import { normalizeRegistration } from "./_vansco-cache-utils.js";
+import { DEALERKIT_PRODUCT_IMAGE_MARKERS } from "../lib/dealerKitProductImageState.js";
 
 export const DEALERKIT_REVIEW_TABLE = "dealerkit_review_decisions";
 
@@ -23,6 +24,7 @@ export const DEALERKIT_FINANCE_CATEGORY_KEYS = Object.freeze([
 
 const REVIEW_STATUS_SET = new Set(DEALERKIT_REVIEW_STATUSES);
 const FINANCE_CATEGORY_SET = new Set(DEALERKIT_FINANCE_CATEGORY_KEYS);
+const PRODUCT_IMAGE_MARKER_SET = new Set(Object.values(DEALERKIT_PRODUCT_IMAGE_MARKERS));
 
 function clean(value, limit = 3000) {
   return String(value ?? "").trim().slice(0, limit);
@@ -34,9 +36,13 @@ function isoOrNull(value) {
   return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
-function cleanIdArray(value, { max = 80 } = {}) {
-  const items = Array.isArray(value) ? value : [];
-  return Array.from(new Set(items.map((item) => clean(item, 300)).filter(Boolean))).slice(0, max);
+function cleanIdArray(value, { max = 80, dedupe = true } = {}) {
+  const items = (Array.isArray(value) ? value : []).map((item) => clean(item, 300)).filter(Boolean);
+  return (dedupe ? Array.from(new Set(items)) : items).slice(0, max);
+}
+
+function hasProductImageMarkers(values = []) {
+  return (Array.isArray(values) ? values : []).some((value) => PRODUCT_IMAGE_MARKER_SET.has(clean(value, 300)));
 }
 
 function cleanFinanceCategories(value, financeEnabled) {
@@ -80,9 +86,9 @@ export function rowToDealerKitReviewDecision(row = {}) {
     financeCategories: cleanFinanceCategories(row.finance_categories, row.finance_enabled !== false),
     rent2buyEnabled: Boolean(row.rent2buy_enabled),
     rent2buyCategories: cleanIdArray(row.rent2buy_categories, { max: 20 }),
-    excludedImageIds: cleanIdArray(row.excluded_image_ids),
+    excludedImageIds: cleanIdArray(row.excluded_image_ids, { max: 200, dedupe: false }),
     primaryImageId: clean(row.primary_image_id, 300) || null,
-    imageOrderIds: cleanIdArray(row.image_order_ids),
+    imageOrderIds: cleanIdArray(row.image_order_ids, { max: 200, dedupe: false }),
     reviewedSourceUpdatedAt: isoOrNull(row.reviewed_source_updated_at),
     notes: clean(row.notes, 2000),
     createdAt: isoOrNull(row.created_at),
@@ -100,11 +106,15 @@ export function normalizeDealerKitReviewInput(input = {}) {
   if (!REVIEW_STATUS_SET.has(reviewStatus)) throw new Error("Review status is not allowed at this stage.");
 
   const financeEnabled = input.financeEnabled !== false;
-  const excludedImageIds = cleanIdArray(input.excludedImageIds);
+  const excludedImageIds = cleanIdArray(input.excludedImageIds, { max: 200, dedupe: false });
+  const imageOrderIdsRaw = cleanIdArray(input.imageOrderIds, { max: 200, dedupe: false });
+  const splitProductImageState = hasProductImageMarkers(excludedImageIds) || hasProductImageMarkers(imageOrderIdsRaw);
   const excludedSet = new Set(excludedImageIds);
   const requestedPrimary = clean(input.primaryImageId, 300);
-  const primaryImageId = requestedPrimary && !excludedSet.has(requestedPrimary) ? requestedPrimary : null;
-  const imageOrderIds = cleanIdArray(input.imageOrderIds).filter((id) => !excludedSet.has(id));
+  const primaryImageId = requestedPrimary && (splitProductImageState || !excludedSet.has(requestedPrimary)) ? requestedPrimary : null;
+  const imageOrderIds = splitProductImageState
+    ? imageOrderIdsRaw
+    : imageOrderIdsRaw.filter((id) => !excludedSet.has(id));
 
   return {
     supplierStockId,
