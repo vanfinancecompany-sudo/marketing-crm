@@ -5,7 +5,7 @@ import { VAN_FINANCE_WIX_COLLECTIONS, normalizeFinanceRegistration } from "../li
 import { DEALERKIT_MANUAL_MEDIA_TABLE, WIX_MEDIA_GET_FILE_URL, manualMediaRowToClient, manualMediaSiteConfiguration } from "../lib/dealerKitWixManualMedia.js";
 import { buildDealerKitWixManualMediaReadiness } from "../lib/dealerKitWixManualMediaReadiness.js";
 import { DEALERKIT_IMPORTED_MEDIA_TABLE, buildProductImageSets, importedMediaRowToClient } from "../lib/dealerKitWixVehicleMedia.js";
-import { RENT2BUY_CATEGORY_COLLECTIONS, normalizeRent2BuyCategories } from "../lib/dealerKitRent2BuyPlan.js";
+import { RENT2BUY_CATEGORY_COLLECTIONS } from "../lib/dealerKitRent2BuyPlan.js";
 import { buildControlledPublishConfirmation, buildControlledVehiclePublishPlan } from "../lib/dealerKitControlledPublishPlan.js";
 
 const clean = (value, limit = 10000) => String(value ?? "").trim().slice(0, limit);
@@ -68,22 +68,12 @@ async function verifyManualRow(row) {
   const stored = manualMediaRowToClient(row);
   const configuration = manualMediaSiteConfiguration(stored.purpose);
   const liveVerifiedAt = new Date().toISOString();
-  if (!configuration?.configured || stored.wixSiteId !== configuration.siteId || !stored.wixFileId) {
-    return { ...stored, liveVerified: false, liveVerifiedAt, liveVerificationError: "Manual media identity does not match the authoritative Wix site." };
-  }
+  if (!configuration?.configured || stored.wixSiteId !== configuration.siteId || !stored.wixFileId) return { ...stored, liveVerified: false, liveVerifiedAt, liveVerificationError: "Manual media identity does not match the authoritative Wix site." };
   try {
     const payload = await controlledWixRequest(configuration, `${WIX_MEDIA_GET_FILE_URL}?fileId=${encodeURIComponent(stored.wixFileId)}`, { method: "GET" });
     const file = payload?.file;
     if (!file?.id || clean(file.id, 500) !== stored.wixFileId || clean(file.mediaType, 80).toUpperCase() !== "IMAGE") throw new Error("Wix returned a different or non-image media item.");
-    return {
-      ...stored,
-      url: clean(file.url, 3000) || stored.url,
-      thumbnailUrl: clean(file.thumbnailUrl, 3000) || stored.thumbnailUrl,
-      liveOperationStatus: clean(file.operationStatus, 80).toUpperCase() || "UNKNOWN",
-      liveVerified: true,
-      liveVerifiedAt,
-      liveVerificationError: null,
-    };
+    return { ...stored, url: clean(file.url, 3000) || stored.url, thumbnailUrl: clean(file.thumbnailUrl, 3000) || stored.thumbnailUrl, liveOperationStatus: clean(file.operationStatus, 80).toUpperCase() || "UNKNOWN", liveVerified: true, liveVerifiedAt, liveVerificationError: null };
   } catch (error) {
     return { ...stored, liveVerified: false, liveVerifiedAt, liveVerificationError: clean(error?.message, 1000) || "Manual media verification failed." };
   }
@@ -96,13 +86,8 @@ async function loadManualReadiness(supabase, registration) {
 }
 
 async function loadImportedReadiness(supabase, configuration, vehicle) {
-  const { data, error } = await supabase
-    .from(DEALERKIT_IMPORTED_MEDIA_TABLE)
-    .select("*")
-    .eq("supplier_stock_id", vehicle.supplierStockId)
-    .eq("wix_site_id", configuration.siteId);
+  const { data, error } = await supabase.from(DEALERKIT_IMPORTED_MEDIA_TABLE).select("*").eq("supplier_stock_id", vehicle.supplierStockId).eq("wix_site_id", configuration.siteId);
   if (error) throw new ControlledPublishError(502, `DealerKit Wix media map read failed: ${error.message || error}`);
-
   const items = [];
   for (const row of data || []) {
     const stored = importedMediaRowToClient(row);
@@ -110,7 +95,8 @@ async function loadImportedReadiness(supabase, configuration, vehicle) {
       const payload = await controlledWixRequest(configuration, `${WIX_MEDIA_GET_FILE_URL}?fileId=${encodeURIComponent(stored.wixFileId)}`, { method: "GET" });
       const file = payload?.file;
       const status = clean(file?.operationStatus, 80).toUpperCase() || "UNKNOWN";
-      items.push({ ...stored, wixUrl: clean(file?.url, 3000) || stored.wixUrl, operationStatus: status, ready: status === "READY", liveVerified: Boolean(file?.id === stored.wixFileId && clean(file?.mediaType, 80).toUpperCase() === "IMAGE") });
+      const validIdentity = Boolean(file?.id === stored.wixFileId && clean(file?.mediaType, 80).toUpperCase() === "IMAGE");
+      items.push({ ...stored, wixUrl: clean(file?.url, 3000) || stored.wixUrl, operationStatus: status, ready: validIdentity && status === "READY", liveVerified: validIdentity });
     } catch {
       items.push({ ...stored, ready: false, liveVerified: false, operationStatus: "UNVERIFIED" });
     }
@@ -118,10 +104,9 @@ async function loadImportedReadiness(supabase, configuration, vehicle) {
   return items;
 }
 
-function rent2buyCollectionIds(decision = {}) {
+function allRent2BuyCollectionIds(decision = {}) {
   if (!decision.rent2buyEnabled) return [];
-  const categories = normalizeRent2BuyCategories(decision.financeCategories || []);
-  return Array.from(new Set([...categories.map((key) => RENT2BUY_CATEGORY_COLLECTIONS[key]).filter(Boolean), "VANPAGES"]));
+  return Array.from(new Set([...Object.values(RENT2BUY_CATEGORY_COLLECTIONS), "VANPAGES"]));
 }
 
 export async function buildFreshControlledPublishState(registrationInput, environment = process.env) {
@@ -139,7 +124,7 @@ export async function buildFreshControlledPublishState(registrationInput, enviro
     Promise.all(VAN_FINANCE_WIX_COLLECTIONS.map((collection) => queryRegistration(configuration, collection.id, registration, collection))),
   ]);
   const imageSets = buildProductImageSets({ vehicle, decision, importedDealerKitMedia, manualMediaReadiness });
-  const r2bIds = rent2buyCollectionIds(decision);
+  const r2bIds = allRent2BuyCollectionIds(decision);
   const rent2buyWixResults = await Promise.all(r2bIds.map((collectionId) => queryRegistration(configuration, collectionId, registration)));
   const plan = buildControlledVehiclePublishPlan({ vehicle, decision, imageSets, vfcWixResults, rent2buyWixResults });
   plan.confirmation = buildControlledPublishConfirmation(plan);
