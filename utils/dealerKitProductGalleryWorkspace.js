@@ -131,6 +131,12 @@ function selectedManual(state, product) {
   return manualForProduct(state, product).find((item) => item?.selected && item?.ready) || null;
 }
 
+function mergeManualMedia(media, item) {
+  if (!item?.id) return Array.isArray(media) ? media : [];
+  const current = Array.isArray(media) ? media : [];
+  return [item, ...current.filter((value) => value?.id !== item.id)];
+}
+
 function findLegacyGallerySection(body) {
   return Array.from(body.querySelectorAll(".dealerkit-review__section")).find((section) => {
     const heading = clean(section.querySelector("h3")?.textContent).toLowerCase();
@@ -140,12 +146,14 @@ function findLegacyGallerySection(body) {
 
 function hideLegacyImageUi(workspace, body) {
   const localGrid = body.querySelector(".dealerkit-review__local-grid");
-  if (localGrid) localGrid.hidden = true;
+  if (localGrid && !localGrid.hidden) localGrid.hidden = true;
   const gallery = findLegacyGallerySection(body);
-  if (gallery) gallery.hidden = true;
+  if (gallery && !gallery.hidden) gallery.hidden = true;
   const oldFooter = body.querySelector(".dealerkit-review__decisions .dealerkit-review__decision-footer");
-  if (oldFooter) oldFooter.hidden = true;
-  workspace.querySelectorAll("[data-dealerkit-wix-manual-media]").forEach((node) => { node.hidden = true; });
+  if (oldFooter && !oldFooter.hidden) oldFooter.hidden = true;
+  workspace.querySelectorAll("[data-dealerkit-wix-manual-media]").forEach((node) => {
+    if (!node.hidden) node.hidden = true;
+  });
 }
 
 function readCurrentReviewControls(body, fallback = {}) {
@@ -155,13 +163,10 @@ function readCurrentReviewControls(body, fallback = {}) {
   const status = decisions.querySelector("select")?.value || fallback.reviewStatus || "needs_review";
   let financeEnabled = fallback.financeEnabled !== false;
   let rent2buyEnabled = Boolean(fallback.rent2buyEnabled);
-  for (const label of decisions.querySelectorAll(".dealerkit-review__toggle")) {
-    const text = clean(label.textContent).toLowerCase();
-    const input = label.querySelector('input[type="checkbox"]');
-    if (!input) continue;
-    if (text.includes("van finance enabled")) financeEnabled = input.checked;
-    if (text.includes("rent2buy")) rent2buyEnabled = input.checked;
-  }
+  const financeRoute = decisions.querySelector('[data-dealerkit-product-route="finance"]');
+  const rent2buyRoute = decisions.querySelector('[data-dealerkit-product-route="rent2buy"]');
+  if (financeRoute) financeEnabled = financeRoute.checked;
+  if (rent2buyRoute) rent2buyEnabled = rent2buyRoute.checked;
 
   const financeCategories = ["all_vans"];
   for (const label of decisions.querySelectorAll(".dealerkit-review__category-grid .dealerkit-review__check")) {
@@ -275,13 +280,17 @@ function sourceCard(state, product, image, displayIndex) {
   includeLabel.append(include, element("span", "", "Use image"));
   controls.appendChild(includeLabel);
 
-  if (product === "finance" && !excluded) {
+  if (!excluded) {
     const primary = element("button", "dealerkit-product-gallery__mini-button", productState.primaryId === id ? "Source primary" : "Set source primary");
     primary.type = "button";
     primary.disabled = productState.primaryId === id;
     primary.addEventListener("click", () => {
-      productState.primaryId = id;
-      markDirty(state, "Van Finance source primary changed. A selected Finance template image still takes precedence as the live cover image.");
+      if (product === "finance") productState.primaryId = id;
+      else {
+        productState.orderIds = [id, ...productState.orderIds.filter((value) => value !== id)];
+        refreshIncluded(state, product);
+      }
+      markDirty(state, `${PRODUCTS[product].label} source primary changed. A selected product template image still takes precedence as the live cover image.`);
       renderActiveProduct(state);
     });
     controls.appendChild(primary);
@@ -322,7 +331,7 @@ async function refreshOneManual(state, item) {
   }
 }
 
-async function loadManualMedia(state, { quiet = false } = {}) {
+async function loadManualMedia(state, { quiet = false, preserveOnError = false } = {}) {
   if (!state.decision?.persisted) {
     state.manualMedia = [];
     if (!quiet) setMessage(state, "Save the review once before uploading a Finance or Rent2Buy template image.", "warning");
@@ -339,7 +348,7 @@ async function loadManualMedia(state, { quiet = false } = {}) {
     for (const item of media) refreshed.push(await refreshOneManual(state, item));
     state.manualMedia = refreshed;
   } catch (error) {
-    state.manualMedia = [];
+    if (!preserveOnError) state.manualMedia = [];
     if (!quiet) setMessage(state, error?.message || "Could not load staged Wix images.", "warning");
   }
 }
@@ -477,15 +486,19 @@ function uploadPanel(state, product) {
       const wixFileId = clean(uploaded?.file?.id);
       if (!wixFileId) throw new Error("Wix accepted the image but did not return a file ID.");
 
-      await postManualMedia(state.registration, {
+      const registered = await postManualMedia(state.registration, {
         action: "register_upload",
         purpose: PRODUCTS[product].purpose,
         wixFileId,
       }, "The image reached Wix, but the CRM could not register it.");
+      const registeredMedia = registered.media;
+      state.manualMedia = mergeManualMedia(state.manualMedia, registeredMedia);
       if (pending?.url) URL.revokeObjectURL(pending.url);
       state.pendingUploads[product] = null;
-      await loadManualMedia(state, { quiet: true });
-      setMessage(state, `${PRODUCTS[product].label} image uploaded. It is now visible in this gallery; choose Set as primary when Wix reports READY.`, "good");
+      renderActiveProduct(state);
+      await loadManualMedia(state, { quiet: true, preserveOnError: true });
+      state.manualMedia = mergeManualMedia(state.manualMedia, registeredMedia);
+      setMessage(state, `${PRODUCTS[product].label} image uploaded and saved to this product workspace. It will remain here after refresh; choose Set as primary when Wix reports READY.`, "good");
     } catch (error) {
       setMessage(state, error?.message || "Image upload failed.", "warning");
     } finally {
@@ -551,8 +564,13 @@ function renderActiveProduct(state) {
   if (!state.root) return;
   const product = state.activeProduct;
   const config = PRODUCTS[product];
+  const liveReview = readCurrentReviewControls(state.body, state.decision);
   state.root.querySelectorAll("[data-product-tab]").forEach((button) => {
     const active = button.dataset.productTab === product;
+    const enabled = button.dataset.productTab === "finance"
+      ? liveReview.financeEnabled !== false
+      : Boolean(liveReview.rent2buyEnabled);
+    button.textContent = `${PRODUCTS[button.dataset.productTab].label} · ${enabled ? "PREPARING" : "NOT SELECTED"}`;
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-selected", active ? "true" : "false");
   });
@@ -593,7 +611,7 @@ function renderActiveProduct(state) {
   const primaryNote = state.root.querySelector("[data-product-gallery-primary-note]");
   if (primaryNote) {
     if (selected) primaryNote.textContent = `${selected.displayName || "Uploaded image"} is the ${config.label} product primary.`;
-    else if (product === "finance" && state.imageState.finance.primaryId) primaryNote.textContent = "No Finance template selected. The chosen DealerKit source primary will be used as the Finance cover.";
+    else if (state.imageState[product].primaryId) primaryNote.textContent = `No ${config.label} template selected. The chosen DealerKit source primary is first in this product's saved image order.`;
     else primaryNote.textContent = "No product template is selected as primary yet.";
   }
 
@@ -617,7 +635,8 @@ function buildRoot(state) {
   const tabs = element("div", "dealerkit-product-gallery__tabs");
   tabs.setAttribute("role", "tablist");
   for (const [key, config] of Object.entries(PRODUCTS)) {
-    const button = element("button", "dealerkit-product-gallery__tab", config.label);
+    const enabled = key === "finance" ? state.decision.financeEnabled !== false : Boolean(state.decision.rent2buyEnabled);
+    const button = element("button", "dealerkit-product-gallery__tab", `${config.label} · ${enabled ? "PREPARING" : "NOT SELECTED"}`);
     button.type = "button";
     button.dataset.productTab = key;
     button.setAttribute("role", "tab");
@@ -627,6 +646,13 @@ function buildRoot(state) {
     });
     tabs.appendChild(button);
   }
+  state.body.querySelectorAll("[data-dealerkit-product-route]").forEach((input) => {
+    input.addEventListener("change", () => {
+      state.decision = { ...state.decision, ...readCurrentReviewControls(state.body, state.decision) };
+      markDirty(state, "Product routing changed. Save the review and galleries to keep this choice.");
+      renderActiveProduct(state);
+    });
+  });
   top.append(heading, tabs);
 
   const pricing = element("div", "dealerkit-product-gallery__pricing");
@@ -759,5 +785,5 @@ if (typeof document !== "undefined") {
   else scheduleScan();
   window.addEventListener("popstate", scheduleScan);
   const observer = new MutationObserver(scheduleScan);
-  observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
 }

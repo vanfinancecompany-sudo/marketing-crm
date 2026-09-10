@@ -5,6 +5,10 @@ import {
   defaultDealerKitReviewDecision,
   normalizeDealerKitReviewInput,
 } from "../api/_dealerkit-review-decisions.js";
+import {
+  decodeDealerKitProductImageState,
+  encodeDealerKitProductImageState,
+} from "../lib/dealerKitProductImageState.js";
 
 test("DealerKit review decisions keep All Vans mandatory and store only allowed neutral category keys", () => {
   const decision = normalizeDealerKitReviewInput({
@@ -108,6 +112,27 @@ test("split product gallery state preserves duplicate source IDs across Finance 
   ]);
 });
 
+test("Finance and Rent2Buy image selection, order and primary round-trip independently", () => {
+  const encoded = encodeDealerKitProductImageState({
+    finance: {
+      orderIds: ["image-3", "image-1", "image-2"],
+      excludedIds: ["image-2"],
+      primaryId: "image-1",
+    },
+    rent2buy: {
+      orderIds: ["image-2", "image-3", "image-1"],
+      excludedIds: ["image-1"],
+      primaryId: "image-2",
+    },
+  });
+  const decoded = decodeDealerKitProductImageState(encoded, ["image-1", "image-2", "image-3"]);
+
+  assert.deepEqual(decoded.finance.includedOrderIds, ["image-3", "image-1"]);
+  assert.equal(decoded.finance.primaryId, "image-1");
+  assert.deepEqual(decoded.rent2buy.includedOrderIds, ["image-2", "image-3"]);
+  assert.equal(decoded.rent2buy.primaryId, "image-2");
+});
+
 test("review decision endpoint is access-gated and cannot write DealerKit or Wix", () => {
   const endpoint = fs.readFileSync(new URL("../api/dealerkit-review-decision.js", import.meta.url), "utf8");
   assert.match(endpoint, /Marketing CRM access is required/);
@@ -120,7 +145,10 @@ test("review workspace exposes decisions but still has no Wix publish action", (
   assert.match(ui, /Save review/);
   assert.match(ui, /Use image/);
   assert.match(ui, /Set primary/);
-  assert.match(ui, /Send to Rent2Buy later/);
+  assert.match(ui, /Prepare for Van Finance/);
+  assert.match(ui, /Prepare for Rent2Buy/);
+  assert.match(ui, /Product routes are independent/);
+  assert.match(ui, /data-dealerkit-product-route/);
   assert.match(ui, /all_vans/);
   assert.match(ui, /\/api\/dealerkit-review-decision/);
   assert.doesNotMatch(ui, /Publish to Wix|Update Wix vehicle|Send live/i);
