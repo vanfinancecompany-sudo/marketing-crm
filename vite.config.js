@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { retireDuplicateVercelRuntime } from "./scripts/retire-duplicate-vercel-runtime.mjs";
-import { probeDealerKitPaginationGapReadOnly } from "./scripts/dealerkit-phase1-gap-probe.mjs";
+import { probeKnownDealerKitVehicleReadOnly } from "./scripts/dealerkit-phase1-target-probe.mjs";
 
 function retireDuplicateVercelRuntimePlugin() {
   return {
@@ -19,7 +19,7 @@ function dealerKitPhase1InspectionPlugin() {
       const isInspectionBranch = process.env.VERCEL_GIT_COMMIT_REF === "feature/dealerkit-phase1-inspection";
       const isPreview = process.env.VERCEL_ENV === "preview";
       if (!isInspectionBranch || !isPreview) return;
-      await probeDealerKitPaginationGapReadOnly();
+      await probeKnownDealerKitVehicleReadOnly();
     },
   };
 }
