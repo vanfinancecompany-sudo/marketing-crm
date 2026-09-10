@@ -106,15 +106,17 @@ export function normalizeDealerKitReviewInput(input = {}) {
   if (!REVIEW_STATUS_SET.has(reviewStatus)) throw new Error("Review status is not allowed at this stage.");
 
   const financeEnabled = input.financeEnabled !== false;
-  const excludedImageIds = cleanIdArray(input.excludedImageIds, { max: 200, dedupe: false });
-  const imageOrderIdsRaw = cleanIdArray(input.imageOrderIds, { max: 200, dedupe: false });
-  const splitProductImageState = hasProductImageMarkers(excludedImageIds) || hasProductImageMarkers(imageOrderIdsRaw);
+  const rawExcludedImageIds = cleanIdArray(input.excludedImageIds, { max: 200, dedupe: false });
+  const rawImageOrderIds = cleanIdArray(input.imageOrderIds, { max: 200, dedupe: false });
+  const splitProductImageState = hasProductImageMarkers(rawExcludedImageIds) || hasProductImageMarkers(rawImageOrderIds);
+  const excludedImageIds = splitProductImageState ? rawExcludedImageIds : Array.from(new Set(rawExcludedImageIds));
+  const imageOrderIdsBase = splitProductImageState ? rawImageOrderIds : Array.from(new Set(rawImageOrderIds));
   const excludedSet = new Set(excludedImageIds);
   const requestedPrimary = clean(input.primaryImageId, 300);
   const primaryImageId = requestedPrimary && (splitProductImageState || !excludedSet.has(requestedPrimary)) ? requestedPrimary : null;
   const imageOrderIds = splitProductImageState
-    ? imageOrderIdsRaw
-    : imageOrderIdsRaw.filter((id) => !excludedSet.has(id));
+    ? imageOrderIdsBase
+    : imageOrderIdsBase.filter((id) => !excludedSet.has(id));
 
   return {
     supplierStockId,
