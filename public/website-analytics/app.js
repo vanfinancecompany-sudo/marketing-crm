@@ -1,279 +1,346 @@
-const SUMMARY_ENDPOINT = '/api/website-analytics-summary';
-const DETAILS_ENDPOINT = '/api/website-analytics-details';
+const GA4_ENDPOINT = '/api/ga4-website-analytics';
+const SUPPLEMENTAL_DETAILS_ENDPOINT = '/api/website-analytics-details';
 
 const $ = (id) => document.getElementById(id);
+const nf = new Intl.NumberFormat('en-GB');
+let ga4Data = null;
+let supplementalData = null;
+let selectedSite = 'all';
 
-function nav() {
-  const config = globalThis.MarketingCrmNavigation;
-  const host = $('sidebarNav');
-  if (!config || !host) return;
-  const current = window.location.pathname;
-  host.innerHTML = config.items.map((item) => {
-    const active = config.isItemActive(current, item);
-    const href = item.href || item.path || '#';
-    const external = item.external ? ' target="_blank" rel="noreferrer"' : '';
-    return `<a class="marketing-sidebar__link${active ? ' is-active' : ''}${item.variant === 'primary' ? ' is-primary' : ''}" href="${href}"${external}>${item.label}</a>`;
-  }).join('');
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
 }
 
-function field(summary, name) {
-  const value = Number(summary?.[name]);
-  return Number.isFinite(value) ? value : 0;
+function fmtNumber(value, digits = 0) {
+  const number = Number(value || 0);
+  return digits ? number.toFixed(digits) : nf.format(Math.round(number));
 }
 
-function pct(value) {
-  return `${Math.round((Number(value) || 0) * 100)}%`;
+function fmtPct(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '—';
+  return `${Math.round(number * 100)}%`;
 }
 
-function ratio(value) {
-  return value === null || value === undefined ? '—' : pct(value);
+function fmtDuration(seconds) {
+  const value = Math.max(0, Math.round(Number(seconds || 0)));
+  const minutes = Math.floor(value / 60);
+  const remainder = value % 60;
+  if (!minutes) return `${remainder}s`;
+  return `${minutes}m ${remainder}s`;
 }
 
-function whole(value) {
-  return Math.round(Number(value) || 0).toLocaleString('en-GB');
-}
-
-function seconds(value) {
-  const n = Math.round(Number(value) || 0);
-  if (n < 60) return `${n}s`;
-  const m = Math.floor(n / 60);
-  const s = n % 60;
-  return `${m}m ${s}s`;
-}
-
-function delta(current, previous, invert = false) {
-  const a = Number(current) || 0;
-  const b = Number(previous) || 0;
-  if (!b) return { text: a ? 'New' : '0%', tone: 'neutral' };
-  const change = ((a - b) / b) * 100;
-  const good = invert ? change < 0 : change > 0;
+function delta(current, previous, lowerIsBetter = false) {
+  const a = Number(current || 0);
+  const b = Number(previous || 0);
+  if (!b) return { text: a ? 'Building history' : '0%', tone: 'neutral' };
+  const pct = ((a - b) / b) * 100;
+  const improved = lowerIsBetter ? pct < 0 : pct > 0;
   return {
-    text: `${change > 0 ? '+' : ''}${change.toFixed(1)}%`,
-    tone: Math.abs(change) < 0.5 ? 'neutral' : good ? 'good' : 'bad'
+    text: `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`,
+    tone: Math.abs(pct) < 0.1 ? 'neutral' : improved ? 'good' : 'bad',
   };
 }
 
-function metricCard(label, current, previous, formatter, invert = false, note = '') {
-  const d = delta(current, previous, invert);
+function metricCard({ label, current, previous, format = fmtNumber, note, lowerIsBetter = false }) {
+  const change = delta(current, previous, lowerIsBetter);
   return `<article class="metric-card">
-    <div class="metric-label">${label}</div>
-    <div class="metric-value">${formatter(current)}</div>
-    <div class="metric-foot"><span class="delta ${d.tone}">${d.text}</span><span>vs previous 7 days</span></div>
-    ${note ? `<div class="metric-note">${note}</div>` : ''}
+    <div class="metric-label">${escapeHtml(label)}</div>
+    <div class="metric-value">${escapeHtml(format(current))}</div>
+    <div class="metric-foot"><span class="delta ${change.tone}">${escapeHtml(change.text)}</span><span>vs previous 7 days</span></div>
+    <div class="metric-note">${escapeHtml(note)}</div>
   </article>`;
 }
 
-function shortUrl(value) {
-  try {
-    const url = new URL(value);
-    return `${url.pathname || '/'}${url.search ? ' + campaign' : ''}`;
-  } catch {
-    return String(value || 'Unknown');
+function aggregateSummary(sites, period = 'current') {
+  const rows = sites.map((site) => site?.[period]?.summary).filter(Boolean);
+  const sessions = rows.reduce((sum, row) => sum + Number(row.sessions || 0), 0);
+  const activeUsers = rows.reduce((sum, row) => sum + Number(row.activeUsers || 0), 0);
+  const pageViews = rows.reduce((sum, row) => sum + Number(row.pageViews || 0), 0);
+  const weighted = (field) => {
+    if (!sessions) return 0;
+    return rows.reduce((sum, row) => sum + Number(row[field] || 0) * Number(row.sessions || 0), 0) / sessions;
+  };
+  return {
+    sessions,
+    activeUsers,
+    pageViews,
+    bounceRate: weighted('bounceRate'),
+    averageSessionDuration: weighted('averageSessionDuration'),
+    pagesPerSession: sessions ? pageViews / sessions : 0,
+  };
+}
+
+function configuredSites() {
+  return (ga4Data?.sites || []).filter((site) => site?.configured);
+}
+
+function visibleSites() {
+  const sites = configuredSites();
+  return selectedSite === 'all' ? sites : sites.filter((site) => site.key === selectedSite);
+}
+
+function summaryFor(period) {
+  const sites = visibleSites();
+  if (!sites.length) return {};
+  if (sites.length === 1) return sites[0]?.[period]?.summary || {};
+  return aggregateSummary(sites, period);
+}
+
+function renderMetrics() {
+  const current = summaryFor('current');
+  const previous = summaryFor('previous');
+  $('metricGrid').innerHTML = [
+    metricCard({ label: 'Sessions', current: current.sessions, previous: previous.sessions, note: 'GA4 sessions' }),
+    metricCard({ label: 'Active users', current: current.activeUsers, previous: previous.activeUsers, note: 'GA4 active users' }),
+    metricCard({ label: 'Page views', current: current.pageViews, previous: previous.pageViews, note: 'Total pages viewed' }),
+    metricCard({ label: 'Bounce rate', current: current.bounceRate, previous: previous.bounceRate, format: fmtPct, note: 'Lower is generally healthier', lowerIsBetter: true }),
+    metricCard({ label: 'Avg session', current: current.averageSessionDuration, previous: previous.averageSessionDuration, format: fmtDuration, note: 'Average GA4 session duration' }),
+    metricCard({ label: 'Pages / session', current: current.pagesPerSession, previous: previous.pagesPerSession, format: (value) => Number(value || 0).toFixed(1), note: 'Depth of visit' }),
+  ].join('');
+
+  $('combinedNote').textContent = selectedSite === 'all'
+    ? (ga4Data?.note || 'Combined totals add the two GA4 properties.')
+    : `Showing ${visibleSites()[0]?.label || 'selected website'} only.`;
+}
+
+function eventDelta(current, previous) {
+  if (current == null || previous == null) return { text: 'No comparison yet', tone: 'neutral' };
+  return delta(current, previous, false);
+}
+
+function funnelCard(site) {
+  const current = site?.current?.events || {};
+  const previous = site?.previous?.events || {};
+  const rate = current.conversionRate;
+  const previousRate = previous.conversionRate;
+  const change = eventDelta(rate, previousRate);
+  const tone = site.key === 'rent2buy' ? 'rent' : 'finance';
+  return `<article class="funnel-card ${tone}">
+    <div class="funnel-title">${escapeHtml(site.label)}</div>
+    <div class="funnel-line">
+      <span>Application started</span><strong>${fmtNumber(current.applicationStarts)}</strong>
+      <small>${escapeHtml(delta(current.applicationStarts, previous.applicationStarts).text)} vs previous week</small>
+    </div>
+    <div class="funnel-arrow">↓</div>
+    <div class="funnel-line">
+      <span>Application completed</span><strong>${fmtNumber(current.applicationCompletions)}</strong>
+      <small>${escapeHtml(delta(current.applicationCompletions, previous.applicationCompletions).text)} vs previous week</small>
+    </div>
+    <div class="funnel-rate${rate == null ? ' muted' : ''}">
+      <strong>${rate == null ? '—' : fmtPct(rate)}</strong>
+      <span>GA4 start → completion</span>
+      <em class="delta ${change.tone}">${escapeHtml(change.text)}</em>
+    </div>
+  </article>`;
+}
+
+function renderFunnel() {
+  const sites = visibleSites();
+  const container = $('applicationFunnel');
+  container.classList.toggle('single', sites.length === 1);
+  container.innerHTML = sites.length ? sites.map(funnelCard).join('') : '<div class="empty">GA4 application data is not available yet.</div>';
+}
+
+function watchItem(tone, title, text) {
+  return `<div class="watch-item ${tone}"><strong>${escapeHtml(title)}</strong><p>${escapeHtml(text)}</p></div>`;
+}
+
+function renderWatchlist() {
+  const sites = visibleSites();
+  const items = [];
+
+  for (const site of sites) {
+    const current = site.current || {};
+    const previous = site.previous || {};
+    const currentSummary = current.summary || {};
+    const previousSummary = previous.summary || {};
+    const events = current.events || {};
+    const previousEvents = previous.events || {};
+
+    if (!previousSummary.sessions && currentSummary.sessions) {
+      items.push(watchItem('info', `${site.label}: GA4 history is building`, `${fmtNumber(currentSummary.sessions)} sessions are recorded in the current settled window; the previous seven-day GA4 comparison is still sparse.`));
+    } else if (previousSummary.sessions) {
+      const trafficChange = ((Number(currentSummary.sessions || 0) - Number(previousSummary.sessions || 0)) / Number(previousSummary.sessions || 1)) * 100;
+      items.push(watchItem(trafficChange >= 0 ? 'good' : 'warn', `${site.label}: traffic ${trafficChange >= 0 ? 'up' : 'down'}`, `${fmtNumber(currentSummary.sessions)} sessions, ${Math.abs(trafficChange).toFixed(1)}% ${trafficChange >= 0 ? 'above' : 'below'} the previous seven days.`));
+    }
+
+    if (events.applicationStarts) {
+      const currentRate = Number(events.conversionRate || 0);
+      const previousRate = previousEvents.conversionRate;
+      const comparison = previousRate == null ? 'Previous-period conversion is not established yet.' : `${delta(currentRate, previousRate).text} versus the previous seven days.`;
+      items.push(watchItem(currentRate >= 0.35 ? 'good' : 'warn', `${site.label}: application conversion`, `${fmtNumber(events.applicationStarts)} starts produced ${fmtNumber(events.applicationCompletions)} completions (${fmtPct(currentRate)}). ${comparison}`));
+    } else {
+      items.push(watchItem('info', `${site.label}: application event baseline`, 'No application_start event is present in this settled seven-day window yet. Keep an eye on this as the new GA4 event history builds.'));
+    }
+
+    const leak = (current.landingPages || [])
+      .filter((row) => Number(row.sessions || 0) >= 3)
+      .sort((a, b) => Number(b.bounceRate || 0) - Number(a.bounceRate || 0))[0];
+    if (leak && Number(leak.bounceRate || 0) >= 0.7) {
+      items.push(watchItem('warn', `${site.label}: high-bounce entry`, `${leak.path || '/'} has ${fmtNumber(leak.sessions)} landing sessions and ${fmtPct(leak.bounceRate)} bounce.`));
+    }
+
+    const mobile = (current.devices || []).find((row) => String(row.device).toLowerCase() === 'mobile');
+    const totalDeviceSessions = (current.devices || []).reduce((sum, row) => sum + Number(row.sessions || 0), 0);
+    if (mobile && totalDeviceSessions) {
+      const share = Number(mobile.sessions || 0) / totalDeviceSessions;
+      if (share >= 0.65) items.push(watchItem('info', `${site.label}: mobile dominates`, `${fmtPct(share)} of device-attributed sessions are mobile, so mobile journey checks should carry the most weight.`));
+    }
   }
+
+  $('watchlist').innerHTML = items.length ? items.slice(0, 8).join('') : '<div class="empty">No conversion warnings yet.</div>';
 }
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+function siteTag(site) {
+  return `<span class="site-pill ${site.key === 'rent2buy' ? 'rent' : 'finance'}">${site.key === 'rent2buy' ? 'Rent2Buy' : 'Van Finance'}</span>`;
 }
 
-function renderMetrics(summaryData) {
-  const c = summaryData?.current?.summary || {};
-  const p = summaryData?.previous?.summary || {};
-  const metrics = [
-    ['Sessions', field(c, 'traffic.sessions_count'), field(p, 'traffic.sessions_count'), whole, false, 'Visits to the site'],
-    ['Unique visitors', field(c, 'traffic.visitors_count'), field(p, 'traffic.visitors_count'), whole, false, 'People rather than page loads'],
-    ['Page views', field(c, 'traffic.views_count'), field(p, 'traffic.views_count'), whole, false, 'Total pages viewed'],
-    ['Bounce rate', field(c, 'traffic.site_bounce_ratio'), field(p, 'traffic.site_bounce_ratio'), pct, true, 'Lower is generally healthier'],
-    ['Avg session', field(c, 'traffic.site_time_seconds_avg'), field(p, 'traffic.site_time_seconds_avg'), seconds, false, 'Average time on site'],
-    ['Pages / session', field(c, 'traffic.pages_per_session_avg'), field(p, 'traffic.pages_per_session_avg'), (v) => Number(v || 0).toFixed(1), false, 'Depth of visit']
-  ];
-  $('metricGrid').innerHTML = metrics.map((m) => metricCard(...m)).join('');
+function flattenRows(field) {
+  return visibleSites().flatMap((site) => (site.current?.[field] || []).map((row) => ({ ...row, site })));
 }
 
-function renderFunnel(funnel) {
-  const current = funnel?.current || {};
-  const previous = funnel?.previous || {};
-  const finance = current.finance || {};
-  const oldFinance = previous.finance || {};
-  const rent = current.rent2buy || {};
-  const oldRent = previous.rent2buy || {};
-
-  const financeReached = finance.reachedApplication?.sessions || 0;
-  const financeCompleted = finance.completed?.sessions || 0;
-  const financeRate = finance.completionRate || 0;
-  const oldRate = oldFinance.completionRate || 0;
-  const rateDelta = delta(financeRate, oldRate);
-  const rentGate = rent.reachedPostcodeGate?.sessions || 0;
-  const oldRentGate = oldRent.reachedPostcodeGate?.sessions || 0;
-  const rentMeasured = rent.postcodeSupplied !== null && rent.postcodeSupplied !== undefined;
-  const rentSupplied = rent.postcodeSupplied?.sessions || 0;
-  const rentPass = rent.postcodePass?.sessions || 0;
-  const rentFail = rent.postcodeFail?.sessions || 0;
-  const rentOpened = rent.fullApplicationOpened?.sessions || 0;
-  const rentCompleted = rent.completed?.sessions || 0;
-  const rentRate = rent.completionRate;
-
-  $('applicationFunnel').innerHTML = `
-    <article class="funnel-card finance">
-      <div class="funnel-title">Van Finance</div>
-      <div class="funnel-line"><span>Reached application</span><strong>${whole(financeReached)}</strong><small>${delta(financeReached, oldFinance.reachedApplication?.sessions || 0).text} vs prior week</small></div>
-      <div class="funnel-arrow">↓</div>
-      <div class="funnel-line completed"><span>Completed</span><strong>${whole(financeCompleted)}</strong><small>${delta(financeCompleted, oldFinance.completed?.sessions || 0).text} vs prior week</small></div>
-      <div class="funnel-rate"><strong>${pct(financeRate)}</strong><span>application-page session → completion signal</span><em class="delta ${rateDelta.tone}">${rateDelta.text}</em></div>
-    </article>
-    <article class="funnel-card rent">
-      <div class="funnel-title">Rent2Buy</div>
-      <div class="funnel-line"><span>Reached postcode gate</span><strong>${whole(rentGate)}</strong><small>${delta(rentGate, oldRentGate).text} vs prior week</small></div>
-      <div class="funnel-arrow${rentMeasured ? '' : ' muted'}">↓</div>
-      <div class="funnel-line${rentMeasured ? '' : ' muted'}"><span>Postcode supplied</span><strong>${rentMeasured ? whole(rentSupplied) : 'Not measured'}</strong><small>${rentMeasured ? `${whole(rentPass)} pass · ${whole(rentFail)} outside area` : 'Historical Wix data do not expose postcode state'}</small></div>
-      <div class="funnel-arrow${rentMeasured ? '' : ' muted'}">↓</div>
-      <div class="funnel-line${rentMeasured ? '' : ' muted'}"><span>Full application / completed</span><strong>${rentMeasured ? `${whole(rentOpened)} / ${whole(rentCompleted)}` : 'Not claimed'}</strong><small>${rentMeasured ? 'Explicit first-party events' : 'Available from cutover onward'}</small></div>
-      <div class="funnel-rate${rentMeasured ? '' : ' muted'}"><strong>${rentMeasured && rentRate !== null ? pct(rentRate) : '—'}</strong><span>full application opened → completed</span></div>
-    </article>`;
+function emptyRow(columns, text = 'No GA4 data in this settled window.') {
+  return `<tr><td colspan="${columns}"><div class="empty">${escapeHtml(text)}</div></td></tr>`;
 }
 
-function rowPage(item, cols) {
-  return `<tr><td class="page-cell" title="${escapeHtml(item.url)}">${escapeHtml(shortUrl(item.url))}</td>${cols.map((c) => `<td>${c(item)}</td>`).join('')}</tr>`;
+function renderLandingRows() {
+  const rows = flattenRows('landingPages').sort((a, b) => Number(b.sessions || 0) - Number(a.sessions || 0)).slice(0, 20);
+  $('landingRows').innerHTML = rows.length ? rows.map((row) => `<tr>
+    <td>${siteTag(row.site)}</td><td class="page-cell" title="${escapeHtml(row.path)}">${escapeHtml(row.path || '/')}</td>
+    <td>${fmtNumber(row.sessions)}</td><td>${fmtPct(row.bounceRate)}</td>
+  </tr>`).join('') : emptyRow(4);
+
+  const leaks = flattenRows('landingPages')
+    .filter((row) => Number(row.sessions || 0) >= 2)
+    .sort((a, b) => Number(b.bounceRate || 0) - Number(a.bounceRate || 0) || Number(b.sessions || 0) - Number(a.sessions || 0))
+    .slice(0, 20);
+  $('exitRows').innerHTML = leaks.length ? leaks.map((row) => `<tr>
+    <td>${siteTag(row.site)}</td><td class="page-cell" title="${escapeHtml(row.path)}">${escapeHtml(row.path || '/')}</td>
+    <td>${fmtNumber(row.sessions)}</td><td>${fmtPct(row.bounceRate)}</td>
+  </tr>`).join('') : emptyRow(4);
 }
 
-function renderTables(data) {
-  const c = data.current || {};
-  $('landingRows').innerHTML = (c.landingPages || []).map((item) => rowPage(item, [
-    (x) => whole(x.sessions), (x) => pct(x.bounceRate)
-  ])).join('') || '<tr><td colspan="3">No data yet.</td></tr>';
-
-  $('exitRows').innerHTML = (c.exitPages || []).map((item) => rowPage(item, [
-    (x) => whole(x.sessions), (x) => ratio(x.exitRate)
-  ])).join('') || '<tr><td colspan="3">No data yet.</td></tr>';
-
-  $('pageRows').innerHTML = (c.pages || []).map((item) => rowPage(item, [
-    (x) => whole(x.views), (x) => seconds(x.avgTimeSeconds), (x) => pct(x.bounceRate), (x) => ratio(x.exitRate)
-  ])).join('') || '<tr><td colspan="5">No data yet.</td></tr>';
-
-  $('sourceRows').innerHTML = (c.sources || []).map((item) => `<tr><td>${escapeHtml(item.source)}</td><td>${whole(item.sessions)}</td><td>${pct(item.bounceRate)}</td></tr>`).join('') || '<tr><td colspan="3">No data yet.</td></tr>';
-  $('deviceRows').innerHTML = (c.devices || []).map((item) => `<tr><td>${escapeHtml(item.device || 'Unknown')}</td><td>${whole(item.sessions)}</td><td>${whole(item.visitors)}</td><td>${pct(item.bounceRate)}</td></tr>`).join('') || '<tr><td colspan="4">No data yet.</td></tr>';
-
-  const formsUnavailable = c.sectionStatus?.forms === 'error';
-  $('formRows').innerHTML = (c.forms || []).map((item) => `<tr><td title="${escapeHtml(item.url)}">${escapeHtml(item.name || shortUrl(item.url))}</td><td>${whole(item.views)}</td><td>${whole(item.starts)}</td><td>${whole(item.submissions)}</td><td>${pct(item.completionRate)}</td></tr>`).join('') || `<tr><td colspan="5">${formsUnavailable ? 'Form analytics are temporarily unavailable.' : 'No form activity in this period.'}</td></tr>`;
+function renderPageRows() {
+  const rows = flattenRows('pages').sort((a, b) => Number(b.views || 0) - Number(a.views || 0)).slice(0, 30);
+  $('pageRows').innerHTML = rows.length ? rows.map((row) => `<tr>
+    <td>${siteTag(row.site)}</td><td class="page-cell" title="${escapeHtml(row.path)}">${escapeHtml(row.path || '/')}</td>
+    <td>${fmtNumber(row.views)}</td><td>${fmtNumber(row.activeUsers)}</td><td>${fmtDuration(row.avgEngagementSeconds)}</td>
+  </tr>`).join('') : emptyRow(5);
 }
 
-function renderFlows(data) {
-  const c = data.current || {};
-  const flows = c.userFlows || [];
-  if (!flows.length) {
-    $('flowRows').innerHTML = `<div class="empty">${c.sectionStatus?.userFlows === 'error' ? 'Visitor-flow analytics are temporarily unavailable.' : 'No user-flow data yet.'}</div>`;
+function renderSourceRows() {
+  const rows = flattenRows('sources').sort((a, b) => Number(b.sessions || 0) - Number(a.sessions || 0)).slice(0, 25);
+  $('sourceRows').innerHTML = rows.length ? rows.map((row) => `<tr>
+    <td>${siteTag(row.site)}</td><td>${escapeHtml(row.source || 'Direct / unknown')}</td><td>${fmtNumber(row.sessions)}</td><td>${fmtPct(row.bounceRate)}</td>
+  </tr>`).join('') : emptyRow(4);
+}
+
+function renderDeviceRows() {
+  const rows = flattenRows('devices').sort((a, b) => Number(b.sessions || 0) - Number(a.sessions || 0));
+  $('deviceRows').innerHTML = rows.length ? rows.map((row) => `<tr>
+    <td>${siteTag(row.site)}</td><td>${escapeHtml(row.device || 'unknown')}</td><td>${fmtNumber(row.sessions)}</td><td>${fmtNumber(row.activeUsers)}</td><td>${fmtPct(row.bounceRate)}</td>
+  </tr>`).join('') : emptyRow(5);
+}
+
+function renderFlows() {
+  if (selectedSite !== 'all') {
+    $('flowRows').innerHTML = '<div class="empty">The supplemental journey feed is combined across the legacy first-party tracker. Switch to All websites to view it without pretending it is site-separated GA4 data.</div>';
     return;
   }
-  $('flowRows').innerHTML = flows.map((flow) => {
-    const steps = [flow.entry, flow.first, flow.second, flow.third, flow.fourth].filter(Boolean);
-    return `<div class="flow-row"><div class="flow-count">${whole(flow.sessions)} sessions</div><div class="flow-steps">${steps.map((s) => `<span>${escapeHtml(shortUrl(s))}</span>`).join('<b>→</b>')}</div></div>`;
-  }).join('');
+  const rows = supplementalData?.current?.userFlows || [];
+  $('flowRows').innerHTML = rows.length ? rows.slice(0, 20).map((row) => {
+    const steps = [row.entry, row.first, row.second, row.third, row.fourth].filter(Boolean);
+    return `<div class="flow-row"><div class="flow-count">${fmtNumber(row.sessions)} sessions</div><div class="flow-steps">${steps.map((step, index) => `${index ? '<b>→</b>' : ''}<span>${escapeHtml(step)}</span>`).join('')}</div></div>`;
+  }).join('') : '<div class="empty">No supplemental first-party journey sequences available.</div>';
 }
 
-function previousByUrl(items = []) {
-  return new Map(items.map((item) => [shortUrl(item.url), item]));
+function renderApplicationRows() {
+  const sites = visibleSites();
+  $('formRows').innerHTML = sites.length ? sites.map((site) => {
+    const events = site.current?.events || {};
+    return `<tr>
+      <td>${siteTag(site)}</td><td>${fmtNumber(events.applicationStarts)}</td><td>${fmtNumber(events.applicationCompletions)}</td>
+      <td>${fmtNumber(events.generateLead)}</td><td>${fmtNumber(events.proofsReceived)}</td><td>${events.conversionRate == null ? '—' : fmtPct(events.conversionRate)}</td>
+    </tr>`;
+  }).join('') : emptyRow(6);
 }
 
-function buildWatchlist(data, funnel, summaryData) {
-  const current = data.current || {};
-  const previous = data.previous || {};
-  const previousPages = previousByUrl(previous.pages || []);
-  const findings = [];
-
-  const finance = funnel?.current?.finance;
-  if (finance?.reachedApplication?.sessions) {
-    findings.push({
-      score: 12000,
-      tone: finance.completionRate < 0.5 ? 'warn' : 'info',
-      title: 'Finance application funnel is measurable',
-      detail: `${whole(finance.reachedApplication.sessions)} sessions reached a Finance application route and ${whole(finance.completed?.sessions || 0)} reached the completion signal, ${pct(finance.completionRate)} on this session-based funnel.`
-    });
-  }
-
-  const rent = funnel?.current?.rent2buy;
-  if (rent?.reachedPostcodeGate?.sessions) {
-    const hasExplicitStages = rent.postcodeSupplied !== null && rent.postcodeSupplied !== undefined;
-    findings.push({
-      score: 11000,
-      tone: 'info',
-      title: 'Rent2Buy postcode gate is measurable',
-      detail: hasExplicitStages
-        ? `${whole(rent.reachedPostcodeGate.sessions)} sessions reached the gate, ${whole(rent.postcodePass?.sessions || 0)} passed and ${whole(rent.completed?.sessions || 0)} completed the application.`
-        : `${whole(rent.reachedPostcodeGate.sessions)} sessions reached the postcode gate. Historical Wix page-path data cannot reliably provide the later stages.`
-    });
-  }
-
-  for (const page of current.pages || []) {
-    if ((page.views || 0) < 25) continue;
-    if ((page.exitRate || 0) >= 0.45) {
-      findings.push({ score: (page.views || 0) * (page.exitRate || 0), tone: 'warn', title: `${shortUrl(page.url)} is leaking traffic`, detail: `${whole(page.views)} views, ${pct(page.exitRate)} exit rate.` });
-    }
-    const old = previousPages.get(shortUrl(page.url));
-    if (old?.views && page.views > old.views * 1.25) {
-      findings.push({ score: page.views, tone: 'good', title: `${shortUrl(page.url)} is gaining attention`, detail: `Views rose ${delta(page.views, old.views).text} week on week.` });
-    }
-  }
-
-  const mobile = (current.devices || []).find((x) => String(x.device).toLowerCase() === 'mobile');
-  const totalSessions = field(summaryData?.current?.summary || {}, 'traffic.sessions_count');
-  if (mobile && mobile.sessions > 0 && totalSessions > 0) {
-    const share = mobile.sessions / totalSessions;
-    if (share > 0.8) findings.push({ score: 10000, tone: 'info', title: 'Mobile is the website', detail: `${pct(share)} of sessions are mobile. Conversion fixes should be judged mobile-first.` });
-  }
-
-  return findings.sort((a, b) => b.score - a.score).slice(0, 8);
-}
-
-function renderWatchlist(data, funnel, summaryData) {
-  const list = buildWatchlist(data, funnel, summaryData);
-  $('watchlist').innerHTML = list.length ? list.map((item) => `<div class="watch-item ${item.tone}"><div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.detail)}</p></div></div>`).join('') : '<div class="empty">No obvious high-volume leaks detected in this window.</div>';
-}
-
-function render(data, summaryData) {
-  renderMetrics(summaryData);
-  renderFunnel(data.funnel);
-  renderTables(data);
-  renderFlows(data);
-  renderWatchlist(data, data.funnel, summaryData);
-
-  const trafficDate = summaryData?.settledThrough;
-  const detailDate = data?.settledThrough || data?.funnel?.settledThrough;
-  if (trafficDate && detailDate && trafficDate !== detailDate) {
-    $('settledLabel').textContent = `Traffic through ${trafficDate} · detailed tables through ${detailDate}`;
-  } else {
-    $('settledLabel').textContent = `Settled through ${trafficDate || detailDate || 'yesterday'}`;
-  }
+function renderAll() {
+  renderMetrics();
+  renderFunnel();
+  renderWatchlist();
+  renderLandingRows();
+  renderPageRows();
+  renderSourceRows();
+  renderDeviceRows();
+  renderFlows();
+  renderApplicationRows();
 }
 
 async function getJson(url) {
-  const separator = url.includes('?') ? '&' : '?';
-  const response = await fetch(`${url}${separator}t=${Date.now()}`, { cache: 'no-store' });
-  const data = await response.json();
-  if (!response.ok || data.error || data.ok === false) throw new Error(data.error || data.message || `Request returned ${response.status}`);
-  return data;
+  const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.ok === false) throw new Error(payload?.message || `Request failed (${response.status})`);
+  return payload;
 }
 
-async function load() {
-  $('refreshButton').disabled = true;
+async function loadAnalytics() {
+  const button = $('refreshButton');
+  button.disabled = true;
   $('statusDot').className = 'status-dot loading';
-  $('statusText').textContent = 'Loading website analytics...';
+  $('statusText').textContent = 'Loading GA4 Analytics...';
+
   try {
-    const [summaryData, detailsData] = await Promise.all([
-      getJson(SUMMARY_ENDPOINT),
-      getJson(DETAILS_ENDPOINT),
+    const [ga4, supplemental] = await Promise.all([
+      getJson(GA4_ENDPOINT),
+      getJson(SUPPLEMENTAL_DETAILS_ENDPOINT).catch(() => null),
     ]);
-    render(detailsData, summaryData);
-    $('statusDot').className = 'status-dot ready';
-    const sourceLabel = { wix: 'Historical Wix', first_party: 'First-party', mixed: 'Mixed Wix + first-party' }[summaryData.source] || 'Website';
-    $('statusText').textContent = `${sourceLabel} analytics connected`;
+    ga4Data = ga4;
+    supplementalData = supplemental;
+
+    const sites = configuredSites();
+    const failed = (ga4.sites || []).filter((site) => !site.configured);
+    $('statusDot').className = failed.length && sites.length ? 'status-dot loading' : sites.length ? 'status-dot ready' : 'status-dot error';
+    $('statusText').textContent = sites.length === 2
+      ? 'GA4 connected · Van Finance + Rent2Buy'
+      : sites.length === 1
+        ? `GA4 connected · ${sites[0].label} · other property unavailable`
+        : 'GA4 unavailable';
+    $('settledLabel').textContent = ga4.settledThrough ? `Settled through ${ga4.settledThrough}` : '';
+    renderAll();
   } catch (error) {
+    ga4Data = null;
     $('statusDot').className = 'status-dot error';
-    $('statusText').textContent = `Analytics unavailable: ${error.message}`;
+    $('statusText').textContent = `GA4 analytics unavailable: ${error.message}`;
+    $('settledLabel').textContent = '';
+    $('metricGrid').innerHTML = '<div class="empty">Could not load GA4 website analytics.</div>';
   } finally {
-    $('refreshButton').disabled = false;
+    button.disabled = false;
   }
 }
 
-nav();
-$('refreshButton').addEventListener('click', load);
-load();
+function initTabs() {
+  $('siteTabs').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-site]');
+    if (!button) return;
+    selectedSite = button.dataset.site || 'all';
+    document.querySelectorAll('.site-tab').forEach((tab) => tab.classList.toggle('is-active', tab === button));
+    if (ga4Data) renderAll();
+  });
+}
+
+function initSidebar() {
+  if (!window.MarketingSidebarNavigation?.render) return;
+  window.MarketingSidebarNavigation.render({ containerId: 'sidebarNav', currentId: 'website-analytics' });
+}
+
+$('refreshButton').addEventListener('click', loadAnalytics);
+initSidebar();
+initTabs();
+loadAnalytics();
