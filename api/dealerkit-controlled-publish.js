@@ -18,9 +18,17 @@ function authorised(request, environment = process.env) {
 
 function orderedTargets(targets = []) {
   return [...targets].sort((left, right) => {
-    if (left.kind === right.kind) return `${left.product}:${left.collectionId}`.localeCompare(`${right.product}:${right.collectionId}`);
+    if (left.kind === right.kind) return `${left.product}:${left.siteId || ""}:${left.collectionId}`.localeCompare(`${right.product}:${right.siteId || ""}:${right.collectionId}`);
     return left.kind === "detail" ? -1 : 1;
   });
+}
+
+function configurationForTarget(state, target) {
+  const siteId = clean(target?.siteId, 500);
+  if (!siteId) return state?.configuration;
+  const configuration = state?.configurationsBySiteId?.[siteId];
+  if (!configuration) throw new ControlledPublishError(500, `No controlled Wix configuration is available for site ${siteId}.`);
+  return configuration;
 }
 
 function fieldRollbackSnapshot(target) {
@@ -32,11 +40,7 @@ function fieldRollbackSnapshot(target) {
 }
 
 function setFieldModifications(data = {}) {
-  return Object.entries(data).map(([fieldPath, value]) => ({
-    fieldPath,
-    action: "SET_FIELD",
-    setFieldOptions: { value },
-  }));
+  return Object.entries(data).map(([fieldPath, value]) => ({ fieldPath, action: "SET_FIELD", setFieldOptions: { value } }));
 }
 
 function rollbackFieldModifications(snapshot = {}) {
@@ -52,7 +56,7 @@ async function insertTarget(configuration, target) {
   });
   const item = payload?.dataItem;
   if (!item?.id) throw new ControlledPublishError(502, `Wix did not return an item ID after creating ${target.collectionId}.`);
-  return { operation: "create", product: target.product, collectionId: target.collectionId, kind: target.kind, itemId: item.id };
+  return { operation: "create", product: target.product, siteId: configuration.siteId, siteLabel: target.siteLabel || configuration.siteLabel || null, collectionId: target.collectionId, kind: target.kind, itemId: item.id };
 }
 
 async function updateTarget(configuration, target) {
@@ -63,18 +67,14 @@ async function updateTarget(configuration, target) {
 
   await controlledWixRequest(configuration, `/wix-data/v2/items/${encodeURIComponent(itemId)}`, {
     method: "PATCH",
-    body: {
-      dataCollectionId: target.collectionId,
-      patch: {
-        dataItemId: itemId,
-        fieldModifications,
-      },
-    },
+    body: { dataCollectionId: target.collectionId, patch: { dataItemId: itemId, fieldModifications } },
   });
 
   return {
     operation: "update",
     product: target.product,
+    siteId: configuration.siteId,
+    siteLabel: target.siteLabel || configuration.siteLabel || null,
     collectionId: target.collectionId,
     kind: target.kind,
     itemId,
@@ -83,37 +83,29 @@ async function updateTarget(configuration, target) {
 }
 
 async function applyTarget(configuration, target) {
-  return target?.operation === "update"
-    ? updateTarget(configuration, target)
-    : insertTarget(configuration, target);
+  return target?.operation === "update" ? updateTarget(configuration, target) : insertTarget(configuration, target);
 }
 
-async function rollbackWrite(configuration, item) {
+async function rollbackWrite(state, item) {
+  const configuration = configurationForTarget(state, item);
   if (item.operation === "update") {
     const fieldModifications = rollbackFieldModifications(item.previousFields || {});
     if (fieldModifications.length) {
       await controlledWixRequest(configuration, `/wix-data/v2/items/${encodeURIComponent(item.itemId)}`, {
         method: "PATCH",
-        body: {
-          dataCollectionId: item.collectionId,
-          patch: {
-            dataItemId: item.itemId,
-            fieldModifications,
-          },
-        },
+        body: { dataCollectionId: item.collectionId, patch: { dataItemId: item.itemId, fieldModifications } },
       });
     }
     return;
   }
-
   await controlledWixRequest(configuration, `/wix-data/v2/items/${encodeURIComponent(item.itemId)}?dataCollectionId=${encodeURIComponent(item.collectionId)}`, { method: "DELETE" });
 }
 
-async function rollbackCreatedAndUpdated(configuration, writes = []) {
+async function rollbackCreatedAndUpdated(state, writes = []) {
   const outcomes = [];
   for (const item of [...writes].reverse()) {
     try {
-      await rollbackWrite(configuration, item);
+      await rollbackWrite(state, item);
       outcomes.push({ ...item, rolledBack: true });
     } catch (error) {
       outcomes.push({ ...item, rolledBack: false, error: clean(error?.message, 500) || "Rollback failed" });
@@ -122,29 +114,19 @@ async function rollbackCreatedAndUpdated(configuration, writes = []) {
   return outcomes;
 }
 
-async function verifyWritten(configuration, registration, targets = []) {
+async function verifyWritten(state, registration, targets = []) {
   const results = [];
   for (const target of targets) {
+    const configuration = configurationForTarget(state, target);
     const payload = await controlledWixRequest(configuration, "/wix-data/v2/items/query", {
       method: "POST",
-      body: {
-        dataCollectionId: target.collectionId,
-        query: { filter: { title: { $eq: registration } }, paging: { limit: 3, offset: 0 } },
-        consistentRead: true,
-      },
+      body: { dataCollectionId: target.collectionId, query: { filter: { title: { $eq: registration } }, paging: { limit: 3, offset: 0 } }, consistentRead: true },
     });
     const items = Array.isArray(payload.dataItems) ? payload.dataItems : [];
     const exact = items.length === 1 && normalizeFinanceRegistration(items[0]?.data?.title || "") === registration;
     const expectedId = target.operation === "update" ? clean(target.itemId, 300) : "";
     const identityMatches = !expectedId || clean(items[0]?.id, 300) === expectedId;
-    results.push({
-      operation: target.operation === "update" ? "update" : "create",
-      product: target.product,
-      collectionId: target.collectionId,
-      count: items.length,
-      verified: exact && identityMatches,
-      itemId: items[0]?.id || null,
-    });
+    results.push({ operation: target.operation === "update" ? "update" : "create", product: target.product, siteId: configuration.siteId, siteLabel: target.siteLabel || configuration.siteLabel || null, collectionId: target.collectionId, count: items.length, verified: exact && identityMatches, itemId: items[0]?.id || null });
   }
   return { verified: results.length === targets.length && results.every((item) => item.verified), results };
 }
@@ -172,11 +154,11 @@ export default async function handler(request, response) {
     const targets = orderedTargets(state.plan.targets);
     if (!targets.length) throw new ControlledPublishError(409, "No verified Wix write targets are available.");
 
-    for (const target of targets) writes.push(await applyTarget(state.configuration, target));
+    for (const target of targets) writes.push(await applyTarget(configurationForTarget(state, target), target));
 
-    const verification = await verifyWritten(state.configuration, registration, targets);
+    const verification = await verifyWritten(state, registration, targets);
     if (!verification.verified) {
-      const rollback = await rollbackCreatedAndUpdated(state.configuration, writes);
+      const rollback = await rollbackCreatedAndUpdated(state, writes);
       const rollbackComplete = rollback.every((item) => item.rolledBack);
       throw new ControlledPublishError(502, rollbackComplete
         ? "Wix publishing could not be verified, so every write was rolled back."
@@ -205,7 +187,7 @@ export default async function handler(request, response) {
     });
   } catch (error) {
     let rollback = [];
-    if (writes.length && !error?.details?.rollback && state?.configuration) rollback = await rollbackCreatedAndUpdated(state.configuration, writes);
+    if (writes.length && !error?.details?.rollback && state) rollback = await rollbackCreatedAndUpdated(state, writes);
     const reportedRollback = error?.details?.rollback || rollback;
     const rollbackComplete = !writes.length || (reportedRollback.length === writes.length && reportedRollback.every((item) => item.rolledBack));
     response.status(error?.status || 502).json({
