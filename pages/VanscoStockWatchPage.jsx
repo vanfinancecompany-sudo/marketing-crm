@@ -503,7 +503,7 @@ export default function VanscoStockWatchPage() {
       const urlResult = await refreshVanscoCacheUrls();
       const batchResult = await processVanscoCacheBatch();
       await loadPipeline(selectedPipeline);
-      setSuccessMessage(`Vansco URL list refreshed: ${urlResult.urlsFound || 0} current URLs. Details checked: ${batchResult.successCount || 0} success, ${batchResult.failureCount || 0} failed, ${batchResult.remainingCount || 0} remaining.`);
+      setSuccessMessage(`DealerKit stock refreshed: ${urlResult.urlsFound || 0} current vehicles. Details checked: ${batchResult.successCount || 0} success, ${batchResult.failureCount || 0} failed, ${batchResult.remainingCount || 0} remaining.`);
       setDebugByPipeline((prev) => ({ ...prev, [selectedPipeline]: { urlResult, batchResult } }));
     } catch (error) {
       setErrorMessage(`${error.message || "Could not refresh Vansco cache."} Showing the latest saved cache if available.`);
@@ -574,7 +574,7 @@ export default function VanscoStockWatchPage() {
           <SummaryCard label="Never show again" value={summary.never} onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "never" }))} />
           <SummaryCard label="Local CRM regs loaded" value={activeLocalRegistrations.size} />
         </div>
-        {selectedPipeline === "finance" ? <div className="vansco-watch-note"><strong>Price differences:</strong> Van Finance only. It compares exact registration matches where both prices and VAT basis are clear. It never changes Wix or Vansco prices.</div> : null}
+        {selectedPipeline === "finance" ? <div className="vansco-watch-note"><strong>Price differences:</strong> Van Finance only. It compares exact registration matches where both prices and VAT basis are clear. It never changes Wix or DealerKit prices.</div> : null}
         <div className="vansco-watch-note"><strong>Daytime workflow:</strong> when you advertise a Missing vehicle, use <strong>Mark as advertised</strong>. It leaves Missing immediately and remains in Advertised / Awaiting refresh until the registration appears in this CRM stock tab.</div>
         <div className="vansco-watch-note"><strong>My stock not on DealerKit:</strong> this reverse registration check shows active CRM vehicles absent from the current DealerKit feed.</div>
         <div className="vansco-watch-note"><strong>Back in stock rule:</strong> a hidden vehicle returns here when DealerKit shows it available again and it is not already in this CRM stock tab. Use <strong>Never show again</strong> for vehicles you will not advertise.</div>
@@ -582,7 +582,7 @@ export default function VanscoStockWatchPage() {
         {selectedPipeline === "cars" ? <div className="vansco-watch-note"><strong>Cars secondary check:</strong> Cars stay separate, but this view also checks {financeRegistrationsForCars.size} active Van Finance registrations so Cars already advertised through Van Finance do not stay in Missing.</div> : null}
         {selectedPipeline === "cars" ? <div className="vansco-watch-note vansco-watch-note--warning">Cars local stock source is not confirmed yet. This page loaded {activeLocalRegistrations.size} local Cars registrations. Check the Cars Supabase table name/fields before relying on Cars results.</div> : null}
         {localLoadError ? <div className="error-banner">{localLoadError}</div> : null}{errorMessage ? <div className="error-banner">{errorMessage}</div> : null}{successMessage ? <div className="success-banner">{successMessage}</div> : null}
-        <div className="vansco-watch-note">Hidden from working cards: {summary.alreadyListed} already listed/available, {summary.hiddenReserved} reserved but not advertised in this tab, {summary.hiddenNoReg} no valid registration. Advertised, Hide and Never Show Again are stored per tab. My stock not on Vansco and Price differences are advisory only and do not save actions.</div>
+        <div className="vansco-watch-note">Hidden from working cards: {summary.alreadyListed} already listed/available, {summary.hiddenReserved} reserved but not advertised in this tab, {summary.hiddenNoReg} no valid registration. Advertised, Hide and Never Show Again are stored per tab. My stock not on DealerKit and Price differences are advisory only and do not save actions.</div>
         <div className="segmented-control">{activeFilters.map((filter) => <button key={filter.value} className={activeFilter === filter.value ? "segment is-active" : "segment"} type="button" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: filter.value }))}>{filter.label} ({filterCounts[filter.value] ?? 0})</button>)}</div>
         <label className="field"><span className="field__label">Search this view</span><input className="field__input" value={activeSearch} onChange={(event) => setSearchByPipeline((prev) => ({ ...prev, [selectedPipeline]: event.target.value }))} placeholder="Search registration, title, status or notes" /></label>
         <div className="card-actions"><button className="button button--ghost" type="button" onClick={() => setShowDiagnostics((value) => !value)}>{showDiagnostics ? "Hide accuracy details" : "Show accuracy details"}</button></div>

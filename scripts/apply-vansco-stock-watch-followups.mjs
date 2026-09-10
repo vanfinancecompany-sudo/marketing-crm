@@ -51,9 +51,9 @@ patchFile("../pages/VanscoStockWatchPage.jsx", [
   },
   {
     label: "five-photo image readiness wording",
-    already: "Vansco now has at least 5 vehicle images",
-    before: "If that page still has exactly one image and Vansco now has multiple vehicle photos, it appears in New Vansco photos ready.",
-    after: "If that page still has exactly one image and Vansco now has at least 5 vehicle images, it appears in New Vansco photos ready.",
+    already: "DealerKit now has at least 5 vehicle images",
+    before: "If that page still has exactly one image and DealerKit now has multiple vehicle photos, it appears in New DealerKit photos ready.",
+    after: "If that page still has exactly one image and DealerKit now has at least 5 vehicle images, it appears in New DealerKit photos ready.",
   },
 ]);
 

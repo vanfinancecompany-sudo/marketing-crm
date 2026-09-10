@@ -102,7 +102,7 @@ import {
   );
 
   replaceOnce(
-`        {record.displayStatus === "back_in_stock" ? <div className="vehicle-card__meta">This was hidden before, but Vansco now shows it as available/unknown again.</div> : null}`,
+`        {record.displayStatus === "back_in_stock" ? <div className="vehicle-card__meta">This was hidden before, but DealerKit now shows it as available again.</div> : null}`,
 `        {showCarReservedWix ? (
           <div style={{ marginTop: 4, border: "1px solid #bfdbfe", borderRadius: 12, padding: 10, background: "#eff6ff", display: "grid", gap: 8 }}>
             <div style={{ fontWeight: 900, fontSize: 12, color: "#1d4ed8" }}>Car Wix stock check</div>
@@ -147,7 +147,7 @@ import {
             {carWixActionError ? <div style={{ borderRadius: 8, padding: "7px 8px", background: "#fff7ed", color: "#9a3412", fontSize: 10, lineHeight: 1.45, fontWeight: 800 }}>{carWixActionError}</div> : null}
           </div>
         ) : null}
-        {record.displayStatus === "back_in_stock" ? <div className="vehicle-card__meta">This was hidden before, but Vansco now shows it as available/unknown again.</div> : null}`,
+        {record.displayStatus === "back_in_stock" ? <div className="vehicle-card__meta">This was hidden before, but DealerKit now shows it as available again.</div> : null}`,
     "WatchCard car Wix UI"
   );
 }
