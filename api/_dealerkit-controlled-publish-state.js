@@ -104,8 +104,7 @@ async function loadImportedReadiness(supabase, configuration, vehicle) {
   return items;
 }
 
-function allRent2BuyCollectionIds(decision = {}) {
-  if (!decision.rent2buyEnabled) return [];
+function allRent2BuyCollectionIds() {
   return Array.from(new Set([...Object.values(RENT2BUY_CATEGORY_COLLECTIONS), "VANPAGES"]));
 }
 
@@ -118,14 +117,13 @@ export async function buildFreshControlledPublishState(registrationInput, enviro
   if (normalizeFinanceRegistration(vehicle?.registration || "") !== registration) throw new ControlledPublishError(409, "DealerKit registration changed. Re-open and save the review again.");
   const configuration = controlledWixConfiguration(environment);
 
-  const [manualMediaReadiness, importedDealerKitMedia, vfcWixResults] = await Promise.all([
+  const [manualMediaReadiness, importedDealerKitMedia, vfcWixResults, rent2buyWixResults] = await Promise.all([
     loadManualReadiness(supabase, registration),
     loadImportedReadiness(supabase, configuration, vehicle),
     Promise.all(VAN_FINANCE_WIX_COLLECTIONS.map((collection) => queryRegistration(configuration, collection.id, registration, collection))),
+    Promise.all(allRent2BuyCollectionIds().map((collectionId) => queryRegistration(configuration, collectionId, registration))),
   ]);
   const imageSets = buildProductImageSets({ vehicle, decision, importedDealerKitMedia, manualMediaReadiness });
-  const r2bIds = allRent2BuyCollectionIds(decision);
-  const rent2buyWixResults = await Promise.all(r2bIds.map((collectionId) => queryRegistration(configuration, collectionId, registration)));
   const plan = buildControlledVehiclePublishPlan({ vehicle, decision, imageSets, vfcWixResults, rent2buyWixResults });
   plan.confirmation = buildControlledPublishConfirmation(plan);
 
