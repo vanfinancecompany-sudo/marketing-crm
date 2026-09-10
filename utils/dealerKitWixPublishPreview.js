@@ -32,6 +32,25 @@ function fieldText(fields = {}) {
   return values.length ? values.map(([key, value]) => `${key}: ${value}`).join(" · ") : "–";
 }
 
+function createPlanText(plan = {}) {
+  const fields = plan.proposedFields || {};
+  const keys = [
+    "title",
+    "titleText",
+    "price",
+    "priceVat",
+    "salePrice",
+    "mthPrice",
+    "vat",
+    "year",
+    "mileage",
+    "buttonText",
+    "buttonName",
+  ];
+  const selected = Object.fromEntries(keys.filter((key) => clean(fields[key])).map((key) => [key, fields[key]]));
+  return fieldText(selected);
+}
+
 function renderWriteGate(panel, result, preview) {
   const gate = element("section", "dealerkit-wix-preview__write-gate");
   gate.setAttribute("data-dealerkit-wix-write-gate", "true");
@@ -170,7 +189,24 @@ function renderResult(panel, payload) {
         element("div", "dealerkit-wix-preview__field-line", `Proposed · ${fieldText(target.proposed)}`),
       );
     } else if (target.status === "missing") {
-      row.appendChild(element("div", "dealerkit-wix-preview__field-line", "No existing Wix row. Creation remains locked until the full CMS create schema is verified."));
+      const createPlan = target.createPlan || {};
+      if (createPlan.schemaVerified) {
+        row.append(
+          element("div", "dealerkit-wix-preview__field-line", `Create preview · ${createPlanText(createPlan)}`),
+          element("div", "dealerkit-wix-preview__field-line", `Still pending · ${(createPlan.pendingFields || []).join(" · ") || "Media and copy review"}`),
+          element("div", "dealerkit-wix-preview__field-line", `CMS schema verified ${createPlan.schemaVerifiedAt || ""}. This is a read-only plan only; no Wix row will be created yet.`),
+        );
+        if (createPlan.descriptionDraft) {
+          const features = createPlan.descriptionDraft.sourceFacts?.features || [];
+          row.appendChild(element(
+            "div",
+            "dealerkit-wix-preview__field-line",
+            `AI copy seed · ${features.length ? features.join(", ") : "No headline equipment claims extracted yet"}. Original VFC copy will remain editable and separate from the fixed VFC reassurance text.`,
+          ));
+        }
+      } else {
+        row.appendChild(element("div", "dealerkit-wix-preview__field-line", "No existing Wix row. Creation remains locked because the create plan could not be verified."));
+      }
     } else if (target.status === "duplicate") {
       row.appendChild(element("div", "dealerkit-wix-preview__field-line", "Duplicate Wix rows found. Publishing remains blocked."));
     }
@@ -197,7 +233,7 @@ function renderResult(panel, payload) {
     `dealerkit-wix-preview__verdict ${preview.canPublishLater ? "is-good" : "is-warning"}`,
     preview.canPublishLater
       ? "The fresh source/review/Wix snapshot passed the safety gates. Existing VFC price rows can now be updated through the guarded control below; media, category membership and new-record publishing remain locked."
-      : "Publishing remains locked. Resolve the blockers above, save the review again where required, then preview once more.",
+      : "Publishing remains locked. Missing rows can now show their verified read-only create plan; live creation still waits for reviewed Wix media and approved original vehicle copy.",
   );
   result.appendChild(end);
 
