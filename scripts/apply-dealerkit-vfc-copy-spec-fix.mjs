@@ -54,22 +54,11 @@ function listingDescription(vehicle = {}) {
 });
 
 patch({
-  label: "complete VFC vehicle specification text",
+  label: "technical value helpers",
   already: "function dealerKitTechnicalValue(vehicle = {}, labels = [])",
   before: `export function buildDealerKitVehicleSpecText(vehicle = {}) {
   const registration = normalizeFinanceRegistration(vehicle.registration || "");
-  const bhp = optionalNumber(vehicle.bhp);
-  const rows = [
-    ["REGISTRATION", formatRegistration(registration)],
-    ["YEAR", yearDisplay(vehicle, registration)],
-    ["MILEAGE", formatMileage(vehicle.mileage)],
-    ["FUEL TYPE", clean(vehicle.fuel, 100).toUpperCase()],
-    ["COLOUR", clean(vehicle.colour, 120).toUpperCase()],
-    ["TRANSMISSION", clean(vehicle.transmission, 100).toUpperCase()],
-    ["BHP", bhp !== null && bhp > 0 ? String(Math.round(bhp)) : ""],
-  ].filter(([, value]) => value);
-  return rows.map(([label, value]) => label + ": " + value).join("\\n");
-}`,
+  const bhp = optionalNumber(vehicle.bhp);`,
   after: `function normaliseTechnicalLabel(value) {
   return clean(value, 200).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
@@ -126,11 +115,18 @@ function combinedMpgText(vehicle = {}) {
 export function buildDealerKitVehicleSpecText(vehicle = {}) {
   const registration = normalizeFinanceRegistration(vehicle.registration || "");
   const bhp = optionalNumber(vehicle.bhp);
-  const combinedMpg = combinedMpgText(vehicle);
-  const rows = [
-    ["REGISTRATION", formatRegistration(registration)],
-    ["YEAR", yearDisplay(vehicle, registration)],
-    ["MILEAGE", formatMileage(vehicle.mileage)],
+  const combinedMpg = combinedMpgText(vehicle);`,
+});
+
+patch({
+  label: "established VFC spec labels",
+  already: `["COMBINED MPG", combinedMpg],\n    ["MPG", combinedMpg],`,
+  before: `    ["MILEAGE", formatMileage(vehicle.mileage)],
+    ["FUEL TYPE", clean(vehicle.fuel, 100).toUpperCase()],
+    ["COLOUR", clean(vehicle.colour, 120).toUpperCase()],
+    ["TRANSMISSION", clean(vehicle.transmission, 100).toUpperCase()],
+    ["BHP", bhp !== null && bhp > 0 ? String(Math.round(bhp)) : ""],`,
+  after: `    ["MILEAGE", formatMileage(vehicle.mileage)],
     ["FUEL", clean(vehicle.fuel, 100).toUpperCase()],
     ["BODY TYPE", clean(vehicle.bodyType, 160).toUpperCase()],
     ["COLOUR", clean(vehicle.colour, 120).toUpperCase()],
@@ -140,10 +136,7 @@ export function buildDealerKitVehicleSpecText(vehicle = {}) {
     ["CO2 EMISSIONS", co2Text(vehicle)],
     ["COMBINED MPG", combinedMpg],
     ["MPG", combinedMpg],
-    ["BHP", bhp !== null && bhp > 0 ? String(Math.round(bhp)) : ""],
-  ].filter(([, value]) => value);
-  return rows.map(([label, value]) => label + ": " + value).join("\\n");
-}`,
+    ["BHP", bhp !== null && bhp > 0 ? String(Math.round(bhp)) : ""],`,
 });
 
 fs.writeFileSync(targetPath, source);
