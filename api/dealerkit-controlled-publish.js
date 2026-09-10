@@ -109,7 +109,7 @@ async function rollbackWrite(configuration, item) {
   await controlledWixRequest(configuration, `/wix-data/v2/items/${encodeURIComponent(item.itemId)}?dataCollectionId=${encodeURIComponent(item.collectionId)}`, { method: "DELETE" });
 }
 
-async function rollbackWrites(configuration, writes = []) {
+async function rollbackCreatedAndUpdated(configuration, writes = []) {
   const outcomes = [];
   for (const item of [...writes].reverse()) {
     try {
@@ -176,7 +176,7 @@ export default async function handler(request, response) {
 
     const verification = await verifyWritten(state.configuration, registration, targets);
     if (!verification.verified) {
-      const rollback = await rollbackWrites(state.configuration, writes);
+      const rollback = await rollbackCreatedAndUpdated(state.configuration, writes);
       const rollbackComplete = rollback.every((item) => item.rolledBack);
       throw new ControlledPublishError(502, rollbackComplete
         ? "Wix publishing could not be verified, so every write was rolled back."
@@ -205,7 +205,7 @@ export default async function handler(request, response) {
     });
   } catch (error) {
     let rollback = [];
-    if (writes.length && !error?.details?.rollback && state?.configuration) rollback = await rollbackWrites(state.configuration, writes);
+    if (writes.length && !error?.details?.rollback && state?.configuration) rollback = await rollbackCreatedAndUpdated(state.configuration, writes);
     const reportedRollback = error?.details?.rollback || rollback;
     const rollbackComplete = !writes.length || (reportedRollback.length === writes.length && reportedRollback.every((item) => item.rolledBack));
     response.status(error?.status || 502).json({
