@@ -52,9 +52,7 @@ async function wixRequest(configuration, path, { method = "GET", body } = {}) {
     throw new ApiError(502, "Wix Media could not be reached. No vehicle CMS rows were changed.");
   }
   const payload = await result.json().catch(() => ({}));
-  if (!result.ok) {
-    throw new ApiError(result.status === 401 || result.status === 403 ? 502 : result.status, clean(payload?.message, 1000) || `Wix Media returned ${result.status}.`);
-  }
+  if (!result.ok) throw new ApiError(result.status === 401 || result.status === 403 ? 502 : result.status, clean(payload?.message, 1000) || `Wix Media returned ${result.status}.`);
   return payload;
 }
 
@@ -67,11 +65,7 @@ async function loadDecision(supabase, registration) {
 }
 
 async function loadMappings(supabase, supplierStockId, wixSiteId) {
-  const { data, error } = await supabase
-    .from(DEALERKIT_IMPORTED_MEDIA_TABLE)
-    .select("*")
-    .eq("supplier_stock_id", supplierStockId)
-    .eq("wix_site_id", wixSiteId);
+  const { data, error } = await supabase.from(DEALERKIT_IMPORTED_MEDIA_TABLE).select("*").eq("supplier_stock_id", supplierStockId).eq("wix_site_id", wixSiteId);
   if (error) throw new ApiError(502, `Imported media map read failed: ${error.message || error}`);
   return data || [];
 }
@@ -89,11 +83,7 @@ async function verifyExisting(configuration, row) {
 }
 
 async function persistMapping(supabase, row) {
-  const { data, error } = await supabase
-    .from(DEALERKIT_IMPORTED_MEDIA_TABLE)
-    .upsert(row, { onConflict: "supplier_stock_id,dealerkit_image_id,wix_site_id" })
-    .select("*")
-    .single();
+  const { data, error } = await supabase.from(DEALERKIT_IMPORTED_MEDIA_TABLE).upsert(row, { onConflict: "supplier_stock_id,dealerkit_image_id,wix_site_id" }).select("*").single();
   if (error) throw new ApiError(502, `Imported media map save failed: ${error.message || error}`);
   return importedMediaRowToClient(data);
 }
@@ -116,22 +106,14 @@ async function prepareImages(supabase, configuration, vehicle, decision) {
     if (existing) wixFile = await verifyExisting(configuration, existing);
 
     if (!wixFile) {
-      const requestBody = {
-        url: sourceImage.sourceUrl,
-        displayName: sourceImage.proposedBaseName || `${vehicle.registration}-${sourceImage.position}`,
-      };
+      const requestBody = { url: sourceImage.sourceUrl, displayName: sourceImage.proposedBaseName || `${vehicle.registration}-${sourceImage.position}` };
       if (sourceImage.sourceMimeType) requestBody.mimeType = sourceImage.sourceMimeType;
       const imported = await wixRequest(configuration, WIX_MEDIA_IMPORT_URL, { method: "POST", body: requestBody });
       wixFile = imported?.file;
       if (!wixFile?.id || !wixFile?.url) throw new ApiError(502, `Wix did not return a usable media identity for DealerKit image ${sourceImage.id}.`);
     }
 
-    const mapped = await persistMapping(supabase, buildImportedMediaRow({
-      vehicle,
-      sourceImage,
-      wixFile,
-      wixSiteId: configuration.siteId,
-    }));
+    const mapped = await persistMapping(supabase, buildImportedMediaRow({ vehicle, sourceImage, wixFile, wixSiteId: configuration.siteId }));
     results.push(mapped);
   }
 
@@ -145,8 +127,8 @@ async function prepareImages(supabase, configuration, vehicle, decision) {
 
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
-  if (request.method !== "POST") return response.status(405).json({ ok: false, message: "Method not allowed." });
   if (!authorised(request)) return response.status(401).json({ ok: false, message: "Marketing CRM access is required." });
+  if (request.method !== "POST") return response.status(405).json({ ok: false, message: "Method not allowed." });
 
   try {
     const registration = normalizeFinanceRegistration(request.body?.registration || "");
@@ -156,9 +138,7 @@ export default async function handler(request, response) {
     const supabase = getSupabaseServiceAdmin();
     const decision = await loadDecision(supabase, registration);
     const vehicle = await fetchDealerKitStockDetail(decision.supplierStockId, { specifications: false });
-    if (normalizeFinanceRegistration(vehicle?.registration || "") !== registration) {
-      throw new ApiError(409, "DealerKit registration changed. Re-open and review the vehicle before preparing media.");
-    }
+    if (normalizeFinanceRegistration(vehicle?.registration || "") !== registration) throw new ApiError(409, "DealerKit registration changed. Re-open and review the vehicle before preparing media.");
     const configuration = wixConfiguration();
     const prepared = await prepareImages(supabase, configuration, vehicle, decision);
 
