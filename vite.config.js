@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { retireDuplicateVercelRuntime } from "./scripts/retire-duplicate-vercel-runtime.mjs";
 import { inspectDealerKitOpenApi } from "./scripts/dealerkit-phase1-openapi-inspect.mjs";
+import { probeDealerKitStockReadOnly } from "./scripts/dealerkit-phase1-readonly-probe.mjs";
 
 function retireDuplicateVercelRuntimePlugin() {
   return {
@@ -20,6 +21,7 @@ function dealerKitPhase1InspectionPlugin() {
       const isPreview = process.env.VERCEL_ENV === "preview";
       if (!isInspectionBranch || !isPreview) return;
       await inspectDealerKitOpenApi();
+      await probeDealerKitStockReadOnly();
     },
   };
 }
