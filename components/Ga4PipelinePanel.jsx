@@ -7,17 +7,19 @@ function changeLabel(value){if(value==null)return 'No 7-day comparison yet';cons
 
 function SiteCard({site}){
  const configured=Boolean(site?.configured);
+ const liveCompletion=site?.applicationCompletionSource==='first_party_live';
+ const conversionRate=site?.effectiveConversionRate??site?.conversionRate;
  return <article className="ga4-pipeline-card">
   <div className="ga4-pipeline-card__head">
    <div><span>{site?.label||'Website'}</span><strong>{configured?'GA4 live':'GA4 setup needed'}</strong></div>
-   <b>{site?.source||'ga4'}</b>
+   <b>{liveCompletion?'GA4 + live':site?.source||'ga4'}</b>
   </div>
   {configured? <>
    <div className="ga4-pipeline-metrics">
     <div><strong>{formatNumber(site.usersToday)}</strong><span>Users today</span><em>{changeLabel(site.usersVsSevenDayPct)}</em></div>
     <div><strong>{formatNumber(site.sessionsToday)}</strong><span>Sessions</span><em>{formatNumber(site.pageViewsToday)} page views</em></div>
-    <div><strong>{formatNumber(site.applicationStartsToday)}</strong><span>App starts</span><em>{formatNumber(site.applicationCompletionsToday)} completed</em></div>
-    <div><strong>{formatPercent(site.conversionRate)}</strong><span>App conversion</span><em>{formatNumber(site.leadEventsToday)} lead events</em></div>
+    <div><strong>{formatNumber(site.applicationStartsToday)}</strong><span>App starts</span><em>{formatNumber(site.applicationCompletionsToday)} completed{liveCompletion?' · live confirmed':''}</em></div>
+    <div><strong>{formatPercent(conversionRate)}</strong><span>App conversion</span><em>{liveCompletion?'Completion confirmed before GA4 settled':`${formatNumber(site.leadEventsToday)} lead events`}</em></div>
    </div>
    <div className="ga4-pipeline-lists">
     <div><h4>Top pages today</h4>{(site.topPages||[]).slice(0,4).map((page)=><p key={page.path}><span>{page.path}</span><b>{formatNumber(page.views)}</b></p>)}</div>
@@ -49,7 +51,7 @@ export default function Ga4PipelinePanel(){
    <div>
     <span className="eyebrow">GA4 · REAL WEBSITE TRAFFIC</span>
     <h3>Daily pipeline traffic</h3>
-    <p>Authoritative Google Analytics users, sessions, pages and application events for each website.</p>
+    <p>Google Analytics remains the traffic source of truth; first-party application completion confirms a submission immediately while GA4 processes it.</p>
    </div>
    <small>{data?.checkedAt?`Checked ${new Date(data.checkedAt).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}`:'Loading'}</small>
   </div>
