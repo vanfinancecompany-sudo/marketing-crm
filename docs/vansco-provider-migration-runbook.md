@@ -6,7 +6,15 @@ Last updated: 10 September 2026
 
 This note exists so that the Vansco stock-feed migration can be picked up safely in a future ChatGPT/Codex session without relying on conversation history.
 
-Vansco has now launched its replacement public website. DealerKit is the underlying dealer-management system and an API access request has been submitted for Van Finance Company / Vansco Ltd. The API is still pending as of 10 September 2026.
+Vansco has now launched its replacement public website. DealerKit is the underlying dealer-management system. DealerKit API access has now been issued for Van Finance Company / Vansco Ltd.
+
+Known non-secret integration detail:
+
+- Vansco DealerKit dealer ID: `70376`
+- Developer documentation: `https://developers.dealerkit.co.uk`
+- A one-time-view API secret link was supplied on 10 September 2026. The secret itself must never be committed to GitHub, copied into this runbook, logged, or pasted into application code. It should be stored only in the secure deployment environment used by the primary Marketing CRM.
+
+The DealerKit public Postman workspace is also discoverable as “DealerKit Integrator API”; use the official DealerKit documentation/API contract as authority when implementing.
 
 ## Firm delivery plan — do not redesign mid-build
 
