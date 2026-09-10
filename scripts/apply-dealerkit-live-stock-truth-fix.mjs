@@ -127,8 +127,8 @@ patchFile("../utils/dealerKitProductGalleryWorkspace.js", [
   {
     label: "Cars do not accidentally inherit Finance/Rent2Buy gallery state",
     already: 'if (workspace.dataset.product === "cars") return;',
-    before: '    if (!workspace || workspace.hidden) return;\n    const body = workspace.querySelector("[data-dealerkit-review-body]");',
-    after: '    if (!workspace || workspace.hidden) return;\n    if (workspace.dataset.product === "cars") return;\n    const body = workspace.querySelector("[data-dealerkit-review-body]");',
+    before: '    const body = workspace.querySelector("[data-dealerkit-review-body]");',
+    after: '    if (workspace.dataset.product === "cars") return;\n    const body = workspace.querySelector("[data-dealerkit-review-body]");',
   },
 ]);
 
