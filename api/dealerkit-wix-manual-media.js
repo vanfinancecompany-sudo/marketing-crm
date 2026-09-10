@@ -67,7 +67,7 @@ async function loadManualMediaById(supabase, registration, mediaId) {
     .limit(2);
   if (error) throw new ApiError(502, `Manual Wix media metadata read failed: ${error.message || error}`);
   if (!data?.length) throw new ApiError(404, "That staged Wix media record was not found for this vehicle.");
-  if (data.length > 1) throw new ApiError(409, "Duplicate staged Wix media metadata was found. Status refresh is blocked until that is reconciled.");
+  if (data.length > 1) throw new ApiError(409, "Duplicate staged Wix media metadata was found. The media action is blocked until that is reconciled.");
   return data[0];
 }
 
@@ -258,6 +258,70 @@ async function refreshUpload({ request, supabase, registration }) {
   };
 }
 
+async function selectUpload({ request, supabase, registration }) {
+  const stored = await loadManualMediaById(supabase, registration, request.body?.mediaId);
+  const purpose = normaliseManualMediaPurpose(stored.purpose);
+  if (!purpose) throw new ApiError(409, "The staged Wix media purpose is no longer supported.");
+
+  const decision = await loadDecisionByRegistration(supabase, registration);
+  await loadFreshVehicle(decision, registration);
+  if (clean(stored.supplier_stock_id, 300) !== clean(decision.supplierStockId, 300)) {
+    throw new ApiError(409, "The staged Wix image belongs to a different DealerKit stock identity. Selection is blocked.");
+  }
+
+  const configuration = siteConfiguration(purpose.key);
+  if (clean(stored.wix_site_id, 500) !== configuration.siteId) {
+    throw new ApiError(409, "The staged Wix image is bound to a different Wix site. Selection is blocked.");
+  }
+
+  const file = await getVerifiedWixFile(configuration, stored.wix_file_id);
+  const operationStatus = clean(file?.operationStatus, 80).toUpperCase();
+  if (operationStatus !== "READY") {
+    throw new ApiError(409, `Wix Media reports this image as ${operationStatus || "UNKNOWN"}. Only READY images can be selected for publishing.`);
+  }
+
+  const verifiedRow = wixFileToManualMediaRow({
+    file,
+    decision,
+    purpose: purpose.key,
+    siteId: configuration.siteId,
+  });
+  const { error: refreshError } = await supabase
+    .from(DEALERKIT_MANUAL_MEDIA_TABLE)
+    .update(verifiedRow)
+    .eq("id", stored.id)
+    .eq("registration", registration);
+  if (refreshError) throw new ApiError(502, `Manual Wix media verification save failed: ${refreshError.message || refreshError}`);
+
+  const { error: clearError } = await supabase
+    .from(DEALERKIT_MANUAL_MEDIA_TABLE)
+    .update({ selected_at: null })
+    .eq("supplier_stock_id", decision.supplierStockId)
+    .eq("purpose", purpose.key)
+    .not("selected_at", "is", null);
+  if (clearError) throw new ApiError(502, `Could not clear the previous manual image selection: ${clearError.message || clearError}`);
+
+  const selectedAt = new Date().toISOString();
+  const { data, error } = await supabase
+    .from(DEALERKIT_MANUAL_MEDIA_TABLE)
+    .update({ selected_at: selectedAt, updated_at: selectedAt })
+    .eq("id", stored.id)
+    .eq("registration", registration)
+    .eq("supplier_stock_id", decision.supplierStockId)
+    .eq("purpose", purpose.key)
+    .select("*")
+    .single();
+  if (error) throw new ApiError(502, `Could not select the staged Wix image: ${error.message || error}`);
+
+  return {
+    action: "select_media",
+    registration,
+    media: manualMediaRowToClient(data),
+    selectedPurpose: purpose.key,
+    selectionOnly: true,
+  };
+}
+
 export default async function handler(request, response) {
   if (!authorised(request)) {
     response.status(401).json({ ok: false, message: "Marketing CRM access is required." });
@@ -302,7 +366,9 @@ export default async function handler(request, response) {
         ? await registerUpload({ request, supabase, registration })
         : action === "refresh_status"
           ? await refreshUpload({ request, supabase, registration })
-          : null;
+          : action === "select_media"
+            ? await selectUpload({ request, supabase, registration })
+            : null;
     if (!result) throw new ApiError(400, "Manual Wix media action is not supported.");
 
     response.status(200).json({
