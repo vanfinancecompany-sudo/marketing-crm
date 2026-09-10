@@ -13,6 +13,9 @@ function clean(value, limit = 4000) {
 }
 
 function finiteNumber(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  if (typeof value === "boolean") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -61,7 +64,19 @@ function boundedSpecs(items, limit = 120) {
   })).filter((item) => item.name || item.value);
 }
 
-function publicVehicle(vehicle) {
+export function publicDealerKitVehicle(vehicle) {
+  const images = (Array.isArray(vehicle?.images) ? vehicle.images : []).slice(0, 80).map((image) => {
+    const id = clean(image?.id, 300) || null;
+    const explicitStable = typeof image?.identityStable === "boolean" ? image.identityStable : Boolean(id);
+    return {
+      id,
+      url: clean(image?.url, 3000),
+      order: finiteNumber(image?.order),
+      identityStable: Boolean(id && explicitStable),
+      identitySource: clean(image?.identitySource, 100) || (id ? "dealerkit" : "missing"),
+    };
+  }).filter((image) => image.url);
+
   return {
     supplierStockId: clean(vehicle?.supplierStockId, 300),
     registration: clean(vehicle?.registration, 20),
@@ -89,12 +104,8 @@ function publicVehicle(vehicle) {
     insuranceGroup: clean(vehicle?.insuranceGroup, 100),
     description: clean(vehicle?.description, 12000),
     attentionGrabber: clean(vehicle?.attentionGrabber, 1200),
-    images: (Array.isArray(vehicle?.images) ? vehicle.images : []).slice(0, 80).map((image) => ({
-      id: clean(image?.id, 300),
-      url: clean(image?.url, 3000),
-      order: finiteNumber(image?.order),
-    })).filter((image) => image.url),
-    imageCount: Math.max(0, finiteNumber(vehicle?.imageCount) || 0),
+    images,
+    imageCount: images.length,
     sourceUrl: clean(vehicle?.sourceUrl, 3000),
     specifications: {
       standard: boundedSpecs(vehicle?.specifications?.standard),
@@ -156,7 +167,7 @@ export default async function handler(request, response) {
       return;
     }
 
-    const publicSourceVehicle = publicVehicle(vehicle);
+    const publicSourceVehicle = publicDealerKitVehicle(vehicle);
     const normalisedRegistration = normalizeRegistration(vehicle.registration || registration);
     const supabase = getSupabaseServiceAdmin();
     const [local, savedDecision] = await Promise.all([
