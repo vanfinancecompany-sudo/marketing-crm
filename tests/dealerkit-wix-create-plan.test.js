@@ -165,3 +165,28 @@ test("vehicle spec text omits facts that DealerKit has not supplied", () => {
   assert.doesNotMatch(text, /COLOUR:/);
   assert.doesNotMatch(text, /EURO:/);
 });
+
+test("missing numeric DealerKit facts stay missing rather than becoming zero", () => {
+  const missing = vehicle({ year: null, mileage: "", bhp: undefined });
+  const facts = dealerKitDescriptionFacts(missing);
+  assert.equal(facts.year, null);
+  assert.equal(facts.mileage, null);
+  assert.equal(facts.bhp, null);
+
+  const text = buildDealerKitVehicleSpecText(missing);
+  assert.doesNotMatch(text, /YEAR:/);
+  assert.doesNotMatch(text, /MILEAGE:/);
+  assert.doesNotMatch(text, /BHP:/);
+});
+
+test("numeric DealerKit strings remain valid facts", () => {
+  const facts = dealerKitDescriptionFacts(vehicle({ year: "2022", mileage: "93000", bhp: "128" }));
+  assert.equal(facts.year, 2022);
+  assert.equal(facts.mileage, 93000);
+  assert.equal(facts.bhp, 128);
+
+  const text = buildDealerKitVehicleSpecText(vehicle({ year: "2022", mileage: "93000", bhp: "128" }));
+  assert.match(text, /YEAR: 2022\/22/);
+  assert.match(text, /MILEAGE: 93,000/);
+  assert.match(text, /BHP: 128/);
+});
