@@ -9,11 +9,13 @@ import "./styles.css";
 import "./styles/stock-control-centre.css";
 import "./styles/stock-control-centre-polish.css";
 import "./styles/dealerkit-stock-control-preview.css";
+import "./styles/dealerkit-review-workspace.css";
 import "./utils/overnightAutoRefreshPause.js";
 import "./utils/postingVisibilityStateAutoSync.js";
 import "./utils/vanscoWixPriceHelper.js";
 import "./utils/stockControlCentreUi.js";
 import "./utils/dealerKitStockControlPreview.js";
+import "./utils/dealerKitReviewWorkspace.js";
 
 const ACTIVE_INTEGRATIONS = Object.freeze({
   liveStatus: "/buffer-live-status.js",
