@@ -48,7 +48,7 @@ async function fetchJsonish(url) {
     });
     const text = await response.text();
     if (!response.ok) throw new Error(`OpenAPI spec returned ${response.status}`);
-    let parsed = JSON.parse(text);
+    let parsed = JSON.parse(escapeJsonStringControlCharacters(text));
     if (typeof parsed === "string") parsed = JSON.parse(escapeJsonStringControlCharacters(parsed));
     if (!parsed || typeof parsed !== "object") throw new Error("OpenAPI spec did not decode to an object");
     return parsed;
