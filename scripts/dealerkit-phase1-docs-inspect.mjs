@@ -94,37 +94,40 @@ async function inspectPage(label, url) {
   }
 }
 
-console.log("\n[DealerKit Phase 1] Starting read-only documentation inspection.");
-console.log(JSON.stringify({
-  vercelEnv: process.env.VERCEL_ENV || "",
-  secretConfigured: Boolean(process.env.DEALERKIT_API_SECRET),
-  dealerIdConfigured: Boolean(process.env.DEALERKIT_DEALER_ID),
-  secretValueLogged: false,
-  dealerApiCalled: false,
-}, null, 2));
+export async function inspectDealerKitPublicDocs() {
+  console.log("\n[DealerKit Phase 1] Starting read-only documentation inspection.");
+  console.log(JSON.stringify({
+    vercelEnv: process.env.VERCEL_ENV || "",
+    gitRef: process.env.VERCEL_GIT_COMMIT_REF || "",
+    secretConfigured: Boolean(process.env.DEALERKIT_API_SECRET),
+    dealerIdConfigured: Boolean(process.env.DEALERKIT_DEALER_ID),
+    secretValueLogged: false,
+    dealerApiCalled: false,
+  }, null, 2));
 
-const docs = await inspectPage("Developer docs", DOCS_URL);
-await inspectPage("Postman workspace", POSTMAN_URL);
+  const docs = await inspectPage("Developer docs", DOCS_URL);
+  await inspectPage("Postman workspace", POSTMAN_URL);
 
-if (docs?.meta?.scripts?.length) {
-  const sameOriginScripts = docs.meta.scripts.filter((url) => {
-    try { return new URL(url).origin === new URL(docs.result.finalUrl || DOCS_URL).origin; } catch { return false; }
-  }).slice(0, MAX_SCRIPTS);
+  if (docs?.meta?.scripts?.length) {
+    const sameOriginScripts = docs.meta.scripts.filter((url) => {
+      try { return new URL(url).origin === new URL(docs.result.finalUrl || DOCS_URL).origin; } catch { return false; }
+    }).slice(0, MAX_SCRIPTS);
 
-  for (const scriptUrl of sameOriginScripts) {
-    try {
-      const script = await fetchText(scriptUrl, MAX_SCRIPT);
-      printSection("Docs script clues", {
-        url: scriptUrl,
-        ok: script.ok,
-        status: script.status,
-        contentType: script.contentType,
-        clues: script.ok ? clues(script.text) : { urls: [], paths: [], snippets: [] },
-      });
-    } catch (error) {
-      printSection("Docs script error", { url: scriptUrl, name: error?.name || "Error", message: compact(error?.message || "fetch failed") });
+    for (const scriptUrl of sameOriginScripts) {
+      try {
+        const script = await fetchText(scriptUrl, MAX_SCRIPT);
+        printSection("Docs script clues", {
+          url: scriptUrl,
+          ok: script.ok,
+          status: script.status,
+          contentType: script.contentType,
+          clues: script.ok ? clues(script.text) : { urls: [], paths: [], snippets: [] },
+        });
+      } catch (error) {
+        printSection("Docs script error", { url: scriptUrl, name: error?.name || "Error", message: compact(error?.message || "fetch failed") });
+      }
     }
   }
-}
 
-console.log("\n[DealerKit Phase 1] Documentation inspection complete. No DealerKit API request was made.\n");
+  console.log("\n[DealerKit Phase 1] Documentation inspection complete. No DealerKit API request was made.\n");
+}
