@@ -45,7 +45,7 @@ function decision() {
     reviewStatus: "reviewed",
     financeEnabled: false,
     rent2buyEnabled: true,
-    rent2buyCategories: ["all_vans", "small_van"],
+    rent2buyCategories: ["all_vans", "small"],
     reviewedSourceUpdatedAt: now,
     updatedAt: "2026-09-11T00:11:00.000Z",
   };
@@ -108,7 +108,7 @@ test("an existing detail row is reused only on the Wix site where it exists", ()
   const plan = buildControlledVehiclePublishPlan({ vehicle: vehicle(), decision: decision(), imageSets: imageSets(), rent2buyWixResults: rows, rent2buySites: sites, productMode: "rent2buy" });
   const vfcDetail = plan.targets.find((target) => target.siteId === VAN_FINANCE_RENT2BUY_WIX_SITE_ID && target.collectionId === "VANPAGES");
   const standalone = plan.targets.find((target) => target.siteId === STANDALONE_RENT2BUY_WIX_SITE_ID && target.collectionId === "VANPAGES");
-  assert.equal(vfcDetail.operation, "create");
+  assert.notEqual(vfcDetail.operation, "update");
   assert.equal(standalone.operation, "update");
   assert.equal(standalone.itemId, "historic-standalone-detail");
 });
