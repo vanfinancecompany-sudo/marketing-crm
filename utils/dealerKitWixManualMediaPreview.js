@@ -36,7 +36,7 @@ function renderPanel(panel) {
   const top = element("div", "dealerkit-wix-preview__target-top");
   top.append(
     element("strong", "", "Staged manual Wix media"),
-    element("span", "", `READ-ONLY · ${readiness.ready || 0} READY / ${readiness.total || 0} STAGED`),
+    element("span", "", `READ-ONLY · ${readiness.selectedReady || 0} SELECTED / ${readiness.ready || 0} READY`),
   );
   box.appendChild(top);
 
@@ -52,11 +52,12 @@ function renderPanel(panel) {
       const status = displayStatus(item);
       const label = item.purposeLabel || item.purpose || "Manual Wix image";
       const verification = liveVerificationText(item);
+      const selection = item.selected ? " · SELECTED AS MAIN" : "";
       const suffix = item.liveVerificationError ? ` · ${item.liveVerificationError}` : "";
       box.appendChild(element(
         "div",
         "dealerkit-wix-preview__field-line",
-        `${label} · ${status} · ${verification}${suffix}`,
+        `${label} · ${status} · ${verification}${selection}${suffix}`,
       ));
     }
   }
@@ -71,7 +72,15 @@ function renderPanel(panel) {
     box.appendChild(element(
       "div",
       "dealerkit-wix-preview__field-line",
-      "More than one READY image exists for at least one destination. A later controlled step must make an explicit choice; the CRM will not pick one automatically.",
+      `Choose a main image for: ${readiness.purposesNeedingSelection.join(", ")}. The selected main image will also become that product's listing image.`,
+    ));
+  }
+
+  if (readiness.duplicateSelectedPurposes?.length || readiness.selectedInvalid) {
+    box.appendChild(element(
+      "div",
+      "dealerkit-wix-preview__field-line",
+      "A selected image is no longer safely usable. Publishing must remain blocked until the media choice is re-verified.",
     ));
   }
 
