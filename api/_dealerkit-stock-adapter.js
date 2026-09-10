@@ -218,7 +218,22 @@ function dedupeWithDiagnostics(rows) {
   };
 }
 
-async function recoverFailedPageBySingleItemReads({
+function expectedPageCount(page, perPage, total) {
+  const startIndex = (page - 1) * perPage;
+  return Math.max(0, Math.min(perPage, total - startIndex));
+}
+
+function invalidRecordDiagnostic(item, position) {
+  return {
+    position,
+    idPresent: Boolean(clean(item?.id, 300)),
+    registrationPresent: Boolean(normalizeRegistration(item?.vehicle?.registration || item?.vehicle?.plate || "")),
+    sourceStatus: clean(item?.status ?? item?.meta?.status, 100) || "unknown",
+    vehicleType: clean(item?.vehicle?.type, 100) || "unknown",
+  };
+}
+
+async function recoverPageBySingleItemReads({
   page,
   perPage,
   total,
@@ -233,12 +248,14 @@ async function recoverFailedPageBySingleItemReads({
     return {
       vehicles: [],
       failedPositions: [{ start, end, status: 0, reason: "fallback_guard" }],
+      invalidRecords: [],
       reportedTotals: [],
     };
   }
 
   const vehicles = [];
   const failedPositions = [];
+  const invalidRecords = [];
   const reportedTotals = [];
   for (let position = start; position <= end; position += 1) {
     const result = await requestJson(stockUrl(dealerId, { page: position, perPage: 1 }), secret, fetchImplementation);
@@ -248,11 +265,12 @@ async function recoverFailedPageBySingleItemReads({
       failedPositions.push({ position, status: result.status, responseBytes: result.responseBytes });
       continue;
     }
-    const mapped = mapDealerKitListing(result.payload.data[0]);
+    const item = result.payload.data[0];
+    const mapped = mapDealerKitListing(item);
     if (mapped) vehicles.push(mapped);
-    else failedPositions.push({ position, status: result.status, responseBytes: result.responseBytes, reason: "invalid_record" });
+    else invalidRecords.push(invalidRecordDiagnostic(item, position));
   }
-  return { vehicles, failedPositions, reportedTotals };
+  return { vehicles, failedPositions, invalidRecords, reportedTotals };
 }
 
 export class DealerKitSnapshotIncompleteError extends Error {
@@ -285,29 +303,49 @@ export async function fetchDealerKitStockSnapshot({
   const vehicles = [];
   const failedPages = [];
   const failedPositions = [];
+  const invalidRecords = [];
+  const pageCounts = [];
   const reportedTotals = new Set([total]);
 
-  const addPayload = (payload) => {
-    const meta = pageMeta(payload);
+  for (let page = 1; page <= lastPage; page += 1) {
+    const result = page === 1
+      ? firstResult
+      : await requestJson(stockUrl(dealerId, { page, perPage }), secret, fetchImplementation);
+    const meta = pageMeta(result.payload);
     if (meta.total !== null) reportedTotals.add(meta.total);
-    for (const item of payload?.data || []) {
-      const mapped = mapDealerKitListing(item);
-      if (mapped) vehicles.push(mapped);
-    }
-  };
-  addPayload(firstResult.payload);
+    const rows = Array.isArray(result.payload?.data) ? result.payload.data : [];
+    const expected = expectedPageCount(page, perPage, total);
+    const pageIsUsable = result.ok && Array.isArray(result.payload?.data) && rows.length === expected;
 
-  for (let page = 2; page <= lastPage; page += 1) {
-    const result = await requestJson(stockUrl(dealerId, { page, perPage }), secret, fetchImplementation);
-    if (result.ok && Array.isArray(result.payload?.data)) {
-      addPayload(result.payload);
+    pageCounts.push({
+      page,
+      status: result.status,
+      observed: rows.length,
+      expected,
+      recovered: !pageIsUsable,
+    });
+
+    if (pageIsUsable) {
+      rows.forEach((item, index) => {
+        const mapped = mapDealerKitListing(item);
+        if (mapped) vehicles.push(mapped);
+        else invalidRecords.push(invalidRecordDiagnostic(item, ((page - 1) * perPage) + index + 1));
+      });
       continue;
     }
 
-    failedPages.push({ page, status: result.status, responseBytes: result.responseBytes });
-    const recovered = await recoverFailedPageBySingleItemReads({ page, perPage, total, dealerId, secret, fetchImplementation });
+    failedPages.push({
+      page,
+      status: result.status,
+      responseBytes: result.responseBytes,
+      observed: rows.length,
+      expected,
+      reason: result.ok ? "unexpected_page_count" : "http_error",
+    });
+    const recovered = await recoverPageBySingleItemReads({ page, perPage, total, dealerId, secret, fetchImplementation });
     vehicles.push(...recovered.vehicles);
     failedPositions.push(...recovered.failedPositions);
+    invalidRecords.push(...recovered.invalidRecords);
     for (const observedTotal of recovered.reportedTotals) reportedTotals.add(observedTotal);
   }
 
@@ -315,6 +353,7 @@ export async function fetchDealerKitStockSnapshot({
   const stableReportedTotal = reportedTotals.size === 1;
   const complete = (
     failedPositions.length === 0
+    && invalidRecords.length === 0
     && deduped.duplicateSupplierStockIds.length === 0
     && deduped.duplicateRegistrations.length === 0
     && stableReportedTotal
@@ -324,8 +363,10 @@ export async function fetchDealerKitStockSnapshot({
     apiReportedTotal: total,
     reportedTotals: Array.from(reportedTotals).sort((a, b) => a - b),
     stableReportedTotal,
+    pageCounts,
     rawMappedRecords: vehicles.length,
     recordsFetched: deduped.vehicles.length,
+    invalidRecords,
     duplicateSupplierStockIds: deduped.duplicateSupplierStockIds,
     duplicateRegistrations: deduped.duplicateRegistrations,
     failedPages,
@@ -340,7 +381,11 @@ export async function fetchDealerKitStockSnapshot({
     );
   }
 
-  const anomalyCount = failedPositions.length + deduped.duplicateSupplierStockIds.length + deduped.duplicateRegistrations.length + (stableReportedTotal ? 0 : 1);
+  const anomalyCount = failedPositions.length
+    + invalidRecords.length
+    + deduped.duplicateSupplierStockIds.length
+    + deduped.duplicateRegistrations.length
+    + (stableReportedTotal ? 0 : 1);
   const checkedAt = new Date().toISOString();
   return {
     providerId: "dealerkit",
@@ -360,7 +405,7 @@ export async function fetchDealerKitStockSnapshot({
       updatedAt: checkedAt,
       completedAt: checkedAt,
       total,
-      processed: vehicles.length + failedPositions.length,
+      processed: vehicles.length + failedPositions.length + invalidRecords.length,
       succeeded: deduped.vehicles.length,
       failed: anomalyCount,
       remaining: Math.max(0, total - deduped.vehicles.length),
