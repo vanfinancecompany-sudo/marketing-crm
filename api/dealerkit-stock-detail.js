@@ -2,6 +2,7 @@ import { fetchDealerKitStockSnapshot, fetchDealerKitStockDetail } from "./_deale
 import { getSupabaseServiceAdmin, normalizeRegistration } from "./_vansco-cache-utils.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
+const REGISTRATION_PATTERN = /\b([A-Z]{2}[0-9]{2}\s?[A-Z]{3}|[A-Z][0-9]{1,3}\s?[A-Z]{3}|[A-Z]{3}\s?[0-9]{1,3}[A-Z]|[0-9]{1,4}\s?[A-Z]{1,3})\b/i;
 
 function clean(value, limit = 4000) {
   return String(value ?? "").trim().slice(0, limit);
@@ -17,6 +18,14 @@ function isAuthorised(request, environment = process.env) {
   const header = clean(request.headers?.[API_KEY_HEADER], 2000);
   const bearer = clean(request.headers?.authorization, 2200).replace(/^Bearer\s+/i, "");
   return Boolean(expected && (header === expected || bearer === expected));
+}
+
+function localRegistration(value) {
+  const text = clean(value, 1000).toUpperCase();
+  const direct = normalizeRegistration(text);
+  if (direct) return direct;
+  const match = text.match(REGISTRATION_PATTERN);
+  return normalizeRegistration(match?.[1] || "");
 }
 
 async function loadLocalMatches(supabase, registration) {
@@ -36,8 +45,8 @@ async function loadLocalMatches(supabase, registration) {
   if (financeResult.error) throw new Error(`Finance stock read failed: ${financeResult.error.message || financeResult.error}`);
   if (rentResult.error) throw new Error(`Rent2Buy stock read failed: ${rentResult.error.message || rentResult.error}`);
 
-  const finance = (financeResult.data || []).find((row) => normalizeRegistration(row?.title || row?.registration || "") === registration) || null;
-  const rent2buy = (rentResult.data || []).find((row) => normalizeRegistration(row?.registration || row?.title || "") === registration) || null;
+  const finance = (financeResult.data || []).find((row) => localRegistration(row?.title || row?.registration || "") === registration) || null;
+  const rent2buy = (rentResult.data || []).find((row) => localRegistration(row?.registration || row?.title || "") === registration) || null;
   return { finance, rent2buy };
 }
 
