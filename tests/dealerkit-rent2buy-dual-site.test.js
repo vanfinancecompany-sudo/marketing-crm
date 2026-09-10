@@ -97,7 +97,7 @@ test("Rent2Buy detail specs include source-backed Engine, Euro and MPG without r
   assert.equal(detail.data.title, "FV72DZA");
   assert.match(detail.data.titleText, /^Peugeot Partner 1\.5 BlueHDi/);
   assert.match(detail.data.specText, /ENGINE SIZE: 1499 CC/i);
-  assert.match(detail.data.specText, /EURO: EURO 6/i);
+  assert.match(detail.data.specText, /EURO: 6/i);
   assert.match(detail.data.specText, /MPG: 55\.4/i);
 });
 
