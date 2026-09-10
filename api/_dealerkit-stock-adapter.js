@@ -46,7 +46,7 @@ function normaliseVatStatus(value) {
   if (["ex-vat", "excluding-vat", "+vat", "plus-vat"].includes(status)) return "plus_vat";
   if (["inc-vat", "including-vat", "vat-inclusive", "vat-included"].includes(status)) return "inc_vat";
   if (["no-vat", "vat-free", "margin", "margin-scheme"].includes(status)) return "no_vat";
-  return status ? "unknown" : "unknown";
+  return "unknown";
 }
 
 function normaliseImages(media = {}) {
@@ -192,13 +192,30 @@ function pageMeta(payload = {}) {
   };
 }
 
-function dedupe(rows) {
+function dedupeWithDiagnostics(rows) {
   const byId = new Map();
+  const duplicateSupplierStockIds = new Set();
+  const registrationToIds = new Map();
+
   for (const row of rows) {
     if (!row?.supplierStockId) continue;
+    if (byId.has(row.supplierStockId)) duplicateSupplierStockIds.add(row.supplierStockId);
     byId.set(row.supplierStockId, row);
+
+    const ids = registrationToIds.get(row.registration) || new Set();
+    ids.add(row.supplierStockId);
+    registrationToIds.set(row.registration, ids);
   }
-  return Array.from(byId.values());
+
+  const duplicateRegistrations = Array.from(registrationToIds.entries())
+    .filter(([, ids]) => ids.size > 1)
+    .map(([registration, ids]) => ({ registration, supplierStockIds: Array.from(ids).sort() }));
+
+  return {
+    vehicles: Array.from(byId.values()),
+    duplicateSupplierStockIds: Array.from(duplicateSupplierStockIds).sort(),
+    duplicateRegistrations,
+  };
 }
 
 async function recoverFailedPageBySingleItemReads({
@@ -213,13 +230,20 @@ async function recoverFailedPageBySingleItemReads({
   const end = Math.min(page * perPage, total);
   const count = Math.max(0, end - start + 1);
   if (count > MAX_FALLBACK_ITEMS) {
-    return { vehicles: [], failedPositions: [{ start, end, status: 0, reason: "fallback_guard" }] };
+    return {
+      vehicles: [],
+      failedPositions: [{ start, end, status: 0, reason: "fallback_guard" }],
+      reportedTotals: [],
+    };
   }
 
   const vehicles = [];
   const failedPositions = [];
+  const reportedTotals = [];
   for (let position = start; position <= end; position += 1) {
     const result = await requestJson(stockUrl(dealerId, { page: position, perPage: 1 }), secret, fetchImplementation);
+    const meta = pageMeta(result.payload);
+    if (meta.total !== null) reportedTotals.push(meta.total);
     if (!result.ok || !Array.isArray(result.payload?.data) || !result.payload.data[0]) {
       failedPositions.push({ position, status: result.status, responseBytes: result.responseBytes });
       continue;
@@ -228,7 +252,7 @@ async function recoverFailedPageBySingleItemReads({
     if (mapped) vehicles.push(mapped);
     else failedPositions.push({ position, status: result.status, responseBytes: result.responseBytes, reason: "invalid_record" });
   }
-  return { vehicles, failedPositions };
+  return { vehicles, failedPositions, reportedTotals };
 }
 
 export class DealerKitSnapshotIncompleteError extends Error {
@@ -261,8 +285,11 @@ export async function fetchDealerKitStockSnapshot({
   const vehicles = [];
   const failedPages = [];
   const failedPositions = [];
+  const reportedTotals = new Set([total]);
 
   const addPayload = (payload) => {
+    const meta = pageMeta(payload);
+    if (meta.total !== null) reportedTotals.add(meta.total);
     for (const item of payload?.data || []) {
       const mapped = mapDealerKitListing(item);
       if (mapped) vehicles.push(mapped);
@@ -281,13 +308,26 @@ export async function fetchDealerKitStockSnapshot({
     const recovered = await recoverFailedPageBySingleItemReads({ page, perPage, total, dealerId, secret, fetchImplementation });
     vehicles.push(...recovered.vehicles);
     failedPositions.push(...recovered.failedPositions);
+    for (const observedTotal of recovered.reportedTotals) reportedTotals.add(observedTotal);
   }
 
-  const uniqueVehicles = dedupe(vehicles);
-  const complete = failedPositions.length === 0 && uniqueVehicles.length === total;
+  const deduped = dedupeWithDiagnostics(vehicles);
+  const stableReportedTotal = reportedTotals.size === 1;
+  const complete = (
+    failedPositions.length === 0
+    && deduped.duplicateSupplierStockIds.length === 0
+    && deduped.duplicateRegistrations.length === 0
+    && stableReportedTotal
+    && deduped.vehicles.length === total
+  );
   const diagnostics = {
     apiReportedTotal: total,
-    recordsFetched: uniqueVehicles.length,
+    reportedTotals: Array.from(reportedTotals).sort((a, b) => a - b),
+    stableReportedTotal,
+    rawMappedRecords: vehicles.length,
+    recordsFetched: deduped.vehicles.length,
+    duplicateSupplierStockIds: deduped.duplicateSupplierStockIds,
+    duplicateRegistrations: deduped.duplicateRegistrations,
     failedPages,
     failedPositions,
     complete,
@@ -295,11 +335,12 @@ export async function fetchDealerKitStockSnapshot({
 
   if (!complete && !allowPartial) {
     throw new DealerKitSnapshotIncompleteError(
-      `DealerKit stock snapshot is incomplete: ${uniqueVehicles.length} of ${total} records were readable.`,
+      `DealerKit stock snapshot is incomplete or unstable: ${deduped.vehicles.length} usable records against an initial total of ${total}.`,
       diagnostics,
     );
   }
 
+  const anomalyCount = failedPositions.length + deduped.duplicateSupplierStockIds.length + deduped.duplicateRegistrations.length + (stableReportedTotal ? 0 : 1);
   const checkedAt = new Date().toISOString();
   return {
     providerId: "dealerkit",
@@ -307,8 +348,8 @@ export async function fetchDealerKitStockSnapshot({
     checkedAt,
     complete,
     apiReportedTotal: total,
-    vehicles: uniqueVehicles,
-    vehicleCount: uniqueVehicles.length,
+    vehicles: deduped.vehicles,
+    vehicleCount: deduped.vehicles.length,
     diagnostics,
     refresh: {
       id: null,
@@ -319,11 +360,11 @@ export async function fetchDealerKitStockSnapshot({
       updatedAt: checkedAt,
       completedAt: checkedAt,
       total,
-      processed: uniqueVehicles.length + failedPositions.length,
-      succeeded: uniqueVehicles.length,
-      failed: failedPositions.length,
-      remaining: Math.max(0, total - uniqueVehicles.length),
-      error: complete ? null : `DealerKit returned ${failedPositions.length} unreadable stock position(s).`,
+      processed: vehicles.length + failedPositions.length,
+      succeeded: deduped.vehicles.length,
+      failed: anomalyCount,
+      remaining: Math.max(0, total - deduped.vehicles.length),
+      error: complete ? null : "DealerKit returned an incomplete or unstable stock snapshot; authoritative cutover is blocked.",
     },
   };
 }
