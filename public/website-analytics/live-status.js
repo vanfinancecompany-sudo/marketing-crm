@@ -3,6 +3,14 @@
   let latest = null;
   let timer = null;
 
+  function installStyles() {
+    if (document.getElementById('liveCompletionStatusStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'liveCompletionStatusStyles';
+    style.textContent = '.live-completion-status{display:grid;gap:4px;margin-top:12px;padding:12px 14px;border:1px solid #dfe4ea;border-left:4px solid #667085;border-radius:10px;background:#f8fafc;color:#344054}.live-completion-status strong{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#101828}.live-completion-status span{font-size:14px;font-weight:800}.live-completion-status small{font-size:11px;line-height:1.45;color:#667085}.live-completion-status.is-live-ahead{border-left-color:#1b8f4d;background:#f2fbf5}.live-completion-status.is-live-ahead strong{color:#197543}';
+    document.head.appendChild(style);
+  }
+
   function renderSidebar() {
     const sidebar = document.getElementById('sidebar');
     if (!sidebar || !window.MarketingCrmSidebarRenderer?.render) return;
@@ -76,6 +84,7 @@
     }
   }
 
+  installStyles();
   renderSidebar();
   load();
   document.getElementById('refreshButton')?.addEventListener('click', () => window.setTimeout(load, 50));
