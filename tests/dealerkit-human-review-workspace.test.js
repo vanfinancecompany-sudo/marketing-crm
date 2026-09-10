@@ -44,3 +44,25 @@ test("direct missing-stock review bridge does not mutate stock or Wix", () => {
   const bridge = fs.readFileSync(new URL("../utils/dealerKitMissingStockReviewBridge.js", import.meta.url), "utf8");
   assert.doesNotMatch(bridge, /\/api\/dealerkit-controlled-publish|\/wix-data\/|saveVanscoWatchAction|method:\s*["'](?:POST|PUT|PATCH|DELETE)/i);
 });
+
+test("product gallery workspace separates Finance and Rent2Buy, previews uploads and supports drag ordering", () => {
+  const client = fs.readFileSync(new URL("../utils/dealerKitProductGalleryWorkspace.js", import.meta.url), "utf8");
+  const main = fs.readFileSync(new URL("../main.jsx", import.meta.url), "utf8");
+  assert.match(main, /dealerKitProductGalleryWorkspace\.js/);
+  assert.match(client, /Van Finance/);
+  assert.match(client, /Rent2Buy/);
+  assert.match(client, /van_finance_replacement/);
+  assert.match(client, /rent2buy_template/);
+  assert.match(client, /URL\.createObjectURL/);
+  assert.match(client, /draggable = true/);
+  assert.match(client, /dragstart/);
+  assert.match(client, /drop/);
+  assert.match(client, /Save gallery changes/);
+  assert.match(client, /dealerkit-review-decision/);
+  assert.match(client, /dealerkit-wix-manual-media/);
+});
+
+test("product gallery workspace stores review/media choices but never calls the controlled Wix publish action", () => {
+  const client = fs.readFileSync(new URL("../utils/dealerKitProductGalleryWorkspace.js", import.meta.url), "utf8");
+  assert.doesNotMatch(client, /dealerkit-controlled-publish|Publish new vehicle to Wix|wix-data\/v2\/items|createDataItem|updateDataItem/i);
+});

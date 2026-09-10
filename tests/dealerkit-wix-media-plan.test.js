@@ -116,3 +116,33 @@ test("DealerKit URL durability remains an explicit lock even when the review set
   assert.equal(plan.sourceRequirements.dealerKitUrlDurabilityVerified, false);
   assert.equal(plan.sourceRequirements.dealerKitHeadSupportVerified, false);
 });
+
+test("product-specific image state imports the union needed by Finance and Rent2Buy", () => {
+  const plan = buildDealerKitWixMediaPlan({
+    vehicle: vehicle(),
+    decision: decision({
+      rent2buyEnabled: true,
+      imageOrderIds: [
+        "__VFC_PRODUCT_IMAGES__",
+        "image-2",
+        "image-3",
+        "image-1",
+        "__R2B_PRODUCT_IMAGES__",
+        "image-1",
+        "image-3",
+        "image-2",
+      ],
+      excludedImageIds: [
+        "__VFC_PRODUCT_IMAGES__",
+        "image-1",
+        "__R2B_PRODUCT_IMAGES__",
+        "image-2",
+      ],
+    }),
+  });
+
+  assert.deepEqual(plan.selectedImageIds, ["image-2", "image-3", "image-1"]);
+  assert.deepEqual(plan.excludedImageIds, []);
+  assert.equal(plan.items[0].isPrimary, true);
+  assert.equal(plan.canPrepareImport, true);
+});

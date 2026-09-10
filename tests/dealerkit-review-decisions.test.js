@@ -66,6 +66,48 @@ test("new review state references source image IDs rather than storing image fil
   assert.doesNotMatch(JSON.stringify(decision), /images\.example/i);
 });
 
+test("split product gallery state preserves duplicate source IDs across Finance and Rent2Buy sections", () => {
+  const decision = normalizeDealerKitReviewInput({
+    supplierStockId: "stock-split",
+    registration: "BM17 WEA",
+    reviewStatus: "reviewed",
+    financeEnabled: true,
+    financeCategories: ["all_vans"],
+    rent2buyEnabled: true,
+    primaryImageId: "image-2",
+    imageOrderIds: [
+      "__VFC_PRODUCT_IMAGES__",
+      "image-2",
+      "image-1",
+      "__R2B_PRODUCT_IMAGES__",
+      "image-1",
+      "image-2",
+    ],
+    excludedImageIds: [
+      "__VFC_PRODUCT_IMAGES__",
+      "image-1",
+      "__R2B_PRODUCT_IMAGES__",
+      "image-2",
+    ],
+  });
+
+  assert.equal(decision.primaryImageId, "image-2");
+  assert.deepEqual(decision.imageOrderIds, [
+    "__VFC_PRODUCT_IMAGES__",
+    "image-2",
+    "image-1",
+    "__R2B_PRODUCT_IMAGES__",
+    "image-1",
+    "image-2",
+  ]);
+  assert.deepEqual(decision.excludedImageIds, [
+    "__VFC_PRODUCT_IMAGES__",
+    "image-1",
+    "__R2B_PRODUCT_IMAGES__",
+    "image-2",
+  ]);
+});
+
 test("review decision endpoint is access-gated and cannot write DealerKit or Wix", () => {
   const endpoint = fs.readFileSync(new URL("../api/dealerkit-review-decision.js", import.meta.url), "utf8");
   assert.match(endpoint, /Marketing CRM access is required/);
