@@ -2,21 +2,23 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-test("DealerKit human review endpoint is access-gated and read-only", () => {
+test("DealerKit human review detail endpoint is access-gated and source read-only", () => {
   const endpoint = fs.readFileSync(new URL("../api/dealerkit-stock-detail.js", import.meta.url), "utf8");
   assert.match(endpoint, /Marketing CRM access is required/);
   assert.match(endpoint, /fetchDealerKitStockDetail/);
   assert.match(endpoint, /specifications:\s*true/);
-  assert.doesNotMatch(endpoint, /\.insert\(|\.update\(|\.delete\(|PATCH|POST\s+https:\/\/api\.dealerkit/i);
+  assert.match(endpoint, /loadDealerKitReviewDecision/);
+  assert.doesNotMatch(endpoint, /api\.dealerkit\.uk.*(?:POST|PATCH|PUT|DELETE)|wixapis/i);
 });
 
-test("DealerKit review workspace exposes review-only controls and no publishing actions", () => {
+test("DealerKit review workspace saves internal decisions but still exposes no publishing action", () => {
   const client = fs.readFileSync(new URL("../utils/dealerKitReviewWorkspace.js", import.meta.url), "utf8");
-  assert.match(client, /DEALERKIT · REVIEW ONLY/);
-  assert.match(client, /Nothing can be saved or published from here yet/);
+  assert.match(client, /DEALERKIT · REVIEW WORKSPACE/);
   assert.match(client, /Review vehicle/);
   assert.match(client, /dealerkit-stock-detail/);
-  assert.doesNotMatch(client, /Publish to Wix|Update Wix|Send to Rent2Buy|saveReview|persistReview/);
+  assert.match(client, /Save review/);
+  assert.match(client, /publishing still locked/i);
+  assert.doesNotMatch(client, /Publish to Wix|Update Wix vehicle|Send live/i);
 });
 
 test("DealerKit review workspace reads the registration from bounded comparison rows", () => {

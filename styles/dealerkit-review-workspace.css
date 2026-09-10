@@ -29,7 +29,7 @@ body.dealerkit-review-open {
   inset: 0;
   z-index: 2147483000;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) min(760px, 88vw);
+  grid-template-columns: minmax(0, 1fr) min(780px, 90vw);
 }
 
 .dealerkit-review__shade {
@@ -233,6 +233,203 @@ body.dealerkit-review-open {
   font-size: 15px;
 }
 
+.dealerkit-review__section-note {
+  margin: -4px 0 12px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.dealerkit-review__decisions {
+  border-color: #fecaca;
+  box-shadow: 0 10px 28px rgba(127, 29, 29, 0.06);
+}
+
+.dealerkit-review__decision-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 13px;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.dealerkit-review__decision-state {
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 5px 8px;
+  font-size: 9px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.dealerkit-review__stale-warning {
+  margin-bottom: 12px;
+  border: 1px solid #fed7aa;
+  border-radius: 12px;
+  background: #fff7ed;
+  color: #9a3412;
+  padding: 9px 11px;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.dealerkit-review__decision-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.dealerkit-review__field {
+  display: grid;
+  gap: 6px;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.dealerkit-review__field select,
+.dealerkit-review__field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  color: #0f172a;
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.dealerkit-review__field textarea {
+  min-height: 76px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.dealerkit-review__toggle,
+.dealerkit-review__check,
+.dealerkit-review__image-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.dealerkit-review__toggle {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.dealerkit-review__toggle input,
+.dealerkit-review__check input,
+.dealerkit-review__image-toggle input {
+  accent-color: #b91c1c;
+}
+
+.dealerkit-review__category-block {
+  display: grid;
+  gap: 7px;
+  margin-top: 13px;
+  padding-top: 13px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.dealerkit-review__category-block > strong {
+  color: #0f172a;
+  font-size: 12px;
+}
+
+.dealerkit-review__category-block > p,
+.dealerkit-review__routing-note {
+  margin: 0;
+  color: #64748b;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.dealerkit-review__category-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.dealerkit-review__check {
+  min-width: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 8px 9px;
+}
+
+.dealerkit-review__check:has(input:checked) {
+  border-color: #fecaca;
+  background: #fff7f7;
+  color: #991b1b;
+}
+
+.dealerkit-review__check--fixed {
+  background: #f1f5f9;
+}
+
+.dealerkit-review__routing-note {
+  margin-top: 10px;
+  border-left: 3px solid #cbd5e1;
+  padding: 5px 0 5px 9px;
+}
+
+.dealerkit-review__notes {
+  margin-top: 12px;
+}
+
+.dealerkit-review__decision-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.dealerkit-review__save-state {
+  color: #64748b;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.dealerkit-review__save {
+  flex: 0 0 auto;
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  background: #b91c1c;
+  color: #fff;
+  min-height: 34px;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.dealerkit-review__save:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
 .dealerkit-review__gallery {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -246,6 +443,16 @@ body.dealerkit-review-open {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   background: #f8fafc;
+  transition: opacity 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.dealerkit-review__image-card.is-primary {
+  border-color: #b91c1c;
+  box-shadow: 0 0 0 2px rgba(185, 28, 28, 0.08);
+}
+
+.dealerkit-review__image-card.is-excluded {
+  opacity: 0.42;
 }
 
 .dealerkit-review__image-card img {
@@ -257,8 +464,54 @@ body.dealerkit-review-open {
 }
 
 .dealerkit-review__image-card figcaption {
-  padding: 7px 8px;
+  padding: 7px 8px 4px;
   color: #64748b;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.dealerkit-review__image-card.is-primary figcaption {
+  color: #991b1b;
+}
+
+.dealerkit-review__image-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 5px 8px 8px;
+}
+
+.dealerkit-review__image-toggle {
+  font-size: 9px;
+}
+
+.dealerkit-review__image-primary {
+  appearance: none;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  color: #334155;
+  padding: 5px 7px;
+  font: inherit;
+  font-size: 8px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.dealerkit-review__image-card.is-primary .dealerkit-review__image-primary {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.dealerkit-review__image-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.dealerkit-review__image-untracked {
+  color: #94a3b8;
   font-size: 9px;
   font-weight: 700;
 }
@@ -354,6 +607,11 @@ body.dealerkit-review-open {
   .dealerkit-review__gallery {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+
+  .dealerkit-review__decision-row,
+  .dealerkit-review__category-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 620px) {
@@ -364,8 +622,19 @@ body.dealerkit-review-open {
   }
 
   .dealerkit-review__local-grid,
-  .dealerkit-review__spec-grid {
+  .dealerkit-review__spec-grid,
+  .dealerkit-review__decision-row,
+  .dealerkit-review__category-grid {
     grid-template-columns: 1fr;
+  }
+
+  .dealerkit-review__decision-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dealerkit-review__save {
+    width: 100%;
   }
 
   .dealerkit-review__gallery {

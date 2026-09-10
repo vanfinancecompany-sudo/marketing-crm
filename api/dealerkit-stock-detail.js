@@ -1,4 +1,8 @@
 import { fetchDealerKitStockSnapshot, fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
+import {
+  defaultDealerKitReviewDecision,
+  loadDealerKitReviewDecision,
+} from "./_dealerkit-review-decisions.js";
 import { getSupabaseServiceAdmin, normalizeRegistration } from "./_vansco-cache-utils.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
@@ -152,14 +156,23 @@ export default async function handler(request, response) {
       return;
     }
 
+    const publicSourceVehicle = publicVehicle(vehicle);
     const normalisedRegistration = normalizeRegistration(vehicle.registration || registration);
-    const local = await loadLocalMatches(getSupabaseServiceAdmin(), normalisedRegistration);
+    const supabase = getSupabaseServiceAdmin();
+    const [local, savedDecision] = await Promise.all([
+      loadLocalMatches(supabase, normalisedRegistration),
+      loadDealerKitReviewDecision(supabase, publicSourceVehicle.supplierStockId),
+    ]);
+    const reviewDecision = savedDecision || defaultDealerKitReviewDecision(publicSourceVehicle);
+
     response.setHeader("Cache-Control", "no-store, max-age=0");
     response.status(200).json({
       ok: true,
       readOnly: true,
       authoritative: false,
-      vehicle: publicVehicle(vehicle),
+      reviewStateWritable: true,
+      vehicle: publicSourceVehicle,
+      reviewDecision,
       local: {
         finance: localVehicle(local.finance, "finance"),
         rent2buy: localVehicle(local.rent2buy, "rent2buy"),
