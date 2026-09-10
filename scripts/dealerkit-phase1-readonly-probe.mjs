@@ -143,6 +143,38 @@ function linkNext(payload) {
   return links.next || links.next_page_url || links.nextPage || "";
 }
 
+function aggregate(items, pageMeta, targetItem) {
+  const registrations = new Set(items.map(findRegistration).map(normalizeRegistration).filter(Boolean));
+  const statusCounts = {};
+  const typeCounts = {};
+  const imageCounts = [];
+  for (const item of items) {
+    const status = String(findScalar(item, /^status$/i) ?? "unknown");
+    statusCounts[status] = (statusCounts[status] || 0) + 1;
+    const type = String(findScalar(item, /^type$/i) ?? "unknown");
+    typeCounts[type] = (typeCounts[type] || 0) + 1;
+    imageCounts.push(countImages(item));
+  }
+  const knownTotal = pageMeta.find((entry) => Number.isFinite(Number(entry.total)))?.total ?? null;
+  const imageSummary = imageCounts.length ? {
+    zero: imageCounts.filter((count) => count === 0).length,
+    one: imageCounts.filter((count) => count === 1).length,
+    fiveOrMore: imageCounts.filter((count) => count >= 5).length,
+    max: Math.max(...imageCounts),
+  } : { zero: 0, one: 0, fiveOrMore: 0, max: 0 };
+  return {
+    recordsFetched: items.length,
+    uniqueRegistrations: registrations.size,
+    apiReportedTotal: knownTotal,
+    statusCounts,
+    typeCounts,
+    imageSummary,
+    targetRegistration: TARGET_REGISTRATION,
+    targetFound: Boolean(targetItem),
+    target: targetSummary(targetItem),
+  };
+}
+
 export async function probeDealerKitStockReadOnly() {
   const secret = process.env.DEALERKIT_API_SECRET;
   const dealerId = compact(process.env.DEALERKIT_DEALER_ID);
@@ -169,12 +201,19 @@ export async function probeDealerKitStockReadOnly() {
     if (!result.ok || !result.payload || typeof result.payload !== "object") {
       console.log(JSON.stringify({
         ok: false,
+        partial: true,
         phase: "stock-list",
-        page,
+        failedPage: page,
         httpStatus: result.status,
         contentType: result.contentType,
         responseBytes: result.textLength,
+        pagesSuccessfullyFetched: pageMeta.length,
+        pageMeta,
+        ...aggregate(items, pageMeta, targetItem),
+        firstItemFieldPaths,
         secretLogged: false,
+        dealerIdLogged: false,
+        writeEndpointsCalled: false,
       }, null, 2));
       return;
     }
@@ -207,41 +246,13 @@ export async function probeDealerKitStockReadOnly() {
   if (page >= MAX_PAGES) stoppedReason = "page_guard";
   if (items.length >= MAX_ITEMS) stoppedReason = "item_guard";
 
-  const registrations = new Set(items.map(findRegistration).map(normalizeRegistration).filter(Boolean));
-  const statusCounts = {};
-  const typeCounts = {};
-  const imageCounts = [];
-  for (const item of items) {
-    const status = String(findScalar(item, /^status$/i) ?? "unknown");
-    statusCounts[status] = (statusCounts[status] || 0) + 1;
-    const type = String(findScalar(item, /^type$/i) ?? "unknown");
-    typeCounts[type] = (typeCounts[type] || 0) + 1;
-    imageCounts.push(countImages(item));
-  }
-
-  const knownTotal = pageMeta.find((entry) => Number.isFinite(Number(entry.total)))?.total ?? null;
-  const imageSummary = imageCounts.length ? {
-    zero: imageCounts.filter((count) => count === 0).length,
-    one: imageCounts.filter((count) => count === 1).length,
-    fiveOrMore: imageCounts.filter((count) => count >= 5).length,
-    max: Math.max(...imageCounts),
-  } : { zero: 0, one: 0, fiveOrMore: 0, max: 0 };
-
   console.log(JSON.stringify({
     ok: true,
     readOnly: true,
     pagesFetched: page,
-    recordsFetched: items.length,
-    uniqueRegistrations: registrations.size,
-    apiReportedTotal: knownTotal,
     stoppedReason,
     pageMeta,
-    statusCounts,
-    typeCounts,
-    imageSummary,
-    targetRegistration: TARGET_REGISTRATION,
-    targetFound: Boolean(targetItem),
-    target: targetSummary(targetItem),
+    ...aggregate(items, pageMeta, targetItem),
     firstItemFieldPaths,
     secretLogged: false,
     dealerIdLogged: false,
