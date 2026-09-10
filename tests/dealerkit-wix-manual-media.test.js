@@ -13,6 +13,7 @@ import {
   validateDealerKitManualMediaFile,
   wixFileToManualMediaRow,
 } from "../lib/dealerKitWixManualMedia.js";
+import { RENT2BUY_WIX_SITE_ID } from "../lib/rent2buyMonthlyPriceSync.js";
 
 const root = new URL("../", import.meta.url);
 
@@ -31,10 +32,16 @@ test("manual media contract keeps Van Finance and Rent2Buy destinations explicit
   const environment = {
     WIX_API_KEY: "secret",
     WIX_SITE_ID: "vfc-site",
-    WIX_RENT2BUY_SITE_ID: "r2b-site",
+    // A stale env value must not redirect Rent2Buy media back to the legacy standalone site.
+    WIX_RENT2BUY_SITE_ID: "legacy-r2b-site",
   };
   assert.equal(manualMediaSiteConfiguration("van_finance_replacement", environment).siteId, "vfc-site");
-  assert.equal(manualMediaSiteConfiguration("rent2buy_template", environment).siteId, "r2b-site");
+  assert.equal(manualMediaSiteConfiguration("rent2buy_template", environment).siteId, RENT2BUY_WIX_SITE_ID);
+  assert.equal(manualMediaSiteConfiguration("rent2buy_template", environment).siteIdSource, "authoritative_van_finance_cms");
+});
+
+test("authoritative Rent2Buy CMS stays bound to the current Van Finance Wix site", () => {
+  assert.equal(RENT2BUY_WIX_SITE_ID, "85f11c52-ee54-495d-aaec-a351831709b5");
 });
 
 test("manual upload accepts only the deliberately small image contract", () => {
