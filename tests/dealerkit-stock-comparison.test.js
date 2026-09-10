@@ -91,6 +91,33 @@ test("builds read-only Finance and Rent2Buy review records without treating part
   assert.doesNotMatch(JSON.stringify(result), /sold because missing|remove from wix/i);
 });
 
+test("missing source and local prices stay null instead of becoming a false zero-price comparison", () => {
+  const result = buildDealerKitComparison({
+    snapshot: {
+      complete: true,
+      apiReportedTotal: 1,
+      vehicleCount: 1,
+      vehicles: [{
+        supplierStockId: "dk-null",
+        registration: "HT22KJX",
+        title: "Ford Transit Custom",
+        vehicleType: "LCV",
+        sourceStatus: "In Stock",
+        status: "available",
+        retailPrice: null,
+        vatStatus: "plus_vat",
+        imageCount: null,
+      }],
+    },
+    financeRows: [{ title: "Ford Transit Custom HT22 KJX", price: null, vat: "+ VAT" }],
+  });
+
+  assert.equal(result.finance.exactMatches, 1);
+  assert.equal(result.finance.priceDifferences, 0);
+  assert.equal(result.reviewRecordCount, 0);
+  assert.equal(result.source.apiReportedTotal, 1);
+});
+
 test("comparison endpoint is access-gated and client remains read-only", () => {
   const endpoint = fs.readFileSync(new URL("../api/dealerkit-stock-comparison.js", import.meta.url), "utf8");
   assert.match(endpoint, /Marketing CRM access is required/);
