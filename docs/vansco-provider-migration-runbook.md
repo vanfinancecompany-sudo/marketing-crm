@@ -115,11 +115,15 @@ Initial publishing remains semi-automatic and human-approved.
 
 The system should prepare the intended Wix changes and let Stuart approve Publish / Update Wix.
 
+The first live-write gate may be deliberately narrower than full publishing: it can update already-existing Van Finance Wix rows only after a fresh DealerKit + saved-review + Wix recheck, while new-record creation, category membership changes and image changes remain locked until their schemas/workflows are separately verified.
+
 For Van Finance, preserve the existing category/detail collection structure and existing pricing rule: 5% flat per annum over 60 months, with the advertised monthly figure rounded up to the next whole pound.
 
 For Rent2Buy, use the existing live Rent2Buy pricing/business rules from current code. Re-verify those rules in code before implementing any money-related calculation.
 
 Approved source images should ultimately live in Wix Media/CMS or another intentional permanent destination, not as permanent Supabase blobs. Temporary staging is acceptable only if automatically expired/deleted after transfer.
+
+**Manual replacement-image upload is a required part of the media workflow, not an optional enhancement.** The operator must be able to upload an image instead of using a DealerKit source photo. This is especially important for Rent2Buy, where the live advert uses a separately prepared/template image rather than simply reusing the supplier gallery. The upload control should be added in the media/publishing stage without interrupting the source-adapter and controlled-write safety work. Uploaded media must follow the same review/primary-image/publish-state safeguards as source images.
 
 ### Phase 6 — Parallel validation and cutover
 
