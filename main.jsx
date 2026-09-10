@@ -18,6 +18,7 @@ import "./utils/stockControlCentreUi.js";
 import "./utils/dealerKitStockControlPreview.js";
 import "./utils/dealerKitReviewWorkspace.js";
 import "./utils/dealerKitWixPublishPreview.js";
+import "./utils/dealerKitWixManualMediaPreview.js";
 
 const ACTIVE_INTEGRATIONS = Object.freeze({
   liveStatus: "/buffer-live-status.js",
