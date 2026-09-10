@@ -2,7 +2,7 @@
 
 Last updated: 10 September 2026
 
-This is the Phase 1 field map for the Vansco → DealerKit migration. It records the DealerKit Integrator API fields that have been observed against the live Vansco dealer account and how they should enter the Marketing CRM before any Wix publishing work is added.
+This is the Phase 1 field map for the Vansco → DealerKit migration. It records the DealerKit Integrator API fields observed against the live Vansco dealer account and how they enter the Marketing CRM before any Wix publishing work is enabled.
 
 ## Current integration state
 
@@ -12,9 +12,22 @@ This is the Phase 1 field map for the Vansco → DealerKit migration. It records
 - Stock detail: `GET https://api.dealerkit.uk/integrators/stock/{id}`.
 - The list endpoint supports `page`, `per_page` and optional specification flags.
 - Full specification data is available from the detail endpoint and does not need to be pulled for every stock-list refresh.
-- Observed live API total on 10 September 2026: 248 records.
-- Two stock positions, 240 and 244 in the observed ordering, returned DealerKit HTTP 500 responses when isolated with `per_page=1`. The adapter therefore remains fail-closed and is not cutover-ready yet.
 - Known validation vehicle `HT22 KJX` was successfully matched and read through the detail endpoint.
+- The DealerKit adapter is wired behind the explicit `STOCK_SOURCE_PROVIDER_ID=dealerkit` provider option, but remains `switchReady: false`. Production continues to use the existing Vansco / Dragon source.
+
+## Live completeness findings
+
+The DealerKit account is live operational data, so the reported stock total changed while the inspection work was under way: **248 → 247 → 246**. This is expected evidence that the dealer stock itself is moving, but it also means ordinal page positions must never be treated as stable vehicle identities.
+
+The latest read-only validation observed 246 API-reported records. Of those, 240 could be normalized into registration-bound vehicle records. Six source records currently prevent authoritative cutover:
+
+- Four records were returned as `In Stock` with stable DealerKit stock IDs but **no registration** in the stock-list response. A follow-up `GET /stock/{id}` returned HTTP 200 for each one but still did not provide a usable registration. Three were LCV records and one was a Car record.
+- Two records consistently caused DealerKit HTTP 500 responses when isolated with `per_page=1`.
+- The two failing ordinal positions shifted as the live stock total changed, confirming that positions are diagnostic only. Earlier examples were 240/244, then 239/243, then 238/242.
+- No duplicate DealerKit stock IDs or duplicate registrations were observed in the latest normalized snapshot.
+- The API-reported total remained stable within the latest individual snapshot run.
+
+The adapter deliberately **fails closed** on any incomplete authoritative snapshot. It also checks page sizes, API-total stability, duplicate supplier IDs, duplicate registrations, missing registrations and unreadable rows. Partial snapshots are available only for diagnostics.
 
 ## DealerKit → normalized internal record
 
@@ -93,6 +106,7 @@ The first Stock Control Centre integration should use DealerKit for source facts
 - mileage/specification changes where useful
 - registration-based adoption of existing Wix/CRM stock
 - source image review using stable DealerKit image IDs
+- explicit review state for any DealerKit record that cannot yet be registration-bound
 
 Do not automatically publish DealerKit data to Wix during this phase.
 
@@ -117,12 +131,12 @@ Rent2Buy publishing remains a separate later step and its current live pricing/b
 
 DealerKit must not become the authoritative Stock Watch provider until all of the following are true:
 
-1. A full DealerKit stock snapshot is readable with no missing positions.
-2. The API-reported total equals the number of usable mapped records.
-3. Registration uniqueness/duplicate handling has been reviewed against real stock.
+1. A full DealerKit stock snapshot is readable or every exceptional record has an explicit, safe business rule agreed for it.
+2. The API-reported total reconciles with usable records plus explicit exception records.
+3. Registration uniqueness and supplier-ID uniqueness have been reviewed against real stock.
 4. Status semantics have been checked against live Vansco operational behaviour.
 5. A representative side-by-side sample has been compared with the existing Vansco/Dragon source.
 6. Image URL durability has been observed over time or images are copied promptly to the permanent destination when approved.
 7. The existing manual Wix fallback remains available during the transition.
 
-The adapter deliberately throws on an incomplete authoritative snapshot. Partial snapshots may be used for diagnostics only.
+Until those guards are met, DealerKit is a validated read-only source candidate, not the production authority.
