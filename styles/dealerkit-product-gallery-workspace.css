@@ -1,0 +1,465 @@
+.dealerkit-product-gallery {
+  margin: 18px 0;
+  padding: 18px;
+  border: 1px solid #d9e0e8;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+}
+
+.dealerkit-product-gallery.is-loading,
+.dealerkit-product-gallery.is-error {
+  min-height: 90px;
+  display: grid;
+  place-items: center;
+  color: #475569;
+  font-weight: 700;
+}
+
+.dealerkit-product-gallery.is-error {
+  color: #b91c1c;
+  background: #fff7f7;
+}
+
+.dealerkit-product-gallery__top,
+.dealerkit-product-gallery__gallery-top,
+.dealerkit-product-gallery__footer,
+.dealerkit-product-gallery__upload,
+.dealerkit-product-gallery__source-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dealerkit-product-gallery__heading {
+  display: grid;
+  gap: 4px;
+}
+
+.dealerkit-product-gallery__heading > strong {
+  font-size: 18px;
+  color: #0f172a;
+}
+
+.dealerkit-product-gallery__heading p,
+.dealerkit-product-gallery__gallery-top p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.dealerkit-product-gallery__eyebrow {
+  color: #c81e1e;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.dealerkit-product-gallery__tabs {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(130px, 1fr));
+  gap: 6px;
+  padding: 5px;
+  border-radius: 14px;
+  background: #f1f5f9;
+}
+
+.dealerkit-product-gallery__tab {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #475569;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.dealerkit-product-gallery__tab.is-active {
+  background: #0f172a;
+  color: #fff;
+  box-shadow: 0 5px 14px rgba(15, 23, 42, 0.18);
+}
+
+.dealerkit-product-gallery__pricing {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0 18px;
+}
+
+.dealerkit-product-gallery__fact {
+  min-height: 68px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 11px 13px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.dealerkit-product-gallery__fact span,
+.dealerkit-product-gallery__fact small {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.dealerkit-product-gallery__fact strong {
+  color: #0f172a;
+  font-size: 15px;
+}
+
+.dealerkit-product-gallery__gallery-top {
+  align-items: flex-start;
+  padding-top: 4px;
+}
+
+.dealerkit-product-gallery__gallery-top > div {
+  display: grid;
+  gap: 4px;
+}
+
+.dealerkit-product-gallery__primary-note {
+  max-width: 310px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.dealerkit-product-gallery__manual-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.dealerkit-product-gallery__manual {
+  overflow: hidden;
+  border: 1px solid #dbe3ec;
+  border-radius: 13px;
+  background: #f8fafc;
+}
+
+.dealerkit-product-gallery__manual.is-primary {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.08);
+}
+
+.dealerkit-product-gallery__manual.is-local-preview {
+  border-style: dashed;
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.dealerkit-product-gallery__manual img {
+  width: 100%;
+  height: 132px;
+  display: block;
+  object-fit: cover;
+  background: #e2e8f0;
+}
+
+.dealerkit-product-gallery__manual-copy {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.dealerkit-product-gallery__manual-copy > strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dealerkit-product-gallery__primary-badge,
+.dealerkit-product-gallery__local-badge {
+  width: fit-content;
+  padding: 4px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+.dealerkit-product-gallery__primary-badge {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.dealerkit-product-gallery__local-badge {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.dealerkit-product-gallery__manual-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dealerkit-product-gallery__upload {
+  padding: 12px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 13px;
+  background: #f8fafc;
+}
+
+.dealerkit-product-gallery__upload-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.dealerkit-product-gallery__upload-copy strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.dealerkit-product-gallery__upload-copy span,
+.dealerkit-product-gallery__save-first {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.dealerkit-product-gallery__upload-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dealerkit-product-gallery__upload-actions input[type="file"] {
+  max-width: 250px;
+  min-height: 38px;
+  padding: 5px;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  background: #fff;
+  font-size: 11px;
+}
+
+.dealerkit-product-gallery__upload-button,
+.dealerkit-product-gallery__save,
+.dealerkit-product-gallery__mini-button {
+  border: 0;
+  border-radius: 999px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.dealerkit-product-gallery__upload-button,
+.dealerkit-product-gallery__save {
+  min-height: 38px;
+  padding: 0 15px;
+  background: #c81e1e;
+  color: #fff;
+}
+
+.dealerkit-product-gallery__upload-button:disabled,
+.dealerkit-product-gallery__save:disabled,
+.dealerkit-product-gallery__mini-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.dealerkit-product-gallery__mini-button {
+  min-height: 28px;
+  padding: 0 9px;
+  background: #e2e8f0;
+  color: #0f172a;
+  font-size: 10px;
+}
+
+.dealerkit-product-gallery__mini-button.is-primary-action {
+  background: #0f172a;
+  color: #fff;
+}
+
+.dealerkit-product-gallery__source-heading {
+  align-items: flex-end;
+  margin: 18px 0 9px;
+}
+
+.dealerkit-product-gallery__source-heading strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.dealerkit-product-gallery__source-heading span {
+  color: #64748b;
+  font-size: 11px;
+  text-align: right;
+}
+
+.dealerkit-product-gallery__source-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 9px;
+}
+
+.dealerkit-product-gallery__image {
+  overflow: hidden;
+  border: 1px solid #dbe3ec;
+  border-radius: 11px;
+  background: #fff;
+  cursor: grab;
+  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+}
+
+.dealerkit-product-gallery__image:active {
+  cursor: grabbing;
+}
+
+.dealerkit-product-gallery__image.is-dragging {
+  opacity: 0.45;
+  transform: scale(0.98);
+}
+
+.dealerkit-product-gallery__image.is-drop-target {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14);
+}
+
+.dealerkit-product-gallery__image.is-excluded {
+  opacity: 0.48;
+  background: #f1f5f9;
+}
+
+.dealerkit-product-gallery__image img {
+  width: 100%;
+  height: 108px;
+  display: block;
+  object-fit: cover;
+  pointer-events: none;
+  background: #e2e8f0;
+}
+
+.dealerkit-product-gallery__image-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px 3px;
+}
+
+.dealerkit-product-gallery__image-top strong {
+  color: #0f172a;
+  font-size: 11px;
+}
+
+.dealerkit-product-gallery__image-top span {
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.dealerkit-product-gallery__image-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 5px 8px 8px;
+}
+
+.dealerkit-product-gallery__include {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #334155;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.dealerkit-product-gallery__footer {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.dealerkit-product-gallery__message {
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.dealerkit-product-gallery__message.is-good {
+  color: #15803d;
+}
+
+.dealerkit-product-gallery__message.is-warning {
+  color: #b45309;
+}
+
+.dealerkit-product-gallery__empty {
+  min-height: 70px;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 11px;
+  color: #64748b;
+  font-size: 11px;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .dealerkit-product-gallery__top,
+  .dealerkit-product-gallery__gallery-top,
+  .dealerkit-product-gallery__footer,
+  .dealerkit-product-gallery__upload,
+  .dealerkit-product-gallery__source-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dealerkit-product-gallery__tabs {
+    width: 100%;
+  }
+
+  .dealerkit-product-gallery__pricing {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dealerkit-product-gallery__primary-note {
+    max-width: none;
+    text-align: left;
+  }
+
+  .dealerkit-product-gallery__source-heading span {
+    text-align: left;
+  }
+}
+
+@media (max-width: 560px) {
+  .dealerkit-product-gallery {
+    margin: 12px 0;
+    padding: 12px;
+    border-radius: 14px;
+  }
+
+  .dealerkit-product-gallery__pricing {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .dealerkit-product-gallery__source-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dealerkit-product-gallery__upload-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dealerkit-product-gallery__upload-actions input[type="file"] {
+    max-width: none;
+    width: 100%;
+  }
+}
