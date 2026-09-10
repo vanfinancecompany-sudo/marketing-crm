@@ -4,6 +4,39 @@ function compact(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
+function escapeJsonStringControlCharacters(source) {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+
+  for (const char of String(source || "")) {
+    if (escaped) {
+      output += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      output += char;
+      if (inString) escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      output += char;
+      inString = !inString;
+      continue;
+    }
+    if (inString && char === "\n") { output += "\\n"; continue; }
+    if (inString && char === "\r") { output += "\\r"; continue; }
+    if (inString && char === "\t") { output += "\\t"; continue; }
+    if (inString && char.charCodeAt(0) < 32) {
+      output += `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
+      continue;
+    }
+    output += char;
+  }
+  return output;
+}
+
 async function fetchJsonish(url) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
@@ -16,7 +49,7 @@ async function fetchJsonish(url) {
     const text = await response.text();
     if (!response.ok) throw new Error(`OpenAPI spec returned ${response.status}`);
     let parsed = JSON.parse(text);
-    if (typeof parsed === "string") parsed = JSON.parse(parsed);
+    if (typeof parsed === "string") parsed = JSON.parse(escapeJsonStringControlCharacters(parsed));
     if (!parsed || typeof parsed !== "object") throw new Error("OpenAPI spec did not decode to an object");
     return parsed;
   } finally {
@@ -28,7 +61,7 @@ function schemaRef(value) {
   return typeof value?.$ref === "string" ? value.$ref : "";
 }
 
-function safeSchemaShape(schema, depth = 0, seen = new Set()) {
+function safeSchemaShape(schema, depth = 0) {
   if (!schema || typeof schema !== "object" || depth > 4) return null;
   const ref = schemaRef(schema);
   if (ref) return { ref };
@@ -39,11 +72,11 @@ function safeSchemaShape(schema, depth = 0, seen = new Set()) {
   if (schema.nullable === true) result.nullable = true;
   if (Array.isArray(schema.enum)) result.enum = schema.enum.slice(0, 50);
   if (schema.description) result.description = compact(schema.description).slice(0, 300);
-  if (schema.items) result.items = safeSchemaShape(schema.items, depth + 1, seen);
+  if (schema.items) result.items = safeSchemaShape(schema.items, depth + 1);
 
   if (schema.properties && typeof schema.properties === "object") {
     result.required = Array.isArray(schema.required) ? schema.required : [];
-    result.properties = Object.fromEntries(Object.entries(schema.properties).map(([key, value]) => [key, safeSchemaShape(value, depth + 1, seen)]));
+    result.properties = Object.fromEntries(Object.entries(schema.properties).map(([key, value]) => [key, safeSchemaShape(value, depth + 1)]));
   }
   return result;
 }
@@ -122,41 +155,47 @@ export async function inspectDealerKitOpenApi() {
     dealerApiCalled: false,
   }, null, 2));
 
-  const spec = await fetchJsonish(SPEC_URL);
-  const securitySchemes = Object.entries(spec.components?.securitySchemes || {}).map(([name, value]) => ({
-    name,
-    type: value?.type || "",
-    scheme: value?.scheme || "",
-    bearerFormat: value?.bearerFormat || "",
-    in: value?.in || "",
-    headerName: value?.name || "",
-  }));
+  try {
+    const spec = await fetchJsonish(SPEC_URL);
+    const securitySchemes = Object.entries(spec.components?.securitySchemes || {}).map(([name, value]) => ({
+      name,
+      type: value?.type || "",
+      scheme: value?.scheme || "",
+      bearerFormat: value?.bearerFormat || "",
+      in: value?.in || "",
+      headerName: value?.name || "",
+    }));
 
-  const stockSchemaNames = findStockSchemaNames(spec);
-  const preferredSchemas = Array.from(new Set([
-    "stock-listing",
-    "stock-listing-item",
-    "stock",
-    "pagination-meta",
-    "meta",
-    ...stockSchemaNames,
-  ])).filter((name) => spec.components?.schemas?.[name]).slice(0, 30);
+    const stockSchemaNames = findStockSchemaNames(spec);
+    const preferredSchemas = Array.from(new Set([
+      "stock-listing",
+      "stock-listing-item",
+      "stock",
+      "pagination-meta",
+      "meta",
+      ...stockSchemaNames,
+    ])).filter((name) => spec.components?.schemas?.[name]).slice(0, 30);
 
-  const summary = {
-    openapi: spec.openapi || spec.swagger || "",
-    title: spec.info?.title || "",
-    version: spec.info?.version || "",
-    servers: (spec.servers || []).map((server) => server?.url).filter(Boolean),
-    securitySchemes,
-    stockList: operationSummary(spec, "/stock", "get"),
-    stockDetail: operationSummary(spec, "/stock/{id}", "get"),
-    dealerList: operationSummary(spec, "/dealers", "get"),
-    dealerDetail: operationSummary(spec, "/dealers/{id}", "get"),
-    stockRelatedSchemaNames: stockSchemaNames,
-    schemas: preferredSchemas.map((name) => namedSchemaSummary(spec, name)).filter(Boolean),
-  };
+    const summary = {
+      openapi: spec.openapi || spec.swagger || "",
+      title: spec.info?.title || "",
+      version: spec.info?.version || "",
+      servers: (spec.servers || []).map((server) => server?.url).filter(Boolean),
+      securitySchemes,
+      stockList: operationSummary(spec, "/stock", "get"),
+      stockDetail: operationSummary(spec, "/stock/{id}", "get"),
+      dealerList: operationSummary(spec, "/dealers", "get"),
+      dealerDetail: operationSummary(spec, "/dealers/{id}", "get"),
+      stockRelatedSchemaNames: stockSchemaNames,
+      schemas: preferredSchemas.map((name) => namedSchemaSummary(spec, name)).filter(Boolean),
+    };
 
-  console.log("[DealerKit Phase 1] Safe OpenAPI inventory:");
-  console.log(JSON.stringify(summary, null, 2));
-  console.log("[DealerKit Phase 1] Safe OpenAPI inventory complete. No authenticated DealerKit API request was made.\n");
+    console.log("[DealerKit Phase 1] Safe OpenAPI inventory:");
+    console.log(JSON.stringify(summary, null, 2));
+    console.log("[DealerKit Phase 1] Safe OpenAPI inventory complete. No authenticated DealerKit API request was made.\n");
+  } catch (error) {
+    console.log("[DealerKit Phase 1] OpenAPI inventory could not be decoded safely:");
+    console.log(JSON.stringify({ name: error?.name || "Error", message: compact(error?.message || "OpenAPI parse failed") }, null, 2));
+    console.log("[DealerKit Phase 1] Build remains non-blocking; no authenticated DealerKit API request was made.\n");
+  }
 }
