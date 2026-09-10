@@ -47,23 +47,37 @@ function replaceMediaItem(media, refreshed) {
   return media.map((item) => item.id === refreshed.id ? refreshed : item);
 }
 
-async function refreshMediaStatus(root, item) {
+async function postMediaAction(root, body, fallbackMessage) {
   const registration = normaliseRegistration(root.dataset.registration);
-  if (!registration || !item?.id) throw new Error("This staged image cannot be rechecked yet.");
+  if (!registration) throw new Error("This staged image cannot be changed yet.");
   const response = await fetch("/api/dealerkit-wix-manual-media", {
     method: "POST",
     headers: buildMarketingAccessHeaders({
       accept: "application/json",
       "content-type": "application/json",
     }),
-    body: JSON.stringify({
-      action: "refresh_status",
-      registration,
-      mediaId: item.id,
-    }),
+    body: JSON.stringify({ registration, ...body }),
   });
-  const payload = await parseMarketingJsonResponse(response, "Could not refresh the Wix Media status.");
+  return parseMarketingJsonResponse(response, fallbackMessage);
+}
+
+async function refreshMediaStatus(root, item) {
+  if (!item?.id) throw new Error("This staged image cannot be rechecked yet.");
+  const payload = await postMediaAction(
+    root,
+    { action: "refresh_status", mediaId: item.id },
+    "Could not refresh the Wix Media status.",
+  );
   return payload.media;
+}
+
+async function selectManualMedia(root, item) {
+  if (!item?.id) throw new Error("This staged image cannot be selected yet.");
+  return postMediaAction(
+    root,
+    { action: "select_media", mediaId: item.id },
+    "Could not select this Wix Media image.",
+  );
 }
 
 function renderSavedMedia(root, media = []) {
@@ -77,6 +91,8 @@ function renderSavedMedia(root, media = []) {
 
   for (const item of media) {
     const row = element("article", "dealerkit-manual-media__saved");
+    row.dataset.mediaId = item.id || "";
+    row.classList.toggle("is-selected", Boolean(item.selected));
     if (item.thumbnailUrl || item.url) {
       const image = document.createElement("img");
       image.src = item.thumbnailUrl || item.url;
@@ -88,15 +104,25 @@ function renderSavedMedia(root, media = []) {
     const top = element("div", "dealerkit-manual-media__saved-top");
     top.append(
       element("strong", "", item.purposeLabel || item.purpose || "Manual Wix image"),
-      element("span", `dealerkit-manual-media__state ${statusClass(item)}`, item.operationStatus || "PENDING"),
+      element(
+        "span",
+        `dealerkit-manual-media__state ${statusClass(item)}`,
+        item.selected ? `SELECTED · ${item.operationStatus || "READY"}` : (item.operationStatus || "PENDING"),
+      ),
     );
 
     const metaRow = element("div", "dealerkit-manual-media__meta-row");
     metaRow.appendChild(element(
       "div",
       "dealerkit-manual-media__meta",
-      [item.siteScope === "rent2buy" ? "Rent2Buy Wix" : "Van Finance Wix", formatSize(item.sizeInBytes)].filter(Boolean).join(" · "),
+      [
+        item.siteScope === "rent2buy" ? "Rent2Buy template" : "Van Finance replacement",
+        formatSize(item.sizeInBytes),
+        item.selected ? "Chosen for publish" : "Not selected",
+      ].filter(Boolean).join(" · "),
     ));
+
+    const actions = element("div", "dealerkit-manual-media__meta-row");
     const recheck = element("button", "dealerkit-manual-media__recheck", processing(item) ? "Check Wix status" : "Recheck Wix");
     recheck.type = "button";
     recheck.addEventListener("click", async () => {
@@ -107,7 +133,7 @@ function renderSavedMedia(root, media = []) {
         const refreshed = await refreshMediaStatus(root, item);
         const nextMedia = replaceMediaItem(media, refreshed);
         renderSavedMedia(root, nextMedia);
-        if (refreshed?.ready) setStatus(root, "WIX MEDIA READY", "is-good");
+        if (refreshed?.ready) setStatus(root, refreshed?.selected ? "SELECTED MEDIA READY" : "WIX MEDIA READY", "is-good");
         else if (refreshed?.failed) setStatus(root, "WIX MEDIA FAILED", "is-warning");
         else setStatus(root, "WIX PROCESSING", "is-busy");
       } catch (error) {
@@ -116,7 +142,35 @@ function renderSavedMedia(root, media = []) {
         recheck.textContent = processing(item) ? "Check Wix status" : "Recheck Wix";
       }
     });
-    metaRow.appendChild(recheck);
+    actions.appendChild(recheck);
+
+    const choose = element("button", "dealerkit-manual-media__recheck", item.selected ? "Selected" : "Use this image");
+    choose.type = "button";
+    choose.disabled = !item.ready || Boolean(item.selected);
+    choose.addEventListener("click", async () => {
+      if (!item.ready || item.selected) return;
+      const registration = normaliseRegistration(root.dataset.registration);
+      const approved = window.confirm(
+        `Use ${item.displayName || "this Wix image"} as the selected ${item.purposeLabel || "manual image"} for ${registration}?\n\nThis saves the media choice only. It does NOT attach the image to a vehicle or publish anything.`,
+      );
+      if (!approved) return;
+      choose.disabled = true;
+      recheck.disabled = true;
+      choose.textContent = "Verifying selection…";
+      setStatus(root, "VERIFYING SELECTED MEDIA", "is-busy");
+      try {
+        await selectManualMedia(root, item);
+        await loadSavedMedia(root);
+        setStatus(root, "IMAGE SELECTED", "is-good");
+      } catch (error) {
+        choose.disabled = false;
+        recheck.disabled = false;
+        choose.textContent = "Use this image";
+        setStatus(root, error?.message || "SELECTION BLOCKED", "is-warning");
+      }
+    });
+    actions.appendChild(choose);
+    metaRow.appendChild(actions);
 
     copy.append(
       top,
@@ -185,7 +239,7 @@ function createManualMediaPanel(registration) {
   copy.append(
     element("span", "dealerkit-manual-media__eyebrow", "WIX MEDIA · MANUAL STAGING"),
     element("strong", "", "Upload a replacement / template image"),
-    element("p", "", "For prepared showroom or Rent2Buy template images. The file goes directly from this browser to the chosen Wix Media library. Uploading does not attach it to a vehicle, alter categories or publish anything."),
+    element("p", "", "For prepared showroom or Rent2Buy template images. The file goes directly from this browser to Wix Media. After Wix reports READY, choose exactly which image is allowed into the final publish plan."),
   );
   const status = element("span", "dealerkit-manual-media__status", "MEDIA ONLY");
   status.setAttribute("data-manual-media-status", "true");
@@ -215,7 +269,7 @@ function createManualMediaPanel(registration) {
   button.disabled = true;
   controls.append(destinationLabel, fileLabel, button);
 
-  const note = element("div", "dealerkit-manual-media__note", "JPEG, PNG or WebP · maximum 10 MB · only freshly verified READY media can enter a later publish decision");
+  const note = element("div", "dealerkit-manual-media__note", "JPEG, PNG or WebP · maximum 10 MB · upload first, then explicitly select a READY image");
   const list = element("div", "dealerkit-manual-media__list");
   list.setAttribute("data-manual-media-list", "true");
 
@@ -296,7 +350,7 @@ function createManualMediaPanel(registration) {
         }),
       });
       const registered = await parseMarketingJsonResponse(registerResponse, "Wix received the image, but the CRM could not verify it.");
-      if (registered.media?.ready) setStatus(root, "WIX MEDIA READY", "is-good");
+      if (registered.media?.ready) setStatus(root, "WIX MEDIA READY · SELECT IT BELOW", "is-good");
       else if (registered.media?.failed) setStatus(root, "WIX MEDIA FAILED", "is-warning");
       else setStatus(root, "WIX PROCESSING", "is-busy");
       input.value = "";
