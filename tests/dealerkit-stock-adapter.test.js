@@ -127,6 +127,48 @@ test("returns a complete DealerKit stock snapshot when every reported record is 
   assert.equal(snapshot.refresh.failed, 0);
 });
 
+test("recovers an unexpectedly short successful page before accepting a snapshot", async () => {
+  const fetchImplementation = async (input) => {
+    const url = new URL(String(input));
+    const page = Number(url.searchParams.get("page"));
+    const perPage = Number(url.searchParams.get("per_page"));
+
+    if (perPage === 2 && page === 1) {
+      return response(200, {
+        data: [listing({ id: "1", registration: "AA11AAA" }), listing({ id: "2", registration: "BB22BBB" })],
+        meta: { total: 4, current_page: 1, last_page: 2, per_page: 2 },
+      });
+    }
+    if (perPage === 2 && page === 2) {
+      return response(200, {
+        data: [listing({ id: "3", registration: "CC33CCC" })],
+        meta: { total: 4, current_page: 2, last_page: 2, per_page: 2 },
+      });
+    }
+    if (perPage === 1 && page === 3) {
+      return response(200, {
+        data: [listing({ id: "3", registration: "CC33CCC" })],
+        meta: { total: 4, current_page: 3, last_page: 4, per_page: 1 },
+      });
+    }
+    if (perPage === 1 && page === 4) {
+      return response(200, {
+        data: [listing({ id: "4", registration: "DD44DDD" })],
+        meta: { total: 4, current_page: 4, last_page: 4, per_page: 1 },
+      });
+    }
+    throw new Error(`Unexpected request ${url.toString()}`);
+  };
+
+  const snapshot = await fetchDealerKitStockSnapshot({ environment: ENV, fetchImplementation, perPage: 2 });
+  assert.equal(snapshot.complete, true);
+  assert.equal(snapshot.vehicleCount, 4);
+  assert.equal(snapshot.refresh.failed, 0);
+  assert.equal(snapshot.diagnostics.failedPages.length, 1);
+  assert.equal(snapshot.diagnostics.failedPages[0].reason, "unexpected_page_count");
+  assert.equal(snapshot.diagnostics.pageCounts[1].recovered, true);
+});
+
 test("recovers readable records from a failed page but refuses an incomplete authoritative snapshot", async () => {
   const fetchImplementation = async (input) => {
     const url = new URL(String(input));
@@ -166,6 +208,20 @@ test("recovers readable records from a failed page but refuses an incomplete aut
   assert.equal(partial.vehicleCount, 3);
   assert.equal(partial.refresh.failed, 1);
   assert.equal(partial.refresh.remaining, 1);
+});
+
+test("invalid source rows are diagnostic-only and block authoritative cutover", async () => {
+  const fetchImplementation = async () => response(200, {
+    data: [listing({ id: "1", registration: "" })],
+    meta: { total: 1, current_page: 1, last_page: 1, per_page: 1 },
+  });
+
+  const partial = await fetchDealerKitStockSnapshot({ environment: ENV, fetchImplementation, perPage: 1, allowPartial: true });
+  assert.equal(partial.complete, false);
+  assert.equal(partial.vehicleCount, 0);
+  assert.equal(partial.diagnostics.invalidRecords.length, 1);
+  assert.equal(partial.diagnostics.invalidRecords[0].registrationPresent, false);
+  assert.equal(partial.refresh.failed, 1);
 });
 
 test("requires server-side DealerKit credentials and never accepts a credential-free source", async () => {
