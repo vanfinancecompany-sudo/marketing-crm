@@ -51,9 +51,24 @@ async function loadFreshVehicle(decision, registration) {
   const vehicle = await fetchDealerKitStockDetail(decision.supplierStockId, { specifications: false });
   const currentRegistration = normalizeFinanceRegistration(vehicle?.registration || "");
   if (!currentRegistration || currentRegistration !== registration) {
-    throw new ApiError(409, "DealerKit registration no longer matches the saved review. Re-open the vehicle and review it again before uploading media.");
+    throw new ApiError(409, "DealerKit registration no longer matches the saved review. Re-open the vehicle and review it again before using Wix media.");
   }
   return vehicle;
+}
+
+async function loadManualMediaById(supabase, registration, mediaId) {
+  const id = clean(mediaId, 100);
+  if (!id) throw new ApiError(400, "A staged Wix media record is required.");
+  const { data, error } = await supabase
+    .from(DEALERKIT_MANUAL_MEDIA_TABLE)
+    .select("*")
+    .eq("id", id)
+    .eq("registration", registration)
+    .limit(2);
+  if (error) throw new ApiError(502, `Manual Wix media metadata read failed: ${error.message || error}`);
+  if (!data?.length) throw new ApiError(404, "That staged Wix media record was not found for this vehicle.");
+  if (data.length > 1) throw new ApiError(409, "Duplicate staged Wix media metadata was found. Status refresh is blocked until that is reconciled.");
+  return data[0];
 }
 
 function siteConfiguration(purpose) {
@@ -97,6 +112,27 @@ async function wixRequest(configuration, path, { method = "GET", body } = {}) {
     );
   }
   return payload;
+}
+
+async function getVerifiedWixFile(configuration, wixFileId) {
+  const expectedFileId = clean(wixFileId, 500);
+  const payload = await wixRequest(
+    configuration,
+    `${WIX_MEDIA_GET_FILE_URL}?fileId=${encodeURIComponent(expectedFileId)}`,
+    { method: "GET" },
+  );
+  const file = payload?.file;
+  if (!file?.id) throw new ApiError(502, "Wix could not verify the uploaded image.");
+  if (clean(file.id, 500) !== expectedFileId) {
+    throw new ApiError(409, "Wix returned a different media file than the one requested. The staged media record was not changed.");
+  }
+  if (file?.siteId && clean(file.siteId, 500) !== configuration.siteId) {
+    throw new ApiError(409, "The Wix Media item belongs to a different site. It has not been attached to this review.");
+  }
+  if (clean(file?.mediaType, 80).toUpperCase() !== "IMAGE") {
+    throw new ApiError(409, "The Wix Media item is not an image. It cannot be used by the vehicle publishing workflow.");
+  }
+  return file;
 }
 
 async function listManualMedia(supabase, registration) {
@@ -161,17 +197,7 @@ async function registerUpload({ request, supabase, registration }) {
   const decision = await loadDecisionByRegistration(supabase, registration);
   await loadFreshVehicle(decision, registration);
   const configuration = siteConfiguration(purpose.key);
-  const payload = await wixRequest(
-    configuration,
-    `${WIX_MEDIA_GET_FILE_URL}?fileId=${encodeURIComponent(wixFileId)}`,
-    { method: "GET" },
-  );
-  const file = payload?.file;
-  if (!file?.id) throw new ApiError(502, "Wix could not verify the uploaded image.");
-  if (file?.siteId && clean(file.siteId, 500) !== configuration.siteId) {
-    throw new ApiError(409, "The uploaded Wix Media item belongs to a different site. It has not been attached to this review.");
-  }
-
+  const file = await getVerifiedWixFile(configuration, wixFileId);
   const row = wixFileToManualMediaRow({
     file,
     decision,
@@ -192,9 +218,54 @@ async function registerUpload({ request, supabase, registration }) {
   };
 }
 
+async function refreshUpload({ request, supabase, registration }) {
+  const stored = await loadManualMediaById(supabase, registration, request.body?.mediaId);
+  const purpose = normaliseManualMediaPurpose(stored.purpose);
+  if (!purpose) throw new ApiError(409, "The staged Wix media purpose is no longer supported.");
+
+  const decision = await loadDecisionByRegistration(supabase, registration);
+  await loadFreshVehicle(decision, registration);
+  if (clean(stored.supplier_stock_id, 300) !== clean(decision.supplierStockId, 300)) {
+    throw new ApiError(409, "The staged Wix image belongs to a different DealerKit stock identity. Status refresh is blocked.");
+  }
+
+  const configuration = siteConfiguration(purpose.key);
+  if (clean(stored.wix_site_id, 500) !== configuration.siteId) {
+    throw new ApiError(409, "The staged Wix image is bound to a different Wix site. Status refresh is blocked.");
+  }
+
+  const file = await getVerifiedWixFile(configuration, stored.wix_file_id);
+  const verifiedRow = wixFileToManualMediaRow({
+    file,
+    decision,
+    purpose: purpose.key,
+    siteId: configuration.siteId,
+  });
+  const { data, error } = await supabase
+    .from(DEALERKIT_MANUAL_MEDIA_TABLE)
+    .update(verifiedRow)
+    .eq("id", stored.id)
+    .eq("registration", registration)
+    .select("*")
+    .single();
+  if (error) throw new ApiError(502, `Manual Wix media status refresh failed: ${error.message || error}`);
+
+  return {
+    action: "refresh_status",
+    registration,
+    media: manualMediaRowToClient(data),
+    statusRefreshOnly: true,
+  };
+}
+
 export default async function handler(request, response) {
   if (!authorised(request)) {
     response.status(401).json({ ok: false, message: "Marketing CRM access is required." });
+    return;
+  }
+
+  if (!["GET", "POST"].includes(request.method)) {
+    response.status(405).json({ ok: false, message: "Method not allowed." });
     return;
   }
 
@@ -218,12 +289,9 @@ export default async function handler(request, response) {
         registration,
         media,
         vehicleWritesAttempted: false,
+        cmsWritesAttempted: false,
+        categoryWritesAttempted: false,
       });
-      return;
-    }
-
-    if (request.method !== "POST") {
-      response.status(405).json({ ok: false, message: "Method not allowed." });
       return;
     }
 
@@ -232,7 +300,9 @@ export default async function handler(request, response) {
       ? await prepareUpload({ request, supabase, registration })
       : action === "register_upload"
         ? await registerUpload({ request, supabase, registration })
-        : null;
+        : action === "refresh_status"
+          ? await refreshUpload({ request, supabase, registration })
+          : null;
     if (!result) throw new ApiError(400, "Manual Wix media action is not supported.");
 
     response.status(200).json({
