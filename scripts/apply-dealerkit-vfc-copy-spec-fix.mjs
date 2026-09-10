@@ -68,7 +68,7 @@ patch({
     ["TRANSMISSION", clean(vehicle.transmission, 100).toUpperCase()],
     ["BHP", bhp !== null && bhp > 0 ? String(Math.round(bhp)) : ""],
   ].filter(([, value]) => value);
-  return rows.map(([label, value]) => \`${"${label}: ${value}"}\`).join("\\n");
+  return rows.map(([label, value]) => `${label}: ${value}`).join("\\n");
 }`,
   after: `function normaliseTechnicalLabel(value) {
   return clean(value, 200).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -80,7 +80,7 @@ function dealerKitTechnicalValue(vehicle = {}, labels = []) {
   for (const item of technical) {
     if (!item || typeof item !== "object") continue;
     const itemLabel = normaliseTechnicalLabel(item.name || item.label || item.title);
-    if (!itemLabel || !wanted.some((label) => itemLabel === label || itemLabel.startsWith(\`${"${label} "}\`))) continue;
+    if (!itemLabel || !wanted.some((label) => itemLabel === label || itemLabel.startsWith(`${label} `))) continue;
     for (const key of ["value", "text", "content"]) {
       const value = item[key];
       if (typeof value === "string" || typeof value === "number") {
@@ -96,7 +96,7 @@ function engineSizeText(vehicle = {}) {
   const value = dealerKitTechnicalValue(vehicle, ["Engine Size", "Engine Capacity", "Engine CC"]);
   if (!value) return "";
   const text = value.replace(/\\s+/g, " ").trim();
-  return /^\\d+(?:\\.\\d+)?$/.test(text) ? \`${"${text} CC"}\` : text.replace(/\\s*cc$/i, " CC");
+  return /^\\d+(?:\\.\\d+)?$/.test(text) ? `${text} CC` : text.replace(/\\s*cc$/i, " CC");
 }
 
 function euroStatusText(vehicle = {}) {
@@ -107,7 +107,7 @@ function euroStatusText(vehicle = {}) {
   }
   if (!value) return "";
   const text = value.replace(/\\s+/g, " ").trim();
-  if (/^[4567](?:[a-z])?$/i.test(text)) return \`EURO ${"${text.toUpperCase()}"}\`;
+  if (/^[4567](?:[a-z])?$/i.test(text)) return `EURO ${text.toUpperCase()}`;
   return text.toUpperCase().replace(/^EURO(?=\\d)/, "EURO ");
 }
 
@@ -115,7 +115,7 @@ function co2Text(vehicle = {}) {
   const value = dealerKitTechnicalValue(vehicle, ["CO2 Emissions", "CO2 Emission", "CO2"]);
   if (!value) return "";
   const text = value.replace(/\\s+/g, " ").trim();
-  return /^\\d+(?:\\.\\d+)?$/.test(text) ? \`${"${text} G/KM"}\` : text.toUpperCase();
+  return /^\\d+(?:\\.\\d+)?$/.test(text) ? `${text} G/KM` : text.toUpperCase();
 }
 
 function combinedMpgText(vehicle = {}) {
@@ -126,6 +126,7 @@ function combinedMpgText(vehicle = {}) {
 export function buildDealerKitVehicleSpecText(vehicle = {}) {
   const registration = normalizeFinanceRegistration(vehicle.registration || "");
   const bhp = optionalNumber(vehicle.bhp);
+  const combinedMpg = combinedMpgText(vehicle);
   const rows = [
     ["REGISTRATION", formatRegistration(registration)],
     ["YEAR", yearDisplay(vehicle, registration)],
@@ -137,12 +138,13 @@ export function buildDealerKitVehicleSpecText(vehicle = {}) {
     ["ENGINE SIZE", engineSizeText(vehicle)],
     ["EURO STATUS", euroStatusText(vehicle)],
     ["CO2 EMISSIONS", co2Text(vehicle)],
-    ["COMBINED MPG", combinedMpgText(vehicle)],
+    ["COMBINED MPG", combinedMpg],
+    ["MPG", combinedMpg],
     ["BHP", bhp !== null && bhp > 0 ? String(Math.round(bhp)) : ""],
   ].filter(([, value]) => value);
-  return rows.map(([label, value]) => \`${"${label}: ${value}"}\`).join("\\n");
+  return rows.map(([label, value]) => `${label}: ${value}`).join("\\n");
 }`,
 });
 
 fs.writeFileSync(targetPath, source);
-console.log("Applied DealerKit VFC copy/spec fix: richer listing headlines plus source-backed engine, Euro, CO2 and combined MPG fields.");
+console.log("Applied DealerKit VFC copy/spec fix: richer listing headlines plus source-backed engine, Euro, CO2 and combined MPG fields, including the live MPG summary alias.");
