@@ -86,7 +86,13 @@ test("maps the known DealerKit vehicle shape into the neutral stock record", () 
   assert.equal(mapped.fuel, "Diesel");
   assert.equal(mapped.transmission, "Manual");
   assert.equal(mapped.imageCount, 2);
-  assert.deepEqual(mapped.primaryImage, { id: "image-1", url: "https://images.example/1.jpg", order: 0 });
+  assert.deepEqual(mapped.primaryImage, {
+    id: "image-1",
+    url: "https://images.example/1.jpg",
+    order: 0,
+    identityStable: true,
+    identitySource: "dealerkit",
+  });
   assert.equal(mapped.specifications.standard.length, 1);
   assert.equal(mapped.specifications.options.length, 1);
   assert.equal(mapped.specifications.technical.length, 1);
