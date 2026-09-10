@@ -46,15 +46,30 @@ function loadActiveBrowserIntegrations() {
   if (isFacebookPosting) ensureModuleScript("activeBufferPostingBridge", ACTIVE_INTEGRATIONS.postingBridge);
 }
 
-loadActiveBrowserIntegrations();
+function ActiveApp() {
+  React.useEffect(() => {
+    const startupTimer = window.setTimeout(loadActiveBrowserIntegrations, 350);
+    window.addEventListener("popstate", loadActiveBrowserIntegrations);
+    return () => {
+      window.clearTimeout(startupTimer);
+      window.removeEventListener("popstate", loadActiveBrowserIntegrations);
+    };
+  }, []);
 
-ReactDOM.createRoot(document.getElementById("root")).render(
-  <React.StrictMode>
-    <SingleActiveTabGate>
+  return (
+    <>
       <App />
       <OnlyVansQuickAction />
       <AutomationHealthCentre />
       <StockReconciliationAgent />
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <React.StrictMode>
+    <SingleActiveTabGate>
+      <ActiveApp />
     </SingleActiveTabGate>
-  </React.StrictMode>,
+  </React.StrictMode>
 );
