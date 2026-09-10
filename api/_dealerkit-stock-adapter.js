@@ -158,6 +158,13 @@ function stockUrl(dealerId, { page = 1, perPage = DEFAULT_PER_PAGE, specificatio
   return url;
 }
 
+function stockDetailUrl(stockId, dealerId, { specifications = false } = {}) {
+  const url = new URL(`${DEALERKIT_API_ORIGIN}${DEALERKIT_STOCK_PATH}/${encodeURIComponent(stockId)}`);
+  url.searchParams.set("dealer_id", dealerId);
+  if (specifications) url.searchParams.set("specifications", "true");
+  return url;
+}
+
 async function requestJson(url, secret, fetchImplementation) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
@@ -223,13 +230,34 @@ function expectedPageCount(page, perPage, total) {
   return Math.max(0, Math.min(perPage, total - startIndex));
 }
 
-function invalidRecordDiagnostic(item, position) {
+function invalidRecordDiagnostic(item, position, extra = {}) {
   return {
     position,
     idPresent: Boolean(clean(item?.id, 300)),
     registrationPresent: Boolean(normalizeRegistration(item?.vehicle?.registration || item?.vehicle?.plate || "")),
     sourceStatus: clean(item?.status ?? item?.meta?.status, 100) || "unknown",
     vehicleType: clean(item?.vehicle?.type, 100) || "unknown",
+    ...extra,
+  };
+}
+
+async function mapOrRecoverListing({ item, position, dealerId, secret, fetchImplementation }) {
+  const mapped = mapDealerKitListing(item);
+  if (mapped) return { vehicle: mapped, recoveredByDetail: false, invalid: null };
+
+  const stockId = clean(item?.id, 300);
+  if (!stockId) {
+    return { vehicle: null, recoveredByDetail: false, invalid: invalidRecordDiagnostic(item, position, { detailStatus: null }) };
+  }
+
+  const detail = await requestJson(stockDetailUrl(stockId, dealerId), secret, fetchImplementation);
+  const detailMapped = detail.ok && detail.payload?.data ? mapDealerKitListing(detail.payload.data) : null;
+  if (detailMapped) return { vehicle: detailMapped, recoveredByDetail: true, invalid: null };
+
+  return {
+    vehicle: null,
+    recoveredByDetail: false,
+    invalid: invalidRecordDiagnostic(item, position, { detailStatus: detail.status }),
   };
 }
 
@@ -249,6 +277,7 @@ async function recoverPageBySingleItemReads({
       vehicles: [],
       failedPositions: [{ start, end, status: 0, reason: "fallback_guard" }],
       invalidRecords: [],
+      detailRecoveries: [],
       reportedTotals: [],
     };
   }
@@ -256,6 +285,7 @@ async function recoverPageBySingleItemReads({
   const vehicles = [];
   const failedPositions = [];
   const invalidRecords = [];
+  const detailRecoveries = [];
   const reportedTotals = [];
   for (let position = start; position <= end; position += 1) {
     const result = await requestJson(stockUrl(dealerId, { page: position, perPage: 1 }), secret, fetchImplementation);
@@ -265,12 +295,18 @@ async function recoverPageBySingleItemReads({
       failedPositions.push({ position, status: result.status, responseBytes: result.responseBytes });
       continue;
     }
-    const item = result.payload.data[0];
-    const mapped = mapDealerKitListing(item);
-    if (mapped) vehicles.push(mapped);
-    else invalidRecords.push(invalidRecordDiagnostic(item, position));
+    const resolution = await mapOrRecoverListing({
+      item: result.payload.data[0],
+      position,
+      dealerId,
+      secret,
+      fetchImplementation,
+    });
+    if (resolution.vehicle) vehicles.push(resolution.vehicle);
+    if (resolution.recoveredByDetail) detailRecoveries.push({ position });
+    if (resolution.invalid) invalidRecords.push(resolution.invalid);
   }
-  return { vehicles, failedPositions, invalidRecords, reportedTotals };
+  return { vehicles, failedPositions, invalidRecords, detailRecoveries, reportedTotals };
 }
 
 export class DealerKitSnapshotIncompleteError extends Error {
@@ -304,6 +340,7 @@ export async function fetchDealerKitStockSnapshot({
   const failedPages = [];
   const failedPositions = [];
   const invalidRecords = [];
+  const detailRecoveries = [];
   const pageCounts = [];
   const reportedTotals = new Set([total]);
 
@@ -326,11 +363,19 @@ export async function fetchDealerKitStockSnapshot({
     });
 
     if (pageIsUsable) {
-      rows.forEach((item, index) => {
-        const mapped = mapDealerKitListing(item);
-        if (mapped) vehicles.push(mapped);
-        else invalidRecords.push(invalidRecordDiagnostic(item, ((page - 1) * perPage) + index + 1));
-      });
+      for (let index = 0; index < rows.length; index += 1) {
+        const position = ((page - 1) * perPage) + index + 1;
+        const resolution = await mapOrRecoverListing({
+          item: rows[index],
+          position,
+          dealerId,
+          secret,
+          fetchImplementation,
+        });
+        if (resolution.vehicle) vehicles.push(resolution.vehicle);
+        if (resolution.recoveredByDetail) detailRecoveries.push({ position });
+        if (resolution.invalid) invalidRecords.push(resolution.invalid);
+      }
       continue;
     }
 
@@ -346,6 +391,7 @@ export async function fetchDealerKitStockSnapshot({
     vehicles.push(...recovered.vehicles);
     failedPositions.push(...recovered.failedPositions);
     invalidRecords.push(...recovered.invalidRecords);
+    detailRecoveries.push(...recovered.detailRecoveries);
     for (const observedTotal of recovered.reportedTotals) reportedTotals.add(observedTotal);
   }
 
@@ -366,6 +412,7 @@ export async function fetchDealerKitStockSnapshot({
     pageCounts,
     rawMappedRecords: vehicles.length,
     recordsFetched: deduped.vehicles.length,
+    detailRecoveries,
     invalidRecords,
     duplicateSupplierStockIds: deduped.duplicateSupplierStockIds,
     duplicateRegistrations: deduped.duplicateRegistrations,
@@ -422,10 +469,7 @@ export async function fetchDealerKitStockDetail(stockId, {
   const id = clean(stockId, 300);
   if (!id) throw new Error("DealerKit stock ID is required.");
   const { secret, dealerId } = dealerKitConfig(environment);
-  const url = new URL(`${DEALERKIT_API_ORIGIN}${DEALERKIT_STOCK_PATH}/${encodeURIComponent(id)}`);
-  url.searchParams.set("dealer_id", dealerId);
-  if (specifications) url.searchParams.set("specifications", "true");
-  const result = await requestJson(url, secret, fetchImplementation);
+  const result = await requestJson(stockDetailUrl(id, dealerId, { specifications }), secret, fetchImplementation);
   if (!result.ok || !result.payload?.data) throw new Error(`DealerKit stock detail failed with HTTP ${result.status}.`);
   const mapped = mapDealerKitListing(result.payload.data);
   if (!mapped) throw new Error("DealerKit stock detail did not contain a usable registration and stock ID.");
