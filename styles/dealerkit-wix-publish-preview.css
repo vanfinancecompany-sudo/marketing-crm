@@ -1,0 +1,185 @@
+.dealerkit-wix-preview {
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.dealerkit-wix-preview__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dealerkit-wix-preview__copy {
+  display: grid;
+  gap: 5px;
+}
+
+.dealerkit-wix-preview__copy p {
+  margin: 0;
+  max-width: 760px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.dealerkit-wix-preview__eyebrow {
+  color: #b91c1c;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.dealerkit-wix-preview__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.dealerkit-wix-preview__status {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.dealerkit-wix-preview__status.is-good,
+.dealerkit-wix-preview__verdict.is-good {
+  background: #ecfdf5;
+  color: #166534;
+  border-color: #bbf7d0;
+}
+
+.dealerkit-wix-preview__status.is-warning,
+.dealerkit-wix-preview__verdict.is-warning {
+  background: #fff7ed;
+  color: #9a3412;
+  border-color: #fed7aa;
+}
+
+.dealerkit-wix-preview__result {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.dealerkit-wix-preview__summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dealerkit-wix-preview__summary > div,
+.dealerkit-wix-preview__target,
+.dealerkit-wix-preview__messages,
+.dealerkit-wix-preview__verdict {
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.dealerkit-wix-preview__summary > div {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dealerkit-wix-preview__primary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.dealerkit-wix-preview__primary img {
+  width: 90px;
+  height: 62px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+}
+
+.dealerkit-wix-preview__targets {
+  display: grid;
+  gap: 8px;
+}
+
+.dealerkit-wix-preview__target-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+}
+
+.dealerkit-wix-preview__target-top span {
+  color: #64748b;
+  font-weight: 800;
+}
+
+.dealerkit-wix-preview__field-line {
+  margin-top: 5px;
+  color: #475569;
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.dealerkit-wix-preview__messages {
+  display: grid;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.dealerkit-wix-preview__messages--blockers {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.dealerkit-wix-preview__messages--warnings {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.dealerkit-wix-preview__verdict {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dealerkit-wix-preview__loading,
+.dealerkit-wix-preview__error {
+  padding: 12px;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.dealerkit-wix-preview__error {
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+@media (max-width: 760px) {
+  .dealerkit-wix-preview__top {
+    flex-direction: column;
+  }
+
+  .dealerkit-wix-preview__actions {
+    justify-content: flex-start;
+  }
+
+  .dealerkit-wix-preview__summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
