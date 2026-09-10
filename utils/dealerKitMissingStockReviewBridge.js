@@ -1,6 +1,14 @@
+import {
+  buildMarketingAccessHeaders,
+  parseMarketingJsonResponse,
+} from "../services/marketingAccess.js";
+
 const DIRECT_BUTTON_ATTRIBUTE = "data-dealerkit-missing-stock-review";
 const REVIEW_BUTTON_ATTRIBUTE = "data-dealerkit-review-button";
+const COMPARISON_EVENT = "dealerkit-stock-comparison-refreshed";
 let scanQueued = false;
+let comparisonPromise = null;
+let reviewableByRegistration = new Map();
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -31,7 +39,43 @@ function registrationFromCard(card) {
   return normalizeRegistration(clean(meta?.textContent).replace(/^registration\s*:/i, ""));
 }
 
-function temporaryReviewRow(registration) {
+function setComparison(payload) {
+  const next = new Map();
+  for (const record of Array.isArray(payload?.reviewRecords) ? payload.reviewRecords : []) {
+    if (record?.pipeline !== "finance" || record?.reason !== "missing_from_finance") continue;
+    const registration = normalizeRegistration(record?.registration);
+    const supplierStockId = clean(record?.supplierStockId);
+    if (registration && supplierStockId && !next.has(registration)) next.set(registration, supplierStockId);
+  }
+  reviewableByRegistration = next;
+  scheduleScan();
+}
+
+async function ensureComparison() {
+  if (window.__dealerKitStockComparison) {
+    setComparison(window.__dealerKitStockComparison);
+    return window.__dealerKitStockComparison;
+  }
+  if (comparisonPromise) return comparisonPromise;
+  comparisonPromise = (async () => {
+    const response = await fetch("/api/dealerkit-stock-comparison", {
+      method: "GET",
+      headers: buildMarketingAccessHeaders({ accept: "application/json" }),
+      cache: "no-store",
+    });
+    const payload = await parseMarketingJsonResponse(response, "Could not load the DealerKit stock identity map.");
+    window.__dealerKitStockComparison = payload;
+    setComparison(payload);
+    return payload;
+  })();
+  try {
+    return await comparisonPromise;
+  } finally {
+    comparisonPromise = null;
+  }
+}
+
+function temporaryReviewRow(registration, supplierStockId) {
   const row = document.createElement("article");
   row.className = "dealerkit-comparison__row dealerkit-missing-review-bridge";
   row.hidden = true;
@@ -40,7 +84,9 @@ function temporaryReviewRow(registration) {
   const top = document.createElement("div");
   top.className = "dealerkit-comparison__row-top";
   const strong = document.createElement("strong");
-  strong.textContent = registration;
+  // Hidden bridge token. The detail endpoint splits this back into exact
+  // registration + exact DealerKit stock ID, avoiding a second fuzzy stock-list lookup.
+  strong.textContent = `${registration}::${supplierStockId}`;
   top.appendChild(strong);
 
   const links = document.createElement("div");
@@ -54,22 +100,16 @@ function waitForReviewButton(row, timeoutMs = 1500) {
     const startedAt = Date.now();
     const check = () => {
       const button = row.querySelector(`[${REVIEW_BUTTON_ATTRIBUTE}]`);
-      if (button) {
-        resolve(button);
-        return;
-      }
-      if (Date.now() - startedAt >= timeoutMs) {
-        resolve(null);
-        return;
-      }
+      if (button) return resolve(button);
+      if (Date.now() - startedAt >= timeoutMs) return resolve(null);
       window.setTimeout(check, 25);
     };
     check();
   });
 }
 
-async function openDealerKitReview(registration) {
-  const bridgeRow = temporaryReviewRow(registration);
+async function openDealerKitReview(registration, supplierStockId) {
+  const bridgeRow = temporaryReviewRow(registration, supplierStockId);
   document.body.appendChild(bridgeRow);
   try {
     const reviewButton = await waitForReviewButton(bridgeRow);
@@ -80,28 +120,43 @@ async function openDealerKitReview(registration) {
   }
 }
 
+function removeDirectButton(card) {
+  card.querySelector(`[${DIRECT_BUTTON_ATTRIBUTE}]`)?.remove();
+}
+
 function installDirectButtons() {
   if (typeof window === "undefined" || window.location.pathname !== "/vansco-stock-watch") return;
 
   for (const card of document.querySelectorAll(".vansco-card-grid .vansco-card")) {
-    if (!isFinanceMissingCard(card)) continue;
-    if (card.querySelector(`[${DIRECT_BUTTON_ATTRIBUTE}]`)) continue;
+    if (!isFinanceMissingCard(card)) {
+      removeDirectButton(card);
+      continue;
+    }
 
     const registration = registrationFromCard(card);
+    const supplierStockId = reviewableByRegistration.get(registration) || "";
     const actions = card.querySelector(".card-actions");
-    if (!registration || !actions) continue;
+    if (!registration || !supplierStockId || !actions) {
+      removeDirectButton(card);
+      continue;
+    }
+
+    const existing = card.querySelector(`[${DIRECT_BUTTON_ATTRIBUTE}]`);
+    if (existing?.dataset.dealerkitStockId === supplierStockId) continue;
+    if (existing) existing.remove();
 
     const button = document.createElement("button");
     button.type = "button";
     button.className = "button button--primary";
     button.textContent = "Review vehicle";
     button.setAttribute(DIRECT_BUTTON_ATTRIBUTE, "true");
+    button.dataset.dealerkitStockId = supplierStockId;
     button.setAttribute("aria-label", `Review ${registration} in DealerKit`);
     button.addEventListener("click", async () => {
       button.disabled = true;
       button.textContent = "Opening review…";
       try {
-        await openDealerKitReview(registration);
+        await openDealerKitReview(registration, supplierStockId);
       } catch (error) {
         button.textContent = error?.message || "Could not open review";
         window.setTimeout(() => {
@@ -113,7 +168,6 @@ function installDirectButtons() {
       button.textContent = "Review vehicle";
       button.disabled = false;
     });
-
     actions.prepend(button);
   }
 }
@@ -128,9 +182,20 @@ function scheduleScan() {
 }
 
 if (typeof document !== "undefined") {
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", scheduleScan, { once: true });
-  else scheduleScan();
-  window.addEventListener("popstate", scheduleScan);
+  window.addEventListener(COMPARISON_EVENT, (event) => setComparison(event.detail || {}));
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+      ensureComparison().catch(() => null);
+      scheduleScan();
+    }, { once: true });
+  } else {
+    ensureComparison().catch(() => null);
+    scheduleScan();
+  }
+  window.addEventListener("popstate", () => {
+    if (window.location.pathname === "/vansco-stock-watch") ensureComparison().catch(() => null);
+    scheduleScan();
+  });
   const observer = new MutationObserver(scheduleScan);
   observer.observe(document.documentElement, { childList: true, subtree: true });
 }

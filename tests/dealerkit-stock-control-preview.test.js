@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { summariseDealerKitPreview } from "../api/dealerkit-stock-preview.js";
 
 test("summarises DealerKit coverage, statuses, types and image readiness without exposing source records", () => {
@@ -49,4 +50,27 @@ test("summarises DealerKit coverage, statuses, types and image readiness without
     stableReportedTotal: true,
   });
   assert.equal(Object.prototype.hasOwnProperty.call(summary, "vehicles"), false);
+});
+
+test("Stock Control Centre uses original buttons/cards instead of the standalone DealerKit preview", () => {
+  const main = fs.readFileSync(new URL("../main.jsx", import.meta.url), "utf8");
+  const controls = fs.readFileSync(new URL("../utils/dealerKitOriginalStockControls.js", import.meta.url), "utf8");
+  assert.doesNotMatch(main, /import\s+["']\.\/utils\/dealerKitStockControlPreview\.js["']/);
+  assert.match(main, /dealerKitOriginalStockControls\.js/);
+  assert.match(controls, /refresh dealer stock|refresh vansco cache/i);
+  assert.match(controls, /refresh comparison|reload comparison/i);
+  assert.match(controls, /Vansco Status Hub/);
+  assert.match(controls, /\/api\/dealerkit-stock-comparison/);
+  assert.doesNotMatch(controls, /dealerkit-controlled-publish|wix-data\/v2\/items/i);
+});
+
+test("Missing-card review buttons are limited to exact DealerKit finance-missing identities", () => {
+  const bridge = fs.readFileSync(new URL("../utils/dealerKitMissingStockReviewBridge.js", import.meta.url), "utf8");
+  const detail = fs.readFileSync(new URL("../api/dealerkit-stock-detail.js", import.meta.url), "utf8");
+  assert.match(bridge, /reason !== "missing_from_finance"/);
+  assert.match(bridge, /supplierStockId/);
+  assert.match(bridge, /registration}::\${supplierStockId}/);
+  assert.match(detail, /rawRegistration\.split\("::", 2\)/);
+  assert.match(detail, /fetchDealerKitStockDetail\(supplierStockId/);
+  assert.match(detail, /stock identity no longer matches this registration/i);
 });

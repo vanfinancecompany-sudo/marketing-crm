@@ -15,7 +15,7 @@ import "./utils/overnightAutoRefreshPause.js";
 import "./utils/postingVisibilityStateAutoSync.js";
 import "./utils/vanscoWixPriceHelper.js";
 import "./utils/stockControlCentreUi.js";
-import "./utils/dealerKitStockControlPreview.js";
+import "./utils/dealerKitOriginalStockControls.js";
 import "./utils/dealerKitReviewWorkspace.js";
 import "./utils/dealerKitMissingStockReviewBridge.js";
 import "./utils/dealerKitWixPublishPreview.js";

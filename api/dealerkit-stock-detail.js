@@ -32,6 +32,15 @@ function localRegistration(value) {
   return normalizeRegistration(match?.[1] || "");
 }
 
+function requestedVehicleIdentity(request) {
+  const rawRegistration = clean(request.query?.registration, 1000);
+  const [registrationPart, bridgeStockId = ""] = rawRegistration.split("::", 2);
+  return {
+    registration: normalizeRegistration(registrationPart || ""),
+    supplierStockId: clean(request.query?.stockId || bridgeStockId, 300),
+  };
+}
+
 async function loadLocalMatches(supabase, registration) {
   const [financeResult, rentResult] = await Promise.all([
     supabase
@@ -133,8 +142,7 @@ export default async function handler(request, response) {
     return;
   }
 
-  const registration = normalizeRegistration(request.query?.registration || "");
-  const supplierStockId = clean(request.query?.stockId, 300);
+  const { registration, supplierStockId } = requestedVehicleIdentity(request);
   if (!registration && !supplierStockId) {
     response.status(400).json({ ok: false, message: "Registration or DealerKit stock ID is required." });
     return;
@@ -144,15 +152,27 @@ export default async function handler(request, response) {
     let vehicle = null;
     if (supplierStockId) {
       vehicle = await fetchDealerKitStockDetail(supplierStockId, { specifications: true });
+      const exactRegistration = normalizeRegistration(vehicle?.registration || "");
+      if (registration && exactRegistration !== registration) {
+        response.setHeader("Cache-Control", "no-store, max-age=0");
+        response.status(409).json({ ok: false, message: "DealerKit stock identity no longer matches this registration. Refresh comparison before reviewing it." });
+        return;
+      }
     } else {
       const snapshot = await fetchDealerKitStockSnapshot({ allowPartial: true });
-      const match = (snapshot.vehicles || []).find((item) => item.registration === registration);
+      const matches = (snapshot.vehicles || []).filter((item) => item.registration === registration);
+      if (matches.length > 1) {
+        response.setHeader("Cache-Control", "no-store, max-age=0");
+        response.status(409).json({ ok: false, message: "More than one DealerKit vehicle uses this registration. Refresh comparison and resolve the duplicate before review." });
+        return;
+      }
+      const match = matches[0] || null;
       if (match?.supplierStockId) vehicle = await fetchDealerKitStockDetail(match.supplierStockId, { specifications: true });
       else vehicle = match || null;
     }
 
     if (!vehicle) {
-      response.status(404).json({ ok: false, message: "DealerKit vehicle was not found." });
+      response.status(404).json({ ok: false, message: "DealerKit vehicle was not found. Refresh dealer stock / comparison and try again." });
       return;
     }
 

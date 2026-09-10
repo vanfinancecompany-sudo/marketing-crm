@@ -37,11 +37,14 @@ test("Finance Missing from my stock cards expose the same DealerKit review works
   assert.match(bridge, /Review vehicle/);
   assert.match(bridge, /dealerkit-comparison__row-top/);
   assert.match(bridge, /data-dealerkit-review-button/);
-  assert.doesNotMatch(bridge, /dealerkit-stock-comparison/);
+  assert.match(bridge, /dealerkit-stock-comparison/);
+  assert.match(bridge, /supplierStockId/);
+  assert.match(bridge, /dealerkitStockId/);
 });
 
-test("direct missing-stock review bridge does not mutate stock or Wix", () => {
+test("direct missing-stock review bridge only reads comparison data and does not mutate stock or Wix", () => {
   const bridge = fs.readFileSync(new URL("../utils/dealerKitMissingStockReviewBridge.js", import.meta.url), "utf8");
+  assert.match(bridge, /method:\s*"GET"/);
   assert.doesNotMatch(bridge, /\/api\/dealerkit-controlled-publish|\/wix-data\/|saveVanscoWatchAction|method:\s*["'](?:POST|PUT|PATCH|DELETE)/i);
 });
 
