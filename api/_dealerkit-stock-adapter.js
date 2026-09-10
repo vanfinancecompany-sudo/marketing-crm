@@ -11,6 +11,9 @@ function clean(value, limit = 4000) {
 }
 
 function finiteNumber(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  if (typeof value === "boolean") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -63,7 +66,13 @@ function normaliseImages(media = {}) {
     const key = id || url;
     if (seen.has(key)) continue;
     seen.add(key);
-    images.push({ id, url, order: images.length });
+    images.push({
+      id,
+      url,
+      order: images.length,
+      identityStable: Boolean(id),
+      identitySource: id ? "dealerkit" : "missing",
+    });
   }
   return images;
 }
