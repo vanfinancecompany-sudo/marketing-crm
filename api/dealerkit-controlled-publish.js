@@ -26,10 +26,7 @@ function orderedTargets(targets = []) {
 async function insertTarget(configuration, target) {
   const payload = await controlledWixRequest(configuration, "/wix-data/v2/items", {
     method: "POST",
-    body: {
-      dataCollectionId: target.collectionId,
-      dataItem: { data: target.data },
-    },
+    body: { dataCollectionId: target.collectionId, dataItem: { data: target.data } },
   });
   const item = payload?.dataItem;
   if (!item?.id) throw new ControlledPublishError(502, `Wix did not return an item ID after creating ${target.collectionId}.`);
@@ -40,11 +37,7 @@ async function rollbackCreated(configuration, created = []) {
   const outcomes = [];
   for (const item of [...created].reverse()) {
     try {
-      await controlledWixRequest(
-        configuration,
-        `/wix-data/v2/items/${encodeURIComponent(item.itemId)}?dataCollectionId=${encodeURIComponent(item.collectionId)}`,
-        { method: "DELETE" },
-      );
+      await controlledWixRequest(configuration, `/wix-data/v2/items/${encodeURIComponent(item.itemId)}?dataCollectionId=${encodeURIComponent(item.collectionId)}`, { method: "DELETE" });
       outcomes.push({ ...item, rolledBack: true });
     } catch (error) {
       outcomes.push({ ...item, rolledBack: false, error: clean(error?.message, 500) || "Rollback failed" });
@@ -81,28 +74,19 @@ export default async function handler(request, response) {
 
   const registration = normalizeFinanceRegistration(request.body?.registration || "");
   const confirmRegistration = normalizeFinanceRegistration(request.body?.confirmRegistration || "");
-  if (!registration || registration !== confirmRegistration) {
-    return response.status(400).json({ ok: false, message: "Type the vehicle registration exactly to unlock new-vehicle publishing." });
-  }
+  if (!registration || registration !== confirmRegistration) return response.status(400).json({ ok: false, message: "Type the vehicle registration exactly to unlock new-vehicle publishing." });
 
   let state = null;
   const created = [];
   try {
     state = await buildFreshControlledPublishState(registration);
-    if (!state.plan.canPublish) {
-      throw new ControlledPublishError(409, "The fresh DealerKit/Wix state is not safe for new-vehicle publishing.", { blockers: state.plan.blockers });
-    }
-    if (!controlledPublishConfirmationMatches(request.body?.confirmation, state.plan)) {
-      throw new ControlledPublishError(409, "The publish preview is stale. Rebuild the final preview before publishing.");
-    }
+    if (!state.plan.canPublish) throw new ControlledPublishError(409, "The fresh DealerKit/Wix state is not safe for new-vehicle publishing.", { blockers: state.plan.blockers });
+    if (!controlledPublishConfirmationMatches(request.body?.confirmation, state.plan)) throw new ControlledPublishError(409, "The publish preview is stale. Rebuild the final preview before publishing.");
 
     const targets = orderedTargets(state.plan.targets);
     if (!targets.length) throw new ControlledPublishError(409, "No verified Wix create targets are available.");
 
-    for (const target of targets) {
-      const createdItem = await insertTarget(state.configuration, target);
-      created.push(createdItem);
-    }
+    for (const target of targets) created.push(await insertTarget(state.configuration, target));
 
     const verification = await verifyCreated(state.configuration, registration, targets);
     if (!verification.verified) {
@@ -129,15 +113,16 @@ export default async function handler(request, response) {
     });
   } catch (error) {
     let rollback = [];
-    if (created.length && !error?.details?.rollback) rollback = await rollbackCreated(state?.configuration, created);
-    const rollbackComplete = !created.length || rollback.every((item) => item.rolledBack);
+    if (created.length && !error?.details?.rollback && state?.configuration) rollback = await rollbackCreated(state.configuration, created);
+    const reportedRollback = error?.details?.rollback || rollback;
+    const rollbackComplete = !created.length || (reportedRollback.length === created.length && reportedRollback.every((item) => item.rolledBack));
     response.status(error?.status || 502).json({
       ok: false,
       published: false,
       registration,
       createdBeforeFailure: created,
-      rollback: error?.details?.rollback || rollback,
-      manualAttentionRequired: created.length > 0 && !rollbackComplete,
+      rollback: reportedRollback,
+      manualAttentionRequired: Boolean(error?.details?.manualAttentionRequired || (created.length > 0 && !rollbackComplete)),
       message: error?.message || "Controlled Wix publishing failed.",
       details: error?.details || null,
     });
