@@ -210,11 +210,35 @@ test("recovers readable records from a failed page but refuses an incomplete aut
   assert.equal(partial.refresh.remaining, 1);
 });
 
-test("invalid source rows are diagnostic-only and block authoritative cutover", async () => {
-  const fetchImplementation = async () => response(200, {
-    data: [listing({ id: "1", registration: "" })],
-    meta: { total: 1, current_page: 1, last_page: 1, per_page: 1 },
-  });
+test("recovers an incomplete list row from its stable DealerKit stock detail", async () => {
+  const fetchImplementation = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("/stock/row-1")) {
+      return response(200, { data: listing({ id: "row-1", registration: "EE55EEE" }) });
+    }
+    return response(200, {
+      data: [listing({ id: "row-1", registration: "" })],
+      meta: { total: 1, current_page: 1, last_page: 1, per_page: 1 },
+    });
+  };
+
+  const snapshot = await fetchDealerKitStockSnapshot({ environment: ENV, fetchImplementation, perPage: 1 });
+  assert.equal(snapshot.complete, true);
+  assert.equal(snapshot.vehicleCount, 1);
+  assert.equal(snapshot.vehicles[0].registration, "EE55EEE");
+  assert.equal(snapshot.diagnostics.detailRecoveries.length, 1);
+  assert.equal(snapshot.diagnostics.invalidRecords.length, 0);
+});
+
+test("invalid source rows are diagnostic-only and block authoritative cutover when detail cannot recover them", async () => {
+  const fetchImplementation = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("/stock/1")) return response(200, { data: listing({ id: "1", registration: "" }) });
+    return response(200, {
+      data: [listing({ id: "1", registration: "" })],
+      meta: { total: 1, current_page: 1, last_page: 1, per_page: 1 },
+    });
+  };
 
   const partial = await fetchDealerKitStockSnapshot({ environment: ENV, fetchImplementation, perPage: 1, allowPartial: true });
   assert.equal(partial.complete, false);
