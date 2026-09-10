@@ -29,6 +29,23 @@ function formatCheckedAt(value) {
   }).format(date);
 }
 
+function formatPrice(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "–";
+  return `£${number.toLocaleString("en-GB", { maximumFractionDigits: 2 })}`;
+}
+
+function reasonLabel(reason) {
+  const labels = {
+    price_difference: "Price difference",
+    source_status_changed: "Supplier status",
+    missing_from_finance: "Not in Finance stock",
+    local_not_on_dealerkit: "Local only",
+    local_not_seen_unverified: "Local not seen · source incomplete",
+  };
+  return labels[reason] || reason || "Review";
+}
+
 function renderSummary(panel, payload) {
   const summary = payload?.summary || {};
   const grid = panel.querySelector("[data-dealerkit-preview-grid]");
@@ -69,6 +86,102 @@ function renderSummary(panel, payload) {
   message.textContent = `DealerKit is connected, but this snapshot is not safe for cutover${checkedText ? ` (${checkedText})` : ""}. ${issueCount} source issue${issueCount === 1 ? "" : "s"} detected. Existing Vansco/Dragon stock remains authoritative.`;
 }
 
+function createReviewRow(record) {
+  const row = document.createElement("article");
+  row.className = "dealerkit-comparison__row";
+
+  if (record.imageUrl) {
+    const image = document.createElement("img");
+    image.src = record.imageUrl;
+    image.alt = record.registration || record.title || "DealerKit vehicle";
+    image.loading = "lazy";
+    row.appendChild(image);
+  } else {
+    const placeholder = document.createElement("div");
+    placeholder.className = "dealerkit-comparison__image-placeholder";
+    placeholder.textContent = "No image";
+    row.appendChild(placeholder);
+  }
+
+  const copy = document.createElement("div");
+  copy.className = "dealerkit-comparison__row-copy";
+  const top = document.createElement("div");
+  top.className = "dealerkit-comparison__row-top";
+  const registration = document.createElement("strong");
+  registration.textContent = record.registration || "No registration";
+  const reason = document.createElement("span");
+  reason.className = `dealerkit-comparison__reason dealerkit-comparison__reason--${record.reason || "review"}`;
+  reason.textContent = reasonLabel(record.reason);
+  top.append(registration, reason);
+
+  const title = document.createElement("span");
+  title.className = "dealerkit-comparison__title";
+  title.textContent = record.title || "DealerKit vehicle";
+
+  const meta = document.createElement("span");
+  meta.className = "dealerkit-comparison__meta";
+  const bits = [
+    record.pipeline === "rent2buy" ? "Rent2Buy" : "Finance",
+    record.sourceStatus ? `DealerKit: ${record.sourceStatus}` : "",
+    Number.isFinite(Number(record.retailPrice)) ? `Source ${formatPrice(record.retailPrice)}` : "",
+    Number.isFinite(Number(record.localPrice)) ? `Our price ${formatPrice(record.localPrice)}` : "",
+    Number.isFinite(Number(record.imageCount)) ? `${record.imageCount} source images` : "",
+  ].filter(Boolean);
+  meta.textContent = bits.join(" · ");
+
+  copy.append(top, title, meta);
+  row.appendChild(copy);
+
+  const links = document.createElement("div");
+  links.className = "dealerkit-comparison__links";
+  if (record.localUrl) {
+    const local = document.createElement("a");
+    local.href = record.localUrl;
+    local.target = "_blank";
+    local.rel = "noreferrer";
+    local.textContent = "Our advert";
+    links.appendChild(local);
+  }
+  if (record.sourceUrl) {
+    const source = document.createElement("a");
+    source.href = record.sourceUrl;
+    source.target = "_blank";
+    source.rel = "noreferrer";
+    source.textContent = "DealerKit vehicle";
+    links.appendChild(source);
+  }
+  if (links.childElementCount) row.appendChild(links);
+  return row;
+}
+
+function renderComparison(panel, payload) {
+  const section = panel.querySelector("[data-dealerkit-comparison]");
+  const summaryGrid = panel.querySelector("[data-dealerkit-comparison-grid]");
+  const records = panel.querySelector("[data-dealerkit-comparison-records]");
+  const note = panel.querySelector("[data-dealerkit-comparison-note]");
+  if (!section || !summaryGrid || !records || !note) return;
+
+  const finance = payload?.finance || {};
+  const rent = payload?.rent2buy || {};
+  summaryGrid.replaceChildren(
+    stat("Finance matches", finance.exactMatches ?? 0),
+    stat("Not in Finance", finance.missingFromFinance ?? 0),
+    stat("Price differences", finance.priceDifferences ?? 0),
+    stat("Finance status", finance.sourceStatusWarnings ?? 0),
+    stat("Rent2Buy matches", rent.exactMatches ?? 0),
+    stat("Rent2Buy status", rent.sourceStatusWarnings ?? 0),
+    stat("Local not seen", (finance.localNotSeen ?? 0) + (rent.localNotSeen ?? 0)),
+    stat("5+ image matches", finance.sourceFivePlusImageMatches ?? 0),
+  );
+
+  records.replaceChildren(...(payload.reviewRecords || []).map(createReviewRow));
+  note.textContent = payload.source?.complete
+    ? `${payload.reviewRecordCount || 0} review item${payload.reviewRecordCount === 1 ? "" : "s"}. DealerKit is still comparison-only until cutover is explicitly approved.`
+    : `${payload.reviewRecordCount || 0} review item${payload.reviewRecordCount === 1 ? "" : "s"}. DealerKit source is incomplete, so local vehicles not seen in the API are verification items only and must not be treated as sold or removed.`;
+  if (payload.truncated) note.textContent += " Showing the first 80 highest-priority items.";
+  section.hidden = false;
+}
+
 function createPanel() {
   const panel = document.createElement("section");
   panel.className = "dealerkit-source-preview";
@@ -86,7 +199,7 @@ function createPanel() {
   heading.textContent = "New stock source connection";
   const message = document.createElement("span");
   message.setAttribute("data-dealerkit-preview-message", "true");
-  message.textContent = "DealerKit is connected alongside the existing stock feed. Run a manual source check to inspect live coverage without changing any CRM or Wix stock.";
+  message.textContent = "DealerKit is connected alongside the existing stock feed. Check source health or compare its readable vehicle records with your current Finance and Rent2Buy stock. Nothing is written back.";
   copy.append(eyebrow, heading, message);
 
   const actions = document.createElement("div");
@@ -99,13 +212,36 @@ function createPanel() {
   button.className = "button button--ghost dealerkit-source-preview__button";
   button.type = "button";
   button.textContent = "Check DealerKit source";
-  actions.append(badge, button);
+  const compareButton = document.createElement("button");
+  compareButton.className = "button button--ghost dealerkit-source-preview__button";
+  compareButton.type = "button";
+  compareButton.textContent = "Compare with my stock";
+  actions.append(badge, button, compareButton);
   top.append(copy, actions);
 
   const grid = document.createElement("div");
   grid.className = "dealerkit-source-preview__grid";
   grid.setAttribute("data-dealerkit-preview-grid", "true");
   grid.hidden = true;
+
+  const comparison = document.createElement("section");
+  comparison.className = "dealerkit-comparison";
+  comparison.setAttribute("data-dealerkit-comparison", "true");
+  comparison.hidden = true;
+  const comparisonTop = document.createElement("div");
+  comparisonTop.className = "dealerkit-comparison__top";
+  const comparisonHeading = document.createElement("strong");
+  comparisonHeading.textContent = "DealerKit record comparison";
+  const comparisonNote = document.createElement("span");
+  comparisonNote.setAttribute("data-dealerkit-comparison-note", "true");
+  comparisonTop.append(comparisonHeading, comparisonNote);
+  const comparisonGrid = document.createElement("div");
+  comparisonGrid.className = "dealerkit-source-preview__grid dealerkit-comparison__grid";
+  comparisonGrid.setAttribute("data-dealerkit-comparison-grid", "true");
+  const comparisonRecords = document.createElement("div");
+  comparisonRecords.className = "dealerkit-comparison__records";
+  comparisonRecords.setAttribute("data-dealerkit-comparison-records", "true");
+  comparison.append(comparisonTop, comparisonGrid, comparisonRecords);
 
   button.addEventListener("click", async () => {
     button.disabled = true;
@@ -133,7 +269,29 @@ function createPanel() {
     }
   });
 
-  panel.append(top, grid);
+  compareButton.addEventListener("click", async () => {
+    compareButton.disabled = true;
+    compareButton.textContent = "Comparing records...";
+    try {
+      const response = await fetch("/api/dealerkit-stock-comparison", {
+        method: "GET",
+        headers: buildMarketingAccessHeaders({ accept: "application/json" }),
+        cache: "no-store",
+      });
+      const payload = await parseMarketingJsonResponse(response, "Could not compare DealerKit stock.");
+      renderComparison(panel, payload);
+    } catch (error) {
+      comparison.hidden = false;
+      comparisonGrid.replaceChildren();
+      comparisonRecords.replaceChildren();
+      comparisonNote.textContent = error?.message || "Could not compare DealerKit with current stock. No stock data was changed.";
+    } finally {
+      compareButton.disabled = false;
+      compareButton.textContent = "Compare with my stock";
+    }
+  });
+
+  panel.append(top, grid, comparison);
   return panel;
 }
 
