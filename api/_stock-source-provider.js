@@ -173,12 +173,12 @@ async function loadNormalizedHttpSnapshot(config, environment, fetchImplementati
 }
 
 export async function loadStockSourceSnapshot({
-  supabase = getSupabaseServiceAdmin(),
+  supabase = null,
   environment = process.env,
   fetchImplementation = fetch,
 } = {}) {
   const config = stockSourceProviderConfig(environment);
-  if (config.kind === "supabase_cache") return loadVanscoDragonSnapshot(supabase);
+  if (config.kind === "supabase_cache") return loadVanscoDragonSnapshot(supabase || getSupabaseServiceAdmin());
   if (config.kind === "dealerkit") {
     return fetchDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial: false });
   }
