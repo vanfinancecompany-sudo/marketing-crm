@@ -16,7 +16,7 @@ async function fetchText(url, maxChars = MAX_HTML) {
       redirect: "follow",
       signal: controller.signal,
       headers: {
-        accept: "text/html,application/json,text/plain;q=0.9,*/*;q=0.8",
+        accept: "text/html,application/json,application/yaml,text/yaml,text/plain;q=0.9,*/*;q=0.8",
         "user-agent": "Mozilla/5.0 DealerKitPhase1Inspection/1.0",
       },
     });
@@ -29,6 +29,24 @@ async function fetchText(url, maxChars = MAX_HTML) {
 
 function toAbsolute(value, base) {
   try { return new URL(value, base).toString(); } catch { return ""; }
+}
+
+function extractSpecCandidates(html, base) {
+  const candidates = [];
+  const patterns = [
+    /\bspec-url\s*=\s*["']([^"']+)["']/gi,
+    /\bdata-spec-url\s*=\s*["']([^"']+)["']/gi,
+    /Redoc\.init\(\s*["']([^"']+)["']/gi,
+    /["']([^"']*\.(?:json|ya?ml)(?:\?[^"']*)?)["']/gi,
+  ];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(String(html || ""))) && candidates.length < 30) {
+      const url = toAbsolute(match[1], base);
+      if (url && !candidates.includes(url)) candidates.push(url);
+    }
+  }
+  return candidates;
 }
 
 function metadata(html, base) {
@@ -46,7 +64,7 @@ function metadata(html, base) {
     const url = toAbsolute(match[1], base);
     if (url && !links.includes(url)) links.push(url);
   }
-  return { title, scripts, links };
+  return { title, scripts, links, specCandidates: extractSpecCandidates(html, base) };
 }
 
 function clues(source) {
@@ -60,12 +78,56 @@ function clues(source) {
   const paths = Array.from(new Set(pathMatches.map((value) => value.slice(1, -1)).filter((value) => value.length <= 220))).slice(0, 80);
 
   const snippets = [];
-  const rx = /(authorization|bearer|api[-_ ]?key|api[-_ ]?secret|dealer[-_ ]?id|stock|vehicles?|pagination|webhooks?|rate[-_ ]?limit)/gi;
+  const rx = /(authorization|bearer|api[-_ ]?key|api[-_ ]?secret|dealer[-_ ]?id|stock|vehicles?|pagination|webhooks?|rate[-_ ]?limit|openapi|swagger)/gi;
   let match;
   while ((match = rx.exec(text)) && snippets.length < 50) {
     snippets.push(compact(text.slice(Math.max(0, match.index - 100), Math.min(text.length, match.index + 220))).slice(0, 320));
   }
   return { urls, paths, snippets: Array.from(new Set(snippets)).slice(0, 30) };
+}
+
+function summarizeOpenApi(text, contentType = "") {
+  const source = String(text || "");
+  let parsed = null;
+  if (/json/i.test(contentType) || source.trim().startsWith("{")) {
+    try { parsed = JSON.parse(source); } catch { parsed = null; }
+  }
+
+  if (parsed && typeof parsed === "object") {
+    const paths = Object.keys(parsed.paths || {});
+    const operations = [];
+    for (const path of paths) {
+      for (const method of ["get", "post", "put", "patch", "delete", "head", "options"]) {
+        const op = parsed.paths?.[path]?.[method];
+        if (!op) continue;
+        operations.push({ method: method.toUpperCase(), path, summary: compact(op.summary || op.description || "").slice(0, 180), operationId: op.operationId || "" });
+      }
+    }
+    const securitySchemes = Object.entries(parsed.components?.securitySchemes || {}).map(([name, scheme]) => ({
+      name,
+      type: scheme?.type || "",
+      scheme: scheme?.scheme || "",
+      in: scheme?.in || "",
+      keyName: scheme?.name || "",
+      bearerFormat: scheme?.bearerFormat || "",
+    }));
+    const schemas = Object.keys(parsed.components?.schemas || {});
+    return {
+      format: "json",
+      openapi: parsed.openapi || parsed.swagger || "",
+      title: parsed.info?.title || "",
+      version: parsed.info?.version || "",
+      servers: (parsed.servers || []).map((server) => server?.url).filter(Boolean),
+      security: parsed.security || [],
+      securitySchemes,
+      operations,
+      schemas,
+    };
+  }
+
+  const endpointLines = source.split(/\r?\n/).filter((line) => /^\s{0,8}\/(?:[^:]+):\s*$/.test(line)).map((line) => compact(line).replace(/:$/, "")).slice(0, 100);
+  const serverUrls = Array.from(new Set((source.match(/https?:\/\/[^\s"']+/gi) || []).map((value) => value.replace(/[,'"}\]]+$/g, "")).filter((value) => /dealerkit|api/i.test(value)))).slice(0, 30);
+  return { format: "yaml-or-text", endpointLines, serverUrls, clues: clues(source) };
 }
 
 function printSection(label, value) {
@@ -85,6 +147,7 @@ async function inspectPage(label, url) {
       title: meta.title,
       links: meta.links.slice(0, 40),
       scripts: meta.scripts.slice(0, 20),
+      specCandidates: meta.specCandidates,
       inlineClues: clues(result.text),
     });
     return { result, meta };
@@ -107,6 +170,22 @@ export async function inspectDealerKitPublicDocs() {
 
   const docs = await inspectPage("Developer docs", DOCS_URL);
   await inspectPage("Postman workspace", POSTMAN_URL);
+
+  for (const specUrl of docs?.meta?.specCandidates || []) {
+    try {
+      const spec = await fetchText(specUrl, 1500000);
+      printSection("OpenAPI specification", {
+        url: specUrl,
+        ok: spec.ok,
+        status: spec.status,
+        finalUrl: spec.finalUrl,
+        contentType: spec.contentType,
+        summary: spec.ok ? summarizeOpenApi(spec.text, spec.contentType) : null,
+      });
+    } catch (error) {
+      printSection("OpenAPI specification error", { url: specUrl, name: error?.name || "Error", message: compact(error?.message || "fetch failed") });
+    }
+  }
 
   if (docs?.meta?.scripts?.length) {
     const sameOriginScripts = docs.meta.scripts.filter((url) => {
