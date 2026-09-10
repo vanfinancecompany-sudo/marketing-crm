@@ -97,6 +97,7 @@ test("DealerKit Wix preview maps reviewed Van Finance categories and pricing wit
   assert.equal(preview.images.count, 2);
   assert.equal(preview.images.primaryImageId, "image-1");
   assert.equal(preview.writeTargets.length, 3);
+  assert.equal(preview.createTargets.length, 0);
   assert.equal(preview.confirmation.version, 1);
 
   const allVans = preview.targets.find((target) => target.collectionId === "VANFINANCE-ALLVANS");
@@ -120,7 +121,7 @@ test("DealerKit Wix preview maps reviewed Van Finance categories and pricing wit
   });
 });
 
-test("preview blocks stale reviews, unsupported categories, missing images and unverified Wix creation", () => {
+test("preview blocks stale reviews, unsupported categories, missing images and locked Wix creation", () => {
   const preview = buildDealerKitWixPublishPreview({
     vehicle: dealerKitVehicle({
       sourceUpdatedAt: "2026-09-10T13:00:00.000Z",
@@ -146,8 +147,11 @@ test("preview blocks stale reviews, unsupported categories, missing images and u
   assert.ok(codes.has("unmapped_category"));
   assert.ok(codes.has("no_images"));
   assert.ok(codes.has("primary_image"));
-  assert.ok(codes.has("wix_create_not_verified"));
+  assert.ok(codes.has("wix_create_locked"));
   assert.ok(codes.has("missing_detail_existing_row"));
+  assert.equal(preview.createTargets.length, 1);
+  assert.equal(preview.createTargets[0].collectionId, "VANFINANCEPAGES");
+  assert.equal(preview.createTargets[0].liveCreateLocked, true);
 });
 
 test("existing unselected Wix category rows stay visible and are included in the safe price-sync write plan", () => {
