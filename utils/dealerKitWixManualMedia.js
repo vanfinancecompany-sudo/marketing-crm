@@ -31,6 +31,41 @@ function formatSize(bytes) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function processing(item) {
+  if (typeof item?.processing === "boolean") return item.processing;
+  return !["READY", "FAILED"].includes(clean(item?.operationStatus).toUpperCase());
+}
+
+function statusClass(item) {
+  if (item?.ready) return "is-ready";
+  if (item?.failed || clean(item?.operationStatus).toUpperCase() === "FAILED") return "is-failed";
+  return "is-pending";
+}
+
+function replaceMediaItem(media, refreshed) {
+  if (!refreshed?.id) return media;
+  return media.map((item) => item.id === refreshed.id ? refreshed : item);
+}
+
+async function refreshMediaStatus(root, item) {
+  const registration = normaliseRegistration(root.dataset.registration);
+  if (!registration || !item?.id) throw new Error("This staged image cannot be rechecked yet.");
+  const response = await fetch("/api/dealerkit-wix-manual-media", {
+    method: "POST",
+    headers: buildMarketingAccessHeaders({
+      accept: "application/json",
+      "content-type": "application/json",
+    }),
+    body: JSON.stringify({
+      action: "refresh_status",
+      registration,
+      mediaId: item.id,
+    }),
+  });
+  const payload = await parseMarketingJsonResponse(response, "Could not refresh the Wix Media status.");
+  return payload.media;
+}
+
 function renderSavedMedia(root, media = []) {
   const list = root.querySelector("[data-manual-media-list]");
   if (!list) return;
@@ -53,12 +88,40 @@ function renderSavedMedia(root, media = []) {
     const top = element("div", "dealerkit-manual-media__saved-top");
     top.append(
       element("strong", "", item.purposeLabel || item.purpose || "Manual Wix image"),
-      element("span", `dealerkit-manual-media__state ${item.ready ? "is-ready" : "is-pending"}`, item.operationStatus || "PENDING"),
+      element("span", `dealerkit-manual-media__state ${statusClass(item)}`, item.operationStatus || "PENDING"),
     );
+
+    const metaRow = element("div", "dealerkit-manual-media__meta-row");
+    metaRow.appendChild(element(
+      "div",
+      "dealerkit-manual-media__meta",
+      [item.siteScope === "rent2buy" ? "Rent2Buy Wix" : "Van Finance Wix", formatSize(item.sizeInBytes)].filter(Boolean).join(" · "),
+    ));
+    const recheck = element("button", "dealerkit-manual-media__recheck", processing(item) ? "Check Wix status" : "Recheck Wix");
+    recheck.type = "button";
+    recheck.addEventListener("click", async () => {
+      recheck.disabled = true;
+      recheck.textContent = "Checking…";
+      setStatus(root, "CHECKING WIX MEDIA", "is-busy");
+      try {
+        const refreshed = await refreshMediaStatus(root, item);
+        const nextMedia = replaceMediaItem(media, refreshed);
+        renderSavedMedia(root, nextMedia);
+        if (refreshed?.ready) setStatus(root, "WIX MEDIA READY", "is-good");
+        else if (refreshed?.failed) setStatus(root, "WIX MEDIA FAILED", "is-warning");
+        else setStatus(root, "WIX PROCESSING", "is-busy");
+      } catch (error) {
+        setStatus(root, error?.message || "STATUS CHECK FAILED", "is-warning");
+        recheck.disabled = false;
+        recheck.textContent = processing(item) ? "Check Wix status" : "Recheck Wix";
+      }
+    });
+    metaRow.appendChild(recheck);
+
     copy.append(
       top,
       element("div", "dealerkit-manual-media__filename", item.displayName || item.wixFileId || "Wix Media image"),
-      element("div", "dealerkit-manual-media__meta", [item.siteScope === "rent2buy" ? "Rent2Buy Wix" : "Van Finance Wix", formatSize(item.sizeInBytes)].filter(Boolean).join(" · ")),
+      metaRow,
     );
     row.appendChild(copy);
     list.appendChild(row);
@@ -76,7 +139,17 @@ async function loadSavedMedia(root) {
       cache: "no-store",
     });
     const payload = await parseMarketingJsonResponse(response, "Could not load staged Wix images.");
-    renderSavedMedia(root, payload.media || []);
+    let media = Array.isArray(payload.media) ? payload.media : [];
+
+    for (const item of media.filter(processing).slice(0, 4)) {
+      try {
+        const refreshed = await refreshMediaStatus(root, item);
+        media = replaceMediaItem(media, refreshed);
+      } catch {
+        // Keep the last verified state visible. A manual recheck remains available.
+      }
+    }
+    renderSavedMedia(root, media);
   } catch (error) {
     if (list) list.replaceChildren(element("div", "dealerkit-manual-media__empty is-warning", error?.message || "Could not load staged Wix images."));
   }
@@ -142,7 +215,7 @@ function createManualMediaPanel(registration) {
   button.disabled = true;
   controls.append(destinationLabel, fileLabel, button);
 
-  const note = element("div", "dealerkit-manual-media__note", "JPEG, PNG or WebP · maximum 10 MB · vehicle publishing remains locked");
+  const note = element("div", "dealerkit-manual-media__note", "JPEG, PNG or WebP · maximum 10 MB · only freshly verified READY media can enter a later publish decision");
   const list = element("div", "dealerkit-manual-media__list");
   list.setAttribute("data-manual-media-list", "true");
 
@@ -223,7 +296,9 @@ function createManualMediaPanel(registration) {
         }),
       });
       const registered = await parseMarketingJsonResponse(registerResponse, "Wix received the image, but the CRM could not verify it.");
-      setStatus(root, registered.media?.ready ? "WIX MEDIA READY" : "WIX PROCESSING", registered.media?.ready ? "is-good" : "is-busy");
+      if (registered.media?.ready) setStatus(root, "WIX MEDIA READY", "is-good");
+      else if (registered.media?.failed) setStatus(root, "WIX MEDIA FAILED", "is-warning");
+      else setStatus(root, "WIX PROCESSING", "is-busy");
       input.value = "";
       await loadSavedMedia(root);
     } catch (error) {

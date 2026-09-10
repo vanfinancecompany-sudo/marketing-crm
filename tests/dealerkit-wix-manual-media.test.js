@@ -73,8 +73,8 @@ test("Wix upload naming is registration and purpose specific without trusting th
   );
 });
 
-test("verified Wix image metadata maps to server-only review metadata", () => {
-  const row = wixFileToManualMediaRow({
+test("verified Wix image metadata maps READY, PENDING and FAILED states explicitly", () => {
+  const baseRow = wixFileToManualMediaRow({
     decision: decision(),
     purpose: "rent2buy_template",
     siteId: "r2b-site",
@@ -89,10 +89,25 @@ test("verified Wix image metadata maps to server-only review metadata", () => {
       operationStatus: "READY",
     },
   });
-  assert.equal(row.supplier_stock_id, "stock-123");
-  assert.equal(row.site_scope, "rent2buy");
-  assert.equal(row.operation_status, "READY");
-  assert.equal(manualMediaRowToClient({ ...row, id: "row-1" }).ready, true);
+  assert.equal(baseRow.supplier_stock_id, "stock-123");
+  assert.equal(baseRow.site_scope, "rent2buy");
+  assert.equal(baseRow.operation_status, "READY");
+
+  const ready = manualMediaRowToClient({ ...baseRow, id: "row-1" });
+  assert.equal(ready.ready, true);
+  assert.equal(ready.failed, false);
+  assert.equal(ready.processing, false);
+  assert.ok(ready.verifiedAt);
+
+  const pending = manualMediaRowToClient({ ...baseRow, id: "row-2", operation_status: "PENDING" });
+  assert.equal(pending.ready, false);
+  assert.equal(pending.failed, false);
+  assert.equal(pending.processing, true);
+
+  const failed = manualMediaRowToClient({ ...baseRow, id: "row-3", operation_status: "FAILED" });
+  assert.equal(failed.ready, false);
+  assert.equal(failed.failed, true);
+  assert.equal(failed.processing, false);
 });
 
 test("manual media constants stay bound to the verified Wix Media endpoints", () => {
@@ -112,11 +127,25 @@ test("manual media API preserves the access-first and media-only boundary", asyn
   assert.doesNotMatch(source, /wix-data\/v2\/items\/(insert|update|remove)/i);
 });
 
-test("manual media browser flow uploads bytes to the signed Wix URL and never sends image bytes to Supabase", async () => {
+test("status refresh is an explicit Wix read plus metadata-only update", async () => {
+  const source = await readFile(new URL("api/dealerkit-wix-manual-media.js", root), "utf8");
+  assert.match(source, /action === "refresh_status"/);
+  assert.match(source, /loadManualMediaById/);
+  assert.match(source, /stored\.supplier_stock_id/);
+  assert.match(source, /stored\.wix_site_id/);
+  assert.match(source, /getVerifiedWixFile\(configuration, stored\.wix_file_id\)/);
+  assert.match(source, /statusRefreshOnly:\s*true/);
+});
+
+test("manual media browser flow uploads bytes only to Wix and rechecks processing items", async () => {
   const source = await readFile(new URL("utils/dealerKitWixManualMedia.js", root), "utf8");
   assert.match(source, /fetch\(prepared\.uploadUrl/);
   assert.match(source, /method:\s*"PUT"/);
   assert.match(source, /body:\s*file/);
+  assert.match(source, /action:\s*"refresh_status"/);
+  assert.match(source, /media\.filter\(processing\)\.slice\(0, 4\)/);
+  assert.match(source, /Check Wix status/);
+  assert.match(source, /WIX MEDIA FAILED/);
   assert.match(source, /This uploads media only/i);
   assert.doesNotMatch(source, /supabase/i);
 });
