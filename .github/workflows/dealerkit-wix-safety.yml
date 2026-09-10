@@ -1,0 +1,29 @@
+name: DealerKit Wix safety
+
+on:
+  pull_request:
+    paths:
+      - 'lib/dealerKitWix*.js'
+      - 'api/dealerkit-wix*.js'
+      - 'utils/dealerKitWix*.js'
+      - 'tests/dealerkit-wix*.test.js'
+      - '.github/workflows/dealerkit-wix-safety.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  dealerkit-wix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run DealerKit Wix safety tests
+        run: node --test tests/dealerkit-wix-create-plan.test.js tests/dealerkit-wix-publish-preview.test.js
+      - name: Build
+        run: npm run build
