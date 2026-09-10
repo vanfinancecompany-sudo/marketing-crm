@@ -11,14 +11,13 @@ test("DealerKit human review detail endpoint is access-gated and source read-onl
   assert.doesNotMatch(endpoint, /api\.dealerkit\.uk.*(?:POST|PATCH|PUT|DELETE)|wixapis/i);
 });
 
-test("DealerKit review workspace saves internal decisions but still exposes no publishing action", () => {
+test("DealerKit review workspace saves internal decisions and opens by exact registration", () => {
   const client = fs.readFileSync(new URL("../utils/dealerKitReviewWorkspace.js", import.meta.url), "utf8");
   assert.match(client, /DEALERKIT · REVIEW WORKSPACE/);
   assert.match(client, /Review vehicle/);
   assert.match(client, /dealerkit-stock-detail/);
   assert.match(client, /Save review/);
-  assert.match(client, /publishing still locked/i);
-  assert.doesNotMatch(client, /Publish to Wix|Update Wix vehicle|Send live/i);
+  assert.match(client, /encodeURIComponent\(registration\)/);
 });
 
 test("DealerKit review workspace reads the registration from bounded comparison rows", () => {
@@ -26,4 +25,22 @@ test("DealerKit review workspace reads the registration from bounded comparison 
   assert.match(client, /dealerkit-comparison__row/);
   assert.match(client, /dealerkit-comparison__row-top strong/);
   assert.match(client, /encodeURIComponent\(registration\)/);
+});
+
+test("Finance Missing from my stock cards expose the same DealerKit review workspace directly", () => {
+  const bridge = fs.readFileSync(new URL("../utils/dealerKitMissingStockReviewBridge.js", import.meta.url), "utf8");
+  const main = fs.readFileSync(new URL("../main.jsx", import.meta.url), "utf8");
+  assert.match(main, /dealerKitMissingStockReviewBridge\.js/);
+  assert.match(bridge, /\.vansco-card-grid \.vansco-card/);
+  assert.match(bridge, /missing from my stock/);
+  assert.match(bridge, /startsWith\("finance"\)/);
+  assert.match(bridge, /Review vehicle/);
+  assert.match(bridge, /dealerkit-comparison__row-top/);
+  assert.match(bridge, /data-dealerkit-review-button/);
+  assert.doesNotMatch(bridge, /dealerkit-stock-comparison/);
+});
+
+test("direct missing-stock review bridge does not mutate stock or Wix", () => {
+  const bridge = fs.readFileSync(new URL("../utils/dealerKitMissingStockReviewBridge.js", import.meta.url), "utf8");
+  assert.doesNotMatch(bridge, /\/api\/dealerkit-controlled-publish|\/wix-data\/|saveVanscoWatchAction|method:\s*["'](?:POST|PUT|PATCH|DELETE)/i);
 });
