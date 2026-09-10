@@ -15,7 +15,7 @@ import "./utils/overnightAutoRefreshPause.js";
 import "./utils/postingVisibilityStateAutoSync.js";
 import "./utils/vanscoWixPriceHelper.js";
 import "./utils/stockControlCentreUi.js";
-import "./utils/dealerKitStockControlPreview.js";
+import "./utils/dealerKitOriginalStockControls.js";
 import "./utils/dealerKitReviewWorkspace.js";
 import "./utils/dealerKitMissingStockReviewBridge.js";
 import "./utils/dealerKitWixPublishPreview.js";
@@ -46,30 +46,15 @@ function loadActiveBrowserIntegrations() {
   if (isFacebookPosting) ensureModuleScript("activeBufferPostingBridge", ACTIVE_INTEGRATIONS.postingBridge);
 }
 
-function ActiveApp() {
-  React.useEffect(() => {
-    const startupTimer = window.setTimeout(loadActiveBrowserIntegrations, 350);
-    window.addEventListener("popstate", loadActiveBrowserIntegrations);
-    return () => {
-      window.clearTimeout(startupTimer);
-      window.removeEventListener("popstate", loadActiveBrowserIntegrations);
-    };
-  }, []);
-
-  return (
-    <>
-      <App />
-      <OnlyVansQuickAction />
-      <AutomationHealthCentre />
-      <StockReconciliationAgent />
-    </>
-  );
-}
+loadActiveBrowserIntegrations();
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <SingleActiveTabGate>
-      <ActiveApp />
+      <App />
+      <OnlyVansQuickAction />
+      <AutomationHealthCentre />
+      <StockReconciliationAgent />
     </SingleActiveTabGate>
-  </React.StrictMode>
+  </React.StrictMode>,
 );
