@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mapDealerKitListing } from "../api/_dealerkit-stock-adapter.js";
+import { publicDealerKitVehicle } from "../api/dealerkit-stock-detail.js";
 import { buildDealerKitWixMediaPlan } from "../lib/dealerKitWixMediaPlan.js";
 
 function listing(overrides = {}) {
@@ -101,6 +102,43 @@ test("images without DealerKit IDs remain viewable but are explicitly unsafe for
   assert.equal(mapped.images[0].id, null);
   assert.equal(mapped.images[0].identityStable, false);
   assert.equal(mapped.images[0].identitySource, "missing");
+});
+
+test("review API boundary preserves missing numbers and source image identity metadata", () => {
+  const publicVehicle = publicDealerKitVehicle({
+    supplierStockId: "stock-123",
+    registration: "HT22KJX",
+    retailPrice: null,
+    mileage: "",
+    year: undefined,
+    bhp: null,
+    torqueNm: false,
+    images: [
+      { id: "image-1", url: "https://images.example/one.jpg", order: 0, identityStable: true, identitySource: "dealerkit" },
+      { id: null, url: "https://images.example/two.jpg", order: 1, identityStable: false, identitySource: "missing" },
+    ],
+  });
+
+  assert.equal(publicVehicle.retailPrice, null);
+  assert.equal(publicVehicle.mileage, null);
+  assert.equal(publicVehicle.year, null);
+  assert.equal(publicVehicle.bhp, null);
+  assert.equal(publicVehicle.torqueNm, null);
+  assert.equal(publicVehicle.imageCount, 2);
+  assert.deepEqual(publicVehicle.images[0], {
+    id: "image-1",
+    url: "https://images.example/one.jpg",
+    order: 0,
+    identityStable: true,
+    identitySource: "dealerkit",
+  });
+  assert.deepEqual(publicVehicle.images[1], {
+    id: null,
+    url: "https://images.example/two.jpg",
+    order: 1,
+    identityStable: false,
+    identitySource: "missing",
+  });
 });
 
 test("Wix media planning refuses a positional or generated image identity even when it has an ID string", () => {
