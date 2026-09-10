@@ -64,6 +64,9 @@
     "api/dealerkit-stock-comparison.js": {
       "maxDuration": 60
     },
+    "api/dealerkit-stock-detail.js": {
+      "maxDuration": 60
+    },
     "api/buffer-facebook-automation-worker.js": {
       "maxDuration": 300
     },
