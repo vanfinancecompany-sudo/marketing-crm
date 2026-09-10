@@ -19,6 +19,7 @@ import "./utils/dealerKitStockControlPreview.js";
 import "./utils/dealerKitReviewWorkspace.js";
 import "./utils/dealerKitWixPublishPreview.js";
 import "./utils/dealerKitWixManualMediaPreview.js";
+import "./utils/dealerKitControlledPublish.js";
 
 const ACTIVE_INTEGRATIONS = Object.freeze({
   liveStatus: "/buffer-live-status.js",
@@ -40,21 +41,14 @@ function loadActiveBrowserIntegrations() {
   const isFacebookPosting = path === "/van-finance-facebook" || path === "/rent2buy-facebook";
   const needsLiveStatus = path === "/" || isFacebookPosting || path.startsWith("/daily-reels");
 
-  if (needsLiveStatus) {
-    ensureModuleScript("activeBufferLiveStatus", ACTIVE_INTEGRATIONS.liveStatus);
-  }
-  if (isFacebookPosting) {
-    ensureModuleScript("activeBufferPostingBridge", ACTIVE_INTEGRATIONS.postingBridge);
-  }
+  if (needsLiveStatus) ensureModuleScript("activeBufferLiveStatus", ACTIVE_INTEGRATIONS.liveStatus);
+  if (isFacebookPosting) ensureModuleScript("activeBufferPostingBridge", ACTIVE_INTEGRATIONS.postingBridge);
 }
 
 function ActiveApp() {
   React.useEffect(() => {
-    // The safety gate wins startup. Buffer integrations are loaded once after
-    // the real CRM mounts, then again only when browser navigation changes.
     const startupTimer = window.setTimeout(loadActiveBrowserIntegrations, 350);
     window.addEventListener("popstate", loadActiveBrowserIntegrations);
-
     return () => {
       window.clearTimeout(startupTimer);
       window.removeEventListener("popstate", loadActiveBrowserIntegrations);
