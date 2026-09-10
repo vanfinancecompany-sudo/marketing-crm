@@ -58,6 +58,9 @@
     "api/stock-watch-monitor-agent.js": {
       "maxDuration": 60
     },
+    "api/dealerkit-stock-preview.js": {
+      "maxDuration": 60
+    },
     "api/buffer-facebook-automation-worker.js": {
       "maxDuration": 300
     },
