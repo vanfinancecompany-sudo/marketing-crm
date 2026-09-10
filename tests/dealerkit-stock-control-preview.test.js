@@ -52,16 +52,33 @@ test("summarises DealerKit coverage, statuses, types and image readiness without
   assert.equal(Object.prototype.hasOwnProperty.call(summary, "vehicles"), false);
 });
 
-test("Stock Control Centre uses original buttons/cards instead of the standalone DealerKit preview", () => {
+test("Stock Control Centre keeps original buttons/cards but routes the operator engine to DealerKit", () => {
   const main = fs.readFileSync(new URL("../main.jsx", import.meta.url), "utf8");
   const controls = fs.readFileSync(new URL("../utils/dealerKitOriginalStockControls.js", import.meta.url), "utf8");
   assert.doesNotMatch(main, /import\s+["']\.\/utils\/dealerKitStockControlPreview\.js["']/);
   assert.match(main, /dealerKitOriginalStockControls\.js/);
   assert.match(controls, /refresh dealer stock|refresh vansco cache/i);
   assert.match(controls, /refresh comparison|reload comparison/i);
-  assert.match(controls, /Vansco Status Hub/);
+  assert.match(controls, /DealerKit Stock Status/);
+  assert.match(controls, /\/api\/dealerkit-stock-watch-list/);
   assert.match(controls, /\/api\/dealerkit-stock-comparison/);
+  assert.match(controls, /url\.pathname === "\/api\/vansco-cache-list"/);
+  assert.match(controls, /url\.pathname === "\/api\/vansco-cache-live-refresh"/);
+  assert.match(controls, /Stop the legacy React handler before it can start \/vansco-cache-live-refresh/);
+  assert.doesNotMatch(controls, /waitForOriginalRefresh|processing_dragon_details/);
   assert.doesNotMatch(controls, /dealerkit-controlled-publish|wix-data\/v2\/items/i);
+});
+
+test("DealerKit Stock Watch list is access-gated and maps the supplier feed into the original card contract", () => {
+  const endpoint = fs.readFileSync(new URL("../api/dealerkit-stock-watch-list.js", import.meta.url), "utf8");
+  assert.match(endpoint, /Marketing CRM access is required/);
+  assert.match(endpoint, /fetchDealerKitStockSnapshot\(\{ allowPartial: true \}\)/);
+  assert.match(endpoint, /supplierStockId/);
+  assert.match(endpoint, /providerId: "dealerkit"/);
+  assert.match(endpoint, /isCurrentlyOnVansco: true/);
+  assert.match(endpoint, /WATCH_TABLE/);
+  assert.match(endpoint, /Legacy Vansco\/Dragon refresh jobs are not used by this operator feed/);
+  assert.doesNotMatch(endpoint, /vansco-cache-live-refresh|fetchVanscoDetailHtml|DRAGON_SOURCE_ORIGIN|wix-data|controlled-publish/i);
 });
 
 test("Missing-card review buttons are limited to exact DealerKit finance-missing identities", () => {
