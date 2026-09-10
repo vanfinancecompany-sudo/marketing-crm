@@ -10,6 +10,10 @@ function clean(value) {
   return String(value ?? "").trim();
 }
 
+function normaliseRegistration(value) {
+  return clean(value).replace(/[^A-Z0-9]/gi, "").toUpperCase();
+}
+
 function element(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -28,6 +32,98 @@ function fieldText(fields = {}) {
   return values.length ? values.map(([key, value]) => `${key}: ${value}`).join(" · ") : "–";
 }
 
+function renderWriteGate(panel, result, preview) {
+  const gate = element("section", "dealerkit-wix-preview__write-gate");
+  gate.setAttribute("data-dealerkit-wix-write-gate", "true");
+
+  const copy = element("div", "dealerkit-wix-preview__write-copy");
+  copy.append(
+    element("strong", "", "Controlled Wix update"),
+    element("p", "", `This first live-write gate can update price and monthly fields on ${preview.writeTargets?.length ?? 0} existing Van Finance Wix row(s). It cannot create vehicles, add/remove categories, change images or touch Rent2Buy.`),
+  );
+  gate.appendChild(copy);
+
+  const confirm = element("div", "dealerkit-wix-preview__confirm");
+  const label = document.createElement("label");
+  label.textContent = `Type ${preview.registration} to unlock this update`;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.placeholder = preview.registration;
+  input.setAttribute("aria-label", `Type ${preview.registration} to confirm the Wix update`);
+  const applyButton = element("button", "dealerkit-wix-preview__apply", "Apply reviewed Wix update");
+  applyButton.type = "button";
+  applyButton.disabled = true;
+  label.appendChild(input);
+  confirm.append(label, applyButton);
+  gate.appendChild(confirm);
+
+  input.addEventListener("input", () => {
+    applyButton.disabled = normaliseRegistration(input.value) !== preview.registration;
+  });
+
+  applyButton.addEventListener("click", async () => {
+    const typedRegistration = normaliseRegistration(input.value);
+    if (typedRegistration !== preview.registration) return;
+    const approved = window.confirm(
+      `Update the existing Van Finance Wix price fields for ${preview.registration}?\n\nThis will NOT create/delete vehicles, change categories, change images or touch Rent2Buy.`,
+    );
+    if (!approved) return;
+
+    applyButton.disabled = true;
+    input.disabled = true;
+    applyButton.textContent = "Applying guarded update…";
+    const status = panel.querySelector("[data-dealerkit-wix-preview-status]");
+    if (status) {
+      status.textContent = "RECHECKING BEFORE WRITE";
+      status.classList.remove("is-good", "is-warning");
+    }
+
+    try {
+      const response = await fetch("/api/dealerkit-wix-publish", {
+        method: "POST",
+        headers: buildMarketingAccessHeaders({
+          accept: "application/json",
+          "content-type": "application/json",
+        }),
+        body: JSON.stringify({
+          action: "apply_existing_vfc_update",
+          registration: preview.registration,
+          confirmRegistration: typedRegistration,
+          confirmation: preview.confirmation,
+        }),
+      });
+      const payload = await parseMarketingJsonResponse(response, "Controlled Wix update failed.");
+      const success = element(
+        "div",
+        `dealerkit-wix-preview__write-result ${payload.verified ? "is-good" : "is-warning"}`,
+        payload.message || `Updated ${payload.recordsUpdated ?? 0} existing Wix row(s).`,
+      );
+      success.setAttribute("data-dealerkit-wix-write-result", "true");
+      gate.replaceWith(success);
+      if (status) {
+        status.textContent = payload.verified ? "WIX UPDATE VERIFIED" : "CHECK WIX RESULT";
+        status.classList.toggle("is-good", Boolean(payload.verified));
+        status.classList.toggle("is-warning", !payload.verified);
+      }
+    } catch (error) {
+      const errorBox = element("div", "dealerkit-wix-preview__write-result is-warning", error?.message || "Controlled Wix update failed. Nothing further was changed.");
+      errorBox.setAttribute("data-dealerkit-wix-write-result", "true");
+      gate.appendChild(errorBox);
+      input.disabled = false;
+      applyButton.disabled = normaliseRegistration(input.value) !== preview.registration;
+      applyButton.textContent = "Apply reviewed Wix update";
+      if (status) {
+        status.textContent = "UPDATE BLOCKED";
+        status.classList.add("is-warning");
+      }
+    }
+  });
+
+  result.appendChild(gate);
+}
+
 function renderResult(panel, payload) {
   const preview = payload?.preview || {};
   const result = panel.querySelector("[data-dealerkit-wix-preview-result]");
@@ -35,6 +131,7 @@ function renderResult(panel, payload) {
   if (!result || !status) return;
   result.replaceChildren();
 
+  panel._dealerKitWixPreview = preview;
   status.textContent = preview.canPublishLater ? "PREVIEW CLEAN" : "PUBLISH BLOCKED";
   status.classList.toggle("is-good", Boolean(preview.canPublishLater));
   status.classList.toggle("is-warning", !preview.canPublishLater);
@@ -99,10 +196,12 @@ function renderResult(panel, payload) {
     "div",
     `dealerkit-wix-preview__verdict ${preview.canPublishLater ? "is-good" : "is-warning"}`,
     preview.canPublishLater
-      ? "This saved review is structurally ready for a future controlled Wix update. This preview still cannot write anything."
+      ? "The fresh source/review/Wix snapshot passed the safety gates. Existing VFC price rows can now be updated through the guarded control below; media, category membership and new-record publishing remain locked."
       : "Publishing remains locked. Resolve the blockers above, save the review again where required, then preview once more.",
   );
   result.appendChild(end);
+
+  if (preview.canPublishLater && preview.confirmation) renderWriteGate(panel, result, preview);
   result.hidden = false;
 }
 
@@ -116,11 +215,11 @@ function createPanel(registration) {
   copy.append(
     element("span", "dealerkit-wix-preview__eyebrow", "WIX · CONTROLLED PUBLISHING"),
     element("strong", "", "Preview Wix publish"),
-    element("p", "", "Reads the fresh DealerKit vehicle, your last saved review choices and every mapped Van Finance Wix collection. It does not create, update, delete or unpublish anything."),
+    element("p", "", "Reads the fresh DealerKit vehicle, your last saved review choices and every mapped Van Finance Wix collection. Previewing itself never creates, updates, deletes or unpublishes anything."),
   );
 
   const actions = element("div", "dealerkit-wix-preview__actions");
-  const status = element("span", "dealerkit-wix-preview__status", "PREVIEW ONLY");
+  const status = element("span", "dealerkit-wix-preview__status", "PREVIEW FIRST");
   status.setAttribute("data-dealerkit-wix-preview-status", "true");
   const button = element("button", "dealerkit-review__save", "Preview Wix publish");
   button.type = "button";
@@ -133,7 +232,7 @@ function createPanel(registration) {
   panel.append(top, result);
 
   button.addEventListener("click", async () => {
-    const currentRegistration = clean(panel.dataset.registration).replace(/[^A-Z0-9]/gi, "").toUpperCase();
+    const currentRegistration = normaliseRegistration(panel.dataset.registration);
     if (!currentRegistration) return;
     button.disabled = true;
     button.textContent = "Building preview…";
@@ -169,7 +268,7 @@ function installPanel() {
   const body = workspace.querySelector("[data-dealerkit-review-body]");
   const title = workspace.querySelector("[data-dealerkit-review-title]");
   if (!body || !title) return;
-  const registration = clean(title.textContent).replace(/[^A-Z0-9]/gi, "").toUpperCase();
+  const registration = normaliseRegistration(title.textContent);
   if (!registration || registration.length < 5 || registration.length > 8) return;
 
   let panel = body.querySelector(`[${PANEL_ATTRIBUTE}]`);
@@ -178,8 +277,19 @@ function installPanel() {
     const decisions = body.querySelector(".dealerkit-review__decisions");
     if (decisions) decisions.insertAdjacentElement("afterend", panel);
     else body.appendChild(panel);
-  } else {
+  } else if (panel.dataset.registration !== registration) {
     panel.dataset.registration = registration;
+    panel._dealerKitWixPreview = null;
+    const result = panel.querySelector("[data-dealerkit-wix-preview-result]");
+    const status = panel.querySelector("[data-dealerkit-wix-preview-status]");
+    if (result) {
+      result.hidden = true;
+      result.replaceChildren();
+    }
+    if (status) {
+      status.textContent = "PREVIEW FIRST";
+      status.classList.remove("is-good", "is-warning");
+    }
   }
 }
 
