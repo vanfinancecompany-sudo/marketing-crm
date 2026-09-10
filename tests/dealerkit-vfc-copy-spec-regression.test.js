@@ -59,6 +59,7 @@ test("new VFC spec text preserves the established Engine, Euro, CO2 and MPG labe
   assert.match(text, /EURO STATUS: EURO 6/);
   assert.match(text, /CO2 EMISSIONS: 180 G\/KM/);
   assert.match(text, /COMBINED MPG: 40\.4/);
+  assert.match(text, /(?:^|\n)MPG: 40\.4(?:\n|$)/);
   assert.match(text, /BHP: 128/);
 });
 
@@ -69,5 +70,6 @@ test("Euro status may be taken from the DealerKit derivative/title but MPG is ne
   assert.match(text, /ENGINE SIZE: 1997 CC/);
   assert.match(text, /EURO STATUS: EURO 6/);
   assert.doesNotMatch(text, /COMBINED MPG:/);
+  assert.doesNotMatch(text, /(?:^|\n)MPG:/);
   assert.doesNotMatch(text, /CO2 EMISSIONS:/);
 });
