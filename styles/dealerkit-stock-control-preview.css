@@ -1,0 +1,140 @@
+.dealerkit-source-preview {
+  margin: 16px 0 6px;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(255, 255, 255, 0.98) 100%);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+}
+
+.dealerkit-source-preview__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.dealerkit-source-preview__copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dealerkit-source-preview__copy > strong {
+  font-size: 16px;
+  color: #0f172a;
+}
+
+.dealerkit-source-preview__copy > span:last-child {
+  font-size: 13px;
+  line-height: 1.45;
+  color: #475569;
+  max-width: 860px;
+}
+
+.dealerkit-source-preview__eyebrow {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  color: #b91c1c;
+}
+
+.dealerkit-source-preview__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.dealerkit-source-preview__badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+.dealerkit-source-preview__badge.is-good {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.dealerkit-source-preview__badge.is-warning {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.dealerkit-source-preview__button {
+  white-space: nowrap;
+}
+
+.dealerkit-source-preview__grid {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dealerkit-source-preview__grid[hidden] {
+  display: none;
+}
+
+.dealerkit-source-preview__stat {
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  display: grid;
+  gap: 2px;
+}
+
+.dealerkit-source-preview__stat span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.dealerkit-source-preview__stat strong {
+  color: #0f172a;
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+@media (max-width: 1100px) {
+  .dealerkit-source-preview__grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .dealerkit-source-preview {
+    padding: 13px;
+    border-radius: 15px;
+  }
+
+  .dealerkit-source-preview__top {
+    display: grid;
+  }
+
+  .dealerkit-source-preview__actions {
+    justify-content: flex-start;
+  }
+
+  .dealerkit-source-preview__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
