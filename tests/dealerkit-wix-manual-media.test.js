@@ -108,7 +108,7 @@ test("manual media API preserves the access-first and media-only boundary", asyn
   assert.match(source, /cmsWritesAttempted:\s*false/);
   assert.match(source, /categoryWritesAttempted:\s*false/);
   assert.match(source, /fetchDealerKitStockDetail/);
-  assert.match(source, /get-file-by-id/);
+  assert.match(source, /WIX_MEDIA_GET_FILE_URL/);
   assert.doesNotMatch(source, /wix-data\/v2\/items\/(insert|update|remove)/i);
 });
 
