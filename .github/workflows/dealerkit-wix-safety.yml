@@ -24,6 +24,6 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Run DealerKit Wix safety tests
-        run: node --test tests/dealerkit-wix-create-plan.test.js tests/dealerkit-wix-publish-preview.test.js
+        run: node --test tests/dealerkit-wix-*.test.js
       - name: Build
         run: npm run build
