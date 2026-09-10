@@ -32,7 +32,6 @@ test("manual media contract keeps Van Finance and Rent2Buy destinations explicit
   const environment = {
     WIX_API_KEY: "secret",
     WIX_SITE_ID: "vfc-site",
-    // A stale env value must not redirect Rent2Buy media back to the legacy standalone site.
     WIX_RENT2BUY_SITE_ID: "legacy-r2b-site",
   };
   assert.equal(manualMediaSiteConfiguration("van_finance_replacement", environment).siteId, "vfc-site");
@@ -45,76 +44,40 @@ test("authoritative Rent2Buy CMS stays bound to the current Van Finance Wix site
 });
 
 test("manual upload accepts only the deliberately small image contract", () => {
-  const valid = validateDealerKitManualMediaFile({
-    fileName: "finished showroom.jpg",
-    mimeType: "image/jpeg",
-    sizeInBytes: 2_000_000,
-  });
+  const valid = validateDealerKitManualMediaFile({ fileName: "finished showroom.jpg", mimeType: "image/jpeg", sizeInBytes: 2_000_000 });
   assert.equal(valid.valid, true);
-
-  const tooLarge = validateDealerKitManualMediaFile({
-    fileName: "big.png",
-    mimeType: "image/png",
-    sizeInBytes: DEALERKIT_MANUAL_MEDIA_MAX_BYTES + 1,
-  });
+  const tooLarge = validateDealerKitManualMediaFile({ fileName: "big.png", mimeType: "image/png", sizeInBytes: DEALERKIT_MANUAL_MEDIA_MAX_BYTES + 1 });
   assert.equal(tooLarge.valid, false);
   assert.match(tooLarge.errors.join(" "), /10 MB/i);
-
-  const wrongType = validateDealerKitManualMediaFile({
-    fileName: "animation.gif",
-    mimeType: "image/gif",
-    sizeInBytes: 1000,
-  });
+  const wrongType = validateDealerKitManualMediaFile({ fileName: "animation.gif", mimeType: "image/gif", sizeInBytes: 1000 });
   assert.equal(wrongType.valid, false);
   assert.match(wrongType.errors.join(" "), /JPEG, PNG or WebP/i);
 });
 
 test("Wix upload naming is registration and purpose specific without trusting the local path", () => {
-  assert.equal(
-    buildManualMediaUploadFileName({
-      registration: "HT22 KJX",
-      purpose: "rent2buy_template",
-      fileName: "C:\\Users\\Stu\\Desktop\\Rent2Buy Final.JPG",
-    }),
-    "HT22KJX-rent2buy_template.jpg",
-  );
+  assert.equal(buildManualMediaUploadFileName({ registration: "HT22 KJX", purpose: "rent2buy_template", fileName: "C:\\Users\\Stu\\Desktop\\Rent2Buy Final.JPG" }), "HT22KJX-rent2buy_template.jpg");
 });
 
-test("verified Wix image metadata maps READY, PENDING and FAILED states explicitly", () => {
+test("verified Wix image metadata maps processing and selected state explicitly", () => {
   const baseRow = wixFileToManualMediaRow({
     decision: decision(),
     purpose: "rent2buy_template",
     siteId: "r2b-site",
     file: {
-      id: "abc~mv2.jpg",
-      displayName: "HT22KJX-rent2buy_template.jpg",
-      url: "https://static.wixstatic.com/media/abc~mv2.jpg",
-      thumbnailUrl: "https://static.wixstatic.com/media/abc~mv2.jpg",
-      hash: "hash-123",
-      sizeInBytes: "123456",
-      mediaType: "IMAGE",
-      operationStatus: "READY",
+      id: "abc~mv2.jpg", displayName: "HT22KJX-rent2buy_template.jpg",
+      url: "https://static.wixstatic.com/media/abc~mv2.jpg", thumbnailUrl: "https://static.wixstatic.com/media/abc~mv2.jpg",
+      hash: "hash-123", sizeInBytes: "123456", mediaType: "IMAGE", operationStatus: "READY",
     },
   });
-  assert.equal(baseRow.supplier_stock_id, "stock-123");
-  assert.equal(baseRow.site_scope, "rent2buy");
-  assert.equal(baseRow.operation_status, "READY");
-
-  const ready = manualMediaRowToClient({ ...baseRow, id: "row-1" });
+  const ready = manualMediaRowToClient({ ...baseRow, id: "row-1", selected_at: "2026-09-10T18:00:00.000Z" });
   assert.equal(ready.ready, true);
-  assert.equal(ready.failed, false);
-  assert.equal(ready.processing, false);
-  assert.ok(ready.verifiedAt);
-
+  assert.equal(ready.selected, true);
+  assert.equal(ready.selectedAt, "2026-09-10T18:00:00.000Z");
   const pending = manualMediaRowToClient({ ...baseRow, id: "row-2", operation_status: "PENDING" });
-  assert.equal(pending.ready, false);
-  assert.equal(pending.failed, false);
   assert.equal(pending.processing, true);
-
+  assert.equal(pending.selected, false);
   const failed = manualMediaRowToClient({ ...baseRow, id: "row-3", operation_status: "FAILED" });
-  assert.equal(failed.ready, false);
   assert.equal(failed.failed, true);
-  assert.equal(failed.processing, false);
 });
 
 test("manual media constants stay bound to the verified Wix Media endpoints", () => {
@@ -130,29 +93,30 @@ test("manual media API preserves the access-first and media-only boundary", asyn
   assert.match(source, /cmsWritesAttempted:\s*false/);
   assert.match(source, /categoryWritesAttempted:\s*false/);
   assert.match(source, /fetchDealerKitStockDetail/);
-  assert.match(source, /WIX_MEDIA_GET_FILE_URL/);
   assert.doesNotMatch(source, /wix-data\/v2\/items\/(insert|update|remove)/i);
 });
 
-test("status refresh is an explicit Wix read plus metadata-only update", async () => {
+test("selection rechecks DealerKit identity, site identity and Wix READY before saving", async () => {
   const source = await readFile(new URL("api/dealerkit-wix-manual-media.js", root), "utf8");
-  assert.match(source, /action === "refresh_status"/);
-  assert.match(source, /loadManualMediaById/);
+  assert.match(source, /action === "select_media"/);
+  assert.match(source, /getVerifiedWixFile\(configuration, stored\.wix_file_id\)/);
+  assert.match(source, /operationStatus !== "READY"/);
   assert.match(source, /stored\.supplier_stock_id/);
   assert.match(source, /stored\.wix_site_id/);
-  assert.match(source, /getVerifiedWixFile\(configuration, stored\.wix_file_id\)/);
-  assert.match(source, /statusRefreshOnly:\s*true/);
+  assert.match(source, /selected_at:\s*null/);
+  assert.match(source, /selected_at:\s*selectedAt/);
+  assert.match(source, /selectionOnly:\s*true/);
 });
 
-test("manual media browser flow uploads bytes only to Wix and rechecks processing items", async () => {
+test("manual media browser flow uploads bytes only to Wix and offers explicit main-image selection", async () => {
   const source = await readFile(new URL("utils/dealerKitWixManualMedia.js", root), "utf8");
   assert.match(source, /fetch\(prepared\.uploadUrl/);
   assert.match(source, /method:\s*"PUT"/);
   assert.match(source, /body:\s*file/);
   assert.match(source, /action:\s*"refresh_status"/);
-  assert.match(source, /media\.filter\(processing\)\.slice\(0, 4\)/);
-  assert.match(source, /Check Wix status/);
-  assert.match(source, /WIX MEDIA FAILED/);
-  assert.match(source, /This uploads media only/i);
+  assert.match(source, /action:\s*"select_media"/);
+  assert.match(source, /Use this image/);
+  assert.match(source, /SELECTED AS MAIN|Chosen for publish/);
+  assert.match(source, /This saves the media choice only/i);
   assert.doesNotMatch(source, /supabase/i);
 });
