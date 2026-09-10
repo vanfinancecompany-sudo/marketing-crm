@@ -9,7 +9,7 @@ const clean = (value, limit = 3000) => String(value ?? "").trim().slice(0, limit
 
 export function rent2BuyCategoriesFromReview(decision = {}) {
   return normalizeRent2BuyCategories(
-    (Array.isArray(decision.financeCategories) ? decision.financeCategories : [])
+    (Array.isArray(decision.rent2buyCategories) ? decision.rent2buyCategories : [])
       .filter((key) => key !== "nine_seater"),
   );
 }

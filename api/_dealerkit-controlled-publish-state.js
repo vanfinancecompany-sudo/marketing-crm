@@ -108,7 +108,7 @@ function allRent2BuyCollectionIds() {
   return Array.from(new Set([...Object.values(RENT2BUY_CATEGORY_COLLECTIONS), "VANPAGES"]));
 }
 
-export async function buildFreshControlledPublishState(registrationInput, environment = process.env) {
+export async function buildFreshControlledPublishState(registrationInput, environment = process.env, { productMode } = {}) {
   const registration = normalizeFinanceRegistration(registrationInput || "");
   if (!registration) throw new ControlledPublishError(400, "A valid registration is required.");
   const supabase = getSupabaseServiceAdmin();
@@ -123,9 +123,15 @@ export async function buildFreshControlledPublishState(registrationInput, enviro
     Promise.all(VAN_FINANCE_WIX_COLLECTIONS.map((collection) => queryRegistration(configuration, collection.id, registration, collection))),
     Promise.all(allRent2BuyCollectionIds().map((collectionId) => queryRegistration(configuration, collectionId, registration))),
   ]);
-  const imageSets = buildProductImageSets({ vehicle, decision, importedDealerKitMedia, manualMediaReadiness });
-  const plan = buildControlledVehiclePublishPlan({ vehicle, decision, imageSets, vfcWixResults, rent2buyWixResults });
+  const effectiveDecision = {
+    ...decision,
+    ...(productMode === "finance" ? { financeEnabled: true, rent2buyEnabled: false } : {}),
+    ...(productMode === "rent2buy" ? { financeEnabled: false, rent2buyEnabled: true } : {}),
+    ...(productMode === "both" ? { financeEnabled: true, rent2buyEnabled: true } : {}),
+  };
+  const imageSets = buildProductImageSets({ vehicle, decision: effectiveDecision, importedDealerKitMedia, manualMediaReadiness });
+  const plan = buildControlledVehiclePublishPlan({ vehicle, decision: effectiveDecision, imageSets, vfcWixResults, rent2buyWixResults, productMode });
   plan.confirmation = buildControlledPublishConfirmation(plan);
 
-  return { registration, supabase, configuration, decision, vehicle, manualMediaReadiness, importedDealerKitMedia, imageSets, vfcWixResults, rent2buyWixResults, plan };
+  return { registration, supabase, configuration, decision: effectiveDecision, vehicle, manualMediaReadiness, importedDealerKitMedia, imageSets, vfcWixResults, rent2buyWixResults, plan };
 }

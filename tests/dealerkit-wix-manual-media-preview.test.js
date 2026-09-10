@@ -60,11 +60,12 @@ test("publish preview rechecks staged media live and keeps it informational", as
   assert.match(source, /preview\.manualMediaReadiness\s*=\s*manualMediaReadiness/);
 });
 
-test("browser preview names the selected main-image relationship clearly", async () => {
+test("product gallery shows uploaded media in-place and labels the selected primary", async () => {
   const main = await readFile(new URL("main.jsx", root), "utf8");
-  const renderer = await readFile(new URL("utils/dealerKitWixManualMediaPreview.js", root), "utf8");
-  assert.match(main, /dealerKitWixManualMediaPreview\.js/);
-  assert.match(renderer, /SELECTED AS MAIN/);
-  assert.match(renderer, /listing image/i);
-  assert.match(renderer, /selected image is no longer safely usable/i);
+  const renderer = await readFile(new URL("utils/dealerKitProductGalleryWorkspace.js", root), "utf8");
+  assert.match(main, /dealerKitProductGalleryWorkspace\.js/);
+  assert.match(renderer, /PRODUCT PRIMARY/);
+  assert.match(renderer, /Set as primary/);
+  assert.match(renderer, /manualHost\.appendChild\(manualCard/);
+  assert.match(renderer, /Other product galleries are not changed/);
 });

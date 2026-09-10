@@ -18,9 +18,6 @@ import "./utils/stockControlCentreUi.js";
 import "./utils/dealerKitOriginalStockControls.js";
 import "./utils/dealerKitReviewWorkspace.js";
 import "./utils/dealerKitProductGalleryWorkspace.js";
-import "./utils/dealerKitMissingStockReviewBridge.js";
-import "./utils/dealerKitWixPublishPreview.js";
-import "./utils/dealerKitWixManualMediaPreview.js";
 import "./utils/dealerKitControlledPublish.js";
 
 const ACTIVE_INTEGRATIONS = Object.freeze({

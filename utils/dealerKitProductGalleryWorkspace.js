@@ -6,6 +6,7 @@ import {
   decodeDealerKitProductImageState,
   encodeDealerKitProductImageState,
 } from "../lib/dealerKitProductImageState.js";
+import { calculateRent2BuyPricing } from "../lib/dealerKitRent2BuyPlan.js";
 import "../styles/dealerkit-product-gallery-workspace.css";
 
 const WORKSPACE_SELECTOR = "[data-dealerkit-review-workspace]";
@@ -156,34 +157,26 @@ function hideLegacyImageUi(workspace, body) {
   });
 }
 
-function readCurrentReviewControls(body, fallback = {}) {
+function readCurrentReviewControls(body, fallback = {}, product = "finance") {
   const decisions = body.querySelector(".dealerkit-review__decisions");
   if (!decisions) return { ...fallback };
-
-  const status = decisions.querySelector("select")?.value || fallback.reviewStatus || "needs_review";
-  let financeEnabled = fallback.financeEnabled !== false;
-  let rent2buyEnabled = Boolean(fallback.rent2buyEnabled);
-  const financeRoute = decisions.querySelector('[data-dealerkit-product-route="finance"]');
-  const rent2buyRoute = decisions.querySelector('[data-dealerkit-product-route="rent2buy"]');
-  if (financeRoute) financeEnabled = financeRoute.checked;
-  if (rent2buyRoute) rent2buyEnabled = rent2buyRoute.checked;
-
-  const financeCategories = ["all_vans"];
+  const categories = ["all_vans"];
   for (const label of decisions.querySelectorAll(".dealerkit-review__category-grid .dealerkit-review__check")) {
     const input = label.querySelector('input[type="checkbox"]');
     if (!input?.checked) continue;
     const text = clean(label.textContent).replace(/\s*·\s*fixed\s*$/i, "");
-    const key = CATEGORY_KEYS[text];
-    if (key && !financeCategories.includes(key)) financeCategories.push(key);
+    const key = input.dataset.categoryKey || CATEGORY_KEYS[text];
+    if (key && !categories.includes(key)) categories.push(key);
   }
 
   const notes = decisions.querySelector(".dealerkit-review__notes textarea")?.value ?? fallback.notes ?? "";
   return {
     ...fallback,
-    reviewStatus: status,
-    financeEnabled,
-    financeCategories,
-    rent2buyEnabled,
+    reviewStatus: "reviewed",
+    financeEnabled: product === "finance" ? true : Boolean(fallback.financeEnabled),
+    financeCategories: product === "finance" ? categories : (fallback.financeCategories || []),
+    rent2buyEnabled: product === "rent2buy" ? true : Boolean(fallback.rent2buyEnabled),
+    rent2buyCategories: product === "rent2buy" ? categories : (fallback.rent2buyCategories || []),
     notes,
   };
 }
@@ -221,10 +214,17 @@ function renderPricing(state, product, host) {
       fact("Images selected", String(state.imageState.finance.includedOrderIds.length)),
     );
   } else {
+    const categories = readCurrentReviewControls(state.body, state.decision, "rent2buy").rent2buyCategories;
+    const calculated = calculateRent2BuyPricing({
+      retailPrice: vehicle.retailPrice,
+      mileage: vehicle.mileage,
+      categories,
+      vatStatus: vehicle.vatStatus,
+    });
     host.append(
-      fact("Current Rent2Buy monthly", local ? money(local.monthly) : "Not advertised"),
-      fact("Weekly", local ? money(local.week) : "–"),
-      fact("Initial rental", local ? money(local.initialRental) : "–"),
+      fact("Calculated monthly", calculated ? `${money(calculated.monthly)} p/m` : "Needs review"),
+      fact("Calculated upfront", calculated ? money(calculated.upfront) : "Needs review", calculated ? `${calculated.upfrontMonths} rentals upfront` : "Check price and mileage"),
+      fact("Term", calculated ? `${calculated.termMonths} months` : "Needs review", calculated ? `${calculated.upliftPercent}% structure` : "Exactly 42,000 miles is held"),
       fact("Images selected", String(state.imageState.rent2buy.includedOrderIds.length)),
     );
   }
@@ -516,7 +516,7 @@ function uploadPanel(state, product) {
 
 async function saveProductState(state) {
   const body = state.workspace.querySelector("[data-dealerkit-review-body]");
-  const liveReview = readCurrentReviewControls(body, state.decision);
+  const liveReview = readCurrentReviewControls(body, state.decision, state.activeProduct);
   const encoded = encodeDealerKitProductImageState(state.imageState);
   setMessage(state, "Saving review choices and both product galleries…");
   state.saving = true;
@@ -532,6 +532,7 @@ async function saveProductState(state) {
         financeEnabled: liveReview.financeEnabled !== false,
         financeCategories: liveReview.financeCategories || ["all_vans"],
         rent2buyEnabled: Boolean(liveReview.rent2buyEnabled),
+        rent2buyCategories: liveReview.rent2buyCategories || [],
         excludedImageIds: encoded.excludedImageIds,
         primaryImageId: encoded.primaryImageId,
         imageOrderIds: encoded.imageOrderIds,
@@ -543,7 +544,7 @@ async function saveProductState(state) {
     state.imageState = copyMutableImageState(decodeDealerKitProductImageState(state.decision, state.sourceIds));
     state.dirty = false;
     await loadManualMedia(state, { quiet: true });
-    setMessage(state, "Saved. Van Finance and Rent2Buy now keep their own image selection and order. Nothing has been published.", "good");
+    setMessage(state, `Saved for ${PRODUCTS[state.activeProduct].label}. Nothing has been published yet.`, "good");
     renderActiveProduct(state);
   } catch (error) {
     setMessage(state, error?.message || "Could not save product gallery choices.", "warning");
@@ -557,23 +558,13 @@ function renderSaveButton(state) {
   const button = state.root?.querySelector("[data-product-gallery-save]");
   if (!button) return;
   button.disabled = Boolean(state.saving);
-  button.textContent = state.saving ? "Saving…" : (state.dirty ? "Save gallery changes" : "Save review & galleries");
+  button.textContent = state.saving ? "Saving…" : "Save";
 }
 
 function renderActiveProduct(state) {
   if (!state.root) return;
   const product = state.activeProduct;
   const config = PRODUCTS[product];
-  const liveReview = readCurrentReviewControls(state.body, state.decision);
-  state.root.querySelectorAll("[data-product-tab]").forEach((button) => {
-    const active = button.dataset.productTab === product;
-    const enabled = button.dataset.productTab === "finance"
-      ? liveReview.financeEnabled !== false
-      : Boolean(liveReview.rent2buyEnabled);
-    button.textContent = `${PRODUCTS[button.dataset.productTab].label} · ${enabled ? "PREPARING" : "NOT SELECTED"}`;
-    button.classList.toggle("is-active", active);
-    button.setAttribute("aria-selected", active ? "true" : "false");
-  });
 
   const title = state.root.querySelector("[data-product-gallery-title]");
   if (title) title.textContent = `${config.label} images`;
@@ -624,36 +615,16 @@ function buildRoot(state) {
   const root = element("section", "dealerkit-product-gallery");
   root.setAttribute(ROOT_ATTRIBUTE, "true");
   root.dataset.registration = state.registration;
+  root.dataset.product = state.activeProduct;
 
   const top = element("div", "dealerkit-product-gallery__top");
   const heading = element("div", "dealerkit-product-gallery__heading");
   heading.append(
-    element("span", "dealerkit-product-gallery__eyebrow", "PRODUCT WORKSPACE"),
-    element("strong", "", "Choose where you are preparing this van"),
-    element("p", "", "Finance and Rent2Buy now have separate image selections and image order. Switching tabs never publishes anything."),
+    element("span", "dealerkit-product-gallery__eyebrow", `${PRODUCTS[state.activeProduct].label.toUpperCase()} WORKSPACE`),
+    element("strong", "", `${PRODUCTS[state.activeProduct].label} images`),
+    element("p", "", `These images belong only to ${PRODUCTS[state.activeProduct].label}. Other product galleries are not changed.`),
   );
-  const tabs = element("div", "dealerkit-product-gallery__tabs");
-  tabs.setAttribute("role", "tablist");
-  for (const [key, config] of Object.entries(PRODUCTS)) {
-    const enabled = key === "finance" ? state.decision.financeEnabled !== false : Boolean(state.decision.rent2buyEnabled);
-    const button = element("button", "dealerkit-product-gallery__tab", `${config.label} · ${enabled ? "PREPARING" : "NOT SELECTED"}`);
-    button.type = "button";
-    button.dataset.productTab = key;
-    button.setAttribute("role", "tab");
-    button.addEventListener("click", () => {
-      state.activeProduct = key;
-      renderActiveProduct(state);
-    });
-    tabs.appendChild(button);
-  }
-  state.body.querySelectorAll("[data-dealerkit-product-route]").forEach((input) => {
-    input.addEventListener("change", () => {
-      state.decision = { ...state.decision, ...readCurrentReviewControls(state.body, state.decision) };
-      markDirty(state, "Product routing changed. Save the review and galleries to keep this choice.");
-      renderActiveProduct(state);
-    });
-  });
-  top.append(heading, tabs);
+  top.append(heading);
 
   const pricing = element("div", "dealerkit-product-gallery__pricing");
   pricing.setAttribute("data-product-gallery-pricing", "true");
@@ -683,9 +654,9 @@ function buildRoot(state) {
   source.setAttribute("data-product-gallery-source", "true");
 
   const footer = element("div", "dealerkit-product-gallery__footer");
-  const message = element("div", "dealerkit-product-gallery__message", "Nothing here publishes a vehicle. Save stores review and gallery choices only.");
+  const message = element("div", "dealerkit-product-gallery__message", "Save stores this review and gallery. Prepare and Publish remain separate steps below.");
   message.setAttribute("data-product-gallery-message", "true");
-  const save = element("button", "dealerkit-product-gallery__save", "Save review & galleries");
+  const save = element("button", "dealerkit-product-gallery__save", "Save");
   save.type = "button";
   save.setAttribute("data-product-gallery-save", "true");
   save.addEventListener("click", () => saveProductState(state));
@@ -702,13 +673,14 @@ async function initialiseWorkspace(workspace, body, registration) {
   const loading = element("section", "dealerkit-product-gallery is-loading", "Loading separate Van Finance and Rent2Buy galleries…");
   loading.setAttribute(ROOT_ATTRIBUTE, "true");
   loading.dataset.registration = registration;
+  loading.dataset.product = workspace.dataset.product === "rent2buy" ? "rent2buy" : "finance";
   const hero = body.querySelector(".dealerkit-review__hero");
   if (hero) hero.insertAdjacentElement("afterend", loading);
   else body.prepend(loading);
 
   try {
     const payload = await apiJson(
-      `/api/dealerkit-stock-detail?registration=${encodeURIComponent(registration)}`,
+      `/api/dealerkit-stock-detail?registration=${encodeURIComponent(registration)}&product=${encodeURIComponent(workspace.dataset.product || "finance")}`,
       {},
       "Could not load product gallery workspace.",
     );
@@ -728,7 +700,7 @@ async function initialiseWorkspace(workspace, body, registration) {
       imageState: copyMutableImageState(decodeDealerKitProductImageState(decision, sourceIds)),
       manualMedia: [],
       pendingUploads: { finance: null, rent2buy: null },
-      activeProduct: "finance",
+      activeProduct: workspace.dataset.product === "rent2buy" ? "rent2buy" : "finance",
       dirty: false,
       saving: false,
       uploading: false,
@@ -763,8 +735,9 @@ function scan() {
 
     hideLegacyImageUi(workspace, body);
     const current = body.querySelector(`[${ROOT_ATTRIBUTE}]`);
-    if (current?.dataset.registration === registration && !current.classList.contains("is-loading")) return;
-    if (current?.dataset.registration === registration && current.classList.contains("is-loading")) return;
+    const product = workspace.dataset.product === "rent2buy" ? "rent2buy" : "finance";
+    if (current?.dataset.registration === registration && current.dataset.product === product && !current.classList.contains("is-loading")) return;
+    if (current?.dataset.registration === registration && current.dataset.product === product && current.classList.contains("is-loading")) return;
     initialiseWorkspace(workspace, body, registration);
   } finally {
     renderingScan = false;
@@ -784,6 +757,13 @@ if (typeof document !== "undefined") {
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", scheduleScan, { once: true });
   else scheduleScan();
   window.addEventListener("popstate", scheduleScan);
+  window.addEventListener("dealerkit-review-categories-changed", () => {
+    const state = document.querySelector(WORKSPACE_SELECTOR)?._dealerKitProductGalleryState;
+    if (state) {
+      markDirty(state, "Category changes not saved yet.");
+      renderActiveProduct(state);
+    }
+  });
   const observer = new MutationObserver(scheduleScan);
   observer.observe(document.documentElement, { childList: true, subtree: true });
 }

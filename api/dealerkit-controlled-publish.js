@@ -79,7 +79,8 @@ export default async function handler(request, response) {
   let state = null;
   const created = [];
   try {
-    state = await buildFreshControlledPublishState(registration);
+    const productMode = ["finance", "rent2buy", "both"].includes(clean(request.body?.productMode, 30)) ? clean(request.body.productMode, 30) : undefined;
+    state = await buildFreshControlledPublishState(registration, process.env, { productMode });
     if (!state.plan.canPublish) throw new ControlledPublishError(409, "The fresh DealerKit/Wix state is not safe for new-vehicle publishing.", { blockers: state.plan.blockers });
     if (!controlledPublishConfirmationMatches(request.body?.confirmation, state.plan)) throw new ControlledPublishError(409, "The publish preview is stale. Rebuild the final preview before publishing.");
 

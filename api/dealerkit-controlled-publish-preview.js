@@ -18,7 +18,8 @@ export default async function handler(request, response) {
 
   try {
     const registration = normalizeFinanceRegistration(request.query?.registration || "");
-    const state = await buildFreshControlledPublishState(registration);
+    const productMode = ["finance", "rent2buy", "both"].includes(clean(request.query?.product, 30)) ? clean(request.query.product, 30) : undefined;
+    const state = await buildFreshControlledPublishState(registration, process.env, { productMode });
     response.status(200).json({
       ok: true,
       readOnly: true,

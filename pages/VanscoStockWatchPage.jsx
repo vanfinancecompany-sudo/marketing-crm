@@ -20,9 +20,9 @@ import {
 const DEFAULT_FILTERS = { finance: "missing", rent2buy: "missing", cars: "missing" };
 const BASE_FILTERS = [
   { value: "missing", label: "Missing from my stock" },
-  { value: "local_not_vansco", label: "My stock not on Vansco" },
+  { value: "local_not_vansco", label: "My stock not on DealerKit" },
   { value: "advertised", label: "Advertised / Awaiting refresh" },
-  { value: "reserved", label: "Reserved on Vansco" },
+  { value: "reserved", label: "Reserved on DealerKit" },
   { value: "back_in_stock", label: "Back in stock / Review hidden" },
   { value: "hidden", label: "Hidden" },
   { value: "never", label: "Never show again" },
@@ -239,10 +239,10 @@ function SourceStatusBadge({ status }) {
 
 function displayStatusLabel(status) {
   switch (status) {
-    case "local_not_vansco": return "My stock not on Vansco";
+    case "local_not_vansco": return "My stock not on DealerKit";
     case "price_difference": return "Price difference";
     case "advertised": return "Advertised / Awaiting refresh";
-    case "reserved": return "Reserved on Vansco";
+    case "reserved": return "Reserved on DealerKit";
     case "back_in_stock": return "Back in stock / Review hidden";
     case "hidden": return "Hidden";
     case "never": return "Never show again";
@@ -269,12 +269,12 @@ function PriceDifferenceCard({ record }) {
         <h3>{record.localTitle || record.title || "Untitled vehicle"}</h3>
         <div className="vehicle-card__meta">Registration: {record.registration}</div>
         <div className="vehicle-card__meta"><strong>Wix/Finance price:</strong> {record.localPriceText}</div>
-        <div className="vehicle-card__meta"><strong>Vansco price:</strong> {record.advertisedPriceText || formatPrice(record.advertisedPrice)}</div>
-        <div className="vehicle-card__meta"><strong>{record.vanscoIsLower ? "Vansco is lower by" : "Vansco is higher by"}:</strong> {formatPrice(record.priceDifference)}</div>
+        <div className="vehicle-card__meta"><strong>DealerKit price:</strong> {record.advertisedPriceText || formatPrice(record.advertisedPrice)}</div>
+        <div className="vehicle-card__meta"><strong>{record.vanscoIsLower ? "DealerKit is lower by" : "DealerKit is higher by"}:</strong> {formatPrice(record.priceDifference)}</div>
         <div className="vehicle-card__meta">VAT basis matched: {record.vatStatus === "plus_vat" ? "+ VAT" : record.vatStatus === "no_vat" ? "NO VAT" : "VAT included"}</div>
         <div className="card-actions">
           {record.localStockUrl ? <a className="button button--ghost" href={record.localStockUrl} target="_blank" rel="noreferrer">Open my stock page</a> : null}
-          <a className="button button--ghost" href={record.stockUrl || "#"} target="_blank" rel="noreferrer">Open Vansco Page</a>
+          <a className="button button--ghost" href={record.stockUrl || "#"} target="_blank" rel="noreferrer">Open DealerKit vehicle</a>
         </div>
       </div>
     </article>
@@ -310,6 +310,20 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
   const isHiddenOrNever = isTemporaryHiddenStatus(status) || isNeverShowStatus(status);
   const isAdvertised = isAdvertisedStatus(status) || record.displayStatus === "advertised";
   const isLocalNotVansco = record.displayStatus === "local_not_vansco";
+  const canReviewDealerKit = !isLocalNotVansco
+    && record.displayStatus === "missing"
+    && (selectedPipeline === "finance" || selectedPipeline === "rent2buy")
+    && Boolean(record.registration && record.supplierStockId);
+
+  function openDealerKitReview() {
+    window.dispatchEvent(new CustomEvent("dealerkit-open-product-review", {
+      detail: {
+        registration: record.registration,
+        supplierStockId: record.supplierStockId,
+        product: selectedPipeline,
+      },
+    }));
+  }
 
   return (
     <article className="vansco-card">
@@ -328,13 +342,14 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
         {!isLocalNotVansco && (isHiddenOrNever || isAdvertised) ? <div className="vehicle-card__meta">Current status: {workflowLabel(status)}</div> : null}
         {!isLocalNotVansco ? <label className="field"><span className="field__label">Notes</span><textarea className="field__input field__textarea" rows="3" value={notesDraft} onChange={(event) => setNotesDraft(event.target.value)} placeholder="Optional notes for this stock check" /></label> : null}
         <div className="card-actions">
+          {canReviewDealerKit ? <button className="button button--primary" type="button" onClick={openDealerKitReview}>Review vehicle</button> : null}
           {isLocalNotVansco && record.localStockUrl ? <a className="button button--ghost" href={record.localStockUrl} target="_blank" rel="noreferrer">Open my stock page</a> : null}
-          {!isLocalNotVansco ? <a className="button button--ghost" href={record.stockUrl || "#"} target="_blank" rel="noreferrer">Open Vansco Page</a> : null}
+          {!isLocalNotVansco ? <a className="button button--ghost" href={record.stockUrl || "#"} target="_blank" rel="noreferrer">Open DealerKit vehicle</a> : null}
           {!isLocalNotVansco && (isAdvertised ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("new", "Unmarked")} disabled={Boolean(savingAction)}>{savingAction === "new" ? "Unmarking..." : "Unmark advertised"}</button> : isHiddenOrNever ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("new", "Unhidden")} disabled={Boolean(savingAction)}>{savingAction === "new" ? "Unhiding..." : "Unhide"}</button> : <button className="button button--ghost" type="button" onClick={() => saveWorkflow("ignored", "Hidden")} disabled={Boolean(savingAction)}>{savingAction === "ignored" ? "Hiding..." : "Hide"}</button>)}
           {!isLocalNotVansco && record.displayStatus === "missing" ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("added_to_crm", "Marked as advertised")} disabled={Boolean(savingAction)}>{savingAction === "added_to_crm" ? "Marking..." : "Mark as advertised"}</button> : null}
           {!isLocalNotVansco && !isNeverShowStatus(status) ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("never_show_again", "Moved to Never show again")} disabled={Boolean(savingAction)}>{savingAction === "never_show_again" ? "Saving..." : "Never show again"}</button> : null}
         </div>
-        {record.displayStatus === "back_in_stock" ? <div className="vehicle-card__meta">This was hidden before, but Vansco now shows it as available/unknown again.</div> : null}
+        {record.displayStatus === "back_in_stock" ? <div className="vehicle-card__meta">This was hidden before, but DealerKit now shows it as available again.</div> : null}
         {record.displayStatus === "advertised" && record.financeStockMatchForCars ? <div className="vehicle-card__meta">Advisory only: counted as advertised for the Cars tab because the registration is active in Van Finance stock.</div> : null}
         {record.displayStatus === "advertised" && !record.financeStockMatchForCars ? <div className="vehicle-card__meta">You marked this as advertised during the day. Overnight refresh should remove it automatically once the registration is found in this CRM stock tab.</div> : null}
         {isLocalNotVansco ? <div className="vehicle-card__meta">Advisory only: check whether this van has sold or needs removing from your website stock.</div> : null}
@@ -545,25 +560,25 @@ export default function VanscoStockWatchPage() {
   return (
     <div className="page-stack">
       <section className="panel hero-panel vansco-watch-panel">
-        <div className="panel__header"><div><h3>Vansco Stock Watch</h3><p>Advisory-only comparison by registration. It never auto-adds, removes, posts, publishes, or edits stock.</p></div><div className="card-actions"><button className="button button--primary" type="button" onClick={handleRefreshCache} disabled={refreshingCache}>{refreshingCache ? "Refreshing cache..." : "Refresh Vansco cache"}</button><button className="button button--ghost" type="button" onClick={handleReloadComparison} disabled={reloadComparisonRunning || loadingPipeline === selectedPipeline}>{reloadComparisonRunning ? "Refreshing comparison..." : "Reload comparison"}</button></div></div>
+        <div className="panel__header"><div><h3>DealerKit Stock Watch</h3><p>Finance Vans, Rent2Buy Vans and Cars stay as separate working lanes. DealerKit supplies the stock underneath them.</p></div><div className="card-actions"><button className="button button--primary" type="button" onClick={handleRefreshCache} disabled={refreshingCache}>{refreshingCache ? "Refreshing dealer stock..." : "Refresh Dealer Stock"}</button><button className="button button--ghost" type="button" onClick={handleReloadComparison} disabled={reloadComparisonRunning || loadingPipeline === selectedPipeline}>{reloadComparisonRunning ? "Refreshing comparison..." : "Refresh comparison"}</button></div></div>
         {reloadComparisonStatus ? <div className="vansco-watch-note vansco-watch-note--warning"><strong>Reload comparison:</strong> {reloadComparisonStatus}{reloadComparisonRunning ? <div style={{ marginTop: "8px", height: "8px", borderRadius: "999px", background: "#e5e7eb", overflow: "hidden" }}><div style={{ width: `${reloadComparisonProgress}%`, height: "100%", borderRadius: "999px", background: "#2563eb", transition: "width 300ms ease" }} /></div> : null}</div> : null}
         <div className="segmented-control">{WATCH_PIPELINES.map((pipeline) => <button key={pipeline.value} className={selectedPipeline === pipeline.value ? "segment is-active" : "segment"} type="button" onClick={() => setSelectedPipeline(pipeline.value)}>{pipeline.label}</button>)}</div>
         <div className="stat-grid stat-grid--centered">
           <SummaryCard label={`Missing from ${pipelineLabel(selectedPipeline)}`} value={summary.missing} tone="blue" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "missing" }))} />
-          <SummaryCard label="My stock not on Vansco" value={summary.localNotVansco} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "local_not_vansco" }))} />
+          <SummaryCard label="My stock not on DealerKit" value={summary.localNotVansco} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "local_not_vansco" }))} />
           {selectedPipeline === "finance" ? <SummaryCard label="Price differences" value={summary.priceDifference} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, finance: "price_difference" }))} /> : null}
           <SummaryCard label="Advertised / Awaiting refresh" value={summary.advertised} tone="blue" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "advertised" }))} />
-          <SummaryCard label="Reserved on Vansco" value={summary.reserved} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "reserved" }))} />
+          <SummaryCard label="Reserved on DealerKit" value={summary.reserved} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "reserved" }))} />
           <SummaryCard label="Back in stock / Review hidden" value={summary.backInStock} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "back_in_stock" }))} />
           <SummaryCard label="Hidden" value={summary.hidden} onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "hidden" }))} />
           <SummaryCard label="Never show again" value={summary.never} onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "never" }))} />
           <SummaryCard label="Local CRM regs loaded" value={activeLocalRegistrations.size} />
         </div>
         {selectedPipeline === "finance" ? <div className="vansco-watch-note"><strong>Price differences:</strong> Van Finance only. It compares exact registration matches where both prices and VAT basis are clear. It never changes Wix or Vansco prices.</div> : null}
-        <div className="vansco-watch-note"><strong>Daytime workflow:</strong> when you advertise a Missing vehicle but the Vansco refresh cannot run until overnight, use <strong>Mark as advertised</strong>. It leaves Missing immediately and sits in Advertised / Awaiting refresh until the registration is found in this CRM stock tab.</div>
-        <div className="vansco-watch-note"><strong>My stock not on Vansco:</strong> this is the reverse registration-only check. It shows active vehicles in your CRM stock tab where the registration is not in the current Vansco cache, helping you spot sold/removed vans that may still be advertised by you.</div>
-        <div className="vansco-watch-note"><strong>Back in stock rule:</strong> hidden vehicles only appear there when Vansco is currently available/unknown, the vehicle is still on Vansco, and it is not already in this CRM stock tab. Use <strong>Never show again</strong> for vehicles you will not advertise so they do not inflate the review number.</div>
-        <div className="vansco-watch-note"><strong>Accuracy check:</strong> {pipelineLabel(selectedPipeline)} has {activeLocalRegistrations.size} local CRM registrations loaded.{cacheSummary ? ` Vansco cache for this tab has ${cacheSummary.currentPipelineUrlCount ?? "?"} current URLs and ${cacheSummary.usableCachedRegistrations ?? cacheSummary.cachedRegs ?? "?"} usable registrations.` : ""}{lastCheckedAt ? ` Latest detail check: ${formatWatchTimestamp(lastCheckedAt)}.` : ""}</div>
+        <div className="vansco-watch-note"><strong>Daytime workflow:</strong> when you advertise a Missing vehicle, use <strong>Mark as advertised</strong>. It leaves Missing immediately and remains in Advertised / Awaiting refresh until the registration appears in this CRM stock tab.</div>
+        <div className="vansco-watch-note"><strong>My stock not on DealerKit:</strong> this reverse registration check shows active CRM vehicles absent from the current DealerKit feed.</div>
+        <div className="vansco-watch-note"><strong>Back in stock rule:</strong> a hidden vehicle returns here when DealerKit shows it available again and it is not already in this CRM stock tab. Use <strong>Never show again</strong> for vehicles you will not advertise.</div>
+        <div className="vansco-watch-note"><strong>Accuracy check:</strong> {pipelineLabel(selectedPipeline)} has {activeLocalRegistrations.size} local CRM registrations loaded.{cacheSummary ? ` DealerKit supplied ${cacheSummary.currentPipelineUrlCount ?? "?"} correctly segmented records for this tab and ${cacheSummary.usableCachedRegistrations ?? cacheSummary.cachedRegs ?? "?"} usable registrations.` : ""}{lastCheckedAt ? ` Latest source check: ${formatWatchTimestamp(lastCheckedAt)}.` : ""}</div>
         {selectedPipeline === "cars" ? <div className="vansco-watch-note"><strong>Cars secondary check:</strong> Cars stay separate, but this view also checks {financeRegistrationsForCars.size} active Van Finance registrations so Cars already advertised through Van Finance do not stay in Missing.</div> : null}
         {selectedPipeline === "cars" ? <div className="vansco-watch-note vansco-watch-note--warning">Cars local stock source is not confirmed yet. This page loaded {activeLocalRegistrations.size} local Cars registrations. Check the Cars Supabase table name/fields before relying on Cars results.</div> : null}
         {localLoadError ? <div className="error-banner">{localLoadError}</div> : null}{errorMessage ? <div className="error-banner">{errorMessage}</div> : null}{successMessage ? <div className="success-banner">{successMessage}</div> : null}

@@ -162,7 +162,7 @@ test("any ghost VFC row blocks the new-vehicle publisher even when its category 
   assert.ok(plan.blockers.some((item) => item.code === "vfc_existing_anywhere"));
 });
 
-test("any ghost Rent2Buy row blocks a supposedly new vehicle even when Rent2Buy is disabled", () => {
+test("an existing Rent2Buy row does not block an independent Finance-only publish", () => {
   const v = vehicle();
   const d = decision({ rent2buyEnabled: false });
   const sets = buildProductImageSets({ vehicle: v, decision: d, importedDealerKitMedia: imported(), manualMediaReadiness: manualReadiness() });
@@ -173,8 +173,22 @@ test("any ghost Rent2Buy row blocks a supposedly new vehicle even when Rent2Buy 
     vfcWixResults: emptyVfcRows(),
     rent2buyWixResults: [{ collectionId: "ALLRENT2BUYVANS", items: [{ id: "old-r2b", data: { title: "AB23CDE" } }] }],
   });
-  assert.equal(plan.canPublish, false);
-  assert.ok(plan.blockers.some((item) => item.code === "rent2buy_existing_anywhere"));
+  assert.equal(plan.canPublish, true);
+  assert.ok(!plan.blockers.some((item) => item.code === "rent2buy_existing_anywhere"));
+});
+
+test("controlled publisher permits Rent2Buy-only creation without Van Finance", () => {
+  const template = { selected: true, selectedAndReady: true, url: "https://static.wixstatic.com/media/r2b-template.png" };
+  const v = vehicle();
+  const d = decision({ financeEnabled: false, rent2buyEnabled: true, rent2buyCategories: ["all_vans", "medium_mwb"] });
+  const sets = buildProductImageSets({ vehicle: v, decision: d, importedDealerKitMedia: imported(), manualMediaReadiness: manualReadiness({ selections: { rent2buy_template: template } }) });
+  const plan = buildControlledVehiclePublishPlan({ vehicle: v, decision: d, imageSets: sets, vfcWixResults: emptyVfcRows(), rent2buyWixResults: [], productMode: "rent2buy" });
+  assert.equal(plan.mode, "rent2buy");
+  assert.equal(plan.canPublish, true);
+  assert.equal(plan.vfc.targets.length, 0);
+  assert.ok(plan.targets.length >= 2);
+  assert.ok(plan.targets.every((target) => target.product === "rent2buy"));
+  assert.ok(!plan.blockers.some((item) => item.code === "finance_disabled"));
 });
 
 test("stale DealerKit review blocks final creation even if media and Wix rows are clean", () => {
@@ -234,8 +248,9 @@ test("final publisher requires confirmation, inserts only new rows, verifies and
 
 test("operator flow separates media preparation from final CMS publishing", async () => {
   const source = await readFile(new URL("utils/dealerKitControlledPublish.js", root), "utf8");
-  assert.match(source, /Prepare reviewed images in Wix/);
-  assert.match(source, /Publish new vehicle to Wix/);
+  assert.match(source, /Prepare images/);
+  assert.match(source, /Publish to \$\{productLabel\}/);
+  assert.match(source, /productMode/);
   assert.match(source, /final live-write confirmation/i);
   assert.match(source, /dealerkit-controlled-publish-preview/);
   assert.match(source, /dealerkit-wix-prepare-media/);

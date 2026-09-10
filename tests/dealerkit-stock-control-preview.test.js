@@ -77,7 +77,8 @@ test("DealerKit Stock Watch list is access-gated and maps the supplier feed into
   assert.match(endpoint, /providerId: "dealerkit"/);
   assert.match(endpoint, /isCurrentlyOnVansco: true/);
   assert.match(endpoint, /WATCH_TABLE/);
-  assert.match(endpoint, /Legacy Vansco\/Dragon refresh jobs are not used by this operator feed/);
+  assert.match(endpoint, /segmented before card classification/);
+  assert.match(endpoint, /dealerKitVehicleBelongsToPipeline/);
   assert.doesNotMatch(endpoint, /vansco-cache-live-refresh|fetchVanscoDetailHtml|DRAGON_SOURCE_ORIGIN|wix-data|controlled-publish/i);
 });
 
