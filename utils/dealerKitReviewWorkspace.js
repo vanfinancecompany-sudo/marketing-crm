@@ -246,16 +246,24 @@ function renderDecisionControls(vehicle, state, refreshGallery) {
   const financeToggle = document.createElement("input");
   financeToggle.type = "checkbox";
   financeToggle.checked = state.financeEnabled;
-  financeLabel.append(financeToggle, element("span", "", "Van Finance enabled"));
+  financeToggle.setAttribute("data-dealerkit-product-route", "finance");
+  financeLabel.append(financeToggle, element("span", "", "Prepare for Van Finance"));
   statusRow.appendChild(financeLabel);
 
   const rentLabel = element("label", "dealerkit-review__toggle");
   const rentToggle = document.createElement("input");
   rentToggle.type = "checkbox";
   rentToggle.checked = state.rent2buyEnabled;
-  rentLabel.append(rentToggle, element("span", "", "Send to Rent2Buy later"));
+  rentToggle.setAttribute("data-dealerkit-product-route", "rent2buy");
+  rentLabel.append(rentToggle, element("span", "", "Prepare for Rent2Buy"));
   statusRow.appendChild(rentLabel);
   section.appendChild(statusRow);
+
+  section.appendChild(element(
+    "p",
+    "dealerkit-review__routing-note",
+    "Product routes are independent. Select Van Finance, Rent2Buy, or both; each selected product keeps its own image workspace and preparation state.",
+  ));
 
   const categories = element("div", "dealerkit-review__category-block");
   categories.appendChild(element("strong", "", "Van Finance categories"));
@@ -287,9 +295,6 @@ function renderDecisionControls(vehicle, state, refreshGallery) {
   }
   categories.appendChild(categoryGrid);
   section.appendChild(categories);
-
-  const rentNote = element("p", "dealerkit-review__routing-note", "Rent2Buy is only a routing decision at this stage. Its pricing, category mapping, imagery and Wix publishing remain untouched until the dedicated Rent2Buy publishing audit is complete.");
-  section.appendChild(rentNote);
 
   const notesLabel = element("label", "dealerkit-review__field dealerkit-review__notes");
   notesLabel.appendChild(element("span", "", "Review notes"));
