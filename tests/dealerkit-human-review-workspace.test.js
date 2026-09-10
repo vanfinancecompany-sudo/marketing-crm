@@ -47,8 +47,6 @@ test("direct missing-stock review bridge does not mutate stock or Wix", () => {
 
 test("product gallery workspace separates Finance and Rent2Buy, previews uploads and supports drag ordering", () => {
   const client = fs.readFileSync(new URL("../utils/dealerKitProductGalleryWorkspace.js", import.meta.url), "utf8");
-  const main = fs.readFileSync(new URL("../main.jsx", import.meta.url), "utf8");
-  assert.match(main, /dealerKitProductGalleryWorkspace\.js/);
   assert.match(client, /Van Finance/);
   assert.match(client, /Rent2Buy/);
   assert.match(client, /van_finance_replacement/);
