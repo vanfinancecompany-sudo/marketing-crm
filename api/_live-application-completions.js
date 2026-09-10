@@ -54,7 +54,7 @@ export async function loadLiveApplicationCompletions({ now = new Date(), supabas
   const startIso = londonBoundaryIso(date);
   const endIso = londonBoundaryIso(nextDate);
   const entries = await Promise.all(Object.entries(SITE_EVENTS).map(async ([key, config]) => {
-    const completions = await loadSiteCount({ client, supabase: client, ...config, startIso, endIso });
+    const completions = await loadSiteCount({ supabase: client, ...config, startIso, endIso });
     return [key, { completions, eventName: config.eventName }];
   }));
   return {
