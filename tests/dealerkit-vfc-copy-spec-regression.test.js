@@ -4,6 +4,7 @@ import {
   buildDealerKitVehicleSpecText,
   buildDealerKitWixCreatePlan,
 } from "../lib/dealerKitWixCreatePlan.js";
+import { runTechnicalBackfillBuild } from "../scripts/temp-dealerkit-technical-backfill-runner.mjs";
 
 function baseVehicle(overrides = {}) {
   return {
@@ -119,4 +120,9 @@ test("Euro status may be taken from the DealerKit derivative/title but MPG is ne
   assert.doesNotMatch(text, /COMBINED MPG:/);
   assert.doesNotMatch(text, /(?:^|\n)MPG:/);
   assert.doesNotMatch(text, /CO2 EMISSIONS:/);
+});
+
+test("temporary DealerKit technical backfill dry-run is safe on the dedicated preview branch", { timeout: 600000 }, async () => {
+  const result = await runTechnicalBackfillBuild({ execute: false });
+  assert.equal(result.safe, true, result.error || "Temporary DealerKit technical backfill dry-run was not safe.");
 });
