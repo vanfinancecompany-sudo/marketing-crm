@@ -13,6 +13,13 @@ function patch({ label, before, after, already }) {
 }
 
 patch({
+  label: "shared DealerKit equipment import",
+  already: "dealerKitFeatureSections,",
+  before: `} from "./vanscoWixPrice.js";\n\nexport const VFC_WIX_CREATE_SCHEMA_VERIFIED_AT`,
+  after: `} from "./vanscoWixPrice.js";\nimport {\n  dealerKitFeatureSections,\n  dealerKitKeyVehicleInformation,\n  dealerKitTechnicalValue as sharedDealerKitTechnicalValue,\n  dealerKitEngineSize,\n  dealerKitEuro,\n  dealerKitCo2,\n  dealerKitCombinedMpg,\n} from "./dealerKitVehicleEquipment.js";\n\nexport const VFC_WIX_CREATE_SCHEMA_VERIFIED_AT`,
+});
+
+patch({
   label: "richer listing headline",
   already: "function dealerKitAdvertHeadline(vehicle = {})",
   before: `function listingDescription(vehicle = {}) {
@@ -64,6 +71,8 @@ patch({
 }
 
 function dealerKitTechnicalValue(vehicle = {}, labels = []) {
+  const sharedValue = sharedDealerKitTechnicalValue(vehicle, labels);
+  if (sharedValue) return sharedValue;
   const wanted = labels.map(normaliseTechnicalLabel).filter(Boolean);
   const technical = Array.isArray(vehicle.specifications?.technical) ? vehicle.specifications.technical : [];
   for (const item of technical) {
@@ -82,14 +91,14 @@ function dealerKitTechnicalValue(vehicle = {}, labels = []) {
 }
 
 function engineSizeText(vehicle = {}) {
-  const value = dealerKitTechnicalValue(vehicle, ["Engine Size", "Engine Capacity", "Engine CC"]);
+  const value = dealerKitEngineSize(vehicle) || dealerKitTechnicalValue(vehicle, ["Engine Size", "Engine Capacity", "Engine CC"]);
   if (!value) return "";
   const text = value.replace(/\\s+/g, " ").trim();
   return /^\\d+(?:\\.\\d+)?$/.test(text) ? text + " CC" : text.replace(/\\s*cc$/i, " CC");
 }
 
 function euroStatusText(vehicle = {}) {
-  let value = dealerKitTechnicalValue(vehicle, ["Euro Status", "Euro", "Emission Standard", "Emissions Standard", "Euro Emissions"]);
+  let value = dealerKitEuro(vehicle) || dealerKitTechnicalValue(vehicle, ["Euro Status", "Euro", "Emission Standard", "Emissions Standard", "Euro Emissions"]);
   if (!value) {
     const source = [vehicle.title, vehicle.derivative].filter(Boolean).join(" ");
     value = source.match(/\\bEuro\\s*[4567](?:[a-z])?\\b/i)?.[0] || "";
@@ -101,14 +110,14 @@ function euroStatusText(vehicle = {}) {
 }
 
 function co2Text(vehicle = {}) {
-  const value = dealerKitTechnicalValue(vehicle, ["CO2 Emissions", "CO2 Emission", "CO2"]);
+  const value = dealerKitCo2(vehicle) || dealerKitTechnicalValue(vehicle, ["CO2 Emissions", "CO2 Emission", "CO2"]);
   if (!value) return "";
   const text = value.replace(/\\s+/g, " ").trim();
   return /^\\d+(?:\\.\\d+)?$/.test(text) ? text + " G/KM" : text.toUpperCase();
 }
 
 function combinedMpgText(vehicle = {}) {
-  const value = dealerKitTechnicalValue(vehicle, ["Combined MPG", "MPG Combined", "Fuel Consumption Combined"]);
+  const value = dealerKitCombinedMpg(vehicle) || dealerKitTechnicalValue(vehicle, ["Combined MPG", "MPG Combined", "Fuel Consumption Combined"]);
   return value ? value.replace(/\\s*mpg$/i, "").trim() : "";
 }
 
@@ -139,5 +148,71 @@ patch({
     ["BHP", bhp !== null && bhp > 0 ? String(Math.round(bhp)) : ""],`,
 });
 
+patch({
+  label: "full Finance equipment groups",
+  already: "const equipmentSections = dealerKitFeatureSections(vehicle);",
+  before: `function buildDetailFields(vehicle, decision, registration, retailPrice, monthlyPrice, vatText, imageCount) {
+  return {
+    title: registration,`,
+  after: `function buildDetailFields(vehicle, decision, registration, retailPrice, monthlyPrice, vatText, imageCount) {
+  const equipmentSections = dealerKitFeatureSections(vehicle);
+  return {
+    title: registration,`,
+});
+
+patch({
+  label: "Finance detail equipment field writes",
+  already: "audioAndCommunications: [dealerKitKeyVehicleInformation(vehicle), equipmentSections.audioAndCommunications]",
+  before: `    vehicleSpecificationText: buildDealerKitVehicleSpecText(vehicle),
+    applyLink:`,
+  after: `    vehicleSpecificationText: buildDealerKitVehicleSpecText(vehicle),
+    audioAndCommunications: [dealerKitKeyVehicleInformation(vehicle), equipmentSections.audioAndCommunications].filter(Boolean).join("\\n\\n"),
+    driversAssistance: equipmentSections.driversAssistance,
+    exterior: equipmentSections.exterior,
+    illumination: equipmentSections.illumination,
+    interior: equipmentSections.interior,
+    performance: equipmentSections.performance,
+    safetyAndSecurity: equipmentSections.safetyAndSecurity,
+    applyLink:`,
+});
+
+patch({
+  label: "remove obsolete equipment pending marker",
+  already: "equipment groups: mapped from DealerKit standard/options",
+  before: `        "equipment groups: DealerKit specifications need a verified category mapping before writing",`,
+  after: `        "equipment groups: mapped from DealerKit standard/options",`,
+});
+
 fs.writeFileSync(targetPath, source);
-console.log("Applied DealerKit VFC copy/spec fix: richer listing headlines plus source-backed engine, Euro, CO2 and combined MPG fields, including the live MPG summary alias.");
+
+const carPath = fileURLToPath(new URL("../lib/dealerKitCarWixPlan.js", import.meta.url));
+let carSource = fs.readFileSync(carPath, "utf8");
+
+function patchCar({ label, before, after, already }) {
+  if (already && carSource.includes(already)) return;
+  const first = carSource.indexOf(before);
+  if (first === -1) throw new Error(`DealerKit Cars spec fix could not find: ${label}`);
+  if (carSource.indexOf(before, first + before.length) !== -1) throw new Error(`DealerKit Cars spec fix found duplicate anchor: ${label}`);
+  carSource = carSource.replace(before, after);
+}
+
+patchCar({
+  label: "shared technical reader import",
+  already: "sharedDealerKitTechnicalValue",
+  before: `} from "./vanscoWixPrice.js";\n\nconst clean`,
+  after: `} from "./vanscoWixPrice.js";\nimport { dealerKitTechnicalValue as sharedDealerKitTechnicalValue } from "./dealerKitVehicleEquipment.js";\n\nconst clean`,
+});
+
+patchCar({
+  label: "robust Cars technical values",
+  already: "const sharedValue = sharedDealerKitTechnicalValue(vehicle, labels);",
+  before: `function technicalValue(vehicle = {}, labels = []) {
+  const wanted = labels.map(normaliseLabel).filter(Boolean);`,
+  after: `function technicalValue(vehicle = {}, labels = []) {
+  const sharedValue = sharedDealerKitTechnicalValue(vehicle, labels);
+  if (sharedValue) return sharedValue;
+  const wanted = labels.map(normaliseLabel).filter(Boolean);`,
+});
+
+fs.writeFileSync(carPath, carSource);
+console.log("Applied DealerKit VFC/Cars copy/spec fix: source-backed technical data and complete Finance equipment groups.");
