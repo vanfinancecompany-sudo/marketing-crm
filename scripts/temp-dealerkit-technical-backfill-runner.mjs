@@ -61,6 +61,45 @@ function indexRows(items = []) {
   return byRegistration;
 }
 
+function scalarStrings(value, prefix = "", result = []) {
+  if (value === null || value === undefined) return result;
+  if (typeof value === "string" || typeof value === "number") {
+    result.push([prefix, String(value)]);
+    return result;
+  }
+  if (Array.isArray(value)) {
+    value.slice(0, 100).forEach((item, index) => scalarStrings(item, `${prefix}[${index}]`, result));
+    return result;
+  }
+  if (typeof value === "object") {
+    Object.entries(value).slice(0, 200).forEach(([key, nested]) => scalarStrings(nested, prefix ? `${prefix}.${key}` : key, result));
+  }
+  return result;
+}
+
+function registrationReferences(items = [], registration) {
+  const wanted = normalizeFinanceRegistration(registration);
+  if (!wanted) return [];
+  const matches = [];
+  for (const item of items) {
+    const fields = scalarStrings(item?.data || {});
+    const matchingKeys = fields
+      .filter(([, value]) => normalizeFinanceRegistration(value).includes(wanted))
+      .map(([key]) => key)
+      .filter(Boolean);
+    if (!matchingKeys.length) continue;
+    matches.push({
+      id: item?.id || null,
+      title: clean(item?.data?.title, 300) || null,
+      titleText: clean(item?.data?.titleText, 500) || null,
+      applyLink: clean(item?.data?.applyLink, 1000) || null,
+      updatedAt: itemUpdatedAt(item),
+      matchingKeys: Array.from(new Set(matchingKeys)).slice(0, 20),
+    });
+  }
+  return matches;
+}
+
 async function loadInventory(configuration) {
   const [financeMastersRaw, carMastersRaw, financeDetailsRaw, carDetailsRaw] = await Promise.all([
     queryCollection(configuration, "VANFINANCE-ALLVANS"),
@@ -73,6 +112,8 @@ async function loadInventory(configuration) {
     carMasters: indexRows(carMastersRaw),
     financeDetails: indexRows(financeDetailsRaw),
     carDetails: indexRows(carDetailsRaw),
+    financeDetailsRaw,
+    carDetailsRaw,
     scanned: {
       financeMasters: financeMastersRaw.length,
       carMasters: carMastersRaw.length,
@@ -172,35 +213,37 @@ async function buildDryRun(environment = process.env) {
   if (financeTargets.length !== EXPECTED_FINANCE_COUNT) blockers.push(`Recovered Finance cohort contains ${financeTargets.length} records, expected ${EXPECTED_FINANCE_COUNT}.`);
   if (carTargets.length !== EXPECTED_CARS_COUNT) blockers.push(`Recovered Cars cohort contains ${carTargets.length} records, expected ${EXPECTED_CARS_COUNT}.`);
 
-  for (const row of targetRows) {
-    if (row.masterRows.length !== 1) blockers.push(`${row.registration} has ${row.masterRows.length} master rows in ${row.lane}.`);
-    if (row.detailRows.length !== 1) blockers.push(`${row.registration} has ${row.detailRows.length} exact historical detail rows in ${row.lane}.`);
-    if (duplicateSources.has(row.registration)) blockers.push(`DealerKit returned more than one source identity for ${row.registration}.`);
-  }
+  const rowStates = targetRows.map((row) => {
+    const rowBlockers = [];
+    if (row.masterRows.length !== 1) rowBlockers.push(`${row.registration} has ${row.masterRows.length} master rows in ${row.lane}.`);
+    if (row.detailRows.length !== 1) rowBlockers.push(`${row.registration} has ${row.detailRows.length} exact historical detail rows in ${row.lane}.`);
+    if (duplicateSources.has(row.registration)) rowBlockers.push(`DealerKit returned more than one source identity for ${row.registration}.`);
+    const referenceRows = row.detailRows.length === 0
+      ? registrationReferences(row.lane === "cars" ? inventory.carDetailsRaw : inventory.financeDetailsRaw, row.registration)
+      : [];
+    return { ...row, rowBlockers, referenceRows };
+  });
+  for (const row of rowStates) blockers.push(...row.rowBlockers);
 
-  const sourceReads = blockers.length
-    ? []
-    : await mapLimit(targetRows, 5, (row) => fetchDealerKitStockDetail(bySource.get(row.registration).supplierStockId, { environment, specifications: true }));
+  const structurallyReady = rowStates.filter((row) => row.rowBlockers.length === 0);
+  const sourceReads = await mapLimit(structurallyReady, 5, (row) => fetchDealerKitStockDetail(bySource.get(row.registration).supplierStockId, { environment, specifications: true }));
   const plans = [];
-  if (!blockers.length) {
-    for (let index = 0; index < targetRows.length; index += 1) {
-      const row = targetRows[index];
-      const read = sourceReads[index];
-      if (!read?.ok) {
-        blockers.push(`DealerKit detail read failed for ${row.registration}: ${clean(read?.error?.message, 300) || "unknown error"}.`);
-        continue;
-      }
-      const vehicle = read.value;
-      if (normalizeFinanceRegistration(vehicle.registration || "") !== row.registration) {
-        blockers.push(`DealerKit detail registration changed for ${row.registration}.`);
-        continue;
-      }
-      plans.push(buildPlan(row, vehicle));
+  for (let index = 0; index < structurallyReady.length; index += 1) {
+    const row = structurallyReady[index];
+    const read = sourceReads[index];
+    if (!read?.ok) {
+      blockers.push(`DealerKit detail read failed for ${row.registration}: ${clean(read?.error?.message, 300) || "unknown error"}.`);
+      continue;
     }
+    const vehicle = read.value;
+    if (normalizeFinanceRegistration(vehicle.registration || "") !== row.registration) {
+      blockers.push(`DealerKit detail registration changed for ${row.registration}.`);
+      continue;
+    }
+    plans.push(buildPlan(row, vehicle));
   }
 
-  if (!blockers.length && plans.length !== EXPECTED_FINANCE_COUNT + EXPECTED_CARS_COUNT) blockers.push(`Only ${plans.length} of 39 target plans could be built.`);
-  const safe = blockers.length === 0;
+  const safe = blockers.length === 0 && plans.length === EXPECTED_FINANCE_COUNT + EXPECTED_CARS_COUNT;
   const records = plans.map((plan) => ({
     lane: plan.lane,
     registration: plan.registration,
@@ -212,10 +255,14 @@ async function buildDryRun(environment = process.env) {
     additions: additionsSummary(plan.audit),
     confirmationToken: safe && plan.changeFields.length ? signBackfillFingerprint(secret, buildBackfillFingerprint(plan)) : null,
   }));
+  const missingDetailDiagnostics = Object.fromEntries(rowStates
+    .filter((row) => row.detailRows.length === 0)
+    .map((row) => [row.registration, row.referenceRows]));
   const summary = {
     expected: { finance: EXPECTED_FINANCE_COUNT, cars: EXPECTED_CARS_COUNT, total: EXPECTED_FINANCE_COUNT + EXPECTED_CARS_COUNT },
     cohortStarts: { finance: FINANCE_COHORT_START, cars: CARS_COHORT_START },
     targetCounts: { finance: financeTargets.length, cars: carTargets.length, total: targetRows.length },
+    structurallyReady: structurallyReady.length,
     wixScanned: inventory.scanned,
     dealerKit: { complete: snapshot.complete, reportedTotal: snapshot.apiReportedTotal, usableRecords: snapshot.vehicleCount },
     plansBuilt: plans.length,
@@ -229,6 +276,7 @@ async function buildDryRun(environment = process.env) {
       finance: financeTargets.map((row) => row.registration).sort(),
       cars: carTargets.map((row) => row.registration).sort(),
     },
+    missingDetailDiagnostics,
   };
   return { safe, executed: false, configuration, secret, inventory, snapshot, plans, blockers, records, summary, error: blockers[0] || null };
 }
