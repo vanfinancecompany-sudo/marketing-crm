@@ -125,7 +125,7 @@ patchFile("../utils/dealerKitReviewWorkspace.js", [
 
 patchFile("../utils/dealerKitProductGalleryWorkspace.js", [
   {
-    label: "Cars do not accidentally inherit Finance/Rent2Buy gallery state",
+    label: "Cars keep their standalone review image state",
     already: 'if (workspace.dataset.product === "cars") return;',
     before: '    const body = workspace.querySelector("[data-dealerkit-review-body]");',
     after: '    if (workspace.dataset.product === "cars") return;\n    const body = workspace.querySelector("[data-dealerkit-review-body]");',
@@ -145,12 +145,6 @@ patchFile("../utils/dealerKitControlledPublish.js", [
     before: '`Records to create: ${plan.targets?.length || 0}`',
     after: '`Records to write: ${plan.targets?.length || 0}`',
   },
-  {
-    label: "Cars do not inherit Van Finance controlled publish panel",
-    already: 'if (workspace.dataset.product === "cars") return;\n  const gallery = workspace.querySelector("[data-dealerkit-product-gallery]");',
-    before: '  if (!workspace || workspace.hidden) return;\n  const gallery = workspace.querySelector("[data-dealerkit-product-gallery]");',
-    after: '  if (!workspace || workspace.hidden) return;\n  if (workspace.dataset.product === "cars") return;\n  const gallery = workspace.querySelector("[data-dealerkit-product-gallery]");',
-  },
 ]);
 
-console.log("Applied DealerKit live-stock truth fix: published master listings only, no CRM fallback, Cars review enabled, historical detail pages kept out of live-stock authority, and typed-registration UI clarified.");
+console.log("Applied DealerKit live-stock truth fix: published master listings only, no CRM fallback, Cars review/publish enabled, historical detail pages kept out of live-stock authority, and typed-registration UI clarified.");
