@@ -161,7 +161,7 @@ function createPanel(registration, product = "finance") {
   input.type = "text";
   input.autocomplete = "off";
   input.spellcheck = false;
-  input.placeholder = `Type ${registration}`;
+  input.placeholder = `Type ${registration} here`;
   input.setAttribute("data-controlled-publish-confirm", "true");
   label.appendChild(input);
   const prepare = element("button", "dealerkit-wix-preview__apply", "Prepare images");
