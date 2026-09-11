@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { buildDealerKitImageReadinessAlerts } from "../api/dealerkit-image-readiness.js";
 import { buildStockWatchMonitorIssues } from "../api/_stock-watch-monitor.js";
+import { normalizeRegistration } from "../api/_vansco-cache-utils.js";
 
 const NOW = new Date("2026-09-11T14:30:00.000Z");
 
@@ -48,6 +49,13 @@ test("DealerKit image readiness only alerts for an active exact registration wit
   assert.equal(alerts[0].registration, "AB24CDE");
   assert.equal(alerts[0].sourceImageCount, 7);
   assert.equal(alerts[0].supplierStockId, "stock-1");
+});
+
+test("DealerKit registration normalizer accepts dateless UK registrations returned by the live feed", () => {
+  for (const registration of ["VIG6973", "SV7840", "WGZ8806", "XGZ4865"]) {
+    assert.equal(normalizeRegistration(registration), registration);
+  }
+  assert.equal(normalizeRegistration("SV 7840"), "SV7840");
 });
 
 test("image readiness production path no longer reads Vansco refresh/cache tables", () => {
