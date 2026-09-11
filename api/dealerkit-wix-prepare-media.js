@@ -143,6 +143,8 @@ export default async function handler(request, response) {
       ...(productMode === "finance" ? { financeEnabled: true, rent2buyEnabled: false } : {}),
       ...(productMode === "rent2buy" ? { financeEnabled: false, rent2buyEnabled: true } : {}),
       ...(productMode === "both" ? { financeEnabled: true, rent2buyEnabled: true } : {}),
+      // Cars keeps its own CMS lane but reuses the legacy reviewed image ordering/primary slot for media preparation only.
+      ...(productMode === "cars" ? { financeEnabled: true, rent2buyEnabled: false } : {}),
     };
     const vehicle = await fetchDealerKitStockDetail(decision.supplierStockId, { specifications: false });
     if (normalizeFinanceRegistration(vehicle?.registration || "") !== registration) throw new ApiError(409, "DealerKit registration changed. Re-open and review the vehicle before preparing media.");
