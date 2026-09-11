@@ -249,7 +249,7 @@ test("final publisher requires confirmation, inserts only new rows, verifies and
 test("operator flow separates media preparation from final CMS publishing", async () => {
   const source = await readFile(new URL("utils/dealerKitControlledPublish.js", root), "utf8");
   assert.match(source, /Prepare images/);
-  assert.match(source, /Publish to \$\{productLabel\}/);
+  assert.match(source, /Publish to \$\{(?:labelText|productLabel)\}/);
   assert.match(source, /productMode/);
   assert.match(source, /final live-write confirmation/i);
   assert.match(source, /dealerkit-controlled-publish-preview/);
