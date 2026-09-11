@@ -4,7 +4,6 @@ import {
   buildDealerKitVehicleSpecText,
   buildDealerKitWixCreatePlan,
 } from "../lib/dealerKitWixCreatePlan.js";
-import { runTechnicalBackfillBuild } from "../scripts/temp-dealerkit-technical-backfill-runner.mjs";
 
 function baseVehicle(overrides = {}) {
   return {
@@ -120,10 +119,4 @@ test("Euro status may be taken from the DealerKit derivative/title but MPG is ne
   assert.doesNotMatch(text, /COMBINED MPG:/);
   assert.doesNotMatch(text, /(?:^|\n)MPG:/);
   assert.doesNotMatch(text, /CO2 EMISSIONS:/);
-});
-
-test("temporary DealerKit technical backfill executes and verifies the existing-detail cohort on the dedicated preview branch", { timeout: 600000 }, async () => {
-  const result = await runTechnicalBackfillBuild({ execute: true });
-  assert.equal(result.safe, true, JSON.stringify({ error: result.error || null, summary: result.summary || result.finalCheck?.summary || null }));
-  if (!result.skipped) assert.equal(result.executed, true, "Temporary DealerKit technical backfill did not execute.");
 });
