@@ -25,6 +25,13 @@ function registrationOf(item = {}) {
   return normalizeFinanceRegistration(item?.data?.title || "");
 }
 
+function itemDate(item = {}, key = "_updatedDate") {
+  const raw = item?.data?.[key]?.$date || item?.data?.[key] || item?.[key]?.$date || item?.[key] || null;
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+}
+
 async function queryCollection(configuration, collectionId) {
   const items = [];
   for (let offset = 0; offset < MAX_COLLECTION_ITEMS; offset += PAGE_SIZE) {
@@ -59,10 +66,8 @@ function sourceMap(snapshot) {
 
 function equipmentDiagnostics(data = {}, lane = "finance") {
   const equipmentBlank = EQUIPMENT_FIELDS.filter((field) => !clean(data?.[field], 30000));
-  const equipmentPopulated = EQUIPMENT_FIELDS.filter((field) => clean(data?.[field], 30000));
   const financeSpec = clean(data?.vehicleSpecificationText, 30000);
-  const carSummary = clean(data?.descriptionLine, 30000);
-  const technicalText = lane === "cars" ? carSummary : financeSpec;
+  const technicalText = lane === "cars" ? clean(data?.descriptionLine, 30000) : financeSpec;
   const technicalMissing = {
     engine: !/ENGINE\s*SIZE\s*:/i.test(technicalText),
     euro: !/(?:EURO\s*STATUS|EURO)\s*:/i.test(technicalText),
@@ -70,7 +75,6 @@ function equipmentDiagnostics(data = {}, lane = "finance") {
   };
   return {
     equipmentBlank,
-    equipmentPopulated,
     allSevenAccordionBlank: equipmentBlank.length === EQUIPMENT_FIELDS.length,
     anyAccordionBlank: equipmentBlank.length > 0,
     technicalMissing,
@@ -91,12 +95,7 @@ async function loadInventory(configuration) {
     carMasters: indexRows(carMasters),
     financeDetails: indexRows(financeDetails),
     carDetails: indexRows(carDetails),
-    scanned: {
-      financeMasters: financeMasters.length,
-      carMasters: carMasters.length,
-      financeDetails: financeDetails.length,
-      carDetails: carDetails.length,
-    },
+    scanned: { financeMasters: financeMasters.length, carMasters: carMasters.length, financeDetails: financeDetails.length, carDetails: carDetails.length },
   };
 }
 
@@ -107,12 +106,26 @@ function rowsForLane(inventory, lane) {
     lane,
     registration,
     masterRows,
+    masterItem: masterRows[0] || null,
     detailRows: details.get(registration) || [],
+    detailItem: (details.get(registration) || []).length === 1 ? details.get(registration)[0] : null,
   }));
 }
 
 function countBy(records, predicate) {
   return records.filter(predicate).length;
+}
+
+function countUpdatedSince(records, iso) {
+  const threshold = new Date(iso).getTime();
+  return {
+    finance: countBy(records, (row) => row.lane === "finance" && (new Date(itemDate(row.masterItem) || 0).getTime() >= threshold)),
+    cars: countBy(records, (row) => row.lane === "cars" && (new Date(itemDate(row.masterItem) || 0).getTime() >= threshold)),
+  };
+}
+
+function registrations(records, predicate) {
+  return records.filter(predicate).map((row) => row.registration).sort();
 }
 
 export async function runTechnicalBackfillBuild() {
@@ -128,18 +141,14 @@ export async function runTechnicalBackfillBuild() {
   ]);
   const bySource = sourceMap(snapshot);
   const rows = [...rowsForLane(inventory, "finance"), ...rowsForLane(inventory, "cars")];
-  const sourceMatched = rows
-    .filter((row) => bySource.has(row.registration))
-    .map((row) => {
-      const exactDetail = row.detailRows.length === 1 ? row.detailRows[0] : null;
-      const diagnostics = exactDetail ? equipmentDiagnostics(exactDetail.data || {}, row.lane) : null;
-      return { ...row, exactDetail, diagnostics };
-    });
-
-  const usable = sourceMatched.filter((row) => row.exactDetail && row.masterRows.length >= 1);
-  const diagnosticCandidates = usable.filter((row) => row.diagnostics.allSevenAccordionBlank || row.diagnostics.anyCoreTechnicalMissing || row.diagnostics.carFeatureListBlank);
-  const blankAccordionCandidates = usable.filter((row) => row.diagnostics.allSevenAccordionBlank);
-  const anyBlankCandidates = usable.filter((row) => row.diagnostics.anyAccordionBlank);
+  const sourceMatched = rows.filter((row) => bySource.has(row.registration)).map((row) => ({
+    ...row,
+    diagnostics: row.detailItem ? equipmentDiagnostics(row.detailItem.data || {}, row.lane) : null,
+  }));
+  const usable = sourceMatched.filter((row) => row.detailItem && row.masterRows.length >= 1);
+  const broad = usable.filter((row) => row.diagnostics.allSevenAccordionBlank || row.diagnostics.anyCoreTechnicalMissing || row.diagnostics.carFeatureListBlank);
+  const allBlank = usable.filter((row) => row.diagnostics.allSevenAccordionBlank);
+  const anyBlank = usable.filter((row) => row.diagnostics.anyAccordionBlank);
 
   const summary = {
     expectedBackfill: { finance: EXPECTED_FINANCE_COUNT, cars: EXPECTED_CARS_COUNT, total: EXPECTED_FINANCE_COUNT + EXPECTED_CARS_COUNT },
@@ -148,33 +157,29 @@ export async function runTechnicalBackfillBuild() {
     dealerKit: { complete: snapshot.complete, reportedTotal: snapshot.apiReportedTotal, usableRecords: snapshot.vehicleCount },
     sourceMatched: { finance: countBy(sourceMatched, (row) => row.lane === "finance"), cars: countBy(sourceMatched, (row) => row.lane === "cars") },
     exactDetailMatches: { finance: countBy(usable, (row) => row.lane === "finance"), cars: countBy(usable, (row) => row.lane === "cars") },
-    allSevenAccordionBlank: { finance: countBy(blankAccordionCandidates, (row) => row.lane === "finance"), cars: countBy(blankAccordionCandidates, (row) => row.lane === "cars") },
-    anyAccordionBlank: { finance: countBy(anyBlankCandidates, (row) => row.lane === "finance"), cars: countBy(anyBlankCandidates, (row) => row.lane === "cars") },
-    broadDiagnosticCandidates: { finance: countBy(diagnosticCandidates, (row) => row.lane === "finance"), cars: countBy(diagnosticCandidates, (row) => row.lane === "cars") },
+    allSevenAccordionBlank: { finance: countBy(allBlank, (row) => row.lane === "finance"), cars: countBy(allBlank, (row) => row.lane === "cars") },
+    anyAccordionBlank: { finance: countBy(anyBlank, (row) => row.lane === "finance"), cars: countBy(anyBlank, (row) => row.lane === "cars") },
+    broadDiagnosticCandidates: { finance: countBy(broad, (row) => row.lane === "finance"), cars: countBy(broad, (row) => row.lane === "cars") },
+    masterUpdatedSince: {
+      sep11: countUpdatedSince(sourceMatched, "2026-09-11T00:00:00Z"),
+      sep10: countUpdatedSince(sourceMatched, "2026-09-10T00:00:00Z"),
+      sep09: countUpdatedSince(sourceMatched, "2026-09-09T00:00:00Z"),
+      sep08: countUpdatedSince(sourceMatched, "2026-09-08T00:00:00Z"),
+      sep07: countUpdatedSince(sourceMatched, "2026-09-07T00:00:00Z"),
+      sep05: countUpdatedSince(sourceMatched, "2026-09-05T00:00:00Z"),
+      sep04: countUpdatedSince(sourceMatched, "2026-09-04T00:00:00Z"),
+      sep03: countUpdatedSince(sourceMatched, "2026-09-03T00:00:00Z"),
+      sep01: countUpdatedSince(sourceMatched, "2026-09-01T00:00:00Z"),
+    },
+    registrations: {
+      financeAnyAccordionBlank: registrations(anyBlank, (row) => row.lane === "finance"),
+      carsAnyAccordionBlank: registrations(anyBlank, (row) => row.lane === "cars"),
+      financeBroad: registrations(broad, (row) => row.lane === "finance"),
+      carsBroad: registrations(broad, (row) => row.lane === "cars"),
+    },
   };
 
   console.log("TEMP_TECHNICAL_BACKFILL_DIAGNOSTIC", JSON.stringify(summary));
-  for (const row of diagnosticCandidates) {
-    console.log("TEMP_TECHNICAL_BACKFILL_DIAGNOSTIC_RECORD", JSON.stringify({
-      lane: row.lane,
-      registration: row.registration,
-      masterRowCount: row.masterRows.length,
-      detailRowCount: row.detailRows.length,
-      allSevenAccordionBlank: row.diagnostics.allSevenAccordionBlank,
-      blankAccordionFields: row.diagnostics.equipmentBlank,
-      technicalMissing: row.diagnostics.technicalMissing,
-      carFeatureListBlank: row.diagnostics.carFeatureListBlank,
-      sourceStockId: bySource.get(row.registration)?.supplierStockId || null,
-    }));
-  }
-
-  const exactCandidateCount = summary.allSevenAccordionBlank.finance === EXPECTED_FINANCE_COUNT
-    && summary.allSevenAccordionBlank.cars === EXPECTED_CARS_COUNT;
-  return {
-    safe: exactCandidateCount,
-    executed: false,
-    diagnosticOnly: true,
-    summary,
-    error: exactCandidateCount ? null : "The exact 33 Finance + 6 Cars candidate signature has not been proven yet.",
-  };
+  const exactCandidateCount = summary.allSevenAccordionBlank.finance === EXPECTED_FINANCE_COUNT && summary.allSevenAccordionBlank.cars === EXPECTED_CARS_COUNT;
+  return { safe: exactCandidateCount, executed: false, diagnosticOnly: true, summary, error: exactCandidateCount ? null : "The exact 33 Finance + 6 Cars candidate signature has not been proven yet." };
 }
