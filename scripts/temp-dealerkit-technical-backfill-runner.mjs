@@ -33,6 +33,15 @@ function registrationOf(item = {}) {
   return normalizeFinanceRegistration(item?.data?.title || "");
 }
 
+function itemPublishStatus(item = {}) {
+  return clean(item?.data?._publishStatus || item?._publishStatus || "", 100).toUpperCase();
+}
+
+function isLiveMasterItem(item = {}) {
+  const status = itemPublishStatus(item);
+  return !status || status === "PUBLISHED";
+}
+
 async function queryCollection(configuration, collectionId) {
   const items = [];
   for (let offset = 0; offset < MAX_COLLECTION_ITEMS; offset += PAGE_SIZE) {
@@ -65,15 +74,19 @@ function duplicates(index) {
 }
 
 async function loadInventory(configuration) {
-  const [financeMasters, carMasters, financeDetails, carDetails] = await Promise.all([
+  const [financeMasterRows, carMasterRows, financeDetails, carDetails] = await Promise.all([
     queryCollection(configuration, "VANFINANCE-ALLVANS"),
     queryCollection(configuration, "CARFINANCE"),
     queryCollection(configuration, "VANFINANCEPAGES"),
     queryCollection(configuration, "CARPAGES"),
   ]);
+  const financeMasters = financeMasterRows.filter(isLiveMasterItem);
+  const carMasters = carMasterRows.filter(isLiveMasterItem);
   return {
     financeMasters,
     carMasters,
+    financeMasterScanned: financeMasterRows.length,
+    carMasterScanned: carMasterRows.length,
     financeDetails,
     carDetails,
     financeMasterIndex: indexRows(financeMasters),
@@ -85,8 +98,8 @@ async function loadInventory(configuration) {
 
 function inventoryBlockers(inventory) {
   const blockers = [];
-  if (inventory.financeMasters.length !== EXPECTED_FINANCE_COUNT) blockers.push(`Finance master count ${inventory.financeMasters.length}, expected ${EXPECTED_FINANCE_COUNT}.`);
-  if (inventory.carMasters.length !== EXPECTED_CARS_COUNT) blockers.push(`Cars master count ${inventory.carMasters.length}, expected ${EXPECTED_CARS_COUNT}.`);
+  if (inventory.financeMasters.length !== EXPECTED_FINANCE_COUNT) blockers.push(`Finance published master count ${inventory.financeMasters.length}, expected ${EXPECTED_FINANCE_COUNT}.`);
+  if (inventory.carMasters.length !== EXPECTED_CARS_COUNT) blockers.push(`Cars published master count ${inventory.carMasters.length}, expected ${EXPECTED_CARS_COUNT}.`);
   if (inventory.financeMasterIndex.blank.length) blockers.push(`Finance master has ${inventory.financeMasterIndex.blank.length} blank registration row(s).`);
   if (inventory.carMasterIndex.blank.length) blockers.push(`Cars master has ${inventory.carMasterIndex.blank.length} blank registration row(s).`);
   const financeDupes = duplicates(inventory.financeMasterIndex);
@@ -166,7 +179,7 @@ async function runDryRun(environment = process.env) {
   const blockers = inventoryBlockers(inventory);
   if (!secret) blockers.push("Backfill signing secret is unavailable.");
   const rows = masterRows(inventory);
-  if (rows.length !== EXPECTED_FINANCE_COUNT + EXPECTED_CARS_COUNT) blockers.push(`Usable master registrations ${rows.length}, expected ${EXPECTED_FINANCE_COUNT + EXPECTED_CARS_COUNT}.`);
+  if (rows.length !== EXPECTED_FINANCE_COUNT + EXPECTED_CARS_COUNT) blockers.push(`Usable published master registrations ${rows.length}, expected ${EXPECTED_FINANCE_COUNT + EXPECTED_CARS_COUNT}.`);
   const targetRegistrations = rows.map((row) => row.registration);
   const targetSourceDupes = targetDuplicateSourceRegistrations(snapshot, targetRegistrations);
   if (targetSourceDupes.length) blockers.push(`DealerKit has duplicate source identities for target registration(s): ${targetSourceDupes.map((item) => item.registration).join(", ")}.`);
@@ -213,6 +226,7 @@ async function runDryRun(environment = process.env) {
     summary: {
       expected: { finance: EXPECTED_FINANCE_COUNT, cars: EXPECTED_CARS_COUNT, total: EXPECTED_FINANCE_COUNT + EXPECTED_CARS_COUNT },
       publishedMasters: { finance: inventory.financeMasters.length, cars: inventory.carMasters.length, total: inventory.financeMasters.length + inventory.carMasters.length },
+      scannedMasterRows: { finance: inventory.financeMasterScanned, cars: inventory.carMasterScanned },
       dealerKitSnapshotComplete: Boolean(snapshot.complete),
       dealerKitReportedTotal: Number(snapshot.apiReportedTotal || 0),
       dealerKitUsableRecords: Number(snapshot.vehicleCount || 0),
@@ -236,8 +250,9 @@ function rollbackModifications(detailItem, proposed = {}) {
     : { fieldPath, action: "REMOVE_FIELD" });
 }
 
-async function currentSingleFromCollection(configuration, collectionId, registration) {
-  const items = await queryCollection(configuration, collectionId);
+async function currentSingleFromCollection(configuration, collectionId, registration, { publishedOnly = false } = {}) {
+  let items = await queryCollection(configuration, collectionId);
+  if (publishedOnly) items = items.filter(isLiveMasterItem);
   const rows = items.filter((item) => registrationOf(item) === registration);
   return rows.length === 1 ? rows[0] : null;
 }
@@ -246,7 +261,7 @@ async function applyPreparedRecord(record, configuration, secret, environment = 
   const masterCollection = record.lane === "cars" ? "CARFINANCE" : "VANFINANCE-ALLVANS";
   const detailCollection = record.lane === "cars" ? "CARPAGES" : "VANFINANCEPAGES";
   const [masterItem, detailItem, vehicle] = await Promise.all([
-    currentSingleFromCollection(configuration, masterCollection, record.registration),
+    currentSingleFromCollection(configuration, masterCollection, record.registration, { publishedOnly: true }),
     currentSingleFromCollection(configuration, detailCollection, record.registration),
     fetchDealerKitStockDetail(record.vehicle.supplierStockId, { environment, specifications: true }),
   ]);
