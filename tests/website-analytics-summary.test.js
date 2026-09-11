@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { addDays, londonMidnightUtcIso, summaryFrom } from '../api/website-analytics-summary.js';
 import { mapExitPages } from '../api/website-analytics-details.js';
 import { addDays as addGa4Days, summaryFrom as ga4SummaryFrom } from '../api/ga4-website-analytics.js';
-import { uniqueSessionCount } from '../api/_live-application-completions.js';
+import { applicationSessionCounts, uniqueSessionCount } from '../api/_live-application-completions.js';
 import { withLiveApplicationCompletions } from '../api/ga4-pipeline-summary.js';
 
 describe('Website Analytics fresh data', () => {
@@ -77,24 +77,66 @@ describe('Website Analytics fresh data', () => {
     ]), 2);
   });
 
-  it('uses a live first-party completion while GA4 event reporting catches up', () => {
+  it('counts each application session once across starts and completions', () => {
+    assert.deepEqual(applicationSessionCounts([
+      { session_id: 'session-a', event_name: 'finance_application_reached' },
+      { session_id: 'session-a', event_name: 'finance_application_reached' },
+      { session_id: 'session-b', event_name: 'finance_application_reached' },
+      { session_id: 'session-a', event_name: 'finance_application_completed' },
+      { session_id: 'session-c', event_name: 'finance_application_completed' },
+    ], {
+      startEventName: 'finance_application_reached',
+      completionEventName: 'finance_application_completed',
+    }), {
+      starts: 3,
+      explicitStarts: 2,
+      completions: 2,
+    });
+  });
+
+  it('uses live unique application sessions while retaining raw GA4 event counts', () => {
     const result = withLiveApplicationCompletions({
       ok: true,
       sites: [{
         key: 'vanFinance',
-        applicationStartsToday: 1,
-        applicationCompletionsToday: 0,
-        conversionRate: 0,
+        applicationStartsToday: 10,
+        applicationCompletionsToday: 2,
+        conversionRate: 0.2,
       }],
     }, {
       date: '2026-09-10',
-      sites: { vanFinance: { completions: 1 } },
+      sites: { vanFinance: { starts: 5, explicitStarts: 5, completions: 3 } },
     });
-    assert.equal(result.sites[0].ga4ApplicationCompletionsToday, 0);
-    assert.equal(result.sites[0].liveApplicationCompletionsToday, 1);
-    assert.equal(result.sites[0].applicationCompletionsToday, 1);
+    assert.equal(result.sites[0].ga4ApplicationStartsToday, 10);
+    assert.equal(result.sites[0].ga4ApplicationCompletionsToday, 2);
+    assert.equal(result.sites[0].liveApplicationStartsToday, 5);
+    assert.equal(result.sites[0].liveExplicitApplicationStartsToday, 5);
+    assert.equal(result.sites[0].liveApplicationCompletionsToday, 3);
+    assert.equal(result.sites[0].applicationStartsToday, 5);
+    assert.equal(result.sites[0].applicationCompletionsToday, 3);
+    assert.equal(result.sites[0].applicationStartSource, 'first_party_live');
     assert.equal(result.sites[0].applicationCompletionSource, 'first_party_live');
-    assert.equal(result.sites[0].effectiveConversionRate, 1);
+    assert.equal(result.sites[0].effectiveConversionRate, 0.6);
+  });
+
+  it('falls back to GA4 when first-party application activity is quiet', () => {
+    const result = withLiveApplicationCompletions({
+      ok: true,
+      sites: [{
+        key: 'vanFinance',
+        applicationStartsToday: 4,
+        applicationCompletionsToday: 1,
+        conversionRate: 0.25,
+      }],
+    }, {
+      date: '2026-09-10',
+      sites: { vanFinance: { starts: 0, explicitStarts: 0, completions: 0 } },
+    });
+    assert.equal(result.sites[0].applicationStartsToday, 4);
+    assert.equal(result.sites[0].applicationCompletionsToday, 1);
+    assert.equal(result.sites[0].applicationStartSource, 'ga4');
+    assert.equal(result.sites[0].applicationCompletionSource, 'ga4');
+    assert.equal(result.sites[0].effectiveConversionRate, 0.25);
   });
 
   it('uses GA4 as the Website Analytics source while retaining only supplemental journey details', () => {
@@ -119,12 +161,13 @@ describe('Website Analytics fresh data', () => {
     assert.match(liveStatus, /settled seven-day GA4 counters above intentionally stop at yesterday/);
   });
 
-  it('keeps the concise GA4 panel in Content Operations with live completion confirmation', () => {
+  it('keeps the concise GA4 panel in Content Operations with unique-session application metrics', () => {
     const source = fs.readFileSync(new URL('../pages/DashboardPage.jsx', import.meta.url), 'utf8');
     const panel = fs.readFileSync(new URL('../components/Ga4PipelinePanel.jsx', import.meta.url), 'utf8');
     assert.match(source, /import Ga4PipelinePanel from "\.\.\/components\/Ga4PipelinePanel\.jsx"/);
     assert.match(source, /<Ga4PipelinePanel \/>/);
-    assert.match(panel, /applicationCompletionSource==='first_party_live'/);
-    assert.match(panel, /live confirmed/);
+    assert.match(panel, /applicationStartSource==='first_party_live'/);
+    assert.match(panel, /Unique app starts/);
+    assert.match(panel, /GA4 logged/);
   });
 });
