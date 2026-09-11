@@ -13,6 +13,7 @@ import {
   validateDealerKitManualMediaFile,
   wixFileToManualMediaRow,
 } from "../lib/dealerKitWixManualMedia.js";
+import { buildProductImageSets } from "../lib/dealerKitWixVehicleMedia.js";
 import { RENT2BUY_WIX_SITE_ID } from "../lib/rent2buyMonthlyPriceSync.js";
 
 const root = new URL("../", import.meta.url);
@@ -21,6 +22,14 @@ function decision() {
   return {
     supplierStockId: "stock-123",
     registration: "HT22KJX",
+  };
+}
+
+function importedMedia(id, url) {
+  return {
+    dealerKitImageId: id,
+    wixUrl: url,
+    ready: true,
   };
 }
 
@@ -78,6 +87,82 @@ test("verified Wix image metadata maps processing and selected state explicitly"
   assert.equal(pending.selected, false);
   const failed = manualMediaRowToClient({ ...baseRow, id: "row-3", operation_status: "FAILED" });
   assert.equal(failed.failed, true);
+});
+
+test("selected Van Finance manual main replaces the DealerKit primary instead of prepending it", () => {
+  const sets = buildProductImageSets({
+    vehicle: {
+      registration: "HT22KJX",
+      images: [{ id: "image-1" }, { id: "image-2" }, { id: "image-3" }],
+    },
+    decision: {
+      registration: "HT22KJX",
+      primaryImageId: "image-1",
+      imageOrderIds: ["image-1", "image-2", "image-3"],
+      excludedImageIds: [],
+      rent2buyEnabled: false,
+    },
+    importedDealerKitMedia: [
+      importedMedia("image-1", "https://static.wixstatic.com/media/dealerkit-primary.jpg"),
+      importedMedia("image-2", "https://static.wixstatic.com/media/dealerkit-two.jpg"),
+      importedMedia("image-3", "https://static.wixstatic.com/media/dealerkit-three.jpg"),
+    ],
+    manualMediaReadiness: {
+      selections: {
+        van_finance_replacement: {
+          selectedAndReady: true,
+          url: "https://static.wixstatic.com/media/manual-main.jpg",
+        },
+      },
+    },
+  });
+
+  assert.equal(sets.vanFinance.mainSource, "manual_replacement");
+  assert.equal(sets.vanFinance.mainUrl, "https://static.wixstatic.com/media/manual-main.jpg");
+  assert.deepEqual(sets.vanFinance.galleryUrls, [
+    "https://static.wixstatic.com/media/manual-main.jpg",
+    "https://static.wixstatic.com/media/dealerkit-two.jpg",
+    "https://static.wixstatic.com/media/dealerkit-three.jpg",
+  ]);
+  assert.equal(sets.vanFinance.galleryUrls.includes("https://static.wixstatic.com/media/dealerkit-primary.jpg"), false);
+});
+
+test("selected Rent2Buy template replaces its DealerKit primary without changing Finance gallery state", () => {
+  const sets = buildProductImageSets({
+    vehicle: {
+      registration: "HT22KJX",
+      images: [{ id: "image-1" }, { id: "image-2" }],
+    },
+    decision: {
+      registration: "HT22KJX",
+      primaryImageId: "image-1",
+      imageOrderIds: ["image-1", "image-2"],
+      excludedImageIds: [],
+      rent2buyEnabled: true,
+    },
+    importedDealerKitMedia: [
+      importedMedia("image-1", "https://static.wixstatic.com/media/dealerkit-primary.jpg"),
+      importedMedia("image-2", "https://static.wixstatic.com/media/dealerkit-two.jpg"),
+    ],
+    manualMediaReadiness: {
+      selections: {
+        rent2buy_template: {
+          selectedAndReady: true,
+          url: "https://static.wixstatic.com/media/r2b-template.jpg",
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(sets.vanFinance.galleryUrls, [
+    "https://static.wixstatic.com/media/dealerkit-primary.jpg",
+    "https://static.wixstatic.com/media/dealerkit-two.jpg",
+  ]);
+  assert.deepEqual(sets.rent2buy.galleryUrls, [
+    "https://static.wixstatic.com/media/r2b-template.jpg",
+    "https://static.wixstatic.com/media/dealerkit-two.jpg",
+  ]);
+  assert.equal(sets.rent2buy.galleryUrls.includes("https://static.wixstatic.com/media/dealerkit-primary.jpg"), false);
 });
 
 test("manual media constants stay bound to the verified Wix Media endpoints", () => {

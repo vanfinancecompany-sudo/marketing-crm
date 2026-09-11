@@ -18,6 +18,24 @@ if (!source.includes("calculatePublishedRent2BuyPricing")) {
   replaceOrThrow(importAnchor, `${importAnchor}\nimport { calculatePublishedRent2BuyPricing } from "../lib/dealerKitPublishedPrice.js";`, "published Rent2Buy pricing import");
 }
 
+if (!source.includes('from "../lib/dealerKitCarsPublishedListing.js"')) {
+  const presenceImport = 'import { fetchStockWatchWixListingPresence } from "../services/stockWatchWixListingPresence.js";';
+  replaceOrThrow(
+    presenceImport,
+    `${presenceImport}\nimport { mergeCarsPublishedListingVehicles } from "../lib/dealerKitCarsPublishedListing.js";`,
+    "Cars published listing merge import",
+  );
+}
+
+if (!source.includes("mergeCarsPublishedListingVehicles(vehicles, presence.vehicles || [])")) {
+  const liveVehicleFilter = `            effectiveVehicles = vehicles.filter((vehicle) => {\n              const registration = normalizeLocalStockRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name);\n              return Boolean(registration && liveRegistrationSet.has(registration));\n            });`;
+  replaceOrThrow(
+    liveVehicleFilter,
+    `            effectiveVehicles = pipeline === "cars"\n              ? mergeCarsPublishedListingVehicles(vehicles, presence.vehicles || [])\n              : vehicles.filter((vehicle) => {\n                const registration = normalizeLocalStockRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name);\n                return Boolean(registration && liveRegistrationSet.has(registration));\n              });`,
+    "Cars live CARFINANCE price snapshot",
+  );
+}
+
 replaceOrThrow(
   /function filtersForPipeline\(pipeline\) \{[\s\S]*?\n\}/,
   `function filtersForPipeline(pipeline) {\n  if (!["finance", "rent2buy", "cars"].includes(pipeline)) return BASE_FILTERS;\n  return [\n    ...BASE_FILTERS.slice(0, 2),\n    { value: "price_difference", label: "Price differences" },\n    ...BASE_FILTERS.slice(2),\n  ];\n}`,
