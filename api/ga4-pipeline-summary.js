@@ -10,18 +10,30 @@ function withLiveApplicationCompletions(summary,live){
   ...summary,
   liveApplicationDate:live.date||'',
   sites:summary.sites.map((site)=>{
+   const ga4Starts=number(site.applicationStartsToday);
    const ga4Completions=number(site.applicationCompletionsToday);
-   const liveCompletions=number(live.sites?.[site.key]?.completions);
-   const effectiveCompletions=Math.max(ga4Completions,liveCompletions);
-   const starts=number(site.applicationStartsToday);
-   const liveAhead=liveCompletions>ga4Completions;
+   const liveSite=live.sites?.[site.key]||null;
+   const liveStarts=number(liveSite?.starts);
+   const liveExplicitStarts=number(liveSite?.explicitStarts);
+   const liveCompletions=number(liveSite?.completions);
+   const hasLiveApplicationActivity=Boolean(liveSite)&&(liveStarts>0||liveCompletions>0);
+   const effectiveStarts=hasLiveApplicationActivity?liveStarts:ga4Starts;
+   const effectiveCompletions=hasLiveApplicationActivity?liveCompletions:ga4Completions;
+   const effectiveConversionRate=effectiveStarts>0&&effectiveCompletions<=effectiveStarts
+    ?effectiveCompletions/effectiveStarts
+    :effectiveStarts===0&&effectiveCompletions===0?0:null;
    return {
     ...site,
+    ga4ApplicationStartsToday:ga4Starts,
     ga4ApplicationCompletionsToday:ga4Completions,
+    liveApplicationStartsToday:liveStarts,
+    liveExplicitApplicationStartsToday:liveExplicitStarts,
     liveApplicationCompletionsToday:liveCompletions,
+    applicationStartsToday:effectiveStarts,
     applicationCompletionsToday:effectiveCompletions,
-    applicationCompletionSource:liveAhead?'first_party_live':'ga4',
-    effectiveConversionRate:starts>=effectiveCompletions&&starts>0?effectiveCompletions/starts:site.conversionRate,
+    applicationStartSource:hasLiveApplicationActivity?'first_party_live':'ga4',
+    applicationCompletionSource:hasLiveApplicationActivity?'first_party_live':'ga4',
+    effectiveConversionRate:hasLiveApplicationActivity?effectiveConversionRate:site.conversionRate,
    };
   }),
  };
