@@ -33,6 +33,17 @@ function importedMedia(id, url) {
   };
 }
 
+function readyManual({ id, purpose, url, selected = false }) {
+  return {
+    id,
+    purpose,
+    url,
+    eligibleForLaterSelection: true,
+    selected,
+    selectedAndReady: selected,
+  };
+}
+
 test("manual media contract keeps Van Finance and Rent2Buy destinations explicit", () => {
   assert.equal(normaliseManualMediaPurpose("van_finance_replacement")?.siteScope, "van_finance");
   assert.equal(normaliseManualMediaPurpose("rent2buy_template")?.siteScope, "rent2buy");
@@ -163,6 +174,76 @@ test("selected Rent2Buy template replaces its DealerKit primary without changing
     "https://static.wixstatic.com/media/dealerkit-two.jpg",
   ]);
   assert.equal(sets.rent2buy.galleryUrls.includes("https://static.wixstatic.com/media/dealerkit-primary.jpg"), false);
+});
+
+test("Van Finance can publish a manual-only gallery after every DealerKit source image is excluded", () => {
+  const primary = readyManual({
+    id: "manual-primary",
+    purpose: "van_finance_replacement",
+    url: "https://static.wixstatic.com/media/manual-primary.jpg",
+    selected: true,
+  });
+  const dueIn = readyManual({
+    id: "manual-due-in",
+    purpose: "van_finance_replacement",
+    url: "https://static.wixstatic.com/media/due-in-soon.jpg",
+  });
+  const sets = buildProductImageSets({
+    vehicle: { registration: "PN72JWY", images: [{ id: "dealerkit-only" }] },
+    decision: {
+      registration: "PN72JWY",
+      primaryImageId: "dealerkit-only",
+      imageOrderIds: ["dealerkit-only"],
+      excludedImageIds: ["dealerkit-only"],
+      rent2buyEnabled: false,
+    },
+    importedDealerKitMedia: [],
+    manualMediaReadiness: {
+      selections: { van_finance_replacement: primary },
+      items: [dueIn, primary],
+    },
+  });
+
+  assert.deepEqual(sets.vanFinance.dealerKitImageIds, []);
+  assert.deepEqual(sets.vanFinance.missingDealerKitImageIds, []);
+  assert.equal(sets.vanFinance.mainUrl, primary.url);
+  assert.deepEqual(sets.vanFinance.galleryUrls, [primary.url, dueIn.url]);
+  assert.equal(sets.vanFinance.ready, true);
+});
+
+test("Rent2Buy can publish a manual-only gallery after every DealerKit source image is excluded", () => {
+  const primary = readyManual({
+    id: "r2b-primary",
+    purpose: "rent2buy_template",
+    url: "https://static.wixstatic.com/media/r2b-primary.jpg",
+    selected: true,
+  });
+  const second = readyManual({
+    id: "r2b-second",
+    purpose: "rent2buy_template",
+    url: "https://static.wixstatic.com/media/r2b-second.jpg",
+  });
+  const sets = buildProductImageSets({
+    vehicle: { registration: "PN72JWY", images: [{ id: "dealerkit-only" }] },
+    decision: {
+      registration: "PN72JWY",
+      primaryImageId: "dealerkit-only",
+      imageOrderIds: ["dealerkit-only"],
+      excludedImageIds: ["dealerkit-only"],
+      rent2buyEnabled: true,
+    },
+    importedDealerKitMedia: [],
+    manualMediaReadiness: {
+      selections: { rent2buy_template: primary },
+      items: [second, primary],
+    },
+  });
+
+  assert.deepEqual(sets.rent2buy.dealerKitImageIds, []);
+  assert.deepEqual(sets.rent2buy.missingDealerKitImageIds, []);
+  assert.equal(sets.rent2buy.mainUrl, primary.url);
+  assert.deepEqual(sets.rent2buy.galleryUrls, [primary.url, second.url]);
+  assert.equal(sets.rent2buy.ready, true);
 });
 
 test("manual media constants stay bound to the verified Wix Media endpoints", () => {
