@@ -11,6 +11,22 @@ function patch(relativePath, before, after, label, already = "") {
 }
 
 patch(
+  "../api/_vansco-cache-utils.js",
+  String.raw`const REGISTRATION_PATTERN = /\b([A-Z]{2}[0-9]{2}\s?[A-Z]{3}|[A-Z][0-9]{1,3}\s?[A-Z]{3}|[A-Z]{3}\s?[0-9]{1,3}[A-Z]|[0-9]{1,4}\s?[A-Z]{1,3})\b/i;`,
+  String.raw`const REGISTRATION_PATTERN = /\b([A-Z]{2}[0-9]{2}\s?[A-Z]{3}|[A-Z][0-9]{1,3}\s?[A-Z]{3}|[A-Z]{3}\s?[0-9]{1,3}[A-Z]|[A-Z]{1,3}\s?[0-9]{1,4}|[0-9]{1,4}\s?[A-Z]{1,3})\b/i;`,
+  "dateless registration extraction",
+  String.raw`|[A-Z]{1,3}\s?[0-9]{1,4}|`
+);
+
+patch(
+  "../api/_vansco-cache-utils.js",
+  String.raw`const LEGACY_REG_PATTERN = /^(?:[A-Z][0-9]{1,3}[A-Z]{3}|[A-Z]{3}[0-9]{1,3}[A-Z]|[0-9]{1,4}[A-Z]{1,3})$/i;`,
+  String.raw`const LEGACY_REG_PATTERN = /^(?:[A-Z][0-9]{1,3}[A-Z]{3}|[A-Z]{3}[0-9]{1,3}[A-Z]|[A-Z]{1,3}[0-9]{1,4}|[0-9]{1,4}[A-Z]{1,3})$/i;`,
+  "dateless registration validation",
+  String.raw`|[A-Z]{1,3}[0-9]{1,4}|`
+);
+
+patch(
   "../pages/VanscoStockWatchPage.jsx",
   'value={summary.imagesReady} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "images_ready" }))}',
   'value={imageReadyError || (imageReadySummary && imageReadySummary.complete === false) ? "Unavailable" : summary.imagesReady} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "images_ready" }))}',
@@ -159,4 +175,4 @@ patch(
   "const rejectedSummary = invalidRecords.slice(0, 12)"
 );
 
-console.log("Applied DealerKit image-readiness fail-closed UI, safety-stop monitor classification, and rejected-row diagnostics.");
+console.log("Applied DealerKit image-readiness fail-closed UI, safety-stop monitor classification, dateless registration support, and rejected-row diagnostics.");
