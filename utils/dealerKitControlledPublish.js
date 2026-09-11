@@ -13,6 +13,12 @@ function element(tag, className, text) {
   return node;
 }
 
+function productLabel(product) {
+  if (product === "rent2buy") return "Rent2Buy";
+  if (product === "cars") return "Cars";
+  return "Van Finance";
+}
+
 function setStatus(root, text, state = "") {
   const status = root.querySelector("[data-controlled-publish-status]");
   if (!status) return;
@@ -58,22 +64,33 @@ function renderPayload(root, payload) {
   result.replaceChildren();
   const plan = payload?.plan || {};
   const media = payload?.media || {};
-  const productLabel = plan.mode === "rent2buy" ? "Rent2Buy" : plan.mode === "both" ? "Van Finance + Rent2Buy" : "Van Finance";
+  const label = productLabel(plan.mode || root.dataset.product);
   const unpreparedCount = media.unpreparedDealerKitImageIds?.length || 0;
   const processingCount = media.processingDealerKitImageIds?.length || 0;
+  const mainSource = plan.mode === "rent2buy"
+    ? plan.imageSets?.rent2buy?.mainSource
+    : plan.mode === "cars"
+      ? plan.imageSets?.cars?.mainSource
+      : plan.imageSets?.vanFinance?.mainSource;
 
   const summary = element("div", "dealerkit-wix-preview__summary");
   summary.append(
-    element("div", "", `Destination: ${productLabel}`),
+    element("div", "", `Destination: ${label}`),
     element("div", "", `Records to write: ${plan.targets?.length || 0}`),
     element("div", "", `Selected DealerKit photos READY: ${media.dealerKitReady || 0}/${media.dealerKitExpected || 0}`),
-    element("div", "", `Primary image: ${plan.mode === "rent2buy" ? plan.imageSets?.rent2buy?.mainSource || "not ready" : plan.imageSets?.vanFinance?.mainSource || "not ready"}`),
+    element("div", "", `Primary image: ${mainSource || "not ready"}`),
   );
   if (plan.rent2buy?.enabled && plan.rent2buy?.pricing) {
     const pricing = plan.rent2buy.pricing;
     summary.append(
       element("div", "", `Rent2Buy term: ${pricing.termMonths} months · ${pricing.upliftPercent}%`),
       element("div", "", `Rent2Buy: £${pricing.monthly} p/m · £${pricing.upfront} upfront · ${pricing.followingPayments} further payments`),
+    );
+  }
+  if (plan.mode === "cars" && Number.isFinite(Number(plan.retailPrice)) && Number.isFinite(Number(plan.monthlyPrice))) {
+    summary.append(
+      element("div", "", `Car retail: £${Number(plan.retailPrice).toLocaleString("en-GB")}`),
+      element("div", "", `Example monthly: FROM £${plan.monthlyPrice} P/M`),
     );
   }
   result.appendChild(summary);
@@ -91,10 +108,10 @@ function renderPayload(root, payload) {
     result.appendChild(blockers);
   }
 
-  const imageRule = element("div", "dealerkit-wix-preview__field-line", plan.mode === "rent2buy"
-    ? "The selected Rent2Buy primary becomes its card image and the first vehicle-page image. Van Finance images are untouched."
-    : "The selected Van Finance primary becomes its card image and the first vehicle-page image. Rent2Buy images are untouched.");
-  result.appendChild(imageRule);
+  let imageRuleText = "The selected Van Finance primary becomes its card image and the first vehicle-page image. Rent2Buy images are untouched.";
+  if (plan.mode === "rent2buy") imageRuleText = "The selected Rent2Buy primary becomes its card image and the first vehicle-page image. Van Finance images are untouched.";
+  if (plan.mode === "cars") imageRuleText = "The selected Cars primary becomes its card image and the first Cars vehicle-page image. Van Finance and Rent2Buy records are untouched.";
+  result.appendChild(element("div", "dealerkit-wix-preview__field-line", imageRuleText));
 
   const verdict = element("div", `dealerkit-wix-preview__verdict ${plan.canPublish ? "is-good" : "is-warning"}`, plan.canPublish
     ? "READY TO PUBLISH · All required checks for this product have passed."
@@ -123,7 +140,10 @@ async function loadPreview(root) {
     result.replaceChildren(element("div", "dealerkit-wix-preview__loading", "Checking DealerKit, selected images and Wix stock…"));
   }
   const product = clean(root.dataset.product) || "finance";
-  const response = await fetch(`/api/dealerkit-controlled-publish-preview?registration=${encodeURIComponent(registration)}&product=${encodeURIComponent(product)}`, {
+  const previewUrl = product === "cars"
+    ? `/api/dealerkit-car-controlled-publish-preview?registration=${encodeURIComponent(registration)}`
+    : `/api/dealerkit-controlled-publish-preview?registration=${encodeURIComponent(registration)}&product=${encodeURIComponent(product)}`;
+  const response = await fetch(previewUrl, {
     headers: buildMarketingAccessHeaders({ accept: "application/json" }), cache: "no-store",
   });
   const payload = await parseMarketingJsonResponse(response, "Could not build final publish readiness.");
@@ -134,14 +154,14 @@ function createPanel(registration, product = "finance") {
   const root = element("section", "dealerkit-wix-preview");
   root.setAttribute(ROOT_ATTRIBUTE, "true");
   root.dataset.registration = registration;
-  root.dataset.product = product === "rent2buy" ? "rent2buy" : "finance";
-  const productLabel = root.dataset.product === "rent2buy" ? "Rent2Buy" : "Van Finance";
+  root.dataset.product = ["finance", "rent2buy", "cars"].includes(product) ? product : "finance";
+  const labelText = productLabel(root.dataset.product);
 
   const top = element("div", "dealerkit-wix-preview__top");
   const copy = element("div", "dealerkit-wix-preview__copy");
   copy.append(
-    element("span", "dealerkit-wix-preview__eyebrow", `${productLabel.toUpperCase()} · DEALERKIT → WIX`),
-    element("strong", "", `Publish to ${productLabel}`),
+    element("span", "dealerkit-wix-preview__eyebrow", `${labelText.toUpperCase()} · DEALERKIT → WIX`),
+    element("strong", "", `Publish to ${labelText}`),
     element("p", "", "Checks run automatically. This panel only shows the next action you actually need."),
   );
   const actions = element("div", "dealerkit-wix-preview__actions");
@@ -169,7 +189,7 @@ function createPanel(registration, product = "finance") {
   prepare.disabled = true;
   prepare.hidden = true;
   prepare.setAttribute("data-controlled-publish-prepare", "true");
-  const publish = element("button", "dealerkit-wix-preview__apply", `Publish to ${productLabel}`);
+  const publish = element("button", "dealerkit-wix-preview__apply", `Publish to ${labelText}`);
   publish.type = "button";
   publish.disabled = true;
   publish.hidden = true;
@@ -219,17 +239,21 @@ function createPanel(registration, product = "finance") {
   publish.addEventListener("click", async () => {
     const payload = root._controlledPublishPayload;
     if (!confirmationInputMatches(root) || !payload?.plan?.canPublish || !payload.plan.confirmation) return;
-    const approved = window.confirm(`PUBLISH ${registration} TO LIVE ${productLabel.toUpperCase()} WIX?\n\nThis is the final live-write confirmation.`);
+    const approved = window.confirm(`PUBLISH ${registration} TO LIVE ${labelText.toUpperCase()} WIX?\n\nThis is the final live-write confirmation.`);
     if (!approved) return;
     publish.disabled = true;
     prepare.disabled = true;
     publish.textContent = "Publishing…";
     setStatus(root, "FINAL RECHECK", "is-busy");
     try {
-      const response = await fetch("/api/dealerkit-controlled-publish", {
+      const endpoint = root.dataset.product === "cars" ? "/api/dealerkit-car-controlled-publish" : "/api/dealerkit-controlled-publish";
+      const body = root.dataset.product === "cars"
+        ? { action: "publish_new_car", registration, confirmRegistration: normaliseRegistration(input.value), confirmation: payload.plan.confirmation }
+        : { action: "publish_new_vehicle", registration, confirmRegistration: normaliseRegistration(input.value), productMode: root.dataset.product, confirmation: payload.plan.confirmation };
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: buildMarketingAccessHeaders({ accept: "application/json", "content-type": "application/json" }),
-        body: JSON.stringify({ action: "publish_new_vehicle", registration, confirmRegistration: normaliseRegistration(input.value), productMode: root.dataset.product, confirmation: payload.plan.confirmation }),
+        body: JSON.stringify(body),
       });
       const published = await parseMarketingJsonResponse(response, "Controlled Wix publishing failed.");
       setStatus(root, published.verified ? "PUBLISHED + VERIFIED" : "CHECK RESULT", published.verified ? "is-good" : "is-warning");
@@ -241,7 +265,7 @@ function createPanel(registration, product = "finance") {
       result.replaceChildren(element("div", "dealerkit-wix-preview__error", error?.message || "Publishing failed. Check the rollback result before trying again."));
       try { await loadPreview(root); } catch {}
     } finally {
-      publish.textContent = `Publish to ${productLabel}`;
+      publish.textContent = `Publish to ${labelText}`;
       refreshActionState(root);
     }
   });
@@ -261,15 +285,19 @@ function installPanel() {
   if (typeof window === "undefined" || window.location.pathname !== "/vansco-stock-watch") return;
   const workspace = document.querySelector("[data-dealerkit-review-workspace]");
   if (!workspace || workspace.hidden) return;
+  const product = ["finance", "rent2buy", "cars"].includes(workspace.dataset.product) ? workspace.dataset.product : "finance";
   const gallery = workspace.querySelector("[data-dealerkit-product-gallery]");
-  if (!gallery) return;
-  const registration = normaliseRegistration(gallery.dataset.registration);
-  const product = workspace.dataset.product === "rent2buy" ? "rent2buy" : "finance";
-  if (!registration) return;
+  const body = workspace.querySelector("[data-dealerkit-review-body]");
+  const registration = product === "cars"
+    ? normaliseRegistration(workspace.querySelector("[data-dealerkit-review-title]")?.textContent)
+    : normaliseRegistration(gallery?.dataset.registration);
+  if (!registration || !body) return;
+
   let root = workspace.querySelector(`[${ROOT_ATTRIBUTE}]`);
   if (!root) {
     root = createPanel(registration, product);
-    gallery.insertAdjacentElement("afterend", root);
+    if (gallery) gallery.insertAdjacentElement("afterend", root);
+    else body.appendChild(root);
   } else if (root.dataset.registration !== registration || root.dataset.product !== product) {
     root.replaceWith(createPanel(registration, product));
   }
