@@ -184,4 +184,35 @@ patch({
 });
 
 fs.writeFileSync(targetPath, source);
-console.log("Applied DealerKit VFC copy/spec fix: richer listing headlines, robust source-backed technical data and complete equipment groups.");
+
+const carPath = fileURLToPath(new URL("../lib/dealerKitCarWixPlan.js", import.meta.url));
+let carSource = fs.readFileSync(carPath, "utf8");
+
+function patchCar({ label, before, after, already }) {
+  if (already && carSource.includes(already)) return;
+  const first = carSource.indexOf(before);
+  if (first === -1) throw new Error(`DealerKit Cars spec fix could not find: ${label}`);
+  if (carSource.indexOf(before, first + before.length) !== -1) throw new Error(`DealerKit Cars spec fix found duplicate anchor: ${label}`);
+  carSource = carSource.replace(before, after);
+}
+
+patchCar({
+  label: "shared technical reader import",
+  already: "sharedDealerKitTechnicalValue",
+  before: `} from "./vanscoWixPrice.js";\n\nconst clean`,
+  after: `} from "./vanscoWixPrice.js";\nimport { dealerKitTechnicalValue as sharedDealerKitTechnicalValue } from "./dealerKitVehicleEquipment.js";\n\nconst clean`,
+});
+
+patchCar({
+  label: "robust Cars technical values",
+  already: "const sharedValue = sharedDealerKitTechnicalValue(vehicle, labels);",
+  before: `function technicalValue(vehicle = {}, labels = []) {
+  const wanted = labels.map(normaliseLabel).filter(Boolean);`,
+  after: `function technicalValue(vehicle = {}, labels = []) {
+  const sharedValue = sharedDealerKitTechnicalValue(vehicle, labels);
+  if (sharedValue) return sharedValue;
+  const wanted = labels.map(normaliseLabel).filter(Boolean);`,
+});
+
+fs.writeFileSync(carPath, carSource);
+console.log("Applied DealerKit VFC/Cars copy/spec fix: source-backed technical data and complete Finance equipment groups.");
