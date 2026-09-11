@@ -21,7 +21,7 @@ const after = `export function isCronRequest(request, environment = process.env)
   const isExpectedSchedule = schedule === "*/15 * * * *";
   const isVercelCronAgent = /vercel-cron/.test(userAgent);
   if (!isExpectedSchedule || !isVercelCronAgent) return false;
-  if (expectedSecret) return authorization === `Bearer ${expectedSecret}`;
+  if (expectedSecret) return authorization === \`Bearer \${expectedSecret}\`;
   return true;
 }`;
 
