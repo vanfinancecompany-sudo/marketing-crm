@@ -31,8 +31,24 @@ function refreshActionState(root) {
   const typed = confirmationInputMatches(root);
   const prepare = root.querySelector("[data-controlled-publish-prepare]");
   const publish = root.querySelector("[data-controlled-publish-apply]");
-  if (prepare) prepare.disabled = !typed || !state || !(state.media?.missingDealerKitImageIds?.length);
-  if (publish) publish.disabled = !typed || !state?.plan?.canPublish;
+  const check = root.querySelector("[data-controlled-publish-check]");
+  const unpreparedCount = state?.media?.unpreparedDealerKitImageIds?.length || 0;
+  const processingCount = state?.media?.processingDealerKitImageIds?.length || 0;
+  const canPublish = Boolean(state?.plan?.canPublish);
+
+  if (prepare) {
+    prepare.hidden = unpreparedCount === 0;
+    prepare.disabled = !typed || !state || unpreparedCount === 0;
+  }
+  if (publish) {
+    publish.hidden = !canPublish;
+    publish.disabled = !typed || !canPublish;
+  }
+  if (check) {
+    check.hidden = !state || canPublish || unpreparedCount > 0;
+    check.disabled = false;
+    check.textContent = processingCount > 0 ? "Check image status" : "Check again";
+  }
 }
 
 function renderPayload(root, payload) {
@@ -43,12 +59,14 @@ function renderPayload(root, payload) {
   const plan = payload?.plan || {};
   const media = payload?.media || {};
   const productLabel = plan.mode === "rent2buy" ? "Rent2Buy" : plan.mode === "both" ? "Van Finance + Rent2Buy" : "Van Finance";
+  const unpreparedCount = media.unpreparedDealerKitImageIds?.length || 0;
+  const processingCount = media.processingDealerKitImageIds?.length || 0;
 
   const summary = element("div", "dealerkit-wix-preview__summary");
   summary.append(
     element("div", "", `Destination: ${productLabel}`),
-    element("div", "", `Records to create: ${plan.targets?.length || 0}`),
-    element("div", "", `DealerKit photos READY: ${media.dealerKitReady || 0}/${media.dealerKitExpected || 0}`),
+    element("div", "", `Records to write: ${plan.targets?.length || 0}`),
+    element("div", "", `Selected DealerKit photos READY: ${media.dealerKitReady || 0}/${media.dealerKitExpected || 0}`),
     element("div", "", `Primary image: ${plan.mode === "rent2buy" ? plan.imageSets?.rent2buy?.mainSource || "not ready" : plan.imageSets?.vanFinance?.mainSource || "not ready"}`),
   );
   if (plan.rent2buy?.enabled && plan.rent2buy?.pricing) {
@@ -60,8 +78,10 @@ function renderPayload(root, payload) {
   }
   result.appendChild(summary);
 
-  if (media.missingDealerKitImageIds?.length) {
-    result.appendChild(element("div", "dealerkit-wix-preview__messages dealerkit-wix-preview__messages--warnings", `${media.missingDealerKitImageIds.length} reviewed DealerKit image(s) still need preparing in Wix Media. This changes Media Manager only, never vehicle CMS rows.`));
+  if (unpreparedCount > 0) {
+    result.appendChild(element("div", "dealerkit-wix-preview__messages dealerkit-wix-preview__messages--warnings", `${unpreparedCount} selected DealerKit image(s) need preparing in Wix Media before this product can publish.`));
+  } else if (processingCount > 0) {
+    result.appendChild(element("div", "dealerkit-wix-preview__messages dealerkit-wix-preview__messages--warnings", `${processingCount} selected DealerKit image(s) are still processing in Wix Media. You do not need to press Prepare again; use Check image status.`));
   }
 
   if (plan.blockers?.length) {
@@ -77,23 +97,30 @@ function renderPayload(root, payload) {
   result.appendChild(imageRule);
 
   const verdict = element("div", `dealerkit-wix-preview__verdict ${plan.canPublish ? "is-good" : "is-warning"}`, plan.canPublish
-    ? "FINAL WRITE READY · Fresh DealerKit, Wix rows and all required Wix Media passed the release gates."
-    : "FINAL WRITE LOCKED · Resolve the blockers above, then check readiness again.");
+    ? "READY TO PUBLISH · All required checks for this product have passed."
+    : "NOT READY TO PUBLISH · Complete the single next action shown above, then the panel will recheck automatically.");
   result.appendChild(verdict);
   result.hidden = false;
 
-  setStatus(root, plan.canPublish ? "READY TO PUBLISH" : media.missingDealerKitImageIds?.length ? "PREPARE IMAGES" : "BLOCKED", plan.canPublish ? "is-good" : "is-warning");
+  const statusText = plan.canPublish
+    ? "READY TO PUBLISH"
+    : unpreparedCount > 0
+      ? "PREPARE IMAGES"
+      : processingCount > 0
+        ? "WIX PROCESSING"
+        : "BLOCKED";
+  setStatus(root, statusText, plan.canPublish ? "is-good" : processingCount > 0 ? "is-busy" : "is-warning");
   refreshActionState(root);
 }
 
 async function loadPreview(root) {
   const registration = normaliseRegistration(root.dataset.registration);
   if (!registration) return;
-  setStatus(root, "FRESH RECHECK", "is-busy");
+  setStatus(root, "CHECKING", "is-busy");
   const result = root.querySelector("[data-controlled-publish-result]");
   if (result) {
     result.hidden = false;
-    result.replaceChildren(element("div", "dealerkit-wix-preview__loading", "Re-reading DealerKit, review decisions, Wix Media and every relevant Wix CMS collection…"));
+    result.replaceChildren(element("div", "dealerkit-wix-preview__loading", "Checking DealerKit, selected images and Wix stock…"));
   }
   const product = clean(root.dataset.product) || "finance";
   const response = await fetch(`/api/dealerkit-controlled-publish-preview?registration=${encodeURIComponent(registration)}&product=${encodeURIComponent(product)}`, {
@@ -114,34 +141,38 @@ function createPanel(registration, product = "finance") {
   const copy = element("div", "dealerkit-wix-preview__copy");
   copy.append(
     element("span", "dealerkit-wix-preview__eyebrow", `${productLabel.toUpperCase()} · DEALERKIT → WIX`),
-    element("strong", "", `Prepare and publish to ${productLabel}`),
-    element("p", "", "Fresh DealerKit, image and Wix duplicate checks run automatically. No vehicle is published until you press Publish and accept the final confirmation."),
+    element("strong", "", `Publish to ${productLabel}`),
+    element("p", "", "Checks run automatically. This panel only shows the next action you actually need."),
   );
   const actions = element("div", "dealerkit-wix-preview__actions");
-  const status = element("span", "dealerkit-wix-preview__status", "CHECK FIRST");
+  const status = element("span", "dealerkit-wix-preview__status", "CHECKING");
   status.setAttribute("data-controlled-publish-status", "true");
-  const check = element("button", "dealerkit-review__save", "Refresh checks");
+  const check = element("button", "dealerkit-review__save", "Check again");
   check.type = "button";
+  check.hidden = true;
+  check.setAttribute("data-controlled-publish-check", "true");
   actions.append(status, check);
   top.append(copy, actions);
 
   const confirm = element("div", "dealerkit-wix-preview__confirm");
   const label = document.createElement("label");
-  label.textContent = `Type ${registration} to unlock Prepare and Publish`;
+  label.textContent = `Type ${registration} to unlock the next step`;
   const input = document.createElement("input");
   input.type = "text";
   input.autocomplete = "off";
   input.spellcheck = false;
-  input.placeholder = registration;
+  input.placeholder = `Type ${registration}`;
   input.setAttribute("data-controlled-publish-confirm", "true");
   label.appendChild(input);
   const prepare = element("button", "dealerkit-wix-preview__apply", "Prepare images");
   prepare.type = "button";
   prepare.disabled = true;
+  prepare.hidden = true;
   prepare.setAttribute("data-controlled-publish-prepare", "true");
   const publish = element("button", "dealerkit-wix-preview__apply", `Publish to ${productLabel}`);
   publish.type = "button";
   publish.disabled = true;
+  publish.hidden = true;
   publish.setAttribute("data-controlled-publish-apply", "true");
   confirm.append(label, prepare, publish);
 
@@ -156,17 +187,17 @@ function createPanel(registration, product = "finance") {
     check.textContent = "Checking…";
     try { await loadPreview(root); }
     catch (error) { setStatus(root, "CHECK FAILED", "is-warning"); result.replaceChildren(element("div", "dealerkit-wix-preview__error", error?.message || "Could not check final readiness.")); }
-    finally { check.disabled = false; check.textContent = "Refresh checks"; }
+    finally { refreshActionState(root); }
   });
 
   prepare.addEventListener("click", async () => {
     if (!confirmationInputMatches(root)) return;
-    const approved = window.confirm(`Prepare the approved DealerKit photographs for ${registration} in Wix Media?\n\nThis may add image files to Wix Media Manager, but it will NOT create or update any vehicle CMS row.`);
+    const approved = window.confirm(`Prepare the selected DealerKit photographs for ${registration} in Wix Media?\n\nThis changes Wix Media only. It does not publish the vehicle.`);
     if (!approved) return;
     prepare.disabled = true;
     publish.disabled = true;
-    prepare.textContent = "Preparing Wix images…";
-    setStatus(root, "MEDIA PREPARATION", "is-busy");
+    prepare.textContent = "Preparing…";
+    setStatus(root, "PREPARING IMAGES", "is-busy");
     try {
       const response = await fetch("/api/dealerkit-wix-prepare-media", {
         method: "POST",
@@ -188,11 +219,11 @@ function createPanel(registration, product = "finance") {
   publish.addEventListener("click", async () => {
     const payload = root._controlledPublishPayload;
     if (!confirmationInputMatches(root) || !payload?.plan?.canPublish || !payload.plan.confirmation) return;
-    const approved = window.confirm(`PUBLISH ${registration} TO LIVE ${productLabel.toUpperCase()} WIX?\n\nThis will create only the reviewed ${productLabel} records. The selected primary becomes the listing image and first gallery image. This is the final live-write confirmation.`);
+    const approved = window.confirm(`PUBLISH ${registration} TO LIVE ${productLabel.toUpperCase()} WIX?\n\nThis is the final live-write confirmation.`);
     if (!approved) return;
     publish.disabled = true;
     prepare.disabled = true;
-    publish.textContent = "Rechecking + publishing…";
+    publish.textContent = "Publishing…";
     setStatus(root, "FINAL RECHECK", "is-busy");
     try {
       const response = await fetch("/api/dealerkit-controlled-publish", {
@@ -204,6 +235,7 @@ function createPanel(registration, product = "finance") {
       setStatus(root, published.verified ? "PUBLISHED + VERIFIED" : "CHECK RESULT", published.verified ? "is-good" : "is-warning");
       result.replaceChildren(element("div", "dealerkit-wix-preview__verdict is-good", published.message || `${registration} was published and verified.`));
       root._controlledPublishPayload = null;
+      refreshActionState(root);
     } catch (error) {
       setStatus(root, "PUBLISH BLOCKED", "is-warning");
       result.replaceChildren(element("div", "dealerkit-wix-preview__error", error?.message || "Publishing failed. Check the rollback result before trying again."));
@@ -218,6 +250,8 @@ function createPanel(registration, product = "finance") {
     setStatus(root, "CHECK FAILED", "is-warning");
     result.hidden = false;
     result.replaceChildren(element("div", "dealerkit-wix-preview__error", error?.message || "Could not check readiness."));
+    root._controlledPublishPayload = { plan: { canPublish: false }, media: {} };
+    refreshActionState(root);
   }));
 
   return root;
