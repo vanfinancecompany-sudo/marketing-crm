@@ -84,6 +84,31 @@ export function buildFinanceApplicationFunnel(rows = []) {
   };
 }
 
+async function addSessionEnvironment(supabase, rows = []) {
+  const blockedSessionIds = [...uniqueSessions(rows.filter((row) => row.event_name === 'finance_application_step_blocked'))];
+  if (!blockedSessionIds.length) return rows;
+
+  const { data, error } = await supabase
+    .from('site_analytics_sessions')
+    .select('session_id,device_category,browser_category')
+    .in('session_id', blockedSessionIds)
+    .limit(10000);
+
+  // Device/browser is diagnostic only. Never break the funnel if the
+  // supplemental session lookup is unavailable.
+  if (error) return rows;
+
+  const bySession = new Map((data || []).map((session) => [String(session.session_id || ''), session]));
+  return rows.map((row) => {
+    const session = bySession.get(String(row?.session_id || ''));
+    return session ? {
+      ...row,
+      device_category: session.device_category || null,
+      browser_category: session.browser_category || null,
+    } : row;
+  });
+}
+
 export default async function handler(request, response) {
   if (request.method !== 'GET') return response.status(405).json({ ok: false, message: 'Method not allowed.' });
   response.setHeader('Cache-Control', 'no-store, max-age=0');
@@ -94,7 +119,7 @@ export default async function handler(request, response) {
     const supabase = getSupabaseServiceAdmin();
     const { data, error } = await supabase
       .from('site_analytics_events')
-      .select('session_id,event_name,metadata,device_category,browser_category,occurred_at')
+      .select('session_id,event_name,metadata,occurred_at')
       .eq('site_origin', SITE_ORIGIN)
       .in('event_name', EVENTS)
       .gte('occurred_at', startIso)
@@ -102,11 +127,13 @@ export default async function handler(request, response) {
       .order('occurred_at', { ascending: true })
       .limit(10000);
     if (error) throw error;
+
+    const rows = await addSessionEnvironment(supabase, data || []);
     return response.status(200).json({
       ok: true,
       date,
       checkedAt: new Date().toISOString(),
-      ...buildFinanceApplicationFunnel(data || []),
+      ...buildFinanceApplicationFunnel(rows),
     });
   } catch {
     return response.status(500).json({ ok: false, message: 'Finance application funnel could not be loaded.' });

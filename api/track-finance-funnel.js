@@ -1,6 +1,8 @@
 import { getSupabaseServiceAdmin, isMissingSupabaseObjectError } from './_vansco-cache-utils.js';
 
 const ALLOWED_ORIGINS = new Set([
+  'https://www.vanfinancecompany.co.uk',
+  'https://vanfinancecompany.co.uk',
   'https://vanfinance.co',
   'https://www.vanfinance.co',
 ]);
@@ -150,7 +152,7 @@ export default async function handler(request, response) {
       p_event_name: payload.eventName,
       p_occurred_at: new Date().toISOString(),
       p_path: '/apply',
-      p_page_url: 'https://vanfinance.co/apply',
+      p_page_url: 'https://www.vanfinancecompany.co.uk/apply',
       p_landing_path: '/apply',
       p_site_origin: SITE_ORIGIN,
       p_referrer: payload.referrer,
