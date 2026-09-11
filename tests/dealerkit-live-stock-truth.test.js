@@ -18,7 +18,7 @@ test("final Stock Watch uses live Wix listing presence for Finance, Rent2Buy and
   assert.match(page, /Stock Watch classification is paused for this tab rather than falling back to CRM stock/);
 });
 
-test("Cars can open and save a Cars-specific DealerKit review without inheriting van product controls", () => {
+test("Cars can open, save and use a Cars-specific controlled publish lane without inheriting van product galleries", () => {
   const detailApi = read("api/dealerkit-stock-detail.js");
   const review = read("utils/dealerKitReviewWorkspace.js");
   const productGallery = read("utils/dealerKitProductGalleryWorkspace.js");
@@ -29,7 +29,10 @@ test("Cars can open and save a Cars-specific DealerKit review without inheriting
   assert.match(review, /Saved Cars review\. Nothing has been published\./);
   assert.match(review, /\["finance", "rent2buy", "cars"\]\.includes\(product\)/);
   assert.match(productGallery, /if \(workspace\.dataset\.product === "cars"\) return;/);
-  assert.match(controlledPublish, /if \(workspace\.dataset\.product === "cars"\) return;/);
+  assert.match(controlledPublish, /dealerkit-car-controlled-publish-preview/);
+  assert.match(controlledPublish, /dealerkit-car-controlled-publish/);
+  assert.match(controlledPublish, /publish_new_car/);
+  assert.doesNotMatch(controlledPublish, /if \(workspace\.dataset\.product === "cars"\) return;/);
 });
 
 test("typed registration gate is visibly empty and historical detail pages are reusable", () => {
