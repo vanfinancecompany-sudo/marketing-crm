@@ -16,10 +16,7 @@ import {
   carWixCurrentFields,
   rent2BuyWixCurrentFields,
 } from "../lib/dealerKitPublishedPrice.js";
-import {
-  STANDALONE_RENT2BUY_WIX_SITE_ID,
-  VAN_FINANCE_RENT2BUY_WIX_SITE_ID,
-} from "../lib/dealerKitRent2BuyWixPlan.js";
+import { VAN_FINANCE_RENT2BUY_WIX_SITE_ID } from "../lib/dealerKitRent2BuyWixPlan.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value ?? "").trim().slice(0, limit);
@@ -59,26 +56,21 @@ function firstValue(environment, names, limit = 5000) {
 function wixConfigurations(environment = process.env) {
   const apiBaseUrl = clean(environment.WIX_API_BASE_URL, 1000) || "https://www.wixapis.com";
 
-  // The long-running Finance price updater has always used WIX_API_KEY. Keep that
-  // write-capable identity first for Van Finance and its Rent2Buy collections.
-  // WIX_FINANCE_API_KEY can remain a read/create fallback for other workflows.
+  // Finance and Rent2Buy both write to the Van Finance Wix CMS. The standalone
+  // Rent2Buy website reads this shared CMS and is not a second write target.
   const financeApiKey = firstValue(environment, ["WIX_API_KEY", "WIX_FINANCE_API_KEY"]);
   const financeSiteId = firstValue(environment, ["WIX_SITE_ID", "WIX_FINANCE_SITE_ID"], 500) || VAN_FINANCE_RENT2BUY_WIX_SITE_ID;
 
   const carApiKey = firstValue(environment, ["WIX_CAR_API_KEY", "WIX_API_KEY", "WIX_FINANCE_API_KEY"]);
   const carSiteId = firstValue(environment, ["WIX_CAR_SITE_ID", "WIX_SITE_ID", "WIX_FINANCE_SITE_ID"], 500) || financeSiteId;
 
-  const standaloneApiKey = firstValue(environment, ["WIX_RENT2BUY_API_KEY", "WIX_API_KEY", "WIX_FINANCE_API_KEY"]);
-
   if (!financeApiKey) throw new ApiError(500, "Van Finance Wix price updating is not configured.");
   if (!carApiKey) throw new ApiError(500, "Car Wix price updating is not configured.");
-  if (!standaloneApiKey) throw new ApiError(500, "Standalone Rent2Buy Wix price updating is not configured.");
 
   return {
     finance: { apiKey: financeApiKey, siteId: financeSiteId, siteLabel: "VAN FINANCE Wix", apiBaseUrl },
     cars: { apiKey: carApiKey, siteId: carSiteId, siteLabel: "CAR Wix", apiBaseUrl },
-    rent2buyPrimary: { apiKey: financeApiKey, siteId: VAN_FINANCE_RENT2BUY_WIX_SITE_ID, siteLabel: "VAN FINANCE Wix · Rent2Buy", apiBaseUrl },
-    rent2buyStandalone: { apiKey: standaloneApiKey, siteId: STANDALONE_RENT2BUY_WIX_SITE_ID, siteLabel: "RENT2BUY VANS Wix", apiBaseUrl },
+    rent2buyPrimary: { apiKey: financeApiKey, siteId: VAN_FINANCE_RENT2BUY_WIX_SITE_ID, siteLabel: "VAN FINANCE Wix · Rent2Buy shared CMS", apiBaseUrl },
   };
 }
 
@@ -207,28 +199,21 @@ async function carPreview(configuration, vehicle) {
   };
 }
 
-async function rent2BuyPreview(configurations, vehicle) {
-  const queriedSites = await Promise.all(configurations.map(async (configuration) => ({
-    configuration,
-    rows: await Promise.all(RENT2BUY_PRICE_COLLECTIONS.map(async (collection) => ({ collection, item: await queryRegistration(configuration, collection, vehicle.registration) }))),
-  })));
-  for (const { configuration, rows } of queriedSites) {
-    const master = rows.find(({ collection }) => collection.id === "ALLRENT2BUYVANS");
-    if (!master?.item) throw new ApiError(409, `${vehicle.registration} is not published in ${configuration.siteLabel} ALLRENT2BUYVANS. Price sync is held so the two Rent2Buy sites cannot drift.`);
-  }
-  const pickup = queriedSites.some(({ rows }) => rows.some(({ collection, item }) => collection.id === "PICKUPS" && item));
+async function rent2BuyPreview(configuration, vehicle) {
+  const rows = await Promise.all(RENT2BUY_PRICE_COLLECTIONS.map(async (collection) => ({ collection, item: await queryRegistration(configuration, collection, vehicle.registration) })));
+  const master = rows.find(({ collection }) => collection.id === "ALLRENT2BUYVANS");
+  if (!master?.item) throw new ApiError(409, `${vehicle.registration} is not published in the shared Rent2Buy ALLRENT2BUYVANS collection. Nothing was changed.`);
+
+  const pickup = rows.some(({ collection, item }) => collection.id === "PICKUPS" && item);
   const pricing = calculatePublishedRent2BuyPricing({ retailPrice: vehicle.retailPrice, mileage: vehicle.mileage, vatStatus: vehicle.vatStatus, pickup });
   if (!pricing) throw new ApiError(409, "Rent2Buy pricing could not be safely recalculated from the current DealerKit retail price and mileage.");
 
-  const matches = [];
-  for (const { configuration, rows } of queriedSites) {
-    const standalone = configuration.siteId === STANDALONE_RENT2BUY_WIX_SITE_ID;
-    for (const { collection, item } of rows) {
-      if (!item) continue;
-      const patch = buildRent2BuyWixPricePatch(collection, item, pricing, { standalone });
-      if (patch) matches.push(makeMatch(configuration, collection, item, rent2BuyWixCurrentFields(collection, item, { standalone }), patch.fields));
-    }
-  }
+  const matches = rows.flatMap(({ collection, item }) => {
+    if (!item) return [];
+    const patch = buildRent2BuyWixPricePatch(collection, item, pricing, { standalone: false });
+    return patch ? [makeMatch(configuration, collection, item, rent2BuyWixCurrentFields(collection, item, { standalone: false }), patch.fields)] : [];
+  });
+
   return {
     pipeline: "rent2buy",
     registration: vehicle.registration,
@@ -270,10 +255,7 @@ async function patchFields(configuration, match, fields) {
 function configurationForMatch(configurations, preview, match) {
   if (preview.pipeline === "finance") return configurations.finance;
   if (preview.pipeline === "cars") return configurations.cars;
-  if (preview.pipeline === "rent2buy") {
-    if (match.site_id === configurations.rent2buyPrimary.siteId) return configurations.rent2buyPrimary;
-    if (match.site_id === configurations.rent2buyStandalone.siteId) return configurations.rent2buyStandalone;
-  }
+  if (preview.pipeline === "rent2buy" && match.site_id === configurations.rent2buyPrimary.siteId) return configurations.rent2buyPrimary;
   return null;
 }
 
@@ -305,7 +287,7 @@ async function applyPreview(configurations, preview) {
 async function buildPreview(configurations, pipeline, vehicle) {
   if (pipeline === "finance") return financePreview(configurations.finance, vehicle);
   if (pipeline === "cars") return carPreview(configurations.cars, vehicle);
-  if (pipeline === "rent2buy") return rent2BuyPreview([configurations.rent2buyPrimary, configurations.rent2buyStandalone], vehicle);
+  if (pipeline === "rent2buy") return rent2BuyPreview(configurations.rent2buyPrimary, vehicle);
   throw new ApiError(400, "Unsupported price-update pipeline.");
 }
 
