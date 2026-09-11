@@ -124,5 +124,5 @@ test("Euro status may be taken from the DealerKit derivative/title but MPG is ne
 
 test("temporary DealerKit technical backfill dry-run is safe on the dedicated preview branch", { timeout: 600000 }, async () => {
   const result = await runTechnicalBackfillBuild({ execute: false });
-  assert.equal(result.safe, true, result.error || "Temporary DealerKit technical backfill dry-run was not safe.");
+  assert.equal(result.safe, true, JSON.stringify({ error: result.error || null, summary: result.summary || null }));
 });
