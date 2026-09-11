@@ -58,14 +58,26 @@ function firstValue(environment, names, limit = 5000) {
 
 function wixConfigurations(environment = process.env) {
   const apiBaseUrl = clean(environment.WIX_API_BASE_URL, 1000) || "https://www.wixapis.com";
-  const primaryApiKey = firstValue(environment, ["WIX_FINANCE_API_KEY", "WIX_CAR_API_KEY", "WIX_API_KEY"]);
+
+  // The long-running Finance price updater has always used WIX_API_KEY. Keep that
+  // write-capable identity first for Van Finance and its Rent2Buy collections.
+  // WIX_FINANCE_API_KEY can remain a read/create fallback for other workflows.
+  const financeApiKey = firstValue(environment, ["WIX_API_KEY", "WIX_FINANCE_API_KEY"]);
+  const financeSiteId = firstValue(environment, ["WIX_SITE_ID", "WIX_FINANCE_SITE_ID"], 500) || VAN_FINANCE_RENT2BUY_WIX_SITE_ID;
+
+  const carApiKey = firstValue(environment, ["WIX_CAR_API_KEY", "WIX_API_KEY", "WIX_FINANCE_API_KEY"]);
+  const carSiteId = firstValue(environment, ["WIX_CAR_SITE_ID", "WIX_SITE_ID", "WIX_FINANCE_SITE_ID"], 500) || financeSiteId;
+
   const standaloneApiKey = firstValue(environment, ["WIX_RENT2BUY_API_KEY", "WIX_API_KEY", "WIX_FINANCE_API_KEY"]);
-  const primarySiteId = firstValue(environment, ["WIX_FINANCE_SITE_ID", "WIX_CAR_SITE_ID", "WIX_SITE_ID"], 500) || VAN_FINANCE_RENT2BUY_WIX_SITE_ID;
-  if (!primaryApiKey) throw new ApiError(500, "Van Finance Wix price updating is not configured.");
+
+  if (!financeApiKey) throw new ApiError(500, "Van Finance Wix price updating is not configured.");
+  if (!carApiKey) throw new ApiError(500, "Car Wix price updating is not configured.");
   if (!standaloneApiKey) throw new ApiError(500, "Standalone Rent2Buy Wix price updating is not configured.");
+
   return {
-    primary: { apiKey: primaryApiKey, siteId: primarySiteId, siteLabel: "VAN FINANCE Wix", apiBaseUrl },
-    rent2buyPrimary: { apiKey: primaryApiKey, siteId: VAN_FINANCE_RENT2BUY_WIX_SITE_ID, siteLabel: "VAN FINANCE Wix · Rent2Buy", apiBaseUrl },
+    finance: { apiKey: financeApiKey, siteId: financeSiteId, siteLabel: "VAN FINANCE Wix", apiBaseUrl },
+    cars: { apiKey: carApiKey, siteId: carSiteId, siteLabel: "CAR Wix", apiBaseUrl },
+    rent2buyPrimary: { apiKey: financeApiKey, siteId: VAN_FINANCE_RENT2BUY_WIX_SITE_ID, siteLabel: "VAN FINANCE Wix · Rent2Buy", apiBaseUrl },
     rent2buyStandalone: { apiKey: standaloneApiKey, siteId: STANDALONE_RENT2BUY_WIX_SITE_ID, siteLabel: "RENT2BUY VANS Wix", apiBaseUrl },
   };
 }
@@ -255,16 +267,21 @@ async function patchFields(configuration, match, fields) {
   });
 }
 
-function configurationBySite(configurations) {
-  return new Map([configurations.primary, configurations.rent2buyPrimary, configurations.rent2buyStandalone].map((configuration) => [configuration.siteId, configuration]));
+function configurationForMatch(configurations, preview, match) {
+  if (preview.pipeline === "finance") return configurations.finance;
+  if (preview.pipeline === "cars") return configurations.cars;
+  if (preview.pipeline === "rent2buy") {
+    if (match.site_id === configurations.rent2buyPrimary.siteId) return configurations.rent2buyPrimary;
+    if (match.site_id === configurations.rent2buyStandalone.siteId) return configurations.rent2buyStandalone;
+  }
+  return null;
 }
 
 async function applyPreview(configurations, preview) {
-  const bySite = configurationBySite(configurations);
   const applied = [];
   try {
     for (const match of preview.matches) {
-      const configuration = bySite.get(match.site_id);
+      const configuration = configurationForMatch(configurations, preview, match);
       if (!configuration) throw new ApiError(500, `No Wix configuration is available for ${match.site_label || match.site_id}.`);
       await patchFields(configuration, match, match.proposed);
       applied.push(match);
@@ -273,7 +290,7 @@ async function applyPreview(configurations, preview) {
   } catch (error) {
     const rollback = [];
     for (const match of [...applied].reverse()) {
-      const configuration = bySite.get(match.site_id);
+      const configuration = configurationForMatch(configurations, preview, match);
       try {
         await patchFields(configuration, match, match.current);
         rollback.push({ site_id: match.site_id, collection_id: match.collection_id, ok: true });
@@ -286,8 +303,8 @@ async function applyPreview(configurations, preview) {
 }
 
 async function buildPreview(configurations, pipeline, vehicle) {
-  if (pipeline === "finance") return financePreview(configurations.primary, vehicle);
-  if (pipeline === "cars") return carPreview(configurations.primary, vehicle);
+  if (pipeline === "finance") return financePreview(configurations.finance, vehicle);
+  if (pipeline === "cars") return carPreview(configurations.cars, vehicle);
   if (pipeline === "rent2buy") return rent2BuyPreview([configurations.rent2buyPrimary, configurations.rent2buyStandalone], vehicle);
   throw new ApiError(400, "Unsupported price-update pipeline.");
 }
@@ -302,7 +319,7 @@ export default async function handler(request, response) {
     body = parseBody(request);
     const action = clean(body.action, 30).toLowerCase();
     const pipeline = clean(body.pipeline, 30).toLowerCase();
-    if (!['preview', 'update'].includes(action)) throw new ApiError(400, "Unsupported action.");
+    if (!["preview", "update"].includes(action)) throw new ApiError(400, "Unsupported action.");
     if (!["finance", "rent2buy", "cars"].includes(pipeline)) throw new ApiError(400, "Choose Finance Vans, Rent2Buy Vans or Cars.");
 
     const vehicle = await freshDealerKitVehicle(body, pipeline);
