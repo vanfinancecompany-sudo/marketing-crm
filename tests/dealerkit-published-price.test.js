@@ -32,12 +32,12 @@ test("Rent2Buy recalculates monthly and initial rentals from DealerKit retail an
   assert.equal(pricing.followingPayments, 48);
 
   const master = RENT2BUY_PRICE_COLLECTIONS.find((collection) => collection.id === "ALLRENT2BUYVANS");
-  const patch = buildRent2BuyWixPricePatch(master, { id: "r2b-master", data: {} }, pricing, { standalone: true });
+  const patch = buildRent2BuyWixPricePatch(master, { id: "r2b-master", data: {} }, pricing, { standalone: false });
   assert.equal(patch.fields.mth, "£467 PM");
   assert.equal(patch.fields.weekly, "x48");
   assert.equal(patch.fields.initialRental2250Vat, "INITIAL RENTAL £1401 +VAT");
-  assert.equal(patch.fields.weeklyPrice1, "x48");
-  assert.equal(patch.fields.monthlyPriceNumeric, 467);
+  assert.equal(patch.fields.weeklyPrice1, undefined);
+  assert.equal(patch.fields.monthlyPriceNumeric, undefined);
 });
 
 test("Rent2Buy pickup price sync keeps the four-upfront / term-minus-one rule", () => {
@@ -58,18 +58,18 @@ test("Rent2Buy detail price patch updates all public rental fields together", ()
   assert.equal(patch.fields.weeklyPrice, "£467 P/M");
 });
 
-test("published price endpoint rechecks DealerKit and protects both Rent2Buy Wix sites", async () => {
+test("published price endpoint rechecks DealerKit and updates only the shared Rent2Buy Wix CMS", async () => {
   const source = await readFile(new URL("api/dealerkit-published-price.js", root), "utf8");
   assert.match(source, /fetchDealerKitStockDetail/);
   assert.match(source, /VAN_FINANCE_RENT2BUY_WIX_SITE_ID/);
-  assert.match(source, /STANDALONE_RENT2BUY_WIX_SITE_ID/);
+  assert.doesNotMatch(source, /STANDALONE_RENT2BUY_WIX_SITE_ID/);
   assert.match(source, /ALLRENT2BUYVANS/);
-  assert.match(source, /Price sync is held so the two Rent2Buy sites cannot drift/);
+  assert.match(source, /shared Rent2Buy ALLRENT2BUYVANS collection/);
   assert.match(source, /confirmationMatchesPreview/);
   assert.match(source, /rollback/);
 });
 
-test("published price endpoint keeps the proven VFC write key ahead of read/create fallbacks", async () => {
+test("published price endpoint keeps the proven VFC write key for shared Rent2Buy CMS", async () => {
   const source = await readFile(new URL("api/dealerkit-published-price.js", root), "utf8");
   assert.match(source, /firstValue\(environment, \["WIX_API_KEY", "WIX_FINANCE_API_KEY"\]\)/);
   assert.match(source, /rent2buyPrimary: \{ apiKey: financeApiKey/);
