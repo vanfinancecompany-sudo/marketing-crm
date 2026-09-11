@@ -6,7 +6,7 @@ import { DEALERKIT_MANUAL_MEDIA_TABLE, WIX_MEDIA_GET_FILE_URL, manualMediaRowToC
 import { buildDealerKitWixManualMediaReadiness } from "../lib/dealerKitWixManualMediaReadiness.js";
 import { DEALERKIT_IMPORTED_MEDIA_TABLE, buildProductImageSets, importedMediaRowToClient } from "../lib/dealerKitWixVehicleMedia.js";
 import { RENT2BUY_CATEGORY_COLLECTIONS } from "../lib/dealerKitRent2BuyPlan.js";
-import { VAN_FINANCE_RENT2BUY_WIX_SITE_ID, STANDALONE_RENT2BUY_WIX_SITE_ID } from "../lib/dealerKitRent2BuyWixPlan.js";
+import { VAN_FINANCE_RENT2BUY_WIX_SITE_ID } from "../lib/dealerKitRent2BuyWixPlan.js";
 import { buildControlledPublishConfirmation, buildControlledVehiclePublishPlan } from "../lib/dealerKitControlledPublishPlan.js";
 
 const clean = (value, limit = 10000) => String(value ?? "").trim().slice(0, limit);
@@ -37,14 +37,14 @@ function firstConfiguredKey(environment, names = []) {
 export function controlledRent2BuyWixConfigurations(environment = process.env, primaryConfiguration = null) {
   const primary = primaryConfiguration || controlledWixConfiguration(environment);
   const apiBaseUrl = clean(environment.WIX_API_BASE_URL, 1000) || primary.apiBaseUrl || "https://www.wixapis.com";
-  const financeKey = firstConfiguredKey(environment, ["WIX_FINANCE_API_KEY", "WIX_API_KEY", "WIX_RENT2BUY_API_KEY"])
+  const financeKey = firstConfiguredKey(environment, ["WIX_API_KEY", "WIX_FINANCE_API_KEY", "WIX_RENT2BUY_API_KEY"])
     || (primary.siteId === VAN_FINANCE_RENT2BUY_WIX_SITE_ID ? { apiKey: primary.apiKey, apiKeySource: "WIX_API_KEY" } : null);
-  const standaloneKey = firstConfiguredKey(environment, ["WIX_RENT2BUY_API_KEY", "WIX_API_KEY", "WIX_FINANCE_API_KEY"]);
   if (!financeKey?.apiKey) throw new ControlledPublishError(500, "Van Finance Wix publishing credentials are not configured.");
-  if (!standaloneKey?.apiKey) throw new ControlledPublishError(500, "Standalone Rent2Buy Wix publishing credentials are not configured.");
+
+  // Rent2BuyVans.co.uk reads these collections from the Van Finance Wix site.
+  // The standalone Wix site's old CMS is no longer a write target.
   return [
-    { ...financeKey, apiBaseUrl, siteId: VAN_FINANCE_RENT2BUY_WIX_SITE_ID, siteLabel: "VAN FINANCE Wix · Rent2Buy", siteRole: "authoritative" },
-    { ...standaloneKey, apiBaseUrl, siteId: STANDALONE_RENT2BUY_WIX_SITE_ID, siteLabel: "RENT2BUY VANS Wix", siteRole: "mirror" },
+    { ...financeKey, apiBaseUrl, siteId: VAN_FINANCE_RENT2BUY_WIX_SITE_ID, siteLabel: "VAN FINANCE Wix · Rent2Buy shared CMS", siteRole: "authoritative" },
   ];
 }
 
