@@ -11,6 +11,29 @@ function authorised(request, environment = process.env) {
   return Boolean(expected && (header === expected || bearer === expected));
 }
 
+function selectedDealerKitIds(imageSets = {}, productMode) {
+  if (productMode === "rent2buy") return imageSets.rent2buy?.dealerKitImageIds || [];
+  if (productMode === "finance") return imageSets.vanFinance?.dealerKitImageIds || [];
+  return imageSets.dealerKitImageIds || [];
+}
+
+function productMediaSummary(state, productMode) {
+  const selectedIds = selectedDealerKitIds(state.imageSets, productMode);
+  const importedById = new Map((state.importedDealerKitMedia || []).map((item) => [clean(item?.dealerKitImageId, 300), item]));
+  const readyIds = selectedIds.filter((id) => importedById.get(id)?.ready);
+  const unpreparedIds = selectedIds.filter((id) => !importedById.has(id));
+  const processingIds = selectedIds.filter((id) => importedById.has(id) && !importedById.get(id)?.ready);
+  return {
+    dealerKitImported: selectedIds.filter((id) => importedById.has(id)).length,
+    dealerKitExpected: selectedIds.length,
+    dealerKitReady: readyIds.length,
+    missingDealerKitImageIds: [...unpreparedIds, ...processingIds],
+    unpreparedDealerKitImageIds: unpreparedIds,
+    processingDealerKitImageIds: processingIds,
+    manualSelectedReady: state.manualMediaReadiness.selectedReady,
+  };
+}
+
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (!authorised(request)) return response.status(401).json({ ok: false, message: "Marketing CRM access is required." });
@@ -26,13 +49,7 @@ export default async function handler(request, response) {
       writesAttempted: false,
       registration: state.registration,
       plan: state.plan,
-      media: {
-        dealerKitImported: state.importedDealerKitMedia.length,
-        dealerKitExpected: state.imageSets.dealerKitImageIds.length,
-        dealerKitReady: state.importedDealerKitMedia.filter((item) => item.ready).length,
-        missingDealerKitImageIds: state.imageSets.missingDealerKitImageIds,
-        manualSelectedReady: state.manualMediaReadiness.selectedReady,
-      },
+      media: productMediaSummary(state, productMode),
     });
   } catch (error) {
     response.status(error?.status || 502).json({ ok: false, readOnly: true, writesAttempted: false, message: error?.message || "Could not build the final controlled publish preview.", details: error?.details || null });
