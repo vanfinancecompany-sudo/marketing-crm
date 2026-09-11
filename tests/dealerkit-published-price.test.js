@@ -69,6 +69,15 @@ test("published price endpoint rechecks DealerKit and protects both Rent2Buy Wix
   assert.match(source, /rollback/);
 });
 
+test("published price endpoint keeps the proven VFC write key ahead of read/create fallbacks", async () => {
+  const source = await readFile(new URL("api/dealerkit-published-price.js", root), "utf8");
+  assert.match(source, /firstValue\(environment, \["WIX_API_KEY", "WIX_FINANCE_API_KEY"\]\)/);
+  assert.match(source, /rent2buyPrimary: \{ apiKey: financeApiKey/);
+  assert.match(source, /configurationForMatch/);
+  assert.match(source, /preview\.pipeline === "finance"/);
+  assert.match(source, /preview\.pipeline === "cars"/);
+});
+
 test("Stock Watch price helper recognises DealerKit instead of requiring the retired Vansco label", async () => {
   const source = await readFile(new URL("utils/vanscoWixPriceHelper.js", root), "utf8");
   assert.match(source, /DealerKit price/);
