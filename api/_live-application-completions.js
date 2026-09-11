@@ -6,11 +6,13 @@ const TIME_ZONE = 'Europe/London';
 const SITE_EVENTS = Object.freeze({
   vanFinance: {
     siteOrigin: ANALYTICS_SITE_ORIGINS.vfc,
-    eventName: 'finance_application_completed',
+    startEventName: 'finance_application_reached',
+    completionEventName: 'finance_application_completed',
   },
   rent2buy: {
     siteOrigin: ANALYTICS_SITE_ORIGINS.rent2buy,
-    eventName: 'rent2buy_application_completed',
+    startEventName: 'rent2buy_full_application_opened',
+    completionEventName: 'rent2buy_application_completed',
   },
 });
 
@@ -34,17 +36,33 @@ export function uniqueSessionCount(rows = []) {
   return new Set(rows.map((row) => String(row?.session_id || '').trim()).filter(Boolean)).size;
 }
 
-async function loadSiteCount({ supabase, siteOrigin, eventName, startIso, endIso }) {
+export function applicationSessionCounts(rows = [], { startEventName, completionEventName } = {}) {
+  const startRows = rows.filter((row) => row?.event_name === startEventName);
+  const completionRows = rows.filter((row) => row?.event_name === completionEventName);
+  const applicationRows = rows.filter((row) => (
+    row?.event_name === startEventName || row?.event_name === completionEventName
+  ));
+
+  return {
+    // A completed session necessarily started the application. Including it here
+    // prevents a delayed/missed reach event from producing completions > starts.
+    starts: uniqueSessionCount(applicationRows),
+    explicitStarts: uniqueSessionCount(startRows),
+    completions: uniqueSessionCount(completionRows),
+  };
+}
+
+async function loadSiteCounts({ supabase, siteOrigin, startEventName, completionEventName, startIso, endIso }) {
   const { data, error } = await supabase
     .from('site_analytics_events')
-    .select('session_id')
+    .select('session_id,event_name')
     .eq('site_origin', siteOrigin)
-    .eq('event_name', eventName)
+    .in('event_name', [startEventName, completionEventName])
     .gte('occurred_at', startIso)
     .lt('occurred_at', endIso)
     .limit(10000);
   if (error) throw error;
-  return uniqueSessionCount(data || []);
+  return applicationSessionCounts(data || [], { startEventName, completionEventName });
 }
 
 export async function loadLiveApplicationCompletions({ now = new Date(), supabase } = {}) {
@@ -54,8 +72,12 @@ export async function loadLiveApplicationCompletions({ now = new Date(), supabas
   const startIso = londonBoundaryIso(date);
   const endIso = londonBoundaryIso(nextDate);
   const entries = await Promise.all(Object.entries(SITE_EVENTS).map(async ([key, config]) => {
-    const completions = await loadSiteCount({ supabase: client, ...config, startIso, endIso });
-    return [key, { completions, eventName: config.eventName }];
+    const counts = await loadSiteCounts({ supabase: client, ...config, startIso, endIso });
+    return [key, {
+      ...counts,
+      startEventName: config.startEventName,
+      eventName: config.completionEventName,
+    }];
   }));
   return {
     source: 'first_party_live',
