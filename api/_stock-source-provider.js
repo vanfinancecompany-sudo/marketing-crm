@@ -1,7 +1,7 @@
 import { getSupabaseServiceAdmin, normalizeRegistration } from "./_vansco-cache-utils.js";
 import { fetchDealerKitStockSnapshot } from "./_dealerkit-stock-adapter.js";
 
-const DEFAULT_PROVIDER_ID = "vansco_dragon";
+const DEFAULT_PROVIDER_ID = "dealerkit";
 const CURRENT_PROVIDER_ALIASES = new Set(["vansco", "dragon", "dragon2000", "vansco_dragon"]);
 const HTTP_PROVIDER_ALIASES = new Set(["normalized_http", "http_json", "external_api"]);
 const DEALERKIT_PROVIDER_ALIASES = new Set(["dealerkit", "dealerkit_api"]);
@@ -67,7 +67,7 @@ export function stockSourceProviderConfig(environment = process.env) {
       id: "dealerkit",
       label: "DealerKit",
       kind: "dealerkit",
-      switchReady: false,
+      switchReady: true,
     };
   }
   if (HTTP_PROVIDER_ALIASES.has(providerId)) {

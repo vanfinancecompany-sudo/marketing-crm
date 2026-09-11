@@ -27,7 +27,7 @@ test("DealerKit review decisions keep All Vans mandatory and store only allowed 
 
   assert.deepEqual(decision.financeCategories, ["all_vans", "automatic", "electric"]);
   assert.equal(decision.rent2buyEnabled, true);
-  assert.deepEqual(decision.rent2buyCategories, []);
+  assert.deepEqual(decision.rent2buyCategories, ["all_vans", "automatic", "electric"]);
   assert.deepEqual(decision.excludedImageIds, ["image-2"]);
   assert.equal(decision.primaryImageId, null);
   assert.deepEqual(decision.imageOrderIds, ["image-1", "image-3"]);
@@ -140,17 +140,14 @@ test("review decision endpoint is access-gated and cannot write DealerKit or Wix
   assert.doesNotMatch(endpoint, /api\.dealerkit\.uk|wixapis|VANFINANCEPAGES|PATCH\s+https/i);
 });
 
-test("review workspace exposes decisions but still has no Wix publish action", () => {
+test("review workspace is product-scoped and has no cross-product routing toggles", () => {
   const ui = fs.readFileSync(new URL("../utils/dealerKitReviewWorkspace.js", import.meta.url), "utf8");
-  assert.match(ui, /Save review/);
   assert.match(ui, /Use image/);
   assert.match(ui, /Set primary/);
-  assert.match(ui, /Prepare for Van Finance/);
-  assert.match(ui, /Prepare for Rent2Buy/);
-  assert.match(ui, /Product routes are independent/);
-  assert.match(ui, /data-dealerkit-product-route/);
+  assert.match(ui, /workspace\.dataset\.product/);
+  assert.doesNotMatch(ui, /Prepare for Van Finance/);
+  assert.doesNotMatch(ui, /Prepare for Rent2Buy/);
   assert.match(ui, /all_vans/);
-  assert.match(ui, /\/api\/dealerkit-review-decision/);
   assert.doesNotMatch(ui, /Publish to Wix|Update Wix vehicle|Send live/i);
 });
 

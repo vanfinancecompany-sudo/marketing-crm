@@ -24,6 +24,7 @@ export const DEALERKIT_FINANCE_CATEGORY_KEYS = Object.freeze([
 
 const REVIEW_STATUS_SET = new Set(DEALERKIT_REVIEW_STATUSES);
 const FINANCE_CATEGORY_SET = new Set(DEALERKIT_FINANCE_CATEGORY_KEYS);
+const RENT2BUY_CATEGORY_SET = new Set(DEALERKIT_FINANCE_CATEGORY_KEYS.filter((key) => key !== "nine_seater"));
 const PRODUCT_IMAGE_MARKER_SET = new Set(Object.values(DEALERKIT_PRODUCT_IMAGE_MARKERS));
 
 function clean(value, limit = 3000) {
@@ -54,6 +55,15 @@ function cleanFinanceCategories(value, financeEnabled) {
   return categories;
 }
 
+function cleanRent2BuyCategories(value, rent2buyEnabled) {
+  if (!rent2buyEnabled) return [];
+  const categories = Array.from(new Set((Array.isArray(value) ? value : [])
+    .map((item) => clean(item, 80))
+    .filter((item) => RENT2BUY_CATEGORY_SET.has(item))));
+  if (!categories.includes("all_vans")) categories.unshift("all_vans");
+  return categories;
+}
+
 export function defaultDealerKitReviewDecision(vehicle = {}) {
   const imageIds = cleanIdArray((vehicle.images || []).map((image) => image?.id));
   const primaryImageId = clean(vehicle?.primaryImage?.id || vehicle?.images?.[0]?.id, 300) || null;
@@ -77,6 +87,9 @@ export function defaultDealerKitReviewDecision(vehicle = {}) {
 }
 
 export function rowToDealerKitReviewDecision(row = {}) {
+  const storedRent2BuyCategories = Array.isArray(row.rent2buy_categories) && row.rent2buy_categories.length
+    ? row.rent2buy_categories
+    : row.finance_categories;
   return {
     persisted: true,
     supplierStockId: clean(row.supplier_stock_id, 300),
@@ -85,7 +98,7 @@ export function rowToDealerKitReviewDecision(row = {}) {
     financeEnabled: row.finance_enabled !== false,
     financeCategories: cleanFinanceCategories(row.finance_categories, row.finance_enabled !== false),
     rent2buyEnabled: Boolean(row.rent2buy_enabled),
-    rent2buyCategories: cleanIdArray(row.rent2buy_categories, { max: 20 }),
+    rent2buyCategories: cleanRent2BuyCategories(storedRent2BuyCategories, Boolean(row.rent2buy_enabled)),
     excludedImageIds: cleanIdArray(row.excluded_image_ids, { max: 200, dedupe: false }),
     primaryImageId: clean(row.primary_image_id, 300) || null,
     imageOrderIds: cleanIdArray(row.image_order_ids, { max: 200, dedupe: false }),
@@ -106,6 +119,8 @@ export function normalizeDealerKitReviewInput(input = {}) {
   if (!REVIEW_STATUS_SET.has(reviewStatus)) throw new Error("Review status is not allowed at this stage.");
 
   const financeEnabled = input.financeEnabled !== false;
+  const rent2buyEnabled = Boolean(input.rent2buyEnabled);
+  const rent2buyCategoryInput = Array.isArray(input.rent2buyCategories) ? input.rent2buyCategories : input.financeCategories;
   const rawExcludedImageIds = cleanIdArray(input.excludedImageIds, { max: 200, dedupe: false });
   const rawImageOrderIds = cleanIdArray(input.imageOrderIds, { max: 200, dedupe: false });
   const splitProductImageState = hasProductImageMarkers(rawExcludedImageIds) || hasProductImageMarkers(rawImageOrderIds);
@@ -124,8 +139,8 @@ export function normalizeDealerKitReviewInput(input = {}) {
     reviewStatus,
     financeEnabled,
     financeCategories: cleanFinanceCategories(input.financeCategories, financeEnabled),
-    rent2buyEnabled: Boolean(input.rent2buyEnabled),
-    rent2buyCategories: [],
+    rent2buyEnabled,
+    rent2buyCategories: cleanRent2BuyCategories(rent2buyCategoryInput, rent2buyEnabled),
     excludedImageIds,
     primaryImageId,
     imageOrderIds,

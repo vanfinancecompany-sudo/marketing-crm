@@ -11,35 +11,29 @@ test("DealerKit human review detail endpoint is access-gated and source read-onl
   assert.doesNotMatch(endpoint, /api\.dealerkit\.uk.*(?:POST|PATCH|PUT|DELETE)|wixapis/i);
 });
 
-test("DealerKit review workspace saves internal decisions and opens by exact registration", () => {
+test("DealerKit review workspace opens the product selected by the Stock Watch tab", () => {
   const client = fs.readFileSync(new URL("../utils/dealerKitReviewWorkspace.js", import.meta.url), "utf8");
   assert.match(client, /DEALERKIT · REVIEW WORKSPACE/);
   assert.match(client, /Review vehicle/);
   assert.match(client, /dealerkit-stock-detail/);
-  assert.match(client, /Save review/);
-  assert.match(client, /encodeURIComponent\(registration\)/);
+  assert.match(client, /dealerkit-open-product-review/);
+  assert.match(client, /workspace\.dataset\.product/);
+  assert.match(client, /params\.set\("stockId"/);
 });
 
-test("DealerKit review workspace reads the registration from bounded comparison rows", () => {
+test("DealerKit review workspace retains the guarded legacy comparison entry point", () => {
   const client = fs.readFileSync(new URL("../utils/dealerKitReviewWorkspace.js", import.meta.url), "utf8");
   assert.match(client, /dealerkit-comparison__row/);
   assert.match(client, /dealerkit-comparison__row-top strong/);
-  assert.match(client, /encodeURIComponent\(registration\)/);
+  assert.match(client, /new URLSearchParams\(\{ registration \}\)/);
 });
 
-test("Finance Missing from my stock cards expose the same DealerKit review workspace directly", () => {
-  const bridge = fs.readFileSync(new URL("../utils/dealerKitMissingStockReviewBridge.js", import.meta.url), "utf8");
-  const main = fs.readFileSync(new URL("../main.jsx", import.meta.url), "utf8");
-  assert.match(main, /dealerKitMissingStockReviewBridge\.js/);
-  assert.match(bridge, /\.vansco-card-grid \.vansco-card/);
-  assert.match(bridge, /missing from my stock/);
-  assert.match(bridge, /startsWith\("finance"\)/);
-  assert.match(bridge, /Review vehicle/);
-  assert.match(bridge, /dealerkit-comparison__row-top/);
-  assert.match(bridge, /data-dealerkit-review-button/);
-  assert.match(bridge, /dealerkit-stock-comparison/);
-  assert.match(bridge, /supplierStockId/);
-  assert.match(bridge, /dealerkitStockId/);
+test("Finance and Rent2Buy Missing cards pass their active product directly to review", () => {
+  const page = fs.readFileSync(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
+  assert.match(page, /dealerkit-open-product-review/);
+  assert.match(page, /supplierStockId:\s*record\.supplierStockId/);
+  assert.match(page, /product:\s*selectedPipeline/);
+  assert.match(page, /selectedPipeline === "finance" \|\| selectedPipeline === "rent2buy"/);
 });
 
 test("direct missing-stock review bridge only reads comparison data and does not mutate stock or Wix", () => {
@@ -60,7 +54,7 @@ test("product gallery workspace separates Finance and Rent2Buy, previews uploads
   assert.match(client, /draggable = true/);
   assert.match(client, /dragstart/);
   assert.match(client, /drop/);
-  assert.match(client, /Save gallery changes/);
+  assert.match(client, /"Save"/);
   assert.match(client, /dealerkit-review-decision/);
   assert.match(client, /dealerkit-wix-manual-media/);
   assert.match(client, /registered\.media/);

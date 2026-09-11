@@ -81,6 +81,9 @@ function publicVehicle(vehicle) {
     trim: clean(vehicle?.trim, 300),
     bodyType: clean(vehicle?.bodyType, 300),
     vehicleType: clean(vehicle?.vehicleType, 100),
+    vehicleCategory: clean(vehicle?.vehicleCategory, 200),
+    vehicleClass: clean(vehicle?.vehicleClass, 200),
+    bodyStyle: clean(vehicle?.bodyStyle, 300),
     sourceStatus: clean(vehicle?.sourceStatus, 100),
     status: clean(vehicle?.status, 100),
     retailPrice: finiteNumber(vehicle?.retailPrice),
@@ -183,7 +186,13 @@ export default async function handler(request, response) {
       loadLocalMatches(supabase, normalisedRegistration),
       loadDealerKitReviewDecision(supabase, publicSourceVehicle.supplierStockId),
     ]);
-    const reviewDecision = savedDecision || defaultDealerKitReviewDecision(publicSourceVehicle);
+    const requestedProduct = clean(request.query?.product, 30).toLowerCase() === "rent2buy" ? "rent2buy" : "finance";
+    const reviewDecision = savedDecision || {
+      ...defaultDealerKitReviewDecision(publicSourceVehicle),
+      financeEnabled: requestedProduct === "finance",
+      rent2buyEnabled: requestedProduct === "rent2buy",
+      rent2buyCategories: requestedProduct === "rent2buy" ? ["all_vans"] : [],
+    };
 
     response.setHeader("Cache-Control", "no-store, max-age=0");
     response.status(200).json({
@@ -193,6 +202,7 @@ export default async function handler(request, response) {
       reviewStateWritable: true,
       vehicle: publicSourceVehicle,
       reviewDecision,
+      product: requestedProduct,
       local: {
         finance: localVehicle(local.finance, "finance"),
         rent2buy: localVehicle(local.rent2buy, "rent2buy"),

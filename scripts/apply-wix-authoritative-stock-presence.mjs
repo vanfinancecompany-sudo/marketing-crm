@@ -101,20 +101,20 @@ import { fetchVanscoImageReadiness } from "../services/vanscoImageReadiness.js";
   );
 }
 
-if (!source.includes('{ value: "images_ready", label: "New Vansco photos ready" }')) {
+if (!source.includes('{ value: "images_ready", label: "New DealerKit photos ready" }')) {
   replaceOnce(
 `  { value: "missing", label: "Missing from my stock" },`,
 `  { value: "missing", label: "Missing from my stock" },
-  { value: "images_ready", label: "New Vansco photos ready" },`,
+  { value: "images_ready", label: "New DealerKit photos ready" },`,
     "image readiness filter"
   );
 }
 
-if (!source.includes('case "images_ready": return "New Vansco photos ready";')) {
+if (!source.includes('case "images_ready": return "New DealerKit photos ready";')) {
   replaceOnce(
-`    case "local_not_vansco": return "My stock not on Vansco";`,
-`    case "images_ready": return "New Vansco photos ready";
-    case "local_not_vansco": return "My stock not on Vansco";`,
+`    case "local_not_vansco": return "My stock not on DealerKit";`,
+`    case "images_ready": return "New DealerKit photos ready";
+    case "local_not_vansco": return "My stock not on DealerKit";`,
     "image readiness display label"
   );
 }
@@ -133,12 +133,12 @@ if (!source.includes("function ImageReadyCard({ record })")) {
         <h3>{record.title || "Vehicle photos ready"}</h3>
         <div className="vehicle-card__meta">Registration: {record.registration}</div>
         <div className="vehicle-card__meta"><strong>Main CMS vehicle page:</strong> {record.cmsImageCount} image</div>
-        <div className="vehicle-card__meta"><strong>Vansco now has:</strong> {record.sourceImageCount} vehicle images</div>
-        <div className="vehicle-card__meta">This vehicle already matches the correct CRM and its main CMS vehicle page. Add the newer Vansco gallery images to that page.</div>
-        {record.sourceCheckedAt ? <div className="vehicle-card__meta">Vansco images checked: {formatWatchTimestamp(record.sourceCheckedAt)}</div> : null}
+        <div className="vehicle-card__meta"><strong>DealerKit now has:</strong> {record.sourceImageCount} vehicle images</div>
+        <div className="vehicle-card__meta">This vehicle already matches the correct CRM and its main CMS vehicle page. Add the newer DealerKit gallery images to that page.</div>
+        {record.sourceCheckedAt ? <div className="vehicle-card__meta">DealerKit images checked: {formatWatchTimestamp(record.sourceCheckedAt)}</div> : null}
         <div className="card-actions">
           {record.localStockUrl ? <a className="button button--primary" href={record.localStockUrl} target="_blank" rel="noreferrer">Open my vehicle page</a> : null}
-          {record.stockUrl ? <a className="button button--ghost" href={record.stockUrl} target="_blank" rel="noreferrer">Open Vansco Page</a> : null}
+          {record.stockUrl ? <a className="button button--ghost" href={record.stockUrl} target="_blank" rel="noreferrer">Open DealerKit vehicle</a> : null}
         </div>
       </div>
     </article>
@@ -187,7 +187,7 @@ if (!source.includes("async function loadImageReadiness(pipeline = selectedPipel
       if (!isActive()) return null;
       setImageReadyByPipeline((prev) => ({ ...prev, [pipeline]: [] }));
       setImageReadySummaryByPipeline((prev) => ({ ...prev, [pipeline]: null }));
-      setImageReadyErrorByPipeline((prev) => ({ ...prev, [pipeline]: error.message || "Could not check Vansco image readiness." }));
+      setImageReadyErrorByPipeline((prev) => ({ ...prev, [pipeline]: error.message || "Could not check DealerKit image readiness." }));
       return null;
     }
   }
@@ -254,22 +254,22 @@ if (!source.includes('["missing", "images_ready", "local_not_vansco"')) {
   );
 }
 
-if (!source.includes('label="New Vansco photos ready" value={summary.imagesReady}')) {
+if (!source.includes('label="New DealerKit photos ready" value={summary.imagesReady}')) {
   replaceOnce(
 `          <SummaryCard label={\`Missing from \${pipelineLabel(selectedPipeline)}\`} value={summary.missing} tone="blue" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "missing" }))} />`,
 `          <SummaryCard label={\`Missing from \${pipelineLabel(selectedPipeline)}\`} value={summary.missing} tone="blue" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "missing" }))} />
-          {selectedPipeline !== "cars" ? <SummaryCard label="New Vansco photos ready" value={summary.imagesReady} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "images_ready" }))} /> : null}`,
+          {selectedPipeline !== "cars" ? <SummaryCard label="New DealerKit photos ready" value={summary.imagesReady} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "images_ready" }))} /> : null}`,
     "image readiness summary card"
   );
 }
 
 if (!source.includes("Photo update needed:")) {
   replaceOnce(
-`        {selectedPipeline === "finance" ? <div className="vansco-watch-note"><strong>Price differences:</strong> Van Finance only. It compares exact registration matches where both prices and VAT basis are clear. It never changes Wix or Vansco prices.</div> : null}`,
-`        {selectedPipeline === "finance" ? <div className="vansco-watch-note"><strong>Price differences:</strong> Van Finance only. It compares exact registration matches where both prices and VAT basis are clear. It never changes Wix or Vansco prices.</div> : null}
-        {selectedPipeline !== "cars" ? <div className="vansco-watch-note"><strong>Image readiness:</strong> this checks only registrations already advertised in this CRM and matching a main CMS vehicle page. If that page still has exactly one image and Vansco now has multiple vehicle photos, it appears in New Vansco photos ready. Once your CMS page has multiple images, later Vansco image additions are ignored.</div> : null}
-        {imageReadyRecords.length ? <div className="vansco-watch-note vansco-watch-note--warning"><strong>Photo update needed:</strong> {imageReadyRecords.length} {imageReadyRecords.length === 1 ? "vehicle has" : "vehicles have"} newer Vansco photos ready to add to the main CMS vehicle page.</div> : null}
-        {selectedPipeline !== "cars" && imageReadySummary && !imageReadySummary.complete ? <div className="vansco-watch-note vansco-watch-note--warning">Vansco image counts are waiting for the next complete stock refresh before image-readiness alerts can be trusted.</div> : null}
+`        {selectedPipeline === "finance" ? <div className="vansco-watch-note"><strong>Price differences:</strong> Van Finance only. It compares exact registration matches where both prices and VAT basis are clear. It never changes Wix or DealerKit prices.</div> : null}`,
+`        {selectedPipeline === "finance" ? <div className="vansco-watch-note"><strong>Price differences:</strong> Van Finance only. It compares exact registration matches where both prices and VAT basis are clear. It never changes Wix or DealerKit prices.</div> : null}
+        {selectedPipeline !== "cars" ? <div className="vansco-watch-note"><strong>Image readiness:</strong> this checks only registrations already advertised in this CRM and matching a main CMS vehicle page. If that page still has exactly one image and DealerKit now has multiple vehicle photos, it appears in New DealerKit photos ready. Once your CMS page has multiple images, later DealerKit image additions are ignored.</div> : null}
+        {imageReadyRecords.length ? <div className="vansco-watch-note vansco-watch-note--warning"><strong>Photo update needed:</strong> {imageReadyRecords.length} {imageReadyRecords.length === 1 ? "vehicle has" : "vehicles have"} newer DealerKit photos ready to add to the main CMS vehicle page.</div> : null}
+        {selectedPipeline !== "cars" && imageReadySummary && !imageReadySummary.complete ? <div className="vansco-watch-note vansco-watch-note--warning">DealerKit image counts are waiting for the next complete stock refresh before image-readiness alerts can be trusted.</div> : null}
         {imageReadyError ? <div className="error-banner">Image readiness check: {imageReadyError}</div> : null}`,
     "image readiness explanation"
   );
@@ -294,10 +294,10 @@ if (!source.includes('record.displayStatus === "images_ready" ? <ImageReadyCard'
 if (!source.includes("await loadImageReadiness(selectedPipeline);")) {
   replaceOnce(
 `      await loadPipeline(selectedPipeline);
-      setSuccessMessage(\`Vansco URL list refreshed: \${urlResult.urlsFound || 0} current URLs. Details checked: \${batchResult.successCount || 0} success, \${batchResult.failureCount || 0} failed, \${batchResult.remainingCount || 0} remaining.\`);`,
+      setSuccessMessage(\`DealerKit stock refreshed: \${urlResult.urlsFound || 0} current vehicles. Details checked: \${batchResult.successCount || 0} success, \${batchResult.failureCount || 0} failed, \${batchResult.remainingCount || 0} remaining.\`);`,
 `      await loadPipeline(selectedPipeline);
       await loadImageReadiness(selectedPipeline);
-      setSuccessMessage(\`Vansco URL list refreshed: \${urlResult.urlsFound || 0} current URLs. Details checked: \${batchResult.successCount || 0} success, \${batchResult.failureCount || 0} failed, \${batchResult.remainingCount || 0} remaining.\`);`,
+      setSuccessMessage(\`DealerKit stock refreshed: \${urlResult.urlsFound || 0} current vehicles. Details checked: \${batchResult.successCount || 0} success, \${batchResult.failureCount || 0} failed, \${batchResult.remainingCount || 0} remaining.\`);`,
     "image readiness refresh"
   );
 }

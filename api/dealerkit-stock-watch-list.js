@@ -5,6 +5,11 @@ import {
   normalizeActionRecord,
   normalizeRegistration,
 } from "./_vansco-cache-utils.js";
+import {
+  classifyDealerKitVehicle,
+  dealerKitVehicleBelongsToPipeline,
+  summariseDealerKitSegments,
+} from "../lib/dealerKitVehicleSegmentation.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 
@@ -19,14 +24,14 @@ function isAuthorised(request, environment = process.env) {
   return Boolean(expected && (header === expected || bearer === expected));
 }
 
-function isCar(vehicle = {}) {
-  const type = clean(vehicle.vehicleType, 100).toLowerCase();
-  const body = clean(vehicle.bodyType, 200).toLowerCase();
-  return type === "car" || type === "cars" || /\b(car|hatchback|saloon|estate|coupe|convertible|suv)\b/.test(`${type} ${body}`);
+function pipelineVehicle(vehicle, pipeline) {
+  return dealerKitVehicleBelongsToPipeline(vehicle, pipeline);
 }
 
-function pipelineVehicle(vehicle, pipeline) {
-  return pipeline === "cars" ? isCar(vehicle) : !isCar(vehicle);
+function orphanActionBelongsToPipeline(action, pipeline) {
+  const segment = classifyDealerKitVehicle(action).segment;
+  if (segment === "unknown") return true;
+  return pipeline === "cars" ? segment === "car" : segment === "commercial";
 }
 
 function normalizedSourceStatus(vehicle = {}) {
@@ -39,6 +44,7 @@ function vehicleRecord(vehicle, action = null) {
   const registration = normalizeRegistration(vehicle.registration || "");
   const workflowStatus = clean(action?.workflowStatus || action?.workflow_status, 100).toLowerCase();
   const checkedAt = vehicle.checkedAt || vehicle.sourceUpdatedAt || new Date().toISOString();
+  const segmentation = classifyDealerKitVehicle(vehicle);
   return {
     id: `dealerkit-${clean(vehicle.supplierStockId, 300)}`,
     vehicleKey: clean(vehicle.supplierStockId, 300),
@@ -68,6 +74,10 @@ function vehicleRecord(vehicle, action = null) {
     derivative: clean(vehicle.derivative, 800),
     bodyType: clean(vehicle.bodyType, 300),
     vehicleType: clean(vehicle.vehicleType, 100),
+    vehicleCategory: clean(vehicle.vehicleCategory, 200),
+    vehicleClass: clean(vehicle.vehicleClass, 200),
+    sourceSegment: segmentation.segment,
+    sourceSegmentReason: segmentation.reason,
     mileage: Number.isFinite(Number(vehicle.mileage)) ? Number(vehicle.mileage) : null,
     year: Number.isFinite(Number(vehicle.year)) ? Number(vehicle.year) : null,
     fuel: clean(vehicle.fuel, 120),
@@ -130,12 +140,14 @@ export default async function handler(request, response) {
       .map((action) => [normalizeRegistration(action.registration || ""), action])
       .filter(([registration]) => registration));
     const sourceVehicles = (snapshot.vehicles || []).filter((vehicle) => pipelineVehicle(vehicle, pipeline));
+    const segmentCounts = summariseDealerKitSegments(snapshot.vehicles || []);
     const records = sourceVehicles.map((vehicle) => vehicleRecord(vehicle, actionByRegistration.get(vehicle.registration) || null));
     const sourceRegistrations = new Set(records.map((record) => record.registration).filter(Boolean));
 
     for (const action of actions) {
       const registration = normalizeRegistration(action.registration || "");
       if (!registration || sourceRegistrations.has(registration)) continue;
+      if (!orphanActionBelongsToPipeline(action, pipeline)) continue;
       const orphan = orphanActionRecord(action, pipeline);
       if (orphan) records.push(orphan);
     }
@@ -153,6 +165,8 @@ export default async function handler(request, response) {
         apiReportedTotal: Number(snapshot.apiReportedTotal || 0),
         usableRecords: Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0),
         pipelineRecords: sourceVehicles.length,
+        segmentCounts,
+        unclassifiedRecords: segmentCounts.unknown,
         issues: snapshot.diagnostics || null,
         checkedAt: snapshot.checkedAt || new Date().toISOString(),
       },
@@ -173,7 +187,7 @@ export default async function handler(request, response) {
         failedDetailChecks: Math.max(0, Number(snapshot.apiReportedTotal || 0) - Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0)),
         latestUrlListCheckedAt: snapshot.checkedAt || new Date().toISOString(),
         sourceComplete: Boolean(snapshot.complete),
-        totalsNote: "Operator Stock Watch is sourced from DealerKit. Saved Hide, Mark advertised and Never show again decisions remain per tab. Legacy Vansco/Dragon refresh jobs are not used by this operator feed.",
+        totalsNote: `Operator Stock Watch is sourced from DealerKit and segmented before card classification. ${segmentCounts.unknown} unclassified record(s) are held out of all product tabs for safety. Saved actions remain per tab.`,
       },
     });
   } catch (error) {

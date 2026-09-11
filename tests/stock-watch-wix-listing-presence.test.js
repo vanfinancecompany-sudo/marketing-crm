@@ -51,7 +51,7 @@ test("Stock Watch follow-up intersects Rent2Buy Wix presence with active CRM reg
   assert.match(source, /const liveRegistrationSet = new Set\(\(presence\.registrations \|\| \[\]\)/);
   assert.match(source, /effectiveRegistrations = vehicleRegistrations\.filter\(\(registration\) => liveRegistrationSet\.has\(registration\)\)/);
   assert.match(source, /const percent = complete \? 100/);
-  assert.match(source, /Vansco now has at least 5 vehicle images/);
+  assert.match(source, /DealerKit now has at least 5 vehicle images/);
 });
 
 test("Vansco gallery counter keeps unique vehicle photos for the matching stock ID", () => {
@@ -113,7 +113,7 @@ test("Stock Watch build transform wires image counts and never relies on Due In 
   assert.match(transform, /fetchVanscoImageReadiness/);
   assert.match(transform, /countVanscoVehicleImages/);
   assert.match(transform, /imageCountsByRegistration/);
-  assert.match(transform, /New Vansco photos ready/);
+  assert.match(transform, /New DealerKit photos ready/);
   assert.doesNotMatch(apiSource, /due\s+in/i);
   assert.match(apiSource, /pageImageCount !== 1/);
   assert.match(apiSource, /sourceImageCount === null \|\| sourceImageCount < MIN_VANSCO_IMAGE_COUNT/);

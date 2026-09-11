@@ -146,13 +146,18 @@ function obviousFinanceCategories(vehicle) {
   return categories;
 }
 
-function buildReviewState(vehicle, saved = {}) {
+function buildReviewState(vehicle, saved = {}, product = "finance") {
   const currentImageIds = (vehicle.images || []).map((image) => clean(image?.id)).filter(Boolean);
   const persisted = Boolean(saved?.persisted);
   const financeCategories = new Set(Array.isArray(saved?.financeCategories) ? saved.financeCategories : ["all_vans"]);
+  const rent2buyCategories = new Set(Array.isArray(saved?.rent2buyCategories) && saved.rent2buyCategories.length ? saved.rent2buyCategories : ["all_vans"]);
   financeCategories.add("all_vans");
+  rent2buyCategories.add("all_vans");
   if (!persisted) {
-    for (const category of obviousFinanceCategories(vehicle)) financeCategories.add(category);
+    for (const category of obviousFinanceCategories(vehicle)) {
+      financeCategories.add(category);
+      if (category !== "nine_seater") rent2buyCategories.add(category);
+    }
   }
 
   const excludedImageIds = new Set(Array.isArray(saved?.excludedImageIds) ? saved.excludedImageIds.map(clean).filter(Boolean) : []);
@@ -172,9 +177,11 @@ function buildReviewState(vehicle, saved = {}) {
     supplierStockId: clean(saved?.supplierStockId || vehicle.supplierStockId),
     registration: clean(saved?.registration || vehicle.registration).replace(/\s+/g, ""),
     reviewStatus: ["needs_review", "reviewed", "held"].includes(saved?.reviewStatus) ? saved.reviewStatus : "needs_review",
-    financeEnabled: saved?.financeEnabled !== false,
+    product,
+    financeEnabled: persisted ? saved?.financeEnabled !== false : product === "finance",
     financeCategories,
-    rent2buyEnabled: Boolean(saved?.rent2buyEnabled),
+    rent2buyEnabled: persisted ? Boolean(saved?.rent2buyEnabled) : product === "rent2buy",
+    rent2buyCategories,
     excludedImageIds,
     primaryImageId,
     imageOrderIds,
@@ -204,6 +211,7 @@ async function saveReviewDecision(vehicle, state) {
       financeEnabled: state.financeEnabled,
       financeCategories: Array.from(state.financeCategories),
       rent2buyEnabled: state.rent2buyEnabled,
+      rent2buyCategories: Array.from(state.rent2buyCategories),
       excludedImageIds: Array.from(state.excludedImageIds),
       primaryImageId: state.primaryImageId || null,
       imageOrderIds: state.imageOrderIds,
@@ -214,11 +222,13 @@ async function saveReviewDecision(vehicle, state) {
   return parseMarketingJsonResponse(response, "Could not save DealerKit review decisions.");
 }
 
-function renderDecisionControls(vehicle, state, refreshGallery) {
+function renderDecisionControls(vehicle, state) {
   const section = element("section", "dealerkit-review__section dealerkit-review__decisions");
+  section.dataset.reviewProduct = state.product;
+  const productLabel = state.product === "rent2buy" ? "Rent2Buy" : "Van Finance";
   const heading = element("div", "dealerkit-review__decision-heading");
   heading.append(
-    element("div", "", "Review decisions"),
+    element("div", "", `${productLabel} review`),
     element("span", "dealerkit-review__decision-state", state.persisted ? `Saved ${formatSavedAt(state.updatedAt)}` : "Not saved yet"),
   );
   section.appendChild(heading);
@@ -227,67 +237,32 @@ function renderDecisionControls(vehicle, state, refreshGallery) {
     section.appendChild(element("div", "dealerkit-review__stale-warning", "DealerKit has changed since these review decisions were last saved. Re-check the vehicle before marking it reviewed."));
   }
 
-  const statusRow = element("div", "dealerkit-review__decision-row");
-  const statusLabel = element("label", "dealerkit-review__field");
-  statusLabel.appendChild(element("span", "", "Review status"));
-  const statusSelect = document.createElement("select");
-  for (const [value, label] of REVIEW_STATUS_OPTIONS) {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = label;
-    option.selected = state.reviewStatus === value;
-    statusSelect.appendChild(option);
-  }
-  statusSelect.addEventListener("change", () => { state.reviewStatus = statusSelect.value; });
-  statusLabel.appendChild(statusSelect);
-  statusRow.appendChild(statusLabel);
-
-  const financeLabel = element("label", "dealerkit-review__toggle");
-  const financeToggle = document.createElement("input");
-  financeToggle.type = "checkbox";
-  financeToggle.checked = state.financeEnabled;
-  financeToggle.setAttribute("data-dealerkit-product-route", "finance");
-  financeLabel.append(financeToggle, element("span", "", "Prepare for Van Finance"));
-  statusRow.appendChild(financeLabel);
-
-  const rentLabel = element("label", "dealerkit-review__toggle");
-  const rentToggle = document.createElement("input");
-  rentToggle.type = "checkbox";
-  rentToggle.checked = state.rent2buyEnabled;
-  rentToggle.setAttribute("data-dealerkit-product-route", "rent2buy");
-  rentLabel.append(rentToggle, element("span", "", "Prepare for Rent2Buy"));
-  statusRow.appendChild(rentLabel);
-  section.appendChild(statusRow);
-
-  section.appendChild(element(
-    "p",
-    "dealerkit-review__routing-note",
-    "Product routes are independent. Select Van Finance, Rent2Buy, or both; each selected product keeps its own image workspace and preparation state.",
-  ));
-
   const categories = element("div", "dealerkit-review__category-block");
-  categories.appendChild(element("strong", "", "Van Finance categories"));
-  categories.appendChild(element("p", "", "All Vans is mandatory. DealerKit only pre-ticks obvious categories such as Automatic, Electric, Crew or Pickup; size categories stay for human review."));
+  categories.appendChild(element("strong", "", `${productLabel} categories`));
+  categories.appendChild(element("p", "", "All Vans is included automatically. Check the additional categories that apply to this vehicle."));
   const categoryGrid = element("div", "dealerkit-review__category-grid");
+  const selectedCategories = state.product === "rent2buy" ? state.rent2buyCategories : state.financeCategories;
 
   const allLabel = element("label", "dealerkit-review__check dealerkit-review__check--fixed");
   const allCheck = document.createElement("input");
   allCheck.type = "checkbox";
-  allCheck.checked = state.financeEnabled;
+  allCheck.checked = true;
   allCheck.disabled = true;
   allLabel.append(allCheck, element("span", "", "All Vans · fixed"));
   categoryGrid.appendChild(allLabel);
 
   const categoryInputs = [];
   for (const [key, label] of CATEGORY_OPTIONS) {
+    if (state.product === "rent2buy" && key === "nine_seater") continue;
     const item = element("label", "dealerkit-review__check");
     const input = document.createElement("input");
     input.type = "checkbox";
-    input.checked = state.financeCategories.has(key);
-    input.disabled = !state.financeEnabled;
+    input.checked = selectedCategories.has(key);
+    input.dataset.categoryKey = key;
     input.addEventListener("change", () => {
-      if (input.checked) state.financeCategories.add(key);
-      else state.financeCategories.delete(key);
+      if (input.checked) selectedCategories.add(key);
+      else selectedCategories.delete(key);
+      window.dispatchEvent(new CustomEvent("dealerkit-review-categories-changed"));
     });
     item.append(input, element("span", "", label));
     categoryInputs.push(input);
@@ -307,56 +282,14 @@ function renderDecisionControls(vehicle, state, refreshGallery) {
   notesLabel.appendChild(notes);
   section.appendChild(notesLabel);
 
-  const footer = element("div", "dealerkit-review__decision-footer");
-  const saveState = element("span", "dealerkit-review__save-state", "Saving here stores review choices only. It cannot change DealerKit, Wix or live adverts.");
-  const save = element("button", "dealerkit-review__save", "Save review");
-  save.type = "button";
-  save.addEventListener("click", async () => {
-    save.disabled = true;
-    save.textContent = "Saving…";
-    saveState.textContent = "Saving review decisions…";
-    try {
-      const result = await saveReviewDecision(vehicle, state);
-      const saved = result?.decision || {};
-      state.persisted = true;
-      state.reviewStatus = saved.reviewStatus || state.reviewStatus;
-      state.financeEnabled = saved.financeEnabled !== false;
-      state.financeCategories = new Set(saved.financeCategories || ["all_vans"]);
-      state.rent2buyEnabled = Boolean(saved.rent2buyEnabled);
-      state.excludedImageIds = new Set(saved.excludedImageIds || []);
-      state.primaryImageId = saved.primaryImageId || "";
-      state.imageOrderIds = saved.imageOrderIds || state.imageOrderIds;
-      state.reviewedSourceUpdatedAt = saved.reviewedSourceUpdatedAt || vehicle.sourceUpdatedAt || null;
-      state.notes = saved.notes || "";
-      state.updatedAt = saved.updatedAt || new Date().toISOString();
-      heading.querySelector(".dealerkit-review__decision-state").textContent = `Saved ${formatSavedAt(state.updatedAt)}`;
-      saveState.textContent = "Saved. Only the Marketing CRM review state changed; live stock and websites are untouched.";
-      refreshGallery();
-    } catch (error) {
-      saveState.textContent = error?.message || "Could not save review decisions. Nothing else was changed.";
-    } finally {
-      save.disabled = false;
-      save.textContent = "Save review";
-    }
-  });
-
-  financeToggle.addEventListener("change", () => {
-    state.financeEnabled = financeToggle.checked;
-    if (state.financeEnabled) state.financeCategories.add("all_vans");
-    allCheck.checked = state.financeEnabled;
-    for (const input of categoryInputs) input.disabled = !state.financeEnabled;
-  });
-  rentToggle.addEventListener("change", () => { state.rent2buyEnabled = rentToggle.checked; });
-
-  footer.append(saveState, save);
-  section.appendChild(footer);
   return section;
 }
 
 function renderVehicle(workspace, payload) {
   const vehicle = payload?.vehicle || {};
   const local = payload?.local || {};
-  const state = buildReviewState(vehicle, payload?.reviewDecision || {});
+  const product = workspace.dataset.product === "rent2buy" ? "rent2buy" : "finance";
+  const state = buildReviewState(vehicle, payload?.reviewDecision || {}, product);
   const body = workspace.querySelector("[data-dealerkit-review-body]");
   const title = workspace.querySelector("[data-dealerkit-review-title]");
   const subtitle = workspace.querySelector("[data-dealerkit-review-subtitle]");
@@ -398,7 +331,7 @@ function renderVehicle(workspace, payload) {
   body.appendChild(hero);
 
   const localGrid = element("div", "dealerkit-review__local-grid");
-  localGrid.append(localCard("Van Finance", local.finance), localCard("Rent2Buy", local.rent2buy));
+  localGrid.append(localCard(product === "rent2buy" ? "Rent2Buy" : "Van Finance", local[product]));
   body.appendChild(localGrid);
 
   const gallerySection = element("section", "dealerkit-review__section");
@@ -471,7 +404,7 @@ function renderVehicle(workspace, payload) {
   if (!gallery.childElementCount) gallery.appendChild(element("p", "dealerkit-review__empty", "No source images returned."));
   gallerySection.appendChild(gallery);
 
-  body.appendChild(renderDecisionControls(vehicle, state, refreshGallery));
+  body.appendChild(renderDecisionControls(vehicle, state));
   body.appendChild(gallerySection);
   refreshGallery();
 
@@ -494,8 +427,8 @@ function renderVehicle(workspace, payload) {
 
   const future = element("section", "dealerkit-review__future");
   future.append(
-    element("strong", "", "Review decisions only · publishing still locked"),
-    element("p", "", "You can now save image choices, a primary image, Van Finance categories, review status and the Rent2Buy routing intention. These decisions live only in the Marketing CRM. There is still no Wix publish action, no DealerKit write-back and no automatic stock cutover."),
+    element("strong", "", `${product === "rent2buy" ? "Rent2Buy" : "Van Finance"} lane`),
+    element("p", "", "Choose the details and images above, then use Save, Prepare and Publish. Safety checks still run before any live Wix change."),
   );
   if (vehicle.sourceUrl) {
     const link = element("a", "dealerkit-review__link", "Open DealerKit vehicle");
@@ -576,8 +509,10 @@ function getWorkspace() {
   return document.querySelector(`[${WORKSPACE_ATTRIBUTE}]`) || createWorkspace();
 }
 
-async function openWorkspace(registration) {
+async function openWorkspace(registration, supplierStockId = "", product = "finance") {
   const workspace = getWorkspace();
+  workspace.dataset.product = product === "rent2buy" ? "rent2buy" : "finance";
+  workspace.dataset.supplierStockId = clean(supplierStockId);
   workspace.hidden = false;
   workspace.setAttribute("aria-hidden", "false");
   document.body.classList.add("dealerkit-review-open");
@@ -585,7 +520,10 @@ async function openWorkspace(registration) {
 
   const requestId = ++activeRequest;
   try {
-    const response = await fetch(`/api/dealerkit-stock-detail?registration=${encodeURIComponent(registration)}`, {
+    const params = new URLSearchParams({ registration });
+    if (supplierStockId) params.set("stockId", supplierStockId);
+    params.set("product", workspace.dataset.product);
+    const response = await fetch(`/api/dealerkit-stock-detail?${params.toString()}`, {
       method: "GET",
       headers: buildMarketingAccessHeaders({ accept: "application/json" }),
       cache: "no-store",
@@ -626,6 +564,10 @@ function scheduleScan() {
 }
 
 if (typeof document !== "undefined") {
+  window.addEventListener("dealerkit-open-product-review", (event) => {
+    const detail = event.detail || {};
+    openWorkspace(clean(detail.registration), clean(detail.supplierStockId), clean(detail.product)).catch(() => null);
+  });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", scheduleScan, { once: true });
   else scheduleScan();
   window.addEventListener("popstate", scheduleScan);
