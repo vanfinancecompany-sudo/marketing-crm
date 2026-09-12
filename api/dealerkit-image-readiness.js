@@ -1,8 +1,14 @@
-import { getSupabaseAdmin, normalizeRegistration } from "./_vansco-cache-utils.js";
+import { normalizeRegistration } from "./_vansco-cache-utils.js";
 import { DealerKitSnapshotIncompleteError, fetchDealerKitStockSnapshot } from "./_dealerkit-stock-adapter.js";
+import { loadLiveWixListingPresence } from "./stock-watch-wix-listing-presence.js";
+import { dealerKitVehicleBelongsToPipeline } from "../lib/dealerKitVehicleSegmentation.js";
 
-const STOCK_LIMIT = 1000;
 const CMS_TIMEOUT_MS = 12000;
+const WIX_QUERY_URL = "https://www.wixapis.com/wix-data/v2/items/query";
+const WIX_PAGE_SIZE = 100;
+const MAX_WIX_ROWS = 2000;
+const FINANCE_WIX_SITE_ID = "85f11c52-ee54-495d-aaec-a351831709b5";
+const SUPPORTED_PIPELINES = new Set(["finance", "rent2buy", "cars"]);
 export const MIN_DEALERKIT_IMAGE_COUNT = 5;
 
 const CMS_ENDPOINTS = {
@@ -20,13 +26,8 @@ function extractRegistration(value) {
   return normalizeRegistration(match?.[1] || "");
 }
 
-function localRegistration(row, pipeline) {
-  if (pipeline === "rent2buy") return normalizeRegistration(row?.registration || "");
-  return normalizeRegistration(row?.registration || extractRegistration(row?.title || ""));
-}
-
-function localVehicleUrl(row, pipeline) {
-  return compact(pipeline === "rent2buy" ? row?.webLink : row?.weblink);
+function relevantAdvertPipelines(pipeline) {
+  return pipeline === "cars" ? ["cars"] : ["finance", "rent2buy"];
 }
 
 function cmsRegistration(row) {
@@ -34,69 +35,141 @@ function cmsRegistration(row) {
 }
 
 function cmsImageCount(row) {
-  const explicitCount = Number(row?.imageCount);
-  const galleryCount = Array.isArray(row?.images) ? row.images.filter(Boolean).length : 0;
+  const explicitCount = Number(row?.imageCount ?? row?.numberOfImages);
+  const arrays = [row?.images, row?.mainImages, row?.gallery]
+    .filter(Array.isArray)
+    .map((items) => items.filter(Boolean).length);
+  const galleryCount = arrays.length ? Math.max(...arrays) : 0;
   if (Number.isFinite(explicitCount) && explicitCount >= 0) return Math.max(explicitCount, galleryCount);
   return galleryCount;
 }
 
-export function buildDealerKitImageReadinessAlerts({ pipeline, localVehicles = [], cmsItems = [], dealerKitVehicles = [] }) {
-  if (!CMS_ENDPOINTS[pipeline]) return [];
-
-  const localByRegistration = new Map();
-  for (const row of localVehicles) {
-    const registration = localRegistration(row, pipeline);
-    if (!registration || localByRegistration.has(registration)) continue;
-    localByRegistration.set(registration, row);
+function imageCountMap(items = []) {
+  const counts = new Map();
+  for (const item of items) {
+    const registration = cmsRegistration(item);
+    if (!registration) continue;
+    const count = cmsImageCount(item);
+    counts.set(registration, Math.max(counts.get(registration) || 0, count));
   }
+  return counts;
+}
 
-  const sourceByRegistration = new Map();
-  for (const vehicle of dealerKitVehicles) {
+function normalizeListingPresence(presence = {}) {
+  const registrations = new Set((presence.registrations || []).map(normalizeRegistration).filter(Boolean));
+  const vehicles = new Map();
+  for (const vehicle of presence.vehicles || []) {
     const registration = normalizeRegistration(vehicle?.registration || "");
-    if (!registration || sourceByRegistration.has(registration)) continue;
-    sourceByRegistration.set(registration, vehicle);
+    if (registration && !vehicles.has(registration)) vehicles.set(registration, vehicle);
   }
+  return { registrations, vehicles };
+}
+
+function listingPresenceFromLegacyLocal(localVehicles = [], pipeline = "finance") {
+  const vehicles = [];
+  for (const row of localVehicles) {
+    const registration = normalizeRegistration(row?.registration || row?.reg || "")
+      || extractRegistration(row?.title || row?.name || "");
+    if (!registration) continue;
+    vehicles.push({
+      registration,
+      title: compact(row?.title || row?.name || registration),
+      webLink: compact(row?.weblink || row?.webLink || row?.link || ""),
+      picture: compact(row?.picture || row?.image || row?.imageUrl || ""),
+      pipeline,
+    });
+  }
+  return { registrations: vehicles.map((vehicle) => vehicle.registration), vehicles };
+}
+
+export function buildDealerKitImageReadinessAlerts({
+  pipeline,
+  listingPresenceByPipeline = null,
+  cmsItemsByPipeline = null,
+  localVehicles = [],
+  cmsItems = [],
+  dealerKitVehicles = [],
+} = {}) {
+  const normalizedPipeline = compact(pipeline).toLowerCase();
+  if (!SUPPORTED_PIPELINES.has(normalizedPipeline)) return [];
+
+  const relevantPipelines = relevantAdvertPipelines(normalizedPipeline);
+  const presenceByPipeline = listingPresenceByPipeline || {
+    [normalizedPipeline]: listingPresenceFromLegacyLocal(localVehicles, normalizedPipeline),
+  };
+  const pagesByPipeline = cmsItemsByPipeline || { [normalizedPipeline]: cmsItems };
+
+  const listingByPipeline = Object.fromEntries(relevantPipelines.map((product) => [
+    product,
+    normalizeListingPresence(presenceByPipeline?.[product] || {}),
+  ]));
+  const imageCountsByPipeline = Object.fromEntries(relevantPipelines.map((product) => [
+    product,
+    imageCountMap(pagesByPipeline?.[product] || []),
+  ]));
 
   const alerts = [];
-  for (const page of cmsItems) {
-    const registration = cmsRegistration(page);
+  for (const dealerKitVehicle of dealerKitVehicles) {
+    if (!dealerKitVehicleBelongsToPipeline(dealerKitVehicle, normalizedPipeline)) continue;
+    const registration = normalizeRegistration(dealerKitVehicle?.registration || "");
     if (!registration) continue;
 
-    const localVehicle = localByRegistration.get(registration);
-    if (!localVehicle) continue;
+    const sourceImageCount = Number(dealerKitVehicle?.imageCount ?? dealerKitVehicle?.images?.length);
+    if (!Number.isFinite(sourceImageCount) || sourceImageCount < MIN_DEALERKIT_IMAGE_COUNT) continue;
 
-    const pageImageCount = cmsImageCount(page);
-    if (pageImageCount !== 1) continue;
+    const advertisedPipelines = relevantPipelines.filter((product) => listingByPipeline[product].registrations.has(registration));
+    if (!advertisedPipelines.length) continue;
 
-    const dealerKitVehicle = sourceByRegistration.get(registration);
-    const sourceImageCount = Number(dealerKitVehicle?.imageCount);
-    if (!dealerKitVehicle || !Number.isFinite(sourceImageCount) || sourceImageCount < MIN_DEALERKIT_IMAGE_COUNT) continue;
+    const advertisedImageCounts = {};
+    let currentAdvertImageCount = 0;
+    let referencePipeline = advertisedPipelines[0];
+    for (const product of advertisedPipelines) {
+      const count = imageCountsByPipeline[product].get(registration) || 0;
+      advertisedImageCounts[product] = count;
+      if (count > currentAdvertImageCount) {
+        currentAdvertImageCount = count;
+        referencePipeline = product;
+      }
+    }
+
+    if (sourceImageCount <= currentAdvertImageCount) continue;
+
+    const referenceListing = listingByPipeline[referencePipeline].vehicles.get(registration)
+      || advertisedPipelines.map((product) => listingByPipeline[product].vehicles.get(registration)).find(Boolean)
+      || null;
+    const selectedListing = listingByPipeline[normalizedPipeline]?.vehicles.get(registration) || null;
 
     alerts.push({
-      id: `images-ready-${pipeline}-${registration}`,
-      pipeline,
+      id: `images-ready-${normalizedPipeline}-${registration}`,
+      pipeline: normalizedPipeline,
       displayStatus: "images_ready",
       matchStatus: "images_ready",
       registration,
-      title: compact(dealerKitVehicle.title || page.title || localVehicle.title || registration),
-      imageUrl: compact(dealerKitVehicle?.primaryImage?.url || dealerKitVehicle?.images?.[0]?.url || localVehicle.picture || ""),
+      title: compact(dealerKitVehicle.title || referenceListing?.title || registration),
+      imageUrl: compact(dealerKitVehicle?.primaryImage?.url || dealerKitVehicle?.images?.[0]?.url || selectedListing?.picture || referenceListing?.picture || ""),
       stockUrl: compact(dealerKitVehicle.sourceUrl || ""),
-      localStockUrl: localVehicleUrl(localVehicle, pipeline),
+      localStockUrl: compact(selectedListing?.webLink || selectedListing?.weblink || referenceListing?.webLink || referenceListing?.weblink || ""),
       sourceStatus: compact(dealerKitVehicle.sourceStatus || dealerKitVehicle.status || "unknown"),
       workflowStatus: "",
       notes: "",
       safeExactRegistrationMatch: true,
-      cmsImageCount: pageImageCount,
+      cmsImageCount: currentAdvertImageCount,
+      currentAdvertImageCount,
       sourceImageCount,
+      newImageCount: sourceImageCount - currentAdvertImageCount,
+      advertisedPipelines,
+      advertisedImageCounts,
+      referencePipeline,
+      crossProductEvidence: advertisedPipelines.some((product) => product !== normalizedPipeline),
       sourceCheckedAt: dealerKitVehicle.checkedAt || "",
       supplierStockId: compact(dealerKitVehicle.supplierStockId || ""),
     });
   }
 
-  return alerts.sort((a, b) => b.sourceImageCount - a.sourceImageCount || a.registration.localeCompare(b.registration));
+  return alerts.sort((a, b) => b.newImageCount - a.newImageCount || b.sourceImageCount - a.sourceImageCount || a.registration.localeCompare(b.registration));
 }
 
-async function fetchCmsItems(pipeline, fetchImplementation = fetch) {
+async function fetchPublicCmsItems(pipeline, fetchImplementation = fetch) {
   const endpoint = CMS_ENDPOINTS[pipeline];
   if (!endpoint) return { items: [], refreshedAt: "" };
 
@@ -109,33 +182,76 @@ async function fetchCmsItems(pipeline, fetchImplementation = fetch) {
       signal: controller.signal,
       headers: { accept: "application/json" },
     });
-    if (!response.ok) throw new Error(`CMS vehicle-page feed returned ${response.status}.`);
+    if (!response.ok) throw new Error(`${pipeline} CMS vehicle-page feed returned ${response.status}.`);
     const payload = await response.json();
-    if (!Array.isArray(payload?.items)) throw new Error("CMS vehicle-page feed did not return an items array.");
+    if (!Array.isArray(payload?.items)) throw new Error(`${pipeline} CMS vehicle-page feed did not return an items array.`);
     return { items: payload.items, refreshedAt: compact(payload.refreshedAt) };
   } finally {
     clearTimeout(timeout);
   }
 }
 
-async function fetchLocalVehicles(supabase, pipeline) {
-  if (pipeline === "finance") {
-    const { data, error } = await supabase
-      .from("facebook_adverts")
-      .select("id, title, picture, weblink, is_active")
-      .eq("is_active", true)
-      .limit(STOCK_LIMIT);
-    if (error) throw new Error(`Could not load active Finance CRM stock: ${error.message}`);
-    return data || [];
+function wixHeaders(environment = process.env) {
+  const apiKey = compact(environment.WIX_CAR_API_KEY || environment.WIX_FINANCE_API_KEY || environment.WIX_API_KEY);
+  const siteId = compact(environment.WIX_CAR_SITE_ID || environment.WIX_FINANCE_SITE_ID || environment.WIX_SITE_ID || FINANCE_WIX_SITE_ID);
+  if (!apiKey) throw new Error("Cars Wix image readiness is not configured.");
+  return {
+    siteId,
+    headers: {
+      "Content-Type": "application/json",
+      "wix-site-id": siteId,
+      Authorization: apiKey,
+    },
+  };
+}
+
+function itemPublishStatus(item) {
+  return compact(item?.data?._publishStatus || item?._publishStatus || "").toUpperCase();
+}
+
+async function fetchCarCmsItems(fetchImplementation = fetch, environment = process.env) {
+  const { headers } = wixHeaders(environment);
+  const items = [];
+  let refreshedAt = "";
+
+  for (let offset = 0; offset < MAX_WIX_ROWS; offset += WIX_PAGE_SIZE) {
+    const response = await fetchImplementation(WIX_QUERY_URL, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        dataCollectionId: "CARPAGES",
+        query: { paging: { limit: WIX_PAGE_SIZE, offset } },
+        consistentRead: true,
+      }),
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`Cars CMS vehicle-page feed returned ${response.status}.`);
+    const payload = await response.json();
+    const page = Array.isArray(payload?.dataItems) ? payload.dataItems : [];
+    for (const item of page) {
+      const status = itemPublishStatus(item);
+      if (status && status !== "PUBLISHED") continue;
+      const data = item?.data || {};
+      const registration = normalizeRegistration(data.title || data.registration || data.reg || "");
+      if (!registration) continue;
+      const updated = data?._updatedDate?.$date || data?._updatedDate || item?._updatedDate?.$date || item?._updatedDate || "";
+      if (updated && (!refreshedAt || new Date(updated).getTime() > new Date(refreshedAt).getTime())) refreshedAt = new Date(updated).toISOString();
+      items.push({
+        registration,
+        title: compact(data.titleText || data.title || registration),
+        imageCount: Number(data.numberOfImages),
+        images: Array.isArray(data.mainImages) ? data.mainImages : [],
+      });
+    }
+    if (page.length < WIX_PAGE_SIZE) break;
   }
 
-  const { data, error } = await supabase
-    .from("rent_vehicles")
-    .select("id, registration, picture, webLink, is_active")
-    .eq("is_active", true)
-    .limit(STOCK_LIMIT);
-  if (error) throw new Error(`Could not load active Rent2Buy CRM stock: ${error.message}`);
-  return data || [];
+  return { items, refreshedAt };
+}
+
+async function fetchCmsItems(pipeline, fetchImplementation = fetch, environment = process.env) {
+  if (pipeline === "cars") return fetchCarCmsItems(fetchImplementation, environment);
+  return fetchPublicCmsItems(pipeline, fetchImplementation);
 }
 
 function safeDealerKitDiagnostics(error) {
@@ -156,58 +272,77 @@ export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (request.method !== "GET") return response.status(405).json({ ok: false, message: "Method not allowed." });
 
-  const pipeline = String(request.query?.pipeline || "finance").toLowerCase();
-  if (!CMS_ENDPOINTS[pipeline]) {
-    return response.status(400).json({ ok: false, message: "Image readiness is available for Finance and Rent2Buy only." });
+  const pipeline = compact(request.query?.pipeline || "finance").toLowerCase();
+  if (!SUPPORTED_PIPELINES.has(pipeline)) {
+    return response.status(400).json({ ok: false, message: "Image readiness is available for Finance, Rent2Buy and Cars only." });
   }
 
   try {
-    const supabase = getSupabaseAdmin();
-    const [localVehicles, cmsFeed, dealerKitSnapshot] = await Promise.all([
-      fetchLocalVehicles(supabase, pipeline),
-      fetchCmsItems(pipeline),
-      fetchDealerKitStockSnapshot({ allowPartial: false }),
+    const relevantPipelines = relevantAdvertPipelines(pipeline);
+    const [dealerKitSnapshot, listingEntries, cmsEntries] = await Promise.all([
+      fetchDealerKitStockSnapshot({ allowPartial: true }),
+      Promise.all(relevantPipelines.map(async (product) => [product, await loadLiveWixListingPresence(product)])),
+      Promise.all(relevantPipelines.map(async (product) => [product, await fetchCmsItems(product)])),
     ]);
 
-    if (!dealerKitSnapshot.complete) {
-      return response.status(503).json({
-        ok: false,
-        pipeline,
-        sourceAvailable: false,
-        message: "DealerKit returned an incomplete stock snapshot, so image readiness is unavailable until the source is healthy.",
-        summary: { imageUpdatesReady: 0, complete: false, sourceAvailable: false },
-        diagnostics: dealerKitSnapshot.diagnostics || {},
-      });
-    }
+    const listingPresenceByPipeline = Object.fromEntries(listingEntries);
+    const cmsFeedByPipeline = Object.fromEntries(cmsEntries);
+    const incompleteListing = relevantPipelines.find((product) => listingPresenceByPipeline[product]?.complete === false);
+    if (incompleteListing) throw new Error(`${incompleteListing} live Wix listing presence is incomplete, so photo readiness was not guessed.`);
 
+    const sourceDegraded = dealerKitSnapshot.complete === false;
     const alerts = buildDealerKitImageReadinessAlerts({
       pipeline,
-      localVehicles,
-      cmsItems: cmsFeed.items,
+      listingPresenceByPipeline,
+      cmsItemsByPipeline: Object.fromEntries(relevantPipelines.map((product) => [product, cmsFeedByPipeline[product]?.items || []])),
       dealerKitVehicles: dealerKitSnapshot.vehicles,
     });
 
-    const localRegistrationCount = new Set(localVehicles.map((row) => localRegistration(row, pipeline)).filter(Boolean)).size;
-    const cmsPageCount = new Set(cmsFeed.items.map(cmsRegistration).filter(Boolean)).size;
-    const singleImageCmsPageCount = cmsFeed.items.filter((row) => cmsRegistration(row) && cmsImageCount(row) === 1).length;
+    const liveAdvertRegistrations = new Set();
+    const cmsRegistrations = new Set();
+    let singleImageCmsPages = 0;
+    for (const product of relevantPipelines) {
+      (listingPresenceByPipeline[product]?.registrations || []).forEach((registration) => {
+        const normalized = normalizeRegistration(registration);
+        if (normalized) liveAdvertRegistrations.add(normalized);
+      });
+      for (const item of cmsFeedByPipeline[product]?.items || []) {
+        const registration = cmsRegistration(item);
+        if (registration) cmsRegistrations.add(registration);
+        if (registration && cmsImageCount(item) === 1) singleImageCmsPages += 1;
+      }
+    }
+
+    const refreshedTimes = relevantPipelines
+      .map((product) => cmsFeedByPipeline[product]?.refreshedAt)
+      .filter(Boolean)
+      .map((value) => new Date(value))
+      .filter((value) => Number.isFinite(value.getTime()))
+      .sort((a, b) => b.getTime() - a.getTime());
 
     return response.status(200).json({
       ok: true,
       pipeline,
       sourceAvailable: true,
+      degraded: sourceDegraded,
+      diagnostics: sourceDegraded ? dealerKitSnapshot.diagnostics : undefined,
       alerts,
       summary: {
-        localAdvertisedRegistrations: localRegistrationCount,
-        cmsVehiclePages: cmsPageCount,
-        singleImageCmsPages: singleImageCmsPageCount,
+        liveAdvertisedRegistrations: liveAdvertRegistrations.size,
+        localAdvertisedRegistrations: liveAdvertRegistrations.size,
+        cmsVehiclePages: cmsRegistrations.size,
+        singleImageCmsPages,
         dealerKitVehiclesAvailable: dealerKitSnapshot.vehicleCount,
         imageUpdatesReady: alerts.length,
         sourceCheckedAt: dealerKitSnapshot.checkedAt,
-        cmsRefreshedAt: cmsFeed.refreshedAt,
-        complete: true,
+        cmsRefreshedAt: refreshedTimes[0]?.toISOString() || "",
+        complete: !sourceDegraded,
+        degraded: sourceDegraded,
         sourceAvailable: true,
         minimumDealerKitImageCount: MIN_DEALERKIT_IMAGE_COUNT,
-        rule: "Alert only when the registration is active in this CRM, the matching main CMS vehicle page has exactly one image, and DealerKit has at least 5 vehicle images.",
+        crossProduct: pipeline !== "cars",
+        comparedPipelines: relevantPipelines,
+        rule: "Alert when a live advert exists in the relevant product group, DealerKit has at least 5 images, and DealerKit has more images than the fullest current live advert for that registration.",
       },
     });
   } catch (error) {
