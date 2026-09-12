@@ -1,4 +1,5 @@
 import { normalizeRegistration } from "./_vansco-cache-utils.js";
+import { parseRent2BuyMonthlyPrice } from "../lib/rent2buyMonthlyPriceSync.js";
 
 const WIX_QUERY_URL = "https://www.wixapis.com/wix-data/v2/items/query";
 const PAGE_SIZE = 100;
@@ -36,7 +37,8 @@ function clean(value) {
 }
 
 function parsePrice(value) {
-  const numeric = Number(String(value ?? "").replace(/[^0-9.]/g, ""));
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(String(value).replace(/[^0-9.]/g, ""));
   return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
 }
 
@@ -59,9 +61,25 @@ function itemPublishStatus(item) {
   return clean(item?.data?._publishStatus || item?._publishStatus || "").toUpperCase();
 }
 
-function itemPrice(item) {
+function itemRetailPrice(item) {
   const data = item?.data || {};
-  return parsePrice(data.price ?? data.priceVat ?? data.salePrice ?? null);
+  // Listing price is the cash-price authority. salePrice is intentionally not a
+  // fallback because on Finance it is the monthly-payment display field.
+  return parsePrice(data.price ?? data.priceVat ?? null);
+}
+
+function itemRent2BuyMonthly(item) {
+  const data = item?.data || {};
+  // The visible mth field is updated by the controlled Rent2Buy Wix price write,
+  // so it is the immediate published authority. monthlyPriceNumeric can lag until
+  // the numeric sync runs and is therefore fallback-only here.
+  const visible = parseRent2BuyMonthlyPrice(data.mth)
+    ?? parseRent2BuyMonthlyPrice(data.monthlyPayments)
+    ?? parseRent2BuyMonthlyPrice(data.weeklyPrice);
+  if (visible !== null) return visible;
+
+  const numeric = Number(data.monthlyPriceNumeric);
+  return Number.isFinite(numeric) && numeric > 0 && numeric <= 10000 ? numeric : null;
 }
 
 function itemUpdatedAt(item) {
@@ -71,7 +89,24 @@ function itemUpdatedAt(item) {
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
 }
 
-async function loadSource(source) {
+export function publishedListingVehicle(item, pipelineValue, source = {}) {
+  const data = item?.data || {};
+  const pipeline = clean(pipelineValue).toLowerCase();
+  const registration = itemRegistration(item);
+  if (!registration) return null;
+
+  return {
+    registration,
+    title: clean(data.vanDescription || data.title || registration),
+    price: pipeline === "rent2buy" ? null : itemRetailPrice(item),
+    monthly: pipeline === "rent2buy" ? itemRent2BuyMonthly(item) : null,
+    vat: clean(data.vat ?? data.vatText ?? data.vat_text ?? ""),
+    updated_at: itemUpdatedAt(item),
+    collection_id: source.collectionId || "",
+  };
+}
+
+async function loadSource(source, pipeline) {
   const vehiclesByRegistration = new Map();
   let scanned = 0;
 
@@ -99,15 +134,9 @@ async function loadSource(source) {
     for (const item of page) {
       const status = itemPublishStatus(item);
       if (status && status !== "PUBLISHED") continue;
-      const registration = itemRegistration(item);
-      if (!registration) continue;
-      vehiclesByRegistration.set(registration, {
-        registration,
-        title: clean(item?.data?.vanDescription || item?.data?.title || registration),
-        price: itemPrice(item),
-        updated_at: itemUpdatedAt(item),
-        collection_id: source.collectionId,
-      });
+      const vehicle = publishedListingVehicle(item, pipeline, source);
+      if (!vehicle) continue;
+      vehiclesByRegistration.set(vehicle.registration, vehicle);
     }
 
     if (page.length < PAGE_SIZE) break;
@@ -147,7 +176,7 @@ export async function loadLiveWixListingPresence(pipelineValue) {
     };
   }
 
-  const settled = await Promise.allSettled(sources.map(loadSource));
+  const settled = await Promise.allSettled(sources.map((source) => loadSource(source, pipeline)));
   const vehiclesByRegistration = new Map();
   const results = settled.map((result, index) => {
     const source = sources[index];

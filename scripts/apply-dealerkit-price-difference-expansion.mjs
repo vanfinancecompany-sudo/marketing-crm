@@ -18,21 +18,21 @@ if (!source.includes("calculatePublishedRent2BuyPricing")) {
   replaceOrThrow(importAnchor, `${importAnchor}\nimport { calculatePublishedRent2BuyPricing } from "../lib/dealerKitPublishedPrice.js";`, "published Rent2Buy pricing import");
 }
 
-if (!source.includes('from "../lib/dealerKitCarsPublishedListing.js"')) {
+if (!source.includes("mergePublishedListingVehicles")) {
   const presenceImport = 'import { fetchStockWatchWixListingPresence } from "../services/stockWatchWixListingPresence.js";';
   replaceOrThrow(
     presenceImport,
-    `${presenceImport}\nimport { mergeCarsPublishedListingVehicles } from "../lib/dealerKitCarsPublishedListing.js";`,
-    "Cars published listing merge import",
+    `${presenceImport}\nimport { mergePublishedListingVehicles } from "../lib/dealerKitCarsPublishedListing.js";`,
+    "published Wix listing merge import",
   );
 }
 
-if (!source.includes("mergeCarsPublishedListingVehicles(vehicles, presence.vehicles || [])")) {
+if (!source.includes("mergePublishedListingVehicles(pipeline, vehicles, presence.vehicles || [])")) {
   const liveVehicleFilter = `            effectiveVehicles = vehicles.filter((vehicle) => {\n              const registration = normalizeLocalStockRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name);\n              return Boolean(registration && liveRegistrationSet.has(registration));\n            });`;
   replaceOrThrow(
     liveVehicleFilter,
-    `            effectiveVehicles = pipeline === "cars"\n              ? mergeCarsPublishedListingVehicles(vehicles, presence.vehicles || [])\n              : vehicles.filter((vehicle) => {\n                const registration = normalizeLocalStockRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name);\n                return Boolean(registration && liveRegistrationSet.has(registration));\n              });`,
-    "Cars live CARFINANCE price snapshot",
+    `            effectiveVehicles = mergePublishedListingVehicles(pipeline, vehicles, presence.vehicles || []);`,
+    "Wix-authoritative Finance, Rent2Buy and Cars comparison values",
   );
 }
 
@@ -68,15 +68,15 @@ replaceOrThrow(
 
 replaceOrThrow(
   '{selectedPipeline === "finance" ? <div className="vansco-watch-note"><strong>Price differences:</strong> Van Finance only. It compares exact registration matches where both prices and VAT basis are clear. It never changes Wix or DealerKit prices.</div> : null}',
-  '<div className="vansco-watch-note"><strong>Price differences:</strong> Finance and Cars compare the published cash price with DealerKit. Rent2Buy compares the published monthly rental with the current DealerKit-derived rental. Nothing changes until Update Wix price is previewed and confirmed.</div>',
+  '<div className="vansco-watch-note"><strong>Price differences:</strong> Finance and Cars compare the published Wix cash price with DealerKit. Rent2Buy compares the published Wix monthly rental with the current DealerKit-derived rental. Nothing changes until Update Wix price is previewed and confirmed.</div>',
   "price difference note",
 );
 
 replaceOrThrow(
   '      const priceText = pipeline === "finance" ? " Price differences recalculated from the refreshed Finance stock snapshot and saved Vansco cache." : "";',
-  '      const priceText = " Price differences recalculated from the refreshed local stock snapshot and saved DealerKit cache.";',
+  '      const priceText = " Price differences recalculated from the refreshed live Wix listing snapshot and saved DealerKit cache.";',
   "refresh comparison price message",
 );
 
 await writeFile(pageUrl, source);
-console.log("Applied DealerKit Price Differences across Finance, Rent2Buy and Cars with controlled published-price actions.");
+console.log("Applied DealerKit Price Differences across Finance, Rent2Buy and Cars with live Wix published values as comparison authority.");

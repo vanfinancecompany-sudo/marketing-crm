@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { sourcesForPipeline } from "../api/stock-watch-wix-listing-presence.js";
+import {
+  publishedListingVehicle,
+  sourcesForPipeline,
+} from "../api/stock-watch-wix-listing-presence.js";
 import { countVanscoVehicleImages, extractVanscoVehicleImageUrls } from "../api/_vansco-image-gallery.js";
 import { buildImageReadinessAlerts, MIN_VANSCO_IMAGE_COUNT } from "../api/vansco-image-readiness.js";
 
@@ -21,6 +24,27 @@ test("Rent2Buy live-presence authority is ALLRENT2BUYVANS on VAN FINANCE Wix onl
   assert.equal(sources[0].siteId, FINANCE_WIX_SITE_ID);
   assert.equal(sources[0].collectionId, "ALLRENT2BUYVANS");
   assert.equal(sources.some((source) => source.siteId === LEGACY_RENT2BUY_WIX_SITE_ID), false);
+});
+
+test("Rent2Buy listing presence uses the visible Wix monthly rental before the lagging numeric helper", () => {
+  const visibleWins = publishedListingVehicle({
+    data: { title: "RO21VVD", monthlyPriceNumeric: 467, mth: "£499 PM" },
+  }, "rent2buy", { collectionId: "ALLRENT2BUYVANS" });
+  assert.equal(visibleWins.monthly, 499);
+  assert.equal(visibleWins.collection_id, "ALLRENT2BUYVANS");
+
+  const numericFallback = publishedListingVehicle({
+    data: { title: "AB24CDE", monthlyPriceNumeric: 455, mth: "" },
+  }, "rent2buy", { collectionId: "ALLRENT2BUYVANS" });
+  assert.equal(numericFallback.monthly, 455);
+});
+
+test("Finance listing presence takes cash price from price and never mistakes monthly salePrice for retail", () => {
+  const vehicle = publishedListingVehicle({
+    data: { title: "AB24CDE", price: "£20,995", salePrice: "FROM £438 P/M", vat: "+ VAT" },
+  }, "finance", { collectionId: "VANFINANCE-ALLVANS" });
+  assert.equal(vehicle.price, 20995);
+  assert.equal(vehicle.vat, "+ VAT");
 });
 
 test("historic standalone Rent2Buy Wix CMS can never resurrect drafted vehicles", () => {
