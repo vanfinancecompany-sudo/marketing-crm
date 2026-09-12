@@ -2,7 +2,7 @@
 // The implementation is DealerKit-backed after the supplier migration.
 export async function fetchVanscoImageReadiness(pipeline) {
   const normalizedPipeline = String(pipeline || "finance").toLowerCase();
-  if (!["finance", "rent2buy"].includes(normalizedPipeline)) {
+  if (!["finance", "rent2buy", "cars"].includes(normalizedPipeline)) {
     return { ok: true, pipeline: normalizedPipeline, alerts: [], summary: { imageUpdatesReady: 0, complete: true, sourceAvailable: true } };
   }
 
