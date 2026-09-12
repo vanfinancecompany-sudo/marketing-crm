@@ -29,9 +29,9 @@ patch(
 patch(
   "../pages/VanscoStockWatchPage.jsx",
   'value={summary.imagesReady} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "images_ready" }))}',
-  'value={imageReadyError || (imageReadySummary && imageReadySummary.complete === false) ? "Unavailable" : summary.imagesReady} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "images_ready" }))}',
+  'value={imageReadyError || (imageReadySummary && imageReadySummary.sourceAvailable === false) ? "Unavailable" : summary.imagesReady} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "images_ready" }))}',
   "image readiness unavailable summary value",
-  'value={imageReadyError || (imageReadySummary && imageReadySummary.complete === false) ? "Unavailable" : summary.imagesReady}'
+  'value={imageReadyError || (imageReadySummary && imageReadySummary.sourceAvailable === false) ? "Unavailable" : summary.imagesReady}'
 );
 
 patch(
@@ -94,6 +94,39 @@ patch(
 );
 
 patch(
+  "../api/_stock-watch-monitor.js",
+  'evidence: { failed, succeeded, remaining: refresh.remaining, error: refresh.error, progressAgeMinutes: Number(progressAgeMinutes.toFixed(1)) },',
+  'evidence: { failed, succeeded, remaining: refresh.remaining, error: refresh.error, progressAgeMinutes: Number(progressAgeMinutes.toFixed(1)), diagnostics: provider.diagnostics || snapshot.providerDiagnostics || null },',
+  "degraded provider diagnostics evidence",
+  "diagnostics: provider.diagnostics || snapshot.providerDiagnostics || null"
+);
+
+patch(
+  "../api/_stock-source-provider.js",
+  `export async function loadStockSourceSnapshot({
+  supabase = null,
+  environment = process.env,
+  fetchImplementation = fetch,
+} = {}) {`,
+  `export async function loadStockSourceSnapshot({
+  supabase = null,
+  environment = process.env,
+  fetchImplementation = fetch,
+  allowPartial = false,
+} = {}) {`,
+  "provider partial-read option",
+  "return fetchDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial });"
+);
+
+patch(
+  "../api/_stock-source-provider.js",
+  'return fetchDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial: false });',
+  'return fetchDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial });',
+  "provider partial-read passthrough",
+  'return fetchDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial });'
+);
+
+patch(
   "../api/stock-watch-monitor-agent.js",
   `    let provider = null;
     let providerError = "";
@@ -102,13 +135,15 @@ patch(
   `    let provider = null;
     let providerError = "";
     let providerDiagnostics = null;
-    try { provider = await loadStockSourceSnapshot({ supabase, environment, fetchImplementation }); }
-    catch (error) {
+    try {
+      provider = await loadStockSourceSnapshot({ supabase, environment, fetchImplementation, allowPartial: true });
+      providerDiagnostics = provider?.diagnostics && typeof provider.diagnostics === "object" ? provider.diagnostics : null;
+    } catch (error) {
       providerError = clean(error?.message || error, 2000);
       providerDiagnostics = error?.diagnostics && typeof error.diagnostics === "object" ? error.diagnostics : null;
     }`,
-  "provider diagnostic capture",
-  "let providerDiagnostics = null;"
+  "provider diagnostic capture and degraded monitor read",
+  "allowPartial: true });\n      providerDiagnostics = provider?.diagnostics"
 );
 
 patch(
@@ -122,6 +157,74 @@ patch(
       provider: provider || { providerId: config.id, providerLabel: config.label, vehicleCount: 0, vehicles: [], refresh: {} },`,
   "provider diagnostics snapshot",
   "providerDiagnostics,"
+);
+
+patch(
+  "../api/_dealerkit-stock-adapter.js",
+  `async function requestJson(url, secret, fetchImplementation) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetchImplementation(url, {
+      method: "GET",
+      redirect: "error",
+      signal: controller.signal,
+      cache: "no-store",
+      headers: {
+        accept: "application/json",
+        authorization: \`Bearer \${secret}\`,
+        "user-agent": "VFC-DealerKit-Stock-Adapter/1.0",
+      },
+    });
+    const text = await response.text();
+    let payload = null;
+    try { payload = text ? JSON.parse(text) : null; } catch { payload = null; }
+    return { ok: response.ok, status: response.status, payload, responseBytes: text.length };
+  } finally {
+    clearTimeout(timeout);
+  }
+}`,
+  `const DEALERKIT_REQUEST_ATTEMPTS = 3;
+const TRANSIENT_DEALERKIT_STATUSES = new Set([500, 502, 503, 504]);
+
+function retryDelay(attempt) {
+  return new Promise((resolve) => setTimeout(resolve, attempt * 50));
+}
+
+async function requestJson(url, secret, fetchImplementation) {
+  let lastResult = null;
+  for (let attempt = 1; attempt <= DEALERKIT_REQUEST_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    let shouldRetry = false;
+    try {
+      const response = await fetchImplementation(url, {
+        method: "GET",
+        redirect: "error",
+        signal: controller.signal,
+        cache: "no-store",
+        headers: {
+          accept: "application/json",
+          authorization: \`Bearer \${secret}\`,
+          "user-agent": "VFC-DealerKit-Stock-Adapter/1.0",
+        },
+      });
+      const text = await response.text();
+      let payload = null;
+      try { payload = text ? JSON.parse(text) : null; } catch { payload = null; }
+      const result = { ok: response.ok, status: response.status, payload, responseBytes: text.length };
+      lastResult = result;
+      shouldRetry = TRANSIENT_DEALERKIT_STATUSES.has(response.status) && attempt < DEALERKIT_REQUEST_ATTEMPTS;
+      if (!shouldRetry) return result;
+    } finally {
+      clearTimeout(timeout);
+    }
+    await retryDelay(attempt);
+  }
+  return lastResult;
+}`,
+  "transient DealerKit retries",
+  "const DEALERKIT_REQUEST_ATTEMPTS = 3;"
 );
 
 patch(
@@ -175,4 +278,56 @@ patch(
   "const rejectedSummary = invalidRecords.slice(0, 12)"
 );
 
-console.log("Applied DealerKit image-readiness fail-closed UI, safety-stop monitor classification, dateless registration support, and rejected-row diagnostics.");
+patch(
+  "../api/dealerkit-image-readiness.js",
+  'fetchDealerKitStockSnapshot({ allowPartial: false }),',
+  'fetchDealerKitStockSnapshot({ allowPartial: true }),',
+  "image readiness degraded source read",
+  'fetchDealerKitStockSnapshot({ allowPartial: true })'
+);
+
+patch(
+  "../api/dealerkit-image-readiness.js",
+  `    if (!dealerKitSnapshot.complete) {
+      return response.status(503).json({
+        ok: false,
+        pipeline,
+        sourceAvailable: false,
+        message: "DealerKit returned an incomplete stock snapshot, so image readiness is unavailable until the source is healthy.",
+        summary: { imageUpdatesReady: 0, complete: false, sourceAvailable: false },
+        diagnostics: dealerKitSnapshot.diagnostics || {},
+      });
+    }`,
+  `    const sourceDegraded = dealerKitSnapshot.complete === false;`,
+  "image readiness partial snapshot handling",
+  "const sourceDegraded = dealerKitSnapshot.complete === false;"
+);
+
+patch(
+  "../api/dealerkit-image-readiness.js",
+  `      ok: true,
+      pipeline,
+      sourceAvailable: true,
+      alerts,`,
+  `      ok: true,
+      pipeline,
+      sourceAvailable: true,
+      degraded: sourceDegraded,
+      diagnostics: sourceDegraded ? dealerKitSnapshot.diagnostics : undefined,
+      alerts,`,
+  "image readiness degraded response",
+  "degraded: sourceDegraded,"
+);
+
+patch(
+  "../api/dealerkit-image-readiness.js",
+  `        complete: true,
+        sourceAvailable: true,`,
+  `        complete: !sourceDegraded,
+        degraded: sourceDegraded,
+        sourceAvailable: true,`,
+  "image readiness degraded summary",
+  "complete: !sourceDegraded,"
+);
+
+console.log("Applied DealerKit retries, degraded-source image readiness/monitor safety, dateless registrations, safety-stop classification, and rejected-row diagnostics.");

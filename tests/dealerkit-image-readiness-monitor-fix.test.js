@@ -2,10 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { buildDealerKitImageReadinessAlerts } from "../api/dealerkit-image-readiness.js";
+import { fetchDealerKitStockSnapshot } from "../api/_dealerkit-stock-adapter.js";
 import { buildStockWatchMonitorIssues } from "../api/_stock-watch-monitor.js";
 import { normalizeRegistration } from "../api/_vansco-cache-utils.js";
 
 const NOW = new Date("2026-09-11T14:30:00.000Z");
+const DEALERKIT_ENV = {
+  DEALERKIT_API_SECRET: "test-secret",
+  DEALERKIT_DEALER_ID: "test-dealer",
+};
 
 function healthySnapshot() {
   return {
@@ -25,6 +30,41 @@ function healthySnapshot() {
     registrations: { financeLive: ["AB24CDE"], rent2buyLive: ["RO21VVD"] },
     queries: { crm: { ok: true }, rent2buy: { ok: true }, finance: { ok: true }, actionLogs: { ok: true } },
     switchReady: true,
+  };
+}
+
+function dealerKitRow(id, registration) {
+  return {
+    id,
+    status: "available",
+    vehicle: {
+      registration,
+      manufacturer: "Ford",
+      model: "Transit",
+      derivative: "350 Leader",
+      type: "LCV",
+    },
+    prices: { advertised: { amount: 12000, vat_status: "ex-vat" } },
+    media: { images: [{ id: `${id}-image`, url: `https://cdn.example.test/${id}.jpg` }] },
+  };
+}
+
+function jsonResponse(payload, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function pagePayload(data, { total, currentPage, lastPage, perPage }) {
+  return {
+    data,
+    meta: {
+      total,
+      current_page: currentPage,
+      last_page: lastPage,
+      per_page: perPage,
+    },
   };
 }
 
@@ -58,14 +98,155 @@ test("DealerKit registration normalizer accepts dateless UK registrations return
   assert.equal(normalizeRegistration("SV 7840"), "SV7840");
 });
 
-test("image readiness production path no longer reads Vansco refresh/cache tables", () => {
+test("DealerKit transient 5xx page failures are retried before the snapshot is degraded", async () => {
+  let pageTwoAttempts = 0;
+  const fetchImplementation = async (input) => {
+    const url = new URL(String(input));
+    const page = Number(url.searchParams.get("page"));
+    const perPage = Number(url.searchParams.get("per_page"));
+
+    if (page === 1 && perPage === 2) {
+      return jsonResponse(pagePayload([
+        dealerKitRow("stock-a", "AB24CDE"),
+        dealerKitRow("stock-b", "XY24ZZZ"),
+      ], { total: 3, currentPage: 1, lastPage: 2, perPage: 2 }));
+    }
+
+    if (page === 2 && perPage === 2) {
+      pageTwoAttempts += 1;
+      if (pageTwoAttempts < 3) return jsonResponse({ message: "temporary upstream error" }, 500);
+      return jsonResponse(pagePayload([
+        dealerKitRow("stock-c", "RO21VVD"),
+      ], { total: 3, currentPage: 2, lastPage: 2, perPage: 2 }));
+    }
+
+    throw new Error(`Unexpected DealerKit test request: ${url}`);
+  };
+
+  const snapshot = await fetchDealerKitStockSnapshot({
+    environment: DEALERKIT_ENV,
+    fetchImplementation,
+    perPage: 2,
+    allowPartial: false,
+  });
+
+  assert.equal(pageTwoAttempts, 3);
+  assert.equal(snapshot.complete, true);
+  assert.equal(snapshot.vehicleCount, 3);
+  assert.equal(snapshot.refresh.status, "complete");
+});
+
+test("persistent isolated DealerKit 5xx records produce a usable degraded snapshot rather than zero source", async () => {
+  let failedPageAttempts = 0;
+  let failedPositionAttempts = 0;
+  const fetchImplementation = async (input) => {
+    const url = new URL(String(input));
+    const page = Number(url.searchParams.get("page"));
+    const perPage = Number(url.searchParams.get("per_page"));
+
+    if (page === 1 && perPage === 2) {
+      return jsonResponse(pagePayload([
+        dealerKitRow("stock-a", "AB24CDE"),
+        dealerKitRow("stock-b", "XY24ZZZ"),
+      ], { total: 3, currentPage: 1, lastPage: 2, perPage: 2 }));
+    }
+
+    if (page === 2 && perPage === 2) {
+      failedPageAttempts += 1;
+      return jsonResponse({ message: "persistent page failure" }, 500);
+    }
+
+    if (page === 3 && perPage === 1) {
+      failedPositionAttempts += 1;
+      return jsonResponse({ message: "persistent item failure" }, 500);
+    }
+
+    throw new Error(`Unexpected DealerKit test request: ${url}`);
+  };
+
+  const snapshot = await fetchDealerKitStockSnapshot({
+    environment: DEALERKIT_ENV,
+    fetchImplementation,
+    perPage: 2,
+    allowPartial: true,
+  });
+
+  assert.equal(failedPageAttempts, 3);
+  assert.equal(failedPositionAttempts, 3);
+  assert.equal(snapshot.complete, false);
+  assert.equal(snapshot.vehicleCount, 2);
+  assert.equal(snapshot.refresh.status, "partial");
+  assert.equal(snapshot.refresh.failed, 1);
+  assert.equal(snapshot.refresh.remaining, 1);
+  assert.equal(snapshot.diagnostics.failedPositions.length, 1);
+});
+
+test("a degraded DealerKit snapshot is a monitor warning, not a source-unavailable critical", () => {
+  const snapshot = healthySnapshot();
+  const diagnostics = {
+    apiReportedTotal: 244,
+    recordsFetched: 242,
+    stableReportedTotal: true,
+    invalidRecords: [],
+    duplicateSupplierStockIds: [],
+    duplicateRegistrations: [],
+    failedPages: [{ page: 3, status: 500 }],
+    failedPositions: [{ position: 225, status: 500 }, { position: 229, status: 500 }],
+  };
+  snapshot.providerDiagnostics = diagnostics;
+  snapshot.provider = {
+    providerId: "dealerkit",
+    providerLabel: "DealerKit",
+    checkedAt: "2026-09-11T14:25:00.000Z",
+    vehicleCount: 242,
+    complete: false,
+    diagnostics,
+    refresh: {
+      status: "partial",
+      stage: "incomplete_source",
+      updatedAt: "2026-09-11T14:25:00.000Z",
+      completedAt: "2026-09-11T14:25:00.000Z",
+      total: 244,
+      succeeded: 242,
+      failed: 2,
+      remaining: 2,
+      error: "DealerKit returned an incomplete or unstable stock snapshot; authoritative cutover is blocked.",
+    },
+  };
+  snapshot.counts.providerVehicles = 242;
+
+  const previous = structuredClone(snapshot);
+  const issues = buildStockWatchMonitorIssues({ snapshot, previousSnapshot: previous, actionLogs: [], now: NOW });
+  assert.equal(issues.some((item) => item.code === "STOCK_SOURCE_UNAVAILABLE"), false);
+  const degraded = issues.find((item) => item.code === "STOCK_SOURCE_REFRESH_FAILURES");
+  assert.ok(degraded);
+  assert.equal(degraded.severity, "warning");
+  assert.equal(degraded.evidence.failed, 2);
+  assert.deepEqual(degraded.evidence.diagnostics.failedPositions, diagnostics.failedPositions);
+});
+
+test("image readiness production path uses known-good rows from a degraded DealerKit snapshot", () => {
   const endpoint = fs.readFileSync(new URL("../api/dealerkit-image-readiness.js", import.meta.url), "utf8");
   const service = fs.readFileSync(new URL("../services/vanscoImageReadiness.js", import.meta.url), "utf8");
+  const page = fs.readFileSync(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
   assert.match(endpoint, /fetchDealerKitStockSnapshot/);
-  assert.match(endpoint, /allowPartial:\s*false/);
+  assert.match(endpoint, /allowPartial:\s*true/);
+  assert.match(endpoint, /const sourceDegraded = dealerKitSnapshot\.complete === false/);
+  assert.match(endpoint, /degraded:\s*sourceDegraded/);
+  assert.match(endpoint, /complete:\s*!sourceDegraded/);
+  assert.doesNotMatch(endpoint, /if \(!dealerKitSnapshot\.complete\)[\s\S]{0,300}status\(503\)/);
+  assert.match(page, /imageReadySummary\.sourceAvailable === false/);
   assert.doesNotMatch(endpoint, /vansco_refresh_runs|vansco_vehicle_cache/i);
   assert.match(service, /\/api\/dealerkit-image-readiness/);
   assert.doesNotMatch(service, /\/api\/vansco-image-readiness/);
+});
+
+test("absence-based reserved mutation remains fail-closed on an incomplete DealerKit snapshot", () => {
+  const verifier = fs.readFileSync(new URL("../api/_dealerkit-reservation-verification.js", import.meta.url), "utf8");
+  assert.match(verifier, /allowPartial:\s*true/);
+  assert.match(verifier, /if \(snapshot\.complete === false\)/);
+  assert.match(verifier, /could not safely verify/);
+  assert.match(verifier, /Nothing was changed in Wix/);
 });
 
 test("two intentional reserved-status safety stops do not create a critical draft-action failure", () => {
@@ -88,17 +269,23 @@ test("real Wix action failures remain visible to the monitor", () => {
   assert.equal(failure.severity, "critical");
 });
 
-test("build fix makes the DealerKit photo card fail closed and exposes rejected source rows", () => {
+test("build fix makes hard image-readiness failures unavailable and exposes rejected source rows", () => {
   const page = fs.readFileSync(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
   const monitor = fs.readFileSync(new URL("../api/_stock-watch-monitor.js", import.meta.url), "utf8");
   const agent = fs.readFileSync(new URL("../api/stock-watch-monitor-agent.js", import.meta.url), "utf8");
   const adapter = fs.readFileSync(new URL("../api/_dealerkit-stock-adapter.js", import.meta.url), "utf8");
+  const provider = fs.readFileSync(new URL("../api/_stock-source-provider.js", import.meta.url), "utf8");
 
   assert.match(page, /summary\.imagesReady[^\n]*Unavailable|Unavailable[^\n]*summary\.imagesReady/);
   assert.match(page, /Rejected DealerKit rows:/);
   assert.match(monitor, /isIntentionalSafetyStop/);
   assert.match(monitor, /providerDiagnostics/);
+  assert.match(agent, /allowPartial:\s*true/);
   assert.match(agent, /providerDiagnostics/);
+  assert.match(provider, /allowPartial = false/);
+  assert.match(provider, /fetchDealerKitStockSnapshot\(\{ environment, fetchImplementation, allowPartial \}\)/);
+  assert.match(adapter, /DEALERKIT_REQUEST_ATTEMPTS = 3/);
+  assert.match(adapter, /TRANSIENT_DEALERKIT_STATUSES/);
   assert.match(adapter, /registrationCandidate/);
   assert.match(adapter, /Rejected records:/);
 });
