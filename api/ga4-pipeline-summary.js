@@ -13,10 +13,11 @@ function withLiveApplicationCompletions(summary,live){
    const ga4Starts=number(site.applicationStartsToday);
    const ga4Completions=number(site.applicationCompletionsToday);
    const liveSite=live.sites?.[site.key]||null;
+   const liveReaches=number(liveSite?.reaches);
    const liveStarts=number(liveSite?.starts);
    const liveExplicitStarts=number(liveSite?.explicitStarts);
    const liveCompletions=number(liveSite?.completions);
-   const hasLiveApplicationActivity=Boolean(liveSite)&&(liveStarts>0||liveCompletions>0);
+   const hasLiveApplicationActivity=Boolean(liveSite)&&(liveReaches>0||liveStarts>0||liveCompletions>0);
    const effectiveStarts=hasLiveApplicationActivity?liveStarts:ga4Starts;
    const effectiveCompletions=hasLiveApplicationActivity?liveCompletions:ga4Completions;
    const effectiveConversionRate=effectiveStarts>0&&effectiveCompletions<=effectiveStarts
@@ -26,6 +27,7 @@ function withLiveApplicationCompletions(summary,live){
     ...site,
     ga4ApplicationStartsToday:ga4Starts,
     ga4ApplicationCompletionsToday:ga4Completions,
+    liveApplicationReachesToday:liveReaches,
     liveApplicationStartsToday:liveStarts,
     liveExplicitApplicationStartsToday:liveExplicitStarts,
     liveApplicationCompletionsToday:liveCompletions,
