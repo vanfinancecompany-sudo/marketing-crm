@@ -39,5 +39,6 @@ patchReservationEndpoint("../api/rent2buy-reserved-wix-stock.js", "unpublishItem
 
 await import("./apply-dealerkit-vat-publishing-fix.mjs");
 await import("./apply-dealerkit-production-safety-audit-fixes.mjs");
+await import("./apply-dealerkit-manual-media-delete.mjs");
 
 console.log("Applied DealerKit reservation safety verification to Finance, Cars and Rent2Buy Wix draft actions.");
