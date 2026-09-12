@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { mergeCarsPublishedListingVehicles } from "../lib/dealerKitCarsPublishedListing.js";
+import {
+  mergeCarsPublishedListingVehicles,
+  mergePublishedListingVehicles,
+} from "../lib/dealerKitCarsPublishedListing.js";
 import {
   CAR_WIX_PRICE_COLLECTIONS,
   RENT2BUY_PRICE_COLLECTIONS,
@@ -58,6 +61,39 @@ test("Cars comparison fails closed when the published CARFINANCE row has no safe
     [{ registration: "XY24ZZZ", price: "" }],
   );
   assert.equal(rows[0].price, null);
+});
+
+test("Finance comparison uses the live Wix listing price while preserving support-card details", () => {
+  const rows = mergePublishedListingVehicles(
+    "finance",
+    [{ registration: "AB24CDE", price: "£21,995", vat: "+ VAT", picture: "finance.jpg", weblink: "https://example.test/finance" }],
+    [{ registration: "AB24CDE", title: "Published Finance van", price: 20995, vat: "+ VAT" }],
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].price, 20995);
+  assert.equal(rows[0].vat, "+ VAT");
+  assert.equal(rows[0].picture, "finance.jpg");
+  assert.equal(rows[0].weblink, "https://example.test/finance");
+});
+
+test("Rent2Buy comparison uses the live Wix monthly rental and cannot resurrect a stale CRM monthly value", () => {
+  const support = [{ registration: "RO21VVD", monthly: "£499 PM", picture: "r2b.jpg", webLink: "https://example.test/r2b" }];
+  const first = mergePublishedListingVehicles("rent2buy", support, [
+    { registration: "RO21VVD", title: "Published Rent2Buy van", monthly: 467 },
+  ]);
+  assert.equal(first.length, 1);
+  assert.equal(first[0].monthly, 467);
+  assert.equal(first[0].picture, "r2b.jpg");
+
+  const refreshed = mergePublishedListingVehicles("rent2buy", support, [
+    { registration: "RO21VVD", monthly: 455 },
+  ]);
+  assert.equal(refreshed[0].monthly, 455);
+
+  const missingPublishedMonthly = mergePublishedListingVehicles("rent2buy", support, [
+    { registration: "RO21VVD", monthly: null },
+  ]);
+  assert.equal(missingPublishedMonthly[0].monthly, null, "must fail closed rather than reuse stale rent_vehicles.monthly");
 });
 
 test("Rent2Buy recalculates monthly and initial rentals from DealerKit retail and mileage", () => {
@@ -132,8 +168,9 @@ test("Stock Watch source is expanded to show Price Differences in Finance, Rent2
   assert.match(source, /Wix\/Car price/);
 });
 
-test("Cars Stock Watch refresh hydrates comparison rows from live CARFINANCE vehicles", async () => {
+test("Stock Watch refresh hydrates Finance, Rent2Buy and Cars comparison values from live Wix listings", async () => {
   const source = await readFile(new URL("pages/VanscoStockWatchPage.jsx", root), "utf8");
-  assert.match(source, /mergeCarsPublishedListingVehicles/);
-  assert.match(source, /mergeCarsPublishedListingVehicles\(vehicles, presence\.vehicles \|\| \[\]\)/);
+  assert.match(source, /mergePublishedListingVehicles/);
+  assert.match(source, /mergePublishedListingVehicles\(pipeline, vehicles, presence\.vehicles \|\| \[\]\)/);
+  assert.match(source, /refreshed live Wix listing snapshot/);
 });
