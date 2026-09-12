@@ -9,6 +9,7 @@ const ALLOWED_ORIGINS = new Set([
 const SITE_ORIGIN = 'https://www.vanfinancecompany.co.uk';
 const EVENTS = new Set([
   'finance_application_reached',
+  'finance_application_started',
   'finance_application_step_viewed',
   'finance_application_step_blocked',
   'finance_application_completed',
@@ -17,6 +18,7 @@ const STEP_NAMES = new Set([
   'Application type',
   'Company',
   'About you',
+  'A little more about you',
   'Address history',
   'Work & income',
   'Part exchange',
