@@ -68,7 +68,7 @@ function pagePayload(data, { total, currentPage, lastPage, perPage }) {
   };
 }
 
-test("DealerKit image readiness only alerts for an active exact registration with one CMS image and at least five DealerKit images", () => {
+test("DealerKit image readiness alerts when DealerKit has more images than the current live advert", () => {
   const alerts = buildDealerKitImageReadinessAlerts({
     pipeline: "finance",
     localVehicles: [
@@ -85,10 +85,96 @@ test("DealerKit image readiness only alerts for an active exact registration wit
     ],
   });
 
+  assert.equal(alerts.length, 2);
+  assert.equal(alerts[0].registration, "XY24ZZZ");
+  assert.equal(alerts[0].currentAdvertImageCount, 2);
+  assert.equal(alerts[0].sourceImageCount, 9);
+  assert.equal(alerts[0].newImageCount, 7);
+  assert.equal(alerts[1].registration, "AB24CDE");
+  assert.equal(alerts[1].sourceImageCount, 7);
+  assert.equal(alerts[1].supplierStockId, "stock-1");
+});
+
+test("BD21HCX is photo-ready in Rent2Buy from its live Finance advert baseline", () => {
+  const alerts = buildDealerKitImageReadinessAlerts({
+    pipeline: "rent2buy",
+    listingPresenceByPipeline: {
+      finance: {
+        registrations: ["BD21HCX"],
+        vehicles: [{ registration: "BD21HCX", title: "Ford Transit Leader TWIN WHEEL LUTON", webLink: "https://example.test/finance/bd21hcx" }],
+      },
+      rent2buy: { registrations: [], vehicles: [] },
+    },
+    cmsItemsByPipeline: {
+      finance: [{ title: "BD21HCX", imageCount: 2, images: ["finance-1.jpg", "finance-2.jpg"] }],
+      rent2buy: [],
+    },
+    dealerKitVehicles: [{
+      registration: "BD21HCX",
+      supplierStockId: "bd21hcx-stock",
+      title: "Ford Transit 2.0 350 EcoBlue HD Leader Chassis Cab",
+      bodyType: "Chassis Cab",
+      vehicleType: "LCV",
+      imageCount: 19,
+      images: Array.from({ length: 19 }, (_, index) => ({ id: `bd-${index + 1}`, url: `https://dealerkit.test/bd-${index + 1}.jpg` })),
+      status: "available",
+    }],
+  });
+
   assert.equal(alerts.length, 1);
-  assert.equal(alerts[0].registration, "AB24CDE");
-  assert.equal(alerts[0].sourceImageCount, 7);
-  assert.equal(alerts[0].supplierStockId, "stock-1");
+  assert.equal(alerts[0].registration, "BD21HCX");
+  assert.equal(alerts[0].currentAdvertImageCount, 2);
+  assert.equal(alerts[0].sourceImageCount, 19);
+  assert.equal(alerts[0].newImageCount, 17);
+  assert.deepEqual(alerts[0].advertisedPipelines, ["finance"]);
+  assert.equal(alerts[0].referencePipeline, "finance");
+  assert.equal(alerts[0].crossProductEvidence, true);
+});
+
+test("commercial photo readiness compares DealerKit with the fullest live Finance or Rent2Buy advert", () => {
+  const alerts = buildDealerKitImageReadinessAlerts({
+    pipeline: "finance",
+    listingPresenceByPipeline: {
+      finance: { registrations: ["AB24CDE"], vehicles: [{ registration: "AB24CDE" }] },
+      rent2buy: { registrations: ["AB24CDE"], vehicles: [{ registration: "AB24CDE" }] },
+    },
+    cmsItemsByPipeline: {
+      finance: [{ title: "AB24CDE", imageCount: 2 }],
+      rent2buy: [{ title: "AB24CDE", imageCount: 6 }],
+    },
+    dealerKitVehicles: [{ registration: "AB24CDE", title: "Ford Transit", vehicleType: "LCV", imageCount: 6, status: "available" }],
+  });
+
+  assert.equal(alerts.length, 0);
+});
+
+test("Cars photo readiness compares a live Cars advert with DealerKit", () => {
+  const alerts = buildDealerKitImageReadinessAlerts({
+    pipeline: "cars",
+    listingPresenceByPipeline: {
+      cars: { registrations: ["AB24CAR"], vehicles: [{ registration: "AB24CAR", title: "Example car" }] },
+    },
+    cmsItemsByPipeline: {
+      cars: [{ title: "AB24CAR", numberOfImages: 2, mainImages: ["car-1.jpg", "car-2.jpg"] }],
+    },
+    dealerKitVehicles: [{
+      registration: "AB24CAR",
+      supplierStockId: "car-stock",
+      title: "Example Hatchback",
+      vehicleType: "Car",
+      bodyType: "Hatchback",
+      imageCount: 8,
+      images: [{ url: "https://dealerkit.test/car.jpg" }],
+      status: "available",
+    }],
+  });
+
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].registration, "AB24CAR");
+  assert.equal(alerts[0].currentAdvertImageCount, 2);
+  assert.equal(alerts[0].sourceImageCount, 8);
+  assert.equal(alerts[0].newImageCount, 6);
+  assert.deepEqual(alerts[0].advertisedPipelines, ["cars"]);
 });
 
 test("DealerKit registration normalizer accepts dateless UK registrations returned by the live feed", () => {
@@ -225,7 +311,7 @@ test("a degraded DealerKit snapshot is a monitor warning, not a source-unavailab
   assert.deepEqual(degraded.evidence.diagnostics.failedPositions, diagnostics.failedPositions);
 });
 
-test("image readiness production path uses known-good rows from a degraded DealerKit snapshot", () => {
+test("image readiness production path uses known-good rows from a degraded DealerKit snapshot across all three products", () => {
   const endpoint = fs.readFileSync(new URL("../api/dealerkit-image-readiness.js", import.meta.url), "utf8");
   const service = fs.readFileSync(new URL("../services/vanscoImageReadiness.js", import.meta.url), "utf8");
   const page = fs.readFileSync(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
@@ -234,9 +320,13 @@ test("image readiness production path uses known-good rows from a degraded Deale
   assert.match(endpoint, /const sourceDegraded = dealerKitSnapshot\.complete === false/);
   assert.match(endpoint, /degraded:\s*sourceDegraded/);
   assert.match(endpoint, /complete:\s*!sourceDegraded/);
+  assert.match(endpoint, /loadLiveWixListingPresence/);
+  assert.match(endpoint, /finance[\s\S]*rent2buy/);
+  assert.match(endpoint, /CARPAGES/);
   assert.doesNotMatch(endpoint, /if \(!dealerKitSnapshot\.complete\)[\s\S]{0,300}status\(503\)/);
   assert.match(page, /imageReadySummary\.sourceAvailable === false/);
   assert.doesNotMatch(endpoint, /vansco_refresh_runs|vansco_vehicle_cache/i);
+  assert.match(service, /\["finance", "rent2buy", "cars"\]/);
   assert.match(service, /\/api\/dealerkit-image-readiness/);
   assert.doesNotMatch(service, /\/api\/vansco-image-readiness/);
 });
