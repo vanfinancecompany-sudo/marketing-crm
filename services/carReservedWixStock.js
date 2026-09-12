@@ -1,7 +1,9 @@
+import { buildMarketingAccessHeaders } from "./marketingAccess.js";
+
 async function callCarReservedWixStock(payload) {
   const response = await fetch("/api/car-reserved-wix-stock", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: buildMarketingAccessHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
     body: JSON.stringify(payload),
   });
   const result = await response.json().catch(() => ({}));
@@ -11,10 +13,10 @@ async function callCarReservedWixStock(payload) {
   return result;
 }
 
-export function previewReservedCarWixStock(registration) {
-  return callCarReservedWixStock({ action: "preview", registration });
+export function previewReservedCarWixStock(registration, supplierStockId) {
+  return callCarReservedWixStock({ action: "preview", registration, supplier_stock_id: supplierStockId || undefined });
 }
 
-export function unpublishReservedCarWixStock(registration) {
-  return callCarReservedWixStock({ action: "unpublish", registration, confirmed: true });
+export function unpublishReservedCarWixStock(registration, supplierStockId) {
+  return callCarReservedWixStock({ action: "unpublish", registration, supplier_stock_id: supplierStockId || undefined, confirmed: true });
 }

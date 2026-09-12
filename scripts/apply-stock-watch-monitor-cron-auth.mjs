@@ -38,4 +38,5 @@ if (source.includes('const cron = request.method === "GET" && isCronRequest(requ
 }
 
 fs.writeFileSync(targetPath, source);
-console.log("Applied Vercel cron authentication to Stock Watch Monitor Agent.");
+await import("./apply-stock-watch-reservation-auth.mjs");
+console.log("Applied Vercel cron authentication to Stock Watch Monitor Agent and Marketing access to reservation actions.");

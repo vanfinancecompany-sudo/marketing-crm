@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import "./stock-watch-reservation-auth.test.js";
 import { isCronRequest } from "../api/stock-watch-monitor-agent.js";
 
 function request(headers = {}) {

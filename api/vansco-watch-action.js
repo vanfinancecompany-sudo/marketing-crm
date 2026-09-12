@@ -15,6 +15,14 @@ const ALLOWED_MATCH_STATUSES = new Set([
   "reserved_still_listed",
 ]);
 
+export function isMarketingStockWatchActionAuthorized(request, environment = process.env) {
+  const expected = String(environment.MARKETING_CUSTOMER_DATABASE_API_KEY || "").trim().slice(0, 2000);
+  const header = String(request.headers?.["x-marketing-customer-database-key"] || "").trim().slice(0, 2000);
+  const authorization = String(request.headers?.authorization || "").trim().slice(0, 2200);
+  const bearer = authorization.replace(/^Bearer\s+/i, "");
+  return Boolean(expected && (header === expected || bearer === expected));
+}
+
 async function readJsonBody(request) {
   if (request.body && typeof request.body === "object") return request.body;
   const chunks = [];
@@ -137,7 +145,16 @@ async function removeExistingAction({ supabase, pipeline, registration, stockUrl
   return deleted;
 }
 
-export default async function handler(request, response) {
+export async function handleVanscoWatchAction(
+  request,
+  response,
+  { environment = process.env, getSupabase = getSupabaseAdmin } = {},
+) {
+  response.setHeader("Cache-Control", "no-store, max-age=0");
+  if (!isMarketingStockWatchActionAuthorized(request, environment)) {
+    response.status(401).json({ ok: false, message: "Marketing CRM access is required." });
+    return;
+  }
   if (request.method !== "POST") {
     response.status(405).json({ ok: false, message: "Method not allowed." });
     return;
@@ -150,7 +167,7 @@ export default async function handler(request, response) {
     const workflowStatus = storedWorkflowStatus(requestedWorkflowStatus);
     const notes = body.notes || "";
     const record = body.record || {};
-    const supabase = getSupabaseAdmin();
+    const supabase = getSupabase();
 
     const registration = normalizeRegistration(record.registration);
     const stockUrl = normalizeUrl(record.stockUrl || record.stock_url);
@@ -159,7 +176,6 @@ export default async function handler(request, response) {
 
     if (requestedWorkflowStatus === "new") {
       await removeExistingAction({ supabase, pipeline, registration, stockUrl, actionId });
-      response.setHeader("Cache-Control", "no-store, max-age=0");
       response.status(200).json({
         ok: true,
         record: {
@@ -182,9 +198,12 @@ export default async function handler(request, response) {
     const { data: saved, error: saveError } = await query;
     if (saveError) throw saveError;
 
-    response.setHeader("Cache-Control", "no-store, max-age=0");
     response.status(200).json({ ok: true, record: normalizeActionRecord(saved) });
   } catch (error) {
     response.status(500).json({ ok: false, message: error?.message || "Could not save Vansco Stock Watch action." });
   }
+}
+
+export default function handler(request, response) {
+  return handleVanscoWatchAction(request, response);
 }

@@ -1,7 +1,9 @@
+import { buildMarketingAccessHeaders } from "./marketingAccess.js";
+
 async function callRent2BuyReservedWixStock(payload) {
   const response = await fetch("/api/rent2buy-reserved-wix-stock", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: buildMarketingAccessHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
     body: JSON.stringify(payload),
   });
   const result = await response.json().catch(() => ({}));
@@ -11,10 +13,10 @@ async function callRent2BuyReservedWixStock(payload) {
   return result;
 }
 
-export function previewReservedRent2BuyWixStock(registration) {
-  return callRent2BuyReservedWixStock({ action: "preview", registration });
+export function previewReservedRent2BuyWixStock(registration, supplierStockId) {
+  return callRent2BuyReservedWixStock({ action: "preview", registration, supplier_stock_id: supplierStockId || undefined });
 }
 
-export function unpublishReservedRent2BuyWixStock(registration) {
-  return callRent2BuyReservedWixStock({ action: "unpublish", registration, confirmed: true });
+export function unpublishReservedRent2BuyWixStock(registration, supplierStockId) {
+  return callRent2BuyReservedWixStock({ action: "unpublish", registration, supplier_stock_id: supplierStockId || undefined, confirmed: true });
 }
