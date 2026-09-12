@@ -75,7 +75,7 @@ test("Stock Watch follow-up intersects Rent2Buy Wix presence with active CRM reg
   assert.match(source, /const liveRegistrationSet = new Set\(\(presence\.registrations \|\| \[\]\)/);
   assert.match(source, /effectiveRegistrations = vehicleRegistrations\.filter\(\(registration\) => liveRegistrationSet\.has\(registration\)\)/);
   assert.match(source, /const percent = complete \? 100/);
-  assert.match(source, /DealerKit now has at least 5 vehicle images/);
+  assert.match(source, /DealerKit has at least 5 images and more vehicle photos than the fullest current live advert/);
 });
 
 test("Vansco gallery counter keeps unique vehicle photos for the matching stock ID", () => {
