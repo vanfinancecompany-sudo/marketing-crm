@@ -6,7 +6,8 @@ const TIME_ZONE = 'Europe/London';
 const SITE_EVENTS = Object.freeze({
   vanFinance: {
     siteOrigin: ANALYTICS_SITE_ORIGINS.vfc,
-    startEventName: 'finance_application_reached',
+    reachedEventName: 'finance_application_reached',
+    startEventName: 'finance_application_started',
     completionEventName: 'finance_application_completed',
   },
   rent2buy: {
@@ -36,7 +37,8 @@ export function uniqueSessionCount(rows = []) {
   return new Set(rows.map((row) => String(row?.session_id || '').trim()).filter(Boolean)).size;
 }
 
-export function applicationSessionCounts(rows = [], { startEventName, completionEventName } = {}) {
+export function applicationSessionCounts(rows = [], { reachedEventName, startEventName, completionEventName } = {}) {
+  const reachedRows = reachedEventName ? rows.filter((row) => row?.event_name === reachedEventName) : [];
   const startRows = rows.filter((row) => row?.event_name === startEventName);
   const completionRows = rows.filter((row) => row?.event_name === completionEventName);
   const applicationRows = rows.filter((row) => (
@@ -44,25 +46,27 @@ export function applicationSessionCounts(rows = [], { startEventName, completion
   ));
 
   return {
+    reaches: uniqueSessionCount(reachedRows),
     // A completed session necessarily started the application. Including it here
-    // prevents a delayed/missed reach event from producing completions > starts.
+    // prevents a delayed/missed explicit start event from producing completions > starts.
     starts: uniqueSessionCount(applicationRows),
     explicitStarts: uniqueSessionCount(startRows),
     completions: uniqueSessionCount(completionRows),
   };
 }
 
-async function loadSiteCounts({ supabase, siteOrigin, startEventName, completionEventName, startIso, endIso }) {
+async function loadSiteCounts({ supabase, siteOrigin, reachedEventName, startEventName, completionEventName, startIso, endIso }) {
+  const eventNames = [reachedEventName, startEventName, completionEventName].filter(Boolean);
   const { data, error } = await supabase
     .from('site_analytics_events')
     .select('session_id,event_name')
     .eq('site_origin', siteOrigin)
-    .in('event_name', [startEventName, completionEventName])
+    .in('event_name', eventNames)
     .gte('occurred_at', startIso)
     .lt('occurred_at', endIso)
     .limit(10000);
   if (error) throw error;
-  return applicationSessionCounts(data || [], { startEventName, completionEventName });
+  return applicationSessionCounts(data || [], { reachedEventName, startEventName, completionEventName });
 }
 
 export async function loadLiveApplicationCompletions({ now = new Date(), supabase } = {}) {
@@ -75,6 +79,7 @@ export async function loadLiveApplicationCompletions({ now = new Date(), supabas
     const counts = await loadSiteCounts({ supabase: client, ...config, startIso, endIso });
     return [key, {
       ...counts,
+      reachedEventName: config.reachedEventName || null,
       startEventName: config.startEventName,
       eventName: config.completionEventName,
     }];
