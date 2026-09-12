@@ -68,14 +68,14 @@ test("current Finance vehicle page answers mthPrice and priceVat without model e
   assert.match(retailReply, /retail price of £18,995 \+ VAT/i);
 });
 
-test("current Rent2Buy vehicle context answers fixed initial rental and monthly payments but does not expose stock-page agreement length", () => {
+test("current Rent2Buy vehicle context answers fixed initial rental, monthly payments and the verified agreement length", () => {
   const vehicleContext = {
     title: "Ford Transit Connect",
     pricing: {
       rent2buy_initial: "£2,000 + VAT / £2,400 inc VAT",
       rent2buy_monthly: "£499 + VAT / £598.80 inc VAT",
     },
-    term_months: null,
+    term_months: 48,
   };
   const rememberedFacts = { product_context: "rent2buy", vehicle_interest: "Ford Transit Connect" };
 
@@ -97,7 +97,7 @@ test("current Rent2Buy vehicle context answers fixed initial rental and monthly 
     vehicleContext,
     rememberedFacts,
   });
-  assert.equal(termReply, null);
+  assert.match(termReply, /48-month term/i);
 });
 
 test("Tell me about this van uses the trusted Finance vehicle profile in natural customer language", () => {

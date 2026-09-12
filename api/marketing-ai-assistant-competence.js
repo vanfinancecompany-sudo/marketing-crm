@@ -88,6 +88,11 @@ import {
   buildAssistantResponseModelParameters,
   chooseAssistantModel,
 } from "../lib/aiAssistantModelRouter.js";
+import {
+  LIVE_JASMINE_PERSONA,
+  controlledCompositionInstructions,
+  validateControlledCompositionReply,
+} from "../lib/liveJasmineComposition.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
@@ -220,7 +225,7 @@ export async function requestOpenAIConversationReply(prompt, route = {}, environ
     body: JSON.stringify({
       ...modelParameters,
       input: [
-        { role: "system", content: "You are the grounded internal simulation of a UK van website assistant. Compose only the customer-facing reply. Never override product context, deterministic rules, remembered facts or supplied evidence." },
+        { role: "system", content: LIVE_JASMINE_PERSONA },
         { role: "user", content: prompt },
       ],
       text: { format: { type: "json_schema", name: "conversation_simulation_reply", strict: true, schema: CONVERSATION_REPLY_SCHEMA } },
@@ -341,10 +346,11 @@ function conversationRetrievalQuery(intent, memory, messages) {
   return clean(`${recent} ${intent.normalised_message} ${facts}`, 6000);
 }
 
-export function conversationPrompt({ question, messages, sources, sections, settings, productContext, comparison, intent, memory, buyingSignals = {}, lengthTarget = {}, contextualResolution = "", journey = {}, human = {}, phraseDiagnostics = {} }) {
-  const base = buildCompetencePrompt({ question, messages, sources, sections, settings, productContext, comparison });
+export function conversationPrompt({ question, messages, sources, sections, settings, productContext, comparison, intent, memory, buyingSignals = {}, lengthTarget = {}, contextualResolution = "", journey = {}, human = {}, phraseDiagnostics = {}, pageContext = {}, vehicleContext = {}, fallbackResponse = null }) {
+  const base = buildCompetencePrompt({ question, messages, sources, sections, settings, productContext, comparison, live: true });
   const disclaimer = disclaimerControl(messages);
-  return `${base}\n\n# Locked V5 human conversation and recovery\nUniversal message type: ${human.message_type || "question"} (${human.confidence || 0}% confidence). Customer emotion: ${human.emotion?.emotion || "neutral"}. Objection: ${human.objection?.objection || "none"}. The server conversation intent is ${intent.primary_intent}; secondary intents: ${intent.secondary_intents.join(", ") || "none"}. The locked product remains ${productContext} and must never be cross-sold. Remembered structured customer facts: ${JSON.stringify(memory.remembered_facts)}. Corrections: ${JSON.stringify(memory.corrections)}. Buying signal: ${buyingSignals.detected_buying_signal || "none"} (${buyingSignals.signal_strength || "low"}). Buying intent level: ${journey.buying_intent_level || "Research"}. Current customer goal: ${journey.conversation_goal || "Research"}. Journey stage: ${journey.journey_stage || "Research"}. Recommended single action: ${journey.recommended_cta || buyingSignals.recommended_next_action || "Continue conversation"}. Next best question: ${journey.next_best_question || "none"}. Context resolution: ${contextualResolution || "none required"}. Recently used terms to avoid repeating mechanically: ${(phraseDiagnostics.recently_used_terms || []).join(", ") || "none"}. Target reply band: ${lengthTarget.band || "normal"}, maximum ${lengthTarget.maximum_words || 90} words. Be helpful, friendly, patient and professional. Acknowledge an objection or emotion naturally before progressing. Listen, answer, reassure, progress, then stop. Ask at most one useful question, never ask for a known fact, and ask none when the factual answer or natural closing is complete. Never expose classifications, scores, rules or internal reasoning. Avoid repeated openings and unnecessary full disclaimers. ${disclaimer.instruction} Never invent approval likelihood, stock, rates, payment figures, affordability outcomes or a delivery date. Deterministic evidence is the highest-priority fact and overrides every article, Business Brain passage and model inference. If approved evidence is insufficient, use a plain, honest fallback and do not infer a business fact.`;
+  const controlled = fallbackResponse ? `\n\n${controlledCompositionInstructions({ fallbackReply: fallbackResponse.reply, permittedAction: fallbackResponse.recommended_action, nextQuestion: journey.next_best_question, pageContext, vehicleContext })}` : `\n\n# Verified live page context\n${JSON.stringify(pageContext || {})}\n\n# Verified public vehicle context\n${JSON.stringify(vehicleContext || {})}`;
+  return `${base}\n\n# Locked V5 human conversation and recovery\nUniversal message type: ${human.message_type || "question"} (${human.confidence || 0}% confidence). Customer emotion: ${human.emotion?.emotion || "neutral"}. Objection: ${human.objection?.objection || "none"}. The server conversation intent is ${intent.primary_intent}; secondary intents: ${intent.secondary_intents.join(", ") || "none"}. The locked product remains ${productContext} and must never be cross-sold. Remembered structured customer facts: ${JSON.stringify(memory.remembered_facts)}. Corrections: ${JSON.stringify(memory.corrections)}. Buying signal: ${buyingSignals.detected_buying_signal || "none"} (${buyingSignals.signal_strength || "low"}). Buying intent level: ${journey.buying_intent_level || "Research"}. Current customer goal: ${journey.conversation_goal || "Research"}. Journey stage: ${journey.journey_stage || "Research"}. Recommended single action: ${journey.recommended_cta || buyingSignals.recommended_next_action || "Continue conversation"}. Next best question: ${journey.next_best_question || "none"}. Context resolution: ${contextualResolution || "none required"}. Recently used terms to avoid repeating mechanically: ${(phraseDiagnostics.recently_used_terms || []).join(", ") || "none"}. Target reply band: ${lengthTarget.band || "normal"}, maximum ${lengthTarget.maximum_words || 90} words. Be helpful, friendly, patient and professional. Acknowledge an objection or emotion naturally before progressing. Listen, answer, reassure, progress, then stop. Ask at most one useful question, never ask for a known fact, and ask none when the factual answer or natural closing is complete. Never expose classifications, scores, rules or internal reasoning. Avoid repeated openings and unnecessary full disclaimers. ${disclaimer.instruction} Never invent approval likelihood, stock, rates, payment figures, affordability outcomes or a delivery date. Deterministic evidence is the highest-priority fact and overrides every article, Business Brain passage and model inference. If approved evidence is insufficient, use a plain, honest fallback and do not infer a business fact.${controlled}`;
 }
 
 export async function simulateCustomerConversation(supabase, body, options = {}) {
@@ -354,6 +360,17 @@ export async function simulateCustomerConversation(supabase, body, options = {})
   const productContext = clean(body.product_context, 20).toLowerCase();
   if (!COMPETENCE_PRODUCT_CONTEXTS.includes(productContext)) throw new ApiError(400, "Choose a locked product context: finance or rent2buy.", "validation");
   const messages = cleanMessages(body.messages);
+  const suppliedFallback = body.controlled_fallback && typeof body.controlled_fallback === "object" && clean(body.controlled_fallback.reply, 5000)
+    ? {
+        reply: clean(body.controlled_fallback.reply, 5000),
+        insufficient_knowledge: false,
+        human_handoff_recommended: false,
+        recommended_action: clean(body.controlled_fallback.recommended_action, 80) || "continue",
+        confidence: 100,
+        confidence_reason: clean(body.controlled_fallback.confidence_reason, 500) || "Verified server-side customer response.",
+        source_ids: [],
+      }
+    : null;
   const requestId = clean(body.request_id, 100) || createRequestId();
   const sessionId = clean(body.session_id, 100) || requestId;
   const context = { request_id: requestId, session_id: sessionId, scenario_id: clean(body.scenario_id, 50) || null, product_context: productContext };
@@ -379,6 +396,12 @@ export async function simulateCustomerConversation(supabase, body, options = {})
     intent.clarification_required = false;
     intent.suggested_clarification_question = "";
   }
+  if (suppliedFallback) {
+    intent.retrieval_required = false;
+    intent.clarification_required = false;
+    orchestration.retrieval_required = false;
+    orchestration.recovery_required = false;
+  }
   const recoveryRequired = orchestration.recovery_required;
   const comparison = isExplicitProductComparison(question, messages);
   let sources = [];
@@ -402,9 +425,9 @@ export async function simulateCustomerConversation(supabase, body, options = {})
   const priorPhraseDiagnostics = recentAssistantPhraseDiagnostics(messages);
 
   if (!intent.retrieval_required) {
-    response = recoveryRequired && intent.primary_intent !== "product_clarification_required"
+    response = suppliedFallback || (recoveryRequired && intent.primary_intent !== "product_clarification_required"
       ? humanRecoveryReply(human, { messages, facts: memory.remembered_facts, productContext, journey })
-      : naturalSalesReply(intent, productContext, buyingSignals, memory.remembered_facts) || naturalConversationReply(intent, productContext, memory.remembered_facts);
+      : naturalSalesReply(intent, productContext, buyingSignals, memory.remembered_facts) || naturalConversationReply(intent, productContext, memory.remembered_facts));
   } else {
     const retrievalStart = performance.now();
     const knowledge = options.knowledge || await loadKnowledge(supabase);
@@ -436,7 +459,7 @@ export async function simulateCustomerConversation(supabase, body, options = {})
       };
     } else {
       const generationStart = performance.now();
-      const prompt = await runStage("Conversation prompt creation", { ...context, source_count: sources.length }, async () => conversationPrompt({ question, messages, sources, sections: bounded.sections, settings: knowledge.settings, productContext, comparison, intent, memory, buyingSignals, lengthTarget, contextualResolution, journey, human, phraseDiagnostics: priorPhraseDiagnostics }));
+      const prompt = await runStage("Conversation prompt creation", { ...context, source_count: sources.length }, async () => conversationPrompt({ question, messages, sources, sections: bounded.sections, settings: knowledge.settings, productContext, comparison, intent, memory, buyingSignals, lengthTarget, contextualResolution, journey, human, phraseDiagnostics: priorPhraseDiagnostics, pageContext: body.page_context, vehicleContext: body.vehicle_context }));
       const selectedModelRoute = chooseAssistantModel({
         message: question,
         intent,
@@ -466,8 +489,64 @@ export async function simulateCustomerConversation(supabase, body, options = {})
     }
   }
 
-  if (journey.application_mode_active && !intent.retrieval_required && !recoveryRequired && !orchestration.product_boundary_blocked) {
+  if (!suppliedFallback && journey.application_mode_active && !intent.retrieval_required && !recoveryRequired && !orchestration.product_boundary_blocked) {
     response = { ...response, reply: applicationModeReply(productContext, journey.application_state), insufficient_knowledge: false, human_handoff_recommended: false, recommended_action: productContext === "finance" ? "apply_finance" : "apply_rent2buy", confidence: 100, confidence_reason: "Server-side V4 Application Mode triggered by explicit customer progression.", source_ids: [] };
+  }
+
+  if (!intent.retrieval_required && options.generationMode !== "deterministic") {
+    const fallbackResponse = { ...response, source_ids: Array.isArray(response.source_ids) ? response.source_ids : [] };
+    const generationStart = performance.now();
+    try {
+      const prompt = await runStage("Controlled conversation prompt creation", context, async () => conversationPrompt({
+        question,
+        messages,
+        sources: [],
+        sections: [],
+        settings: {},
+        productContext,
+        comparison,
+        intent,
+        memory,
+        buyingSignals,
+        lengthTarget,
+        contextualResolution,
+        journey,
+        human,
+        phraseDiagnostics: priorPhraseDiagnostics,
+        pageContext: body.page_context,
+        vehicleContext: body.vehicle_context,
+        fallbackResponse,
+      }));
+      const selectedModelRoute = chooseAssistantModel({ message: question, intent, human, orchestration, sourceCount: 0 });
+      const requester = options.requestConversationReply || requestOpenAIConversationReply;
+      const parser = options.parseConversationReply || parseOpenAIConversationReply;
+      const requested = await runStage("Controlled conversation OpenAI request", { ...context, model: selectedModelRoute.model, model_tier: selectedModelRoute.tier }, () => requester(prompt, selectedModelRoute));
+      const generated = await runStage("Controlled conversation response parsing", { ...context, model: requested.model }, async () => parser(requested.payload, requested.model));
+      const validation = validateControlledCompositionReply(generated.reply.reply, {
+        fallbackReply: fallbackResponse.reply,
+        productContext,
+        comparison,
+        pageContext: body.page_context,
+        vehicleContext: body.vehicle_context,
+      });
+      if (!validation.valid) throw new ApiError(502, `Controlled composition validation failed: ${validation.reason}.`, "validation");
+      response = { ...fallbackResponse, reply: generated.reply.reply };
+      model = generated.model;
+      modelRoute = requested.route || { ...selectedModelRoute, model: generated.model };
+      tokenUsage = {
+        input_tokens: Number(requested.payload?.usage?.input_tokens) || 0,
+        output_tokens: Number(requested.payload?.usage?.output_tokens) || 0,
+        total_tokens: Number(requested.payload?.usage?.total_tokens) || (Number(requested.payload?.usage?.input_tokens) || 0) + (Number(requested.payload?.usage?.output_tokens) || 0),
+      };
+      openAIResponseId = clean(requested.payload?.id, 100) || null;
+      generationTime = elapsed(generationStart);
+    } catch (error) {
+      logStageError("Controlled conversation fallback", error, generationStart, context);
+      response = fallbackResponse;
+      model = "deterministic-conversation-fallback";
+      modelRoute = { model, tier: "deterministic", temperature: null, reasoning_effort: null, reason: "Generated wording failed or did not pass validation, so the verified deterministic reply was used." };
+      generationTime = elapsed(generationStart);
+    }
   }
 
   orchestration = completeKnowledgeOrchestration(orchestration, {

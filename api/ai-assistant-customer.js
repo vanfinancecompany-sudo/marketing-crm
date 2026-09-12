@@ -18,7 +18,7 @@ import {
   validateWixOrigin,
 } from "../lib/publicAssistantFoundation.js";
 import { publicApplicationGuidanceReply } from "../lib/publicApplicationGuidance.js";
-import { publicVehiclePricingReply } from "../lib/publicVehiclePricing.js";
+import { isVehicleSpecificationQuestion, publicVehiclePricingReply } from "../lib/publicVehiclePricing.js";
 import {
   buildCanonicalConversationInput,
   canonicalSessionState,
@@ -112,7 +112,7 @@ function sessionExpiry() {
 async function createSession(supabase, pageContext, environment = process.env) {
   const conversationId = createPublicConversationId();
   const productLock = pageProductLock(pageContext.page_type);
-  const greeting = initialCustomerReply(pageContext.page_type);
+  const greeting = initialCustomerReply(pageContext.page_type, pageContext.vehicle);
   const rememberedFacts = {
     ...(productLock ? { product_context: productLock } : {}),
     ...(pageContext.vehicle?.title || pageContext.vehicle?.registration
@@ -310,6 +310,7 @@ async function continueConversation(supabase, body, environment, simulateConvers
           message,
           requestId,
           history,
+          pageContext,
         });
         const generated = await simulateConversation(supabase, comparisonInput);
         const result = generated.result;
@@ -340,14 +341,11 @@ async function continueConversation(supabase, body, environment, simulateConvers
     pageType: session.page_type,
     productLock,
   });
-  if (applicationGuidanceReply) {
-    await updateSession(supabase, session, {
-      conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: applicationGuidanceReply }]),
-      message_count: messageNumber,
-    });
-    await recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, responseMode: "application_guidance" });
-    return safeCustomerPayload({ reply: applicationGuidanceReply, cta: null, conversationId, status: "ready" });
-  }
+  let controlledFallback = applicationGuidanceReply ? {
+    reply: applicationGuidanceReply,
+    recommended_action: "continue",
+    confidence_reason: "Verified public application guidance.",
+  } : null;
 
   const pricingReply = publicVehiclePricingReply({
     message,
@@ -357,12 +355,20 @@ async function continueConversation(supabase, body, environment, simulateConvers
     rememberedFacts: session.remembered_facts,
   });
   if (pricingReply) {
+    if (isVehicleSpecificationQuestion(message)) {
+      controlledFallback = {
+        reply: pricingReply,
+        recommended_action: "continue",
+        confidence_reason: "Verified current vehicle specification.",
+      };
+    } else {
     await updateSession(supabase, session, {
       conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: pricingReply }]),
       message_count: messageNumber,
     });
     await recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, responseMode: "vehicle_pricing" });
     return safeCustomerPayload({ reply: pricingReply, cta: null, conversationId, status: "ready" });
+    }
   }
 
   const requestId = `public-${randomUUID()}`;
@@ -371,6 +377,8 @@ async function continueConversation(supabase, body, environment, simulateConvers
     message,
     requestId,
     history,
+    pageContext,
+    controlledFallback,
   });
   const generated = await simulateConversation(supabase, canonicalInput);
   const result = generated.result;
