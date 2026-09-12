@@ -20,6 +20,12 @@ function compact(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
+function extractRegistration(value) {
+  const text = compact(value).toUpperCase();
+  const match = text.match(/\b([A-Z]{2}[0-9]{2}\s?[A-Z]{3}|[A-Z][0-9]{1,3}\s?[A-Z]{3}|[A-Z]{3}\s?[0-9]{1,3}[A-Z]|[0-9]{1,4}\s?[A-Z]{1,3})\b/);
+  return normalizeRegistration(match?.[1] || "");
+}
+
 function relevantAdvertPipelines(pipeline) {
   return pipeline === "cars" ? ["cars"] : ["finance", "rent2buy"];
 }
@@ -62,7 +68,8 @@ function normalizeListingPresence(presence = {}) {
 function listingPresenceFromLegacyLocal(localVehicles = [], pipeline = "finance") {
   const vehicles = [];
   for (const row of localVehicles) {
-    const registration = normalizeRegistration(row?.registration || row?.reg || row?.title || "");
+    const registration = normalizeRegistration(row?.registration || row?.reg || "")
+      || extractRegistration(row?.title || row?.name || "");
     if (!registration) continue;
     vehicles.push({
       registration,
