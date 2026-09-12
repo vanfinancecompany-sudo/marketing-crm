@@ -10,6 +10,10 @@ function SiteCard({site}){
  const liveApplication=site?.applicationStartSource==='first_party_live'||site?.applicationCompletionSource==='first_party_live';
  const conversionRate=site?.effectiveConversionRate??site?.conversionRate;
  const ga4Starts=site?.ga4ApplicationStartsToday??site?.applicationStartsToday;
+ const pageReaches=number(site?.liveApplicationReachesToday);
+ const applicationDetail=liveApplication
+  ?`${pageReaches>0?`${formatNumber(pageReaches)} page reaches · `:''}${formatNumber(site.applicationCompletionsToday)} completed · GA4 logged ${formatNumber(ga4Starts)} start events`
+  :`${formatNumber(site.leadEventsToday)} lead events`;
  return <article className="ga4-pipeline-card">
   <div className="ga4-pipeline-card__head">
    <div><span>{site?.label||'Website'}</span><strong>{configured?'GA4 live':'GA4 setup needed'}</strong></div>
@@ -19,8 +23,8 @@ function SiteCard({site}){
    <div className="ga4-pipeline-metrics">
     <div><strong>{formatNumber(site.usersToday)}</strong><span>Users today</span><em>{changeLabel(site.usersVsSevenDayPct)}</em></div>
     <div><strong>{formatNumber(site.sessionsToday)}</strong><span>Sessions</span><em>{formatNumber(site.pageViewsToday)} page views</em></div>
-    <div><strong>{formatNumber(site.applicationStartsToday)}</strong><span>{liveApplication?'Unique app starts':'App start events'}</span><em>{formatNumber(site.applicationCompletionsToday)} completed{liveApplication?` · GA4 logged ${formatNumber(ga4Starts)} start events`:''}</em></div>
-    <div><strong>{formatPercent(conversionRate)}</strong><span>App conversion</span><em>{liveApplication?'Deduplicated by application session':`${formatNumber(site.leadEventsToday)} lead events`}</em></div>
+    <div><strong>{formatNumber(site.applicationStartsToday)}</strong><span>{liveApplication?'Unique app starts':'App start events'}</span><em>{applicationDetail}</em></div>
+    <div><strong>{formatPercent(conversionRate)}</strong><span>App conversion</span><em>{liveApplication?'Started applications → completed applications':'GA4 event conversion'}</em></div>
    </div>
    <div className="ga4-pipeline-lists">
     <div><h4>Top pages today</h4>{(site.topPages||[]).slice(0,4).map((page)=><p key={page.path}><span>{page.path}</span><b>{formatNumber(page.views)}</b></p>)}</div>
@@ -52,7 +56,7 @@ export default function Ga4PipelinePanel(){
    <div>
     <span className="eyebrow">GA4 · REAL WEBSITE TRAFFIC</span>
     <h3>Daily pipeline traffic</h3>
-    <p>Google Analytics remains the traffic source of truth; application starts and completions use first-party session IDs when available so repeat events are not counted as extra applicants.</p>
+    <p>Google Analytics remains the traffic source of truth; first-party application page reaches, deliberate starts and completions are kept separate so the funnel is not inflated by page loads.</p>
    </div>
    <small>{data?.checkedAt?`Checked ${new Date(data.checkedAt).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}`:'Loading'}</small>
   </div>
