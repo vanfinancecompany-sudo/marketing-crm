@@ -1,7 +1,9 @@
+import { buildMarketingAccessHeaders } from "./marketingAccess.js";
+
 async function callRent2BuyReservedWixStock(payload) {
   const response = await fetch("/api/rent2buy-reserved-wix-stock", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: buildMarketingAccessHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
     body: JSON.stringify(payload),
   });
   const result = await response.json().catch(() => ({}));
