@@ -14,13 +14,7 @@ export function transformVanFinanceVatSource(input) {
   let source = String(input || "");
 
   if (!source.includes(VFC_POLICY_IMPORT)) {
-    const importAnchor = '} from "./vanscoWixPrice.js";';
-    source = replaceOrThrow(
-      source,
-      importAnchor,
-      `${importAnchor}\n${VFC_POLICY_IMPORT}`,
-      "Van Finance VAT policy import anchor",
-    );
+    source = `${VFC_POLICY_IMPORT}\n${source}`;
   }
 
   if (!source.includes("DEALERKIT_VFC_VAT_POLICY")) {
