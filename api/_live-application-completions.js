@@ -46,7 +46,7 @@ export function applicationSessionCounts(rows = [], { reachedEventName, startEve
   ));
 
   return {
-    reaches: uniqueSessionCount(reachedRows),
+    ...(reachedEventName ? { reaches: uniqueSessionCount(reachedRows) } : {}),
     // A completed session necessarily started the application. Including it here
     // prevents a delayed/missed explicit start event from producing completions > starts.
     starts: uniqueSessionCount(applicationRows),
