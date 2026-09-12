@@ -55,4 +55,6 @@ patchReservationEndpoint("../api/finance-reserved-wix-stock.js", "getWixTask");
 patchReservationEndpoint("../api/car-reserved-wix-stock.js", "getWixTask");
 patchReservationEndpoint("../api/rent2buy-reserved-wix-stock.js", "unpublishItem");
 
+await import("./apply-dealerkit-production-safety-audit-fixes.mjs");
+
 console.log("Applied DealerKit reservation verification and Marketing access gating to Finance, Cars and Rent2Buy Wix draft actions.");
