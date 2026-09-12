@@ -26,17 +26,17 @@ test("Rent2Buy live-presence authority is ALLRENT2BUYVANS on VAN FINANCE Wix onl
   assert.equal(sources.some((source) => source.siteId === LEGACY_RENT2BUY_WIX_SITE_ID), false);
 });
 
-test("Rent2Buy listing presence exposes the actual published monthly rental", () => {
-  const fromNumeric = publishedListingVehicle({
+test("Rent2Buy listing presence uses the visible Wix monthly rental before the lagging numeric helper", () => {
+  const visibleWins = publishedListingVehicle({
     data: { title: "RO21VVD", monthlyPriceNumeric: 467, mth: "£499 PM" },
   }, "rent2buy", { collectionId: "ALLRENT2BUYVANS" });
-  assert.equal(fromNumeric.monthly, 467);
-  assert.equal(fromNumeric.collection_id, "ALLRENT2BUYVANS");
+  assert.equal(visibleWins.monthly, 499);
+  assert.equal(visibleWins.collection_id, "ALLRENT2BUYVANS");
 
-  const fromDisplay = publishedListingVehicle({
-    data: { title: "AB24CDE", mth: "£455 P/M" },
+  const numericFallback = publishedListingVehicle({
+    data: { title: "AB24CDE", monthlyPriceNumeric: 455, mth: "" },
   }, "rent2buy", { collectionId: "ALLRENT2BUYVANS" });
-  assert.equal(fromDisplay.monthly, 455);
+  assert.equal(numericFallback.monthly, 455);
 });
 
 test("Finance listing presence takes cash price from price and never mistakes monthly salePrice for retail", () => {
