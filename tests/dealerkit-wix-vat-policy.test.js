@@ -12,10 +12,17 @@ import {
 
 const root = new URL("../", import.meta.url);
 
-test("Van Finance keeps verified VAT displays and accepts explicit supplier NO VAT evidence", () => {
+test("Van Finance keeps verified VAT displays and accepts explicit no-extra-VAT evidence", () => {
   assert.equal(resolveVanFinanceVatText({ vatStatus: "plus_vat" }), "+VAT");
   assert.equal(resolveVanFinanceVatText({ vatStatus: "no_vat" }), "N/A");
+
+  // FP66PXU reaches the live controlled-publish route as DealerKit inc_vat.
+  // That means the advertised retail figure is VAT-inclusive, so Wix must not
+  // add +VAT on top. The existing verified no-extra-VAT display is N/A.
+  assert.equal(resolveVanFinanceVatText({ vatStatus: "inc_vat" }), "N/A");
+
   assert.equal(resolveVanFinanceVatText({ vatStatus: "unknown", sourceVatStatus: "Non VAT" }), "N/A");
+  assert.equal(resolveVanFinanceVatText({ vatStatus: "unknown", sourceVatStatus: "VAT included" }), "N/A");
   assert.equal(resolveVanFinanceVatText({
     vatStatus: "unknown",
     description: "£8,495 NO VAT. 2016 Citroen Dispatch Enterprise Plus M.",
@@ -23,7 +30,6 @@ test("Van Finance keeps verified VAT displays and accepts explicit supplier NO V
 });
 
 test("Van Finance still fails closed when VAT evidence is ambiguous", () => {
-  assert.equal(resolveVanFinanceVatText({ vatStatus: "inc_vat" }), "");
   assert.equal(resolveVanFinanceVatText({ vatStatus: "unknown", description: "Great value van" }), "");
   assert.equal(resolveVanFinanceVatText({ vatStatus: "unknown", description: "VAT status to be confirmed" }), "");
 });
