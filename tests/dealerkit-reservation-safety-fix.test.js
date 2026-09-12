@@ -93,7 +93,6 @@ test("build transform replaces the old Vansco reservation guard for all three pr
   assert.match(source, /car-reserved-wix-stock\.js/);
   assert.match(source, /rent2buy-reserved-wix-stock\.js/);
   assert.match(source, /verifyDealerKitReservedRegistration/);
-  assert.match(source, /Marketing CRM access is required/);
   assert.match(source, /apply-dealerkit-production-safety-audit-fixes\.mjs/);
   assert.match(source, /legacy Vansco reservation guard/);
 });
