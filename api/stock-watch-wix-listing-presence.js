@@ -70,11 +70,16 @@ function itemRetailPrice(item) {
 
 function itemRent2BuyMonthly(item) {
   const data = item?.data || {};
-  const numeric = Number(data.monthlyPriceNumeric);
-  if (Number.isFinite(numeric) && numeric > 0 && numeric <= 10000) return numeric;
-  return parseRent2BuyMonthlyPrice(data.mth)
+  // The visible mth field is updated by the controlled Rent2Buy Wix price write,
+  // so it is the immediate published authority. monthlyPriceNumeric can lag until
+  // the numeric sync runs and is therefore fallback-only here.
+  const visible = parseRent2BuyMonthlyPrice(data.mth)
     ?? parseRent2BuyMonthlyPrice(data.monthlyPayments)
     ?? parseRent2BuyMonthlyPrice(data.weeklyPrice);
+  if (visible !== null) return visible;
+
+  const numeric = Number(data.monthlyPriceNumeric);
+  return Number.isFinite(numeric) && numeric > 0 && numeric <= 10000 ? numeric : null;
 }
 
 function itemUpdatedAt(item) {
