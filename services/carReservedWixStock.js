@@ -13,10 +13,10 @@ async function callCarReservedWixStock(payload) {
   return result;
 }
 
-export function previewReservedCarWixStock(registration) {
-  return callCarReservedWixStock({ action: "preview", registration });
+export function previewReservedCarWixStock(registration, supplierStockId) {
+  return callCarReservedWixStock({ action: "preview", registration, supplier_stock_id: supplierStockId || undefined });
 }
 
-export function unpublishReservedCarWixStock(registration) {
-  return callCarReservedWixStock({ action: "unpublish", registration, confirmed: true });
+export function unpublishReservedCarWixStock(registration, supplierStockId) {
+  return callCarReservedWixStock({ action: "unpublish", registration, supplier_stock_id: supplierStockId || undefined, confirmed: true });
 }

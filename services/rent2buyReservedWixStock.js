@@ -13,10 +13,10 @@ async function callRent2BuyReservedWixStock(payload) {
   return result;
 }
 
-export function previewReservedRent2BuyWixStock(registration) {
-  return callRent2BuyReservedWixStock({ action: "preview", registration });
+export function previewReservedRent2BuyWixStock(registration, supplierStockId) {
+  return callRent2BuyReservedWixStock({ action: "preview", registration, supplier_stock_id: supplierStockId || undefined });
 }
 
-export function unpublishReservedRent2BuyWixStock(registration) {
-  return callRent2BuyReservedWixStock({ action: "unpublish", registration, confirmed: true });
+export function unpublishReservedRent2BuyWixStock(registration, supplierStockId) {
+  return callRent2BuyReservedWixStock({ action: "unpublish", registration, supplier_stock_id: supplierStockId || undefined, confirmed: true });
 }

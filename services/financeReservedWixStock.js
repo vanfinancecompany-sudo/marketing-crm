@@ -13,10 +13,10 @@ async function callFinanceReservedWixStock(payload) {
   return result;
 }
 
-export function previewReservedFinanceWixStock(registration) {
-  return callFinanceReservedWixStock({ action: "preview", registration });
+export function previewReservedFinanceWixStock(registration, supplierStockId) {
+  return callFinanceReservedWixStock({ action: "preview", registration, supplier_stock_id: supplierStockId || undefined });
 }
 
-export function unpublishReservedFinanceWixStock(registration) {
-  return callFinanceReservedWixStock({ action: "unpublish", registration, confirmed: true });
+export function unpublishReservedFinanceWixStock(registration, supplierStockId) {
+  return callFinanceReservedWixStock({ action: "unpublish", registration, supplier_stock_id: supplierStockId || undefined, confirmed: true });
 }

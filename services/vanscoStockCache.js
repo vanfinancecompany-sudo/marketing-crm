@@ -1,3 +1,5 @@
+import { buildMarketingAccessHeaders } from "./marketingAccess.js";
+
 let activeVanscoRunId = "";
 
 function wait(ms) {
@@ -423,10 +425,10 @@ export async function processVanscoCacheBatch() {
 export async function saveVanscoWatchAction({ pipeline, record, workflowStatus, notes }) {
   const response = await fetch("/api/vansco-watch-action", {
     method: "POST",
-    headers: {
+    headers: buildMarketingAccessHeaders({
       accept: "application/json",
       "content-type": "application/json",
-    },
+    }),
     body: JSON.stringify({ pipeline, record, workflowStatus, notes }),
   });
   const payload = await response.json().catch(() => ({}));
