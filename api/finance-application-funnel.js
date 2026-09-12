@@ -5,6 +5,7 @@ const SITE_ORIGIN = 'https://www.vanfinancecompany.co.uk';
 const TIME_ZONE = 'Europe/London';
 const EVENTS = [
   'finance_application_reached',
+  'finance_application_started',
   'finance_application_step_viewed',
   'finance_application_step_blocked',
   'finance_application_completed',
@@ -13,6 +14,7 @@ const STEP_ORDER = [
   'Application type',
   'Company',
   'About you',
+  'A little more about you',
   'Address history',
   'Work & income',
   'Part exchange',
@@ -54,17 +56,21 @@ function groupCounts(rows = [], field) {
 }
 
 export function buildFinanceApplicationFunnel(rows = []) {
+  const reaches = uniqueSessions(rows.filter((row) => row.event_name === 'finance_application_reached'));
+  const explicitStarts = uniqueSessions(rows.filter((row) => row.event_name === 'finance_application_started'));
   const starts = uniqueSessions(rows.filter((row) => (
-    row.event_name === 'finance_application_reached' ||
-    row.event_name === 'finance_application_step_viewed' ||
-    row.event_name === 'finance_application_completed'
+    row.event_name === 'finance_application_started' ||
+    row.event_name === 'finance_application_completed' ||
+    (row.event_name === 'finance_application_step_viewed' && row?.metadata?.step_name !== 'Application type')
   )));
   const completions = uniqueSessions(rows.filter((row) => row.event_name === 'finance_application_completed'));
   const viewed = rows.filter((row) => row.event_name === 'finance_application_step_viewed');
   const blocked = rows.filter((row) => row.event_name === 'finance_application_step_blocked');
 
   const steps = STEP_ORDER.map((name) => {
-    const viewedSessions = uniqueSessions(viewed.filter((row) => row?.metadata?.step_name === name));
+    const viewedSessions = name === 'Application type'
+      ? starts
+      : uniqueSessions(viewed.filter((row) => row?.metadata?.step_name === name));
     const blockedSessions = uniqueSessions(blocked.filter((row) => row?.metadata?.step_name === name));
     return {
       name,
@@ -75,7 +81,10 @@ export function buildFinanceApplicationFunnel(rows = []) {
   }).filter((step) => step.viewed > 0 || step.blocked > 0);
 
   return {
+    reaches: reaches.size,
     starts: starts.size,
+    explicitStarts: explicitStarts.size,
+    startRate: reaches.size ? starts.size / reaches.size : 0,
     completions: completions.size,
     conversionRate: starts.size ? completions.size / starts.size : 0,
     steps,
