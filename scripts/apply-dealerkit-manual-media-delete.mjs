@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 function patchFile(relativePath, patches) {
   const targetUrl = new URL(relativePath, import.meta.url);
   const targetPath = fileURLToPath(targetUrl);
-  let source = fs.readFileSync(targetPath, "utf8");
+  let source = fs.readFileSync(targetPath, "utf8").replace(/\r\n/g, "\n");
 
   for (const { before, after, label, already } of patches) {
     if (already && source.includes(already)) continue;
