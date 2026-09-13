@@ -30,11 +30,9 @@ test("photo readiness is a due-in placeholder alert, not a general image-count d
     pipeline: "finance",
     listingPresenceByPipeline: {
       finance: presence("AB24CDE"),
-      rent2buy: { registrations: [], vehicles: [] },
     },
     cmsItemsByPipeline: {
       finance: [{ title: "AB24CDE", imageCount: 20 }],
-      rent2buy: [],
     },
     dealerKitVehicles: [dealerKitVehicle("AB24CDE", 22)],
   });
@@ -44,11 +42,9 @@ test("photo readiness is a due-in placeholder alert, not a general image-count d
     pipeline: "finance",
     listingPresenceByPipeline: {
       finance: presence("XY24ZZZ"),
-      rent2buy: { registrations: [], vehicles: [] },
     },
     cmsItemsByPipeline: {
       finance: [{ title: "XY24ZZZ", imageCount: 2 }],
-      rent2buy: [],
     },
     dealerKitVehicles: [dealerKitVehicle("XY24ZZZ", 10)],
   });
@@ -58,36 +54,53 @@ test("photo readiness is a due-in placeholder alert, not a general image-count d
   assert.equal(dueIn[0].imageReadinessAlert, true);
 });
 
-test("zero CMS images are treated as uncertain evidence rather than guessed photo-ready", () => {
-  const alerts = buildDealerKitImageReadinessAlerts({
+test("BD21HCX style Finance alert is not suppressed by a fuller Rent2Buy advert", () => {
+  const listingPresenceByPipeline = {
+    finance: presence("BD21HCX", "Ford Transit Leader TWIN WHEEL LUTON"),
+    rent2buy: presence("BD21HCX", "Ford Transit"),
+  };
+  const cmsItemsByPipeline = {
+    // The Finance image feed can report zero while the live page visibly shows its
+    // primary image, so a live listing is safely treated as one displayed image.
+    finance: [{ title: "BD21HCX", imageCount: 0 }],
+    rent2buy: [{ title: "BD21HCX", imageCount: 18 }],
+  };
+  const dealerKitVehicles = [dealerKitVehicle("BD21HCX", 19)];
+
+  const financeAlerts = buildDealerKitImageReadinessAlerts({
     pipeline: "finance",
-    listingPresenceByPipeline: {
-      finance: presence("AB24CDE"),
-      rent2buy: { registrations: [], vehicles: [] },
-    },
-    cmsItemsByPipeline: {
-      finance: [{ title: "AB24CDE", imageCount: 0 }],
-      rent2buy: [],
-    },
-    dealerKitVehicles: [dealerKitVehicle("AB24CDE", 12)],
+    listingPresenceByPipeline,
+    cmsItemsByPipeline,
+    dealerKitVehicles,
   });
-  assert.equal(alerts.length, 0);
+  assert.equal(financeAlerts.length, 1, "Finance 1-image advert versus DealerKit 19 must be flagged");
+  assert.equal(financeAlerts[0].currentAdvertImageCount, 1);
+  assert.equal(financeAlerts[0].sourceImageCount, 19);
+  assert.deepEqual(financeAlerts[0].advertisedPipelines, ["finance"]);
+  assert.equal(financeAlerts[0].crossProductEvidence, false);
+
+  const rent2buyAlerts = buildDealerKitImageReadinessAlerts({
+    pipeline: "rent2buy",
+    listingPresenceByPipeline,
+    cmsItemsByPipeline,
+    dealerKitVehicles,
+  });
+  assert.equal(rent2buyAlerts.length, 0, "Rent2Buy 18 images versus DealerKit 19 is a normal gallery, not a due-in alert");
 });
 
-test("commercial photo readiness uses the fullest live Finance or Rent2Buy advert", () => {
+test("Cars uses the same lane-specific due-in photo rule", () => {
   const alerts = buildDealerKitImageReadinessAlerts({
-    pipeline: "finance",
+    pipeline: "cars",
     listingPresenceByPipeline: {
-      finance: presence("AB24CDE"),
-      rent2buy: presence("AB24CDE"),
+      cars: presence("AB24CAR"),
     },
     cmsItemsByPipeline: {
-      finance: [{ title: "AB24CDE", imageCount: 2 }],
-      rent2buy: [{ title: "AB24CDE", imageCount: 18 }],
+      cars: [{ title: "AB24CAR", imageCount: 1 }],
     },
-    dealerKitVehicles: [dealerKitVehicle("AB24CDE", 24)],
+    dealerKitVehicles: [dealerKitVehicle("AB24CAR", 8, { vehicleType: "CAR", bodyType: "Hatchback" })],
   });
-  assert.equal(alerts.length, 0, "a normal gallery on either live commercial advert blocks a false due-in alert");
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].currentAdvertImageCount, 1);
 });
 
 test("photo-ready UI uses the normal actionable Stock Watch workflow across all lanes", () => {
