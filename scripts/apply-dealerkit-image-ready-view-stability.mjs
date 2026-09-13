@@ -23,8 +23,8 @@ if (!source.includes("const IMAGE_READY_RENDER_BATCH = 18;")) {
 
 if (!source.includes('loading="lazy" decoding="async" fetchPriority="low"')) {
   replaceOnce(
-    `<img src={record.imageUrl} alt={record.title || "Vehicle"} className="vansco-card__image" />`,
-    `<img loading="lazy" decoding="async" fetchPriority="low" src={record.imageUrl} alt={record.title || "Vehicle"} className="vansco-card__image" />`,
+    `function ImageReadyCard({ record }) {\n  return (\n    <article className="vansco-card">\n      <div className="vansco-card__image-wrap">\n        {record.imageUrl ? <img src={record.imageUrl} alt={record.title || "Vehicle"} className="vansco-card__image" />`,
+    `function ImageReadyCard({ record }) {\n  return (\n    <article className="vansco-card">\n      <div className="vansco-card__image-wrap">\n        {record.imageUrl ? <img loading="lazy" decoding="async" fetchPriority="low" src={record.imageUrl} alt={record.title || "Vehicle"} className="vansco-card__image" />`,
     "lazy DealerKit readiness image"
   );
 }
