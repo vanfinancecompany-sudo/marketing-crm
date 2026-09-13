@@ -50,7 +50,7 @@ patchFile("../pages/VanscoStockWatchPage.jsx", [
             effectiveRegistrations = vehicleRegistrations.filter((registration) => liveRegistrationSet.has(registration));`,
   },
   {
-    label: "cross-product photo readiness wording",
+    label: "photo readiness wording",
     already: "DealerKit has more vehicle photos than the fullest current live advert",
     before: "If that page still has exactly one image and DealerKit now has multiple vehicle photos, it appears in New DealerKit photos ready.",
     after: "If DealerKit has at least 5 images and more vehicle photos than the fullest current live advert for that registration, it appears in New DealerKit photos ready.",
@@ -96,4 +96,4 @@ patchFile("../api/vansco-cache-live-refresh.js", [
   },
 ]);
 
-console.log("Applied Vansco Stock Watch follow-ups: completed scans show 100%, Rent2Buy authority is CRM ∩ live Wix, DealerKit photo readiness compares against the fullest relevant live advert, and URL removals require two successful snapshots.");
+console.log("Applied Vansco Stock Watch follow-ups: completed scans show 100%, Rent2Buy authority is CRM ∩ live Wix, photo readiness is refined later into lane-specific due-in alerts, and URL removals require two successful snapshots.");
