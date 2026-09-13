@@ -103,7 +103,7 @@ test("Cars plan creates one current listing and one detail page using live CAR f
   assert.match(detail.data.safetyAndSecurity, /Stability Control/);
 });
 
-test("Cars live listing is the duplicate authority while one historical detail page is reused", () => {
+test("Cars live listing switches to the controlled photo-ready repair path", () => {
   const historical = [{ id: "historic-car-page", data: { title: "AB23CDE", titleText: "Old title", priceVat: "£19,995" } }];
   const reusable = buildDealerKitCarWixPlan({ vehicle: vehicle(), decision: decision(), imageSet: imageSet(), carDetailRows: historical });
   const detail = reusable.targets.find((target) => target.collectionId === "CARPAGES");
@@ -113,10 +113,17 @@ test("Cars live listing is the duplicate authority while one historical detail p
 
   const listed = buildDealerKitCarWixPlan({
     vehicle: vehicle(), decision: decision(), imageSet: imageSet(), carDetailRows: historical,
-    carListingRows: [{ id: "live-car", data: { title: "AB23CDE" } }],
+    carListingRows: [{ id: "live-car", data: { title: "AB23CDE", picture: "old.jpg", price: "£21,795" } }],
   });
-  assert.equal(listed.canPublish, false);
-  assert.ok(listed.blockers.some((blocker) => blocker.code === "car_already_listed"));
+  assert.equal(listed.canPublish, true);
+  assert.equal(listed.writeIntent, "update_existing_vehicle");
+  assert.deepEqual(listed.blockers, []);
+  const liveListing = listed.targets.find((target) => target.collectionId === "CARFINANCE");
+  const liveDetail = listed.targets.find((target) => target.collectionId === "CARPAGES");
+  assert.equal(liveListing.operation, "update");
+  assert.deepEqual(liveListing.data, { picture: imageSet().mainUrl });
+  assert.equal(liveDetail.operation, "update");
+  assert.deepEqual(liveDetail.data, { mainImages: imageSet().galleryUrls, numberOfImages: "2" });
 });
 
 test("Cars plan fails closed on stale review or incomplete Wix Media", () => {
@@ -152,6 +159,7 @@ test("Cars browser/runtime flow has separate preview, final publisher and media-
   assert.match(ui, /dealerkit-car-controlled-publish-preview/);
   assert.match(ui, /dealerkit-car-controlled-publish/);
   assert.match(ui, /publish_new_car/);
+  assert.match(ui, /update_existing_car/);
   assert.match(preview, /writesAttempted:\s*false/);
   assert.match(publish, /carPublishConfirmationMatches/);
   assert.match(publish, /rollbackWrites/);
