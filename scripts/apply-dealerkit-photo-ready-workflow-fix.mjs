@@ -122,9 +122,9 @@ replaceOnce(
 
 replaceOnce(
   `{selectedPipeline !== "cars" ? <div className="vansco-watch-note"><strong>Image readiness:</strong> this checks only registrations already advertised in this CRM and matching a main CMS vehicle page. If DealerKit has at least 5 images and more vehicle photos than the fullest current live advert for that registration, it appears in New DealerKit photos ready. Once your CMS page has multiple images, later DealerKit image additions are ignored.</div> : null}`,
-  `<div className="vansco-watch-note"><strong>Image readiness:</strong> this is a due-in photo alert, not a general picture-count comparison. It appears only while the fullest current live advert has 1 or 2 placeholder images and DealerKit now has at least 5 images. Once an advert has 3 or more images, small later DealerKit additions are ignored.</div>`,
+  `<div className="vansco-watch-note"><strong>Image readiness:</strong> this is a due-in photo alert, not a general picture-count comparison. Each tab checks only its own live advert. It appears only while that advert has 1 or 2 placeholder images and DealerKit now has at least 5 images. Once the advert has 3 or more images, small later DealerKit additions are ignored.</div>`,
   "due-in photo-ready wording",
-  `this is a due-in photo alert, not a general picture-count comparison`
+  `Each tab checks only its own live advert.`
 );
 
 replaceOnce(
@@ -151,4 +151,4 @@ replaceRegexOnce(
 );
 
 fs.writeFileSync(pagePath, source);
-console.log("Applied DealerKit due-in photo readiness workflow: 1–2 image alerts, Cars support, actionable review cards and refresh-safe counts.");
+console.log("Applied DealerKit due-in photo readiness workflow: lane-specific 1–2 image alerts, Cars support, actionable review cards and refresh-safe counts.");
