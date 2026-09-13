@@ -19,9 +19,11 @@ import {
 } from "../lib/publicAssistantFoundation.js";
 import { publicApplicationGuidanceReply } from "../lib/publicApplicationGuidance.js";
 import { isVehicleSpecificationQuestion, publicVehiclePricingReply } from "../lib/publicVehiclePricing.js";
+import { controlledBusinessRuntimeReply, controlledProductComparisonReply, controlledVehicleNextStepReply } from "../lib/salesConversationEngine.js";
 import {
   buildCanonicalConversationInput,
   canonicalSessionState,
+  londonRuntimeContext,
 } from "../lib/canonicalPublicAssistantSession.js";
 import {
   assistantTelemetryVisitorHash,
@@ -304,22 +306,12 @@ async function continueConversation(supabase, body, environment, simulateConvers
 
     if (!productLock) {
       if (isExplicitProductComparison(message, history)) {
-        const requestId = `public-${randomUUID()}`;
-        const comparisonInput = buildCanonicalConversationInput({
-          session: { ...session, product_lock: "finance" },
-          message,
-          requestId,
-          history,
-          pageContext,
-        });
-        const generated = await simulateConversation(supabase, comparisonInput);
-        const result = generated.result;
-        const reply = clean(result.reply, 5000);
+        const reply = controlledProductComparisonReply(message);
         await updateSession(supabase, session, {
           conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
           message_count: messageNumber,
         });
-        await recordResponseTelemetry({ supabase, body, environment, session, productContext: "finance", messageNumber, result, responseMode: "ai_product_comparison" });
+        await recordResponseTelemetry({ supabase, body, environment, session, productContext: "finance", messageNumber, responseMode: "verified_product_comparison" });
         return safeCustomerPayload({ reply, conversationId, status: "needs_product" });
       }
 
@@ -355,12 +347,19 @@ async function continueConversation(supabase, body, environment, simulateConvers
     rememberedFacts: session.remembered_facts,
   });
   if (pricingReply) {
+    const businessReply = controlledBusinessRuntimeReply({
+      message,
+      productContext: productLock,
+      runtimeContext: londonRuntimeContext(),
+    });
+    const nextStepReply = controlledVehicleNextStepReply(message, productLock);
+    const reply = [pricingReply, businessReply, nextStepReply].filter(Boolean).join(" ");
     await updateSession(supabase, session, {
-      conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: pricingReply }]),
+      conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
       message_count: messageNumber,
     });
-    await recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, responseMode: isVehicleSpecificationQuestion(message) ? "vehicle_specification" : "vehicle_pricing" });
-    return safeCustomerPayload({ reply: pricingReply, cta: null, conversationId, status: "ready" });
+    await recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, responseMode: businessReply || nextStepReply ? "verified_multi_intent" : isVehicleSpecificationQuestion(message) ? "vehicle_specification" : "vehicle_pricing" });
+    return safeCustomerPayload({ reply, cta: null, conversationId, status: "ready" });
   }
 
   const requestId = `public-${randomUUID()}`;

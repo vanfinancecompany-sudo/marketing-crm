@@ -45,6 +45,10 @@ const regressions = [
     expected: [/£100/i, /day before delivery/i, /bank transfer|card/i],
   },
   {
+    question: "Is it £100 to reserve the van, and what happens next?",
+    expected: [/£100/i, /finance documents/i, /workshop/i],
+  },
+  {
     question: "How long does remote van delivery normally take?",
     expected: [/7–10 working days|7-10 working days/i, /not a guaranteed|not guaranteed|typical/i],
   },

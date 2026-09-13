@@ -164,10 +164,30 @@ test("Phase 1B vehicle-page conversation uses direct trusted facts, pricing, loc
   const reply = (message) => publicVehiclePricingReply({ message, pageType: "finance_vehicle", productLock: "finance", vehicleContext, rememberedFacts: {} });
   assert.match(reply("What gearbox has it got?"), /manual gearbox/i);
   assert.match(reply("And what's the mileage?"), /68,000 miles/i);
+  assert.match(reply("Can you confirm the mileage and gearbox on this van?"), /68,000 miles and a manual gearbox/i);
+  assert.match(reply("Can you confirm the mileage and whether it has a reversing camera?"), /68,000 miles.*can’t confirm.*camera/i);
   assert.match(reply("How much is it a month?"), /£313/i);
   assert.equal(reply("What deposit do I need on this one?"), null);
   assert.match(controlledBusinessRuntimeReply({ message: "Where are you located?", productContext: "finance" }), /Southampton.*nationwide.*free delivery/i);
   assert.equal(controlledBusinessRuntimeReply({ message: "What day is today?", productContext: "finance", runtimeContext: { current_date: "2026-09-13", current_day: "Sunday" } }), "Today is Sunday, 13 September 2026.");
+});
+
+test("Phase 1B compound vehicle facts remain deterministic alongside delivery coverage and an uncertain deadline", () => {
+  const vehicleContext = {
+    registration: "LX23AYD",
+    title: "VW Caddy 2.0 TDI C20 Commerce Pro",
+    mileage: "94,539",
+    transmission: "MANUAL",
+  };
+  const message = "Can you confirm the mileage and gearbox on this van, and if I’m accepted could you deliver it to Plymouth before next Friday?";
+  const vehicleReply = publicVehiclePricingReply({ message, pageType: "finance_vehicle", productLock: "finance", vehicleContext, rememberedFacts: {} });
+  const deliveryReply = controlledBusinessRuntimeReply({ message, productContext: "finance" });
+  const reply = `${vehicleReply} ${deliveryReply}`;
+
+  assert.match(reply, /94,539 miles and a manual gearbox/i);
+  assert.match(reply, /free delivery.*Plymouth|Plymouth.*free delivery/i);
+  assert.match(reply, /7–10 working days/i);
+  assert.match(reply, /cannot be guaranteed/i);
 });
 
 test("Phase 1B does not invent absent opening hours and keeps Rent2Buy collection-only", () => {
