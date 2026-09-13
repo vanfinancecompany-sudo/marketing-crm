@@ -95,19 +95,24 @@ test("DealerKit image readiness alerts when DealerKit has more images than the c
   assert.equal(alerts[1].supplierStockId, "stock-1");
 });
 
-test("BD21HCX is photo-ready in Rent2Buy from its live Finance advert baseline", () => {
+test("BD21HCX is photo-ready in Finance from its own live one-image advert", () => {
   const alerts = buildDealerKitImageReadinessAlerts({
-    pipeline: "rent2buy",
+    pipeline: "finance",
     listingPresenceByPipeline: {
       finance: {
         registrations: ["BD21HCX"],
         vehicles: [{ registration: "BD21HCX", title: "Ford Transit Leader TWIN WHEEL LUTON", webLink: "https://example.test/finance/bd21hcx" }],
       },
-      rent2buy: { registrations: [], vehicles: [] },
+      rent2buy: {
+        registrations: ["BD21HCX"],
+        vehicles: [{ registration: "BD21HCX", title: "Ford Transit", webLink: "https://example.test/rent2buy/bd21hcx" }],
+      },
     },
     cmsItemsByPipeline: {
-      finance: [{ title: "BD21HCX", imageCount: 2, images: ["finance-1.jpg", "finance-2.jpg"] }],
-      rent2buy: [],
+      // Finance can report zero from the CMS gallery feed while the live page shows
+      // its primary image. The live listing therefore gives Finance a safe floor of 1.
+      finance: [{ title: "BD21HCX", imageCount: 0 }],
+      rent2buy: [{ title: "BD21HCX", imageCount: 18 }],
     },
     dealerKitVehicles: [{
       registration: "BD21HCX",
@@ -123,29 +128,42 @@ test("BD21HCX is photo-ready in Rent2Buy from its live Finance advert baseline",
 
   assert.equal(alerts.length, 1);
   assert.equal(alerts[0].registration, "BD21HCX");
-  assert.equal(alerts[0].currentAdvertImageCount, 2);
+  assert.equal(alerts[0].currentAdvertImageCount, 1);
   assert.equal(alerts[0].sourceImageCount, 19);
-  assert.equal(alerts[0].newImageCount, 17);
+  assert.equal(alerts[0].newImageCount, 18);
   assert.deepEqual(alerts[0].advertisedPipelines, ["finance"]);
   assert.equal(alerts[0].referencePipeline, "finance");
-  assert.equal(alerts[0].crossProductEvidence, true);
+  assert.equal(alerts[0].crossProductEvidence, false);
 });
 
-test("commercial photo readiness compares DealerKit with the fullest live Finance or Rent2Buy advert", () => {
-  const alerts = buildDealerKitImageReadinessAlerts({
-    pipeline: "finance",
-    listingPresenceByPipeline: {
-      finance: { registrations: ["AB24CDE"], vehicles: [{ registration: "AB24CDE" }] },
-      rent2buy: { registrations: ["AB24CDE"], vehicles: [{ registration: "AB24CDE" }] },
-    },
-    cmsItemsByPipeline: {
-      finance: [{ title: "AB24CDE", imageCount: 2 }],
-      rent2buy: [{ title: "AB24CDE", imageCount: 6 }],
-    },
-    dealerKitVehicles: [{ registration: "AB24CDE", title: "Ford Transit", vehicleType: "LCV", imageCount: 6, status: "available" }],
-  });
+test("Finance and Rent2Buy photo readiness are isolated advertising lanes", () => {
+  const listingPresenceByPipeline = {
+    finance: { registrations: ["AB24CDE"], vehicles: [{ registration: "AB24CDE" }] },
+    rent2buy: { registrations: ["AB24CDE"], vehicles: [{ registration: "AB24CDE" }] },
+  };
+  const cmsItemsByPipeline = {
+    finance: [{ title: "AB24CDE", imageCount: 2 }],
+    rent2buy: [{ title: "AB24CDE", imageCount: 6 }],
+  };
+  const dealerKitVehicles = [{ registration: "AB24CDE", title: "Ford Transit", vehicleType: "LCV", imageCount: 6, status: "available" }];
 
-  assert.equal(alerts.length, 0);
+  const financeAlerts = buildDealerKitImageReadinessAlerts({
+    pipeline: "finance",
+    listingPresenceByPipeline,
+    cmsItemsByPipeline,
+    dealerKitVehicles,
+  });
+  assert.equal(financeAlerts.length, 1, "Finance 2-image due-in advert must not be suppressed by Rent2Buy's six-image gallery");
+  assert.equal(financeAlerts[0].currentAdvertImageCount, 2);
+  assert.deepEqual(financeAlerts[0].advertisedPipelines, ["finance"]);
+
+  const rent2buyAlerts = buildDealerKitImageReadinessAlerts({
+    pipeline: "rent2buy",
+    listingPresenceByPipeline,
+    cmsItemsByPipeline,
+    dealerKitVehicles,
+  });
+  assert.equal(rent2buyAlerts.length, 0, "Rent2Buy six-image gallery is already a normal gallery and should not alert");
 });
 
 test("Cars photo readiness compares a live Cars advert with DealerKit", () => {
@@ -321,8 +339,9 @@ test("image readiness production path uses known-good rows from a degraded Deale
   assert.match(endpoint, /degraded:\s*sourceDegraded/);
   assert.match(endpoint, /complete:\s*!sourceDegraded/);
   assert.match(endpoint, /loadLiveWixListingPresence/);
-  assert.match(endpoint, /finance[\s\S]*rent2buy/);
+  assert.match(endpoint, /SUPPORTED_PIPELINES/);
   assert.match(endpoint, /CARPAGES/);
+  assert.match(endpoint, /comparisonScope:\s*"selected_pipeline_only"/);
   assert.doesNotMatch(endpoint, /if \(!dealerKitSnapshot\.complete\)[\s\S]{0,300}status\(503\)/);
   assert.match(page, /imageReadySummary\.sourceAvailable === false/);
   assert.doesNotMatch(endpoint, /vansco_refresh_runs|vansco_vehicle_cache/i);
