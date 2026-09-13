@@ -2,8 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildCanonicalConversationInput } from "../lib/canonicalPublicAssistantSession.js";
 import { normalisePageContext } from "../lib/publicAssistantFoundation.js";
-import { conversationPrompt, requestOpenAIConversationReply } from "../api/marketing-ai-assistant-competence.js";
+import { conversationPrompt, requestOpenAIConversationReply, simulateCustomerConversation } from "../api/marketing-ai-assistant-competence.js";
 import { LIVE_JASMINE_PERSONA, validateControlledCompositionReply } from "../lib/liveJasmineComposition.js";
+import { controlledBusinessRuntimeReply } from "../lib/salesConversationEngine.js";
+import { publicVehiclePricingReply } from "../lib/publicVehiclePricing.js";
 
 const pageContext = normalisePageContext({
   page_type: "rent2buy_general",
@@ -66,12 +68,112 @@ test("canonical live input carries full page and verified vehicle context withou
     { role: "user", content: "What gearbox has this van got?" },
     { role: "assistant", content: "It has a manual gearbox." },
   ];
-  const input = buildCanonicalConversationInput({ session, message: "And what's the mileage?", requestId: "request-1", history, pageContext });
+  const input = buildCanonicalConversationInput({ session, message: "And what's the mileage?", requestId: "request-1", history, pageContext, runtimeNow: new Date("2026-09-13T10:00:00Z") });
   assert.deepEqual(input.messages, history);
   assert.equal(input.page_context.context_source, "rent2buy_server_stock");
   assert.equal(input.vehicle_context.registration, "AB12 CDE");
   assert.equal(input.vehicle_context.mileage, "42,000");
   assert.equal(input.vehicle_context.term_months, 48);
+  assert.deepEqual(input.runtime_context, { current_date: "2026-09-13", current_day: "Sunday", timezone: "Europe/London" });
+});
+
+const financeKnowledge = {
+  settings: {},
+  sections: [{
+    id: "phase-1b-finance",
+    section_key: "finance",
+    title: "Finance guidance",
+    active: true,
+    content: "Customers with poor credit and self-employed customers can apply. Approval is subject to status and the lender's assessment. Deposits depend on the customer, lender and vehicle, so a precise deposit cannot be promised before assessment. After an application, the team reviews it and submits suitable cases to a lender; timing varies and approval is not guaranteed.",
+    entries: [],
+  }],
+  articles: [],
+};
+
+function carryJourney(result = {}) {
+  return {
+    buying_intent_level: result.buying_intent_level,
+    buying_intent_score: result.buying_intent_score,
+    buying_intent_confidence: result.buying_intent_confidence,
+    buying_intent_reasons: result.buying_intent_reasons,
+    conversation_goal: result.conversation_goal,
+    journey_stage: result.journey_stage,
+    application_readiness: result.application_readiness,
+    application_mode_active: result.application_mode_active,
+    application_state: result.application_state,
+    application_cta: result.application_cta,
+    recommended_cta: result.recommended_cta,
+    next_best_question: result.journey_next_best_question,
+  };
+}
+
+test("Phase 1B regression: every current customer question wins over the application journey", async () => {
+  const state = { messages: [], facts: {}, journey: {} };
+  const turns = [
+    ["My credit isn't great, can you still help me get a van?", "Yes, you can still apply. A lender will assess the application, so approval can’t be guaranteed.", /apply.*lender/i],
+    ["How much deposit would I need?", "The deposit depends on the customer, lender and van, so it’s confirmed after assessment rather than guessed.", /deposit.*lender/i],
+    ["I'm self employed if that makes any difference.", "Thanks — I’ve noted that.", /noted/i],
+    ["What happens after I apply?", "The team reviews the application and submits suitable cases to a lender. Timing varies and approval isn’t guaranteed.", /application.*lender/i],
+    ["Can you deliver to Plymouth?", null, /free delivery.*Plymouth|Plymouth.*free delivery/i],
+    ["And how long does it normally take?", "Do you mean how long application approval normally takes, or how long delivery takes?", /application approval.*delivery|delivery.*application approval/i],
+  ];
+  for (const [message, modelReply, expected] of turns) {
+    const generated = await simulateCustomerConversation(null, {
+      message,
+      product_context: "finance",
+      messages: state.messages,
+      remembered_facts: state.facts,
+      journey_state: state.journey,
+      runtime_context: { current_date: "2026-09-13", current_day: "Sunday", timezone: "Europe/London" },
+    }, {
+      persist: false,
+      knowledge: financeKnowledge,
+      requestConversationReply: async () => ({ payload: {}, model: "phase-1b-test-model", route: { model: "phase-1b-test-model", tier: "test" } }),
+      parseConversationReply: async () => ({
+        model: "phase-1b-test-model",
+        reply: {
+          reply: modelReply,
+          insufficient_knowledge: false,
+          human_handoff_recommended: false,
+          recommended_action: "continue",
+          confidence: 90,
+          confidence_reason: "Phase 1B regression fixture.",
+          source_ids: ["S1"],
+        },
+      }),
+    });
+    const result = generated.result;
+    assert.match(result.reply, expected, message);
+    assert.doesNotMatch(result.reply, /what would you like help with/i, message);
+    state.messages.push({ role: "user", content: message }, { role: "assistant", content: result.reply });
+    state.facts = result.remembered_facts;
+    state.journey = carryJourney(result);
+  }
+});
+
+test("Phase 1B vehicle-page conversation uses direct trusted facts, pricing, location and runtime date", () => {
+  const vehicleContext = {
+    registration: "LX23AYD",
+    title: "VW Caddy 2.0 TDI C20 Commerce Pro",
+    year: "2023/23",
+    mileage: "68,000",
+    transmission: "MANUAL",
+    fuel: "DIESEL",
+    pricing: { finance_monthly: "£313", finance_retail_vat: "£14,995 +VAT" },
+  };
+  const reply = (message) => publicVehiclePricingReply({ message, pageType: "finance_vehicle", productLock: "finance", vehicleContext, rememberedFacts: {} });
+  assert.match(reply("What gearbox has it got?"), /manual gearbox/i);
+  assert.match(reply("And what's the mileage?"), /68,000 miles/i);
+  assert.match(reply("How much is it a month?"), /£313/i);
+  assert.equal(reply("What deposit do I need on this one?"), null);
+  assert.match(controlledBusinessRuntimeReply({ message: "Where are you located?", productContext: "finance" }), /Southampton.*nationwide.*free delivery/i);
+  assert.equal(controlledBusinessRuntimeReply({ message: "What day is today?", productContext: "finance", runtimeContext: { current_date: "2026-09-13", current_day: "Sunday" } }), "Today is Sunday, 13 September 2026.");
+});
+
+test("Phase 1B does not invent absent opening hours and keeps Rent2Buy collection-only", () => {
+  assert.match(controlledBusinessRuntimeReply({ message: "What time are you open?", productContext: "finance" }), /don’t have verified opening hours/i);
+  assert.match(controlledBusinessRuntimeReply({ message: "Where are you located?", productContext: "rent2buy" }), /collected from Southampton.*100 miles of SO40 2NN/i);
+  assert.doesNotMatch(controlledBusinessRuntimeReply({ message: "Can you deliver to Plymouth?", productContext: "rent2buy" }), /free delivery/i);
 });
 
 test("the live conversation prompt uses Jasmine's customer persona and a controlled fallback packet", () => {

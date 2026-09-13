@@ -355,20 +355,12 @@ async function continueConversation(supabase, body, environment, simulateConvers
     rememberedFacts: session.remembered_facts,
   });
   if (pricingReply) {
-    if (isVehicleSpecificationQuestion(message)) {
-      controlledFallback = {
-        reply: pricingReply,
-        recommended_action: "continue",
-        confidence_reason: "Verified current vehicle specification.",
-      };
-    } else {
     await updateSession(supabase, session, {
       conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: pricingReply }]),
       message_count: messageNumber,
     });
-    await recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, responseMode: "vehicle_pricing" });
+    await recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, responseMode: isVehicleSpecificationQuestion(message) ? "vehicle_specification" : "vehicle_pricing" });
     return safeCustomerPayload({ reply: pricingReply, cta: null, conversationId, status: "ready" });
-    }
   }
 
   const requestId = `public-${randomUUID()}`;
