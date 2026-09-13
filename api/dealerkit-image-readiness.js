@@ -28,7 +28,7 @@ function extractRegistration(value) {
 }
 
 function relevantAdvertPipelines(pipeline) {
-  return pipeline === "cars" ? ["cars"] : ["finance", "rent2buy"];
+  return SUPPORTED_PIPELINES.has(pipeline) ? [pipeline] : [];
 }
 
 function cmsRegistration(row) {
@@ -94,6 +94,8 @@ export function buildDealerKitImageReadinessAlerts({
   const normalizedPipeline = compact(pipeline).toLowerCase();
   if (!SUPPORTED_PIPELINES.has(normalizedPipeline)) return [];
 
+  // Every Stock Watch lane compares only against its own live advert. A full
+  // Rent2Buy gallery must not suppress a Finance due-in alert, and vice versa.
   const relevantPipelines = relevantAdvertPipelines(normalizedPipeline);
   const presenceByPipeline = listingPresenceByPipeline || {
     [normalizedPipeline]: listingPresenceFromLegacyLocal(localVehicles, normalizedPipeline),
@@ -125,25 +127,27 @@ export function buildDealerKitImageReadinessAlerts({
     let currentAdvertImageCount = 0;
     let referencePipeline = advertisedPipelines[0];
     for (const product of advertisedPipelines) {
-      const count = imageCountsByPipeline[product].get(registration) || 0;
-      advertisedImageCounts[product] = count;
-      if (count > currentAdvertImageCount) {
-        currentAdvertImageCount = count;
+      const reportedCount = imageCountsByPipeline[product].get(registration) || 0;
+      // The public image feed can report zero when the live advert is showing only
+      // its primary/hero image. Presence in the live listing proves there is an
+      // advert, so use one as the safe floor instead of losing a genuine due-in
+      // alert such as BD21HCX (Finance 1 image, DealerKit 19 images).
+      const effectiveCount = reportedCount > 0 ? reportedCount : 1;
+      advertisedImageCounts[product] = effectiveCount;
+      if (effectiveCount > currentAdvertImageCount) {
+        currentAdvertImageCount = effectiveCount;
         referencePipeline = product;
       }
     }
 
     // Photo readiness is a due-in/placeholder alert, not a general image-count diff.
-    // Once the fullest current advert already has a normal gallery (3+ images), small
-    // later DealerKit additions should not create another work item. A zero image
-    // count is treated as missing/uncertain CMS evidence rather than guessed ready.
+    // Once this lane's advert has a normal gallery (3+ images), later DealerKit
+    // additions should not create another work item.
     if (currentAdvertImageCount < 1 || currentAdvertImageCount > MAX_PLACEHOLDER_ADVERT_IMAGES) continue;
     if (sourceImageCount <= currentAdvertImageCount) continue;
 
-    const referenceListing = listingByPipeline[referencePipeline].vehicles.get(registration)
-      || advertisedPipelines.map((product) => listingByPipeline[product].vehicles.get(registration)).find(Boolean)
-      || null;
-    const selectedListing = listingByPipeline[normalizedPipeline]?.vehicles.get(registration) || null;
+    const referenceListing = listingByPipeline[referencePipeline].vehicles.get(registration) || null;
+    const selectedListing = listingByPipeline[normalizedPipeline]?.vehicles.get(registration) || referenceListing;
 
     alerts.push({
       id: `images-ready-${normalizedPipeline}-${registration}`,
@@ -167,7 +171,7 @@ export function buildDealerKitImageReadinessAlerts({
       advertisedPipelines,
       advertisedImageCounts,
       referencePipeline,
-      crossProductEvidence: advertisedPipelines.some((product) => product !== normalizedPipeline),
+      crossProductEvidence: false,
       sourceCheckedAt: dealerKitVehicle.checkedAt || "",
       supplierStockId: compact(dealerKitVehicle.supplierStockId || ""),
     });
@@ -348,9 +352,10 @@ export default async function handler(request, response) {
         sourceAvailable: true,
         minimumDealerKitImageCount: MIN_DEALERKIT_IMAGE_COUNT,
         maximumPlaceholderAdvertImages: MAX_PLACEHOLDER_ADVERT_IMAGES,
-        crossProduct: pipeline !== "cars",
+        crossProduct: false,
+        comparisonScope: "selected_pipeline_only",
         comparedPipelines: relevantPipelines,
-        rule: "Alert only when a live advert still has 1 or 2 placeholder/due-in images, DealerKit has at least 5 images, and DealerKit now has more images than that advert. Normal galleries with 3 or more images are ignored.",
+        rule: "Alert only when this Stock Watch lane has a live advert with 1 or 2 placeholder/due-in images, DealerKit has at least 5 images, and DealerKit now has more images. A live advert reported as zero by the CMS image feed is treated as one visible primary image. Other product lanes do not suppress the alert.",
       },
     });
   } catch (error) {
