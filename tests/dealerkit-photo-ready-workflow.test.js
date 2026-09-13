@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { buildDealerKitImageReadinessAlerts, MAX_PLACEHOLDER_ADVERT_IMAGES } from "../api/dealerkit-image-readiness.js";
+import { safeActionPayload, safeImageReadySourceStatus } from "../api/vansco-watch-action.js";
 
 function presence(registration, title = "Vehicle") {
   return {
@@ -101,6 +102,39 @@ test("Cars uses the same lane-specific due-in photo rule", () => {
   });
   assert.equal(alerts.length, 1);
   assert.equal(alerts[0].currentAdvertImageCount, 1);
+});
+
+test("photo-ready Hide and Never show again persist a check-safe DealerKit source status in every lane", () => {
+  assert.equal(safeImageReadySourceStatus({ sourceStatus: "In Stock" }), "available");
+
+  const lanes = [
+    ["finance", "AB24CDE"],
+    ["rent2buy", "CD24EFG"],
+    ["cars", "EF24GHJ"],
+  ];
+
+  for (const [pipeline, registration] of lanes) {
+    const record = {
+      id: `images-ready-${pipeline}-${registration}`,
+      pipeline,
+      registration,
+      title: "DealerKit photo-ready vehicle",
+      sourceStatus: "In Stock",
+      displayStatus: "images_ready",
+      matchStatus: "images_ready",
+      imageReadinessAlert: true,
+    };
+
+    const hiddenPayload = safeActionPayload(pipeline, record, "ignored", "");
+    assert.equal(hiddenPayload.pipeline, pipeline);
+    assert.equal(hiddenPayload.source_status, "available", `${pipeline} Hide must not persist DealerKit's raw In Stock label`);
+    assert.equal(hiddenPayload.match_status, "missing", `${pipeline} photo-ready status must remain DB-compatible`);
+
+    const neverPayload = safeActionPayload(pipeline, record, "not_listing_spec", "");
+    assert.equal(neverPayload.pipeline, pipeline);
+    assert.equal(neverPayload.source_status, "available", `${pipeline} Never show again must use a canonical source status`);
+    assert.equal(neverPayload.match_status, "missing", `${pipeline} Never show again must keep match_status DB-compatible`);
+  }
 });
 
 test("photo-ready UI uses the normal actionable Stock Watch workflow across all lanes", () => {
