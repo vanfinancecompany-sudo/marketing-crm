@@ -93,7 +93,7 @@ test("commercial photo readiness uses the fullest live Finance or Rent2Buy adver
 test("photo-ready UI uses the normal actionable Stock Watch workflow across all lanes", () => {
   const transform = fs.readFileSync(new URL("../scripts/apply-dealerkit-photo-ready-workflow-fix.mjs", import.meta.url), "utf8");
   assert.match(transform, /Photo readiness runs for Finance, Rent2Buy and Cars/);
-  assert.match(transform, /record\.displayStatus === \\\"missing\\\" \|\| isImageReady/);
+  assert.ok(transform.includes('record.displayStatus === "missing" || isImageReady'));
   assert.match(transform, /Mark as advertised/);
   assert.match(transform, /Never show again/);
   assert.match(transform, /setImageReadyByPipeline/);
