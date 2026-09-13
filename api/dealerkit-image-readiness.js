@@ -10,6 +10,7 @@ const MAX_WIX_ROWS = 2000;
 const FINANCE_WIX_SITE_ID = "85f11c52-ee54-495d-aaec-a351831709b5";
 const SUPPORTED_PIPELINES = new Set(["finance", "rent2buy", "cars"]);
 export const MIN_DEALERKIT_IMAGE_COUNT = 5;
+export const MAX_PLACEHOLDER_ADVERT_IMAGES = 2;
 
 const CMS_ENDPOINTS = {
   finance: "https://www.vanfinancecompany.co.uk/_functions/marketingVanFinanceImages",
@@ -132,6 +133,11 @@ export function buildDealerKitImageReadinessAlerts({
       }
     }
 
+    // Photo readiness is a due-in/placeholder alert, not a general image-count diff.
+    // Once the fullest current advert already has a normal gallery (3+ images), small
+    // later DealerKit additions should not create another work item. A zero image
+    // count is treated as missing/uncertain CMS evidence rather than guessed ready.
+    if (currentAdvertImageCount < 1 || currentAdvertImageCount > MAX_PLACEHOLDER_ADVERT_IMAGES) continue;
     if (sourceImageCount <= currentAdvertImageCount) continue;
 
     const referenceListing = listingByPipeline[referencePipeline].vehicles.get(registration)
@@ -144,6 +150,7 @@ export function buildDealerKitImageReadinessAlerts({
       pipeline: normalizedPipeline,
       displayStatus: "images_ready",
       matchStatus: "images_ready",
+      imageReadinessAlert: true,
       registration,
       title: compact(dealerKitVehicle.title || referenceListing?.title || registration),
       imageUrl: compact(dealerKitVehicle?.primaryImage?.url || dealerKitVehicle?.images?.[0]?.url || selectedListing?.picture || referenceListing?.picture || ""),
@@ -340,9 +347,10 @@ export default async function handler(request, response) {
         degraded: sourceDegraded,
         sourceAvailable: true,
         minimumDealerKitImageCount: MIN_DEALERKIT_IMAGE_COUNT,
+        maximumPlaceholderAdvertImages: MAX_PLACEHOLDER_ADVERT_IMAGES,
         crossProduct: pipeline !== "cars",
         comparedPipelines: relevantPipelines,
-        rule: "Alert when a live advert exists in the relevant product group, DealerKit has at least 5 images, and DealerKit has more images than the fullest current live advert for that registration.",
+        rule: "Alert only when a live advert still has 1 or 2 placeholder/due-in images, DealerKit has at least 5 images, and DealerKit now has more images than that advert. Normal galleries with 3 or more images are ignored.",
       },
     });
   } catch (error) {
