@@ -27,7 +27,7 @@ function wixHeaders(pipeline, environment = process.env) {
   const siteId = compact(cars
     ? (environment.WIX_CAR_SITE_ID || environment.WIX_FINANCE_SITE_ID || environment.WIX_SITE_ID || FINANCE_WIX_SITE_ID)
     : (environment.WIX_FINANCE_SITE_ID || environment.WIX_SITE_ID || FINANCE_WIX_SITE_ID));
-  if (!apiKey) throw new Error(\`${"${pipeline}"} Wix image readiness is not configured.\`);
+  if (!apiKey) throw new Error(pipeline + " Wix image readiness is not configured.");
   return {
     siteId,
     headers: {
@@ -62,7 +62,7 @@ async function fetchCmsItems(pipeline, fetchImplementation = fetch, environment 
     });
     if (!response.ok) {
       const detail = compact(await response.text()).slice(0, 500);
-      throw new Error(\`${"${pipeline}"} Wix ${"${config.collectionId}"} returned ${"${response.status}"}${"${detail ? `: ${detail}` : \"\"}"}.\`);
+      throw new Error(pipeline + " Wix " + config.collectionId + " returned " + response.status + (detail ? ": " + detail : "") + ".");
     }
 
     const payload = await response.json();
