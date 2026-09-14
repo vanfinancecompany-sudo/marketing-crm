@@ -43,24 +43,20 @@ test("DealerKit Stock Watch payload carries snapshot completeness to the UI", ()
   assert.match(source, /failedDetailChecks: Math\.max\(0, Number\(snapshot\.apiReportedTotal/);
 });
 
-test("resolved DealerKit reserved vehicles stay out after Wix is confirmed clear", () => {
+test("Stock Watch completion authority is saved workflow state, not telemetry snapshots", () => {
   const source = read("api/dealerkit-stock-watch-list.js");
 
-  assert.match(source, /ACTION_LOG_TABLE = "stock_watch_action_logs"/);
-  assert.match(source, /MONITOR_RUN_TABLE = "stock_watch_monitor_runs"/);
-  assert.match(source, /seenRegistrations = new Set\(\)/);
-  assert.match(source, /seenRegistrations\.add\(registration\)/);
-  assert.match(source, /Number\(row\?\.result\?\.liveCollectionCount\) === 0/);
-  assert.match(source, /financeLiveRegistrations\.has\(registration\)/);
-  assert.match(source, /clearCheckedAt >= stateStartedAt/);
-  assert.match(source, /resolvedReservedRegistrations\.add\(registration\)/);
-  assert.match(source, /resolvedReservedCount: resolvedReservedRegistrations\.size/);
+  assert.match(source, /supabase\.from\(WATCH_TABLE\)\.select\("\*"\)\.eq\("pipeline", pipeline\)/);
+  assert.match(source, /actionByRegistration/);
+  assert.match(source, /workflowStatus/);
+  assert.doesNotMatch(source, /stock_watch_action_logs|stock_watch_monitor_runs|ACTION_LOG_TABLE|MONITOR_RUN_TABLE/);
+  assert.doesNotMatch(source, /reservedVehicleIsResolved|latestClearFinanceChecks|resolvedReservedRegistrations/);
 });
 
-test("resolved reserved suppression fails open when current Wix or DealerKit state cannot be proven", () => {
+test("DealerKit source remains advisory when incomplete", () => {
   const source = read("api/dealerkit-stock-watch-list.js");
 
-  assert.match(source, /if \(!\(financeLiveRegistrations instanceof Set\) \|\| financeLiveRegistrations\.has\(registration\)\) return false/);
-  assert.match(source, /if \(!stateStartedAt \|\| !Number\.isFinite\(clearCheckedAt\)\) return false/);
-  assert.match(source, /sourceUpdatedAt \|\| vehicle\?\.checkedAt \|\| vehicle\?\.sourceCreatedAt/);
+  assert.match(source, /fetchDealerKitStockSnapshot\(\{ allowPartial: true \}\)/);
+  assert.match(source, /sourceComplete: Boolean\(snapshot\.complete\)/);
+  assert.match(source, /failedDetailChecks:/);
 });
