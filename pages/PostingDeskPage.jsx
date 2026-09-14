@@ -662,15 +662,56 @@ export default function PostingDeskPage({
     setActionMessage("");
 
     const marketplaceWindow = window.open("about:blank", "_blank");
-    if (marketplaceWindow) {
+    const renderPreparationState = (title, message, { error = false } = {}) => {
+      if (!marketplaceWindow || marketplaceWindow.closed) return;
       try {
-        marketplaceWindow.document.title = "Preparing Facebook Marketplace...";
-        marketplaceWindow.document.body.innerHTML = "<p style='font:16px Arial;padding:24px'>Preparing this Rent2Buy van for Facebook Marketplace…</p>";
+        marketplaceWindow.document.title = title;
+        const document = marketplaceWindow.document;
+        document.body.replaceChildren();
+        document.body.style.margin = "0";
+        document.body.style.background = "#f6f7f9";
+        document.body.style.fontFamily = "Arial, sans-serif";
+        const wrapper = document.createElement("main");
+        wrapper.style.cssText = "max-width:680px;margin:64px auto;padding:28px;background:#fff;border:1px solid #ddd;border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.08)";
+        const heading = document.createElement("h2");
+        heading.textContent = title;
+        heading.style.cssText = `margin:0 0 14px;color:${error ? "#b42318" : "#111"};font-size:24px`;
+        const copy = document.createElement("p");
+        copy.textContent = message;
+        copy.style.cssText = "margin:0;color:#333;font-size:16px;line-height:1.55";
+        wrapper.append(heading, copy);
+
+        if (error) {
+          const help = document.createElement("p");
+          help.textContent = "Nothing has been posted. Return to the Marketing CRM and press Advertise on Marketplace again after checking the message above.";
+          help.style.cssText = "margin:16px 0 0;color:#555;font-size:14px;line-height:1.5";
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = "Back to Marketing CRM";
+          button.style.cssText = "margin-top:20px;padding:10px 16px;border:0;border-radius:8px;background:#111;color:#fff;font-weight:700;cursor:pointer";
+          button.addEventListener("click", () => {
+            try { marketplaceWindow.opener?.focus(); } catch {}
+            try { marketplaceWindow.close(); } catch {}
+          });
+          wrapper.append(help, button);
+        }
+
+        document.body.appendChild(wrapper);
       } catch {}
-    }
+    };
+
+    renderPreparationState(
+      "Preparing Facebook Marketplace",
+      "Checking this Rent2Buy van, its DealerKit details and the ordered CMS image gallery…",
+    );
 
     try {
       const job = await buildRent2BuyMarketplaceJob(vehicle, caption || vehicle.caption || "");
+      renderPreparationState(
+        "Preparing Facebook Marketplace",
+        `${job.registration} is ready. Handing the listing to the VFC Marketplace Helper…`,
+      );
+
       const acknowledgement = await sendMarketplaceJobToExtension(job);
       if (!acknowledgement?.ok) {
         throw new Error(acknowledgement?.error || "Marketplace helper extension rejected the job.");
@@ -687,8 +728,9 @@ export default function PostingDeskPage({
         window.open(MARKETPLACE_CREATE_URL, "_blank", "noopener,noreferrer");
       }
     } catch (error) {
-      if (marketplaceWindow && !marketplaceWindow.closed) marketplaceWindow.close();
-      setActionMessage(error.message || "Could not prepare this Marketplace advert.");
+      const message = error?.message || "Could not prepare this Marketplace advert.";
+      setActionMessage(message);
+      renderPreparationState("Marketplace preparation needs attention", message, { error: true });
     }
   }
 

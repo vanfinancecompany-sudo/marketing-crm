@@ -9,6 +9,10 @@ import {
 } from "../services/marketplaceAutomation.js";
 
 const postingDeskSource = fs.readFileSync(new URL("../pages/PostingDeskPage.jsx", import.meta.url), "utf8");
+const marketplaceAutomationSource = fs.readFileSync(
+  new URL("../services/marketplaceAutomation.js", import.meta.url),
+  "utf8",
+);
 const backgroundSource = fs.readFileSync(new URL("../browser-extension/marketplace-helper/background.js", import.meta.url), "utf8");
 const facebookSource = fs.readFileSync(new URL("../browser-extension/marketplace-helper/facebook.js", import.meta.url), "utf8");
 const manifest = JSON.parse(
@@ -31,6 +35,19 @@ test("Posting Desk treats Marketplace as a prepared and confirmed workflow", () 
   assert.match(postingDeskSource, /Confirm Advertised/);
   assert.match(postingDeskSource, /MARKETPLACE_PUBLISHED_MESSAGE_TYPE/);
   assert.match(postingDeskSource, /removed from the Marketplace to-do list/);
+});
+
+test("Marketplace preparation failures stay visible instead of silently closing", () => {
+  assert.match(postingDeskSource, /Marketplace preparation needs attention/);
+  assert.match(postingDeskSource, /Nothing has been posted/);
+  assert.match(postingDeskSource, /Back to Marketing CRM/);
+  assert.doesNotMatch(
+    postingDeskSource,
+    /catch \(error\) \{\s*if \(marketplaceWindow && !marketplaceWindow\.closed\) marketplaceWindow\.close\(\)/,
+  );
+  assert.match(marketplaceAutomationSource, /MARKETPLACE_EXTENSION_ACK_TIMEOUT_MS = 6000/);
+  assert.match(marketplaceAutomationSource, /MARKETPLACE_EXTENSION_ACK_ATTEMPTS = 2/);
+  assert.match(marketplaceAutomationSource, /sendMarketplaceJobAttempt/);
 });
 
 test("Marketplace extension requires manual Publish before a live listing receipt", () => {
