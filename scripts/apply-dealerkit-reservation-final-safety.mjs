@@ -53,7 +53,7 @@ const endpointConfigs = [
     name: "Rent2Buy",
     functionName: "unpublishReservedRent2BuyWixStock",
     previewFunction: "previewRent2BuyWixStock",
-    mutationFunction: "unpublishMatch",
+    mutationFunction: "setDraftMatch",
     noMatchesMessage: "This registration is not live in any approved Rent2Buy listing/category collection in the authoritative VAN FINANCE Wix CMS.",
     successMessage: (count) => `Moved ${count} matching Rent2Buy listing/category record(s) to Draft in the authoritative VAN FINANCE Wix CMS. VAN PAGES remained live and protected.`,
     failureMessage: (count) => `${count} Rent2Buy collection action(s) failed in the authoritative CMS. Successful listing records remain in Draft; VAN PAGES remained protected.`,
@@ -219,7 +219,7 @@ ${config.extraResult}
     source = replaceOnce(
       source,
       '  if (!currentlyOnVansco) return { ...baseRecord, displayStatus: "hidden_not_current", matchStatus: "hidden_not_current" };\n  if (!registration) return { ...baseRecord, displayStatus: "hidden_no_registration", matchStatus: "hidden_no_registration" };\n  if (hasExactLocalMatch && reservedOnVansco) return { ...baseRecord, displayStatus: "reserved", matchStatus: "reserved_still_listed" };',
-      '  // DEALERKIT_RESERVED_BUCKET_ROUTING: reservation truth wins before live-feed absence.\n  if (!registration) return { ...baseRecord, displayStatus: "hidden_no_registration", matchStatus: "hidden_no_registration" };\n  if (reservedOnVansco) return { ...baseRecord, displayStatus: "reserved", matchStatus: hasExactLocalMatch ? "reserved_still_listed" : "reserved_on_dealerkit" };\n  if (!currentlyOnVansco) return { ...baseRecord, displayStatus: "hidden_not_current", matchStatus: "hidden_not_current" };',
+      '  // DEALERKIT_RESERVED_BUCKET_ROUTING: preserve the old completion rule: only still-advertised reserved stock remains actionable.\n  if (!currentlyOnVansco) return { ...baseRecord, displayStatus: "hidden_not_current", matchStatus: "hidden_not_current" };\n  if (!registration) return { ...baseRecord, displayStatus: "hidden_no_registration", matchStatus: "hidden_no_registration" };\n  if (hasExactLocalMatch && reservedOnVansco) return { ...baseRecord, displayStatus: "reserved", matchStatus: "reserved_still_listed" };',
       "reserved classification precedence",
       relativePath,
     );
@@ -259,4 +259,4 @@ ${config.extraResult}
   }
 }
 
-console.log("Applied final DealerKit reservation safety: complete Wix reads, exact stock identity, reservation bucket routing and per-write DealerKit rechecks.");
+console.log("Applied final DealerKit reservation safety: complete Wix reads, exact stock identity, legacy completion routing and per-write DealerKit rechecks.");

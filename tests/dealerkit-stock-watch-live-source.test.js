@@ -42,3 +42,21 @@ test("DealerKit Stock Watch payload carries snapshot completeness to the UI", ()
   assert.match(source, /complete: Boolean\(snapshot\.complete\)/);
   assert.match(source, /failedDetailChecks: Math\.max\(0, Number\(snapshot\.apiReportedTotal/);
 });
+
+test("Stock Watch completion authority is saved workflow state, not telemetry snapshots", () => {
+  const source = read("api/dealerkit-stock-watch-list.js");
+
+  assert.match(source, /supabase\.from\(WATCH_TABLE\)\.select\("\*"\)\.eq\("pipeline", pipeline\)/);
+  assert.match(source, /actionByRegistration/);
+  assert.match(source, /workflowStatus/);
+  assert.doesNotMatch(source, /stock_watch_action_logs|stock_watch_monitor_runs|ACTION_LOG_TABLE|MONITOR_RUN_TABLE/);
+  assert.doesNotMatch(source, /reservedVehicleIsResolved|latestClearFinanceChecks|resolvedReservedRegistrations/);
+});
+
+test("DealerKit source remains advisory when incomplete", () => {
+  const source = read("api/dealerkit-stock-watch-list.js");
+
+  assert.match(source, /fetchDealerKitStockSnapshot\(\{ allowPartial: true \}\)/);
+  assert.match(source, /sourceComplete: Boolean\(snapshot\.complete\)/);
+  assert.match(source, /failedDetailChecks:/);
+});

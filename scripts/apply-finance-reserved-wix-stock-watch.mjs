@@ -87,6 +87,16 @@ import {
       setWixDraftResult(result);
       const refreshed = await previewReservedFinanceWixStock(record.registration);
       setWixPreview(refreshed);
+      if (result.ok && (refreshed.matches || []).length === 0) {
+        const completed = await saveVanscoWatchAction({
+          pipeline: selectedPipeline,
+          record,
+          workflowStatus: "ignored",
+          notes: notesDraft,
+        });
+        onRecordSaved(record, completed);
+        window.location.reload();
+      }
     } catch (error) {
       setWixActionError(error?.message || "Could not move Finance Wix records to draft.");
     } finally {
@@ -158,4 +168,5 @@ import {
 
 fs.writeFileSync(targetPath, source);
 console.log("Applied Finance reserved Wix Stock Watch controls.");
+await import("./apply-dealerkit-missing-wix-controls.mjs");
 await import("./apply-car-reserved-wix-stock-watch.mjs");

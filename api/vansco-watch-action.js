@@ -67,12 +67,6 @@ function safeMatchStatus(record) {
   return "missing";
 }
 
-function isImageReadyRecord(record) {
-  return record?.imageReadinessAlert === true
-    || String(record?.matchStatus || record?.match_status || "").toLowerCase() === "images_ready"
-    || String(record?.id || "").startsWith("images-ready-");
-}
-
 export function safeImageReadySourceStatus(record) {
   const raw = String(record?.sourceStatus || record?.source_status || record?.status || record?.availability || "")
     .trim()
@@ -83,6 +77,8 @@ export function safeImageReadySourceStatus(record) {
     instock: "available",
     live: "available",
     for_sale: "available",
+    due_in: "available",
+    awaiting_delivery: "reserved",
   };
   const normalized = aliases[raw] || raw;
   return ALLOWED_SOURCE_STATUSES.has(normalized) ? normalized : "unknown";
@@ -96,13 +92,9 @@ export function safeActionPayload(pipeline, record, workflowStatus, notes) {
   // show again must be stored as workflow_status decisions, not match_status.
   payload.match_status = safeMatchStatus(record);
 
-  // DealerKit exposes its human-readable source status (for example "In Stock")
-  // on photo-readiness records. The legacy watch table only accepts its canonical
-  // source-status values, so normalize that one workflow before persistence rather
-  // than weakening the database constraint or changing normal Stock Watch rows.
-  if (isImageReadyRecord(record)) {
-    payload.source_status = safeImageReadySourceStatus(record);
-  }
+  // DealerKit has valid live statuses that the legacy watch-table constraint does
+  // not know about. Persist schema-safe equivalents for every Stock Watch action.
+  payload.source_status = safeImageReadySourceStatus(record);
 
   return payload;
 }
