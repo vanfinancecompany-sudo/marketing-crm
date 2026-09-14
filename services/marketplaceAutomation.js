@@ -14,6 +14,9 @@ export const MARKETPLACE_PUBLISHED_MESSAGE_TYPE = "VFC_MARKETPLACE_PUBLISHED";
 
 const LOCATION_STORAGE_KEY = "rent2buyMarketplaceLocationRotationV1";
 const MARKETPLACE_MAX_IMAGES = 20;
+const MARKETPLACE_EXTENSION_ACK_TIMEOUT_MS = 6000;
+const MARKETPLACE_EXTENSION_ACK_ATTEMPTS = 2;
+const MARKETPLACE_EXTENSION_RETRY_DELAY_MS = 300;
 
 export const RENT2BUY_MARKETPLACE_LOCATIONS = Object.freeze([
   "Southampton",
@@ -258,15 +261,14 @@ export async function buildRent2BuyMarketplaceJob(vehicle, caption) {
   };
 }
 
-export function sendMarketplaceJobToExtension(job, timeoutMs = 3500) {
-  if (typeof window === "undefined") return Promise.reject(new Error("Marketplace helper requires a browser."));
+function sendMarketplaceJobAttempt(job, timeoutMs) {
   return new Promise((resolve, reject) => {
     let settled = false;
     const timeout = window.setTimeout(() => {
       if (settled) return;
       settled = true;
       window.removeEventListener("message", onMessage);
-      reject(new Error("Marketplace helper extension did not acknowledge the job. Check that the extension is installed and enabled."));
+      reject(new Error("Marketplace helper extension did not acknowledge the job in time."));
     }, timeoutMs);
 
     function onMessage(event) {
@@ -286,4 +288,29 @@ export function sendMarketplaceJobToExtension(job, timeoutMs = 3500) {
       job,
     }, window.location.origin);
   });
+}
+
+export async function sendMarketplaceJobToExtension(
+  job,
+  timeoutMs = MARKETPLACE_EXTENSION_ACK_TIMEOUT_MS,
+) {
+  if (typeof window === "undefined") {
+    throw new Error("Marketplace helper requires a browser.");
+  }
+
+  let lastTimeoutError = null;
+  for (let attempt = 1; attempt <= MARKETPLACE_EXTENSION_ACK_ATTEMPTS; attempt += 1) {
+    try {
+      return await sendMarketplaceJobAttempt(job, timeoutMs);
+    } catch (error) {
+      lastTimeoutError = error;
+      if (attempt >= MARKETPLACE_EXTENSION_ACK_ATTEMPTS) break;
+      await new Promise((resolve) => window.setTimeout(resolve, MARKETPLACE_EXTENSION_RETRY_DELAY_MS));
+    }
+  }
+
+  throw new Error(
+    `${lastTimeoutError?.message || "Marketplace helper extension did not acknowledge the job."} ` +
+    "Check that VFC Marketplace Helper is installed and enabled in this Chrome profile, then try again.",
+  );
 }
