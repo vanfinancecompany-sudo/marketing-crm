@@ -2,6 +2,20 @@ export const WIDGET_CHANNEL = "vfc-ai-assistant-widget-v1";
 export const PAGE_TYPES = Object.freeze(["finance_vehicle", "finance_general", "rent2buy_general", "homepage"]);
 export const PRODUCT_CONTEXTS = Object.freeze(["finance", "rent2buy"]);
 const SAFE_STATUSES = new Set(["ready", "needs_product", "rate_limited", "invalid_request", "unavailable"]);
+const SAFE_STOCK_CTA_URLS = Object.freeze({
+  finance: new Set([
+    "https://www.vanfinancecompany.co.uk/vans-on-finance",
+    "https://www.vanfinancecompany.co.uk/vans-on-finance?type=Small",
+    "https://www.vanfinancecompany.co.uk/vans-on-finance?type=Medium",
+    "https://www.vanfinancecompany.co.uk/vans-on-finance?type=Large",
+  ]),
+  rent2buy: new Set([
+    "https://www.rent2buyvans.co.uk/view-all-vans",
+    "https://www.rent2buyvans.co.uk/view-small-vans",
+    "https://www.rent2buyvans.co.uk/view-medium-vans",
+    "https://www.rent2buyvans.co.uk/view-lwb-vans",
+  ]),
+});
 const SAFE_PRICE_WORDS = new Set([
   "from", "vat", "inc", "incl", "including", "inclusive", "ex", "excl", "excluding", "exclusive",
   "plus", "before", "with", "per", "month", "monthly", "pcm", "pm", "p", "m",
@@ -130,10 +144,18 @@ export function safePrivacyUrl(value) {
   } catch { return null; }
 }
 
-export function safeWidgetCta(_serverCta, _pageContext) {
-  // Applications are deliberately not actioned from inside chat. The assistant tells the customer to use
-  // the existing APPLY NOW button on the Wix page, which remains the single application control.
-  return null;
+export function safeWidgetCta(serverCta, pageContext = {}) {
+  if (!serverCta || serverCta.action !== "navigate" || serverCta.behavior !== "same_window") return null;
+  const pageType = clean(pageContext.pageType ?? pageContext.page_type, 40).toLowerCase();
+  const productContext = clean(pageContext.productContext ?? pageContext.product_context, 20).toLowerCase()
+    || (["finance_vehicle", "finance_general"].includes(pageType) ? "finance" : pageType === "rent2buy_general" ? "rent2buy" : "");
+  if (!["finance", "rent2buy"].includes(productContext)) return null;
+  let url;
+  try { url = new URL(clean(serverCta.url, 500)).href; } catch { return null; }
+  if (!SAFE_STOCK_CTA_URLS[productContext].has(url)) return null;
+  const label = clean(serverCta.label, 100);
+  if (!/^View (?:Small|Medium|LWB|All) Vans$/.test(label)) return null;
+  return { label, action: "navigate", behavior: "same_window", url };
 }
 
 export function safeAssistantResponse(payload = {}, pageContext = {}) {

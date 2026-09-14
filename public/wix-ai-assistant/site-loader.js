@@ -388,6 +388,24 @@
     frame.contentWindow.postMessage({ channel: CHANNEL, ...message }, SCRIPT_ORIGIN);
   }
 
+  function navigateStockCta(cta = {}) {
+    if (cta.action !== "navigate" || cta.behavior !== "same_window") return;
+    let url;
+    try { url = new URL(clean(cta.url, 500)); } catch { return; }
+    const financeUrl = url.origin === "https://www.vanfinancecompany.co.uk"
+      && url.pathname === "/vans-on-finance"
+      && [...url.searchParams.keys()].every((key) => key === "type")
+      && (!url.searchParams.get("type") || ["Small", "Medium", "Large"].includes(url.searchParams.get("type")));
+    const rent2BuyUrl = url.origin === "https://www.rent2buyvans.co.uk"
+      && ["/view-all-vans", "/view-small-vans", "/view-medium-vans", "/view-lwb-vans"].includes(url.pathname)
+      && !url.search;
+    const lockedProduct = activeContext.productContext;
+    if (!financeUrl && !rent2BuyUrl) return;
+    if (lockedProduct === "finance" && !financeUrl) return;
+    if (lockedProduct === "rent2buy" && !rent2BuyUrl) return;
+    window.location.assign(url.href);
+  }
+
   async function callAssistant(message) {
     if (requestInFlight) return;
     requestInFlight = true;
@@ -448,6 +466,7 @@
     }
     if (message.type === "cta") {
       sendTelemetry("cta_click", { cta: message.cta });
+      navigateStockCta(message.cta);
       return;
     }
     if (message.type === "ui_close") hidePanel();

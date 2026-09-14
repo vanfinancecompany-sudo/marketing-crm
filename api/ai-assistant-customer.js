@@ -20,6 +20,7 @@ import {
 import { publicApplicationGuidanceReply } from "../lib/publicApplicationGuidance.js";
 import { isVehicleSpecificationQuestion, publicVehiclePricingReply } from "../lib/publicVehiclePricing.js";
 import { controlledBusinessRuntimeReply, controlledProductComparisonReply, controlledVehicleNextStepReply } from "../lib/salesConversationEngine.js";
+import { buildPublicStockNavigation } from "../lib/publicStockNavigation.js";
 import {
   buildCanonicalConversationInput,
   canonicalSessionState,
@@ -374,7 +375,8 @@ async function continueConversation(supabase, body, environment, simulateConvers
   });
   const generated = await simulateConversation(supabase, canonicalInput);
   const result = generated.result;
-  const reply = clean(result.reply, 5000);
+  const stockNavigation = buildPublicStockNavigation({ message, productContext: productLock, facts: result.remembered_facts });
+  const reply = clean(stockNavigation?.reply || result.reply, 5000);
   const nextHistory = boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]);
   const state = canonicalSessionState({ session, result, productLock });
   await updateSession(supabase, session, {
@@ -382,8 +384,8 @@ async function continueConversation(supabase, body, environment, simulateConvers
     conversation_history: nextHistory,
     message_count: messageNumber,
   });
-  const cta = publicApplicationCta(session.page_type, productLock, result);
-  await recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, result, responseMode: "ai_generated", cta });
+  const cta = stockNavigation?.cta || publicApplicationCta(session.page_type, productLock, result);
+  await recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, result, responseMode: stockNavigation ? "stock_navigation" : "ai_generated", cta });
   return safeCustomerPayload({
     reply,
     cta,

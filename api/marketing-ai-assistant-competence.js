@@ -29,11 +29,13 @@ import {
   classifyConversationIntent,
   controlledAlternativeRecallReply,
   controlledMemoryRecallReply,
+  controlledVehiclePreferenceReply,
   conversationLearningDiagnosis,
   enforceGroundedConversationReply,
   insufficientKnowledgeReply,
   naturalConversationReply,
 } from "../lib/conversationIntelligence.js";
+import { buildPublicStockNavigation } from "../lib/publicStockNavigation.js";
 import { REAL_CUSTOMER_SCENARIOS } from "../lib/customerSimulationScenarios.js";
 import {
   applicationReadiness,
@@ -426,18 +428,25 @@ export async function simulateCustomerConversation(supabase, body, options = {})
     orchestration.retrieval_required = false;
     orchestration.recovery_required = false;
   }
+  const stockNavigation = buildPublicStockNavigation({ message: question, productContext, facts: memory.remembered_facts });
   const controlledContinuityReply = controlledMemoryRecallReply({
     message: question,
     facts: memory.remembered_facts,
     factMetadata: memory.fact_metadata,
     vehicleContext: body.vehicle_context,
   }) || controlledAlternativeRecallReply({ message: question, facts: memory.remembered_facts, productContext })
-    || controlledVehicleNextStepReply(question, productContext);
+    || controlledVehicleNextStepReply(question, productContext)
+    || stockNavigation?.reply
+    || controlledVehiclePreferenceReply({
+      message: question,
+      facts: memory.remembered_facts,
+      nextQuestion: journey.next_best_question,
+    });
   const controlledContinuityResponse = controlledContinuityReply ? {
     reply: controlledContinuityReply,
     insufficient_knowledge: false,
     human_handoff_recommended: false,
-    recommended_action: "continue",
+    recommended_action: stockNavigation ? "browse_stock" : "continue",
     confidence: 100,
     confidence_reason: "Trusted remembered facts or controlled journey guidance.",
     source_ids: [],
