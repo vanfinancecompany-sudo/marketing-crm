@@ -56,7 +56,7 @@ test("structured memory stores commercial facts, confidence and source message i
   assert.equal(memory.remembered_facts.vehicle_interest, "Transit Custom");
   assert.equal(memory.remembered_facts.budget_monthly_gbp, 700);
   assert.equal(memory.remembered_facts.delivery_interest, true);
-  assert.deepEqual(memory.fact_metadata.quantity_required, { confidence: 0.95, source_message_id: "m1" });
+  assert.deepEqual(memory.fact_metadata.quantity_required, { provenance: "customer_explicit", confidence: 0.95, source_message_id: "m1" });
   assert.equal(memory.remembered_facts.prior_answer, undefined);
 });
 

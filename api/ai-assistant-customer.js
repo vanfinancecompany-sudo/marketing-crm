@@ -351,6 +351,7 @@ async function continueConversation(supabase, body, environment, simulateConvers
       message,
       productContext: productLock,
       runtimeContext: londonRuntimeContext(),
+      rememberedFacts: session.remembered_facts,
     });
     const nextStepReply = controlledVehicleNextStepReply(message, productLock);
     const reply = [pricingReply, businessReply, nextStepReply].filter(Boolean).join(" ");

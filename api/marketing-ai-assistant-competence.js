@@ -27,6 +27,8 @@ import {
   CONVERSATION_REVIEW_OUTCOMES,
   buildConversationMemory,
   classifyConversationIntent,
+  controlledAlternativeRecallReply,
+  controlledMemoryRecallReply,
   conversationLearningDiagnosis,
   enforceGroundedConversationReply,
   insufficientKnowledgeReply,
@@ -44,6 +46,7 @@ import {
   responseLengthTarget,
   naturalSalesReply,
   controlledBusinessRuntimeReply,
+  controlledVehicleNextStepReply,
   latestCustomerQuestionRequiresAnswer,
   stripRepeatedDisclaimer,
 } from "../lib/salesConversationEngine.js";
@@ -94,6 +97,7 @@ import {
   LIVE_JASMINE_PERSONA,
   controlledCompositionInstructions,
   validateControlledCompositionReply,
+  validateRememberedFactConsistency,
 } from "../lib/liveJasmineComposition.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
@@ -381,7 +385,11 @@ export async function simulateCustomerConversation(supabase, body, options = {})
   const human = await runStage("Universal message classification", context, async () => classifyUniversalMessage({ message: question, messages, journey: body.journey_state }));
   const intent = await runStage("Conversation intent", context, async () => classifyConversationIntent({ message: question, history: messages, productContext }));
   const conversationWithCurrent = [...messages, { role: "user", content: question }];
-  const memory = await runStage("Conversation memory", context, async () => buildConversationMemory(conversationWithCurrent, body.remembered_facts));
+  const memory = await runStage("Conversation memory", context, async () => buildConversationMemory(
+    conversationWithCurrent,
+    body.remembered_facts,
+    body.remembered_fact_metadata || body.journey_state?.remembered_fact_metadata,
+  ));
   const contextualResolution = contextualClarification(question, messages, memory.remembered_facts);
   const latestQuestionRequiresAnswer = latestCustomerQuestionRequiresAnswer(question);
   const buyingSignals = await runStage("Buying signal detection", context, async () => detectBuyingSignals(question, memory.remembered_facts));
@@ -410,7 +418,30 @@ export async function simulateCustomerConversation(supabase, body, options = {})
     orchestration.retrieval_required = false;
     orchestration.recovery_required = false;
   }
-  const controlledBusinessReply = controlledBusinessRuntimeReply({ message: question, productContext, runtimeContext: body.runtime_context });
+  const controlledContinuityReply = controlledMemoryRecallReply({
+    message: question,
+    facts: memory.remembered_facts,
+    factMetadata: memory.fact_metadata,
+    vehicleContext: body.vehicle_context,
+  }) || controlledAlternativeRecallReply({ message: question, facts: memory.remembered_facts, productContext })
+    || controlledVehicleNextStepReply(question, productContext);
+  const controlledContinuityResponse = controlledContinuityReply ? {
+    reply: controlledContinuityReply,
+    insufficient_knowledge: false,
+    human_handoff_recommended: false,
+    recommended_action: "continue",
+    confidence: 100,
+    confidence_reason: "Trusted remembered facts or controlled journey guidance.",
+    source_ids: [],
+  } : null;
+  if (controlledContinuityResponse) {
+    intent.retrieval_required = false;
+    intent.clarification_required = false;
+    orchestration.retrieval_required = false;
+    orchestration.recovery_required = false;
+    orchestration.application_continuation = false;
+  }
+  const controlledBusinessReply = controlledBusinessRuntimeReply({ message: question, productContext, runtimeContext: body.runtime_context, rememberedFacts: memory.remembered_facts });
   const controlledBusinessResponse = controlledBusinessReply ? {
     reply: controlledBusinessReply,
     insufficient_knowledge: /don.t have verified opening hours/i.test(controlledBusinessReply),
@@ -449,7 +480,7 @@ export async function simulateCustomerConversation(supabase, body, options = {})
   const priorPhraseDiagnostics = recentAssistantPhraseDiagnostics(messages);
 
   if (!intent.retrieval_required) {
-    response = controlledBusinessResponse || suppliedFallback || (recoveryRequired && intent.primary_intent !== "product_clarification_required"
+    response = controlledContinuityResponse || controlledBusinessResponse || suppliedFallback || (recoveryRequired && intent.primary_intent !== "product_clarification_required"
       ? humanRecoveryReply(human, { messages, facts: memory.remembered_facts, productContext, journey })
       : naturalSalesReply(intent, productContext, buyingSignals, memory.remembered_facts) || naturalConversationReply(intent, productContext, memory.remembered_facts));
   } else {
@@ -505,6 +536,12 @@ export async function simulateCustomerConversation(supabase, body, options = {})
       };
       openAIResponseId = clean(requested.payload?.id, 100) || null;
       response = enforceGroundedConversationReply(response, { deterministicRuleUsed: Boolean(coverage), productContext });
+      const factConsistency = validateRememberedFactConsistency(response.reply, { rememberedFacts: memory.remembered_facts });
+      if (!factConsistency.valid) {
+        response = deterministicEvidenceReply(sources, productContext);
+        model = "deterministic-memory-safety-fallback";
+        modelRoute = { model, tier: "deterministic", temperature: null, reasoning_effort: null, reason: `Generated wording conflicted with trusted conversation state (${factConsistency.reason}).` };
+      }
       const deterministicDelivery = deterministicDeliveryReply(productContext, question, coverage);
       if (deterministicDelivery) response = { ...response, reply: deterministicDelivery, insufficient_knowledge: false, confidence: 100, confidence_reason: "Server-side approved delivery rule.", source_ids: ["S1"] };
       response.reply = stripRepeatedDisclaimer(response.reply, messages);
@@ -519,7 +556,7 @@ export async function simulateCustomerConversation(supabase, body, options = {})
     response = { ...response, reply: applicationModeReply(productContext, journey.application_state), insufficient_knowledge: false, human_handoff_recommended: false, recommended_action: productContext === "finance" ? "apply_finance" : "apply_rent2buy", confidence: 100, confidence_reason: "Server-side V4 Application Mode triggered by explicit customer progression.", source_ids: [] };
   }
 
-  if (!intent.retrieval_required && !controlledBusinessResponse && options.generationMode !== "deterministic") {
+  if (!intent.retrieval_required && !controlledContinuityResponse && !controlledBusinessResponse && options.generationMode !== "deterministic") {
     const fallbackResponse = { ...response, source_ids: Array.isArray(response.source_ids) ? response.source_ids : [] };
     const generationStart = performance.now();
     try {
@@ -555,6 +592,7 @@ export async function simulateCustomerConversation(supabase, body, options = {})
         comparison,
         pageContext: body.page_context,
         vehicleContext: body.vehicle_context,
+        rememberedFacts: memory.remembered_facts,
       });
       if (!validation.valid) throw new ApiError(502, `Controlled composition validation failed: ${validation.reason}.`, "validation");
       response = { ...fallbackResponse, reply: generated.reply.reply };
