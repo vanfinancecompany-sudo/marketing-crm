@@ -29,7 +29,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Run Stock Watch reservation routing regression
-        run: node scripts/apply-dealerkit-reservation-final-safety.mjs && node --test tests/dealerkit-reservation-final-safety-post-transform.test.js
+        run: node scripts/apply-dealerkit-reservation-safety-fix.mjs && node scripts/apply-dealerkit-reservation-final-safety.mjs && node --test tests/dealerkit-reservation-final-safety-post-transform.test.js
       - name: Run DealerKit Wix safety tests
         run: node --test tests/dealerkit-wix-*.test.js
       - name: Build
