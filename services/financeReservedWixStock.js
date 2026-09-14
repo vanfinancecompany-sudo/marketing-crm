@@ -30,6 +30,10 @@ export function previewReservedFinanceWixStock(registration, supplierStockId) {
   return callFinanceReservedWixStock({ action: "preview", registration, supplier_stock_id: supplierStockId || undefined });
 }
 
+export function previewMissingFinanceWixStock(registration) {
+  return callFinanceReservedWixStock({ action: "preview", registration });
+}
+
 export function unpublishReservedFinanceWixStock(registration, supplierStockId) {
   return callFinanceReservedWixStock({ action: "unpublish", registration, supplier_stock_id: supplierStockId || undefined, confirmed: true });
 }
