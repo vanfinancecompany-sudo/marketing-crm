@@ -395,11 +395,19 @@ export async function simulateCustomerConversation(supabase, body, options = {})
   const buyingSignals = await runStage("Buying signal detection", context, async () => detectBuyingSignals(question, memory.remembered_facts));
   const lengthTarget = responseLengthTarget(question, intent);
   const updatedFacts = Object.fromEntries(Object.entries(memory.remembered_facts).filter(([key, value]) => clean(body.remembered_facts?.[key]) !== clean(value)));
-  if (human.message_type === "objection" && !["uncertainty"].includes(human.objection.objection) && intent.primary_intent !== "product_clarification_required") intent.retrieval_required = true;
+  if (human.message_type === "objection" && !["uncertainty"].includes(human.objection.objection) && !["product_clarification_required", "customer_fact_statement"].includes(intent.primary_intent)) intent.retrieval_required = true;
   let journey = await runStage("Application journey", context, async () => buildJourneyState({ message: question, messages, intent, facts: memory.remembered_facts, factMetadata: memory.fact_metadata, productContext, priorJourney: body.journey_state, updatedFacts }));
   let orchestration = await runStage("Conversation and knowledge orchestration", context, async () => orchestrateConversationTurn({ message: question, intent, human, journey, priorJourney: body.journey_state, buyingSignals }));
   journey = preserveJourneyAcrossOrchestration(journey, body.journey_state, orchestration);
   intent.retrieval_required = orchestration.retrieval_required;
+  if (intent.primary_intent === "customer_fact_statement") {
+    intent.retrieval_required = false;
+    intent.clarification_required = false;
+    intent.suggested_clarification_question = "";
+    orchestration.retrieval_required = false;
+    orchestration.recovery_required = false;
+    orchestration.application_continuation = false;
+  }
   if (contextualResolution && /^(?:and\s+)?how long/i.test(question)) {
     intent.clarification_required = true;
     intent.retrieval_required = false;

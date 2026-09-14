@@ -5,11 +5,14 @@ import { simulateCustomerConversation } from "../api/marketing-ai-assistant-comp
 import { canonicalSessionState } from "../lib/canonicalPublicAssistantSession.js";
 import {
   buildConversationMemory,
+  classifyConversationIntent,
+  classifyMonthlyAmountIntent,
   controlledAlternativeRecallReply,
   controlledMemoryRecallReply,
   extractConversationFacts,
   mergeRememberedFacts,
 } from "../lib/conversationIntelligence.js";
+import { isSpecificVehiclePricingQuestion } from "../lib/publicVehiclePricing.js";
 import { extractUkLocation } from "../lib/productCoverageRules.js";
 import { controlledBusinessRuntimeReply, controlledVehicleNextStepReply } from "../lib/salesConversationEngine.js";
 import { validateRememberedFactConsistency } from "../lib/liveJasmineComposition.js";
@@ -67,6 +70,91 @@ test("a monthly budget persists and a deposit figure cannot overwrite it", () =>
   assert.equal(second.remembered_facts.budget_monthly_gbp, 350);
   assert.equal(second.remembered_facts.deposit_budget_gbp, undefined);
 });
+
+test("central monthly-amount semantics separate customer facts from pricing questions", () => {
+  const statements = [
+    "I'd like to spend around £350 a month",
+    "My budget is £400 per month",
+    "I want to keep payments under £300",
+  ];
+  for (const message of statements) {
+    assert.equal(classifyMonthlyAmountIntent(message).kind, "budget_statement", message);
+    for (const productContext of ["finance", "rent2buy"]) {
+      const intent = classifyConversationIntent({ message, productContext });
+      assert.equal(intent.primary_intent, "customer_fact_statement", `${productContext}: ${message}`);
+      assert.equal(intent.retrieval_required, false, `${productContext}: ${message}`);
+    }
+    assert.equal(isSpecificVehiclePricingQuestion({ message, pageType: "finance_vehicle", rememberedFacts: { vehicle_interest: "VW Caddy" } }), false, message);
+  }
+
+  const questions = [
+    "How much is this van per month?",
+    "What's the monthly payment?",
+    "Can I get this van for £350 a month?",
+    "What vans are around £350 a month?",
+  ];
+  for (const message of questions) {
+    assert.equal(classifyMonthlyAmountIntent(message).kind, "pricing_question", message);
+    for (const productContext of ["finance", "rent2buy"]) {
+      const intent = classifyConversationIntent({ message, productContext });
+      assert.notEqual(intent.primary_intent, "customer_fact_statement", `${productContext}: ${message}`);
+      assert.equal(intent.retrieval_required, true, `${productContext}: ${message}`);
+    }
+  }
+});
+
+const budgetStatementContexts = [
+  { name: "Finance homepage", product: "finance", pageType: "homepage", message: "My budget is £400 per month", expected: /monthly budget of £400/i, advertised: null },
+  { name: "Finance vehicle page", product: "finance", pageType: "finance_vehicle", message: "I'd like to keep the payments around £350 a month", expected: /noted.*around £350/i, advertised: "£313" },
+  { name: "Rent2Buy homepage", product: "rent2buy", pageType: "homepage", message: "I want to keep payments under £300", expected: /under £300/i, advertised: null },
+  { name: "Rent2Buy vehicle page", product: "rent2buy", pageType: "rent2buy_general", message: "I'd like to spend around £350 a month", expected: /noted.*around £350/i, advertised: "£499" },
+];
+
+for (const scenario of budgetStatementContexts) {
+  test(`${scenario.name} acknowledges a supplied budget without routing to advertised pricing`, async () => {
+    const vehicle = scenario.pageType === "homepage" ? {} : {
+      registration: "AB12CDE",
+      title: "VW Caddy",
+      pricing: scenario.product === "finance" ? { finance_monthly: scenario.advertised } : { rent2buy_monthly: scenario.advertised },
+    };
+    const state = { session: {
+      id: `budget-${scenario.product}-${scenario.pageType}`,
+      page_type: scenario.pageType,
+      product_lock: scenario.product,
+      vehicle_context: vehicle,
+      conversation_history: [],
+      remembered_facts: { product_context: scenario.product, ...(vehicle.title ? { vehicle_interest: vehicle.title } : {}) },
+      journey_state: {},
+      message_count: 0,
+      status: "active",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    } };
+    const supabase = {
+      async rpc() { return { data: true, error: null }; },
+      from(table) {
+        if (table === "ai_assistant_events") return { insert() { return { async select() { return { data: [], error: null }; } }; } };
+        assert.equal(table, "ai_customer_sessions");
+        return {
+          select() { const chain = { eq() { return chain; }, async maybeSingle() { return { data: structuredClone(state.session), error: null }; } }; return chain; },
+          update(payload) { state.session = { ...state.session, ...structuredClone(payload) }; const chain = { eq() { return chain; }, select() { return { async single() { return { data: structuredClone(state.session), error: null }; } }; } }; return chain; },
+        };
+      },
+    };
+    const knowledge = { settings: {}, sections: [], articles: [] };
+    const simulateConversation = (client, input) => simulateCustomerConversation(client, input, { generationMode: "deterministic", persist: false, knowledge });
+    const response = { headers: {}, setHeader(name, value) { this.headers[name] = value; }, status(code) { this.statusCode = code; return this; }, json(payload) { this.payload = payload; return this; }, end() { return this; } };
+    await handleCustomerAssistantRequest({
+      method: "POST",
+      headers: { origin: "https://www.vanfinancecompany.co.uk", "x-forwarded-for": "192.0.2.45" },
+      body: { action: "message", conversation_id: "opaque", page_context: { pageType: scenario.pageType, ...(vehicle.registration ? { vehicle } : {}) }, message: scenario.message },
+    }, response, { environment: { AI_ASSISTANT_SESSION_SECRET: "phase-2-test-secret", AI_ASSISTANT_ALLOWED_ORIGINS: "https://www.vanfinancecompany.co.uk" }, supabase, simulateConversation });
+
+    assert.equal(response.statusCode, 200);
+    assert.match(response.payload.reply, scenario.expected);
+    if (scenario.advertised) assert.doesNotMatch(response.payload.reply, new RegExp(scenario.advertised.replace("£", "£\\s*")));
+    assert.equal(state.session.remembered_facts.budget_monthly_gbp, Number(scenario.message.match(/£(\d+)/)[1]));
+  });
+}
 
 test("direct budget and circumstances recall use only trusted state and current vehicle context", () => {
   const facts = {
