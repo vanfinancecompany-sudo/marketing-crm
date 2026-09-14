@@ -7,6 +7,11 @@ on:
       - 'api/dealerkit-wix*.js'
       - 'utils/dealerKitWix*.js'
       - 'tests/dealerkit-wix*.test.js'
+      - 'scripts/apply-dealerkit-reservation-final-safety.mjs'
+      - 'tests/dealerkit-reservation-final-safety-post-transform.test.js'
+      - 'pages/VanscoStockWatchPage.jsx'
+      - 'public/shared/sidebar-navigation.js'
+      - 'App.jsx'
       - '.github/workflows/dealerkit-wix-safety.yml'
 
 permissions:
