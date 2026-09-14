@@ -48,8 +48,14 @@ if (!source.includes("DEALERKIT_MISSING_WIX_CONTROLS")) {
 
   replaceOnce(
     `{isLocalNotVansco && record.localStockUrl ? <a className="button button--ghost" href={record.localStockUrl} target="_blank" rel="noreferrer">Open my stock page</a> : null}`,
-    `{isLocalNotVansco && record.localStockUrl ? <a className="button button--ghost" href={record.localStockUrl} target="_blank" rel="noreferrer">Open my stock page</a> : null}\n          {isLocalNotVansco ? <button className="button button--ghost" type="button" onClick={() => saveWorkflow("ignored", "Hidden from Stock Watch. Wix was not changed.")} disabled={Boolean(savingAction)}>{savingAction === "ignored" ? "Hiding..." : "Hide from Stock Watch"}</button> : null}`,
+    `{isLocalNotVansco && record.localStockUrl ? <a className="button button--ghost" href={record.localStockUrl} target="_blank" rel="noreferrer">Open my stock page</a> : null}\n          {isLocalNotVansco && (selectedPipeline !== "finance" || !wixPreview || (Array.isArray(wixPreview.matches) && wixPreview.matches.length > 0)) ? <button className="button button--ghost" type="button" onClick={() => saveWorkflow("ignored", "Hidden from Stock Watch. Wix was not changed.")} disabled={Boolean(savingAction)}>{savingAction === "ignored" ? "Hiding..." : "Hide from Stock Watch"}</button> : null}`,
     "reverse-check Hide action",
+  );
+
+  replaceOnce(
+    `<div className="vehicle-card__meta">No live matches remain in the approved Finance stock collections.</div>`,
+    `<><div className="vehicle-card__meta">No live matches remain in the approved Finance stock collections.</div>{showFinanceMissingWix ? <button className="button button--ghost" type="button" onClick={() => saveWorkflow("ignored", "Hidden from Stock Watch. Wix was not changed.")} disabled={Boolean(savingAction)}>{savingAction === "ignored" ? "Hiding..." : "Hide from Stock Watch"}</button> : null}</>`,
+    "Finance no-live-match Hide state",
   );
 
   replaceOnce(
