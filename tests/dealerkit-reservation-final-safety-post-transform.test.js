@@ -31,6 +31,34 @@ test("post-transform Stock Watch UI passes the current record stock ID", () => {
   assert.equal((source.match(/Boolean\(normalizeWatchRegistration\(record\.registration\) && record\.supplierStockId\)/g) || []).length, 3);
 });
 
+test("reserved DealerKit truth wins over live-feed absence for every Stock Watch lane", () => {
+  const source = fs.readFileSync(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
+  assert.match(source, /DEALERKIT_RESERVED_BUCKET_ROUTING/);
+  const reservedIndex = source.indexOf('if (reservedOnVansco) return { ...baseRecord, displayStatus: "reserved"');
+  const notCurrentIndex = source.indexOf('if (!currentlyOnVansco) return { ...baseRecord, displayStatus: "hidden_not_current"');
+  assert.ok(reservedIndex >= 0, "reserved classification should exist");
+  assert.ok(notCurrentIndex >= 0, "not-current classification should exist");
+  assert.ok(reservedIndex < notCurrentIndex, "reserved classification must run before live-feed absence");
+  assert.match(source, /const reservedDealerKitRegistrationSet = useMemo/);
+  assert.match(source, /!reservedDealerKitRegistrationSet\.has\(registration\)/);
+  assert.match(source, /\[activeLocalVehicles, currentVanscoRegistrationSet, reservedDealerKitRegistrationSet, selectedPipeline\]/);
+  assert.match(source, /Reserved on DealerKit/);
+});
+
+test("Stock Watch visible naming is DealerKit while the legacy route key stays stable", () => {
+  const appSource = fs.readFileSync(new URL("../App.jsx", import.meta.url), "utf8");
+  const navigationSource = fs.readFileSync(new URL("../public/shared/sidebar-navigation.js", import.meta.url), "utf8");
+  const watchSource = fs.readFileSync(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
+
+  assert.match(appSource, /DEALERKIT_STOCK_WATCH_DISPLAY_NAME/);
+  assert.match(appSource, /DealerKit Stock Watch/);
+  assert.match(navigationSource, /label: "DealerKit Stock Watch"/);
+  assert.match(navigationSource, /view: "Vansco Stock Watch"/);
+  assert.doesNotMatch(watchSource, /current Vansco cache for this tab/);
+  assert.doesNotMatch(watchSource, /Saved Vansco cache records/);
+  assert.doesNotMatch(watchSource, /Loading Vansco comparison/);
+});
+
 test("Finance, Cars and Rent2Buy all stop when a required Wix collection read failed", async () => {
   const modules = await Promise.all([
     import("../api/finance-reserved-wix-stock.js"),
