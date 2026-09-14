@@ -16,7 +16,7 @@ function replaceOnce(before, after, label) {
 if (!source.includes("DEALERKIT_MISSING_WIX_CONTROLS")) {
   replaceOnce(
     `import {\n  previewReservedFinanceWixStock,\n  unpublishReservedFinanceWixStock,\n} from "../services/financeReservedWixStock.js";`,
-    `import {\n  previewReservedFinanceWixStock,\n  previewMissingFinanceWixStock,\n  unpublishReservedFinanceWixStock,\n  unpublishMissingFinanceWixStock,\n} from "../services/financeReservedWixStock.js";`,
+    `import {\n  previewReservedFinanceWixStock,\n  unpublishReservedFinanceWixStock,\n} from "../services/financeReservedWixStock.js";\nimport {\n  previewMissingFinanceWixStock,\n  unpublishMissingFinanceWixStock,\n} from "../services/financeReservedWixStock.js";`,
     "Finance Wix service import",
   );
 
