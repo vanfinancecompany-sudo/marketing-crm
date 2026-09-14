@@ -53,7 +53,7 @@ const endpointConfigs = [
     name: "Rent2Buy",
     functionName: "unpublishReservedRent2BuyWixStock",
     previewFunction: "previewRent2BuyWixStock",
-    mutationFunction: "unpublishMatch",
+    mutationFunction: "setDraftMatch",
     noMatchesMessage: "This registration is not live in any approved Rent2Buy listing/category collection in the authoritative VAN FINANCE Wix CMS.",
     successMessage: (count) => `Moved ${count} matching Rent2Buy listing/category record(s) to Draft in the authoritative VAN FINANCE Wix CMS. VAN PAGES remained live and protected.`,
     failureMessage: (count) => `${count} Rent2Buy collection action(s) failed in the authoritative CMS. Successful listing records remain in Draft; VAN PAGES remained protected.`,
