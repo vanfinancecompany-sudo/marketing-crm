@@ -122,17 +122,22 @@ function timestamp(value) {
 
 function latestClearFinanceChecks(rows = []) {
   const byRegistration = new Map();
+  const seenRegistrations = new Set();
   for (const row of rows) {
     const registration = normalizeRegistration(row?.registration || "");
-    if (!registration || byRegistration.has(registration)) continue;
+    if (!registration || seenRegistrations.has(registration)) continue;
     if (clean(row?.action, 30).toLowerCase() !== "preview") continue;
     if (clean(row?.status, 30).toLowerCase() !== "completed") continue;
     if (Number(row?.failure_count || 0) > 0) continue;
     if (row?.http_status != null && Number(row.http_status) !== 200) continue;
-    if (Number(row?.result?.liveCollectionCount) !== 0) continue;
+
     const completedAt = timestamp(row?.completed_at);
     if (!completedAt) continue;
-    byRegistration.set(registration, completedAt);
+    seenRegistrations.add(registration);
+
+    if (Number(row?.result?.liveCollectionCount) === 0) {
+      byRegistration.set(registration, completedAt);
+    }
   }
   return byRegistration;
 }
