@@ -104,3 +104,4 @@ if (updated.includes("async function fetchPublicCmsItems(")) {
 }
 
 console.log("Applied photo-ready live Wix image counts for Finance, Rent2Buy and Cars.");
+await import("./apply-dealerkit-missing-wix-hide-suppression.mjs");

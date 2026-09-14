@@ -2,10 +2,6 @@
   "ignoreCommand": "test \"$VERCEL_PROJECT_ID\" = \"prj_zD76dAe2MHZdBTO08GNFSqOb9UHf\"",
   "crons": [
     {
-      "path": "/api/vansco-cache-live-refresh?auto=true&batchSize=15&maxMs=45000",
-      "schedule": "*/5 * * * *"
-    },
-    {
       "path": "/api/stock-watch-monitor-agent",
       "schedule": "*/15 * * * *"
     },
@@ -190,6 +186,8 @@
       "has": [{ "type": "host", "value": "marketing-crm-github-work-95nxmsvdy-stuart-westons-projects.vercel.app" }],
       "destination": "/duplicate-project-retired.json"
     },
+    { "source": "/api/vansco-cache-list", "destination": "/api/dealerkit-stock-watch-legacy-list-compat" },
+    { "source": "/api/vansco-cache-live-refresh", "destination": "/api/dealerkit-stock-watch-legacy-refresh-compat" },
     { "source": "/api/marketing-template-campaign-sends", "destination": "/api/marketing-template-campaign-sends-resilient" },
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }

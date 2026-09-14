@@ -83,6 +83,16 @@ import {
       setRentWixDraftResult(result);
       const refreshed = await previewReservedRent2BuyWixStock(record.registration);
       setRentWixPreview(refreshed);
+      if (result.ok && (refreshed.matches || []).length === 0) {
+        const completed = await saveVanscoWatchAction({
+          pipeline: selectedPipeline,
+          record,
+          workflowStatus: "ignored",
+          notes: notesDraft,
+        });
+        onRecordSaved(record, completed);
+        window.location.reload();
+      }
     } catch (error) {
       setRentWixActionError(error?.message || "Could not move Rent2Buy listing records to Draft.");
     } finally {
@@ -172,4 +182,4 @@ import {
 }
 
 fs.writeFileSync(targetPath, source);
-console.log("Applied dual-site Rent2Buy reserved Wix Stock Watch controls with VAN PAGES hard protection and mismatch warning.");
+console.log("Applied dual-site Rent2Buy reserved Wix Stock Watch controls with VAN PAGES hard protection and completion persistence.");
