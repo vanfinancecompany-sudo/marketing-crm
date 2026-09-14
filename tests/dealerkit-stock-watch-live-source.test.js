@@ -42,3 +42,23 @@ test("DealerKit Stock Watch payload carries snapshot completeness to the UI", ()
   assert.match(source, /complete: Boolean\(snapshot\.complete\)/);
   assert.match(source, /failedDetailChecks: Math\.max\(0, Number\(snapshot\.apiReportedTotal/);
 });
+
+test("resolved DealerKit reserved vehicles stay out after Wix is confirmed clear", () => {
+  const source = read("api/dealerkit-stock-watch-list.js");
+
+  assert.match(source, /ACTION_LOG_TABLE = "stock_watch_action_logs"/);
+  assert.match(source, /MONITOR_RUN_TABLE = "stock_watch_monitor_runs"/);
+  assert.match(source, /Number\(row\?\.result\?\.liveCollectionCount\) !== 0/);
+  assert.match(source, /financeLiveRegistrations\.has\(registration\)/);
+  assert.match(source, /clearCheckedAt >= stateStartedAt/);
+  assert.match(source, /resolvedReservedRegistrations\.add\(registration\)/);
+  assert.match(source, /resolvedReservedCount: resolvedReservedRegistrations\.size/);
+});
+
+test("resolved reserved suppression fails open when current Wix or DealerKit state cannot be proven", () => {
+  const source = read("api/dealerkit-stock-watch-list.js");
+
+  assert.match(source, /if \(!\(financeLiveRegistrations instanceof Set\) \|\| financeLiveRegistrations\.has\(registration\)\) return false/);
+  assert.match(source, /if \(!stateStartedAt \|\| !Number\.isFinite\(clearCheckedAt\)\) return false/);
+  assert.match(source, /sourceUpdatedAt \|\| vehicle\?\.checkedAt \|\| vehicle\?\.sourceCreatedAt/);
+});
