@@ -48,7 +48,9 @@ test("resolved DealerKit reserved vehicles stay out after Wix is confirmed clear
 
   assert.match(source, /ACTION_LOG_TABLE = "stock_watch_action_logs"/);
   assert.match(source, /MONITOR_RUN_TABLE = "stock_watch_monitor_runs"/);
-  assert.match(source, /Number\(row\?\.result\?\.liveCollectionCount\) !== 0/);
+  assert.match(source, /seenRegistrations = new Set\(\)/);
+  assert.match(source, /seenRegistrations\.add\(registration\)/);
+  assert.match(source, /Number\(row\?\.result\?\.liveCollectionCount\) === 0/);
   assert.match(source, /financeLiveRegistrations\.has\(registration\)/);
   assert.match(source, /clearCheckedAt >= stateStartedAt/);
   assert.match(source, /resolvedReservedRegistrations\.add\(registration\)/);
