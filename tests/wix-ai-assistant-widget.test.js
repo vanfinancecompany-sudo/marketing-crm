@@ -125,7 +125,10 @@ test("loading and retry state retain one safe retry request", () => {
   assert.deepEqual(failed.retryRequest, request);
 });
 
-test("widget rejects every server application CTA because APPLY NOW belongs to the page", () => {
+test("widget permits only product-matched stock CTAs and still rejects application or unsafe actions", () => {
+  assert.deepEqual(safeWidgetCta({ label: "View Medium Vans", action: "navigate", behavior: "same_window", url: "https://www.vanfinancecompany.co.uk/vans-on-finance?type=Medium" }, financeVehicle), { label: "View Medium Vans", action: "navigate", behavior: "same_window", url: "https://www.vanfinancecompany.co.uk/vans-on-finance?type=Medium" });
+  assert.deepEqual(safeWidgetCta({ label: "View LWB Vans", action: "navigate", behavior: "same_window", url: "https://www.rent2buyvans.co.uk/view-lwb-vans" }, { pageType: "rent2buy_general", productContext: "rent2buy" }), { label: "View LWB Vans", action: "navigate", behavior: "same_window", url: "https://www.rent2buyvans.co.uk/view-lwb-vans" });
+  assert.equal(safeWidgetCta({ label: "View LWB Vans", action: "navigate", behavior: "same_window", url: "https://www.rent2buyvans.co.uk/view-lwb-vans" }, financeVehicle), null);
   assert.equal(safeWidgetCta({ label: "Apply", action: "navigate", behavior: "same_window", url: "https://www.vanfinancecompany.co.uk/application" }, financeVehicle), null);
   assert.equal(safeWidgetCta({ label: "Apply", action: "open_current_page_finance_application", behavior: "same_page", url: null }, financeVehicle), null);
   assert.equal(safeWidgetCta({ label: "Unsafe", action: "run_javascript", behavior: "same_window", url: "javascript:alert(1)" }, financeVehicle), null);
