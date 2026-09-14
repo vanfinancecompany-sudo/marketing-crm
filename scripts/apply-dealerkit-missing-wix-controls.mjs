@@ -16,13 +16,13 @@ function replaceOnce(before, after, label) {
 if (!source.includes("DEALERKIT_MISSING_WIX_CONTROLS")) {
   replaceOnce(
     `import {\n  previewReservedFinanceWixStock,\n  unpublishReservedFinanceWixStock,\n} from "../services/financeReservedWixStock.js";`,
-    `import {\n  previewReservedFinanceWixStock,\n  unpublishReservedFinanceWixStock,\n  unpublishMissingFinanceWixStock,\n} from "../services/financeReservedWixStock.js";`,
+    `import {\n  previewReservedFinanceWixStock,\n  previewMissingFinanceWixStock,\n  unpublishReservedFinanceWixStock,\n  unpublishMissingFinanceWixStock,\n} from "../services/financeReservedWixStock.js";`,
     "Finance Wix service import",
   );
 
   replaceOnce(
     `  const status = workflowStatusOf(record);`,
-    `  async function moveMissingFinanceWixMatchesToDraft() {\n    setWixDrafting(true);\n    setWixActionError("");\n    try {\n      const result = await unpublishMissingFinanceWixStock(record.registration);\n      setWixDraftResult(result);\n      const refreshed = await previewReservedFinanceWixStock(record.registration);\n      setWixPreview(refreshed);\n    } catch (error) {\n      setWixActionError(error?.message || "Could not safely remove DealerKit-missing Finance Wix stock.");\n    } finally {\n      setWixDrafting(false);\n    }\n  }\n\n  // DEALERKIT_MISSING_WIX_CONTROLS: DealerKit absence gets a read-first Wix check, not an automatic deletion.\n  const status = workflowStatusOf(record);`,
+    `  async function moveMissingFinanceWixMatchesToDraft() {\n    setWixDrafting(true);\n    setWixActionError("");\n    try {\n      const result = await unpublishMissingFinanceWixStock(record.registration);\n      setWixDraftResult(result);\n      const refreshed = await previewMissingFinanceWixStock(record.registration);\n      setWixPreview(refreshed);\n    } catch (error) {\n      setWixActionError(error?.message || "Could not safely remove DealerKit-missing Finance Wix stock.");\n    } finally {\n      setWixDrafting(false);\n    }\n  }\n\n  // DEALERKIT_MISSING_WIX_CONTROLS: DealerKit absence gets a read-first Wix check, not an automatic deletion.\n  const status = workflowStatusOf(record);`,
     "WatchCard workflow status anchor",
   );
 
@@ -53,9 +53,15 @@ if (!source.includes("DEALERKIT_MISSING_WIX_CONTROLS")) {
   );
 
   replaceOnce(
-    `  const reservedDealerKitRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => isReservedLikeStatus(record.sourceStatus)).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);\n  const localNotVanscoRecords = useMemo(() => dedupeLocalVehiclesByRegistration(activeLocalVehicles).filter(({ registration }) => registration && !currentVanscoRegistrationSet.has(registration) && !reservedDealerKitRegistrationSet.has(registration)).map(({ vehicle, index }) => mapLocalVehicleToWatchRecord(vehicle, index, selectedPipeline)), [activeLocalVehicles, currentVanscoRegistrationSet, reservedDealerKitRegistrationSet, selectedPipeline]);`,
-    `  const reservedDealerKitRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => isReservedLikeStatus(record.sourceStatus)).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);\n  const hiddenReverseRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => isTemporaryHiddenStatus(workflowStatusOf(record))).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);\n  const localNotVanscoRecords = useMemo(() => dedupeLocalVehiclesByRegistration(activeLocalVehicles).filter(({ registration }) => registration && !currentVanscoRegistrationSet.has(registration) && !reservedDealerKitRegistrationSet.has(registration) && !hiddenReverseRegistrationSet.has(registration)).map(({ vehicle, index }) => mapLocalVehicleToWatchRecord(vehicle, index, selectedPipeline)), [activeLocalVehicles, currentVanscoRegistrationSet, reservedDealerKitRegistrationSet, hiddenReverseRegistrationSet, selectedPipeline]);`,
-    "hidden reverse-registration exclusion",
+    `  const displayRecords = useMemo(() => [...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, localNotVanscoRecords, priceDifferenceRecords]);`,
+    `  const hiddenReverseRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => isTemporaryHiddenStatus(workflowStatusOf(record))).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);\n  const visibleLocalNotVanscoRecords = useMemo(() => localNotVanscoRecords.filter((record) => !hiddenReverseRegistrationSet.has(normalizeWatchRegistration(record.registration))), [hiddenReverseRegistrationSet, localNotVanscoRecords]);\n  const displayRecords = useMemo(() => [...activeRecords, ...visibleLocalNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, visibleLocalNotVanscoRecords, priceDifferenceRecords]);`,
+    "reverse-check hidden filtering",
+  );
+
+  replaceOnce(
+    `    localNotVansco: localNotVanscoRecords.length,`,
+    `    localNotVansco: visibleLocalNotVanscoRecords.length,`,
+    "reverse-check summary count",
   );
 
   replaceOnce(
