@@ -2,10 +2,15 @@ import { fetchDealerKitStockSnapshot } from "./_dealerkit-stock-adapter.js";
 import { normalizeRegistration } from "./_vansco-cache-utils.js";
 import {
   FINANCE_WIX_STOCK_COLLECTIONS,
+  assertFinanceWixStockCollection,
   previewFinanceWixStock,
-  setDraftMatch,
 } from "./finance-reserved-wix-stock.js";
 import { isMarketingStockWatchActionAuthorized } from "./vansco-watch-action.js";
+
+const WIX_TASKS_URL = "https://www.wixapis.com/cms/v1/tasks";
+const DEFAULT_WIX_SITE_ID = "85f11c52-ee54-495d-aaec-a351831709b5";
+const TASK_POLL_DELAY_MS = 350;
+const TASK_MAX_POLLS = 24;
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -13,6 +18,102 @@ function clean(value) {
 
 function safetyStop(message) {
   return new Error(`Safety stop: ${message} Nothing was changed in Wix.`);
+}
+
+function wixHeaders() {
+  const headers = {
+    "Content-Type": "application/json",
+    "wix-site-id": clean(process.env.WIX_FINANCE_SITE_ID) || DEFAULT_WIX_SITE_ID,
+  };
+  const apiKey = clean(process.env.WIX_FINANCE_API_KEY || process.env.WIX_API_KEY);
+  if (apiKey) headers.Authorization = apiKey;
+  return headers;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getWixTask(taskId) {
+  const response = await fetch(`${WIX_TASKS_URL}/${encodeURIComponent(taskId)}`, {
+    method: "GET",
+    headers: wixHeaders(),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const detail = clean(await response.text()).slice(0, 500);
+    throw new Error(`Could not read Wix draft task ${taskId} (${response.status})${detail ? `: ${detail}` : ""}`);
+  }
+  const payload = await response.json();
+  return payload?.task || {};
+}
+
+async function waitForWixTask(taskId, label) {
+  for (let poll = 0; poll < TASK_MAX_POLLS; poll += 1) {
+    const task = await getWixTask(taskId);
+    const status = clean(task?.status).toUpperCase();
+    if (status === "COMPLETED") {
+      const failed = Number(task?.itemsFailed || 0);
+      const succeeded = Number(task?.itemsSucceeded || 0);
+      if (failed > 0 || succeeded < 1) {
+        const failures = Array.isArray(task?.failures)
+          ? task.failures.map((failure) => clean(failure?.description || failure?.code)).filter(Boolean).join("; ")
+          : "";
+        throw new Error(`${label} draft task completed without changing the expected item${failures ? `: ${failures}` : ""}.`);
+      }
+      return task;
+    }
+    if (status === "FAILED") {
+      const failures = Array.isArray(task?.failures)
+        ? task.failures.map((failure) => clean(failure?.description || failure?.code)).filter(Boolean).join("; ")
+        : "";
+      throw new Error(`${label} draft task failed${failures ? `: ${failures}` : ""}.`);
+    }
+    await sleep(TASK_POLL_DELAY_MS);
+  }
+  throw new Error(`${label} draft task did not finish in time. Recheck the collection before retrying.`);
+}
+
+async function moveFinanceMatchToDraft(match) {
+  const collectionId = assertFinanceWixStockCollection(match.collectionId);
+  const itemId = clean(match.itemId);
+  const label = match.collectionLabel || collectionId;
+  if (!itemId) throw new Error(`Missing Wix item ID for ${label}.`);
+
+  const response = await fetch(WIX_TASKS_URL, {
+    method: "POST",
+    headers: wixHeaders(),
+    body: JSON.stringify({
+      task: {
+        type: "UPDATE_PUBLISH_STATUS",
+        updatePublishStatusOptions: {
+          dataCollectionId: collectionId,
+          environment: "LIVE",
+          filter: { _id: { $eq: itemId } },
+          operation: "SET_DRAFT_STATUS",
+        },
+      },
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const detail = clean(await response.text()).slice(0, 700);
+    throw new Error(`${label} could not start its Draft task (${response.status})${detail ? `: ${detail}` : ""}`);
+  }
+
+  const payload = await response.json();
+  const taskId = clean(payload?.task?.id);
+  if (!taskId) throw new Error(`${label} did not return a Wix Draft task ID.`);
+  const task = await waitForWixTask(taskId, label);
+  return {
+    collectionId,
+    collectionLabel: label,
+    itemId,
+    taskId,
+    taskStatus: clean(task?.status) || "COMPLETED",
+    itemsSucceeded: Number(task?.itemsSucceeded || 0),
+  };
 }
 
 export async function verifyDealerKitMissingRegistration(
@@ -74,7 +175,7 @@ export async function unpublishMissingFinanceWixStock(
   {
     loadSnapshot = fetchDealerKitStockSnapshot,
     loadPreview = previewFinanceWixStock,
-    mutateMatch = setDraftMatch,
+    mutateMatch = moveFinanceMatchToDraft,
   } = {},
 ) {
   const registration = normalizeRegistration(registrationValue);
