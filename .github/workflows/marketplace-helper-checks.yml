@@ -1,0 +1,36 @@
+name: Marketplace Helper Checks
+
+on:
+  pull_request:
+    paths:
+      - "pages/PostingDeskPage.jsx"
+      - "services/marketplaceAutomation.js"
+      - "browser-extension/marketplace-helper/**"
+      - "tests/marketplace-helper.test.js"
+      - ".github/workflows/marketplace-helper-checks.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  marketplace-helper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Marketplace helper tests
+        run: node --test tests/marketplace-helper.test.js
+
+      - name: Run production build
+        run: npm run build

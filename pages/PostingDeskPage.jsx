@@ -4,9 +4,15 @@ import {
   getRecentPostingHistory,
   recordDailyMarketingActivity,
 } from "../services/marketingDailyOperations.js";
+import {
+  MARKETPLACE_CREATE_URL,
+  MARKETPLACE_PUBLISHED_MESSAGE_TYPE,
+  buildRent2BuyMarketplaceJob,
+  sendMarketplaceJobToExtension,
+} from "../services/marketplaceAutomation.js";
 import { formatDateShort } from "../utils/creativeUtils.js";
 
-const POSTING_HISTORY_DAYS = 180;
+const POSTING_HISTORY_DAYS = 365;
 const FACEBOOK_URLS = {
   "Van Finance Facebook": "https://www.facebook.com/VanFinance",
   "Rent2Buy Facebook": "https://www.facebook.com/profile.php?id=100076904157939",
@@ -37,7 +43,7 @@ function getSyncButtonLabel(destination) {
 }
 
 function getPostButtonLabel(destination) {
-  return destination === "Facebook Marketplace" ? "Open Marketplace" : "Prepare + Open Facebook";
+  return destination === "Facebook Marketplace" ? "Advertise on Marketplace" : "Prepare + Open Facebook";
 }
 
 function getPostingPipelineLabel(destination, vehicle) {
@@ -54,9 +60,17 @@ function isFacebookPageDestination(destination) {
   return destination === "Van Finance Facebook" || destination === "Rent2Buy Facebook";
 }
 
+function isMarketplaceDestination(destination) {
+  return destination === "Facebook Marketplace";
+}
+
+function isPostingHistoryDestination(destination) {
+  return isFacebookPageDestination(destination) || isMarketplaceDestination(destination);
+}
+
 function getActivityType(destination) {
   if (destination === "Van Finance Facebook") return "van_finance_facebook_post";
-  if (destination === "Rent2Buy Facebook") return "rent2buy_facebook_post";
+  if (destination === "Rent2Buy Facebook" || destination === "Facebook Marketplace") return "rent2buy_facebook_post";
   return "";
 }
 
@@ -105,10 +119,12 @@ function normalizeRegistration(value) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
+function vehicleRegistration(vehicle) {
+  return normalizeRegistration(vehicle?.registration || vehicle?.reg || vehicle?.title || vehicle?.name);
+}
+
 function vehiclePostingKey(vehicle) {
-  const registration = normalizeRegistration(
-    vehicle?.registration || vehicle?.reg || vehicle?.title || vehicle?.name,
-  );
+  const registration = vehicleRegistration(vehicle);
   if (registration) return `reg:${registration}`;
   const id = String(vehicle?.id || vehicle?.vehicle_id || "").trim();
   return id ? `id:${id}` : "";
@@ -211,6 +227,7 @@ function PostingVehicleCard({
   onPreview,
   onPostVehicle,
   onPrepareFacebook,
+  onPrepareMarketplace,
   onConfirmPosted,
   onSkip,
   postingDestination,
@@ -222,6 +239,7 @@ function PostingVehicleCard({
 }) {
   const [primaryPrice, secondaryPrice] = getPostingPriceFields(vehicle, postingDestination);
   const facebookPage = isFacebookPageDestination(postingDestination);
+  const marketplace = isMarketplaceDestination(postingDestination);
 
   return (
     <article className={`posting-card posting-card--${accent}`}>
@@ -265,6 +283,25 @@ function PostingVehicleCard({
                   disabled={confirming}
                 >
                   {confirming ? "Confirming..." : "Confirm Posted"}
+                </button>
+              ) : null}
+            </>
+          ) : marketplace ? (
+            <>
+              <button
+                className="button button--primary"
+                onClick={() => onPrepareMarketplace(vehicle, caption)}
+                disabled={confirming}
+              >
+                {prepared ? "Open Marketplace Again" : getPostButtonLabel(postingDestination)}
+              </button>
+              {prepared ? (
+                <button
+                  className="button button--primary"
+                  onClick={() => onConfirmPosted(vehicle, postingDestination)}
+                  disabled={confirming}
+                >
+                  {confirming ? "Confirming..." : "Confirm Advertised"}
                 </button>
               ) : null}
             </>
@@ -379,6 +416,7 @@ function PostingLane({
   onPreview,
   onPostVehicle,
   onPrepareFacebook,
+  onPrepareMarketplace,
   onConfirmPosted,
   onSkip,
   postingDestination,
@@ -391,7 +429,11 @@ function PostingLane({
       <div className="panel__header">
         <div>
           <h3>{title}: {vehicles.length} vans available today</h3>
-          <p>Facebook pages are ranked by posting history. Confirmed posts leave today's list automatically.</p>
+          <p>
+            {isMarketplaceDestination(postingDestination)
+              ? "Advertised Marketplace vans leave this list after a confirmed publish."
+              : "Facebook pages are ranked by posting history. Confirmed posts leave today's list automatically."}
+          </p>
         </div>
       </div>
 
@@ -413,6 +455,7 @@ function PostingLane({
                 onPreview={onPreview}
                 onPostVehicle={onPostVehicle}
                 onPrepareFacebook={onPrepareFacebook}
+                onPrepareMarketplace={onPrepareMarketplace}
                 onConfirmPosted={onConfirmPosted}
                 onSkip={onSkip}
                 postingDestination={postingDestination}
@@ -452,7 +495,7 @@ export default function PostingDeskPage({
 
   useEffect(() => {
     let active = true;
-    if (!isFacebookPageDestination(destination)) {
+    if (!isPostingHistoryDestination(destination)) {
       setPostingHistory([]);
       setHistoryError("");
       return undefined;
@@ -492,6 +535,11 @@ export default function PostingDeskPage({
     return latest;
   }, [destinationHistory]);
 
+  const advertisedMarketplaceKeys = useMemo(
+    () => new Set(destinationHistory.map(historyPostingKey).filter(Boolean)),
+    [destinationHistory],
+  );
+
   const todayKey = londonDateKey();
   const todayPostedKeys = useMemo(() => {
     const keys = new Set(
@@ -509,6 +557,11 @@ export default function PostingDeskPage({
   }, [destinationHistory, destination, postedToday, todayKey]);
 
   const rankedVehicles = useMemo(() => {
+    if (isMarketplaceDestination(destination)) {
+      return [...vehicles]
+        .filter((vehicle) => !advertisedMarketplaceKeys.has(vehiclePostingKey(vehicle)))
+        .sort((first, second) => String(first.reg || first.name || "").localeCompare(String(second.reg || second.name || "")));
+    }
     if (!isFacebookPageDestination(destination)) return vehicles;
     return [...vehicles]
       .filter((vehicle) => !todayPostedKeys.has(vehiclePostingKey(vehicle)))
@@ -520,7 +573,7 @@ export default function PostingDeskPage({
         if (firstLast !== secondLast) return firstLast - secondLast;
         return String(first.reg || first.name || "").localeCompare(String(second.reg || second.name || ""));
       });
-  }, [destination, vehicles, todayPostedKeys, lastPostedByKey]);
+  }, [destination, vehicles, advertisedMarketplaceKeys, todayPostedKeys, lastPostedByKey]);
 
   const recommendations = useMemo(
     () => (isFacebookPageDestination(destination) ? rankedVehicles.slice(0, 5) : []),
@@ -541,7 +594,7 @@ export default function PostingDeskPage({
   }, [recommendations, lastPostedByKey]);
 
   const effectiveSummary = useMemo(() => {
-    if (!isFacebookPageDestination(destination)) {
+    if (!isPostingHistoryDestination(destination)) {
       return { ...summary, totalVisible: rankedVehicles.length };
     }
     const weekStart = dateKeyDaysAgo(6);
@@ -567,7 +620,7 @@ export default function PostingDeskPage({
   }, [destination, destinationHistory, postedToday, rankedVehicles.length, summary, todayKey]);
 
   const destinationPostedToday = useMemo(() => {
-    if (!isFacebookPageDestination(destination)) {
+    if (!isPostingHistoryDestination(destination)) {
       return (postedToday || []).filter((item) => item.destination === destination);
     }
 
@@ -603,14 +656,52 @@ export default function PostingDeskPage({
     }
   }
 
-  async function confirmFacebookPosted(vehicle, postingDestination) {
+  async function prepareMarketplaceVehicle(vehicle, caption) {
+    const key = vehiclePostingKey(vehicle);
+    if (!key) return;
+    setActionMessage("");
+
+    const marketplaceWindow = window.open("about:blank", "_blank");
+    if (marketplaceWindow) {
+      try {
+        marketplaceWindow.document.title = "Preparing Facebook Marketplace...";
+        marketplaceWindow.document.body.innerHTML = "<p style='font:16px Arial;padding:24px'>Preparing this Rent2Buy van for Facebook Marketplace…</p>";
+      } catch {}
+    }
+
+    try {
+      const job = await buildRent2BuyMarketplaceJob(vehicle, caption || vehicle.caption || "");
+      const acknowledgement = await sendMarketplaceJobToExtension(job);
+      if (!acknowledgement?.ok) {
+        throw new Error(acknowledgement?.error || "Marketplace helper extension rejected the job.");
+      }
+
+      setPreparedKeys((current) => new Set([...current, key]));
+      setActionMessage(
+        `${job.registration} prepared for ${job.location} with ${job.imageCount} ordered CMS image${job.imageCount === 1 ? "" : "s"}. Facebook will fill automatically. Publish it there, then the CRM will mark it advertised when Facebook confirms the live listing.`,
+      );
+
+      if (marketplaceWindow && !marketplaceWindow.closed) {
+        marketplaceWindow.location.replace(MARKETPLACE_CREATE_URL);
+      } else {
+        window.open(MARKETPLACE_CREATE_URL, "_blank", "noopener,noreferrer");
+      }
+    } catch (error) {
+      if (marketplaceWindow && !marketplaceWindow.closed) marketplaceWindow.close();
+      setActionMessage(error.message || "Could not prepare this Marketplace advert.");
+    }
+  }
+
+  async function confirmFacebookPosted(vehicle, postingDestination, receipt = null) {
     const activityType = getActivityType(postingDestination);
     const key = vehiclePostingKey(vehicle);
-    if (!activityType || !key || confirmingKey) return;
+    if (!activityType || !key || confirmingKey) return false;
 
-    const registration = normalizeRegistration(vehicle.registration || vehicle.reg || vehicle.title || vehicle.name);
-    const sourceId = `${todayKey}::${key}::${postingDestination}`;
-    const occurredAt = new Date().toISOString();
+    const registration = vehicleRegistration(vehicle);
+    const sourceId = receipt?.jobId
+      ? `marketplace:${receipt.jobId}`
+      : `${todayKey}::${key}::${postingDestination}`;
+    const occurredAt = receipt?.publishedAt || new Date().toISOString();
     const metadata = {
       vehicle_id: vehicle.id || null,
       registration,
@@ -618,6 +709,10 @@ export default function PostingDeskPage({
       vehicle_name: vehicle.name || vehicle.vanDescription || vehicle.description || registration,
       vehicle_description: vehicle.description || vehicle.vanDescription || vehicle.spec || "",
       image_url: postingAdvertImageUrl(vehicle, postingDestination),
+      ...(receipt?.location ? { marketplace_location: receipt.location } : {}),
+      ...(receipt?.listingUrl ? { marketplace_listing_url: receipt.listingUrl } : {}),
+      ...(receipt?.imageCount ? { marketplace_image_count: receipt.imageCount } : {}),
+      ...(receipt?.jobId ? { marketplace_job_id: receipt.jobId } : {}),
     };
 
     setConfirmingKey(key);
@@ -648,16 +743,47 @@ export default function PostingDeskPage({
         return next;
       });
       setActionMessage(
-        `${registration || vehicle.name || "Vehicle"} confirmed posted. It will stay out of today's list and return to the rotation later.`,
+        isMarketplaceDestination(postingDestination)
+          ? `${registration || vehicle.name || "Vehicle"} confirmed advertised on Marketplace${receipt?.location ? ` in ${receipt.location}` : ""}. It has been removed from the Marketplace to-do list.`
+          : `${registration || vehicle.name || "Vehicle"} confirmed posted. It will stay out of today's list and return to the rotation later.`,
       );
+      return true;
     } catch (error) {
       setActionMessage(
-        `${error.message || "Could not confirm the post."} The van has not been removed from today's list.`,
+        `${error.message || "Could not confirm the post."} The van has not been removed from the posting list.`,
       );
+      return false;
     } finally {
       setConfirmingKey("");
     }
   }
+
+  useEffect(() => {
+    if (!isMarketplaceDestination(destination)) return undefined;
+
+    async function handleMarketplaceReceipt(event) {
+      if (event.source !== window || event.origin !== window.location.origin) return;
+      const message = event.data || {};
+      if (message.source !== "vfc-marketplace-extension" || message.type !== MARKETPLACE_PUBLISHED_MESSAGE_TYPE) return;
+      const receipt = message.receipt || {};
+      const registration = normalizeRegistration(receipt.registration);
+      if (!registration) return;
+      const vehicle = vehicles.find((item) => vehicleRegistration(item) === registration);
+      if (!vehicle) return;
+
+      const confirmed = await confirmFacebookPosted(vehicle, "Facebook Marketplace", receipt);
+      if (confirmed && receipt.id) {
+        window.postMessage({
+          source: "vfc-marketing-crm",
+          type: "VFC_MARKETPLACE_RECEIPT_ACK",
+          receiptId: receipt.id,
+        }, window.location.origin);
+      }
+    }
+
+    window.addEventListener("message", handleMarketplaceReceipt);
+    return () => window.removeEventListener("message", handleMarketplaceReceipt);
+  }, [destination, vehicles, confirmingKey, todayKey]);
 
   if (vehiclesLoading) {
     return <div className="empty-state">Loading live stock...</div>;
@@ -674,9 +800,11 @@ export default function PostingDeskPage({
           <div>
             <h3>{title}</h3>
             <p>
-              {isFacebookPageDestination(destination)
-                ? "Prepare the advert, post it on Facebook, then confirm it here. Only confirmed posts count towards your daily total."
-                : `Dedicated stock posting page for ${destination}.`}
+              {isMarketplaceDestination(destination)
+                ? "Choose a Rent2Buy van. The Marketplace helper prepares the ordered CMS photos and fills Facebook automatically. You still review the advert and click Publish yourself."
+                : isFacebookPageDestination(destination)
+                  ? "Prepare the advert, post it on Facebook, then confirm it here. Only confirmed posts count towards your daily total."
+                  : `Dedicated stock posting page for ${destination}.`}
             </p>
           </div>
           <div className="posting-page-actions">
@@ -694,7 +822,11 @@ export default function PostingDeskPage({
 
         {historyError ? <div className="notice notice--error">{historyError}</div> : null}
         {actionMessage ? <div className="notice">{actionMessage}</div> : null}
-        {isFacebookPageDestination(destination) ? (
+        {isMarketplaceDestination(destination) ? (
+          <div className="notice">
+            Marketplace vans are marked advertised only after a confirmed live publish. The helper never clicks Publish for you. If Facebook confirmation is missed, use Confirm Advertised on the prepared van only after checking that the listing is live.
+          </div>
+        ) : isFacebookPageDestination(destination) ? (
           <div className="notice">
             Confirmed posts are no longer permanently hidden. The separate Hide button is only for vans you deliberately want removed from this posting lane.
           </div>
@@ -703,7 +835,7 @@ export default function PostingDeskPage({
         <section className="posted-ready-section">
           <div className="panel__header">
             <div>
-              <h3>Posted Today</h3>
+              <h3>{isMarketplaceDestination(destination) ? "Advertised Today" : "Posted Today"}</h3>
               <p>Only posts you have explicitly confirmed are counted here.</p>
             </div>
             <span className="status-pill">{destinationPostedToday.length} posted today</span>
@@ -742,6 +874,7 @@ export default function PostingDeskPage({
         }
         onPostVehicle={onPostVehicle}
         onPrepareFacebook={prepareFacebookVehicle}
+        onPrepareMarketplace={prepareMarketplaceVehicle}
         onConfirmPosted={confirmFacebookPosted}
         onSkip={onSkip}
         recommendationByKey={recommendationByKey}
@@ -780,6 +913,8 @@ export default function PostingDeskPage({
                     onClick={() => {
                       if (isFacebookPageDestination(previewItem.destination)) {
                         prepareFacebookVehicle(previewItem.vehicle, previewItem.destination, previewItem.caption);
+                      } else if (isMarketplaceDestination(previewItem.destination)) {
+                        prepareMarketplaceVehicle(previewItem.vehicle, previewItem.caption);
                       } else {
                         onPostVehicle(previewItem.vehicle, previewItem.destination, previewItem.caption);
                       }
