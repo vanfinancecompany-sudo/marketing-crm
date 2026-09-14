@@ -45,6 +45,16 @@ test("reserved DealerKit truth wins over live-feed absence for every Stock Watch
   assert.match(source, /Reserved on DealerKit/);
 });
 
+test("DealerKit-missing Finance cards use Wix verification, safe removal, then Hide", () => {
+  const source = fs.readFileSync(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
+  assert.match(source, /DEALERKIT_MISSING_WIX_CONTROLS/);
+  assert.match(source, /showFinanceMissingWix/);
+  assert.match(source, /unpublishMissingFinanceWixStock\(record\.registration\)/);
+  assert.match(source, /previewMissingFinanceWixStock\(record\.registration\)/);
+  assert.match(source, /visibleLocalNotVanscoRecords/);
+  assert.match(source, /showFinanceMissingWix \? <button[^>]+onClick=\{\(\) => saveWorkflow\("ignored", "Hidden"\)\}/);
+});
+
 test("Stock Watch visible naming is DealerKit while the legacy route key stays stable", () => {
   const appSource = fs.readFileSync(new URL("../App.jsx", import.meta.url), "utf8");
   const navigationSource = fs.readFileSync(new URL("../public/shared/sidebar-navigation.js", import.meta.url), "utf8");
@@ -87,4 +97,69 @@ test("Finance, Cars and Rent2Buy all stop when a required Wix collection read fa
     );
     assert.equal(mutationCalls, 0);
   }
+});
+
+test("DealerKit-missing Finance removal requires a complete absent snapshot and rechecks before every Wix write", async () => {
+  const { FINANCE_WIX_STOCK_COLLECTIONS } = await import("../api/finance-reserved-wix-stock.js");
+  const { unpublishMissingFinanceWixStock } = await import("../api/finance-missing-dealerkit-wix-stock.js");
+  const collections = FINANCE_WIX_STOCK_COLLECTIONS.map((collection) => ({ ...collection, live: false, error: "", matches: [] }));
+  const matches = [
+    { collectionId: "VANFINANCE-ALLVANS", collectionLabel: "ALL VANS", itemId: "one" },
+    { collectionId: "VANFINANCE-MWB", collectionLabel: "MWB", itemId: "two" },
+  ];
+  let snapshotCalls = 0;
+  let mutationCalls = 0;
+  const result = await unpublishMissingFinanceWixStock("DN73VTM", {
+    loadSnapshot: async () => {
+      snapshotCalls += 1;
+      return { complete: true, checkedAt: "2026-09-14T13:00:00.000Z", vehicles: [], vehicleCount: 192 };
+    },
+    loadPreview: async () => ({ collections, matches, protectedCollection: { id: "VANFINANCEPAGES", protected: true } }),
+    mutateMatch: async (match) => {
+      mutationCalls += 1;
+      return { ...match, taskStatus: "COMPLETED", itemsSucceeded: 1 };
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, 2);
+  assert.equal(mutationCalls, 2);
+  assert.equal(snapshotCalls, 3, "one initial DealerKit absence check plus one immediately before each Wix write");
+});
+
+test("DealerKit-missing Finance removal fails closed for incomplete, reappeared, or partially unreadable source truth", async () => {
+  const { FINANCE_WIX_STOCK_COLLECTIONS } = await import("../api/finance-reserved-wix-stock.js");
+  const { unpublishMissingFinanceWixStock } = await import("../api/finance-missing-dealerkit-wix-stock.js");
+  const cleanCollections = FINANCE_WIX_STOCK_COLLECTIONS.map((collection) => ({ ...collection, live: false, error: "", matches: [] }));
+  let mutationCalls = 0;
+
+  await assert.rejects(
+    unpublishMissingFinanceWixStock("CK70VAF", {
+      loadSnapshot: async () => ({ complete: false, vehicles: [] }),
+      loadPreview: async () => ({ collections: cleanCollections, matches: [] }),
+      mutateMatch: async () => { mutationCalls += 1; },
+    }),
+    /snapshot is incomplete or unstable/i,
+  );
+
+  await assert.rejects(
+    unpublishMissingFinanceWixStock("CK70VAF", {
+      loadSnapshot: async () => ({ complete: true, vehicles: [{ registration: "CK70VAF", status: "reserved" }] }),
+      loadPreview: async () => ({ collections: cleanCollections, matches: [] }),
+      mutateMatch: async () => { mutationCalls += 1; },
+    }),
+    /currently contains CK70VAF/i,
+  );
+
+  const failedCollections = cleanCollections.map((collection, index) => index === 0 ? { ...collection, error: "Wix read failed" } : collection);
+  await assert.rejects(
+    unpublishMissingFinanceWixStock("CK70VAF", {
+      loadSnapshot: async () => ({ complete: true, vehicles: [] }),
+      loadPreview: async () => ({ collections: failedCollections, matches: [] }),
+      mutateMatch: async () => { mutationCalls += 1; },
+    }),
+    /Wix could not be fully verified before removal/i,
+  );
+
+  assert.equal(mutationCalls, 0);
 });

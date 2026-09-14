@@ -221,7 +221,7 @@ async function waitForWixTask(taskId, label) {
   throw new Error(`${label} draft task did not finish in time. Recheck the collection before retrying.`);
 }
 
-async function setDraftMatch(match) {
+export async function setDraftMatch(match) {
   const collectionId = assertFinanceWixStockCollection(match.collectionId);
   const itemId = clean(match.itemId);
   const label = match.collectionLabel || collectionId;
