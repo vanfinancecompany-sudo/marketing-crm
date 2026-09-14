@@ -54,7 +54,7 @@ if (!source.includes("DEALERKIT_MISSING_WIX_CONTROLS")) {
 
   replaceOnce(
     `<div className="vehicle-card__meta">No live matches remain in the approved Finance stock collections.</div>`,
-    `<><div className="vehicle-card__meta">No live matches remain in the approved Finance stock collections.</div>{showFinanceMissingWix ? <button className="button button--ghost" type="button" onClick={() => saveWorkflow("ignored", "Hidden from Stock Watch. Wix was not changed.")} disabled={Boolean(savingAction)}>{savingAction === "ignored" ? "Hiding..." : "Hide from Stock Watch"}</button> : null}</>`,
+    `<><div className="vehicle-card__meta">No live matches remain in the approved Finance stock collections.</div>{showFinanceMissingWix ? <button className="button button--ghost" type="button" onClick={() => saveWorkflow("ignored", "Hidden")} disabled={Boolean(savingAction)}>{savingAction === "ignored" ? "Hiding..." : "Hide from Stock Watch"}</button> : null}</>`,
     "Finance no-live-match Hide state",
   );
 
