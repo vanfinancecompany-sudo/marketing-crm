@@ -158,4 +158,5 @@ import {
 
 fs.writeFileSync(targetPath, source);
 console.log("Applied Finance reserved Wix Stock Watch controls.");
+await import("./apply-dealerkit-missing-wix-controls.mjs");
 await import("./apply-car-reserved-wix-stock-watch.mjs");
