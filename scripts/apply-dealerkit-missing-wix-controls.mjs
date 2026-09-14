@@ -53,18 +53,6 @@ if (!source.includes("DEALERKIT_MISSING_WIX_CONTROLS")) {
   );
 
   replaceOnce(
-    `  const displayRecords = useMemo(() => [...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, localNotVanscoRecords, priceDifferenceRecords]);`,
-    `  const hiddenReverseRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => isTemporaryHiddenStatus(workflowStatusOf(record))).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);\n  const visibleLocalNotVanscoRecords = useMemo(() => localNotVanscoRecords.filter((record) => !hiddenReverseRegistrationSet.has(normalizeWatchRegistration(record.registration))), [hiddenReverseRegistrationSet, localNotVanscoRecords]);\n  const displayRecords = useMemo(() => [...activeRecords, ...visibleLocalNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, visibleLocalNotVanscoRecords, priceDifferenceRecords]);`,
-    "reverse-check hidden filtering",
-  );
-
-  replaceOnce(
-    `    localNotVansco: localNotVanscoRecords.length,`,
-    `    localNotVansco: visibleLocalNotVanscoRecords.length,`,
-    "reverse-check summary count",
-  );
-
-  replaceOnce(
     `<div className="vansco-watch-note"><strong>My stock not on DealerKit:</strong> this reverse registration check shows active CRM vehicles absent from the current DealerKit feed.</div>`,
     `<div className="vansco-watch-note"><strong>My stock not on DealerKit:</strong> this reverse registration check shows active CRM vehicles absent from the current DealerKit feed. Finance cards can check Wix first: live listing rows can be moved to Draft safely, while cards already off Wix can be hidden from Stock Watch.</div>`,
     "reverse-check guidance",
@@ -73,4 +61,4 @@ if (!source.includes("DEALERKIT_MISSING_WIX_CONTROLS")) {
   fs.writeFileSync(pagePath, source);
 }
 
-console.log("Applied DealerKit missing-stock controls: Finance reverse-check cards verify Wix, remove only confirmed live listings, and hide only once Wix is clear.");
+console.log("Applied DealerKit missing-stock controls: Finance reverse-check cards verify Wix and remove only confirmed live listings.");
