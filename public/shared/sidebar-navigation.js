@@ -14,7 +14,7 @@
     { id: "suppression-centre", label: "Suppression Centre", path: "/suppression-centre/", paths: ["/suppression-centre/"], navigation: "document" },
     { id: "email-templates", label: "Email Templates", path: "/email-templates/", paths: ["/email-templates/"], navigation: "document" },
     { id: "campaigns", label: "Campaigns", path: "/campaigns/", paths: ["/campaigns/"], navigation: "document" },
-    { id: "vansco-stock-watch", label: "Vansco Stock Watch", path: "/vansco-stock-watch", paths: ["/vansco-stock-watch"], navigation: "react", view: "Vansco Stock Watch" },
+    { id: "vansco-stock-watch", label: "DealerKit Stock Watch", path: "/vansco-stock-watch", paths: ["/vansco-stock-watch"], navigation: "react", view: "Vansco Stock Watch" },
     { id: "youtube-generator", label: "YouTube Generator", path: "/youtube-generator", paths: ["/youtube-generator", "/youtube-shorts-beta"], navigation: "react", view: "YouTube Generator" },
     { id: "daily-reels", label: "Daily Reels", path: "/daily-reels/", paths: ["/daily-reels/", "/daily-reels"], navigation: "document" },
     { id: "creative-library", label: "Creative Library", path: "/creative-library", paths: ["/creative-library"], navigation: "react", view: "Creative Library" },
