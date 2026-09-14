@@ -8,6 +8,7 @@ on:
       - 'utils/dealerKitWix*.js'
       - 'tests/dealerkit-wix*.test.js'
       - 'scripts/apply-dealerkit-reservation-final-safety.mjs'
+      - 'scripts/apply-dealerkit-missing-wix*.mjs'
       - 'tests/dealerkit-reservation-final-safety-post-transform.test.js'
       - 'pages/VanscoStockWatchPage.jsx'
       - 'public/shared/sidebar-navigation.js'
@@ -45,6 +46,7 @@ jobs:
           node scripts/apply-dealerkit-readiness-monitor-fix.mjs
           node scripts/apply-dealerkit-photo-ready-workflow-fix.mjs
           node scripts/apply-dealerkit-reservation-final-safety.mjs
+          node scripts/apply-dealerkit-missing-wix-hide-suppression.mjs
           node --test tests/dealerkit-reservation-final-safety-post-transform.test.js
       - name: Run DealerKit Wix safety tests
         run: node --test tests/dealerkit-wix-*.test.js
