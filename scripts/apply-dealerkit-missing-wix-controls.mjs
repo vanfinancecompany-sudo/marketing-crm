@@ -47,18 +47,18 @@ if (!source.includes("DEALERKIT_MISSING_WIX_CONTROLS")) {
   );
 
   replaceOnce(
-    `<div className="vehicle-card__meta">No live matches remain in the approved Finance stock collections.</div>`,
-    `<><div className="vehicle-card__meta">No live matches remain in the approved Finance stock collections.</div>{showFinanceMissingWix ? <button className="button button--ghost" type="button" onClick={() => saveWorkflow("ignored", "Hidden")} disabled={Boolean(savingAction)}>{savingAction === "ignored" ? "Hiding..." : "Hide"}</button> : null}</>`,
-    "Finance no-live-match state",
+    `{isLocalNotVansco && record.localStockUrl ? <a className="button button--ghost" href={record.localStockUrl} target="_blank" rel="noreferrer">Open my stock page</a> : null}`,
+    `{isLocalNotVansco && record.localStockUrl ? <a className="button button--ghost" href={record.localStockUrl} target="_blank" rel="noreferrer">Open my stock page</a> : null}\n          {isLocalNotVansco ? <button className="button button--ghost" type="button" onClick={() => saveWorkflow("ignored", "Hidden from Stock Watch. Wix was not changed.")} disabled={Boolean(savingAction)}>{savingAction === "ignored" ? "Hiding..." : "Hide from Stock Watch"}</button> : null}`,
+    "reverse-check Hide action",
   );
 
   replaceOnce(
     `<div className="vansco-watch-note"><strong>My stock not on DealerKit:</strong> this reverse registration check shows active CRM vehicles absent from the current DealerKit feed.</div>`,
-    `<div className="vansco-watch-note"><strong>My stock not on DealerKit:</strong> this reverse registration check shows active CRM vehicles absent from the current DealerKit feed. Finance cards can check Wix first: live listing rows can be moved to Draft safely, while cards already off Wix can be hidden from Stock Watch.</div>`,
+    `<div className="vansco-watch-note"><strong>My stock not on DealerKit:</strong> this reverse registration check shows active CRM vehicles absent from the current DealerKit feed. Any Finance, Rent2Buy or Cars card can be hidden from Stock Watch without changing Wix. Finance cards can additionally check Wix first and safely move confirmed live listing rows to Draft.</div>`,
     "reverse-check guidance",
   );
 
   fs.writeFileSync(pagePath, source);
 }
 
-console.log("Applied DealerKit missing-stock controls: Finance reverse-check cards verify Wix and remove only confirmed live listings.");
+console.log("Applied DealerKit missing-stock controls: Finance reverse-check cards verify Wix, and all pipelines can temporarily hide feed-missing cards without changing Wix.");
