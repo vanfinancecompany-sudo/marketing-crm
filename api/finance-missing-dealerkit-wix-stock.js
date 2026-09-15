@@ -131,16 +131,19 @@ export async function verifyDealerKitMissingRegistration(
     throw safetyStop(`DealerKit could not be checked safely for ${registration}: ${clean(error?.message) || "DealerKit stock check failed."}`);
   }
 
-  if (snapshot?.complete !== true) {
-    throw safetyStop(`DealerKit could not prove ${registration} is absent because the current stock snapshot is incomplete or unstable.`);
-  }
-
-  const matches = (snapshot.vehicles || []).filter(
+  // Positive presence evidence is authoritative even when the wider snapshot is partial.
+  // Check this before the absence/completeness gate so Reserved/Sold vehicles can never
+  // fall through the "missing" route merely because another DealerKit row was unstable.
+  const matches = (snapshot?.vehicles || []).filter(
     (vehicle) => normalizeRegistration(vehicle?.registration) === registration,
   );
   if (matches.length) {
-    const statuses = Array.from(new Set(matches.map((vehicle) => clean(vehicle?.status || vehicle?.sourceStatus)).filter(Boolean)));
+    const statuses = Array.from(new Set(matches.map((vehicle) => clean(vehicle?.sourceStatus || vehicle?.status)).filter(Boolean)));
     throw safetyStop(`DealerKit currently contains ${registration}${statuses.length ? ` (${statuses.join(", ")})` : ""}, so the missing-stock removal route is no longer valid.`);
+  }
+
+  if (snapshot?.complete !== true) {
+    throw safetyStop(`DealerKit could not prove ${registration} is absent because the current stock snapshot is incomplete or unstable.`);
   }
 
   return {
