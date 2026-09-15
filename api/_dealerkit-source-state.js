@@ -73,6 +73,33 @@ export async function loadDealerKitSourceState(supabase, { sinceDays = 30, limit
   return { available: true, rows: data || [] };
 }
 
+export async function loadDealerKitSourceStateRegistration(supabase, registrationValue) {
+  const registration = normalizeRegistration(registrationValue || "");
+  if (!registration) return { available: true, row: null };
+
+  const { data, error } = await supabase
+    .from(DEALERKIT_SOURCE_STATE_TABLE)
+    .select("registration,supplier_stock_id,last_status,source_status,title,source_url,image_url,source_updated_at,first_seen_at,last_seen_at,vehicle_snapshot,updated_at")
+    .eq("registration", registration)
+    .maybeSingle();
+  if (error) {
+    if (isMissingDealerKitSourceStateTableError(error)) return { available: false, row: null, missingTable: true };
+    throw new Error(`Could not read DealerKit source state for ${registration}: ${error.message || error}`);
+  }
+  return { available: true, row: data || null };
+}
+
+export function dealerKitSourceStateMatchesIdentity(row = {}, registrationValue, supplierStockIdValue) {
+  const registration = normalizeRegistration(registrationValue || "");
+  const supplierStockId = clean(supplierStockIdValue, 300);
+  return Boolean(
+    registration
+    && supplierStockId
+    && normalizeRegistration(row?.registration || "") === registration
+    && clean(row?.supplier_stock_id, 300) === supplierStockId
+  );
+}
+
 export function dealerKitObservationVehicle(row = {}) {
   const snapshot = row?.vehicle_snapshot && typeof row.vehicle_snapshot === "object" ? row.vehicle_snapshot : {};
   const registration = normalizeRegistration(row.registration || snapshot.registration || "");
