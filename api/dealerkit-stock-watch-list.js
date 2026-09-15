@@ -1,4 +1,10 @@
 import { fetchStableDealerKitStockSnapshot } from "./_dealerkit-stable-stock-snapshot.js";
+import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
+import {
+  dealerKitObservationVehicle,
+  loadDealerKitSourceState,
+  syncDealerKitSourceState,
+} from "./_dealerkit-source-state.js";
 import {
   WATCH_TABLE,
   getSupabaseServiceAdmin,
@@ -12,6 +18,9 @@ import {
 } from "../lib/dealerKitVehicleSegmentation.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
+const RECENT_SOURCE_STATE_DAYS = 3;
+const MAX_TRANSITION_PROBES = 40;
+const TRANSITION_PROBE_CONCURRENCY = 5;
 
 function clean(value, limit = 3000) {
   return String(value ?? "").trim().slice(0, limit);
@@ -36,8 +45,94 @@ function orphanActionBelongsToPipeline(action, pipeline) {
 
 function normalizedSourceStatus(vehicle = {}) {
   const status = clean(vehicle.status || vehicle.availability || vehicle.sourceStatus, 100).toLowerCase();
-  if (["available", "due_in", "reserved", "sold", "deposit_taken", "awaiting_delivery"].includes(status)) return status;
+  if (["available", "due_in", "reserved", "sold", "deposit_taken", "awaiting_delivery", "removed_from_dealerkit"].includes(status)) return status;
   return status || "unknown";
+}
+
+function isDetailNotFound(error) {
+  return /DealerKit stock detail failed with HTTP 404\.?/i.test(clean(error?.message || error));
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const results = new Array(items.length).fill(null);
+  let nextIndex = 0;
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
+async function resolveRecentDealerKitTransitions({ supabase, snapshot, pipeline }) {
+  const state = await loadDealerKitSourceState(supabase, {
+    sinceDays: RECENT_SOURCE_STATE_DAYS,
+    limit: 1000,
+  });
+  if (state.available === false) {
+    return {
+      vehicles: [],
+      available: false,
+      missingTable: Boolean(state.missingTable),
+      candidates: 0,
+      probed: 0,
+      detailErrors: 0,
+    };
+  }
+
+  const currentRegistrations = new Set((snapshot.vehicles || [])
+    .map((vehicle) => normalizeRegistration(vehicle?.registration || ""))
+    .filter(Boolean));
+
+  const candidates = (state.rows || [])
+    .map((row) => ({ row, vehicle: dealerKitObservationVehicle(row) }))
+    .filter(({ vehicle }) => vehicle?.registration && vehicle?.supplierStockId)
+    .filter(({ vehicle }) => !currentRegistrations.has(normalizeRegistration(vehicle.registration)))
+    .filter(({ vehicle }) => pipelineVehicle(vehicle, pipeline))
+    .slice(0, MAX_TRANSITION_PROBES);
+
+  let detailErrors = 0;
+  const resolved = await mapWithConcurrency(candidates, TRANSITION_PROBE_CONCURRENCY, async ({ row, vehicle }) => {
+    const registration = normalizeRegistration(vehicle.registration);
+    const stockId = clean(vehicle.supplierStockId, 300);
+    try {
+      const detail = await fetchDealerKitStockDetail(stockId, { specifications: false });
+      if (normalizeRegistration(detail?.registration) !== registration) return null;
+      return {
+        ...detail,
+        sourceResolution: "historical_identity_detail",
+        lastKnownSourceStatus: normalizedSourceStatus(vehicle),
+        lastSeenInDealerKitAt: row?.last_seen_at || vehicle.checkedAt || null,
+      };
+    } catch (error) {
+      if (!isDetailNotFound(error)) {
+        detailErrors += 1;
+        return null;
+      }
+      return {
+        ...vehicle,
+        status: "removed_from_dealerkit",
+        availability: "removed_from_dealerkit",
+        sourceStatus: "Removed from DealerKit API",
+        checkedAt: new Date().toISOString(),
+        sourceResolution: "historical_identity_detail_404",
+        lastKnownSourceStatus: normalizedSourceStatus(vehicle),
+        lastSeenInDealerKitAt: row?.last_seen_at || vehicle.checkedAt || null,
+      };
+    }
+  });
+
+  return {
+    vehicles: resolved.filter(Boolean),
+    available: true,
+    missingTable: false,
+    candidates: candidates.length,
+    probed: candidates.length,
+    detailErrors,
+  };
 }
 
 function vehicleRecord(vehicle, action = null) {
@@ -60,6 +155,9 @@ function vehicleRecord(vehicle, action = null) {
     advertisedPriceText: Number.isFinite(Number(vehicle.retailPrice)) ? `£${Number(vehicle.retailPrice).toLocaleString("en-GB", { maximumFractionDigits: 2 })}` : "",
     vatStatus: clean(vehicle.vatStatus, 50) || "unknown",
     sourceStatus: normalizedSourceStatus(vehicle),
+    sourceResolution: clean(vehicle.sourceResolution, 100),
+    lastKnownSourceStatus: clean(vehicle.lastKnownSourceStatus, 100),
+    lastSeenInDealerKitAt: vehicle.lastSeenInDealerKitAt || null,
     isCurrentlyOnVansco: true,
     lastCheckedAt: checkedAt,
     lastSuccessfullyCheckedAt: checkedAt,
@@ -135,13 +233,22 @@ export default async function handler(request, response) {
     ]);
     if (actionsResult.error) throw new Error(`Could not read Stock Watch decisions: ${actionsResult.error.message || actionsResult.error}`);
 
+    const sourceStateSync = await syncDealerKitSourceState(supabase, snapshot);
+    const transitions = await resolveRecentDealerKitTransitions({ supabase, snapshot, pipeline });
+
     const actions = (actionsResult.data || []).map(normalizeActionRecord);
     const actionByRegistration = new Map(actions
       .map((action) => [normalizeRegistration(action.registration || ""), action])
       .filter(([registration]) => registration));
-    const sourceVehicles = (snapshot.vehicles || []).filter((vehicle) => pipelineVehicle(vehicle, pipeline));
+    const currentSourceVehicles = (snapshot.vehicles || []).filter((vehicle) => pipelineVehicle(vehicle, pipeline));
+    const currentRegistrations = new Set(currentSourceVehicles.map((vehicle) => normalizeRegistration(vehicle.registration)).filter(Boolean));
+    const transitionVehicles = transitions.vehicles.filter((vehicle) => {
+      const registration = normalizeRegistration(vehicle.registration || "");
+      return registration && !currentRegistrations.has(registration);
+    });
+    const sourceVehicles = [...currentSourceVehicles, ...transitionVehicles];
     const segmentCounts = summariseDealerKitSegments(snapshot.vehicles || []);
-    const records = sourceVehicles.map((vehicle) => vehicleRecord(vehicle, actionByRegistration.get(vehicle.registration) || null));
+    const records = sourceVehicles.map((vehicle) => vehicleRecord(vehicle, actionByRegistration.get(normalizeRegistration(vehicle.registration)) || null));
     const sourceRegistrations = new Set(records.map((record) => record.registration).filter(Boolean));
 
     for (const action of actions) {
@@ -154,7 +261,7 @@ export default async function handler(request, response) {
 
     const usableRegistrations = records.filter((record) => record.registration).length;
     const availableCount = sourceVehicles.filter((vehicle) => ["available", "due_in"].includes(normalizedSourceStatus(vehicle))).length;
-    const reservedCount = sourceVehicles.filter((vehicle) => ["reserved", "sold", "deposit_taken", "awaiting_delivery"].includes(normalizedSourceStatus(vehicle))).length;
+    const reservedCount = sourceVehicles.filter((vehicle) => ["reserved", "sold", "deposit_taken", "awaiting_delivery", "removed_from_dealerkit"].includes(normalizedSourceStatus(vehicle))).length;
 
     response.status(200).json({
       ok: true,
@@ -164,18 +271,28 @@ export default async function handler(request, response) {
         complete: Boolean(snapshot.complete),
         apiReportedTotal: Number(snapshot.apiReportedTotal || 0),
         usableRecords: Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0),
-        pipelineRecords: sourceVehicles.length,
+        pipelineRecords: currentSourceVehicles.length,
+        lifecycleRecoveredRecords: transitionVehicles.length,
         segmentCounts,
         unclassifiedRecords: segmentCounts.unknown,
         issues: snapshot.diagnostics || null,
         checkedAt: snapshot.checkedAt || new Date().toISOString(),
+        sourceState: {
+          available: sourceStateSync.available !== false && transitions.available !== false,
+          written: Number(sourceStateSync.written || 0),
+          missingTable: Boolean(sourceStateSync.missingTable || transitions.missingTable),
+          transitionCandidates: transitions.candidates,
+          transitionProbes: transitions.probed,
+          transitionDetailErrors: transitions.detailErrors,
+        },
       },
       records,
       summary: {
         provider: "dealerkit",
         currentUrlCount: Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0),
-        currentPipelineUrlCount: sourceVehicles.length,
-        hiddenOtherTabTypeCount: Math.max(0, Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0) - sourceVehicles.length),
+        currentPipelineUrlCount: currentSourceVehicles.length,
+        lifecycleRecoveredCount: transitionVehicles.length,
+        hiddenOtherTabTypeCount: Math.max(0, Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0) - currentSourceVehicles.length),
         cachedRegs: usableRegistrations,
         usableCachedRegistrations: usableRegistrations,
         currentNoRegistrationCount: 0,
@@ -183,11 +300,12 @@ export default async function handler(request, response) {
         currentAvailableOrUnknownCount: availableCount,
         currentCheckedCount: sourceVehicles.length,
         currentUncheckedCount: 0,
-        detailRefreshedToday: sourceVehicles.length,
+        detailRefreshedToday: currentSourceVehicles.length,
         failedDetailChecks: Math.max(0, Number(snapshot.apiReportedTotal || 0) - Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0)),
         latestUrlListCheckedAt: snapshot.checkedAt || new Date().toISOString(),
         sourceComplete: Boolean(snapshot.complete),
-        totalsNote: `Operator Stock Watch is sourced from DealerKit and segmented before card classification. ${segmentCounts.unknown} unclassified record(s) are held out of all product tabs for safety. Saved actions remain per tab.`,
+        sourceStateAvailable: sourceStateSync.available !== false && transitions.available !== false,
+        totalsNote: `Operator Stock Watch is sourced from DealerKit and segmented before card classification. ${segmentCounts.unknown} unclassified record(s) are held out of all product tabs for safety. Known registrations that disappear from the bulk feed are resolved by their saved DealerKit identity without treating unrelated source failures as global absence.`,
       },
     });
   } catch (error) {
