@@ -392,7 +392,7 @@ test("build fix makes hard image-readiness failures unavailable and exposes reje
   assert.match(agent, /allowPartial:\s*true/);
   assert.match(agent, /providerDiagnostics/);
   assert.match(provider, /allowPartial = false/);
-  assert.match(provider, /fetchDealerKitStockSnapshot\(\{ environment, fetchImplementation, allowPartial \}\)/);
+  assert.match(provider, /fetchStableDealerKitStockSnapshot\(\{ environment, fetchImplementation, allowPartial \}\)/);
   assert.match(adapter, /DEALERKIT_REQUEST_ATTEMPTS = 3/);
   assert.match(adapter, /TRANSIENT_DEALERKIT_STATUSES/);
   assert.match(adapter, /registrationCandidate/);

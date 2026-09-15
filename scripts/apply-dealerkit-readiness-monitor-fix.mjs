@@ -115,15 +115,15 @@ patch(
   allowPartial = false,
 } = {}) {`,
   "provider partial-read option",
-  "return fetchDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial });"
+  "allowPartial = false,"
 );
 
 patch(
   "../api/_stock-source-provider.js",
-  'return fetchDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial: false });',
-  'return fetchDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial });',
-  "provider partial-read passthrough",
-  'return fetchDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial });'
+  'return fetchStableDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial: false });',
+  'return fetchStableDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial });',
+  "provider stable partial-read passthrough",
+  'return fetchStableDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial });'
 );
 
 patch(

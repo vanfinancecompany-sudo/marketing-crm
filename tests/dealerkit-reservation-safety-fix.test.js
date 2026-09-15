@@ -73,7 +73,7 @@ test("reservation action fails closed when DealerKit detail is no longer reserve
       environment,
       fetchImplementation: fake.fetchImplementation,
     }),
-    /Safety stop: DealerKit no longer shows LC72YEG as Reserved\/Sold\/Deposit Taken\. Nothing was changed in Wix\./,
+    /Safety stop: DealerKit no longer shows LC72YEG as Reserved\/Sold\/Deposit Taken\/Awaiting Delivery\. Nothing was changed in Wix\./,
   );
 });
 

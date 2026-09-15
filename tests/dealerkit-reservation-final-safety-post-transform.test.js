@@ -91,7 +91,8 @@ test("Finance and Rent2Buy completion is persisted and advertising presence is i
 test("Stock Watch source API no longer derives Finance completion from telemetry tables", () => {
   const source = fs.readFileSync(new URL("../api/dealerkit-stock-watch-list.js", import.meta.url), "utf8");
   assert.doesNotMatch(source, /stock_watch_action_logs|stock_watch_monitor_runs|reservedVehicleIsResolved|latestClearFinanceChecks/);
-  assert.match(source, /Saved actions remain per tab/);
+  assert.match(source, /supabase\.from\(WATCH_TABLE\)\.select\("\*"\)\.eq\("pipeline", pipeline\)/);
+  assert.match(source, /actionByRegistration/);
 });
 
 test("DealerKit due-in and awaiting-delivery statuses save safely in the legacy workflow table", async () => {

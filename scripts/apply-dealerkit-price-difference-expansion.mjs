@@ -73,7 +73,7 @@ replaceOrThrow(
 );
 
 replaceOrThrow(
-  '      const priceText = pipeline === "finance" ? " Price differences recalculated from the refreshed Finance stock snapshot and saved Vansco cache." : "";',
+  /      const priceText = pipeline === "finance" \? " Price differences recalculated from the refreshed Finance stock snapshot and saved (?:Vansco cache|DealerKit stock data)\." : "";/,
   '      const priceText = " Price differences recalculated from the refreshed live Wix listing snapshot and saved DealerKit cache.";',
   "refresh comparison price message",
 );

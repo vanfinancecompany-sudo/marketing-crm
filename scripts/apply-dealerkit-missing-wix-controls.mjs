@@ -58,10 +58,46 @@ if (!source.includes("DEALERKIT_MISSING_WIX_CONTROLS")) {
     "Finance no-live-match Hide state",
   );
 
-  replaceOnce(
-    `<div className="vansco-watch-note"><strong>My stock not on DealerKit:</strong> this reverse registration check shows active CRM vehicles absent from the current DealerKit feed.</div>`,
-    `<div className="vansco-watch-note"><strong>My stock not on DealerKit:</strong> this reverse registration check shows active CRM vehicles absent from the current DealerKit feed. Any Finance, Rent2Buy or Cars card can be hidden from Stock Watch without changing Wix. Finance cards can additionally check Wix first and safely move confirmed live listing rows to Draft.</div>`,
-    "reverse-check guidance",
+  const legacyReverseGuidance = `<div className="vansco-watch-note"><strong>My stock not on DealerKit:</strong> this reverse registration check shows active CRM vehicles absent from the current DealerKit feed.</div>`;
+  if (source.includes(legacyReverseGuidance)) {
+    replaceOnce(
+      legacyReverseGuidance,
+      `<div className="vansco-watch-note"><strong>My stock not on DealerKit:</strong> this reverse registration check shows active CRM vehicles absent from the current DealerKit feed. Any Finance, Rent2Buy or Cars card can be hidden from Stock Watch without changing Wix. Finance cards can additionally check Wix first and safely move confirmed live listing rows to Draft.</div>`,
+      "reverse-check guidance",
+    );
+  } else if (!source.includes("No CRM vehicle is classified as absent until a complete DealerKit snapshot proves it.")) {
+    throw new Error("DealerKit missing-stock controls could not find safe reverse-check guidance.");
+  }
+
+  // The newer classifier already gives Reserved presence precedence and, more
+  // importantly, suppresses every reverse absence card while the DealerKit snapshot
+  // is incomplete. Mark that routing as satisfied so the older final-safety transform
+  // does not replace it with its weaker one-line reverse comparison.
+  if (!source.includes("DEALERKIT_RESERVED_BUCKET_ROUTING")) {
+    source = source.replace(
+      `  if (!currentlyOnVansco) return { ...baseRecord, displayStatus: "hidden_not_current", matchStatus: "hidden_not_current" };\n  if (!registration) return { ...baseRecord, displayStatus: "hidden_no_registration", matchStatus: "hidden_no_registration" };\n  if (hasExactLocalMatch && reservedOnVansco) return { ...baseRecord, displayStatus: "reserved", matchStatus: "reserved_still_listed" };`,
+      `  // DEALERKIT_RESERVED_BUCKET_ROUTING: Reserved presence wins before absence; reverse absence also requires a complete source snapshot.\n  if (!currentlyOnVansco) return { ...baseRecord, displayStatus: "hidden_not_current", matchStatus: "hidden_not_current" };\n  if (!registration) return { ...baseRecord, displayStatus: "hidden_no_registration", matchStatus: "hidden_no_registration" };\n  if (hasExactLocalMatch && reservedOnVansco) return { ...baseRecord, displayStatus: "reserved", matchStatus: "reserved_still_listed" };`,
+    );
+  }
+
+  // The old final-safety transform also carried a few display-name replacements in
+  // the same block as its weaker reverse-comparison rewrite. Preserve those names
+  // separately now that the routing block is intentionally skipped.
+  const copyReplacements = [
+    ["current Vansco cache for this tab", "current DealerKit stock data for this tab"],
+    ["Could not load Vansco Stock Watch cache.", "Could not load DealerKit Stock Watch data."],
+    ["Could not refresh Vansco cache.", "Could not refresh DealerKit stock data."],
+    ["saved Vansco cache", "saved DealerKit stock data"],
+    ["Saved Vansco cache records", "Saved DealerKit stock records"],
+    ["Loading Vansco comparison...", "Loading DealerKit comparison..."],
+  ];
+  for (const [before, after] of copyReplacements) source = source.split(before).join(after);
+
+  // The next legacy build transform matches the diagnostics line literally. Keep its
+  // anchor compatible without weakening the real dealerKitSnapshotComplete gate above.
+  source = source.replace(
+    `{JSON.stringify({ selectedPipeline, dealerKitSnapshotComplete, localRegsLoaded:`,
+    `{JSON.stringify({ selectedPipeline, localRegsLoaded:`,
   );
 
   fs.writeFileSync(pagePath, source);
