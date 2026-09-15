@@ -3,11 +3,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { fetchStableDealerKitStockSnapshot } from "../api/_dealerkit-stable-stock-snapshot.js";
 import { verifyDealerKitMissingRegistration } from "../api/finance-missing-dealerkit-wix-stock.js";
+import { verifyDealerKitReservedRegistration } from "../api/_dealerkit-reservation-verification.js";
 
 const ENV = {
   DEALERKIT_API_SECRET: "test-secret",
   DEALERKIT_DEALER_ID: "70376",
 };
+
+const AF71_STOCK_ID = "c500e0856a9b0c7db4be7";
 
 function listing({ id, registration, status = "In Stock" }) {
   return {
@@ -33,6 +36,26 @@ function response(status, payload) {
     async text() {
       return payload === null || payload === undefined ? "" : JSON.stringify(payload);
     },
+  };
+}
+
+function historicalAf71State(overrides = {}) {
+  return {
+    registration: "AF71TVY",
+    supplier_stock_id: AF71_STOCK_ID,
+    last_status: "available",
+    source_status: "In Stock",
+    last_seen_at: "2026-09-15T13:15:00Z",
+    updated_at: "2026-09-15T13:15:00Z",
+    vehicle_snapshot: {
+      registration: "AF71TVY",
+      supplierStockId: AF71_STOCK_ID,
+      status: "available",
+      sourceStatus: "In Stock",
+      vehicleType: "LCV",
+      title: "Ford Transit Custom",
+    },
+    ...overrides,
   };
 }
 
@@ -215,4 +238,126 @@ test("AF71TVY still cannot be treated as missing when no presence is seen in an 
       return true;
     },
   );
+});
+
+test("AF71TVY known registration and stock ID can resolve a DealerKit lifecycle removal after the bulk row vanishes", async () => {
+  const result = await verifyDealerKitReservedRegistration("AF71 TVY", {
+    supplierStockId: AF71_STOCK_ID,
+    now: new Date("2026-09-15T17:00:00Z"),
+    loadSnapshot: async () => ({
+      complete: false,
+      checkedAt: "2026-09-15T17:00:00Z",
+      vehicles: [],
+    }),
+    loadSourceState: async () => ({ available: true, row: historicalAf71State() }),
+    loadDetail: async () => {
+      throw new Error("DealerKit stock detail failed with HTTP 404.");
+    },
+  });
+
+  assert.equal(result.registration, "AF71TVY");
+  assert.equal(result.supplierStockId, AF71_STOCK_ID);
+  assert.equal(result.sourceStatus, "removed_from_dealerkit");
+  assert.equal(result.evidence, "historical_identity_detail_404");
+  assert.equal(result.previousSourceStatus, "available");
+});
+
+test("a vanished registration cannot use a different historical DealerKit stock ID", async () => {
+  await assert.rejects(
+    verifyDealerKitReservedRegistration("AF71TVY", {
+      supplierStockId: AF71_STOCK_ID,
+      now: new Date("2026-09-15T17:00:00Z"),
+      loadSnapshot: async () => ({ complete: false, vehicles: [] }),
+      loadSourceState: async () => ({
+        available: true,
+        row: historicalAf71State({ supplier_stock_id: "different-stock-id" }),
+      }),
+      loadDetail: async () => {
+        throw new Error("DealerKit stock detail failed with HTTP 404.");
+      },
+    }),
+    /stored DealerKit identity for AF71TVY does not match/i,
+  );
+});
+
+test("a vanished registration with an unreadable DealerKit detail remains fail closed", async () => {
+  await assert.rejects(
+    verifyDealerKitReservedRegistration("AF71TVY", {
+      supplierStockId: AF71_STOCK_ID,
+      now: new Date("2026-09-15T17:00:00Z"),
+      loadSnapshot: async () => ({ complete: false, vehicles: [] }),
+      loadSourceState: async () => ({ available: true, row: historicalAf71State() }),
+      loadDetail: async () => {
+        throw new Error("DealerKit stock detail failed with HTTP 500.");
+      },
+    }),
+    (error) => {
+      assert.match(error.message, /HTTP 500/i);
+      assert.match(error.message, /Nothing was changed in Wix\./);
+      return true;
+    },
+  );
+});
+
+test("current available registration wins over an old vanished identity and blocks Wix removal", async () => {
+  let detailReads = 0;
+  await assert.rejects(
+    verifyDealerKitReservedRegistration("AF71TVY", {
+      supplierStockId: AF71_STOCK_ID,
+      loadSnapshot: async () => ({
+        complete: false,
+        vehicles: [{
+          registration: "AF71 TVY",
+          supplierStockId: "replacement-current-id",
+          status: "available",
+          sourceStatus: "In Stock",
+        }],
+      }),
+      loadSourceState: async () => ({ available: true, row: historicalAf71State() }),
+      loadDetail: async () => {
+        detailReads += 1;
+        throw new Error("DealerKit stock detail failed with HTTP 404.");
+      },
+    }),
+    /currently shows AF71TVY as In Stock, not Reserved\/Sold\/Deposit Taken\/Awaiting Delivery/i,
+  );
+  assert.equal(detailReads, 0);
+});
+
+test("Awaiting Delivery is treated as a positive reserved-like DealerKit lifecycle status", async () => {
+  const result = await verifyDealerKitReservedRegistration("AB12 CDE", {
+    supplierStockId: "awaiting-delivery-id",
+    loadSnapshot: async () => ({
+      complete: false,
+      vehicles: [{
+        registration: "AB12 CDE",
+        supplierStockId: "awaiting-delivery-id",
+        status: "awaiting_delivery",
+        sourceStatus: "Awaiting Delivery",
+      }],
+    }),
+    loadDetail: async () => ({
+      registration: "AB12CDE",
+      supplierStockId: "awaiting-delivery-id",
+      status: "awaiting_delivery",
+      sourceStatus: "Awaiting Delivery",
+      checkedAt: "2026-09-15T17:00:00Z",
+    }),
+  });
+
+  assert.equal(result.sourceStatus, "awaiting_delivery");
+  assert.equal(result.evidence, "current_registration_and_detail");
+});
+
+test("Stock Watch source list keeps lifecycle truth while routing DealerKit removals through Reserved workflow", () => {
+  const listSource = fs.readFileSync(new URL("../api/dealerkit-stock-watch-list.js", import.meta.url), "utf8");
+  const providerSource = fs.readFileSync(new URL("../api/_stock-source-provider.js", import.meta.url), "utf8");
+
+  assert.match(listSource, /historical_identity_detail_404/);
+  assert.match(listSource, /sourceLifecycleStatus: lifecycleStatus/);
+  assert.match(listSource, /\["awaiting_delivery", "removed_from_dealerkit"\]\.includes\(lifecycleStatus\)\) return "reserved"/);
+  assert.match(listSource, /syncDealerKitSourceState\(supabase, snapshot\)/);
+  assert.match(listSource, /loadDealerKitSourceState\(supabase/);
+  assert.match(providerSource, /DEALERKIT_SOURCE_STATE_SYNC/);
+  assert.match(providerSource, /allowPartial = false/);
 });
