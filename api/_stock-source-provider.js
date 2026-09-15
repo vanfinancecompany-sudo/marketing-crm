@@ -1,5 +1,6 @@
 import { getSupabaseServiceAdmin, normalizeRegistration } from "./_vansco-cache-utils.js";
 import { fetchStableDealerKitStockSnapshot } from "./_dealerkit-stable-stock-snapshot.js";
+import { syncDealerKitSourceState } from "./_dealerkit-source-state.js";
 
 const DEFAULT_PROVIDER_ID = "dealerkit";
 const CURRENT_PROVIDER_ALIASES = new Set(["vansco", "dragon", "dragon2000", "vansco_dragon"]);
@@ -17,7 +18,7 @@ function iso(value) {
 
 function normaliseStatus(value) {
   const text = clean(value, 100).toLowerCase().replace(/[\s-]+/g, "_");
-  if (["reserved", "sold", "deposit_taken"].includes(text)) return text;
+  if (["reserved", "sold", "deposit_taken", "awaiting_delivery"].includes(text)) return text;
   if (["available", "in_stock", "instock", "live"].includes(text)) return "available";
   return text || "unknown";
 }
@@ -176,11 +177,18 @@ export async function loadStockSourceSnapshot({
   supabase = null,
   environment = process.env,
   fetchImplementation = fetch,
+  allowPartial = false,
 } = {}) {
   const config = stockSourceProviderConfig(environment);
   if (config.kind === "supabase_cache") return loadVanscoDragonSnapshot(supabase || getSupabaseServiceAdmin());
   if (config.kind === "dealerkit") {
-    return fetchStableDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial: false });
+    const snapshot = await fetchStableDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial });
+    const database = supabase || getSupabaseServiceAdmin();
+    const sourceState = await syncDealerKitSourceState(database, snapshot); // DEALERKIT_SOURCE_STATE_SYNC
+    return {
+      ...snapshot,
+      sourceState,
+    };
   }
   if (config.kind === "normalized_http") return loadNormalizedHttpSnapshot(config, environment, fetchImplementation);
   throw new Error(`Unsupported stock-source provider: ${config.id}. Add an adapter before switching STOCK_SOURCE_PROVIDER_ID.`);
@@ -188,7 +196,7 @@ export async function loadStockSourceSnapshot({
 
 export function providerReservedRegistrations(snapshot = {}) {
   return new Set((snapshot.vehicles || [])
-    .filter((vehicle) => ["reserved", "sold", "deposit_taken"].includes(vehicle.status))
+    .filter((vehicle) => ["reserved", "sold", "deposit_taken", "awaiting_delivery"].includes(vehicle.status))
     .map((vehicle) => vehicle.registration)
     .filter(Boolean));
 }
