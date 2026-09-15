@@ -138,7 +138,7 @@ export async function verifyDealerKitReservedRegistration(
 
     if (!requestedStockId) {
       if (snapshot.complete === false) {
-        throw safetyStop(`DealerKit does not currently return ${registration}, and no previously known DealerKit stock identity was supplied. The wider stock response is incomplete, so this vehicle cannot be resolved safely.`);
+        throw safetyStop(`DealerKit could not safely verify ${registration}: it is absent from the readable rows, no previously known DealerKit stock identity was supplied, and the wider stock response is incomplete.`);
       }
       throw safetyStop(`DealerKit no longer shows ${registration} in the current stock feed and no previously known DealerKit stock identity was supplied.`);
     }
