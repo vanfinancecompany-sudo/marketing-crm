@@ -17,6 +17,12 @@ function hasReportedTotalDrift(snapshot) {
   return snapshot?.diagnostics?.stableReportedTotal === false || totals.length > 1;
 }
 
+function retryableIncompleteSource(snapshot) {
+  return hasReportedTotalDrift(snapshot)
+    || Number(snapshot?.diagnostics?.failedPositions?.length || 0) > 0
+    || Number(snapshot?.diagnostics?.invalidRecords?.length || 0) > 0;
+}
+
 function withStabilityDiagnostics(snapshot, attempts) {
   return {
     ...snapshot,
@@ -47,11 +53,13 @@ export async function fetchStableDealerKitStockSnapshot({
     });
     const totals = reportedTotals(snapshot);
     const totalDrift = hasReportedTotalDrift(snapshot);
+    const retryableIncomplete = retryableIncompleteSource(snapshot);
     attempts.push({
       attempt,
       maxAttempts,
       complete: snapshot?.complete === true,
       totalDrift,
+      retryableIncomplete,
       reportedTotals: totals,
       vehicleCount: Number(snapshot?.vehicleCount ?? snapshot?.vehicles?.length ?? 0),
       failedPositions: Number(snapshot?.diagnostics?.failedPositions?.length || 0),
@@ -63,8 +71,11 @@ export async function fetchStableDealerKitStockSnapshot({
       return withStabilityDiagnostics(snapshot, attempts);
     }
 
-    // Retry only the moving-target case. Real unreadable/invalid source failures stay fail-closed.
-    if (!totalDrift) break;
+    // DealerKit intermittently returns HTTP 5xx for a bulk page or an individual
+    // fallback position. Re-read the whole snapshot so a transient unreadable row
+    // cannot manufacture a false "missing from DealerKit" classification. Hard
+    // integrity failures such as duplicates still remain fail-closed without loops.
+    if (!retryableIncomplete) break;
   }
 
   const decorated = withStabilityDiagnostics(lastSnapshot || {}, attempts);
