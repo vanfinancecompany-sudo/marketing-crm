@@ -58,11 +58,16 @@ if (!source.includes("DEALERKIT_MISSING_WIX_CONTROLS")) {
     "Finance no-live-match Hide state",
   );
 
-  replaceOnce(
-    `<div className="vansco-watch-note"><strong>My stock not on DealerKit:</strong> this reverse registration check shows active CRM vehicles absent from the current DealerKit feed.</div>`,
-    `<div className="vansco-watch-note"><strong>My stock not on DealerKit:</strong> this reverse registration check shows active CRM vehicles absent from the current DealerKit feed. Any Finance, Rent2Buy or Cars card can be hidden from Stock Watch without changing Wix. Finance cards can additionally check Wix first and safely move confirmed live listing rows to Draft.</div>`,
-    "reverse-check guidance",
-  );
+  const legacyReverseGuidance = `<div className="vansco-watch-note"><strong>My stock not on DealerKit:</strong> this reverse registration check shows active CRM vehicles absent from the current DealerKit feed.</div>`;
+  if (source.includes(legacyReverseGuidance)) {
+    replaceOnce(
+      legacyReverseGuidance,
+      `<div className="vansco-watch-note"><strong>My stock not on DealerKit:</strong> this reverse registration check shows active CRM vehicles absent from the current DealerKit feed. Any Finance, Rent2Buy or Cars card can be hidden from Stock Watch without changing Wix. Finance cards can additionally check Wix first and safely move confirmed live listing rows to Draft.</div>`,
+      "reverse-check guidance",
+    );
+  } else if (!source.includes("No CRM vehicle is classified as absent until a complete DealerKit snapshot proves it.")) {
+    throw new Error("DealerKit missing-stock controls could not find safe reverse-check guidance.");
+  }
 
   fs.writeFileSync(pagePath, source);
 }
