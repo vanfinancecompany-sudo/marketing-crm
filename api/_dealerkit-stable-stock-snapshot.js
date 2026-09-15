@@ -3,13 +3,6 @@ import {
   fetchDealerKitStockSnapshot,
 } from "./_dealerkit-stock-adapter.js";
 
-if (
-  process.env.VERCEL_ENV === "preview"
-  && process.env.VERCEL_GIT_COMMIT_REF === "fix/dealerkit-af71tvy-reserved-snapshot"
-) {
-  await import("../scripts/diagnose-dealerkit-failed-positions.mjs");
-}
-
 const DEFAULT_STABILITY_ATTEMPTS = 3;
 
 function reportedTotals(snapshot) {
