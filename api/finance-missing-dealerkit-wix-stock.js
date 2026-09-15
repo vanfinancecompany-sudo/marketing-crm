@@ -1,4 +1,4 @@
-import { fetchDealerKitStockSnapshot } from "./_dealerkit-stock-adapter.js";
+import { fetchStableDealerKitStockSnapshot } from "./_dealerkit-stable-stock-snapshot.js";
 import { normalizeRegistration } from "./_vansco-cache-utils.js";
 import {
   FINANCE_WIX_STOCK_COLLECTIONS,
@@ -118,7 +118,7 @@ async function moveFinanceMatchToDraft(match) {
 
 export async function verifyDealerKitMissingRegistration(
   registrationValue,
-  { loadSnapshot = fetchDealerKitStockSnapshot } = {},
+  { loadSnapshot = fetchStableDealerKitStockSnapshot } = {},
 ) {
   const registration = normalizeRegistration(registrationValue);
   if (!registration) throw new Error("A valid vehicle registration is required.");
@@ -176,7 +176,7 @@ function assertCompleteFinancePreview(preview) {
 export async function unpublishMissingFinanceWixStock(
   registrationValue,
   {
-    loadSnapshot = fetchDealerKitStockSnapshot,
+    loadSnapshot = fetchStableDealerKitStockSnapshot,
     loadPreview = previewFinanceWixStock,
     mutateMatch = moveFinanceMatchToDraft,
   } = {},
