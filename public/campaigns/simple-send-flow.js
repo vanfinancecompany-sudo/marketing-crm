@@ -1,7 +1,7 @@
 (() => {
   const STORAGE_KEY = "marketingCustomerDatabaseApiKey";
   const API_HEADER = "x-marketing-customer-database-key";
-  const SEND_API = "/api/marketing-template-campaign-sends";
+  const SEND_API = "/api/marketing-template-campaign-sends-resilient";
   const PROGRESS_API = "/api/marketing-template-campaign-send-progress";
   const POLL_MS = 2000;
   const fmt = new Intl.NumberFormat("en-GB");
