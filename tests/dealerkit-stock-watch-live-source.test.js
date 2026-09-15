@@ -53,10 +53,12 @@ test("Stock Watch completion authority is saved workflow state, not telemetry sn
   assert.doesNotMatch(source, /reservedVehicleIsResolved|latestClearFinanceChecks|resolvedReservedRegistrations/);
 });
 
-test("DealerKit source remains advisory when incomplete", () => {
+test("DealerKit source remains advisory when incomplete while display reads stay bounded", () => {
   const source = read("api/dealerkit-stock-watch-list.js");
 
-  assert.match(source, /fetchStableDealerKitStockSnapshot\(\{ allowPartial: true \}\)/);
+  assert.match(source, /fetchStableDealerKitStockSnapshot\(\{[\s\S]*allowPartial: true,[\s\S]*stabilityAttempts: 1,[\s\S]*\}\)/);
+  assert.match(source, /SNAPSHOT_CACHE_TTL_MS = 20_000/);
+  assert.match(source, /loadStockWatchSnapshot\(\{ forceFresh \}\)/);
   assert.match(source, /sourceComplete: Boolean\(snapshot\.complete\)/);
   assert.match(source, /failedDetailChecks:/);
 });
