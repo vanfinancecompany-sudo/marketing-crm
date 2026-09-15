@@ -69,6 +69,13 @@ if (!source.includes("DEALERKIT_MISSING_WIX_CONTROLS")) {
     throw new Error("DealerKit missing-stock controls could not find safe reverse-check guidance.");
   }
 
+  // The next legacy build transform matches the diagnostics line literally. Keep its
+  // anchor compatible without weakening the real dealerKitSnapshotComplete gate above.
+  source = source.replace(
+    `{JSON.stringify({ selectedPipeline, dealerKitSnapshotComplete, localRegsLoaded:`,
+    `{JSON.stringify({ selectedPipeline, localRegsLoaded:`,
+  );
+
   fs.writeFileSync(pagePath, source);
 }
 
