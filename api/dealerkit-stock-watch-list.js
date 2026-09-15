@@ -220,6 +220,27 @@ function orphanActionRecord(action, pipeline) {
   };
 }
 
+function unavailableSourceState(error = null) {
+  return {
+    available: false,
+    written: 0,
+    missingTable: false,
+    error: clean(error?.message || error, 1500) || null,
+  };
+}
+
+function unavailableTransitions(error = null) {
+  return {
+    vehicles: [],
+    available: false,
+    missingTable: false,
+    candidates: 0,
+    probed: 0,
+    detailErrors: 0,
+    error: clean(error?.message || error, 1500) || null,
+  };
+}
+
 export default async function handler(request, response) {
   if (!isAuthorised(request)) {
     response.status(401).json({ ok: false, message: "Marketing CRM access is required." });
@@ -243,8 +264,19 @@ export default async function handler(request, response) {
     ]);
     if (actionsResult.error) throw new Error(`Could not read Stock Watch decisions: ${actionsResult.error.message || actionsResult.error}`);
 
-    const sourceStateSync = await syncDealerKitSourceState(supabase, snapshot);
-    const transitions = await resolveRecentDealerKitTransitions({ supabase, snapshot, pipeline });
+    let sourceStateSync;
+    try {
+      sourceStateSync = await syncDealerKitSourceState(supabase, snapshot);
+    } catch (error) {
+      sourceStateSync = unavailableSourceState(error);
+    }
+
+    let transitions;
+    try {
+      transitions = await resolveRecentDealerKitTransitions({ supabase, snapshot, pipeline });
+    } catch (error) {
+      transitions = unavailableTransitions(error);
+    }
 
     const actions = (actionsResult.data || []).map(normalizeActionRecord);
     const actionByRegistration = new Map(actions
@@ -294,6 +326,7 @@ export default async function handler(request, response) {
           transitionCandidates: transitions.candidates,
           transitionProbes: transitions.probed,
           transitionDetailErrors: transitions.detailErrors,
+          error: sourceStateSync.error || transitions.error || null,
         },
       },
       records,
