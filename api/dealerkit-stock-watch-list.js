@@ -21,6 +21,7 @@ const API_KEY_HEADER = "x-marketing-customer-database-key";
 const RECENT_SOURCE_STATE_DAYS = 3;
 const MAX_TRANSITION_PROBES = 40;
 const TRANSITION_PROBE_CONCURRENCY = 5;
+const DETAIL_RETRY_ATTEMPTS = 3;
 const RESERVED_WORKFLOW_STATUSES = new Set(["reserved", "sold", "deposit_taken", "awaiting_delivery", "removed_from_dealerkit"]);
 
 function clean(value, limit = 3000) {
@@ -46,7 +47,7 @@ function orphanActionBelongsToPipeline(action, pipeline) {
 
 function normalizedSourceStatus(vehicle = {}) {
   const status = clean(vehicle.status || vehicle.availability || vehicle.sourceStatus, 100).toLowerCase();
-  if (["available", "due_in", "reserved", "sold", "deposit_taken", "awaiting_delivery", "removed_from_dealerkit"].includes(status)) return status;
+  if (["available", "due_in", "reserved", "sold", "deposit_taken", "awaiting_delivery", "removed_from_dealerkit", "source_unresolved"].includes(status)) return status;
   return status || "unknown";
 }
 
@@ -58,6 +59,29 @@ function workflowSourceStatus(vehicle = {}) {
 
 function isDetailNotFound(error) {
   return /DealerKit stock detail failed with HTTP 404\.?/i.test(clean(error?.message || error));
+}
+
+function detailErrorStatus(error) {
+  const match = clean(error?.message || error, 500).match(/HTTP\s+(\d{3})/i);
+  return match ? Number(match[1]) : null;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function readHistoricalDetail(stockId, loadDetail) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= DETAIL_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      return await loadDetail(stockId, { specifications: false });
+    } catch (error) {
+      lastError = error;
+      if (isDetailNotFound(error)) throw error;
+      if (attempt < DETAIL_RETRY_ATTEMPTS) await sleep(120 * attempt);
+    }
+  }
+  throw lastError || new Error("DealerKit stock detail could not be read.");
 }
 
 async function mapWithConcurrency(items, concurrency, worker) {
@@ -74,7 +98,12 @@ async function mapWithConcurrency(items, concurrency, worker) {
   return results;
 }
 
-async function resolveRecentDealerKitTransitions({ supabase, snapshot, pipeline }) {
+export async function resolveRecentDealerKitTransitions({
+  supabase,
+  snapshot,
+  pipeline,
+  loadDetail = fetchDealerKitStockDetail,
+}) {
   const state = await loadDealerKitSourceState(supabase, {
     sinceDays: RECENT_SOURCE_STATE_DAYS,
     limit: 1000,
@@ -87,6 +116,7 @@ async function resolveRecentDealerKitTransitions({ supabase, snapshot, pipeline 
       candidates: 0,
       probed: 0,
       detailErrors: 0,
+      unresolved: 0,
     };
   }
 
@@ -102,12 +132,26 @@ async function resolveRecentDealerKitTransitions({ supabase, snapshot, pipeline 
     .slice(0, MAX_TRANSITION_PROBES);
 
   let detailErrors = 0;
+  let unresolved = 0;
   const resolved = await mapWithConcurrency(candidates, TRANSITION_PROBE_CONCURRENCY, async ({ row, vehicle }) => {
     const registration = normalizeRegistration(vehicle.registration);
     const stockId = clean(vehicle.supplierStockId, 300);
     try {
-      const detail = await fetchDealerKitStockDetail(stockId, { specifications: false });
-      if (normalizeRegistration(detail?.registration) !== registration) return null;
+      const detail = await readHistoricalDetail(stockId, loadDetail);
+      if (normalizeRegistration(detail?.registration) !== registration) {
+        unresolved += 1;
+        return {
+          ...vehicle,
+          status: "source_unresolved",
+          availability: "source_unresolved",
+          sourceStatus: "DealerKit identity mismatch",
+          checkedAt: new Date().toISOString(),
+          sourceResolution: "historical_identity_detail_mismatch",
+          sourceResolutionError: `DealerKit stock ID ${stockId} did not resolve back to ${registration}.`,
+          lastKnownSourceStatus: normalizedSourceStatus(vehicle),
+          lastSeenInDealerKitAt: row?.last_seen_at || vehicle.checkedAt || null,
+        };
+      }
       return {
         ...detail,
         sourceResolution: "historical_identity_detail",
@@ -115,17 +159,30 @@ async function resolveRecentDealerKitTransitions({ supabase, snapshot, pipeline 
         lastSeenInDealerKitAt: row?.last_seen_at || vehicle.checkedAt || null,
       };
     } catch (error) {
-      if (!isDetailNotFound(error)) {
-        detailErrors += 1;
-        return null;
+      if (isDetailNotFound(error)) {
+        return {
+          ...vehicle,
+          status: "removed_from_dealerkit",
+          availability: "removed_from_dealerkit",
+          sourceStatus: "Removed from DealerKit API",
+          checkedAt: new Date().toISOString(),
+          sourceResolution: "historical_identity_detail_404",
+          lastKnownSourceStatus: normalizedSourceStatus(vehicle),
+          lastSeenInDealerKitAt: row?.last_seen_at || vehicle.checkedAt || null,
+        };
       }
+
+      detailErrors += 1;
+      unresolved += 1;
       return {
         ...vehicle,
-        status: "removed_from_dealerkit",
-        availability: "removed_from_dealerkit",
-        sourceStatus: "Removed from DealerKit API",
+        status: "source_unresolved",
+        availability: "source_unresolved",
+        sourceStatus: "DealerKit source check failed",
         checkedAt: new Date().toISOString(),
-        sourceResolution: "historical_identity_detail_404",
+        sourceResolution: "historical_identity_detail_error",
+        sourceResolutionError: clean(error?.message || error, 500) || "DealerKit stock detail could not be verified.",
+        sourceResolutionHttpStatus: detailErrorStatus(error),
         lastKnownSourceStatus: normalizedSourceStatus(vehicle),
         lastSeenInDealerKitAt: row?.last_seen_at || vehicle.checkedAt || null,
       };
@@ -139,6 +196,7 @@ async function resolveRecentDealerKitTransitions({ supabase, snapshot, pipeline 
     candidates: candidates.length,
     probed: candidates.length,
     detailErrors,
+    unresolved,
   };
 }
 
@@ -165,12 +223,14 @@ function vehicleRecord(vehicle, action = null) {
     sourceStatus: workflowSourceStatus(vehicle),
     sourceLifecycleStatus: lifecycleStatus,
     sourceResolution: clean(vehicle.sourceResolution, 100),
+    sourceResolutionError: clean(vehicle.sourceResolutionError, 500),
+    sourceResolutionHttpStatus: Number.isFinite(Number(vehicle.sourceResolutionHttpStatus)) ? Number(vehicle.sourceResolutionHttpStatus) : null,
     lastKnownSourceStatus: clean(vehicle.lastKnownSourceStatus, 100),
     lastSeenInDealerKitAt: vehicle.lastSeenInDealerKitAt || null,
     isCurrentlyOnVansco: true,
     lastCheckedAt: checkedAt,
     lastSuccessfullyCheckedAt: checkedAt,
-    lastError: "",
+    lastError: clean(vehicle.sourceResolutionError, 500),
     workflowStatus,
     workflow_status: workflowStatus,
     watchActionId: clean(action?.id || action?.watchActionId, 100),
@@ -237,6 +297,7 @@ function unavailableTransitions(error = null) {
     candidates: 0,
     probed: 0,
     detailErrors: 0,
+    unresolved: 0,
     error: clean(error?.message || error, 1500) || null,
   };
 }
@@ -326,6 +387,7 @@ export default async function handler(request, response) {
           transitionCandidates: transitions.candidates,
           transitionProbes: transitions.probed,
           transitionDetailErrors: transitions.detailErrors,
+          transitionUnresolved: transitions.unresolved,
           error: sourceStateSync.error || transitions.error || null,
         },
       },
@@ -335,6 +397,7 @@ export default async function handler(request, response) {
         currentUrlCount: Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0),
         currentPipelineUrlCount: currentSourceVehicles.length,
         lifecycleRecoveredCount: transitionVehicles.length,
+        lifecycleUnresolvedCount: Number(transitions.unresolved || 0),
         hiddenOtherTabTypeCount: Math.max(0, Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0) - currentSourceVehicles.length),
         cachedRegs: usableRegistrations,
         usableCachedRegistrations: usableRegistrations,
@@ -342,9 +405,9 @@ export default async function handler(request, response) {
         currentReservedCount: reservedCount,
         currentAvailableOrUnknownCount: availableCount,
         currentCheckedCount: sourceVehicles.length,
-        currentUncheckedCount: 0,
+        currentUncheckedCount: Number(transitions.unresolved || 0),
         detailRefreshedToday: currentSourceVehicles.length,
-        failedDetailChecks: Math.max(0, Number(snapshot.apiReportedTotal || 0) - Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0)),
+        failedDetailChecks: Math.max(0, Number(snapshot.apiReportedTotal || 0) - Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0)) + Number(transitions.detailErrors || 0),
         latestUrlListCheckedAt: snapshot.checkedAt || new Date().toISOString(),
         sourceComplete: Boolean(snapshot.complete),
         sourceStateAvailable: sourceStateSync.available !== false && transitions.available !== false,
