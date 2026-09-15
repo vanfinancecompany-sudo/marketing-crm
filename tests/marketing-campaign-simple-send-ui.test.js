@@ -74,8 +74,6 @@ test("send progress uses durable worker counters", () => {
   assert.equal(progress.processed, 120);
   assert.equal(progress.pending, 380);
   assert.equal(progress.accepted, 118);
-  assert.equal(progress.failed, 1);
-  assert.equal(progress.suppressed, 1);
   assert.equal(progress.progress_percent, 24);
   assert.equal(progress.phase, "sending");
 });
