@@ -185,7 +185,18 @@ export async function loadStockSourceSnapshot({
     // Build-transform compatibility: return fetchStableDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial });
     const snapshot = await fetchStableDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial });
     const database = supabase || getSupabaseServiceAdmin();
-    const sourceState = await syncDealerKitSourceState(database, snapshot); // DEALERKIT_SOURCE_STATE_SYNC
+    let sourceState;
+    try {
+      sourceState = await syncDealerKitSourceState(database, snapshot); // DEALERKIT_SOURCE_STATE_SYNC
+    } catch (error) {
+      // Source memory is supplementary. A database write problem must never turn
+      // a readable DealerKit snapshot into a provider outage.
+      sourceState = {
+        available: false,
+        written: 0,
+        error: clean(error?.message || error, 1500) || "Could not persist DealerKit source state.",
+      };
+    }
     return {
       ...snapshot,
       sourceState,
