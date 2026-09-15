@@ -17,9 +17,18 @@ const origin = "https://api.dealerkit.uk";
 const path = "/integrators/stock";
 const blockSize = 25;
 const targetRegistration = "AF71TVY";
+const targetStockId = "c500e0856a9b0c7db4be7";
 
 function compactRegistration(value) {
   return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function headers() {
+  return {
+    accept: "application/json",
+    authorization: `Bearer ${secret}`,
+    "user-agent": "VFC-DealerKit-Position-Diagnostic/1.0",
+  };
 }
 
 function stockUrl({ page, perPage, specifications = false }) {
@@ -31,13 +40,16 @@ function stockUrl({ page, perPage, specifications = false }) {
   return url;
 }
 
+function stockDetailUrl(stockId, specifications = false) {
+  const url = new URL(`${origin}${path}/${encodeURIComponent(stockId)}`);
+  url.searchParams.set("dealer_id", dealerId);
+  if (specifications) url.searchParams.set("specifications", "true");
+  return url;
+}
+
 async function request({ page, perPage, specifications = false }) {
   const response = await fetch(stockUrl({ page, perPage, specifications }), {
-    headers: {
-      accept: "application/json",
-      authorization: `Bearer ${secret}`,
-      "user-agent": "VFC-DealerKit-Position-Diagnostic/1.0",
-    },
+    headers: headers(),
     cache: "no-store",
   });
   const text = await response.text();
@@ -61,6 +73,29 @@ async function request({ page, perPage, specifications = false }) {
   };
 }
 
+async function requestDetail(stockId, specifications = false) {
+  const response = await fetch(stockDetailUrl(stockId, specifications), {
+    headers: headers(),
+    cache: "no-store",
+  });
+  const text = await response.text();
+  let payload = null;
+  try { payload = text ? JSON.parse(text) : null; } catch { payload = null; }
+  const row = payload?.data || null;
+  return {
+    ok: response.ok,
+    status: response.status,
+    responseBytes: text.length,
+    row: row ? {
+      id: row?.id ? String(row.id) : null,
+      registration: row?.vehicle?.registration || row?.vehicle?.plate || null,
+      status: row?.status ?? row?.meta?.status ?? null,
+      vehicleType: row?.vehicle?.type || null,
+      updatedAt: row?.updated_at ?? row?.meta?.updated_at ?? null,
+    } : null,
+  };
+}
+
 async function alternateWindowProbes(position) {
   const probes = [];
   for (const perPage of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 17, 20, 25]) {
@@ -79,6 +114,11 @@ async function alternateWindowProbes(position) {
   }
   return probes;
 }
+
+const targetDetail = {
+  withoutSpecifications: await requestDetail(targetStockId, false),
+  withSpecifications: await requestDetail(targetStockId, true),
+};
 
 const first = await request({ page: 1, perPage: blockSize });
 const total = first.total || first.rows.length;
@@ -145,6 +185,8 @@ console.log(JSON.stringify({
   recoveredFromFailedBlocks: recoveredPositions.length,
   failedPositions,
   targetRegistration,
+  targetStockId,
+  targetDetail,
   targetMatches,
 }, null, 2));
 console.log("DEALERKIT POSITION DIAGNOSTIC END");
