@@ -79,8 +79,15 @@ test("one-click send automatically prepares then confirms the same batch", () =>
   assert.match(ui, /oldCancel\.hidden = true/);
 });
 
+test("one-click production send calls the resilient dispatcher directly", () => {
+  const ui = source("public/campaigns/simple-send-flow.js");
+  assert.match(ui, /const SEND_API = "\/api\/marketing-template-campaign-sends-resilient";/);
+  assert.doesNotMatch(ui, /const SEND_API = "\/api\/marketing-template-campaign-sends";/);
+});
+
 test("campaign page loader enables the simple send experience after the legacy foundation loads", () => {
   const loader = source("public/campaigns/campaign-send-payload.js");
   assert.match(loader, /simple-send-flow\.js/);
+  assert.match(loader, /20260915-resilient-endpoint/);
   assert.match(loader, /DOMContentLoaded/);
 });
