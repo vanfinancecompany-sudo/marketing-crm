@@ -43,9 +43,24 @@ export function isMissingDealerKitSourceStateTableError(error) {
 
 export async function syncDealerKitSourceState(supabase, snapshot = {}, { now = new Date() } = {}) {
   const checkedAt = iso(snapshot.checkedAt, now.toISOString());
-  const rows = (snapshot.vehicles || [])
-    .map((vehicle) => dealerKitSourceStatePayload(vehicle, checkedAt))
-    .filter(Boolean);
+  const byRegistration = new Map();
+  for (const vehicle of snapshot.vehicles || []) {
+    const row = dealerKitSourceStatePayload(vehicle, checkedAt);
+    if (!row) continue;
+    const existing = byRegistration.get(row.registration);
+    if (!existing) {
+      byRegistration.set(row.registration, row);
+      continue;
+    }
+
+    // Do not let a duplicate registration make one Supabase upsert affect the
+    // same conflict target twice. Prefer the record with the newest source
+    // timestamp and otherwise keep the first stable identity for diagnostics.
+    const currentTime = new Date(row.source_updated_at || row.last_seen_at || 0).getTime();
+    const existingTime = new Date(existing.source_updated_at || existing.last_seen_at || 0).getTime();
+    if (currentTime > existingTime) byRegistration.set(row.registration, row);
+  }
+  const rows = Array.from(byRegistration.values());
   if (!rows.length) return { available: true, written: 0 };
 
   const { error } = await supabase
