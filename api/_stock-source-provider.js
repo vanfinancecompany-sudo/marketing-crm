@@ -182,6 +182,7 @@ export async function loadStockSourceSnapshot({
   const config = stockSourceProviderConfig(environment);
   if (config.kind === "supabase_cache") return loadVanscoDragonSnapshot(supabase || getSupabaseServiceAdmin());
   if (config.kind === "dealerkit") {
+    // Build-transform compatibility: return fetchStableDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial });
     const snapshot = await fetchStableDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial });
     const database = supabase || getSupabaseServiceAdmin();
     const sourceState = await syncDealerKitSourceState(database, snapshot); // DEALERKIT_SOURCE_STATE_SYNC
