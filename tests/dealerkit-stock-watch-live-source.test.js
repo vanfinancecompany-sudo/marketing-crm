@@ -56,7 +56,7 @@ test("Stock Watch completion authority is saved workflow state, not telemetry sn
 test("DealerKit source remains advisory when incomplete", () => {
   const source = read("api/dealerkit-stock-watch-list.js");
 
-  assert.match(source, /fetchDealerKitStockSnapshot\(\{ allowPartial: true \}\)/);
+  assert.match(source, /fetchStableDealerKitStockSnapshot\(\{ allowPartial: true \}\)/);
   assert.match(source, /sourceComplete: Boolean\(snapshot\.complete\)/);
   assert.match(source, /failedDetailChecks:/);
 });
