@@ -69,6 +69,17 @@ if (!source.includes("DEALERKIT_MISSING_WIX_CONTROLS")) {
     throw new Error("DealerKit missing-stock controls could not find safe reverse-check guidance.");
   }
 
+  // The newer classifier already gives Reserved presence precedence and, more
+  // importantly, suppresses every reverse absence card while the DealerKit snapshot
+  // is incomplete. Mark that routing as satisfied so the older final-safety transform
+  // does not replace it with its weaker one-line reverse comparison.
+  if (!source.includes("DEALERKIT_RESERVED_BUCKET_ROUTING")) {
+    source = source.replace(
+      `  if (!currentlyOnVansco) return { ...baseRecord, displayStatus: "hidden_not_current", matchStatus: "hidden_not_current" };\n  if (!registration) return { ...baseRecord, displayStatus: "hidden_no_registration", matchStatus: "hidden_no_registration" };\n  if (hasExactLocalMatch && reservedOnVansco) return { ...baseRecord, displayStatus: "reserved", matchStatus: "reserved_still_listed" };`,
+      `  // DEALERKIT_RESERVED_BUCKET_ROUTING: Reserved presence wins before absence; reverse absence also requires a complete source snapshot.\n  if (!currentlyOnVansco) return { ...baseRecord, displayStatus: "hidden_not_current", matchStatus: "hidden_not_current" };\n  if (!registration) return { ...baseRecord, displayStatus: "hidden_no_registration", matchStatus: "hidden_no_registration" };\n  if (hasExactLocalMatch && reservedOnVansco) return { ...baseRecord, displayStatus: "reserved", matchStatus: "reserved_still_listed" };`,
+    );
+  }
+
   // The next legacy build transform matches the diagnostics line literally. Keep its
   // anchor compatible without weakening the real dealerKitSnapshotComplete gate above.
   source = source.replace(
