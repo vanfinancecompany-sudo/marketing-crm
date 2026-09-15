@@ -1,5 +1,5 @@
 import { getSupabaseServiceAdmin, normalizeRegistration } from "./_vansco-cache-utils.js";
-import { fetchDealerKitStockSnapshot } from "./_dealerkit-stock-adapter.js";
+import { fetchStableDealerKitStockSnapshot } from "./_dealerkit-stable-stock-snapshot.js";
 
 const DEFAULT_PROVIDER_ID = "dealerkit";
 const CURRENT_PROVIDER_ALIASES = new Set(["vansco", "dragon", "dragon2000", "vansco_dragon"]);
@@ -180,7 +180,7 @@ export async function loadStockSourceSnapshot({
   const config = stockSourceProviderConfig(environment);
   if (config.kind === "supabase_cache") return loadVanscoDragonSnapshot(supabase || getSupabaseServiceAdmin());
   if (config.kind === "dealerkit") {
-    return fetchDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial: false });
+    return fetchStableDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial: false });
   }
   if (config.kind === "normalized_http") return loadNormalizedHttpSnapshot(config, environment, fetchImplementation);
   throw new Error(`Unsupported stock-source provider: ${config.id}. Add an adapter before switching STOCK_SOURCE_PROVIDER_ID.`);
