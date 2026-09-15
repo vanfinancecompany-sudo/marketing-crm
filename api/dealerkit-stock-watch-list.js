@@ -21,8 +21,17 @@ const API_KEY_HEADER = "x-marketing-customer-database-key";
 const RECENT_SOURCE_STATE_DAYS = 3;
 const MAX_TRANSITION_PROBES = 40;
 const TRANSITION_PROBE_CONCURRENCY = 5;
-const DETAIL_RETRY_ATTEMPTS = 3;
+const DETAIL_RETRY_ATTEMPTS = 2;
+const SNAPSHOT_CACHE_TTL_MS = 20_000;
+const DETAIL_CACHE_TTL_MS = 30_000;
+const DETAIL_ERROR_CACHE_TTL_MS = 8_000;
 const RESERVED_WORKFLOW_STATUSES = new Set(["reserved", "sold", "deposit_taken", "awaiting_delivery", "removed_from_dealerkit"]);
+
+let cachedSnapshot = null;
+let cachedSnapshotAt = 0;
+let snapshotInFlight = null;
+const historicalDetailCache = new Map();
+const historicalDetailInFlight = new Map();
 
 function clean(value, limit = 3000) {
   return String(value ?? "").trim().slice(0, limit);
@@ -70,7 +79,32 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function readHistoricalDetail(stockId, loadDetail) {
+async function loadStockWatchSnapshot({ forceFresh = false } = {}) {
+  const now = Date.now();
+  if (!forceFresh && cachedSnapshot && (now - cachedSnapshotAt) < SNAPSHOT_CACHE_TTL_MS) {
+    return cachedSnapshot;
+  }
+  if (!forceFresh && snapshotInFlight) return snapshotInFlight;
+
+  const work = fetchStableDealerKitStockSnapshot({
+    allowPartial: true,
+    // The operator display already exposes degraded-source diagnostics and
+    // registration-first recovery. Do one source pass here; destructive Wix
+    // actions continue to perform their own fresh final verification.
+    stabilityAttempts: 1,
+  }).then((snapshot) => {
+    cachedSnapshot = snapshot;
+    cachedSnapshotAt = Date.now();
+    return snapshot;
+  }).finally(() => {
+    if (snapshotInFlight === work) snapshotInFlight = null;
+  });
+
+  if (!forceFresh) snapshotInFlight = work;
+  return work;
+}
+
+async function readHistoricalDetailUncached(stockId, loadDetail) {
   let lastError = null;
   for (let attempt = 1; attempt <= DETAIL_RETRY_ATTEMPTS; attempt += 1) {
     try {
@@ -82,6 +116,35 @@ async function readHistoricalDetail(stockId, loadDetail) {
     }
   }
   throw lastError || new Error("DealerKit stock detail could not be read.");
+}
+
+async function readHistoricalDetail(stockId, loadDetail) {
+  // Test-injected readers should remain deterministic and uncached.
+  if (loadDetail !== fetchDealerKitStockDetail) return readHistoricalDetailUncached(stockId, loadDetail);
+
+  const key = clean(stockId, 300);
+  const now = Date.now();
+  const cached = historicalDetailCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    if (cached.error) throw cached.error;
+    return cached.detail;
+  }
+  if (historicalDetailInFlight.has(key)) return historicalDetailInFlight.get(key);
+
+  const work = readHistoricalDetailUncached(key, loadDetail)
+    .then((detail) => {
+      historicalDetailCache.set(key, { detail, error: null, expiresAt: Date.now() + DETAIL_CACHE_TTL_MS });
+      return detail;
+    })
+    .catch((error) => {
+      const ttl = isDetailNotFound(error) ? DETAIL_CACHE_TTL_MS : DETAIL_ERROR_CACHE_TTL_MS;
+      historicalDetailCache.set(key, { detail: null, error, expiresAt: Date.now() + ttl });
+      throw error;
+    })
+    .finally(() => historicalDetailInFlight.delete(key));
+
+  historicalDetailInFlight.set(key, work);
+  return work;
 }
 
 async function mapWithConcurrency(items, concurrency, worker) {
@@ -318,9 +381,10 @@ export default async function handler(request, response) {
     const pipeline = ["finance", "rent2buy", "cars"].includes(clean(request.query?.pipeline, 30).toLowerCase())
       ? clean(request.query.pipeline, 30).toLowerCase()
       : "finance";
+    const forceFresh = ["1", "true", "yes"].includes(clean(request.query?.fresh, 20).toLowerCase());
     const supabase = getSupabaseServiceAdmin();
     const [snapshot, actionsResult] = await Promise.all([
-      fetchStableDealerKitStockSnapshot({ allowPartial: true }),
+      loadStockWatchSnapshot({ forceFresh }),
       supabase.from(WATCH_TABLE).select("*").eq("pipeline", pipeline).limit(2000),
     ]);
     if (actionsResult.error) throw new Error(`Could not read Stock Watch decisions: ${actionsResult.error.message || actionsResult.error}`);
