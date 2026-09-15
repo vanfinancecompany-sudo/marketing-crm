@@ -61,6 +61,25 @@ async function request({ page, perPage, specifications = false }) {
   };
 }
 
+async function alternateWindowProbes(position) {
+  const probes = [];
+  for (const perPage of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 17, 20, 25]) {
+    const page = Math.floor((position - 1) / perPage) + 1;
+    const result = await request({ page, perPage });
+    const recovered = result.rows.find((row) => row.position === position) || null;
+    probes.push({
+      perPage,
+      page,
+      ok: result.ok,
+      status: result.status,
+      responseBytes: result.responseBytes,
+      total: result.total,
+      recovered,
+    });
+  }
+  return probes;
+}
+
 const first = await request({ page: 1, perPage: blockSize });
 const total = first.total || first.rows.length;
 const pageCount = Math.max(1, Math.ceil(total / blockSize));
@@ -93,6 +112,14 @@ for (const block of failedBlocks) {
 
     const withSpecifications = await request({ page: position, perPage: 1, specifications: true });
     const specsRow = withSpecifications.ok ? withSpecifications.rows[0] || null : null;
+    const alternateWindows = await alternateWindowProbes(position);
+    const alternateRecovered = alternateWindows.find((probe) => probe.recovered)?.recovered || null;
+    if (alternateRecovered) {
+      recoveredPositions.push(alternateRecovered);
+      if (compactRegistration(alternateRecovered.registration) === targetRegistration) {
+        targetMatches.push({ source: `alternate-${position}`, ...alternateRecovered });
+      }
+    }
     failedPositions.push({
       position,
       basic: { ok: single.ok, status: single.status, responseBytes: single.responseBytes },
@@ -102,8 +129,9 @@ for (const block of failedBlocks) {
         responseBytes: withSpecifications.responseBytes,
         row: specsRow,
       },
+      alternateRecovered,
+      alternateWindows,
     });
-    if (specsRow && compactRegistration(specsRow.registration) === targetRegistration) targetMatches.push({ source: `specs-${position}`, ...specsRow });
   }
 }
 
