@@ -21,6 +21,7 @@ const API_KEY_HEADER = "x-marketing-customer-database-key";
 const RECENT_SOURCE_STATE_DAYS = 3;
 const MAX_TRANSITION_PROBES = 40;
 const TRANSITION_PROBE_CONCURRENCY = 5;
+const RESERVED_WORKFLOW_STATUSES = new Set(["reserved", "sold", "deposit_taken", "awaiting_delivery", "removed_from_dealerkit"]);
 
 function clean(value, limit = 3000) {
   return String(value ?? "").trim().slice(0, limit);
@@ -47,6 +48,12 @@ function normalizedSourceStatus(vehicle = {}) {
   const status = clean(vehicle.status || vehicle.availability || vehicle.sourceStatus, 100).toLowerCase();
   if (["available", "due_in", "reserved", "sold", "deposit_taken", "awaiting_delivery", "removed_from_dealerkit"].includes(status)) return status;
   return status || "unknown";
+}
+
+function workflowSourceStatus(vehicle = {}) {
+  const lifecycleStatus = normalizedSourceStatus(vehicle);
+  if (["awaiting_delivery", "removed_from_dealerkit"].includes(lifecycleStatus)) return "reserved";
+  return lifecycleStatus;
 }
 
 function isDetailNotFound(error) {
@@ -140,6 +147,7 @@ function vehicleRecord(vehicle, action = null) {
   const workflowStatus = clean(action?.workflowStatus || action?.workflow_status, 100).toLowerCase();
   const checkedAt = vehicle.checkedAt || vehicle.sourceUpdatedAt || new Date().toISOString();
   const segmentation = classifyDealerKitVehicle(vehicle);
+  const lifecycleStatus = normalizedSourceStatus(vehicle);
   return {
     id: `dealerkit-${clean(vehicle.supplierStockId, 300)}`,
     vehicleKey: clean(vehicle.supplierStockId, 300),
@@ -154,7 +162,8 @@ function vehicleRecord(vehicle, action = null) {
     advertisedPrice: Number.isFinite(Number(vehicle.retailPrice)) ? Number(vehicle.retailPrice) : null,
     advertisedPriceText: Number.isFinite(Number(vehicle.retailPrice)) ? `£${Number(vehicle.retailPrice).toLocaleString("en-GB", { maximumFractionDigits: 2 })}` : "",
     vatStatus: clean(vehicle.vatStatus, 50) || "unknown",
-    sourceStatus: normalizedSourceStatus(vehicle),
+    sourceStatus: workflowSourceStatus(vehicle),
+    sourceLifecycleStatus: lifecycleStatus,
     sourceResolution: clean(vehicle.sourceResolution, 100),
     lastKnownSourceStatus: clean(vehicle.lastKnownSourceStatus, 100),
     lastSeenInDealerKitAt: vehicle.lastSeenInDealerKitAt || null,
@@ -200,6 +209,7 @@ function orphanActionRecord(action, pipeline) {
     stockUrl: clean(action.stockUrl || action.stock_url, 3000),
     sourceUrl: "",
     sourceStatus: "unknown",
+    sourceLifecycleStatus: "unknown",
     isCurrentlyOnVansco: true,
     workflowStatus,
     workflow_status: workflowStatus,
@@ -261,7 +271,7 @@ export default async function handler(request, response) {
 
     const usableRegistrations = records.filter((record) => record.registration).length;
     const availableCount = sourceVehicles.filter((vehicle) => ["available", "due_in"].includes(normalizedSourceStatus(vehicle))).length;
-    const reservedCount = sourceVehicles.filter((vehicle) => ["reserved", "sold", "deposit_taken", "awaiting_delivery", "removed_from_dealerkit"].includes(normalizedSourceStatus(vehicle))).length;
+    const reservedCount = sourceVehicles.filter((vehicle) => RESERVED_WORKFLOW_STATUSES.has(normalizedSourceStatus(vehicle))).length;
 
     response.status(200).json({
       ok: true,
