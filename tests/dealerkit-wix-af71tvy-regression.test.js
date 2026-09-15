@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { fetchStableDealerKitStockSnapshot } from "../api/_dealerkit-stable-stock-snapshot.js";
 import { verifyDealerKitMissingRegistration } from "../api/finance-missing-dealerkit-wix-stock.js";
 
@@ -122,6 +123,80 @@ test("AF71TVY total drift is retried from page one and a stable Reserved snapsho
   assert.ok(af71tvy);
   assert.equal(af71tvy.status, "reserved");
   assert.equal(af71tvy.sourceStatus, "Reserved");
+});
+
+test("AF71TVY transient failed position is retried and resolves as Reserved", async () => {
+  let listAttempt = 0;
+
+  const fetchImplementation = async (input) => {
+    const url = new URL(String(input));
+    const page = Number(url.searchParams.get("page"));
+    const perPage = Number(url.searchParams.get("per_page"));
+
+    if (perPage === 2 && page === 1) {
+      listAttempt += 1;
+      return response(200, {
+        data: [
+          listing({ id: "stock-a", registration: "AA11 AAA" }),
+          listing({ id: "stock-b", registration: "BB22 BBB" }),
+        ],
+        meta: { total: 4, current_page: 1, last_page: 2, per_page: 2 },
+      });
+    }
+
+    if (perPage === 2 && page === 2 && listAttempt === 1) {
+      return response(500, { message: "Transient DealerKit page failure" });
+    }
+
+    if (perPage === 1 && page === 3 && listAttempt === 1) {
+      return response(200, {
+        data: [listing({ id: "stock-c", registration: "CC33 CCC" })],
+        meta: { total: 4, current_page: 3, last_page: 4, per_page: 1 },
+      });
+    }
+
+    if (perPage === 1 && page === 4 && listAttempt === 1) {
+      return response(500, { message: "AF71TVY row temporarily unreadable" });
+    }
+
+    if (perPage === 2 && page === 2 && listAttempt === 2) {
+      return response(200, {
+        data: [
+          listing({ id: "stock-c", registration: "CC33 CCC" }),
+          listing({ id: "stock-af71tvy", registration: "AF71 TVY", status: "Reserved" }),
+        ],
+        meta: { total: 4, current_page: 2, last_page: 2, per_page: 2 },
+      });
+    }
+
+    throw new Error(`Unexpected DealerKit request: ${url.toString()}`);
+  };
+
+  const snapshot = await fetchStableDealerKitStockSnapshot({
+    environment: ENV,
+    fetchImplementation,
+    perPage: 2,
+  });
+
+  assert.equal(snapshot.complete, true);
+  assert.equal(snapshot.vehicleCount, 4);
+  assert.equal(snapshot.diagnostics.stability.attemptsUsed, 2);
+  assert.equal(snapshot.diagnostics.stability.attempts[0].failedPositions, 1);
+  assert.equal(snapshot.diagnostics.stability.attempts[0].retryableIncomplete, true);
+  assert.equal(snapshot.diagnostics.stability.attempts[1].complete, true);
+
+  const af71tvy = snapshot.vehicles.find((vehicle) => vehicle.registration === "AF71TVY");
+  assert.ok(af71tvy);
+  assert.equal(af71tvy.status, "reserved");
+  assert.equal(af71tvy.sourceStatus, "Reserved");
+});
+
+test("incomplete DealerKit snapshots cannot manufacture My stock not on DealerKit cards", () => {
+  const pageSource = fs.readFileSync(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
+
+  assert.match(pageSource, /const dealerKitSnapshotComplete = cacheSummary\?\.sourceComplete === true/);
+  assert.match(pageSource, /if \(!dealerKitSnapshotComplete\) return \[\]/);
+  assert.match(pageSource, /No CRM vehicle is classified as absent until a complete DealerKit snapshot proves it/);
 });
 
 test("AF71TVY still cannot be treated as missing when no presence is seen in an incomplete snapshot", async () => {
