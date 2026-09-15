@@ -202,7 +202,7 @@ function buildFinancePriceDifferences(vanscoRecords, financeVehicles) {
     if (vanscoVatStatus === "unknown" || localVatStatus === "unknown" || vanscoVatStatus !== localVatStatus) return [];
 
     const localStockUrl = localVehicle.weblink || localVehicle.webLink || localVehicle.link || "";
-    const localImage = localVehicle.image || localVehicle.picture || localVehicle.imageUrl || vehicle.image_url || "";
+    const localImage = localVehicle.image || localVehicle.picture || localVehicle.imageUrl || localVehicle.image_url || "";
     const difference = localPrice - vanscoPrice;
     return [{
       ...record,
