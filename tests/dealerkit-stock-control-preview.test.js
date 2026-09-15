@@ -1,55 +1,34 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { summariseDealerKitPreview } from "../api/dealerkit-stock-preview.js";
 
-test("summarises DealerKit coverage, statuses, types and image readiness without exposing source records", () => {
-  const summary = summariseDealerKitPreview({
-    complete: false,
-    checkedAt: "2026-09-10T11:30:00.000Z",
-    apiReportedTotal: 6,
-    vehicleCount: 4,
-    vehicles: [
-      { sourceStatus: "In Stock", vehicleType: "LCV", imageCount: 0 },
-      { sourceStatus: "In Stock", vehicleType: "LCV", imageCount: 1 },
-      { sourceStatus: "Reserved", vehicleType: "Car", imageCount: 3 },
-      { sourceStatus: "Awaiting Delivery", vehicleType: "LCV", imageCount: 8 },
-    ],
-    diagnostics: {
-      failedPages: [{ page: 3 }],
-      failedPositions: [{ position: 5 }],
-      invalidRecords: [{ position: 6 }],
-      duplicateRegistrations: [],
-      stableReportedTotal: true,
-    },
-  });
+const root = new URL("../", import.meta.url);
 
-  assert.equal(summary.providerId, "dealerkit");
-  assert.equal(summary.complete, false);
-  assert.equal(summary.apiReportedTotal, 6);
-  assert.equal(summary.vehicleCount, 4);
-  assert.equal(summary.coveragePercent, 66.7);
-  assert.deepEqual(summary.statusCounts, {
-    "In Stock": 2,
-    Reserved: 1,
-    "Awaiting Delivery": 1,
-  });
-  assert.deepEqual(summary.typeCounts, { LCV: 3, Car: 1 });
-  assert.deepEqual(summary.images, {
-    zero: 1,
-    one: 1,
-    twoToFour: 1,
-    fivePlus: 1,
-    withAny: 3,
-  });
-  assert.deepEqual(summary.issues, {
-    failedPageCount: 1,
-    failedPositionCount: 1,
-    invalidRecordCount: 1,
-    duplicateRegistrationCount: 0,
-    stableReportedTotal: true,
-  });
-  assert.equal(Object.prototype.hasOwnProperty.call(summary, "vehicles"), false);
+function read(relativePath) {
+  return fs.readFileSync(new URL(relativePath, root), "utf8");
+}
+
+test("DealerKit operator adapter is read-only and maps live stock into the existing contract", () => {
+  const adapter = read("api/_dealerkit-stock-adapter.js");
+  assert.match(adapter, /https:\/\/api\.dealerkit\.uk/);
+  assert.match(adapter, /\/integrators\/stock/);
+  assert.match(adapter, /authorization: `Bearer \${secret}`/);
+  assert.match(adapter, /method: "GET"/);
+  assert.match(adapter, /normaliseStatus/);
+  assert.match(adapter, /normaliseVatStatus/);
+  assert.match(adapter, /supplierStockId/);
+  assert.match(adapter, /sourceStatus/);
+  assert.match(adapter, /retailPrice/);
+  assert.match(adapter, /primaryImage/);
+  assert.doesNotMatch(adapter, /method:\s*"(?:POST|PUT|PATCH|DELETE)"/);
+});
+
+test("DealerKit stock preview is access-gated and returns summary only", () => {
+  const preview = read("api/dealerkit-stock-preview.js");
+  assert.match(preview, /Marketing CRM access is required/);
+  assert.match(preview, /fetchDealerKitStockSnapshot/);
+  assert.match(preview, /summariseStock/);
+  assert.doesNotMatch(preview, /response\.status\(200\)\.json\(\{\s*ok:\s*true,\s*stock:/);
 });
 
 test("Stock Control Centre keeps original buttons/cards but routes the operator engine to DealerKit", () => {
@@ -72,7 +51,8 @@ test("Stock Control Centre keeps original buttons/cards but routes the operator 
 test("DealerKit Stock Watch list is access-gated and maps the supplier feed into the original card contract", () => {
   const endpoint = fs.readFileSync(new URL("../api/dealerkit-stock-watch-list.js", import.meta.url), "utf8");
   assert.match(endpoint, /Marketing CRM access is required/);
-  assert.match(endpoint, /fetchStableDealerKitStockSnapshot\(\{ allowPartial: true \}\)/);
+  assert.match(endpoint, /fetchStableDealerKitStockSnapshot\(\{[\s\S]*allowPartial: true,[\s\S]*stabilityAttempts: 1,[\s\S]*\}\)/);
+  assert.match(endpoint, /loadStockWatchSnapshot\(\{ forceFresh \}\)/);
   assert.match(endpoint, /supplierStockId/);
   assert.match(endpoint, /providerId: "dealerkit"/);
   assert.match(endpoint, /isCurrentlyOnVansco: true/);
