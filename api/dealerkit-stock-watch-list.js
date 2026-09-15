@@ -1,4 +1,4 @@
-import { fetchDealerKitStockSnapshot } from "./_dealerkit-stock-adapter.js";
+import { fetchStableDealerKitStockSnapshot } from "./_dealerkit-stable-stock-snapshot.js";
 import {
   WATCH_TABLE,
   getSupabaseServiceAdmin,
@@ -130,7 +130,7 @@ export default async function handler(request, response) {
       : "finance";
     const supabase = getSupabaseServiceAdmin();
     const [snapshot, actionsResult] = await Promise.all([
-      fetchDealerKitStockSnapshot({ allowPartial: true }),
+      fetchStableDealerKitStockSnapshot({ allowPartial: true }),
       supabase.from(WATCH_TABLE).select("*").eq("pipeline", pipeline).limit(2000),
     ]);
     if (actionsResult.error) throw new Error(`Could not read Stock Watch decisions: ${actionsResult.error.message || actionsResult.error}`);
