@@ -11,7 +11,7 @@
   function loadSimpleSendFlow() {
     if (document.querySelector('script[data-simple-send-flow="true"]')) return;
     const script = document.createElement("script");
-    script.src = "/campaigns/simple-send-flow.js?v=20260826-one-click-progress";
+    script.src = "/campaigns/simple-send-flow.js?v=20260915-resilient-endpoint";
     script.dataset.simpleSendFlow = "true";
     document.body.appendChild(script);
   }
