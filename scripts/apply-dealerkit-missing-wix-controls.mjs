@@ -80,6 +80,19 @@ if (!source.includes("DEALERKIT_MISSING_WIX_CONTROLS")) {
     );
   }
 
+  // The old final-safety transform also carried a few display-name replacements in
+  // the same block as its weaker reverse-comparison rewrite. Preserve those names
+  // separately now that the routing block is intentionally skipped.
+  const copyReplacements = [
+    ["current Vansco cache for this tab", "current DealerKit stock data for this tab"],
+    ["Could not load Vansco Stock Watch cache.", "Could not load DealerKit Stock Watch data."],
+    ["Could not refresh Vansco cache.", "Could not refresh DealerKit stock data."],
+    ["saved Vansco cache", "saved DealerKit stock data"],
+    ["Saved Vansco cache records", "Saved DealerKit stock records"],
+    ["Loading Vansco comparison...", "Loading DealerKit comparison..."],
+  ];
+  for (const [before, after] of copyReplacements) source = source.split(before).join(after);
+
   // The next legacy build transform matches the diagnostics line literally. Keep its
   // anchor compatible without weakening the real dealerKitSnapshotComplete gate above.
   source = source.replace(
