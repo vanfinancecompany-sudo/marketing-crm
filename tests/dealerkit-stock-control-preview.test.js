@@ -27,7 +27,7 @@ test("DealerKit stock preview is access-gated and returns summary only", () => {
   const preview = read("api/dealerkit-stock-preview.js");
   assert.match(preview, /Marketing CRM access is required/);
   assert.match(preview, /fetchDealerKitStockSnapshot/);
-  assert.match(preview, /summariseStock/);
+  assert.match(preview, /summariseDealerKitPreview/);
   assert.doesNotMatch(preview, /response\.status\(200\)\.json\(\{\s*ok:\s*true,\s*stock:/);
 });
 
