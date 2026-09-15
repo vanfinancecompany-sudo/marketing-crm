@@ -66,6 +66,12 @@ test("live recipient states advance the progress bar before the parent row refre
   assert.equal(progress.progress_percent, 80);
 });
 
+test("campaign contact exclusion pagination uses immutable recipient ordering", () => {
+  const controls = source("lib/marketingCampaignContactControls.js");
+  const orderedPages = controls.match(/\.order\("id", \{ ascending: true \}\)\s*\.range\(from, from \+ 999\)/g) || [];
+  assert.equal(orderedPages.length, 2);
+});
+
 test("one-click send automatically prepares then confirms the same batch", () => {
   const ui = source("public/campaigns/simple-send-flow.js");
   assert.match(ui, /prepareProductionSend/);
