@@ -266,6 +266,73 @@ async function setDraftMatch(match) {
   };
 }
 
+export async function processReservedFinanceDraftMatches(
+  registration,
+  matches,
+  {
+    verifyReserved = verifyReservedInVansco,
+    findMatches = findRegistrationInCollection,
+    draftMatch = setDraftMatch,
+  } = {}
+) {
+  const results = [];
+
+  // Wix UPDATE_PUBLISH_STATUS is a background-task API. Run collection writes one at a time.
+  // Parallel task creation caused intermittent multi-collection failures in production.
+  for (const originalMatch of matches) {
+    const collection = {
+      id: originalMatch.collectionId,
+      label: originalMatch.collectionLabel || originalMatch.collectionId,
+    };
+
+    try {
+      await verifyReserved(registration);
+      const currentMatches = await findMatches(collection, registration);
+      const currentMatch = currentMatches.find((match) => match.itemId === originalMatch.itemId);
+
+      if (!currentMatch) {
+        results.push({
+          ok: true,
+          changed: false,
+          skipped: true,
+          collectionId: originalMatch.collectionId,
+          collectionLabel: originalMatch.collectionLabel,
+          itemId: originalMatch.itemId,
+          message: "Already not live when this collection was rechecked.",
+        });
+        continue;
+      }
+
+      const changed = await draftMatch(currentMatch);
+      const remainingMatches = await findMatches(collection, registration);
+      if (remainingMatches.some((match) => match.itemId === currentMatch.itemId)) {
+        throw new Error(`${collection.label} still reports the item as live after Wix completed the Draft task.`);
+      }
+
+      results.push({ ok: true, changed: true, ...changed });
+    } catch (error) {
+      const message = clean(error?.message || error || "Could not move item to draft.");
+      console.error("FINANCE RESERVED WIX COLLECTION ACTION ERROR", {
+        registration,
+        collectionId: originalMatch.collectionId,
+        collectionLabel: originalMatch.collectionLabel,
+        itemId: originalMatch.itemId,
+        message: message.slice(0, 1000),
+      });
+      results.push({
+        ok: false,
+        changed: false,
+        collectionId: originalMatch.collectionId,
+        collectionLabel: originalMatch.collectionLabel,
+        itemId: originalMatch.itemId,
+        error: message,
+      });
+    }
+  }
+
+  return results;
+}
+
 export async function unpublishReservedFinanceWixStock(registrationValue) {
   const registration = normalizeRegistration(registrationValue);
   if (!registration) throw new Error("A valid vehicle registration is required.");
@@ -278,37 +345,37 @@ export async function unpublishReservedFinanceWixStock(registrationValue) {
       registration,
       vansco,
       changed: 0,
+      attempted: 0,
       results: [],
+      preview,
       message: "This registration is not live in any approved Van Finance Wix stock collection.",
       protectedCollection: preview.protectedCollection,
     };
   }
 
-  const settled = await Promise.allSettled(preview.matches.map(setDraftMatch));
-  const results = settled.map((result, index) => {
-    const match = preview.matches[index];
-    if (result.status === "fulfilled") return { ok: true, ...result.value };
-    return {
-      ok: false,
-      collectionId: match.collectionId,
-      collectionLabel: match.collectionLabel,
-      itemId: match.itemId,
-      error: clean(result.reason?.message || result.reason || "Could not move item to draft."),
-    };
-  });
+  const results = await processReservedFinanceDraftMatches(registration, preview.matches);
+  const refreshedPreview = await previewFinanceWixStock(registration);
   const failures = results.filter((result) => !result.ok);
+  const changed = results.filter((result) => result.ok && result.changed).length;
+  const remaining = refreshedPreview.matches.length;
+  const ok = failures.length === 0 && remaining === 0;
 
   return {
-    ok: failures.length === 0,
+    ok,
     registration,
     vansco,
-    changed: results.filter((result) => result.ok).length,
+    changed,
+    attempted: preview.matches.length,
     results,
     failures: failures.length,
+    remaining,
+    preview: refreshedPreview,
     protectedCollection: preview.protectedCollection,
     message: failures.length
-      ? `${failures.length} collection action(s) failed. Successful collections remain in draft; review the results before retrying.`
-      : `Moved ${results.length} matching Van Finance Wix record(s) to draft.`,
+      ? `${failures.length} collection action(s) failed. Successful collections remain in draft; review the error shown for each failed collection before retrying.`
+      : remaining
+        ? `${remaining} live Finance record(s) still remain after the Draft action. Recheck before retrying.`
+        : `Moved ${changed} matching Van Finance Wix record(s) to draft.`,
   };
 }
 
