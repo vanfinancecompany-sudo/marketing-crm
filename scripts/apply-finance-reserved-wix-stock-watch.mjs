@@ -85,7 +85,7 @@ import {
     try {
       const result = await unpublishReservedFinanceWixStock(record.registration);
       setWixDraftResult(result);
-      const refreshed = await previewReservedFinanceWixStock(record.registration);
+      const refreshed = result?.preview || await previewReservedFinanceWixStock(record.registration);
       setWixPreview(refreshed);
       if (result.ok && (refreshed.matches || []).length === 0) {
         const completed = await saveVanscoWatchAction({
@@ -154,8 +154,12 @@ import {
             )}
             {wixDraftResult ? (
               <div style={{ borderRadius: 8, padding: "7px 8px", background: wixDraftResult.ok ? "#ecfdf5" : "#fff7ed", color: wixDraftResult.ok ? "#047857" : "#9a3412", fontSize: 10, lineHeight: 1.45, fontWeight: 800 }}>
-                {wixDraftResult.message || ((wixDraftResult.changed || 0) + " record(s) moved to draft.")}
-                {(wixDraftResult.results || []).length ? (" " + wixDraftResult.results.map((item) => item.collectionLabel + ": " + (item.ok ? "Draft ✓" : "Failed")).join(" · ")) : ""}
+                <div>{wixDraftResult.message || ((wixDraftResult.changed || 0) + " record(s) moved to draft.")}</div>
+                {(wixDraftResult.results || []).map((item) => (
+                  <div key={item.collectionId + ":" + item.itemId} style={{ marginTop: 3 }}>
+                    {item.collectionLabel}: {item.ok ? (item.skipped ? "Already not live ✓" : "Draft ✓") : ("Failed — " + (item.error || "No error detail returned."))}
+                  </div>
+                ))}
               </div>
             ) : null}
             {wixActionError ? <div style={{ borderRadius: 8, padding: "7px 8px", background: "#fff7ed", color: "#9a3412", fontSize: 10, lineHeight: 1.45, fontWeight: 800 }}>{wixActionError}</div> : null}
