@@ -136,14 +136,14 @@ patch(
     let providerError = "";
     let providerDiagnostics = null;
     try {
-      provider = await loadStockSourceSnapshot({ supabase, environment, fetchImplementation, allowPartial: true });
+      provider = await loadStockSourceSnapshot({ supabase, environment, fetchImplementation, allowPartial: true, stabilityAttempts: 1 });
       providerDiagnostics = provider?.diagnostics && typeof provider.diagnostics === "object" ? provider.diagnostics : null;
     } catch (error) {
       providerError = clean(error?.message || error, 2000);
       providerDiagnostics = error?.diagnostics && typeof error.diagnostics === "object" ? error.diagnostics : null;
     }`,
   "provider diagnostic capture and degraded monitor read",
-  "allowPartial: true });\n      providerDiagnostics = provider?.diagnostics"
+  "allowPartial: true, stabilityAttempts: 1 });\n      providerDiagnostics = provider?.diagnostics"
 );
 
 patch(

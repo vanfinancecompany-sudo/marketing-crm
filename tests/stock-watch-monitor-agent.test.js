@@ -131,6 +131,14 @@ test("provider config is swappable without changing monitor business rules", () 
   assert.deepEqual(stockSourceProviderConfig({ STOCK_SOURCE_PROVIDER_ID: "normalized_http", STOCK_SOURCE_PROVIDER_LABEL: "Monday Provider" }), { id: "normalized_http", label: "Monday Provider", kind: "normalized_http", switchReady: true });
 });
 
+test("DealerKit monitor uses one degraded-source pass so the 15-minute cron cannot loop over the same broken feed", () => {
+  const source = fs.readFileSync(new URL("../scripts/apply-dealerkit-readiness-monitor-fix.mjs", import.meta.url), "utf8");
+  const provider = fs.readFileSync(new URL("../api/_stock-source-provider.js", import.meta.url), "utf8");
+  assert.match(source, /allowPartial: true, stabilityAttempts: 1/);
+  assert.match(provider, /stabilityAttempts = undefined/);
+  assert.match(provider, /fetchStableDealerKitStockSnapshot\(\{ environment, fetchImplementation, allowPartial, stabilityAttempts \}\)/);
+});
+
 test("monitor agent is advisory-only and AI is anomaly-gated", () => {
   const source = fs.readFileSync(new URL("../api/stock-watch-monitor-agent.js", import.meta.url), "utf8");
   assert.doesNotMatch(source, /method:\s*["']DELETE["']/i);
