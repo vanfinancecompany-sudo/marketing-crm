@@ -144,6 +144,7 @@ function classifyWatchRecord(record, localRegistrationSet, selectedPipeline, fin
   const hasFinanceMatchForCars = selectedPipeline === "cars" && !hasExactLocalMatch && Boolean(registration && financeRegistrationsForCars?.has(registration));
   const workflowStatus = workflowStatusOf(record);
   const reservedOnVansco = isReservedLikeStatus(record.sourceStatus);
+  const currentDealerKitBulkPresence = record.isCurrentDealerKitBulkRecord === true;
   const currentlyOnVansco = record.isCurrentlyOnVansco !== false;
   const baseRecord = { ...record, pipeline: selectedPipeline, workflowStatus, safeExactRegistrationMatch: hasExactLocalMatch, financeStockMatchForCars: hasFinanceMatchForCars };
 
@@ -155,7 +156,12 @@ function classifyWatchRecord(record, localRegistrationSet, selectedPipeline, fin
   if (isNeverShowStatus(workflowStatus)) return { ...baseRecord, displayStatus: "never", matchStatus: "never_show_again" };
   if (isAdvertisedStatus(workflowStatus)) return { ...baseRecord, displayStatus: "advertised", matchStatus: "advertised_awaiting_refresh" };
   if (isTemporaryHiddenStatus(workflowStatus)) {
-    if (!reservedOnVansco) return { ...baseRecord, displayStatus: "back_in_stock", matchStatus: "hidden_back_in_stock" };
+    // "Back in stock" must be backed by a positive sighting in the current
+    // DealerKit bulk feed. A historical/detail-only lookup can help explain a
+    // lifecycle transition, but must not manufacture a return-to-stock signal.
+    if (!reservedOnVansco && currentDealerKitBulkPresence) {
+      return { ...baseRecord, displayStatus: "back_in_stock", matchStatus: "hidden_back_in_stock" };
+    }
     return { ...baseRecord, displayStatus: "hidden", matchStatus: "hidden" };
   }
   if (reservedOnVansco) return { ...baseRecord, displayStatus: "hidden_reserved_not_advertised", matchStatus: "hidden_reserved_not_advertised" };
@@ -583,7 +589,7 @@ export default function VanscoStockWatchPage() {
         {selectedPipeline === "finance" ? <div className="vansco-watch-note"><strong>Price differences:</strong> Van Finance only. It compares exact registration matches where both prices and VAT basis are clear. It never changes Wix or DealerKit prices.</div> : null}
         <div className="vansco-watch-note"><strong>Daytime workflow:</strong> when you advertise a Missing vehicle, use <strong>Mark as advertised</strong>. It leaves Missing immediately and remains in Advertised / Awaiting refresh until the registration appears in this CRM stock tab.</div>
         <div className={`vansco-watch-note${dealerKitSnapshotComplete ? "" : " vansco-watch-note--warning"}`}><strong>My stock not on DealerKit:</strong> {dealerKitSnapshotComplete ? "this reverse registration check shows active CRM vehicles absent from a complete DealerKit feed." : "temporarily suspended because the current DealerKit snapshot is incomplete. No CRM vehicle is classified as absent until a complete DealerKit snapshot proves it."}</div>
-        <div className="vansco-watch-note"><strong>Back in stock rule:</strong> a hidden vehicle returns here when DealerKit shows it available again and it is not already in this CRM stock tab. Use <strong>Never show again</strong> for vehicles you will not advertise.</div>
+        <div className="vansco-watch-note"><strong>Back in stock rule:</strong> a hidden vehicle returns here only when the current DealerKit bulk stock feed positively shows it available again and it is not already in this CRM stock tab. Use <strong>Never show again</strong> for vehicles you will not advertise.</div>
         <div className="vansco-watch-note"><strong>Accuracy check:</strong> {pipelineLabel(selectedPipeline)} has {activeLocalRegistrations.size} local CRM registrations loaded.{cacheSummary ? ` DealerKit supplied ${cacheSummary.currentPipelineUrlCount ?? "?"} correctly segmented records for this tab and ${cacheSummary.usableCachedRegistrations ?? cacheSummary.cachedRegs ?? "?"} usable registrations. Source snapshot: ${dealerKitSnapshotComplete ? "complete" : "incomplete"}.` : ""}{lastCheckedAt ? ` Latest source check: ${formatWatchTimestamp(lastCheckedAt)}.` : ""}</div>
         {selectedPipeline === "cars" ? <div className="vansco-watch-note"><strong>Cars secondary check:</strong> Cars stay separate, but this view also checks {financeRegistrationsForCars.size} active Van Finance registrations so Cars already advertised through Van Finance do not stay in Missing.</div> : null}
         {selectedPipeline === "cars" ? <div className="vansco-watch-note vansco-watch-note--warning">Cars local stock source is not confirmed yet. This page loaded {activeLocalRegistrations.size} local Cars registrations. Check the Cars Supabase table name/fields before relying on Cars results.</div> : null}

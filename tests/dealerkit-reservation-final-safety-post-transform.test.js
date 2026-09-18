@@ -71,12 +71,14 @@ test("Finance and Rent2Buy preserve the old reserved completion state machine af
     const advertised = new Set(["LJ19JBT"]);
     const empty = new Set();
     const reserved = { registration: "LJ19JBT", sourceStatus: "reserved", isCurrentlyOnVansco: true };
-    const available = { registration: "LJ19JBT", sourceStatus: "available", isCurrentlyOnVansco: true };
+    const available = { registration: "LJ19JBT", sourceStatus: "available", isCurrentlyOnVansco: true, isCurrentDealerKitBulkRecord: true };
+    const detailOnlyAvailable = { registration: "LJ19JBT", sourceStatus: "available", isCurrentlyOnVansco: true, isCurrentDealerKitBulkRecord: false };
 
     assert.equal(classify(reserved, advertised, pipeline).displayStatus, "reserved", `${pipeline}: live + reserved stays actionable`);
     assert.equal(classify(reserved, empty, pipeline).displayStatus, "hidden_reserved_not_advertised", `${pipeline}: reserved + zero advertising is finished`);
     assert.equal(classify({ ...reserved, workflowStatus: "ignored" }, empty, pipeline).displayStatus, "hidden", `${pipeline}: ignored completion stays hidden while reserved`);
-    assert.equal(classify({ ...available, workflowStatus: "ignored" }, empty, pipeline).displayStatus, "back_in_stock", `${pipeline}: completed vehicle returns when supplier becomes available`);
+    assert.equal(classify({ ...available, workflowStatus: "ignored" }, empty, pipeline).displayStatus, "back_in_stock", `${pipeline}: completed vehicle returns when the current DealerKit bulk feed shows it available`);
+    assert.equal(classify({ ...detailOnlyAvailable, workflowStatus: "ignored" }, empty, pipeline).displayStatus, "hidden", `${pipeline}: detail-only availability cannot manufacture a Back in stock card`);
     assert.equal(classify({ ...reserved, workflowStatus: "not_listing_spec" }, empty, pipeline).displayStatus, "never", `${pipeline}: permanent suppression survives reserved status`);
     assert.equal(classify({ ...reserved, workflowStatus: "ignored" }, advertised, pipeline).displayStatus, "reserved", `${pipeline}: re-advertised reserved stock becomes actionable again`);
   }
