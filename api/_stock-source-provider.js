@@ -178,12 +178,13 @@ export async function loadStockSourceSnapshot({
   environment = process.env,
   fetchImplementation = fetch,
   allowPartial = false,
+  stabilityAttempts = undefined,
 } = {}) {
   const config = stockSourceProviderConfig(environment);
   if (config.kind === "supabase_cache") return loadVanscoDragonSnapshot(supabase || getSupabaseServiceAdmin());
   if (config.kind === "dealerkit") {
-    // Build-transform compatibility: return fetchStableDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial });
-    const snapshot = await fetchStableDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial });
+    // Build-transform compatibility: bounded monitor/display reads can opt into one stability pass.
+    const snapshot = await fetchStableDealerKitStockSnapshot({ environment, fetchImplementation, allowPartial, stabilityAttempts });
     const database = supabase || getSupabaseServiceAdmin();
     let sourceState;
     try {

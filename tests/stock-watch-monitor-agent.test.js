@@ -179,3 +179,15 @@ test("action logger closes a started trace instead of leaving a false stalled ro
   assert.match(source, /\.eq\("status", "started"\)/);
   assert.match(source, /if \(!updated\?\.length\)/);
 });
+
+
+test("DealerKit monitor uses one partial-tolerant source pass so the 15-minute cron stays within its runtime budget", () => {
+  const agent = fs.readFileSync(new URL("../api/stock-watch-monitor-agent.js", import.meta.url), "utf8");
+  const provider = fs.readFileSync(new URL("../api/_stock-source-provider.js", import.meta.url), "utf8");
+  const transform = fs.readFileSync(new URL("../scripts/apply-dealerkit-readiness-monitor-fix.mjs", import.meta.url), "utf8");
+
+  assert.match(agent, /loadStockSourceSnapshot\(\{[\s\S]*allowPartial:\s*true,[\s\S]*stabilityAttempts:\s*1,[\s\S]*\}\)/);
+  assert.match(provider, /stabilityAttempts\s*=\s*undefined/);
+  assert.match(provider, /fetchStableDealerKitStockSnapshot\(\{\s*environment,\s*fetchImplementation,\s*allowPartial,\s*stabilityAttempts\s*\}\)/);
+  assert.match(transform, /stabilityAttempts:\s*1/);
+});

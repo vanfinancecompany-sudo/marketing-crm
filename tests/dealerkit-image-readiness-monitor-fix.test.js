@@ -390,9 +390,11 @@ test("build fix makes hard image-readiness failures unavailable and exposes reje
   assert.match(monitor, /isIntentionalSafetyStop/);
   assert.match(monitor, /providerDiagnostics/);
   assert.match(agent, /allowPartial:\s*true/);
+  assert.match(agent, /stabilityAttempts:\s*1/);
   assert.match(agent, /providerDiagnostics/);
   assert.match(provider, /allowPartial = false/);
-  assert.match(provider, /fetchStableDealerKitStockSnapshot\(\{ environment, fetchImplementation, allowPartial \}\)/);
+  assert.match(provider, /stabilityAttempts = undefined/);
+  assert.match(provider, /fetchStableDealerKitStockSnapshot\(\{ environment, fetchImplementation, allowPartial, stabilityAttempts \}\)/);
   assert.match(adapter, /DEALERKIT_REQUEST_ATTEMPTS = 3/);
   assert.match(adapter, /TRANSIENT_DEALERKIT_STATUSES/);
   assert.match(adapter, /registrationCandidate/);
