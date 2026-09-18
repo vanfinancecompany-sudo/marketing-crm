@@ -291,6 +291,7 @@ function vehicleRecord(vehicle, action = null) {
     lastKnownSourceStatus: clean(vehicle.lastKnownSourceStatus, 100),
     lastSeenInDealerKitAt: vehicle.lastSeenInDealerKitAt || null,
     isCurrentlyOnVansco: true,
+    isCurrentDealerKitBulkRecord: vehicle.isCurrentDealerKitBulkRecord === true,
     lastCheckedAt: checkedAt,
     lastSuccessfullyCheckedAt: checkedAt,
     lastError: clean(vehicle.sourceResolutionError, 500),
@@ -407,12 +408,16 @@ export default async function handler(request, response) {
     const actionByRegistration = new Map(actions
       .map((action) => [normalizeRegistration(action.registration || ""), action])
       .filter(([registration]) => registration));
-    const currentSourceVehicles = (snapshot.vehicles || []).filter((vehicle) => pipelineVehicle(vehicle, pipeline));
+    const currentSourceVehicles = (snapshot.vehicles || [])
+      .filter((vehicle) => pipelineVehicle(vehicle, pipeline))
+      .map((vehicle) => ({ ...vehicle, isCurrentDealerKitBulkRecord: true }));
     const currentRegistrations = new Set(currentSourceVehicles.map((vehicle) => normalizeRegistration(vehicle.registration)).filter(Boolean));
-    const transitionVehicles = transitions.vehicles.filter((vehicle) => {
-      const registration = normalizeRegistration(vehicle.registration || "");
-      return registration && !currentRegistrations.has(registration);
-    });
+    const transitionVehicles = transitions.vehicles
+      .filter((vehicle) => {
+        const registration = normalizeRegistration(vehicle.registration || "");
+        return registration && !currentRegistrations.has(registration);
+      })
+      .map((vehicle) => ({ ...vehicle, isCurrentDealerKitBulkRecord: false }));
     const sourceVehicles = [...currentSourceVehicles, ...transitionVehicles];
     const segmentCounts = summariseDealerKitSegments(snapshot.vehicles || []);
     const records = sourceVehicles.map((vehicle) => vehicleRecord(vehicle, actionByRegistration.get(normalizeRegistration(vehicle.registration)) || null));
