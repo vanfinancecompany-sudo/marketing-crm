@@ -251,8 +251,23 @@ export async function runStockWatchMonitor({ environment = process.env, fetchImp
   try {
     let provider = null;
     let providerError = "";
-    try { provider = await loadStockSourceSnapshot({ supabase, environment, fetchImplementation }); }
-    catch (error) { providerError = clean(error?.message || error, 2000); }
+    let providerDiagnostics = null;
+    try {
+      // This monitor is advisory. One partial-tolerant DealerKit pass is enough
+      // to surface source faults without spending the whole 60s function budget
+      // repeating the same known-bad positions.
+      provider = await loadStockSourceSnapshot({
+        supabase,
+        environment,
+        fetchImplementation,
+        allowPartial: true,
+        stabilityAttempts: 1,
+      });
+      providerDiagnostics = provider?.diagnostics && typeof provider.diagnostics === "object" ? provider.diagnostics : null;
+    } catch (error) {
+      providerError = clean(error?.message || error, 2000);
+      providerDiagnostics = error?.diagnostics && typeof error.diagnostics === "object" ? error.diagnostics : null;
+    }
 
     const [crmResult, rentWixResult, financeWixResult, actionLogResult, previousRunResult, existingIssuesResult] = await Promise.allSettled([
       loadCrmCounts(supabase),
@@ -277,6 +292,7 @@ export async function runStockWatchMonitor({ environment = process.env, fetchImp
       generatedAt: now.toISOString(),
       providerId: config.id,
       providerError: providerError || null,
+      providerDiagnostics,
       provider: provider || { providerId: config.id, providerLabel: config.label, vehicleCount: 0, vehicles: [], refresh: {} },
       authorities: {
         rent2buy: `VAN FINANCE Wix / ${RENT2BUY_AUTHORITY_COLLECTION}`,
