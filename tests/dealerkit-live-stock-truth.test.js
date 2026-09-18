@@ -49,3 +49,17 @@ test("typed registration gate is visibly empty and historical detail pages are r
   assert.match(publisher, /method: "PATCH"/);
   assert.match(publisher, /rollbackCreatedAndUpdated/);
 });
+
+
+test("Back in stock requires positive current DealerKit bulk presence", () => {
+  const page = read("pages/VanscoStockWatchPage.jsx");
+  const source = read("api/dealerkit-stock-watch-list.js");
+
+  assert.match(source, /isCurrentDealerKitBulkRecord:\s*vehicle\.isCurrentDealerKitBulkRecord === true/);
+  assert.match(source, /isCurrentDealerKitBulkRecord:\s*true/);
+  assert.match(source, /isCurrentDealerKitBulkRecord:\s*false/);
+  assert.match(page, /const currentDealerKitBulkPresence = record\.isCurrentDealerKitBulkRecord === true/);
+  assert.match(page, /if \(!reservedOnVansco && currentDealerKitBulkPresence\)/);
+  assert.doesNotMatch(page, /if \(!reservedOnVansco\) return \{ \.\.\.baseRecord, displayStatus: "back_in_stock"/);
+  assert.match(page, /current DealerKit bulk stock feed positively shows it available again/);
+});
