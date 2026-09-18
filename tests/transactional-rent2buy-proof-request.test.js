@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import handler, { normalizeRent2BuyProofRequestPayload } from "../api/transactional-rent2buy-proof-request.js";
 import approvalHandler, { normalizeRent2BuyApprovalChasePayload } from "../api/transactional-rent2buy-approval-chase.js";
+import { renderEmail as renderRent2BuyProofLinkEmail } from "../api/transactional-rent2buy-proof-link.js";
 
 function responseHarness() {
   const result = { statusCode: 200, payload: null, headers: {} };
@@ -14,6 +15,21 @@ function responseHarness() {
     },
   };
 }
+
+test("personal proof-link email makes document completion explicit", () => {
+  const email = renderRent2BuyProofLinkEmail({
+    applicationRef: "R2B-ABC123",
+    fullName: "Alex Example",
+    email: "alex@example.com",
+    vehicle: "Example Van",
+    uploadUrl: "https://www.rent2buyvans.co.uk/upload-your-documents?proofToken=test-token",
+  });
+  assert.equal(email.subject, "Complete your Rent2Buy application – upload your documents");
+  assert.match(email.plain, /assessment cannot begin until the required proofs are received/i);
+  assert.match(email.plain, /3 months’ full bank statements/i);
+  assert.match(email.html, /Complete my application/);
+  assert.doesNotMatch(email.html, /whenever it’s convenient/i);
+});
 
 test("normalizes the trusted CRM proof request payload", () => {
   const payload = normalizeRent2BuyProofRequestPayload({
