@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
+  canResolveDealerKitAbsence,
   dealerKitBulkRegistrations,
   loadStockWatchSnapshot,
   resolveRecentDealerKitTransitions,
@@ -100,36 +101,66 @@ test("available historical detail remains lifecycle-only and cannot prove curren
   assert.equal(record.isCurrentDealerKitBulkRecord, false);
 });
 
-test("an incomplete DealerKit refresh cannot replace the last verified complete snapshot", async () => {
-  const verified = {
-    complete: true,
-    checkedAt: "2026-09-20T09:00:00Z",
-    vehicles: [{ registration: "AF71TVY", supplierStockId: "af71", status: "available" }],
-    vehicleCount: 1,
-  };
-  let completeOptions = null;
-  await loadStockWatchSnapshot({
+test("255 reported / 253 proven keeps positive DealerKit truth advancing without granting absence authority", async () => {
+  const firstVehicles = Array.from({ length: 253 }, (_, index) => ({
+    registration: `T${String(index).padStart(3, "0")}EST`,
+    supplierStockId: `stock-${index}`,
+    status: "available",
+    sourceStatus: "In Stock",
+  }));
+  const secondVehicles = firstVehicles.map((vehicle, index) => index === 0
+    ? { ...vehicle, status: "reserved", sourceStatus: "Reserved" }
+    : vehicle).concat({
+      registration: "NEW24VAN",
+      supplierStockId: "stock-new",
+      status: "available",
+      sourceStatus: "In Stock",
+  });
+
+  let optionsSeen = null;
+  const first = await loadStockWatchSnapshot({
     forceFresh: true,
     loadSnapshot: async (options) => {
-      completeOptions = options;
-      return verified;
+      optionsSeen = options;
+      return {
+        complete: false,
+        apiReportedTotal: 255,
+        checkedAt: "2026-09-20T09:00:00Z",
+        vehicles: firstVehicles,
+        vehicleCount: 253,
+        diagnostics: { failedPositions: [{ position: 219 }, { position: 223 }] },
+      };
     },
   });
 
-  assert.deepEqual(completeOptions, { allowPartial: false, stabilityAttempts: 3 });
-  await assert.rejects(
-    loadStockWatchSnapshot({
-      forceFresh: true,
-      loadSnapshot: async () => ({ complete: false, vehicles: [] }),
-    }),
-    /incomplete.*last verified/i,
-  );
+  assert.deepEqual(optionsSeen, { allowPartial: true, stabilityAttempts: 3 });
+  assert.equal(first.complete, false);
+  assert.equal(first.vehicleCount, 253);
+  assert.equal(canResolveDealerKitAbsence(first), false);
 
-  const retained = await loadStockWatchSnapshot({
-    loadSnapshot: async () => { throw new Error("verified cache should have been retained"); },
+  const second = await loadStockWatchSnapshot({
+    forceFresh: true,
+    loadSnapshot: async () => ({
+      complete: false,
+      apiReportedTotal: 256,
+      checkedAt: "2026-09-20T10:00:00Z",
+      vehicles: secondVehicles,
+      vehicleCount: 254,
+      diagnostics: { failedPositions: [{ position: 219 }, { position: 223 }] },
+    }),
   });
-  assert.equal(retained.complete, true);
-  assert.deepEqual(retained.vehicles.map((vehicle) => vehicle.registration), ["AF71TVY"]);
+
+  assert.equal(second.complete, false);
+  assert.equal(second.vehicleCount, 254);
+  assert.equal(second.vehicles[0].status, "reserved");
+  assert.ok(second.vehicles.some((vehicle) => vehicle.registration === "NEW24VAN"));
+  assert.equal(canResolveDealerKitAbsence(second), false);
+
+  const latest = await loadStockWatchSnapshot({
+    loadSnapshot: async () => { throw new Error("latest positive cache should be reused"); },
+  });
+  assert.equal(latest.checkedAt, "2026-09-20T10:00:00Z");
+  assert.equal(latest.vehicleCount, 254);
 });
 
 test("repeated historical 404s never freeze later complete bulk snapshots", async () => {
@@ -243,9 +274,11 @@ test("failed or partial Wix presence retains prior truth and pauses cards, summa
   assert.match(loadLocalStock, /Stock data incomplete \/ last verified snapshot shown/);
   assert.doesNotMatch(loadLocalStock, /setLocalVehiclesByPipeline\(\(prev\) => \(\{ \.\.\.prev, \[pipeline\]: \[\] \}\)\)/);
   assert.doesNotMatch(loadLocalStock, /setLocalRegistrationsByPipeline\(\(prev\) => \(\{ \.\.\.prev, \[pipeline\]: new Set\(\) \}\)\)/);
-  assert.match(source, /const comparisonPaused = Boolean\(localLoadError\) \|\| !dealerKitSnapshotComplete/);
-  assert.match(source, /const activeRecords = useMemo\(\(\) => comparisonPaused \? \[\]/);
-  assert.match(source, /const displayRecords = useMemo\(\(\) => comparisonPaused \? \[\]/);
-  assert.match(source, /const comparisonCount = \(value\) => comparisonPaused \? "—" : value/);
-  assert.match(source, /Action cards, summary totals and filter counts are paused/);
+  assert.match(source, /const positiveComparisonPaused = Boolean\(localLoadError\)/);
+  assert.match(source, /const absenceComparisonPaused = positiveComparisonPaused \|\| !dealerKitSnapshotComplete/);
+  assert.match(source, /const activeRecords = useMemo\(\(\) => positiveComparisonPaused \? \[\]/);
+  assert.match(source, /if \(absenceComparisonPaused\) return \[\]/);
+  assert.match(source, /const displayRecords = useMemo\(\(\) => positiveComparisonPaused \? \[\]/);
+  assert.match(source, /Positively returned vehicles and statuses are still refreshed/);
+  assert.match(source, /"My stock not on DealerKit" remains suspended/);
 });
