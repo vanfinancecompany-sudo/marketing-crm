@@ -128,7 +128,7 @@ if (!source.includes("DEALERKIT_STOCK_TRUTH_SAFETY")) {
     `  const localNotVanscoRecords = useMemo(() => {
     if (!dealerKitSnapshotComplete) return [];`,
     `  const localNotVanscoRecords = useMemo(() => {
-    if (absenceComparisonPaused) return [];`
+    if (absenceComparisonPaused) return [];`,
     "pause reverse comparison"
   );
 
