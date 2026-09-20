@@ -453,18 +453,22 @@ export default function VanscoStockWatchPage() {
   const localLoadError = localLoadErrorByPipeline[selectedPipeline] || "";
   const cacheSummary = cacheSummaryByPipeline[selectedPipeline] || null;
   const dealerKitSnapshotComplete = cacheSummary?.sourceComplete === true;
+  // Positive DealerKit presence can advance from a partial snapshot. Only
+  // absence-dependent conclusions require a complete bulk snapshot.
+  const positiveComparisonPaused = Boolean(localLoadError);
+  const absenceComparisonPaused = positiveComparisonPaused || !dealerKitSnapshotComplete;
 
-  const activeRecords = useMemo(() => currentRawRecords.map((record) => classifyWatchRecord(record, activeLocalRegistrations, selectedPipeline, financeRegistrationsForCars)), [activeLocalRegistrations, currentRawRecords, financeRegistrationsForCars, selectedPipeline]);
+  const activeRecords = useMemo(() => positiveComparisonPaused ? [] : currentRawRecords.map((record) => classifyWatchRecord(record, activeLocalRegistrations, selectedPipeline, financeRegistrationsForCars)), [activeLocalRegistrations, currentRawRecords, financeRegistrationsForCars, positiveComparisonPaused, selectedPipeline]);
   const priceDifferenceRecords = useMemo(() => selectedPipeline === "finance" ? buildFinancePriceDifferences(currentRawRecords, activeLocalVehicles) : [], [activeLocalVehicles, currentRawRecords, selectedPipeline]);
 
   const currentVanscoRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => record.isCurrentlyOnVansco !== false).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);
   const localNotVanscoRecords = useMemo(() => {
-    if (!dealerKitSnapshotComplete) return [];
+    if (absenceComparisonPaused) return [];
     return dedupeLocalVehiclesByRegistration(activeLocalVehicles)
       .filter(({ registration }) => registration && !currentVanscoRegistrationSet.has(registration))
       .map(({ vehicle, index }) => mapLocalVehicleToWatchRecord(vehicle, index, selectedPipeline));
-  }, [activeLocalVehicles, currentVanscoRegistrationSet, dealerKitSnapshotComplete, selectedPipeline]);
-  const displayRecords = useMemo(() => [...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, localNotVanscoRecords, priceDifferenceRecords]);
+  }, [absenceComparisonPaused, activeLocalVehicles, currentVanscoRegistrationSet, selectedPipeline]);
+  const displayRecords = useMemo(() => positiveComparisonPaused ? [] : [...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, localNotVanscoRecords, positiveComparisonPaused, priceDifferenceRecords]);
 
   const summary = useMemo(() => ({
     missing: activeRecords.filter((record) => record.displayStatus === "missing").length,
