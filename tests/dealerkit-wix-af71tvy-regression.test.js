@@ -218,7 +218,7 @@ test("incomplete DealerKit snapshots cannot manufacture My stock not on DealerKi
   const pageSource = fs.readFileSync(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
 
   assert.match(pageSource, /const dealerKitSnapshotComplete = cacheSummary\?\.sourceComplete === true/);
-  assert.match(pageSource, /if \(comparisonPaused\) return \[\]/);
+  assert.match(pageSource, /if \(absenceComparisonPaused\) return \[\]/);
   assert.match(pageSource, /No CRM vehicle is classified as absent until a complete DealerKit snapshot proves it/);
 });
 
