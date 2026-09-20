@@ -15,7 +15,7 @@ test("final Stock Watch uses live Wix listing presence for Finance, Rent2Buy and
   assert.match(page, /const financeRegistrationsForCars = new Set\(\);/);
   assert.match(page, /Cars has its own published CARFINANCE authority; never borrow Finance presence/);
   assert.match(page, /selectedPipeline === "finance" \|\| selectedPipeline === "rent2buy" \|\| selectedPipeline === "cars"/);
-  assert.match(page, /const displayRecords = useMemo\(\(\) => comparisonPaused \? \[\] :/);
+  assert.match(page, /const displayRecords = useMemo\(\(\) => positiveComparisonPaused \? \[\] :/);
   assert.match(page, /Stock data incomplete \/ last verified snapshot shown/);
 });
 
