@@ -90,14 +90,14 @@ export async function loadStockWatchSnapshot({
   if (!forceFresh && snapshotInFlight) return snapshotInFlight;
 
   const work = loadSnapshot({
-    allowPartial: false,
-    // The Stock Watch comparison is operational stock truth. Retry the complete
-    // bulk read, but never cache or compare a partial set as if omissions proved
-    // absence. A rejected refresh leaves the last verified cache untouched.
+    allowPartial: true,
+    // Retry the whole bulk read before accepting degraded source truth. If some
+    // positions remain unresolved, positive registrations/statuses may still
+    // advance Stock Watch, but absence-dependent conclusions stay disabled.
     stabilityAttempts: 3,
   }).then((snapshot) => {
-    if (snapshot?.complete !== true) {
-      throw new Error("DealerKit stock data is incomplete; the last verified Stock Watch snapshot was left unchanged.");
+    if (!snapshot || !Array.isArray(snapshot.vehicles)) {
+      throw new Error("DealerKit stock data could not provide a usable current snapshot.");
     }
     cachedSnapshot = snapshot;
     cachedSnapshotAt = Date.now();
@@ -381,6 +381,10 @@ export function dealerKitBulkRegistrations(snapshot = {}) {
     .sort();
 }
 
+export function canResolveDealerKitAbsence(snapshot = {}) {
+  return snapshot?.complete === true;
+}
+
 export default async function handler(request, response) {
   if (!isAuthorised(request)) {
     response.status(401).json({ ok: false, message: "Marketing CRM access is required." });
@@ -413,10 +417,21 @@ export default async function handler(request, response) {
     }
 
     let transitions;
-    try {
-      transitions = await resolveRecentDealerKitTransitions({ supabase, snapshot, pipeline });
-    } catch (error) {
-      transitions = unavailableTransitions(error);
+    if (!canResolveDealerKitAbsence(snapshot)) {
+      // Missing rows in a partial bulk read are unknown, not lifecycle events.
+      // Do not probe historical detail or infer removal until a complete bulk
+      // snapshot can prove that the registration is genuinely absent.
+      transitions = {
+        ...unavailableTransitions(),
+        available: true,
+        pausedForIncompleteSnapshot: true,
+      };
+    } else {
+      try {
+        transitions = await resolveRecentDealerKitTransitions({ supabase, snapshot, pipeline });
+      } catch (error) {
+        transitions = unavailableTransitions(error);
+      }
     }
 
     const actions = (actionsResult.data || []).map(normalizeActionRecord);
@@ -497,7 +512,7 @@ export default async function handler(request, response) {
         latestUrlListCheckedAt: snapshot.checkedAt || new Date().toISOString(),
         sourceComplete: Boolean(snapshot.complete),
         sourceStateAvailable: sourceStateSync.available !== false && transitions.available !== false,
-        totalsNote: `Operator Stock Watch is sourced from a complete DealerKit bulk snapshot and segmented before card classification. ${segmentCounts.unknown} unclassified record(s) are held out of product tabs but still prove DealerKit presence by exact registration. Historical detail can explain lifecycle only and never proves current stock presence.`,
+        totalsNote: `Operator Stock Watch refreshes positive DealerKit registrations/statuses even when a small number of bulk positions remain unresolved. Absence-dependent checks stay suspended until the bulk snapshot is complete. ${segmentCounts.unknown} unclassified record(s) are held out of product tabs but still prove DealerKit presence by exact registration. Historical detail can explain lifecycle only and never proves current stock presence.`,
       },
     });
   } catch (error) {
