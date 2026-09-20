@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import "./dealerkit-stock-truth-safety.test.js";
 
 const root = new URL("../", import.meta.url);
 const read = (path) => fs.readFileSync(new URL(path, root), "utf8");
@@ -14,8 +15,8 @@ test("final Stock Watch uses live Wix listing presence for Finance, Rent2Buy and
   assert.match(page, /const financeRegistrationsForCars = new Set\(\);/);
   assert.match(page, /Cars has its own published CARFINANCE authority; never borrow Finance presence/);
   assert.match(page, /selectedPipeline === "finance" \|\| selectedPipeline === "rent2buy" \|\| selectedPipeline === "cars"/);
-  assert.match(page, /const displayRecords = useMemo\(\(\) => localLoadError \? \[\] :/);
-  assert.match(page, /Stock Watch classification is paused for this tab rather than falling back to CRM stock/);
+  assert.match(page, /const displayRecords = useMemo\(\(\) => comparisonPaused \? \[\] :/);
+  assert.match(page, /Stock data incomplete \/ last verified snapshot shown/);
 });
 
 test("Cars can open, save and use a Cars-specific controlled publish lane without inheriting van product galleries", () => {
@@ -59,7 +60,7 @@ test("Back in stock requires positive current DealerKit bulk presence", () => {
   assert.match(source, /isCurrentDealerKitBulkRecord:\s*true/);
   assert.match(source, /isCurrentDealerKitBulkRecord:\s*false/);
   assert.match(page, /const currentDealerKitBulkPresence = record\.isCurrentDealerKitBulkRecord === true/);
-  assert.match(page, /if \(!reservedOnVansco && currentDealerKitBulkPresence\)/);
+  assert.match(page, /if \(explicitlyAvailableOnDealerKit && currentDealerKitBulkPresence\)/);
   assert.doesNotMatch(page, /if \(!reservedOnVansco\) return \{ \.\.\.baseRecord, displayStatus: "back_in_stock"/);
   assert.match(page, /current DealerKit bulk stock feed positively shows it available again/);
 });

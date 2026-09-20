@@ -114,3 +114,7 @@ if (!mediaTestSource.includes('test("existing Finance listing creates the missin
 fs.writeFileSync(mediaTestPath, mediaTestSource);
 
 console.log("Updated controlled publish contract: photo-ready listings may safely create a missing detail page across Finance, Rent2Buy and Cars.");
+
+// This is the final Stock Watch page transform so source-truth gates cannot be
+// weakened by an earlier UI compatibility transform.
+await import("./apply-dealerkit-stock-truth-safety.mjs");

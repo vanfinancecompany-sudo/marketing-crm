@@ -86,7 +86,7 @@ test("a vanished known registration is retained as source_unresolved instead of 
     },
   });
 
-  assert.equal(attempts, 3);
+  assert.equal(attempts, 2, "the Stock Watch wrapper makes two bounded probes; the real DealerKit adapter already retries transient HTTP failures three times internally");
   assert.equal(result.candidates, 1);
   assert.equal(result.detailErrors, 1);
   assert.equal(result.unresolved, 1);

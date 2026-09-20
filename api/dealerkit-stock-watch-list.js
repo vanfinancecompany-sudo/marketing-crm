@@ -79,20 +79,26 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function loadStockWatchSnapshot({ forceFresh = false } = {}) {
+export async function loadStockWatchSnapshot({
+  forceFresh = false,
+  loadSnapshot = fetchStableDealerKitStockSnapshot,
+} = {}) {
   const now = Date.now();
   if (!forceFresh && cachedSnapshot && (now - cachedSnapshotAt) < SNAPSHOT_CACHE_TTL_MS) {
     return cachedSnapshot;
   }
   if (!forceFresh && snapshotInFlight) return snapshotInFlight;
 
-  const work = fetchStableDealerKitStockSnapshot({
-    allowPartial: true,
-    // The operator display already exposes degraded-source diagnostics and
-    // registration-first recovery. Do one source pass here; destructive Wix
-    // actions continue to perform their own fresh final verification.
-    stabilityAttempts: 1,
+  const work = loadSnapshot({
+    allowPartial: false,
+    // The Stock Watch comparison is operational stock truth. Retry the complete
+    // bulk read, but never cache or compare a partial set as if omissions proved
+    // absence. A rejected refresh leaves the last verified cache untouched.
+    stabilityAttempts: 3,
   }).then((snapshot) => {
+    if (snapshot?.complete !== true) {
+      throw new Error("DealerKit stock data is incomplete; the last verified Stock Watch snapshot was left unchanged.");
+    }
     cachedSnapshot = snapshot;
     cachedSnapshotAt = Date.now();
     return snapshot;
@@ -263,7 +269,7 @@ export async function resolveRecentDealerKitTransitions({
   };
 }
 
-function vehicleRecord(vehicle, action = null) {
+export function vehicleRecord(vehicle, action = null) {
   const registration = normalizeRegistration(vehicle.registration || "");
   const workflowStatus = clean(action?.workflowStatus || action?.workflow_status, 100).toLowerCase();
   const checkedAt = vehicle.checkedAt || vehicle.sourceUpdatedAt || new Date().toISOString();
@@ -290,7 +296,9 @@ function vehicleRecord(vehicle, action = null) {
     sourceResolutionHttpStatus: Number.isFinite(Number(vehicle.sourceResolutionHttpStatus)) ? Number(vehicle.sourceResolutionHttpStatus) : null,
     lastKnownSourceStatus: clean(vehicle.lastKnownSourceStatus, 100),
     lastSeenInDealerKitAt: vehicle.lastSeenInDealerKitAt || null,
-    isCurrentlyOnVansco: true,
+    // Only the complete current bulk feed proves present stock. Historical
+    // detail is lifecycle evidence and must never manufacture current presence.
+    isCurrentlyOnVansco: vehicle.isCurrentDealerKitBulkRecord === true,
     isCurrentDealerKitBulkRecord: vehicle.isCurrentDealerKitBulkRecord === true,
     lastCheckedAt: checkedAt,
     lastSuccessfullyCheckedAt: checkedAt,
@@ -334,7 +342,7 @@ function orphanActionRecord(action, pipeline) {
     sourceUrl: "",
     sourceStatus: "unknown",
     sourceLifecycleStatus: "unknown",
-    isCurrentlyOnVansco: true,
+    isCurrentlyOnVansco: false,
     workflowStatus,
     workflow_status: workflowStatus,
     watchActionId: action.id || action.watchActionId || "",
@@ -364,6 +372,13 @@ function unavailableTransitions(error = null) {
     unresolved: 0,
     error: clean(error?.message || error, 1500) || null,
   };
+}
+
+export function dealerKitBulkRegistrations(snapshot = {}) {
+  return Array.from(new Set((snapshot.vehicles || [])
+    .map((vehicle) => normalizeRegistration(vehicle?.registration || ""))
+    .filter(Boolean)))
+    .sort();
 }
 
 export default async function handler(request, response) {
@@ -408,6 +423,7 @@ export default async function handler(request, response) {
     const actionByRegistration = new Map(actions
       .map((action) => [normalizeRegistration(action.registration || ""), action])
       .filter(([registration]) => registration));
+    const currentDealerKitRegistrations = dealerKitBulkRegistrations(snapshot);
     const currentSourceVehicles = (snapshot.vehicles || [])
       .filter((vehicle) => pipelineVehicle(vehicle, pipeline))
       .map((vehicle) => ({ ...vehicle, isCurrentDealerKitBulkRecord: true }));
@@ -432,8 +448,8 @@ export default async function handler(request, response) {
     }
 
     const usableRegistrations = records.filter((record) => record.registration).length;
-    const availableCount = sourceVehicles.filter((vehicle) => ["available", "due_in"].includes(normalizedSourceStatus(vehicle))).length;
-    const reservedCount = sourceVehicles.filter((vehicle) => RESERVED_WORKFLOW_STATUSES.has(normalizedSourceStatus(vehicle))).length;
+    const availableCount = currentSourceVehicles.filter((vehicle) => ["available", "due_in"].includes(normalizedSourceStatus(vehicle))).length;
+    const reservedCount = currentSourceVehicles.filter((vehicle) => RESERVED_WORKFLOW_STATUSES.has(normalizedSourceStatus(vehicle))).length;
 
     response.status(200).json({
       ok: true,
@@ -465,6 +481,7 @@ export default async function handler(request, response) {
         provider: "dealerkit",
         currentUrlCount: Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0),
         currentPipelineUrlCount: currentSourceVehicles.length,
+        currentDealerKitRegistrations,
         lifecycleRecoveredCount: transitionVehicles.length,
         lifecycleUnresolvedCount: Number(transitions.unresolved || 0),
         hiddenOtherTabTypeCount: Math.max(0, Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0) - currentSourceVehicles.length),
@@ -473,14 +490,14 @@ export default async function handler(request, response) {
         currentNoRegistrationCount: 0,
         currentReservedCount: reservedCount,
         currentAvailableOrUnknownCount: availableCount,
-        currentCheckedCount: sourceVehicles.length,
+        currentCheckedCount: currentSourceVehicles.length,
         currentUncheckedCount: Number(transitions.unresolved || 0),
         detailRefreshedToday: currentSourceVehicles.length,
         failedDetailChecks: Math.max(0, Number(snapshot.apiReportedTotal || 0) - Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0)) + Number(transitions.detailErrors || 0),
         latestUrlListCheckedAt: snapshot.checkedAt || new Date().toISOString(),
         sourceComplete: Boolean(snapshot.complete),
         sourceStateAvailable: sourceStateSync.available !== false && transitions.available !== false,
-        totalsNote: `Operator Stock Watch is sourced from DealerKit and segmented before card classification. ${segmentCounts.unknown} unclassified record(s) are held out of all product tabs for safety. Known registrations that disappear from the bulk feed are resolved by their saved DealerKit identity without treating unrelated source failures as global absence.`,
+        totalsNote: `Operator Stock Watch is sourced from a complete DealerKit bulk snapshot and segmented before card classification. ${segmentCounts.unknown} unclassified record(s) are held out of product tabs but still prove DealerKit presence by exact registration. Historical detail can explain lifecycle only and never proves current stock presence.`,
       },
     });
   } catch (error) {

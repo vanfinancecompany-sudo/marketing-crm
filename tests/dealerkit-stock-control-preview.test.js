@@ -51,11 +51,11 @@ test("Stock Control Centre keeps original buttons/cards but routes the operator 
 test("DealerKit Stock Watch list is access-gated and maps the supplier feed into the original card contract", () => {
   const endpoint = fs.readFileSync(new URL("../api/dealerkit-stock-watch-list.js", import.meta.url), "utf8");
   assert.match(endpoint, /Marketing CRM access is required/);
-  assert.match(endpoint, /fetchStableDealerKitStockSnapshot\(\{[\s\S]*allowPartial: true,[\s\S]*stabilityAttempts: 1,[\s\S]*\}\)/);
+  assert.match(endpoint, /loadSnapshot\(\{[\s\S]*allowPartial: false,[\s\S]*stabilityAttempts: 3,[\s\S]*\}\)/);
   assert.match(endpoint, /loadStockWatchSnapshot\(\{ forceFresh \}\)/);
   assert.match(endpoint, /supplierStockId/);
   assert.match(endpoint, /providerId: "dealerkit"/);
-  assert.match(endpoint, /isCurrentlyOnVansco: true/);
+  assert.match(endpoint, /isCurrentlyOnVansco: vehicle\.isCurrentDealerKitBulkRecord === true/);
   assert.match(endpoint, /WATCH_TABLE/);
   assert.match(endpoint, /segmented before card classification/);
   assert.match(endpoint, /dealerKitVehicleBelongsToPipeline/);
