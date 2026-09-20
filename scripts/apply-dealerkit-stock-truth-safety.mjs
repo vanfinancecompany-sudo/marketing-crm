@@ -93,17 +93,20 @@ if (!source.includes("DEALERKIT_STOCK_TRUTH_SAFETY")) {
 
   const activeRecords = useMemo(() => currentRawRecords.map((record) => classifyWatchRecord(record, activeLocalRegistrations, selectedPipeline, financeRegistrationsForCars)), [activeLocalRegistrations, currentRawRecords, financeRegistrationsForCars, selectedPipeline]);`,
     `  const dealerKitSnapshotComplete = cacheSummary?.sourceComplete === true;
-  const comparisonPaused = Boolean(localLoadError) || !dealerKitSnapshotComplete;
+  // Positive DealerKit presence can advance from a partial snapshot. Only
+  // absence-dependent conclusions require a complete bulk snapshot.
+  const positiveComparisonPaused = Boolean(localLoadError);
+  const absenceComparisonPaused = positiveComparisonPaused || !dealerKitSnapshotComplete;
 
-  const activeRecords = useMemo(() => comparisonPaused ? [] : currentRawRecords.map((record) => classifyWatchRecord(record, activeLocalRegistrations, selectedPipeline, financeRegistrationsForCars)), [activeLocalRegistrations, comparisonPaused, currentRawRecords, financeRegistrationsForCars, selectedPipeline]);`,
-    "pause classifications without both sources"
+  const activeRecords = useMemo(() => positiveComparisonPaused ? [] : currentRawRecords.map((record) => classifyWatchRecord(record, activeLocalRegistrations, selectedPipeline, financeRegistrationsForCars)), [activeLocalRegistrations, currentRawRecords, financeRegistrationsForCars, positiveComparisonPaused, selectedPipeline]);`,
+    "separate positive truth from absence authority"
   );
 
   replaceOnce(
     `  const priceDifferenceRecords = useMemo(() => {
     if (selectedPipeline === "finance")`,
     `  const priceDifferenceRecords = useMemo(() => {
-    if (comparisonPaused) return [];
+    if (positiveComparisonPaused) return [];
     if (selectedPipeline === "finance")`,
     "pause price comparisons"
   );
@@ -112,7 +115,7 @@ if (!source.includes("DEALERKIT_STOCK_TRUTH_SAFETY")) {
     `  }, [activeLocalVehicles, currentRawRecords, selectedPipeline]);
 
   const currentVanscoRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => record.isCurrentlyOnVansco !== false).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);`,
-    `  }, [activeLocalVehicles, comparisonPaused, currentRawRecords, selectedPipeline]);
+    `  }, [activeLocalVehicles, currentRawRecords, positiveComparisonPaused, selectedPipeline]);
 
   const currentVanscoRegistrationSet = useMemo(() => new Set([
     ...(cacheSummary?.currentDealerKitRegistrations || []).map(normalizeWatchRegistration).filter(Boolean),
@@ -125,20 +128,20 @@ if (!source.includes("DEALERKIT_STOCK_TRUTH_SAFETY")) {
     `  const localNotVanscoRecords = useMemo(() => {
     if (!dealerKitSnapshotComplete) return [];`,
     `  const localNotVanscoRecords = useMemo(() => {
-    if (comparisonPaused) return [];`,
+    if (absenceComparisonPaused) return [];`
     "pause reverse comparison"
   );
 
   replaceOnce(
     `  }, [activeLocalVehicles, currentVanscoRegistrationSet, dealerKitSnapshotComplete, selectedPipeline]);`,
-    `  }, [activeLocalVehicles, comparisonPaused, currentVanscoRegistrationSet, selectedPipeline]);`,
+    `  }, [absenceComparisonPaused, activeLocalVehicles, currentVanscoRegistrationSet, selectedPipeline]);`,
     "reverse comparison dependencies"
   );
 
   replaceOnce(
     `  const displayRecords = useMemo(() => localLoadError ? [] : [...imageReadyRecords, ...activeRecords, ...visibleLocalNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, imageReadyRecords, localLoadError, visibleLocalNotVanscoRecords, priceDifferenceRecords]);`,
-    `  const displayRecords = useMemo(() => comparisonPaused ? [] : [...imageReadyRecords, ...activeRecords, ...visibleLocalNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, comparisonPaused, imageReadyRecords, visibleLocalNotVanscoRecords, priceDifferenceRecords]);`,
-    "pause action cards"
+    `  const displayRecords = useMemo(() => positiveComparisonPaused ? [] : [...imageReadyRecords, ...activeRecords, ...visibleLocalNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, imageReadyRecords, positiveComparisonPaused, priceDifferenceRecords, visibleLocalNotVanscoRecords]);`,
+    "pause positive cards only when Wix truth is unavailable"
   );
 
   replaceOnce(
@@ -146,15 +149,15 @@ if (!source.includes("DEALERKIT_STOCK_TRUTH_SAFETY")) {
 
   const filteredRecords`,
     `  }), [summary]);
-  const comparisonCount = (value) => comparisonPaused ? "—" : value;
+  const positiveCount = (value) => positiveComparisonPaused ? "—" : value;
+  const absenceCount = (value) => absenceComparisonPaused ? "—" : value;
 
   const filteredRecords`,
-    "paused count display"
+    "scoped paused count display"
   );
 
   for (const expression of [
     "summary.missing",
-    "summary.localNotVansco",
     "summary.priceDifference",
     "summary.advertised",
     "summary.reserved",
@@ -163,27 +166,32 @@ if (!source.includes("DEALERKIT_STOCK_TRUTH_SAFETY")) {
     "summary.never",
     "activeLocalRegistrations.size",
   ]) {
-    source = source.replace(`value={${expression}}`, `value={comparisonCount(${expression})}`);
+    source = source.replace(`value={${expression}}`, `value={positiveCount(${expression})}`);
   }
   source = source.replace(
+    `value={summary.localNotVansco}`,
+    `value={absenceCount(summary.localNotVansco)}`
+  );
+  source = source.replace(
     `value={imageReadyError || (imageReadySummary && imageReadySummary.sourceAvailable === false) ? "Unavailable" : summary.imagesReady}`,
-    `value={comparisonPaused ? "—" : imageReadyError || (imageReadySummary && imageReadySummary.sourceAvailable === false) ? "Unavailable" : summary.imagesReady}`
+    `value={positiveComparisonPaused ? "—" : imageReadyError || (imageReadySummary && imageReadySummary.sourceAvailable === false) ? "Unavailable" : summary.imagesReady}`
   );
   source = source.replace(
     `{filter.label} ({filterCounts[filter.value] ?? 0})`,
-    `{filter.label} ({comparisonCount(filterCounts[filter.value] ?? 0)})`
+    `{filter.label} ({filter.value === "local_not_vansco" ? absenceCount(filterCounts[filter.value] ?? 0) : positiveCount(filterCounts[filter.value] ?? 0)})`
   );
 
   replaceOnce(
     `        <div className="vansco-watch-note"><strong>Price differences:</strong>`,
-    `        {comparisonPaused ? <div className="vansco-watch-note vansco-watch-note--warning"><strong>Stock data incomplete / last verified snapshot shown.</strong> Action cards, summary totals and filter counts are paused until complete DealerKit and Wix stock presence are both verified.</div> : null}
+    `        {!dealerKitSnapshotComplete && !positiveComparisonPaused ? <div className="vansco-watch-note vansco-watch-note--warning"><strong>DealerKit source is partially degraded.</strong> Positively returned vehicles and statuses are still refreshed. "My stock not on DealerKit" remains suspended until a complete bulk snapshot proves absence.</div> : null}
+        {positiveComparisonPaused ? <div className="vansco-watch-note vansco-watch-note--warning"><strong>Stock data incomplete / last verified Wix snapshot shown.</strong> Action cards and dependent counts are paused until live Wix stock presence is verified.</div> : null}
         <div className="vansco-watch-note"><strong>Price differences:</strong>`,
     "visible paused comparison state"
   );
 
   replaceOnce(
     `        <div className="vansco-watch-note">Hidden from working cards: {summary.alreadyListed} already listed/available, {summary.hiddenReserved} reserved but not advertised in this tab, {summary.hiddenNoReg} no valid registration.`,
-    `        <div className="vansco-watch-note">Hidden from working cards: {comparisonCount(summary.alreadyListed)} already listed/available, {comparisonCount(summary.hiddenReserved)} reserved but not advertised in this tab, {comparisonCount(summary.hiddenNoReg)} no valid registration.`,
+    `        <div className="vansco-watch-note">Hidden from working cards: {positiveCount(summary.alreadyListed)} already listed/available, {positiveCount(summary.hiddenReserved)} reserved but not advertised in this tab, {positiveCount(summary.hiddenNoReg)} no valid registration.`,
     "pause hidden summary counts"
   );
 }
