@@ -655,10 +655,9 @@ test("approval checker can recognise a live advert from registration text withou
     "RENT IT! - DRIVE IT! - OWN IT!",
   ].join("\n");
 
-  assert.deepEqual(
-    harness.hooks.registrationEvidenceLines("YG73 AMF"),
-    ["REGISTRATION: YG73AMF"],
-  );
+  const evidence = Array.from(harness.hooks.registrationEvidenceLines("YG73 AMF"));
+  assert.equal(evidence.length, 1);
+  assert.equal(evidence[0], "REGISTRATION: YG73AMF");
 });
 
 test("approval checker ignores registration shown only inside the helper panel", () => {
@@ -668,7 +667,7 @@ test("approval checker ignores registration shown only inside the helper panel",
     ? { innerText: "FaceBay Hampshire • YG73AMF" }
     : null;
 
-  assert.deepEqual(harness.hooks.registrationEvidenceLines("YG73AMF"), []);
+  assert.equal(Array.from(harness.hooks.registrationEvidenceLines("YG73AMF")).length, 0);
 });
 
 test("post prep detects Facebook membership pending and reports it back to CRM", async () => {
