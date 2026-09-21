@@ -90,7 +90,7 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.13");
+  assert.equal(manifest.version, "1.2.14");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -644,6 +644,31 @@ test("helper inserts nothing when no verified Create Post dialog exists", async 
       String(panel.innerHTML).includes("Could not verify Facebook group post composer. Nothing was inserted.")
     ),
   );
+});
+
+test("approval checker can recognise a live advert from registration text without a permalink anchor", () => {
+  const harness = loadGroupHelperTestHooks();
+  harness.document.body.innerText = [
+    "Search results for YG73AMF",
+    "NO CREDIT CHECK",
+    "REGISTRATION: YG73AMF",
+    "RENT IT! - DRIVE IT! - OWN IT!",
+  ].join("\n");
+
+  assert.deepEqual(
+    harness.hooks.registrationEvidenceLines("YG73 AMF"),
+    ["REGISTRATION: YG73AMF"],
+  );
+});
+
+test("approval checker ignores registration shown only inside the helper panel", () => {
+  const harness = loadGroupHelperTestHooks();
+  harness.document.body.innerText = "Search results for YG73AMF";
+  harness.document.getElementById = (id) => id === "vfc-group-helper-report"
+    ? { innerText: "FaceBay Hampshire • YG73AMF" }
+    : null;
+
+  assert.deepEqual(harness.hooks.registrationEvidenceLines("YG73AMF"), []);
 });
 
 test("post prep detects Facebook membership pending and reports it back to CRM", async () => {
