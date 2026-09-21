@@ -158,17 +158,20 @@ test("Cars still block when the chosen primary is not READY", () => {
   assert.ok(plan.blockers.some((blocker) => blocker.code === "car_media_not_ready"));
 });
 
-test("Cars live listing switches to the controlled photo-ready repair path", () => {
-  const historical = [{ id: "historic-car-page", data: { title: "AB23CDE", titleText: "Old title", priceVat: "£19,995" } }];
+test("Cars reconciliation reuses exact listing/detail IDs with the full controlled payload", () => {
+  const historical = [{ id: "historic-car-page", data: { title: "AB23CDE", titleText: "Old title", priceVat: "£19,995", _publishStatus: "PUBLISHED" } }];
   const reusable = buildDealerKitCarWixPlan({ vehicle: vehicle(), decision: decision(), imageSet: imageSet(), carDetailRows: historical });
   const detail = reusable.targets.find((target) => target.collectionId === "CARPAGES");
   assert.equal(reusable.canPublish, true);
+  assert.equal(reusable.writeIntent, "update_existing_vehicle");
   assert.equal(detail.operation, "update");
   assert.equal(detail.itemId, "historic-car-page");
+  assert.equal(detail.data.priceVat, "£21,795");
+  assert.deepEqual(detail.data.mainImages, imageSet().galleryUrls);
 
   const listed = buildDealerKitCarWixPlan({
     vehicle: vehicle(), decision: decision(), imageSet: imageSet(), carDetailRows: historical,
-    carListingRows: [{ id: "live-car", data: { title: "AB23CDE", picture: "old.jpg", price: "£21,795" } }],
+    carListingRows: [{ id: "live-car", data: { title: "AB23CDE", picture: "old.jpg", price: "£21,795", _publishStatus: "DRAFT" } }],
   });
   assert.equal(listed.canPublish, true);
   assert.equal(listed.writeIntent, "update_existing_vehicle");
@@ -176,9 +179,41 @@ test("Cars live listing switches to the controlled photo-ready repair path", () 
   const liveListing = listed.targets.find((target) => target.collectionId === "CARFINANCE");
   const liveDetail = listed.targets.find((target) => target.collectionId === "CARPAGES");
   assert.equal(liveListing.operation, "update");
-  assert.deepEqual(liveListing.data, { picture: imageSet().mainUrl });
+  assert.equal(liveListing.itemId, "live-car");
+  assert.equal(liveListing.data.picture, imageSet().mainUrl);
+  assert.equal(liveListing.data.price, "£21,795");
+  assert.equal(liveListing.publishStatusOperation, "publish");
+  assert.equal(liveListing.desiredPublishStatus, "PUBLISHED");
   assert.equal(liveDetail.operation, "update");
-  assert.deepEqual(liveDetail.data, { mainImages: imageSet().galleryUrls, numberOfImages: "2" });
+  assert.equal(liveDetail.itemId, "historic-car-page");
+  assert.deepEqual(liveDetail.data.mainImages, imageSet().galleryUrls);
+  assert.equal(liveDetail.data.numberOfImages, "2");
+});
+
+test("Cars reconciliation blocks ambiguous duplicate listing or detail identities", () => {
+  const duplicateListing = buildDealerKitCarWixPlan({
+    vehicle: vehicle(),
+    decision: decision(),
+    imageSet: imageSet(),
+    carListingRows: [
+      { id: "car-a", data: { title: "AB23CDE" } },
+      { id: "car-b", data: { title: "AB23CDE" } },
+    ],
+  });
+  assert.equal(duplicateListing.canPublish, false);
+  assert.ok(duplicateListing.blockers.some((blocker) => blocker.code === "car_listing_ambiguous"));
+
+  const duplicateDetail = buildDealerKitCarWixPlan({
+    vehicle: vehicle(),
+    decision: decision(),
+    imageSet: imageSet(),
+    carDetailRows: [
+      { id: "page-a", data: { title: "AB23CDE" } },
+      { id: "page-b", data: { title: "AB23CDE" } },
+    ],
+  });
+  assert.equal(duplicateDetail.canPublish, false);
+  assert.ok(duplicateDetail.blockers.some((blocker) => blocker.code === "car_detail_ambiguous"));
 });
 
 test("Cars plan fails closed on stale review or incomplete Wix Media", () => {
@@ -217,6 +252,10 @@ test("Cars browser/runtime flow has separate preview, final publisher and media-
   assert.match(ui, /update_existing_car/);
   assert.match(preview, /writesAttempted:\s*false/);
   assert.match(publish, /carPublishConfirmationMatches/);
+  assert.match(publish, /\["publish_new_car", "update_existing_car"\]\.includes\(action\)/);
+  assert.match(publish, /state\.plan\.writeIntent !== requestedIntent/);
+  assert.match(publish, /setTargetPublishStatus/);
+  assert.match(publish, /rollbackPublishStatuses/);
   assert.match(publish, /rollbackWrites/);
   assert.match(publish, /CARFINANCE/);
   assert.match(publish, /CARPAGES/);
@@ -224,5 +263,6 @@ test("Cars browser/runtime flow has separate preview, final publisher and media-
   assert.match(prepare, /cmsWritesAttempted:\s*false/);
   assert.match(state, /CARFINANCE/);
   assert.match(state, /CARPAGES/);
+  assert.match(state, /registrationTitleVariants/);
   assert.match(state, /WIX_CAR_API_KEY/);
 });
