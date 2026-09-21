@@ -289,7 +289,7 @@ test("generic page-level contenteditable is never accepted as a group composer",
   });
   harness.document.querySelectorAll = (selector) => selector === '[role="dialog"]' ? [] : [pageEditor];
 
-  const result = await harness.hooks.waitForComposerEditor(0);
+  const result = await harness.hooks.waitForComposerEditor(5);
   assert.equal(result.editor, null);
   assert.equal(result.scope, null);
   assert.equal(result.verified, false);
