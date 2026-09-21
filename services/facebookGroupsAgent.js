@@ -354,7 +354,11 @@ export function startFacebookGroupDiscovery(productKey, options = {}) {
 
 export function startFacebookGroupInspection(groups, productKey, limit = 12) {
   const targets = (groups || [])
-    .filter((group) => group.url && group.status !== "Red")
+    .filter((group) =>
+      group.url &&
+      group.status !== "Red" &&
+      /^https:\/\/www\.facebook\.com\/groups\//i.test(normalizeFacebookGroupUrl(group.url))
+    )
     .sort((a, b) => {
       const aChecked = a.lastCheckedAt ? new Date(a.lastCheckedAt).getTime() : 0;
       const bChecked = b.lastCheckedAt ? new Date(b.lastCheckedAt).getTime() : 0;
