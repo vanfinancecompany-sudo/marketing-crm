@@ -11,6 +11,8 @@ export const GROUP_POST_EVENT_ACK = "VFC_GROUP_POST_EVENT_ACK";
 export const GROUP_POST_STATUS_START = "VFC_GROUP_POST_STATUS_START";
 export const GROUP_POST_STATUS_ACK = "VFC_GROUP_POST_STATUS_ACK";
 export const GROUP_POST_STATUS_COMPLETE = "VFC_GROUP_POST_STATUS_COMPLETE";
+export const FACEBOOK_HELPER_PING = "VFC_FACEBOOK_HELPER_PING";
+export const FACEBOOK_HELPER_PONG = "VFC_FACEBOOK_HELPER_PONG";
 
 const GROUP_STORAGE_KEY = "marketingFacebookGroupsAgentV1";
 const DISCOVERY_ROTATION_KEY = "marketingFacebookGroupDiscoveryRotationV1";
@@ -371,6 +373,23 @@ function messageRoundTrip(type, ackType, payload, timeoutMs = 9000) {
 
 function requestId(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function getFacebookHelperStatus(timeoutMs = 2500) {
+  const id = requestId("helper-health");
+  return messageRoundTrip(FACEBOOK_HELPER_PING, FACEBOOK_HELPER_PONG, { id }, timeoutMs)
+    .then((message) => ({
+      connected: true,
+      version: clean(message.version || ""),
+      capabilities: Array.isArray(message.capabilities) ? message.capabilities : [],
+      hostname: clean(message.hostname || ""),
+    }))
+    .catch(() => ({
+      connected: false,
+      version: "",
+      capabilities: [],
+      hostname: "",
+    }));
 }
 
 export function startFacebookGroupDiscovery(productKey, options = {}) {
