@@ -6,6 +6,10 @@ export const GROUP_AGENT_INSPECTION_ACK = "VFC_GROUP_INSPECTION_ACK";
 export const GROUP_AGENT_INSPECTION_COMPLETE = "VFC_GROUP_INSPECTION_COMPLETE";
 export const GROUP_POST_JOB = "VFC_GROUP_POST_JOB";
 export const GROUP_POST_JOB_ACK = "VFC_GROUP_POST_JOB_ACK";
+export const GROUP_POST_SUBMITTED = "VFC_GROUP_POST_SUBMITTED";
+export const GROUP_POST_STATUS_START = "VFC_GROUP_POST_STATUS_START";
+export const GROUP_POST_STATUS_ACK = "VFC_GROUP_POST_STATUS_ACK";
+export const GROUP_POST_STATUS_COMPLETE = "VFC_GROUP_POST_STATUS_COMPLETE";
 
 const GROUP_STORAGE_KEY = "marketingFacebookGroupsAgentV1";
 const DISCOVERY_ROTATION_KEY = "marketingFacebookGroupDiscoveryRotationV1";
@@ -154,6 +158,10 @@ function calculateScore(group, productKey) {
   if (group?.approvalRequired === true) score -= 2;
   if (group?.status === "Green") score += 16;
   if (group?.status === "Red") score -= 45;
+  if (Number(group?.acceptedPostCount || 0) > 0) score += 18;
+  if (group?.pipeline === "proven") score += 10;
+  if (group?.postStatus === "rejected") score -= 12;
+  if (group?.archived) score -= 70;
 
   const members = parseMemberCount(group?.members || group?.membersReported || "");
   if (members >= 50000) score += 8;
@@ -190,7 +198,17 @@ function normaliseSeed(group) {
     ruleEvidence: "",
     lastCheckedAt: "",
     lastPostedAt: "",
+    lastAcceptedAt: "",
+    lastPostCheckAt: "",
+    postStatus: "new",
+    pipeline: "new",
+    repeatDays: 7,
+    pendingRegistration: "",
     postCount: 0,
+    acceptedPostCount: 0,
+    rejectedPostCount: 0,
+    archived: false,
+    archiveReason: "",
     leads: Number(group.leads || 0),
   };
 }
@@ -236,6 +254,7 @@ export function applyGroupInspection(groups, inspections, productKey) {
     if (!inspection) return group;
     const evidence = clean(inspection.ruleText || inspection.pageText || inspection.context || "");
     const classified = inspection.explicitStatus || ruleClassification(evidence);
+    const unavailable = Boolean(inspection.unavailable);
     const next = {
       ...group,
       name: inspection.name || group.name,
@@ -248,8 +267,11 @@ export function applyGroupInspection(groups, inspections, productKey) {
         : group.approvalRequired,
       linksAllowed: typeof inspection.linksAllowed === "boolean" ? inspection.linksAllowed : group.linksAllowed,
       ruleEvidence: clean(inspection.ruleEvidence || evidence).slice(0, 1400),
-      status: classified,
+      status: unavailable ? "Red" : classified,
       lastCheckedAt: new Date().toISOString(),
+      unavailable,
+      archived: unavailable ? true : Boolean(group.archived),
+      archiveReason: unavailable ? "Facebook says this group/content is unavailable" : group.archiveReason || "",
       source: group.source === "seed" ? "seed+live-check" : "facebook-live",
     };
     next.score = calculateScore(next, productKey);
@@ -282,7 +304,17 @@ export function mergeDiscoveredGroups(groups, candidates, productKey) {
       ruleEvidence: "",
       lastCheckedAt: "",
       lastPostedAt: "",
+      lastAcceptedAt: "",
+      lastPostCheckAt: "",
+      postStatus: "new",
+      pipeline: "new",
+      repeatDays: 7,
+      pendingRegistration: "",
       postCount: 0,
+      acceptedPostCount: 0,
+      rejectedPostCount: 0,
+      archived: false,
+      archiveReason: "",
       leads: 0,
     };
     next.score = calculateScore(next, productKey);
@@ -398,6 +430,28 @@ function vehicleImage(vehicle) {
   );
 }
 
+export function groupDueState(group, now = new Date()) {
+  if (!group || group.pipeline !== "proven" || !group.lastPostedAt) {
+    return { due: false, daysSincePost: null, daysUntilDue: null };
+  }
+  const postedAt = new Date(group.lastPostedAt);
+  if (Number.isNaN(postedAt.getTime())) return { due: false, daysSincePost: null, daysUntilDue: null };
+  const daysSincePost = Math.floor((now.getTime() - postedAt.getTime()) / 86400000);
+  const repeatDays = Math.max(1, Number(group.repeatDays || 7));
+  return {
+    due: daysSincePost >= repeatDays,
+    daysSincePost,
+    daysUntilDue: Math.max(0, repeatDays - daysSincePost),
+  };
+}
+
+export function groupPipeline(group) {
+  if (group?.archived) return "archived";
+  if (group?.pipeline === "proven" || Number(group?.acceptedPostCount || 0) > 0) return "proven";
+  if (group?.postStatus === "awaiting" || group?.postStatus === "pending" || group?.postStatus === "not_found") return "testing";
+  return "new";
+}
+
 export function prepareFacebookGroupPost({ group, vehicle, caption, productKey }) {
   if (!group?.url) return Promise.reject(new Error("Choose a Facebook group first."));
   if (!vehicle) return Promise.reject(new Error("Choose a van first."));
@@ -416,15 +470,126 @@ export function prepareFacebookGroupPost({ group, vehicle, caption, productKey }
   return messageRoundTrip(GROUP_POST_JOB, GROUP_POST_JOB_ACK, { id, job });
 }
 
-export function markGroupPosted(groups, groupUrl) {
+export function markGroupPosted(groups, groupUrl, details = {}) {
   const key = normalizeFacebookGroupUrl(groupUrl).toLowerCase();
+  const postedAt = details.postedAt || new Date().toISOString();
   return (groups || []).map((group) => {
     if (normalizeFacebookGroupUrl(group.url).toLowerCase() !== key) return group;
     return {
       ...group,
-      lastPostedAt: new Date().toISOString(),
-      postCount: Number(group.postCount || 0) + 1,
+      lastPostedAt: postedAt,
+      lastPostCheckAt: "",
+      postStatus: details.approvalState === "accepted" ? "accepted" : "awaiting",
+      pendingRegistration: clean(details.registration || group.pendingRegistration || ""),
+      postCount: Number(group.postCount || 0) + (details.increment === false ? 0 : 1),
+      pipeline: details.approvalState === "accepted" ? "proven" : group.pipeline === "proven" ? "proven" : "testing",
     };
+  });
+}
+
+export function markGroupAccepted(groups, groupUrl, details = {}) {
+  const key = normalizeFacebookGroupUrl(groupUrl).toLowerCase();
+  const acceptedAt = details.acceptedAt || new Date().toISOString();
+  return (groups || []).map((group) => {
+    if (normalizeFacebookGroupUrl(group.url).toLowerCase() !== key) return group;
+    const alreadyAccepted = group.postStatus === "accepted" && group.pendingRegistration === clean(details.registration || group.pendingRegistration || "");
+    return {
+      ...group,
+      status: "Green",
+      pipeline: "proven",
+      postStatus: "accepted",
+      lastAcceptedAt: acceptedAt,
+      lastPostCheckAt: acceptedAt,
+      acceptedPostCount: Number(group.acceptedPostCount || 0) + (alreadyAccepted ? 0 : 1),
+      pendingRegistration: clean(details.registration || group.pendingRegistration || ""),
+      canPost: group.canPost === false ? group.canPost : true,
+    };
+  });
+}
+
+export function markGroupPostStatus(groups, result) {
+  const key = normalizeFacebookGroupUrl(result?.url || result?.groupUrl || "").toLowerCase();
+  return (groups || []).map((group) => {
+    if (normalizeFacebookGroupUrl(group.url).toLowerCase() !== key) return group;
+    if (result?.unavailable) {
+      return {
+        ...group,
+        status: "Red",
+        postStatus: "unavailable",
+        archived: true,
+        archiveReason: "Facebook says this group/content is unavailable",
+        lastPostCheckAt: new Date().toISOString(),
+      };
+    }
+    if (result?.accepted) {
+      return markGroupAccepted([group], group.url, {
+        acceptedAt: result.checkedAt,
+        registration: result.registration,
+      })[0];
+    }
+    return {
+      ...group,
+      postStatus: result?.pending ? "pending" : "not_found",
+      lastPostCheckAt: result?.checkedAt || new Date().toISOString(),
+    };
+  });
+}
+
+export function setGroupRepeatDays(groups, groupUrl, repeatDays) {
+  const key = normalizeFacebookGroupUrl(groupUrl).toLowerCase();
+  const days = Math.max(1, Math.min(90, Number(repeatDays || 7)));
+  return (groups || []).map((group) =>
+    normalizeFacebookGroupUrl(group.url).toLowerCase() === key ? { ...group, repeatDays: days } : group
+  );
+}
+
+export function archiveFacebookGroup(groups, groupUrl, reason = "Removed from active group list") {
+  const key = normalizeFacebookGroupUrl(groupUrl).toLowerCase();
+  return (groups || []).map((group) =>
+    normalizeFacebookGroupUrl(group.url).toLowerCase() === key
+      ? { ...group, archived: true, archiveReason: reason, archivedAt: new Date().toISOString() }
+      : group
+  );
+}
+
+export function restoreFacebookGroup(groups, groupUrl) {
+  const key = normalizeFacebookGroupUrl(groupUrl).toLowerCase();
+  return (groups || []).map((group) =>
+    normalizeFacebookGroupUrl(group.url).toLowerCase() === key
+      ? { ...group, archived: false, archiveReason: "", unavailable: false, status: group.status === "Red" ? "Amber" : group.status }
+      : group
+  );
+}
+
+export function startFacebookPostStatusCheck(groups, productKey, limit = 12) {
+  const targets = (groups || [])
+    .filter((group) =>
+      productAllowed(group, productKey) &&
+      !group.archived &&
+      group.lastPostedAt &&
+      ["awaiting", "pending", "not_found"].includes(group.postStatus) &&
+      group.pendingRegistration &&
+      /^https:\/\/www\.facebook\.com\/groups\//i.test(normalizeFacebookGroupUrl(group.url))
+    )
+    .sort((a, b) => new Date(a.lastPostCheckAt || a.lastPostedAt || 0) - new Date(b.lastPostCheckAt || b.lastPostedAt || 0))
+    .slice(0, Math.max(1, Math.min(25, Number(limit || 12))));
+
+  if (!targets.length) return Promise.reject(new Error("There are no posted groups waiting for an acceptance check."));
+
+  const id = requestId("group-post-status");
+  return messageRoundTrip(GROUP_POST_STATUS_START, GROUP_POST_STATUS_ACK, {
+    id,
+    job: {
+      id,
+      productKey,
+      groups: targets.map((group) => ({
+        name: group.name,
+        url: group.url,
+        registration: group.pendingRegistration,
+        postedAt: group.lastPostedAt,
+      })),
+      startedAt: new Date().toISOString(),
+    },
   });
 }
 
@@ -432,5 +597,12 @@ export function scoreFacebookGroups(groups, productKey) {
   return (groups || [])
     .filter((group) => productAllowed(group, productKey))
     .map((group) => ({ ...group, score: calculateScore(group, productKey) }))
-    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+    .sort((a, b) => {
+      const aDue = groupDueState(a).due ? 1 : 0;
+      const bDue = groupDueState(b).due ? 1 : 0;
+      if (aDue !== bDue) return bDue - aDue;
+      if (groupPipeline(a) === "proven" && groupPipeline(b) !== "proven") return -1;
+      if (groupPipeline(b) === "proven" && groupPipeline(a) !== "proven") return 1;
+      return Number(b.score || 0) - Number(a.score || 0);
+    });
 }
