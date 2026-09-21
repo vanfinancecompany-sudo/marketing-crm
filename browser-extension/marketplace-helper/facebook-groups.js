@@ -164,18 +164,131 @@
     return label.closest('button, [role="button"]') || label;
   }
 
+  function composerDialog() {
+    const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter(visible);
+    const createPostDialog = dialogs.find((dialog) =>
+      /create post/i.test(clean(dialog.innerText || dialog.textContent || dialog.getAttribute("aria-label")))
+    );
+    return createPostDialog || dialogs[dialogs.length - 1] || document;
+  }
+
+  function composerEditorCandidates(scope) {
+    const selectors = [
+      '[contenteditable="true"]',
+      '[contenteditable="plaintext-only"]',
+      '[role="textbox"]',
+      '[data-lexical-editor="true"]',
+      '[aria-label*="Create a public post"]',
+      '[aria-placeholder*="Create a public post"]',
+      '[aria-label*="Write something"]',
+      '[aria-placeholder*="Write something"]',
+    ];
+
+    const candidates = [...new Set(
+      selectors.flatMap((selector) => [...scope.querySelectorAll(selector)])
+    )].filter(visible);
+
+    return candidates
+      .filter((element) => {
+        const label = clean([
+          element.getAttribute?.("aria-label"),
+          element.getAttribute?.("aria-placeholder"),
+          element.getAttribute?.("data-placeholder"),
+          element.getAttribute?.("placeholder"),
+        ].filter(Boolean).join(" "));
+        return !/comment|reply|search/i.test(label);
+      })
+      .sort((first, second) => {
+        const score = (element) => {
+          let value = 0;
+          const label = clean([
+            element.getAttribute?.("aria-label"),
+            element.getAttribute?.("aria-placeholder"),
+            element.getAttribute?.("data-placeholder"),
+          ].filter(Boolean).join(" "));
+          if (/create a public post|write something|what'?s on your mind/i.test(label)) value += 10;
+          if (element.getAttribute?.("role") === "textbox") value += 6;
+          if (element.getAttribute?.("contenteditable") === "true") value += 5;
+          if (element.getAttribute?.("contenteditable") === "plaintext-only") value += 5;
+          if (element.getAttribute?.("data-lexical-editor") === "true") value += 5;
+          const rect = element.getBoundingClientRect();
+          value += Math.min(8, Math.round((rect.width * rect.height) / 15000));
+          return value;
+        };
+        return score(second) - score(first);
+      });
+  }
+
+  function editorFromPlaceholder(scope) {
+    const labels = [...scope.querySelectorAll("div, span, p")]
+      .filter(visible)
+      .filter((element) =>
+        /^(create a public post|write something|what'?s on your mind)/i.test(
+          clean(element.innerText || element.textContent || element.getAttribute("aria-label"))
+        )
+      );
+
+    for (const label of labels) {
+      const ancestor = label.closest(
+        '[contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], [data-lexical-editor="true"]'
+      );
+      if (ancestor && visible(ancestor)) return ancestor;
+
+      const parent = label.parentElement;
+      const descendant = parent?.querySelector?.(
+        '[contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], [data-lexical-editor="true"]'
+      );
+      if (descendant && visible(descendant)) return descendant;
+    }
+    return null;
+  }
+
   async function waitForComposerEditor(timeoutMs = 6000) {
     const started = Date.now();
+    let lastScope = document;
+
     while (Date.now() - started < timeoutMs) {
-      const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter(visible);
-      const scope = dialogs[dialogs.length - 1] || document;
-      const editor = [...scope.querySelectorAll('[contenteditable="true"][role="textbox"], [contenteditable="true"]')]
+      const scope = composerDialog();
+      lastScope = scope;
+
+      const direct = composerEditorCandidates(scope)[0];
+      if (direct) return { editor: direct, scope };
+
+      const placeholderEditor = editorFromPlaceholder(scope);
+      if (placeholderEditor) return { editor: placeholderEditor, scope };
+
+      const placeholder = [...scope.querySelectorAll("div, span, p")]
         .filter(visible)
-        .find((element) => !/comment/i.test(clean(element.getAttribute("aria-label"))));
-      if (editor) return { editor, scope };
+        .find((element) =>
+          /^(create a public post|write something|what'?s on your mind)/i.test(
+            clean(element.innerText || element.textContent || element.getAttribute("aria-label"))
+          )
+        );
+
+      if (placeholder) {
+        try { placeholder.click(); } catch {}
+        await sleep(180);
+
+        const active = document.activeElement;
+        if (
+          active &&
+          active !== document.body &&
+          visible(active) &&
+          (
+            active.getAttribute?.("role") === "textbox" ||
+            active.getAttribute?.("contenteditable") === "true" ||
+            active.getAttribute?.("contenteditable") === "plaintext-only" ||
+            active.getAttribute?.("data-lexical-editor") === "true"
+          )
+        ) {
+          return { editor: active, scope };
+        }
+      }
+
       await sleep(250);
     }
-    return { editor: null, scope: document };
+
+    return { editor: null, scope: lastScope };
   }
 
   async function inspectGroup(state) {
@@ -413,7 +526,8 @@
       results.push({ label: "Post text", ok: false, detail: "Composer text box not found after opening the post dialog" });
     }
 
-    const imageResult = editor
+    const composerOpened = scope !== document || Boolean(composerDialog() !== document);
+    const imageResult = composerOpened
       ? await attachImage(job, scope)
       : { ok: false, detail: "Skipped because the post composer did not open" };
     results.push({ label: "Photo", ok: imageResult.ok, detail: imageResult.detail });
