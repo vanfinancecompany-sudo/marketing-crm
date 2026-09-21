@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 function replaceOnce(source, before, after, label) {
+  if (source.includes("VFC_CREATE_OR_UPDATE_RECONCILE")) return source;
   const first = source.indexOf(before);
   if (first === -1) throw new Error(`Photo-ready detail repair could not find ${label}.`);
   if (source.indexOf(before, first + before.length) !== -1) throw new Error(`Photo-ready detail repair found duplicate ${label}.`);
@@ -11,7 +12,8 @@ function replaceOnce(source, before, after, label) {
 const controlledTestPath = fileURLToPath(new URL("../tests/dealerkit-controlled-publish.test.js", import.meta.url));
 let controlledTestSource = fs.readFileSync(controlledTestPath, "utf8");
 
-if (!controlledTestSource.includes('["publish_new_vehicle", "update_existing_vehicle"].includes(action)')) {
+if (!controlledTestSource.includes('["publish_new_vehicle", "update_existing_vehicle"].includes(action)')
+  && !controlledTestSource.includes('final publisher requires confirmation, reconciles rows and publish status')) {
   const beforeTitle = 'test("final publisher requires confirmation, inserts only new rows, verifies and rolls back", async () => {';
   const afterTitle = 'test("final publisher requires confirmation, supports safe create or image-only update, verifies and rolls back", async () => {';
   const beforeAssertion = '  assert.match(source, /action !== "publish_new_vehicle"/);';

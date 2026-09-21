@@ -77,7 +77,7 @@ function decision() {
   };
 }
 
-test("existing Finance vehicle refresh updates only image fields on every exact live row", () => {
+test("existing Finance vehicle refresh reuses every exact row with the full controlled payload", () => {
   const plan = buildControlledVfcTargets({
     vehicle: vehicle(),
     decision: decision(),
@@ -95,13 +95,15 @@ test("existing Finance vehicle refresh updates only image fields on every exact 
   const category = plan.targets.find((target) => target.collectionId === "VANFINANCE-TIPPERSDROPSIDEL");
   const detail = plan.targets.find((target) => target.collectionId === "VANFINANCEPAGES");
 
-  assert.deepEqual(allVans.data, { picture: listingImageUrl });
-  assert.deepEqual(category.data, { picture: listingImageUrl });
-  assert.deepEqual(detail.data, { imageCount: "3", mainImages: galleryUrls });
-  assert.equal("price" in allVans.data, false);
-  assert.equal("salePrice" in allVans.data, false);
-  assert.equal("priceVat" in detail.data, false);
-  assert.equal("descriptionLine" in detail.data, false);
+  assert.equal(allVans.data.picture, listingImageUrl);
+  assert.equal(allVans.data.price, "£13,995");
+  assert.equal(allVans.data.salePrice, "FROM £292 P/M");
+  assert.equal(category.data.picture, listingImageUrl);
+  assert.equal(detail.data.imageCount, "3");
+  assert.deepEqual(detail.data.mainImages, galleryUrls);
+  assert.equal(detail.data.priceVat, "£13,995 +VAT");
+  assert.ok(detail.data.descriptionLine);
+  assert.equal("manualOnlyField" in allVans.data, false);
 });
 
 test("existing Finance vehicle image refresh blocks ambiguous duplicate Wix rows", () => {
@@ -112,7 +114,7 @@ test("existing Finance vehicle image refresh blocks ambiguous duplicate Wix rows
     wixResults: financeResults({ duplicateCategory: true }),
   });
   assert.equal(plan.canPublish, false);
-  assert.ok(plan.blockers.some((blocker) => blocker.code === "vfc_existing_ambiguous"));
+  assert.ok(plan.blockers.some((blocker) => blocker.code === "vfc_duplicate_existing"));
 });
 
 test("top-level controlled plan exposes update intent and binds it into confirmation", () => {
