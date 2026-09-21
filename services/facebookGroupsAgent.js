@@ -96,6 +96,10 @@ function clean(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
+export function preserveFacebookGroupCaption(value) {
+  return String(value ?? "").replace(/\r\n?/g, "\n").trim();
+}
+
 export function normalizeFacebookGroupUrl(value) {
   const raw = clean(value);
   if (!raw) return "";
@@ -488,7 +492,7 @@ export function prepareFacebookGroupPost({ group, vehicle, caption, productKey }
     groupName: group.name || "Facebook group",
     registration: vehicleRegistration(vehicle),
     vehicleId: String(vehicle.id || ""),
-    caption: clean(caption || vehicle.caption || ""),
+    caption: preserveFacebookGroupCaption(caption || vehicle.caption || ""),
     imageUrl: vehicleImage(vehicle),
     createdAt: new Date().toISOString(),
   };

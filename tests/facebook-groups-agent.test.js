@@ -12,6 +12,7 @@ import {
   markGroupPostStatus,
   markGroupPosted,
   normalizeFacebookGroupUrl,
+  preserveFacebookGroupCaption,
   scoreFacebookGroups,
 } from "../services/facebookGroupsAgent.js";
 
@@ -31,6 +32,15 @@ test("Facebook group seed gives both products a useful starting pool", () => {
   assert.ok(groups.some((group) => group.rent2buy));
   assert.ok(groups.some((group) => /courier|trade/i.test(group.segment)));
   assert.ok(groups.some((group) => /van|marketplace/i.test(group.segment)));
+});
+
+test("Facebook group caption handoff preserves paragraph breaks exactly", () => {
+  const caption = "NO CREDIT CHECK\r\n\r\n£536 MTH RENT IT · DRIVE IT · OWN IT\r\nApply in 60 seconds\r\n\r\nJUST £99 FINAL PAYMENT. IT'S YOURS!";
+  assert.equal(
+    preserveFacebookGroupCaption(caption),
+    "NO CREDIT CHECK\n\n£536 MTH RENT IT · DRIVE IT · OWN IT\nApply in 60 seconds\n\nJUST £99 FINAL PAYMENT. IT'S YOURS!",
+  );
+  assert.match(serviceSource, /caption: preserveFacebookGroupCaption\(caption \|\| vehicle\.caption \|\| ""\)/);
 });
 
 test("Facebook group URLs are canonicalised for dedupe and history", () => {
