@@ -133,7 +133,6 @@ function ruleClassification(text) {
     /no\s+dealers?\b/,
     /dealers?\s+(?:are\s+)?not\s+allowed/,
     /no\s+promotional\s+posts?/,
-    /no\s+external\s+links?/,
   ];
   const allowPatterns = [
     /business(?:es)?\s+(?:are\s+)?welcome/,
@@ -271,8 +270,12 @@ export function applyGroupInspection(groups, inspections, productKey) {
       status: unavailable ? "Red" : classified,
       lastCheckedAt: new Date().toISOString(),
       unavailable,
-      archived: unavailable ? true : Boolean(group.archived),
-      archiveReason: unavailable ? "Facebook says this group/content is unavailable" : group.archiveReason || "",
+      archived: unavailable || classified === "Red" ? true : Boolean(group.archived),
+      archiveReason: unavailable
+        ? "Facebook says this group/content is unavailable"
+        : classified === "Red"
+          ? "Live rules say commercial/dealer/promotional posts are not allowed"
+          : group.archiveReason || "",
       source: group.source === "seed" ? "seed+live-check" : "facebook-live",
     };
     next.score = calculateScore(next, productKey);
