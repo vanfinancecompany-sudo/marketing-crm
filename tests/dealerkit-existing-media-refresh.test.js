@@ -135,6 +135,15 @@ test("top-level controlled plan exposes update intent and binds it into confirma
   assert.equal(buildControlledPublishConfirmation(plan).writeIntent, "update_existing_vehicle");
 });
 
+test("verified publish success is latched so delayed stale previews cannot overwrite it", () => {
+  const ui = fs.readFileSync(new URL("../utils/dealerKitControlledPublish.js", import.meta.url), "utf8");
+  assert.match(ui, /publishCompleted === "true"/);
+  assert.match(ui, /_controlledPreviewRequestId/);
+  assert.match(ui, /delayed READY response from the old CMS state must never overwrite/);
+  assert.match(ui, /if \(root\.dataset\.publishCompleted === "true"\) return;/);
+  assert.match(ui, /loadPreview\(root, \{ force: true \}\)/);
+});
+
 test("controlled endpoint and workspace use the explicit existing-vehicle update action", () => {
   const api = fs.readFileSync(new URL("../api/dealerkit-controlled-publish.js", import.meta.url), "utf8");
   const ui = fs.readFileSync(new URL("../utils/dealerKitControlledPublish.js", import.meta.url), "utf8");
