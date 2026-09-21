@@ -72,6 +72,7 @@ function postStatusLabel(group) {
   if (group.postStatus === "pending") return "Pending admin approval";
   if (group.postStatus === "awaiting") return "Awaiting acceptance check";
   if (group.postStatus === "not_found") return "Not found yet";
+  if (group.postStatus === "declined") return "Declined";
   if (group.postStatus === "unavailable") return "Unavailable";
   return group.postCount ? "Posted before" : "Not posted yet";
 }
