@@ -8,6 +8,7 @@ import { DEALERKIT_IMPORTED_MEDIA_TABLE, buildProductImageSets, importedMediaRow
 import { RENT2BUY_CATEGORY_COLLECTIONS } from "../lib/dealerKitRent2BuyPlan.js";
 import { VAN_FINANCE_RENT2BUY_WIX_SITE_ID } from "../lib/dealerKitRent2BuyWixPlan.js";
 import { buildControlledPublishConfirmation, buildControlledVehiclePublishPlan } from "../lib/dealerKitControlledPublishPlan.js";
+import { registrationTitleVariants } from "../lib/wixRegistrationVariants.js";
 
 const clean = (value, limit = 10000) => String(value ?? "").trim().slice(0, limit);
 
@@ -80,17 +81,28 @@ async function loadDecision(supabase, registration) {
 }
 
 async function queryRegistration(configuration, collectionId, registration, collection = null) {
-  const payload = await controlledWixRequest(configuration, "/wix-data/v2/items/query", {
-    method: "POST",
-    body: { dataCollectionId: collectionId, query: { filter: { title: { $eq: registration } }, paging: { limit: 3, offset: 0 } }, consistentRead: true },
-  });
+  const detailCollection = collectionId === "VANFINANCEPAGES" || collectionId === "VANPAGES";
+  const candidates = detailCollection ? registrationTitleVariants(registration) : [registration];
+  const matched = new Map();
+  for (const candidate of candidates) {
+    const payload = await controlledWixRequest(configuration, "/wix-data/v2/items/query", {
+      method: "POST",
+      body: { dataCollectionId: collectionId, query: { filter: { title: { $eq: candidate } }, paging: { limit: 3, offset: 0 } }, consistentRead: true },
+    });
+    for (const item of Array.isArray(payload.dataItems) ? payload.dataItems : []) {
+      if (normalizeFinanceRegistration(item?.data?.title || "") !== registration) continue;
+      const id = clean(item?.id, 300);
+      if (id) matched.set(id, item);
+    }
+    if (!detailCollection && matched.size) break;
+  }
   return {
     siteId: configuration.siteId,
     siteLabel: configuration.siteLabel || null,
     siteRole: configuration.siteRole || null,
     collectionId,
     collection: collection || { id: collectionId },
-    items: Array.isArray(payload.dataItems) ? payload.dataItems : [],
+    items: Array.from(matched.values()),
   };
 }
 

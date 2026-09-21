@@ -8,6 +8,7 @@ function read(relativePath) {
 
 function replaceSection(relativePath, startMarker, endMarker, replacement, label, alreadyMarker = "") {
   const { path, source: original } = read(relativePath);
+  if (original.includes("VFC_CREATE_OR_UPDATE_RECONCILE")) return;
   if (alreadyMarker && original.includes(alreadyMarker)) return;
   const start = original.indexOf(startMarker);
   if (start === -1) throw new Error(`Existing-media refresh transform could not find ${label} start in ${relativePath}.`);
@@ -19,6 +20,7 @@ function replaceSection(relativePath, startMarker, endMarker, replacement, label
 
 function replaceOnce(relativePath, before, after, label, alreadyMarker = "") {
   const { path, source: original } = read(relativePath);
+  if (original.includes("VFC_CREATE_OR_UPDATE_RECONCILE")) return;
   if (alreadyMarker && original.includes(alreadyMarker)) return;
   const first = original.indexOf(before);
   if (first === -1) throw new Error(`Existing-media refresh transform could not find ${label} in ${relativePath}.`);
@@ -140,4 +142,4 @@ replaceOnce(
   `payload?.plan?.writeIntent === "update_existing_vehicle" ? "Update images"`,
 );
 
-console.log("Applied existing DealerKit media refresh: existing Wix vehicles update image fields only, with exact-row safety and no price/detail overwrite.");
+console.log("Applied the current DealerKit existing-vehicle controlled publish contract.");

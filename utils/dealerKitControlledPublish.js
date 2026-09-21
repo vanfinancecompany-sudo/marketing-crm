@@ -3,6 +3,9 @@ import { buildMarketingAccessHeaders, parseMarketingJsonResponse } from "../serv
 const ROOT_ATTRIBUTE = "data-dealerkit-controlled-publish";
 let scanQueued = false;
 
+// VFC_CREATE_OR_UPDATE_RECONCILE: the existing review panel now describes the
+// create/update/publish/draft operations already present in the confirmed plan.
+
 const clean = (value) => String(value ?? "").trim();
 const normaliseRegistration = (value) => clean(value).replace(/[^A-Z0-9]/gi, "").toUpperCase();
 
@@ -72,6 +75,10 @@ function renderPayload(root, payload) {
     : plan.mode === "cars"
       ? plan.imageSets?.cars?.mainSource
       : plan.imageSets?.vanFinance?.mainSource;
+  const createCount = (plan.targets || []).filter((target) => target.operation === "create").length;
+  const updateCount = (plan.targets || []).filter((target) => target.operation === "update").length;
+  const restoreCount = (plan.targets || []).filter((target) => target.publishStatusOperation === "publish" && target.operation === "update").length;
+  const draftCount = (plan.targets || []).filter((target) => target.operation === "draft").length;
 
   const summary = element("div", "dealerkit-wix-preview__summary");
   summary.append(
@@ -80,6 +87,9 @@ function renderPayload(root, payload) {
     element("div", "", `Selected DealerKit photos READY: ${media.dealerKitReady || 0}/${media.dealerKitExpected || 0}`),
     element("div", "", `Primary image: ${mainSource || "not ready"}`),
   );
+  if (plan.mode === "finance") {
+    summary.append(element("div", "", `CMS reconciliation: ${createCount} Create · ${updateCount} Update existing · ${restoreCount} Restore existing · ${draftCount} Move stale category to Draft`));
+  }
   if (plan.rent2buy?.enabled && plan.rent2buy?.pricing) {
     const pricing = plan.rent2buy.pricing;
     summary.append(
@@ -119,8 +129,15 @@ function renderPayload(root, payload) {
   result.appendChild(verdict);
   result.hidden = false;
 
+  const updateExisting = plan.writeIntent === "update_existing_vehicle";
+  const updateActionLabel = plan.mode === "finance" ? "Reconcile advert" : "Update images";
+  const heading = root.querySelector(".dealerkit-wix-preview__copy strong");
+  if (heading) heading.textContent = updateExisting ? `Reconcile ${label} advert` : `Publish to ${label}`;
+  const applyButton = root.querySelector("[data-controlled-publish-apply]");
+  if (applyButton) applyButton.textContent = updateExisting ? updateActionLabel : `Publish to ${label}`;
+
   const statusText = plan.canPublish
-    ? "READY TO PUBLISH"
+    ? (updateExisting ? "READY TO RECONCILE" : "READY TO PUBLISH")
     : unpreparedCount > 0
       ? "PREPARE IMAGES"
       : processingCount > 0
@@ -239,7 +256,13 @@ function createPanel(registration, product = "finance") {
   publish.addEventListener("click", async () => {
     const payload = root._controlledPublishPayload;
     if (!confirmationInputMatches(root) || !payload?.plan?.canPublish || !payload.plan.confirmation) return;
-    const approved = window.confirm(`PUBLISH ${registration} TO LIVE ${labelText.toUpperCase()} WIX?\n\nThis is the final live-write confirmation.`);
+    const updateExisting = payload.plan.writeIntent === "update_existing_vehicle";
+    const financeReconcile = updateExisting && payload.plan.mode === "finance";
+    const approved = window.confirm(updateExisting
+      ? financeReconcile
+        ? `RECONCILE ${registration} ON LIVE ${labelText.toUpperCase()} WIX?\n\nExisting item IDs will be reused, selected records restored to Published, and stale category rows moved to Draft.`
+        : `UPDATE ${registration} IMAGES ON LIVE ${labelText.toUpperCase()} WIX?\n\nOnly the verified image fields on existing rows will be changed.`
+      : `PUBLISH ${registration} TO LIVE ${labelText.toUpperCase()} WIX?\n\nThis is the final live-write confirmation.`);
     if (!approved) return;
     publish.disabled = true;
     prepare.disabled = true;
@@ -248,15 +271,15 @@ function createPanel(registration, product = "finance") {
     try {
       const endpoint = root.dataset.product === "cars" ? "/api/dealerkit-car-controlled-publish" : "/api/dealerkit-controlled-publish";
       const body = root.dataset.product === "cars"
-        ? { action: "publish_new_car", registration, confirmRegistration: normaliseRegistration(input.value), confirmation: payload.plan.confirmation }
-        : { action: "publish_new_vehicle", registration, confirmRegistration: normaliseRegistration(input.value), productMode: root.dataset.product, confirmation: payload.plan.confirmation };
+        ? { action: updateExisting ? "update_existing_car" : "publish_new_car", registration, confirmRegistration: normaliseRegistration(input.value), confirmation: payload.plan.confirmation }
+        : { action: updateExisting ? "update_existing_vehicle" : "publish_new_vehicle", registration, confirmRegistration: normaliseRegistration(input.value), productMode: root.dataset.product, confirmation: payload.plan.confirmation };
       const response = await fetch(endpoint, {
         method: "POST",
         headers: buildMarketingAccessHeaders({ accept: "application/json", "content-type": "application/json" }),
         body: JSON.stringify(body),
       });
       const published = await parseMarketingJsonResponse(response, "Controlled Wix publishing failed.");
-      setStatus(root, published.verified ? "PUBLISHED + VERIFIED" : "CHECK RESULT", published.verified ? "is-good" : "is-warning");
+      setStatus(root, published.verified ? (updateExisting ? "RECONCILED + VERIFIED" : "PUBLISHED + VERIFIED") : "CHECK RESULT", published.verified ? "is-good" : "is-warning");
       result.replaceChildren(element("div", "dealerkit-wix-preview__verdict is-good", published.message || `${registration} was published and verified.`));
       root._controlledPublishPayload = null;
       refreshActionState(root);
@@ -265,7 +288,9 @@ function createPanel(registration, product = "finance") {
       result.replaceChildren(element("div", "dealerkit-wix-preview__error", error?.message || "Publishing failed. Check the rollback result before trying again."));
       try { await loadPreview(root); } catch {}
     } finally {
-      publish.textContent = `Publish to ${labelText}`;
+      publish.textContent = payload?.plan?.writeIntent === "update_existing_vehicle"
+        ? (payload.plan.mode === "finance" ? "Reconcile advert" : "Update images")
+        : `Publish to ${labelText}`;
       refreshActionState(root);
     }
   });
