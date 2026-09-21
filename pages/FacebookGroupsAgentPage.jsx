@@ -375,7 +375,7 @@ export default function FacebookGroupsAgentPage({
 
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [groups, productKey]);
+  }, [groups, productKey, selectedVehicleId, vehicles]);
 
   async function requireGroupsHelper() {
     const status = await getFacebookHelperStatus();
@@ -574,7 +574,7 @@ export default function FacebookGroupsAgentPage({
           </p>
 
           <div className="posting-card__meta">
-            <span>Joined: {yesNoUnknown(group.joined)}</span>
+            <span>Joined: {group.membershipPending ? "Pending approval" : yesNoUnknown(group.joined)}</span>
             <span>Can post: {yesNoUnknown(group.canPost)}</span>
             <span>Post approval: {yesNoUnknown(group.approvalRequired, "Required", "Not seen")}</span>
             <span>Links: {yesNoUnknown(group.linksAllowed, "Allowed", "Restricted")}</span>
