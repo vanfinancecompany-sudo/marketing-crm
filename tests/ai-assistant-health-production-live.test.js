@@ -31,6 +31,7 @@ async function withEnvironment(values, operation) {
 
 const runtime = {
   VERCEL_ENV: "production",
+  AI_HEALTH_ENABLE_LIVE_VALIDATION: "true",
   MARKETING_CUSTOMER_DATABASE_API_KEY: "health-test-key",
   OPENAI_API_KEY: "server-only-openai-key",
   SUPABASE_URL: "https://example.supabase.co",
@@ -47,7 +48,22 @@ test("production live-health route remains locked behind Marketing access", asyn
   });
 });
 
-test("protected production configuration enables bounded live validation without exposing secrets", async () => {
+test("paid live validation is disabled by default even when production OpenAI credentials exist", async () => {
+  await withEnvironment({ ...runtime, AI_HEALTH_ENABLE_LIVE_VALIDATION: null }, async () => {
+    const response = responseRecorder();
+    await handler({
+      method: "POST",
+      headers: { "x-marketing-customer-database-key": "health-test-key" },
+      body: { action: "configuration" },
+    }, response);
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.payload.configuration.live_validation_available, false);
+    assert.equal(response.payload.configuration.live_validation_environment, "disabled_by_default");
+    assert.equal(response.payload.configuration.guarantees.explicit_environment_enable_required, true);
+  });
+});
+
+test("protected production configuration enables bounded live validation only after explicit opt-in", async () => {
   await withEnvironment(runtime, async () => {
     const response = responseRecorder();
     await handler({
@@ -87,5 +103,7 @@ test("production wrapper preserves confirmation, batch limits and write-free val
   assert.match(source, /runLiveHealthBatch\(supabase, body, permissionEnvironment\)/);
   assert.match(source, /VERCEL_ENV:\s*"preview"/);
   assert.doesNotMatch(source, /\.insert\(|\.upsert\(|customer_records.*insert/i);
+  assert.match(source, /AI_HEALTH_ENABLE_LIVE_VALIDATION\s*===\s*"true"/);
   assert.match(source, /explicit_confirmation_required:\s*true/);
+  assert.match(source, /explicit_environment_enable_required:\s*true/);
 });
