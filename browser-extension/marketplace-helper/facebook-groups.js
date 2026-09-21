@@ -308,7 +308,10 @@
     const stateResult = await chrome.runtime.sendMessage({ type: "GET_GROUP_AGENT_STATE" }).catch(() => null);
     const state = stateResult?.state || null;
 
-    if (state?.mode === "discovery" && location.pathname.startsWith("/search/groups")) {
+    if (
+      state?.mode === "discovery" &&
+      (location.pathname.startsWith("/search/groups") || location.pathname.startsWith("/groups/search"))
+    ) {
       await sleep(1600);
       await collectSearchResults(state);
       return;
