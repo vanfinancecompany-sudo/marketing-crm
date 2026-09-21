@@ -24,6 +24,8 @@
     { id: "rent2buy-facebook", label: "Rent2Buy Facebook", path: "/rent2buy-facebook", paths: ["/rent2buy-facebook"], navigation: "react", view: "Rent2Buy Facebook" },
     { id: "van-finance-marketplace", label: "Van Finance Marketplace", path: "/van-finance-marketplace", paths: ["/van-finance-marketplace"], navigation: "react", view: "Van Finance Marketplace" },
     { id: "rent2buy-marketplace", label: "Rent2Buy Marketplace", path: "/rent2buy-marketplace", paths: ["/rent2buy-marketplace", "/facebook-marketplace"], navigation: "react", view: "Rent2Buy Marketplace" },
+    { id: "van-finance-groups", label: "Van Finance Groups & Classifieds", path: "/van-finance-groups", paths: ["/van-finance-groups"], navigation: "react", view: "Van Finance Groups & Classifieds" },
+    { id: "rent2buy-groups", label: "Rent2Buy Facebook Groups", path: "/rent2buy-groups", paths: ["/rent2buy-groups"], navigation: "react", view: "Rent2Buy Facebook Groups" },
   ]);
 
   const advancedRoutes = Object.freeze([

@@ -1,6 +1,6 @@
-# VFC Marketplace Helper
+# VFC Facebook Helper
 
-This Chrome extension is the local browser bridge between the Marketing CRM and Facebook Marketplace.
+This Chrome extension is the local browser bridge between the Marketing CRM and Facebook Marketplace / Facebook Groups.
 
 ## Controlled workflow
 
@@ -37,3 +37,27 @@ The extension never clicks Publish, never handles Facebook credentials, and cont
 5. Select this `browser-extension/marketplace-helper` directory from a local checkout/export of the approved branch/release.
 
 The extension is scoped to the production Marketing CRM and Facebook Marketplace vehicle creation pages.
+
+
+## Facebook Groups agent
+
+The same extension also supports the separate **Rent2Buy Facebook Groups** and **Van Finance Groups & Classifieds** CRM pages.
+
+- Discovery runs search Facebook Groups through the user's normal logged-in browser session and return candidate group URLs/names to the CRM.
+- Live checks open a controlled batch of group About pages and record visible membership/posting access, privacy, approval and advertising/link-rule evidence.
+- Rent2Buy and Van Finance use separate search plans and scoring.
+- Group post preparation opens the selected group, attempts to fill the existing CRM caption and stock image, and stops before Facebook's final Post action.
+- The helper never joins a group, requests membership, clicks the final Post button, bypasses CAPTCHA/security checks or attempts to hide automation.
+- Discovery and inspection are deliberately batched rather than running as an unattended high-frequency crawler.
+
+The Group agent stores its candidate/check history in the browser-side Marketing CRM state in this first release. No production customer, lead or stock records are altered.
+
+
+## Group pipeline logic
+
+The CRM separates groups into:
+- **New & Testing**: new discoveries and groups with adverts waiting for visibility/approval checks.
+- **Proven / Hot**: at least one advert has been confirmed visible/accepted.
+- **Archived**: unavailable groups or groups whose visible rules explicitly prohibit commercial/dealer/promotional posting.
+
+When the user manually clicks Facebook's **Post** button, the helper records that posting attempt back to the CRM. The CRM can then run an acceptance check against posted registrations. Proven groups default to a 7-day repeat interval (configurable per group) and appear in the **Due again** section when ready for another advert.

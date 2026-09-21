@@ -1,6 +1,9 @@
 const PENDING_JOB_KEY = "vfcPendingMarketplaceJob";
 const LAST_RECEIPT_KEY = "vfcLastMarketplaceReceipt";
 const PUBLISH_CONFIRM_WINDOW_MS = 10 * 60 * 1000;
+const GROUP_AGENT_STATE_KEY = "vfcFacebookGroupsAgentState";
+const GROUP_POST_JOB_KEY = "vfcPendingFacebookGroupPost";
+const LAST_GROUP_POST_EVENT_KEY = "vfcLastFacebookGroupPostEvent";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -26,6 +29,63 @@ async function savePendingJob(value) {
 
 async function clearPendingJob() {
   await chrome.storage.local.remove(PENDING_JOB_KEY);
+}
+
+async function broadcastToCrm(message, preferredTabId = null) {
+  if (preferredTabId) {
+    try {
+      await chrome.tabs.sendMessage(preferredTabId, message);
+      return;
+    } catch {}
+  }
+
+  const tabs = await chrome.tabs.query({
+    url: ["https://marketing-crm-six.vercel.app/*", "https://*.vercel.app/*"],
+  });
+  await Promise.allSettled(tabs.map((tab) => chrome.tabs.sendMessage(tab.id, message)));
+}
+
+function canonicalGroupUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    const match = url.pathname.match(/^\/groups\/([^/?#]+)/i);
+    if (!match) return "";
+    return `https://www.facebook.com/groups/${match[1]}/`;
+  } catch {
+    return "";
+  }
+}
+
+function groupSearchUrl(query) {
+  return `https://www.facebook.com/search/groups/?q=${encodeURIComponent(String(query || ""))}`;
+}
+
+function groupAboutUrl(value) {
+  const base = canonicalGroupUrl(value);
+  return base ? `${base}about/` : String(value || "");
+}
+
+function groupPostSearchUrl(value, registration) {
+  const base = canonicalGroupUrl(value);
+  return base ? `${base}search/?q=${encodeURIComponent(String(registration || ""))}` : String(value || "");
+}
+
+async function getGroupAgentState() {
+  const stored = await chrome.storage.local.get(GROUP_AGENT_STATE_KEY);
+  return stored[GROUP_AGENT_STATE_KEY] || null;
+}
+
+async function saveGroupAgentState(state) {
+  await chrome.storage.local.set({ [GROUP_AGENT_STATE_KEY]: state });
+}
+
+async function clearGroupAgentState() {
+  await chrome.storage.local.remove(GROUP_AGENT_STATE_KEY);
+}
+
+async function getPendingGroupPost() {
+  const stored = await chrome.storage.local.get(GROUP_POST_JOB_KEY);
+  return stored[GROUP_POST_JOB_KEY] || null;
 }
 
 async function broadcastReceipt(receipt, crmTabId) {
@@ -165,6 +225,282 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const stored = await chrome.storage.local.get(LAST_RECEIPT_KEY);
       if (!message.receiptId || stored[LAST_RECEIPT_KEY]?.id === message.receiptId) {
         await chrome.storage.local.remove(LAST_RECEIPT_KEY);
+      }
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === "STORE_GROUP_DISCOVERY_JOB") {
+      const job = message.job;
+      if (!job?.id || !Array.isArray(job?.queries) || !job.queries.length) {
+        sendResponse({ ok: false, error: "Invalid Facebook group discovery job." });
+        return;
+      }
+      const state = {
+        mode: "discovery",
+        job,
+        queryIndex: 0,
+        candidates: [],
+        crmTabId: sender?.tab?.id || null,
+        tabId: null,
+        startedAt: Date.now(),
+      };
+      await saveGroupAgentState(state);
+      const tab = await chrome.tabs.create({ url: groupSearchUrl(job.queries[0]?.query || job.queries[0]), active: true });
+      state.tabId = tab.id || null;
+      await saveGroupAgentState(state);
+      sendResponse({ ok: true, jobId: job.id, tabId: state.tabId });
+      return;
+    }
+
+    if (message?.type === "STORE_GROUP_INSPECTION_JOB") {
+      const job = message.job;
+      if (!job?.id || !Array.isArray(job?.groups) || !job.groups.length) {
+        sendResponse({ ok: false, error: "Invalid Facebook group inspection job." });
+        return;
+      }
+      const state = {
+        mode: "inspection",
+        job,
+        groupIndex: 0,
+        inspections: [],
+        crmTabId: sender?.tab?.id || null,
+        tabId: null,
+        startedAt: Date.now(),
+      };
+      await saveGroupAgentState(state);
+      const tab = await chrome.tabs.create({ url: groupAboutUrl(job.groups[0]?.url), active: true });
+      state.tabId = tab.id || null;
+      await saveGroupAgentState(state);
+      sendResponse({ ok: true, jobId: job.id, tabId: state.tabId });
+      return;
+    }
+
+    if (message?.type === "STORE_GROUP_POST_STATUS_JOB") {
+      const job = message.job;
+      if (!job?.id || !Array.isArray(job?.groups) || !job.groups.length) {
+        sendResponse({ ok: false, error: "Invalid Facebook group post-status job." });
+        return;
+      }
+      const state = {
+        mode: "post-status",
+        job,
+        groupIndex: 0,
+        results: [],
+        crmTabId: sender?.tab?.id || null,
+        tabId: null,
+        startedAt: Date.now(),
+      };
+      await saveGroupAgentState(state);
+      const first = job.groups[0];
+      const tab = await chrome.tabs.create({
+        url: groupPostSearchUrl(first?.url, first?.registration),
+        active: true,
+      });
+      state.tabId = tab.id || null;
+      await saveGroupAgentState(state);
+      sendResponse({ ok: true, jobId: job.id, tabId: state.tabId });
+      return;
+    }
+
+    if (message?.type === "GET_GROUP_AGENT_STATE") {
+      const state = await getGroupAgentState();
+      if (state?.tabId && sender?.tab?.id && state.tabId !== sender.tab.id) {
+        sendResponse({ ok: true, state: null });
+        return;
+      }
+      sendResponse({ ok: true, state });
+      return;
+    }
+
+    if (message?.type === "GROUP_DISCOVERY_PAGE_RESULTS") {
+      const state = await getGroupAgentState();
+      if (!state || state.mode !== "discovery" || state.job?.id !== message.jobId) {
+        sendResponse({ ok: false });
+        return;
+      }
+      if (Number(message.queryIndex) !== Number(state.queryIndex)) {
+        sendResponse({ ok: false, error: "Discovery result is from an old query." });
+        return;
+      }
+
+      const map = new Map(
+        (state.candidates || []).map((item) => [canonicalGroupUrl(item.url) || item.url, item]),
+      );
+      for (const candidate of message.candidates || []) {
+        const key = canonicalGroupUrl(candidate.url);
+        if (!key) continue;
+        map.set(key, { ...(map.get(key) || {}), ...candidate, url: key });
+        if (map.size >= Number(state.job.maxGroups || 60)) break;
+      }
+      state.candidates = [...map.values()];
+      state.queryIndex += 1;
+
+      const nextQuery = state.job.queries?.[state.queryIndex];
+      if (nextQuery && state.candidates.length < Number(state.job.maxGroups || 60)) {
+        await saveGroupAgentState(state);
+        if (state.tabId) {
+          await chrome.tabs.update(state.tabId, { url: groupSearchUrl(nextQuery.query || nextQuery), active: true });
+        }
+      } else {
+        await broadcastToCrm({
+          type: "GROUP_DISCOVERY_COMPLETE",
+          jobId: state.job.id,
+          productKey: state.job.productKey,
+          candidates: state.candidates,
+          queryCount: state.queryIndex,
+        }, state.crmTabId);
+        await clearGroupAgentState();
+      }
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === "GROUP_INSPECTION_PAGE_RESULT") {
+      const state = await getGroupAgentState();
+      if (!state || state.mode !== "inspection" || state.job?.id !== message.jobId) {
+        sendResponse({ ok: false });
+        return;
+      }
+      if (Number(message.groupIndex) !== Number(state.groupIndex)) {
+        sendResponse({ ok: false, error: "Inspection result is from an old group." });
+        return;
+      }
+
+      state.inspections = [...(state.inspections || []), message.inspection || {}];
+      state.groupIndex += 1;
+      const nextGroup = state.job.groups?.[state.groupIndex];
+
+      if (nextGroup) {
+        await saveGroupAgentState(state);
+        if (state.tabId) {
+          await chrome.tabs.update(state.tabId, { url: groupAboutUrl(nextGroup.url), active: true });
+        }
+      } else {
+        await broadcastToCrm({
+          type: "GROUP_INSPECTION_COMPLETE",
+          jobId: state.job.id,
+          productKey: state.job.productKey,
+          inspections: state.inspections,
+        }, state.crmTabId);
+        await clearGroupAgentState();
+      }
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === "GROUP_POST_STATUS_PAGE_RESULT") {
+      const state = await getGroupAgentState();
+      if (!state || state.mode !== "post-status" || state.job?.id !== message.jobId) {
+        sendResponse({ ok: false });
+        return;
+      }
+      if (Number(message.groupIndex) !== Number(state.groupIndex)) {
+        sendResponse({ ok: false, error: "Post-status result is from an old group." });
+        return;
+      }
+
+      state.results = [...(state.results || []), message.result || {}];
+      state.groupIndex += 1;
+      const nextGroup = state.job.groups?.[state.groupIndex];
+
+      if (nextGroup) {
+        await saveGroupAgentState(state);
+        if (state.tabId) {
+          await chrome.tabs.update(
+            state.tabId,
+            { url: groupPostSearchUrl(nextGroup.url, nextGroup.registration), active: true },
+          );
+        }
+      } else {
+        await broadcastToCrm({
+          type: "GROUP_POST_STATUS_COMPLETE",
+          jobId: state.job.id,
+          productKey: state.job.productKey,
+          results: state.results,
+        }, state.crmTabId);
+        await clearGroupAgentState();
+      }
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === "STORE_GROUP_POST_JOB") {
+      const job = message.job;
+      if (!job?.id || !job?.groupUrl || !job?.caption) {
+        sendResponse({ ok: false, error: "Invalid Facebook group post job." });
+        return;
+      }
+      const pending = {
+        job,
+        crmTabId: sender?.tab?.id || null,
+        storedAt: Date.now(),
+        tabId: null,
+      };
+      await chrome.storage.local.set({ [GROUP_POST_JOB_KEY]: pending });
+      const tab = await chrome.tabs.create({ url: job.groupUrl, active: true });
+      pending.tabId = tab.id || null;
+      await chrome.storage.local.set({ [GROUP_POST_JOB_KEY]: pending });
+      sendResponse({ ok: true, jobId: job.id, tabId: pending.tabId });
+      return;
+    }
+
+    if (message?.type === "GET_PENDING_GROUP_POST_JOB") {
+      const pending = await getPendingGroupPost();
+      if (pending?.tabId && sender?.tab?.id && pending.tabId !== sender.tab.id) {
+        sendResponse({ ok: true, job: null });
+        return;
+      }
+      sendResponse({ ok: true, job: pending?.job || null });
+      return;
+    }
+
+    if (message?.type === "GROUP_POST_FILL_COMPLETED") {
+      const pending = await getPendingGroupPost();
+      if (pending?.job?.id === message.jobId) {
+        pending.fillCompletedAt = Date.now();
+        pending.fillReport = message.results || [];
+        await chrome.storage.local.set({ [GROUP_POST_JOB_KEY]: pending });
+      }
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === "GROUP_POST_SUBMITTED") {
+      const pending = await getPendingGroupPost();
+      if (!pending || pending.job?.id !== message.jobId) {
+        sendResponse({ ok: false, error: "No matching prepared Facebook group post was found." });
+        return;
+      }
+
+      const event = {
+        id: `group-post-event-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        jobId: pending.job.id,
+        productKey: pending.job.productKey || "",
+        groupUrl: canonicalGroupUrl(message.groupUrl || pending.job.groupUrl),
+        groupName: pending.job.groupName || "",
+        registration: message.registration || pending.job.registration || "",
+        postedAt: message.postedAt || new Date().toISOString(),
+        approvalState: message.approvalState || "submitted",
+      };
+
+      await chrome.storage.local.set({ [LAST_GROUP_POST_EVENT_KEY]: event });
+      await broadcastToCrm({ type: "GROUP_POST_SUBMITTED", event }, pending.crmTabId);
+      await chrome.storage.local.remove(GROUP_POST_JOB_KEY);
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === "GET_LAST_GROUP_POST_EVENT") {
+      const stored = await chrome.storage.local.get(LAST_GROUP_POST_EVENT_KEY);
+      sendResponse({ ok: true, event: stored[LAST_GROUP_POST_EVENT_KEY] || null });
+      return;
+    }
+
+    if (message?.type === "ACK_GROUP_POST_EVENT") {
+      const stored = await chrome.storage.local.get(LAST_GROUP_POST_EVENT_KEY);
+      if (!message.eventId || stored[LAST_GROUP_POST_EVENT_KEY]?.id === message.eventId) {
+        await chrome.storage.local.remove(LAST_GROUP_POST_EVENT_KEY);
       }
       sendResponse({ ok: true });
       return;

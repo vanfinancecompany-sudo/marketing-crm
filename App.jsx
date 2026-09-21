@@ -69,6 +69,7 @@ import ReelLabBetaPage from "./pages/ReelLabBetaPage.jsx";
 import YouTubeGeneratorPage from "./pages/YouTubeGeneratorPage.jsx";
 import CreativeLibraryPage from "./pages/CreativeLibraryPage.jsx";
 import PostingDeskPage from "./pages/PostingDeskPage.jsx";
+import FacebookGroupsAgentPage from "./pages/FacebookGroupsAgentPage.jsx";
 import { londonDateKey } from "./lib/marketingDailyOperations.js";
 import { recordDailyMarketingActivity } from "./services/marketingDailyOperations.js";
 import {
@@ -479,6 +480,8 @@ const VIEW_PATHS = {
   "Rent2Buy Facebook": "/rent2buy-facebook",
   "Van Finance Marketplace": "/van-finance-marketplace",
   "Rent2Buy Marketplace": "/rent2buy-marketplace",
+  "Van Finance Groups & Classifieds": "/van-finance-groups",
+  "Rent2Buy Facebook Groups": "/rent2buy-groups",
 };
 
 function viewFromPath() {
@@ -508,6 +511,8 @@ function viewFromPath() {
   if (path === "/rent2buy-facebook") return "Rent2Buy Facebook";
   if (path === "/van-finance-marketplace") return "Van Finance Marketplace";
   if (path === "/rent2buy-marketplace" || path === "/facebook-marketplace") return "Rent2Buy Marketplace";
+  if (path === "/van-finance-groups") return "Van Finance Groups & Classifieds";
+  if (path === "/rent2buy-groups") return "Rent2Buy Facebook Groups";
 
   return "Content Operations";
 }
@@ -2897,6 +2902,36 @@ async function handleClearTodayReels() {
             onRefreshStock={handleRefreshStock}
             onSyncStock={handleSyncStock}
             onShowHiddenAgain={handleShowHiddenAgain}
+          />
+        );
+      case "Van Finance Groups & Classifieds":
+        return (
+          <FacebookGroupsAgentPage
+            productKey="finance"
+            vehicles={financeVehicles.map((vehicle, index) => ({
+              ...asPipelineVehicle(vehicle, "vanFinance"),
+              caption: buildPostingCaption(asPipelineVehicle(vehicle, "vanFinance"), {
+                destination: "Van Finance Facebook",
+                index,
+              }),
+            }))}
+            vehiclesLoading={vehiclesLoading}
+            vehiclesError={vehiclesError}
+          />
+        );
+      case "Rent2Buy Facebook Groups":
+        return (
+          <FacebookGroupsAgentPage
+            productKey="rent2buy"
+            vehicles={rentVehicles.map((vehicle, index) => ({
+              ...asPipelineVehicle(vehicle, "rent2buy"),
+              caption: buildPostingCaption(asPipelineVehicle(vehicle, "rent2buy"), {
+                destination: "Rent2Buy Facebook",
+                index,
+              }),
+            }))}
+            vehiclesLoading={vehiclesLoading}
+            vehiclesError={vehiclesError}
           />
         );
       case "Van Finance Marketplace":
