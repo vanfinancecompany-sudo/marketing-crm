@@ -508,7 +508,10 @@
   async function reactSetText(element, value) {
     const text = String(value ?? "").replace(/\r\n?/g, "\n");
 
-    const probeOk = await pasteTextIntoComposer(element, FORMAT_PROBE_TEXT);
+    let probeOk = false;
+    try {
+      probeOk = await pasteTextIntoComposer(element, FORMAT_PROBE_TEXT);
+    } catch {}
     clearComposerEditor(element);
     await sleep(120);
 
@@ -521,7 +524,10 @@
       };
     }
 
-    const captionOk = await pasteTextIntoComposer(element, text);
+    let captionOk = false;
+    try {
+      captionOk = await pasteTextIntoComposer(element, text);
+    } catch {}
     if (captionOk) {
       return {
         ok: true,
