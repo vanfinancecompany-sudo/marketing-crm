@@ -149,146 +149,202 @@
       .find((element) => pattern.test(clean(element.innerText || element.textContent || element.getAttribute("aria-label"))));
   }
 
+  const COMPOSER_OPENER_PATTERN = /^(?:write something(?:\.\.\.)?|what'?s on your mind\??|create post)(?:\s.*)?$/i;
+  const COMPOSER_EDITOR_PATTERN = /create a (?:public )?post|write something|what'?s on your mind/i;
+  const REJECTED_EDITOR_PATTERN = /write a comment|\bcomment\b|\breply\b|\banswer\b|\bmessage\b/i;
+
+  function elementEvidence(element) {
+    if (!element) return "";
+    return clean([
+      element.getAttribute?.("aria-label"),
+      element.getAttribute?.("aria-placeholder"),
+      element.getAttribute?.("data-placeholder"),
+      element.getAttribute?.("placeholder"),
+      element.getAttribute?.("name"),
+      element.innerText,
+      element.textContent,
+    ].filter(Boolean).join(" "));
+  }
+
   function findComposerOpener() {
-    const direct = buttonWithText(/write something|what'?s on your mind|create post/i);
+    const controls = [...document.querySelectorAll('button, [role="button"], a')]
+      .filter(visible)
+      .filter((element) => COMPOSER_OPENER_PATTERN.test(elementEvidence(element)));
+
+    const direct = controls.find((element) => !REJECTED_EDITOR_PATTERN.test(elementEvidence(element)));
     if (direct) return direct;
 
     const label = [...document.querySelectorAll("div, span")]
       .filter(visible)
-      .find((element) =>
-        /^(write something(?:\.\.\.)?|what'?s on your mind\??)$/i.test(
-          clean(element.innerText || element.textContent || element.getAttribute("aria-label")),
-        )
-      );
+      .find((element) => {
+        const evidence = elementEvidence(element);
+        return COMPOSER_OPENER_PATTERN.test(evidence) && !REJECTED_EDITOR_PATTERN.test(evidence);
+      });
     if (!label) return null;
-    return label.closest('button, [role="button"]') || label;
+    return label.closest?.('button, [role="button"]') || label;
   }
 
-  function composerDialog() {
-    const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter(visible);
-    const createPostDialog = dialogs.find((dialog) =>
-      /create post/i.test(clean(dialog.innerText || dialog.textContent || dialog.getAttribute("aria-label")))
-    );
-    return createPostDialog || dialogs[dialogs.length - 1] || document;
+  function dialogHasCreatePostIdentity(dialog) {
+    if (!dialog || dialog.getAttribute?.("role") !== "dialog" || !visible(dialog)) return false;
+    const headings = [...dialog.querySelectorAll('[role="heading"], h1, h2, h3')]
+      .filter(visible)
+      .map(elementEvidence);
+    const identity = clean([dialog.getAttribute?.("aria-label"), ...headings].filter(Boolean).join(" "));
+    return /\bcreate post\b/i.test(identity);
   }
 
-  function composerEditorCandidates(scope) {
+  function dialogHasLocalPostButton(dialog) {
+    if (!dialog) return false;
+    return [...dialog.querySelectorAll('button, [role="button"]')]
+      .filter(visible)
+      .some((element) => /^post(?:\s|$)/i.test(elementEvidence(element))
+        && !/comment|reply/i.test(elementEvidence(element)));
+  }
+
+  function dialogHasLocalPhotoControl(dialog) {
+    if (!dialog) return false;
+    if ([...dialog.querySelectorAll('input[type="file"]')]
+      .some((element) => String(element.accept || "").includes("image") || !element.accept)) {
+      return true;
+    }
+    return [...dialog.querySelectorAll('button, [role="button"]')]
+      .filter(visible)
+      .some((element) => /photo|video/i.test(elementEvidence(element)));
+  }
+
+  function isVerifiedCreatePostDialog(dialog) {
+    if (!dialogHasCreatePostIdentity(dialog)) return false;
+    if (!dialogHasLocalPostButton(dialog)) return false;
+    return true;
+  }
+
+  function verifiedComposerDialog() {
+    return [...document.querySelectorAll('[role="dialog"]')]
+      .filter(visible)
+      .find(isVerifiedCreatePostDialog) || null;
+  }
+
+  function isRejectedComposerEditor(element) {
+    if (!element || !visible(element)) return true;
+    const evidence = elementEvidence(element);
+    if (REJECTED_EDITOR_PATTERN.test(evidence)) return true;
+    if (element.closest?.('[role="article"], article')) return true;
+    return false;
+  }
+
+  function composerEditorCandidates(dialog) {
+    if (!isVerifiedCreatePostDialog(dialog)) return [];
+
     const selectors = [
-      '[contenteditable="true"]',
-      '[contenteditable="plaintext-only"]',
-      '[role="textbox"]',
-      '[data-lexical-editor="true"]',
       '[aria-label*="Create a public post"]',
       '[aria-placeholder*="Create a public post"]',
       '[aria-label*="Write something"]',
       '[aria-placeholder*="Write something"]',
+      '[data-lexical-editor="true"]',
+      '[contenteditable="true"]',
+      '[contenteditable="plaintext-only"]',
+      '[role="textbox"]',
     ];
 
     const candidates = [...new Set(
-      selectors.flatMap((selector) => [...scope.querySelectorAll(selector)])
+      selectors.flatMap((selector) => [...dialog.querySelectorAll(selector)])
     )].filter(visible);
 
     return candidates
+      .filter((element) => !isRejectedComposerEditor(element))
       .filter((element) => {
-        const label = clean([
-          element.getAttribute?.("aria-label"),
-          element.getAttribute?.("aria-placeholder"),
-          element.getAttribute?.("data-placeholder"),
-          element.getAttribute?.("placeholder"),
-        ].filter(Boolean).join(" "));
-        return !/comment|reply|search/i.test(label);
+        const evidence = elementEvidence(element);
+        const role = element.getAttribute?.("role");
+        const contenteditable = element.getAttribute?.("contenteditable");
+        const lexical = element.getAttribute?.("data-lexical-editor");
+        return COMPOSER_EDITOR_PATTERN.test(evidence)
+          || lexical === "true"
+          || (role === "textbox" && (contenteditable === "true" || contenteditable === "plaintext-only"))
+          || contenteditable === "true"
+          || contenteditable === "plaintext-only";
       })
       .sort((first, second) => {
         const score = (element) => {
           let value = 0;
-          const label = clean([
-            element.getAttribute?.("aria-label"),
-            element.getAttribute?.("aria-placeholder"),
-            element.getAttribute?.("data-placeholder"),
-          ].filter(Boolean).join(" "));
-          if (/create a public post|write something|what'?s on your mind/i.test(label)) value += 10;
-          if (element.getAttribute?.("role") === "textbox") value += 6;
+          const evidence = elementEvidence(element);
+          if (COMPOSER_EDITOR_PATTERN.test(evidence)) value += 20;
+          if (element.getAttribute?.("role") === "textbox") value += 8;
+          if (element.getAttribute?.("data-lexical-editor") === "true") value += 8;
           if (element.getAttribute?.("contenteditable") === "true") value += 5;
           if (element.getAttribute?.("contenteditable") === "plaintext-only") value += 5;
-          if (element.getAttribute?.("data-lexical-editor") === "true") value += 5;
           const rect = element.getBoundingClientRect();
-          value += Math.min(8, Math.round((rect.width * rect.height) / 15000));
+          value += Math.min(6, Math.round((rect.width * rect.height) / 18000));
           return value;
         };
         return score(second) - score(first);
       });
   }
 
-  function editorFromPlaceholder(scope) {
-    const labels = [...scope.querySelectorAll("div, span, p")]
+  function editorFromPlaceholder(dialog) {
+    if (!isVerifiedCreatePostDialog(dialog)) return null;
+    const labels = [...dialog.querySelectorAll("div, span, p")]
       .filter(visible)
-      .filter((element) =>
-        /^(create a public post|write something|what'?s on your mind)/i.test(
-          clean(element.innerText || element.textContent || element.getAttribute("aria-label"))
-        )
-      );
+      .filter((element) => COMPOSER_EDITOR_PATTERN.test(elementEvidence(element)));
 
     for (const label of labels) {
-      const ancestor = label.closest(
+      const ancestor = label.closest?.(
         '[contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], [data-lexical-editor="true"]'
       );
-      if (ancestor && visible(ancestor)) return ancestor;
+      if (ancestor && dialog.contains(ancestor) && !isRejectedComposerEditor(ancestor)) return ancestor;
 
       const parent = label.parentElement;
       const descendant = parent?.querySelector?.(
         '[contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], [data-lexical-editor="true"]'
       );
-      if (descendant && visible(descendant)) return descendant;
+      if (descendant && dialog.contains(descendant) && !isRejectedComposerEditor(descendant) && visible(descendant)) {
+        return descendant;
+      }
     }
     return null;
   }
 
   async function waitForComposerEditor(timeoutMs = 6000) {
     const started = Date.now();
-    let lastScope = document;
 
     while (Date.now() - started < timeoutMs) {
-      const scope = composerDialog();
-      lastScope = scope;
+      const dialog = verifiedComposerDialog();
+      if (dialog) {
+        const direct = composerEditorCandidates(dialog)[0];
+        if (direct) return { editor: direct, scope: dialog, verified: true };
 
-      const direct = composerEditorCandidates(scope)[0];
-      if (direct) return { editor: direct, scope };
+        const placeholderEditor = editorFromPlaceholder(dialog);
+        if (placeholderEditor) return { editor: placeholderEditor, scope: dialog, verified: true };
 
-      const placeholderEditor = editorFromPlaceholder(scope);
-      if (placeholderEditor) return { editor: placeholderEditor, scope };
+        const placeholder = [...dialog.querySelectorAll("div, span, p")]
+          .filter(visible)
+          .find((element) => COMPOSER_EDITOR_PATTERN.test(elementEvidence(element)));
 
-      const placeholder = [...scope.querySelectorAll("div, span, p")]
-        .filter(visible)
-        .find((element) =>
-          /^(create a public post|write something|what'?s on your mind)/i.test(
-            clean(element.innerText || element.textContent || element.getAttribute("aria-label"))
-          )
-        );
+        if (placeholder) {
+          try { placeholder.click(); } catch {}
+          await sleep(180);
 
-      if (placeholder) {
-        try { placeholder.click(); } catch {}
-        await sleep(180);
-
-        const active = document.activeElement;
-        if (
-          active &&
-          active !== document.body &&
-          visible(active) &&
-          (
-            active.getAttribute?.("role") === "textbox" ||
-            active.getAttribute?.("contenteditable") === "true" ||
-            active.getAttribute?.("contenteditable") === "plaintext-only" ||
-            active.getAttribute?.("data-lexical-editor") === "true"
-          )
-        ) {
-          return { editor: active, scope };
+          const active = document.activeElement;
+          if (
+            active &&
+            active !== document.body &&
+            dialog.contains(active) &&
+            !isRejectedComposerEditor(active) &&
+            (
+              active.getAttribute?.("role") === "textbox" ||
+              active.getAttribute?.("contenteditable") === "true" ||
+              active.getAttribute?.("contenteditable") === "plaintext-only" ||
+              active.getAttribute?.("data-lexical-editor") === "true"
+            )
+          ) {
+            return { editor: active, scope: dialog, verified: true };
+          }
         }
       }
 
       await sleep(250);
     }
 
-    return { editor: null, scope: lastScope };
+    return { editor: null, scope: null, verified: false };
   }
 
   async function inspectGroup(state) {
@@ -297,10 +353,7 @@
     const pageText = lines.join("\n").slice(0, 30000);
     const unavailable = contentUnavailable(pageText);
     const ruleEvidence = extractRuleEvidence(lines);
-    const canPost = Boolean(
-      buttonWithText(/write something|what'?s on your mind|create post/i)
-      || [...document.querySelectorAll('[contenteditable="true"][role="textbox"]')].some(visible)
-    );
+    const canPost = Boolean(findComposerOpener() || verifiedComposerDialog());
     const joinButton = buttonWithText(/^join(?: group)?$/i);
     const joinedButton = buttonWithText(/^joined$/i);
     const joined = canPost || Boolean(joinedButton) ? true : joinButton ? false : null;
@@ -404,21 +457,28 @@
 
   async function attachImage(job, dialog) {
     if (!job.imageUrl) return { ok: true, detail: "No image supplied" };
-    let input = [...(dialog || document).querySelectorAll('input[type="file"]')]
+    if (!isVerifiedCreatePostDialog(dialog)) {
+      return { ok: false, detail: "Verified Create Post composer required before attaching an image" };
+    }
+
+    let input = [...dialog.querySelectorAll('input[type="file"]')]
       .find((element) => String(element.accept || "").includes("image") || !element.accept);
 
     if (!input) {
-      const photoButton = [...(dialog || document).querySelectorAll('button, [role="button"]')]
+      const photoButton = [...dialog.querySelectorAll('button, [role="button"]')]
         .filter(visible)
-        .find((element) => /photo|video/i.test(clean(element.innerText || element.textContent || element.getAttribute("aria-label"))));
+        .find((element) => /photo|video/i.test(elementEvidence(element)));
       if (photoButton) {
         photoButton.click();
         await sleep(800);
-        input = [...document.querySelectorAll('input[type="file"]')]
+        if (!isVerifiedCreatePostDialog(dialog)) {
+          return { ok: false, detail: "Create Post composer changed before photo upload" };
+        }
+        input = [...dialog.querySelectorAll('input[type="file"]')]
           .find((element) => String(element.accept || "").includes("image") || !element.accept);
       }
     }
-    if (!input) return { ok: false, detail: "Photo input not found" };
+    if (!input) return { ok: false, detail: "Photo input not found inside the verified Create Post composer" };
 
     const result = await chrome.runtime.sendMessage({ type: "FETCH_MARKETPLACE_IMAGE", url: job.imageUrl });
     if (!result?.ok || !result.dataUrl) return { ok: false, detail: result?.error || "Image fetch failed" };
@@ -428,10 +488,10 @@
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
     await sleep(1200);
-    return { ok: true, detail: "Image attached" };
+    return { ok: true, detail: "Image attached inside verified Create Post composer" };
   }
 
-  function showPostReport(job, results) {
+  function showPostReport(job, results, fatalMessage = "") {
     document.getElementById("vfc-group-helper-report")?.remove();
     const panel = document.createElement("div");
     panel.id = "vfc-group-helper-report";
@@ -450,9 +510,11 @@
       "box-shadow:0 12px 35px rgba(0,0,0,.45)",
     ].join(";");
     const failed = results.filter((item) => !item.ok);
-    const failureHtml = failed.length
-      ? '<div style="margin-top:8px;color:#ffd5d5"><b>Needs attention:</b><br>' + failed.map((item) => "• " + item.label + ": " + item.detail).join("<br>") + "</div>"
-      : '<div style="margin-top:8px;color:#bfffc8"><b>Post is prepared for review.</b></div>';
+    const failureHtml = fatalMessage
+      ? '<div style="margin-top:8px;color:#ffd5d5"><b>' + fatalMessage + "</b></div>"
+      : failed.length
+        ? '<div style="margin-top:8px;color:#ffd5d5"><b>Needs attention:</b><br>' + failed.map((item) => "• " + item.label + ": " + item.detail).join("<br>") + "</div>"
+        : '<div style="margin-top:8px;color:#bfffc8"><b>Post is prepared for review.</b></div>';
     panel.innerHTML =
       '<div style="font-size:16px;font-weight:700">VFC Facebook Groups Helper</div>' +
       '<div style="margin-top:4px">' + (job.groupName || "Facebook group") + " • " + (job.registration || "selected van") + "</div>" +
@@ -500,42 +562,60 @@
     await sleep(1200);
     const results = [];
 
-    let { editor, scope } = await waitForComposerEditor(1200);
-    if (!editor) {
+    let { editor, scope, verified } = await waitForComposerEditor(1200);
+    if (!editor || !verified) {
       const opener = findComposerOpener();
       if (opener) {
         try { opener.click(); } catch {}
-        results.push({ label: "Composer", ok: true, detail: "Opened" });
-        ({ editor, scope } = await waitForComposerEditor(6500));
-      } else {
-        results.push({ label: "Composer", ok: false, detail: "Write something / Create post control not found" });
+        ({ editor, scope, verified } = await waitForComposerEditor(6500));
       }
-    } else {
-      results.push({ label: "Composer", ok: true, detail: "Already open" });
     }
 
-    if (editor) {
-      reactSetText(editor, job.caption || "");
-      await sleep(700);
-      results.push({
-        label: "Post text",
-        ok: clean(editor.innerText || editor.textContent).length > 10,
-        detail: "Caption inserted",
-      });
-    } else {
-      results.push({ label: "Post text", ok: false, detail: "Composer text box not found after opening the post dialog" });
+    if (!editor || !scope || !verified || !isVerifiedCreatePostDialog(scope)) {
+      const fatalMessage = "Could not verify Facebook group post composer. Nothing was inserted.";
+      results.push({ label: "Composer", ok: false, detail: "Verified Create Post dialog not found" });
+      results.push({ label: "Post text", ok: false, detail: "Skipped because the composer was not verified" });
+      results.push({ label: "Photo", ok: false, detail: "Skipped because the composer was not verified" });
+      showPostReport(job, results, fatalMessage);
+      await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
+      return;
     }
 
-    const composerOpened = scope !== document || Boolean(composerDialog() !== document);
-    const imageResult = composerOpened
-      ? await attachImage(job, scope)
-      : { ok: false, detail: "Skipped because the post composer did not open" };
+    results.push({ label: "Composer", ok: true, detail: "Verified Create Post dialog" });
+
+    reactSetText(editor, job.caption || "");
+    await sleep(700);
+    const inserted = clean(editor.innerText || editor.textContent).length > 10;
+    results.push({
+      label: "Post text",
+      ok: inserted,
+      detail: inserted ? "Caption inserted inside verified composer" : "Caption did not stick",
+    });
+
+    const imageResult = await attachImage(job, scope);
     results.push({ label: "Photo", ok: imageResult.ok, detail: imageResult.detail });
 
-    if (editor) watchManualGroupPost(job, scope);
+    watchManualGroupPost(job, scope);
     showPostReport(job, results);
     await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
   }
+
+  if (window.__VFC_FACEBOOK_GROUPS_TEST_HOOKS__ && typeof window.__VFC_FACEBOOK_GROUPS_TEST_HOOKS__ === "object") {
+    Object.assign(window.__VFC_FACEBOOK_GROUPS_TEST_HOOKS__, {
+      elementEvidence,
+      findComposerOpener,
+      isVerifiedCreatePostDialog,
+      verifiedComposerDialog,
+      isRejectedComposerEditor,
+      composerEditorCandidates,
+      waitForComposerEditor,
+      attachImage,
+      reactSetText,
+      prepareGroupPost,
+    });
+  }
+
+  if (window.__VFC_FACEBOOK_GROUPS_TEST_MODE__) return;
 
   (async () => {
     const postResult = await chrome.runtime.sendMessage({ type: "GET_PENDING_GROUP_POST_JOB" }).catch(() => null);
