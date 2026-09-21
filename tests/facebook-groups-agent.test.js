@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 import {
+  applyGroupInspection,
   archiveFacebookGroup,
   groupDueState,
   groupPipeline,
@@ -61,10 +62,12 @@ test("Rent2Buy and Finance scoring stay separate", () => {
   assert.ok(rent2buy.every((group) => group.rent2buy));
 });
 
-test("CRM exposes discovery, live checks and separate New, Awaiting and Proven pipelines", () => {
+test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipelines", () => {
   assert.match(pageSource, /Discover New Groups/);
   assert.match(pageSource, /Check Next 12/);
   assert.match(pageSource, /New & Testing/);
+  assert.match(pageSource, /Pending Membership \(\{counts\.membershipPending\}\)/);
+  assert.match(pageSource, /pipelineView === "membership_pending"/);
   assert.match(pageSource, /Awaiting \(\{counts\.awaiting\}\)/);
   assert.match(pageSource, /Proven \/ Hot/);
   assert.match(pageSource, /pipelineView === "awaiting"/);
@@ -78,13 +81,16 @@ test("CRM exposes discovery, live checks and separate New, Awaiting and Proven p
   assert.match(serviceSource, /Southampton courier drivers/);
   assert.match(pageSource, /navigator\.clipboard\?\.writeText/);
   assert.match(pageSource, /captionCopyPromise = copyGroupCaptionForFallback\(caption\)/);
+  assert.match(pageSource, /Reset Vans/);
+  assert.match(pageSource, /vfcFacebookGroupsUsedVans/);
+  assert.match(pageSource, /markVehicleUsed\(postEvent\.registration/);
   const copyIndex = pageSource.indexOf("captionCopyPromise = copyGroupCaptionForFallback(caption)");
   const healthIndex = pageSource.indexOf("await requireGroupsHelper()", copyIndex);
   assert.ok(copyIndex >= 0 && healthIndex > copyIndex, "caption clipboard write must start before async helper health check");
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.11");
+  assert.equal(manifest.version, "1.2.12");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -131,6 +137,8 @@ test("Chrome helper can discover and inspect groups without auto-posting", () =>
   assert.match(groupsHelperSource, /composerEditorCandidates/);
   assert.match(groupsHelperSource, /GET_PENDING_GROUP_POST_JOB/);
   assert.match(groupsHelperSource, /contentUnavailable/);
+  assert.match(groupsHelperSource, /membershipPending/);
+  assert.match(groupsHelperSource, /cancel request\|requested\|pending/);
   assert.doesNotMatch(groupsHelperSource, /\.click\(\).*Facebook.*Post/i);
   assert.doesNotMatch(groupsHelperSource, /FORMAT_PROBE_TEXT/);
   assert.match(groupsHelperSource, /captionCopied/);
@@ -143,6 +151,32 @@ test("Group post helper leaves final Facebook Post action to the user", () => {
   assert.match(backgroundSource, /STORE_GROUP_POST_JOB/);
 });
 
+
+test("pending group membership leaves New and returns once Facebook shows joined", () => {
+  const base = loadFacebookGroups()[0];
+  const pending = applyGroupInspection([base], [{
+    url: base.url,
+    joined: false,
+    membershipPending: true,
+    canPost: false,
+    pageText: "Your request to join is pending",
+  }], "rent2buy")[0];
+
+  assert.equal(pending.membershipPending, true);
+  assert.equal(groupPipeline(pending), "membership_pending");
+
+  const joined = applyGroupInspection([pending], [{
+    url: base.url,
+    joined: true,
+    membershipPending: false,
+    canPost: true,
+    pageText: "Joined",
+  }], "rent2buy")[0];
+
+  assert.equal(joined.membershipPending, false);
+  assert.equal(joined.joined, true);
+  assert.equal(groupPipeline(joined), "new");
+});
 
 test("accepted groups become proven and get a seven-day repeat cadence", () => {
   const base = loadFacebookGroups()[0];
