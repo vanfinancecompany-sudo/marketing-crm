@@ -90,7 +90,7 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.14");
+  assert.equal(manifest.version, "1.2.15");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -668,6 +668,23 @@ test("approval checker ignores registration shown only inside the helper panel",
     : null;
 
   assert.equal(Array.from(harness.hooks.registrationEvidenceLines("YG73AMF")).length, 0);
+});
+
+test("membership pending detection waits for Facebook to render the banner", async () => {
+  const harness = loadGroupHelperTestHooks();
+  let reads = 0;
+  Object.defineProperty(harness.document.body, "innerText", {
+    configurable: true,
+    get() {
+      reads += 1;
+      return reads < 3
+        ? ""
+        : "Your membership is pending. You'll be notified if your request to join is approved.";
+    },
+  });
+
+  assert.equal(await harness.hooks.waitForMembershipPending(5000), true);
+  assert.ok(reads >= 3);
 });
 
 test("post prep detects Facebook membership pending and reports it back to CRM", async () => {
