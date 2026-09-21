@@ -30,11 +30,19 @@ The extension never clicks Publish, never handles Facebook credentials, and cont
 
 ## Install locally
 
+Create the validated extension-only package from the repository root:
+
+```sh
+npm run package:marketplace-helper
+```
+
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode**.
-3. Remove/disable the old V6 test helper.
+3. Remove/disable the old V6 test helper and any old `rent2buy-marketplace-helper-production` copy.
 4. Choose **Load unpacked**.
-5. Select this `browser-extension/marketplace-helper` directory from a local checkout/export of the approved branch/release.
+5. Select `dist/marketplace-helper/VFC-Facebook-Helper-v1.2.6` from the approved branch/release.
+
+The selected folder must contain `manifest.json` and `background.js` directly at its root. Do not select the ZIP itself or a parent folder. The generated ZIP is flat as well: after extraction, its destination folder is ready for **Load unpacked** without another nested extension directory.
 
 The extension is scoped to the production Marketing CRM and Facebook Marketplace vehicle creation pages.
 
