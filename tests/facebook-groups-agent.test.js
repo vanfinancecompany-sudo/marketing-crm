@@ -3,7 +3,12 @@ import fs from "node:fs";
 import test from "node:test";
 
 import {
+  archiveFacebookGroup,
+  groupDueState,
+  groupPipeline,
   loadFacebookGroups,
+  markGroupAccepted,
+  markGroupPosted,
   normalizeFacebookGroupUrl,
   scoreFacebookGroups,
 } from "../services/facebookGroupsAgent.js";
@@ -43,10 +48,14 @@ test("Rent2Buy and Finance scoring stay separate", () => {
   assert.ok(rent2buy.every((group) => group.rent2buy));
 });
 
-test("CRM exposes discovery, live checks and manual group-post preparation", () => {
+test("CRM exposes discovery, live checks and two-stage group pipelines", () => {
   assert.match(pageSource, /Discover New Groups/);
   assert.match(pageSource, /Check Next 12/);
-  assert.match(pageSource, /Prepare Group Post/);
+  assert.match(pageSource, /New & Testing/);
+  assert.match(pageSource, /Proven \/ Hot/);
+  assert.match(pageSource, /Check .*Awaiting Posts/);
+  assert.match(pageSource, /Prepare Test Post/);
+  assert.match(pageSource, /Prepare Next Post/);
   assert.match(pageSource, /Green groups are the best posting candidates/);
   assert.match(serviceSource, /FINANCE_QUERY_BANK/);
   assert.match(serviceSource, /RENT2BUY_QUERY_BANK/);
@@ -55,7 +64,7 @@ test("CRM exposes discovery, live checks and manual group-post preparation", () 
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.0");
+  assert.equal(manifest.version, "1.2.1");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(
     manifest.content_scripts.some((entry) =>
@@ -73,14 +82,50 @@ test("Chrome helper can discover and inspect groups without auto-posting", () =>
   assert.match(backgroundSource, /STORE_GROUP_INSPECTION_JOB/);
   assert.match(backgroundSource, /GROUP_DISCOVERY_PAGE_RESULTS/);
   assert.match(backgroundSource, /GROUP_INSPECTION_PAGE_RESULT/);
+  assert.match(backgroundSource, /STORE_GROUP_POST_STATUS_JOB/);
+  assert.match(backgroundSource, /GROUP_POST_STATUS_PAGE_RESULT/);
+  assert.match(backgroundSource, /GROUP_POST_SUBMITTED/);
   assert.match(bridgeSource, /VFC_GROUP_DISCOVERY_START/);
   assert.match(bridgeSource, /VFC_GROUP_INSPECTION_START/);
   assert.match(groupsHelperSource, /Nothing has been posted/);
-  assert.doesNotMatch(groupsHelperSource, /click\(\).*Post/i);
+  assert.match(groupsHelperSource, /watchManualGroupPost/);
+  assert.match(groupsHelperSource, /checkPostedStatus/);
+  assert.match(groupsHelperSource, /this content isn'?t available right now/i);
+  assert.doesNotMatch(groupsHelperSource, /\.click\(\).*Facebook.*Post/i);
 });
 
 test("Group post helper leaves final Facebook Post action to the user", () => {
   assert.match(groupsHelperSource, /click Facebook\\'s Post button yourself/);
   assert.match(groupsHelperSource, /GROUP_POST_FILL_COMPLETED/);
   assert.match(backgroundSource, /STORE_GROUP_POST_JOB/);
+});
+
+
+test("accepted groups become proven and get a seven-day repeat cadence", () => {
+  const base = loadFacebookGroups()[0];
+  const posted = markGroupPosted([base], base.url, {
+    registration: "AB12CDE",
+    postedAt: "2026-09-01T09:00:00.000Z",
+  })[0];
+  assert.equal(groupPipeline(posted), "testing");
+  assert.equal(posted.postStatus, "awaiting");
+
+  const accepted = markGroupAccepted([posted], posted.url, {
+    registration: "AB12CDE",
+    acceptedAt: "2026-09-01T10:00:00.000Z",
+  })[0];
+  assert.equal(groupPipeline(accepted), "proven");
+  assert.equal(accepted.acceptedPostCount, 1);
+  assert.equal(accepted.repeatDays, 7);
+
+  const due = groupDueState(accepted, new Date("2026-09-09T09:00:00.000Z"));
+  assert.equal(due.due, true);
+  assert.ok(due.daysSincePost >= 7);
+});
+
+test("bad groups can leave the active pipeline without deleting history", () => {
+  const base = loadFacebookGroups()[0];
+  const archived = archiveFacebookGroup([base], base.url, "Unavailable")[0];
+  assert.equal(groupPipeline(archived), "archived");
+  assert.equal(archived.archived, true);
 });
