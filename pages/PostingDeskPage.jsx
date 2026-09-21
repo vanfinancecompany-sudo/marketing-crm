@@ -8,6 +8,7 @@ import {
   MARKETPLACE_CREATE_URL,
   MARKETPLACE_PUBLISHED_MESSAGE_TYPE,
   buildRent2BuyMarketplaceJob,
+  buildVanFinanceMarketplaceJob,
   sendMarketplaceJobToExtension,
 } from "../services/marketplaceAutomation.js";
 import { formatDateShort } from "../utils/creativeUtils.js";
@@ -38,22 +39,41 @@ function SummaryStrip({ summary, accent }) {
   );
 }
 
+function normalizeMarketplaceDestination(destination) {
+  if (destination === "Facebook Marketplace") return "Rent2Buy Marketplace";
+  return destination;
+}
+
+function isFinanceMarketplaceDestination(destination) {
+  return normalizeMarketplaceDestination(destination) === "Van Finance Marketplace";
+}
+
+function isRent2BuyMarketplaceDestination(destination) {
+  return normalizeMarketplaceDestination(destination) === "Rent2Buy Marketplace";
+}
+
+function marketplaceProductLabel(destination) {
+  return isFinanceMarketplaceDestination(destination) ? "Van Finance" : "Rent2Buy";
+}
+
 function getSyncButtonLabel(destination) {
-  return destination === "Van Finance Facebook" ? "Sync Finance Vans" : "Sync Rent2Buy Vans";
+  return destination === "Van Finance Facebook" || isFinanceMarketplaceDestination(destination)
+    ? "Sync Finance Vans"
+    : "Sync Rent2Buy Vans";
 }
 
 function getPostButtonLabel(destination) {
-  return destination === "Facebook Marketplace" ? "Advertise on Marketplace" : "Prepare + Open Facebook";
+  return isMarketplaceDestination(destination) ? "Advertise on Marketplace" : "Prepare + Open Facebook";
 }
 
 function getPostingPipelineLabel(destination, vehicle) {
-  if (destination === "Van Finance Facebook") return "Finance";
-  if (destination === "Rent2Buy Facebook" || destination === "Facebook Marketplace") return "Rent2Buy";
+  if (destination === "Van Finance Facebook" || isFinanceMarketplaceDestination(destination)) return "Finance";
+  if (destination === "Rent2Buy Facebook" || isRent2BuyMarketplaceDestination(destination)) return "Rent2Buy";
   return vehicle.pipeline === "rent2buy" ? "Rent2Buy" : "Finance";
 }
 
 function isRentPostingDestination(destination) {
-  return destination === "Rent2Buy Facebook" || destination === "Facebook Marketplace";
+  return destination === "Rent2Buy Facebook" || isRent2BuyMarketplaceDestination(destination);
 }
 
 function isFacebookPageDestination(destination) {
@@ -61,7 +81,8 @@ function isFacebookPageDestination(destination) {
 }
 
 function isMarketplaceDestination(destination) {
-  return destination === "Facebook Marketplace";
+  const normalized = normalizeMarketplaceDestination(destination);
+  return normalized === "Van Finance Marketplace" || normalized === "Rent2Buy Marketplace";
 }
 
 function isPostingHistoryDestination(destination) {
@@ -69,8 +90,12 @@ function isPostingHistoryDestination(destination) {
 }
 
 function getActivityType(destination) {
-  if (destination === "Van Finance Facebook") return "van_finance_facebook_post";
-  if (destination === "Rent2Buy Facebook" || destination === "Facebook Marketplace") return "rent2buy_facebook_post";
+  if (destination === "Van Finance Facebook" || isFinanceMarketplaceDestination(destination)) {
+    return "van_finance_facebook_post";
+  }
+  if (destination === "Rent2Buy Facebook" || isRent2BuyMarketplaceDestination(destination)) {
+    return "rent2buy_facebook_post";
+  }
   return "";
 }
 
@@ -140,7 +165,7 @@ function historyPostingKey(row) {
 
 function historyDestination(row) {
   const explicit = String(row?.metadata?.destination || "").trim();
-  if (explicit) return explicit;
+  if (explicit) return normalizeMarketplaceDestination(explicit);
   if (row?.activity_type === "van_finance_facebook_post") return "Van Finance Facebook";
   if (row?.activity_type === "rent2buy_facebook_post") return "Rent2Buy Facebook";
   return "";
@@ -290,7 +315,7 @@ function PostingVehicleCard({
             <>
               <button
                 className="button button--primary"
-                onClick={() => onPrepareMarketplace(vehicle, caption)}
+                onClick={() => onPrepareMarketplace(vehicle, postingDestination, caption)}
                 disabled={confirming}
               >
                 {prepared ? "Open Marketplace Again" : getPostButtonLabel(postingDestination)}
@@ -321,9 +346,10 @@ function PostingVehicleCard({
 
 function PostedTodayCard({ item }) {
   const vehicle = item.vehicle;
-  const accent = item.destination === "Rent2Buy Facebook" || item.destination === "Facebook Marketplace"
-    ? "rent"
-    : "finance";
+  const accent =
+    item.destination === "Rent2Buy Facebook" || isRent2BuyMarketplaceDestination(item.destination)
+      ? "rent"
+      : "finance";
   const pipelineLabel = getPostingPipelineLabel(item.destination, vehicle);
   const image = postingAdvertImageUrl(vehicle, item.destination);
 
@@ -656,7 +682,7 @@ export default function PostingDeskPage({
     }
   }
 
-  async function prepareMarketplaceVehicle(vehicle, caption) {
+  async function prepareMarketplaceVehicle(vehicle, postingDestination, caption) {
     const key = vehiclePostingKey(vehicle);
     if (!key) return;
     setActionMessage("");
@@ -700,13 +726,18 @@ export default function PostingDeskPage({
       } catch {}
     };
 
+    const productLabel = marketplaceProductLabel(postingDestination);
+    const buildJob = isFinanceMarketplaceDestination(postingDestination)
+      ? buildVanFinanceMarketplaceJob
+      : buildRent2BuyMarketplaceJob;
+
     renderPreparationState(
       "Preparing Facebook Marketplace",
-      "Checking this Rent2Buy van, its DealerKit details and the ordered CMS image gallery…",
+      `Checking this ${productLabel} van, its DealerKit details and the ordered CMS image gallery…`,
     );
 
     try {
-      const job = await buildRent2BuyMarketplaceJob(vehicle, caption || vehicle.caption || "");
+      const job = await buildJob(vehicle, caption || vehicle.caption || "");
       renderPreparationState(
         "Preparing Facebook Marketplace",
         `${job.registration} is ready. Handing the listing to the VFC Marketplace Helper…`,
@@ -813,7 +844,15 @@ export default function PostingDeskPage({
       const vehicle = vehicles.find((item) => vehicleRegistration(item) === registration);
       if (!vehicle) return;
 
-      const confirmed = await confirmFacebookPosted(vehicle, "Facebook Marketplace", receipt);
+      const receiptJobId = String(receipt.jobId || "");
+      const expectedDestination = receiptJobId.startsWith("marketplace-finance-")
+        ? "Van Finance Marketplace"
+        : receiptJobId.startsWith("marketplace-rent2buy-")
+          ? "Rent2Buy Marketplace"
+          : normalizeMarketplaceDestination(receipt.postingDestination || receipt.destination || "");
+      if (expectedDestination && normalizeMarketplaceDestination(destination) !== expectedDestination) return;
+
+      const confirmed = await confirmFacebookPosted(vehicle, destination, receipt);
       if (confirmed && receipt.id) {
         window.postMessage({
           source: "vfc-marketing-crm",
@@ -843,7 +882,7 @@ export default function PostingDeskPage({
             <h3>{title}</h3>
             <p>
               {isMarketplaceDestination(destination)
-                ? "Choose a Rent2Buy van. The Marketplace helper prepares the ordered CMS photos and fills Facebook automatically. You still review the advert and click Publish yourself."
+                ? `Choose a ${marketplaceProductLabel(destination)} van. The Marketplace helper prepares the ordered CMS photos and fills Facebook automatically. You still review the advert and click Publish yourself.`
                 : isFacebookPageDestination(destination)
                   ? "Prepare the advert, post it on Facebook, then confirm it here. Only confirmed posts count towards your daily total."
                   : `Dedicated stock posting page for ${destination}.`}
@@ -956,7 +995,7 @@ export default function PostingDeskPage({
                       if (isFacebookPageDestination(previewItem.destination)) {
                         prepareFacebookVehicle(previewItem.vehicle, previewItem.destination, previewItem.caption);
                       } else if (isMarketplaceDestination(previewItem.destination)) {
-                        prepareMarketplaceVehicle(previewItem.vehicle, previewItem.caption);
+                        prepareMarketplaceVehicle(previewItem.vehicle, previewItem.destination, previewItem.caption);
                       } else {
                         onPostVehicle(previewItem.vehicle, previewItem.destination, previewItem.caption);
                       }
