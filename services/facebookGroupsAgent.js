@@ -201,6 +201,7 @@ function normaliseSeed(group) {
     source: "seed",
     canPost: null,
     joined: null,
+    membershipPending: false,
     approvalRequired: null,
     linksAllowed: null,
     ruleEvidence: "",
@@ -270,6 +271,11 @@ export function applyGroupInspection(groups, inspections, productKey) {
       privacy: inspection.privacy || group.privacy,
       canPost: typeof inspection.canPost === "boolean" ? inspection.canPost : group.canPost,
       joined: typeof inspection.joined === "boolean" ? inspection.joined : group.joined,
+      membershipPending: inspection.joined === true
+        ? false
+        : typeof inspection.membershipPending === "boolean"
+          ? inspection.membershipPending
+          : Boolean(group.membershipPending),
       approvalRequired: typeof inspection.approvalRequired === "boolean"
         ? inspection.approvalRequired
         : group.approvalRequired,
@@ -311,6 +317,7 @@ export function mergeDiscoveredGroups(groups, candidates, productKey) {
       discoveredAt: new Date().toISOString(),
       canPost: null,
       joined: null,
+      membershipPending: false,
       approvalRequired: null,
       linksAllowed: null,
       ruleEvidence: "",
@@ -478,6 +485,7 @@ export function groupPipeline(group) {
   if (group?.archived) return "archived";
   if (group?.pipeline === "proven" || Number(group?.acceptedPostCount || 0) > 0) return "proven";
   if (group?.postStatus === "awaiting" || group?.postStatus === "pending" || group?.postStatus === "not_found") return "testing";
+  if (group?.membershipPending) return "membership_pending";
   return "new";
 }
 
