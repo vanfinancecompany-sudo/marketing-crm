@@ -41,6 +41,29 @@ function vehicleLabel(vehicle) {
   return [reg, name].filter(Boolean).join(" - ") || "Van";
 }
 
+function registrationKey(value) {
+  return clean(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function usedVansStorageKey(productKey) {
+  return `vfcFacebookGroupsUsedVans:${productKey}`;
+}
+
+function loadUsedVanKeys(productKey) {
+  if (typeof window === "undefined") return [];
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(usedVansStorageKey(productKey)) || "[]");
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveUsedVanKeys(productKey, keys) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(usedVansStorageKey(productKey), JSON.stringify(keys || []));
+}
+
 function statusClass(status) {
   if (status === "Green") return "success";
   if (status === "Red") return "danger";
@@ -81,6 +104,7 @@ function pipelineLabel(group) {
   const pipeline = groupPipeline(group);
   if (pipeline === "proven") return "PROVEN";
   if (pipeline === "testing") return "AWAITING";
+  if (pipeline === "membership_pending") return "PENDING MEMBERSHIP";
   if (pipeline === "archived") return "ARCHIVED";
   return "NEW";
 }
@@ -95,6 +119,7 @@ export default function FacebookGroupsAgentPage({
   const title = isRent2Buy ? "Rent2Buy Facebook Groups" : "Van Finance Groups & Classifieds";
   const [groups, setGroups] = useState(() => loadFacebookGroups());
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
+  const [usedVehicleKeys, setUsedVehicleKeys] = useState(() => loadUsedVanKeys(productKey));
   const [statusFilter, setStatusFilter] = useState("All");
   const [segmentFilter, setSegmentFilter] = useState("All");
   const [pipelineView, setPipelineView] = useState("new");
@@ -130,6 +155,11 @@ export default function FacebookGroupsAgentPage({
     [activeGroups],
   );
 
+  const membershipPendingGroups = useMemo(
+    () => activeGroups.filter((group) => groupPipeline(group) === "membership_pending"),
+    [activeGroups],
+  );
+
   const provenGroups = useMemo(
     () => activeGroups.filter((group) => groupPipeline(group) === "proven"),
     [activeGroups],
@@ -158,7 +188,9 @@ export default function FacebookGroupsAgentPage({
       ? provenGroups
       : pipelineView === "awaiting"
         ? awaitingGroups
-        : newGroups;
+        : pipelineView === "membership_pending"
+          ? membershipPendingGroups
+          : newGroups;
 
   const visibleGroups = useMemo(
     () => pipelineGroups
@@ -173,10 +205,19 @@ export default function FacebookGroupsAgentPage({
     [vehicles, selectedVehicleId],
   );
 
+  const rotationVehicles = useMemo(
+    () => (vehicles || []).filter((vehicle) => {
+      const key = vehicleKey(vehicle);
+      return key === selectedVehicleId || !usedVehicleKeys.includes(key);
+    }),
+    [vehicles, selectedVehicleId, usedVehicleKeys],
+  );
+
   const counts = useMemo(() => {
     const result = {
       total: activeGroups.length,
       new: newGroups.length,
+      membershipPending: membershipPendingGroups.length,
       awaiting: awaitingGroups.length,
       proven: provenGroups.length,
       due: dueGroups.length,
@@ -189,7 +230,12 @@ export default function FacebookGroupsAgentPage({
       else if (group.status !== "Red") result.amber += 1;
     }
     return result;
-  }, [activeGroups, newGroups, awaitingGroups, provenGroups, dueGroups, archivedGroups]);
+  }, [activeGroups, newGroups, membershipPendingGroups, awaitingGroups, provenGroups, dueGroups, archivedGroups]);
+
+  useEffect(() => {
+    setUsedVehicleKeys(loadUsedVanKeys(productKey));
+    setSelectedVehicleId("");
+  }, [productKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -272,6 +318,7 @@ export default function FacebookGroupsAgentPage({
           registration: postEvent.registration,
           approvalState: postEvent.approvalState === "accepted" ? "accepted" : "awaiting",
         }));
+        markVehicleUsed(postEvent.registration, selectedVehicleId);
         window.postMessage({
           source: "vfc-marketing-crm",
           type: GROUP_POST_EVENT_ACK,
@@ -434,6 +481,28 @@ export default function FacebookGroupsAgentPage({
     }
   }
 
+  function markVehicleUsed(registration, fallbackId = "") {
+    const wanted = registrationKey(registration);
+    const matched = (vehicles || []).find((vehicle) =>
+      registrationKey(vehicle?.registration || vehicle?.reg || vehicle?.title) === wanted
+    );
+    const key = vehicleKey(matched) || fallbackId;
+    if (!key) return;
+
+    setUsedVehicleKeys((current) => {
+      if (current.includes(key)) return current;
+      const next = [...current, key];
+      saveUsedVanKeys(productKey, next);
+      return next;
+    });
+  }
+
+  function resetVanRotation() {
+    saveUsedVanKeys(productKey, []);
+    setUsedVehicleKeys([]);
+    setMessage("Van rotation reset. Full stock is available again.");
+  }
+
   function persistGroups(updated) {
     setGroups(updated);
     saveFacebookGroups(updated);
@@ -443,6 +512,7 @@ export default function FacebookGroupsAgentPage({
     const registration = clean(selectedVehicle?.registration || selectedVehicle?.reg || selectedVehicle?.title);
     const updated = markGroupPosted(groups, group.url, { registration });
     persistGroups(updated);
+    markVehicleUsed(registration, selectedVehicleId);
     setMessage(`${group.name} marked posted manually. It is now awaiting an acceptance check.`);
   }
 
@@ -617,6 +687,7 @@ export default function FacebookGroupsAgentPage({
           {[
             ["Active", counts.total],
             ["New / Testing", counts.new],
+            ["Pending Membership", counts.membershipPending],
             ["Awaiting", counts.awaiting],
             ["Proven / Hot", counts.proven],
             ["Due again", counts.due],
@@ -667,7 +738,12 @@ export default function FacebookGroupsAgentPage({
         <div className="panel__header">
           <div>
             <h3>Post setup</h3>
-            <p>Select the van once, then use it across the groups you want to test or revisit.</p>
+            <p>Select the van once, then use it across the groups you want to test or revisit. Posted vans drop out of the rotation once you move on.</p>
+          </div>
+          <div className="card-actions">
+            <button className="button button--ghost" type="button" onClick={resetVanRotation} disabled={!usedVehicleKeys.length}>
+              Reset Vans
+            </button>
           </div>
         </div>
         {vehiclesError ? <div className="notice notice--error">{vehiclesError}</div> : null}
@@ -675,7 +751,7 @@ export default function FacebookGroupsAgentPage({
           <span>Van</span>
           <select value={selectedVehicleId} onChange={(event) => setSelectedVehicleId(event.target.value)}>
             <option value="">Choose a van…</option>
-            {(vehicles || []).map((vehicle) => (
+            {rotationVehicles.map((vehicle) => (
               <option key={vehicleKey(vehicle)} value={vehicleKey(vehicle)}>
                 {vehicleLabel(vehicle)}
               </option>
@@ -685,6 +761,7 @@ export default function FacebookGroupsAgentPage({
         {selectedVehicle ? (
           <div className="notice">
             Ready: <strong>{vehicleLabel(selectedVehicle)}</strong>. The helper uses the existing {isRent2Buy ? "Rent2Buy" : "Van Finance"} Facebook copy and stock image.
+            {" "}Rotation remaining: <strong>{Math.max(0, (vehicles || []).length - usedVehicleKeys.length)}</strong>.
           </div>
         ) : null}
       </section>
@@ -692,7 +769,7 @@ export default function FacebookGroupsAgentPage({
       <section className="panel">
         <div className="panel__header">
           <div>
-            <h3>{showArchived ? "Archived / dead groups" : pipelineView === "proven" ? "Proven / Hot groups" : pipelineView === "awaiting" ? "Awaiting approval / visibility" : "New & testing groups"}</h3>
+            <h3>{showArchived ? "Archived / dead groups" : pipelineView === "proven" ? "Proven / Hot groups" : pipelineView === "awaiting" ? "Awaiting approval / visibility" : pipelineView === "membership_pending" ? "Pending membership" : "New & testing groups"}</h3>
             <p>
               {showArchived
                 ? "Unavailable, declined or unwanted groups stay out of the working pipelines but can be restored."
@@ -700,12 +777,17 @@ export default function FacebookGroupsAgentPage({
                   ? "Only groups where an advert has been confirmed visible/accepted."
                   : pipelineView === "awaiting"
                     ? "Posts already sent to Facebook and waiting for approval or visibility checks."
-                    : "Fresh discoveries and groups you have not posted to yet."}
+                    : pipelineView === "membership_pending"
+                      ? "Groups where your join request is still waiting for admin approval. Once Facebook shows you as joined, they return to New & Testing."
+                      : "Fresh discoveries and groups you have not posted to yet."}
             </p>
           </div>
           <div className="card-actions">
             <button className={`button ${!showArchived && pipelineView === "new" ? "button--primary" : "button--ghost"}`} type="button" onClick={() => { setShowArchived(false); setPipelineView("new"); }}>
               New & Testing ({counts.new})
+            </button>
+            <button className={`button ${!showArchived && pipelineView === "membership_pending" ? "button--primary" : "button--ghost"}`} type="button" onClick={() => { setShowArchived(false); setPipelineView("membership_pending"); }}>
+              Pending Membership ({counts.membershipPending})
             </button>
             <button className={`button ${!showArchived && pipelineView === "awaiting" ? "button--primary" : "button--ghost"}`} type="button" onClick={() => { setShowArchived(false); setPipelineView("awaiting"); }}>
               Awaiting ({counts.awaiting})
@@ -736,7 +818,9 @@ export default function FacebookGroupsAgentPage({
                 ? "No proven groups yet. Once Facebook accepts a test advert, it will move here."
                 : pipelineView === "awaiting"
                   ? "No posts are waiting for approval or visibility checks."
-                  : "No new groups match this view yet. Run discovery to build the pipeline."}
+                  : pipelineView === "membership_pending"
+                    ? "No group membership requests are currently pending."
+                    : "No new groups match this view yet. Run discovery to build the pipeline."}
           </div>
         ) : (
           <div className="posting-card-grid posting-card-grid--dense">
