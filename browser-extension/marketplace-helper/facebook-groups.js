@@ -129,6 +129,20 @@
     return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   }
 
+  function membershipPendingVisible() {
+    const pageText = clean(document.body?.innerText || "");
+    return /your membership is pending|membership request (?:is )?pending|your request to join is pending|request to join (?:is )?pending|membership pending|request sent/i.test(pageText);
+  }
+
+  async function waitForMembershipPending(timeoutMs = 5000) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      if (membershipPendingVisible()) return true;
+      await sleep(250);
+    }
+    return membershipPendingVisible();
+  }
+
   function extractRuleEvidence(lines) {
     const keywords = /advert|business|commercial|dealer|promo|link|spam|sell|sale|rule|approval|admin|service/i;
     const results = [];
@@ -590,8 +604,7 @@
     }
 
     if (!editor || !scope || !verified || !isVerifiedCreatePostDialog(scope)) {
-      const pageText = clean(document.body?.innerText || "");
-      const membershipPending = /your membership is pending|membership request (?:is )?pending|your request to join is pending|request to join (?:is )?pending|membership pending|request sent/i.test(pageText);
+      const membershipPending = await waitForMembershipPending(5000);
       const fatalMessage = membershipPending
         ? "Facebook says your membership is pending. This group has been moved to Pending Membership."
         : "Could not verify Facebook group post composer. Nothing was inserted.";
@@ -645,6 +658,8 @@
       waitForComposerEditor,
       attachImage,
       registrationEvidenceLines,
+      membershipPendingVisible,
+      waitForMembershipPending,
       prepareGroupPost,
     });
   }
