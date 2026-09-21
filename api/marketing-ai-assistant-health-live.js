@@ -24,6 +24,7 @@ function parseBody(request) {
 
 function privateRuntimeReady(environment = process.env) {
   return environment.VERCEL_ENV === "production"
+    && environment.AI_HEALTH_ENABLE_LIVE_VALIDATION === "true"
     && Boolean(environment.OPENAI_API_KEY)
     && Boolean(environment.SUPABASE_URL)
     && Boolean(environment.SUPABASE_SERVICE_ROLE_KEY);
@@ -34,7 +35,7 @@ function configuration(environment = process.env) {
   return {
     live_validation_available: available,
     preview_live_validation_available: available,
-    live_validation_environment: available ? "protected_production" : "unavailable",
+    live_validation_environment: available ? "protected_production" : "disabled_by_default",
     deterministic_max_conversations: MAX_DETERMINISTIC_CONVERSATIONS,
     deterministic_batch_limit: DETERMINISTIC_BATCH_LIMIT,
     live_min_conversations: LIVE_VALIDATION_MIN,
@@ -52,6 +53,7 @@ function configuration(environment = process.env) {
       customer_records_created: 0,
       live_batch_limit: LIVE_VALIDATION_BATCH_LIMIT,
       explicit_confirmation_required: true,
+      explicit_environment_enable_required: true,
     },
   };
 }
@@ -80,7 +82,7 @@ export default async function handler(request, response) {
   }
 
   if (!privateRuntimeReady()) {
-    return response.status(503).json({ ok: false, message: "Protected production live validation is not configured." });
+    return response.status(503).json({ ok: false, message: "Paid live AI validation is disabled by default. Set AI_HEALTH_ENABLE_LIVE_VALIDATION=true only for a deliberate validation run." });
   }
 
   try {
