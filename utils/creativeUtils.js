@@ -66,7 +66,7 @@ function buildMarketplaceTitle(vehicle) {
 }
 
 function legacyBuildPostingCaption(vehicle, { destination = pipelineDestination(vehicle.pipeline), index = 0 } = {}) {
-  if (destination === "Facebook Marketplace") {
+  if (destination === "Facebook Marketplace" || destination === "Rent2Buy Marketplace") {
     const title = buildMarketplaceTitle(vehicle);
     return `NO CREDIT CHECK - ${vehicle.monthly || ""}
 

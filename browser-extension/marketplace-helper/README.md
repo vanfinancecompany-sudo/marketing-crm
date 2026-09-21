@@ -4,8 +4,8 @@ This Chrome extension is the local browser bridge between the Marketing CRM and 
 
 ## Controlled workflow
 
-1. In Marketing CRM → Facebook Marketplace, choose an eligible Rent2Buy van and press **Advertise on Marketplace**.
-2. The CRM validates DealerKit vehicle data, Rent2Buy monthly price and the ordered Rent2Buy CMS image gallery.
+1. In Marketing CRM → Van Finance Marketplace or Rent2Buy Marketplace, choose an eligible van and press **Advertise on Marketplace**.
+2. The CRM validates DealerKit vehicle data, the product-specific Marketplace price and the ordered product CMS image gallery.
 3. The extension stores that one pending job and Facebook Marketplace opens.
 4. The extension fills the vehicle form and uploads the ordered CMS images.
 5. The user reviews the advert and clicks Facebook's **Publish** button manually.
@@ -17,15 +17,16 @@ The extension never clicks Publish, never handles Facebook credentials, and cont
 ## Marketplace rules
 
 - Vehicle type: `Car/Truck`
-- Price: numeric Rent2Buy monthly amount only
-- Model: `[model] - Visit us at Rent2BuyVans.co.uk`
-- Body style: `Other`
-- Condition: `Very good`
-- Location: shuffled controlled Rent2Buy town rotation
-- Interior colour: left blank
-- Clean title: untouched
-- Description: current CRM Marketplace copy with `Visit us at Rent2BuyVans.co.uk` near the top
-- Images: CMS order only, lead CMS image first, never reshuffled. Facebook upload is capped at 20 and the CRM preflight stops if the CMS lead image/gallery is missing.
+- Rent2Buy price: numeric monthly amount.
+- Van Finance price: numeric cash vehicle price; the Finance description carries the monthly example and VAT wording.
+- Rent2Buy model/title hook: `[model] - Visit us at Rent2BuyVans.co.uk`.
+- Van Finance model/title hook: `[model/derivative] - VANFINANCECOMPANY.co.uk | Deposit from £99`.
+- Body style: `Other`.
+- Condition: `Very good`.
+- Location: separate shuffled rotations. Rent2Buy keeps the southern-area pool; Van Finance uses an England-wide major-town/city pool.
+- Interior colour: left blank.
+- Description: product-specific CRM copy.
+- Images: product CMS order only, lead CMS image first, never reshuffled. Facebook upload is capped at 20 and the CRM preflight stops if the matching CMS gallery is missing.
 
 ## Install locally
 

@@ -12,7 +12,10 @@ export const MARKETPLACE_JOB_MESSAGE_TYPE = "VFC_MARKETPLACE_JOB";
 export const MARKETPLACE_JOB_ACK_TYPE = "VFC_MARKETPLACE_JOB_STORED";
 export const MARKETPLACE_PUBLISHED_MESSAGE_TYPE = "VFC_MARKETPLACE_PUBLISHED";
 
-const LOCATION_STORAGE_KEY = "rent2buyMarketplaceLocationRotationV1";
+const LOCATION_STORAGE_KEYS = Object.freeze({
+  rent2buy: "rent2buyMarketplaceLocationRotationV1",
+  finance: "vanFinanceMarketplaceLocationRotationV1",
+});
 const MARKETPLACE_MAX_IMAGES = 20;
 const MARKETPLACE_EXTENSION_ACK_TIMEOUT_MS = 6000;
 const MARKETPLACE_EXTENSION_ACK_ATTEMPTS = 2;
@@ -32,6 +35,39 @@ export const RENT2BUY_MARKETPLACE_LOCATIONS = Object.freeze([
   "Farnborough",
   "Woking",
   "Worthing",
+]);
+
+export const VAN_FINANCE_MARKETPLACE_LOCATIONS = Object.freeze([
+  "London",
+  "Birmingham",
+  "Manchester",
+  "Leeds",
+  "Liverpool",
+  "Sheffield",
+  "Bristol",
+  "Leicester",
+  "Nottingham",
+  "Newcastle upon Tyne",
+  "Coventry",
+  "Bradford",
+  "Stoke-on-Trent",
+  "Hull",
+  "Plymouth",
+  "Wolverhampton",
+  "Derby",
+  "Southampton",
+  "Portsmouth",
+  "Brighton",
+  "Reading",
+  "Northampton",
+  "Luton",
+  "Milton Keynes",
+  "Norwich",
+  "Bournemouth",
+  "Swindon",
+  "Peterborough",
+  "Cambridge",
+  "Oxford",
 ]);
 
 function clean(value) {
@@ -119,39 +155,55 @@ function shuffled(values) {
   return copy;
 }
 
-export function nextMarketplaceLocation() {
-  if (typeof window === "undefined") return RENT2BUY_MARKETPLACE_LOCATIONS[0];
+function marketplaceLocationConfig(productKey) {
+  if (productKey === "finance") {
+    return {
+      storageKey: LOCATION_STORAGE_KEYS.finance,
+      locations: VAN_FINANCE_MARKETPLACE_LOCATIONS,
+    };
+  }
+  return {
+    storageKey: LOCATION_STORAGE_KEYS.rent2buy,
+    locations: RENT2BUY_MARKETPLACE_LOCATIONS,
+  };
+}
+
+export function nextMarketplaceLocation(productKey = "rent2buy") {
+  const { storageKey, locations } = marketplaceLocationConfig(productKey);
+  if (typeof window === "undefined") return locations[0];
+
   let state = { remaining: [], last: "" };
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(LOCATION_STORAGE_KEY) || "{}");
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey) || "{}");
     state = {
       remaining: Array.isArray(parsed.remaining)
-        ? parsed.remaining.filter((value) => RENT2BUY_MARKETPLACE_LOCATIONS.includes(value))
+        ? parsed.remaining.filter((value) => locations.includes(value))
         : [],
       last: clean(parsed.last),
     };
   } catch {}
 
   if (!state.remaining.length) {
-    state.remaining = shuffled(RENT2BUY_MARKETPLACE_LOCATIONS);
+    state.remaining = shuffled(locations);
     if (state.last && state.remaining.length > 1 && state.remaining[0] === state.last) {
       [state.remaining[0], state.remaining[1]] = [state.remaining[1], state.remaining[0]];
     }
   }
 
-  const location = state.remaining.shift() || RENT2BUY_MARKETPLACE_LOCATIONS[0];
+  const location = state.remaining.shift() || locations[0];
   try {
     window.localStorage.setItem(
-      LOCATION_STORAGE_KEY,
+      storageKey,
       JSON.stringify({ remaining: state.remaining, last: location }),
     );
   } catch {}
   return location;
 }
 
-async function fetchDealerKitVehicle(registration) {
+async function fetchDealerKitVehicle(registration, productKey = "rent2buy") {
+  const product = productKey === "finance" ? "finance" : "rent2buy";
   const response = await fetch(
-    `/api/dealerkit-stock-detail?registration=${encodeURIComponent(registration)}&product=rent2buy`,
+    `/api/dealerkit-stock-detail?registration=${encodeURIComponent(registration)}&product=${product}`,
     {
       method: "GET",
       cache: "no-store",
@@ -165,8 +217,9 @@ async function fetchDealerKitVehicle(registration) {
   return result?.vehicle || null;
 }
 
-function orderedCmsImages(cmsUploads, vehicle) {
-  const rows = cmsUploads?.rent2buy?.rows || [];
+function orderedCmsImages(cmsUploads, vehicle, productKey = "rent2buy") {
+  const cmsKey = productKey === "finance" ? "vanFinance" : "rent2buy";
+  const rows = cmsUploads?.[cmsKey]?.rows || [];
   const match = findYoutubeCmsMatch(rows, vehicle);
   const records = Array.isArray(match?.imageRecords) ? match.imageRecords : [];
   const seen = new Set();
@@ -191,11 +244,32 @@ function ensureVisitLine(caption) {
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-function jobId() {
+function jobId(productKey = "rent2buy") {
+  const product = productKey === "finance" ? "finance" : "rent2buy";
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
+    return `marketplace-${product}-${crypto.randomUUID()}`;
   }
-  return `marketplace-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `marketplace-${product}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function buildFinanceMarketplaceModel(dealerKitVehicle, financeVehicle) {
+  const model = clean(dealerKitVehicle?.model) || fallbackModel(financeVehicle);
+  if (!model) return "";
+
+  const derivative = clean(dealerKitVehicle?.derivative || dealerKitVehicle?.trim);
+  let detail = model;
+
+  if (derivative) {
+    const foldedModel = model.toLowerCase();
+    const foldedDerivative = derivative.toLowerCase();
+    if (foldedDerivative.includes(foldedModel) && derivative.length > model.length) {
+      detail = derivative;
+    } else if (!foldedModel.includes(foldedDerivative)) {
+      detail = `${model} ${derivative}`.trim();
+    }
+  }
+
+  return `${detail} - VANFINANCECOMPANY.co.uk | Deposit from £99`;
 }
 
 export async function buildRent2BuyMarketplaceJob(vehicle, caption) {
@@ -209,13 +283,13 @@ export async function buildRent2BuyMarketplaceJob(vehicle, caption) {
   if (!monthlyPrice) throw new Error("Marketplace preflight failed: monthly Rent2Buy price is missing.");
 
   const [dealerKitVehicle, cmsUploads] = await Promise.all([
-    fetchDealerKitVehicle(registration),
+    fetchDealerKitVehicle(registration, "rent2buy"),
     loadYouTubeCmsUploadsAsync(),
   ]);
 
   if (!dealerKitVehicle) throw new Error("Marketplace preflight failed: DealerKit vehicle details were not found.");
 
-  const { match: cmsMatch, images } = orderedCmsImages(cmsUploads, rentVehicle);
+  const { match: cmsMatch, images } = orderedCmsImages(cmsUploads, rentVehicle, "rent2buy");
   if (!cmsMatch || !images.length) {
     throw new Error("Marketplace preflight failed: the ordered Rent2Buy CMS image gallery was not found.");
   }
@@ -230,13 +304,14 @@ export async function buildRent2BuyMarketplaceJob(vehicle, caption) {
 
   return {
     version: 1,
-    id: jobId(),
+    id: jobId("rent2buy"),
     createdAt: new Date().toISOString(),
     destination: "Facebook Marketplace",
+    postingDestination: "Rent2Buy Marketplace",
     pipeline: "rent2buy",
     registration,
     vehicleId: String(vehicle?.id || rentVehicle?.id || ""),
-    location: nextMarketplaceLocation(),
+    location: nextMarketplaceLocation("rent2buy"),
     vehicleType: "Car/Truck",
     year,
     make,
@@ -288,6 +363,72 @@ function sendMarketplaceJobAttempt(job, timeoutMs) {
       job,
     }, window.location.origin);
   });
+}
+
+export async function buildVanFinanceMarketplaceJob(vehicle, caption) {
+  const financeVehicle = vehicle || {};
+  const registration = normalizeRegistration(
+    financeVehicle.registration || financeVehicle.reg || financeVehicle.title || financeVehicle.name,
+  );
+  if (!registration) throw new Error("Marketplace preflight failed: registration is missing.");
+
+  const [dealerKitVehicle, cmsUploads] = await Promise.all([
+    fetchDealerKitVehicle(registration, "finance"),
+    loadYouTubeCmsUploadsAsync(),
+  ]);
+
+  if (!dealerKitVehicle) throw new Error("Marketplace preflight failed: DealerKit vehicle details were not found.");
+
+  const cashPrice = numericValue(financeVehicle.price || dealerKitVehicle.retailPrice || "");
+  if (!cashPrice) throw new Error("Marketplace preflight failed: Van Finance cash price is missing.");
+
+  const { match: cmsMatch, images } = orderedCmsImages(cmsUploads, financeVehicle, "finance");
+  if (!cmsMatch || !images.length) {
+    throw new Error("Marketplace preflight failed: the ordered Van Finance CMS image gallery was not found.");
+  }
+
+  const make = clean(dealerKitVehicle.make);
+  const model = buildFinanceMarketplaceModel(dealerKitVehicle, financeVehicle);
+  const year = clean(dealerKitVehicle.year || parseSpecValue(financeVehicle, "year"));
+  const mileage = numericValue(dealerKitVehicle.mileage || parseSpecValue(financeVehicle, "mileage"));
+  if (!make || !model || !year || !mileage) {
+    throw new Error("Marketplace preflight failed: make, model, year or mileage is missing.");
+  }
+
+  return {
+    version: 1,
+    id: jobId("finance"),
+    createdAt: new Date().toISOString(),
+    destination: "Facebook Marketplace",
+    postingDestination: "Van Finance Marketplace",
+    pipeline: "finance",
+    registration,
+    vehicleId: String(financeVehicle.id || ""),
+    location: nextMarketplaceLocation("finance"),
+    vehicleType: "Car/Truck",
+    year,
+    make,
+    model,
+    mileage,
+    price: cashPrice,
+    monthlyPrice: numericValue(financeVehicle.salePrice || financeVehicle.monthly || ""),
+    priceContext: "cash",
+    bodyStyle: "Other",
+    exteriorColor: normalizeExteriorColour(dealerKitVehicle.colour),
+    interiorColor: "",
+    vehicleCondition: "Very good",
+    fuelType: normalizeFuel(dealerKitVehicle.fuel),
+    transmission: normalizeTransmission(dealerKitVehicle.transmission),
+    description: clean(caption) || "Visit us at VANFINANCECOMPANY.co.uk",
+    images,
+    imageCount: images.length,
+    leadImage: images[0],
+    source: {
+      cms: cmsUploads?.vanFinance?.source || "cms",
+      cmsMatchRegistration: clean(cmsMatch.registration),
+      dealerKitStockId: clean(dealerKitVehicle.supplierStockId),
+    },
+  };
 }
 
 export async function sendMarketplaceJobToExtension(

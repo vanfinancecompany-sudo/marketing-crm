@@ -22,7 +22,8 @@
     { id: "documents-hub", label: "Documents Hub", href: "https://work-documents-hub.vercel.app", external: true },
     { id: "van-finance-facebook", label: "Van Finance Facebook", path: "/van-finance-facebook", paths: ["/van-finance-facebook"], navigation: "react", view: "Van Finance Facebook" },
     { id: "rent2buy-facebook", label: "Rent2Buy Facebook", path: "/rent2buy-facebook", paths: ["/rent2buy-facebook"], navigation: "react", view: "Rent2Buy Facebook" },
-    { id: "facebook-marketplace", label: "Facebook Marketplace", path: "/facebook-marketplace", paths: ["/facebook-marketplace"], navigation: "react", view: "Facebook Marketplace" },
+    { id: "van-finance-marketplace", label: "Van Finance Marketplace", path: "/van-finance-marketplace", paths: ["/van-finance-marketplace"], navigation: "react", view: "Van Finance Marketplace" },
+    { id: "rent2buy-marketplace", label: "Rent2Buy Marketplace", path: "/rent2buy-marketplace", paths: ["/rent2buy-marketplace", "/facebook-marketplace"], navigation: "react", view: "Rent2Buy Marketplace" },
   ]);
 
   const advancedRoutes = Object.freeze([

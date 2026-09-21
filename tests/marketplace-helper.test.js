@@ -5,36 +5,65 @@ import test from "node:test";
 import {
   MARKETPLACE_CREATE_URL,
   RENT2BUY_MARKETPLACE_LOCATIONS,
+  VAN_FINANCE_MARKETPLACE_LOCATIONS,
   nextMarketplaceLocation,
 } from "../services/marketplaceAutomation.js";
 
 const postingDeskSource = fs.readFileSync(new URL("../pages/PostingDeskPage.jsx", import.meta.url), "utf8");
+const appSource = fs.readFileSync(new URL("../App.jsx", import.meta.url), "utf8");
+const sidebarSource = fs.readFileSync(new URL("../public/shared/sidebar-navigation.js", import.meta.url), "utf8");
 const marketplaceAutomationSource = fs.readFileSync(
   new URL("../services/marketplaceAutomation.js", import.meta.url),
   "utf8",
 );
 const backgroundSource = fs.readFileSync(new URL("../browser-extension/marketplace-helper/background.js", import.meta.url), "utf8");
+const crmBridgeSource = fs.readFileSync(new URL("../browser-extension/marketplace-helper/crm-bridge.js", import.meta.url), "utf8");
 const facebookSource = fs.readFileSync(new URL("../browser-extension/marketplace-helper/facebook.js", import.meta.url), "utf8");
 const manifest = JSON.parse(
   fs.readFileSync(new URL("../browser-extension/marketplace-helper/manifest.json", import.meta.url), "utf8"),
 );
 
-test("Marketplace job uses the vehicle creation route and controlled location pool", () => {
+test("Marketplace jobs keep separate Rent2Buy and Van Finance location pools", () => {
   assert.equal(MARKETPLACE_CREATE_URL, "https://www.facebook.com/marketplace/create/vehicle");
+
   assert.ok(RENT2BUY_MARKETPLACE_LOCATIONS.length >= 8);
   assert.ok(RENT2BUY_MARKETPLACE_LOCATIONS.includes("Southampton"));
   assert.ok(RENT2BUY_MARKETPLACE_LOCATIONS.includes("Basingstoke"));
   assert.ok(RENT2BUY_MARKETPLACE_LOCATIONS.includes("Portsmouth"));
   assert.ok(RENT2BUY_MARKETPLACE_LOCATIONS.includes(nextMarketplaceLocation()));
+
+  assert.ok(VAN_FINANCE_MARKETPLACE_LOCATIONS.length >= 20);
+  assert.ok(VAN_FINANCE_MARKETPLACE_LOCATIONS.includes("London"));
+  assert.ok(VAN_FINANCE_MARKETPLACE_LOCATIONS.includes("Birmingham"));
+  assert.ok(VAN_FINANCE_MARKETPLACE_LOCATIONS.includes("Manchester"));
+  assert.ok(VAN_FINANCE_MARKETPLACE_LOCATIONS.includes(nextMarketplaceLocation("finance")));
 });
 
-test("Posting Desk treats Marketplace as a prepared and confirmed workflow", () => {
+test("Posting Desk keeps Van Finance and Rent2Buy Marketplace as separate prepared workflows", () => {
   assert.match(postingDeskSource, /Advertise on Marketplace/);
   assert.match(postingDeskSource, /buildRent2BuyMarketplaceJob/);
+  assert.match(postingDeskSource, /buildVanFinanceMarketplaceJob/);
+  assert.match(postingDeskSource, /Van Finance Marketplace/);
+  assert.match(postingDeskSource, /Rent2Buy Marketplace/);
   assert.match(postingDeskSource, /sendMarketplaceJobToExtension/);
   assert.match(postingDeskSource, /Confirm Advertised/);
   assert.match(postingDeskSource, /MARKETPLACE_PUBLISHED_MESSAGE_TYPE/);
   assert.match(postingDeskSource, /removed from the Marketplace to-do list/);
+
+  assert.match(appSource, /vanFinanceMarketplaceQueue/);
+  assert.match(appSource, /rent2BuyMarketplaceQueue/);
+  assert.match(sidebarSource, /Van Finance Marketplace/);
+  assert.match(sidebarSource, /Rent2Buy Marketplace/);
+});
+
+test("Van Finance Marketplace uses cash pricing and a £99-deposit title hook", () => {
+  assert.match(marketplaceAutomationSource, /buildVanFinanceMarketplaceJob/);
+  assert.match(marketplaceAutomationSource, /postingDestination: "Van Finance Marketplace"/);
+  assert.match(marketplaceAutomationSource, /VANFINANCECOMPANY\.co\.uk \| Deposit from £99/);
+  assert.match(marketplaceAutomationSource, /priceContext: "cash"/);
+  assert.match(marketplaceAutomationSource, /cmsUploads\?\.vanFinance/);
+  assert.match(backgroundSource, /postingDestination/);
+  assert.match(facebookSource, /job\.pipeline === "finance"/);
 });
 
 test("Marketplace preparation failures stay visible instead of silently closing", () => {
@@ -63,6 +92,10 @@ test("Marketplace extension requires manual Publish before a live listing receip
 test("Marketplace extension is scoped and preserves controlled image handoff", () => {
   assert.equal(manifest.manifest_version, 3);
   assert.ok(manifest.content_scripts.some((entry) => entry.matches.includes("https://marketing-crm-six.vercel.app/*")));
+  assert.ok(manifest.content_scripts.some((entry) => entry.matches.includes("https://*.vercel.app/*")));
+  assert.match(crmBridgeSource, /marketing-crm-six\.vercel\.app/);
+  assert.match(crmBridgeSource, /hostname\.startsWith\("marketing-crm-"/);
+  assert.match(crmBridgeSource, /if \(!isMarketingCrmHost\) return/);
   assert.ok(manifest.content_scripts.some((entry) => entry.matches.includes("https://www.facebook.com/marketplace/create/vehicle*")));
   assert.match(facebookSource, /slice\(0, 20\)/);
   assert.match(facebookSource, /CMS images attached in order/);

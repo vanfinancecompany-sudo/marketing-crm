@@ -319,7 +319,9 @@
       return false;
     }
 
-    const baseModel = String(job.model || "").split(" - Visit us at ")[0].trim();
+    const baseModel = String(job.model || "")
+      .split(/\s+-\s+(?:Visit us at|VANFINANCECOMPANY\.co\.uk)/i)[0]
+      .trim();
     try {
       control.focus();
       control.click();
@@ -366,9 +368,13 @@
       "font:14px/1.4 Arial,sans-serif",
       "box-shadow:0 12px 35px rgba(0,0,0,.45)",
     ].join(";");
+    const priceSummary = job.pipeline === "finance"
+      ? `£${job.price} cash price${job.monthlyPrice ? ` • from £${job.monthlyPrice}/month` : ""}`
+      : `£${job.price}/month`;
+
     panel.innerHTML = `
       <div style="font-size:16px;font-weight:700">VFC Marketplace Helper</div>
-      <div>${job.registration} • £${job.price}/month • ${job.location}</div>
+      <div>${job.registration} • ${priceSummary} • ${job.location}</div>
       <div style="margin-top:8px"><b>${succeeded}/${report.length}</b> verified items succeeded.</div>
       ${failed.length
         ? `<div style="margin-top:8px;color:#ffd5d5"><b>Needs attention:</b><br>${failed.map((item) => `• ${item.field}: ${item.detail}`).join("<br>")}</div>`
