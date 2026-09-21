@@ -434,13 +434,22 @@
   }
 
   function reactSetText(element, value) {
+    const text = String(value ?? "").replace(/\r\n?/g, "\n");
     element.focus();
     try {
       document.execCommand("selectAll", false, null);
-      document.execCommand("insertText", false, value);
+      const lines = text.split("\n");
+      for (let index = 0; index < lines.length; index += 1) {
+        if (lines[index]) {
+          document.execCommand("insertText", false, lines[index]);
+        }
+        if (index < lines.length - 1) {
+          document.execCommand("insertLineBreak", false, null);
+        }
+      }
     } catch {
-      element.textContent = value;
-      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+      element.textContent = text;
+      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
     }
   }
 
