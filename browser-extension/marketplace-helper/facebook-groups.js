@@ -433,120 +433,6 @@
     });
   }
 
-  const FORMAT_PROBE_TEXT = "VFC FORMAT CHECK A\n\nVFC FORMAT CHECK B";
-
-  function normalizeComposerText(value) {
-    return String(value ?? "")
-      .replace(/\r\n?/g, "\n")
-      .replace(/\u00a0/g, " ")
-      .split("\n")
-      .map((line) => line.replace(/[ \t]+/g, " ").trimEnd())
-      .join("\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-  }
-
-  function composerTextMatches(element, expected) {
-    return normalizeComposerText(element?.innerText || element?.textContent || "")
-      === normalizeComposerText(expected);
-  }
-
-  function clearComposerEditor(element) {
-    element.focus();
-    try {
-      document.execCommand("selectAll", false, null);
-      document.execCommand("delete", false, null);
-    } catch {
-      element.textContent = "";
-      element.dispatchEvent(new InputEvent("input", {
-        bubbles: true,
-        composed: true,
-        inputType: "deleteContentBackward",
-        data: null,
-      }));
-    }
-  }
-
-  function plainTextDataTransfer(text) {
-    const transfer = new DataTransfer();
-    if (typeof transfer.setData === "function") {
-      transfer.setData("text/plain", text);
-      transfer.setData("text", text);
-    }
-    return transfer;
-  }
-
-  function pasteEventForText(text) {
-    const transfer = plainTextDataTransfer(text);
-    try {
-      return new ClipboardEvent("paste", {
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        clipboardData: transfer,
-      });
-    } catch {
-      const event = new Event("paste", { bubbles: true, cancelable: true, composed: true });
-      try {
-        Object.defineProperty(event, "clipboardData", { value: transfer });
-      } catch {}
-      return event;
-    }
-  }
-
-  async function pasteTextIntoComposer(element, value) {
-    const text = String(value ?? "").replace(/\r\n?/g, "\n");
-    clearComposerEditor(element);
-    await sleep(80);
-    element.focus();
-    const event = pasteEventForText(text);
-    element.dispatchEvent(event);
-    await sleep(450);
-    return composerTextMatches(element, text);
-  }
-
-  async function reactSetText(element, value) {
-    const text = String(value ?? "").replace(/\r\n?/g, "\n");
-
-    let probeOk = false;
-    try {
-      probeOk = await pasteTextIntoComposer(element, FORMAT_PROBE_TEXT);
-    } catch {}
-    clearComposerEditor(element);
-    await sleep(120);
-
-    if (!probeOk) {
-      return {
-        ok: false,
-        method: "manual-paste-required",
-        probePassed: false,
-        captionAttempted: false,
-      };
-    }
-
-    let captionOk = false;
-    try {
-      captionOk = await pasteTextIntoComposer(element, text);
-    } catch {}
-    if (captionOk) {
-      return {
-        ok: true,
-        method: "native-paste-event",
-        probePassed: true,
-        captionAttempted: true,
-      };
-    }
-
-    clearComposerEditor(element);
-    await sleep(120);
-    return {
-      ok: false,
-      method: "manual-paste-required",
-      probePassed: true,
-      captionAttempted: true,
-    };
-  }
-
   function dataUrlToFile(dataUrl, filename) {
     const parts = String(dataUrl || "").split(",");
     const header = parts[0] || "";
@@ -677,7 +563,7 @@
     if (!editor || !scope || !verified || !isVerifiedCreatePostDialog(scope)) {
       const fatalMessage = "Could not verify Facebook group post composer. Nothing was inserted.";
       results.push({ label: "Composer", ok: false, detail: "Verified Create Post dialog not found" });
-      results.push({ label: "Post text", ok: false, detail: "Skipped because the composer was not verified" });
+      results.push({ label: "Caption clipboard", ok: Boolean(job.captionCopied), detail: job.captionCopied ? "Caption copied before Facebook opened" : "Caption was not copied" });
       results.push({ label: "Photo", ok: false, detail: "Skipped because the composer was not verified" });
       showPostReport(job, results, fatalMessage);
       await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
@@ -685,37 +571,24 @@
     }
 
     results.push({ label: "Composer", ok: true, detail: "Verified Create Post dialog" });
-
-    const textResult = await reactSetText(editor, job.caption || "");
     results.push({
-      label: "Post text",
-      ok: textResult.ok,
-      detail: textResult.ok
-        ? `Caption inserted and formatting verified (${textResult.method})`
-        : textResult.captionAttempted
-          ? "Facebook rejected the verified formatted paste; the text was cleared"
-          : "Facebook does not accept the formatted paste method on this layout",
+      label: "Caption clipboard",
+      ok: Boolean(job.captionCopied),
+      detail: job.captionCopied
+        ? "Formatted CRM caption copied to clipboard"
+        : "Clipboard copy was unavailable; copy the caption from the CRM manually",
     });
 
     const imageResult = await attachImage(job, scope);
     results.push({ label: "Photo", ok: imageResult.ok, detail: imageResult.detail });
 
+    try { editor.focus(); } catch {}
     watchManualGroupPost(job, scope);
 
-    if (!textResult.ok) {
-      const clipboardMessage = job.captionCopied
-        ? "The correctly formatted caption is already on your clipboard. Click in the Facebook text box and press Ctrl+V, review the advert, then click Post."
-        : "Automatic formatted text is unavailable on this Facebook layout. Copy the caption from the CRM, paste it into this text box, review the advert, then click Post.";
-      showPostReport(
-        job,
-        results,
-        `Facebook blocked automatic formatted text. ${clipboardMessage}`
-      );
-      await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
-      return;
-    }
-
-    showPostReport(job, results);
+    const instruction = job.captionCopied
+      ? "Caption copied. Click in the Facebook text box and press Ctrl+V, review the advert, then click Post."
+      : "Copy the caption from the CRM, paste it into the Facebook text box, review the advert, then click Post.";
+    showPostReport(job, results, instruction);
     await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
   }
 
@@ -729,10 +602,6 @@
       composerEditorCandidates,
       waitForComposerEditor,
       attachImage,
-      normalizeComposerText,
-      composerTextMatches,
-      pasteTextIntoComposer,
-      reactSetText,
       prepareGroupPost,
     });
   }
