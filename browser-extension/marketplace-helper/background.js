@@ -125,6 +125,22 @@ async function createPublishReceipt(pending, listingUrl) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
+    if (message?.type === "GET_FACEBOOK_HELPER_STATUS") {
+      const manifest = chrome.runtime.getManifest();
+      sendResponse({
+        ok: true,
+        version: manifest?.version || "",
+        capabilities: [
+          "marketplace",
+          "groups-discovery",
+          "groups-inspection",
+          "groups-post-prep",
+          "groups-post-status",
+        ],
+      });
+      return;
+    }
+
     if (message?.type === "STORE_MARKETPLACE_JOB") {
       const job = message.job;
       if (!job?.id || !job?.registration || !Array.isArray(job?.images) || !job.images.length) {

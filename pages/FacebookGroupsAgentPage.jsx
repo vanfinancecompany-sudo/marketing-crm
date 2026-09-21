@@ -7,6 +7,7 @@ import {
   GROUP_POST_SUBMITTED,
   applyGroupInspection,
   archiveFacebookGroup,
+  getFacebookHelperStatus,
   groupDueState,
   groupPipeline,
   loadFacebookGroups,
@@ -98,6 +99,13 @@ export default function FacebookGroupsAgentPage({
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [lastRun, setLastRun] = useState(null);
+  const [helperStatus, setHelperStatus] = useState({
+    checking: true,
+    connected: false,
+    version: "",
+    capabilities: [],
+    hostname: "",
+  });
 
   const scoredGroups = useMemo(
     () => scoreFacebookGroups(groups, productKey),
@@ -177,6 +185,22 @@ export default function FacebookGroupsAgentPage({
     }
     return result;
   }, [activeGroups, newGroups, awaitingGroups, provenGroups, dueGroups, archivedGroups]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkHelper() {
+      const status = await getFacebookHelperStatus();
+      if (!cancelled) {
+        setHelperStatus({ checking: false, ...status });
+      }
+    }
+
+    checkHelper();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     function persist(update) {
@@ -275,8 +299,23 @@ export default function FacebookGroupsAgentPage({
     return () => window.removeEventListener("message", handleMessage);
   }, [groups, productKey]);
 
+  async function requireGroupsHelper() {
+    const status = await getFacebookHelperStatus();
+    setHelperStatus({ checking: false, ...status });
+    const ready = status.connected && status.capabilities.includes("groups-discovery");
+    if (!ready) {
+      setMessage(
+        status.connected
+          ? `Facebook Helper v${status.version || "unknown"} is connected, but it does not include Groups support. Update the extension and refresh this CRM tab.`
+          : "Facebook Helper is not connected to this CRM tab. Update/reload the extension, then refresh this page before trying again.",
+      );
+    }
+    return ready;
+  }
+
   async function discoverGroups() {
     if (busy) return;
+    if (!(await requireGroupsHelper())) return;
     setBusy("discovery");
     setMessage("Starting Facebook discovery. The helper will work through a controlled batch of live group searches.");
     try {
@@ -293,6 +332,7 @@ export default function FacebookGroupsAgentPage({
 
   async function checkNextGroups() {
     if (busy) return;
+    if (!(await requireGroupsHelper())) return;
     setBusy("inspection");
     setMessage("Checking the next group batch for access, posting ability and visible advertising rules.");
     try {
@@ -306,6 +346,7 @@ export default function FacebookGroupsAgentPage({
 
   async function checkPostAcceptance() {
     if (busy) return;
+    if (!(await requireGroupsHelper())) return;
     setBusy("post-status");
     setMessage("Checking posted groups to see which adverts are visible, still pending, or unavailable.");
     try {
@@ -318,6 +359,7 @@ export default function FacebookGroupsAgentPage({
   }
 
   async function preparePost(group) {
+    if (!(await requireGroupsHelper())) return;
     if (!selectedVehicle) {
       setMessage("Choose a van at the top of the page first.");
       return;
@@ -518,6 +560,16 @@ export default function FacebookGroupsAgentPage({
               <strong>{value}</strong>
             </div>
           ))}
+        </div>
+
+        <div className="notice">
+          <strong>Facebook Helper:</strong>{" "}
+          {helperStatus.checking
+            ? "checking connection…"
+            : helperStatus.connected
+              ? `v${helperStatus.version || "unknown"} connected${helperStatus.capabilities.includes("groups-discovery") ? " · Groups ready" : " · Groups support missing"}`
+              : "not connected to this CRM tab"}
+          {helperStatus.hostname ? ` · ${helperStatus.hostname}` : ""}
         </div>
 
         {message ? <div className="notice">{message}</div> : null}

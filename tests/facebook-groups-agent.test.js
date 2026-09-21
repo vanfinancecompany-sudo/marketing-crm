@@ -63,7 +63,7 @@ test("CRM exposes discovery, live checks and two-stage group pipelines", () => {
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.2");
+  assert.equal(manifest.version, "1.2.3");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(
     manifest.content_scripts.some((entry) =>
@@ -86,6 +86,11 @@ test("Chrome helper can discover and inspect groups without auto-posting", () =>
   assert.match(backgroundSource, /GROUP_POST_SUBMITTED/);
   assert.match(bridgeSource, /VFC_GROUP_DISCOVERY_START/);
   assert.match(bridgeSource, /VFC_GROUP_INSPECTION_START/);
+  assert.match(bridgeSource, /VFC_FACEBOOK_HELPER_PING/);
+  assert.match(bridgeSource, /crm-b5po-/);
+  assert.match(backgroundSource, /GET_FACEBOOK_HELPER_STATUS/);
+  assert.match(pageSource, /Facebook Helper:/);
+  assert.match(pageSource, /Groups ready/);
   assert.match(groupsHelperSource, /Nothing has been posted/);
   assert.match(groupsHelperSource, /watchManualGroupPost/);
   assert.match(groupsHelperSource, /checkPostedStatus/);
