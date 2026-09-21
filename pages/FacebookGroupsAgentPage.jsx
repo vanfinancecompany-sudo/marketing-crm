@@ -125,7 +125,7 @@ export default function FacebookGroupsAgentPage({
   );
 
   const newGroups = useMemo(
-    () => activeGroups.filter((group) => groupPipeline(group) !== "proven"),
+    () => activeGroups.filter((group) => groupPipeline(group) === "new"),
     [activeGroups],
   );
 
@@ -155,7 +155,9 @@ export default function FacebookGroupsAgentPage({
     ? archivedGroups
     : pipelineView === "proven"
       ? provenGroups
-      : newGroups;
+      : pipelineView === "awaiting"
+        ? awaitingGroups
+        : newGroups;
 
   const visibleGroups = useMemo(
     () => pipelineGroups
@@ -289,10 +291,11 @@ export default function FacebookGroupsAgentPage({
         ));
         const accepted = results.filter((item) => item.accepted).length;
         const pending = results.filter((item) => item.pending).length;
+        const declined = results.filter((item) => item.declined).length;
         const unavailable = results.filter((item) => item.unavailable).length;
         setBusy("");
         setMessage(
-          `Acceptance check finished: ${accepted} accepted, ${pending} still pending, ${Math.max(0, results.length - accepted - pending - unavailable)} not visible yet${unavailable ? `, ${unavailable} unavailable group${unavailable === 1 ? "" : "s"} archived` : ""}.`,
+          `Acceptance check finished: ${accepted} accepted, ${pending} still pending, ${Math.max(0, results.length - accepted - pending - declined - unavailable)} not visible yet${declined ? `, ${declined} declined and archived` : ""}${unavailable ? `, ${unavailable} unavailable group${unavailable === 1 ? "" : "s"} archived` : ""}.`,
         );
       }
 
@@ -309,6 +312,10 @@ export default function FacebookGroupsAgentPage({
         if (statusEvent.accepted) {
           setMessage(
             `${statusEvent.groupName || "Facebook group"} has accepted/visible ${statusEvent.registration || "the advert"}. It has moved into Proven / Hot automatically.`,
+          );
+        } else if (statusEvent.declined) {
+          setMessage(
+            `${statusEvent.groupName || "Facebook group"} declined ${statusEvent.registration || "the advert"} and has been archived automatically.`,
           );
         } else if (statusEvent.unavailable) {
           setMessage(
@@ -446,6 +453,17 @@ export default function FacebookGroupsAgentPage({
     setMessage(`${group.name} is now Proven/Hot. It will come back to the top when its repeat interval is due.`);
   }
 
+  function confirmDeclined(group) {
+    const updated = markGroupPostStatus(groups, {
+      url: group.url,
+      registration: group.pendingRegistration,
+      declined: true,
+      checkedAt: new Date().toISOString(),
+    });
+    persistGroups(updated);
+    setMessage(`${group.name} marked declined and moved straight to Archived.`);
+  }
+
   function removeGroup(group) {
     if (!window.confirm(`Remove ${group.name} from the active group pipelines?`)) return;
     const updated = archiveFacebookGroup(groups, group.url, "Removed as not worth posting");
@@ -538,9 +556,14 @@ export default function FacebookGroupsAgentPage({
                   Open Group
                 </button>
                 {isAwaiting ? (
-                  <button className="button button--ghost" type="button" onClick={() => confirmAccepted(group)}>
-                    Mark Accepted
-                  </button>
+                  <>
+                    <button className="button button--ghost" type="button" onClick={() => confirmAccepted(group)}>
+                      Mark Accepted
+                    </button>
+                    <button className="button button--ghost" type="button" onClick={() => confirmDeclined(group)}>
+                      Mark Declined
+                    </button>
+                  </>
                 ) : null}
                 <button className="button button--ghost" type="button" onClick={() => confirmPosted(group)}>
                   I Posted It
@@ -668,18 +691,23 @@ export default function FacebookGroupsAgentPage({
       <section className="panel">
         <div className="panel__header">
           <div>
-            <h3>{showArchived ? "Archived / dead groups" : pipelineView === "proven" ? "Proven / Hot groups" : "New & testing groups"}</h3>
+            <h3>{showArchived ? "Archived / dead groups" : pipelineView === "proven" ? "Proven / Hot groups" : pipelineView === "awaiting" ? "Awaiting approval / visibility" : "New & testing groups"}</h3>
             <p>
               {showArchived
-                ? "Unavailable or unwanted groups stay out of the working pipelines but can be restored."
+                ? "Unavailable, declined or unwanted groups stay out of the working pipelines but can be restored."
                 : pipelineView === "proven"
                   ? "Only groups where an advert has been confirmed visible/accepted."
-                  : "Fresh discoveries and groups currently being tested for real posting value."}
+                  : pipelineView === "awaiting"
+                    ? "Posts already sent to Facebook and waiting for approval or visibility checks."
+                    : "Fresh discoveries and groups you have not posted to yet."}
             </p>
           </div>
           <div className="card-actions">
             <button className={`button ${!showArchived && pipelineView === "new" ? "button--primary" : "button--ghost"}`} type="button" onClick={() => { setShowArchived(false); setPipelineView("new"); }}>
               New & Testing ({counts.new})
+            </button>
+            <button className={`button ${!showArchived && pipelineView === "awaiting" ? "button--primary" : "button--ghost"}`} type="button" onClick={() => { setShowArchived(false); setPipelineView("awaiting"); }}>
+              Awaiting ({counts.awaiting})
             </button>
             <button className={`button ${!showArchived && pipelineView === "proven" ? "button--primary" : "button--ghost"}`} type="button" onClick={() => { setShowArchived(false); setPipelineView("proven"); }}>
               Proven / Hot ({counts.proven})
@@ -701,7 +729,13 @@ export default function FacebookGroupsAgentPage({
 
         {visibleGroups.length === 0 ? (
           <div className="empty-state">
-            {showArchived ? "No archived groups." : pipelineView === "proven" ? "No proven groups yet. Once Facebook accepts a test advert, it will move here." : "No groups match this view yet. Run discovery to build the pipeline."}
+            {showArchived
+              ? "No archived groups."
+              : pipelineView === "proven"
+                ? "No proven groups yet. Once Facebook accepts a test advert, it will move here."
+                : pipelineView === "awaiting"
+                  ? "No posts are waiting for approval or visibility checks."
+                  : "No new groups match this view yet. Run discovery to build the pipeline."}
           </div>
         ) : (
           <div className="posting-card-grid posting-card-grid--dense">
