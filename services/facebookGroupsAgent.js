@@ -481,7 +481,7 @@ export function groupPipeline(group) {
   return "new";
 }
 
-export function prepareFacebookGroupPost({ group, vehicle, caption, productKey }) {
+export function prepareFacebookGroupPost({ group, vehicle, caption, productKey, captionCopied = false }) {
   if (!group?.url) return Promise.reject(new Error("Choose a Facebook group first."));
   if (!vehicle) return Promise.reject(new Error("Choose a van first."));
   const id = requestId("group-post");
@@ -493,6 +493,7 @@ export function prepareFacebookGroupPost({ group, vehicle, caption, productKey }
     registration: vehicleRegistration(vehicle),
     vehicleId: String(vehicle.id || ""),
     caption: preserveFacebookGroupCaption(caption || vehicle.caption || ""),
+    captionCopied: Boolean(captionCopied),
     imageUrl: vehicleImage(vehicle),
     createdAt: new Date().toISOString(),
   };

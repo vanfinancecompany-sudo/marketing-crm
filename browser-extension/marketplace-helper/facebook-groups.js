@@ -433,90 +433,6 @@
     });
   }
 
-  function normalizeComposerText(value) {
-    return String(value ?? "")
-      .replace(/\r\n?/g, "\n")
-      .replace(/\u00a0/g, " ")
-      .split("\n")
-      .map((line) => line.replace(/[ \t]+/g, " ").trimEnd())
-      .join("\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-  }
-
-  function composerTextMatches(element, expected) {
-    return normalizeComposerText(element?.innerText || element?.textContent || "")
-      === normalizeComposerText(expected);
-  }
-
-  function escapeComposerHtml(value) {
-    return String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-
-  function captionAsComposerHtml(value) {
-    return String(value ?? "")
-      .replace(/\r\n?/g, "\n")
-      .split("\n")
-      .map((line) => `<div>${line ? escapeComposerHtml(line) : "<br>"}</div>`)
-      .join("");
-  }
-
-  function clearComposerEditor(element) {
-    element.focus();
-    try {
-      document.execCommand("selectAll", false, null);
-      document.execCommand("delete", false, null);
-    } catch {
-      element.textContent = "";
-      element.dispatchEvent(new InputEvent("input", {
-        bubbles: true,
-        composed: true,
-        inputType: "deleteContentBackward",
-        data: null,
-      }));
-    }
-  }
-
-  async function reactSetText(element, value) {
-    const text = String(value ?? "").replace(/\r\n?/g, "\n");
-    element.focus();
-
-    try {
-      document.execCommand("selectAll", false, null);
-      const pieces = text.split(/(\n)/);
-      for (const piece of pieces) {
-        if (!piece) continue;
-        document.execCommand("insertText", false, piece);
-      }
-      await sleep(450);
-      if (composerTextMatches(element, text)) {
-        return { ok: true, method: "lexical-newline-text" };
-      }
-    } catch {}
-
-    try {
-      clearComposerEditor(element);
-      document.execCommand("insertHTML", false, captionAsComposerHtml(text));
-      await sleep(450);
-      if (composerTextMatches(element, text)) {
-        return { ok: true, method: "structured-html" };
-      }
-    } catch {}
-
-    clearComposerEditor(element);
-    await sleep(180);
-    return {
-      ok: false,
-      method: "failed",
-      expected: normalizeComposerText(text),
-      actual: normalizeComposerText(element?.innerText || element?.textContent || ""),
-    };
-  }
-
   function dataUrlToFile(dataUrl, filename) {
     const parts = String(dataUrl || "").split(",");
     const header = parts[0] || "";
@@ -564,7 +480,7 @@
     return { ok: true, detail: "Image attached inside verified Create Post composer" };
   }
 
-  function showPostReport(job, results, fatalMessage = "") {
+  function showPostReport(job, results, fatalMessage = "", nextStep = "") {
     document.getElementById("vfc-group-helper-report")?.remove();
     const panel = document.createElement("div");
     panel.id = "vfc-group-helper-report";
@@ -593,6 +509,7 @@
       '<div style="margin-top:4px">' + (job.groupName || "Facebook group") + " • " + (job.registration || "selected van") + "</div>" +
       '<div style="margin-top:8px">' + results.filter((item) => item.ok).length + "/" + results.length + " preparation checks succeeded.</div>" +
       failureHtml +
+      (nextStep ? '<div style="margin-top:10px;color:#fff"><b>Next:</b> ' + nextStep + "</div>" : "") +
       '<div style="margin-top:10px;color:#ddd"><b>Nothing has been posted.</b> Check the group rules and advert, then click Facebook\'s Post button yourself.</div>';
     document.body.appendChild(panel);
   }
@@ -647,7 +564,7 @@
     if (!editor || !scope || !verified || !isVerifiedCreatePostDialog(scope)) {
       const fatalMessage = "Could not verify Facebook group post composer. Nothing was inserted.";
       results.push({ label: "Composer", ok: false, detail: "Verified Create Post dialog not found" });
-      results.push({ label: "Post text", ok: false, detail: "Skipped because the composer was not verified" });
+      results.push({ label: "Caption clipboard", ok: Boolean(job.captionCopied), detail: job.captionCopied ? "Caption copied before Facebook opened" : "Caption was not copied" });
       results.push({ label: "Photo", ok: false, detail: "Skipped because the composer was not verified" });
       showPostReport(job, results, fatalMessage);
       await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
@@ -655,36 +572,24 @@
     }
 
     results.push({ label: "Composer", ok: true, detail: "Verified Create Post dialog" });
-
-    const textResult = await reactSetText(editor, job.caption || "");
     results.push({
-      label: "Post text",
-      ok: textResult.ok,
-      detail: textResult.ok
-        ? `Caption inserted and formatting verified (${textResult.method})`
-        : "Facebook changed the caption structure, so the text was cleared",
+      label: "Caption clipboard",
+      ok: Boolean(job.captionCopied),
+      detail: job.captionCopied
+        ? "Formatted CRM caption copied to clipboard"
+        : "Clipboard copy was unavailable; copy the caption from the CRM manually",
     });
-
-    if (!textResult.ok) {
-      results.push({
-        label: "Photo",
-        ok: false,
-        detail: "Skipped because caption formatting could not be verified",
-      });
-      showPostReport(
-        job,
-        results,
-        "Facebook changed the caption formatting. The text was cleared and no photo was attached."
-      );
-      await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
-      return;
-    }
 
     const imageResult = await attachImage(job, scope);
     results.push({ label: "Photo", ok: imageResult.ok, detail: imageResult.detail });
 
+    try { editor.focus(); } catch {}
     watchManualGroupPost(job, scope);
-    showPostReport(job, results);
+
+    const instruction = job.captionCopied
+      ? "Caption copied. Click in the Facebook text box and press Ctrl+V, review the advert, then click Post."
+      : "Copy the caption from the CRM, paste it into the Facebook text box, review the advert, then click Post.";
+    showPostReport(job, results, "", instruction);
     await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
   }
 
@@ -698,10 +603,6 @@
       composerEditorCandidates,
       waitForComposerEditor,
       attachImage,
-      normalizeComposerText,
-      composerTextMatches,
-      captionAsComposerHtml,
-      reactSetText,
       prepareGroupPost,
     });
   }

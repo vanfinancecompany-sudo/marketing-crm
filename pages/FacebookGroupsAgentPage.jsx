@@ -381,23 +381,43 @@ export default function FacebookGroupsAgentPage({
     }
   }
 
+  async function copyGroupCaptionForFallback(caption) {
+    const text = String(caption || "");
+    if (!text || !navigator.clipboard?.writeText) return false;
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function preparePost(group) {
-    if (!(await requireGroupsHelper())) return;
     if (!selectedVehicle) {
       setMessage("Choose a van at the top of the page first.");
       return;
     }
+
+    const caption = selectedVehicle.caption || "";
+    const captionCopyPromise = copyGroupCaptionForFallback(caption);
+
+    if (!(await requireGroupsHelper())) return;
+
+    const captionCopied = await captionCopyPromise;
     setBusy(`post:${group.id}`);
     setMessage(`Preparing ${selectedVehicle.registration || selectedVehicle.reg || "the selected van"} for ${group.name}…`);
     try {
       await prepareFacebookGroupPost({
         group,
         vehicle: selectedVehicle,
-        caption: selectedVehicle.caption || "",
+        caption,
         productKey,
+        captionCopied,
       });
       setMessage(
-        `${group.name} is opening in Facebook. The helper will prepare the advert. When you click Facebook's Post button, the CRM will record that automatically and start tracking acceptance.`,
+        captionCopied
+          ? `${group.name} is opening in Facebook. The helper will prepare the advert, with the formatted caption also held on your clipboard as a safe fallback.`
+          : `${group.name} is opening in Facebook. The helper will prepare the advert. When you click Facebook's Post button, the CRM will record that automatically and start tracking acceptance.`,
       );
     } catch (error) {
       setMessage(error.message || "Could not hand this group post to the browser helper.");

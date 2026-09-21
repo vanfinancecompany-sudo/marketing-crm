@@ -41,6 +41,7 @@ test("Facebook group caption handoff preserves paragraph breaks exactly", () => 
     "NO CREDIT CHECK\n\n£536 MTH RENT IT · DRIVE IT · OWN IT\nApply in 60 seconds\n\nJUST £99 FINAL PAYMENT. IT'S YOURS!",
   );
   assert.match(serviceSource, /caption: preserveFacebookGroupCaption\(caption \|\| vehicle\.caption \|\| ""\)/);
+  assert.match(serviceSource, /captionCopied: Boolean\(captionCopied\)/);
 });
 
 test("Facebook group URLs are canonicalised for dedupe and history", () => {
@@ -72,10 +73,15 @@ test("CRM exposes discovery, live checks and two-stage group pipelines", () => {
   assert.match(serviceSource, /RENT2BUY_QUERY_BANK/);
   assert.match(serviceSource, /van classifieds UK/);
   assert.match(serviceSource, /Southampton courier drivers/);
+  assert.match(pageSource, /navigator\.clipboard\?\.writeText/);
+  assert.match(pageSource, /captionCopyPromise = copyGroupCaptionForFallback\(caption\)/);
+  const copyIndex = pageSource.indexOf("captionCopyPromise = copyGroupCaptionForFallback(caption)");
+  const healthIndex = pageSource.indexOf("await requireGroupsHelper()", copyIndex);
+  assert.ok(copyIndex >= 0 && healthIndex > copyIndex, "caption clipboard write must start before async helper health check");
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.9");
+  assert.equal(manifest.version, "1.2.10");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -123,6 +129,9 @@ test("Chrome helper can discover and inspect groups without auto-posting", () =>
   assert.match(groupsHelperSource, /GET_PENDING_GROUP_POST_JOB/);
   assert.match(groupsHelperSource, /contentUnavailable/);
   assert.doesNotMatch(groupsHelperSource, /\.click\(\).*Facebook.*Post/i);
+  assert.doesNotMatch(groupsHelperSource, /FORMAT_PROBE_TEXT/);
+  assert.match(groupsHelperSource, /captionCopied/);
+  assert.match(groupsHelperSource, /press Ctrl\+V/);
 });
 
 test("Group post helper leaves final Facebook Post action to the user", () => {
@@ -187,6 +196,14 @@ test("group helper actually claims an explicit post before reading inspection st
     getBoundingClientRect: () => ({ width: 600, height: 160 }),
     closest: () => null,
     focus() { activeElement = editor; },
+    dispatchEvent(event) {
+      if (event?.type === "paste" && event.clipboardData) {
+        const text = event.clipboardData.getData("text/plain");
+        editor.innerText = text;
+        editor.textContent = text;
+      }
+      return true;
+    },
   };
   const heading = {
     innerText: "Create post",
@@ -260,6 +277,21 @@ test("group helper actually claims an explicit post before reading inspection st
     document,
     getComputedStyle: () => ({ display: "block", visibility: "visible" }),
     location: { href: "https://www.facebook.com/groups/test/", origin: "https://www.facebook.com", pathname: "/groups/test/" },
+    DataTransfer: class DataTransfer {
+      constructor() {
+        this.data = {};
+        this.files = [];
+        this.items = { add: (file) => this.files.push(file) };
+      }
+      setData(type, value) { this.data[type] = String(value); }
+      getData(type) { return this.data[type] || ""; }
+    },
+    ClipboardEvent: class ClipboardEvent {
+      constructor(type, init = {}) { this.type = type; Object.assign(this, init); }
+    },
+    Event: class Event {
+      constructor(type, init = {}) { this.type = type; Object.assign(this, init); }
+    },
     setTimeout(callback) { callback(); return 1; },
     clearTimeout() {},
   };
@@ -388,16 +420,11 @@ function loadGroupHelperTestHooks({
   controls = [],
   labels = [],
   runtimeSendMessage,
-  flattenNewlines = false,
-  flattenHtml = false,
 } = {}) {
   const hooks = {};
   const appended = [];
   const calls = [];
   let activeElement = null;
-  let insertTextCalls = 0;
-  let insertedNewlineTextCalls = 0;
-  let insertHtmlCalls = 0;
   let clock = 0;
 
   class FastDate extends Date {
@@ -408,8 +435,13 @@ function loadGroupHelperTestHooks({
   }
 
   class FakeEvent {
-    constructor(type) { this.type = type; }
+    constructor(type, init = {}) {
+      this.type = type;
+      Object.assign(this, init);
+    }
   }
+
+  class FakeClipboardEvent extends FakeEvent {}
 
   class FakeFile {
     constructor(parts, name, options = {}) {
@@ -422,9 +454,12 @@ function loadGroupHelperTestHooks({
   class FakeDataTransfer {
     constructor() {
       const files = [];
+      this.data = {};
       this.items = { add(file) { files.push(file); } };
       Object.defineProperty(this, "files", { get: () => files });
     }
+    setData(type, value) { this.data[type] = String(value); }
+    getData(type) { return this.data[type] || ""; }
   }
 
   const document = {
@@ -443,37 +478,10 @@ function loadGroupHelperTestHooks({
     createElement: () => ({ style: {}, innerHTML: "", remove() {} }),
     addEventListener() {},
     removeEventListener() {},
-    execCommand(command, _showUi, value) {
-      if (command === "selectAll" && activeElement) {
+    execCommand(command) {
+      if ((command === "selectAll" || command === "delete") && activeElement) {
         activeElement.innerText = "";
         activeElement.textContent = "";
-      }
-      if (command === "delete" && activeElement) {
-        activeElement.innerText = "";
-        activeElement.textContent = "";
-      }
-      if (command === "insertText" && activeElement) {
-        insertTextCalls += 1;
-        const piece = String(value || "");
-        if (piece === "\n") insertedNewlineTextCalls += 1;
-        const inserted = flattenNewlines && piece === "\n" ? "" : piece;
-        activeElement.innerText = String(activeElement.innerText || "") + inserted;
-        activeElement.textContent = String(activeElement.textContent || "") + inserted;
-      }
-      if (command === "insertHTML" && activeElement) {
-        insertHtmlCalls += 1;
-        const html = String(value || "");
-        const decoded = html
-          .replace(/<div><br><\/div>/gi, flattenHtml ? "" : "\n")
-          .replace(/<\/div>\s*<div>/gi, flattenHtml ? "" : "\n")
-          .replace(/^<div>|<\/div>$/gi, "")
-          .replace(/<br\s*\/?\s*>/gi, flattenHtml ? "" : "\n")
-          .replace(/&quot;/g, '"')
-          .replace(/&gt;/g, ">")
-          .replace(/&lt;/g, "<")
-          .replace(/&amp;/g, "&");
-        activeElement.innerText = decoded;
-        activeElement.textContent = decoded;
       }
       return true;
     },
@@ -501,6 +509,7 @@ function loadGroupHelperTestHooks({
     },
     Date: FastDate,
     Event: FakeEvent,
+    ClipboardEvent: FakeClipboardEvent,
     InputEvent: FakeEvent,
     File: FakeFile,
     DataTransfer: FakeDataTransfer,
@@ -518,9 +527,6 @@ function loadGroupHelperTestHooks({
     appended,
     calls,
     setActive(element) { activeElement = element; },
-    get insertTextCalls() { return insertTextCalls; },
-    get insertedNewlineTextCalls() { return insertedNewlineTextCalls; },
-    get insertHtmlCalls() { return insertHtmlCalls; },
   };
 }
 
@@ -572,7 +578,6 @@ test("helper inserts nothing when no verified Create Post dialog exists", async 
   });
 
   assert.equal(comment.innerText, "");
-  assert.equal(harness.insertTextCalls, 0);
   assert.equal(harness.calls.includes("FETCH_MARKETPLACE_IMAGE"), false);
   assert.equal(harness.calls.includes("GROUP_POST_FILL_COMPLETED"), true);
   assert.ok(
@@ -582,74 +587,59 @@ test("helper inserts nothing when no verified Create Post dialog exists", async 
   );
 });
 
-test("verified top-level Create Post dialog is accepted and caption target stays inside it", async () => {
+test("verified top-level Create Post dialog is accepted without injecting caption text", () => {
   const fixture = createVerifiedComposerFixture();
   const pageComment = makeGroupHelperNode({
     attrs: { role: "textbox", contenteditable: "true", "aria-label": "Write a comment..." },
   });
   const harness = loadGroupHelperTestHooks({ dialogs: [fixture.dialog] });
-  fixture.editor.focus = () => harness.setActive(fixture.editor);
 
   assert.equal(harness.hooks.isVerifiedCreatePostDialog(fixture.dialog), true);
   assert.equal(harness.hooks.verifiedComposerDialog(), fixture.dialog);
   const candidates = harness.hooks.composerEditorCandidates(fixture.dialog);
   assert.equal(candidates[0], fixture.editor);
   assert.equal(candidates.includes(pageComment), false);
-
-  const result = await harness.hooks.reactSetText(candidates[0], "Verified composer caption");
-  assert.equal(result.ok, true);
-  assert.equal(fixture.editor.innerText, "Verified composer caption");
+  assert.equal(fixture.editor.innerText, "");
   assert.equal(pageComment.innerText, "");
 });
 
-test("Facebook group captions preserve CRM paragraph and line breaks through Lexical text input", async () => {
-  const fixture = createVerifiedComposerFixture();
-  const harness = loadGroupHelperTestHooks({ dialogs: [fixture.dialog] });
-  fixture.editor.focus = () => harness.setActive(fixture.editor);
-
-  const caption = "NO CREDIT CHECK\n\n£376 MTH\n\nRENT IT! - DRIVE IT! - OWN IT!\n\nApply in 60 seconds\n\nhttps://www.rent2buyvans.co.uk/";
-  const result = await harness.hooks.reactSetText(fixture.editor, caption);
-
-  assert.equal(result.ok, true);
-  assert.equal(result.method, "lexical-newline-text");
-  assert.equal(harness.hooks.normalizeComposerText(fixture.editor.innerText), harness.hooks.normalizeComposerText(caption));
-  assert.equal(harness.insertedNewlineTextCalls, 8);
-  assert.equal(harness.insertHtmlCalls, 0);
-  assert.doesNotMatch(groupsHelperSource, /execCommand\("insertLineBreak"/);
-});
-
-test("helper detects flattened Facebook formatting, clears it and skips the photo", async () => {
+test("group preparation attaches image, leaves caption box untouched, and instructs manual Ctrl+V", async () => {
   const fixture = createVerifiedComposerFixture();
   const harness = loadGroupHelperTestHooks({
     dialogs: [fixture.dialog],
-    flattenNewlines: true,
-    flattenHtml: true,
     runtimeSendMessage(message) {
       if (message.type === "FETCH_MARKETPLACE_IMAGE") {
-        throw new Error("image fetch must not happen after formatting failure");
+        return { ok: true, dataUrl: "data:image/jpeg;base64,QQ==" };
       }
       return { ok: true };
     },
   });
   fixture.editor.focus = () => harness.setActive(fixture.editor);
 
+  const caption = "NO CREDIT CHECK\n\n£376 MTH\n\nRENT IT! - DRIVE IT! - OWN IT!\n\nhttps://www.rent2buyvans.co.uk/van-pages/AB12CDE";
   await harness.hooks.prepareGroupPost({
-    id: "format-failure-test",
+    id: "manual-paste-test",
     groupName: "Test group",
     registration: "AB12CDE",
-    caption: "NO CREDIT CHECK\n\n£376 MTH\n\nRENT IT! - DRIVE IT! - OWN IT!",
+    caption,
+    captionCopied: true,
     imageUrl: "https://example.test/van.jpg",
   });
 
   assert.equal(fixture.editor.innerText, "");
-  assert.equal(harness.calls.includes("FETCH_MARKETPLACE_IMAGE"), false);
-  const completedIndex = harness.calls.indexOf("GROUP_POST_FILL_COMPLETED");
-  assert.ok(completedIndex >= 0);
+  assert.equal(fixture.editor.textContent, "");
+  assert.equal(fixture.fileInput.files.length, 1);
+  assert.equal(harness.calls.includes("FETCH_MARKETPLACE_IMAGE"), true);
+  assert.equal(harness.calls.includes("GROUP_POST_FILL_COMPLETED"), true);
   assert.ok(
     harness.appended.some((panel) =>
-      String(panel.innerHTML).includes("Facebook changed the caption formatting. The text was cleared and no photo was attached.")
+      String(panel.innerHTML).includes("Caption copied")
+      && String(panel.innerHTML).includes("press Ctrl+V")
     ),
   );
+  assert.doesNotMatch(groupsHelperSource, /execCommand\("(?:insertText|insertHTML|insertLineBreak)"/);
+  assert.doesNotMatch(groupsHelperSource, /ClipboardEvent/);
+  assert.doesNotMatch(groupsHelperSource, /reactSetText/);
 });
 
 test("group image upload stays inside the same verified Create Post dialog", async () => {
