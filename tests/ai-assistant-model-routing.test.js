@@ -65,21 +65,41 @@ test("normal evidence-backed business questions use GPT-5.6 Terra", () => {
   }
 });
 
-test("ambiguous and multi-step turns escalate to Sol with stronger reasoning", () => {
+test("ordinary ambiguity stays on Terra while genuinely hard turns escalate to Sol", () => {
   const ambiguous = route("What about that?", {
     intent: { primary_intent: "incomplete_business_question", retrieval_required: false, clarification_required: true, confidence: 60 },
     human: { confidence: 60, low_confidence: true },
     orchestration: { retrieval_required: false, recovery_required: true },
     sourceCount: 0,
   });
-  assert.equal(ambiguous.model, "gpt-5.6-sol");
+  assert.equal(ambiguous.model, "gpt-5.6-terra");
   assert.equal(ambiguous.reasoning_effort, "medium");
+  assert.match(ambiguous.reason, /stays on the main model/i);
 
   const multiStep = route("How does it work, what documents do I need, and what happens next?", {
     intent: { primary_intent: "multi_part_question", secondary_intents: ["documents", "application"] },
   });
   assert.equal(multiStep.model, "gpt-5.6-sol");
   assert.equal(multiStep.reasoning_effort, "medium");
+
+  const hardRecovery = route("I was declined, I am self-employed and the lender says something different. What should I do?", {
+    intent: { primary_intent: "knowledge_question", retrieval_required: true, clarification_required: true, confidence: 55 },
+    human: { confidence: 55, low_confidence: true },
+    orchestration: { retrieval_required: true, recovery_required: true },
+    sourceCount: 2,
+  });
+  assert.equal(hardRecovery.model, "gpt-5.6-sol");
+  assert.equal(hardRecovery.reasoning_effort, "medium");
+});
+
+test("normal compound sales statements do not escalate merely because they contain and", () => {
+  const selected = route("I am self employed and have about £400 a month to spend", {
+    intent: { primary_intent: "monthly_budget", retrieval_required: false },
+    orchestration: { retrieval_required: false },
+    sourceCount: 0,
+  });
+  assert.equal(selected.model, "gpt-5.6-terra");
+  assert.equal(selected.reasoning_effort, "low");
 });
 
 test("high-confidence uncategorised turns default to Terra", () => {
@@ -112,10 +132,18 @@ test("Wix model tiers can be overridden independently", () => {
     sourceCount: 0,
     environment,
   });
+  const hardRecovery = route("I was declined and the lender says something different. What should I do?", {
+    intent: { retrieval_required: true, clarification_required: true, confidence: 55 },
+    human: { confidence: 55, low_confidence: true },
+    orchestration: { retrieval_required: true, recovery_required: true },
+    sourceCount: 2,
+    environment,
+  });
 
   assert.equal(simple.model, "fast-model");
   assert.equal(factual.model, "main-model");
-  assert.equal(ambiguous.model, "escalation-model");
+  assert.equal(ambiguous.model, "main-model");
+  assert.equal(hardRecovery.model, "escalation-model");
 });
 
 test("GPT-5.6 Responses API parameters omit temperature and include reasoning", () => {
