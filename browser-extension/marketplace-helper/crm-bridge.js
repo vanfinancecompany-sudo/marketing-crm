@@ -4,7 +4,8 @@
     hostname === "marketing-crm-six.vercel.app" ||
     hostname.startsWith("marketing-crm-") ||
     hostname.startsWith("marketing-crm-git-") ||
-    hostname.startsWith("marketing-crm-six-");
+    hostname.startsWith("marketing-crm-six-") ||
+    hostname.startsWith("crm-b5po-");
   if (!isMarketingCrmHost) return;
 
   const JOB_TYPE = "VFC_MARKETPLACE_JOB";
@@ -24,6 +25,8 @@
   const GROUP_POST_STATUS_START = "VFC_GROUP_POST_STATUS_START";
   const GROUP_POST_STATUS_ACK = "VFC_GROUP_POST_STATUS_ACK";
   const GROUP_POST_STATUS_COMPLETE = "VFC_GROUP_POST_STATUS_COMPLETE";
+  const FACEBOOK_HELPER_PING = "VFC_FACEBOOK_HELPER_PING";
+  const FACEBOOK_HELPER_PONG = "VFC_FACEBOOK_HELPER_PONG";
 
   function validJob(job) {
     return Boolean(
@@ -40,6 +43,35 @@
   window.addEventListener("message", async (event) => {
     if (event.source !== window || event.origin !== window.location.origin) return;
     const message = event.data || {};
+
+    if (message.source === "vfc-marketing-crm" && message.type === FACEBOOK_HELPER_PING) {
+      const id = message.id || "";
+      try {
+        const result = await chrome.runtime.sendMessage({ type: "GET_FACEBOOK_HELPER_STATUS" });
+        window.postMessage({
+          source: "vfc-facebook-helper",
+          type: FACEBOOK_HELPER_PONG,
+          id,
+          ok: Boolean(result?.ok),
+          version: result?.version || chrome.runtime.getManifest()?.version || "",
+          capabilities: result?.capabilities || [],
+          hostname,
+          error: result?.error || "",
+        }, window.location.origin);
+      } catch (error) {
+        window.postMessage({
+          source: "vfc-facebook-helper",
+          type: FACEBOOK_HELPER_PONG,
+          id,
+          ok: false,
+          version: chrome.runtime.getManifest()?.version || "",
+          capabilities: [],
+          hostname,
+          error: String(error?.message || error),
+        }, window.location.origin);
+      }
+      return;
+    }
 
     if (message.source === "vfc-marketing-crm" && message.type === JOB_TYPE) {
       const job = message.job;
