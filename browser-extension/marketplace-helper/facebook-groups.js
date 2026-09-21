@@ -356,7 +356,12 @@
     const canPost = Boolean(findComposerOpener() || verifiedComposerDialog());
     const joinButton = buttonWithText(/^join(?: group)?$/i);
     const joinedButton = buttonWithText(/^joined$/i);
-    const joined = canPost || Boolean(joinedButton) ? true : joinButton ? false : null;
+    const pendingMembershipButton = buttonWithText(/^(?:cancel request|requested|pending)$/i);
+    const membershipPending = !canPost && !joinedButton && Boolean(
+      pendingMembershipButton ||
+      /membership request (?:is )?pending|your request to join is pending|request to join (?:is )?pending|membership pending|request sent/i.test(pageText)
+    );
+    const joined = canPost || Boolean(joinedButton) ? true : membershipPending || joinButton ? false : null;
     const approvalRequired = /post approval|requires? approval|pending approval|admin approval/i.test(pageText);
     const linksAllowed = /no external links|links? (?:are )?not allowed|no links/i.test(pageText)
       ? false
@@ -383,6 +388,7 @@
         unavailable,
         canPost: unavailable ? false : canPost,
         joined,
+        membershipPending,
         approvalRequired,
         linksAllowed,
         privacy: /\bpublic group\b/i.test(pageText) ? "Public" : /\bprivate group\b/i.test(pageText) ? "Private" : "",
