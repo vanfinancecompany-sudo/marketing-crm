@@ -141,7 +141,8 @@ test("controlled endpoint and workspace use the explicit existing-vehicle update
   assert.match(api, /\["publish_new_vehicle", "update_existing_vehicle"\]\.includes\(action\)/);
   assert.match(api, /state\.plan\.writeIntent !== requestedIntent/);
   assert.match(ui, /action: updateExisting \? "update_existing_vehicle" : "publish_new_vehicle"/);
-  assert.match(ui, /Only the verified image fields on existing rows will be changed/);
+  assert.match(ui, /Existing Wix item IDs will be reused/);
+  assert.doesNotMatch(ui, /try \{ await loadPreview\(root\); \} catch \{\}/);
 });
 
 test("existing Finance listing creates the missing detail page during photo-ready repair", () => {
@@ -175,18 +176,109 @@ test("Rent2Buy photo-ready repair creates only a missing VANPAGES detail row", (
   assert.ok(plan.targets.filter((target) => target.kind === "listing").every((target) => target.operation === "update"));
 });
 
-test("Cars photo-ready repair updates the existing listing and creates a missing CARPAGES detail row", async () => {
+test("CK70VAF Rent2Buy reconciliation can create missing listings while updating the existing detail row", () => {
+  const rentDecision = {
+    ...decision(),
+    registration: "CK70VAF",
+    financeEnabled: false,
+    rent2buyEnabled: true,
+    rent2buyCategories: ["medium_mwb"],
+    financeCategories: [],
+  };
+  const rentVehicle = { ...vehicle(), registration: "CK70VAF", mileage: 41000, vatStatus: "plus_vat" };
+  const rentImages = {
+    ...imageSets(),
+    vanFinance: {},
+    rent2buy: { ready: true, mainUrl: listingImageUrl, listingImageUrl, galleryUrls, mainSource: "manual_template" },
+  };
+  const site = { siteId: "85f11c52-ee54-495d-aaec-a351831709b5", siteLabel: "Van Finance Rent2Buy", siteRole: "authoritative" };
+  const rentResults = [
+    { ...site, collectionId: "ALLRENT2BUYVANS", collection: { id: "ALLRENT2BUYVANS", kind: "listing" }, items: [] },
+    { ...site, collectionId: "MEDIUMVANS", collection: { id: "MEDIUMVANS", kind: "listing" }, items: [] },
+    { ...site, collectionId: "VANPAGES", collection: { id: "VANPAGES", kind: "detail" }, items: [{ id: "ck70-r2b-page", data: { title: "CK70VAF", mediaGallery: ["old.jpg"], _publishStatus: "PUBLISHED" } }] },
+  ];
+  const plan = buildControlledVehiclePublishPlan({
+    vehicle: rentVehicle,
+    decision: rentDecision,
+    imageSets: rentImages,
+    vfcWixResults: [],
+    rent2buyWixResults: rentResults,
+    rent2buySites: [site],
+    productMode: "rent2buy",
+  });
+  assert.equal(plan.canPublish, true);
+  assert.equal(plan.writeIntent, "update_existing_vehicle");
+  assert.ok(!plan.blockers.some((blocker) => blocker.code === "mixed_write_intent"));
+  assert.deepEqual(
+    ["ALLRENT2BUYVANS", "MEDIUMVANS", "VANPAGES"].map((id) => {
+      const target = plan.targets.find((item) => item.collectionId === id);
+      return [id, target.operation, target.itemId || null];
+    }),
+    [
+      ["ALLRENT2BUYVANS", "create", null],
+      ["MEDIUMVANS", "create", null],
+      ["VANPAGES", "update", "ck70-r2b-page"],
+    ],
+  );
+});
+
+test("Rent2Buy reconciliation restores selected Draft rows and drafts stale old categories", () => {
+  const rentDecision = { ...decision(), financeEnabled: false, rent2buyEnabled: true, rent2buyCategories: ["medium_mwb"], financeCategories: [] };
+  const rentVehicle = { ...vehicle(), mileage: 41000, vatStatus: "plus_vat" };
+  const rentImages = { ...imageSets(), vanFinance: {}, rent2buy: { ready: true, mainUrl: listingImageUrl, listingImageUrl, galleryUrls, mainSource: "manual_template" } };
+  const site = { siteId: "85f11c52-ee54-495d-aaec-a351831709b5", siteLabel: "Van Finance Rent2Buy", siteRole: "authoritative" };
+  const rentResults = [
+    { ...site, collectionId: "ALLRENT2BUYVANS", collection: { id: "ALLRENT2BUYVANS", kind: "listing" }, items: [item("r2b-all", { picture: "old.jpg", _publishStatus: "DRAFT" })] },
+    { ...site, collectionId: "MEDIUMVANS", collection: { id: "MEDIUMVANS", kind: "listing" }, items: [item("r2b-medium", { picture: "old.jpg", _publishStatus: "PUBLISHED" })] },
+    { ...site, collectionId: "SmallVans", collection: { id: "SmallVans", kind: "listing" }, items: [item("r2b-stale-small", { picture: "old.jpg", _publishStatus: "PUBLISHED" })] },
+    { ...site, collectionId: "VANPAGES", collection: { id: "VANPAGES", kind: "detail" }, items: [item("r2b-page", { mediaGallery: ["old.jpg"], _publishStatus: "PUBLISHED" })] },
+  ];
+  const plan = buildControlledVehiclePublishPlan({
+    vehicle: rentVehicle,
+    decision: rentDecision,
+    imageSets: rentImages,
+    vfcWixResults: [],
+    rent2buyWixResults: rentResults,
+    rent2buySites: [site],
+    productMode: "rent2buy",
+  });
+  assert.equal(plan.canPublish, true);
+  const master = plan.targets.find((target) => target.collectionId === "ALLRENT2BUYVANS");
+  const detail = plan.targets.find((target) => target.collectionId === "VANPAGES");
+  const stale = plan.targets.find((target) => target.collectionId === "SmallVans");
+  assert.equal(master.operation, "update");
+  assert.equal(master.itemId, "r2b-all");
+  assert.equal(master.publishStatusOperation, "publish");
+  assert.equal(master.data.mth.startsWith("£"), true);
+  assert.equal(detail.operation, "update");
+  assert.deepEqual(detail.data.mediaGallery, galleryUrls);
+  assert.equal(stale.operation, "draft");
+  assert.equal(stale.itemId, "r2b-stale-small");
+  assert.equal(stale.desiredPublishStatus, "DRAFT");
+});
+
+test("Cars reconciliation reuses the existing listing and creates a missing CARPAGES detail row", async () => {
   const { buildDealerKitCarWixPlan } = await import("../lib/dealerKitCarWixPlan.js");
   const carVehicle = { ...vehicle(), status: "available", mileage: 41000, year: 2022, make: "Ford", model: "Focus", description: "Ford Focus", specifications: { technical: [], standard: [], options: [] } };
   const carDecision = { registration, persisted: true, reviewStatus: "reviewed", reviewedSourceUpdatedAt: carVehicle.sourceUpdatedAt };
   const carImages = { ready: true, mainUrl: listingImageUrl, listingImageUrl, galleryUrls, dealerKitImageIds: ["dk-1", "dk-2", "dk-3"] };
-  const plan = buildDealerKitCarWixPlan({ vehicle: carVehicle, decision: carDecision, imageSet: carImages, carListingRows: [item("car-list", { picture: "old.jpg", price: "£13,995" })], carDetailRows: [] });
+  const plan = buildDealerKitCarWixPlan({
+    vehicle: carVehicle,
+    decision: carDecision,
+    imageSet: carImages,
+    carListingRows: [item("car-list", { picture: "old.jpg", price: "£13,995", _publishStatus: "DRAFT" })],
+    carDetailRows: [],
+  });
   assert.equal(plan.writeIntent, "update_existing_vehicle");
   assert.equal(plan.canPublish, true);
   const listing = plan.targets.find((target) => target.collectionId === "CARFINANCE");
   const detail = plan.targets.find((target) => target.collectionId === "CARPAGES");
   assert.equal(listing.operation, "update");
-  assert.deepEqual(listing.data, { picture: listingImageUrl });
+  assert.equal(listing.itemId, "car-list");
+  assert.equal(listing.data.picture, listingImageUrl);
+  assert.equal(listing.data.price, "£13,995");
+  assert.equal(listing.publishStatusOperation, "publish");
+  assert.equal(listing.desiredPublishStatus, "PUBLISHED");
   assert.equal(detail.operation, "create");
   assert.deepEqual(detail.data.mainImages, galleryUrls);
 });

@@ -137,7 +137,7 @@ function renderPayload(root, payload) {
   result.hidden = false;
 
   const updateExisting = plan.writeIntent === "update_existing_vehicle";
-  const updateActionLabel = plan.mode === "finance" ? "Reconcile advert" : "Update images";
+  const updateActionLabel = "Reconcile advert";
   const heading = root.querySelector(".dealerkit-wix-preview__copy strong");
   if (heading) heading.textContent = updateExisting ? `Reconcile ${label} advert` : `Publish to ${label}`;
   const applyButton = root.querySelector("[data-controlled-publish-apply]");
@@ -264,11 +264,8 @@ function createPanel(registration, product = "finance") {
     const payload = root._controlledPublishPayload;
     if (!confirmationInputMatches(root) || !payload?.plan?.canPublish || !payload.plan.confirmation) return;
     const updateExisting = payload.plan.writeIntent === "update_existing_vehicle";
-    const financeReconcile = updateExisting && payload.plan.mode === "finance";
     const approved = window.confirm(updateExisting
-      ? financeReconcile
-        ? `RECONCILE ${registration} ON LIVE ${labelText.toUpperCase()} WIX?\n\nExisting item IDs will be reused, selected records restored to Published, and stale category rows moved to Draft.`
-        : `UPDATE ${registration} IMAGES ON LIVE ${labelText.toUpperCase()} WIX?\n\nOnly the verified image fields on existing rows will be changed.`
+      ? `RECONCILE ${registration} ON LIVE ${labelText.toUpperCase()} WIX?\n\nExisting Wix item IDs will be reused where present. Controlled fields will be updated, missing selected rows may be created, Draft selected rows restored, and stale category rows moved to Draft where applicable.`
       : `PUBLISH ${registration} TO LIVE ${labelText.toUpperCase()} WIX?\n\nThis is the final live-write confirmation.`);
     if (!approved) return;
     publish.disabled = true;
@@ -293,10 +290,15 @@ function createPanel(registration, product = "finance") {
     } catch (error) {
       setStatus(root, "PUBLISH BLOCKED", "is-warning");
       result.replaceChildren(element("div", "dealerkit-wix-preview__error", error?.message || "Publishing failed. Check the rollback result before trying again."));
-      try { await loadPreview(root); } catch {}
+      const checkButton = root.querySelector("[data-controlled-publish-check]");
+      if (checkButton) {
+        checkButton.hidden = false;
+        checkButton.disabled = false;
+        checkButton.textContent = "Check again";
+      }
     } finally {
       publish.textContent = payload?.plan?.writeIntent === "update_existing_vehicle"
-        ? (payload.plan.mode === "finance" ? "Reconcile advert" : "Update images")
+        ? "Reconcile advert"
         : `Publish to ${labelText}`;
       refreshActionState(root);
     }

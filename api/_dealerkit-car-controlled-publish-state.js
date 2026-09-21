@@ -6,6 +6,7 @@ import { normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
 import { decodeDealerKitProductImageState } from "../lib/dealerKitProductImageState.js";
 import { DEALERKIT_IMPORTED_MEDIA_TABLE, WIX_MEDIA_GET_FILE_URL, importedMediaRowToClient } from "../lib/dealerKitWixVehicleMedia.js";
 import { buildDealerKitCarWixPlan, buildCarPublishConfirmation } from "../lib/dealerKitCarWixPlan.js";
+import { registrationTitleVariants } from "../lib/wixRegistrationVariants.js";
 
 const clean = (value, limit = 10000) => String(value ?? "").trim().slice(0, limit);
 
@@ -30,15 +31,25 @@ async function loadDecision(supabase, registration) {
 }
 
 async function queryRegistration(configuration, collectionId, registration) {
-  const payload = await controlledWixRequest(configuration, "/wix-data/v2/items/query", {
-    method: "POST",
-    body: {
-      dataCollectionId: collectionId,
-      query: { filter: { title: { $eq: registration } }, paging: { limit: 3, offset: 0 } },
-      consistentRead: true,
-    },
-  });
-  return Array.isArray(payload.dataItems) ? payload.dataItems : [];
+  const candidates = collectionId === "CARPAGES" ? registrationTitleVariants(registration) : [registration];
+  const matched = new Map();
+  for (const candidate of candidates) {
+    const payload = await controlledWixRequest(configuration, "/wix-data/v2/items/query", {
+      method: "POST",
+      body: {
+        dataCollectionId: collectionId,
+        query: { filter: { title: { $eq: candidate } }, paging: { limit: 3, offset: 0 } },
+        consistentRead: true,
+      },
+    });
+    for (const item of Array.isArray(payload.dataItems) ? payload.dataItems : []) {
+      if (normalizeFinanceRegistration(item?.data?.title || "") !== registration) continue;
+      const id = clean(item?.id, 300);
+      if (id) matched.set(id, item);
+    }
+    if (collectionId !== "CARPAGES" && matched.size) break;
+  }
+  return Array.from(matched.values());
 }
 
 async function loadImportedReadiness(supabase, configuration, vehicle) {
