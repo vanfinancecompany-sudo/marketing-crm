@@ -546,6 +546,12 @@ async function saveProductState(state) {
     await loadManualMedia(state, { quiet: true });
     setMessage(state, `Saved for ${PRODUCTS[state.activeProduct].label}. Nothing has been published yet.`, "good");
     renderActiveProduct(state);
+    window.dispatchEvent(new CustomEvent("dealerkit-product-gallery-saved", {
+      detail: {
+        registration: state.registration,
+        product: state.workspace?.dataset?.product || state.activeProduct,
+      },
+    }));
   } catch (error) {
     setMessage(state, error?.message || "Could not save product gallery choices.", "warning");
   } finally {

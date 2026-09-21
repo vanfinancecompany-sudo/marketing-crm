@@ -106,9 +106,16 @@ function renderPayload(root, payload) {
   result.appendChild(summary);
 
   if (unpreparedCount > 0) {
-    result.appendChild(element("div", "dealerkit-wix-preview__messages dealerkit-wix-preview__messages--warnings", `${unpreparedCount} selected DealerKit image(s) need preparing in Wix Media before this product can publish.`));
-  } else if (processingCount > 0) {
-    result.appendChild(element("div", "dealerkit-wix-preview__messages dealerkit-wix-preview__messages--warnings", `${processingCount} selected DealerKit image(s) are still processing in Wix Media. You do not need to press Prepare again; use Check image status.`));
+    const publishNote = plan.canPublish
+      ? ` The advert can publish now with ${media.dealerKitReady || 0} READY DealerKit photo(s).`
+      : "";
+    result.appendChild(element("div", "dealerkit-wix-preview__messages dealerkit-wix-preview__messages--warnings", `${unpreparedCount} additional selected DealerKit photo(s) are not prepared yet.${publishNote}`));
+  }
+  if (processingCount > 0) {
+    const publishNote = plan.canPublish
+      ? ` The advert can publish now with ${media.dealerKitReady || 0} READY DealerKit photo(s).`
+      : "";
+    result.appendChild(element("div", "dealerkit-wix-preview__messages dealerkit-wix-preview__messages--warnings", `${processingCount} additional selected DealerKit photo(s) are still processing in Wix Media.${publishNote}`));
   }
 
   if (plan.blockers?.length) {
@@ -338,6 +345,21 @@ if (typeof document !== "undefined") {
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", scheduleScan, { once: true });
   else scheduleScan();
   window.addEventListener("popstate", scheduleScan);
+  window.addEventListener("dealerkit-product-gallery-saved", (event) => {
+    const registration = normaliseRegistration(event?.detail?.registration);
+    const product = clean(event?.detail?.product);
+    const root = document.querySelector(`[${ROOT_ATTRIBUTE}]`);
+    if (!root || normaliseRegistration(root.dataset.registration) !== registration) return;
+    if (product && clean(root.dataset.product) !== product) return;
+    loadPreview(root).catch((error) => {
+      setStatus(root, "CHECK FAILED", "is-warning");
+      const result = root.querySelector("[data-controlled-publish-result]");
+      if (result) {
+        result.hidden = false;
+        result.replaceChildren(element("div", "dealerkit-wix-preview__error", error?.message || "Could not refresh readiness after saving the gallery."));
+      }
+    });
+  });
   const observer = new MutationObserver(scheduleScan);
   observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
 }

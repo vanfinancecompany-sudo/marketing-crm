@@ -71,7 +71,7 @@ async function loadImportedReadiness(supabase, configuration, vehicle) {
   return items;
 }
 
-function buildCarImageSet(vehicle = {}, decision = {}, importedDealerKitMedia = []) {
+export function buildCarImageSet(vehicle = {}, decision = {}, importedDealerKitMedia = []) {
   const sourceIds = (Array.isArray(vehicle.images) ? vehicle.images : []).map((image) => clean(image?.id, 300)).filter(Boolean);
   const decoded = decodeDealerKitProductImageState(decision, sourceIds);
   const selectedIds = decoded.finance.includedOrderIds;
@@ -90,7 +90,10 @@ function buildCarImageSet(vehicle = {}, decision = {}, importedDealerKitMedia = 
       mainSource: mainUrl ? "dealerkit_primary" : null,
       listingImageUrl: mainUrl,
       galleryUrls,
-      ready: Boolean(selectedIds.length && mainUrl && readyIds.length === selectedIds.length),
+      // Cars follows the same rule as the van lanes: the chosen primary/card
+      // image is the hard requirement. READY secondary photos are included,
+      // while processing/unprepared secondary photos are advisory only.
+      ready: Boolean(selectedIds.length && mainUrl && galleryUrls.length),
     },
     media: {
       dealerKitImported: selectedIds.filter((id) => importedById.has(id)).length,
