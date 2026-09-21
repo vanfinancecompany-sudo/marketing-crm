@@ -63,8 +63,9 @@ test("CRM exposes discovery, live checks and two-stage group pipelines", () => {
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.3");
+  assert.equal(manifest.version, "1.2.4");
   assert.equal(manifest.name, "VFC Facebook Helper");
+  assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
     manifest.content_scripts.some((entry) =>
       entry.matches.includes("https://www.facebook.com/groups/*")
@@ -84,16 +85,27 @@ test("Chrome helper can discover and inspect groups without auto-posting", () =>
   assert.match(backgroundSource, /STORE_GROUP_POST_STATUS_JOB/);
   assert.match(backgroundSource, /GROUP_POST_STATUS_PAGE_RESULT/);
   assert.match(backgroundSource, /GROUP_POST_SUBMITTED/);
+  assert.match(backgroundSource, /GROUP_APPROVAL_ALARM/);
+  assert.match(backgroundSource, /startAutomaticApprovalCheck/);
+  assert.match(backgroundSource, /groups-auto-approval-monitor/);
+  assert.match(backgroundSource, /GROUP_POST_STATUS_EVENT/);
   assert.match(bridgeSource, /VFC_GROUP_DISCOVERY_START/);
   assert.match(bridgeSource, /VFC_GROUP_INSPECTION_START/);
   assert.match(bridgeSource, /VFC_FACEBOOK_HELPER_PING/);
+  assert.match(bridgeSource, /VFC_GROUP_POST_STATUS_EVENT/);
   assert.match(bridgeSource, /crm-b5po-/);
   assert.match(backgroundSource, /GET_FACEBOOK_HELPER_STATUS/);
   assert.match(pageSource, /Facebook Helper:/);
   assert.match(pageSource, /Groups ready/);
+  assert.match(pageSource, /approval monitor on/);
+  assert.match(pageSource, /Post approval:/);
+  assert.match(pageSource, /GROUP_POST_STATUS_EVENT/);
   assert.match(groupsHelperSource, /Nothing has been posted/);
   assert.match(groupsHelperSource, /watchManualGroupPost/);
   assert.match(groupsHelperSource, /checkPostedStatus/);
+  assert.match(groupsHelperSource, /findComposerOpener/);
+  assert.match(groupsHelperSource, /waitForComposerEditor/);
+  assert.match(groupsHelperSource, /GET_PENDING_GROUP_POST_JOB/);
   assert.match(groupsHelperSource, /contentUnavailable/);
   assert.doesNotMatch(groupsHelperSource, /\.click\(\).*Facebook.*Post/i);
 });
@@ -132,4 +144,21 @@ test("bad groups can leave the active pipeline without deleting history", () => 
   const archived = archiveFacebookGroup([base], base.url, "Unavailable")[0];
   assert.equal(groupPipeline(archived), "archived");
   assert.equal(archived.archived, true);
+});
+
+
+test("group post preparation takes priority over background inspection jobs", () => {
+  const postIndex = groupsHelperSource.indexOf("GET_PENDING_GROUP_POST_JOB");
+  const agentIndex = groupsHelperSource.indexOf("GET_GROUP_AGENT_STATE");
+  assert.ok(postIndex >= 0);
+  assert.ok(agentIndex >= 0);
+  assert.ok(postIndex < agentIndex);
+});
+
+test("background monitor keeps posted groups under hourly approval review", () => {
+  assert.match(backgroundSource, /periodInMinutes: GROUP_APPROVAL_CHECK_MINUTES/);
+  assert.match(backgroundSource, /GROUP_APPROVAL_CHECK_MINUTES = 60/);
+  assert.match(backgroundSource, /mode: "auto-post-status"/);
+  assert.match(backgroundSource, /chrome\.action\.setBadgeText/);
+  assert.match(backgroundSource, /GET_LAST_GROUP_STATUS_EVENT/);
 });
