@@ -52,6 +52,56 @@ function normaliseVatStatus(value) {
   return "unknown";
 }
 
+function positiveNumber(value) {
+  const number = finiteNumber(value);
+  return number !== null && number > 0 ? number : null;
+}
+
+export function resolveDealerKitRetailPrice(prices = {}) {
+  const advertised = prices?.advertised || {};
+  const cash = prices?.cash || {};
+  const vatStatus = normaliseVatStatus(advertised?.vat_status);
+  const advertisedAmount = positiveNumber(advertised?.amount);
+  const cashAmount = positiveNumber(cash?.amount);
+  const cashVatAmount = finiteNumber(cash?.vat_amount);
+
+  if (advertisedAmount !== null) {
+    return {
+      amount: advertisedAmount,
+      source: "advertised",
+      fallbackUsed: false,
+    };
+  }
+
+  if (
+    vatStatus === "plus_vat"
+    && cashAmount !== null
+    && cashVatAmount !== null
+    && cashVatAmount > 0
+    && cashAmount > cashVatAmount
+  ) {
+    return {
+      amount: Math.round((cashAmount - cashVatAmount) * 100) / 100,
+      source: "cash_minus_vat",
+      fallbackUsed: true,
+    };
+  }
+
+  if (["inc_vat", "no_vat"].includes(vatStatus) && cashAmount !== null) {
+    return {
+      amount: cashAmount,
+      source: "cash",
+      fallbackUsed: true,
+    };
+  }
+
+  return {
+    amount: null,
+    source: "unresolved",
+    fallbackUsed: false,
+  };
+}
+
 function normaliseImages(media = {}) {
   const source = [];
   if (media?.cover_image?.url) source.push(media.cover_image);
@@ -101,6 +151,7 @@ export function mapDealerKitListing(listing = {}) {
   const title = [make, model, derivative].filter(Boolean).join(" ").trim();
   const rawStatus = clean(listing?.status ?? listing?.meta?.status, 100);
   const rawVatStatus = clean(advertised?.vat_status, 100);
+  const retailPriceResolution = resolveDealerKitRetailPrice(prices);
 
   return {
     providerId: "dealerkit",
@@ -119,7 +170,10 @@ export function mapDealerKitListing(listing = {}) {
     sourceStatus: rawStatus || "unknown",
     status: normaliseStatus(rawStatus),
     availability: normaliseStatus(rawStatus),
-    retailPrice: finiteNumber(advertised?.amount),
+    retailPrice: retailPriceResolution.amount,
+    retailPriceSource: retailPriceResolution.source,
+    retailPriceFallbackUsed: retailPriceResolution.fallbackUsed,
+    advertisedRetailPrice: finiteNumber(advertised?.amount),
     sourceVatStatus: rawVatStatus || null,
     vatStatus: normaliseVatStatus(rawVatStatus),
     cashPrice: finiteNumber(cash?.amount),
