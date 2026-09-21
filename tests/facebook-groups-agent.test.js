@@ -61,11 +61,14 @@ test("Rent2Buy and Finance scoring stay separate", () => {
   assert.ok(rent2buy.every((group) => group.rent2buy));
 });
 
-test("CRM exposes discovery, live checks and two-stage group pipelines", () => {
+test("CRM exposes discovery, live checks and separate New, Awaiting and Proven pipelines", () => {
   assert.match(pageSource, /Discover New Groups/);
   assert.match(pageSource, /Check Next 12/);
   assert.match(pageSource, /New & Testing/);
+  assert.match(pageSource, /Awaiting \(\{counts\.awaiting\}\)/);
   assert.match(pageSource, /Proven \/ Hot/);
+  assert.match(pageSource, /pipelineView === "awaiting"/);
+  assert.match(pageSource, /groupPipeline\(group\) === "new"/);
   assert.match(pageSource, /Check .*Awaiting Posts/);
   assert.match(pageSource, /Prepare Test Post/);
   assert.match(pageSource, /Prepare Next Post/);
@@ -320,6 +323,28 @@ test("manual group post submission is recorded in Awaiting with its exact time a
   assert.equal(posted.postStatus, "awaiting");
   assert.equal(posted.pipeline, "testing");
   assert.equal(posted.postCount, Number(base.postCount || 0) + 1);
+});
+
+test("declined Facebook group posts move straight to Archived", () => {
+  const base = loadFacebookGroups()[0];
+  const posted = markGroupPosted([base], base.url, {
+    registration: "AB12CDE",
+    postedAt: "2026-09-21T10:15:00.000Z",
+  });
+  const declined = markGroupPostStatus(posted, {
+    url: base.url,
+    registration: "AB12CDE",
+    declined: true,
+    checkedAt: "2026-09-21T11:00:00.000Z",
+  })[0];
+
+  assert.equal(declined.postStatus, "declined");
+  assert.equal(declined.archived, true);
+  assert.equal(groupPipeline(declined), "archived");
+  assert.match(declined.archiveReason, /declined|rejected/i);
+  assert.match(groupsHelperSource, /declined by/);
+  assert.match(backgroundSource, /event\.declined/);
+  assert.match(pageSource, /Mark Declined/);
 });
 
 test("post monitoring moves pending adverts to Proven and archives unavailable groups", () => {
