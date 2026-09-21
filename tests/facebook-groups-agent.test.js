@@ -65,7 +65,7 @@ test("CRM exposes discovery, live checks and two-stage group pipelines", () => {
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.7");
+  assert.equal(manifest.version, "1.2.8");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -379,6 +379,7 @@ function loadGroupHelperTestHooks({ dialogs = [], controls = [], labels = [], ru
   const calls = [];
   let activeElement = null;
   let insertTextCalls = 0;
+  let insertLineBreakCalls = 0;
   let clock = 0;
 
   class FastDate extends Date {
@@ -425,10 +426,19 @@ function loadGroupHelperTestHooks({ dialogs = [], controls = [], labels = [], ru
     addEventListener() {},
     removeEventListener() {},
     execCommand(command, _showUi, value) {
+      if (command === "selectAll" && activeElement) {
+        activeElement.innerText = "";
+        activeElement.textContent = "";
+      }
       if (command === "insertText" && activeElement) {
         insertTextCalls += 1;
-        activeElement.innerText = value;
-        activeElement.textContent = value;
+        activeElement.innerText = String(activeElement.innerText || "") + String(value || "");
+        activeElement.textContent = String(activeElement.textContent || "") + String(value || "");
+      }
+      if (command === "insertLineBreak" && activeElement) {
+        insertLineBreakCalls += 1;
+        activeElement.innerText = String(activeElement.innerText || "") + "\n";
+        activeElement.textContent = String(activeElement.textContent || "") + "\n";
       }
       return true;
     },
@@ -474,6 +484,7 @@ function loadGroupHelperTestHooks({ dialogs = [], controls = [], labels = [], ru
     calls,
     setActive(element) { activeElement = element; },
     get insertTextCalls() { return insertTextCalls; },
+    get insertLineBreakCalls() { return insertLineBreakCalls; },
   };
 }
 
@@ -552,6 +563,20 @@ test("verified top-level Create Post dialog is accepted and caption target stays
   harness.hooks.reactSetText(candidates[0], "Verified composer caption");
   assert.equal(fixture.editor.innerText, "Verified composer caption");
   assert.equal(pageComment.innerText, "");
+});
+
+test("Facebook group captions preserve CRM paragraph and line breaks", () => {
+  const fixture = createVerifiedComposerFixture();
+  const harness = loadGroupHelperTestHooks({ dialogs: [fixture.dialog] });
+  fixture.editor.focus = () => harness.setActive(fixture.editor);
+
+  const caption = "NO CREDIT CHECK\n\n£376 MTH RENT IT · DRIVE IT · OWN IT\nApply in 60 seconds\nhttps://www.rent2buyvans.co.uk/";
+  harness.hooks.reactSetText(fixture.editor, caption);
+
+  assert.equal(fixture.editor.innerText, caption);
+  assert.equal(harness.insertLineBreakCalls, 4);
+  assert.equal(harness.insertTextCalls, 4);
+  assert.match(groupsHelperSource, /insertLineBreak/);
 });
 
 test("group image upload stays inside the same verified Create Post dialog", async () => {
