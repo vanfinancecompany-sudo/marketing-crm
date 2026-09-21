@@ -108,45 +108,21 @@ test("keeps the advertised DealerKit price when it is valid", () => {
   assert.deepEqual(resolved, { amount: 12495, source: "advertised", fallbackUsed: false });
 });
 
-test("recovers a +VAT retail price from cash total minus VAT when advertised amount is zero", () => {
+test("DealerKit TBC vehicles stay unpriced even when cash/VAT fields are present", () => {
   const mapped = mapDealerKitListing(listing({ price: 0 }));
-  assert.equal(mapped.retailPrice, 12495);
-  assert.equal(mapped.retailPriceSource, "cash_minus_vat");
-  assert.equal(mapped.retailPriceFallbackUsed, true);
+  assert.equal(mapped.retailPrice, null);
+  assert.equal(mapped.retailPriceSource, "unpriced");
+  assert.equal(mapped.retailPriceFallbackUsed, false);
   assert.equal(mapped.advertisedRetailPrice, 0);
   assert.equal(mapped.cashPrice, 14994);
   assert.equal(mapped.cashVatAmount, 2499);
 });
 
-test("does not guess a +VAT retail price when the cash VAT amount is missing or unusable", () => {
+test("missing advertised price stays unpriced and is never derived from cash fields", () => {
   assert.deepEqual(resolveDealerKitRetailPrice({
-    advertised: { amount: 0, vat_status: "ex-VAT" },
-    cash: { amount: 14994, vat_amount: null },
-  }), { amount: null, source: "unresolved", fallbackUsed: false });
-
-  assert.deepEqual(resolveDealerKitRetailPrice({
-    advertised: { amount: 0, vat_status: "ex-VAT" },
-    cash: { amount: 14994, vat_amount: 0 },
-  }), { amount: null, source: "unresolved", fallbackUsed: false });
-});
-
-test("uses a valid cash price directly only when VAT semantics make that safe", () => {
-  assert.deepEqual(resolveDealerKitRetailPrice({
-    advertised: { amount: 0, vat_status: "inc-VAT" },
-    cash: { amount: 11995, vat_amount: 1999.17 },
-  }), { amount: 11995, source: "cash", fallbackUsed: true });
-
-  assert.deepEqual(resolveDealerKitRetailPrice({
-    advertised: { amount: null, vat_status: "margin" },
-    cash: { amount: 8995, vat_amount: 0 },
-  }), { amount: 8995, source: "cash", fallbackUsed: true });
-});
-
-test("unknown VAT semantics remain fail-closed instead of inventing a retail price", () => {
-  assert.deepEqual(resolveDealerKitRetailPrice({
-    advertised: { amount: 0, vat_status: "" },
+    advertised: { amount: null, vat_status: "ex-VAT" },
     cash: { amount: 14994, vat_amount: 2499 },
-  }), { amount: null, source: "unresolved", fallbackUsed: false });
+  }), { amount: null, source: "unpriced", fallbackUsed: false });
 });
 
 test("normalizes DealerKit operational statuses without changing the source wording", () => {

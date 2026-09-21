@@ -57,10 +57,18 @@ function element(tag, className, text) {
 }
 
 function money(value) {
+  if (value === null || value === undefined || value === "") return "–";
   const number = Number(value);
   return Number.isFinite(number)
     ? `£${number.toLocaleString("en-GB", { maximumFractionDigits: 2 })}`
     : "–";
+}
+
+function retailMoney(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0
+    ? `£${number.toLocaleString("en-GB", { maximumFractionDigits: 2 })}`
+    : "TBC";
 }
 
 function validateFile(file) {
@@ -208,7 +216,7 @@ function renderPricing(state, product, host) {
   const local = state.local?.[product] || null;
   if (product === "finance") {
     host.append(
-      fact("DealerKit retail", money(vehicle.retailPrice), vehicle.vatStatus === "plus_vat" ? "+ VAT" : vehicle.vatStatus || ""),
+      fact("DealerKit retail", retailMoney(vehicle.retailPrice), vehicle.vatStatus === "plus_vat" ? "+ VAT" : vehicle.vatStatus || ""),
       fact("Current Finance advert", local ? money(local.price) : "Not advertised"),
       fact("Current monthly", local ? money(local.monthly) : "–"),
       fact("Images selected", String(state.imageState.finance.includedOrderIds.length)),
