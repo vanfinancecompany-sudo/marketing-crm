@@ -3,6 +3,7 @@ const LAST_RECEIPT_KEY = "vfcLastMarketplaceReceipt";
 const PUBLISH_CONFIRM_WINDOW_MS = 10 * 60 * 1000;
 const GROUP_AGENT_STATE_KEY = "vfcFacebookGroupsAgentState";
 const GROUP_POST_JOB_KEY = "vfcPendingFacebookGroupPost";
+const LAST_GROUP_POST_EVENT_KEY = "vfcLastFacebookGroupPostEvent";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -62,6 +63,11 @@ function groupSearchUrl(query) {
 function groupAboutUrl(value) {
   const base = canonicalGroupUrl(value);
   return base ? `${base}about/` : String(value || "");
+}
+
+function groupPostSearchUrl(value, registration) {
+  const base = canonicalGroupUrl(value);
+  return base ? `${base}search/?q=${encodeURIComponent(String(registration || ""))}` : String(value || "");
 }
 
 async function getGroupAgentState() {
@@ -270,6 +276,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    if (message?.type === "STORE_GROUP_POST_STATUS_JOB") {
+      const job = message.job;
+      if (!job?.id || !Array.isArray(job?.groups) || !job.groups.length) {
+        sendResponse({ ok: false, error: "Invalid Facebook group post-status job." });
+        return;
+      }
+      const state = {
+        mode: "post-status",
+        job,
+        groupIndex: 0,
+        results: [],
+        crmTabId: sender?.tab?.id || null,
+        tabId: null,
+        startedAt: Date.now(),
+      };
+      await saveGroupAgentState(state);
+      const first = job.groups[0];
+      const tab = await chrome.tabs.create({
+        url: groupPostSearchUrl(first?.url, first?.registration),
+        active: true,
+      });
+      state.tabId = tab.id || null;
+      await saveGroupAgentState(state);
+      sendResponse({ ok: true, jobId: job.id, tabId: state.tabId });
+      return;
+    }
+
     if (message?.type === "GET_GROUP_AGENT_STATE") {
       const state = await getGroupAgentState();
       if (state?.tabId && sender?.tab?.id && state.tabId !== sender.tab.id) {
@@ -356,6 +389,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    if (message?.type === "GROUP_POST_STATUS_PAGE_RESULT") {
+      const state = await getGroupAgentState();
+      if (!state || state.mode !== "post-status" || state.job?.id !== message.jobId) {
+        sendResponse({ ok: false });
+        return;
+      }
+      if (Number(message.groupIndex) !== Number(state.groupIndex)) {
+        sendResponse({ ok: false, error: "Post-status result is from an old group." });
+        return;
+      }
+
+      state.results = [...(state.results || []), message.result || {}];
+      state.groupIndex += 1;
+      const nextGroup = state.job.groups?.[state.groupIndex];
+
+      if (nextGroup) {
+        await saveGroupAgentState(state);
+        if (state.tabId) {
+          await chrome.tabs.update(
+            state.tabId,
+            { url: groupPostSearchUrl(nextGroup.url, nextGroup.registration), active: true },
+          );
+        }
+      } else {
+        await broadcastToCrm({
+          type: "GROUP_POST_STATUS_COMPLETE",
+          jobId: state.job.id,
+          productKey: state.job.productKey,
+          results: state.results,
+        }, state.crmTabId);
+        await clearGroupAgentState();
+      }
+      sendResponse({ ok: true });
+      return;
+    }
+
     if (message?.type === "STORE_GROUP_POST_JOB") {
       const job = message.job;
       if (!job?.id || !job?.groupUrl || !job?.caption) {
@@ -389,7 +458,49 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === "GROUP_POST_FILL_COMPLETED") {
       const pending = await getPendingGroupPost();
       if (pending?.job?.id === message.jobId) {
-        await chrome.storage.local.remove(GROUP_POST_JOB_KEY);
+        pending.fillCompletedAt = Date.now();
+        pending.fillReport = message.results || [];
+        await chrome.storage.local.set({ [GROUP_POST_JOB_KEY]: pending });
+      }
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === "GROUP_POST_SUBMITTED") {
+      const pending = await getPendingGroupPost();
+      if (!pending || pending.job?.id !== message.jobId) {
+        sendResponse({ ok: false, error: "No matching prepared Facebook group post was found." });
+        return;
+      }
+
+      const event = {
+        id: `group-post-event-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        jobId: pending.job.id,
+        productKey: pending.job.productKey || "",
+        groupUrl: canonicalGroupUrl(message.groupUrl || pending.job.groupUrl),
+        groupName: pending.job.groupName || "",
+        registration: message.registration || pending.job.registration || "",
+        postedAt: message.postedAt || new Date().toISOString(),
+        approvalState: message.approvalState || "submitted",
+      };
+
+      await chrome.storage.local.set({ [LAST_GROUP_POST_EVENT_KEY]: event });
+      await broadcastToCrm({ type: "GROUP_POST_SUBMITTED", event }, pending.crmTabId);
+      await chrome.storage.local.remove(GROUP_POST_JOB_KEY);
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === "GET_LAST_GROUP_POST_EVENT") {
+      const stored = await chrome.storage.local.get(LAST_GROUP_POST_EVENT_KEY);
+      sendResponse({ ok: true, event: stored[LAST_GROUP_POST_EVENT_KEY] || null });
+      return;
+    }
+
+    if (message?.type === "ACK_GROUP_POST_EVENT") {
+      const stored = await chrome.storage.local.get(LAST_GROUP_POST_EVENT_KEY);
+      if (!message.eventId || stored[LAST_GROUP_POST_EVENT_KEY]?.id === message.eventId) {
+        await chrome.storage.local.remove(LAST_GROUP_POST_EVENT_KEY);
       }
       sendResponse({ ok: true });
       return;
