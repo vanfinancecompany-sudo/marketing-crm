@@ -90,7 +90,7 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.12");
+  assert.equal(manifest.version, "1.2.14");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -644,6 +644,61 @@ test("helper inserts nothing when no verified Create Post dialog exists", async 
       String(panel.innerHTML).includes("Could not verify Facebook group post composer. Nothing was inserted.")
     ),
   );
+});
+
+test("approval checker can recognise a live advert from registration text without a permalink anchor", () => {
+  const harness = loadGroupHelperTestHooks();
+  harness.document.body.innerText = [
+    "Search results for YG73AMF",
+    "NO CREDIT CHECK",
+    "REGISTRATION: YG73AMF",
+    "RENT IT! - DRIVE IT! - OWN IT!",
+  ].join("\n");
+
+  const evidence = Array.from(harness.hooks.registrationEvidenceLines("YG73 AMF"));
+  assert.equal(evidence.length, 1);
+  assert.equal(evidence[0], "REGISTRATION: YG73AMF");
+});
+
+test("approval checker ignores registration shown only inside the helper panel", () => {
+  const harness = loadGroupHelperTestHooks();
+  harness.document.body.innerText = "Search results for YG73AMF";
+  harness.document.getElementById = (id) => id === "vfc-group-helper-report"
+    ? { innerText: "FaceBay Hampshire • YG73AMF" }
+    : null;
+
+  assert.equal(Array.from(harness.hooks.registrationEvidenceLines("YG73AMF")).length, 0);
+});
+
+test("post prep detects Facebook membership pending and reports it back to CRM", async () => {
+  let fillMessage = null;
+  const harness = loadGroupHelperTestHooks({
+    runtimeSendMessage(message) {
+      if (message.type === "GROUP_POST_FILL_COMPLETED") fillMessage = message;
+      return { ok: true };
+    },
+  });
+  harness.document.body.innerText = "Your membership is pending. You'll be notified if your request to join is approved.";
+
+  await harness.hooks.prepareGroupPost({
+    id: "membership-pending-test",
+    groupName: "FaceBay Hampshire.. Sell Anything",
+    groupUrl: "https://www.facebook.com/groups/test/",
+    registration: "YG73AMF",
+    caption: "Test caption",
+    imageUrl: "https://example.test/van.jpg",
+  });
+
+  assert.equal(fillMessage?.membershipPending, true);
+  assert.ok(
+    harness.appended.some((panel) =>
+      String(panel.innerHTML).includes("moved to Pending Membership")
+    ),
+  );
+  assert.equal(harness.calls.includes("FETCH_MARKETPLACE_IMAGE"), false);
+  assert.match(backgroundSource, /message\.membershipPending/);
+  assert.match(backgroundSource, /type: "GROUP_INSPECTION_COMPLETE"/);
+  assert.match(backgroundSource, /membershipPending: true/);
 });
 
 test("verified top-level Create Post dialog is accepted without injecting caption text", () => {

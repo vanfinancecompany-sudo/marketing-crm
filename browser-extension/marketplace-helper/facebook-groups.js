@@ -103,10 +103,22 @@
   }
 
   function pageLines() {
-    return String(document.body?.innerText || "")
+    let text = String(document.body?.innerText || "");
+    const helperText = clean(document.getElementById("vfc-group-helper-report")?.innerText || "");
+    if (helperText) text = text.replace(helperText, "");
+    return text
       .split(/\n+/)
       .map(clean)
       .filter(Boolean);
+  }
+
+  function registrationEvidenceLines(registration) {
+    const wantedReg = normalizeRegistration(registration);
+    if (!wantedReg) return [];
+    return pageLines().filter((line) => {
+      if (/search results for|results for|search this group|search facebook/i.test(line)) return false;
+      return normalizeRegistration(line).includes(wantedReg);
+    });
   }
 
   function contentUnavailable(text) {
@@ -407,19 +419,26 @@
     const wantedReg = normalizeRegistration(target.registration);
 
     const resultAnchors = [...document.querySelectorAll(
-      'a[href*="/posts/"], a[href*="/permalink/"], a[href*="/groups/"][href*="posts"]'
+      'a[href*="/posts/"], a[href*="/permalink/"], a[href*="multi_permalinks="], a[href*="story_fbid="]'
     )].filter(visible);
 
     let accepted = false;
     let matchedUrl = "";
+    let matchMethod = "";
     if (!unavailable && !declined && wantedReg) {
       for (const anchor of resultAnchors) {
         const context = nearestContext(anchor);
         if (normalizeRegistration(context).includes(wantedReg)) {
           accepted = true;
           matchedUrl = anchor.href || "";
+          matchMethod = "post-link";
           break;
         }
+      }
+
+      if (!accepted && registrationEvidenceLines(target.registration).length) {
+        accepted = true;
+        matchMethod = "registration-text";
       }
     }
 
@@ -436,6 +455,7 @@
         declined,
         unavailable,
         matchedUrl,
+        matchMethod,
         checkedAt: new Date().toISOString(),
       },
     });
@@ -570,12 +590,25 @@
     }
 
     if (!editor || !scope || !verified || !isVerifiedCreatePostDialog(scope)) {
-      const fatalMessage = "Could not verify Facebook group post composer. Nothing was inserted.";
-      results.push({ label: "Composer", ok: false, detail: "Verified Create Post dialog not found" });
+      const pageText = clean(document.body?.innerText || "");
+      const membershipPending = /your membership is pending|membership request (?:is )?pending|your request to join is pending|request to join (?:is )?pending|membership pending|request sent/i.test(pageText);
+      const fatalMessage = membershipPending
+        ? "Facebook says your membership is pending. This group has been moved to Pending Membership."
+        : "Could not verify Facebook group post composer. Nothing was inserted.";
+      results.push({
+        label: "Composer",
+        ok: false,
+        detail: membershipPending ? "Posting blocked while group membership is pending" : "Verified Create Post dialog not found",
+      });
       results.push({ label: "Caption clipboard", ok: Boolean(job.captionCopied), detail: job.captionCopied ? "Caption copied before Facebook opened" : "Caption was not copied" });
       results.push({ label: "Photo", ok: false, detail: "Skipped because the composer was not verified" });
       showPostReport(job, results, fatalMessage);
-      await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
+      await chrome.runtime.sendMessage({
+        type: "GROUP_POST_FILL_COMPLETED",
+        jobId: job.id,
+        results,
+        membershipPending,
+      });
       return;
     }
 
@@ -611,6 +644,7 @@
       composerEditorCandidates,
       waitForComposerEditor,
       attachImage,
+      registrationEvidenceLines,
       prepareGroupPost,
     });
   }
