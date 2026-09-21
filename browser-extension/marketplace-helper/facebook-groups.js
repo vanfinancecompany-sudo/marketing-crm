@@ -433,6 +433,8 @@
     });
   }
 
+  const FORMAT_PROBE_TEXT = "VFC FORMAT CHECK A\n\nVFC FORMAT CHECK B";
+
   function normalizeComposerText(value) {
     return String(value ?? "")
       .replace(/\r\n?/g, "\n")
@@ -447,22 +449,6 @@
   function composerTextMatches(element, expected) {
     return normalizeComposerText(element?.innerText || element?.textContent || "")
       === normalizeComposerText(expected);
-  }
-
-  function escapeComposerHtml(value) {
-    return String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-
-  function captionAsComposerHtml(value) {
-    return String(value ?? "")
-      .replace(/\r\n?/g, "\n")
-      .split("\n")
-      .map((line) => `<div>${line ? escapeComposerHtml(line) : "<br>"}</div>`)
-      .join("");
   }
 
   function clearComposerEditor(element) {
@@ -481,39 +467,77 @@
     }
   }
 
+  function plainTextDataTransfer(text) {
+    const transfer = new DataTransfer();
+    if (typeof transfer.setData === "function") {
+      transfer.setData("text/plain", text);
+      transfer.setData("text", text);
+    }
+    return transfer;
+  }
+
+  function pasteEventForText(text) {
+    const transfer = plainTextDataTransfer(text);
+    try {
+      return new ClipboardEvent("paste", {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        clipboardData: transfer,
+      });
+    } catch {
+      const event = new Event("paste", { bubbles: true, cancelable: true, composed: true });
+      try {
+        Object.defineProperty(event, "clipboardData", { value: transfer });
+      } catch {}
+      return event;
+    }
+  }
+
+  async function pasteTextIntoComposer(element, value) {
+    const text = String(value ?? "").replace(/\r\n?/g, "\n");
+    clearComposerEditor(element);
+    await sleep(80);
+    element.focus();
+    const event = pasteEventForText(text);
+    element.dispatchEvent(event);
+    await sleep(450);
+    return composerTextMatches(element, text);
+  }
+
   async function reactSetText(element, value) {
     const text = String(value ?? "").replace(/\r\n?/g, "\n");
-    element.focus();
 
-    try {
-      document.execCommand("selectAll", false, null);
-      const pieces = text.split(/(\n)/);
-      for (const piece of pieces) {
-        if (!piece) continue;
-        document.execCommand("insertText", false, piece);
-      }
-      await sleep(450);
-      if (composerTextMatches(element, text)) {
-        return { ok: true, method: "lexical-newline-text" };
-      }
-    } catch {}
+    const probeOk = await pasteTextIntoComposer(element, FORMAT_PROBE_TEXT);
+    clearComposerEditor(element);
+    await sleep(120);
 
-    try {
-      clearComposerEditor(element);
-      document.execCommand("insertHTML", false, captionAsComposerHtml(text));
-      await sleep(450);
-      if (composerTextMatches(element, text)) {
-        return { ok: true, method: "structured-html" };
-      }
-    } catch {}
+    if (!probeOk) {
+      return {
+        ok: false,
+        method: "manual-paste-required",
+        probePassed: false,
+        captionAttempted: false,
+      };
+    }
+
+    const captionOk = await pasteTextIntoComposer(element, text);
+    if (captionOk) {
+      return {
+        ok: true,
+        method: "native-paste-event",
+        probePassed: true,
+        captionAttempted: true,
+      };
+    }
 
     clearComposerEditor(element);
-    await sleep(180);
+    await sleep(120);
     return {
       ok: false,
-      method: "failed",
-      expected: normalizeComposerText(text),
-      actual: normalizeComposerText(element?.innerText || element?.textContent || ""),
+      method: "manual-paste-required",
+      probePassed: true,
+      captionAttempted: true,
     };
   }
 
@@ -662,28 +686,29 @@
       ok: textResult.ok,
       detail: textResult.ok
         ? `Caption inserted and formatting verified (${textResult.method})`
-        : "Facebook changed the caption structure, so the text was cleared",
+        : textResult.captionAttempted
+          ? "Facebook rejected the verified formatted paste; the text was cleared"
+          : "Facebook does not accept the formatted paste method on this layout",
     });
-
-    if (!textResult.ok) {
-      results.push({
-        label: "Photo",
-        ok: false,
-        detail: "Skipped because caption formatting could not be verified",
-      });
-      showPostReport(
-        job,
-        results,
-        "Facebook changed the caption formatting. The text was cleared and no photo was attached."
-      );
-      await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
-      return;
-    }
 
     const imageResult = await attachImage(job, scope);
     results.push({ label: "Photo", ok: imageResult.ok, detail: imageResult.detail });
 
     watchManualGroupPost(job, scope);
+
+    if (!textResult.ok) {
+      const clipboardMessage = job.captionCopied
+        ? "The correctly formatted caption is already on your clipboard. Click in the Facebook text box and press Ctrl+V, review the advert, then click Post."
+        : "Automatic formatted text is unavailable on this Facebook layout. Copy the caption from the CRM, paste it into this text box, review the advert, then click Post.";
+      showPostReport(
+        job,
+        results,
+        `Facebook blocked automatic formatted text. ${clipboardMessage}`
+      );
+      await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
+      return;
+    }
+
     showPostReport(job, results);
     await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
   }
@@ -700,7 +725,7 @@
       attachImage,
       normalizeComposerText,
       composerTextMatches,
-      captionAsComposerHtml,
+      pasteTextIntoComposer,
       reactSetText,
       prepareGroupPost,
     });
