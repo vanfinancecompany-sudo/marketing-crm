@@ -71,7 +71,7 @@ async function loadImportedReadiness(supabase, configuration, vehicle) {
   return items;
 }
 
-function buildCarImageSet(vehicle = {}, decision = {}, importedDealerKitMedia = []) {
+export function buildCarImageSet(vehicle = {}, decision = {}, importedDealerKitMedia = []) {
   const sourceIds = (Array.isArray(vehicle.images) ? vehicle.images : []).map((image) => clean(image?.id, 300)).filter(Boolean);
   const decoded = decodeDealerKitProductImageState(decision, sourceIds);
   const selectedIds = decoded.finance.includedOrderIds;
