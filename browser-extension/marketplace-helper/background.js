@@ -239,6 +239,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         tabId: null,
         startedAt: Date.now(),
       };
+      await saveGroupAgentState(state);
       const tab = await chrome.tabs.create({ url: groupSearchUrl(job.queries[0]?.query || job.queries[0]), active: true });
       state.tabId = tab.id || null;
       await saveGroupAgentState(state);
@@ -261,6 +262,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         tabId: null,
         startedAt: Date.now(),
       };
+      await saveGroupAgentState(state);
       const tab = await chrome.tabs.create({ url: groupAboutUrl(job.groups[0]?.url), active: true });
       state.tabId = tab.id || null;
       await saveGroupAgentState(state);
@@ -366,6 +368,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         storedAt: Date.now(),
         tabId: null,
       };
+      await chrome.storage.local.set({ [GROUP_POST_JOB_KEY]: pending });
       const tab = await chrome.tabs.create({ url: job.groupUrl, active: true });
       pending.tabId = tab.id || null;
       await chrome.storage.local.set({ [GROUP_POST_JOB_KEY]: pending });
