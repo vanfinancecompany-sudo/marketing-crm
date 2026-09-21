@@ -26,9 +26,9 @@
   function canonicalGroupUrl(value) {
     try {
       const url = new URL(String(value || ""), location.origin);
-      const match = url.pathname.match(/^/groups/([^/?#]+)/i);
-      if (!match) return "";
-      const id = match[1];
+      const parts = url.pathname.split("/").filter(Boolean);
+      if (parts[0]?.toLowerCase() !== "groups" || !parts[1]) return "";
+      const id = parts[1];
       if (["feed", "discover", "search", "create"].includes(id.toLowerCase())) return "";
       return "https://www.facebook.com/groups/" + id + "/";
     } catch {
