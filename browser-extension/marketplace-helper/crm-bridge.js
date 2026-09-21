@@ -19,6 +19,11 @@
   const GROUP_INSPECTION_COMPLETE = "VFC_GROUP_INSPECTION_COMPLETE";
   const GROUP_POST_JOB = "VFC_GROUP_POST_JOB";
   const GROUP_POST_JOB_ACK = "VFC_GROUP_POST_JOB_ACK";
+  const GROUP_POST_SUBMITTED = "VFC_GROUP_POST_SUBMITTED";
+  const GROUP_POST_EVENT_ACK = "VFC_GROUP_POST_EVENT_ACK";
+  const GROUP_POST_STATUS_START = "VFC_GROUP_POST_STATUS_START";
+  const GROUP_POST_STATUS_ACK = "VFC_GROUP_POST_STATUS_ACK";
+  const GROUP_POST_STATUS_COMPLETE = "VFC_GROUP_POST_STATUS_COMPLETE";
 
   function validJob(job) {
     return Boolean(
@@ -139,6 +144,37 @@
       return;
     }
 
+    if (message.source === "vfc-marketing-crm" && message.type === GROUP_POST_STATUS_START) {
+      const id = message.id || message.job?.id || "";
+      try {
+        const result = await chrome.runtime.sendMessage({ type: "STORE_GROUP_POST_STATUS_JOB", job: message.job });
+        window.postMessage({
+          source: "vfc-facebook-helper",
+          type: GROUP_POST_STATUS_ACK,
+          id,
+          ok: Boolean(result?.ok),
+          error: result?.error || "",
+        }, window.location.origin);
+      } catch (error) {
+        window.postMessage({
+          source: "vfc-facebook-helper",
+          type: GROUP_POST_STATUS_ACK,
+          id,
+          ok: false,
+          error: String(error?.message || error),
+        }, window.location.origin);
+      }
+      return;
+    }
+
+    if (message.source === "vfc-marketing-crm" && message.type === GROUP_POST_EVENT_ACK) {
+      chrome.runtime.sendMessage({
+        type: "ACK_GROUP_POST_EVENT",
+        eventId: message.eventId || "",
+      }).catch(() => {});
+      return;
+    }
+
     if (message.source === "vfc-marketing-crm" && message.type === RECEIPT_ACK_TYPE) {
       chrome.runtime.sendMessage({ type: "ACK_MARKETPLACE_RECEIPT", receiptId: message.receiptId || "" }).catch(() => {});
     }
@@ -174,6 +210,26 @@
         productKey: message.productKey || "",
         inspections: message.inspections || [],
       }, window.location.origin);
+      return;
+    }
+
+    if (message?.type === "GROUP_POST_SUBMITTED" && message.event) {
+      window.postMessage({
+        source: "vfc-facebook-helper",
+        type: GROUP_POST_SUBMITTED,
+        event: message.event,
+      }, window.location.origin);
+      return;
+    }
+
+    if (message?.type === "GROUP_POST_STATUS_COMPLETE") {
+      window.postMessage({
+        source: "vfc-facebook-helper",
+        type: GROUP_POST_STATUS_COMPLETE,
+        jobId: message.jobId || "",
+        productKey: message.productKey || "",
+        results: message.results || [],
+      }, window.location.origin);
     }
   });
 
@@ -184,6 +240,17 @@
         source: "vfc-marketplace-extension",
         type: PUBLISHED_TYPE,
         receipt: result.receipt,
+      }, window.location.origin);
+    })
+    .catch(() => {});
+
+  chrome.runtime.sendMessage({ type: "GET_LAST_GROUP_POST_EVENT" })
+    .then((result) => {
+      if (!result?.event) return;
+      window.postMessage({
+        source: "vfc-facebook-helper",
+        type: GROUP_POST_SUBMITTED,
+        event: result.event,
       }, window.location.origin);
     })
     .catch(() => {});
