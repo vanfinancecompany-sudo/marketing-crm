@@ -63,7 +63,7 @@ test("CRM exposes discovery, live checks and two-stage group pipelines", () => {
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.4");
+  assert.equal(manifest.version, "1.2.5");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -105,6 +105,9 @@ test("Chrome helper can discover and inspect groups without auto-posting", () =>
   assert.match(groupsHelperSource, /checkPostedStatus/);
   assert.match(groupsHelperSource, /findComposerOpener/);
   assert.match(groupsHelperSource, /waitForComposerEditor/);
+  assert.match(groupsHelperSource, /Create a public post/);
+  assert.match(groupsHelperSource, /data-lexical-editor/);
+  assert.match(groupsHelperSource, /composerEditorCandidates/);
   assert.match(groupsHelperSource, /GET_PENDING_GROUP_POST_JOB/);
   assert.match(groupsHelperSource, /contentUnavailable/);
   assert.doesNotMatch(groupsHelperSource, /\.click\(\).*Facebook.*Post/i);
