@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "VFC Marketplace Helper",
-  "version": "1.1.1",
+  "name": "VFC Facebook Helper",
+  "version": "1.2.0",
   "description": "Controlled Marketplace handoff for Van Finance Company and Rent2Buy Vans. Never publishes automatically.",
   "permissions": ["storage", "tabs"],
   "host_permissions": [
@@ -23,9 +23,17 @@
       "matches": ["https://www.facebook.com/marketplace/create/vehicle*"],
       "js": ["facebook.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.facebook.com/groups/*",
+        "https://www.facebook.com/search/groups/*"
+      ],
+      "js": ["facebook-groups.js"],
+      "run_at": "document_idle"
     }
   ],
   "action": {
-    "default_title": "VFC Marketplace Helper"
+    "default_title": "VFC Facebook Helper"
   }
 }
