@@ -32,6 +32,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Syntax-check Chrome extension scripts
+        run: |
+          node --check browser-extension/marketplace-helper/background.js
+          node --check browser-extension/marketplace-helper/crm-bridge.js
+          node --check browser-extension/marketplace-helper/facebook.js
+          node --check browser-extension/marketplace-helper/facebook-groups.js
+
       - name: Run Facebook helper tests
         run: node --test tests/marketplace-helper.test.js tests/facebook-groups-agent.test.js
 
