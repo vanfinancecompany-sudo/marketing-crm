@@ -653,6 +653,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         pending.fillCompletedAt = Date.now();
         pending.fillReport = message.results || [];
         await chrome.storage.local.set({ [GROUP_POST_JOB_KEY]: pending });
+
+        if (message.membershipPending) {
+          await broadcastToCrm({
+            type: "GROUP_INSPECTION_COMPLETE",
+            jobId: pending.job.id,
+            productKey: pending.job.productKey || "",
+            inspections: [{
+              name: pending.job.groupName || "",
+              url: canonicalGroupUrl(pending.job.groupUrl),
+              joined: false,
+              membershipPending: true,
+              canPost: false,
+              pageText: "Your membership is pending",
+            }],
+          }, pending.crmTabId);
+          await chrome.storage.local.remove(GROUP_POST_JOB_KEY);
+        }
       }
       sendResponse({ ok: true });
       return;
