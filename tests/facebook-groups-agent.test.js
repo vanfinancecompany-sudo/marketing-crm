@@ -84,7 +84,7 @@ test("CRM exposes discovery, live checks and separate New, Awaiting and Proven p
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.10");
+  assert.equal(manifest.version, "1.2.11");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
