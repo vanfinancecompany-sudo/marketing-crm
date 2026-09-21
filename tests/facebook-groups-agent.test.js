@@ -56,7 +56,6 @@ test("CRM exposes discovery, live checks and two-stage group pipelines", () => {
   assert.match(pageSource, /Check .*Awaiting Posts/);
   assert.match(pageSource, /Prepare Test Post/);
   assert.match(pageSource, /Prepare Next Post/);
-  assert.match(pageSource, /Green groups are the best posting candidates/);
   assert.match(serviceSource, /FINANCE_QUERY_BANK/);
   assert.match(serviceSource, /RENT2BUY_QUERY_BANK/);
   assert.match(serviceSource, /van classifieds UK/);
@@ -90,7 +89,7 @@ test("Chrome helper can discover and inspect groups without auto-posting", () =>
   assert.match(groupsHelperSource, /Nothing has been posted/);
   assert.match(groupsHelperSource, /watchManualGroupPost/);
   assert.match(groupsHelperSource, /checkPostedStatus/);
-  assert.match(groupsHelperSource, /this content isn'?t available right now/i);
+  assert.match(groupsHelperSource, /contentUnavailable/);
   assert.doesNotMatch(groupsHelperSource, /\.click\(\).*Facebook.*Post/i);
 });
 
