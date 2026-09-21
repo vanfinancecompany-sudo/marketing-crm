@@ -75,7 +75,7 @@ test("CRM exposes discovery, live checks and two-stage group pipelines", () => {
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.8");
+  assert.equal(manifest.version, "1.2.9");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -383,13 +383,21 @@ function createVerifiedComposerFixture() {
   return { dialog, heading, postButton, photoButton, editor, fileInput };
 }
 
-function loadGroupHelperTestHooks({ dialogs = [], controls = [], labels = [], runtimeSendMessage } = {}) {
+function loadGroupHelperTestHooks({
+  dialogs = [],
+  controls = [],
+  labels = [],
+  runtimeSendMessage,
+  flattenNewlines = false,
+  flattenHtml = false,
+} = {}) {
   const hooks = {};
   const appended = [];
   const calls = [];
   let activeElement = null;
   let insertTextCalls = 0;
-  let insertLineBreakCalls = 0;
+  let insertedNewlineTextCalls = 0;
+  let insertHtmlCalls = 0;
   let clock = 0;
 
   class FastDate extends Date {
@@ -440,15 +448,32 @@ function loadGroupHelperTestHooks({ dialogs = [], controls = [], labels = [], ru
         activeElement.innerText = "";
         activeElement.textContent = "";
       }
+      if (command === "delete" && activeElement) {
+        activeElement.innerText = "";
+        activeElement.textContent = "";
+      }
       if (command === "insertText" && activeElement) {
         insertTextCalls += 1;
-        activeElement.innerText = String(activeElement.innerText || "") + String(value || "");
-        activeElement.textContent = String(activeElement.textContent || "") + String(value || "");
+        const piece = String(value || "");
+        if (piece === "\n") insertedNewlineTextCalls += 1;
+        const inserted = flattenNewlines && piece === "\n" ? "" : piece;
+        activeElement.innerText = String(activeElement.innerText || "") + inserted;
+        activeElement.textContent = String(activeElement.textContent || "") + inserted;
       }
-      if (command === "insertLineBreak" && activeElement) {
-        insertLineBreakCalls += 1;
-        activeElement.innerText = String(activeElement.innerText || "") + "\n";
-        activeElement.textContent = String(activeElement.textContent || "") + "\n";
+      if (command === "insertHTML" && activeElement) {
+        insertHtmlCalls += 1;
+        const html = String(value || "");
+        const decoded = html
+          .replace(/<div><br><\/div>/gi, flattenHtml ? "" : "\n")
+          .replace(/<\/div>\s*<div>/gi, flattenHtml ? "" : "\n")
+          .replace(/^<div>|<\/div>$/gi, "")
+          .replace(/<br\s*\/?\s*>/gi, flattenHtml ? "" : "\n")
+          .replace(/&quot;/g, '"')
+          .replace(/&gt;/g, ">")
+          .replace(/&lt;/g, "<")
+          .replace(/&amp;/g, "&");
+        activeElement.innerText = decoded;
+        activeElement.textContent = decoded;
       }
       return true;
     },
@@ -494,7 +519,8 @@ function loadGroupHelperTestHooks({ dialogs = [], controls = [], labels = [], ru
     calls,
     setActive(element) { activeElement = element; },
     get insertTextCalls() { return insertTextCalls; },
-    get insertLineBreakCalls() { return insertLineBreakCalls; },
+    get insertedNewlineTextCalls() { return insertedNewlineTextCalls; },
+    get insertHtmlCalls() { return insertHtmlCalls; },
   };
 }
 
@@ -556,7 +582,7 @@ test("helper inserts nothing when no verified Create Post dialog exists", async 
   );
 });
 
-test("verified top-level Create Post dialog is accepted and caption target stays inside it", () => {
+test("verified top-level Create Post dialog is accepted and caption target stays inside it", async () => {
   const fixture = createVerifiedComposerFixture();
   const pageComment = makeGroupHelperNode({
     attrs: { role: "textbox", contenteditable: "true", "aria-label": "Write a comment..." },
@@ -570,23 +596,60 @@ test("verified top-level Create Post dialog is accepted and caption target stays
   assert.equal(candidates[0], fixture.editor);
   assert.equal(candidates.includes(pageComment), false);
 
-  harness.hooks.reactSetText(candidates[0], "Verified composer caption");
+  const result = await harness.hooks.reactSetText(candidates[0], "Verified composer caption");
+  assert.equal(result.ok, true);
   assert.equal(fixture.editor.innerText, "Verified composer caption");
   assert.equal(pageComment.innerText, "");
 });
 
-test("Facebook group captions preserve CRM paragraph and line breaks", () => {
+test("Facebook group captions preserve CRM paragraph and line breaks through Lexical text input", async () => {
   const fixture = createVerifiedComposerFixture();
   const harness = loadGroupHelperTestHooks({ dialogs: [fixture.dialog] });
   fixture.editor.focus = () => harness.setActive(fixture.editor);
 
-  const caption = "NO CREDIT CHECK\n\n£376 MTH RENT IT · DRIVE IT · OWN IT\nApply in 60 seconds\nhttps://www.rent2buyvans.co.uk/";
-  harness.hooks.reactSetText(fixture.editor, caption);
+  const caption = "NO CREDIT CHECK\n\n£376 MTH\n\nRENT IT! - DRIVE IT! - OWN IT!\n\nApply in 60 seconds\n\nhttps://www.rent2buyvans.co.uk/";
+  const result = await harness.hooks.reactSetText(fixture.editor, caption);
 
-  assert.equal(fixture.editor.innerText, caption);
-  assert.equal(harness.insertLineBreakCalls, 4);
-  assert.equal(harness.insertTextCalls, 4);
-  assert.match(groupsHelperSource, /insertLineBreak/);
+  assert.equal(result.ok, true);
+  assert.equal(result.method, "lexical-newline-text");
+  assert.equal(harness.hooks.normalizeComposerText(fixture.editor.innerText), harness.hooks.normalizeComposerText(caption));
+  assert.equal(harness.insertedNewlineTextCalls, 8);
+  assert.equal(harness.insertHtmlCalls, 0);
+  assert.doesNotMatch(groupsHelperSource, /execCommand\("insertLineBreak"/);
+});
+
+test("helper detects flattened Facebook formatting, clears it and skips the photo", async () => {
+  const fixture = createVerifiedComposerFixture();
+  const harness = loadGroupHelperTestHooks({
+    dialogs: [fixture.dialog],
+    flattenNewlines: true,
+    flattenHtml: true,
+    runtimeSendMessage(message) {
+      if (message.type === "FETCH_MARKETPLACE_IMAGE") {
+        throw new Error("image fetch must not happen after formatting failure");
+      }
+      return { ok: true };
+    },
+  });
+  fixture.editor.focus = () => harness.setActive(fixture.editor);
+
+  await harness.hooks.prepareGroupPost({
+    id: "format-failure-test",
+    groupName: "Test group",
+    registration: "AB12CDE",
+    caption: "NO CREDIT CHECK\n\n£376 MTH\n\nRENT IT! - DRIVE IT! - OWN IT!",
+    imageUrl: "https://example.test/van.jpg",
+  });
+
+  assert.equal(fixture.editor.innerText, "");
+  assert.equal(harness.calls.includes("FETCH_MARKETPLACE_IMAGE"), false);
+  const completedIndex = harness.calls.indexOf("GROUP_POST_FILL_COMPLETED");
+  assert.ok(completedIndex >= 0);
+  assert.ok(
+    harness.appended.some((panel) =>
+      String(panel.innerHTML).includes("Facebook changed the caption formatting. The text was cleared and no photo was attached.")
+    ),
+  );
 });
 
 test("group image upload stays inside the same verified Create Post dialog", async () => {

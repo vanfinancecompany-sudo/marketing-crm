@@ -433,24 +433,88 @@
     });
   }
 
-  function reactSetText(element, value) {
-    const text = String(value ?? "").replace(/\r\n?/g, "\n");
+  function normalizeComposerText(value) {
+    return String(value ?? "")
+      .replace(/\r\n?/g, "\n")
+      .replace(/\u00a0/g, " ")
+      .split("\n")
+      .map((line) => line.replace(/[ \t]+/g, " ").trimEnd())
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  function composerTextMatches(element, expected) {
+    return normalizeComposerText(element?.innerText || element?.textContent || "")
+      === normalizeComposerText(expected);
+  }
+
+  function escapeComposerHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function captionAsComposerHtml(value) {
+    return String(value ?? "")
+      .replace(/\r\n?/g, "\n")
+      .split("\n")
+      .map((line) => `<div>${line ? escapeComposerHtml(line) : "<br>"}</div>`)
+      .join("");
+  }
+
+  function clearComposerEditor(element) {
     element.focus();
     try {
       document.execCommand("selectAll", false, null);
-      const lines = text.split("\n");
-      for (let index = 0; index < lines.length; index += 1) {
-        if (lines[index]) {
-          document.execCommand("insertText", false, lines[index]);
-        }
-        if (index < lines.length - 1) {
-          document.execCommand("insertLineBreak", false, null);
-        }
-      }
+      document.execCommand("delete", false, null);
     } catch {
-      element.textContent = text;
-      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+      element.textContent = "";
+      element.dispatchEvent(new InputEvent("input", {
+        bubbles: true,
+        composed: true,
+        inputType: "deleteContentBackward",
+        data: null,
+      }));
     }
+  }
+
+  async function reactSetText(element, value) {
+    const text = String(value ?? "").replace(/\r\n?/g, "\n");
+    element.focus();
+
+    try {
+      document.execCommand("selectAll", false, null);
+      const pieces = text.split(/(\n)/);
+      for (const piece of pieces) {
+        if (!piece) continue;
+        document.execCommand("insertText", false, piece);
+      }
+      await sleep(450);
+      if (composerTextMatches(element, text)) {
+        return { ok: true, method: "lexical-newline-text" };
+      }
+    } catch {}
+
+    try {
+      clearComposerEditor(element);
+      document.execCommand("insertHTML", false, captionAsComposerHtml(text));
+      await sleep(450);
+      if (composerTextMatches(element, text)) {
+        return { ok: true, method: "structured-html" };
+      }
+    } catch {}
+
+    clearComposerEditor(element);
+    await sleep(180);
+    return {
+      ok: false,
+      method: "failed",
+      expected: normalizeComposerText(text),
+      actual: normalizeComposerText(element?.innerText || element?.textContent || ""),
+    };
   }
 
   function dataUrlToFile(dataUrl, filename) {
@@ -592,14 +656,29 @@
 
     results.push({ label: "Composer", ok: true, detail: "Verified Create Post dialog" });
 
-    reactSetText(editor, job.caption || "");
-    await sleep(700);
-    const inserted = clean(editor.innerText || editor.textContent).length > 10;
+    const textResult = await reactSetText(editor, job.caption || "");
     results.push({
       label: "Post text",
-      ok: inserted,
-      detail: inserted ? "Caption inserted inside verified composer" : "Caption did not stick",
+      ok: textResult.ok,
+      detail: textResult.ok
+        ? `Caption inserted and formatting verified (${textResult.method})`
+        : "Facebook changed the caption structure, so the text was cleared",
     });
+
+    if (!textResult.ok) {
+      results.push({
+        label: "Photo",
+        ok: false,
+        detail: "Skipped because caption formatting could not be verified",
+      });
+      showPostReport(
+        job,
+        results,
+        "Facebook changed the caption formatting. The text was cleared and no photo was attached."
+      );
+      await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
+      return;
+    }
 
     const imageResult = await attachImage(job, scope);
     results.push({ label: "Photo", ok: imageResult.ok, detail: imageResult.detail });
@@ -619,6 +698,9 @@
       composerEditorCandidates,
       waitForComposerEditor,
       attachImage,
+      normalizeComposerText,
+      composerTextMatches,
+      captionAsComposerHtml,
       reactSetText,
       prepareGroupPost,
     });
