@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "VFC Marketplace Helper",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Controlled Marketplace handoff for Van Finance Company and Rent2Buy Vans. Never publishes automatically.",
   "permissions": ["storage", "tabs"],
   "host_permissions": [
