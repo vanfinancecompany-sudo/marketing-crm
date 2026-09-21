@@ -103,10 +103,22 @@
   }
 
   function pageLines() {
-    return String(document.body?.innerText || "")
+    let text = String(document.body?.innerText || "");
+    const helperText = clean(document.getElementById("vfc-group-helper-report")?.innerText || "");
+    if (helperText) text = text.replace(helperText, "");
+    return text
       .split(/\n+/)
       .map(clean)
       .filter(Boolean);
+  }
+
+  function registrationEvidenceLines(registration) {
+    const wantedReg = normalizeRegistration(registration);
+    if (!wantedReg) return [];
+    return pageLines().filter((line) => {
+      if (/search results for|results for|search this group|search facebook/i.test(line)) return false;
+      return normalizeRegistration(line).includes(wantedReg);
+    });
   }
 
   function contentUnavailable(text) {
@@ -407,19 +419,26 @@
     const wantedReg = normalizeRegistration(target.registration);
 
     const resultAnchors = [...document.querySelectorAll(
-      'a[href*="/posts/"], a[href*="/permalink/"], a[href*="/groups/"][href*="posts"]'
+      'a[href*="/posts/"], a[href*="/permalink/"], a[href*="multi_permalinks="], a[href*="story_fbid="]'
     )].filter(visible);
 
     let accepted = false;
     let matchedUrl = "";
+    let matchMethod = "";
     if (!unavailable && !declined && wantedReg) {
       for (const anchor of resultAnchors) {
         const context = nearestContext(anchor);
         if (normalizeRegistration(context).includes(wantedReg)) {
           accepted = true;
           matchedUrl = anchor.href || "";
+          matchMethod = "post-link";
           break;
         }
+      }
+
+      if (!accepted && registrationEvidenceLines(target.registration).length) {
+        accepted = true;
+        matchMethod = "registration-text";
       }
     }
 
@@ -436,6 +455,7 @@
         declined,
         unavailable,
         matchedUrl,
+        matchMethod,
         checkedAt: new Date().toISOString(),
       },
     });
@@ -624,6 +644,7 @@
       composerEditorCandidates,
       waitForComposerEditor,
       attachImage,
+      registrationEvidenceLines,
       prepareGroupPost,
     });
   }
