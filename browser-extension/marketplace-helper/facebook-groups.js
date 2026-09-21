@@ -149,6 +149,35 @@
       .find((element) => pattern.test(clean(element.innerText || element.textContent || element.getAttribute("aria-label"))));
   }
 
+  function findComposerOpener() {
+    const direct = buttonWithText(/write something|what'?s on your mind|create post/i);
+    if (direct) return direct;
+
+    const label = [...document.querySelectorAll("div, span")]
+      .filter(visible)
+      .find((element) =>
+        /^(write something(?:\.\.\.)?|what'?s on your mind\??)$/i.test(
+          clean(element.innerText || element.textContent || element.getAttribute("aria-label")),
+        )
+      );
+    if (!label) return null;
+    return label.closest('button, [role="button"]') || label;
+  }
+
+  async function waitForComposerEditor(timeoutMs = 6000) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter(visible);
+      const scope = dialogs[dialogs.length - 1] || document;
+      const editor = [...scope.querySelectorAll('[contenteditable="true"][role="textbox"], [contenteditable="true"]')]
+        .filter(visible)
+        .find((element) => !/comment/i.test(clean(element.getAttribute("aria-label"))));
+      if (editor) return { editor, scope };
+      await sleep(250);
+    }
+    return { editor: null, scope: document };
+  }
+
   async function inspectGroup(state) {
     await sleep(1800);
     const lines = pageLines();
@@ -354,39 +383,54 @@
   }
 
   async function prepareGroupPost(job) {
-    if (canonicalGroupUrl(location.href) !== canonicalGroupUrl(job.groupUrl)) return;
-    await sleep(1600);
+    if (!location.pathname.startsWith("/groups/")) return;
+    await sleep(1200);
     const results = [];
 
-    const opener = buttonWithText(/write something|what'?s on your mind|create post/i);
-    if (opener) {
-      opener.click();
-      results.push({ label: "Composer", ok: true, detail: "Opened" });
-      await sleep(1000);
+    let { editor, scope } = await waitForComposerEditor(1200);
+    if (!editor) {
+      const opener = findComposerOpener();
+      if (opener) {
+        try { opener.click(); } catch {}
+        results.push({ label: "Composer", ok: true, detail: "Opened" });
+        ({ editor, scope } = await waitForComposerEditor(6500));
+      } else {
+        results.push({ label: "Composer", ok: false, detail: "Write something / Create post control not found" });
+      }
+    } else {
+      results.push({ label: "Composer", ok: true, detail: "Already open" });
     }
-
-    const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter(visible);
-    const dialog = dialogs[dialogs.length - 1] || document;
-    const editor = [...dialog.querySelectorAll('[contenteditable="true"][role="textbox"], [contenteditable="true"]')]
-      .filter(visible)
-      .find((element) => !/comment/i.test(clean(element.getAttribute("aria-label"))));
 
     if (editor) {
       reactSetText(editor, job.caption || "");
-      await sleep(500);
-      results.push({ label: "Post text", ok: clean(editor.innerText || editor.textContent).length > 10, detail: "Caption inserted" });
+      await sleep(700);
+      results.push({
+        label: "Post text",
+        ok: clean(editor.innerText || editor.textContent).length > 10,
+        detail: "Caption inserted",
+      });
     } else {
-      results.push({ label: "Post text", ok: false, detail: "Composer text box not found" });
+      results.push({ label: "Post text", ok: false, detail: "Composer text box not found after opening the post dialog" });
     }
 
-    const imageResult = await attachImage(job, dialog);
+    const imageResult = editor
+      ? await attachImage(job, scope)
+      : { ok: false, detail: "Skipped because the post composer did not open" };
     results.push({ label: "Photo", ok: imageResult.ok, detail: imageResult.detail });
-    watchManualGroupPost(job, dialog);
+
+    if (editor) watchManualGroupPost(job, scope);
     showPostReport(job, results);
     await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
   }
 
   (async () => {
+    const postResult = await chrome.runtime.sendMessage({ type: "GET_PENDING_GROUP_POST_JOB" }).catch(() => null);
+    const job = postResult?.job || null;
+    if (job?.id && location.pathname.startsWith("/groups/")) {
+      await prepareGroupPost(job);
+      return;
+    }
+
     const stateResult = await chrome.runtime.sendMessage({ type: "GET_GROUP_AGENT_STATE" }).catch(() => null);
     const state = stateResult?.state || null;
 
@@ -404,15 +448,11 @@
       return;
     }
 
-    if (state?.mode === "post-status" && location.pathname.startsWith("/groups/")) {
+    if (
+      (state?.mode === "post-status" || state?.mode === "auto-post-status") &&
+      location.pathname.startsWith("/groups/")
+    ) {
       await checkPostedStatus(state);
-      return;
-    }
-
-    const postResult = await chrome.runtime.sendMessage({ type: "GET_PENDING_GROUP_POST_JOB" }).catch(() => null);
-    const job = postResult?.job || null;
-    if (job?.id && location.pathname.startsWith("/groups/")) {
-      await prepareGroupPost(job);
     }
   })().catch((error) => {
     console.error("VFC Facebook Groups Helper failed", error);

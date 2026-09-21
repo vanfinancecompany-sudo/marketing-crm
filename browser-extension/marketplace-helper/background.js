@@ -4,6 +4,10 @@ const PUBLISH_CONFIRM_WINDOW_MS = 10 * 60 * 1000;
 const GROUP_AGENT_STATE_KEY = "vfcFacebookGroupsAgentState";
 const GROUP_POST_JOB_KEY = "vfcPendingFacebookGroupPost";
 const LAST_GROUP_POST_EVENT_KEY = "vfcLastFacebookGroupPostEvent";
+const GROUP_APPROVAL_MONITOR_KEY = "vfcFacebookGroupApprovalMonitor";
+const LAST_GROUP_STATUS_EVENT_KEY = "vfcLastFacebookGroupStatusEvent";
+const GROUP_APPROVAL_ALARM = "vfcFacebookGroupApprovalMonitorAlarm";
+const GROUP_APPROVAL_CHECK_MINUTES = 60;
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -88,6 +92,116 @@ async function getPendingGroupPost() {
   return stored[GROUP_POST_JOB_KEY] || null;
 }
 
+async function getApprovalMonitorItems() {
+  const stored = await chrome.storage.local.get(GROUP_APPROVAL_MONITOR_KEY);
+  return Array.isArray(stored[GROUP_APPROVAL_MONITOR_KEY])
+    ? stored[GROUP_APPROVAL_MONITOR_KEY]
+    : [];
+}
+
+async function saveApprovalMonitorItems(items) {
+  await chrome.storage.local.set({ [GROUP_APPROVAL_MONITOR_KEY]: items || [] });
+  await refreshApprovalBadge(items || []);
+}
+
+async function refreshApprovalBadge(items = null) {
+  const current = items || await getApprovalMonitorItems();
+  const count = current.length;
+  try {
+    await chrome.action.setBadgeText({ text: count ? String(Math.min(count, 99)) : "" });
+    await chrome.action.setTitle({
+      title: count
+        ? `${count} Facebook group post${count === 1 ? "" : "s"} awaiting approval/visibility`
+        : "VFC Facebook Helper",
+    });
+  } catch {}
+}
+
+async function upsertApprovalMonitorItem(item) {
+  const current = await getApprovalMonitorItems();
+  const key = `${canonicalGroupUrl(item.groupUrl)}|${clean(item.registration).toUpperCase()}`;
+  const next = current.filter((entry) => {
+    const entryKey = `${canonicalGroupUrl(entry.groupUrl)}|${clean(entry.registration).toUpperCase()}`;
+    return entryKey !== key;
+  });
+  next.push({
+    ...item,
+    groupUrl: canonicalGroupUrl(item.groupUrl),
+    lastCheckedAt: item.lastCheckedAt || "",
+    checkCount: Number(item.checkCount || 0),
+  });
+  await saveApprovalMonitorItems(next);
+}
+
+async function removeApprovalMonitorItem(groupUrl, registration) {
+  const key = `${canonicalGroupUrl(groupUrl)}|${clean(registration).toUpperCase()}`;
+  const current = await getApprovalMonitorItems();
+  const next = current.filter((entry) => {
+    const entryKey = `${canonicalGroupUrl(entry.groupUrl)}|${clean(entry.registration).toUpperCase()}`;
+    return entryKey !== key;
+  });
+  await saveApprovalMonitorItems(next);
+  return next;
+}
+
+async function saveGroupStatusEvent(event) {
+  await chrome.storage.local.set({ [LAST_GROUP_STATUS_EVENT_KEY]: event });
+  await broadcastToCrm({ type: "GROUP_POST_STATUS_EVENT", event });
+}
+
+async function startAutomaticApprovalCheck() {
+  const activeState = await getGroupAgentState();
+  if (activeState) return;
+
+  const items = await getApprovalMonitorItems();
+  if (!items.length) {
+    await refreshApprovalBadge([]);
+    return;
+  }
+
+  const now = Date.now();
+  const due = [...items]
+    .sort((a, b) => new Date(a.lastCheckedAt || a.postedAt || 0) - new Date(b.lastCheckedAt || b.postedAt || 0))
+    .find((item) => {
+      if (!item.lastCheckedAt) return true;
+      const checkedAt = new Date(item.lastCheckedAt).getTime();
+      return !Number.isFinite(checkedAt) || now - checkedAt >= GROUP_APPROVAL_CHECK_MINUTES * 60 * 1000;
+    });
+  if (!due) return;
+
+  const state = {
+    mode: "auto-post-status",
+    job: {
+      id: `auto-group-post-status-${Date.now().toString(36)}`,
+      productKey: due.productKey || "",
+      groups: [due],
+    },
+    groupIndex: 0,
+    results: [],
+    crmTabId: null,
+    tabId: null,
+    startedAt: Date.now(),
+  };
+
+  await saveGroupAgentState(state);
+  try {
+    const tab = await chrome.tabs.create({
+      url: groupPostSearchUrl(due.groupUrl, due.registration),
+      active: false,
+    });
+    state.tabId = tab.id || null;
+    await saveGroupAgentState(state);
+  } catch (error) {
+    await clearGroupAgentState();
+  }
+}
+
+function ensureApprovalAlarm() {
+  try {
+    chrome.alarms.create(GROUP_APPROVAL_ALARM, { periodInMinutes: GROUP_APPROVAL_CHECK_MINUTES });
+  } catch {}
+}
+
 async function broadcastReceipt(receipt, crmTabId) {
   if (crmTabId) {
     try {
@@ -136,6 +250,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           "groups-inspection",
           "groups-post-prep",
           "groups-post-status",
+          "groups-auto-approval-monitor",
         ],
       });
       return;
@@ -407,12 +522,68 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message?.type === "GROUP_POST_STATUS_PAGE_RESULT") {
       const state = await getGroupAgentState();
-      if (!state || state.mode !== "post-status" || state.job?.id !== message.jobId) {
+      if (
+        !state ||
+        !["post-status", "auto-post-status"].includes(state.mode) ||
+        state.job?.id !== message.jobId
+      ) {
         sendResponse({ ok: false });
         return;
       }
       if (Number(message.groupIndex) !== Number(state.groupIndex)) {
         sendResponse({ ok: false, error: "Post-status result is from an old group." });
+        return;
+      }
+
+      if (state.mode === "auto-post-status") {
+        const result = message.result || {};
+        const target = state.job.groups?.[0] || {};
+        const checkedAt = result.checkedAt || new Date().toISOString();
+        const event = {
+          id: `group-status-event-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          productKey: target.productKey || state.job.productKey || "",
+          groupUrl: canonicalGroupUrl(result.url || target.url || target.groupUrl),
+          groupName: target.name || target.groupName || "",
+          registration: result.registration || target.registration || "",
+          accepted: Boolean(result.accepted),
+          pending: Boolean(result.pending),
+          unavailable: Boolean(result.unavailable),
+          matchedUrl: result.matchedUrl || "",
+          checkedAt,
+        };
+
+        if (event.accepted || event.unavailable) {
+          await removeApprovalMonitorItem(event.groupUrl, event.registration);
+        } else {
+          const current = await getApprovalMonitorItems();
+          const next = current.map((item) => {
+            const sameGroup = canonicalGroupUrl(item.groupUrl) === event.groupUrl;
+            const sameReg = clean(item.registration).toUpperCase() === clean(event.registration).toUpperCase();
+            return sameGroup && sameReg
+              ? {
+                  ...item,
+                  lastCheckedAt: checkedAt,
+                  checkCount: Number(item.checkCount || 0) + 1,
+                  lastResult: event.pending ? "pending" : "not_found",
+                }
+              : item;
+          });
+          await saveApprovalMonitorItems(next);
+        }
+
+        await saveGroupStatusEvent(event);
+        if (event.accepted) {
+          try {
+            await chrome.action.setBadgeText({ text: "✓" });
+            await chrome.action.setTitle({ title: `${event.groupName || "Facebook group"} accepted ${event.registration || "your advert"}` });
+          } catch {}
+        }
+
+        if (state.tabId) {
+          try { await chrome.tabs.remove(state.tabId); } catch {}
+        }
+        await clearGroupAgentState();
+        sendResponse({ ok: true });
         return;
       }
 
@@ -502,6 +673,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       await chrome.storage.local.set({ [LAST_GROUP_POST_EVENT_KEY]: event });
       await broadcastToCrm({ type: "GROUP_POST_SUBMITTED", event }, pending.crmTabId);
+
+      if (event.approvalState !== "accepted") {
+        await upsertApprovalMonitorItem({
+          productKey: event.productKey,
+          groupUrl: event.groupUrl,
+          groupName: event.groupName,
+          registration: event.registration,
+          postedAt: event.postedAt,
+          approvalState: event.approvalState,
+        });
+        ensureApprovalAlarm();
+      }
+
       await chrome.storage.local.remove(GROUP_POST_JOB_KEY);
       sendResponse({ ok: true });
       return;
@@ -522,10 +706,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    if (message?.type === "GET_LAST_GROUP_STATUS_EVENT") {
+      const stored = await chrome.storage.local.get(LAST_GROUP_STATUS_EVENT_KEY);
+      sendResponse({ ok: true, event: stored[LAST_GROUP_STATUS_EVENT_KEY] || null });
+      return;
+    }
+
+    if (message?.type === "ACK_GROUP_STATUS_EVENT") {
+      const stored = await chrome.storage.local.get(LAST_GROUP_STATUS_EVENT_KEY);
+      if (!message.eventId || stored[LAST_GROUP_STATUS_EVENT_KEY]?.id === message.eventId) {
+        await chrome.storage.local.remove(LAST_GROUP_STATUS_EVENT_KEY);
+        await refreshApprovalBadge();
+      }
+      sendResponse({ ok: true });
+      return;
+    }
+
     sendResponse({ ok: false, error: "Unknown Marketplace helper message." });
   })().catch((error) => sendResponse({ ok: false, error: String(error?.message || error) }));
   return true;
 });
+
+chrome.runtime.onInstalled.addListener(() => {
+  ensureApprovalAlarm();
+  refreshApprovalBadge().catch(() => {});
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  ensureApprovalAlarm();
+  refreshApprovalBadge().catch(() => {});
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm?.name !== GROUP_APPROVAL_ALARM) return;
+  startAutomaticApprovalCheck().catch(() => {});
+});
+
+ensureApprovalAlarm();
+refreshApprovalBadge().catch(() => {});
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   const url = changeInfo.url || tab?.url || "";

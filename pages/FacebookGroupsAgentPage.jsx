@@ -4,6 +4,8 @@ import {
   GROUP_AGENT_INSPECTION_COMPLETE,
   GROUP_POST_EVENT_ACK,
   GROUP_POST_STATUS_COMPLETE,
+  GROUP_POST_STATUS_EVENT,
+  GROUP_POST_STATUS_EVENT_ACK,
   GROUP_POST_SUBMITTED,
   applyGroupInspection,
   archiveFacebookGroup,
@@ -293,6 +295,27 @@ export default function FacebookGroupsAgentPage({
           `Acceptance check finished: ${accepted} accepted, ${pending} still pending, ${Math.max(0, results.length - accepted - pending - unavailable)} not visible yet${unavailable ? `, ${unavailable} unavailable group${unavailable === 1 ? "" : "s"} archived` : ""}.`,
         );
       }
+
+      if (payload.type === GROUP_POST_STATUS_EVENT && payload.event) {
+        const statusEvent = payload.event;
+        if (statusEvent.productKey && statusEvent.productKey !== productKey) return;
+        persist((current) => markGroupPostStatus(current, statusEvent));
+        window.postMessage({
+          source: "vfc-marketing-crm",
+          type: GROUP_POST_STATUS_EVENT_ACK,
+          eventId: statusEvent.id || "",
+        }, window.location.origin);
+
+        if (statusEvent.accepted) {
+          setMessage(
+            `${statusEvent.groupName || "Facebook group"} has accepted/visible ${statusEvent.registration || "the advert"}. It has moved into Proven / Hot automatically.`,
+          );
+        } else if (statusEvent.unavailable) {
+          setMessage(
+            `${statusEvent.groupName || "Facebook group"} is no longer available and has been archived automatically.`,
+          );
+        }
+      }
     }
 
     window.addEventListener("message", handleMessage);
@@ -444,7 +467,7 @@ export default function FacebookGroupsAgentPage({
           <div className="posting-card__meta">
             <span>Joined: {yesNoUnknown(group.joined)}</span>
             <span>Can post: {yesNoUnknown(group.canPost)}</span>
-            <span>Approval: {yesNoUnknown(group.approvalRequired, "Required", "Not seen")}</span>
+            <span>Post approval: {yesNoUnknown(group.approvalRequired, "Required", "Not seen")}</span>
             <span>Links: {yesNoUnknown(group.linksAllowed, "Allowed", "Restricted")}</span>
           </div>
 
@@ -567,7 +590,7 @@ export default function FacebookGroupsAgentPage({
           {helperStatus.checking
             ? "checking connection…"
             : helperStatus.connected
-              ? `v${helperStatus.version || "unknown"} connected${helperStatus.capabilities.includes("groups-discovery") ? " · Groups ready" : " · Groups support missing"}`
+              ? `v${helperStatus.version || "unknown"} connected${helperStatus.capabilities.includes("groups-discovery") ? " · Groups ready" : " · Groups support missing"}${helperStatus.capabilities.includes("groups-auto-approval-monitor") ? " · approval monitor on" : ""}`
               : "not connected to this CRM tab"}
           {helperStatus.hostname ? ` · ${helperStatus.hostname}` : ""}
         </div>
