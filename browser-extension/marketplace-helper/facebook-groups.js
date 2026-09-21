@@ -47,22 +47,20 @@
 
   function resultName(anchor, context) {
     const direct = clean(anchor.innerText || anchor.textContent || anchor.getAttribute("aria-label"));
-    if (direct.length >= 3 && direct.length <= 180) return direct.split("
-")[0];
-    const lines = String(context || "").split(/
-+/).map(clean).filter(Boolean);
+    if (direct.length >= 3 && direct.length <= 180) return direct.split("\n")[0];
+    const lines = String(context || "").split(/\n+/).map(clean).filter(Boolean);
     return lines.find((line) => line.length >= 3 && line.length <= 180) || "Facebook group";
   }
 
   function parseMembers(context) {
     const text = clean(context);
-    const match = text.match(/([0-9][0-9,.]*s*[KMB]?)s+(?:members?|member)/i);
+    const match = text.match(/([0-9][0-9,.]*\s*[KMB]?)\s+(?:members?|member)/i);
     return match ? clean(match[1]) : "";
   }
 
   function parsePrivacy(context) {
-    if (/\bpublics+group\b/i.test(context)) return "Public";
-    if (/\bprivates+group\b/i.test(context)) return "Private";
+    if (/\bpublic\s+group\b/i.test(context)) return "Public";
+    if (/\bprivate\s+group\b/i.test(context)) return "Private";
     return "";
   }
 
@@ -106,8 +104,7 @@
 
   function pageLines() {
     return String(document.body?.innerText || "")
-      .split(/
-+/)
+      .split(/\n+/)
       .map(clean)
       .filter(Boolean);
   }
@@ -155,8 +152,7 @@
   async function inspectGroup(state) {
     await sleep(1800);
     const lines = pageLines();
-    const pageText = lines.join("
-").slice(0, 30000);
+    const pageText = lines.join("\n").slice(0, 30000);
     const unavailable = contentUnavailable(pageText);
     const ruleEvidence = extractRuleEvidence(lines);
     const canPost = Boolean(
