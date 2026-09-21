@@ -61,8 +61,8 @@
   }
 
   function parsePrivacy(context) {
-    if (/publics+group/i.test(context)) return "Public";
-    if (/privates+group/i.test(context)) return "Private";
+    if (/\bpublics+group\b/i.test(context)) return "Public";
+    if (/\bprivates+group\b/i.test(context)) return "Private";
     return "";
   }
 
@@ -112,6 +112,14 @@
       .filter(Boolean);
   }
 
+  function contentUnavailable(text) {
+    return /this content isn'?t available right now|content is not available|page isn'?t available|group is unavailable|group has been deleted/i.test(String(text || ""));
+  }
+
+  function normalizeRegistration(value) {
+    return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  }
+
   function extractRuleEvidence(lines) {
     const keywords = /advert|business|commercial|dealer|promo|link|spam|sell|sale|rule|approval|admin|service/i;
     const results = [];
@@ -149,6 +157,7 @@
     const lines = pageLines();
     const pageText = lines.join("
 ").slice(0, 30000);
+    const unavailable = contentUnavailable(pageText);
     const ruleEvidence = extractRuleEvidence(lines);
     const canPost = Boolean(
       buttonWithText(/write something|what'?s on your mind|create post/i)
@@ -179,13 +188,56 @@
         url: currentUrl || target.url || "",
         pageText: pageText.slice(0, 10000),
         ruleEvidence,
-        explicitStatus: explicitRuleStatus(ruleEvidence),
-        canPost,
+        explicitStatus: unavailable ? "Red" : explicitRuleStatus(ruleEvidence),
+        unavailable,
+        canPost: unavailable ? false : canPost,
         joined,
         approvalRequired,
         linksAllowed,
-        privacy: /public group/i.test(pageText) ? "Public" : /private group/i.test(pageText) ? "Private" : "",
+        privacy: /\bpublic group\b/i.test(pageText) ? "Public" : /\bprivate group\b/i.test(pageText) ? "Private" : "",
         members: parseMembers(pageText),
+      },
+    });
+  }
+
+  async function checkPostedStatus(state) {
+    await sleep(2000);
+    const target = state?.job?.groups?.[state.groupIndex] || {};
+    const pageText = clean(document.body?.innerText || "");
+    const unavailable = contentUnavailable(pageText);
+    const pending = /pending approval|awaiting approval|waiting for admin approval|post is pending/i.test(pageText);
+    const wantedReg = normalizeRegistration(target.registration);
+
+    const resultAnchors = [...document.querySelectorAll(
+      'a[href*="/posts/"], a[href*="/permalink/"], a[href*="/groups/"][href*="posts"]'
+    )].filter(visible);
+
+    let accepted = false;
+    let matchedUrl = "";
+    if (!unavailable && wantedReg) {
+      for (const anchor of resultAnchors) {
+        const context = nearestContext(anchor);
+        if (normalizeRegistration(context).includes(wantedReg)) {
+          accepted = true;
+          matchedUrl = anchor.href || "";
+          break;
+        }
+      }
+    }
+
+    await chrome.runtime.sendMessage({
+      type: "GROUP_POST_STATUS_PAGE_RESULT",
+      jobId: state.job.id,
+      groupIndex: state.groupIndex,
+      result: {
+        name: target.name || "",
+        url: canonicalGroupUrl(target.url) || canonicalGroupUrl(location.href),
+        registration: target.registration || "",
+        accepted,
+        pending: !accepted && pending,
+        unavailable,
+        matchedUrl,
+        checkedAt: new Date().toISOString(),
       },
     });
   }
@@ -272,6 +324,39 @@
     document.body.appendChild(panel);
   }
 
+  function watchManualGroupPost(job, dialog) {
+    let sent = false;
+
+    async function onClick(event) {
+      if (sent) return;
+      const button = event.target?.closest?.('button, [role="button"]');
+      if (!button || !visible(button)) return;
+      if (dialog && dialog !== document && !dialog.contains(button)) return;
+      const label = clean(button.innerText || button.textContent || button.getAttribute("aria-label"));
+      if (!/^post(?:\s|$)/i.test(label)) return;
+      if (button.disabled || button.getAttribute("aria-disabled") === "true") return;
+
+      sent = true;
+      await sleep(1800);
+      const pageText = clean(document.body?.innerText || "");
+      const approvalState = /pending approval|awaiting approval|waiting for admin approval|post is pending/i.test(pageText)
+        ? "pending"
+        : "submitted";
+
+      chrome.runtime.sendMessage({
+        type: "GROUP_POST_SUBMITTED",
+        jobId: job.id,
+        groupUrl: canonicalGroupUrl(job.groupUrl),
+        registration: job.registration || "",
+        postedAt: new Date().toISOString(),
+        approvalState,
+      }).catch(() => {});
+    }
+
+    document.addEventListener("click", onClick, true);
+    window.setTimeout(() => document.removeEventListener("click", onClick, true), 15 * 60 * 1000);
+  }
+
   async function prepareGroupPost(job) {
     if (canonicalGroupUrl(location.href) !== canonicalGroupUrl(job.groupUrl)) return;
     await sleep(1600);
@@ -300,6 +385,7 @@
 
     const imageResult = await attachImage(job, dialog);
     results.push({ label: "Photo", ok: imageResult.ok, detail: imageResult.detail });
+    watchManualGroupPost(job, dialog);
     showPostReport(job, results);
     await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
   }
@@ -319,6 +405,11 @@
 
     if (state?.mode === "inspection" && location.pathname.startsWith("/groups/")) {
       await inspectGroup(state);
+      return;
+    }
+
+    if (state?.mode === "post-status" && location.pathname.startsWith("/groups/")) {
+      await checkPostedStatus(state);
       return;
     }
 
