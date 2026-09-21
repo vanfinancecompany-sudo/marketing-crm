@@ -175,17 +175,35 @@ test("group helper actually claims an explicit post before reading inspection st
       }[name] || "";
     },
     getBoundingClientRect: () => ({ width: 600, height: 160 }),
+    closest: () => null,
     focus() { activeElement = editor; },
+  };
+  const heading = {
+    innerText: "Create post",
+    textContent: "Create post",
+    getAttribute: (name) => name === "role" ? "heading" : "",
+    getBoundingClientRect: () => ({ width: 180, height: 30 }),
+  };
+  const postButton = {
+    innerText: "Post",
+    textContent: "Post",
+    getAttribute: (name) => name === "role" ? "button" : "",
+    getBoundingClientRect: () => ({ width: 90, height: 36 }),
   };
   const dialog = {
     innerText: "Create post",
     textContent: "Create post",
-    getAttribute: () => "Create post",
+    getAttribute(name) {
+      return { role: "dialog", "aria-label": "Create post" }[name] || "";
+    },
     getBoundingClientRect: () => ({ width: 700, height: 500 }),
     querySelectorAll(selector) {
+      if (selector === '[role="heading"], h1, h2, h3') return [heading];
+      if (selector === 'button, [role="button"]') return [postButton];
+      if (selector === 'input[type="file"]') return [];
       return /contenteditable|textbox|lexical|Create a public post|Write something/.test(selector) ? [editor] : [];
     },
-    contains: () => true,
+    contains: (element) => element === editor || element === heading || element === postButton,
   };
   const document = {
     body: { innerText: "", appendChild() {} },
