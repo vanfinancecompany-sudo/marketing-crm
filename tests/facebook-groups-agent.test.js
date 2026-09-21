@@ -63,7 +63,7 @@ test("CRM exposes discovery, live checks and two-stage group pipelines", () => {
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.1");
+  assert.equal(manifest.version, "1.2.2");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(
     manifest.content_scripts.some((entry) =>
