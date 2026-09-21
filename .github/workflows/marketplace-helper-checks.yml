@@ -10,6 +10,11 @@ on:
       - "browser-extension/marketplace-helper/**"
       - "tests/marketplace-helper.test.js"
       - "tests/facebook-groups-agent.test.js"
+      - "tests/marketplace-helper-package.test.js"
+      - "scripts/package-marketplace-helper.mjs"
+      - "scripts/validate-marketplace-helper.mjs"
+      - "scripts/build-application.mjs"
+      - "package.json"
       - ".github/workflows/marketplace-helper-checks.yml"
 
 permissions:
@@ -32,15 +37,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Syntax-check Chrome extension scripts
-        run: |
-          node --check browser-extension/marketplace-helper/background.js
-          node --check browser-extension/marketplace-helper/crm-bridge.js
-          node --check browser-extension/marketplace-helper/facebook.js
-          node --check browser-extension/marketplace-helper/facebook-groups.js
+      - name: Validate Chrome extension manifest and scripts
+        run: npm run check:marketplace-helper
+
+      - name: Build and validate extension-only package
+        run: npm run package:marketplace-helper -- --out-dir .artifacts/marketplace-helper
 
       - name: Run Facebook helper tests
-        run: node --test tests/marketplace-helper.test.js tests/facebook-groups-agent.test.js
+        run: node --test tests/marketplace-helper.test.js tests/facebook-groups-agent.test.js tests/marketplace-helper-package.test.js
 
-      - name: Run production build
-        run: npm run build
+      - name: Run non-mutating production application build
+        run: npm run build:application
+
+      - name: Upload validated Facebook Helper package
+        uses: actions/upload-artifact@v4
+        with:
+          name: vfc-facebook-helper
+          path: .artifacts/marketplace-helper/*
+          if-no-files-found: error
+          retention-days: 14

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
+import vm from "node:vm";
 
 import {
   archiveFacebookGroup,
@@ -8,6 +9,7 @@ import {
   groupPipeline,
   loadFacebookGroups,
   markGroupAccepted,
+  markGroupPostStatus,
   markGroupPosted,
   normalizeFacebookGroupUrl,
   scoreFacebookGroups,
@@ -63,7 +65,7 @@ test("CRM exposes discovery, live checks and two-stage group pipelines", () => {
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.5");
+  assert.equal(manifest.version, "1.2.6");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -156,6 +158,145 @@ test("group post preparation takes priority over background inspection jobs", ()
   assert.ok(postIndex >= 0);
   assert.ok(agentIndex >= 0);
   assert.ok(postIndex < agentIndex);
+});
+
+test("group helper actually claims an explicit post before reading inspection state", async () => {
+  const calls = [];
+  let activeElement = null;
+  const editor = {
+    innerText: "",
+    textContent: "",
+    getAttribute(name) {
+      return {
+        "aria-label": "Create a public post",
+        role: "textbox",
+        contenteditable: "true",
+        "data-lexical-editor": "true",
+      }[name] || "";
+    },
+    getBoundingClientRect: () => ({ width: 600, height: 160 }),
+    focus() { activeElement = editor; },
+  };
+  const dialog = {
+    innerText: "Create post",
+    textContent: "Create post",
+    getAttribute: () => "Create post",
+    getBoundingClientRect: () => ({ width: 700, height: 500 }),
+    querySelectorAll(selector) {
+      return /contenteditable|textbox|lexical|Create a public post|Write something/.test(selector) ? [editor] : [];
+    },
+    contains: () => true,
+  };
+  const document = {
+    body: { innerText: "", appendChild() {} },
+    get activeElement() { return activeElement; },
+    querySelectorAll(selector) { return selector === '[role="dialog"]' ? [dialog] : []; },
+    getElementById: () => null,
+    createElement: () => ({ style: {}, innerHTML: "", remove() {} }),
+    addEventListener() {},
+    removeEventListener() {},
+    execCommand(command, _showUi, value) {
+      if (command === "insertText" && activeElement) {
+        activeElement.innerText = value;
+        activeElement.textContent = value;
+      }
+      return true;
+    },
+  };
+  const sandbox = {
+    chrome: {
+      runtime: {
+        async sendMessage(message) {
+          calls.push(message.type);
+          if (message.type === "GET_PENDING_GROUP_POST_JOB") {
+            return {
+              ok: true,
+              job: {
+                id: "explicit-post",
+                groupUrl: "https://www.facebook.com/groups/test/",
+                groupName: "Test group",
+                registration: "AB12CDE",
+                caption: "Rent2Buy caption long enough to be accepted",
+                imageUrl: "",
+              },
+            };
+          }
+          if (message.type === "GET_GROUP_AGENT_STATE") {
+            return { ok: true, state: { mode: "inspection", job: { id: "inspection" } } };
+          }
+          return { ok: true };
+        },
+      },
+    },
+    console,
+    document,
+    getComputedStyle: () => ({ display: "block", visibility: "visible" }),
+    location: { href: "https://www.facebook.com/groups/test/", origin: "https://www.facebook.com", pathname: "/groups/test/" },
+    setTimeout(callback) { callback(); return 1; },
+    clearTimeout() {},
+  };
+  sandbox.window = sandbox;
+
+  vm.runInNewContext(groupsHelperSource, sandbox, { filename: "facebook-groups.js" });
+  for (let attempt = 0; attempt < 20 && !calls.includes("GROUP_POST_FILL_COMPLETED"); attempt += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  assert.equal(calls[0], "GET_PENDING_GROUP_POST_JOB");
+  assert.ok(calls.includes("GROUP_POST_FILL_COMPLETED"));
+  assert.equal(calls.includes("GET_GROUP_AGENT_STATE"), false);
+});
+
+test("manual group post submission is recorded in Awaiting with its exact time and registration", () => {
+  const base = loadFacebookGroups()[0];
+  const postedAt = "2026-09-21T10:15:00.000Z";
+  const posted = markGroupPosted([base], base.url, {
+    registration: "AB12 CDE",
+    postedAt,
+    approvalState: "pending",
+  })[0];
+  assert.equal(posted.lastPostedAt, postedAt);
+  assert.equal(posted.pendingRegistration, "AB12 CDE");
+  assert.equal(posted.postStatus, "awaiting");
+  assert.equal(posted.pipeline, "testing");
+  assert.equal(posted.postCount, Number(base.postCount || 0) + 1);
+});
+
+test("post monitoring moves pending adverts to Proven and archives unavailable groups", () => {
+  const first = loadFacebookGroups()[0];
+  const second = loadFacebookGroups()[1];
+  const posted = [first, second].map((group) => markGroupPosted([group], group.url, {
+    registration: group === first ? "AB12CDE" : "XY34ZTT",
+    postedAt: "2026-09-21T10:15:00.000Z",
+  })[0]);
+
+  const pending = markGroupPostStatus(posted, {
+    url: first.url,
+    registration: "AB12CDE",
+    pending: true,
+    checkedAt: "2026-09-21T11:00:00.000Z",
+  });
+  assert.equal(pending[0].postStatus, "pending");
+
+  const accepted = markGroupPostStatus(pending, {
+    url: first.url,
+    registration: "AB12CDE",
+    accepted: true,
+    checkedAt: "2026-09-21T12:00:00.000Z",
+  });
+  assert.equal(accepted[0].postStatus, "accepted");
+  assert.equal(groupPipeline(accepted[0]), "proven");
+  assert.equal(accepted[0].repeatDays, 7);
+
+  const unavailable = markGroupPostStatus(accepted, {
+    url: second.url,
+    registration: "XY34ZTT",
+    unavailable: true,
+    checkedAt: "2026-09-21T12:00:00.000Z",
+  });
+  assert.equal(unavailable[1].postStatus, "unavailable");
+  assert.equal(unavailable[1].archived, true);
+  assert.equal(groupPipeline(unavailable[1]), "archived");
 });
 
 test("background monitor keeps posted groups under hourly approval review", () => {
