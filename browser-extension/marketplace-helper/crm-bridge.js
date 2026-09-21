@@ -25,6 +25,8 @@
   const GROUP_POST_STATUS_START = "VFC_GROUP_POST_STATUS_START";
   const GROUP_POST_STATUS_ACK = "VFC_GROUP_POST_STATUS_ACK";
   const GROUP_POST_STATUS_COMPLETE = "VFC_GROUP_POST_STATUS_COMPLETE";
+  const GROUP_POST_STATUS_EVENT = "VFC_GROUP_POST_STATUS_EVENT";
+  const GROUP_POST_STATUS_EVENT_ACK = "VFC_GROUP_POST_STATUS_EVENT_ACK";
   const FACEBOOK_HELPER_PING = "VFC_FACEBOOK_HELPER_PING";
   const FACEBOOK_HELPER_PONG = "VFC_FACEBOOK_HELPER_PONG";
 
@@ -207,6 +209,14 @@
       return;
     }
 
+    if (message.source === "vfc-marketing-crm" && message.type === GROUP_POST_STATUS_EVENT_ACK) {
+      chrome.runtime.sendMessage({
+        type: "ACK_GROUP_STATUS_EVENT",
+        eventId: message.eventId || "",
+      }).catch(() => {});
+      return;
+    }
+
     if (message.source === "vfc-marketing-crm" && message.type === RECEIPT_ACK_TYPE) {
       chrome.runtime.sendMessage({ type: "ACK_MARKETPLACE_RECEIPT", receiptId: message.receiptId || "" }).catch(() => {});
     }
@@ -262,6 +272,15 @@
         productKey: message.productKey || "",
         results: message.results || [],
       }, window.location.origin);
+      return;
+    }
+
+    if (message?.type === "GROUP_POST_STATUS_EVENT" && message.event) {
+      window.postMessage({
+        source: "vfc-facebook-helper",
+        type: GROUP_POST_STATUS_EVENT,
+        event: message.event,
+      }, window.location.origin);
     }
   });
 
@@ -282,6 +301,17 @@
       window.postMessage({
         source: "vfc-facebook-helper",
         type: GROUP_POST_SUBMITTED,
+        event: result.event,
+      }, window.location.origin);
+    })
+    .catch(() => {});
+
+  chrome.runtime.sendMessage({ type: "GET_LAST_GROUP_STATUS_EVENT" })
+    .then((result) => {
+      if (!result?.event) return;
+      window.postMessage({
+        source: "vfc-facebook-helper",
+        type: GROUP_POST_STATUS_EVENT,
         event: result.event,
       }, window.location.origin);
     })
