@@ -129,7 +129,7 @@ test("Chrome helper can discover and inspect groups without auto-posting", () =>
   assert.match(groupsHelperSource, /GET_PENDING_GROUP_POST_JOB/);
   assert.match(groupsHelperSource, /contentUnavailable/);
   assert.doesNotMatch(groupsHelperSource, /\.click\(\).*Facebook.*Post/i);
-  assert.match(groupsHelperSource, /FORMAT_PROBE_TEXT/);
+  assert.doesNotMatch(groupsHelperSource, /FORMAT_PROBE_TEXT/);
   assert.match(groupsHelperSource, /captionCopied/);
   assert.match(groupsHelperSource, /press Ctrl\+V/);
 });
@@ -386,11 +386,10 @@ function makeGroupHelperNode({ text = "", attrs = {}, accept = "", query = null,
   };
 }
 
-function createVerifiedComposerFixture({ pasteMode = "preserve" } = {}) {
+function createVerifiedComposerFixture() {
   const heading = makeGroupHelperNode({ text: "Create post", attrs: { role: "heading" } });
   const postButton = makeGroupHelperNode({ text: "Post", attrs: { role: "button" } });
   const photoButton = makeGroupHelperNode({ text: "Photo/video", attrs: { role: "button" } });
-  const pastedTexts = [];
   const editor = makeGroupHelperNode({
     attrs: {
       role: "textbox",
@@ -399,18 +398,6 @@ function createVerifiedComposerFixture({ pasteMode = "preserve" } = {}) {
       "aria-label": "Create a public post",
     },
   });
-  editor.dispatchEvent = (event) => {
-    editor.events.push(event.type);
-    if (event?.type !== "paste" || !event.clipboardData) return true;
-    const text = event.clipboardData.getData("text/plain");
-    pastedTexts.push(text);
-    if (pasteMode === "ignore") return true;
-    const rendered = pasteMode === "flatten" ? text.replace(/\n/g, "") : text;
-    editor.innerText = rendered;
-    editor.textContent = rendered;
-    return true;
-  };
-
   const fileInput = makeGroupHelperNode({ accept: "image/*" });
   const children = [heading, postButton, photoButton, editor, fileInput];
   const dialog = makeGroupHelperNode({
@@ -425,7 +412,7 @@ function createVerifiedComposerFixture({ pasteMode = "preserve" } = {}) {
     },
     contains: (element) => children.includes(element),
   });
-  return { dialog, heading, postButton, photoButton, editor, fileInput, pastedTexts };
+  return { dialog, heading, postButton, photoButton, editor, fileInput };
 }
 
 function loadGroupHelperTestHooks({
@@ -591,7 +578,6 @@ test("helper inserts nothing when no verified Create Post dialog exists", async 
   });
 
   assert.equal(comment.innerText, "");
-  assert.equal(comment.innerText, "");
   assert.equal(harness.calls.includes("FETCH_MARKETPLACE_IMAGE"), false);
   assert.equal(harness.calls.includes("GROUP_POST_FILL_COMPLETED"), true);
   assert.ok(
@@ -601,47 +587,24 @@ test("helper inserts nothing when no verified Create Post dialog exists", async 
   );
 });
 
-test("verified top-level Create Post dialog is accepted and caption target stays inside it", async () => {
+test("verified top-level Create Post dialog is accepted without injecting caption text", () => {
   const fixture = createVerifiedComposerFixture();
   const pageComment = makeGroupHelperNode({
     attrs: { role: "textbox", contenteditable: "true", "aria-label": "Write a comment..." },
   });
   const harness = loadGroupHelperTestHooks({ dialogs: [fixture.dialog] });
-  fixture.editor.focus = () => harness.setActive(fixture.editor);
 
   assert.equal(harness.hooks.isVerifiedCreatePostDialog(fixture.dialog), true);
   assert.equal(harness.hooks.verifiedComposerDialog(), fixture.dialog);
   const candidates = harness.hooks.composerEditorCandidates(fixture.dialog);
   assert.equal(candidates[0], fixture.editor);
   assert.equal(candidates.includes(pageComment), false);
-
-  const result = await harness.hooks.reactSetText(candidates[0], "Verified composer caption");
-  assert.equal(result.ok, true);
-  assert.equal(fixture.editor.innerText, "Verified composer caption");
+  assert.equal(fixture.editor.innerText, "");
   assert.equal(pageComment.innerText, "");
 });
 
-test("Facebook group helper uses a harmless probe before pasting the real multiline caption", async () => {
+test("group preparation attaches image, leaves caption box untouched, and instructs manual Ctrl+V", async () => {
   const fixture = createVerifiedComposerFixture();
-  const harness = loadGroupHelperTestHooks({ dialogs: [fixture.dialog] });
-  fixture.editor.focus = () => harness.setActive(fixture.editor);
-
-  const caption = "NO CREDIT CHECK\n\n£376 MTH\n\nRENT IT! - DRIVE IT! - OWN IT!\n\nApply in 60 seconds\n\nhttps://www.rent2buyvans.co.uk/";
-  const result = await harness.hooks.reactSetText(fixture.editor, caption);
-
-  assert.equal(result.ok, true);
-  assert.equal(result.method, "native-paste-event");
-  assert.equal(result.probePassed, true);
-  assert.equal(fixture.pastedTexts.length, 2);
-  assert.equal(fixture.pastedTexts[0], "VFC FORMAT CHECK A\n\nVFC FORMAT CHECK B");
-  assert.equal(fixture.pastedTexts[1], caption);
-  assert.equal(harness.hooks.normalizeComposerText(fixture.editor.innerText), harness.hooks.normalizeComposerText(caption));
-  assert.doesNotMatch(groupsHelperSource, /execCommand\("insertLineBreak"/);
-  assert.doesNotMatch(groupsHelperSource, /execCommand\("insertHTML"/);
-});
-
-test("unsupported Facebook formatting never receives the real caption, still attaches the advert image, and uses clipboard fallback", async () => {
-  const fixture = createVerifiedComposerFixture({ pasteMode: "ignore" });
   const harness = loadGroupHelperTestHooks({
     dialogs: [fixture.dialog],
     runtimeSendMessage(message) {
@@ -655,7 +618,7 @@ test("unsupported Facebook formatting never receives the real caption, still att
 
   const caption = "NO CREDIT CHECK\n\n£376 MTH\n\nRENT IT! - DRIVE IT! - OWN IT!\n\nhttps://www.rent2buyvans.co.uk/van-pages/AB12CDE";
   await harness.hooks.prepareGroupPost({
-    id: "format-fallback-test",
+    id: "manual-paste-test",
     groupName: "Test group",
     registration: "AB12CDE",
     caption,
@@ -664,17 +627,19 @@ test("unsupported Facebook formatting never receives the real caption, still att
   });
 
   assert.equal(fixture.editor.innerText, "");
-  assert.deepEqual(fixture.pastedTexts, ["VFC FORMAT CHECK A\n\nVFC FORMAT CHECK B"]);
-  assert.equal(fixture.pastedTexts.includes(caption), false);
-  assert.equal(harness.calls.includes("FETCH_MARKETPLACE_IMAGE"), true);
+  assert.equal(fixture.editor.textContent, "");
   assert.equal(fixture.fileInput.files.length, 1);
+  assert.equal(harness.calls.includes("FETCH_MARKETPLACE_IMAGE"), true);
   assert.equal(harness.calls.includes("GROUP_POST_FILL_COMPLETED"), true);
   assert.ok(
     harness.appended.some((panel) =>
-      String(panel.innerHTML).includes("already on your clipboard")
+      String(panel.innerHTML).includes("Caption copied")
       && String(panel.innerHTML).includes("press Ctrl+V")
     ),
   );
+  assert.doesNotMatch(groupsHelperSource, /execCommand\("(?:insertText|insertHTML|insertLineBreak)"/);
+  assert.doesNotMatch(groupsHelperSource, /ClipboardEvent/);
+  assert.doesNotMatch(groupsHelperSource, /reactSetText/);
 });
 
 test("group image upload stays inside the same verified Create Post dialog", async () => {
