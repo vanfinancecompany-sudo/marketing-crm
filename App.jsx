@@ -165,7 +165,8 @@ const TRACK_REDIRECTS = {
 const HIDDEN_POSTING_STORAGE_KEYS = {
   vanFinanceFacebook: "marketingHiddenVanFinanceFacebookVehicles",
   rent2BuyFacebook: "marketingHiddenRent2BuyFacebookVehicles",
-  marketplace: "marketingHiddenMarketplaceVehicles",
+  vanFinanceMarketplace: "marketingHiddenVanFinanceMarketplaceVehicles",
+  rent2BuyMarketplace: "marketingHiddenMarketplaceVehicles",
 };
 const MANUAL_REEL_QUEUE_STORAGE_KEYS = {
   finance: "manualFinanceReelQueue",
@@ -476,7 +477,8 @@ const VIEW_PATHS = {
   "Creative Library": "/creative-library",
   "Van Finance Facebook": "/van-finance-facebook",
   "Rent2Buy Facebook": "/rent2buy-facebook",
-  "Facebook Marketplace": "/facebook-marketplace",
+  "Van Finance Marketplace": "/van-finance-marketplace",
+  "Rent2Buy Marketplace": "/rent2buy-marketplace",
 };
 
 function viewFromPath() {
@@ -504,7 +506,8 @@ function viewFromPath() {
   if (path === "/creative-library") return "Creative Library";
   if (path === "/van-finance-facebook") return "Van Finance Facebook";
   if (path === "/rent2buy-facebook") return "Rent2Buy Facebook";
-  if (path === "/facebook-marketplace") return "Facebook Marketplace";
+  if (path === "/van-finance-marketplace") return "Van Finance Marketplace";
+  if (path === "/rent2buy-marketplace" || path === "/facebook-marketplace") return "Rent2Buy Marketplace";
 
   return "Content Operations";
 }
@@ -956,7 +959,8 @@ const [hiddenTodayReelIds, setHiddenTodayReelIds] = useState(() => {
   const [hiddenPostingVehicleIds, setHiddenPostingVehicleIds] = useState(() => ({
     vanFinanceFacebook: loadHiddenPostingIds("vanFinanceFacebook"),
     rent2BuyFacebook: loadHiddenPostingIds("rent2BuyFacebook"),
-    marketplace: loadHiddenPostingIds("marketplace"),
+    vanFinanceMarketplace: loadHiddenPostingIds("vanFinanceMarketplace"),
+    rent2BuyMarketplace: loadHiddenPostingIds("rent2BuyMarketplace"),
   }));
   const [factoryForm, setFactoryForm] = useState({
     templateType: templateOptions[0],
@@ -1216,13 +1220,21 @@ useEffect(() => {
       .filter((vehicle) => !hiddenIds.has(normalizePostingVehicleId(vehicle)));
   }, [rentVehicles, postedPostingKeys, hiddenPostingVehicleIds.rent2BuyFacebook]);
 
-  const marketplaceQueue = useMemo(() => {
-    const hiddenIds = new Set(hiddenPostingVehicleIds.marketplace);
+  const vanFinanceMarketplaceQueue = useMemo(() => {
+    const hiddenIds = new Set(hiddenPostingVehicleIds.vanFinanceMarketplace);
+    return financeVehicles
+      .map((vehicle) => asPipelineVehicle(vehicle, "vanFinance"))
+      .filter((vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Van Finance Marketplace")))
+      .filter((vehicle) => !hiddenIds.has(normalizePostingVehicleId(vehicle)));
+  }, [financeVehicles, postedPostingKeys, hiddenPostingVehicleIds.vanFinanceMarketplace]);
+
+  const rent2BuyMarketplaceQueue = useMemo(() => {
+    const hiddenIds = new Set(hiddenPostingVehicleIds.rent2BuyMarketplace);
     return rentVehicles
       .map((vehicle) => asPipelineVehicle(vehicle, "rent2buy"))
-      .filter((vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Facebook Marketplace")))
+      .filter((vehicle) => !postedPostingKeys.has(getPostingActionKey(vehicle, "Rent2Buy Marketplace")))
       .filter((vehicle) => !hiddenIds.has(normalizePostingVehicleId(vehicle)));
-  }, [rentVehicles, postedPostingKeys, hiddenPostingVehicleIds.marketplace]);
+  }, [rentVehicles, postedPostingKeys, hiddenPostingVehicleIds.rent2BuyMarketplace]);
 
   const postingDeskSummary = useMemo(() => {
     function buildDestinationSummary(destination, eligibleVehicles, pageKey) {
@@ -1242,14 +1254,18 @@ useEffect(() => {
     return {
       vanFinanceFacebook: buildDestinationSummary("Van Finance Facebook", financeVehicles, "vanFinanceFacebook"),
       rent2BuyFacebook: buildDestinationSummary("Rent2Buy Facebook", rentVehicles, "rent2BuyFacebook"),
-      marketplace: buildDestinationSummary("Facebook Marketplace", rentVehicles, "marketplace"),
+      vanFinanceMarketplace: buildDestinationSummary("Van Finance Marketplace", financeVehicles, "vanFinanceMarketplace"),
+      rent2BuyMarketplace: buildDestinationSummary("Rent2Buy Marketplace", rentVehicles, "rent2BuyMarketplace"),
     };
   }, [financeVehicles, rentVehicles, postedToday, hiddenPostingVehicleIds]);
 
   const dashboardStats = useMemo(() => {
     const createdToday = creatives.filter((creative) => isToday(creative.createdAt)).length;
     const readyToPost =
-      vanFinanceFacebookQueue.length + rent2BuyFacebookQueue.length + marketplaceQueue.length;
+      vanFinanceFacebookQueue.length +
+      rent2BuyFacebookQueue.length +
+      vanFinanceMarketplaceQueue.length +
+      rent2BuyMarketplaceQueue.length;
     const postedVehicleCount = postedToday.filter((item) => isToday(item.postedAt)).length;
 
     return {
@@ -1263,7 +1279,8 @@ useEffect(() => {
     creatives,
     vanFinanceFacebookQueue.length,
     rent2BuyFacebookQueue.length,
-    marketplaceQueue.length,
+    vanFinanceMarketplaceQueue.length,
+    rent2BuyMarketplaceQueue.length,
     postedToday,
     reelClickStats.financeClicksToday,
     reelClickStats.rent2BuyClicksToday,
@@ -1273,7 +1290,10 @@ useEffect(() => {
     const postedVehicleCount = postedToday.filter((item) => isToday(item.postedAt)).length;
     const reelsCreatedToday = todayReels.filter((reel) => isToday(reel.createdAt)).length;
     const totalVisibleVans =
-      vanFinanceFacebookQueue.length + rent2BuyFacebookQueue.length + marketplaceQueue.length;
+      vanFinanceFacebookQueue.length +
+      rent2BuyFacebookQueue.length +
+      vanFinanceMarketplaceQueue.length +
+      rent2BuyMarketplaceQueue.length;
 
     return {
       totalStock: vehicles.length,
@@ -1289,7 +1309,8 @@ useEffect(() => {
     todayReels,
     vanFinanceFacebookQueue.length,
     rent2BuyFacebookQueue.length,
-    marketplaceQueue.length,
+    vanFinanceMarketplaceQueue.length,
+    rent2BuyMarketplaceQueue.length,
     financeVehicles.length,
     rentVehicles.length,
   ]);
@@ -1964,13 +1985,16 @@ async function handleClearTodayReels() {
   function getPostingPageKey(destination) {
     if (destination === "Van Finance Facebook") return "vanFinanceFacebook";
     if (destination === "Rent2Buy Facebook") return "rent2BuyFacebook";
-    return "marketplace";
+    if (destination === "Van Finance Marketplace") return "vanFinanceMarketplace";
+    return "rent2BuyMarketplace";
   }
 
   function handleOpenFacebookPage(destination) {
     const destinationUrls = {
       "Van Finance Facebook": FINANCE_FACEBOOK_URL,
       "Rent2Buy Facebook": RENT_FACEBOOK_URL,
+      "Van Finance Marketplace": MARKETPLACE_URL,
+      "Rent2Buy Marketplace": MARKETPLACE_URL,
       "Facebook Marketplace": MARKETPLACE_URL,
     };
     const url = destinationUrls[destination] || FINANCE_FACEBOOK_URL;
@@ -1982,7 +2006,10 @@ async function handleClearTodayReels() {
   }
 
   function handleSyncStock(destination) {
-    const syncUrl = destination === "Van Finance Facebook" ? FINANCE_SYNC_URL : RENT_SYNC_URL;
+    const syncUrl =
+      destination === "Van Finance Facebook" || destination === "Van Finance Marketplace"
+        ? FINANCE_SYNC_URL
+        : RENT_SYNC_URL;
     window.open(syncUrl, "_blank", "noopener,noreferrer");
     window.setTimeout(() => {
       loadVehicles();
@@ -2872,16 +2899,36 @@ async function handleClearTodayReels() {
             onShowHiddenAgain={handleShowHiddenAgain}
           />
         );
-      case "Facebook Marketplace":
+      case "Van Finance Marketplace":
         return (
           <PostingDeskPage
-            title="Facebook Marketplace"
-            destination="Facebook Marketplace"
-            vehicles={marketplaceQueue.map((vehicle, index) => ({
+            title="Van Finance Marketplace"
+            destination="Van Finance Marketplace"
+            vehicles={vanFinanceMarketplaceQueue.map((vehicle, index) => ({
               ...vehicle,
-              caption: buildPostingCaption(vehicle, { destination: "Facebook Marketplace", index }),
+              caption: buildPostingCaption(vehicle, { destination: "Van Finance Marketplace", index }),
             }))}
-            summary={{ ...postingDeskSummary.marketplace, accent: "marketplace" }}
+            summary={{ ...postingDeskSummary.vanFinanceMarketplace, accent: "finance" }}
+            postedToday={postedToday}
+            vehiclesLoading={vehiclesLoading}
+            vehiclesError={vehiclesError}
+            onPostVehicle={handlePostVehicle}
+            onSkip={handleSkipVehicle}
+            onRefreshStock={handleRefreshStock}
+            onSyncStock={handleSyncStock}
+            onShowHiddenAgain={handleShowHiddenAgain}
+          />
+        );
+      case "Rent2Buy Marketplace":
+        return (
+          <PostingDeskPage
+            title="Rent2Buy Marketplace"
+            destination="Rent2Buy Marketplace"
+            vehicles={rent2BuyMarketplaceQueue.map((vehicle, index) => ({
+              ...vehicle,
+              caption: buildPostingCaption(vehicle, { destination: "Rent2Buy Marketplace", index }),
+            }))}
+            summary={{ ...postingDeskSummary.rent2BuyMarketplace, accent: "rent" }}
             postedToday={postedToday}
             vehiclesLoading={vehiclesLoading}
             vehiclesError={vehiclesError}
