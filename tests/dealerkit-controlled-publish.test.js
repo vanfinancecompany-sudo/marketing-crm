@@ -95,6 +95,68 @@ test("Van Finance primary image becomes both listing image and first gallery ima
   assert.equal(sets.vanFinance.ready, true);
 });
 
+test("Van Finance can publish with READY primary while secondary photos are still processing", () => {
+  const partialImported = [
+    { dealerKitImageId: "dk-2", wixUrl: "https://static.wixstatic.com/media/dk-2.jpg", ready: true, liveVerified: true, operationStatus: "READY" },
+    { dealerKitImageId: "dk-1", wixUrl: "https://static.wixstatic.com/media/dk-1.jpg", ready: false, liveVerified: true, operationStatus: "PROCESSING" },
+  ];
+  const v = vehicle();
+  const d = decision();
+  const sets = buildProductImageSets({ vehicle: v, decision: d, importedDealerKitMedia: partialImported, manualMediaReadiness: manualReadiness() });
+  assert.equal(sets.vanFinance.ready, true);
+  assert.equal(sets.vanFinance.mainUrl, "https://static.wixstatic.com/media/dk-2.jpg");
+  assert.deepEqual(sets.vanFinance.galleryUrls, ["https://static.wixstatic.com/media/dk-2.jpg"]);
+  assert.deepEqual(sets.vanFinance.missingDealerKitImageIds.sort(), ["dk-1", "dk-3"]);
+  const plan = buildControlledVehiclePublishPlan({ vehicle: v, decision: d, imageSets: sets, vfcWixResults: emptyVfcRows(), rent2buyWixResults: [] });
+  assert.equal(plan.canPublish, true);
+});
+
+test("Van Finance excluded photos are ignored and do not appear in the final gallery", () => {
+  const d = decision({ excludedImageIds: ["dk-1", "dk-3"], imageOrderIds: ["dk-1", "dk-2", "dk-3"], primaryImageId: "dk-2" });
+  const sets = buildProductImageSets({ vehicle: vehicle(), decision: d, importedDealerKitMedia: imported(), manualMediaReadiness: manualReadiness() });
+  assert.deepEqual(sets.vanFinance.dealerKitImageIds, ["dk-2"]);
+  assert.deepEqual(sets.vanFinance.missingDealerKitImageIds, []);
+  assert.deepEqual(sets.vanFinance.galleryUrls, ["https://static.wixstatic.com/media/dk-2.jpg"]);
+  assert.equal(sets.vanFinance.ready, true);
+});
+
+test("Van Finance still blocks when the chosen primary is not READY", () => {
+  const partialImported = [
+    { dealerKitImageId: "dk-1", wixUrl: "https://static.wixstatic.com/media/dk-1.jpg", ready: true, liveVerified: true, operationStatus: "READY" },
+    { dealerKitImageId: "dk-3", wixUrl: "https://static.wixstatic.com/media/dk-3.jpg", ready: true, liveVerified: true, operationStatus: "READY" },
+  ];
+  const v = vehicle();
+  const d = decision();
+  const sets = buildProductImageSets({ vehicle: v, decision: d, importedDealerKitMedia: partialImported, manualMediaReadiness: manualReadiness() });
+  assert.equal(sets.vanFinance.ready, false);
+  const plan = buildControlledVehiclePublishPlan({ vehicle: v, decision: d, imageSets: sets, vfcWixResults: emptyVfcRows(), rent2buyWixResults: [] });
+  assert.equal(plan.canPublish, false);
+  assert.ok(plan.blockers.some((blocker) => blocker.code === "vfc_media_not_ready"));
+});
+
+test("Rent2Buy READY template can publish while DealerKit secondary photos are processing", () => {
+  const template = { id: "manual-r2b", purpose: "rent2buy_template", selected: true, selectedAndReady: true, url: "https://static.wixstatic.com/media/r2b-template.png" };
+  const v = vehicle();
+  const d = decision({ financeEnabled: false, rent2buyEnabled: true, rent2buyCategories: ["all_vans", "medium_mwb"] });
+  const partialImported = [
+    { dealerKitImageId: "dk-1", wixUrl: "https://static.wixstatic.com/media/dk-1.jpg", ready: false, liveVerified: true, operationStatus: "PROCESSING" },
+  ];
+  const sets = buildProductImageSets({ vehicle: v, decision: d, importedDealerKitMedia: partialImported, manualMediaReadiness: manualReadiness({ selections: { rent2buy_template: template } }) });
+  assert.equal(sets.rent2buy.ready, true);
+  assert.deepEqual(sets.rent2buy.galleryUrls, [template.url]);
+  const plan = buildDealerKitRent2BuyWixPlan({ vehicle: v, decision: d, imageSets: sets });
+  assert.equal(plan.canPublish, true);
+});
+
+test("Rent2Buy still blocks when its template/primary is not READY", () => {
+  const v = vehicle();
+  const d = decision({ financeEnabled: false, rent2buyEnabled: true, rent2buyCategories: ["all_vans", "medium_mwb"] });
+  const sets = buildProductImageSets({ vehicle: v, decision: d, importedDealerKitMedia: imported(), manualMediaReadiness: manualReadiness() });
+  const plan = buildDealerKitRent2BuyWixPlan({ vehicle: v, decision: d, imageSets: sets });
+  assert.equal(plan.canPublish, false);
+  assert.ok(plan.blockers.some((blocker) => blocker.code === "rent2buy_template_not_ready"));
+});
+
 test("Rent2Buy template is isolated from Van Finance and leads only the Rent2Buy gallery", () => {
   const template = { id: "manual-r2b", purpose: "rent2buy_template", selected: true, selectedAndReady: true, url: "https://static.wixstatic.com/media/r2b-template.png" };
   const sets = buildProductImageSets({ vehicle: vehicle(), decision: decision({ rent2buyEnabled: true }), importedDealerKitMedia: imported(), manualMediaReadiness: manualReadiness({ selections: { rent2buy_template: template } }) });
