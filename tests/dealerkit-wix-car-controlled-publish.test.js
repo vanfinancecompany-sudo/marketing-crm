@@ -6,6 +6,7 @@ import {
   buildCarPublishConfirmation,
   carPublishConfirmationMatches,
 } from "../lib/dealerKitCarWixPlan.js";
+import { buildCarImageSet } from "../api/_dealerkit-car-controlled-publish-state.js";
 
 const root = new URL("../", import.meta.url);
 const sourceUpdatedAt = "2026-09-11T08:30:00.000Z";
@@ -101,6 +102,60 @@ test("Cars plan creates one current listing and one detail page using live CAR f
   assert.match(detail.data.exterior, /Alloy Wheels/);
   assert.match(detail.data.illumination, /LED Headlights/);
   assert.match(detail.data.safetyAndSecurity, /Stability Control/);
+});
+
+test("Cars can publish with READY primary while secondary photos are still processing", () => {
+  const carVehicle = vehicle({
+    images: [
+      { id: "image-1", url: "https://dealerkit.example/car-1.jpg" },
+      { id: "image-2", url: "https://dealerkit.example/car-2.jpg" },
+      { id: "image-3", url: "https://dealerkit.example/car-3.jpg" },
+    ],
+  });
+  const imported = [
+    { dealerKitImageId: "image-1", wixUrl: "https://static.wixstatic.com/media/car-1.jpg", ready: true },
+    { dealerKitImageId: "image-2", wixUrl: "https://static.wixstatic.com/media/car-2.jpg", ready: false },
+  ];
+  const { imageSet: partial } = buildCarImageSet(carVehicle, decision({ imageOrderIds: ["image-1", "image-2", "image-3"], primaryImageId: "image-1" }), imported);
+  assert.equal(partial.ready, true);
+  assert.deepEqual(partial.galleryUrls, ["https://static.wixstatic.com/media/car-1.jpg"]);
+  const plan = buildDealerKitCarWixPlan({ vehicle: carVehicle, decision: decision(), imageSet: partial });
+  assert.equal(plan.canPublish, true);
+});
+
+test("Cars excluded photos are ignored by readiness and gallery output", () => {
+  const carVehicle = vehicle({
+    images: [
+      { id: "image-1", url: "https://dealerkit.example/car-1.jpg" },
+      { id: "image-2", url: "https://dealerkit.example/car-2.jpg" },
+    ],
+  });
+  const imported = [
+    { dealerKitImageId: "image-1", wixUrl: "https://static.wixstatic.com/media/car-1.jpg", ready: true },
+  ];
+  const { imageSet: filtered, media } = buildCarImageSet(carVehicle, decision({ excludedImageIds: ["image-2"], primaryImageId: "image-1" }), imported);
+  assert.equal(filtered.ready, true);
+  assert.deepEqual(filtered.dealerKitImageIds, ["image-1"]);
+  assert.deepEqual(filtered.galleryUrls, ["https://static.wixstatic.com/media/car-1.jpg"]);
+  assert.equal(media.dealerKitExpected, 1);
+  assert.deepEqual(media.missingDealerKitImageIds, []);
+});
+
+test("Cars still block when the chosen primary is not READY", () => {
+  const carVehicle = vehicle({
+    images: [
+      { id: "image-1", url: "https://dealerkit.example/car-1.jpg" },
+      { id: "image-2", url: "https://dealerkit.example/car-2.jpg" },
+    ],
+  });
+  const imported = [
+    { dealerKitImageId: "image-2", wixUrl: "https://static.wixstatic.com/media/car-2.jpg", ready: true },
+  ];
+  const { imageSet: missingPrimary } = buildCarImageSet(carVehicle, decision(), imported);
+  assert.equal(missingPrimary.ready, false);
+  const plan = buildDealerKitCarWixPlan({ vehicle: carVehicle, decision: decision(), imageSet: missingPrimary });
+  assert.equal(plan.canPublish, false);
+  assert.ok(plan.blockers.some((blocker) => blocker.code === "car_media_not_ready"));
 });
 
 test("Cars live listing switches to the controlled photo-ready repair path", () => {
