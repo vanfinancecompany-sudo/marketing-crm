@@ -243,7 +243,7 @@ export default async function handler(request, response) {
       rollback: reportedRollback,
       publishStatusTransitions: statusTransitions,
       publishStatusRollback: statusRollback,
-      manualAttentionRequired: Boolean(error?.details?.manualAttentionRequired || (writes.length > 0 && !rollbackComplete) || (statusTransitions.length > 0 && !statusRollbackComplete)),
+      manualAttentionRequired: Boolean(error?.details?.manualAttentionRequired || error?.details?.publishStatusChangeUncertain || (writes.length > 0 && !rollbackComplete) || (statusTransitions.length > 0 && !statusRollbackComplete)),
       message: error?.message || "Controlled Cars reconciliation failed.",
       details: error?.details || null,
     });
