@@ -480,7 +480,7 @@
     return { ok: true, detail: "Image attached inside verified Create Post composer" };
   }
 
-  function showPostReport(job, results, fatalMessage = "") {
+  function showPostReport(job, results, fatalMessage = "", nextStep = "") {
     document.getElementById("vfc-group-helper-report")?.remove();
     const panel = document.createElement("div");
     panel.id = "vfc-group-helper-report";
@@ -509,6 +509,7 @@
       '<div style="margin-top:4px">' + (job.groupName || "Facebook group") + " • " + (job.registration || "selected van") + "</div>" +
       '<div style="margin-top:8px">' + results.filter((item) => item.ok).length + "/" + results.length + " preparation checks succeeded.</div>" +
       failureHtml +
+      (nextStep ? '<div style="margin-top:10px;color:#fff"><b>Next:</b> ' + nextStep + "</div>" : "") +
       '<div style="margin-top:10px;color:#ddd"><b>Nothing has been posted.</b> Check the group rules and advert, then click Facebook\'s Post button yourself.</div>';
     document.body.appendChild(panel);
   }
@@ -588,7 +589,7 @@
     const instruction = job.captionCopied
       ? "Caption copied. Click in the Facebook text box and press Ctrl+V, review the advert, then click Post."
       : "Copy the caption from the CRM, paste it into the Facebook text box, review the advert, then click Post.";
-    showPostReport(job, results, instruction);
+    showPostReport(job, results, "", instruction);
     await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
   }
 
