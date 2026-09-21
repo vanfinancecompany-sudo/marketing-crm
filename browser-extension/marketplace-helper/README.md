@@ -51,3 +51,13 @@ The same extension also supports the separate **Rent2Buy Facebook Groups** and *
 - Discovery and inspection are deliberately batched rather than running as an unattended high-frequency crawler.
 
 The Group agent stores its candidate/check history in the browser-side Marketing CRM state in this first release. No production customer, lead or stock records are altered.
+
+
+## Group pipeline logic
+
+The CRM separates groups into:
+- **New & Testing**: new discoveries and groups with adverts waiting for visibility/approval checks.
+- **Proven / Hot**: at least one advert has been confirmed visible/accepted.
+- **Archived**: unavailable groups or groups whose visible rules explicitly prohibit commercial/dealer/promotional posting.
+
+When the user manually clicks Facebook's **Post** button, the helper records that posting attempt back to the CRM. The CRM can then run an acceptance check against posted registrations. Proven groups default to a 7-day repeat interval (configurable per group) and appear in the **Due again** section when ready for another advert.
