@@ -570,12 +570,25 @@
     }
 
     if (!editor || !scope || !verified || !isVerifiedCreatePostDialog(scope)) {
-      const fatalMessage = "Could not verify Facebook group post composer. Nothing was inserted.";
-      results.push({ label: "Composer", ok: false, detail: "Verified Create Post dialog not found" });
+      const pageText = clean(document.body?.innerText || "");
+      const membershipPending = /your membership is pending|membership request (?:is )?pending|your request to join is pending|request to join (?:is )?pending|membership pending|request sent/i.test(pageText);
+      const fatalMessage = membershipPending
+        ? "Facebook says your membership is pending. This group has been moved to Pending Membership."
+        : "Could not verify Facebook group post composer. Nothing was inserted.";
+      results.push({
+        label: "Composer",
+        ok: false,
+        detail: membershipPending ? "Posting blocked while group membership is pending" : "Verified Create Post dialog not found",
+      });
       results.push({ label: "Caption clipboard", ok: Boolean(job.captionCopied), detail: job.captionCopied ? "Caption copied before Facebook opened" : "Caption was not copied" });
       results.push({ label: "Photo", ok: false, detail: "Skipped because the composer was not verified" });
       showPostReport(job, results, fatalMessage);
-      await chrome.runtime.sendMessage({ type: "GROUP_POST_FILL_COMPLETED", jobId: job.id, results });
+      await chrome.runtime.sendMessage({
+        type: "GROUP_POST_FILL_COMPLETED",
+        jobId: job.id,
+        results,
+        membershipPending,
+      });
       return;
     }
 
