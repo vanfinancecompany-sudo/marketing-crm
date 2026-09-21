@@ -162,7 +162,7 @@ export default async function handler(request, response) {
       pending: prepared.pending,
       message: prepared.ready
         ? `All ${prepared.images.length} reviewed DealerKit images are READY in Wix Media. No vehicle CMS rows were changed.`
-        : `Prepared ${prepared.images.length} DealerKit image(s) in Wix Media. Some are still processing; vehicle publishing remains locked.`,
+        : `Prepared ${prepared.images.length} DealerKit image(s) in Wix Media. Some secondary photos are still processing; once the chosen primary is READY, the advert can publish with the READY photos.`,
     });
   } catch (error) {
     response.status(error?.status || 502).json({ ok: false, cmsWritesAttempted: false, message: error?.message || "Could not prepare DealerKit images.", details: error?.details || null });
