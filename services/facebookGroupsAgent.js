@@ -541,6 +541,17 @@ export function markGroupPostStatus(groups, result) {
   const key = normalizeFacebookGroupUrl(result?.url || result?.groupUrl || "").toLowerCase();
   return (groups || []).map((group) => {
     if (normalizeFacebookGroupUrl(group.url).toLowerCase() !== key) return group;
+    if (result?.declined) {
+      return {
+        ...group,
+        status: "Red",
+        postStatus: "declined",
+        archived: true,
+        archiveReason: "Facebook declined/rejected the advert",
+        archivedAt: result?.checkedAt || new Date().toISOString(),
+        lastPostCheckAt: result?.checkedAt || new Date().toISOString(),
+      };
+    }
     if (result?.unavailable) {
       return {
         ...group,
@@ -548,7 +559,8 @@ export function markGroupPostStatus(groups, result) {
         postStatus: "unavailable",
         archived: true,
         archiveReason: "Facebook says this group/content is unavailable",
-        lastPostCheckAt: new Date().toISOString(),
+        archivedAt: result?.checkedAt || new Date().toISOString(),
+        lastPostCheckAt: result?.checkedAt || new Date().toISOString(),
       };
     }
     if (result?.accepted) {

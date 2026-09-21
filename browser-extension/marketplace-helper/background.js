@@ -547,12 +547,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           registration: result.registration || target.registration || "",
           accepted: Boolean(result.accepted),
           pending: Boolean(result.pending),
+          declined: Boolean(result.declined),
           unavailable: Boolean(result.unavailable),
           matchedUrl: result.matchedUrl || "",
           checkedAt,
         };
 
-        if (event.accepted || event.unavailable) {
+        if (event.accepted || event.declined || event.unavailable) {
           await removeApprovalMonitorItem(event.groupUrl, event.registration);
         } else {
           const current = await getApprovalMonitorItems();
@@ -572,10 +573,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         await saveGroupStatusEvent(event);
-        if (event.accepted) {
+        if (event.accepted || event.declined) {
           try {
-            await chrome.action.setBadgeText({ text: "✓" });
-            await chrome.action.setTitle({ title: `${event.groupName || "Facebook group"} accepted ${event.registration || "your advert"}` });
+            await chrome.action.setBadgeText({ text: event.accepted ? "✓" : "×" });
+            await chrome.action.setTitle({
+              title: event.accepted
+                ? `${event.groupName || "Facebook group"} accepted ${event.registration || "your advert"}`
+                : `${event.groupName || "Facebook group"} declined ${event.registration || "your advert"}`,
+            });
           } catch {}
         }
 

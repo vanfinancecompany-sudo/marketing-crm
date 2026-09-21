@@ -396,7 +396,8 @@
     const target = state?.job?.groups?.[state.groupIndex] || {};
     const pageText = clean(document.body?.innerText || "");
     const unavailable = contentUnavailable(pageText);
-    const pending = /pending approval|awaiting approval|waiting for admin approval|post is pending/i.test(pageText);
+    const declined = /post (?:was )?(?:declined|rejected)|declined by (?:an )?admin|rejected by (?:an )?admin|your post was not approved|post was not approved/i.test(pageText);
+    const pending = !declined && /pending approval|awaiting approval|waiting for admin approval|post is pending/i.test(pageText);
     const wantedReg = normalizeRegistration(target.registration);
 
     const resultAnchors = [...document.querySelectorAll(
@@ -405,7 +406,7 @@
 
     let accepted = false;
     let matchedUrl = "";
-    if (!unavailable && wantedReg) {
+    if (!unavailable && !declined && wantedReg) {
       for (const anchor of resultAnchors) {
         const context = nearestContext(anchor);
         if (normalizeRegistration(context).includes(wantedReg)) {
@@ -426,6 +427,7 @@
         registration: target.registration || "",
         accepted,
         pending: !accepted && pending,
+        declined,
         unavailable,
         matchedUrl,
         checkedAt: new Date().toISOString(),
