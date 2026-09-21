@@ -391,7 +391,6 @@
     if (!editor) {
       const opener = findComposerOpener();
       if (opener) {
-        fireRealisticClick(opener);
         try { opener.click(); } catch {}
         results.push({ label: "Composer", ok: true, detail: "Opened" });
         ({ editor, scope } = await waitForComposerEditor(6500));
