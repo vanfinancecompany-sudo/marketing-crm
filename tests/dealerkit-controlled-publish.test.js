@@ -480,4 +480,6 @@ test("operator flow separates media preparation from final CMS publishing", asyn
   assert.match(source, /dealerkit-controlled-publish-preview/);
   assert.match(source, /dealerkit-wix-prepare-media/);
   assert.match(source, /dealerkit-controlled-publish/);
+  assert.match(source, /dealerkit-product-gallery-saved/);
+  assert.match(source, /additional selected DealerKit photo/);
 });
