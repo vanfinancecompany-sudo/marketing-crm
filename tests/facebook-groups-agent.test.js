@@ -324,3 +324,287 @@ test("background monitor keeps posted groups under hourly approval review", () =
   assert.match(backgroundSource, /chrome\.action\.setBadgeText/);
   assert.match(backgroundSource, /GET_LAST_GROUP_STATUS_EVENT/);
 });
+
+
+function makeGroupHelperNode({ text = "", attrs = {}, accept = "", query = null, contains = null } = {}) {
+  return {
+    innerText: text,
+    textContent: text,
+    accept,
+    events: [],
+    clicked: 0,
+    getAttribute(name) { return attrs[name] || ""; },
+    getBoundingClientRect: () => ({ width: 520, height: 120 }),
+    querySelectorAll(selector) { return query ? query(selector) : []; },
+    closest: () => null,
+    contains(element) { return contains ? contains(element) : false; },
+    click() { this.clicked += 1; },
+    focus() {},
+    dispatchEvent(event) { this.events.push(event.type); },
+  };
+}
+
+function createVerifiedComposerFixture() {
+  const heading = makeGroupHelperNode({ text: "Create post", attrs: { role: "heading" } });
+  const postButton = makeGroupHelperNode({ text: "Post", attrs: { role: "button" } });
+  const photoButton = makeGroupHelperNode({ text: "Photo/video", attrs: { role: "button" } });
+  const editor = makeGroupHelperNode({
+    attrs: {
+      role: "textbox",
+      contenteditable: "true",
+      "data-lexical-editor": "true",
+      "aria-label": "Create a public post",
+    },
+  });
+  const fileInput = makeGroupHelperNode({ accept: "image/*" });
+  const children = [heading, postButton, photoButton, editor, fileInput];
+  const dialog = makeGroupHelperNode({
+    attrs: { role: "dialog", "aria-label": "Create post" },
+    query(selector) {
+      if (selector === '[role="heading"], h1, h2, h3') return [heading];
+      if (selector === 'button, [role="button"]') return [postButton, photoButton];
+      if (selector === 'input[type="file"]') return [fileInput];
+      if (selector === "div, span, p") return [];
+      if (/contenteditable|textbox|lexical|Create a public post|Write something/.test(selector)) return [editor];
+      return [];
+    },
+    contains: (element) => children.includes(element),
+  });
+  return { dialog, heading, postButton, photoButton, editor, fileInput };
+}
+
+function loadGroupHelperTestHooks({ dialogs = [], controls = [], labels = [], runtimeSendMessage } = {}) {
+  const hooks = {};
+  const appended = [];
+  const calls = [];
+  let activeElement = null;
+  let insertTextCalls = 0;
+  let clock = 0;
+
+  class FastDate extends Date {
+    static now() {
+      clock += 1000;
+      return clock;
+    }
+  }
+
+  class FakeEvent {
+    constructor(type) { this.type = type; }
+  }
+
+  class FakeFile {
+    constructor(parts, name, options = {}) {
+      this.parts = parts;
+      this.name = name;
+      this.type = options.type || "";
+    }
+  }
+
+  class FakeDataTransfer {
+    constructor() {
+      const files = [];
+      this.items = { add(file) { files.push(file); } };
+      Object.defineProperty(this, "files", { get: () => files });
+    }
+  }
+
+  const document = {
+    body: {
+      innerText: "",
+      appendChild(node) { appended.push(node); },
+    },
+    get activeElement() { return activeElement; },
+    querySelectorAll(selector) {
+      if (selector === '[role="dialog"]') return dialogs;
+      if (selector === 'button, [role="button"], a') return controls;
+      if (selector === "div, span") return labels;
+      return [];
+    },
+    getElementById: () => null,
+    createElement: () => ({ style: {}, innerHTML: "", remove() {} }),
+    addEventListener() {},
+    removeEventListener() {},
+    execCommand(command, _showUi, value) {
+      if (command === "insertText" && activeElement) {
+        insertTextCalls += 1;
+        activeElement.innerText = value;
+        activeElement.textContent = value;
+      }
+      return true;
+    },
+  };
+
+  const sandbox = {
+    __VFC_FACEBOOK_GROUPS_TEST_HOOKS__: hooks,
+    __VFC_FACEBOOK_GROUPS_TEST_MODE__: true,
+    chrome: {
+      runtime: {
+        async sendMessage(message) {
+          calls.push(message.type);
+          if (runtimeSendMessage) return runtimeSendMessage(message);
+          return { ok: true };
+        },
+      },
+    },
+    console,
+    document,
+    getComputedStyle: () => ({ display: "block", visibility: "visible" }),
+    location: {
+      href: "https://www.facebook.com/groups/test/",
+      origin: "https://www.facebook.com",
+      pathname: "/groups/test/",
+    },
+    Date: FastDate,
+    Event: FakeEvent,
+    InputEvent: FakeEvent,
+    File: FakeFile,
+    DataTransfer: FakeDataTransfer,
+    atob: (value) => Buffer.from(value, "base64").toString("binary"),
+    setTimeout(callback) { callback(); return 1; },
+    clearTimeout() {},
+  };
+  sandbox.window = sandbox;
+
+  vm.runInNewContext(groupsHelperSource, sandbox, { filename: "facebook-groups.js" });
+
+  return {
+    hooks,
+    document,
+    appended,
+    calls,
+    setActive(element) { activeElement = element; },
+    get insertTextCalls() { return insertTextCalls; },
+  };
+}
+
+test("Facebook group comment and reply editors are rejected", () => {
+  const harness = loadGroupHelperTestHooks();
+  const comment = makeGroupHelperNode({
+    attrs: { role: "textbox", contenteditable: "true", "aria-label": "Comment" },
+  });
+  const writeComment = makeGroupHelperNode({
+    attrs: { role: "textbox", contenteditable: "true", "aria-label": "Write a comment..." },
+  });
+  const reply = makeGroupHelperNode({
+    attrs: { role: "textbox", contenteditable: "true", "aria-label": "Reply" },
+  });
+
+  assert.equal(harness.hooks.isRejectedComposerEditor(comment), true);
+  assert.equal(harness.hooks.isRejectedComposerEditor(writeComment), true);
+  assert.equal(harness.hooks.isRejectedComposerEditor(reply), true);
+});
+
+test("generic page-level contenteditable is never accepted as a Facebook group composer", () => {
+  const genericEditor = makeGroupHelperNode({
+    attrs: { role: "textbox", contenteditable: "true" },
+  });
+  const genericScope = makeGroupHelperNode({
+    query: () => [genericEditor],
+  });
+  const harness = loadGroupHelperTestHooks();
+
+  assert.equal(harness.hooks.isVerifiedCreatePostDialog(genericScope), false);
+  assert.deepEqual(harness.hooks.composerEditorCandidates(genericScope), []);
+  assert.doesNotMatch(groupsHelperSource, /dialogs\[dialogs\.length - 1\]\s*\|\|\s*document/);
+  assert.doesNotMatch(groupsHelperSource, /\(dialog\s*\|\|\s*document\)/);
+});
+
+test("helper inserts nothing when no verified Create Post dialog exists", async () => {
+  const comment = makeGroupHelperNode({
+    text: "",
+    attrs: { role: "textbox", contenteditable: "true", "aria-label": "Write a comment..." },
+  });
+  const harness = loadGroupHelperTestHooks();
+
+  await harness.hooks.prepareGroupPost({
+    id: "unsafe-comment-test",
+    groupName: "Test group",
+    registration: "AB12CDE",
+    caption: "This advert must never be inserted into a comment editor.",
+    imageUrl: "https://example.test/van.jpg",
+  });
+
+  assert.equal(comment.innerText, "");
+  assert.equal(harness.insertTextCalls, 0);
+  assert.equal(harness.calls.includes("FETCH_MARKETPLACE_IMAGE"), false);
+  assert.equal(harness.calls.includes("GROUP_POST_FILL_COMPLETED"), true);
+  assert.ok(
+    harness.appended.some((panel) =>
+      String(panel.innerHTML).includes("Could not verify Facebook group post composer. Nothing was inserted.")
+    ),
+  );
+});
+
+test("verified top-level Create Post dialog is accepted and caption target stays inside it", () => {
+  const fixture = createVerifiedComposerFixture();
+  const pageComment = makeGroupHelperNode({
+    attrs: { role: "textbox", contenteditable: "true", "aria-label": "Write a comment..." },
+  });
+  const harness = loadGroupHelperTestHooks({ dialogs: [fixture.dialog] });
+  fixture.editor.focus = () => harness.setActive(fixture.editor);
+
+  assert.equal(harness.hooks.isVerifiedCreatePostDialog(fixture.dialog), true);
+  assert.equal(harness.hooks.verifiedComposerDialog(), fixture.dialog);
+  const candidates = harness.hooks.composerEditorCandidates(fixture.dialog);
+  assert.equal(candidates[0], fixture.editor);
+  assert.equal(candidates.includes(pageComment), false);
+
+  harness.hooks.reactSetText(candidates[0], "Verified composer caption");
+  assert.equal(fixture.editor.innerText, "Verified composer caption");
+  assert.equal(pageComment.innerText, "");
+});
+
+test("group image upload stays inside the same verified Create Post dialog", async () => {
+  const fixture = createVerifiedComposerFixture();
+  const pageLevelFileInput = makeGroupHelperNode({ accept: "image/*" });
+  const harness = loadGroupHelperTestHooks({
+    dialogs: [fixture.dialog],
+    runtimeSendMessage(message) {
+      if (message.type === "FETCH_MARKETPLACE_IMAGE") {
+        return { ok: true, dataUrl: "data:image/jpeg;base64,QQ==" };
+      }
+      return { ok: true };
+    },
+  });
+
+  harness.document.querySelectorAll = (selector) => {
+    if (selector === '[role="dialog"]') return [fixture.dialog];
+    if (selector === 'input[type="file"]') return [pageLevelFileInput];
+    return [];
+  };
+
+  const result = await harness.hooks.attachImage({
+    registration: "AB12CDE",
+    imageUrl: "https://example.test/van.jpg",
+  }, fixture.dialog);
+
+  assert.equal(result.ok, true);
+  assert.equal(fixture.fileInput.files.length, 1);
+  assert.equal(pageLevelFileInput.files, undefined);
+  assert.deepEqual(fixture.fileInput.events, ["input", "change"]);
+  assert.deepEqual(harness.calls, ["FETCH_MARKETPLACE_IMAGE"]);
+});
+
+test("unverified dialogs cannot trigger group image download or upload", async () => {
+  const fakeDialog = makeGroupHelperNode({
+    attrs: { role: "dialog", "aria-label": "Comments" },
+    query: () => [],
+  });
+  const harness = loadGroupHelperTestHooks();
+  const result = await harness.hooks.attachImage({
+    registration: "AB12CDE",
+    imageUrl: "https://example.test/van.jpg",
+  }, fakeDialog);
+
+  assert.equal(result.ok, false);
+  assert.match(result.detail, /Verified Create Post composer required/);
+  assert.equal(harness.calls.includes("FETCH_MARKETPLACE_IMAGE"), false);
+});
+
+test("group composer fail-safe and manual final Post safeguard remain explicit", () => {
+  assert.match(groupsHelperSource, /Could not verify Facebook group post composer\. Nothing was inserted\./);
+  assert.match(groupsHelperSource, /isVerifiedCreatePostDialog\(scope\)/);
+  assert.match(groupsHelperSource, /dialog\.contains\(active\)/);
+  assert.match(groupsHelperSource, /click Facebook\\'s Post button yourself/);
+  assert.doesNotMatch(groupsHelperSource, /\.click\(\).*Facebook.*Post/i);
+});
