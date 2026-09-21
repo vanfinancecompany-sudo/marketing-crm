@@ -37,6 +37,7 @@ function confirmationInputMatches(root) {
 
 function refreshActionState(root) {
   const state = root._controlledPublishPayload;
+  const completed = root.dataset.publishCompleted === "true";
   const typed = confirmationInputMatches(root);
   const prepare = root.querySelector("[data-controlled-publish-prepare]");
   const publish = root.querySelector("[data-controlled-publish-apply]");
@@ -44,6 +45,13 @@ function refreshActionState(root) {
   const unpreparedCount = state?.media?.unpreparedDealerKitImageIds?.length || 0;
   const processingCount = state?.media?.processingDealerKitImageIds?.length || 0;
   const canPublish = Boolean(state?.plan?.canPublish);
+
+  if (completed) {
+    if (prepare) prepare.hidden = true;
+    if (publish) publish.hidden = true;
+    if (check) check.hidden = true;
+    return;
+  }
 
   if (prepare) {
     prepare.hidden = unpreparedCount === 0;
@@ -154,9 +162,12 @@ function renderPayload(root, payload) {
   refreshActionState(root);
 }
 
-async function loadPreview(root) {
+async function loadPreview(root, { force = false } = {}) {
   const registration = normaliseRegistration(root.dataset.registration);
   if (!registration) return;
+  if (root.dataset.publishCompleted === "true" && !force) return;
+  const requestId = (Number(root._controlledPreviewRequestId) || 0) + 1;
+  root._controlledPreviewRequestId = requestId;
   setStatus(root, "CHECKING", "is-busy");
   const result = root.querySelector("[data-controlled-publish-result]");
   if (result) {
@@ -171,6 +182,8 @@ async function loadPreview(root) {
     headers: buildMarketingAccessHeaders({ accept: "application/json" }), cache: "no-store",
   });
   const payload = await parseMarketingJsonResponse(response, "Could not build final publish readiness.");
+  if (root._controlledPreviewRequestId !== requestId) return;
+  if (root.dataset.publishCompleted === "true" && !force) return;
   renderPayload(root, payload);
 }
 
@@ -271,6 +284,10 @@ function createPanel(registration, product = "finance") {
     publish.disabled = true;
     prepare.disabled = true;
     publish.textContent = "Publishing…";
+    // Invalidate any preview request that started before this final write. A
+    // delayed READY response from the old CMS state must never overwrite a
+    // successful publish/reconcile result.
+    root._controlledPreviewRequestId = (Number(root._controlledPreviewRequestId) || 0) + 1;
     setStatus(root, "FINAL RECHECK", "is-busy");
     try {
       const endpoint = root.dataset.product === "cars" ? "/api/dealerkit-car-controlled-publish" : "/api/dealerkit-controlled-publish";
@@ -286,8 +303,16 @@ function createPanel(registration, product = "finance") {
       setStatus(root, published.verified ? (updateExisting ? "RECONCILED + VERIFIED" : "PUBLISHED + VERIFIED") : "CHECK RESULT", published.verified ? "is-good" : "is-warning");
       result.replaceChildren(element("div", "dealerkit-wix-preview__verdict is-good", published.message || `${registration} was published and verified.`));
       root._controlledPublishPayload = null;
+      if (published.verified) {
+        root.dataset.publishCompleted = "true";
+        root.dataset.publishCompletedAt = new Date().toISOString();
+      }
       refreshActionState(root);
     } catch (error) {
+      // A duplicate/late request can return "preview stale" after an earlier
+      // request has already completed successfully. Never replace a verified
+      // success with that later stale result.
+      if (root.dataset.publishCompleted === "true") return;
       setStatus(root, "PUBLISH BLOCKED", "is-warning");
       result.replaceChildren(element("div", "dealerkit-wix-preview__error", error?.message || "Publishing failed. Check the rollback result before trying again."));
       const checkButton = root.querySelector("[data-controlled-publish-check]");
@@ -353,7 +378,9 @@ if (typeof document !== "undefined") {
     const root = document.querySelector(`[${ROOT_ATTRIBUTE}]`);
     if (!root || normaliseRegistration(root.dataset.registration) !== registration) return;
     if (product && clean(root.dataset.product) !== product) return;
-    loadPreview(root).catch((error) => {
+    root.dataset.publishCompleted = "false";
+    delete root.dataset.publishCompletedAt;
+    loadPreview(root, { force: true }).catch((error) => {
       setStatus(root, "CHECK FAILED", "is-warning");
       const result = root.querySelector("[data-controlled-publish-result]");
       if (result) {
