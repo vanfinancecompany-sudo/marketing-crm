@@ -785,7 +785,7 @@ test("generic page-level contenteditable is never accepted as a Facebook group c
   const harness = loadGroupHelperTestHooks();
 
   assert.equal(harness.hooks.isVerifiedCreatePostDialog(genericScope), false);
-  assert.deepEqual(harness.hooks.composerEditorCandidates(genericScope), []);
+  assert.equal(harness.hooks.composerEditorCandidates(genericScope).length, 0);
   assert.doesNotMatch(groupsHelperSource, /dialogs\[dialogs\.length - 1\]\s*\|\|\s*document/);
   assert.doesNotMatch(groupsHelperSource, /\(dialog\s*\|\|\s*document\)/);
 });
