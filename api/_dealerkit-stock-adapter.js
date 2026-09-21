@@ -59,45 +59,11 @@ function positiveNumber(value) {
 
 export function resolveDealerKitRetailPrice(prices = {}) {
   const advertised = prices?.advertised || {};
-  const cash = prices?.cash || {};
-  const vatStatus = normaliseVatStatus(advertised?.vat_status);
   const advertisedAmount = positiveNumber(advertised?.amount);
-  const cashAmount = positiveNumber(cash?.amount);
-  const cashVatAmount = finiteNumber(cash?.vat_amount);
-
-  if (advertisedAmount !== null) {
-    return {
-      amount: advertisedAmount,
-      source: "advertised",
-      fallbackUsed: false,
-    };
-  }
-
-  if (
-    vatStatus === "plus_vat"
-    && cashAmount !== null
-    && cashVatAmount !== null
-    && cashVatAmount > 0
-    && cashAmount > cashVatAmount
-  ) {
-    return {
-      amount: Math.round((cashAmount - cashVatAmount) * 100) / 100,
-      source: "cash_minus_vat",
-      fallbackUsed: true,
-    };
-  }
-
-  if (["inc_vat", "no_vat"].includes(vatStatus) && cashAmount !== null) {
-    return {
-      amount: cashAmount,
-      source: "cash",
-      fallbackUsed: true,
-    };
-  }
 
   return {
-    amount: null,
-    source: "unresolved",
+    amount: advertisedAmount,
+    source: advertisedAmount !== null ? "advertised" : "unpriced",
     fallbackUsed: false,
   };
 }
