@@ -68,6 +68,10 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
   assert.match(pageSource, /New & Testing/);
   assert.match(pageSource, /Pending Membership \(\{counts\.membershipPending\}\)/);
   assert.match(pageSource, /pipelineView === "membership_pending"/);
+  assert.match(pageSource, /Check Pending Membership \(\$\{counts\.membershipPending\}\)/);
+  assert.match(pageSource, /async function checkPendingMembership\(\)/);
+  assert.match(pageSource, /membershipPendingGroups,/);
+  assert.match(pageSource, /groupPipeline\(group\) !== "membership_pending"/);
   assert.match(pageSource, /Awaiting \(\{counts\.awaiting\}\)/);
   assert.match(pageSource, /Proven \/ Hot/);
   assert.match(pageSource, /pipelineView === "awaiting"/);

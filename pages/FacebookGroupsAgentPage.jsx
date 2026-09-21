@@ -414,11 +414,30 @@ export default function FacebookGroupsAgentPage({
     setBusy("inspection");
     setMessage("Checking the next group batch for access, posting ability and visible advertising rules.");
     try {
-      await startFacebookGroupInspection(activeGroups, productKey, 12);
+      const generalGroups = activeGroups.filter((group) => groupPipeline(group) !== "membership_pending");
+      await startFacebookGroupInspection(generalGroups, productKey, 12);
       setMessage("Live group checks are running. Dead/unavailable groups will fall out of the active pipelines automatically.");
     } catch (error) {
       setBusy("");
       setMessage(error.message || "Could not start live group checks.");
+    }
+  }
+
+  async function checkPendingMembership() {
+    if (busy || !membershipPendingGroups.length) return;
+    if (!(await requireGroupsHelper())) return;
+    setBusy("membership-inspection");
+    setMessage(`Checking ${membershipPendingGroups.length} pending membership request${membershipPendingGroups.length === 1 ? "" : "s"} against Facebook.`);
+    try {
+      await startFacebookGroupInspection(
+        membershipPendingGroups,
+        productKey,
+        Math.min(25, membershipPendingGroups.length),
+      );
+      setMessage("Membership checks are running. Approved groups will return to New & Testing automatically.");
+    } catch (error) {
+      setBusy("");
+      setMessage(error.message || "Could not check pending memberships.");
     }
   }
 
@@ -802,6 +821,18 @@ export default function FacebookGroupsAgentPage({
         </div>
 
         <div className="card-actions">
+          {!showArchived && pipelineView === "membership_pending" ? (
+            <button
+              className="button button--primary"
+              type="button"
+              onClick={checkPendingMembership}
+              disabled={Boolean(busy) || !counts.membershipPending}
+            >
+              {busy === "membership-inspection"
+                ? "Checking Membership…"
+                : `Check Pending Membership (${counts.membershipPending})`}
+            </button>
+          ) : null}
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
             {["All", "Green", "Amber", "Red"].map((value) => <option key={value}>{value}</option>)}
           </select>
