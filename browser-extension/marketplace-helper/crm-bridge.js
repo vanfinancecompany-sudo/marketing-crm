@@ -1,4 +1,12 @@
 (() => {
+  const hostname = String(window.location.hostname || "").toLowerCase();
+  const isMarketingCrmHost =
+    hostname === "marketing-crm-six.vercel.app" ||
+    hostname.startsWith("marketing-crm-") ||
+    hostname.startsWith("marketing-crm-git-") ||
+    hostname.startsWith("marketing-crm-six-");
+  if (!isMarketingCrmHost) return;
+
   const JOB_TYPE = "VFC_MARKETPLACE_JOB";
   const ACK_TYPE = "VFC_MARKETPLACE_JOB_STORED";
   const PUBLISHED_TYPE = "VFC_MARKETPLACE_PUBLISHED";
