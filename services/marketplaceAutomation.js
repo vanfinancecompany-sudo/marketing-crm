@@ -254,11 +254,19 @@ function jobId(productKey = "rent2buy") {
 
 function buildFinanceMarketplaceModel(dealerKitVehicle, financeVehicle) {
   const model = clean(dealerKitVehicle?.model) || fallbackModel(financeVehicle);
+  if (!model) return "";
+
   const derivative = clean(dealerKitVehicle?.derivative || dealerKitVehicle?.trim);
   let detail = model;
 
-  if (derivative && !model.toLowerCase().includes(derivative.toLowerCase())) {
-    detail = `${model} ${derivative}`.trim();
+  if (derivative) {
+    const foldedModel = model.toLowerCase();
+    const foldedDerivative = derivative.toLowerCase();
+    if (foldedDerivative.includes(foldedModel) && derivative.length > model.length) {
+      detail = derivative;
+    } else if (!foldedModel.includes(foldedDerivative)) {
+      detail = `${model} ${derivative}`.trim();
+    }
   }
 
   return `${detail} - VANFINANCECOMPANY.co.uk | Deposit from £99`;
