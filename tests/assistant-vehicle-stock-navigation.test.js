@@ -84,6 +84,35 @@ test("central vehicle preference parser handles natural size and model variants"
   }
 });
 
+
+test("combined size and automatic preference retains both facts", () => {
+  const preference = extractVehiclePreference("I need a medium automatic van");
+  assert.equal(preference.size, "medium");
+  assert.equal(preference.vehicle_type, "Medium wheelbase");
+  assert.equal(preference.transmission, "automatic");
+
+  const memory = buildConversationMemory([{ role: "user", content: "I need a medium automatic van" }]);
+  assert.equal(memory.remembered_facts.vehicle_type, "Medium wheelbase");
+  assert.equal(memory.remembered_facts.transmission, "automatic");
+});
+
+test("medium automatic next-step request browses automatic stock instead of jumping straight to apply", () => {
+  for (const productContext of ["finance", "rent2buy"]) {
+    const navigation = buildPublicStockNavigation({
+      message: "I need a medium automatic van. What should I do next?",
+      productContext,
+      facts: {},
+    });
+    assert.equal(navigation.category, "automatic", productContext);
+    assert.equal(navigation.cta.label, "View Automatic Vans", productContext);
+    assert.match(navigation.reply, /medium automatic van/i, productContext);
+    assert.match(navigation.reply, /automatic .*stock/i, productContext);
+    assert.doesNotMatch(navigation.reply, /APPLY NOW/i, productContext);
+  }
+  assert.equal(PUBLIC_STOCK_ROUTES.finance.automatic, "https://www.vanfinancecompany.co.uk/vans-on-finance?type=Automatic");
+  assert.equal(PUBLIC_STOCK_ROUTES.rent2buy.automatic, "https://www.rent2buyvans.co.uk/view-automatic-vans");
+});
+
 test("stock follow-ups resolve remembered preferences without claiming unverified availability", () => {
   const memory = buildConversationMemory([
     { role: "assistant", content: "What type of van are you looking for?" },
