@@ -34,19 +34,20 @@ function route(message, overrides = {}) {
   });
 }
 
-test("harmless simple conversation uses Luna", () => {
+test("harmless simple conversation uses GPT-6 Sol at low reasoning", () => {
   for (const primary_intent of ["greeting", "thanks", "goodbye", "general_help_request"]) {
     const selected = route("Hi", {
       intent: { primary_intent, retrieval_required: false },
       orchestration: { retrieval_required: false },
       sourceCount: 0,
     });
-    assert.equal(selected.model, "gpt-5.6-luna", primary_intent);
+    assert.equal(selected.model, "gpt-6-sol", primary_intent);
     assert.equal(selected.tier, "mini", primary_intent);
+    assert.equal(selected.reasoning_effort, "low", primary_intent);
   }
 });
 
-test("normal evidence-backed business questions use GPT-5.6 Terra", () => {
+test("normal evidence-backed business questions use GPT-6 Sol at low reasoning", () => {
   const cases = [
     ["Are prices plus VAT?", ["vat_pricing"]],
     ["Which documents are required?", ["documents"]],
@@ -59,8 +60,9 @@ test("normal evidence-backed business questions use GPT-5.6 Terra", () => {
   ];
   for (const [message, secondary_intents] of cases) {
     const selected = route(message, { intent: { secondary_intents } });
-    assert.equal(selected.model, "gpt-5.6-terra", message);
+    assert.equal(selected.model, "gpt-6-sol", message);
     assert.equal(selected.tier, "full", message);
+    assert.equal(selected.reasoning_effort, "low", message);
     assert.match(selected.reason, /quality-first|grounded/i);
   }
 });
@@ -82,13 +84,14 @@ test("ambiguous and multi-step turns escalate to Sol with stronger reasoning", (
   assert.equal(multiStep.reasoning_effort, "medium");
 });
 
-test("high-confidence uncategorised turns default to Terra", () => {
+test("high-confidence uncategorised turns use GPT-6 Sol at low reasoning", () => {
   const selected = route("Please explain this properly", {
     intent: { primary_intent: "unknown", retrieval_required: false, secondary_intents: [] },
     orchestration: { retrieval_required: false },
     sourceCount: 0,
   });
-  assert.equal(selected.model, "gpt-5.6-terra");
+  assert.equal(selected.model, "gpt-6-sol");
+  assert.equal(selected.reasoning_effort, "low");
 });
 
 test("Wix model tiers can be overridden independently", () => {
@@ -118,21 +121,21 @@ test("Wix model tiers can be overridden independently", () => {
   assert.equal(ambiguous.model, "escalation-model");
 });
 
-test("GPT-5.6 Responses API parameters omit temperature and include reasoning", () => {
-  const fast = buildAssistantResponseModelParameters({ model: ASSISTANT_MODEL_POLICY.mini, temperature: 0.2 });
-  assert.deepEqual(fast, { model: "gpt-5.6-luna" });
+test("GPT-6 Sol Responses API parameters omit temperature and include low/medium reasoning", () => {
+  const fast = buildAssistantResponseModelParameters({ model: ASSISTANT_MODEL_POLICY.mini, temperature: 0.2, reasoning_effort: "low" });
+  assert.deepEqual(fast, { model: "gpt-6-sol", reasoning: { effort: "low" } });
 
   const full = buildAssistantResponseModelParameters({ model: ASSISTANT_MODEL_POLICY.full, temperature: 0.2, reasoning_effort: "low" });
-  assert.deepEqual(full, { model: "gpt-5.6-terra", reasoning: { effort: "low" } });
+  assert.deepEqual(full, { model: "gpt-6-sol", reasoning: { effort: "low" } });
 
   const escalation = buildAssistantResponseModelParameters({ model: ASSISTANT_MODEL_POLICY.escalation, temperature: 0.2, reasoning_effort: "medium" });
-  assert.deepEqual(escalation, { model: "gpt-5.6-sol", reasoning: { effort: "medium" } });
+  assert.deepEqual(escalation, { model: "gpt-6-sol", reasoning: { effort: "medium" } });
 
   const legacy = buildAssistantResponseModelParameters({ model: "gpt-4.1", temperature: 0.2 });
   assert.deepEqual(legacy, { model: "gpt-4.1", temperature: 0.2 });
 });
 
-test("the canonical conversation request sends GPT-5.6 Terra for a normal factual lookup", async () => {
+test("the canonical conversation request sends GPT-6 Sol with low reasoning for a normal factual lookup", async () => {
   let requestBody;
   const selected = route("Are prices plus VAT?", { intent: { secondary_intents: ["vat_pricing"] } });
   const fetchImplementation = async (_url, options) => {
@@ -152,9 +155,9 @@ test("the canonical conversation request sends GPT-5.6 Terra for a normal factua
     fetchImplementation,
   );
 
-  assert.equal(requestBody.model, "gpt-5.6-terra");
+  assert.equal(requestBody.model, "gpt-6-sol");
   assert.equal("temperature" in requestBody, false);
   assert.deepEqual(requestBody.reasoning, { effort: "low" });
-  assert.equal(requested.model, "gpt-5.6-terra");
+  assert.equal(requested.model, "gpt-6-sol");
   assert.equal(requested.route.tier, "full");
 });
