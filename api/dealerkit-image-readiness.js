@@ -260,7 +260,7 @@ async function fetchCarCmsItems(fetchImplementation = fetch, environment = proce
   return { items, refreshedAt };
 }
 
-async function fetchCmsItems(pipeline, fetchImplementation = fetch, environment = process.env) {
+export async function fetchCmsItems(pipeline, fetchImplementation = fetch, environment = process.env) {
   if (pipeline === "cars") return fetchCarCmsItems(fetchImplementation, environment);
   return fetchPublicCmsItems(pipeline, fetchImplementation);
 }

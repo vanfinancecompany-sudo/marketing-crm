@@ -60,6 +60,12 @@
     "api/dealerkit-stock-comparison.js": {
       "maxDuration": 60
     },
+    "api/dealerkit-stock-watch-session.js": {
+      "maxDuration": 120
+    },
+    "api/dealerkit-stock-watch-comparison-refresh.js": {
+      "maxDuration": 60
+    },
     "api/dealerkit-stock-detail.js": {
       "maxDuration": 60
     },
