@@ -5,6 +5,8 @@ const DEALERKIT_STOCK_PATH = "/integrators/stock";
 const DEFAULT_PER_PAGE = 100;
 const MAX_STOCK_RECORDS = 2000;
 const MAX_FALLBACK_ITEMS = 100;
+export const KNOWN_UNREADABLE_SOURCE_FAULT_BUDGET = 2;
+const RECOVERY_PAGE_SIZES = [25, 20, 10, 5, 2, 1];
 
 function clean(value, limit = 4000) {
   return String(value ?? "").trim().slice(0, limit);
@@ -308,53 +310,114 @@ async function mapOrRecoverListing({ item, position, dealerId, secret, fetchImpl
   };
 }
 
-async function recoverPageBySingleItemReads({
+function nextRecoveryPageSize(currentPerPage) {
+  for (const candidate of RECOVERY_PAGE_SIZES) {
+    if (candidate < currentPerPage && currentPerPage % candidate === 0) return candidate;
+  }
+  return 1;
+}
+
+function emptyRecoveryResult() {
+  return {
+    vehicles: [],
+    failedPositions: [],
+    invalidRecords: [],
+    detailRecoveries: [],
+    reportedTotals: [],
+    recoveryRequests: 0,
+  };
+}
+
+function mergeRecoveryResult(target, source) {
+  target.vehicles.push(...source.vehicles);
+  target.failedPositions.push(...source.failedPositions);
+  target.invalidRecords.push(...source.invalidRecords);
+  target.detailRecoveries.push(...source.detailRecoveries);
+  target.reportedTotals.push(...source.reportedTotals);
+  target.recoveryRequests += Number(source.recoveryRequests || 0);
+  return target;
+}
+
+async function recoverFailedPage({
   page,
   perPage,
   total,
   dealerId,
   secret,
   fetchImplementation,
+  failedResult = null,
 }) {
   const start = ((page - 1) * perPage) + 1;
   const end = Math.min(page * perPage, total);
   const count = Math.max(0, end - start + 1);
   if (count > MAX_FALLBACK_ITEMS) {
     return {
-      vehicles: [],
-      failedPositions: [{ start, end, status: 0, reason: "fallback_guard" }],
-      invalidRecords: [],
-      detailRecoveries: [],
-      reportedTotals: [],
+      ...emptyRecoveryResult(),
+      failedPositions: [{ start, end, status: failedResult?.status || 0, reason: "fallback_guard" }],
+    };
+  }
+  if (count <= 1 || perPage <= 1) {
+    return {
+      ...emptyRecoveryResult(),
+      failedPositions: [{
+        position: start,
+        status: failedResult?.status || 0,
+        responseBytes: failedResult?.responseBytes || 0,
+      }],
     };
   }
 
-  const vehicles = [];
-  const failedPositions = [];
-  const invalidRecords = [];
-  const detailRecoveries = [];
-  const reportedTotals = [];
-  for (let position = start; position <= end; position += 1) {
-    const result = await requestJson(stockUrl(dealerId, { page: position, perPage: 1 }), secret, fetchImplementation);
+  const recovered = emptyRecoveryResult();
+  const childPerPage = nextRecoveryPageSize(perPage);
+
+  for (let childStart = start; childStart <= end; childStart += childPerPage) {
+    const childPage = Math.floor((childStart - 1) / childPerPage) + 1;
+    const expected = Math.max(0, Math.min(childPerPage, total - childStart + 1, end - childStart + 1));
+    const result = await requestJson(stockUrl(dealerId, { page: childPage, perPage: childPerPage }), secret, fetchImplementation);
+    recovered.recoveryRequests += 1;
     throwIfStockRateLimited(result);
     const meta = pageMeta(result.payload);
-    if (meta.total !== null) reportedTotals.push(meta.total);
-    if (!result.ok || !Array.isArray(result.payload?.data) || !result.payload.data[0]) {
-      failedPositions.push({ position, status: result.status, responseBytes: result.responseBytes });
+    if (meta.total !== null) recovered.reportedTotals.push(meta.total);
+    const rows = Array.isArray(result.payload?.data) ? result.payload.data : [];
+    const usable = result.ok && Array.isArray(result.payload?.data) && rows.length === expected;
+
+    if (!usable) {
+      if (childPerPage <= 1) {
+        recovered.failedPositions.push({
+          position: childStart,
+          status: result.status,
+          responseBytes: result.responseBytes,
+        });
+      } else {
+        mergeRecoveryResult(recovered, await recoverFailedPage({
+          page: childPage,
+          perPage: childPerPage,
+          total,
+          dealerId,
+          secret,
+          fetchImplementation,
+          failedResult: result,
+        }));
+      }
       continue;
     }
-    const resolution = await mapOrRecoverListing({
-      item: result.payload.data[0],
-      position,
-      dealerId,
-      secret,
-      fetchImplementation,
-    });
-    if (resolution.vehicle) vehicles.push(resolution.vehicle);
-    if (resolution.recoveredByDetail) detailRecoveries.push({ position });
-    if (resolution.invalid) invalidRecords.push(resolution.invalid);
+
+    for (let index = 0; index < rows.length; index += 1) {
+      const position = childStart + index;
+      const resolution = await mapOrRecoverListing({
+        item: rows[index],
+        position,
+        dealerId,
+        secret,
+        fetchImplementation,
+      });
+      if (resolution.vehicle) recovered.vehicles.push(resolution.vehicle);
+      if (resolution.recoveredByDetail) recovered.detailRecoveries.push({ position });
+      if (resolution.invalid) recovered.invalidRecords.push(resolution.invalid);
+    }
   }
-  return { vehicles, failedPositions, invalidRecords, detailRecoveries, reportedTotals };
+
+  return recovered;
 }
 
 export class DealerKitSnapshotIncompleteError extends Error {
@@ -392,6 +455,7 @@ export async function fetchDealerKitStockSnapshot({
   const invalidRecords = [];
   const detailRecoveries = [];
   const pageCounts = [];
+  let recoveryRequests = 0;
   const reportedTotals = new Set([total]);
 
   for (let page = 1; page <= lastPage; page += 1) {
@@ -438,7 +502,8 @@ export async function fetchDealerKitStockSnapshot({
       expected,
       reason: result.ok ? "unexpected_page_count" : "http_error",
     });
-    const recovered = await recoverPageBySingleItemReads({ page, perPage, total, dealerId, secret, fetchImplementation });
+    const recovered = await recoverFailedPage({ page, perPage, total, dealerId, secret, fetchImplementation, failedResult: result });
+    recoveryRequests += Number(recovered.recoveryRequests || 0);
     vehicles.push(...recovered.vehicles);
     failedPositions.push(...recovered.failedPositions);
     invalidRecords.push(...recovered.invalidRecords);
@@ -456,6 +521,26 @@ export async function fetchDealerKitStockSnapshot({
     && stableReportedTotal
     && deduped.vehicles.length === total
   );
+  const individualFailedPositions = failedPositions.filter((item) => Number.isInteger(item?.position));
+  const withinKnownFaultBudget = failedPositions.length === individualFailedPositions.length
+    && failedPositions.length <= KNOWN_UNREADABLE_SOURCE_FAULT_BUDGET;
+  const knownBaselineOnly = !complete
+    && failedPositions.length > 0
+    && withinKnownFaultBudget
+    && invalidRecords.length === 0
+    && deduped.duplicateSupplierStockIds.length === 0
+    && deduped.duplicateRegistrations.length === 0
+    && stableReportedTotal
+    && deduped.vehicles.length === total - failedPositions.length;
+  const knownSourceFaults = {
+    budget: KNOWN_UNREADABLE_SOURCE_FAULT_BUDGET,
+    count: failedPositions.length,
+    positions: individualFailedPositions.map((item) => item.position).sort((a, b) => a - b),
+    withinBudget: withinKnownFaultBudget,
+    baselineOnly: knownBaselineOnly,
+    exceeded: failedPositions.length > KNOWN_UNREADABLE_SOURCE_FAULT_BUDGET,
+  };
+
   const diagnostics = {
     apiReportedTotal: total,
     reportedTotals: Array.from(reportedTotals).sort((a, b) => a - b),
@@ -469,6 +554,8 @@ export async function fetchDealerKitStockSnapshot({
     duplicateRegistrations: deduped.duplicateRegistrations,
     failedPages,
     failedPositions,
+    recoveryRequests,
+    knownSourceFaults,
     complete,
   };
 
@@ -499,8 +586,8 @@ export async function fetchDealerKitStockSnapshot({
     refresh: {
       id: null,
       runType: "dealerkit_api",
-      status: complete ? "complete" : "partial",
-      stage: complete ? "complete" : "incomplete_source",
+      status: complete ? "complete" : knownBaselineOnly ? "degraded_known" : "partial",
+      stage: complete ? "complete" : knownBaselineOnly ? "known_source_faults" : "incomplete_source",
       startedAt: null,
       updatedAt: checkedAt,
       completedAt: checkedAt,
@@ -509,7 +596,11 @@ export async function fetchDealerKitStockSnapshot({
       succeeded: deduped.vehicles.length,
       failed: anomalyCount,
       remaining: Math.max(0, total - deduped.vehicles.length),
-      error: complete ? null : "DealerKit returned an incomplete or unstable stock snapshot; authoritative cutover is blocked.",
+      error: complete
+        ? null
+        : knownBaselineOnly
+          ? `DealerKit has ${failedPositions.length} known unreadable source row(s) within the accepted baseline of ${KNOWN_UNREADABLE_SOURCE_FAULT_BUDGET}; readable stock loaded and absence-dependent checks remain blocked.`
+          : "DealerKit returned an incomplete or unstable stock snapshot; authoritative cutover is blocked.",
     },
   };
 }
