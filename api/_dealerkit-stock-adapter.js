@@ -215,10 +215,24 @@ async function requestJson(url, secret, fetchImplementation) {
     const text = await response.text();
     let payload = null;
     try { payload = text ? JSON.parse(text) : null; } catch { payload = null; }
-    return { ok: response.ok, status: response.status, payload, responseBytes: text.length };
+    return {
+      ok: response.ok,
+      status: response.status,
+      payload,
+      responseBytes: text.length,
+      retryAfter: response.headers?.get?.("retry-after") || null,
+    };
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function throwIfStockRateLimited(result) {
+  if (result.status !== 429) return;
+  const error = new Error("DealerKit stock list returned HTTP 429 Too Many Requests.");
+  error.status = 429;
+  error.retryAfter = result.retryAfter;
+  throw error;
 }
 
 function pageMeta(payload = {}) {
@@ -283,6 +297,7 @@ async function mapOrRecoverListing({ item, position, dealerId, secret, fetchImpl
   }
 
   const detail = await requestJson(stockDetailUrl(stockId, dealerId), secret, fetchImplementation);
+  throwIfStockRateLimited(detail);
   const detailMapped = detail.ok && detail.payload?.data ? mapDealerKitListing(detail.payload.data) : null;
   if (detailMapped) return { vehicle: detailMapped, recoveredByDetail: true, invalid: null };
 
@@ -321,6 +336,7 @@ async function recoverPageBySingleItemReads({
   const reportedTotals = [];
   for (let position = start; position <= end; position += 1) {
     const result = await requestJson(stockUrl(dealerId, { page: position, perPage: 1 }), secret, fetchImplementation);
+    throwIfStockRateLimited(result);
     const meta = pageMeta(result.payload);
     if (meta.total !== null) reportedTotals.push(meta.total);
     if (!result.ok || !Array.isArray(result.payload?.data) || !result.payload.data[0]) {
@@ -358,6 +374,7 @@ export async function fetchDealerKitStockSnapshot({
   const snapshotStartedAt = Date.now();
   const { secret, dealerId } = dealerKitConfig(environment);
   const firstResult = await requestJson(stockUrl(dealerId, { page: 1, perPage }), secret, fetchImplementation);
+  throwIfStockRateLimited(firstResult);
   if (!firstResult.ok || !firstResult.payload || !Array.isArray(firstResult.payload?.data)) {
     throw new Error(`DealerKit stock list failed on page 1 with HTTP ${firstResult.status}.`);
   }
@@ -381,6 +398,7 @@ export async function fetchDealerKitStockSnapshot({
     const result = page === 1
       ? firstResult
       : await requestJson(stockUrl(dealerId, { page, perPage }), secret, fetchImplementation);
+    throwIfStockRateLimited(result);
     const meta = pageMeta(result.payload);
     if (meta.total !== null) reportedTotals.add(meta.total);
     const rows = Array.isArray(result.payload?.data) ? result.payload.data : [];
