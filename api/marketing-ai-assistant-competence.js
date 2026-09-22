@@ -819,7 +819,11 @@ export async function simulateCustomerConversation(supabase, body, options = {})
     coverage_diagnostics: structured.coverage_diagnostics,
     conversation_intent: intent.primary_intent,
     secondary_intents: intent.secondary_intents,
-    conversation_diagnostics: structured,
+    conversation_diagnostics: {
+      ...structured,
+      learning_capture_status: options.persist !== false && options.captureLearning === false ? "pending" : "inline",
+      learning_capture_queued_at: options.persist !== false && options.captureLearning === false ? new Date().toISOString() : null,
+    },
     learning_diagnosis: learningDiagnosis,
     simulation_session_id: sessionId,
   };
