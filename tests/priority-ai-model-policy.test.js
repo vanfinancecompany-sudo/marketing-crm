@@ -8,11 +8,11 @@ import {
   resolvePriorityAiModels,
 } from "../lib/priorityAiModelPolicy.js";
 
-test("priority AI defaults use Luna for cheap work, Terra for normal work and Sol for escalation/review", () => {
+test("priority AI defaults use GPT-6 Sol for all Wix conversation tiers while other jobs keep their existing models", () => {
   assert.deepEqual(resolvePriorityAiModels({}), PRIORITY_AI_MODEL_DEFAULTS);
-  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.wix_fast, "gpt-5.6-luna");
-  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.wix_main, "gpt-5.6-terra");
-  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.wix_escalation, "gpt-5.6-sol");
+  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.wix_fast, "gpt-6-sol");
+  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.wix_main, "gpt-6-sol");
+  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.wix_escalation, "gpt-6-sol");
   assert.equal(PRIORITY_AI_MODEL_DEFAULTS.knowledge_topic, "gpt-5.6-luna");
   assert.equal(PRIORITY_AI_MODEL_DEFAULTS.knowledge, "gpt-5.6-terra");
   assert.equal(PRIORITY_AI_MODEL_DEFAULTS.knowledge_review, "gpt-5.6-sol");
@@ -59,9 +59,9 @@ test("priority AI model settings can be changed independently", () => {
 
 test("operation routing ignores the generic OPENAI_MODEL", () => {
   const environment = { OPENAI_MODEL: "gpt-4.1-mini" };
-  assert.equal(resolveAiOperationModel(environment, "wix_fast"), "gpt-5.6-luna");
-  assert.equal(resolveAiOperationModel(environment, "wix_main"), "gpt-5.6-terra");
-  assert.equal(resolveAiOperationModel(environment, "wix_escalation"), "gpt-5.6-sol");
+  assert.equal(resolveAiOperationModel(environment, "wix_fast"), "gpt-6-sol");
+  assert.equal(resolveAiOperationModel(environment, "wix_main"), "gpt-6-sol");
+  assert.equal(resolveAiOperationModel(environment, "wix_escalation"), "gpt-6-sol");
   assert.equal(resolveAiOperationModel(environment, "knowledge_topic"), "gpt-5.6-luna");
   assert.equal(resolveAiOperationModel(environment, "knowledge_generation"), "gpt-5.6-terra");
   assert.equal(resolveAiOperationModel(environment, "knowledge_review"), "gpt-5.6-sol");
