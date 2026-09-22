@@ -229,6 +229,36 @@ async function requestJson(url, secret, fetchImplementation) {
   }
 }
 
+async function requestRecoveryJson(url, secret, fetchImplementation) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetchImplementation(url, {
+      method: "GET",
+      redirect: "error",
+      signal: controller.signal,
+      cache: "no-store",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${secret}`,
+        "user-agent": "VFC-DealerKit-Stock-Recovery/1.0",
+      },
+    });
+    const text = await response.text();
+    let payload = null;
+    try { payload = text ? JSON.parse(text) : null; } catch { payload = null; }
+    return {
+      ok: response.ok,
+      status: response.status,
+      payload,
+      responseBytes: text.length,
+      retryAfter: response.headers?.get?.("retry-after") || null,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function throwIfStockRateLimited(result) {
   if (result.status !== 429) return;
   const error = new Error("DealerKit stock list returned HTTP 429 Too Many Requests.");
@@ -373,7 +403,10 @@ async function recoverFailedPage({
   for (let childStart = start; childStart <= end; childStart += childPerPage) {
     const childPage = Math.floor((childStart - 1) / childPerPage) + 1;
     const expected = Math.max(0, Math.min(childPerPage, total - childStart + 1, end - childStart + 1));
-    const result = await requestJson(stockUrl(dealerId, { page: childPage, perPage: childPerPage }), secret, fetchImplementation);
+    // Recovery probes are intentionally single-attempt. The parent bulk page
+    // already received the normal transient retry policy; repeating every drill-
+    // down probe three times recreates the original minutes-long failure mode.
+    const result = await requestRecoveryJson(stockUrl(dealerId, { page: childPage, perPage: childPerPage }), secret, fetchImplementation);
     recovered.recoveryRequests += 1;
     throwIfStockRateLimited(result);
     const meta = pageMeta(result.payload);
