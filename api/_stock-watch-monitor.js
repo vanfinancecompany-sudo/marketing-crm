@@ -110,18 +110,34 @@ export function buildStockWatchMonitorIssues({ snapshot, previousSnapshot = null
         directions: ["Confirm the next scheduled source refresh is due.", "Check the last provider refresh result before manually restarting anything."],
       }));
     }
-    if (Number(refresh.failed || 0) > 0 || refresh.error) {
+    const knownSourceFaults = provider?.diagnostics?.knownSourceFaults || snapshot.providerDiagnostics?.knownSourceFaults || {};
+    const knownBaselineOnly = knownSourceFaults?.baselineOnly === true;
+    if ((Number(refresh.failed || 0) > 0 || refresh.error) && !knownBaselineOnly) {
       const failed = Number(refresh.failed || 0);
       const succeeded = Number(refresh.succeeded || 0);
       const severity = failed >= 5 && (!runningAndProgressing || succeeded === 0) ? "critical" : "warning";
       issues.push(issue({
         severity,
         code: "STOCK_SOURCE_REFRESH_FAILURES",
-        title: "Stock-source refresh contains failed records",
-        evidence: { failed, succeeded, remaining: refresh.remaining, error: refresh.error, progressAgeMinutes: Number(progressAgeMinutes.toFixed(1)) },
-        likelyCause: "One or more source detail requests failed or returned an unexpected payload.",
+        title: knownSourceFaults?.exceeded
+          ? `DealerKit unreadable rows exceeded the known baseline of ${knownSourceFaults.budget || 2}`
+          : "Stock-source refresh contains failed records",
+        evidence: {
+          failed,
+          succeeded,
+          remaining: refresh.remaining,
+          error: refresh.error,
+          progressAgeMinutes: Number(progressAgeMinutes.toFixed(1)),
+          knownSourceFaults,
+          diagnostics: provider.diagnostics || snapshot.providerDiagnostics || null,
+        },
+        likelyCause: knownSourceFaults?.exceeded
+          ? "DealerKit now has more unreadable source rows than the established two-row baseline."
+          : "One or more source detail requests failed or returned an unexpected payload.",
         lookHere: "Latest provider refresh run and failing source records",
-        directions: ["Inspect the latest refresh last_error and failed source URLs.", "Check whether the provider changed HTML/API fields.", "Avoid broad CMS changes until failed registrations are understood."],
+        directions: knownSourceFaults?.exceeded
+          ? ["Compare the failed-position count with the known baseline of two.", "Inspect DealerKit source diagnostics before changing CRM/Wix stock.", "Treat three or more unreadable rows as a new source-health issue."]
+          : ["Inspect the latest refresh last_error and failed source URLs.", "Check whether the provider changed HTML/API fields.", "Avoid broad CMS changes until failed registrations are understood."],
       }));
     }
     if (Number(provider.vehicleCount || 0) === 0) {
