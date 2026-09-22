@@ -95,3 +95,37 @@ test("an unrelated HTTP 400 page-1 error is not retried", async () => {
   }), /HTTP 400/);
   assert.equal(calls, 1);
 });
+
+
+test("known two-row DealerKit baseline does not repeat the whole snapshot", async () => {
+  let pageOneReads = 0;
+  const snapshot = await fetchStableDealerKitStockSnapshot({
+    environment,
+    allowPartial: true,
+    perPage: 2,
+    stabilityAttempts: 3,
+    fetchImplementation: async (url) => {
+      const query = new URL(String(url)).searchParams;
+      const page = Number(query.get("page"));
+      const perPage = Number(query.get("per_page"));
+      if (perPage === 2 && page === 1) {
+        pageOneReads += 1;
+        return response(200, {
+          data: [listing("stock-1", "AA11AAA"), listing("stock-2", "BB22BBB")],
+          meta: { total: 4, current_page: 1, last_page: 2, per_page: 2 },
+        });
+      }
+      if (perPage === 2 && page === 2) return response(500, { message: "Broken page" });
+      if (perPage === 1 && (page === 3 || page === 4)) return response(500, { message: "Known broken row" });
+      throw new Error(`Unexpected request page=${page} perPage=${perPage}`);
+    },
+    sleep: async () => {},
+  });
+
+  assert.equal(pageOneReads, 1);
+  assert.equal(snapshot.complete, false);
+  assert.equal(snapshot.vehicleCount, 2);
+  assert.equal(snapshot.diagnostics.stability.attemptsUsed, 1);
+  assert.equal(snapshot.diagnostics.knownSourceFaults.baselineOnly, true);
+  assert.deepEqual(snapshot.diagnostics.knownSourceFaults.positions, [3, 4]);
+});
