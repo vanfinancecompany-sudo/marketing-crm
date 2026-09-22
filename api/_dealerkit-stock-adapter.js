@@ -386,7 +386,7 @@ async function recoverFailedPage({
       failedPositions: [{ start, end, status: failedResult?.status || 0, reason: "fallback_guard" }],
     };
   }
-  if (count <= 1 || perPage <= 1) {
+  if (perPage <= 1) {
     return {
       ...emptyRecoveryResult(),
       failedPositions: [{
@@ -395,6 +395,40 @@ async function recoverFailedPage({
         responseBytes: failedResult?.responseBytes || 0,
       }],
     };
+  }
+
+  if (count === 1) {
+    const recovered = emptyRecoveryResult();
+    const result = await requestRecoveryJson(
+      stockUrl(dealerId, { page: start, perPage: 1 }),
+      secret,
+      fetchImplementation,
+    );
+    recovered.recoveryRequests = 1;
+    throwIfStockRateLimited(result);
+    const meta = pageMeta(result.payload);
+    if (meta.total !== null) recovered.reportedTotals.push(meta.total);
+    const row = Array.isArray(result.payload?.data) ? result.payload.data[0] : null;
+    if (!result.ok || !row) {
+      recovered.failedPositions.push({
+        position: start,
+        status: result.status,
+        responseBytes: result.responseBytes,
+      });
+      return recovered;
+    }
+
+    const resolution = await mapOrRecoverListing({
+      item: row,
+      position: start,
+      dealerId,
+      secret,
+      fetchImplementation,
+    });
+    if (resolution.vehicle) recovered.vehicles.push(resolution.vehicle);
+    if (resolution.recoveredByDetail) recovered.detailRecoveries.push({ position: start });
+    if (resolution.invalid) recovered.invalidRecords.push(resolution.invalid);
+    return recovered;
   }
 
   const recovered = emptyRecoveryResult();
