@@ -286,3 +286,59 @@ test("requires server-side DealerKit credentials and never accepts a credential-
     /DEALERKIT_API_SECRET/,
   );
 });
+
+
+test("failed final bulk page uses bounded drill-down recovery and records the known two-row baseline", async () => {
+  const total = 252;
+  const broken = new Set([201, 204]);
+  const requests = [];
+  const fetchImplementation = async (input) => {
+    const url = new URL(String(input));
+    const page = Number(url.searchParams.get("page"));
+    const perPage = Number(url.searchParams.get("per_page"));
+    const start = ((page - 1) * perPage) + 1;
+    const end = Math.min(page * perPage, total);
+    requests.push({ page, perPage, start, end });
+
+    const includesBroken = Array.from(broken).some((position) => position >= start && position <= end);
+    if (includesBroken) return response(500, { message: "Broken DealerKit row" });
+
+    const data = [];
+    for (let position = start; position <= end; position += 1) {
+      data.push(listing({ id: `stock-${position}`, registration: `A${position}AAA` }));
+    }
+    return response(200, {
+      data,
+      meta: {
+        total,
+        current_page: page,
+        last_page: Math.ceil(total / perPage),
+        per_page: perPage,
+      },
+    });
+  };
+
+  const snapshot = await fetchDealerKitStockSnapshot({
+    environment: ENV,
+    fetchImplementation,
+    perPage: 100,
+    allowPartial: true,
+  });
+
+  assert.equal(snapshot.complete, false);
+  assert.equal(snapshot.vehicleCount, 250);
+  assert.deepEqual(snapshot.diagnostics.failedPositions.map((item) => item.position), [201, 204]);
+  assert.deepEqual(snapshot.diagnostics.knownSourceFaults, {
+    budget: 2,
+    count: 2,
+    positions: [201, 204],
+    withinBudget: true,
+    baselineOnly: true,
+    exceeded: false,
+  });
+  assert.equal(snapshot.refresh.status, "degraded_known");
+  assert.equal(snapshot.refresh.failed, 2);
+  assert.ok(snapshot.diagnostics.recoveryRequests <= 12);
+  assert.equal(requests.filter((item) => item.perPage === 1).length, 5);
+  assert.ok(requests.length < 20);
+});
