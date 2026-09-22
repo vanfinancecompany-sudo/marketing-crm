@@ -276,13 +276,14 @@ test("persistent isolated DealerKit 5xx records produce a usable degraded snapsh
   });
 
   assert.equal(failedPageAttempts, 3);
-  assert.equal(failedPositionAttempts, 3);
+  assert.equal(failedPositionAttempts, 1);
   assert.equal(snapshot.complete, false);
   assert.equal(snapshot.vehicleCount, 2);
-  assert.equal(snapshot.refresh.status, "partial");
+  assert.equal(snapshot.refresh.status, "degraded_known");
   assert.equal(snapshot.refresh.failed, 1);
   assert.equal(snapshot.refresh.remaining, 1);
   assert.equal(snapshot.diagnostics.failedPositions.length, 1);
+  assert.equal(snapshot.diagnostics.knownSourceFaults.baselineOnly, true);
 });
 
 test("a degraded DealerKit snapshot is a monitor warning, not a source-unavailable critical", () => {
