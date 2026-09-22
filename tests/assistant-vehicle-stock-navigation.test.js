@@ -177,6 +177,53 @@ test("public assistant emits a structured stock CTA and persists its final safe 
   assert.doesNotMatch(response.payload.reply, /definitely|available today|we have one/i);
 });
 
+test("live Rent2Buy prompt for a medium automatic van returns stock guidance rather than generic APPLY NOW", async () => {
+  const state = { session: {
+    id: "automatic-stock-session",
+    page_type: "rent2buy_general",
+    product_lock: "rent2buy",
+    vehicle_context: {},
+    conversation_history: [],
+    remembered_facts: { product_context: "rent2buy" },
+    journey_state: {}, message_count: 0, status: "active", expires_at: new Date(Date.now() + 60_000).toISOString(),
+  } };
+  const supabase = {
+    async rpc() { return { data: true, error: null }; },
+    from(table) {
+      if (table === "ai_assistant_events") return { insert() { return { async select() { return { data: [], error: null }; } }; } };
+      assert.equal(table, "ai_customer_sessions");
+      return {
+        select() { const chain = { eq() { return chain; }, async maybeSingle() { return { data: structuredClone(state.session), error: null }; } }; return chain; },
+        update(payload) { state.session = { ...state.session, ...structuredClone(payload) }; const chain = { eq() { return chain; }, select() { return { async single() { return { data: structuredClone(state.session), error: null }; } }; } }; return chain; },
+      };
+    },
+  };
+  const response = { setHeader() {}, status(code) { this.statusCode = code; return this; }, json(payload) { this.payload = payload; return this; } };
+
+  await handleCustomerAssistantRequest({
+    method: "POST",
+    headers: { origin: "https://www.rent2buyvans.co.uk", "x-forwarded-for": "192.0.2.82" },
+    body: {
+      action: "message",
+      conversation_id: "opaque",
+      page_context: { pageType: "rent2buy_general" },
+      message: "I need a medium automatic van. What should I do next?",
+    },
+  }, response, {
+    environment: { AI_ASSISTANT_SESSION_SECRET: "stock-test-secret", AI_ASSISTANT_ALLOWED_ORIGINS: "https://www.rent2buyvans.co.uk" },
+    supabase,
+    simulateConversation: (_client, input) => deterministicConversation(input),
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.payload.cta.label, "View Automatic Vans");
+  assert.equal(response.payload.cta.url, PUBLIC_STOCK_ROUTES.rent2buy.automatic);
+  assert.match(response.payload.reply, /medium automatic van/i);
+  assert.doesNotMatch(response.payload.reply, /APPLY NOW/i);
+  assert.equal(state.session.remembered_facts.vehicle_type, "Medium wheelbase");
+  assert.equal(state.session.remembered_facts.transmission, "automatic");
+});
+
 test("the site bridge navigates only after the widget emits a validated stock CTA", async () => {
   const loader = await readFile(new URL("../public/wix-ai-assistant/site-loader.js", import.meta.url), "utf8");
   assert.match(loader, /function navigateStockCta/);
