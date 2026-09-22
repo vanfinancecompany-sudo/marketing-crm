@@ -384,13 +384,15 @@ async function continueConversation(supabase, body, environment, simulateConvers
   const reply = clean(stockNavigation?.reply || result.reply, 5000);
   const nextHistory = boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]);
   const state = canonicalSessionState({ session, result, productLock });
-  await updateSession(supabase, session, {
-    ...state,
-    conversation_history: nextHistory,
-    message_count: messageNumber,
-  });
   const cta = stockNavigation?.cta || publicApplicationCta(session.page_type, productLock, result);
-  await recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, result, responseMode: stockNavigation ? "stock_navigation" : "ai_generated", cta });
+  await Promise.all([
+    updateSession(supabase, session, {
+      ...state,
+      conversation_history: nextHistory,
+      message_count: messageNumber,
+    }),
+    recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, result, responseMode: stockNavigation ? "stock_navigation" : "ai_generated", cta }),
+  ]);
   return safeCustomerPayload({
     reply,
     cta,
