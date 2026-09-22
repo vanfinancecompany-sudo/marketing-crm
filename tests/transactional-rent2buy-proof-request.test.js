@@ -3,6 +3,7 @@ import test from "node:test";
 import handler, { normalizeRent2BuyProofRequestPayload } from "../api/transactional-rent2buy-proof-request.js";
 import approvalHandler, { normalizeRent2BuyApprovalChasePayload } from "../api/transactional-rent2buy-approval-chase.js";
 import { renderEmail as renderRent2BuyProofLinkEmail } from "../api/transactional-rent2buy-proof-link.js";
+import { validateRent2BuyProofPayload } from "../api/transactional-rent2buy-proofs.js";
 
 function responseHarness() {
   const result = { statusCode: 200, payload: null, headers: {} };
@@ -15,6 +16,50 @@ function responseHarness() {
     },
   };
 }
+
+
+
+function proofFile(name) {
+  return {
+    name,
+    content: Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF").toString("base64"),
+  };
+}
+
+function flexibleProofPayload(bankCount) {
+  return {
+    applicationRef: "R2B-ABC123",
+    fullName: "Alex Example",
+    email: "alex@example.com",
+    phone: "07123456789",
+    postcode: "SO40 2NN",
+    bankMode: "flexible",
+    groups: {
+      address: [proofFile("address-1.pdf"), proofFile("address-2.pdf")],
+      licence: [proofFile("licence.pdf")],
+      bank: Array.from({ length: bankCount }, (_, index) => proofFile(`bank-${index + 1}.pdf`)),
+    },
+  };
+}
+
+test("accepts Rent2Buy flexible bank uploads with one to three PDFs", () => {
+  for (const count of [1, 2, 3]) {
+    const validated = validateRent2BuyProofPayload(flexibleProofPayload(count));
+    assert.equal(validated.meta.bankMode, "flexible");
+    assert.equal(validated.groups.bank.length, count);
+  }
+});
+
+test("rejects Rent2Buy flexible bank uploads outside one to three PDFs", () => {
+  assert.throws(
+    () => validateRent2BuyProofPayload(flexibleProofPayload(0)),
+    /1 to 3 PDF files/i,
+  );
+  assert.throws(
+    () => validateRent2BuyProofPayload(flexibleProofPayload(4)),
+    /1 to 3 PDF files/i,
+  );
+});
 
 test("personal proof-link email makes document completion explicit", () => {
   const email = renderRent2BuyProofLinkEmail({
