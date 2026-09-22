@@ -81,8 +81,18 @@ import {
     try {
       const result = await unpublishReservedCarWixStock(record.registration);
       setCarWixDraftResult(result);
-      const refreshed = await previewReservedCarWixStock(record.registration);
+      const refreshed = result?.preview;
+      if (!refreshed) throw new Error("Wix post-change verification was not returned. Refresh the comparison before continuing.");
       setCarWixPreview(refreshed);
+      if (result.ok && (refreshed.matches || []).length === 0) {
+        const completed = await saveVanscoWatchAction({
+          pipeline: selectedPipeline,
+          record,
+          workflowStatus: "ignored",
+          notes: notesDraft,
+        });
+        onReservedDrafted(record, completed);
+      }
     } catch (error) {
       setCarWixActionError(error?.message || "Could not move CAR FINANCE record to draft.");
     } finally {

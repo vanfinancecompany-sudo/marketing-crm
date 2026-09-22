@@ -71,7 +71,7 @@ for (const config of endpointConfigs) {
   source = replaceOnce(
     source,
     verificationImport,
-    `${verificationImport}\nimport { finalDealerKitVerificationError, prepareDealerKitReservedWixMutation } from "./_dealerkit-reservation-mutation-safety.js";`,
+    `${verificationImport}\nimport { buildPostChangeWixReservationPreview, finalDealerKitVerificationError, prepareDealerKitReservedWixMutation } from "./_dealerkit-reservation-mutation-safety.js";`,
     "DealerKit verification import",
     config.path,
   );
@@ -92,7 +92,8 @@ for (const config of endpointConfigs) {
     config.path,
   );
 
-  const functionBody = `export async function ${config.functionName}(registrationValue, { supplierStockId = "", verifyDealerKit, loadPreview, mutateMatch } = {}) {
+  const functionBody = `export async function ${config.functionName}(registrationValue, { supplierStockId = "", verifyDealerKit, loadPreview, mutateMatch, verifyWixMatch } = {}) {
+  const actionStartedAt = Date.now();
   const prepared = await prepareDealerKitReservedWixMutation({
     registrationValue,
     supplierStockId,
@@ -101,6 +102,14 @@ for (const config of endpointConfigs) {
   });
   const { registration, supplierStockId: stockId, dealerKit: vansco, preview, verifyDealerKit: verifyReservation } = prepared;
   const mutate = mutateMatch || ${config.mutationFunction};
+  const postVerify = verifyWixMatch || (async (match) => findRegistrationInCollection({ id: match.collectionId, label: match.collectionLabel }, registration));
+  const timing = {
+    dealerKitSnapshotMs: prepared.timing.dealerKitSnapshotMs,
+    dealerKitDetailVerificationMs: prepared.timing.dealerKitDetailVerificationMs,
+    wixPreviewSearchMs: prepared.timing.wixPreviewSearchMs,
+    wixDraftTaskMs: 0,
+    wixPostChangeVerificationMs: 0,
+  };
 
   if (!preview.matches.length) {
     return {
@@ -109,6 +118,8 @@ for (const config of endpointConfigs) {
       vansco,
       changed: 0,
       results: [],
+      preview,
+      timing: { ...timing, totalMs: Date.now() - actionStartedAt },
       message: ${JSON.stringify(config.noMatchesMessage)},
 ${config.extraNoMatches}
     };
@@ -119,7 +130,10 @@ ${config.extraNoMatches}
   for (const match of preview.matches) {
     let finalDealerKit;
     try {
+      const verificationStartedAt = Date.now();
       finalDealerKit = await verifyReservation(registration, { supplierStockId: stockId });
+      timing.dealerKitSnapshotMs += finalDealerKit?.timing?.dealerKitSnapshotMs ?? (Date.now() - verificationStartedAt);
+      timing.dealerKitDetailVerificationMs += finalDealerKit?.timing?.dealerKitDetailVerificationMs ?? 0;
     } catch (error) {
       verificationStopped = true;
       results.push({ ok: false, safetyStop: true, ...match, error: finalDealerKitVerificationError(error) });
@@ -127,7 +141,22 @@ ${config.extraNoMatches}
     }
 
     try {
-      results.push({ ok: true, ...(await mutate(match)), finalDealerKit });
+      const draftStartedAt = Date.now();
+      const mutation = await mutate(match);
+      timing.wixDraftTaskMs += Date.now() - draftStartedAt;
+      const postChangeStartedAt = Date.now();
+      try {
+        const remainingMatches = await postVerify(match, registration);
+        if (!Array.isArray(remainingMatches)) throw new Error("Wix post-change verification returned an invalid response.");
+        const stillLive = remainingMatches.some((remaining) => clean(remaining.itemId) === clean(match.itemId));
+        if (stillLive) throw new Error(\`Wix still reports \${match.collectionLabel || match.collectionId} as published after the draft task.\`);
+      } catch (error) {
+        results.push({ ok: false, wixChanged: true, postChangeVerified: false, ...match, ...mutation, finalDealerKit, error: clean(error?.message || error || "Could not verify the Wix item after moving it to draft.") });
+        continue;
+      } finally {
+        timing.wixPostChangeVerificationMs += Date.now() - postChangeStartedAt;
+      }
+      results.push({ ok: true, wixChanged: true, postChangeVerified: true, ...match, ...mutation, finalDealerKit });
     } catch (error) {
       results.push({ ok: false, ...match, error: clean(error?.message || error || "Could not move the Wix item to draft.") });
     }
@@ -135,13 +164,16 @@ ${config.extraNoMatches}
 
   const failures = results.filter((result) => !result.ok);
   const lastFailure = failures[failures.length - 1];
+  const refreshedPreview = buildPostChangeWixReservationPreview(preview, results);
   return {
     ok: failures.length === 0,
     registration,
     vansco,
-    changed: results.filter((result) => result.ok).length,
+    changed: results.filter((result) => result.wixChanged || result.ok).length,
     results,
     failures: failures.length,
+    preview: refreshedPreview,
+    timing: { ...timing, totalMs: Date.now() - actionStartedAt },
 ${config.extraResult}
     message: verificationStopped
       ? \`Safety stop: DealerKit could not be verified immediately before the next Wix change. No further Wix records were changed. \${lastFailure?.error || ""}\`.trim()
@@ -185,15 +217,22 @@ ${config.extraResult}
     source = replaceOnce(
       source,
       "function WatchCard({ record, selectedPipeline, onRecordSaved }) {",
-      "// FINAL_DEALERKIT_RESERVATION_UI_SAFETY: destructive actions retain the exact current DealerKit stock identity.\nfunction WatchCard({ record, selectedPipeline, onRecordSaved }) {",
+      "// FINAL_DEALERKIT_RESERVATION_UI_SAFETY: destructive actions retain the exact current DealerKit stock identity.\nfunction WatchCard({ record, selectedPipeline, onRecordSaved, onReservedDrafted }) {",
       "Stock Watch card",
+      relativePath,
+    );
+    source = replaceOnce(
+      source,
+      "selectedPipeline={selectedPipeline} onRecordSaved={handleRecordSaved} />)",
+      "selectedPipeline={selectedPipeline} onRecordSaved={handleRecordSaved} onReservedDrafted={handleReservedDrafted} />)",
+      "Stock Watch card callback",
       relativePath,
     );
     for (const name of ["Finance", "Car", "Rent2Buy"]) {
       const preview = `previewReserved${name}WixStock(record.registration)`;
       const unpublish = `unpublishReserved${name}WixStock(record.registration)`;
       const previewCount = source.split(preview).length - 1;
-      if (previewCount !== 2) throw new Error(`Final reservation safety transform expected two ${name} preview calls, found ${previewCount}.`);
+      if (previewCount !== 1) throw new Error(`Final reservation safety transform expected one ${name} preview call, found ${previewCount}.`);
       source = source.split(preview).join(`previewReserved${name}WixStock(record.registration, record.supplierStockId)`);
       source = replaceOnce(
         source,

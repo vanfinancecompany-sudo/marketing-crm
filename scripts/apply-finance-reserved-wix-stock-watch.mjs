@@ -85,7 +85,8 @@ import {
     try {
       const result = await unpublishReservedFinanceWixStock(record.registration);
       setWixDraftResult(result);
-      const refreshed = result?.preview || await previewReservedFinanceWixStock(record.registration);
+      const refreshed = result?.preview;
+      if (!refreshed) throw new Error("Wix post-change verification was not returned. Refresh the comparison before continuing.");
       setWixPreview(refreshed);
       if (result.ok && (refreshed.matches || []).length === 0) {
         const completed = await saveVanscoWatchAction({
@@ -94,8 +95,7 @@ import {
           workflowStatus: "ignored",
           notes: notesDraft,
         });
-        onRecordSaved(record, completed);
-        window.location.reload();
+        onReservedDrafted(record, completed);
       }
     } catch (error) {
       setWixActionError(error?.message || "Could not move Finance Wix records to draft.");

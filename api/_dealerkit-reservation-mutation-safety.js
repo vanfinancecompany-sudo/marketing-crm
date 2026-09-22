@@ -67,14 +67,60 @@ export async function prepareDealerKitReservedWixMutation({
   }
   if (typeof loadPreview !== "function") throw new Error("Reservation preview dependency is not configured.");
 
+  const startedAt = Date.now();
+  const dealerKitStartedAt = Date.now();
   const dealerKit = await verifyDealerKit(registration, { supplierStockId: stockId });
+  const dealerKitVerificationMs = Date.now() - dealerKitStartedAt;
+  const wixPreviewStartedAt = Date.now();
   const preview = assertCompleteWixReservationPreview(await loadPreview(registration));
+  const wixPreviewSearchMs = Date.now() - wixPreviewStartedAt;
   return {
     registration,
     supplierStockId: stockId,
     dealerKit,
     preview,
     verifyDealerKit,
+    timing: {
+      dealerKitSnapshotMs: dealerKit?.timing?.dealerKitSnapshotMs ?? dealerKitVerificationMs,
+      dealerKitDetailVerificationMs: dealerKit?.timing?.dealerKitDetailVerificationMs ?? 0,
+      wixPreviewSearchMs,
+      totalMs: Date.now() - startedAt,
+    },
+  };
+}
+
+function matchKey(match = {}) {
+  return `${clean(match.collectionId)}:${clean(match.itemId)}`;
+}
+
+export function buildPostChangeWixReservationPreview(preview, results = []) {
+  const verifiedDrafts = new Set(results.filter((result) => result.ok && result.postChangeVerified).map(matchKey));
+  const keepMatch = (match) => !verifiedDrafts.has(matchKey(match));
+  const updateCollection = (collection) => {
+    const matches = (collection?.matches || []).filter(keepMatch);
+    return { ...collection, matches, live: matches.length > 0 };
+  };
+  const collections = Array.isArray(preview?.collections) ? preview.collections.map(updateCollection) : preview?.collections;
+  const sites = Array.isArray(preview?.sites)
+    ? preview.sites.map((site) => {
+      const siteCollections = (site?.collections || []).map(updateCollection);
+      return {
+        ...site,
+        collections: siteCollections,
+        matches: (site?.matches || []).filter(keepMatch),
+        protectedMatches: (site?.protectedMatches || []).filter(keepMatch),
+      };
+    })
+    : preview?.sites;
+  const matches = (preview?.matches || []).filter(keepMatch);
+  return {
+    ...preview,
+    collections,
+    sites,
+    matches,
+    liveCollectionCount: Array.isArray(collections) ? collections.filter((collection) => collection.live).length : preview?.liveCollectionCount,
+    actionableLiveCollectionCount: Array.isArray(collections) ? collections.filter((collection) => collection.live && !collection.protected).length : preview?.actionableLiveCollectionCount,
+    actionableMatches: preview?.actionableMatches === undefined ? undefined : matches.length,
   };
 }
 

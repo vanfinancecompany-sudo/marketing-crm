@@ -372,10 +372,6 @@ async function fetchLocalVehiclesForPipeline(pipeline) {
   return [];
 }
 
-function wait(ms) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
 function countVehicleRegistrations(vehicles) {
   return new Set((vehicles || []).map((vehicle) => normalizeLocalStockRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name)).filter(Boolean)).size;
 }
@@ -531,20 +527,21 @@ export default function VanscoStockWatchPage() {
     setReloadComparisonProgress(0);
     setReloadComparisonStatus("Refreshing comparison...");
     const pipeline = selectedPipeline;
+    const startedAt = Date.now();
     try {
-      await wait(500); setReloadComparisonProgress(20);
-      await wait(800); setReloadComparisonProgress(45);
-      await wait(800); setReloadComparisonProgress(70);
-      await wait(900); setReloadComparisonProgress(100);
+      setReloadComparisonProgress(15);
       const localLoads = [loadLocalStock("finance"), loadLocalStock("rent2buy")];
       if (pipeline === "cars") localLoads.push(loadLocalStock("cars"));
       const [localVehiclesByReload, cachePayload] = await Promise.all([Promise.all(localLoads), loadPipeline(pipeline, { throwOnError: true })]);
+      setReloadComparisonProgress(85);
       const [financeVehicles, rentVehicles, carsVehicles] = localVehiclesByReload;
       const cacheRecords = cachePayload?.records || [];
       const pipelineName = pipelineLabel(pipeline);
       const carsText = pipeline === "cars" ? ` Cars: ${(carsVehicles || []).length} vehicles / ${countVehicleRegistrations(carsVehicles)} registrations.` : "";
       const priceText = pipeline === "finance" ? " Price differences recalculated from the refreshed Finance stock snapshot and saved Vansco cache." : "";
-      const finalMessage = `Comparison refreshed successfully using latest local stock and saved Vansco cache. Pipeline: ${pipelineName}. Finance: ${(financeVehicles || []).length} vehicles / ${countVehicleRegistrations(financeVehicles)} registrations. Rent2Buy: ${(rentVehicles || []).length} vehicles / ${countVehicleRegistrations(rentVehicles)} registrations.${carsText} Saved Vansco cache records: ${cacheRecords.length}.${priceText}`;
+      const elapsedMs = Date.now() - startedAt;
+      setReloadComparisonProgress(100);
+      const finalMessage = `Comparison refreshed successfully in ${(elapsedMs / 1000).toFixed(1)}s using latest local stock and saved Vansco cache. Pipeline: ${pipelineName}. Finance: ${(financeVehicles || []).length} vehicles / ${countVehicleRegistrations(financeVehicles)} registrations. Rent2Buy: ${(rentVehicles || []).length} vehicles / ${countVehicleRegistrations(rentVehicles)} registrations.${carsText} Saved Vansco cache records: ${cacheRecords.length}.${priceText}`;
       setReloadComparisonStatus(finalMessage);
       setSuccessMessage(finalMessage);
     } catch (error) {
@@ -566,6 +563,21 @@ export default function VanscoStockWatchPage() {
         const sameRecord = (savedRegistration && recordRegistration === savedRegistration) || (originalRegistration && recordRegistration === originalRegistration) || record.stockUrl === actionRecord.stockUrl || record.stockUrl === actionRecord.stock_url;
         return sameRecord ? { ...record, ...actionRecord, workflowStatus: workflowStatusOf(actionRecord) || workflowStatusOf(record), workflow_status: workflowStatusOf(actionRecord) || workflowStatusOf(record), notes: actionRecord.notes ?? record.notes } : record;
       }),
+    }));
+  }
+
+  function handleReservedDrafted(originalRecord, actionRecord) {
+    handleRecordSaved(originalRecord, actionRecord);
+    const registration = normalizeWatchRegistration(originalRecord.registration || actionRecord.registration);
+    if (!registration) return;
+    setLocalRegistrationsByPipeline((prev) => {
+      const nextRegistrations = new Set(prev[selectedPipeline]);
+      nextRegistrations.delete(registration);
+      return { ...prev, [selectedPipeline]: nextRegistrations };
+    });
+    setLocalVehiclesByPipeline((prev) => ({
+      ...prev,
+      [selectedPipeline]: prev[selectedPipeline].filter((vehicle) => normalizeLocalStockRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name) !== registration),
     }));
   }
 

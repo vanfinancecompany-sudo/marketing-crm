@@ -355,6 +355,7 @@ export async function fetchDealerKitStockSnapshot({
   perPage = DEFAULT_PER_PAGE,
   allowPartial = false,
 } = {}) {
+  const snapshotStartedAt = Date.now();
   const { secret, dealerId } = dealerKitConfig(environment);
   const firstResult = await requestJson(stockUrl(dealerId, { page: 1, perPage }), secret, fetchImplementation);
   if (!firstResult.ok || !firstResult.payload || !Array.isArray(firstResult.payload?.data)) {
@@ -466,6 +467,7 @@ export async function fetchDealerKitStockSnapshot({
     + deduped.duplicateRegistrations.length
     + (stableReportedTotal ? 0 : 1);
   const checkedAt = new Date().toISOString();
+  const snapshotMs = Date.now() - snapshotStartedAt;
   return {
     providerId: "dealerkit",
     providerLabel: "DealerKit",
@@ -475,6 +477,7 @@ export async function fetchDealerKitStockSnapshot({
     vehicles: deduped.vehicles,
     vehicleCount: deduped.vehicles.length,
     diagnostics,
+    timing: { dealerKitSnapshotMs: snapshotMs },
     refresh: {
       id: null,
       runType: "dealerkit_api",
