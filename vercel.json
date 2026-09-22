@@ -14,6 +14,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/ai-assistant-learning-worker",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/sync-finance-stock?auto=true",
       "schedule": "1 * * * *"
     },
@@ -122,6 +126,9 @@
     },
     "api/carslink-production-test.js": {
       "maxDuration": 300
+    },
+    "api/ai-assistant-learning-worker.js": {
+      "maxDuration": 60
     }
   },
   "headers": [
@@ -174,28 +181,63 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "has": [{ "type": "host", "value": "marketing-crm-github-work.vercel.app" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "marketing-crm-github-work.vercel.app"
+        }
+      ],
       "destination": "/duplicate-project-retired.json"
     },
     {
       "source": "/api/(.*)",
-      "has": [{ "type": "host", "value": "marketing-crm-github-work-stuart-westons-projects.vercel.app" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "marketing-crm-github-work-stuart-westons-projects.vercel.app"
+        }
+      ],
       "destination": "/duplicate-project-retired.json"
     },
     {
       "source": "/api/(.*)",
-      "has": [{ "type": "host", "value": "marketing-crm-github-work-git-main-stuart-westons-projects.vercel.app" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "marketing-crm-github-work-git-main-stuart-westons-projects.vercel.app"
+        }
+      ],
       "destination": "/duplicate-project-retired.json"
     },
     {
       "source": "/api/(.*)",
-      "has": [{ "type": "host", "value": "marketing-crm-github-work-95nxmsvdy-stuart-westons-projects.vercel.app" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "marketing-crm-github-work-95nxmsvdy-stuart-westons-projects.vercel.app"
+        }
+      ],
       "destination": "/duplicate-project-retired.json"
     },
-    { "source": "/api/vansco-cache-list", "destination": "/api/dealerkit-stock-watch-legacy-list-compat" },
-    { "source": "/api/vansco-cache-live-refresh", "destination": "/api/dealerkit-stock-watch-legacy-refresh-compat" },
-    { "source": "/api/marketing-template-campaign-sends", "destination": "/api/marketing-template-campaign-sends-resilient" },
-    { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/api/vansco-cache-list",
+      "destination": "/api/dealerkit-stock-watch-legacy-list-compat"
+    },
+    {
+      "source": "/api/vansco-cache-live-refresh",
+      "destination": "/api/dealerkit-stock-watch-legacy-refresh-compat"
+    },
+    {
+      "source": "/api/marketing-template-campaign-sends",
+      "destination": "/api/marketing-template-campaign-sends-resilient"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }
