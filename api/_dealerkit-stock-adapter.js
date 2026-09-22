@@ -6,7 +6,7 @@ const DEFAULT_PER_PAGE = 100;
 const MAX_STOCK_RECORDS = 2000;
 const MAX_FALLBACK_ITEMS = 100;
 export const KNOWN_UNREADABLE_SOURCE_FAULT_BUDGET = 2;
-const RECOVERY_PAGE_SIZES = [25, 20, 10, 5, 2, 1];
+const RECOVERY_PAGE_SIZES = [20, 25, 10, 5, 2, 1];
 
 function clean(value, limit = 4000) {
   return String(value ?? "").trim().slice(0, limit);
