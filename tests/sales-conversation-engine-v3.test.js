@@ -7,7 +7,7 @@ import { REAL_CUSTOMER_SCENARIOS, V3_SALES_SCENARIOS, scenarioLibrarySummary } f
 import {
   applicationReadiness, buildConversationSummary, contextualClarification, conversationQualityDiagnostics,
   detectBuyingSignals, deterministicDeliveryReply, disclaimerControl, responseLengthTarget, stripRepeatedDisclaimer,
-  naturalSalesReply,
+  naturalSalesReply, controlledBusinessRuntimeReply,
 } from "../lib/salesConversationEngine.js";
 import { assessKnowledgeGapCandidate } from "../lib/knowledgeLearningEngine.js";
 import { conversationPrompt } from "../api/marketing-ai-assistant-competence.js";
@@ -18,6 +18,32 @@ test("short and complex messages receive adaptive length bands", () => {
   assert.equal(responseLengthTarget("bad credit", intent("bad credit")).maximum_words, 45);
   const complex = intent("self employed six months poor credit need two vans and delivery");
   assert.equal(responseLengthTarget("self employed six months poor credit need two vans and delivery", complex).maximum_words, 130);
+});
+
+
+test("Finance deposit plus delivery keeps both verified answers in one deterministic reply", () => {
+  const reply = controlledBusinessRuntimeReply({
+    message: "What deposit would I need, and do you deliver?",
+    productContext: "finance",
+  });
+  assert.match(reply, /Deposits may start from £99/i);
+  assert.match(reply, /not guaranteed/i);
+  assert.match(reply, /free delivery/i);
+  assert.match(reply, /England, Wales and Scotland/i);
+});
+
+test("Rent2Buy end-of-agreement questions use the verified £99 + VAT purchase option", () => {
+  for (const message of [
+    "If I chose Rent2Buy, what happens at the end?",
+    "Do I own the van at the end?",
+    "What is the final purchase option?",
+  ]) {
+    const reply = controlledBusinessRuntimeReply({ message, productContext: "rent2buy" });
+    assert.match(reply, /£99 \+ VAT/i, message);
+    assert.match(reply, /ownership can transfer/i, message);
+    assert.match(reply, /optional, not automatic/i, message);
+    assert.doesNotMatch(reply, /team can confirm|don.t have the confirmed/i, message);
+  }
 });
 
 test("quality diagnostics enforce one useful follow-up question only", () => {

@@ -84,6 +84,35 @@ test("central vehicle preference parser handles natural size and model variants"
   }
 });
 
+
+test("combined size and automatic preference retains both facts", () => {
+  const preference = extractVehiclePreference("I need a medium automatic van");
+  assert.equal(preference.size, "medium");
+  assert.equal(preference.vehicle_type, "Medium wheelbase");
+  assert.equal(preference.transmission, "automatic");
+
+  const memory = buildConversationMemory([{ role: "user", content: "I need a medium automatic van" }]);
+  assert.equal(memory.remembered_facts.vehicle_type, "Medium wheelbase");
+  assert.equal(memory.remembered_facts.transmission, "automatic");
+});
+
+test("medium automatic next-step request browses automatic stock instead of jumping straight to apply", () => {
+  for (const productContext of ["finance", "rent2buy"]) {
+    const navigation = buildPublicStockNavigation({
+      message: "I need a medium automatic van. What should I do next?",
+      productContext,
+      facts: {},
+    });
+    assert.equal(navigation.category, "automatic", productContext);
+    assert.equal(navigation.cta.label, "View Automatic Vans", productContext);
+    assert.match(navigation.reply, /medium automatic van/i, productContext);
+    assert.match(navigation.reply, /automatic .*stock/i, productContext);
+    assert.doesNotMatch(navigation.reply, /APPLY NOW/i, productContext);
+  }
+  assert.equal(PUBLIC_STOCK_ROUTES.finance.automatic, "https://www.vanfinancecompany.co.uk/vans-on-finance?type=Automatic");
+  assert.equal(PUBLIC_STOCK_ROUTES.rent2buy.automatic, "https://www.rent2buyvans.co.uk/view-automatic-vans");
+});
+
 test("stock follow-ups resolve remembered preferences without claiming unverified availability", () => {
   const memory = buildConversationMemory([
     { role: "assistant", content: "What type of van are you looking for?" },
@@ -146,6 +175,53 @@ test("public assistant emits a structured stock CTA and persists its final safe 
   assert.deepEqual(response.payload.cta, { label: "View LWB Vans", action: "navigate", behavior: "same_window", url: "https://www.rent2buyvans.co.uk/view-lwb-vans" });
   assert.equal(state.session.conversation_history.at(-1).content, response.payload.reply);
   assert.doesNotMatch(response.payload.reply, /definitely|available today|we have one/i);
+});
+
+test("live Rent2Buy prompt for a medium automatic van returns stock guidance rather than generic APPLY NOW", async () => {
+  const state = { session: {
+    id: "automatic-stock-session",
+    page_type: "rent2buy_general",
+    product_lock: "rent2buy",
+    vehicle_context: {},
+    conversation_history: [],
+    remembered_facts: { product_context: "rent2buy" },
+    journey_state: {}, message_count: 0, status: "active", expires_at: new Date(Date.now() + 60_000).toISOString(),
+  } };
+  const supabase = {
+    async rpc() { return { data: true, error: null }; },
+    from(table) {
+      if (table === "ai_assistant_events") return { insert() { return { async select() { return { data: [], error: null }; } }; } };
+      assert.equal(table, "ai_customer_sessions");
+      return {
+        select() { const chain = { eq() { return chain; }, async maybeSingle() { return { data: structuredClone(state.session), error: null }; } }; return chain; },
+        update(payload) { state.session = { ...state.session, ...structuredClone(payload) }; const chain = { eq() { return chain; }, select() { return { async single() { return { data: structuredClone(state.session), error: null }; } }; } }; return chain; },
+      };
+    },
+  };
+  const response = { setHeader() {}, status(code) { this.statusCode = code; return this; }, json(payload) { this.payload = payload; return this; } };
+
+  await handleCustomerAssistantRequest({
+    method: "POST",
+    headers: { origin: "https://www.rent2buyvans.co.uk", "x-forwarded-for": "192.0.2.82" },
+    body: {
+      action: "message",
+      conversation_id: "opaque",
+      page_context: { pageType: "rent2buy_general" },
+      message: "I need a medium automatic van. What should I do next?",
+    },
+  }, response, {
+    environment: { AI_ASSISTANT_SESSION_SECRET: "stock-test-secret", AI_ASSISTANT_ALLOWED_ORIGINS: "https://www.rent2buyvans.co.uk" },
+    supabase,
+    simulateConversation: (_client, input) => deterministicConversation(input),
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.payload.cta.label, "View Automatic Vans");
+  assert.equal(response.payload.cta.url, PUBLIC_STOCK_ROUTES.rent2buy.automatic);
+  assert.match(response.payload.reply, /medium automatic van/i);
+  assert.doesNotMatch(response.payload.reply, /APPLY NOW/i);
+  assert.equal(state.session.remembered_facts.vehicle_type, "Medium wheelbase");
+  assert.equal(state.session.remembered_facts.transmission, "automatic");
 });
 
 test("the site bridge navigates only after the widget emits a validated stock CTA", async () => {
