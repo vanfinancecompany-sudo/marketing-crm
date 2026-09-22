@@ -81,7 +81,8 @@ import {
     try {
       const result = await unpublishReservedRent2BuyWixStock(record.registration);
       setRentWixDraftResult(result);
-      const refreshed = await previewReservedRent2BuyWixStock(record.registration);
+      const refreshed = result?.preview;
+      if (!refreshed) throw new Error("Wix post-change verification was not returned. Refresh the comparison before continuing.");
       setRentWixPreview(refreshed);
       if (result.ok && (refreshed.matches || []).length === 0) {
         const completed = await saveVanscoWatchAction({
@@ -90,8 +91,7 @@ import {
           workflowStatus: "ignored",
           notes: notesDraft,
         });
-        onRecordSaved(record, completed);
-        window.location.reload();
+        onReservedDrafted(record, completed);
       }
     } catch (error) {
       setRentWixActionError(error?.message || "Could not move Rent2Buy listing records to Draft.");

@@ -84,10 +84,13 @@ test("Finance and Rent2Buy preserve the old reserved completion state machine af
   }
 });
 
-test("Finance and Rent2Buy completion is persisted and advertising presence is immediately reloaded", () => {
+test("reserved completion is persisted and confirmed advertising presence is updated without a page reload", () => {
   const source = fs.readFileSync(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
-  assert.match(source, /moveFinanceWixMatchesToDraft[\s\S]*workflowStatus: "ignored"[\s\S]*window\.location\.reload\(\)/);
-  assert.match(source, /moveRent2BuyWixMatchesToDraft[\s\S]*workflowStatus: "ignored"[\s\S]*window\.location\.reload\(\)/);
+  for (const name of ["Finance", "Car", "Rent2Buy"]) {
+    assert.match(source, new RegExp(`move${name}WixMatchesToDraft[\\s\\S]*?result\\?\\.preview[\\s\\S]*?workflowStatus: "ignored"[\\s\\S]*?onReservedDrafted\\(record, completed\\)`));
+  }
+  assert.match(source, /function handleReservedDrafted[\s\S]*setLocalRegistrationsByPipeline[\s\S]*setLocalVehiclesByPipeline/);
+  assert.doesNotMatch(source, /window\.location\.reload\(\)/);
 });
 
 test("Stock Watch source API no longer derives Finance completion from telemetry tables", () => {
@@ -157,6 +160,82 @@ test("Finance, Cars and Rent2Buy all stop when a required Wix collection read fa
     );
     assert.equal(mutationCalls, 0);
   }
+});
+
+test("reserved draft endpoints retain each DealerKit recheck and return only verified Wix changes", async () => {
+  const modules = await Promise.all([
+    import("../api/finance-reserved-wix-stock.js"),
+    import("../api/car-reserved-wix-stock.js"),
+    import("../api/rent2buy-reserved-wix-stock.js"),
+  ]);
+  const actions = [
+    modules[0].unpublishReservedFinanceWixStock,
+    modules[1].unpublishReservedCarWixStock,
+    modules[2].unpublishReservedRent2BuyWixStock,
+  ];
+
+  for (const action of actions) {
+    const sequence = [];
+    const match = { collectionId: "SAFE", collectionLabel: "Safe listing", itemId: "item-1" };
+    const result = await action("LC72YEG", {
+      supplierStockId: "dealerkit-stock-42",
+      verifyDealerKit: async () => { sequence.push("dealerkit"); return { sourceStatus: "reserved" }; },
+      loadPreview: async () => {
+        sequence.push("preview");
+        return { matches: [match], collections: [{ id: "SAFE", matches: [match], live: true, error: "" }] };
+      },
+      mutateMatch: async () => { sequence.push("draft"); return { taskStatus: "COMPLETED" }; },
+      verifyWixMatch: async () => { sequence.push("postverify"); return []; },
+    });
+    assert.deepEqual(sequence, ["dealerkit", "preview", "dealerkit", "draft", "postverify"]);
+    assert.equal(result.ok, true);
+    assert.equal(result.changed, 1);
+    assert.equal(result.preview.matches.length, 0);
+    assert.equal(result.preview.collections[0].live, false);
+    assert.ok(result.timing.totalMs >= 0);
+  }
+});
+
+test("unverified Wix results keep the listing visible and stop automatic completion", async () => {
+  const { unpublishReservedFinanceWixStock } = await import("../api/finance-reserved-wix-stock.js");
+  const match = { collectionId: "SAFE", collectionLabel: "Safe listing", itemId: "item-1" };
+  for (const verification of [null, [match]]) {
+    const result = await unpublishReservedFinanceWixStock("LC72YEG", {
+      supplierStockId: "dealerkit-stock-42",
+      verifyDealerKit: async () => ({ sourceStatus: "reserved" }),
+      loadPreview: async () => ({ matches: [match], collections: [{ id: "SAFE", matches: [match], live: true, error: "" }] }),
+      mutateMatch: async () => ({ taskStatus: "COMPLETED" }),
+      verifyWixMatch: async () => verification,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.results[0].postChangeVerified, false);
+    assert.equal(result.preview.matches.length, 1);
+    assert.equal(result.preview.collections[0].live, true);
+  }
+});
+
+test("a later DealerKit safety stop leaves remaining Wix matches untouched", async () => {
+  const { unpublishReservedFinanceWixStock } = await import("../api/finance-reserved-wix-stock.js");
+  const matches = ["item-1", "item-2"].map((itemId) => ({ collectionId: "SAFE", collectionLabel: "Safe listing", itemId }));
+  let checks = 0;
+  let drafts = 0;
+  const result = await unpublishReservedFinanceWixStock("LC72YEG", {
+    supplierStockId: "dealerkit-stock-42",
+    verifyDealerKit: async () => {
+      checks += 1;
+      if (checks === 3) throw new Error("Safety stop: DealerKit status changed.");
+      return { sourceStatus: "reserved" };
+    },
+    loadPreview: async () => ({ matches, collections: [{ id: "SAFE", matches, live: true, error: "" }] }),
+    mutateMatch: async () => { drafts += 1; return { taskStatus: "COMPLETED" }; },
+    verifyWixMatch: async () => [],
+  });
+  assert.equal(checks, 3);
+  assert.equal(drafts, 1);
+  assert.equal(result.ok, false);
+  assert.equal(result.changed, 1);
+  assert.deepEqual(result.preview.matches.map((match) => match.itemId), ["item-2"]);
+  assert.equal(result.results[1].safetyStop, true);
 });
 
 test("DealerKit-missing Finance removal requires a complete absent snapshot and rechecks before every Wix write", async () => {

@@ -41,7 +41,7 @@ function stateAgeDays(row, now = new Date()) {
   return Math.max(0, (now.getTime() - time) / 86_400_000);
 }
 
-function verifiedResult({ registration, stockId, status, rawStatus, checkedAt, snapshot, evidence, previousStatus = "" }) {
+function verifiedResult({ registration, stockId, status, rawStatus, checkedAt, snapshot, evidence, previousStatus = "", timing }) {
   return {
     providerId: "dealerkit",
     providerLabel: "DealerKit",
@@ -53,6 +53,7 @@ function verifiedResult({ registration, stockId, status, rawStatus, checkedAt, s
     snapshotComplete: snapshot?.complete ?? null,
     evidence,
     previousSourceStatus: previousStatus || null,
+    timing,
   };
 }
 
@@ -82,13 +83,30 @@ export async function verifyDealerKitReservedRegistration(
 
   const requestedStockId = clean(supplierStockId);
   let snapshot = null;
+  const timing = {
+    dealerKitSnapshotMs: 0,
+    dealerKitDetailVerificationMs: 0,
+  };
+  const readTimedDetail = async (stockId, options) => {
+    const startedAt = Date.now();
+    try {
+      return await readDetail(stockId, options);
+    } finally {
+      timing.dealerKitDetailVerificationMs += Date.now() - startedAt;
+    }
+  };
 
   try {
-    snapshot = await readSnapshot({
-      environment,
-      fetchImplementation,
-      allowPartial: true,
-    });
+    const snapshotStartedAt = Date.now();
+    try {
+      snapshot = await readSnapshot({
+        environment,
+        fetchImplementation,
+        allowPartial: true,
+      });
+    } finally {
+      timing.dealerKitSnapshotMs = Date.now() - snapshotStartedAt;
+    }
 
     const matches = (snapshot.vehicles || []).filter(
       (vehicle) => normalizeRegistration(vehicle?.registration) === registration,
@@ -110,7 +128,7 @@ export async function verifyDealerKitReservedRegistration(
         throw safetyStop(`DealerKit currently shows ${registration} as ${clean(current?.sourceStatus) || currentStatus || "available/unknown"}, not Reserved/Sold/Deposit Taken/Awaiting Delivery.`);
       }
 
-      const detail = await readDetail(stockId, {
+      const detail = await readTimedDetail(stockId, {
         environment,
         fetchImplementation,
         specifications: false,
@@ -133,6 +151,7 @@ export async function verifyDealerKitReservedRegistration(
         checkedAt: detail?.checkedAt,
         snapshot,
         evidence: "current_registration_and_detail",
+        timing,
       });
     }
 
@@ -159,7 +178,7 @@ export async function verifyDealerKitReservedRegistration(
     }
 
     try {
-      const detail = await readDetail(requestedStockId, {
+      const detail = await readTimedDetail(requestedStockId, {
         environment,
         fetchImplementation,
         specifications: false,
@@ -183,6 +202,7 @@ export async function verifyDealerKitReservedRegistration(
         snapshot,
         evidence: "historical_identity_detail",
         previousStatus: clean(stateRow?.last_status),
+        timing,
       });
     } catch (error) {
       if (/^Safety stop:/i.test(clean(error?.message))) throw error;
@@ -197,6 +217,7 @@ export async function verifyDealerKitReservedRegistration(
         snapshot,
         evidence: "historical_identity_detail_404",
         previousStatus: clean(stateRow?.last_status),
+        timing,
       });
     }
   } catch (error) {

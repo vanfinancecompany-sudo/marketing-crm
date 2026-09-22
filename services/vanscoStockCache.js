@@ -1,10 +1,7 @@
 import { buildMarketingAccessHeaders } from "./marketingAccess.js";
 
 let activeVanscoRunId = "";
-
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const MANUAL_REFRESH_BATCH_SIZE = 15;
 
 function formatDateTime(value) {
   if (!value) return "Not run yet";
@@ -360,7 +357,7 @@ export async function runVanscoLiveRefreshBatch({ batchSize = 10, refreshUrls = 
 export async function refreshVanscoCacheUrls() {
   showStatusHub();
   updateStatusHub({}, "starting", "Starting full Vansco feed refresh. First step: refresh current URL list.");
-  const payload = await runVanscoLiveRefreshBatch({ batchSize: 10, refreshUrls: true });
+  const payload = await runVanscoLiveRefreshBatch({ batchSize: MANUAL_REFRESH_BATCH_SIZE, refreshUrls: true });
   return {
     ...payload,
     urlsFound: payload.refresh?.urlsFound || payload.run?.total_urls || 0,
@@ -369,6 +366,7 @@ export async function refreshVanscoCacheUrls() {
 }
 
 export async function processVanscoCacheBatch() {
+  const startedAt = Date.now();
   let latest = null;
   let runId = activeVanscoRunId;
   const maxBatches = 120;
@@ -376,7 +374,7 @@ export async function processVanscoCacheBatch() {
   let noProgressBatches = 0;
 
   for (let batchIndex = 0; batchIndex < maxBatches; batchIndex += 1) {
-    latest = await runVanscoLiveRefreshBatch({ batchSize: 10, refreshUrls: false, runId });
+    latest = await runVanscoLiveRefreshBatch({ batchSize: MANUAL_REFRESH_BATCH_SIZE, refreshUrls: false, runId });
     runId = latest.runId || runId;
     updateStatusHub(latest, "processing_dragon_details", `Processing safe batch ${batchIndex + 1}. Keep this page open while refresh runs.`);
 
@@ -406,7 +404,6 @@ export async function processVanscoCacheBatch() {
       break;
     }
 
-    await wait(1000);
   }
 
   const result = {
@@ -415,6 +412,10 @@ export async function processVanscoCacheBatch() {
     successCount: latest?.totalRunSuccessCount ?? latest?.successCount ?? 0,
     failureCount: latest?.totalRunFailureCount ?? latest?.failureCount ?? 0,
     remainingCount: latest?.remainingThisRunCount ?? latest?.remainingUncheckedOrMissingRegCount ?? 0,
+    timing: {
+      ...(latest?.timing || {}),
+      dealerKitDetailBatchMs: Date.now() - startedAt,
+    },
   };
 
   finishStatusHub(result);
