@@ -40,8 +40,9 @@ function hasReportedTotalDrift(snapshot) {
 }
 
 function retryableIncompleteSource(snapshot) {
+  const knownBaselineOnly = snapshot?.diagnostics?.knownSourceFaults?.baselineOnly === true;
   return hasReportedTotalDrift(snapshot)
-    || Number(snapshot?.diagnostics?.failedPositions?.length || 0) > 0
+    || (!knownBaselineOnly && Number(snapshot?.diagnostics?.failedPositions?.length || 0) > 0)
     || Number(snapshot?.diagnostics?.invalidRecords?.length || 0) > 0;
 }
 
@@ -98,6 +99,7 @@ export async function fetchStableDealerKitStockSnapshot({
       vehicleCount: Number(snapshot?.vehicleCount ?? snapshot?.vehicles?.length ?? 0),
       failedPositions: Number(snapshot?.diagnostics?.failedPositions?.length || 0),
       invalidRecords: Number(snapshot?.diagnostics?.invalidRecords?.length || 0),
+      knownSourceFaults: snapshot?.diagnostics?.knownSourceFaults || null,
     });
     lastSnapshot = snapshot;
 
