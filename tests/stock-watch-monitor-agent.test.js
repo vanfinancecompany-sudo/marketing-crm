@@ -191,3 +191,66 @@ test("DealerKit monitor uses one partial-tolerant source pass so the 15-minute c
   assert.match(provider, /fetchStableDealerKitStockSnapshot\(\{\s*environment,\s*fetchImplementation,\s*allowPartial,\s*stabilityAttempts\s*\}\)/);
   assert.match(transform, /stabilityAttempts:\s*1/);
 });
+
+
+test("two known unreadable DealerKit rows stay quiet but a third becomes a source-health issue", () => {
+  const knownTwo = healthySnapshot({
+    provider: {
+      ...healthySnapshot().provider,
+      providerId: "dealerkit",
+      providerLabel: "DealerKit",
+      diagnostics: {
+        knownSourceFaults: {
+          budget: 2,
+          count: 2,
+          positions: [201, 204],
+          withinBudget: true,
+          baselineOnly: true,
+          exceeded: false,
+        },
+      },
+      refresh: {
+        status: "degraded_known",
+        stage: "known_source_faults",
+        updatedAt: "2026-09-04T18:30:00.000Z",
+        completedAt: "2026-09-04T18:30:00.000Z",
+        succeeded: 250,
+        failed: 2,
+        remaining: 2,
+        error: "DealerKit has 2 known unreadable source rows.",
+      },
+    },
+  });
+  const twoIssues = buildStockWatchMonitorIssues({ snapshot: knownTwo, previousSnapshot: healthySnapshot(), actionLogs: [], now: NOW });
+  assert.equal(twoIssues.some((item) => item.code === "STOCK_SOURCE_REFRESH_FAILURES"), false);
+
+  const threeFaults = healthySnapshot({
+    provider: {
+      ...knownTwo.provider,
+      diagnostics: {
+        knownSourceFaults: {
+          budget: 2,
+          count: 3,
+          positions: [201, 204, 207],
+          withinBudget: false,
+          baselineOnly: false,
+          exceeded: true,
+        },
+      },
+      refresh: {
+        ...knownTwo.provider.refresh,
+        status: "partial",
+        stage: "incomplete_source",
+        succeeded: 249,
+        failed: 3,
+        remaining: 3,
+        error: "DealerKit returned an incomplete stock snapshot.",
+      },
+    },
+  });
+  const threeIssues = buildStockWatchMonitorIssues({ snapshot: threeFaults, previousSnapshot: healthySnapshot(), actionLogs: [], now: NOW });
+  const found = threeIssues.find((item) => item.code === "STOCK_SOURCE_REFRESH_FAILURES");
+  assert.ok(found);
+  assert.match(found.title, /exceeded the known baseline of 2/i);
+  assert.equal(found.evidence.knownSourceFaults.count, 3);
+});
