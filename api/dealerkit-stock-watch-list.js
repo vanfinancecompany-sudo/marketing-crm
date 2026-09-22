@@ -385,6 +385,109 @@ export function canResolveDealerKitAbsence(snapshot = {}) {
   return snapshot?.complete === true;
 }
 
+export async function buildDealerKitStockWatchPayload({ pipeline, snapshot, supabase, actionsResult, sourceStateSync }) {
+  if (actionsResult?.error) throw new Error(`Could not read Stock Watch decisions: ${actionsResult.error.message || actionsResult.error}`);
+  let transitions;
+  if (!canResolveDealerKitAbsence(snapshot)) {
+    // Missing rows in a partial bulk read are unknown, not lifecycle events.
+    // Do not probe historical detail or infer removal until a complete bulk
+    // snapshot can prove that the registration is genuinely absent.
+    transitions = {
+      ...unavailableTransitions(),
+      available: true,
+      pausedForIncompleteSnapshot: true,
+    };
+  } else {
+    try {
+      transitions = await resolveRecentDealerKitTransitions({ supabase, snapshot, pipeline });
+    } catch (error) {
+      transitions = unavailableTransitions(error);
+    }
+  }
+
+  const actions = (actionsResult.data || []).map(normalizeActionRecord);
+  const actionByRegistration = new Map(actions
+    .map((action) => [normalizeRegistration(action.registration || ""), action])
+    .filter(([registration]) => registration));
+  const currentDealerKitRegistrations = dealerKitBulkRegistrations(snapshot);
+  const currentSourceVehicles = (snapshot.vehicles || [])
+    .filter((vehicle) => pipelineVehicle(vehicle, pipeline))
+    .map((vehicle) => ({ ...vehicle, isCurrentDealerKitBulkRecord: true }));
+  const currentRegistrations = new Set(currentSourceVehicles.map((vehicle) => normalizeRegistration(vehicle.registration)).filter(Boolean));
+  const transitionVehicles = transitions.vehicles
+    .filter((vehicle) => {
+      const registration = normalizeRegistration(vehicle.registration || "");
+      return registration && !currentRegistrations.has(registration);
+    })
+    .map((vehicle) => ({ ...vehicle, isCurrentDealerKitBulkRecord: false }));
+  const sourceVehicles = [...currentSourceVehicles, ...transitionVehicles];
+  const segmentCounts = summariseDealerKitSegments(snapshot.vehicles || []);
+  const records = sourceVehicles.map((vehicle) => vehicleRecord(vehicle, actionByRegistration.get(normalizeRegistration(vehicle.registration)) || null));
+  const sourceRegistrations = new Set(records.map((record) => record.registration).filter(Boolean));
+
+  for (const action of actions) {
+    const registration = normalizeRegistration(action.registration || "");
+    if (!registration || sourceRegistrations.has(registration)) continue;
+    if (!orphanActionBelongsToPipeline(action, pipeline)) continue;
+    const orphan = orphanActionRecord(action, pipeline);
+    if (orphan) records.push(orphan);
+  }
+
+  const usableRegistrations = records.filter((record) => record.registration).length;
+  const availableCount = currentSourceVehicles.filter((vehicle) => ["available", "due_in"].includes(normalizedSourceStatus(vehicle))).length;
+  const reservedCount = currentSourceVehicles.filter((vehicle) => RESERVED_WORKFLOW_STATUSES.has(normalizedSourceStatus(vehicle))).length;
+
+  return {
+    ok: true,
+    pipeline,
+    source: {
+      provider: "dealerkit",
+      complete: Boolean(snapshot.complete),
+      apiReportedTotal: Number(snapshot.apiReportedTotal || 0),
+      usableRecords: Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0),
+      pipelineRecords: currentSourceVehicles.length,
+      lifecycleRecoveredRecords: transitionVehicles.length,
+      segmentCounts,
+      unclassifiedRecords: segmentCounts.unknown,
+      issues: snapshot.diagnostics || null,
+      checkedAt: snapshot.checkedAt || new Date().toISOString(),
+      sourceState: {
+        available: sourceStateSync.available !== false && transitions.available !== false,
+        written: Number(sourceStateSync.written || 0),
+        missingTable: Boolean(sourceStateSync.missingTable || transitions.missingTable),
+        transitionCandidates: transitions.candidates,
+        transitionProbes: transitions.probed,
+        transitionDetailErrors: transitions.detailErrors,
+        transitionUnresolved: transitions.unresolved,
+        error: sourceStateSync.error || transitions.error || null,
+      },
+    },
+    records,
+    summary: {
+      provider: "dealerkit",
+      currentUrlCount: Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0),
+      currentPipelineUrlCount: currentSourceVehicles.length,
+      currentDealerKitRegistrations,
+      lifecycleRecoveredCount: transitionVehicles.length,
+      lifecycleUnresolvedCount: Number(transitions.unresolved || 0),
+      hiddenOtherTabTypeCount: Math.max(0, Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0) - currentSourceVehicles.length),
+      cachedRegs: usableRegistrations,
+      usableCachedRegistrations: usableRegistrations,
+      currentNoRegistrationCount: 0,
+      currentReservedCount: reservedCount,
+      currentAvailableOrUnknownCount: availableCount,
+      currentCheckedCount: currentSourceVehicles.length,
+      currentUncheckedCount: Number(transitions.unresolved || 0),
+      detailRefreshedToday: currentSourceVehicles.length,
+      failedDetailChecks: Math.max(0, Number(snapshot.apiReportedTotal || 0) - Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0)) + Number(transitions.detailErrors || 0),
+      latestUrlListCheckedAt: snapshot.checkedAt || new Date().toISOString(),
+      sourceComplete: Boolean(snapshot.complete),
+      sourceStateAvailable: sourceStateSync.available !== false && transitions.available !== false,
+      totalsNote: `Operator Stock Watch refreshes positive DealerKit registrations/statuses even when a small number of bulk positions remain unresolved. Absence-dependent checks stay suspended until the bulk snapshot is complete. ${segmentCounts.unknown} unclassified record(s) are held out of product tabs but still prove DealerKit presence by exact registration. Historical detail can explain lifecycle only and never proves current stock presence.`,
+    },
+  };
+}
+
 export default async function handler(request, response) {
   if (!isAuthorised(request)) {
     response.status(401).json({ ok: false, message: "Marketing CRM access is required." });
@@ -416,105 +519,7 @@ export default async function handler(request, response) {
       sourceStateSync = unavailableSourceState(error);
     }
 
-    let transitions;
-    if (!canResolveDealerKitAbsence(snapshot)) {
-      // Missing rows in a partial bulk read are unknown, not lifecycle events.
-      // Do not probe historical detail or infer removal until a complete bulk
-      // snapshot can prove that the registration is genuinely absent.
-      transitions = {
-        ...unavailableTransitions(),
-        available: true,
-        pausedForIncompleteSnapshot: true,
-      };
-    } else {
-      try {
-        transitions = await resolveRecentDealerKitTransitions({ supabase, snapshot, pipeline });
-      } catch (error) {
-        transitions = unavailableTransitions(error);
-      }
-    }
-
-    const actions = (actionsResult.data || []).map(normalizeActionRecord);
-    const actionByRegistration = new Map(actions
-      .map((action) => [normalizeRegistration(action.registration || ""), action])
-      .filter(([registration]) => registration));
-    const currentDealerKitRegistrations = dealerKitBulkRegistrations(snapshot);
-    const currentSourceVehicles = (snapshot.vehicles || [])
-      .filter((vehicle) => pipelineVehicle(vehicle, pipeline))
-      .map((vehicle) => ({ ...vehicle, isCurrentDealerKitBulkRecord: true }));
-    const currentRegistrations = new Set(currentSourceVehicles.map((vehicle) => normalizeRegistration(vehicle.registration)).filter(Boolean));
-    const transitionVehicles = transitions.vehicles
-      .filter((vehicle) => {
-        const registration = normalizeRegistration(vehicle.registration || "");
-        return registration && !currentRegistrations.has(registration);
-      })
-      .map((vehicle) => ({ ...vehicle, isCurrentDealerKitBulkRecord: false }));
-    const sourceVehicles = [...currentSourceVehicles, ...transitionVehicles];
-    const segmentCounts = summariseDealerKitSegments(snapshot.vehicles || []);
-    const records = sourceVehicles.map((vehicle) => vehicleRecord(vehicle, actionByRegistration.get(normalizeRegistration(vehicle.registration)) || null));
-    const sourceRegistrations = new Set(records.map((record) => record.registration).filter(Boolean));
-
-    for (const action of actions) {
-      const registration = normalizeRegistration(action.registration || "");
-      if (!registration || sourceRegistrations.has(registration)) continue;
-      if (!orphanActionBelongsToPipeline(action, pipeline)) continue;
-      const orphan = orphanActionRecord(action, pipeline);
-      if (orphan) records.push(orphan);
-    }
-
-    const usableRegistrations = records.filter((record) => record.registration).length;
-    const availableCount = currentSourceVehicles.filter((vehicle) => ["available", "due_in"].includes(normalizedSourceStatus(vehicle))).length;
-    const reservedCount = currentSourceVehicles.filter((vehicle) => RESERVED_WORKFLOW_STATUSES.has(normalizedSourceStatus(vehicle))).length;
-
-    response.status(200).json({
-      ok: true,
-      pipeline,
-      source: {
-        provider: "dealerkit",
-        complete: Boolean(snapshot.complete),
-        apiReportedTotal: Number(snapshot.apiReportedTotal || 0),
-        usableRecords: Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0),
-        pipelineRecords: currentSourceVehicles.length,
-        lifecycleRecoveredRecords: transitionVehicles.length,
-        segmentCounts,
-        unclassifiedRecords: segmentCounts.unknown,
-        issues: snapshot.diagnostics || null,
-        checkedAt: snapshot.checkedAt || new Date().toISOString(),
-        sourceState: {
-          available: sourceStateSync.available !== false && transitions.available !== false,
-          written: Number(sourceStateSync.written || 0),
-          missingTable: Boolean(sourceStateSync.missingTable || transitions.missingTable),
-          transitionCandidates: transitions.candidates,
-          transitionProbes: transitions.probed,
-          transitionDetailErrors: transitions.detailErrors,
-          transitionUnresolved: transitions.unresolved,
-          error: sourceStateSync.error || transitions.error || null,
-        },
-      },
-      records,
-      summary: {
-        provider: "dealerkit",
-        currentUrlCount: Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0),
-        currentPipelineUrlCount: currentSourceVehicles.length,
-        currentDealerKitRegistrations,
-        lifecycleRecoveredCount: transitionVehicles.length,
-        lifecycleUnresolvedCount: Number(transitions.unresolved || 0),
-        hiddenOtherTabTypeCount: Math.max(0, Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0) - currentSourceVehicles.length),
-        cachedRegs: usableRegistrations,
-        usableCachedRegistrations: usableRegistrations,
-        currentNoRegistrationCount: 0,
-        currentReservedCount: reservedCount,
-        currentAvailableOrUnknownCount: availableCount,
-        currentCheckedCount: currentSourceVehicles.length,
-        currentUncheckedCount: Number(transitions.unresolved || 0),
-        detailRefreshedToday: currentSourceVehicles.length,
-        failedDetailChecks: Math.max(0, Number(snapshot.apiReportedTotal || 0) - Number(snapshot.vehicleCount || snapshot.vehicles?.length || 0)) + Number(transitions.detailErrors || 0),
-        latestUrlListCheckedAt: snapshot.checkedAt || new Date().toISOString(),
-        sourceComplete: Boolean(snapshot.complete),
-        sourceStateAvailable: sourceStateSync.available !== false && transitions.available !== false,
-        totalsNote: `Operator Stock Watch refreshes positive DealerKit registrations/statuses even when a small number of bulk positions remain unresolved. Absence-dependent checks stay suspended until the bulk snapshot is complete. ${segmentCounts.unknown} unclassified record(s) are held out of product tabs but still prove DealerKit presence by exact registration. Historical detail can explain lifecycle only and never proves current stock presence.`,
-      },
-    });
+    response.status(200).json(await buildDealerKitStockWatchPayload({ pipeline, snapshot, supabase, actionsResult, sourceStateSync }));
   } catch (error) {
     response.status(502).json({ ok: false, message: error?.message || "Could not load DealerKit Stock Watch records." });
   }
