@@ -104,8 +104,10 @@ async function enforceRateLimits(supabase, request, environment = process.env) {
   const secret = clean(environment.AI_ASSISTANT_SESSION_SECRET, 1000);
   const keyHash = secureHash(`ip:${requestIp(request)}`, secret);
   const now = new Date();
-  await consumeRateLimit(supabase, keyHash, "minute", rateWindow(now, 60_000), MINUTE_LIMIT);
-  await consumeRateLimit(supabase, keyHash, "day", rateWindow(now, 86_400_000), DAILY_LIMIT);
+  await Promise.all([
+    consumeRateLimit(supabase, keyHash, "minute", rateWindow(now, 60_000), MINUTE_LIMIT),
+    consumeRateLimit(supabase, keyHash, "day", rateWindow(now, 86_400_000), DAILY_LIMIT),
+  ]);
 }
 
 function sessionExpiry() {
@@ -373,7 +375,10 @@ async function continueConversation(supabase, body, environment, simulateConvers
     pageContext,
     controlledFallback,
   });
-  const generated = await simulateConversation(supabase, canonicalInput);
+  // Live customer chat keeps the saved competence result, but defers the heavy
+  // knowledge-opportunity analysis to the existing protected "Analyse Existing" workflow.
+  // That learning pass re-reads the full knowledge library and must not sit on the customer response path.
+  const generated = await simulateConversation(supabase, canonicalInput, { captureLearning: false });
   const result = generated.result;
   const stockNavigation = buildPublicStockNavigation({ message, productContext: productLock, facts: result.remembered_facts });
   const reply = clean(stockNavigation?.reply || result.reply, 5000);
