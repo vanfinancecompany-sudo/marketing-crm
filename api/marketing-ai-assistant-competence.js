@@ -101,6 +101,10 @@ import {
   validateControlledCompositionReply,
   validateRememberedFactConsistency,
 } from "../lib/liveJasmineComposition.js";
+import {
+  getCachedAssistantKnowledge,
+  preparedKnowledgeFor,
+} from "../lib/assistantKnowledgeRuntime.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value || "").trim().slice(0, limit);
@@ -483,6 +487,10 @@ export async function simulateCustomerConversation(supabase, body, options = {})
   let categoryFilter = productContext === "rent2buy" ? "Rent2Buy only" : "All approved Finance categories; exclude Rent2Buy";
   let retrievalTime = 0;
   let generationTime = 0;
+  let knowledgeCacheHit = null;
+  let knowledgeCacheJoined = false;
+  let knowledgeCacheAgeMs = null;
+  let knowledgeLoadTimeMs = 0;
   let model = "deterministic-conversation-rules";
   let modelRoute = {
     model,
@@ -502,10 +510,26 @@ export async function simulateCustomerConversation(supabase, body, options = {})
       : naturalSalesReply(intent, productContext, buyingSignals, memory.remembered_facts) || naturalConversationReply(intent, productContext, memory.remembered_facts));
   } else {
     const retrievalStart = performance.now();
-    const knowledge = options.knowledge || await loadKnowledge(supabase);
-    const bounded = await runStage("Apply conversation product boundary", { ...context, comparison }, async () => filterKnowledgeForProduct(knowledge, productContext, { comparison }));
+    let knowledge;
+    let bounded;
+    let corpus;
+    if (options.knowledge) {
+      knowledge = options.knowledge;
+      bounded = await runStage("Apply conversation product boundary", { ...context, comparison }, async () => filterKnowledgeForProduct(knowledge, productContext, { comparison }));
+      corpus = await runStage("Build conversation article chunks", { ...context, article_count: bounded.articles.length }, async () => buildRetrievalCorpus(bounded));
+    } else {
+      const runtime = await runStage("Load prepared assistant knowledge", { ...context, comparison }, () => getCachedAssistantKnowledge(
+        () => loadKnowledge(supabase),
+        { environment: options.environment || process.env },
+      ));
+      knowledge = runtime.knowledge;
+      ({ bounded, corpus } = preparedKnowledgeFor(runtime, productContext, comparison));
+      knowledgeCacheHit = runtime.cache_hit;
+      knowledgeCacheJoined = runtime.cache_joined;
+      knowledgeCacheAgeMs = runtime.cache_age_ms;
+      knowledgeLoadTimeMs = runtime.load_time_ms;
+    }
     categoryFilter = bounded.categoryFilter;
-    const corpus = await runStage("Build conversation article chunks", { ...context, article_count: bounded.articles.length }, async () => buildRetrievalCorpus(bounded));
     const retrievalQuery = conversationRetrievalQuery(intent, memory, conversationWithCurrent);
     const location = memory.remembered_facts.location;
     const coverageQuestion = intent.secondary_intents.includes("coverage") && location ? `coverage for ${location}` : question;
@@ -769,6 +793,10 @@ export async function simulateCustomerConversation(supabase, body, options = {})
     token_usage: tokenUsage,
     estimated_cost_usd: options.generationMode === "deterministic" ? 0 : estimateOpenAICost(tokenUsage),
     openai_response_id: openAIResponseId,
+    knowledge_cache_hit: knowledgeCacheHit,
+    knowledge_cache_joined: knowledgeCacheJoined,
+    knowledge_cache_age_ms: knowledgeCacheAgeMs,
+    knowledge_load_time_ms: knowledgeLoadTimeMs,
   };
   const resultPayload = {
     run_id: body.run_id || null,
@@ -791,16 +819,40 @@ export async function simulateCustomerConversation(supabase, body, options = {})
     coverage_diagnostics: structured.coverage_diagnostics,
     conversation_intent: intent.primary_intent,
     secondary_intents: intent.secondary_intents,
-    conversation_diagnostics: structured,
+    conversation_diagnostics: {
+      ...structured,
+      learning_capture_status: options.persist !== false && options.captureLearning === false ? "pending" : "inline",
+      learning_capture_queued_at: options.persist !== false && options.captureLearning === false ? new Date().toISOString() : null,
+    },
     learning_diagnosis: learningDiagnosis,
     simulation_session_id: sessionId,
   };
+  const persistenceStart = performance.now();
   const saved = options.persist === false
     ? { ...resultPayload, id: `health-${requestId}` }
     : await runStage("Save conversation simulation", context, async () => data(await supabase.from("knowledge_competence_results").insert(resultPayload).select().single(), "The conversation simulation could not be saved."));
-  if (options.persist !== false) await assessSavedCompetenceResult(supabase, saved.id);
-  const trace = { request_id: requestId, session_id: sessionId, submitted_question: question, result_question: saved.question, result_id: saved.id, selected_product: productContext, generated_at: new Date().toISOString(), cached_value_used: false, previous_value_used: false };
-  return { result: { ...structured, id: saved.id, response_time_ms: resultPayload.response_time_ms, retrieval_time_ms: retrievalTime, generation_time_ms: generationTime, model, model_route: modelRoute, category_filter: categoryFilter }, request_trace: trace };
+  const persistenceTime = options.persist === false ? 0 : elapsed(persistenceStart);
+  const learningStart = performance.now();
+  const learningCaptureInline = options.persist !== false && options.captureLearning !== false;
+  if (learningCaptureInline) await assessSavedCompetenceResult(supabase, saved.id);
+  const learningCaptureTime = learningCaptureInline ? elapsed(learningStart) : 0;
+  const trace = { request_id: requestId, session_id: sessionId, submitted_question: question, result_question: saved.question, result_id: saved.id, selected_product: productContext, generated_at: new Date().toISOString(), cached_value_used: Boolean(knowledgeCacheHit), previous_value_used: false };
+  return {
+    result: {
+      ...structured,
+      id: saved.id,
+      response_time_ms: resultPayload.response_time_ms,
+      retrieval_time_ms: retrievalTime,
+      generation_time_ms: generationTime,
+      persistence_time_ms: persistenceTime,
+      learning_capture_time_ms: learningCaptureTime,
+      learning_capture_deferred: options.persist !== false && !learningCaptureInline,
+      model,
+      model_route: modelRoute,
+      category_filter: categoryFilter,
+    },
+    request_trace: trace,
+  };
 }
 
 function deterministicHealthCoverage({ question, productContext, settings = {} } = {}) {

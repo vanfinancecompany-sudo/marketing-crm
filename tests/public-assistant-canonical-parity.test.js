@@ -166,8 +166,9 @@ test("canonical session state persists the runner result rather than a reduced p
 test("homepage product selection sets transport state without polluting canonical history", async () => {
   const { client, state } = statefulSupabase(homepageSession());
   const canonicalInputs = [];
-  const simulateConversation = async (_supabase, input) => {
+  const simulateConversation = async (_supabase, input, options) => {
     canonicalInputs.push(structuredClone(input));
+    assert.equal(options?.captureLearning, false);
     return { result: {
       id: "result-homepage-1",
       reply: "Finance prices are shown plus VAT.",

@@ -134,7 +134,7 @@ export async function analyseCompetenceResults(supabase, results, reviews, setti
   return { analysed_results: results.length, candidate_groups: grouped.length, opportunities_upserted: saved.length, opportunity_ids: saved.map((item) => item.id) };
 }
 
-export async function assessSavedCompetenceResult(supabase, resultId) {
+export async function assessSavedCompetenceResult(supabase, resultId, options = {}) {
   try {
     const [result, review, settings] = await Promise.all([
       supabase.from("knowledge_competence_results").select("*").eq("id", resultId).single(),
@@ -143,7 +143,7 @@ export async function assessSavedCompetenceResult(supabase, resultId) {
     ]);
     if (result.error) throw result.error;
     const configuration = { confidence_threshold: settings.data?.assistant_confidence_threshold ?? 65 };
-    const initial = await analyseCompetenceResults(supabase, [result.data], review.data ? [review.data] : [], configuration);
+    const initial = await analyseCompetenceResults(supabase, [result.data], review.data ? [review.data] : [], configuration, options.knowledge || null);
     for (const opportunityId of initial.opportunity_ids || []) {
       const links = data(await supabase.from("knowledge_assistant_opportunity_questions").select("competence_result_id").eq("opportunity_id", opportunityId), "Opportunity links could not be refreshed.") || [];
       const resultIds = links.map((item) => item.competence_result_id);
@@ -152,7 +152,7 @@ export async function assessSavedCompetenceResult(supabase, resultId) {
         supabase.from("knowledge_competence_results").select("*").in("id", resultIds),
         supabase.from("knowledge_competence_reviews").select("*").in("result_id", resultIds),
       ]);
-      await analyseCompetenceResults(supabase, data(allResults, "Opportunity results could not be refreshed.") || [], data(allReviews, "Opportunity reviews could not be refreshed.") || [], configuration);
+      await analyseCompetenceResults(supabase, data(allResults, "Opportunity results could not be refreshed.") || [], data(allReviews, "Opportunity reviews could not be refreshed.") || [], configuration, options.knowledge || null);
     }
     return { ...initial, captured: true };
   } catch (error) {
