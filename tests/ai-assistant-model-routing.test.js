@@ -74,13 +74,13 @@ test("ambiguous and multi-step turns escalate to Sol with stronger reasoning", (
     orchestration: { retrieval_required: false, recovery_required: true },
     sourceCount: 0,
   });
-  assert.equal(ambiguous.model, "gpt-5.6-sol");
+  assert.equal(ambiguous.model, "gpt-6-sol");
   assert.equal(ambiguous.reasoning_effort, "medium");
 
   const multiStep = route("How does it work, what documents do I need, and what happens next?", {
     intent: { primary_intent: "multi_part_question", secondary_intents: ["documents", "application"] },
   });
-  assert.equal(multiStep.model, "gpt-5.6-sol");
+  assert.equal(multiStep.model, "gpt-6-sol");
   assert.equal(multiStep.reasoning_effort, "medium");
 });
 
