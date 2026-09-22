@@ -65,8 +65,9 @@ replaceBlock('  async function loadPipeline(pipeline = selectedPipeline, options
 
   async function loadSession({ forceFresh = false } = {}) {
     const cache = sessionCacheRef.current;
+    // A click during the initial load joins that request, including forceFresh.
+    if (sessionUiLoadRef.current) return sessionUiLoadRef.current;
     if (!forceFresh && cache.isCurrent()) return cache.peek();
-    if (!forceFresh && sessionUiLoadRef.current) return sessionUiLoadRef.current;
     const uiGeneration = ++sessionUiGenerationRef.current;
     setLoadingPipeline(selectedPipeline);
     const work = cache.load(fetchDealerKitStockWatchSession, { forceFresh }).then(async ({ session }) => {
@@ -93,7 +94,9 @@ replaceBlock('  useEffect(() => {\n    let active = true;\n    loadLocalStock(se
     const startedAt = performance.now();
     const cached = sessionCacheRef.current.isCurrent();
     if (!cached) {
-      loadSession().catch((error) => setErrorMessage(\`Stock data incomplete / last verified snapshot shown. \${error.message || "Could not load DealerKit Stock Watch data."}\`));
+      loadSession().catch((error) => setErrorMessage(sessionCacheRef.current.peek()
+        ? \`DealerKit refresh failed: \${error.message || "Could not load DealerKit Stock Watch data."} Existing verified data remains displayed.\`
+        : \`DealerKit stock is unavailable: \${error.message || "Could not load DealerKit Stock Watch data."} No verified session is available yet.\`));
     }
     setDebugByPipeline((previous) => ({
       ...previous,
@@ -116,7 +119,9 @@ replaceBlock('  async function handleRefreshCache() {', '  function handleRecord
       const attempts = session.timing?.dealerKitBulkReadAttempts || 1;
       setSuccessMessage(\`DealerKit stock refreshed for Finance, Rent2Buy and Cars in \${((Date.now() - startedAt) / 1000).toFixed(1)}s. Source checked: \${formatWatchTimestamp(session.snapshotGeneration)}. Bulk read attempts: \${attempts}.\`);
     } catch (error) {
-      setErrorMessage(\`\${error.message || "Could not refresh DealerKit stock data."} Showing the last verified snapshot if available.\`);
+      setErrorMessage(sessionCacheRef.current.peek()
+        ? \`DealerKit refresh failed: \${error.message || "Could not refresh DealerKit stock data."} Existing verified data remains displayed.\`
+        : \`DealerKit refresh failed: \${error.message || "Could not refresh DealerKit stock data."} No verified session is available yet.\`);
     } finally {
       setRefreshingCache(false);
     }
@@ -184,8 +189,9 @@ replaceBlock('  async function handleRefreshCache() {', '  function handleRecord
 
 `, "refresh handlers");
 
-replaceOnce('disabled={refreshingCache}>{refreshingCache ? "Refreshing dealer stock..."', 'disabled={refreshingCache || reloadComparisonRunning}>{refreshingCache ? "Refreshing dealer stock..."', "dealer refresh button");
+replaceOnce('disabled={refreshingCache}>{refreshingCache ? "Refreshing dealer stock..."', 'disabled={refreshingCache || reloadComparisonRunning || Boolean(loadingPipeline)}>{refreshingCache ? "Refreshing dealer stock..."', "dealer refresh button");
 replaceOnce('disabled={reloadComparisonRunning || loadingPipeline === selectedPipeline}', 'disabled={reloadComparisonRunning || refreshingCache || loadingPipeline === selectedPipeline}', "comparison button");
+replaceOnce('filteredRecords.length === 0 ? <div className="empty-state">No vehicles in this view.</div> :', 'filteredRecords.length === 0 ? <div className="empty-state">{sessionCacheRef.current.peek() ? "No vehicles in this view." : "DealerKit stock is unavailable; no verified session has loaded."}</div> :', "unavailable first session");
 replaceOnce('  const financeRegistrationsForCars = new Set();', '  // Cars has its own published CARFINANCE authority; never borrow Finance presence.\n  const financeRegistrationsForCars = new Set();', "Cars presence boundary");
 replaceOnce('debug: debugByPipeline[selectedPipeline]', 'snapshotGeneration: sessionCacheRef.current.peek()?.snapshotGeneration, debug: debugByPipeline[selectedPipeline]', "accuracy diagnostics");
 

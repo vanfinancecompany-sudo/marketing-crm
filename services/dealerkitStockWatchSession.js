@@ -20,8 +20,10 @@ export function createDealerKitStockWatchSessionCache({
       return cached?.lanes?.[pipeline] || null;
     },
     async load(fetchSession, { forceFresh = false } = {}) {
+      // A manual refresh joins an active read instead of creating a second
+      // DealerKit bulk request from this browser session.
+      if (inFlight) return inFlight;
       if (!forceFresh && cached && now() < expiresAt) return { session: cached, cached: true };
-      if (!forceFresh && inFlight) return inFlight;
       const requestGeneration = ++generation;
       const work = Promise.resolve().then(fetchSession).then((session) => {
         if (!session?.ok || !session?.lanes) throw new Error("DealerKit Stock Watch returned an incomplete session response.");

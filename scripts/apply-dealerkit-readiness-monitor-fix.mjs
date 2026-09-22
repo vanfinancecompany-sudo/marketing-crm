@@ -185,7 +185,13 @@ patch(
     const text = await response.text();
     let payload = null;
     try { payload = text ? JSON.parse(text) : null; } catch { payload = null; }
-    return { ok: response.ok, status: response.status, payload, responseBytes: text.length };
+    return {
+      ok: response.ok,
+      status: response.status,
+      payload,
+      responseBytes: text.length,
+      retryAfter: response.headers?.get?.("retry-after") || null,
+    };
   } finally {
     clearTimeout(timeout);
   }
@@ -218,7 +224,13 @@ async function requestJson(url, secret, fetchImplementation) {
       const text = await response.text();
       let payload = null;
       try { payload = text ? JSON.parse(text) : null; } catch { payload = null; }
-      const result = { ok: response.ok, status: response.status, payload, responseBytes: text.length };
+      const result = {
+        ok: response.ok,
+        status: response.status,
+        payload,
+        responseBytes: text.length,
+        retryAfter: response.headers?.get?.("retry-after") || null,
+      };
       lastResult = result;
       shouldRetry = TRANSIENT_DEALERKIT_STATUSES.has(response.status) && attempt < DEALERKIT_REQUEST_ATTEMPTS;
       if (!shouldRetry) return result;

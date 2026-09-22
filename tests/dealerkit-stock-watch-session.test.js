@@ -94,6 +94,52 @@ test("tab switches use cached lanes, while an explicit refresh reacquires source
   assert.equal(acquisitions, 3);
 });
 
+test("concurrent loads and forceFresh join one in-flight DealerKit session", async () => {
+  const cache = createDealerKitStockWatchSessionCache();
+  let acquisitions = 0;
+  let release;
+  const firstFetch = () => {
+    acquisitions += 1;
+    return new Promise((resolve) => { release = resolve; });
+  };
+  const initial = cache.load(firstFetch);
+  const second = cache.load(firstFetch);
+  const forced = cache.load(firstFetch, { forceFresh: true });
+  await Promise.resolve();
+  assert.equal(acquisitions, 1);
+  release({ ok: true, lanes: { finance: {}, rent2buy: {}, cars: {} }, generation: 1 });
+  const results = await Promise.all([initial, second, forced]);
+  assert.ok(results.every((result) => result.session.generation === 1));
+  await cache.load(async () => ({ ok: true, lanes: { finance: {}, rent2buy: {}, cars: {} }, generation: ++acquisitions }), { forceFresh: true });
+  assert.equal(acquisitions, 2);
+});
+
+test("a failed refresh retains all three last verified lane views", async () => {
+  const cache = createDealerKitStockWatchSessionCache();
+  const verified = {
+    ok: true,
+    lanes: {
+      finance: { records: [{ registration: "AB12CDE" }] },
+      rent2buy: { records: [{ registration: "EF34GHI" }] },
+      cars: { records: [{ registration: "JK56LMN" }] },
+    },
+  };
+  await cache.load(async () => verified);
+  await assert.rejects(cache.load(async () => { throw new Error("DealerKit HTTP 429"); }, { forceFresh: true }), /429/);
+  assert.equal(cache.peek(), verified);
+  for (const pipeline of ["finance", "rent2buy", "cars"]) {
+    assert.equal(cache.lane(pipeline).records.length, 1);
+  }
+});
+
+test("rendered session transform disables the initial refresh and distinguishes no verified session", () => {
+  const transform = fs.readFileSync(new URL("../scripts/apply-dealerkit-stock-watch-session.mjs", import.meta.url), "utf8");
+  assert.match(transform, /if \(sessionUiLoadRef\.current\) return sessionUiLoadRef\.current;[\s\S]*?if \(!forceFresh && cache\.isCurrent\(\)\)/);
+  assert.match(transform, /refreshingCache \|\| reloadComparisonRunning \|\| Boolean\(loadingPipeline\)/);
+  assert.match(transform, /Existing verified data remains displayed/);
+  assert.match(transform, /no verified session has loaded/);
+});
+
 test("incomplete source never proves absence; Wix failures suppress photo readiness", async () => {
   const source = snapshot(false);
   const session = await createDealerKitStockWatchSession({
