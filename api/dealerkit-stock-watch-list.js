@@ -18,7 +18,7 @@ import {
 } from "../lib/dealerKitVehicleSegmentation.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
-const RECENT_SOURCE_STATE_DAYS = 3;
+const RECENT_SOURCE_STATE_DAYS = 14;
 const MAX_TRANSITION_PROBES = 40;
 const TRANSITION_PROBE_CONCURRENCY = 5;
 const DETAIL_RETRY_ATTEMPTS = 2;

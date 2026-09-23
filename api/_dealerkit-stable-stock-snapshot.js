@@ -40,9 +40,14 @@ function hasReportedTotalDrift(snapshot) {
 }
 
 function retryableIncompleteSource(snapshot) {
-  const knownBaselineOnly = snapshot?.diagnostics?.knownSourceFaults?.baselineOnly === true;
+  const failedPositions = Number(snapshot?.diagnostics?.failedPositions?.length || 0);
+  const knownFaults = snapshot?.diagnostics?.knownSourceFaults || {};
+  const knownBaselineOnly = knownFaults.baselineOnly === true;
+  const knownFaultBudget = Math.max(0, Number(knownFaults.budget || 0));
+  const retryableKnownBaseline = knownBaselineOnly && failedPositions > 0 && failedPositions < knownFaultBudget;
+
   return hasReportedTotalDrift(snapshot)
-    || (!knownBaselineOnly && Number(snapshot?.diagnostics?.failedPositions?.length || 0) > 0)
+    || (failedPositions > 0 && (!knownBaselineOnly || retryableKnownBaseline))
     || Number(snapshot?.diagnostics?.invalidRecords?.length || 0) > 0;
 }
 
