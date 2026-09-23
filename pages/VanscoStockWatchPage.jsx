@@ -148,9 +148,13 @@ function classifyWatchRecord(record, localRegistrationSet, selectedPipeline, fin
   const currentlyOnVansco = record.isCurrentlyOnVansco !== false;
   const baseRecord = { ...record, pipeline: selectedPipeline, workflowStatus, safeExactRegistrationMatch: hasExactLocalMatch, financeStockMatchForCars: hasFinanceMatchForCars };
 
-  if (!currentlyOnVansco) return { ...baseRecord, displayStatus: "hidden_not_current", matchStatus: "hidden_not_current" };
   if (!registration) return { ...baseRecord, displayStatus: "hidden_no_registration", matchStatus: "hidden_no_registration" };
+  // A positive DealerKit lifecycle result such as Reserved, Awaiting Delivery or
+  // Removed must win before generic "not current" handling. These records can
+  // legitimately be absent from the current bulk feed while still proving why
+  // an active local advert needs review/removal.
   if (hasExactLocalMatch && reservedOnVansco) return { ...baseRecord, displayStatus: "reserved", matchStatus: "reserved_still_listed" };
+  if (!currentlyOnVansco) return { ...baseRecord, displayStatus: "hidden_not_current", matchStatus: "hidden_not_current" };
   if (hasExactLocalMatch) return { ...baseRecord, displayStatus: "hidden_already_ok", matchStatus: "listed" };
   if (hasFinanceMatchForCars) return { ...baseRecord, displayStatus: "advertised", matchStatus: "advertised_in_finance_awaiting_refresh" };
   if (isNeverShowStatus(workflowStatus)) return { ...baseRecord, displayStatus: "never", matchStatus: "never_show_again" };
@@ -454,12 +458,16 @@ export default function VanscoStockWatchPage() {
   const priceDifferenceRecords = useMemo(() => selectedPipeline === "finance" ? buildFinancePriceDifferences(currentRawRecords, activeLocalVehicles) : [], [activeLocalVehicles, currentRawRecords, selectedPipeline]);
 
   const currentVanscoRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => record.isCurrentlyOnVansco !== false).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);
+  const dealerKitAccountedRegistrationSet = useMemo(() => new Set(currentRawRecords
+    .filter((record) => record.isCurrentlyOnVansco !== false || isReservedLikeStatus(record.sourceStatus))
+    .map((record) => normalizeWatchRegistration(record.registration))
+    .filter(Boolean)), [currentRawRecords]);
   const localNotVanscoRecords = useMemo(() => {
     if (!dealerKitSnapshotComplete) return [];
     return dedupeLocalVehiclesByRegistration(activeLocalVehicles)
-      .filter(({ registration }) => registration && !currentVanscoRegistrationSet.has(registration))
+      .filter(({ registration }) => registration && !dealerKitAccountedRegistrationSet.has(registration))
       .map(({ vehicle, index }) => mapLocalVehicleToWatchRecord(vehicle, index, selectedPipeline));
-  }, [activeLocalVehicles, currentVanscoRegistrationSet, dealerKitSnapshotComplete, selectedPipeline]);
+  }, [activeLocalVehicles, dealerKitAccountedRegistrationSet, dealerKitSnapshotComplete, selectedPipeline]);
   const displayRecords = useMemo(() => [...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, localNotVanscoRecords, priceDifferenceRecords]);
 
   const summary = useMemo(() => ({
