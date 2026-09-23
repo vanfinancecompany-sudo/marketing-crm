@@ -253,34 +253,35 @@ ${config.extraResult}
 {
   const relativePath = "../pages/VanscoStockWatchPage.jsx";
   const { path, source: original } = read(relativePath);
+  let source = original;
+
   if (!original.includes("DEALERKIT_RESERVED_BUCKET_ROUTING")) {
-    let source = original;
     source = replaceOnce(
       source,
       '  if (!currentlyOnVansco) return { ...baseRecord, displayStatus: "hidden_not_current", matchStatus: "hidden_not_current" };\n  if (!registration) return { ...baseRecord, displayStatus: "hidden_no_registration", matchStatus: "hidden_no_registration" };\n  if (hasExactLocalMatch && reservedOnVansco) return { ...baseRecord, displayStatus: "reserved", matchStatus: "reserved_still_listed" };',
-      '  // DEALERKIT_RESERVED_BUCKET_ROUTING: preserve the old completion rule: only still-advertised reserved stock remains actionable.\n  if (!currentlyOnVansco) return { ...baseRecord, displayStatus: "hidden_not_current", matchStatus: "hidden_not_current" };\n  if (!registration) return { ...baseRecord, displayStatus: "hidden_no_registration", matchStatus: "hidden_no_registration" };\n  if (hasExactLocalMatch && reservedOnVansco) return { ...baseRecord, displayStatus: "reserved", matchStatus: "reserved_still_listed" };',
+      '  if (!registration) return { ...baseRecord, displayStatus: "hidden_no_registration", matchStatus: "hidden_no_registration" };\n  // DEALERKIT_RESERVED_BUCKET_ROUTING: positive lifecycle evidence wins before generic not-current handling.\n  if (hasExactLocalMatch && reservedOnVansco) return { ...baseRecord, displayStatus: "reserved", matchStatus: "reserved_still_listed" };\n  if (!currentlyOnVansco) return { ...baseRecord, displayStatus: "hidden_not_current", matchStatus: "hidden_not_current" };',
       "reserved classification precedence",
       relativePath,
     );
     source = replaceOnce(
       source,
       '  const currentVanscoRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => record.isCurrentlyOnVansco !== false).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);\n  const localNotVanscoRecords = useMemo(() => dedupeLocalVehiclesByRegistration(activeLocalVehicles).filter(({ registration }) => registration && !currentVanscoRegistrationSet.has(registration)).map(({ vehicle, index }) => mapLocalVehicleToWatchRecord(vehicle, index, selectedPipeline)), [activeLocalVehicles, currentVanscoRegistrationSet, selectedPipeline]);',
-      '  const currentVanscoRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => record.isCurrentlyOnVansco !== false).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);\n  const reservedDealerKitRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => isReservedLikeStatus(record.sourceStatus)).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);\n  const localNotVanscoRecords = useMemo(() => dedupeLocalVehiclesByRegistration(activeLocalVehicles).filter(({ registration }) => registration && !currentVanscoRegistrationSet.has(registration) && !reservedDealerKitRegistrationSet.has(registration)).map(({ vehicle, index }) => mapLocalVehicleToWatchRecord(vehicle, index, selectedPipeline)), [activeLocalVehicles, currentVanscoRegistrationSet, reservedDealerKitRegistrationSet, selectedPipeline]);',
+      '  const currentVanscoRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => record.isCurrentlyOnVansco !== false).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);\n  const dealerKitAccountedRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => record.isCurrentlyOnVansco !== false || isReservedLikeStatus(record.sourceStatus)).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);\n  const localNotVanscoRecords = useMemo(() => dedupeLocalVehiclesByRegistration(activeLocalVehicles).filter(({ registration }) => registration && !dealerKitAccountedRegistrationSet.has(registration)).map(({ vehicle, index }) => mapLocalVehicleToWatchRecord(vehicle, index, selectedPipeline)), [activeLocalVehicles, dealerKitAccountedRegistrationSet, selectedPipeline]);',
       "reserved registration exclusion from reverse stock check",
       relativePath,
     );
-
-    const copyReplacements = [
-      ["current Vansco cache for this tab", "current DealerKit stock data for this tab"],
-      ["Could not load Vansco Stock Watch cache.", "Could not load DealerKit Stock Watch data."],
-      ["Could not refresh Vansco cache.", "Could not refresh DealerKit stock data."],
-      ["saved Vansco cache", "saved DealerKit stock data"],
-      ["Saved Vansco cache records", "Saved DealerKit stock records"],
-      ["Loading Vansco comparison...", "Loading DealerKit comparison..."],
-    ];
-    for (const [before, after] of copyReplacements) source = source.split(before).join(after);
-    fs.writeFileSync(path, source);
   }
+
+  const copyReplacements = [
+    ["current Vansco cache for this tab", "current DealerKit stock data for this tab"],
+    ["Could not load Vansco Stock Watch cache.", "Could not load DealerKit Stock Watch data."],
+    ["Could not refresh Vansco cache.", "Could not refresh DealerKit stock data."],
+    ["saved Vansco cache", "saved DealerKit stock data"],
+    ["Saved Vansco cache records", "Saved DealerKit stock records"],
+    ["Loading Vansco comparison...", "Loading DealerKit comparison..."],
+  ];
+  for (const [before, after] of copyReplacements) source = source.split(before).join(after);
+  fs.writeFileSync(path, source);
 }
 
 {
