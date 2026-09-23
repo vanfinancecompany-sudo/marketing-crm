@@ -736,6 +736,7 @@ test("helper inserts nothing when no verified Create Post dialog exists", async 
 test("acceptance checker waits for Facebook search results to render", () => {
   assert.match(groupsHelperSource, /waitStarted = Date\.now\(\)/);
   assert.match(groupsHelperSource, /Date\.now\(\) - waitStarted < 9000/);
+  assert.doesNotMatch(groupsHelperSource, /resultAnchors\.length \|\| evidenceLines\.length/);
   assert.match(groupsHelperSource, /evidenceLines = wantedReg \? registrationEvidenceLines/);
   assert.match(pageSource, /Math\.min\(25, awaitingGroups\.length \|\| 25\)/);
 });
