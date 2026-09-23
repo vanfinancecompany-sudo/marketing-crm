@@ -19,6 +19,7 @@ import {
   markGroupPostStatus,
   markGroupPosted,
   mergeFacebookGroupsByRecentPostState,
+  normalizeFacebookGroupUrl,
   mergeDiscoveredGroups,
   prepareFacebookGroupPost,
   recoverFacebookGroupsFromSnapshot,
@@ -31,6 +32,8 @@ import {
   startFacebookGroupInspection,
   startFacebookPostStatusCheck,
 } from "../services/facebookGroupsAgent.js";
+import { londonDateKey } from "../lib/marketingDailyOperations.js";
+import { recordDailyMarketingActivity } from "../services/marketingDailyOperations.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -52,6 +55,14 @@ function registrationKey(value) {
 
 function usedVansStorageKey(productKey) {
   return `vfcFacebookGroupsUsedVans:${productKey}`;
+}
+
+function groupActivityType(productKey) {
+  return productKey === "rent2buy" ? "rent2buy_groups_post" : "van_finance_groups_post";
+}
+
+function groupActivityDestination(productKey) {
+  return productKey === "rent2buy" ? "Rent2Buy Facebook Groups" : "Van Finance Groups & Classifieds";
 }
 
 function loadUsedVanKeys(productKey) {
@@ -130,6 +141,30 @@ export default function FacebookGroupsAgentPage({
   const [pipelineView, setPipelineView] = useState("new");
   const [showArchived, setShowArchived] = useState(false);
   const [busy, setBusy] = useState("");
+
+  function recordGroupPostActivity({ groupUrl, groupName, registration, postedAt }) {
+    const activityDate = londonDateKey(postedAt ? new Date(postedAt) : new Date());
+    const canonicalUrl = normalizeFacebookGroupUrl(groupUrl || "");
+    const sourceId = [
+      "facebook-group",
+      productKey,
+      activityDate,
+      canonicalUrl.toLowerCase(),
+      registrationKey(registration),
+    ].join("::");
+
+    return recordDailyMarketingActivity(groupActivityType(productKey), {
+      activityDate,
+      source: "facebook_groups",
+      sourceId,
+      metadata: {
+        destination: groupActivityDestination(productKey),
+        group_url: canonicalUrl,
+        group_name: clean(groupName),
+        registration: clean(registration).toUpperCase(),
+      },
+    });
+  }
   const [message, setMessage] = useState("");
   const [lastRun, setLastRun] = useState(null);
   const [helperStatus, setHelperStatus] = useState({
@@ -361,6 +396,14 @@ export default function FacebookGroupsAgentPage({
           approvalState: postEvent.approvalState === "accepted" ? "accepted" : "awaiting",
         }));
         markVehicleUsed(postEvent.registration, selectedVehicleId);
+        recordGroupPostActivity({
+          groupUrl: postEvent.groupUrl,
+          groupName: postEvent.groupName,
+          registration: postEvent.registration,
+          postedAt: postEvent.postedAt,
+        }).catch((error) => {
+          setMessage(`${postEvent.groupName || "Facebook group"} was recorded as posted, but Content Operations could not be updated: ${error.message || "unknown error"}`);
+        });
         window.postMessage({
           source: "vfc-marketing-crm",
           type: GROUP_POST_EVENT_ACK,
@@ -580,6 +623,14 @@ export default function FacebookGroupsAgentPage({
     const updated = markGroupPosted(groups, group.url, { registration });
     persistGroups(updated);
     markVehicleUsed(registration, selectedVehicleId);
+    recordGroupPostActivity({
+      groupUrl: group.url,
+      groupName: group.name,
+      registration,
+      postedAt: new Date().toISOString(),
+    }).catch((error) => {
+      setMessage(`${group.name} was marked posted, but Content Operations could not be updated: ${error.message || "unknown error"}`);
+    });
     setMessage(`${group.name} marked posted manually. It is now awaiting an acceptance check.`);
   }
 
