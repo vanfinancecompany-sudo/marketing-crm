@@ -50,7 +50,7 @@ test("Extension packager emits one clean folder and a flat, loadable ZIP", (t) =
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
-  const folder = path.join(outputBase, "VFC-Facebook-Helper-v1.2.19");
+  const folder = path.join(outputBase, "VFC-Facebook-Helper-v1.2.20");
   const zip = `${folder}.zip`;
   const validated = validateExtensionRoot(folder);
   const entries = validateZipRoot(zip, validated.requiredFiles);
