@@ -12,12 +12,15 @@ import {
   getFacebookHelperStatus,
   groupDueState,
   groupPipeline,
+  hydrateFacebookGroups,
   loadFacebookGroups,
   markGroupAccepted,
   markGroupPostStatus,
   markGroupPosted,
   mergeDiscoveredGroups,
   prepareFacebookGroupPost,
+  recoverFacebookGroupsFromSnapshot,
+  requestFacebookGroupRecoverySnapshot,
   restoreFacebookGroup,
   saveFacebookGroups,
   scoreFacebookGroups,
@@ -240,10 +243,43 @@ export default function FacebookGroupsAgentPage({
   useEffect(() => {
     let cancelled = false;
 
+    hydrateFacebookGroups(loadFacebookGroups())
+      .then((restored) => {
+        if (!cancelled) setGroups(restored);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
     async function checkHelper() {
       const status = await getFacebookHelperStatus();
-      if (!cancelled) {
-        setHelperStatus({ checking: false, ...status });
+      if (cancelled) return;
+      setHelperStatus({ checking: false, ...status });
+
+      if (status.connected && status.capabilities.includes("groups-state-recovery")) {
+        try {
+          const response = await requestFacebookGroupRecoverySnapshot();
+          if (cancelled) return;
+          const approvalItems = Array.isArray(response?.snapshot?.approvalItems)
+            ? response.snapshot.approvalItems
+            : [];
+          setGroups((current) => {
+            const recovered = recoverFacebookGroupsFromSnapshot(current, response?.snapshot || {});
+            saveFacebookGroups(recovered);
+            return recovered;
+          });
+          if (approvalItems.length) {
+            setMessage(`Recovered ${approvalItems.length} Facebook group post${approvalItems.length === 1 ? "" : "s"} still waiting for approval from the browser helper.`);
+          }
+        } catch {
+          // Recovery is best-effort. Persistent server state remains the source of truth.
+        }
       }
     }
 
