@@ -310,24 +310,26 @@ test("Knowledge Hub endpoint rejects requests without Marketing CRM access", asy
   else process.env.MARKETING_CUSTOMER_DATABASE_API_KEY = previous;
 });
 
-test("AI configuration reads server variables without exposing the key", () => {
+test("AI configuration uses operation-specific GPT-6 routing without exposing the key", () => {
   const configured = knowledgeAiConfiguration({
     OPENAI_API_KEY: "  secret-value  ",
-    OPENAI_MODEL: "gpt-4.1-mini",
+    OPENAI_MODEL: "legacy-generic-model",
     VERCEL_ENV: "preview",
     VERCEL_URL: "marketing-preview.example",
     VERCEL_GIT_COMMIT_REF: "agent/knowledge-hub-v1-marketing",
   });
   assert.deepEqual(configured, {
     configured: true,
-    model: "gpt-4.1-mini",
+    model: "gpt-6-luna",
     environment: "preview",
     deployment_host: "marketing-preview.example",
     commit_ref: "agent/knowledge-hub-v1-marketing",
   });
   assert.doesNotMatch(JSON.stringify(configured), /secret-value/);
   assert.equal(knowledgeAiConfiguration({ VERCEL_ENV: "production" }).configured, false);
-  assert.equal(knowledgeAiConfiguration({}).model, "gpt-4.1-mini");
+  assert.equal(knowledgeAiConfiguration({}).model, "gpt-6-luna");
+  assert.equal(knowledgeAiConfiguration({}, "knowledge_topic").model, "gpt-6-luna");
+  assert.equal(knowledgeAiConfiguration({}, "knowledge_review").model, "gpt-6-sol");
 });
 
 test("route, sidebar and page expose the complete Knowledge Hub workflow", () => {

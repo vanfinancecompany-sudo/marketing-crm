@@ -156,7 +156,7 @@ test("Responses API preserves the original OpenAI error and diagnostic metadata"
   const fetchImplementation = async () => ({ ok: false, status: 400, statusText: "Bad Request", json: async () => ({ error: { type: "invalid_request_error", code: "invalid_json_schema", message: "Unsupported keyword: uniqueItems" } }) });
   await assert.rejects(
     requestOpenAIAnswer("prompt", { OPENAI_API_KEY: "test-key", OPENAI_MODEL: "gpt-4.1-mini" }, fetchImplementation),
-    (error) => error.message.includes("Unsupported keyword: uniqueItems") && error.details.openai_status === 400 && error.details.model === "gpt-4.1-mini",
+    (error) => error.message.includes("Unsupported keyword: uniqueItems") && error.details.openai_status === 400 && error.details.model === "gpt-6-luna",
   );
 });
 

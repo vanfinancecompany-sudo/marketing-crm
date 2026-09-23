@@ -137,7 +137,7 @@ test("monitor agent is advisory-only and AI is anomaly-gated", () => {
   assert.doesNotMatch(source, /SET_DRAFT_STATUS|UNPUBLISH_DATA_ITEM|\/items\/unpublish/i);
   assert.match(source, /if \(newSevere\.length\)/);
   assert.match(source, /OPENAI_STOCK_WATCH_MONITOR_MODEL/);
-  assert.match(source, /gpt-5\.6-terra/);
+  assert.match(source, /gpt-6-luna/);
   assert.match(source, /Never recommend automatic CMS mutations/i);
 });
 

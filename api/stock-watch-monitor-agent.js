@@ -134,7 +134,7 @@ const DIAGNOSIS_SCHEMA = {
 async function requestAiDiagnosis(issues, snapshot, environment = process.env, fetchImplementation = fetch) {
   const apiKey = clean(environment.OPENAI_API_KEY, 4000);
   if (!apiKey || !issues.length) return { diagnoses: new Map(), model: null, usage: null, skipped: apiKey ? "no_issues" : "no_api_key" };
-  const model = clean(environment.OPENAI_STOCK_WATCH_MONITOR_MODEL, 100) || "gpt-5.6-terra";
+  const model = clean(environment.OPENAI_STOCK_WATCH_MONITOR_MODEL, 100) || "gpt-6-luna";
   const evidence = {
     provider: { id: snapshot.provider?.providerId, label: snapshot.provider?.providerLabel, refresh: snapshot.provider?.refresh },
     counts: snapshot.counts,
