@@ -19,6 +19,7 @@ import {
   parseKnowledgeArticleReviewResponse,
 } from "../lib/businessIntelligence.js";
 import { refreshArticleInternalLinks } from "../lib/internalLinkingService.js";
+import { resolveAiOperationModel } from "../lib/priorityAiModelPolicy.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const ARTICLE_SCHEMA = {
@@ -248,14 +249,14 @@ function cleanText(value, max = 20000) {
   return String(value || "").trim().slice(0, max);
 }
 
-export function knowledgeAiConfiguration(environment = process.env) {
+export function knowledgeAiConfiguration(environment = process.env, operation = "knowledge_generation") {
   const deploymentHost = cleanText(
     environment.VERCEL_URL || environment.VERCEL_PROJECT_PRODUCTION_URL,
     500
   );
   return {
     configured: Boolean(cleanText(environment.OPENAI_API_KEY, 10000)),
-    model: cleanText(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini",
+    model: resolveAiOperationModel(environment, operation),
     environment: cleanText(environment.VERCEL_ENV || environment.NODE_ENV, 50) || "unknown",
     deployment_host: deploymentHost,
     commit_ref: cleanText(environment.VERCEL_GIT_COMMIT_REF, 200),
@@ -397,8 +398,9 @@ async function callKnowledgeStructuredAi({
   schemaName,
   systemInstruction,
   operationLabel = "content",
+  modelOperation = "knowledge_generation",
 }) {
-  const configuration = knowledgeAiConfiguration();
+  const configuration = knowledgeAiConfiguration(process.env, modelOperation);
   if (!configuration.configured) {
     const deployment = configuration.deployment_host
       ? ` for ${configuration.deployment_host}`
@@ -515,6 +517,7 @@ Return useful Markdown and equivalent clean HTML. The result is a draft for huma
       schema: ARTICLE_SCHEMA,
       schemaName: "knowledge_article",
       operationLabel: "article",
+      modelOperation: "knowledge_generation",
       systemInstruction:
         "You are a careful UK van-finance knowledge editor. Produce useful, non-spammy content and follow the JSON schema exactly.",
     })
@@ -634,6 +637,7 @@ export async function findTopics(supabase, body) {
       schema: TOPIC_IDEAS_SCHEMA,
       schemaName: "knowledge_topic_ideas",
       operationLabel: "topic ideas",
+      modelOperation: "knowledge_topic",
       systemInstruction:
         "You are a careful content planner for a UK van business. Produce distinct, useful topic ideas and follow the JSON schema exactly.",
     })
@@ -865,11 +869,12 @@ change its status or approve it.`,
       schema: ARTICLE_REVIEW_SCHEMA,
       schemaName: "knowledge_article_review",
       operationLabel: "article review",
+      modelOperation: "knowledge_review",
       systemInstruction:
         "You are an advisory content reviewer. Return a strict, evidence-based quality assessment and never rewrite or approve content.",
     })
   );
-  const configuration = knowledgeAiConfiguration();
+  const configuration = knowledgeAiConfiguration(process.env, "knowledge_review");
   const savedReview = assertResult(
     await supabase
       .from("knowledge_article_reviews")
