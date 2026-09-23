@@ -8,20 +8,20 @@ import {
   resolvePriorityAiModels,
 } from "../lib/priorityAiModelPolicy.js";
 
-test("priority AI defaults use GPT-6 Sol for all Wix conversation tiers while other jobs keep their existing models", () => {
+test("priority AI defaults keep customer chat on GPT-6 Sol and route bounded background work to GPT-6 Luna", () => {
   assert.deepEqual(resolvePriorityAiModels({}), PRIORITY_AI_MODEL_DEFAULTS);
   assert.equal(PRIORITY_AI_MODEL_DEFAULTS.wix_fast, "gpt-6-sol");
   assert.equal(PRIORITY_AI_MODEL_DEFAULTS.wix_main, "gpt-6-sol");
   assert.equal(PRIORITY_AI_MODEL_DEFAULTS.wix_escalation, "gpt-6-sol");
-  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.knowledge_topic, "gpt-5.6-luna");
-  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.knowledge, "gpt-5.6-terra");
-  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.knowledge_review, "gpt-5.6-sol");
-  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.editorial, "gpt-5.6-terra");
-  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.marketing_content, "gpt-5.6-terra");
-  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.marketing_review, "gpt-5.6-terra");
-  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.website_intelligence, "gpt-5.6-luna");
-  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.editorial_automation, "gpt-5.6-terra");
-  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.competence_bulk, "gpt-5.6-luna");
+  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.knowledge_topic, "gpt-6-luna");
+  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.knowledge, "gpt-6-luna");
+  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.knowledge_review, "gpt-6-sol");
+  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.editorial, "gpt-6-luna");
+  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.marketing_content, "gpt-6-luna");
+  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.marketing_review, "gpt-6-luna");
+  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.website_intelligence, "gpt-6-luna");
+  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.editorial_automation, "gpt-6-luna");
+  assert.equal(PRIORITY_AI_MODEL_DEFAULTS.competence_bulk, "gpt-6-luna");
 });
 
 test("priority AI model settings can be changed independently", () => {
@@ -62,11 +62,11 @@ test("operation routing ignores the generic OPENAI_MODEL", () => {
   assert.equal(resolveAiOperationModel(environment, "wix_fast"), "gpt-6-sol");
   assert.equal(resolveAiOperationModel(environment, "wix_main"), "gpt-6-sol");
   assert.equal(resolveAiOperationModel(environment, "wix_escalation"), "gpt-6-sol");
-  assert.equal(resolveAiOperationModel(environment, "knowledge_topic"), "gpt-5.6-luna");
-  assert.equal(resolveAiOperationModel(environment, "knowledge_generation"), "gpt-5.6-terra");
-  assert.equal(resolveAiOperationModel(environment, "knowledge_review"), "gpt-5.6-sol");
-  assert.equal(resolveAiOperationModel(environment, "editorial"), "gpt-5.6-terra");
-  assert.equal(resolveAiOperationModel(environment, "website_intelligence"), "gpt-5.6-luna");
+  assert.equal(resolveAiOperationModel(environment, "knowledge_topic"), "gpt-6-luna");
+  assert.equal(resolveAiOperationModel(environment, "knowledge_generation"), "gpt-6-luna");
+  assert.equal(resolveAiOperationModel(environment, "knowledge_review"), "gpt-6-sol");
+  assert.equal(resolveAiOperationModel(environment, "editorial"), "gpt-6-luna");
+  assert.equal(resolveAiOperationModel(environment, "website_intelligence"), "gpt-6-luna");
 });
 
 test("knowledge endpoint overrides select topic, generation and review tiers", () => {
@@ -77,18 +77,18 @@ test("knowledge endpoint overrides select topic, generation and review tiers", (
     OPENAI_KNOWLEDGE_REVIEW_MODEL: "review-model",
   };
 
-  assert.equal(applyKnowledgeModelOverride(topicEnvironment, "topic"), "gpt-5.6-luna");
-  assert.equal(topicEnvironment.OPENAI_MODEL, "gpt-5.6-luna");
-  assert.equal(applyKnowledgeModelOverride(generationEnvironment), "gpt-5.6-terra");
-  assert.equal(generationEnvironment.OPENAI_MODEL, "gpt-5.6-terra");
+  assert.equal(applyKnowledgeModelOverride(topicEnvironment, "topic"), "gpt-6-luna");
+  assert.equal(topicEnvironment.OPENAI_MODEL, "gpt-6-luna");
+  assert.equal(applyKnowledgeModelOverride(generationEnvironment), "gpt-6-luna");
+  assert.equal(generationEnvironment.OPENAI_MODEL, "gpt-6-luna");
   assert.equal(applyKnowledgeModelOverride(reviewEnvironment, "review"), "review-model");
   assert.equal(reviewEnvironment.OPENAI_MODEL, "review-model");
 });
 
 test("generic operation override writes only the selected routed model", () => {
   const environment = { OPENAI_MODEL: "legacy-model" };
-  assert.equal(applyAiOperationModelOverride(environment, "website_intelligence"), "gpt-5.6-luna");
-  assert.equal(environment.OPENAI_MODEL, "gpt-5.6-luna");
-  assert.equal(applyAiOperationModelOverride(environment, "editorial"), "gpt-5.6-terra");
-  assert.equal(environment.OPENAI_MODEL, "gpt-5.6-terra");
+  assert.equal(applyAiOperationModelOverride(environment, "website_intelligence"), "gpt-6-luna");
+  assert.equal(environment.OPENAI_MODEL, "gpt-6-luna");
+  assert.equal(applyAiOperationModelOverride(environment, "editorial"), "gpt-6-luna");
+  assert.equal(environment.OPENAI_MODEL, "gpt-6-luna");
 });
