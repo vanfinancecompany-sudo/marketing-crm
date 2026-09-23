@@ -251,6 +251,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           "groups-post-prep",
           "groups-post-status",
           "groups-auto-approval-monitor",
+          "groups-state-recovery",
         ],
       });
       return;
@@ -731,6 +732,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === "GET_LAST_GROUP_STATUS_EVENT") {
       const stored = await chrome.storage.local.get(LAST_GROUP_STATUS_EVENT_KEY);
       sendResponse({ ok: true, event: stored[LAST_GROUP_STATUS_EVENT_KEY] || null });
+      return;
+    }
+
+    if (message?.type === "GET_GROUP_RECOVERY_SNAPSHOT") {
+      const stored = await chrome.storage.local.get([
+        LAST_GROUP_POST_EVENT_KEY,
+        LAST_GROUP_STATUS_EVENT_KEY,
+        GROUP_AGENT_STATE_KEY,
+        GROUP_POST_JOB_KEY,
+      ]);
+      sendResponse({
+        ok: true,
+        snapshot: {
+          approvalItems: await getApprovalMonitorItems(),
+          lastPostEvent: stored[LAST_GROUP_POST_EVENT_KEY] || null,
+          lastStatusEvent: stored[LAST_GROUP_STATUS_EVENT_KEY] || null,
+          agentState: stored[GROUP_AGENT_STATE_KEY] || null,
+          pendingGroupPost: stored[GROUP_POST_JOB_KEY]?.job || null,
+        },
+      });
       return;
     }
 
