@@ -29,6 +29,8 @@
   const GROUP_POST_STATUS_EVENT_ACK = "VFC_GROUP_POST_STATUS_EVENT_ACK";
   const FACEBOOK_HELPER_PING = "VFC_FACEBOOK_HELPER_PING";
   const FACEBOOK_HELPER_PONG = "VFC_FACEBOOK_HELPER_PONG";
+  const GROUP_RECOVERY_REQUEST = "VFC_GROUP_RECOVERY_REQUEST";
+  const GROUP_RECOVERY_RESPONSE = "VFC_GROUP_RECOVERY_RESPONSE";
 
   function validJob(job) {
     return Boolean(
@@ -69,6 +71,31 @@
           version: chrome.runtime.getManifest()?.version || "",
           capabilities: [],
           hostname,
+          error: String(error?.message || error),
+        }, window.location.origin);
+      }
+      return;
+    }
+
+    if (message.source === "vfc-marketing-crm" && message.type === GROUP_RECOVERY_REQUEST) {
+      const id = message.id || "";
+      try {
+        const result = await chrome.runtime.sendMessage({ type: "GET_GROUP_RECOVERY_SNAPSHOT" });
+        window.postMessage({
+          source: "vfc-facebook-helper",
+          type: GROUP_RECOVERY_RESPONSE,
+          id,
+          ok: Boolean(result?.ok),
+          snapshot: result?.snapshot || {},
+          error: result?.error || "",
+        }, window.location.origin);
+      } catch (error) {
+        window.postMessage({
+          source: "vfc-facebook-helper",
+          type: GROUP_RECOVERY_RESPONSE,
+          id,
+          ok: false,
+          snapshot: {},
           error: String(error?.message || error),
         }, window.location.origin);
       }
