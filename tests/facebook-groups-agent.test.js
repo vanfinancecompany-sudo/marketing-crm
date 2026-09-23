@@ -14,6 +14,7 @@ import {
   markGroupPosted,
   normalizeFacebookGroupUrl,
   preserveFacebookGroupCaption,
+  recoverFacebookGroupsFromSnapshot,
   scoreFacebookGroups,
 } from "../services/facebookGroupsAgent.js";
 
@@ -22,6 +23,8 @@ const serviceSource = fs.readFileSync(new URL("../services/facebookGroupsAgent.j
 const backgroundSource = fs.readFileSync(new URL("../browser-extension/marketplace-helper/background.js", import.meta.url), "utf8");
 const bridgeSource = fs.readFileSync(new URL("../browser-extension/marketplace-helper/crm-bridge.js", import.meta.url), "utf8");
 const groupsHelperSource = fs.readFileSync(new URL("../browser-extension/marketplace-helper/facebook-groups.js", import.meta.url), "utf8");
+const stateApiSource = fs.readFileSync(new URL("../api/facebook-groups-state.js", import.meta.url), "utf8");
+const stateMigrationSource = fs.readFileSync(new URL("../supabase/migrations/202609230830_facebook_group_state.sql", import.meta.url), "utf8");
 const manifest = JSON.parse(
   fs.readFileSync(new URL("../browser-extension/marketplace-helper/manifest.json", import.meta.url), "utf8"),
 );
@@ -62,6 +65,42 @@ test("Rent2Buy and Finance scoring stay separate", () => {
   assert.ok(rent2buy.every((group) => group.rent2buy));
 });
 
+test("Facebook group state persists remotely without deleting browser recovery data", () => {
+  assert.match(serviceSource, /\/api\/facebook-groups-state/);
+  assert.match(serviceSource, /hydrateFacebookGroups/);
+  assert.match(serviceSource, /remoteSyncReady/);
+  assert.match(pageSource, /hydrateFacebookGroups\(loadFacebookGroups\(\)\)/);
+  assert.match(stateApiSource, /getSupabaseServiceAdmin/);
+  assert.match(stateApiSource, /upsert\(rows, \{ onConflict: "group_key" \}\)/);
+  assert.match(stateApiSource, /suspicious reduction/i);
+  assert.match(stateApiSource, /facebook_group_state_backups/);
+  assert.match(stateMigrationSource, /create table if not exists public\.facebook_group_state/);
+  assert.match(stateMigrationSource, /create table if not exists public\.facebook_group_state_backups/);
+  assert.match(stateMigrationSource, /enable row level security/);
+  assert.match(stateMigrationSource, /revoke all .* anon, authenticated/);
+});
+
+test("Chrome helper recovery can rebuild Awaiting group records", () => {
+  const recovered = recoverFacebookGroupsFromSnapshot(loadFacebookGroups(), {
+    approvalItems: [{
+      productKey: "rent2buy",
+      groupUrl: "https://www.facebook.com/groups/recovered-awaiting-test/",
+      groupName: "Recovered Awaiting Test",
+      registration: "AB12CDE",
+      postedAt: "2026-09-21T10:15:00.000Z",
+      lastCheckedAt: "2026-09-21T11:15:00.000Z",
+      lastResult: "pending",
+    }],
+  });
+  const restored = recovered.find((group) => /recovered-awaiting-test/i.test(group.url));
+  assert.ok(restored);
+  assert.equal(restored.rent2buy, true);
+  assert.equal(restored.finance, false);
+  assert.equal(restored.pendingRegistration, "AB12CDE");
+  assert.equal(restored.postStatus, "pending");
+  assert.equal(groupPipeline(restored), "testing");
+});
+
 test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipelines", () => {
   assert.match(pageSource, /Discover New Groups/);
   assert.match(pageSource, /Check Next 12/);
@@ -94,7 +133,7 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.15");
+  assert.equal(manifest.version, "1.2.16");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -119,10 +158,14 @@ test("Chrome helper can discover and inspect groups without auto-posting", () =>
   assert.match(backgroundSource, /GROUP_APPROVAL_ALARM/);
   assert.match(backgroundSource, /startAutomaticApprovalCheck/);
   assert.match(backgroundSource, /groups-auto-approval-monitor/);
+  assert.match(backgroundSource, /groups-state-recovery/);
+  assert.match(backgroundSource, /GET_GROUP_RECOVERY_SNAPSHOT/);
   assert.match(backgroundSource, /GROUP_POST_STATUS_EVENT/);
   assert.match(bridgeSource, /VFC_GROUP_DISCOVERY_START/);
   assert.match(bridgeSource, /VFC_GROUP_INSPECTION_START/);
   assert.match(bridgeSource, /VFC_FACEBOOK_HELPER_PING/);
+  assert.match(bridgeSource, /VFC_GROUP_RECOVERY_REQUEST/);
+  assert.match(bridgeSource, /VFC_GROUP_RECOVERY_RESPONSE/);
   assert.match(bridgeSource, /VFC_GROUP_POST_STATUS_EVENT/);
   assert.match(bridgeSource, /crm-b5po-/);
   assert.match(backgroundSource, /GET_FACEBOOK_HELPER_STATUS/);
