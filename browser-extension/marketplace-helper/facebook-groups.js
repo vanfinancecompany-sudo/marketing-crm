@@ -489,9 +489,10 @@
       )].filter(visible);
       evidenceLines = wantedReg ? registrationEvidenceLines(target.registration) : [];
       const visibleResult = wantedReg ? visibleSearchResultEvidence(target.registration) : null;
-      // Facebook's current group search can show the registration only inside a rendered
-      // result card. Treat that visible card as evidence even when there is no permalink anchor.
-      if (visibleResult || evidenceLines.length || contentUnavailable(document.body?.innerText || "")) break;
+      const visibleAdvert = wantedReg ? visibleAdvertCardForExactSearch(target.registration) : null;
+      // Keep the rule simple: exact registration search + a genuine visible advert card
+      // means Facebook is showing the advert, so it is accepted/Proven.
+      if (visibleAdvert || visibleResult || evidenceLines.length || contentUnavailable(document.body?.innerText || "")) break;
       await sleep(500);
     }
 
@@ -515,8 +516,13 @@
       }
 
       if (!accepted) {
+        const visibleAdvert = visibleAdvertCardForExactSearch(target.registration);
         const visibleResult = visibleSearchResultEvidence(target.registration);
-        if (visibleResult) {
+        if (visibleAdvert) {
+          accepted = true;
+          matchedUrl = visibleAdvert.querySelector('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid="]')?.href || "";
+          matchMethod = "exact-search-visible-advert";
+        } else if (visibleResult) {
           accepted = true;
           matchedUrl = visibleResult.querySelector('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid="]')?.href || "";
           matchMethod = "visible-result-card";
@@ -729,6 +735,7 @@
       waitForComposerEditor,
       attachImage,
       registrationEvidenceLines,
+      visibleAdvertCardForExactSearch,
       membershipPendingVisible,
       waitForMembershipPending,
       prepareGroupPost,
