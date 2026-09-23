@@ -133,8 +133,8 @@ if (!source.includes("DEALERKIT_STOCK_TRUTH_SAFETY")) {
   );
 
   replaceOnce(
-    `  }, [activeLocalVehicles, currentVanscoRegistrationSet, dealerKitSnapshotComplete, selectedPipeline]);`,
-    `  }, [absenceComparisonPaused, activeLocalVehicles, currentVanscoRegistrationSet, selectedPipeline]);`,
+    `  }, [activeLocalVehicles, dealerKitAccountedRegistrationSet, dealerKitSnapshotComplete, selectedPipeline]);`,
+    `  }, [absenceComparisonPaused, activeLocalVehicles, dealerKitAccountedRegistrationSet, selectedPipeline]);`,
     "reverse comparison dependencies"
   );
 
