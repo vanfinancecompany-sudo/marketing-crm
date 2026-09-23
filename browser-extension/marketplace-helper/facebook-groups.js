@@ -142,6 +142,36 @@
     return null;
   }
 
+  function visibleAdvertCardForExactSearch(registration) {
+    const wantedReg = normalizeRegistration(registration);
+    if (!wantedReg) return null;
+
+    let searchedReg = "";
+    try {
+      searchedReg = normalizeRegistration(new URL(location.href).searchParams.get("q") || "");
+    } catch {}
+    if (!searchedReg || searchedReg !== wantedReg) return null;
+
+    const candidates = [...document.querySelectorAll('[role="article"], div[role="article"], [data-ad-preview="message"]')].filter(visible);
+    for (const node of candidates) {
+      const text = clean(node.innerText || node.textContent || "");
+      if (/search results for|results for/i.test(text) && text.length < 250) continue;
+      const largeImage = [...node.querySelectorAll("img")].filter(visible).find((image) => {
+        const rect = image.getBoundingClientRect();
+        return rect.width >= 180 && rect.height >= 120;
+      });
+      if (!largeImage) continue;
+      const controls = clean([...node.querySelectorAll('button, [role="button"], a')]
+        .filter(visible)
+        .map((element) => element.innerText || element.textContent || element.getAttribute("aria-label"))
+        .join(" "));
+      const looksLikePost = /like|comment|share/i.test(controls);
+      const looksLikeOurAdvert = /rent\s*(?:2|to)\s*buy\s*vans|van\s*finance\s*company/i.test(text);
+      if (looksLikePost || looksLikeOurAdvert) return node;
+    }
+    return null;
+  }
+
   function contentUnavailable(text) {
     return /this content isn'?t available right now|content is not available|page isn'?t available|group is unavailable|group has been deleted/i.test(String(text || ""));
   }
