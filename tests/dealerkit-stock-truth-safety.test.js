@@ -305,6 +305,6 @@ test("reserved lifecycle evidence wins before generic not-current handling and s
 });
 
 test("DealerKit lifecycle recovery keeps enough history to cover week-old disappearing stock", () => {
-  const source = read("api/dealerkit-stock-watch-list.js");
+  const source = fs.readFileSync(new URL("../api/dealerkit-stock-watch-list.js", import.meta.url), "utf8");
   assert.match(source, /const RECENT_SOURCE_STATE_DAYS = 14;/);
 });
