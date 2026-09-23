@@ -481,9 +481,9 @@ export default function FacebookGroupsAgentPage({
     if (busy) return;
     if (!(await requireGroupsHelper())) return;
     setBusy("post-status");
-    setMessage("Checking posted groups to see which adverts are visible, still pending, or unavailable.");
+    setMessage(`Checking ${Math.min(25, awaitingGroups.length)} posted group${Math.min(25, awaitingGroups.length) === 1 ? "" : "s"} to see which adverts are visible, still pending, or unavailable.`);
     try {
-      await startFacebookPostStatusCheck(activeGroups, productKey, 12);
+      await startFacebookPostStatusCheck(activeGroups, productKey, Math.min(25, awaitingGroups.length || 25));
       setMessage("Acceptance checks are running through the posted groups. Results will return here automatically.");
     } catch (error) {
       setBusy("");
