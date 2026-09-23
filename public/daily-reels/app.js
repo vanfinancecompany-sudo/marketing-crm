@@ -1,6 +1,6 @@
 const TARGET_PER_PRODUCT = 10;
 const FRAME_COUNT = 10;
-const TEMPLATE_KEY = "tiktokPunch";
+const TEMPLATE_KEY = "editorialImpact";
 const PRODUCT_LABELS = {
   vanFinance: "Finance",
   rent2buy: "Rent2Buy",
@@ -407,7 +407,7 @@ async function prepareToday() {
       messagePackCounters[candidate.productKey] = packIndex + 1;
       const packCount = (MESSAGE_PACKS[candidate.productKey] || []).length || 1;
       setStatus(
-        `${label} ${index + 1}/${queue.length}: rendering ${reg} in TikTok Punch · message pack ${(packIndex % packCount) + 1}...`,
+        `${label} ${index + 1}/${queue.length}: rendering ${reg} in Editorial Impact · message pack ${(packIndex % packCount) + 1}...`,
         "working",
       );
       try {
