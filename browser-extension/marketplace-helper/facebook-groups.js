@@ -121,6 +121,21 @@
     });
   }
 
+  function visibleSearchResultEvidence(registration) {
+    const wantedReg = normalizeRegistration(registration);
+    if (!wantedReg) return null;
+    const candidates = [...document.querySelectorAll('[role="article"], [data-ad-preview="message"], div')].filter(visible);
+    for (const node of candidates) {
+      const text = clean(node.innerText || "");
+      if (!text || text.length > 5000) continue;
+      if (/search results for|results for/i.test(text) && text.length < 250) continue;
+      if (!normalizeRegistration(text).includes(wantedReg)) continue;
+      if (!node.querySelector('img, a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid="], [role="button"]')) continue;
+      return node;
+    }
+    return null;
+  }
+
   function contentUnavailable(text) {
     return /this content isn'?t available right now|content is not available|page isn'?t available|group is unavailable|group has been deleted/i.test(String(text || ""));
   }
@@ -437,9 +452,10 @@
         'a[href*="/posts/"], a[href*="/permalink/"], a[href*="multi_permalinks="], a[href*="story_fbid="]'
       )].filter(visible);
       evidenceLines = wantedReg ? registrationEvidenceLines(target.registration) : [];
-      // Facebook renders generic navigation/post anchors before the actual search result.
-      // Do not treat those anchors as "results ready"; wait for registration evidence.
-      if (evidenceLines.length || contentUnavailable(document.body?.innerText || "")) break;
+      const visibleResult = wantedReg ? visibleSearchResultEvidence(target.registration) : null;
+      // Facebook's current group search can show the registration only inside a rendered
+      // result card. Treat that visible card as evidence even when there is no permalink anchor.
+      if (visibleResult || evidenceLines.length || contentUnavailable(document.body?.innerText || "")) break;
       await sleep(500);
     }
 
@@ -462,9 +478,16 @@
         }
       }
 
-      if (!accepted && evidenceLines.length) {
-        accepted = true;
-        matchMethod = "registration-text";
+      if (!accepted) {
+        const visibleResult = visibleSearchResultEvidence(target.registration);
+        if (visibleResult) {
+          accepted = true;
+          matchedUrl = visibleResult.querySelector('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid="]')?.href || "";
+          matchMethod = "visible-result-card";
+        } else if (evidenceLines.length) {
+          accepted = true;
+          matchMethod = "registration-text";
+        }
       }
     }
 

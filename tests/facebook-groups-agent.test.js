@@ -173,7 +173,7 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.17");
+  assert.equal(manifest.version, "1.2.18");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -731,6 +731,12 @@ test("helper inserts nothing when no verified Create Post dialog exists", async 
       String(panel.innerHTML).includes("Could not verify Facebook group post composer. Nothing was inserted.")
     ),
   );
+});
+
+test("acceptance checker recognises a visibly rendered Facebook result card", () => {
+  assert.match(groupsHelperSource, /function visibleSearchResultEvidence\(registration\)/);
+  assert.match(groupsHelperSource, /matchMethod = "visible-result-card"/);
+  assert.match(groupsHelperSource, /visibleResult \|\| evidenceLines\.length/);
 });
 
 test("acceptance checker waits for Facebook search results to render", () => {
