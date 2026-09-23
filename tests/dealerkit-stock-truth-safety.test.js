@@ -299,7 +299,8 @@ test("reserved lifecycle evidence wins before generic not-current handling and s
 
   const source = pageSource();
   assert.match(source, /dealerKitAccountedRegistrationSet/);
-  assert.match(source, /record\.isCurrentlyOnVansco !== false \|\| isReservedLikeStatus\(record\.sourceStatus\)/);
+  assert.match(source, /\.\.\.currentVanscoRegistrationSet/);
+  assert.match(source, /isReservedLikeStatus\(record\.sourceStatus\)/);
   assert.match(source, /!dealerKitAccountedRegistrationSet\.has\(registration\)/);
 });
 
