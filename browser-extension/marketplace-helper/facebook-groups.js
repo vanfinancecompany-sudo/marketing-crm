@@ -142,6 +142,36 @@
     return null;
   }
 
+  function visibleAdvertCardForExactSearch(registration) {
+    const wantedReg = normalizeRegistration(registration);
+    if (!wantedReg) return null;
+
+    let searchedReg = "";
+    try {
+      searchedReg = normalizeRegistration(new URL(location.href).searchParams.get("q") || "");
+    } catch {}
+    if (!searchedReg || searchedReg !== wantedReg) return null;
+
+    const candidates = [...document.querySelectorAll('[role="article"], div[role="article"], [data-ad-preview="message"]')].filter(visible);
+    for (const node of candidates) {
+      const text = clean(node.innerText || node.textContent || "");
+      if (/search results for|results for/i.test(text) && text.length < 250) continue;
+      const largeImage = [...node.querySelectorAll("img")].filter(visible).find((image) => {
+        const rect = image.getBoundingClientRect();
+        return rect.width >= 180 && rect.height >= 120;
+      });
+      if (!largeImage) continue;
+      const controls = clean([...node.querySelectorAll('button, [role="button"], a')]
+        .filter(visible)
+        .map((element) => element.innerText || element.textContent || element.getAttribute("aria-label"))
+        .join(" "));
+      const looksLikePost = /like|comment|share/i.test(controls);
+      const looksLikeOurAdvert = /rent\s*(?:2|to)\s*buy\s*vans|van\s*finance\s*company/i.test(text);
+      if (looksLikePost || looksLikeOurAdvert) return node;
+    }
+    return null;
+  }
+
   function contentUnavailable(text) {
     return /this content isn'?t available right now|content is not available|page isn'?t available|group is unavailable|group has been deleted/i.test(String(text || ""));
   }
@@ -459,9 +489,10 @@
       )].filter(visible);
       evidenceLines = wantedReg ? registrationEvidenceLines(target.registration) : [];
       const visibleResult = wantedReg ? visibleSearchResultEvidence(target.registration) : null;
-      // Facebook's current group search can show the registration only inside a rendered
-      // result card. Treat that visible card as evidence even when there is no permalink anchor.
-      if (visibleResult || evidenceLines.length || contentUnavailable(document.body?.innerText || "")) break;
+      const visibleAdvert = wantedReg ? visibleAdvertCardForExactSearch(target.registration) : null;
+      // Keep the rule simple: exact registration search + a genuine visible advert card
+      // means Facebook is showing the advert, so it is accepted/Proven.
+      if (visibleAdvert || visibleResult || evidenceLines.length || contentUnavailable(document.body?.innerText || "")) break;
       await sleep(500);
     }
 
@@ -485,8 +516,13 @@
       }
 
       if (!accepted) {
+        const visibleAdvert = visibleAdvertCardForExactSearch(target.registration);
         const visibleResult = visibleSearchResultEvidence(target.registration);
-        if (visibleResult) {
+        if (visibleAdvert) {
+          accepted = true;
+          matchedUrl = visibleAdvert.querySelector('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid="]')?.href || "";
+          matchMethod = "exact-search-visible-advert";
+        } else if (visibleResult) {
           accepted = true;
           matchedUrl = visibleResult.querySelector('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid="]')?.href || "";
           matchMethod = "visible-result-card";
@@ -699,6 +735,7 @@
       waitForComposerEditor,
       attachImage,
       registrationEvidenceLines,
+      visibleAdvertCardForExactSearch,
       membershipPendingVisible,
       waitForMembershipPending,
       prepareGroupPost,
