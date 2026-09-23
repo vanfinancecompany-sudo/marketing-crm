@@ -424,17 +424,27 @@
   }
 
   async function checkPostedStatus(state) {
-    await sleep(2000);
     const target = state?.job?.groups?.[state.groupIndex] || {};
+    const wantedReg = normalizeRegistration(target.registration);
+
+    // Facebook group search results often render several seconds after navigation.
+    // Wait for real registration evidence instead of taking a one-off snapshot too early.
+    let resultAnchors = [];
+    let evidenceLines = [];
+    const waitStarted = Date.now();
+    while (Date.now() - waitStarted < 9000) {
+      resultAnchors = [...document.querySelectorAll(
+        'a[href*="/posts/"], a[href*="/permalink/"], a[href*="multi_permalinks="], a[href*="story_fbid="]'
+      )].filter(visible);
+      evidenceLines = wantedReg ? registrationEvidenceLines(target.registration) : [];
+      if (resultAnchors.length || evidenceLines.length || contentUnavailable(document.body?.innerText || "")) break;
+      await sleep(500);
+    }
+
     const pageText = clean(document.body?.innerText || "");
     const unavailable = contentUnavailable(pageText);
     const declined = /post (?:was )?(?:declined|rejected)|declined by (?:an )?admin|rejected by (?:an )?admin|your post was not approved|post was not approved/i.test(pageText);
     const pending = !declined && /pending approval|awaiting approval|waiting for admin approval|post is pending/i.test(pageText);
-    const wantedReg = normalizeRegistration(target.registration);
-
-    const resultAnchors = [...document.querySelectorAll(
-      'a[href*="/posts/"], a[href*="/permalink/"], a[href*="multi_permalinks="], a[href*="story_fbid="]'
-    )].filter(visible);
 
     let accepted = false;
     let matchedUrl = "";
@@ -450,7 +460,7 @@
         }
       }
 
-      if (!accepted && registrationEvidenceLines(target.registration).length) {
+      if (!accepted && evidenceLines.length) {
         accepted = true;
         matchMethod = "registration-text";
       }
