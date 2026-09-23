@@ -23,8 +23,8 @@ function history(registration, occurredAt, productKey = "vanFinance") {
   };
 }
 
-test("daily YouTube batch locks TikTok, 10 images and 10 per product defaults", () => {
-  assert.equal(DAILY_YOUTUBE_TEMPLATE_KEY, "tiktokPunch");
+test("daily YouTube batch locks Editorial Impact, 10 images and 10 per product defaults", () => {
+  assert.equal(DAILY_YOUTUBE_TEMPLATE_KEY, "editorialImpact");
   assert.equal(DAILY_YOUTUBE_MIN_IMAGES, 10);
   assert.equal(DAILY_YOUTUBE_TARGET_PER_PRODUCT, 10);
   assert.equal(DAILY_YOUTUBE_COOLDOWN_HOURS, 48);
