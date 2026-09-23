@@ -8,6 +8,7 @@ import { put } from "@vercel/blob";
 import ffmpegPath from "ffmpeg-static";
 import { Resvg } from "@resvg/resvg-js";
 import opentype from "opentype.js";
+import { editorialLayout, editorialHeadline } from "../utils/editorialImpactDesign.js";
 
 const require = createRequire(import.meta.url);
 const INTER_BOLD_FONT_PATH = require.resolve("@fontsource/inter/files/inter-latin-900-normal.woff");
@@ -321,7 +322,13 @@ async function prepareImagePpm(imagePath, ppmPath) {
   return readPpm(ppmPath);
 }
 
-async function writeMotionImage(imagePath, outputPath) {
+async function writeMotionImage(imagePath, outputPath, templateKey, sceneIndex = 0) {
+  const editorial = templateKey === "editorialImpact";
+  if (editorial) {
+    const bytes = await fs.readFile(imagePath);
+    await writeSvgFrame(outputPath, renderEditorialImpactPhotoSvg({ bytes, contentType: 'image/jpeg' }));
+    return { filePath: outputPath };
+  }
   await runFfmpeg([
     "-y",
     "-i",
@@ -629,7 +636,101 @@ async function writeSvgFrame(filePath, svg) {
   await fs.writeFile(filePath, rendered.asPng());
 }
 
-async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults, templateKey, headerText, includePhoto = true, includeSweep = true, includeCtaButton = true }) {
+export function renderEditorialImpactPhotoSvg(image) {
+  const href = imageDataUri(image);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="800" viewBox="0 0 1080 800">
+    <defs>
+      <filter id="defocus" x="-20%" y="-30%" width="140%" height="160%"><feGaussianBlur stdDeviation="26"/></filter>
+      <linearGradient id="falloff" x2="0" y2="1"><stop stop-color="#0b1015" stop-opacity=".12"/><stop offset=".35" stop-color="#0b1015" stop-opacity="0"/><stop offset="1" stop-color="#0b1015" stop-opacity=".18"/></linearGradient>
+    </defs>
+    <rect width="1080" height="800" fill="#111b23"/>
+    <image href="${href}" x="-60" y="-60" width="1200" height="920" preserveAspectRatio="xMidYMid slice" opacity=".42" filter="url(#defocus)"/>
+    <image href="${href}" x="36" y="22" width="1008" height="756" preserveAspectRatio="xMidYMid meet"/>
+    <rect width="1080" height="800" fill="url(#falloff)"/>
+  </svg>`;
+}
+
+export function renderEditorialImpactSweepSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="800" viewBox="0 0 360 800">
+    <defs><linearGradient id="light"><stop stop-color="#e8f5ff" stop-opacity="0"/><stop offset=".5" stop-color="#e8f5ff" stop-opacity=".075"/><stop offset="1" stop-color="#e8f5ff" stop-opacity="0"/></linearGradient></defs>
+    <path d="M0 0 H180 L360 800 H180 Z" fill="url(#light)"/>
+  </svg>`;
+}
+
+export function renderEditorialImpactCtaSheenSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="153" viewBox="0 0 120 153">
+    <defs><linearGradient id="sheen"><stop stop-color="#ef233c" stop-opacity="0"/><stop offset=".5" stop-color="#ef233c" stop-opacity=".13"/><stop offset="1" stop-color="#ef233c" stop-opacity="0"/></linearGradient></defs>
+    <path d="M0 0 H45 L120 153 H75 Z" fill="url(#sheen)"/>
+  </svg>`;
+}
+
+export function renderEditorialImpactSvg({ frameNumber, frameCount = 10, frame, image, defaults, headerText, layer = "composite" }) {
+  const finalCta = frame.finalCta;
+  const layout = editorialLayout(frameNumber - 1, finalCta);
+  const { ink, muted, accent, background, textY, photoY } = layout;
+  const eyebrow = safeDisplayText(frame.eyebrow || defaults.productName).toUpperCase();
+  const headline = editorialHeadline(frame.headline || defaults.hook, measureVectorText, finalCta);
+  const headlineBlock = headline.map(row => svgPathText(row.text, {
+    x: 72, y: textY + 44 + row.y, size: row.size, fill: layout[row.tone], letterSpacing: -row.size * .025,
+  })).join("");
+  const support = safeDisplayText(frame.support || defaults.website).toUpperCase();
+  const button = safeDisplayText(frame.button || defaults.finalButton).toUpperCase();
+  const header = safeDisplayText(headerText || defaults.productName).toUpperCase();
+  const website = safeDisplayText(defaults.website).toUpperCase().replace(/^HTTPS?:\/\//, "");
+  const label = `${String(frameNumber).padStart(2, "0")} / ${String(frameCount).padStart(2, "0")}`;
+  const fit = (value, x, y, size, width, fill) => svgPathText(value, { x, y,
+    size: Math.min(size, width / Math.max(measureVectorText(value, 1), 1)), fill });
+  const ctaText = finalCta ? fit(button, 110, 1648, 58, 720, '#10171b') : '';
+  if (layer === 'hero' || layer === 'ctaText') {
+    return `<svg xmlns="http://www.w3.org/2000/svg" ${layer === 'hero'
+      ? `width="1080" height="640" viewBox="0 ${textY} 1080 640"`
+      : 'width="936" height="153" viewBox="72 1552 936 153"'}>${layer === 'hero' ? headlineBlock : ctaText}</svg>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">
+    <defs>
+      <filter id="backdrop"><feGaussianBlur stdDeviation="36"/></filter>
+      <radialGradient id="atmosphere" cx="90%" cy="40%" r="80%"><stop stop-color="${finalCta ? '#8e0823' : '#244454'}" stop-opacity="${layout.light ? '.08' : '.38'}"/><stop offset="1" stop-color="${background}" stop-opacity="0"/></radialGradient>
+      <linearGradient id="edge"><stop stop-color="${accent}"/><stop offset="1" stop-color="${accent}" stop-opacity="0"/></linearGradient>
+    </defs>
+    <rect width="1080" height="1920" fill="${background}"/>
+    ${!layout.light && !finalCta ? `<image href="${imageDataUri(image)}" x="-80" y="-80" width="1240" height="2080" preserveAspectRatio="xMidYMid slice" opacity=".10" filter="url(#backdrop)"/>` : ""}
+    <rect width="1080" height="1920" fill="url(#atmosphere)"/>
+    <path d="M72 76 L94 76 L75 126 L53 126 Z M102 76 L116 76 L97 126 L83 126 Z" fill="${accent}"/>
+    ${fit(header, 138, 111, 28, 690, ink)}
+    ${fit(label, 885, 110, 24, 140, muted)}
+    <path d="M72 164 H1008" stroke="${ink}" stroke-opacity=".18"/>
+    ${Array.from({ length: Math.max(1, frameCount) }, (_, i) => `<rect x="${72 + i * 936 / frameCount}" y="163" width="${936 / frameCount - 8}" height="3" fill="${i < frameNumber ? accent : ink}" opacity="${i < frameNumber ? 1 : .12}"/>`).join('')}
+    ${layer === 'base' ? '' : `<svg x="0" y="${photoY}" width="1080" height="800">${renderEditorialImpactPhotoSvg(image).replace(/^<svg[^>]*>|<\/svg>$/g, '')}</svg>`}
+    <rect x="72" y="${photoY + 814}" width="120" height="4" fill="url(#edge)"/>
+    <path d="M990 ${photoY + 807} H1008 V${photoY + 789}" fill="none" stroke="${accent}" stroke-width="2"/>
+    ${fit(eyebrow, 72, textY + 24, 25, 890, muted)}
+    ${layer === 'base' ? '' : headlineBlock}
+    ${finalCta ? `
+      ${headline.every(row => measureVectorText(row.text, row.size) < 740) ? `<circle cx="910" cy="1350" r="77" fill="none" stroke="#ffe4e6" stroke-opacity=".28" stroke-width="2"/>
+      <path d="M880 1380 L940 1320 M880 1320 H940 V1380" fill="none" stroke="#fff" stroke-width="8"/>` : ""}
+      <rect x="72" y="1552" width="936" height="153" rx="12" fill="#f7f4ec"/>
+      <path d="M84 1553 H996" stroke="#fff" stroke-opacity=".75"/>
+      <circle cx="930" cy="1628" r="47" fill="#e92642"/>
+      <path d="M910 1645 L948 1607 M910 1607 H948 V1645" fill="none" stroke="#fff" stroke-width="6"/>
+      ${layer === 'base' ? '' : ctaText}
+      ${fit(support, 72, 1748, 27, 936, ink)}
+    ` : `
+      <path d="M72 1620 H1008" stroke="${ink}" stroke-opacity=".2"/>
+      <circle cx="82" cy="1660" r="5" fill="${accent}"/>
+      ${fit(support, 108, 1672, 32, 880, ink)}
+    `}
+    ${fit(website, 72, 1810, 28, 900, muted)}
+    <path d="M72 1854 H1008" stroke="${ink}" stroke-opacity=".15"/>
+  </svg>`;
+}
+
+
+async function writeVehicleFrame(filePath, { frameNumber, frameCount, frame, image, defaults, templateKey, headerText, includePhoto = true, includeSweep = true, includeCtaButton = true }) {
+  if (templateKey === "editorialImpact") {
+    await writeSvgFrame(filePath, renderEditorialImpactSvg({ frameNumber, frameCount,
+      frame, image, defaults, headerText }));
+    return;
+  }
   const finalCta = frame.finalCta;
   const accent = "#ef233c";
   const imageHref = imageDataUri(image);
@@ -771,15 +872,36 @@ function zoompanExpressions(index, frameTotal) {
   return { zoom, x, y };
 }
 
-function buildSceneClipArgs({ framePath, image, clipPath, sceneDuration, sceneIndex, fps, lightFade = true }) {
+function buildSceneClipArgs({ framePath, image, clipPath, sceneDuration, sceneIndex, fps, templateKey,
+  editorialHeroPath, editorialCtaPath, editorialSweepPath, editorialSheenPath,
+  editorialCtaEnabled = false, lightFade = true }) {
   const frameTotal = Math.max(1, Math.round(sceneDuration * fps));
   const { zoom, x, y } = zoompanExpressions(sceneIndex, frameTotal);
+  const editorialLayoutSpec = editorialLayout(sceneIndex, editorialCtaEnabled);
+  const editorialProgress = `on/${Math.max(1, frameTotal - 1)}`;
+  const editorialZoom = sceneIndex % 2 === 0
+    ? `1.016+0.03*(1-exp(-7*${editorialProgress}))+0.009*${editorialProgress}`
+    : `1.055-0.031*(1-exp(-6*${editorialProgress}))-0.008*${editorialProgress}`;
+  const editorialPanX = "(iw-iw/zoom)/2";
+  const editorialPanY = "(ih-ih/zoom)/2";
   const lightFadeEndSeconds = LIGHT_FADE_START_SECONDS + LIGHT_FADE_SECONDS;
   const washAmount = `between(t\\,${LIGHT_FADE_START_SECONDS}\\,${lightFadeEndSeconds})*(${lightFadeEndSeconds}-t)/${LIGHT_FADE_SECONDS}`;
   const lightFadeFilter = lightFade && sceneIndex > 0
     ? `,eq=brightness='0.28*${washAmount}':contrast='1+0.035*${washAmount}':saturation='1-0.08*${washAmount}':eval=frame`
     : "";
-  const filter = [
+  const filter = templateKey === "editorialImpact" ? [
+    `[0:v]fps=${fps},format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[base]`,
+    `[1:v]format=rgba,setsar=1,zoompan=z='${editorialZoom}':x='${editorialPanX}':y='${editorialPanY}':d=${frameTotal}:s=1080x800:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[photo]`,
+    `[base][photo]overlay=0:${editorialLayoutSpec.photoY}[scene]`,
+    `[2:v]format=rgba,setsar=1,zoompan=z='1+0.025*exp(-14*${editorialProgress})':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2':d=${frameTotal}:s=1080x640:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[hero]`,
+    `[scene][hero]overlay=x=0:y='${editorialLayoutSpec.textY}+18*exp(-14*t/${sceneDuration})'[withHero]`,
+    `[5:v]format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[sheen]`,
+    `[withHero][sheen]overlay=x='150+650*min(t/0.75,1)':y=1552:enable='${editorialCtaEnabled ? "between(t,0,0.75)" : "0"}'[withSheen]`,
+    `[3:v]format=rgba,setsar=1,zoompan=z='1+0.018*exp(-on/5)':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2':d=${frameTotal}:s=936x153:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[cta]`,
+    `[withSheen][cta]overlay=72:1552[withCta]`,
+    `[4:v]format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[sweep]`,
+    `[withCta][sweep]overlay=x='-360+1800*min(t/0.9,1)':y=${editorialLayoutSpec.photoY}:enable='between(t,0,0.9)',format=yuv420p[vout]`,
+  ].join(";") : [
     `[0:v]fps=${fps},format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[base]`,
     `[1:v]format=rgba,setsar=1,zoompan=z='${zoom}':x='${x}':y='${y}':d=${frameTotal}:s=${IMAGE_WIDTH}x${IMAGE_HEIGHT}:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[photo]`,
     `[base][photo]overlay=${IMAGE_X}:${IMAGE_Y}:shortest=1,format=yuv420p${lightFadeFilter}[vout]`,
@@ -799,6 +921,12 @@ function buildSceneClipArgs({ framePath, image, clipPath, sceneDuration, sceneIn
     String(sceneDuration),
     "-i",
     image.filePath,
+    ...(templateKey === "editorialImpact" ? [
+      "-loop", "1", "-t", String(sceneDuration), "-i", editorialHeroPath,
+      "-loop", "1", "-t", String(sceneDuration), "-i", editorialCtaPath,
+      "-loop", "1", "-t", String(sceneDuration), "-i", editorialSweepPath,
+      "-loop", "1", "-t", String(sceneDuration), "-i", editorialSheenPath,
+    ] : []),
     "-filter_complex",
     filter,
     "-map",
@@ -835,6 +963,10 @@ function buildSceneClipArgs({ framePath, image, clipPath, sceneDuration, sceneIn
 }
 
 async function renderSceneClip(options) {
+  if (options.templateKey === "editorialImpact") {
+    await runFfmpeg(buildSceneClipArgs({ ...options, lightFade: false }));
+    return { lightFadeApplied: false };
+  }
   try {
     await runFfmpeg(buildSceneClipArgs({ ...options, lightFade: true }));
     return { lightFadeApplied: true };
@@ -1016,6 +1148,7 @@ export default async function handler(req, res) {
       const image = preparedImages[Math.min(index, preparedImages.length - 1)];
       await writeVehicleFrame(framePath, {
         frameNumber: index + 1,
+        frameCount,
         frame: frameSpecs[index],
         image,
         defaults,
@@ -1078,25 +1211,60 @@ export default async function handler(req, res) {
     if (motionEnabled) {
       const clipPaths = [];
       const motionImagePaths = [];
+      const editorialLayerPaths = [];
       try {
         const lightFadeWarnings = [];
         const motionImages = [];
-        for (let index = 0; index < preparedImages.length; index += 1) {
+        const motionImageCount = templateKey === "editorialImpact" ? frameCount : preparedImages.length;
+        for (let index = 0; index < motionImageCount; index += 1) {
           const motionImagePath = path.join(workDir, `motion-source-${index + 1}.png`);
-          const motionImage = await writeMotionImage(preparedImages[index].filePath, motionImagePath);
+          const sourceImage = preparedImages[Math.min(index, preparedImages.length - 1)];
+          const motionImage = await writeMotionImage(sourceImage.filePath, motionImagePath, templateKey, index);
           motionImagePaths.push(motionImagePath);
           motionImages.push(motionImage);
+        }
+
+        const editorialLayers = [];
+        let editorialSweepPath;
+        let editorialSheenPath;
+        if (templateKey === "editorialImpact") {
+          editorialSweepPath = path.join(workDir, "editorial-sweep.png");
+          await writeSvgFrame(editorialSweepPath, renderEditorialImpactSweepSvg());
+          editorialLayerPaths.push(editorialSweepPath);
+          editorialSheenPath = path.join(workDir, "editorial-cta-sheen.png");
+          await writeSvgFrame(editorialSheenPath, renderEditorialImpactCtaSheenSvg());
+          editorialLayerPaths.push(editorialSheenPath);
+          for (let index = 0; index < framePaths.length; index += 1) {
+            const image = preparedImages[Math.min(index, preparedImages.length - 1)];
+            const paths = Object.fromEntries(["base", "hero", "ctaText"].map((layer) => [
+              layer, path.join(workDir, `editorial-${layer}-${index + 1}.png`),
+            ]));
+            for (const [layer, layerPath] of Object.entries(paths)) {
+              await writeSvgFrame(layerPath, renderEditorialImpactSvg({
+                frameNumber: index + 1, frameCount, frame: frameSpecs[index], image,
+                defaults, headerText, layer,
+              }));
+              editorialLayerPaths.push(layerPath);
+            }
+            editorialLayers.push(paths);
+          }
         }
 
         for (let index = 0; index < framePaths.length; index += 1) {
           const clipPath = path.join(workDir, `scene-${index + 1}.mp4`);
           const result = await renderSceneClip({
-            framePath: framePaths[index],
+            framePath: editorialLayers[index]?.base || framePaths[index],
             image: motionImages[Math.min(index, motionImages.length - 1)],
+            editorialHeroPath: editorialLayers[index]?.hero,
+            editorialCtaPath: editorialLayers[index]?.ctaText,
+            editorialSweepPath,
+            editorialSheenPath,
+            editorialCtaEnabled: Boolean(frameSpecs[index]?.finalCta),
             clipPath,
             sceneDuration: frameSeconds,
             sceneIndex: index,
             fps,
+            templateKey,
           });
           clipPaths.push(clipPath);
           if (result.lightFadeApplied) lightFadeApplied = true;
@@ -1120,6 +1288,7 @@ export default async function handler(req, res) {
       } finally {
         await Promise.all(clipPaths.map((clipPath) => fs.rm(clipPath, { force: true }).catch(() => {})));
         await Promise.all(motionImagePaths.map((imagePath) => fs.rm(imagePath, { force: true }).catch(() => {})));
+        await Promise.all(editorialLayerPaths.map((layerPath) => fs.rm(layerPath, { force: true }).catch(() => {})));
       }
     } else {
       motionWarning = "Premium motion disabled for this render.";
