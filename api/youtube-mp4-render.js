@@ -8,6 +8,7 @@ import { put } from "@vercel/blob";
 import ffmpegPath from "ffmpeg-static";
 import { Resvg } from "@resvg/resvg-js";
 import opentype from "opentype.js";
+import { editorialLayout, editorialHeadline } from "../utils/editorialImpactDesign.js";
 
 const require = createRequire(import.meta.url);
 const INTER_BOLD_FONT_PATH = require.resolve("@fontsource/inter/files/inter-latin-900-normal.woff");
@@ -323,15 +324,17 @@ async function prepareImagePpm(imagePath, ppmPath) {
 
 async function writeMotionImage(imagePath, outputPath, templateKey, sceneIndex = 0) {
   const editorial = templateKey === "editorialImpact";
-  const layout = editorial ? editorialPhotoLayout(sceneIndex) : null;
+  if (editorial) {
+    const bytes = await fs.readFile(imagePath);
+    await writeSvgFrame(outputPath, renderEditorialImpactPhotoSvg({ bytes, contentType: 'image/jpeg' }));
+    return { filePath: outputPath };
+  }
   await runFfmpeg([
     "-y",
     "-i",
     imagePath,
     "-vf",
-    editorial
-      ? `scale=${layout.width}:${layout.height}:force_original_aspect_ratio=decrease,pad=1080:800:${layout.x}+(${layout.width}-iw)/2:${layout.y - 250}+(${layout.height}-ih)/2:color=0x0b1019,setsar=1,format=rgba`
-      : `scale=${IMAGE_WIDTH}:${IMAGE_HEIGHT}:force_original_aspect_ratio=decrease,pad=${IMAGE_WIDTH}:${IMAGE_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=0x101014,setsar=1,format=rgba`,
+    `scale=${IMAGE_WIDTH}:${IMAGE_HEIGHT}:force_original_aspect_ratio=decrease,pad=${IMAGE_WIDTH}:${IMAGE_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=0x101014,setsar=1,format=rgba`,
     "-frames:v",
     "1",
     outputPath,
@@ -633,120 +636,94 @@ async function writeSvgFrame(filePath, svg) {
   await fs.writeFile(filePath, rendered.asPng());
 }
 
-function editorialVectorLines(value, maxWidth, maxLines, startingSize, minimumSize) {
-  const words = safeDisplayText(value).toUpperCase().split(" ").filter(Boolean);
-  for (let size = startingSize; size >= minimumSize; size -= 4) {
-    const lines = [];
-    let current = "";
-    for (const word of words) {
-      const next = current ? `${current} ${word}` : word;
-      if (current && measureVectorText(next, size) > maxWidth) {
-        lines.push(current);
-        current = word;
-      } else {
-        current = next;
-      }
-    }
-    if (current) lines.push(current);
-    if (lines.length <= maxLines && lines.every((line) => measureVectorText(line, size) <= maxWidth)) {
-      return { lines, size };
-    }
-  }
-  return { lines: splitVectorLines(value, maxWidth, minimumSize, maxLines), size: minimumSize };
-}
-
-function editorialPhotoLayout(sceneIndex) {
-  return [
-    { x: 30, y: 280, width: 1020, height: 740, headlineX: 72, railX: null },
-    { x: 104, y: 292, width: 946, height: 718, headlineX: 108, railX: 54 },
-    { x: 30, y: 266, width: 946, height: 748, headlineX: 72, railX: 1018 },
-  ][sceneIndex % 3];
+export function renderEditorialImpactPhotoSvg(image) {
+  const href = imageDataUri(image);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="800" viewBox="0 0 1080 800">
+    <defs>
+      <filter id="defocus" x="-20%" y="-30%" width="140%" height="160%"><feGaussianBlur stdDeviation="26"/></filter>
+      <linearGradient id="falloff" x2="0" y2="1"><stop stop-color="#0b1015" stop-opacity=".12"/><stop offset=".35" stop-color="#0b1015" stop-opacity="0"/><stop offset="1" stop-color="#0b1015" stop-opacity=".18"/></linearGradient>
+    </defs>
+    <rect width="1080" height="800" fill="#111b23"/>
+    <image href="${href}" x="-60" y="-60" width="1200" height="920" preserveAspectRatio="xMidYMid slice" opacity=".42" filter="url(#defocus)"/>
+    <image href="${href}" x="36" y="22" width="1008" height="756" preserveAspectRatio="xMidYMid meet"/>
+    <rect width="1080" height="800" fill="url(#falloff)"/>
+  </svg>`;
 }
 
 export function renderEditorialImpactSweepSvg() {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="260" height="215" viewBox="0 0 260 215">
-    <path d="M0 0 H56 L190 215 H134 Z" fill="#ef233c" opacity="0.24"/>
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="800" viewBox="0 0 360 800">
+    <defs><linearGradient id="light"><stop stop-color="#e8f5ff" stop-opacity="0"/><stop offset=".5" stop-color="#e8f5ff" stop-opacity=".075"/><stop offset="1" stop-color="#e8f5ff" stop-opacity="0"/></linearGradient></defs>
+    <path d="M0 0 H180 L360 800 H180 Z" fill="url(#light)"/>
   </svg>`;
 }
 
 export function renderEditorialImpactCtaSheenSvg() {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="153" viewBox="0 0 120 153">
-    <defs><linearGradient id="sheen"><stop offset="0" stop-color="#fff" stop-opacity="0"/>
-      <stop offset="0.5" stop-color="#fff" stop-opacity="0.16"/>
-      <stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>
+    <defs><linearGradient id="sheen"><stop stop-color="#ef233c" stop-opacity="0"/><stop offset=".5" stop-color="#ef233c" stop-opacity=".13"/><stop offset="1" stop-color="#ef233c" stop-opacity="0"/></linearGradient></defs>
     <path d="M0 0 H45 L120 153 H75 Z" fill="url(#sheen)"/>
   </svg>`;
 }
 
 export function renderEditorialImpactSvg({ frameNumber, frameCount = 10, frame, image, defaults, headerText, layer = "composite" }) {
   const finalCta = frame.finalCta;
-  const accent = "#ef233c";
-  const layout = editorialPhotoLayout(frameNumber - 1);
-  const imageHref = layer === "hero" || layer === "ctaText" ? "" : imageDataUri(image);
+  const layout = editorialLayout(frameNumber - 1, finalCta);
+  const { ink, muted, accent, background, textY, photoY } = layout;
   const eyebrow = safeDisplayText(frame.eyebrow || defaults.productName).toUpperCase();
-  const headline = editorialVectorLines(frame.headline || defaults.hook, 930, finalCta ? 3 : 4,
-    finalCta ? 118 : 106, 62);
-  const headlineY = 1208;
-  const headlineBlock = headline.lines.map((line, index) => svgPathText(line, {
-    x: layout.headlineX, y: headlineY + index * headline.size * 1.02, size: headline.size,
+  const headline = editorialHeadline(frame.headline || defaults.hook, measureVectorText, finalCta);
+  const headlineBlock = headline.map(row => svgPathText(row.text, {
+    x: 72, y: textY + 44 + row.y, size: row.size, fill: layout[row.tone], letterSpacing: -row.size * .025,
   })).join("");
   const support = safeDisplayText(frame.support || defaults.website).toUpperCase();
   const button = safeDisplayText(frame.button || defaults.finalButton).toUpperCase();
   const header = safeDisplayText(headerText || defaults.productName).toUpperCase();
   const website = safeDisplayText(defaults.website).toUpperCase().replace(/^HTTPS?:\/\//, "");
-  const count = Math.max(1, frameCount);
-  const progressWidth = Math.round(936 * frameNumber / count);
-  const label = `${String(frameNumber).padStart(2, "0")} / ${String(count).padStart(2, "0")}`;
-  const ctaText = finalCta ? svgPathText(button, {
-    x: 110, y: 1650, size: Math.min(58, Math.max(34, 740 / Math.max(1, measureVectorText(button, 1)))), fill: "#ffffff",
-  }) : "";
-
-  if (layer === "hero" || layer === "ctaText") {
-    const viewport = layer === "hero"
-      ? 'width="1080" height="470" viewBox="0 1100 1080 470"'
-      : 'width="936" height="153" viewBox="72 1552 936 153"';
-    return `<svg xmlns="http://www.w3.org/2000/svg" ${viewport}>
-      ${layer === "hero" ? headlineBlock : ctaText}
-    </svg>`;
+  const label = `${String(frameNumber).padStart(2, "0")} / ${String(frameCount).padStart(2, "0")}`;
+  const fit = (value, x, y, size, width, fill) => svgPathText(value, { x, y,
+    size: Math.min(size, width / Math.max(measureVectorText(value, 1), 1)), fill });
+  const ctaText = finalCta ? fit(button, 110, 1648, 58, 720, '#10171b') : '';
+  if (layer === 'hero' || layer === 'ctaText') {
+    return `<svg xmlns="http://www.w3.org/2000/svg" ${layer === 'hero'
+      ? `width="1080" height="640" viewBox="0 ${textY} 1080 640"`
+      : 'width="936" height="153" viewBox="72 1552 936 153"'}>${layer === 'hero' ? headlineBlock : ctaText}</svg>`;
   }
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
-  <defs>
-    <radialGradient id="ambient">
-      <stop offset="0" stop-color="${accent}" stop-opacity="0.08"/>
-      <stop offset="1" stop-color="${accent}" stop-opacity="0"/>
-    </radialGradient>
-    <filter id="buttonGlow" x="-15%" y="-60%" width="130%" height="220%">
-      <feGaussianBlur stdDeviation="32"/>
-    </filter>
-  </defs>
-  <rect width="${WIDTH}" height="${HEIGHT}" fill="#08090d"/>
-  <ellipse cx="540" cy="690" rx="820" ry="900" fill="url(#ambient)"/>
-  <rect x="0" y="250" width="1080" height="800" fill="#0b1019"/>
-  <image href="${imageHref}" x="${layout.x}" y="${layout.y}" width="${layout.width}" height="${layout.height}" preserveAspectRatio="xMidYMid meet"/>
-  ${layout.railX === null ? "" : `<rect x="${layout.railX}" y="862" width="6" height="142" fill="${accent}" opacity="0.78"/>`}
-  <path d="M998 0 H1080 V112 Z" fill="${accent}" opacity="0.42"/>
-  <rect x="72" y="78" width="11" height="72" fill="${accent}"/>
-  ${svgPathText(header, { x: 108, y: 124, size: Math.min(36, Math.max(24, 680 / Math.max(1, measureVectorText(header, 1)))), fill: "#ffffff" })}
-  ${svgPathText(label, { x: 1002 - measureVectorText(label, 31), y: 191, size: 31, fill: "#eeeeee" })}
-  <rect x="72" y="219" width="936" height="4" fill="#ffffff" opacity="0.24"/>
-  <rect x="72" y="219" width="${progressWidth}" height="4" fill="${accent}"/>
-  ${svgPathText(eyebrow, { x: 72, y: 1102, size: Math.min(32, Math.max(23, 880 / Math.max(1, measureVectorText(eyebrow, 1)))), fill: "#f4f4f5" })}
-  <rect x="72" y="1112" width="70" height="6" fill="${accent}"/>
-  ${layer === "base" ? "" : headlineBlock}
-  ${finalCta ? `
-    <rect x="72" y="1552" width="936" height="153" rx="24" fill="${accent}" opacity="0.58" filter="url(#buttonGlow)"/>
-    <rect x="72" y="1552" width="936" height="153" rx="24" fill="${accent}"/>
-    ${layer === "base" ? "" : ctaText}
-    <circle cx="930" cy="1628" r="51" fill="#000000" opacity="0.18"/>
-    <path d="M908 1628 H950 M934 1612 L950 1628 L934 1644" fill="none" stroke="#ffffff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>`
-    : `
-    ${svgPathText(support, { x: 72, y: 1660, size: Math.min(42, Math.max(28, 930 / Math.max(1, measureVectorText(support, 1)))), fill: "#e9e9eb" })}
-    <rect x="72" y="1702" width="936" height="2" fill="${accent}"/>`}
-  ${svgPathText(finalCta ? support : website, { x: 72, y: 1809, size: Math.min(35, Math.max(24, 930 / Math.max(1, measureVectorText(finalCta ? support : website, 1)))), fill: "#dedee0" })}
-</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">
+    <defs>
+      <filter id="backdrop"><feGaussianBlur stdDeviation="36"/></filter>
+      <radialGradient id="atmosphere" cx="90%" cy="40%" r="80%"><stop stop-color="${finalCta ? '#8e0823' : '#244454'}" stop-opacity="${layout.light ? '.08' : '.38'}"/><stop offset="1" stop-color="${background}" stop-opacity="0"/></radialGradient>
+      <linearGradient id="edge"><stop stop-color="${accent}"/><stop offset="1" stop-color="${accent}" stop-opacity="0"/></linearGradient>
+    </defs>
+    <rect width="1080" height="1920" fill="${background}"/>
+    ${!layout.light && !finalCta ? `<image href="${imageDataUri(image)}" x="-80" y="-80" width="1240" height="2080" preserveAspectRatio="xMidYMid slice" opacity=".10" filter="url(#backdrop)"/>` : ""}
+    <rect width="1080" height="1920" fill="url(#atmosphere)"/>
+    <path d="M72 76 L94 76 L75 126 L53 126 Z M102 76 L116 76 L97 126 L83 126 Z" fill="${accent}"/>
+    ${fit(header, 138, 111, 28, 690, ink)}
+    ${fit(label, 885, 110, 24, 140, muted)}
+    <path d="M72 164 H1008" stroke="${ink}" stroke-opacity=".18"/>
+    ${Array.from({ length: Math.max(1, frameCount) }, (_, i) => `<rect x="${72 + i * 936 / frameCount}" y="163" width="${936 / frameCount - 8}" height="3" fill="${i < frameNumber ? accent : ink}" opacity="${i < frameNumber ? 1 : .12}"/>`).join('')}
+    ${layer === 'base' ? '' : `<svg x="0" y="${photoY}" width="1080" height="800">${renderEditorialImpactPhotoSvg(image).replace(/^<svg[^>]*>|<\/svg>$/g, '')}</svg>`}
+    <rect x="72" y="${photoY + 814}" width="120" height="4" fill="url(#edge)"/>
+    <path d="M990 ${photoY + 807} H1008 V${photoY + 789}" fill="none" stroke="${accent}" stroke-width="2"/>
+    ${fit(eyebrow, 72, textY + 24, 25, 890, muted)}
+    ${layer === 'base' ? '' : headlineBlock}
+    ${finalCta ? `
+      ${headline.every(row => measureVectorText(row.text, row.size) < 740) ? `<circle cx="910" cy="1350" r="77" fill="none" stroke="#ffe4e6" stroke-opacity=".28" stroke-width="2"/>
+      <path d="M880 1380 L940 1320 M880 1320 H940 V1380" fill="none" stroke="#fff" stroke-width="8"/>` : ""}
+      <rect x="72" y="1552" width="936" height="153" rx="12" fill="#f7f4ec"/>
+      <path d="M84 1553 H996" stroke="#fff" stroke-opacity=".75"/>
+      <circle cx="930" cy="1628" r="47" fill="#e92642"/>
+      <path d="M910 1645 L948 1607 M910 1607 H948 V1645" fill="none" stroke="#fff" stroke-width="6"/>
+      ${layer === 'base' ? '' : ctaText}
+      ${fit(support, 72, 1748, 27, 936, ink)}
+    ` : `
+      <path d="M72 1620 H1008" stroke="${ink}" stroke-opacity=".2"/>
+      <circle cx="82" cy="1660" r="5" fill="${accent}"/>
+      ${fit(support, 108, 1672, 32, 880, ink)}
+    `}
+    ${fit(website, 72, 1810, 28, 900, muted)}
+    <path d="M72 1854 H1008" stroke="${ink}" stroke-opacity=".15"/>
+  </svg>`;
 }
+
 
 async function writeVehicleFrame(filePath, { frameNumber, frameCount, frame, image, defaults, templateKey, headerText, includePhoto = true, includeSweep = true, includeCtaButton = true }) {
   if (templateKey === "editorialImpact") {
@@ -900,18 +877,13 @@ function buildSceneClipArgs({ framePath, image, clipPath, sceneDuration, sceneIn
   editorialCtaEnabled = false, lightFade = true }) {
   const frameTotal = Math.max(1, Math.round(sceneDuration * fps));
   const { zoom, x, y } = zoompanExpressions(sceneIndex, frameTotal);
+  const editorialLayoutSpec = editorialLayout(sceneIndex, editorialCtaEnabled);
   const editorialProgress = `on/${Math.max(1, frameTotal - 1)}`;
   const editorialZoom = sceneIndex % 2 === 0
-    ? `1.006+0.024*${editorialProgress}`
-    : `1.03-0.022*${editorialProgress}`;
-  const editorialPanX = sceneIndex % 3 === 1
-    ? `(iw-iw/zoom)*(0.3+0.4*${editorialProgress})`
-    : sceneIndex % 3 === 2
-      ? `(iw-iw/zoom)*(0.7-0.4*${editorialProgress})`
-      : "(iw-iw/zoom)/2";
-  const editorialPanY = sceneIndex % 3 === 2
-    ? `(ih-ih/zoom)*(0.62-0.24*${editorialProgress})`
-    : "(ih-ih/zoom)/2";
+    ? `1.016+0.03*(1-exp(-7*${editorialProgress}))+0.009*${editorialProgress}`
+    : `1.055-0.031*(1-exp(-6*${editorialProgress}))-0.008*${editorialProgress}`;
+  const editorialPanX = "(iw-iw/zoom)/2";
+  const editorialPanY = "(ih-ih/zoom)/2";
   const lightFadeEndSeconds = LIGHT_FADE_START_SECONDS + LIGHT_FADE_SECONDS;
   const washAmount = `between(t\\,${LIGHT_FADE_START_SECONDS}\\,${lightFadeEndSeconds})*(${lightFadeEndSeconds}-t)/${LIGHT_FADE_SECONDS}`;
   const lightFadeFilter = lightFade && sceneIndex > 0
@@ -920,15 +892,15 @@ function buildSceneClipArgs({ framePath, image, clipPath, sceneDuration, sceneIn
   const filter = templateKey === "editorialImpact" ? [
     `[0:v]fps=${fps},format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[base]`,
     `[1:v]format=rgba,setsar=1,zoompan=z='${editorialZoom}':x='${editorialPanX}':y='${editorialPanY}':d=${frameTotal}:s=1080x800:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[photo]`,
-    `[base][photo]overlay=0:250[scene]`,
-    `[2:v]format=rgba,setsar=1,zoompan=z='1+0.032*exp(-on/4)':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2':d=${frameTotal}:s=1080x470:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[hero]`,
-    `[scene][hero]overlay=x='2.5*sin(t*42)*exp(-t*18)':y='1100+1.5*sin(t*30)*exp(-t*18)'[withHero]`,
+    `[base][photo]overlay=0:${editorialLayoutSpec.photoY}[scene]`,
+    `[2:v]format=rgba,setsar=1,zoompan=z='1+0.025*exp(-14*${editorialProgress})':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2':d=${frameTotal}:s=1080x640:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[hero]`,
+    `[scene][hero]overlay=x=0:y='${editorialLayoutSpec.textY}+18*exp(-14*t/${sceneDuration})'[withHero]`,
     `[5:v]format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[sheen]`,
     `[withHero][sheen]overlay=x='150+650*min(t/0.75,1)':y=1552:enable='${editorialCtaEnabled ? "between(t,0,0.75)" : "0"}'[withSheen]`,
     `[3:v]format=rgba,setsar=1,zoompan=z='1+0.018*exp(-on/5)':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2':d=${frameTotal}:s=936x153:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[cta]`,
     `[withSheen][cta]overlay=72:1552[withCta]`,
     `[4:v]format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[sweep]`,
-    `[withCta][sweep]overlay=x='780+380*min(t/0.42,1)':y=0:enable='between(t,0,0.42)',format=yuv420p[vout]`,
+    `[withCta][sweep]overlay=x='-360+1800*min(t/0.9,1)':y=${editorialLayoutSpec.photoY}:enable='between(t,0,0.9)',format=yuv420p[vout]`,
   ].join(";") : [
     `[0:v]fps=${fps},format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[base]`,
     `[1:v]format=rgba,setsar=1,zoompan=z='${zoom}':x='${x}':y='${y}':d=${frameTotal}:s=${IMAGE_WIDTH}x${IMAGE_HEIGHT}:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[photo]`,
