@@ -8,9 +8,11 @@ import {
   archiveFacebookGroup,
   groupDueState,
   groupPipeline,
+  isRent2BuyLocalGroup,
   loadFacebookGroups,
   markGroupAccepted,
   markGroupPostStatus,
+  mergeDiscoveredGroups,
   markGroupPosted,
   normalizeFacebookGroupUrl,
   preserveFacebookGroupCaption,
@@ -63,6 +65,44 @@ test("Rent2Buy and Finance scoring stay separate", () => {
   assert.ok(rent2buy.length > 0);
   assert.ok(finance.every((group) => group.finance));
   assert.ok(rent2buy.every((group) => group.rent2buy));
+  assert.ok(rent2buy.every((group) => isRent2BuyLocalGroup(group)));
+});
+
+test("Rent2Buy discovery rejects national and out-of-area groups", () => {
+  const groups = loadFacebookGroups();
+  const merged = mergeDiscoveredGroups(groups, [
+    {
+      name: "Southampton Trades and Vans",
+      url: "https://www.facebook.com/groups/southampton-trades-vans/",
+      context: "Southampton Hampshire local trades",
+      segment: "Trades",
+    },
+    {
+      name: "Manchester Van Traders",
+      url: "https://www.facebook.com/groups/manchester-van-traders/",
+      context: "Manchester Greater Manchester",
+      segment: "Van/Vehicle",
+    },
+    {
+      name: "UK Vans Nationwide",
+      url: "https://www.facebook.com/groups/uk-vans-nationwide/",
+      context: "UK nationwide van sales",
+      segment: "Van/Vehicle",
+    },
+  ], "rent2buy");
+
+  assert.ok(merged.some((group) => /southampton-trades-vans/i.test(group.url)));
+  assert.equal(merged.some((group) => /manchester-van-traders/i.test(group.url)), false);
+  assert.equal(merged.some((group) => /uk-vans-nationwide/i.test(group.url)), false);
+});
+
+test("Rent2Buy local radius recognises intended Southampton-area locations", () => {
+  for (const name of ["Portsmouth Buy Sell", "Bournemouth Trades", "Reading Vans", "Guildford Marketplace", "Bristol Small Business", "London Van Sales"]) {
+    assert.equal(isRent2BuyLocalGroup({ name }), true, name);
+  }
+  for (const name of ["Manchester Van Sales", "Leeds Trades", "Liverpool Marketplace", "UK Nationwide Vans"]) {
+    assert.equal(isRent2BuyLocalGroup({ name }), false, name);
+  }
 });
 
 test("Facebook group state persists remotely without deleting browser recovery data", () => {
