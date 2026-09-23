@@ -1386,9 +1386,16 @@ function editorialLines(ctx, value, maxWidth, maxLines, initialSize, minimumSize
   return { lines: lines.slice(0, maxLines), size: minimumSize };
 }
 
+const EDITORIAL_PHOTO_LAYOUTS = [
+  { x: 30, y: 280, width: 1020, height: 740, headlineX: 72, railX: null },
+  { x: 104, y: 292, width: 946, height: 718, headlineX: 108, railX: 54 },
+  { x: 30, y: 266, width: 946, height: 748, headlineX: 72, railX: 1018 },
+];
+
 function drawEditorialImpactFrame(ctx, image, product, text, spec, frameIndex, frameCount, progress) {
   const finalCta = spec?.type === "finalCta";
   const display = spec?.display || {};
+  const layout = EDITORIAL_PHOTO_LAYOUTS[frameIndex % EDITORIAL_PHOTO_LAYOUTS.length];
   const entrance = easeInOut(Math.min(1, progress / 0.22));
   const punch = 1 + 0.025 * Math.exp(-progress * 13) * Math.cos(progress * 31);
   const shake = Math.sin(progress * 50) * 2 * Math.exp(-progress * 18);
@@ -1403,15 +1410,39 @@ function drawEditorialImpactFrame(ctx, image, product, text, spec, frameIndex, f
   ctx.fillRect(0, 0, SHORT_WIDTH, SHORT_HEIGHT);
   ctx.fillStyle = "#0b1019";
   ctx.fillRect(0, 250, SHORT_WIDTH, 800);
-  if (image) drawContainImage(ctx, image, 30, 280, 1020, 740, 1);
+  if (image) {
+    const push = frameIndex % 2 === 0 ? progress : 1 - progress;
+    const scale = 0.982 + 0.018 * push;
+    drawContainImage(ctx, image, layout.x, layout.y, layout.width, layout.height, scale,
+      layout.railX === 54 ? -8 + 16 * progress : 0,
+      layout.railX === 1018 ? 8 - 16 * progress : 0);
+  }
+  if (layout.railX !== null) {
+    ctx.fillStyle = "rgba(239,35,60,0.78)";
+    ctx.fillRect(layout.railX, 862, 6, 142);
+  }
 
   ctx.save();
-  ctx.globalAlpha = 0.72;
+  ctx.globalAlpha = 0.42;
   ctx.fillStyle = accent;
   ctx.beginPath();
-  ctx.moveTo(850, 0); ctx.lineTo(1080, 0); ctx.lineTo(1080, 215); ctx.closePath();
+  ctx.moveTo(998, 0); ctx.lineTo(1080, 0); ctx.lineTo(1080, 112); ctx.closePath();
   ctx.fill();
   ctx.restore();
+  if (progress < 0.42) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(780, 0, 300, 215);
+    ctx.clip();
+    const sweepX = 780 + easeInOut(progress / 0.42) * 380;
+    ctx.fillStyle = `rgba(239,35,60,${0.24 * (1 - progress / 0.42)})`;
+    ctx.beginPath();
+    ctx.moveTo(sweepX - 50, 0); ctx.lineTo(sweepX + 6, 0);
+    ctx.lineTo(sweepX + 120, 215); ctx.lineTo(sweepX + 64, 215);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
   ctx.fillStyle = accent;
   ctx.fillRect(72, 78, 11, 72);
   ctx.fillStyle = "#fff";
@@ -1435,7 +1466,7 @@ function drawEditorialImpactFrame(ctx, image, product, text, spec, frameIndex, f
   const lineHeight = headline.size * 1.02;
   ctx.save();
   ctx.globalAlpha = Math.max(0.35, entrance);
-  ctx.translate(72 + shake, 1208 + (1 - entrance) * 28);
+  ctx.translate(layout.headlineX + shake, 1208 + (1 - entrance) * 28);
   ctx.scale(punch, punch);
   ctx.fillStyle = "#fff";
   ctx.shadowColor = "rgba(0,0,0,0.58)";
