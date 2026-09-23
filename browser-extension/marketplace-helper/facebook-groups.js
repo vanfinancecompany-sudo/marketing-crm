@@ -437,7 +437,9 @@
         'a[href*="/posts/"], a[href*="/permalink/"], a[href*="multi_permalinks="], a[href*="story_fbid="]'
       )].filter(visible);
       evidenceLines = wantedReg ? registrationEvidenceLines(target.registration) : [];
-      if (resultAnchors.length || evidenceLines.length || contentUnavailable(document.body?.innerText || "")) break;
+      // Facebook renders generic navigation/post anchors before the actual search result.
+      // Do not treat those anchors as "results ready"; wait for registration evidence.
+      if (evidenceLines.length || contentUnavailable(document.body?.innerText || "")) break;
       await sleep(500);
     }
 

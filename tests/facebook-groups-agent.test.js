@@ -173,7 +173,7 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.16");
+  assert.equal(manifest.version, "1.2.17");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -736,6 +736,7 @@ test("helper inserts nothing when no verified Create Post dialog exists", async 
 test("acceptance checker waits for Facebook search results to render", () => {
   assert.match(groupsHelperSource, /waitStarted = Date\.now\(\)/);
   assert.match(groupsHelperSource, /Date\.now\(\) - waitStarted < 9000/);
+  assert.doesNotMatch(groupsHelperSource, /resultAnchors\.length \|\| evidenceLines\.length/);
   assert.match(groupsHelperSource, /evidenceLines = wantedReg \? registrationEvidenceLines/);
   assert.match(pageSource, /Math\.min\(25, awaitingGroups\.length \|\| 25\)/);
 });
