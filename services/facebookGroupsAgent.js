@@ -30,8 +30,8 @@ export const FACEBOOK_GROUP_PRODUCTS = Object.freeze({
 });
 
 const SEED_GROUPS = Object.freeze([
-  { name: "Vans Only for Sale Swaps & Wanted", url: "https://www.facebook.com/groups/360871827417794/", area: "UK", segment: "Van/Vehicle", finance: true, rent2buy: true, members: "75K", status: "Amber", score: 72 },
-  { name: "UK Car, Van, Truck, Motorbike & Parts Swaps & Sales", url: "https://www.facebook.com/groups/ukcarswaps/", area: "UK", segment: "Van/Vehicle", finance: true, rent2buy: true, members: "38K", status: "Amber", score: 70 },
+  { name: "Vans Only for Sale Swaps & Wanted", url: "https://www.facebook.com/groups/360871827417794/", area: "UK", segment: "Van/Vehicle", finance: true, rent2buy: false, members: "75K", status: "Amber", score: 72 },
+  { name: "UK Car, Van, Truck, Motorbike & Parts Swaps & Sales", url: "https://www.facebook.com/groups/ukcarswaps/", area: "UK", segment: "Van/Vehicle", finance: true, rent2buy: false, members: "38K", status: "Amber", score: 70 },
   { name: "Southampton-Portsmouth UK Online Sales", url: "https://www.facebook.com/groups/Southamptoncommunitysales", area: "Southampton / Portsmouth", segment: "Local Marketplace", finance: true, rent2buy: true, members: "62,676", status: "Amber", score: 78 },
   { name: "Buy And Sell-Portsmouth Havant Waterlooville!", url: "https://www.facebook.com/groups/296917307036835", area: "Portsmouth / Havant / Waterlooville", segment: "Local Marketplace", finance: true, rent2buy: true, members: "25,969", status: "Amber", score: 77 },
   { name: "Buy & Sell Portsmouth, Southampton & Waterlooville", url: "https://www.facebook.com/groups/leabaysouthampton", area: "Portsmouth / Southampton / Waterlooville", segment: "Local Marketplace", finance: true, rent2buy: true, members: "7,838", status: "Amber", score: 75 },
@@ -41,10 +41,10 @@ const SEED_GROUPS = Object.freeze([
   { name: "Weston Super Mare Sell And Buy No Rules", url: "https://www.facebook.com/groups/953513678002756", area: "Weston-super-Mare", segment: "Local Marketplace", finance: true, rent2buy: true, members: "27,775", status: "Green", score: 78 },
   { name: "Weston Super Mare Market Place", url: "https://www.facebook.com/groups/449987541693194", area: "Weston-super-Mare", segment: "Local Marketplace", finance: true, rent2buy: true, members: "6,907", status: "Green", score: 76 },
   { name: "Weston-Super-Mare Buy, Sell, Swap No Rules", url: "https://www.facebook.com/groups/682664651809559", area: "Weston-super-Mare", segment: "Local Marketplace", finance: true, rent2buy: true, members: "2,411", status: "Green", score: 74 },
-  { name: "Elite Trades Community", url: "https://www.facebook.com/groups/1821484254786832", area: "UK", segment: "Trades", finance: true, rent2buy: true, members: "170,000+", status: "Amber", score: 82 },
-  { name: "Couriers TV Facebook Group", url: "https://www.facebook.com/groups/2753926601567404", area: "UK", segment: "Courier/Delivery", finance: true, rent2buy: true, members: "300+ vetted couriers", status: "Green", score: 86 },
-  { name: "Transport Managers CPC UK", url: "https://facebook.com/groups/cpc.tm", area: "UK", segment: "Transport", finance: true, rent2buy: true, members: "33,000 reported", status: "Amber", score: 75 },
-  { name: "Great Small Biz Community", url: "https://www.facebook.com/search/groups/?q=Great%20Small%20Biz%20Community", area: "UK", segment: "Small Business", finance: true, rent2buy: true, members: "", status: "Amber", score: 64 },
+  { name: "Elite Trades Community", url: "https://www.facebook.com/groups/1821484254786832", area: "UK", segment: "Trades", finance: true, rent2buy: false, members: "170,000+", status: "Amber", score: 82 },
+  { name: "Couriers TV Facebook Group", url: "https://www.facebook.com/groups/2753926601567404", area: "UK", segment: "Courier/Delivery", finance: true, rent2buy: false, members: "300+ vetted couriers", status: "Green", score: 86 },
+  { name: "Transport Managers CPC UK", url: "https://facebook.com/groups/cpc.tm", area: "UK", segment: "Transport", finance: true, rent2buy: false, members: "33,000 reported", status: "Amber", score: 75 },
+  { name: "Great Small Biz Community", url: "https://www.facebook.com/search/groups/?q=Great%20Small%20Biz%20Community", area: "UK", segment: "Small Business", finance: true, rent2buy: false, members: "", status: "Amber", score: 64 },
 ]);
 
 const RENT2BUY_QUERY_BANK = Object.freeze([
@@ -123,8 +123,21 @@ function groupKey(group) {
     || clean(group?.name).toLowerCase();
 }
 
+const RENT2BUY_LOCALITY_PATTERN = /\b(?:southampton|eastleigh|chandlers? ford|romsey|totton|new forest|lymington|ringwood|fareham|gosport|portsmouth|havant|waterlooville|petersfield|winchester|andover|basingstoke|alton|farnborough|aldershot|fleet|hook|hampshire|salisbury|amesbury|bournemouth|poole|christchurch|dorchester|weymouth|wimborne|dorset|chichester|bognor regis|worthing|brighton|horsham|crawley|west sussex|guildford|woking|camberley|farnham|surrey|reading|bracknell|maidenhead|newbury|berkshire|swindon|chippenham|trowbridge|warminster|wiltshire|bath|bristol|weston(?:-super-mare| super mare)|somerset|oxford|didcot|abingdon|oxfordshire|london|croydon|kingston|richmond|hounslow|slough)\b/i;
+
+export function isRent2BuyLocalGroup(group) {
+  const text = clean([
+    group?.name,
+    group?.area,
+    group?.context,
+    group?.query,
+    group?.ruleEvidence,
+  ].filter(Boolean).join(" "));
+  return RENT2BUY_LOCALITY_PATTERN.test(text);
+}
+
 function productAllowed(group, productKey) {
-  if (productKey === "rent2buy") return Boolean(group?.rent2buy);
+  if (productKey === "rent2buy") return Boolean(group?.rent2buy) && isRent2BuyLocalGroup(group);
   return Boolean(group?.finance);
 }
 
@@ -398,7 +411,11 @@ export function mergeDiscoveredGroups(groups, candidates, productKey) {
     };
     next.score = calculateScore(next, productKey);
     return next;
-  }).filter((item) => item.url && item.name);
+  }).filter((item) =>
+    item.url &&
+    item.name &&
+    (productKey !== "rent2buy" || isRent2BuyLocalGroup(item))
+  );
   return mergeFacebookGroups(groups, incoming);
 }
 
