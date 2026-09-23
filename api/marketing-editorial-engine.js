@@ -16,6 +16,7 @@ import {
   isApprovedInternalUrl,
 } from "../lib/internalLinking.js";
 import { refreshArticleInternalLinks } from "../lib/internalLinkingService.js";
+import { resolveAiOperationModel } from "../lib/priorityAiModelPolicy.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const CATEGORY_KEYS = Object.keys(EDITORIAL_CATEGORY_WEIGHTS);
@@ -240,10 +241,10 @@ function data(result, fallback) {
   return result.data;
 }
 
-function aiConfiguration() {
+function aiConfiguration(environment = process.env) {
   return {
-    configured: Boolean(clean(process.env.OPENAI_API_KEY, 10000)),
-    model: clean(process.env.OPENAI_MODEL, 200) || "gpt-4.1-mini",
+    configured: Boolean(clean(environment.OPENAI_API_KEY, 10000)),
+    model: resolveAiOperationModel(environment, "editorial"),
   };
 }
 
