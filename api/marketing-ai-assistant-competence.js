@@ -95,6 +95,7 @@ import {
   buildAssistantResponseModelParameters,
   chooseAssistantModel,
 } from "../lib/aiAssistantModelRouter.js";
+import { resolveAiOperationModel } from "../lib/priorityAiModelPolicy.js";
 import {
   LIVE_JASMINE_PERSONA,
   controlledCompositionInstructions,
@@ -197,7 +198,7 @@ function openAIErrorMessage(payload, response) {
 export async function requestOpenAIAnswer(prompt, environment = process.env, fetchImplementation = fetch) {
   const apiKey = clean(environment.OPENAI_API_KEY);
   if (!apiKey) throw new ApiError(500, "OPENAI_API_KEY is not configured.", "configuration", { openai_api_key_present: false });
-  const model = clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini";
+  const model = resolveAiOperationModel(environment, "competence_bulk");
   const response = await fetchImplementation("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -302,7 +303,7 @@ export async function testCompetenceAnswer(supabase, body) {
   const generationStart = performance.now();
   const prompt = await runStage("Prompt creation", { ...context, category_filter: boundedKnowledge.categoryFilter, source_count: sources.length }, async () => buildCompetencePrompt({ question, messages, sources, sections: boundedKnowledge.sections, settings: knowledge.settings, productContext, comparison }));
   if (!prompt.includes(`# Customer question\n${question}\n`)) throw new ApiError(500, "Generated prompt does not contain the current submitted question.", "validation");
-  const model = clean(process.env.OPENAI_MODEL, 200) || "gpt-4.1-mini";
+  const model = resolveAiOperationModel(process.env, "competence_bulk");
   const requested = await runStage("OpenAI request", { ...context, model, openai_api_key_present: Boolean(clean(process.env.OPENAI_API_KEY)), source_count: sources.length }, () => requestOpenAIAnswer(prompt));
   const generated = await runStage("Structured response parsing", { ...context, model: requested.model }, async () => parseOpenAIAnswer(requested.payload, requested.model));
   const generationTime = elapsed(generationStart);
