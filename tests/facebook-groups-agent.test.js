@@ -12,6 +12,7 @@ import {
   loadFacebookGroups,
   markGroupAccepted,
   markGroupPostStatus,
+  mergeDiscoveredGroups,
   markGroupPosted,
   normalizeFacebookGroupUrl,
   preserveFacebookGroupCaption,
