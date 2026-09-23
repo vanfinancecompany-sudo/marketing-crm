@@ -173,7 +173,7 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.20");
+  assert.equal(manifest.version, "1.2.21");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -731,6 +731,14 @@ test("helper inserts nothing when no verified Create Post dialog exists", async 
       String(panel.innerHTML).includes("Could not verify Facebook group post composer. Nothing was inserted.")
     ),
   );
+});
+
+test("Van Finance acceptance checker recognises a visible branded advert image even without an article wrapper", () => {
+  assert.match(groupsHelperSource, /function visibleFinanceAdvertForExactSearch\(registration\)/);
+  assert.match(groupsHelperSource, /van\\s\+finance\\s\+company/i);
+  assert.match(groupsHelperSource, /rect\.width >= 220 && rect\.height >= 140/);
+  assert.match(groupsHelperSource, /matchMethod = "exact-search-finance-advert"/);
+  assert.match(groupsHelperSource, /visibleFinanceAdvert \|\| visibleAdvert \|\| visibleResult/);
 });
 
 test("acceptance checker recognises a visible advert on the exact registration search", () => {
