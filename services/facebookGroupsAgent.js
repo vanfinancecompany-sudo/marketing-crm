@@ -15,9 +15,13 @@ export const GROUP_POST_STATUS_EVENT = "VFC_GROUP_POST_STATUS_EVENT";
 export const GROUP_POST_STATUS_EVENT_ACK = "VFC_GROUP_POST_STATUS_EVENT_ACK";
 export const FACEBOOK_HELPER_PING = "VFC_FACEBOOK_HELPER_PING";
 export const FACEBOOK_HELPER_PONG = "VFC_FACEBOOK_HELPER_PONG";
+export const GROUP_RECOVERY_REQUEST = "VFC_GROUP_RECOVERY_REQUEST";
+export const GROUP_RECOVERY_RESPONSE = "VFC_GROUP_RECOVERY_RESPONSE";
 
 const GROUP_STORAGE_KEY = "marketingFacebookGroupsAgentV1";
 const DISCOVERY_ROTATION_KEY = "marketingFacebookGroupDiscoveryRotationV1";
+const GROUP_STATE_ENDPOINT = "/api/facebook-groups-state";
+let remoteWriteChain = Promise.resolve();
 
 export const FACEBOOK_GROUP_PRODUCTS = Object.freeze({
   finance: "finance",
@@ -233,9 +237,62 @@ export function loadFacebookGroups() {
   }
 }
 
-export function saveFacebookGroups(groups) {
+export async function fetchFacebookGroupsState() {
+  if (typeof fetch !== "function") return [];
+  const response = await fetch(GROUP_STATE_ENDPOINT, {
+    method: "GET",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`Facebook group state returned HTTP ${response.status}`);
+  const payload = await response.json();
+  return Array.isArray(payload?.groups) ? payload.groups : [];
+}
+
+export async function persistFacebookGroupsRemote(groups) {
+  if (typeof fetch !== "function") return { ok: false, skipped: true };
+  const response = await fetch(GROUP_STATE_ENDPOINT, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ groups: Array.isArray(groups) ? groups : [] }),
+    cache: "no-store",
+    keepalive: true,
+  });
+  if (!response.ok) throw new Error(`Facebook group state save returned HTTP ${response.status}`);
+  return response.json();
+}
+
+function queueRemoteFacebookGroupsSave(groups) {
+  const snapshot = Array.isArray(groups) ? groups.map((group) => ({ ...group })) : [];
+  remoteWriteChain = remoteWriteChain
+    .catch(() => {})
+    .then(() => persistFacebookGroupsRemote(snapshot));
+  remoteWriteChain.catch((error) => {
+    console.warn("Could not persist Facebook group state remotely.", error);
+  });
+  return remoteWriteChain;
+}
+
+export async function hydrateFacebookGroups(localGroups = loadFacebookGroups()) {
+  try {
+    const remoteGroups = await fetchFacebookGroupsState();
+    const merged = remoteGroups.length
+      ? mergeFacebookGroups(localGroups, remoteGroups)
+      : mergeFacebookGroups([], localGroups);
+    saveFacebookGroups(merged, { remote: false });
+    queueRemoteFacebookGroupsSave(merged);
+    return merged;
+  } catch (error) {
+    console.warn("Could not load persistent Facebook group state; using browser cache.", error);
+    return localGroups;
+  }
+}
+
+export function saveFacebookGroups(groups, options = {}) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(GROUP_STORAGE_KEY, JSON.stringify(groups || []));
+  const snapshot = Array.isArray(groups) ? groups : [];
+  window.localStorage.setItem(GROUP_STORAGE_KEY, JSON.stringify(snapshot));
+  if (options.remote !== false) queueRemoteFacebookGroupsSave(snapshot);
 }
 
 export function mergeFacebookGroups(existing, incoming) {
@@ -403,6 +460,86 @@ export function getFacebookHelperStatus(timeoutMs = 2500) {
       capabilities: [],
       hostname: "",
     }));
+}
+
+export function requestFacebookGroupRecoverySnapshot(timeoutMs = 4000) {
+  const id = requestId("group-recovery");
+  return messageRoundTrip(GROUP_RECOVERY_REQUEST, GROUP_RECOVERY_RESPONSE, { id }, timeoutMs);
+}
+
+function recoveryGroupFromMonitor(item = {}) {
+  const url = normalizeFacebookGroupUrl(item.groupUrl || item.url || "");
+  if (!url) return null;
+  const productKey = clean(item.productKey || "");
+  return {
+    id: `recovered-${groupKey({ url }).replace(/[^a-z0-9]+/g, "-").slice(0, 80)}`,
+    name: clean(item.groupName || item.name || "Recovered Facebook group"),
+    url,
+    area: clean(item.area || ""),
+    segment: clean(item.segment || "Recovered"),
+    finance: productKey ? productKey === "finance" : true,
+    rent2buy: productKey ? productKey === "rent2buy" : true,
+    members: "",
+    privacy: "",
+    status: "Amber",
+    seedScore: 50,
+    score: 50,
+    source: "extension-recovery",
+    canPost: true,
+    joined: true,
+    membershipPending: false,
+    approvalRequired: null,
+    linksAllowed: null,
+    ruleEvidence: "",
+    lastCheckedAt: "",
+    lastPostedAt: item.postedAt || "",
+    lastAcceptedAt: "",
+    lastPostCheckAt: item.lastCheckedAt || "",
+    postStatus: item.lastResult === "pending" ? "pending" : "awaiting",
+    pipeline: "testing",
+    repeatDays: 7,
+    pendingRegistration: clean(item.registration || ""),
+    postCount: 1,
+    acceptedPostCount: 0,
+    rejectedPostCount: 0,
+    archived: false,
+    archiveReason: "",
+    leads: 0,
+  };
+}
+
+export function recoverFacebookGroupsFromSnapshot(groups, snapshot = {}) {
+  let recovered = mergeFacebookGroups([], groups || []);
+  const monitorItems = Array.isArray(snapshot.approvalItems) ? snapshot.approvalItems : [];
+  const candidates = [...monitorItems];
+  if (snapshot.lastPostEvent) candidates.push(snapshot.lastPostEvent);
+
+  for (const item of candidates) {
+    const next = recoveryGroupFromMonitor(item);
+    if (!next) continue;
+    const key = groupKey(next);
+    const existing = recovered.find((group) => groupKey(group) === key);
+    if (existing && ["proven", "archived"].includes(groupPipeline(existing))) continue;
+    recovered = mergeFacebookGroups(recovered, [next]);
+  }
+
+  const statusEvent = snapshot.lastStatusEvent || null;
+  if (statusEvent?.groupUrl || statusEvent?.url) {
+    const fallback = recoveryGroupFromMonitor(statusEvent);
+    if (fallback && !recovered.some((group) => groupKey(group) === groupKey(fallback))) {
+      recovered = mergeFacebookGroups(recovered, [fallback]);
+    }
+    if (statusEvent.accepted) {
+      recovered = markGroupAccepted(recovered, statusEvent.groupUrl || statusEvent.url, {
+        acceptedAt: statusEvent.checkedAt,
+        registration: statusEvent.registration,
+      });
+    } else if (statusEvent.declined || statusEvent.unavailable) {
+      recovered = markGroupPostStatus(recovered, statusEvent);
+    }
+  }
+
+  return recovered;
 }
 
 export function startFacebookGroupDiscovery(productKey, options = {}) {
