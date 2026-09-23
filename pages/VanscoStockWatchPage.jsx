@@ -459,10 +459,10 @@ export default function VanscoStockWatchPage() {
   const priceDifferenceRecords = useMemo(() => selectedPipeline === "finance" ? buildFinancePriceDifferences(currentRawRecords, activeLocalVehicles) : [], [activeLocalVehicles, currentRawRecords, selectedPipeline]);
 
   const currentVanscoRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => record.isCurrentlyOnVansco !== false).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);
-  const dealerKitAccountedRegistrationSet = useMemo(() => new Set(currentRawRecords
-    .filter((record) => record.isCurrentlyOnVansco !== false || isReservedLikeStatus(record.sourceStatus))
-    .map((record) => normalizeWatchRegistration(record.registration))
-    .filter(Boolean)), [currentRawRecords]);
+  const dealerKitAccountedRegistrationSet = useMemo(() => new Set([
+    ...currentVanscoRegistrationSet,
+    ...currentRawRecords.filter((record) => isReservedLikeStatus(record.sourceStatus)).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean),
+  ]), [currentRawRecords, currentVanscoRegistrationSet]);
   const localNotVanscoRecords = useMemo(() => {
     if (!dealerKitSnapshotComplete) return [];
     return dedupeLocalVehiclesByRegistration(activeLocalVehicles)
