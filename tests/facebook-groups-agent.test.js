@@ -72,7 +72,10 @@ test("Facebook group state persists remotely without deleting browser recovery d
   assert.match(pageSource, /hydrateFacebookGroups\(loadFacebookGroups\(\)\)/);
   assert.match(stateApiSource, /getSupabaseServiceAdmin/);
   assert.match(stateApiSource, /upsert\(rows, \{ onConflict: "group_key" \}\)/);
+  assert.match(stateApiSource, /suspicious reduction/i);
+  assert.match(stateApiSource, /facebook_group_state_backups/);
   assert.match(stateMigrationSource, /create table if not exists public\.facebook_group_state/);
+  assert.match(stateMigrationSource, /create table if not exists public\.facebook_group_state_backups/);
   assert.match(stateMigrationSource, /enable row level security/);
   assert.match(stateMigrationSource, /revoke all .* anon, authenticated/);
 });
