@@ -321,13 +321,16 @@ async function prepareImagePpm(imagePath, ppmPath) {
   return readPpm(ppmPath);
 }
 
-async function writeMotionImage(imagePath, outputPath) {
+async function writeMotionImage(imagePath, outputPath, templateKey) {
+  const editorial = templateKey === "editorialImpact";
   await runFfmpeg([
     "-y",
     "-i",
     imagePath,
     "-vf",
-    `scale=${IMAGE_WIDTH}:${IMAGE_HEIGHT}:force_original_aspect_ratio=decrease,pad=${IMAGE_WIDTH}:${IMAGE_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=0x101014,setsar=1,format=rgba`,
+    editorial
+      ? "scale=1020:740:force_original_aspect_ratio=decrease,pad=1080:800:(ow-iw)/2:(oh-ih)/2:color=0x0b1019,setsar=1,format=rgba"
+      : `scale=${IMAGE_WIDTH}:${IMAGE_HEIGHT}:force_original_aspect_ratio=decrease,pad=${IMAGE_WIDTH}:${IMAGE_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=0x101014,setsar=1,format=rgba`,
     "-frames:v",
     "1",
     outputPath,
@@ -658,7 +661,7 @@ export function renderEditorialImpactSvg({ frameNumber, frameCount = 10, frame, 
   const eyebrow = safeDisplayText(frame.eyebrow || defaults.productName).toUpperCase();
   const headline = editorialVectorLines(frame.headline || defaults.hook, 930, finalCta ? 3 : 4,
     finalCta ? 118 : 106, 62);
-  const headlineY = finalCta ? 1180 : 1208;
+  const headlineY = 1208;
   const headlineBlock = headline.lines.map((line, index) => svgPathText(line, {
     x: 72, y: headlineY + index * headline.size * 1.02, size: headline.size,
   })).join("");
@@ -673,53 +676,26 @@ export function renderEditorialImpactSvg({ frameNumber, frameCount = 10, frame, 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
   <defs>
-    <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#020409" stop-opacity="0.72"/>
-      <stop offset="0.32" stop-color="#030509" stop-opacity="${finalCta ? "0.12" : "0.02"}"/>
-      <stop offset="0.53" stop-color="#020409" stop-opacity="0.24"/>
-      <stop offset="0.73" stop-color="#030408" stop-opacity="0.88"/>
-      <stop offset="1" stop-color="#030408" stop-opacity="0.99"/>
-    </linearGradient>
-    <linearGradient id="side" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#020409" stop-opacity="0.48"/>
-      <stop offset="1" stop-color="#020409" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
-      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.12"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="photoFade" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
-      <stop offset="0.18" stop-color="#ffffff" stop-opacity="0"/>
-      <stop offset="0.3" stop-color="#ffffff" stop-opacity="1"/>
-      <stop offset="0.73" stop-color="#ffffff" stop-opacity="1"/>
-      <stop offset="0.9" stop-color="#ffffff" stop-opacity="0"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
-    </linearGradient>
-    <mask id="photoMask" maskUnits="userSpaceOnUse" x="0" y="305" width="1080" height="805">
-      <rect x="0" y="305" width="1080" height="805" fill="url(#photoFade)"/>
-    </mask>
+    <radialGradient id="ambient">
+      <stop offset="0" stop-color="${accent}" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="${accent}" stop-opacity="0"/>
+    </radialGradient>
     <filter id="buttonGlow" x="-15%" y="-60%" width="130%" height="220%">
       <feGaussianBlur stdDeviation="32"/>
     </filter>
-    <filter id="bgBlur" x="-10%" y="-10%" width="120%" height="120%">
-      <feGaussianBlur stdDeviation="24"/>
-    </filter>
   </defs>
   <rect width="${WIDTH}" height="${HEIGHT}" fill="#08090d"/>
-  <image href="${imageHref}" x="0" y="0" width="${WIDTH}" height="${HEIGHT}" preserveAspectRatio="xMidYMid slice" filter="url(#bgBlur)"/>
-  <image href="${imageHref}" x="0" y="305" width="${WIDTH}" height="805" preserveAspectRatio="xMidYMid meet" opacity="0.96" mask="url(#photoMask)"/>
-  <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#shade)"/>
-  <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#side)"/>
-  <path d="M830 0 H1080 V410 Z" fill="${accent}" opacity="0.72"/>
+  <ellipse cx="540" cy="690" rx="820" ry="900" fill="url(#ambient)"/>
+  <rect x="0" y="250" width="1080" height="800" fill="#0b1019"/>
+  <image href="${imageHref}" x="30" y="280" width="1020" height="740" preserveAspectRatio="xMidYMid meet"/>
+  <path d="M850 0 H1080 V215 Z" fill="${accent}" opacity="0.72"/>
   <rect x="72" y="78" width="11" height="72" fill="${accent}"/>
   ${svgPathText(header, { x: 108, y: 124, size: Math.min(36, Math.max(24, 680 / Math.max(1, measureVectorText(header, 1)))), fill: "#ffffff" })}
   ${svgPathText(label, { x: 1002 - measureVectorText(label, 31), y: 191, size: 31, fill: "#eeeeee" })}
   <rect x="72" y="219" width="936" height="4" fill="#ffffff" opacity="0.24"/>
   <rect x="72" y="219" width="${progressWidth}" height="4" fill="${accent}"/>
-  ${svgPathText(eyebrow, { x: 72, y: finalCta ? 1040 : 1102, size: Math.min(32, Math.max(23, 880 / Math.max(1, measureVectorText(eyebrow, 1)))), fill: "#f4f4f5" })}
-  <rect x="72" y="${finalCta ? 1062 : 1124}" width="70" height="7" fill="${accent}"/>
+  ${svgPathText(eyebrow, { x: 72, y: 1102, size: Math.min(32, Math.max(23, 880 / Math.max(1, measureVectorText(eyebrow, 1)))), fill: "#f4f4f5" })}
+  <rect x="72" y="1112" width="70" height="6" fill="${accent}"/>
   ${headlineBlock}
   ${finalCta ? `
     <rect x="72" y="1552" width="936" height="153" rx="24" fill="${accent}" opacity="0.58" filter="url(#buttonGlow)"/>
@@ -731,7 +707,6 @@ export function renderEditorialImpactSvg({ frameNumber, frameCount = 10, frame, 
     ${svgPathText(support, { x: 72, y: 1660, size: Math.min(42, Math.max(28, 930 / Math.max(1, measureVectorText(support, 1)))), fill: "#e9e9eb" })}
     <rect x="72" y="1702" width="936" height="2" fill="${accent}"/>`}
   ${svgPathText(finalCta ? support : website, { x: 72, y: 1809, size: Math.min(35, Math.max(24, 930 / Math.max(1, measureVectorText(finalCta ? support : website, 1)))), fill: "#dedee0" })}
-  <path d="M750 260 L1030 260 L390 1780 L110 1780 Z" fill="url(#sweep)" opacity="0.3"/>
 </svg>`;
 }
 
@@ -891,7 +866,9 @@ function buildSceneClipArgs({ framePath, image, clipPath, sceneDuration, sceneIn
     ? `,eq=brightness='0.28*${washAmount}':contrast='1+0.035*${washAmount}':saturation='1-0.08*${washAmount}':eval=frame`
     : "";
   const filter = templateKey === "editorialImpact" ? [
-    `[0:v]fps=${fps},format=rgba,zoompan=z='1.018+0.055*exp(-on/7)+0.02*on/${Math.max(1, frameTotal - 1)}':x='(iw-iw/zoom)/2+sin(on*0.75)*6*exp(-on/7)':y='(ih-ih/zoom)/2':d=${frameTotal}:s=${WIDTH}x${HEIGHT}:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=yuv420p${lightFadeFilter}[vout]`,
+    `[0:v]fps=${fps},format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[base]`,
+    `[1:v]format=rgba,setsar=1,zoompan=z='1+0.018*on/${Math.max(1, frameTotal - 1)}':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2':d=${frameTotal}:s=1080x800:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[photo]`,
+    `[base][photo]overlay=0:250:shortest=1,format=yuv420p[vout]`,
   ].join(";") : [
     `[0:v]fps=${fps},format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[base]`,
     `[1:v]format=rgba,setsar=1,zoompan=z='${zoom}':x='${x}':y='${y}':d=${frameTotal}:s=${IMAGE_WIDTH}x${IMAGE_HEIGHT}:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[photo]`,
@@ -948,6 +925,10 @@ function buildSceneClipArgs({ framePath, image, clipPath, sceneDuration, sceneIn
 }
 
 async function renderSceneClip(options) {
+  if (options.templateKey === "editorialImpact") {
+    await runFfmpeg(buildSceneClipArgs({ ...options, lightFade: false }));
+    return { lightFadeApplied: false };
+  }
   try {
     await runFfmpeg(buildSceneClipArgs({ ...options, lightFade: true }));
     return { lightFadeApplied: true };
@@ -1197,7 +1178,7 @@ export default async function handler(req, res) {
         const motionImages = [];
         for (let index = 0; index < preparedImages.length; index += 1) {
           const motionImagePath = path.join(workDir, `motion-source-${index + 1}.png`);
-          const motionImage = await writeMotionImage(preparedImages[index].filePath, motionImagePath);
+          const motionImage = await writeMotionImage(preparedImages[index].filePath, motionImagePath, templateKey);
           motionImagePaths.push(motionImagePath);
           motionImages.push(motionImage);
         }

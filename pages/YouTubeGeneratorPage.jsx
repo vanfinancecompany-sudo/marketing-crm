@@ -1386,71 +1386,30 @@ function editorialLines(ctx, value, maxWidth, maxLines, initialSize, minimumSize
   return { lines: lines.slice(0, maxLines), size: minimumSize };
 }
 
-const editorialPhotoLayers = new WeakMap();
-
-function editorialPhotoLayer(image) {
-  if (editorialPhotoLayers.has(image)) return editorialPhotoLayers.get(image);
-  const layer = document.createElement("canvas");
-  layer.width = SHORT_WIDTH;
-  layer.height = 805;
-  const layerContext = layer.getContext("2d");
-  drawContainImage(layerContext, image, 0, 0, layer.width, layer.height, 1.04);
-  layerContext.globalCompositeOperation = "destination-in";
-  const fade = layerContext.createLinearGradient(0, 0, 0, layer.height);
-  fade.addColorStop(0, "rgba(0,0,0,0)");
-  fade.addColorStop(0.18, "rgba(0,0,0,0)");
-  fade.addColorStop(0.3, "rgba(0,0,0,1)");
-  fade.addColorStop(0.73, "rgba(0,0,0,1)");
-  fade.addColorStop(0.9, "rgba(0,0,0,0)");
-  fade.addColorStop(1, "rgba(0,0,0,0)");
-  layerContext.fillStyle = fade;
-  layerContext.fillRect(0, 0, layer.width, layer.height);
-  editorialPhotoLayers.set(image, layer);
-  return layer;
-}
-
 function drawEditorialImpactFrame(ctx, image, product, text, spec, frameIndex, frameCount, progress) {
   const finalCta = spec?.type === "finalCta";
   const display = spec?.display || {};
   const entrance = easeInOut(Math.min(1, progress / 0.22));
-  const punch = 1 + 0.045 * Math.exp(-progress * 13) * Math.cos(progress * 31);
-  const shake = Math.sin(progress * 75) * 5 * Math.exp(-progress * 14);
+  const punch = 1 + 0.025 * Math.exp(-progress * 13) * Math.cos(progress * 31);
+  const shake = Math.sin(progress * 50) * 2 * Math.exp(-progress * 18);
   const accent = product.accent;
 
   ctx.fillStyle = "#08090d";
   ctx.fillRect(0, 0, SHORT_WIDTH, SHORT_HEIGHT);
-  if (image) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, 0, SHORT_WIDTH, SHORT_HEIGHT);
-    ctx.clip();
-    ctx.filter = "blur(28px)";
-    drawCoverImage(ctx, image, 0, 0, SHORT_WIDTH, SHORT_HEIGHT, 1.07 + progress * 0.045,
-      Math.sin((frameIndex + progress) * 1.2) * 12, -18 * progress);
-    ctx.filter = "none";
-    ctx.globalAlpha = 0.96;
-    ctx.drawImage(editorialPhotoLayer(image), 0, 305);
-    ctx.restore();
-  }
-  const shade = ctx.createLinearGradient(0, 0, 0, SHORT_HEIGHT);
-  shade.addColorStop(0, "rgba(2,4,9,0.70)");
-  shade.addColorStop(0.32, finalCta ? "rgba(3,5,9,0.12)" : "rgba(3,5,9,0.02)");
-  shade.addColorStop(0.53, "rgba(2,4,9,0.24)");
-  shade.addColorStop(0.73, "rgba(3,4,8,0.88)");
-  shade.addColorStop(1, "rgba(3,4,8,0.99)");
-  ctx.fillStyle = shade;
+  const ambient = ctx.createRadialGradient(540, 690, 80, 540, 690, 900);
+  ambient.addColorStop(0, "rgba(239,35,60,0.08)");
+  ambient.addColorStop(1, "rgba(239,35,60,0)");
+  ctx.fillStyle = ambient;
   ctx.fillRect(0, 0, SHORT_WIDTH, SHORT_HEIGHT);
-  const sideShade = ctx.createLinearGradient(0, 0, 800, 0);
-  sideShade.addColorStop(0, "rgba(2,4,9,0.48)");
-  sideShade.addColorStop(1, "rgba(2,4,9,0)");
-  ctx.fillStyle = sideShade;
-  ctx.fillRect(0, 0, SHORT_WIDTH, SHORT_HEIGHT);
+  ctx.fillStyle = "#0b1019";
+  ctx.fillRect(0, 250, SHORT_WIDTH, 800);
+  if (image) drawContainImage(ctx, image, 30, 280, 1020, 740, 1);
 
   ctx.save();
   ctx.globalAlpha = 0.72;
   ctx.fillStyle = accent;
   ctx.beginPath();
-  ctx.moveTo(830, 0); ctx.lineTo(1080, 0); ctx.lineTo(1080, 410); ctx.closePath();
+  ctx.moveTo(850, 0); ctx.lineTo(1080, 0); ctx.lineTo(1080, 215); ctx.closePath();
   ctx.fill();
   ctx.restore();
   ctx.fillStyle = accent;
@@ -1468,17 +1427,15 @@ function drawEditorialImpactFrame(ctx, image, product, text, spec, frameIndex, f
   ctx.fillStyle = accent;
   ctx.fillRect(72, 219, 936 * (frameIndex + 1) / frameCount, 4);
 
-  ctx.save();
-  ctx.globalAlpha = Math.max(0.35, entrance);
-  ctx.translate(shake, (1 - entrance) * 48);
   ctx.fillStyle = accent;
-  ctx.fillRect(72, finalCta ? 1062 : 1124, 70, 7);
+  ctx.fillRect(72, 1112, 70, 6);
   ctx.fillStyle = "#f4f4f5";
-  drawFitText(ctx, display.eyebrow || product.brand, 72, finalCta ? 1040 : 1102, 880, 32, 23, 900);
+  drawFitText(ctx, display.eyebrow || product.brand, 72, 1102, 880, 32, 23, 900);
   const headline = editorialLines(ctx, display.headline || text.hook, 930, finalCta ? 3 : 4, finalCta ? 118 : 106, 62);
   const lineHeight = headline.size * 1.02;
-  const headlineTop = finalCta ? 1180 : 1208;
-  ctx.translate(72, headlineTop);
+  ctx.save();
+  ctx.globalAlpha = Math.max(0.35, entrance);
+  ctx.translate(72 + shake, 1208 + (1 - entrance) * 28);
   ctx.scale(punch, punch);
   ctx.fillStyle = "#fff";
   ctx.shadowColor = "rgba(0,0,0,0.58)";
@@ -1493,9 +1450,18 @@ function drawEditorialImpactFrame(ctx, image, product, text, spec, frameIndex, f
     ctx.shadowBlur = 42;
     fillRoundRect(ctx, 72, 1552, 936, 153, 24, accent);
     ctx.restore();
+    ctx.save();
+    drawRoundRect(ctx, 72, 1552, 936, 153, 24);
+    ctx.clip();
+    drawLightSweep(ctx, 72, 1552, 936, 153, Math.min(1, progress * 0.8), 0.12);
+    ctx.restore();
     ctx.fillStyle = "#fff";
     ctx.textAlign = "left";
-    drawFitText(ctx, display.cta || text.cta, 110, 1650, 740, 58, 34, 950);
+    ctx.save();
+    ctx.translate(110, 1650);
+    ctx.scale(1 + 0.015 * Math.exp(-progress * 12), 1 + 0.015 * Math.exp(-progress * 12));
+    drawFitText(ctx, display.cta || text.cta, 0, 0, 740, 58, 34, 950);
+    ctx.restore();
     ctx.beginPath();
     ctx.arc(930, 1628, 51, 0, Math.PI * 2);
     ctx.fillStyle = "rgba(0,0,0,0.18)";
@@ -1514,11 +1480,6 @@ function drawEditorialImpactFrame(ctx, image, product, text, spec, frameIndex, f
   drawFitText(ctx, finalCta ? display.subline || productWebsiteDisplay(product) : productWebsiteDisplay(product),
     72, 1809, 930, 35, 24, 900);
 
-  if (progress < 0.26) {
-    ctx.fillStyle = `rgba(255,255,255,${(1 - progress / 0.26) * 0.16})`;
-    ctx.fillRect(0, 0, SHORT_WIDTH, SHORT_HEIGHT);
-  }
-  drawLightSweep(ctx, 0, 0, SHORT_WIDTH, SHORT_HEIGHT, Math.min(1, progress * 1.35), 0.1);
 }
 
 function drawYouTubeFrame(
