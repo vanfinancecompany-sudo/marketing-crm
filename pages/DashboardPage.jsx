@@ -34,6 +34,10 @@ const WEEKDAYS = [
 const ACTIVITY_UNITS = {
   van_finance_facebook_post: "posted",
   rent2buy_facebook_post: "posted",
+  van_finance_groups_post: "posted",
+  rent2buy_groups_post: "posted",
+  van_finance_marketplace_post: "advertised",
+  rent2buy_marketplace_post: "advertised",
   van_finance_reel: "generated",
   rent2buy_reel: "generated",
   emails_sent: "sent",
@@ -87,10 +91,27 @@ function TargetFields({ value, onChange }) {
   );
 }
 
-function ActivityCard({ metric }) {
+const ACTIVITY_NAVIGATION = {
+  van_finance_groups_post: "Van Finance Groups & Classifieds",
+  rent2buy_groups_post: "Rent2Buy Facebook Groups",
+  van_finance_marketplace_post: "Van Finance Marketplace",
+  rent2buy_marketplace_post: "Rent2Buy Marketplace",
+};
+
+function ActivityCard({ metric, onOpen }) {
+  const linked = Boolean(onOpen);
   return (
     <article
-      className={`operations-activity-card${metric.remaining === 0 ? " is-complete" : ""}`}
+      className={`operations-activity-card${metric.remaining === 0 ? " is-complete" : ""}${linked ? " is-linked" : ""}`}
+      role={linked ? "button" : undefined}
+      tabIndex={linked ? 0 : undefined}
+      onClick={onOpen}
+      onKeyDown={linked ? (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      } : undefined}
     >
       <div className="operations-activity-card__heading">
         <span>{ACTIVITY_LABELS[metric.type]}</span>
@@ -295,9 +316,16 @@ export default function DashboardPage({ onNavigate }) {
       {error ? <div className="notice notice--error">{error}</div> : null}
       {message ? <div className="notice notice--success">{message}</div> : null}
       <section className="operations-activity-grid">
-        {metrics.map((metric) => (
-          <ActivityCard key={metric.type} metric={metric} />
-        ))}
+        {metrics.map((metric) => {
+          const destination = ACTIVITY_NAVIGATION[metric.type];
+          return (
+            <ActivityCard
+              key={metric.type}
+              metric={metric}
+              onOpen={destination ? () => onNavigate?.(destination) : undefined}
+            />
+          );
+        })}
       </section>
       <AIVisibilityWidget onOpen={() => onNavigate?.("AI Visibility")} />
       <Ga4PipelinePanel />
