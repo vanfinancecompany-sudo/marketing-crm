@@ -629,7 +629,118 @@ async function writeSvgFrame(filePath, svg) {
   await fs.writeFile(filePath, rendered.asPng());
 }
 
-async function writeVehicleFrame(filePath, { frameNumber, frame, image, defaults, templateKey, headerText, includePhoto = true, includeSweep = true, includeCtaButton = true }) {
+function editorialVectorLines(value, maxWidth, maxLines, startingSize, minimumSize) {
+  const words = safeDisplayText(value).toUpperCase().split(" ").filter(Boolean);
+  for (let size = startingSize; size >= minimumSize; size -= 4) {
+    const lines = [];
+    let current = "";
+    for (const word of words) {
+      const next = current ? `${current} ${word}` : word;
+      if (current && measureVectorText(next, size) > maxWidth) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = next;
+      }
+    }
+    if (current) lines.push(current);
+    if (lines.length <= maxLines && lines.every((line) => measureVectorText(line, size) <= maxWidth)) {
+      return { lines, size };
+    }
+  }
+  return { lines: splitVectorLines(value, maxWidth, minimumSize, maxLines), size: minimumSize };
+}
+
+export function renderEditorialImpactSvg({ frameNumber, frameCount = 10, frame, image, defaults, headerText }) {
+  const finalCta = frame.finalCta;
+  const accent = "#ef233c";
+  const imageHref = imageDataUri(image);
+  const eyebrow = safeDisplayText(frame.eyebrow || defaults.productName).toUpperCase();
+  const headline = editorialVectorLines(frame.headline || defaults.hook, 930, finalCta ? 3 : 4,
+    finalCta ? 118 : 106, 62);
+  const headlineY = finalCta ? 1180 : 1208;
+  const headlineBlock = headline.lines.map((line, index) => svgPathText(line, {
+    x: 72, y: headlineY + index * headline.size * 1.02, size: headline.size,
+  })).join("");
+  const support = safeDisplayText(frame.support || defaults.website).toUpperCase();
+  const button = safeDisplayText(frame.button || defaults.finalButton).toUpperCase();
+  const header = safeDisplayText(headerText || defaults.productName).toUpperCase();
+  const website = safeDisplayText(defaults.website).toUpperCase().replace(/^HTTPS?:\/\//, "");
+  const count = Math.max(1, frameCount);
+  const progressWidth = Math.round(936 * frameNumber / count);
+  const label = `${String(frameNumber).padStart(2, "0")} / ${String(count).padStart(2, "0")}`;
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
+  <defs>
+    <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#020409" stop-opacity="0.72"/>
+      <stop offset="0.32" stop-color="#030509" stop-opacity="${finalCta ? "0.12" : "0.02"}"/>
+      <stop offset="0.53" stop-color="#020409" stop-opacity="0.24"/>
+      <stop offset="0.73" stop-color="#030408" stop-opacity="0.88"/>
+      <stop offset="1" stop-color="#030408" stop-opacity="0.99"/>
+    </linearGradient>
+    <linearGradient id="side" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#020409" stop-opacity="0.48"/>
+      <stop offset="1" stop-color="#020409" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="photoFade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.18" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.3" stop-color="#ffffff" stop-opacity="1"/>
+      <stop offset="0.73" stop-color="#ffffff" stop-opacity="1"/>
+      <stop offset="0.9" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="photoMask" maskUnits="userSpaceOnUse" x="0" y="305" width="1080" height="805">
+      <rect x="0" y="305" width="1080" height="805" fill="url(#photoFade)"/>
+    </mask>
+    <filter id="buttonGlow" x="-15%" y="-60%" width="130%" height="220%">
+      <feGaussianBlur stdDeviation="32"/>
+    </filter>
+    <filter id="bgBlur" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="24"/>
+    </filter>
+  </defs>
+  <rect width="${WIDTH}" height="${HEIGHT}" fill="#08090d"/>
+  <image href="${imageHref}" x="0" y="0" width="${WIDTH}" height="${HEIGHT}" preserveAspectRatio="xMidYMid slice" filter="url(#bgBlur)"/>
+  <image href="${imageHref}" x="0" y="305" width="${WIDTH}" height="805" preserveAspectRatio="xMidYMid meet" opacity="0.96" mask="url(#photoMask)"/>
+  <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#shade)"/>
+  <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#side)"/>
+  <path d="M830 0 H1080 V410 Z" fill="${accent}" opacity="0.72"/>
+  <rect x="72" y="78" width="11" height="72" fill="${accent}"/>
+  ${svgPathText(header, { x: 108, y: 124, size: Math.min(36, Math.max(24, 680 / Math.max(1, measureVectorText(header, 1)))), fill: "#ffffff" })}
+  ${svgPathText(label, { x: 1002 - measureVectorText(label, 31), y: 191, size: 31, fill: "#eeeeee" })}
+  <rect x="72" y="219" width="936" height="4" fill="#ffffff" opacity="0.24"/>
+  <rect x="72" y="219" width="${progressWidth}" height="4" fill="${accent}"/>
+  ${svgPathText(eyebrow, { x: 72, y: finalCta ? 1040 : 1102, size: Math.min(32, Math.max(23, 880 / Math.max(1, measureVectorText(eyebrow, 1)))), fill: "#f4f4f5" })}
+  <rect x="72" y="${finalCta ? 1062 : 1124}" width="70" height="7" fill="${accent}"/>
+  ${headlineBlock}
+  ${finalCta ? `
+    <rect x="72" y="1552" width="936" height="153" rx="24" fill="${accent}" opacity="0.58" filter="url(#buttonGlow)"/>
+    <rect x="72" y="1552" width="936" height="153" rx="24" fill="${accent}"/>
+    ${svgPathText(button, { x: 110, y: 1650, size: Math.min(58, Math.max(34, 740 / Math.max(1, measureVectorText(button, 1)))), fill: "#ffffff" })}
+    <circle cx="930" cy="1628" r="51" fill="#000000" opacity="0.18"/>
+    <path d="M908 1628 H950 M934 1612 L950 1628 L934 1644" fill="none" stroke="#ffffff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>`
+    : `
+    ${svgPathText(support, { x: 72, y: 1660, size: Math.min(42, Math.max(28, 930 / Math.max(1, measureVectorText(support, 1)))), fill: "#e9e9eb" })}
+    <rect x="72" y="1702" width="936" height="2" fill="${accent}"/>`}
+  ${svgPathText(finalCta ? support : website, { x: 72, y: 1809, size: Math.min(35, Math.max(24, 930 / Math.max(1, measureVectorText(finalCta ? support : website, 1)))), fill: "#dedee0" })}
+  <path d="M750 260 L1030 260 L390 1780 L110 1780 Z" fill="url(#sweep)" opacity="0.3"/>
+</svg>`;
+}
+
+async function writeVehicleFrame(filePath, { frameNumber, frameCount, frame, image, defaults, templateKey, headerText, includePhoto = true, includeSweep = true, includeCtaButton = true }) {
+  if (templateKey === "editorialImpact") {
+    await writeSvgFrame(filePath, renderEditorialImpactSvg({ frameNumber, frameCount,
+      frame, image, defaults, headerText }));
+    return;
+  }
   const finalCta = frame.finalCta;
   const accent = "#ef233c";
   const imageHref = imageDataUri(image);
@@ -771,7 +882,7 @@ function zoompanExpressions(index, frameTotal) {
   return { zoom, x, y };
 }
 
-function buildSceneClipArgs({ framePath, image, clipPath, sceneDuration, sceneIndex, fps, lightFade = true }) {
+function buildSceneClipArgs({ framePath, image, clipPath, sceneDuration, sceneIndex, fps, templateKey, lightFade = true }) {
   const frameTotal = Math.max(1, Math.round(sceneDuration * fps));
   const { zoom, x, y } = zoompanExpressions(sceneIndex, frameTotal);
   const lightFadeEndSeconds = LIGHT_FADE_START_SECONDS + LIGHT_FADE_SECONDS;
@@ -779,7 +890,9 @@ function buildSceneClipArgs({ framePath, image, clipPath, sceneDuration, sceneIn
   const lightFadeFilter = lightFade && sceneIndex > 0
     ? `,eq=brightness='0.28*${washAmount}':contrast='1+0.035*${washAmount}':saturation='1-0.08*${washAmount}':eval=frame`
     : "";
-  const filter = [
+  const filter = templateKey === "editorialImpact" ? [
+    `[0:v]fps=${fps},format=rgba,zoompan=z='1.018+0.055*exp(-on/7)+0.02*on/${Math.max(1, frameTotal - 1)}':x='(iw-iw/zoom)/2+sin(on*0.75)*6*exp(-on/7)':y='(ih-ih/zoom)/2':d=${frameTotal}:s=${WIDTH}x${HEIGHT}:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=yuv420p${lightFadeFilter}[vout]`,
+  ].join(";") : [
     `[0:v]fps=${fps},format=rgba,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[base]`,
     `[1:v]format=rgba,setsar=1,zoompan=z='${zoom}':x='${x}':y='${y}':d=${frameTotal}:s=${IMAGE_WIDTH}x${IMAGE_HEIGHT}:fps=${fps},trim=duration=${sceneDuration},setpts=PTS-STARTPTS,format=rgba[photo]`,
     `[base][photo]overlay=${IMAGE_X}:${IMAGE_Y}:shortest=1,format=yuv420p${lightFadeFilter}[vout]`,
@@ -1016,6 +1129,7 @@ export default async function handler(req, res) {
       const image = preparedImages[Math.min(index, preparedImages.length - 1)];
       await writeVehicleFrame(framePath, {
         frameNumber: index + 1,
+        frameCount,
         frame: frameSpecs[index],
         image,
         defaults,
@@ -1097,6 +1211,7 @@ export default async function handler(req, res) {
             sceneDuration: frameSeconds,
             sceneIndex: index,
             fps,
+            templateKey,
           });
           clipPaths.push(clipPath);
           if (result.lightFadeApplied) lightFadeApplied = true;
