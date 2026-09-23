@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { loadLiveWixListingPresence } from "./stock-watch-wix-listing-presence.js";
+import { resolveAiOperationModel } from "../lib/priorityAiModelPolicy.js";
 
 const MAX_AI_EXCEPTIONS = 90;
 const SOURCE_FRESH_MS = 36 * 60 * 60 * 1000;
@@ -321,7 +322,7 @@ const REPORT_SCHEMA = {
 async function aiReview(reconciliation) {
   const apiKey = clean(process.env.OPENAI_API_KEY, 10000);
   if (!apiKey) return null;
-  const model = clean(process.env.OPENAI_MODEL, 200) || "gpt-4.1-mini";
+  const model = clean(process.env.OPENAI_STOCK_RECONCILIATION_MODEL, 200) || resolveAiOperationModel(process.env, "marketing_review");
   const input = JSON.stringify({
     metrics: reconciliation.metrics,
     exceptions: reconciliation.exceptions.slice(0, MAX_AI_EXCEPTIONS),
