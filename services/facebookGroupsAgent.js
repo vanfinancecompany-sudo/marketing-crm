@@ -22,6 +22,7 @@ const GROUP_STORAGE_KEY = "marketingFacebookGroupsAgentV1";
 const DISCOVERY_ROTATION_KEY = "marketingFacebookGroupDiscoveryRotationV1";
 const GROUP_STATE_ENDPOINT = "/api/facebook-groups-state";
 let remoteWriteChain = Promise.resolve();
+let remoteSyncReady = false;
 
 export const FACEBOOK_GROUP_PRODUCTS = Object.freeze({
   finance: "finance",
@@ -280,9 +281,11 @@ export async function hydrateFacebookGroups(localGroups = loadFacebookGroups()) 
       ? mergeFacebookGroups(localGroups, remoteGroups)
       : mergeFacebookGroups([], localGroups);
     saveFacebookGroups(merged, { remote: false });
+    remoteSyncReady = true;
     queueRemoteFacebookGroupsSave(merged);
     return merged;
   } catch (error) {
+    remoteSyncReady = false;
     console.warn("Could not load persistent Facebook group state; using browser cache.", error);
     return localGroups;
   }
@@ -292,7 +295,7 @@ export function saveFacebookGroups(groups, options = {}) {
   if (typeof window === "undefined") return;
   const snapshot = Array.isArray(groups) ? groups : [];
   window.localStorage.setItem(GROUP_STORAGE_KEY, JSON.stringify(snapshot));
-  if (options.remote !== false) queueRemoteFacebookGroupsSave(snapshot);
+  if (options.remote !== false && remoteSyncReady) queueRemoteFacebookGroupsSave(snapshot);
 }
 
 export function mergeFacebookGroups(existing, incoming) {
