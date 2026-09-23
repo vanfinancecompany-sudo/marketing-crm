@@ -282,3 +282,28 @@ test("failed or partial Wix presence retains prior truth and pauses cards, summa
   assert.match(source, /Positively returned vehicles and statuses are still refreshed/);
   assert.match(source, /"My stock not on DealerKit" remains suspended/);
 });
+
+
+test("reserved lifecycle evidence wins before generic not-current handling and suppresses duplicate local-missing cards", () => {
+  const classify = transformedClassifier();
+  const local = new Set(["DN73VTM"]);
+  const reservedTransition = {
+    registration: "DN73VTM",
+    sourceStatus: "reserved",
+    sourceLifecycleStatus: "reserved",
+    isCurrentlyOnVansco: false,
+    isCurrentDealerKitBulkRecord: false,
+  };
+
+  assert.equal(classify(reservedTransition, local, "finance").displayStatus, "reserved");
+
+  const source = pageSource();
+  assert.match(source, /dealerKitAccountedRegistrationSet/);
+  assert.match(source, /record\.isCurrentlyOnVansco !== false \|\| isReservedLikeStatus\(record\.sourceStatus\)/);
+  assert.match(source, /!dealerKitAccountedRegistrationSet\.has\(registration\)/);
+});
+
+test("DealerKit lifecycle recovery keeps enough history to cover week-old disappearing stock", () => {
+  const source = read("api/dealerkit-stock-watch-list.js");
+  assert.match(source, /const RECENT_SOURCE_STATE_DAYS = 14;/);
+});
