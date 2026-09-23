@@ -6,6 +6,7 @@ const GROUP_POST_JOB_KEY = "vfcPendingFacebookGroupPost";
 const LAST_GROUP_POST_EVENT_KEY = "vfcLastFacebookGroupPostEvent";
 const GROUP_APPROVAL_MONITOR_KEY = "vfcFacebookGroupApprovalMonitor";
 const LAST_GROUP_STATUS_EVENT_KEY = "vfcLastFacebookGroupStatusEvent";
+const LAST_GROUP_STATUS_BATCH_KEY = "vfcLastFacebookGroupStatusBatch";
 const GROUP_APPROVAL_ALARM = "vfcFacebookGroupApprovalMonitorAlarm";
 const GROUP_APPROVAL_CHECK_MINUTES = 60;
 
@@ -551,6 +552,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           declined: Boolean(result.declined),
           unavailable: Boolean(result.unavailable),
           matchedUrl: result.matchedUrl || "",
+          matchMethod: result.matchMethod || "",
           checkedAt,
         };
 
@@ -594,6 +596,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
 
       state.results = [...(state.results || []), message.result || {}];
+      // Persist and deliver each result before opening the next Facebook page. A later
+      // page can fail to load, so the CRM must not depend on the final page completing.
+      await saveGroupAgentState(state);
+      await broadcastToCrm({
+        type: "GROUP_POST_STATUS_PROGRESS",
+        jobId: state.job.id,
+        productKey: state.job.productKey,
+        result: message.result || {},
+      }, state.crmTabId);
       state.groupIndex += 1;
       const nextGroup = state.job.groups?.[state.groupIndex];
 
@@ -606,6 +617,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           );
         }
       } else {
+        await chrome.storage.local.set({
+          [LAST_GROUP_STATUS_BATCH_KEY]: {
+            jobId: state.job.id,
+            productKey: state.job.productKey,
+            results: state.results,
+          },
+        });
         await broadcastToCrm({
           type: "GROUP_POST_STATUS_COMPLETE",
           jobId: state.job.id,
@@ -739,6 +757,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const stored = await chrome.storage.local.get([
         LAST_GROUP_POST_EVENT_KEY,
         LAST_GROUP_STATUS_EVENT_KEY,
+        LAST_GROUP_STATUS_BATCH_KEY,
         GROUP_AGENT_STATE_KEY,
         GROUP_POST_JOB_KEY,
       ]);
@@ -748,6 +767,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           approvalItems: await getApprovalMonitorItems(),
           lastPostEvent: stored[LAST_GROUP_POST_EVENT_KEY] || null,
           lastStatusEvent: stored[LAST_GROUP_STATUS_EVENT_KEY] || null,
+          lastStatusBatch: stored[LAST_GROUP_STATUS_BATCH_KEY] || null,
           agentState: stored[GROUP_AGENT_STATE_KEY] || null,
           pendingGroupPost: stored[GROUP_POST_JOB_KEY]?.job || null,
         },

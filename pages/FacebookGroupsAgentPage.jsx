@@ -4,6 +4,7 @@ import {
   GROUP_AGENT_INSPECTION_COMPLETE,
   GROUP_POST_EVENT_ACK,
   GROUP_POST_STATUS_COMPLETE,
+  GROUP_POST_STATUS_PROGRESS,
   GROUP_POST_STATUS_EVENT,
   GROUP_POST_STATUS_EVENT_ACK,
   GROUP_POST_SUBMITTED,
@@ -17,6 +18,7 @@ import {
   markGroupAccepted,
   markGroupPostStatus,
   markGroupPosted,
+  mergeFacebookGroupsByRecentPostState,
   mergeDiscoveredGroups,
   prepareFacebookGroupPost,
   recoverFacebookGroupsFromSnapshot,
@@ -245,7 +247,11 @@ export default function FacebookGroupsAgentPage({
 
     hydrateFacebookGroups(loadFacebookGroups())
       .then((restored) => {
-        if (!cancelled) setGroups(restored);
+        if (!cancelled) setGroups((current) => {
+          const merged = mergeFacebookGroupsByRecentPostState(current, restored);
+          saveFacebookGroups(merged);
+          return merged;
+        });
       })
       .catch(() => {});
 
@@ -363,6 +369,12 @@ export default function FacebookGroupsAgentPage({
         setMessage(
           `${postEvent.groupName || "Facebook group"} recorded as posted. It now sits in Awaiting until Facebook visibility/approval is confirmed.`,
         );
+        return;
+      }
+
+      if (payload.type === GROUP_POST_STATUS_PROGRESS) {
+        if (payload.productKey && payload.productKey !== productKey) return;
+        persist((current) => markGroupPostStatus(current, payload.result));
         return;
       }
 
@@ -641,6 +653,14 @@ export default function FacebookGroupsAgentPage({
             <br />
             Last post: <strong>{dateLabel(group.lastPostedAt)}</strong>
             {" · "}Accepted posts: <strong>{Number(group.acceptedPostCount || 0)}</strong>
+            {group.lastPostDetectedState ? (
+              <>
+                <br />
+                Last Facebook check: <strong>{group.lastPostDetectedState}</strong>
+                {group.lastPostMatchMethod ? ` · ${group.lastPostMatchMethod}` : ""}
+                {` · CRM: ${pipeline === "proven" ? "Proven / Hot" : pipeline === "archived" ? "Archived" : "Awaiting"}`}
+              </>
+            ) : null}
             {pipeline === "proven" ? (
               <>
                 {" · "}Repeat every{" "}

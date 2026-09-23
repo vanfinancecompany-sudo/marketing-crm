@@ -11,6 +11,7 @@ export const GROUP_POST_EVENT_ACK = "VFC_GROUP_POST_EVENT_ACK";
 export const GROUP_POST_STATUS_START = "VFC_GROUP_POST_STATUS_START";
 export const GROUP_POST_STATUS_ACK = "VFC_GROUP_POST_STATUS_ACK";
 export const GROUP_POST_STATUS_COMPLETE = "VFC_GROUP_POST_STATUS_COMPLETE";
+export const GROUP_POST_STATUS_PROGRESS = "VFC_GROUP_POST_STATUS_PROGRESS";
 export const GROUP_POST_STATUS_EVENT = "VFC_GROUP_POST_STATUS_EVENT";
 export const GROUP_POST_STATUS_EVENT_ACK = "VFC_GROUP_POST_STATUS_EVENT_ACK";
 export const FACEBOOK_HELPER_PING = "VFC_FACEBOOK_HELPER_PING";
@@ -121,6 +122,10 @@ export function normalizeFacebookGroupUrl(value) {
 function groupKey(group) {
   return normalizeFacebookGroupUrl(group?.url || group?.groupUrl || "").toLowerCase()
     || clean(group?.name).toLowerCase();
+}
+
+function registrationKey(value) {
+  return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
 const RENT2BUY_LOCALITY_PATTERN = /\b(?:southampton|eastleigh|chandlers? ford|romsey|totton|new forest|lymington|ringwood|fareham|gosport|portsmouth|havant|waterlooville|petersfield|winchester|andover|basingstoke|alton|farnborough|aldershot|fleet|hook|hampshire|salisbury|amesbury|bournemouth|poole|christchurch|dorchester|weymouth|wimborne|dorset|chichester|bognor regis|worthing|brighton|horsham|crawley|west sussex|guildford|woking|camberley|farnham|surrey|reading|bracknell|maidenhead|newbury|berkshire|swindon|chippenham|trowbridge|warminster|wiltshire|bath|bristol|weston(?:-super-mare| super mare)|somerset|oxford|didcot|abingdon|oxfordshire|london|croydon|kingston|richmond|hounslow|slough)\b/i;
@@ -290,9 +295,11 @@ function queueRemoteFacebookGroupsSave(groups) {
 export async function hydrateFacebookGroups(localGroups = loadFacebookGroups()) {
   try {
     const remoteGroups = await fetchFacebookGroupsState();
+    // A status result may arrive while the server request is in flight.
+    const latestLocalGroups = mergeFacebookGroups(localGroups, loadFacebookGroups());
     const merged = remoteGroups.length
-      ? mergeFacebookGroups(localGroups, remoteGroups)
-      : mergeFacebookGroups([], localGroups);
+      ? mergeFacebookGroupsByRecentPostState(latestLocalGroups, remoteGroups)
+      : mergeFacebookGroups([], latestLocalGroups);
     saveFacebookGroups(merged, { remote: false });
     remoteSyncReady = true;
     queueRemoteFacebookGroupsSave(merged);
@@ -559,7 +566,35 @@ export function recoverFacebookGroupsFromSnapshot(groups, snapshot = {}) {
     }
   }
 
+  const batchResults = [
+    ...(Array.isArray(snapshot.agentState?.results) ? snapshot.agentState.results : []),
+    ...(Array.isArray(snapshot.lastStatusBatch?.results) ? snapshot.lastStatusBatch.results : []),
+  ];
+  for (const result of batchResults) recovered = markGroupPostStatus(recovered, result);
+
   return recovered;
+}
+
+function lastPostStateTime(group) {
+  return Math.max(0, ...[
+    group?.lastPostedAt,
+    group?.lastPostCheckAt,
+    group?.lastAcceptedAt,
+    group?.archivedAt,
+  ].map((value) => Date.parse(value || "") || 0));
+}
+
+export function mergeFacebookGroupsByRecentPostState(localGroups, remoteGroups) {
+  const localByKey = new Map((localGroups || []).map((group) => [groupKey(group), group]));
+  const remoteByKey = new Map((remoteGroups || []).map((group) => [groupKey(group), group]));
+  return mergeFacebookGroups(localGroups, remoteGroups).map((group) => {
+    const key = groupKey(group);
+    const local = localByKey.get(key);
+    const remote = remoteByKey.get(key);
+    return local && remote && lastPostStateTime(local) > lastPostStateTime(remote)
+      ? { ...group, ...local }
+      : group;
+  });
 }
 
 export function startFacebookGroupDiscovery(productKey, options = {}) {
@@ -675,6 +710,8 @@ export function markGroupPosted(groups, groupUrl, details = {}) {
       lastPostedAt: postedAt,
       lastPostCheckAt: "",
       postStatus: details.approvalState === "accepted" ? "accepted" : "awaiting",
+      lastPostDetectedState: "",
+      lastPostMatchMethod: "",
       pendingRegistration: clean(details.registration || group.pendingRegistration || ""),
       postCount: Number(group.postCount || 0) + (details.increment === false ? 0 : 1),
       pipeline: details.approvalState === "accepted" ? "proven" : group.pipeline === "proven" ? "proven" : "testing",
@@ -706,9 +743,19 @@ export function markGroupPostStatus(groups, result) {
   const key = normalizeFacebookGroupUrl(result?.url || result?.groupUrl || "").toLowerCase();
   return (groups || []).map((group) => {
     if (normalizeFacebookGroupUrl(group.url).toLowerCase() !== key) return group;
+    // A delayed result from an older advert must never change the current advert.
+    if (registrationKey(result?.registration) !== registrationKey(group.pendingRegistration)) return group;
+    const checkedAt = Date.parse(result?.checkedAt || "");
+    const postedAt = Date.parse(group.lastPostedAt || "");
+    if (Number.isFinite(checkedAt) && Number.isFinite(postedAt) && checkedAt < postedAt) return group;
+    const checkEvidence = {
+      lastPostDetectedState: result?.accepted ? "accepted" : result?.declined ? "declined" : result?.unavailable ? "unavailable" : result?.pending ? "pending" : "not_found",
+      lastPostMatchMethod: clean(result?.matchMethod || ""),
+    };
     if (result?.declined) {
       return {
         ...group,
+        ...checkEvidence,
         status: "Red",
         postStatus: "declined",
         archived: true,
@@ -720,6 +767,7 @@ export function markGroupPostStatus(groups, result) {
     if (result?.unavailable) {
       return {
         ...group,
+        ...checkEvidence,
         status: "Red",
         postStatus: "unavailable",
         archived: true,
@@ -729,13 +777,14 @@ export function markGroupPostStatus(groups, result) {
       };
     }
     if (result?.accepted) {
-      return markGroupAccepted([group], group.url, {
+      return { ...markGroupAccepted([group], group.url, {
         acceptedAt: result.checkedAt,
         registration: result.registration,
-      })[0];
+      })[0], ...checkEvidence };
     }
     return {
       ...group,
+      ...checkEvidence,
       postStatus: result?.pending ? "pending" : "not_found",
       lastPostCheckAt: result?.checkedAt || new Date().toISOString(),
     };

@@ -115,10 +115,13 @@
   function registrationEvidenceLines(registration) {
     const wantedReg = normalizeRegistration(registration);
     if (!wantedReg) return [];
-    return pageLines().filter((line) => {
-      if (/search results for|results for|search this group|search facebook/i.test(line)) return false;
-      return normalizeRegistration(line).includes(wantedReg);
-    });
+    return pageLines().filter((line) => advertRegistrationLine(line, wantedReg));
+  }
+
+  function advertRegistrationLine(line, wantedReg) {
+    if (/search results for|results for|search this group|search facebook/i.test(line)) return false;
+    const pattern = new RegExp(`(?:^|[^A-Z0-9])${wantedReg.split("").join("[\\s-]*")}(?=$|[^A-Z0-9])`, "i");
+    return pattern.test(line);
   }
 
   function visibleSearchResultEvidence(registration) {
@@ -126,10 +129,13 @@
     if (!wantedReg) return null;
     const candidates = [...document.querySelectorAll('[role="article"], [data-ad-preview="message"], div')].filter(visible);
     for (const node of candidates) {
-      const text = clean(node.innerText || "");
+      const rawText = String(node.innerText || "");
+      const text = clean(rawText);
       if (!text || text.length > 5000) continue;
       if (/search results for|results for/i.test(text) && text.length < 250) continue;
-      if (!normalizeRegistration(text).includes(wantedReg)) continue;
+      const helperText = String(document.getElementById("vfc-group-helper-report")?.innerText || "");
+      const advertText = helperText ? rawText.replace(helperText, "") : rawText;
+      if (!advertText.split(/\n+/).some((line) => advertRegistrationLine(line, wantedReg))) continue;
       if (!node.querySelector('img, a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid="], [role="button"]')) continue;
       return node;
     }

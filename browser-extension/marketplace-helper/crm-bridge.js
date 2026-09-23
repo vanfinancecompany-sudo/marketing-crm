@@ -25,6 +25,7 @@
   const GROUP_POST_STATUS_START = "VFC_GROUP_POST_STATUS_START";
   const GROUP_POST_STATUS_ACK = "VFC_GROUP_POST_STATUS_ACK";
   const GROUP_POST_STATUS_COMPLETE = "VFC_GROUP_POST_STATUS_COMPLETE";
+  const GROUP_POST_STATUS_PROGRESS = "VFC_GROUP_POST_STATUS_PROGRESS";
   const GROUP_POST_STATUS_EVENT = "VFC_GROUP_POST_STATUS_EVENT";
   const GROUP_POST_STATUS_EVENT_ACK = "VFC_GROUP_POST_STATUS_EVENT_ACK";
   const FACEBOOK_HELPER_PING = "VFC_FACEBOOK_HELPER_PING";
@@ -287,6 +288,17 @@
         source: "vfc-facebook-helper",
         type: GROUP_POST_SUBMITTED,
         event: message.event,
+      }, window.location.origin);
+      return;
+    }
+
+    if (message?.type === "GROUP_POST_STATUS_PROGRESS") {
+      window.postMessage({
+        source: "vfc-facebook-helper",
+        type: GROUP_POST_STATUS_PROGRESS,
+        jobId: message.jobId || "",
+        productKey: message.productKey || "",
+        result: message.result || {},
       }, window.location.origin);
       return;
     }
