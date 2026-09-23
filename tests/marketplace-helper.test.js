@@ -56,6 +56,13 @@ test("Posting Desk keeps Van Finance and Rent2Buy Marketplace as separate prepar
   assert.match(sidebarSource, /Rent2Buy Marketplace/);
 });
 
+test("Marketplace confirmations count separately from Facebook page posts", () => {
+  assert.match(postingDeskSource, /destination === "Van Finance Facebook"\) return "van_finance_facebook_post"/);
+  assert.match(postingDeskSource, /destination === "Rent2Buy Facebook"\) return "rent2buy_facebook_post"/);
+  assert.match(postingDeskSource, /isFinanceMarketplaceDestination\(destination\)\) return "van_finance_marketplace_post"/);
+  assert.match(postingDeskSource, /isRent2BuyMarketplaceDestination\(destination\)\) return "rent2buy_marketplace_post"/);
+});
+
 test("Van Finance Marketplace uses cash pricing and a £99-deposit title hook", () => {
   assert.match(marketplaceAutomationSource, /buildVanFinanceMarketplaceJob/);
   assert.match(marketplaceAutomationSource, /postingDestination: "Van Finance Marketplace"/);

@@ -90,12 +90,10 @@ function isPostingHistoryDestination(destination) {
 }
 
 function getActivityType(destination) {
-  if (destination === "Van Finance Facebook" || isFinanceMarketplaceDestination(destination)) {
-    return "van_finance_facebook_post";
-  }
-  if (destination === "Rent2Buy Facebook" || isRent2BuyMarketplaceDestination(destination)) {
-    return "rent2buy_facebook_post";
-  }
+  if (destination === "Van Finance Facebook") return "van_finance_facebook_post";
+  if (destination === "Rent2Buy Facebook") return "rent2buy_facebook_post";
+  if (isFinanceMarketplaceDestination(destination)) return "van_finance_marketplace_post";
+  if (isRent2BuyMarketplaceDestination(destination)) return "rent2buy_marketplace_post";
   return "";
 }
 
@@ -207,7 +205,7 @@ function historyRowToPostedItem(row) {
       description: metadata.vehicle_description || metadata.vehicle_name || registration || "",
       image: metadata.image_url || "",
       picture: metadata.image_url || "",
-      pipeline: row?.activity_type === "rent2buy_facebook_post" ? "rent2buy" : "vanFinance",
+      pipeline: String(row?.activity_type || "").startsWith("rent2buy_") ? "rent2buy" : "vanFinance",
     },
   };
 }

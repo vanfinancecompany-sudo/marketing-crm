@@ -4593,6 +4593,19 @@ textarea {
   background: linear-gradient(180deg, #fff 0%, #f0fdf4 100%);
 }
 
+.operations-activity-card.is-linked {
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+
+.operations-activity-card.is-linked:hover,
+.operations-activity-card.is-linked:focus-visible {
+  transform: translateY(-2px);
+  border-color: #93c5fd;
+  box-shadow: 0 14px 32px rgba(37, 99, 235, 0.12);
+  outline: none;
+}
+
 .operations-activity-card__heading {
   display: flex;
   align-items: flex-start;

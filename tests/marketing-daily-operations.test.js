@@ -24,6 +24,30 @@ test("London dates and day ranges respect summer and winter time", () => {
   });
 });
 
+test("Marketplace and Facebook Groups have separate five-a-day targets", () => {
+  assert.equal(DEFAULT_DAILY_TARGETS.van_finance_groups_post, 5);
+  assert.equal(DEFAULT_DAILY_TARGETS.rent2buy_groups_post, 5);
+  assert.equal(DEFAULT_DAILY_TARGETS.van_finance_marketplace_post, 5);
+  assert.equal(DEFAULT_DAILY_TARGETS.rent2buy_marketplace_post, 5);
+
+  const summary = summarizeDailyActivity({
+    targets: DEFAULT_DAILY_TARGETS,
+    events: [
+      { activity_type: "van_finance_facebook_post", quantity: 1 },
+      { activity_type: "van_finance_groups_post", quantity: 2 },
+      { activity_type: "rent2buy_groups_post", quantity: 3 },
+      { activity_type: "van_finance_marketplace_post", quantity: 4 },
+      { activity_type: "rent2buy_marketplace_post", quantity: 5 },
+    ],
+  });
+
+  assert.equal(summary.metrics.van_finance_facebook_post.completed, 1);
+  assert.equal(summary.metrics.van_finance_groups_post.completed, 2);
+  assert.equal(summary.metrics.rent2buy_groups_post.completed, 3);
+  assert.equal(summary.metrics.van_finance_marketplace_post.completed, 4);
+  assert.equal(summary.metrics.rent2buy_marketplace_post.completed, 5);
+});
+
 test("Knowledge Hub defaults to maintenance mode instead of a forced daily production target", () => {
   assert.equal(DEFAULT_DAILY_TARGETS.knowledge_hub_article, 0);
   const summary = summarizeDailyActivity({
