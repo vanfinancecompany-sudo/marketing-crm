@@ -7,6 +7,7 @@ import {
   parseWebsiteIntelligence,
 } from "../lib/aiMarketingPlatform.js";
 import { buildAiPlatformPrompt } from "../lib/businessIntelligence.js";
+import { resolveAiOperationModel } from "../lib/priorityAiModelPolicy.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const CHANNEL_KEYS = new Set(AI_CONTENT_CHANNELS.map((channel) => channel.key));
@@ -136,16 +137,16 @@ function assertResult(result, fallback) {
   return result.data;
 }
 
-function aiConfiguration(environment = process.env) {
+function aiConfiguration(environment = process.env, operation = "marketing_content") {
   return {
     configured: Boolean(clean(environment.OPENAI_API_KEY, 10000)),
-    model: clean(environment.OPENAI_MODEL, 200) || "gpt-4.1-mini",
+    model: resolveAiOperationModel(environment, operation),
     environment: clean(environment.VERCEL_ENV, 50) || "local",
   };
 }
 
-async function callStructuredAi({ input, schema, schemaName, systemInstruction }) {
-  const configuration = aiConfiguration();
+async function callStructuredAi({ input, schema, schemaName, systemInstruction, modelOperation = "marketing_content" }) {
+  const configuration = aiConfiguration(process.env, modelOperation);
   if (!configuration.configured) {
     throw new ApiError(500, "OPENAI_API_KEY is not available to this deployment.");
   }
@@ -308,6 +309,7 @@ Everything is a draft for manual editing and approval. Do not claim it has been 
 emailed or sent. Return the structured asset only.`,
       schema: ASSET_SCHEMA,
       schemaName: "marketing_content_asset",
+      modelOperation: "marketing_content",
       systemInstruction:
         "You create one draft marketing asset from an approved source article. Follow the supplied Business Brain and JSON schema exactly.",
     })
@@ -322,7 +324,7 @@ emailed or sent. Return the structured asset only.`,
     updated_at: new Date().toISOString(),
     generation_metadata: {
       prompt: assembled.metadata,
-      model: aiConfiguration().model,
+      model: aiConfiguration(process.env, "marketing_content").model,
       generated_at: new Date().toISOString(),
       source_article_updated_at: article.updated_at,
     },
@@ -431,6 +433,7 @@ CTA: ${asset.cta}`,
 Return advisory findings only. Do not rewrite, edit, approve, post or send the asset.`,
       schema: REVIEW_SCHEMA,
       schemaName: "marketing_content_review",
+      modelOperation: "marketing_review",
       systemInstruction:
         "You are an evidence-based AI marketing reviewer. Follow the supplied Business Brain and JSON schema exactly.",
     })
@@ -446,7 +449,7 @@ Return advisory findings only. Do not rewrite, edit, approve, post or send the a
         summary: review.summary,
         recommendations: review.recommendations,
         warnings: review.warnings,
-        model: aiConfiguration().model,
+        model: aiConfiguration(process.env, "marketing_review").model,
         prompt_metadata: {
           ...assembled.metadata,
           content_fingerprint: contentFingerprint(asset),
@@ -524,6 +527,7 @@ Extract only claims evidenced in the supplied website text. Keep each item indep
 Do not overwrite, merge or save any Business Brain section.`,
       schema: WEBSITE_SCHEMA,
       schemaName: "website_business_intelligence",
+      modelOperation: "website_intelligence",
       systemInstruction:
         "You extract evidence-based business knowledge for human review. Follow the JSON schema exactly and do not invent missing facts.",
     })
@@ -537,7 +541,7 @@ Do not overwrite, merge or save any Business Brain section.`,
         extracted_sections: extracted,
         analysis_metadata: {
           prompt: assembled.metadata,
-          model: aiConfiguration().model,
+          model: aiConfiguration(process.env, "website_intelligence").model,
           analysed_at: new Date().toISOString(),
         },
       })
