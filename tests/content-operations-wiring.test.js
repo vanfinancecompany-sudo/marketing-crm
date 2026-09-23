@@ -93,6 +93,36 @@ test("tracking failure remains non-blocking after the browser download", async (
   );
 });
 
+test("Content Operations links the four new five-a-day lanes to their pages", async () => {
+  const [dashboard, lib, postingDesk, groupsPage, migration] = await Promise.all([
+    read("../pages/DashboardPage.jsx"),
+    read("../lib/marketingDailyOperations.js"),
+    read("../pages/PostingDeskPage.jsx"),
+    read("../pages/FacebookGroupsAgentPage.jsx"),
+    read("../supabase/migrations/202609231330_content_operations_marketplace_groups.sql"),
+  ]);
+
+  for (const type of [
+    "van_finance_groups_post",
+    "rent2buy_groups_post",
+    "van_finance_marketplace_post",
+    "rent2buy_marketplace_post",
+  ]) {
+    assert.match(lib, new RegExp(`${type}: 5`));
+  }
+
+  assert.match(dashboard, /van_finance_groups_post: "Van Finance Groups & Classifieds"/);
+  assert.match(dashboard, /rent2buy_groups_post: "Rent2Buy Facebook Groups"/);
+  assert.match(dashboard, /van_finance_marketplace_post: "Van Finance Marketplace"/);
+  assert.match(dashboard, /rent2buy_marketplace_post: "Rent2Buy Marketplace"/);
+  assert.match(postingDesk, /return "van_finance_marketplace_post"/);
+  assert.match(postingDesk, /return "rent2buy_marketplace_post"/);
+  assert.match(groupsPage, /groupActivityType/);
+  assert.match(groupsPage, /source: "facebook_groups"/);
+  assert.match(migration, /metadata->>'destination' = 'Van Finance Marketplace'/);
+  assert.match(migration, /metadata->>'destination' = 'Rent2Buy Marketplace'/);
+});
+
 test("Knowledge Hub card uses sent-to-Wix wording", async () => {
   const dashboard = await read("../pages/DashboardPage.jsx");
   assert.match(dashboard, /knowledge_hub_article:\s*"sent to Wix"/);
