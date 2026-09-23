@@ -172,6 +172,30 @@
     return null;
   }
 
+  function visibleFinanceAdvertForExactSearch(registration) {
+    const wantedReg = normalizeRegistration(registration);
+    if (!wantedReg) return null;
+
+    let searchedReg = "";
+    try {
+      searchedReg = normalizeRegistration(new URL(location.href).searchParams.get("q") || "");
+    } catch {}
+    if (!searchedReg || searchedReg !== wantedReg) return null;
+
+    const pageText = clean(document.body?.innerText || "");
+    if (!/\bvan\s+finance\s+company\b/i.test(pageText)) return null;
+
+    const largeImage = [...document.querySelectorAll("img")]
+      .filter(visible)
+      .find((image) => {
+        const rect = image.getBoundingClientRect();
+        return rect.width >= 220 && rect.height >= 140;
+      });
+    if (!largeImage) return null;
+
+    return largeImage.closest?.('[role="article"], article, div') || largeImage.parentElement || document.body;
+  }
+
   function contentUnavailable(text) {
     return /this content isn'?t available right now|content is not available|page isn'?t available|group is unavailable|group has been deleted/i.test(String(text || ""));
   }
@@ -490,9 +514,10 @@
       evidenceLines = wantedReg ? registrationEvidenceLines(target.registration) : [];
       const visibleResult = wantedReg ? visibleSearchResultEvidence(target.registration) : null;
       const visibleAdvert = wantedReg ? visibleAdvertCardForExactSearch(target.registration) : null;
-      // Keep the rule simple: exact registration search + a genuine visible advert card
-      // means Facebook is showing the advert, so it is accepted/Proven.
-      if (visibleAdvert || visibleResult || evidenceLines.length || contentUnavailable(document.body?.innerText || "")) break;
+      const visibleFinanceAdvert = wantedReg ? visibleFinanceAdvertForExactSearch(target.registration) : null;
+      // Keep the rule simple: exact registration search + a genuine visible advert means
+      // Facebook is showing the advert, so it is accepted/Proven.
+      if (visibleFinanceAdvert || visibleAdvert || visibleResult || evidenceLines.length || contentUnavailable(document.body?.innerText || "")) break;
       await sleep(500);
     }
 
@@ -516,9 +541,14 @@
       }
 
       if (!accepted) {
+        const visibleFinanceAdvert = visibleFinanceAdvertForExactSearch(target.registration);
         const visibleAdvert = visibleAdvertCardForExactSearch(target.registration);
         const visibleResult = visibleSearchResultEvidence(target.registration);
-        if (visibleAdvert) {
+        if (visibleFinanceAdvert) {
+          accepted = true;
+          matchedUrl = visibleFinanceAdvert.querySelector?.('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid="]')?.href || "";
+          matchMethod = "exact-search-finance-advert";
+        } else if (visibleAdvert) {
           accepted = true;
           matchedUrl = visibleAdvert.querySelector('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid="]')?.href || "";
           matchMethod = "exact-search-visible-advert";
@@ -736,6 +766,7 @@
       attachImage,
       registrationEvidenceLines,
       visibleAdvertCardForExactSearch,
+      visibleFinanceAdvertForExactSearch,
       membershipPendingVisible,
       waitForMembershipPending,
       prepareGroupPost,
