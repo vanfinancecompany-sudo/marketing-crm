@@ -40,9 +40,8 @@ function hasReportedTotalDrift(snapshot) {
 }
 
 function retryableIncompleteSource(snapshot) {
-  const knownBaselineOnly = snapshot?.diagnostics?.knownSourceFaults?.baselineOnly === true;
   return hasReportedTotalDrift(snapshot)
-    || (!knownBaselineOnly && Number(snapshot?.diagnostics?.failedPositions?.length || 0) > 0)
+    || Number(snapshot?.diagnostics?.failedPositions?.length || 0) > 0
     || Number(snapshot?.diagnostics?.invalidRecords?.length || 0) > 0;
 }
 
