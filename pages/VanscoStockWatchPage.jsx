@@ -149,6 +149,7 @@ function classifyWatchRecord(record, localRegistrationSet, selectedPipeline, fin
   const baseRecord = { ...record, pipeline: selectedPipeline, workflowStatus, safeExactRegistrationMatch: hasExactLocalMatch, financeStockMatchForCars: hasFinanceMatchForCars };
 
   if (!registration) return { ...baseRecord, displayStatus: "hidden_no_registration", matchStatus: "hidden_no_registration" };
+  // DEALERKIT_RESERVED_BUCKET_ROUTING: positive lifecycle evidence wins before generic not-current handling.
   // A positive DealerKit lifecycle result such as Reserved, Awaiting Delivery or
   // Removed must win before generic "not current" handling. These records can
   // legitimately be absent from the current bulk feed while still proving why
