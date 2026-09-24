@@ -182,9 +182,9 @@ export default async function handler(request, response) {
   try {
     state = await buildFreshCarControlledPublishState(registration);
     const requestedIntent = action === "update_existing_car" ? "update_existing_vehicle" : "create_new_vehicle";
-    if (state.plan.writeIntent !== requestedIntent) throw new ControlledPublishError(409, "The Cars Wix write intent changed during the final recheck. Rebuild the preview before continuing.", { expected: state.plan.writeIntent, requested: requestedIntent });
+    if (state.plan.writeIntent !== requestedIntent) throw new ControlledPublishError(409, "The Cars Wix write intent changed during the final recheck. Rebuild the preview before continuing.", { code: "write_intent_changed", expected: state.plan.writeIntent, requested: requestedIntent });
     if (!state.plan.canPublish) throw new ControlledPublishError(409, "The fresh DealerKit/Wix Cars state is not safe for reconciliation.", { blockers: state.plan.blockers });
-    if (!carPublishConfirmationMatches(request.body?.confirmation, state.plan)) throw new ControlledPublishError(409, "The Cars publish preview is stale. Rebuild the final preview before publishing.");
+    if (!carPublishConfirmationMatches(request.body?.confirmation, state.plan)) throw new ControlledPublishError(409, "The Cars publish preview is stale. Rebuild the final preview before publishing.", { code: "preview_stale" });
 
     const targets = orderedTargets(state.plan.targets);
     if (targets.length !== 2 || !targets.some((target) => target.collectionId === "CARFINANCE") || !targets.some((target) => target.collectionId === "CARPAGES")) {
@@ -244,6 +244,7 @@ export default async function handler(request, response) {
       publishStatusTransitions: statusTransitions,
       publishStatusRollback: statusRollback,
       manualAttentionRequired: Boolean(error?.details?.manualAttentionRequired || error?.details?.publishStatusChangeUncertain || (writes.length > 0 && !rollbackComplete) || (statusTransitions.length > 0 && !statusRollbackComplete)),
+      error_type: clean(error?.details?.code, 100) || null,
       message: error?.message || "Controlled Cars reconciliation failed.",
       details: error?.details || null,
     });
