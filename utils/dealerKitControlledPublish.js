@@ -41,27 +41,30 @@ function sameNumberValue(left, right) {
 }
 
 export function describeConfirmationChanges(previous = {}, current = {}) {
+  const before = previous && typeof previous === "object" ? previous : {};
+  const after = current && typeof current === "object" ? current : {};
   const changes = [];
-  if (clean(previous.writeIntent) !== clean(current.writeIntent)) changes.push("publish action");
-  if (clean(previous.sourceUpdatedAt) !== clean(current.sourceUpdatedAt)) changes.push("DealerKit source");
-  if (clean(previous.reviewUpdatedAt) !== clean(current.reviewUpdatedAt)) changes.push("saved review");
-  if (!sameJson(previous.dealerKitImageIds || [], current.dealerKitImageIds || [])) changes.push("selected images");
+  if (clean(before.writeIntent) !== clean(after.writeIntent)) changes.push("publish action");
+  if (clean(before.sourceUpdatedAt) !== clean(after.sourceUpdatedAt)) changes.push("DealerKit source");
+  if (clean(before.reviewUpdatedAt) !== clean(after.reviewUpdatedAt)) changes.push("saved review");
+  if (!sameJson(before.dealerKitImageIds || [], after.dealerKitImageIds || [])) changes.push("selected images");
 
-  const previousMainImage = previous.carMainImage || previous.vfcMainImage || previous.rent2buyMainImage || null;
-  const currentMainImage = current.carMainImage || current.vfcMainImage || current.rent2buyMainImage || null;
-  if (clean(previousMainImage) !== clean(currentMainImage)) changes.push("primary image");
+  if (clean(before.carMainImage) !== clean(after.carMainImage)
+      || clean(before.vfcMainImage) !== clean(after.vfcMainImage)
+      || clean(before.rent2buyMainImage) !== clean(after.rent2buyMainImage)) {
+    changes.push("primary image");
+  }
 
-  if (!sameNumberValue(previous.retailPrice, current.retailPrice)
-      || !sameNumberValue(previous.monthlyPrice, current.monthlyPrice)
-      || !sameNumberValue(previous.rent2buyMonthly, current.rent2buyMonthly)
-      || !sameNumberValue(previous.rent2buyUpfront, current.rent2buyUpfront)) {
+  if (!sameNumberValue(before.retailPrice, after.retailPrice)
+      || !sameNumberValue(before.monthlyPrice, after.monthlyPrice)
+      || !sameNumberValue(before.rent2buyMonthly, after.rent2buyMonthly)
+      || !sameNumberValue(before.rent2buyUpfront, after.rent2buyUpfront)) {
     changes.push("price/payment");
   }
-  if (!sameJson(previous.targetPayloads || [], current.targetPayloads || [])) changes.push("Wix rows/fields");
+  if (!sameJson(before.targetPayloads || [], after.targetPayloads || [])) changes.push("Wix rows/fields");
 
   return [...new Set(changes)];
 }
-
 function addAutomaticRefreshNotice(root, previousConfirmation, currentConfirmation) {
   const result = root.querySelector("[data-controlled-publish-result]");
   if (!result) return;
