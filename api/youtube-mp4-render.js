@@ -322,17 +322,16 @@ async function prepareImagePpm(imagePath, ppmPath) {
   return readPpm(ppmPath);
 }
 
-async function writeMotionImage(imagePath, outputPath, templateKey, sceneIndex = 0) {
+async function writeMotionImage(image, outputPath, templateKey, sceneIndex = 0) {
   const editorial = templateKey === "editorialImpact";
   if (editorial) {
-    const bytes = await fs.readFile(imagePath);
-    await writeSvgFrame(outputPath, renderEditorialImpactPhotoSvg({ bytes, contentType: 'image/jpeg' }));
+    await writeSvgFrame(outputPath, renderEditorialImpactPhotoSvg(image));
     return { filePath: outputPath };
   }
   await runFfmpeg([
     "-y",
     "-i",
-    imagePath,
+    image.filePath,
     "-vf",
     `scale=${IMAGE_WIDTH}:${IMAGE_HEIGHT}:force_original_aspect_ratio=decrease,pad=${IMAGE_WIDTH}:${IMAGE_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=0x101014,setsar=1,format=rgba`,
     "-frames:v",
@@ -1219,7 +1218,7 @@ export default async function handler(req, res) {
         for (let index = 0; index < motionImageCount; index += 1) {
           const motionImagePath = path.join(workDir, `motion-source-${index + 1}.png`);
           const sourceImage = preparedImages[Math.min(index, preparedImages.length - 1)];
-          const motionImage = await writeMotionImage(sourceImage.filePath, motionImagePath, templateKey, index);
+          const motionImage = await writeMotionImage(sourceImage, motionImagePath, templateKey, index);
           motionImagePaths.push(motionImagePath);
           motionImages.push(motionImage);
         }
