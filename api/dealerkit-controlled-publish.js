@@ -326,9 +326,9 @@ export default async function handler(request, response) {
     const productMode = ["finance", "rent2buy", "both"].includes(clean(request.body?.productMode, 30)) ? clean(request.body.productMode, 30) : undefined;
     state = await buildFreshControlledPublishState(registration, process.env, { productMode });
     const requestedIntent = action === "update_existing_vehicle" ? "update_existing_vehicle" : "create_new_vehicle";
-    if (state.plan.writeIntent !== requestedIntent) throw new ControlledPublishError(409, "The Wix write intent changed during the final recheck. Rebuild the preview before continuing.", { expected: state.plan.writeIntent, requested: requestedIntent });
+    if (state.plan.writeIntent !== requestedIntent) throw new ControlledPublishError(409, "The Wix write intent changed during the final recheck. Rebuild the preview before continuing.", { code: "write_intent_changed", expected: state.plan.writeIntent, requested: requestedIntent });
     if (!state.plan.canPublish) throw new ControlledPublishError(409, "The fresh DealerKit/Wix state is not safe for controlled reconciliation.", { blockers: state.plan.blockers });
-    if (!controlledPublishConfirmationMatches(request.body?.confirmation, state.plan)) throw new ControlledPublishError(409, "The publish preview is stale. Rebuild the final preview before publishing.");
+    if (!controlledPublishConfirmationMatches(request.body?.confirmation, state.plan)) throw new ControlledPublishError(409, "The publish preview is stale. Rebuild the final preview before publishing.", { code: "preview_stale" });
 
     const targets = orderedTargets(state.plan.targets);
     if (!targets.length) throw new ControlledPublishError(409, "No verified Wix write targets are available.");
@@ -373,6 +373,7 @@ export default async function handler(request, response) {
       publishStatusTransitions: error?.details?.statusTransitions || [],
       publishStatusRollback: error?.details?.statusRollback || [],
       manualAttentionRequired: Boolean(error?.details?.manualAttentionRequired),
+      error_type: clean(error?.details?.code, 100) || null,
       message: error?.message || "Controlled Wix publishing failed.",
       details: error?.details || null,
     });
