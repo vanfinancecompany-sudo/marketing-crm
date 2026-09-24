@@ -33,6 +33,13 @@ function sameJson(left, right) {
   return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 }
 
+function sameNumberValue(left, right) {
+  if ((left === undefined || left === null || left === "") && (right === undefined || right === null || right === "")) return true;
+  const a = Number(left);
+  const b = Number(right);
+  return Number.isFinite(a) && Number.isFinite(b) ? a === b : clean(left) === clean(right);
+}
+
 export function describeConfirmationChanges(previous = {}, current = {}) {
   const changes = [];
   if (clean(previous.writeIntent) !== clean(current.writeIntent)) changes.push("publish action");
@@ -44,10 +51,10 @@ export function describeConfirmationChanges(previous = {}, current = {}) {
   const currentMainImage = current.carMainImage || current.vfcMainImage || current.rent2buyMainImage || null;
   if (clean(previousMainImage) !== clean(currentMainImage)) changes.push("primary image");
 
-  if (Number(previous.retailPrice) !== Number(current.retailPrice)
-      || Number(previous.monthlyPrice) !== Number(current.monthlyPrice)
-      || Number(previous.rent2buyMonthly) !== Number(current.rent2buyMonthly)
-      || Number(previous.rent2buyUpfront) !== Number(current.rent2buyUpfront)) {
+  if (!sameNumberValue(previous.retailPrice, current.retailPrice)
+      || !sameNumberValue(previous.monthlyPrice, current.monthlyPrice)
+      || !sameNumberValue(previous.rent2buyMonthly, current.rent2buyMonthly)
+      || !sameNumberValue(previous.rent2buyUpfront, current.rent2buyUpfront)) {
     changes.push("price/payment");
   }
   if (!sameJson(previous.targetPayloads || [], current.targetPayloads || [])) changes.push("Wix rows/fields");
@@ -381,7 +388,7 @@ function createPanel(registration, product = "finance") {
         checkButton.textContent = "Check again";
       }
     } finally {
-      publish.textContent = payload?.plan?.writeIntent === "update_existing_vehicle"
+      publish.textContent = root._controlledPublishPayload?.plan?.writeIntent === "update_existing_vehicle"
         ? "Reconcile advert"
         : `Publish to ${labelText}`;
       refreshActionState(root);
