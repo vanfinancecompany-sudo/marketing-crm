@@ -32,6 +32,7 @@ test("automatic refresh explains meaningful snapshot changes without inventing c
     targetPayloads: [{ collectionId: "VANFINANCE-ALLVANS", data: { price: "£20,000" } }],
   };
   assert.deepEqual(describeConfirmationChanges(before, structuredClone(before)), []);
+  assert.ok(describeConfirmationChanges(before, null).length > 0);
 
   const after = structuredClone(before);
   after.sourceUpdatedAt = "2026-09-24T13:32:00.000Z";
