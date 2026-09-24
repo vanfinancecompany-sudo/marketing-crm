@@ -497,11 +497,11 @@ async function resolveSelectedVehicleReferences(supabase, blocks = [], options =
   });
 }
 
-function validateTemplate(values) {
+export function validateTemplate(values, options = {}) {
   if (!cleanText(values.name, 200)) throw new ValidationError("Template name is required.");
   if (!cleanText(values.default_subject, 300)) throw new ValidationError("Default subject is required.");
   if (!cleanText(values.company_name, 200)) throw new ValidationError("Company name is required.");
-  if (values.status === "active") {
+  if (values.status === "active" && !options.allowEmptySelectedVehicleGrid) {
     const emptySelectedGrid = (values.content_blocks || []).find((block) => block.enabled !== false && block.type === "vehicle_grid" && block.settings.source_mode === "selected" && !block.settings.selected_vehicles.length);
     if (emptySelectedGrid) throw new ValidationError("Active templates cannot contain an enabled selected vehicle grid with no selected vehicles.");
   }
@@ -531,7 +531,7 @@ async function normalizeValues(values = {}, options = {}) {
     status: normalizeStatus(values.status),
   };
   if (options.resolveVehicleReferences) normalized.content_blocks = await resolveSelectedVehicleReferences(options.supabase, normalized.content_blocks, options);
-  validateTemplate(normalized);
+  validateTemplate(normalized, options);
   if (!options.allowArchivedStatus && !EDITABLE_STATUSES.has(normalized.status)) throw new ValidationError("Use the Archive action to archive templates.");
   return normalized;
 }
@@ -956,8 +956,8 @@ ${hasBlocks ? renderContentBlocks(values) : renderLegacyBody(values)}
 </table></td></tr></table></body></html>`;
 }
 
-async function previewTemplate(supabase, body = {}) {
-  const values = await normalizeValues(templateInput(body), { allowArchivedStatus: true, allowSubmittedFrozenSnapshots: true, allowMissingVehicleUrls: true, supabase, resolveVehicleReferences: true });
+export async function previewTemplate(supabase, body = {}) {
+  const values = await normalizeValues(templateInput(body), { allowArchivedStatus: true, allowSubmittedFrozenSnapshots: true, allowMissingVehicleUrls: true, allowEmptySelectedVehicleGrid: true, supabase, resolveVehicleReferences: true });
   return {
     preview: {
       subject: replaceTextPlaceholders(values.default_subject, values),
