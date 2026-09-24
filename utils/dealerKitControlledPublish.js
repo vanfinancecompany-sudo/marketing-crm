@@ -21,6 +21,52 @@ function productLabel(product) {
   if (product === "cars") return "Cars";
   return "Van Finance";
 }
+export function isRefreshableFinalCheckError(error) {
+  const type = clean(error?.type).toLowerCase();
+  const message = clean(error?.message || error).toLowerCase();
+  return type === "preview_stale"
+    || type === "write_intent_changed"
+    || /publish preview is stale|write intent changed during the final recheck/.test(message);
+}
+
+function sameJson(left, right) {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+export function describeConfirmationChanges(previous = {}, current = {}) {
+  const changes = [];
+  if (clean(previous.writeIntent) !== clean(current.writeIntent)) changes.push("publish action");
+  if (clean(previous.sourceUpdatedAt) !== clean(current.sourceUpdatedAt)) changes.push("DealerKit source");
+  if (clean(previous.reviewUpdatedAt) !== clean(current.reviewUpdatedAt)) changes.push("saved review");
+  if (!sameJson(previous.dealerKitImageIds || [], current.dealerKitImageIds || [])) changes.push("selected images");
+
+  const previousMainImage = previous.carMainImage || previous.vfcMainImage || previous.rent2buyMainImage || null;
+  const currentMainImage = current.carMainImage || current.vfcMainImage || current.rent2buyMainImage || null;
+  if (clean(previousMainImage) !== clean(currentMainImage)) changes.push("primary image");
+
+  if (Number(previous.retailPrice) !== Number(current.retailPrice)
+      || Number(previous.monthlyPrice) !== Number(current.monthlyPrice)
+      || Number(previous.rent2buyMonthly) !== Number(current.rent2buyMonthly)
+      || Number(previous.rent2buyUpfront) !== Number(current.rent2buyUpfront)) {
+    changes.push("price/payment");
+  }
+  if (!sameJson(previous.targetPayloads || [], current.targetPayloads || [])) changes.push("Wix rows/fields");
+
+  return [...new Set(changes)];
+}
+
+function addAutomaticRefreshNotice(root, previousConfirmation, currentConfirmation) {
+  const result = root.querySelector("[data-controlled-publish-result]");
+  if (!result) return;
+  const changes = describeConfirmationChanges(previousConfirmation, currentConfirmation);
+  const detail = changes.length ? ` Changed: ${changes.join(", ")}.` : " The live snapshot changed during the final safety check.";
+  const notice = element(
+    "div",
+    "dealerkit-wix-preview__messages dealerkit-wix-preview__messages--warnings",
+    `Preview refreshed automatically.${detail} Nothing was published. Review the fresh plan and press the publish/reconcile button again.`,
+  );
+  result.prepend(notice);
+}
 
 function setStatus(root, text, state = "") {
   const status = root.querySelector("[data-controlled-publish-status]");
@@ -185,6 +231,7 @@ async function loadPreview(root, { force = false } = {}) {
   if (root._controlledPreviewRequestId !== requestId) return;
   if (root.dataset.publishCompleted === "true" && !force) return;
   renderPayload(root, payload);
+  return payload;
 }
 
 function createPanel(registration, product = "finance") {
@@ -313,6 +360,18 @@ function createPanel(registration, product = "finance") {
       // request has already completed successfully. Never replace a verified
       // success with that later stale result.
       if (root.dataset.publishCompleted === "true") return;
+      if (isRefreshableFinalCheckError(error)) {
+        const previousConfirmation = payload?.plan?.confirmation || null;
+        setStatus(root, "REFRESHING PREVIEW", "is-busy");
+        try {
+          const refreshed = await loadPreview(root, { force: true });
+          addAutomaticRefreshNotice(root, previousConfirmation, refreshed?.plan?.confirmation || null);
+        } catch (refreshError) {
+          setStatus(root, "CHECK FAILED", "is-warning");
+          result.replaceChildren(element("div", "dealerkit-wix-preview__error", refreshError?.message || "The live state changed and the fresh preview could not be rebuilt."));
+        }
+        return;
+      }
       setStatus(root, "PUBLISH BLOCKED", "is-warning");
       result.replaceChildren(element("div", "dealerkit-wix-preview__error", error?.message || "Publishing failed. Check the rollback result before trying again."));
       const checkButton = root.querySelector("[data-controlled-publish-check]");
