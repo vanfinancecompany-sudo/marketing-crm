@@ -178,16 +178,40 @@ function channelIdentity(channel) {
   return `${channel?.name || ""} ${channel?.displayName || ""} ${channel?.externalLink || ""}`.toLowerCase();
 }
 
-export async function discoverVanscoBufferConfig() {
+export async function inspectVanscoBufferAccount() {
   const accountPayload = await bufferGraphql(ACCOUNT_QUERY);
   const organizations = accountPayload?.data?.account?.organizations || [];
-  const candidates = [];
+  const result = [];
 
   for (const organization of organizations) {
     const channelsPayload = await bufferGraphql(CHANNELS_QUERY, {
       organizationId: organization.id,
     });
-    for (const channel of channelsPayload?.data?.channels || []) {
+    result.push({
+      organizationId: String(organization?.id || ""),
+      organizationName: String(organization?.name || ""),
+      scheduledPostsLimit: Number(organization?.limits?.scheduledPosts) || null,
+      channels: (channelsPayload?.data?.channels || []).map((channel) => ({
+        id: String(channel?.id || ""),
+        name: String(channel?.name || ""),
+        displayName: String(channel?.displayName || ""),
+        service: String(channel?.service || ""),
+        externalLink: String(channel?.externalLink || ""),
+        isDisconnected: Boolean(channel?.isDisconnected),
+        isLocked: Boolean(channel?.isLocked),
+      })),
+    });
+  }
+
+  return result;
+}
+
+export async function discoverVanscoBufferConfig() {
+  const organizations = await inspectVanscoBufferAccount();
+  const candidates = [];
+
+  for (const organization of organizations) {
+    for (const channel of organization.channels || []) {
       const identity = channelIdentity(channel);
       if (
         String(channel?.service || "").toLowerCase() === "facebook"
@@ -210,9 +234,9 @@ export async function discoverVanscoBufferConfig() {
 
   const selected = candidates[0];
   const config = {
-    organizationId: String(selected.organization.id),
-    organizationName: String(selected.organization.name || ""),
-    scheduledPostsLimit: Number(selected.organization?.limits?.scheduledPosts) || 10,
+    organizationId: String(selected.organization.organizationId || ""),
+    organizationName: String(selected.organization.organizationName || ""),
+    scheduledPostsLimit: Number(selected.organization?.scheduledPostsLimit) || 10,
     channelId: String(selected.channel.id),
     channelName: String(selected.channel.displayName || selected.channel.name || "Vansco Limited"),
     externalLink: String(selected.channel.externalLink || ""),
