@@ -169,21 +169,19 @@ export default async function handler(request, response) {
   const dryRun = String(request.query?.dryRun || "").toLowerCase() === "true";
 
   try {
-    const vehicles = await fetchVanscoMetaCatalogue();
-    const eligible = vehicles.filter(isEligibleVanscoVehicle);
-    const liveUrls = liveVehicleUrls(eligible);
-
     if (!enabled && !dryRun) {
       return response.status(200).json({
         ok: true,
         enabled: false,
         date: dateKey,
-        metaVehicleCount: vehicles.length,
-        eligibleVehicleCount: eligible.length,
-        message: "Vansco Facebook automation is built but not enabled. No Buffer changes were made.",
+        message: "Vansco Facebook automation is built but not enabled. No DealerKit or Buffer changes were made.",
         elapsedMs: Date.now() - startedAt,
       });
     }
+
+    const vehicles = await fetchVanscoMetaCatalogue();
+    const eligible = vehicles.filter(isEligibleVanscoVehicle);
+    const liveUrls = liveVehicleUrls(eligible);
 
     if (dryRun) {
       const history = await loadVanscoPostingHistory();
