@@ -40,12 +40,21 @@ function postTitle(text) {
     || "Vansco vehicle";
 }
 
+function postBranch(text) {
+  const value = String(text || "").toLowerCase();
+  if (value.includes("vansco 333 showroom")) return "Vansco 333";
+  if (value.includes("vansco new forest")) return "New Forest / Cadnam";
+  if (value.includes("vansco southampton airport")) return "Southampton Airport";
+  return "Branch not shown";
+}
+
 function queuedPostSummary(post) {
   const assets = Array.isArray(post?.assets) ? post.assets : [];
   const image = assets.find((asset) => String(asset?.mimeType || "").startsWith("image/"));
   return {
     id: String(post?.id || ""),
     title: postTitle(post?.text),
+    branch: postBranch(post?.text),
     dueAt: post?.dueAt || null,
     status: String(post?.status || ""),
     vehicleUrl: extractVanscoVehicleUrl(post?.text) || "",
