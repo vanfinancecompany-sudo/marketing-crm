@@ -57,6 +57,7 @@ test("VAT and registration helpers only return explicit evidence", () => {
   assert.equal(vatLabelFromStatus("plus_vat"), "+ VAT");
   assert.equal(vatLabelFromStatus("no_vat"), "NO VAT");
   assert.equal(vatLabelFromStatus("vat_included"), "INC VAT");
+  assert.equal(vatLabelFromStatus("inc_vat"), "INC VAT");
   assert.equal(vatLabelFromStatus("unknown"), "");
   assert.equal(hasExplicitVanscoVatLabel("Advertised price: £12,995 + VAT"), true);
   assert.equal(hasExplicitVanscoVatLabel("Advertised price: £12,995"), false);
@@ -155,6 +156,10 @@ test("worker replaces queued live posts that are missing a VAT label", async () 
     new URL("../api/_vansco-facebook-source.js", import.meta.url),
     "utf8",
   );
+  assert.match(source, /hydrateVanscoVatFromDealerKitState/);
+  assert.match(source, /dealerkit_stock_state/);
+  assert.match(source, /supplier_stock_id,source_url,last_seen_at,vehicle_snapshot/);
+  assert.match(source, /vatSource: "dealerkit_stock_state"/);
   assert.match(source, /hydrateVanscoVatFromCache/);
   assert.match(source, /fetchVanscoDetailHtml/);
   assert.match(source, /parseDetailHtml/);
