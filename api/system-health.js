@@ -975,7 +975,11 @@ export default async function handler(request, response) {
       networkDailyLimit: checks[7].status.buffer?.networkDailyLimit ?? null,
       providerSent: checks[7].status.buffer?.providerSent ?? null,
       providerScheduled: checks[7].status.buffer?.providerScheduled ?? null,
-      held: Array.isArray(checks[7].status.held) ? checks[7].status.held.slice(0, 5) : [],
+      heldReasonCounts: (checks[7].status.held || []).reduce((counts, item) => {
+        const reason = String(item?.reason || "unknown");
+        counts[reason] = (counts[reason] || 0) + 1;
+        return counts;
+      }, {}),
     } : null,
     automations,
     issues,
