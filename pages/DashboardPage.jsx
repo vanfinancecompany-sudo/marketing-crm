@@ -158,6 +158,9 @@ export default function DashboardPage({ onNavigate }) {
   const [vanscoBuffer, setVanscoBuffer] = useState(null);
   const [vanscoBufferBusy, setVanscoBufferBusy] = useState(false);
   const [vanscoBufferError, setVanscoBufferError] = useState("");
+  const [vanscoStatus, setVanscoStatus] = useState(null);
+  const [vanscoStatusBusy, setVanscoStatusBusy] = useState(false);
+  const [vanscoStatusError, setVanscoStatusError] = useState("");
 
   function periodRange(nextPeriod = period) {
     if (nextPeriod === "seven")
@@ -189,6 +192,7 @@ export default function DashboardPage({ onNavigate }) {
       );
       setLocked(false);
       await loadTotals("today");
+      await loadVanscoStatus();
     } catch (caught) {
       if (caught?.status === 401) setLocked(true);
       else
@@ -252,6 +256,25 @@ export default function DashboardPage({ onNavigate }) {
       setError(caught.message || "Could not load totals.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function loadVanscoStatus() {
+    setVanscoStatusBusy(true);
+    setVanscoStatusError("");
+    try {
+      const result = await fetch("/api/vansco-facebook-automation-status", {
+        method: "GET",
+        headers: buildMarketingAccessHeaders(),
+        cache: "no-store",
+      });
+      const payload = await result.json();
+      if (!result.ok || !payload.ok) throw new Error(payload.error || "Could not load Vansco Facebook status.");
+      setVanscoStatus(payload);
+    } catch (caught) {
+      setVanscoStatusError(caught?.message || "Could not load Vansco Facebook status.");
+    } finally {
+      setVanscoStatusBusy(false);
     }
   }
 
