@@ -96,11 +96,12 @@ test("branch-specific caption uses only the selected site details", () => {
   assert.match(caption, /£12,995 \+ VAT/);
 });
 
-test("35-post schedule is evenly spaced without crossing midnight", () => {
+test("35-post schedule is evenly spaced from 08:00 through 21:00", () => {
   const slots = vanscoDailySlots("2026-09-25", 35);
   assert.equal(slots.length, 35);
-  assert.equal(slots[0].localTime, "00:30");
-  assert.equal(slots.at(-1).localTime, "23:10");
+  assert.equal(slots[0].localTime, "08:00");
+  assert.equal(slots.at(-1).localTime, "21:00");
+  assert.ok(slots.every((slot) => slot.localMinutes >= 8 * 60 && slot.localMinutes <= 21 * 60));
   assert.equal(new Set(slots.map((slot) => slot.dueAt)).size, 35);
 });
 
