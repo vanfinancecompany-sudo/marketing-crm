@@ -858,6 +858,7 @@ export default async function handler(request, response) {
     runCheck("CarsLink stock sync", checkCarslink),
     runCheck("Email campaign worker", checkEmailCampaigns),
     runCheck("Email delivery", checkUnknownEmailSubmissions),
+    runCheck("Vansco Facebook automation", checkVanscoFacebookAutomation),
   ]);
   const issues = checks.filter((check) => !check.ok && check.issue).map((check) => check.issue);
 
@@ -865,7 +866,7 @@ export default async function handler(request, response) {
     .map((check, index) => ({ check, index }))
     .filter(({ check }) => check?.degraded)
     .map(({ check, index }) => ({
-      key: ["Supabase", "Buffer", "Facebook automation", "Reel duplicate protection", "CarsLink stock sync", "Email campaign worker", "Email delivery"][index],
+      key: ["Supabase", "Buffer", "Facebook automation", "Reel duplicate protection", "CarsLink stock sync", "Email campaign worker", "Email delivery", "Vansco Facebook automation"][index],
       reason: check.reason || "temporarily_degraded",
       retry_after_ms: check.retry_after_ms || null,
     }));
