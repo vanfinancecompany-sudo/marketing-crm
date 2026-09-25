@@ -415,6 +415,35 @@ async function checkVanscoFacebookAutomation() {
     };
   }
 
+  const createdCount = Number(status.createdCount);
+  const heldCount = Number(status.heldCount);
+  if (
+    queueCount === 0
+    && createdCount === 0
+    && Number.isFinite(heldCount)
+    && heldCount > 0
+  ) {
+    const reasons = (status.held || []).reduce((counts, item) => {
+      const reason = String(item?.reason || "unknown");
+      counts[reason] = (counts[reason] || 0) + 1;
+      return counts;
+    }, {});
+    const reasonText = Object.entries(reasons)
+      .map(([reason, count]) => `${count} ${reason.replaceAll("_", " ")}`)
+      .join(", ");
+    return {
+      ok: false,
+      enabled: true,
+      status,
+      issue: issue(
+        "vansco-facebook-candidates-held",
+        "Vansco Facebook automation",
+        `Buffer queue is empty because ${heldCount} Vansco candidate${heldCount === 1 ? " was" : "s were"} held instead of posted${reasonText ? `: ${reasonText}` : "."}`,
+        { last_success_at: status.lastSuccessAt || attemptedAt },
+      ),
+    };
+  }
+
   return {
     ok: true,
     enabled: true,
