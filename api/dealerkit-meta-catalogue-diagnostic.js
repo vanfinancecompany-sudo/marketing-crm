@@ -1,6 +1,13 @@
 import { timingSafeEqual } from "node:crypto";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { parse as parseDelimited } from "csv-parse/sync";
+import {
+  BUFFER_API_URL,
+  BUFFER_CHANNELS_QUERY,
+  BUFFER_ORGANIZATION_ID,
+  parseBufferChannelsPayload,
+} from "../lib/bufferPublishing.js";
+import { guardedBufferGraphql } from "../lib/bufferRuntimeGuard.js";
 
 const ACCESS_HEADER = "x-marketing-customer-database-key";
 const META_URL = "https://api.dealerkit.uk/meta-catalogue";
@@ -51,6 +58,97 @@ function firstLiteral(record, keys) {
     if (value !== null) return value;
   }
   return null;
+}
+
+function inferVanscoBranch(vehicle) {
+  const description = String(firstLiteral(vehicle, ["description"]) || "").toLowerCase();
+  const vehicleUrl = String(pick(vehicle, ["url", "vehicle_url", "vehicleUrl", "link"]) || "").toLowerCase();
+  const city = String(firstLiteral(vehicle, ["address.city", "city"]) || "").toLowerCase();
+
+  const tests = {
+    vansco333: [
+      /vansco\s*(?:limited\s*[–-]\s*)?333\b/,
+      /333\s+showroom/,
+      /333\s+millbrook/,
+      /02380\s*333\s*777/,
+      /02380333777/,
+    ],
+    newForest: [
+      /new\s+forest/,
+      /cadnam/,
+      /romsey\s+road/,
+      /02380\s*813\s*119/,
+      /02380813119/,
+    ],
+    southamptonAirport: [
+      /southampton\s+airport/,
+      /spitfire\s+roundabout/,
+      /201\s+wide\s+lane/,
+      /02381\s*780\s*300/,
+      /02381780300/,
+    ],
+  };
+  const urlTests = {
+    vansco333: [/vansco-333/, /333-showroom/, /333-millbrook/],
+    newForest: [/vansco-new-forest/, /vansco-cadnam/],
+    southamptonAirport: [/vansco-southampton-airport/, /vansco-eastleigh/, /southampton-airport/],
+  };
+
+  const descriptionMatches = Object.entries(tests)
+    .filter(([, patterns]) => patterns.some((pattern) => pattern.test(description)))
+    .map(([key]) => key);
+  const urlMatches = Object.entries(urlTests)
+    .filter(([, patterns]) => patterns.some((pattern) => pattern.test(vehicleUrl)))
+    .map(([key]) => key);
+
+  let resolved = "";
+  let source = "";
+  let conflict = false;
+  if (descriptionMatches.length === 1) {
+    resolved = descriptionMatches[0];
+    source = "description";
+    if (urlMatches.length === 1 && urlMatches[0] !== resolved) conflict = true;
+  } else if (descriptionMatches.length === 0 && urlMatches.length === 1) {
+    resolved = urlMatches[0];
+    source = "url";
+  } else if (descriptionMatches.length === 0 && urlMatches.length === 0 && city === "cadnam") {
+    resolved = "newForest";
+    source = "city";
+  } else if (descriptionMatches.length > 1 || urlMatches.length > 1) {
+    conflict = true;
+  }
+
+  return { resolved: resolved || "unknown", source: source || "none", conflict, descriptionMatches, urlMatches };
+}
+
+async function inspectExistingBufferChannels() {
+  const token = String(process.env.BUFFER_API_KEY || "").trim();
+  if (!token) return { configured: false, organizationId: BUFFER_ORGANIZATION_ID, channels: [] };
+  try {
+    const payload = await guardedBufferGraphql({
+      url: BUFFER_API_URL,
+      token,
+      query: BUFFER_CHANNELS_QUERY,
+      variables: { organizationId: BUFFER_ORGANIZATION_ID },
+    });
+    const channels = parseBufferChannelsPayload(payload).map((channel) => ({
+      id: String(channel?.id || ""),
+      name: String(channel?.name || ""),
+      displayName: String(channel?.displayName || ""),
+      service: String(channel?.service || ""),
+      externalLink: String(channel?.externalLink || ""),
+      isDisconnected: Boolean(channel?.isDisconnected),
+      isLocked: Boolean(channel?.isLocked),
+    }));
+    return { configured: true, organizationId: BUFFER_ORGANIZATION_ID, channels };
+  } catch (error) {
+    return {
+      configured: true,
+      organizationId: BUFFER_ORGANIZATION_ID,
+      error: String(error?.message || "Buffer channel lookup failed.").slice(0, 250),
+      channels: [],
+    };
+  }
 }
 
 function countBy(values) {
@@ -260,6 +358,11 @@ export function summariseMetaCatalogue(payload) {
   const vatFields = fieldNamesAvailable.filter((name) => /vat|tax/i.test(name));
   const vehicleIds = validVehicles.map((vehicle) => firstLiteral(vehicle, ["vehicle_id", "vehicleId"])).filter(Boolean);
   const ukRegistrationLike = vehicleIds.filter((value) => /^[A-Z0-9]{2,8}$/i.test(String(value).replace(/\s+/g, ""))).length;
+  const branchEvidence = validVehicles.map((vehicle) => ({
+    vehicleId: firstLiteral(vehicle, ["vehicle_id", "vehicleId"]),
+    vehicleUrl: url(pick(vehicle, ["url", "vehicle_url", "vehicleUrl", "link"])),
+    ...inferVanscoBranch(vehicle),
+  }));
   return {
     totalVehicleCount: validVehicles.length,
     responseShape: {
@@ -284,6 +387,10 @@ export function summariseMetaCatalogue(payload) {
       registrationLikeCount: ukRegistrationLike,
       note: "Heuristic only. Compare representative vehicleId values with Vansco URLs/titles before treating vehicle_id as registration.",
     },
+    branchResolutionCounts: countBy(branchEvidence.map((item) => item.resolved)),
+    branchResolutionSourceCounts: countBy(branchEvidence.map((item) => item.source)),
+    branchConflicts: branchEvidence.filter((item) => item.conflict).slice(0, 10),
+    branchUnknownExamples: branchEvidence.filter((item) => item.resolved === "unknown").slice(0, 10),
   };
 }
 
@@ -325,6 +432,7 @@ export default async function handler(request, response) {
       return response.status(502).json({ ok: false, error: "Catalogue format could not be parsed.", errorCode: parsed.errorCode, upstreamStatus: upstream.status, contentType, detectedFormat: parsed.detectedFormat, structure: parsed.structure });
     }
     const summary = summariseMetaCatalogue(parsed.payload);
+    summary.bufferExistingOrganization = await inspectExistingBufferChannels();
     if (!summary.responseShape.vehiclesPath) {
       console.warn("Meta catalogue diagnostic: vehicle_array_missing", { upstreamStatus: upstream.status, contentType, detectedFormat: parsed.detectedFormat, structure: parsed.structure, responseType: summary.responseShape.type, topLevelFields: summary.responseShape.topLevelFields });
       return response.status(502).json({ ok: false, error: "Catalogue vehicle array was not found.", errorCode: "vehicle_array_missing", upstreamStatus: upstream.status, contentType, detectedFormat: parsed.detectedFormat, structure: parsed.structure, responseShape: summary.responseShape });
