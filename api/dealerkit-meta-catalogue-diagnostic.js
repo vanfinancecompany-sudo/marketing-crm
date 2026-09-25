@@ -153,7 +153,10 @@ export default async function handler(request, response) {
 
   const username = process.env.DEALERKIT_META_USERNAME;
   const password = process.env.DEALERKIT_META_PASSWORD;
-  if (!username || !password) return response.status(503).json({ ok: false, error: "Catalogue credentials are unavailable." });
+  if (!username || !password) {
+    console.warn("Meta catalogue diagnostic: credentials_missing", { usernameConfigured: Boolean(username), passwordConfigured: Boolean(password) });
+    return response.status(503).json({ ok: false, error: "Catalogue credentials are unavailable.", errorCode: "credentials_missing" });
+  }
 
   try {
     const upstream = await fetch(META_URL, {
@@ -162,13 +165,28 @@ export default async function handler(request, response) {
       cache: "no-store",
       signal: AbortSignal.timeout(25000),
     });
-    if (!upstream.ok) return response.status(502).json({ ok: false, error: "Catalogue request failed.", upstreamStatus: upstream.status });
-    const payload = await upstream.json();
+    const contentType = String(upstream.headers.get("content-type") || "").split(";")[0].trim().toLowerCase().slice(0, 80);
+    if (!upstream.ok) {
+      console.warn("Meta catalogue diagnostic: upstream_http_error", { upstreamStatus: upstream.status, contentType });
+      return response.status(502).json({ ok: false, error: "Catalogue request was rejected by the upstream service.", errorCode: "upstream_http_error", upstreamStatus: upstream.status, contentType });
+    }
+    let payload;
+    try {
+      payload = await upstream.json();
+    } catch {
+      console.warn("Meta catalogue diagnostic: invalid_json", { upstreamStatus: upstream.status, contentType });
+      return response.status(502).json({ ok: false, error: "Catalogue response was not valid JSON.", errorCode: "invalid_json", upstreamStatus: upstream.status, contentType });
+    }
     const summary = summariseMetaCatalogue(payload);
-    if (!summary.responseShape.vehiclesPath) return response.status(502).json({ ok: false, error: "Catalogue vehicle array was not found.", responseShape: summary.responseShape });
+    if (!summary.responseShape.vehiclesPath) {
+      console.warn("Meta catalogue diagnostic: vehicle_array_missing", { upstreamStatus: upstream.status, contentType, responseType: summary.responseShape.type, topLevelFields: summary.responseShape.topLevelFields });
+      return response.status(502).json({ ok: false, error: "Catalogue vehicle array was not found.", errorCode: "vehicle_array_missing", upstreamStatus: upstream.status, contentType, responseShape: summary.responseShape });
+    }
     return response.status(200).json({ ok: true, readOnly: true, summary });
-  } catch {
-    return response.status(502).json({ ok: false, error: "Catalogue request failed." });
+  } catch (error) {
+    const errorCode = error?.name === "TimeoutError" ? "upstream_timeout" : "request_failed";
+    console.warn(`Meta catalogue diagnostic: ${errorCode}`);
+    return response.status(502).json({ ok: false, error: "Catalogue request failed before a usable response was received.", errorCode });
   }
 }
 
