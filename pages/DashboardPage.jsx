@@ -403,11 +403,39 @@ export default function DashboardPage({ onNavigate }) {
         {vanscoPreviewError ? <div className="notice notice--error">{vanscoPreviewError}</div> : null}
         {vanscoBufferError ? <div className="notice notice--error">{vanscoBufferError}</div> : null}
         {vanscoBuffer ? (
-          <div className={`notice ${vanscoBuffer.connected ? "notice--success" : ""}`}>
-            {vanscoBuffer.connected
-              ? `${vanscoBuffer.channelName} connected · daily network limit ${vanscoBuffer.dailyPostingLimit ?? "not reported"} · queue limit ${vanscoBuffer.scheduledPostsLimit}`
-              : vanscoBuffer.message}
-          </div>
+          <>
+            <div className={`notice ${vanscoBuffer.connected ? "notice--success" : ""}`}>
+              {vanscoBuffer.connected
+                ? `${vanscoBuffer.channelName} connected · daily network limit ${vanscoBuffer.dailyPostingLimit ?? "not reported"} · queue limit ${vanscoBuffer.scheduledPostsLimit}`
+                : vanscoBuffer.message}
+            </div>
+            {!vanscoBuffer.connected && vanscoBuffer.accessibleOrganizations?.length ? (
+              <div style={{ marginTop: 12 }}>
+                {vanscoBuffer.accessibleOrganizations.map((organization, index) => (
+                  <details className="operations-drawer" key={`${organization.organizationName}-${index}`}>
+                    <summary>
+                      Buffer workspace: {organization.organizationName || "(unnamed)"} · queue limit {organization.scheduledPostsLimit ?? "not reported"}
+                    </summary>
+                    <div className="operations-drawer__body">
+                      {(organization.channels || []).length ? (
+                        <ul>
+                          {organization.channels.map((channel, channelIndex) => (
+                            <li key={`${channel.name}-${channelIndex}`}>
+                              {channel.name || "(unnamed channel)"} · {channel.service || "unknown service"}
+                              {channel.isDisconnected ? " · disconnected" : ""}
+                              {channel.isLocked ? " · locked" : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p>No channels visible to this Buffer token.</p>
+                      )}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            ) : null}
+          </>
         ) : null}
         {vanscoPreview ? (
           <div style={{ marginTop: 16 }}>
