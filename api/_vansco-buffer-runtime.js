@@ -138,8 +138,10 @@ async function writeBlobJson(pathname, value) {
 }
 
 function apiKey() {
-  const key = String(process.env.VANSCO_BUFFER_API_KEY || "").trim();
-  if (!key) throw new Error("VANSCO_BUFFER_API_KEY is not configured.");
+  const dedicated = String(process.env.VANSCO_BUFFER_API_KEY || "").trim();
+  const existing = String(process.env.BUFFER_API_KEY || "").trim();
+  const key = dedicated || existing;
+  if (!key) throw new Error("No Buffer API key is configured for Vansco.");
   return key;
 }
 
