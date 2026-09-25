@@ -263,7 +263,14 @@ export default function DashboardPage({ onNavigate }) {
         cache: "no-store",
       });
       const payload = await result.json();
-      if (!result.ok || !payload.ok) throw new Error("The Preview diagnostic could not be completed.");
+      if (!result.ok || !payload.ok) {
+        const safeCode = ["credentials_missing", "upstream_http_error", "invalid_json", "vehicle_array_missing", "upstream_timeout", "request_failed"].includes(payload.errorCode)
+          ? payload.errorCode
+          : "diagnostic_failed";
+        const upstreamStatus = Number.isInteger(payload.upstreamStatus) ? ` · upstream HTTP ${payload.upstreamStatus}` : "";
+        setMetaDiagnosticError(`The Preview diagnostic could not be completed (${safeCode}${upstreamStatus}).`);
+        return;
+      }
       setMetaDiagnostic(payload.summary);
     } catch {
       setMetaDiagnosticError("The Preview diagnostic could not be completed.");
