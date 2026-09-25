@@ -728,6 +728,17 @@ function buildAutomationCentre(evidence, checkMap) {
       detail: "Current Dragon/Vansco cache refresh. Advisory stock comparison only.",
     }),
     automationItem({
+      key: "vansco_facebook_automation",
+      label: "Vansco Facebook stock automation",
+      cadence: "Every 30 minutes at :11/:41",
+      status: checkMap.vanscoFacebookWaiting ? "waiting" : (checkMap.vanscoFacebook ? "healthy" : "failed"),
+      lastAttemptAt: checkMap.vanscoFacebookAttemptAt || null,
+      lastSuccessAt: checkMap.vanscoFacebookSuccessAt || null,
+      nextExpectedAt: nextHourlyAt(41, now),
+      lastError: checkMap.vanscoFacebookIssue || "",
+      detail: checkMap.vanscoFacebookDetail || "DealerKit retail stock posting through the dedicated Vansco Buffer channel.",
+    }),
+    automationItem({
       key: "facebook_automation",
       label: "Facebook publishing automation",
       cadence: "Hourly at :05",
