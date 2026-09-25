@@ -158,6 +158,9 @@ export default function DashboardPage({ onNavigate }) {
   const [vanscoBuffer, setVanscoBuffer] = useState(null);
   const [vanscoBufferBusy, setVanscoBufferBusy] = useState(false);
   const [vanscoBufferError, setVanscoBufferError] = useState("");
+  const [vanscoStatus, setVanscoStatus] = useState(null);
+  const [vanscoStatusBusy, setVanscoStatusBusy] = useState(false);
+  const [vanscoStatusError, setVanscoStatusError] = useState("");
 
   function periodRange(nextPeriod = period) {
     if (nextPeriod === "seven")
@@ -189,6 +192,7 @@ export default function DashboardPage({ onNavigate }) {
       );
       setLocked(false);
       await loadTotals("today");
+      await loadVanscoStatus();
     } catch (caught) {
       if (caught?.status === 401) setLocked(true);
       else
@@ -252,6 +256,25 @@ export default function DashboardPage({ onNavigate }) {
       setError(caught.message || "Could not load totals.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function loadVanscoStatus() {
+    setVanscoStatusBusy(true);
+    setVanscoStatusError("");
+    try {
+      const result = await fetch("/api/vansco-facebook-automation-status", {
+        method: "GET",
+        headers: buildMarketingAccessHeaders(),
+        cache: "no-store",
+      });
+      const payload = await result.json();
+      if (!result.ok || !payload.ok) throw new Error(payload.error || "Could not load Vansco Facebook status.");
+      setVanscoStatus(payload);
+    } catch (caught) {
+      setVanscoStatusError(caught?.message || "Could not load Vansco Facebook status.");
+    } finally {
+      setVanscoStatusBusy(false);
     }
   }
 
@@ -379,9 +402,11 @@ export default function DashboardPage({ onNavigate }) {
         <div className="eyebrow">VANSCO · FACEBOOK STOCK AUTOMATION</div>
         <h3>DealerKit → branch-specific Facebook posts → Buffer</h3>
         <p>
-          DealerKit Meta catalogue is the retail stock source. Preview is read-only.
-          Buffer verification prefers the dedicated Vansco key when configured. Live publishing remains disabled until production is explicitly enabled.
+          DealerKit Meta catalogue is the retail stock source. Branch-specific copy is created only when the vehicle location can be resolved safely, then queued to the dedicated Vansco Limited Buffer channel.
         </p>
+        <div className="notice" style={{ marginBottom: 12 }}>
+          <strong>Posting flow:</strong> DealerKit retail stock to branch match to post builder to Buffer to Vansco Limited Facebook.
+        </div>
         <div className="card-actions">
           <button
             className="button button--primary"
@@ -406,7 +431,7 @@ export default function DashboardPage({ onNavigate }) {
           <>
             <div className={`notice ${vanscoBuffer.connected ? "notice--success" : ""}`}>
               {vanscoBuffer.connected
-                ? `${vanscoBuffer.channelName} connected · daily network limit ${vanscoBuffer.dailyPostingLimit ?? "not reported"} · queue limit ${vanscoBuffer.scheduledPostsLimit}`
+                ? `${vanscoBuffer.channelName} connected · sent today ${vanscoBuffer.sentToday ?? 0} · queued now ${vanscoBuffer.queuedNow ?? 0} · daily limit ${vanscoBuffer.dailyPostingLimit ?? "not reported"} · queue limit ${vanscoBuffer.scheduledPostsLimit}`
                 : vanscoBuffer.message}
             </div>
             {!vanscoBuffer.connected && vanscoBuffer.accessibleOrganizations?.length ? (

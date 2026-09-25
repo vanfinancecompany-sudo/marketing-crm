@@ -3,6 +3,7 @@ import { list, put } from "@vercel/blob";
 const BUFFER_API_URL = "https://api.buffer.com";
 const CONFIG_PATH = "vansco-buffer-v1/channel.json";
 const HISTORY_PATH = "vansco-buffer-v1/history.json";
+const STATUS_PATH = "vansco-buffer-v1/status.json";
 
 const ACCOUNT_QUERY = `
   query VanscoBufferAccount {
@@ -312,6 +313,19 @@ export async function loadVanscoPostingHistory() {
 export async function saveVanscoPostingHistory(lastPostedByKey) {
   return writeBlobJson(HISTORY_PATH, {
     lastPostedByKey,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+
+export async function loadVanscoAutomationStatus() {
+  const stored = await readBlobJson(STATUS_PATH);
+  return stored && typeof stored === "object" ? stored : null;
+}
+
+export async function saveVanscoAutomationStatus(status) {
+  return writeBlobJson(STATUS_PATH, {
+    ...(status && typeof status === "object" ? status : {}),
     updatedAt: new Date().toISOString(),
   });
 }

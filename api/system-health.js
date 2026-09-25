@@ -12,6 +12,7 @@ import {
   isBufferRateLimitCooldownError,
 } from "../lib/bufferRuntimeGuard.js";
 import { loadCarslinkSyncStatus } from "../lib/carslinkSyncState.js";
+import { loadVanscoAutomationStatus } from "./_vansco-buffer-runtime.js";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -287,6 +288,114 @@ async function checkBuffer() {
     };
   }
   return { ...base, ok: true };
+}
+
+async function checkVanscoFacebookAutomation() {
+  const enabled = String(process.env.VANSCO_FACEBOOK_AUTOMATION_ENABLED || "").toLowerCase() === "true";
+  const configured = Boolean(
+    String(process.env.VANSCO_BUFFER_API_KEY || "").trim()
+    && String(process.env.DEALERKIT_META_USERNAME || "").trim()
+    && String(process.env.DEALERKIT_META_PASSWORD || "").trim()
+  );
+
+  if (!enabled) {
+    return { ok: true, enabled: false, waiting: false, status: null, detail: "Vansco Facebook automation is disabled." };
+  }
+
+  if (!configured) {
+    return {
+      ok: false,
+      enabled: true,
+      issue: issue(
+        "vansco-facebook-config",
+        "Vansco Facebook automation",
+        "Vansco Facebook automation is enabled but its Buffer or DealerKit configuration is incomplete.",
+      ),
+    };
+  }
+
+  const status = await loadVanscoAutomationStatus();
+  if (!status) {
+    return {
+      ok: true,
+      enabled: true,
+      waiting: true,
+      status: null,
+      detail: "Enabled and waiting for its first recorded production run.",
+    };
+  }
+
+  const attemptedAt = status.attemptedAt || status.updatedAt || null;
+  const state = String(status.state || "").toLowerCase();
+  const channelName = String(status?.buffer?.channelName || "").trim();
+  const eligible = Number(status.eligibleVehicleCount);
+  const queueCount = Number(status.queueCountAfter);
+
+  if (state === "failed" || status.ok === false) {
+    return {
+      ok: false,
+      enabled: true,
+      status,
+      issue: issue(
+        "vansco-facebook-failed",
+        "Vansco Facebook automation",
+        status.lastError || status.error || "The latest Vansco Facebook automation run failed.",
+        { last_success_at: status.lastSuccessAt || null },
+      ),
+    };
+  }
+
+  if (attemptedAt && ageMs(attemptedAt) > 90 * 60 * 1000) {
+    return {
+      ok: false,
+      enabled: true,
+      status,
+      issue: issue(
+        "vansco-facebook-stale",
+        "Vansco Facebook automation",
+        "The Vansco Facebook automation has not recorded a run for more than 90 minutes.",
+        { last_success_at: status.lastSuccessAt || attemptedAt },
+      ),
+    };
+  }
+
+  if (channelName && !/vansco/i.test(channelName)) {
+    return {
+      ok: false,
+      enabled: true,
+      status,
+      issue: issue(
+        "vansco-facebook-channel",
+        "Vansco Facebook automation",
+        "The latest run reported an unexpected Buffer channel.",
+        { last_success_at: status.lastSuccessAt || attemptedAt },
+      ),
+    };
+  }
+
+  if (Number.isFinite(eligible) && eligible <= 0) {
+    return {
+      ok: false,
+      enabled: true,
+      status,
+      issue: issue(
+        "vansco-facebook-no-stock",
+        "Vansco Facebook automation",
+        "DealerKit returned no eligible Vansco retail vehicles on the latest run.",
+        { last_success_at: status.lastSuccessAt || attemptedAt },
+      ),
+    };
+  }
+
+  return {
+    ok: true,
+    enabled: true,
+    waiting: false,
+    status,
+    checked_at: attemptedAt,
+    queue_count: Number.isFinite(queueCount) ? queueCount : null,
+    detail: Number.isFinite(queueCount) ? `Latest run healthy; Buffer queue ${queueCount}.` : "Latest run healthy.",
+  };
 }
 
 async function checkRecentAutomationActivity() {
@@ -619,6 +728,17 @@ function buildAutomationCentre(evidence, checkMap) {
       detail: "Current Dragon/Vansco cache refresh. Advisory stock comparison only.",
     }),
     automationItem({
+      key: "vansco_facebook_automation",
+      label: "Vansco Facebook stock automation",
+      cadence: "Every 30 minutes at :11/:41",
+      status: checkMap.vanscoFacebookWaiting ? "waiting" : (checkMap.vanscoFacebook ? "healthy" : "failed"),
+      lastAttemptAt: checkMap.vanscoFacebookAttemptAt || null,
+      lastSuccessAt: checkMap.vanscoFacebookSuccessAt || null,
+      nextExpectedAt: nextHourlyAt(41, now),
+      lastError: checkMap.vanscoFacebookIssue || "",
+      detail: checkMap.vanscoFacebookDetail || "DealerKit retail stock posting through the dedicated Vansco Buffer channel.",
+    }),
+    automationItem({
       key: "facebook_automation",
       label: "Facebook publishing automation",
       cadence: "Hourly at :05",
@@ -749,6 +869,7 @@ export default async function handler(request, response) {
     runCheck("CarsLink stock sync", checkCarslink),
     runCheck("Email campaign worker", checkEmailCampaigns),
     runCheck("Email delivery", checkUnknownEmailSubmissions),
+    runCheck("Vansco Facebook automation", checkVanscoFacebookAutomation),
   ]);
   const issues = checks.filter((check) => !check.ok && check.issue).map((check) => check.issue);
 
@@ -756,7 +877,7 @@ export default async function handler(request, response) {
     .map((check, index) => ({ check, index }))
     .filter(({ check }) => check?.degraded)
     .map(({ check, index }) => ({
-      key: ["Supabase", "Buffer", "Facebook automation", "Reel duplicate protection", "CarsLink stock sync", "Email campaign worker", "Email delivery"][index],
+      key: ["Supabase", "Buffer", "Facebook automation", "Reel duplicate protection", "CarsLink stock sync", "Email campaign worker", "Email delivery", "Vansco Facebook automation"][index],
       reason: check.reason || "temporarily_degraded",
       retry_after_ms: check.retry_after_ms || null,
     }));
@@ -777,6 +898,12 @@ export default async function handler(request, response) {
       carslinkIssue: checks[4]?.issue?.message || "",
       email: checks[5].ok && checks[6].ok,
       emailIssue: checks[5]?.issue?.message || checks[6]?.issue?.message || "",
+      vanscoFacebook: checks[7].ok,
+      vanscoFacebookWaiting: Boolean(checks[7]?.waiting),
+      vanscoFacebookAttemptAt: checks[7]?.status?.attemptedAt || checks[7]?.status?.updatedAt || null,
+      vanscoFacebookSuccessAt: checks[7]?.status?.lastSuccessAt || null,
+      vanscoFacebookIssue: checks[7]?.issue?.message || "",
+      vanscoFacebookDetail: checks[7]?.detail || "DealerKit retail stock posting through the dedicated Vansco Buffer channel.",
     });
   } catch (error) {
     automations = [
@@ -805,6 +932,7 @@ export default async function handler(request, response) {
       carslink_stock_sync: checks[4].ok,
       email_campaign_worker: checks[5].ok,
       email_delivery: checks[6].ok,
+      vansco_facebook_automation: checks[7].ok,
     },
     buffer_ignored_inactive_failures: checks[1]?.ignored_inactive_failures || 0,
     buffer_ignored_inactive_registrations: checks[1]?.ignored_inactive_registrations || [],
