@@ -402,8 +402,7 @@ export default function DashboardPage({ onNavigate }) {
         <div className="eyebrow">VANSCO · FACEBOOK STOCK AUTOMATION</div>
         <h3>DealerKit → branch-specific Facebook posts → Buffer</h3>
         <p>
-          DealerKit Meta catalogue is the retail stock source. Preview is read-only.
-          Buffer verification prefers the dedicated Vansco key when configured. Live publishing remains disabled until production is explicitly enabled.
+          DealerKit Meta catalogue is the retail stock source. Branch-specific copy is created only when the vehicle location can be resolved safely, then queued to the dedicated Vansco Limited Buffer channel.
         </p>
         <div className="card-actions">
           <button
