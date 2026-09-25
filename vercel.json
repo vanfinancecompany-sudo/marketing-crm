@@ -52,6 +52,10 @@
     {
       "path": "/api/carslink-auto-sync",
       "schedule": "47 * * * *"
+    },
+    {
+      "path": "/api/vansco-facebook-automation-worker",
+      "schedule": "11,41 * * * *"
     }
   ],
   "functions": {
@@ -129,6 +133,9 @@
     },
     "api/ai-assistant-learning-worker.js": {
       "maxDuration": 60
+    },
+    "api/vansco-facebook-automation-worker.js": {
+      "maxDuration": 300
     }
   },
   "headers": [
