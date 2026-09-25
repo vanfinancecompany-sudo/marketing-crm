@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildVanscoFacebookCaption,
   extractUkRegistration,
+  hasExplicitVanscoVatLabel,
   isEligibleVanscoVehicle,
   normalizeVanscoMetaRow,
   parseCsvRecords,
@@ -49,7 +50,11 @@ test("branch resolver recognises each Vansco branch and Cadnam fallback", () => 
 test("VAT and registration helpers only return explicit evidence", () => {
   assert.equal(vatLabelFromText("Price £12,995 + VAT"), "+ VAT");
   assert.equal(vatLabelFromText("Price £12,995 NO VAT"), "NO VAT");
+  assert.equal(vatLabelFromText("Price £12,995 including VAT"), "INC VAT");
+  assert.equal(vatLabelFromText("Price £12,995 VAT included"), "INC VAT");
   assert.equal(vatLabelFromText("Price £12,995"), "");
+  assert.equal(hasExplicitVanscoVatLabel("Advertised price: £12,995 + VAT"), true);
+  assert.equal(hasExplicitVanscoVatLabel("Advertised price: £12,995"), false);
   assert.equal(extractUkRegistration("Registration: AB12 CDE"), "AB12CDE");
 });
 
@@ -111,4 +116,31 @@ test("shared footer branch names do not override a vehicle-specific page branch"
   assert.equal(result.branchKey, "vansco333");
   assert.equal(result.source, "page");
   assert.equal(result.conflict, false);
+});
+
+
+test("caption refuses ambiguous VAT instead of publishing a bare price", () => {
+  assert.throws(
+    () => buildVanscoFacebookCaption({
+      title: "2022 Volkswagen Transporter",
+      year: "2022",
+      price: "20995 GBP",
+      mileage: "23000",
+      vatLabel: "",
+      branchKey: "newForest",
+      vehicleUrl: "https://www.vansco.co.uk/vehicle-details/example",
+    }),
+    /VAT status is unresolved/,
+  );
+});
+
+test("worker replaces queued live posts that are missing a VAT label", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const worker = await readFile(
+    new URL("../api/vansco-facebook-automation-worker.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(worker, /vat_label_missing/);
+  assert.match(worker, /vat_unresolved/);
+  assert.match(worker, /hasExplicitVanscoVatLabel/);
 });

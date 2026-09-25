@@ -7,7 +7,8 @@ import {
 } from "../lib/vanscoFacebookAutomation.js";
 
 const META_URL = "https://api.dealerkit.uk/meta-catalogue";
-const PAGE_TIMEOUT_MS = 12000;
+const PAGE_TIMEOUT_MS = 8000;
+const PAGE_ATTEMPTS = 2;
 
 function text(value) {
   return String(value ?? "");
@@ -59,20 +60,22 @@ export async function enrichVanscoVehicleFromPage(vehicle) {
   }
 
   let pageText = "";
-  try {
-    const response = await fetch(vehicleUrl, {
-      method: "GET",
-      redirect: "follow",
-      cache: "no-store",
-      headers: {
-        "User-Agent": "VanscoMarketingCRM/1.0",
-        Accept: "text/html,application/xhtml+xml",
-      },
-      signal: AbortSignal.timeout(PAGE_TIMEOUT_MS),
-    });
-    if (response.ok) pageText = stripHtml(await response.text());
-  } catch {
-    pageText = "";
+  for (let attempt = 0; attempt < PAGE_ATTEMPTS && !pageText; attempt += 1) {
+    try {
+      const response = await fetch(vehicleUrl, {
+        method: "GET",
+        redirect: "follow",
+        cache: "no-store",
+        headers: {
+          "User-Agent": "VanscoMarketingCRM/1.0",
+          Accept: "text/html,application/xhtml+xml",
+        },
+        signal: AbortSignal.timeout(PAGE_TIMEOUT_MS),
+      });
+      if (response.ok) pageText = stripHtml(await response.text());
+    } catch {
+      pageText = "";
+    }
   }
 
   const resolved = resolveVanscoBranch({
