@@ -12,7 +12,7 @@ import {
   isBufferRateLimitCooldownError,
 } from "../lib/bufferRuntimeGuard.js";
 import { loadCarslinkSyncStatus } from "../lib/carslinkSyncState.js";
-import { loadVanscoAutomationStatus } from "./_vansco-buffer-runtime.js";
+import { loadVanscoAutomationStatus, loadVanscoBufferConfig } from "./_vansco-buffer-runtime.js";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -90,6 +90,19 @@ function nextHourlyAt(minute, now = new Date()) {
   next.setUTCSeconds(0, 0);
   if (next.getUTCMinutes() >= minute) next.setUTCHours(next.getUTCHours() + 1);
   next.setUTCMinutes(minute);
+  return next.toISOString();
+}
+
+function nextTwiceHourlyAt(firstMinute, secondMinute, now = new Date()) {
+  const next = new Date(now);
+  next.setUTCSeconds(0, 0);
+  const minute = next.getUTCMinutes();
+  if (minute < firstMinute) next.setUTCMinutes(firstMinute);
+  else if (minute < secondMinute) next.setUTCMinutes(secondMinute);
+  else {
+    next.setUTCHours(next.getUTCHours() + 1);
+    next.setUTCMinutes(firstMinute);
+  }
   return next.toISOString();
 }
 
@@ -316,6 +329,21 @@ async function checkVanscoFacebookAutomation() {
 
   const status = await loadVanscoAutomationStatus();
   if (!status) {
+    const bufferConfig = await loadVanscoBufferConfig().catch(() => null);
+    const verifiedAt = bufferConfig?.verifiedAt || null;
+    if (verifiedAt && ageMs(verifiedAt) > 90 * 60 * 1000) {
+      return {
+        ok: false,
+        enabled: true,
+        waiting: false,
+        status: null,
+        issue: issue(
+          "vansco-facebook-never-ran",
+          "Vansco Facebook automation",
+          "Vansco Facebook automation is enabled but no production run has been recorded within 90 minutes.",
+        ),
+      };
+    }
     return {
       ok: true,
       enabled: true,
@@ -734,7 +762,7 @@ function buildAutomationCentre(evidence, checkMap) {
       status: checkMap.vanscoFacebookWaiting ? "waiting" : (checkMap.vanscoFacebook ? "healthy" : "failed"),
       lastAttemptAt: checkMap.vanscoFacebookAttemptAt || null,
       lastSuccessAt: checkMap.vanscoFacebookSuccessAt || null,
-      nextExpectedAt: nextHourlyAt(41, now),
+      nextExpectedAt: nextTwiceHourlyAt(11, 41, now),
       lastError: checkMap.vanscoFacebookIssue || "",
       detail: checkMap.vanscoFacebookDetail || "DealerKit retail stock posting through the dedicated Vansco Buffer channel.",
     }),
