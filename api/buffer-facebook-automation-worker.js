@@ -34,6 +34,7 @@ import {
   mapFinanceVehicleRow,
   mapRentVehicleRow,
 } from "../services/marketingVehicleContract.js";
+import { DAILY_YOUTUBE_TEMPLATE_KEY } from "../lib/youtubeDailyBatch.js";
 
 export const config = { maxDuration: 300 };
 
@@ -366,7 +367,7 @@ async function generateOneReel(request, productKey, dateKey, packIndex, excluded
       frameCount: 10,
       durationSeconds: 20,
       fps: 24,
-      templateKey: "tiktokPunch",
+      templateKey: DAILY_YOUTUBE_TEMPLATE_KEY,
       premiumMotion: true,
     },
     false,
