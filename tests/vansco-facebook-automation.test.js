@@ -6,11 +6,14 @@ import {
   extractUkRegistration,
   hasExplicitVanscoVatLabel,
   isEligibleVanscoVehicle,
+  isVanscoCar,
+  isVanscoVatResolved,
   normalizeVanscoMetaRow,
   parseCsvRecords,
   resolveVanscoBranch,
   vanscoDailySlots,
   vanscoNextDateKey,
+  vanscoAdvertVatLabel,
   vatLabelFromStatus,
   vatLabelFromText,
 } from "../lib/vanscoFacebookAutomation.js";
@@ -63,6 +66,42 @@ test("VAT and registration helpers only return explicit evidence", () => {
   assert.equal(hasExplicitVanscoVatLabel("Advertised price: £12,995 + VAT"), true);
   assert.equal(hasExplicitVanscoVatLabel("Advertised price: £12,995"), false);
   assert.equal(extractUkRegistration("Registration: AB12 CDE"), "AB12CDE");
+});
+
+test("Vansco car classification suppresses VAT wording without weakening van VAT rules", () => {
+  const car = {
+    title: "2003 Jaguar XKR",
+    bodyStyle: "Convertible",
+    vehicleUrl: "https://www.vansco.co.uk/jaguar-xkr-supercharged-convertible-petrol-automatic",
+    vatLabel: "NO VAT",
+  };
+  const van = {
+    title: "2022 Volkswagen Transporter",
+    bodyStyle: "Panel Van",
+    vehicleUrl: "https://www.vansco.co.uk/volkswagen-transporter-panel-van",
+    vatLabel: "NO VAT",
+  };
+  assert.equal(isVanscoCar(car), true);
+  assert.equal(isVanscoCar(van), false);
+  assert.equal(vanscoAdvertVatLabel(car), "");
+  assert.equal(vanscoAdvertVatLabel(van), "NO VAT");
+  assert.equal(isVanscoVatResolved({ ...car, vatLabel: "" }), true);
+  assert.equal(isVanscoVatResolved({ ...van, vatLabel: "" }), false);
+});
+
+test("Vansco car caption shows the retail price without NO VAT", () => {
+  const caption = buildVanscoFacebookCaption({
+    title: "2003 Jaguar XKR",
+    year: "2003",
+    price: "12999 GBP",
+    mileage: "67800",
+    vatLabel: "NO VAT",
+    bodyStyle: "Convertible",
+    branchKey: "vansco333",
+    vehicleUrl: "https://www.vansco.co.uk/jaguar-xkr-supercharged-convertible-petrol-automatic",
+  });
+  assert.match(caption, /Advertised price: £12,999/);
+  assert.doesNotMatch(caption, /NO VAT|INC VAT|\+ VAT/);
 });
 
 test("normalised Meta rows require AVAILABLE stock, image, price and live vehicle URL", () => {
@@ -155,9 +194,11 @@ test("worker replaces queued live posts that are missing a VAT label", async () 
     "utf8",
   );
   assert.match(worker, /vat_label_missing/);
+  assert.match(worker, /car_vat_label_present/);
   assert.match(worker, /vat_unresolved/);
   assert.match(worker, /hasExplicitVanscoVatLabel/);
-  assert.match(worker, /candidate\.branchKey && !candidate\.branchConflict && candidate\.vatLabel/);
+  assert.match(worker, /isVanscoVatResolved/);
+  assert.match(worker, /vanscoAdvertVatLabel/);
   assert.match(worker, /scheduleDateKey = currentSlots\.length \? dateKey : vanscoNextDateKey\(dateKey\)/);
   assert.match(worker, /scheduleDate: scheduleDateKey/);
 
