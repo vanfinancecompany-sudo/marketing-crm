@@ -898,6 +898,12 @@ export default async function handler(request, response) {
       carslinkIssue: checks[4]?.issue?.message || "",
       email: checks[5].ok && checks[6].ok,
       emailIssue: checks[5]?.issue?.message || checks[6]?.issue?.message || "",
+      vanscoFacebook: checks[7].ok,
+      vanscoFacebookWaiting: Boolean(checks[7]?.waiting),
+      vanscoFacebookAttemptAt: checks[7]?.status?.attemptedAt || checks[7]?.status?.updatedAt || null,
+      vanscoFacebookSuccessAt: checks[7]?.status?.lastSuccessAt || null,
+      vanscoFacebookIssue: checks[7]?.issue?.message || "",
+      vanscoFacebookDetail: checks[7]?.detail || "DealerKit retail stock posting through the dedicated Vansco Buffer channel.",
     });
   } catch (error) {
     automations = [
