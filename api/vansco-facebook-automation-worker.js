@@ -4,6 +4,9 @@ import {
   extractVanscoVehicleUrl,
   hasExplicitVanscoVatLabel,
   isEligibleVanscoVehicle,
+  isVanscoCar,
+  isVanscoVatResolved,
+  vanscoAdvertVatLabel,
   vanscoDailySlots,
   vanscoNextDateKey,
   VANSCO_FACEBOOK_MAX_POSTS_PER_DAY,
@@ -63,27 +66,34 @@ function postDueIso(post) {
   return Number.isFinite(date.getTime()) ? date.toISOString() : "";
 }
 
-function liveVehicleUrls(vehicles) {
-  return new Set(
+function liveVehicleMap(vehicles) {
+  return new Map(
     (vehicles || [])
       .filter(isEligibleVanscoVehicle)
-      .map((vehicle) => clean(vehicle.vehicleUrl))
-      .filter(Boolean),
+      .map((vehicle) => [clean(vehicle.vehicleUrl), vehicle])
+      .filter(([vehicleUrl]) => Boolean(vehicleUrl)),
   );
 }
 
-async function pruneStaleScheduledPosts(posts, liveUrls) {
+async function pruneStaleScheduledPosts(posts, liveVehicles) {
   const kept = [];
   const removed = [];
   for (const post of posts || []) {
     const vehicleUrl = extractVanscoVehicleUrl(post?.text);
-    const live = Boolean(vehicleUrl && liveUrls.has(vehicleUrl));
-    const vatMissing = live && !hasExplicitVanscoVatLabel(post?.text);
-    if ((!vehicleUrl || live) && !vatMissing) {
+    const vehicle = vehicleUrl ? liveVehicles.get(vehicleUrl) : null;
+    const live = Boolean(vehicle);
+    const explicitVat = hasExplicitVanscoVatLabel(post?.text);
+    const carVatLabelPresent = live && isVanscoCar(vehicle) && explicitVat;
+    const vatMissing = live && !isVanscoCar(vehicle) && !explicitVat;
+    if ((!vehicleUrl || live) && !vatMissing && !carVatLabelPresent) {
       kept.push(post);
       continue;
     }
-    const reason = vatMissing ? "vat_label_missing" : "vehicle_no_longer_live";
+    const reason = carVatLabelPresent
+      ? "car_vat_label_present"
+      : vatMissing
+        ? "vat_label_missing"
+        : "vehicle_no_longer_live";
     try {
       await deleteVanscoBufferPost(post.id);
       removed.push({
@@ -144,12 +154,12 @@ async function chooseResolvedCandidate({
     });
     if (!candidate) return { vehicle: null, held };
 
-    if (candidate.branchKey && !candidate.branchConflict && candidate.vatLabel) {
+    if (candidate.branchKey && !candidate.branchConflict && isVanscoVatResolved(candidate)) {
       return { vehicle: candidate, held };
     }
 
     const enriched = await enrichVanscoVehicleFromPage(candidate);
-    if (enriched.branchKey && !enriched.branchConflict && enriched.vatLabel) {
+    if (enriched.branchKey && !enriched.branchConflict && isVanscoVatResolved(enriched)) {
       return { vehicle: enriched, held };
     }
 
@@ -158,7 +168,7 @@ async function chooseResolvedCandidate({
       vehicleKey: candidate.vehicleKey,
       vehicleUrl: candidate.vehicleUrl,
       title: candidate.title,
-      reason: !enriched.vatLabel
+      reason: !isVanscoVatResolved(enriched)
         ? "vat_unresolved"
         : enriched.branchConflict
           ? "branch_conflict"
@@ -203,7 +213,7 @@ export default async function handler(request, response) {
 
     const vehicles = await fetchVanscoMetaCatalogue();
     const eligible = vehicles.filter(isEligibleVanscoVehicle);
-    const liveUrls = liveVehicleUrls(eligible);
+    const liveVehicles = liveVehicleMap(eligible);
 
     if (dryRun) {
       const history = await loadVanscoPostingHistory();
@@ -217,7 +227,7 @@ export default async function handler(request, response) {
           registration: vehicle.registration,
           title: vehicle.title,
           price: vehicle.price,
-          vatLabel: vehicle.vatLabel,
+          vatLabel: vanscoAdvertVatLabel(vehicle),
           mileage: vehicle.mileage,
           branchKey: vehicle.branchKey,
           branchSource: vehicle.branchSource,
@@ -240,13 +250,13 @@ export default async function handler(request, response) {
           })[0];
         if (!candidate) continue;
         const enriched = await enrichVanscoVehicleFromPage(candidate);
-        if (enriched.branchKey === branchKey && !enriched.branchConflict && enriched.vatLabel) addPreview(enriched);
+        if (enriched.branchKey === branchKey && !enriched.branchConflict && isVanscoVatResolved(enriched)) addPreview(enriched);
         else {
           held.push({
             vehicleKey: candidate.vehicleKey,
             vehicleUrl: candidate.vehicleUrl,
             title: candidate.title,
-            reason: !enriched.vatLabel
+            reason: !isVanscoVatResolved(enriched)
               ? "vat_unresolved"
               : enriched.branchConflict
                 ? "branch_conflict"
@@ -283,7 +293,7 @@ export default async function handler(request, response) {
     const bufferConfig = await loadVanscoBufferConfig();
     const now = Date.now();
     const currentState = await loadVanscoBufferState(bufferConfig, `${dateKey}T12:00:00.000Z`);
-    const pruned = await pruneStaleScheduledPosts(currentState.posts, liveUrls);
+    const pruned = await pruneStaleScheduledPosts(currentState.posts, liveVehicles);
     const posts = [...pruned.kept];
 
     const currentNetworkLimit = dailyLimitFromState(currentState.limit);
