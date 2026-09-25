@@ -16,6 +16,7 @@ import {
   loadVanscoBufferConfig,
   loadVanscoBufferState,
   loadVanscoPostingHistory,
+  saveVanscoAutomationStatus,
   saveVanscoPostingHistory,
 } from "./_vansco-buffer-runtime.js";
 
@@ -170,13 +171,19 @@ export default async function handler(request, response) {
 
   try {
     if (!enabled && !dryRun) {
-      return response.status(200).json({
+      const payload = {
         ok: true,
         enabled: false,
         date: dateKey,
+        state: "disabled",
         message: "Vansco Facebook automation is built but not enabled. No DealerKit or Buffer changes were made.",
         elapsedMs: Date.now() - startedAt,
-      });
+      };
+      await saveVanscoAutomationStatus({
+        ...payload,
+        attemptedAt: new Date().toISOString(),
+      }).catch(() => {});
+      return response.status(200).json(payload);
     }
 
     const vehicles = await fetchVanscoMetaCatalogue();
@@ -319,10 +326,11 @@ export default async function handler(request, response) {
       await saveVanscoPostingHistory(history.lastPostedByKey);
     }
 
-    return response.status(200).json({
+    const payload = {
       ok: true,
       enabled: true,
       date: dateKey,
+      state: "healthy",
       source: "dealerkit_meta_catalogue",
       metaVehicleCount: vehicles.length,
       eligibleVehicleCount: eligible.length,
@@ -340,16 +348,39 @@ export default async function handler(request, response) {
       held: held.slice(0, 30),
       queueCountAfter: posts.length,
       elapsedMs: Date.now() - startedAt,
+    };
+    await saveVanscoAutomationStatus({
+      ...payload,
+      attemptedAt: new Date().toISOString(),
+      lastSuccessAt: new Date().toISOString(),
+      createdCount: created.length,
+      heldCount: held.length,
+      staleRemovedCount: pruned.removed.filter((item) => !item.deleteFailed).length,
+      staleRemoveFailedCount: pruned.removed.filter((item) => item.deleteFailed).length,
+    }).catch((error) => {
+      console.warn("[vansco-facebook-automation] could not persist run status", {
+        message: error?.message || String(error),
+      });
     });
+    return response.status(200).json(payload);
   } catch (error) {
     const message = clean(error?.message || error) || "Vansco Facebook automation failed.";
     console.error("[vansco-facebook-automation] worker failed", { message });
     const status = error?.code === "BUFFER_RATE_LIMIT" ? 429 : 500;
-    return response.status(status).json({
+    const payload = {
       ok: false,
+      enabled,
+      state: "failed",
+      date: dateKey,
       error: message,
       retryAfter: error?.retryAfter || null,
       elapsedMs: Date.now() - startedAt,
-    });
+    };
+    await saveVanscoAutomationStatus({
+      ...payload,
+      attemptedAt: new Date().toISOString(),
+      lastError: message,
+    }).catch(() => {});
+    return response.status(status).json(payload);
   }
 }
