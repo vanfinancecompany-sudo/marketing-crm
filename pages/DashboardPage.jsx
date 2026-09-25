@@ -380,7 +380,7 @@ export default function DashboardPage({ onNavigate }) {
         <h3>DealerKit → branch-specific Facebook posts → Buffer</h3>
         <p>
           DealerKit Meta catalogue is the retail stock source. Preview is read-only.
-          Live Buffer publishing remains disabled until production is explicitly enabled.
+          Buffer verification prefers the dedicated Vansco key when configured. Live publishing remains disabled until production is explicitly enabled.
         </p>
         <div className="card-actions">
           <button
