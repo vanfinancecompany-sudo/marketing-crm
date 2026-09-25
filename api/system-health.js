@@ -93,6 +93,19 @@ function nextHourlyAt(minute, now = new Date()) {
   return next.toISOString();
 }
 
+function nextTwiceHourlyAt(firstMinute, secondMinute, now = new Date()) {
+  const next = new Date(now);
+  next.setUTCSeconds(0, 0);
+  const minute = next.getUTCMinutes();
+  if (minute < firstMinute) next.setUTCMinutes(firstMinute);
+  else if (minute < secondMinute) next.setUTCMinutes(secondMinute);
+  else {
+    next.setUTCHours(next.getUTCHours() + 1);
+    next.setUTCMinutes(firstMinute);
+  }
+  return next.toISOString();
+}
+
 function nextMinuteAt(now = new Date()) {
   const next = new Date(now);
   next.setUTCSeconds(0, 0);
@@ -749,7 +762,7 @@ function buildAutomationCentre(evidence, checkMap) {
       status: checkMap.vanscoFacebookWaiting ? "waiting" : (checkMap.vanscoFacebook ? "healthy" : "failed"),
       lastAttemptAt: checkMap.vanscoFacebookAttemptAt || null,
       lastSuccessAt: checkMap.vanscoFacebookSuccessAt || null,
-      nextExpectedAt: nextHourlyAt(41, now),
+      nextExpectedAt: nextTwiceHourlyAt(11, 41, now),
       lastError: checkMap.vanscoFacebookIssue || "",
       detail: checkMap.vanscoFacebookDetail || "DealerKit retail stock posting through the dedicated Vansco Buffer channel.",
     }),
