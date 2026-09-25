@@ -1,4 +1,5 @@
 import {
+  inspectVanscoBufferAccount,
   loadVanscoBufferConfig,
   loadVanscoBufferState,
 } from "./_vansco-buffer-runtime.js";
@@ -51,7 +52,31 @@ export default async function handler(request, response) {
       });
     }
 
-    const config = await loadVanscoBufferConfig({ forceDiscovery: true });
+    let config = null;
+    try {
+      config = await loadVanscoBufferConfig({ forceDiscovery: true });
+    } catch (error) {
+      const account = await inspectVanscoBufferAccount().catch(() => []);
+      return response.status(200).json({
+        ok: true,
+        connected: false,
+        keySource: dedicatedKey ? "dedicated_vansco_key" : "existing_marketing_crm_key",
+        message: String(error?.message || "Vansco Facebook was not found in this Buffer account.").slice(0, 300),
+        accessibleOrganizations: account.map((organization) => ({
+          organizationName: organization.organizationName,
+          scheduledPostsLimit: organization.scheduledPostsLimit,
+          channels: (organization.channels || []).map((channel) => ({
+            name: channel.displayName || channel.name,
+            service: channel.service,
+            externalLink: channel.externalLink,
+            isDisconnected: channel.isDisconnected,
+            isLocked: channel.isLocked,
+          })),
+        })),
+        verifiedAt: new Date().toISOString(),
+      });
+    }
+
     const dateKey = londonDateKey();
     const state = await loadVanscoBufferState(config, `${dateKey}T12:00:00.000Z`);
     return response.status(200).json({
