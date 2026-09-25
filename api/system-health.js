@@ -316,6 +316,21 @@ async function checkVanscoFacebookAutomation() {
 
   const status = await loadVanscoAutomationStatus();
   if (!status) {
+    const bufferConfig = await loadVanscoBufferConfig().catch(() => null);
+    const verifiedAt = bufferConfig?.verifiedAt || null;
+    if (verifiedAt && ageMs(verifiedAt) > 90 * 60 * 1000) {
+      return {
+        ok: false,
+        enabled: true,
+        waiting: false,
+        status: null,
+        issue: issue(
+          "vansco-facebook-never-ran",
+          "Vansco Facebook automation",
+          "Vansco Facebook automation is enabled but no production run has been recorded within 90 minutes.",
+        ),
+      };
+    }
     return {
       ok: true,
       enabled: true,
