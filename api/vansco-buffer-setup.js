@@ -39,13 +39,15 @@ export default async function handler(request, response) {
   }
 
   try {
-    const bufferConfigured = Boolean(String(process.env.VANSCO_BUFFER_API_KEY || "").trim());
+    const dedicatedKey = String(process.env.VANSCO_BUFFER_API_KEY || "").trim();
+    const existingKey = String(process.env.BUFFER_API_KEY || "").trim();
+    const bufferConfigured = Boolean(dedicatedKey || existingKey);
     if (!bufferConfigured) {
       return response.status(200).json({
         ok: true,
         connected: false,
-        missingVariable: "VANSCO_BUFFER_API_KEY",
-        message: "Add the dedicated Vansco Buffer API key to this Vercel environment, then verify again.",
+        missingVariable: "BUFFER_API_KEY",
+        message: "No Buffer API key is available in this Vercel environment.",
       });
     }
 
@@ -63,6 +65,7 @@ export default async function handler(request, response) {
       sentToday: state.limit?.sent ?? 0,
       scheduledToday: state.limit?.scheduled ?? 0,
       queuedNow: state.posts.length,
+      keySource: dedicatedKey ? "dedicated_vansco_key" : "existing_marketing_crm_key",
       verifiedAt: new Date().toISOString(),
     });
   } catch (error) {
