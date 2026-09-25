@@ -18,6 +18,7 @@ const META_URL = "https://api.dealerkit.uk/meta-catalogue";
 const PAGE_TIMEOUT_MS = 8000;
 const VAT_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const VAT_CACHE_BATCH_SIZE = 80;
+const DEALERKIT_STATE_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 
 function text(value) {
   return String(value ?? "");
@@ -42,6 +43,70 @@ function cacheRowIsFresh(row, now = Date.now()) {
   return Number.isFinite(checkedAt)
     && checkedAt > 0
     && now - checkedAt <= VAT_CACHE_MAX_AGE_MS;
+}
+
+async function hydrateVanscoVatFromDealerKitState(vehicles) {
+  try {
+    const supabase = getSupabaseServiceAdmin();
+    const result = await supabase
+      .from("dealerkit_stock_state")
+      .select("supplier_stock_id,source_url,last_seen_at,vehicle_snapshot")
+      .limit(500);
+    if (result.error) throw result.error;
+
+    const now = Date.now();
+    const byUrl = new Map();
+    const bySupplierStockId = new Map();
+    const byVin = new Map();
+
+    for (const row of result.data || []) {
+      const seenAt = new Date(row?.last_seen_at || 0).getTime();
+      if (!Number.isFinite(seenAt) || seenAt <= 0 || now - seenAt > DEALERKIT_STATE_MAX_AGE_MS) continue;
+
+      const snapshot = row?.vehicle_snapshot && typeof row.vehicle_snapshot === "object"
+        ? row.vehicle_snapshot
+        : {};
+      const vatLabel = vatLabelFromStatus(snapshot?.vatStatus);
+      if (!vatLabel) continue;
+
+      const evidence = {
+        vatLabel,
+        registration: String(snapshot?.registration || "").trim(),
+      };
+      const sourceUrl = normalizeCacheUrl(row?.source_url || snapshot?.sourceUrl);
+      const supplierStockId = String(row?.supplier_stock_id || snapshot?.supplierStockId || "").trim();
+      const vin = String(snapshot?.vin || "").trim().toUpperCase();
+
+      if (sourceUrl) byUrl.set(sourceUrl, evidence);
+      if (supplierStockId) bySupplierStockId.set(supplierStockId, evidence);
+      if (vin) byVin.set(vin, evidence);
+    }
+
+    return (vehicles || []).map((vehicle) => {
+      if (vehicle?.vatLabel) return vehicle;
+
+      const sourceUrl = normalizeCacheUrl(vehicle?.vehicleUrl);
+      const vehicleId = String(vehicle?.vehicleId || vehicle?.vehicleKey || "").trim();
+      const vin = String(vehicle?.vin || "").trim().toUpperCase();
+      const evidence = byUrl.get(sourceUrl)
+        || bySupplierStockId.get(vehicleId)
+        || byVin.get(vin)
+        || null;
+      if (!evidence?.vatLabel) return vehicle;
+
+      return {
+        ...vehicle,
+        vatLabel: evidence.vatLabel,
+        vatSource: "dealerkit_stock_state",
+        registration: vehicle?.registration || evidence.registration || "",
+      };
+    });
+  } catch (error) {
+    console.warn("[vansco-facebook] DealerKit VAT state lookup deferred", {
+      message: error?.message || String(error),
+    });
+    return vehicles;
+  }
 }
 
 async function hydrateVanscoVatFromCache(vehicles) {
@@ -113,7 +178,8 @@ export async function fetchVanscoMetaCatalogue() {
   const rows = parseCsvRecords(raw);
   if (!rows.length) throw new Error("DealerKit Meta catalogue returned no vehicle rows.");
   const vehicles = rows.map(normalizeVanscoMetaRow);
-  return hydrateVanscoVatFromCache(vehicles);
+  const dealerKitHydrated = await hydrateVanscoVatFromDealerKitState(vehicles);
+  return hydrateVanscoVatFromCache(dealerKitHydrated);
 }
 
 export async function enrichVanscoVehicleFromPage(vehicle) {
