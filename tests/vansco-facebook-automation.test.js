@@ -98,3 +98,17 @@ test("35-post schedule is evenly spaced without crossing midnight", () => {
   assert.equal(slots.at(-1).localTime, "23:10");
   assert.equal(new Set(slots.map((slot) => slot.dueAt)).size, 35);
 });
+
+
+test("shared footer branch names do not override a vehicle-specific page branch", () => {
+  const pageText = [
+    "This vehicle is situated at our Vansco 333 Showroom.",
+    "333 Showroom 02380 333 777",
+    "New Forest 02380 813 119",
+    "S'hampton Airport 02381 780 300",
+  ].join(" ");
+  const result = resolveVanscoBranch({ pageText });
+  assert.equal(result.branchKey, "vansco333");
+  assert.equal(result.source, "page");
+  assert.equal(result.conflict, false);
+});
