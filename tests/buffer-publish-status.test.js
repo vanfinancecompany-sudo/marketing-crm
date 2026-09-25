@@ -89,6 +89,8 @@ test("client surfaces live Buffer confirmation in all three CRM areas", async ()
   assert.match(bridge, /\/rent2buy-facebook/);
   assert.match(bridge, /\/daily-reels/);
   assert.match(bridge, /Buffer confirmed/);
+  assert.match(bridge, /Vansco/);
+  assert.match(bridge, /includeReels: false/);
 
   const service = await readFile(new URL("../services/marketingDailyOperations.js", import.meta.url), "utf8");
   assert.match(service, /syncBufferPublishStatus/);
@@ -99,4 +101,7 @@ test("client surfaces live Buffer confirmation in all three CRM areas", async ()
   assert.match(endpoint, /facebook_published/);
   assert.match(endpoint, /facebook_live:\s*true/);
   assert.match(endpoint, /item\.mediaKind === "image"/);
+  assert.match(endpoint, /loadVanscoAutomationStatus/);
+  assert.match(endpoint, /providerSent/);
+  assert.match(endpoint, /withVanscoToday/);
 });

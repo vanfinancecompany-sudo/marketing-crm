@@ -53,8 +53,19 @@ async function requestStatus(force = false) {
   return inFlight;
 }
 
-function countsLine(label, group) {
-  return `${label}: ${Number(group?.posts || 0)} vehicle post${Number(group?.posts || 0) === 1 ? "" : "s"} live · ${Number(group?.reels || 0)} Reel${Number(group?.reels || 0) === 1 ? "" : "s"} live`;
+function countsLine(label, group, { includeReels = true } = {}) {
+  const posts = Number(group?.posts || 0);
+  const postText = `${label}: ${posts} vehicle post${posts === 1 ? "" : "s"} live`;
+  if (!includeReels) return postText;
+  const reels = Number(group?.reels || 0);
+  return `${postText} · ${reels} Reel${reels === 1 ? "" : "s"} live`;
+}
+
+function vanscoLine(group) {
+  if (!group) return "";
+  if (group.error) return "Vansco: live confirmation temporarily unavailable";
+  const confirmed = formatCheckedAt(group.confirmedAt);
+  return `${countsLine("Vansco", group, { includeReels: false })}${confirmed ? ` · confirmed ${confirmed}` : ""}`;
 }
 
 function ensureOperationsPanel() {
@@ -106,6 +117,7 @@ function renderStatus(payload) {
   const confirmationLabel = payload.degraded ? "Buffer last confirmed" : "Buffer confirmed";
   const finance = payload.today.vanFinance || {};
   const rent = payload.today.rent2buy || {};
+  const vansco = payload.today.vansco || null;
 
   if (kind === "operations") {
     const panel = ensureOperationsPanel();
@@ -120,6 +132,7 @@ function renderStatus(payload) {
       </div>
       <div class="notice notice--success">${countsLine("Van Finance", finance)}</div>
       <div class="notice notice--success">${countsLine("Rent2Buy", rent)}</div>
+      ${vansco ? `<div class="notice ${vansco.error ? "notice--warning" : "notice--success"}">${vanscoLine(vansco)}</div>` : ""}
     `;
     return;
   }

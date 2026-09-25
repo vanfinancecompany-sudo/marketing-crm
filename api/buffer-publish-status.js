@@ -14,6 +14,7 @@ import {
   summarizeBufferPublishedToday,
 } from "../lib/bufferPublishStatus.js";
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
+import { loadVanscoAutomationStatus } from "./_vansco-buffer-runtime.js";
 import {
   bufferDeferredPayload,
   guardedBufferGraphql,
@@ -58,6 +59,51 @@ async function loadSentBufferPosts() {
     query: BUFFER_SENT_POSTS_QUERY,
   });
   return parseBufferSentPostsPayload(payload);
+}
+
+async function vanscoPublishedToday(todayKey) {
+  try {
+    const status = await loadVanscoAutomationStatus();
+    const statusDate = String(status?.date || "");
+    const confirmedAt = String(
+      status?.lastSuccessAt || status?.attemptedAt || status?.updatedAt || "",
+    ).trim();
+    const sameDay = statusDate === todayKey;
+    const healthy = sameDay && status?.ok !== false && String(status?.state || "").toLowerCase() !== "failed";
+    const posts = healthy
+      ? Math.max(0, Number(status?.buffer?.providerSent) || 0)
+      : 0;
+    return {
+      posts,
+      reels: 0,
+      total: posts,
+      confirmed: healthy,
+      confirmedAt: sameDay ? confirmedAt : "",
+      state: sameDay ? String(status?.state || "") : "waiting",
+      error: sameDay && !healthy,
+    };
+  } catch (error) {
+    console.warn("[buffer-publish-status] Vansco heartbeat unavailable", {
+      message: error?.message || String(error),
+    });
+    return {
+      posts: 0,
+      reels: 0,
+      total: 0,
+      confirmed: false,
+      confirmedAt: "",
+      state: "unavailable",
+      error: true,
+    };
+  }
+}
+
+async function withVanscoToday(today, todayKey) {
+  if (!today) return today;
+  return {
+    ...today,
+    vansco: await vanscoPublishedToday(todayKey),
+  };
 }
 
 function trackingDescriptor(post) {
@@ -237,7 +283,10 @@ export default async function handler(request, response) {
       synced: sync.inserted,
       matched_manual: sync.matchedManual,
       cleaned_reel_blobs: cleanup.cleaned,
-      today: summarizeBufferPublishedToday(posts, todayKey, londonDateKey),
+      today: await withVanscoToday(
+        summarizeBufferPublishedToday(posts, todayKey, londonDateKey),
+        todayKey,
+      ),
       recent: bufferPublishedItems(posts),
     };
     await saveBufferStatusSnapshot(result);
@@ -249,21 +298,25 @@ export default async function handler(request, response) {
         retryAfterMs: error.retryAfterMs,
         cached: Boolean(cached),
       });
-      response.status(200).json(cached
-        ? {
-            ...cached,
-            ...bufferDeferredPayload(error),
-            stale: true,
-            checked_at: new Date().toISOString(),
-            last_success_at: cached.checked_at || cached.cached_at || null,
-          }
-        : bufferDeferredPayload(error, {
-            stale: true,
-            checked_at: new Date().toISOString(),
-            last_success_at: null,
-            today: null,
-            recent: [],
-          }));
+      if (cached) {
+        const todayKey = londonDateKey();
+        response.status(200).json({
+          ...cached,
+          ...bufferDeferredPayload(error),
+          stale: true,
+          checked_at: new Date().toISOString(),
+          last_success_at: cached.checked_at || cached.cached_at || null,
+          today: await withVanscoToday(cached.today, todayKey),
+        });
+      } else {
+        response.status(200).json(bufferDeferredPayload(error, {
+          stale: true,
+          checked_at: new Date().toISOString(),
+          last_success_at: null,
+          today: null,
+          recent: [],
+        }));
+      }
       return;
     }
     console.error("[buffer-publish-status] sync failed", {
