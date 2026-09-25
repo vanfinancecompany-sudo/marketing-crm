@@ -932,6 +932,7 @@ export default async function handler(request, response) {
       carslink_stock_sync: checks[4].ok,
       email_campaign_worker: checks[5].ok,
       email_delivery: checks[6].ok,
+      vansco_facebook_automation: checks[7].ok,
     },
     buffer_ignored_inactive_failures: checks[1]?.ignored_inactive_failures || 0,
     buffer_ignored_inactive_registrations: checks[1]?.ignored_inactive_registrations || [],
