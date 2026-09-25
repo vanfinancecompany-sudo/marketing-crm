@@ -12,6 +12,7 @@ import {
   isBufferRateLimitCooldownError,
 } from "../lib/bufferRuntimeGuard.js";
 import { loadCarslinkSyncStatus } from "../lib/carslinkSyncState.js";
+import { loadVanscoAutomationStatus } from "./_vansco-buffer-runtime.js";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
