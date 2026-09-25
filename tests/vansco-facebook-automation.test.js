@@ -10,6 +10,7 @@ import {
   parseCsvRecords,
   resolveVanscoBranch,
   vanscoDailySlots,
+  vatLabelFromStatus,
   vatLabelFromText,
 } from "../lib/vanscoFacebookAutomation.js";
 
@@ -53,6 +54,10 @@ test("VAT and registration helpers only return explicit evidence", () => {
   assert.equal(vatLabelFromText("Price £12,995 including VAT"), "INC VAT");
   assert.equal(vatLabelFromText("Price £12,995 VAT included"), "INC VAT");
   assert.equal(vatLabelFromText("Price £12,995"), "");
+  assert.equal(vatLabelFromStatus("plus_vat"), "+ VAT");
+  assert.equal(vatLabelFromStatus("no_vat"), "NO VAT");
+  assert.equal(vatLabelFromStatus("vat_included"), "INC VAT");
+  assert.equal(vatLabelFromStatus("unknown"), "");
   assert.equal(hasExplicitVanscoVatLabel("Advertised price: £12,995 + VAT"), true);
   assert.equal(hasExplicitVanscoVatLabel("Advertised price: £12,995"), false);
   assert.equal(extractUkRegistration("Registration: AB12 CDE"), "AB12CDE");
@@ -144,4 +149,14 @@ test("worker replaces queued live posts that are missing a VAT label", async () 
   assert.match(worker, /vat_label_missing/);
   assert.match(worker, /vat_unresolved/);
   assert.match(worker, /hasExplicitVanscoVatLabel/);
+  assert.match(worker, /candidate\.branchKey && !candidate\.branchConflict && candidate\.vatLabel/);
+
+  const source = await readFile(
+    new URL("../api/_vansco-facebook-source.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /hydrateVanscoVatFromCache/);
+  assert.match(source, /fetchVanscoDetailHtml/);
+  assert.match(source, /parseDetailHtml/);
+  assert.match(source, /VAT_CACHE_MAX_AGE_MS/);
 });

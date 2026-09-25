@@ -2,13 +2,22 @@ import {
   normalizeVanscoMetaRow,
   parseCsvRecords,
   resolveVanscoBranch,
+  vatLabelFromStatus,
   vatLabelFromText,
   extractUkRegistration,
 } from "../lib/vanscoFacebookAutomation.js";
+import {
+  CACHE_TABLE,
+  fetchVanscoDetailHtml,
+  getSupabaseServiceAdmin,
+  normalizeUrl as normalizeCacheUrl,
+  parseDetailHtml,
+} from "./_vansco-cache-utils.js";
 
 const META_URL = "https://api.dealerkit.uk/meta-catalogue";
 const PAGE_TIMEOUT_MS = 8000;
-const PAGE_ATTEMPTS = 2;
+const VAT_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const VAT_CACHE_BATCH_SIZE = 80;
 
 function text(value) {
   return String(value ?? "");
@@ -21,10 +30,63 @@ function stripHtml(value) {
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;|&#160;/gi, " ")
     .replace(/&amp;/gi, "&")
+    .replace(/&pound;/gi, "£")
     .replace(/&#39;|&apos;/gi, "'")
     .replace(/&quot;/gi, '"')
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function cacheRowIsFresh(row, now = Date.now()) {
+  const checkedAt = new Date(row?.last_successfully_checked_at || 0).getTime();
+  return Number.isFinite(checkedAt)
+    && checkedAt > 0
+    && now - checkedAt <= VAT_CACHE_MAX_AGE_MS;
+}
+
+async function hydrateVanscoVatFromCache(vehicles) {
+  const urls = [...new Set(
+    (vehicles || [])
+      .map((vehicle) => normalizeCacheUrl(vehicle?.vehicleUrl))
+      .filter(Boolean),
+  )];
+  if (!urls.length) return vehicles;
+
+  try {
+    const supabase = getSupabaseServiceAdmin();
+    const rows = [];
+    for (let offset = 0; offset < urls.length; offset += VAT_CACHE_BATCH_SIZE) {
+      const chunk = urls.slice(offset, offset + VAT_CACHE_BATCH_SIZE);
+      const result = await supabase
+        .from(CACHE_TABLE)
+        .select("stock_url,vat_status,last_successfully_checked_at,is_currently_on_vansco")
+        .eq("is_currently_on_vansco", true)
+        .in("stock_url", chunk);
+      if (result.error) throw result.error;
+      rows.push(...(result.data || []));
+    }
+
+    const now = Date.now();
+    const vatByUrl = new Map();
+    for (const row of rows) {
+      const label = vatLabelFromStatus(row?.vat_status);
+      const url = normalizeCacheUrl(row?.stock_url);
+      if (url && label && cacheRowIsFresh(row, now)) vatByUrl.set(url, label);
+    }
+
+    return (vehicles || []).map((vehicle) => {
+      if (vehicle?.vatLabel) return vehicle;
+      const cachedVat = vatByUrl.get(normalizeCacheUrl(vehicle?.vehicleUrl)) || "";
+      return cachedVat
+        ? { ...vehicle, vatLabel: cachedVat, vatSource: "vansco_detail_cache" }
+        : vehicle;
+    });
+  } catch (error) {
+    console.warn("[vansco-facebook] VAT cache lookup deferred", {
+      message: error?.message || String(error),
+    });
+    return vehicles;
+  }
 }
 
 export async function fetchVanscoMetaCatalogue() {
@@ -50,7 +112,8 @@ export async function fetchVanscoMetaCatalogue() {
   const raw = await response.text();
   const rows = parseCsvRecords(raw);
   if (!rows.length) throw new Error("DealerKit Meta catalogue returned no vehicle rows.");
-  return rows.map(normalizeVanscoMetaRow);
+  const vehicles = rows.map(normalizeVanscoMetaRow);
+  return hydrateVanscoVatFromCache(vehicles);
 }
 
 export async function enrichVanscoVehicleFromPage(vehicle) {
@@ -60,22 +123,19 @@ export async function enrichVanscoVehicleFromPage(vehicle) {
   }
 
   let pageText = "";
-  for (let attempt = 0; attempt < PAGE_ATTEMPTS && !pageText; attempt += 1) {
-    try {
-      const response = await fetch(vehicleUrl, {
-        method: "GET",
-        redirect: "follow",
-        cache: "no-store",
-        headers: {
-          "User-Agent": "VanscoMarketingCRM/1.0",
-          Accept: "text/html,application/xhtml+xml",
-        },
-        signal: AbortSignal.timeout(PAGE_TIMEOUT_MS),
-      });
-      if (response.ok) pageText = stripHtml(await response.text());
-    } catch {
-      pageText = "";
+  let parsed = null;
+  let pageChecked = false;
+
+  try {
+    const page = await fetchVanscoDetailHtml(vehicleUrl, PAGE_TIMEOUT_MS);
+    if (page?.ok && page?.html) {
+      pageChecked = true;
+      pageText = stripHtml(page.html);
+      parsed = parseDetailHtml(vehicleUrl, page.html, vehicle?.title || "");
     }
+  } catch {
+    pageText = "";
+    parsed = null;
   }
 
   const resolved = resolveVanscoBranch({
@@ -84,8 +144,8 @@ export async function enrichVanscoVehicleFromPage(vehicle) {
     city: vehicle?.city,
     pageText,
   });
-  const vatFromPage = vatLabelFromText(pageText);
-  const registration = extractUkRegistration(pageText);
+  const vatFromPage = vatLabelFromStatus(parsed?.vat_status) || vatLabelFromText(pageText);
+  const registration = parsed?.registration || extractUkRegistration(pageText);
 
   return {
     ...vehicle,
@@ -93,7 +153,8 @@ export async function enrichVanscoVehicleFromPage(vehicle) {
     branchSource: resolved.branchKey ? resolved.source : vehicle?.branchSource || "",
     branchConflict: resolved.branchKey ? resolved.conflict : Boolean(vehicle?.branchConflict),
     vatLabel: vatFromPage || vehicle?.vatLabel || "",
+    vatSource: vatFromPage ? "live_vansco_detail" : vehicle?.vatSource || "",
     registration: registration || vehicle?.registration || "",
-    pageChecked: Boolean(pageText),
+    pageChecked,
   };
 }
