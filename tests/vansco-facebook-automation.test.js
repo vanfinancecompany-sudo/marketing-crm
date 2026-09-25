@@ -10,6 +10,7 @@ import {
   parseCsvRecords,
   resolveVanscoBranch,
   vanscoDailySlots,
+  vanscoNextDateKey,
   vatLabelFromStatus,
   vatLabelFromText,
 } from "../lib/vanscoFacebookAutomation.js";
@@ -111,6 +112,12 @@ test("35-post schedule is evenly spaced from 08:00 through 21:00", () => {
   assert.equal(new Set(slots.map((slot) => slot.dueAt)).size, 35);
 });
 
+test("Vansco next-day queue date rolls across month and year boundaries", () => {
+  assert.equal(vanscoNextDateKey("2026-09-25"), "2026-09-26");
+  assert.equal(vanscoNextDateKey("2026-09-30"), "2026-10-01");
+  assert.equal(vanscoNextDateKey("2026-12-31"), "2027-01-01");
+});
+
 
 test("shared footer branch names do not override a vehicle-specific page branch", () => {
   const pageText = [
@@ -151,6 +158,8 @@ test("worker replaces queued live posts that are missing a VAT label", async () 
   assert.match(worker, /vat_unresolved/);
   assert.match(worker, /hasExplicitVanscoVatLabel/);
   assert.match(worker, /candidate\.branchKey && !candidate\.branchConflict && candidate\.vatLabel/);
+  assert.match(worker, /scheduleDateKey = currentSlots\.length \? dateKey : vanscoNextDateKey\(dateKey\)/);
+  assert.match(worker, /scheduleDate: scheduleDateKey/);
 
   const source = await readFile(
     new URL("../api/_vansco-facebook-source.js", import.meta.url),
