@@ -41,6 +41,29 @@ function pick(record, names) {
   return null;
 }
 
+function literal(record, key) {
+  return scalar((object(record) ?? {})[key]);
+}
+
+function firstLiteral(record, keys) {
+  for (const key of keys) {
+    const value = literal(record, key);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function countBy(values) {
+  const counts = new Map();
+  for (const value of values) {
+    const key = value === null || value === undefined || value === "" ? "(blank)" : String(value);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
+
 function url(value) {
   const candidate = scalar(value);
   if (typeof candidate !== "string") return null;
@@ -83,22 +106,34 @@ function advertisingFlags(vehicle) {
 }
 
 function vehicleSummary(vehicle) {
+  const mileageValue = firstLiteral(vehicle, ["mileage.value", "mileage"]);
+  const mileageUnit = firstLiteral(vehicle, ["mileage.unit"]);
+  const literalImage = firstLiteral(vehicle, ["image[0].url", "image.0.url", "image_url", "image"]);
   return {
+    vehicleId: firstLiteral(vehicle, ["vehicle_id", "vehicleId"]),
+    vin: firstLiteral(vehicle, ["vin"]),
     registration: pick(vehicle, ["registration", "reg", "vrm", "registration_number", "registrationNumber", "registrationMark"]),
     make: pick(vehicle, ["make", "manufacturer", "vehicleMake"]),
     model: pick(vehicle, ["model"]),
     derivative: pick(vehicle, ["derivative", "variant", "trim"]),
     title: pick(vehicle, ["title", "name"]),
+    year: pick(vehicle, ["year"]),
     price: pick(vehicle, ["price", "advertised_price", "advertisedPrice", "retail_price", "retailPrice", "salePrice"]),
     vat: pick(vehicle, ["vat", "vat_status", "vatStatus", "vat_qualifying", "vatQualifying"]),
-    mileage: pick(vehicle, ["mileage", "miles"]),
+    mileage: mileageValue,
+    mileageUnit,
     vehicleUrl: url(pick(vehicle, ["vehicle_url", "vehicleUrl", "url", "advert_url", "advertUrl", "website_url", "websiteUrl", "link"])),
-    ...imageSummary(vehicle),
-    branch: pick(vehicle, ["branch", "branch_name", "branchName"]),
-    site: pick(vehicle, ["site", "site_name", "siteName"]),
-    location: pick(vehicle, ["location", "location_name", "locationName"]),
+    imageUrl: url(literalImage) ?? imageSummary(vehicle).imageUrl,
+    address1: firstLiteral(vehicle, ["address.address1", "address1"]),
+    address2: firstLiteral(vehicle, ["address.address2", "address2"]),
+    city: firstLiteral(vehicle, ["address.city", "city"]),
+    region: firstLiteral(vehicle, ["address.region", "region"]),
+    country: firstLiteral(vehicle, ["address.country", "country"]),
     availability: pick(vehicle, ["availability", "availability_status", "availabilityStatus"]),
     status: pick(vehicle, ["status", "stock_status", "stockStatus"]),
+    stateOfVehicle: firstLiteral(vehicle, ["state_of_vehicle", "stateOfVehicle"]),
+    bodyStyle: firstLiteral(vehicle, ["body_style", "bodyStyle"]),
+    descriptionPresent: Boolean(firstLiteral(vehicle, ["description"])),
     advertisingFlags: advertisingFlags(vehicle),
     featureFieldNames: fieldNames(vehicle.features ?? vehicle.feature ?? vehicle.options),
     specificationFieldNames: fieldNames(vehicle.specifications ?? vehicle.specification ?? vehicle.specs),
@@ -213,6 +248,18 @@ export function summariseMetaCatalogue(payload) {
     if (representative.length === 5) break;
     if (!selected.has(index)) representative.push(vehicleSummary(vehicle));
   }
+  const locations = validVehicles.map((vehicle) => {
+    const address1 = firstLiteral(vehicle, ["address.address1", "address1"]);
+    const city = firstLiteral(vehicle, ["address.city", "city"]);
+    const region = firstLiteral(vehicle, ["address.region", "region"]);
+    const country = firstLiteral(vehicle, ["address.country", "country"]);
+    return [address1, city, region, country].filter(Boolean).join(" | ") || null;
+  });
+  const imageUrls = validVehicles.map((vehicle) => url(firstLiteral(vehicle, ["image[0].url", "image.0.url", "image_url", "image"])));
+  const registrationFields = fieldNamesAvailable.filter((name) => /registration|\breg\b|vrm/i.test(name));
+  const vatFields = fieldNamesAvailable.filter((name) => /vat|tax/i.test(name));
+  const vehicleIds = validVehicles.map((vehicle) => firstLiteral(vehicle, ["vehicle_id", "vehicleId"])).filter(Boolean);
+  const ukRegistrationLike = vehicleIds.filter((value) => /^[A-Z0-9]{2,8}$/i.test(String(value).replace(/\s+/g, ""))).length;
   return {
     totalVehicleCount: validVehicles.length,
     responseShape: {
@@ -221,9 +268,22 @@ export function summariseMetaCatalogue(payload) {
       vehiclesPath: path,
     },
     vehicleFieldNames: fieldNamesAvailable,
+    registrationFieldNames: registrationFields,
+    vatFieldNames: vatFields,
     representativeRecords: representative,
-    branchLocationValues: unique(validVehicles, ["branch", "branch_name", "branchName", "site", "site_name", "siteName", "location", "location_name", "locationName"]),
-    availabilityStatusValues: unique(validVehicles, ["availability", "availability_status", "availabilityStatus", "status", "stock_status", "stockStatus"]),
+    locationCounts: countBy(locations),
+    availabilityCounts: countBy(validVehicles.map((vehicle) => pick(vehicle, ["availability", "availability_status", "availabilityStatus"]))),
+    stateOfVehicleCounts: countBy(validVehicles.map((vehicle) => firstLiteral(vehicle, ["state_of_vehicle", "stateOfVehicle"]))),
+    statusCounts: countBy(validVehicles.map((vehicle) => pick(vehicle, ["status", "stock_status", "stockStatus"]))),
+    imageCoverage: {
+      withPrimaryImage: imageUrls.filter(Boolean).length,
+      withoutPrimaryImage: imageUrls.filter((value) => !value).length,
+    },
+    vehicleIdAssessment: {
+      nonBlankCount: vehicleIds.length,
+      registrationLikeCount: ukRegistrationLike,
+      note: "Heuristic only. Compare representative vehicleId values with Vansco URLs/titles before treating vehicle_id as registration.",
+    },
   };
 }
 
