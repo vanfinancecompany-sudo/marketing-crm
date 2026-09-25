@@ -143,6 +143,10 @@ async function chooseResolvedCandidate({
     });
     if (!candidate) return { vehicle: null, held };
 
+    if (candidate.branchKey && !candidate.branchConflict && candidate.vatLabel) {
+      return { vehicle: candidate, held };
+    }
+
     const enriched = await enrichVanscoVehicleFromPage(candidate);
     if (enriched.branchKey && !enriched.branchConflict && enriched.vatLabel) {
       return { vehicle: enriched, held };
