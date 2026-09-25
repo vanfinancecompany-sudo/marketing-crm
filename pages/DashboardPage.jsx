@@ -264,11 +264,18 @@ export default function DashboardPage({ onNavigate }) {
       });
       const payload = await result.json();
       if (!result.ok || !payload.ok) {
-        const safeCode = ["credentials_missing", "upstream_http_error", "invalid_json", "vehicle_array_missing", "upstream_timeout", "request_failed"].includes(payload.errorCode)
+        const safeCode = ["credentials_missing", "upstream_http_error", "body_read_failed", "parse_failed", "unsupported_format", "body_too_large", "vehicle_array_missing", "upstream_timeout", "request_failed"].includes(payload.errorCode)
           ? payload.errorCode
           : "diagnostic_failed";
         const upstreamStatus = Number.isInteger(payload.upstreamStatus) ? ` · upstream HTTP ${payload.upstreamStatus}` : "";
         setMetaDiagnosticError(`The Preview diagnostic could not be completed (${safeCode}${upstreamStatus}).`);
+        if (payload.detectedFormat || payload.contentType || payload.structure) {
+          setMetaDiagnostic({
+            contentType: typeof payload.contentType === "string" ? payload.contentType : null,
+            detectedFormat: typeof payload.detectedFormat === "string" ? payload.detectedFormat : null,
+            structure: payload.structure && typeof payload.structure === "object" ? payload.structure : null,
+          });
+        }
         return;
       }
       setMetaDiagnostic(payload.summary);

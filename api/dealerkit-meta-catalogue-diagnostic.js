@@ -1,7 +1,14 @@
 import { timingSafeEqual } from "node:crypto";
+import { XMLParser, XMLValidator } from "fast-xml-parser";
+import { parse as parseDelimited } from "csv-parse/sync";
 
 const ACCESS_HEADER = "x-marketing-customer-database-key";
 const META_URL = "https://api.dealerkit.uk/meta-catalogue";
+const MAX_BODY_BYTES = 25 * 1024 * 1024;
+
+function canonicalKey(value) {
+  return String(value).replace(/^.*:/, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
 
 function authorised(request, environment) {
   const expected = environment.MARKETING_CUSTOMER_DATABASE_API_KEY;
@@ -17,6 +24,7 @@ function object(value) {
 }
 
 function scalar(value) {
+  if (object(value)) return scalar(value["#text"] ?? value.value ?? value.amount);
   if (typeof value === "string") return value.trim().slice(0, 300) || null;
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "boolean") return value;
@@ -24,8 +32,10 @@ function scalar(value) {
 }
 
 function pick(record, names) {
-  for (const name of names) {
-    const value = scalar(record?.[name]);
+  const wanted = new Set(names.map(canonicalKey));
+  for (const [key, raw] of Object.entries(object(record) ?? {})) {
+    if (!wanted.has(canonicalKey(key))) continue;
+    const value = scalar(raw);
     if (value !== null) return value;
   }
   return null;
@@ -43,13 +53,17 @@ function url(value) {
 }
 
 function imageSummary(vehicle) {
-  const images = vehicle.images ?? vehicle.image_urls ?? vehicle.imageUrls ?? vehicle.photos ?? vehicle.media;
-  const list = Array.isArray(images) ? images : Array.isArray(images?.images) ? images.images : [];
+  const images = vehicle.images ?? vehicle.image_urls ?? vehicle.imageUrls ?? vehicle.photos ?? vehicle.media ?? vehicle.image;
+  const nestedImages = object(images) ? Object.entries(images).find(([key]) => ["image", "images", "photo", "photos"].includes(canonicalKey(key)))?.[1] : null;
+  const list = Array.isArray(images) ? images : Array.isArray(nestedImages) ? nestedImages : nestedImages ? [nestedImages] : [];
   const first = list[0];
+  const primary = pick(vehicle, ["image_url", "imageUrl", "primary_image_url", "primaryImageUrl", "thumbnail_url", "thumbnailUrl", "image_link", "imageLink", "image"]);
+  const additional = Object.entries(vehicle).find(([key]) => canonicalKey(key) === "additionalimagelink")?.[1];
+  const additionalCount = Array.isArray(additional) ? additional.length : additional ? 1 : 0;
+  const firstImage = typeof first === "string" ? first : pick(first, ["url", "image_url", "imageUrl", "src", "link"]);
   return {
-    imageUrl: url(pick(vehicle, ["image_url", "imageUrl", "primary_image_url", "primaryImageUrl", "thumbnail_url", "thumbnailUrl"]))
-      ?? url(typeof first === "string" ? first : pick(first, ["url", "image_url", "imageUrl", "src"])),
-    imageCount: list.length || pick(vehicle, ["image_count", "imageCount", "photo_count", "photoCount"]) || 0,
+    imageUrl: url(primary) ?? url(firstImage),
+    imageCount: list.length || (primary ? 1 + additionalCount : additionalCount) || pick(vehicle, ["image_count", "imageCount", "photo_count", "photoCount"]) || 0,
   };
 }
 
@@ -60,7 +74,7 @@ function fieldNames(value) {
 
 function advertisingFlags(vehicle) {
   return Object.fromEntries(Object.entries(vehicle).flatMap(([key, value]) => {
-    if (!/^(?:is_?|has_?)?(?:advertis(?:ed|ing)?|published|live)(?:_?(?:status|flag|enabled|online))?$/i.test(key)) return [];
+    if (!/^(?:is|has)?(?:advertis(?:ed|ing)?|published|live)(?:(?:status|flag|enabled|online))?$/.test(canonicalKey(key))) return [];
     if (typeof value === "boolean") return [[key, value]];
     if (value === 0 || value === 1) return [[key, value]];
     if (typeof value === "string" && /^(?:true|false|yes|no|active|inactive|on|off|live|published|unpublished)$/i.test(value.trim())) return [[key, value.trim()]];
@@ -70,15 +84,15 @@ function advertisingFlags(vehicle) {
 
 function vehicleSummary(vehicle) {
   return {
-    registration: pick(vehicle, ["registration", "reg", "vrm", "registration_number", "registrationNumber"]),
-    make: pick(vehicle, ["make", "manufacturer"]),
+    registration: pick(vehicle, ["registration", "reg", "vrm", "registration_number", "registrationNumber", "registrationMark"]),
+    make: pick(vehicle, ["make", "manufacturer", "vehicleMake"]),
     model: pick(vehicle, ["model"]),
     derivative: pick(vehicle, ["derivative", "variant", "trim"]),
     title: pick(vehicle, ["title", "name"]),
-    price: pick(vehicle, ["price", "advertised_price", "advertisedPrice", "retail_price", "retailPrice"]),
+    price: pick(vehicle, ["price", "advertised_price", "advertisedPrice", "retail_price", "retailPrice", "salePrice"]),
     vat: pick(vehicle, ["vat", "vat_status", "vatStatus", "vat_qualifying", "vatQualifying"]),
     mileage: pick(vehicle, ["mileage", "miles"]),
-    vehicleUrl: url(pick(vehicle, ["vehicle_url", "vehicleUrl", "url", "advert_url", "advertUrl", "website_url", "websiteUrl"])),
+    vehicleUrl: url(pick(vehicle, ["vehicle_url", "vehicleUrl", "url", "advert_url", "advertUrl", "website_url", "websiteUrl", "link"])),
     ...imageSummary(vehicle),
     branch: pick(vehicle, ["branch", "branch_name", "branchName"]),
     site: pick(vehicle, ["site", "site_name", "siteName"]),
@@ -93,23 +107,90 @@ function vehicleSummary(vehicle) {
 
 function findVehicles(payload) {
   if (Array.isArray(payload)) return { vehicles: payload, path: "$" };
-  const root = object(payload);
-  if (!root) return { vehicles: [], path: null };
-  for (const key of ["vehicles", "stock", "items", "results", "data", "catalogue", "catalog"]) {
-    if (Array.isArray(root[key])) return { vehicles: root[key], path: key };
-    const nested = object(root[key]);
-    if (nested) {
-      for (const child of ["vehicles", "stock", "items", "results", "data"]) {
-        if (Array.isArray(nested[child])) return { vehicles: nested[child], path: `${key}.${child}` };
+  const candidates = [];
+  const recordNames = new Set(["vehicle", "vehicles", "item", "items", "entry", "entries", "record", "records", "product", "products", "advert", "adverts", "listing", "listings", "stock"]);
+  const vehicleFields = new Set(["registration", "registrationnumber", "vrm", "make", "model", "title", "price", "mileage", "link", "vehicleurl"]);
+  function visit(value, path, depth) {
+    if (depth > 7) return;
+    if (Array.isArray(value)) {
+      const records = value.filter(object);
+      if (records.length) {
+        const last = canonicalKey(path.split(".").at(-1));
+        const keys = new Set(records.slice(0, 5).flatMap((record) => Object.keys(record).map(canonicalKey)));
+        const score = (recordNames.has(last) ? 20 : 0) + [...keys].filter((key) => vehicleFields.has(key)).length * 4;
+        candidates.push({ vehicles: records, path, score });
       }
+      return;
+    }
+    for (const [key, child] of Object.entries(object(value) ?? {})) {
+      const childPath = path === "$" ? key : `${path}.${key}`;
+      if (object(child) && recordNames.has(canonicalKey(key))) {
+        const keys = Object.keys(child).map(canonicalKey);
+        if (keys.some((item) => vehicleFields.has(item))) candidates.push({ vehicles: [child], path: childPath, score: 15 });
+      }
+      visit(child, childPath, depth + 1);
     }
   }
-  return { vehicles: [], path: null };
+  visit(payload, "$", 0);
+  candidates.sort((a, b) => b.score - a.score || b.vehicles.length - a.vehicles.length);
+  return candidates[0] ?? { vehicles: [], path: null };
 }
 
 function unique(vehicles, names) {
-  return [...new Set(vehicles.flatMap((vehicle) => names.map((name) => scalar(vehicle?.[name]))).filter((value) => value !== null))]
+  return [...new Set(vehicles.flatMap((vehicle) => names.map((name) => pick(vehicle, [name]))).filter((value) => value !== null))]
     .sort((a, b) => String(a).localeCompare(String(b)));
+}
+
+function safeStructure(raw) {
+  const trimmed = raw.trimStart();
+  const root = trimmed.match(/^(?:<\?xml[^>]*\?>\s*)?<([A-Za-z_][\w:.-]*)\b/);
+  return {
+    byteLength: Buffer.byteLength(raw),
+    lineCount: raw.split(/\r\n|\n|\r/).length,
+    firstCharacterType: trimmed.startsWith("<") ? "angle_bracket" : trimmed.startsWith("{") ? "brace" : trimmed.startsWith("[") ? "square_bracket" : "other",
+    xmlRootElement: root?.[1] ?? null,
+  };
+}
+
+function detectFormat(raw, contentType) {
+  const trimmed = raw.replace(/^\uFEFF/, "").trimStart();
+  if (/^[{[]/.test(trimmed)) return "json";
+  if (/^<!doctype\s+html\b|^<html\b/i.test(trimmed)) return "html";
+  if (trimmed.startsWith("<")) return "xml";
+  const firstLine = trimmed.split(/\r\n|\n|\r/, 1)[0];
+  const tabs = (firstLine.match(/\t/g) ?? []).length;
+  const commas = (firstLine.match(/,/g) ?? []).length;
+  if (tabs > commas) return "tsv";
+  if (commas > 0) return "csv";
+  if (/\bjson\b|\+json\b/i.test(contentType)) return "json";
+  if (/\bxml\b|\+xml\b/i.test(contentType)) return "xml";
+  if (/\btab-separated-values\b|\btsv\b/i.test(contentType)) return "tsv";
+  if (/\bcsv\b/i.test(contentType)) return "csv";
+  return "unknown";
+}
+
+export function parseMetaCatalogueText(raw, contentType = "") {
+  const detectedFormat = detectFormat(raw, contentType);
+  const structure = safeStructure(raw);
+  if (structure.byteLength > MAX_BODY_BYTES) return { detectedFormat, structure, errorCode: "body_too_large" };
+  try {
+    if (detectedFormat === "json") return { detectedFormat, structure, payload: JSON.parse(raw.replace(/^\uFEFF/, "")) };
+    if (detectedFormat === "xml") {
+      if (/<!DOCTYPE\b|<!ENTITY\b/i.test(raw) || XMLValidator.validate(raw) !== true) throw new Error("xml_invalid");
+      const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@", textNodeName: "#text", parseTagValue: false, parseAttributeValue: false, processEntities: false,
+        isArray: (name) => ["vehicle", "item", "entry", "record", "product", "advert", "listing"].includes(canonicalKey(name)) });
+      return { detectedFormat, structure, payload: parser.parse(raw) };
+    }
+    if (detectedFormat === "csv" || detectedFormat === "tsv") {
+      const delimiter = detectedFormat === "tsv" ? "\t" : ",";
+      const payload = parseDelimited(raw, { columns: true, bom: true, delimiter, skip_empty_lines: true, relax_column_count: true, max_record_size: 1024 * 1024 });
+      if (!payload.length) throw new Error("empty_table");
+      return { detectedFormat, structure, payload };
+    }
+    return { detectedFormat, structure, errorCode: "unsupported_format" };
+  } catch {
+    return { detectedFormat, structure, errorCode: "parse_failed" };
+  }
 }
 
 export function summariseMetaCatalogue(payload) {
@@ -117,19 +198,20 @@ export function summariseMetaCatalogue(payload) {
   const validVehicles = vehicles.filter(object);
   const fieldNamesAvailable = [...new Set(validVehicles.flatMap((vehicle) => Object.keys(vehicle)))].sort();
   const representative = [];
+  const selected = new Set();
   const seen = new Set();
-  for (const vehicle of validVehicles) {
+  for (const [index, vehicle] of validVehicles.entries()) {
     const summary = vehicleSummary(vehicle);
     const diversityKey = `${summary.branch}|${summary.site}|${summary.location}|${summary.availability}|${summary.status}`;
     if (seen.has(diversityKey)) continue;
     seen.add(diversityKey);
     representative.push(summary);
+    selected.add(index);
     if (representative.length === 5) break;
   }
-  for (const vehicle of validVehicles) {
+  for (const [index, vehicle] of validVehicles.entries()) {
     if (representative.length === 5) break;
-    const summary = vehicleSummary(vehicle);
-    if (!representative.some((item) => item.registration && item.registration === summary.registration)) representative.push(summary);
+    if (!selected.has(index)) representative.push(vehicleSummary(vehicle));
   }
   return {
     totalVehicleCount: validVehicles.length,
@@ -161,7 +243,7 @@ export default async function handler(request, response) {
   try {
     const upstream = await fetch(META_URL, {
       method: "GET",
-      headers: { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`, Accept: "application/json" },
+      headers: { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}` },
       cache: "no-store",
       signal: AbortSignal.timeout(25000),
     });
@@ -170,19 +252,24 @@ export default async function handler(request, response) {
       console.warn("Meta catalogue diagnostic: upstream_http_error", { upstreamStatus: upstream.status, contentType });
       return response.status(502).json({ ok: false, error: "Catalogue request was rejected by the upstream service.", errorCode: "upstream_http_error", upstreamStatus: upstream.status, contentType });
     }
-    let payload;
+    let raw;
     try {
-      payload = await upstream.json();
+      raw = await upstream.text();
     } catch {
-      console.warn("Meta catalogue diagnostic: invalid_json", { upstreamStatus: upstream.status, contentType });
-      return response.status(502).json({ ok: false, error: "Catalogue response was not valid JSON.", errorCode: "invalid_json", upstreamStatus: upstream.status, contentType });
+      console.warn("Meta catalogue diagnostic: body_read_failed", { upstreamStatus: upstream.status, contentType });
+      return response.status(502).json({ ok: false, error: "Catalogue response could not be read.", errorCode: "body_read_failed", upstreamStatus: upstream.status, contentType });
     }
-    const summary = summariseMetaCatalogue(payload);
+    const parsed = parseMetaCatalogueText(raw, contentType);
+    if (parsed.errorCode) {
+      console.warn("Meta catalogue diagnostic: format_parse_failed", { upstreamStatus: upstream.status, contentType, detectedFormat: parsed.detectedFormat, structure: parsed.structure, errorCode: parsed.errorCode });
+      return response.status(502).json({ ok: false, error: "Catalogue format could not be parsed.", errorCode: parsed.errorCode, upstreamStatus: upstream.status, contentType, detectedFormat: parsed.detectedFormat, structure: parsed.structure });
+    }
+    const summary = summariseMetaCatalogue(parsed.payload);
     if (!summary.responseShape.vehiclesPath) {
-      console.warn("Meta catalogue diagnostic: vehicle_array_missing", { upstreamStatus: upstream.status, contentType, responseType: summary.responseShape.type, topLevelFields: summary.responseShape.topLevelFields });
-      return response.status(502).json({ ok: false, error: "Catalogue vehicle array was not found.", errorCode: "vehicle_array_missing", upstreamStatus: upstream.status, contentType, responseShape: summary.responseShape });
+      console.warn("Meta catalogue diagnostic: vehicle_array_missing", { upstreamStatus: upstream.status, contentType, detectedFormat: parsed.detectedFormat, structure: parsed.structure, responseType: summary.responseShape.type, topLevelFields: summary.responseShape.topLevelFields });
+      return response.status(502).json({ ok: false, error: "Catalogue vehicle array was not found.", errorCode: "vehicle_array_missing", upstreamStatus: upstream.status, contentType, detectedFormat: parsed.detectedFormat, structure: parsed.structure, responseShape: summary.responseShape });
     }
-    return response.status(200).json({ ok: true, readOnly: true, summary });
+    return response.status(200).json({ ok: true, readOnly: true, summary: { contentType, detectedFormat: parsed.detectedFormat, ...summary } });
   } catch (error) {
     const errorCode = error?.name === "TimeoutError" ? "upstream_timeout" : "request_failed";
     console.warn(`Meta catalogue diagnostic: ${errorCode}`);
