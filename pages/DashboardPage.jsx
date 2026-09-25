@@ -404,6 +404,9 @@ export default function DashboardPage({ onNavigate }) {
         <p>
           DealerKit Meta catalogue is the retail stock source. Branch-specific copy is created only when the vehicle location can be resolved safely, then queued to the dedicated Vansco Limited Buffer channel.
         </p>
+        <div className="notice" style={{ marginBottom: 12 }}>
+          <strong>Posting flow:</strong> DealerKit retail stock to branch match to post builder to Buffer to Vansco Limited Facebook.
+        </div>
         <div className="card-actions">
           <button
             className="button button--primary"
