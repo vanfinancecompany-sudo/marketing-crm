@@ -5,6 +5,7 @@ import {
   hasExplicitVanscoVatLabel,
   isEligibleVanscoVehicle,
   vanscoDailySlots,
+  vanscoNextDateKey,
   VANSCO_FACEBOOK_MAX_POSTS_PER_DAY,
 } from "../lib/vanscoFacebookAutomation.js";
 import {
@@ -280,23 +281,43 @@ export default async function handler(request, response) {
     }
 
     const bufferConfig = await loadVanscoBufferConfig();
-    const state = await loadVanscoBufferState(bufferConfig, `${dateKey}T12:00:00.000Z`);
-    const pruned = await pruneStaleScheduledPosts(state.posts, liveUrls);
+    const now = Date.now();
+    const currentState = await loadVanscoBufferState(bufferConfig, `${dateKey}T12:00:00.000Z`);
+    const pruned = await pruneStaleScheduledPosts(currentState.posts, liveUrls);
     const posts = [...pruned.kept];
 
+    const currentNetworkLimit = dailyLimitFromState(currentState.limit);
+    const currentSlots = availableSlots({
+      dateKey,
+      networkLimit: currentNetworkLimit,
+      occupiedPosts: posts,
+      now,
+    });
+
+    // Queue creation and public posting are deliberately separate concerns.
+    // Once today's 08:00-21:00 window has no usable slot left, refill Buffer
+    // with tomorrow's slots instead of leaving the queue empty overnight.
+    const scheduleDateKey = currentSlots.length ? dateKey : vanscoNextDateKey(dateKey);
+    const state = scheduleDateKey === dateKey
+      ? currentState
+      : await loadVanscoBufferState(bufferConfig, `${scheduleDateKey}T12:00:00.000Z`);
     const networkLimit = dailyLimitFromState(state.limit);
     const providerSent = safeNumber(state.limit?.sent);
+    const scheduledForTargetDate = posts.filter((post) => {
+      const dueAt = postDueIso(post);
+      return dueAt && londonDateKey(new Date(dueAt)) === scheduleDateKey;
+    }).length;
     const providerScheduled = Math.max(
       safeNumber(state.limit?.scheduled),
-      posts.length,
+      scheduledForTargetDate,
     );
     const remainingDaily = Math.max(0, networkLimit - providerSent - providerScheduled);
     const capacity = Math.min(queueCapacity(bufferConfig, posts), remainingDaily);
     const slots = availableSlots({
-      dateKey,
+      dateKey: scheduleDateKey,
       networkLimit,
       occupiedPosts: posts,
-      now: Date.now(),
+      now,
     }).slice(0, capacity);
 
     const history = await loadVanscoPostingHistory();
@@ -348,6 +369,7 @@ export default async function handler(request, response) {
       ok: true,
       enabled: true,
       date: dateKey,
+      scheduleDate: scheduleDateKey,
       state: "healthy",
       source: "dealerkit_meta_catalogue",
       metaVehicleCount: vehicles.length,
