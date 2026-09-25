@@ -15,6 +15,7 @@ import {
   saveDailyTargetSchedule,
 } from "../services/marketingDailyOperations.js";
 import {
+  buildMarketingAccessHeaders,
   getStoredMarketingAccessKey,
   saveMarketingAccessKey,
   validateMarketingAccessKey,
@@ -151,6 +152,9 @@ export default function DashboardPage({ onNavigate }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [metaDiagnostic, setMetaDiagnostic] = useState(null);
+  const [metaDiagnosticError, setMetaDiagnosticError] = useState("");
+  const [metaDiagnosticBusy, setMetaDiagnosticBusy] = useState(false);
 
   function periodRange(nextPeriod = period) {
     if (nextPeriod === "seven")
@@ -248,6 +252,26 @@ export default function DashboardPage({ onNavigate }) {
     }
   }
 
+  async function runMetaDiagnostic() {
+    setMetaDiagnosticBusy(true);
+    setMetaDiagnostic(null);
+    setMetaDiagnosticError("");
+    try {
+      const result = await fetch("/api/dealerkit-meta-catalogue-diagnostic", {
+        method: "GET",
+        headers: buildMarketingAccessHeaders(),
+        cache: "no-store",
+      });
+      const payload = await result.json();
+      if (!result.ok || !payload.ok) throw new Error("The Preview diagnostic could not be completed.");
+      setMetaDiagnostic(payload.summary);
+    } catch {
+      setMetaDiagnosticError("The Preview diagnostic could not be completed.");
+    } finally {
+      setMetaDiagnosticBusy(false);
+    }
+  }
+
   const metrics = useMemo(
     () =>
       DAILY_ACTIVITY_TYPES.map((type) => overview?.day?.metrics?.[type]).filter(
@@ -329,6 +353,17 @@ export default function DashboardPage({ onNavigate }) {
       </section>
       <AIVisibilityWidget onOpen={() => onNavigate?.("AI Visibility")} />
       <Ga4PipelinePanel />
+
+      <section className="panel">
+        <div className="eyebrow">TEMPORARY PREVIEW DIAGNOSTIC</div>
+        <h3>DealerKit Meta catalogue</h3>
+        <p>Read-only catalogue check. Run it once in this Preview deployment after unlocking Content Operations.</p>
+        <button className="button button--primary" type="button" disabled={metaDiagnosticBusy} onClick={runMetaDiagnostic}>
+          {metaDiagnosticBusy ? "CHECKING…" : "RUN META CATALOGUE DIAGNOSTIC"}
+        </button>
+        {metaDiagnosticError ? <div className="notice notice--error">{metaDiagnosticError}</div> : null}
+        {metaDiagnostic ? <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(metaDiagnostic, null, 2)}</pre> : null}
+      </section>
 
       <details className="operations-drawer">
         <summary>VIEW TOTALS AND HISTORY</summary>
@@ -506,3 +541,4 @@ export default function DashboardPage({ onNavigate }) {
     </div>
   );
 }
+
