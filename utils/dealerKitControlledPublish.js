@@ -21,6 +21,62 @@ function productLabel(product) {
   if (product === "cars") return "Cars";
   return "Van Finance";
 }
+export function isRefreshableFinalCheckError(error) {
+  const type = clean(error?.type).toLowerCase();
+  const message = clean(error?.message || error).toLowerCase();
+  return type === "preview_stale"
+    || type === "write_intent_changed"
+    || /publish preview is stale|write intent changed during the final recheck/.test(message);
+}
+
+function sameJson(left, right) {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+function sameNumberValue(left, right) {
+  if ((left === undefined || left === null || left === "") && (right === undefined || right === null || right === "")) return true;
+  const a = Number(left);
+  const b = Number(right);
+  return Number.isFinite(a) && Number.isFinite(b) ? a === b : clean(left) === clean(right);
+}
+
+export function describeConfirmationChanges(previous = {}, current = {}) {
+  const before = previous && typeof previous === "object" ? previous : {};
+  const after = current && typeof current === "object" ? current : {};
+  const changes = [];
+  if (clean(before.writeIntent) !== clean(after.writeIntent)) changes.push("publish action");
+  if (clean(before.sourceUpdatedAt) !== clean(after.sourceUpdatedAt)) changes.push("DealerKit source");
+  if (clean(before.reviewUpdatedAt) !== clean(after.reviewUpdatedAt)) changes.push("saved review");
+  if (!sameJson(before.dealerKitImageIds || [], after.dealerKitImageIds || [])) changes.push("selected images");
+
+  if (clean(before.carMainImage) !== clean(after.carMainImage)
+      || clean(before.vfcMainImage) !== clean(after.vfcMainImage)
+      || clean(before.rent2buyMainImage) !== clean(after.rent2buyMainImage)) {
+    changes.push("primary image");
+  }
+
+  if (!sameNumberValue(before.retailPrice, after.retailPrice)
+      || !sameNumberValue(before.monthlyPrice, after.monthlyPrice)
+      || !sameNumberValue(before.rent2buyMonthly, after.rent2buyMonthly)
+      || !sameNumberValue(before.rent2buyUpfront, after.rent2buyUpfront)) {
+    changes.push("price/payment");
+  }
+  if (!sameJson(before.targetPayloads || [], after.targetPayloads || [])) changes.push("Wix rows/fields");
+
+  return [...new Set(changes)];
+}
+function addAutomaticRefreshNotice(root, previousConfirmation, currentConfirmation) {
+  const result = root.querySelector("[data-controlled-publish-result]");
+  if (!result) return;
+  const changes = describeConfirmationChanges(previousConfirmation, currentConfirmation);
+  const detail = changes.length ? ` Changed: ${changes.join(", ")}.` : " The live snapshot changed during the final safety check.";
+  const notice = element(
+    "div",
+    "dealerkit-wix-preview__messages dealerkit-wix-preview__messages--warnings",
+    `Preview refreshed automatically.${detail} Nothing was published. Review the fresh plan and press the publish/reconcile button again.`,
+  );
+  result.prepend(notice);
+}
 
 function setStatus(root, text, state = "") {
   const status = root.querySelector("[data-controlled-publish-status]");
@@ -185,6 +241,7 @@ async function loadPreview(root, { force = false } = {}) {
   if (root._controlledPreviewRequestId !== requestId) return;
   if (root.dataset.publishCompleted === "true" && !force) return;
   renderPayload(root, payload);
+  return payload;
 }
 
 function createPanel(registration, product = "finance") {
@@ -313,6 +370,18 @@ function createPanel(registration, product = "finance") {
       // request has already completed successfully. Never replace a verified
       // success with that later stale result.
       if (root.dataset.publishCompleted === "true") return;
+      if (isRefreshableFinalCheckError(error)) {
+        const previousConfirmation = payload?.plan?.confirmation || null;
+        setStatus(root, "REFRESHING PREVIEW", "is-busy");
+        try {
+          const refreshed = await loadPreview(root, { force: true });
+          addAutomaticRefreshNotice(root, previousConfirmation, refreshed?.plan?.confirmation || null);
+        } catch (refreshError) {
+          setStatus(root, "CHECK FAILED", "is-warning");
+          result.replaceChildren(element("div", "dealerkit-wix-preview__error", refreshError?.message || "The live state changed and the fresh preview could not be rebuilt."));
+        }
+        return;
+      }
       setStatus(root, "PUBLISH BLOCKED", "is-warning");
       result.replaceChildren(element("div", "dealerkit-wix-preview__error", error?.message || "Publishing failed. Check the rollback result before trying again."));
       const checkButton = root.querySelector("[data-controlled-publish-check]");
@@ -322,7 +391,7 @@ function createPanel(registration, product = "finance") {
         checkButton.textContent = "Check again";
       }
     } finally {
-      publish.textContent = payload?.plan?.writeIntent === "update_existing_vehicle"
+      publish.textContent = root._controlledPublishPayload?.plan?.writeIntent === "update_existing_vehicle"
         ? "Reconcile advert"
         : `Publish to ${labelText}`;
       refreshActionState(root);
