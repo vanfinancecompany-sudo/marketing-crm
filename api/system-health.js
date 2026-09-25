@@ -290,6 +290,114 @@ async function checkBuffer() {
   return { ...base, ok: true };
 }
 
+async function checkVanscoFacebookAutomation() {
+  const enabled = String(process.env.VANSCO_FACEBOOK_AUTOMATION_ENABLED || "").toLowerCase() === "true";
+  const configured = Boolean(
+    String(process.env.VANSCO_BUFFER_API_KEY || "").trim()
+    && String(process.env.DEALERKIT_META_USERNAME || "").trim()
+    && String(process.env.DEALERKIT_META_PASSWORD || "").trim()
+  );
+
+  if (!enabled) {
+    return { ok: true, enabled: false, waiting: false, status: null, detail: "Vansco Facebook automation is disabled." };
+  }
+
+  if (!configured) {
+    return {
+      ok: false,
+      enabled: true,
+      issue: issue(
+        "vansco-facebook-config",
+        "Vansco Facebook automation",
+        "Vansco Facebook automation is enabled but its Buffer or DealerKit configuration is incomplete.",
+      ),
+    };
+  }
+
+  const status = await loadVanscoAutomationStatus();
+  if (!status) {
+    return {
+      ok: true,
+      enabled: true,
+      waiting: true,
+      status: null,
+      detail: "Enabled and waiting for its first recorded production run.",
+    };
+  }
+
+  const attemptedAt = status.attemptedAt || status.updatedAt || null;
+  const state = String(status.state || "").toLowerCase();
+  const channelName = String(status?.buffer?.channelName || "").trim();
+  const eligible = Number(status.eligibleVehicleCount);
+  const queueCount = Number(status.queueCountAfter);
+
+  if (state === "failed" || status.ok === false) {
+    return {
+      ok: false,
+      enabled: true,
+      status,
+      issue: issue(
+        "vansco-facebook-failed",
+        "Vansco Facebook automation",
+        status.lastError || status.error || "The latest Vansco Facebook automation run failed.",
+        { last_success_at: status.lastSuccessAt || null },
+      ),
+    };
+  }
+
+  if (attemptedAt && ageMs(attemptedAt) > 90 * 60 * 1000) {
+    return {
+      ok: false,
+      enabled: true,
+      status,
+      issue: issue(
+        "vansco-facebook-stale",
+        "Vansco Facebook automation",
+        "The Vansco Facebook automation has not recorded a run for more than 90 minutes.",
+        { last_success_at: status.lastSuccessAt || attemptedAt },
+      ),
+    };
+  }
+
+  if (channelName && !/vansco/i.test(channelName)) {
+    return {
+      ok: false,
+      enabled: true,
+      status,
+      issue: issue(
+        "vansco-facebook-channel",
+        "Vansco Facebook automation",
+        "The latest run reported an unexpected Buffer channel.",
+        { last_success_at: status.lastSuccessAt || attemptedAt },
+      ),
+    };
+  }
+
+  if (Number.isFinite(eligible) && eligible <= 0) {
+    return {
+      ok: false,
+      enabled: true,
+      status,
+      issue: issue(
+        "vansco-facebook-no-stock",
+        "Vansco Facebook automation",
+        "DealerKit returned no eligible Vansco retail vehicles on the latest run.",
+        { last_success_at: status.lastSuccessAt || attemptedAt },
+      ),
+    };
+  }
+
+  return {
+    ok: true,
+    enabled: true,
+    waiting: false,
+    status,
+    checked_at: attemptedAt,
+    queue_count: Number.isFinite(queueCount) ? queueCount : null,
+    detail: Number.isFinite(queueCount) ? `Latest run healthy; Buffer queue ${queueCount}.` : "Latest run healthy.",
+  };
+}
+
 async function checkRecentAutomationActivity() {
   const supabase = supabaseClient();
   const since = new Date(Date.now() - 3 * DAY).toISOString();
