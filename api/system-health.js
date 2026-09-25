@@ -964,6 +964,23 @@ export default async function handler(request, response) {
     },
     buffer_ignored_inactive_failures: checks[1]?.ignored_inactive_failures || 0,
     buffer_ignored_inactive_registrations: checks[1]?.ignored_inactive_registrations || [],
+    vansco_debug: checks[7]?.status ? {
+      metaVehicleCount: checks[7].status.metaVehicleCount ?? null,
+      eligibleVehicleCount: checks[7].status.eligibleVehicleCount ?? null,
+      queueCountAfter: checks[7].status.queueCountAfter ?? null,
+      createdCount: checks[7].status.createdCount ?? null,
+      heldCount: checks[7].status.heldCount ?? null,
+      staleRemovedCount: checks[7].status.staleRemovedCount ?? null,
+      scheduledPostsLimit: checks[7].status.buffer?.scheduledPostsLimit ?? null,
+      networkDailyLimit: checks[7].status.buffer?.networkDailyLimit ?? null,
+      providerSent: checks[7].status.buffer?.providerSent ?? null,
+      providerScheduled: checks[7].status.buffer?.providerScheduled ?? null,
+      heldReasonCounts: (checks[7].status.held || []).reduce((counts, item) => {
+        const reason = String(item?.reason || "unknown");
+        counts[reason] = (counts[reason] || 0) + 1;
+        return counts;
+      }, {}),
+    } : null,
     automations,
     issues,
   });
