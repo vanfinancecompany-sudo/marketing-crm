@@ -431,7 +431,7 @@ export default function DashboardPage({ onNavigate }) {
           <>
             <div className={`notice ${vanscoBuffer.connected ? "notice--success" : ""}`}>
               {vanscoBuffer.connected
-                ? `${vanscoBuffer.channelName} connected · daily network limit ${vanscoBuffer.dailyPostingLimit ?? "not reported"} · queue limit ${vanscoBuffer.scheduledPostsLimit}`
+                ? `${vanscoBuffer.channelName} connected · sent today ${vanscoBuffer.sentToday ?? 0} · queued now ${vanscoBuffer.queuedNow ?? 0} · daily limit ${vanscoBuffer.dailyPostingLimit ?? "not reported"} · queue limit ${vanscoBuffer.scheduledPostsLimit}`
                 : vanscoBuffer.message}
             </div>
             {!vanscoBuffer.connected && vanscoBuffer.accessibleOrganizations?.length ? (
