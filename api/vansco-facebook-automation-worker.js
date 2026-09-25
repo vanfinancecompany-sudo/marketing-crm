@@ -188,6 +188,48 @@ export default async function handler(request, response) {
       const selected = [];
       const held = [];
       const excludedUrls = new Set();
+
+      const addPreview = (vehicle) => {
+        selected.push({
+          vehicleKey: vehicle.vehicleKey,
+          registration: vehicle.registration,
+          title: vehicle.title,
+          price: vehicle.price,
+          vatLabel: vehicle.vatLabel,
+          mileage: vehicle.mileage,
+          branchKey: vehicle.branchKey,
+          branchSource: vehicle.branchSource,
+          vehicleUrl: vehicle.vehicleUrl,
+          imageUrl: vehicle.imageUrl,
+          caption: buildVanscoFacebookCaption(vehicle),
+        });
+        excludedUrls.add(vehicle.vehicleUrl);
+      };
+
+      for (const branchKey of ["vansco333", "newForest", "southamptonAirport"]) {
+        const candidate = eligible
+          .filter((vehicle) => vehicle.branchKey === branchKey && !vehicle.branchConflict)
+          .filter((vehicle) => !excludedUrls.has(vehicle.vehicleUrl))
+          .sort((first, second) => {
+            const firstLast = new Date(history.lastPostedByKey?.[first.vehicleKey] || 0).getTime() || 0;
+            const secondLast = new Date(history.lastPostedByKey?.[second.vehicleKey] || 0).getTime() || 0;
+            if (firstLast !== secondLast) return firstLast - secondLast;
+            return String(first.vehicleKey).localeCompare(String(second.vehicleKey));
+          })[0];
+        if (!candidate) continue;
+        const enriched = await enrichVanscoVehicleFromPage(candidate);
+        if (enriched.branchKey === branchKey && !enriched.branchConflict) addPreview(enriched);
+        else {
+          held.push({
+            vehicleKey: candidate.vehicleKey,
+            vehicleUrl: candidate.vehicleUrl,
+            title: candidate.title,
+            reason: enriched.branchConflict ? "branch_conflict" : "branch_unresolved",
+          });
+          excludedUrls.add(candidate.vehicleUrl);
+        }
+      }
+
       while (selected.length < 5) {
         const result = await chooseResolvedCandidate({
           vehicles: eligible,
@@ -197,20 +239,7 @@ export default async function handler(request, response) {
         held.push(...result.held);
         for (const item of result.held) excludedUrls.add(item.vehicleUrl);
         if (!result.vehicle) break;
-        selected.push({
-          vehicleKey: result.vehicle.vehicleKey,
-          registration: result.vehicle.registration,
-          title: result.vehicle.title,
-          price: result.vehicle.price,
-          vatLabel: result.vehicle.vatLabel,
-          mileage: result.vehicle.mileage,
-          branchKey: result.vehicle.branchKey,
-          branchSource: result.vehicle.branchSource,
-          vehicleUrl: result.vehicle.vehicleUrl,
-          imageUrl: result.vehicle.imageUrl,
-          caption: buildVanscoFacebookCaption(result.vehicle),
-        });
-        excludedUrls.add(result.vehicle.vehicleUrl);
+        addPreview(result.vehicle);
       }
       return response.status(200).json({
         ok: true,
