@@ -15,6 +15,7 @@ import {
   saveDailyTargetSchedule,
 } from "../services/marketingDailyOperations.js";
 import {
+  buildMarketingAccessHeaders,
   getStoredMarketingAccessKey,
   saveMarketingAccessKey,
   validateMarketingAccessKey,
@@ -151,6 +152,12 @@ export default function DashboardPage({ onNavigate }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [vanscoPreview, setVanscoPreview] = useState(null);
+  const [vanscoPreviewBusy, setVanscoPreviewBusy] = useState(false);
+  const [vanscoPreviewError, setVanscoPreviewError] = useState("");
+  const [vanscoBuffer, setVanscoBuffer] = useState(null);
+  const [vanscoBufferBusy, setVanscoBufferBusy] = useState(false);
+  const [vanscoBufferError, setVanscoBufferError] = useState("");
 
   function periodRange(nextPeriod = period) {
     if (nextPeriod === "seven")
@@ -248,6 +255,44 @@ export default function DashboardPage({ onNavigate }) {
     }
   }
 
+  async function previewVanscoFacebook() {
+    setVanscoPreviewBusy(true);
+    setVanscoPreviewError("");
+    try {
+      const result = await fetch("/api/vansco-facebook-automation-worker?dryRun=true", {
+        method: "GET",
+        headers: buildMarketingAccessHeaders(),
+        cache: "no-store",
+      });
+      const payload = await result.json();
+      if (!result.ok || !payload.ok) throw new Error(payload.error || "Could not build Vansco Facebook previews.");
+      setVanscoPreview(payload);
+    } catch (caught) {
+      setVanscoPreviewError(caught?.message || "Could not build Vansco Facebook previews.");
+    } finally {
+      setVanscoPreviewBusy(false);
+    }
+  }
+
+  async function verifyVanscoBuffer() {
+    setVanscoBufferBusy(true);
+    setVanscoBufferError("");
+    try {
+      const result = await fetch("/api/vansco-buffer-setup", {
+        method: "GET",
+        headers: buildMarketingAccessHeaders(),
+        cache: "no-store",
+      });
+      const payload = await result.json();
+      if (!result.ok || !payload.ok) throw new Error(payload.error || "Could not verify Vansco Buffer.");
+      setVanscoBuffer(payload);
+    } catch (caught) {
+      setVanscoBufferError(caught?.message || "Could not verify Vansco Buffer.");
+    } finally {
+      setVanscoBufferBusy(false);
+    }
+  }
+
   const metrics = useMemo(
     () =>
       DAILY_ACTIVITY_TYPES.map((type) => overview?.day?.metrics?.[type]).filter(
@@ -329,6 +374,107 @@ export default function DashboardPage({ onNavigate }) {
       </section>
       <AIVisibilityWidget onOpen={() => onNavigate?.("AI Visibility")} />
       <Ga4PipelinePanel />
+
+      <section className="panel">
+        <div className="eyebrow">VANSCO · FACEBOOK STOCK AUTOMATION</div>
+        <h3>DealerKit → branch-specific Facebook posts → Buffer</h3>
+        <p>
+          DealerKit Meta catalogue is the retail stock source. Preview is read-only.
+          Buffer verification prefers the dedicated Vansco key when configured. Live publishing remains disabled until production is explicitly enabled.
+        </p>
+        <div className="card-actions">
+          <button
+            className="button button--primary"
+            type="button"
+            disabled={vanscoPreviewBusy}
+            onClick={previewVanscoFacebook}
+          >
+            {vanscoPreviewBusy ? "BUILDING PREVIEW…" : "PREVIEW 5 VANSCO POSTS"}
+          </button>
+          <button
+            className="button button--ghost"
+            type="button"
+            disabled={vanscoBufferBusy}
+            onClick={verifyVanscoBuffer}
+          >
+            {vanscoBufferBusy ? "VERIFYING…" : "VERIFY VANSCO BUFFER"}
+          </button>
+        </div>
+        {vanscoPreviewError ? <div className="notice notice--error">{vanscoPreviewError}</div> : null}
+        {vanscoBufferError ? <div className="notice notice--error">{vanscoBufferError}</div> : null}
+        {vanscoBuffer ? (
+          <>
+            <div className={`notice ${vanscoBuffer.connected ? "notice--success" : ""}`}>
+              {vanscoBuffer.connected
+                ? `${vanscoBuffer.channelName} connected · daily network limit ${vanscoBuffer.dailyPostingLimit ?? "not reported"} · queue limit ${vanscoBuffer.scheduledPostsLimit}`
+                : vanscoBuffer.message}
+            </div>
+            {!vanscoBuffer.connected && vanscoBuffer.accessibleOrganizations?.length ? (
+              <div style={{ marginTop: 12 }}>
+                {vanscoBuffer.accessibleOrganizations.map((organization, index) => (
+                  <details className="operations-drawer" key={`${organization.organizationName}-${index}`}>
+                    <summary>
+                      Buffer workspace: {organization.organizationName || "(unnamed)"} · queue limit {organization.scheduledPostsLimit ?? "not reported"}
+                    </summary>
+                    <div className="operations-drawer__body">
+                      {(organization.channels || []).length ? (
+                        <ul>
+                          {organization.channels.map((channel, channelIndex) => (
+                            <li key={`${channel.name}-${channelIndex}`}>
+                              {channel.name || "(unnamed channel)"} · {channel.service || "unknown service"}
+                              {channel.isDisconnected ? " · disconnected" : ""}
+                              {channel.isLocked ? " · locked" : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p>No channels visible to this Buffer token.</p>
+                      )}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            ) : null}
+          </>
+        ) : null}
+        {vanscoPreview ? (
+          <div style={{ marginTop: 16 }}>
+            <p>
+              <strong>{vanscoPreview.eligibleVehicleCount}</strong> eligible of{" "}
+              <strong>{vanscoPreview.metaVehicleCount}</strong> DealerKit Meta vehicles.
+            </p>
+            {(vanscoPreview.preview || []).map((item, index) => (
+              <details className="operations-drawer" key={item.vehicleKey || item.vehicleUrl || index}>
+                <summary>
+                  {index + 1}. {item.title} · {item.branchKey || "branch unresolved"}
+                </summary>
+                <div className="operations-drawer__body">
+                  <p>
+                    <strong>Branch:</strong> {item.branchKey} ({item.branchSource})<br />
+                    <strong>Price:</strong> {item.price} {item.vatLabel}<br />
+                    <strong>Vehicle:</strong> {item.vehicleUrl}
+                  </p>
+                  {item.imageUrl ? (
+                    <img
+                      src={item.imageUrl}
+                      alt=""
+                      style={{ width: "100%", maxWidth: 520, borderRadius: 12 }}
+                    />
+                  ) : null}
+                  <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", marginTop: 12 }}>
+                    {item.caption}
+                  </pre>
+                </div>
+              </details>
+            ))}
+            {vanscoPreview.held?.length ? (
+              <div className="notice notice--warning">
+                {vanscoPreview.held.length} candidate(s) were held because the branch could not be resolved safely.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
 
       <details className="operations-drawer">
         <summary>VIEW TOTALS AND HISTORY</summary>

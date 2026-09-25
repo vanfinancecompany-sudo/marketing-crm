@@ -1,0 +1,103 @@
+import {
+  inspectVanscoBufferAccount,
+  loadVanscoBufferConfig,
+  loadVanscoBufferState,
+} from "./_vansco-buffer-runtime.js";
+
+const ACCESS_HEADER = "x-marketing-customer-database-key";
+
+function clean(value) {
+  return String(value ?? "").trim();
+}
+
+function authorize(request) {
+  const expected = clean(process.env.MARKETING_CUSTOMER_DATABASE_API_KEY);
+  const supplied = clean(request.headers[ACCESS_HEADER]);
+  const authorization = clean(request.headers.authorization);
+  return Boolean(
+    expected &&
+    (supplied === expected || authorization === `Bearer ${expected}`),
+  );
+}
+
+function londonDateKey(value = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value);
+}
+
+export default async function handler(request, response) {
+  response.setHeader("Cache-Control", "no-store, max-age=0");
+  if (!["GET", "POST"].includes(request.method)) {
+    response.setHeader("Allow", "GET, POST");
+    return response.status(405).json({ ok: false, error: "Method not allowed." });
+  }
+  if (!authorize(request)) {
+    return response.status(401).json({ ok: false, error: "Marketing access key not recognised." });
+  }
+
+  try {
+    const dedicatedKey = String(process.env.VANSCO_BUFFER_API_KEY || "").trim();
+    const existingKey = String(process.env.BUFFER_API_KEY || "").trim();
+    const bufferConfigured = Boolean(dedicatedKey || existingKey);
+    if (!bufferConfigured) {
+      return response.status(200).json({
+        ok: true,
+        connected: false,
+        missingVariable: "BUFFER_API_KEY",
+        message: "No Buffer API key is available in this Vercel environment.",
+      });
+    }
+
+    let config = null;
+    try {
+      config = await loadVanscoBufferConfig({ forceDiscovery: true });
+    } catch (error) {
+      const account = await inspectVanscoBufferAccount().catch(() => []);
+      return response.status(200).json({
+        ok: true,
+        connected: false,
+        keySource: dedicatedKey ? "dedicated_vansco_key" : "existing_marketing_crm_key",
+        message: String(error?.message || "Vansco Facebook was not found in this Buffer account.").slice(0, 300),
+        accessibleOrganizations: account.map((organization) => ({
+          organizationName: organization.organizationName,
+          scheduledPostsLimit: organization.scheduledPostsLimit,
+          channels: (organization.channels || []).map((channel) => ({
+            name: channel.displayName || channel.name,
+            service: channel.service,
+            externalLink: channel.externalLink,
+            isDisconnected: channel.isDisconnected,
+            isLocked: channel.isLocked,
+          })),
+        })),
+        verifiedAt: new Date().toISOString(),
+      });
+    }
+
+    const dateKey = londonDateKey();
+    const state = await loadVanscoBufferState(config, `${dateKey}T12:00:00.000Z`);
+    return response.status(200).json({
+      ok: true,
+      connected: true,
+      organizationName: config.organizationName,
+      channelName: config.channelName,
+      externalLink: config.externalLink,
+      scheduledPostsLimit: config.scheduledPostsLimit,
+      dailyPostingLimit: state.limit?.limit ?? null,
+      sentToday: state.limit?.sent ?? 0,
+      scheduledToday: state.limit?.scheduled ?? 0,
+      queuedNow: state.posts.length,
+      keySource: dedicatedKey ? "dedicated_vansco_key" : "existing_marketing_crm_key",
+      verifiedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    return response.status(500).json({
+      ok: false,
+      connected: false,
+      error: String(error?.message || "Could not verify the Vansco Buffer connection.").slice(0, 300),
+    });
+  }
+}
