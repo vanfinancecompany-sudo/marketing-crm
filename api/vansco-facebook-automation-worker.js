@@ -2,6 +2,7 @@ import {
   buildVanscoFacebookCaption,
   chooseVanscoCandidate,
   extractVanscoVehicleUrl,
+  hasExplicitVanscoVatLabel,
   isEligibleVanscoVehicle,
   vanscoDailySlots,
   VANSCO_FACEBOOK_MAX_POSTS_PER_DAY,
@@ -75,16 +76,20 @@ async function pruneStaleScheduledPosts(posts, liveUrls) {
   const removed = [];
   for (const post of posts || []) {
     const vehicleUrl = extractVanscoVehicleUrl(post?.text);
-    if (!vehicleUrl || liveUrls.has(vehicleUrl)) {
+    const live = Boolean(vehicleUrl && liveUrls.has(vehicleUrl));
+    const vatMissing = live && !hasExplicitVanscoVatLabel(post?.text);
+    if ((!vehicleUrl || live) && !vatMissing) {
       kept.push(post);
       continue;
     }
+    const reason = vatMissing ? "vat_label_missing" : "vehicle_no_longer_live";
     try {
       await deleteVanscoBufferPost(post.id);
       removed.push({
         id: String(post.id || ""),
         vehicleUrl,
         dueAt: postDueIso(post),
+        reason,
       });
     } catch (error) {
       kept.push(post);
@@ -92,6 +97,7 @@ async function pruneStaleScheduledPosts(posts, liveUrls) {
         id: String(post.id || ""),
         vehicleUrl,
         dueAt: postDueIso(post),
+        reason,
         deleteFailed: true,
         error: clean(error?.message || error).slice(0, 200),
       });
@@ -138,7 +144,7 @@ async function chooseResolvedCandidate({
     if (!candidate) return { vehicle: null, held };
 
     const enriched = await enrichVanscoVehicleFromPage(candidate);
-    if (enriched.branchKey && !enriched.branchConflict) {
+    if (enriched.branchKey && !enriched.branchConflict && enriched.vatLabel) {
       return { vehicle: enriched, held };
     }
 
@@ -147,7 +153,11 @@ async function chooseResolvedCandidate({
       vehicleKey: candidate.vehicleKey,
       vehicleUrl: candidate.vehicleUrl,
       title: candidate.title,
-      reason: enriched.branchConflict ? "branch_conflict" : "branch_unresolved",
+      reason: !enriched.vatLabel
+        ? "vat_unresolved"
+        : enriched.branchConflict
+          ? "branch_conflict"
+          : "branch_unresolved",
     });
   }
 
@@ -225,13 +235,17 @@ export default async function handler(request, response) {
           })[0];
         if (!candidate) continue;
         const enriched = await enrichVanscoVehicleFromPage(candidate);
-        if (enriched.branchKey === branchKey && !enriched.branchConflict) addPreview(enriched);
+        if (enriched.branchKey === branchKey && !enriched.branchConflict && enriched.vatLabel) addPreview(enriched);
         else {
           held.push({
             vehicleKey: candidate.vehicleKey,
             vehicleUrl: candidate.vehicleUrl,
             title: candidate.title,
-            reason: enriched.branchConflict ? "branch_conflict" : "branch_unresolved",
+            reason: !enriched.vatLabel
+              ? "vat_unresolved"
+              : enriched.branchConflict
+                ? "branch_conflict"
+                : "branch_unresolved",
           });
           excludedUrls.add(candidate.vehicleUrl);
         }
