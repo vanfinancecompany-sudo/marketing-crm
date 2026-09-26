@@ -163,6 +163,10 @@ test("worker keeps the Buffer Free queue cap while filling the larger daily targ
   assert.match(worker, /recentBufferReelRegistrations/);
   assert.match(worker, /!excluded\.has\(registration\)/);
   assert.match(worker, /DAILY_YOUTUBE_TEMPLATE_KEY/);
+  assert.match(worker, /marketingVanFinanceImages/);
+  assert.match(worker, /marketingRent2BuyImages/);
+  assert.match(worker, /facebookVehicleImageUrls/);
+  assert.match(worker, /mediaUrls,/);
   assert.doesNotMatch(worker, /templateKey:\s*["']tiktokPunch["']/);
   assert.doesNotMatch(worker, /shareNow/);
   assert.match(worker, /customScheduled|createBufferScheduledPost/);
