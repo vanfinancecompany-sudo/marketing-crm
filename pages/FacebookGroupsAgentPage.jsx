@@ -677,7 +677,7 @@ export default function FacebookGroupsAgentPage({
     const due = groupDueState(group);
     const isAwaiting = ["awaiting", "pending", "not_found"].includes(group.postStatus);
     return (
-      <article className="posting-card" key={group.id || group.url}>
+      <article className={`posting-card${due.due ? " posting-card--due" : ""}`} key={group.id || group.url}>
         <div className="posting-card__body">
           <div className="creative-card__tags">
             <span className="tag">{pipelineLabel(group)}</span>
