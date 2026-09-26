@@ -141,7 +141,7 @@ export function isRent2BuyLocalGroup(group) {
 
 const VEHICLE_GROUP_PATTERN = /\b(?:vans?|cars?|vehicles?|commercial\s+vehicles?|motor\s+vehicles?|motors?|pickups?|trucks?)\b/i;
 const VEHICLE_SALES_PATTERN = /\b(?:for\s+sale|sales?|sell(?:ing)?|buy(?:ing)?|swap(?:s|ping)?|wanted|classifieds?|market\s*place|marketplace|dealers?)\b/i;
-const CLASSIFIED_GROUP_PATTERN = /\b(?:classifieds?|market\s*place|marketplace|facebay|online\s+sales?|buy\s*(?:&|and)?\s*sell|sell\s*(?:&|and)?\s*buy|buy\s*sell|sell\s*buy|buy\s*sell\s*swap|sell\s*swap|selling\s+and\s+buying|for\s+sale\s+and\s+wanted)\b/i;
+const CLASSIFIED_GROUP_PATTERN = /\b(?:classifieds?|market\s*place|marketplace|facebay|online\s+sales?|buy\s*[,/&+-]?\s*(?:and\s+)?sell|sell\s*[,/&+-]?\s*(?:and\s+)?buy|buy\s*[,/&+-]?\s*sell\s*[,/&+-]?\s*swap|sell\s*[,/&+-]?\s*swap|selling\s+and\s+buying|for\s+sale\s+and\s+wanted)\b/i;
 const IRRELEVANT_GROUP_PATTERN = /\b(?:jobs?|recruit(?:ment|ing)?|self[-\s]?employed|small\s+business|business\s+owners?|business\s+networking|entrepreneurs?|builders?|electricians?|plumbers?|cleaners?|cleaning|estate\s+agents?|carers?|childcare|support\s+group|therapy|beauty|nails?|fitness|couriers?|delivery\s+drivers?|removals?|accountants?|insurance|mortgages?)\b/i;
 
 export function isVehicleClassifiedGroup(group) {
