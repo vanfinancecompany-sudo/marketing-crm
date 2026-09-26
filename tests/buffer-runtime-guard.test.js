@@ -205,7 +205,7 @@ test("status monitoring uses cached success and no longer retries on browser foc
 
 test("health and automation routes degrade cleanly instead of returning Buffer 500s", () => {
   const health = source("api/system-health.js");
-  assert.match(health, /reason: "buffer_rate_limit_cooldown"/);
+  assert.match(health, /reason: String\(error\?\.reason \|\| "buffer_rate_limit_cooldown"\)/);
   assert.match(health, /degraded/);
 
   for (const file of [
