@@ -93,6 +93,16 @@ function nextHourlyAt(minute, now = new Date()) {
   return next.toISOString();
 }
 
+function nextEveryTwoHoursAt(minute, now = new Date()) {
+  const next = new Date(now);
+  next.setUTCSeconds(0, 0);
+  let hour = next.getUTCHours();
+  if (hour % 2 !== 0) hour += 1;
+  else if (next.getUTCMinutes() >= minute) hour += 2;
+  next.setUTCHours(hour, minute, 0, 0);
+  return next.toISOString();
+}
+
 function nextTwiceHourlyAt(firstMinute, secondMinute, now = new Date()) {
   const next = new Date(now);
   next.setUTCSeconds(0, 0);
@@ -247,7 +257,7 @@ async function checkBuffer() {
         checked_at: checkedAt(),
         duration_ms: Date.now() - startedAt,
         degraded: true,
-        reason: "buffer_rate_limit_cooldown",
+        reason: String(error?.reason || "buffer_rate_limit_cooldown"),
         retry_after_ms: error.retryAfterMs,
       };
     }
@@ -797,13 +807,13 @@ function buildAutomationCentre(evidence, checkMap) {
     }),
     automationItem({
       key: "facebook_automation",
-      label: "Facebook publishing automation",
-      cadence: "Hourly at :05",
+      label: "Facebook + Google Business publishing automation",
+      cadence: "Every 2 hours at :05",
       status: checkMap.facebook ? "healthy" : "failed",
       lastSuccessAt: facebookLast,
-      nextExpectedAt: nextHourlyAt(5, now),
+      nextExpectedAt: nextEveryTwoHoursAt(5, now),
       lastError: checkMap.facebookIssue || "",
-      detail: "Van Finance and Rent2Buy Facebook publishing via Buffer.",
+      detail: "Van Finance and Rent2Buy Facebook plus Google Business vehicle publishing via Buffer.",
     }),
     automationItem({
       key: "instagram_mirror",
