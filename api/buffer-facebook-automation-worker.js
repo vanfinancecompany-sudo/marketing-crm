@@ -34,7 +34,10 @@ import {
   mapFinanceVehicleRow,
   mapRentVehicleRow,
 } from "../services/marketingVehicleContract.js";
-import { DAILY_YOUTUBE_TEMPLATE_KEY } from "../lib/youtubeDailyBatch.js";
+import {
+  DAILY_YOUTUBE_TEMPLATE_KEY,
+  normalizeDailyYouTubeImageUrl,
+} from "../lib/youtubeDailyBatch.js";
 
 export const config = { maxDuration: 300 };
 
@@ -44,6 +47,10 @@ const MIN_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 const REEL_COOLDOWN_MS = 48 * 60 * 60 * 1000;
 const CHANNEL_QUEUE_LIMIT = 10;
 const PUBLIC_PRODUCTION_ORIGIN = "https://marketing-crm-six.vercel.app";
+const FACEBOOK_IMAGE_FEEDS = Object.freeze({
+  vanFinance: "https://www.vanfinancecompany.co.uk/_functions/marketingVanFinanceImages",
+  rent2buy: "https://www.vanfinancecompany.co.uk/_functions/marketingRent2BuyImages",
+});
 
 function errorText(value, fallback = "Automation request failed.") {
   if (value instanceof Error) {
@@ -96,11 +103,12 @@ async function loadBufferPosts() {
   return parseBufferAutomationPostsPayload(await bufferGraphql(BUFFER_AUTOMATION_POSTS_QUERY));
 }
 
-async function createBufferScheduledPost({ destination, text, mediaUrl, mediaKind, dueAt }) {
+async function createBufferScheduledPost({ destination, text, mediaUrl, mediaUrls = [], mediaKind, dueAt }) {
   const input = buildBufferCreatePostInput({
     destination,
     text,
     mediaUrl,
+    mediaUrls,
     mediaKind,
     draft: false,
     dueAt,
@@ -156,6 +164,69 @@ function nextFutureSlot({ posts, automationConfig, productKey, dateKey, mediaKin
 
 function normalizeReg(value) {
   return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+async function loadFacebookVehicleImages(productKey) {
+  const url = FACEBOOK_IMAGE_FEEDS[productKey];
+  if (!url) return new Map();
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) {
+      throw new Error(`Image feed returned HTTP ${response.status}.`);
+    }
+
+    const payload = await response.json();
+    const byRegistration = new Map();
+    for (const item of Array.isArray(payload?.items) ? payload.items : []) {
+      const registration = normalizeReg(item?.registration);
+      if (!registration || byRegistration.has(registration)) continue;
+
+      const seen = new Set();
+      const images = (Array.isArray(item?.images) ? item.images : [])
+        .map(normalizeDailyYouTubeImageUrl)
+        .map((value) => String(value || "").trim())
+        .filter((value) => /^https:\/\//i.test(value))
+        .filter((value) => {
+          if (seen.has(value)) return false;
+          seen.add(value);
+          return true;
+        })
+        .slice(0, 3);
+
+      if (images.length) byRegistration.set(registration, images);
+    }
+    return byRegistration;
+  } catch (error) {
+    console.warn(`[buffer-facebook-automation] ${productKey} multi-image feed unavailable; using primary image only`, {
+      message: errorText(error, "Image feed failed."),
+    });
+    return new Map();
+  }
+}
+
+function facebookVehicleImageUrls(vehicle, imagesByRegistration) {
+  const registration = normalizeReg(
+    vehicle?.registration || vehicle?.reg || vehicle?.title || vehicle?.name,
+  );
+  const primary = normalizeDailyYouTubeImageUrl(vehicle?.image || vehicle?.picture || "");
+  const feedImages = registration ? imagesByRegistration?.get(registration) || [] : [];
+  const seen = new Set();
+
+  return [primary, ...feedImages]
+    .map(normalizeDailyYouTubeImageUrl)
+    .map((value) => String(value || "").trim())
+    .filter((value) => /^https:\/\//i.test(value))
+    .filter((value) => {
+      if (seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    })
+    .slice(0, 3);
 }
 
 function postTime(post) {
@@ -247,9 +318,10 @@ async function createNextImagePost({ supabase, posts, automationConfig, productK
     return { skipped: slotInfo.existing >= slotInfo.target ? "target_met" : "no_future_slot", ...slotInfo };
   }
 
-  const [vehicles, historyRows] = await Promise.all([
+  const [vehicles, historyRows, imagesByRegistration] = await Promise.all([
     loadVehicles(supabase, productKey),
     loadFacebookHistory(supabase, productKey),
+    loadFacebookVehicleImages(productKey),
   ]);
   const vehicle = chooseOldestFacebookCandidate({
     vehicles,
@@ -260,10 +332,12 @@ async function createNextImagePost({ supabase, posts, automationConfig, productK
 
   const destination = bufferDestinationForProduct(productKey);
   const text = buildAutomatedFacebookCaption(vehicle, productKey);
+  const mediaUrls = facebookVehicleImageUrls(vehicle, imagesByRegistration);
   const post = await createBufferScheduledPost({
     destination,
     text,
     mediaUrl: vehicle.image || vehicle.picture,
+    mediaUrls,
     mediaKind: "image",
     dueAt: slotInfo.slot.dueAt,
   });
@@ -273,6 +347,7 @@ async function createNextImagePost({ supabase, posts, automationConfig, productK
     mediaKind: "image",
     registration: normalizeReg(vehicle.registration || vehicle.reg),
     bufferPostId: post.id,
+    imageCount: mediaUrls.length,
     dueAt: post.dueAt || slotInfo.slot.dueAt,
     localTime: slotInfo.slot.localTime,
   };
