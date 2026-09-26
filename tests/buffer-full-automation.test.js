@@ -229,5 +229,6 @@ test("delivery status route supports cron GET and cleans delivered Reel blobs", 
   assert.match(status, /\["GET", "POST"\]/);
   assert.match(status, /cleanDeliveredReelBlobs/);
   assert.match(status, /await del\(url\)/);
-  assert.match(status, /facebook_live: true/);
+  assert.match(status, /facebook_live: item\.destination !== "Van Finance Google Business"/);
+  assert.match(status, /google_business_live: item\.destination === "Van Finance Google Business"/);
 });

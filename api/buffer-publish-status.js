@@ -211,7 +211,11 @@ async function syncSentPosts(supabase, posts, googleBusinessChannelId = "") {
         google_business_live: item.destination === "Van Finance Google Business",
         external_link: item.externalLink,
         sent_at: item.sentAt,
-        status_event: item.mediaKind === "video" ? "facebook_published" : "facebook_posted",
+        status_event: item.destination === "Van Finance Google Business"
+          ? "google_business_posted"
+          : item.mediaKind === "video"
+            ? "facebook_published"
+            : "facebook_posted",
       },
       occurred_at: item.sentAt,
     });

@@ -6,6 +6,7 @@ import {
   BUFFER_SENT_POSTS_QUERY,
   bufferDestinationForChannel,
   bufferPostMediaKind,
+  bufferProductKeyForDestination,
   bufferPublishedActivityType,
   bufferPublishedItems,
   normalizeBufferRegistration,
@@ -41,6 +42,21 @@ test("maps Buffer channels, registrations and media kinds correctly", () => {
   }), "story");
   assert.equal(bufferPublishedActivityType("Van Finance Facebook", "story"), "van_finance_facebook_post");
   assert.equal(bufferPublishedActivityType("Rent2Buy Facebook", "story"), "rent2buy_facebook_post");
+});
+
+test("only counts marked Google Business vehicle automation posts", () => {
+  assert.equal(
+    bufferProductKeyForDestination("Van Finance Google Business", "VAN FINANCE COMPANY STOCK\n\nREGISTRATION: AB12CDE"),
+    "vanFinance",
+  );
+  assert.equal(
+    bufferProductKeyForDestination("Van Finance Google Business", "RENT2BUY VAN AVAILABLE\n\nREGISTRATION: CD34EFG"),
+    "rent2buy",
+  );
+  assert.equal(
+    bufferProductKeyForDestination("Van Finance Google Business", "Google Business Profile"),
+    "",
+  );
 });
 
 test("parses and summarizes Buffer sent feed posts, Stories and Reels by London day", () => {
@@ -100,7 +116,8 @@ test("client surfaces live Buffer confirmation in all three CRM areas", async ()
   const endpoint = await readFile(new URL("../api/buffer-publish-status.js", import.meta.url), "utf8");
   assert.match(endpoint, /source:\s*"buffer_publish"/);
   assert.match(endpoint, /facebook_published/);
-  assert.match(endpoint, /facebook_live:\s*true/);
+  assert.match(endpoint, /facebook_live:\s*item\.destination !== "Van Finance Google Business"/);
+  assert.match(endpoint, /google_business_posted/);
   assert.match(endpoint, /item\.mediaKind === "image"/);
   assert.match(endpoint, /loadVanscoAutomationStatus/);
   assert.match(endpoint, /providerSent/);
