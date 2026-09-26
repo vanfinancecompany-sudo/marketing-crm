@@ -14,6 +14,7 @@ import {
   vanscoDailySlots,
   vanscoNextDateKey,
   vanscoAdvertVatLabel,
+  vanscoFacebookImageUrls,
   vatLabelFromStatus,
   vatLabelFromText,
 } from "../lib/vanscoFacebookAutomation.js";
@@ -111,7 +112,10 @@ test("normalised Meta rows require AVAILABLE stock, image, price and live vehicl
     year: "2022",
     price: "12995 GBP",
     url: "https://www.vansco.co.uk/vehicle-details/example",
-    "image[0].url": "https://cdn.example.com/image.jpg",
+    "image[0].url": "https://cdn.example.com/image-main.jpg",
+    "image[2].url": "https://cdn.example.com/image-third.jpg",
+    "image[1].url": "https://cdn.example.com/image-second.jpg",
+    "image[3].url": "https://cdn.example.com/image-fourth.jpg",
     "mileage.value": "42000",
     availability: "AVAILABLE",
     description: "Vansco Limited - New Forest. Price + VAT.",
@@ -120,6 +124,13 @@ test("normalised Meta rows require AVAILABLE stock, image, price and live vehicl
   assert.equal(vehicle.branchKey, "newForest");
   assert.equal(vehicle.vatLabel, "+ VAT");
   assert.equal(vehicle.mileage, "42000");
+  assert.equal(vehicle.imageUrl, "https://cdn.example.com/image-main.jpg");
+  assert.deepEqual(vehicle.imageUrls, [
+    "https://cdn.example.com/image-main.jpg",
+    "https://cdn.example.com/image-second.jpg",
+    "https://cdn.example.com/image-third.jpg",
+  ]);
+  assert.deepEqual(vanscoFacebookImageUrls(vehicle), vehicle.imageUrls);
   assert.equal(isEligibleVanscoVehicle(vehicle), true);
   assert.equal(isEligibleVanscoVehicle({ ...vehicle, availability: "SOLD" }), false);
 });
@@ -194,11 +205,14 @@ test("worker replaces queued live posts that are missing a VAT label", async () 
     "utf8",
   );
   assert.match(worker, /vat_label_missing/);
+  assert.match(worker, /image_count_upgrade/);
   assert.match(worker, /car_vat_label_present/);
   assert.match(worker, /vat_unresolved/);
   assert.match(worker, /hasExplicitVanscoVatLabel/);
   assert.match(worker, /isVanscoVatResolved/);
   assert.match(worker, /vanscoAdvertVatLabel/);
+  assert.match(worker, /vanscoFacebookImageUrls/);
+  assert.match(worker, /imageUrls,/);
   assert.match(worker, /scheduleDateKey = currentSlots\.length \? dateKey : vanscoNextDateKey\(dateKey\)/);
   assert.match(worker, /scheduleDate: scheduleDateKey/);
 
@@ -214,4 +228,18 @@ test("worker replaces queued live posts that are missing a VAT label", async () 
   assert.match(source, /fetchVanscoDetailHtml/);
   assert.match(source, /parseDetailHtml/);
   assert.match(source, /VAT_CACHE_MAX_AGE_MS/);
+  assert.match(source, /snapshot\?\.images/);
+  assert.match(source, /vanscoFacebookImageUrls/);
+});
+
+
+test("Vansco Buffer runtime sends at most three ordered image assets", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const runtime = await readFile(
+    new URL("../api/_vansco-buffer-runtime.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(runtime, /imageUrls = \[\]/);
+  assert.match(runtime, /\.slice\(0, 3\)/);
+  assert.match(runtime, /assets: urls\.map\(\(url\) => \(\{ image: \{ url \} \}\)\)/);
 });
