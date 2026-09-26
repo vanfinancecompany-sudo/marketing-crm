@@ -741,7 +741,7 @@ test("Van Finance acceptance checker recognises a visible branded advert image e
   assert.match(groupsHelperSource, /van\\s\+finance\\s\+company/i);
   assert.match(groupsHelperSource, /rect\.width >= 220 && rect\.height >= 140/);
   assert.match(groupsHelperSource, /matchMethod = "exact-search-finance-advert"/);
-  assert.match(groupsHelperSource, /visibleFinanceAdvert \|\| visibleAdvert \|\| visibleResult/);
+  assert.match(groupsHelperSource, /visibleFinanceAdvert \|\| visibleRent2BuyAdvert \|\| visibleAdvert \|\| visibleResult/);
 });
 
 test("Rent2Buy acceptance checker recognises the visible advert shown by exact registration search", () => {
