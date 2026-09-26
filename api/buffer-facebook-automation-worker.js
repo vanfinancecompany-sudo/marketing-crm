@@ -61,13 +61,13 @@ const GOOGLE_BUSINESS_PLAN = Object.freeze([
   "vanFinance",
   "rent2buy",
   "vanFinance",
-  "vanFinance",
   "rent2buy",
   "vanFinance",
   "rent2buy",
   "vanFinance",
   "rent2buy",
   "vanFinance",
+  "rent2buy",
 ]);
 
 const GOOGLE_BUSINESS_POSTS_QUERY = `
