@@ -793,8 +793,8 @@ export default function FacebookGroupsAgentPage({
             <h2>{title}</h2>
             <p>
               {isRent2Buy
-                ? "Find, test and retain the Facebook groups that actually accept Rent2Buy adverts. Proven groups become a repeat posting pipeline."
-                : "Find, test and retain England-wide Facebook groups and classifieds that actually accept Van Finance adverts."}
+                ? "Find, test and retain local van sales, car-and-van classifieds and marketplace groups that actually accept Rent2Buy adverts."
+                : "Find, test and retain UK van sales, car-and-van classifieds and vehicle marketplace groups that actually accept Van Finance adverts."}
             </p>
           </div>
           <div className="card-actions">
@@ -910,7 +910,7 @@ export default function FacebookGroupsAgentPage({
                     ? "Posts already sent to Facebook and waiting for approval or visibility checks."
                     : pipelineView === "membership_pending"
                       ? "Groups where your join request is still waiting for admin approval. Once Facebook shows you as joined, they return to New & Testing."
-                      : "Fresh discoveries and groups you have not posted to yet."}
+                      : "Fresh vehicle-sales and classified-group discoveries you have not posted to yet."}
             </p>
           </div>
           <div className="card-actions">

@@ -50,52 +50,50 @@ const SEED_GROUPS = Object.freeze([
 
 const RENT2BUY_QUERY_BANK = Object.freeze([
   { query: "vans for sale Hampshire", segment: "Van/Vehicle" },
-  { query: "vans buy sell swap Hampshire", segment: "Van/Vehicle" },
-  { query: "Southampton buy sell", segment: "Local Marketplace" },
-  { query: "Portsmouth buy sell", segment: "Local Marketplace" },
-  { query: "Bournemouth buy sell", segment: "Local Marketplace" },
-  { query: "Hampshire buy sell", segment: "Local Marketplace" },
-  { query: "Southampton builders", segment: "Trades" },
-  { query: "Hampshire builders", segment: "Trades" },
-  { query: "Portsmouth electricians plumbers", segment: "Trades" },
-  { query: "Southampton courier drivers", segment: "Courier/Delivery" },
-  { query: "Hampshire courier drivers", segment: "Courier/Delivery" },
-  { query: "Southampton self employed", segment: "Small Business" },
-  { query: "Hampshire small business owners", segment: "Small Business" },
-  { query: "Basingstoke buy sell", segment: "Local Marketplace" },
-  { query: "Winchester buy sell", segment: "Local Marketplace" },
-  { query: "Salisbury buy sell", segment: "Local Marketplace" },
-  { query: "Reading buy sell vans", segment: "Local Marketplace" },
-  { query: "Guildford buy sell vans", segment: "Local Marketplace" },
-  { query: "Chichester buy sell", segment: "Local Marketplace" },
-  { query: "Andover buy sell", segment: "Local Marketplace" },
+  { query: "used vans for sale Hampshire", segment: "Van/Vehicle" },
+  { query: "van sales Hampshire", segment: "Van/Vehicle" },
+  { query: "van classifieds Hampshire", segment: "Classifieds" },
+  { query: "car and van classifieds Hampshire", segment: "Classifieds" },
+  { query: "commercial vehicles for sale Hampshire", segment: "Van/Vehicle" },
+  { query: "vans buy sell swap Southampton", segment: "Van/Vehicle" },
+  { query: "car and van sales Southampton", segment: "Van/Vehicle" },
+  { query: "van classifieds Portsmouth", segment: "Classifieds" },
+  { query: "cars vans buy sell Portsmouth", segment: "Classifieds" },
+  { query: "van sales Bournemouth", segment: "Van/Vehicle" },
+  { query: "car van classifieds Bournemouth", segment: "Classifieds" },
+  { query: "van sales Basingstoke", segment: "Van/Vehicle" },
+  { query: "car van classifieds Winchester", segment: "Classifieds" },
+  { query: "van sales Salisbury", segment: "Van/Vehicle" },
+  { query: "van classifieds Reading", segment: "Classifieds" },
+  { query: "van sales Guildford", segment: "Van/Vehicle" },
+  { query: "car van classifieds Chichester", segment: "Classifieds" },
+  { query: "van sales Andover", segment: "Van/Vehicle" },
+  { query: "vehicle classifieds Southampton Hampshire", segment: "Classifieds" },
 ]);
 
 const FINANCE_QUERY_BANK = Object.freeze([
   { query: "vans for sale UK", segment: "Van/Vehicle" },
+  { query: "used vans for sale UK", segment: "Van/Vehicle" },
+  { query: "van sales UK", segment: "Van/Vehicle" },
   { query: "commercial vans for sale UK", segment: "Van/Vehicle" },
+  { query: "commercial vehicles for sale UK", segment: "Van/Vehicle" },
   { query: "vans buy sell swap UK", segment: "Van/Vehicle" },
-  { query: "commercial vehicles buy sell UK", segment: "Van/Vehicle" },
+  { query: "cars vans buy sell swap UK", segment: "Classifieds" },
   { query: "van classifieds UK", segment: "Classifieds" },
-  { query: "builders UK", segment: "Trades" },
-  { query: "electricians UK", segment: "Trades" },
-  { query: "plumbers UK", segment: "Trades" },
-  { query: "courier drivers UK", segment: "Courier/Delivery" },
-  { query: "owner drivers UK", segment: "Courier/Delivery" },
-  { query: "man and van UK", segment: "Removals" },
-  { query: "removal companies UK", segment: "Removals" },
-  { query: "self employed UK", segment: "Small Business" },
-  { query: "small business owners UK", segment: "Small Business" },
-  { query: "London vans for sale", segment: "Local Marketplace" },
-  { query: "Birmingham vans for sale", segment: "Local Marketplace" },
-  { query: "Manchester vans for sale", segment: "Local Marketplace" },
-  { query: "Leeds vans for sale", segment: "Local Marketplace" },
-  { query: "Liverpool vans for sale", segment: "Local Marketplace" },
-  { query: "Sheffield vans for sale", segment: "Local Marketplace" },
-  { query: "Bristol vans for sale", segment: "Local Marketplace" },
-  { query: "Nottingham vans for sale", segment: "Local Marketplace" },
-  { query: "Leicester vans for sale", segment: "Local Marketplace" },
-  { query: "Newcastle vans for sale", segment: "Local Marketplace" },
+  { query: "car and van classifieds UK", segment: "Classifieds" },
+  { query: "vehicle classifieds UK", segment: "Classifieds" },
+  { query: "commercial vehicle classifieds UK", segment: "Classifieds" },
+  { query: "van marketplace UK", segment: "Classifieds" },
+  { query: "London van sales classifieds", segment: "Classifieds" },
+  { query: "Birmingham van sales classifieds", segment: "Classifieds" },
+  { query: "Manchester van sales classifieds", segment: "Classifieds" },
+  { query: "Leeds van sales classifieds", segment: "Classifieds" },
+  { query: "Liverpool van sales classifieds", segment: "Classifieds" },
+  { query: "Sheffield van sales classifieds", segment: "Classifieds" },
+  { query: "Bristol van sales classifieds", segment: "Classifieds" },
+  { query: "Nottingham van sales classifieds", segment: "Classifieds" },
+  { query: "Leicester van sales classifieds", segment: "Classifieds" },
+  { query: "Newcastle van sales classifieds", segment: "Classifieds" },
 ]);
 
 function clean(value) {
@@ -141,9 +139,28 @@ export function isRent2BuyLocalGroup(group) {
   return RENT2BUY_LOCALITY_PATTERN.test(text);
 }
 
+const VEHICLE_GROUP_PATTERN = /\b(?:vans?|cars?|vehicles?|commercial\s+vehicles?|motor\s+vehicles?|motors?|pickups?|trucks?)\b/i;
+const VEHICLE_SALES_PATTERN = /\b(?:for\s+sale|sales?|sell(?:ing)?|buy(?:ing)?|swap(?:s|ping)?|wanted|classifieds?|market\s*place|marketplace|dealers?)\b/i;
+const CLASSIFIED_GROUP_PATTERN = /\b(?:classifieds?|market\s*place|marketplace|facebay|online\s+sales?|buy\s*[,/&+-]?\s*(?:and\s+)?sell|sell\s*[,/&+-]?\s*(?:and\s+)?buy|buy\s*[,/&+-]?\s*sell\s*[,/&+-]?\s*swap|sell\s*[,/&+-]?\s*swap|selling\s+and\s+buying|for\s+sale\s+and\s+wanted)\b/i;
+const IRRELEVANT_GROUP_PATTERN = /\b(?:jobs?|recruit(?:ment|ing)?|self[-\s]?employed|small\s+business|business\s+owners?|business\s+networking|entrepreneurs?|builders?|electricians?|plumbers?|cleaners?|cleaning|estate\s+agents?|carers?|childcare|support\s+group|therapy|beauty|nails?|fitness|couriers?|delivery\s+drivers?|removals?|accountants?|insurance|mortgages?)\b/i;
+
+export function isVehicleClassifiedGroup(group) {
+  const text = clean([
+    group?.name,
+    group?.context,
+    group?.ruleEvidence,
+  ].filter(Boolean).join(" "));
+  if (!text || IRRELEVANT_GROUP_PATTERN.test(text)) return false;
+  if (CLASSIFIED_GROUP_PATTERN.test(text)) return true;
+  return VEHICLE_GROUP_PATTERN.test(text) && VEHICLE_SALES_PATTERN.test(text);
+}
+
 function productAllowed(group, productKey) {
-  if (productKey === "rent2buy") return Boolean(group?.rent2buy) && isRent2BuyLocalGroup(group);
-  return Boolean(group?.finance);
+  const relevant = isVehicleClassifiedGroup(group);
+  if (productKey === "rent2buy") {
+    return Boolean(group?.rent2buy) && relevant && isRent2BuyLocalGroup(group);
+  }
+  return Boolean(group?.finance) && relevant;
 }
 
 function parseMemberCount(value) {
@@ -181,9 +198,8 @@ function ruleClassification(text) {
 function calculateScore(group, productKey) {
   let score = Number(group?.seedScore || group?.score || 45);
   const text = `${group?.name || ""} ${group?.segment || ""} ${group?.context || ""} ${group?.area || ""}`.toLowerCase();
-  if (/\bvan|commercial vehicle/.test(text)) score += 14;
-  if (/buy|sell|swap|classified|marketplace/.test(text)) score += 8;
-  if (/builder|electrician|plumber|trade|courier|owner driver|removal|self employed|small business/.test(text)) score += 7;
+  if (/\bvan|\bcar|commercial vehicle|\bvehicle/.test(text)) score += 14;
+  if (/buy|sell|swap|classified|marketplace|for sale/.test(text)) score += 10;
   if (group?.canPost === true) score += 18;
   if (group?.joined === true) score += 6;
   if (group?.approvalRequired === true) score -= 2;
@@ -421,6 +437,7 @@ export function mergeDiscoveredGroups(groups, candidates, productKey) {
   }).filter((item) =>
     item.url &&
     item.name &&
+    isVehicleClassifiedGroup(item) &&
     (productKey !== "rent2buy" || isRent2BuyLocalGroup(item))
   );
   return mergeFacebookGroups(groups, incoming);
