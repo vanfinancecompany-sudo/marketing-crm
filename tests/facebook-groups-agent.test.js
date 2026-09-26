@@ -565,6 +565,8 @@ function loadGroupHelperTestHooks({
   dialogs = [],
   controls = [],
   labels = [],
+  images = [],
+  locationHref = "https://www.facebook.com/groups/test/",
   runtimeSendMessage,
 } = {}) {
   const hooks = {};
@@ -618,6 +620,7 @@ function loadGroupHelperTestHooks({
       if (selector === '[role="dialog"]') return dialogs;
       if (selector === 'button, [role="button"], a') return controls;
       if (selector === "div, span") return labels;
+      if (selector === "img") return images;
       return [];
     },
     getElementById: () => null,
@@ -649,9 +652,9 @@ function loadGroupHelperTestHooks({
     document,
     getComputedStyle: () => ({ display: "block", visibility: "visible" }),
     location: {
-      href: "https://www.facebook.com/groups/test/",
+      href: locationHref,
       origin: "https://www.facebook.com",
-      pathname: "/groups/test/",
+      pathname: new URL(locationHref).pathname,
     },
     Date: FastDate,
     Event: FakeEvent,
@@ -741,6 +744,30 @@ test("Van Finance acceptance checker recognises a visible branded advert image e
   assert.match(groupsHelperSource, /visibleFinanceAdvert \|\| visibleAdvert \|\| visibleResult/);
 });
 
+test("Rent2Buy acceptance checker recognises the visible advert shown by exact registration search", () => {
+  const image = {
+    getBoundingClientRect: () => ({ width: 640, height: 360 }),
+    closest: () => null,
+    parentElement: null,
+  };
+  const harness = loadGroupHelperTestHooks({
+    images: [image],
+    locationHref: "https://www.facebook.com/groups/test/search/?q=LD22XTN",
+  });
+  harness.document.body.innerText = [
+    "Search results for LD22XTN",
+    "RENT TO BUY VANS",
+    "NO CREDIT CHECK | £609 MTH",
+  ].join("\n");
+
+  assert.equal(
+    harness.hooks.visibleRent2BuyAdvertForExactSearch("LD22 XTN"),
+    harness.document.body,
+  );
+  assert.match(groupsHelperSource, /matchMethod = "exact-search-rent2buy-advert"/);
+  assert.match(groupsHelperSource, /visibleFinanceAdvert \|\| visibleRent2BuyAdvert \|\| visibleAdvert/);
+});
+
 test("acceptance checker recognises a visible advert on the exact registration search", () => {
   assert.match(groupsHelperSource, /function visibleAdvertCardForExactSearch\(registration\)/);
   assert.match(groupsHelperSource, /searchParams\.get\("q"\)/);
@@ -755,6 +782,7 @@ test("acceptance checker waits for Facebook search results to render", () => {
   assert.doesNotMatch(groupsHelperSource, /resultAnchors\.length \|\| evidenceLines\.length/);
   assert.match(groupsHelperSource, /evidenceLines = wantedReg \? registrationEvidenceLines/);
   assert.match(pageSource, /Math\.min\(25, awaitingGroups\.length \|\| 25\)/);
+  assert.match(pageSource, /Check next 25 of/);
 });
 
 test("approval checker can recognise a live advert from registration text without a permalink anchor", () => {
