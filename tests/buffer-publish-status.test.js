@@ -18,10 +18,10 @@ import {
   summarizeDailyActivity,
 } from "../lib/marketingDailyOperations.js";
 
-test("Buffer sent-post query is read-only and restricted to the two Facebook channels", () => {
+test("Buffer sent-post query is read-only and accepts the monitored channel list", () => {
   assert.match(BUFFER_SENT_POSTS_QUERY, /status:\s*\[sent\]/);
-  assert.match(BUFFER_SENT_POSTS_QUERY, /6a8721fbccaf649a67e227a3/);
-  assert.match(BUFFER_SENT_POSTS_QUERY, /6a8722ffccaf649a67e22bc6/);
+  assert.match(BUFFER_SENT_POSTS_QUERY, /\$channelIds:\s*\[ChannelId!\]!/);
+  assert.match(BUFFER_SENT_POSTS_QUERY, /channelIds:\s*\$channelIds/);
   assert.match(BUFFER_SENT_POSTS_QUERY, /schedulingType/);
   assert.match(BUFFER_SENT_POSTS_QUERY, /FacebookPostMetadata/);
   assert.doesNotMatch(BUFFER_SENT_POSTS_QUERY, /mutation/i);
@@ -84,7 +84,8 @@ test("published Reel status events do not double-count Reel generation targets",
 
 test("client surfaces live Buffer confirmation in all three CRM areas", async () => {
   const bridge = await readFile(new URL("../public/buffer-live-status.js", import.meta.url), "utf8");
-  assert.match(bridge, /Facebook live today/);
+  assert.match(bridge, /Buffer live today/);
+  assert.match(bridge, /Google Business/);
   assert.match(bridge, /\/van-finance-facebook/);
   assert.match(bridge, /\/rent2buy-facebook/);
   assert.match(bridge, /\/daily-reels/);
