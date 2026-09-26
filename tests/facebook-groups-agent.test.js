@@ -9,6 +9,7 @@ import {
   groupDueState,
   groupPipeline,
   isRent2BuyLocalGroup,
+  isVehicleClassifiedGroup,
   loadFacebookGroups,
   markGroupAccepted,
   markGroupPostStatus,
@@ -31,13 +32,15 @@ const manifest = JSON.parse(
   fs.readFileSync(new URL("../browser-extension/marketplace-helper/manifest.json", import.meta.url), "utf8"),
 );
 
-test("Facebook group seed gives both products a useful starting pool", () => {
+test("Facebook group seed keeps useful vehicle and classified groups available", () => {
   const groups = loadFacebookGroups();
+  const finance = scoreFacebookGroups(groups, "finance");
+  const rent2buy = scoreFacebookGroups(groups, "rent2buy");
   assert.ok(groups.length >= 12);
-  assert.ok(groups.some((group) => group.finance));
-  assert.ok(groups.some((group) => group.rent2buy));
-  assert.ok(groups.some((group) => /courier|trade/i.test(group.segment)));
-  assert.ok(groups.some((group) => /van|marketplace/i.test(group.segment)));
+  assert.ok(finance.length > 0);
+  assert.ok(rent2buy.length > 0);
+  assert.ok(finance.every((group) => isVehicleClassifiedGroup(group)));
+  assert.ok(rent2buy.every((group) => isVehicleClassifiedGroup(group)));
 });
 
 test("Facebook group caption handoff preserves paragraph breaks exactly", () => {
@@ -68,19 +71,25 @@ test("Rent2Buy and Finance scoring stay separate", () => {
   assert.ok(rent2buy.every((group) => isRent2BuyLocalGroup(group)));
 });
 
-test("Rent2Buy discovery rejects national and out-of-area groups", () => {
+test("Rent2Buy discovery keeps local vehicle/classified groups and rejects irrelevant or out-of-area groups", () => {
   const groups = loadFacebookGroups();
   const merged = mergeDiscoveredGroups(groups, [
     {
-      name: "Southampton Trades and Vans",
-      url: "https://www.facebook.com/groups/southampton-trades-vans/",
-      context: "Southampton Hampshire local trades",
-      segment: "Trades",
+      name: "Southampton Car and Van Classifieds",
+      url: "https://www.facebook.com/groups/southampton-car-van-classifieds/",
+      context: "Southampton Hampshire cars vans buy sell",
+      segment: "Classifieds",
     },
     {
-      name: "Manchester Van Traders",
-      url: "https://www.facebook.com/groups/manchester-van-traders/",
-      context: "Manchester Greater Manchester",
+      name: "Southampton Self Employed Business Network",
+      url: "https://www.facebook.com/groups/southampton-self-employed/",
+      context: "Southampton Hampshire self employed business owners networking",
+      segment: "Small Business",
+    },
+    {
+      name: "Manchester Van Sales",
+      url: "https://www.facebook.com/groups/manchester-van-sales/",
+      context: "Manchester Greater Manchester vans for sale",
       segment: "Van/Vehicle",
     },
     {
@@ -91,8 +100,9 @@ test("Rent2Buy discovery rejects national and out-of-area groups", () => {
     },
   ], "rent2buy");
 
-  assert.ok(merged.some((group) => /southampton-trades-vans/i.test(group.url)));
-  assert.equal(merged.some((group) => /manchester-van-traders/i.test(group.url)), false);
+  assert.ok(merged.some((group) => /southampton-car-van-classifieds/i.test(group.url)));
+  assert.equal(merged.some((group) => /southampton-self-employed/i.test(group.url)), false);
+  assert.equal(merged.some((group) => /manchester-van-sales/i.test(group.url)), false);
   assert.equal(merged.some((group) => /uk-vans-nationwide/i.test(group.url)), false);
 });
 
@@ -102,6 +112,30 @@ test("Rent2Buy local radius recognises intended Southampton-area locations", () 
   }
   for (const name of ["Manchester Van Sales", "Leeds Trades", "Liverpool Marketplace", "UK Nationwide Vans"]) {
     assert.equal(isRent2BuyLocalGroup({ name }), false, name);
+  }
+});
+
+test("Facebook group relevance is restricted to vehicle sales and classified-style groups", () => {
+  for (const name of [
+    "UK Car and Van Classifieds",
+    "Vans for Sale UK",
+    "Commercial Vehicle Marketplace",
+    "Southampton Buy, Sell, Swap",
+    "Facebay Portsmouth",
+    "Weston Super Mare Online Sales",
+  ]) {
+    assert.equal(isVehicleClassifiedGroup({ name }), true, name);
+  }
+
+  for (const name of [
+    "Self Employed Estate Agents UK",
+    "Self Employed Cleaners Support Group",
+    "UK Small Business Networking",
+    "Builders and Electricians UK",
+    "Courier Drivers UK",
+    "Entrepreneurs and Business Owners",
+  ]) {
+    assert.equal(isVehicleClassifiedGroup({ name }), false, name);
   }
 });
 
@@ -161,7 +195,11 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
   assert.match(serviceSource, /FINANCE_QUERY_BANK/);
   assert.match(serviceSource, /RENT2BUY_QUERY_BANK/);
   assert.match(serviceSource, /van classifieds UK/);
-  assert.match(serviceSource, /Southampton courier drivers/);
+  assert.match(serviceSource, /car and van classifieds UK/);
+  assert.match(serviceSource, /car and van classifieds Hampshire/);
+  assert.doesNotMatch(serviceSource, /Southampton courier drivers/);
+  assert.doesNotMatch(serviceSource, /builders UK/);
+  assert.doesNotMatch(serviceSource, /small business owners UK/);
   assert.match(pageSource, /navigator\.clipboard\?\.writeText/);
   assert.match(pageSource, /captionCopyPromise = copyGroupCaptionForFallback\(caption\)/);
   assert.match(pageSource, /Reset Vans/);
