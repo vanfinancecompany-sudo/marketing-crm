@@ -7,9 +7,9 @@ alter table public.marketing_daily_target_schedules
   check (rent2buy_google_business_post >= 0);
 
 alter table public.marketing_daily_target_overrides
-  add column if not exists van_finance_google_business_post integer not null default 6
+  add column if not exists van_finance_google_business_post integer not null default 5
   check (van_finance_google_business_post >= 0),
-  add column if not exists rent2buy_google_business_post integer not null default 4
+  add column if not exists rent2buy_google_business_post integer not null default 5
   check (rent2buy_google_business_post >= 0);
 
 alter table public.marketing_daily_activity_events
