@@ -30,9 +30,13 @@ async function refreshBufferStatusSafely() {
 
 function bufferHistoryRow(item) {
   const destination = item?.destination || "";
-  const activityType = destination === "Rent2Buy Facebook"
-    ? "rent2buy_facebook_post"
-    : "van_finance_facebook_post";
+  const activityType = destination === "Van Finance Google Business"
+    ? (item?.productKey === "rent2buy"
+      ? "rent2buy_google_business_post"
+      : "van_finance_google_business_post")
+    : destination === "Rent2Buy Facebook"
+      ? "rent2buy_facebook_post"
+      : "van_finance_facebook_post";
   const registration = String(item?.registration || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   return {
     id: `buffer-${item?.id || registration}`,
@@ -45,7 +49,8 @@ function bufferHistoryRow(item) {
       destination,
       buffer_post_id: item?.id || "",
       buffer_status: "sent",
-      facebook_live: true,
+      facebook_live: destination !== "Van Finance Google Business",
+      google_business_live: destination === "Van Finance Google Business",
       media_kind: "image",
       external_link: item?.externalLink || "",
     },

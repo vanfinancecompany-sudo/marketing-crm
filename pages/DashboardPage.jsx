@@ -35,6 +35,8 @@ const WEEKDAYS = [
 const ACTIVITY_UNITS = {
   van_finance_facebook_post: "posted",
   rent2buy_facebook_post: "posted",
+  van_finance_google_business_post: "posted",
+  rent2buy_google_business_post: "posted",
   van_finance_groups_post: "posted",
   rent2buy_groups_post: "posted",
   van_finance_marketplace_post: "advertised",

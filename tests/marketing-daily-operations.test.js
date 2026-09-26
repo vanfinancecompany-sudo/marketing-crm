@@ -24,11 +24,13 @@ test("London dates and day ranges respect summer and winter time", () => {
   });
 });
 
-test("Marketplace and Facebook Groups have separate five-a-day targets", () => {
+test("Marketplace, Facebook Groups and Google Business have separate daily targets", () => {
   assert.equal(DEFAULT_DAILY_TARGETS.van_finance_groups_post, 5);
   assert.equal(DEFAULT_DAILY_TARGETS.rent2buy_groups_post, 5);
   assert.equal(DEFAULT_DAILY_TARGETS.van_finance_marketplace_post, 5);
   assert.equal(DEFAULT_DAILY_TARGETS.rent2buy_marketplace_post, 5);
+  assert.equal(DEFAULT_DAILY_TARGETS.van_finance_google_business_post, 5);
+  assert.equal(DEFAULT_DAILY_TARGETS.rent2buy_google_business_post, 5);
 
   const summary = summarizeDailyActivity({
     targets: DEFAULT_DAILY_TARGETS,
