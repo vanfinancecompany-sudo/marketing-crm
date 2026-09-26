@@ -536,7 +536,8 @@ export default function FacebookGroupsAgentPage({
     if (busy) return;
     if (!(await requireGroupsHelper())) return;
     setBusy("post-status");
-    setMessage(`Checking ${Math.min(25, awaitingGroups.length)} posted group${Math.min(25, awaitingGroups.length) === 1 ? "" : "s"} to see which adverts are visible, still pending, or unavailable.`);
+    const batchSize = Math.min(25, awaitingGroups.length);
+    setMessage(`Checking the next ${batchSize} of ${awaitingGroups.length} posted group${awaitingGroups.length === 1 ? "" : "s"} to see which adverts are visible, still pending, or unavailable.`);
     try {
       await startFacebookPostStatusCheck(activeGroups, productKey, Math.min(25, awaitingGroups.length || 25));
       setMessage("Acceptance checks are running through the posted groups. Results will return here automatically.");
@@ -804,7 +805,11 @@ export default function FacebookGroupsAgentPage({
               {busy === "inspection" ? "Checking…" : "Check Next 12"}
             </button>
             <button className="button button--ghost" type="button" onClick={checkPostAcceptance} disabled={Boolean(busy) || !counts.awaiting}>
-              {busy === "post-status" ? "Checking Posts…" : `Check ${counts.awaiting} Awaiting Posts`}
+              {busy === "post-status"
+                ? "Checking Posts…"
+                : counts.awaiting > 25
+                  ? `Check next 25 of ${counts.awaiting} Awaiting Posts`
+                  : `Check ${counts.awaiting} Awaiting Posts`}
             </button>
           </div>
         </div>

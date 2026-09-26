@@ -196,6 +196,35 @@
     return largeImage.closest?.('[role="article"], article, div') || largeImage.parentElement || document.body;
   }
 
+  function visibleRent2BuyAdvertForExactSearch(registration) {
+    const wantedReg = normalizeRegistration(registration);
+    if (!wantedReg) return null;
+
+    let searchedReg = "";
+    try {
+      searchedReg = normalizeRegistration(new URL(location.href).searchParams.get("q") || "");
+    } catch {}
+    if (!searchedReg || searchedReg !== wantedReg) return null;
+
+    const pageText = clean(document.body?.innerText || "");
+    const looksLikeRent2BuyAdvert =
+      /\brent\s*(?:2|to)\s*buy\s*vans\b/i.test(pageText) ||
+      /\bno\s+credit\s+check\b/i.test(pageText) ||
+      /\brent\s+it\b[\s\S]{0,120}\bdrive\s+it\b[\s\S]{0,120}\bown\s+it\b/i.test(pageText) ||
+      /rent2buyvans\.co\.uk/i.test(pageText);
+    if (!looksLikeRent2BuyAdvert) return null;
+
+    const largeImage = [...document.querySelectorAll("img")]
+      .filter(visible)
+      .find((image) => {
+        const rect = image.getBoundingClientRect();
+        return rect.width >= 220 && rect.height >= 140;
+      });
+    if (!largeImage) return null;
+
+    return largeImage.closest?.('[role="article"], article, div') || largeImage.parentElement || document.body;
+  }
+
   function contentUnavailable(text) {
     return /this content isn'?t available right now|content is not available|page isn'?t available|group is unavailable|group has been deleted/i.test(String(text || ""));
   }
@@ -515,9 +544,10 @@
       const visibleResult = wantedReg ? visibleSearchResultEvidence(target.registration) : null;
       const visibleAdvert = wantedReg ? visibleAdvertCardForExactSearch(target.registration) : null;
       const visibleFinanceAdvert = wantedReg ? visibleFinanceAdvertForExactSearch(target.registration) : null;
+      const visibleRent2BuyAdvert = wantedReg ? visibleRent2BuyAdvertForExactSearch(target.registration) : null;
       // Keep the rule simple: exact registration search + a genuine visible advert means
       // Facebook is showing the advert, so it is accepted/Proven.
-      if (visibleFinanceAdvert || visibleAdvert || visibleResult || evidenceLines.length || contentUnavailable(document.body?.innerText || "")) break;
+      if (visibleFinanceAdvert || visibleRent2BuyAdvert || visibleAdvert || visibleResult || evidenceLines.length || contentUnavailable(document.body?.innerText || "")) break;
       await sleep(500);
     }
 
@@ -542,12 +572,17 @@
 
       if (!accepted) {
         const visibleFinanceAdvert = visibleFinanceAdvertForExactSearch(target.registration);
+        const visibleRent2BuyAdvert = visibleRent2BuyAdvertForExactSearch(target.registration);
         const visibleAdvert = visibleAdvertCardForExactSearch(target.registration);
         const visibleResult = visibleSearchResultEvidence(target.registration);
         if (visibleFinanceAdvert) {
           accepted = true;
           matchedUrl = visibleFinanceAdvert.querySelector?.('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid="]')?.href || "";
           matchMethod = "exact-search-finance-advert";
+        } else if (visibleRent2BuyAdvert) {
+          accepted = true;
+          matchedUrl = visibleRent2BuyAdvert.querySelector?.('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid="]')?.href || "";
+          matchMethod = "exact-search-rent2buy-advert";
         } else if (visibleAdvert) {
           accepted = true;
           matchedUrl = visibleAdvert.querySelector('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid="]')?.href || "";
@@ -767,6 +802,7 @@
       registrationEvidenceLines,
       visibleAdvertCardForExactSearch,
       visibleFinanceAdvertForExactSearch,
+      visibleRent2BuyAdvertForExactSearch,
       membershipPendingVisible,
       waitForMembershipPending,
       prepareGroupPost,
