@@ -1,6 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
 import { del } from "@vercel/blob";
-import { BUFFER_API_URL } from "../lib/bufferPublishing.js";
+import {
+  BUFFER_API_URL,
+  BUFFER_CHANNELS_QUERY,
+  BUFFER_FACEBOOK_CHANNELS,
+  BUFFER_ORGANIZATION_ID,
+  parseBufferChannelsPayload,
+  selectVanFinanceGoogleBusinessChannel,
+} from "../lib/bufferPublishing.js";
 import {
   BUFFER_SENT_POSTS_QUERY,
   bufferDestinationForChannel,
@@ -52,11 +59,22 @@ function bufferToken() {
   return token;
 }
 
-async function loadSentBufferPosts() {
+async function loadBufferChannels() {
+  const payload = await guardedBufferGraphql({
+    url: BUFFER_API_URL,
+    token: bufferToken(),
+    query: BUFFER_CHANNELS_QUERY,
+    variables: { organizationId: BUFFER_ORGANIZATION_ID },
+  });
+  return parseBufferChannelsPayload(payload);
+}
+
+async function loadSentBufferPosts(channelIds) {
   const payload = await guardedBufferGraphql({
     url: BUFFER_API_URL,
     token: bufferToken(),
     query: BUFFER_SENT_POSTS_QUERY,
+    variables: { channelIds },
   });
   return parseBufferSentPostsPayload(payload);
 }
@@ -106,9 +124,9 @@ async function withVanscoToday(today, todayKey) {
   };
 }
 
-function trackingDescriptor(post) {
-  const destination = bufferDestinationForChannel(post?.channelId);
-  const productKey = bufferProductKeyForDestination(destination);
+function trackingDescriptor(post, googleBusinessChannelId = "") {
+  const destination = bufferDestinationForChannel(post?.channelId, googleBusinessChannelId);
+  const productKey = bufferProductKeyForDestination(destination, post?.text);
   const sentAt = bufferSentTimestamp(post);
   if (!destination || !productKey || !sentAt || !post?.id) return null;
   const mediaKind = bufferPostMediaKind(post);
@@ -117,7 +135,7 @@ function trackingDescriptor(post) {
     sourceId: `buffer:${post.id}`,
     bufferPostId: String(post.id),
     activityDate: londonDateKey(new Date(sentAt)),
-    activityType: bufferPublishedActivityType(destination, mediaKind),
+    activityType: bufferPublishedActivityType(destination, mediaKind, productKey),
     destination,
     productKey,
     mediaKind,
@@ -133,8 +151,10 @@ function registrationKey(row) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
-async function syncSentPosts(supabase, posts) {
-  const descriptors = (posts || []).map(trackingDescriptor).filter(Boolean);
+async function syncSentPosts(supabase, posts, googleBusinessChannelId = "") {
+  const descriptors = (posts || [])
+    .map((post) => trackingDescriptor(post, googleBusinessChannelId))
+    .filter(Boolean);
   if (!descriptors.length) return { inserted: 0, matchedManual: 0, descriptors: [] };
 
   const dates = descriptors.map((item) => item.activityDate).sort();
@@ -151,6 +171,8 @@ async function syncSentPosts(supabase, posts) {
       "rent2buy_facebook_post",
       "van_finance_reel",
       "rent2buy_reel",
+      "van_finance_google_business_post",
+      "rent2buy_google_business_post",
     ])
     .limit(5000);
   if (existing.error) throw existing.error;
@@ -185,7 +207,8 @@ async function syncSentPosts(supabase, posts) {
         media_kind: item.mediaKind,
         buffer_post_id: item.bufferPostId,
         buffer_status: "sent",
-        facebook_live: true,
+        facebook_live: item.destination !== "Van Finance Google Business",
+        google_business_live: item.destination === "Van Finance Google Business",
         external_link: item.externalLink,
         sent_at: item.sentAt,
         status_event: item.mediaKind === "video" ? "facebook_published" : "facebook_posted",
@@ -272,9 +295,23 @@ export default async function handler(request, response) {
   }
 
   try {
-    const posts = await loadSentBufferPosts();
+    const channels = await loadBufferChannels();
+    let googleBusinessChannel = null;
+    try {
+      googleBusinessChannel = selectVanFinanceGoogleBusinessChannel(channels);
+    } catch (error) {
+      console.warn("[buffer-publish-status] Google Business channel unavailable", {
+        message: error?.message || String(error),
+      });
+    }
+    const channelIds = [
+      ...Object.values(BUFFER_FACEBOOK_CHANNELS),
+      ...(googleBusinessChannel?.id ? [googleBusinessChannel.id] : []),
+    ];
+    const posts = await loadSentBufferPosts(channelIds);
     const supabase = getSupabase();
-    const sync = await syncSentPosts(supabase, posts);
+    const googleBusinessChannelId = googleBusinessChannel?.id || "";
+    const sync = await syncSentPosts(supabase, posts, googleBusinessChannelId);
     const cleanup = await cleanDeliveredReelBlobs(supabase, sync.descriptors);
     const todayKey = londonDateKey();
     const result = {
@@ -283,11 +320,20 @@ export default async function handler(request, response) {
       synced: sync.inserted,
       matched_manual: sync.matchedManual,
       cleaned_reel_blobs: cleanup.cleaned,
+      google_business_channel: googleBusinessChannel
+        ? {
+            id: googleBusinessChannel.id,
+            name: googleBusinessChannel.displayName || googleBusinessChannel.name || "Van Finance Company",
+            connected: true,
+          }
+        : { connected: false },
       today: await withVanscoToday(
-        summarizeBufferPublishedToday(posts, todayKey, londonDateKey),
+        summarizeBufferPublishedToday(posts, todayKey, londonDateKey, {
+          googleBusinessChannelId,
+        }),
         todayKey,
       ),
-      recent: bufferPublishedItems(posts),
+      recent: bufferPublishedItems(posts, { googleBusinessChannelId }),
     };
     await saveBufferStatusSnapshot(result);
     response.status(200).json(result);
