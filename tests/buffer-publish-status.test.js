@@ -116,7 +116,8 @@ test("client surfaces live Buffer confirmation in all three CRM areas", async ()
   const endpoint = await readFile(new URL("../api/buffer-publish-status.js", import.meta.url), "utf8");
   assert.match(endpoint, /source:\s*"buffer_publish"/);
   assert.match(endpoint, /facebook_published/);
-  assert.match(endpoint, /facebook_live:\s*true/);
+  assert.match(endpoint, /facebook_live:\s*item\.destination !== "Van Finance Google Business"/);
+  assert.match(endpoint, /google_business_posted/);
   assert.match(endpoint, /item\.mediaKind === "image"/);
   assert.match(endpoint, /loadVanscoAutomationStatus/);
   assert.match(endpoint, /providerSent/);
