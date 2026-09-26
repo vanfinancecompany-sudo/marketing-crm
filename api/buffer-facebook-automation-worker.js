@@ -772,12 +772,7 @@ export default async function handler(request, response) {
       return;
     }
 
-    const [posts, channels] = await Promise.all([
-      loadBufferPosts(),
-      loadBufferChannels(),
-    ]);
-    const googleChannel = selectVanFinanceGoogleBusinessChannel(channels);
-    const googlePosts = await loadGoogleBusinessPosts(googleChannel.id);
+    const posts = await loadBufferPosts();
     const now = Date.now();
     const results = { vanFinance: {}, rent2buy: {}, googleBusiness: {} };
 
@@ -805,15 +800,18 @@ export default async function handler(request, response) {
       );
     }
 
-    results.googleBusiness = await safeStep("Google Business vehicle post", () =>
-      createNextGoogleBusinessPost({
+    results.googleBusiness = await safeStep("Google Business vehicle post", async () => {
+      const channels = await loadBufferChannels();
+      const googleChannel = selectVanFinanceGoogleBusinessChannel(channels);
+      const googlePosts = await loadGoogleBusinessPosts(googleChannel.id);
+      return createNextGoogleBusinessPost({
         supabase,
         googlePosts,
         googleChannel,
         dateKey,
         now,
-      }),
-    );
+      });
+    });
 
     response.status(200).json({
       ok: true,
