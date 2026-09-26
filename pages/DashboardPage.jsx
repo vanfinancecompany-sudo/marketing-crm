@@ -32,8 +32,11 @@ const WEEKDAYS = [
   "Friday",
   "Saturday",
 ];
+const VANSCO_FACEBOOK_DAILY_TARGET = 20;
+
 const ACTIVITY_UNITS = {
   van_finance_facebook_post: "posted",
+  vansco_facebook_post: "posted",
   rent2buy_facebook_post: "posted",
   van_finance_google_business_post: "posted",
   rent2buy_google_business_post: "posted",
@@ -103,9 +106,14 @@ const ACTIVITY_NAVIGATION = {
 
 function ActivityCard({ metric, onOpen }) {
   const linked = Boolean(onOpen);
+  const isVansco = metric.type === "vansco_facebook_post";
+  const label = isVansco ? "Vansco Facebook posts" : ACTIVITY_LABELS[metric.type];
+  const statusLabel = metric.statusLabel
+    || (metric.remaining === 0 ? "COMPLETE" : `${metric.remaining} LEFT`);
+  const completedLabel = metric.displayCompleted ?? metric.completed;
   return (
     <article
-      className={`operations-activity-card${metric.remaining === 0 ? " is-complete" : ""}${linked ? " is-linked" : ""}`}
+      className={`operations-activity-card${metric.remaining === 0 ? " is-complete" : ""}${linked ? " is-linked" : ""}${isVansco ? " is-vansco" : ""}`}
       role={linked ? "button" : undefined}
       tabIndex={linked ? 0 : undefined}
       onClick={onOpen}
@@ -117,13 +125,11 @@ function ActivityCard({ metric, onOpen }) {
       } : undefined}
     >
       <div className="operations-activity-card__heading">
-        <span>{ACTIVITY_LABELS[metric.type]}</span>
-        <b>
-          {metric.remaining === 0 ? "COMPLETE" : `${metric.remaining} LEFT`}
-        </b>
+        <span>{label}</span>
+        <b>{statusLabel}</b>
       </div>
       <div className="operations-activity-card__numbers">
-        <strong>{metric.completed}</strong>
+        <strong>{completedLabel}</strong>
         <span>{ACTIVITY_UNITS[metric.type]}</span>
         <em>Target {metric.target}</em>
       </div>
@@ -326,6 +332,43 @@ export default function DashboardPage({ onNavigate }) {
     [overview],
   );
 
+  const vanscoMetric = useMemo(() => {
+    const completed = Math.max(0, Number(vanscoStatus?.buffer?.sentToday || 0));
+    const unavailable = Boolean(vanscoStatusError) && !vanscoStatus;
+    const checking = vanscoStatusBusy && !vanscoStatus;
+    return {
+      type: "vansco_facebook_post",
+      target: VANSCO_FACEBOOK_DAILY_TARGET,
+      completed,
+      displayCompleted: unavailable || checking ? "—" : completed,
+      remaining: Math.max(0, VANSCO_FACEBOOK_DAILY_TARGET - completed),
+      percentage: Math.min(
+        100,
+        Math.round((completed / VANSCO_FACEBOOK_DAILY_TARGET) * 100),
+      ),
+      statusLabel: unavailable
+        ? "UNAVAILABLE"
+        : checking
+          ? "CHECKING"
+          : completed >= VANSCO_FACEBOOK_DAILY_TARGET
+            ? "COMPLETE"
+            : `${Math.max(0, VANSCO_FACEBOOK_DAILY_TARGET - completed)} LEFT`,
+    };
+  }, [vanscoStatus, vanscoStatusBusy, vanscoStatusError]);
+
+  const displayMetrics = useMemo(() => {
+    const next = [...metrics];
+    const rent2buyFacebookIndex = next.findIndex(
+      (metric) => metric.type === "rent2buy_facebook_post",
+    );
+    next.splice(
+      rent2buyFacebookIndex >= 0 ? rent2buyFacebookIndex + 1 : 2,
+      0,
+      vanscoMetric,
+    );
+    return next;
+  }, [metrics, vanscoMetric]);
+
   if (locked)
     return (
       <div className="page-stack">
@@ -386,7 +429,7 @@ export default function DashboardPage({ onNavigate }) {
       {error ? <div className="notice notice--error">{error}</div> : null}
       {message ? <div className="notice notice--success">{message}</div> : null}
       <section className="operations-activity-grid">
-        {metrics.map((metric) => {
+        {displayMetrics.map((metric) => {
           const destination = ACTIVITY_NAVIGATION[metric.type];
           return (
             <ActivityCard
