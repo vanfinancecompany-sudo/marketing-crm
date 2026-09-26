@@ -7,6 +7,7 @@ import {
   bufferDestinationForProduct,
   buildBufferCreatePostInput,
   parseBufferCreatePostPayload,
+  selectVanFinanceGoogleBusinessChannel,
 } from "../lib/bufferPublishing.js";
 
 test("maps both Facebook destinations to the connected Buffer channels", () => {
@@ -97,6 +98,41 @@ test("builds an explicitly queued Facebook Reel", () => {
   assert.equal(input.schedulingType, "automatic");
   assert.equal(input.mode, "addToQueue");
   assert.deepEqual(input.metadata, { facebook: { type: "reel" } });
+});
+
+test("builds a Google Business Whats New post with Learn more CTA", () => {
+  const input = buildBufferCreatePostInput({
+    channelId: "google-channel-1",
+    platform: "googlebusiness",
+    text: "VAN FINANCE COMPANY STOCK\n\nREGISTRATION: AB12CDE",
+    mediaUrl: "https://example.com/van.jpg",
+    mediaKind: "image",
+    draft: false,
+    dueAt: "2026-09-27T09:00:00.000Z",
+    linkUrl: "https://www.vanfinancecompany.co.uk/van-finance/ab12cde",
+  });
+
+  assert.equal(input.channelId, "google-channel-1");
+  assert.equal(input.mode, "customScheduled");
+  assert.equal(input.saveToDraft, false);
+  assert.deepEqual(input.assets, [{ image: { url: "https://example.com/van.jpg" } }]);
+  assert.deepEqual(input.metadata, {
+    google: {
+      type: "whats_new",
+      detailsWhatsNew: {
+        button: "learn_more",
+        link: "https://www.vanfinancecompany.co.uk/van-finance/ab12cde",
+      },
+    },
+  });
+});
+
+test("selects the connected Van Finance Google Business channel safely", () => {
+  const selected = selectVanFinanceGoogleBusinessChannel([
+    { id: "fb", service: "facebook", name: "Van Finance Company" },
+    { id: "gbp", service: "googlebusiness", name: "Van Finance Company", displayName: "Van Finance Company", isDisconnected: false, isLocked: false },
+  ]);
+  assert.equal(selected.id, "gbp");
 });
 
 test("rejects unsafe media URLs and unsupported destinations", () => {
