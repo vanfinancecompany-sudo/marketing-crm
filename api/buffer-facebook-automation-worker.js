@@ -800,17 +800,29 @@ export default async function handler(request, response) {
       );
     }
 
-    results.googleBusiness = await safeStep("Google Business vehicle post", async () => {
+    results.googleBusiness = await safeStep("Google Business vehicle posts", async () => {
       const channels = await loadBufferChannels();
       const googleChannel = selectVanFinanceGoogleBusinessChannel(channels);
       const googlePosts = await loadGoogleBusinessPosts(googleChannel.id);
-      return createNextGoogleBusinessPost({
-        supabase,
-        googlePosts,
-        googleChannel,
-        dateKey,
-        now,
-      });
+      const created = [];
+
+      for (let index = 0; index < 2; index += 1) {
+        const item = await createNextGoogleBusinessPost({
+          supabase,
+          googlePosts,
+          googleChannel,
+          dateKey,
+          now,
+        });
+        created.push(item);
+        if (!item?.created) break;
+      }
+
+      return {
+        channelId: googleChannel.id,
+        channelName: googleChannel.displayName || googleChannel.name || "Van Finance Company",
+        created,
+      };
     });
 
     response.status(200).json({
