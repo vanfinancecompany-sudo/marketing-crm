@@ -8,17 +8,22 @@ import {
   extractBufferRegistration,
   isBufferPostReserved,
   londonDateKeyForValue,
+  londonLocalMinutesToUtcIso,
 } from "../lib/bufferAutomation.js";
 import {
   BUFFER_API_URL,
   BUFFER_AUTOMATION_POSTS_QUERY,
+  BUFFER_CHANNELS_QUERY,
   BUFFER_CREATE_POST_MUTATION,
   BUFFER_FACEBOOK_CHANNELS,
+  BUFFER_ORGANIZATION_ID,
   bufferDestinationForProduct,
   buildBufferCreatePostInput,
   parseBufferAutomationPostsPayload,
+  parseBufferChannelsPayload,
   parseBufferCreatePostPayload,
   readableBufferError,
+  selectVanFinanceGoogleBusinessChannel,
 } from "../lib/bufferPublishing.js";
 import {
   bufferDeferredPayload,
@@ -27,8 +32,10 @@ import {
 } from "../lib/bufferRuntimeGuard.js";
 import {
   automatedReelFrameSpecs,
+  automatedVehicleUrl,
   buildAutomatedFacebookCaption,
   buildAutomatedReelCaption,
+  buildGoogleBusinessCaption,
 } from "../lib/facebookAutomationContent.js";
 import {
   mapFinanceVehicleRow,
@@ -47,6 +54,56 @@ const MIN_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 const REEL_COOLDOWN_MS = 48 * 60 * 60 * 1000;
 const CHANNEL_QUEUE_LIMIT = 10;
 const PUBLIC_PRODUCTION_ORIGIN = "https://marketing-crm-six.vercel.app";
+const GOOGLE_BUSINESS_DAILY_TARGET = 10;
+const GOOGLE_BUSINESS_FIRST_LOCAL_MINUTES = 8 * 60 + 30;
+const GOOGLE_BUSINESS_SLOT_GAP_MINUTES = 75;
+const GOOGLE_BUSINESS_PLAN = Object.freeze([
+  "vanFinance",
+  "rent2buy",
+  "vanFinance",
+  "vanFinance",
+  "rent2buy",
+  "vanFinance",
+  "rent2buy",
+  "vanFinance",
+  "rent2buy",
+  "vanFinance",
+]);
+
+const GOOGLE_BUSINESS_POSTS_QUERY = `
+  query GetGoogleBusinessAutomationPosts($channelIds: [ChannelId!]!) {
+    posts(
+      first: 100
+      input: {
+        organizationId: "6a8720b714b19791c7f51e13"
+        sort: [{ field: createdAt, direction: desc }]
+        filter: {
+          status: [draft, scheduled, sending, sent, error]
+          channelIds: $channelIds
+        }
+      }
+    ) {
+      edges {
+        node {
+          id
+          text
+          status
+          schedulingType
+          createdAt
+          dueAt
+          sentAt
+          channelId
+          assets {
+            id
+            mimeType
+            source
+          }
+        }
+      }
+    }
+  }
+`;
+
 const FACEBOOK_IMAGE_FEEDS = Object.freeze({
   vanFinance: "https://www.vanfinancecompany.co.uk/_functions/marketingVanFinanceImages",
   rent2buy: "https://www.vanfinancecompany.co.uk/_functions/marketingRent2BuyImages",
@@ -103,15 +160,40 @@ async function loadBufferPosts() {
   return parseBufferAutomationPostsPayload(await bufferGraphql(BUFFER_AUTOMATION_POSTS_QUERY));
 }
 
-async function createBufferScheduledPost({ destination, text, mediaUrl, mediaUrls = [], mediaKind, dueAt }) {
+async function loadBufferChannels() {
+  return parseBufferChannelsPayload(
+    await bufferGraphql(BUFFER_CHANNELS_QUERY, { organizationId: BUFFER_ORGANIZATION_ID }),
+  );
+}
+
+async function loadGoogleBusinessPosts(channelId) {
+  return parseBufferAutomationPostsPayload(
+    await bufferGraphql(GOOGLE_BUSINESS_POSTS_QUERY, { channelIds: [channelId] }),
+  );
+}
+
+async function createBufferScheduledPost({
+  destination,
+  channelId,
+  platform = "facebook",
+  text,
+  mediaUrl,
+  mediaUrls = [],
+  mediaKind,
+  dueAt,
+  linkUrl = "",
+}) {
   const input = buildBufferCreatePostInput({
     destination,
+    channelId,
+    platform,
     text,
     mediaUrl,
     mediaUrls,
     mediaKind,
     draft: false,
     dueAt,
+    linkUrl,
   });
   return parseBufferCreatePostPayload(
     await bufferGraphql(BUFFER_CREATE_POST_MUTATION, { input }),
@@ -235,6 +317,62 @@ function postTime(post) {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
+function googleBusinessProductKey(post) {
+  const text = String(post?.text || "").toUpperCase();
+  if (text.includes("RENT2BUY VAN AVAILABLE")) return "rent2buy";
+  if (text.includes("VAN FINANCE COMPANY STOCK")) return "vanFinance";
+  return "";
+}
+
+function googleBusinessSlots(dateKey) {
+  return Array.from({ length: GOOGLE_BUSINESS_DAILY_TARGET }, (_, index) => {
+    const localMinutes = GOOGLE_BUSINESS_FIRST_LOCAL_MINUTES + (index * GOOGLE_BUSINESS_SLOT_GAP_MINUTES);
+    return {
+      index,
+      productKey: GOOGLE_BUSINESS_PLAN[index] || "vanFinance",
+      localMinutes,
+      localTime: `${String(Math.floor(localMinutes / 60)).padStart(2, "0")}:${String(localMinutes % 60).padStart(2, "0")}`,
+      dueAt: londonLocalMinutesToUtcIso(dateKey, localMinutes),
+    };
+  });
+}
+
+function nextGoogleBusinessSlot(posts, dateKey, now) {
+  const slots = googleBusinessSlots(dateKey);
+  const existingPosts = (posts || []).filter(
+    (post) => liveOrReserved(post) && bufferPostDateKey(post) === dateKey,
+  );
+  if (existingPosts.length >= slots.length) {
+    return { slot: null, existing: existingPosts.length, target: slots.length };
+  }
+
+  const occupiedDueAt = new Set(existingPosts.map(postDueIso).filter(Boolean));
+  const slot = slots.find((candidate) =>
+    new Date(candidate.dueAt).getTime() > now + MIN_SCHEDULE_LEAD_MS
+      && !occupiedDueAt.has(candidate.dueAt)
+  ) || null;
+  return { slot, existing: existingPosts.length, target: slots.length };
+}
+
+function googleBusinessReservedRegistrations(posts, dateKey) {
+  return (posts || [])
+    .filter((post) => liveOrReserved(post) && (isBufferPostReserved(post) || bufferPostDateKey(post) === dateKey))
+    .map((post) => extractBufferRegistration(post?.text))
+    .filter(Boolean);
+}
+
+function googleBusinessBufferHistoryRows(posts, productKey) {
+  return (posts || [])
+    .filter((post) => String(post?.status || "").toLowerCase() === "sent")
+    .filter((post) => googleBusinessProductKey(post) === productKey)
+    .map((post) => ({
+      registration: extractBufferRegistration(post?.text),
+      occurred_at: post?.sentAt || post?.dueAt || post?.createdAt,
+      metadata: { registration: extractBufferRegistration(post?.text) },
+    }))
+    .filter((row) => row.registration && row.occurred_at);
+}
+
 function reservedRegistrations(posts, productKey, dateKey) {
   return postsForProduct(posts, productKey)
     .filter((post) => liveOrReserved(post) && (isBufferPostReserved(post) || bufferPostDateKey(post) === dateKey))
@@ -275,6 +413,23 @@ async function loadFacebookHistory(supabase, productKey) {
     .select("id,activity_date,activity_type,source,source_id,metadata,occurred_at")
     .eq("activity_type", activityType)
     .in("source", ["posting_desk", "buffer_publish", "buffer_automation"])
+    .gte("occurred_at", since)
+    .order("occurred_at", { ascending: false })
+    .limit(2500);
+  if (result.error) throw result.error;
+  return result.data || [];
+}
+
+async function loadGoogleBusinessHistory(supabase, productKey) {
+  const activityType = productKey === "rent2buy"
+    ? "rent2buy_google_business_post"
+    : "van_finance_google_business_post";
+  const since = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+  const result = await supabase
+    .from("marketing_daily_activity_events")
+    .select("id,activity_date,activity_type,source,source_id,metadata,occurred_at")
+    .eq("activity_type", activityType)
+    .in("source", ["buffer_publish", "buffer_automation"])
     .gte("occurred_at", since)
     .order("occurred_at", { ascending: false })
     .limit(2500);
@@ -350,6 +505,57 @@ async function createNextImagePost({ supabase, posts, automationConfig, productK
     imageCount: mediaUrls.length,
     dueAt: post.dueAt || slotInfo.slot.dueAt,
     localTime: slotInfo.slot.localTime,
+  };
+}
+
+async function createNextGoogleBusinessPost({
+  supabase,
+  googlePosts,
+  googleChannel,
+  dateKey,
+  now,
+}) {
+  const slotInfo = nextGoogleBusinessSlot(googlePosts, dateKey, now);
+  if (!slotInfo.slot) {
+    return { skipped: slotInfo.existing >= slotInfo.target ? "target_met" : "no_future_slot", ...slotInfo };
+  }
+
+  const productKey = slotInfo.slot.productKey;
+  const [vehicles, historyRows] = await Promise.all([
+    loadVehicles(supabase, productKey),
+    loadGoogleBusinessHistory(supabase, productKey),
+  ]);
+  const vehicle = chooseOldestFacebookCandidate({
+    vehicles,
+    historyRows: [
+      ...historyRows,
+      ...googleBusinessBufferHistoryRows(googlePosts, productKey),
+    ],
+    reservedRegistrations: googleBusinessReservedRegistrations(googlePosts, dateKey),
+  });
+  if (!vehicle) return { skipped: "no_candidate", productKey, ...slotInfo };
+
+  const registration = normalizeReg(vehicle.registration || vehicle.reg || vehicle.title);
+  const linkUrl = automatedVehicleUrl(vehicle, productKey);
+  const post = await createBufferScheduledPost({
+    channelId: googleChannel.id,
+    platform: "googlebusiness",
+    text: buildGoogleBusinessCaption(vehicle, productKey),
+    mediaUrl: vehicle.image || vehicle.picture,
+    mediaKind: "image",
+    dueAt: slotInfo.slot.dueAt,
+    linkUrl,
+  });
+  googlePosts.unshift(post);
+  return {
+    created: true,
+    productKey,
+    registration,
+    bufferPostId: post.id,
+    dueAt: post.dueAt || slotInfo.slot.dueAt,
+    localTime: slotInfo.slot.localTime,
+    channelId: googleChannel.id,
+    channelName: googleChannel.displayName || googleChannel.name || "Van Finance Company",
   };
 }
 
@@ -566,9 +772,14 @@ export default async function handler(request, response) {
       return;
     }
 
-    const posts = await loadBufferPosts();
+    const [posts, channels] = await Promise.all([
+      loadBufferPosts(),
+      loadBufferChannels(),
+    ]);
+    const googleChannel = selectVanFinanceGoogleBusinessChannel(channels);
+    const googlePosts = await loadGoogleBusinessPosts(googleChannel.id);
     const now = Date.now();
-    const results = { vanFinance: {}, rent2buy: {} };
+    const results = { vanFinance: {}, rent2buy: {}, googleBusiness: {} };
 
     for (const productKey of PRODUCTS) {
       results[productKey].image = await safeStep(`${productKey} image`, () =>
@@ -594,6 +805,16 @@ export default async function handler(request, response) {
       );
     }
 
+    results.googleBusiness = await safeStep("Google Business vehicle post", () =>
+      createNextGoogleBusinessPost({
+        supabase,
+        googlePosts,
+        googleChannel,
+        dateKey,
+        now,
+      }),
+    );
+
     response.status(200).json({
       ok: true,
       enabled: true,
@@ -601,6 +822,7 @@ export default async function handler(request, response) {
       schedule: {
         vanFinance: bufferAutomationSlots(automationConfig, "vanFinance", dateKey).map(({ localTime, mediaKind }) => ({ localTime, mediaKind })),
         rent2buy: bufferAutomationSlots(automationConfig, "rent2buy", dateKey).map(({ localTime, mediaKind }) => ({ localTime, mediaKind })),
+        googleBusiness: googleBusinessSlots(dateKey).map(({ localTime, productKey }) => ({ localTime, productKey })),
       },
       results,
       elapsedMs: Date.now() - startedAt,
