@@ -60,6 +60,15 @@ test("Facebook group URLs are canonicalised for dedupe and history", () => {
   );
 });
 
+test("Proven groups due for reposting render with the red due-card class", () => {
+  assert.match(pageSource, /posting-card--due/);
+  assert.match(pageSource, /due\.due \? " posting-card--due" : ""/);
+  assert.match(
+    fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8"),
+    /\.posting-card--due\s*\{[\s\S]*border:\s*4px solid #dc2626/,
+  );
+});
+
 test("Rent2Buy and Finance scoring stay separate", () => {
   const groups = loadFacebookGroups();
   const finance = scoreFacebookGroups(groups, "finance");
