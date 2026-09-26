@@ -4598,6 +4598,17 @@ textarea {
   background: linear-gradient(180deg, #fff 0%, #f0fdf4 100%);
 }
 
+.operations-activity-card.is-vansco,
+.operations-activity-card.is-vansco.is-complete {
+  border: 2px solid #2563eb;
+  background: linear-gradient(180deg, #fff 0%, #eff6ff 100%);
+  box-shadow: 0 10px 26px rgba(37, 99, 235, 0.14);
+}
+
+.operations-activity-card.is-vansco .operations-progress span {
+  background: #2563eb;
+}
+
 .operations-activity-card.is-linked {
   cursor: pointer;
   transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
