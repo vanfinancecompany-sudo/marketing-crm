@@ -7,6 +7,7 @@ import {
   isVanscoCar,
   isVanscoVatResolved,
   vanscoAdvertVatLabel,
+  vanscoFacebookImageUrls,
   vanscoDailySlots,
   vanscoNextDateKey,
   VANSCO_FACEBOOK_MAX_POSTS_PER_DAY,
@@ -85,7 +86,12 @@ async function pruneStaleScheduledPosts(posts, liveVehicles) {
     const explicitVat = hasExplicitVanscoVatLabel(post?.text);
     const carVatLabelPresent = live && isVanscoCar(vehicle) && explicitVat;
     const vatMissing = live && !isVanscoCar(vehicle) && !explicitVat;
-    if ((!vehicleUrl || live) && !vatMissing && !carVatLabelPresent) {
+    const desiredImageCount = live ? vanscoFacebookImageUrls(vehicle).length : 0;
+    const queuedImageCount = Array.isArray(post?.assets) ? post.assets.length : 0;
+    const imageUpgradeRequired = live
+      && desiredImageCount > queuedImageCount
+      && desiredImageCount > 1;
+    if ((!vehicleUrl || live) && !vatMissing && !carVatLabelPresent && !imageUpgradeRequired) {
       kept.push(post);
       continue;
     }
@@ -93,7 +99,9 @@ async function pruneStaleScheduledPosts(posts, liveVehicles) {
       ? "car_vat_label_present"
       : vatMissing
         ? "vat_label_missing"
-        : "vehicle_no_longer_live";
+        : imageUpgradeRequired
+          ? "image_count_upgrade"
+          : "vehicle_no_longer_live";
     try {
       await deleteVanscoBufferPost(post.id);
       removed.push({
@@ -233,6 +241,7 @@ export default async function handler(request, response) {
           branchSource: vehicle.branchSource,
           vehicleUrl: vehicle.vehicleUrl,
           imageUrl: vehicle.imageUrl,
+          imageUrls: vanscoFacebookImageUrls(vehicle),
           caption: buildVanscoFacebookCaption(vehicle),
         });
         excludedUrls.add(vehicle.vehicleUrl);
@@ -349,10 +358,12 @@ export default async function handler(request, response) {
       if (!vehicle) break;
 
       const caption = buildVanscoFacebookCaption(vehicle);
+      const imageUrls = vanscoFacebookImageUrls(vehicle);
       const post = await createVanscoBufferPost({
         config: bufferConfig,
         text: caption,
         imageUrl: vehicle.imageUrl,
+        imageUrls,
         dueAt: slot.dueAt,
       });
       posts.push(post);
@@ -366,6 +377,7 @@ export default async function handler(request, response) {
         branchKey: vehicle.branchKey,
         branchSource: vehicle.branchSource,
         vehicleUrl: vehicle.vehicleUrl,
+        imageCount: imageUrls.length,
         dueAt: post.dueAt || slot.dueAt,
         localTime: slot.localTime,
       });
