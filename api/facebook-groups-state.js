@@ -73,6 +73,76 @@ function normalizeGroup(group = {}) {
   };
 }
 
+const POST_STATE_FIELDS = Object.freeze([
+  "pipeline",
+  "postStatus",
+  "lastPostedAt",
+  "lastAcceptedAt",
+  "lastPostCheckAt",
+  "lastPostDetectedState",
+  "lastPostMatchMethod",
+  "pendingRegistration",
+  "postCount",
+  "acceptedPostCount",
+  "rejectedPostCount",
+  "archived",
+  "archiveReason",
+  "archivedAt",
+  "unavailable",
+  "status",
+  "canPost",
+]);
+
+function postStateTime(group = {}) {
+  return Math.max(0, ...[
+    group.lastPostedAt,
+    group.lastAcceptedAt,
+    group.lastPostCheckAt,
+    group.archivedAt,
+  ].map((value) => Date.parse(value || "") || 0));
+}
+
+function postStateRank(group = {}) {
+  if (group.archived || ["declined", "unavailable"].includes(group.postStatus)) return 4;
+  if (group.pipeline === "proven" || group.postStatus === "accepted" || Number(group.acceptedPostCount || 0) > 0) return 3;
+  if (["awaiting", "pending", "not_found"].includes(group.postStatus)) return 2;
+  return 1;
+}
+
+function preserveNewerPostState(incomingRow, existingRow) {
+  const incomingState = incomingRow?.state || {};
+  const existingState = existingRow?.state || {};
+  if (!existingRow) return incomingRow;
+
+  const incomingTime = postStateTime(incomingState);
+  const existingTime = postStateTime(existingState);
+  const existingIsNewer =
+    existingTime > incomingTime ||
+    (existingTime === incomingTime && postStateRank(existingState) > postStateRank(incomingState));
+
+  const state = {
+    ...existingState,
+    ...incomingState,
+  };
+
+  if (existingIsNewer) {
+    for (const field of POST_STATE_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(existingState, field)) {
+        state[field] = existingState[field];
+      }
+    }
+  }
+
+  return {
+    ...incomingRow,
+    group_url: normalizeGroupUrl(state.url || incomingRow.group_url) || incomingRow.group_url,
+    group_name: clean(state.name || incomingRow.group_name || "Facebook group", 500) || incomingRow.group_name,
+    finance: state.finance !== false,
+    rent2buy: state.rent2buy !== false,
+    state,
+  };
+}
+
 export default async function handler(request, response) {
   try {
     const supabase = getSupabaseServiceAdmin();
@@ -130,8 +200,6 @@ export default async function handler(request, response) {
       }
 
       const existing = Array.isArray(existingRows) ? existingRows : [];
-      const incomingKeys = new Set(rows.map((row) => row.group_key));
-      const missingExisting = existing.filter((row) => !incomingKeys.has(row.group_key));
       const suspiciousReduction =
         existing.length >= MASS_REDUCTION_MIN_ROWS &&
         rows.length < Math.ceil(existing.length * MASS_REDUCTION_RATIO);
@@ -164,9 +232,14 @@ export default async function handler(request, response) {
         }
       }
 
+      const existingByKey = new Map(existing.map((row) => [row.group_key, row]));
+      const safeRows = rows.map((row) =>
+        preserveNewerPostState(row, existingByKey.get(row.group_key))
+      );
+
       const { error } = await supabase
         .from(FACEBOOK_GROUP_STATE_TABLE)
-        .upsert(rows, { onConflict: "group_key" });
+        .upsert(safeRows, { onConflict: "group_key" });
 
       if (error) {
         sendJson(response, 500, {
@@ -176,7 +249,7 @@ export default async function handler(request, response) {
         return;
       }
 
-      sendJson(response, 200, { ok: true, saved: rows.length });
+      sendJson(response, 200, { ok: true, saved: safeRows.length });
       return;
     }
 

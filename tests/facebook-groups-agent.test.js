@@ -148,13 +148,42 @@ test("Facebook group relevance is restricted to vehicle sales and classified-sty
   }
 });
 
+test("Previously accepted groups stay in Proven / Hot even if they fail the new discovery relevance filter", () => {
+  const historicalWinner = {
+    name: "Southampton Self Employed Business Network",
+    url: "https://www.facebook.com/groups/historical-winner/",
+    finance: false,
+    rent2buy: true,
+    archived: false,
+    pipeline: "proven",
+    postStatus: "accepted",
+    acceptedPostCount: 2,
+    lastPostedAt: "2026-09-20T10:00:00.000Z",
+    lastAcceptedAt: "2026-09-20T11:00:00.000Z",
+  };
+  assert.equal(isVehicleClassifiedGroup(historicalWinner), false);
+  assert.equal(scoreFacebookGroups([historicalWinner], "rent2buy").length, 1);
+
+  const unprovenIrrelevant = {
+    ...historicalWinner,
+    pipeline: "new",
+    postStatus: "new",
+    acceptedPostCount: 0,
+    lastAcceptedAt: "",
+  };
+  assert.equal(scoreFacebookGroups([unprovenIrrelevant], "rent2buy").length, 0);
+});
+
 test("Facebook group state persists remotely without deleting browser recovery data", () => {
   assert.match(serviceSource, /\/api\/facebook-groups-state/);
   assert.match(serviceSource, /hydrateFacebookGroups/);
   assert.match(serviceSource, /remoteSyncReady/);
   assert.match(pageSource, /hydrateFacebookGroups\(loadFacebookGroups\(\)\)/);
   assert.match(stateApiSource, /getSupabaseServiceAdmin/);
-  assert.match(stateApiSource, /upsert\(rows, \{ onConflict: "group_key" \}\)/);
+  assert.match(stateApiSource, /upsert\(safeRows, \{ onConflict: "group_key" \}\)/);
+  assert.match(stateApiSource, /preserveNewerPostState/);
+  assert.match(stateApiSource, /POST_STATE_FIELDS/);
+  assert.doesNotMatch(serviceSource, /keepalive:\s*true/);
   assert.match(stateApiSource, /suspicious reduction/i);
   assert.match(stateApiSource, /facebook_group_state_backups/);
   assert.match(stateMigrationSource, /create table if not exists public\.facebook_group_state/);

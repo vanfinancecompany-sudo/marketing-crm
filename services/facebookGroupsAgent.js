@@ -156,11 +156,25 @@ export function isVehicleClassifiedGroup(group) {
 }
 
 function productAllowed(group, productKey) {
+  const belongsToProduct = productKey === "rent2buy"
+    ? Boolean(group?.rent2buy)
+    : Boolean(group?.finance);
+  if (!belongsToProduct) return false;
+
+  // Once Facebook has genuinely accepted a post, keep that group in Proven / Hot.
+  // The tighter discovery filter is for finding NEW groups, not erasing known winners.
+  const proven = !group?.archived && (
+    group?.pipeline === "proven" ||
+    Number(group?.acceptedPostCount || 0) > 0 ||
+    group?.postStatus === "accepted"
+  );
+  if (proven) return true;
+
   const relevant = isVehicleClassifiedGroup(group);
   if (productKey === "rent2buy") {
-    return Boolean(group?.rent2buy) && relevant && isRent2BuyLocalGroup(group);
+    return relevant && isRent2BuyLocalGroup(group);
   }
-  return Boolean(group?.finance) && relevant;
+  return relevant;
 }
 
 function parseMemberCount(value) {
@@ -291,7 +305,6 @@ export async function persistFacebookGroupsRemote(groups) {
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify({ groups: Array.isArray(groups) ? groups : [] }),
     cache: "no-store",
-    keepalive: true,
   });
   if (!response.ok) throw new Error(`Facebook group state save returned HTTP ${response.status}`);
   return response.json();
