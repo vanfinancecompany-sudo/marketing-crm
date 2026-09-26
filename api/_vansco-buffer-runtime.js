@@ -274,7 +274,22 @@ export async function loadVanscoBufferState(config, dateIso) {
   };
 }
 
-export async function createVanscoBufferPost({ config, text, imageUrl, dueAt }) {
+export async function createVanscoBufferPost({ config, text, imageUrl, imageUrls = [], dueAt }) {
+  const candidates = [
+    ...(Array.isArray(imageUrls) ? imageUrls : []),
+    imageUrl,
+  ];
+  const seen = new Set();
+  const urls = candidates
+    .map((value) => String(value || "").trim())
+    .filter((value) => {
+      if (!/^https:\/\//i.test(value) || seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    })
+    .slice(0, 3);
+  if (!urls.length) throw new Error("Vansco Buffer post requires at least one image.");
+
   const payload = await bufferGraphql(CREATE_POST_MUTATION, {
     input: {
       text: String(text || "").trim(),
@@ -284,7 +299,7 @@ export async function createVanscoBufferPost({ config, text, imageUrl, dueAt }) 
       dueAt: new Date(dueAt).toISOString(),
       saveToDraft: false,
       source: "vansco-marketing-crm",
-      assets: [{ image: { url: String(imageUrl || "").trim() } }],
+      assets: urls.map((url) => ({ image: { url } })),
       metadata: { facebook: { type: "post" } },
     },
   });
