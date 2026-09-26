@@ -80,6 +80,13 @@ async function hydrateVanscoVatFromDealerKitState(vehicles) {
         vatLabel,
         registration: String(snapshot?.registration || "").trim(),
         imageUrls,
+        dealerKitTitle: String(snapshot?.title || "").trim(),
+        derivative: String(snapshot?.derivative || "").trim(),
+        trim: String(snapshot?.trim || "").trim(),
+        bodyType: String(snapshot?.bodyType || "").trim(),
+        attentionGrabber: String(snapshot?.attentionGrabber || "").trim(),
+        make: String(snapshot?.make || "").trim(),
+        model: String(snapshot?.model || "").trim(),
       };
       const sourceUrl = normalizeCacheUrl(row?.source_url || snapshot?.sourceUrl);
       const supplierStockId = String(row?.supplier_stock_id || snapshot?.supplierStockId || "").trim();
@@ -117,6 +124,13 @@ async function hydrateVanscoVatFromDealerKitState(vehicles) {
             ? "dealerkit_stock_state"
             : vehicle?.vatSource || "",
         registration: vehicle?.registration || evidence.registration || "",
+        dealerKitTitle: evidence.dealerKitTitle || vehicle?.dealerKitTitle || "",
+        derivative: evidence.derivative || vehicle?.derivative || "",
+        trim: evidence.trim || vehicle?.trim || "",
+        bodyType: evidence.bodyType || vehicle?.bodyType || vehicle?.bodyStyle || "",
+        attentionGrabber: evidence.attentionGrabber || vehicle?.attentionGrabber || "",
+        make: evidence.make || vehicle?.make || "",
+        model: evidence.model || vehicle?.model || "",
         imageUrl: imageUrls[0] || vehicle?.imageUrl || "",
         imageUrls,
       };
