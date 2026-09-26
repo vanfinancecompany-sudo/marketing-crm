@@ -68,6 +68,14 @@ function vanscoLine(group) {
   return `${countsLine("Vansco", group, { includeReels: false })}${confirmed ? ` · confirmed ${confirmed}` : ""}`;
 }
 
+function googleBusinessLine(group) {
+  if (!group) return "Google Business: live confirmation unavailable";
+  const finance = Number(group?.vanFinance || 0);
+  const rent2buy = Number(group?.rent2buy || 0);
+  const total = Number(group?.total || finance + rent2buy);
+  return `Google Business: ${total} vehicle post${total === 1 ? "" : "s"} live · Van Finance ${finance} · Rent2Buy ${rent2buy}`;
+}
+
 function ensureOperationsPanel() {
   let panel = document.getElementById(STATUS_ID);
   if (panel) return panel;
@@ -118,6 +126,7 @@ function renderStatus(payload) {
   const finance = payload.today.vanFinance || {};
   const rent = payload.today.rent2buy || {};
   const vansco = payload.today.vansco || null;
+  const googleBusiness = payload.today.googleBusiness || null;
 
   if (kind === "operations") {
     const panel = ensureOperationsPanel();
@@ -125,14 +134,15 @@ function renderStatus(payload) {
     panel.innerHTML = `
       <div class="panel__header">
         <div>
-          <h3>Facebook live today</h3>
-          <p>Confirmed from Buffer, so you do not need to cross-check Facebook manually.</p>
+          <h3>Buffer live today</h3>
+          <p>Confirmed from Buffer across Facebook and Google Business, so you can see what has actually published.</p>
         </div>
         <span class="status-pill">${confirmationLabel}${checked ? ` · ${checked}` : ""}</span>
       </div>
       <div class="notice notice--success">${countsLine("Van Finance", finance)}</div>
       <div class="notice notice--success">${countsLine("Rent2Buy", rent)}</div>
       ${vansco ? `<div class="notice ${vansco.error ? "notice--warning" : "notice--success"}">${vanscoLine(vansco)}</div>` : ""}
+      <div class="notice notice--success">${googleBusinessLine(googleBusiness)}</div>
     `;
     return;
   }
