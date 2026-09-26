@@ -45,6 +45,28 @@ test("builds a safe Facebook image draft", () => {
   ]);
 });
 
+test("builds a three-image Facebook vehicle post in order", () => {
+  const input = buildBufferCreatePostInput({
+    destination: "Van Finance Facebook",
+    text: "Three image vehicle post",
+    mediaUrl: "https://static.wixstatic.com/media/main.jpg",
+    mediaUrls: [
+      "https://static.wixstatic.com/media/main.jpg",
+      "https://static.wixstatic.com/media/second.jpg",
+      "https://static.wixstatic.com/media/third.jpg",
+      "https://static.wixstatic.com/media/fourth.jpg",
+    ],
+    mediaKind: "image",
+    draft: false,
+  });
+
+  assert.deepEqual(input.assets, [
+    { image: { url: "https://static.wixstatic.com/media/main.jpg" } },
+    { image: { url: "https://static.wixstatic.com/media/second.jpg" } },
+    { image: { url: "https://static.wixstatic.com/media/third.jpg" } },
+  ]);
+});
+
 test("builds a safe Facebook reel draft", () => {
   const input = buildBufferCreatePostInput({
     destination: "Van Finance Facebook",
