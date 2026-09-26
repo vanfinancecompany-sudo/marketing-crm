@@ -45,3 +45,18 @@ test("the floating incomplete warning was removed", async () => {
   assert.doesNotMatch(renderer, /marketing-daily-warning|loadDailyTargetWarning/);
   assert.doesNotMatch(css, /marketing-daily-warning/);
 });
+
+test("Content Operations shows Vansco Buffer posts as a blue-accent live card", async () => {
+  const [page, css] = await Promise.all([
+    read("pages/DashboardPage.jsx"),
+    read("styles.css"),
+  ]);
+
+  assert.match(page, /VANSCO_FACEBOOK_DAILY_TARGET = 20/);
+  assert.match(page, /vanscoStatus\?\.buffer\?\.sentToday/);
+  assert.match(page, /type: "vansco_facebook_post"/);
+  assert.match(page, /Vansco Facebook posts/);
+  assert.match(css, /operations-activity-card\.is-vansco/);
+  assert.match(css, /border: 2px solid #2563eb/);
+});
+
