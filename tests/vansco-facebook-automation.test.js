@@ -17,6 +17,7 @@ import {
   vanscoFacebookImageUrls,
   vatLabelFromStatus,
   vatLabelFromText,
+  vanscoSocialTitle,
 } from "../lib/vanscoFacebookAutomation.js";
 
 test("DealerKit Meta CSV parser keeps quoted descriptions and literal dotted headers", () => {
@@ -133,6 +134,34 @@ test("normalised Meta rows require AVAILABLE stock, image, price and live vehicl
   assert.deepEqual(vanscoFacebookImageUrls(vehicle), vehicle.imageUrls);
   assert.equal(isEligibleVanscoVehicle(vehicle), true);
   assert.equal(isEligibleVanscoVehicle({ ...vehicle, availability: "SOLD" }), false);
+});
+
+
+test("Vansco social titles prefer rich DealerKit titles and concise specialist descriptors", () => {
+  assert.equal(
+    vanscoSocialTitle({
+      title: "Mercedes-Benz A Class",
+      dealerKitTitle: "Mercedes-Benz A Class 1.5 A180d AMG Line (Premium 2) Hatchback 5dr Diesel Manual Euro 6 (s/s) (116 ps)",
+      make: "Mercedes-Benz",
+      model: "A Class",
+      bodyType: "Hatchback",
+      attentionGrabber: "Parking Camera-Heated Seats",
+    }),
+    "Mercedes-Benz A Class 1.5 A180d AMG Line (Premium 2) Hatchback 5dr Diesel Manual Euro 6 (s/s) (116 ps)",
+  );
+
+  assert.equal(
+    vanscoSocialTitle({
+      title: "Peugeot Boxer",
+      dealerKitTitle: "Peugeot Boxer BlueHDi 440 2.0 4dr Minibus (9-17 Seats) Manual Diesel Minibus (9-17 Seats) Manual Diesel Minibus (9-17 Seats) Manual Diesel",
+      make: "Peugeot",
+      model: "Boxer",
+      trim: "Professional Premium +",
+      bodyType: "Minibus",
+      attentionGrabber: "17 SEATER MINIBUS",
+    }),
+    "Peugeot Boxer Professional Premium + 17 SEATER MINIBUS",
+  );
 });
 
 test("branch-specific caption uses only the selected site details", () => {
