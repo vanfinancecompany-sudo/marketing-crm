@@ -5,6 +5,7 @@ import {
   vatLabelFromStatus,
   vatLabelFromText,
   extractUkRegistration,
+  vanscoFacebookImageUrls,
 } from "../lib/vanscoFacebookAutomation.js";
 import {
   CACHE_TABLE,
@@ -67,11 +68,18 @@ async function hydrateVanscoVatFromDealerKitState(vehicles) {
         ? row.vehicle_snapshot
         : {};
       const vatLabel = vatLabelFromStatus(snapshot?.vatStatus);
-      if (!vatLabel) continue;
+      const imageUrls = vanscoFacebookImageUrls({
+        imageUrls: [
+          snapshot?.primaryImage?.url,
+          ...(Array.isArray(snapshot?.images) ? snapshot.images.map((image) => image?.url) : []),
+        ],
+      });
+      if (!vatLabel && !imageUrls.length) continue;
 
       const evidence = {
         vatLabel,
         registration: String(snapshot?.registration || "").trim(),
+        imageUrls,
       };
       const sourceUrl = normalizeCacheUrl(row?.source_url || snapshot?.sourceUrl);
       const supplierStockId = String(row?.supplier_stock_id || snapshot?.supplierStockId || "").trim();
@@ -83,8 +91,6 @@ async function hydrateVanscoVatFromDealerKitState(vehicles) {
     }
 
     return (vehicles || []).map((vehicle) => {
-      if (vehicle?.vatLabel) return vehicle;
-
       const sourceUrl = normalizeCacheUrl(vehicle?.vehicleUrl);
       const vehicleId = String(vehicle?.vehicleId || vehicle?.vehicleKey || "").trim();
       const vin = String(vehicle?.vin || "").trim().toUpperCase();
@@ -92,13 +98,27 @@ async function hydrateVanscoVatFromDealerKitState(vehicles) {
         || bySupplierStockId.get(vehicleId)
         || byVin.get(vin)
         || null;
-      if (!evidence?.vatLabel) return vehicle;
+      if (!evidence) return vehicle;
+
+      const imageUrls = vanscoFacebookImageUrls({
+        imageUrls: [
+          ...(Array.isArray(vehicle?.imageUrls) ? vehicle.imageUrls : []),
+          ...(Array.isArray(evidence?.imageUrls) ? evidence.imageUrls : []),
+        ],
+        imageUrl: vehicle?.imageUrl,
+      });
 
       return {
         ...vehicle,
-        vatLabel: evidence.vatLabel,
-        vatSource: "dealerkit_stock_state",
+        vatLabel: vehicle?.vatLabel || evidence.vatLabel || "",
+        vatSource: vehicle?.vatLabel
+          ? vehicle?.vatSource || ""
+          : evidence.vatLabel
+            ? "dealerkit_stock_state"
+            : vehicle?.vatSource || "",
         registration: vehicle?.registration || evidence.registration || "",
+        imageUrl: imageUrls[0] || vehicle?.imageUrl || "",
+        imageUrls,
       };
     });
   } catch (error) {
