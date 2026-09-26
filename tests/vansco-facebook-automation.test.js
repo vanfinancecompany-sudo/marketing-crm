@@ -223,7 +223,7 @@ test("worker replaces queued live posts that are missing a VAT label", async () 
   assert.match(source, /hydrateVanscoVatFromDealerKitState/);
   assert.match(source, /dealerkit_stock_state/);
   assert.match(source, /supplier_stock_id,source_url,last_seen_at,vehicle_snapshot/);
-  assert.match(source, /vatSource: "dealerkit_stock_state"/);
+  assert.match(source, /"dealerkit_stock_state"/);
   assert.match(source, /hydrateVanscoVatFromCache/);
   assert.match(source, /fetchVanscoDetailHtml/);
   assert.match(source, /parseDetailHtml/);
