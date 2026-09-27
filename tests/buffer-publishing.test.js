@@ -6,6 +6,7 @@ import {
   bufferChannelForDestination,
   bufferDestinationForProduct,
   buildBufferCreatePostInput,
+  googleBusinessCompatibleImageUrl,
   parseBufferCreatePostPayload,
   selectVanFinanceGoogleBusinessChannel,
 } from "../lib/bufferPublishing.js";
@@ -125,6 +126,38 @@ test("builds a Google Business Whats New post with Learn more CTA", () => {
       },
     },
   });
+});
+
+test("converts Wix AVIF images to JPEG for Google Business only", () => {
+  const avif = "https://static.wixstatic.com/media/5ef4b7_example~mv2.avif";
+
+  assert.equal(
+    googleBusinessCompatibleImageUrl(avif),
+    "https://static.wixstatic.com/media/5ef4b7_example~mv2.avif/v1/fit/w_1600,h_1600/file.jpg",
+  );
+
+  const google = buildBufferCreatePostInput({
+    channelId: "google-channel-1",
+    platform: "googlebusiness",
+    text: "VAN FINANCE COMPANY STOCK",
+    mediaUrl: avif,
+    mediaKind: "image",
+    draft: false,
+  });
+  assert.deepEqual(google.assets, [{
+    image: {
+      url: "https://static.wixstatic.com/media/5ef4b7_example~mv2.avif/v1/fit/w_1600,h_1600/file.jpg",
+    },
+  }]);
+
+  const facebook = buildBufferCreatePostInput({
+    destination: "Van Finance Facebook",
+    text: "VAN FINANCE COMPANY STOCK",
+    mediaUrl: avif,
+    mediaKind: "image",
+    draft: false,
+  });
+  assert.deepEqual(facebook.assets, [{ image: { url: avif } }]);
 });
 
 test("selects the connected Van Finance Google Business channel safely", () => {
