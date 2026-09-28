@@ -31,7 +31,7 @@
     },
     {
       "path": "/api/buffer-instagram-mirror",
-      "schedule": "14 */4 * * *"
+      "schedule": "14 */2 * * *"
     },
     {
       "path": "/api/marketing-editorial-automation-worker-routed",
@@ -39,7 +39,7 @@
     },
     {
       "path": "/api/buffer-facebook-story-automation",
-      "schedule": "25 */4 * * *"
+      "schedule": "25 * * * *"
     },
     {
       "path": "/api/rent2buy-monthly-price-sync",
@@ -47,7 +47,7 @@
     },
     {
       "path": "/api/buffer-publish-status",
-      "schedule": "5,25,45 * * * *"
+      "schedule": "35 */4 * * *"
     },
     {
       "path": "/api/carslink-auto-sync",
@@ -55,15 +55,15 @@
     },
     {
       "path": "/api/vansco-facebook-automation-worker",
-      "schedule": "11 */4 * * *"
+      "schedule": "11,41 * * * *"
     },
     {
       "path": "/api/vansco-facebook-story-automation-worker",
-      "schedule": "31 */4 * * *"
+      "schedule": "31 * * * *"
     },
     {
       "path": "/api/vansco-google-business-automation-worker",
-      "schedule": "51 */4 * * *"
+      "schedule": "21,51 * * * *"
     }
   ],
   "functions": {
