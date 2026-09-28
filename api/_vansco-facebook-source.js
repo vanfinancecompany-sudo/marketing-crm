@@ -107,10 +107,13 @@ async function hydrateVanscoVatFromDealerKitState(vehicles) {
         || null;
       if (!evidence) return vehicle;
 
+      // Prefer the DealerKit stock-state JPEGs over Meta/Wix artwork. The Meta
+      // catalogue can expose AVIF/WebP URLs which Buffer/Meta may reject, while
+      // DealerKit's live stock snapshot currently provides conventional JPEGs.
       const imageUrls = vanscoFacebookImageUrls({
         imageUrls: [
-          ...(Array.isArray(vehicle?.imageUrls) ? vehicle.imageUrls : []),
           ...(Array.isArray(evidence?.imageUrls) ? evidence.imageUrls : []),
+          ...(Array.isArray(vehicle?.imageUrls) ? vehicle.imageUrls : []),
         ],
         imageUrl: vehicle?.imageUrl,
       });
