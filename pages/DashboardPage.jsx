@@ -33,11 +33,14 @@ const WEEKDAYS = [
   "Saturday",
 ];
 const VANSCO_FACEBOOK_DAILY_TARGET = 30;
+const FACEBOOK_STORY_DAILY_MAX = 3;
 const VANSCO_FACEBOOK_STORY_DAILY_TARGET = 5;
 const VANSCO_GOOGLE_BUSINESS_DAILY_TARGET = 10;
 
 const ACTIVITY_UNITS = {
   van_finance_facebook_post: "posted",
+  van_finance_facebook_story: "posted",
+  rent2buy_facebook_story: "posted",
   vansco_facebook_post: "posted",
   vansco_facebook_story: "posted",
   vansco_333_google_business_post: "posted",
@@ -177,6 +180,7 @@ export default function DashboardPage({ onNavigate }) {
   const [vanscoStatus, setVanscoStatus] = useState(null);
   const [vanscoStatusBusy, setVanscoStatusBusy] = useState(false);
   const [vanscoStatusError, setVanscoStatusError] = useState("");
+  const [bufferLiveStatus, setBufferLiveStatus] = useState(null);
 
   function periodRange(nextPeriod = period) {
     if (nextPeriod === "seven")
@@ -229,6 +233,14 @@ export default function DashboardPage({ onNavigate }) {
     return () =>
       window.removeEventListener(DAILY_OPERATIONS_REFRESH_EVENT, refresh);
   }, [locked]);
+
+  useEffect(() => {
+    const receiveBufferLiveStatus = (event) => {
+      if (event?.detail?.today) setBufferLiveStatus(event.detail);
+    };
+    window.addEventListener("buffer-facebook-live-status", receiveBufferLiveStatus);
+    return () => window.removeEventListener("buffer-facebook-live-status", receiveBufferLiveStatus);
+  }, []);
 
   async function unlock(event) {
     event.preventDefault();
@@ -340,6 +352,52 @@ export default function DashboardPage({ onNavigate }) {
     [overview],
   );
 
+  const facebookStoryMetrics = useMemo(() => {
+    const storyMetric = ({ type, label, productKey, facebookType }) => {
+      const facebookMetric = metrics.find((metric) => metric.type === facebookType);
+      const target = Math.min(
+        FACEBOOK_STORY_DAILY_MAX,
+        Math.max(0, Number(facebookMetric?.target || 0)),
+      );
+      const hasLiveStatus = Boolean(bufferLiveStatus?.today);
+      const completed = Math.max(
+        0,
+        Number(bufferLiveStatus?.today?.[productKey]?.stories || 0),
+      );
+      return {
+        type,
+        label,
+        target,
+        completed,
+        displayCompleted: hasLiveStatus ? completed : "—",
+        remaining: Math.max(0, target - completed),
+        percentage: target > 0
+          ? Math.min(100, Math.round((completed / target) * 100))
+          : 100,
+        statusLabel: !hasLiveStatus
+          ? "CHECKING"
+          : completed >= target
+            ? "COMPLETE"
+            : `${Math.max(0, target - completed)} LEFT`,
+      };
+    };
+
+    return [
+      storyMetric({
+        type: "van_finance_facebook_story",
+        label: "Van Finance Facebook Stories",
+        productKey: "vanFinance",
+        facebookType: "van_finance_facebook_post",
+      }),
+      storyMetric({
+        type: "rent2buy_facebook_story",
+        label: "Rent2Buy Facebook Stories",
+        productKey: "rent2buy",
+        facebookType: "rent2buy_facebook_post",
+      }),
+    ];
+  }, [bufferLiveStatus, metrics]);
+
   const vanscoMetric = useMemo(() => {
     const completed = Math.max(0, Number(vanscoStatus?.buffer?.sentToday || 0));
     const unavailable = Boolean(vanscoStatusError) && !vanscoStatus;
@@ -439,19 +497,32 @@ export default function DashboardPage({ onNavigate }) {
   }, [vanscoStatus, vanscoStatusBusy, vanscoStatusError]);
 
   const displayMetrics = useMemo(() => {
-    const next = [...metrics];
-    const rent2buyFacebookIndex = next.findIndex(
-      (metric) => metric.type === "rent2buy_facebook_post",
-    );
-    next.splice(
-      rent2buyFacebookIndex >= 0 ? rent2buyFacebookIndex + 1 : 2,
-      0,
-      vanscoMetric,
-      vanscoStoryMetric,
-      ...vanscoGoogleMetrics,
-    );
+    const [financeStoryMetric, rent2buyStoryMetric] = facebookStoryMetrics;
+    const next = [];
+    let vanscoInserted = false;
+
+    for (const metric of metrics) {
+      next.push(metric);
+      if (metric.type === "van_finance_facebook_post") {
+        next.push(financeStoryMetric);
+      }
+      if (metric.type === "rent2buy_facebook_post") {
+        next.push(rent2buyStoryMetric, vanscoMetric, vanscoStoryMetric, ...vanscoGoogleMetrics);
+        vanscoInserted = true;
+      }
+    }
+
+    if (!vanscoInserted) {
+      next.push(vanscoMetric, vanscoStoryMetric, ...vanscoGoogleMetrics);
+    }
     return next;
-  }, [metrics, vanscoMetric, vanscoStoryMetric, vanscoGoogleMetrics]);
+  }, [
+    metrics,
+    facebookStoryMetrics,
+    vanscoMetric,
+    vanscoStoryMetric,
+    vanscoGoogleMetrics,
+  ]);
 
   if (locked)
     return (
