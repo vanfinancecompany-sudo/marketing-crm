@@ -1,4 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
+import {
+  bufferDormantPayload,
+  isBufferApiActiveWindow,
+} from "../lib/bufferActiveWindow.js";
 import { del } from "@vercel/blob";
 import {
   BUFFER_API_URL,
@@ -313,6 +317,31 @@ export default async function handler(request, response) {
   }
   if (!authorize(request)) {
     response.status(401).json({ ok: false, error: "Marketing access key not recognised." });
+    return;
+  }
+
+  if (!isBufferApiActiveWindow()) {
+    const cached = await loadBufferStatusSnapshot();
+    if (cached) {
+      response.status(200).json({
+        ...cached,
+        ...bufferDormantPayload({
+          stale: true,
+          checked_at: new Date().toISOString(),
+          last_success_at: cached.checked_at || cached.cached_at || null,
+          message: "Buffer live confirmation is paused overnight; cached daytime counts are being shown.",
+        }),
+      });
+      return;
+    }
+    response.status(200).json(bufferDormantPayload({
+      stale: true,
+      checked_at: new Date().toISOString(),
+      last_success_at: null,
+      today: null,
+      recent: [],
+      message: "Buffer live confirmation is paused overnight.",
+    }));
     return;
   }
 
