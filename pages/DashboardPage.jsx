@@ -33,10 +33,14 @@ const WEEKDAYS = [
   "Saturday",
 ];
 const VANSCO_FACEBOOK_DAILY_TARGET = 20;
+const VANSCO_GOOGLE_BUSINESS_DAILY_TARGET = 10;
 
 const ACTIVITY_UNITS = {
   van_finance_facebook_post: "posted",
   vansco_facebook_post: "posted",
+  vansco_333_google_business_post: "posted",
+  vansco_airport_google_business_post: "posted",
+  vansco_new_forest_google_business_post: "posted",
   rent2buy_facebook_post: "posted",
   van_finance_google_business_post: "posted",
   rent2buy_google_business_post: "posted",
@@ -106,8 +110,10 @@ const ACTIVITY_NAVIGATION = {
 
 function ActivityCard({ metric, onOpen }) {
   const linked = Boolean(onOpen);
-  const isVansco = metric.type === "vansco_facebook_post";
-  const label = isVansco ? "Vansco Facebook posts" : ACTIVITY_LABELS[metric.type];
+  const isVansco = String(metric.type || "").startsWith("vansco_");
+  const label = metric.label
+    || (metric.type === "vansco_facebook_post" ? "Vansco Facebook posts" : ACTIVITY_LABELS[metric.type])
+    || metric.type;
   const statusLabel = metric.statusLabel
     || (metric.remaining === 0 ? "COMPLETE" : `${metric.remaining} LEFT`);
   const completedLabel = metric.displayCompleted ?? metric.completed;
@@ -130,7 +136,7 @@ function ActivityCard({ metric, onOpen }) {
       </div>
       <div className="operations-activity-card__numbers">
         <strong>{completedLabel}</strong>
-        <span>{ACTIVITY_UNITS[metric.type]}</span>
+        <span>{ACTIVITY_UNITS[metric.type] || "posted"}</span>
         <em>Target {metric.target}</em>
       </div>
       <div
@@ -356,6 +362,55 @@ export default function DashboardPage({ onNavigate }) {
     };
   }, [vanscoStatus, vanscoStatusBusy, vanscoStatusError]);
 
+  const vanscoGoogleMetrics = useMemo(() => {
+    const checking = vanscoStatusBusy && !vanscoStatus;
+    const statusUnavailable = Boolean(vanscoStatusError) && !vanscoStatus;
+    const google = vanscoStatus?.googleBusiness;
+    const definitions = [
+      {
+        type: "vansco_333_google_business_post",
+        label: "Vansco 333 Google Business",
+        branchKey: "vansco333",
+      },
+      {
+        type: "vansco_airport_google_business_post",
+        label: "Vansco Airport Google Business",
+        branchKey: "southamptonAirport",
+      },
+      {
+        type: "vansco_new_forest_google_business_post",
+        label: "Vansco New Forest Google Business",
+        branchKey: "newForest",
+      },
+    ];
+
+    return definitions.map(({ type, label, branchKey }) => {
+      const branchStatus = google?.branches?.[branchKey];
+      const unavailable = statusUnavailable
+        || (Boolean(vanscoStatus) && (!google?.connected || !branchStatus));
+      const completed = Math.max(0, Number(branchStatus?.sentToday || 0));
+      return {
+        type,
+        label,
+        target: VANSCO_GOOGLE_BUSINESS_DAILY_TARGET,
+        completed,
+        displayCompleted: unavailable || checking ? "—" : completed,
+        remaining: Math.max(0, VANSCO_GOOGLE_BUSINESS_DAILY_TARGET - completed),
+        percentage: Math.min(
+          100,
+          Math.round((completed / VANSCO_GOOGLE_BUSINESS_DAILY_TARGET) * 100),
+        ),
+        statusLabel: unavailable
+          ? "UNAVAILABLE"
+          : checking
+            ? "CHECKING"
+            : completed >= VANSCO_GOOGLE_BUSINESS_DAILY_TARGET
+              ? "COMPLETE"
+              : `${Math.max(0, VANSCO_GOOGLE_BUSINESS_DAILY_TARGET - completed)} LEFT`,
+      };
+    });
+  }, [vanscoStatus, vanscoStatusBusy, vanscoStatusError]);
+
   const displayMetrics = useMemo(() => {
     const next = [...metrics];
     const rent2buyFacebookIndex = next.findIndex(
@@ -365,9 +420,10 @@ export default function DashboardPage({ onNavigate }) {
       rent2buyFacebookIndex >= 0 ? rent2buyFacebookIndex + 1 : 2,
       0,
       vanscoMetric,
+      ...vanscoGoogleMetrics,
     );
     return next;
-  }, [metrics, vanscoMetric]);
+  }, [metrics, vanscoMetric, vanscoGoogleMetrics]);
 
   if (locked)
     return (
@@ -444,13 +500,13 @@ export default function DashboardPage({ onNavigate }) {
       <Ga4PipelinePanel />
 
       <section className="panel">
-        <div className="eyebrow">VANSCO · FACEBOOK STOCK AUTOMATION</div>
-        <h3>DealerKit → branch-specific Facebook posts → Buffer</h3>
+        <div className="eyebrow">VANSCO · BUFFER STOCK AUTOMATION</div>
+        <h3>DealerKit → branch-specific social and Google Business posts → Buffer</h3>
         <p>
-          DealerKit Meta catalogue is the retail stock source. Branch-specific copy is created only when the vehicle location can be resolved safely, then queued to the dedicated Vansco Limited Buffer channel.
+          DealerKit Meta catalogue is the retail stock source. Facebook uses the Vansco Limited channel, while each Google Business page receives only vehicles assigned to its own branch.
         </p>
         <div className="notice" style={{ marginBottom: 12 }}>
-          <strong>Posting flow:</strong> DealerKit retail stock to branch match to post builder to Buffer to Vansco Limited Facebook.
+          <strong>Google Business routing:</strong> Vansco 333 → 333 stock · Southampton Airport → Airport stock · New Forest → New Forest stock.
         </div>
         <div className="card-actions">
           <button
