@@ -10,17 +10,13 @@ import {
   encryptBufferOAuthPayload,
 } from "../lib/bufferOAuth.js";
 import {
-  BUFFER_MUTATION_MAX_24H_REQUESTS,
-  BUFFER_QUERY_MAX_24H_REQUESTS,
   BUFFER_RATE_LIMIT_COOLDOWN_MS,
   BufferRateLimitCooldownError,
   bufferCooldownRemainingMs,
   bufferDeferredPayload,
-  bufferQuotaUsed,
   bufferRetryAfterMs,
   bufferStatusPollIntervalMs,
   bufferThirtyDayQuota,
-  bufferTwentyFourHourQuota,
   isBufferRateLimitCooldownError,
   isBufferRateLimitMessage,
   parseBufferRateLimitHeaders,
@@ -126,27 +122,14 @@ test("monitoring queries are throttled before they can burn the monthly Buffer b
 });
 
 
-test("status polling stays fresh in the posting window without burning the 24-hour bucket", () => {
+test("status polling stays fresh in the posting window without burning requests overnight", () => {
   assert.equal(bufferStatusPollIntervalMs(new Date("2026-09-28T12:00:00Z")), 20 * 60 * 1000);
   assert.equal(bufferStatusPollIntervalMs(new Date("2026-09-28T01:00:00Z")), 60 * 60 * 1000);
-  assert.equal(BUFFER_QUERY_MAX_24H_REQUESTS, 165);
-  assert.equal(BUFFER_MUTATION_MAX_24H_REQUESTS, 190);
-
-  const daily = {
-    name: "250-in-1day",
-    remaining: 60,
-    quota: 250,
-    windowSeconds: 86400,
-    resetSeconds: 1200,
-    partitionKey: ":daily:",
-  };
-  assert.equal(bufferQuotaUsed(daily), 190);
-  assert.deepEqual(bufferTwentyFourHourQuota({ rateLimits: [daily] }), daily);
 
   const runtime = source("lib/bufferRuntimeGuard.js");
   assert.match(runtime, /GetBufferSentPosts/);
   assert.match(runtime, /GetBufferChannels/);
-  assert.match(runtime, /buffer_daily_quota_reserve/);
+  assert.match(runtime, /12 \* HOUR_MS/);
 });
 
 test("Buffer OAuth uses PKCE, offline access and encrypted token storage", () => {
