@@ -2,6 +2,7 @@ import {
   inspectVanscoBufferAccount,
   loadVanscoBufferConfig,
   loadVanscoBufferState,
+  loadVanscoGoogleBusinessConfig,
 } from "./_vansco-buffer-runtime.js";
 
 const ACCESS_HEADER = "x-marketing-customer-database-key";
@@ -79,6 +80,39 @@ export default async function handler(request, response) {
 
     const dateKey = londonDateKey();
     const state = await loadVanscoBufferState(config, `${dateKey}T12:00:00.000Z`);
+
+    let googleBusiness = { connected: false, branches: {}, error: "" };
+    try {
+      const googleConfig = await loadVanscoGoogleBusinessConfig({ forceDiscovery: true });
+      const branchEntries = await Promise.all(
+        Object.entries(googleConfig.branches || {}).map(async ([branchKey, branchConfig]) => {
+          const branchState = await loadVanscoBufferState(
+            branchConfig,
+            `${dateKey}T12:00:00.000Z`,
+          );
+          return [branchKey, {
+            channelName: branchConfig.channelName,
+            externalLink: branchConfig.externalLink,
+            sentToday: branchState.limit?.sent ?? 0,
+            scheduledToday: branchState.limit?.scheduled ?? 0,
+            queuedNow: branchState.posts.length,
+            dailyPostingLimit: branchState.limit?.limit ?? null,
+          }];
+        }),
+      );
+      googleBusiness = {
+        connected: true,
+        branches: Object.fromEntries(branchEntries),
+        error: "",
+      };
+    } catch (googleError) {
+      googleBusiness = {
+        connected: false,
+        branches: {},
+        error: String(googleError?.message || googleError).slice(0, 300),
+      };
+    }
+
     return response.status(200).json({
       ok: true,
       connected: true,
@@ -90,6 +124,7 @@ export default async function handler(request, response) {
       sentToday: state.limit?.sent ?? 0,
       scheduledToday: state.limit?.scheduled ?? 0,
       queuedNow: state.posts.length,
+      googleBusiness,
       keySource: dedicatedKey ? "dedicated_vansco_key" : "existing_marketing_crm_key",
       verifiedAt: new Date().toISOString(),
     });

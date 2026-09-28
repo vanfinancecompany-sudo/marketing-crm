@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildVanscoFacebookCaption,
+  buildVanscoGoogleBusinessCaption,
   extractUkRegistration,
   hasExplicitVanscoVatLabel,
   isEligibleVanscoVehicle,
@@ -15,6 +16,7 @@ import {
   vanscoNextDateKey,
   vanscoAdvertVatLabel,
   vanscoFacebookImageUrls,
+  vanscoGoogleBusinessSlots,
   vatLabelFromStatus,
   vatLabelFromText,
   vanscoSocialTitle,
@@ -182,6 +184,39 @@ test("branch-specific caption uses only the selected site details", () => {
   assert.match(caption, /£12,995 \+ VAT/);
 });
 
+test("Vansco Google Business copy is branch-specific and contains no finance offer", () => {
+  const caption = buildVanscoGoogleBusinessCaption({
+    title: "Ford Transit Custom",
+    dealerKitTitle: "Ford Transit Custom 2.0 EcoBlue Limited Panel Van",
+    year: "2022",
+    registration: "AB12CDE",
+    mileage: "42000",
+    price: "19995 GBP",
+    branchKey: "southamptonAirport",
+    vehicleUrl: "https://www.vansco.co.uk/vehicle-details/example",
+  });
+
+  assert.match(caption, /VANSCO SOUTHAMPTON AIRPORT STOCK/);
+  assert.match(caption, /REGISTRATION: AB12CDE/);
+  assert.match(caption, /YEAR: 2022/);
+  assert.match(caption, /MILEAGE: 42,000/);
+  assert.match(caption, /Available now from Vansco Southampton Airport/);
+  assert.match(caption, /using Learn more/);
+  assert.doesNotMatch(caption, /£|deposit|monthly|APR|finance/i);
+});
+
+test("Vansco Google Business schedule creates ten staggerable branch slots", () => {
+  const base = vanscoGoogleBusinessSlots("2026-09-28", 10, 0);
+  const airport = vanscoGoogleBusinessSlots("2026-09-28", 10, 5);
+  const forest = vanscoGoogleBusinessSlots("2026-09-28", 10, 10);
+  assert.equal(base.length, 10);
+  assert.equal(base[0].localTime, "08:30");
+  assert.equal(base.at(-1).localTime, "20:00");
+  assert.equal(airport[0].localTime, "08:35");
+  assert.equal(forest[0].localTime, "08:40");
+  assert.equal(new Set(base.map((slot) => slot.dueAt)).size, 10);
+});
+
 test("35-post schedule is evenly spaced from 08:00 through 21:00", () => {
   const slots = vanscoDailySlots("2026-09-25", 35);
   assert.equal(slots.length, 35);
@@ -301,3 +336,44 @@ test("Vansco Buffer converts Wix AVIF/WebP assets to JPEG before publishing", as
     "",
   );
 });
+
+test("Vansco Google Business runtime maps exactly the three branch channels", async () => {
+  const { vanscoGoogleBusinessBranchKey } = await import("../api/_vansco-buffer-runtime.js");
+  assert.equal(vanscoGoogleBusinessBranchKey({
+    service: "googlebusiness",
+    name: "Vansco 333 Showroom",
+  }), "vansco333");
+  assert.equal(vanscoGoogleBusinessBranchKey({
+    service: "googlebusiness",
+    name: "Vansco Southampton Airport",
+  }), "southamptonAirport");
+  assert.equal(vanscoGoogleBusinessBranchKey({
+    service: "googlebusiness",
+    name: "Vansco New Forest",
+  }), "newForest");
+  assert.equal(vanscoGoogleBusinessBranchKey({
+    service: "googlebusiness",
+    name: "Van Finance Company",
+  }), "");
+  assert.equal(vanscoGoogleBusinessBranchKey({
+    service: "facebook",
+    name: "Vansco Limited",
+  }), "");
+});
+
+test("Vansco Google Business worker enforces branch-only van routing", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const worker = await readFile(
+    new URL("../api/vansco-google-business-automation-worker.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(worker, /VANSCO_GOOGLE_BUSINESS_POSTS_PER_DAY/);
+  assert.match(worker, /vehicle\.branchKey === branchKey && !vehicle\.branchConflict/);
+  assert.match(worker, /!isVanscoCar\(vehicle\)/);
+  assert.match(worker, /createVanscoGoogleBusinessPost/);
+  assert.match(worker, /linkUrl: vehicle\.vehicleUrl/);
+  assert.match(worker, /vansco333/);
+  assert.match(worker, /southamptonAirport/);
+  assert.match(worker, /newForest/);
+});
+

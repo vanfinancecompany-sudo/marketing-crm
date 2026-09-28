@@ -56,6 +56,11 @@ test("Content Operations shows Vansco Buffer posts as a blue-accent live card", 
   assert.match(page, /vanscoStatus\?\.buffer\?\.sentToday/);
   assert.match(page, /type: "vansco_facebook_post"/);
   assert.match(page, /Vansco Facebook posts/);
+  assert.match(page, /Vansco 333 Google Business/);
+  assert.match(page, /Vansco Airport Google Business/);
+  assert.match(page, /Vansco New Forest Google Business/);
+  assert.match(page, /VANSCO_GOOGLE_BUSINESS_DAILY_TARGET = 10/);
+  assert.match(page, /startsWith\("vansco_"\)/);
   assert.match(css, /operations-activity-card\.is-vansco/);
   assert.match(css, /border: 2px solid #2563eb/);
 });
