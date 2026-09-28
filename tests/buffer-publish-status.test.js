@@ -78,8 +78,10 @@ test("parses and summarizes Buffer sent feed posts, Stories and Reels by London 
   assert.equal(items.find((item) => item.id === "p3")?.registration, "XGZ4865");
   const summary = summarizeBufferPublishedToday(posts, "2026-08-20", londonDateKey);
   assert.equal(summary.vanFinance.posts, 1);
+  assert.equal(summary.vanFinance.stories, 0);
   assert.equal(summary.vanFinance.reels, 0);
   assert.equal(summary.rent2buy.posts, 1);
+  assert.equal(summary.rent2buy.stories, 1);
   assert.equal(summary.rent2buy.reels, 1);
 });
 
