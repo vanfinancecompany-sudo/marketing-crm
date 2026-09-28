@@ -29,6 +29,7 @@ import {
   bufferDeferredPayload,
   guardedBufferGraphql,
   isBufferRateLimitCooldownError,
+  loadBufferStatusSnapshot,
 } from "../lib/bufferRuntimeGuard.js";
 import {
   automatedReelFrameSpecs,
@@ -164,6 +165,24 @@ async function loadBufferChannels() {
   return parseBufferChannelsPayload(
     await bufferGraphql(BUFFER_CHANNELS_QUERY, { organizationId: BUFFER_ORGANIZATION_ID }),
   );
+}
+
+async function resolveGoogleBusinessChannelForAutomation() {
+  const snapshot = await loadBufferStatusSnapshot();
+  const cached = snapshot?.google_business_channel;
+  if (cached?.connected && cached?.id) {
+    return {
+      id: String(cached.id),
+      name: String(cached.name || "Van Finance Company"),
+      displayName: String(cached.name || "Van Finance Company"),
+      service: "googlebusiness",
+      isDisconnected: false,
+      isLocked: false,
+    };
+  }
+
+  const channels = await loadBufferChannels();
+  return selectVanFinanceGoogleBusinessChannel(channels);
 }
 
 async function loadGoogleBusinessPosts(channelId) {
@@ -801,8 +820,7 @@ export default async function handler(request, response) {
     }
 
     results.googleBusiness = await safeStep("Google Business vehicle posts", async () => {
-      const channels = await loadBufferChannels();
-      const googleChannel = selectVanFinanceGoogleBusinessChannel(channels);
+      const googleChannel = await resolveGoogleBusinessChannelForAutomation();
       const googlePosts = await loadGoogleBusinessPosts(googleChannel.id);
       const created = [];
 
