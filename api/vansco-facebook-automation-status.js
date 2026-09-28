@@ -3,6 +3,8 @@ import {
   loadVanscoAutomationStatus,
   loadVanscoBufferConfig,
   loadVanscoBufferState,
+  loadVanscoGoogleBusinessAutomationStatus,
+  loadVanscoGoogleBusinessConfig,
 } from "./_vansco-buffer-runtime.js";
 
 const ACCESS_HEADER = "x-marketing-customer-database-key";
@@ -79,6 +81,45 @@ export default async function handler(request, response) {
     const dateKey = londonDateKey();
     const bufferState = await loadVanscoBufferState(config, `${dateKey}T12:00:00.000Z`);
 
+    let googleBusiness = {
+      connected: false,
+      branches: {},
+      error: "",
+    };
+    try {
+      const googleConfig = await loadVanscoGoogleBusinessConfig();
+      const entries = await Promise.all(
+        Object.entries(googleConfig.branches || {}).map(async ([branchKey, branchConfig]) => {
+          const branchState = await loadVanscoBufferState(
+            branchConfig,
+            `${dateKey}T12:00:00.000Z`,
+          );
+          return [branchKey, {
+            channelId: branchConfig.channelId,
+            channelName: branchConfig.channelName,
+            externalLink: branchConfig.externalLink,
+            dailyLimit: branchState.limit?.limit ?? null,
+            sentToday: branchState.limit?.sent ?? 0,
+            scheduledToday: branchState.limit?.scheduled ?? 0,
+            queueCount: branchState.posts.length,
+          }];
+        }),
+      );
+      googleBusiness = {
+        connected: true,
+        branches: Object.fromEntries(entries),
+        lastRun: await loadVanscoGoogleBusinessAutomationStatus(),
+        error: "",
+      };
+    } catch (googleError) {
+      googleBusiness = {
+        connected: false,
+        branches: {},
+        lastRun: await loadVanscoGoogleBusinessAutomationStatus().catch(() => null),
+        error: String(googleError?.message || googleError).slice(0, 300),
+      };
+    }
+
     return response.status(200).json({
       ok: true,
       enabled,
@@ -93,6 +134,7 @@ export default async function handler(request, response) {
         scheduledToday: bufferState.limit?.scheduled ?? 0,
         queueCount: bufferState.posts.length,
       },
+      googleBusiness,
       queue: bufferState.posts
         .slice()
         .sort((a, b) => new Date(a?.dueAt || 0).getTime() - new Date(b?.dueAt || 0).getTime())
