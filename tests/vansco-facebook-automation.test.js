@@ -399,8 +399,12 @@ test("Vansco Story worker uses the dedicated Story lane and five-per-day target"
   assert.match(worker, /VANSCO_FACEBOOK_STORIES_PER_DAY/);
   assert.match(worker, /createVanscoFacebookStory/);
   assert.match(worker, /vanscoFacebookStorySlots/);
-  assert.match(worker, /metadata: \{ facebook: \{ type: "story" \} \}/);
   assert.match(worker, /VANSCO_FACEBOOK_STORIES_AUTOMATION_ENABLED/);
+  const runtime = await readFile(
+    new URL("../api/_vansco-buffer-runtime.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(runtime, /metadata: \{ facebook: \{ type: "story" \} \}/);
 });
 
 test("normal Vansco Facebook worker excludes Stories from the 30-post target", async () => {
