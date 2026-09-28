@@ -1,4 +1,8 @@
 import {
+  bufferDormantPayload,
+  isBufferScheduledRunDue,
+} from "../lib/bufferActiveWindow.js";
+import {
   BUFFER_API_URL,
   BUFFER_FACEBOOK_CHANNELS,
   bufferDestinationForProduct,
@@ -323,6 +327,14 @@ export default async function handler(request, response) {
   }
   if (!authorize(request)) {
     response.status(401).json({ ok: false, error: "Story automation access not recognised." });
+    return;
+  }
+
+  if (!isBufferScheduledRunDue("two-hour")) {
+    response.status(200).json(bufferDormantPayload({
+      job: "facebook-stories",
+      message: "Facebook Story refill is dormant outside its daytime schedule.",
+    }));
     return;
   }
 
