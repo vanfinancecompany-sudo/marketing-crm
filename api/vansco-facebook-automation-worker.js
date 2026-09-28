@@ -36,6 +36,21 @@ function clean(value) {
   return String(value ?? "").trim();
 }
 
+export function vanscoRecoverableBufferPostError(error) {
+  const message = clean(error?.message || error);
+  if (!message) return "";
+  if (/already got this one scheduled|same thing twice|duplicate/i.test(message)) {
+    return "buffer_duplicate";
+  }
+  if (
+    /compatible jpeg\/png image|unsupported.*(?:image|media)|invalid.*(?:image|media)|(?:image|media).*format/i
+      .test(message)
+  ) {
+    return "buffer_media_rejected";
+  }
+  return "";
+}
+
 function authorize(request) {
   const cronSecret = clean(process.env.CRON_SECRET);
   const marketingKey = clean(process.env.MARKETING_CUSTOMER_DATABASE_API_KEY);
@@ -345,45 +360,82 @@ export default async function handler(request, response) {
     );
     const created = [];
     const held = [];
+    let historyChanged = false;
 
     for (const slot of slots) {
-      const result = await chooseResolvedCandidate({
-        vehicles: eligible,
-        history,
-        excludedUrls,
-      });
-      held.push(...result.held);
-      for (const item of result.held) excludedUrls.add(item.vehicleUrl);
-      const vehicle = result.vehicle;
-      if (!vehicle) break;
+      let filled = false;
 
-      const caption = buildVanscoFacebookCaption(vehicle);
-      const imageUrls = vanscoFacebookImageUrls(vehicle);
-      const post = await createVanscoBufferPost({
-        config: bufferConfig,
-        text: caption,
-        imageUrl: vehicle.imageUrl,
-        imageUrls,
-        dueAt: slot.dueAt,
-      });
-      posts.push(post);
-      excludedUrls.add(vehicle.vehicleUrl);
-      history.lastPostedByKey[vehicle.vehicleKey] = slot.dueAt;
-      created.push({
-        bufferPostId: String(post.id || ""),
-        vehicleKey: vehicle.vehicleKey,
-        registration: vehicle.registration,
-        title: vehicle.title,
-        branchKey: vehicle.branchKey,
-        branchSource: vehicle.branchSource,
-        vehicleUrl: vehicle.vehicleUrl,
-        imageCount: imageUrls.length,
-        dueAt: post.dueAt || slot.dueAt,
-        localTime: slot.localTime,
-      });
+      for (let attempt = 0; attempt < MAX_BRANCH_RESOLUTION_ATTEMPTS; attempt += 1) {
+        const result = await chooseResolvedCandidate({
+          vehicles: eligible,
+          history,
+          excludedUrls,
+        });
+        held.push(...result.held);
+        for (const item of result.held) excludedUrls.add(item.vehicleUrl);
+        const vehicle = result.vehicle;
+        if (!vehicle) break;
+
+        const caption = buildVanscoFacebookCaption(vehicle);
+        const imageUrls = vanscoFacebookImageUrls(vehicle);
+
+        let post;
+        try {
+          post = await createVanscoBufferPost({
+            config: bufferConfig,
+            text: caption,
+            imageUrl: vehicle.imageUrl,
+            imageUrls,
+            dueAt: slot.dueAt,
+          });
+        } catch (error) {
+          const reason = vanscoRecoverableBufferPostError(error);
+          if (!reason) throw error;
+
+          const message = clean(error?.message || error);
+          excludedUrls.add(vehicle.vehicleUrl);
+          held.push({
+            vehicleKey: vehicle.vehicleKey,
+            vehicleUrl: vehicle.vehicleUrl,
+            title: vehicle.title,
+            reason,
+            error: message.slice(0, 200),
+          });
+
+          if (reason === "buffer_duplicate") {
+            // Buffer knows this content was posted/scheduled recently even when our
+            // local history does not. Record that fact so the next cron does not
+            // immediately select the same vehicle again.
+            history.lastPostedByKey[vehicle.vehicleKey] = new Date().toISOString();
+            historyChanged = true;
+          }
+          continue;
+        }
+
+        posts.push(post);
+        excludedUrls.add(vehicle.vehicleUrl);
+        history.lastPostedByKey[vehicle.vehicleKey] = slot.dueAt;
+        historyChanged = true;
+        created.push({
+          bufferPostId: String(post.id || ""),
+          vehicleKey: vehicle.vehicleKey,
+          registration: vehicle.registration,
+          title: vehicle.title,
+          branchKey: vehicle.branchKey,
+          branchSource: vehicle.branchSource,
+          vehicleUrl: vehicle.vehicleUrl,
+          imageCount: imageUrls.length,
+          dueAt: post.dueAt || slot.dueAt,
+          localTime: slot.localTime,
+        });
+        filled = true;
+        break;
+      }
+
+      if (!filled) break;
     }
 
-    if (created.length) {
+    if (historyChanged) {
       await saveVanscoPostingHistory(history.lastPostedByKey);
     }
 
@@ -408,6 +460,9 @@ export default async function handler(request, response) {
       staleScheduledPosts: pruned.removed,
       created,
       held: held.slice(0, 30),
+      duplicateSkippedCount: held.filter((item) => item.reason === "buffer_duplicate").length,
+      mediaSkippedCount: held.filter((item) => item.reason === "buffer_media_rejected").length,
+      vatUnresolvedCount: held.filter((item) => item.reason === "vat_unresolved").length,
       queueCountAfter: posts.length,
       elapsedMs: Date.now() - startedAt,
     };
@@ -417,6 +472,9 @@ export default async function handler(request, response) {
       lastSuccessAt: new Date().toISOString(),
       createdCount: created.length,
       heldCount: held.length,
+      duplicateSkippedCount: held.filter((item) => item.reason === "buffer_duplicate").length,
+      mediaSkippedCount: held.filter((item) => item.reason === "buffer_media_rejected").length,
+      vatUnresolvedCount: held.filter((item) => item.reason === "vat_unresolved").length,
       staleRemovedCount: pruned.removed.filter((item) => !item.deleteFailed).length,
       staleRemoveFailedCount: pruned.removed.filter((item) => item.deleteFailed).length,
     }).catch((error) => {
