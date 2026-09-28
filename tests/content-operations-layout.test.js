@@ -52,7 +52,7 @@ test("Content Operations shows Vansco Buffer posts as a blue-accent live card", 
     read("styles.css"),
   ]);
 
-  assert.match(page, /VANSCO_FACEBOOK_DAILY_TARGET = 20/);
+  assert.match(page, /VANSCO_FACEBOOK_DAILY_TARGET = 30/);
   assert.match(page, /vanscoStatus\?\.buffer\?\.sentToday/);
   assert.match(page, /type: "vansco_facebook_post"/);
   assert.match(page, /Vansco Facebook posts/);
