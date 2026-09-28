@@ -217,13 +217,13 @@ test("Vansco Google Business schedule creates ten staggerable branch slots", () 
   assert.equal(new Set(base.map((slot) => slot.dueAt)).size, 10);
 });
 
-test("35-post schedule is evenly spaced from 08:00 through 21:00", () => {
-  const slots = vanscoDailySlots("2026-09-25", 35);
-  assert.equal(slots.length, 35);
+test("30-post schedule is evenly spaced from 08:00 through 21:00", () => {
+  const slots = vanscoDailySlots("2026-09-25", 30);
+  assert.equal(slots.length, 30);
   assert.equal(slots[0].localTime, "08:00");
   assert.equal(slots.at(-1).localTime, "21:00");
   assert.ok(slots.every((slot) => slot.localMinutes >= 8 * 60 && slot.localMinutes <= 21 * 60));
-  assert.equal(new Set(slots.map((slot) => slot.dueAt)).size, 35);
+  assert.equal(new Set(slots.map((slot) => slot.dueAt)).size, 30);
 });
 
 test("Vansco next-day queue date rolls across month and year boundaries", () => {
