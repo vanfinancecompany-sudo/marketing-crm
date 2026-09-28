@@ -244,6 +244,11 @@ test("worker replaces queued live posts that are missing a VAT label", async () 
   assert.match(worker, /imageUrls,/);
   assert.match(worker, /scheduleDateKey = currentSlots\.length \? dateKey : vanscoNextDateKey\(dateKey\)/);
   assert.match(worker, /scheduleDate: scheduleDateKey/);
+  assert.match(worker, /buffer_duplicate/);
+  assert.match(worker, /buffer_media_rejected/);
+  assert.match(worker, /duplicateSkippedCount/);
+  assert.match(worker, /mediaSkippedCount/);
+  assert.match(worker, /continue;/);
 
   const source = await readFile(
     new URL("../api/_vansco-facebook-source.js", import.meta.url),
@@ -259,6 +264,10 @@ test("worker replaces queued live posts that are missing a VAT label", async () 
   assert.match(source, /VAT_CACHE_MAX_AGE_MS/);
   assert.match(source, /snapshot\?\.images/);
   assert.match(source, /vanscoFacebookImageUrls/);
+  assert.match(
+    source,
+    /\.\.\.\(Array\.isArray\(evidence\?\.imageUrls\)[\s\S]*\.\.\.\(Array\.isArray\(vehicle\?\.imageUrls\)/,
+  );
 });
 
 
@@ -271,4 +280,24 @@ test("Vansco Buffer runtime sends at most three ordered image assets", async () 
   assert.match(runtime, /imageUrls = \[\]/);
   assert.match(runtime, /\.slice\(0, 3\)/);
   assert.match(runtime, /assets: urls\.map\(\(url\) => \(\{ image: \{ url \} \}\)\)/);
+});
+
+test("Vansco Buffer converts Wix AVIF/WebP assets to JPEG before publishing", async () => {
+  const { vanscoBufferCompatibleImageUrl } = await import("../api/_vansco-buffer-runtime.js");
+  assert.equal(
+    vanscoBufferCompatibleImageUrl("https://static.wixstatic.com/media/example~mv2.avif"),
+    "https://static.wixstatic.com/media/example~mv2.avif/v1/fit/w_1600,h_1600/file.jpg",
+  );
+  assert.equal(
+    vanscoBufferCompatibleImageUrl("https://static.wixstatic.com/media/example~mv2.webp?x=1"),
+    "https://static.wixstatic.com/media/example~mv2.webp/v1/fit/w_1600,h_1600/file.jpg",
+  );
+  assert.equal(
+    vanscoBufferCompatibleImageUrl("https://acdn.uk/vansco/i/example.jpeg"),
+    "https://acdn.uk/vansco/i/example.jpeg",
+  );
+  assert.equal(
+    vanscoBufferCompatibleImageUrl("https://other.example/image.avif"),
+    "",
+  );
 });
