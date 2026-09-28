@@ -1,10 +1,6 @@
 import { list, put } from "@vercel/blob";
 import {
-  BUFFER_MUTATION_MAX_24H_REQUESTS,
-  BUFFER_QUERY_MAX_24H_REQUESTS,
-  bufferQuotaUsed,
   bufferStatusPollIntervalMs,
-  bufferTwentyFourHourQuota,
   parseBufferRateLimitHeaders,
 } from "../lib/bufferRuntimeGuard.js";
 
@@ -19,6 +15,9 @@ const STORY_HISTORY_PATH = "vansco-buffer-v1/facebook-story-history.json";
 const STORY_STATUS_PATH = "vansco-buffer-v1/facebook-story-status.json";
 const LIVE_STATUS_SNAPSHOT_PATH = "vansco-buffer-v1/live-status-snapshot.json";
 const QUOTA_STATE_PATH = "vansco-buffer-v1/api-quota-state.json";
+const VANSCO_QUERY_MAX_24H_REQUESTS = 165;
+const VANSCO_MUTATION_MAX_24H_REQUESTS = 190;
+const TWENTY_FOUR_HOUR_SECONDS = 24 * 60 * 60;
 
 const ACCOUNT_QUERY = `
   query VanscoBufferAccount {
@@ -305,21 +304,35 @@ async function loadVanscoQuotaState() {
   return vanscoQuotaState;
 }
 
+function vanscoTwentyFourHourQuota(state) {
+  return (Array.isArray(state?.rateLimits) ? state.rateLimits : [])
+    .find((item) => Number(item?.windowSeconds) === TWENTY_FOUR_HOUR_SECONDS) || null;
+}
+
+function vanscoQuotaUsed(quota) {
+  const total = Number(quota?.quota);
+  const remaining = Number(quota?.remaining);
+  return Number.isFinite(total) && Number.isFinite(remaining)
+    ? Math.max(0, total - remaining)
+    : 0;
+}
+
 async function ensureVanscoBufferBudget(query) {
   const state = await loadVanscoQuotaState();
-  const dailyQuota = bufferTwentyFourHourQuota(state);
+  const dailyQuota = vanscoTwentyFourHourQuota(state);
   const updatedMs = new Date(state?.updatedAt || 0).getTime();
   const fresh = Number.isFinite(updatedMs)
     && updatedMs > 0
     && Date.now() - updatedMs < 20 * 60 * 1000;
   const isMutation = /\bmutation\b/i.test(String(query || ""));
   const maxUsed = isMutation
-    ? BUFFER_MUTATION_MAX_24H_REQUESTS
-    : BUFFER_QUERY_MAX_24H_REQUESTS;
+    ? VANSCO_MUTATION_MAX_24H_REQUESTS
+    : VANSCO_QUERY_MAX_24H_REQUESTS;
+  const used = vanscoQuotaUsed(dailyQuota);
 
-  if (fresh && dailyQuota?.quota > 0 && bufferQuotaUsed(dailyQuota) >= maxUsed) {
+  if (fresh && dailyQuota?.quota > 0 && used >= maxUsed) {
     const error = new Error(
-      `Buffer 24-hour safety reserve is active (${bufferQuotaUsed(dailyQuota)}/${dailyQuota.quota} requests used).`,
+      `Buffer 24-hour safety reserve is active (${used}/${dailyQuota.quota} requests used).`,
     );
     error.code = "BUFFER_RATE_LIMIT";
     error.reason = "buffer_daily_quota_reserve";
