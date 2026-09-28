@@ -68,3 +68,15 @@ test("Content Operations shows Vansco Buffer posts as a blue-accent live card", 
   assert.match(css, /border: 2px solid #2563eb/);
 });
 
+
+
+test("Content Operations shows Finance and Rent2Buy Story cards without the Vansco blue accent", async () => {
+  const page = await read("pages/DashboardPage.jsx");
+
+  assert.match(page, /Van Finance Facebook Stories/);
+  assert.match(page, /Rent2Buy Facebook Stories/);
+  assert.match(page, /bufferLiveStatus\?\.today\?\.\[productKey\]\?\.stories/);
+  assert.match(page, /type: "van_finance_facebook_story"/);
+  assert.match(page, /type: "rent2buy_facebook_story"/);
+  assert.match(page, /const isVansco = String\(metric\.type \|\| ""\)\.startsWith\("vansco_"\)/);
+});
