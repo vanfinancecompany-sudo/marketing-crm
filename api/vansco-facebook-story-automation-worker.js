@@ -1,4 +1,8 @@
 import {
+  bufferDormantPayload,
+  isBufferScheduledRunDue,
+} from "../lib/bufferActiveWindow.js";
+import {
   VANSCO_FACEBOOK_STORIES_PER_DAY,
   buildVanscoFacebookCaption,
   chooseVanscoCandidate,
@@ -142,6 +146,13 @@ export default async function handler(request, response) {
   }
   if (!authorize(request)) {
     return response.status(401).json({ ok: false, error: "Automation access not recognised." });
+  }
+
+  if (!isBufferScheduledRunDue("two-hour")) {
+    return response.status(200).json(bufferDormantPayload({
+      job: "vansco-facebook-stories",
+      message: "Vansco Story refill is dormant outside its daytime two-hour schedule.",
+    }));
   }
 
   const startedAt = Date.now();
