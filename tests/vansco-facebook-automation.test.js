@@ -431,8 +431,8 @@ test("Vansco uses one cached four-channel status read and four-hour refill worke
   assert.match(runtime, /loadVanscoCombinedStatusSnapshot/);
   assert.match(runtime, /LIVE_STATUS_SNAPSHOT_PATH/);
   assert.match(runtime, /QUOTA_STATE_PATH/);
-  assert.match(runtime, /BUFFER_QUERY_MAX_24H_REQUESTS/);
-  assert.match(runtime, /BUFFER_MUTATION_MAX_24H_REQUESTS/);
+  assert.match(runtime, /VANSCO_QUERY_MAX_24H_REQUESTS = 165/);
+  assert.match(runtime, /VANSCO_MUTATION_MAX_24H_REQUESTS = 190/);
 
   const status = await readFile(
     new URL("../api/vansco-facebook-automation-status.js", import.meta.url),
