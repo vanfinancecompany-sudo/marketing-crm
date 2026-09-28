@@ -152,6 +152,29 @@ function readableError(payload, fallback) {
   return fallback;
 }
 
+export function vanscoBufferCompatibleImageUrl(value) {
+  const url = String(value || "").trim();
+  if (!/^https:\/\//i.test(url)) return "";
+
+  try {
+    const parsed = new URL(url);
+    const pathname = String(parsed.pathname || "").toLowerCase();
+    const needsTranscode = pathname.endsWith(".avif") || pathname.endsWith(".webp");
+    if (!needsTranscode) return url;
+
+    const wixHosted = parsed.hostname.toLowerCase() === "static.wixstatic.com"
+      && pathname.startsWith("/media/");
+    if (!wixHosted) return "";
+
+    parsed.search = "";
+    parsed.hash = "";
+    const source = parsed.toString().replace(/\/$/, "");
+    return `${source}/v1/fit/w_1600,h_1600/file.jpg`;
+  } catch {
+    return "";
+  }
+}
+
 async function bufferGraphql(query, variables = undefined) {
   const response = await fetch(BUFFER_API_URL, {
     method: "POST",
@@ -281,14 +304,16 @@ export async function createVanscoBufferPost({ config, text, imageUrl, imageUrls
   ];
   const seen = new Set();
   const urls = candidates
-    .map((value) => String(value || "").trim())
+    .map(vanscoBufferCompatibleImageUrl)
     .filter((value) => {
-      if (!/^https:\/\//i.test(value) || seen.has(value)) return false;
+      if (!value || seen.has(value)) return false;
       seen.add(value);
       return true;
     })
     .slice(0, 3);
-  if (!urls.length) throw new Error("Vansco Buffer post requires at least one image.");
+  if (!urls.length) {
+    throw new Error("Vansco Buffer post requires at least one compatible JPEG/PNG image.");
+  }
 
   const payload = await bufferGraphql(CREATE_POST_MUTATION, {
     input: {
