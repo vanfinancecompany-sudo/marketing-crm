@@ -4,6 +4,9 @@ const BUFFER_API_URL = "https://api.buffer.com";
 const CONFIG_PATH = "vansco-buffer-v1/channel.json";
 const HISTORY_PATH = "vansco-buffer-v1/history.json";
 const STATUS_PATH = "vansco-buffer-v1/status.json";
+const GOOGLE_CONFIG_PATH = "vansco-buffer-v1/google-business-channels.json";
+const GOOGLE_HISTORY_PATH = "vansco-buffer-v1/google-business-history.json";
+const GOOGLE_STATUS_PATH = "vansco-buffer-v1/google-business-status.json";
 
 const ACCOUNT_QUERY = `
   query VanscoBufferAccount {
@@ -278,6 +281,81 @@ export async function loadVanscoBufferConfig({ forceDiscovery = false } = {}) {
   return discoverVanscoBufferConfig();
 }
 
+export function vanscoGoogleBusinessBranchKey(channel = {}) {
+  if (String(channel?.service || "").toLowerCase() !== "googlebusiness") return "";
+  const identity = channelIdentity(channel);
+  if (!identity.includes("vansco")) return "";
+  if (/vansco\s*333/.test(identity)) return "vansco333";
+  if (/new\s*forest|cadnam/.test(identity)) return "newForest";
+  if (/southampton\s*airport/.test(identity)) return "southamptonAirport";
+  return "";
+}
+
+export async function discoverVanscoGoogleBusinessConfig() {
+  const organizations = await inspectVanscoBufferAccount();
+  const branchMatches = {
+    vansco333: [],
+    newForest: [],
+    southamptonAirport: [],
+  };
+
+  for (const organization of organizations) {
+    for (const channel of organization.channels || []) {
+      if (channel?.isDisconnected === true || channel?.isLocked === true) continue;
+      const branchKey = vanscoGoogleBusinessBranchKey(channel);
+      if (!branchKey) continue;
+      branchMatches[branchKey].push({ organization, channel });
+    }
+  }
+
+  for (const [branchKey, matches] of Object.entries(branchMatches)) {
+    if (matches.length !== 1) {
+      throw new Error(
+        matches.length
+          ? `More than one active Vansco Google Business channel matched ${branchKey}.`
+          : `No active Vansco Google Business channel matched ${branchKey}.`,
+      );
+    }
+  }
+
+  const branches = Object.fromEntries(
+    Object.entries(branchMatches).map(([branchKey, matches]) => {
+      const selected = matches[0];
+      return [branchKey, {
+        branchKey,
+        organizationId: String(selected.organization.organizationId || ""),
+        organizationName: String(selected.organization.organizationName || ""),
+        scheduledPostsLimit: Number(selected.organization?.scheduledPostsLimit) || 10,
+        channelId: String(selected.channel.id || ""),
+        channelName: String(selected.channel.displayName || selected.channel.name || branchKey),
+        externalLink: String(selected.channel.externalLink || ""),
+      }];
+    }),
+  );
+
+  const config = {
+    branches,
+    verifiedAt: new Date().toISOString(),
+  };
+  await writeBlobJson(GOOGLE_CONFIG_PATH, config);
+  return config;
+}
+
+export async function loadVanscoGoogleBusinessConfig({ forceDiscovery = false } = {}) {
+  if (!forceDiscovery) {
+    const stored = await readBlobJson(GOOGLE_CONFIG_PATH);
+    const branches = stored?.branches || {};
+    if (
+      branches?.vansco333?.channelId
+      && branches?.newForest?.channelId
+      && branches?.southamptonAirport?.channelId
+    ) {
+      return stored;
+    }
+  }
+  return discoverVanscoGoogleBusinessConfig();
+}
+
 export async function loadVanscoBufferState(config, dateIso) {
   const payload = await bufferGraphql(STATE_QUERY, {
     organizationId: config.organizationId,
@@ -334,6 +412,49 @@ export async function createVanscoBufferPost({ config, text, imageUrl, imageUrls
   return result.post;
 }
 
+export async function createVanscoGoogleBusinessPost({
+  config,
+  text,
+  imageUrl,
+  dueAt,
+  linkUrl,
+}) {
+  const compatibleImage = vanscoBufferCompatibleImageUrl(imageUrl);
+  if (!compatibleImage) {
+    throw new Error("Vansco Google Business post requires a compatible JPEG/PNG image.");
+  }
+  const link = String(linkUrl || "").trim();
+  if (!/^https:\/\//i.test(link)) {
+    throw new Error("Vansco Google Business post requires a public Learn more URL.");
+  }
+
+  const payload = await bufferGraphql(CREATE_POST_MUTATION, {
+    input: {
+      text: String(text || "").trim(),
+      channelId: config.channelId,
+      schedulingType: "automatic",
+      mode: "customScheduled",
+      dueAt: new Date(dueAt).toISOString(),
+      saveToDraft: false,
+      source: "vansco-marketing-crm",
+      assets: [{ image: { url: compatibleImage } }],
+      metadata: {
+        google: {
+          type: "whats_new",
+          detailsWhatsNew: {
+            button: "learn_more",
+            link,
+          },
+        },
+      },
+    },
+  });
+  const result = payload?.data?.createPost;
+  if (result?.message) throw new Error(String(result.message));
+  if (!result?.post?.id) throw new Error("Buffer did not return a Vansco Google Business post ID.");
+  return result.post;
+}
+
 export async function deleteVanscoBufferPost(postId) {
   const payload = await bufferGraphql(DELETE_POST_MUTATION, {
     input: { id: String(postId || "").trim() },
@@ -357,6 +478,35 @@ export async function saveVanscoPostingHistory(lastPostedByKey) {
   });
 }
 
+
+export async function loadVanscoGoogleBusinessHistory() {
+  const stored = await readBlobJson(GOOGLE_HISTORY_PATH);
+  return stored && typeof stored === "object"
+    ? {
+        lastPostedByBranch: stored.lastPostedByBranch || {},
+        updatedAt: stored.updatedAt || null,
+      }
+    : { lastPostedByBranch: {}, updatedAt: null };
+}
+
+export async function saveVanscoGoogleBusinessHistory(lastPostedByBranch) {
+  return writeBlobJson(GOOGLE_HISTORY_PATH, {
+    lastPostedByBranch,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function loadVanscoGoogleBusinessAutomationStatus() {
+  const stored = await readBlobJson(GOOGLE_STATUS_PATH);
+  return stored && typeof stored === "object" ? stored : null;
+}
+
+export async function saveVanscoGoogleBusinessAutomationStatus(status) {
+  return writeBlobJson(GOOGLE_STATUS_PATH, {
+    ...(status && typeof status === "object" ? status : {}),
+    updatedAt: new Date().toISOString(),
+  });
+}
 
 export async function loadVanscoAutomationStatus() {
   const stored = await readBlobJson(STATUS_PATH);
