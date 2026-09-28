@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  VANSCO_FACEBOOK_STORIES_PER_DAY,
   buildVanscoFacebookCaption,
   buildVanscoGoogleBusinessCaption,
   extractUkRegistration,
@@ -16,6 +17,7 @@ import {
   vanscoNextDateKey,
   vanscoAdvertVatLabel,
   vanscoFacebookImageUrls,
+  vanscoFacebookStorySlots,
   vanscoGoogleBusinessSlots,
   vatLabelFromStatus,
   vatLabelFromText,
@@ -217,6 +219,17 @@ test("Vansco Google Business schedule creates ten staggerable branch slots", () 
   assert.equal(new Set(base.map((slot) => slot.dueAt)).size, 10);
 });
 
+test("Vansco Facebook Stories are five separate daily slots", () => {
+  assert.equal(VANSCO_FACEBOOK_STORIES_PER_DAY, 5);
+  const slots = vanscoFacebookStorySlots("2026-09-28");
+  assert.equal(slots.length, 5);
+  assert.deepEqual(
+    slots.map((slot) => slot.localTime),
+    ["09:30", "12:00", "14:30", "17:00", "19:30"],
+  );
+  assert.equal(new Set(slots.map((slot) => slot.dueAt)).size, 5);
+});
+
 test("30-post schedule is evenly spaced from 08:00 through 21:00", () => {
   const slots = vanscoDailySlots("2026-09-25", 30);
   assert.equal(slots.length, 30);
@@ -375,5 +388,34 @@ test("Vansco Google Business worker enforces branch-only van routing", async () 
   assert.match(worker, /vansco333/);
   assert.match(worker, /southamptonAirport/);
   assert.match(worker, /newForest/);
+});
+
+test("Vansco Story worker uses the dedicated Story lane and five-per-day target", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const worker = await readFile(
+    new URL("../api/vansco-facebook-story-automation-worker.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(worker, /VANSCO_FACEBOOK_STORIES_PER_DAY/);
+  assert.match(worker, /createVanscoFacebookStory/);
+  assert.match(worker, /vanscoFacebookStorySlots/);
+  assert.match(worker, /VANSCO_FACEBOOK_STORIES_AUTOMATION_ENABLED/);
+  const runtime = await readFile(
+    new URL("../api/_vansco-buffer-runtime.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(runtime, /metadata: \{ facebook: \{ type: "story" \} \}/);
+});
+
+test("normal Vansco Facebook worker excludes Stories from the 30-post target", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const worker = await readFile(
+    new URL("../api/vansco-facebook-automation-worker.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(worker, /loadVanscoFacebookActivity/);
+  assert.match(worker, /!isVanscoFacebookStory\(post\)/);
+  assert.match(worker, /remainingNormal/);
+  assert.match(worker, /VANSCO_FACEBOOK_MAX_POSTS_PER_DAY - normalSent - normalScheduled/);
 });
 

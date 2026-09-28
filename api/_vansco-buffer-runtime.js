@@ -7,6 +7,8 @@ const STATUS_PATH = "vansco-buffer-v1/status.json";
 const GOOGLE_CONFIG_PATH = "vansco-buffer-v1/google-business-channels.json";
 const GOOGLE_HISTORY_PATH = "vansco-buffer-v1/google-business-history.json";
 const GOOGLE_STATUS_PATH = "vansco-buffer-v1/google-business-status.json";
+const STORY_HISTORY_PATH = "vansco-buffer-v1/facebook-story-history.json";
+const STORY_STATUS_PATH = "vansco-buffer-v1/facebook-story-status.json";
 
 const ACCOUNT_QUERY = `
   query VanscoBufferAccount {
@@ -61,7 +63,56 @@ const STATE_QUERY = `
           status
           createdAt
           dueAt
+          sentAt
           channelId
+          metadata {
+            ... on FacebookPostMetadata {
+              type
+            }
+          }
+          assets {
+            id
+            mimeType
+            source
+          }
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`;
+
+const FACEBOOK_ACTIVITY_QUERY = `
+  query VanscoFacebookActivity($organizationId: OrganizationId!, $channelId: ChannelId!) {
+    posts(
+      first: 100
+      input: {
+        organizationId: $organizationId
+        sort: [{ field: createdAt, direction: desc }]
+        filter: {
+          status: [draft, scheduled, sending, sent, error]
+          channelIds: [$channelId]
+        }
+      }
+    ) {
+      edges {
+        node {
+          id
+          text
+          status
+          schedulingType
+          createdAt
+          dueAt
+          sentAt
+          channelId
+          metadata {
+            ... on FacebookPostMetadata {
+              type
+            }
+          }
           assets {
             id
             mimeType
@@ -356,6 +407,27 @@ export async function loadVanscoGoogleBusinessConfig({ forceDiscovery = false } 
   return discoverVanscoGoogleBusinessConfig();
 }
 
+export function isVanscoFacebookStory(post) {
+  const assets = Array.isArray(post?.assets) ? post.assets : [];
+  const hasImage = assets.some((asset) => /^image\//i.test(String(asset?.mimeType || "")));
+  const metadataType = String(post?.metadata?.type || post?.metadata?.facebook?.type || "").toLowerCase();
+  const legacyNotification = String(post?.schedulingType || "").toLowerCase() === "notification";
+  return hasImage && (metadataType === "story" || legacyNotification);
+}
+
+export async function loadVanscoFacebookActivity(config) {
+  const payload = await bufferGraphql(FACEBOOK_ACTIVITY_QUERY, {
+    organizationId: config.organizationId,
+    channelId: config.channelId,
+  });
+  const graphError = Array.isArray(payload?.errors) ? payload.errors[0]?.message : "";
+  if (graphError) throw new Error(String(graphError));
+  return {
+    posts: (payload?.data?.posts?.edges || []).map((edge) => edge?.node).filter(Boolean),
+    hasNextPage: Boolean(payload?.data?.posts?.pageInfo?.hasNextPage),
+  };
+}
+
 export async function loadVanscoBufferState(config, dateIso) {
   const payload = await bufferGraphql(STATE_QUERY, {
     organizationId: config.organizationId,
@@ -409,6 +481,36 @@ export async function createVanscoBufferPost({ config, text, imageUrl, imageUrls
   const result = payload?.data?.createPost;
   if (result?.message) throw new Error(String(result.message));
   if (!result?.post?.id) throw new Error("Buffer did not return a Vansco post ID.");
+  return result.post;
+}
+
+export async function createVanscoFacebookStory({
+  config,
+  text,
+  imageUrl,
+  dueAt,
+}) {
+  const compatibleImage = vanscoBufferCompatibleImageUrl(imageUrl);
+  if (!compatibleImage) {
+    throw new Error("Vansco Facebook Story requires a compatible JPEG/PNG image.");
+  }
+
+  const payload = await bufferGraphql(CREATE_POST_MUTATION, {
+    input: {
+      text: String(text || "").trim(),
+      channelId: config.channelId,
+      schedulingType: "automatic",
+      mode: "customScheduled",
+      dueAt: new Date(dueAt).toISOString(),
+      saveToDraft: false,
+      source: "vansco-marketing-crm-story",
+      assets: [{ image: { url: compatibleImage } }],
+      metadata: { facebook: { type: "story" } },
+    },
+  });
+  const result = payload?.data?.createPost;
+  if (result?.message) throw new Error(String(result.message));
+  if (!result?.post?.id) throw new Error("Buffer did not return a Vansco Story post ID.");
   return result.post;
 }
 
@@ -478,6 +580,32 @@ export async function saveVanscoPostingHistory(lastPostedByKey) {
   });
 }
 
+
+export async function loadVanscoFacebookStoryHistory() {
+  const stored = await readBlobJson(STORY_HISTORY_PATH);
+  return stored && typeof stored === "object"
+    ? { lastPostedByKey: stored.lastPostedByKey || {}, updatedAt: stored.updatedAt || null }
+    : { lastPostedByKey: {}, updatedAt: null };
+}
+
+export async function saveVanscoFacebookStoryHistory(lastPostedByKey) {
+  return writeBlobJson(STORY_HISTORY_PATH, {
+    lastPostedByKey,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function loadVanscoFacebookStoryStatus() {
+  const stored = await readBlobJson(STORY_STATUS_PATH);
+  return stored && typeof stored === "object" ? stored : null;
+}
+
+export async function saveVanscoFacebookStoryStatus(status) {
+  return writeBlobJson(STORY_STATUS_PATH, {
+    ...(status && typeof status === "object" ? status : {}),
+    updatedAt: new Date().toISOString(),
+  });
+}
 
 export async function loadVanscoGoogleBusinessHistory() {
   const stored = await readBlobJson(GOOGLE_HISTORY_PATH);

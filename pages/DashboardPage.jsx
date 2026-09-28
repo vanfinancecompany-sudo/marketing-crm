@@ -33,11 +33,13 @@ const WEEKDAYS = [
   "Saturday",
 ];
 const VANSCO_FACEBOOK_DAILY_TARGET = 30;
+const VANSCO_FACEBOOK_STORY_DAILY_TARGET = 5;
 const VANSCO_GOOGLE_BUSINESS_DAILY_TARGET = 10;
 
 const ACTIVITY_UNITS = {
   van_finance_facebook_post: "posted",
   vansco_facebook_post: "posted",
+  vansco_facebook_story: "posted",
   vansco_333_google_business_post: "posted",
   vansco_airport_google_business_post: "posted",
   vansco_new_forest_google_business_post: "posted",
@@ -362,6 +364,31 @@ export default function DashboardPage({ onNavigate }) {
     };
   }, [vanscoStatus, vanscoStatusBusy, vanscoStatusError]);
 
+  const vanscoStoryMetric = useMemo(() => {
+    const completed = Math.max(0, Number(vanscoStatus?.stories?.sentToday || 0));
+    const unavailable = Boolean(vanscoStatusError) && !vanscoStatus;
+    const checking = vanscoStatusBusy && !vanscoStatus;
+    return {
+      type: "vansco_facebook_story",
+      label: "Vansco Facebook Stories",
+      target: VANSCO_FACEBOOK_STORY_DAILY_TARGET,
+      completed,
+      displayCompleted: unavailable || checking ? "—" : completed,
+      remaining: Math.max(0, VANSCO_FACEBOOK_STORY_DAILY_TARGET - completed),
+      percentage: Math.min(
+        100,
+        Math.round((completed / VANSCO_FACEBOOK_STORY_DAILY_TARGET) * 100),
+      ),
+      statusLabel: unavailable
+        ? "UNAVAILABLE"
+        : checking
+          ? "CHECKING"
+          : completed >= VANSCO_FACEBOOK_STORY_DAILY_TARGET
+            ? "COMPLETE"
+            : `${Math.max(0, VANSCO_FACEBOOK_STORY_DAILY_TARGET - completed)} LEFT`,
+    };
+  }, [vanscoStatus, vanscoStatusBusy, vanscoStatusError]);
+
   const vanscoGoogleMetrics = useMemo(() => {
     const checking = vanscoStatusBusy && !vanscoStatus;
     const statusUnavailable = Boolean(vanscoStatusError) && !vanscoStatus;
@@ -420,10 +447,11 @@ export default function DashboardPage({ onNavigate }) {
       rent2buyFacebookIndex >= 0 ? rent2buyFacebookIndex + 1 : 2,
       0,
       vanscoMetric,
+      vanscoStoryMetric,
       ...vanscoGoogleMetrics,
     );
     return next;
-  }, [metrics, vanscoMetric, vanscoGoogleMetrics]);
+  }, [metrics, vanscoMetric, vanscoStoryMetric, vanscoGoogleMetrics]);
 
   if (locked)
     return (

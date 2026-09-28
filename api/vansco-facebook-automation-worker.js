@@ -19,8 +19,10 @@ import {
 import {
   createVanscoBufferPost,
   deleteVanscoBufferPost,
+  isVanscoFacebookStory,
   loadVanscoBufferConfig,
   loadVanscoBufferState,
+  loadVanscoFacebookActivity,
   loadVanscoPostingHistory,
   saveVanscoAutomationStatus,
   saveVanscoPostingHistory,
@@ -69,6 +71,21 @@ function londonDateKey(value = new Date()) {
     month: "2-digit",
     day: "2-digit",
   }).format(value);
+}
+
+function postActivityDateKey(post) {
+  const value = clean(post?.sentAt || post?.dueAt || post?.createdAt);
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : londonDateKey(date);
+}
+
+function normalSentCountForDay(posts, dateKey) {
+  return (posts || []).filter((post) =>
+    String(post?.status || "").toLowerCase() === "sent"
+    && !isVanscoFacebookStory(post)
+    && postActivityDateKey(post) === dateKey
+  ).length;
 }
 
 function safeNumber(value, fallback = 0) {
@@ -316,15 +333,21 @@ export default async function handler(request, response) {
 
     const bufferConfig = await loadVanscoBufferConfig();
     const now = Date.now();
-    const currentState = await loadVanscoBufferState(bufferConfig, `${dateKey}T12:00:00.000Z`);
-    const pruned = await pruneStaleScheduledPosts(currentState.posts, liveVehicles);
+    const [currentState, activity] = await Promise.all([
+      loadVanscoBufferState(bufferConfig, `${dateKey}T12:00:00.000Z`),
+      loadVanscoFacebookActivity(bufferConfig),
+    ]);
+    const currentStories = currentState.posts.filter(isVanscoFacebookStory);
+    const currentNormalPosts = currentState.posts.filter((post) => !isVanscoFacebookStory(post));
+    const pruned = await pruneStaleScheduledPosts(currentNormalPosts, liveVehicles);
     const posts = [...pruned.kept];
+    const occupiedPosts = [...posts, ...currentStories];
 
     const currentNetworkLimit = dailyLimitFromState(currentState.limit);
     const currentSlots = availableSlots({
       dateKey,
       networkLimit: currentNetworkLimit,
-      occupiedPosts: posts,
+      occupiedPosts,
       now,
     });
 
@@ -337,20 +360,34 @@ export default async function handler(request, response) {
       : await loadVanscoBufferState(bufferConfig, `${scheduleDateKey}T12:00:00.000Z`);
     const networkLimit = dailyLimitFromState(state.limit);
     const providerSent = safeNumber(state.limit?.sent);
-    const scheduledForTargetDate = posts.filter((post) => {
-      const dueAt = postDueIso(post);
-      return dueAt && londonDateKey(new Date(dueAt)) === scheduleDateKey;
-    }).length;
-    const providerScheduled = Math.max(
-      safeNumber(state.limit?.scheduled),
-      scheduledForTargetDate,
+    const providerScheduled = safeNumber(state.limit?.scheduled);
+    const normalSent = scheduleDateKey === dateKey
+      ? normalSentCountForDay(activity.posts, scheduleDateKey)
+      : 0;
+    const normalScheduled = state.posts
+      .filter((post) => !isVanscoFacebookStory(post))
+      .filter((post) => {
+        const dueAt = postDueIso(post);
+        return dueAt && londonDateKey(new Date(dueAt)) === scheduleDateKey;
+      })
+      .length;
+    const remainingNormal = Math.max(
+      0,
+      VANSCO_FACEBOOK_MAX_POSTS_PER_DAY - normalSent - normalScheduled,
     );
-    const remainingDaily = Math.max(0, networkLimit - providerSent - providerScheduled);
-    const capacity = Math.min(queueCapacity(bufferConfig, posts), remainingDaily);
+    const providerDailyLimit = Number(state.limit?.limit);
+    const remainingProvider = Number.isFinite(providerDailyLimit)
+      ? Math.max(0, providerDailyLimit - providerSent - providerScheduled)
+      : remainingNormal;
+    const capacity = Math.min(
+      queueCapacity(bufferConfig, state.posts),
+      remainingNormal,
+      remainingProvider,
+    );
     const slots = availableSlots({
       dateKey: scheduleDateKey,
       networkLimit,
-      occupiedPosts: posts,
+      occupiedPosts: state.posts,
       now,
     }).slice(0, capacity);
 
@@ -456,6 +493,8 @@ export default async function handler(request, response) {
         networkDailyLimit: networkLimit,
         providerSent,
         providerScheduled,
+        normalSent,
+        normalScheduled,
       },
       staleScheduledPosts: pruned.removed,
       created,
@@ -463,7 +502,7 @@ export default async function handler(request, response) {
       duplicateSkippedCount: held.filter((item) => item.reason === "buffer_duplicate").length,
       mediaSkippedCount: held.filter((item) => item.reason === "buffer_media_rejected").length,
       vatUnresolvedCount: held.filter((item) => item.reason === "vat_unresolved").length,
-      queueCountAfter: posts.length,
+      queueCountAfter: state.posts.length + created.length,
       elapsedMs: Date.now() - startedAt,
     };
     await saveVanscoAutomationStatus({
