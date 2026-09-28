@@ -25,7 +25,7 @@ function dealerKitVehicle(registration, imageCount, extra = {}) {
 }
 
 test("photo readiness is a due-in placeholder alert, not a general image-count difference", () => {
-  assert.equal(MAX_PLACEHOLDER_ADVERT_IMAGES, 2);
+  assert.equal(MAX_PLACEHOLDER_ADVERT_IMAGES, 3);
 
   const normalGallery = buildDealerKitImageReadinessAlerts({
     pipeline: "finance",
@@ -53,6 +53,20 @@ test("photo readiness is a due-in placeholder alert, not a general image-count d
   assert.equal(dueIn[0].currentAdvertImageCount, 2);
   assert.equal(dueIn[0].sourceImageCount, 10);
   assert.equal(dueIn[0].imageReadinessAlert, true);
+
+  const threeImageDueIn = buildDealerKitImageReadinessAlerts({
+    pipeline: "rent2buy",
+    listingPresenceByPipeline: {
+      rent2buy: presence("PN72JWY", "Renault Trucks Master"),
+    },
+    cmsItemsByPipeline: {
+      rent2buy: [{ title: "PN72JWY", imageCount: 3 }],
+    },
+    dealerKitVehicles: [dealerKitVehicle("PN72JWY", 32, { title: "Renault Trucks Master" })],
+  });
+  assert.equal(threeImageDueIn.length, 1, "3-image advert versus DealerKit 32 must become a photo-ready task");
+  assert.equal(threeImageDueIn[0].currentAdvertImageCount, 3);
+  assert.equal(threeImageDueIn[0].sourceImageCount, 32);
 });
 
 test("BD21HCX style Finance alert is not suppressed by a fuller Rent2Buy advert", () => {
@@ -146,5 +160,5 @@ test("photo-ready UI uses the normal actionable Stock Watch workflow across all 
   assert.match(transform, /setImageReadyByPipeline/);
   assert.match(transform, /await loadImageReadiness\(pipeline\)/);
   assert.match(transform, /Review vehicle/);
-  assert.match(transform, /1–2 placeholder images/);
+  assert.match(transform, /1–3 placeholder images/);
 });
