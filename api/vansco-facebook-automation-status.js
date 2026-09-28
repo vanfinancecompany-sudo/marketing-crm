@@ -5,12 +5,9 @@ import {
 import {
   isVanscoFacebookStory,
   loadVanscoAutomationStatus,
-  loadVanscoBufferConfig,
-  loadVanscoBufferState,
-  loadVanscoFacebookActivity,
+  loadVanscoCombinedStatusSnapshot,
   loadVanscoFacebookStoryStatus,
   loadVanscoGoogleBusinessAutomationStatus,
-  loadVanscoGoogleBusinessConfig,
 } from "./_vansco-buffer-runtime.js";
 
 const ACCESS_HEADER = "x-marketing-customer-database-key";
@@ -89,68 +86,60 @@ export default async function handler(request, response) {
 
   try {
     const enabled = String(process.env.VANSCO_FACEBOOK_AUTOMATION_ENABLED || "").toLowerCase() === "true";
-    const status = await loadVanscoAutomationStatus();
-    const config = await loadVanscoBufferConfig();
-    const dateKey = londonDateKey();
-    const [bufferState, facebookActivity, storyStatus] = await Promise.all([
-      loadVanscoBufferState(config, `${dateKey}T12:00:00.000Z`),
-      loadVanscoFacebookActivity(config),
+    const [status, liveSnapshot, storyStatus, googleLastRun] = await Promise.all([
+      loadVanscoAutomationStatus(),
+      loadVanscoCombinedStatusSnapshot(),
       loadVanscoFacebookStoryStatus().catch(() => null),
+      loadVanscoGoogleBusinessAutomationStatus().catch(() => null),
     ]);
-    const sentToday = (facebookActivity.posts || []).filter((post) =>
+    const dateKey = londonDateKey();
+    const config = liveSnapshot?.facebook?.config || {};
+    const facebookLimit = liveSnapshot?.facebook?.limit || null;
+    const facebookPosts = Array.isArray(liveSnapshot?.facebook?.posts)
+      ? liveSnapshot.facebook.posts
+      : [];
+    const queuedFacebookPosts = facebookPosts.filter((post) =>
+      ["scheduled", "sending"].includes(String(post?.status || "").toLowerCase())
+    );
+    const sentToday = facebookPosts.filter((post) =>
       String(post?.status || "").toLowerCase() === "sent"
       && !isVanscoFacebookStory(post)
       && activityDateKey(post) === dateKey
     ).length;
-    const storiesSentToday = (facebookActivity.posts || []).filter((post) =>
+    const storiesSentToday = facebookPosts.filter((post) =>
       String(post?.status || "").toLowerCase() === "sent"
       && isVanscoFacebookStory(post)
       && activityDateKey(post) === dateKey
     ).length;
-    const storiesScheduledToday = (facebookActivity.posts || []).filter((post) =>
-      ["scheduled", "sending"].includes(String(post?.status || "").toLowerCase())
-      && isVanscoFacebookStory(post)
+    const storiesScheduledToday = queuedFacebookPosts.filter((post) =>
+      isVanscoFacebookStory(post)
       && activityDateKey(post) === dateKey
     ).length;
 
-    let googleBusiness = {
-      connected: false,
-      branches: {},
-      error: "",
-    };
-    try {
-      const googleConfig = await loadVanscoGoogleBusinessConfig();
-      const entries = await Promise.all(
-        Object.entries(googleConfig.branches || {}).map(async ([branchKey, branchConfig]) => {
-          const branchState = await loadVanscoBufferState(
-            branchConfig,
-            `${dateKey}T12:00:00.000Z`,
+    const googleEntries = Object.entries(liveSnapshot?.googleBusiness?.branches || {});
+    const googleBusiness = {
+      connected: googleEntries.length === 3,
+      branches: Object.fromEntries(
+        googleEntries.map(([branchKey, branch]) => {
+          const branchConfig = branch?.config || {};
+          const branchPosts = Array.isArray(branch?.posts) ? branch.posts : [];
+          const queued = branchPosts.filter((post) =>
+            ["scheduled", "sending"].includes(String(post?.status || "").toLowerCase())
           );
           return [branchKey, {
             channelId: branchConfig.channelId,
             channelName: branchConfig.channelName,
             externalLink: branchConfig.externalLink,
-            dailyLimit: branchState.limit?.limit ?? null,
-            sentToday: branchState.limit?.sent ?? 0,
-            scheduledToday: branchState.limit?.scheduled ?? 0,
-            queueCount: branchState.posts.length,
+            dailyLimit: branch?.limit?.limit ?? null,
+            sentToday: branch?.limit?.sent ?? 0,
+            scheduledToday: branch?.limit?.scheduled ?? 0,
+            queueCount: queued.length,
           }];
         }),
-      );
-      googleBusiness = {
-        connected: true,
-        branches: Object.fromEntries(entries),
-        lastRun: await loadVanscoGoogleBusinessAutomationStatus(),
-        error: "",
-      };
-    } catch (googleError) {
-      googleBusiness = {
-        connected: false,
-        branches: {},
-        lastRun: await loadVanscoGoogleBusinessAutomationStatus().catch(() => null),
-        error: String(googleError?.message || googleError).slice(0, 300),
-      };
-    }
+      ),
+      lastRun: googleLastRun,
+      error: liveSnapshot?.refreshError || "",
+    };
 
     return response.status(200).json({
       ok: true,
@@ -161,26 +150,29 @@ export default async function handler(request, response) {
         channelName: config.channelName,
         externalLink: config.externalLink,
         queueLimit: config.scheduledPostsLimit,
-        dailyLimit: bufferState.limit?.limit ?? null,
+        dailyLimit: facebookLimit?.limit ?? null,
         sentToday,
-        providerSentToday: bufferState.limit?.sent ?? 0,
-        scheduledToday: bufferState.posts.filter((post) => !isVanscoFacebookStory(post)).length,
-        queueCount: bufferState.posts.filter((post) => !isVanscoFacebookStory(post)).length,
+        providerSentToday: facebookLimit?.sent ?? 0,
+        scheduledToday: queuedFacebookPosts.filter((post) => !isVanscoFacebookStory(post)).length,
+        queueCount: queuedFacebookPosts.filter((post) => !isVanscoFacebookStory(post)).length,
       },
       stories: {
         target: VANSCO_FACEBOOK_STORIES_PER_DAY,
         sentToday: storiesSentToday,
         scheduledToday: storiesScheduledToday,
-        queueCount: bufferState.posts.filter(isVanscoFacebookStory).length,
+        queueCount: queuedFacebookPosts.filter(isVanscoFacebookStory).length,
         lastRun: storyStatus,
       },
       googleBusiness,
-      queue: bufferState.posts
+      queue: queuedFacebookPosts
         .slice()
         .sort((a, b) => new Date(a?.dueAt || 0).getTime() - new Date(b?.dueAt || 0).getTime())
         .slice(0, 10)
         .map(queuedPostSummary),
       checkedAt: new Date().toISOString(),
+      providerCheckedAt: liveSnapshot?.checkedAt || null,
+      cached: Boolean(liveSnapshot?.cached),
+      stale: Boolean(liveSnapshot?.stale),
     });
   } catch (error) {
     return response.status(500).json({
