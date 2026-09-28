@@ -56,6 +56,10 @@
     {
       "path": "/api/vansco-facebook-automation-worker",
       "schedule": "11,41 * * * *"
+    },
+    {
+      "path": "/api/vansco-google-business-automation-worker",
+      "schedule": "21,51 * * * *"
     }
   ],
   "functions": {
@@ -135,6 +139,9 @@
       "maxDuration": 60
     },
     "api/vansco-facebook-automation-worker.js": {
+      "maxDuration": 300
+    },
+    "api/vansco-google-business-automation-worker.js": {
       "maxDuration": 300
     }
   },
