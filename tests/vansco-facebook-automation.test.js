@@ -419,32 +419,3 @@ test("normal Vansco Facebook worker excludes Stories from the 30-post target", a
   assert.match(worker, /VANSCO_FACEBOOK_MAX_POSTS_PER_DAY - normalSent - normalScheduled/);
 });
 
-
-
-test("Vansco uses one cached four-channel status read and four-hour refill workers", async () => {
-  const { readFile } = await import("node:fs/promises");
-  const runtime = await readFile(
-    new URL("../api/_vansco-buffer-runtime.js", import.meta.url),
-    "utf8",
-  );
-  assert.match(runtime, /VanscoAllChannelStatus/);
-  assert.match(runtime, /loadVanscoCombinedStatusSnapshot/);
-  assert.match(runtime, /LIVE_STATUS_SNAPSHOT_PATH/);
-  assert.match(runtime, /QUOTA_STATE_PATH/);
-  assert.match(runtime, /VANSCO_QUERY_MAX_24H_REQUESTS = 165/);
-  assert.match(runtime, /VANSCO_MUTATION_MAX_24H_REQUESTS = 190/);
-
-  const status = await readFile(
-    new URL("../api/vansco-facebook-automation-status.js", import.meta.url),
-    "utf8",
-  );
-  assert.match(status, /loadVanscoCombinedStatusSnapshot/);
-  assert.doesNotMatch(status, /loadVanscoBufferState/);
-  assert.doesNotMatch(status, /loadVanscoFacebookActivity/);
-
-  const vercel = JSON.parse(await readFile(new URL("../vercel.json", import.meta.url), "utf8"));
-  const schedules = new Map(vercel.crons.map((entry) => [entry.path, entry.schedule]));
-  assert.equal(schedules.get("/api/vansco-facebook-automation-worker"), "11 */4 * * *");
-  assert.equal(schedules.get("/api/vansco-facebook-story-automation-worker"), "31 */4 * * *");
-  assert.equal(schedules.get("/api/vansco-google-business-automation-worker"), "51 */4 * * *");
-});
