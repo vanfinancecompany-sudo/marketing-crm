@@ -10,7 +10,7 @@ const MAX_WIX_ROWS = 2000;
 const FINANCE_WIX_SITE_ID = "85f11c52-ee54-495d-aaec-a351831709b5";
 const SUPPORTED_PIPELINES = new Set(["finance", "rent2buy", "cars"]);
 export const MIN_DEALERKIT_IMAGE_COUNT = 5;
-export const MAX_PLACEHOLDER_ADVERT_IMAGES = 2;
+export const MAX_PLACEHOLDER_ADVERT_IMAGES = 3;
 
 const CMS_ENDPOINTS = {
   finance: "https://www.vanfinancecompany.co.uk/_functions/marketingVanFinanceImages",
@@ -141,7 +141,7 @@ export function buildDealerKitImageReadinessAlerts({
     }
 
     // Photo readiness is a due-in/placeholder alert, not a general image-count diff.
-    // Once this lane's advert has a normal gallery (3+ images), later DealerKit
+    // Once this lane's advert has a normal gallery (4+ images), later DealerKit
     // additions should not create another work item.
     if (currentAdvertImageCount < 1 || currentAdvertImageCount > MAX_PLACEHOLDER_ADVERT_IMAGES) continue;
     if (sourceImageCount <= currentAdvertImageCount) continue;
@@ -355,7 +355,7 @@ export default async function handler(request, response) {
         crossProduct: false,
         comparisonScope: "selected_pipeline_only",
         comparedPipelines: relevantPipelines,
-        rule: "Alert only when this Stock Watch lane has a live advert with 1 or 2 placeholder/due-in images, DealerKit has at least 5 images, and DealerKit now has more images. A live advert reported as zero by the CMS image feed is treated as one visible primary image. Other product lanes do not suppress the alert.",
+        rule: "Alert only when this Stock Watch lane has a live advert with 1, 2 or 3 placeholder/due-in images, DealerKit has at least 5 images, and DealerKit now has more images. A live advert reported as zero by the CMS image feed is treated as one visible primary image. Other product lanes do not suppress the alert.",
       },
     });
   } catch (error) {
