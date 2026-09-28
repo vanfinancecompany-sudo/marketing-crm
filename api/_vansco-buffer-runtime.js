@@ -1,4 +1,5 @@
 import { list, put } from "@vercel/blob";
+import { bufferStatusPollIntervalMs } from "../lib/bufferRuntimeGuard.js";
 
 const BUFFER_API_URL = "https://api.buffer.com";
 const CONFIG_PATH = "vansco-buffer-v1/channel.json";
@@ -9,6 +10,7 @@ const GOOGLE_HISTORY_PATH = "vansco-buffer-v1/google-business-history.json";
 const GOOGLE_STATUS_PATH = "vansco-buffer-v1/google-business-status.json";
 const STORY_HISTORY_PATH = "vansco-buffer-v1/facebook-story-history.json";
 const STORY_STATUS_PATH = "vansco-buffer-v1/facebook-story-status.json";
+const LIVE_STATUS_SNAPSHOT_PATH = "vansco-buffer-v1/live-status-snapshot.json";
 
 const ACCOUNT_QUERY = `
   query VanscoBufferAccount {
@@ -95,6 +97,60 @@ const FACEBOOK_ACTIVITY_QUERY = `
         filter: {
           status: [draft, scheduled, sending, sent, error]
           channelIds: [$channelId]
+        }
+      }
+    ) {
+      edges {
+        node {
+          id
+          text
+          status
+          schedulingType
+          createdAt
+          dueAt
+          sentAt
+          channelId
+          metadata {
+            ... on FacebookPostMetadata {
+              type
+            }
+          }
+          assets {
+            id
+            mimeType
+            source
+          }
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`;
+
+const ALL_CHANNEL_STATUS_QUERY = `
+  query VanscoAllChannelStatus(
+    $organizationId: OrganizationId!,
+    $channelIds: [ChannelId!]!,
+    $date: DateTime!
+  ) {
+    dailyPostingLimits(input: { channelIds: $channelIds, date: $date }) {
+      channelId
+      sent
+      scheduled
+      limit
+      isAtLimit
+    }
+    posts(
+      first: 100
+      input: {
+        organizationId: $organizationId
+        sort: [{ field: createdAt, direction: desc }]
+        filter: {
+          status: [draft, scheduled, sending, sent, error]
+          channelIds: $channelIds
         }
       }
     ) {
@@ -405,6 +461,116 @@ export async function loadVanscoGoogleBusinessConfig({ forceDiscovery = false } 
     }
   }
   return discoverVanscoGoogleBusinessConfig();
+}
+
+function londonDateKey(value = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value);
+}
+
+function snapshotAgeMs(snapshot) {
+  const timestamp = new Date(snapshot?.checkedAt || snapshot?.cachedAt || 0).getTime();
+  return Number.isFinite(timestamp) && timestamp > 0 ? Math.max(0, Date.now() - timestamp) : Infinity;
+}
+
+let vanscoStatusRefreshPromise = null;
+
+export async function loadVanscoCombinedStatusSnapshot({ force = false } = {}) {
+  const cached = await readBlobJson(LIVE_STATUS_SNAPSHOT_PATH);
+  const maxAgeMs = bufferStatusPollIntervalMs();
+  if (!force && cached && snapshotAgeMs(cached) < maxAgeMs) {
+    return { ...cached, cached: true };
+  }
+
+  if (vanscoStatusRefreshPromise) return vanscoStatusRefreshPromise;
+
+  vanscoStatusRefreshPromise = (async () => {
+    const [facebookConfig, googleConfig] = await Promise.all([
+      loadVanscoBufferConfig(),
+      loadVanscoGoogleBusinessConfig(),
+    ]);
+    const branchEntries = Object.entries(googleConfig?.branches || {});
+    const organizationIds = new Set([
+      String(facebookConfig?.organizationId || ""),
+      ...branchEntries.map(([, config]) => String(config?.organizationId || "")),
+    ].filter(Boolean));
+    if (organizationIds.size !== 1) {
+      throw new Error("Vansco Buffer channels are not in one shared organization.");
+    }
+
+    const channelIds = [
+      String(facebookConfig.channelId || ""),
+      ...branchEntries.map(([, config]) => String(config?.channelId || "")),
+    ].filter(Boolean);
+    const dateKey = londonDateKey();
+    const payload = await bufferGraphql(ALL_CHANNEL_STATUS_QUERY, {
+      organizationId: [...organizationIds][0],
+      channelIds,
+      date: `${dateKey}T12:00:00.000Z`,
+    });
+    const limits = Array.isArray(payload?.data?.dailyPostingLimits)
+      ? payload.data.dailyPostingLimits
+      : [];
+    const posts = (payload?.data?.posts?.edges || [])
+      .map((edge) => edge?.node)
+      .filter(Boolean);
+    const limitByChannel = Object.fromEntries(
+      limits.map((item) => [String(item?.channelId || ""), item]),
+    );
+    const postsByChannel = Object.fromEntries(
+      channelIds.map((channelId) => [
+        channelId,
+        posts.filter((post) => String(post?.channelId || "") === channelId),
+      ]),
+    );
+
+    const snapshot = {
+      ok: true,
+      checkedAt: new Date().toISOString(),
+      date: dateKey,
+      organizationId: [...organizationIds][0],
+      facebook: {
+        config: facebookConfig,
+        limit: limitByChannel[String(facebookConfig.channelId || "")] || null,
+        posts: postsByChannel[String(facebookConfig.channelId || "")] || [],
+      },
+      googleBusiness: {
+        branches: Object.fromEntries(
+          branchEntries.map(([branchKey, config]) => [
+            branchKey,
+            {
+              config,
+              limit: limitByChannel[String(config?.channelId || "")] || null,
+              posts: postsByChannel[String(config?.channelId || "")] || [],
+            },
+          ]),
+        ),
+      },
+      hasNextPage: Boolean(payload?.data?.posts?.pageInfo?.hasNextPage),
+    };
+    await writeBlobJson(LIVE_STATUS_SNAPSHOT_PATH, snapshot);
+    return snapshot;
+  })();
+
+  try {
+    return await vanscoStatusRefreshPromise;
+  } catch (error) {
+    if (cached) {
+      return {
+        ...cached,
+        cached: true,
+        stale: true,
+        refreshError: String(error?.message || error).slice(0, 300),
+      };
+    }
+    throw error;
+  } finally {
+    vanscoStatusRefreshPromise = null;
+  }
 }
 
 export function isVanscoFacebookStory(post) {

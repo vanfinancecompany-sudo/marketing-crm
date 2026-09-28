@@ -79,6 +79,24 @@ async function loadSentBufferPosts(channelIds) {
   return parseBufferSentPostsPayload(payload);
 }
 
+async function resolveGoogleBusinessChannelForStatus() {
+  const snapshot = await loadBufferStatusSnapshot();
+  const cached = snapshot?.google_business_channel;
+  if (cached?.connected && cached?.id) {
+    return {
+      id: String(cached.id),
+      name: String(cached.name || "Van Finance Company"),
+      displayName: String(cached.name || "Van Finance Company"),
+      service: "googlebusiness",
+      isDisconnected: false,
+      isLocked: false,
+    };
+  }
+
+  const channels = await loadBufferChannels();
+  return selectVanFinanceGoogleBusinessChannel(channels);
+}
+
 async function vanscoPublishedToday(todayKey) {
   try {
     const status = await loadVanscoAutomationStatus();
@@ -299,10 +317,9 @@ export default async function handler(request, response) {
   }
 
   try {
-    const channels = await loadBufferChannels();
     let googleBusinessChannel = null;
     try {
-      googleBusinessChannel = selectVanFinanceGoogleBusinessChannel(channels);
+      googleBusinessChannel = await resolveGoogleBusinessChannelForStatus();
     } catch (error) {
       console.warn("[buffer-publish-status] Google Business channel unavailable", {
         message: error?.message || String(error),
