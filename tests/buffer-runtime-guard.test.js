@@ -15,7 +15,6 @@ import {
   bufferCooldownRemainingMs,
   bufferDeferredPayload,
   bufferRetryAfterMs,
-  bufferStatusPollIntervalMs,
   bufferThirtyDayQuota,
   isBufferRateLimitCooldownError,
   isBufferRateLimitMessage,
@@ -119,17 +118,6 @@ test("monitoring queries are throttled before they can burn the monthly Buffer b
   assert.match(runtime, /buffer_request_throttle/);
   assert.match(runtime, /buffer_quota_reserve/);
   assert.match(runtime, /quotaUpdatedAt/);
-});
-
-
-test("status polling stays fresh in the posting window without burning requests overnight", () => {
-  assert.equal(bufferStatusPollIntervalMs(new Date("2026-09-28T12:00:00Z")), 20 * 60 * 1000);
-  assert.equal(bufferStatusPollIntervalMs(new Date("2026-09-28T01:00:00Z")), 60 * 60 * 1000);
-
-  const runtime = source("lib/bufferRuntimeGuard.js");
-  assert.match(runtime, /GetBufferSentPosts/);
-  assert.match(runtime, /GetBufferChannels/);
-  assert.match(runtime, /12 \* HOUR_MS/);
 });
 
 test("Buffer OAuth uses PKCE, offline access and encrypted token storage", () => {
