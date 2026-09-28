@@ -16,6 +16,10 @@ import {
 import { alignBufferAutomationConfigToDailyTargets } from "../lib/bufferAutomationConfig.js";
 import { buildBufferCreatePostInput } from "../lib/bufferPublishing.js";
 import {
+  isBufferApiActiveWindow,
+  isBufferScheduledRunDue,
+} from "../lib/bufferActiveWindow.js";
+import {
   buildAutomatedFacebookCaption,
   buildAutomatedReelCaption,
 } from "../lib/facebookAutomationContent.js";
@@ -209,14 +213,24 @@ test("temporary ten-Reel proof control is removed", () => {
 test("Vercel runs Buffer jobs at quota-safe cadence across all paid channels", () => {
   const vercel = JSON.parse(source("vercel.json"));
   const schedules = new Map(vercel.crons.map((entry) => [entry.path, entry.schedule]));
-  assert.equal(schedules.get("/api/buffer-facebook-automation-cron"), "5 */2 * * *");
+  assert.equal(schedules.get("/api/buffer-facebook-automation-cron"), "5 6-22 * * *");
   assert.equal(schedules.has("/api/buffer-facebook-automation-worker"), false);
-  assert.equal(schedules.get("/api/buffer-facebook-story-automation"), "25 */4 * * *");
-  assert.equal(schedules.get("/api/buffer-instagram-mirror"), "14 */4 * * *");
-  assert.equal(schedules.get("/api/buffer-publish-status"), "5,25,45 * * * *");
-  assert.equal(schedules.get("/api/vansco-facebook-automation-worker"), "11 */4 * * *");
-  assert.equal(schedules.get("/api/vansco-facebook-story-automation-worker"), "31 */4 * * *");
-  assert.equal(schedules.get("/api/vansco-google-business-automation-worker"), "51 */4 * * *");
+  assert.equal(schedules.get("/api/buffer-facebook-story-automation"), "25 6-22 * * *");
+  assert.equal(schedules.get("/api/buffer-instagram-mirror"), "14 6-22 * * *");
+  assert.equal(schedules.get("/api/buffer-publish-status"), "5,25,45 6-22 * * *");
+  assert.equal(schedules.get("/api/vansco-facebook-automation-worker"), "11 6-22 * * *");
+  assert.equal(schedules.get("/api/vansco-facebook-story-automation-worker"), "31 6-22 * * *");
+  assert.equal(schedules.get("/api/vansco-google-business-automation-worker"), "51 6-22 * * *");
+});
+
+test("Buffer API window follows London time across BST and winter", () => {
+  assert.equal(isBufferApiActiveWindow(new Date("2026-09-28T06:05:00Z")), true);
+  assert.equal(isBufferScheduledRunDue("two-hour", new Date("2026-09-28T06:05:00Z")), true);
+  assert.equal(isBufferScheduledRunDue("two-hour", new Date("2026-09-28T09:05:00Z")), false);
+  assert.equal(isBufferScheduledRunDue("vfc-facebook", new Date("2026-09-28T09:05:00Z")), true);
+  assert.equal(isBufferApiActiveWindow(new Date("2026-09-28T21:20:00Z")), false);
+  assert.equal(isBufferApiActiveWindow(new Date("2026-12-01T06:05:00Z")), false);
+  assert.equal(isBufferApiActiveWindow(new Date("2026-12-01T07:05:00Z")), true);
 });
 
 test("cron wrapper retries only transient Reel transport failures", () => {
