@@ -419,3 +419,17 @@ test("normal Vansco Facebook worker excludes Stories from the 30-post target", a
   assert.match(worker, /VANSCO_FACEBOOK_MAX_POSTS_PER_DAY - normalSent - normalScheduled/);
 });
 
+
+test("Vansco Buffer workers use daytime cadence and cached monitoring reserve", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const facebook = await readFile(new URL("../api/vansco-facebook-automation-worker.js", import.meta.url), "utf8");
+  const stories = await readFile(new URL("../api/vansco-facebook-story-automation-worker.js", import.meta.url), "utf8");
+  const google = await readFile(new URL("../api/vansco-google-business-automation-worker.js", import.meta.url), "utf8");
+  const runtime = await readFile(new URL("../api/_vansco-buffer-runtime.js", import.meta.url), "utf8");
+  assert.match(facebook, /isBufferScheduledRunDue\("two-hour"\)/);
+  assert.match(stories, /isBufferScheduledRunDue\("two-hour"\)/);
+  assert.match(google, /isBufferScheduledRunDue\("four-hour-plus-final"\)/);
+  assert.match(runtime, /isBufferApiActiveWindow/);
+  assert.match(runtime, /vanscoMonitoringReserveActive/);
+  assert.match(runtime, /BUFFER_MONITORING_MAX_24H_REQUESTS/);
+});
