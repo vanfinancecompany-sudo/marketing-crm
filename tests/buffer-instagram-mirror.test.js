@@ -213,8 +213,8 @@ test("Instagram delay helper preserves ISO scheduling", () => {
 test("Instagram mirror follows the quota-safe Facebook cadence and Blob cleanup keeps a safety window", () => {
   const vercel = JSON.parse(source("vercel.json"));
   const schedules = new Map(vercel.crons.map((entry) => [entry.path, entry.schedule]));
-  assert.equal(schedules.get("/api/buffer-facebook-automation-cron"), "5 */2 * * *");
-  assert.equal(schedules.get("/api/buffer-instagram-mirror"), "14 */4 * * *");
+  assert.equal(schedules.get("/api/buffer-facebook-automation-cron"), "5 6-22 * * *");
+  assert.equal(schedules.get("/api/buffer-instagram-mirror"), "14 6-22 * * *");
 
   const status = source("api/buffer-publish-status.js");
   assert.match(status, /REEL_BLOB_MIN_SENT_AGE_MS = 72 \* 60 \* 60 \* 1000/);
