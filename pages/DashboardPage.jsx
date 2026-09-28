@@ -237,10 +237,11 @@ export default function DashboardPage({ onNavigate }) {
   useEffect(() => {
     const receiveBufferLiveStatus = (event) => {
       if (event?.detail?.today) setBufferLiveStatus(event.detail);
+      if (!locked) loadVanscoStatus();
     };
     window.addEventListener("buffer-facebook-live-status", receiveBufferLiveStatus);
     return () => window.removeEventListener("buffer-facebook-live-status", receiveBufferLiveStatus);
-  }, []);
+  }, [locked]);
 
   async function unlock(event) {
     event.preventDefault();
