@@ -1,8 +1,14 @@
-import { extractVanscoVehicleUrl } from "../lib/vanscoFacebookAutomation.js";
 import {
+  VANSCO_FACEBOOK_STORIES_PER_DAY,
+  extractVanscoVehicleUrl,
+} from "../lib/vanscoFacebookAutomation.js";
+import {
+  isVanscoFacebookStory,
   loadVanscoAutomationStatus,
   loadVanscoBufferConfig,
   loadVanscoBufferState,
+  loadVanscoFacebookActivity,
+  loadVanscoFacebookStoryStatus,
   loadVanscoGoogleBusinessAutomationStatus,
   loadVanscoGoogleBusinessConfig,
 } from "./_vansco-buffer-runtime.js";
@@ -30,6 +36,13 @@ function londonDateKey(value = new Date()) {
     month: "2-digit",
     day: "2-digit",
   }).format(value);
+}
+
+function activityDateKey(post) {
+  const value = post?.sentAt || post?.dueAt || post?.createdAt;
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : londonDateKey(date);
 }
 
 function postTitle(text) {
@@ -79,7 +92,26 @@ export default async function handler(request, response) {
     const status = await loadVanscoAutomationStatus();
     const config = await loadVanscoBufferConfig();
     const dateKey = londonDateKey();
-    const bufferState = await loadVanscoBufferState(config, `${dateKey}T12:00:00.000Z`);
+    const [bufferState, facebookActivity, storyStatus] = await Promise.all([
+      loadVanscoBufferState(config, `${dateKey}T12:00:00.000Z`),
+      loadVanscoFacebookActivity(config),
+      loadVanscoFacebookStoryStatus().catch(() => null),
+    ]);
+    const sentToday = (facebookActivity.posts || []).filter((post) =>
+      String(post?.status || "").toLowerCase() === "sent"
+      && !isVanscoFacebookStory(post)
+      && activityDateKey(post) === dateKey
+    ).length;
+    const storiesSentToday = (facebookActivity.posts || []).filter((post) =>
+      String(post?.status || "").toLowerCase() === "sent"
+      && isVanscoFacebookStory(post)
+      && activityDateKey(post) === dateKey
+    ).length;
+    const storiesScheduledToday = (facebookActivity.posts || []).filter((post) =>
+      ["scheduled", "sending"].includes(String(post?.status || "").toLowerCase())
+      && isVanscoFacebookStory(post)
+      && activityDateKey(post) === dateKey
+    ).length;
 
     let googleBusiness = {
       connected: false,
@@ -130,9 +162,17 @@ export default async function handler(request, response) {
         externalLink: config.externalLink,
         queueLimit: config.scheduledPostsLimit,
         dailyLimit: bufferState.limit?.limit ?? null,
-        sentToday: bufferState.limit?.sent ?? 0,
-        scheduledToday: bufferState.limit?.scheduled ?? 0,
-        queueCount: bufferState.posts.length,
+        sentToday,
+        providerSentToday: bufferState.limit?.sent ?? 0,
+        scheduledToday: bufferState.posts.filter((post) => !isVanscoFacebookStory(post)).length,
+        queueCount: bufferState.posts.filter((post) => !isVanscoFacebookStory(post)).length,
+      },
+      stories: {
+        target: VANSCO_FACEBOOK_STORIES_PER_DAY,
+        sentToday: storiesSentToday,
+        scheduledToday: storiesScheduledToday,
+        queueCount: bufferState.posts.filter(isVanscoFacebookStory).length,
+        lastRun: storyStatus,
       },
       googleBusiness,
       queue: bufferState.posts
