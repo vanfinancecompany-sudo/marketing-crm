@@ -57,9 +57,9 @@ replaceOnce(
 
 replaceOnce(
   `        <div className="vehicle-card__meta">Registration: {record.registration || "Not found"}</div>`,
-  `        <div className="vehicle-card__meta">Registration: {record.registration || "Not found"}</div>\n        {isImageReady ? <div className="vehicle-card__meta"><strong>Current advert:</strong> {record.currentAdvertImageCount ?? record.cmsImageCount ?? "?"} vehicle image{Number(record.currentAdvertImageCount ?? record.cmsImageCount) === 1 ? "" : "s"}</div> : null}\n        {isImageReady ? <div className="vehicle-card__meta"><strong>DealerKit now has:</strong> {record.sourceImageCount ?? "?"} vehicle images</div> : null}\n        {isImageReady ? <div className="vehicle-card__meta">Due-in photo alert: your live advert still has only 1–2 placeholder images and DealerKit now has the fuller stock gallery. Use <strong>Review vehicle</strong> to update the existing advert.</div> : null}\n        {isImageReady && record.sourceCheckedAt ? <div className="vehicle-card__meta">DealerKit images checked: {formatWatchTimestamp(record.sourceCheckedAt)}</div> : null}`,
+  `        <div className="vehicle-card__meta">Registration: {record.registration || "Not found"}</div>\n        {isImageReady ? <div className="vehicle-card__meta"><strong>Current advert:</strong> {record.currentAdvertImageCount ?? record.cmsImageCount ?? "?"} vehicle image{Number(record.currentAdvertImageCount ?? record.cmsImageCount) === 1 ? "" : "s"}</div> : null}\n        {isImageReady ? <div className="vehicle-card__meta"><strong>DealerKit now has:</strong> {record.sourceImageCount ?? "?"} vehicle images</div> : null}\n        {isImageReady ? <div className="vehicle-card__meta">Due-in photo alert: your live advert still has only 1–3 placeholder images and DealerKit now has the fuller stock gallery. Use <strong>Review vehicle</strong> to update the existing advert.</div> : null}\n        {isImageReady && record.sourceCheckedAt ? <div className="vehicle-card__meta">DealerKit images checked: {formatWatchTimestamp(record.sourceCheckedAt)}</div> : null}`,
   "photo-ready card details",
-  "Due-in photo alert: your live advert still has only 1–2 placeholder images"
+  "Due-in photo alert: your live advert still has only 1–3 placeholder images"
 );
 
 replaceOnce(
