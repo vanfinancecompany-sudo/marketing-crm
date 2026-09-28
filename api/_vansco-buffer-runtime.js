@@ -1,5 +1,12 @@
 import { list, put } from "@vercel/blob";
-import { bufferStatusPollIntervalMs } from "../lib/bufferRuntimeGuard.js";
+import { isBufferApiActiveWindow } from "../lib/bufferActiveWindow.js";
+import {
+  BUFFER_MONITORING_MAX_24H_REQUESTS,
+  bufferQuotaUsed,
+  bufferStatusPollIntervalMs,
+  bufferTwentyFourHourQuota,
+  parseBufferRateLimitHeaders,
+} from "../lib/bufferRuntimeGuard.js";
 
 const BUFFER_API_URL = "https://api.buffer.com";
 const CONFIG_PATH = "vansco-buffer-v1/channel.json";
@@ -11,6 +18,7 @@ const GOOGLE_STATUS_PATH = "vansco-buffer-v1/google-business-status.json";
 const STORY_HISTORY_PATH = "vansco-buffer-v1/facebook-story-history.json";
 const STORY_STATUS_PATH = "vansco-buffer-v1/facebook-story-status.json";
 const LIVE_STATUS_SNAPSHOT_PATH = "vansco-buffer-v1/live-status-snapshot.json";
+const API_QUOTA_STATE_PATH = "vansco-buffer-v1/api-quota-state.json";
 
 const ACCOUNT_QUERY = `
   query VanscoBufferAccount {
@@ -285,6 +293,43 @@ export function vanscoBufferCompatibleImageUrl(value) {
   }
 }
 
+let vanscoQuotaState = null;
+let vanscoQuotaReadAt = 0;
+
+async function loadVanscoQuotaState() {
+  if (vanscoQuotaState && Date.now() - vanscoQuotaReadAt < 20 * 1000) {
+    return vanscoQuotaState;
+  }
+  vanscoQuotaState = await readBlobJson(API_QUOTA_STATE_PATH) || vanscoQuotaState || {};
+  vanscoQuotaReadAt = Date.now();
+  return vanscoQuotaState;
+}
+
+async function recordVanscoQuotaTelemetry(response) {
+  const rateLimits = parseBufferRateLimitHeaders(response);
+  if (!rateLimits.length) return;
+  vanscoQuotaState = {
+    rateLimits,
+    quotaUpdatedAt: new Date().toISOString(),
+  };
+  vanscoQuotaReadAt = Date.now();
+  await writeBlobJson(API_QUOTA_STATE_PATH, vanscoQuotaState).catch(() => {});
+}
+
+async function vanscoMonitoringReserveActive() {
+  const state = await loadVanscoQuotaState();
+  const quota = bufferTwentyFourHourQuota(state);
+  const updatedMs = new Date(state?.quotaUpdatedAt || 0).getTime();
+  const fresh = Number.isFinite(updatedMs)
+    && updatedMs > 0
+    && Date.now() - updatedMs < 30 * 60 * 1000;
+  return Boolean(
+    fresh
+    && quota?.quota > 0
+    && bufferQuotaUsed(quota) >= BUFFER_MONITORING_MAX_24H_REQUESTS,
+  );
+}
+
 async function bufferGraphql(query, variables = undefined) {
   const response = await fetch(BUFFER_API_URL, {
     method: "POST",
@@ -295,6 +340,7 @@ async function bufferGraphql(query, variables = undefined) {
     body: JSON.stringify(variables ? { query, variables } : { query }),
   });
   const payload = await response.json().catch(() => ({}));
+  await recordVanscoQuotaTelemetry(response);
   if (response.status === 429) {
     const retryAfter = String(response.headers.get("retry-after") || "").trim();
     const error = new Error(readableError(payload, "Buffer rate limit reached."));
@@ -481,6 +527,36 @@ let vanscoStatusRefreshPromise = null;
 
 export async function loadVanscoCombinedStatusSnapshot({ force = false } = {}) {
   const cached = await readBlobJson(LIVE_STATUS_SNAPSHOT_PATH);
+
+  if (!isBufferApiActiveWindow()) {
+    if (cached) {
+      return {
+        ...cached,
+        cached: true,
+        dormant: true,
+      };
+    }
+    return {
+      ok: true,
+      checkedAt: null,
+      cached: true,
+      dormant: true,
+      facebook: { config: {}, limit: null, posts: [] },
+      googleBusiness: { branches: {} },
+    };
+  }
+
+  if (!force && await vanscoMonitoringReserveActive()) {
+    if (cached) {
+      return {
+        ...cached,
+        cached: true,
+        stale: true,
+        monitoringReserve: true,
+      };
+    }
+  }
+
   const maxAgeMs = bufferStatusPollIntervalMs();
   if (!force && cached && snapshotAgeMs(cached) < maxAgeMs) {
     return { ...cached, cached: true };

@@ -1,4 +1,8 @@
 import {
+  bufferDormantPayload,
+  isBufferScheduledRunDue,
+} from "../lib/bufferActiveWindow.js";
+import {
   VANSCO_GOOGLE_BUSINESS_POSTS_PER_DAY,
   buildVanscoGoogleBusinessCaption,
   extractUkRegistration,
@@ -142,6 +146,13 @@ export default async function handler(request, response) {
   }
   if (!authorize(request)) {
     return response.status(401).json({ ok: false, error: "Automation access not recognised." });
+  }
+
+  if (!isBufferScheduledRunDue("four-hour-plus-final")) {
+    return response.status(200).json(bufferDormantPayload({
+      job: "vansco-google-business",
+      message: "Vansco Google Business refill is dormant outside its daytime schedule.",
+    }));
   }
 
   const startedAt = Date.now();

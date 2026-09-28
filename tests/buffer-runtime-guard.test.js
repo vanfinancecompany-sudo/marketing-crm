@@ -117,6 +117,8 @@ test("monitoring queries are throttled before they can burn the monthly Buffer b
   assert.match(runtime, /GetVanFinanceInstagramPosts/);
   assert.match(runtime, /buffer_request_throttle/);
   assert.match(runtime, /buffer_quota_reserve/);
+  assert.match(runtime, /buffer_daily_monitoring_reserve/);
+  assert.match(runtime, /BUFFER_MONITORING_MAX_24H_REQUESTS = 175/);
   assert.match(runtime, /quotaUpdatedAt/);
 });
 

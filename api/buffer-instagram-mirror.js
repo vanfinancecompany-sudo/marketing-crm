@@ -1,5 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 import {
+  bufferDormantPayload,
+  isBufferScheduledRunDue,
+} from "../lib/bufferActiveWindow.js";
+import {
   loadBufferAutomationConfig,
   saveBufferAutomationConfig,
 } from "../lib/bufferAutomationConfig.js";
@@ -277,6 +281,14 @@ export default async function handler(request, response) {
   }
   if (!authorize(request)) {
     response.status(401).json({ ok: false, error: "Automation access not recognised." });
+    return;
+  }
+
+  if (!isBufferScheduledRunDue("two-hour")) {
+    response.status(200).json(bufferDormantPayload({
+      job: "instagram-mirror",
+      message: "Instagram mirror refill is dormant outside its daytime schedule.",
+    }));
     return;
   }
 

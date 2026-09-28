@@ -1,4 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
+import {
+  bufferDormantPayload,
+  isBufferScheduledRunDue,
+} from "../lib/bufferActiveWindow.js";
 import { loadBufferAutomationConfig } from "../lib/bufferAutomationConfig.js";
 import {
   bufferAutomationSlots,
@@ -762,6 +766,14 @@ export default async function handler(request, response) {
   }
   if (!authorize(request)) {
     response.status(401).json({ ok: false, error: "Automation access not recognised." });
+    return;
+  }
+
+  if (!isBufferScheduledRunDue("vfc-facebook")) {
+    response.status(200).json(bufferDormantPayload({
+      job: "vfc-facebook",
+      message: "Buffer publishing refill is dormant outside its daytime schedule.",
+    }));
     return;
   }
 

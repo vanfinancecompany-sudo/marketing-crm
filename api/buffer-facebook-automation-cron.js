@@ -1,3 +1,7 @@
+import {
+  bufferDormantPayload,
+  isBufferScheduledRunDue,
+} from "../lib/bufferActiveWindow.js";
 const ACCESS_HEADER = "x-marketing-customer-database-key";
 const PUBLIC_PRODUCTION_ORIGIN = "https://marketing-crm-six.vercel.app";
 const RETRY_DELAY_MS = 1500;
@@ -77,6 +81,13 @@ export default async function handler(request, response) {
   }
   if (!authorize(request)) {
     return response.status(401).json({ ok: false, error: "Automation access not recognised." });
+  }
+
+  if (!isBufferScheduledRunDue("vfc-facebook")) {
+    return response.status(200).json(bufferDormantPayload({
+      job: "vfc-facebook-cron",
+      message: "Buffer Facebook automation is dormant outside the daytime refill schedule.",
+    }));
   }
 
   const attempts = [];
