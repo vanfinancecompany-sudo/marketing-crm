@@ -25,6 +25,7 @@ function baseVehicle(overrides = {}) {
     availability: "AVAILABLE",
     stateOfVehicle: "USED",
     bodyStyle: "Pickup",
+    colour: "Blue",
     branchKey: "newForest",
     branchConflict: false,
     ...overrides,
@@ -66,6 +67,10 @@ test("requires a resolved branch and complete Google vehicle fields", () => {
   const missingRegistration = googleVehicleAdsEligibility(baseVehicle({ registration: "" }));
   assert.equal(missingRegistration.eligible, false);
   assert.ok(missingRegistration.missing.includes("id"));
+
+  const missingColour = googleVehicleAdsEligibility(baseVehicle({ colour: "" }));
+  assert.equal(missingColour.eligible, false);
+  assert.ok(missingColour.missing.includes("color"));
 });
 
 test("formats an in-stock UK vehicle offer for Merchant Center", () => {
@@ -76,12 +81,14 @@ test("formats an in-stock UK vehicle offer for Merchant Center", () => {
     title: "2025 Ford Ranger EcoBlue Wildtrak Pickup Double Cab Diesel Auto 4WD",
     description: "Ford Ranger Wildtrak pickup. Vansco New Forest.",
     link: "https://www.vansco.co.uk/vehicle-details/used-ford-ranger-for-sale-vansco-new-forest-u12345/",
+    link_template: "https://www.vansco.co.uk/vehicle-details/used-ford-ranger-for-sale-vansco-new-forest-u12345/?store={store_code}",
     image_link: "https://cdn.dealerkit.uk/ranger.jpg",
     availability: "in_stock",
     price: "32495.00 GBP",
     condition: "used",
     brand: "Ford",
     model: "Ranger",
+    color: "Blue",
     year: "2025",
     mileage: "12000 miles",
     VIN: "",
@@ -100,7 +107,7 @@ test("pilot feed is bounded and TSV-safe", () => {
 
   const feed = buildGoogleVehicleAdsTsv(vehicles, { mode: "pilot" });
   assert.equal(feed.rows.length, 12);
-  assert.ok(feed.tsv.startsWith("id\ttitle\tdescription\tlink\timage_link\tavailability\tprice"));
+  assert.ok(feed.tsv.startsWith("id\ttitle\tdescription\tlink\tlink_template\timage_link\tavailability\tprice"));
   assert.equal(feed.tsv.includes("Line one\nLine two"), false);
   assert.equal(feed.tsv.includes("\twith tab"), false);
 });
