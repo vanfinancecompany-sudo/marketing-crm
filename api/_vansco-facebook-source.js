@@ -68,16 +68,24 @@ async function hydrateVanscoVatFromDealerKitState(vehicles) {
         ? row.vehicle_snapshot
         : {};
       const vatLabel = vatLabelFromStatus(snapshot?.vatStatus);
+      const colour = String(
+        snapshot?.colour
+        || snapshot?.color
+        || snapshot?.manufacturer_colour
+        || snapshot?.manufacturerColour
+        || "",
+      ).trim();
       const imageUrls = vanscoFacebookImageUrls({
         imageUrls: [
           snapshot?.primaryImage?.url,
           ...(Array.isArray(snapshot?.images) ? snapshot.images.map((image) => image?.url) : []),
         ],
       });
-      if (!vatLabel && !imageUrls.length) continue;
+      if (!vatLabel && !imageUrls.length && !colour) continue;
 
       const evidence = {
         vatLabel,
+        colour,
         registration: String(snapshot?.registration || "").trim(),
         imageUrls,
         dealerKitTitle: String(snapshot?.title || "").trim(),
@@ -134,6 +142,7 @@ async function hydrateVanscoVatFromDealerKitState(vehicles) {
         attentionGrabber: evidence.attentionGrabber || vehicle?.attentionGrabber || "",
         make: evidence.make || vehicle?.make || "",
         model: evidence.model || vehicle?.model || "",
+        colour: vehicle?.colour || evidence.colour || "",
         imageUrl: imageUrls[0] || vehicle?.imageUrl || "",
         imageUrls,
       };
