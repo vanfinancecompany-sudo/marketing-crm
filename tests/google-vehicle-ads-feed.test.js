@@ -21,7 +21,7 @@ function baseVehicle(overrides = {}) {
     mileageUnit: "MI",
     vehicleUrl: "https://www.vansco.co.uk/vehicle-details/used-ford-ranger-for-sale-vansco-new-forest-u12345/",
     imageUrl: "https://cdn.dealerkit.uk/ranger.jpg",
-    description: "Ford Ranger Wildtrak pickup. Vansco New Forest.",
+    description: "Ford Ranger Wildtrak pickup. 📞 Vansco New Forest. ✔️ Reserve for £99.",
     availability: "AVAILABLE",
     stateOfVehicle: "USED",
     bodyStyle: "Pickup",
@@ -79,7 +79,7 @@ test("formats an in-stock UK vehicle offer for Merchant Center", () => {
   assert.deepEqual(rows[0], {
     id: "HV25FCG",
     title: "2025 Ford Ranger EcoBlue Wildtrak Pickup Double Cab Diesel Auto 4WD",
-    description: "Ford Ranger Wildtrak pickup. Vansco New Forest.",
+    description: "Ford Ranger Wildtrak pickup. Vansco New Forest. Reserve for £99.",
     link: "https://www.vansco.co.uk/vehicle-details/used-ford-ranger-for-sale-vansco-new-forest-u12345/",
     link_template: "https://www.vansco.co.uk/vehicle-details/used-ford-ranger-for-sale-vansco-new-forest-u12345/?store={store_code}",
     image_link: "https://cdn.dealerkit.uk/ranger.jpg",
@@ -96,6 +96,12 @@ test("formats an in-stock UK vehicle offer for Merchant Center", () => {
     store_code: "VANSCO-NEWFOREST",
     google_product_category: "916",
   });
+});
+
+test("removes emoji characters from Merchant Center descriptions", () => {
+  const { rows } = buildGoogleVehicleAdsRows([baseVehicle()], { mode: "pilot" });
+  assert.equal(rows[0].description, "Ford Ranger Wildtrak pickup. Vansco New Forest. Reserve for £99.");
+  assert.equal(/[\p{Extended_Pictographic}\u2600-\u27BF\uFE0F\u200D]/u.test(rows[0].description), false);
 });
 
 test("pilot feed is bounded and TSV-safe", () => {
