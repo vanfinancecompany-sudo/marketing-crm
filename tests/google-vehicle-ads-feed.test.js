@@ -5,7 +5,7 @@ import {
   buildGoogleVehicleAdsRows,
   buildGoogleVehicleAdsTsv,
   googleVehicleAdsEligibility,
-  isGoogleVehicleAdsSupportedVehicle,
+  isGoogleVehicleAdsTargetVehicle,
 } from "../lib/googleVehicleAdsFeed.js";
 
 function baseVehicle(overrides = {}) {
@@ -40,17 +40,18 @@ test("uses the exact Merchant Center store codes configured for Vansco", () => {
   });
 });
 
-test("allows cars and pickups but blocks ordinary commercial vans", () => {
-  assert.equal(isGoogleVehicleAdsSupportedVehicle(baseVehicle()), true);
-  assert.equal(isGoogleVehicleAdsSupportedVehicle(baseVehicle({
-    model: "Defender",
-    title: "Land Rover Defender OCTA",
-    bodyStyle: "SUV",
-  })), true);
-  assert.equal(isGoogleVehicleAdsSupportedVehicle(baseVehicle({
+test("targets Vansco commercial stock and excludes passenger cars", () => {
+  assert.equal(isGoogleVehicleAdsTargetVehicle(baseVehicle()), true);
+  assert.equal(isGoogleVehicleAdsTargetVehicle(baseVehicle({
     model: "Transit",
     title: "Ford Transit 350 L3 H3 Panel Van",
     bodyStyle: "Panel Van",
+  })), true);
+  assert.equal(isGoogleVehicleAdsTargetVehicle(baseVehicle({
+    make: "BMW",
+    model: "3 Series",
+    title: "BMW 3 Series 320d",
+    bodyStyle: "Saloon",
   })), false);
 });
 
@@ -83,6 +84,8 @@ test("formats an in-stock UK vehicle offer for Merchant Center", () => {
     model: "Ranger",
     year: "2025",
     mileage: "12000 miles",
+    VIN: "",
+    body_style: "truck",
     store_code: "VANSCO-NEWFOREST",
     google_product_category: "916",
   });
@@ -102,20 +105,28 @@ test("pilot feed is bounded and TSV-safe", () => {
   assert.equal(feed.tsv.includes("\twith tab"), false);
 });
 
-test("full feed includes every eligible supported vehicle", () => {
+test("full feed includes Vansco vans and pickups while excluding passenger cars", () => {
   const vehicles = [
     baseVehicle({ registration: "HV25FCG" }),
-    baseVehicle({ registration: "AB24XYZ", vehicleKey: "stock-2" }),
     baseVehicle({
       registration: "CD24XYZ",
-      vehicleKey: "stock-3",
+      vehicleKey: "stock-2",
       model: "Transit",
       title: "Ford Transit Panel Van",
       bodyStyle: "Panel Van",
+    }),
+    baseVehicle({
+      registration: "AB24XYZ",
+      vehicleKey: "stock-3",
+      make: "BMW",
+      model: "3 Series",
+      title: "BMW 3 Series 320d",
+      bodyStyle: "Saloon",
     }),
   ];
 
   const feed = buildGoogleVehicleAdsRows(vehicles, { mode: "full" });
   assert.equal(feed.rows.length, 2);
-  assert.equal(feed.skipped.some((item) => item.reason === "commercial_vehicle_not_supported"), true);
+  assert.equal(feed.rows.some((row) => row.body_style === "full_size_van"), true);
+  assert.equal(feed.skipped.some((item) => item.reason === "not_vansco_commercial_stock"), true);
 });
