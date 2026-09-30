@@ -1,0 +1,333 @@
+(() => {
+  if (window.__VFC_MARKETPLACE_MANAGER_BOOTED__) return;
+  if (!/^\/marketplace\/you\/selling\/?/i.test(window.location.pathname)) return;
+  window.__VFC_MARKETPLACE_MANAGER_BOOTED__ = true;
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const state = {
+    rows: [],
+    context: { registry: [], stock: {} },
+    running: false,
+    productFilter: "all",
+    cursor: -1,
+  };
+
+  function fold(value) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[’'\`]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  function visible(element) {
+    if (!element) return false;
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+  }
+
+  function itemIdentity(href) {
+    try {
+      const url = new URL(href, window.location.origin);
+      const match = url.pathname.match(/^\/marketplace\/item\/([^/?#]+)/i);
+      if (!match) return null;
+      return {
+        itemId: match[1],
+        listingUrl: `https://www.facebook.com/marketplace/item/${match[1]}/`,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function nearestListingCard(link) {
+    let node = link;
+    for (let depth = 0; depth < 11 && node?.parentElement; depth += 1) {
+      node = node.parentElement;
+      const text = fold(node.innerText || node.textContent);
+      const itemLinks = node.querySelectorAll?.('a[href*="/marketplace/item/"]').length || 0;
+      const looksManaged =
+        text.includes("mark as sold") ||
+        text.includes("boost listing") ||
+        text.includes("renew your listing") ||
+        text.includes("listed on marketplace");
+      if (looksManaged && itemLinks <= 3) return node;
+    }
+    return link.closest?.('[role="article"]') || link.parentElement;
+  }
+
+  function listingTitle(card, link) {
+    const direct = String(link?.innerText || link?.textContent || "").trim();
+    if (direct && direct.length > 4) return direct.split("\n").map((line) => line.trim()).find(Boolean) || direct;
+    const lines = String(card?.innerText || card?.textContent || "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    return (
+      lines.find((line) => /rent2buyvans\.co\.uk|vanfinancecompany\.co\.uk/i.test(line)) ||
+      lines.find((line) => /^20\d{2}\s+/.test(line) && !/^£/.test(line)) ||
+      lines[0] ||
+      "Marketplace listing"
+    );
+  }
+
+  function classifyProduct(text, registryEntry) {
+    const explicit = fold(registryEntry?.pipeline || registryEntry?.postingDestination || "");
+    if (explicit.includes("rent2buy")) return "rent2buy";
+    if (explicit.includes("finance")) return "finance";
+    const value = fold(text);
+    if (value.includes("rent2buyvans.co.uk") || value.includes("rent2buy")) return "rent2buy";
+    if (value.includes("vanfinancecompany.co.uk") || value.includes("deposit from £99")) return "finance";
+    return "unknown";
+  }
+
+  function registryByItemId() {
+    const map = new Map();
+    for (const item of state.context.registry || []) {
+      const identity = itemIdentity(item?.listingUrl || "");
+      if (identity?.itemId) map.set(identity.itemId, item);
+    }
+    return map;
+  }
+
+  function stockStatus(product, registryEntry) {
+    if (!registryEntry?.registration || !["finance", "rent2buy"].includes(product)) return "unknown";
+    const snapshot = state.context.stock?.[product];
+    if (!snapshot || !Array.isArray(snapshot.registrations) || !snapshot.registrations.length) return "unknown";
+    const reg = String(registryEntry.registration || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    return snapshot.registrations.includes(reg) ? "active" : "stale";
+  }
+
+  async function loadContext() {
+    try {
+      const result = await chrome.runtime.sendMessage({ type: "GET_MARKETPLACE_MANAGER_CONTEXT" });
+      if (result?.ok) {
+        state.context = {
+          registry: Array.isArray(result.registry) ? result.registry : [],
+          stock: result.stock || {},
+        };
+      }
+    } catch {}
+  }
+
+  function scanLoadedListings() {
+    const registry = registryByItemId();
+    const seen = new Set();
+    const rows = [];
+    for (const link of document.querySelectorAll('a[href*="/marketplace/item/"]')) {
+      const identity = itemIdentity(link.href);
+      if (!identity || seen.has(identity.itemId)) continue;
+      const card = nearestListingCard(link);
+      if (!card || !visible(card)) continue;
+      seen.add(identity.itemId);
+      const entry = registry.get(identity.itemId) || null;
+      const title = listingTitle(card, link);
+      const product = classifyProduct(`${title} ${card.innerText || ""}`, entry);
+      rows.push({
+        ...identity,
+        card,
+        title,
+        product,
+        registryEntry: entry,
+        stockStatus: stockStatus(product, entry),
+        renewable: fold(card.innerText || card.textContent).includes("renew your listing"),
+      });
+    }
+    state.rows = rows;
+    state.cursor = -1;
+    render();
+    return rows;
+  }
+
+  function currentRows() {
+    if (state.productFilter === "all") return state.rows;
+    return state.rows.filter((row) => row.product === state.productFilter);
+  }
+
+  function findMenuButton(card) {
+    return [...card.querySelectorAll('button,[role="button"],div[tabindex="0"]')]
+      .filter(visible)
+      .find((element) => {
+        const label = fold([
+          element.getAttribute?.("aria-label"),
+          element.getAttribute?.("title"),
+          element.innerText,
+          element.textContent,
+        ].filter(Boolean).join(" "));
+        return (
+          label === "more" ||
+          label.includes("more options") ||
+          label.includes("more actions") ||
+          label.includes("listing actions") ||
+          label === "menu"
+        );
+      }) || null;
+  }
+
+  function visibleRenewOption() {
+    return [...document.querySelectorAll('[role="menuitem"],[role="button"],div[tabindex="0"],span')]
+      .filter(visible)
+      .find((element) => fold(element.innerText || element.textContent) === "renew listing") || null;
+  }
+
+  function closeOpenMenu() {
+    try {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+      document.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", code: "Escape", bubbles: true }));
+    } catch {}
+  }
+
+  async function revealNextRenewable() {
+    if (state.running) return;
+    const rows = currentRows().filter((row) => row.stockStatus !== "stale");
+    if (!rows.length) {
+      render("No loaded listings available in this filter.");
+      return;
+    }
+
+    state.running = true;
+    for (let step = 0; step < rows.length; step += 1) {
+      state.cursor = (state.cursor + 1) % rows.length;
+      const row = rows[state.cursor];
+      render(`Checking: ${row.title.slice(0, 58)}…`);
+      row.card.scrollIntoView({ block: "center", behavior: "smooth" });
+      await sleep(350);
+
+      const menu = findMenuButton(row.card);
+      if (!menu) continue;
+      menu.click();
+      await sleep(350);
+      const renew = visibleRenewOption();
+      if (!renew) {
+        closeOpenMenu();
+        await sleep(150);
+        continue;
+      }
+
+      row.renewable = true;
+      try {
+        renew.style.outline = "3px solid #e31b23";
+        renew.style.outlineOffset = "2px";
+      } catch {}
+      state.running = false;
+      render(`Ready: ${row.title.slice(0, 70)}. Facebook's Renew listing option is open. Click it manually, then press Next renewable.`);
+      return;
+    }
+
+    state.running = false;
+    render("No further Renew listing option was found in the listings currently loaded on the page.");
+  }
+
+  function stats() {
+    const rows = currentRows();
+    return {
+      total: rows.length,
+      rent2buy: rows.filter((row) => row.product === "rent2buy").length,
+      finance: rows.filter((row) => row.product === "finance").length,
+      active: rows.filter((row) => row.stockStatus === "active").length,
+      stale: rows.filter((row) => row.stockStatus === "stale").length,
+      stockUnknown: rows.filter((row) => row.stockStatus === "unknown").length,
+    };
+  }
+
+  function panel() {
+    let root = document.getElementById("vfc-marketplace-manager");
+    if (root) return root;
+    root = document.createElement("section");
+    root.id = "vfc-marketplace-manager";
+    root.style.cssText = [
+      "position:fixed",
+      "right:18px",
+      "bottom:18px",
+      "z-index:2147483646",
+      "width:min(420px,calc(100vw - 36px))",
+      "background:#111216",
+      "color:#fff",
+      "border:2px solid #e31b23",
+      "border-radius:14px",
+      "box-shadow:0 16px 42px rgba(0,0,0,.42)",
+      "font:13px/1.35 Arial,sans-serif",
+      "overflow:hidden",
+    ].join(";");
+    document.documentElement.appendChild(root);
+    return root;
+  }
+
+  function render(message = "") {
+    const root = panel();
+    const summary = stats();
+    root.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;background:#08090b">
+        <div>
+          <div style="font-size:15px;font-weight:800">VFC Marketplace Manager</div>
+          <div style="color:#aeb1b8;font-size:11px">Edge helper · v${chrome.runtime.getManifest().version}</div>
+        </div>
+        <button id="vfc-mgr-hide" style="border:0;background:#24262b;color:#fff;border-radius:8px;padding:6px 9px;cursor:pointer">Hide</button>
+      </div>
+      <div style="padding:12px 14px 14px">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px">
+          <div style="background:#1c1e23;border-radius:8px;padding:8px"><b style="font-size:17px">${summary.total}</b><br><span style="color:#aeb1b8">loaded</span></div>
+          <div style="background:#1c1e23;border-radius:8px;padding:8px"><b style="font-size:17px">${summary.rent2buy}</b><br><span style="color:#aeb1b8">Rent2Buy</span></div>
+          <div style="background:#1c1e23;border-radius:8px;padding:8px"><b style="font-size:17px">${summary.finance}</b><br><span style="color:#aeb1b8">Finance</span></div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:9px">
+          <label for="vfc-mgr-product" style="color:#c8cad0;font-weight:700">Show</label>
+          <select id="vfc-mgr-product" style="flex:1;background:#202228;color:#fff;border:1px solid #3c3f47;border-radius:8px;padding:7px">
+            <option value="all" ${state.productFilter === "all" ? "selected" : ""}>All VFC + Rent2Buy</option>
+            <option value="rent2buy" ${state.productFilter === "rent2buy" ? "selected" : ""}>Rent2Buy only</option>
+            <option value="finance" ${state.productFilter === "finance" ? "selected" : ""}>Van Finance only</option>
+          </select>
+        </div>
+        <div style="font-size:11px;color:#b9bbc1;margin-bottom:10px">
+          Stock match: <b style="color:#bfffc8">${summary.active} active</b> ·
+          <b style="color:#ffb4b4">${summary.stale} stale</b> ·
+          ${summary.stockUnknown} unknown
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+          <button id="vfc-mgr-scan" ${state.running ? "disabled" : ""} style="min-height:38px;border:0;border-radius:9px;background:#343740;color:#fff;font-weight:700;cursor:pointer">Scan loaded</button>
+          <button id="vfc-mgr-next" ${state.running ? "disabled" : ""} style="min-height:38px;border:0;border-radius:9px;background:#e31b23;color:#fff;font-weight:800;cursor:pointer">Next renewable</button>
+        </div>
+        <div style="margin-top:9px;padding:8px;border-radius:8px;background:#191b20;color:#c7c9cf;min-height:32px">
+          ${message || (state.rows.length ? "Ready. The helper opens the next Facebook menu that contains Renew listing; you make the final Renew click." : "Click Scan loaded after your Marketplace listings have appeared.")}
+        </div>
+        <div style="margin-top:7px;color:#8e9199;font-size:10px">Never deletes, marks sold, edits, boosts, publishes or renews a listing without your click.</div>
+      </div>
+    `;
+
+    root.querySelector("#vfc-mgr-hide")?.addEventListener("click", () => {
+      root.style.display = "none";
+      const reopen = document.createElement("button");
+      reopen.id = "vfc-marketplace-manager-reopen";
+      reopen.textContent = "Marketplace Helper";
+      reopen.style.cssText = "position:fixed;right:18px;bottom:18px;z-index:2147483646;border:0;border-radius:999px;padding:10px 14px;background:#111216;color:#fff;font:700 12px Arial;box-shadow:0 8px 24px rgba(0,0,0,.3);cursor:pointer";
+      reopen.addEventListener("click", () => {
+        reopen.remove();
+        root.style.display = "";
+      });
+      document.documentElement.appendChild(reopen);
+    });
+    root.querySelector("#vfc-mgr-product")?.addEventListener("change", (event) => {
+      state.productFilter = event.target.value;
+      state.cursor = -1;
+      render();
+    });
+    root.querySelector("#vfc-mgr-scan")?.addEventListener("click", scanLoadedListings);
+    root.querySelector("#vfc-mgr-next")?.addEventListener("click", revealNextRenewable);
+  }
+
+  async function boot() {
+    await loadContext();
+    render("Waiting for Facebook Marketplace listings…");
+    let attempts = 0;
+    while (attempts < 20 && !document.querySelector('a[href*="/marketplace/item/"]')) {
+      attempts += 1;
+      await sleep(500);
+    }
+    scanLoadedListings();
+  }
+
+  boot();
+})();
