@@ -1,5 +1,7 @@
 const PENDING_JOB_KEY = "vfcPendingMarketplaceJob";
 const LAST_RECEIPT_KEY = "vfcLastMarketplaceReceipt";
+const MARKETPLACE_LISTING_REGISTRY_KEY = "vfcMarketplaceListingRegistryV1";
+const MARKETPLACE_STOCK_SNAPSHOTS_KEY = "vfcMarketplaceStockSnapshotsV1";
 const PUBLISH_CONFIRM_WINDOW_MS = 10 * 60 * 1000;
 const GROUP_AGENT_STATE_KEY = "vfcFacebookGroupsAgentState";
 const GROUP_POST_JOB_KEY = "vfcPendingFacebookGroupPost";
@@ -12,6 +14,63 @@ const GROUP_APPROVAL_CHECK_MINUTES = 60;
 
 function clean(value) {
   return String(value ?? "").trim();
+}
+
+function normalizeRegistration(value) {
+  return clean(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+async function getMarketplaceListingRegistry() {
+  const stored = await chrome.storage.local.get(MARKETPLACE_LISTING_REGISTRY_KEY);
+  return Array.isArray(stored[MARKETPLACE_LISTING_REGISTRY_KEY])
+    ? stored[MARKETPLACE_LISTING_REGISTRY_KEY]
+    : [];
+}
+
+async function saveMarketplaceListingRegistry(items) {
+  const rows = Array.isArray(items) ? items.slice(-1500) : [];
+  await chrome.storage.local.set({ [MARKETPLACE_LISTING_REGISTRY_KEY]: rows });
+  return rows;
+}
+
+async function upsertMarketplaceListingRegistry(receipt) {
+  if (!receipt?.listingUrl || !receipt?.registration) return getMarketplaceListingRegistry();
+  const current = await getMarketplaceListingRegistry();
+  const url = clean(receipt.listingUrl);
+  const registration = normalizeRegistration(receipt.registration);
+  const next = current.filter((item) => clean(item?.listingUrl) !== url);
+  next.push({
+    listingUrl: url,
+    registration,
+    vehicleId: clean(receipt.vehicleId),
+    pipeline: clean(receipt.pipeline),
+    postingDestination: clean(receipt.postingDestination || receipt.destination),
+    publishedAt: clean(receipt.publishedAt),
+  });
+  return saveMarketplaceListingRegistry(next);
+}
+
+async function getMarketplaceStockSnapshots() {
+  const stored = await chrome.storage.local.get(MARKETPLACE_STOCK_SNAPSHOTS_KEY);
+  return stored[MARKETPLACE_STOCK_SNAPSHOTS_KEY] || {};
+}
+
+async function saveMarketplaceStockSnapshot(product, registrations, generatedAt = "") {
+  const productKey = product === "finance" ? "finance" : product === "rent2buy" ? "rent2buy" : "";
+  if (!productKey) throw new Error("Marketplace stock snapshot product is invalid.");
+  const cleanRegistrations = [...new Set((Array.isArray(registrations) ? registrations : [])
+    .map(normalizeRegistration)
+    .filter(Boolean))];
+  const current = await getMarketplaceStockSnapshots();
+  const next = {
+    ...current,
+    [productKey]: {
+      registrations: cleanRegistrations,
+      generatedAt: clean(generatedAt) || new Date().toISOString(),
+    },
+  };
+  await chrome.storage.local.set({ [MARKETPLACE_STOCK_SNAPSHOTS_KEY]: next });
+  return next;
 }
 
 function isMarketplaceItemUrl(value) {
@@ -233,6 +292,7 @@ async function createPublishReceipt(pending, listingUrl) {
   };
 
   await chrome.storage.local.set({ [LAST_RECEIPT_KEY]: receipt });
+  await upsertMarketplaceListingRegistry(receipt);
   await clearPendingJob();
   await broadcastReceipt(receipt, pending.crmTabId);
   return receipt;
@@ -247,6 +307,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         version: manifest?.version || "",
         capabilities: [
           "marketplace",
+          "marketplace-renew-manager",
           "groups-discovery",
           "groups-inspection",
           "groups-post-prep",
@@ -255,6 +316,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           "groups-state-recovery",
         ],
       });
+      return;
+    }
+
+    if (message?.type === "GET_MARKETPLACE_MANAGER_CONTEXT") {
+      sendResponse({
+        ok: true,
+        registry: await getMarketplaceListingRegistry(),
+        stock: await getMarketplaceStockSnapshots(),
+      });
+      return;
+    }
+
+    if (message?.type === "STORE_MARKETPLACE_STOCK_SNAPSHOT") {
+      try {
+        const stock = await saveMarketplaceStockSnapshot(
+          message.product,
+          message.registrations,
+          message.generatedAt,
+        );
+        sendResponse({ ok: true, stock });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
       return;
     }
 
