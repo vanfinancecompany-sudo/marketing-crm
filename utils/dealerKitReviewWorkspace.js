@@ -3,6 +3,8 @@ import {
   parseMarketingJsonResponse,
 } from "../services/marketingAccess.js";
 
+import { currentWixAdvertForReview, currentWixAdvertPrice } from "../lib/dealerKitAdvertisedReviewContext.js";
+
 const WORKSPACE_ATTRIBUTE = "data-dealerkit-review-workspace";
 const BUTTON_ATTRIBUTE = "data-dealerkit-review-button";
 const CATEGORY_OPTIONS = Object.freeze([
@@ -327,6 +329,7 @@ function renderVehicle(workspace, payload) {
   const vehicle = payload?.vehicle || {};
   const local = payload?.local || {};
   const product = ["rent2buy", "cars"].includes(workspace.dataset.product) ? workspace.dataset.product : "finance";
+  const currentAdvert = currentWixAdvertForReview(workspace._dealerKitCurrentWixAdvert, vehicle.registration, product);
   const state = buildReviewState(vehicle, payload?.reviewDecision || {}, product);
   const body = workspace.querySelector("[data-dealerkit-review-body]");
   const title = workspace.querySelector("[data-dealerkit-review-title]");
@@ -334,23 +337,34 @@ function renderVehicle(workspace, payload) {
   if (!body || !title || !subtitle) return;
 
   title.textContent = vehicle.registration || "DealerKit vehicle";
-  subtitle.textContent = vehicle.title || [vehicle.make, vehicle.model, vehicle.derivative].filter(Boolean).join(" ") || "Vehicle review";
+  subtitle.textContent = currentAdvert?.vehicleDescription || currentAdvert?.title || vehicle.title || [vehicle.make, vehicle.model, vehicle.derivative].filter(Boolean).join(" ") || "Vehicle review";
   body.replaceChildren();
 
   const hero = element("section", "dealerkit-review__hero");
-  const primary = currentPrimaryImage(vehicle, state);
+  const primary = currentAdvert ? { url: currentAdvert.imageUrl } : currentPrimaryImage(vehicle, state);
+  if (currentAdvert) hero.appendChild(element("strong", "dealerkit-review__current-image-label", "Current Wix image"));
   let heroImage = null;
   if (primary?.url) {
     heroImage = document.createElement("img");
     heroImage.src = primary.url;
-    heroImage.alt = vehicle.registration || vehicle.title || "DealerKit vehicle";
+    heroImage.alt = currentAdvert ? `Current Wix image for ${vehicle.registration}` : vehicle.registration || vehicle.title || "DealerKit vehicle";
     heroImage.loading = "eager";
     hero.appendChild(heroImage);
   } else {
-    hero.appendChild(element("div", "dealerkit-review__hero-placeholder", "No included DealerKit image"));
+    hero.appendChild(element("div", "dealerkit-review__hero-placeholder", currentAdvert ? "No picture stored on the current Wix advert" : "No included DealerKit image"));
   }
 
   const facts = element("div", "dealerkit-review__facts");
+  if (currentAdvert) {
+    facts.append(detail("Current advert", "Published in Wix"), detail("Current advert price", currentWixAdvertPrice(currentAdvert)));
+    if (currentAdvert.advertUrl) {
+      const link = element("a", "dealerkit-review__link", "Open current Wix advert");
+      link.href = currentAdvert.advertUrl;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      facts.appendChild(link);
+    }
+  }
   facts.append(
     detail("DealerKit status", vehicle.sourceStatus || "Unknown"),
     detail("Retail", Number.isFinite(Number(vehicle.retailPrice)) ? formatPrice(vehicle.retailPrice) : "–"),
@@ -369,7 +383,9 @@ function renderVehicle(workspace, payload) {
   body.appendChild(hero);
 
   const localGrid = element("div", "dealerkit-review__local-grid");
-  if (product === "cars") {
+  if (currentAdvert) {
+    localGrid.appendChild(element("section", "dealerkit-review__local-card", `${product === "rent2buy" ? "Rent2Buy" : product === "cars" ? "Cars" : "Van Finance"} · Published in Wix · ${currentWixAdvertPrice(currentAdvert)}`));
+  } else if (product === "cars") {
     localGrid.appendChild(element("section", "dealerkit-review__local-card", "Cars live Wix presence is checked again in the controlled reconcile preview below."));
   } else {
     localGrid.append(localCard(product === "rent2buy" ? "Rent2Buy" : "Van Finance", local[product]));
@@ -378,6 +394,7 @@ function renderVehicle(workspace, payload) {
 
   const gallerySection = element("section", "dealerkit-review__section");
   gallerySection.appendChild(element("h3", "", `DealerKit images (${vehicle.images?.length || 0})`));
+  if (currentAdvert) gallerySection.appendChild(element("p", "dealerkit-review__section-note", "DealerKit source photos are possible replacements. The Current Wix image above stays live until you Prepare and Reconcile the advert."));
   gallerySection.appendChild(element("p", "dealerkit-review__section-note", "Choose which source photos we are allowed to use and select the primary image. Only stable DealerKit image IDs are stored; the image files stay at source until the future Wix media step."));
   const gallery = element("div", "dealerkit-review__gallery");
   const imageControls = [];
@@ -398,11 +415,11 @@ function renderVehicle(workspace, payload) {
       control.figure.classList.toggle("is-primary", isPrimary);
       control.include.checked = !excluded;
       control.primary.disabled = excluded || !control.id;
-      control.primary.textContent = isPrimary ? "Primary" : "Set primary";
-      control.caption.textContent = isPrimary ? `Image ${control.index + 1} · PRIMARY` : `Source image ${control.index + 1}`;
+      control.primary.textContent = currentAdvert ? (isPrimary ? "Replacement primary" : "Set replacement primary") : isPrimary ? "Primary" : "Set primary";
+      control.caption.textContent = isPrimary ? `Image ${control.index + 1} · ${currentAdvert ? "REPLACEMENT PRIMARY" : "PRIMARY"}` : `Source image ${control.index + 1}`;
     }
     const selected = currentPrimaryImage(vehicle, state);
-    if (heroImage && selected?.url) heroImage.src = selected.url;
+    if (!currentAdvert && heroImage && selected?.url) heroImage.src = selected.url;
   }
 
   for (const [index, imageData] of (vehicle.images || []).entries()) {
@@ -551,10 +568,13 @@ function getWorkspace() {
   return document.querySelector(`[${WORKSPACE_ATTRIBUTE}]`) || createWorkspace();
 }
 
-async function openWorkspace(registration, supplierStockId = "", product = "finance") {
+async function openWorkspace(registration, supplierStockId = "", product = "finance", advertisedWixRecord = null) {
   const workspace = getWorkspace();
   workspace.dataset.product = ["finance", "rent2buy", "cars"].includes(product) ? product : "finance";
   workspace.dataset.supplierStockId = clean(supplierStockId);
+  workspace._dealerKitCurrentWixAdvert = null;
+  workspace._dealerKitReviewReady = false;
+  workspace._dealerKitProductGalleryState = null;
   workspace.hidden = false;
   workspace.setAttribute("aria-hidden", "false");
   document.body.classList.add("dealerkit-review-open");
@@ -562,6 +582,7 @@ async function openWorkspace(registration, supplierStockId = "", product = "fina
 
   const requestId = ++activeRequest;
   try {
+    workspace._dealerKitCurrentWixAdvert = currentWixAdvertForReview(advertisedWixRecord, registration, workspace.dataset.product);
     const params = new URLSearchParams({ registration });
     if (supplierStockId) params.set("stockId", supplierStockId);
     params.set("product", workspace.dataset.product);
@@ -573,6 +594,7 @@ async function openWorkspace(registration, supplierStockId = "", product = "fina
     const payload = await parseMarketingJsonResponse(response, "Could not load DealerKit vehicle review.");
     if (requestId !== activeRequest) return;
     renderVehicle(workspace, payload);
+    workspace._dealerKitReviewReady = true;
   } catch (error) {
     if (requestId !== activeRequest) return;
     setError(workspace, error?.message || "Could not load DealerKit vehicle review. No stock data was changed.");
@@ -608,7 +630,7 @@ function scheduleScan() {
 if (typeof document !== "undefined") {
   window.addEventListener("dealerkit-open-product-review", (event) => {
     const detail = event.detail || {};
-    openWorkspace(clean(detail.registration), clean(detail.supplierStockId), clean(detail.product)).catch(() => null);
+    openWorkspace(clean(detail.registration), clean(detail.supplierStockId), clean(detail.product), detail.advertisedWixRecord ?? null).catch(() => null);
   });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", scheduleScan, { once: true });
   else scheduleScan();
