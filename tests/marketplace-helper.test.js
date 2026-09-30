@@ -121,9 +121,8 @@ test("Marketplace helper adds a manual renewal assistant for Edge seller listing
   assert.ok(managerEntry.matches.includes("https://www.facebook.com/marketplace/you/selling*"));
   assert.match(marketplaceManagerSource, /Find next renewable/);
   assert.match(marketplaceManagerSource, /Renew listing/);
-  assert.match(marketplaceManagerSource, /you make the final click/i);
+  assert.match(marketplaceManagerSource, /Click Renew listing, then press Find next renewable/i);
   assert.match(marketplaceManagerSource, /stockStatus/);
-  assert.doesNotMatch(marketplaceManagerSource, /renew\.click\(/);
 });
 
 test("Marketplace helper syncs live stock context for stale-listing warnings", () => {
@@ -149,7 +148,6 @@ test("Marketplace manager scans the virtualised list and searches for the next r
   assert.match(marketplaceManagerSource, /Find next renewable/);
   assert.match(marketplaceManagerSource, /window\.scrollTo/);
   assert.match(marketplaceManagerSource, /window\.scrollBy/);
-  assert.doesNotMatch(marketplaceManagerSource, /renew\.click\(/);
 });
 
 
@@ -159,4 +157,18 @@ test("Marketplace manager waits through Facebook pagination loaders before stopp
   assert.match(marketplaceManagerSource, /Facebook is loading the next batch/);
   assert.match(marketplaceManagerSource, /Waiting for Facebook to load the next batch/);
   assert.match(marketplaceManagerSource, /12000/);
+});
+
+
+test("Marketplace manager bulk renewal is explicit, paced and stoppable", () => {
+  assert.match(marketplaceManagerSource, /Auto renew current filter/);
+  assert.match(marketplaceManagerSource, /window\.confirm/);
+  assert.match(marketplaceManagerSource, /clickRenewForRow/);
+  assert.match(marketplaceManagerSource, /renew\.click\(\)/);
+  assert.match(marketplaceManagerSource, /Stop auto renewal/);
+  assert.match(marketplaceManagerSource, /stopRequested/);
+  assert.match(marketplaceManagerSource, /facebookBlockingMessage/);
+  assert.match(marketplaceManagerSource, /temporarily blocked/);
+  assert.match(marketplaceManagerSource, /try again later/);
+  assert.match(marketplaceManagerSource, /await sleep\(850\)/);
 });

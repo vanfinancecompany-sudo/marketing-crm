@@ -10,6 +10,8 @@
     running: false,
     productFilter: "all",
     renewSeen: new Set(),
+    autoProcessed: new Set(),
+    stopRequested: false,
   };
 
   function fold(value) {
@@ -375,6 +377,55 @@
     } catch {}
   }
 
+  function facebookBlockingMessage() {
+    const candidates = [
+      ...document.querySelectorAll('[role="alert"],[role="dialog"],[aria-live="assertive"],[aria-live="polite"]'),
+    ].filter(visible);
+    for (const element of candidates) {
+      const text = fold(element.innerText || element.textContent);
+      if (
+        text.includes("temporarily blocked") ||
+        text.includes("try again later") ||
+        text.includes("we limit how often") ||
+        text.includes("youre going too fast") ||
+        text.includes("you're going too fast")
+      ) {
+        return String(element.innerText || element.textContent || "").trim();
+      }
+    }
+    return "";
+  }
+
+  async function clickRenewForRow(row) {
+    if (!row?.card || !document.contains(row.card)) return { renewed: false, reason: "card unavailable" };
+
+    row.card.scrollIntoView({ block: "center", behavior: "auto" });
+    await sleep(180);
+
+    const menu = findMenuButton(row.card);
+    if (!menu) return { renewed: false, reason: "menu unavailable" };
+
+    menu.click();
+    await sleep(320);
+
+    const renew = visibleRenewOption();
+    if (!renew) {
+      closeOpenMenu();
+      await sleep(120);
+      return { renewed: false, reason: "not renewable" };
+    }
+
+    renew.click();
+    await sleep(950);
+
+    const blocked = facebookBlockingMessage();
+    if (blocked) {
+      return { renewed: false, blocked: true, reason: blocked };
+    }
+
+    return { renewed: true, reason: "renewed" };
+  }
+
   async function tryOpenRenew(row) {
     if (!row?.card || !document.contains(row.card)) return false;
     row.card.scrollIntoView({ block: "center", behavior: "auto" });
@@ -465,6 +516,118 @@
     render("No further Facebook Renew listing option was found. If Facebook has just loaded more adverts, run Scan all listings again.");
   }
 
+  async function autoRenewAll() {
+    if (state.running) return;
+
+    const scopeLabel =
+      state.productFilter === "finance"
+        ? "Van Finance"
+        : state.productFilter === "rent2buy"
+          ? "Rent2Buy"
+          : "Van Finance + Rent2Buy";
+
+    const confirmed = window.confirm(
+      `Automatically renew every Facebook Marketplace listing Facebook offers as renewable in the current filter (${scopeLabel})?\n\nThe helper will click Renew listing for each eligible advert, wait between actions, continue through Facebook's loading batches, and stop if Facebook reports a limit or block.\n\nIt will not delete, edit, boost, mark sold or create adverts.`,
+    );
+    if (!confirmed) return;
+
+    state.running = true;
+    state.stopRequested = false;
+    state.autoProcessed.clear();
+
+    let renewed = 0;
+    let notRenewable = 0;
+    let failed = 0;
+    let pageWaitsWithoutProgress = 0;
+
+    window.scrollTo({ top: 0, behavior: "auto" });
+    await sleep(650);
+
+    for (let pass = 0; pass < 320 && !state.stopRequested; pass += 1) {
+      scanVisibleListings();
+
+      const rows = filteredRows(visibleRows())
+        .filter((row) => !state.autoProcessed.has(row.key))
+        .sort((a, b) => a.card.getBoundingClientRect().top - b.card.getBoundingClientRect().top);
+
+      for (const row of rows) {
+        if (state.stopRequested) break;
+
+        state.autoProcessed.add(row.key);
+        render(
+          `Auto renewing… ${renewed} renewed · ${notRenewable} not renewable · ${failed} failed. Checking: ${row.title.slice(0, 55)}…`,
+        );
+
+        try {
+          const result = await clickRenewForRow(row);
+          if (result.blocked) {
+            state.stopRequested = true;
+            state.running = false;
+            render(`Stopped because Facebook reported a limit/block: ${result.reason}`);
+            return;
+          }
+          if (result.renewed) renewed += 1;
+          else notRenewable += 1;
+        } catch {
+          failed += 1;
+          closeOpenMenu();
+        }
+
+        await sleep(850);
+      }
+
+      if (state.stopRequested) break;
+
+      const height = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0);
+      const atBottom = window.scrollY + window.innerHeight >= height - 180;
+
+      if (!atBottom) {
+        window.scrollBy({
+          top: Math.max(560, Math.round(window.innerHeight * 0.82)),
+          behavior: "auto",
+        });
+        await sleep(420);
+        continue;
+      }
+
+      const previousSignature = visibleBatchSignature();
+      const previousTotal = state.rows.length;
+      render(
+        `Waiting for Facebook's next batch… ${renewed} renewed · ${notRenewable} not renewable · ${failed} failed.`,
+      );
+
+      const loadedNextBatch = await waitForNextFacebookBatch(
+        previousSignature,
+        previousTotal,
+        12000,
+      );
+
+      if (loadedNextBatch) {
+        pageWaitsWithoutProgress = 0;
+        await sleep(280);
+        continue;
+      }
+
+      pageWaitsWithoutProgress += 1;
+      if (pageWaitsWithoutProgress >= 2) break;
+
+      window.scrollBy({ top: -220, behavior: "auto" });
+      await sleep(260);
+      window.scrollTo({
+        top: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
+        behavior: "auto",
+      });
+      await sleep(550);
+    }
+
+    state.running = false;
+    const stopped = state.stopRequested;
+    state.stopRequested = false;
+    render(
+      `${stopped ? "Auto renewal stopped" : "Auto renewal complete"}: ${renewed} renewed · ${notRenewable} not renewable · ${failed} failed.`,
+    );
+  }
+
   function stats() {
     const rows = filteredRows();
     return {
@@ -532,12 +695,14 @@
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
           <button id="vfc-mgr-scan" ${state.running ? "disabled" : ""} style="min-height:38px;border:0;border-radius:9px;background:#343740;color:#fff;font-weight:700;cursor:pointer">Scan all listings</button>
-          <button id="vfc-mgr-next" ${state.running ? "disabled" : ""} style="min-height:38px;border:0;border-radius:9px;background:#e31b23;color:#fff;font-weight:800;cursor:pointer">Find next renewable</button>
+          <button id="vfc-mgr-next" ${state.running ? "disabled" : ""} style="min-height:38px;border:0;border-radius:9px;background:#343740;color:#fff;font-weight:700;cursor:pointer">Find next renewable</button>
+          <button id="vfc-mgr-auto" ${state.running ? "disabled" : ""} style="grid-column:1/-1;min-height:42px;border:0;border-radius:9px;background:#e31b23;color:#fff;font-weight:800;cursor:pointer">Auto renew current filter</button>
+          <button id="vfc-mgr-stop" ${state.running ? "" : "disabled"} style="grid-column:1/-1;min-height:34px;border:1px solid #4b4e56;border-radius:9px;background:#202228;color:#fff;font-weight:700;cursor:pointer">Stop auto renewal</button>
         </div>
         <div style="margin-top:9px;padding:8px;border-radius:8px;background:#191b20;color:#c7c9cf;min-height:32px">
-          ${message || (state.rows.length ? "Ready. Find next renewable opens Facebook's Renew listing option; you make the final click." : "Start with Scan all listings. Facebook will scroll while the helper counts the whole list.")}
+          ${message || (state.rows.length ? "Ready. Use Auto renew current filter to renew every listing Facebook currently offers for renewal, or Find next renewable for manual review." : "Start with Scan all listings, or run Auto renew current filter directly.")}
         </div>
-        <div style="margin-top:7px;color:#8e9199;font-size:10px">Never deletes, marks sold, edits, boosts, publishes or renews a listing without your click.</div>
+        <div style="margin-top:7px;color:#8e9199;font-size:10px">Auto renew only clicks Facebook's existing Renew listing action. It never deletes, marks sold, edits, boosts, publishes or creates adverts.</div>
       </div>
     `;
 
@@ -560,6 +725,11 @@
     });
     root.querySelector("#vfc-mgr-scan")?.addEventListener("click", scanAllListings);
     root.querySelector("#vfc-mgr-next")?.addEventListener("click", findNextRenewable);
+    root.querySelector("#vfc-mgr-auto")?.addEventListener("click", autoRenewAll);
+    root.querySelector("#vfc-mgr-stop")?.addEventListener("click", () => {
+      state.stopRequested = true;
+      render("Stopping after the current Facebook action…");
+    });
   }
 
   async function boot() {
