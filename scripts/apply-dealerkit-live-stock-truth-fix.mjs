@@ -57,22 +57,34 @@ patchFile("../pages/VanscoStockWatchPage.jsx", [
   },
   {
     label: "Cars gets Review vehicle",
-    already: '(selectedPipeline === "finance" || selectedPipeline === "rent2buy" || selectedPipeline === "cars")',
+    already: '["finance", "rent2buy", "cars"].includes(selectedPipeline)',
     before: '(selectedPipeline === "finance" || selectedPipeline === "rent2buy")',
     after: '(selectedPipeline === "finance" || selectedPipeline === "rent2buy" || selectedPipeline === "cars")',
   },
   {
     label: "pause cards when Wix authority is unavailable",
-    already: "const displayRecords = useMemo(() => localLoadError ? [] : [...imageReadyRecords",
+    already: "localLoadError ? [] : [...imageReadyRecords",
     before: 'const displayRecords = useMemo(() => [...imageReadyRecords, ...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, imageReadyRecords, localNotVanscoRecords, priceDifferenceRecords]);',
     after: 'const displayRecords = useMemo(() => localLoadError ? [] : [...imageReadyRecords, ...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, imageReadyRecords, localLoadError, localNotVanscoRecords, priceDifferenceRecords]);',
+  },
+  {
+    label: "advertised maintenance also pauses when Wix authority is unavailable",
+    already: "localLoadError ? [] : [...imageReadyRecords, ...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords, ...advertisedStockRecords]",
+    before: `  const displayRecords = useMemo(
+    () => [...imageReadyRecords, ...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords, ...advertisedStockRecords],
+    [activeRecords, advertisedStockRecords, imageReadyRecords, localNotVanscoRecords, priceDifferenceRecords],
+  );`,
+    after: `  const displayRecords = useMemo(
+    () => localLoadError ? [] : [...imageReadyRecords, ...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords, ...advertisedStockRecords],
+    [activeRecords, advertisedStockRecords, imageReadyRecords, localLoadError, localNotVanscoRecords, priceDifferenceRecords],
+  );`,
   },
 ]);
 
 patchFile("../api/dealerkit-stock-detail.js", [
   {
     label: "Cars can open the DealerKit detail workspace",
-    already: '["finance", "rent2buy", "cars"].includes(clean(request.query?.product, 30).toLowerCase())',
+    already: '["finance", "rent2buy", "cars"].includes(requestedProductRaw)',
     before: 'const requestedProduct = clean(request.query?.product, 30).toLowerCase() === "rent2buy" ? "rent2buy" : "finance";',
     after: 'const requestedProduct = ["finance", "rent2buy", "cars"].includes(clean(request.query?.product, 30).toLowerCase())\n      ? clean(request.query?.product, 30).toLowerCase()\n      : "finance";',
   },
@@ -81,13 +93,13 @@ patchFile("../api/dealerkit-stock-detail.js", [
 patchFile("../utils/dealerKitReviewWorkspace.js", [
   {
     label: "Cars review label",
-    already: 'state.product === "cars" ? "Cars" : state.product === "rent2buy" ? "Rent2Buy" : "Van Finance"',
+    already: 'const productLabel = state.product === "rent2buy" ? "Rent2Buy" : state.product === "cars" ? "Cars" : "Van Finance";',
     before: 'state.product === "rent2buy" ? "Rent2Buy" : "Van Finance"',
     after: 'state.product === "cars" ? "Cars" : state.product === "rent2buy" ? "Rent2Buy" : "Van Finance"',
   },
   {
     label: "Cars have no van category selector",
-    already: "Cars are reviewed against the published CARFINANCE listing lane",
+    already: "Cars maintenance uses the saved DealerKit image selection below.",
     before: '  const categories = element("div", "dealerkit-review__category-block");',
     after: '  if (state.product === "cars") {\n    const carNote = element("div", "dealerkit-review__category-block");\n    carNote.appendChild(element("strong", "", "Cars listing lane"));\n    carNote.appendChild(element("p", "", "Cars are reviewed against the published CARFINANCE listing lane. Van Finance and Rent2Buy categories do not apply."));\n    section.appendChild(carNote);\n\n    const notesLabel = element("label", "dealerkit-review__field dealerkit-review__notes");\n    notesLabel.appendChild(element("span", "", "Review notes"));\n    const notes = document.createElement("textarea");\n    notes.rows = 3;\n    notes.maxLength = 2000;\n    notes.placeholder = "Optional note about this car or its images";\n    notes.value = state.notes;\n    notes.addEventListener("input", () => { state.notes = notes.value; });\n    notesLabel.appendChild(notes);\n    section.appendChild(notesLabel);\n    return section;\n  }\n\n  const categories = element("div", "dealerkit-review__category-block");',
   },
@@ -99,19 +111,19 @@ patchFile("../utils/dealerKitReviewWorkspace.js", [
   },
   {
     label: "Cars local card label",
-    already: 'localCard(product === "cars" ? "Cars" : product === "rent2buy" ? "Rent2Buy" : "Van Finance", local[product])',
+    already: "Cars live Wix presence is checked again in the controlled reconcile preview below.",
     before: 'localCard(product === "rent2buy" ? "Rent2Buy" : "Van Finance", local[product])',
     after: 'localCard(product === "cars" ? "Cars" : product === "rent2buy" ? "Rent2Buy" : "Van Finance", local[product])',
   },
   {
     label: "Cars save reviewed source selection",
-    already: "Saved Cars review. Nothing has been published.",
+    already: "Save Cars review",
     before: '  if (vehicle.attentionGrabber || vehicle.description) {',
     after: '  if (product === "cars") {\n    const carFooter = element("section", "dealerkit-review__section dealerkit-review__decision-footer");\n    const carMessage = element("div", "dealerkit-review__decision-state", state.persisted ? "Saved Cars review. Nothing has been published." : "Review the car and images, then save. Nothing publishes from this button.");\n    const carSave = element("button", "dealerkit-review__save", "Save");\n    carSave.type = "button";\n    carSave.addEventListener("click", async () => {\n      carSave.disabled = true;\n      carSave.textContent = "Saving…";\n      carMessage.textContent = "Saving Cars review…";\n      try {\n        state.reviewStatus = "reviewed";\n        state.financeEnabled = false;\n        state.rent2buyEnabled = false;\n        const payload = await saveReviewDecision(vehicle, state);\n        const saved = payload?.decision || {};\n        state.persisted = true;\n        state.reviewStatus = saved.reviewStatus || "reviewed";\n        state.reviewedSourceUpdatedAt = saved.reviewedSourceUpdatedAt || vehicle.sourceUpdatedAt || null;\n        state.updatedAt = saved.updatedAt || new Date().toISOString();\n        const savedState = body.querySelector(".dealerkit-review__decisions .dealerkit-review__decision-state");\n        if (savedState) savedState.textContent = `Saved ${formatSavedAt(state.updatedAt)}`;\n        carMessage.textContent = "Saved Cars review. Nothing has been published.";\n      } catch (error) {\n        carMessage.textContent = error?.message || "Could not save Cars review.";\n      } finally {\n        carSave.disabled = false;\n        carSave.textContent = "Save";\n      }\n    });\n    carFooter.append(carMessage, carSave);\n    body.appendChild(carFooter);\n  }\n\n  if (vehicle.attentionGrabber || vehicle.description) {',
   },
   {
     label: "Cars lane wording",
-    already: 'product === "cars" ? "Cars" : product === "rent2buy" ? "Rent2Buy" : "Van Finance"',
+    already: 'product === "rent2buy" ? "Rent2Buy" : product === "cars" ? "Cars" : "Van Finance"',
     before: 'product === "rent2buy" ? "Rent2Buy" : "Van Finance"',
     after: 'product === "cars" ? "Cars" : product === "rent2buy" ? "Rent2Buy" : "Van Finance"',
   },
@@ -126,7 +138,7 @@ patchFile("../utils/dealerKitReviewWorkspace.js", [
 patchFile("../utils/dealerKitProductGalleryWorkspace.js", [
   {
     label: "Cars keep their standalone review image state",
-    already: 'if (workspace.dataset.product === "cars") return;',
+    already: 'if (workspace.dataset.product === "cars") {',
     before: '    const body = workspace.querySelector("[data-dealerkit-review-body]");',
     after: '    if (workspace.dataset.product === "cars") return;\n    const body = workspace.querySelector("[data-dealerkit-review-body]");',
   },
