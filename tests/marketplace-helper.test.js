@@ -133,3 +133,12 @@ test("Marketplace helper syncs live stock context for stale-listing warnings", (
   assert.match(backgroundSource, /GET_MARKETPLACE_MANAGER_CONTEXT/);
   assert.match(backgroundSource, /marketplace-renew-manager/);
 });
+
+
+test("Marketplace renewal scan supports Facebook managed listing cards without item links", () => {
+  assert.match(marketplaceManagerSource, /function candidateListingCards\(\)/);
+  assert.match(marketplaceManagerSource, /mark as sold/);
+  assert.match(marketplaceManagerSource, /boost listing/);
+  assert.match(marketplaceManagerSource, /Scan complete: found/);
+  assert.match(marketplaceManagerSource, /listingItemLink/);
+});
