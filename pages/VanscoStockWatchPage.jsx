@@ -17,6 +17,8 @@ import {
   saveVanscoWatchAction,
 } from "../services/vanscoStockCache.js";
 
+import { fetchAdvertisedWixVehicles } from "../services/stockWatchWixListingPresence.js";
+
 const DEFAULT_FILTERS = { finance: "missing", rent2buy: "missing", cars: "missing" };
 const BASE_FILTERS = [
   { value: "missing", label: "Missing from my stock" },
@@ -158,17 +160,25 @@ function buildDealerKitByRegistration(records) {
 
 function mapAdvertisedLocalVehicleToWatchRecord(vehicle, index, selectedPipeline, dealerKitRecord = null, dealerKitIdentityAmbiguous = false) {
   const registration = normalizeLocalStockRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name);
-  const title = vehicle.title || vehicle.name || vehicle.registration || vehicle.reg || dealerKitRecord?.title || "Advertised vehicle";
-  const localStockUrl = vehicle.weblink || vehicle.webLink || vehicle.link || "";
-  const imageUrl = vehicle.image || vehicle.picture || vehicle.imageUrl || vehicle.image_url || dealerKitRecord?.imageUrl || "";
+  const title = vehicle.vehicleDescription || vehicle.title || registration || "Advertised vehicle";
+  const localStockUrl = vehicle.advertUrl || "";
+  const imageUrl = vehicle.imageUrl || "";
   return {
     ...(dealerKitRecord || {}),
-    id: `advertised-stock-${selectedPipeline}-${registration || index}`,
+    id: `advertised-stock-${selectedPipeline}-${vehicle.wixItemId || registration || index}`,
     title,
     registration,
     imageUrl,
     localStockUrl,
     pipeline: selectedPipeline,
+    wixItemId: vehicle.wixItemId || "",
+    wixCollectionId: vehicle.collection_id || "",
+    wixPublishStatus: vehicle.publishStatus || "",
+    wixPriceText: vehicle.priceText || "",
+    wixStatus: vehicle.status || "",
+    price: vehicle.price,
+    monthly: vehicle.monthly,
+    picture: vehicle.picture,
     displayStatus: "advertised_stock",
     matchStatus: dealerKitIdentityAmbiguous ? "advertised_stock_ambiguous_dealerkit" : dealerKitRecord ? "advertised_stock_dealerkit_match" : "advertised_stock_no_dealerkit_match",
     dealerKitIdentityAmbiguous,
@@ -390,6 +400,7 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
         <div className="vansco-card__badges"><PipelineBadge pipeline={selectedPipeline} /><DisplayStatusBadge status={record.displayStatus} /><SourceStatusBadge status={record.sourceStatus} /></div>
         <h3>{record.title || "Untitled vehicle"}</h3>
         <div className="vehicle-card__meta">Registration: {record.registration || "Not found"}</div>
+        {isAdvertisedStockMaintenance ? <div className="vehicle-card__meta">Published Wix advert{record.wixPriceText ? ` · ${record.wixPriceText}` : ""}</div> : null}
         {isAdvertisedStockMaintenance && record.dealerKitIdentityAmbiguous ? <div className="vehicle-card__meta">More than one DealerKit vehicle uses this registration. Resolve the duplicate before reviewing this advert.</div> : null}
         {isLocalNotVansco ? <div className="vehicle-card__meta">This registration is active in your CRM stock, but was not found in the current Vansco cache for this tab.</div> : null}
         {!isLocalNotVansco && record.safeExactRegistrationMatch ? <div className="vehicle-card__meta">This registration is currently in this CRM stock tab.</div> : null}
@@ -437,6 +448,8 @@ export default function VanscoStockWatchPage() {
   const [cacheSummaryByPipeline, setCacheSummaryByPipeline] = useState({ finance: null, rent2buy: null, cars: null });
   const [localRegistrationsByPipeline, setLocalRegistrationsByPipeline] = useState({ finance: new Set(), rent2buy: new Set(), cars: new Set() });
   const [localVehiclesByPipeline, setLocalVehiclesByPipeline] = useState({ finance: [], rent2buy: [], cars: [] });
+  const [advertisedWixVehiclesByPipeline, setAdvertisedWixVehiclesByPipeline] = useState({ finance: [], rent2buy: [], cars: [] });
+  const [advertisedStockErrorByPipeline, setAdvertisedStockErrorByPipeline] = useState({ finance: "", rent2buy: "", cars: "" });
   const [localLoadErrorByPipeline, setLocalLoadErrorByPipeline] = useState({ finance: "", rent2buy: "", cars: "" });
   const [loadingPipeline, setLoadingPipeline] = useState("");
   const [refreshingCache, setRefreshingCache] = useState(false);
@@ -465,6 +478,7 @@ export default function VanscoStockWatchPage() {
   }
 
   async function loadLocalStock(pipeline = selectedPipeline, isActive = () => true) {
+    await loadAdvertisedStock(pipeline, isActive);
     try {
       const vehicles = await fetchLocalVehiclesForPipeline(pipeline);
       if (!isActive()) return;
@@ -479,6 +493,27 @@ export default function VanscoStockWatchPage() {
       setLocalRegistrationsByPipeline((prev) => ({ ...prev, [pipeline]: new Set() }));
       setLocalLoadErrorByPipeline((prev) => ({ ...prev, [pipeline]: error.message || `Could not load ${pipelineLabel(pipeline)} local stock.` }));
       throw error;
+    }
+  }
+
+  function clearAdvertisedStock(pipelines) {
+    setAdvertisedWixVehiclesByPipeline((previous) => ({ ...previous, ...Object.fromEntries(pipelines.map((pipeline) => [pipeline, []])) }));
+  }
+
+  async function loadAdvertisedStock(pipeline = selectedPipeline, isActive = () => true, comparison = null) {
+    if (!isActive()) return;
+    clearAdvertisedStock([pipeline]);
+    try {
+      const vehicles = await fetchAdvertisedWixVehicles(pipeline, comparison);
+      if (!isActive()) return;
+      setAdvertisedWixVehiclesByPipeline((previous) => ({ ...previous, [pipeline]: vehicles }));
+      setAdvertisedStockErrorByPipeline((previous) => ({ ...previous, [pipeline]: "" }));
+      return vehicles;
+    } catch (error) {
+      if (!isActive()) return;
+      clearAdvertisedStock([pipeline]);
+      setAdvertisedStockErrorByPipeline((previous) => ({ ...previous, [pipeline]: error.message || "Published Wix adverts could not be verified." }));
+      return null;
     }
   }
 
@@ -499,6 +534,8 @@ export default function VanscoStockWatchPage() {
   const activeLocalRegistrations = localRegistrationsByPipeline[selectedPipeline] || new Set();
   const financeRegistrationsForCars = selectedPipeline === "cars" ? localRegistrationsByPipeline.finance || new Set() : new Set();
   const activeLocalVehicles = localVehiclesByPipeline[selectedPipeline] || [];
+  const activeAdvertisedWixVehicles = advertisedWixVehiclesByPipeline[selectedPipeline] || [];
+  const advertisedStockLoadError = advertisedStockErrorByPipeline[selectedPipeline] || "";
   const localLoadError = localLoadErrorByPipeline[selectedPipeline] || "";
   const cacheSummary = cacheSummaryByPipeline[selectedPipeline] || null;
   const dealerKitSnapshotComplete = cacheSummary?.sourceComplete === true;
@@ -520,14 +557,14 @@ export default function VanscoStockWatchPage() {
 
   const dealerKitByRegistration = useMemo(() => buildDealerKitByRegistration(rawActiveRecords), [rawActiveRecords]);
 
-  const advertisedStockRecords = useMemo(() => dedupeLocalVehiclesByRegistration(activeLocalVehicles)
-    .map(({ vehicle, index, registration }) => mapAdvertisedLocalVehicleToWatchRecord(
+  const advertisedStockRecords = useMemo(() => activeAdvertisedWixVehicles
+    .map((vehicle, index) => mapAdvertisedLocalVehicleToWatchRecord(
       vehicle,
       index,
       selectedPipeline,
-      dealerKitByRegistration.get(registration)?.record || null,
-      dealerKitByRegistration.get(registration)?.ambiguous || false,
-    )), [activeLocalVehicles, dealerKitByRegistration, selectedPipeline]);
+      dealerKitByRegistration.get(vehicle.registration)?.record || null,
+      dealerKitByRegistration.get(vehicle.registration)?.ambiguous || false,
+    )), [activeAdvertisedWixVehicles, dealerKitByRegistration, selectedPipeline]);
 
   const displayRecords = useMemo(
     () => [...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords, ...advertisedStockRecords],
@@ -655,12 +692,14 @@ export default function VanscoStockWatchPage() {
       ...prev,
       [selectedPipeline]: prev[selectedPipeline].filter((vehicle) => normalizeLocalStockRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name) !== registration),
     }));
+    loadAdvertisedStock(selectedPipeline);
   }
 
   return (
     <div className="page-stack">
       <section className="panel hero-panel vansco-watch-panel">
         <div className="panel__header"><div><h3>DealerKit Stock Watch</h3><p>Finance Vans, Rent2Buy Vans and Cars stay as separate working lanes. DealerKit supplies the stock underneath them.</p></div><div className="card-actions"><button className="button button--primary" type="button" onClick={handleRefreshCache} disabled={refreshingCache}>{refreshingCache ? "Refreshing dealer stock..." : "Refresh Dealer Stock"}</button><button className="button button--ghost" type="button" onClick={handleReloadComparison} disabled={reloadComparisonRunning || loadingPipeline === selectedPipeline}>{reloadComparisonRunning ? "Refreshing comparison..." : "Refresh comparison"}</button></div></div>
+        {activeFilter === "advertised_stock" && advertisedStockLoadError ? <div className="error-banner">All advertised stock: {advertisedStockLoadError}</div> : null}
         {reloadComparisonStatus ? <div className="vansco-watch-note vansco-watch-note--warning"><strong>Reload comparison:</strong> {reloadComparisonStatus}{reloadComparisonRunning ? <div style={{ marginTop: "8px", height: "8px", borderRadius: "999px", background: "#e5e7eb", overflow: "hidden" }}><div style={{ width: `${reloadComparisonProgress}%`, height: "100%", borderRadius: "999px", background: "#2563eb", transition: "width 300ms ease" }} /></div> : null}</div> : null}
         <div className="segmented-control">{WATCH_PIPELINES.map((pipeline) => <button key={pipeline.value} className={selectedPipeline === pipeline.value ? "segment is-active" : "segment"} type="button" onClick={() => setSelectedPipeline(pipeline.value)}>{pipeline.label}</button>)}</div>
         <div className="stat-grid stat-grid--centered">

@@ -14,7 +14,7 @@ function replaceOnce(before, after, label) {
   source = source.replace(before, after);
 }
 
-if (!source.includes('from "../services/stockWatchWixListingPresence.js"')) {
+if (!source.includes("let effectiveRegistrations = vehicleRegistrations;")) {
   replaceOnce(
 `} from "../services/vanscoStockCache.js";`,
 `} from "../services/vanscoStockCache.js";
@@ -24,6 +24,7 @@ import { fetchStockWatchWixListingPresence } from "../services/stockWatchWixList
 
   replaceOnce(
 `  async function loadLocalStock(pipeline = selectedPipeline, isActive = () => true) {
+    await loadAdvertisedStock(pipeline, isActive);
     try {
       const vehicles = await fetchLocalVehiclesForPipeline(pipeline);
       if (!isActive()) return;
@@ -41,6 +42,7 @@ import { fetchStockWatchWixListingPresence } from "../services/stockWatchWixList
     }
   }`,
 `  async function loadLocalStock(pipeline = selectedPipeline, isActive = () => true) {
+    await loadAdvertisedStock(pipeline, isActive);
     try {
       const vehicles = await fetchLocalVehiclesForPipeline(pipeline);
       const vehicleRegistrations = vehicles

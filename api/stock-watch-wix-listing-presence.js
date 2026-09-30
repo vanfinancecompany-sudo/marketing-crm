@@ -106,12 +106,35 @@ export function publishedListingVehicle(item, pipelineValue, source = {}) {
   };
 }
 
-async function loadSource(source, pipeline) {
+export function publishedListingRecord(item, pipeline, source = {}) {
+  const vehicle = publishedListingVehicle(item, pipeline, source);
+  if (!vehicle || itemPublishStatus(item) !== "PUBLISHED") return null;
+  const data = item?.data || {};
+  return {
+    ...vehicle,
+    wixItemId: clean(item?.id || item?._id || data._id),
+    cmsTitle: clean(data.title),
+    vehicleDescription: clean(data.vanDescription || data.vehicleDescription || data.description || data.title),
+    picture: data.picture ?? "",
+    advertUrl: clean(data.webLink || data.weblink || data.link || data.url
+      || Object.entries(data).find(([key, value]) => key.startsWith("link-") && typeof value === "string")?.[1]),
+    priceText: clean(data.price ?? data.priceVat),
+    salePrice: clean(data.salePrice),
+    status: clean(data.status),
+    publishStatus: itemPublishStatus(item),
+    site_id: source.siteId || "",
+  };
+}
+
+async function loadSource(source, pipeline, fetchImplementation = fetch) {
   const vehiclesByRegistration = new Map();
+  const publishedListingsById = new Map();
+  let publishedListingsComplete = true;
+  let exhausted = false;
   let scanned = 0;
 
   for (let offset = 0; offset < MAX_ROWS_PER_COLLECTION; offset += PAGE_SIZE) {
-    const response = await fetch(WIX_QUERY_URL, {
+    const response = await fetchImplementation(WIX_QUERY_URL, {
       method: "POST",
       headers: wixHeaders(source.siteId),
       body: JSON.stringify({
@@ -128,6 +151,7 @@ async function loadSource(source, pipeline) {
     }
 
     const payload = await response.json();
+    if (!Array.isArray(payload?.dataItems)) publishedListingsComplete = false;
     const page = Array.isArray(payload?.dataItems) ? payload.dataItems : [];
     scanned += page.length;
 
@@ -137,9 +161,17 @@ async function loadSource(source, pipeline) {
       const vehicle = publishedListingVehicle(item, pipeline, source);
       if (!vehicle) continue;
       vehiclesByRegistration.set(vehicle.registration, vehicle);
+      const listing = publishedListingRecord(item, pipeline, source);
+      if (!listing?.wixItemId) publishedListingsComplete = false;
+      else {
+        if (publishedListingsById.has(listing.wixItemId)) publishedListingsComplete = false;
+        publishedListingsById.set(listing.wixItemId, listing);
+      }
     }
 
-    if (page.length < PAGE_SIZE) break;
+    if (page.length < PAGE_SIZE) { exhausted = true; break; }
+    const total = Number(payload?.pagingMetadata?.total);
+    if (offset + page.length === MAX_ROWS_PER_COLLECTION && Number.isFinite(total) && total === scanned) exhausted = true;
   }
 
   const vehicles = Array.from(vehiclesByRegistration.values());
@@ -147,6 +179,8 @@ async function loadSource(source, pipeline) {
     ...source,
     registrations: vehicles.map((vehicle) => vehicle.registration),
     vehicles,
+    publishedListings: Array.from(publishedListingsById.values()),
+    publishedListingsComplete: publishedListingsComplete && exhausted,
     scanned,
   };
 }
@@ -159,7 +193,7 @@ export function sourcesForPipeline(pipelineValue) {
   return [];
 }
 
-export async function loadLiveWixListingPresence(pipelineValue) {
+export async function loadLiveWixListingPresence(pipelineValue, { fetchImplementation = fetch } = {}) {
   const pipeline = clean(pipelineValue).toLowerCase();
   const sources = sourcesForPipeline(pipeline);
   if (!sources.length) {
@@ -169,6 +203,8 @@ export async function loadLiveWixListingPresence(pipelineValue) {
       complete: false,
       registrations: [],
       vehicles: [],
+      publishedListings: [],
+      publishedListingsComplete: false,
       registrationCount: 0,
       sources: [],
       errors: [{ error: "Live Wix listing presence is not configured for this pipeline." }],
@@ -176,7 +212,7 @@ export async function loadLiveWixListingPresence(pipelineValue) {
     };
   }
 
-  const settled = await Promise.allSettled(sources.map((source) => loadSource(source, pipeline)));
+  const settled = await Promise.allSettled(sources.map((source) => loadSource(source, pipeline, fetchImplementation)));
   const vehiclesByRegistration = new Map();
   const results = settled.map((result, index) => {
     const source = sources[index];
@@ -187,6 +223,8 @@ export async function loadLiveWixListingPresence(pipelineValue) {
         scanned: 0,
         registrations: [],
         vehicles: [],
+        publishedListings: [],
+        publishedListingsComplete: false,
         error: clean(result.reason?.message || result.reason || "Wix listing check failed."),
       };
     }
@@ -208,6 +246,8 @@ export async function loadLiveWixListingPresence(pipelineValue) {
     complete: errors.length === 0,
     registrations: vehicles.map((vehicle) => vehicle.registration),
     vehicles,
+    publishedListings: results.flatMap((result) => result.publishedListings || []),
+    publishedListingsComplete: errors.length === 0 && results.every((result) => result.publishedListingsComplete),
     registrationCount: vehicles.length,
     sources: results,
     errors: errors.map((item) => ({ siteLabel: item.siteLabel, collectionLabel: item.collectionLabel, error: item.error })),

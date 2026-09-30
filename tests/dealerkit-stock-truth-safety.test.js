@@ -267,7 +267,7 @@ test("Non-Stock and unknown statuses stay non-actionable while AF71TVY still ret
   assert.equal(classify({ ...base, sourceStatus: "available", sourceLifecycleStatus: "available", workflowStatus: "ignored" }, empty, "finance").displayStatus, "back_in_stock");
 });
 
-test("failed or partial Wix presence retains prior truth and pauses cards, summaries and filter counts", () => {
+test("failed or partial Wix presence retains prior comparison truth and pauses action cards, summaries and filter counts", () => {
   const source = pageSource();
   const loadLocalStock = extractFunction(source, "loadLocalStock");
 
@@ -278,7 +278,7 @@ test("failed or partial Wix presence retains prior truth and pauses cards, summa
   assert.match(source, /const absenceComparisonPaused = positiveComparisonPaused \|\| !dealerKitSnapshotComplete/);
   assert.match(source, /const activeRecords = useMemo\(\(\) => positiveComparisonPaused \? \[\]/);
   assert.match(source, /if \(absenceComparisonPaused\) return \[\]/);
-  assert.match(source, /const displayRecords = useMemo\(\s*\(\) => positiveComparisonPaused \? \[\]/);
+  assert.match(source, /const displayRecords = useMemo\([\s\S]*positiveComparisonPaused \? \[\]/);
   assert.match(source, /Positively returned vehicles and statuses are still refreshed/);
   assert.match(source, /"My stock not on DealerKit" remains suspended/);
 });

@@ -214,5 +214,32 @@ if (!source.includes("DEALERKIT_STOCK_TRUTH_SAFETY")) {
   );
 }
 
+
+if (source.includes("async function loadAdvertisedStock(")) {
+  function maintenanceReplace(before, after, label) {
+    if (source.includes(after)) return;
+    replaceOnce(before, after, label);
+  }
+// Maintenance cards have their own Wix authority and never use the support-row pause or images.
+maintenanceReplace(
+  '() => positiveComparisonPaused ? [] : [...imageReadyRecords, ...activeRecords, ...visibleLocalNotVanscoRecords, ...priceDifferenceRecords, ...advertisedStockRecords]',
+  '() => [...(positiveComparisonPaused ? [] : [...imageReadyRecords, ...activeRecords, ...visibleLocalNotVanscoRecords, ...priceDifferenceRecords]), ...advertisedStockRecords]',
+  "independent advertised-stock authority"
+);
+maintenanceReplace('value={positiveCount(summary.advertisedStock)}', 'value={advertisedStockLoadError ? "—" : summary.advertisedStock}', "advertised Wix count");
+maintenanceReplace(
+  '{filter.value === "local_not_vansco" ? absenceCount(filterCounts[filter.value] ?? 0) : positiveCount(filterCounts[filter.value] ?? 0)}',
+  '{filter.value === "advertised_stock" ? (advertisedStockLoadError ? "—" : summary.advertisedStock) : filter.value === "local_not_vansco" ? absenceCount(filterCounts[filter.value] ?? 0) : positiveCount(filterCounts[filter.value] ?? 0)}',
+  "advertised Wix filter count"
+);
+maintenanceReplace(
+  'key={normalizeWatchRegistration(record.registration) || record.stockUrl || record.localStockUrl || record.id}',
+  'key={record.isAdvertisedStockMaintenance ? record.id : normalizeWatchRegistration(record.registration) || record.stockUrl || record.localStockUrl || record.id}',
+  "distinct advertised Wix item keys"
+);
+
+
+}
+
 fs.writeFileSync(targetPath, source);
 console.log("Applied DealerKit Stock Watch stock-truth safety gates.");
