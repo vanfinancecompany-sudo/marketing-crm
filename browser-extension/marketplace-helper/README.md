@@ -28,7 +28,7 @@ The extension never clicks Publish, never handles Facebook credentials, and cont
 - Description: product-specific CRM copy.
 - Images: product CMS order only, lead CMS image first, never reshuffled. Facebook upload is capped at 20 and the CRM preflight stops if the matching CMS gallery is missing.
 
-## Install locally
+## Install locally in Microsoft Edge
 
 Create the validated extension-only package from the repository root:
 
@@ -36,11 +36,13 @@ Create the validated extension-only package from the repository root:
 npm run package:marketplace-helper
 ```
 
-1. Open `chrome://extensions`.
+1. Open `edge://extensions` in Microsoft Edge.
 2. Turn on **Developer mode**.
-3. Remove/disable the old V6 test helper and any old `rent2buy-marketplace-helper-production` copy.
+3. Remove/disable older VFC Facebook Helper test copies so only one helper is active.
 4. Choose **Load unpacked**.
-5. Select `dist/marketplace-helper/VFC-Facebook-Helper-v1.2.6` from the approved branch/release.
+5. Select the generated `dist/marketplace-helper/VFC-Facebook-Helper-v<version>` folder from the approved branch/release.
+
+The same package also works in Chrome via `chrome://extensions`.
 
 The selected folder must contain `manifest.json` and `background.js` directly at its root. Do not select the ZIP itself or a parent folder. The generated ZIP is flat as well: after extraction, its destination folder is ready for **Load unpacked** without another nested extension directory.
 
@@ -69,3 +71,19 @@ The CRM separates groups into:
 - **Archived**: unavailable groups or groups whose visible rules explicitly prohibit commercial/dealer/promotional posting.
 
 When the user manually clicks Facebook's **Post** button, the helper records that posting attempt back to the CRM. The CRM can then run an acceptance check against posted registrations. Proven groups default to a 7-day repeat interval (configurable per group) and appear in the **Due again** section when ready for another advert.
+
+
+## Marketplace listing renewal assistant
+
+Version 1.2.23 adds a controlled helper on Facebook Marketplace → **Your listings**.
+
+- Scans the Marketplace listings currently loaded in the user's normal Facebook session.
+- Separates obvious Rent2Buy and Van Finance adverts using the existing Marketplace title hooks.
+- Receives current stock registration snapshots when the user opens the matching Marketing CRM Marketplace lane.
+- Remembers registration-to-listing links for Marketplace adverts published through the helper from this version onward.
+- Flags exact registry matches as current stock or stale when a matching stock snapshot is available.
+- **Next renewable** scrolls to the next eligible listing, opens its Facebook listing-actions menu and highlights **Renew listing**.
+- The user still clicks Facebook's final **Renew listing** action manually.
+- The helper never deletes, marks sold, edits, boosts, publishes or renews a listing without the user's click.
+
+Existing Marketplace listings that pre-date the stored listing registry can still be classified by title and stepped through for renewal, but their exact registration/stock match may show as unknown.
