@@ -39,6 +39,29 @@ test("every Finance, Rent2Buy and Cars collection finds a spaced row and keeps i
   assert.equal(plan.targets.find((target) => target.collectionId === "VANFINANCE-ALLVANS").operation, "update");
   assert.equal(plan.targets.find((target) => target.collectionId === "VANFINANCE-ALLVANS").itemId, "listing");
   assert.ok(plan.targets.every((target) => target.product === "van_finance"));
+
+  const rentRows = await Promise.all(["ALLRENT2BUYVANS", "VANPAGES"].map(async (collectionId) => ({
+    collectionId,
+    items: await queryControlledRegistrationItems({}, collectionId, registration, { request: wixRequest([row(`existing-${collectionId}`)]) }),
+  })));
+  const rentPlan = buildControlledVehiclePublishPlan({
+    vehicle, decision: { ...decision, financeEnabled: false, rent2buyEnabled: true, rent2buyCategories: ["all_vans"] },
+    imageSets: { dealerKitImageIds: ["one"], rent2buy: images }, rent2buyWixResults: rentRows, productMode: "rent2buy",
+  });
+  assert.equal(rentPlan.canPublish, true);
+  assert.ok(rentPlan.targets.every((target) => target.product === "rent2buy" && target.operation === "update"));
+  assert.deepEqual(rentPlan.targets.map((target) => [target.collectionId, target.itemId]), [
+    ["ALLRENT2BUYVANS", "existing-ALLRENT2BUYVANS"], ["VANPAGES", "existing-VANPAGES"],
+  ]);
+
+  const carListingRows = await queryControlledRegistrationItems({}, "CARFINANCE", registration, { request: wixRequest([row("car-listing")]) });
+  const carDetailRows = await queryControlledRegistrationItems({}, "CARPAGES", registration, { request: wixRequest([row("car-detail")]) });
+  const carPlan = buildDealerKitCarWixPlan({ vehicle, decision, imageSet: images, carListingRows, carDetailRows });
+  assert.equal(carPlan.canPublish, true);
+  assert.ok(carPlan.targets.every((target) => target.product === "cars" && target.operation === "update"));
+  assert.deepEqual(carPlan.targets.map((target) => [target.collectionId, target.itemId]), [
+    ["CARFINANCE", "car-listing"], ["CARPAGES", "car-detail"],
+  ]);
 });
 
 test("all variants and pages are collected, with repeated IDs deduplicated and ID-less rows retained", async () => {
