@@ -84,7 +84,8 @@ async function watchHelpers() {
   const page = await readFile(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
   const code = page.slice(page.indexOf("function normalizeWatchRegistration("), page.indexOf("function classifyWatchRecord("));
   const helpers = new Function(`${code}; return { buildDealerKitByRegistration, mapAdvertisedLocalVehicleToWatchRecord, dedupeDisplayRecords };`)();
-  const expression = page.match(/const canReviewDealerKit = ([\s\S]*?);/)[1];
+  const watchCard = page.slice(page.indexOf("function WatchCard("));
+  const expression = watchCard.match(/const canReviewDealerKit = ([\s\S]*?);/)[1];
   helpers.canReview = new Function("record", "selectedPipeline", "isLocalNotVansco", "isAdvertisedStockMaintenance", `return ${expression};`);
   return helpers;
 }

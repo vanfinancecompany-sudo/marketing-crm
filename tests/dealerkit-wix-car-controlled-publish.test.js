@@ -263,6 +263,6 @@ test("Cars browser/runtime flow has separate preview, final publisher and media-
   assert.match(prepare, /cmsWritesAttempted:\s*false/);
   assert.match(state, /CARFINANCE/);
   assert.match(state, /CARPAGES/);
-  assert.match(state, /registrationTitleVariants/);
+  assert.match(state, /queryControlledRegistrationItems/);
   assert.match(state, /WIX_CAR_API_KEY/);
 });

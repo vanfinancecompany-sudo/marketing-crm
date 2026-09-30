@@ -466,7 +466,7 @@ test("final publisher requires confirmation, reconciles rows and publish status,
   assert.match(source, /SET_PUBLISHED_STATUS/);
   assert.match(source, /SET_DRAFT_STATUS/);
   assert.match(source, /method:\s*"DELETE"/);
-  assert.match(source, /consistentRead:\s*true/);
+  assert.match(source, /queryControlledRegistrationItems/);
   assert.match(source, /manualAttentionRequired:\s*Boolean/);
   assert.match(source, /verified:\s*true/);
 });
