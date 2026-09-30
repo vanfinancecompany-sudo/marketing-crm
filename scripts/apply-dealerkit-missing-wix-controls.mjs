@@ -46,11 +46,25 @@ if (!source.includes("DEALERKIT_MISSING_WIX_CONTROLS")) {
     "Finance Wix draft action",
   );
 
-  replaceOnce(
-    `{isLocalNotVansco && record.localStockUrl ? <a className="button button--ghost" href={record.localStockUrl} target="_blank" rel="noreferrer">Open my stock page</a> : null}`,
-    `{isLocalNotVansco && record.localStockUrl ? <a className="button button--ghost" href={record.localStockUrl} target="_blank" rel="noreferrer">Open my stock page</a> : null}\n          {isLocalNotVansco && (selectedPipeline !== "finance" || !wixPreview || (Array.isArray(wixPreview.matches) && wixPreview.matches.length > 0)) ? <button className="button button--ghost" type="button" onClick={() => saveWorkflow("ignored", "Hidden from Stock Watch. Wix was not changed.")} disabled={Boolean(savingAction)}>{savingAction === "ignored" ? "Hiding..." : "Hide from Stock Watch"}</button> : null}`,
-    "reverse-check Hide action",
-  );
+  const legacyReverseLink = `{isLocalNotVansco && record.localStockUrl ? <a className="button button--ghost" href={record.localStockUrl} target="_blank" rel="noreferrer">Open my stock page</a> : null}`;
+  const maintenanceReverseLink = `{(isLocalNotVansco || isAdvertisedStockMaintenance) && record.localStockUrl ? <a className="button button--ghost" href={record.localStockUrl} target="_blank" rel="noreferrer">Open current advert</a> : null}`;
+  const reverseHide = `{isLocalNotVansco && (selectedPipeline !== "finance" || !wixPreview || (Array.isArray(wixPreview.matches) && wixPreview.matches.length > 0)) ? <button className="button button--ghost" type="button" onClick={() => saveWorkflow("ignored", "Hidden from Stock Watch. Wix was not changed.")} disabled={Boolean(savingAction)}>{savingAction === "ignored" ? "Hiding..." : "Hide from Stock Watch"}</button> : null}`;
+
+  if (source.includes(legacyReverseLink)) {
+    replaceOnce(
+      legacyReverseLink,
+      `${legacyReverseLink}\n          ${reverseHide}`,
+      "reverse-check Hide action",
+    );
+  } else if (source.includes(maintenanceReverseLink)) {
+    replaceOnce(
+      maintenanceReverseLink,
+      `${maintenanceReverseLink}\n          ${reverseHide}`,
+      "advertised-stock-compatible reverse-check Hide action",
+    );
+  } else {
+    throw new Error("DealerKit missing-stock controls could not find reverse-check Hide action.");
+  }
 
   replaceOnce(
     `<div className="vehicle-card__meta">No live matches remain in the approved Finance stock collections.</div>`,
