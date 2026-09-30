@@ -186,7 +186,10 @@ export default async function handler(request, response) {
       loadLocalMatches(supabase, normalisedRegistration),
       loadDealerKitReviewDecision(supabase, publicSourceVehicle.supplierStockId),
     ]);
-    const requestedProduct = clean(request.query?.product, 30).toLowerCase() === "rent2buy" ? "rent2buy" : "finance";
+    const requestedProductRaw = clean(request.query?.product, 30).toLowerCase();
+    const requestedProduct = ["finance", "rent2buy", "cars"].includes(requestedProductRaw)
+      ? requestedProductRaw
+      : "finance";
     const reviewDecision = savedDecision || {
       ...defaultDealerKitReviewDecision(publicSourceVehicle),
       financeEnabled: requestedProduct === "finance",

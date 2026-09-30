@@ -28,12 +28,13 @@ test("DealerKit review workspace retains the guarded legacy comparison entry poi
   assert.match(client, /new URLSearchParams\(\{ registration \}\)/);
 });
 
-test("Finance and Rent2Buy Missing cards pass their active product directly to review", () => {
+test("Missing and advertised-stock cards pass Finance, Rent2Buy or Cars directly to review", () => {
   const page = fs.readFileSync(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
   assert.match(page, /dealerkit-open-product-review/);
   assert.match(page, /supplierStockId:\s*record\.supplierStockId/);
   assert.match(page, /product:\s*selectedPipeline/);
-  assert.match(page, /selectedPipeline === "finance" \|\| selectedPipeline === "rent2buy"/);
+  assert.match(page, /\["finance", "rent2buy", "cars"\]\.includes\(selectedPipeline\)/);
+  assert.match(page, /record\.displayStatus === "missing" \|\| isAdvertisedStockMaintenance/);
 });
 
 test("direct missing-stock review bridge only reads comparison data and does not mutate stock or Wix", () => {
@@ -67,4 +68,31 @@ test("product gallery workspace separates Finance and Rent2Buy, previews uploads
 test("product gallery workspace stores review/media choices but never calls the controlled Wix publish action", () => {
   const client = fs.readFileSync(new URL("../utils/dealerKitProductGalleryWorkspace.js", import.meta.url), "utf8");
   assert.doesNotMatch(client, /dealerkit-controlled-publish|Publish new vehicle to Wix|wix-data\/v2\/items|createDataItem|updateDataItem/i);
+});
+
+
+test("Stock Watch exposes live advertised stock as a separate maintenance view", () => {
+  const page = fs.readFileSync(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
+  assert.match(page, /value: "advertised_stock", label: "All advertised stock"/);
+  assert.match(page, /mapAdvertisedLocalVehicleToWatchRecord/);
+  assert.match(page, /advertisedStockRecords/);
+  assert.match(page, /All advertised stock/);
+  assert.match(page, /Prepare \+ Reconcile/);
+  assert.match(page, /isAdvertisedStockMaintenance/);
+});
+
+test("Cars review stays in Cars mode and uses the source-image review plus controlled reconcile", () => {
+  const review = fs.readFileSync(new URL("../utils/dealerKitReviewWorkspace.js", import.meta.url), "utf8");
+  const gallery = fs.readFileSync(new URL("../utils/dealerKitProductGalleryWorkspace.js", import.meta.url), "utf8");
+  const detail = fs.readFileSync(new URL("../api/dealerkit-stock-detail.js", import.meta.url), "utf8");
+  const controlled = fs.readFileSync(new URL("../utils/dealerKitControlledPublish.js", import.meta.url), "utf8");
+
+  assert.match(review, /\["finance", "rent2buy", "cars"\]\.includes\(product\)/);
+  assert.match(review, /Save Cars review/);
+  assert.match(review, /product: "cars"/);
+  assert.match(gallery, /workspace\.dataset\.product === "cars"/);
+  assert.match(detail, /\["finance", "rent2buy", "cars"\]\.includes\(requestedProductRaw\)/);
+  assert.match(controlled, /product === "cars"/);
+  assert.match(controlled, /dealerkit-car-controlled-publish-preview/);
+  assert.match(controlled, /dealerkit-car-controlled-publish/);
 });

@@ -212,11 +212,30 @@ if (!source.includes("const imageReadyRecords = imageReadyByPipeline[selectedPip
 }
 
 if (!source.includes("...imageReadyRecords, ...activeRecords")) {
-  replaceOnce(
-`  const displayRecords = useMemo(() => [...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, localNotVanscoRecords, priceDifferenceRecords]);`,
-`  const displayRecords = useMemo(() => [...imageReadyRecords, ...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, imageReadyRecords, localNotVanscoRecords, priceDifferenceRecords]);`,
-    "image readiness display records"
-  );
+  const legacyDisplayRecords = `  const displayRecords = useMemo(() => [...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, localNotVanscoRecords, priceDifferenceRecords]);`;
+  const maintenanceDisplayRecords = `  const displayRecords = useMemo(
+    () => [...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords, ...advertisedStockRecords],
+    [activeRecords, advertisedStockRecords, localNotVanscoRecords, priceDifferenceRecords],
+  );`;
+
+  if (source.includes(legacyDisplayRecords)) {
+    replaceOnce(
+      legacyDisplayRecords,
+      `  const displayRecords = useMemo(() => [...imageReadyRecords, ...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, imageReadyRecords, localNotVanscoRecords, priceDifferenceRecords]);`,
+      "image readiness display records"
+    );
+  } else if (source.includes(maintenanceDisplayRecords)) {
+    replaceOnce(
+      maintenanceDisplayRecords,
+      `  const displayRecords = useMemo(
+    () => [...imageReadyRecords, ...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords, ...advertisedStockRecords],
+    [activeRecords, advertisedStockRecords, imageReadyRecords, localNotVanscoRecords, priceDifferenceRecords],
+  );`,
+      "advertised-stock-compatible image readiness display records"
+    );
+  } else {
+    throw new Error("Wix authoritative Stock Watch transform could not find: image readiness display records");
+  }
 }
 
 if (!source.includes("imagesReady: imageReadyRecords.length")) {
@@ -228,11 +247,19 @@ if (!source.includes("imagesReady: imageReadyRecords.length")) {
     missing: activeRecords.filter((record) => record.displayStatus === "missing").length,`,
     "image readiness summary count"
   );
-  replaceOnce(
-`  }), [activeRecords, localNotVanscoRecords, priceDifferenceRecords]);`,
-`  }), [activeRecords, imageReadyRecords, localNotVanscoRecords, priceDifferenceRecords]);`,
-    "image readiness summary dependencies"
-  );
+  if (source.includes(`  }), [activeRecords, localNotVanscoRecords, priceDifferenceRecords]);`)) {
+    replaceOnce(
+      `  }), [activeRecords, localNotVanscoRecords, priceDifferenceRecords]);`,
+      `  }), [activeRecords, imageReadyRecords, localNotVanscoRecords, priceDifferenceRecords]);`,
+      "image readiness summary dependencies"
+    );
+  } else {
+    replaceOnce(
+      `  }), [activeRecords, advertisedStockRecords, localNotVanscoRecords, priceDifferenceRecords]);`,
+      `  }), [activeRecords, advertisedStockRecords, imageReadyRecords, localNotVanscoRecords, priceDifferenceRecords]);`,
+      "advertised-stock-compatible image readiness summary dependencies"
+    );
+  }
 }
 
 if (!source.includes("images_ready: summary.imagesReady")) {
@@ -276,11 +303,22 @@ if (!source.includes("Photo update needed:")) {
 }
 
 if (!source.includes("imageReadiness: imageReadySummary")) {
-  replaceOnce(
-`{JSON.stringify({ selectedPipeline, localRegsLoaded: activeLocalRegistrations.size, financeRegsUsedForCars: selectedPipeline === "cars" ? financeRegistrationsForCars.size : 0, vanscoCurrentRegsLoaded: currentVanscoRegistrationSet.size, localNotVansco: summary.localNotVansco, priceDifferences: summary.priceDifference, localLoadError, cacheSummary, actionSummary: summary, debug: debugByPipeline[selectedPipeline] }, null, 2)}`,
-`{JSON.stringify({ selectedPipeline, localRegsLoaded: activeLocalRegistrations.size, financeRegsUsedForCars: selectedPipeline === "cars" ? financeRegistrationsForCars.size : 0, vanscoCurrentRegsLoaded: currentVanscoRegistrationSet.size, localNotVansco: summary.localNotVansco, priceDifferences: summary.priceDifference, imageReadiness: imageReadySummary, localLoadError, cacheSummary, actionSummary: summary, debug: debugByPipeline[selectedPipeline] }, null, 2)}`,
-    "image readiness diagnostics"
-  );
+  const legacyDiagnostics = `{JSON.stringify({ selectedPipeline, localRegsLoaded: activeLocalRegistrations.size, financeRegsUsedForCars: selectedPipeline === "cars" ? financeRegistrationsForCars.size : 0, vanscoCurrentRegsLoaded: currentVanscoRegistrationSet.size, localNotVansco: summary.localNotVansco, priceDifferences: summary.priceDifference, localLoadError, cacheSummary, actionSummary: summary, debug: debugByPipeline[selectedPipeline] }, null, 2)}`;
+  const maintenanceDiagnostics = `{JSON.stringify({ selectedPipeline, localRegsLoaded: activeLocalRegistrations.size, advertisedStockLoaded: summary.advertisedStock, financeRegsUsedForCars: selectedPipeline === "cars" ? financeRegistrationsForCars.size : 0, vanscoCurrentRegsLoaded: currentVanscoRegistrationSet.size, localNotVansco: summary.localNotVansco, priceDifferences: summary.priceDifference, localLoadError, cacheSummary, actionSummary: summary, debug: debugByPipeline[selectedPipeline] }, null, 2)}`;
+
+  if (source.includes(legacyDiagnostics)) {
+    replaceOnce(
+      legacyDiagnostics,
+      `{JSON.stringify({ selectedPipeline, localRegsLoaded: activeLocalRegistrations.size, financeRegsUsedForCars: selectedPipeline === "cars" ? financeRegistrationsForCars.size : 0, vanscoCurrentRegsLoaded: currentVanscoRegistrationSet.size, localNotVansco: summary.localNotVansco, priceDifferences: summary.priceDifference, imageReadiness: imageReadySummary, localLoadError, cacheSummary, actionSummary: summary, debug: debugByPipeline[selectedPipeline] }, null, 2)}`,
+      "image readiness diagnostics"
+    );
+  } else {
+    replaceOnce(
+      maintenanceDiagnostics,
+      `{JSON.stringify({ selectedPipeline, localRegsLoaded: activeLocalRegistrations.size, advertisedStockLoaded: summary.advertisedStock, financeRegsUsedForCars: selectedPipeline === "cars" ? financeRegistrationsForCars.size : 0, vanscoCurrentRegsLoaded: currentVanscoRegistrationSet.size, localNotVansco: summary.localNotVansco, priceDifferences: summary.priceDifference, imageReadiness: imageReadySummary, localLoadError, cacheSummary, actionSummary: summary, debug: debugByPipeline[selectedPipeline] }, null, 2)}`,
+      "advertised-stock-compatible image readiness diagnostics"
+    );
+  }
 }
 
 if (!source.includes('record.displayStatus === "images_ready" ? <ImageReadyCard')) {

@@ -278,7 +278,7 @@ test("failed or partial Wix presence retains prior truth and pauses cards, summa
   assert.match(source, /const absenceComparisonPaused = positiveComparisonPaused \|\| !dealerKitSnapshotComplete/);
   assert.match(source, /const activeRecords = useMemo\(\(\) => positiveComparisonPaused \? \[\]/);
   assert.match(source, /if \(absenceComparisonPaused\) return \[\]/);
-  assert.match(source, /const displayRecords = useMemo\(\(\) => positiveComparisonPaused \? \[\]/);
+  assert.match(source, /const displayRecords = useMemo\(\s*\(\) => positiveComparisonPaused \? \[\]/);
   assert.match(source, /Positively returned vehicles and statuses are still refreshed/);
   assert.match(source, /"My stock not on DealerKit" remains suspended/);
 });
