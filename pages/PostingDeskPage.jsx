@@ -518,6 +518,19 @@ export default function PostingDeskPage({
   const [actionMessage, setActionMessage] = useState("");
 
   useEffect(() => {
+    if (!isMarketplaceDestination(destination) || !Array.isArray(vehicles)) return;
+    const product = isFinanceMarketplaceDestination(destination) ? "finance" : "rent2buy";
+    const registrations = [...new Set(vehicles.map(vehicleRegistration).filter(Boolean))];
+    window.postMessage({
+      source: "vfc-marketing-crm",
+      type: "VFC_MARKETPLACE_STOCK_SNAPSHOT",
+      product,
+      registrations,
+      generatedAt: new Date().toISOString(),
+    }, window.location.origin);
+  }, [destination, vehicles]);
+
+  useEffect(() => {
     let active = true;
     if (!isPostingHistoryDestination(destination)) {
       setPostingHistory([]);

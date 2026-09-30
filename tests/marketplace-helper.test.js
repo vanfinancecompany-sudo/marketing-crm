@@ -19,6 +19,7 @@ const marketplaceAutomationSource = fs.readFileSync(
 const backgroundSource = fs.readFileSync(new URL("../browser-extension/marketplace-helper/background.js", import.meta.url), "utf8");
 const crmBridgeSource = fs.readFileSync(new URL("../browser-extension/marketplace-helper/crm-bridge.js", import.meta.url), "utf8");
 const facebookSource = fs.readFileSync(new URL("../browser-extension/marketplace-helper/facebook.js", import.meta.url), "utf8");
+const marketplaceManagerSource = fs.readFileSync(new URL("../browser-extension/marketplace-helper/facebook-marketplace-manager.js", import.meta.url), "utf8");
 const manifest = JSON.parse(
   fs.readFileSync(new URL("../browser-extension/marketplace-helper/manifest.json", import.meta.url), "utf8"),
 );
@@ -109,4 +110,26 @@ test("Marketplace extension is scoped and preserves controlled image handoff", (
   assert.match(facebookSource, /Vehicle type/);
   assert.match(facebookSource, /Car\/Truck/);
   assert.match(facebookSource, /Body style/);
+});
+
+
+test("Marketplace helper adds a manual renewal assistant for Edge seller listings", () => {
+  const managerEntry = manifest.content_scripts.find((entry) =>
+    entry.js?.includes("facebook-marketplace-manager.js"),
+  );
+  assert.ok(managerEntry);
+  assert.ok(managerEntry.matches.includes("https://www.facebook.com/marketplace/you/selling*"));
+  assert.match(marketplaceManagerSource, /Next renewable/);
+  assert.match(marketplaceManagerSource, /Renew listing/);
+  assert.match(marketplaceManagerSource, /you make the final Renew click/i);
+  assert.match(marketplaceManagerSource, /stockStatus/);
+  assert.doesNotMatch(marketplaceManagerSource, /renew\.click\(/);
+});
+
+test("Marketplace helper syncs live stock context for stale-listing warnings", () => {
+  assert.match(postingDeskSource, /VFC_MARKETPLACE_STOCK_SNAPSHOT/);
+  assert.match(crmBridgeSource, /STORE_MARKETPLACE_STOCK_SNAPSHOT/);
+  assert.match(backgroundSource, /MARKETPLACE_LISTING_REGISTRY_KEY/);
+  assert.match(backgroundSource, /GET_MARKETPLACE_MANAGER_CONTEXT/);
+  assert.match(backgroundSource, /marketplace-renew-manager/);
 });
