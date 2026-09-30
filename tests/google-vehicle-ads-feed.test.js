@@ -7,6 +7,7 @@ import {
   googleVehicleAdsEligibility,
   isGoogleVehicleAdsTargetVehicle,
 } from "../lib/googleVehicleAdsFeed.js";
+import { cleanDealerKitGoogleVehicleAdsCsv } from "../lib/dealerKitGoogleVehicleAdsFeed.js";
 
 function baseVehicle(overrides = {}) {
   return {
@@ -142,4 +143,29 @@ test("full feed includes Vansco vans and pickups while excluding passenger cars"
   assert.equal(feed.rows.length, 2);
   assert.equal(feed.rows.some((row) => row.body_style === "full_size_van"), true);
   assert.equal(feed.skipped.some((item) => item.reason === "not_vansco_commercial_stock"), true);
+});
+
+
+test("cleans only the DealerKit GVA description column and preserves quoted CSV fields", () => {
+  const source = [
+    "store_code,id,title,description,link",
+    'VANSCO-333,stock-1,"Ford Transit, Limited","Great van 📞\nReserve now ✔️","https://example.com/one?x=1,2"',
+    'VANSCO-AIRPORT,stock-2,Ford Ranger,"No emoji, keep this text",https://example.com/two',
+  ].join("\n");
+
+  const cleaned = cleanDealerKitGoogleVehicleAdsCsv(source);
+
+  assert.equal(cleaned.vehicleCount, 2);
+  assert.equal(cleaned.cleanedDescriptionCount, 1);
+  assert.match(cleaned.csv, /VANSCO-333,stock-1,"Ford Transit, Limited","Great van\nReserve now"/);
+  assert.match(cleaned.csv, /"https:\/\/example\.com\/one\?x=1,2"/);
+  assert.match(cleaned.csv, /VANSCO-AIRPORT,stock-2,Ford Ranger,"No emoji, keep this text"/);
+  assert.equal(/[\p{Extended_Pictographic}\p{Emoji_Presentation}\u2600-\u27BF\uFE0F\u200D\u20E3]/u.test(cleaned.csv), false);
+});
+
+test("rejects an unexpected DealerKit GVA schema instead of silently serving a bad feed", () => {
+  assert.throws(
+    () => cleanDealerKitGoogleVehicleAdsCsv("store_code,id,title\nVANSCO-333,stock-1,Ford Transit\n"),
+    /missing the description column/,
+  );
 });
