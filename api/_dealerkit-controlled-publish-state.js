@@ -1,4 +1,4 @@
-import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
+import { fetchDealerKitStockDetail, fetchDealerKitStockSnapshot } from "./_dealerkit-stock-adapter.js";
 import { DEALERKIT_REVIEW_TABLE, rowToDealerKitReviewDecision } from "./_dealerkit-review-decisions.js";
 import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
 import { VAN_FINANCE_WIX_COLLECTIONS, normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
@@ -78,6 +78,20 @@ async function loadDecision(supabase, registration) {
   if (!data?.length) throw new ControlledPublishError(409, `Save the DealerKit review for ${registration} first.`);
   if (data.length !== 1) throw new ControlledPublishError(409, `DealerKit review identity for ${registration} is ambiguous.`);
   return rowToDealerKitReviewDecision(data[0]);
+}
+
+export async function assertDealerKitRegistrationUnambiguous(registration, { fetchSnapshot = fetchDealerKitStockSnapshot } = {}) {
+  const snapshot = await fetchSnapshot({ allowPartial: true });
+  const stockIds = new Set((snapshot.vehicles || [])
+    .filter((vehicle) => normalizeFinanceRegistration(vehicle?.registration || "") === registration)
+    .map((vehicle) => clean(vehicle?.supplierStockId, 300))
+    .filter(Boolean));
+  if (stockIds.size > 1) {
+    throw new ControlledPublishError(409, "More than one DealerKit vehicle uses this registration. Resolve the duplicate before reconciling this advert.", {
+      registration,
+      supplierStockIds: Array.from(stockIds).sort(),
+    });
+  }
 }
 
 // Listing and detail rows use the same canonical identity, including legacy spaced titles.
@@ -169,6 +183,7 @@ export async function buildFreshControlledPublishState(registrationInput, enviro
   const decision = await loadDecision(supabase, registration);
   const vehicle = await fetchDealerKitStockDetail(decision.supplierStockId, { specifications: true });
   if (normalizeFinanceRegistration(vehicle?.registration || "") !== registration) throw new ControlledPublishError(409, "DealerKit registration changed. Re-open and save the review again.");
+  await assertDealerKitRegistrationUnambiguous(registration);
   const configuration = controlledWixConfiguration(environment);
   const rent2buyConfigurations = controlledRent2BuyWixConfigurations(environment, configuration);
 

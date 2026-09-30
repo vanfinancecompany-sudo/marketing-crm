@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { queryControlledRegistrationItems } from "../api/_dealerkit-controlled-publish-state.js";
+import { queryControlledRegistrationItems, assertDealerKitRegistrationUnambiguous, ControlledPublishError } from "../api/_dealerkit-controlled-publish-state.js";
 import { buildCarImageSet } from "../api/_dealerkit-car-controlled-publish-state.js";
 import { verifyWritten as verifyVans } from "../api/dealerkit-controlled-publish.js";
 import { verifyWritten as verifyCars } from "../api/dealerkit-car-controlled-publish.js";
@@ -218,3 +218,74 @@ test("Finance and Rent2Buy image selections remain separate during review saving
   assert.deepEqual(decoded.rent2buy.includedOrderIds, ["two", "one"]);
   assert.equal(decoded.rent2buy.primaryId, "two");
 });
+
+async function loadFreshStateBuilder(path, name, dependencies) {
+  const source = await readFile(new URL(`../${path}`, import.meta.url), "utf8");
+  const start = source.indexOf(`export async function ${name}(`);
+  assert.ok(start >= 0, `Missing ${name}`);
+  const code = source.slice(start).replace(/^export /gm, "");
+  return new Function(...Object.keys(dependencies), `${code}; return ${name};`)(...Object.values(dependencies));
+}
+
+for (const productMode of ["finance", "rent2buy", "cars"]) {
+  test(`final ${productMode} reconciliation rechecks DealerKit identity after a successful saved review`, async () => {
+    const events = [];
+    let snapshotVehicles = [vehicle, { ...vehicle }];
+    const configuration = { siteId: "85f11c52-ee54-495d-aaec-a351831709b5" };
+    const imported = ["one", "two", "three"].map((id) => ({ dealerKitImageId: id, ready: true, wixUrl: `wix-${id}` }));
+    const dependencies = {
+      normalizeFinanceRegistration: (value) => String(value || "").replace(/[^a-z0-9]/gi, "").toUpperCase(),
+      ControlledPublishError,
+      getSupabaseServiceAdmin: () => ({}),
+      loadDecision: async () => { events.push("saved-review"); return decision; },
+      fetchDealerKitStockDetail: async () => { events.push("detail"); return vehicle; },
+      assertDealerKitRegistrationUnambiguous: (reg) => assertDealerKitRegistrationUnambiguous(reg, {
+        fetchSnapshot: async (options) => {
+          events.push("snapshot");
+          assert.deepEqual(options, { allowPartial: true });
+          return { vehicles: snapshotVehicles };
+        },
+      }),
+      controlledWixConfiguration: () => configuration,
+      controlledRent2BuyWixConfigurations: () => [configuration],
+      controlledCarWixConfiguration: () => configuration,
+      VAN_FINANCE_WIX_COLLECTIONS: [{ id: "VANFINANCE-ALLVANS" }, { id: "VANFINANCEPAGES" }],
+      allRent2BuyCollectionIds: () => ["ALLRENT2BUYVANS", "VANPAGES"],
+      loadManualReadiness: async () => ({}),
+      loadImportedReadiness: async () => imported,
+      queryRegistration: async (site, collectionId) => {
+        events.push("wix-read");
+        const items = [row(collectionId)];
+        return productMode === "cars" ? items : { siteId: site.siteId, collectionId, items };
+      },
+      buildProductImageSets: () => ({ dealerKitImageIds: ["one", "two", "three"], vanFinance: images, rent2buy: images }),
+      buildCarImageSet,
+      buildControlledVehiclePublishPlan: (input) => { events.push("build-plan"); return buildControlledVehiclePublishPlan(input); },
+      buildDealerKitCarWixPlan: (input) => { events.push("build-plan"); return buildDealerKitCarWixPlan(input); },
+      buildControlledPublishConfirmation: () => ({}),
+      buildCarPublishConfirmation: () => ({}),
+    };
+    const isCars = productMode === "cars";
+    const builder = await loadFreshStateBuilder(
+      isCars ? "api/_dealerkit-car-controlled-publish-state.js" : "api/_dealerkit-controlled-publish-state.js",
+      isCars ? "buildFreshCarControlledPublishState" : "buildFreshControlledPublishState",
+      dependencies,
+    );
+    const earlierState = await builder(registration, {}, { productMode });
+    assert.equal(earlierState.decision.persisted, true);
+    assert.equal(earlierState.plan.canPublish, true);
+    assert.deepEqual(events.slice(0, 3), ["saved-review", "detail", "snapshot"]);
+    assert.ok(events.indexOf("snapshot") < events.indexOf("wix-read"));
+
+    // The saved review and detail version remain valid, but current stock now has two identities.
+    snapshotVehicles = [vehicle, { ...vehicle, registration: "AB23 CDE", supplierStockId: "stock-2" }];
+    events.length = 0;
+    await assert.rejects(
+      () => builder(registration, {}, { productMode }),
+      (error) => error instanceof ControlledPublishError && error.status === 409
+        && /More than one DealerKit vehicle/.test(error.message)
+        && error.details.supplierStockIds.join(",") === "stock-1,stock-2",
+    );
+    assert.deepEqual(events, ["saved-review", "detail", "snapshot"]);
+  });
+}

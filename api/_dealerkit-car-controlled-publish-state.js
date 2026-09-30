@@ -1,7 +1,7 @@
 import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
 import { DEALERKIT_REVIEW_TABLE, rowToDealerKitReviewDecision } from "./_dealerkit-review-decisions.js";
 import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
-import { ControlledPublishError, controlledWixRequest, queryControlledRegistrationItems } from "./_dealerkit-controlled-publish-state.js";
+import { ControlledPublishError, controlledWixRequest, queryControlledRegistrationItems, assertDealerKitRegistrationUnambiguous } from "./_dealerkit-controlled-publish-state.js";
 import { normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
 import { decodeDealerKitProductImageState } from "../lib/dealerKitProductImageState.js";
 import { DEALERKIT_IMPORTED_MEDIA_TABLE, WIX_MEDIA_GET_FILE_URL, importedMediaRowToClient } from "../lib/dealerKitWixVehicleMedia.js";
@@ -109,6 +109,8 @@ export async function buildFreshCarControlledPublishState(registrationInput, env
   if (normalizeFinanceRegistration(vehicle?.registration || "") !== registration) {
     throw new ControlledPublishError(409, "DealerKit registration changed. Re-open and save the Cars review again.");
   }
+
+  await assertDealerKitRegistrationUnambiguous(registration);
 
   const configuration = controlledCarWixConfiguration(environment);
   const [importedDealerKitMedia, carListingRows, carDetailRows] = await Promise.all([
