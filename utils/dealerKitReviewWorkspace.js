@@ -225,7 +225,7 @@ async function saveReviewDecision(vehicle, state) {
 function renderDecisionControls(vehicle, state) {
   const section = element("section", "dealerkit-review__section dealerkit-review__decisions");
   section.dataset.reviewProduct = state.product;
-  const productLabel = state.product === "rent2buy" ? "Rent2Buy" : "Van Finance";
+  const productLabel = state.product === "rent2buy" ? "Rent2Buy" : state.product === "cars" ? "Cars" : "Van Finance";
   const heading = element("div", "dealerkit-review__decision-heading");
   heading.append(
     element("div", "", `${productLabel} review`),
@@ -237,39 +237,43 @@ function renderDecisionControls(vehicle, state) {
     section.appendChild(element("div", "dealerkit-review__stale-warning", "DealerKit has changed since these review decisions were last saved. Re-check the vehicle before marking it reviewed."));
   }
 
-  const categories = element("div", "dealerkit-review__category-block");
-  categories.appendChild(element("strong", "", `${productLabel} categories`));
-  categories.appendChild(element("p", "", "All Vans is included automatically. Check the additional categories that apply to this vehicle."));
-  const categoryGrid = element("div", "dealerkit-review__category-grid");
-  const selectedCategories = state.product === "rent2buy" ? state.rent2buyCategories : state.financeCategories;
+  if (state.product !== "cars") {
+    const categories = element("div", "dealerkit-review__category-block");
+    categories.appendChild(element("strong", "", `${productLabel} categories`));
+    categories.appendChild(element("p", "", "All Vans is included automatically. Check the additional categories that apply to this vehicle."));
+    const categoryGrid = element("div", "dealerkit-review__category-grid");
+    const selectedCategories = state.product === "rent2buy" ? state.rent2buyCategories : state.financeCategories;
 
-  const allLabel = element("label", "dealerkit-review__check dealerkit-review__check--fixed");
-  const allCheck = document.createElement("input");
-  allCheck.type = "checkbox";
-  allCheck.checked = true;
-  allCheck.disabled = true;
-  allLabel.append(allCheck, element("span", "", "All Vans · fixed"));
-  categoryGrid.appendChild(allLabel);
+    const allLabel = element("label", "dealerkit-review__check dealerkit-review__check--fixed");
+    const allCheck = document.createElement("input");
+    allCheck.type = "checkbox";
+    allCheck.checked = true;
+    allCheck.disabled = true;
+    allLabel.append(allCheck, element("span", "", "All Vans · fixed"));
+    categoryGrid.appendChild(allLabel);
 
-  const categoryInputs = [];
-  for (const [key, label] of CATEGORY_OPTIONS) {
-    if (state.product === "rent2buy" && key === "nine_seater") continue;
-    const item = element("label", "dealerkit-review__check");
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = selectedCategories.has(key);
-    input.dataset.categoryKey = key;
-    input.addEventListener("change", () => {
-      if (input.checked) selectedCategories.add(key);
-      else selectedCategories.delete(key);
-      window.dispatchEvent(new CustomEvent("dealerkit-review-categories-changed"));
-    });
-    item.append(input, element("span", "", label));
-    categoryInputs.push(input);
-    categoryGrid.appendChild(item);
+    const categoryInputs = [];
+    for (const [key, label] of CATEGORY_OPTIONS) {
+      if (state.product === "rent2buy" && key === "nine_seater") continue;
+      const item = element("label", "dealerkit-review__check");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = selectedCategories.has(key);
+      input.dataset.categoryKey = key;
+      input.addEventListener("change", () => {
+        if (input.checked) selectedCategories.add(key);
+        else selectedCategories.delete(key);
+        window.dispatchEvent(new CustomEvent("dealerkit-review-categories-changed"));
+      });
+      item.append(input, element("span", "", label));
+      categoryInputs.push(input);
+      categoryGrid.appendChild(item);
+    }
+    categories.appendChild(categoryGrid);
+    section.appendChild(categories);
+  } else {
+    section.appendChild(element("p", "dealerkit-review__section-note", "Cars maintenance uses the saved DealerKit image selection below. Choose the images / primary photo, then save before using Prepare images and Reconcile advert."));
   }
-  categories.appendChild(categoryGrid);
-  section.appendChild(categories);
 
   const notesLabel = element("label", "dealerkit-review__field dealerkit-review__notes");
   notesLabel.appendChild(element("span", "", "Review notes"));
@@ -282,13 +286,47 @@ function renderDecisionControls(vehicle, state) {
   notesLabel.appendChild(notes);
   section.appendChild(notesLabel);
 
+  if (state.product === "cars") {
+    const footer = element("div", "dealerkit-review__decision-footer");
+    const saveState = element("span", "dealerkit-review__decision-state", "Save stores the Cars image choices. Wix is unchanged until you run the controlled reconcile step.");
+    const save = element("button", "dealerkit-review__save", "Save Cars review");
+    save.type = "button";
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      save.textContent = "Saving…";
+      saveState.textContent = "Saving Cars review…";
+      try {
+        state.reviewStatus = "reviewed";
+        const payload = await saveReviewDecision(vehicle, state);
+        const decision = payload?.decision || {};
+        state.persisted = true;
+        state.reviewStatus = decision.reviewStatus || "reviewed";
+        state.updatedAt = decision.updatedAt || new Date().toISOString();
+        state.reviewedSourceUpdatedAt = decision.reviewedSourceUpdatedAt || vehicle.sourceUpdatedAt || null;
+        const headingState = section.querySelector(".dealerkit-review__decision-heading .dealerkit-review__decision-state");
+        if (headingState) headingState.textContent = `Saved ${formatSavedAt(state.updatedAt)}`;
+        saveState.textContent = "Saved. Use Prepare images / Reconcile advert below when ready.";
+        window.dispatchEvent(new CustomEvent("dealerkit-product-gallery-saved", {
+          detail: { registration: state.registration, product: "cars" },
+        }));
+      } catch (error) {
+        saveState.textContent = error?.message || "Could not save the Cars review.";
+      } finally {
+        save.disabled = false;
+        save.textContent = "Save Cars review";
+      }
+    });
+    footer.append(saveState, save);
+    section.appendChild(footer);
+  }
+
   return section;
 }
 
 function renderVehicle(workspace, payload) {
   const vehicle = payload?.vehicle || {};
   const local = payload?.local || {};
-  const product = workspace.dataset.product === "rent2buy" ? "rent2buy" : "finance";
+  const product = ["rent2buy", "cars"].includes(workspace.dataset.product) ? workspace.dataset.product : "finance";
   const state = buildReviewState(vehicle, payload?.reviewDecision || {}, product);
   const body = workspace.querySelector("[data-dealerkit-review-body]");
   const title = workspace.querySelector("[data-dealerkit-review-title]");
@@ -331,7 +369,11 @@ function renderVehicle(workspace, payload) {
   body.appendChild(hero);
 
   const localGrid = element("div", "dealerkit-review__local-grid");
-  localGrid.append(localCard(product === "rent2buy" ? "Rent2Buy" : "Van Finance", local[product]));
+  if (product === "cars") {
+    localGrid.appendChild(element("section", "dealerkit-review__local-card", "Cars live Wix presence is checked again in the controlled reconcile preview below."));
+  } else {
+    localGrid.append(localCard(product === "rent2buy" ? "Rent2Buy" : "Van Finance", local[product]));
+  }
   body.appendChild(localGrid);
 
   const gallerySection = element("section", "dealerkit-review__section");
@@ -427,7 +469,7 @@ function renderVehicle(workspace, payload) {
 
   const future = element("section", "dealerkit-review__future");
   future.append(
-    element("strong", "", `${product === "rent2buy" ? "Rent2Buy" : "Van Finance"} lane`),
+    element("strong", "", `${product === "rent2buy" ? "Rent2Buy" : product === "cars" ? "Cars" : "Van Finance"} lane`),
     element("p", "", "Choose the details and images above, then use Save, Prepare and Publish. Safety checks still run before any live Wix change."),
   );
   if (vehicle.sourceUrl) {
@@ -511,7 +553,7 @@ function getWorkspace() {
 
 async function openWorkspace(registration, supplierStockId = "", product = "finance") {
   const workspace = getWorkspace();
-  workspace.dataset.product = product === "rent2buy" ? "rent2buy" : "finance";
+  workspace.dataset.product = ["finance", "rent2buy", "cars"].includes(product) ? product : "finance";
   workspace.dataset.supplierStockId = clean(supplierStockId);
   workspace.hidden = false;
   workspace.setAttribute("aria-hidden", "false");
