@@ -152,6 +152,25 @@ export default async function handler(request, response) {
   }
 
   try {
+    const snapshot = await fetchDealerKitStockSnapshot({ allowPartial: true });
+    const matchingIdentities = (value) => {
+      const matches = new Map();
+      for (const item of snapshot.vehicles || []) {
+        if (normalizeRegistration(item?.registration || "") !== value) continue;
+        const id = clean(item?.supplierStockId, 300);
+        if (id) matches.set(id, item);
+      }
+      return matches;
+    };
+    const rejectAmbiguous = (matches) => {
+      if (matches.size <= 1) return false;
+      response.setHeader("Cache-Control", "no-store, max-age=0");
+      response.status(409).json({ ok: false, message: "More than one DealerKit vehicle uses this registration. Refresh comparison and resolve the duplicate before review." });
+      return true;
+    };
+    const requestedMatches = matchingIdentities(registration);
+    if (registration && rejectAmbiguous(requestedMatches)) return;
+
     let vehicle = null;
     if (supplierStockId) {
       vehicle = await fetchDealerKitStockDetail(supplierStockId, { specifications: true });
@@ -161,17 +180,10 @@ export default async function handler(request, response) {
         response.status(409).json({ ok: false, message: "DealerKit stock identity no longer matches this registration. Refresh comparison before reviewing it." });
         return;
       }
+      if (exactRegistration && rejectAmbiguous(matchingIdentities(exactRegistration))) return;
     } else {
-      const snapshot = await fetchDealerKitStockSnapshot({ allowPartial: true });
-      const matches = (snapshot.vehicles || []).filter((item) => item.registration === registration);
-      if (matches.length > 1) {
-        response.setHeader("Cache-Control", "no-store, max-age=0");
-        response.status(409).json({ ok: false, message: "More than one DealerKit vehicle uses this registration. Refresh comparison and resolve the duplicate before review." });
-        return;
-      }
-      const match = matches[0] || null;
+      const match = Array.from(requestedMatches.values())[0] || null;
       if (match?.supplierStockId) vehicle = await fetchDealerKitStockDetail(match.supplierStockId, { specifications: true });
-      else vehicle = match || null;
     }
 
     if (!vehicle) {

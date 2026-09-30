@@ -1,7 +1,7 @@
 import { normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
 import { carPublishConfirmationMatches } from "../lib/dealerKitCarWixPlan.js";
 import { wixItemPublishStatus } from "../lib/dealerKitControlledPublishPlan.js";
-import { ControlledPublishError, controlledWixRequest } from "./_dealerkit-controlled-publish-state.js";
+import { ControlledPublishError, controlledWixRequest, queryControlledRegistrationItems } from "./_dealerkit-controlled-publish-state.js";
 import { setTargetPublishStatus } from "./dealerkit-controlled-publish.js";
 import { buildFreshCarControlledPublishState } from "./_dealerkit-car-controlled-publish-state.js";
 
@@ -130,19 +130,11 @@ async function rollbackPublishStatuses(configuration, transitions = []) {
   return outcomes;
 }
 
-async function verifyWritten(configuration, registration, targets = [], writes = []) {
+export async function verifyWritten(configuration, registration, targets = [], writes = [], { request = controlledWixRequest } = {}) {
   const results = [];
   const writesByCollection = new Map(writes.map((write) => [write.collectionId, write]));
   for (const target of targets) {
-    const payload = await controlledWixRequest(configuration, "/wix-data/v2/items/query", {
-      method: "POST",
-      body: {
-        dataCollectionId: target.collectionId,
-        query: { filter: { title: { $eq: registration } }, paging: { limit: 3, offset: 0 } },
-        consistentRead: true,
-      },
-    });
-    const items = Array.isArray(payload.dataItems) ? payload.dataItems : [];
+    const items = await queryControlledRegistrationItems(configuration, target.collectionId, registration, { request });
     const exact = items.length === 1 && normalizeFinanceRegistration(items[0]?.data?.title || "") === registration;
     const expectedId = target.operation === "update"
       ? clean(target.itemId, 300)

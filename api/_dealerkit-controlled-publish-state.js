@@ -1,4 +1,4 @@
-import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
+import { fetchDealerKitStockDetail, fetchDealerKitStockSnapshot } from "./_dealerkit-stock-adapter.js";
 import { DEALERKIT_REVIEW_TABLE, rowToDealerKitReviewDecision } from "./_dealerkit-review-decisions.js";
 import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
 import { VAN_FINANCE_WIX_COLLECTIONS, normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
@@ -80,29 +80,55 @@ async function loadDecision(supabase, registration) {
   return rowToDealerKitReviewDecision(data[0]);
 }
 
-async function queryRegistration(configuration, collectionId, registration, collection = null) {
-  const detailCollection = collectionId === "VANFINANCEPAGES" || collectionId === "VANPAGES";
-  const candidates = detailCollection ? registrationTitleVariants(registration) : [registration];
-  const matched = new Map();
-  for (const candidate of candidates) {
-    const payload = await controlledWixRequest(configuration, "/wix-data/v2/items/query", {
-      method: "POST",
-      body: { dataCollectionId: collectionId, query: { filter: { title: { $eq: candidate } }, paging: { limit: 3, offset: 0 } }, consistentRead: true },
+export async function assertDealerKitRegistrationUnambiguous(registration, { fetchSnapshot = fetchDealerKitStockSnapshot } = {}) {
+  const snapshot = await fetchSnapshot({ allowPartial: true });
+  const stockIds = new Set((snapshot.vehicles || [])
+    .filter((vehicle) => normalizeFinanceRegistration(vehicle?.registration || "") === registration)
+    .map((vehicle) => clean(vehicle?.supplierStockId, 300))
+    .filter(Boolean));
+  if (stockIds.size > 1) {
+    throw new ControlledPublishError(409, "More than one DealerKit vehicle uses this registration. Resolve the duplicate before reconciling this advert.", {
+      registration,
+      supplierStockIds: Array.from(stockIds).sort(),
     });
-    for (const item of Array.isArray(payload.dataItems) ? payload.dataItems : []) {
-      if (normalizeFinanceRegistration(item?.data?.title || "") !== registration) continue;
-      const id = clean(item?.id, 300);
-      if (id) matched.set(id, item);
-    }
-    if (!detailCollection && matched.size) break;
   }
+}
+
+// Listing and detail rows use the same canonical identity, including legacy spaced titles.
+export async function queryControlledRegistrationItems(configuration, collectionId, registration, { request = controlledWixRequest } = {}) {
+  const matched = new Map();
+  const missingIdentity = [];
+  const limit = 100;
+  for (const candidate of registrationTitleVariants(registration)) {
+    let offset = 0;
+    while (true) {
+      const payload = await request(configuration, "/wix-data/v2/items/query", {
+        method: "POST",
+        body: { dataCollectionId: collectionId, query: { filter: { title: { $eq: candidate } }, paging: { limit, offset } }, consistentRead: true },
+      });
+      const items = Array.isArray(payload.dataItems) ? payload.dataItems : [];
+      for (const item of items) {
+        if (normalizeFinanceRegistration(item?.data?.title || "") !== registration) continue;
+        const id = clean(item?.id, 300);
+        if (id) matched.set(id, item);
+        else missingIdentity.push(item);
+      }
+      offset += items.length;
+      if (items.length < limit) break;
+    }
+  }
+  // Keep ID-less matches so the existing plan blockers cannot mistake them for absence.
+  return [...matched.values(), ...missingIdentity];
+}
+
+async function queryRegistration(configuration, collectionId, registration, collection = null) {
   return {
     siteId: configuration.siteId,
     siteLabel: configuration.siteLabel || null,
     siteRole: configuration.siteRole || null,
     collectionId,
     collection: collection || { id: collectionId },
-    items: Array.from(matched.values()),
+    items: await queryControlledRegistrationItems(configuration, collectionId, registration),
   };
 }
 
@@ -157,6 +183,7 @@ export async function buildFreshControlledPublishState(registrationInput, enviro
   const decision = await loadDecision(supabase, registration);
   const vehicle = await fetchDealerKitStockDetail(decision.supplierStockId, { specifications: true });
   if (normalizeFinanceRegistration(vehicle?.registration || "") !== registration) throw new ControlledPublishError(409, "DealerKit registration changed. Re-open and save the review again.");
+  await assertDealerKitRegistrationUnambiguous(registration);
   const configuration = controlledWixConfiguration(environment);
   const rent2buyConfigurations = controlledRent2BuyWixConfigurations(environment, configuration);
 

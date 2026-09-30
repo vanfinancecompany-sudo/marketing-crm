@@ -69,6 +69,7 @@ replaceBlock('  async function loadPipeline(pipeline = selectedPipeline, options
     if (sessionUiLoadRef.current) return sessionUiLoadRef.current;
     if (!forceFresh && cache.isCurrent()) return cache.peek();
     const uiGeneration = ++sessionUiGenerationRef.current;
+    clearAdvertisedStock(["finance", "rent2buy", "cars"]);
     setLoadingPipeline(selectedPipeline);
     const work = cache.load(fetchDealerKitStockWatchSession, { forceFresh }).then(async ({ session }) => {
       if (uiGeneration !== sessionUiGenerationRef.current) return session;
@@ -76,6 +77,13 @@ replaceBlock('  async function loadPipeline(pipeline = selectedPipeline, options
       await Promise.allSettled(["finance", "rent2buy", "cars"].map((pipeline) =>
         loadLocalStock(pipeline, () => uiGeneration === sessionUiGenerationRef.current, session.lanes[pipeline].comparison)));
       return session;
+    }).catch(async (error) => {
+      // DealerKit availability is enrichment only for the published-advert maintenance view.
+      if (uiGeneration === sessionUiGenerationRef.current) {
+        await Promise.allSettled(["finance", "rent2buy", "cars"].map((pipeline) =>
+          loadAdvertisedStock(pipeline, () => uiGeneration === sessionUiGenerationRef.current)));
+      }
+      throw error;
     }).finally(() => {
       if (sessionUiLoadRef.current === work) sessionUiLoadRef.current = null;
       if (uiGeneration === sessionUiGenerationRef.current) setLoadingPipeline("");
@@ -87,6 +95,7 @@ replaceBlock('  async function loadPipeline(pipeline = selectedPipeline, options
 `, "pipeline loader");
 
 replaceOnce('  async function loadLocalStock(pipeline = selectedPipeline, isActive = () => true) {', '  async function loadLocalStock(pipeline = selectedPipeline, isActive = () => true, comparison = null) {\n    const localStartedAt = performance.now();', "local loader signature");
+replaceOnce('    await loadAdvertisedStock(pipeline, isActive);', '    await loadAdvertisedStock(pipeline, isActive, comparison);', "shared advertised Wix records");
 replaceOnce('          const presence = await fetchStockWatchWixListingPresence(pipeline);', '          const presence = comparison ? comparison.presence : await fetchStockWatchWixListingPresence(pipeline);', "shared Wix presence");
 replaceOnce('      setLocalLoadErrorByPipeline((prev) => ({ ...prev, [pipeline]: presenceWarning }));\n      return effectiveVehicles;', '      setLocalLoadErrorByPipeline((prev) => ({ ...prev, [pipeline]: presenceWarning }));\n      setDebugByPipeline((prev) => ({ ...prev, [pipeline]: { ...(prev[pipeline] || {}), localComparisonMs: Math.round(performance.now() - localStartedAt), reusedWixListingPresence: Boolean(comparison) } }));\n      return effectiveVehicles;', "local comparison timing");
 
@@ -135,6 +144,7 @@ replaceBlock('  async function handleRefreshCache() {', '  function handleRecord
     setReloadComparisonStatus("Refreshing comparison...");
     const startedAt = Date.now();
     const pipeline = selectedPipeline;
+    clearAdvertisedStock(pipeline === "cars" ? ["cars", "finance"] : [pipeline]);
     try {
       const session = sessionCacheRef.current.peek();
       if (!session?.lanes?.[pipeline]) throw new Error("Refresh Dealer Stock first to establish a source snapshot.");
@@ -194,6 +204,7 @@ replaceOnce('disabled={reloadComparisonRunning || loadingPipeline === selectedPi
 replaceOnce('filteredRecords.length === 0 ? <div className="empty-state">No vehicles in this view.</div> :', 'filteredRecords.length === 0 ? <div className="empty-state">{sessionCacheRef.current.peek() ? "No vehicles in this view." : "DealerKit stock is unavailable; no verified session has loaded."}</div> :', "unavailable first session");
 replaceOnce('  const financeRegistrationsForCars = new Set();', '  // Cars has its own published CARFINANCE authority; never borrow Finance presence.\n  const financeRegistrationsForCars = new Set();', "Cars presence boundary");
 replaceOnce('debug: debugByPipeline[selectedPipeline]', 'snapshotGeneration: sessionCacheRef.current.peek()?.snapshotGeneration, debug: debugByPipeline[selectedPipeline]', "accuracy diagnostics");
+
 
 fs.writeFileSync(pagePath, source);
 console.log("Applied single-snapshot DealerKit Stock Watch session UI.");
