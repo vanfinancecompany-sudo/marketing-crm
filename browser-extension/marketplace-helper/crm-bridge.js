@@ -12,6 +12,7 @@
   const ACK_TYPE = "VFC_MARKETPLACE_JOB_STORED";
   const PUBLISHED_TYPE = "VFC_MARKETPLACE_PUBLISHED";
   const RECEIPT_ACK_TYPE = "VFC_MARKETPLACE_RECEIPT_ACK";
+  const MARKETPLACE_STOCK_SNAPSHOT = "VFC_MARKETPLACE_STOCK_SNAPSHOT";
   const GROUP_DISCOVERY_START = "VFC_GROUP_DISCOVERY_START";
   const GROUP_DISCOVERY_ACK = "VFC_GROUP_DISCOVERY_ACK";
   const GROUP_DISCOVERY_COMPLETE = "VFC_GROUP_DISCOVERY_COMPLETE";
@@ -100,6 +101,18 @@
           error: String(error?.message || error),
         }, window.location.origin);
       }
+      return;
+    }
+
+    if (message.source === "vfc-marketing-crm" && message.type === MARKETPLACE_STOCK_SNAPSHOT) {
+      try {
+        await chrome.runtime.sendMessage({
+          type: "STORE_MARKETPLACE_STOCK_SNAPSHOT",
+          product: message.product,
+          registrations: message.registrations,
+          generatedAt: message.generatedAt,
+        });
+      } catch {}
       return;
     }
 
