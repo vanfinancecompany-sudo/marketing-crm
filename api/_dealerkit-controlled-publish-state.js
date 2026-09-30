@@ -80,29 +80,41 @@ async function loadDecision(supabase, registration) {
   return rowToDealerKitReviewDecision(data[0]);
 }
 
-async function queryRegistration(configuration, collectionId, registration, collection = null) {
-  const detailCollection = collectionId === "VANFINANCEPAGES" || collectionId === "VANPAGES";
-  const candidates = detailCollection ? registrationTitleVariants(registration) : [registration];
+// Listing and detail rows use the same canonical identity, including legacy spaced titles.
+export async function queryControlledRegistrationItems(configuration, collectionId, registration, { request = controlledWixRequest } = {}) {
   const matched = new Map();
-  for (const candidate of candidates) {
-    const payload = await controlledWixRequest(configuration, "/wix-data/v2/items/query", {
-      method: "POST",
-      body: { dataCollectionId: collectionId, query: { filter: { title: { $eq: candidate } }, paging: { limit: 3, offset: 0 } }, consistentRead: true },
-    });
-    for (const item of Array.isArray(payload.dataItems) ? payload.dataItems : []) {
-      if (normalizeFinanceRegistration(item?.data?.title || "") !== registration) continue;
-      const id = clean(item?.id, 300);
-      if (id) matched.set(id, item);
+  const missingIdentity = [];
+  const limit = 100;
+  for (const candidate of registrationTitleVariants(registration)) {
+    let offset = 0;
+    while (true) {
+      const payload = await request(configuration, "/wix-data/v2/items/query", {
+        method: "POST",
+        body: { dataCollectionId: collectionId, query: { filter: { title: { $eq: candidate } }, paging: { limit, offset } }, consistentRead: true },
+      });
+      const items = Array.isArray(payload.dataItems) ? payload.dataItems : [];
+      for (const item of items) {
+        if (normalizeFinanceRegistration(item?.data?.title || "") !== registration) continue;
+        const id = clean(item?.id, 300);
+        if (id) matched.set(id, item);
+        else missingIdentity.push(item);
+      }
+      offset += items.length;
+      if (items.length < limit) break;
     }
-    if (!detailCollection && matched.size) break;
   }
+  // Keep ID-less matches so the existing plan blockers cannot mistake them for absence.
+  return [...matched.values(), ...missingIdentity];
+}
+
+async function queryRegistration(configuration, collectionId, registration, collection = null) {
   return {
     siteId: configuration.siteId,
     siteLabel: configuration.siteLabel || null,
     siteRole: configuration.siteRole || null,
     collectionId,
     collection: collection || { id: collectionId },
-    items: Array.from(matched.values()),
+    items: await queryControlledRegistrationItems(configuration, collectionId, registration),
   };
 }
 

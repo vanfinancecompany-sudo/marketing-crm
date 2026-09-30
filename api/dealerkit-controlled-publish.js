@@ -1,10 +1,10 @@
 import { normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
 import { controlledPublishConfirmationMatches, wixItemPublishStatus } from "../lib/dealerKitControlledPublishPlan.js";
-import { registrationTitleVariants } from "../lib/wixRegistrationVariants.js";
 import {
   ControlledPublishError,
   buildFreshControlledPublishState,
   controlledWixRequest,
+  queryControlledRegistrationItems,
 } from "./_dealerkit-controlled-publish-state.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
@@ -234,21 +234,7 @@ export async function verifyWritten(state, registration, targets = [], writes = 
   const writesByTarget = new Map(writes.map((write) => [targetKey(write), write]));
   for (const target of targets) {
     const configuration = configurationForTarget(state, target);
-    const candidates = target.kind === "detail" ? registrationTitleVariants(registration) : [registration];
-    const matched = new Map();
-    for (const candidate of candidates) {
-      const payload = await request(configuration, "/wix-data/v2/items/query", {
-        method: "POST",
-        body: { dataCollectionId: target.collectionId, query: { filter: { title: { $eq: candidate } }, paging: { limit: 3, offset: 0 } }, consistentRead: true },
-      });
-      for (const item of Array.isArray(payload.dataItems) ? payload.dataItems : []) {
-        if (normalizeFinanceRegistration(item?.data?.title || "") !== registration) continue;
-        const id = clean(item?.id, 300);
-        if (id) matched.set(id, item);
-      }
-      if (target.kind !== "detail" && matched.size) break;
-    }
-    const items = Array.from(matched.values());
+    const items = await queryControlledRegistrationItems(configuration, target.collectionId, registration, { request });
     const exact = items.length === 1 && normalizeFinanceRegistration(items[0]?.data?.title || "") === registration;
     const written = writesByTarget.get(targetKey(target));
     const expectedId = target.operation === "create" ? clean(written?.itemId, 300) : clean(target.itemId, 300);

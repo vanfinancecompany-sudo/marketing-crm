@@ -32,7 +32,8 @@ if (!stateSource.includes(variantImport)) {
   stateSource = stateSource.replace(importAnchor, `${importAnchor}\n${variantImport}`);
 }
 
-if (!stateSource.includes('const candidates = detailCollection ? registrationTitleVariants(registration) : [registration];')) {
+if (!stateSource.includes('export async function queryControlledRegistrationItems(')
+  && !stateSource.includes('const candidates = detailCollection ? registrationTitleVariants(registration) : [registration];')) {
   const startMarker = 'async function queryRegistration(configuration, collectionId, registration, collection = null) {';
   const endMarker = '\nasync function verifyManualRow(';
   const start = stateSource.indexOf(startMarker);

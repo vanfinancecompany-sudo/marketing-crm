@@ -1,12 +1,11 @@
 import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
 import { DEALERKIT_REVIEW_TABLE, rowToDealerKitReviewDecision } from "./_dealerkit-review-decisions.js";
 import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
-import { ControlledPublishError, controlledWixRequest } from "./_dealerkit-controlled-publish-state.js";
+import { ControlledPublishError, controlledWixRequest, queryControlledRegistrationItems } from "./_dealerkit-controlled-publish-state.js";
 import { normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
 import { decodeDealerKitProductImageState } from "../lib/dealerKitProductImageState.js";
 import { DEALERKIT_IMPORTED_MEDIA_TABLE, WIX_MEDIA_GET_FILE_URL, importedMediaRowToClient } from "../lib/dealerKitWixVehicleMedia.js";
 import { buildDealerKitCarWixPlan, buildCarPublishConfirmation } from "../lib/dealerKitCarWixPlan.js";
-import { registrationTitleVariants } from "../lib/wixRegistrationVariants.js";
 
 const clean = (value, limit = 10000) => String(value ?? "").trim().slice(0, limit);
 
@@ -31,25 +30,7 @@ async function loadDecision(supabase, registration) {
 }
 
 async function queryRegistration(configuration, collectionId, registration) {
-  const candidates = collectionId === "CARPAGES" ? registrationTitleVariants(registration) : [registration];
-  const matched = new Map();
-  for (const candidate of candidates) {
-    const payload = await controlledWixRequest(configuration, "/wix-data/v2/items/query", {
-      method: "POST",
-      body: {
-        dataCollectionId: collectionId,
-        query: { filter: { title: { $eq: candidate } }, paging: { limit: 3, offset: 0 } },
-        consistentRead: true,
-      },
-    });
-    for (const item of Array.isArray(payload.dataItems) ? payload.dataItems : []) {
-      if (normalizeFinanceRegistration(item?.data?.title || "") !== registration) continue;
-      const id = clean(item?.id, 300);
-      if (id) matched.set(id, item);
-    }
-    if (collectionId !== "CARPAGES" && matched.size) break;
-  }
-  return Array.from(matched.values());
+  return queryControlledRegistrationItems(configuration, collectionId, registration);
 }
 
 async function loadImportedReadiness(supabase, configuration, vehicle) {
@@ -92,7 +73,8 @@ export function buildCarImageSet(vehicle = {}, decision = {}, importedDealerKitM
   const unpreparedIds = selectedIds.filter((id) => !importedById.has(id));
   const processingIds = selectedIds.filter((id) => importedById.has(id) && !importedById.get(id)?.ready);
   const mainUrl = primaryId && importedById.get(primaryId)?.ready ? clean(importedById.get(primaryId)?.wixUrl, 3000) : null;
-  const galleryUrls = readyIds.map((id) => clean(importedById.get(id)?.wixUrl, 3000)).filter(Boolean);
+  const galleryIds = mainUrl ? [primaryId, ...readyIds.filter((id) => id !== primaryId)] : readyIds;
+  const galleryUrls = galleryIds.map((id) => clean(importedById.get(id)?.wixUrl, 3000)).filter(Boolean);
 
   return {
     imageSet: {

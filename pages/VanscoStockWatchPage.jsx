@@ -139,7 +139,24 @@ function mapLocalVehicleToWatchRecord(vehicle, index, selectedPipeline) {
   };
 }
 
-function mapAdvertisedLocalVehicleToWatchRecord(vehicle, index, selectedPipeline, dealerKitRecord = null) {
+function buildDealerKitByRegistration(records) {
+  const grouped = new Map();
+  records.forEach((record) => {
+    const registration = normalizeWatchRegistration(record.registration);
+    const supplierStockId = String(record.supplierStockId || "").trim();
+    if (!registration || !supplierStockId) return;
+    if (!grouped.has(registration)) grouped.set(registration, new Map());
+    const byId = grouped.get(registration);
+    const existing = byId.get(supplierStockId);
+    if (!existing || recordCheckedTimeMs(record) >= recordCheckedTimeMs(existing)) byId.set(supplierStockId, record);
+  });
+  return new Map(Array.from(grouped, ([registration, byId]) => [registration, {
+    record: byId.size === 1 ? Array.from(byId.values())[0] : null,
+    ambiguous: byId.size > 1,
+  }]));
+}
+
+function mapAdvertisedLocalVehicleToWatchRecord(vehicle, index, selectedPipeline, dealerKitRecord = null, dealerKitIdentityAmbiguous = false) {
   const registration = normalizeLocalStockRegistration(vehicle.reg || vehicle.registration || vehicle.title || vehicle.name);
   const title = vehicle.title || vehicle.name || vehicle.registration || vehicle.reg || dealerKitRecord?.title || "Advertised vehicle";
   const localStockUrl = vehicle.weblink || vehicle.webLink || vehicle.link || "";
@@ -153,7 +170,8 @@ function mapAdvertisedLocalVehicleToWatchRecord(vehicle, index, selectedPipeline
     localStockUrl,
     pipeline: selectedPipeline,
     displayStatus: "advertised_stock",
-    matchStatus: dealerKitRecord ? "advertised_stock_dealerkit_match" : "advertised_stock_no_dealerkit_match",
+    matchStatus: dealerKitIdentityAmbiguous ? "advertised_stock_ambiguous_dealerkit" : dealerKitRecord ? "advertised_stock_dealerkit_match" : "advertised_stock_no_dealerkit_match",
+    dealerKitIdentityAmbiguous,
     workflowStatus: workflowStatusOf(dealerKitRecord),
     sourceStatus: dealerKitRecord?.sourceStatus || "",
     notes: "",
@@ -350,6 +368,7 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
   const canReviewDealerKit = !isLocalNotVansco
     && (record.displayStatus === "missing" || isAdvertisedStockMaintenance)
     && ["finance", "rent2buy", "cars"].includes(selectedPipeline)
+    && !record.dealerKitIdentityAmbiguous
     && Boolean(record.registration && record.supplierStockId);
 
   function openDealerKitReview() {
@@ -371,6 +390,7 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
         <div className="vansco-card__badges"><PipelineBadge pipeline={selectedPipeline} /><DisplayStatusBadge status={record.displayStatus} /><SourceStatusBadge status={record.sourceStatus} /></div>
         <h3>{record.title || "Untitled vehicle"}</h3>
         <div className="vehicle-card__meta">Registration: {record.registration || "Not found"}</div>
+        {isAdvertisedStockMaintenance && record.dealerKitIdentityAmbiguous ? <div className="vehicle-card__meta">More than one DealerKit vehicle uses this registration. Resolve the duplicate before reviewing this advert.</div> : null}
         {isLocalNotVansco ? <div className="vehicle-card__meta">This registration is active in your CRM stock, but was not found in the current Vansco cache for this tab.</div> : null}
         {!isLocalNotVansco && record.safeExactRegistrationMatch ? <div className="vehicle-card__meta">This registration is currently in this CRM stock tab.</div> : null}
         {!isLocalNotVansco && record.financeStockMatchForCars ? <div className="vehicle-card__meta">This Cars vehicle registration is already active in Van Finance stock.</div> : null}
@@ -498,21 +518,15 @@ export default function VanscoStockWatchPage() {
       .map(({ vehicle, index }) => mapLocalVehicleToWatchRecord(vehicle, index, selectedPipeline));
   }, [activeLocalVehicles, dealerKitAccountedRegistrationSet, dealerKitSnapshotComplete, selectedPipeline]);
 
-  const dealerKitByRegistration = useMemo(() => {
-    const map = new Map();
-    currentRawRecords.forEach((record) => {
-      const registration = normalizeWatchRegistration(record.registration);
-      if (registration && !map.has(registration)) map.set(registration, record);
-    });
-    return map;
-  }, [currentRawRecords]);
+  const dealerKitByRegistration = useMemo(() => buildDealerKitByRegistration(rawActiveRecords), [rawActiveRecords]);
 
   const advertisedStockRecords = useMemo(() => dedupeLocalVehiclesByRegistration(activeLocalVehicles)
     .map(({ vehicle, index, registration }) => mapAdvertisedLocalVehicleToWatchRecord(
       vehicle,
       index,
       selectedPipeline,
-      dealerKitByRegistration.get(registration) || null,
+      dealerKitByRegistration.get(registration)?.record || null,
+      dealerKitByRegistration.get(registration)?.ambiguous || false,
     )), [activeLocalVehicles, dealerKitByRegistration, selectedPipeline]);
 
   const displayRecords = useMemo(
