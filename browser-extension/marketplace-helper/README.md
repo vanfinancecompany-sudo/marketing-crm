@@ -75,7 +75,7 @@ When the user manually clicks Facebook's **Post** button, the helper records tha
 
 ## Marketplace listing renewal assistant
 
-Version 1.2.27 includes the controlled helper on Facebook Marketplace → **Your listings**.
+Version 1.2.28 includes the controlled helper on Facebook Marketplace → **Your listings**.
 
 - **Scan all listings** automatically scrolls through Facebook's virtualised seller list, waits through the three-dot/loading pagination pauses, and accumulates each new batch instead of stopping at the first loader.
 - Separates obvious Rent2Buy and Van Finance adverts using the existing Marketplace title hooks.
@@ -84,7 +84,8 @@ Version 1.2.27 includes the controlled helper on Facebook Marketplace → **Your
 - Flags exact registry matches as current stock or stale when a matching stock snapshot is available.
 - **Find next renewable** also waits for the next Facebook batch when it reaches the loading dots, then continues searching before giving up.
 - **Auto renew current filter** can automatically click Facebook's existing **Renew listing** action for every renewable advert in the selected All / Rent2Buy / Van Finance filter, with one confirmation before the run, pacing between actions, pagination waits, a Stop control and an automatic stop if Facebook reports a temporary block/rate limit.
+- v1.2.28 waits for Facebook's menu portal to finish rendering and clicks the actual actionable **Renew listing** menu item rather than a nested text span, which fixes menus opening without the renewal action firing.
 - Manual mode still leaves the final **Renew listing** click to the user. Auto-renew mode is explicitly opt-in from the helper panel and performs only the existing Renew action.
-- The helper never deletes, marks sold, edits, boosts, publishes or renews a listing without the user's click.
+- The helper never deletes, marks sold, edits, boosts, publishes or creates listings. Bulk renewal only runs after the user's explicit **Auto renew current filter** confirmation.
 
 Existing Marketplace listings that pre-date the stored listing registry can still be classified by title and stepped through for renewal, but their exact registration/stock match may show as unknown.
