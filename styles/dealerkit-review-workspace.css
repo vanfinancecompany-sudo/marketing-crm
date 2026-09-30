@@ -641,3 +641,11 @@ body.dealerkit-review-open {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.dealerkit-review__current-image-label {
+  display: block;
+  padding: 14px 16px;
+  background: #ecfdf5;
+  color: #166534;
+  font-size: 16px;
+}

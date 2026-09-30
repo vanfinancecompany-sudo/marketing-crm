@@ -8,6 +8,7 @@ import {
 } from "../lib/dealerKitProductImageState.js";
 import { calculateRent2BuyPricing } from "../lib/dealerKitRent2BuyPlan.js";
 import "../styles/dealerkit-product-gallery-workspace.css";
+import { currentWixAdvertForReview, currentWixAdvertPrice } from "../lib/dealerKitAdvertisedReviewContext.js";
 
 const WORKSPACE_SELECTOR = "[data-dealerkit-review-workspace]";
 const ROOT_ATTRIBUTE = "data-dealerkit-product-gallery";
@@ -213,12 +214,13 @@ function fact(label, value, note = "") {
 function renderPricing(state, product, host) {
   host.replaceChildren();
   const vehicle = state.vehicle;
+  const currentAdvert = state.currentWixAdvert;
   const local = state.local?.[product] || null;
   if (product === "finance") {
     host.append(
       fact("DealerKit retail", retailMoney(vehicle.retailPrice), vehicle.vatStatus === "plus_vat" ? "+ VAT" : vehicle.vatStatus || ""),
-      fact("Current Finance advert", local ? money(local.price) : "Not advertised"),
-      fact("Current monthly", local ? money(local.monthly) : "–"),
+      fact("Current Finance advert", currentAdvert ? currentWixAdvertPrice(currentAdvert) : local ? money(local.price) : "Not advertised", currentAdvert ? "Published in Wix" : ""),
+      fact("Current monthly", currentAdvert ? (currentAdvert.salePrice || money(currentAdvert.monthly)) : local ? money(local.monthly) : "–"),
       fact("Images selected", String(state.imageState.finance.includedOrderIds.length)),
     );
   } else {
@@ -229,6 +231,7 @@ function renderPricing(state, product, host) {
       categories,
       vatStatus: vehicle.vatStatus,
     });
+    if (currentAdvert) host.appendChild(fact("Current Rent2Buy advert", currentWixAdvertPrice(currentAdvert), "Published in Wix"));
     host.append(
       fact("Calculated monthly", calculated ? `${money(calculated.monthly)} p/m` : "Needs review"),
       fact("Calculated upfront", calculated ? money(calculated.upfront) : "Needs review", calculated ? `${calculated.upfrontMonths} rentals upfront` : "Check price and mileage"),
@@ -376,7 +379,7 @@ function manualCard(state, product, item) {
   const copy = element("div", "dealerkit-product-gallery__manual-copy");
   copy.append(
     element("strong", "", item.displayName || PRODUCTS[product].uploadLabel),
-    element("span", selected ? "dealerkit-product-gallery__primary-badge" : "", selected ? "PRODUCT PRIMARY" : (item.operationStatus || "STAGED")),
+    element("span", selected ? "dealerkit-product-gallery__primary-badge" : "", selected ? (state.currentWixAdvert ? "REPLACEMENT PRIMARY" : "PRODUCT PRIMARY") : (item.operationStatus || "STAGED")),
   );
   const actions = element("div", "dealerkit-product-gallery__manual-actions");
   if (ready && !selected) {
@@ -615,7 +618,10 @@ function renderActiveProduct(state) {
   const selected = selectedManual(state, product);
   const primaryNote = state.root.querySelector("[data-product-gallery-primary-note]");
   if (primaryNote) {
-    if (selected) primaryNote.textContent = `${selected.displayName || "Uploaded image"} is the ${config.label} product primary.`;
+    if (state.currentWixAdvert) primaryNote.textContent = selected
+      ? `${selected.displayName || "Uploaded template"} is the optional replacement primary. The Current Wix image above is live until Reconcile.`
+      : "DealerKit source photos are replacement choices. No template is selected; the Current Wix image above remains live.";
+    else if (selected) primaryNote.textContent = `${selected.displayName || "Uploaded image"} is the ${config.label} product primary.`;
     else if (state.imageState[product].primaryId) primaryNote.textContent = `No ${config.label} template selected. The chosen DealerKit source primary is first in this product's saved image order.`;
     else primaryNote.textContent = "No product template is selected as primary yet.";
   }
@@ -676,12 +682,20 @@ function buildRoot(state) {
   save.addEventListener("click", () => saveProductState(state));
   footer.append(message, save);
 
-  root.append(top, pricing, galleryTop, manual, upload, sourceHeading, source, footer);
+  const manualHeading = element("div", "dealerkit-product-gallery__source-heading");
+  if (state.currentWixAdvert) manualHeading.append(
+    element("strong", "", `${PRODUCTS[state.activeProduct].label} template image`),
+    element("span", "", "Optional uploaded replacement"),
+  );
+  root.append(top, pricing, galleryTop);
+  if (state.currentWixAdvert) root.appendChild(manualHeading);
+  root.append(manual, upload, sourceHeading, source, footer);
   return root;
 }
 
 async function initialiseWorkspace(workspace, body, registration) {
   const requestId = ++requestCounter;
+  const advertContext = workspace._dealerKitCurrentWixAdvert;
   const existing = body.querySelector(`[${ROOT_ATTRIBUTE}]`);
   if (existing) existing.remove();
   const loading = element("section", "dealerkit-product-gallery is-loading", "Loading separate Van Finance and Rent2Buy galleries…");
@@ -698,7 +712,7 @@ async function initialiseWorkspace(workspace, body, registration) {
       {},
       "Could not load product gallery workspace.",
     );
-    if (requestId !== requestCounter) return;
+    if (requestId !== requestCounter || advertContext !== workspace._dealerKitCurrentWixAdvert || workspace._dealerKitReviewReady === false || !loading.isConnected) return;
     const vehicle = payload.vehicle || {};
     const decision = payload.reviewDecision || {};
     const sourceIds = (vehicle.images || []).map((image) => clean(image.id)).filter(Boolean);
@@ -709,6 +723,7 @@ async function initialiseWorkspace(workspace, body, registration) {
       registration,
       vehicle,
       local: payload.local || {},
+      currentWixAdvert: currentWixAdvertForReview(advertContext, vehicle.registration, workspace.dataset.product || "finance"),
       decision,
       sourceIds,
       imageState: copyMutableImageState(decodeDealerKitProductImageState(decision, sourceIds)),
@@ -723,7 +738,7 @@ async function initialiseWorkspace(workspace, body, registration) {
       messageTone: "",
     };
     await loadManualMedia(state, { quiet: true });
-    if (requestId !== requestCounter) return;
+    if (requestId !== requestCounter || advertContext !== workspace._dealerKitCurrentWixAdvert || workspace._dealerKitReviewReady === false || !loading.isConnected) return;
     const root = buildRoot(state);
     state.root = root;
     loading.replaceWith(root);
@@ -742,7 +757,7 @@ function scan() {
   renderingScan = true;
   try {
     const workspace = document.querySelector(WORKSPACE_SELECTOR);
-    if (!workspace || workspace.hidden) return;
+    if (!workspace || workspace.hidden || workspace._dealerKitReviewReady === false) return;
     const body = workspace.querySelector("[data-dealerkit-review-body]");
     const registration = normaliseRegistration(workspace.querySelector("[data-dealerkit-review-title]")?.textContent);
     if (!body || !registration) return;

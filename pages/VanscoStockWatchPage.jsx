@@ -179,6 +179,7 @@ function mapAdvertisedLocalVehicleToWatchRecord(vehicle, index, selectedPipeline
     price: vehicle.price,
     monthly: vehicle.monthly,
     picture: vehicle.picture,
+    currentWixAdvert: vehicle,
     displayStatus: "advertised_stock",
     matchStatus: dealerKitIdentityAmbiguous ? "advertised_stock_ambiguous_dealerkit" : dealerKitRecord ? "advertised_stock_dealerkit_match" : "advertised_stock_no_dealerkit_match",
     dealerKitIdentityAmbiguous,
@@ -387,6 +388,7 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
         registration: record.registration,
         supplierStockId: record.supplierStockId,
         product: selectedPipeline,
+        advertisedWixRecord: isAdvertisedStockMaintenance ? (record.currentWixAdvert || {}) : null,
       },
     }));
   }
