@@ -190,6 +190,10 @@ test("unknown publication status, missing Wix IDs and malformed page data fail m
     assert.equal(wix.publishedListingsComplete, false);
     assert.throws(() => advertisedWixVehicles(wix, "finance"), /unavailable or incomplete/);
   }
+  const unidentifiable = await presence("finance", [item("missing-registration", "", { vanDescription: "A published vehicle with no registration" })]);
+  assert.deepEqual(unidentifiable.vehicles, [], "The other comparison views keep their existing missing-registration handling");
+  assert.equal(unidentifiable.publishedListingsComplete, false);
+  assert.throws(() => advertisedWixVehicles(unidentifiable, "finance"), /unavailable or incomplete/);
   const malformed = await loadLiveWixListingPresence("finance", { fetchImplementation: async () => ({ ok: true, json: async () => ({}) }) });
   assert.equal(malformed.publishedListingsComplete, false);
 });

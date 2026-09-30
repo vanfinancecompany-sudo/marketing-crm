@@ -159,7 +159,7 @@ async function loadSource(source, pipeline, fetchImplementation = fetch) {
       const status = itemPublishStatus(item);
       if (status && status !== "PUBLISHED") continue;
       const vehicle = publishedListingVehicle(item, pipeline, source);
-      if (!vehicle) continue;
+      if (!vehicle) { publishedListingsComplete = false; continue; }
       vehiclesByRegistration.set(vehicle.registration, vehicle);
       const listing = publishedListingRecord(item, pipeline, source);
       if (!listing?.wixItemId) publishedListingsComplete = false;
