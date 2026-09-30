@@ -119,9 +119,9 @@ test("Marketplace helper adds a manual renewal assistant for Edge seller listing
   );
   assert.ok(managerEntry);
   assert.ok(managerEntry.matches.includes("https://www.facebook.com/marketplace/you/selling*"));
-  assert.match(marketplaceManagerSource, /Next renewable/);
+  assert.match(marketplaceManagerSource, /Find next renewable/);
   assert.match(marketplaceManagerSource, /Renew listing/);
-  assert.match(marketplaceManagerSource, /you make the final Renew click/i);
+  assert.match(marketplaceManagerSource, /you make the final click/i);
   assert.match(marketplaceManagerSource, /stockStatus/);
   assert.doesNotMatch(marketplaceManagerSource, /renew\.click\(/);
 });
@@ -139,6 +139,15 @@ test("Marketplace renewal scan supports Facebook managed listing cards without i
   assert.match(marketplaceManagerSource, /function candidateListingCards\(\)/);
   assert.match(marketplaceManagerSource, /mark as sold/);
   assert.match(marketplaceManagerSource, /boost listing/);
-  assert.match(marketplaceManagerSource, /Scan complete: found/);
   assert.match(marketplaceManagerSource, /listingItemLink/);
+});
+
+test("Marketplace manager scans the virtualised list and searches for the next renewable advert", () => {
+  assert.match(marketplaceManagerSource, /Scan all listings/);
+  assert.match(marketplaceManagerSource, /Scanning Facebook/);
+  assert.match(marketplaceManagerSource, /Full scan complete/);
+  assert.match(marketplaceManagerSource, /Find next renewable/);
+  assert.match(marketplaceManagerSource, /window\.scrollTo/);
+  assert.match(marketplaceManagerSource, /window\.scrollBy/);
+  assert.doesNotMatch(marketplaceManagerSource, /renew\.click\(/);
 });

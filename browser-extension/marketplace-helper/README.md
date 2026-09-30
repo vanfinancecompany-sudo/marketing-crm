@@ -75,14 +75,14 @@ When the user manually clicks Facebook's **Post** button, the helper records tha
 
 ## Marketplace listing renewal assistant
 
-Version 1.2.24 includes the controlled helper on Facebook Marketplace → **Your listings**.
+Version 1.2.25 includes the controlled helper on Facebook Marketplace → **Your listings**.
 
-- Scans the Marketplace listings currently loaded in the user's normal Facebook session, including Facebook's managed listing cards even when no `/marketplace/item/...` link is exposed in the card.
+- **Scan all listings** automatically scrolls through Facebook's virtualised seller list and accumulates the cards it encounters, instead of only counting the few cards currently mounted on screen.
 - Separates obvious Rent2Buy and Van Finance adverts using the existing Marketplace title hooks.
 - Receives current stock registration snapshots when the user opens the matching Marketing CRM Marketplace lane.
 - Remembers registration-to-listing links for Marketplace adverts published through the helper from this version onward.
 - Flags exact registry matches as current stock or stale when a matching stock snapshot is available.
-- **Next renewable** scrolls to the next eligible listing, opens its Facebook listing-actions menu and highlights **Renew listing**.
+- **Find next renewable** searches through the virtualised list, opens the next eligible listing-actions menu and highlights **Renew listing**.
 - The user still clicks Facebook's final **Renew listing** action manually.
 - The helper never deletes, marks sold, edits, boosts, publishes or renews a listing without the user's click.
 
