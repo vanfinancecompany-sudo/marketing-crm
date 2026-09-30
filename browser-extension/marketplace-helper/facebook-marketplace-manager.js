@@ -365,9 +365,36 @@
   }
 
   function visibleRenewOption() {
-    return [...document.querySelectorAll('[role="menuitem"],[role="button"],div[tabindex="0"],span')]
+    const actionableSelector = '[role="menuitem"],[role="button"],button,a,div[tabindex="0"]';
+    const actionable = [...document.querySelectorAll(actionableSelector)]
       .filter(visible)
-      .find((element) => fold(element.innerText || element.textContent) === "renew listing") || null;
+      .find((element) => fold(element.innerText || element.textContent) === "renew listing");
+    if (actionable) return actionable;
+
+    const textNode = [...document.querySelectorAll('span')]
+      .filter(visible)
+      .find((element) => fold(element.innerText || element.textContent) === "renew listing");
+
+    return textNode?.closest?.(actionableSelector) || null;
+  }
+
+  async function waitForRenewOption(timeoutMs = 3000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const renew = visibleRenewOption();
+      if (renew) return renew;
+      await sleep(120);
+    }
+    return null;
+  }
+
+  function renewalConfirmed() {
+    return [...document.querySelectorAll('[role="alert"],[role="status"],[aria-live="polite"],[aria-live="assertive"]')]
+      .filter(visible)
+      .some((element) => {
+        const text = fold(element.innerText || element.textContent);
+        return text.includes("listing has been renewed") || text.includes("listing renewed");
+      });
   }
 
   function closeOpenMenu() {
@@ -406,17 +433,32 @@
     if (!menu) return { renewed: false, reason: "menu unavailable" };
 
     menu.click();
-    await sleep(320);
 
-    const renew = visibleRenewOption();
+    const renew = await waitForRenewOption(3000);
     if (!renew) {
       closeOpenMenu();
       await sleep(120);
       return { renewed: false, reason: "not renewable" };
     }
 
+    renew.scrollIntoView?.({ block: "center", behavior: "auto" });
     renew.click();
-    await sleep(950);
+
+    let clickedThrough = false;
+    const clickDeadline = Date.now() + 3000;
+    while (Date.now() < clickDeadline) {
+      await sleep(180);
+      if (renewalConfirmed() || !visibleRenewOption()) {
+        clickedThrough = true;
+        break;
+      }
+    }
+
+    if (!clickedThrough && visibleRenewOption()) {
+      const clickable = visibleRenewOption();
+      clickable?.click?.();
+      await sleep(650);
+    }
 
     const blocked = facebookBlockingMessage();
     if (blocked) {
@@ -435,8 +477,7 @@
     if (!menu) return false;
 
     menu.click();
-    await sleep(320);
-    const renew = visibleRenewOption();
+    const renew = await waitForRenewOption(3000);
     if (!renew) {
       closeOpenMenu();
       await sleep(120);
