@@ -43,20 +43,43 @@
     }
   }
 
-  function nearestListingCard(link) {
-    let node = link;
-    for (let depth = 0; depth < 11 && node?.parentElement; depth += 1) {
+  function listingActionLabel(element) {
+    return fold([
+      element?.getAttribute?.("aria-label"),
+      element?.getAttribute?.("title"),
+      element?.innerText,
+      element?.textContent,
+    ].filter(Boolean).join(" "));
+  }
+
+  function isListingAction(element) {
+    const label = listingActionLabel(element);
+    return (
+      label.includes("mark as sold") ||
+      label.includes("boost listing") ||
+      label.includes("renew your listing")
+    );
+  }
+
+  function nearestListingCard(seed) {
+    let node = seed;
+    for (let depth = 0; depth < 12 && node?.parentElement; depth += 1) {
       node = node.parentElement;
       const text = fold(node.innerText || node.textContent);
-      const itemLinks = node.querySelectorAll?.('a[href*="/marketplace/item/"]').length || 0;
-      const looksManaged =
-        text.includes("mark as sold") ||
-        text.includes("boost listing") ||
-        text.includes("renew your listing") ||
-        text.includes("listed on marketplace");
-      if (looksManaged && itemLinks <= 3) return node;
+      const hasSold = text.includes("mark as sold");
+      const hasBoost = text.includes("boost listing");
+      const hasRenewTip = text.includes("renew your listing");
+      const actionCount = [...(node.querySelectorAll?.('button,[role="button"]') || [])]
+        .filter(isListingAction)
+        .length;
+      if ((hasSold && hasBoost) || (hasRenewTip && actionCount >= 1) || actionCount >= 2) return node;
     }
-    return link.closest?.('[role="article"]') || link.parentElement;
+    return seed?.closest?.('[role="article"]') || seed?.parentElement || null;
+  }
+
+  function listingItemLink(card) {
+    return [...(card?.querySelectorAll?.('a[href*="/marketplace/item/"]') || [])]
+      .find((link) => itemIdentity(link.href)) || null;
   }
 
   function listingTitle(card, link) {
@@ -113,21 +136,49 @@
     } catch {}
   }
 
+  function candidateListingCards() {
+    const cards = [];
+    const seenCards = new Set();
+
+    const addCard = (card) => {
+      if (!card || seenCards.has(card)) return;
+      const text = fold(card.innerText || card.textContent);
+      if (!text.includes("mark as sold") && !text.includes("boost listing") && !text.includes("renew your listing")) return;
+      seenCards.add(card);
+      cards.push(card);
+    };
+
+    for (const element of document.querySelectorAll('button,[role="button"]')) {
+      if (!isListingAction(element)) continue;
+      addCard(nearestListingCard(element));
+    }
+
+    for (const link of document.querySelectorAll('a[href*="/marketplace/item/"]')) {
+      addCard(nearestListingCard(link));
+    }
+
+    return cards;
+  }
+
   function scanLoadedListings() {
     const registry = registryByItemId();
     const seen = new Set();
     const rows = [];
-    for (const link of document.querySelectorAll('a[href*="/marketplace/item/"]')) {
-      const identity = itemIdentity(link.href);
-      if (!identity || seen.has(identity.itemId)) continue;
-      const card = nearestListingCard(link);
-      if (!card || !visible(card)) continue;
-      seen.add(identity.itemId);
-      const entry = registry.get(identity.itemId) || null;
+
+    for (const card of candidateListingCards()) {
+      const link = listingItemLink(card);
+      const identity = link ? itemIdentity(link.href) : null;
+      const fallbackKey = `card:${fold(card.innerText || card.textContent).slice(0, 220)}`;
+      const rowKey = identity?.itemId || fallbackKey;
+      if (!rowKey || seen.has(rowKey)) continue;
+      seen.add(rowKey);
+
+      const entry = identity?.itemId ? (registry.get(identity.itemId) || null) : null;
       const title = listingTitle(card, link);
       const product = classifyProduct(`${title} ${card.innerText || ""}`, entry);
       rows.push({
-        ...identity,
+        itemId: identity?.itemId || "",
+        listingUrl: identity?.listingUrl || "",
         card,
         title,
         product,
@@ -136,9 +187,16 @@
         renewable: fold(card.innerText || card.textContent).includes("renew your listing"),
       });
     }
+
     state.rows = rows;
     state.cursor = -1;
-    render();
+    const financeCount = rows.filter((row) => row.product === "finance").length;
+    const rentCount = rows.filter((row) => row.product === "rent2buy").length;
+    render(
+      rows.length
+        ? `Scan complete: found ${rows.length} loaded Marketplace listing card${rows.length === 1 ? "" : "s"} · ${rentCount} Rent2Buy · ${financeCount} Van Finance.`
+        : "Scan complete, but no Marketplace listing cards matched. Facebook may still be rendering the page.",
+    );
     return rows;
   }
 
@@ -322,7 +380,11 @@
     await loadContext();
     render("Waiting for Facebook Marketplace listings…");
     let attempts = 0;
-    while (attempts < 20 && !document.querySelector('a[href*="/marketplace/item/"]')) {
+    while (
+      attempts < 20 &&
+      !document.querySelector('a[href*="/marketplace/item/"]') &&
+      ![...document.querySelectorAll('button,[role="button"]')].some(isListingAction)
+    ) {
       attempts += 1;
       await sleep(500);
     }
