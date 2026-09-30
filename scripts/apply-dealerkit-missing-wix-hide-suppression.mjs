@@ -28,12 +28,27 @@ if (!financeWixSource.includes(registrationTruthMarker)) {
 let source = fs.readFileSync(pagePath, "utf8");
 const hideMarker = "DEALERKIT_MISSING_WIX_HIDE_SUPPRESSION";
 if (!source.includes(hideMarker)) {
-  source = replaceOnceIn(
-    source,
-    `  const displayRecords = useMemo(() => localLoadError ? [] : [...imageReadyRecords, ...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, imageReadyRecords, localLoadError, localNotVanscoRecords, priceDifferenceRecords]);`,
-    `  // ${hideMarker}: once a reverse-check card is deliberately hidden, keep it out of the working reverse-stock lane.\n  const hiddenReverseRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => isTemporaryHiddenStatus(workflowStatusOf(record))).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);\n  const visibleLocalNotVanscoRecords = useMemo(() => localNotVanscoRecords.filter((record) => !hiddenReverseRegistrationSet.has(normalizeWatchRegistration(record.registration))), [hiddenReverseRegistrationSet, localNotVanscoRecords]);\n  const displayRecords = useMemo(() => localLoadError ? [] : [...imageReadyRecords, ...activeRecords, ...visibleLocalNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, imageReadyRecords, localLoadError, visibleLocalNotVanscoRecords, priceDifferenceRecords]);`,
-    "final display-record composition",
-  );
+  const legacyDisplayRecords = `  const displayRecords = useMemo(() => localLoadError ? [] : [...imageReadyRecords, ...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, imageReadyRecords, localLoadError, localNotVanscoRecords, priceDifferenceRecords]);`;
+  const maintenanceDisplayRecords = `  const displayRecords = useMemo(
+    () => localLoadError ? [] : [...imageReadyRecords, ...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords, ...advertisedStockRecords],
+    [activeRecords, advertisedStockRecords, imageReadyRecords, localLoadError, localNotVanscoRecords, priceDifferenceRecords],
+  );`;
+
+  if (source.includes(maintenanceDisplayRecords)) {
+    source = replaceOnceIn(
+      source,
+      maintenanceDisplayRecords,
+      `  // ${hideMarker}: once a reverse-check card is deliberately hidden, keep it out of the working reverse-stock lane.\n  const hiddenReverseRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => isTemporaryHiddenStatus(workflowStatusOf(record))).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);\n  const visibleLocalNotVanscoRecords = useMemo(() => localNotVanscoRecords.filter((record) => !hiddenReverseRegistrationSet.has(normalizeWatchRegistration(record.registration))), [hiddenReverseRegistrationSet, localNotVanscoRecords]);\n  const displayRecords = useMemo(\n    () => localLoadError ? [] : [...imageReadyRecords, ...activeRecords, ...visibleLocalNotVanscoRecords, ...priceDifferenceRecords, ...advertisedStockRecords],\n    [activeRecords, advertisedStockRecords, imageReadyRecords, localLoadError, visibleLocalNotVanscoRecords, priceDifferenceRecords],\n  );`,
+      "advertised-stock-compatible final display-record composition",
+    );
+  } else {
+    source = replaceOnceIn(
+      source,
+      legacyDisplayRecords,
+      `  // ${hideMarker}: once a reverse-check card is deliberately hidden, keep it out of the working reverse-stock lane.\n  const hiddenReverseRegistrationSet = useMemo(() => new Set(currentRawRecords.filter((record) => isTemporaryHiddenStatus(workflowStatusOf(record))).map((record) => normalizeWatchRegistration(record.registration)).filter(Boolean)), [currentRawRecords]);\n  const visibleLocalNotVanscoRecords = useMemo(() => localNotVanscoRecords.filter((record) => !hiddenReverseRegistrationSet.has(normalizeWatchRegistration(record.registration))), [hiddenReverseRegistrationSet, localNotVanscoRecords]);\n  const displayRecords = useMemo(() => localLoadError ? [] : [...imageReadyRecords, ...activeRecords, ...visibleLocalNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, imageReadyRecords, localLoadError, visibleLocalNotVanscoRecords, priceDifferenceRecords]);`,
+      "final display-record composition",
+    );
+  }
 
   source = replaceOnceIn(
     source,
