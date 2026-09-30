@@ -63,13 +63,13 @@ patchFile("../pages/VanscoStockWatchPage.jsx", [
   },
   {
     label: "pause cards when Wix authority is unavailable",
-    already: "localLoadError ? [] : [...imageReadyRecords",
+    already: "advertisedStockRecords",
     before: 'const displayRecords = useMemo(() => [...imageReadyRecords, ...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, imageReadyRecords, localNotVanscoRecords, priceDifferenceRecords]);',
     after: 'const displayRecords = useMemo(() => localLoadError ? [] : [...imageReadyRecords, ...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, imageReadyRecords, localLoadError, localNotVanscoRecords, priceDifferenceRecords]);',
   },
   {
     label: "advertised maintenance also pauses when Wix authority is unavailable",
-    already: "localLoadError ? [] : [...imageReadyRecords, ...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords, ...advertisedStockRecords]",
+    already: "const displayRecords = useMemo(() => localLoadError ? [] : [...imageReadyRecords, ...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords]",
     before: `  const displayRecords = useMemo(
     () => [...imageReadyRecords, ...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords, ...advertisedStockRecords],
     [activeRecords, advertisedStockRecords, imageReadyRecords, localNotVanscoRecords, priceDifferenceRecords],
