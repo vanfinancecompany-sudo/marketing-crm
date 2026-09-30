@@ -172,3 +172,13 @@ test("Marketplace manager bulk renewal is explicit, paced and stoppable", () => 
   assert.match(marketplaceManagerSource, /try again later/);
   assert.match(marketplaceManagerSource, /await sleep\(850\)/);
 });
+
+
+test("Marketplace auto renewal clicks the actionable Renew menu item after Facebook renders it", () => {
+  assert.match(marketplaceManagerSource, /actionableSelector/);
+  assert.match(marketplaceManagerSource, /waitForRenewOption/);
+  assert.match(marketplaceManagerSource, /3000/);
+  assert.match(marketplaceManagerSource, /textNode\?\.closest/);
+  assert.match(marketplaceManagerSource, /renewalConfirmed/);
+  assert.match(marketplaceManagerSource, /listing has been renewed/);
+});
