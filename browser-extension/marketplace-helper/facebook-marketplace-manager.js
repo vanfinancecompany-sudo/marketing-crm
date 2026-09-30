@@ -221,6 +221,54 @@
     return rows;
   }
 
+  function visibleBatchSignature() {
+    return visibleRows()
+      .map((row) => row.key)
+      .sort()
+      .join("|");
+  }
+
+  function facebookLoaderVisible() {
+    return [...document.querySelectorAll('[role="progressbar"],[aria-label]')]
+      .filter(visible)
+      .some((element) => {
+        const label = fold([
+          element.getAttribute?.("aria-label"),
+          element.innerText,
+          element.textContent,
+        ].filter(Boolean).join(" "));
+        return element.getAttribute?.("role") === "progressbar" || label.includes("loading");
+      });
+  }
+
+  async function waitForNextFacebookBatch(previousSignature, previousTotal, timeoutMs = 12000) {
+    const deadline = Date.now() + timeoutMs;
+    let sawLoader = false;
+
+    while (Date.now() < deadline) {
+      if (facebookLoaderVisible()) sawLoader = true;
+
+      window.scrollTo({
+        top: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
+        behavior: "auto",
+      });
+
+      await sleep(sawLoader ? 550 : 350);
+
+      const signature = visibleBatchSignature();
+      scanVisibleListings();
+
+      if (
+        (signature && signature !== previousSignature) ||
+        state.rows.length > previousTotal
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   async function scanAllListings() {
     if (state.running) return;
     state.running = true;
@@ -228,40 +276,57 @@
     state.renewSeen.clear();
 
     const startY = window.scrollY;
-    let stableBottomPasses = 0;
-    let previousCount = -1;
-    let previousHeight = -1;
+    let pageWaitsWithoutProgress = 0;
 
     window.scrollTo({ top: 0, behavior: "auto" });
-    await sleep(500);
+    await sleep(600);
 
-    for (let pass = 0; pass < 180; pass += 1) {
+    for (let pass = 0; pass < 260; pass += 1) {
       scanVisibleListings();
       render(`Scanning Facebook… ${state.rows.length} listing${state.rows.length === 1 ? "" : "s"} found so far.`);
 
-      const doc = document.documentElement;
-      const height = Math.max(doc.scrollHeight, document.body?.scrollHeight || 0);
-      const atBottom = window.scrollY + window.innerHeight >= height - 160;
+      const height = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0);
+      const atBottom = window.scrollY + window.innerHeight >= height - 180;
 
-      if (atBottom) {
-        if (state.rows.length === previousCount && height === previousHeight) {
-          stableBottomPasses += 1;
-        } else {
-          stableBottomPasses = 0;
-        }
-        previousCount = state.rows.length;
-        previousHeight = height;
-        if (stableBottomPasses >= 3) break;
-        window.scrollTo({ top: height, behavior: "auto" });
-      } else {
-        window.scrollBy({ top: Math.max(520, Math.round(window.innerHeight * 0.78)), behavior: "auto" });
+      if (!atBottom) {
+        window.scrollBy({
+          top: Math.max(560, Math.round(window.innerHeight * 0.82)),
+          behavior: "auto",
+        });
+        await sleep(420);
+        continue;
       }
 
-      await sleep(380);
+      const previousSignature = visibleBatchSignature();
+      const previousTotal = state.rows.length;
+      render(`Facebook is loading the next batch… ${state.rows.length} listings collected so far.`);
+
+      const loadedNextBatch = await waitForNextFacebookBatch(
+        previousSignature,
+        previousTotal,
+        12000,
+      );
+
+      if (loadedNextBatch) {
+        pageWaitsWithoutProgress = 0;
+        await sleep(250);
+        continue;
+      }
+
+      pageWaitsWithoutProgress += 1;
+      if (pageWaitsWithoutProgress >= 2) break;
+
+      window.scrollBy({ top: -220, behavior: "auto" });
+      await sleep(250);
+      window.scrollTo({
+        top: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
+        behavior: "auto",
+      });
+      await sleep(500);
     }
 
     window.scrollTo({ top: startY, behavior: "auto" });
-    await sleep(150);
+    await sleep(180);
     state.running = false;
 
     const rows = filteredRows();
@@ -360,21 +425,34 @@
         }
       }
 
-      const doc = document.documentElement;
-      const height = Math.max(doc.scrollHeight, document.body?.scrollHeight || 0);
-      const atBottom = window.scrollY + window.innerHeight >= height - 160;
+      const height = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0);
+      const atBottom = window.scrollY + window.innerHeight >= height - 180;
 
       if (atBottom) {
+        const previousSignature = visibleBatchSignature();
+        const previousTotal = state.rows.length;
+        render("Waiting for Facebook to load the next batch…");
+
+        const loadedNextBatch = await waitForNextFacebookBatch(
+          previousSignature,
+          previousTotal,
+          12000,
+        );
+
+        if (loadedNextBatch) {
+          continue;
+        }
+
         if (!wrapped && startY > 200) {
           wrapped = true;
           window.scrollTo({ top: 0, behavior: "auto" });
-          await sleep(450);
+          await sleep(500);
           continue;
         }
         break;
       }
 
-      const nextY = Math.min(height, window.scrollY + Math.max(520, Math.round(window.innerHeight * 0.78)));
+      const nextY = Math.min(height, window.scrollY + Math.max(560, Math.round(window.innerHeight * 0.82)));
       if (Math.abs(nextY - lastY) < 10) noProgress += 1;
       else noProgress = 0;
       if (noProgress >= 4) break;
