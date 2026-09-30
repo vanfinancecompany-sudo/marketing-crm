@@ -48,12 +48,22 @@ replaceOnce(
   "const isImageReady = record.imageReadinessAlert === true"
 );
 
-replaceOnce(
-  `    && record.displayStatus === "missing"\n    && (selectedPipeline === "finance" || selectedPipeline === "rent2buy" || selectedPipeline === "cars")`,
-  `    && (record.displayStatus === "missing" || isImageReady)\n    && (selectedPipeline === "finance" || selectedPipeline === "rent2buy" || selectedPipeline === "cars")`,
-  "photo-ready Review vehicle eligibility",
-  `&& (record.displayStatus === "missing" || isImageReady)`
-);
+if (!source.includes(`|| isImageReady)\n    && ["finance", "rent2buy", "cars"].includes(selectedPipeline)`)) {
+  const maintenanceEligibility = `    && (record.displayStatus === "missing" || isAdvertisedStockMaintenance)\n    && ["finance", "rent2buy", "cars"].includes(selectedPipeline)`;
+  if (source.includes(maintenanceEligibility)) {
+    replaceOnce(
+      maintenanceEligibility,
+      `    && (record.displayStatus === "missing" || isAdvertisedStockMaintenance || isImageReady)\n    && ["finance", "rent2buy", "cars"].includes(selectedPipeline)`,
+      "advertised-stock-compatible photo-ready Review vehicle eligibility"
+    );
+  } else {
+    replaceOnce(
+      `    && record.displayStatus === "missing"\n    && (selectedPipeline === "finance" || selectedPipeline === "rent2buy" || selectedPipeline === "cars")`,
+      `    && (record.displayStatus === "missing" || isImageReady)\n    && (selectedPipeline === "finance" || selectedPipeline === "rent2buy" || selectedPipeline === "cars")`,
+      "photo-ready Review vehicle eligibility"
+    );
+  }
+}
 
 replaceOnce(
   `        <div className="vehicle-card__meta">Registration: {record.registration || "Not found"}</div>`,
@@ -62,12 +72,22 @@ replaceOnce(
   "Due-in photo alert: your live advert still has only 1–3 placeholder images"
 );
 
-replaceOnce(
-  `{!isLocalNotVansco && record.displayStatus === "missing" ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("added_to_crm", "Marked as advertised")} disabled={Boolean(savingAction)}>{savingAction === "added_to_crm" ? "Marking..." : "Mark as advertised"}</button> : null}`,
-  `{!isLocalNotVansco && (record.displayStatus === "missing" || record.displayStatus === "images_ready") ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("added_to_crm", "Marked as advertised")} disabled={Boolean(savingAction)}>{savingAction === "added_to_crm" ? "Marking..." : "Mark as advertised"}</button> : null}`,
-  "photo-ready Mark as advertised",
-  `(record.displayStatus === "missing" || record.displayStatus === "images_ready") ? <button`
-);
+if (!source.includes(`!isAdvertisedStockMaintenance && (record.displayStatus === "missing" || record.displayStatus === "images_ready")`)) {
+  const maintenanceMark = `{!isLocalNotVansco && !isAdvertisedStockMaintenance && record.displayStatus === "missing" ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("added_to_crm", "Marked as advertised")} disabled={Boolean(savingAction)}>{savingAction === "added_to_crm" ? "Marking..." : "Mark as advertised"}</button> : null}`;
+  if (source.includes(maintenanceMark)) {
+    replaceOnce(
+      maintenanceMark,
+      `{!isLocalNotVansco && !isAdvertisedStockMaintenance && (record.displayStatus === "missing" || record.displayStatus === "images_ready") ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("added_to_crm", "Marked as advertised")} disabled={Boolean(savingAction)}>{savingAction === "added_to_crm" ? "Marking..." : "Mark as advertised"}</button> : null}`,
+      "advertised-stock-compatible photo-ready Mark as advertised"
+    );
+  } else {
+    replaceOnce(
+      `{!isLocalNotVansco && record.displayStatus === "missing" ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("added_to_crm", "Marked as advertised")} disabled={Boolean(savingAction)}>{savingAction === "added_to_crm" ? "Marking..." : "Mark as advertised"}</button> : null}`,
+      `{!isLocalNotVansco && (record.displayStatus === "missing" || record.displayStatus === "images_ready") ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("added_to_crm", "Marked as advertised")} disabled={Boolean(savingAction)}>{savingAction === "added_to_crm" ? "Marking..." : "Mark as advertised"}</button> : null}`,
+      "photo-ready Mark as advertised"
+    );
+  }
+}
 
 // Render photo-ready alerts through the normal action card so they get Review vehicle,
 // Hide, Never show again, notes and Mark as advertised rather than a read-only card.
