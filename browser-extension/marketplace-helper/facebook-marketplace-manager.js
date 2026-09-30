@@ -9,7 +9,7 @@
     context: { registry: [], stock: {} },
     running: false,
     productFilter: "all",
-    cursor: -1,
+    renewSeen: new Set(),
   };
 
   function fold(value) {
@@ -160,61 +160,127 @@
     return cards;
   }
 
-  function scanLoadedListings() {
+  function rowFromCard(card) {
     const registry = registryByItemId();
+    const link = listingItemLink(card);
+    const identity = link ? itemIdentity(link.href) : null;
+    const entry = identity?.itemId ? (registry.get(identity.itemId) || null) : null;
+    const title = listingTitle(card, link);
+    const text = String(card.innerText || card.textContent || "");
+    const product = classifyProduct(`${title} ${text}`, entry);
+    const imageSrc = card.querySelector?.("img")?.src || "";
+    const priceLine = text.split("\n").map((line) => line.trim()).find((line) => /^£[\d,.]+/.test(line)) || "";
+    const key = identity?.itemId || `card:${fold([title, priceLine, imageSrc].join("|")).slice(0, 520)}`;
+    return {
+      key,
+      itemId: identity?.itemId || "",
+      listingUrl: identity?.listingUrl || "",
+      card,
+      title,
+      product,
+      registryEntry: entry,
+      stockStatus: stockStatus(product, entry),
+      renewable: fold(text).includes("renew your listing"),
+    };
+  }
+
+  function visibleRows() {
     const seen = new Set();
     const rows = [];
-
     for (const card of candidateListingCards()) {
-      const link = listingItemLink(card);
-      const identity = link ? itemIdentity(link.href) : null;
-      const fallbackKey = `card:${fold(card.innerText || card.textContent).slice(0, 220)}`;
-      const rowKey = identity?.itemId || fallbackKey;
-      if (!rowKey || seen.has(rowKey)) continue;
-      seen.add(rowKey);
-
-      const entry = identity?.itemId ? (registry.get(identity.itemId) || null) : null;
-      const title = listingTitle(card, link);
-      const product = classifyProduct(`${title} ${card.innerText || ""}`, entry);
-      rows.push({
-        itemId: identity?.itemId || "",
-        listingUrl: identity?.listingUrl || "",
-        card,
-        title,
-        product,
-        registryEntry: entry,
-        stockStatus: stockStatus(product, entry),
-        renewable: fold(card.innerText || card.textContent).includes("renew your listing"),
-      });
+      const row = rowFromCard(card);
+      if (!row.key || seen.has(row.key)) continue;
+      seen.add(row.key);
+      rows.push(row);
     }
-
-    state.rows = rows;
-    state.cursor = -1;
-    const financeCount = rows.filter((row) => row.product === "finance").length;
-    const rentCount = rows.filter((row) => row.product === "rent2buy").length;
-    render(
-      rows.length
-        ? `Scan complete: found ${rows.length} loaded Marketplace listing card${rows.length === 1 ? "" : "s"} · ${rentCount} Rent2Buy · ${financeCount} Van Finance.`
-        : "Scan complete, but no Marketplace listing cards matched. Facebook may still be rendering the page.",
-    );
     return rows;
   }
 
-  function currentRows() {
-    if (state.productFilter === "all") return state.rows;
-    return state.rows.filter((row) => row.product === state.productFilter);
+  function mergeRows(rows) {
+    const map = new Map(state.rows.map((row) => [row.key, row]));
+    for (const row of rows) {
+      const previous = map.get(row.key);
+      map.set(row.key, {
+        ...(previous || {}),
+        ...row,
+        card: row.card,
+      });
+    }
+    state.rows = [...map.values()];
+  }
+
+  function filteredRows(rows = state.rows) {
+    if (state.productFilter === "all") return rows;
+    return rows.filter((row) => row.product === state.productFilter);
+  }
+
+  function scanVisibleListings({ reset = false } = {}) {
+    if (reset) state.rows = [];
+    const rows = visibleRows();
+    mergeRows(rows);
+    return rows;
+  }
+
+  async function scanAllListings() {
+    if (state.running) return;
+    state.running = true;
+    state.rows = [];
+    state.renewSeen.clear();
+
+    const startY = window.scrollY;
+    let stableBottomPasses = 0;
+    let previousCount = -1;
+    let previousHeight = -1;
+
+    window.scrollTo({ top: 0, behavior: "auto" });
+    await sleep(500);
+
+    for (let pass = 0; pass < 180; pass += 1) {
+      scanVisibleListings();
+      render(`Scanning Facebook… ${state.rows.length} listing${state.rows.length === 1 ? "" : "s"} found so far.`);
+
+      const doc = document.documentElement;
+      const height = Math.max(doc.scrollHeight, document.body?.scrollHeight || 0);
+      const atBottom = window.scrollY + window.innerHeight >= height - 160;
+
+      if (atBottom) {
+        if (state.rows.length === previousCount && height === previousHeight) {
+          stableBottomPasses += 1;
+        } else {
+          stableBottomPasses = 0;
+        }
+        previousCount = state.rows.length;
+        previousHeight = height;
+        if (stableBottomPasses >= 3) break;
+        window.scrollTo({ top: height, behavior: "auto" });
+      } else {
+        window.scrollBy({ top: Math.max(520, Math.round(window.innerHeight * 0.78)), behavior: "auto" });
+      }
+
+      await sleep(380);
+    }
+
+    window.scrollTo({ top: startY, behavior: "auto" });
+    await sleep(150);
+    state.running = false;
+
+    const rows = filteredRows();
+    const allRows = state.rows;
+    const financeCount = allRows.filter((row) => row.product === "finance").length;
+    const rentCount = allRows.filter((row) => row.product === "rent2buy").length;
+    const unknownCount = allRows.filter((row) => row.product === "unknown").length;
+    render(
+      allRows.length
+        ? `Full scan complete: ${allRows.length} listings found · ${rentCount} Rent2Buy · ${financeCount} Van Finance · ${unknownCount} unknown. ${rows.length} in the current filter.`
+        : "Full scan complete, but Facebook did not expose any managed listing cards.",
+    );
   }
 
   function findMenuButton(card) {
-    return [...card.querySelectorAll('button,[role="button"],div[tabindex="0"]')]
+    const candidates = [...card.querySelectorAll('button,[role="button"],div[tabindex="0"]')]
       .filter(visible)
-      .find((element) => {
-        const label = fold([
-          element.getAttribute?.("aria-label"),
-          element.getAttribute?.("title"),
-          element.innerText,
-          element.textContent,
-        ].filter(Boolean).join(" "));
+      .filter((element) => {
+        const label = listingActionLabel(element);
         return (
           label === "more" ||
           label.includes("more options") ||
@@ -222,7 +288,13 @@
           label.includes("listing actions") ||
           label === "menu"
         );
-      }) || null;
+      });
+    if (!candidates.length) return null;
+    return candidates.sort((first, second) => {
+      const a = first.getBoundingClientRect();
+      const b = second.getBoundingClientRect();
+      return b.right - a.right;
+    })[0];
   }
 
   function visibleRenewOption() {
@@ -238,49 +310,85 @@
     } catch {}
   }
 
-  async function revealNextRenewable() {
-    if (state.running) return;
-    const rows = currentRows().filter((row) => row.stockStatus !== "stale");
-    if (!rows.length) {
-      render("No loaded listings available in this filter.");
-      return;
+  async function tryOpenRenew(row) {
+    if (!row?.card || !document.contains(row.card)) return false;
+    row.card.scrollIntoView({ block: "center", behavior: "auto" });
+    await sleep(180);
+
+    const menu = findMenuButton(row.card);
+    if (!menu) return false;
+
+    menu.click();
+    await sleep(320);
+    const renew = visibleRenewOption();
+    if (!renew) {
+      closeOpenMenu();
+      await sleep(120);
+      return false;
     }
 
-    state.running = true;
-    for (let step = 0; step < rows.length; step += 1) {
-      state.cursor = (state.cursor + 1) % rows.length;
-      const row = rows[state.cursor];
-      render(`Checking: ${row.title.slice(0, 58)}…`);
-      row.card.scrollIntoView({ block: "center", behavior: "smooth" });
-      await sleep(350);
+    try {
+      renew.style.outline = "3px solid #e31b23";
+      renew.style.outlineOffset = "2px";
+    } catch {}
+    render(`Ready: ${row.title.slice(0, 70)}. Facebook's Renew listing option is open. Click Renew listing, then press Find next renewable.`);
+    return true;
+  }
 
-      const menu = findMenuButton(row.card);
-      if (!menu) continue;
-      menu.click();
-      await sleep(350);
-      const renew = visibleRenewOption();
-      if (!renew) {
-        closeOpenMenu();
-        await sleep(150);
-        continue;
+  async function findNextRenewable() {
+    if (state.running) return;
+    closeOpenMenu();
+    state.running = true;
+
+    const startY = window.scrollY;
+    let wrapped = false;
+    let noProgress = 0;
+    let lastY = -1;
+
+    for (let pass = 0; pass < 220; pass += 1) {
+      const rows = filteredRows(visibleRows())
+        .filter((row) => row.stockStatus !== "stale")
+        .sort((a, b) => a.card.getBoundingClientRect().top - b.card.getBoundingClientRect().top);
+
+      for (const row of rows) {
+        if (state.renewSeen.has(row.key)) continue;
+        state.renewSeen.add(row.key);
+        render(`Checking: ${row.title.slice(0, 58)}…`);
+        if (await tryOpenRenew(row)) {
+          state.running = false;
+          return;
+        }
       }
 
-      row.renewable = true;
-      try {
-        renew.style.outline = "3px solid #e31b23";
-        renew.style.outlineOffset = "2px";
-      } catch {}
-      state.running = false;
-      render(`Ready: ${row.title.slice(0, 70)}. Facebook's Renew listing option is open. Click it manually, then press Next renewable.`);
-      return;
+      const doc = document.documentElement;
+      const height = Math.max(doc.scrollHeight, document.body?.scrollHeight || 0);
+      const atBottom = window.scrollY + window.innerHeight >= height - 160;
+
+      if (atBottom) {
+        if (!wrapped && startY > 200) {
+          wrapped = true;
+          window.scrollTo({ top: 0, behavior: "auto" });
+          await sleep(450);
+          continue;
+        }
+        break;
+      }
+
+      const nextY = Math.min(height, window.scrollY + Math.max(520, Math.round(window.innerHeight * 0.78)));
+      if (Math.abs(nextY - lastY) < 10) noProgress += 1;
+      else noProgress = 0;
+      if (noProgress >= 4) break;
+      lastY = nextY;
+      window.scrollTo({ top: nextY, behavior: "auto" });
+      await sleep(380);
     }
 
     state.running = false;
-    render("No further Renew listing option was found in the listings currently loaded on the page.");
+    render("No further Facebook Renew listing option was found. If Facebook has just loaded more adverts, run Scan all listings again.");
   }
 
   function stats() {
-    const rows = currentRows();
+    const rows = filteredRows();
     return {
       total: rows.length,
       rent2buy: rows.filter((row) => row.product === "rent2buy").length,
@@ -327,7 +435,7 @@
       </div>
       <div style="padding:12px 14px 14px">
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px">
-          <div style="background:#1c1e23;border-radius:8px;padding:8px"><b style="font-size:17px">${summary.total}</b><br><span style="color:#aeb1b8">loaded</span></div>
+          <div style="background:#1c1e23;border-radius:8px;padding:8px"><b style="font-size:17px">${summary.total}</b><br><span style="color:#aeb1b8">scanned</span></div>
           <div style="background:#1c1e23;border-radius:8px;padding:8px"><b style="font-size:17px">${summary.rent2buy}</b><br><span style="color:#aeb1b8">Rent2Buy</span></div>
           <div style="background:#1c1e23;border-radius:8px;padding:8px"><b style="font-size:17px">${summary.finance}</b><br><span style="color:#aeb1b8">Finance</span></div>
         </div>
@@ -345,11 +453,11 @@
           ${summary.stockUnknown} unknown
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
-          <button id="vfc-mgr-scan" ${state.running ? "disabled" : ""} style="min-height:38px;border:0;border-radius:9px;background:#343740;color:#fff;font-weight:700;cursor:pointer">Scan loaded</button>
-          <button id="vfc-mgr-next" ${state.running ? "disabled" : ""} style="min-height:38px;border:0;border-radius:9px;background:#e31b23;color:#fff;font-weight:800;cursor:pointer">Next renewable</button>
+          <button id="vfc-mgr-scan" ${state.running ? "disabled" : ""} style="min-height:38px;border:0;border-radius:9px;background:#343740;color:#fff;font-weight:700;cursor:pointer">Scan all listings</button>
+          <button id="vfc-mgr-next" ${state.running ? "disabled" : ""} style="min-height:38px;border:0;border-radius:9px;background:#e31b23;color:#fff;font-weight:800;cursor:pointer">Find next renewable</button>
         </div>
         <div style="margin-top:9px;padding:8px;border-radius:8px;background:#191b20;color:#c7c9cf;min-height:32px">
-          ${message || (state.rows.length ? "Ready. The helper opens the next Facebook menu that contains Renew listing; you make the final Renew click." : "Click Scan loaded after your Marketplace listings have appeared.")}
+          ${message || (state.rows.length ? "Ready. Find next renewable opens Facebook's Renew listing option; you make the final click." : "Start with Scan all listings. Facebook will scroll while the helper counts the whole list.")}
         </div>
         <div style="margin-top:7px;color:#8e9199;font-size:10px">Never deletes, marks sold, edits, boosts, publishes or renews a listing without your click.</div>
       </div>
@@ -369,11 +477,11 @@
     });
     root.querySelector("#vfc-mgr-product")?.addEventListener("change", (event) => {
       state.productFilter = event.target.value;
-      state.cursor = -1;
+      state.renewSeen.clear();
       render();
     });
-    root.querySelector("#vfc-mgr-scan")?.addEventListener("click", scanLoadedListings);
-    root.querySelector("#vfc-mgr-next")?.addEventListener("click", revealNextRenewable);
+    root.querySelector("#vfc-mgr-scan")?.addEventListener("click", scanAllListings);
+    root.querySelector("#vfc-mgr-next")?.addEventListener("click", findNextRenewable);
   }
 
   async function boot() {
@@ -388,7 +496,8 @@
       attempts += 1;
       await sleep(500);
     }
-    scanLoadedListings();
+    scanVisibleListings({ reset: true });
+    render();
   }
 
   boot();
