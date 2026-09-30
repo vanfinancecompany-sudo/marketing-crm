@@ -121,7 +121,7 @@ test("Marketplace helper adds a manual renewal assistant for Edge seller listing
   assert.ok(managerEntry.matches.includes("https://www.facebook.com/marketplace/you/selling*"));
   assert.match(marketplaceManagerSource, /Find next renewable/);
   assert.match(marketplaceManagerSource, /Renew listing/);
-  assert.match(marketplaceManagerSource, /you make the final click/i);
+  assert.match(marketplaceManagerSource, /Click Renew listing, then press Find next renewable/i);
   assert.match(marketplaceManagerSource, /stockStatus/);
 });
 
