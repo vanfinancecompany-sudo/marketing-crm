@@ -151,3 +151,12 @@ test("Marketplace manager scans the virtualised list and searches for the next r
   assert.match(marketplaceManagerSource, /window\.scrollBy/);
   assert.doesNotMatch(marketplaceManagerSource, /renew\.click\(/);
 });
+
+
+test("Marketplace manager waits through Facebook pagination loaders before stopping", () => {
+  assert.match(marketplaceManagerSource, /waitForNextFacebookBatch/);
+  assert.match(marketplaceManagerSource, /facebookLoaderVisible/);
+  assert.match(marketplaceManagerSource, /Facebook is loading the next batch/);
+  assert.match(marketplaceManagerSource, /Waiting for Facebook to load the next batch/);
+  assert.match(marketplaceManagerSource, /12000/);
+});
