@@ -138,11 +138,28 @@ if (!source.includes("DEALERKIT_STOCK_TRUTH_SAFETY")) {
     "reverse comparison dependencies"
   );
 
-  replaceOnce(
-    `  const displayRecords = useMemo(() => localLoadError ? [] : [...imageReadyRecords, ...activeRecords, ...visibleLocalNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, imageReadyRecords, localLoadError, visibleLocalNotVanscoRecords, priceDifferenceRecords]);`,
-    `  const displayRecords = useMemo(() => positiveComparisonPaused ? [] : [...imageReadyRecords, ...activeRecords, ...visibleLocalNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, imageReadyRecords, positiveComparisonPaused, priceDifferenceRecords, visibleLocalNotVanscoRecords]);`,
-    "pause positive cards only when Wix truth is unavailable"
-  );
+  const legacyDisplayRecords = `  const displayRecords = useMemo(() => localLoadError ? [] : [...imageReadyRecords, ...activeRecords, ...visibleLocalNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, imageReadyRecords, localLoadError, visibleLocalNotVanscoRecords, priceDifferenceRecords]);`;
+  const maintenanceDisplayRecords = `  const displayRecords = useMemo(
+    () => localLoadError ? [] : [...imageReadyRecords, ...activeRecords, ...visibleLocalNotVanscoRecords, ...priceDifferenceRecords, ...advertisedStockRecords],
+    [activeRecords, advertisedStockRecords, imageReadyRecords, localLoadError, visibleLocalNotVanscoRecords, priceDifferenceRecords],
+  );`;
+
+  if (source.includes(maintenanceDisplayRecords)) {
+    replaceOnce(
+      maintenanceDisplayRecords,
+      `  const displayRecords = useMemo(
+    () => positiveComparisonPaused ? [] : [...imageReadyRecords, ...activeRecords, ...visibleLocalNotVanscoRecords, ...priceDifferenceRecords, ...advertisedStockRecords],
+    [activeRecords, advertisedStockRecords, imageReadyRecords, positiveComparisonPaused, priceDifferenceRecords, visibleLocalNotVanscoRecords],
+  );`,
+      "advertised-stock-compatible positive-card pause"
+    );
+  } else {
+    replaceOnce(
+      legacyDisplayRecords,
+      `  const displayRecords = useMemo(() => positiveComparisonPaused ? [] : [...imageReadyRecords, ...activeRecords, ...visibleLocalNotVanscoRecords, ...priceDifferenceRecords], [activeRecords, imageReadyRecords, positiveComparisonPaused, priceDifferenceRecords, visibleLocalNotVanscoRecords]);`,
+      "pause positive cards only when Wix truth is unavailable"
+    );
+  }
 
   replaceOnce(
     `  }), [summary]);
@@ -160,6 +177,7 @@ if (!source.includes("DEALERKIT_STOCK_TRUTH_SAFETY")) {
     "summary.missing",
     "summary.priceDifference",
     "summary.advertised",
+    "summary.advertisedStock",
     "summary.reserved",
     "summary.backInStock",
     "summary.hidden",
