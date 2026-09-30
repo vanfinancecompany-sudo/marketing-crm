@@ -105,7 +105,7 @@ patchFile("../utils/dealerKitReviewWorkspace.js", [
   },
   {
     label: "Cars render as Cars product",
-    already: 'const product = ["finance", "rent2buy", "cars"].includes(workspace.dataset.product) ? workspace.dataset.product : "finance";',
+    already: 'const product = ["rent2buy", "cars"].includes(workspace.dataset.product) ? workspace.dataset.product : "finance";',
     before: 'const product = workspace.dataset.product === "rent2buy" ? "rent2buy" : "finance";',
     after: 'const product = ["finance", "rent2buy", "cars"].includes(workspace.dataset.product) ? workspace.dataset.product : "finance";',
   },
