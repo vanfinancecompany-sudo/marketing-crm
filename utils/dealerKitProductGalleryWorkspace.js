@@ -747,6 +747,11 @@ function scan() {
     const registration = normaliseRegistration(workspace.querySelector("[data-dealerkit-review-title]")?.textContent);
     if (!body || !registration) return;
 
+    if (workspace.dataset.product === "cars") {
+      body.querySelector(`[${ROOT_ATTRIBUTE}]`)?.remove();
+      return;
+    }
+
     hideLegacyImageUi(workspace, body);
     const current = body.querySelector(`[${ROOT_ATTRIBUTE}]`);
     const product = workspace.dataset.product === "rent2buy" ? "rent2buy" : "finance";
