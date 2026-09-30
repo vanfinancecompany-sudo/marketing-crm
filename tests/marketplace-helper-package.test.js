@@ -22,7 +22,7 @@ test("Manifest V3 points at a real, non-empty background service worker", () => 
   assert.equal(result.manifest.background.service_worker, "background.js");
   assert.ok(result.requiredFiles.includes("background.js"));
   assert.ok(fs.statSync(path.join(DEFAULT_EXTENSION_ROOT, "background.js")).size > 0);
-  assert.deepEqual(result.jsFiles, ["background.js", "crm-bridge.js", "facebook-groups.js", "facebook.js"]);
+  assert.deepEqual(result.jsFiles, ["background.js", "crm-bridge.js", "facebook-groups.js", "facebook-marketplace-manager.js", "facebook.js"]);
 });
 
 test("Validation rejects the exact missing-background package failure", (t) => {
@@ -50,7 +50,7 @@ test("Extension packager emits one clean folder and a flat, loadable ZIP", (t) =
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
-  const folder = path.join(outputBase, "VFC-Facebook-Helper-v1.2.22");
+  const folder = path.join(outputBase, "VFC-Facebook-Helper-v1.2.23");
   const zip = `${folder}.zip`;
   const validated = validateExtensionRoot(folder);
   const entries = validateZipRoot(zip, validated.requiredFiles);
