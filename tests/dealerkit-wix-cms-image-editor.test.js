@@ -18,6 +18,7 @@ function fixture(pipeline, gallery = urls) {
   };
   for (const collection of Object.keys(WIX_ADVERT_CATEGORY_IMAGE_FIELDS[pipeline])) rows[collection] = [];
   const calls = [];
+  const logs = [];
   const files = {};
   let fileCounter = 0;
   const state = { failListingOnce: false, failCollectionOnce: "", mutateThenFail: false, beforePatch: null, beforeQuery: null };
@@ -67,7 +68,7 @@ function fixture(pipeline, gallery = urls) {
     }
     throw new Error("Unexpected request; CMS creates/publish-status tasks/DealerKit are forbidden: " + path);
   };
-  return { pipeline, lane, rows, calls, files, state, request, service: createWixAdvertImageService({ environment, request }),
+  return { pipeline, lane, rows, calls, logs, files, state, request, service: createWixAdvertImageService({ environment, request, logger: (entry) => logs.push(entry) }),
     input: { registration, pipeline }, untouched, writes: () => calls.filter((call) => call.method === "PATCH") };
 }
 
@@ -79,7 +80,7 @@ async function upload(f) {
 async function confirm(f, draft) {
   const proposal = { ...f.input, ...wixImageProposal(draft) };
   const prepared = await f.service.prepare(proposal);
-  return f.service.reconcile({ ...proposal, confirmation: prepared.confirmation, confirmRegistration: registration, confirmed: true });
+  return f.service.reconcile({ ...proposal, confirmation: prepared.confirmation, confirmed: true });
 }
 
 for (const pipeline of Object.keys(WIX_ADVERT_IMAGE_LANES)) {
@@ -101,7 +102,7 @@ for (const pipeline of Object.keys(WIX_ADVERT_IMAGE_LANES)) {
     const prepared = await f.service.prepare({ ...f.input, ...wixImageProposal(draft) });
     assert.deepEqual(prepared.gallery, [urls[0], uploadedUrl, urls[1]]);
     assert.equal(f.writes().length, 0, "Prepare does not write CMS");
-    await assert.rejects(() => f.service.reconcile({ ...f.input, ...wixImageProposal(draft), confirmation: prepared.confirmation, confirmRegistration: registration }), /Confirm/);
+    await assert.rejects(() => f.service.reconcile({ ...f.input, ...wixImageProposal(draft), confirmation: prepared.confirmation }), /Confirm/);
     assert.equal(f.writes().length, 0);
     const result = await confirm(f, draft);
     assert.equal(result.verified, true);
@@ -174,10 +175,10 @@ test("arbitrary images, empty galleries, stale previews and changed proposals ca
   await assert.rejects(() => f.service.prepare({ ...input, images: [{ kind: "url", url: "https://images.example/dealerkit.jpg" }] }), /Only current Wix/);
   await assert.rejects(() => f.service.prepare({ ...input, images: [] }), /Keep between/);
   const prepared = await f.service.prepare(input);
-  await assert.rejects(() => f.service.reconcile({ ...input, confirmation: prepared.confirmation, confirmed: true, confirmRegistration: "OTHER" }), /Confirm/);
-  await assert.rejects(() => f.service.reconcile({ ...input, images: [{ kind: "existing", index: 1 }], confirmation: prepared.confirmation, confirmed: true, confirmRegistration: registration }), /confirmed images changed/);
+  await assert.rejects(() => f.service.reconcile({ ...input, confirmation: prepared.confirmation, confirmed: false }), /Confirm/);
+  await assert.rejects(() => f.service.reconcile({ ...input, images: [{ kind: "existing", index: 1 }], confirmation: prepared.confirmation, confirmed: true }), /confirmed images changed/);
   f.rows[f.lane.detail][0].data.mainImages.push(uploadedUrl);
-  await assert.rejects(() => f.service.reconcile({ ...input, confirmation: prepared.confirmation, confirmed: true, confirmRegistration: registration }), /changed after/);
+  await assert.rejects(() => f.service.reconcile({ ...input, confirmation: prepared.confirmation, confirmed: true }), /changed after/);
   assert.equal(f.writes().length, 0);
 });
 
@@ -193,7 +194,7 @@ test("upload and reconciliation confirmations cannot cross product lanes or regi
   const draft = createWixImageDraft(await f.service.load(f.input));
   const input = { ...f.input, ...wixImageProposal(draft) };
   const preview = await f.service.prepare(input);
-  await assert.rejects(() => f.service.reconcile({ ...input, confirmation: preview.confirmation + "x", confirmed: true, confirmRegistration: registration }), /invalid/);
+  await assert.rejects(() => f.service.reconcile({ ...input, confirmation: preview.confirmation + "x", confirmed: true }), /invalid/);
   assert.equal(f.writes().length + rent.writes().length, 0);
 });
 
@@ -223,7 +224,7 @@ test("a failed listing patch restores the image-only detail write, including an 
     const prepared = await f.service.prepare(proposal);
     f.state.failListingOnce = true; f.state.mutateThenFail = mutateThenFail;
     let error;
-    try { await f.service.reconcile({ ...proposal, confirmation: prepared.confirmation, confirmRegistration: registration, confirmed: true }); } catch (caught) { error = caught; }
+    try { await f.service.reconcile({ ...proposal, confirmation: prepared.confirmation, confirmed: true }); } catch (caught) { error = caught; }
     assert.ok(error);
     assert.equal(error.details.manualAttentionRequired, false);
     assert.deepEqual(f.rows, original);
@@ -233,7 +234,7 @@ test("a failed listing patch restores the image-only detail write, including an 
 
 test("the HTTP endpoint is authenticated and rejects non-confirmed writes without DealerKit or Supabase credentials", async () => {
   const f = fixture("finance");
-  const handler = createWixAdvertImageHandler({ environment, request: f.request });
+  const handler = createWixAdvertImageHandler({ environment, request: f.request, logger: (entry) => f.logs.push(entry) });
   function response() { return { code: 0, payload: null, setHeader() {}, status(code) { this.code = code; return this; }, json(payload) { this.payload = payload; return this; } }; }
   const denied = response();
   await handler({ method: "GET", headers: {}, query: f.input }, denied);
@@ -313,7 +314,7 @@ for (const pipeline of ["finance", "rent2buy"]) {
           { id: "spaced-category", data: { ...copy(f.untouched), title: "OY72 YSJ", [field]: urls[0], _publishStatus: duplicateStatus } },
         ];
         await assert.rejects(() => f.service.reconcile({ ...input, confirmation: prepared.confirmation,
-          confirmed: true, confirmRegistration: registration }), /ambiguous/);
+          confirmed: true }), /ambiguous/);
         assert.equal(f.writes().length, 0, collection + " ambiguity blocks before the detail/count write");
       }
     }
@@ -343,7 +344,7 @@ for (const pipeline of ["finance", "rent2buy"]) {
         f.state.failCollectionOnce = Object.keys(WIX_ADVERT_CATEGORY_IMAGE_FIELDS[pipeline]).at(-1);
         f.state.mutateThenFail = mutateThenFail;
         let error;
-        try { await f.service.reconcile({ ...input, confirmation: prepared.confirmation, confirmed: true, confirmRegistration: registration }); }
+        try { await f.service.reconcile({ ...input, confirmation: prepared.confirmation, confirmed: true }); }
         catch (caught) { error = caught; }
         assert.ok(error);
         assert.equal(error.details.manualAttentionRequired, false);
@@ -383,14 +384,149 @@ test("new or changed published category identities invalidate confirmation befor
   const prepared = await f.service.prepare(input);
   f.rows.CREWVANS = [{ id: "new-category", data: { ...copy(f.untouched), title: "OY72YSJ", image: urls[0] } }];
   await assert.rejects(() => f.service.reconcile({ ...input, confirmation: prepared.confirmation,
-    confirmed: true, confirmRegistration: registration }), /category targets changed/);
+    confirmed: true }), /category targets changed/);
   assert.equal(f.writes().length, 0);
 });
 
 test("unverifiable category publication fails closed rather than treating it as absent", async () => {
   const f = fixture("finance");
   f.rows.AUTOMATIC = [{ id: "unknown-status", data: { title: "OY72YSJ", picture: urls[0] } }];
-  const draft = createWixImageDraft(await f.service.load(f.input));
-  await assert.rejects(() => f.service.prepare({ ...f.input, ...wixImageProposal(draft) }), /published/);
+  await assert.rejects(() => f.service.load(f.input), /published/);
   assert.equal(f.writes().length, 0);
+});
+
+
+test("published destinations and header facts come only from the verified current Wix rows", async () => {
+  for (const pipeline of ["finance", "rent2buy", "cars"]) {
+    const f = fixture(pipeline); addCategories(f);
+    f.rows[f.lane.listing][0].data.webLink = "https://live.example/" + pipeline;
+    const snapshot = await f.service.load(f.input);
+    assert.equal(snapshot.title, f.untouched.vanDescription);
+    assert.equal(snapshot.priceText, f.untouched.price);
+    assert.equal(snapshot.advertUrl, "https://live.example/" + pipeline);
+    assert.equal(snapshot.galleryDestination.collectionId, f.lane.detail);
+    assert.equal(snapshot.galleryDestination.field, f.lane.gallery);
+    assert.deepEqual(snapshot.destinations.map((item) => item.collectionId), [f.lane.listing, ...Object.keys(WIX_ADVERT_CATEGORY_IMAGE_FIELDS[pipeline])]);
+    assert.ok(snapshot.destinations.every((item) => item.selected));
+    assert.equal(snapshot.destinations.filter((item) => item.required).length, 1);
+    assert.equal(snapshot.destinations[0].collectionId, f.lane.listing);
+    if (pipeline === "finance") assert.ok(snapshot.destinations.some((item) => item.label === "Medium / MWB"));
+    if (pipeline === "rent2buy") assert.equal(snapshot.destinations.find((item) => item.collectionId === "CREWVANS").imageField, "image");
+    if (pipeline === "cars") assert.deepEqual(snapshot.destinations.map((item) => item.collectionId), ["CARFINANCE"]);
+    assert.equal(f.writes().length, 0);
+  }
+});
+
+for (const pipeline of ["finance", "rent2buy"]) {
+  test(pipeline + " updates only selected existing published destinations and never removes category membership", async () => {
+    const f = fixture(pipeline); addCategories(f);
+    const original = copy(f.rows);
+    const draft = createWixImageDraft(await f.service.load(f.input));
+    moveWixImage(draft, "existing-1", "existing-0");
+    const chosen = Object.keys(WIX_ADVERT_CATEGORY_IMAGE_FIELDS[pipeline])[0];
+    const input = { ...f.input, ...wixImageProposal(draft), selectedDestinations: [f.lane.listing, chosen] };
+    const prepared = await f.service.prepare(input);
+    assert.deepEqual(prepared.destinations.filter((item) => item.selected).map((item) => item.collectionId), [f.lane.listing, chosen]);
+    assert.equal(f.writes().length, 0, "Update button preparation cannot publish");
+    await f.service.reconcile({ ...input, confirmation: prepared.confirmation, confirmed: true });
+    assert.deepEqual(f.writes().map((call) => call.body.dataCollectionId), [f.lane.detail, f.lane.listing, chosen]);
+    for (const collection of Object.keys(WIX_ADVERT_CATEGORY_IMAGE_FIELDS[pipeline]).filter((id) => id !== chosen)) {
+      assert.deepEqual(f.rows[collection], original[collection], "Unselected category remains present and unchanged");
+    }
+    assert.equal(f.rows[chosen][0].data[WIX_ADVERT_CATEGORY_IMAGE_FIELDS[pipeline][chosen]], urls[1]);
+  });
+}
+
+test("required canonical destination cannot be unchecked and unknown, duplicate or cross-lane destinations cannot be written", async () => {
+  for (const pipeline of ["finance", "rent2buy", "cars"]) {
+    const f = fixture(pipeline); addCategories(f);
+    const draft = createWixImageDraft(await f.service.load(f.input));
+    const input = { ...f.input, ...wixImageProposal(draft) };
+    for (const selectedDestinations of [[], ["invented-category"], [f.lane.listing, f.lane.listing],
+      [f.lane.listing, pipeline === "cars" ? "VANFINANCE-ALLVANS" : "CARFINANCE"]]) {
+      await assert.rejects(() => f.service.prepare({ ...input, selectedDestinations }), /existing published Wix sections/);
+    }
+    assert.equal(f.writes().length, 0);
+  }
+});
+
+test("changing destination selection after prepare invalidates the signed confirmation before writes", async () => {
+  const f = fixture("rent2buy"); addCategories(f);
+  const draft = createWixImageDraft(await f.service.load(f.input));
+  moveWixImage(draft, "existing-1", "existing-0");
+  const input = { ...f.input, ...wixImageProposal(draft), selectedDestinations: [f.lane.listing, "CREWVANS"] };
+  const prepared = await f.service.prepare(input);
+  await assert.rejects(() => f.service.reconcile({ ...input, selectedDestinations: [f.lane.listing], confirmation: prepared.confirmation, confirmed: true }), /confirmed images changed/);
+  assert.equal(f.writes().length, 0);
+});
+
+test("unselected ambiguous categories still block before any write", async () => {
+  const f = fixture("finance"); addCategories(f);
+  const draft = createWixImageDraft(await f.service.load(f.input));
+  const input = { ...f.input, ...wixImageProposal(draft), selectedDestinations: [f.lane.listing] };
+  const prepared = await f.service.prepare(input);
+  f.rows.AUTOMATIC.push({ ...copy(f.rows.AUTOMATIC[0]), id: "second-auto", data: { ...copy(f.rows.AUTOMATIC[0].data), title: "OY72 YSJ" } });
+  await assert.rejects(() => f.service.reconcile({ ...input, confirmation: prepared.confirmation, confirmed: true }), /ambiguous/);
+  assert.equal(f.writes().length, 0);
+});
+
+test("the HTTP two-step update logs actions, writes and verification without keys, confirmation tokens or image data", async () => {
+  const f = fixture("finance");
+  const handler = createWixAdvertImageHandler({ environment, request: f.request, logger: (entry) => f.logs.push(entry) });
+  const send = async (body) => {
+    const response = { code: 0, payload: null, setHeader() {}, status(code) { this.code = code; return this; }, json(value) { this.payload = value; return this; } };
+    await handler({ method: "POST", headers: { "x-marketing-customer-database-key": environment.MARKETING_CUSTOMER_DATABASE_API_KEY }, body: { ...f.input, ...body } }, response);
+    assert.equal(response.code, 200, response.payload?.message);
+    return response.payload;
+  };
+  const snapshot = await send({ action: "load" });
+  const preparedUpload = await send({ action: "prepareUpload", mimeType: "image/jpeg", sizeInBytes: 1000 });
+  const fileId = preparedUpload.uploadUrl.split("/").pop();
+  const media = await send({ action: "finishUpload", uploadTicket: preparedUpload.uploadTicket, fileId });
+  const draft = createWixImageDraft(snapshot); appendWixImage(draft, media); moveWixImage(draft, "existing-1", "existing-0");
+  const input = { ...wixImageProposal(draft), selectedDestinations: [f.lane.listing] };
+  const prepared = await send({ action: "prepare", ...input });
+  assert.equal(f.writes().length, 0);
+  assert.equal(f.logs.filter((entry) => entry.event === "wix_write_succeeded").length, 0);
+  await send({ action: "reconcile", ...input, confirmation: prepared.confirmation, confirmed: true });
+  assert.deepEqual(f.logs.filter((entry) => entry.event === "action_started").map((entry) => entry.action),
+    ["load", "prepareUpload", "finishUpload", "prepare", "reconcile"]);
+  assert.deepEqual(f.logs.filter((entry) => entry.event === "action_completed").map((entry) => entry.action),
+    ["load", "prepareUpload", "finishUpload", "prepare", "reconcile"]);
+  const reconcileTrace = f.logs.find((entry) => entry.event === "action_started" && entry.action === "reconcile").traceId;
+  assert.ok(f.logs.filter((entry) => entry.event === "wix_write_succeeded").every((entry) => entry.traceId === reconcileTrace));
+  const verification = f.logs.find((entry) => entry.event === "reconciliation_verification" && entry.outcome === "success");
+  assert.equal(verification.traceId, reconcileTrace);
+  assert.equal(verification.imageCount, 4);
+  assert.equal(verification.registration, registration);
+  const output = JSON.stringify(f.logs);
+  for (const sensitive of [environment.WIX_API_KEY, environment.MARKETING_CUSTOMER_DATABASE_API_KEY, preparedUpload.uploadTicket,
+    media.token, prepared.confirmation, uploadedUrl, "Due in Soon.jpg"]) assert.ok(!output.includes(sensitive), "Never log credentials, tokens or image data");
+});
+
+test("failed reconciliation logs exact failure and rollback state without implying verification success", async () => {
+  const f = fixture("rent2buy"); addCategories(f);
+  const draft = createWixImageDraft(await f.service.load(f.input));
+  moveWixImage(draft, "existing-1", "existing-0");
+  const input = { ...f.input, ...wixImageProposal(draft) };
+  const prepared = await f.service.prepare(input);
+  f.state.failCollectionOnce = "CREWVANS";
+  await assert.rejects(() => f.service.reconcile({ ...input, confirmation: prepared.confirmation, confirmed: true }), /Simulated failed image patch/);
+  const verification = f.logs.find((entry) => entry.event === "reconciliation_verification");
+  assert.equal(verification.outcome, "failed");
+  assert.equal(verification.manualAttentionRequired, false);
+  assert.ok(f.logs.some((entry) => entry.event === "wix_write_succeeded" && entry.phase === "rollback"));
+  assert.ok(!f.logs.some((entry) => entry.event === "reconciliation_verification" && entry.outcome === "success"));
+});
+
+test("logging redacts credentials and signed-token text even when a downstream error includes them", async () => {
+  const logs = [];
+  const message = environment.WIX_API_KEY + " " + environment.MARKETING_CUSTOMER_DATABASE_API_KEY + " %7Btoken%7D.signature";
+  const handler = createWixAdvertImageHandler({ environment, logger: (entry) => logs.push(entry), request: async () => { throw new Error(message); } });
+  const response = { setHeader() {}, status() { return this; }, json() {} };
+  await handler({ method: "POST", headers: { "x-marketing-customer-database-key": environment.MARKETING_CUSTOMER_DATABASE_API_KEY },
+    body: { registration, pipeline: "finance", action: "load" } }, response);
+  const output = JSON.stringify(logs);
+  assert.ok(output.includes("action_failed"));
+  assert.ok(!output.includes(environment.WIX_API_KEY) && !output.includes(environment.MARKETING_CUSTOMER_DATABASE_API_KEY) && !output.includes("%7Btoken"));
 });
