@@ -124,7 +124,7 @@ export async function reconcileImages(state) {
   state.confirmInput.value = ""; state.confirmCheck.checked = false;
   try { localStorage.removeItem(draftKey(state)); } catch {}
   showCurrent(state);
-  message(state, "Verified: the exact ordered Wix gallery and listing picture were updated. Other vehicle fields were unchanged.");
+  message(state, "Verified: the exact ordered Wix gallery, card images and image count were updated. Other vehicle fields were unchanged.");
   window.dispatchEvent(new CustomEvent("wix-advert-images-reconciled", { detail: { registration: state.registration, pipeline: state.pipeline } }));
 }
 
@@ -203,7 +203,7 @@ export async function openWixImageEditor(registrationInput, pipeline) {
     typedLabel.appendChild(state.confirmInput);
     const checkLabel = node("label", "dealerkit-review__image-toggle");
     state.confirmCheck = node("input"); state.confirmCheck.type = "checkbox"; state.confirmCheck.addEventListener("change", () => render(state));
-    checkLabel.append(state.confirmCheck, node("span", "", "Update only this Wix gallery and listing picture"));
+    checkLabel.append(state.confirmCheck, node("span", "", "Update only this Wix gallery, card images and image count"));
     state.reconcileButton = node("button", "dealerkit-review__save", "Reconcile advert images");
     state.reconcileButton.type = "button"; state.reconcileButton.addEventListener("click", () => run(state, () => reconcileImages(state)));
     state.message = node("p", "dealerkit-review__section-note", "Save and Prepare keep the live advert unchanged.");

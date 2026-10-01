@@ -2,7 +2,7 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto
 import { Buffer } from "node:buffer";
 import { normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
 import { registrationTitleVariants } from "../lib/wixRegistrationVariants.js";
-import { WIX_ADVERT_IMAGE_LANES, wixGalleryImageSource } from "../lib/wixAdvertImageEditor.js";
+import { WIX_ADVERT_IMAGE_LANES, WIX_ADVERT_CATEGORY_IMAGE_FIELDS, wixGalleryImageSource } from "../lib/wixAdvertImageEditor.js";
 
 const SITE_ID = "85f11c52-ee54-495d-aaec-a351831709b5";
 const clean = (value) => String(value ?? "").trim();
@@ -48,7 +48,7 @@ async function wixRequest(configuration, path, { method = "POST", body } = {}) {
   return payload;
 }
 
-async function queryRows(configuration, request, collection, registration) {
+async function queryRows(configuration, request, collection, registration, optional = false) {
   const byId = new Map();
   for (const title of registrationTitleVariants(registration)) {
     let exhausted = false;
@@ -66,8 +66,13 @@ async function queryRows(configuration, request, collection, registration) {
     if (!exhausted) throw new WixImageEditorError(409, "Wix identity scan is incomplete.");
   }
   const rows = [...byId.values()];
-  if (rows.length !== 1) throw new WixImageEditorError(409, "The Wix listing/detail identity is missing or ambiguous. No images were changed.");
-  if (clean(rows[0].data?._publishStatus || rows[0]._publishStatus).toUpperCase() !== "PUBLISHED") {
+  if (optional && rows.length === 0) return null;
+  if (rows.length !== 1) throw new WixImageEditorError(409, optional
+    ? "The Wix category identity in " + collection + " is ambiguous. No images were changed."
+    : "The Wix listing/detail identity is missing or ambiguous. No images were changed.");
+  const status = clean(rows[0].data?._publishStatus || rows[0]._publishStatus).toUpperCase();
+  if (optional && status === "DRAFT") return null;
+  if (status !== "PUBLISHED") {
     throw new WixImageEditorError(409, "Both Wix listing and detail must be verified as published. No images were changed.");
   }
   return rows[0];
@@ -99,7 +104,8 @@ export function createWixAdvertImageService({ environment = process.env, request
       throw new WixImageEditorError(409, "The current Wix gallery is missing or contains unsupported media. No images were changed.");
     }
     const state = { ...scope, listingId: listing.id, detailId: detail.id, picture: listing.data.picture ?? "", gallery,
-      listingCollection: lane.listing, detailCollection: lane.detail, galleryField: lane.gallery };
+      listingCollection: lane.listing, detailCollection: lane.detail, galleryField: lane.gallery, countField: lane.count,
+      imageCount: fieldState(detail.data, lane.count), listingImage: fieldState(listing.data, "picture") };
     return { ...state, baseline: fingerprint(state), title: listing.data.vanDescription || listing.data.title,
       priceText: clean(listing.data.price ?? listing.data.priceVat), monthly: clean(listing.data.mth || listing.data.salePrice) };
   }
@@ -166,16 +172,39 @@ export function createWixAdvertImageService({ environment = process.env, request
     return { ready: true, fileId: file.id, url: file.url, token: ticket({ fileId: file.id, url: file.url }, "uploaded_image", scope, 24 * 60 * 60 * 1000) };
   }
 
-  async function prepare(input) {
-    const snapshot = await load(input);
-    const proposed = await proposal(input, snapshot);
-    return { ...proposed, confirmation: ticket({ baseline: snapshot.baseline, proposal: fingerprint(proposed) }, "reconcile", snapshot, 5 * 60 * 1000) };
+  function fieldState(data, field) {
+    return Object.hasOwn(data, field) ? { exists: true, value: data[field] } : { exists: false };
   }
 
-  async function patch(collection, itemId, field, value) {
+  async function reconciliationState(input) {
+    const snapshot = await load(input);
+    const categories = await Promise.all(Object.entries(WIX_ADVERT_CATEGORY_IMAGE_FIELDS[snapshot.pipeline])
+      .map(async ([collection, field]) => {
+        const row = await queryRows(configuration, request, collection, snapshot.registration, true);
+        return row ? { collection, id: row.id, fields: { [field]: fieldState(row.data, field) } } : null;
+      }));
+    const rows = [
+      { collection: snapshot.detailCollection, id: snapshot.detailId,
+        fields: { [snapshot.galleryField]: { exists: true, value: snapshot.gallery }, [snapshot.countField]: snapshot.imageCount } },
+      { collection: snapshot.listingCollection, id: snapshot.listingId, fields: { picture: snapshot.listingImage } },
+      ...categories.filter(Boolean),
+    ];
+    return { snapshot, rows };
+  }
+
+  async function prepare(input) {
+    const { snapshot, rows } = await reconciliationState(input);
+    const proposed = await proposal(input, snapshot);
+    return { ...proposed, confirmation: ticket({ baseline: snapshot.baseline, proposal: fingerprint(proposed), targets: fingerprint(rows) },
+      "reconcile", snapshot, 5 * 60 * 1000) };
+  }
+
+  async function patch(collection, itemId, fields) {
     await request(configuration, "/wix-data/v2/items/" + encodeURIComponent(itemId), {
       method: "PATCH", body: { dataCollectionId: collection, patch: { dataItemId: itemId,
-        fieldModifications: [{ fieldPath: field, action: "SET_FIELD", setFieldOptions: { value } }] } },
+        fieldModifications: Object.entries(fields).map(([fieldPath, state]) => state.exists
+          ? { fieldPath, action: "SET_FIELD", setFieldOptions: { value: state.value } }
+          : { fieldPath, action: "REMOVE_FIELD" }) } },
     });
   }
 
@@ -185,47 +214,62 @@ export function createWixAdvertImageService({ environment = process.env, request
       throw new WixImageEditorError(400, "Confirm the image-only change and type the registration before reconciling.");
     }
     const proof = readToken(input.confirmation, secret, "reconcile", scope);
-    const snapshot = await load(input);
+    const { snapshot, rows } = await reconciliationState(input);
     const proposed = await proposal(input, snapshot);
-    if (proof.baseline !== snapshot.baseline || proof.proposal !== fingerprint(proposed)) throw new WixImageEditorError(409, "The confirmed images changed. Prepare again.");
+    if (proof.baseline !== snapshot.baseline || proof.proposal !== fingerprint(proposed) || proof.targets !== fingerprint(rows)) {
+      throw new WixImageEditorError(409, "The confirmed images changed or category targets changed. Prepare again.");
+    }
+    const targets = rows.map((row) => {
+      const desired = row.collection === snapshot.detailCollection
+        ? { [snapshot.galleryField]: { exists: true, value: proposed.gallery },
+          [snapshot.countField]: { exists: true, value: String(proposed.gallery.length) } }
+        : Object.fromEntries(Object.keys(row.fields).map((field) => [field, { exists: true, value: proposed.picture }]));
+      const fields = Object.fromEntries(Object.entries(desired).filter(([field, state]) => !same(state, row.fields[field])));
+      return { ...row, fields, previous: Object.fromEntries(Object.keys(fields).map((field) => [field, row.fields[field]])) };
+    }).filter((target) => Object.keys(target.fields).length);
+    let expected = rows;
     const attempted = [];
-    const sameIds = (fresh) => fresh.listingId === snapshot.listingId && fresh.detailId === snapshot.detailId;
     try {
-      const before = await load(input);
-      if (before.baseline !== snapshot.baseline) throw new WixImageEditorError(409, "Wix images changed before the write.");
-      attempted.push("gallery");
-      await patch(snapshot.detailCollection, snapshot.detailId, snapshot.galleryField, proposed.gallery);
-      const between = await load(input);
-      if (!sameIds(between) || !same(between.gallery, proposed.gallery) || !same(between.picture, snapshot.picture)) {
-        throw new WixImageEditorError(409, "Wix identity or images changed before the listing image could be synchronised.");
+      for (const target of targets) {
+        const before = await reconciliationState(input);
+        if (!same(before.rows, expected)) throw new WixImageEditorError(409, "Wix identity or images changed before the write.");
+        attempted.push(target);
+        // Gallery and count share one detail-row patch; category/canonical patches touch only their image field.
+        await patch(target.collection, target.id, target.fields);
+        expected = expected.map((row) => row.collection === target.collection && row.id === target.id
+          ? { ...row, fields: { ...row.fields, ...target.fields } } : row);
       }
-      attempted.push("picture");
-      await patch(snapshot.listingCollection, snapshot.listingId, "picture", proposed.picture);
-      const after = await load(input);
-      if (!sameIds(after) || !same(after.gallery, proposed.gallery) || !same(after.picture, proposed.picture)) {
-        throw new WixImageEditorError(502, "The exact Wix image result could not be verified.");
-      }
-      return { snapshot: after, verified: true };
+      const after = await reconciliationState(input);
+      if (!same(after.rows, expected)) throw new WixImageEditorError(502, "The exact Wix image result could not be verified.");
+      return { snapshot: after.snapshot, verified: true };
     } catch (error) {
       const rollback = [];
-      for (const field of attempted.reverse()) {
+      for (const target of attempted.reverse()) {
         try {
-          const fresh = await load(input);
-          if (!sameIds(fresh)) throw new Error("Wix identities changed; automatic rollback is blocked.");
-          const current = field === "picture" ? fresh.picture : fresh.gallery;
-          const original = snapshot[field];
-          if (same(current, original)) { rollback.push({ field, restored: true }); continue; }
-          if (!same(current, proposed[field])) throw new Error("Wix images changed concurrently; automatic rollback is blocked.");
-          await patch(field === "picture" ? snapshot.listingCollection : snapshot.detailCollection,
-            field === "picture" ? snapshot.listingId : snapshot.detailId,
-            field === "picture" ? "picture" : snapshot.galleryField, original);
-          const verified = await load(input);
-          if (!sameIds(verified) || !same(field === "picture" ? verified.picture : verified.gallery, original)) throw new Error("Rollback could not be verified.");
-          rollback.push({ field, restored: true });
-        } catch (rollbackError) { rollback.push({ field, restored: false, message: rollbackError.message }); }
+          const fresh = await reconciliationState(input);
+          const row = fresh.rows.find((item) => item.collection === target.collection && item.id === target.id);
+          if (!row) throw new Error("Wix identity changed; automatic rollback is blocked.");
+          const restore = {};
+          for (const [field, original] of Object.entries(target.previous)) {
+            const current = row.fields[field];
+            if (same(current, original)) continue;
+            if (!same(current, target.fields[field])) throw new Error("Wix images changed concurrently; automatic rollback is blocked.");
+            restore[field] = original;
+          }
+          if (Object.keys(restore).length) await patch(target.collection, target.id, restore);
+          const verified = await reconciliationState(input);
+          const restored = verified.rows.find((item) => item.collection === target.collection && item.id === target.id);
+          if (!restored || Object.entries(target.previous).some(([field, original]) => !same(restored.fields[field], original))) {
+            throw new Error("Rollback could not be verified.");
+          }
+          rollback.push({ collection: target.collection, id: target.id, fields: Object.keys(target.previous), restored: true });
+        } catch (rollbackError) {
+          rollback.push({ collection: target.collection, id: target.id, fields: Object.keys(target.previous), restored: false, message: rollbackError.message });
+        }
       }
       throw new WixImageEditorError(error.status || 502, "Wix image reconciliation failed. " + (rollback.some((item) => !item.restored)
-        ? "A partial change needs manual attention." : "Completed image changes were rolled back."), { rollback, manualAttentionRequired: rollback.some((item) => !item.restored), cause: error.message });
+        ? "A partial change needs manual attention." : "Completed image changes were rolled back."),
+        { rollback, manualAttentionRequired: rollback.some((item) => !item.restored), cause: error.message });
     }
   }
 
