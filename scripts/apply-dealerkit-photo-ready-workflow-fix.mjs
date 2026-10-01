@@ -50,7 +50,13 @@ replaceOnce(
 
 if (!source.includes(`|| isImageReady)\n    && ["finance", "rent2buy", "cars"].includes(selectedPipeline)`)) {
   const maintenanceEligibility = `    && (record.displayStatus === "missing" || isAdvertisedStockMaintenance)\n    && ["finance", "rent2buy", "cars"].includes(selectedPipeline)`;
-  if (source.includes(maintenanceEligibility)) {
+  if (source.includes("const canReviewWix =")) {
+    replaceOnce(
+      `    && record.displayStatus === "missing"\n    && ["finance", "rent2buy", "cars"].includes(selectedPipeline)`,
+      `    && (record.displayStatus === "missing" || isImageReady)\n    && ["finance", "rent2buy", "cars"].includes(selectedPipeline)`,
+      "separate Wix image maintenance from DealerKit photo-ready review"
+    );
+  } else if (source.includes(maintenanceEligibility)) {
     replaceOnce(
       maintenanceEligibility,
       `    && (record.displayStatus === "missing" || isAdvertisedStockMaintenance || isImageReady)\n    && ["finance", "rent2buy", "cars"].includes(selectedPipeline)`,

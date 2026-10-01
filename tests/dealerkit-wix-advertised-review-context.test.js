@@ -1,22 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { currentWixAdvertForReview, currentWixAdvertPrice } from "../lib/dealerKitAdvertisedReviewContext.js";
-import { decodeDealerKitProductImageState, encodeDealerKitProductImageState } from "../lib/dealerKitProductImageState.js";
-import { calculateRent2BuyPricing } from "../lib/dealerKitRent2BuyPlan.js";
+import { convertWixImage } from "../services/marketingVehicleContract.js";
+import { WIX_ADVERT_IMAGE_LANES, createWixImageDraft, appendWixImage, moveWixImage, removeWixImage, wixImageProposal, wixGalleryImageSource } from "../lib/wixAdvertImageEditor.js";
 
-const collections = { finance: "VANFINANCE-ALLVANS", rent2buy: "ALLRENT2BUYVANS", cars: "CARFINANCE" };
 const registration = "OY72YSJ";
-const sourceImages = [{ id: "source-one", url: "https://images.example/dealerkit-primary.jpg" }, { id: "source-two", url: "https://images.example/dealerkit-other.jpg" }];
-function advert(product, overrides = {}) {
-  return { registration, wixItemId: product + "-listing", collection_id: collections[product], publishStatus: "PUBLISHED",
-    title: registration, vehicleDescription: "Current Wix Transit", picture: "https://images.example/" + product + "-live.jpg",
-    advertUrl: "https://stock.example/" + product + "/" + registration, price: 18995, priceText: "£18,995", monthly: product === "rent2buy" ? 599 : null,
-    salePrice: product === "finance" ? "£333" : "", ...overrides };
-}
+const urls = ["https://static.wixstatic.com/media/current-van.jpg", "https://static.wixstatic.com/media/current-interior.jpg"];
+const uploadUrl = "https://static.wixstatic.com/media/due-in-soon.jpg";
 
-// Small DOM fixture: execute the actual review/gallery clients, including their
-// click handlers and network boundary, without a browser or production writes.
 class Node {
   constructor(tag = "div") { this.tagName = tag.toLowerCase(); this.children = []; this.parentElement = null; this.dataset = {}; this.attributes = {}; this.listeners = {}; this.className = ""; this.text = ""; this.hidden = false;
     this.classList = { contains: (name) => this.className.split(/\s+/).includes(name),
@@ -38,7 +29,7 @@ class Node {
   replaceWith(node) { const parent = this.parentElement; if (!parent) return; const index = parent.children.indexOf(this); this.remove(); node.remove(); node.parentElement = parent; parent.children.splice(index, 0, node); }
   insertAdjacentElement(position, node) { assert.equal(position, "afterend"); const parent = this.parentElement; const index = parent.children.indexOf(this); node.remove(); node.parentElement = parent; parent.children.splice(index + 1, 0, node); }
   addEventListener(type, listener) { (this.listeners[type] ||= []).push(listener); }
-  async fire(type) { for (const listener of this.listeners[type] || []) await listener({ target: this }); }
+  async fire(type, extra = {}) { for (const listener of this.listeners[type] || []) await listener({ target: this, preventDefault() {}, ...extra }); }
   async click() { await this.fire("click"); }
   matches(selector) {
     const attribute = selector.match(/\[([^=\]]+)(?:="([^"]*)")?\]/);
@@ -67,200 +58,129 @@ class Node {
 }
 class ReviewEvent { constructor(type, options = {}) { this.type = type; this.detail = options.detail; } }
 
-async function clients({ picture = undefined, local = undefined } = {}) {
+
+
+async function clients(pipeline) {
   const document = new Node("document");
-  document.readyState = "loading";
   document.createElement = (tag) => new Node(tag);
-  document.body = new Node("body"); document.body.connected = true; document.append(document.body);
-  document.documentElement = document;
+  document.body = new Node("body"); document.body.connected = true; document.appendChild(document.body);
   const events = {};
-  const window = { location: { pathname: "/vansco-stock-watch" }, addEventListener(type, listener) { (events[type] ||= []).push(listener); },
+  const window = { addEventListener(type, listener) { (events[type] ||= []).push(listener); },
     dispatchEvent(event) { for (const listener of events[event.type] || []) listener(event); } };
+  const storage = new Map();
+  const localStorage = { getItem: (key) => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) };
+  const lane = WIX_ADVERT_IMAGE_LANES[pipeline];
+  let snapshot = { registration, pipeline, baseline: "live-baseline-" + pipeline, gallery: [...urls], picture: urls[0], priceText: "£18,995",
+    listingId: "listing", detailId: "detail", listingCollection: lane.listing, detailCollection: lane.detail, galleryField: lane.gallery };
   const calls = [];
-  const templates = [
-    { id: "finance-template", purpose: "van_finance_replacement", ready: true, selected: false, url: "https://images.example/finance-template.jpg", displayName: "Finance template" },
-    { id: "rent-template", purpose: "rent2buy_template", ready: true, selected: false, url: "https://images.example/rent-template.jpg", displayName: "Rent2Buy template" },
-  ];
-  const payload = { vehicle: { registration, supplierStockId: "stock-oy72", title: "DealerKit description", retailPrice: 23995, mileage: 30000, vatStatus: "plus_vat", sourceUpdatedAt: "2026-09-30T10:00:00Z", sourceStatus: "Available", images: sourceImages, specifications: {} },
-    local: local ?? { finance: { picture: "https://images.example/crm.jpg", price: 999, monthly: 777, url: "https://stock.example/crm" }, rent2buy: { picture: "https://images.example/crm-rent.jpg", monthly: 888 } },
-    reviewDecision: { persisted: true, supplierStockId: "stock-oy72", registration, financeEnabled: true, rent2buyEnabled: true, financeCategories: ["all_vans"], rent2buyCategories: ["all_vans"], imageOrderIds: ["source-one", "source-two"], primaryImageId: "source-one" } };
-  let detailOverride = null;
   const fetch = async (url, options = {}) => {
-    calls.push({ url, method: options.method || "GET", body: options.body ? JSON.parse(options.body) : null });
-    if (url.startsWith("/api/dealerkit-stock-detail?")) return { ok: true, json: async () => detailOverride ? await detailOverride() : payload };
-    if (url.startsWith("/api/dealerkit-wix-manual-media?")) return { ok: true, json: async () => ({ media: templates }) };
-    if (url === "/api/dealerkit-review-decision") return { ok: true, json: async () => ({ decision: { ...JSON.parse(options.body), persisted: true } }) };
-    if (url === "/api/dealerkit-wix-manual-media" && JSON.parse(options.body).action === "select_media") {
-      const selected = templates.find((item) => item.id === JSON.parse(options.body).mediaId);
-      selected.selected = true;
-      return { ok: true, json: async () => ({ media: selected }) };
-    }
-    throw new Error("Unexpected network request: " + url);
+    if (url === "https://upload.example/signed") { calls.push({ url, method: options.method }); return { ok: true, json: async () => ({ file: { id: "new-file" } }) }; }
+    assert.equal(url, "/api/wix-advert-images", "The maintenance UI must never call DealerKit, CRM or review decisions");
+    const body = JSON.parse(options.body); calls.push({ url, ...body });
+    assert.equal(body.pipeline, pipeline); assert.equal(body.registration, registration);
+    let result;
+    if (body.action === "load") result = { ...snapshot, gallery: [...snapshot.gallery] };
+    else if (body.action === "prepareUpload") result = { uploadUrl: "https://upload.example/signed", mimeType: body.mimeType, uploadTicket: "lane-upload-ticket" };
+    else if (body.action === "finishUpload") result = { ready: true, fileId: "new-file", url: uploadUrl, token: "new-image-token" };
+    else if (body.action === "prepare") result = { confirmation: "confirmed-gallery", gallery: body.images.map((image) => image.kind === "existing" ? snapshot.gallery[image.index] : uploadUrl) };
+    else if (body.action === "reconcile") {
+      assert.equal(body.confirmed, true); assert.equal(body.confirmRegistration, registration); assert.equal(body.confirmation, "confirmed-gallery");
+      const gallery = body.images.map((image) => image.kind === "existing" ? snapshot.gallery[image.index] : uploadUrl);
+      snapshot = { ...snapshot, gallery, picture: gallery[0], baseline: "updated-baseline" };
+      result = { verified: true, snapshot };
+    } else throw new Error("Unexpected image action");
+    return { ok: true, json: async () => ({ ok: true, ...result }) };
   };
-  const dependencies = { document, window, fetch, URLSearchParams, CustomEvent: ReviewEvent,
-    MutationObserver: class { observe() {} }, queueMicrotask: () => {},
+  const dependencies = { document, window, localStorage, fetch, CustomEvent: ReviewEvent, convertWixImage,
     buildMarketingAccessHeaders: (headers) => headers, parseMarketingJsonResponse: async (response) => response.json(),
-    currentWixAdvertForReview, currentWixAdvertPrice, decodeDealerKitProductImageState, encodeDealerKitProductImageState, calculateRent2BuyPricing };
-  async function loadClient(path, names) {
-    const code = (await readFile(new URL("../" + path, import.meta.url), "utf8")).replace(/^import[\s\S]*?;\s*/gm, "");
-    return new Function(...Object.keys(dependencies), code + "; return { " + names.join(",") + " };")(...Object.values(dependencies));
-  }
-  const review = await loadClient("utils/dealerKitReviewWorkspace.js", ["openWorkspace", "renderVehicle"]);
-  const gallery = await loadClient("utils/dealerKitProductGalleryWorkspace.js", ["initialiseWorkspace", "renderActiveProduct", "saveProductState", "scan"]);
+    WIX_ADVERT_IMAGE_LANES, createWixImageDraft, appendWixImage, moveWixImage, removeWixImage, wixImageProposal, wixGalleryImageSource };
+  const code = (await readFile(new URL("../utils/wixAdvertImageWorkspace.js", import.meta.url), "utf8"))
+    .replace(/^import[\s\S]*?;\s*/gm, "").replace(/^export /gm, "");
+  const editor = new Function(...Object.keys(dependencies), code + ";return { openWixImageEditor, render, uploadImage, prepareReconciliation, reconcileImages };")(...Object.values(dependencies));
   const page = await readFile(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
-  const helperCode = page.slice(page.indexOf("function normalizeWatchRegistration("), page.indexOf("function classifyWatchRecord("));
-  const map = new Function(helperCode + "; return mapAdvertisedLocalVehicleToWatchRecord;")();
-  const start = page.indexOf("  function openDealerKitReview()", page.indexOf("function WatchCard("));
-  const handoff = page.slice(start, page.indexOf("\n  return (", start));
-  async function fromCard(product, record = advert(product, picture === undefined ? {} : { picture })) {
-    const card = map(record, 0, product, { registration, supplierStockId: "stock-oy72", imageUrl: sourceImages[0].url });
-    new Function("record", "selectedPipeline", "isAdvertisedStockMaintenance", "window", "CustomEvent", handoff + ";openDealerKitReview();")(card, product, true, window, ReviewEvent);
+  const watch = page.slice(page.indexOf("function WatchCard("));
+  const start = watch.indexOf("  function openDealerKitReview()");
+  const handoff = watch.slice(start, watch.indexOf("\n  return (", start));
+  const gate = watch.match(/const canReviewWix = ([\s\S]*?);/)[1];
+  async function fromCard() {
+    // Deliberately no supplierStockId or DealerKit match.
+    const record = { registration, displayStatus: "advertised_stock", wixItemId: "listing", wixCollectionId: lane.listing, wixPublishStatus: "PUBLISHED", dealerKitIdentityAmbiguous: true };
+    assert.equal(new Function("record", "isAdvertisedStockMaintenance", "selectedPipeline", "return " + gate)(record, true, pipeline), true);
+    new Function("record", "selectedPipeline", "isAdvertisedStockMaintenance", "window", "CustomEvent", handoff + ";openDealerKitReview();")(record, pipeline, true, window, ReviewEvent);
     for (let turn = 0; turn < 30; turn += 1) await Promise.resolve();
-    return document.querySelector("[data-dealerkit-review-workspace]");
+    return document.querySelector("[data-wix-advert-image-editor]")._wixImageEditorState;
   }
-  return { review, gallery, fromCard, document, calls, templates, payload, overrideDetail: (callback) => { detailOverride = callback; } };
+  return { editor, fromCard, calls, document, storage, live: () => snapshot };
 }
 
-for (const product of Object.keys(collections)) {
-  test(product + " OY72YSJ review preserves the live Wix image and price through detail reload, replacement choices and save", async () => {
-    const client = await clients();
-    const workspace = await client.fromCard(product);
-    assert.equal(workspace._dealerKitReviewReady, true);
-    const body = workspace.querySelector("[data-dealerkit-review-body]");
-    const hero = body.querySelector(".dealerkit-review__hero");
-    const liveUrl = advert(product).picture;
-    assert.equal(hero.querySelector("img").src, liveUrl, "The different DealerKit and CRM images cannot replace the current Wix image");
-    assert.equal(hero.querySelector(".dealerkit-review__current-image-label").textContent, "Current Wix image");
-    assert.ok(hero.textContent.includes("Published in Wix"));
-    assert.ok(hero.textContent.includes(product === "rent2buy" ? "£599 p/m" : "£18,995"));
-    assert.equal(workspace.querySelector("[data-dealerkit-review-subtitle]").textContent, "Current Wix Transit");
-    assert.equal(hero.querySelector("a").href, advert(product).advertUrl);
-    const replacement = body.querySelectorAll(".dealerkit-review__image-primary")[1];
-    await replacement.click();
-    assert.equal(replacement.textContent, "Replacement primary");
-    assert.equal(hero.querySelector("img").src, liveUrl, "Changing a replacement choice must not change what is labelled live");
+for (const pipeline of Object.keys(WIX_ADVERT_IMAGE_LANES)) {
+  test(pipeline + " advertised Review vehicle opens only Current Wix images without a DealerKit stock ID", async () => {
+    const client = await clients(pipeline);
+    const state = await client.fromCard();
+    assert.deepEqual(state.draft.items.map((item) => item.src), urls);
+    assert.equal(state.current.querySelector("img").src, urls[0]);
+    assert.ok(state.gallery.textContent.includes("#1 · Current gallery primary"));
+    assert.equal(client.document.querySelector("[data-dealerkit-review-workspace]"), null, "Legacy review/gallery/publisher observers cannot attach");
+    assert.ok(!state.body.textContent.includes("DealerKit source photos") && !state.body.textContent.includes("template image"));
+    assert.equal(client.calls.filter((call) => call.action === "load").length, 1);
 
-    if (product === "cars") {
-      await body.querySelector(".dealerkit-review__save").click();
-      const saved = client.calls.find((call) => call.url === "/api/dealerkit-review-decision");
-      assert.equal(saved.body.primaryImageId, "source-two");
-    } else {
-      await client.gallery.initialiseWorkspace(workspace, body, registration);
-      const state = workspace._dealerKitProductGalleryState;
-      assert.equal(state.currentWixAdvert.imageUrl, liveUrl, "The second DealerKit detail reload must retain the verified Wix context");
-      assert.equal(state.currentWixAdvert.collection_id, collections[product]);
-      const pricing = state.root.querySelector("[data-product-gallery-pricing]");
-      assert.ok(pricing.textContent.includes("Published in Wix"));
-      assert.ok(pricing.textContent.includes(product === "rent2buy" ? "£599 p/m" : "£18,995"));
-      assert.ok(!pricing.textContent.includes("£999") && !pricing.textContent.includes("£777") && !pricing.textContent.includes("£888"));
-      const manual = state.root.querySelector("[data-product-gallery-manual]");
-      assert.equal(manual.querySelector("img").src, product === "finance" ? client.templates[0].url : client.templates[1].url);
-      assert.equal(manual.querySelectorAll("img").length, 1, "Other product templates remain isolated");
-      assert.equal(state.root.querySelectorAll("[data-product-gallery-source] img").length, 2);
-      const sourceCards = state.root.querySelectorAll("[data-product-gallery-source] article");
-      await sourceCards[1].querySelector("button").click();
-      assert.equal(state.imageState[product].primaryId, "source-two");
-      assert.equal(hero.querySelector("img").src, liveUrl, "Source-primary changes are replacement choices, not live changes");
-      assert.ok(state.root.textContent.includes("Optional uploaded replacement"));
-      assert.ok(state.root.querySelector("[data-product-gallery-primary-note]").textContent.includes("Current Wix image above remains live"));
-      assert.ok(!state.sourceIds.includes(state.currentWixAdvert.wixItemId));
-      assert.ok(!state.manualMedia.some((item) => item.url === liveUrl), "The live picture must not be registered as an uploaded template");
-      await manual.querySelector("button").click();
-      assert.ok(state.root.querySelector("[data-product-gallery-primary-note]").textContent.includes("optional replacement primary"));
-      assert.equal(hero.querySelector("img").src, liveUrl);
-      await client.gallery.saveProductState(state);
-    }
-    assert.equal(hero.querySelector("img").src, liveUrl);
-    const writes = client.calls.filter((call) => call.method !== "GET");
-    assert.ok(writes.every((call) => call.url === "/api/dealerkit-review-decision" || (call.url === "/api/dealerkit-wix-manual-media" && call.body.action === "select_media")));
-    const decisionWrite = writes.find((call) => call.url === "/api/dealerkit-review-decision");
-    assert.ok(decisionWrite);
-    assert.equal(decisionWrite.body.picture, undefined);
-    assert.equal(decisionWrite.body.currentWixAdvert, undefined);
-    assert.ok(!client.calls.some((call) => /controlled-publish|wixapis|wix-data/.test(call.url)));
+    await client.editor.uploadImage(state, { name: "Due in Soon.jpg", type: "image/jpeg", size: 1200 });
+    client.editor.render(state);
+    assert.deepEqual(state.draft.items.map((item) => item.src), [...urls, uploadUrl]);
+    assert.equal(state.current.querySelector("img").src, urls[0]);
+    assert.deepEqual(client.live().gallery, urls);
+    const cards = state.gallery.querySelectorAll("figure");
+    await cards[2].fire("dragstart", { dataTransfer: { setData() {} } });
+    await cards[1].fire("drop");
+    assert.deepEqual(state.draft.items.map((item) => item.src), [urls[0], uploadUrl, urls[1]]);
+    await state.gallery.querySelectorAll("figure")[2].querySelector("button").click();
+    assert.deepEqual(state.draft.items.map((item) => item.src), [urls[0], uploadUrl]);
+    await state.saveButton.click();
+    assert.equal(client.storage.size, 1);
+    assert.equal(client.calls.filter((call) => call.action === "reconcile").length, 0);
+    await state.prepareButton.click();
+    assert.equal(state.reconcileButton.disabled, true);
+    assert.deepEqual(client.live().gallery, urls);
+    assert.equal(client.calls.filter((call) => call.action === "reconcile").length, 0);
+    state.confirmInput.value = registration; state.confirmCheck.checked = true; client.editor.render(state);
+    assert.equal(state.reconcileButton.disabled, false);
+    await state.reconcileButton.click();
+    assert.deepEqual(client.live().gallery, [urls[0], uploadUrl]);
+    assert.equal(client.live().picture, urls[0]);
+    assert.equal(client.calls.filter((call) => call.action === "reconcile").length, 1);
+    assert.equal(state.current.querySelector("img").src, urls[0]);
   });
 }
 
-test("Wix-only advert remains recognised when detail reload has no CRM support match", async () => {
-  const client = await clients({ local: {} });
-  const workspace = await client.fromCard("finance");
-  const body = workspace.querySelector("[data-dealerkit-review-body]");
-  await client.gallery.initialiseWorkspace(workspace, body, registration);
-  const pricing = workspace._dealerKitProductGalleryState.root.querySelector("[data-product-gallery-pricing]").textContent;
-  assert.ok(pricing.includes("£18,995") && pricing.includes("Published in Wix"));
-  assert.ok(!pricing.includes("Not advertised"));
+test("a later reorder invalidates the prepared confirmation and changes primary only on the next explicit reconcile", async () => {
+  const client = await clients("cars");
+  const state = await client.fromCard();
+  await state.prepareButton.click();
+  state.confirmInput.value = registration; state.confirmCheck.checked = true;
+  await state.gallery.querySelectorAll("figure")[1].querySelectorAll("button")[1].click();
+  assert.equal(state.draft.confirmation, null);
+  assert.equal(state.reconcileButton.disabled, true);
+  assert.equal(state.current.querySelector("img").src, urls[0]);
+  assert.deepEqual(state.draft.items.map((item) => item.src), [urls[1], urls[0]]);
+  await assert.rejects(() => client.editor.reconcileImages(state), /Prepare/);
+  await state.prepareButton.click();
+  state.confirmInput.value = registration; state.confirmCheck.checked = true;
+  await client.editor.reconcileImages(state);
+  assert.equal(client.live().picture, urls[1]);
+  assert.deepEqual(client.live().gallery, [urls[1], urls[0]]);
 });
 
-test("an existing Wix advert with unknown price is published, never shown as an absent advert or priced from CRM", async () => {
-  const client = await clients();
-  const workspace = await client.fromCard("finance", advert("finance", { price: null, priceText: "", salePrice: "" }));
-  const body = workspace.querySelector("[data-dealerkit-review-body]");
-  await client.gallery.initialiseWorkspace(workspace, body, registration);
-  const pricing = workspace._dealerKitProductGalleryState.root.querySelector("[data-product-gallery-pricing]").textContent;
-  assert.ok(pricing.includes("Price unavailable") && pricing.includes("Published in Wix"));
-  assert.ok(!pricing.includes("Not advertised") && !pricing.includes("£999"));
-});
-
-test("an empty Wix picture never falls back to a DealerKit, CRM or uploaded template image", async () => {
-  const client = await clients({ picture: "" });
-  const workspace = await client.fromCard("finance");
-  const hero = workspace.querySelector(".dealerkit-review__hero");
-  assert.equal(hero.querySelector("img"), null);
-  assert.ok(hero.textContent.includes("No picture stored on the current Wix advert"));
-  await client.gallery.initialiseWorkspace(workspace, workspace.querySelector("[data-dealerkit-review-body]"), registration);
-  assert.equal(hero.querySelector("img"), null);
-});
-
-test("review rejects an unpublished, unidentified, wrong-registration or wrong-lane advert before requesting detail", async () => {
-  for (const overrides of [{ publishStatus: "DRAFT" }, { wixItemId: "" }, { registration: "AB23CDE" }, { collection_id: "ALLRENT2BUYVANS" }, { collection_id: "CARFINANCE" }]) {
-    const client = await clients();
-    await client.review.openWorkspace(registration, "stock-oy72", "finance", advert("finance", overrides));
-    const workspace = client.document.querySelector("[data-dealerkit-review-workspace]");
-    assert.equal(workspace._dealerKitReviewReady, false);
-    assert.ok(workspace.textContent.includes("could not be verified"));
-    assert.deepEqual(client.calls, []);
-  }
-  for (const product of Object.keys(collections)) {
-    for (const other of Object.keys(collections).filter((lane) => lane !== product)) {
-      assert.throws(() => currentWixAdvertForReview(advert(other), registration, product), /could not be verified/);
-    }
-  }
-});
-
-test("reopening a different lane resets live context; an ordinary Missing review keeps its source-image behaviour", async () => {
-  const client = await clients();
-  const workspace = await client.fromCard("finance");
-  await client.fromCard("rent2buy");
-  assert.equal(workspace.querySelector(".dealerkit-review__hero img").src, advert("rent2buy").picture);
-  await client.review.openWorkspace(registration, "stock-oy72", "finance");
-  assert.equal(workspace._dealerKitCurrentWixAdvert, null);
-  assert.equal(workspace.querySelector(".dealerkit-review__hero img").src, sourceImages[0].url);
-  assert.equal(workspace.querySelector(".dealerkit-review__current-image-label"), null);
-  await workspace.querySelectorAll(".dealerkit-review__image-primary")[1].click();
-  assert.equal(workspace.querySelector(".dealerkit-review__hero img").src, sourceImages[1].url);
-});
-
-test("a delayed product-detail response cannot restore a previous lane's advert after another review opens", async () => {
-  const client = await clients();
-  const workspace = await client.fromCard("finance");
-  let resolveDetail;
-  client.overrideDetail(() => new Promise((resolve) => { resolveDetail = resolve; }));
-  const loading = client.gallery.initialiseWorkspace(workspace, workspace.querySelector("[data-dealerkit-review-body]"), registration);
-  for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
-  client.overrideDetail(null);
-  await client.fromCard("rent2buy");
-  resolveDetail(client.payload);
-  await loading;
-  assert.equal(workspace._dealerKitProductGalleryState, null);
-  assert.equal(workspace.querySelector(".dealerkit-review__hero img").src, advert("rent2buy").picture);
-  await client.gallery.initialiseWorkspace(workspace, workspace.querySelector("[data-dealerkit-review-body]"), registration);
-  assert.equal(workspace._dealerKitProductGalleryState.activeProduct, "rent2buy");
-  assert.equal(workspace._dealerKitProductGalleryState.currentWixAdvert.collection_id, "ALLRENT2BUYVANS");
-});
-
-test("native Wix picture conversion and lane-specific prices come only from the published context", () => {
-  const live = currentWixAdvertForReview(advert("cars", { picture: "wix:image://v1/live-file/current.jpg", imageUrl: "https://images.example/crm.jpg" }), "OY72 YSJ", "cars");
-  assert.equal(live.imageUrl, "https://static.wixstatic.com/media/live-file");
-  assert.equal(currentWixAdvertPrice(live), "£18,995");
-  assert.equal(currentWixAdvertPrice(currentWixAdvertForReview(advert("rent2buy"), registration, "rent2buy")), "£599 p/m");
+test("saved local drafts never replace the current gallery on opening and require an explicit verified restore", async () => {
+  const client = await clients("finance");
+  const state = await client.fromCard();
+  await state.gallery.querySelectorAll("figure")[1].querySelectorAll("button")[1].click();
+  await state.saveButton.click();
+  const reopened = await client.editor.openWixImageEditor(registration, "finance");
+  assert.deepEqual(reopened.draft.items.map((item) => item.src), urls, "Opening always shows the current stored order");
+  const restore = reopened.body.querySelectorAll("button").find((button) => button.textContent === "Restore local draft");
+  assert.ok(restore);
+  await restore.click();
+  assert.deepEqual(reopened.draft.items.map((item) => item.src), [urls[1], urls[0]]);
+  assert.equal(reopened.draft.confirmation, null);
+  assert.equal(client.calls.filter((call) => call.action === "reconcile").length, 0);
 });
