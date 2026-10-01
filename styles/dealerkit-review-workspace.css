@@ -649,3 +649,42 @@ body.dealerkit-review-open {
   color: #166534;
   font-size: 16px;
 }
+
+
+/* Wix-only maintenance uses the normal review layout with a clear two-step update. */
+[data-wix-advert-image-editor] .wix-image-review__facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+[data-wix-advert-image-editor] .dealerkit-review__gallery { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+[data-wix-advert-image-editor] .dealerkit-review__image-actions { flex-wrap: wrap; justify-content: flex-start; }
+[data-wix-advert-image-editor] .dealerkit-review__image-primary { min-height: 30px; font-size: 10px; }
+[data-wix-advert-image-editor] .dealerkit-review__image-card figcaption { font-size: 12px; }
+[data-wix-advert-image-editor] .wix-image-review__notice {
+  margin: 0; padding: 14px 16px; border: 1px solid #cbd5e1; border-radius: 12px;
+  background: #eff6ff; color: #1e3a8a; font-size: 14px; font-weight: 750; line-height: 1.5;
+}
+[data-wix-advert-image-editor] .wix-image-review__notice--success { background: #ecfdf5; border-color: #86efac; color: #166534; font-size: 18px; }
+[data-wix-advert-image-editor] .wix-image-review__notice--error { background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
+[data-wix-advert-image-editor] .wix-image-review__destination { min-width: 0; }
+[data-wix-advert-image-editor] .wix-image-review__destination small { display: block; margin-top: 4px; font-size: 9px; overflow-wrap: anywhere; color: #64748b; }
+[data-wix-advert-image-editor] .wix-image-review__upload { display: flex; gap: 10px; margin-top: 14px; }
+[data-wix-advert-image-editor] .wix-image-review__footer {
+  position: sticky; bottom: 0; z-index: 4; display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 14px; border: 1px solid #e2e8f0; border-radius: 14px; background: rgba(255,255,255,.98);
+}
+[data-wix-advert-image-editor] .wix-image-review__footer button,
+[data-wix-advert-image-editor] .wix-image-review__confirmation button { min-height: 42px; font-size: 13px; }
+[data-wix-advert-image-editor] .wix-image-review__confirmation { border: 2px solid #b91c1c; }
+[data-wix-advert-image-editor] .wix-image-review__confirmation[hidden],
+[data-wix-advert-image-editor] button[hidden], [data-wix-advert-image-editor] input[hidden] { display: none; }
+[data-wix-advert-image-editor] .wix-image-review__confirmation-preview { display: flex; align-items: center; gap: 16px; }
+[data-wix-advert-image-editor] .wix-image-review__confirmation-preview img { width: 150px; max-width: 40%; aspect-ratio: 4 / 3; object-fit: contain; background: #eef2f7; border-radius: 10px; }
+[data-wix-advert-image-editor] .wix-image-review__confirmation p,
+[data-wix-advert-image-editor] .wix-image-review__confirmation li { color: #334155; font-size: 13px; line-height: 1.6; }
+[data-wix-advert-image-editor] .wix-image-review__confirmation small { overflow-wrap: anywhere; }
+@media (max-width: 620px) {
+  [data-wix-advert-image-editor] .dealerkit-review__gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-wix-advert-image-editor] .dealerkit-review__category-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 400px) {
+  [data-wix-advert-image-editor] .dealerkit-review__gallery,
+  [data-wix-advert-image-editor] .dealerkit-review__category-grid { grid-template-columns: minmax(0, 1fr); }
+}
