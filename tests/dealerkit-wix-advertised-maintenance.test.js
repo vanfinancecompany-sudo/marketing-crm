@@ -109,11 +109,13 @@ async function watchHelpers() {
   const helpers = new Function(`${code}; return { buildDealerKitByRegistration, mapAdvertisedLocalVehicleToWatchRecord, dedupeDisplayRecords };`)();
   const watchCard = page.slice(page.indexOf("function WatchCard("));
   const expression = watchCard.match(/const canReviewDealerKit = ([\s\S]*?);/)[1];
+  const wixExpression = watchCard.match(/const canReviewWix = ([\s\S]*?);/)[1];
+  helpers.canReviewWix = new Function("record", "selectedPipeline", "isAdvertisedStockMaintenance", `return ${wixExpression};`);
   helpers.canReview = new Function("record", "selectedPipeline", "isLocalNotVansco", "isAdvertisedStockMaintenance", `return ${expression};`);
   return helpers;
 }
 
-test("advertised-stock identity uses distinct raw DealerKit IDs before display deduplication", async () => {
+test("DealerKit review still rejects ambiguous source IDs; advertised-stock Wix editing does not require DealerKit", async () => {
   const helpers = await watchHelpers();
   const raw = [{ registration, supplierStockId: "one" }, { registration: "AB23 CDE", supplierStockId: "two" }];
   assert.equal(helpers.dedupeDisplayRecords(raw).length, 1);
@@ -124,11 +126,12 @@ test("advertised-stock identity uses distinct raw DealerKit IDs before display d
     assert.equal(card.pipeline, pipeline);
     assert.equal(card.matchStatus, "advertised_stock_ambiguous_dealerkit");
     assert.equal(helpers.canReview(card, pipeline, false, true), false);
+    assert.equal(helpers.canReviewWix({ ...card, wixItemId: "listing", wixCollectionId: pipeline === "cars" ? "CARFINANCE" : pipeline === "rent2buy" ? "ALLRENT2BUYVANS" : "VANFINANCE-ALLVANS", wixPublishStatus: "PUBLISHED" }, pipeline, true), true);
   }
   const repeated = helpers.buildDealerKitByRegistration([raw[0], { ...raw[0] }]).get(registration);
   assert.equal(repeated.ambiguous, false);
   const card = helpers.mapAdvertisedLocalVehicleToWatchRecord({ registration }, 0, "cars", repeated.record, repeated.ambiguous);
-  assert.equal(helpers.canReview(card, "cars", false, true), true);
+  assert.equal(helpers.canReview(card, "cars", false, true), false);
   assert.equal(helpers.canReview({ registration, supplierStockId: "one", displayStatus: "missing" }, "finance", false, false), true);
 });
 

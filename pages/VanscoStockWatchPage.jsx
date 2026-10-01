@@ -376,19 +376,28 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
   const isAdvertised = isAdvertisedStatus(status) || record.displayStatus === "advertised";
   const isLocalNotVansco = record.displayStatus === "local_not_vansco";
   const isAdvertisedStockMaintenance = record.displayStatus === "advertised_stock";
+  const canReviewWix = isAdvertisedStockMaintenance
+    && ["finance", "rent2buy", "cars"].includes(selectedPipeline)
+    && Boolean(record.registration && record.wixItemId && record.wixCollectionId && record.wixPublishStatus === "PUBLISHED");
   const canReviewDealerKit = !isLocalNotVansco
-    && (record.displayStatus === "missing" || isAdvertisedStockMaintenance)
+    && !isAdvertisedStockMaintenance
+    && record.displayStatus === "missing"
     && ["finance", "rent2buy", "cars"].includes(selectedPipeline)
     && !record.dealerKitIdentityAmbiguous
     && Boolean(record.registration && record.supplierStockId);
 
   function openDealerKitReview() {
+    if (isAdvertisedStockMaintenance) {
+      window.dispatchEvent(new CustomEvent("wix-open-advert-image-editor", {
+        detail: { registration: record.registration, pipeline: selectedPipeline },
+      }));
+      return;
+    }
     window.dispatchEvent(new CustomEvent("dealerkit-open-product-review", {
       detail: {
         registration: record.registration,
         supplierStockId: record.supplierStockId,
         product: selectedPipeline,
-        advertisedWixRecord: isAdvertisedStockMaintenance ? (record.currentWixAdvert || {}) : null,
       },
     }));
   }
@@ -403,7 +412,6 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
         <h3>{record.title || "Untitled vehicle"}</h3>
         <div className="vehicle-card__meta">Registration: {record.registration || "Not found"}</div>
         {isAdvertisedStockMaintenance ? <div className="vehicle-card__meta">Published Wix advert{record.wixPriceText ? ` · ${record.wixPriceText}` : ""}</div> : null}
-        {isAdvertisedStockMaintenance && record.dealerKitIdentityAmbiguous ? <div className="vehicle-card__meta">More than one DealerKit vehicle uses this registration. Resolve the duplicate before reviewing this advert.</div> : null}
         {isLocalNotVansco ? <div className="vehicle-card__meta">This registration is active in your CRM stock, but was not found in the current Vansco cache for this tab.</div> : null}
         {!isLocalNotVansco && record.safeExactRegistrationMatch ? <div className="vehicle-card__meta">This registration is currently in this CRM stock tab.</div> : null}
         {!isLocalNotVansco && record.financeStockMatchForCars ? <div className="vehicle-card__meta">This Cars vehicle registration is already active in Van Finance stock.</div> : null}
@@ -412,15 +420,14 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
         {!isLocalNotVansco && (isHiddenOrNever || isAdvertised) ? <div className="vehicle-card__meta">Current status: {workflowLabel(status)}</div> : null}
         {!isLocalNotVansco && !isAdvertisedStockMaintenance ? <label className="field"><span className="field__label">Notes</span><textarea className="field__input field__textarea" rows="3" value={notesDraft} onChange={(event) => setNotesDraft(event.target.value)} placeholder="Optional notes for this stock check" /></label> : null}
         <div className="card-actions">
-          {canReviewDealerKit ? <button className="button button--primary" type="button" onClick={openDealerKitReview}>Review vehicle</button> : null}
+          {(canReviewWix || canReviewDealerKit) ? <button className="button button--primary" type="button" onClick={openDealerKitReview}>Review vehicle</button> : null}
           {(isLocalNotVansco || isAdvertisedStockMaintenance) && record.localStockUrl ? <a className="button button--ghost" href={record.localStockUrl} target="_blank" rel="noreferrer">Open current advert</a> : null}
           {!isLocalNotVansco && record.stockUrl ? <a className="button button--ghost" href={record.stockUrl} target="_blank" rel="noreferrer">Open DealerKit vehicle</a> : null}
           {!isLocalNotVansco && !isAdvertisedStockMaintenance && (isAdvertised ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("new", "Unmarked")} disabled={Boolean(savingAction)}>{savingAction === "new" ? "Unmarking..." : "Unmark advertised"}</button> : isHiddenOrNever ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("new", "Unhidden")} disabled={Boolean(savingAction)}>{savingAction === "new" ? "Unhiding..." : "Unhide"}</button> : <button className="button button--ghost" type="button" onClick={() => saveWorkflow("ignored", "Hidden")} disabled={Boolean(savingAction)}>{savingAction === "ignored" ? "Hiding..." : "Hide"}</button>)}
           {!isLocalNotVansco && !isAdvertisedStockMaintenance && record.displayStatus === "missing" ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("added_to_crm", "Marked as advertised")} disabled={Boolean(savingAction)}>{savingAction === "added_to_crm" ? "Marking..." : "Mark as advertised"}</button> : null}
           {!isLocalNotVansco && !isAdvertisedStockMaintenance && !isNeverShowStatus(status) ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("never_show_again", "Moved to Never show again")} disabled={Boolean(savingAction)}>{savingAction === "never_show_again" ? "Saving..." : "Never show again"}</button> : null}
         </div>
-        {isAdvertisedStockMaintenance ? <div className="vehicle-card__meta">Live in this CMS stock lane. Use Review vehicle to change the saved image selection / primary image, then use the existing Prepare + Reconcile controls to update Wix.</div> : null}
-        {isAdvertisedStockMaintenance && !record.supplierStockId ? <div className="vehicle-card__meta">DealerKit did not return a matching source record in the current saved comparison, so image review is unavailable until the source match is present.</div> : null}
+        {isAdvertisedStockMaintenance ? <div className="vehicle-card__meta">Published Wix image maintenance only. Review the current Wix gallery, upload / reorder images, then use Prepare + Reconcile to confirm the image-only change.</div> : null}
         {record.displayStatus === "back_in_stock" ? <div className="vehicle-card__meta">This was hidden before, but DealerKit now shows it as available again.</div> : null}
         {record.displayStatus === "advertised" && record.financeStockMatchForCars ? <div className="vehicle-card__meta">Advisory only: counted as advertised for the Cars tab because the registration is active in Van Finance stock.</div> : null}
         {record.displayStatus === "advertised" && !record.financeStockMatchForCars ? <div className="vehicle-card__meta">You marked this as advertised during the day. Overnight refresh should remove it automatically once the registration is found in this CRM stock tab.</div> : null}
@@ -529,6 +536,16 @@ export default function VanscoStockWatchPage() {
   useEffect(() => { loadPipeline(selectedPipeline); }, [selectedPipeline]);
 
   const activeFilter = filtersByPipeline[selectedPipeline] || "missing";
+  useEffect(() => {
+    let active = true;
+    const reloadWixImages = (event) => {
+      const lane = event.detail?.pipeline;
+      if (["finance", "rent2buy", "cars"].includes(lane)) loadAdvertisedStock(lane, () => active);
+    };
+    window.addEventListener("wix-advert-images-reconciled", reloadWixImages);
+    return () => { active = false; window.removeEventListener("wix-advert-images-reconciled", reloadWixImages); };
+  }, []);
+
   const activeSearch = searchByPipeline[selectedPipeline] || "";
   const activeFilters = filtersForPipeline(selectedPipeline);
   const rawActiveRecords = recordsByPipeline[selectedPipeline] || [];

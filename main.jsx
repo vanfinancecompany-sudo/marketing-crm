@@ -17,6 +17,7 @@ import "./utils/vanscoWixPriceHelper.js";
 import "./utils/stockControlCentreUi.js";
 import "./utils/dealerKitOriginalStockControls.js";
 import "./utils/dealerKitReviewWorkspace.js";
+import "./utils/wixAdvertImageWorkspace.js";
 import "./utils/dealerKitProductGalleryWorkspace.js";
 import "./utils/dealerKitControlledPublish.js";
 
