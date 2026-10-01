@@ -150,6 +150,9 @@
     },
     "api/vansco-facebook-story-automation-worker.js": {
       "maxDuration": 180
+    },
+    "api/vehicle-image-suite-stock.js": {
+      "maxDuration": 60
     }
   },
   "headers": [
@@ -260,5 +263,10 @@
       "source": "/(.*)",
       "destination": "/index.html"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "feature/vehicle-image-suite-dealerkit-bridge": false
+    }
+  }
 }

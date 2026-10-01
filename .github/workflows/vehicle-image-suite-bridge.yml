@@ -1,0 +1,22 @@
+name: Vehicle Image Suite bridge
+on:
+  push:
+    branches: [feature/vehicle-image-suite-dealerkit-bridge]
+  pull_request:
+    paths:
+      - 'api/_vehicle-image-suite-stock.js'
+      - 'api/vehicle-image-suite-stock.js'
+      - 'tests/vehicle-image-suite-stock.test.js'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --check api/vehicle-image-suite-stock.js
+      - run: node --test tests/vehicle-image-suite-stock.test.js
