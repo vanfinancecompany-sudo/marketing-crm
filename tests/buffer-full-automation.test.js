@@ -114,6 +114,8 @@ test("Facebook Story worker uses Buffer automatic publishing with story metadata
   assert.doesNotMatch(storyWorker, /schedulingType:\s*"notification"/);
   assert.match(storyWorker, /type:\s*"story"/);
   assert.match(storyWorker, /FacebookPostMetadata/);
+  assert.match(storyWorker, /CHANNEL_QUEUE_LIMIT = 35/);
+  assert.match(storyWorker, /10 \* 60 \+ 15, 14 \* 60 \+ 15, 18 \* 60 \+ 15/);
 });
 
 test("London schedule conversion handles BST and winter correctly", () => {
