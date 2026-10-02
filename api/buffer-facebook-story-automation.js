@@ -30,8 +30,8 @@ export const config = { maxDuration: 120 };
 
 const ACCESS_HEADER = "x-marketing-customer-database-key";
 const PRODUCTS = ["vanFinance", "rent2buy"];
-const CHANNEL_QUEUE_LIMIT = 10;
-const STORY_LOCAL_MINUTES = [10 * 60 + 30, 14 * 60 + 30, 18 * 60 + 30];
+const CHANNEL_QUEUE_LIMIT = 35;
+const STORY_LOCAL_MINUTES = [10 * 60 + 15, 14 * 60 + 15, 18 * 60 + 15];
 const RENT2BUY_OFFSET_MINUTES = 10;
 const MIN_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 const STORY_LOOKAHEAD_MS = 5 * 60 * 60 * 1000;

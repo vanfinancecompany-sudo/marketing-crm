@@ -47,9 +47,9 @@ test("Instagram mirror is enabled by default without changing Facebook targets",
   assert.equal(config.vanFinanceInstagramEnabled, true);
   assert.equal(config.vanFinanceInstagramChannelId, "");
   assert.equal(config.instagramDelayMinutes, 10);
-  assert.equal(config.vanFinancePostsPerDay, 10);
+  assert.equal(config.vanFinancePostsPerDay, 20);
   assert.equal(config.vanFinanceReelsPerDay, 10);
-  assert.equal(config.rent2buyPostsPerDay, 10);
+  assert.equal(config.rent2buyPostsPerDay, 20);
   assert.equal(config.rent2buyReelsPerDay, 10);
 });
 
@@ -80,6 +80,19 @@ test("Buffer Instagram inputs use native post and Reel metadata", () => {
   });
   assert.equal(reel.metadata.instagram.type, "reel");
   assert.equal(reel.assets[0].video.url, "https://example.com/van.mp4");
+
+  const story = buildBufferCreatePostInput({
+    channelId: "instagram-channel",
+    platform: "instagram",
+    text: "REGISTRATION: EF56HIJ",
+    mediaUrl: "https://example.com/story.jpg",
+    mediaKind: "story",
+    draft: false,
+    dueAt: "2026-08-22T14:10:00.000Z",
+  });
+  assert.equal(story.metadata.instagram.type, "story");
+  assert.equal(story.metadata.instagram.shouldShareToFeed, false);
+  assert.equal(story.assets[0].image.url, "https://example.com/story.jpg");
 });
 
 test("Van Finance Instagram channel selection prefers the named account safely", () => {
@@ -191,6 +204,7 @@ test("Instagram worker resolves original media and preflights it before Buffer",
   assert.match(worker, /mediaSource: media\.source/);
   assert.match(worker, /original_crm/);
   assert.match(worker, /console\.error\("\[buffer-instagram-mirror\] Instagram item failed"/);
+  assert.match(worker, /CHANNEL_QUEUE_LIMIT = 40/);
   assert.match(worker, /ok: failed === 0/);
 });
 
