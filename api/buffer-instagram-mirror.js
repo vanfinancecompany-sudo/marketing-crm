@@ -30,7 +30,7 @@ import { selectVanFinanceInstagramMirrors } from "../lib/bufferInstagramMirror.j
 import { mapFinanceVehicleRow } from "../services/marketingVehicleContract.js";
 
 const ACCESS_HEADER = "x-marketing-customer-database-key";
-const CHANNEL_QUEUE_LIMIT = 10;
+const CHANNEL_QUEUE_LIMIT = 40;
 const MEDIA_PREFLIGHT_TIMEOUT_MS = 8000;
 const REEL_LOOKBACK_MS = 3 * 24 * 60 * 60 * 1000;
 
