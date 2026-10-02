@@ -30,38 +30,36 @@ function source(relative) {
   return fs.readFileSync(path.join(ROOT, relative), "utf8");
 }
 
-test("final automation is armed for 21 August with ten Facebook outputs and ten Reels per Page", () => {
+test("paid automation is armed with twenty feed posts plus ten Reels per Facebook Page", () => {
   const config = normalizeBufferAutomationConfig(DEFAULT_BUFFER_AUTOMATION_CONFIG);
   assert.equal(config.enabled, true);
   assert.equal(config.startDate, "2026-08-21");
-  assert.equal(config.vanFinancePostsPerDay, 10);
+  assert.equal(config.vanFinancePostsPerDay, 20);
   assert.equal(config.vanFinanceReelsPerDay, 10);
-  assert.equal(config.rent2buyPostsPerDay, 10);
+  assert.equal(config.rent2buyPostsPerDay, 20);
   assert.equal(config.rent2buyReelsPerDay, 10);
   assert.equal(config.slotGapMinutes, 38);
   assert.equal(FACEBOOK_STORY_TARGET_PER_DAY, 3);
 });
 
-test("Facebook schedule reserves three Story slots inside the daily Facebook total", () => {
+test("Facebook paid schedule keeps three Stories separate from twenty feed posts", () => {
   const finance = bufferAutomationSlots(DEFAULT_BUFFER_AUTOMATION_CONFIG, "vanFinance", "2026-08-21");
   const rent = bufferAutomationSlots(DEFAULT_BUFFER_AUTOMATION_CONFIG, "rent2buy", "2026-08-21");
-  assert.deepEqual(finance.map((slot) => slot.localTime), [
-    "08:00", "08:38", "09:16", "09:54", "10:32", "11:10", "11:48", "12:26", "13:04",
-    "13:42", "14:20", "14:58", "15:36", "16:14", "16:52", "17:30", "18:08",
-  ]);
-  assert.deepEqual(rent.map((slot) => slot.localTime), [
-    "08:10", "08:48", "09:26", "10:04", "10:42", "11:20", "11:58", "12:36", "13:14",
-    "13:52", "14:30", "15:08", "15:46", "16:24", "17:02", "17:40", "18:18",
-  ]);
-  assert.equal(finance.filter((slot) => slot.mediaKind === "image").length, 7);
+  assert.equal(finance.length, 30);
+  assert.equal(rent.length, 30);
+  assert.equal(finance[0].localTime, "08:00");
+  assert.equal(finance.at(-1).localTime, "22:30");
+  assert.equal(rent[0].localTime, "08:10");
+  assert.equal(rent.at(-1).localTime, "22:40");
+  assert.equal(finance.filter((slot) => slot.mediaKind === "image").length, 20);
   assert.equal(finance.filter((slot) => slot.mediaKind === "video").length, 10);
-  assert.equal(rent.filter((slot) => slot.mediaKind === "image").length, 7);
+  assert.equal(rent.filter((slot) => slot.mediaKind === "image").length, 20);
   assert.equal(rent.filter((slot) => slot.mediaKind === "video").length, 10);
-  assert.equal(finance.filter((slot) => slot.mediaKind === "image").length + facebookStoryTargetForProduct(DEFAULT_BUFFER_AUTOMATION_CONFIG, "vanFinance"), 10);
-  assert.equal(rent.filter((slot) => slot.mediaKind === "image").length + facebookStoryTargetForProduct(DEFAULT_BUFFER_AUTOMATION_CONFIG, "rent2buy"), 10);
+  assert.equal(facebookStoryTargetForProduct(DEFAULT_BUFFER_AUTOMATION_CONFIG, "vanFinance"), 3);
+  assert.equal(facebookStoryTargetForProduct(DEFAULT_BUFFER_AUTOMATION_CONFIG, "rent2buy"), 3);
 });
 
-test("an eight-post Content Operations target becomes five feed posts plus three Stories for both brands", () => {
+test("Content Operations feed targets stay independent and Stories remain separate", () => {
   const aligned = alignBufferAutomationConfigToDailyTargets(DEFAULT_BUFFER_AUTOMATION_CONFIG, {
     van_finance_facebook_post: 8,
     rent2buy_facebook_post: 4,
@@ -70,15 +68,18 @@ test("an eight-post Content Operations target becomes five feed posts plus three
     off_day: false,
   });
   assert.equal(aligned.vanFinancePostsPerDay, 8);
-  assert.equal(aligned.rent2buyPostsPerDay, 8);
+  assert.equal(aligned.rent2buyPostsPerDay, 4);
   assert.equal(aligned.vanFinanceReelsPerDay, 8);
   assert.equal(aligned.rent2buyReelsPerDay, 8);
-  for (const productKey of ["vanFinance", "rent2buy"]) {
-    const slots = bufferAutomationSlots(aligned, productKey, "2026-08-26");
-    assert.equal(slots.filter((slot) => slot.mediaKind === "image").length, 5);
-    assert.equal(slots.filter((slot) => slot.mediaKind === "video").length, 8);
-    assert.equal(facebookStoryTargetForProduct(aligned, productKey), 3);
-  }
+
+  const finance = bufferAutomationSlots(aligned, "vanFinance", "2026-08-26");
+  const rent = bufferAutomationSlots(aligned, "rent2buy", "2026-08-26");
+  assert.equal(finance.filter((slot) => slot.mediaKind === "image").length, 8);
+  assert.equal(finance.filter((slot) => slot.mediaKind === "video").length, 8);
+  assert.equal(rent.filter((slot) => slot.mediaKind === "image").length, 4);
+  assert.equal(rent.filter((slot) => slot.mediaKind === "video").length, 8);
+  assert.equal(facebookStoryTargetForProduct(aligned, "vanFinance"), 3);
+  assert.equal(facebookStoryTargetForProduct(aligned, "rent2buy"), 3);
 });
 
 test("Stories are a distinct Buffer media kind instead of accidental image posts", () => {
@@ -158,9 +159,9 @@ test("automated captions keep direct live vehicle URLs and add no tracking redir
   assert.match(rent, /https:\/\/www\.rent2buyvans\.co\.uk\/van-pages\/live-ab12cde/);
 });
 
-test("worker keeps the Buffer Free queue cap while filling the larger daily target gradually", () => {
+test("worker uses paid queue headroom while refilling the larger daily target gradually", () => {
   const worker = source("api/buffer-facebook-automation-worker.js");
-  assert.match(worker, /CHANNEL_QUEUE_LIMIT = 10/);
+  assert.match(worker, /CHANNEL_QUEUE_LIMIT = 35/);
   assert.match(worker, /MIN_SCHEDULE_LEAD_MS/);
   assert.match(worker, /dateKey < automationConfig\.startDate/);
   assert.match(worker, /REEL_COOLDOWN_MS = 48/);
@@ -170,6 +171,7 @@ test("worker keeps the Buffer Free queue cap while filling the larger daily targ
   assert.match(worker, /marketingVanFinanceImages/);
   assert.match(worker, /marketingRent2BuyImages/);
   assert.match(worker, /facebookVehicleImageUrls/);
+  assert.match(worker, /imageExtra/);
   assert.match(worker, /mediaUrls,/);
   assert.doesNotMatch(worker, /templateKey:\s*["']tiktokPunch["']/);
   assert.doesNotMatch(worker, /shareNow/);
@@ -181,9 +183,9 @@ test("Buffer worker follows Content Operations targets while settings keep the s
   const settingsSource = source("api/buffer-automation-settings.js");
   assert.match(configSource, /marketing_daily_target_schedules/);
   assert.match(configSource, /marketing_daily_target_overrides/);
-  assert.match(configSource, /Math\.max\(/);
-  assert.match(configSource, /vanFinancePostsPerDay: facebookTarget/);
-  assert.match(configSource, /rent2buyPostsPerDay: facebookTarget/);
+  assert.doesNotMatch(configSource, /const facebookTarget =/);
+  assert.match(configSource, /vanFinancePostsPerDay: offDay \? 0 : Number\(targets\.van_finance_facebook_post/);
+  assert.match(configSource, /rent2buyPostsPerDay: offDay \? 0 : Number\(targets\.rent2buy_facebook_post/);
   assert.match(settingsSource, /useDailyTargets: false/);
 });
 
