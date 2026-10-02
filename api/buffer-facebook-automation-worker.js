@@ -57,7 +57,7 @@ const ACCESS_HEADER = "x-marketing-customer-database-key";
 const PRODUCTS = ["vanFinance", "rent2buy"];
 const MIN_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 const REEL_COOLDOWN_MS = 48 * 60 * 60 * 1000;
-const CHANNEL_QUEUE_LIMIT = 10;
+const CHANNEL_QUEUE_LIMIT = 35;
 const PUBLIC_PRODUCTION_ORIGIN = "https://marketing-crm-six.vercel.app";
 const GOOGLE_BUSINESS_DAILY_TARGET = 10;
 const GOOGLE_BUSINESS_FIRST_LOCAL_MINUTES = 8 * 60 + 30;
@@ -818,6 +818,18 @@ export default async function handler(request, response) {
           now,
         }),
       );
+      if (results[productKey].image?.created) {
+        results[productKey].imageExtra = await safeStep(`${productKey} second image`, () =>
+          createNextImagePost({
+            supabase,
+            posts,
+            automationConfig,
+            productKey,
+            dateKey,
+            now,
+          }),
+        );
+      }
       results[productKey].video = await safeStep(`${productKey} Reel`, () =>
         createNextReel({
           request,
