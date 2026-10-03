@@ -61,6 +61,13 @@ function countsLine(label, group, { includeReels = true } = {}) {
   return `${postText} · ${reels} Reel${reels === 1 ? "" : "s"} live`;
 }
 
+function instagramLine(group) {
+  if (!group) return "Van Finance Instagram: live confirmation unavailable";
+  const posts = Number(group?.posts || 0);
+  const stories = Number(group?.stories || 0);
+  const reels = Number(group?.reels || 0);
+  return `Van Finance Instagram: ${posts} post${posts === 1 ? "" : "s"} live · ${reels} Reel${reels === 1 ? "" : "s"} live · ${stories} Stor${stories === 1 ? "y" : "ies"} live`;
+}
 function vanscoLine(group) {
   if (!group) return "";
   if (group.error) return "Vansco: live confirmation temporarily unavailable";
@@ -125,6 +132,7 @@ function renderStatus(payload) {
   const confirmationLabel = payload.degraded ? "Buffer last confirmed" : "Buffer confirmed";
   const finance = payload.today.vanFinance || {};
   const rent = payload.today.rent2buy || {};
+  const instagram = payload.today.vanFinanceInstagram || null;
   const vansco = payload.today.vansco || null;
   const googleBusiness = payload.today.googleBusiness || null;
 
@@ -135,12 +143,13 @@ function renderStatus(payload) {
       <div class="panel__header">
         <div>
           <h3>Buffer live today</h3>
-          <p>Confirmed from Buffer across Facebook and Google Business, so you can see what has actually published.</p>
+          <p>Confirmed from Buffer across Facebook, Instagram and Google Business, so you can see what has actually published.</p>
         </div>
         <span class="status-pill">${confirmationLabel}${checked ? ` · ${checked}` : ""}</span>
       </div>
       <div class="notice notice--success">${countsLine("Van Finance", finance)}</div>
       <div class="notice notice--success">${countsLine("Rent2Buy", rent)}</div>
+      ${instagram ? `<div class="notice notice--success">${instagramLine(instagram)}</div>` : ""}
       ${vansco ? `<div class="notice ${vansco.error ? "notice--warning" : "notice--success"}">${vanscoLine(vansco)}</div>` : ""}
       <div class="notice notice--success">${googleBusinessLine(googleBusiness)}</div>
     `;
