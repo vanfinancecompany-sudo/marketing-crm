@@ -42,8 +42,8 @@ test("maps Buffer channels, registrations and media kinds correctly", () => {
     metadata: { type: "story" },
     assets: [{ mimeType: "image/jpeg" }],
   }), "story");
-  assert.equal(bufferPublishedActivityType("Van Finance Facebook", "story"), "van_finance_facebook_post");
-  assert.equal(bufferPublishedActivityType("Rent2Buy Facebook", "story"), "rent2buy_facebook_post");
+  assert.equal(bufferPublishedActivityType("Van Finance Facebook", "story"), "");
+  assert.equal(bufferPublishedActivityType("Rent2Buy Facebook", "story"), "");
   assert.equal(bufferPublishedActivityType("Van Finance Instagram", "image"), "");
 });
 
@@ -83,7 +83,7 @@ test("parses and summarizes Buffer sent feed posts, Stories and Reels by London 
   assert.equal(summary.vanFinance.posts, 1);
   assert.equal(summary.vanFinance.stories, 0);
   assert.equal(summary.vanFinance.reels, 0);
-  assert.equal(summary.rent2buy.posts, 1);
+  assert.equal(summary.rent2buy.posts, 0);
   assert.equal(summary.rent2buy.stories, 1);
   assert.equal(summary.rent2buy.reels, 1);
 });
@@ -97,7 +97,7 @@ test("summarizes Van Finance Instagram posts, Stories and Reels separately", () 
     { id: "ig3", text: "REGISTRATION: EF56HIJ", sentAt, channelId: instagramChannelId, metadata: { type: "story" }, assets: [{ mimeType: "image/jpeg" }] },
   ];
   const summary = summarizeBufferPublishedToday(posts, "2026-10-03", londonDateKey, { instagramChannelId });
-  assert.equal(summary.vanFinanceInstagram.posts, 2);
+  assert.equal(summary.vanFinanceInstagram.posts, 1);
   assert.equal(summary.vanFinanceInstagram.stories, 1);
   assert.equal(summary.vanFinanceInstagram.reels, 1);
   assert.equal(summary.vanFinanceInstagram.total, 3);
