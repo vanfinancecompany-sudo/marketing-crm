@@ -25,6 +25,7 @@ import {
   summarizeBufferPublishedToday,
 } from "../lib/bufferPublishStatus.js";
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
+import { loadBufferAutomationConfig } from "../lib/bufferAutomationConfig.js";
 import { loadVanscoAutomationStatus } from "./_vansco-buffer-runtime.js";
 import {
   bufferDeferredPayload,
@@ -101,6 +102,21 @@ async function resolveGoogleBusinessChannelForStatus() {
   return selectVanFinanceGoogleBusinessChannel(channels);
 }
 
+async function resolveInstagramChannelForStatus() {
+  try {
+    const config = await loadBufferAutomationConfig({ useDailyTargets: false });
+    const id = String(config?.vanFinanceInstagramChannelId || "").trim();
+    return id
+      ? { id, name: "Van Finance Instagram", connected: true }
+      : { id: "", name: "Van Finance Instagram", connected: false };
+  } catch (error) {
+    console.warn("[buffer-publish-status] Instagram channel unavailable", {
+      message: error?.message || String(error),
+    });
+    return { id: "", name: "Van Finance Instagram", connected: false };
+  }
+}
+
 async function vanscoPublishedToday(todayKey) {
   try {
     const status = await loadVanscoAutomationStatus();
@@ -146,18 +162,24 @@ async function withVanscoToday(today, todayKey) {
   };
 }
 
-function trackingDescriptor(post, googleBusinessChannelId = "") {
-  const destination = bufferDestinationForChannel(post?.channelId, googleBusinessChannelId);
+function trackingDescriptor(post, googleBusinessChannelId = "", instagramChannelId = "") {
+  const destination = bufferDestinationForChannel(
+    post?.channelId,
+    googleBusinessChannelId,
+    instagramChannelId,
+  );
   const productKey = bufferProductKeyForDestination(destination, post?.text);
   const sentAt = bufferSentTimestamp(post);
   if (!destination || !productKey || !sentAt || !post?.id) return null;
   const mediaKind = bufferPostMediaKind(post);
+  const activityType = bufferPublishedActivityType(destination, mediaKind, productKey);
+  if (!activityType) return null;
   const registration = normalizeBufferRegistration(post?.text);
   return {
     sourceId: `buffer:${post.id}`,
     bufferPostId: String(post.id),
     activityDate: londonDateKey(new Date(sentAt)),
-    activityType: bufferPublishedActivityType(destination, mediaKind, productKey),
+    activityType,
     destination,
     productKey,
     mediaKind,
@@ -173,9 +195,14 @@ function registrationKey(row) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
-async function syncSentPosts(supabase, posts, googleBusinessChannelId = "") {
+async function syncSentPosts(
+  supabase,
+  posts,
+  googleBusinessChannelId = "",
+  instagramChannelId = "",
+) {
   const descriptors = (posts || [])
-    .map((post) => trackingDescriptor(post, googleBusinessChannelId))
+    .map((post) => trackingDescriptor(post, googleBusinessChannelId, instagramChannelId))
     .filter(Boolean);
   if (!descriptors.length) return { inserted: 0, matchedManual: 0, descriptors: [] };
 
@@ -354,14 +381,22 @@ export default async function handler(request, response) {
         message: error?.message || String(error),
       });
     }
+    const instagramChannel = await resolveInstagramChannelForStatus();
     const channelIds = [
       ...Object.values(BUFFER_FACEBOOK_CHANNELS),
       ...(googleBusinessChannel?.id ? [googleBusinessChannel.id] : []),
+      ...(instagramChannel?.id ? [instagramChannel.id] : []),
     ];
     const posts = await loadSentBufferPosts(channelIds);
     const supabase = getSupabase();
     const googleBusinessChannelId = googleBusinessChannel?.id || "";
-    const sync = await syncSentPosts(supabase, posts, googleBusinessChannelId);
+    const instagramChannelId = instagramChannel?.id || "";
+    const sync = await syncSentPosts(
+      supabase,
+      posts,
+      googleBusinessChannelId,
+      instagramChannelId,
+    );
     const cleanup = await cleanDeliveredReelBlobs(supabase, sync.descriptors);
     const todayKey = londonDateKey();
     const result = {
@@ -377,13 +412,18 @@ export default async function handler(request, response) {
             connected: true,
           }
         : { connected: false },
+      instagram_channel: instagramChannel,
       today: await withVanscoToday(
         summarizeBufferPublishedToday(posts, todayKey, londonDateKey, {
           googleBusinessChannelId,
+          instagramChannelId,
         }),
         todayKey,
       ),
-      recent: bufferPublishedItems(posts, { googleBusinessChannelId }),
+      recent: bufferPublishedItems(posts, {
+        googleBusinessChannelId,
+        instagramChannelId,
+      }),
     };
     await saveBufferStatusSnapshot(result);
     response.status(200).json(result);
