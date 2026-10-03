@@ -80,3 +80,20 @@ test("Content Operations shows Finance and Rent2Buy Story cards without the Vans
   assert.match(page, /type: "rent2buy_facebook_story"/);
   assert.match(page, /const isVansco = String\(metric\.type \|\| ""\)\.startsWith\("vansco_"\)/);
 });
+
+test("Content Operations includes Van Finance Instagram and totals all visible cards", async () => {
+  const [page, bridge] = await Promise.all([
+    read("pages/DashboardPage.jsx"),
+    read("public/buffer-live-status.js"),
+  ]);
+  assert.match(page, /Van Finance Instagram posts/);
+  assert.match(page, /Van Finance Instagram Stories/);
+  assert.match(page, /Van Finance Instagram Reels/);
+  assert.match(page, /vanFinanceInstagram/);
+  assert.match(page, /operationsSummary/);
+  assert.match(page, /remainingTotal/);
+  assert.match(page, /completionPercentage/);
+  assert.doesNotMatch(page, /overview\?\.day\?\.remaining_total \|\| 0/);
+  assert.match(bridge, /Van Finance Instagram:/);
+  assert.match(bridge, /Facebook, Instagram and Google Business/);
+});
