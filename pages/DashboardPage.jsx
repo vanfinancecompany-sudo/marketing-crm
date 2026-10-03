@@ -34,12 +34,16 @@ const WEEKDAYS = [
 ];
 const VANSCO_FACEBOOK_DAILY_TARGET = 30;
 const FACEBOOK_STORY_DAILY_MAX = 3;
+const INSTAGRAM_STORY_DAILY_MAX = 3;
 const VANSCO_FACEBOOK_STORY_DAILY_TARGET = 5;
 const VANSCO_GOOGLE_BUSINESS_DAILY_TARGET = 10;
 
 const ACTIVITY_UNITS = {
   van_finance_facebook_post: "posted",
   van_finance_facebook_story: "posted",
+  van_finance_instagram_post: "posted",
+  van_finance_instagram_story: "posted",
+  van_finance_instagram_reel: "published",
   rent2buy_facebook_story: "posted",
   vansco_facebook_post: "posted",
   vansco_facebook_story: "posted",
@@ -399,6 +403,50 @@ export default function DashboardPage({ onNavigate }) {
     ];
   }, [bufferLiveStatus, metrics]);
 
+  const instagramMetrics = useMemo(() => {
+    const financeFacebook = metrics.find((metric) => metric.type === "van_finance_facebook_post");
+    const financeReel = metrics.find((metric) => metric.type === "van_finance_reel");
+    const live = bufferLiveStatus?.today?.vanFinanceInstagram;
+    const hasLiveStatus = Boolean(bufferLiveStatus?.today && live);
+    const definitions = [
+      {
+        type: "van_finance_instagram_post",
+        label: "Van Finance Instagram posts",
+        target: Math.max(0, Number(financeFacebook?.target || 0)),
+        completed: Math.max(0, Number(live?.posts || 0)),
+      },
+      {
+        type: "van_finance_instagram_story",
+        label: "Van Finance Instagram Stories",
+        target: Math.min(
+          INSTAGRAM_STORY_DAILY_MAX,
+          Math.max(0, Number(financeFacebook?.target || 0)),
+        ),
+        completed: Math.max(0, Number(live?.stories || 0)),
+      },
+      {
+        type: "van_finance_instagram_reel",
+        label: "Van Finance Instagram Reels",
+        target: Math.max(0, Number(financeReel?.target || 0)),
+        completed: Math.max(0, Number(live?.reels || 0)),
+      },
+    ];
+
+    return definitions.map((item) => ({
+      ...item,
+      displayCompleted: hasLiveStatus ? item.completed : "—",
+      remaining: Math.max(0, item.target - item.completed),
+      percentage: item.target > 0
+        ? Math.min(100, Math.round((item.completed / item.target) * 100))
+        : 100,
+      statusLabel: !hasLiveStatus
+        ? "CHECKING"
+        : item.completed >= item.target
+          ? "COMPLETE"
+          : `${Math.max(0, item.target - item.completed)} LEFT`,
+    }));
+  }, [bufferLiveStatus, metrics]);
+
   const vanscoMetric = useMemo(() => {
     const completed = Math.max(0, Number(vanscoStatus?.buffer?.sentToday || 0));
     const unavailable = Boolean(vanscoStatusError) && !vanscoStatus;
@@ -505,7 +553,7 @@ export default function DashboardPage({ onNavigate }) {
     for (const metric of metrics) {
       next.push(metric);
       if (metric.type === "van_finance_facebook_post") {
-        next.push(financeStoryMetric);
+        next.push(financeStoryMetric, ...instagramMetrics);
       }
       if (metric.type === "rent2buy_facebook_post") {
         next.push(rent2buyStoryMetric, vanscoMetric, vanscoStoryMetric, ...vanscoGoogleMetrics);
@@ -520,10 +568,35 @@ export default function DashboardPage({ onNavigate }) {
   }, [
     metrics,
     facebookStoryMetrics,
+    instagramMetrics,
     vanscoMetric,
     vanscoStoryMetric,
     vanscoGoogleMetrics,
   ]);
+
+  const operationsSummary = useMemo(() => {
+    const active = displayMetrics.filter((metric) => Number(metric?.target || 0) > 0);
+    const targetTotal = active.reduce((sum, metric) => sum + Number(metric.target || 0), 0);
+    const completedTowardTarget = active.reduce(
+      (sum, metric) => sum + Math.min(
+        Number(metric.target || 0),
+        Math.max(0, Number(metric.completed || 0)),
+      ),
+      0,
+    );
+    const remainingTotal = active.reduce(
+      (sum, metric) => sum + Math.max(0, Number(metric.remaining || 0)),
+      0,
+    );
+    return {
+      targetTotal,
+      remainingTotal,
+      complete: targetTotal === 0 || remainingTotal === 0,
+      completionPercentage: targetTotal > 0
+        ? Math.min(100, Math.round((completedTowardTarget / targetTotal) * 100))
+        : 100,
+    };
+  }, [displayMetrics]);
 
   if (locked)
     return (
@@ -560,25 +633,25 @@ export default function DashboardPage({ onNavigate }) {
   return (
     <div className="page-stack content-operations-page">
       <section
-        className={`operations-summary${overview?.day?.complete ? " is-complete" : ""}`}
+        className={`operations-summary${operationsSummary.complete ? " is-complete" : ""}`}
       >
         <div>
           <div className="eyebrow">TODAY · UK TIME</div>
           <h2>
             {overview?.day?.off_day
               ? "No target today"
-              : overview?.day?.complete
+              : operationsSummary.complete
                 ? "Today’s target is complete"
                 : "What you need to do today"}
           </h2>
           <p>
             {overview?.day?.off_day
               ? "This is set as an off day."
-              : `${overview?.day?.remaining_total || 0} remaining across today’s marketing activity.`}
+              : `${operationsSummary.remainingTotal} remaining across today’s marketing activity.`}
           </p>
         </div>
         <div className="operations-summary__score">
-          <strong>{overview?.day?.completion_percentage || 0}%</strong>
+          <strong>{operationsSummary.completionPercentage}%</strong>
           <span>complete</span>
         </div>
       </section>

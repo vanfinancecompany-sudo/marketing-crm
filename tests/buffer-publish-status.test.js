@@ -25,12 +25,14 @@ test("Buffer sent-post query is read-only and accepts the monitored channel list
   assert.match(BUFFER_SENT_POSTS_QUERY, /channelIds:\s*\$channelIds/);
   assert.match(BUFFER_SENT_POSTS_QUERY, /schedulingType/);
   assert.match(BUFFER_SENT_POSTS_QUERY, /FacebookPostMetadata/);
+  assert.match(BUFFER_SENT_POSTS_QUERY, /InstagramPostMetadata/);
   assert.doesNotMatch(BUFFER_SENT_POSTS_QUERY, /mutation/i);
 });
 
 test("maps Buffer channels, registrations and media kinds correctly", () => {
   assert.equal(bufferDestinationForChannel("6a8721fbccaf649a67e227a3"), "Van Finance Facebook");
   assert.equal(bufferDestinationForChannel("6a8722ffccaf649a67e22bc6"), "Rent2Buy Facebook");
+  assert.equal(bufferDestinationForChannel("instagram-1", "", "instagram-1"), "Van Finance Instagram");
   assert.equal(normalizeBufferRegistration("REGISTRATION: AB12 CDE"), "AB12CDE");
   assert.equal(normalizeBufferRegistration("REGISTRATION: XGZ4865"), "XGZ4865");
   assert.equal(bufferPostMediaKind({ assets: [{ mimeType: "video/mp4" }] }), "video");
@@ -40,8 +42,9 @@ test("maps Buffer channels, registrations and media kinds correctly", () => {
     metadata: { type: "story" },
     assets: [{ mimeType: "image/jpeg" }],
   }), "story");
-  assert.equal(bufferPublishedActivityType("Van Finance Facebook", "story"), "van_finance_facebook_post");
-  assert.equal(bufferPublishedActivityType("Rent2Buy Facebook", "story"), "rent2buy_facebook_post");
+  assert.equal(bufferPublishedActivityType("Van Finance Facebook", "story"), "");
+  assert.equal(bufferPublishedActivityType("Rent2Buy Facebook", "story"), "");
+  assert.equal(bufferPublishedActivityType("Van Finance Instagram", "image"), "");
 });
 
 test("only counts marked Google Business vehicle automation posts", () => {
@@ -80,11 +83,25 @@ test("parses and summarizes Buffer sent feed posts, Stories and Reels by London 
   assert.equal(summary.vanFinance.posts, 1);
   assert.equal(summary.vanFinance.stories, 0);
   assert.equal(summary.vanFinance.reels, 0);
-  assert.equal(summary.rent2buy.posts, 1);
+  assert.equal(summary.rent2buy.posts, 0);
   assert.equal(summary.rent2buy.stories, 1);
   assert.equal(summary.rent2buy.reels, 1);
 });
 
+test("summarizes Van Finance Instagram posts, Stories and Reels separately", () => {
+  const sentAt = "2026-10-03T09:00:00Z";
+  const instagramChannelId = "instagram-1";
+  const posts = [
+    { id: "ig1", text: "REGISTRATION: AB12CDE", sentAt, channelId: instagramChannelId, metadata: { type: "post" }, assets: [{ mimeType: "image/jpeg" }] },
+    { id: "ig2", text: "REGISTRATION: CD34EFG", sentAt, channelId: instagramChannelId, metadata: { type: "reel" }, assets: [{ mimeType: "video/mp4" }] },
+    { id: "ig3", text: "REGISTRATION: EF56HIJ", sentAt, channelId: instagramChannelId, metadata: { type: "story" }, assets: [{ mimeType: "image/jpeg" }] },
+  ];
+  const summary = summarizeBufferPublishedToday(posts, "2026-10-03", londonDateKey, { instagramChannelId });
+  assert.equal(summary.vanFinanceInstagram.posts, 1);
+  assert.equal(summary.vanFinanceInstagram.stories, 1);
+  assert.equal(summary.vanFinanceInstagram.reels, 1);
+  assert.equal(summary.vanFinanceInstagram.total, 3);
+});
 test("published Reel status events do not double-count Reel generation targets", () => {
   const summary = summarizeDailyActivity({
     targets: DEFAULT_DAILY_TARGETS,
