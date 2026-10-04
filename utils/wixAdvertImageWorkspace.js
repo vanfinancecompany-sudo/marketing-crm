@@ -1,6 +1,6 @@
 import { buildMarketingAccessHeaders, parseMarketingJsonResponse } from "../services/marketingAccess.js";
 import { convertWixImage } from "../services/marketingVehicleContract.js";
-import { WIX_ADVERT_IMAGE_LANES, createWixImageDraft, appendWixImage, moveWixImage, removeWixImage, wixImageProposal, wixGalleryImageSource } from "../lib/wixAdvertImageEditor.js";
+import { WIX_ADVERT_IMAGE_LANES, createWixImageDraft, prependWixImages, moveWixImage, removeWixImage, wixImageProposal, wixGalleryImageSource } from "../lib/wixAdvertImageEditor.js";
 
 const ATTRIBUTE = "data-wix-advert-image-editor";
 let activeRequest = 0;
@@ -136,38 +136,52 @@ export function render(state) {
   renderDestinations(state);
   renderConfirmation(state);
   state.updateButton.hidden = Boolean(state.prepared);
-  state.updateButton.disabled = state.busy || state.requiresReload || !state.draft.items.length || Boolean(state.pendingUpload);
+  const pendingUploadCount = state.pendingUploads?.length || 0;
+  state.updateButton.disabled = state.busy || state.requiresReload || !state.draft.items.length || pendingUploadCount > 0;
   state.updateButton.textContent = state.busy ? "Checking Wix…" : "Update Wix images";
-  state.uploadButton.disabled = state.busy || state.requiresReload || Boolean(state.pendingUpload);
+  state.uploadButton.disabled = state.busy || state.requiresReload || pendingUploadCount > 0;
   state.uploadInput.disabled = state.uploadButton.disabled;
-  state.recheckButton.hidden = !state.pendingUpload;
+  state.recheckButton.hidden = pendingUploadCount === 0;
   state.recheckButton.disabled = state.busy || state.requiresReload;
   state.cancelButton.disabled = state.busy;
   state.closeButton.disabled = state.busy;
 }
 
-export async function finishUpload(state) {
-  if (!state.pendingUpload) return;
-  const uploaded = await api(state, "finishUpload", state.pendingUpload);
-  if (!uploaded.ready) { message(state, "Your image is still processing in Wix Media. Recheck when ready; the advert is unchanged."); return; }
-  appendWixImage(state.draft, uploaded);
-  state.pendingUpload = null; state.uploadInput.value = "";
+export async function finishUploads(state) {
+  const pendingUploads = Array.isArray(state.pendingUploads) ? state.pendingUploads : [];
+  if (!pendingUploads.length) return;
+  const uploadedImages = await Promise.all(pendingUploads.map((pending) => api(state, "finishUpload", pending)));
+  const waiting = uploadedImages.filter((uploaded) => !uploaded.ready).length;
+  if (waiting) {
+    message(state, `${waiting} of ${pendingUploads.length} uploaded image${pendingUploads.length === 1 ? "" : "s"} ${waiting === 1 ? "is" : "are"} still processing in Wix Media. Recheck when ready; the advert is unchanged.`);
+    return;
+  }
+  prependWixImages(state.draft, uploadedImages);
+  state.pendingUploads = []; state.uploadInput.value = "";
   changed(state);
-  message(state, "Image added at the end. The primary image is unchanged. Click Update Wix images when ready.");
+  message(state, `${uploadedImages.length} image${uploadedImages.length === 1 ? "" : "s"} added at the start. The first selected image is now #1 / Primary. Click Update Wix images when ready.`);
 }
 
-export async function uploadImage(state, file) {
-  if (!file) return;
-  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size <= 0 || file.size > 10 * 1024 * 1024) {
-    throw new Error("Choose a JPEG, PNG or WebP image up to 10 MB.");
+export async function uploadImages(state, files) {
+  const selectedFiles = Array.from(files || []);
+  if (!selectedFiles.length) return;
+  if (state.draft.items.length + selectedFiles.length > 80) {
+    throw new Error(`This advert can contain up to 80 images. Choose no more than ${Math.max(0, 80 - state.draft.items.length)} additional image${80 - state.draft.items.length === 1 ? "" : "s"}.`);
   }
-  message(state, "Uploading your image to Wix Media…");
-  const prepared = await api(state, "prepareUpload", { fileName: file.name, mimeType: file.type, sizeInBytes: file.size });
-  const response = await fetch(prepared.uploadUrl, { method: "PUT", headers: { "Content-Type": prepared.mimeType }, body: file });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.file?.id) throw new Error("Wix Media upload did not return a verified file ID.");
-  state.pendingUpload = { fileId: payload.file.id, uploadTicket: prepared.uploadTicket };
-  await finishUpload(state);
+  selectedFiles.forEach((file) => {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size <= 0 || file.size > 10 * 1024 * 1024) {
+      throw new Error(`${file.name || "One selected file"} is not a JPEG, PNG or WebP image up to 10 MB.`);
+    }
+  });
+  message(state, `Uploading ${selectedFiles.length} image${selectedFiles.length === 1 ? "" : "s"} to Wix Media…`);
+  state.pendingUploads = await Promise.all(selectedFiles.map(async (file) => {
+    const prepared = await api(state, "prepareUpload", { fileName: file.name, mimeType: file.type, sizeInBytes: file.size });
+    const response = await fetch(prepared.uploadUrl, { method: "PUT", headers: { "Content-Type": prepared.mimeType }, body: file });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.file?.id) throw new Error(`Wix Media did not return a verified file ID for ${file.name || "one selected image"}.`);
+    return { fileId: payload.file.id, uploadTicket: prepared.uploadTicket };
+  }));
+  await finishUploads(state);
 }
 
 export async function prepareReconciliation(state) {
@@ -276,7 +290,7 @@ export async function openWixImageEditor(registrationInput, pipeline) {
   body.appendChild(node("p", "dealerkit-review__loading", "Loading current Wix images and published sections…"));
   panel.append(header, body); header.append(heading, close); overlay.append(shade, panel); document.body.appendChild(overlay);
   document.body.classList.add("dealerkit-review-open");
-  const state = { registration, pipeline, overlay, body, title, subtitle, closeButton: close, busy: false, pendingUpload: null, requiresReload: false };
+  const state = { registration, pipeline, overlay, body, title, subtitle, closeButton: close, busy: false, pendingUploads: [], requiresReload: false };
   const closeEditor = () => { if (state.busy) return; activeRequest += 1; overlay.remove(); document.body.classList.remove("dealerkit-review-open"); };
   shade.addEventListener("click", closeEditor); close.addEventListener("click", closeEditor);
   try {
@@ -289,15 +303,15 @@ export async function openWixImageEditor(registrationInput, pipeline) {
     state.galleryHeading = node("h3"); state.galleryNote = node("p", "dealerkit-review__section-note");
     state.gallery = node("div", "dealerkit-review__gallery");
     const upload = node("div", "wix-image-review__upload");
-    state.uploadInput = node("input"); state.uploadInput.type = "file"; state.uploadInput.accept = "image/jpeg,image/png,image/webp";
-    state.uploadInput.hidden = true; state.uploadInput.setAttribute("aria-label", "Upload an additional Wix image");
+    state.uploadInput = node("input"); state.uploadInput.type = "file"; state.uploadInput.accept = "image/jpeg,image/png,image/webp"; state.uploadInput.multiple = true;
+    state.uploadInput.hidden = true; state.uploadInput.setAttribute("aria-label", "Upload additional Wix images");
     state.uploadInput.addEventListener("change", () => run(state, async () => {
-      try { await uploadImage(state, state.uploadInput.files?.[0]); } finally { state.uploadInput.value = ""; }
+      try { await uploadImages(state, state.uploadInput.files); } finally { state.uploadInput.value = ""; }
     }));
-    state.uploadButton = node("button", "dealerkit-review__close", "Upload additional image"); state.uploadButton.type = "button";
+    state.uploadButton = node("button", "dealerkit-review__close", "Upload additional images"); state.uploadButton.type = "button";
     state.uploadButton.addEventListener("click", () => state.uploadInput.click());
-    state.recheckButton = node("button", "dealerkit-review__close", "Recheck uploaded image"); state.recheckButton.type = "button";
-    state.recheckButton.addEventListener("click", () => run(state, () => finishUpload(state)));
+    state.recheckButton = node("button", "dealerkit-review__close", "Recheck uploaded images"); state.recheckButton.type = "button";
+    state.recheckButton.addEventListener("click", () => run(state, () => finishUploads(state)));
     upload.append(state.uploadInput, state.uploadButton, state.recheckButton);
     gallerySection.append(state.galleryHeading, state.galleryNote, state.gallery, upload);
     const sections = node("section", "dealerkit-review__section dealerkit-review__decisions");
