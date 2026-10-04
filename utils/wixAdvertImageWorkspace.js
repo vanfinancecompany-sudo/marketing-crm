@@ -131,7 +131,7 @@ export function render(state) {
   state.galleryHeading.textContent = "Current Wix images (" + state.draft.items.length + ")";
   state.galleryNote.textContent = state.hasLocalChanges
     ? "Proposed order — changes have not been saved to Wix. Image #1 will be Primary."
-    : "Current published order. Image #1 is Primary. Drag images to reorder, or upload another image.";
+    : "Current published order. Image #1 is Primary. Drag images to reorder, or upload additional images.";
   if (!state.draft.items.length) state.gallery.appendChild(node("p", "", "Add at least one image before updating Wix."));
   renderDestinations(state);
   renderConfirmation(state);
@@ -182,6 +182,16 @@ export async function uploadImages(state, files) {
     return { fileId: payload.file.id, uploadTicket: prepared.uploadTicket };
   }));
   await finishUploads(state);
+}
+
+// Keep the original single-image helpers callable for older tests/integrations while
+// routing all UI behaviour through the new batch implementation.
+export async function uploadImage(state, file) {
+  return uploadImages(state, file ? [file] : []);
+}
+
+export async function finishUpload(state) {
+  return finishUploads(state);
 }
 
 export async function prepareReconciliation(state) {
