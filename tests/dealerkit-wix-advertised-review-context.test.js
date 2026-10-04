@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { parseMarketingJsonResponse } from "../services/marketingAccess.js";
 import { convertWixImage } from "../services/marketingVehicleContract.js";
-import { WIX_ADVERT_IMAGE_LANES, createWixImageDraft, appendWixImage, moveWixImage, removeWixImage, wixImageProposal, wixGalleryImageSource } from "../lib/wixAdvertImageEditor.js";
+import { WIX_ADVERT_IMAGE_LANES, createWixImageDraft, appendWixImage, prependWixImages, moveWixImage, removeWixImage, wixImageProposal, wixGalleryImageSource } from "../lib/wixAdvertImageEditor.js";
 
 const registration = "OY72YSJ";
 const urls = ["https://static.wixstatic.com/media/current-van.jpg", "https://static.wixstatic.com/media/current-interior.jpg"];
@@ -119,7 +119,7 @@ async function clients(pipeline) {
   };
   const dependencies = { document, window, fetch, CustomEvent: ReviewEvent, convertWixImage,
     buildMarketingAccessHeaders: (headers) => headers, parseMarketingJsonResponse,
-    WIX_ADVERT_IMAGE_LANES, createWixImageDraft, appendWixImage, moveWixImage, removeWixImage, wixImageProposal, wixGalleryImageSource };
+    WIX_ADVERT_IMAGE_LANES, createWixImageDraft, appendWixImage, prependWixImages, moveWixImage, removeWixImage, wixImageProposal, wixGalleryImageSource };
   const code = (await readFile(new URL("../utils/wixAdvertImageWorkspace.js", import.meta.url), "utf8"))
     .replace(/^import[\s\S]*?;\s*/gm, "").replace(/^export /gm, "");
   const editor = new Function(...Object.keys(dependencies), code + ";return { openWixImageEditor, render, uploadImage, prepareReconciliation, reconcileImages };")(...Object.values(dependencies));
@@ -156,17 +156,18 @@ for (const pipeline of Object.keys(WIX_ADVERT_IMAGE_LANES)) {
     assert.equal(state.body.querySelectorAll("input").filter((input) => input.type === "text").length, 0);
     assert.ok(state.destinationInputs.every((input) => input.checked));
     assert.ok(state.destinationInputs.find((input) => input.dataset.collectionId === WIX_ADVERT_IMAGE_LANES[pipeline].listing).disabled);
+    assert.equal(state.uploadInput.multiple, true, "The Wix image picker supports Ctrl/Cmd multi-select");
 
     state.uploadInput.files = [{ name: "Due in Soon.jpg", type: "image/jpeg", size: 1200 }];
     await state.uploadInput.fire("change");
-    assert.deepEqual(state.draft.items.map((item) => item.src), [...urls, uploadUrl]);
+    assert.deepEqual(state.draft.items.map((item) => item.src), [uploadUrl, ...urls]);
     assert.equal(state.current.querySelector("img").src, urls[0], "Uploading does not replace current primary");
     const cards = state.gallery.querySelectorAll("figure");
     await cards[2].fire("dragstart", { dataTransfer: { setData() {} } });
     await cards[1].fire("drop");
-    assert.deepEqual(state.draft.items.map((item) => item.src), [urls[0], uploadUrl, urls[1]]);
+    assert.deepEqual(state.draft.items.map((item) => item.src), [uploadUrl, urls[1], urls[0]]);
     await state.gallery.querySelectorAll("figure")[2].querySelector("button").click();
-    assert.deepEqual(state.draft.items.map((item) => item.src), [urls[0], uploadUrl]);
+    assert.deepEqual(state.draft.items.map((item) => item.src), [uploadUrl, urls[1]]);
     assert.deepEqual(client.live().gallery, urls);
     assert.equal(client.calls.filter((call) => call.action === "reconcile").length, 0);
 
@@ -174,16 +175,16 @@ for (const pipeline of Object.keys(WIX_ADVERT_IMAGE_LANES)) {
     assert.ok(state.prepared);
     assert.equal(state.confirmationPanel.hidden, false);
     assert.ok(state.confirmationPanel.textContent.includes("2 images") && state.confirmationPanel.textContent.includes(WIX_ADVERT_IMAGE_LANES[pipeline].detail));
-    assert.equal(state.confirmationPanel.querySelector("img").src, urls[0]);
+    assert.equal(state.confirmationPanel.querySelector("img").src, uploadUrl);
     for (const destination of client.live().destinations) assert.ok(state.confirmationPanel.textContent.includes(destination.collectionId + "." + destination.imageField));
     assert.deepEqual(client.live().gallery, urls, "Update Wix images prepares only");
     assert.equal(client.calls.filter((call) => call.action === "reconcile").length, 0);
     await state.confirmButton.click();
-    assert.deepEqual(client.live().gallery, [urls[0], uploadUrl]);
-    assert.equal(client.live().picture, urls[0]);
+    assert.deepEqual(client.live().gallery, [uploadUrl, urls[1]]);
+    assert.equal(client.live().picture, uploadUrl);
     assert.equal(client.calls.filter((call) => call.action === "reconcile").length, 1);
     assert.equal(client.calls.filter((call) => call.action === "load").length, 2, "Reload after verification, rather than rendering the optimistic draft");
-    assert.deepEqual(state.draft.items.map((item) => item.src), [urls[0], uploadUrl]);
+    assert.deepEqual(state.draft.items.map((item) => item.src), [uploadUrl, urls[1]]);
     assert.equal(state.message.textContent, "✓ Wix images updated successfully");
     assert.equal(state.message.dataset.kind, "success");
     assert.equal(state.message.scrolledIntoView, true);
@@ -294,7 +295,7 @@ test("busy confirmation blocks repeated updates and closing while a guarded writ
   assert.equal(state.message.dataset.kind, "success");
 });
 
-test("processing uploads keep the original primary and block update until the Wix image is READY", async () => {
+test("processing uploads keep the live primary unchanged and block update until the Wix image is READY", async () => {
   const client = await clients("finance");
   const state = await client.fromCard();
   client.control.processing = true;
@@ -305,8 +306,8 @@ test("processing uploads keep the original primary and block update until the Wi
   assert.equal(state.recheckButton.hidden, false);
   client.control.processing = false;
   await state.recheckButton.click();
-  assert.deepEqual(state.draft.items.map((item) => item.src), [...urls, uploadUrl]);
-  assert.equal(state.draft.items[0].src, urls[0]);
+  assert.deepEqual(state.draft.items.map((item) => item.src), [uploadUrl, ...urls]);
+  assert.equal(state.draft.items[0].src, uploadUrl);
   assert.equal(state.updateButton.disabled, false);
   assert.equal(client.calls.filter((call) => call.action === "reconcile").length, 0);
 });

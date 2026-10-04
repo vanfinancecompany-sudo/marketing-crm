@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createWixAdvertImageService, createWixAdvertImageHandler } from "../api/wix-advert-images.js";
-import { WIX_ADVERT_IMAGE_LANES, WIX_ADVERT_CATEGORY_IMAGE_FIELDS, createWixImageDraft, appendWixImage, moveWixImage, removeWixImage, wixImageProposal } from "../lib/wixAdvertImageEditor.js";
+import { WIX_ADVERT_IMAGE_LANES, WIX_ADVERT_CATEGORY_IMAGE_FIELDS, createWixImageDraft, appendWixImage, prependWixImages, moveWixImage, removeWixImage, wixImageProposal } from "../lib/wixAdvertImageEditor.js";
 
 const registration = "OY72YSJ";
 const environment = { MARKETING_CUSTOMER_DATABASE_API_KEY: "test-editor-key", WIX_API_KEY: "test-wix-key" };
@@ -82,6 +82,19 @@ async function confirm(f, draft) {
   const prepared = await f.service.prepare(proposal);
   return f.service.reconcile({ ...proposal, confirmation: prepared.confirmation, confirmed: true });
 }
+
+test("a selected upload batch is inserted ahead of the existing Wix gallery in selection order", async () => {
+  const f = fixture("finance");
+  const draft = createWixImageDraft(await f.service.load(f.input));
+  const first = (await upload(f)).media;
+  const second = (await upload(f)).media;
+  prependWixImages(draft, [first, second]);
+  assert.deepEqual(draft.items.slice(0, 2).map((item) => item.key), ["upload-" + first.fileId, "upload-" + second.fileId]);
+  assert.deepEqual(draft.items.slice(2).map((item) => item.src), urls);
+  await confirm(f, draft);
+  assert.equal(f.rows[f.lane.listing][0].data.picture, first.url, "The first selected upload becomes Primary");
+  assert.deepEqual(f.rows[f.lane.detail][0].data[f.lane.gallery].slice(2), urls, "Existing Wix images stay behind the new upload batch");
+});
 
 for (const pipeline of Object.keys(WIX_ADVERT_IMAGE_LANES)) {
   test(pipeline + " loads the exact stored Wix gallery without DealerKit and reconciles only image fields and the image count", async () => {
