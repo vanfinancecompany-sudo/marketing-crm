@@ -1,6 +1,6 @@
 import { buildMarketingAccessHeaders, parseMarketingJsonResponse } from "../services/marketingAccess.js";
 import { convertWixImage } from "../services/marketingVehicleContract.js";
-import { WIX_ADVERT_IMAGE_LANES, createWixImageDraft, appendWixImage, moveWixImage, removeWixImage, wixImageProposal, wixGalleryImageSource } from "../lib/wixAdvertImageEditor.js";
+import { WIX_ADVERT_IMAGE_LANES, createWixImageDraft, prependWixImages, moveWixImage, removeWixImage, wixImageProposal, wixGalleryImageSource } from "../lib/wixAdvertImageEditor.js";
 
 const ATTRIBUTE = "data-wix-advert-image-editor";
 let activeRequest = 0;
@@ -163,10 +163,10 @@ export async function finishUploads(state) {
     message(state, `${waiting} of ${pendingUploads.length} uploaded image${pendingUploads.length === 1 ? "" : "s"} ${waiting === 1 ? "is" : "are"} still processing in Wix Media. Recheck when ready; the advert is unchanged.`);
     return;
   }
-  uploadedImages.forEach((uploaded) => appendWixImage(state.draft, uploaded));
+  prependWixImages(state.draft, uploadedImages);
   state.pendingUploads = []; state.uploadInput.value = "";
   changed(state);
-  message(state, `${uploadedImages.length} image${uploadedImages.length === 1 ? "" : "s"} added. The primary image is unchanged. Click Update Wix images when ready.`);
+  message(state, `${uploadedImages.length} image${uploadedImages.length === 1 ? "" : "s"} added at the top in selection order. Image #1 is now Primary. Click Update Wix images when ready.`);
 }
 
 export async function uploadImages(state, files) {
