@@ -26,7 +26,11 @@ import {
 } from "../lib/bufferPublishStatus.js";
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
 import { loadBufferAutomationConfig } from "../lib/bufferAutomationConfig.js";
-import { loadVanscoAutomationStatus } from "./_vansco-buffer-runtime.js";
+import {
+  isVanscoFacebookStory,
+  loadVanscoAutomationStatus,
+  loadVanscoCombinedStatusSnapshot,
+} from "./_vansco-buffer-runtime.js";
 import {
   bufferDeferredPayload,
   guardedBufferGraphql,
@@ -217,7 +221,12 @@ async function syncSentPosts(
     .lte("activity_date", endDate)
     .in("activity_type", [
       "van_finance_facebook_post",
+      "van_finance_facebook_story",
+      "van_finance_instagram_post",
+      "van_finance_instagram_story",
+      "van_finance_instagram_reel",
       "rent2buy_facebook_post",
+      "rent2buy_facebook_story",
       "van_finance_reel",
       "rent2buy_reel",
       "van_finance_google_business_post",
@@ -275,6 +284,90 @@ async function syncSentPosts(
     if (inserted.error) throw inserted.error;
   }
   return { inserted: inserts.length, matchedManual, descriptors };
+}
+
+const VANSCO_GOOGLE_ACTIVITY_TYPES = Object.freeze({
+  vansco333: "vansco_333_google_business_post",
+  southamptonAirport: "vansco_airport_google_business_post",
+  newForest: "vansco_new_forest_google_business_post",
+});
+
+function vanscoSentDescriptors(snapshot) {
+  const items = [];
+  const add = (post, activityType, branchKey = "") => {
+    if (String(post?.status || "").toLowerCase() !== "sent" || !post?.id) return;
+    const sentAt = String(post?.sentAt || post?.dueAt || post?.createdAt || "").trim();
+    if (!sentAt) return;
+    items.push({
+      sourceId: `vansco-buffer:${post.id}`,
+      activityDate: londonDateKey(new Date(sentAt)),
+      activityType,
+      sentAt,
+      bufferPostId: String(post.id),
+      branchKey,
+    });
+  };
+
+  for (const post of snapshot?.facebook?.posts || []) {
+    add(
+      post,
+      isVanscoFacebookStory(post)
+        ? "vansco_facebook_story"
+        : "vansco_facebook_post",
+    );
+  }
+  for (const [branchKey, branch] of Object.entries(snapshot?.googleBusiness?.branches || {})) {
+    const activityType = VANSCO_GOOGLE_ACTIVITY_TYPES[branchKey];
+    if (!activityType) continue;
+    for (const post of branch?.posts || []) add(post, activityType, branchKey);
+  }
+  return items;
+}
+
+async function syncVanscoSentPosts(supabase, snapshot) {
+  const descriptors = vanscoSentDescriptors(snapshot);
+  if (!descriptors.length) return { inserted: 0, descriptors: [] };
+
+  const dates = descriptors.map((item) => item.activityDate).sort();
+  const existing = await supabase
+    .from("marketing_daily_activity_events")
+    .select("source_id")
+    .gte("activity_date", dates[0])
+    .lte("activity_date", dates[dates.length - 1])
+    .in("activity_type", [
+      "vansco_facebook_post",
+      "vansco_facebook_story",
+      "vansco_333_google_business_post",
+      "vansco_airport_google_business_post",
+      "vansco_new_forest_google_business_post",
+    ])
+    .limit(5000);
+  if (existing.error) throw existing.error;
+
+  const seen = new Set((existing.data || []).map((row) => String(row.source_id || "")).filter(Boolean));
+  const inserts = descriptors
+    .filter((item) => !seen.has(item.sourceId))
+    .map((item) => ({
+      activity_date: item.activityDate,
+      activity_type: item.activityType,
+      quantity: 1,
+      source: "buffer_publish",
+      source_id: item.sourceId,
+      metadata: {
+        buffer_post_id: item.bufferPostId,
+        buffer_status: "sent",
+        branch_key: item.branchKey || null,
+        sent_at: item.sentAt,
+        status_event: "buffer_published",
+      },
+      occurred_at: item.sentAt,
+    }));
+
+  if (inserts.length) {
+    const inserted = await supabase.from("marketing_daily_activity_events").insert(inserts);
+    if (inserted.error) throw inserted.error;
+  }
+  return { inserted: inserts.length, descriptors };
 }
 
 async function cleanDeliveredReelBlobs(supabase, descriptors) {
@@ -398,11 +491,21 @@ export default async function handler(request, response) {
       instagramChannelId,
     );
     const cleanup = await cleanDeliveredReelBlobs(supabase, sync.descriptors);
+    const vanscoSnapshot = await loadVanscoCombinedStatusSnapshot().catch((error) => {
+      console.warn("[buffer-publish-status] Vansco placement history sync deferred", {
+        message: error?.message || String(error),
+      });
+      return null;
+    });
+    const vanscoSync = vanscoSnapshot
+      ? await syncVanscoSentPosts(supabase, vanscoSnapshot)
+      : { inserted: 0, descriptors: [] };
     const todayKey = londonDateKey();
     const result = {
       ok: true,
       checked_at: new Date().toISOString(),
-      synced: sync.inserted,
+      synced: sync.inserted + vanscoSync.inserted,
+      synced_vansco: vanscoSync.inserted,
       matched_manual: sync.matchedManual,
       cleaned_reel_blobs: cleanup.cleaned,
       google_business_channel: googleBusinessChannel
