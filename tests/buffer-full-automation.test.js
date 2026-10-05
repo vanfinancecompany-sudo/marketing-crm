@@ -174,6 +174,9 @@ test("worker uses paid queue headroom while refilling the larger daily target gr
   assert.match(worker, /marketingRent2BuyImages/);
   assert.match(worker, /facebookVehicleImageUrls/);
   assert.match(worker, /imageExtra/);
+  assert.match(worker, /videoExtra/);
+  assert.match(worker, /SAME_DAY_CATCHUP_LATEST_LOCAL_MINUTES = 23 \* 60 \+ 40/);
+  assert.match(worker, /catchUp: true/);
   assert.match(worker, /mediaUrls,/);
   assert.doesNotMatch(worker, /templateKey:\s*["']tiktokPunch["']/);
   assert.doesNotMatch(worker, /shareNow/);
@@ -234,7 +237,10 @@ test("Buffer API window follows London time across BST and winter", () => {
   assert.equal(isBufferScheduledRunDue("two-hour", new Date("2026-09-28T06:05:00Z")), true);
   assert.equal(isBufferScheduledRunDue("two-hour", new Date("2026-09-28T09:05:00Z")), false);
   assert.equal(isBufferScheduledRunDue("vfc-facebook", new Date("2026-09-28T09:05:00Z")), true);
-  assert.equal(isBufferApiActiveWindow(new Date("2026-09-28T21:20:00Z")), false);
+  assert.equal(isBufferApiActiveWindow(new Date("2026-09-28T21:20:00Z")), true);
+  assert.equal(isBufferScheduledRunDue("vfc-facebook", new Date("2026-09-28T21:05:00Z")), true);
+  assert.equal(isBufferScheduledRunDue("two-hour", new Date("2026-09-28T21:05:00Z")), true);
+  assert.equal(isBufferApiActiveWindow(new Date("2026-09-28T22:20:00Z")), false);
   assert.equal(isBufferApiActiveWindow(new Date("2026-12-01T06:05:00Z")), false);
   assert.equal(isBufferApiActiveWindow(new Date("2026-12-01T07:05:00Z")), true);
 });
