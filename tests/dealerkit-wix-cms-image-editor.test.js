@@ -83,6 +83,20 @@ async function confirm(f, draft) {
   return f.service.reconcile({ ...proposal, confirmation: prepared.confirmation, confirmed: true });
 }
 
+test("upload tickets stay compact for large galleries and remain valid at finishUpload", async () => {
+  const largeGallery = Array.from({ length: 38 }, (_, index) =>
+    "https://static.wixstatic.com/media/ea21tsz-" + String(index).padStart(2, "0") + "-" + "x".repeat(160) + ".jpg"
+  );
+  const f = fixture("finance", largeGallery);
+  const prepared = await f.service.prepareUpload({ ...f.input, mimeType: "image/png", sizeInBytes: 1200 });
+  assert.ok(prepared.uploadTicket.length < 2000, "Upload ticket must not scale with the existing gallery size");
+  const fileId = prepared.uploadUrl.split("/").pop();
+  const result = await f.service.finishUpload({ ...f.input, fileId, fileName: prepared.fileName, uploadTicket: prepared.uploadTicket });
+  assert.equal(result.ready, true);
+  assert.equal(result.fileId, fileId);
+  assert.equal(f.writes().length, 0, "Preparing and finishing an upload must not write Wix CMS data");
+});
+
 test("a selected upload batch is inserted ahead of the existing Wix gallery in selection order", async () => {
   const f = fixture("finance");
   const draft = createWixImageDraft(await f.service.load(f.input));
