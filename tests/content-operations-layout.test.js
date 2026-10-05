@@ -16,7 +16,7 @@ test("Content Operations is the single daily marketing page", async () => {
   assert.doesNotMatch(navigation, /label: "Totals"/);
 });
 
-test("Content Operations shows only the five daily activity cards", async () => {
+test("Content Operations renders the full daily placement card set", async () => {
   const page = await read("pages/DashboardPage.jsx");
 
   assert.match(page, /operations-activity-grid/);
@@ -52,15 +52,15 @@ test("Content Operations shows Vansco Buffer posts as a blue-accent live card", 
     read("styles.css"),
   ]);
 
-  assert.match(page, /VANSCO_FACEBOOK_DAILY_TARGET = 30/);
+  assert.match(page, /targetFor\("vansco_facebook_post"\)/);
   assert.match(page, /vanscoStatus\?\.buffer\?\.sentToday/);
   assert.match(page, /type: "vansco_facebook_post"/);
   assert.match(page, /Vansco Facebook posts/);
   assert.match(page, /Vansco 333 Google Business/);
   assert.match(page, /Vansco Airport Google Business/);
   assert.match(page, /Vansco New Forest Google Business/);
-  assert.match(page, /VANSCO_GOOGLE_BUSINESS_DAILY_TARGET = 10/);
-  assert.match(page, /VANSCO_FACEBOOK_STORY_DAILY_TARGET = 5/);
+  assert.match(page, /targetFor\(type\)/);
+  assert.match(page, /targetFor\("vansco_facebook_story"\)/);
   assert.match(page, /Vansco Facebook Stories/);
   assert.match(page, /vanscoStatus\?\.stories\?\.sentToday/);
   assert.match(page, /startsWith\("vansco_"\)/);
@@ -96,4 +96,27 @@ test("Content Operations includes Van Finance Instagram and totals all visible c
   assert.doesNotMatch(page, /overview\?\.day\?\.remaining_total \|\| 0/);
   assert.match(bridge, /Van Finance Instagram:/);
   assert.match(bridge, /Facebook, Instagram and Google Business/);
+});
+test("View Totals and Edit Daily Targets both use the complete placement registry", async () => {
+  const [page, daily] = await Promise.all([
+    read("pages/DashboardPage.jsx"),
+    read("lib/marketingDailyOperations.js"),
+  ]);
+
+  assert.match(page, /DAILY_ACTIVITY_TYPES\.map\(\(type\) =>/);
+  assert.match(page, /<TargetFields/);
+  for (const type of [
+    "van_finance_facebook_story",
+    "van_finance_instagram_post",
+    "van_finance_instagram_story",
+    "van_finance_instagram_reel",
+    "rent2buy_facebook_story",
+    "vansco_facebook_post",
+    "vansco_facebook_story",
+    "vansco_333_google_business_post",
+    "vansco_airport_google_business_post",
+    "vansco_new_forest_google_business_post",
+  ]) {
+    assert.match(daily, new RegExp(type));
+  }
 });

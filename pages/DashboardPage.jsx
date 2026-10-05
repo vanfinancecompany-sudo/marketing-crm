@@ -349,37 +349,48 @@ export default function DashboardPage({ onNavigate }) {
     }
   }
 
+  const baseMetric = (type) => overview?.day?.metrics?.[type] || null;
+  const targetFor = (type) => Math.max(
+    0,
+    Number(
+      overview?.day?.targets?.[type]
+      ?? baseMetric(type)?.target
+      ?? DEFAULT_DAILY_TARGETS[type]
+      ?? 0,
+    ),
+  );
+
   const metrics = useMemo(
     () =>
-      DAILY_ACTIVITY_TYPES.map((type) => overview?.day?.metrics?.[type]).filter(
-        Boolean,
-      ),
+      DAILY_ACTIVITY_TYPES
+        .map((type) => overview?.day?.metrics?.[type])
+        .filter(Boolean),
     [overview],
   );
 
   const facebookStoryMetrics = useMemo(() => {
-    const storyMetric = ({ type, label, productKey, facebookType }) => {
-      const facebookMetric = metrics.find((metric) => metric.type === facebookType);
-      const target = Math.min(
-        FACEBOOK_STORY_DAILY_MAX,
-        Math.max(0, Number(facebookMetric?.target || 0)),
-      );
+    const storyMetric = ({ type, label, productKey }) => {
+      const stored = baseMetric(type);
+      const target = targetFor(type);
       const hasLiveStatus = Boolean(bufferLiveStatus?.today);
-      const completed = Math.max(
+      const liveCompleted = Math.max(
         0,
         Number(bufferLiveStatus?.today?.[productKey]?.stories || 0),
       );
+      const completed = hasLiveStatus
+        ? liveCompleted
+        : Math.max(0, Number(stored?.completed || 0));
       return {
         type,
         label,
         target,
         completed,
-        displayCompleted: hasLiveStatus ? completed : "—",
+        displayCompleted: hasLiveStatus ? completed : stored ? completed : "—",
         remaining: Math.max(0, target - completed),
         percentage: target > 0
           ? Math.min(100, Math.round((completed / target) * 100))
           : 100,
-        statusLabel: !hasLiveStatus
+        statusLabel: !hasLiveStatus && !stored
           ? "CHECKING"
           : completed >= target
             ? "COMPLETE"
@@ -392,109 +403,116 @@ export default function DashboardPage({ onNavigate }) {
         type: "van_finance_facebook_story",
         label: "Van Finance Facebook Stories",
         productKey: "vanFinance",
-        facebookType: "van_finance_facebook_post",
       }),
       storyMetric({
         type: "rent2buy_facebook_story",
         label: "Rent2Buy Facebook Stories",
         productKey: "rent2buy",
-        facebookType: "rent2buy_facebook_post",
       }),
     ];
-  }, [bufferLiveStatus, metrics]);
+  }, [bufferLiveStatus, overview]);
 
   const instagramMetrics = useMemo(() => {
-    const financeFacebook = metrics.find((metric) => metric.type === "van_finance_facebook_post");
-    const financeReel = metrics.find((metric) => metric.type === "van_finance_reel");
     const live = bufferLiveStatus?.today?.vanFinanceInstagram;
     const hasLiveStatus = Boolean(bufferLiveStatus?.today && live);
     const definitions = [
       {
         type: "van_finance_instagram_post",
         label: "Van Finance Instagram posts",
-        target: Math.max(0, Number(financeFacebook?.target || 0)),
         completed: Math.max(0, Number(live?.posts || 0)),
       },
       {
         type: "van_finance_instagram_story",
         label: "Van Finance Instagram Stories",
-        target: Math.min(
-          INSTAGRAM_STORY_DAILY_MAX,
-          Math.max(0, Number(financeFacebook?.target || 0)),
-        ),
         completed: Math.max(0, Number(live?.stories || 0)),
       },
       {
         type: "van_finance_instagram_reel",
         label: "Van Finance Instagram Reels",
-        target: Math.max(0, Number(financeReel?.target || 0)),
         completed: Math.max(0, Number(live?.reels || 0)),
       },
     ];
 
-    return definitions.map((item) => ({
-      ...item,
-      displayCompleted: hasLiveStatus ? item.completed : "—",
-      remaining: Math.max(0, item.target - item.completed),
-      percentage: item.target > 0
-        ? Math.min(100, Math.round((item.completed / item.target) * 100))
-        : 100,
-      statusLabel: !hasLiveStatus
-        ? "CHECKING"
-        : item.completed >= item.target
-          ? "COMPLETE"
-          : `${Math.max(0, item.target - item.completed)} LEFT`,
-    }));
-  }, [bufferLiveStatus, metrics]);
+    return definitions.map((item) => {
+      const stored = baseMetric(item.type);
+      const target = targetFor(item.type);
+      const completed = hasLiveStatus
+        ? item.completed
+        : Math.max(0, Number(stored?.completed || 0));
+      return {
+        ...item,
+        target,
+        completed,
+        displayCompleted: hasLiveStatus ? completed : stored ? completed : "—",
+        remaining: Math.max(0, target - completed),
+        percentage: target > 0
+          ? Math.min(100, Math.round((completed / target) * 100))
+          : 100,
+        statusLabel: !hasLiveStatus && !stored
+          ? "CHECKING"
+          : completed >= target
+            ? "COMPLETE"
+            : `${Math.max(0, target - completed)} LEFT`,
+      };
+    });
+  }, [bufferLiveStatus, overview]);
 
   const vanscoMetric = useMemo(() => {
-    const completed = Math.max(0, Number(vanscoStatus?.buffer?.sentToday || 0));
-    const unavailable = Boolean(vanscoStatusError) && !vanscoStatus;
-    const checking = vanscoStatusBusy && !vanscoStatus;
+    const stored = baseMetric("vansco_facebook_post");
+    const liveAvailable = Boolean(vanscoStatus?.buffer);
+    const completed = liveAvailable
+      ? Math.max(0, Number(vanscoStatus?.buffer?.sentToday || 0))
+      : Math.max(0, Number(stored?.completed || 0));
+    const target = targetFor("vansco_facebook_post");
+    const unavailable = Boolean(vanscoStatusError) && !vanscoStatus && !stored;
+    const checking = vanscoStatusBusy && !vanscoStatus && !stored;
     return {
       type: "vansco_facebook_post",
-      target: VANSCO_FACEBOOK_DAILY_TARGET,
+      target,
       completed,
       displayCompleted: unavailable || checking ? "—" : completed,
-      remaining: Math.max(0, VANSCO_FACEBOOK_DAILY_TARGET - completed),
-      percentage: Math.min(
-        100,
-        Math.round((completed / VANSCO_FACEBOOK_DAILY_TARGET) * 100),
-      ),
+      remaining: Math.max(0, target - completed),
+      percentage: target > 0
+        ? Math.min(100, Math.round((completed / target) * 100))
+        : 100,
       statusLabel: unavailable
         ? "UNAVAILABLE"
         : checking
           ? "CHECKING"
-          : completed >= VANSCO_FACEBOOK_DAILY_TARGET
+          : completed >= target
             ? "COMPLETE"
-            : `${Math.max(0, VANSCO_FACEBOOK_DAILY_TARGET - completed)} LEFT`,
+            : `${Math.max(0, target - completed)} LEFT`,
     };
-  }, [vanscoStatus, vanscoStatusBusy, vanscoStatusError]);
+  }, [vanscoStatus, vanscoStatusBusy, vanscoStatusError, overview]);
 
   const vanscoStoryMetric = useMemo(() => {
-    const completed = Math.max(0, Number(vanscoStatus?.stories?.sentToday || 0));
-    const unavailable = Boolean(vanscoStatusError) && !vanscoStatus;
-    const checking = vanscoStatusBusy && !vanscoStatus;
+    const stored = baseMetric("vansco_facebook_story");
+    const liveAvailable = Boolean(vanscoStatus?.stories);
+    const completed = liveAvailable
+      ? Math.max(0, Number(vanscoStatus?.stories?.sentToday || 0))
+      : Math.max(0, Number(stored?.completed || 0));
+    const target = targetFor("vansco_facebook_story");
+    const unavailable = Boolean(vanscoStatusError) && !vanscoStatus && !stored;
+    const checking = vanscoStatusBusy && !vanscoStatus && !stored;
     return {
       type: "vansco_facebook_story",
       label: "Vansco Facebook Stories",
-      target: VANSCO_FACEBOOK_STORY_DAILY_TARGET,
+      target,
       completed,
       displayCompleted: unavailable || checking ? "—" : completed,
-      remaining: Math.max(0, VANSCO_FACEBOOK_STORY_DAILY_TARGET - completed),
-      percentage: Math.min(
-        100,
-        Math.round((completed / VANSCO_FACEBOOK_STORY_DAILY_TARGET) * 100),
-      ),
+      remaining: Math.max(0, target - completed),
+      percentage: target > 0
+        ? Math.min(100, Math.round((completed / target) * 100))
+        : 100,
       statusLabel: unavailable
         ? "UNAVAILABLE"
         : checking
           ? "CHECKING"
-          : completed >= VANSCO_FACEBOOK_STORY_DAILY_TARGET
+          : completed >= target
             ? "COMPLETE"
-            : `${Math.max(0, VANSCO_FACEBOOK_STORY_DAILY_TARGET - completed)} LEFT`,
+            : `${Math.max(0, target - completed)} LEFT`,
     };
-  }, [vanscoStatus, vanscoStatusBusy, vanscoStatusError]);
+  }, [vanscoStatus, vanscoStatusBusy, vanscoStatusError, overview]);
 
   const vanscoGoogleMetrics = useMemo(() => {
     const checking = vanscoStatusBusy && !vanscoStatus;
@@ -519,60 +537,54 @@ export default function DashboardPage({ onNavigate }) {
     ];
 
     return definitions.map(({ type, label, branchKey }) => {
+      const stored = baseMetric(type);
       const branchStatus = google?.branches?.[branchKey];
       const unavailable = statusUnavailable
         || (Boolean(vanscoStatus) && (!google?.connected || !branchStatus));
-      const completed = Math.max(0, Number(branchStatus?.sentToday || 0));
+      const liveAvailable = Boolean(branchStatus);
+      const completed = liveAvailable
+        ? Math.max(0, Number(branchStatus?.sentToday || 0))
+        : Math.max(0, Number(stored?.completed || 0));
+      const target = targetFor(type);
       return {
         type,
         label,
-        target: VANSCO_GOOGLE_BUSINESS_DAILY_TARGET,
+        target,
         completed,
-        displayCompleted: unavailable || checking ? "—" : completed,
-        remaining: Math.max(0, VANSCO_GOOGLE_BUSINESS_DAILY_TARGET - completed),
-        percentage: Math.min(
-          100,
-          Math.round((completed / VANSCO_GOOGLE_BUSINESS_DAILY_TARGET) * 100),
-        ),
-        statusLabel: unavailable
-          ? "UNAVAILABLE"
-          : checking
-            ? "CHECKING"
-            : completed >= VANSCO_GOOGLE_BUSINESS_DAILY_TARGET
-              ? "COMPLETE"
-              : `${Math.max(0, VANSCO_GOOGLE_BUSINESS_DAILY_TARGET - completed)} LEFT`,
+        displayCompleted: (unavailable || checking) && !stored ? "—" : completed,
+        remaining: Math.max(0, target - completed),
+        percentage: target > 0
+          ? Math.min(100, Math.round((completed / target) * 100))
+          : 100,
+        statusLabel: (unavailable || checking) && !stored
+          ? unavailable ? "UNAVAILABLE" : "CHECKING"
+          : completed >= target
+            ? "COMPLETE"
+            : `${Math.max(0, target - completed)} LEFT`,
       };
     });
-  }, [vanscoStatus, vanscoStatusBusy, vanscoStatusError]);
+  }, [vanscoStatus, vanscoStatusBusy, vanscoStatusError, overview]);
 
   const displayMetrics = useMemo(() => {
-    const [financeStoryMetric, rent2buyStoryMetric] = facebookStoryMetrics;
-    const next = [];
-    let vanscoInserted = false;
-
-    for (const metric of metrics) {
-      next.push(metric);
-      if (metric.type === "van_finance_facebook_post") {
-        next.push(financeStoryMetric, ...instagramMetrics);
-      }
-      if (metric.type === "rent2buy_facebook_post") {
-        next.push(rent2buyStoryMetric, vanscoMetric, vanscoStoryMetric, ...vanscoGoogleMetrics);
-        vanscoInserted = true;
-      }
-    }
-
-    if (!vanscoInserted) {
-      next.push(vanscoMetric, vanscoStoryMetric, ...vanscoGoogleMetrics);
-    }
-    return next;
+    const live = new Map([
+      ...facebookStoryMetrics.map((metric) => [metric.type, metric]),
+      ...instagramMetrics.map((metric) => [metric.type, metric]),
+      [vanscoMetric.type, vanscoMetric],
+      [vanscoStoryMetric.type, vanscoStoryMetric],
+      ...vanscoGoogleMetrics.map((metric) => [metric.type, metric]),
+    ]);
+    return DAILY_ACTIVITY_TYPES
+      .map((type) => live.get(type) || overview?.day?.metrics?.[type])
+      .filter(Boolean);
   }, [
-    metrics,
+    overview,
     facebookStoryMetrics,
     instagramMetrics,
     vanscoMetric,
     vanscoStoryMetric,
     vanscoGoogleMetrics,
   ]);
+
 
   const operationsSummary = useMemo(() => {
     const active = displayMetrics.filter((metric) => Number(metric?.target || 0) > 0);

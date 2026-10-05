@@ -1,6 +1,7 @@
 import {
   bufferDormantPayload,
   isBufferScheduledRunDue,
+  londonMinutesOfDay,
 } from "../lib/bufferActiveWindow.js";
 import {
   BUFFER_API_URL,
@@ -35,6 +36,8 @@ const STORY_LOCAL_MINUTES = [10 * 60 + 15, 14 * 60 + 15, 18 * 60 + 15];
 const RENT2BUY_OFFSET_MINUTES = 10;
 const MIN_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 const STORY_LOOKAHEAD_MS = 5 * 60 * 60 * 1000;
+const SAME_DAY_STORY_CATCHUP_STEP_MINUTES = 10;
+const SAME_DAY_STORY_CATCHUP_LATEST_LOCAL_MINUTES = 23 * 60 + 30;
 
 const POSTS_QUERY = `
   query GetFacebookStoryAutomationPosts {
@@ -219,11 +222,48 @@ function storySlotForRun(posts, productKey, dateKey, now, storyTarget) {
       && !occupied.has(candidate.dueAt);
   }) || null;
 
+  if (slot) {
+    return {
+      slot,
+      existing: existingStories.length,
+      target: storyTarget,
+      reason: "ready",
+    };
+  }
+
+  const missed = slots.filter(
+    (candidate) => new Date(candidate.dueAt).getTime() <= now + MIN_SCHEDULE_LEAD_MS,
+  ).length;
+  if (missed > 0) {
+    const leadMinutes = Math.ceil(MIN_SCHEDULE_LEAD_MS / 60000);
+    let localMinutes = londonMinutesOfDay(new Date(now)) + leadMinutes;
+    localMinutes = Math.ceil(localMinutes / SAME_DAY_STORY_CATCHUP_STEP_MINUTES)
+      * SAME_DAY_STORY_CATCHUP_STEP_MINUTES;
+    while (localMinutes <= SAME_DAY_STORY_CATCHUP_LATEST_LOCAL_MINUTES) {
+      const dueAt = londonLocalMinutesToUtcIso(dateKey, localMinutes);
+      if (!occupied.has(dueAt)) {
+        return {
+          slot: {
+            index: slots.length,
+            dueAt,
+            localMinutes,
+            localTime: `${String(Math.floor(localMinutes / 60)).padStart(2, "0")}:${String(localMinutes % 60).padStart(2, "0")}`,
+            catchUp: true,
+          },
+          existing: existingStories.length,
+          target: storyTarget,
+          reason: "same_day_catch_up",
+        };
+      }
+      localMinutes += SAME_DAY_STORY_CATCHUP_STEP_MINUTES;
+    }
+  }
+
   return {
-    slot,
+    slot: null,
     existing: existingStories.length,
     target: storyTarget,
-    reason: slot ? "ready" : "no_story_slot_due_soon",
+    reason: "no_story_slot_due_soon",
   };
 }
 
@@ -306,6 +346,7 @@ async function createNextStory({ posts, productKey, dateKey, now, storyTarget })
     dueAt: post.dueAt || slotInfo.slot.dueAt,
     localTime: slotInfo.slot.localTime,
     publishing: "automatic",
+    catchUp: Boolean(slotInfo.slot.catchUp),
   };
 }
 
@@ -364,9 +405,28 @@ export default async function handler(request, response) {
       const storyTarget = facebookStoryTargetForProduct(automationConfig, productKey);
       storyTargets[productKey] = storyTarget;
       facebookTargets[productKey] = facebookPostTargetForProduct(automationConfig, productKey);
-      results[productKey] = await safeStep(productKey, () =>
+
+      const first = await safeStep(productKey, () =>
         createNextStory({ posts, productKey, dateKey, now, storyTarget }),
       );
+      const additional = [];
+
+      // During a catch-up window, fill every remaining Story slot we safely can
+      // while Buffer still has channel headroom. Normal daytime runs remain one
+      // Story at a time.
+      if (first?.created && first?.catchUp) {
+        while (storyPostsForDay(posts, productKey, dateKey).length < storyTarget) {
+          const next = await safeStep(`${productKey} Story catch-up`, () =>
+            createNextStory({ posts, productKey, dateKey, now, storyTarget }),
+          );
+          if (!next?.created) break;
+          additional.push(next);
+        }
+      }
+
+      results[productKey] = additional.length
+        ? { ...first, additional, createdCount: 1 + additional.length }
+        : first;
     }
 
     response.status(200).json({

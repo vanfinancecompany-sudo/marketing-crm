@@ -42,9 +42,11 @@ test("maps Buffer channels, registrations and media kinds correctly", () => {
     metadata: { type: "story" },
     assets: [{ mimeType: "image/jpeg" }],
   }), "story");
-  assert.equal(bufferPublishedActivityType("Van Finance Facebook", "story"), "");
-  assert.equal(bufferPublishedActivityType("Rent2Buy Facebook", "story"), "");
-  assert.equal(bufferPublishedActivityType("Van Finance Instagram", "image"), "");
+  assert.equal(bufferPublishedActivityType("Van Finance Facebook", "story"), "van_finance_facebook_story");
+  assert.equal(bufferPublishedActivityType("Rent2Buy Facebook", "story"), "rent2buy_facebook_story");
+  assert.equal(bufferPublishedActivityType("Van Finance Instagram", "image"), "van_finance_instagram_post");
+  assert.equal(bufferPublishedActivityType("Van Finance Instagram", "story"), "van_finance_instagram_story");
+  assert.equal(bufferPublishedActivityType("Van Finance Instagram", "video"), "van_finance_instagram_reel");
 });
 
 test("only counts marked Google Business vehicle automation posts", () => {
@@ -141,4 +143,7 @@ test("client surfaces live Buffer confirmation in all three CRM areas", async ()
   assert.match(endpoint, /loadVanscoAutomationStatus/);
   assert.match(endpoint, /providerSent/);
   assert.match(endpoint, /withVanscoToday/);
+  assert.match(endpoint, /syncVanscoSentPosts/);
+  assert.match(endpoint, /vansco-buffer:/);
+  assert.match(endpoint, /vansco_333_google_business_post/);
 });
