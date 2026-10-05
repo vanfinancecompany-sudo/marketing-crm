@@ -221,7 +221,7 @@ async function loadMarketplaceWixGallery(registration, pipeline) {
   let snapshot;
   try {
     const response = await fetch(
-      `/api/wix-advert-images?registration=${encodeURIComponent(registration)}&pipeline=${pipeline}`,
+      `/api/wix-advert-images?registration=${encodeURIComponent(registration)}&pipeline=${pipeline}&mode=marketplace-gallery`,
       { method: "GET", cache: "no-store", headers: buildMarketingAccessHeaders({ Accept: "application/json" }),
         signal: AbortSignal.timeout(30000) },
     );
@@ -232,8 +232,8 @@ async function loadMarketplaceWixGallery(registration, pipeline) {
     }
     throw new Error(`Marketplace preflight failed: Wix read/API failed for the ${label} gallery. ${error.message}`);
   }
-  // The server verifies exact published listing/detail identities. Keep that
-  // scope intact rather than matching a cached CMS title or another stock lane.
+  // Marketplace needs the authoritative published detail gallery only. The
+  // Wix editor's stricter listing + detail identity checks remain unchanged.
   if (normalizeRegistration(snapshot.registration) !== registration || snapshot.pipeline !== pipeline
     || snapshot.detailCollection !== lane.detail || snapshot.galleryField !== lane.gallery) {
     throw new Error("Marketplace preflight failed: Wix gallery identity did not match the selected vehicle/lane.");
