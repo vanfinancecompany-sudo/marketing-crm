@@ -89,7 +89,7 @@ async function queryRows(configuration, request, collection, registration, optio
     }));
     const unknown = classified.filter((item) => !["PUBLISHED", "DRAFT"].includes(item.status));
     if (unknown.length) {
-      throw new WixImageEditorError(409, "The Wix category publication state in " + collection + " could not be verified. No images were changed.");
+      throw new WixImageEditorError(409, "The Wix category in " + collection + " could not be verified as published. No images were changed.");
     }
     const published = classified.filter((item) => item.status === "PUBLISHED");
     if (published.length === 0) return null;
