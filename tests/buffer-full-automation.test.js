@@ -116,6 +116,9 @@ test("Facebook Story worker uses Buffer automatic publishing with story metadata
   assert.match(storyWorker, /FacebookPostMetadata/);
   assert.match(storyWorker, /CHANNEL_QUEUE_LIMIT = 35/);
   assert.match(storyWorker, /10 \* 60 \+ 15, 14 \* 60 \+ 15, 18 \* 60 \+ 15/);
+  assert.match(storyWorker, /SAME_DAY_STORY_CATCHUP_LATEST_LOCAL_MINUTES = 23 \* 60 \+ 30/);
+  assert.match(storyWorker, /same_day_catch_up/);
+  assert.match(storyWorker, /createdCount/);
 });
 
 test("London schedule conversion handles BST and winter correctly", () => {
@@ -225,7 +228,7 @@ test("Vercel runs Buffer jobs at quota-safe cadence across all paid channels", (
   assert.equal(schedules.get("/api/buffer-facebook-automation-cron"), "5 6-22 * * *");
   assert.equal(schedules.has("/api/buffer-facebook-automation-worker"), false);
   assert.equal(schedules.get("/api/buffer-facebook-story-automation"), "25 6-22 * * *");
-  assert.equal(schedules.get("/api/buffer-instagram-mirror"), "14 6-22 * * *");
+  assert.equal(schedules.get("/api/buffer-instagram-mirror"), "40 6-22 * * *");
   assert.equal(schedules.get("/api/buffer-publish-status"), "5,25,45 6-22 * * *");
   assert.equal(schedules.get("/api/vansco-facebook-automation-worker"), "11 6-22 * * *");
   assert.equal(schedules.get("/api/vansco-facebook-story-automation-worker"), "31 6-22 * * *");
