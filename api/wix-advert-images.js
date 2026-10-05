@@ -82,7 +82,7 @@ async function queryRows(configuration, request, collection, registration, optio
   }
   const rows = [...byId.values()];
   if (optional) {
-    if (rows.length === 0) return null;
+    if (rows.length === 0) return [];
     const classified = rows.map((row) => ({
       row,
       status: clean(row.data?._publishStatus || row._publishStatus).toUpperCase(),
@@ -91,12 +91,7 @@ async function queryRows(configuration, request, collection, registration, optio
     if (unknown.length) {
       throw new WixImageEditorError(409, "The Wix category in " + collection + " could not be verified as published. No images were changed.");
     }
-    const published = classified.filter((item) => item.status === "PUBLISHED");
-    if (published.length === 0) return null;
-    if (published.length !== 1) {
-      throw new WixImageEditorError(409, "The Wix category identity in " + collection + " is ambiguous. No images were changed.");
-    }
-    return published[0].row;
+    return classified.filter((item) => item.status === "PUBLISHED").map((item) => item.row);
   }
   if (rows.length !== 1) {
     throw new WixImageEditorError(409, "The Wix listing/detail identity is missing or ambiguous. No images were changed.");
@@ -211,15 +206,18 @@ export function createWixAdvertImageService({ environment = process.env, request
   async function finishUpload(input) {
     const scope = scopeFor(input);
     await loadSnapshot(input);
+    const file = await uploadedFile(scope, clean(input.fileId));
     let expectedFileName = "";
     if (typeof input.uploadTicket === "string" && input.uploadTicket) {
       expectedFileName = readToken(input.uploadTicket, secret, "upload", scope).fileName;
     } else {
-      expectedFileName = generatedUploadNameForScope(scope, input.fileName);
+      expectedFileName = generatedUploadNameForScope(scope, file.displayName);
       if (!expectedFileName) throw new WixImageEditorError(409, "Wix image confirmation is missing or invalid.");
-      emit("upload_ticket_recovered", { ...logScope, method: "verified_generated_filename" });
+      if (clean(input.fileName) && clean(input.fileName) !== file.displayName) {
+        throw new WixImageEditorError(409, "This uploaded image does not belong to this vehicle/lane.");
+      }
+      emit("upload_ticket_recovered", { ...logScope, method: "verified_wix_generated_filename" });
     }
-    const file = await uploadedFile(scope, clean(input.fileId));
     if (file.displayName !== expectedFileName) throw new WixImageEditorError(409, "This uploaded image does not belong to this vehicle/lane.");
     if (file.operationStatus !== "READY") return { ready: false, fileId: file.id, status: file.operationStatus || "UNKNOWN" };
     return { ready: true, fileId: file.id, url: file.url, token: ticket({ fileId: file.id, url: file.url }, "uploaded_image", scope, 24 * 60 * 60 * 1000) };
@@ -233,28 +231,38 @@ export function createWixAdvertImageService({ environment = process.env, request
     const snapshot = await loadSnapshot(input);
     const categories = await Promise.all(Object.entries(WIX_ADVERT_CATEGORY_IMAGE_FIELDS[snapshot.pipeline])
       .map(async ([collection, field]) => {
-        const row = await queryRows(configuration, request, collection, snapshot.registration, true);
-        return row ? { collection, id: row.id, fields: { [field]: fieldState(row.data, field) } } : null;
+        const categoryRows = await queryRows(configuration, request, collection, snapshot.registration, true);
+        return categoryRows.map((row) => ({ collection, id: row.id, fields: { [field]: fieldState(row.data, field) } }));
       }));
     const rows = [
       { collection: snapshot.detailCollection, id: snapshot.detailId,
         fields: { [snapshot.galleryField]: { exists: true, value: snapshot.gallery }, [snapshot.countField]: snapshot.imageCount } },
       { collection: snapshot.listingCollection, id: snapshot.listingId, fields: { picture: snapshot.listingImage } },
-      ...categories.filter(Boolean),
+      ...categories.flat(),
     ];
     return { snapshot, rows };
   }
 
   function destinationsFor({ snapshot, rows }, selected) {
-    return rows.filter((row) => row.collection !== snapshot.detailCollection).map((row) => ({
-      collectionId: row.collection, itemId: row.id, label: WIX_ADVERT_SECTION_LABELS[row.collection] || row.collection,
-      imageField: Object.keys(row.fields)[0], required: row.collection === snapshot.listingCollection,
-      currentImage: Object.values(row.fields)[0].value || "", selected: !selected || selected.includes(row.collection),
+    const byCollection = new Map();
+    for (const row of rows.filter((item) => item.collection !== snapshot.detailCollection)) {
+      if (!byCollection.has(row.collection)) byCollection.set(row.collection, []);
+      byCollection.get(row.collection).push(row);
+    }
+    return [...byCollection.entries()].map(([collection, collectionRows]) => ({
+      collectionId: collection,
+      itemId: collectionRows[0].id,
+      itemIds: collectionRows.map((row) => row.id),
+      label: WIX_ADVERT_SECTION_LABELS[collection] || collection,
+      imageField: Object.keys(collectionRows[0].fields)[0],
+      required: collection === snapshot.listingCollection,
+      currentImage: Object.values(collectionRows[0].fields)[0].value || "",
+      selected: !selected || selected.includes(collection),
     }));
   }
 
   function selectedDestinations(input, { snapshot, rows }) {
-    const available = rows.filter((row) => row.collection !== snapshot.detailCollection).map((row) => row.collection);
+    const available = [...new Set(rows.filter((row) => row.collection !== snapshot.detailCollection).map((row) => row.collection))];
     const selected = input.selectedDestinations ?? available;
     if (!Array.isArray(selected) || selected.some((id) => typeof id !== "string" || !available.includes(id))
       || new Set(selected).size !== selected.length || !selected.includes(snapshot.listingCollection)) {
