@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   bufferDormantPayload,
   isBufferScheduledRunDue,
+  londonMinutesOfDay,
 } from "../lib/bufferActiveWindow.js";
 import { loadBufferAutomationConfig } from "../lib/bufferAutomationConfig.js";
 import {
@@ -56,6 +57,8 @@ export const config = { maxDuration: 300 };
 const ACCESS_HEADER = "x-marketing-customer-database-key";
 const PRODUCTS = ["vanFinance", "rent2buy"];
 const MIN_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
+const SAME_DAY_CATCHUP_STEP_MINUTES = 10;
+const SAME_DAY_CATCHUP_LATEST_LOCAL_MINUTES = 23 * 60 + 40;
 const REEL_COOLDOWN_MS = 48 * 60 * 60 * 1000;
 const CHANNEL_QUEUE_LIMIT = 35;
 const PUBLIC_PRODUCTION_ORIGIN = "https://marketing-crm-six.vercel.app";
@@ -251,20 +254,57 @@ function nextFutureSlot({ posts, automationConfig, productKey, dateKey, mediaKin
   const slots = bufferAutomationSlots(automationConfig, productKey, dateKey).filter(
     (slot) => slot.mediaKind === mediaKind,
   );
-  const existingPosts = postsForProduct(posts, productKey).filter(
-    (post) => liveOrReserved(post) && bufferPostDateKey(post) === dateKey && bufferPostMediaKind(post) === mediaKind,
+  const productPosts = postsForProduct(posts, productKey).filter(
+    (post) => liveOrReserved(post) && bufferPostDateKey(post) === dateKey,
+  );
+  const existingPosts = productPosts.filter(
+    (post) => bufferPostMediaKind(post) === mediaKind,
   );
   const existing = existingPosts.length;
   const missed = slots.filter((slot) => new Date(slot.dueAt).getTime() <= now + MIN_SCHEDULE_LEAD_MS).length;
   if (existing >= slots.length) return { slot: null, existing, missed, target: slots.length };
 
-  const occupiedDueAt = new Set(existingPosts.map(postDueIso).filter(Boolean));
-  const slot = slots.find(
+  const occupiedDueAt = new Set(productPosts.map(postDueIso).filter(Boolean));
+  const regularSlot = slots.find(
     (candidate) =>
       new Date(candidate.dueAt).getTime() > now + MIN_SCHEDULE_LEAD_MS &&
       !occupiedDueAt.has(candidate.dueAt),
   ) || null;
-  return { slot, existing, missed, target: slots.length };
+  if (regularSlot) return { slot: regularSlot, existing, missed, target: slots.length };
+
+  // A failed earlier render/API call should not force today's missing placement
+  // into tomorrow. If Buffer still has queue room, create a short catch-up slot
+  // later the same UK day, capped at 23:40 so Instagram's 10-minute mirror also
+  // remains before midnight.
+  if (missed > 0) {
+    const leadMinutes = Math.ceil(MIN_SCHEDULE_LEAD_MS / 60000);
+    let localMinutes = londonMinutesOfDay(new Date(now)) + leadMinutes;
+    localMinutes = Math.ceil(localMinutes / SAME_DAY_CATCHUP_STEP_MINUTES) * SAME_DAY_CATCHUP_STEP_MINUTES;
+    while (localMinutes <= SAME_DAY_CATCHUP_LATEST_LOCAL_MINUTES) {
+      const dueAt = londonLocalMinutesToUtcIso(dateKey, localMinutes);
+      if (!occupiedDueAt.has(dueAt)) {
+        return {
+          slot: {
+            index: slots.length,
+            productKey,
+            mediaKind,
+            localMinutes,
+            localTime: `${String(Math.floor(localMinutes / 60)).padStart(2, "0")}:${String(localMinutes % 60).padStart(2, "0")}`,
+            dueAt,
+            key: `${productKey}:${dateKey}:catchup:${mediaKind}:${localMinutes}`,
+            catchUp: true,
+          },
+          existing,
+          missed,
+          target: slots.length,
+          catchUp: true,
+        };
+      }
+      localMinutes += SAME_DAY_CATCHUP_STEP_MINUTES;
+    }
+  }
+
+  return { slot: null, existing, missed, target: slots.length };
 }
 
 function normalizeReg(value) {
@@ -841,6 +881,19 @@ export default async function handler(request, response) {
           now,
         }),
       );
+      if (results[productKey].video?.created) {
+        results[productKey].videoExtra = await safeStep(`${productKey} catch-up Reel`, () =>
+          createNextReel({
+            request,
+            supabase,
+            posts,
+            automationConfig,
+            productKey,
+            dateKey,
+            now,
+          }),
+        );
+      }
     }
 
     results.googleBusiness = await safeStep("Google Business vehicle posts", async () => {
