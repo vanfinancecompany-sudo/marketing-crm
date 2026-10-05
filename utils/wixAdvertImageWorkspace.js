@@ -179,7 +179,10 @@ export async function uploadImages(state, files) {
     const response = await fetch(prepared.uploadUrl, { method: "PUT", headers: { "Content-Type": prepared.mimeType }, body: file });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.file?.id) throw new Error(`Wix Media did not return a verified file ID for ${file.name || "one selected image"}.`);
-    return { fileId: payload.file.id, uploadTicket: prepared.uploadTicket };
+    if (!prepared.uploadUrl || !prepared.mimeType || !prepared.fileName) {
+      throw new Error(`Wix did not return a complete upload session for ${file.name || "one selected image"}.`);
+    }
+    return { fileId: payload.file.id, fileName: prepared.fileName, uploadTicket: prepared.uploadTicket };
   }));
   await finishUploads(state);
 }
