@@ -64,7 +64,7 @@ class ReviewEvent { constructor(type, options = {}) { this.type = type; this.det
 
 
 
-async function clients(pipeline) {
+async function clients(pipeline, gallery = urls) {
   const document = new Node("document");
   document.createElement = (tag) => new Node(tag);
   document.body = new Node("body"); document.body.connected = true; document.appendChild(document.body);
@@ -76,53 +76,71 @@ async function clients(pipeline) {
     ? [{ collectionId: "VANFINANCE-SMALLVANS", label: "Small Vans", imageField: "picture" }, { collectionId: "AUTOMATIC", label: "Automatic", imageField: "picture" }]
     : pipeline === "rent2buy"
       ? [{ collectionId: "CREWVANS", label: "Crew Vans", imageField: "image" }, { collectionId: "SmallVans", label: "Small Vans", imageField: "picture" }] : [];
-  let snapshot = { registration, pipeline, baseline: "live-baseline-" + pipeline, gallery: [...urls], picture: urls[0], title: "Published Ford Transit Custom",
-    priceText: "£18,995", advertUrl: "https://live.example/" + pipeline, imageCount: { exists: true, value: "2" },
+  let snapshot = { registration, pipeline, baseline: "live-baseline-" + pipeline, gallery: [...gallery], picture: gallery[0], title: "Published Ford Transit Custom",
+    priceText: "£18,995", advertUrl: "https://live.example/" + pipeline, imageCount: { exists: true, value: String(gallery.length) },
     listingId: "listing", detailId: "detail", listingCollection: lane.listing, detailCollection: lane.detail, galleryField: lane.gallery,
     galleryDestination: { collectionId: lane.detail, itemId: "detail", field: lane.gallery, label: lane.label + " vehicle gallery" },
     destinations: [{ collectionId: lane.listing, label: pipeline === "cars" ? "Car Finance" : "All Vans", imageField: "picture", required: true }, ...extra]
       .map((item, index) => ({ ...item, itemId: "row-" + index, selected: true, currentImage: urls[0] })),
   };
   const calls = [];
-  const control = { fail: {}, unverified: false, reloadMismatch: false, reloadFailure: false, processing: false, beforeAction: null };
-  let submitted = false;
+  const control = { fail: {}, unverified: false, savedMismatch: false, missingSnapshot: false, processing: false, beforeAction: null };
+  const media = new Map();
+  let uploadCount = 0;
   const fetch = async (url, options = {}) => {
-    if (url === "https://upload.example/signed") { calls.push({ url, method: options.method }); return { ok: true, json: async () => ({ file: { id: "new-file" } }) }; }
+    if (url.startsWith("https://upload.example/signed")) {
+      const index = Number(new URL(url).searchParams.get("file") || 1);
+      const fileId = "new-file-" + index;
+      media.set(fileId, index === 1 ? uploadUrl : uploadUrl.replace(".jpg", "-" + index + ".jpg"));
+      calls.push({ url, method: options.method, fileName: options.body.name });
+      return { ok: true, json: async () => ({ file: { id: fileId } }) };
+    }
     assert.equal(url, "/api/wix-advert-images", "The maintenance UI must never call DealerKit, CRM or review decisions");
     const body = JSON.parse(options.body); calls.push({ url, ...body });
     assert.equal(body.pipeline, pipeline); assert.equal(body.registration, registration);
+    if (control.hangAction === body.action) await new Promise((resolve, reject) => {
+      options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+    });
     if (control.beforeAction) await control.beforeAction(body);
     if (control.fail[body.action]) return { ok: false, status: 409, json: async () => ({ ok: false, message: control.fail[body.action] }) };
     let result;
     if (body.action === "load") {
-      if (submitted && control.reloadFailure) return { ok: false, status: 502, json: async () => ({ ok: false, message: "Wix identity read is incomplete." }) };
-      result = { ...snapshot, gallery: submitted && control.reloadMismatch ? [...snapshot.gallery].reverse() : [...snapshot.gallery] };
+      result = { ...snapshot, gallery: [...snapshot.gallery], destinations: snapshot.destinations.filter((item) => item.required) };
     }
-    else if (body.action === "prepareUpload") result = { uploadUrl: "https://upload.example/signed", mimeType: body.mimeType, uploadTicket: "lane-upload-ticket" };
+    else if (body.action === "prepareUpload") {
+      uploadCount += 1;
+      result = { uploadUrl: "https://upload.example/signed?file=" + uploadCount, mimeType: body.mimeType,
+        fileName: "server-generated-" + uploadCount + ".jpg", uploadTicket: "lane-upload-ticket-" + uploadCount };
+    }
     else if (body.action === "finishUpload") result = control.processing ? { ready: false, status: "PROCESSING" }
-      : { ready: true, fileId: "new-file", url: uploadUrl, token: "new-image-token" };
+      : { ready: true, fileId: body.fileId, url: media.get(body.fileId), token: body.fileId };
     else if (body.action === "prepare") {
-      const gallery = body.images.map((image) => image.kind === "existing" ? snapshot.gallery[image.index] : uploadUrl);
-      result = { confirmation: "confirmed-gallery", gallery, picture: gallery[0], galleryDestination: snapshot.galleryDestination,
-        destinations: snapshot.destinations.map((item) => ({ ...item, selected: body.selectedDestinations.includes(item.collectionId) })) };
+      const gallery = body.images.map((image) => image.kind === "existing" ? snapshot.gallery[image.index] : media.get(image.token));
+      const primaryChanged = gallery[0] !== snapshot.gallery[0];
+      result = { confirmation: "confirmed-gallery", gallery, picture: gallery[0], primaryChanged, currentPicture: snapshot.picture, galleryDestination: snapshot.galleryDestination,
+        destinations: snapshot.destinations.filter((item) => primaryChanged || item.required)
+          .map((item) => ({ ...item, selected: !body.selectedDestinations || body.selectedDestinations.includes(item.collectionId) })) };
     }
     else if (body.action === "reconcile") {
       assert.equal(body.confirmed, true); assert.equal(body.confirmRegistration, undefined, "No registration typing is required");
       assert.equal(body.confirmation, "confirmed-gallery");
-      const gallery = body.images.map((image) => image.kind === "existing" ? snapshot.gallery[image.index] : uploadUrl);
-      snapshot = { ...snapshot, gallery, picture: gallery[0], baseline: "updated-baseline", imageCount: { exists: true, value: String(gallery.length) },
-        destinations: snapshot.destinations.map((item) => body.selectedDestinations.includes(item.collectionId) ? { ...item, currentImage: gallery[0] } : item) };
-      submitted = true;
-      result = { verified: !control.unverified, snapshot };
+      const gallery = body.images.map((image) => image.kind === "existing" ? snapshot.gallery[image.index] : media.get(image.token));
+      const primaryChanged = gallery[0] !== snapshot.gallery[0];
+      snapshot = { ...snapshot, gallery, picture: primaryChanged ? gallery[0] : snapshot.picture, baseline: "updated-baseline", imageCount: { exists: true, value: String(gallery.length) },
+        destinations: snapshot.destinations.map((item) => primaryChanged ? { ...item, currentImage: gallery[0] } : item) };
+      result = { verified: !control.unverified, snapshot: control.missingSnapshot ? undefined
+        : { ...snapshot, gallery: control.savedMismatch ? [...snapshot.gallery].reverse() : snapshot.gallery,
+          destinations: snapshot.destinations.filter((item) => primaryChanged || item.required) } };
     } else throw new Error("Unexpected image action");
     return { ok: true, status: 200, json: async () => ({ ok: true, ...result }) };
   };
   const dependencies = { document, window, fetch, CustomEvent: ReviewEvent, convertWixImage,
+    setTimeout: (callback, delay) => { control.timeout = callback; return setTimeout(callback, delay); }, clearTimeout,
     buildMarketingAccessHeaders: (headers) => headers, parseMarketingJsonResponse,
     WIX_ADVERT_IMAGE_LANES, createWixImageDraft, appendWixImage, prependWixImages, moveWixImage, removeWixImage, wixImageProposal, wixGalleryImageSource };
   const code = (await readFile(new URL("../utils/wixAdvertImageWorkspace.js", import.meta.url), "utf8"))
     .replace(/^import[\s\S]*?;\s*/gm, "").replace(/^export /gm, "");
-  const editor = new Function(...Object.keys(dependencies), code + ";return { openWixImageEditor, render, uploadImage, prepareReconciliation, reconcileImages };")(...Object.values(dependencies));
+  const editor = new Function(...Object.keys(dependencies), code + ";return { openWixImageEditor, render, uploadImage, uploadImages, prepareReconciliation, reconcileImages };")(...Object.values(dependencies));
   const page = await readFile(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
   const watch = page.slice(page.indexOf("function WatchCard("));
   const start = watch.indexOf("  function openDealerKitReview()");
@@ -140,7 +158,7 @@ async function clients(pipeline) {
 }
 
 for (const pipeline of Object.keys(WIX_ADVERT_IMAGE_LANES)) {
-  test(pipeline + " review uses the familiar Wix-only two-step update and reloads the verified stored gallery", async () => {
+  test(pipeline + " review uses the familiar Wix-only two-step update and renders the server-verified stored gallery", async () => {
     const client = await clients(pipeline);
     const state = await client.fromCard();
     assert.deepEqual(state.draft.items.map((item) => item.src), urls);
@@ -160,13 +178,13 @@ for (const pipeline of Object.keys(WIX_ADVERT_IMAGE_LANES)) {
 
     state.uploadInput.files = [{ name: "Due in Soon.jpg", type: "image/jpeg", size: 1200 }];
     await state.uploadInput.fire("change");
-    assert.deepEqual(state.draft.items.map((item) => item.src), [uploadUrl, ...urls]);
+    assert.deepEqual(state.draft.items.map((item) => item.src), [...urls, uploadUrl]);
     assert.equal(state.current.querySelector("img").src, urls[0], "Uploading does not replace current primary");
     const cards = state.gallery.querySelectorAll("figure");
     await cards[2].fire("dragstart", { dataTransfer: { setData() {} } });
-    await cards[1].fire("drop");
-    assert.deepEqual(state.draft.items.map((item) => item.src), [uploadUrl, urls[1], urls[0]]);
-    await state.gallery.querySelectorAll("figure")[2].querySelector("button").click();
+    await cards[0].fire("drop");
+    assert.deepEqual(state.draft.items.map((item) => item.src), [uploadUrl, urls[0], urls[1]]);
+    await state.gallery.querySelectorAll("figure")[1].querySelector("button").click();
     assert.deepEqual(state.draft.items.map((item) => item.src), [uploadUrl, urls[1]]);
     assert.deepEqual(client.live().gallery, urls);
     assert.equal(client.calls.filter((call) => call.action === "reconcile").length, 0);
@@ -183,7 +201,7 @@ for (const pipeline of Object.keys(WIX_ADVERT_IMAGE_LANES)) {
     assert.deepEqual(client.live().gallery, [uploadUrl, urls[1]]);
     assert.equal(client.live().picture, uploadUrl);
     assert.equal(client.calls.filter((call) => call.action === "reconcile").length, 1);
-    assert.equal(client.calls.filter((call) => call.action === "load").length, 2, "Reload after verification, rather than rendering the optimistic draft");
+    assert.equal(client.calls.filter((call) => call.action === "load").length, 1, "Use the server-verified saved snapshot without another collection scan");
     assert.deepEqual(state.draft.items.map((item) => item.src), [uploadUrl, urls[1]]);
     assert.equal(state.message.textContent, "✓ Wix images updated successfully");
     assert.equal(state.message.dataset.kind, "success");
@@ -194,24 +212,21 @@ for (const pipeline of Object.keys(WIX_ADVERT_IMAGE_LANES)) {
 }
 
 for (const pipeline of ["finance", "rent2buy"]) {
-  test(pipeline + " shows only actual published destinations and confirms the user's selected existing sections", async () => {
+  test(pipeline + " a primary change updates every verified published destination without exclusions", async () => {
     const client = await clients(pipeline);
     const state = await client.fromCard();
-    assert.equal(state.destinationInputs.length, 3);
+    assert.equal(state.destinationInputs.length, 1, "Category reads are deferred until primary changes");
     assert.ok(!state.destinations.textContent.includes("Electric"), "No classification guesses or absent category destinations");
-    if (pipeline === "rent2buy") assert.ok(state.destinations.textContent.includes("CREWVANS.image"));
-    const excluded = client.live().destinations[1];
-    const input = state.destinationInputs.find((item) => item.dataset.collectionId === excluded.collectionId);
-    input.checked = false; await input.fire("change");
     await state.gallery.querySelectorAll("figure")[1].querySelectorAll("button")[1].click();
     await state.updateButton.click();
-    assert.ok(!state.confirmationPanel.textContent.includes(excluded.collectionId + "." + excluded.imageField));
-    const selected = client.live().destinations.filter((item) => item.collectionId !== excluded.collectionId).map((item) => item.collectionId);
-    assert.deepEqual(state.prepared.input.selectedDestinations, selected);
+    assert.equal(state.destinationInputs.length, 3);
+    if (pipeline === "rent2buy") assert.ok(state.destinations.textContent.includes("CREWVANS.image"));
+    assert.ok(state.destinationInputs.every((input) => input.checked && input.disabled));
+    for (const destination of client.live().destinations) assert.ok(state.confirmationPanel.textContent.includes(destination.collectionId + "." + destination.imageField));
+    assert.equal(state.prepared.input.selectedDestinations, undefined, "All targets are determined by the server");
     await state.confirmButton.click();
     assert.equal(client.live().destinations.length, 3, "No category membership is created or removed");
-    assert.equal(client.live().destinations.find((item) => item.collectionId === excluded.collectionId).currentImage, urls[0]);
-    assert.ok(client.live().destinations.filter((item) => item.collectionId !== excluded.collectionId).every((item) => item.currentImage === urls[1]));
+    assert.ok(client.live().destinations.every((item) => item.currentImage === urls[1]));
     assert.equal(state.current.querySelector("img").src, urls[1]);
     assert.equal(state.message.dataset.kind, "success");
   });
@@ -232,6 +247,67 @@ test("editing after preparation invalidates confirmation until a new two-step up
   await state.confirmButton.click();
   assert.deepEqual(state.draft.items.map((item) => item.src), [urls[1], urls[0]]);
   assert.equal(state.current.querySelector("img").src, urls[1]);
+});
+
+for (const [existingCount, uploadCount] of [[2, 1], [2, 3], [38, 3]]) {
+  test(`workspace adds ${uploadCount} images to ${existingCount} in selection order and preserves each upload proof`, async () => {
+    const gallery = Array.from({ length: existingCount }, (_, index) => index === 0 ? urls[0]
+      : "https://static.wixstatic.com/media/existing-" + index + ".jpg");
+    const client = await clients("finance", gallery);
+    const state = await client.fromCard();
+    state.uploadInput.files = Array.from({ length: uploadCount }, (_, index) => ({ name: "selected-" + index + ".jpg", type: "image/jpeg", size: 1200 }));
+    await state.uploadInput.fire("change");
+    const added = Array.from({ length: uploadCount }, (_, index) => index === 0 ? uploadUrl : uploadUrl.replace(".jpg", "-" + (index + 1) + ".jpg"));
+    assert.deepEqual(state.draft.items.map((item) => item.src), [...gallery, ...added]);
+    assert.deepEqual(client.live().gallery, gallery);
+    const finished = client.calls.filter((call) => call.action === "finishUpload");
+    assert.deepEqual(finished.map((call) => [call.fileId, call.uploadTicket]), Array.from({ length: uploadCount }, (_, index) => ["new-file-" + (index + 1), "lane-upload-ticket-" + (index + 1)]));
+    await state.updateButton.click();
+    assert.ok(state.confirmationPanel.textContent.includes("primary image is unchanged"));
+    await state.confirmButton.click();
+    assert.deepEqual(client.live().gallery, [...gallery, ...added]);
+    assert.equal(client.live().picture, gallery[0]);
+    assert.equal(client.calls.filter((call) => call.action === "load").length, 1);
+    assert.equal(state.busy, false);
+    assert.equal(state.updateButton.disabled, false);
+    assert.equal(state.message.dataset.kind, "success");
+  });
+}
+
+test("failed or timed-out requests release the spinner and re-enable controls", async () => {
+  for (const action of ["prepareUpload", "prepare", "reconcile"]) {
+    for (const timeout of [false, true]) {
+      const client = await clients("finance");
+      const state = await client.fromCard();
+      if (action === "reconcile") await state.updateButton.click();
+      if (timeout) client.control.hangAction = action;
+      else client.control.fail[action] = "Simulated Wix request failure";
+      state.uploadInput.files = [{ name: "extra.jpg", type: "image/jpeg", size: 1200 }];
+      const pending = action === "prepareUpload" ? state.uploadInput.fire("change")
+        : action === "prepare" ? state.updateButton.click() : state.confirmButton.click();
+      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+      if (timeout) { assert.equal(state.busy, true); client.control.timeout(); }
+      await pending;
+      assert.equal(state.busy, false);
+      assert.equal(state.message.dataset.kind, "error");
+      assert.ok(state.message.textContent.includes(timeout ? "timed out" : "request failure"));
+      assert.equal(state.updateButton.disabled, false);
+      assert.equal(state.uploadButton.disabled, false);
+      assert.equal(state.closeButton.disabled, false);
+      assert.deepEqual(client.live().gallery, urls);
+    }
+  }
+});
+
+test("non-image selections fail before any upload and leave controls usable", async () => {
+  const client = await clients("finance");
+  const state = await client.fromCard();
+  state.uploadInput.files = [{ name: "video.mp4", type: "video/mp4", size: 1200 }];
+  await state.uploadInput.fire("change");
+  assert.equal(state.message.dataset.kind, "error");
+  assert.equal(state.busy, false);
+  assert.equal(state.uploadButton.disabled, false);
+  assert.equal(client.calls.filter((call) => call.action === "prepareUpload").length, 0);
 });
 
 test("Cancel after uploading and preparing performs no live CMS write", async () => {
@@ -259,8 +335,8 @@ test("prepare failures show their exact reason prominently and never expose Conf
   assert.ok(!state.message.textContent.includes("successfully"));
 });
 
-test("failed verification, failed reload or a different stored order can never display success", async () => {
-  for (const failure of ["reconcile", "unverified", "reloadFailure", "reloadMismatch"]) {
+test("failed verification, missing saved result or a different stored order can never display success", async () => {
+  for (const failure of ["reconcile", "unverified", "missingSnapshot", "savedMismatch"]) {
     const client = await clients("cars");
     const state = await client.fromCard();
     await state.gallery.querySelectorAll("figure")[1].querySelectorAll("button")[1].click();
@@ -306,8 +382,8 @@ test("processing uploads keep the live primary unchanged and block update until 
   assert.equal(state.recheckButton.hidden, false);
   client.control.processing = false;
   await state.recheckButton.click();
-  assert.deepEqual(state.draft.items.map((item) => item.src), [uploadUrl, ...urls]);
-  assert.equal(state.draft.items[0].src, uploadUrl);
+  assert.deepEqual(state.draft.items.map((item) => item.src), [...urls, uploadUrl]);
+  assert.equal(state.draft.items[0].src, urls[0]);
   assert.equal(state.updateButton.disabled, false);
   assert.equal(client.calls.filter((call) => call.action === "reconcile").length, 0);
 });

@@ -1,9 +1,21 @@
 import { buildMarketingAccessHeaders, parseMarketingJsonResponse } from "../services/marketingAccess.js";
 import { convertWixImage } from "../services/marketingVehicleContract.js";
-import { WIX_ADVERT_IMAGE_LANES, createWixImageDraft, prependWixImages, moveWixImage, removeWixImage, wixImageProposal, wixGalleryImageSource } from "../lib/wixAdvertImageEditor.js";
+import { WIX_ADVERT_IMAGE_LANES, createWixImageDraft, appendWixImage, moveWixImage, removeWixImage, wixImageProposal, wixGalleryImageSource } from "../lib/wixAdvertImageEditor.js";
 
 const ATTRIBUTE = "data-wix-advert-image-editor";
 let activeRequest = 0;
+
+async function requestJson(url, options, fallback) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return await parseMarketingJsonResponse(response, fallback);
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error("Wix request timed out. Please try again.");
+    throw error;
+  } finally { clearTimeout(timer); }
+}
 
 function node(tag, className = "", text = "") {
   const result = document.createElement(tag);
@@ -13,11 +25,10 @@ function node(tag, className = "", text = "") {
 }
 
 async function api(state, action, extra = {}) {
-  const response = await fetch("/api/wix-advert-images", {
+  return requestJson("/api/wix-advert-images", {
     method: "POST", headers: buildMarketingAccessHeaders({ "content-type": "application/json", accept: "application/json" }),
     cache: "no-store", body: JSON.stringify({ action, registration: state.registration, pipeline: state.pipeline, ...extra }),
-  });
-  return parseMarketingJsonResponse(response, "Wix images could not be verified.");
+  }, "Wix images could not be verified.");
 }
 
 function message(state, text, kind = "info") {
@@ -42,15 +53,9 @@ function renderDestinations(state) {
     const label = node("label", "dealerkit-review__check" + (destination.required ? " dealerkit-review__check--fixed" : ""));
     const input = node("input");
     input.type = "checkbox";
-    input.checked = destination.required || state.selectedDestinations.has(destination.collectionId);
-    input.disabled = state.busy || state.requiresReload || destination.required;
+    input.checked = true;
+    input.disabled = true;
     input.dataset.collectionId = destination.collectionId;
-    input.addEventListener("change", () => {
-      if (state.busy || state.requiresReload || destination.required) return;
-      if (input.checked) state.selectedDestinations.add(destination.collectionId);
-      else state.selectedDestinations.delete(destination.collectionId);
-      changed(state);
-    });
     const text = node("span", "wix-image-review__destination", destination.label + (destination.required ? " · Required" : ""));
     text.appendChild(node("small", "", destination.collectionId + "." + destination.imageField));
     label.append(input, text);
@@ -75,9 +80,11 @@ function renderConfirmation(state) {
     node("p", "", "Vehicle gallery: " + prepared.galleryDestination.label),
     node("small", "", prepared.galleryDestination.collectionId + "." + prepared.galleryDestination.field));
   preview.append(image, facts); state.confirmationPanel.appendChild(preview);
-  state.confirmationPanel.appendChild(node("p", "", "The primary image will be used in these existing Wix sections:"));
+  state.confirmationPanel.appendChild(node("p", "", prepared.primaryChanged === false
+    ? "The primary image is unchanged. Listing and category images will be kept."
+    : "The primary image will be used in these existing Wix sections:"));
   const list = node("ul");
-  for (const destination of prepared.destinations.filter((item) => item.selected)) {
+  for (const destination of prepared.destinations.filter((item) => prepared.primaryChanged !== false && item.selected)) {
     list.appendChild(node("li", "", destination.label + " · " + destination.collectionId + "." + destination.imageField));
   }
   state.confirmationPanel.appendChild(list);
@@ -156,10 +163,10 @@ export async function finishUploads(state) {
     message(state, `${waiting} of ${pendingUploads.length} uploaded image${pendingUploads.length === 1 ? "" : "s"} ${waiting === 1 ? "is" : "are"} still processing in Wix Media. Recheck when ready; the advert is unchanged.`);
     return;
   }
-  prependWixImages(state.draft, uploadedImages);
+  uploadedImages.forEach((uploaded) => appendWixImage(state.draft, uploaded));
   state.pendingUploads = []; state.uploadInput.value = "";
   changed(state);
-  message(state, `${uploadedImages.length} image${uploadedImages.length === 1 ? "" : "s"} added at the start. The first selected image is now #1 / Primary. Click Update Wix images when ready.`);
+  message(state, `${uploadedImages.length} image${uploadedImages.length === 1 ? "" : "s"} added. The primary image is unchanged. Click Update Wix images when ready.`);
 }
 
 export async function uploadImages(state, files) {
@@ -176,13 +183,12 @@ export async function uploadImages(state, files) {
   message(state, `Uploading ${selectedFiles.length} image${selectedFiles.length === 1 ? "" : "s"} to Wix Media…`);
   state.pendingUploads = await Promise.all(selectedFiles.map(async (file) => {
     const prepared = await api(state, "prepareUpload", { fileName: file.name, mimeType: file.type, sizeInBytes: file.size });
-    const response = await fetch(prepared.uploadUrl, { method: "PUT", headers: { "Content-Type": prepared.mimeType }, body: file });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.file?.id) throw new Error(`Wix Media did not return a verified file ID for ${file.name || "one selected image"}.`);
-    if (!prepared.uploadUrl || !prepared.mimeType) {
+    if (!prepared.uploadUrl || !prepared.mimeType || !prepared.fileName || !prepared.uploadTicket) {
       throw new Error(`Wix did not return a complete upload session for ${file.name || "one selected image"}.`);
     }
-    return { fileId: payload.file.id, fileName: prepared.fileName || "", uploadTicket: prepared.uploadTicket };
+    const payload = await requestJson(prepared.uploadUrl, { method: "PUT", headers: { "Content-Type": prepared.mimeType }, body: file }, "Wix Media upload failed.");
+    if (typeof payload.file?.id !== "string" || !payload.file.id) throw new Error(`Wix Media did not return a verified file ID for ${file.name || "one selected image"}.`);
+    return { fileId: payload.file.id, uploadTicket: prepared.uploadTicket };
   }));
   await finishUploads(state);
 }
@@ -199,11 +205,12 @@ export async function finishUpload(state) {
 
 export async function prepareReconciliation(state) {
   state.prepared = null; state.draft.confirmation = null;
-  message(state, "Checking the current Wix advert and your selected sections…");
-  const input = { ...wixImageProposal(state.draft), selectedDestinations: [...state.selectedDestinations] };
+  message(state, "Checking the current Wix advert…");
+  const input = wixImageProposal(state.draft);
   const result = await api(state, "prepare", input);
   if (!result.confirmation || !Array.isArray(result.gallery) || !result.gallery.length
     || !Array.isArray(result.destinations) || !result.galleryDestination) throw new Error("Wix did not return a verified update summary.");
+  state.draft.snapshot.destinations = result.destinations;
   state.prepared = { ...result, input };
   state.draft.confirmation = result.confirmation;
   message(state, "Review the summary below, then Confirm update.");
@@ -212,9 +219,9 @@ export async function prepareReconciliation(state) {
 function matchesPrepared(snapshot, prepared) {
   const sources = (gallery) => Array.isArray(gallery) ? gallery.map(wixGalleryImageSource) : [];
   if (JSON.stringify(sources(snapshot.gallery)) !== JSON.stringify(sources(prepared.gallery))
-    || wixGalleryImageSource(snapshot.picture) !== prepared.picture
+    || wixGalleryImageSource(snapshot.picture) !== (prepared.primaryChanged === false ? wixGalleryImageSource(prepared.currentPicture) : prepared.picture)
     || String(snapshot.imageCount?.value) !== String(prepared.gallery.length)) return false;
-  return prepared.destinations.filter((item) => item.selected).every((destination) => {
+  return prepared.destinations.filter((item) => prepared.primaryChanged !== false && item.selected).every((destination) => {
     const actual = snapshot.destinations?.find((item) => item.collectionId === destination.collectionId && item.itemId === destination.itemId);
     return actual && wixGalleryImageSource(actual.currentImage) === prepared.picture;
   });
@@ -228,11 +235,9 @@ export async function reconcileImages(state) {
   if (result.verified !== true) { state.requiresReload = true; throw new Error("Wix could not verify the image update. Reopen the advert before retrying."); }
   state.prepared = null; state.draft.confirmation = null;
   state.requiresReload = true;
-  let snapshot;
-  try { snapshot = await api(state, "load"); }
-  catch (error) { throw new Error("The update was submitted, but the Wix reload failed: " + error.message + " Reopen this advert to check the saved result."); }
-  if (!matchesPrepared(snapshot, prepared)) throw new Error("Wix reload did not match the confirmed primary, gallery order, count or destinations. Reopen this advert to check the saved result.");
-  applySnapshot(state, snapshot, prepared.input.selectedDestinations);
+  const snapshot = result.snapshot;
+  if (!snapshot || !matchesPrepared(snapshot, prepared)) throw new Error("Wix saved result did not match the confirmed primary, gallery order, count or destinations. Reopen this advert to check the saved result.");
+  applySnapshot(state, snapshot);
   message(state, "✓ Wix images updated successfully", "success");
   window.dispatchEvent(new CustomEvent("wix-advert-images-reconciled", { detail: { registration: state.registration, pipeline: state.pipeline } }));
 }
@@ -257,12 +262,11 @@ function showCurrent(state) {
   facts.append(advert, price); state.current.appendChild(facts);
 }
 
-function applySnapshot(state, snapshot, selected) {
+function applySnapshot(state, snapshot) {
   if (!Array.isArray(snapshot.destinations) || !snapshot.destinations.some((item) => item.required && item.collectionId === snapshot.listingCollection)) {
     throw new Error("The published Wix sections could not be verified. No update is available.");
   }
   state.draft = createWixImageDraft(snapshot);
-  state.selectedDestinations = new Set(snapshot.destinations.filter((item) => item.required || !selected || selected.includes(item.collectionId)).map((item) => item.collectionId));
   state.requiresReload = false; state.hasLocalChanges = false; state.prepared = null;
   showCurrent(state);
 }
@@ -328,8 +332,8 @@ export async function openWixImageEditor(registrationInput, pipeline) {
     upload.append(state.uploadInput, state.uploadButton, state.recheckButton);
     gallerySection.append(state.galleryHeading, state.galleryNote, state.gallery, upload);
     const sections = node("section", "dealerkit-review__section dealerkit-review__decisions");
-    sections.append(node("h3", "", "Wix sections this advert is currently published in"),
-      node("p", "dealerkit-review__section-note", "Checked sections receive the primary image. Unticking keeps that section's existing image; it does not remove the advert."));
+    sections.append(node("h3", "", "Wix primary image destinations"),
+      node("p", "dealerkit-review__section-note", "Changing image #1 updates the listing and all verified published category images. Categories are checked when you review a primary change. Adding images keeps the current primary."));
     state.destinations = node("div", "dealerkit-review__category-grid"); sections.appendChild(state.destinations);
     sections.appendChild(node("p", "dealerkit-review__routing-note", "The vehicle gallery is always updated: " + snapshot.detailCollection + "." + snapshot.galleryField));
     state.confirmationPanel = node("section", "dealerkit-review__section wix-image-review__confirmation"); state.confirmationPanel.hidden = true;
@@ -341,7 +345,7 @@ export async function openWixImageEditor(registrationInput, pipeline) {
     footer.append(state.cancelButton, state.updateButton);
     body.append(state.message, state.current, gallerySection, sections, state.confirmationPanel, footer);
     applySnapshot(state, snapshot);
-    message(state, "Choose your images and sections, then click Update Wix images.");
+    message(state, "Choose your images, then click Update Wix images.");
     overlay._wixImageEditorState = state;
     render(state);
     return state;

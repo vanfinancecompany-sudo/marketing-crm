@@ -97,18 +97,52 @@ test("upload tickets stay compact for large galleries and remain valid at finish
   assert.equal(f.writes().length, 0, "Preparing and finishing an upload must not write Wix CMS data");
 });
 
-test("a selected upload batch is inserted ahead of the existing Wix gallery in selection order", async () => {
+test("a selected upload batch is appended in selection order without changing Primary", async () => {
   const f = fixture("finance");
   const draft = createWixImageDraft(await f.service.load(f.input));
   const first = (await upload(f)).media;
   const second = (await upload(f)).media;
-  prependWixImages(draft, [first, second]);
-  assert.deepEqual(draft.items.slice(0, 2).map((item) => item.key), ["upload-" + first.fileId, "upload-" + second.fileId]);
-  assert.deepEqual(draft.items.slice(2).map((item) => item.src), urls);
+  [first, second].forEach((image) => appendWixImage(draft, image));
+  assert.deepEqual(draft.items.slice(3).map((item) => item.key), ["upload-" + first.fileId, "upload-" + second.fileId]);
+  assert.deepEqual(draft.items.slice(0, 3).map((item) => item.src), urls);
   await confirm(f, draft);
-  assert.equal(f.rows[f.lane.listing][0].data.picture, first.url, "The first selected upload becomes Primary");
-  assert.deepEqual(f.rows[f.lane.detail][0].data[f.lane.gallery].slice(2), urls, "Existing Wix images stay behind the new upload batch");
+  assert.equal(f.rows[f.lane.listing][0].data.picture, urls[0], "Appending preserves Primary");
+  assert.deepEqual(f.rows[f.lane.detail][0].data[f.lane.gallery].slice(0, 3), urls, "Existing Wix images stay in their original order");
 });
+
+for (const [existingCount, uploadCount] of [[3, 1], [3, 3], [38, 1], [38, 3]]) {
+  test(`add ${uploadCount} images to a ${existingCount}-image gallery without collection scans during upload`, async () => {
+    const gallery = Array.from({ length: existingCount }, (_, index) => index === 0 ? urls[0]
+      : "https://static.wixstatic.com/media/original-" + index + "-" + "x".repeat(160) + ".jpg");
+    const f = fixture("finance", gallery);
+    f.rows.AUTOMATIC = [{ id: "unknown-category", data: { title: registration, picture: urls[0] } }];
+    const draft = createWixImageDraft(await f.service.load(f.input));
+    assert.equal(f.calls.length, 14, "Open reads only listing/detail registration variants");
+    const added = [];
+    for (let index = 0; index < uploadCount; index += 1) {
+      const start = f.calls.length;
+      const prepared = await f.service.prepareUpload({ ...f.input, mimeType: "image/jpeg", sizeInBytes: 1200 });
+      const fileId = prepared.uploadUrl.split("/").pop();
+      f.files[fileId].url = uploadedUrl.replace(".jpg", "-" + index + ".jpg");
+      const image = await f.service.finishUpload({ ...f.input, fileId, uploadTicket: prepared.uploadTicket });
+      appendWixImage(draft, image); added.push(image.url);
+      assert.equal(f.calls.length - start, 2, "One upload URL and one Media file verification");
+      assert.ok(f.calls.slice(start).every((call) => call.path.startsWith("/site-media/")));
+    }
+    assert.deepEqual(f.rows[f.lane.detail][0].data[f.lane.gallery], gallery, "No live gallery write during upload");
+    const input = { ...f.input, ...wixImageProposal(draft) };
+    const prepared = await f.service.prepare(input);
+    assert.ok(prepared.confirmation.length < 2000, "Save confirmation contains hashes, not the full gallery");
+    const saved = await f.service.reconcile({ ...input, confirmation: prepared.confirmation, confirmed: true });
+    assert.equal(saved.verified, true);
+    assert.deepEqual(saved.snapshot.gallery, [...gallery, ...added]);
+    assert.equal(f.calls.length, 57 + 4 * uploadCount, "One save identity check and one final verification, with no per-patch scans");
+    assert.deepEqual(f.writes().map((call) => call.body.dataCollectionId), [f.lane.detail]);
+    for (const collection of [f.lane.listing, f.lane.detail]) {
+      for (const [field, value] of Object.entries(f.untouched)) assert.deepEqual(f.rows[collection][0].data[field], value);
+    }
+  });
+}
 
 for (const pipeline of Object.keys(WIX_ADVERT_IMAGE_LANES)) {
   test(pipeline + " loads the exact stored Wix gallery without DealerKit and reconciles only image fields and the image count", async () => {
@@ -177,7 +211,7 @@ test("object gallery metadata and duplicate stored images retain their exact cur
   assert.equal(f.rows[f.lane.listing][0].data.picture, urls[1]);
 });
 
-test("missing, draft, malformed or ambiguous Wix listing/detail identities fail closed before any write or upload", async () => {
+test("missing, draft, malformed or ambiguous Wix listing/detail identities fail closed before any CMS write", async () => {
   for (const target of ["listing", "detail"]) {
     for (const condition of ["missing", "ambiguous", "draft", "no-id"]) {
       const f = fixture("cars"); const collection = f.lane[target];
@@ -186,7 +220,6 @@ test("missing, draft, malformed or ambiguous Wix listing/detail identities fail 
       if (condition === "draft") f.rows[collection][0].data._publishStatus = "DRAFT";
       if (condition === "no-id") delete f.rows[collection][0].id;
       await assert.rejects(() => f.service.load(f.input), /missing or ambiguous|published|unverified/);
-      await assert.rejects(() => f.service.prepareUpload({ ...f.input, mimeType: "image/jpeg", sizeInBytes: 100 }), /missing or ambiguous|published|unverified/);
       assert.equal(f.writes().length, 0);
       assert.ok(!f.calls.some((call) => call.path.includes("generate-upload-url")));
     }
@@ -214,6 +247,7 @@ test("upload and reconciliation confirmations cannot cross product lanes or regi
   const rent = fixture("rent2buy");
   const { media, prepared, fileId } = await upload(f);
   rent.files[fileId] = f.files[fileId];
+  await assert.rejects(() => f.service.finishUpload({ ...f.input, registration: "ZZ99ZZZ", fileId, uploadTicket: prepared.uploadTicket }), /another vehicle\/lane/);
   await assert.rejects(() => rent.service.finishUpload({ ...rent.input, fileId, uploadTicket: prepared.uploadTicket }), /another vehicle\/lane/);
   const rentDraft = createWixImageDraft(await rent.service.load(rent.input));
   appendWixImage(rentDraft, media);
@@ -237,25 +271,28 @@ test("only READY, public images from the correct Wix Media site and scoped uploa
   f.files[fileId].displayName = prepared.fileName;
   f.files[fileId].siteId = "other-site";
   await assert.rejects(() => f.service.finishUpload({ ...f.input, fileId, uploadTicket: prepared.uploadTicket }), /could not be verified/);
+  f.files[fileId].siteId = "85f11c52-ee54-495d-aaec-a351831709b5";
+  for (const changes of [{ mediaType: "VIDEO" }, { private: true }]) {
+    const original = copy(f.files[fileId]);
+    Object.assign(f.files[fileId], changes);
+    await assert.rejects(() => f.service.finishUpload({ ...f.input, fileId, uploadTicket: prepared.uploadTicket }), /could not be verified/);
+    f.files[fileId] = original;
+  }
   assert.equal(f.writes().length, 0);
 });
 
-test("a missing browser upload ticket recovers from the verified Wix-generated vehicle filename", async () => {
+test("missing upload proof is rejected even for a correctly generated Wix filename", async () => {
   const f = fixture("finance");
   const prepared = await f.service.prepareUpload({ ...f.input, mimeType: "image/jpeg", sizeInBytes: 500 });
   const fileId = prepared.uploadUrl.split("/").pop();
 
-  const recovered = await f.service.finishUpload({ ...f.input, fileId });
-  assert.equal(recovered.ready, true);
-  assert.equal(recovered.fileId, fileId);
-  assert.ok(recovered.token);
-  assert.ok(f.logs.some((entry) => entry.event === "upload_ticket_recovered"));
+  await assert.rejects(() => f.service.finishUpload({ ...f.input, fileId }), /missing or invalid/);
 
   await assert.rejects(() => f.service.finishUpload({
     ...f.input,
     fileId,
     fileName: prepared.fileName.replace(registration, "ZZ99ZZZ"),
-  }), /does not belong/);
+  }), /missing or invalid/);
 
   const rent = fixture("rent2buy");
   rent.files[fileId] = copy(f.files[fileId]);
@@ -464,11 +501,16 @@ test("new or changed published category identities invalidate confirmation befor
   assert.equal(f.writes().length, 0);
 });
 
-test("unverifiable category publication fails closed rather than treating it as absent", async () => {
+test("unverifiable categories do not block additions but still block primary changes", async () => {
   const f = fixture("finance");
   f.rows.AUTOMATIC = [{ id: "unknown-status", data: { title: "OY72YSJ", picture: urls[0] } }];
-  await assert.rejects(() => f.service.load(f.input), /published/);
-  assert.equal(f.writes().length, 0);
+  const draft = createWixImageDraft(await f.service.load(f.input));
+  appendWixImage(draft, (await upload(f)).media);
+  await confirm(f, draft);
+  assert.deepEqual(f.writes().map((call) => call.body.dataCollectionId), [f.lane.detail]);
+  const changed = createWixImageDraft(await f.service.load(f.input));
+  moveWixImage(changed, "existing-1", "existing-0");
+  await assert.rejects(() => f.service.prepare({ ...f.input, ...wixImageProposal(changed) }), /published/);
 });
 
 
@@ -482,34 +524,32 @@ test("published destinations and header facts come only from the verified curren
     assert.equal(snapshot.advertUrl, "https://live.example/" + pipeline);
     assert.equal(snapshot.galleryDestination.collectionId, f.lane.detail);
     assert.equal(snapshot.galleryDestination.field, f.lane.gallery);
-    assert.deepEqual(snapshot.destinations.map((item) => item.collectionId), [f.lane.listing, ...Object.keys(WIX_ADVERT_CATEGORY_IMAGE_FIELDS[pipeline])]);
+    assert.deepEqual(snapshot.destinations.map((item) => item.collectionId), [f.lane.listing]);
+    const draft = createWixImageDraft(snapshot);
+    moveWixImage(draft, "existing-1", "existing-0");
+    const prepared = await f.service.prepare({ ...f.input, ...wixImageProposal(draft) });
+    assert.deepEqual(prepared.destinations.map((item) => item.collectionId), [f.lane.listing, ...Object.keys(WIX_ADVERT_CATEGORY_IMAGE_FIELDS[pipeline])]);
     assert.ok(snapshot.destinations.every((item) => item.selected));
     assert.equal(snapshot.destinations.filter((item) => item.required).length, 1);
     assert.equal(snapshot.destinations[0].collectionId, f.lane.listing);
-    if (pipeline === "finance") assert.ok(snapshot.destinations.some((item) => item.label === "Medium / MWB"));
-    if (pipeline === "rent2buy") assert.equal(snapshot.destinations.find((item) => item.collectionId === "CREWVANS").imageField, "image");
+    if (pipeline === "finance") assert.ok(prepared.destinations.some((item) => item.label === "Medium / MWB"));
+    if (pipeline === "rent2buy") assert.equal(prepared.destinations.find((item) => item.collectionId === "CREWVANS").imageField, "image");
     if (pipeline === "cars") assert.deepEqual(snapshot.destinations.map((item) => item.collectionId), ["CARFINANCE"]);
     assert.equal(f.writes().length, 0);
   }
 });
 
 for (const pipeline of ["finance", "rent2buy"]) {
-  test(pipeline + " updates only selected existing published destinations and never removes category membership", async () => {
+  test(pipeline + " cannot exclude published categories from a primary change", async () => {
     const f = fixture(pipeline); addCategories(f);
     const original = copy(f.rows);
     const draft = createWixImageDraft(await f.service.load(f.input));
     moveWixImage(draft, "existing-1", "existing-0");
     const chosen = Object.keys(WIX_ADVERT_CATEGORY_IMAGE_FIELDS[pipeline])[0];
     const input = { ...f.input, ...wixImageProposal(draft), selectedDestinations: [f.lane.listing, chosen] };
-    const prepared = await f.service.prepare(input);
-    assert.deepEqual(prepared.destinations.filter((item) => item.selected).map((item) => item.collectionId), [f.lane.listing, chosen]);
-    assert.equal(f.writes().length, 0, "Update button preparation cannot publish");
-    await f.service.reconcile({ ...input, confirmation: prepared.confirmation, confirmed: true });
-    assert.deepEqual(f.writes().map((call) => call.body.dataCollectionId), [f.lane.detail, f.lane.listing, chosen]);
-    for (const collection of Object.keys(WIX_ADVERT_CATEGORY_IMAGE_FIELDS[pipeline]).filter((id) => id !== chosen)) {
-      assert.deepEqual(f.rows[collection], original[collection], "Unselected category remains present and unchanged");
-    }
-    assert.equal(f.rows[chosen][0].data[WIX_ADVERT_CATEGORY_IMAGE_FIELDS[pipeline][chosen]], urls[1]);
+    await assert.rejects(() => f.service.prepare(input), /all verified destinations/);
+    assert.equal(f.writes().length, 0);
+    assert.deepEqual(f.rows, original);
   });
 }
 
@@ -530,16 +570,17 @@ test("changing destination selection after prepare invalidates the signed confir
   const f = fixture("rent2buy"); addCategories(f);
   const draft = createWixImageDraft(await f.service.load(f.input));
   moveWixImage(draft, "existing-1", "existing-0");
-  const input = { ...f.input, ...wixImageProposal(draft), selectedDestinations: [f.lane.listing, "CREWVANS"] };
+  const input = { ...f.input, ...wixImageProposal(draft) };
   const prepared = await f.service.prepare(input);
-  await assert.rejects(() => f.service.reconcile({ ...input, selectedDestinations: [f.lane.listing], confirmation: prepared.confirmation, confirmed: true }), /confirmed images changed/);
+  await assert.rejects(() => f.service.reconcile({ ...input, selectedDestinations: [f.lane.listing], confirmation: prepared.confirmation, confirmed: true }), /all verified destinations/);
   assert.equal(f.writes().length, 0);
 });
 
 test("category target changes after prepare still block before any write", async () => {
   const f = fixture("finance"); addCategories(f);
   const draft = createWixImageDraft(await f.service.load(f.input));
-  const input = { ...f.input, ...wixImageProposal(draft), selectedDestinations: [f.lane.listing] };
+  moveWixImage(draft, "existing-1", "existing-0");
+  const input = { ...f.input, ...wixImageProposal(draft) };
   const prepared = await f.service.prepare(input);
   f.rows.AUTOMATIC.push({ ...copy(f.rows.AUTOMATIC[0]), id: "second-auto", data: { ...copy(f.rows.AUTOMATIC[0].data), title: "OY72 YSJ" } });
   await assert.rejects(() => f.service.reconcile({ ...input, confirmation: prepared.confirmation, confirmed: true }), /category targets changed/);
