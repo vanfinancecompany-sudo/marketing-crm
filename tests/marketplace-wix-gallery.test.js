@@ -17,7 +17,7 @@ function fixture(t, pipeline, options = {}) {
   const lane = WIX_ADVERT_IMAGE_LANES[pipeline];
   const calls = [], wixCalls = [];
   const rows = {
-    [lane.listing]: [{ id: "listing", data: { title: "EA21 TSZ", _publishStatus: "PUBLISHED", picture: publicUrl("listing-primary") } }],
+    [lane.listing]: options.listingNotFound ? [] : [{ id: "listing", data: { title: "EA21 TSZ", _publishStatus: "PUBLISHED", picture: publicUrl("listing-primary") } }],
     [lane.detail]: [{ id: "detail", data: { title: registration, _publishStatus: "PUBLISHED", [lane.gallery]: options.gallery ?? gallery } }],
   };
   const originalRows = JSON.stringify(rows);
@@ -73,8 +73,18 @@ for (const pipeline of Object.keys(builders)) {
     assert.equal(read.method, "GET");
     assert.equal(read.cache, "no-store");
     assert.equal(read.headers["x-marketing-customer-database-key"], environment.MARKETING_CUSTOMER_DATABASE_API_KEY);
-    assert.equal(new URL(read.url, "https://crm.example").searchParams.get("pipeline"), pipeline);
-    assert.ok(f.wixCalls.every(call => [WIX_ADVERT_IMAGE_LANES[pipeline].listing, WIX_ADVERT_IMAGE_LANES[pipeline].detail].includes(call.body.dataCollectionId)));
+    const readUrl = new URL(read.url, "https://crm.example");
+    assert.equal(readUrl.searchParams.get("pipeline"), pipeline);
+    assert.equal(readUrl.searchParams.get("mode"), "marketplace-gallery");
+    assert.equal(f.wixCalls.length, 1, "Marketplace must read only the authoritative detail gallery");
+    assert.equal(f.wixCalls[0].body.dataCollectionId, WIX_ADVERT_IMAGE_LANES[pipeline].detail);
+  });
+  test(`${pipeline} Marketplace gallery does not require the listing-card record`, async t => {
+    const f = fixture(t, pipeline, { listingNotFound: true });
+    const job = await f.build();
+    assert.deepEqual(job.images, [publicUrl("first"), publicUrl("second"), publicUrl("third")]);
+    assert.equal(f.wixCalls.length, 1);
+    assert.equal(f.wixCalls[0].body.dataCollectionId, WIX_ADVERT_IMAGE_LANES[pipeline].detail);
   });
   test(`${pipeline} deduplicates before limiting to 20 without reordering`, async t => {
     const images = Array.from({ length: 25 }, (_, index) => publicUrl(String(index)));

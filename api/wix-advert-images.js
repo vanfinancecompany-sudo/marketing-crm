@@ -121,6 +121,18 @@ export function createWixAdvertImageService({ environment = process.env, request
     return { registration, pipeline, siteId: SITE_ID };
   }
 
+  async function loadMarketplaceGallery(input) {
+    const scope = scopeFor(input);
+    const lane = WIX_ADVERT_IMAGE_LANES[scope.pipeline];
+    const detail = await queryRows(configuration, request, lane.detail, scope.registration);
+    const gallery = detail.data[lane.gallery];
+    if (!Array.isArray(gallery) || gallery.length > 80 || gallery.some((entry) => !wixGalleryImageSource(entry))) {
+      throw new WixImageEditorError(409, "The current Wix gallery is missing or contains unsupported media.");
+    }
+    return { ...scope, detailId: detail.id, gallery, detailCollection: lane.detail,
+      galleryField: lane.gallery, countField: lane.count, imageCount: fieldState(detail.data, lane.count) };
+  }
+
   async function loadSnapshot(input) {
     const scope = scopeFor(input);
     const lane = WIX_ADVERT_IMAGE_LANES[scope.pipeline];
@@ -353,7 +365,7 @@ export function createWixAdvertImageService({ environment = process.env, request
     }
   }
 
-  return { load, prepareUpload, finishUpload, prepare, reconcile };
+  return { load, loadMarketplaceGallery, prepareUpload, finishUpload, prepare, reconcile };
 }
 
 export function createWixAdvertImageHandler(dependencies = {}) {
@@ -367,16 +379,20 @@ export function createWixAdvertImageHandler(dependencies = {}) {
     const traceId = randomUUID();
     const emit = editorLogger(environment, dependencies.logger, traceId);
     const inputForLog = request.method === "GET" ? request.query || {} : request.body || {};
-    const knownActions = ["load", "prepareUpload", "finishUpload", "prepare", "reconcile"];
-    const actionForLog = request.method === "GET" ? "load" : knownActions.includes(inputForLog.action) ? inputForLog.action : "unknown";
+    const knownActions = ["load", "loadMarketplaceGallery", "prepareUpload", "finishUpload", "prepare", "reconcile"];
+    const marketplaceGalleryRead = request.method === "GET" && clean(inputForLog.mode) === "marketplace-gallery";
+    const actionForLog = request.method === "GET" ? (marketplaceGalleryRead ? "loadMarketplaceGallery" : "load")
+      : knownActions.includes(inputForLog.action) ? inputForLog.action : "unknown";
     const logScope = { action: actionForLog, registration: normalizeFinanceRegistration(inputForLog.registration || ""),
       pipeline: Object.hasOwn(WIX_ADVERT_IMAGE_LANES, inputForLog.pipeline) ? inputForLog.pipeline : "unknown" };
     emit("action_started", logScope);
     try {
       const service = createWixAdvertImageService({ ...dependencies, environment, traceId });
       const input = request.method === "GET" ? request.query : request.body || {};
-      const action = request.method === "GET" ? "load" : input.action;
-      if (!["load", "prepareUpload", "finishUpload", "prepare", "reconcile"].includes(action)) throw new WixImageEditorError(400, "Unsupported image action.");
+      const action = request.method === "GET"
+        ? (clean(input.mode) === "marketplace-gallery" ? "loadMarketplaceGallery" : "load")
+        : input.action;
+      if (!knownActions.includes(action)) throw new WixImageEditorError(400, "Unsupported image action.");
       const result = await service[action](input);
       emit("action_completed", { ...logScope, status: 200,
         ...(action === "reconcile" ? { verified: result.verified } : {}),
