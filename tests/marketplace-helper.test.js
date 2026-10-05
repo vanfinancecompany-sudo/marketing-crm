@@ -69,7 +69,7 @@ test("Van Finance Marketplace uses cash pricing and a £99-deposit title hook", 
   assert.match(marketplaceAutomationSource, /postingDestination: "Van Finance Marketplace"/);
   assert.match(marketplaceAutomationSource, /VANFINANCECOMPANY\.co\.uk \| Deposit from £99/);
   assert.match(marketplaceAutomationSource, /priceContext: "cash"/);
-  assert.match(marketplaceAutomationSource, /cmsUploads\?\.vanFinance/);
+  assert.match(marketplaceAutomationSource, /loadMarketplaceWixGallery\(registration, "finance"\)/);
   assert.match(backgroundSource, /postingDestination/);
   assert.match(facebookSource, /job\.pipeline === "finance"/);
 });
