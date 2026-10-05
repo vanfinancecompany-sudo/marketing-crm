@@ -81,12 +81,27 @@ async function queryRows(configuration, request, collection, registration, optio
     if (!exhausted) throw new WixImageEditorError(409, "Wix identity scan is incomplete.");
   }
   const rows = [...byId.values()];
-  if (optional && rows.length === 0) return null;
-  if (rows.length !== 1) throw new WixImageEditorError(409, optional
-    ? "The Wix category identity in " + collection + " is ambiguous. No images were changed."
-    : "The Wix listing/detail identity is missing or ambiguous. No images were changed.");
+  if (optional) {
+    if (rows.length === 0) return null;
+    const classified = rows.map((row) => ({
+      row,
+      status: clean(row.data?._publishStatus || row._publishStatus).toUpperCase(),
+    }));
+    const unknown = classified.filter((item) => !["PUBLISHED", "DRAFT"].includes(item.status));
+    if (unknown.length) {
+      throw new WixImageEditorError(409, "The Wix category in " + collection + " could not be verified as published. No images were changed.");
+    }
+    const published = classified.filter((item) => item.status === "PUBLISHED");
+    if (published.length === 0) return null;
+    if (published.length !== 1) {
+      throw new WixImageEditorError(409, "The Wix category identity in " + collection + " is ambiguous. No images were changed.");
+    }
+    return published[0].row;
+  }
+  if (rows.length !== 1) {
+    throw new WixImageEditorError(409, "The Wix listing/detail identity is missing or ambiguous. No images were changed.");
+  }
   const status = clean(rows[0].data?._publishStatus || rows[0]._publishStatus).toUpperCase();
-  if (optional && status === "DRAFT") return null;
   if (status !== "PUBLISHED") {
     throw new WixImageEditorError(409, "Both Wix listing and detail must be verified as published. No images were changed.");
   }
@@ -183,12 +198,29 @@ export function createWixAdvertImageService({ environment = process.env, request
     return { uploadUrl: payload.uploadUrl, mimeType, fileName, uploadTicket: ticket({ fileName }, "upload", snapshot, 60 * 60 * 1000) };
   }
 
+  function generatedUploadNameForScope(scope, value) {
+    const fileName = clean(value);
+    const prefix = scope.registration + "-" + scope.pipeline + "-advert-";
+    if (!fileName.startsWith(prefix)) return "";
+    const suffix = fileName.slice(prefix.length);
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:jpg|png|webp)$/i.test(suffix)
+      ? fileName
+      : "";
+  }
+
   async function finishUpload(input) {
     const scope = scopeFor(input);
     await loadSnapshot(input);
-    const proof = readToken(input.uploadTicket, secret, "upload", scope);
+    let expectedFileName = "";
+    if (typeof input.uploadTicket === "string" && input.uploadTicket) {
+      expectedFileName = readToken(input.uploadTicket, secret, "upload", scope).fileName;
+    } else {
+      expectedFileName = generatedUploadNameForScope(scope, input.fileName);
+      if (!expectedFileName) throw new WixImageEditorError(409, "Wix image confirmation is missing or invalid.");
+      emit("upload_ticket_recovered", { ...logScope, method: "verified_generated_filename" });
+    }
     const file = await uploadedFile(scope, clean(input.fileId));
-    if (file.displayName !== proof.fileName) throw new WixImageEditorError(409, "This uploaded image does not belong to this vehicle/lane.");
+    if (file.displayName !== expectedFileName) throw new WixImageEditorError(409, "This uploaded image does not belong to this vehicle/lane.");
     if (file.operationStatus !== "READY") return { ready: false, fileId: file.id, status: file.operationStatus || "UNKNOWN" };
     return { ready: true, fileId: file.id, url: file.url, token: ticket({ fileId: file.id, url: file.url }, "uploaded_image", scope, 24 * 60 * 60 * 1000) };
   }

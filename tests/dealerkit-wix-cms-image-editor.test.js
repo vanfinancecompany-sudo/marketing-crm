@@ -211,7 +211,7 @@ test("upload and reconciliation confirmations cannot cross product lanes or regi
   assert.equal(f.writes().length + rent.writes().length, 0);
 });
 
-test("only READY, public images from the correct Wix Media site and upload ticket may be appended", async () => {
+test("only READY, public images from the correct Wix Media site and scoped upload proof may be appended", async () => {
   const f = fixture("finance");
   const prepared = await f.service.prepareUpload({ ...f.input, mimeType: "image/png", sizeInBytes: 500 });
   const fileId = prepared.uploadUrl.split("/").pop();
@@ -223,6 +223,34 @@ test("only READY, public images from the correct Wix Media site and upload ticke
   f.files[fileId].displayName = prepared.fileName;
   f.files[fileId].siteId = "other-site";
   await assert.rejects(() => f.service.finishUpload({ ...f.input, fileId, uploadTicket: prepared.uploadTicket }), /could not be verified/);
+  assert.equal(f.writes().length, 0);
+});
+
+test("a missing browser upload ticket can recover only from the exact server-generated vehicle filename", async () => {
+  const f = fixture("finance");
+  const prepared = await f.service.prepareUpload({ ...f.input, mimeType: "image/jpeg", sizeInBytes: 500 });
+  const fileId = prepared.uploadUrl.split("/").pop();
+
+  const recovered = await f.service.finishUpload({
+    ...f.input,
+    fileId,
+    fileName: prepared.fileName,
+  });
+  assert.equal(recovered.ready, true);
+  assert.equal(recovered.fileId, fileId);
+  assert.ok(recovered.token);
+
+  await assert.rejects(() => f.service.finishUpload({
+    ...f.input,
+    fileId,
+    fileName: prepared.fileName.replace(registration, "ZZ99ZZZ"),
+  }), /missing or invalid|does not belong/);
+
+  await assert.rejects(() => f.service.finishUpload({
+    ...f.input,
+    fileId,
+    fileName: "random-upload.jpg",
+  }), /missing or invalid/);
   assert.equal(f.writes().length, 0);
 });
 
@@ -314,23 +342,42 @@ for (const pipeline of ["finance", "rent2buy"]) {
     assert.ok(f.calls.filter((call) => call.path === "/wix-data/v2/items/query").every((call) => Object.hasOwn(f.rows, call.body.dataCollectionId)));
   });
 
-  test(pipeline + " blocks ambiguous canonical/spaced matches in every category before any image/count write", async () => {
+  test(pipeline + " blocks two published canonical/spaced matches in every category before any image/count write", async () => {
     for (const [collection, field] of Object.entries(WIX_ADVERT_CATEGORY_IMAGE_FIELDS[pipeline])) {
-      for (const duplicateStatus of ["PUBLISHED", "DRAFT"]) {
-        const f = fixture(pipeline); addCategories(f);
-        const draft = createWixImageDraft(await f.service.load(f.input));
-        moveWixImage(draft, "existing-1", "existing-0");
-        const input = { ...f.input, ...wixImageProposal(draft) };
-        const prepared = await f.service.prepare(input);
-        f.rows[collection] = [
-          { id: "canonical-category", data: { ...copy(f.untouched), title: "OY72YSJ", [field]: urls[0] } },
-          { id: "spaced-category", data: { ...copy(f.untouched), title: "OY72 YSJ", [field]: urls[0], _publishStatus: duplicateStatus } },
-        ];
-        await assert.rejects(() => f.service.reconcile({ ...input, confirmation: prepared.confirmation,
-          confirmed: true }), /ambiguous/);
-        assert.equal(f.writes().length, 0, collection + " ambiguity blocks before the detail/count write");
-      }
+      const f = fixture(pipeline); addCategories(f);
+      const draft = createWixImageDraft(await f.service.load(f.input));
+      moveWixImage(draft, "existing-1", "existing-0");
+      const input = { ...f.input, ...wixImageProposal(draft) };
+      const prepared = await f.service.prepare(input);
+      f.rows[collection] = [
+        { id: "canonical-category", data: { ...copy(f.untouched), title: "OY72YSJ", [field]: urls[0] } },
+        { id: "spaced-category", data: { ...copy(f.untouched), title: "OY72 YSJ", [field]: urls[0], _publishStatus: "PUBLISHED" } },
+      ];
+      await assert.rejects(() => f.service.reconcile({ ...input, confirmation: prepared.confirmation,
+        confirmed: true }), /ambiguous/);
+      assert.equal(f.writes().length, 0, collection + " live ambiguity blocks before the detail/count write");
     }
+  });
+
+  test(pipeline + " ignores a draft duplicate when exactly one category row is published", async () => {
+    const f = fixture(pipeline); addCategories(f);
+    const [collection, field] = Object.entries(WIX_ADVERT_CATEGORY_IMAGE_FIELDS[pipeline])[0];
+    const published = { id: "published-category", data: { ...copy(f.untouched), title: "OY72YSJ", [field]: urls[0] } };
+    const draftDuplicate = { id: "draft-category", data: { ...copy(f.untouched), title: "OY72 YSJ", [field]: urls[2], _publishStatus: "DRAFT" } };
+    f.rows[collection] = [published, draftDuplicate];
+    const originalDraft = copy(draftDuplicate);
+
+    const draft = createWixImageDraft(await f.service.load(f.input));
+    moveWixImage(draft, "existing-1", "existing-0");
+    await confirm(f, draft);
+
+    assert.equal(f.rows[collection].find((row) => row.id === "published-category").data[field], urls[1]);
+    assert.deepEqual(f.rows[collection].find((row) => row.id === "draft-category"), originalDraft);
+    assert.equal(
+      f.writes().filter((call) => call.body.dataCollectionId === collection).length,
+      1,
+      "Only the single published category row is updated",
+    );
   });
 
   test(pipeline + " deduplicates the same category ID seen under canonical/spaced title variants", async () => {
