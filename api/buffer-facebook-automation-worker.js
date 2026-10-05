@@ -670,7 +670,7 @@ async function generateOneReel(request, productKey, dateKey, packIndex, excluded
       frameSpecs: automatedReelFrameSpecs(productKey, packIndex),
       frameCount: 10,
       durationSeconds: 20,
-      fps: 24,
+      fps: 30,
       templateKey: DAILY_YOUTUBE_TEMPLATE_KEY,
       premiumMotion: true,
     },

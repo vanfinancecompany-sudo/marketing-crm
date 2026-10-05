@@ -178,6 +178,8 @@ test("worker uses paid queue headroom while refilling the larger daily target gr
   assert.doesNotMatch(worker, /templateKey:\s*["']tiktokPunch["']/);
   assert.doesNotMatch(worker, /shareNow/);
   assert.match(worker, /customScheduled|createBufferScheduledPost/);
+  assert.match(worker, /fps:\s*30/);
+  assert.doesNotMatch(worker, /fps:\s*24/);
 });
 
 test("Buffer worker follows Content Operations targets while settings keep the stored fallback values", () => {
