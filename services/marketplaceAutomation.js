@@ -2,10 +2,8 @@ import {
   buildMarketingAccessHeaders,
   parseMarketingJsonResponse,
 } from "./marketingAccess.js";
-import {
-  findYoutubeCmsMatch,
-  loadYouTubeCmsUploadsAsync,
-} from "../utils/youtubeImageResolution.js";
+import { convertWixImage } from "./marketingVehicleContract.js";
+import { WIX_ADVERT_IMAGE_LANES, wixGalleryImageSource } from "../lib/wixAdvertImageEditor.js";
 
 export const MARKETPLACE_CREATE_URL = "https://www.facebook.com/marketplace/create/vehicle";
 export const MARKETPLACE_JOB_MESSAGE_TYPE = "VFC_MARKETPLACE_JOB";
@@ -217,21 +215,50 @@ async function fetchDealerKitVehicle(registration, productKey = "rent2buy") {
   return result?.vehicle || null;
 }
 
-function orderedCmsImages(cmsUploads, vehicle, productKey = "rent2buy") {
-  const cmsKey = productKey === "finance" ? "vanFinance" : "rent2buy";
-  const rows = cmsUploads?.[cmsKey]?.rows || [];
-  const match = findYoutubeCmsMatch(rows, vehicle);
-  const records = Array.isArray(match?.imageRecords) ? match.imageRecords : [];
+async function loadMarketplaceWixGallery(registration, pipeline) {
+  const label = pipeline === "finance" ? "Van Finance" : "Rent2Buy";
+  const lane = WIX_ADVERT_IMAGE_LANES[pipeline];
+  let snapshot;
+  try {
+    const response = await fetch(
+      `/api/wix-advert-images?registration=${encodeURIComponent(registration)}&pipeline=${pipeline}`,
+      { method: "GET", cache: "no-store", headers: buildMarketingAccessHeaders({ Accept: "application/json" }),
+        signal: AbortSignal.timeout(30000) },
+    );
+    snapshot = await parseMarketingJsonResponse(response, "Wix gallery could not be read.");
+  } catch (error) {
+    if (error.type === "WIX_VEHICLE_NOT_FOUND") {
+      throw new Error(`Marketplace preflight failed: vehicle ${registration} was not found in Wix (${label}).`);
+    }
+    throw new Error(`Marketplace preflight failed: Wix read/API failed for the ${label} gallery. ${error.message}`);
+  }
+  // The server verifies exact published listing/detail identities. Keep that
+  // scope intact rather than matching a cached CMS title or another stock lane.
+  if (normalizeRegistration(snapshot.registration) !== registration || snapshot.pipeline !== pipeline
+    || snapshot.detailCollection !== lane.detail || snapshot.galleryField !== lane.gallery) {
+    throw new Error("Marketplace preflight failed: Wix gallery identity did not match the selected vehicle/lane.");
+  }
+  if (!Array.isArray(snapshot.gallery)) {
+    throw new Error(`Marketplace preflight failed: Wix read/API failed for the ${label} gallery (invalid response).`);
+  }
+  if (!snapshot.gallery.length) {
+    throw new Error(`Marketplace preflight failed: the ${label} Wix gallery is empty for ${registration}.`);
+  }
   const seen = new Set();
   const images = [];
-  for (const record of records) {
-    const url = clean(record?.url || record);
-    if (!url || seen.has(url)) continue;
+  for (const entry of snapshot.gallery) {
+    const url = convertWixImage(wixGalleryImageSource(entry)).replace(/^http:/i, "https:");
+    let publicUrl;
+    try { publicUrl = new URL(url); } catch {}
+    if (!publicUrl || publicUrl.protocol !== "https:" || publicUrl.username || publicUrl.password) {
+      throw new Error(`Marketplace preflight failed: the ${label} Wix gallery contains an unusable image URL.`);
+    }
+    if (seen.has(url)) continue;
     seen.add(url);
     images.push(url);
     if (images.length >= MARKETPLACE_MAX_IMAGES) break;
   }
-  return { match, images };
+  return { registration: snapshot.registration, images };
 }
 
 function ensureVisitLine(caption) {
@@ -282,17 +309,14 @@ export async function buildRent2BuyMarketplaceJob(vehicle, caption) {
   const monthlyPrice = numericValue(rentVehicle.monthly || rentVehicle.salePrice || "");
   if (!monthlyPrice) throw new Error("Marketplace preflight failed: monthly Rent2Buy price is missing.");
 
-  const [dealerKitVehicle, cmsUploads] = await Promise.all([
+  const [dealerKitVehicle, gallery] = await Promise.all([
     fetchDealerKitVehicle(registration, "rent2buy"),
-    loadYouTubeCmsUploadsAsync(),
+    loadMarketplaceWixGallery(registration, "rent2buy"),
   ]);
 
   if (!dealerKitVehicle) throw new Error("Marketplace preflight failed: DealerKit vehicle details were not found.");
 
-  const { match: cmsMatch, images } = orderedCmsImages(cmsUploads, rentVehicle, "rent2buy");
-  if (!cmsMatch || !images.length) {
-    throw new Error("Marketplace preflight failed: the ordered Rent2Buy CMS image gallery was not found.");
-  }
+  const { images } = gallery;
 
   const make = clean(dealerKitVehicle.make);
   const model = clean(dealerKitVehicle.model) || fallbackModel(rentVehicle);
@@ -329,8 +353,8 @@ export async function buildRent2BuyMarketplaceJob(vehicle, caption) {
     imageCount: images.length,
     leadImage: images[0],
     source: {
-      cms: cmsUploads?.rent2buy?.source || "cms",
-      cmsMatchRegistration: clean(cmsMatch.registration),
+      cms: "wix-advert-images",
+      cmsMatchRegistration: clean(gallery.registration),
       dealerKitStockId: clean(dealerKitVehicle.supplierStockId),
     },
   };
@@ -372,9 +396,9 @@ export async function buildVanFinanceMarketplaceJob(vehicle, caption) {
   );
   if (!registration) throw new Error("Marketplace preflight failed: registration is missing.");
 
-  const [dealerKitVehicle, cmsUploads] = await Promise.all([
+  const [dealerKitVehicle, gallery] = await Promise.all([
     fetchDealerKitVehicle(registration, "finance"),
-    loadYouTubeCmsUploadsAsync(),
+    loadMarketplaceWixGallery(registration, "finance"),
   ]);
 
   if (!dealerKitVehicle) throw new Error("Marketplace preflight failed: DealerKit vehicle details were not found.");
@@ -382,10 +406,7 @@ export async function buildVanFinanceMarketplaceJob(vehicle, caption) {
   const cashPrice = numericValue(financeVehicle.price || dealerKitVehicle.retailPrice || "");
   if (!cashPrice) throw new Error("Marketplace preflight failed: Van Finance cash price is missing.");
 
-  const { match: cmsMatch, images } = orderedCmsImages(cmsUploads, financeVehicle, "finance");
-  if (!cmsMatch || !images.length) {
-    throw new Error("Marketplace preflight failed: the ordered Van Finance CMS image gallery was not found.");
-  }
+  const { images } = gallery;
 
   const make = clean(dealerKitVehicle.make);
   const model = buildFinanceMarketplaceModel(dealerKitVehicle, financeVehicle);
@@ -424,8 +445,8 @@ export async function buildVanFinanceMarketplaceJob(vehicle, caption) {
     imageCount: images.length,
     leadImage: images[0],
     source: {
-      cms: cmsUploads?.vanFinance?.source || "cms",
-      cmsMatchRegistration: clean(cmsMatch.registration),
+      cms: "wix-advert-images",
+      cmsMatchRegistration: clean(gallery.registration),
       dealerKitStockId: clean(dealerKitVehicle.supplierStockId),
     },
   };

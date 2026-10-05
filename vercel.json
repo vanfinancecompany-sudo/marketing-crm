@@ -1,4 +1,9 @@
 {
+  "git": {
+    "deploymentEnabled": {
+      "fix/facebook-marketplace-wix-gallery-20261005": false
+    }
+  },
   "ignoreCommand": "test \"$VERCEL_PROJECT_ID\" = \"prj_zD76dAe2MHZdBTO08GNFSqOb9UHf\"",
   "crons": [
     {

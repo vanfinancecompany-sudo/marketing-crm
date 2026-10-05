@@ -94,7 +94,8 @@ async function queryRows(configuration, request, collection, registration, optio
     return classified.filter((item) => item.status === "PUBLISHED").map((item) => item.row);
   }
   if (rows.length !== 1) {
-    throw new WixImageEditorError(409, "The Wix listing/detail identity is missing or ambiguous. No images were changed.");
+    throw new WixImageEditorError(409, "The Wix listing/detail identity is missing or ambiguous. No images were changed.",
+      { error_type: rows.length === 0 ? "WIX_VEHICLE_NOT_FOUND" : "WIX_IDENTITY_AMBIGUOUS" });
   }
   const status = clean(rows[0].data?._publishStatus || rows[0]._publishStatus).toUpperCase();
   if (status !== "PUBLISHED") {
