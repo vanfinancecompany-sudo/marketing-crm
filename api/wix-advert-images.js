@@ -190,7 +190,8 @@ export function createWixAdvertImageService({ environment = process.env, request
       body: { mimeType, fileName, sizeInBytes: String(size), private: false },
     });
     if (!payload.uploadUrl) throw new WixImageEditorError(502, "Wix did not return an upload URL.");
-    return { uploadUrl: payload.uploadUrl, mimeType, fileName, uploadTicket: ticket({ fileName }, "upload", snapshot, 60 * 60 * 1000) };
+    const uploadScope = { registration: snapshot.registration, pipeline: snapshot.pipeline, siteId: SITE_ID };
+    return { uploadUrl: payload.uploadUrl, mimeType, fileName, uploadTicket: ticket({ fileName }, "upload", uploadScope, 60 * 60 * 1000) };
   }
 
   function generatedUploadNameForScope(scope, value) {
