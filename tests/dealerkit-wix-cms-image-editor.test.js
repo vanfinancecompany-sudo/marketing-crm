@@ -522,13 +522,13 @@ test("changing destination selection after prepare invalidates the signed confir
   assert.equal(f.writes().length, 0);
 });
 
-test("unselected ambiguous categories still block before any write", async () => {
+test("category target changes after prepare still block before any write", async () => {
   const f = fixture("finance"); addCategories(f);
   const draft = createWixImageDraft(await f.service.load(f.input));
   const input = { ...f.input, ...wixImageProposal(draft), selectedDestinations: [f.lane.listing] };
   const prepared = await f.service.prepare(input);
   f.rows.AUTOMATIC.push({ ...copy(f.rows.AUTOMATIC[0]), id: "second-auto", data: { ...copy(f.rows.AUTOMATIC[0].data), title: "OY72 YSJ" } });
-  await assert.rejects(() => f.service.reconcile({ ...input, confirmation: prepared.confirmation, confirmed: true }), /ambiguous/);
+  await assert.rejects(() => f.service.reconcile({ ...input, confirmation: prepared.confirmation, confirmed: true }), /category targets changed/);
   assert.equal(f.writes().length, 0);
 });
 
