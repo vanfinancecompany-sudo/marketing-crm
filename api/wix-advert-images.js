@@ -56,7 +56,7 @@ function readToken(token, secret, purpose, scope) {
 async function wixRequest(configuration, path, { method = "POST", body } = {}) {
   const response = await fetch(configuration.baseUrl + path, {
     method, headers: { Authorization: configuration.apiKey, "wix-site-id": SITE_ID, "Content-Type": "application/json" },
-    ...(body ? { body: JSON.stringify(body) } : {}), cache: "no-store",
+    ...(body ? { body: JSON.stringify(body) } : {}), cache: "no-store", signal: AbortSignal.timeout(15000),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new WixImageEditorError(502, clean(payload.message) || "Wix request failed.");
@@ -178,48 +178,26 @@ export function createWixAdvertImageService({ environment = process.env, request
   }
 
   async function prepareUpload(input) {
-    const snapshot = await loadSnapshot(input);
+    const scope = scopeFor(input);
     const mimeType = clean(input.mimeType).toLowerCase();
     const size = Number(input.sizeInBytes);
     if (!["image/jpeg", "image/png", "image/webp"].includes(mimeType) || !Number.isSafeInteger(size) || size <= 0 || size > 10 * 1024 * 1024) {
       throw new WixImageEditorError(400, "Choose a JPEG, PNG or WebP image up to 10 MB.");
     }
     const extension = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp" }[mimeType];
-    const fileName = snapshot.registration + "-" + snapshot.pipeline + "-advert-" + randomUUID() + extension;
+    const fileName = scope.registration + "-" + scope.pipeline + "-advert-" + randomUUID() + extension;
     const payload = await request(configuration, "/site-media/v1/files/generate-upload-url", {
       body: { mimeType, fileName, sizeInBytes: String(size), private: false },
     });
     if (!payload.uploadUrl) throw new WixImageEditorError(502, "Wix did not return an upload URL.");
-    const uploadScope = { registration: snapshot.registration, pipeline: snapshot.pipeline, siteId: SITE_ID };
-    return { uploadUrl: payload.uploadUrl, mimeType, fileName, uploadTicket: ticket({ fileName }, "upload", uploadScope, 60 * 60 * 1000) };
-  }
-
-  function generatedUploadNameForScope(scope, value) {
-    const fileName = clean(value);
-    const prefix = scope.registration + "-" + scope.pipeline + "-advert-";
-    if (!fileName.startsWith(prefix)) return "";
-    const suffix = fileName.slice(prefix.length);
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:jpg|png|webp)$/i.test(suffix)
-      ? fileName
-      : "";
+    return { uploadUrl: payload.uploadUrl, mimeType, fileName, uploadTicket: ticket({ fileName }, "upload", scope, 60 * 60 * 1000) };
   }
 
   async function finishUpload(input) {
     const scope = scopeFor(input);
-    await loadSnapshot(input);
+    const proof = readToken(input.uploadTicket, secret, "upload", scope);
     const file = await uploadedFile(scope, clean(input.fileId));
-    let expectedFileName = "";
-    if (typeof input.uploadTicket === "string" && input.uploadTicket) {
-      expectedFileName = readToken(input.uploadTicket, secret, "upload", scope).fileName;
-    } else {
-      expectedFileName = generatedUploadNameForScope(scope, file.displayName);
-      if (!expectedFileName) throw new WixImageEditorError(409, "Wix image confirmation is missing or invalid.");
-      if (clean(input.fileName) && clean(input.fileName) !== file.displayName) {
-        throw new WixImageEditorError(409, "This uploaded image does not belong to this vehicle/lane.");
-      }
-      emit("upload_ticket_recovered", { ...logScope, method: "verified_wix_generated_filename" });
-    }
-    if (file.displayName !== expectedFileName) throw new WixImageEditorError(409, "This uploaded image does not belong to this vehicle/lane.");
+    if (file.displayName !== proof.fileName) throw new WixImageEditorError(409, "This uploaded image does not belong to this vehicle/lane.");
     if (file.operationStatus !== "READY") return { ready: false, fileId: file.id, status: file.operationStatus || "UNKNOWN" };
     return { ready: true, fileId: file.id, url: file.url, token: ticket({ fileId: file.id, url: file.url }, "uploaded_image", scope, 24 * 60 * 60 * 1000) };
   }
@@ -228,13 +206,13 @@ export function createWixAdvertImageService({ environment = process.env, request
     return Object.hasOwn(data, field) ? { exists: true, value: data[field] } : { exists: false };
   }
 
-  async function reconciliationState(input) {
-    const snapshot = await loadSnapshot(input);
-    const categories = await Promise.all(Object.entries(WIX_ADVERT_CATEGORY_IMAGE_FIELDS[snapshot.pipeline])
+  async function reconciliationState(input, includeCategories = false, snapshot = null) {
+    snapshot ||= await loadSnapshot(input);
+    const categories = includeCategories ? await Promise.all(Object.entries(WIX_ADVERT_CATEGORY_IMAGE_FIELDS[snapshot.pipeline])
       .map(async ([collection, field]) => {
         const categoryRows = await queryRows(configuration, request, collection, snapshot.registration, true);
         return categoryRows.map((row) => ({ collection, id: row.id, fields: { [field]: fieldState(row.data, field) } }));
-      }));
+      })) : [];
     const rows = [
       { collection: snapshot.detailCollection, id: snapshot.detailId,
         fields: { [snapshot.galleryField]: { exists: true, value: snapshot.gallery }, [snapshot.countField]: snapshot.imageCount } },
@@ -266,8 +244,8 @@ export function createWixAdvertImageService({ environment = process.env, request
     const available = [...new Set(rows.filter((row) => row.collection !== snapshot.detailCollection).map((row) => row.collection))];
     const selected = input.selectedDestinations ?? available;
     if (!Array.isArray(selected) || selected.some((id) => typeof id !== "string" || !available.includes(id))
-      || new Set(selected).size !== selected.length || !selected.includes(snapshot.listingCollection)) {
-      throw new WixImageEditorError(409, "Select only existing published Wix sections and keep the required canonical listing selected.");
+      || new Set(selected).size !== selected.length || selected.length !== available.length) {
+      throw new WixImageEditorError(409, "Select only existing published Wix sections and keep all verified destinations selected.");
     }
     return available.filter((id) => selected.includes(id));
   }
@@ -283,12 +261,14 @@ export function createWixAdvertImageService({ environment = process.env, request
   }
 
   async function prepare(input) {
-    const { snapshot, rows } = await reconciliationState(input);
+    const snapshot = await loadSnapshot(input);
     const proposed = await proposal(input, snapshot);
+    const primaryChanged = proposed.picture !== wixGalleryImageSource(snapshot.gallery[0]);
+    const { rows } = await reconciliationState(input, primaryChanged, snapshot);
     const selection = selectedDestinations(input, { snapshot, rows });
-    return { ...proposed, imageCount: proposed.gallery.length, destinations: destinationsFor({ snapshot, rows }, selection),
+    return { ...proposed, primaryChanged, currentPicture: snapshot.picture, imageCount: proposed.gallery.length, destinations: destinationsFor({ snapshot, rows }, selection),
       galleryDestination: galleryDestination(snapshot), confirmation: ticket({ baseline: snapshot.baseline, proposal: fingerprint(proposed), targets: fingerprint(rows), selection: fingerprint(selection) },
-      "reconcile", snapshot, 5 * 60 * 1000) };
+      "reconcile", scopeFor(input), 5 * 60 * 1000) };
   }
 
   async function patch(collection, itemId, fields, phase = "apply") {
@@ -307,13 +287,15 @@ export function createWixAdvertImageService({ environment = process.env, request
       throw new WixImageEditorError(400, "Confirm the Wix image update before continuing.");
     }
     const proof = readToken(input.confirmation, secret, "reconcile", scope);
-    const { snapshot, rows } = await reconciliationState(input);
+    const snapshot = await loadSnapshot(input);
     const proposed = await proposal(input, snapshot);
+    const primaryChanged = proposed.picture !== wixGalleryImageSource(snapshot.gallery[0]);
+    const { rows } = await reconciliationState(input, primaryChanged, snapshot);
     const selection = selectedDestinations(input, { snapshot, rows });
     if (proof.baseline !== snapshot.baseline || proof.proposal !== fingerprint(proposed) || proof.targets !== fingerprint(rows) || proof.selection !== fingerprint(selection)) {
       throw new WixImageEditorError(409, "The confirmed images changed or category targets changed. Click Update Wix images again.");
     }
-    const targets = rows.filter((row) => row.collection === snapshot.detailCollection || selection.includes(row.collection)).map((row) => {
+    const targets = rows.filter((row) => row.collection === snapshot.detailCollection || (primaryChanged && selection.includes(row.collection))).map((row) => {
       const desired = row.collection === snapshot.detailCollection
         ? { [snapshot.galleryField]: { exists: true, value: proposed.gallery },
           [snapshot.countField]: { exists: true, value: String(proposed.gallery.length) } }
@@ -325,15 +307,13 @@ export function createWixAdvertImageService({ environment = process.env, request
     const attempted = [];
     try {
       for (const target of targets) {
-        const before = await reconciliationState(input);
-        if (!same(before.rows, expected)) throw new WixImageEditorError(409, "Wix identity or images changed before the write.");
         attempted.push(target);
         // Gallery and count share one detail-row patch; category/canonical patches touch only their image field.
         await patch(target.collection, target.id, target.fields);
         expected = expected.map((row) => row.collection === target.collection && row.id === target.id
           ? { ...row, fields: { ...row.fields, ...target.fields } } : row);
       }
-      const after = await reconciliationState(input);
+      const after = await reconciliationState(input, primaryChanged);
       if (!same(after.rows, expected)) throw new WixImageEditorError(502, "The exact Wix image result could not be verified.");
       emit("reconciliation_verification", { ...logScope, outcome: "success", imageCount: proposed.gallery.length,
         listingCollections: selection, detailCollection: snapshot.detailCollection, writeCount: targets.length });
@@ -342,7 +322,7 @@ export function createWixAdvertImageService({ environment = process.env, request
       const rollback = [];
       for (const target of attempted.reverse()) {
         try {
-          const fresh = await reconciliationState(input);
+          const fresh = await reconciliationState(input, primaryChanged);
           const row = fresh.rows.find((item) => item.collection === target.collection && item.id === target.id);
           if (!row) throw new Error("Wix identity changed; automatic rollback is blocked.");
           const restore = {};
@@ -353,7 +333,7 @@ export function createWixAdvertImageService({ environment = process.env, request
             restore[field] = original;
           }
           if (Object.keys(restore).length) await patch(target.collection, target.id, restore, "rollback");
-          const verified = await reconciliationState(input);
+          const verified = await reconciliationState(input, primaryChanged);
           const restored = verified.rows.find((item) => item.collection === target.collection && item.id === target.id);
           if (!restored || Object.entries(target.previous).some(([field, original]) => !same(restored.fields[field], original))) {
             throw new Error("Rollback could not be verified.");
@@ -396,29 +376,7 @@ export function createWixAdvertImageHandler(dependencies = {}) {
       const input = request.method === "GET" ? request.query : request.body || {};
       const action = request.method === "GET" ? "load" : input.action;
       if (!["load", "prepareUpload", "finishUpload", "prepare", "reconcile"].includes(action)) throw new WixImageEditorError(400, "Unsupported image action.");
-      if (action === "finishUpload") {
-        emit("finish_upload_request_shape", {
-          ...logScope,
-          bodyKeys: Object.keys(input || {}).sort(),
-          hasFileId: typeof input.fileId === "string" && input.fileId.length > 0,
-          fileId: typeof input.fileId === "string" ? input.fileId : "",
-          hasFileName: typeof input.fileName === "string" && input.fileName.length > 0,
-          fileNameLength: typeof input.fileName === "string" ? input.fileName.length : 0,
-          hasUploadTicket: typeof input.uploadTicket === "string" && input.uploadTicket.length > 0,
-          uploadTicketLength: typeof input.uploadTicket === "string" ? input.uploadTicket.length : 0,
-        });
-      }
       const result = await service[action](input);
-      if (action === "prepareUpload") {
-        emit("prepare_upload_response_shape", {
-          ...logScope,
-          resultKeys: Object.keys(result || {}).sort(),
-          hasFileName: typeof result.fileName === "string" && result.fileName.length > 0,
-          fileNameLength: typeof result.fileName === "string" ? result.fileName.length : 0,
-          hasUploadTicket: typeof result.uploadTicket === "string" && result.uploadTicket.length > 0,
-          uploadTicketLength: typeof result.uploadTicket === "string" ? result.uploadTicket.length : 0,
-        });
-      }
       emit("action_completed", { ...logScope, status: 200,
         ...(action === "reconcile" ? { verified: result.verified } : {}),
         ...(action === "finishUpload" ? { ready: result.ready } : {}),
