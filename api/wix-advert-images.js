@@ -395,7 +395,29 @@ export function createWixAdvertImageHandler(dependencies = {}) {
       const input = request.method === "GET" ? request.query : request.body || {};
       const action = request.method === "GET" ? "load" : input.action;
       if (!["load", "prepareUpload", "finishUpload", "prepare", "reconcile"].includes(action)) throw new WixImageEditorError(400, "Unsupported image action.");
+      if (action === "finishUpload") {
+        emit("finish_upload_request_shape", {
+          ...logScope,
+          bodyKeys: Object.keys(input || {}).sort(),
+          hasFileId: typeof input.fileId === "string" && input.fileId.length > 0,
+          fileId: typeof input.fileId === "string" ? input.fileId : "",
+          hasFileName: typeof input.fileName === "string" && input.fileName.length > 0,
+          fileNameLength: typeof input.fileName === "string" ? input.fileName.length : 0,
+          hasUploadTicket: typeof input.uploadTicket === "string" && input.uploadTicket.length > 0,
+          uploadTicketLength: typeof input.uploadTicket === "string" ? input.uploadTicket.length : 0,
+        });
+      }
       const result = await service[action](input);
+      if (action === "prepareUpload") {
+        emit("prepare_upload_response_shape", {
+          ...logScope,
+          resultKeys: Object.keys(result || {}).sort(),
+          hasFileName: typeof result.fileName === "string" && result.fileName.length > 0,
+          fileNameLength: typeof result.fileName === "string" ? result.fileName.length : 0,
+          hasUploadTicket: typeof result.uploadTicket === "string" && result.uploadTicket.length > 0,
+          uploadTicketLength: typeof result.uploadTicket === "string" ? result.uploadTicket.length : 0,
+        });
+      }
       emit("action_completed", { ...logScope, status: 200,
         ...(action === "reconcile" ? { verified: result.verified } : {}),
         ...(action === "finishUpload" ? { ready: result.ready } : {}),
