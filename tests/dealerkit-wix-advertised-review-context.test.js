@@ -178,12 +178,8 @@ for (const pipeline of Object.keys(WIX_ADVERT_IMAGE_LANES)) {
 
     state.uploadInput.files = [{ name: "Due in Soon.jpg", type: "image/jpeg", size: 1200 }];
     await state.uploadInput.fire("change");
-    assert.deepEqual(state.draft.items.map((item) => item.src), [...urls, uploadUrl]);
-    assert.equal(state.current.querySelector("img").src, urls[0], "Uploading does not replace current primary");
-    const cards = state.gallery.querySelectorAll("figure");
-    await cards[2].fire("dragstart", { dataTransfer: { setData() {} } });
-    await cards[0].fire("drop");
-    assert.deepEqual(state.draft.items.map((item) => item.src), [uploadUrl, urls[0], urls[1]]);
+    assert.deepEqual(state.draft.items.map((item) => item.src), [uploadUrl, ...urls], "New upload is immediately #1 / Primary");
+    assert.equal(state.current.querySelector("img").src, urls[0], "Current published primary stays unchanged until save");
     await state.gallery.querySelectorAll("figure")[1].querySelector("button").click();
     assert.deepEqual(state.draft.items.map((item) => item.src), [uploadUrl, urls[1]]);
     assert.deepEqual(client.live().gallery, urls);
@@ -258,15 +254,15 @@ for (const [existingCount, uploadCount] of [[2, 1], [2, 3], [38, 3]]) {
     state.uploadInput.files = Array.from({ length: uploadCount }, (_, index) => ({ name: "selected-" + index + ".jpg", type: "image/jpeg", size: 1200 }));
     await state.uploadInput.fire("change");
     const added = Array.from({ length: uploadCount }, (_, index) => index === 0 ? uploadUrl : uploadUrl.replace(".jpg", "-" + (index + 1) + ".jpg"));
-    assert.deepEqual(state.draft.items.map((item) => item.src), [...gallery, ...added]);
+    assert.deepEqual(state.draft.items.map((item) => item.src), [...added, ...gallery], "New uploads appear first in file-selection order");
     assert.deepEqual(client.live().gallery, gallery);
     const finished = client.calls.filter((call) => call.action === "finishUpload");
     assert.deepEqual(finished.map((call) => [call.fileId, call.uploadTicket]), Array.from({ length: uploadCount }, (_, index) => ["new-file-" + (index + 1), "lane-upload-ticket-" + (index + 1)]));
     await state.updateButton.click();
-    assert.ok(state.confirmationPanel.textContent.includes("primary image is unchanged"));
+    assert.ok(state.confirmationPanel.textContent.includes("primary image will be used"));
     await state.confirmButton.click();
-    assert.deepEqual(client.live().gallery, [...gallery, ...added]);
-    assert.equal(client.live().picture, gallery[0]);
+    assert.deepEqual(client.live().gallery, [...added, ...gallery]);
+    assert.equal(client.live().picture, added[0]);
     assert.equal(client.calls.filter((call) => call.action === "load").length, 1);
     assert.equal(state.busy, false);
     assert.equal(state.updateButton.disabled, false);
@@ -382,8 +378,8 @@ test("processing uploads keep the live primary unchanged and block update until 
   assert.equal(state.recheckButton.hidden, false);
   client.control.processing = false;
   await state.recheckButton.click();
-  assert.deepEqual(state.draft.items.map((item) => item.src), [...urls, uploadUrl]);
-  assert.equal(state.draft.items[0].src, urls[0]);
+  assert.deepEqual(state.draft.items.map((item) => item.src), [uploadUrl, ...urls]);
+  assert.equal(state.draft.items[0].src, uploadUrl);
   assert.equal(state.updateButton.disabled, false);
   assert.equal(client.calls.filter((call) => call.action === "reconcile").length, 0);
 });
