@@ -50,6 +50,46 @@ test("Marketplace, Facebook Groups and Google Business have separate daily targe
   assert.equal(summary.metrics.rent2buy_marketplace_post.completed, 5);
 });
 
+test("every visible Content Operations placement has its own target and durable metric", () => {
+  assert.equal(DEFAULT_DAILY_TARGETS.van_finance_facebook_story, 3);
+  assert.equal(DEFAULT_DAILY_TARGETS.van_finance_instagram_post, 20);
+  assert.equal(DEFAULT_DAILY_TARGETS.van_finance_instagram_story, 3);
+  assert.equal(DEFAULT_DAILY_TARGETS.van_finance_instagram_reel, 10);
+  assert.equal(DEFAULT_DAILY_TARGETS.rent2buy_facebook_story, 3);
+  assert.equal(DEFAULT_DAILY_TARGETS.vansco_facebook_post, 30);
+  assert.equal(DEFAULT_DAILY_TARGETS.vansco_facebook_story, 5);
+  assert.equal(DEFAULT_DAILY_TARGETS.vansco_333_google_business_post, 10);
+  assert.equal(DEFAULT_DAILY_TARGETS.vansco_airport_google_business_post, 10);
+  assert.equal(DEFAULT_DAILY_TARGETS.vansco_new_forest_google_business_post, 10);
+
+  const summary = summarizeDailyActivity({
+    targets: DEFAULT_DAILY_TARGETS,
+    events: [
+      { activity_type: "van_finance_facebook_story", quantity: 2 },
+      { activity_type: "van_finance_instagram_post", quantity: 4 },
+      { activity_type: "van_finance_instagram_story", quantity: 1 },
+      { activity_type: "van_finance_instagram_reel", quantity: 3 },
+      { activity_type: "rent2buy_facebook_story", quantity: 2 },
+      { activity_type: "vansco_facebook_post", quantity: 7 },
+      { activity_type: "vansco_facebook_story", quantity: 2 },
+      { activity_type: "vansco_333_google_business_post", quantity: 5 },
+      { activity_type: "vansco_airport_google_business_post", quantity: 6 },
+      { activity_type: "vansco_new_forest_google_business_post", quantity: 4 },
+    ],
+  });
+
+  assert.equal(summary.metrics.van_finance_facebook_story.completed, 2);
+  assert.equal(summary.metrics.van_finance_instagram_post.completed, 4);
+  assert.equal(summary.metrics.van_finance_instagram_story.completed, 1);
+  assert.equal(summary.metrics.van_finance_instagram_reel.completed, 3);
+  assert.equal(summary.metrics.rent2buy_facebook_story.completed, 2);
+  assert.equal(summary.metrics.vansco_facebook_post.completed, 7);
+  assert.equal(summary.metrics.vansco_facebook_story.completed, 2);
+  assert.equal(summary.metrics.vansco_333_google_business_post.completed, 5);
+  assert.equal(summary.metrics.vansco_airport_google_business_post.completed, 6);
+  assert.equal(summary.metrics.vansco_new_forest_google_business_post.completed, 4);
+});
+
 test("Knowledge Hub defaults to maintenance mode instead of a forced daily production target", () => {
   assert.equal(DEFAULT_DAILY_TARGETS.knowledge_hub_article, 0);
   const summary = summarizeDailyActivity({
