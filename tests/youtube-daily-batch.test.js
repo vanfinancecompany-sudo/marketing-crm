@@ -5,6 +5,7 @@ import {
   DAILY_YOUTUBE_MIN_IMAGES,
   DAILY_YOUTUBE_TARGET_PER_PRODUCT,
   DAILY_YOUTUBE_TEMPLATE_KEY,
+  buildRent2BuyDailyYouTubeImages,
   normalizeDailyYouTubeImageUrl,
   selectDailyYouTubeCandidates,
 } from "../lib/youtubeDailyBatch.js";
@@ -43,6 +44,37 @@ test("daily batch converts Wix gallery references into downloadable public URLs"
     normalizeDailyYouTubeImageUrl("https://static.wixstatic.com/media/live123"),
     "https://static.wixstatic.com/media/live123",
   );
+});
+
+test("Rent2Buy Reels replace a contaminated Finance lead image with the Rent2Buy branded stock image", () => {
+  const rent2buyPrimary = "https://static.wixstatic.com/media/rent2buy-card.png";
+  const financePrimary = "https://static.wixstatic.com/media/finance-99-card.png";
+  const galleryPhotos = Array.from({ length: 9 }, (_, index) => `https://example.com/photo-${index + 1}.jpg`);
+
+  const images = buildRent2BuyDailyYouTubeImages(
+    rent2buyPrimary,
+    [financePrimary, ...galleryPhotos],
+  );
+
+  assert.equal(images.length, 10);
+  assert.equal(images[0], rent2buyPrimary);
+  assert.equal(images.includes(financePrimary), false);
+  assert.deepEqual(images.slice(1), galleryPhotos);
+});
+
+test("Rent2Buy Reels keep the branded first image once when the Wix feed is already correct", () => {
+  const rent2buyPrimary = "https://static.wixstatic.com/media/rent2buy-card.png";
+  const galleryPhotos = Array.from({ length: 9 }, (_, index) => `https://example.com/photo-${index + 1}.jpg`);
+
+  const images = buildRent2BuyDailyYouTubeImages(
+    rent2buyPrimary,
+    [rent2buyPrimary, ...galleryPhotos],
+  );
+
+  assert.equal(images.length, 10);
+  assert.equal(images[0], rent2buyPrimary);
+  assert.equal(images.filter((url) => url === rent2buyPrimary).length, 1);
+  assert.deepEqual(images.slice(1), galleryPhotos);
 });
 
 test("daily YouTube batch rejects fewer than 10 images and registrations used inside 48 hours", () => {
