@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { vehiclesForSelection } from "../api/marketing-email-templates.js";
+import { previewTemplate, vehiclesForSelection } from "../api/marketing-email-templates.js";
+import { extractRegistration } from "../services/marketingVehicleContract.js";
 import { renderEmailHtml } from "../lib/marketingCampaignTemplateRenderer.js";
 import { renderRecipientCampaignPreview } from "../lib/marketingRecipientPersonalization.js";
 
@@ -129,6 +130,36 @@ test("selector search is scoped to the active product inventory", () => {
   assert.match(selectorSource, /postJson\(TEMPLATE_API, \{ action: "vehiclesForSelection", productMode: mode \}\)/);
   assert.match(selectorSource, /const activeInventory = state\.vehiclesByMode\[mode\] \|\| \[\]; const vehicles = activeInventory\.filter/);
   assert.match(selectorSource, /vehicleSearchText\(vehicle\)\.includes\(query\)/);
+});
+
+test("vehicle selector refreshes stock on open and immediately before saving", () => {
+  assert.match(selectorSource, /loadVehicles\(state\.selector\.mode, \{ force: true \}\)/);
+  assert.match(selectorSource, /vehicleSaveSelection\.addEventListener\("click", async/);
+  assert.match(selectorSource, /const currentInventory = await loadVehicles\(state\.selector\.mode, \{ force: true \}\)/);
+  assert.match(selectorSource, /is no longer in current stock\. Remove it and choose another vehicle\./);
+  assert.match(selectorSource, /snapshot_status: "unresolved"/);
+});
+
+test("Northern Ireland registrations are recognised as stable vehicle identities", () => {
+  assert.equal(extractRegistration("VIG6973"), "VIG6973");
+  assert.equal(extractRegistration("VIG 6973"), "VIG 6973");
+});
+
+test("preview resolves a newly selected van by registration if its stock row id has changed", async () => {
+  const supabase = createSupabaseFixture();
+  const block = selectedVehicleBlock("finance", {
+    snapshot_status: "unresolved",
+    selection_id: "finance:old-row-id",
+    source_id: "old-row-id",
+    registration: "AB22 CDE",
+    title: "2022 Ford Transit Custom AB22 CDE",
+    image_override_url: "",
+  });
+  const result = await previewTemplate(supabase, {
+    template: vehicleEmailTemplate(block),
+  });
+  assert.match(result.preview.html, /2022 Ford Transit Custom AB22 CDE/);
+  assert.match(result.preview.html, /https:\/\/www\.vanfinancecompany\.co\.uk\/finance-van/);
 });
 
 test("Rent2Buy preview cards use Rent2Buy payments and advert URL, never Finance cash price", () => {

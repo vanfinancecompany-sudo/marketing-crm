@@ -253,13 +253,15 @@ function normalizeUnresolvedSelectedVehicle(vehicle, productMode) {
   const selectionId = normalizeProfileText(vehicle.selection_id, "Selected vehicle selection_id", 160);
   const sourceId = normalizeProfileText(vehicle.source_id, "Selected vehicle source_id", 160);
   const registration = normalizeProfileText(vehicle.registration, "Selected vehicle registration", 40);
-  const lookupValue = selectionId || sourceId || registration;
+  const title = normalizeProfileText(vehicle.title, "Selected vehicle title", 300);
+  const lookupValue = selectionId || sourceId || registration || title;
   if (!lookupValue) throw new ValidationError("Selected vehicle reference is required.");
   return {
     snapshot_status: "unresolved",
     selection_id: selectionId,
     source_id: sourceId,
     registration,
+    title,
     product_mode: productMode,
     image_override_url: cleanHttpsUrl(vehicle.image_override_url, "Selected vehicle override image URL"),
   };
@@ -392,6 +394,10 @@ function cloneContentBlocks(blocks = []) {
   return normalizeContentBlocks(blocks, { allowSubmittedFrozenSnapshots: true, allowUnmarkedFrozenSnapshots: true }).map((block, index) => ({ ...block, id: generateBlockId(), position: index + 1 }));
 }
 
+function normalizedVehicleTitleKey(value) {
+  return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
 function vehicleLookupCandidates(productMode, reference = {}) {
   const candidates = [];
   if (reference.selection_id) candidates.push(reference.selection_id);
@@ -400,6 +406,12 @@ function vehicleLookupCandidates(productMode, reference = {}) {
     candidates.push(`${productMode}:${reference.registration}`);
     const registrationKey = normalizeRegistrationKey(reference.registration);
     if (registrationKey) candidates.push(`${productMode}:reg:${registrationKey}`);
+  }
+  if (reference.title) {
+    const titleRegistrationKey = normalizeRegistrationKey(reference.title);
+    if (titleRegistrationKey) candidates.push(`${productMode}:reg:${titleRegistrationKey}`);
+    const titleKey = normalizedVehicleTitleKey(reference.title);
+    if (titleKey) candidates.push(`${productMode}:title:${titleKey}`);
   }
   return candidates.filter(Boolean);
 }
@@ -417,6 +429,8 @@ function buildVehicleSelectionLookup(vehicles = []) {
         const registrationKey = normalizeRegistrationKey(vehicle.registration);
         if (registrationKey) entries.push(`${productMode}:reg:${registrationKey}`);
       }
+      const titleKey = normalizedVehicleTitleKey(vehicle.title || vehicle.name);
+      if (titleKey) entries.push(`${productMode}:title:${titleKey}`);
       entries.filter(Boolean).forEach((key) => {
         if (!lookup.has(key)) lookup.set(key, vehicle);
       });
@@ -478,7 +492,10 @@ async function resolveSelectedVehicleReferences(supabase, blocks = [], options =
       const resolved = vehicle.snapshot_status === "unresolved"
         ? (() => {
             const sourceVehicle = vehicleLookupCandidates(productMode, vehicle).map((key) => lookup.get(key)).find(Boolean);
-            if (!sourceVehicle) throw new ValidationError("Selected vehicle could not be found in current stock.");
+            if (!sourceVehicle) {
+              const label = vehicle.registration || vehicle.title || vehicle.source_id || vehicle.selection_id || "Selected vehicle";
+              throw new ValidationError(`${label} could not be found in current stock. Re-open Select Vehicles and choose from the refreshed stock list.`);
+            }
             return buildAuthoritativeSelectedVehicleSnapshot(vehicle, sourceVehicle, productMode, options);
           })()
         : vehicle;
