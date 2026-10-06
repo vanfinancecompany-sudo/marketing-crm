@@ -3,6 +3,7 @@ import {
   RENT2BUY_WIX_SITE_ID,
 } from "../lib/rent2buyMonthlyPriceSync.js";
 import { loadCompleteWixStockSnapshot } from "../lib/wixStockSnapshot.js";
+import { normalizeAdvertisedRent2BuyInitialRental } from "../lib/rent2BuyInitialRental.js";
 
 const WIX_QUERY_URL = "https://www.wixapis.com/wix-data/v2/items/query";
 const DEFAULT_SYNC_ENDPOINT = "https://crm-roan-rho.vercel.app/api/sync-rent-vehicles";
@@ -100,11 +101,11 @@ async function loadCurrentRent2BuyStock() {
       data.followedBy47Months,
       data.followedBy47Months1
     ),
-    initialRental: first(
+    initialRental: normalizeAdvertisedRent2BuyInitialRental(first(
       data.initialRental2250Vat,
       data.intialRentalCharge,
       data.initialRental
-    ),
+    )),
     vanDescription: first(
       data.vanDescription,
       data.descriptionText,

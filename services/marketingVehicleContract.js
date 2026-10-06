@@ -1,3 +1,5 @@
+import { normalizeAdvertisedRent2BuyInitialRental } from "../lib/rent2BuyInitialRental.js";
+
 const PLACEHOLDER_CAR_TEXT_PATTERNS = [
   /\bcar title here\b/i,
   /\breg\d+here\b/i,
@@ -165,6 +167,7 @@ export function mapFinanceVehicleRow(row, index) {
 export function mapRentVehicleRow(row, index) {
   const imageUrl = convertWixImage(row.picture);
   const registration = valueOrFallback(row.registration, `rent-${index + 1}`);
+  const initialRental = normalizeAdvertisedRent2BuyInitialRental(row.initialRental || "");
 
   return {
     id: row.id || registration || `rent-${index}`,
@@ -173,10 +176,10 @@ export function mapRentVehicleRow(row, index) {
     reg: registration,
     picture: imageUrl,
     image: imageUrl,
-    price: row.initialRental || "",
+    price: initialRental,
     monthly: row.monthly || "",
     week: row.week || "",
-    initialRental: row.initialRental || "",
+    initialRental,
     vanDescription: row.vanDescription || "",
     description: row.vanDescription || "",
     vanSpec: row.vanSpec || "",
@@ -269,7 +272,7 @@ function rentProfileForVehicle(vehicle) {
   return {
     eligible,
     monthly: eligible ? rentData?.monthly || "" : "",
-    initialRental: eligible ? valueOrFallback(rentData?.initialRental, rentData?.price) : "",
+    initialRental: eligible ? normalizeAdvertisedRent2BuyInitialRental(valueOrFallback(rentData?.initialRental, rentData?.price)) : "",
     term: eligible ? valueOrFallback(rentData?.week, rentData?.term) : "",
     url: eligible ? valueOrFallback(rentData?.weblink, rentData?.webLink, rentData?.link) : "",
   };

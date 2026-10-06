@@ -21,6 +21,8 @@ test("page pricing accepts bounded single and dual VAT display values", () => {
     rent2buy_monthly: "£499 + VAT / £598.80 inc VAT",
     rent2buy_initial: "£2,000 + VAT / £2,400 inc VAT",
   });
+  assert.equal(normalisePublicVehiclePricing({ rent2buy_initial: "£873 + VAT" }).rent2buy_initial, "£1,000 +VAT");
+  assert.equal(normalisePublicVehiclePricing({ rent2buy_initial: "£1,200 + VAT" }).rent2buy_initial, "£1,200 + VAT");
   assert.equal(normalisePublicVehiclePricing({ finance_monthly: "Ask the model for £399" }).finance_monthly, null);
   assert.equal(normalisePublicVehiclePricing({ finance_monthly: "<script>alert(1)</script>" }).finance_monthly, null);
   assert.equal(normaliseVehicleTermMonths(48), 48);

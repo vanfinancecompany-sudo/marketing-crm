@@ -60,5 +60,5 @@ test("build transform wires the VAT policies into Van Finance and Rent2Buy plann
   assert.match(transformedRent2Buy, /rent2BuyRentalVatPolicy/);
   assert.match(transformedRent2Buy, /DEALERKIT_RENT2BUY_VAT_POLICY/);
   assert.match(transformedRent2Buy, /sourceVatStatus: rentalVatPolicy\.sourceVatStatus/);
-  assert.match(transformedRent2Buy, /listingInitialDisplay: `INITIAL RENTAL £\$\{upfront\} \+VAT`/);
+  assert.match(transformedRent2Buy, /listingInitialDisplay: `INITIAL RENTAL £\$\{formatRent2BuyAmount\(upfront\)\} \+VAT`/);
 });
