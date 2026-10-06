@@ -6,6 +6,7 @@ import {
   DAILY_YOUTUBE_SOURCE,
   DAILY_YOUTUBE_TARGET_PER_PRODUCT,
   DAILY_YOUTUBE_TEMPLATE_KEY,
+  buildRent2BuyDailyYouTubeImages,
   normalizeDailyYouTubeImageUrl,
   normalizeDailyYouTubeRegistration,
   selectDailyYouTubeCandidates,
@@ -244,12 +245,13 @@ function buildRent2BuyCandidates(feedItems, stockRows) {
     const stock = stockByRegistration.get(feed.registration);
     if (!stock) return [];
     const title = clean(stock.vanDescription || feed.title || feed.registration);
+    const images = buildRent2BuyDailyYouTubeImages(stock.picture, feed.images);
     return [
       {
         productKey: "rent2buy",
         registration: feed.registration,
         title,
-        images: feed.images.slice(0, DAILY_YOUTUBE_MIN_IMAGES),
+        images,
         vehicle: {
           id: stock.id,
           reg: feed.registration,
