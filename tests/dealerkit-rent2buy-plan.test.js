@@ -91,7 +91,7 @@ test("advertised initial rental has a £1,000 + VAT floor without changing highe
   assert.equal(floored.upfront, 1000);
   assert.equal(floored.upfrontIncVat, 1200);
   assert.equal(floored.listingInitialDisplay, "INITIAL RENTAL £1,000 +VAT");
-  assert.equal(floored.upfrontDisplay, "£1,000 +Vat (£1,200 INC VAT)");
+  assert.equal(floored.upfrontDisplay, "£1,000 +VAT (£1,200 INC VAT)");
 
   const aboveFloor = calculateRent2BuyPricing({
     retailPrice: 10105,
