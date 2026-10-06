@@ -80,6 +80,31 @@ test("under 42k gets 90 percent over 48 months and over 42k gets 75 percent over
   assert.equal(highMileagePickup.followingPayments, 35);
 });
 
+test("advertised initial rental has a £1,000 + VAT floor without changing higher 3-month calculations", () => {
+  const floored = calculateRent2BuyPricing({
+    retailPrice: 7352,
+    mileage: 30000,
+    categories: ["all_vans"],
+    vatStatus: "plus_vat",
+  });
+  assert.equal(floored.monthly, 291);
+  assert.equal(floored.upfront, 1000);
+  assert.equal(floored.upfrontIncVat, 1200);
+  assert.equal(floored.listingInitialDisplay, "INITIAL RENTAL £1,000 +VAT");
+  assert.equal(floored.upfrontDisplay, "£1,000 +Vat (£1,200 INC VAT)");
+
+  const aboveFloor = calculateRent2BuyPricing({
+    retailPrice: 10105,
+    mileage: 30000,
+    categories: ["all_vans"],
+    vatStatus: "plus_vat",
+  });
+  assert.equal(aboveFloor.monthly, 400);
+  assert.equal(aboveFloor.upfront, 1200);
+  assert.equal(aboveFloor.upfrontIncVat, 1440);
+  assert.equal(aboveFloor.listingInitialDisplay, "INITIAL RENTAL £1,200 +VAT");
+});
+
 test("review save rechecks DealerKit before storing the derived Rent2Buy term", async () => {
   const source = await readFile(new URL("api/dealerkit-review-decision.js", root), "utf8");
   assert.match(source, /fetchDealerKitStockDetail/);

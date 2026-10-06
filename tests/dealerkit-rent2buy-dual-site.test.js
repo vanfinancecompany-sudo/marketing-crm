@@ -119,3 +119,22 @@ test("runtime controlled publisher does not require a standalone Rent2Buy Wix wr
   assert.match(publisher, /configurationForTarget/);
   assert.match(publisher, /rollbackCreatedAndUpdated\(state, writes\)/);
 });
+
+
+test("Rent2Buy publish targets use the central £1,000 + VAT initial-rental floor", () => {
+  const lowPriceVehicle = { ...vehicle(), retailPrice: 7352 };
+  const plan = buildControlledVehiclePublishPlan({
+    vehicle: lowPriceVehicle,
+    decision: decision(),
+    imageSets: imageSets(),
+    rent2buyWixResults: emptyResults(),
+    rent2buySites: sites,
+    productMode: "rent2buy",
+  });
+  const master = plan.targets.find((target) => target.collectionId === "ALLRENT2BUYVANS");
+  const detail = plan.targets.find((target) => target.collectionId === "VANPAGES");
+  assert.equal(plan.rent2buy.pricing.monthly, 291);
+  assert.equal(plan.rent2buy.pricing.upfront, 1000);
+  assert.equal(master.data.initialRental2250Vat, "INITIAL RENTAL £1,000 +VAT");
+  assert.equal(detail.data.intialRentalCharge, "£1,000 +Vat (£1,200 INC VAT)");
+});
