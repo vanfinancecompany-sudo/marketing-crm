@@ -136,5 +136,5 @@ test("Rent2Buy publish targets use the central £1,000 + VAT initial-rental floo
   assert.equal(plan.rent2buy.pricing.monthly, 291);
   assert.equal(plan.rent2buy.pricing.upfront, 1000);
   assert.equal(master.data.initialRental2250Vat, "INITIAL RENTAL £1,000 +VAT");
-  assert.equal(detail.data.intialRentalCharge, "£1,000 +Vat (£1,200 INC VAT)");
+  assert.equal(detail.data.intialRentalCharge, "£1,000 +VAT (£1,200 INC VAT)");
 });
