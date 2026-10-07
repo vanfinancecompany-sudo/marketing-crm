@@ -35,7 +35,8 @@ test("advertised stock with a DealerKit identity uses source-photo review and fa
   assert.match(page, /supplierStockId:\s*record\.supplierStockId/);
   assert.match(page, /product:\s*selectedPipeline/);
   assert.match(page, /advertisedWixRecord:\s*isAdvertisedStockMaintenance \? record\.currentWixAdvert : null/);
-  assert.match(page, /const canReviewWix = isAdvertisedStockMaintenance\s*&& !canRefreshAdvertFromDealerKit/);
+  assert.match(page, /const canReviewWix = isAdvertisedStockMaintenance/);
+  assert.match(page, /const useDealerKitSourceReview = !record\.dealerKitIdentityAmbiguous/);
   assert.match(page, /wix-open-advert-image-editor/);
 });
 
