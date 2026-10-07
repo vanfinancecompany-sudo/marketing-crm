@@ -176,6 +176,55 @@ function allRent2BuyCollectionIds() {
   return Array.from(new Set([...Object.values(RENT2BUY_CATEGORY_COLLECTIONS), "VANPAGES"]));
 }
 
+function exactPublishedCollectionImage(results = [], collectionId, fields = []) {
+  const matches = (Array.isArray(results) ? results : [])
+    .filter((entry) => (entry?.collectionId || entry?.collection?.id) === collectionId)
+    .flatMap((entry) => Array.isArray(entry?.items) ? entry.items : [])
+    .filter((item) => clean(item?.data?._publishStatus, 80).toUpperCase() !== "DRAFT");
+  if (matches.length !== 1) return "";
+  const data = matches[0]?.data || {};
+  for (const field of fields) {
+    const value = clean(data?.[field], 3000);
+    if (value) return value;
+  }
+  return "";
+}
+
+export function applyExistingRent2BuyMainImageFallback(imageSets = {}, rent2buyWixResults = [], vfcWixResults = []) {
+  const current = imageSets?.rent2buy || {};
+  if (clean(current.mainUrl, 3000)) return imageSets;
+
+  const rent2buyMain = exactPublishedCollectionImage(
+    rent2buyWixResults,
+    "ALLRENT2BUYVANS",
+    ["picture", "image", "addPicture", "additonalPicture"],
+  );
+  const financeMain = exactPublishedCollectionImage(vfcWixResults, "VANFINANCE-ALLVANS", ["picture"]);
+
+  // Existing Rent2Buy adverts are allowed to reuse their own published card
+  // image as the branded gallery lead. Never adopt the exact Van Finance
+  // card image as a Rent2Buy fallback.
+  if (!rent2buyMain || (financeMain && rent2buyMain === financeMain)) return imageSets;
+
+  const galleryUrls = [
+    rent2buyMain,
+    ...(Array.isArray(current.galleryUrls) ? current.galleryUrls : [])
+      .filter((url) => clean(url, 3000) && clean(url, 3000) !== rent2buyMain && (!financeMain || clean(url, 3000) !== financeMain)),
+  ];
+
+  return {
+    ...imageSets,
+    rent2buy: {
+      ...current,
+      mainUrl: rent2buyMain,
+      listingImageUrl: rent2buyMain,
+      mainSource: "existing_rent2buy_listing",
+      galleryUrls,
+      ready: galleryUrls.length > 0,
+    },
+  };
+}
+
 export async function buildFreshControlledPublishState(registrationInput, environment = process.env, { productMode } = {}) {
   const registration = normalizeFinanceRegistration(registrationInput || "");
   if (!registration) throw new ControlledPublishError(400, "A valid registration is required.");
@@ -200,7 +249,8 @@ export async function buildFreshControlledPublishState(registrationInput, enviro
     ...(productMode === "rent2buy" ? { financeEnabled: false, rent2buyEnabled: true } : {}),
     ...(productMode === "both" ? { financeEnabled: true, rent2buyEnabled: true } : {}),
   };
-  const imageSets = buildProductImageSets({ vehicle, decision: effectiveDecision, importedDealerKitMedia, manualMediaReadiness });
+  let imageSets = buildProductImageSets({ vehicle, decision: effectiveDecision, importedDealerKitMedia, manualMediaReadiness });
+  imageSets = applyExistingRent2BuyMainImageFallback(imageSets, rent2buyWixResults, vfcWixResults);
   const rent2buySites = rent2buyConfigurations.map(({ siteId, siteLabel, siteRole }) => ({ siteId, siteLabel, siteRole }));
   const plan = buildControlledVehiclePublishPlan({ vehicle, decision: effectiveDecision, imageSets, vfcWixResults, rent2buyWixResults, rent2buySites, productMode });
   plan.confirmation = buildControlledPublishConfirmation(plan);
