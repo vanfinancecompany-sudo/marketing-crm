@@ -382,7 +382,7 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
     && !record.dealerKitIdentityAmbiguous
     && Boolean(record.registration && record.supplierStockId);
   const canReviewWix = isAdvertisedStockMaintenance
-    && !canRefreshAdvertFromDealerKit
+    && !(!record.dealerKitIdentityAmbiguous && Boolean(record.registration && record.supplierStockId))
     && ["finance", "rent2buy", "cars"].includes(selectedPipeline)
     && Boolean(record.registration && record.wixItemId && record.wixCollectionId && record.wixPublishStatus === "PUBLISHED");
   const canReviewDealerKit = !isLocalNotVansco
@@ -392,7 +392,10 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
     && Boolean(record.registration && record.supplierStockId);
 
   function openDealerKitReview() {
-    if (canReviewDealerKit) {
+    const useDealerKitSourceReview = !record.dealerKitIdentityAmbiguous
+      && Boolean(record.registration && record.supplierStockId)
+      && ["finance", "rent2buy", "cars"].includes(selectedPipeline);
+    if (useDealerKitSourceReview) {
       window.dispatchEvent(new CustomEvent("dealerkit-open-product-review", {
         detail: {
           registration: record.registration,
