@@ -375,6 +375,7 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
   const isHiddenOrNever = isTemporaryHiddenStatus(status) || isNeverShowStatus(status);
   const isAdvertised = isAdvertisedStatus(status) || record.displayStatus === "advertised";
   const isLocalNotVansco = record.displayStatus === "local_not_vansco";
+  const isImageReady = record.imageReadinessAlert === true || record.matchStatus === "images_ready" || String(record.id || "").startsWith("images-ready-");
   const isAdvertisedStockMaintenance = record.displayStatus === "advertised_stock";
   const canRefreshAdvertFromDealerKit = isAdvertisedStockMaintenance
     && ["finance", "rent2buy", "cars"].includes(selectedPipeline)
@@ -385,7 +386,7 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
     && ["finance", "rent2buy", "cars"].includes(selectedPipeline)
     && Boolean(record.registration && record.wixItemId && record.wixCollectionId && record.wixPublishStatus === "PUBLISHED");
   const canReviewDealerKit = !isLocalNotVansco
-    && (record.displayStatus === "missing" || canRefreshAdvertFromDealerKit)
+    && (record.displayStatus === "missing" || canRefreshAdvertFromDealerKit || isImageReady)
     && ["finance", "rent2buy", "cars"].includes(selectedPipeline)
     && !record.dealerKitIdentityAmbiguous
     && Boolean(record.registration && record.supplierStockId);
