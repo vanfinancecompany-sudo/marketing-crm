@@ -376,30 +376,37 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
   const isAdvertised = isAdvertisedStatus(status) || record.displayStatus === "advertised";
   const isLocalNotVansco = record.displayStatus === "local_not_vansco";
   const isAdvertisedStockMaintenance = record.displayStatus === "advertised_stock";
+  const canRefreshAdvertFromDealerKit = isAdvertisedStockMaintenance
+    && ["finance", "rent2buy", "cars"].includes(selectedPipeline)
+    && !record.dealerKitIdentityAmbiguous
+    && Boolean(record.registration && record.supplierStockId);
   const canReviewWix = isAdvertisedStockMaintenance
+    && !canRefreshAdvertFromDealerKit
     && ["finance", "rent2buy", "cars"].includes(selectedPipeline)
     && Boolean(record.registration && record.wixItemId && record.wixCollectionId && record.wixPublishStatus === "PUBLISHED");
   const canReviewDealerKit = !isLocalNotVansco
-    && !isAdvertisedStockMaintenance
-    && record.displayStatus === "missing"
+    && (record.displayStatus === "missing" || canRefreshAdvertFromDealerKit)
     && ["finance", "rent2buy", "cars"].includes(selectedPipeline)
     && !record.dealerKitIdentityAmbiguous
     && Boolean(record.registration && record.supplierStockId);
 
   function openDealerKitReview() {
+    if (canReviewDealerKit) {
+      window.dispatchEvent(new CustomEvent("dealerkit-open-product-review", {
+        detail: {
+          registration: record.registration,
+          supplierStockId: record.supplierStockId,
+          product: selectedPipeline,
+          advertisedWixRecord: isAdvertisedStockMaintenance ? record.currentWixAdvert : null,
+        },
+      }));
+      return;
+    }
     if (isAdvertisedStockMaintenance) {
       window.dispatchEvent(new CustomEvent("wix-open-advert-image-editor", {
         detail: { registration: record.registration, pipeline: selectedPipeline },
       }));
-      return;
     }
-    window.dispatchEvent(new CustomEvent("dealerkit-open-product-review", {
-      detail: {
-        registration: record.registration,
-        supplierStockId: record.supplierStockId,
-        product: selectedPipeline,
-      },
-    }));
   }
 
   return (
@@ -427,7 +434,7 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
           {!isLocalNotVansco && !isAdvertisedStockMaintenance && record.displayStatus === "missing" ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("added_to_crm", "Marked as advertised")} disabled={Boolean(savingAction)}>{savingAction === "added_to_crm" ? "Marking..." : "Mark as advertised"}</button> : null}
           {!isLocalNotVansco && !isAdvertisedStockMaintenance && !isNeverShowStatus(status) ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("never_show_again", "Moved to Never show again")} disabled={Boolean(savingAction)}>{savingAction === "never_show_again" ? "Saving..." : "Never show again"}</button> : null}
         </div>
-        {isAdvertisedStockMaintenance ? <div className="vehicle-card__meta">Published Wix image maintenance only. Review the current Wix gallery, upload / reorder images, then use Prepare + Reconcile to confirm the image-only change.</div> : null}
+        {isAdvertisedStockMaintenance ? <div className="vehicle-card__meta">{canRefreshAdvertFromDealerKit ? "DealerKit source photos are available. Review the source gallery, then use Prepare + Reconcile to refresh the live website images." : "Published Wix image maintenance only. Review the current Wix gallery, upload / reorder images, then use Prepare + Reconcile to confirm the image-only change."}</div> : null}
         {record.displayStatus === "back_in_stock" ? <div className="vehicle-card__meta">This was hidden before, but DealerKit now shows it as available again.</div> : null}
         {record.displayStatus === "advertised" && record.financeStockMatchForCars ? <div className="vehicle-card__meta">Advisory only: counted as advertised for the Cars tab because the registration is active in Van Finance stock.</div> : null}
         {record.displayStatus === "advertised" && !record.financeStockMatchForCars ? <div className="vehicle-card__meta">You marked this as advertised during the day. Overnight refresh should remove it automatically once the registration is found in this CRM stock tab.</div> : null}
