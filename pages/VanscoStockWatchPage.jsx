@@ -385,8 +385,13 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
     && !(!record.dealerKitIdentityAmbiguous && Boolean(record.registration && record.supplierStockId))
     && ["finance", "rent2buy", "cars"].includes(selectedPipeline)
     && Boolean(record.registration && record.wixItemId && record.wixCollectionId && record.wixPublishStatus === "PUBLISHED");
+  // DEALERKIT_EXISTING_ADVERT_SOURCE_REFRESH: advertised stock with an exact DealerKit identity uses the source-photo review path.
   const canReviewDealerKit = !isLocalNotVansco
-    && (record.displayStatus === "missing" || (isAdvertisedStockMaintenance && !record.dealerKitIdentityAmbiguous && Boolean(record.registration && record.supplierStockId)) || isImageReady)
+    && (record.displayStatus === "missing"
+      || (isAdvertisedStockMaintenance && !record.dealerKitIdentityAmbiguous && Boolean(record.registration && record.supplierStockId))
+      || record.imageReadinessAlert === true
+      || record.matchStatus === "images_ready"
+      || String(record.id || "").startsWith("images-ready-"))
     && ["finance", "rent2buy", "cars"].includes(selectedPipeline)
     && !record.dealerKitIdentityAmbiguous
     && Boolean(record.registration && record.supplierStockId);
