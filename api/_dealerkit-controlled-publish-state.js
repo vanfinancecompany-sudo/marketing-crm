@@ -220,7 +220,7 @@ export function applyExistingRent2BuyMainImageFallback(imageSets = {}, rent2buyW
       listingImageUrl: rent2buyMain,
       mainSource: "existing_rent2buy_listing",
       galleryUrls,
-      ready: galleryUrls.length > 0,
+      ready: Boolean(galleryUrls.length > 0 && !(current.unpreparedDealerKitImageIds || []).length),
     },
   };
 }
