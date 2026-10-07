@@ -48,7 +48,7 @@ replaceOnce(
   "const isImageReady = record.imageReadinessAlert === true"
 );
 
-if (!source.includes(`|| isImageReady)\n    && ["finance", "rent2buy", "cars"].includes(selectedPipeline)`)) {
+if (!source.includes("DEALERKIT_EXISTING_ADVERT_SOURCE_REFRESH") && !source.includes(`|| isImageReady)\n    && ["finance", "rent2buy", "cars"].includes(selectedPipeline)`)) {
   const maintenanceEligibility = `    && (record.displayStatus === "missing" || isAdvertisedStockMaintenance)\n    && ["finance", "rent2buy", "cars"].includes(selectedPipeline)`;
   if (source.includes("const canReviewWix =")) {
     replaceOnce(
