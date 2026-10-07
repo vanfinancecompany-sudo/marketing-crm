@@ -276,7 +276,9 @@ export function createWixAdvertImageService({ environment = process.env, request
   async function prepare(input) {
     const snapshot = await loadSnapshot(input);
     const proposed = await proposal(input, snapshot);
-    const primaryChanged = proposed.picture !== wixGalleryImageSource(snapshot.gallery[0]);
+    const galleryPrimary = wixGalleryImageSource(snapshot.gallery[0]);
+    const listingPrimary = wixGalleryImageSource(snapshot.picture);
+    const primaryChanged = proposed.picture !== galleryPrimary || !listingPrimary;
     const { rows } = await reconciliationState(input, primaryChanged, snapshot);
     const selection = selectedDestinations(input, { snapshot, rows });
     return { ...proposed, primaryChanged, currentPicture: snapshot.picture, imageCount: proposed.gallery.length, destinations: destinationsFor({ snapshot, rows }, selection),
@@ -302,7 +304,9 @@ export function createWixAdvertImageService({ environment = process.env, request
     const proof = readToken(input.confirmation, secret, "reconcile", scope);
     const snapshot = await loadSnapshot(input);
     const proposed = await proposal(input, snapshot);
-    const primaryChanged = proposed.picture !== wixGalleryImageSource(snapshot.gallery[0]);
+    const galleryPrimary = wixGalleryImageSource(snapshot.gallery[0]);
+    const listingPrimary = wixGalleryImageSource(snapshot.picture);
+    const primaryChanged = proposed.picture !== galleryPrimary || !listingPrimary;
     const { rows } = await reconciliationState(input, primaryChanged, snapshot);
     const selection = selectedDestinations(input, { snapshot, rows });
     if (proof.baseline !== snapshot.baseline || proof.proposal !== fingerprint(proposed) || proof.targets !== fingerprint(rows) || proof.selection !== fingerprint(selection)) {
