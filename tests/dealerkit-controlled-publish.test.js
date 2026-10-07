@@ -10,6 +10,7 @@ import {
 } from "../lib/dealerKitControlledPublishPlan.js";
 import { VAN_FINANCE_WIX_COLLECTIONS } from "../lib/vanscoWixPrice.js";
 import { reconcileControlledTargets, setTargetPublishStatus, verifyWritten } from "../api/dealerkit-controlled-publish.js";
+import { applyExistingRent2BuyMainImageFallback } from "../api/_dealerkit-controlled-publish-state.js";
 
 const root = new URL("../", import.meta.url);
 const now = "2026-09-10T17:00:00.000Z";
@@ -132,6 +133,46 @@ test("Van Finance still blocks when the chosen primary is not READY", () => {
   const plan = buildControlledVehiclePublishPlan({ vehicle: v, decision: d, imageSets: sets, vfcWixResults: emptyVfcRows(), rent2buyWixResults: [] });
   assert.equal(plan.canPublish, false);
   assert.ok(plan.blockers.some((blocker) => blocker.code === "vfc_media_not_ready"));
+});
+
+test("existing Rent2Buy advert can reuse its own published card image as the gallery lead", () => {
+  const sets = buildProductImageSets({
+    vehicle: vehicle(),
+    decision: decision({ financeEnabled: false, rent2buyEnabled: true, rent2buyCategories: ["all_vans", "medium_mwb"] }),
+    importedDealerKitMedia: imported(),
+    manualMediaReadiness: manualReadiness(),
+  });
+  assert.equal(sets.rent2buy.mainUrl, null);
+
+  const patched = applyExistingRent2BuyMainImageFallback(
+    sets,
+    [{ collectionId: "ALLRENT2BUYVANS", items: [{ id: "r2b-all", data: { title: "AB23CDE", picture: "https://static.wixstatic.com/media/r2b-existing.png", _publishStatus: "PUBLISHED" } }] }],
+    [{ collection: { id: "VANFINANCE-ALLVANS" }, items: [{ id: "vfc-all", data: { title: "AB23CDE", picture: "https://static.wixstatic.com/media/vfc-existing.png", _publishStatus: "PUBLISHED" } }] }],
+  );
+
+  assert.equal(patched.rent2buy.mainUrl, "https://static.wixstatic.com/media/r2b-existing.png");
+  assert.equal(patched.rent2buy.listingImageUrl, patched.rent2buy.mainUrl);
+  assert.equal(patched.rent2buy.mainSource, "existing_rent2buy_listing");
+  assert.equal(patched.rent2buy.galleryUrls[0], patched.rent2buy.mainUrl);
+  assert.equal(patched.rent2buy.ready, true);
+  assert.ok(!patched.rent2buy.galleryUrls.includes("https://static.wixstatic.com/media/vfc-existing.png"));
+});
+
+test("Rent2Buy existing-card fallback refuses the exact Van Finance promo image", () => {
+  const sets = buildProductImageSets({
+    vehicle: vehicle(),
+    decision: decision({ financeEnabled: false, rent2buyEnabled: true, rent2buyCategories: ["all_vans", "medium_mwb"] }),
+    importedDealerKitMedia: imported(),
+    manualMediaReadiness: manualReadiness(),
+  });
+  const shared = "https://static.wixstatic.com/media/finance-99.png";
+  const patched = applyExistingRent2BuyMainImageFallback(
+    sets,
+    [{ collectionId: "ALLRENT2BUYVANS", items: [{ id: "r2b-all", data: { title: "AB23CDE", picture: shared, _publishStatus: "PUBLISHED" } }] }],
+    [{ collection: { id: "VANFINANCE-ALLVANS" }, items: [{ id: "vfc-all", data: { title: "AB23CDE", picture: shared, _publishStatus: "PUBLISHED" } }] }],
+  );
+  assert.equal(patched.rent2buy.mainUrl, null);
+  assert.equal(patched.rent2buy.ready, false);
 });
 
 test("Rent2Buy READY template can publish while DealerKit secondary photos are processing", () => {
