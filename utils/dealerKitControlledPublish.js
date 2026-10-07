@@ -242,7 +242,9 @@ function createPanel(registration, product = "finance") {
   check.addEventListener("click", async () => {
     check.disabled = true;
     check.textContent = "Checking…";
-    try { await loadPreview(root); }
+    root.dataset.publishCompleted = "false";
+    delete root.dataset.publishCompletedAt;
+    try { await loadPreview(root, { force: true }); }
     catch (error) { setStatus(root, "CHECK FAILED", "is-warning"); result.replaceChildren(element("div", "dealerkit-wix-preview__error", error?.message || "Could not check final readiness.")); }
     finally { refreshActionState(root); }
   });
@@ -300,14 +302,30 @@ function createPanel(registration, product = "finance") {
         body: JSON.stringify(body),
       });
       const published = await parseMarketingJsonResponse(response, "Controlled Wix publishing failed.");
-      setStatus(root, published.verified ? (updateExisting ? "RECONCILED + VERIFIED" : "PUBLISHED + VERIFIED") : "CHECK RESULT", published.verified ? "is-good" : "is-warning");
-      result.replaceChildren(element("div", "dealerkit-wix-preview__verdict is-good", published.message || `${registration} was published and verified.`));
+      const partialGallery = Boolean(published.verified && published.galleryComplete === false);
+      setStatus(
+        root,
+        published.verified
+          ? partialGallery
+            ? "PUBLISHED · GALLERY PROCESSING"
+            : (updateExisting ? "RECONCILED + VERIFIED" : "PUBLISHED + VERIFIED")
+          : "CHECK RESULT",
+        published.verified ? (partialGallery ? "is-busy" : "is-good") : "is-warning",
+      );
+      result.replaceChildren(element("div", `dealerkit-wix-preview__verdict ${partialGallery ? "is-warning" : "is-good"}`, published.message || `${registration} was published and verified.`));
       root._controlledPublishPayload = null;
-      if (published.verified) {
+      if (published.verified && !partialGallery) {
         root.dataset.publishCompleted = "true";
         root.dataset.publishCompletedAt = new Date().toISOString();
+      } else {
+        root.dataset.publishCompleted = "false";
+        delete root.dataset.publishCompletedAt;
       }
-      refreshActionState(root);
+      if (partialGallery) {
+        await loadPreview(root, { force: true });
+      } else {
+        refreshActionState(root);
+      }
     } catch (error) {
       // A duplicate/late request can return "preview stale" after an earlier
       // request has already completed successfully. Never replace a verified
