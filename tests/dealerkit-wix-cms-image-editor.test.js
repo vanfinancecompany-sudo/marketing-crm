@@ -195,6 +195,39 @@ for (const pipeline of Object.keys(WIX_ADVERT_IMAGE_LANES)) {
   });
 }
 
+test("Rent2Buy self-heals a blank listing and category image from gallery position #1", async () => {
+  const f = fixture("rent2buy");
+  delete f.rows[f.lane.listing][0].data.picture;
+  for (const [collection, field] of Object.entries(WIX_ADVERT_CATEGORY_IMAGE_FIELDS.rent2buy)) {
+    f.rows[collection] = [{ id: "category-" + collection, data: { ...copy(f.untouched), title: registration, [field]: "" } }];
+  }
+
+  const snapshot = await f.service.load(f.input);
+  assert.equal(snapshot.picture, "");
+  assert.equal(snapshot.gallery[0], urls[0]);
+
+  const draft = createWixImageDraft(snapshot);
+  const prepared = await f.service.prepare({ ...f.input, ...wixImageProposal(draft) });
+  assert.equal(prepared.primaryChanged, true, "Missing listing primary must trigger image reconciliation");
+
+  const result = await f.service.reconcile({
+    ...f.input,
+    ...wixImageProposal(draft),
+    confirmation: prepared.confirmation,
+    confirmed: true,
+  });
+
+  assert.equal(result.verified, true);
+  assert.equal(f.rows[f.lane.listing][0].data.picture, urls[0]);
+  for (const [collection, field] of Object.entries(WIX_ADVERT_CATEGORY_IMAGE_FIELDS.rent2buy)) {
+    assert.equal(f.rows[collection][0].data[field], urls[0], collection);
+  }
+  assert.deepEqual(
+    f.writes().map((write) => write.body.dataCollectionId),
+    [f.lane.detail, f.lane.listing, ...Object.keys(WIX_ADVERT_CATEGORY_IMAGE_FIELDS.rent2buy)],
+  );
+});
+
 test("object gallery metadata and duplicate stored images retain their exact current order and representation", async () => {
   const entries = [{ type: "image", src: "wix:image://v1/a/van.jpg", title: "Van", description: "Original caption", custom: { keep: true } }, { type: "image", src: urls[1], title: "Inside" }, { type: "image", src: urls[1], title: "Same image with another caption" }];
   const f = fixture("finance", entries);
