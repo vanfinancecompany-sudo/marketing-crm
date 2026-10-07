@@ -100,7 +100,7 @@ test("verified Wix image metadata maps processing and selected state explicitly"
   assert.equal(failed.failed, true);
 });
 
-test("selected Van Finance manual main replaces the DealerKit primary instead of prepending it", () => {
+test("selected Van Finance manual main leads the gallery without removing any selected DealerKit photo", () => {
   const sets = buildProductImageSets({
     vehicle: {
       registration: "HT22KJX",
@@ -132,13 +132,14 @@ test("selected Van Finance manual main replaces the DealerKit primary instead of
   assert.equal(sets.vanFinance.mainUrl, "https://static.wixstatic.com/media/manual-main.jpg");
   assert.deepEqual(sets.vanFinance.galleryUrls, [
     "https://static.wixstatic.com/media/manual-main.jpg",
+    "https://static.wixstatic.com/media/dealerkit-primary.jpg",
     "https://static.wixstatic.com/media/dealerkit-two.jpg",
     "https://static.wixstatic.com/media/dealerkit-three.jpg",
   ]);
-  assert.equal(sets.vanFinance.galleryUrls.includes("https://static.wixstatic.com/media/dealerkit-primary.jpg"), false);
+  assert.equal(sets.vanFinance.galleryUrls.includes("https://static.wixstatic.com/media/dealerkit-primary.jpg"), true);
 });
 
-test("selected Rent2Buy template replaces its DealerKit primary without changing Finance gallery state", () => {
+test("selected Rent2Buy template leads its gallery without removing the selected DealerKit primary", () => {
   const sets = buildProductImageSets({
     vehicle: {
       registration: "HT22KJX",
@@ -171,9 +172,10 @@ test("selected Rent2Buy template replaces its DealerKit primary without changing
   ]);
   assert.deepEqual(sets.rent2buy.galleryUrls, [
     "https://static.wixstatic.com/media/r2b-template.jpg",
+    "https://static.wixstatic.com/media/dealerkit-primary.jpg",
     "https://static.wixstatic.com/media/dealerkit-two.jpg",
   ]);
-  assert.equal(sets.rent2buy.galleryUrls.includes("https://static.wixstatic.com/media/dealerkit-primary.jpg"), false);
+  assert.equal(sets.rent2buy.galleryUrls.includes("https://static.wixstatic.com/media/dealerkit-primary.jpg"), true);
 });
 
 test("Van Finance can publish a manual-only gallery after every DealerKit source image is excluded", () => {
