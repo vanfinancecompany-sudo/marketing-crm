@@ -51,6 +51,7 @@ import {
   DAILY_YOUTUBE_TEMPLATE_KEY,
   normalizeDailyYouTubeImageUrl,
 } from "../lib/youtubeDailyBatch.js";
+import { loadRent2BuyPhotoProvenanceMap } from "../lib/rent2BuyPhotoProvenance.js";
 
 export const config = { maxDuration: 300 };
 
@@ -340,8 +341,7 @@ async function loadFacebookVehicleImages(productKey) {
           if (seen.has(value)) return false;
           seen.add(value);
           return true;
-        })
-        .slice(0, 3);
+        });
 
       if (images.length) byRegistration.set(registration, images);
     }
@@ -354,18 +354,21 @@ async function loadFacebookVehicleImages(productKey) {
   }
 }
 
-function facebookVehicleImageUrls(vehicle, imagesByRegistration) {
+export function facebookVehicleImageUrls(vehicle, imagesByRegistration, provenSecondaryUrls = null) {
   const registration = normalizeReg(
     vehicle?.registration || vehicle?.reg || vehicle?.title || vehicle?.name,
   );
   const primary = normalizeDailyYouTubeImageUrl(vehicle?.image || vehicle?.picture || "");
   const feedImages = registration ? imagesByRegistration?.get(registration) || [] : [];
+  const proven = provenSecondaryUrls === null
+    ? null
+    : new Set((Array.isArray(provenSecondaryUrls) ? provenSecondaryUrls : []).map(normalizeDailyYouTubeImageUrl).filter(Boolean));
   const seen = new Set();
 
   return [primary, ...feedImages]
     .map(normalizeDailyYouTubeImageUrl)
     .map((value) => String(value || "").trim())
-    .filter((value) => /^https:\/\//i.test(value))
+    .filter((value, index) => /^https:\/\//i.test(value) && (index === 0 || proven === null || proven.has(value)))
     .filter((value) => {
       if (seen.has(value)) return false;
       seen.add(value);
@@ -550,7 +553,20 @@ async function createNextImagePost({ supabase, posts, automationConfig, productK
 
   const destination = bufferDestinationForProduct(productKey);
   const text = buildAutomatedFacebookCaption(vehicle, productKey);
-  const mediaUrls = facebookVehicleImageUrls(vehicle, imagesByRegistration);
+  let provenSecondaryUrls = null;
+  if (productKey === "rent2buy") {
+    const registration = normalizeReg(vehicle.registration || vehicle.reg || vehicle.title || vehicle.name);
+    try {
+      const provenance = await loadRent2BuyPhotoProvenanceMap(supabase, [registration]);
+      provenSecondaryUrls = provenance.get(registration) || [];
+    } catch (error) {
+      console.warn("[buffer-facebook-automation] Rent2Buy photo provenance unavailable; using branded primary only", {
+        message: errorText(error, "Rent2Buy photo provenance failed."),
+      });
+      provenSecondaryUrls = [];
+    }
+  }
+  const mediaUrls = facebookVehicleImageUrls(vehicle, imagesByRegistration, provenSecondaryUrls);
   const post = await createBufferScheduledPost({
     destination,
     text,
