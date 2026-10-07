@@ -386,7 +386,7 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
     && ["finance", "rent2buy", "cars"].includes(selectedPipeline)
     && Boolean(record.registration && record.wixItemId && record.wixCollectionId && record.wixPublishStatus === "PUBLISHED");
   const canReviewDealerKit = !isLocalNotVansco
-    && (record.displayStatus === "missing" || isImageReady || (isAdvertisedStockMaintenance && !record.dealerKitIdentityAmbiguous && Boolean(record.registration && record.supplierStockId)))
+    && (record.displayStatus === "missing" || (isAdvertisedStockMaintenance && !record.dealerKitIdentityAmbiguous && Boolean(record.registration && record.supplierStockId)) || isImageReady)
     && ["finance", "rent2buy", "cars"].includes(selectedPipeline)
     && !record.dealerKitIdentityAmbiguous
     && Boolean(record.registration && record.supplierStockId);
