@@ -228,6 +228,58 @@ function targetKey(target = {}) {
   return `${product}:${siteId}:${clean(target.collectionId, 300)}`;
 }
 
+function wixImageIdentity(value) {
+  if (!value) return "";
+  if (typeof value === "object") {
+    return wixImageIdentity(value.url || value.src || value.fileUrl || value.image || value.uri || value._id || value.id || "");
+  }
+  const text = clean(value, 3000);
+  const wixProtocol = text.match(/^(?:wix:)?image:\/\/v1\/([^\/#?]+)/i);
+  if (wixProtocol) return `wix:${wixProtocol[1].toLowerCase()}`;
+  const staticWix = text.match(/static\.wixstatic\.com\/media\/([^/?#]+)/i);
+  if (staticWix) return `wix:${staticWix[1].toLowerCase()}`;
+  try {
+    const url = new URL(text);
+    url.search = "";
+    url.hash = "";
+    return url.toString().toLowerCase();
+  } catch {
+    return text.toLowerCase();
+  }
+}
+
+function imageListIdentities(value) {
+  return (Array.isArray(value) ? value : [])
+    .map(wixImageIdentity)
+    .filter(Boolean);
+}
+
+function exactImageListMatch(actual, expected) {
+  const left = imageListIdentities(actual);
+  const right = imageListIdentities(expected);
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function targetMediaVerification(target = {}, item = {}) {
+  const expected = target.data || {};
+  const actual = item?.data || {};
+  if (target.collectionId === "VANFINANCEPAGES") {
+    const galleryVerified = exactImageListMatch(actual.mainImages, expected.mainImages);
+    const countVerified = String(actual.imageCount ?? "") === String(expected.imageCount ?? "");
+    return { mediaVerified: galleryVerified && countVerified, galleryVerified, countVerified };
+  }
+  if (target.collectionId === "VANPAGES") {
+    const galleryVerified = exactImageListMatch(actual.mediaGallery, expected.mediaGallery);
+    const countVerified = String(actual.numberOfImages ?? "") === String(expected.numberOfImages ?? "");
+    return { mediaVerified: galleryVerified && countVerified, galleryVerified, countVerified };
+  }
+
+  const imageField = ["picture", "image", "addPicture", "additonalPicture"].find((field) => expected[field]);
+  if (!imageField) return { mediaVerified: true, galleryVerified: true, countVerified: true };
+  const imageVerified = wixImageIdentity(actual[imageField]) === wixImageIdentity(expected[imageField]);
+  return { mediaVerified: imageVerified, galleryVerified: imageVerified, countVerified: true };
+}
+
 export async function verifyWritten(state, registration, targets = [], writes = [], dependencies = {}) {
   const results = [];
   const request = dependencies.request || controlledWixRequest;
@@ -242,7 +294,8 @@ export async function verifyWritten(state, registration, targets = [], writes = 
     const publishStatus = wixItemPublishStatus(items[0]);
     const desiredPublishStatus = clean(target.desiredPublishStatus, 80).toUpperCase();
     const publishStatusMatches = !desiredPublishStatus || !publishStatus || publishStatus === desiredPublishStatus;
-    results.push({ operation: target.operation, product: target.product, siteId: configuration.siteId, siteLabel: target.siteLabel || configuration.siteLabel || null, collectionId: target.collectionId, count: items.length, verified: exact && identityMatches && publishStatusMatches, itemId: items[0]?.id || null, expectedItemId: expectedId || null, publishStatus: publishStatus || null, desiredPublishStatus: desiredPublishStatus || null, publishStatusVerified: publishStatusMatches });
+    const media = exact ? targetMediaVerification(target, items[0]) : { mediaVerified: false, galleryVerified: false, countVerified: false };
+    results.push({ operation: target.operation, product: target.product, siteId: configuration.siteId, siteLabel: target.siteLabel || configuration.siteLabel || null, collectionId: target.collectionId, count: items.length, verified: exact && identityMatches && publishStatusMatches && media.mediaVerified, itemId: items[0]?.id || null, expectedItemId: expectedId || null, publishStatus: publishStatus || null, desiredPublishStatus: desiredPublishStatus || null, publishStatusVerified: publishStatusMatches, mediaVerified: media.mediaVerified, galleryVerified: media.galleryVerified, countVerified: media.countVerified });
   }
   return { verified: results.length === targets.length && results.every((item) => item.verified), results };
 }
@@ -326,6 +379,13 @@ export default async function handler(request, response) {
     const updated = writes.filter((item) => item.operation === "update");
     const drafted = statusTransitions.filter((item) => item.action === "draft");
     const restored = statusTransitions.filter((item) => item.action === "publish");
+    const galleryComplete = state.plan.mode === "rent2buy"
+      ? Boolean(state.imageSets?.rent2buy?.galleryComplete)
+      : state.plan.mode === "finance"
+        ? Boolean(state.imageSets?.vanFinance?.galleryComplete)
+        : state.plan.mode === "both"
+          ? Boolean(state.imageSets?.vanFinance?.galleryComplete && state.imageSets?.rent2buy?.galleryComplete)
+          : true;
     response.status(200).json({
       ok: true,
       published: true,
@@ -345,7 +405,11 @@ export default async function handler(request, response) {
       writes,
       publishStatusTransitions: statusTransitions,
       verification: verification.results,
-      message: `${registration} was reconciled and verified across Wix CMS: ${created.length} created, ${updated.length} updated, ${restored.length} published/restored, ${drafted.length} stale category row(s) moved to Draft.`,
+      galleryComplete,
+      followUpRequired: !galleryComplete,
+      message: galleryComplete
+        ? `${registration} was reconciled and verified across Wix CMS: ${created.length} created, ${updated.length} updated, ${restored.length} published/restored, ${drafted.length} stale category row(s) moved to Draft.`
+        : `${registration} was reconciled and verified with the READY gallery images. Some selected DealerKit photos are still processing; use Check image status, then Reconcile advert again when they are READY.`,
     });
   } catch (error) {
     const reportedRollback = error?.details?.rollback || [];

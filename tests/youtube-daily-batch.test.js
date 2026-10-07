@@ -54,6 +54,7 @@ test("Rent2Buy Reels replace a contaminated Finance lead image with the Rent2Buy
   const images = buildRent2BuyDailyYouTubeImages(
     rent2buyPrimary,
     [financePrimary, ...galleryPhotos],
+    galleryPhotos,
   );
 
   assert.equal(images.length, 10);
@@ -69,12 +70,39 @@ test("Rent2Buy Reels keep the branded first image once when the Wix feed is alre
   const images = buildRent2BuyDailyYouTubeImages(
     rent2buyPrimary,
     [rent2buyPrimary, ...galleryPhotos],
+    galleryPhotos,
   );
 
   assert.equal(images.length, 10);
   assert.equal(images[0], rent2buyPrimary);
   assert.equal(images.filter((url) => url === rent2buyPrimary).length, 1);
   assert.deepEqual(images.slice(1), galleryPhotos);
+});
+
+test("Rent2Buy Reels reject every unproven secondary image, not only a contaminated lead", () => {
+  const rent2buyPrimary = "https://static.wixstatic.com/media/rent2buy-card.png";
+  const financeFreeDelivery = "https://static.wixstatic.com/media/finance-free-delivery.png";
+  const financeWarranty = "https://static.wixstatic.com/media/finance-warranty.png";
+  const genuine = Array.from({ length: 9 }, (_, index) => `https://example.com/genuine-${index + 1}.jpg`);
+  const images = buildRent2BuyDailyYouTubeImages(
+    rent2buyPrimary,
+    [genuine[0], financeFreeDelivery, ...genuine.slice(1, 5), financeWarranty, ...genuine.slice(5)],
+    genuine,
+  );
+  assert.equal(images[0], rent2buyPrimary);
+  assert.equal(images.includes(financeFreeDelivery), false);
+  assert.equal(images.includes(financeWarranty), false);
+  assert.deepEqual(images.slice(1), genuine);
+});
+
+test("Rent2Buy Reel image assembly fails closed when no DealerKit provenance is available", () => {
+  const rent2buyPrimary = "https://static.wixstatic.com/media/rent2buy-card.png";
+  const images = buildRent2BuyDailyYouTubeImages(
+    rent2buyPrimary,
+    Array.from({ length: 10 }, (_, index) => `https://example.com/unknown-${index}.jpg`),
+    [],
+  );
+  assert.deepEqual(images, [rent2buyPrimary]);
 });
 
 test("daily YouTube batch rejects fewer than 10 images and registrations used inside 48 hours", () => {

@@ -21,15 +21,30 @@ function productMediaSummary(state, productMode) {
   const selectedIds = selectedDealerKitIds(state.imageSets, productMode);
   const importedById = new Map((state.importedDealerKitMedia || []).map((item) => [clean(item?.dealerKitImageId, 300), item]));
   const readyIds = selectedIds.filter((id) => importedById.get(id)?.ready);
-  const unpreparedIds = selectedIds.filter((id) => !importedById.has(id));
-  const processingIds = selectedIds.filter((id) => importedById.has(id) && !importedById.get(id)?.ready);
+
+  const productSet = productMode === "rent2buy"
+    ? state.imageSets?.rent2buy
+    : productMode === "finance"
+      ? state.imageSets?.vanFinance
+      : null;
+  const unpreparedIds = productSet
+    ? [...(productSet.unpreparedDealerKitImageIds || [])]
+    : selectedIds.filter((id) => !importedById.has(id));
+  const processingIds = productSet
+    ? [...(productSet.processingDealerKitImageIds || [])]
+    : selectedIds.filter((id) => importedById.has(id) && !importedById.get(id)?.ready);
+  const galleryComplete = productSet
+    ? Boolean(productSet.galleryComplete)
+    : selectedIds.length > 0 && unpreparedIds.length === 0 && processingIds.length === 0;
+
   return {
-    dealerKitImported: selectedIds.filter((id) => importedById.has(id)).length,
+    dealerKitImported: selectedIds.length - unpreparedIds.length,
     dealerKitExpected: selectedIds.length,
     dealerKitReady: readyIds.length,
     missingDealerKitImageIds: [...unpreparedIds, ...processingIds],
     unpreparedDealerKitImageIds: unpreparedIds,
     processingDealerKitImageIds: processingIds,
+    galleryComplete,
     manualSelectedReady: state.manualMediaReadiness.selectedReady,
   };
 }
