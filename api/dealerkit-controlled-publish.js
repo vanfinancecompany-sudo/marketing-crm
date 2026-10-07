@@ -379,6 +379,13 @@ export default async function handler(request, response) {
     const updated = writes.filter((item) => item.operation === "update");
     const drafted = statusTransitions.filter((item) => item.action === "draft");
     const restored = statusTransitions.filter((item) => item.action === "publish");
+    const galleryComplete = state.plan.mode === "rent2buy"
+      ? Boolean(state.imageSets?.rent2buy?.galleryComplete)
+      : state.plan.mode === "finance"
+        ? Boolean(state.imageSets?.vanFinance?.galleryComplete)
+        : state.plan.mode === "both"
+          ? Boolean(state.imageSets?.vanFinance?.galleryComplete && state.imageSets?.rent2buy?.galleryComplete)
+          : true;
     response.status(200).json({
       ok: true,
       published: true,
@@ -398,7 +405,11 @@ export default async function handler(request, response) {
       writes,
       publishStatusTransitions: statusTransitions,
       verification: verification.results,
-      message: `${registration} was reconciled and verified across Wix CMS: ${created.length} created, ${updated.length} updated, ${restored.length} published/restored, ${drafted.length} stale category row(s) moved to Draft.`,
+      galleryComplete,
+      followUpRequired: !galleryComplete,
+      message: galleryComplete
+        ? `${registration} was reconciled and verified across Wix CMS: ${created.length} created, ${updated.length} updated, ${restored.length} published/restored, ${drafted.length} stale category row(s) moved to Draft.`
+        : `${registration} was reconciled and verified with the READY gallery images. Some selected DealerKit photos are still processing; use Check image status, then Reconcile advert again when they are READY.`,
     });
   } catch (error) {
     const reportedRollback = error?.details?.rollback || [];
