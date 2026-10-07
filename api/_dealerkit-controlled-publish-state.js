@@ -250,7 +250,9 @@ export async function buildFreshControlledPublishState(registrationInput, enviro
     ...(productMode === "both" ? { financeEnabled: true, rent2buyEnabled: true } : {}),
   };
   let imageSets = buildProductImageSets({ vehicle, decision: effectiveDecision, importedDealerKitMedia, manualMediaReadiness });
-  imageSets = applyExistingRent2BuyMainImageFallback(imageSets, rent2buyWixResults, vfcWixResults);
+  if (typeof applyExistingRent2BuyMainImageFallback === "function") {
+    imageSets = applyExistingRent2BuyMainImageFallback(imageSets, rent2buyWixResults, vfcWixResults);
+  }
   const rent2buySites = rent2buyConfigurations.map(({ siteId, siteLabel, siteRole }) => ({ siteId, siteLabel, siteRole }));
   const plan = buildControlledVehiclePublishPlan({ vehicle, decision: effectiveDecision, imageSets, vfcWixResults, rent2buyWixResults, rent2buySites, productMode });
   plan.confirmation = buildControlledPublishConfirmation(plan);
