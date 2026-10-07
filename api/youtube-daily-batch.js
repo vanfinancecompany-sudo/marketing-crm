@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { del } from "@vercel/blob";
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
+import { loadRent2BuyPhotoProvenanceMap } from "../lib/rent2BuyPhotoProvenance.js";
 import {
   DAILY_YOUTUBE_MIN_IMAGES,
   DAILY_YOUTUBE_SOURCE,
@@ -232,7 +233,7 @@ function buildFinanceCandidates(feedItems, stockRows) {
   });
 }
 
-function buildRent2BuyCandidates(feedItems, stockRows) {
+export function buildRent2BuyCandidates(feedItems, stockRows, provenPhotosByRegistration = new Map()) {
   const stockByRegistration = new Map();
   for (const row of stockRows || []) {
     const registration = normalizeDailyYouTubeRegistration(row?.registration);
@@ -245,7 +246,10 @@ function buildRent2BuyCandidates(feedItems, stockRows) {
     const stock = stockByRegistration.get(feed.registration);
     if (!stock) return [];
     const title = clean(stock.vanDescription || feed.title || feed.registration);
-    const images = buildRent2BuyDailyYouTubeImages(stock.picture, feed.images);
+    const provenPhotos = provenPhotosByRegistration instanceof Map
+      ? provenPhotosByRegistration.get(feed.registration) || []
+      : provenPhotosByRegistration?.[feed.registration] || [];
+    const images = buildRent2BuyDailyYouTubeImages(stock.picture, feed.images, provenPhotos);
     return [
       {
         productKey: "rent2buy",
@@ -295,8 +299,21 @@ async function candidateOverview(supabase, historyRows) {
     generatedToday: financeToday,
   });
   const financeRegistrations = finance.map((item) => item.registration);
+
+  let rent2buyProvenance = new Map();
+  try {
+    rent2buyProvenance = await loadRent2BuyPhotoProvenanceMap(
+      supabase,
+      rentFeed.map((item) => item.registration),
+    );
+  } catch (error) {
+    console.error("[youtube-daily-batch] Rent2Buy photo provenance unavailable; failing closed for secondary Reel images.", {
+      message: error?.message || String(error),
+    });
+  }
+
   const rent2buy = selectDailyYouTubeCandidates({
-    candidates: buildRent2BuyCandidates(rentFeed, stock.rent2buy),
+    candidates: buildRent2BuyCandidates(rentFeed, stock.rent2buy, rent2buyProvenance),
     historyRows,
     generatedToday: rentToday,
     reservedRegistrations: financeRegistrations,
