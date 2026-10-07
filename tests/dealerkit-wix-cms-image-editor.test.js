@@ -224,7 +224,7 @@ test("Rent2Buy self-heals a blank listing and category image from gallery positi
   }
   assert.deepEqual(
     f.writes().map((write) => write.body.dataCollectionId),
-    [f.lane.listing, ...Object.keys(WIX_ADVERT_CATEGORY_IMAGE_FIELDS.rent2buy)],
+    [f.lane.detail, f.lane.listing, ...Object.keys(WIX_ADVERT_CATEGORY_IMAGE_FIELDS.rent2buy)],
   );
 });
 
