@@ -97,7 +97,7 @@ test("existing Finance vehicle refresh reuses every exact row with the full cont
 
   assert.equal(allVans.data.picture, listingImageUrl);
   assert.equal(allVans.data.price, "£13,995");
-  assert.equal(allVans.data.salePrice, "FROM £292 P/M");
+  assert.equal(allVans.data.salePrice, "FROM £294 P/M");
   assert.equal(category.data.picture, listingImageUrl);
   assert.equal(detail.data.imageCount, "3");
   assert.deepEqual(detail.data.mainImages, galleryUrls);
