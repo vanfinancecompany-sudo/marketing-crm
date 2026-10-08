@@ -388,7 +388,7 @@ function productDefaults(productKey) {
     finalButton: "START APPLICATION",
     paymentFallback: "FLEXIBLE VAN FINANCE",
     featureLines: [
-      "GOOD OR BAD CREDIT",
+      "GOOD OR POOR CREDIT",
       "ALL CREDIT PROFILES",
       "LOW DEPOSIT OPTIONS",
       "SELF EMPLOYED WELCOME",
