@@ -26,6 +26,7 @@ import {
   isVanFinancePoorCreditReelSlot,
 } from "../lib/facebookAutomationContent.js";
 import { buildInstagramMirrorCaption } from "../lib/bufferInstagramMirror.js";
+import { isVanFinancePoorCreditImageSlot, withVanFinancePoorCreditOpening } from "../lib/vanFinanceStaticAdHooks.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -317,4 +318,71 @@ test("only selected VFC Reel captions start with poor-credit question and Instag
   assert.match(worker, /slotIndex: slotInfo\.existing/);
   assert.match(source("api/youtube-mp4-render.js"), /"GOOD OR POOR CREDIT"/);
   assert.doesNotMatch(source("api/youtube-mp4-render.js"), /"GOOD OR BAD CREDIT"/);
+});
+
+
+test("VFC static advert hook alternates 50/50 without touching the full vehicle advert", () => {
+  const vehicle = {
+    registration: "WR67MME",
+    vanDescription: "Fiat Doblo 1.6 Multijet Maxi",
+    vanSpec: "YEAR: 2017\\nMILEAGE: 78,964\\nEURO: 6",
+    price: "5995",
+    salePrice: "125",
+    weblink: "https://www.vanfinancecompany.co.uk/van-finance/WR67MME",
+  };
+  const baseline = buildAutomatedFacebookCaption(vehicle, "vanFinance");
+  assert.match(baseline, /^FROM £99 DEPOSIT/);
+  const expected = withVanFinancePoorCreditOpening(baseline, 0);
+  assert.match(expected, /^GOOD OR POOR CREDIT\\?\\n\\nFROM £99 DEPOSIT/);
+  assert.match(expected, /VAN FINANCE COMPANY \\| VAN FINANCE OPTIONS/);
+  assert.match(expected, /REGISTRATION: WR67MME/);
+  assert.match(expected, /MILEAGE: 78,964/);
+  assert.match(expected, /£5,995 \\+ VAT/);
+  assert.match(expected, /£125 MTH/);
+  assert.ok(expected.endsWith(vehicle.weblink));
+  assert.doesNotMatch(expected, /utm_|\\/track|\\/r\\//);
+  const credits = Array.from({ length: 30 }, (_, i) => isVanFinancePoorCreditImageSlot(i));
+  assert.equal(credits.filter(Boolean).length, 15);
+  for (let i = 0; i < 30; i += 1) {
+    const result = buildAutomatedFacebookCaption(vehicle, "vanFinance", { imageSlotIndex: i });
+    assert.equal(result, i % 2 === 0 ? expected : baseline, `Buffer image slot ${i}`);
+  }
+  assert.equal(isVanFinancePoorCreditImageSlot(null), false);
+  assert.equal(isVanFinancePoorCreditImageSlot(undefined), false);
+  assert.equal(withVanFinancePoorCreditOpening(baseline, null), baseline);
+  assert.equal(withVanFinancePoorCreditOpening(expected, 0), expected, "must not repeat hook");
+});
+
+test("Rent2Buy, Google Business, Reels and manual vehicle posting retain their own paths", () => {
+  const rentVehicle = {
+    registration: "WR67MME", monthly: "450",
+    vanDescription: "Fiat Doblo",
+    webLink: "https://www.rent2buyvans.co.uk/van-pages/live-wr67mme",
+  };
+  const ordinary = buildAutomatedFacebookCaption(rentVehicle, "rent2buy");
+  for (let i = 0; i < 30; i += 1) {
+    assert.equal(buildAutomatedFacebookCaption(rentVehicle, "rent2buy", { imageSlotIndex: i }), ordinary);
+  }
+  assert.match(ordinary, /^NO CREDIT CHECK/);
+  const financeVehicle = {
+    registration: "WR67MME", vanDescription: "Fiat Doblo", weblink: "https://www.vanfinancecompany.co.uk/van-finance/WR67MME",
+  };
+  assert.doesNotMatch(buildAutomatedReelCaption({ productKey: "vanFinance", vehicle: financeVehicle, slotIndex: 1 }), /^GOOD OR POOR CREDIT\\?/);
+  assert.match(buildAutomatedReelCaption({ productKey: "vanFinance", vehicle: financeVehicle, slotIndex: 0 }), /^GOOD OR POOR CREDIT\\?/);
+  const worker = source("api/buffer-facebook-automation-worker.js");
+  assert.match(worker, /buildAutomatedFacebookCaption\\(vehicle, productKey, \\{ imageSlotIndex: slotInfo\\.existing \\}\\)/);
+  assert.match(worker, /mediaUrls,\\n    mediaKind: "image"/);
+  const app = source("App.jsx");
+  const captionModule = source("utils/creativeUtils.js");
+  assert.match(captionModule, /withVanFinancePoorCreditOpening\\(caption, index\\)/);
+  assert.match(captionModule, /destination === "Van Finance Facebook" \\|\\| destination === "Van Finance Marketplace"/);
+  assert.match(app, /case "Van Finance Groups & Classifieds":[\\s\\S]*?destination: "Van Finance Facebook"/);
+  assert.match(app, /case "Rent2Buy Facebook Groups":[\\s\\S]*?destination: "Rent2Buy Facebook"/);
+  assert.match(app, /case "Van Finance Marketplace":[\\s\\S]*?destination: "Van Finance Marketplace"/);
+  assert.match(app, /case "Rent2Buy Marketplace":[\\s\\S]*?destination: "Rent2Buy Marketplace"/);
+  const marketplace = source("services/marketplaceAutomation.js");
+  assert.match(marketplace, /description: clean\\(caption\\) \\|\\| "Visit us at VANFINANCECOMPANY\\.co\\.uk"/);
+  assert.match(marketplace, /images,\\n    imageCount: images\\.length/);
+  assert.match(marketplace, /price: cashPrice/);
+  assert.doesNotMatch(source("lib/vanFinanceStaticAdHooks.js"), /localStorage|supabase|marketplace|createBufferScheduledPost/i);
 });
