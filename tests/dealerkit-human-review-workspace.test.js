@@ -39,7 +39,7 @@ test("all advertised stock uses the Wix upload editor while DealerKit matches re
   assert.match(page, /function openDealerKitSourceReview\(\)/);
   assert.match(page, /wix-open-advert-image-editor/);
   assert.match(page, /Refresh from DealerKit/);
-  const defaultReview = page.split("function openDealerKitReview()")[1].split("function openDealerKitSourceReview()")[0];
+  const defaultReview = page.slice(page.indexOf("function WatchCard(")).split("function openDealerKitReview()")[1].split("function openDealerKitSourceReview()")[0];
   assert.match(defaultReview, /if \(isAdvertisedStockMaintenance\)/);
   assert.match(defaultReview, /wix-open-advert-image-editor/);
   assert.doesNotMatch(defaultReview, /dealerkit-open-product-review/);
