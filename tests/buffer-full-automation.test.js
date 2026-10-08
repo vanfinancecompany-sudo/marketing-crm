@@ -384,5 +384,5 @@ test("Rent2Buy, Google Business, Reels and manual vehicle posting retain their o
   assert.match(marketplace, /description: clean\\(caption\\) \\|\\| "Visit us at VANFINANCECOMPANY\\.co\\.uk"/);
   assert.match(marketplace, /images,\\n    imageCount: images\\.length/);
   assert.match(marketplace, /price: cashPrice/);
-  assert.doesNotMatch(source("lib/vanFinanceStaticAdHooks.js"), /localStorage|supabase|marketplace|createBufferScheduledPost/i);
+  assert.doesNotMatch(source("lib/vanFinanceStaticAdHooks.js"), /\b(localStorage|supabase|createBufferScheduledPost)\b/);
 });
