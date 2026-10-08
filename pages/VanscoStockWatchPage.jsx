@@ -382,13 +382,11 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
     && !record.dealerKitIdentityAmbiguous
     && Boolean(record.registration && record.supplierStockId);
   const canReviewWix = isAdvertisedStockMaintenance
-    && !(!record.dealerKitIdentityAmbiguous && Boolean(record.registration && record.supplierStockId))
     && ["finance", "rent2buy", "cars"].includes(selectedPipeline)
     && Boolean(record.registration && record.wixItemId && record.wixCollectionId && record.wixPublishStatus === "PUBLISHED");
-  // DEALERKIT_EXISTING_ADVERT_SOURCE_REFRESH: advertised stock with an exact DealerKit identity uses the source-photo review path.
+  // DEALERKIT_EXISTING_ADVERT_SOURCE_REFRESH: exact matches retain a separate supplier-photo refresh action.
   const canReviewDealerKit = !isLocalNotVansco
     && (record.displayStatus === "missing"
-      || (isAdvertisedStockMaintenance && !record.dealerKitIdentityAmbiguous && Boolean(record.registration && record.supplierStockId))
       || record.imageReadinessAlert === true
       || record.matchStatus === "images_ready"
       || String(record.id || "").startsWith("images-ready-"))
@@ -397,25 +395,28 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
     && Boolean(record.registration && record.supplierStockId);
 
   function openDealerKitReview() {
-    const useDealerKitSourceReview = !record.dealerKitIdentityAmbiguous
-      && Boolean(record.registration && record.supplierStockId)
-      && ["finance", "rent2buy", "cars"].includes(selectedPipeline);
-    if (useDealerKitSourceReview) {
-      window.dispatchEvent(new CustomEvent("dealerkit-open-product-review", {
-        detail: {
-          registration: record.registration,
-          supplierStockId: record.supplierStockId,
-          product: selectedPipeline,
-          advertisedWixRecord: isAdvertisedStockMaintenance ? record.currentWixAdvert : null,
-        },
-      }));
-      return;
-    }
+    // Published Wix adverts always open their own gallery editor first,
+    // regardless of whether the stock currently has an exact DealerKit match.
     if (isAdvertisedStockMaintenance) {
       window.dispatchEvent(new CustomEvent("wix-open-advert-image-editor", {
         detail: { registration: record.registration, pipeline: selectedPipeline },
       }));
+      return;
     }
+    openDealerKitSourceReview();
+  }
+
+  function openDealerKitSourceReview() {
+    if (record.dealerKitIdentityAmbiguous || !record.registration || !record.supplierStockId
+      || !["finance", "rent2buy", "cars"].includes(selectedPipeline)) return;
+    window.dispatchEvent(new CustomEvent("dealerkit-open-product-review", {
+      detail: {
+        registration: record.registration,
+        supplierStockId: record.supplierStockId,
+        product: selectedPipeline,
+        advertisedWixRecord: isAdvertisedStockMaintenance ? record.currentWixAdvert : null,
+      },
+    }));
   }
 
   return (
@@ -437,13 +438,14 @@ function WatchCard({ record, selectedPipeline, onRecordSaved }) {
         {!isLocalNotVansco && !isAdvertisedStockMaintenance ? <label className="field"><span className="field__label">Notes</span><textarea className="field__input field__textarea" rows="3" value={notesDraft} onChange={(event) => setNotesDraft(event.target.value)} placeholder="Optional notes for this stock check" /></label> : null}
         <div className="card-actions">
           {(canReviewWix || canReviewDealerKit) ? <button className="button button--primary" type="button" onClick={openDealerKitReview}>Review vehicle</button> : null}
+          {canRefreshAdvertFromDealerKit ? <button className="button button--ghost" type="button" onClick={openDealerKitSourceReview}>Refresh from DealerKit</button> : null}
           {(isLocalNotVansco || isAdvertisedStockMaintenance) && record.localStockUrl ? <a className="button button--ghost" href={record.localStockUrl} target="_blank" rel="noreferrer">Open current advert</a> : null}
           {!isLocalNotVansco && record.stockUrl ? <a className="button button--ghost" href={record.stockUrl} target="_blank" rel="noreferrer">Open DealerKit vehicle</a> : null}
           {!isLocalNotVansco && !isAdvertisedStockMaintenance && (isAdvertised ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("new", "Unmarked")} disabled={Boolean(savingAction)}>{savingAction === "new" ? "Unmarking..." : "Unmark advertised"}</button> : isHiddenOrNever ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("new", "Unhidden")} disabled={Boolean(savingAction)}>{savingAction === "new" ? "Unhiding..." : "Unhide"}</button> : <button className="button button--ghost" type="button" onClick={() => saveWorkflow("ignored", "Hidden")} disabled={Boolean(savingAction)}>{savingAction === "ignored" ? "Hiding..." : "Hide"}</button>)}
           {!isLocalNotVansco && !isAdvertisedStockMaintenance && record.displayStatus === "missing" ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("added_to_crm", "Marked as advertised")} disabled={Boolean(savingAction)}>{savingAction === "added_to_crm" ? "Marking..." : "Mark as advertised"}</button> : null}
           {!isLocalNotVansco && !isAdvertisedStockMaintenance && !isNeverShowStatus(status) ? <button className="button button--primary" type="button" onClick={() => saveWorkflow("never_show_again", "Moved to Never show again")} disabled={Boolean(savingAction)}>{savingAction === "never_show_again" ? "Saving..." : "Never show again"}</button> : null}
         </div>
-        {isAdvertisedStockMaintenance ? <div className="vehicle-card__meta">{canRefreshAdvertFromDealerKit ? "DealerKit source photos are available. Review the source gallery, then use Prepare + Reconcile to refresh the live website images." : "Published Wix image maintenance only. Review the current Wix gallery, upload / reorder images, then use Prepare + Reconcile to confirm the image-only change."}</div> : null}
+        {isAdvertisedStockMaintenance ? <div className="vehicle-card__meta">{canRefreshAdvertFromDealerKit ? "Review vehicle opens the published Wix gallery: upload photos at the top, drag to reorder, then confirm Update Wix images. To import new supplier photos instead, choose Refresh from DealerKit and use Prepare + Reconcile." : "Review vehicle opens the published Wix gallery: upload photos at the top, drag to reorder, then confirm Update Wix images."}</div> : null}
         {record.displayStatus === "back_in_stock" ? <div className="vehicle-card__meta">This was hidden before, but DealerKit now shows it as available again.</div> : null}
         {record.displayStatus === "advertised" && record.financeStockMatchForCars ? <div className="vehicle-card__meta">Advisory only: counted as advertised for the Cars tab because the registration is active in Van Finance stock.</div> : null}
         {record.displayStatus === "advertised" && !record.financeStockMatchForCars ? <div className="vehicle-card__meta">You marked this as advertised during the day. Overnight refresh should remove it automatically once the registration is found in this CRM stock tab.</div> : null}
@@ -750,7 +752,7 @@ export default function VanscoStockWatchPage() {
           <SummaryCard label="Local CRM regs loaded" value={activeLocalRegistrations.size} />
         </div>
         {selectedPipeline === "finance" ? <div className="vansco-watch-note"><strong>Price differences:</strong> Van Finance only. It compares exact registration matches where both prices and VAT basis are clear. It never changes Wix or DealerKit prices.</div> : null}
-        <div className="vansco-watch-note"><strong>All advertised stock:</strong> this is the live CMS stock for the selected lane. Open <strong>Review vehicle</strong> on a DealerKit-matched vehicle to change its primary / included images, save the review and use the existing Prepare + Reconcile step to update Wix.</div>
+        <div className="vansco-watch-note"><strong>All advertised stock:</strong> this is the live CMS stock for the selected lane. Open <strong>Review vehicle</strong> to upload/reorder photos in the published Wix gallery. On DealerKit-matched vehicles, <strong>Refresh from DealerKit</strong> remains available to import updated supplier photos through Prepare + Reconcile.</div>
         <div className="vansco-watch-note"><strong>Daytime workflow:</strong> when you advertise a Missing vehicle, use <strong>Mark as advertised</strong>. It leaves Missing immediately and remains in Advertised / Awaiting refresh until the registration appears in this CRM stock tab.</div>
         <div className={`vansco-watch-note${dealerKitSnapshotComplete ? "" : " vansco-watch-note--warning"}`}><strong>My stock not on DealerKit:</strong> {dealerKitSnapshotComplete ? "this reverse registration check shows active CRM vehicles absent from a complete DealerKit feed." : "temporarily suspended because the current DealerKit snapshot is incomplete. No CRM vehicle is classified as absent until a complete DealerKit snapshot proves it."}</div>
         <div className="vansco-watch-note"><strong>Back in stock rule:</strong> a hidden vehicle returns here only when the current DealerKit bulk stock feed positively shows it available again and it is not already in this CRM stock tab. Use <strong>Never show again</strong> for vehicles you will not advertise.</div>
