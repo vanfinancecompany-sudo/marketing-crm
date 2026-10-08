@@ -38,6 +38,7 @@ import {
 } from "../lib/bufferRuntimeGuard.js";
 import {
   automatedReelFrameSpecs,
+  isVanFinancePoorCreditReelSlot,
   automatedVehicleUrl,
   buildAutomatedFacebookCaption,
   buildAutomatedReelCaption,
@@ -766,7 +767,10 @@ async function createNextReel({ request, supabase, posts, automationConfig, prod
   const recentReelReserved = recentBufferReelRegistrations(posts, productKey, now);
   const excluded = [...new Set([...currentDayReserved, ...recentReelReserved])];
   const excludedSet = new Set(excluded);
-  const ready = (await loadReadyReels(supabase, productKey, dateKey)).find(
+  // An already-rendered Reel may have a legacy opener. Render the designated
+  // poor-credit slots fresh so the visible first frame always matches its caption.
+  const poorCreditSlot = isVanFinancePoorCreditReelSlot(productKey, slotInfo.existing);
+  const ready = poorCreditSlot ? null : (await loadReadyReels(supabase, productKey, dateKey)).find(
     (reel) => reel.registration && !excludedSet.has(reel.registration),
   );
   const reel = ready || (await generateOneReel(request, productKey, dateKey, slotInfo.existing, excluded));
@@ -784,6 +788,7 @@ async function createNextReel({ request, supabase, posts, automationConfig, prod
     vehicle: captionVehicle,
     registration: reel.registration,
     title: reel.title,
+    slotIndex: slotInfo.existing,
   });
   const post = await createBufferScheduledPost({
     destination,

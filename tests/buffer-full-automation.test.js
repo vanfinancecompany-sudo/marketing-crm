@@ -20,9 +20,12 @@ import {
   isBufferScheduledRunDue,
 } from "../lib/bufferActiveWindow.js";
 import {
+  automatedReelFrameSpecs,
   buildAutomatedFacebookCaption,
   buildAutomatedReelCaption,
+  isVanFinancePoorCreditReelSlot,
 } from "../lib/facebookAutomationContent.js";
+import { buildInstagramMirrorCaption } from "../lib/bufferInstagramMirror.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -264,4 +267,54 @@ test("delivery status route supports cron GET and cleans delivered Reel blobs", 
   assert.match(status, /await del\(url\)/);
   assert.match(status, /facebook_live: item\.destination !== "Van Finance Google Business"/);
   assert.match(status, /google_business_live: item\.destination === "Van Finance Google Business"/);
+});
+
+test("half of ten VFC automated Reels open with GOOD OR POOR CREDIT and others retain varied offers", () => {
+  const openings = Array.from({ length: 10 }, (_, slotIndex) =>
+    automatedReelFrameSpecs("vanFinance", slotIndex)[0].headline,
+  );
+  assert.equal(openings.filter((line) => line === "GOOD OR POOR CREDIT?").length, 5);
+  for (let slot = 0; slot < 10; slot += 1) {
+    assert.equal(isVanFinancePoorCreditReelSlot("vanFinance", slot), slot % 2 === 0);
+    assert.equal(automatedReelFrameSpecs("vanFinance", slot).length, 10);
+    if (slot % 2) assert.notEqual(openings[slot], "GOOD OR POOR CREDIT?");
+  }
+  assert.equal(openings[1], "FAST VAN FINANCE");
+  assert.equal(openings[3], "YOUR NEXT VAN IS HERE");
+  for (let slot = 0; slot < 10; slot += 1) {
+    assert.equal(isVanFinancePoorCreditReelSlot("rent2buy", slot), false);
+    const r2bFrames = automatedReelFrameSpecs("rent2buy", slot);
+    assert.equal(r2bFrames.length, 10);
+    assert.ok(!r2bFrames.some((frame) => /POOR CREDIT|GOOD OR BAD CREDIT/.test(frame.headline || "")));
+  }
+  assert.equal(automatedReelFrameSpecs("rent2buy", 0)[0].headline, "NO CREDIT CHECK VANS");
+  for (let slot = 0; slot < 10; slot += 1) {
+    assert.ok(!automatedReelFrameSpecs("vanFinance", slot)
+      .some((frame) => /GOOD OR BAD CREDIT/.test(frame.headline || "")));
+  }
+});
+
+test("only selected VFC Reel captions start with poor-credit question and Instagram mirror preserves it", () => {
+  const vehicle = {
+    registration: "AB12CDE",
+    vanDescription: "Ford Transit Custom",
+    weblink: "https://www.vanfinancecompany.co.uk/van-finance/live-ab12cde",
+    webLink: "https://www.rent2buyvans.co.uk/van-pages/live-ab12cde",
+  };
+  const finance = buildAutomatedReelCaption({ productKey: "vanFinance", vehicle, slotIndex: 0 });
+  const regular = buildAutomatedReelCaption({ productKey: "vanFinance", vehicle, slotIndex: 1 });
+  const rent = buildAutomatedReelCaption({ productKey: "rent2buy", vehicle, slotIndex: 0 });
+  assert.match(finance, /^GOOD OR POOR CREDIT\?\n\n/);
+  assert.match(buildInstagramMirrorCaption(finance), /^GOOD OR POOR CREDIT\?\n\n/);
+  assert.match(finance, /https:\/\/www\.vanfinancecompany\.co\.uk\/van-finance\/live-ab12cde$/);
+  assert.doesNotMatch(regular, /^GOOD OR POOR CREDIT\?/);
+  assert.doesNotMatch(rent, /^GOOD OR POOR CREDIT\?/);
+  assert.match(rent, /^NO CREDIT CHECK/);
+  const worker = source("api/buffer-facebook-automation-worker.js");
+  assert.match(worker, /const poorCreditSlot = isVanFinancePoorCreditReelSlot\(productKey, slotInfo\.existing\)/);
+  assert.match(worker, /const ready = poorCreditSlot \? null/);
+  assert.match(worker, /frameSpecs: automatedReelFrameSpecs\(productKey, packIndex\)/);
+  assert.match(worker, /slotIndex: slotInfo\.existing/);
+  assert.match(source("api/youtube-mp4-render.js"), /"GOOD OR POOR CREDIT"/);
+  assert.doesNotMatch(source("api/youtube-mp4-render.js"), /"GOOD OR BAD CREDIT"/);
 });
