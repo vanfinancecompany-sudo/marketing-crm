@@ -146,9 +146,9 @@ async function clients(pipeline, gallery = urls) {
   const start = watch.indexOf("  function openDealerKitReview()");
   const handoff = watch.slice(start, watch.indexOf("\n  return (", start));
   const gate = watch.match(/const canReviewWix = ([\s\S]*?);/)[1];
-  async function fromCard() {
-    // Deliberately no supplierStockId or DealerKit match.
-    const record = { registration, displayStatus: "advertised_stock", wixItemId: "listing", wixCollectionId: lane.listing, wixPublishStatus: "PUBLISHED", dealerKitIdentityAmbiguous: true };
+  async function fromCard(dealerKitMatched = false) {
+    const record = { registration, displayStatus: "advertised_stock", wixItemId: "listing", wixCollectionId: lane.listing, wixPublishStatus: "PUBLISHED",
+      dealerKitIdentityAmbiguous: !dealerKitMatched, ...(dealerKitMatched ? { supplierStockId: "exact-dealerkit-match" } : {}) };
     assert.equal(new Function("record", "isAdvertisedStockMaintenance", "selectedPipeline", "return " + gate)(record, true, pipeline), true);
     new Function("record", "selectedPipeline", "isAdvertisedStockMaintenance", "window", "CustomEvent", handoff + ";openDealerKitReview();")(record, pipeline, true, window, ReviewEvent);
     for (let turn = 0; turn < 30; turn += 1) await Promise.resolve();
@@ -158,6 +158,18 @@ async function clients(pipeline, gallery = urls) {
 }
 
 for (const pipeline of Object.keys(WIX_ADVERT_IMAGE_LANES)) {
+  test(pipeline + " exact DealerKit match still opens Wix upload-first gallery", async () => {
+    const client = await clients(pipeline);
+    const state = await client.fromCard(true);
+    assert.ok(state.uploadButton, "Published Wix image upload remains accessible with a DealerKit match");
+    assert.deepEqual(state.draft.items.map((item) => item.src), urls);
+    assert.equal(client.document.querySelector("[data-dealerkit-review-workspace]"), null);
+    state.uploadInput.files = [{ name: "Replacement.jpg", type: "image/jpeg", size: 1200 }];
+    await state.uploadInput.fire("change");
+    assert.deepEqual(state.draft.items.map((item) => item.src), [uploadUrl, ...urls], "Upload is first / Primary for exact DealerKit match");
+    assert.deepEqual(client.live().gallery, urls, "Nothing written until confirmation");
+  });
+
   test(pipeline + " review uses the familiar Wix-only two-step update and renders the server-verified stored gallery", async () => {
     const client = await clients(pipeline);
     const state = await client.fromCard();

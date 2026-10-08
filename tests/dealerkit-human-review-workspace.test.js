@@ -28,7 +28,7 @@ test("DealerKit review workspace retains the guarded legacy comparison entry poi
   assert.match(client, /new URLSearchParams\(\{ registration \}\)/);
 });
 
-test("advertised stock with a DealerKit identity uses source-photo review and falls back to Wix-only editing when DealerKit is unavailable", () => {
+test("all advertised stock uses the Wix upload editor while DealerKit matches retain an explicit supplier refresh action", () => {
   const page = fs.readFileSync(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
   assert.match(page, /const canRefreshAdvertFromDealerKit = isAdvertisedStockMaintenance/);
   assert.match(page, /dealerkit-open-product-review/);
@@ -36,8 +36,13 @@ test("advertised stock with a DealerKit identity uses source-photo review and fa
   assert.match(page, /product:\s*selectedPipeline/);
   assert.match(page, /advertisedWixRecord:\s*isAdvertisedStockMaintenance \? record\.currentWixAdvert : null/);
   assert.match(page, /const canReviewWix = isAdvertisedStockMaintenance/);
-  assert.match(page, /const useDealerKitSourceReview = !record\.dealerKitIdentityAmbiguous/);
+  assert.match(page, /function openDealerKitSourceReview\(\)/);
   assert.match(page, /wix-open-advert-image-editor/);
+  assert.match(page, /Refresh from DealerKit/);
+  const defaultReview = page.slice(page.indexOf("function WatchCard(")).split("function openDealerKitReview()")[1].split("function openDealerKitSourceReview()")[0];
+  assert.match(defaultReview, /if \(isAdvertisedStockMaintenance\)/);
+  assert.match(defaultReview, /wix-open-advert-image-editor/);
+  assert.doesNotMatch(defaultReview, /dealerkit-open-product-review/);
 });
 
 test("direct missing-stock review bridge only reads comparison data and does not mutate stock or Wix", () => {
