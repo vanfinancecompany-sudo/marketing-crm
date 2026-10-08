@@ -131,8 +131,8 @@ test("DealerKit review still rejects ambiguous source IDs; advertised-stock Wix 
   const repeated = helpers.buildDealerKitByRegistration([raw[0], { ...raw[0] }]).get(registration);
   assert.equal(repeated.ambiguous, false);
   const card = helpers.mapAdvertisedLocalVehicleToWatchRecord({ registration }, 0, "cars", repeated.record, repeated.ambiguous);
-  assert.equal(helpers.canReview(card, "cars", false, true), true, "Exact DealerKit matches on advertised stock use the source-photo refresh path");
-  assert.equal(helpers.canReviewWix({ ...card, wixItemId: "listing", wixCollectionId: "CARFINANCE", wixPublishStatus: "PUBLISHED" }, "cars", true), false, "Wix-only editing is the fallback when no safe DealerKit identity exists");
+  assert.equal(helpers.canReview(card, "cars", false, true), false, "The supplier editor is no longer the default Review vehicle action on advertised stock");
+  assert.equal(helpers.canReviewWix({ ...card, wixItemId: "listing", wixCollectionId: "CARFINANCE", wixPublishStatus: "PUBLISHED" }, "cars", true), true, "Published Wix gallery editing must work even when a safe DealerKit match exists");
   assert.equal(helpers.canReview({ registration, supplierStockId: "one", displayStatus: "missing" }, "finance", false, false), true);
 });
 
