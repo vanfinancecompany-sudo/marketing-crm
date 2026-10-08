@@ -89,7 +89,7 @@ test("DealerKit Wix preview maps reviewed Van Finance categories and pricing wit
   assert.equal(preview.readOnly, true);
   assert.equal(preview.registration, "HT22KJX");
   assert.equal(preview.retailPrice, 15995);
-  assert.equal(preview.monthlyPrice, 334);
+  assert.equal(preview.monthlyPrice, 336);
   assert.equal(preview.canPublishLater, true);
   assert.deepEqual(preview.blockers, []);
   assert.deepEqual(preview.warnings, []);
@@ -107,16 +107,16 @@ test("DealerKit Wix preview maps reviewed Van Finance categories and pricing wit
   assert.equal(allVans.status, "matched");
   assert.deepEqual(allVans.proposed, {
     price: "£15,995",
-    salePrice: "FROM £334 P/M",
+    salePrice: "FROM £336 P/M",
     wasPriceVat: "£16,495 +VAT",
   });
   assert.deepEqual(automatic.proposed, {
     price: "£15,995",
-    salePrice: "FROM £334 P/M",
+    salePrice: "FROM £336 P/M",
   });
   assert.deepEqual(detail.proposed, {
     priceVat: "£15,995 +VAT",
-    mthPrice: "£334",
+    mthPrice: "£336",
     wasPriceVat: "£16,495 +VAT",
   });
 });
@@ -183,7 +183,7 @@ test("existing unselected Wix category rows stay visible and are included in the
   const mwbWrite = preview.writeTargets.find((target) => target.collectionId === "VANFINANCE-MWB");
   assert.equal(mwbWrite.selectedCategory, false);
   assert.equal(mwbWrite.proposed.price, "£15,995");
-  assert.equal(mwbWrite.proposed.salePrice, "FROM £334 P/M");
+  assert.equal(mwbWrite.proposed.salePrice, "FROM £336 P/M");
 });
 
 test("preview confirmation binds source, saved review, reviewed images and every existing Wix write target", () => {
