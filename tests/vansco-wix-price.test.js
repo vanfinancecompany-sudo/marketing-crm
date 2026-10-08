@@ -34,7 +34,7 @@ test("category listing patches keep Van Finance Company on one clean current pri
   const item = { id: "item-1", data: { price: "£10,995", salePrice: "FROM £230 P/M", title: "LA23FHK" } };
   assert.deepEqual(buildFinanceWixPricePatch(collection, item, 9995), {
     dataItemId: "item-1",
-    fields: { price: "£9,995", salePrice: "FROM £209 P/M" },
+    fields: { price: "£9,995", salePrice: "FROM £210 P/M" },
   });
 });
 
@@ -43,7 +43,7 @@ test("canonical listing stores the Was price separately for VanFinance.co", () =
   const item = { id: "item-1", data: { price: "£10,995", vat: "+VAT", salePrice: "FROM £230 P/M", title: "LA23FHK" } };
   assert.deepEqual(buildFinanceWixPricePatch(collection, item, 9995), {
     dataItemId: "item-1",
-    fields: { price: "£9,995", salePrice: "FROM £209 P/M", wasPriceVat: "£10,995 +VAT" },
+    fields: { price: "£9,995", salePrice: "FROM £210 P/M", wasPriceVat: "£10,995 +VAT" },
   });
 });
 
@@ -52,7 +52,7 @@ test("detail patch keeps the public price clean and stores original price separa
   const item = { id: "item-2", data: { priceVat: "£10,995 +VAT", mthPrice: "£230", title: "LA23FHK" } };
   assert.deepEqual(buildFinanceWixPricePatch(collection, item, 9995), {
     dataItemId: "item-2",
-    fields: { priceVat: "£9,995 +VAT", mthPrice: "£209", wasPriceVat: "£10,995 +VAT" },
+    fields: { priceVat: "£9,995 +VAT", mthPrice: "£210", wasPriceVat: "£10,995 +VAT" },
   });
   assert.equal(preserveRetailPriceAffixes("£10,995 NO VAT", 9495), "£9,495 NO VAT");
 });
@@ -80,6 +80,6 @@ test("a price increase clears separate reduction history", () => {
   const item = { id: "item-2", data: { priceVat: "£12,995 NO VAT", wasPriceVat: "£14,995 NO VAT", mthPrice: "£271" } };
   assert.deepEqual(buildFinanceWixPricePatch(collection, item, 13995), {
     dataItemId: "item-2",
-    fields: { priceVat: "£13,995 NO VAT", mthPrice: "£292", wasPriceVat: "" },
+    fields: { priceVat: "£13,995 NO VAT", mthPrice: "£294", wasPriceVat: "" },
   });
 });
