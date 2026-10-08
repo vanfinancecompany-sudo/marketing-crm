@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {cashPriceNumber,currentMonthlyNumber,previewVfcMonthlyPrice,hpMonthlyPayment,roundMonthlyUp,VFC_PRICE_POLICY} from '../lib/vfcFinancePriceMatrix.mjs';
+import {cashPriceNumber,currentMonthlyNumber,previewVfcMonthlyPrice,hpMonthlyPayment,roundMonthlyUp,VFC_PRICE_POLICY,calculateVfcAdvertisedMonthly,isVfcPricingReviewHeld,VFC_PRICING_REVIEW_HOLDS} from '../lib/vfcFinancePriceMatrix.mjs';
 
 test('same effective-APR method as approved VFC calculator',()=>{
  assert.ok(Math.abs(hpMonthlyPayment(22995,60)-482.6827088135552)<0.000001);
@@ -29,4 +29,18 @@ test('round up to whole pounds without affecting full-precision calculations',()
  assert.equal(currentMonthlyNumber('FROM £480 P/M'),480);
  assert.equal(currentMonthlyNumber('£1509'),1509);
  assert.equal(currentMonthlyNumber(''),null);
+});
+
+test('future DealerKit sales prices use the same 9.9% APR rather than legacy flat monthly',()=>{
+ assert.equal(calculateVfcAdvertisedMonthly(22995),483);
+ assert.equal(calculateVfcAdvertisedMonthly(12495),263);
+ assert.equal(calculateVfcAdvertisedMonthly(72400),1520);
+ assert.equal(calculateVfcAdvertisedMonthly('£21.995'),null);
+ assert.equal(calculateVfcAdvertisedMonthly(null),null);
+});
+test('original disputed Wix stock is protected in future VFC publishing',()=>{
+ assert.equal(VFC_PRICING_REVIEW_HOLDS.length,10);
+ assert.equal(isVfcPricingReviewHeld('LM70 YPT'),true);
+ assert.equal(isVfcPricingReviewHeld('FL71GZW'),true);
+ assert.equal(isVfcPricingReviewHeld('BD73DXK'),false);
 });
