@@ -1,5 +1,6 @@
 import rent2buyLogo from "../assets/rent2buy-vans.png";
 import financeLogo from "../assets/van-finance-company.png";
+import { withVanFinancePoorCreditOpening } from "../lib/vanFinanceStaticAdHooks.js";
 import defaultReelAudio from "../assets/default-reel-audio.mp3";
 
 export function createCreativePreview(creative) {
@@ -485,12 +486,12 @@ IT'S YOURS!
 ${rentVehicleUrl(rentVehicle)}`);
   }
 
-  const financeHooks = ["£99 deposit options", "Bad credit considered", "Self-employed welcome", "Finance the VAT"];
+  const financeHooks = ["£99 deposit options", "Poor credit considered", "Self-employed welcome", "Finance the VAT"];
   const primaryHook = financeHooks[index % financeHooks.length].toUpperCase().replace(/Â£/g, "£");
   const secondaryHook = financeHooks[(index + 3) % financeHooks.length];
   const financePriceLine = buildSafeFinancePriceLine(vehicle);
 
-  return sanitizePostingCaption(`${financePriceLine}
+  const caption = sanitizePostingCaption(`${financePriceLine}
 
 VAN FINANCE COMPANY | ${primaryHook}
 
@@ -514,6 +515,9 @@ Apply now - takes 60 seconds.
 FAST, SIMPLE APPLICATION, APPROVED IN JUST 60 MINUTES – APPLY TODAY
 
 ${financeVehicleUrl(vehicle)}`);
+  return destination === "Van Finance Facebook" || destination === "Van Finance Marketplace"
+    ? withVanFinancePoorCreditOpening(caption, index)
+    : caption;
 }
 
 export function buildCarFinancePostingCaption(vehicle, { index = 0 } = {}) {
