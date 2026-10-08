@@ -2,7 +2,6 @@ import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
 import {
   VAN_FINANCE_WIX_COLLECTIONS,
   buildFinanceWixPricePatch,
-  calculateFivePercentFlatMonthly,
   financeWixCurrentFields,
   normalizeFinanceRegistration,
   parseRetailPrice,
@@ -17,6 +16,7 @@ import {
   rent2BuyWixCurrentFields,
 } from "../lib/dealerKitPublishedPrice.js";
 import { VAN_FINANCE_RENT2BUY_WIX_SITE_ID } from "../lib/dealerKitRent2BuyWixPlan.js";
+import { calculateVfcAdvertisedMonthly } from "../lib/vfcFinancePriceMatrix.mjs";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value ?? "").trim().slice(0, limit);
@@ -172,7 +172,7 @@ async function financePreview(configuration, vehicle) {
     supplier_stock_id: vehicle.supplierStockId || null,
     source_mode: vehicle.sourceMode,
     retail_price: vehicle.retailPrice,
-    monthly_price: calculateFivePercentFlatMonthly(vehicle.retailPrice),
+    monthly_price: calculateVfcAdvertisedMonthly(vehicle.retailPrice),
     match_count: matches.length,
     matches,
   };
@@ -193,7 +193,7 @@ async function carPreview(configuration, vehicle) {
     supplier_stock_id: vehicle.supplierStockId || null,
     source_mode: vehicle.sourceMode,
     retail_price: vehicle.retailPrice,
-    monthly_price: calculateFivePercentFlatMonthly(vehicle.retailPrice),
+    monthly_price: calculateVfcAdvertisedMonthly(vehicle.retailPrice),
     match_count: matches.length,
     matches,
   };
