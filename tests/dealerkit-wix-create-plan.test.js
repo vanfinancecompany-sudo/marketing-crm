@@ -87,7 +87,7 @@ test("listing create plan uses existing VFC card conventions without writing med
   assert.deepEqual(plan.blockers, []);
   assert.equal(plan.proposedFields.title, "HT22KJX");
   assert.equal(plan.proposedFields.price, "£12,495");
-  assert.equal(plan.proposedFields.salePrice, "FROM £261 P/M");
+  assert.equal(plan.proposedFields.salePrice, "FROM £263 P/M");
   assert.equal(plan.proposedFields.vat, "+VAT");
   assert.equal(plan.proposedFields.webLink, "https://www.vanfinancecompany.co.uk/van-finance/HT22KJX");
   assert.equal(plan.proposedFields.applyLink, "https://www.vanfinancecompany.co.uk/apply-by-reg-finance/HT22KJX");
@@ -122,7 +122,7 @@ test("detail create plan keeps AI vehicle copy separate from fixed VFC reassuran
 
   assert.equal(plan.proposedFields.title, "HT22KJX");
   assert.equal(plan.proposedFields.priceVat, "£12,495 +VAT");
-  assert.equal(plan.proposedFields.mthPrice, "£261");
+  assert.equal(plan.proposedFields.mthPrice, "£263");
   assert.equal(plan.proposedFields.imageCount, "2");
   assert.equal(plan.proposedFields.addToRent2Buy, true);
   assert.equal(plan.proposedFields.isPickupOr4X4, true);
@@ -189,4 +189,15 @@ test("numeric DealerKit strings remain valid facts", () => {
   assert.match(text, /YEAR: 2022\/22/);
   assert.match(text, /MILEAGE: 93,000/);
   assert.match(text, /BHP: 128/);
+});
+
+test('held van pricing cannot be created or republished before Wix reconciliation',()=>{
+ const plan=buildDealerKitWixCreatePlan({
+   collection:{id:'VANFINANCE-ALLVANS',kind:'listing'},
+   vehicle:vehicle({registration:'FL19OFN'}),
+   decision:decision({registration:'FL19OFN'}),
+   selectedImages:{count:1,ids:['image-1']},
+ });
+ assert.equal(plan.canCreateLater,false);
+ assert.ok(plan.blockers.some(b=>b.code==='pricing_review_hold'));
 });

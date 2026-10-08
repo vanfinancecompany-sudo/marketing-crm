@@ -75,7 +75,7 @@ test("preview queries the finance allowlist but never patches Wix", async () => 
     assert.equal(result.statusCode, 200);
     assert.equal(result.payload.ok, true);
     assert.equal(result.payload.preview.registration, "LA23FHK");
-    assert.equal(result.payload.preview.monthly_price, 209);
+    assert.equal(result.payload.preview.monthly_price, 210);
     assert.equal(result.payload.preview.match_count, 2);
     assert.equal(calls.filter((call) => call.method === "PATCH").length, 0);
     assert.equal(calls.filter((call) => call.url.endsWith("/wix-data/v2/items/query")).length, 10);
@@ -99,12 +99,12 @@ test("update keeps VFC display prices clean and stores VanFinance.co Was prices 
     assert.equal(patches.length, 2);
     assert.deepEqual(patches[0].body.patch.fieldModifications.map((field) => [field.fieldPath, field.setFieldOptions.value]), [
       ["price", "£9,995"],
-      ["salePrice", "FROM £209 P/M"],
+      ["salePrice", "FROM £210 P/M"],
       ["wasPriceVat", "£10,995 +VAT"],
     ]);
     assert.deepEqual(patches[1].body.patch.fieldModifications.map((field) => [field.fieldPath, field.setFieldOptions.value]), [
       ["priceVat", "£9,995 +VAT"],
-      ["mthPrice", "£209"],
+      ["mthPrice", "£210"],
       ["wasPriceVat", "£10,995 +VAT"],
     ]);
   });

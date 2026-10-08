@@ -15,10 +15,10 @@ import {
 
 const root = new URL("../", import.meta.url);
 
-test("car published price patch uses the same 5% flat monthly calculation as Finance", () => {
+test("car published price patch uses the same 9.9% effective APR monthly calculation as VFC Finance", () => {
   const listing = CAR_WIX_PRICE_COLLECTIONS.find((collection) => collection.id === "CARFINANCE");
   const patch = buildCarWixPricePatch(listing, { id: "car-1", data: { price: "£21,995", salePrice: "FROM £459 P/M" } }, 20995);
-  assert.deepEqual(patch.fields, { price: "£20,995", salePrice: "FROM £438 P/M" });
+  assert.deepEqual(patch.fields, { price: "£20,995", salePrice: "FROM £441 P/M" });
 });
 
 test("car patch preserves a Was price when a car CMS row exposes the same history field as Finance", () => {

@@ -1,11 +1,11 @@
 import {
   VAN_FINANCE_WIX_COLLECTIONS,
   buildFinanceWixPricePatch,
-  calculateFivePercentFlatMonthly,
   financeWixCurrentFields,
   normalizeFinanceRegistration,
   parseRetailPrice,
 } from "../lib/vanscoWixPrice.js";
+import { calculateVfcAdvertisedMonthly, isVfcPricingReviewHeld } from "../lib/vfcFinancePriceMatrix.mjs";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value ?? "").trim().slice(0, limit);
@@ -87,6 +87,7 @@ function sameFields(left = {}, right = {}) {
 }
 
 async function buildPreview(configuration, registration, retailPrice) {
+  if (isVfcPricingReviewHeld(registration)) throw new ApiError(409, "This Van Finance vehicle has an unresolved monthly/VAT discrepancy. Leave its price untouched until reviewed.");
   const queried = await Promise.all(VAN_FINANCE_WIX_COLLECTIONS.map(async (collection) => ({
     collection,
     item: await queryRegistration(configuration, collection, registration),
@@ -108,7 +109,7 @@ async function buildPreview(configuration, registration, retailPrice) {
   return {
     registration,
     retail_price: retailPrice,
-    monthly_price: calculateFivePercentFlatMonthly(retailPrice),
+    monthly_price: calculateVfcAdvertisedMonthly(retailPrice),
     match_count: matches.length,
     matches,
   };
