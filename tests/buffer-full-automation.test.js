@@ -325,7 +325,7 @@ test("VFC static advert hook alternates 50/50 without touching the full vehicle 
   const vehicle = {
     registration: "WR67MME",
     vanDescription: "Fiat Doblo 1.6 Multijet Maxi",
-    vanSpec: "YEAR: 2017\\nMILEAGE: 78,964\\nEURO: 6",
+    vanSpec: "YEAR: 2017\nMILEAGE: 78,964\nEURO: 6",
     price: "5995",
     salePrice: "125",
     weblink: "https://www.vanfinancecompany.co.uk/van-finance/WR67MME",
@@ -333,14 +333,14 @@ test("VFC static advert hook alternates 50/50 without touching the full vehicle 
   const baseline = buildAutomatedFacebookCaption(vehicle, "vanFinance");
   assert.match(baseline, /^FROM £99 DEPOSIT/);
   const expected = withVanFinancePoorCreditOpening(baseline, 0);
-  assert.match(expected, /^GOOD OR POOR CREDIT\\?\\n\\nFROM £99 DEPOSIT/);
-  assert.match(expected, /VAN FINANCE COMPANY \\| VAN FINANCE OPTIONS/);
+  assert.match(expected, /^GOOD OR POOR CREDIT\?\n\nFROM £99 DEPOSIT/);
+  assert.match(expected, /VAN FINANCE COMPANY \| VAN FINANCE OPTIONS/);
   assert.match(expected, /REGISTRATION: WR67MME/);
   assert.match(expected, /MILEAGE: 78,964/);
-  assert.match(expected, /£5,995 \\+ VAT/);
+  assert.match(expected, /£5,995 \+ VAT/);
   assert.match(expected, /£125 MTH/);
   assert.ok(expected.endsWith(vehicle.weblink));
-  assert.doesNotMatch(expected, /utm_|\\/track|\\/r\\//);
+  assert.doesNotMatch(expected, /utm_|\/track|\/r\//);
   const credits = Array.from({ length: 30 }, (_, i) => isVanFinancePoorCreditImageSlot(i));
   assert.equal(credits.filter(Boolean).length, 15);
   for (let i = 0; i < 30; i += 1) {
@@ -367,22 +367,22 @@ test("Rent2Buy, Google Business, Reels and manual vehicle posting retain their o
   const financeVehicle = {
     registration: "WR67MME", vanDescription: "Fiat Doblo", weblink: "https://www.vanfinancecompany.co.uk/van-finance/WR67MME",
   };
-  assert.doesNotMatch(buildAutomatedReelCaption({ productKey: "vanFinance", vehicle: financeVehicle, slotIndex: 1 }), /^GOOD OR POOR CREDIT\\?/);
-  assert.match(buildAutomatedReelCaption({ productKey: "vanFinance", vehicle: financeVehicle, slotIndex: 0 }), /^GOOD OR POOR CREDIT\\?/);
+  assert.doesNotMatch(buildAutomatedReelCaption({ productKey: "vanFinance", vehicle: financeVehicle, slotIndex: 1 }), /^GOOD OR POOR CREDIT\?/);
+  assert.match(buildAutomatedReelCaption({ productKey: "vanFinance", vehicle: financeVehicle, slotIndex: 0 }), /^GOOD OR POOR CREDIT\?/);
   const worker = source("api/buffer-facebook-automation-worker.js");
-  assert.match(worker, /buildAutomatedFacebookCaption\\(vehicle, productKey, \\{ imageSlotIndex: slotInfo\\.existing \\}\\)/);
-  assert.match(worker, /mediaUrls,\\n    mediaKind: "image"/);
+  assert.match(worker, /buildAutomatedFacebookCaption\(vehicle, productKey, \{ imageSlotIndex: slotInfo\.existing \}\)/);
+  assert.match(worker, /mediaUrls,\n    mediaKind: "image"/);
   const app = source("App.jsx");
   const captionModule = source("utils/creativeUtils.js");
-  assert.match(captionModule, /withVanFinancePoorCreditOpening\\(caption, index\\)/);
-  assert.match(captionModule, /destination === "Van Finance Facebook" \\|\\| destination === "Van Finance Marketplace"/);
-  assert.match(app, /case "Van Finance Groups & Classifieds":[\\s\\S]*?destination: "Van Finance Facebook"/);
-  assert.match(app, /case "Rent2Buy Facebook Groups":[\\s\\S]*?destination: "Rent2Buy Facebook"/);
-  assert.match(app, /case "Van Finance Marketplace":[\\s\\S]*?destination: "Van Finance Marketplace"/);
-  assert.match(app, /case "Rent2Buy Marketplace":[\\s\\S]*?destination: "Rent2Buy Marketplace"/);
+  assert.match(captionModule, /withVanFinancePoorCreditOpening\(caption, index\)/);
+  assert.match(captionModule, /destination === "Van Finance Facebook" \|\| destination === "Van Finance Marketplace"/);
+  assert.match(app, /case "Van Finance Groups & Classifieds":[\s\S]*?destination: "Van Finance Facebook"/);
+  assert.match(app, /case "Rent2Buy Facebook Groups":[\s\S]*?destination: "Rent2Buy Facebook"/);
+  assert.match(app, /case "Van Finance Marketplace":[\s\S]*?destination: "Van Finance Marketplace"/);
+  assert.match(app, /case "Rent2Buy Marketplace":[\s\S]*?destination: "Rent2Buy Marketplace"/);
   const marketplace = source("services/marketplaceAutomation.js");
-  assert.match(marketplace, /description: clean\\(caption\\) \\|\\| "Visit us at VANFINANCECOMPANY\\.co\\.uk"/);
-  assert.match(marketplace, /images,\\n    imageCount: images\\.length/);
+  assert.match(marketplace, /description: clean\(caption\) \|\| "Visit us at VANFINANCECOMPANY\.co\.uk"/);
+  assert.match(marketplace, /images,\n    imageCount: images\.length/);
   assert.match(marketplace, /price: cashPrice/);
   assert.doesNotMatch(source("lib/vanFinanceStaticAdHooks.js"), /\b(localStorage|supabase|createBufferScheduledPost)\b/);
 });
