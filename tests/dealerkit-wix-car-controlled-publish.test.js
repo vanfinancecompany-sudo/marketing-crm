@@ -83,6 +83,9 @@ test("Cars plan creates one current listing and one detail page using live CAR f
 
   const listing = plan.targets.find((target) => target.collectionId === "CARFINANCE");
   const detail = plan.targets.find((target) => target.collectionId === "CARPAGES");
+  assert.equal(plan.monthlyPrice, 458);
+  assert.equal(listing.data.salePrice, "FROM £458 P/M");
+  assert.equal(detail.data.salePrice, "£458");
   assert.equal(listing.operation, "create");
   assert.equal(listing.data.title, "AB23CDE");
   assert.equal(listing.data.buttonText, "VIEW CAR");
@@ -265,4 +268,12 @@ test("Cars browser/runtime flow has separate preview, final publisher and media-
   assert.match(state, /CARPAGES/);
   assert.match(state, /queryControlledRegistrationItems/);
   assert.match(state, /WIX_CAR_API_KEY/);
+});
+
+test('car with disputed Wix cash price is blocked in future DealerKit publishing',()=>{
+ const plan=buildDealerKitCarWixPlan({
+   vehicle:vehicle({registration:'LM70YPT'}),decision:decision({registration:'LM70YPT'}),imageSet:imageSet()
+ });
+ assert.equal(plan.canPublish,false);
+ assert.ok(plan.blockers.some(b=>b.code==='pricing_review_hold'));
 });
