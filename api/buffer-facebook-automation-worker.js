@@ -553,7 +553,7 @@ async function createNextImagePost({ supabase, posts, automationConfig, productK
   if (!vehicle) return { skipped: "no_candidate", ...slotInfo };
 
   const destination = bufferDestinationForProduct(productKey);
-  const text = buildAutomatedFacebookCaption(vehicle, productKey);
+  const text = buildAutomatedFacebookCaption(vehicle, productKey, { imageSlotIndex: slotInfo.existing });
   let provenSecondaryUrls = null;
   if (productKey === "rent2buy") {
     const registration = normalizeReg(vehicle.registration || vehicle.reg || vehicle.title || vehicle.name);
