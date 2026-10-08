@@ -16,7 +16,7 @@ import {
   rent2BuyWixCurrentFields,
 } from "../lib/dealerKitPublishedPrice.js";
 import { VAN_FINANCE_RENT2BUY_WIX_SITE_ID } from "../lib/dealerKitRent2BuyWixPlan.js";
-import { calculateVfcAdvertisedMonthly } from "../lib/vfcFinancePriceMatrix.mjs";
+import { calculateVfcAdvertisedMonthly, isVfcPricingReviewHeld } from "../lib/vfcFinancePriceMatrix.mjs";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value ?? "").trim().slice(0, limit);
@@ -158,6 +158,7 @@ function makeMatch(configuration, collection, item, current, proposed) {
 }
 
 async function financePreview(configuration, vehicle) {
+  if (isVfcPricingReviewHeld(vehicle.registration)) throw new ApiError(409, "This VFC vehicle has a pricing/VAT discrepancy on hold. Do not change its published price yet.");
   const queried = await Promise.all(VAN_FINANCE_WIX_COLLECTIONS.map(async (collection) => ({ collection, item: await queryRegistration(configuration, collection, vehicle.registration) })));
   const master = queried.find(({ collection }) => collection.id === "VANFINANCE-ALLVANS");
   if (!master?.item) throw new ApiError(409, `${vehicle.registration} is not currently published in the Van Finance master listing. Nothing was changed.`);
@@ -179,6 +180,7 @@ async function financePreview(configuration, vehicle) {
 }
 
 async function carPreview(configuration, vehicle) {
+  if (isVfcPricingReviewHeld(vehicle.registration)) throw new ApiError(409, "This VFC car has a pricing discrepancy on hold. Do not change its published price yet.");
   const queried = await Promise.all(CAR_WIX_PRICE_COLLECTIONS.map(async (collection) => ({ collection, item: await queryRegistration(configuration, collection, vehicle.registration) })));
   const master = queried.find(({ collection }) => collection.id === "CARFINANCE");
   if (!master?.item) throw new ApiError(409, `${vehicle.registration} is not currently published in the Car Finance master listing. Nothing was changed.`);
