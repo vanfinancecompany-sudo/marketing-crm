@@ -49,3 +49,15 @@ test("generated Stock Watch page renders verified photos independently and refre
  assert.match(page,/filter.value === "images_ready" \?/);
  assert.match(page,/Stock comparison cards and dependent counts are paused/);
 });
+
+test("photo-ready independently loads on page open and each tab change after session state settles",()=>{
+ const page=fs.readFileSync(new URL("../pages/VanscoStockWatchPage.jsx",import.meta.url),"utf8");
+ const effect=page.slice(page.indexOf("const loadLivePhotoAlerts = async () =>"),page.indexOf("const activeFilter ="));
+ assert.match(effect,/if \(sessionUiLoadRef\.current\) await sessionUiLoadRef\.current/);
+ assert.match(effect,/if \(active\) await loadImageReadiness\(selectedPipeline, \(\) => active\)/);
+ assert.match(effect,/void loadLivePhotoAlerts\(\)/);
+ assert.match(effect,/return \(\) => \{ active = false; \}/);
+ assert.match(effect,/\[selectedPipeline\]/);
+ assert.doesNotMatch(page,/It appears only while that advert has 1 or 2 placeholder images/);
+ assert.match(page,/It appears while that advert has 1 to 4 images/);
+});
