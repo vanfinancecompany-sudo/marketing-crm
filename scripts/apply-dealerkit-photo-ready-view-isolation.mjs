@@ -52,5 +52,41 @@ replaceExactlyOnce(
  'Stock comparison cards and dependent counts are paused until live Wix stock presence is verified. Photo-ready alerts remain visible when independently verified by DealerKit and the live Wix listings.',
  "clarify pause message"
 );
+
+/*
+ * The single-snapshot Stock Watch UI replaced the old initial photo loader.
+ * Previously this independent endpoint ran only when the user clicked the card,
+ * leaving its default count at zero even when three alerts were ready.
+ *
+ * Await the ongoing initial session so applySession cannot overwrite the fresh
+ * independently verified photo result. Recheck on each product-tab switch.
+ * The cleanup protects against late results from a previous product tab.
+ */
+replaceExactlyOnce(
+ '  const activeFilter = filtersByPipeline[selectedPipeline] || "missing";',
+ `  useEffect(() => {
+    let active = true;
+    const loadLivePhotoAlerts = async () => {
+      // The initial shared stock session can overwrite photo state. Join it first.
+      try {
+        if (sessionUiLoadRef.current) await sessionUiLoadRef.current;
+      } catch {
+        // Photo readiness has a separate Wix+DealerKit source and can still pass.
+      }
+      if (active) await loadImageReadiness(selectedPipeline, () => active);
+    };
+    void loadLivePhotoAlerts();
+    return () => { active = false; };
+  }, [selectedPipeline]);
+
+  const activeFilter = filtersByPipeline[selectedPipeline] || "missing";`,
+ "load verified photo alerts on initial screen and lane switches"
+);
+replaceExactlyOnce(
+ 'It appears only while that advert has 1 or 2 placeholder images and DealerKit now has at least 5 images. Once the advert has 3 or more images, small later DealerKit additions are ignored.',
+ 'It appears while that advert has 1 to 4 images, including warranty, Due In Soon or delivery graphics, and DealerKit has at least 5 images and more photos than the advert. Five or more advertised images count as an established gallery.',
+ "correct photo-ready informational wording"
+);
+
 fs.writeFileSync(file,source);
 console.log("Applied independent verified DealerKit photo-ready cards and click-to-refresh without relaxing stock comparison guards.");
