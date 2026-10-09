@@ -64,7 +64,7 @@ async function pageController(pipeline, support, listingPresence, dealerKitRecor
     const start = source.indexOf("  const displayRecords = useMemo(");
     const block = source.slice(start, source.indexOf("\n  const summary =", start));
     const dependencies = { useMemo: (callback) => callback(), positiveComparisonPaused: paused, localLoadError: paused ? "Support unavailable" : "",
-      imageReadyRecords: [{ id: "photos" }], activeRecords: [{ id: "missing" }], visibleLocalNotVanscoRecords: [{ id: "reverse" }],
+      imageReadyRecords: [{ id: "photos" }], visiblePhotoReadyRecords: [], activeRecords: [{ id: "missing" }], visibleLocalNotVanscoRecords: [{ id: "reverse" }],
       localNotVanscoRecords: [{ id: "reverse" }], priceDifferenceRecords: [{ id: "price" }], advertisedStockRecords: controller.cards() };
     return new Function(...Object.keys(dependencies), block + ";return displayRecords;")(...Object.values(dependencies));
   };
