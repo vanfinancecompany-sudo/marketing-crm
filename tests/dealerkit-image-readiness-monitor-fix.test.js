@@ -344,7 +344,7 @@ test("image readiness production path uses known-good rows from a degraded Deale
   assert.match(endpoint, /CARPAGES/);
   assert.match(endpoint, /comparisonScope:\s*"selected_pipeline_only"/);
   assert.doesNotMatch(endpoint, /if \(!dealerKitSnapshot\.complete\)[\s\S]{0,300}status\(503\)/);
-  assert.match(page, /imageReadySummary\.sourceAvailable === false/);
+  assert.match(page, /imageReadySummary\?\.sourceAvailable === false/);
   assert.doesNotMatch(endpoint, /vansco_refresh_runs|vansco_vehicle_cache/i);
   assert.match(service, /\["finance", "rent2buy", "cars"\]/);
   assert.match(service, /\/api\/dealerkit-image-readiness/);
