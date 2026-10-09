@@ -5,15 +5,15 @@ import fs from "node:fs";
 const stockWatchPage = fs.readFileSync(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
 const finalSafetyTransform = fs.readFileSync(new URL("../scripts/apply-dealerkit-photo-ready-final-safety.mjs", import.meta.url), "utf8");
 
-test("final photo-ready safety keeps 4+ image galleries out of the due-in queue", () => {
+test("final photo-ready safety keeps 5+ image galleries out of the due-in queue", () => {
   assert.match(finalSafetyTransform, /advertImageCount >= 1/);
-  assert.match(finalSafetyTransform, /advertImageCount <= 3/);
+  assert.match(finalSafetyTransform, /advertImageCount <= 4/);
   assert.match(finalSafetyTransform, /sourceImageCount >= 5/);
   assert.match(finalSafetyTransform, /sourceImageCount > advertImageCount/);
 
   if (stockWatchPage.includes("FINAL_DEALERKIT_PHOTO_READY_RENDER_SAFETY")) {
     assert.match(stockWatchPage, /advertImageCount >= 1/);
-    assert.match(stockWatchPage, /advertImageCount <= 3/);
+    assert.match(stockWatchPage, /advertImageCount <= 4/);
   }
 });
 
