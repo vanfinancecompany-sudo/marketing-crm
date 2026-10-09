@@ -25,7 +25,7 @@ function dealerKitVehicle(registration, imageCount, extra = {}) {
 }
 
 test("photo readiness is a due-in placeholder alert, not a general image-count difference", () => {
-  assert.equal(MAX_PLACEHOLDER_ADVERT_IMAGES, 3);
+  assert.equal(MAX_PLACEHOLDER_ADVERT_IMAGES, 4);
 
   const normalGallery = buildDealerKitImageReadinessAlerts({
     pipeline: "finance",
@@ -67,6 +67,29 @@ test("photo readiness is a due-in placeholder alert, not a general image-count d
   assert.equal(threeImageDueIn.length, 1, "3-image advert versus DealerKit 32 must become a photo-ready task");
   assert.equal(threeImageDueIn[0].currentAdvertImageCount, 3);
   assert.equal(threeImageDueIn[0].sourceImageCount, 32);
+
+  // One real van photo + warranty + due-in + delivery promo must still notify.
+  const fourImagePromo = buildDealerKitImageReadinessAlerts({
+    pipeline: "finance",
+    listingPresenceByPipeline: { finance: presence("FV24RGE") },
+    cmsItemsByPipeline: { finance: [{
+      title: "FV24RGE",
+      imageCount: 4,
+      images: ["actual-van.jpg", "warranty.png", "due-in-soon.png", "free-delivery.png"],
+    }] },
+    dealerKitVehicles: [dealerKitVehicle("FV24RGE", 9)],
+  });
+  assert.equal(fourImagePromo.length, 1, "4-image promo advert must not hide nine new DealerKit photos");
+  assert.equal(fourImagePromo[0].currentAdvertImageCount, 4);
+  assert.equal(fourImagePromo[0].sourceImageCount, 9);
+
+  const normalFiveImageGallery = buildDealerKitImageReadinessAlerts({
+    pipeline: "finance",
+    listingPresenceByPipeline: { finance: presence("FV24IMG") },
+    cmsItemsByPipeline: { finance: [{ title: "FV24IMG", imageCount: 5 }] },
+    dealerKitVehicles: [dealerKitVehicle("FV24IMG", 14)],
+  });
+  assert.equal(normalFiveImageGallery.length, 0, "Established five-image galleries must not create photo-ready alerts");
 });
 
 test("BD21HCX style Finance alert is not suppressed by a fuller Rent2Buy advert", () => {
