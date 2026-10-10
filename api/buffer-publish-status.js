@@ -199,6 +199,24 @@ function registrationKey(row) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
+// Parallel status refreshes can race after their read of existing source IDs.
+// Treat the uniqueness constraint as an idempotency guard, not a failed sync.
+// The slower row-by-row fallback runs only if a conflicting batch is detected.
+export async function insertBufferActivityIdempotently(supabase, rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return 0;
+  const batch = await supabase.from("marketing_daily_activity_events").insert(rows);
+  if (!batch.error) return rows.length;
+  if (String(batch.error.code || "") !== "23505") throw batch.error;
+
+  let inserted = 0;
+  for (const row of rows) {
+    const single = await supabase.from("marketing_daily_activity_events").insert([row]);
+    if (!single.error) inserted += 1;
+    else if (String(single.error.code || "") !== "23505") throw single.error;
+  }
+  return inserted;
+}
+
 async function syncSentPosts(
   supabase,
   posts,
@@ -279,11 +297,8 @@ async function syncSentPosts(
     });
   }
 
-  if (inserts.length) {
-    const inserted = await supabase.from("marketing_daily_activity_events").insert(inserts);
-    if (inserted.error) throw inserted.error;
-  }
-  return { inserted: inserts.length, matchedManual, descriptors };
+  const inserted = await insertBufferActivityIdempotently(supabase, inserts);
+  return { inserted, matchedManual, descriptors };
 }
 
 const VANSCO_GOOGLE_ACTIVITY_TYPES = Object.freeze({
@@ -363,11 +378,8 @@ async function syncVanscoSentPosts(supabase, snapshot) {
       occurred_at: item.sentAt,
     }));
 
-  if (inserts.length) {
-    const inserted = await supabase.from("marketing_daily_activity_events").insert(inserts);
-    if (inserted.error) throw inserted.error;
-  }
-  return { inserted: inserts.length, descriptors };
+  const inserted = await insertBufferActivityIdempotently(supabase, inserts);
+  return { inserted, descriptors };
 }
 
 async function cleanDeliveredReelBlobs(supabase, descriptors) {
