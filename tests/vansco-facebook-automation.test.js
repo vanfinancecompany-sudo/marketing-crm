@@ -219,24 +219,26 @@ test("Vansco Google Business schedule creates ten staggerable branch slots", () 
   assert.equal(new Set(base.map((slot) => slot.dueAt)).size, 10);
 });
 
-test("Vansco Facebook Stories are five separate daily slots", () => {
-  assert.equal(VANSCO_FACEBOOK_STORIES_PER_DAY, 5);
+test("Vansco Facebook Stories are four evenly spaced daily slots", () => {
+  assert.equal(VANSCO_FACEBOOK_STORIES_PER_DAY, 4);
   const slots = vanscoFacebookStorySlots("2026-09-28");
-  assert.equal(slots.length, 5);
+  assert.equal(slots.length, 4);
   assert.deepEqual(
     slots.map((slot) => slot.localTime),
-    ["09:30", "12:00", "14:30", "17:00", "19:30"],
+    ["09:30", "12:45", "16:15", "19:30"],
   );
-  assert.equal(new Set(slots.map((slot) => slot.dueAt)).size, 5);
+  assert.equal(new Set(slots.map((slot) => slot.dueAt)).size, 4);
 });
 
-test("30-post schedule is evenly spaced from 08:00 through 21:00", () => {
-  const slots = vanscoDailySlots("2026-09-25", 30);
-  assert.equal(slots.length, 30);
+test("25-post schedule is evenly spaced from 08:00 through 21:00 with rolling limit headroom", () => {
+  const slots = vanscoDailySlots("2026-09-25", 30); // Request deliberately above cap
+  assert.equal(slots.length, 25);
   assert.equal(slots[0].localTime, "08:00");
   assert.equal(slots.at(-1).localTime, "21:00");
   assert.ok(slots.every((slot) => slot.localMinutes >= 8 * 60 && slot.localMinutes <= 21 * 60));
-  assert.equal(new Set(slots.map((slot) => slot.dueAt)).size, 30);
+  assert.equal(new Set(slots.map((slot) => slot.dueAt)).size, 25);
+  assert.equal(slots.length + VANSCO_FACEBOOK_STORIES_PER_DAY, 29);
+  assert.ok(slots.length + VANSCO_FACEBOOK_STORIES_PER_DAY < 35);
 });
 
 test("Vansco next-day queue date rolls across month and year boundaries", () => {

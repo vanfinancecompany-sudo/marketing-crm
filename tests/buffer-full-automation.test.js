@@ -386,3 +386,16 @@ test("Rent2Buy, Google Business, Reels and manual vehicle posting retain their o
   assert.match(marketplace, /price: cashPrice/);
   assert.doesNotMatch(source("lib/vanFinanceStaticAdHooks.js"), /\b(localStorage|supabase|createBufferScheduledPost)\b/);
 });
+
+test("VFC Facebook worker keeps rendered reels flowing without timing out on fresh renders", () => {
+  const worker = source("api/buffer-facebook-automation-worker.js");
+  const financePosts = DEFAULT_BUFFER_AUTOMATION_CONFIG.vanFinancePostsPerDay;
+  const financeReels = DEFAULT_BUFFER_AUTOMATION_CONFIG.vanFinanceReelsPerDay;
+  assert.equal(financePosts + financeReels + FACEBOOK_STORY_TARGET_PER_DAY, 33);
+  assert.ok(financePosts + financeReels + FACEBOOK_STORY_TARGET_PER_DAY < 35);
+  assert.match(worker, /const freshRenderBudget = \{ remaining: 1 \}/);
+  assert.match(worker, /if \(!ready && \(!freshRenderBudget \|\| freshRenderBudget\.remaining <= 0\)\)/);
+  assert.match(worker, /freshRenderBudget\.remaining -= 1/);
+  assert.match(worker, /skipped: "fresh_render_deferred"/);
+  assert.equal((worker.match(/\s+freshRenderBudget,\s*\}\),/g) || []).length, 2);
+});
