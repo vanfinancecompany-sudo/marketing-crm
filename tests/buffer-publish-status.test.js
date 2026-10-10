@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { insertBufferActivityIdempotently } from "../api/buffer-publish-status.js";
 
 import {
   BUFFER_SENT_POSTS_QUERY,
@@ -146,4 +147,35 @@ test("client surfaces live Buffer confirmation in all three CRM areas", async ()
   assert.match(endpoint, /syncVanscoSentPosts/);
   assert.match(endpoint, /vansco-buffer:/);
   assert.match(endpoint, /vansco_333_google_business_post/);
+});
+
+test("concurrent Buffer status imports ignore existing source identities and retain new posts", async () => {
+  const seen = new Set(["existing"]);
+  const attempts = [];
+  const supabase = {
+    from(table) {
+      assert.equal(table, "marketing_daily_activity_events");
+      return {
+        async insert(rows) {
+          attempts.push(rows.map(item => item.source_id));
+          if (rows.length > 1) return { error: { code: "23505" } };
+          const row = rows[0];
+          if (seen.has(row.source_id)) return { error: { code: "23505" } };
+          seen.add(row.source_id);
+          return { error: null };
+        },
+      };
+    },
+  };
+  const rows = [{ source_id: "existing" }, { source_id: "new" }];
+  assert.equal(await insertBufferActivityIdempotently(supabase, rows), 1);
+  assert.deepEqual(attempts, [["existing", "new"], ["existing"], ["new"]]);
+  assert.equal(await insertBufferActivityIdempotently(supabase, []), 0);
+});
+
+test("non-duplicate publication database errors remain visible instead of being suppressed", async () => {
+  const supabase = {
+    from() { return { async insert() { return { error: Object.assign(new Error("database unavailable"), { code: "XX000" }) }; } }; },
+  };
+  await assert.rejects(() => insertBufferActivityIdempotently(supabase, [{ source_id: "new" }]), /database unavailable/);
 });
