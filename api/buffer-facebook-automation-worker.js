@@ -878,7 +878,11 @@ export default async function handler(request, response) {
     const freshRenderBudget = { remaining: 1 };
     const results = { vanFinance: {}, rent2buy: {}, googleBusiness: {} };
 
-    for (const productKey of PRODUCTS) {
+    // Alternate the first channel hourly so a shared one-render budget cannot
+    // consistently favour Van Finance over Rent2Buy when fresh videos are needed.
+    const productOrder = new Date(now).getUTCHours() % 2 === 0
+      ? PRODUCTS : [...PRODUCTS].reverse();
+    for (const productKey of productOrder) {
       results[productKey].image = await safeStep(`${productKey} image`, () =>
         createNextImagePost({
           supabase,
