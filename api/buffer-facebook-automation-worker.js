@@ -754,7 +754,7 @@ async function generateOneReel(request, productKey, dateKey, packIndex, excluded
   };
 }
 
-async function createNextReel({ request, supabase, posts, automationConfig, productKey, dateKey, now }) {
+async function createNextReel({ request, supabase, posts, automationConfig, productKey, dateKey, now, freshRenderBudget }) {
   if (queuedCount(posts, productKey) >= CHANNEL_QUEUE_LIMIT) {
     return { skipped: "buffer_queue_full" };
   }
@@ -773,6 +773,13 @@ async function createNextReel({ request, supabase, posts, automationConfig, prod
   const ready = poorCreditSlot ? null : (await loadReadyReels(supabase, productKey, dateKey)).find(
     (reel) => reel.registration && !excludedSet.has(reel.registration),
   );
+  // Never render multiple fresh 20-second videos serially in one 300-second
+  // cron invocation. Ready daily-batch reels remain unlimited, but one fresh
+  // render per request gives both Facebook channels a reliable chance to refill.
+  if (!ready && (!freshRenderBudget || freshRenderBudget.remaining <= 0)) {
+    return { skipped: "fresh_render_deferred", ...slotInfo };
+  }
+  if (!ready) freshRenderBudget.remaining -= 1;
   const reel = ready || (await generateOneReel(request, productKey, dateKey, slotInfo.existing, excluded));
   if (!reel) return { skipped: "no_candidate", ...slotInfo };
 
@@ -866,6 +873,9 @@ export default async function handler(request, response) {
 
     const posts = await loadBufferPosts();
     const now = Date.now();
+    // Limit expensive fallback rendering to one per cron run; daily-batch
+    // videos can still fill all the other Reel slots.
+    const freshRenderBudget = { remaining: 1 };
     const results = { vanFinance: {}, rent2buy: {}, googleBusiness: {} };
 
     for (const productKey of PRODUCTS) {
@@ -900,6 +910,7 @@ export default async function handler(request, response) {
           productKey,
           dateKey,
           now,
+          freshRenderBudget,
         }),
       );
       if (results[productKey].video?.created) {
@@ -912,6 +923,7 @@ export default async function handler(request, response) {
             productKey,
             dateKey,
             now,
+            freshRenderBudget,
           }),
         );
       }
