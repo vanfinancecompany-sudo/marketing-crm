@@ -74,6 +74,58 @@ function blankSchedule() {
   return Array.from({ length: 7 }, () => ({ ...DEFAULT_DAILY_TARGETS }));
 }
 
+// Publishing is finished at 21:00 UK, but the final Buffer reconciliation
+// runs at about 23:05 UK. Do not mistake an evening refill for today's result.
+function londonMinutesAt(value) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(value);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value || 0);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value || 0);
+  return hour * 60 + minute;
+}
+
+function londonTimeLabel(value) {
+  if (!value || !Number.isFinite(new Date(value).getTime())) return "";
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).format(new Date(value));
+}
+
+function vanscoDayProgress({ completed, target, confirmed, checkedAt, now = new Date() }) {
+  const minutes = londonMinutesAt(now);
+  const check = checkedAt ? new Date(checkedAt) : null;
+  const finalChecked = Boolean(
+    confirmed && check && Number.isFinite(check.getTime())
+    && londonDateKey(check) === londonDateKey(now)
+    && londonMinutesAt(check) >= (23 * 60 + 5),
+  );
+  const shortBy = Math.max(0, target - completed);
+  if (minutes < (21 * 60)) {
+    return {
+      label: shortBy === 0 ? "TARGET MET" : shortBy + " LEFT",
+      detail: "Publishing 08:00–21:00 UK",
+    };
+  }
+  if (finalChecked) {
+    return {
+      label: shortBy === 0 ? "DAY COMPLETE" : "DAY SHORT",
+      detail: "Final Buffer check " + londonTimeLabel(check) + " UK"
+        + (shortBy ? " · short by " + shortBy : ""),
+    };
+  }
+  if (minutes >= (23 * 60 + 5)) {
+    return {
+      label: "FINAL CHECK PENDING",
+      detail: "Publishing ended 21:00 UK · waiting for Buffer confirmation",
+    };
+  }
+  return {
+    label: shortBy === 0 ? "TARGET MET" : "POSTING FINISHED",
+    detail: "Publishing ended 21:00 UK · final Buffer check due 23:05",
+  };
+}
+
 function TargetFields({ value, onChange }) {
   return (
     <div className="operations-target-fields">
@@ -154,6 +206,11 @@ function ActivityCard({ metric, onOpen }) {
       >
         <span style={{ width: `${metric.percentage}%` }} />
       </div>
+      {metric.statusDetail ? (
+        <small style={{ marginTop: 7, color: "#52657f", fontSize: 11, lineHeight: 1.35 }}>
+          {metric.statusDetail}
+        </small>
+      ) : null}
     </article>
   );
 }
@@ -459,13 +516,17 @@ export default function DashboardPage({ onNavigate }) {
 
   const vanscoMetric = useMemo(() => {
     const stored = baseMetric("vansco_facebook_post");
-    const liveAvailable = Boolean(vanscoStatus?.buffer);
+    const liveAvailable = vanscoStatus?.buffer?.sentCountConfirmed === true;
     const completed = liveAvailable
       ? Math.max(0, Number(vanscoStatus?.buffer?.sentToday || 0))
       : Math.max(0, Number(stored?.completed || 0));
     const target = targetFor("vansco_facebook_post");
     const unavailable = Boolean(vanscoStatusError) && !vanscoStatus && !stored;
     const checking = vanscoStatusBusy && !vanscoStatus && !stored;
+    const dayProgress = vanscoDayProgress({
+      completed, target, confirmed: liveAvailable,
+      checkedAt: vanscoStatus?.providerCheckedAt,
+    });
     return {
       type: "vansco_facebook_post",
       target,
@@ -479,21 +540,24 @@ export default function DashboardPage({ onNavigate }) {
         ? "UNAVAILABLE"
         : checking
           ? "CHECKING"
-          : completed >= target
-            ? "COMPLETE"
-            : `${Math.max(0, target - completed)} LEFT`,
+          : dayProgress.label,
+      statusDetail: unavailable || checking ? "" : dayProgress.detail,
     };
   }, [vanscoStatus, vanscoStatusBusy, vanscoStatusError, overview]);
 
   const vanscoStoryMetric = useMemo(() => {
     const stored = baseMetric("vansco_facebook_story");
-    const liveAvailable = Boolean(vanscoStatus?.stories);
+    const liveAvailable = vanscoStatus?.buffer?.sentCountConfirmed === true && Boolean(vanscoStatus?.stories);
     const completed = liveAvailable
       ? Math.max(0, Number(vanscoStatus?.stories?.sentToday || 0))
       : Math.max(0, Number(stored?.completed || 0));
     const target = targetFor("vansco_facebook_story");
     const unavailable = Boolean(vanscoStatusError) && !vanscoStatus && !stored;
     const checking = vanscoStatusBusy && !vanscoStatus && !stored;
+    const dayProgress = vanscoDayProgress({
+      completed, target, confirmed: liveAvailable,
+      checkedAt: vanscoStatus?.providerCheckedAt,
+    });
     return {
       type: "vansco_facebook_story",
       label: "Vansco Facebook Stories",
@@ -508,9 +572,8 @@ export default function DashboardPage({ onNavigate }) {
         ? "UNAVAILABLE"
         : checking
           ? "CHECKING"
-          : completed >= target
-            ? "COMPLETE"
-            : `${Math.max(0, target - completed)} LEFT`,
+          : dayProgress.label,
+      statusDetail: unavailable || checking ? "" : dayProgress.detail,
     };
   }, [vanscoStatus, vanscoStatusBusy, vanscoStatusError, overview]);
 
@@ -690,6 +753,11 @@ export default function DashboardPage({ onNavigate }) {
         <p>
           DealerKit Meta catalogue is the retail stock source. Facebook uses the Vansco Limited channel, while each Google Business page receives only vehicles assigned to its own branch.
         </p>
+        <div className="notice" style={{ marginBottom: 12 }}>
+          <strong>Vansco Facebook: {vanscoMetric.displayCompleted}/{vanscoMetric.target} Buffer-sent posts.</strong>{" "}
+          {vanscoMetric.statusLabel}. {vanscoMetric.statusDetail || "Verified history unavailable."}
+          {" "}Tomorrow’s queue is tracked separately and cannot reset today’s total.
+        </div>
         <div className="notice" style={{ marginBottom: 12 }}>
           <strong>Google Business routing:</strong> Vansco 333 → 333 stock · Southampton Airport → Airport stock · New Forest → New Forest stock.
         </div>
