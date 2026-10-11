@@ -476,6 +476,9 @@ export default async function handler(request, response) {
           last_success_at: cached.checked_at || cached.cached_at || null,
           message: "Buffer live confirmation is paused overnight; cached daytime counts are being shown.",
         }),
+        // Vansco publication totals are retained in the date-matched Buffer
+        // sent ledger and remain accurate even after the API quiet window.
+        today: await withVanscoToday(cached.today, londonDateKey()),
       });
       return;
     }
