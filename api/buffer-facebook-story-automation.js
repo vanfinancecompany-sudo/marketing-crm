@@ -38,6 +38,10 @@ const MIN_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 const STORY_LOOKAHEAD_MS = 5 * 60 * 60 * 1000;
 const SAME_DAY_STORY_CATCHUP_STEP_MINUTES = 10;
 const SAME_DAY_STORY_CATCHUP_LATEST_LOCAL_MINUTES = 23 * 60 + 30;
+const STORY_IMAGE_LIMIT_BYTES = 4_000_000;
+const STORY_IMAGE_PREFLIGHT_TIMEOUT_MS = 5000;
+const STORY_ALTERNATIVE_IMAGE_LIMIT = 8;
+const RECOVERABLE_STORY_MEDIA_ERROR = /image exceeds|file size limit|already got this one scheduled|same thing twice/i;
 
 const POSTS_QUERY = `
   query GetFacebookStoryAutomationPosts {
@@ -267,7 +271,7 @@ function storySlotForRun(posts, productKey, dateKey, now, storyTarget) {
   };
 }
 
-function sourceImageCandidate(posts, productKey, dateKey, storyDueAt) {
+function sourceImageCandidates(posts, productKey, dateKey, storyDueAt) {
   const storyRegistrations = new Set(
     storyPostsForDay(posts, productKey, dateKey)
       .map((post) => extractBufferRegistration(post?.text))
@@ -284,14 +288,36 @@ function sourceImageCandidate(posts, productKey, dateKey, storyDueAt) {
       const registration = extractBufferRegistration(post?.text);
       return registration && !storyRegistrations.has(registration);
     })
-    .sort((first, second) => postTimestamp(second) - postTimestamp(first))[0] || null;
+    .sort((first, second) => postTimestamp(second) - postTimestamp(first))
+    .slice(0, STORY_ALTERNATIVE_IMAGE_LIMIT);
+}
+
+export async function storyImageWithinBufferLimit(url, fetchImageHead = fetch) {
+  // Header-based size checks avoid downloading potentially large images into
+  // memory. Unknown Content-Length is not treated as proof of a safe size.
+  const response = await fetchImageHead(url, {
+    method: "HEAD",
+    signal: AbortSignal.timeout(STORY_IMAGE_PREFLIGHT_TIMEOUT_MS),
+  });
+  // Some Wix/CDN hosts omit Content-Length on HEAD. In that case let
+  // Buffer make the authoritative decision; a rejected upload is retried
+  // with a different image. Never knowingly submit an oversized asset.
+  if (!response.ok) return response.status === 405;
+  const header = response.headers.get("content-length");
+  if (!header) return true;
+  const size = Number(header);
+  return Number.isFinite(size) && size > 0 && size <= STORY_IMAGE_LIMIT_BYTES;
 }
 
 async function createStory({ productKey, sourcePost, dueAt }) {
   const mediaUrl = imageSource(sourcePost);
   if (!mediaUrl) throw new Error("The selected classified image does not have a public image URL.");
-  const text = String(sourcePost?.text || "").trim();
-  if (!text) throw new Error("The selected classified post does not have a caption.");
+  const originalText = String(sourcePost?.text || "").trim();
+  if (!originalText) throw new Error("The selected classified post does not have a caption.");
+  // Distinct copy: Buffer rejects publishing the exact same classified caption
+  // again as a Story near the original Facebook image post.
+  const storyHeading = productKey === "rent2buy" ? "RENT2BUY VANS · TODAY'S STORY" : "VAN FINANCE COMPANY · TODAY'S STORY";
+  const text = `${storyHeading}\n\n${originalText}`;
 
   const input = {
     text,
@@ -325,28 +351,49 @@ async function createNextStory({ posts, productKey, dateKey, now, storyTarget })
     return { skipped: slotInfo.reason, existing: slotInfo.existing, target: slotInfo.target };
   }
 
-  const sourcePost = sourceImageCandidate(posts, productKey, dateKey, slotInfo.slot.dueAt);
-  if (!sourcePost) {
+  const candidates = sourceImageCandidates(posts, productKey, dateKey, slotInfo.slot.dueAt);
+  if (!candidates.length) {
     return { skipped: "no_classified_image_candidate", localTime: slotInfo.slot.localTime };
   }
 
-  const post = await createStory({
-    productKey,
-    sourcePost,
-    dueAt: slotInfo.slot.dueAt,
-  });
-  posts.unshift(post);
-
+  let skippedOversizedOrUnverified = 0;
+  let rejectedDuplicateOrMedia = 0;
+  for (const sourcePost of candidates) {
+    const imageUrl = imageSource(sourcePost);
+    const acceptable = await storyImageWithinBufferLimit(imageUrl).catch(() => false);
+    if (!acceptable) {
+      skippedOversizedOrUnverified += 1;
+      continue;
+    }
+    try {
+      const post = await createStory({
+        productKey,
+        sourcePost,
+        dueAt: slotInfo.slot.dueAt,
+      });
+      posts.unshift(post);
+      return {
+        created: true,
+        mediaKind: "story",
+        registration: extractBufferRegistration(sourcePost?.text),
+        sourcePostId: sourcePost.id,
+        bufferPostId: post.id,
+        dueAt: post.dueAt || slotInfo.slot.dueAt,
+        localTime: slotInfo.slot.localTime,
+        publishing: "automatic",
+        catchUp: Boolean(slotInfo.slot.catchUp),
+      };
+    } catch (error) {
+      if (!RECOVERABLE_STORY_MEDIA_ERROR.test(String(error?.message || error))) throw error;
+      rejectedDuplicateOrMedia += 1;
+    }
+  }
   return {
-    created: true,
-    mediaKind: "story",
-    registration: extractBufferRegistration(sourcePost?.text),
-    sourcePostId: sourcePost.id,
-    bufferPostId: post.id,
-    dueAt: post.dueAt || slotInfo.slot.dueAt,
+    skipped: "no_verified_buffer_compatible_story_image",
+    checked: candidates.length,
+    oversizedOrUnverified: skippedOversizedOrUnverified,
+    bufferRejected: rejectedDuplicateOrMedia,
     localTime: slotInfo.slot.localTime,
-    publishing: "automatic",
-    catchUp: Boolean(slotInfo.slot.catchUp),
   };
 }
 

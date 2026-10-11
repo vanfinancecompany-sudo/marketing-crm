@@ -767,11 +767,19 @@ async function createNextReel({ request, supabase, posts, automationConfig, prod
   const recentReelReserved = recentBufferReelRegistrations(posts, productKey, now);
   const excluded = [...new Set([...currentDayReserved, ...recentReelReserved])];
   const excludedSet = new Set(excluded);
+  // A reel rendered while a van was active may be queued after that van
+  // becomes inactive. Verify ready reels against the current active stock
+  // before sending them to Buffer, not only when they were first rendered.
+  const activeRent2BuyStock = productKey === "rent2buy"
+    ? await loadVehicles(supabase, "rent2buy")
+    : null;
+  const stillAdvertised = (registration) => !activeRent2BuyStock
+    || Boolean(findVehicleByRegistration(activeRent2BuyStock, registration));
   // An already-rendered Reel may have a legacy opener. Render the designated
   // poor-credit slots fresh so the visible first frame always matches its caption.
   const poorCreditSlot = isVanFinancePoorCreditReelSlot(productKey, slotInfo.existing);
   const ready = poorCreditSlot ? null : (await loadReadyReels(supabase, productKey, dateKey)).find(
-    (reel) => reel.registration && !excludedSet.has(reel.registration),
+    (reel) => reel.registration && !excludedSet.has(reel.registration) && stillAdvertised(reel.registration),
   );
   // Never render multiple fresh 20-second videos serially in one 300-second
   // cron invocation. Ready daily-batch reels remain unlimited, but one fresh
@@ -782,6 +790,9 @@ async function createNextReel({ request, supabase, posts, automationConfig, prod
   if (!ready) freshRenderBudget.remaining -= 1;
   const reel = ready || (await generateOneReel(request, productKey, dateKey, slotInfo.existing, excluded));
   if (!reel) return { skipped: "no_candidate", ...slotInfo };
+  if (!stillAdvertised(reel.registration)) {
+    return { skipped: "inactive_rent2buy_stock", registration: reel.registration, ...slotInfo };
+  }
 
   let captionVehicle = reel.vehicle || null;
   if (!captionVehicle) {
