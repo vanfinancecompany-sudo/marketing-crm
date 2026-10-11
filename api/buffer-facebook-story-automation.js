@@ -299,8 +299,13 @@ export async function storyImageWithinBufferLimit(url, fetchImageHead = fetch) {
     method: "HEAD",
     signal: AbortSignal.timeout(STORY_IMAGE_PREFLIGHT_TIMEOUT_MS),
   });
-  if (!response.ok) return false;
-  const size = Number(response.headers.get("content-length"));
+  // Some Wix/CDN hosts omit Content-Length on HEAD. In that case let
+  // Buffer make the authoritative decision; a rejected upload is retried
+  // with a different image. Never knowingly submit an oversized asset.
+  if (!response.ok) return response.status === 405;
+  const header = response.headers.get("content-length");
+  if (!header) return true;
+  const size = Number(header);
   return Number.isFinite(size) && size > 0 && size <= STORY_IMAGE_LIMIT_BYTES;
 }
 
