@@ -142,7 +142,8 @@ test("client surfaces live Buffer confirmation in all three CRM areas", async ()
   assert.match(endpoint, /google_business_posted/);
   assert.match(endpoint, /item\.mediaKind === "image"/);
   assert.match(endpoint, /loadVanscoAutomationStatus/);
-  assert.match(endpoint, /providerSent/);
+  assert.match(endpoint, /loadVanscoPublishedLedger/);
+  assert.doesNotMatch(endpoint, /status\?\.buffer\?\.providerSent\s*\|\|\s*0/);
   assert.match(endpoint, /withVanscoToday/);
   assert.match(endpoint, /syncVanscoSentPosts/);
   assert.match(endpoint, /vansco-buffer:/);
