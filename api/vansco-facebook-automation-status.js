@@ -1,3 +1,4 @@
+import { loadVanscoPublishedLedger } from "../lib/vanscoPublishedLedger.js";
 import {
   VANSCO_FACEBOOK_STORIES_PER_DAY,
   extractVanscoVehicleUrl,
@@ -86,13 +87,17 @@ export default async function handler(request, response) {
 
   try {
     const enabled = String(process.env.VANSCO_FACEBOOK_AUTOMATION_ENABLED || "").toLowerCase() === "true";
-    const [status, liveSnapshot, storyStatus, googleLastRun] = await Promise.all([
+    const dateKey = londonDateKey();
+    const [status, liveSnapshot, storyStatus, googleLastRun, ledger] = await Promise.all([
       loadVanscoAutomationStatus(),
       loadVanscoCombinedStatusSnapshot(),
       loadVanscoFacebookStoryStatus().catch(() => null),
       loadVanscoGoogleBusinessAutomationStatus().catch(() => null),
+      loadVanscoPublishedLedger(dateKey).catch((error) => {
+        console.warn("[vansco-facebook-status] Buffer publication ledger unavailable", { message: String(error?.message || error) });
+        return null;
+      }),
     ]);
-    const dateKey = londonDateKey();
     const config = liveSnapshot?.facebook?.config || {};
     const facebookLimit = liveSnapshot?.facebook?.limit || null;
     const facebookPosts = Array.isArray(liveSnapshot?.facebook?.posts)
@@ -131,7 +136,7 @@ export default async function handler(request, response) {
             channelName: branchConfig.channelName,
             externalLink: branchConfig.externalLink,
             dailyLimit: branch?.limit?.limit ?? null,
-            sentToday: branch?.limit?.sent ?? 0,
+            sentToday: ledger?.googleBusiness?.[branchKey] ?? branch?.limit?.sent ?? 0,
             scheduledToday: branch?.limit?.scheduled ?? 0,
             queueCount: queued.length,
           }];
@@ -151,14 +156,18 @@ export default async function handler(request, response) {
         externalLink: config.externalLink,
         queueLimit: config.scheduledPostsLimit,
         dailyLimit: facebookLimit?.limit ?? null,
-        sentToday,
+        sentToday: ledger?.facebookPosts ?? sentToday,
+        sentCountConfirmed: Boolean(ledger),
+        sentCountSource: ledger?.source || "limited_buffer_snapshot",
+        sentCountDate: dateKey,
+        lastPublishedAt: ledger?.lastPublishedAt || null,
         providerSentToday: facebookLimit?.sent ?? 0,
         scheduledToday: queuedFacebookPosts.filter((post) => !isVanscoFacebookStory(post)).length,
         queueCount: queuedFacebookPosts.filter((post) => !isVanscoFacebookStory(post)).length,
       },
       stories: {
         target: VANSCO_FACEBOOK_STORIES_PER_DAY,
-        sentToday: storiesSentToday,
+        sentToday: ledger?.facebookStories ?? storiesSentToday,
         scheduledToday: storiesScheduledToday,
         queueCount: queuedFacebookPosts.filter(isVanscoFacebookStory).length,
         lastRun: storyStatus,

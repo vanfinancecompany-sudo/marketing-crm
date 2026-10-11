@@ -4,6 +4,7 @@ import {
   isBufferApiActiveWindow,
 } from "../lib/bufferActiveWindow.js";
 import { del } from "@vercel/blob";
+import { loadVanscoPublishedLedger } from "../lib/vanscoPublishedLedger.js";
 import {
   BUFFER_API_URL,
   BUFFER_CHANNELS_QUERY,
@@ -130,17 +131,29 @@ async function vanscoPublishedToday(todayKey) {
     ).trim();
     const sameDay = statusDate === todayKey;
     const healthy = sameDay && status?.ok !== false && String(status?.state || "").toLowerCase() !== "failed";
-    const posts = healthy
-      ? Math.max(0, Number(status?.buffer?.providerSent) || 0)
-      : 0;
+    // The worker can refill TOMORROW after 21:00, making providerSent
+    // refer to tomorrow and under-report today's already-published posts.
+    // The all-channel Buffer snapshot is also capped at 100 recent posts.
+    // Only count individually synced, date-matched Buffer SENT records.
+    let ledger = null;
+    try {
+      ledger = await loadVanscoPublishedLedger(todayKey);
+    } catch (error) {
+      console.warn("[buffer-publish-status] Vansco sent ledger unavailable", {
+        message: String(error?.message || error),
+      });
+    }
+    const posts = ledger?.facebookPosts ?? 0;
     return {
       posts,
       reels: 0,
       total: posts,
-      confirmed: healthy,
-      confirmedAt: sameDay ? confirmedAt : "",
-      state: sameDay ? String(status?.state || "") : "waiting",
-      error: sameDay && !healthy,
+      confirmed: Boolean(ledger),
+      confirmedAt: ledger?.lastPublishedAt || (sameDay ? confirmedAt : ""),
+      source: ledger?.source || "unavailable",
+      workerHealthy: healthy,
+      state: !ledger ? "unavailable" : sameDay ? String(status?.state || "") : "waiting",
+      error: !ledger || (sameDay && !healthy),
     };
   } catch (error) {
     console.warn("[buffer-publish-status] Vansco heartbeat unavailable", {
@@ -463,6 +476,9 @@ export default async function handler(request, response) {
           last_success_at: cached.checked_at || cached.cached_at || null,
           message: "Buffer live confirmation is paused overnight; cached daytime counts are being shown.",
         }),
+        // Vansco publication totals are retained in the date-matched Buffer
+        // sent ledger and remain accurate even after the API quiet window.
+        today: await withVanscoToday(cached.today, londonDateKey()),
       });
       return;
     }
