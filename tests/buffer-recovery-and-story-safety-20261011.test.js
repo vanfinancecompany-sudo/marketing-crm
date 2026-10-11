@@ -58,7 +58,7 @@ test("Story copy is distinct and a second suitable image is attempted after a re
   assert.match(source, /VAN FINANCE COMPANY · TODAY'S STORY/);
   assert.match(source, /sourceImageCandidates/);
   assert.match(source, /RECOVERABLE_STORY_MEDIA_ERROR\.test/);
-  assert.match(source, /STORY_IMAGE_LIMIT_BYTES = 4 \* 1024 \* 1024/);
+  assert.match(source, /STORY_IMAGE_LIMIT_BYTES = 4_000_000/);
   assert.match(source, /STORY_ALTERNATIVE_IMAGE_LIMIT = 8/);
 });
 
