@@ -1,0 +1,169 @@
+import { useEffect, useMemo, useState } from "react";
+import { buildMarketingAccessHeaders, parseMarketingJsonResponse } from "../services/marketingAccess.js";
+
+const ENDPOINT = "/api/vansco-google-vehicle-selection";
+
+export default function VanscoGoogleVehicleAdsPage() {
+  const [vehicles, setVehicles] = useState([]);
+  const [selected, setSelected] = useState([]);
+  const [savedIds, setSavedIds] = useState([]);
+  const [mode, setMode] = useState("all");
+  const [search, setSearch] = useState("");
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [previewOnly, setPreviewOnly] = useState(false);
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const unsaved = selected.slice().sort().join("|") !== savedIds.slice().sort().join("|");
+  const visible = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return vehicles.filter(v => (!showSelectedOnly || selectedSet.has(v.id)) && (!term || [v.id, v.title, v.storeCode].some(value => String(value || "").toLowerCase().includes(term))));
+  }, [vehicles, search, selectedSet, showSelectedOnly]);
+
+  async function load() {
+    setBusy("load");
+    setError("");
+    try {
+      const response = await fetch(ENDPOINT, { headers: buildMarketingAccessHeaders(), cache: "no-store" });
+      const json = await parseMarketingJsonResponse(response, "Could not load Vansco Google vehicle stock.");
+      const ids = Array.isArray(json.selectedIds) ? json.selectedIds : [];
+      setVehicles(json.vehicles || []);
+      setSelected(ids);
+      setSavedIds(ids);
+      setMode(json.mode || "all");
+      setPreviewOnly(Boolean(json.previewOnly));
+      setLoaded(true);
+    } catch (err) {
+      setError(err.message || "Could not load Google Vehicle Ads selection.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  function setVehicle(id, checked) {
+    setSelected(prev => checked ? Array.from(new Set([...prev, id])) : prev.filter(item => item !== id));
+    setMessage("");
+  }
+
+  async function act(action) {
+    if (busy || previewOnly || !loaded) return;
+    if (action === "activate" && (unsaved || savedIds.length === 0)) {
+      setError("Save your selected vehicles first, then activate selected-only mode.");
+      return;
+    }
+    if (action === "activate" && !window.confirm("Activate the selected-only setting for the saved vehicles? This preview does not change the current live Merchant Center feed. Once this feature is deployed to production, Google will receive only your selected vehicles.")) return;
+    if (action === "deactivate" && !window.confirm("Show ALL DealerKit vehicles in the Google feed again? This could make the whole stock eligible for paid Vehicle Ads.")) return;
+    setBusy(action);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch(ENDPOINT, {
+        method: "POST",
+        headers: buildMarketingAccessHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(action === "save" ? { action, selectedIds: selected } : { action }),
+      });
+      const json = await parseMarketingJsonResponse(response, "Could not update Vansco Google Vehicle Ads.");
+      setMode(json.mode || "all");
+      setSavedIds(json.selectedIds || []);
+      setSelected(json.selectedIds || []);
+      setMessage(json.message || "Saved.");
+    } catch (err) {
+      setError(err.message || "Could not save the selection.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <div className="page-stack">
+      <section className="panel">
+        <div className="panel__header">
+          <div>
+            <h3>Vansco Google Vehicle Ads</h3>
+            <p>Choose exactly which DealerKit vehicles are sent to Merchant Center. Finance and Rent2Buy stock is not affected.</p>
+          </div>
+          <button className="button button--ghost" type="button" onClick={load} disabled={Boolean(busy)}>Refresh stock</button>
+        </div>
+        <div className="notice" style={{ marginBottom: 14 }}>
+          <strong>Google feed: {mode === "selected" ? "Selected vehicles only" : "All DealerKit vehicles (unchanged)"}</strong>
+          <div style={{ fontSize: 13, marginTop: 6 }}>
+            {vehicles.length} vehicles in the DealerKit Google feed · {selected.length} selected.
+            {previewOnly ? " Read-only preview: setup is awaiting the private selection table." : mode === "selected" ? " Saving a new selection updates the next Google feed fetch." : " Your selections are only a draft until you activate selected-only mode."}
+            {" "}Google normally imports this feed once daily; you can also request Update in Merchant Center.
+          </div>
+        </div>
+        {previewOnly ? <div className="notice" role="status" style={{ marginBottom: 12 }}>
+          <strong>Read-only preview</strong> · You can browse and search the real DealerKit stock.
+          Saving and activation will become available after the selection database is installed.
+          No live Google inventory has been changed.
+        </div> : null}
+        {error ? <div className="notice notice--error" role="alert">{error}</div> : null}
+        {message ? <div className="notice" role="status">{message}</div> : null}
+        <div className="card-actions" style={{ margin: "14px 0" }}>
+          <input
+            className="field__input"
+            type="search"
+            aria-label="Search Google vehicle stock"
+            placeholder="Find registration, make, model or branch"
+            value={search}
+            onChange={event => setSearch(event.target.value)}
+            style={{ flex: "1 1 300px", maxWidth: 420 }}
+          />
+          <span className="status-pill">{visible.length} shown</span>
+          <span className="status-pill" aria-live="polite" style={{ background: selected.length ? "#dbeafe" : undefined, color: selected.length ? "#1d4ed8" : undefined }}>{selected.length} selected</span>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 650 }}>
+            <input type="checkbox" checked={showSelectedOnly} onChange={e => setShowSelectedOnly(e.target.checked)} />
+            Show selected only
+          </label>
+        </div>
+        <p style={{ margin: "2px 0 12px", color: "#475569", fontSize: 13 }}>
+          Click anywhere on a vehicle to tick or untick it. Tick as many as you like, then <strong>Save selected vehicles</strong>.
+        </p>
+        <div className="card-actions" style={{ marginBottom: 14 }}>
+          <button type="button" className="button button--ghost" disabled={Boolean(busy) || previewOnly || !loaded} onClick={() => setSelected(prev => Array.from(new Set([...prev, ...visible.map(v => v.id)])))}>Select visible</button>
+          <button type="button" className="button button--ghost" disabled={Boolean(busy) || previewOnly || !loaded} onClick={() => { const remove = new Set(visible.map(v => v.id)); setSelected(prev => prev.filter(id => !remove.has(id))); }}>Clear visible</button>
+          <button type="button" className="button button--primary" disabled={Boolean(busy) || previewOnly || !loaded || !unsaved} onClick={() => act("save")}>{busy === "save" ? "Saving..." : "Save selected vehicles"}</button>
+          {mode === "all" ? (
+            <button type="button" className="button button--primary" disabled={Boolean(busy) || previewOnly || !loaded || unsaved || !savedIds.length} onClick={() => act("activate")}>Activate selected vehicles only</button>
+          ) : (
+            <button type="button" className="button button--ghost" disabled={Boolean(busy) || previewOnly || !loaded} onClick={() => act("deactivate")}>Return to all vehicles</button>
+          )}
+        </div>
+        {unsaved ? <div className="notice" role="status"><strong>{selected.length} vans selected.</strong> Changes not saved yet. Click <strong>Save selected vehicles</strong> when you're ready.</div> : null}
+        {loaded && visible.length === 0 ? <div className="empty-state">No vehicles match this search.</div> : null}
+        <div style={{ maxHeight: "68vh", overflowY: "auto", borderTop: "1px solid #ddd" }}>
+          {visible.map(vehicle => (
+            <label key={vehicle.id} style={{
+              display: "flex", alignItems: "center", gap: 14, padding: "12px 10px",
+              borderBottom: "1px solid #e2e8f0", borderLeft: selectedSet.has(vehicle.id) ? "4px solid #2563eb" : "4px solid transparent",
+              background: selectedSet.has(vehicle.id) ? "#eff6ff" : "#fff",
+              cursor: busy || previewOnly || !loaded ? "wait" : "pointer", transition: "background .12s ease",
+            }}>
+              <input
+                type="checkbox" disabled={Boolean(busy) || previewOnly || !loaded}
+                checked={selectedSet.has(vehicle.id)}
+                onChange={event => setVehicle(vehicle.id, event.target.checked)}
+                aria-label={`Advertise ${vehicle.title || vehicle.id} on Google`}
+              />
+              {vehicle.imageUrl ? <img src={vehicle.imageUrl} alt="" style={{ width: 90, height: 68, objectFit: "contain", flexShrink: 0 }} loading="lazy" /> : <span style={{ width: 90, textAlign: "center" }}>No photo</span>}
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <strong>{vehicle.title || vehicle.id}</strong>
+                <span style={{ display: "block", fontSize: 13, opacity: 0.75 }}>{vehicle.id} · {vehicle.price || "Price unavailable"} · {vehicle.storeCode || "Unassigned branch"}</span>
+              </span>
+              <span aria-hidden="true" style={{ flexShrink: 0, fontSize: 12, fontWeight: 700, color: selectedSet.has(vehicle.id) ? "#1d4ed8" : "#64748b", minWidth: 74, textAlign: "right" }}>
+                {selectedSet.has(vehicle.id) ? "✓ SELECTED" : "Select"}
+              </span>
+            </label>
+          ))}
+        </div>
+        <p style={{ fontSize: 12, marginTop: 12, opacity: 0.8 }}>
+          Selection controls which products are supplied by the Marketing CRM Google feed. It does not change DealerKit website adverts, other dealership integrations, or the Google Ads daily budget. Please pause the Shopping campaign before making your first selection.
+        </p>
+      </section>
+    </div>
+  );
+}

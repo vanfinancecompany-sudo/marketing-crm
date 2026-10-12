@@ -1,4 +1,6 @@
 import { cleanDealerKitGoogleVehicleAdsCsv } from "../lib/dealerKitGoogleVehicleAdsFeed.js";
+import { selectedGoogleVehicleCsv } from "../lib/vanscoGoogleVehicleAdsSelection.js";
+import { getSupabaseServiceAdmin, isMissingSupabaseObjectError } from "./_vansco-cache-utils.js";
 
 export const config = { maxDuration: 60 };
 
@@ -49,13 +51,27 @@ export default async function handler(request, response) {
       return response.status(503).send("No Google Vehicle Ads vehicles are currently available.\n");
     }
 
+    // Preserve DealerKit's current full feed until a selection has explicitly
+    // been activated in the Marketing CRM. Missing migration means no filtering.
+    // Other DB failures fail closed, never widening an active campaign to all stock.
+    const client = getSupabaseServiceAdmin();
+    const { data: selection, error: selectionError } = await client
+      .from("vansco_google_vehicle_ads_selection")
+      .select("mode,selected_ids")
+      .eq("id", "vansco")
+      .maybeSingle();
+    if (selectionError && !isMissingSupabaseObjectError(selectionError)) throw selectionError;
+    const outbound = selection?.mode === "selected"
+      ? selectedGoogleVehicleCsv(cleaned.csv, selection.selected_ids)
+      : cleaned;
+
     response.setHeader("Content-Type", "text/csv; charset=utf-8");
     response.setHeader("Content-Disposition", 'inline; filename="vansco-google-vehicle-listings.csv"');
     response.setHeader("X-Vansco-GVA-Source", "dealerkit");
-    response.setHeader("X-Vansco-Vehicle-Count", String(cleaned.vehicleCount));
+    response.setHeader("X-Vansco-Vehicle-Count", String(outbound.vehicleCount));
     response.setHeader("X-Vansco-Descriptions-Cleaned", String(cleaned.cleanedDescriptionCount));
 
-    return response.status(200).send(cleaned.csv);
+    return response.status(200).send(outbound.csv);
   } catch (error) {
     console.error("[dealerkit-gva-clean-feed] failed", {
       message: error?.message || String(error),

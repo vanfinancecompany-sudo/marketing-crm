@@ -63,6 +63,7 @@ import RealCustomerSimulationPage from "./pages/RealCustomerSimulationPage.jsx";
 import AIAssistantHealthPage from "./pages/AIAssistantHealthPage.jsx";
 import StockPage from "./pages/StockPage.jsx";
 import VanscoStockWatchPage from "./pages/VanscoStockWatchPage.jsx";
+import VanscoGoogleVehicleAdsPage from "./pages/VanscoGoogleVehicleAdsPage.jsx";
 import ReelFactoryPage from "./pages/ReelFactoryPage.jsx";
 import PremiumReelStudioBetaPage from "./pages/PremiumReelStudioBetaPage.jsx";
 import ReelLabBetaPage from "./pages/ReelLabBetaPage.jsx";
@@ -2774,6 +2775,8 @@ async function handleClearTodayReels() {
         return <AIAssistantHealthPage />;
       case "Vansco Stock Watch":
         return <VanscoStockWatchPage />;
+      case "Vansco Google Vehicle Ads":
+        return <VanscoGoogleVehicleAdsPage />;
       case "Reel Factory":
         return (
           <ReelFactoryPage
@@ -2986,10 +2989,10 @@ async function handleClearTodayReels() {
     <div className="app-shell">
       <Sidebar currentView={currentView} onNavigate={handleNavigate} />
 
-      <main className="app-main">
+      <main className={currentView === "Vansco Google Vehicle Ads" ? "app-main app-main--google-vehicle-ads" : "app-main"}>
         <header className="topbar">
   <div>
-    <div className="eyebrow">Standalone React App</div>
+    <div className="eyebrow">{currentView === "Vansco Google Vehicle Ads" ? "Vansco · Advertising" : "Standalone React App"}</div>
     <h2>{currentView}</h2>
   </div>
 
@@ -3003,8 +3006,12 @@ async function handleClearTodayReels() {
   >
     
     <div className="topbar__meta">
-      <span>{vehicles.length} vehicles</span>
-      <span>{creatives.length} creatives</span>
+      {currentView === "Vansco Google Vehicle Ads" ? <span>Priority vehicle selection</span> : (
+        <>
+          <span>{vehicles.length} vehicles</span>
+          <span>{creatives.length} creatives</span>
+        </>
+      )}
     </div>
   </div>
 </header>
