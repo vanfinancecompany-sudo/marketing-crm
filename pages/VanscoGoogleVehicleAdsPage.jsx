@@ -9,16 +9,18 @@ export default function VanscoGoogleVehicleAdsPage() {
   const [savedIds, setSavedIds] = useState([]);
   const [mode, setMode] = useState("all");
   const [search, setSearch] = useState("");
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [previewOnly, setPreviewOnly] = useState(false);
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
   const unsaved = selected.slice().sort().join("|") !== savedIds.slice().sort().join("|");
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return vehicles.filter(v => !term || [v.id, v.title, v.storeCode].some(value => String(value || "").toLowerCase().includes(term)));
-  }, [vehicles, search]);
+    return vehicles.filter(v => (!showSelectedOnly || selectedSet.has(v.id)) && (!term || [v.id, v.title, v.storeCode].some(value => String(value || "").toLowerCase().includes(term))));
+  }, [vehicles, search, selectedSet, showSelectedOnly]);
 
   async function load() {
     setBusy("load");
@@ -53,6 +55,7 @@ export default function VanscoGoogleVehicleAdsPage() {
       setError("Save your selected vehicles first, then activate selected-only mode.");
       return;
     }
+    if (action === "activate" && !window.confirm("Activate the selected-only setting for the saved vehicles? This preview does not change the current live Merchant Center feed. Once this feature is deployed to production, Google will receive only your selected vehicles.")) return;
     if (action === "deactivate" && !window.confirm("Show ALL DealerKit vehicles in the Google feed again? This could make the whole stock eligible for paid Vehicle Ads.")) return;
     setBusy(action);
     setError("");
@@ -111,8 +114,15 @@ export default function VanscoGoogleVehicleAdsPage() {
             style={{ flex: "1 1 300px", maxWidth: 420 }}
           />
           <span className="status-pill">{visible.length} shown</span>
-          <span className="status-pill">{selected.length} selected</span>
+          <span className="status-pill" aria-live="polite" style={{ background: selected.length ? "#dbeafe" : undefined, color: selected.length ? "#1d4ed8" : undefined }}>{selected.length} selected</span>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 650 }}>
+            <input type="checkbox" checked={showSelectedOnly} onChange={e => setShowSelectedOnly(e.target.checked)} />
+            Show selected only
+          </label>
         </div>
+        <p style={{ margin: "2px 0 12px", color: "#475569", fontSize: 13 }}>
+          Click anywhere on a vehicle to tick or untick it. Tick as many as you like, then <strong>Save selected vehicles</strong>.
+        </p>
         <div className="card-actions" style={{ marginBottom: 14 }}>
           <button type="button" className="button button--ghost" disabled={Boolean(busy) || previewOnly || !loaded} onClick={() => setSelected(prev => Array.from(new Set([...prev, ...visible.map(v => v.id)])))}>Select visible</button>
           <button type="button" className="button button--ghost" disabled={Boolean(busy) || previewOnly || !loaded} onClick={() => { const remove = new Set(visible.map(v => v.id)); setSelected(prev => prev.filter(id => !remove.has(id))); }}>Clear visible</button>
@@ -123,14 +133,19 @@ export default function VanscoGoogleVehicleAdsPage() {
             <button type="button" className="button button--ghost" disabled={Boolean(busy) || previewOnly || !loaded} onClick={() => act("deactivate")}>Return to all vehicles</button>
           )}
         </div>
-        {unsaved ? <div className="notice">You have unsaved changes. Save your selections before leaving this screen.</div> : null}
+        {unsaved ? <div className="notice" role="status"><strong>{selected.length} vans selected.</strong> Changes not saved yet. Click <strong>Save selected vehicles</strong> when you're ready.</div> : null}
         {loaded && visible.length === 0 ? <div className="empty-state">No vehicles match this search.</div> : null}
         <div style={{ maxHeight: "68vh", overflowY: "auto", borderTop: "1px solid #ddd" }}>
           {visible.map(vehicle => (
-            <label key={vehicle.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 6px", borderBottom: "1px solid #ddd", cursor: "pointer" }}>
+            <label key={vehicle.id} style={{
+              display: "flex", alignItems: "center", gap: 14, padding: "12px 10px",
+              borderBottom: "1px solid #e2e8f0", borderLeft: selectedSet.has(vehicle.id) ? "4px solid #2563eb" : "4px solid transparent",
+              background: selectedSet.has(vehicle.id) ? "#eff6ff" : "#fff",
+              cursor: busy || previewOnly || !loaded ? "wait" : "pointer", transition: "background .12s ease",
+            }}>
               <input
                 type="checkbox" disabled={Boolean(busy) || previewOnly || !loaded}
-                checked={selected.includes(vehicle.id)}
+                checked={selectedSet.has(vehicle.id)}
                 onChange={event => setVehicle(vehicle.id, event.target.checked)}
                 aria-label={`Advertise ${vehicle.title || vehicle.id} on Google`}
               />
@@ -138,6 +153,9 @@ export default function VanscoGoogleVehicleAdsPage() {
               <span style={{ flex: 1, minWidth: 0 }}>
                 <strong>{vehicle.title || vehicle.id}</strong>
                 <span style={{ display: "block", fontSize: 13, opacity: 0.75 }}>{vehicle.id} · {vehicle.price || "Price unavailable"} · {vehicle.storeCode || "Unassigned branch"}</span>
+              </span>
+              <span aria-hidden="true" style={{ flexShrink: 0, fontSize: 12, fontWeight: 700, color: selectedSet.has(vehicle.id) ? "#1d4ed8" : "#64748b", minWidth: 74, textAlign: "right" }}>
+                {selectedSet.has(vehicle.id) ? "✓ SELECTED" : "Select"}
               </span>
             </label>
           ))}
