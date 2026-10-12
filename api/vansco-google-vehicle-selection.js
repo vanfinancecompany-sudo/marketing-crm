@@ -1,6 +1,6 @@
 import { cleanDealerKitGoogleVehicleAdsCsv } from "../lib/dealerKitGoogleVehicleAdsFeed.js";
 import { getGoogleVehicleRows, validatedSelectedVehicleIds } from "../lib/vanscoGoogleVehicleAdsSelection.js";
-import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
+import { getSupabaseServiceAdmin, isMissingSupabaseObjectError } from "./_vansco-cache-utils.js";
 import { isMarketingStockWatchActionAuthorized } from "./vansco-watch-action.js";
 
 const TABLE = "vansco_google_vehicle_ads_selection";
@@ -22,8 +22,13 @@ async function fetchCurrentVehicles(environment, fetcher = fetch) {
 
 async function getSetting(client) {
   const { data, error } = await client.from(TABLE).select("mode,selected_ids,updated_at").eq("id", "vansco").maybeSingle();
-  if (error) throw error;
-  return { mode: data?.mode === "selected" ? "selected" : "all", selectedIds: data?.selected_ids || [], updatedAt: data?.updated_at || null };
+  if (error) {
+    if (isMissingSupabaseObjectError(error)) return {
+      mode: "all", selectedIds: [], updatedAt: null, previewOnly: true,
+    };
+    throw error;
+  }
+  return { mode: data?.mode === "selected" ? "selected" : "all", selectedIds: data?.selected_ids || [], updatedAt: data?.updated_at || null, previewOnly: false };
 }
 
 export async function handleVanscoGoogleVehicleSelection(request, response, deps = {}) {
@@ -43,6 +48,9 @@ export async function handleVanscoGoogleVehicleSelection(request, response, deps
       const vehicles = await fetchCurrentVehicles(environment, deps.fetcher || fetch);
       return response.status(200).json({ ok: true, ...setting, vehicles });
     }
+    if (setting.previewOnly) return response.status(503).json({
+      ok: false, message: "Vehicle-selection database table must be installed before saving changes.",
+    });
     const body = typeof request.body === "string" ? JSON.parse(request.body) : request.body || {};
     const action = clean(body.action);
     let mode = setting.mode;
