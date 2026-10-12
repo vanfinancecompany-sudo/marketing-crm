@@ -4940,3 +4940,9 @@ textarea {
   .competence-metrics, .competence-sources, .competence-ratings, .competence-library { grid-template-columns: 1fr; }
   .competence-conversation > div { max-width: 94%; }
 }
+
+/* Vansco Google Vehicle Ads: stop the app-shell grid stretching its header to 50vh. */
+.app-main--google-vehicle-ads {
+  align-content: start;
+  grid-template-rows: auto auto;
+}
