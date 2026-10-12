@@ -138,10 +138,17 @@ const FACEBOOK_ACTIVITY_QUERY = `
   }
 `;
 
+// Sent records are fetched per channel, not as a single shared 100-post list.
+// A shared list is crowded by tomorrow's scheduled posts and high-volume
+// Facebook output, making live Vansco 333 and Story posts appear as zero.
 const ALL_CHANNEL_STATUS_QUERY = `
   query VanscoAllChannelStatus(
-    $organizationId: OrganizationId!,
-    $channelIds: [ChannelId!]!,
+    $organizationId: OrganizationId!
+    $channelIds: [ChannelId!]!
+    $facebookIds: [ChannelId!]!
+    $vansco333Ids: [ChannelId!]!
+    $airportIds: [ChannelId!]!
+    $newForestIds: [ChannelId!]!
     $date: DateTime!
   ) {
     dailyPostingLimits(input: { channelIds: $channelIds, date: $date }) {
@@ -151,14 +158,14 @@ const ALL_CHANNEL_STATUS_QUERY = `
       limit
       isAtLimit
     }
-    posts(
+    facebookSent: posts(
       first: 100
       input: {
         organizationId: $organizationId
         sort: [{ field: createdAt, direction: desc }]
         filter: {
-          status: [draft, scheduled, sending, sent, error]
-          channelIds: $channelIds
+          status: [sent]
+          channelIds: $facebookIds
         }
       }
     ) {
@@ -184,13 +191,136 @@ const ALL_CHANNEL_STATUS_QUERY = `
           }
         }
       }
-      pageInfo {
-        hasNextPage
-        endCursor
+      pageInfo { hasNextPage endCursor }
+    }
+    vansco333Sent: posts(
+      first: 100
+      input: {
+        organizationId: $organizationId
+        sort: [{ field: createdAt, direction: desc }]
+        filter: {
+          status: [sent]
+          channelIds: $vansco333Ids
+        }
       }
+    ) {
+      edges {
+        node {
+          id
+          text
+          status
+          schedulingType
+          createdAt
+          dueAt
+          sentAt
+          channelId
+          metadata {
+            ... on FacebookPostMetadata {
+              type
+            }
+          }
+          assets {
+            id
+            mimeType
+            source
+          }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+    airportSent: posts(
+      first: 100
+      input: {
+        organizationId: $organizationId
+        sort: [{ field: createdAt, direction: desc }]
+        filter: {
+          status: [sent]
+          channelIds: $airportIds
+        }
+      }
+    ) {
+      edges {
+        node {
+          id
+          text
+          status
+          schedulingType
+          createdAt
+          dueAt
+          sentAt
+          channelId
+          metadata {
+            ... on FacebookPostMetadata {
+              type
+            }
+          }
+          assets {
+            id
+            mimeType
+            source
+          }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+    newForestSent: posts(
+      first: 100
+      input: {
+        organizationId: $organizationId
+        sort: [{ field: createdAt, direction: desc }]
+        filter: {
+          status: [sent]
+          channelIds: $newForestIds
+        }
+      }
+    ) {
+      edges {
+        node {
+          id
+          text
+          status
+          schedulingType
+          createdAt
+          dueAt
+          sentAt
+          channelId
+          metadata {
+            ... on FacebookPostMetadata {
+              type
+            }
+          }
+          assets {
+            id
+            mimeType
+            source
+          }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
     }
   }
 `;
+
+export function vanscoSentPostsByChannel(payload = {}, facebookChannelId = "", googleBranches = {}) {
+  const source = payload?.data || {};
+  const sent = (alias, channelId) => {
+    if (!channelId) return [];
+    return (source?.[alias]?.edges || [])
+      .map((edge) => edge?.node)
+      .filter((post) => post && String(post.channelId || "") === String(channelId)
+        && String(post.status || "").toLowerCase() === "sent");
+  };
+  return {
+    facebook: sent("facebookSent", facebookChannelId),
+    googleBusiness: {
+      vansco333: sent("vansco333Sent", googleBranches.vansco333?.channelId),
+      southamptonAirport: sent("airportSent", googleBranches.southamptonAirport?.channelId),
+      newForest: sent("newForestSent", googleBranches.newForest?.channelId),
+    },
+    hasNextPage: ["facebookSent", "vansco333Sent", "airportSent", "newForestSent"]
+      .some((alias) => Boolean(source?.[alias]?.pageInfo?.hasNextPage)),
+  };
+}
 
 const CREATE_POST_MUTATION = `
   mutation VanscoCreatePost($input: CreatePostInput!) {
@@ -586,23 +716,29 @@ export async function loadVanscoCombinedStatusSnapshot({ force = false } = {}) {
     const payload = await bufferGraphql(ALL_CHANNEL_STATUS_QUERY, {
       organizationId: [...organizationIds][0],
       channelIds,
+      facebookIds: facebookConfig.channelId ? [String(facebookConfig.channelId)] : [],
+      vansco333Ids: googleConfig.branches?.vansco333?.channelId
+        ? [String(googleConfig.branches.vansco333.channelId)] : [],
+      airportIds: googleConfig.branches?.southamptonAirport?.channelId
+        ? [String(googleConfig.branches.southamptonAirport.channelId)] : [],
+      newForestIds: googleConfig.branches?.newForest?.channelId
+        ? [String(googleConfig.branches.newForest.channelId)] : [],
       date: `${dateKey}T12:00:00.000Z`,
     });
     const limits = Array.isArray(payload?.data?.dailyPostingLimits)
       ? payload.data.dailyPostingLimits
       : [];
-    const posts = (payload?.data?.posts?.edges || [])
-      .map((edge) => edge?.node)
-      .filter(Boolean);
+    const posts = vanscoSentPostsByChannel(payload, facebookConfig.channelId, googleConfig.branches);
     const limitByChannel = Object.fromEntries(
       limits.map((item) => [String(item?.channelId || ""), item]),
     );
-    const postsByChannel = Object.fromEntries(
-      channelIds.map((channelId) => [
-        channelId,
-        posts.filter((post) => String(post?.channelId || "") === channelId),
-      ]),
-    );
+    const postsByChannel = {
+      [String(facebookConfig.channelId || "")]: posts.facebook,
+      ...Object.fromEntries(branchEntries.map(([branchKey, config]) => [
+        String(config.channelId || ""),
+        posts.googleBusiness[branchKey] || [],
+      ])),
+    };
 
     const snapshot = {
       ok: true,
@@ -626,7 +762,7 @@ export async function loadVanscoCombinedStatusSnapshot({ force = false } = {}) {
           ]),
         ),
       },
-      hasNextPage: Boolean(payload?.data?.posts?.pageInfo?.hasNextPage),
+      hasNextPage: posts.hasNextPage,
     };
     await writeBlobJson(LIVE_STATUS_SNAPSHOT_PATH, snapshot);
     return snapshot;
