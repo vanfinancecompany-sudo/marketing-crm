@@ -13,6 +13,7 @@ export default function VanscoGoogleVehicleAdsPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [previewOnly, setPreviewOnly] = useState(false);
   const unsaved = selected.slice().sort().join("|") !== savedIds.slice().sort().join("|");
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -30,6 +31,7 @@ export default function VanscoGoogleVehicleAdsPage() {
       setSelected(ids);
       setSavedIds(ids);
       setMode(json.mode || "all");
+      setPreviewOnly(Boolean(json.previewOnly));
       setLoaded(true);
     } catch (err) {
       setError(err.message || "Could not load Google Vehicle Ads selection.");
@@ -46,7 +48,7 @@ export default function VanscoGoogleVehicleAdsPage() {
   }
 
   async function act(action) {
-    if (busy) return;
+    if (busy || previewOnly || !loaded) return;
     if (action === "activate" && (unsaved || savedIds.length === 0)) {
       setError("Save your selected vehicles first, then activate selected-only mode.");
       return;
@@ -87,10 +89,15 @@ export default function VanscoGoogleVehicleAdsPage() {
           <strong>Google feed: {mode === "selected" ? "Selected vehicles only" : "All DealerKit vehicles (unchanged)"}</strong>
           <div style={{ fontSize: 13, marginTop: 6 }}>
             {vehicles.length} vehicles in the DealerKit Google feed · {selected.length} selected.
-            {mode === "selected" ? " Saving a new selection updates the next Google feed fetch." : " Your selections are only a draft until you activate selected-only mode."}
+            {previewOnly ? " Read-only preview: setup is awaiting the private selection table." : mode === "selected" ? " Saving a new selection updates the next Google feed fetch." : " Your selections are only a draft until you activate selected-only mode."}
             {" "}Google normally imports this feed once daily; you can also request Update in Merchant Center.
           </div>
         </div>
+        {previewOnly ? <div className="notice" role="status" style={{ marginBottom: 12 }}>
+          <strong>Read-only preview</strong> · You can browse and search the real DealerKit stock.
+          Saving and activation will become available after the selection database is installed.
+          No live Google inventory has been changed.
+        </div> : null}
         {error ? <div className="notice notice--error" role="alert">{error}</div> : null}
         {message ? <div className="notice" role="status">{message}</div> : null}
         <div className="card-actions" style={{ margin: "14px 0" }}>
@@ -107,13 +114,13 @@ export default function VanscoGoogleVehicleAdsPage() {
           <span className="status-pill">{selected.length} selected</span>
         </div>
         <div className="card-actions" style={{ marginBottom: 14 }}>
-          <button type="button" className="button button--ghost" disabled={Boolean(busy)} onClick={() => setSelected(prev => Array.from(new Set([...prev, ...visible.map(v => v.id)])))}>Select visible</button>
-          <button type="button" className="button button--ghost" disabled={Boolean(busy)} onClick={() => { const remove = new Set(visible.map(v => v.id)); setSelected(prev => prev.filter(id => !remove.has(id))); }}>Clear visible</button>
-          <button type="button" className="button button--primary" disabled={Boolean(busy) || !unsaved} onClick={() => act("save")}>{busy === "save" ? "Saving..." : "Save selected vehicles"}</button>
+          <button type="button" className="button button--ghost" disabled={Boolean(busy) || previewOnly || !loaded} onClick={() => setSelected(prev => Array.from(new Set([...prev, ...visible.map(v => v.id)])))}>Select visible</button>
+          <button type="button" className="button button--ghost" disabled={Boolean(busy) || previewOnly || !loaded} onClick={() => { const remove = new Set(visible.map(v => v.id)); setSelected(prev => prev.filter(id => !remove.has(id))); }}>Clear visible</button>
+          <button type="button" className="button button--primary" disabled={Boolean(busy) || previewOnly || !loaded || !unsaved} onClick={() => act("save")}>{busy === "save" ? "Saving..." : "Save selected vehicles"}</button>
           {mode === "all" ? (
-            <button type="button" className="button button--primary" disabled={Boolean(busy) || unsaved || !savedIds.length} onClick={() => act("activate")}>Activate selected vehicles only</button>
+            <button type="button" className="button button--primary" disabled={Boolean(busy) || previewOnly || !loaded || unsaved || !savedIds.length} onClick={() => act("activate")}>Activate selected vehicles only</button>
           ) : (
-            <button type="button" className="button button--ghost" disabled={Boolean(busy)} onClick={() => act("deactivate")}>Return to all vehicles</button>
+            <button type="button" className="button button--ghost" disabled={Boolean(busy) || previewOnly || !loaded} onClick={() => act("deactivate")}>Return to all vehicles</button>
           )}
         </div>
         {unsaved ? <div className="notice">You have unsaved changes. Save your selections before leaving this screen.</div> : null}
@@ -122,7 +129,7 @@ export default function VanscoGoogleVehicleAdsPage() {
           {visible.map(vehicle => (
             <label key={vehicle.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 6px", borderBottom: "1px solid #ddd", cursor: "pointer" }}>
               <input
-                type="checkbox" disabled={Boolean(busy)}
+                type="checkbox" disabled={Boolean(busy) || previewOnly || !loaded}
                 checked={selected.includes(vehicle.id)}
                 onChange={event => setVehicle(vehicle.id, event.target.checked)}
                 aria-label={`Advertise ${vehicle.title || vehicle.id} on Google`}
