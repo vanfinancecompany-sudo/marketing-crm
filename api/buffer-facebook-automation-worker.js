@@ -703,6 +703,10 @@ async function generateOneReel(request, productKey, dateKey, packIndex, excluded
   const candidates = await internalJson(request, "/api/youtube-daily-batch", {
     action: "candidates",
   });
+  const health = candidates?.feedDiagnostics?.[productKey];
+  if (health?.source === "unavailable") {
+    throw new Error(productKey + " reel images unavailable: " + (health.error || "No verified gallery source."));
+  }
   const list = productKey === "rent2buy" ? candidates.rent2buy : candidates.finance;
   const excluded = new Set((excludedRegistrations || []).map(normalizeReg).filter(Boolean));
   const candidate = Array.isArray(list)

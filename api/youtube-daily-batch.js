@@ -2,6 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 import { del } from "@vercel/blob";
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
 import { loadRent2BuyPhotoProvenanceMap } from "../lib/rent2BuyPhotoProvenance.js";
+import { VAN_FINANCE_RENT2BUY_WIX_SITE_ID } from "../lib/dealerKitRent2BuyWixPlan.js";
+import { buildApprovedDailyReelFallback, resolveDailyReelFeed } from "../lib/dailyReelFeedRecovery.js";
 import {
   DAILY_YOUTUBE_MIN_IMAGES,
   DAILY_YOUTUBE_SOURCE,
@@ -143,6 +145,8 @@ async function fetchWixFeed(key) {
   const response = await fetch(WIX_FEEDS[key], {
     method: "GET",
     headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(12000),
+    cache: "no-store",
   });
   if (!response.ok) {
     throw new Error(`${key} live Wix image feed returned HTTP ${response.status}.`);
@@ -279,12 +283,65 @@ export function buildRent2BuyCandidates(feedItems, stockRows, provenPhotosByRegi
   });
 }
 
+// Recover from the legacy Wix _functions endpoint without accepting arbitrary
+// stock photos: only reviewed, product-enabled DealerKit imports linked to
+// currently active Marketing CRM stock are eligible.
+async function loadApprovedPhotoFallback(supabase, key, stock) {
+  const activeVehicles = (key === "rent2buy" ? stock.rent2buy : stock.finance).map((row) => ({
+    registration: key === "rent2buy"
+      ? normalizeDailyYouTubeRegistration(row.registration)
+      : extractRegistration(row.title),
+    picture: row.picture,
+  })).filter((row) => row.registration && row.picture);
+
+  if (!activeVehicles.length) return [];
+  const registrations = [...new Set(activeVehicles.map((row) => row.registration))];
+  const reviews = await supabase
+    .from("dealerkit_review_decisions")
+    .select("registration,supplier_stock_id,review_status,finance_enabled,rent2buy_enabled,image_order_ids,excluded_image_ids,primary_image_id")
+    .in("registration", registrations)
+    .limit(1000);
+  if (reviews.error) throw reviews.error;
+
+  const productReviews = (reviews.data || []).filter((row) =>
+    key === "rent2buy" ? row.rent2buy_enabled === true : row.finance_enabled === true
+  );
+  const stockIds = [...new Set(productReviews.map((row) => clean(row.supplier_stock_id)).filter(Boolean))];
+  if (!stockIds.length) return [];
+
+  const imported = await supabase
+    .from("dealerkit_wix_imported_media")
+    .select("supplier_stock_id,registration,dealerkit_image_id,wix_url,operation_status")
+    .eq("wix_site_id", VAN_FINANCE_RENT2BUY_WIX_SITE_ID)
+    .in("supplier_stock_id", stockIds)
+    .limit(5000);
+  if (imported.error) throw imported.error;
+
+  return buildApprovedDailyReelFallback({
+    productKey: key,
+    activeVehicles,
+    reviews: productReviews,
+    importedMedia: imported.data || [],
+  });
+}
+
 async function candidateOverview(supabase, historyRows) {
-  const [feeds, stock] = await Promise.all([
-    Promise.all([fetchWixFeed("vanFinance"), fetchWixFeed("rent2buy")]),
-    loadStockRows(supabase),
+  const stock = await loadStockRows(supabase);
+  // Independent resolution: one unavailable brand must not block the other.
+  const [financeResult, rentResult] = await Promise.all([
+    resolveDailyReelFeed({
+      key: "vanFinance",
+      wixFeed: fetchWixFeed,
+      fallbackFeed: (key) => loadApprovedPhotoFallback(supabase, key, stock),
+    }),
+    resolveDailyReelFeed({
+      key: "rent2buy",
+      wixFeed: fetchWixFeed,
+      fallbackFeed: (key) => loadApprovedPhotoFallback(supabase, key, stock),
+    }),
   ]);
-  const [financeFeed, rentFeed] = feeds;
+  const financeFeed = financeResult.items;
+  const rentFeed = rentResult.items;
   const today = todayRows(historyRows);
   const financeToday = today.filter(
     (row) => eventProduct(row) === "vanFinance",
@@ -324,6 +381,10 @@ async function candidateOverview(supabase, historyRows) {
     rent2buy,
     financeEligible: finance.length,
     rent2buyEligible: rent2buy.length,
+    feedDiagnostics: {
+      vanFinance: { source: financeResult.source, error: financeResult.error || null },
+      rent2buy: { source: rentResult.source, error: rentResult.error || null },
+    },
   };
 }
 
