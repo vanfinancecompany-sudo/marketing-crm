@@ -18,6 +18,8 @@ export default function VanscoGoogleVehicleAdsPage() {
   const [alerts, setAlerts] = useState([]);
   const [merchantPending, setMerchantPending] = useState([]);
   const [lastStockCheck, setLastStockCheck] = useState(null);
+  const [automaticCount, setAutomaticCount] = useState(0);
+  const [blockedIds, setBlockedIds] = useState([]);
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const unsaved = selected.slice().sort().join("|") !== savedIds.slice().sort().join("|");
   const visible = useMemo(() => {
@@ -40,6 +42,8 @@ export default function VanscoGoogleVehicleAdsPage() {
       setAlerts(json.alerts || []);
       setMerchantPending(json.merchantPending || []);
       setLastStockCheck(json.lastStockWatchCheckedAt || null);
+      setAutomaticCount(Number(json.automaticCount || 0));
+      setBlockedIds(json.blockedSoldIds || []);
       setLoaded(true);
     } catch (err) {
       setError(err.message || "Could not load Google Vehicle Ads selection.");
@@ -69,7 +73,9 @@ export default function VanscoGoogleVehicleAdsPage() {
       return;
     }
     if (action === "activate" && !window.confirm("Activate the saved Google feed selection?")) return;
-    if (action === "deactivate" && !window.confirm("This could make ALL DealerKit vehicles eligible for advertising. Continue?")) return;
+    if (action === "deactivate" && !window.confirm("Enable automatic available-stock advertising? Sold, reserved and manually blocked vehicles will remain excluded.")) return;
+    if (action === "block" && !window.confirm("Block this vehicle from the Google feed until you manually restore it?")) return;
+    if (action === "unblock" && !window.confirm("Restore this vehicle to automatic Google advertising if DealerKit confirms it is available?")) return;
     if (action === "remove" && !window.confirm(
       payload.reason === "sold"
         ? "Mark this van SOLD and remove it from the Google feed? You must also refresh Merchant Center."
@@ -92,6 +98,7 @@ export default function VanscoGoogleVehicleAdsPage() {
       setSavedIds(json.selectedIds || []);
       setSelected(json.selectedIds || []);
       setMerchantPending(json.merchantPending || []);
+      setBlockedIds(json.blockedSoldIds || []);
       setMessage(json.message || "Saved.");
       await load();
     } catch (err) {
@@ -107,16 +114,16 @@ export default function VanscoGoogleVehicleAdsPage() {
         <div className="panel__header">
           <div>
             <h3>Vansco Google Vehicle Ads</h3>
-            <p>Choose exactly which DealerKit vehicles are sent to Merchant Center. Finance and Rent2Buy stock is not affected.</p>
+            <p>Automatically include available DealerKit vehicles in Merchant Center, or switch to your saved manual vehicle selection. Finance and Rent2Buy stock is not affected.</p>
           </div>
           <button className="button button--ghost" type="button" onClick={load} disabled={Boolean(busy)}>Refresh stock</button>
         </div>
         <div className="notice" style={{ marginBottom: 14 }}>
-          <strong>Google feed: {mode === "selected" ? "Selected vehicles only" : "All DealerKit vehicles (unchanged)"}</strong>
+          <strong>Google feed: {mode === "selected" ? "Saved vehicles only (manual)" : "Automatic available stock"}</strong>
           <div style={{ fontSize: 13, marginTop: 6 }}>
-            {vehicles.length} vehicles in the DealerKit Google feed · {selected.length} selected.
-            {previewOnly ? " Read-only preview: setup is awaiting the private selection table." : mode === "selected" ? " Saving a new selection updates the next Google feed fetch." : " Your selections are only a draft until you activate selected-only mode."}
-            {" "}Google normally imports this feed once daily; you can also request Update in Merchant Center.
+            {vehicles.filter(vehicle => !vehicle.missingFromFeed).length} vehicles in the current DealerKit Google feed · {automaticCount} currently eligible for automatic inclusion · {selected.length} saved for optional manual selection.
+            {previewOnly ? " Read-only preview: setup is awaiting the private selection table." : mode === "selected" ? " Your saved selection limits the feed, but sold and reserved vehicles are still excluded." : " New available vans join automatically. Sold, reserved, awaiting-delivery and blocked vans are excluded when the feed is fetched."}
+            {" "}Merchant Center normally fetches this URL daily. Request Update there only when you need a faster refresh.
           </div>
         </div>
         {previewOnly ? <div className="notice" role="status" style={{ marginBottom: 12 }}>
@@ -134,7 +141,7 @@ export default function VanscoGoogleVehicleAdsPage() {
         {alerts.length > 0 ? (
           <section role="alert" style={{ border: "2px solid #dc2626", background: "#fff1f2", borderRadius: 14, padding: 16, marginBottom: 16 }}>
             <h3 style={{ color: "#991b1b", margin: "0 0 6px" }}>ACTION REQUIRED · {alerts.length} Google vehicle stock warning{alerts.length === 1 ? "" : "s"}</h3>
-            <p style={{ marginTop: 0, fontSize: 13 }}>Review immediately. Sold or reserved vans must not continue being advertised. After removing, update Merchant Center separately.</p>
+            <p style={{ marginTop: 0, fontSize: 13 }}>Review the stock discrepancy. Sold and reserved vehicles are excluded from the CRM feed automatically; Merchant Center still needs to fetch the latest feed.</p>
             {alerts.map(alert => (
               <div key={alert.id} style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderTop: "1px solid #fecaca" }}>
                 <div>
@@ -152,7 +159,7 @@ export default function VanscoGoogleVehicleAdsPage() {
           </section>
         ) : (
           <div role="status" style={{ fontSize: 13, marginBottom: 12, color: "#475569" }}>
-            No sold, reserved or missing warnings detected among the current selected Google vehicles. DealerKit statuses may lag actual sales.
+            {mode === "selected" ? "No sold, reserved or missing warnings among your saved vehicles." : "Automatic exclusions are active for known sold, reserved and blocked vehicles."} DealerKit statuses may lag actual sales.
           </div>
         )}
         {merchantPending.length > 0 ? (
@@ -186,23 +193,23 @@ export default function VanscoGoogleVehicleAdsPage() {
             style={{ flex: "1 1 300px", maxWidth: 420 }}
           />
           <span className="status-pill">{visible.length} shown</span>
-          <span className="status-pill" aria-live="polite" style={{ background: selected.length ? "#dbeafe" : undefined, color: selected.length ? "#1d4ed8" : undefined }}>{selected.length} selected</span>
+          <span className="status-pill" aria-live="polite" style={{ background: "#dbeafe", color: "#1d4ed8" }}>{mode === "selected" ? `${selected.length} manual picks` : `${automaticCount} auto eligible`}</span>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 650 }}>
             <input type="checkbox" checked={showSelectedOnly} onChange={e => setShowSelectedOnly(e.target.checked)} />
             Show selected only
           </label>
         </div>
         <p style={{ margin: "2px 0 12px", color: "#475569", fontSize: 13 }}>
-          Click anywhere on a vehicle to tick or untick it. Tick as many as you like, then <strong>Save selected vehicles</strong>.
+          Checkboxes maintain your optional manual shortlist. In automatic mode they do not limit which available vans Google can advertise. To switch to manual mode, save your shortlist and click <strong>Use saved selection only</strong>.
         </p>
         <div className="card-actions" style={{ marginBottom: 14 }}>
           <button type="button" className="button button--ghost" disabled={Boolean(busy) || previewOnly || !loaded} onClick={() => setSelected(prev => Array.from(new Set([...prev, ...visible.map(v => v.id)])))}>Select visible</button>
           <button type="button" className="button button--ghost" disabled={Boolean(busy) || previewOnly || !loaded} onClick={() => { const remove = new Set(visible.map(v => v.id)); setSelected(prev => prev.filter(id => !remove.has(id))); }}>Clear visible</button>
           <button type="button" className="button button--primary" disabled={Boolean(busy) || previewOnly || !loaded || !unsaved} onClick={() => act("save")}>{busy === "save" ? "Saving..." : "Save selected vehicles"}</button>
           {mode === "all" ? (
-            <button type="button" className="button button--primary" disabled={Boolean(busy) || previewOnly || !loaded || unsaved || !savedIds.length} onClick={() => act("activate")}>Activate selected vehicles only</button>
+            <button type="button" className="button button--primary" disabled={Boolean(busy) || previewOnly || !loaded || unsaved || !savedIds.length} onClick={() => act("activate")}>Use saved selection only</button>
           ) : (
-            <button type="button" className="button button--ghost" disabled={Boolean(busy) || previewOnly || !loaded} onClick={() => act("deactivate")}>Return to all vehicles</button>
+            <button type="button" className="button button--ghost" disabled={Boolean(busy) || previewOnly || !loaded} onClick={() => act("deactivate")}>Use automatic available stock</button>
           )}
         </div>
         {unsaved ? <div className="notice" role="status"><strong>{selected.length} vans selected.</strong> Changes not saved yet. Click <strong>Save selected vehicles</strong> when you're ready.</div> : null}
@@ -224,24 +231,38 @@ export default function VanscoGoogleVehicleAdsPage() {
               {vehicle.imageUrl ? <img src={vehicle.imageUrl} alt="" style={{ width: 90, height: 68, objectFit: "contain", flexShrink: 0 }} loading="lazy" /> : <span style={{ width: 90, textAlign: "center" }}>No photo</span>}
               <span style={{ flex: 1, minWidth: 0 }}>
                 <strong>{vehicle.title || vehicle.id}</strong>
+                {vehicle.feedExclusion ? <span style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#b91c1c" }}>EXCLUDED from Google feed: {vehicle.feedExclusion === "blocked" ? "Manual hold / awaiting verification" : "DealerKit unavailable"}</span> : null}
                 <span style={{ display: "block", fontSize: 13, opacity: 0.75 }}>{vehicle.registration ? `${vehicle.registration} · ` : ""}{vehicle.id} · {vehicle.price || "Price unavailable"} · {vehicle.storeCode || "Unassigned branch"}{vehicle.stockStatus ? ` · DealerKit: ${vehicle.stockStatus}` : ""}</span>
               </span>
               {selectedSet.has(vehicle.id) && mode === "selected" ? (
                 <button type="button" className="button button--ghost"
                   style={{ color: "#b91c1c", fontSize: 12 }}
                   disabled={Boolean(busy) || unsaved}
-                  onClick={event => { event.preventDefault(); event.stopPropagation(); act("remove", { vehicleId: vehicle.id, reason: "sold" }); }}>
-                  Mark SOLD & remove
+                  onClick={event => { event.preventDefault(); event.stopPropagation(); act("remove", { vehicleId: vehicle.id, reason: "manual" }); }}>
+                  Remove from shortlist
                 </button>
               ) : null}
-              <span aria-hidden="true" style={{ flexShrink: 0, fontSize: 12, fontWeight: 700, color: selectedSet.has(vehicle.id) ? "#1d4ed8" : "#64748b", minWidth: 74, textAlign: "right" }}>
-                {selectedSet.has(vehicle.id) ? "✓ SELECTED" : "Select"}
+              {blockedIds.includes(vehicle.id) ? (
+                <button type="button" className="button button--ghost" style={{ fontSize: 12 }}
+                  disabled={Boolean(busy) || unsaved}
+                  onClick={event => { event.preventDefault(); event.stopPropagation(); act("unblock", { vehicleId: vehicle.id }); }}>
+                  Restore hold
+                </button>
+              ) : !vehicle.missingFromFeed && !vehicle.feedExclusion ? (
+                <button type="button" className="button button--ghost" style={{ color: "#b91c1c", fontSize: 12 }}
+                  disabled={Boolean(busy) || unsaved}
+                  onClick={event => { event.preventDefault(); event.stopPropagation(); act("block", { vehicleId: vehicle.id }); }}>
+                  Block from Google
+                </button>
+              ) : null}
+              <span aria-hidden="true" style={{ flexShrink: 0, fontSize: 12, fontWeight: 700, color: vehicle.feedExclusion ? "#b91c1c" : "#1d4ed8", minWidth: 74, textAlign: "right" }}>
+                {vehicle.feedExclusion ? "EXCLUDED" : mode === "all" ? "✓ AUTO" : selectedSet.has(vehicle.id) ? "✓ SELECTED" : "Not selected"}
               </span>
             </label>
           ))}
         </div>
         <p style={{ fontSize: 12, marginTop: 12, opacity: 0.8 }}>
-          Selection controls the Marketing CRM Google feed only. Stock Watch, other advertising and the Google Ads daily budget are untouched. Merchant Center refresh and confirmation are manual. Do not assume an item is gone from Google merely because it has been removed here.
+          Only this Vansco Merchant Center feed is affected; Stock Watch, other advertising and Google Ads daily budgets are unchanged. DealerKit changes are applied at the next Merchant Center feed fetch. Google may continue displaying an old listing until its update finishes.
         </p>
       </section>
     </div>
