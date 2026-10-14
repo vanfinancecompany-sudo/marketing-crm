@@ -1,5 +1,5 @@
 import { cleanDealerKitGoogleVehicleAdsCsv } from "../lib/dealerKitGoogleVehicleAdsFeed.js";
-import { getGoogleVehicleRows, normalizeVehicleId, validatedSelectedVehicleIds } from "../lib/vanscoGoogleVehicleAdsSelection.js";
+import { getGoogleVehicleRows, googleVehicleFeedExclusion, normalizeVehicleId, validatedSelectedVehicleIds } from "../lib/vanscoGoogleVehicleAdsSelection.js";
 import { googleVehicleStockRisk, makeMerchantAction, confirmMerchantAction, merchantPending } from "../lib/vanscoGoogleVehicleAdsSafety.js";
 import { getSupabaseServiceAdmin, isMissingSupabaseObjectError } from "./_vansco-cache-utils.js";
 import { isMarketingStockWatchActionAuthorized } from "./vansco-watch-action.js";
@@ -86,6 +86,7 @@ export async function handleVanscoGoogleVehicleSelection(request, response, deps
         readDealerKitObservations(supabase),
       ]);
       const feedIds = new Set(vehicles.map(v => v.id));
+      const pendingRemovalIds = merchantPending(setting.merchantActions).map(item => item.vehicleId);
       const listed = vehicles.map(vehicle => {
         const stock = stockMap.get(vehicle.id);
         return {
@@ -93,6 +94,7 @@ export async function handleVanscoGoogleVehicleSelection(request, response, deps
           registration: stock?.registration || "",
           stockStatus: stock?.last_status || "unknown",
           stockCheckedAt: stock?.last_seen_at || null,
+          feedExclusion: googleVehicleFeedExclusion(vehicle.id, { stock, blockedIds: setting.blockedSoldIds, pendingRemovalIds }),
         };
       });
       // Preserve visibility of selected stock after DealerKit stops advertising it.
@@ -122,6 +124,7 @@ export async function handleVanscoGoogleVehicleSelection(request, response, deps
         : [];
       return response.status(200).json({
         ok: true, ...setting, vehicles: listed,
+        automaticCount: listed.filter(vehicle => !vehicle.missingFromFeed && !vehicle.feedExclusion).length,
         alerts, merchantPending: merchantPending(setting.merchantActions),
         lastStockWatchCheckedAt: [...stockMap.values()]
           .map(row => row.last_seen_at).filter(Boolean).sort().at(-1) || null,
@@ -177,16 +180,48 @@ export async function handleVanscoGoogleVehicleSelection(request, response, deps
         }
       }
       message = "Google feed selection updated. IMPORTANT: Open Merchant Center, request a feed Update and confirm it below.";
+    } else if (action === "block") {
+      // A manual hold wins over DealerKit feed availability and remains until
+      // the operator explicitly restores the vehicle.
+      const id = normalizeVehicleId(body.vehicleId);
+      const vehicles = await fetchCurrentVehicles(environment, deps.fetcher || fetch);
+      const vehicleMap = new Map(vehicles.map(vehicle => [vehicle.id, vehicle]));
+      if (!id || !vehicleMap.has(id)) {
+        return response.status(400).json({ ok: false, message: "Vehicle is not in the current DealerKit Google feed." });
+      }
+      if (!blockedSoldIds.includes(id)) {
+        const stockMap = await readDealerKitObservations(supabase);
+        if (mode === "selected" && selectedIds.length === 1 && selectedIds.includes(id)) {
+          return response.status(400).json({ ok: false, message: "Cannot remove the last selected vehicle. Switch to automatic mode first." });
+        }
+        blockedSoldIds = [...blockedSoldIds, id];
+        selectedIds = selectedIds.filter(selectedId => selectedId !== id);
+        merchantActions = addRemovalAction(merchantActions, id, "sold", stockMap, vehicleMap);
+      }
+      message = "Vehicle blocked from the Google feed. Google will remove it on its next scheduled feed fetch; request Update for faster removal.";
+    } else if (action === "unblock") {
+      const id = normalizeVehicleId(body.vehicleId);
+      if (!blockedSoldIds.includes(id)) {
+        return response.status(400).json({ ok: false, message: "Vehicle is not manually blocked." });
+      }
+      if (merchantPending(merchantActions).some(item => item.vehicleId === id)) {
+        return response.status(400).json({ ok: false, message: "Verify the Merchant Center removal reminder before restoring this vehicle." });
+      }
+      const stockMap = await readDealerKitObservations(supabase);
+      if (googleVehicleFeedExclusion(id, { stock: stockMap.get(id) }) === "unavailable") {
+        return response.status(400).json({ ok: false, message: "DealerKit still reports this vehicle unavailable. It cannot be restored." });
+      }
+      blockedSoldIds = blockedSoldIds.filter(blockedId => blockedId !== id);
+      message = "Manual block cleared. If DealerKit still advertises this vehicle as available, the next Google feed fetch can include it.";
     } else if (action === "activate") {
       if (!setting.selectedIds.length) return response.status(400).json({ ok: false, message: "Save at least one selected vehicle first." });
       mode = "selected";
       message = "Selected vehicles will appear in the next Google feed refresh.";
     } else if (action === "deactivate") {
-      if (blockedSoldIds.length || merchantPending(merchantActions).length) {
-        return response.status(400).json({ ok: false, message: "Cannot advertise all stock while sold-vehicle blocks or Merchant Center reminders exist." });
-      }
+      // Automatic mode still enforces sold, reserved, pending-removal and
+      // operator blocks, so returning to it cannot widen unsafe stock.
       mode = "all";
-      message = "All-vehicles mode restored. Verify the feed before enabling paid ads.";
+      message = "Automatic available-stock mode enabled. New DealerKit arrivals will join the next Merchant Center fetch.";
     } else {
       return response.status(400).json({ ok: false, message: "Unknown action." });
     }
