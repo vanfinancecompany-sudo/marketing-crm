@@ -472,6 +472,7 @@ const VIEW_PATHS = {
   "Real Customer Simulation": "/ai-customer-simulation",
   "AI Assistant Health": "/ai-assistant-health",
   "Vansco Stock Watch": "/vansco-stock-watch",
+  "Vansco Google Vehicle Ads": "/vansco-google-vehicle-ads",
   "Reel Factory": "/reel-factory",
   "Premium Reel Studio": "/premium-reel-studio",
   "Reel Lab Beta": "/reel-lab",
@@ -501,6 +502,7 @@ function viewFromPath() {
   if (path === "/ai-customer-simulation") return "Real Customer Simulation";
   if (path === "/ai-assistant-health") return "AI Assistant Health";
   if (path === "/vansco-stock-watch") return "Vansco Stock Watch";
+  if (path === "/vansco-google-vehicle-ads") return "Vansco Google Vehicle Ads";
   if (path === "/reel-factory") return "Reel Factory";
   if (path === "/premium-reel-studio" || path === "/reel-studio-beta" || path === "/premium-reels") {
     return "Premium Reel Studio";

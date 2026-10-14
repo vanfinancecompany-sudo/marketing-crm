@@ -215,6 +215,44 @@ function ActivityCard({ metric, onOpen }) {
   );
 }
 
+
+// This is an inventory snapshot, not a daily posting target or an estimate
+// of Merchant Center approvals. Keep it outside the daily completion maths.
+function GoogleVehicleAdsCard({ inventory, onOpen }) {
+  const count = Number.isInteger(inventory?.count) ? inventory.count : null;
+  const status = count === null ? (inventory?.error ? "UNAVAILABLE" : "CHECKING") : "LIVE FEED";
+  return (
+    <article
+      className="operations-activity-card is-vansco is-linked"
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen?.();
+        }
+      }}
+      aria-label="Open Vansco Google Vehicle Ads inventory"
+    >
+      <div className="operations-activity-card__heading">
+        <span>Vansco Google Vehicle Ads</span>
+        <b>{status}</b>
+      </div>
+      <div className="operations-activity-card__numbers">
+        <strong>{count === null ? "—" : count.toLocaleString("en-GB")}</strong>
+        <span>vehicles in feed</span>
+        <em>{inventory?.mode === "selected" ? "Manual selection" : "Automatic stock"}</em>
+      </div>
+      <small style={{ color: "#52657f", fontSize: 11, lineHeight: 1.35 }}>
+        {inventory?.error || (inventory?.checkedAt
+          ? `DealerKit feed checked ${londonTimeLabel(inventory.checkedAt)} UK`
+          : "Checking the live CRM feed")}
+      </small>
+    </article>
+  );
+}
+
 export default function DashboardPage({ onNavigate }) {
   const today = londonDateKey();
   const todayWeekday = londonWeekday(new Date());
@@ -242,6 +280,7 @@ export default function DashboardPage({ onNavigate }) {
   const [vanscoStatusBusy, setVanscoStatusBusy] = useState(false);
   const [vanscoStatusError, setVanscoStatusError] = useState("");
   const [bufferLiveStatus, setBufferLiveStatus] = useState(null);
+  const [googleVehicleInventory, setGoogleVehicleInventory] = useState({ count: null, mode: "all", checkedAt: null, error: "" });
 
   function periodRange(nextPeriod = period) {
     if (nextPeriod === "seven")
@@ -256,6 +295,42 @@ export default function DashboardPage({ onNavigate }) {
     const range = periodRange(nextPeriod);
     setTotals(await getDailyOperationsTotals(range.start, range.end));
   }
+
+  async function loadGoogleVehicleInventory() {
+    try {
+      const response = await fetch("/api/vansco-google-vehicle-selection", {
+        method: "GET",
+        headers: buildMarketingAccessHeaders(),
+        cache: "no-store",
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok || !Array.isArray(data.vehicles)) {
+        throw new Error(data.message || "Google feed count unavailable");
+      }
+      const ids = new Set(data.selectedIds || []);
+      const count = data.vehicles.filter(vehicle =>
+        !vehicle.missingFromFeed
+        && !vehicle.feedExclusion
+        && (data.mode !== "selected" || ids.has(vehicle.id))
+      ).length;
+      setGoogleVehicleInventory({
+        count,
+        mode: data.mode === "selected" ? "selected" : "all",
+        checkedAt: new Date().toISOString(),
+        error: "",
+      });
+    } catch {
+      // Never label an old or failed count as live inventory.
+      setGoogleVehicleInventory({ count: null, mode: "all", checkedAt: null, error: "Feed count unavailable" });
+    }
+  }
+
+  useEffect(() => {
+    if (locked) return undefined;
+    loadGoogleVehicleInventory();
+    const interval = window.setInterval(loadGoogleVehicleInventory, 5 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [locked]);
 
   async function load() {
     setBusy(true);
@@ -743,6 +818,10 @@ export default function DashboardPage({ onNavigate }) {
             />
           );
         })}
+        <GoogleVehicleAdsCard
+          inventory={googleVehicleInventory}
+          onOpen={() => onNavigate?.("Vansco Google Vehicle Ads")}
+        />
       </section>
       <AIVisibilityWidget onOpen={() => onNavigate?.("AI Visibility")} />
       <Ga4PipelinePanel />
@@ -932,6 +1011,30 @@ export default function DashboardPage({ onNavigate }) {
               </table>
             </div>
           ) : null}
+          <section style={{ marginTop: 18, borderTop: "1px solid #dbe3ef", paddingTop: 14 }}>
+            <h3 style={{ margin: "0 0 8px" }}>Vansco Google Vehicle Ads</h3>
+            <p style={{ margin: "0 0 10px", color: "#52657f", fontSize: 13 }}>
+              Current DealerKit Google feed stock, separate from the daily publishing targets above.
+              This is a live snapshot, not a historical advertisement or approval count.
+            </p>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+              <strong style={{ fontSize: 22 }}>
+                {Number.isInteger(googleVehicleInventory.count) ? googleVehicleInventory.count.toLocaleString("en-GB") : "—"} vehicles
+              </strong>
+              <span>{googleVehicleInventory.mode === "selected" ? "Manual selection" : "Automatic available stock"}</span>
+              <button type="button" className="button button--ghost" onClick={() => onNavigate?.("Vansco Google Vehicle Ads")}>
+                Open Vehicle Ads
+              </button>
+            </div>
+            {googleVehicleInventory.error ? (
+              <p role="status" style={{ marginTop: 7, color: "#b91c1c" }}>{googleVehicleInventory.error}</p>
+            ) : googleVehicleInventory.checkedAt ? (
+              <p style={{ marginTop: 7, fontSize: 12, color: "#52657f" }}>
+                CRM feed count checked {londonTimeLabel(googleVehicleInventory.checkedAt)} UK.
+                Merchant Center approval and actual advertising impressions are reported separately in Google.
+              </p>
+            ) : null}
+          </section>
         </div>
       </details>
 

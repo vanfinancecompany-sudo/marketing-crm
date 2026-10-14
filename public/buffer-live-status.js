@@ -83,19 +83,6 @@ function googleBusinessLine(group) {
   return `Google Business: ${total} vehicle post${total === 1 ? "" : "s"} live · Van Finance ${finance} · Rent2Buy ${rent2buy}`;
 }
 
-function ensureOperationsPanel() {
-  let panel = document.getElementById(STATUS_ID);
-  if (panel) return panel;
-  const summary = document.querySelector(".operations-summary");
-  if (!summary) return null;
-  panel = document.createElement("section");
-  panel.id = STATUS_ID;
-  panel.className = "panel";
-  panel.setAttribute("aria-live", "polite");
-  summary.insertAdjacentElement("afterend", panel);
-  return panel;
-}
-
 function ensurePostingNotice() {
   let notice = document.getElementById(STATUS_ID);
   if (notice) return notice;
@@ -136,23 +123,10 @@ function renderStatus(payload) {
   const vansco = payload.today.vansco || null;
   const googleBusiness = payload.today.googleBusiness || null;
 
+  // Content Operations already has per-channel live cards. Keep polling and
+  // dispatching the update event, but do not inject the redundant top panel.
   if (kind === "operations") {
-    const panel = ensureOperationsPanel();
-    if (!panel) return;
-    panel.innerHTML = `
-      <div class="panel__header">
-        <div>
-          <h3>Buffer live today</h3>
-          <p>Confirmed from Buffer across Facebook, Instagram and Google Business, so you can see what has actually published.</p>
-        </div>
-        <span class="status-pill">${confirmationLabel}${checked ? ` · ${checked}` : ""}</span>
-      </div>
-      <div class="notice notice--success">${countsLine("Van Finance", finance)}</div>
-      <div class="notice notice--success">${countsLine("Rent2Buy", rent)}</div>
-      ${instagram ? `<div class="notice notice--success">${instagramLine(instagram)}</div>` : ""}
-      ${vansco ? `<div class="notice ${vansco.error ? "notice--warning" : "notice--success"}">${vanscoLine(vansco)}</div>` : ""}
-      <div class="notice notice--success">${googleBusinessLine(googleBusiness)}</div>
-    `;
+    document.getElementById(STATUS_ID)?.remove();
     return;
   }
 

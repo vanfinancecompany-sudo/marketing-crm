@@ -95,7 +95,8 @@ test("Content Operations includes Van Finance Instagram and totals all visible c
   assert.match(page, /completionPercentage/);
   assert.doesNotMatch(page, /overview\?\.day\?\.remaining_total \|\| 0/);
   assert.match(bridge, /Van Finance Instagram:/);
-  assert.match(bridge, /Facebook, Instagram and Google Business/);
+  assert.match(bridge, /buffer-facebook-live-status/);
+  assert.doesNotMatch(bridge, /Buffer live today/);
 });
 test("View Totals and Edit Daily Targets both use the complete placement registry", async () => {
   const [page, daily] = await Promise.all([
@@ -119,4 +120,36 @@ test("View Totals and Edit Daily Targets both use the complete placement registr
   ]) {
     assert.match(daily, new RegExp(type));
   }
+});
+
+test("Vehicle Google Ads route highlights its own sidebar item, including direct loads", async () => {
+  const [app, nav] = await Promise.all([
+    read("App.jsx"),
+    read("public/shared/sidebar-navigation.js"),
+  ]);
+  assert.match(app, /"Vansco Google Vehicle Ads": "\/vansco-google-vehicle-ads"/);
+  assert.match(app, /path === "\/vansco-google-vehicle-ads"\) return "Vansco Google Vehicle Ads"/);
+  assert.match(nav, /id: "vansco-google-vehicle-ads"/);
+  assert.match(nav, /paths: \["\/vansco-google-vehicle-ads"\]/);
+});
+
+test("Content Operations includes a real Vansco Google feed card and totals drawer snapshot", async () => {
+  const page = await read("pages/DashboardPage.jsx");
+  assert.match(page, /function GoogleVehicleAdsCard/);
+  assert.match(page, /"\/api\/vansco-google-vehicle-selection"/);
+  assert.match(page, /!vehicle\.missingFromFeed/);
+  assert.match(page, /!vehicle\.feedExclusion/);
+  assert.match(page, /inventory=\{googleVehicleInventory\}/);
+  assert.match(page, /<summary>VIEW TOTALS AND HISTORY<\/summary>/);
+  assert.match(page, /Current DealerKit Google feed stock/);
+  assert.match(page, /Open Vehicle Ads/);
+  assert.match(page, /onNavigate\?\.\("Vansco Google Vehicle Ads"\)/);
+  assert.match(page, /not a historical advertisement or approval count/);
+});
+
+test("Buffer live status keeps updating placement cards without creating a duplicate summary", async () => {
+  const bridge = await read("public/buffer-live-status.js");
+  assert.doesNotMatch(bridge, /function ensureOperationsPanel|<h3>Buffer live today<\/h3>/);
+  assert.match(bridge, /window\.dispatchEvent\(new CustomEvent\("buffer-facebook-live-status"/);
+  assert.match(bridge, /if \(kind === "operations"\)/);
 });
