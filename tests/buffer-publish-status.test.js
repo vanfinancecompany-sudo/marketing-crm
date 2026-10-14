@@ -120,9 +120,10 @@ test("published Reel status events do not double-count Reel generation targets",
   assert.equal(summary.metrics.rent2buy_reel.completed, 1);
 });
 
-test("client surfaces live Buffer confirmation in all three CRM areas", async () => {
+test("client keeps Buffer confirmation events without a duplicate Content Operations panel", async () => {
   const bridge = await readFile(new URL("../public/buffer-live-status.js", import.meta.url), "utf8");
-  assert.match(bridge, /Buffer live today/);
+  assert.doesNotMatch(bridge, /Buffer live today/);
+  assert.match(bridge, /buffer-facebook-live-status/);
   assert.match(bridge, /Google Business/);
   assert.match(bridge, /\/van-finance-facebook/);
   assert.match(bridge, /\/rent2buy-facebook/);
