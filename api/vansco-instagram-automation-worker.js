@@ -40,10 +40,17 @@ export function instagramBufferSlots({day,now=Date.now(),posts=[],limit=TARGET,r
 export function instagramRemainingCapacity({state,target=TARGET,organisationCapacity=100}){
  const sent=Number(state?.limit?.sent||0);
  const providerScheduled=Number(state?.limit?.scheduled||0);
- const providerLimit=Number(state?.limit?.limit);
+ // A newly connected channel can have no dailyPostingLimits row yet.
+ // Number(null) is zero, which previously blocked every initial post.
+ // Unknown capacity is conservatively bounded by our 20-post target;
+ // a genuine reported limit of 0 still blocks publishing.
+ const hasProviderLimit=state?.limit?.limit!==null
+   &&state?.limit?.limit!==undefined
+   &&state?.limit?.limit!=="";
+ const providerLimit=hasProviderLimit?Number(state.limit.limit):null;
  const livePosts=scheduled(state?.posts||[]);
  const seen=livePosts.length;
- const providerRemaining=Number.isFinite(providerLimit)&&providerLimit>=0
+ const providerRemaining=hasProviderLimit&&Number.isFinite(providerLimit)&&providerLimit>=0
    ?Math.max(0,providerLimit-sent-providerScheduled):target;
  return Math.max(0,Math.min(
   target-sent-providerScheduled,
@@ -57,8 +64,14 @@ export default async function handler(request,response){
  if(!["GET","POST"].includes(request.method))return response.status(405).json({ok:false,error:"Method not allowed"});
  if(!authorised(request))return response.status(401).json({ok:false,error:"Not authorised"});
  const dryRun=clean(request.query?.dryRun).toLowerCase()==="true";
+ const verifyBuffer=dryRun&&clean(request.query?.verifyBuffer).toLowerCase()==="true";
+ // Only an explicit, authorised POST can override the scheduled-run window.
+ const force=request.method==="POST"&&clean(request.query?.force).toLowerCase()==="true";
  const enabled=clean(process.env.VANSCO_INSTAGRAM_AUTOMATION_ENABLED).toLowerCase()==="true";
- if(!isBufferScheduledRunDue("two-hour")&&!dryRun)
+ console.info("[Vansco Instagram] Worker invoked", {
+  enabled,dryRun,force,ukDate:londonDateKeyForValue(new Date()),scheduledRunDue:isBufferScheduledRunDue("two-hour")
+ });
+ if(!isBufferScheduledRunDue("two-hour")&&!dryRun&&!force)
   return response.status(200).json(bufferDormantPayload({job:"vansco-instagram"}));
  if(!enabled&&!dryRun)return response.status(200).json({ok:true,enabled:false,message:"Vansco Instagram worker built but disabled."});
  const now=Date.now(),today=londonDateKeyForValue(new Date(now));
@@ -72,8 +85,19 @@ export default async function handler(request,response){
     .slice(0,20).map(v=>({registration:v.registration,title:v.title,
      branch:v.branchKey,vehicleUrl:v.vehicleUrl,
      photo:vanscoFacebookImageUrls(v)[0]||"",caption:buildVanscoFacebookCaption(v)}));
-   return response.status(200).json({ok:true,dryRun:true,enabled,target:TARGET,stock:stock.length,
+   if(!verifyBuffer) return response.status(200).json({ok:true,dryRun:true,enabled,target:TARGET,stock:stock.length,
     eligible:vehicles.length,preview});
+   const config=await vanscoInstagramConfig();
+   const state=await vanscoInstagramState(config,new Date(now));
+   if(state.hasNextPage)throw new Error("Cannot confirm Instagram queue safely: too many posts.");
+   return response.status(200).json({ok:true,dryRun:true,enabled,target:TARGET,
+    stock:stock.length,eligible:vehicles.length,channelName:config.channelName,
+    queueNow:scheduled(state.posts).length,sentToday:Number(state?.limit?.sent||0),
+    scheduledToday:Number(state?.limit?.scheduled||0),
+    providerLimit:state?.limit?.limit??null,organisationQueueLimit:config.scheduledPostsLimit,
+    availableToQueue:instagramRemainingCapacity({state,organisationCapacity:Number(config.scheduledPostsLimit)||100}),
+    preview:preview.slice(0,3)});
+ 
   }
   const settings=await vanscoInstagramConfig();
   const todayState=await vanscoInstagramState(settings,new Date(now));
@@ -150,6 +174,10 @@ export default async function handler(request,response){
    channelId:settings.channelId,
    state:"healthy"};
   await saveVanscoInstagramStatus(result);
+  console.info("[Vansco Instagram] Queue update",{
+   created:result.created, queued:result.queued, sentToday:result.sentToday,
+   scheduledToday:result.scheduledToday, held:result.held.length
+  });
   return response.status(200).json(result);
  }catch(e){
   if(isBufferRateLimitCooldownError(e)){
@@ -158,6 +186,7 @@ export default async function handler(request,response){
    return response.status(202).json(state);
   }
   const message=clean(e?.message)||"Vansco Instagram worker failed";
+  console.error("[Vansco Instagram] Worker failed",{message:message.slice(0,200)});
   await saveVanscoInstagramStatus({date:today,target:TARGET,state:"failed",error:message}).catch(()=>{});
   return response.status(500).json({ok:false,enabled,error:message.slice(0,250)});
  }
