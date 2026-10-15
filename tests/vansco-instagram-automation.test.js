@@ -75,3 +75,20 @@ test("Instagram operator controls verify channel and queue before any manual ref
  assert.match(dashboard,/force=true/);
  assert.match(dashboard,/dryRun=true&verifyBuffer=true/);
 });
+
+test("Instagram Buffer access errors distinguish account, channel, queue and post stages", () => {
+ const worker=code("../api/vansco-instagram-automation-worker.js");
+ const shared=code("../api/_vansco-buffer-runtime.js");
+ const runtime=code("../api/_vansco-instagram-runtime.js");
+ const status=code("../api/vansco-facebook-automation-status.js");
+ const dashboard=code("../pages/DashboardPage.jsx");
+ assert.match(shared,/onStage\?\.\("read_buffer_account"\)/);
+ assert.match(shared,/onStage\?\.\("read_buffer_channels"\)/);
+ assert.match(runtime,/inspectVanscoBufferAccount\(\{onStage\}\)/);
+ assert.match(worker,/stage="create_instagram_post"/);
+ assert.match(worker,/stage="read_instagram_queue"/);
+ assert.match(worker,/Worker failed",\{stage,message/);
+ assert.match(worker,/state:"failed",stage,error:message/);
+ assert.match(status,/stage: instagram\?\.stage/);
+ assert.match(dashboard,/Buffer step:/);
+});
