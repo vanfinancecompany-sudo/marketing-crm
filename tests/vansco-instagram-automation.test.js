@@ -20,6 +20,9 @@ test("Provider sent and scheduled posts both count against twenty a day",()=>{
  assert.equal(instagramRemainingCapacity({state:{limit:{sent:11,scheduled:10,limit:50},posts:[]}}),0);
  assert.equal(instagramRemainingCapacity({state:{limit:{sent:0,scheduled:0,limit:50},posts:[]}}),6);
  assert.equal(instagramRemainingCapacity({state:{limit:{sent:0,scheduled:0,limit:0},posts:[]}}),0);
+ assert.equal(instagramRemainingCapacity({state:{limit:null,posts:[]}}),6);
+ assert.equal(instagramRemainingCapacity({state:{limit:{sent:0,scheduled:0,limit:null},posts:[]}}),6);
+ assert.equal(instagramRemainingCapacity({state:{limit:{sent:0,scheduled:0,limit:undefined},posts:[]}}),6);
  assert.equal(instagramRemainingCapacity({state:{limit:{sent:0,scheduled:0,limit:50},posts:[]},organisationCapacity:2}),2);
 });
 test("Manual queue slots are not duplicated",()=>{
