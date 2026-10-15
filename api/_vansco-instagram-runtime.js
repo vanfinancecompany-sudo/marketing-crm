@@ -3,6 +3,7 @@ import {list,put} from "@vercel/blob";
 import {inspectVanscoBufferAccount,loadVanscoBufferState,vanscoBufferCompatibleImageUrl} from "./_vansco-buffer-runtime.js";
 import {BUFFER_CREATE_POST_MUTATION,buildBufferCreatePostInput,parseBufferCreatePostPayload} from "../lib/bufferPublishing.js";
 import {guardedBufferGraphql} from "../lib/bufferRuntimeGuard.js";
+import {londonDateKeyForValue} from "../lib/bufferAutomation.js";
 
 const prefix="vansco-buffer-v1/instagram-";
 const token=()=>String(process.env.VANSCO_BUFFER_API_KEY||process.env.BUFFER_API_KEY||"").trim();
@@ -49,9 +50,7 @@ export const vanscoInstagramStatus=async()=>await read("status");
 export const saveVanscoInstagramStatus=status=>
  write("status",{...status,checkedAt:new Date().toISOString()});
 export async function vanscoInstagramState(config,now=new Date()){
- const londonKey=new Intl.DateTimeFormat("en-CA",{
-  timeZone:"Europe/London",year:"numeric",month:"2-digit",day:"2-digit"
- }).format(now);
+ const londonKey=londonDateKeyForValue(now);
  return loadVanscoBufferState(config,londonKey+"T12:00:00.000Z");
 }
 export async function createVanscoInstagramPost({config,text,imageUrl,dueAt}){
