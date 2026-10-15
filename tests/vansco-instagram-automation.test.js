@@ -39,7 +39,7 @@ test("Vansco Instagram is a separate DealerKit worker that respects stocks, VAT 
  assert.match(worker,/MAX_CREATE_PER_RUN=6/);
  assert.match(worker,/deleteVanscoBufferPost/);
  assert.match(runtime,/service\|\|""\)\.toLowerCase\(\)==="instagram"/);
- assert.match(runtime,/metadata/);
+ assert.match(runtime,/buildBufferCreatePostInput/);
  assert.match(runtime,/vansco-buffer-v1\/instagram-/);
 });
 test("Existing Vansco social Facebook and Google Business are not modified",()=>{
