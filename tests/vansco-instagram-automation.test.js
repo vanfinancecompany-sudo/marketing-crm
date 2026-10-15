@@ -5,6 +5,15 @@ import {readFileSync} from "node:fs";
 import {instagramBufferSlots,instagramRemainingCapacity} from "../api/vansco-instagram-automation-worker.js";
 import {vanscoDailySlots} from "../lib/vanscoFacebookAutomation.js";
 const code=path=>readFileSync(new URL(path,import.meta.url),"utf8");
+test("hourly UTC cron can refill while BST shifts London working hours",()=>{
+ const worker=code("../api/vansco-instagram-automation-worker.js");
+ assert.match(worker,/isBufferScheduledRunDue\("status"\)/);
+ assert.doesNotMatch(worker,/isBufferScheduledRunDue\("two-hour"\)/);
+ assert.match(worker,/MAX_CREATE_PER_RUN=6/);
+ const when=new Date("2026-10-15T09:15:00Z"); // 10:15 London BST
+ assert.equal(new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/London",hour:"2-digit",hourCycle:"h23"}).format(when),"10");
+});
+
 test("Vansco Instagram schedules at most twenty daily posts, ending before 22:00 UK",()=>{
  const day="2026-10-16";
  const slots=instagramBufferSlots({day,now:Date.UTC(2026,9,15),limit:20});
