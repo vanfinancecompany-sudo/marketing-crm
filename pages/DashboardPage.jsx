@@ -847,7 +847,7 @@ export default function DashboardPage({ onNavigate }) {
                 <p>{group.description}</p>
               </div>
               <span className="operations-brand-group__count">
-                {group.metrics.length + (group.key === "vansco" ? 1 : 0)} activities
+                {group.metrics.length + (group.key === "vansco" ? 1 : 0)} cards
               </span>
             </div>
             <div className="operations-activity-grid">
