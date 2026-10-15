@@ -278,6 +278,9 @@ export default function DashboardPage({ onNavigate }) {
   const [vanscoBuffer, setVanscoBuffer] = useState(null);
   const [vanscoBufferBusy, setVanscoBufferBusy] = useState(false);
   const [vanscoBufferError, setVanscoBufferError] = useState("");
+  const [instagramCheck, setInstagramCheck] = useState(null);
+  const [instagramCheckBusy, setInstagramCheckBusy] = useState(false);
+  const [instagramCheckError, setInstagramCheckError] = useState("");
   const [vanscoStatus, setVanscoStatus] = useState(null);
   const [vanscoStatusBusy, setVanscoStatusBusy] = useState(false);
   const [vanscoStatusError, setVanscoStatusError] = useState("");
@@ -480,6 +483,28 @@ export default function DashboardPage({ onNavigate }) {
       setVanscoBufferError(caught?.message || "Could not verify Vansco Buffer.");
     } finally {
       setVanscoBufferBusy(false);
+    }
+  }
+
+  async function inspectInstagramBuffer({ refill = false } = {}) {
+    if (refill && !window.confirm("Queue up to six Vansco Instagram stock posts in Buffer now?")) return;
+    setInstagramCheckBusy(true);
+    setInstagramCheckError("");
+    try {
+      const result = await fetch(
+        "/api/vansco-instagram-automation-worker?" + (refill ? "force=true" : "dryRun=true&verifyBuffer=true"),
+        {method:refill ? "POST" : "GET",headers:buildMarketingAccessHeaders(),cache:"no-store"}
+      );
+      const payload = await result.json().catch(() => ({}));
+      if (!result.ok || !payload.ok) throw new Error(payload.error || "Could not check Vansco Instagram.");
+      if (payload.deferred) {
+        throw new Error("Buffer is in API cooldown. The next normal run will retry.");
+      }
+      setInstagramCheck(payload);
+    } catch (caught) {
+      setInstagramCheckError(caught?.message || "Instagram status is currently unavailable.");
+    } finally {
+      setInstagramCheckBusy(false);
     }
   }
 
@@ -905,9 +930,31 @@ export default function DashboardPage({ onNavigate }) {
           >
             {vanscoBufferBusy ? "VERIFYING…" : "VERIFY VANSCO BUFFER"}
           </button>
+          <button className="button button--ghost" type="button"
+            disabled={instagramCheckBusy} onClick={() => inspectInstagramBuffer()}>
+            {instagramCheckBusy ? "CHECKING…" : "CHECK VANSCO INSTAGRAM"}
+          </button>
+          <button className="button button--primary" type="button"
+            disabled={instagramCheckBusy} onClick={() => inspectInstagramBuffer({refill:true})}>
+            QUEUE UP TO 6 INSTAGRAM POSTS
+          </button>
         </div>
         {vanscoPreviewError ? <div className="notice notice--error">{vanscoPreviewError}</div> : null}
         {vanscoBufferError ? <div className="notice notice--error">{vanscoBufferError}</div> : null}
+        {instagramCheckError ? <div className="notice notice--error" role="alert">{instagramCheckError}</div> : null}
+        {instagramCheck ? (
+          <div className="notice" role="status" style={{marginTop:10}}>
+            <strong>Vansco Instagram · {instagramCheck.channelName || "Channel checking"}</strong>
+            {" "} {instagramCheck.deferred ? "Buffer cooldown" :
+              instagramCheck.dryRun
+                ? `Buffer queue: ${instagramCheck.queueNow ?? "—"} · Sent today: ${instagramCheck.sentToday ?? "—"} · Can schedule now: ${instagramCheck.availableToQueue ?? "—"}`
+                : `Added ${instagramCheck.created ?? 0} post(s) · Queue: ${instagramCheck.queued ?? "—"}`}.
+            <span style={{display:"block",fontSize:12,marginTop:5}}>
+              {instagramCheck.dryRun ? "This check did not publish or queue anything." :
+                "Posts accepted into the queue still need Buffer to publish at their scheduled times."}
+            </span>
+          </div>
+        ) : null}
         {vanscoBuffer ? (
           <>
             <div className={`notice ${vanscoBuffer.connected ? "notice--success" : ""}`}>
