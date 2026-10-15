@@ -92,3 +92,13 @@ test("Instagram Buffer access errors distinguish account, channel, queue and pos
  assert.match(status,/stage: instagram\?\.stage/);
  assert.match(dashboard,/Buffer step:/);
 });
+
+test("Instagram create operation selects its own Buffer account rather than the shared OAuth identity",()=>{
+ const runtime=code("../api/_vansco-instagram-runtime.js");
+ const guard=code("../lib/bufferRuntimeGuard.js");
+ assert.match(runtime,/useSuppliedCredential:true/);
+ assert.match(guard,/useSuppliedCredential = false/);
+ assert.match(guard,/channel-specific Buffer credential is required/);
+ assert.match(guard,/source: "personal_access"/);
+ assert.match(guard,/resolveBufferCredential/);
+});
