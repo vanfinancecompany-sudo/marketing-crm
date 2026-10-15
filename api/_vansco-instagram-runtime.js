@@ -22,10 +22,10 @@ async function write(name,value) {
  });
  return value;
 }
-export async function vanscoInstagramConfig({refresh=false}={}){
+export async function vanscoInstagramConfig({refresh=false,onStage}={}){
  const cached=refresh?null:await read("config");
  if(cached?.channelId&&cached?.organizationId)return cached;
- const accounts=await inspectVanscoBufferAccount();
+ const accounts=await inspectVanscoBufferAccount({onStage});
  const matching=accounts.flatMap(organization=>(organization.channels||[])
   .filter(ch=>String(ch.service||"").toLowerCase()==="instagram"
    &&!ch.isDisconnected&&!ch.isLocked
