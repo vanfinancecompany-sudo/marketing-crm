@@ -4582,6 +4582,60 @@ textarea {
   gap: 14px;
 }
 
+/* Distinct business lanes, same live activity cards and click targets. */
+.operations-brand-sections {
+  display: grid;
+  gap: 20px;
+}
+.operations-brand-group {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid #dce4f0;
+  border-radius: 20px;
+  background: #f8fafc;
+}
+.operations-brand-group--van-finance { border-top: 4px solid #df1738; }
+.operations-brand-group--rent2buy { border-top: 4px solid #111827; }
+.operations-brand-group--vansco { border-top: 4px solid #2563eb; }
+.operations-brand-group--shared { border-top: 4px solid #64748b; }
+.operations-brand-group__heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+}
+.operations-brand-group__heading h3 {
+  font-size: 19px;
+  font-weight: 900;
+  color: #172554;
+  margin: 0 0 3px;
+}
+.operations-brand-group__heading p {
+  margin: 0;
+  color: #62748c;
+  font-size: 13px;
+}
+.operations-brand-group__count {
+  font-size: 12px;
+  font-weight: 750;
+  color: #53627a;
+  border: 1px solid #dce4f0;
+  background: #fff;
+  border-radius: 100px;
+  padding: 7px 11px;
+}
+.operations-brand-group .operations-activity-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+}
+@media(max-width: 720px) {
+  .operations-brand-group { padding: 15px; border-radius: 16px; }
+  .operations-brand-group__heading { align-items: flex-start; }
+  .operations-brand-group__heading h3 { font-size: 18px; }
+  .operations-brand-group .operations-activity-grid { grid-template-columns: 1fr; }
+}
+
 .operations-activity-card {
   display: flex;
   min-height: 175px;
