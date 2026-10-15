@@ -63,7 +63,8 @@ export async function createVanscoInstagramPost({config,text,imageUrl,dueAt}){
  });
  const data=await guardedBufferGraphql({
   url:"https://api.buffer.com",token:token(),
-  query:BUFFER_CREATE_POST_MUTATION,variables:{input}
+  query:BUFFER_CREATE_POST_MUTATION,variables:{input},
+  useSuppliedCredential:true,
  });
  return parseBufferCreatePostPayload(data);
 }
