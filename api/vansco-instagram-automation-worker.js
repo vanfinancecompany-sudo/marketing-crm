@@ -69,9 +69,12 @@ export default async function handler(request,response){
  const force=request.method==="POST"&&clean(request.query?.force).toLowerCase()==="true";
  const enabled=clean(process.env.VANSCO_INSTAGRAM_AUTOMATION_ENABLED).toLowerCase()==="true";
  console.info("[Vansco Instagram] Worker invoked", {
-  enabled,dryRun,force,ukDate:londonDateKeyForValue(new Date()),scheduledRunDue:isBufferScheduledRunDue("two-hour")
+  enabled,dryRun,force,ukDate:londonDateKeyForValue(new Date()),scheduledRunDue:isBufferScheduledRunDue("status")
  });
- if(!isBufferScheduledRunDue("two-hour")&&!dryRun&&!force)
+ // The Vercel cron runs hourly in UTC, which shifts against London's local
+ // two-hour windows during BST. Refill at each eligible hourly tick instead.
+ // The six-post batch cap, current stock checks and Buffer quota guard remain.
+ if(!isBufferScheduledRunDue("status")&&!dryRun&&!force)
   return response.status(200).json(bufferDormantPayload({job:"vansco-instagram"}));
  if(!enabled&&!dryRun)return response.status(200).json({ok:true,enabled:false,message:"Vansco Instagram worker built but disabled."});
  const now=Date.now(),today=londonDateKeyForValue(new Date(now));
