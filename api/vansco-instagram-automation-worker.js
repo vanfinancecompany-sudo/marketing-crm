@@ -93,7 +93,7 @@ export default async function handler(request,response){
    if(!verifyBuffer) return response.status(200).json({ok:true,dryRun:true,enabled,target:TARGET,stock:stock.length,
     eligible:vehicles.length,preview});
    stage="discover_instagram_channel";
-   const config=await vanscoInstagramConfig();
+   const config=await vanscoInstagramConfig({onStage:next=>{stage=next;}});
    stage="read_instagram_queue";
    const state=await vanscoInstagramState(config,new Date(now));
    if(state.hasNextPage)throw new Error("Cannot confirm Instagram queue safely: too many posts.");
@@ -107,7 +107,7 @@ export default async function handler(request,response){
  
   }
   stage="discover_instagram_channel";
-  const settings=await vanscoInstagramConfig();
+  const settings=await vanscoInstagramConfig({onStage:next=>{stage=next;}});
   stage="read_instagram_queue";
   const todayState=await vanscoInstagramState(settings,new Date(now));
   if(todayState.hasNextPage)throw new Error("Instagram queue is too large to confirm safe deduplication.");
