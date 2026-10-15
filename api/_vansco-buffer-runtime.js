@@ -488,12 +488,14 @@ function channelIdentity(channel) {
   return `${channel?.name || ""} ${channel?.displayName || ""} ${channel?.externalLink || ""}`.toLowerCase();
 }
 
-export async function inspectVanscoBufferAccount() {
+export async function inspectVanscoBufferAccount({ onStage } = {}) {
+  onStage?.("read_buffer_account");
   const accountPayload = await bufferGraphql(ACCOUNT_QUERY);
   const organizations = accountPayload?.data?.account?.organizations || [];
   const result = [];
 
   for (const organization of organizations) {
+    onStage?.("read_buffer_channels");
     const channelsPayload = await bufferGraphql(CHANNELS_QUERY, {
       organizationId: organization.id,
     });

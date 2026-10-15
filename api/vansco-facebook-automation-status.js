@@ -179,6 +179,7 @@ export default async function handler(request, response) {
             ? Number(instagram.scheduledToday) : null,
         checkedAt: instagram?.checkedAt || null,
         state: instagram?.state || "awaiting_first_run",
+        stage: instagram?.stage || null,
         error: instagram?.error || "",
         channelName: instagram?.channelName || "vansco_limited",
       },

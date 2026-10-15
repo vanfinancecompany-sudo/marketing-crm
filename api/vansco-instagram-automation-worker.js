@@ -78,9 +78,11 @@ export default async function handler(request,response){
   return response.status(200).json(bufferDormantPayload({job:"vansco-instagram"}));
  if(!enabled&&!dryRun)return response.status(200).json({ok:true,enabled:false,message:"Vansco Instagram worker built but disabled."});
  const now=Date.now(),today=londonDateKeyForValue(new Date(now));
+ let stage="load_stock";
  try{
   const stock=await fetchVanscoMetaCatalogue();
   const vehicles=stock.filter(isEligibleVanscoVehicle);
+  stage="load_instagram_history";
   const history=await vanscoInstagramHistory();
   if(dryRun){
    const preview=vehicles
@@ -90,7 +92,9 @@ export default async function handler(request,response){
      photo:vanscoFacebookImageUrls(v)[0]||"",caption:buildVanscoFacebookCaption(v)}));
    if(!verifyBuffer) return response.status(200).json({ok:true,dryRun:true,enabled,target:TARGET,stock:stock.length,
     eligible:vehicles.length,preview});
-   const config=await vanscoInstagramConfig();
+   stage="discover_instagram_channel";
+   const config=await vanscoInstagramConfig({onStage:next=>{stage=next;}});
+   stage="read_instagram_queue";
    const state=await vanscoInstagramState(config,new Date(now));
    if(state.hasNextPage)throw new Error("Cannot confirm Instagram queue safely: too many posts.");
    return response.status(200).json({ok:true,dryRun:true,enabled,target:TARGET,
@@ -102,17 +106,20 @@ export default async function handler(request,response){
     preview:preview.slice(0,3)});
  
   }
-  const settings=await vanscoInstagramConfig();
+  stage="discover_instagram_channel";
+  const settings=await vanscoInstagramConfig({onStage:next=>{stage=next;}});
+  stage="read_instagram_queue";
   const todayState=await vanscoInstagramState(settings,new Date(now));
   if(todayState.hasNextPage)throw new Error("Instagram queue is too large to confirm safe deduplication.");
   const liveUrls=new Set(vehicles.map(v=>v.vehicleUrl));
   const removed=[];
   let todaysQueue=scheduled(todayState.posts);
+  stage="check_queued_stock";
   for(const p of todaysQueue){
    if(removed.length>=MAX_REMOVE_PER_RUN)break;
    const vehicleUrl=extractVanscoVehicleUrl(p.text);
    if(!vehicleUrl||liveUrls.has(vehicleUrl))continue;
-   try{await deleteVanscoBufferPost(p.id);removed.push({postId:p.id,reason:"no_longer_available",vehicleUrl})}
+   try{stage="delete_unavailable_post";await deleteVanscoBufferPost(p.id);stage="check_queued_stock";removed.push({postId:p.id,reason:"no_longer_available",vehicleUrl})}
    catch(e){removed.push({postId:p.id,reason:"delete_failed",error:clean(e.message).slice(0,160)})}
   }
   todaysQueue=todaysQueue.filter(p=>!removed.some(v=>v.postId===p.id&&v.reason!=="delete_failed"));
@@ -121,6 +128,7 @@ export default async function handler(request,response){
   // When today's daypart is over, refill tomorrow rather than leaving the queue empty.
   if(!todaySlots.length)date=vanscoNextDateKey(today);
   const future=date!==today;
+  stage="read_future_queue";
   const state=future?await vanscoInstagramState(settings,new Date(date+"T12:00:00Z")):todayState;
   if(state.hasNextPage)throw new Error("Instagram queue pagination requires attention; refusing to double post.");
   const activePosts=scheduled(state.posts);
@@ -134,6 +142,7 @@ export default async function handler(request,response){
   for(const slot of slots){
    let success=false;
    for(let retry=0;retry<5;retry++){
+    stage="select_stock";
     let candidate=chooseVanscoCandidate({vehicles,lastPostedByKey:history.lastPostedByKey,excludedUrls:[...excluded]});
     if(!candidate)break;
     if(!candidate.branchKey||candidate.branchConflict||!isVanscoVatResolved(candidate)){
@@ -147,6 +156,7 @@ export default async function handler(request,response){
     const media=vanscoFacebookImageUrls(candidate)[0];
     if(!media){excluded.add(candidate.vehicleUrl);continue;}
     try{
+     stage="create_instagram_post";
      const p=await createVanscoInstagramPost({
       config:settings,text:buildVanscoFacebookCaption(candidate),
       imageUrl:media,dueAt:slot.dueAt
@@ -165,6 +175,7 @@ export default async function handler(request,response){
    }
    if(!success)break;
   }
+  stage="save_instagram_history";
   if(created.length)await saveVanscoInstagramHistory(history.lastPostedByKey);
   const result={ok:true,enabled:true,target:TARGET,date:today,scheduleDate:date,
    sentToday:Number(todayState?.limit?.sent||0),
@@ -176,6 +187,7 @@ export default async function handler(request,response){
    channelName:settings.channelName,
    channelId:settings.channelId,
    state:"healthy"};
+  stage="save_instagram_status";
   await saveVanscoInstagramStatus(result);
   console.info("[Vansco Instagram] Queue update",{
    created:result.created, queued:result.queued, sentToday:result.sentToday,
@@ -184,13 +196,13 @@ export default async function handler(request,response){
   return response.status(200).json(result);
  }catch(e){
   if(isBufferRateLimitCooldownError(e)){
-   const state=bufferDeferredPayload(e,{job:"vansco-instagram",enabled});
+   const state=bufferDeferredPayload(e,{job:"vansco-instagram",enabled,stage});
    await saveVanscoInstagramStatus({date:today,target:TARGET,state:"cooldown",...state}).catch(()=>{});
    return response.status(202).json(state);
   }
   const message=clean(e?.message)||"Vansco Instagram worker failed";
-  console.error("[Vansco Instagram] Worker failed",{message:message.slice(0,200)});
-  await saveVanscoInstagramStatus({date:today,target:TARGET,state:"failed",error:message}).catch(()=>{});
-  return response.status(500).json({ok:false,enabled,error:message.slice(0,250)});
+  console.error("[Vansco Instagram] Worker failed",{stage,message:message.slice(0,200)});
+  await saveVanscoInstagramStatus({date:today,target:TARGET,state:"failed",stage,error:message}).catch(()=>{});
+  return response.status(500).json({ok:false,enabled,stage,error:message.slice(0,250)});
  }
 }
