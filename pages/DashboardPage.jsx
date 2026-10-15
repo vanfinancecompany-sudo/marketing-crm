@@ -22,6 +22,7 @@ import {
 } from "../services/marketingAccess.js";
 import AIVisibilityWidget from "../components/AIVisibilityWidget.jsx";
 import Ga4PipelinePanel from "../components/Ga4PipelinePanel.jsx";
+import { groupContentOperationsMetrics } from "../lib/contentOperationsBrandGroups.js";
 
 const WEEKDAYS = [
   "Sunday",
@@ -748,6 +749,8 @@ export default function DashboardPage({ onNavigate }) {
   ]);
 
 
+  const groupedMetrics = useMemo(() => groupContentOperationsMetrics(displayMetrics), [displayMetrics]);
+
   const operationsSummary = useMemo(() => {
     const active = displayMetrics.filter((metric) => Number(metric?.target || 0) > 0);
     const targetTotal = active.reduce((sum, metric) => sum + Number(metric.target || 0), 0);
@@ -831,22 +834,43 @@ export default function DashboardPage({ onNavigate }) {
       </section>
       {error ? <div className="notice notice--error">{error}</div> : null}
       {message ? <div className="notice notice--success">{message}</div> : null}
-      <section className="operations-activity-grid">
-        {displayMetrics.map((metric) => {
-          const destination = ACTIVITY_NAVIGATION[metric.type];
-          return (
-            <ActivityCard
-              key={metric.type}
-              metric={metric}
-              onOpen={destination ? () => onNavigate?.(destination) : undefined}
-            />
-          );
-        })}
-        <GoogleVehicleAdsCard
-          inventory={googleVehicleInventory}
-          onOpen={() => onNavigate?.("Vansco Google Vehicle Ads")}
-        />
-      </section>
+      <div className="operations-brand-sections">
+        {groupedMetrics.map((group) => (
+          <section
+            key={group.key}
+            className={`operations-brand-group operations-brand-group--${group.key}`}
+            aria-labelledby={`operations-brand-${group.key}`}
+          >
+            <div className="operations-brand-group__heading">
+              <div>
+                <h3 id={`operations-brand-${group.key}`}>{group.name}</h3>
+                <p>{group.description}</p>
+              </div>
+              <span className="operations-brand-group__count">
+                {group.metrics.length + (group.key === "vansco" ? 1 : 0)} activities
+              </span>
+            </div>
+            <div className="operations-activity-grid">
+              {group.metrics.map((metric) => {
+                const destination = ACTIVITY_NAVIGATION[metric.type];
+                return (
+                  <ActivityCard
+                    key={metric.type}
+                    metric={metric}
+                    onOpen={destination ? () => onNavigate?.(destination) : undefined}
+                  />
+                );
+              })}
+              {group.key === "vansco" ? (
+                <GoogleVehicleAdsCard
+                  inventory={googleVehicleInventory}
+                  onOpen={() => onNavigate?.("Vansco Google Vehicle Ads")}
+                />
+              ) : null}
+            </div>
+          </section>
+        ))}
+      </div>
       <AIVisibilityWidget onOpen={() => onNavigate?.("AI Visibility")} />
       <Ga4PipelinePanel />
 
