@@ -52,3 +52,17 @@ test("Existing Vansco social Facebook and Google Business are not modified",()=>
  assert.match(dashboard,/vanscoInstagramMetric/);
  assert.match(dashboard,/target = 20/);
 });
+
+test("Instagram operator controls verify channel and queue before any manual refill",()=>{
+ const worker=code("../api/vansco-instagram-automation-worker.js");
+ const dashboard=code("../pages/DashboardPage.jsx");
+ assert.match(worker,/verifyBuffer=dryRun/);
+ assert.match(worker,/const force=request.method==="POST"/);
+ assert.match(worker,/vanscoInstagramConfig\(\)/);
+ assert.match(worker,/vanscoInstagramState\(config,new Date\(now\)\)/);
+ assert.match(dashboard,/CHECK VANSCO INSTAGRAM/);
+ assert.match(dashboard,/QUEUE UP TO 6 INSTAGRAM POSTS/);
+ assert.match(dashboard,/window.confirm\("Queue up to six Vansco Instagram/);
+ assert.match(dashboard,/force=true/);
+ assert.match(dashboard,/dryRun=true&verifyBuffer=true/);
+});
