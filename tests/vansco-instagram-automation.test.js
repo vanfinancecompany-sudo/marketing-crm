@@ -67,7 +67,7 @@ test("Instagram operator controls verify channel and queue before any manual ref
  const dashboard=code("../pages/DashboardPage.jsx");
  assert.match(worker,/verifyBuffer=dryRun/);
  assert.match(worker,/const force=request.method==="POST"/);
- assert.match(worker,/vanscoInstagramConfig\(\)/);
+ assert.match(worker,/vanscoInstagramConfig\(\{onStage:/);
  assert.match(worker,/vanscoInstagramState\(config,new Date\(now\)\)/);
  assert.match(dashboard,/CHECK VANSCO INSTAGRAM/);
  assert.match(dashboard,/QUEUE UP TO 6 INSTAGRAM POSTS/);
