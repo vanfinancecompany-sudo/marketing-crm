@@ -496,7 +496,10 @@ export default function DashboardPage({ onNavigate }) {
         {method:refill ? "POST" : "GET",headers:buildMarketingAccessHeaders(),cache:"no-store"}
       );
       const payload = await result.json().catch(() => ({}));
-      if (!result.ok || !payload.ok) throw new Error(payload.error || "Could not check Vansco Instagram.");
+      if (!result.ok || !payload.ok) throw new Error(
+        (payload.stage ? `Buffer step: ${payload.stage.replaceAll("_"," ")}. ` : "")
+        + (payload.error || "Could not check Vansco Instagram.")
+      );
       if (payload.deferred) {
         throw new Error("Buffer is in API cooldown. The next normal run will retry.");
       }
@@ -664,7 +667,8 @@ export default function DashboardPage({ onNavigate }) {
         data.state==="failed"?"NEEDS ATTENTION":data.state==="cooldown"?"BUFFER COOLDOWN":
         completed>=target?"COMPLETE":`${target-completed} LEFT`,
       statusDetail:recorded?`Buffer-confirmed at ${lastCheck} UK · ${data.scheduledToday||0} scheduled`:
-        (data?.error||"Waiting for first Buffer confirmation")
+        (data?.error ? `${data.stage ? data.stage.replaceAll("_"," ") + ": " : ""}${data.error}` :
+          "Waiting for first Buffer confirmation")
     };
   },[vanscoStatus]);
 
