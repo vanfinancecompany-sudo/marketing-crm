@@ -46,6 +46,7 @@ const ACTIVITY_UNITS = {
   van_finance_instagram_reel: "published",
   rent2buy_facebook_story: "posted",
   vansco_facebook_post: "posted",
+  vansco_instagram_post: "posted",
   vansco_facebook_story: "posted",
   vansco_333_google_business_post: "posted",
   vansco_airport_google_business_post: "posted",
@@ -620,6 +621,27 @@ export default function DashboardPage({ onNavigate }) {
     };
   }, [vanscoStatus, vanscoStatusBusy, vanscoStatusError, overview]);
 
+  const vanscoInstagramMetric = useMemo(() => {
+    const data = vanscoStatus?.instagram;
+    const recorded = Number.isFinite(Number(data?.sentToday)) && data?.sentToday !== null;
+    const completed = recorded ? Math.max(0, Number(data.sentToday)) : 0;
+    const target = 20;
+    const lastCheck = data?.checkedAt ? new Date(data.checkedAt).toLocaleTimeString("en-GB",{
+      timeZone:"Europe/London",hour:"2-digit",minute:"2-digit"
+    }) : "";
+    return {
+      type:"vansco_instagram_post",label:"Vansco Instagram posts",target,completed,
+      displayCompleted:recorded?completed:"—",
+      remaining:Math.max(0,target-completed),
+      percentage:recorded?Math.min(100,Math.round(completed/target*100)):0,
+      statusLabel:!data || data.state==="awaiting_first_run"?"CHECKING":
+        data.state==="failed"?"NEEDS ATTENTION":data.state==="cooldown"?"BUFFER COOLDOWN":
+        completed>=target?"COMPLETE":`${target-completed} LEFT`,
+      statusDetail:recorded?`Buffer-confirmed at ${lastCheck} UK · ${data.scheduledToday||0} scheduled`:
+        (data?.error||"Waiting for first Buffer confirmation")
+    };
+  },[vanscoStatus]);
+
   const vanscoStoryMetric = useMemo(() => {
     const stored = baseMetric("vansco_facebook_story");
     const liveAvailable = vanscoStatus?.buffer?.sentCountConfirmed === true && Boolean(vanscoStatus?.stories);
@@ -708,10 +730,11 @@ export default function DashboardPage({ onNavigate }) {
       ...facebookStoryMetrics.map((metric) => [metric.type, metric]),
       ...instagramMetrics.map((metric) => [metric.type, metric]),
       [vanscoMetric.type, vanscoMetric],
+      [vanscoInstagramMetric.type, vanscoInstagramMetric],
       [vanscoStoryMetric.type, vanscoStoryMetric],
       ...vanscoGoogleMetrics.map((metric) => [metric.type, metric]),
     ]);
-    return DAILY_ACTIVITY_TYPES
+    return [...DAILY_ACTIVITY_TYPES, "vansco_instagram_post"]
       .map((type) => live.get(type) || overview?.day?.metrics?.[type])
       .filter(Boolean);
   }, [
@@ -719,6 +742,7 @@ export default function DashboardPage({ onNavigate }) {
     facebookStoryMetrics,
     instagramMetrics,
     vanscoMetric,
+    vanscoInstagramMetric,
     vanscoStoryMetric,
     vanscoGoogleMetrics,
   ]);

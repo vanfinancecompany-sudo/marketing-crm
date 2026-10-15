@@ -1,4 +1,5 @@
 import { loadVanscoPublishedLedger } from "../lib/vanscoPublishedLedger.js";
+import { vanscoInstagramStatus } from "./_vansco-instagram-runtime.js";
 import {
   VANSCO_FACEBOOK_STORIES_PER_DAY,
   extractVanscoVehicleUrl,
@@ -88,7 +89,7 @@ export default async function handler(request, response) {
   try {
     const enabled = String(process.env.VANSCO_FACEBOOK_AUTOMATION_ENABLED || "").toLowerCase() === "true";
     const dateKey = londonDateKey();
-    const [status, liveSnapshot, storyStatus, googleLastRun, ledger] = await Promise.all([
+    const [status, liveSnapshot, storyStatus, googleLastRun, ledger, instagram] = await Promise.all([
       loadVanscoAutomationStatus(),
       loadVanscoCombinedStatusSnapshot(),
       loadVanscoFacebookStoryStatus().catch(() => null),
@@ -97,6 +98,7 @@ export default async function handler(request, response) {
         console.warn("[vansco-facebook-status] Buffer publication ledger unavailable", { message: String(error?.message || error) });
         return null;
       }),
+      vanscoInstagramStatus().catch(() => null),
     ]);
     const config = liveSnapshot?.facebook?.config || {};
     const facebookLimit = liveSnapshot?.facebook?.limit || null;
@@ -164,6 +166,21 @@ export default async function handler(request, response) {
         providerSentToday: facebookLimit?.sent ?? 0,
         scheduledToday: queuedFacebookPosts.filter((post) => !isVanscoFacebookStory(post)).length,
         queueCount: queuedFacebookPosts.filter((post) => !isVanscoFacebookStory(post)).length,
+      },
+      instagram: {
+        target: 20,
+        connected: Boolean(instagram?.channelId),
+        date: instagram?.date || null,
+        sentToday: instagram?.date === dateKey
+          && Number.isFinite(Number(instagram?.sentToday))
+            ? Number(instagram.sentToday) : null,
+        scheduledToday: instagram?.date === dateKey
+          && Number.isFinite(Number(instagram?.scheduledToday))
+            ? Number(instagram.scheduledToday) : null,
+        checkedAt: instagram?.checkedAt || null,
+        state: instagram?.state || "awaiting_first_run",
+        error: instagram?.error || "",
+        channelName: instagram?.channelName || "vansco_limited",
       },
       stories: {
         target: VANSCO_FACEBOOK_STORIES_PER_DAY,

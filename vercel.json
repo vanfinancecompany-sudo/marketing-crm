@@ -67,6 +67,10 @@
       "schedule": "31 6-22 * * *"
     },
     {
+      "path": "/api/vansco-instagram-automation-worker",
+      "schedule": "15 6-22 * * *"
+    },
+    {
       "path": "/api/vansco-google-business-automation-worker",
       "schedule": "51 6-22 * * *"
     }
@@ -149,6 +153,9 @@
     },
     "api/vansco-facebook-automation-worker.js": {
       "maxDuration": 300
+    },
+    "api/vansco-instagram-automation-worker.js": {
+      "maxDuration": 180
     },
     "api/vansco-google-business-automation-worker.js": {
       "maxDuration": 300
