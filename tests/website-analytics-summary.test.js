@@ -5,7 +5,8 @@ import { addDays, londonMidnightUtcIso, summaryFrom } from '../api/website-analy
 import { mapExitPages } from '../api/website-analytics-details.js';
 import { addDays as addGa4Days, summaryFrom as ga4SummaryFrom } from '../api/ga4-website-analytics.js';
 import { applicationSessionCounts, uniqueSessionCount } from '../api/_live-application-completions.js';
-import { withLiveApplicationCompletions } from '../api/ga4-pipeline-summary.js';
+import { withLiveApplicationCompletions, withCrmApplicationOpportunities } from '../api/ga4-pipeline-summary.js';
+import { groupApplicationOpportunities, buildApplicationOpportunitySummary } from '../api/_crm-application-opportunities.js';
 
 describe('Website Analytics fresh data', () => {
   it('builds rolling date keys safely', () => {
@@ -167,7 +168,88 @@ describe('Website Analytics fresh data', () => {
     assert.match(source, /import Ga4PipelinePanel from "\.\.\/components\/Ga4PipelinePanel\.jsx"/);
     assert.match(source, /<Ga4PipelinePanel \/>/);
     assert.match(panel, /applicationStartSource==='first_party_live'/);
-    assert.match(panel, /Unique app starts/);
-    assert.match(panel, /GA4 logged/);
+    assert.match(panel, /Applications received/);
+    assert.match(panel, /CRM-verified/);
+  });
+});
+
+describe('CRM-confirmed applications, 60-minute reporting rule', () => {
+  const lead = (id, created_at, options = {}) => ({
+    id, created_at, pipeline: 'vanFinance', source: 'Wix Finance Application',
+    email: 'buyer@example.com', name: 'Alex Buyer', phone: '07700 900123', ...options,
+  });
+  it('uses the first submission as the anchor rather than extending the duplicate window forever', () => {
+    const records = [
+      lead(1, '2026-10-16T10:00:00Z'),
+      lead(2, '2026-10-16T10:59:00Z'),
+      lead(3, '2026-10-16T11:01:00Z'),
+    ];
+    const opportunities = groupApplicationOpportunities(records);
+    assert.equal(opportunities.length, 2);
+    assert.equal(opportunities[0].rawSubmissions, 2);
+    assert.equal(opportunities[1].rawSubmissions, 1);
+  });
+  it('matches applicant names with shared emails and can fall back to phone and name', () => {
+    const opportunities = groupApplicationOpportunities([
+      lead(1, '2026-10-16T10:00:00Z'),
+      lead(2, '2026-10-16T10:02:00Z', { email: 'different@example.com' }),
+      lead(3, '2026-10-16T10:03:00Z', { name: 'Different Buyer', phone: '07700 900555' }),
+    ]);
+    assert.equal(opportunities.length, 2);
+    assert.equal(opportunities[0].rawSubmissions, 2);
+  });
+  it('does not conflate finance with Rent2Buy or silently count manually created leads', () => {
+    const opportunities = groupApplicationOpportunities([
+      lead(1, '2026-10-16T10:00:00Z'),
+      lead(2, '2026-10-16T10:02:00Z', { source: 'Rent2BuyVans.co.uk', pipeline: 'rent2buy' }),
+      lead(3, '2026-10-16T10:05:00Z', { source: 'Manual' }),
+      lead(4, '2026-10-16T10:06:00Z', { source: 'VFC Website Reservation' }),
+    ]);
+    assert.equal(opportunities.length, 2);
+  });
+  it('retains a reapplication months later as a new opportunity', () => {
+    const opportunities = groupApplicationOpportunities([
+      lead(1, '2026-08-16T10:00:00Z'),
+      lead(2, '2026-10-16T10:00:00Z'),
+    ]);
+    assert.equal(opportunities.length, 2);
+  });
+  it('does not double count a submission after midnight when the first was before midnight', () => {
+    const rows = [
+      lead(1, '2026-10-16T22:55:00Z'),
+      lead(2, '2026-10-16T23:03:00Z'),
+    ];
+    const stats = buildApplicationOpportunitySummary(rows, { now: new Date('2026-10-16T23:09:00Z') });
+    assert.equal(stats.date, '2026-10-17');
+    assert.equal(stats.periods.today.total, 0);
+    assert.equal(stats.periods.sevenDays.total, 1);
+    assert.equal(stats.periods.sevenDays.duplicates, 1);
+  });
+  it('counts actual CRM source records and repeats without exposing applicant data', () => {
+    const rows = [
+      lead(1, '2026-10-16T12:00:00Z'),
+      lead(2, '2026-10-16T12:10:00Z'),
+      lead(3, '2026-10-16T14:00:00Z', { source: 'VanFinance.co', email: 'another@example.com' }),
+      lead(4, '2026-10-16T14:05:00Z', { source: 'Rent2BuyVans.co.uk', pipeline: 'rent2buy' }),
+    ];
+    const stats = buildApplicationOpportunitySummary(rows, { now: new Date('2026-10-16T22:00:00Z') });
+    assert.equal(stats.periods.today.total, 3);
+    assert.equal(stats.periods.today.finance, 2);
+    assert.equal(stats.periods.today.rent2buy, 1);
+    assert.equal(stats.periods.today.sites.vanFinance, 1);
+    assert.equal(stats.periods.today.sites.vanfinanceCo, 1);
+    assert.equal(stats.periods.today.duplicates, 1);
+    assert.doesNotMatch(JSON.stringify(stats), /buyer@example.com/);
+  });
+  it('returns unknown, not a fabricated zero, if CRM counts are unavailable', () => {
+    const summary = {sites:[{key:'vanFinance',configured:true}]};
+    const unavailable = withCrmApplicationOpportunities(summary, null);
+    assert.equal(unavailable.sites[0].crmConfirmedApplicationsToday, null);
+    assert.equal(unavailable.applicationStatsStatus,'unavailable');
+    const verified = withCrmApplicationOpportunities(summary, {
+      periods: {today: {sites:{vanFinance:7}},sevenDays:{sites:{vanFinance:45}},twentyEightDays:{sites:{vanFinance:160}}},
+    });
+    assert.equal(verified.sites[0].crmConfirmedApplicationsToday, 7);
+    assert.equal(verified.sites[0].crmConfirmedApplications7Days, 45);
   });
 });
