@@ -77,7 +77,8 @@ describe('true finance application start analytics', () => {
     assert.match(endpoint, /A little more about you/);
     assert.doesNotMatch(endpoint, /applicationType|application_type|Limited Company|Self Employed/);
     assert.match(panel, /page reaches/);
-    assert.match(panel, /Unique app starts/);
+    assert.match(panel, /Applications received/);
+    assert.match(panel, /deliberate starts/);
     assert.match(liveFunnel, /A start begins when the customer chooses an application type/);
   });
 });
