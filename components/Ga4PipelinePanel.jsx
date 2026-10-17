@@ -25,7 +25,7 @@ function SiteCard({site}){
   {configured? <>
    <div className="ga4-pipeline-metrics">
     <div><strong>{site.usersToday>0?formatNumber(site.usersToday):'–'}</strong><span>Users today · provisional</span><em>{site.completedDayComparisonReady?`${changeLabel(site.usersVsSevenDayPct)} · yesterday ${formatNumber(site.usersYesterday)} users`:'GA4 may still be processing · no traffic-drop verdict'}</em></div>
-    <div><strong>{site.sessionsToday>0?formatNumber(site.sessionsToday):'–'}</strong><span>Sessions today · provisional</span><em>{site.pageViewsToday>0?`${formatNumber(site.pageViewsToday)} page views`:'Today's GA4 figures may be incomplete'}</em></div>
+    <div><strong>{site.sessionsToday>0?formatNumber(site.sessionsToday):'–'}</strong><span>Sessions today · provisional</span><em>{site.pageViewsToday>0?`${formatNumber(site.pageViewsToday)} page views` : "Today's GA4 figures may be incomplete"}</em></div>
     <div><strong>{liveApplication?formatNumber(applicationVisits):'–'}</strong><span>{liveApplication?applicationVisitLabel:'Application activity unavailable'}</span><em>{applicationDetail}</em></div>
     <div><strong>{receivedVerified?formatNumber(received):'–'}</strong><span>Applications received</span><em>{receivedVerified?'CRM-verified · repeat submissions within 60 minutes counted once':'CRM application figures temporarily unavailable'}</em></div>
    </div>
