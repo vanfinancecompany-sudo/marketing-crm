@@ -326,6 +326,9 @@ export async function inspectStoryImage(url, request = fetch) {
       redirect: "follow",
       signal: AbortSignal.timeout(STORY_IMAGE_PREFLIGHT_TIMEOUT_MS),
     });
+    // The range probe needs headers only. Release a streamed response even
+    // when a CDN ignores Range, without downloading full-resolution artwork.
+    if (ranged.body?.cancel) await ranged.body.cancel().catch(() => {});
     if (!ranged.ok) return { ok: false, reason: "range_http_error" };
     const contentRange = String(ranged.headers?.get?.("content-range") || "");
     const fullSize = contentRange.match(/\/(\d+)\s*$/)?.[1];
