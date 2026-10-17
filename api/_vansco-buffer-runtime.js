@@ -166,7 +166,7 @@ const ALL_CHANNEL_STATUS_QUERY = `
         organizationId: $organizationId
         sort: [{ field: createdAt, direction: desc }]
         filter: {
-          status: [sent]
+          status: [sent, error]
           channelIds: $facebookIds
         }
       }
@@ -181,6 +181,7 @@ const ALL_CHANNEL_STATUS_QUERY = `
           dueAt
           sentAt
           channelId
+          error { message supportUrl }
           metadata {
             ... on FacebookPostMetadata {
               type
@@ -201,7 +202,7 @@ const ALL_CHANNEL_STATUS_QUERY = `
         organizationId: $organizationId
         sort: [{ field: createdAt, direction: desc }]
         filter: {
-          status: [sent]
+          status: [sent, error]
           channelIds: $vansco333Ids
         }
       }
@@ -216,6 +217,7 @@ const ALL_CHANNEL_STATUS_QUERY = `
           dueAt
           sentAt
           channelId
+          error { message supportUrl }
           metadata {
             ... on FacebookPostMetadata {
               type
@@ -236,7 +238,7 @@ const ALL_CHANNEL_STATUS_QUERY = `
         organizationId: $organizationId
         sort: [{ field: createdAt, direction: desc }]
         filter: {
-          status: [sent]
+          status: [sent, error]
           channelIds: $airportIds
         }
       }
@@ -251,6 +253,7 @@ const ALL_CHANNEL_STATUS_QUERY = `
           dueAt
           sentAt
           channelId
+          error { message supportUrl }
           metadata {
             ... on FacebookPostMetadata {
               type
@@ -271,7 +274,7 @@ const ALL_CHANNEL_STATUS_QUERY = `
         organizationId: $organizationId
         sort: [{ field: createdAt, direction: desc }]
         filter: {
-          status: [sent]
+          status: [sent, error]
           channelIds: $newForestIds
         }
       }
@@ -286,6 +289,7 @@ const ALL_CHANNEL_STATUS_QUERY = `
           dueAt
           sentAt
           channelId
+          error { message supportUrl }
           metadata {
             ... on FacebookPostMetadata {
               type
@@ -321,6 +325,47 @@ export function vanscoSentPostsByChannel(payload = {}, facebookChannelId = "", g
     },
     hasNextPage: ["facebookSent", "vansco333Sent", "airportSent", "newForestSent"]
       .some((alias) => Boolean(source?.[alias]?.pageInfo?.hasNextPage)),
+  };
+}
+
+// A failed Buffer post is not the same thing as a failed CRM/API worker.
+// Extract the platform's own error message from the same four channel-specific
+// GraphQL aliases already used by the status snapshot. No extra Buffer request.
+export function vanscoFailedPostsByChannel(payload = {}, facebookChannelId = "", googleBranches = {}, dateKey = "") {
+  const aliases = {
+    facebook: ["facebookSent", facebookChannelId],
+    vansco333: ["vansco333Sent", googleBranches.vansco333?.channelId],
+    southamptonAirport: ["airportSent", googleBranches.southamptonAirport?.channelId],
+    newForest: ["newForestSent", googleBranches.newForest?.channelId],
+  };
+  const relevantFailures = ([alias, channelId]) => {
+    if (!channelId) return [];
+    return (payload?.data?.[alias]?.edges || [])
+      .map((edge) => edge?.node)
+      .filter((post) =>
+        String(post?.channelId || "") === String(channelId)
+        && String(post?.status || "").toLowerCase() === "error")
+      .filter((post) => {
+        if (!dateKey) return true;
+        const date = new Date(post?.dueAt || post?.createdAt || 0);
+        return !Number.isNaN(date.getTime()) && londonDateKey(date) === dateKey;
+      })
+      .map((post) => ({
+        postId: String(post.id || ""),
+        dueAt: post.dueAt || null,
+        message: String(post.error?.message || "Buffer did not provide a publishing reason.").slice(0, 350),
+        supportUrl: /^https:\/\//i.test(String(post.error?.supportUrl || ""))
+          ? String(post.error.supportUrl).slice(0, 1000) : null,
+      }))
+      .slice(0, 35);
+  };
+  return {
+    facebook: relevantFailures(aliases.facebook),
+    googleBusiness: {
+      vansco333: relevantFailures(aliases.vansco333),
+      southamptonAirport: relevantFailures(aliases.southamptonAirport),
+      newForest: relevantFailures(aliases.newForest),
+    },
   };
 }
 
@@ -778,6 +823,12 @@ export async function loadVanscoCombinedStatusSnapshot({ force = false } = {}) {
       ? payload.data.dailyPostingLimits
       : [];
     const posts = vanscoSentPostsByChannel(payload, facebookConfig.channelId, googleConfig.branches);
+    const failedPosts = vanscoFailedPostsByChannel(payload, facebookConfig.channelId, googleConfig.branches, dateKey);
+    const failedPostCounts = {
+      facebook: failedPosts.facebook.length,
+      ...Object.fromEntries(Object.entries(failedPosts.googleBusiness)
+        .map(([branch, items]) => [branch, items.length])),
+    };
     const limitByChannel = Object.fromEntries(
       limits.map((item) => [String(item?.channelId || ""), item]),
     );
@@ -812,8 +863,32 @@ export async function loadVanscoCombinedStatusSnapshot({ force = false } = {}) {
         ),
       },
       hasNextPage: posts.hasNextPage,
+      // Read-only diagnostic data. Existing 'sent' lists remain filtered,
+      // so publishing totals are never inflated by error-state posts.
+      failedPosts,
+      failedPostCounts,
+      failedPostCountsComplete: !posts.hasNextPage,
     };
     await writeBlobJson(LIVE_STATUS_SNAPSHOT_PATH, snapshot);
+    if (Object.values(failedPostCounts).some((count) => count > 0)) {
+      const examples = [
+        ...failedPosts.facebook.map((post) => ({ ...post, channel: "facebook" })),
+        ...Object.entries(failedPosts.googleBusiness).flatMap(([branch, entries]) =>
+          entries.map((post) => ({ ...post, channel: branch }))),
+      ].slice(0, 12).map(({ channel, message, postId }) => ({
+        channel,
+        postId,
+        // Error messages are intended for display. Strip incidental URLs/email addresses.
+        reason: message.replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, "[redacted]").slice(0, 180),
+      }));
+      console.warn("[vansco-buffer] failed published posts detected", {
+        date: dateKey,
+        counts: failedPostCounts,
+        examples,
+        incomplete: posts.hasNextPage,
+        // No captions, image links, number plates or API credentials logged.
+      });
+    }
     return snapshot;
   })();
 

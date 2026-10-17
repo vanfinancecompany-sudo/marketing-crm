@@ -50,6 +50,6 @@ test("GraphQL monitoring asks for published data per channel rather than a share
   for (const name of ["facebookSent", "vansco333Sent", "airportSent", "newForestSent"]) {
     assert.match(source, new RegExp(name + ": posts\\("));
   }
-  assert.match(source, /filter: \{\s*status: \[sent\]/);
+  // The existing query now reads sent and failed posts in one call, while the\n  // published tally still filters for status=sent only.\n  assert.match(source, /filter: \{\s*status: \[sent, error\]/);
   assert.match(source, /vanscoSentPostsByChannel\(payload, facebookConfig.channelId, googleConfig.branches\)/);
 });
