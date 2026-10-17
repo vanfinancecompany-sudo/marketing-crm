@@ -476,6 +476,26 @@ export default async function handler(request, response) {
         : first;
     }
 
+    // Summarise each scheduled refill without another Buffer API call or personal data.
+    // This distinguishes a full queue or unusable image from a successful reservation.
+    const refillDiagnostics = Object.fromEntries(PRODUCTS.map((productKey) => {
+      const result = results[productKey] || {};
+      return [productKey, {
+        outcome: result.created ? "created" : result.error ? "error" : result.skipped || "unknown",
+        created: result.createdCount || (result.created ? 1 : 0),
+        existing: Number.isFinite(result.existing) ? result.existing : null,
+        target: storyTargets[productKey],
+        queued: Number.isFinite(result.queued) ? result.queued : null,
+        imagesChecked: Number.isFinite(result.checked) ? result.checked : null,
+        unsuitableImages: Number.isFinite(result.oversizedOrUnverified) ? result.oversizedOrUnverified : null,
+        bufferRejected: Number.isFinite(result.bufferRejected) ? result.bufferRejected : null,
+      }];
+    }));
+    console.info("[buffer-facebook-story-automation] Story refill diagnostics", {
+      date: dateKey,
+      products: refillDiagnostics,
+    });
+
     response.status(200).json({
       ok: true,
       date: dateKey,
