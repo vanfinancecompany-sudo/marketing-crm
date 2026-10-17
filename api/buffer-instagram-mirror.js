@@ -27,11 +27,13 @@ import {
   isBufferRateLimitCooldownError,
 } from "../lib/bufferRuntimeGuard.js";
 import { selectVanFinanceInstagramMirrors } from "../lib/bufferInstagramMirror.js";
+import { loadReviewedFacebookSecondaryImages } from "../lib/facebookApprovedImageFallback.js";
 import { mapFinanceVehicleRow } from "../services/marketingVehicleContract.js";
 
 const ACCESS_HEADER = "x-marketing-customer-database-key";
 const CHANNEL_QUEUE_LIMIT = 40;
 const MEDIA_PREFLIGHT_TIMEOUT_MS = 8000;
+const INSTAGRAM_IMAGE_LIMIT_BYTES = 8_000_000;
 const REEL_LOOKBACK_MS = 3 * 24 * 60 * 60 * 1000;
 
 function errorText(value, fallback = "Instagram mirror failed.") {
@@ -189,7 +191,7 @@ async function resolveOriginalMediaUrl(supabase, mirror) {
     : resolveOriginalImageUrl(supabase, mirror.registration);
 }
 
-async function preflightPublicMedia(url, mediaKind) {
+export async function preflightPublicMedia(url, mediaKind, request = fetch) {
   const value = String(url || "").trim();
   if (!/^https:\/\//i.test(value)) throw new Error("Instagram media URL must be public HTTPS.");
   const expectedPrefix = mediaKind === "video" ? "video/" : "image/";
@@ -197,7 +199,7 @@ async function preflightPublicMedia(url, mediaKind) {
   const timeout = setTimeout(() => controller.abort(), MEDIA_PREFLIGHT_TIMEOUT_MS);
 
   try {
-    let response = await fetch(value, {
+    let response = await request(value, {
       method: "HEAD",
       redirect: "follow",
       cache: "no-store",
@@ -206,7 +208,7 @@ async function preflightPublicMedia(url, mediaKind) {
     let contentType = String(response.headers.get("content-type") || "").toLowerCase();
 
     if (!response.ok || !contentType.startsWith(expectedPrefix)) {
-      response = await fetch(value, {
+      response = await request(value, {
         method: "GET",
         headers: { Range: "bytes=0-0" },
         redirect: "follow",
@@ -221,6 +223,18 @@ async function preflightPublicMedia(url, mediaKind) {
     }
     if (!contentType.startsWith(expectedPrefix)) {
       throw new Error(`Media preflight returned ${contentType || "an unknown content type"}, expected ${expectedPrefix}`);
+    }
+    // Buffer applies an 8.0 MB (decimal) limit to Instagram images.
+    // Stop known oversized files before sending an avoidable Buffer mutation.
+    // Range responses carry the full resource size in Content-Range.
+    if (mediaKind !== "video") {
+      const range = String(response.headers.get("content-range") || "");
+      const rangedSize = Number(range.match(/\/(\d+)$/)?.[1]);
+      const headerSize = Number(response.headers.get("content-length"));
+      const size = Number.isFinite(rangedSize) && rangedSize > 0 ? rangedSize : headerSize;
+      if (Number.isFinite(size) && size > INSTAGRAM_IMAGE_LIMIT_BYTES) {
+        throw new Error(`Instagram image exceeds Buffer's 8.0 MB limit (${size} bytes).`);
+      }
     }
     return { url: value, contentType, status: response.status };
   } catch (error) {
@@ -252,6 +266,30 @@ async function resolveUsableMedia(supabase, mirror) {
       };
     } catch (error) {
       failures.push(errorText(error, "Media preflight failed."));
+    }
+  }
+
+  // Image posts only: recover using this exact registration's reviewed gallery.
+  // Never borrow another vehicle's image and never touch the reel/video route.
+  if (mirror.mediaKind === "image") {
+    let reviewed = [];
+    try {
+      reviewed = await loadReviewedFacebookSecondaryImages(supabase, "vanFinance", mirror.registration);
+    } catch (error) {
+      console.warn("[buffer-instagram-mirror] approved gallery unavailable", {
+        registration: mirror.registration,
+        message: errorText(error, "Approved gallery lookup failed."),
+      });
+    }
+    for (const candidate of reviewed.filter((value) => !candidates.includes(value))) {
+      try {
+        return {
+          ...await preflightPublicMedia(candidate, "image"),
+          source: "reviewed_vehicle_gallery",
+        };
+      } catch (error) {
+        failures.push(errorText(error, "Approved gallery image failed preflight."));
+      }
     }
   }
 
