@@ -13,10 +13,19 @@ import {
 } from "../lib/vanscoFacebookAutomation.js";
 import { fetchVanscoMetaCatalogue } from "./_vansco-facebook-source.js";
 import {
+  activeVanscoMediaQuarantine,
+  preflightVanscoFacebookImage,
+  quarantineVanscoVehicle,
+  VANSCO_MEDIA_PREFLIGHT_FAILURE_MS,
+} from "../lib/vanscoFailedMediaRecovery.js";
+import {
   createVanscoGoogleBusinessPost,
   loadVanscoBufferState,
   loadVanscoGoogleBusinessConfig,
   loadVanscoGoogleBusinessHistory,
+  loadVanscoGoogleBusinessMediaQuarantine,
+  saveVanscoGoogleBusinessMediaQuarantine,
+  vanscoBufferCompatibleImageUrl,
   saveVanscoGoogleBusinessAutomationStatus,
   saveVanscoGoogleBusinessHistory,
 } from "./_vansco-buffer-runtime.js";
@@ -209,6 +218,10 @@ export default async function handler(request, response) {
     const held = [];
     const branchResults = {};
     let historyChanged = false;
+    const previousMediaQuarantine = await loadVanscoGoogleBusinessMediaQuarantine();
+    let mediaQuarantine = activeVanscoMediaQuarantine(previousMediaQuarantine, now);
+    let mediaQuarantineChanged = JSON.stringify(mediaQuarantine) !== JSON.stringify(previousMediaQuarantine);
+    const MAX_GBP_IMAGE_CHECKS_PER_BRANCH = 12;
 
     for (const branchKey of BRANCH_ORDER) {
       try {
@@ -260,19 +273,42 @@ export default async function handler(request, response) {
       const excludedRegistrations = queuedRegistrations(state.posts, scheduleDateKey);
       const lastPostedByKey = history.lastPostedByBranch?.[branchKey] || {};
       const branchCreated = [];
+      let checkedImages = 0;
 
       for (const slot of slots) {
         let postCreated = false;
         for (let attempt = 0; attempt < 30; attempt += 1) {
           const vehicle = chooseBranchCandidate({
-            vehicles: eligible,
+            vehicles: eligible.filter((item) => !mediaQuarantine[item.vehicleUrl]),
             branchKey,
             lastPostedByKey,
             excludedRegistrations,
           });
-          if (!vehicle) break;
+          if (!vehicle || checkedImages >= MAX_GBP_IMAGE_CHECKS_PER_BRANCH) break;
 
           const registration = registrationKey(vehicle.registration);
+          // Validate the image *before* creating a new Buffer post, so
+          // unreachable stock URLs cannot generate another failed publication.
+          checkedImages++;
+          const checked = await preflightVanscoFacebookImage(
+            vanscoBufferCompatibleImageUrl(vehicle.imageUrl),
+          );
+          if (!checked.ok) {
+            mediaQuarantine = quarantineVanscoVehicle(mediaQuarantine, vehicle.vehicleUrl, {
+              periodMs: VANSCO_MEDIA_PREFLIGHT_FAILURE_MS,
+              reason: checked.reason,
+            });
+            mediaQuarantineChanged = true;
+            excludedRegistrations.add(registration);
+            held.push({
+              branchKey,
+              vehicleKey: vehicle.vehicleKey,
+              registration,
+              reason: "image_unavailable",
+              detail: checked.reason,
+            });
+            continue;
+          }
           try {
             const post = await createVanscoGoogleBusinessPost({
               config: channelConfig,
@@ -335,6 +371,7 @@ export default async function handler(request, response) {
         scheduled: providerScheduled,
         queueCount: state.posts.length + branchCreated.length,
         created: branchCreated.length,
+        checkedImages,
         target: VANSCO_GOOGLE_BUSINESS_POSTS_PER_DAY,
         eligibleVehicles: branchVehicleCounts[branchKey] || 0,
       };
@@ -367,6 +404,9 @@ export default async function handler(request, response) {
 
     if (historyChanged) {
       await saveVanscoGoogleBusinessHistory(history.lastPostedByBranch);
+    }
+    if (mediaQuarantineChanged) {
+      await saveVanscoGoogleBusinessMediaQuarantine(activeVanscoMediaQuarantine(mediaQuarantine));
     }
 
     const failedBranches = Object.entries(branchResults)

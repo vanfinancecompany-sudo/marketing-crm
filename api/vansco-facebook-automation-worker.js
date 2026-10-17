@@ -21,6 +21,14 @@ import {
   fetchVanscoMetaCatalogue,
 } from "./_vansco-facebook-source.js";
 import {
+  activeVanscoMediaQuarantine,
+  isVanscoMediaUrlFailure,
+  preflightVanscoFacebookImages,
+  quarantineFromFailedVanscoFacebookPosts,
+  quarantineVanscoVehicle,
+  VANSCO_MEDIA_PREFLIGHT_FAILURE_MS,
+} from "../lib/vanscoFailedMediaRecovery.js";
+import {
   createVanscoBufferPost,
   deleteVanscoBufferPost,
   isVanscoFacebookStory,
@@ -28,6 +36,9 @@ import {
   loadVanscoBufferState,
   loadVanscoFacebookActivity,
   loadVanscoPostingHistory,
+  loadVanscoFacebookMediaQuarantine,
+  saveVanscoFacebookMediaQuarantine,
+  vanscoBufferCompatibleImageUrl,
   saveVanscoAutomationStatus,
   saveVanscoPostingHistory,
 } from "./_vansco-buffer-runtime.js";
@@ -37,6 +48,7 @@ export const config = { maxDuration: 300 };
 const ACCESS_HEADER = "x-marketing-customer-database-key";
 const MIN_SCHEDULE_LEAD_MS = 8 * 60 * 1000;
 const MAX_BRANCH_RESOLUTION_ATTEMPTS = 30;
+const MAX_IMAGE_CHECKS_PER_RUN = 15;
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -50,7 +62,7 @@ export function vanscoRecoverableBufferPostError(error) {
   }
   if (
     /compatible jpeg\/png image|unsupported.*(?:image|media)|invalid.*(?:image|media)|(?:image|media).*format/i
-      .test(message)
+      .test(message) || isVanscoMediaUrlFailure(message)
   ) {
     return "buffer_media_rejected";
   }
@@ -344,10 +356,20 @@ export default async function handler(request, response) {
 
     const bufferConfig = await loadVanscoBufferConfig();
     const now = Date.now();
-    const [currentState, activity] = await Promise.all([
+    const [currentState, activity, priorMediaQuarantine] = await Promise.all([
       loadVanscoBufferState(bufferConfig, `${dateKey}T12:00:00.000Z`),
       loadVanscoFacebookActivity(bufferConfig),
+      loadVanscoFacebookMediaQuarantine(),
     ]);
+    // Buffer can accept a scheduled post and reject its image hours later.
+    // Use that published failure evidence to remove the exact stock vehicle
+    // from the next candidate rotation, without touching the failed Buffer post.
+    const recoveredMedia = quarantineFromFailedVanscoFacebookPosts(
+      priorMediaQuarantine, activity.failedPosts, eligible, Date.now(),
+    );
+    let mediaQuarantine = recoveredMedia.quarantine;
+    let mediaQuarantineChanged = JSON.stringify(priorMediaQuarantine) !== JSON.stringify(mediaQuarantine);
+    let checkedVehicles = 0;
     const currentStories = currentState.posts.filter(isVanscoFacebookStory);
     const currentNormalPosts = currentState.posts.filter((post) => !isVanscoFacebookStory(post));
     const pruned = await pruneStaleScheduledPosts(currentNormalPosts, liveVehicles);
@@ -403,9 +425,10 @@ export default async function handler(request, response) {
     }).slice(0, capacity);
 
     const history = await loadVanscoPostingHistory();
-    const excludedUrls = new Set(
-      posts.map((post) => extractVanscoVehicleUrl(post?.text)).filter(Boolean),
-    );
+    const excludedUrls = new Set([
+      ...posts.map((post) => extractVanscoVehicleUrl(post?.text)).filter(Boolean),
+      ...Object.keys(mediaQuarantine),
+    ]);
     const created = [];
     const held = [];
     let historyChanged = false;
@@ -426,6 +449,27 @@ export default async function handler(request, response) {
 
         const caption = buildVanscoFacebookCaption(vehicle);
         const imageUrls = vanscoFacebookImageUrls(vehicle);
+        // Check only a bounded number of vehicles per run so a slow or blocked
+        // image host cannot consume Vercel's entire worker deadline.
+        if (checkedVehicles >= MAX_IMAGE_CHECKS_PER_RUN) break;
+        checkedVehicles += 1;
+        const compatibleImages = imageUrls.map(vanscoBufferCompatibleImageUrl).filter(Boolean);
+        const imageCheck = await preflightVanscoFacebookImages(compatibleImages);
+        if (!imageCheck.ok || compatibleImages.length !== imageUrls.length) {
+          mediaQuarantine = quarantineVanscoVehicle(mediaQuarantine, vehicle.vehicleUrl, {
+            periodMs: VANSCO_MEDIA_PREFLIGHT_FAILURE_MS,
+            reason: imageCheck.ok ? "image_format_unavailable" : imageCheck.reason,
+          });
+          mediaQuarantineChanged = true;
+          excludedUrls.add(vehicle.vehicleUrl);
+          held.push({
+            vehicleKey: vehicle.vehicleKey,
+            vehicleUrl: vehicle.vehicleUrl,
+            reason: "image_unavailable",
+            detail: imageCheck.reason,
+          });
+          continue;
+        }
 
         let post;
         try {
@@ -457,6 +501,12 @@ export default async function handler(request, response) {
             history.lastPostedByKey[vehicle.vehicleKey] = new Date().toISOString();
             historyChanged = true;
           }
+          if (reason === "buffer_media_rejected" || isVanscoMediaUrlFailure(message)) {
+            mediaQuarantine = quarantineVanscoVehicle(mediaQuarantine, vehicle.vehicleUrl, {
+              reason: "buffer_media_rejected",
+            });
+            mediaQuarantineChanged = true;
+          }
           continue;
         }
 
@@ -486,6 +536,9 @@ export default async function handler(request, response) {
     if (historyChanged) {
       await saveVanscoPostingHistory(history.lastPostedByKey);
     }
+    if (mediaQuarantineChanged) {
+      await saveVanscoFacebookMediaQuarantine(activeVanscoMediaQuarantine(mediaQuarantine));
+    }
 
     const payload = {
       ok: true,
@@ -511,7 +564,10 @@ export default async function handler(request, response) {
       created,
       held: held.slice(0, 30),
       duplicateSkippedCount: held.filter((item) => item.reason === "buffer_duplicate").length,
-      mediaSkippedCount: held.filter((item) => item.reason === "buffer_media_rejected").length,
+      mediaSkippedCount: held.filter((item) => ["buffer_media_rejected", "image_unavailable"].includes(item.reason)).length,
+      failedMediaPostIdsDetected: recoveredMedia.detected,
+      temporarilyExcludedMediaVehicles: Object.keys(mediaQuarantine).length,
+      vehicleImageChecks: checkedVehicles,
       vatUnresolvedCount: held.filter((item) => item.reason === "vat_unresolved").length,
       queueCountAfter: state.posts.length + created.length,
       elapsedMs: Date.now() - startedAt,
