@@ -242,3 +242,15 @@ test("Facebook Story read throttle permits the next two-hour refill without open
   assert.match(runtime, /buffer_daily_monitoring_reserve/);
   assert.match(runtime, /buffer_rate_limit_cooldown/);
 });
+
+test("Facebook Story refill reports outcome reasons without extra Buffer requests or personal information", () => {
+  const worker = source("api/buffer-facebook-story-automation.js");
+  assert.match(worker, /Story refill diagnostics/);
+  assert.match(worker, /outcome: result.created \? "created"/);
+  assert.match(worker, /result.skipped \|\| "unknown"/);
+  assert.match(worker, /imagesChecked: Number.isFinite\(result.checked\)/);
+  assert.match(worker, /unsuitableImages: Number.isFinite\(result.oversizedOrUnverified\)/);
+  assert.match(worker, /bufferRejected: Number.isFinite\(result.bufferRejected\)/);
+  const handler = worker.slice(worker.indexOf("const refillDiagnostics"),worker.indexOf("response.status(200).json({",worker.indexOf("const refillDiagnostics")));
+  assert.doesNotMatch(handler, /await |bufferGraphql|registration|mediaUrl|channelId/);
+});
