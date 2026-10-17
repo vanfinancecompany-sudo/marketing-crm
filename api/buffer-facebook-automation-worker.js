@@ -53,6 +53,7 @@ import {
   normalizeDailyYouTubeImageUrl,
 } from "../lib/youtubeDailyBatch.js";
 import { loadRent2BuyPhotoProvenanceMap } from "../lib/rent2BuyPhotoProvenance.js";
+import { loadReviewedFacebookSecondaryImages } from "../lib/facebookApprovedImageFallback.js";
 
 export const config = { maxDuration: 300 };
 
@@ -348,7 +349,7 @@ async function loadFacebookVehicleImages(productKey) {
     }
     return byRegistration;
   } catch (error) {
-    console.warn(`[buffer-facebook-automation] ${productKey} multi-image feed unavailable; using primary image only`, {
+    console.warn(`[buffer-facebook-automation] ${productKey} Wix multi-image feed unavailable; checking reviewed image fallback`, {
       message: errorText(error, "Image feed failed."),
     });
     return new Map();
@@ -567,7 +568,29 @@ async function createNextImagePost({ supabase, posts, automationConfig, productK
       provenSecondaryUrls = [];
     }
   }
-  const mediaUrls = facebookVehicleImageUrls(vehicle, imagesByRegistration, provenSecondaryUrls);
+  let mediaUrls = facebookVehicleImageUrls(vehicle, imagesByRegistration, provenSecondaryUrls);
+  let approvedImageFallback = false;
+  if (mediaUrls.length < 3) {
+    // Standard image posts only. Never change the Reel generator or post flow.
+    const registration = normalizeReg(vehicle.registration || vehicle.reg || "");
+    try {
+      const approved = await loadReviewedFacebookSecondaryImages(supabase, productKey, registration);
+      if (approved.length) {
+        const extended = new Map(imagesByRegistration);
+        extended.set(registration, [...(imagesByRegistration.get(registration) || []), ...approved]);
+        const recovered = facebookVehicleImageUrls(vehicle, extended, provenSecondaryUrls);
+        if (recovered.length > mediaUrls.length) {
+          mediaUrls = recovered;
+          approvedImageFallback = true;
+        }
+      }
+    } catch (error) {
+      console.warn("[buffer-facebook-automation] Reviewed Facebook image fallback unavailable; retaining original image", {
+        productKey,
+        message: errorText(error, "Reviewed images unavailable."),
+      });
+    }
+  }
   const post = await createBufferScheduledPost({
     destination,
     text,
@@ -583,6 +606,7 @@ async function createNextImagePost({ supabase, posts, automationConfig, productK
     registration: normalizeReg(vehicle.registration || vehicle.reg),
     bufferPostId: post.id,
     imageCount: mediaUrls.length,
+    approvedImageFallback,
     dueAt: post.dueAt || slotInfo.slot.dueAt,
     localTime: slotInfo.slot.localTime,
   };
