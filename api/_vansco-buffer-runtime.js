@@ -871,12 +871,22 @@ export async function loadVanscoCombinedStatusSnapshot({ force = false } = {}) {
     };
     await writeBlobJson(LIVE_STATUS_SNAPSHOT_PATH, snapshot);
     if (Object.values(failedPostCounts).some((count) => count > 0)) {
+      const examples = [
+        ...failedPosts.facebook.map((post) => ({ ...post, channel: "facebook" })),
+        ...Object.entries(failedPosts.googleBusiness).flatMap(([branch, entries]) =>
+          entries.map((post) => ({ ...post, channel: branch }))),
+      ].slice(0, 12).map(({ channel, message, postId }) => ({
+        channel,
+        postId,
+        // Error messages are intended for display. Strip incidental URLs/email addresses.
+        reason: message.replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, "[redacted]").slice(0, 180),
+      }));
       console.warn("[vansco-buffer] failed published posts detected", {
         date: dateKey,
         counts: failedPostCounts,
+        examples,
         incomplete: posts.hasNextPage,
-        // Platform error messages are available in the cached snapshot.
-        // Do not log captions, photos, registrations or API credentials.
+        // No captions, image links, number plates or API credentials logged.
       });
     }
     return snapshot;
