@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 function number(value){const parsed=Number(value);return Number.isFinite(parsed)?parsed:0;}
 function formatNumber(value){return new Intl.NumberFormat('en-GB').format(Math.round(number(value)));}
 function formatPercent(value){return value==null?'n/a':`${Math.round(number(value)*1000)/10}%`;}
-function changeLabel(value){if(value==null)return 'No 7-day comparison yet';const prefix=value>0?'+':'';return `${prefix}${value}% vs 7-day average`;}
+function changeLabel(value){if(value==null)return 'Daily comparison processing';const prefix=value>0?'+':'';return `${prefix}${value}% yesterday vs prior 7 days`;}
 
 function SiteCard({site}){
  const configured=Boolean(site?.configured);
@@ -19,13 +19,13 @@ function SiteCard({site}){
   :'Browser activity and CRM submissions are separate';
  return <article className="ga4-pipeline-card">
   <div className="ga4-pipeline-card__head">
-   <div><span>{site?.label||'Website'}</span><strong>{configured?'GA4 live':'GA4 setup needed'}</strong></div>
+   <div><span>{site?.label||'Website'}</span><strong>{configured?'GA4 reporting':'GA4 setup needed'}</strong></div>
    <b>{liveApplication?'GA4 + first-party':site?.source||'ga4'}</b>
   </div>
   {configured? <>
    <div className="ga4-pipeline-metrics">
-    <div><strong>{formatNumber(site.usersToday)}</strong><span>Users today</span><em>{changeLabel(site.usersVsSevenDayPct)}</em></div>
-    <div><strong>{formatNumber(site.sessionsToday)}</strong><span>Sessions</span><em>{formatNumber(site.pageViewsToday)} page views</em></div>
+    <div><strong>{site.usersToday>0?formatNumber(site.usersToday):'–'}</strong><span>Users today · provisional</span><em>{site.completedDayComparisonReady?`${changeLabel(site.usersVsSevenDayPct)} · yesterday ${formatNumber(site.usersYesterday)} users`:'GA4 may still be processing · no traffic-drop verdict'}</em></div>
+    <div><strong>{site.sessionsToday>0?formatNumber(site.sessionsToday):'–'}</strong><span>Sessions today · provisional</span><em>{site.pageViewsToday>0?`${formatNumber(site.pageViewsToday)} page views` : "Today's GA4 figures may be incomplete"}</em></div>
     <div><strong>{liveApplication?formatNumber(applicationVisits):'–'}</strong><span>{liveApplication?applicationVisitLabel:'Application activity unavailable'}</span><em>{applicationDetail}</em></div>
     <div><strong>{receivedVerified?formatNumber(received):'–'}</strong><span>Applications received</span><em>{receivedVerified?'CRM-verified · repeat submissions within 60 minutes counted once':'CRM application figures temporarily unavailable'}</em></div>
    </div>
@@ -59,7 +59,7 @@ export default function Ga4PipelinePanel(){
    <div>
     <span className="eyebrow">GA4 · REAL WEBSITE TRAFFIC</span>
     <h3>Daily pipeline traffic</h3>
-    <p>GA4 measures visitors and traffic. CRM-confirmed applications are counted separately, with repeat submissions from the same applicant within 60 minutes counted once.</p>
+    <p>Today’s GA4 figures are provisional; traffic changes compare yesterday with the preceding seven complete days. CRM-confirmed applications remain separate, with repeats within 60 minutes counted once.</p>
    </div>
    <small>{data?.checkedAt?`Checked ${new Date(data.checkedAt).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}`:'Loading'}</small>
   </div>
