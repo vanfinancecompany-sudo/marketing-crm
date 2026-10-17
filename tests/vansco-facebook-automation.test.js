@@ -614,3 +614,18 @@ test("Vansco Facebook refill excludes failed media and still seeks another eligi
   // The revised query shares the already-scheduled Buffer activity read.
   assert.match(runtime,/failedPosts: \(payload\?\.data\?\.failedMediaPosts\?\.edges/);
 });
+
+test("Vansco 333, Airport and New Forest precheck photo URLs independently before scheduling", () => {
+  const worker = readFileSync(new URL("../api/vansco-google-business-automation-worker.js",import.meta.url),"utf8");
+  const runtime = readFileSync(new URL("../api/_vansco-buffer-runtime.js",import.meta.url),"utf8");
+  assert.match(worker,/MAX_GBP_IMAGE_CHECKS_PER_BRANCH = 12/);
+  assert.match(worker,/preflightVanscoFacebookImage\(\s*vanscoBufferCompatibleImageUrl\(vehicle.imageUrl\)/);
+  assert.match(worker,/vehicles: eligible.filter\(\(item\) => !mediaQuarantine\[item.vehicleUrl\]\)/);
+  assert.match(worker,/if \(!checked.ok\) \{/);
+  assert.match(worker,/periodMs: VANSCO_MEDIA_PREFLIGHT_FAILURE_MS/);
+  assert.match(worker,/excludedRegistrations.add\(registration\);/);
+  assert.match(worker,/saveVanscoGoogleBusinessMediaQuarantine\(activeVanscoMediaQuarantine\(mediaQuarantine\)\)/);
+  assert.match(runtime,/GOOGLE_FAILED_MEDIA_PATH/);
+  // A separate Google Business API error must NOT blacklist the source image.
+  assert.doesNotMatch(worker.slice(worker.indexOf("} catch (error) {",worker.indexOf("createVanscoGoogleBusinessPost("))),/quarantineVanscoVehicle/);
+});
