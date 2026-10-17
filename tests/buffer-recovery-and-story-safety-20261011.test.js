@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { selectVanFinanceInstagramMirrors } from "../lib/bufferInstagramMirror.js";
 import { storyImageWithinBufferLimit } from "../api/buffer-facebook-story-automation.js";
+import { preflightPublicMedia } from "../api/buffer-instagram-mirror.js";
 
 function fbReel(dueAt, status = "sent") {
   return {
@@ -69,4 +70,31 @@ test("Ready Rent2Buy reels are rechecked against active CRM stock before Buffer 
   assert.match(worker, /const activeRent2BuyStock = productKey === "rent2buy"/);
   assert.match(worker, /stillAdvertised\(reel\.registration\)/);
   assert.match(worker, /inactive_rent2buy_stock/);
+});
+
+test("Instagram rejects known 8.1MB vehicle images before creating Buffer posts", async () => {
+  const fake = (length, kind="image/jpeg", range=null) => async () => ({
+    ok:true,status:200,
+    headers:{get(name){
+      if(name==="content-type")return kind;
+      if(name==="content-length")return length;
+      if(name==="content-range")return range;
+      return null;
+    }},
+  });
+  await assert.rejects(preflightPublicMedia("https://example.com/oversize.jpg","image",fake("8100000")),/8.0 MB limit/);
+  await assert.doesNotReject(preflightPublicMedia("https://example.com/ok.jpg","image",fake("7999999")));
+  await assert.rejects(preflightPublicMedia("https://example.com/range.jpg","image",fake("1","image/jpeg","bytes 0-0/8100000")),/8.0 MB limit/);
+  // Video reels retain their existing format and size rules, untouched.
+  await assert.doesNotReject(preflightPublicMedia("https://example.com/reel.mp4","video",fake("20000000","video/mp4")));
+});
+
+test("Oversized normal Instagram images may use same-registration reviewed gallery; reels stay untouched", async () => {
+  const mirror = await readFile(new URL("../api/buffer-instagram-mirror.js",import.meta.url),"utf8");
+  assert.match(mirror,/mirror.mediaKind === "image"/);
+  assert.match(mirror,/loadReviewedFacebookSecondaryImages\(supabase, "vanFinance", mirror.registration\)/);
+  assert.match(mirror,/source: "reviewed_vehicle_gallery"/);
+  assert.match(mirror,/INSTAGRAM_IMAGE_LIMIT_BYTES = 8_000_000/);
+  assert.match(mirror,/for \(const candidate of reviewed.filter/);
+  assert.match(mirror,/return mirror.mediaKind === "video"/);
 });
