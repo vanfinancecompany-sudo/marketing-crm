@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { selectVanFinanceInstagramMirrors } from "../lib/bufferInstagramMirror.js";
-import { storyImageWithinBufferLimit } from "../api/buffer-facebook-story-automation.js";
+import { storyImageWithinBufferLimit, inspectStoryImage, compactWixBrandedStoryImageUrl } from "../api/buffer-facebook-story-automation.js";
 import { preflightPublicMedia } from "../api/buffer-instagram-mirror.js";
 
 function fbReel(dueAt, status = "sent") {
@@ -97,4 +97,52 @@ test("Oversized normal Instagram images may use same-registration reviewed galle
   assert.match(mirror,/INSTAGRAM_IMAGE_LIMIT_BYTES = 8_000_000/);
   assert.match(mirror,/for \(const candidate of reviewed.filter/);
   assert.match(mirror,/return mirror.mediaKind === "video"/);
+});
+
+test("Facebook Story branded fallback keeps the exact Wix primary image, at a smaller JPEG resolution", () => {
+  const original = "https://static.wixstatic.com/media/5ef4b7_0c38b0ac28d64d2cb4ddec0d9f23387b~mv2.png";
+  assert.equal(compactWixBrandedStoryImageUrl(original),
+    original + "/v1/fit/w_1080,h_1350/file.jpg");
+  assert.equal(compactWixBrandedStoryImageUrl("https://other.example.com/media/x.png"), "");
+  assert.equal(compactWixBrandedStoryImageUrl("http://static.wixstatic.com/media/x.png"), "");
+  assert.equal(compactWixBrandedStoryImageUrl("https://static.wixstatic.com/media/x.png?token=secret"),
+    "https://static.wixstatic.com/media/x.png/v1/fit/w_1080,h_1350/file.jpg");
+});
+
+test("Facebook Story image preflight classifies oversized PNG and accepts genuine smaller JPEG", async () => {
+  const response=(status,length,range=null)=>({
+    ok:status===200||status===206,status,
+    headers:{get(key){return key==="content-length"?length:key==="content-range"?range:null;}},
+  });
+  const source="https://static.wixstatic.com/media/brand.png";
+  assert.deepEqual(await inspectStoryImage(source,async()=>response(200,"5100000")),
+    {ok:false,reason:"oversized",size:5100000});
+  assert.deepEqual(await inspectStoryImage(source,async()=>response(200,"1200000")),
+    {ok:true,reason:"head_verified",size:1200000});
+  let methods=[];
+  const fallback=async(_url,init)=>{
+    methods.push(init.method);
+    return init.method==="HEAD"?response(405,null):response(206,"1","bytes 0-0/1200000");
+  };
+  assert.deepEqual(await inspectStoryImage(source,fallback),
+    {ok:true,reason:"range_verified",size:1200000});
+  assert.deepEqual(methods,["HEAD","GET"]);
+  const hugeRange=async(_url,init)=>init.method==="HEAD"?response(405,null):response(206,"1","bytes 0-0/5800000");
+  assert.deepEqual(await inspectStoryImage(source,hugeRange),
+    {ok:false,reason:"oversized",size:5800000});
+});
+
+test("Story image preflight fails closed on unknown range sizes and trusted fallback never crosses registrations", async () => {
+  const source="https://static.wixstatic.com/media/brand.png";
+  const fake=async(_url,init)=>init.method==="HEAD"
+    ? {ok:false,status:403,headers:{get:()=>null}}
+    : {ok:true,status:206,headers:{get:(key)=>key==="content-length"?"1":null}};
+  assert.equal((await inspectStoryImage(source,fake)).ok,false);
+  const worker=await readFile(new URL("../api/buffer-facebook-story-automation.js",import.meta.url),"utf8");
+  assert.match(worker,/productKey === "vanFinance"/);
+  assert.match(worker,/\.eq\("is_active", true\)/);
+  assert.match(worker,/\.in\("title", wanted\)/);
+  assert.match(worker,/if \(!wanted.includes\(reg\) \|\| row.is_active !== true\) continue/);
+  assert.match(worker,/brandedImageOverride: smallerImage/);
+  assert.match(worker,/mediaSource: result.mediaSource/);
 });
