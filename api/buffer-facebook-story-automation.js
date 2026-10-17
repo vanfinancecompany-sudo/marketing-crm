@@ -490,7 +490,8 @@ export default async function handler(request, response) {
     });
   } catch (error) {
     if (isBufferRateLimitCooldownError(error)) {
-      console.warn("[buffer-facebook-story-automation] deferred during Buffer cooldown", {
+      console.warn("[buffer-facebook-story-automation] deferred by Buffer request protection", {
+        reason: error.reason || "buffer_rate_limit_cooldown",
         retryAfterMs: error.retryAfterMs,
       });
       response.status(202).json(bufferDeferredPayload(error));
