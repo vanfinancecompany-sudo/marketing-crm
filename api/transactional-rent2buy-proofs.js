@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { sendSendGridEmail } from "../lib/emailProviders/sendgrid.js";
+import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const MAX_TOTAL_BYTES = 3_000_000;
@@ -95,6 +96,7 @@ export function validateRent2BuyProofPayload(body = {}) {
   const meta = {
     applicationRef: text(body.applicationRef, 40).toUpperCase(),
     directUpload: Boolean(body.directUpload),
+    partial: body.partial === true,
     fullName: text(body.fullName, 200),
     email: text(body.email, 254).toLowerCase(),
     phone: text(body.phone, 80),
@@ -109,11 +111,19 @@ export function validateRent2BuyProofPayload(body = {}) {
   const addressRaw = Array.isArray(sourceGroups.address) ? sourceGroups.address : [];
   const licenceRaw = Array.isArray(sourceGroups.licence) ? sourceGroups.licence : [];
   const bankRaw = Array.isArray(sourceGroups.bank) ? sourceGroups.bank : [];
-  if (addressRaw.length < 2 || addressRaw.length > 4) throw new Error("Please attach between two and four proofs of address.");
-  if (licenceRaw.length !== 1) throw new Error("Please attach one clear file showing the front of the driving licence.");
-  if (meta.bankMode === "flexible" && (bankRaw.length < 1 || bankRaw.length > 3)) throw new Error("Please attach 1 to 3 PDF files covering the latest three full months of bank statements.");
-  if (meta.bankMode === "combined" && bankRaw.length !== 1) throw new Error("Please attach one combined bank statement PDF.");
-  if (meta.bankMode === "separate" && bankRaw.length !== 3) throw new Error("Please attach exactly three separate bank statement PDFs.");
+  if (meta.partial) {
+    // A verified applicant may send genuine evidence in smaller batches to
+    // stay under the fixed, secure email relay size limit. Never equate a
+    // partial batch with completion of the required proof pack.
+    if (!addressRaw.length && !licenceRaw.length && !bankRaw.length) throw new Error("Select at least one document to send.");
+    if (addressRaw.length > 4 || licenceRaw.length > 1 || bankRaw.length > 3) throw new Error("Too many proof files in this batch.");
+  } else {
+    if (addressRaw.length < 2 || addressRaw.length > 4) throw new Error("Please attach between two and four proofs of address.");
+    if (licenceRaw.length !== 1) throw new Error("Please attach one clear file showing the front of the driving licence.");
+    if (meta.bankMode === "flexible" && (bankRaw.length < 1 || bankRaw.length > 3)) throw new Error("Please attach 1 to 3 PDF files covering the latest three full months of bank statements.");
+    if (meta.bankMode === "combined" && bankRaw.length !== 1) throw new Error("Please attach one combined bank statement PDF.");
+    if (meta.bankMode === "separate" && bankRaw.length !== 3) throw new Error("Please attach exactly three separate bank statement PDFs.");
+  }
 
   const groups = {
     address: addressRaw.map((file) => decodeFile(file, "Proof of address")),
@@ -127,8 +137,8 @@ export function validateRent2BuyProofPayload(body = {}) {
 
 function buildHtml(meta, counts) {
   const row = (label, value) => `<tr><td style="padding:8px 0;color:#aeb0b7;width:40%;font-size:13px">${escapeHtml(label)}</td><td style="padding:8px 0;color:#fff;font-size:13px;font-weight:700">${escapeHtml(value || "—")}</td></tr>`;
-  const source = meta.directUpload ? "Standalone website upload" : "Application-linked upload";
-  return `<!doctype html><html><body style="margin:0;background:#efefef;font-family:Arial,Helvetica,sans-serif"><table width="100%" cellspacing="0" cellpadding="0" style="padding:24px 10px"><tr><td align="center"><table width="660" cellspacing="0" cellpadding="0" style="width:100%;max-width:660px;background:#17171b;color:#fff;border-radius:18px;overflow:hidden"><tr><td style="padding:24px 28px;background:#0d0d10"><div style="display:inline-block;background:#f4213e;border-radius:999px;padding:6px 10px;font-size:10px;font-weight:800">RENT2BUY PROOFS</div><h1 style="margin:12px 0 4px;font-size:28px">Customer proofs received</h1><div style="color:#b9bac0;font-size:12px">${escapeHtml(meta.applicationRef)} · ${escapeHtml(source)}</div></td></tr><tr><td style="padding:22px 28px"><table width="100%" cellspacing="0" cellpadding="0">${row("Reference", meta.applicationRef)}${row("Applicant", meta.fullName)}${row("Email", meta.email)}${row("Phone", meta.phone)}${row("Postcode", meta.postcode)}${row("Vehicle", meta.registration || "No specific registration")}${row("Proof of address", `${counts.address} file${counts.address === 1 ? "" : "s"}`)}${row("Driving licence front", `${counts.licence} file${counts.licence === 1 ? "" : "s"}`)}${row("Bank statements", `${counts.bank} PDF file${counts.bank === 1 ? "" : "s"}`)}${row("Bank upload mode", meta.bankMode === "flexible" ? `${counts.bank} PDF file${counts.bank === 1 ? "" : "s"} covering 3 months` : meta.bankMode === "separate" ? "3 separate PDFs" : "1 combined PDF")}</table><div style="margin-top:18px;padding:14px 16px;background:#101013;border:1px solid #34343a;border-radius:12px;color:#d8d8dd;font-size:12px;line-height:1.5">All documents are attached to this email. The website and relay services do not retain or save copies of the uploaded files.</div></td></tr><tr><td style="padding:16px 28px;background:#111114;color:#9fa0a6;font-size:11px;text-align:center">Rent2Buy by Van Finance Company · Proof submission</td></tr></table></td></tr></table></body></html>`;
+  const source = meta.partial ? "PARTIAL DOCUMENT BATCH — AWAITING REMAINING PROOFS" : meta.directUpload ? "Standalone website upload" : "Application-linked upload";
+  return `<!doctype html><html><body style="margin:0;background:#efefef;font-family:Arial,Helvetica,sans-serif"><table width="100%" cellspacing="0" cellpadding="0" style="padding:24px 10px"><tr><td align="center"><table width="660" cellspacing="0" cellpadding="0" style="width:100%;max-width:660px;background:#17171b;color:#fff;border-radius:18px;overflow:hidden"><tr><td style="padding:24px 28px;background:#0d0d10"><div style="display:inline-block;background:#f4213e;border-radius:999px;padding:6px 10px;font-size:10px;font-weight:800">RENT2BUY PROOFS</div><h1 style="margin:12px 0 4px;font-size:28px">Customer proofs received</h1><div style="color:#b9bac0;font-size:12px">${escapeHtml(meta.applicationRef)} · ${escapeHtml(source)}</div></td></tr><tr><td style="padding:22px 28px"><table width="100%" cellspacing="0" cellpadding="0">${row("Reference", meta.applicationRef)}${row("Applicant", meta.fullName)}${row("Email", meta.email)}${row("Phone", meta.phone)}${row("Postcode", meta.postcode)}${row("Vehicle", meta.registration || "No specific registration")}${row("Proof of address", `${counts.address} file${counts.address === 1 ? "" : "s"}`)}${row("Driving licence front", `${counts.licence} file${counts.licence === 1 ? "" : "s"}`)}${row("Bank statements", `${counts.bank} PDF file${counts.bank === 1 ? "" : "s"}`)}${row("Bank upload mode", meta.bankMode === "flexible" ? `${counts.bank} PDF file${counts.bank === 1 ? "" : "s"} covering 3 months` : meta.bankMode === "separate" ? "3 separate PDFs" : "1 combined PDF")}</table><div style="margin-top:18px;padding:14px 16px;background:#101013;border:1px solid #34343a;border-radius:12px;color:#d8d8dd;font-size:12px;line-height:1.5">${meta.partial ? "Partial submission. This is not evidence that the full required proof pack has been received or verified. Check remaining documents with the applicant." : "All documents in this submission are attached. The team must verify completeness."} The website and relay services do not retain copies of the uploaded files.</div></td></tr><tr><td style="padding:16px 28px;background:#111114;color:#9fa0a6;font-size:11px;text-align:center">Rent2Buy by Van Finance Company · Proof submission</td></tr></table></td></tr></table></body></html>`;
 }
 
 export default async function handler(request, response) {
@@ -146,13 +156,13 @@ export default async function handler(request, response) {
 
   const { meta, groups } = validated;
   const counts = { address: groups.address.length, licence: groups.licence.length, bank: groups.bank.length };
-  const subject = `Rent2Buy Proofs - ${meta.applicationRef} - ${meta.fullName}${meta.registration ? ` - ${meta.registration}` : ""}`;
+  const subject = `Rent2Buy ${meta.partial ? "PARTIAL Documents" : "Proofs"} - ${meta.applicationRef} - ${meta.fullName}${meta.registration ? ` - ${meta.registration}` : ""}`;
   const attachments = [...groups.address, ...groups.licence, ...groups.bank].map((file) => ({
     content: file.content,
     filename: file.name,
     type: file.type,
   }));
-  const plain = `RENT2BUY PROOFS RECEIVED\nReference: ${meta.applicationRef}\nSource: ${meta.directUpload ? "Standalone website upload" : "Application-linked upload"}\nApplicant: ${meta.fullName}\nEmail: ${meta.email}\nPhone: ${meta.phone}\nPostcode: ${meta.postcode}\nVehicle: ${meta.registration || "No specific registration"}\nBank upload mode: ${meta.bankMode === "flexible" ? `${counts.bank} PDF file${counts.bank === 1 ? "" : "s"} covering 3 months` : meta.bankMode === "separate" ? "3 separate PDFs" : "1 combined PDF"}\n\nProof of address: ${counts.address} file(s)\nDriving licence front: ${counts.licence} file(s)\nBank statements: ${counts.bank} PDF file(s)\n\nAll documents are attached to this email. The website and relay services do not retain or save copies of the uploaded files.`;
+  const plain = `RENT2BUY ${meta.partial ? "PARTIAL DOCUMENT BATCH — NOT COMPLETE" : "PROOFS RECEIVED FOR REVIEW"}\nReference: ${meta.applicationRef}\nSource: ${meta.directUpload ? "Standalone website upload" : "Application-linked upload"}\nApplicant: ${meta.fullName}\nEmail: ${meta.email}\nPhone: ${meta.phone}\nPostcode: ${meta.postcode}\nVehicle: ${meta.registration || "No specific registration"}\nBank upload mode: ${meta.bankMode === "flexible" ? `${counts.bank} PDF file${counts.bank === 1 ? "" : "s"} covering 3 months` : meta.bankMode === "separate" ? "3 separate PDFs" : "1 combined PDF"}\n\nProof of address: ${counts.address} file(s)\nDriving licence front: ${counts.licence} file(s)\nBank statements: ${counts.bank} PDF file(s)\n\n${meta.partial ? "PARTIAL batch: additional documents are still required. Do not mark proofs complete until checked." : "This batch contains the requested proof sections; staff verification is still required."}\nThe website and relay services do not retain copies of the uploaded files.`;
 
   try {
     const provider = await sendSendGridEmail({
@@ -171,10 +181,32 @@ export default async function handler(request, response) {
       customArgs: {
         application_ref: meta.applicationRef,
         proof_source: meta.directUpload ? "direct" : "application-linked",
+        proof_batch: meta.partial ? "partial" : "full",
       },
     });
-    console.info("RENT2BUY PROOFS EMAIL ACCEPTED", { applicationRef: meta.applicationRef, counts, providerMessageId: provider.messageId });
-    return response.status(200).json({ ok: true, provider: "sendgrid", provider_message_id: provider.messageId });
+    // Record metadata only, never attachments or unverified proof flags.
+    // Email acceptance must not be rolled back by an activity-log problem.
+    try {
+      if (/^R2B-[A-Z0-9]{6}$/.test(meta.applicationRef)) {
+        const db = getSupabaseServiceAdmin();
+        const { data: lead, error: leadError } = await db.from("manual_leads")
+          .select("id,email").eq("pipeline", "rent2buy")
+          .eq("summary_note", meta.applicationRef).maybeSingle();
+        if (leadError) throw leadError;
+        if (lead && text(lead.email, 254).toLowerCase() === meta.email) {
+          const { error: auditError } = await db.from("manual_lead_activities").insert({
+            lead_id: lead.id, activity_type: "email",
+            title: meta.partial ? "Rent2Buy partial documents received (unverified)" : "Rent2Buy documents received (unverified)",
+            details: `Web upload delivered to the sales inbox; address files: ${counts.address}, licence files: ${counts.licence}, bank statement PDFs: ${counts.bank}. Provider message: ${provider.messageId}. No document contents stored. Staff verification required.`,
+          });
+          if (auditError) throw auditError;
+        }
+      }
+    } catch (auditError) {
+      console.warn("RENT2BUY PROOF RECEIPT AUDIT FAILED", { applicationRef: meta.applicationRef, error: auditError?.message || "audit_error" });
+    }
+    console.info("RENT2BUY PROOFS EMAIL ACCEPTED", { applicationRef: meta.applicationRef, counts, partial: meta.partial, providerMessageId: provider.messageId });
+    return response.status(200).json({ ok: true, provider: "sendgrid", provider_message_id: provider.messageId, partial: meta.partial });
   } catch (error) {
     console.error("RENT2BUY PROOFS EMAIL FAILED", { applicationRef: meta.applicationRef, message: error?.message || "send_failed", ambiguous: Boolean(error?.ambiguous) });
     return response.status(error?.statusCode || 502).json({
