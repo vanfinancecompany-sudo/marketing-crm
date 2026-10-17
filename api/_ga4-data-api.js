@@ -95,22 +95,43 @@ function rowsByDimension(report){
 function firstMetricRow(report){return rowsByDimension(report)[0]?.metrics||{};}
 function pctChange(today,average){return average>0?Math.round(((today-average)/average)*100):null;}
 
+// Never compare an unfinished 'today' count with seven completed days.
+// Yesterday is the comparison day; the seven preceding calendar days form its baseline.
+// If yesterday's GA4 data is still zero/missing, withhold a misleading -100% warning.
+export function completedDayGa4Comparison({yesterdayMetrics={},dailyRows=[]}={}){
+ const values=Array.isArray(dailyRows)?dailyRows:[];
+ const haveBaseline=values.length>0;
+ const total=values.reduce((sum,row)=>sum+number(row?.metrics?.activeUsers),0);
+ const sevenDayAverageUsers=haveBaseline?Math.round((total/7)*10)/10:null;
+ const yesterdayUsers=Object.hasOwn(yesterdayMetrics,'activeUsers')?number(yesterdayMetrics.activeUsers):null;
+ const awaitingProcessing=yesterdayUsers==null||(yesterdayUsers===0&&sevenDayAverageUsers>0);
+ return {
+  usersYesterday:yesterdayUsers,
+  sevenDayAverageUsers,
+  usersVsSevenDayPct:haveBaseline&&!awaitingProcessing?pctChange(yesterdayUsers,sevenDayAverageUsers):null,
+  completedDayComparisonReady:Boolean(haveBaseline&&!awaitingProcessing),
+  comparisonPeriod:'yesterday_vs_previous_seven_days',
+  comparisonNote:awaitingProcessing?'GA4 daily figures may still be processing.':'Yesterday vs the seven preceding complete days; GA4 data remains provisional.',
+ };
+}
+
 async function loadSiteSummary({accessToken,site}){
  const propertyId=propertyIdFor(site);
  if(!propertyId){
   return {...site,configured:false,source:'ga4',message:`Missing ${site.propertyEnv}.`,propertyId:''};
  }
- const [todayReport,dailyReport,eventReport,pageReport,sourceReport]=await Promise.all([
+ const [todayReport,yesterdayReport,dailyReport,eventReport,pageReport,sourceReport]=await Promise.all([
   runReport({accessToken,propertyId,body:{dateRanges:[{startDate:'today',endDate:'today'}],metrics:[{name:'activeUsers'},{name:'sessions'},{name:'screenPageViews'}],keepEmptyRows:true}}),
-  runReport({accessToken,propertyId,body:{dateRanges:[{startDate:'7daysAgo',endDate:'yesterday'}],dimensions:[{name:'date'}],metrics:[{name:'activeUsers'}],keepEmptyRows:true}}),
+  runReport({accessToken,propertyId,body:{dateRanges:[{startDate:'yesterday',endDate:'yesterday'}],metrics:[{name:'activeUsers'}],keepEmptyRows:true}}),
+  runReport({accessToken,propertyId,body:{dateRanges:[{startDate:'8daysAgo',endDate:'2daysAgo'}],dimensions:[{name:'date'}],metrics:[{name:'activeUsers'}],keepEmptyRows:true}}),
   runReport({accessToken,propertyId,body:{dateRanges:[{startDate:'today',endDate:'today'}],dimensions:[{name:'eventName'}],metrics:[{name:'eventCount'}],dimensionFilter:{filter:{fieldName:'eventName',inListFilter:{values:['application_start','application_complete','generate_lead','proofs_received']}}},keepEmptyRows:true}}),
   runReport({accessToken,propertyId,body:{dateRanges:[{startDate:'today',endDate:'today'}],dimensions:[{name:'pagePath'}],metrics:[{name:'screenPageViews'}],orderBys:[{metric:{metricName:'screenPageViews'},desc:true}],limit:8}}),
   runReport({accessToken,propertyId,body:{dateRanges:[{startDate:'today',endDate:'today'}],dimensions:[{name:'sessionSourceMedium'}],metrics:[{name:'sessions'}],orderBys:[{metric:{metricName:'sessions'},desc:true}],limit:8}}),
  ]);
  const today=firstMetricRow(todayReport);
+ const yesterday=firstMetricRow(yesterdayReport);
  const dailyRows=rowsByDimension(dailyReport);
- const observedDaily=dailyRows.map((row)=>number(row.metrics.activeUsers));
- const sevenDayAverageUsers=observedDaily.length?Math.round((observedDaily.reduce((sum,value)=>sum+value,0)/observedDaily.length)*10)/10:0;
+ const completedComparison=completedDayGa4Comparison({yesterdayMetrics:yesterday,dailyRows});
  const eventRows=rowsByDimension(eventReport);
  const events=Object.fromEntries(eventRows.map((row)=>[row.dimensions.eventName,number(row.metrics.eventCount)]));
  const applicationStartsToday=number(events.application_start);
@@ -129,8 +150,8 @@ async function loadSiteSummary({accessToken,site}){
   leadEventsToday,
   proofsReceivedToday:number(events.proofs_received),
   conversionRate:applicationStartsToday?applicationCompletionsToday/applicationStartsToday:null,
-  sevenDayAverageUsers,
-  usersVsSevenDayPct:pctChange(number(today.activeUsers),sevenDayAverageUsers),
+  ...completedComparison,
+  todayDataProvisional:true,
   topPages:rowsByDimension(pageReport).map((row)=>({path:row.dimensions.pagePath||'/',views:number(row.metrics.screenPageViews)})),
   sources:rowsByDimension(sourceReport).map((row)=>({source:row.dimensions.sessionSourceMedium||'Direct / unknown',sessions:number(row.metrics.sessions)})),
  };
