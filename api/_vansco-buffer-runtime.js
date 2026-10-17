@@ -22,6 +22,7 @@ const STORY_STATUS_PATH = "vansco-buffer-v1/facebook-story-status.json";
 const LIVE_STATUS_SNAPSHOT_PATH = "vansco-buffer-v1/live-status-snapshot.json";
 const API_QUOTA_STATE_PATH = "vansco-buffer-v1/api-quota-state.json";
 const FACEBOOK_FAILED_MEDIA_PATH = "vansco-buffer-v1/facebook-failed-media-quarantine.json";
+const GOOGLE_FAILED_MEDIA_PATH = "vansco-buffer-v1/google-business-failed-media-quarantine.json";
 
 const ACCOUNT_QUERY = `
   query VanscoBufferAccount {
@@ -944,6 +945,15 @@ export async function loadVanscoFacebookMediaQuarantine() {
 
 export async function saveVanscoFacebookMediaQuarantine(entries) {
   return writeBlobJson(FACEBOOK_FAILED_MEDIA_PATH, entries);
+}
+
+export async function loadVanscoGoogleBusinessMediaQuarantine() {
+  const value = await readBlobJson(GOOGLE_FAILED_MEDIA_PATH);
+  return value && typeof value === "object" ? value : {};
+}
+
+export async function saveVanscoGoogleBusinessMediaQuarantine(entries) {
+  return writeBlobJson(GOOGLE_FAILED_MEDIA_PATH, entries);
 }
 
 export async function loadVanscoFacebookActivity(config) {
