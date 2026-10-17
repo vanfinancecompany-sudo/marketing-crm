@@ -463,3 +463,51 @@ test("Vansco Google Business retains branch independence, saves successful histo
   // None of these modifications change the reel or VFC normal-post workers.
   assert.doesNotMatch(readFileSync(new URL("../api/youtube-daily-batch.js",import.meta.url),"utf8"),/vanscoBufferCooldownRemainingMs/);
 });
+
+test("Vansco Buffer monitoring collects today's actual failed posts without counting them as sent", async () => {
+  const { vanscoFailedPostsByChannel, vanscoSentPostsByChannel } = await import("../api/_vansco-buffer-runtime.js");
+  const item = (id, status, channelId, dueAt, message = "") => ({
+    node: {
+      id, status, channelId, dueAt, createdAt: "2026-10-16T10:00:00Z",
+      error: status === "error" ? {message, supportUrl:"https://support.buffer.com/help"} : null,
+    },
+  });
+  const payload = { data: {
+    facebookSent: {edges:[
+      item("f1","error","fb","2026-10-17T11:00:00Z","Facebook permission expired"),
+      item("f2","sent","fb","2026-10-17T12:00:00Z"),
+      item("f3","error","other","2026-10-17T12:00:00Z","Wrong channel"),
+    ],pageInfo:{hasNextPage:false}},
+    vansco333Sent: {edges:[
+      item("g1","error","333","2026-10-17T07:00:00Z","Image rejected"),
+      item("g2","error","333","2026-10-16T07:00:00Z","Yesterday"),
+      item("g3","sent","333","2026-10-17T09:00:00Z"),
+    ],pageInfo:{hasNextPage:false}},
+    airportSent: {edges:[item("a1","sent","air","2026-10-17T10:00:00Z")],pageInfo:{hasNextPage:false}},
+    newForestSent: {edges:[],pageInfo:{hasNextPage:false}},
+  }};
+  const branches={vansco333:{channelId:"333"},southamptonAirport:{channelId:"air"},newForest:{channelId:"forest"}};
+  const failed=vanscoFailedPostsByChannel(payload,"fb",branches,"2026-10-17");
+  assert.equal(failed.facebook.length,1);
+  assert.equal(failed.facebook[0].postId,"f1");
+  assert.equal(failed.facebook[0].message,"Facebook permission expired");
+  assert.equal(failed.googleBusiness.vansco333.length,1);
+  assert.equal(failed.googleBusiness.vansco333[0].message,"Image rejected");
+  assert.deepEqual(failed.googleBusiness.southamptonAirport,[]);
+  assert.deepEqual(failed.googleBusiness.newForest,[]);
+  const sent=vanscoSentPostsByChannel(payload,"fb",branches);
+  assert.equal(sent.facebook.length,1);
+  assert.equal(sent.googleBusiness.vansco333.length,1);
+  assert.equal(sent.googleBusiness.southamptonAirport.length,1);
+  assert.equal(sent.hasNextPage,false);
+});
+
+test("Vansco status collects provider publishing errors from existing four aliases, never by extra API call", () => {
+  const source=readFileSync(new URL("../api/_vansco-buffer-runtime.js",import.meta.url),"utf8");
+  const query=source.slice(source.indexOf("const ALL_CHANNEL_STATUS_QUERY"),source.indexOf("export function vanscoSentPostsByChannel"));
+  assert.equal((query.match(/status: \[sent, error\]/g)||[]).length,4);
+  assert.equal((query.match(/error \{ message supportUrl \}/g)||[]).length,4);
+  assert.match(source,/const failedPosts = vanscoFailedPostsByChannel\(payload/);
+  assert.match(source,/failedPostCountsComplete: !posts.hasNextPage/);
+  assert.match(source,/await writeBlobJson\(LIVE_STATUS_SNAPSHOT_PATH, snapshot\)/);
+});
