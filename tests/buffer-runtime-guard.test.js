@@ -19,6 +19,7 @@ import {
   isBufferRateLimitCooldownError,
   isBufferRateLimitMessage,
   parseBufferRateLimitHeaders,
+  operationMinIntervalMs,
 } from "../lib/bufferRuntimeGuard.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -219,4 +220,25 @@ test("health and automation routes degrade cleanly instead of returning Buffer 5
     assert.match(code, /status\(202\)/);
     assert.match(code, /bufferDeferredPayload/);
   }
+});
+
+test("Facebook Story read throttle permits the next two-hour refill without opening unlimited queries", () => {
+  // Story cron is every two London hours, while the previous 4h limit skipped every other run.
+  assert.equal(operationMinIntervalMs("GetFacebookStoryAutomationPosts"), 110 * 60 * 1000);
+  assert.ok(operationMinIntervalMs("GetFacebookStoryAutomationPosts") < 2 * 60 * 60 * 1000);
+  assert.ok(operationMinIntervalMs("GetFacebookStoryAutomationPosts") >= 60 * 60 * 1000);
+  // Leave unrelated queries, especially the reels and Buffer monitoring guards, unchanged.
+  assert.equal(operationMinIntervalMs("GetVanFinanceInstagramPosts"), 4 * 60 * 60 * 1000);
+  assert.equal(operationMinIntervalMs("GetSystemHealthBufferPosts"), 4 * 60 * 60 * 1000);
+  assert.equal(operationMinIntervalMs("GetBufferChannels"), 12 * 60 * 60 * 1000);
+  assert.equal(operationMinIntervalMs("CreateFacebookStory"), 0);
+  const worker = source("api/buffer-facebook-story-automation.js");
+  assert.match(worker, /reason: error.reason \|\| "buffer_rate_limit_cooldown"/);
+  assert.match(worker, /isBufferRateLimitCooldownError/);
+  assert.match(worker, /createNextStory/);
+  const runtime = source("lib/bufferRuntimeGuard.js");
+  assert.match(runtime, /ensureBufferRequestAllowed/);
+  assert.match(runtime, /buffer_quota_reserve/);
+  assert.match(runtime, /buffer_daily_monitoring_reserve/);
+  assert.match(runtime, /buffer_rate_limit_cooldown/);
 });
