@@ -62,7 +62,7 @@ export function vanscoRecoverableBufferPostError(error) {
   }
   if (
     /compatible jpeg\/png image|unsupported.*(?:image|media)|invalid.*(?:image|media)|(?:image|media).*format/i
-      .test(message)
+      .test(message) || isVanscoMediaUrlFailure(message)
   ) {
     return "buffer_media_rejected";
   }
