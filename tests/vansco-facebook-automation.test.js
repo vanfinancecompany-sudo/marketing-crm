@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { vanscoBufferCooldownRemainingMs } from "../api/_vansco-buffer-runtime.js";
 
 import {
   VANSCO_FACEBOOK_STORIES_PER_DAY,
@@ -434,4 +436,30 @@ test("Vansco Buffer workers use daytime cadence and cached monitoring reserve", 
   assert.match(runtime, /isBufferApiActiveWindow/);
   assert.match(runtime, /vanscoMonitoringReserveActive/);
   assert.match(runtime, /BUFFER_MONITORING_MAX_24H_REQUESTS/);
+});
+
+test("Vansco provider cooldown is shared across the independent Facebook and GBP workers", () => {
+  const now=Date.parse("2026-10-17T10:00:00Z");
+  assert.equal(vanscoBufferCooldownRemainingMs({blockedUntil:"2026-10-17T10:15:00Z"},now),900_000);
+  assert.equal(vanscoBufferCooldownRemainingMs({blockedUntil:"2026-10-17T09:59:00Z"},now),0);
+  assert.equal(vanscoBufferCooldownRemainingMs({},now),0);
+  const runtime=readFileSync(new URL("../api/_vansco-buffer-runtime.js",import.meta.url),"utf8");
+  assert.match(runtime,/await ensureVanscoBufferNotCoolingDown\(\)/);
+  assert.match(runtime,/isBufferRateLimitMessage\(readableError\(payload, ""\)\)/);
+  assert.match(runtime,/Math.max\(15 \* 60 \* 1000, bufferRetryAfterMs\(response\)\)/);
+  assert.match(runtime,/recordVanscoBufferRateLimit\(response\)/);
+  assert.match(runtime,/await writeBlobJson\(API_QUOTA_STATE_PATH, vanscoQuotaState\)/);
+  assert.match(runtime,/\.\.\.previous,\s*rateLimits,/);
+});
+
+test("Vansco Google Business retains branch independence, saves successful history, and stops on a shared cooldown", () => {
+  const worker=readFileSync(new URL("../api/vansco-google-business-automation-worker.js",import.meta.url),"utf8");
+  assert.match(worker,/for \(const branchKey of BRANCH_ORDER\) \{\s*try \{/);
+  assert.match(worker,/branchResults\[branchKey\] = \{\s*connected: true,\s*state: rateLimited \? "deferred" : "failed"/);
+  assert.match(worker,/if \(rateLimited\) \{[\s\S]*?break;/);
+  assert.match(worker,/await saveVanscoGoogleBusinessHistory\(history.lastPostedByBranch\)/);
+  assert.match(worker,/failedBranches\.length \? "degraded" : "healthy"/);
+  assert.match(worker,/error\?\.code === "BUFFER_RATE_LIMIT" \? 429 : 500/);
+  // None of these modifications change the reel or VFC normal-post workers.
+  assert.doesNotMatch(readFileSync(new URL("../api/youtube-daily-batch.js",import.meta.url),"utf8"),/vanscoBufferCooldownRemainingMs/);
 });

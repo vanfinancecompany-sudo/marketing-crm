@@ -211,6 +211,7 @@ export default async function handler(request, response) {
     let historyChanged = false;
 
     for (const branchKey of BRANCH_ORDER) {
+      try {
       const channelConfig = googleConfig.branches?.[branchKey];
       if (!channelConfig?.channelId) {
         branchResults[branchKey] = { connected: false, error: "Buffer channel unavailable." };
@@ -337,17 +338,46 @@ export default async function handler(request, response) {
         target: VANSCO_GOOGLE_BUSINESS_POSTS_PER_DAY,
         eligibleVehicles: branchVehicleCounts[branchKey] || 0,
       };
+      } catch (error) {
+        // One branch's unavailable channel or rejected post must not abandon
+        // healthy branches or lose the successful posting history already created.
+        const rateLimited = error?.code === "BUFFER_RATE_LIMIT";
+        const message = clean(error?.message || error).slice(0, 240);
+        branchResults[branchKey] = {
+          connected: true,
+          state: rateLimited ? "deferred" : "failed",
+          error: message,
+          retryAfter: rateLimited ? String(error.retryAfter || "") : null,
+        };
+        console.warn("[vansco-google-business] branch refill deferred", {
+          branch: branchKey,
+          reason: rateLimited ? "buffer_rate_limit" : "branch_error",
+          message,
+        });
+        if (rateLimited) {
+          // All three branches use the same Vansco credential. Stop immediately
+          // rather than spend further Buffer requests during its cooldown.
+          for (const remaining of BRANCH_ORDER.slice(BRANCH_ORDER.indexOf(branchKey) + 1)) {
+            branchResults[remaining] = { state: "deferred", reason: "shared_buffer_cooldown" };
+          }
+          break;
+        }
+      }
     }
 
     if (historyChanged) {
       await saveVanscoGoogleBusinessHistory(history.lastPostedByBranch);
     }
 
+    const failedBranches = Object.entries(branchResults)
+      .filter(([, result]) => result?.state === "failed" || result?.state === "deferred")
+      .map(([branch]) => branch);
     const payload = {
-      ok: true,
+      ok: failedBranches.length === 0,
       enabled: true,
       date: dateKey,
-      state: "healthy",
+      state: failedBranches.length ? "degraded" : "healthy",
+      failedBranches,
       source: "dealerkit_meta_catalogue",
       targetPerBranch: VANSCO_GOOGLE_BUSINESS_POSTS_PER_DAY,
       branchVehicleCounts,
@@ -359,7 +389,7 @@ export default async function handler(request, response) {
     await saveVanscoGoogleBusinessAutomationStatus({
       ...payload,
       attemptedAt: new Date().toISOString(),
-      lastSuccessAt: new Date().toISOString(),
+      ...(failedBranches.length ? {} : { lastSuccessAt: new Date().toISOString() }),
     });
     return response.status(200).json(payload);
   } catch (error) {
@@ -373,6 +403,9 @@ export default async function handler(request, response) {
       attemptedAt: new Date().toISOString(),
     };
     await saveVanscoGoogleBusinessAutomationStatus(payload).catch(() => {});
-    return response.status(500).json(payload);
+    return response.status(error?.code === "BUFFER_RATE_LIMIT" ? 429 : 500).json({
+      ...payload,
+      retryAfter: error?.retryAfter || null,
+    });
   }
 }
