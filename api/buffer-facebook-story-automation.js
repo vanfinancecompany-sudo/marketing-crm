@@ -1,3 +1,4 @@
+import { createClient } from "@supabase/supabase-js";
 import {
   bufferDormantPayload,
   isBufferScheduledRunDue,
@@ -292,25 +293,112 @@ function sourceImageCandidates(posts, productKey, dateKey, storyDueAt) {
     .slice(0, STORY_ALTERNATIVE_IMAGE_LIMIT);
 }
 
-export async function storyImageWithinBufferLimit(url, fetchImageHead = fetch) {
-  // Header-based size checks avoid downloading potentially large images into
-  // memory. Unknown Content-Length is not treated as proof of a safe size.
-  const response = await fetchImageHead(url, {
-    method: "HEAD",
-    signal: AbortSignal.timeout(STORY_IMAGE_PREFLIGHT_TIMEOUT_MS),
-  });
-  // Some Wix/CDN hosts omit Content-Length on HEAD. In that case let
-  // Buffer make the authoritative decision; a rejected upload is retried
-  // with a different image. Never knowingly submit an oversized asset.
-  if (!response.ok) return response.status === 405;
-  const header = response.headers.get("content-length");
-  if (!header) return true;
-  const size = Number(header);
-  return Number.isFinite(size) && size > 0 && size <= STORY_IMAGE_LIMIT_BYTES;
+// Inspect size using headers only, without downloading multi-megabyte artwork.
+// Some CDNs reject HEAD and need a one-byte Range GET to expose the full size.
+export async function inspectStoryImage(url, request = fetch) {
+  const value = String(url || "").trim();
+  if (!/^https:\/\//i.test(value)) return { ok: false, reason: "invalid_url" };
+  let head = null;
+  let headError = "head_unavailable";
+  try {
+    head = await request(value, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: AbortSignal.timeout(STORY_IMAGE_PREFLIGHT_TIMEOUT_MS),
+    });
+  } catch (error) {
+    headError = error?.name === "TimeoutError" || error?.name === "AbortError"
+      ? "head_timeout" : "head_unavailable";
+  }
+  if (head?.ok) {
+    const length = String(head.headers?.get?.("content-length") || "").trim();
+    if (!length) return { ok: true, reason: "head_no_length" };
+    const size = Number(length);
+    if (!Number.isFinite(size) || size <= 0) return { ok: false, reason: "invalid_length" };
+    return size <= STORY_IMAGE_LIMIT_BYTES
+      ? { ok: true, reason: "head_verified", size }
+      : { ok: false, reason: "oversized", size };
+  }
+  try {
+    const ranged = await request(value, {
+      method: "GET",
+      headers: { Range: "bytes=0-0" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(STORY_IMAGE_PREFLIGHT_TIMEOUT_MS),
+    });
+    // The range probe needs headers only. Release a streamed response even
+    // when a CDN ignores Range, without downloading full-resolution artwork.
+    if (ranged.body?.cancel) await ranged.body.cancel().catch(() => {});
+    if (!ranged.ok) return { ok: false, reason: "range_http_error" };
+    const contentRange = String(ranged.headers?.get?.("content-range") || "");
+    const fullSize = contentRange.match(/\/(\d+)\s*$/)?.[1];
+    // A 206 Content-Length describes one requested byte, not the whole image.
+    const raw = fullSize || (ranged.status === 206 ? "" : String(ranged.headers?.get?.("content-length") || ""));
+    const size = Number(raw);
+    if (!raw || !Number.isFinite(size) || size <= 0) {
+      return { ok: false, reason: "range_size_unknown" };
+    }
+    return size <= STORY_IMAGE_LIMIT_BYTES
+      ? { ok: true, reason: "range_verified", size }
+      : { ok: false, reason: "oversized", size };
+  } catch (error) {
+    return { ok: false, reason: headError === "head_timeout" ? "head_and_range_timeout" : "range_unavailable" };
+  }
 }
 
-async function createStory({ productKey, sourcePost, dueAt }) {
-  const mediaUrl = imageSource(sourcePost);
+// Preserve the boolean API used by existing Story-safety checks.
+export async function storyImageWithinBufferLimit(url, fetchImageHead = fetch) {
+  return (await inspectStoryImage(url, fetchImageHead)).ok;
+}
+
+// Same branded primary vehicle artwork, served at a smaller JPEG size by Wix.
+// Only transform a trusted Wix CDN media URL, never another host's query string.
+export function compactWixBrandedStoryImageUrl(value) {
+  try {
+    const parsed = new URL(String(value || "").trim());
+    if (parsed.protocol !== "https:" || parsed.hostname !== "static.wixstatic.com"
+      || parsed.username || parsed.password
+      || !/^\/media\/[A-Za-z0-9_~-]+\.(?:png|jpe?g|webp)$/i.test(parsed.pathname)) return "";
+    return `${parsed.origin}${parsed.pathname}/v1/fit/w_1080,h_1350/file.jpg`;
+  } catch {
+    return "";
+  }
+}
+
+function financeStorySupabase() {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("Story image fallback database is not configured.");
+  }
+  return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false },
+  });
+}
+
+async function loadFinanceBrandedImageUrls(registrations) {
+  const wanted = [...new Set(registrations.filter(Boolean))].slice(0, STORY_ALTERNATIVE_IMAGE_LIMIT);
+  if (!wanted.length) return new Map();
+  const result = await financeStorySupabase().from("facebook_adverts")
+    .select("title,picture,is_active")
+    .eq("is_active", true)
+    .in("title", wanted)
+    .limit(STORY_ALTERNATIVE_IMAGE_LIMIT * 2);
+  if (result.error) throw result.error;
+  const byReg = new Map();
+  const conflicts = new Set();
+  for (const row of result.data || []) {
+    const reg = String(row.title || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!wanted.includes(reg) || row.is_active !== true) continue;
+    const compact = compactWixBrandedStoryImageUrl(row.picture);
+    if (!compact) continue;
+    if (byReg.has(reg)) conflicts.add(reg);
+    else byReg.set(reg, compact);
+  }
+  for (const reg of conflicts) byReg.delete(reg);
+  return byReg;
+}
+
+async function createStory({ productKey, sourcePost, dueAt, brandedImageOverride = "" }) {
+  const mediaUrl = brandedImageOverride || imageSource(sourcePost);
   if (!mediaUrl) throw new Error("The selected classified image does not have a public image URL.");
   const originalText = String(sourcePost?.text || "").trim();
   if (!originalText) throw new Error("The selected classified post does not have a caption.");
@@ -358,11 +446,38 @@ async function createNextStory({ posts, productKey, dateKey, now, storyTarget })
 
   let skippedOversizedOrUnverified = 0;
   let rejectedDuplicateOrMedia = 0;
-  for (const sourcePost of candidates) {
-    const imageUrl = imageSource(sourcePost);
-    const acceptable = await storyImageWithinBufferLimit(imageUrl).catch(() => false);
-    if (!acceptable) {
+  const checkReasons = {};
+  const recordFailure = (reason) => {
+    const category = String(reason || "unknown");
+    checkReasons[category] = (checkReasons[category] || 0) + 1;
+  };
+  const recordCreated = (post, sourcePost, mediaSource) => {
+    posts.unshift(post);
+    return {
+      created: true,
+      mediaKind: "story",
+      registration: extractBufferRegistration(sourcePost?.text),
+      sourcePostId: sourcePost.id,
+      bufferPostId: post.id,
+      dueAt: post.dueAt || slotInfo.slot.dueAt,
+      localTime: slotInfo.slot.localTime,
+      publishing: "automatic",
+      mediaSource,
+      catchUp: Boolean(slotInfo.slot.catchUp),
+    };
+  };
+  // Check Van Finance image headers together so six slow CDN responses cannot
+  // consume the entire 120-second worker window. No additional Buffer calls.
+  const primaryChecks = productKey === "vanFinance"
+    ? await Promise.all(candidates.map((post) => inspectStoryImage(imageSource(post))))
+    : null;
+  for (const [index, sourcePost] of candidates.entries()) {
+    const checked = primaryChecks
+      ? primaryChecks[index]
+      : await inspectStoryImage(imageSource(sourcePost));
+    if (!checked.ok) {
       skippedOversizedOrUnverified += 1;
+      recordFailure(checked.reason);
       continue;
     }
     try {
@@ -371,27 +486,58 @@ async function createNextStory({ posts, productKey, dateKey, now, storyTarget })
         sourcePost,
         dueAt: slotInfo.slot.dueAt,
       });
-      posts.unshift(post);
-      return {
-        created: true,
-        mediaKind: "story",
-        registration: extractBufferRegistration(sourcePost?.text),
-        sourcePostId: sourcePost.id,
-        bufferPostId: post.id,
-        dueAt: post.dueAt || slotInfo.slot.dueAt,
-        localTime: slotInfo.slot.localTime,
-        publishing: "automatic",
-        catchUp: Boolean(slotInfo.slot.catchUp),
-      };
+      return recordCreated(post, sourcePost, "original_facebook_post");
     } catch (error) {
       if (!RECOVERABLE_STORY_MEDIA_ERROR.test(String(error?.message || error))) throw error;
       rejectedDuplicateOrMedia += 1;
+    }
+  }
+
+  // Van Finance only: fall back to the SAME vehicle's active branded Wix primary,
+  // never a gallery from another registration or an unverified third-party URL.
+  // Rent2Buy's already-working media selection is left unchanged.
+  if (productKey === "vanFinance" && skippedOversizedOrUnverified > 0) {
+    let brandedByReg = new Map();
+    try {
+      brandedByReg = await loadFinanceBrandedImageUrls(
+        candidates.map((post) => extractBufferRegistration(post?.text)),
+      );
+    } catch (error) {
+      console.warn("[buffer-facebook-story-automation] branded fallback unavailable", {
+        reason: "image_source_lookup_unavailable",
+        message: String(error?.message || error).slice(0, 150),
+      });
+    }
+    const compactImages = candidates.map((post) => brandedByReg.get(extractBufferRegistration(post?.text)) || "");
+    const compactChecks = await Promise.all(compactImages.map((url) =>
+      url ? inspectStoryImage(url) : Promise.resolve(null)));
+    for (const [index, sourcePost] of candidates.entries()) {
+      const smallerImage = compactImages[index];
+      if (!smallerImage) continue;
+      const checked = compactChecks[index];
+      if (!checked.ok) {
+        recordFailure("branded_" + checked.reason);
+        continue;
+      }
+      try {
+        const post = await createStory({
+          productKey,
+          sourcePost,
+          dueAt: slotInfo.slot.dueAt,
+          brandedImageOverride: smallerImage,
+        });
+        return recordCreated(post, sourcePost, "same_vehicle_branded_wix_jpeg");
+      } catch (error) {
+        if (!RECOVERABLE_STORY_MEDIA_ERROR.test(String(error?.message || error))) throw error;
+        rejectedDuplicateOrMedia += 1;
+      }
     }
   }
   return {
     skipped: "no_verified_buffer_compatible_story_image",
     checked: candidates.length,
     oversizedOrUnverified: skippedOversizedOrUnverified,
+    checkReasons,
     bufferRejected: rejectedDuplicateOrMedia,
     localTime: slotInfo.slot.localTime,
   };
@@ -488,6 +634,8 @@ export default async function handler(request, response) {
         queued: Number.isFinite(result.queued) ? result.queued : null,
         imagesChecked: Number.isFinite(result.checked) ? result.checked : null,
         unsuitableImages: Number.isFinite(result.oversizedOrUnverified) ? result.oversizedOrUnverified : null,
+        imageCheckReasons: result.checkReasons || {},
+        mediaSource: result.mediaSource || null,
         bufferRejected: Number.isFinite(result.bufferRejected) ? result.bufferRejected : null,
       }];
     }));
