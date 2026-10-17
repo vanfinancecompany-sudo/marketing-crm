@@ -3,6 +3,8 @@ import { isBufferApiActiveWindow } from "../lib/bufferActiveWindow.js";
 import {
   BUFFER_MONITORING_MAX_24H_REQUESTS,
   bufferQuotaUsed,
+  bufferRetryAfterMs,
+  isBufferRateLimitMessage,
   bufferStatusPollIntervalMs,
   bufferTwentyFourHourQuota,
   parseBufferRateLimitHeaders,
@@ -438,12 +440,54 @@ async function loadVanscoQuotaState() {
 async function recordVanscoQuotaTelemetry(response) {
   const rateLimits = parseBufferRateLimitHeaders(response);
   if (!rateLimits.length) return;
+  const previous = await loadVanscoQuotaState();
   vanscoQuotaState = {
+    ...previous,
     rateLimits,
     quotaUpdatedAt: new Date().toISOString(),
   };
   vanscoQuotaReadAt = Date.now();
   await writeBlobJson(API_QUOTA_STATE_PATH, vanscoQuotaState).catch(() => {});
+}
+
+// Share real Buffer provider cooldowns across Vansco Facebook, Stories and
+// all three Google Business workers. This does not affect their posting
+// targets or scheduled slots, and never retries a rejected mutation blindly.
+export function vanscoBufferCooldownRemainingMs(state, now = Date.now()) {
+  const until = new Date(state?.blockedUntil || 0).getTime();
+  return Number.isFinite(until) ? Math.max(0, until - now) : 0;
+}
+
+async function ensureVanscoBufferNotCoolingDown() {
+  const state = await loadVanscoQuotaState();
+  const remaining = vanscoBufferCooldownRemainingMs(state);
+  if (remaining <= 0) return;
+  const error = new Error("Vansco Buffer API cooldown is active. No new publishing request was sent.");
+  error.code = "BUFFER_RATE_LIMIT";
+  error.reason = "buffer_provider_cooldown";
+  error.retryAfterMs = remaining;
+  error.retryAfter = String(Math.ceil(remaining / 1000));
+  throw error;
+}
+
+async function recordVanscoBufferRateLimit(response) {
+  const now = Date.now();
+  const previous = await loadVanscoQuotaState();
+  const oldUntil = new Date(previous?.blockedUntil || 0).getTime();
+  const retryAfterMs = Math.max(15 * 60 * 1000, bufferRetryAfterMs(response));
+  const blockedUntil = new Date(Math.max(Number.isFinite(oldUntil) ? oldUntil : 0, now + retryAfterMs)).toISOString();
+  vanscoQuotaState = {
+    ...previous,
+    blockedUntil,
+    lastErrorAt: new Date(now).toISOString(),
+  };
+  vanscoQuotaReadAt = now;
+  await writeBlobJson(API_QUOTA_STATE_PATH, vanscoQuotaState).catch((error) => {
+    console.warn("[vansco-buffer] could not persist provider cooldown", {
+      message: String(error?.message || error).slice(0, 120),
+    });
+  });
+  return retryAfterMs;
 }
 
 async function vanscoMonitoringReserveActive() {
@@ -461,6 +505,7 @@ async function vanscoMonitoringReserveActive() {
 }
 
 async function bufferGraphql(query, variables = undefined) {
+  await ensureVanscoBufferNotCoolingDown();
   const response = await fetch(BUFFER_API_URL, {
     method: "POST",
     headers: {
@@ -471,11 +516,13 @@ async function bufferGraphql(query, variables = undefined) {
   });
   const payload = await response.json().catch(() => ({}));
   await recordVanscoQuotaTelemetry(response);
-  if (response.status === 429) {
-    const retryAfter = String(response.headers.get("retry-after") || "").trim();
+  if (response.status === 429 || isBufferRateLimitMessage(readableError(payload, ""))) {
+    const retryAfterMs = await recordVanscoBufferRateLimit(response);
     const error = new Error(readableError(payload, "Buffer rate limit reached."));
     error.code = "BUFFER_RATE_LIMIT";
-    error.retryAfter = retryAfter;
+    error.reason = "buffer_provider_rate_limit";
+    error.retryAfterMs = retryAfterMs;
+    error.retryAfter = String(Math.ceil(retryAfterMs / 1000));
     throw error;
   }
   if (!response.ok || payload?.errors?.length) {
