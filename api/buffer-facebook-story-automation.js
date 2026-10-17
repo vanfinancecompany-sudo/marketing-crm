@@ -463,8 +463,15 @@ async function createNextStory({ posts, productKey, dateKey, now, storyTarget })
       catchUp: Boolean(slotInfo.slot.catchUp),
     };
   };
-  for (const sourcePost of candidates) {
-    const checked = await inspectStoryImage(imageSource(sourcePost));
+  // Check Van Finance image headers together so six slow CDN responses cannot
+  // consume the entire 120-second worker window. No additional Buffer calls.
+  const primaryChecks = productKey === "vanFinance"
+    ? await Promise.all(candidates.map((post) => inspectStoryImage(imageSource(post))))
+    : null;
+  for (const [index, sourcePost] of candidates.entries()) {
+    const checked = primaryChecks
+      ? primaryChecks[index]
+      : await inspectStoryImage(imageSource(sourcePost));
     if (!checked.ok) {
       skippedOversizedOrUnverified += 1;
       recordFailure(checked.reason);
@@ -498,11 +505,13 @@ async function createNextStory({ posts, productKey, dateKey, now, storyTarget })
         message: String(error?.message || error).slice(0, 150),
       });
     }
-    for (const sourcePost of candidates) {
-      const registration = extractBufferRegistration(sourcePost?.text);
-      const smallerImage = brandedByReg.get(registration);
+    const compactImages = candidates.map((post) => brandedByReg.get(extractBufferRegistration(post?.text)) || "");
+    const compactChecks = await Promise.all(compactImages.map((url) =>
+      url ? inspectStoryImage(url) : Promise.resolve(null)));
+    for (const [index, sourcePost] of candidates.entries()) {
+      const smallerImage = compactImages[index];
       if (!smallerImage) continue;
-      const checked = await inspectStoryImage(smallerImage);
+      const checked = compactChecks[index];
       if (!checked.ok) {
         recordFailure("branded_" + checked.reason);
         continue;
