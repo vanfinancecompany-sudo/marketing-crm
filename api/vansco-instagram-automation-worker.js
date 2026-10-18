@@ -159,7 +159,7 @@ export default async function handler(request,response){
      stage="create_instagram_post";
      const p=await createVanscoInstagramPost({
       config:settings,text:buildVanscoFacebookCaption(candidate),
-      imageUrl:media,dueAt:slot.dueAt
+      imageUrl:media,vehicleId:candidate.vehicleId,dueAt:slot.dueAt
      });
      excluded.add(candidate.vehicleUrl);
      history.lastPostedByKey[candidate.vehicleKey]=slot.dueAt;
