@@ -6,6 +6,7 @@ import {
   vatLabelFromText,
   extractUkRegistration,
   vanscoFacebookImageUrls,
+  selectVanscoSocialImagesFromSources,
 } from "../lib/vanscoFacebookAutomation.js";
 import {
   CACHE_TABLE,
@@ -46,7 +47,7 @@ function cacheRowIsFresh(row, now = Date.now()) {
     && now - checkedAt <= VAT_CACHE_MAX_AGE_MS;
 }
 
-async function hydrateVanscoVatFromDealerKitState(vehicles) {
+async function hydrateVanscoVatFromDealerKitState(vehicles, { preferLiveMetaImages = false } = {}) {
   try {
     const supabase = getSupabaseServiceAdmin();
     const result = await supabase
@@ -115,16 +116,12 @@ async function hydrateVanscoVatFromDealerKitState(vehicles) {
         || null;
       if (!evidence) return vehicle;
 
-      // Prefer the DealerKit stock-state JPEGs over Meta/Wix artwork. The Meta
-      // catalogue can expose AVIF/WebP URLs which Buffer/Meta may reject, while
-      // DealerKit's live stock snapshot currently provides conventional JPEGs.
-      const imageUrls = vanscoFacebookImageUrls({
-        imageUrls: [
-          ...(Array.isArray(evidence?.imageUrls) ? evidence.imageUrls : []),
-          ...(Array.isArray(vehicle?.imageUrls) ? vehicle.imageUrls : []),
-        ],
-        imageUrl: vehicle?.imageUrl,
-      });
+      // Fresh Meta images win ONLY for opt-in Vansco Facebook and Vansco GBP
+      // publishing. Do not mix old saved stock gallery photos into a newly
+      // changed promotional set. Other Vansco channels retain legacy order.
+      const imageUrls = selectVanscoSocialImagesFromSources(
+        vehicle, evidence?.imageUrls, { preferLiveMeta: preferLiveMetaImages },
+      );
 
       return {
         ...vehicle,
@@ -200,7 +197,7 @@ async function hydrateVanscoVatFromCache(vehicles) {
   }
 }
 
-export async function fetchVanscoMetaCatalogue() {
+export async function fetchVanscoMetaCatalogue({ preferLiveMetaImages = false } = {}) {
   const username = String(process.env.DEALERKIT_META_USERNAME || "").trim();
   const password = String(process.env.DEALERKIT_META_PASSWORD || "").trim();
   if (!username || !password) {
@@ -224,7 +221,7 @@ export async function fetchVanscoMetaCatalogue() {
   const rows = parseCsvRecords(raw);
   if (!rows.length) throw new Error("DealerKit Meta catalogue returned no vehicle rows.");
   const vehicles = rows.map(normalizeVanscoMetaRow);
-  const dealerKitHydrated = await hydrateVanscoVatFromDealerKitState(vehicles);
+  const dealerKitHydrated = await hydrateVanscoVatFromDealerKitState(vehicles, { preferLiveMetaImages });
   return hydrateVanscoVatFromCache(dealerKitHydrated);
 }
 

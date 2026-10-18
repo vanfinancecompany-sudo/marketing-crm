@@ -189,7 +189,7 @@ export default async function handler(request, response) {
     }
 
     const [vehicles, googleConfig, history] = await Promise.all([
-      fetchVanscoMetaCatalogue(),
+      fetchVanscoMetaCatalogue({ preferLiveMetaImages: true }),
       loadVanscoGoogleBusinessConfig({ forceDiscovery: dryRun }),
       loadVanscoGoogleBusinessHistory(),
     ]);
