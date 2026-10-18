@@ -510,7 +510,7 @@ test("Vansco Buffer monitoring collects today's actual failed posts without coun
       node: {
         id: "a2", status: "error", channelId: "air",
         dueAt: "2026-10-17T10:00:00Z",
-        text: "VANSCO SOUTHAMPTON AIRPORT STOCK\\n\\nREGISTRATION: AB12CDE",
+        text: "VANSCO SOUTHAMPTON AIRPORT STOCK\n\nREGISTRATION: AB12CDE",
         error: { message: "Please update the media URL to be publicly accessible before retrying the post." },
       },
     }], pageInfo: { hasNextPage: false } } },
