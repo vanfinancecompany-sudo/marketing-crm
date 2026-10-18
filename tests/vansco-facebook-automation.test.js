@@ -28,6 +28,7 @@ import {
   vanscoNextDateKey,
   vanscoAdvertVatLabel,
   vanscoFacebookImageUrls,
+  selectVanscoSocialImagesFromSources,
   vanscoFacebookStorySlots,
   vanscoGoogleBusinessSlots,
   vatLabelFromStatus,
@@ -325,12 +326,64 @@ test("worker replaces queued live posts that are missing a VAT label", async () 
   assert.match(source, /VAT_CACHE_MAX_AGE_MS/);
   assert.match(source, /snapshot\?\.images/);
   assert.match(source, /vanscoFacebookImageUrls/);
-  assert.match(
-    source,
-    /\.\.\.\(Array\.isArray\(evidence\?\.imageUrls\)[\s\S]*\.\.\.\(Array\.isArray\(vehicle\?\.imageUrls\)/,
+  assert.match(source, /selectVanscoSocialImagesFromSources/);
+  assert.match(source, /preferLiveMetaImages/);
+  assert.match(source, /hydrateVanscoVatFromCache/);
+});
+
+
+test("Vansco Facebook and GBP use current Meta sale artwork ahead of old saved DealerKit stock photographs", () => {
+  const oldSale = [
+    "https://acdn.uk/vansco/i/oktoberfest-old-front.jpeg",
+    "https://acdn.uk/vansco/i/oktoberfest-old-side.jpeg",
+  ];
+  const freshMeta = {
+    vehicleUrl: "https://www.vansco.co.uk/ford-transit-registration-a",
+    imageUrl: "https://static.wixstatic.com/media/halloween-new-front.jpg",
+    imageUrls: [
+      "https://static.wixstatic.com/media/halloween-new-front.jpg",
+      "https://static.wixstatic.com/media/halloween-new-side.webp",
+    ],
+  };
+  const preferred = selectVanscoSocialImagesFromSources(freshMeta, oldSale, {preferLiveMeta: true});
+  assert.deepEqual(preferred, freshMeta.imageUrls);
+  assert.ok(preferred.every(url => !url.includes("oktoberfest")));
+
+  // Opt-in is deliberate: Vansco Instagram and Stories retain their current
+  // photo order and there is no shared VFC / Rent2Buy publishing change.
+  assert.deepEqual(
+    selectVanscoSocialImagesFromSources(freshMeta, oldSale),
+    [oldSale[0],oldSale[1],freshMeta.imageUrls[0]],
+  );
+  assert.deepEqual(
+    selectVanscoSocialImagesFromSources({ imageUrls: [], imageUrl: "" }, oldSale, {preferLiveMeta: true}),
+    oldSale,
   );
 });
 
+test("Vansco latest-image priority is per vehicle, preserves exact order and never combines campaign generations", () => {
+  const newFirst = "https://acdn.uk/vansco/i/new-halloween-front.jpeg";
+  const oldFront = "https://acdn.uk/vansco/i/old-sale-front.jpeg";
+  const vanA = {imageUrl:newFirst,imageUrls:[newFirst]};
+  const vanB = {imageUrl:"https://acdn.uk/vansco/i/another-vehicle.jpeg",imageUrls:["https://acdn.uk/vansco/i/another-vehicle.jpeg"]};
+  assert.deepEqual(selectVanscoSocialImagesFromSources(vanA,[oldFront],{preferLiveMeta:true}),[newFirst]);
+  assert.deepEqual(selectVanscoSocialImagesFromSources(vanB,[oldFront],{preferLiveMeta:true}),vanB.imageUrls);
+  assert.deepEqual(selectVanscoSocialImagesFromSources({imageUrls:[newFirst,newFirst],imageUrl:newFirst},[oldFront],{preferLiveMeta:true}),[newFirst]);
+});
+
+test("only Vansco normal Facebook and branch-specific Google Business opt in to fresh Meta gallery priority", () => {
+  const facebook=readFileSync(new URL("../api/vansco-facebook-automation-worker.js",import.meta.url),"utf8");
+  const google=readFileSync(new URL("../api/vansco-google-business-automation-worker.js",import.meta.url),"utf8");
+  const stories=readFileSync(new URL("../api/vansco-facebook-story-automation-worker.js",import.meta.url),"utf8");
+  const instagram=readFileSync(new URL("../api/vansco-instagram-automation-worker.js",import.meta.url),"utf8");
+  const loader=readFileSync(new URL("../api/_vansco-facebook-source.js",import.meta.url),"utf8");
+  assert.match(facebook,/fetchVanscoMetaCatalogue\(\{ preferLiveMetaImages: true \}\)/);
+  assert.match(google,/fetchVanscoMetaCatalogue\(\{ preferLiveMetaImages: true \}\)/);
+  assert.doesNotMatch(stories,/preferLiveMetaImages/);
+  assert.doesNotMatch(instagram,/preferLiveMetaImages/);
+  assert.match(loader,/preferLiveMetaImages = false/);
+  assert.doesNotMatch(facebook,/pruneStaleScheduledPosts\([\s\S]*?deleteVanscoBufferPost\([\s\S]*?image_changed/);
+});
 
 test("Vansco Buffer runtime sends at most three ordered image assets", async () => {
   const { readFile } = await import("node:fs/promises");
