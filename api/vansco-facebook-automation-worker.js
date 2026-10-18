@@ -274,7 +274,7 @@ export default async function handler(request, response) {
       return response.status(200).json(payload);
     }
 
-    const vehicles = await fetchVanscoMetaCatalogue();
+    const vehicles = await fetchVanscoMetaCatalogue({ preferLiveMetaImages: true });
     const eligible = vehicles.filter(isEligibleVanscoVehicle);
     const liveVehicles = liveVehicleMap(eligible);
 
