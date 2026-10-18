@@ -178,7 +178,7 @@ export default async function handler(request, response) {
     }
 
     const [vehicles, bufferConfig, history] = await Promise.all([
-      fetchVanscoMetaCatalogue(),
+      fetchVanscoMetaCatalogue({ preferLiveMetaImages: true }),
       loadVanscoBufferConfig(),
       loadVanscoFacebookStoryHistory(),
     ]);
