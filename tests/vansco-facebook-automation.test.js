@@ -504,6 +504,20 @@ test("Vansco Buffer monitoring collects today's actual failed posts without coun
   assert.equal(failed.googleBusiness.vansco333[0].message,"Image rejected");
   assert.equal(failed.googleBusiness.vansco333[0].stockRegistration,"");
   assert.deepEqual(failed.googleBusiness.southamptonAirport,[]);
+  const gbpImageFailure = {
+    ...payload,
+    data: { ...payload.data, airportSent: { edges: [{
+      node: {
+        id: "a2", status: "error", channelId: "air",
+        dueAt: "2026-10-17T10:00:00Z",
+        text: "VANSCO SOUTHAMPTON AIRPORT STOCK\\n\\nREGISTRATION: AB12CDE",
+        error: { message: "Please update the media URL to be publicly accessible before retrying the post." },
+      },
+    }], pageInfo: { hasNextPage: false } } },
+  };
+  const gbpExtracted = vanscoFailedPostsByChannel(gbpImageFailure, "fb", branches, "2026-10-17");
+  assert.equal(gbpExtracted.googleBusiness.southamptonAirport[0].stockRegistration, "AB12CDE");
+
   assert.deepEqual(failed.googleBusiness.newForest,[]);
   const sent=vanscoSentPostsByChannel(payload,"fb",branches);
   assert.equal(sent.facebook.length,1);
