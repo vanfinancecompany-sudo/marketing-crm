@@ -322,6 +322,7 @@ export default async function handler(request, response) {
               config: channelConfig,
               text: buildVanscoGoogleBusinessCaption(vehicle),
               imageUrl: vehicle.imageUrl,
+              vehicleId: vehicle.vehicleId,
               dueAt: slot.dueAt,
               linkUrl: vehicle.vehicleUrl,
             });
