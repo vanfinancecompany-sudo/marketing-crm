@@ -1,4 +1,5 @@
 import { list, put } from "@vercel/blob";
+import { prepareVanscoBufferImages } from "../lib/vanscoSocialMediaHandoff.js";
 import { isBufferApiActiveWindow } from "../lib/bufferActiveWindow.js";
 import {
   BUFFER_MONITORING_MAX_24H_REQUESTS,
@@ -1025,6 +1026,7 @@ export async function createVanscoBufferPost({ config, text, imageUrl, imageUrls
     throw new Error("Vansco Buffer post requires at least one compatible JPEG/PNG image.");
   }
 
+  const hostedUrls = await prepareVanscoBufferImages(urls);
   const payload = await bufferGraphql(CREATE_POST_MUTATION, {
     input: {
       text: String(text || "").trim(),
@@ -1034,7 +1036,7 @@ export async function createVanscoBufferPost({ config, text, imageUrl, imageUrls
       dueAt: new Date(dueAt).toISOString(),
       saveToDraft: false,
       source: "vansco-marketing-crm",
-      assets: urls.map((url) => ({ image: { url } })),
+      assets: hostedUrls.map((url) => ({ image: { url } })),
       metadata: { facebook: { type: "post" } },
     },
   });
@@ -1055,6 +1057,7 @@ export async function createVanscoFacebookStory({
     throw new Error("Vansco Facebook Story requires a compatible JPEG/PNG image.");
   }
 
+  const [hostedImage] = await prepareVanscoBufferImages([compatibleImage]);
   const payload = await bufferGraphql(CREATE_POST_MUTATION, {
     input: {
       text: String(text || "").trim(),
@@ -1064,7 +1067,7 @@ export async function createVanscoFacebookStory({
       dueAt: new Date(dueAt).toISOString(),
       saveToDraft: false,
       source: "vansco-marketing-crm-story",
-      assets: [{ image: { url: compatibleImage } }],
+      assets: [{ image: { url: hostedImage } }],
       metadata: { facebook: { type: "story" } },
     },
   });
@@ -1090,6 +1093,7 @@ export async function createVanscoGoogleBusinessPost({
     throw new Error("Vansco Google Business post requires a public Learn more URL.");
   }
 
+  const [hostedImage] = await prepareVanscoBufferImages([compatibleImage]);
   const payload = await bufferGraphql(CREATE_POST_MUTATION, {
     input: {
       text: String(text || "").trim(),
@@ -1099,7 +1103,7 @@ export async function createVanscoGoogleBusinessPost({
       dueAt: new Date(dueAt).toISOString(),
       saveToDraft: false,
       source: "vansco-marketing-crm",
-      assets: [{ image: { url: compatibleImage } }],
+      assets: [{ image: { url: hostedImage } }],
       metadata: {
         google: {
           type: "whats_new",

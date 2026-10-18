@@ -1,5 +1,6 @@
 
 import {list,put} from "@vercel/blob";
+import { prepareVanscoBufferImages } from "../lib/vanscoSocialMediaHandoff.js";
 import {inspectVanscoBufferAccount,loadVanscoBufferState,vanscoBufferCompatibleImageUrl} from "./_vansco-buffer-runtime.js";
 import {BUFFER_CREATE_POST_MUTATION,buildBufferCreatePostInput,parseBufferCreatePostPayload} from "../lib/bufferPublishing.js";
 import {guardedBufferGraphql} from "../lib/bufferRuntimeGuard.js";
@@ -57,14 +58,16 @@ export async function createVanscoInstagramPost({config,text,imageUrl,dueAt}){
  const url=vanscoBufferCompatibleImageUrl(imageUrl);
  if(!url)throw new Error("Instagram image URL is not a supported public JPEG or PNG.");
  if(!token())throw new Error("Buffer API key is missing");
- const input=buildBufferCreatePostInput({
+ const [hostedImage]=await prepareVanscoBufferImages([url]);
+const input=buildBufferCreatePostInput({
   channelId:config.channelId,platform:"instagram",
-  text,mediaUrl:url,mediaKind:"image",dueAt
+  text,mediaUrl:hostedImage,mediaKind:"image",dueAt
  });
  const data=await guardedBufferGraphql({
   url:"https://api.buffer.com",token:token(),
   query:BUFFER_CREATE_POST_MUTATION,variables:{input},
   useSuppliedCredential:true,
+  skipImageHandoff:true,
  });
  return parseBufferCreatePostPayload(data);
 }

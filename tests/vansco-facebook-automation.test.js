@@ -371,7 +371,7 @@ test("Vansco latest-image priority is per vehicle, preserves exact order and nev
   assert.deepEqual(selectVanscoSocialImagesFromSources({imageUrls:[newFirst,newFirst],imageUrl:newFirst},[oldFront],{preferLiveMeta:true}),[newFirst]);
 });
 
-test("only Vansco normal Facebook and branch-specific Google Business opt in to fresh Meta gallery priority", () => {
+test("all Vansco social channels opt in to fresh Meta image priority without modifying other brands", () => {
   const facebook=readFileSync(new URL("../api/vansco-facebook-automation-worker.js",import.meta.url),"utf8");
   const google=readFileSync(new URL("../api/vansco-google-business-automation-worker.js",import.meta.url),"utf8");
   const stories=readFileSync(new URL("../api/vansco-facebook-story-automation-worker.js",import.meta.url),"utf8");
@@ -379,8 +379,8 @@ test("only Vansco normal Facebook and branch-specific Google Business opt in to 
   const loader=readFileSync(new URL("../api/_vansco-facebook-source.js",import.meta.url),"utf8");
   assert.match(facebook,/fetchVanscoMetaCatalogue\(\{ preferLiveMetaImages: true \}\)/);
   assert.match(google,/fetchVanscoMetaCatalogue\(\{ preferLiveMetaImages: true \}\)/);
-  assert.doesNotMatch(stories,/preferLiveMetaImages/);
-  assert.doesNotMatch(instagram,/preferLiveMetaImages/);
+  assert.match(stories,/preferLiveMetaImages/);
+  assert.match(instagram,/preferLiveMetaImages/);
   assert.match(loader,/preferLiveMetaImages = false/);
   assert.doesNotMatch(facebook,/pruneStaleScheduledPosts\([\s\S]*?deleteVanscoBufferPost\([\s\S]*?image_changed/);
 });
@@ -393,7 +393,7 @@ test("Vansco Buffer runtime sends at most three ordered image assets", async () 
   );
   assert.match(runtime, /imageUrls = \[\]/);
   assert.match(runtime, /\.slice\(0, 3\)/);
-  assert.match(runtime, /assets: urls\.map\(\(url\) => \(\{ image: \{ url \} \}\)\)/);
+  assert.match(runtime, /assets: hostedUrls\.map\(\(url\) => \(\{ image: \{ url \} \}\)\)/);
 });
 
 test("Vansco Buffer converts Wix AVIF/WebP assets to JPEG before publishing", async () => {

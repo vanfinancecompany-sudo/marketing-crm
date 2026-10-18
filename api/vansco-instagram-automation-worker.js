@@ -80,7 +80,7 @@ export default async function handler(request,response){
  const now=Date.now(),today=londonDateKeyForValue(new Date(now));
  let stage="load_stock";
  try{
-  const stock=await fetchVanscoMetaCatalogue();
+  const stock=await fetchVanscoMetaCatalogue({ preferLiveMetaImages: true });
   const vehicles=stock.filter(isEligibleVanscoVehicle);
   stage="load_instagram_history";
   const history=await vanscoInstagramHistory();
