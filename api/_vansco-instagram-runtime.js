@@ -54,11 +54,11 @@ export async function vanscoInstagramState(config,now=new Date()){
  const londonKey=londonDateKeyForValue(now);
  return loadVanscoBufferState(config,londonKey+"T12:00:00.000Z");
 }
-export async function createVanscoInstagramPost({config,text,imageUrl,dueAt}){
+export async function createVanscoInstagramPost({config,text,imageUrl,dueAt,vehicleId}){
  const url=vanscoBufferCompatibleImageUrl(imageUrl);
  if(!url)throw new Error("Instagram image URL is not a supported public JPEG or PNG.");
  if(!token())throw new Error("Buffer API key is missing");
- const [hostedImage]=await prepareVanscoBufferImages([url]);
+ const [hostedImage]=await prepareVanscoBufferImages([url], {vehicleId,dueAt});
 const input=buildBufferCreatePostInput({
   channelId:config.channelId,platform:"instagram",
   text,mediaUrl:hostedImage,mediaKind:"image",dueAt
