@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { prepareVanscoBufferImages, VANSCO_BLOB_PREFIX } from "../lib/vanscoSocialMediaHandoff.js";
+import { prepareVanscoBufferImages, loadVanscoImageStorageUsage, VANSCO_BLOB_PREFIX } from "../lib/vanscoSocialMediaHandoff.js";
 
 const VALID_JPEG = Buffer.from([0xff,0xd8,0xff,0xe0,0x01,0x02,0xff,0xd9]);
 const OTH_JPEG = Buffer.from([0xff,0xd8,0xff,0xe0,0x03,0x04,0xff,0xd9]);
@@ -19,6 +19,11 @@ function fixture(images = new Map([[vansco(1),VALID_JPEG],[vansco(2),OTH_JPEG],[
       if (!b) return new Response("not found", { status: 404 });
       return new Response(b, { headers: {"Content-Type":"image/jpeg","Content-Length":String(b.length)} });
     },
+    listImpl: async ({prefix,cursor}) => {
+      assert.equal(prefix,VANSCO_BLOB_PREFIX+"/");
+      assert.equal(cursor,undefined);
+      return {blobs:[...blobs.entries()].map(([pathname,obj])=>({pathname,size:obj.size||8})),hasMore:false};
+    },
     headImpl: async pathname => {
       operations.heads.push(pathname);
       if (!blobs.has(pathname)) {
@@ -29,7 +34,7 @@ function fixture(images = new Map([[vansco(1),VALID_JPEG],[vansco(2),OTH_JPEG],[
     putImpl: async (pathname, bytes, opts) => {
       operations.writes.push({pathname,bytes,opts});
       if (blobs.has(pathname)) throw new Error("Existing blob must never be overwritten");
-      const obj = {url:expectedPublic(pathname),pathname,contentType:opts.contentType};
+      const obj = {url:expectedPublic(pathname),pathname,contentType:opts.contentType,size:bytes.length};
       blobs.set(pathname,obj);
       return obj;
     },
@@ -114,6 +119,38 @@ test("Unexpected storage error fails closed; never overwrites or borrows another
   assert.equal(fx.operations.writes.length,0);
   fx.deps.headImpl=async pathname=>({url:"https://test-storage.public.blob.vercel-storage.com/buffer-social-images/wrong.jpg",pathname,contentType:"image/jpeg"});
   await assert.rejects(prepareVanscoBufferImages([vansco(1)],fx.deps),/dedicated public storage path/);
+});
+
+test("Refuses general Wix media even if public, to prevent cross-brand image contamination",async()=>{
+  const fx=fixture();
+  await assert.rejects(prepareVanscoBufferImages(["https://static.wixstatic.com/media/vanfinancecompany.jpg"],fx.deps),/approved public image host/);
+  assert.equal(fx.operations.fetches.length,0);
+});
+
+test("Vansco Blob inventory is scoped, paginated and fails on incomplete data",async()=>{
+  let count=0;
+  const result=await loadVanscoImageStorageUsage(async ({prefix,cursor})=>{
+    assert.equal(prefix,VANSCO_BLOB_PREFIX+"/");
+    count++;
+    return cursor ? {blobs:[{pathname:prefix+"b.jpg",size:23}],hasMore:false}
+      : {blobs:[{pathname:prefix+"a.jpg",size:12}],hasMore:true,cursor:"page-2"};
+  });
+  assert.equal(count,2);
+  assert.deepEqual(result,{count:2,bytes:35});
+  await assert.rejects(loadVanscoImageStorageUsage(async()=>({blobs:[],hasMore:true})),/pagination is incomplete/);
+  await assert.rejects(loadVanscoImageStorageUsage(async()=>({blobs:[{pathname:"buffer-social-images/wrong.jpg",size:12}],hasMore:false})),/unrelated file/);
+  await assert.rejects(loadVanscoImageStorageUsage(async()=>({blobs:null,hasMore:false})),/usage is unavailable/);
+});
+
+test("Vansco refuses additional storage beyond the 2 GB/4000 file cap; other brands unaffected",async()=>{
+  const fx=fixture();
+  fx.deps.listImpl=async()=>({blobs:[{pathname:VANSCO_BLOB_PREFIX+"/old.jpg",size:2_000_000_000}],hasMore:false});
+  await assert.rejects(prepareVanscoBufferImages([vansco(1)],fx.deps),/storage cap reached/);
+  assert.equal(fx.operations.writes.length,0);
+  fx.deps.listImpl=async()=>({blobs:[{pathname:VANSCO_BLOB_PREFIX+"/old.jpg",size:0}],hasMore:false});
+  const ok=await prepareVanscoBufferImages([vansco(1)],fx.deps);
+  assert.equal(ok.length,1);
+  assert.equal(fx.operations.writes.length,1);
 });
 
 test("Vansco-only code paths have the handoff, while VFC/Rent2Buy retain their default behaviour",()=>{
