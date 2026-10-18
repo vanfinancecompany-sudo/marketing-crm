@@ -67,3 +67,39 @@ test("SendGrid helper maps attachments and reply-to without changing existing ca
   assert.equal(submitted.attachments.length, 1);
   assert.equal(submitted.attachments[0].filename, "bank.pdf");
 });
+
+test("accepts a single genuine address document as an explicitly partial batch", () => {
+  const input = payload();
+  input.partial = true;
+  input.groups = { address: [input.groups.address[0]], licence: [], bank: [] };
+  const result = validateRent2BuyProofPayload(input);
+  assert.equal(result.meta.partial, true);
+  assert.equal(result.groups.address.length, 1);
+  assert.equal(result.groups.bank.length, 0);
+});
+
+test("accepts one genuine bank PDF without pretending it covers all three months", () => {
+  const input = payload();
+  input.partial = true;
+  input.groups = { address: [], licence: [], bank: [{ name: "one-month.pdf", content: pdf }] };
+  const result = validateRent2BuyProofPayload(input);
+  assert.equal(result.meta.partial, true);
+  assert.equal(result.groups.bank.length, 1);
+});
+
+test("does not accept empty partial document batches or relax the existing complete-pack requirement", () => {
+  const input = payload();
+  input.partial = true;
+  input.groups = { address: [], licence: [], bank: [] };
+  assert.throws(() => validateRent2BuyProofPayload(input), /at least one document/i);
+  input.partial = false;
+  input.groups = { address: [], licence: [], bank: [{ name: "bank.pdf", content: pdf }] };
+  assert.throws(() => validateRent2BuyProofPayload(input), /between two and four/i);
+});
+
+test("partial batches retain genuine file signature checks", () => {
+  const input = payload();
+  input.partial = true;
+  input.groups = { address: [], licence: [], bank: [{ name: "false.pdf", content: png }] };
+  assert.throws(() => validateRent2BuyProofPayload(input), /genuine PDF/i);
+});
