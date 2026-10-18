@@ -8,6 +8,7 @@ import {
   preflightVanscoFacebookImage,
   preflightVanscoFacebookImages,
   quarantineFromFailedVanscoFacebookPosts,
+  quarantineFromFailedVanscoGoogleBusinessPosts,
   quarantineVanscoVehicle,
 } from "../lib/vanscoFailedMediaRecovery.js";
 
@@ -501,6 +502,7 @@ test("Vansco Buffer monitoring collects today's actual failed posts without coun
   assert.equal(failed.facebook[0].message,"Facebook permission expired");
   assert.equal(failed.googleBusiness.vansco333.length,1);
   assert.equal(failed.googleBusiness.vansco333[0].message,"Image rejected");
+  assert.equal(failed.googleBusiness.vansco333[0].stockRegistration,"");
   assert.deepEqual(failed.googleBusiness.southamptonAirport,[]);
   assert.deepEqual(failed.googleBusiness.newForest,[]);
   const sent=vanscoSentPostsByChannel(payload,"fb",branches);
@@ -560,43 +562,70 @@ test("Vansco media quarantine expires and can be refreshed without blacklisting 
   assert.equal(quarantineVanscoVehicle({}, "https://untrusted.example/van", { now })["https://untrusted.example/van"], undefined);
 });
 
-test("Vansco photos are header-checked before Buffer enqueue, with range fallback and no full media download", async () => {
+test("Vansco Buffer preflight must fetch one image byte, even when HEAD would appear healthy", async () => {
   const url = "https://acdn.uk/vansco/i/example.jpeg";
-  const head = (status=200, type="image/jpeg", length="250000") => ({
+  const response = (status=206, type="image/jpeg", length="250000") => ({
     ok: status >= 200 && status < 300, status,
-    headers: { get(key) { return key === "content-type" ? type : key === "content-length" ? length : null; } },
+    headers: { get(key) {
+      return key === "content-type" ? type
+        : key === "content-range" && status === 206 ? "bytes 0-0/" + length
+        : key === "content-length" ? length : null;
+    } },
+    body: { cancel: async () => {} },
   });
-  const ok = await preflightVanscoFacebookImage(url, async(_url,opts)=>{
-    assert.equal(opts.method,"HEAD");
-    return head();
+  const calls = [];
+  const ok = await preflightVanscoFacebookImage(url, async (_url, opts) => {
+    calls.push(opts.method);
+    assert.equal(opts.method, "GET");
+    assert.equal(opts.headers.Range, "bytes=0-0");
+    assert.equal(opts.redirect, "manual");
+    return response();
   });
   assert.equal(ok.ok, true);
-  let calls = [];
-  const ranged = await preflightVanscoFacebookImage(url, async(_url,opts)=>{
-    calls.push(opts.method);
-    return opts.method === "HEAD" ? head(405) : {
-      ok:true,status:206, headers:{get(key) {
-        return key === "content-type"?"image/jpeg":key === "content-range"?"bytes 0-0/150000":null;
-      }},
-      body:{cancel:async()=>{calls.push("released");}},
-    };
-  });
-  assert.equal(ranged.ok, true);
-  assert.deepEqual(calls,["HEAD","GET","released"]);
-  const rejected = await preflightVanscoFacebookImage(url,async()=>head(200,"text/html"));
-  assert.equal(rejected.ok,false);
-  assert.equal(rejected.reason,"not_an_image");
-  const blocked = await preflightVanscoFacebookImage(url,async()=>head(403));
-  assert.equal(blocked.ok,false);
-  assert.equal(blocked.reason,"image_http_403");
-  const oversized = await preflightVanscoFacebookImage(url,async()=>head(200,"image/jpeg","8100000"));
-  assert.equal(oversized.ok,false);
-  assert.equal(oversized.reason,"image_over_8mb");
-  const all = await preflightVanscoFacebookImages([url,url,url], async()=>head());
-  assert.equal(all.ok,true);
-  const unusable = await preflightVanscoFacebookImages([url,"https://127.0.0.1/secret.jpeg"], async()=>head());
-  assert.equal(unusable.ok,false);
-  assert.equal(unusable.reason,"untrusted_image_host");
+  assert.deepEqual(calls, ["GET"]);
+  const rejected = await preflightVanscoFacebookImage(url, async () => response(200, "text/html"));
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.reason, "not_an_image");
+  const blocked = await preflightVanscoFacebookImage(url, async () => response(403));
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.reason, "image_http_403");
+  const oversized = await preflightVanscoFacebookImage(url, async () => response(206, "image/jpeg", "8100000"));
+  assert.equal(oversized.ok, false);
+  assert.equal(oversized.reason, "image_over_8mb");
+  const networkBlocked = await preflightVanscoFacebookImage(url, async () => { throw new Error("refused"); });
+  assert.equal(networkBlocked.ok, false);
+  assert.equal(networkBlocked.reason, "image_get_unavailable");
+  const all = await preflightVanscoFacebookImages([url,url,url], async () => response());
+  assert.equal(all.ok, true);
+  const unusable = await preflightVanscoFacebookImages([url,"https://127.0.0.1/secret.jpeg"], async () => response());
+  assert.equal(unusable.ok, false);
+  assert.equal(unusable.reason, "untrusted_image_host");
+});
+
+test("failed Vansco Google Business media only quarantines matching automated stock and branch", () => {
+  const now = Date.parse("2026-10-18T09:20:00Z");
+  const airport = "https://www.vansco.co.uk/ford-transit-airport-123";
+  const forest = "https://www.vansco.co.uk/ford-transit-forest-456";
+  const vehicles = [
+    {registration:"AB12CDE",branchKey:"southamptonAirport",vehicleUrl:airport},
+    {registration:"EF34GHI",branchKey:"newForest",vehicleUrl:forest},
+  ];
+  const failures = { southamptonAirport: [
+    {postId:"image-one",dueAt:"2026-10-18T08:30:00Z",stockRegistration:"AB12CDE",
+      message:"Please update the media URL to be publicly accessible before retrying the post."},
+    {postId:"platform",dueAt:"2026-10-18T09:00:00Z",stockRegistration:"AB12CDE",
+      message:"There appears to be an issue with the Google Business API."},
+    {postId:"wrong-branch",dueAt:"2026-10-18T09:00:00Z",stockRegistration:"EF34GHI",
+      message:"Media URL not accessible"},
+    {postId:"unknown",dueAt:"2026-10-18T09:00:00Z",stockRegistration:"ZZ99ZZZ",
+      message:"Media URL not accessible"},
+  ] };
+  const result = quarantineFromFailedVanscoGoogleBusinessPosts({},failures,vehicles,now);
+  assert.equal(result.detected,1);
+  assert.equal(result.quarantine[airport].postId,"image-one");
+  assert.equal(result.quarantine[forest],undefined);
+  const again=quarantineFromFailedVanscoGoogleBusinessPosts(result.quarantine,failures,vehicles,now+1000);
+  assert.equal(again.detected,0);
 });
 
 test("Vansco Facebook refill excludes failed media and still seeks another eligible stock van", () => {
@@ -626,6 +655,9 @@ test("Vansco 333, Airport and New Forest precheck photo URLs independently befor
   assert.match(worker,/excludedRegistrations.add\(registration\);/);
   assert.match(worker,/saveVanscoGoogleBusinessMediaQuarantine\(activeVanscoMediaQuarantine\(mediaQuarantine\)\)/);
   assert.match(runtime,/GOOGLE_FAILED_MEDIA_PATH/);
+  assert.match(worker,/quarantineFromFailedVanscoGoogleBusinessPosts/);
+  assert.match(worker,/loadVanscoCachedFailedGoogleBusinessPosts/);
+  assert.match(runtime,/loadVanscoCachedFailedGoogleBusinessPosts/);
   // A separate Google Business API error must NOT blacklist the source image.
   assert.doesNotMatch(worker.slice(worker.indexOf("} catch (error) {",worker.indexOf("createVanscoGoogleBusinessPost("))),/quarantineVanscoVehicle/);
 });
