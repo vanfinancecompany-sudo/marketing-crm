@@ -138,7 +138,7 @@ test("Refuses general Wix media even if public, to prevent cross-brand image con
 test("Vansco Blob inventory is scoped, paginated and fails on incomplete data",async()=>{
   let count=0;
   const result=await loadVanscoImageStorageUsage(async ({prefix,cursor})=>{
-    assert.equal(prefix,VANSCO_BLOB_PREFIX+"/");
+    assert.equal(prefix,"vansco-buffer-images/");
     count++;
     return cursor ? {blobs:[{pathname:prefix+"b.jpg",size:23}],hasMore:false}
       : {blobs:[{pathname:prefix+"a.jpg",size:12}],hasMore:true,cursor:"page-2"};
