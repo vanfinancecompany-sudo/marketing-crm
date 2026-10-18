@@ -261,6 +261,7 @@ export default async function handler(request, response) {
             config: bufferConfig,
             text: buildVanscoFacebookCaption(vehicle),
             imageUrl: vehicle.imageUrl,
+            vehicleId: vehicle.vehicleId,
             dueAt: slot.dueAt,
           });
 

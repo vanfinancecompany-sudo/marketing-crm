@@ -478,6 +478,7 @@ export default async function handler(request, response) {
             text: caption,
             imageUrl: vehicle.imageUrl,
             imageUrls,
+            vehicleId: vehicle.vehicleId,
             dueAt: slot.dueAt,
           });
         } catch (error) {

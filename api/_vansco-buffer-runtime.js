@@ -1008,7 +1008,7 @@ export async function loadVanscoBufferState(config, dateIso) {
   };
 }
 
-export async function createVanscoBufferPost({ config, text, imageUrl, imageUrls = [], dueAt }) {
+export async function createVanscoBufferPost({ config, text, imageUrl, imageUrls = [], dueAt, vehicleId }) {
   const candidates = [
     ...(Array.isArray(imageUrls) ? imageUrls : []),
     imageUrl,
@@ -1026,7 +1026,7 @@ export async function createVanscoBufferPost({ config, text, imageUrl, imageUrls
     throw new Error("Vansco Buffer post requires at least one compatible JPEG/PNG image.");
   }
 
-  const hostedUrls = await prepareVanscoBufferImages(urls);
+  const hostedUrls = await prepareVanscoBufferImages(urls, { vehicleId, dueAt });
   const payload = await bufferGraphql(CREATE_POST_MUTATION, {
     input: {
       text: String(text || "").trim(),
@@ -1051,13 +1051,14 @@ export async function createVanscoFacebookStory({
   text,
   imageUrl,
   dueAt,
+  vehicleId,
 }) {
   const compatibleImage = vanscoBufferCompatibleImageUrl(imageUrl);
   if (!compatibleImage) {
     throw new Error("Vansco Facebook Story requires a compatible JPEG/PNG image.");
   }
 
-  const [hostedImage] = await prepareVanscoBufferImages([compatibleImage]);
+  const [hostedImage] = await prepareVanscoBufferImages([compatibleImage], { vehicleId, dueAt });
   const payload = await bufferGraphql(CREATE_POST_MUTATION, {
     input: {
       text: String(text || "").trim(),
@@ -1083,6 +1084,7 @@ export async function createVanscoGoogleBusinessPost({
   imageUrl,
   dueAt,
   linkUrl,
+  vehicleId,
 }) {
   const compatibleImage = vanscoBufferCompatibleImageUrl(imageUrl);
   if (!compatibleImage) {
@@ -1093,7 +1095,7 @@ export async function createVanscoGoogleBusinessPost({
     throw new Error("Vansco Google Business post requires a public Learn more URL.");
   }
 
-  const [hostedImage] = await prepareVanscoBufferImages([compatibleImage]);
+  const [hostedImage] = await prepareVanscoBufferImages([compatibleImage], { vehicleId, dueAt });
   const payload = await bufferGraphql(CREATE_POST_MUTATION, {
     input: {
       text: String(text || "").trim(),
