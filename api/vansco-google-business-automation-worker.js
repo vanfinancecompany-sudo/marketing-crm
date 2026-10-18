@@ -15,12 +15,14 @@ import { fetchVanscoMetaCatalogue } from "./_vansco-facebook-source.js";
 import {
   activeVanscoMediaQuarantine,
   preflightVanscoFacebookImage,
+  quarantineFromFailedVanscoGoogleBusinessPosts,
   quarantineVanscoVehicle,
   VANSCO_MEDIA_PREFLIGHT_FAILURE_MS,
 } from "../lib/vanscoFailedMediaRecovery.js";
 import {
   createVanscoGoogleBusinessPost,
   loadVanscoBufferState,
+  loadVanscoCachedFailedGoogleBusinessPosts,
   loadVanscoGoogleBusinessConfig,
   loadVanscoGoogleBusinessHistory,
   loadVanscoGoogleBusinessMediaQuarantine,
@@ -219,7 +221,13 @@ export default async function handler(request, response) {
     const branchResults = {};
     let historyChanged = false;
     const previousMediaQuarantine = await loadVanscoGoogleBusinessMediaQuarantine();
-    let mediaQuarantine = activeVanscoMediaQuarantine(previousMediaQuarantine, now);
+    // The dashboard already checks Buffer's failed publications. Reuse its
+    // cached result to avoid additional Buffer requests in the refill worker.
+    const publishedFailures = await loadVanscoCachedFailedGoogleBusinessPosts().catch(() => ({}));
+    const recoveredMedia = quarantineFromFailedVanscoGoogleBusinessPosts(
+      previousMediaQuarantine, publishedFailures, eligible, now,
+    );
+    let mediaQuarantine = activeVanscoMediaQuarantine(recoveredMedia.quarantine, now);
     let mediaQuarantineChanged = JSON.stringify(mediaQuarantine) !== JSON.stringify(previousMediaQuarantine);
     const MAX_GBP_IMAGE_CHECKS_PER_BRANCH = 12;
 
