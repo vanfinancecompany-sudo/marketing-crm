@@ -393,7 +393,7 @@ test("Vansco Buffer runtime sends at most three ordered image assets", async () 
   );
   assert.match(runtime, /imageUrls = \[\]/);
   assert.match(runtime, /\.slice\(0, 3\)/);
-  assert.match(runtime, /assets: urls\.map\(\(url\) => \(\{ image: \{ url \} \}\)\)/);
+  assert.match(runtime, /assets: hostedUrls\.map\(\(url\) => \(\{ image: \{ url \} \}\)\)/);
 });
 
 test("Vansco Buffer converts Wix AVIF/WebP assets to JPEG before publishing", async () => {
