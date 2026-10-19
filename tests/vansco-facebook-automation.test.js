@@ -296,7 +296,7 @@ test("worker replaces queued live posts that are missing a VAT label", async () 
     "utf8",
   );
   assert.match(worker, /vat_label_missing/);
-  assert.match(worker, /image_count_upgrade/);
+  assert.doesNotMatch(worker, /image_count_upgrade/);
   assert.match(worker, /car_vat_label_present/);
   assert.match(worker, /vat_unresolved/);
   assert.match(worker, /hasExplicitVanscoVatLabel/);
