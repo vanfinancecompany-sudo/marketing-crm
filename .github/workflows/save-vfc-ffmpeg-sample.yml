@@ -24,8 +24,6 @@ jobs:
             --output samples/videos/vfc_ffmpeg_clean_sample.mp4
           test "$(stat -c '%s' samples/videos/vfc_ffmpeg_clean_sample.mp4)" -gt 1000000
           file samples/videos/vfc_ffmpeg_clean_sample.mp4 | grep -i 'mp4'
-          ffprobe -v error -show_entries format=duration,size \
-            -of default=noprint_wrappers=1 samples/videos/vfc_ffmpeg_clean_sample.mp4
       - name: Keep permanent copy on this sample branch
         shell: bash
         run: |
