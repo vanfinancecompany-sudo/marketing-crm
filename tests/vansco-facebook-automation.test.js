@@ -296,7 +296,7 @@ test("worker replaces queued live posts that are missing a VAT label", async () 
     "utf8",
   );
   assert.match(worker, /vat_label_missing/);
-  assert.match(worker, /image_count_upgrade/);
+  assert.doesNotMatch(worker, /image_count_upgrade/);
   assert.match(worker, /car_vat_label_present/);
   assert.match(worker, /vat_unresolved/);
   assert.match(worker, /hasExplicitVanscoVatLabel/);
@@ -359,6 +359,60 @@ test("Vansco Facebook and GBP use current Meta sale artwork ahead of old saved D
     selectVanscoSocialImagesFromSources({ imageUrls: [], imageUrl: "" }, oldSale, {preferLiveMeta: true}),
     oldSale,
   );
+});
+
+test("Vansco Facebook restores all first three when Meta only contains a matching live lead image", () => {
+  const lead = "https://acdn.uk/vansco/i/halloween-front.jpeg";
+  const side = "https://acdn.uk/vansco/i/halloween-side.jpeg";
+  const interior = "https://acdn.uk/vansco/i/halloween-interior.jpeg";
+  const fourth = "https://acdn.uk/vansco/i/halloween-fourth.jpeg";
+  const stockGallery = [lead, side, interior, fourth];
+
+  // Exactly matching first image identifies the same campaign/gallery.
+  assert.deepEqual(
+    selectVanscoSocialImagesFromSources({ imageUrl: lead, imageUrls: [lead] }, stockGallery, { preferLiveMeta: true }),
+    [lead, side, interior],
+  );
+
+  // A two-image Meta prefix can likewise be completed from the verified stock.
+  assert.deepEqual(
+    selectVanscoSocialImagesFromSources({ imageUrl: lead, imageUrls: [lead, side] }, stockGallery, { preferLiveMeta: true }),
+    [lead, side, interior],
+  );
+  assert.deepEqual(
+    selectVanscoSocialImagesFromSources({ imageUrl: lead, imageUrls: [lead, side, interior] }, stockGallery, { preferLiveMeta: true }),
+    [lead, side, interior],
+  );
+});
+
+test("Vansco never mixes old or differently ordered promotions to reach three images", () => {
+  const fresh = "https://acdn.uk/vansco/i/new-halloween-promo.jpeg";
+  const old = "https://acdn.uk/vansco/i/previous-promo.jpeg";
+  const a = "https://acdn.uk/vansco/i/side-a.jpeg";
+  const b = "https://acdn.uk/vansco/i/side-b.jpeg";
+  assert.deepEqual(
+    selectVanscoSocialImagesFromSources({ imageUrls: [fresh] }, [old, a, b], { preferLiveMeta: true }),
+    [fresh],
+  );
+  assert.deepEqual(
+    selectVanscoSocialImagesFromSources({ imageUrls: [fresh, a] }, [fresh, b, a], { preferLiveMeta: true }),
+    [fresh, a],
+  );
+  assert.deepEqual(
+    selectVanscoSocialImagesFromSources({ imageUrls: [fresh] }, [], { preferLiveMeta: true }),
+    [fresh],
+  );
+});
+
+test("Vansco existing queue is protected from bulk image-count upgrades", async () => {
+  const worker = await (await import("node:fs/promises")).readFile(new URL("../api/vansco-facebook-automation-worker.js", import.meta.url), "utf8");
+  const start = worker.indexOf("async function pruneStaleScheduledPosts(");
+  const end = worker.indexOf("function dailyLimitFromState", start);
+  assert.ok(start !== -1 && end > start);
+  const prune = worker.slice(start,end);
+  assert.doesNotMatch(prune, /imageUpgradeRequired|image_count_upgrade|queuedImageCount/);
+  assert.match(prune, /vat_label_missing/);
+  assert.match(prune, /vehicle_no_longer_live/);
 });
 
 test("Vansco latest-image priority is per vehicle, preserves exact order and never combines campaign generations", () => {
