@@ -1,0 +1,34 @@
+name: Preserve isolated open-source VFC reel comparisons
+on:
+  push:
+    branches:
+      - samples/vfc-open-source-renderers-eval-20261019
+permissions:
+  contents: write
+jobs:
+  save:
+    if: ${{ !contains(github.event.head_commit.message, '[evaluation saved]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download evaluated open-source template MP4s
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p samples/videos/open-source-comparisons
+          for clip in auto13 auto22 rendervid_flashsale; do
+            curl --fail --location --retry 4 --retry-delay 4 --max-time 180 \
+              "https://sb-536kr29ihng0.vercel.run/${clip}.mp4" \
+              --output "samples/videos/open-source-comparisons/${clip}.mp4"
+            file "samples/videos/open-source-comparisons/${clip}.mp4" | grep -i mp4
+            test "$(stat -c %s "samples/videos/open-source-comparisons/${clip}.mp4")" -gt 100000
+            echo "${clip} bytes=$(stat -c %s "samples/videos/open-source-comparisons/${clip}.mp4")"
+          done
+      - name: Save completed test media to isolated branch only
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add samples/videos/open-source-comparisons/
+          git commit -m "Preserve three genuine open-source template test videos [evaluation saved]"
+          git push origin HEAD:samples/vfc-open-source-renderers-eval-20261019
