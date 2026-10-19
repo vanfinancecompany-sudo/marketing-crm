@@ -28,6 +28,7 @@ import {
   vanscoDailySlots,
   vanscoNextDateKey,
   vanscoAdvertVatLabel,
+  vanscoBufferAttachmentAudit,
   vanscoFacebookImageUrls,
   selectVanscoSocialImagesFromSources,
   vanscoFacebookStorySlots,
@@ -482,6 +483,22 @@ test("Vansco transient or broken secondary source images skip the vehicle withou
   ]) {
     assert.equal(vanscoRecoverableBufferPostError(new Error(message)), "", message);
   }
+});
+
+test("Vansco Buffer image audit counts provider-confirmed attachments without extra calls", async () => {
+  const image = { mimeType: "image/jpeg", source: "https://something.public.blob.vercel-storage.com/vansco-buffer-images/v2/a.jpeg" };
+  assert.deepEqual(vanscoBufferAttachmentAudit({assets:[image,image,image]}),
+    {expected:3,confirmed:3,status:"confirmed"});
+  assert.deepEqual(vanscoBufferAttachmentAudit({assets:[image]}),
+    {expected:3,confirmed:1,status:"mismatch"});
+  assert.deepEqual(vanscoBufferAttachmentAudit({assets:[image,{mimeType:"video/mp4"},image]}),
+    {expected:3,confirmed:2,status:"mismatch"});
+  assert.deepEqual(vanscoBufferAttachmentAudit({}),
+    {expected:3,confirmed:null,status:"unconfirmed"});
+  const worker = await (await import("node:fs/promises")).readFile(new URL("../api/vansco-facebook-automation-worker.js", import.meta.url), "utf8");
+  assert.match(worker,/vanscoBufferAttachmentAudit\(post\)/);
+  assert.match(worker,/\[vansco-facebook-three-image-audit\]/);
+  assert.match(worker,/bufferAttachmentAudit: attachmentAudit/);
 });
 
 test("Vansco Buffer runtime sends at most three ordered image assets", async () => {
