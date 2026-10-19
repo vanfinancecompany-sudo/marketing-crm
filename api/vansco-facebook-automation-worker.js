@@ -134,12 +134,12 @@ async function pruneStaleScheduledPosts(posts, liveVehicles) {
     const explicitVat = hasExplicitVanscoVatLabel(post?.text);
     const carVatLabelPresent = live && isVanscoCar(vehicle) && explicitVat;
     const vatMissing = live && !isVanscoCar(vehicle) && !explicitVat;
-    const desiredImageCount = live ? vanscoFacebookImageUrls(vehicle).length : 0;
-    const queuedImageCount = Array.isArray(post?.assets) ? post.assets.length : 0;
-    const imageUpgradeRequired = live
-      && desiredImageCount > queuedImageCount
-      && desiredImageCount > 1;
-    if ((!vehicleUrl || live) && !vatMissing && !carVatLabelPresent && !imageUpgradeRequired) {
+    // Leave already-scheduled, live-vehicle posts alone if their media count is
+    // lower than the current gallery. Bulk deletion before replacement could
+    // empty tonight's queue when Buffer has a quota or image-host failure.
+    // Newly created posts get the corrected gallery; availability and VAT
+    // compliance pruning remains unchanged.
+    if ((!vehicleUrl || live) && !vatMissing && !carVatLabelPresent) {
       kept.push(post);
       continue;
     }
@@ -147,9 +147,7 @@ async function pruneStaleScheduledPosts(posts, liveVehicles) {
       ? "car_vat_label_present"
       : vatMissing
         ? "vat_label_missing"
-        : imageUpgradeRequired
-          ? "image_count_upgrade"
-          : "vehicle_no_longer_live";
+        : "vehicle_no_longer_live";
     try {
       await deleteVanscoBufferPost(post.id);
       removed.push({
