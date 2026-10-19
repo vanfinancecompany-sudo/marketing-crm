@@ -1022,11 +1022,18 @@ export async function createVanscoBufferPost({ config, text, imageUrl, imageUrls
       return true;
     })
     .slice(0, 3);
-  if (!urls.length) {
-    throw new Error("Vansco Buffer post requires at least one compatible JPEG/PNG image.");
+  if (urls.length !== 3) {
+    throw new Error("Vansco Facebook post requires three distinct compatible JPEG/PNG images.");
   }
 
+  // Every source is fully fetched and copied to owned public Blob storage
+  // before any Buffer post is created. Byte-identical photos collapse to one
+  // hosted URL, so reject incomplete three-image posts rather than silently
+  // publishing a single-image advert.
   const hostedUrls = await prepareVanscoBufferImages(urls, { vehicleId, dueAt });
+  if (hostedUrls.length !== 3) {
+    throw new Error("Vansco Facebook post requires three distinct hosted images.");
+  }
   const payload = await bufferGraphql(CREATE_POST_MUTATION, {
     input: {
       text: String(text || "").trim(),
