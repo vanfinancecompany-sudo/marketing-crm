@@ -11,6 +11,7 @@ import {
   isVanscoCar,
   isVanscoVatResolved,
   vanscoAdvertVatLabel,
+  vanscoBufferAttachmentAudit,
   vanscoFacebookImageUrls,
   vanscoDailySlots,
   vanscoNextDateKey,
@@ -526,11 +527,26 @@ export default async function handler(request, response) {
           continue;
         }
 
+        // Buffer's response already includes assets; audit its acknowledged
+        // count without a second API request or any changes to the post.
+        const attachmentAudit = vanscoBufferAttachmentAudit(post);
+        const auditDetails = {
+          bufferPostId: String(post.id || ""),
+          expected: attachmentAudit.expected,
+          confirmed: attachmentAudit.confirmed,
+          status: attachmentAudit.status,
+        };
+        if (attachmentAudit.status === "confirmed") {
+          console.info("[vansco-facebook-three-image-audit]", auditDetails);
+        } else {
+          console.warn("[vansco-facebook-three-image-audit]", auditDetails);
+        }
         posts.push(post);
         excludedUrls.add(vehicle.vehicleUrl);
         history.lastPostedByKey[vehicle.vehicleKey] = slot.dueAt;
         historyChanged = true;
         created.push({
+          bufferAttachmentAudit: attachmentAudit,
           bufferPostId: String(post.id || ""),
           vehicleKey: vehicle.vehicleKey,
           registration: vehicle.registration,
