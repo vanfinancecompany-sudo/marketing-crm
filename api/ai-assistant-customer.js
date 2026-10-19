@@ -17,7 +17,7 @@ import {
   secureHash,
   validateWixOrigin,
 } from "../lib/publicAssistantFoundation.js";
-import { publicApplicationGuidanceReply } from "../lib/publicApplicationGuidance.js";
+import { isRent2BuyGuarantorQuestion, publicApplicationGuidanceReply } from "../lib/publicApplicationGuidance.js";
 import { isVehicleSpecificationQuestion, publicVehiclePricingReply } from "../lib/publicVehiclePricing.js";
 import { controlledBusinessRuntimeReply, controlledProductComparisonReply, controlledVehicleNextStepReply } from "../lib/salesConversationEngine.js";
 import { buildPublicStockNavigation } from "../lib/publicStockNavigation.js";
@@ -336,6 +336,21 @@ async function continueConversation(supabase, body, environment, simulateConvers
     pageType: session.page_type,
     productLock,
   });
+  // Guarantors are never accepted for Rent2Buy. Return the verified policy directly,
+  // rather than allowing the model to hedge or offer a case-by-case exception.
+  if (productLock === "rent2buy" && isRent2BuyGuarantorQuestion(message)) {
+    const reply = applicationGuidanceReply;
+    await updateSession(supabase, session, {
+      conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
+      message_count: messageNumber,
+    });
+    await recordResponseTelemetry({
+      supabase, body, environment, session, productContext: productLock,
+      messageNumber, responseMode: "verified_rent2buy_guarantor",
+    });
+    return safeCustomerPayload({ reply, cta: null, conversationId, status: "ready" });
+  }
+
   let controlledFallback = applicationGuidanceReply ? {
     reply: applicationGuidanceReply,
     recommended_action: "continue",
