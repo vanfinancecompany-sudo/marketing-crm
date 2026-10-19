@@ -63,6 +63,8 @@ export function vanscoRecoverableBufferPostError(error) {
   if (
     /compatible jpeg\/png image|unsupported.*(?:image|media)|invalid.*(?:image|media)|(?:image|media).*format/i
       .test(message) || isVanscoMediaUrlFailure(message)
+    || /^Vansco Facebook post requires three distinct (?:compatible|hosted)/i.test(message)
+    || /^(?:Could not download Vansco source photograph|Vansco photograph (?:returned HTTP|download failed|is incomplete|is not a JPEG or PNG)|Vansco image (?:unexpectedly redirected|exceeds 8 MB|source URL is invalid|URL must use an approved public image host|requires a JPEG or PNG URL|requires a JPEG or PNG)|Only the Vansco DealerKit image folder is permitted)/i.test(message)
   ) {
     return "buffer_media_rejected";
   }
@@ -447,10 +449,22 @@ export default async function handler(request, response) {
 
         const caption = buildVanscoFacebookCaption(vehicle);
         const imageUrls = vanscoFacebookImageUrls(vehicle);
-        // Check only a bounded number of vehicles per run so a slow or blocked
-        // image host cannot consume Vercel's entire worker deadline.
+        // Bound both insufficient-gallery skips and actual network probes.
+        // A short Meta catalogue must not trigger repeated unbounded page reads.
         if (checkedVehicles >= MAX_IMAGE_CHECKS_PER_RUN) break;
         checkedVehicles += 1;
+        // Normal Vansco Facebook feed posts always require the first three
+        // verified photos. Stories and Google Business still use one.
+        if (imageUrls.length !== 3) {
+          excludedUrls.add(vehicle.vehicleUrl);
+          held.push({
+            vehicleKey: vehicle.vehicleKey,
+            vehicleUrl: vehicle.vehicleUrl,
+            reason: "insufficient_images",
+            availableImages: imageUrls.length,
+          });
+          continue;
+        }
         const compatibleImages = imageUrls.map(vanscoBufferCompatibleImageUrl).filter(Boolean);
         const imageCheck = await preflightVanscoFacebookImages(compatibleImages);
         if (!imageCheck.ok || compatibleImages.length !== imageUrls.length) {
