@@ -57,6 +57,9 @@ function clean(value) {
 export function vanscoRecoverableBufferPostError(error) {
   const message = clean(error?.message || error);
   if (!message) return "";
+  // A hosted URL failing the owned-storage security boundary is an internal
+  // integrity fault, not a broken customer photo to quietly quarantine.
+  if (/^Vansco hosted image URL did not match its dedicated public storage path\.?$/i.test(message)) return "";
   if (/already got this one scheduled|same thing twice|duplicate/i.test(message)) {
     return "buffer_duplicate";
   }
