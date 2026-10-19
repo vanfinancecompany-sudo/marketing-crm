@@ -195,3 +195,43 @@ test("Vansco-only media storage refuses unknown DealerKit stock ownership",async
  await assert.rejects(actualPrepareVanscoBufferImages([vansco(1)],{...fx.deps,vehicleId:"",dueAt,leasePutImpl:async()=>{}}),/vehicle ID is required/);
  assert.equal(fx.operations.fetches.length,0);
 });
+
+
+test("Vercel SDK's real missing-blob message allows first-time Vansco upload", async()=>{
+ const fx=fixture();
+ fx.deps.headImpl=async pathname=>{
+   fx.operations.heads.push(pathname);
+   if(!fx.blobs.has(pathname))throw new Error("Vercel Blob: The requested blob does not exist");
+   return fx.blobs.get(pathname);
+ };
+ const first=await prepareForTest([vansco(1),vansco(2),vansco(3)],fx.deps);
+ assert.equal(first.length,3);
+ assert.equal(fx.operations.writes.length,3);
+ const second=await prepareForTest([vansco(1),vansco(2),vansco(3)],fx.deps);
+ assert.deepEqual(second,first);
+ assert.equal(fx.operations.writes.length,3,"existing files must not be uploaded a second time");
+});
+
+test("Missing-file SDK error without a class name is a cache miss, but store/auth failures remain fatal",async()=>{
+ for (const missing of [
+   "The requested blob does not exist",
+   "Vercel Blob: The requested blob does not exist",
+ ]) {
+   const fx=fixture();
+   fx.deps.headImpl=async()=>{throw new Error(missing)};
+   const urls=await prepareForTest([vansco(1)],fx.deps);
+   assert.equal(urls.length,1);
+   assert.equal(fx.operations.writes.length,1);
+ }
+ for (const failure of [
+   "Vercel Blob: This store does not exist.",
+   "Vercel Blob: Access denied, please provide a valid token for this resource.",
+   "Vercel Blob: The blob service is currently not available. Please try again.",
+   "Vercel Blob: The requested blob does not exist due to an invalid store configuration",
+ ]) {
+   const fx=fixture();
+   fx.deps.headImpl=async()=>{throw new Error(failure)};
+   await assert.rejects(prepareForTest([vansco(1)],fx.deps),/Vercel Blob/);
+   assert.equal(fx.operations.writes.length,0,"must never bypass unrelated storage failures");
+ }
+});
