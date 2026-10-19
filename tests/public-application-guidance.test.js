@@ -5,6 +5,7 @@ import {
   isDirectApplicationNavigationQuestion,
   isRent2BuyCoreExplanationQuestion,
   isRent2BuyEligibilityQuestion,
+  isRent2BuyGuarantorQuestion,
   publicApplicationGuidanceReply,
 } from "../lib/publicApplicationGuidance.js";
 
@@ -128,4 +129,45 @@ test("public endpoint checks deterministic product guidance before canonical mod
   assert.ok(guidanceIndex >= 0);
   assert.ok(canonicalIndex > guidanceIndex);
   assert.match(source.slice(guidanceIndex, canonicalIndex), /cta: null/);
+});
+
+test("Rent2Buy never accepts guarantors and requires applicants' own employment income", () => {
+  for (const message of [
+    "Can I apply with a guarantor?",
+    "I am unemployed, can I use a garantor?",
+    "And garantor",
+    "Can u chek if I can use a garentor?",
+    "I have a guarantor and can pay a deposit",
+  ]) {
+    assert.equal(isRent2BuyGuarantorQuestion(message), true, message);
+    const reply = publicApplicationGuidanceReply({
+      message, pageType: "rent2buy_general", productLock: "rent2buy",
+    });
+    assert.match(reply, /does not accept guarantors/i);
+    assert.match(reply, /own income from employment or self-employment/i);
+    assert.match(reply, /upfront rental or deposit cannot replace/i);
+    assert.doesNotMatch(reply, /team (?:can|will) confirm|might|case.by.case/i);
+    assert.equal(publicApplicationGuidanceReply({
+      message, pageType: "finance_general", productLock: "finance",
+    }), null);
+  }
+  assert.equal(isRent2BuyGuarantorQuestion("guaranteed van finance"), false);
+});
+
+test("general Rent2Buy eligibility and explanation require own employment or self-employed income", () => {
+  for (const question of ["Can I get a van?", "What is Rent2Buy?"]) {
+    const reply = publicApplicationGuidanceReply({
+      message: question, pageType: "rent2buy_general", productLock: "rent2buy",
+    });
+    assert.match(reply, /own (?:income from )?employment or self-employed income|own income from employment or self-employment/i);
+  }
+});
+
+test("Rent2Buy guarantor policy is enforced before model generation", async () => {
+  const source = await readFile(new URL("../api/ai-assistant-customer.js", import.meta.url), "utf8");
+  const policyIndex = source.indexOf('isRent2BuyGuarantorQuestion(message))');
+  const generationIndex = source.indexOf('simulateConversation(supabase, canonicalInput');
+  assert.ok(policyIndex > 0 && generationIndex > policyIndex);
+  assert.match(source.slice(policyIndex, generationIndex), /responseMode: "verified_rent2buy_guarantor"/);
+  assert.match(source.slice(policyIndex, generationIndex), /return safeCustomerPayload\(\{ reply, cta: null/);
 });
