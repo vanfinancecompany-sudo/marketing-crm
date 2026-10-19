@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { vanscoBufferCooldownRemainingMs } from "../api/_vansco-buffer-runtime.js";
+import { vanscoRecoverableBufferPostError } from "../api/vansco-facebook-automation-worker.js";
 import {
   activeVanscoMediaQuarantine,
   isVanscoMediaUrlFailure,
@@ -437,6 +438,50 @@ test("all Vansco social channels opt in to fresh Meta image priority without mod
   assert.match(instagram,/preferLiveMetaImages/);
   assert.match(loader,/preferLiveMetaImages = false/);
   assert.doesNotMatch(facebook,/pruneStaleScheduledPosts\([\s\S]*?deleteVanscoBufferPost\([\s\S]*?image_changed/);
+});
+
+test("Vansco standard Facebook feed never sends fewer than three distinct hosted images", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const runtime = await readFile(new URL("../api/_vansco-buffer-runtime.js", import.meta.url), "utf8");
+  const start = runtime.indexOf("export async function createVanscoBufferPost(");
+  const end = runtime.indexOf("export async function createVanscoFacebookStory", start);
+  assert.ok(start >= 0 && end > start);
+  const normalFacebookOnly = runtime.slice(start, end);
+  assert.match(normalFacebookOnly, /urls\.length !== 3/);
+  assert.match(normalFacebookOnly, /hostedUrls\.length !== 3/);
+  assert.ok(normalFacebookOnly.indexOf("hostedUrls.length !== 3") < normalFacebookOnly.indexOf("bufferGraphql(CREATE_POST_MUTATION"));
+  const story = runtime.slice(end, runtime.indexOf("export async function createVanscoGoogleBusinessPost", end));
+  assert.doesNotMatch(story, /length !== 3/);
+});
+
+test("Vansco Facebook skips insufficient galleries before attempting any source download", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const worker = await readFile(new URL("../api/vansco-facebook-automation-worker.js", import.meta.url), "utf8");
+  const start = worker.indexOf("const imageUrls = vanscoFacebookImageUrls(vehicle);", worker.indexOf("const history = await loadVanscoPostingHistory();"));
+  const preflight = worker.indexOf("preflightVanscoFacebookImages(compatibleImages)", start);
+  const shortage = worker.indexOf('imageUrls.length !== 3', start);
+  assert.ok(start > 0 && shortage > start && preflight > shortage);
+  assert.match(worker.slice(shortage, preflight), /reason: "insufficient_images"/);
+  assert.match(worker, /checkedVehicles >= MAX_IMAGE_CHECKS_PER_RUN/);
+});
+
+test("Vansco transient or broken secondary source images skip the vehicle without aborting all future slots", () => {
+  for (const message of [
+    "Vansco photograph returned HTTP 404.",
+    "Could not download Vansco source photograph completely.",
+    "Vansco photograph is incomplete or has invalid image bytes.",
+    "Vansco photograph download failed: Vansco image exceeds 8 MB.",
+    "Vansco Facebook post requires three distinct hosted images.",
+  ]) {
+    assert.equal(vanscoRecoverableBufferPostError(new Error(message)), "buffer_media_rejected", message);
+  }
+  for (const message of [
+    "Vercel Blob: This store does not exist.",
+    "Vercel Blob: Access denied, please provide a valid token for this resource.",
+    "Vansco hosted image URL did not match its dedicated public storage path.",
+  ]) {
+    assert.equal(vanscoRecoverableBufferPostError(new Error(message)), "", message);
+  }
 });
 
 test("Vansco Buffer runtime sends at most three ordered image assets", async () => {
