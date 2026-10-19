@@ -1,0 +1,32 @@
+name: Capture VFC Studio AI Motion Prototype
+on:
+  push:
+    branches:
+      - samples/vfc-wan-studio-20second-poc-20261019
+permissions:
+  contents: write
+jobs:
+  save:
+    if: ${{ !contains(github.event.head_commit.message, '[video saved]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and verify prototype MP4
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p samples/videos
+          curl --fail --location --retry 3 --retry-delay 2 --max-time 120 \
+            "https://sb-270ig5gu72f9.vercel.run/VFC_Wan_Studio_20s_Test.mp4" \
+            --output samples/videos/VFC_Wan_Studio_20s_Test.mp4
+          test "$(stat -c '%s' samples/videos/VFC_Wan_Studio_20s_Test.mp4)" -gt 3000000
+          file samples/videos/VFC_Wan_Studio_20s_Test.mp4 | grep -i 'MP4'
+          echo "Saved MP4 bytes: $(stat -c '%s' samples/videos/VFC_Wan_Studio_20s_Test.mp4)"
+      - name: Save to nonproduction sample branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add samples/videos/VFC_Wan_Studio_20s_Test.mp4
+          git commit -m "Save tested 20-second VFC AI studio prototype [video saved]"
+          git push origin HEAD:samples/vfc-wan-studio-20second-poc-20261019
