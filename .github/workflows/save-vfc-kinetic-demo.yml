@@ -1,0 +1,32 @@
+name: Save one-off VFC TikTok animation demo
+on:
+  push:
+    branches:
+      - samples/vfc-kinetic-tiktok-test-20261019
+permissions:
+  contents: write
+jobs:
+  save-demo:
+    if: ${{ !contains(github.event.head_commit.message, '[demo saved]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and verify MP4
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p samples/videos
+          curl --fail --location --retry 3 --retry-delay 3 --max-time 120 \
+            "https://sb-1isnt1oxldd0.vercel.run/vfc_tiktok_kinetic_demo.mp4" \
+            --output samples/videos/vfc_tiktok_kinetic_demo.mp4
+          test "$(stat -c '%s' samples/videos/vfc_tiktok_kinetic_demo.mp4)" -gt 10000000
+          file samples/videos/vfc_tiktok_kinetic_demo.mp4 | grep -i MP4
+          echo "Video bytes: $(stat -c '%s' samples/videos/vfc_tiktok_kinetic_demo.mp4)"
+      - name: Commit demonstration video to the sample branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add samples/videos/vfc_tiktok_kinetic_demo.mp4
+          git commit -m "Store completed VFC TikTok motion demo [demo saved]"
+          git push origin HEAD:samples/vfc-kinetic-tiktok-test-20261019
