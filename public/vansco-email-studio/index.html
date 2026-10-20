@@ -417,7 +417,7 @@ async function init(){
  try{
   await api("validateAccess");state.ready=true;el("locked").hidden=true;el("app").hidden=false;
   try{var d=await api("loadMaster");fill(Object.assign({},themes.halloween,d.settings))}catch(e){fill(Object.assign({theme:"halloween",selected_keys:[]},themes.halloween));setMsg("templateMessage",e.message,true)}
-  await Promise.all([refreshCounts(),refreshDrafts(),refreshStock()]);
+  await Promise.all([refreshCounts(),refreshDrafts(),refreshStock(),refreshContacts(),refreshReport()]);
  }catch(e){el("locked").hidden=false;el("app").hidden=true;el("unlockError").textContent=e.message}
 }
 el("unlock").addEventListener("click",function(){localStorage.setItem(STORAGE,el("accessKey").value.trim());init()});
@@ -454,7 +454,14 @@ el("uploadLogo").addEventListener("click",async function(){
  }catch(e){setMsg("logoMessage",e.message,true)}finally{el("uploadLogo").disabled=false}
 });
 
-el("saveDraft").addEventListener("click",async function(){try{await api("saveDraft",{name:el("campaignName").value.trim(),settings:values()});setMsg("draftMessage","Vansco campaign draft saved. No emails sent.");await Promise.all([refreshCounts(),refreshDrafts()])}catch(e){setMsg("draftMessage",e.message,true)}});
+el("saveDraft").addEventListener("click",async function(){
+ try{
+  var result=await api("saveDraft",{name:el("campaignName").value.trim(),settings:values()});
+  state.activeCampaign=result.campaign.id;
+  setMsg("draftMessage","Vansco campaign saved and selected for an internal test.");
+  await Promise.all([refreshCounts(),refreshDrafts()]);
+ }catch(e){setMsg("draftMessage",e.message,true)}
+});
 el("importContacts").addEventListener("click",async function(){
  var file=el("csvFile").files[0],source=el("listSource").value.trim(),basis=el("marketingBasis").value;
  if(!file||!source||!basis){setMsg("importMessage","Choose a CSV, its source and a documented marketing basis.",true);return}
