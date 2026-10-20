@@ -104,7 +104,7 @@ export async function dispatch(supabase,{send,campaignRow,vehicles,test=false}){
   }
 }
 async function listContacts(supabase,body={}){
-  let query=supabase.from(CONTACTS).select("id,email_normalized,first_name,last_name,status,source,marketing_basis,reviewed_at,permission_notes").order("created_at",{ascending:false}).limit(80);
+  let query=supabase.from(CONTACTS).select("id,email_normalized,first_name,last_name,display_name,verifalia_classification,status,source,marketing_basis,reviewed_at,permission_notes").order("created_at",{ascending:false}).limit(80);
   const term=clean(body.query,60).replace(/[%_,()\\]/g,"");
   if(term)query=query.ilike("email_normalized","%"+term+"%");
   const rows=checked(await query,"Couldn't list Vansco contacts");
