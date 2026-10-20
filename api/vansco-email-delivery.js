@@ -106,7 +106,11 @@ async function listContacts(supabase,body={}){
   const term=clean(body.query,60).replace(/[%_,()\\]/g,"");
   if(term)query=query.ilike("email_normalized","%"+term+"%");
   const rows=checked(await query,"Couldn't list Vansco contacts");
-  return {contacts:rows||[]};
+  const locks=rows?.length?checked(await supabase.from("marketing_vansco_email_eligibility")
+    .select("id,eligible,attempted_7d,attempted_30d,attempted_this_month,last_attempt_at,suppressed")
+    .in("id",rows.map(r=>r.id)),"Couldn't check contact send locks"):[];
+  const map=new Map((locks||[]).map(r=>[r.id,r]));
+  return {contacts:(rows||[]).map(r=>({...r,lock:map.get(r.id)||null}))};
 }
 async function reviewContact(supabase,body){
   const id=clean(body.contact_id,80),notes=clean(body.permission_notes,700);
@@ -301,7 +305,7 @@ export default async function handler(request,response){
     else if(body.action==="processBatch")result=await processBatch(supabase,body);
     else if(body.action==="reviewContact")result=await reviewContact(supabase,body);
     else if(body.action==="testSend")result=await testSend(supabase,body);
-    else if(body.action==="sendBatch")result=await productionBatch(supabase,body);
+    else if(body.action==="sendBatch")fail("Use the frequency-protected Vansco campaign batch queue.",410);
     else if(body.action==="report")result=await reporting(supabase,body);
     else fail("Unsupported Vansco email action.");
     return response.status(200).json({ok:true,...result});
