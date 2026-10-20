@@ -174,6 +174,12 @@ async function productionBatch(supabase,body){
     const send=await registerAttempt(supabase,{campaignId:row.id,contactId:contact.id,to:contact.email_normalized,type:"production"});
     const result=await dispatch(supabase,{send,campaignRow:row,vehicles});
     if(result.accepted)accepted++;else if(result.status==="submission_unknown")unknown++;else failed++;
+    if(result.status==="failed" && /\b429\b|rate.limit/i.test(result.error||"")){
+      checked(await supabase.from("marketing_vansco_email_batches")
+        .update({status:"paused",updated_at:new Date().toISOString()})
+        .eq("id",current.id).in("status",["queued","sending"]),"Couldn't pause rate-limited batch");
+      break;
+    }
   }
   return {accepted,unknown,failed,count:contacts.length,note:"Manual only; no automatic retries. Check provider before acting on unknown outcomes."};
 }
@@ -321,6 +327,34 @@ async function resumeBatch(supabase,body){
  if(!result)fail("Only paused Vansco batches can resume.",409);
  return statusOfBatch(supabase,body);
 }
+
+async function batchHistory(supabase){
+ const batches=checked(await supabase.from("marketing_vansco_email_batches")
+   .select("id,campaign_id,status,requested_count,reserved_count,created_at,finished_at")
+   .order("created_at",{ascending:false}).limit(30),"Couldn't load Vansco campaign batch history");
+ if(!batches.length)return {batches:[]};
+ const sends=checked(await supabase.from(SENDS)
+   .select("batch_id,status,delivered_at,opened_at,clicked_at")
+   .in("batch_id",batches.map(x=>x.id)).eq("send_type","production").limit(15000),
+   "Couldn't load Vansco batch outcomes");
+ const grouped=new Map();
+ for(const row of sends){
+  const b=grouped.get(row.batch_id)||{submitted:0,accepted:0,delivered:0,opened:0,clicked:0,bounced:0,unsubscribed:0,failed:0,skipped:0,unknown:0};
+  if(["accepted","delivered","opened","clicked","bounced","unsubscribed","complained","submission_unknown"].includes(row.status))b.submitted++;
+  if(["accepted","delivered","opened","clicked","bounced","unsubscribed","complained"].includes(row.status))b.accepted++;
+  if(row.delivered_at)b.delivered++;
+  if(row.opened_at)b.opened++;
+  if(row.clicked_at)b.clicked++;
+  if(row.status==="bounced")b.bounced++;
+  if(row.status==="unsubscribed")b.unsubscribed++;
+  if(row.status==="failed")b.failed++;
+  if(row.status==="skipped")b.skipped++;
+  if(row.status==="submission_unknown")b.unknown++;
+  grouped.set(row.batch_id,b);
+ }
+ return {batches:batches.map(b=>({...b,counts:grouped.get(b.id)||{}}))};
+}
+
 async function reporting(supabase,body={}){
   let query=supabase.from(SENDS).select("id,campaign_id,send_type,email_normalized,status,created_at,delivered_at,opened_at,clicked_at").order("created_at",{ascending:false}).limit(2000);
   if(body.campaign_id&&validId(body.campaign_id))query=query.eq("campaign_id",body.campaign_id);
@@ -361,6 +395,7 @@ export default async function handler(request,response){
     else if(body.action==="testSend")result=await testSend(supabase,body);
     else if(body.action==="sendBatch")fail("Use the frequency-protected Vansco campaign batch queue.",410);
     else if(body.action==="report")result=await reporting(supabase,body);
+    else if(body.action==="batchHistory")result=await batchHistory(supabase);
     else fail("Unsupported Vansco email action.");
     return response.status(200).json({ok:true,...result});
   }catch(error){
