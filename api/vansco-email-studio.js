@@ -67,10 +67,10 @@ function vanscoUrl(value) {
 export function normalisePrice(value, label = "Sale price") {
   const raw = clean(value, 40);
   if (!raw) return "";
-  if (!/^(?:£\\s*)?\\d{1,8}(?:,\\d{3})*(?:\\.\\d{1,2})?$/.test(raw) && !/^(?:£\\s*)?\\d{1,8}(?:\\.\\d{1,2})?$/.test(raw)) {
+  if (!/^(?:£\s*)?\d{1,8}(?:,\d{3})*(?:\.\d{1,2})?$/.test(raw) && !/^(?:£\s*)?\d{1,8}(?:\.\d{1,2})?$/.test(raw)) {
     failure(label + " must be a valid amount in pounds.");
   }
-  const numeric = Number(raw.replace(/[£,\\s]/g, ""));
+  const numeric = Number(raw.replace(/[£,\s]/g, ""));
   if (!Number.isFinite(numeric) || numeric <= 0 || numeric > 10000000) failure(label + " is outside the permitted range.");
   return numeric.toFixed(2);
 }
