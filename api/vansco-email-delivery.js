@@ -34,7 +34,7 @@ async function campaign(supabase,id) {
   if(!row||row.status!=="draft")fail("Campaign isn't an available Vansco draft.");
   return {...row,settings:normaliseSettings(row.settings||{})};
 }
-async function recipientEligible(supabase,contact) {
+export async function recipientEligible(supabase,contact) {
   if(contact.status!=="ready"||!contact.reviewed_at||!contact.permission_notes||contact.permission_notes.length<15)return false;
   const mail=email(contact.email_normalized);
   if(!EMAIL.test(mail))return false;
@@ -53,7 +53,7 @@ async function recipientEligible(supabase,contact) {
   }
   return true;
 }
-async function verifiedVehicles(row) {
+export async function verifiedVehicles(row) {
   const current=await liveStock(),available=new Map(current.map(v=>[v.key,v]));
   const chosen=Array.isArray(row.selected_vehicles)?row.selected_vehicles:[];
   if(!chosen.length||chosen.length>6)fail("Campaign must have 1–6 saved Vansco vans.");
@@ -70,7 +70,7 @@ async function registerAttempt(supabase,{campaignId,contactId=null,to,type}){
   if(result.error?.code==="23505")fail("This contact has already been queued or sent for this campaign. Duplicate blocked.",409);
   return checked(result,"Couldn't safely reserve Vansco email send");
 }
-async function dispatch(supabase,{send,campaignRow,vehicles,test=false}){
+export async function dispatch(supabase,{send,campaignRow,vehicles,test=false}){
   const token=test?"":makeVanscoUnsubscribeToken({
     email:send.email_normalized,contactId:send.contact_id,sendId:send.id,
     secret:process.env.MARKETING_UNSUBSCRIBE_TOKEN_SECRET,
@@ -90,7 +90,7 @@ async function dispatch(supabase,{send,campaignRow,vehicles,test=false}){
     });
     checked(await supabase.from(SENDS).update({
       status:"accepted",provider_message_id:sent.messageId,updated_at:new Date().toISOString(),
-    }).eq("id",send.id),"Provider accepted Vansco email but tracking couldn't be updated");
+    }).eq("id",send.id).eq("status","attempting"),"Provider accepted Vansco email but tracking couldn't be updated");
     return {accepted:true,send_id:send.id};
   }catch(error){
     const unknown=Boolean(error.ambiguous)||/tracking couldn't be updated/i.test(error.message||"");
@@ -106,7 +106,11 @@ async function listContacts(supabase,body={}){
   const term=clean(body.query,60).replace(/[%_,()\\]/g,"");
   if(term)query=query.ilike("email_normalized","%"+term+"%");
   const rows=checked(await query,"Couldn't list Vansco contacts");
-  return {contacts:rows||[]};
+  const locks=rows?.length?checked(await supabase.from("marketing_vansco_email_eligibility")
+    .select("id,eligible,attempted_7d,attempted_30d,attempted_this_month,last_attempt_at,suppressed")
+    .in("id",rows.map(r=>r.id)),"Couldn't check contact send locks"):[];
+  const map=new Map((locks||[]).map(r=>[r.id,r]));
+  return {contacts:(rows||[]).map(r=>({...r,lock:map.get(r.id)||null}))};
 }
 async function reviewContact(supabase,body){
   const id=clean(body.contact_id,80),notes=clean(body.permission_notes,700);
@@ -151,7 +155,7 @@ async function testSend(supabase,body){
   return {result,warning:"Accepted means SendGrid received the email, not proof of inbox delivery."};
 }
 async function productionBatch(supabase,body){
-  if(process.env.VANSCO_EMAIL_PRODUCTION_ENABLED!=="true")fail("Customer sends are locked until an approved production launch.",403);
+  if(process.env.VANSCO_EMAIL_PRODUCTION_ENABLED==="false")fail("Vansco customer campaigns have been disabled by an administrator.",403);
   requireProvider();
   const ids=body.contact_ids;
   if(!Array.isArray(ids)||ids.length<1||ids.length>5||new Set(ids).size!==ids.length||ids.some(id=>!validId(id)))fail("Select 1–5 distinct approved Vansco contacts.");
@@ -171,6 +175,101 @@ async function productionBatch(supabase,body){
   }
   return {accepted,unknown,failed,count:contacts.length,note:"Manual only; no automatic retries. Check provider before acting on unknown outcomes."};
 }
+
+export async function audience(supabase) {
+  const summary=checked(await supabase.rpc("vansco_email_audience_summary"),"Could not calculate Vansco audience");
+  const active=checked(await supabase.from("marketing_vansco_email_batches")
+    .select("id,campaign_id,status,requested_count,reserved_count,created_at")
+    .in("status",["queued","sending","paused"]).order("created_at",{ascending:false}).limit(1),"Could not check ongoing Vansco send");
+  return {audience:summary,active_batch:active?.[0]||null};
+}
+async function reviewSource(supabase,body) {
+  const source=clean(body.source,180),notes=clean(body.permission_notes,900);
+  if(!source||notes.length<30||body.confirm_phrase!=="APPROVE VANSCO SOURCE") {
+    fail("Enter the exact imported source, a documented permission assessment (30+ characters) and type APPROVE VANSCO SOURCE.");
+  }
+  const sample=checked(await supabase.from(CONTACTS).select("id,marketing_basis,status")
+    .eq("source",source).eq("status","pending_review").limit(500),"Couldn't inspect Vansco import source");
+  if(!sample.length)return {approved:0,more_pending:false};
+  if(sample.some(row=>!["consent","legitimate_interest"].includes(row.marketing_basis)))fail("Some imported rows have no recognised marketing basis.");
+  const stamp=new Date().toISOString();
+  const updated=checked(await supabase.from(CONTACTS)
+    .update({status:"ready",reviewed_at:stamp,permission_notes:"Source "+source+": "+notes,updated_at:stamp})
+    .in("id",sample.map(x=>x.id)).eq("status","pending_review").select("id"),"Couldn't approve documented Vansco source");
+  return {approved:updated.length,more_pending:updated.length===500};
+}
+async function reserveBatch(supabase,body) {
+  if(process.env.VANSCO_EMAIL_PRODUCTION_ENABLED==="false")fail("Vansco customer sends are disabled by administrator.",403);
+  requireProvider();
+  const amount=Number(body.batch_size||500);
+  if(!Number.isInteger(amount)||amount<1||amount>500)fail("Choose between 1 and 500 emails.");
+  if(body.confirm_phrase!=="SEND VANSCO "+amount)fail("Type SEND VANSCO "+amount+" to authorise this real customer batch.");
+  const selected=await campaign(supabase,body.campaign_id);
+  await verifiedVehicles(selected);
+  const result=checked(await supabase.rpc("vansco_email_reserve_batch",{p_campaign:selected.id,p_limit:amount}),
+    "Could not safely reserve Vansco mailing batch");
+  return {batch:result};
+}
+async function statusOfBatch(supabase,body) {
+  if(!validId(body.batch_id))fail("Choose a Vansco mailing batch.");
+  const batch=checked(await supabase.from("marketing_vansco_email_batches").select("*")
+    .eq("id",body.batch_id).maybeSingle(),"Could not read Vansco mailing batch");
+  if(!batch)fail("Mailing batch not found.",404);
+  const all=checked(await supabase.from(SENDS).select("status")
+    .eq("batch_id",batch.id).eq("send_type","production").limit(500),"Could not read Vansco recipient progress");
+  const counts={queued:0,attempting:0,accepted:0,failed:0,unknown:0,skipped:0,delivered:0,opened:0,clicked:0,other:0};
+  for(const row of all) {
+    const status=row.status;
+    const key=status==="submission_unknown"?"unknown":(status in counts?status:"other");
+    counts[key]+=1;
+  }
+  const processed=all.length-counts.queued-counts.attempting;
+  let state=batch.status;
+  if(all.length>0&&processed===all.length&&["queued","sending"].includes(state)){
+    checked(await supabase.from("marketing_vansco_email_batches").update({
+      status:"completed",finished_at:new Date().toISOString(),updated_at:new Date().toISOString(),
+    }).eq("id",batch.id).in("status",["queued","sending"]),"Couldn't finalize Vansco batch");
+    state="completed";
+  }
+  return {batch:{id:batch.id,campaign_id:batch.campaign_id,status:state,requested:batch.requested_count,
+    total:batch.reserved_count,processed,remaining:Math.max(0,batch.reserved_count-processed),
+    progress_percent:batch.reserved_count?Math.round(processed*100/batch.reserved_count):100,counts}};
+}
+async function processBatch(supabase,body) {
+  if(process.env.VANSCO_EMAIL_PRODUCTION_ENABLED==="false")fail("Vansco customer sends are disabled by administrator.",403);
+  if(!validId(body.batch_id))fail("Choose a Vansco mailing batch.");
+  requireProvider();
+  const current=checked(await supabase.from("marketing_vansco_email_batches").select("*")
+    .eq("id",body.batch_id).maybeSingle(),"Couldn't load Vansco batch");
+  if(!current||!["queued","sending"].includes(current.status))fail("This batch isn't currently sending.",409);
+  const selected=await campaign(supabase,current.campaign_id);
+  const vehicles=await verifiedVehicles(selected);
+  const queue=checked(await supabase.from(SENDS).select("*").eq("batch_id",current.id)
+    .eq("status","queued").order("created_at",{ascending:true}).limit(5),"Couldn't read queued Vansco recipients");
+  if(queue.length){
+    checked(await supabase.from("marketing_vansco_email_batches").update({status:"sending",updated_at:new Date().toISOString()})
+      .eq("id",current.id).in("status",["queued","sending"]),"Couldn't set Vansco batch running");
+  }
+  let accepted=0,failed=0,skipped=0,unknown=0;
+  for(const row of queue){
+    // Conditional atomic claim prevents duplicate sending across browser tabs or retries.
+    const claim=checked(await supabase.from(SENDS).update({status:"attempting",updated_at:new Date().toISOString()})
+      .eq("id",row.id).eq("status","queued").select("*").maybeSingle(),"Could not claim Vansco recipient");
+    if(!claim)continue;
+    const contact=checked(await supabase.from(CONTACTS).select("*").eq("id",claim.contact_id)
+      .maybeSingle(),"Could not recheck Vansco recipient");
+    if(!contact||!(await recipientEligible(supabase,contact))){
+      checked(await supabase.from(SENDS).update({status:"skipped",failure_reason:"No longer approved or globally suppressed",updated_at:new Date().toISOString()})
+        .eq("id",claim.id).eq("status","attempting"),"Could not skip ineligible recipient");
+      skipped++;continue;
+    }
+    const result=await dispatch(supabase,{send:claim,campaignRow:selected,vehicles});
+    if(result.accepted)accepted++;else if(result.status==="submission_unknown")unknown++;else failed++;
+  }
+  const progress=await statusOfBatch(supabase,{batch_id:current.id});
+  return {...progress,step:{accepted,failed,skipped,unknown}};
+}
+
 async function reporting(supabase,body={}){
   let query=supabase.from(SENDS).select("id,campaign_id,send_type,email_normalized,status,created_at,delivered_at,opened_at,clicked_at").order("created_at",{ascending:false}).limit(2000);
   if(body.campaign_id&&validId(body.campaign_id))query=query.eq("campaign_id",body.campaign_id);
@@ -187,7 +286,7 @@ async function reporting(supabase,body={}){
     unknown:production.filter(r=>r.status==="submission_unknown").length,
     recent:rows.slice(0,15).map(r=>({email:r.email_normalized,type:r.send_type,status:r.status,at:r.created_at})),
     limited_to_latest:2000,
-    production_enabled:process.env.VANSCO_EMAIL_PRODUCTION_ENABLED==="true",
+    production_enabled:process.env.VANSCO_EMAIL_PRODUCTION_ENABLED!=="false",
   };
 }
 export default async function handler(request,response){
@@ -199,9 +298,14 @@ export default async function handler(request,response){
     const supabase=db();
     let result;
     if(body.action==="contacts")result=await listContacts(supabase,body);
+    else if(body.action==="audience")result=await audience(supabase);
+    else if(body.action==="reviewSource")result=await reviewSource(supabase,body);
+    else if(body.action==="reserveBatch")result=await reserveBatch(supabase,body);
+    else if(body.action==="batchStatus")result=await statusOfBatch(supabase,body);
+    else if(body.action==="processBatch")result=await processBatch(supabase,body);
     else if(body.action==="reviewContact")result=await reviewContact(supabase,body);
     else if(body.action==="testSend")result=await testSend(supabase,body);
-    else if(body.action==="sendBatch")result=await productionBatch(supabase,body);
+    else if(body.action==="sendBatch")fail("Use the frequency-protected Vansco campaign batch queue.",410);
     else if(body.action==="report")result=await reporting(supabase,body);
     else fail("Unsupported Vansco email action.");
     return response.status(200).json({ok:true,...result});

@@ -51,7 +51,7 @@ test("new Vansco studio cannot alter automatic transactional sends or dispatch c
   assert.match(api, /NO|NEVER invokes an email provider/i);
   assert.doesNotMatch(api, /sendSendGridEmail|callEmailProvider|sendgrid\.com\/v3\/mail\/send|api\.brevo\.com\/v3\/smtp\/email/);
   assert.doesNotMatch(api, /from\(["']marketing_campaigns["']\)|from\(["']marketing_email_sends["']\)/);
-  assert.match(ui, /id="sendCustomerBatch" disabled/);
+  assert.match(ui, /id="startVanscoBatch"/);
   assert.match(readFileSync(new URL("../api/vansco-email-delivery.js", import.meta.url), "utf8"), /VANSCO_EMAIL_PRODUCTION_ENABLED/);
   assert.match(ui, /Send new campaign draft|Save new campaign draft/);
   assert.match(migration, /marketing_vansco_email_contacts/);
@@ -274,7 +274,7 @@ test("internal tests need no checkbox or phrase and customer sends remain locked
   assert.match(ui,/delivery\("testSend",\{campaign_id:state\.activeCampaign,to:to\}\)/);
   assert.match(delivery,/checkVanscoTestRateLimit\(supabase\)/);
   assert.match(delivery,/result\.count\|\|0\)>=100/);
-  assert.match(delivery,/VANSCO_EMAIL_PRODUCTION_ENABLED!=="true"/);
+  assert.match(delivery,/VANSCO_EMAIL_PRODUCTION_ENABLED==="false"/);
   assert.match(delivery,/send_type","test"/);
 });
 
@@ -286,4 +286,47 @@ test("Vansco showroom addresses use branded directions links instead of Gmail bl
   assert.equal((html.match(/href="tel:/g)||[]).length,3);
   assert.match(ui,/google\.com\/maps\/search/);
   assert.match(html,/mailto:sales@vansco\.co\.uk/);
+});
+
+test("Vansco 500-email sending uses separate atomic queue and protects recent contact frequency", () => {
+  const sql=readFileSync(new URL("../supabase/migrations/20261020_vansco_email_500_batches.sql",import.meta.url),"utf8");
+  const api=readFileSync(new URL("../api/vansco-email-delivery.js",import.meta.url),"utf8");
+  assert.match(sql,/p_limit>500/);
+  assert.match(sql,/for update of c skip locked/i);
+  assert.match(sql,/on conflict do nothing/i);
+  assert.match(sql,/attempted_7d=0/);
+  assert.match(sql,/attempted_30d<4/);
+  assert.match(sql,/attempted_this_month<4/);
+  assert.match(sql,/send_type='production'/);
+  assert.match(sql,/s\.status <> 'skipped'/);
+  assert.match(sql,/marketing_vansco_email_contacts/);
+  assert.match(sql,/vansco_only_one_active_customer_batch/);
+  assert.match(sql,/revoke all on function public\.vansco_email_reserve_batch/);
+  assert.doesNotMatch(sql,/update\s+public\.marketing_contacts/i);
+  assert.match(api,/vansco_email_reserve_batch/);
+  assert.match(api,/action==="reserveBatch"/);
+  assert.match(api,/action==="processBatch"/);
+  assert.match(api,/action==="batchStatus"/);
+  assert.match(api,/\.eq\("status","queued"\)\.select\("\*"\)/);
+  assert.match(api,/action==="sendBatch"\)fail\("Use the frequency-protected/);
+  assert.match(api,/id,eligible,attempted_7d,attempted_30d/);
+});
+
+test("Vansco batch progress interface has 500 limit, progress bar and pause/resume controls", () => {
+  const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
+  assert.match(ui,/id="batchSize" type="number" min="1" max="500" value="500"/);
+  assert.match(ui,/id="batchProgress"/);
+  assert.match(ui,/aria-valuemax="100"/);
+  assert.match(ui,/id="startVanscoBatch"/);
+  assert.match(ui,/id="resumeVanscoBatch"/);
+  assert.match(ui,/id="pauseVanscoBatch"/);
+  assert.match(ui,/id="aEligible"/);
+  assert.match(ui,/id="aLocked"/);
+  assert.match(ui,/id="aMonthly"/);
+  assert.match(ui,/id="aRemaining"/);
+  assert.match(ui,/SEND VANSCO /);
+  assert.match(ui,/id="sourceReviewNotes"/);
+  assert.match(ui,/APPROVE VANSCO SOURCE/);
+  assert.doesNotMatch(ui,/id="sendCustomerBatch"/);
+  assert.doesNotMatch(ui,/id="batchConfirmation"/);
 });

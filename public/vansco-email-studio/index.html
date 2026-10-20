@@ -65,6 +65,11 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
 .err{color:#a61e2e;font-weight:700;font-size:12px}.list{display:grid;gap:9px}.list-row{padding:11px 12px;background:#f5f6f7;border-radius:6px;font-size:12px}
 .reporting{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
 .report{background:#f6f7f7;border-radius:7px;padding:11px}
+.audience-overview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:9px 0 12px}
+.audience-overview>div{padding:12px;background:#f4f5f6;border-radius:7px}.audience-overview b{display:block;font-size:23px;line-height:1.2}.audience-overview span{font-size:11px;color:#687077}
+.batch-progress{height:15px;border-radius:8px;overflow:hidden;background:#e8e9eb;margin:12px 0}
+.batch-progress>div{height:100%;width:0;background:#bd2338;transition:width .2s ease}
+@media(max-width:620px){.audience-overview{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .report b{display:block;font-size:18px;margin-bottom:4px}.report span{font-size:11px;color:#656c75}
 [hidden]{display:none!important}
 @media(max-width:1250px){.stats{grid-template-columns:repeat(3,minmax(0,1fr))}.reporting{grid-template-columns:repeat(3,1fr)}.workspace{grid-template-columns:minmax(300px,1fr) minmax(350px,1fr)}}
@@ -173,12 +178,44 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      <p id="importMessage" class="small" role="status"></p>
      <p class="small muted">CSV columns: email, first_name, last_name. Verifying email deliverability does not itself establish permission to market.</p>
      <div class="heading" style="margin-top:18px"><h3>Review &amp; select Vansco customers</h3><button class="btn" id="refreshContacts">Refresh</button></div>
-     <p class="small muted">Imported contacts remain pending until you review their marketing permissions. Review is individual and logged. Customer sends are limited to five approved contacts per click.</p>
+     <p class="small muted">Imported contacts require a documented marketing basis and review. You can approve a verified source in batches after checking its evidence.</p>
+     <label class="subheading" for="sourceReviewNotes">Source permission review notes</label>
+     <textarea id="sourceReviewNotes" rows="3" placeholder="Record evidence for consent or legitimate interests (minimum 30 characters)"></textarea>
+     <div class="actions"><button class="btn" id="reviewSource">Approve reviewed import source</button></div>
+     <p class="small muted">Uses the exact List source entered above. Only its pending records are reviewed; shared suppressions still apply.</p>
      <div class="actions"><input id="contactSearch" placeholder="Search by email" style="flex:1"><button class="btn" id="searchContacts">Search</button></div>
      <div id="contactRows" class="list" style="max-height:360px;overflow:auto;margin-top:12px"></div>
-     <div class="actions"><input id="batchConfirmation" placeholder="Type SEND 1–5 to confirm" style="flex:1"><button class="btn red" id="sendCustomerBatch" disabled>Send selected customer batch</button></div>
+     <p class="small muted">Locked contacts are calculated from Vansco customer sends, not internal tests.</p>
      <p id="customerSendMessage" class="small" role="status"></p>
     </section>
+     <section class="panel" id="vanscoBatchPanel">
+       <div class="heading"><h2>Vansco 500-email campaigns</h2><span class="pill">MANUAL · 7-DAY LOCK</span></div>
+       <p class="small muted">One email per customer in seven days, maximum four in any calendar month or rolling 30 days. Test messages do not count.</p>
+       <div class="audience-overview">
+         <div><b id="aTotal">—</b><span>Total contacts</span></div>
+         <div><b id="aApproved">—</b><span>Approved</span></div>
+         <div><b id="aEligible">—</b><span>Eligible now</span></div>
+         <div><b id="aLocked">—</b><span>Locked 7 days</span></div>
+         <div><b id="aMonthly">—</b><span>Monthly limit</span></div>
+         <div><b id="aSuppressed">—</b><span>Suppressed</span></div>
+         <div><b id="aPending">—</b><span>Needs review</span></div>
+         <div><b id="aRemaining">—</b><span>Available next</span></div>
+       </div>
+       <div class="actions"><button class="btn" id="refreshAudience">Refresh eligible counts</button></div>
+       <div class="form" style="margin-top:12px">
+         <label>Batch size (maximum 500)<input id="batchSize" type="number" min="1" max="500" value="500"></label>
+         <label>Final authorisation<input id="batchPhrase" placeholder="Type SEND VANSCO 500"></label>
+       </div>
+       <div class="safe-send" style="margin-top:13px">Select a saved Vansco campaign above. Customer sending requires approved recipients, validated vehicle stock and your confirmation. No other CRM emails are affected.</div>
+       <div class="actions">
+        <button class="btn red" id="startVanscoBatch">Start real customer batch</button>
+        <button class="btn dark" id="resumeVanscoBatch" disabled>Resume batch</button>
+        <button class="btn" id="pauseVanscoBatch" disabled>Pause after this step</button>
+       </div>
+       <div class="batch-progress" role="progressbar" aria-label="Vansco customer email send progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="batchProgress"><div id="batchProgressFill"></div></div>
+       <p id="batchProgressText" class="small muted">No active customer batch.</p>
+       <p id="batchMessage" class="small muted" role="status"></p>
+     </section>
    </div>
    <section class="panel preview-wrap">
     <div class="preview-toolbar"><div><h2>Live email preview</h2><span class="small muted">Rendered with real selected Vansco vehicles</span></div><span class="pill">EMAIL DESIGN</span></div>
@@ -220,7 +257,7 @@ var palettes={
  christmas:{dark:"#213e38",accent:"#bd9c5b",light:"#f6f3ec",label:"CHRISTMAS EDITION"}
 };
 var fields={subject:"subject",previewText:"preview_text",eyebrow:"eyebrow",headline:"heading",subheading:"subheading",introduction:"introduction",offer:"offer",brandDescription:"brand_description",extraText:"extra_text",footerNote:"footer_note",stockCount:"stock_count",stockLocation:"stock_location",logoUrl:"logo_url",ctaLabel:"cta_label",ctaUrl:"cta_url"};
-var state={theme:"halloween",selected:[],stock:[],salePrices:{},ready:false,activeCampaign:"",readyToSend:false};
+var state={theme:"halloween",selected:[],stock:[],salePrices:{},ready:false,activeCampaign:"",readyToSend:false,activeBatch:"",batchRunning:false,batchPause:false};
 function el(id){return document.getElementById(id)}
 function escapeHtml(v){return String(v==null?"":v).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function key(){return localStorage.getItem(STORAGE)||""}
@@ -398,10 +435,10 @@ async function refreshContacts(){
   el("contactRows").innerHTML=data.contacts.map(function(c){
    var ready=c.status==="ready",name=[c.first_name,c.last_name].filter(Boolean).join(" ");
    return '<div class="contact-row">'+
-    '<input type="checkbox" class="batch-recipient" data-contact-id="'+escapeHtml(c.id)+'" '+(ready?"":"disabled")+' title="Select approved Vansco contact">'+
+    '<span style="font-size:11px;font-weight:700;color:#687077;white-space:nowrap">'+(c.lock?.eligible?"Eligible":c.lock?.attempted_7d?"7-day lock":c.lock?.attempted_30d>=4||c.lock?.attempted_this_month>=4?"Monthly lock":c.lock?.suppressed?"Suppressed":"Review")+'</span>'+
     '<div style="flex:1;min-width:0"><strong>'+escapeHtml(c.email_normalized)+'</strong>'+
     (name?'<div class="status">'+escapeHtml(name)+'</div>':"")+
-    '<div class="status">'+escapeHtml(c.status.replace(/_/g," "))+' · '+escapeHtml(c.source)+'</div></div>'+
+    '<div class="status">'+escapeHtml(c.status.replace(/_/g," "))+' · '+escapeHtml(c.source)+(c.lock?.last_attempt_at?' · Last campaign: '+new Date(c.lock.last_attempt_at).toLocaleDateString("en-GB"):"")+'</div></div>'+
     (c.status==="pending_review"?'<button type="button" class="btn review-contact" data-review-id="'+escapeHtml(c.id)+'">Review</button>':"")+
     '</div>';
   }).join("")||'<p class="small muted">No Vansco customer emails found.</p>';
@@ -422,7 +459,7 @@ async function refreshReport(){
  try{
   var r=await delivery("report");
   state.readyToSend=r.production_enabled;
-  el("sendCustomerBatch").disabled=!r.production_enabled;
+
   ["Submitted","Delivered","Opened","Clicked","Bounced","Unsubscribed"].forEach(function(k){
    el("r"+k).textContent=Number(r[k.toLowerCase()]||0).toLocaleString("en-GB");
   });
@@ -430,6 +467,56 @@ async function refreshReport(){
     (r.recent||[]).map(function(row){return '<div class="list-row">'+escapeHtml(row.type)+' · '+escapeHtml(row.email)+' · <strong>'+escapeHtml(row.status.replace(/_/g," "))+'</strong> · '+new Date(row.at).toLocaleString("en-GB")+'</div>'}).join("");
  }catch(e){el("recentResults").innerHTML='<p class="err">'+escapeHtml(e.message)+'</p>'}
 }
+
+function updateBatchUI(batch){
+ if(!batch)return;
+ state.activeBatch=batch.id;
+ var pct=Number(batch.progress_percent||0);
+ el("batchProgressFill").style.width=pct+"%";
+ el("batchProgress").setAttribute("aria-valuenow",pct);
+ el("batchProgressText").textContent=batch.processed+" / "+batch.total+" processed ("+pct+"%). "+batch.counts.accepted+" accepted, "+batch.counts.failed+" failed, "+batch.counts.unknown+" uncertain, "+batch.counts.skipped+" skipped.";
+ el("resumeVanscoBatch").disabled=batch.status==="completed"||state.batchRunning;
+ el("pauseVanscoBatch").disabled=!state.batchRunning;
+ if(batch.status==="completed"){state.activeBatch="";setMsg("batchMessage","Vansco batch completed. Provider delivery events may continue arriving.");}
+}
+async function refreshAudience(){
+ try{
+  var info=await delivery("audience"),a=info.audience||{};
+  [["aTotal","total"],["aApproved","approved"],["aEligible","eligible"],["aLocked","locked_7d"],["aMonthly","monthly_cap"],["aSuppressed","suppressed"],["aPending","pending_review"],["aRemaining","remaining"]].forEach(function(x){
+   el(x[0]).textContent=Number(a[x[1]]||0).toLocaleString("en-GB");
+  });
+  if(info.active_batch&&info.active_batch.id){
+   var status=await delivery("batchStatus",{batch_id:info.active_batch.id});updateBatchUI(status.batch);
+   if(!state.batchRunning)setMsg("batchMessage","A Vansco batch is reserved. Click Resume batch to continue processing safely.");
+  }else if(!state.batchRunning){state.activeBatch="";el("resumeVanscoBatch").disabled=true}
+ }catch(e){setMsg("batchMessage",e.message,true)}
+}
+async function runVanscoBatch(){
+ if(state.batchRunning||!state.activeBatch)return;
+ state.batchRunning=true;state.batchPause=false;
+ el("startVanscoBatch").disabled=true;el("resumeVanscoBatch").disabled=true;
+ el("pauseVanscoBatch").disabled=false;
+ setMsg("batchMessage","Sending Vansco customer emails in controlled groups of five...");
+ try{
+  while(!state.batchPause && state.activeBatch){
+   var response=await delivery("processBatch",{batch_id:state.activeBatch});
+   updateBatchUI(response.batch);
+   if(response.batch.status==="completed"||response.batch.remaining===0)break;
+   if(!response.step||Object.values(response.step).every(function(n){return !n})){
+    setMsg("batchMessage","No progress on this step. Click Resume after checking the batch status.",true);break;
+   }
+  }
+  if(state.batchPause)setMsg("batchMessage","Batch paused. The remaining addresses stay reserved and can be resumed.");
+  await Promise.all([refreshAudience(),refreshReport(),refreshContacts()]);
+ }catch(e){setMsg("batchMessage","Batch paused after an error: "+e.message+". Refresh and resume; claimed emails will not be retried automatically.",true)}
+ finally{
+  state.batchRunning=false;
+  el("startVanscoBatch").disabled=false;
+  el("pauseVanscoBatch").disabled=true;
+  el("resumeVanscoBatch").disabled=!state.activeBatch;
+ }
+}
+
 async function refreshStock(){
  setMsg("stockMessage","Checking live Vansco DealerKit stock…");
  try{var data=await api("stock");state.stock=data.vehicles||[];el("stockTotal").textContent=state.stock.length.toLocaleString("en-GB");setMsg("stockMessage",state.stock.length+" eligible Vansco vans loaded.");renderStock();preview()}
@@ -440,7 +527,7 @@ async function init(){
  try{
   await api("validateAccess");state.ready=true;el("locked").hidden=true;el("app").hidden=false;
   try{var d=await api("loadMaster");fill(Object.assign({},themes.halloween,d.settings))}catch(e){fill(Object.assign({theme:"halloween",selected_keys:[]},themes.halloween));setMsg("templateMessage",e.message,true)}
-  await Promise.all([refreshCounts(),refreshDrafts(),refreshStock(),refreshContacts(),refreshReport()]);
+  await Promise.all([refreshCounts(),refreshDrafts(),refreshStock(),refreshContacts(),refreshReport(),refreshAudience()]);
  }catch(e){el("locked").hidden=false;el("app").hidden=true;el("unlockError").textContent=e.message}
 }
 el("unlock").addEventListener("click",function(){localStorage.setItem(STORAGE,el("accessKey").value.trim());init()});
@@ -509,20 +596,44 @@ el("sendInternalTest").addEventListener("click",async function(){
 el("refreshContacts").addEventListener("click",refreshContacts);
 el("searchContacts").addEventListener("click",refreshContacts);
 el("refreshReport").addEventListener("click",refreshReport);
-el("sendCustomerBatch").addEventListener("click",async function(){
- if(!state.readyToSend){setMsg("customerSendMessage","Customer sending is locked until production approval.",true);return}
- if(!state.activeCampaign){setMsg("customerSendMessage","Select a saved campaign.",true);return}
- var ids=Array.from(document.querySelectorAll(".batch-recipient:checked")).map(function(x){return x.dataset.contactId});
- if(!ids.length||ids.length>5){setMsg("customerSendMessage","Select 1 to 5 reviewed contacts.",true);return}
- var phrase="SEND "+ids.length;
- if(el("batchConfirmation").value.trim()!==phrase){setMsg("customerSendMessage","Type "+phrase+" exactly.",true);return}
- if(!confirm("FINAL CONFIRMATION\n\nSend "+ids.length+" REAL CUSTOMER EMAIL(S) from Vansco now?\n\nNo automatic retry."))return;
- el("sendCustomerBatch").disabled=true;
+
+
+el("refreshAudience").addEventListener("click",refreshAudience);
+el("batchSize").addEventListener("input",function(){el("batchPhrase").placeholder="Type SEND VANSCO "+el("batchSize").value});
+el("pauseVanscoBatch").addEventListener("click",function(){state.batchPause=true});
+el("resumeVanscoBatch").addEventListener("click",runVanscoBatch);
+el("startVanscoBatch").addEventListener("click",async function(){
+ var amount=Number(el("batchSize").value),phrase="SEND VANSCO "+amount;
+ if(!state.activeCampaign){setMsg("batchMessage","Select your saved Vansco campaign draft first.",true);return}
+ if(!Number.isInteger(amount)||amount<1||amount>500){setMsg("batchMessage","Choose between one and 500 emails.",true);return}
+ if(el("batchPhrase").value.trim()!==phrase){setMsg("batchMessage","Type "+phrase+" to confirm this real customer batch.",true);return}
+ if(!confirm("SEND REAL CUSTOMER EMAILS\n\nQueue up to "+amount+" eligible Vansco customer emails?\n\nSeven-day and monthly locks apply. This action cannot be undone once emails are accepted by SendGrid."))return;
+ el("startVanscoBatch").disabled=true;
  try{
-  var result=await delivery("sendBatch",{campaign_id:state.activeCampaign,contact_ids:ids,confirm_phrase:phrase});
-  setMsg("customerSendMessage",result.accepted+" accepted, "+result.unknown+" unknown, "+result.failed+" failed. Check the results below.");
-  await Promise.all([refreshReport(),refreshContacts()]);
- }catch(e){setMsg("customerSendMessage",e.message,true)}finally{el("sendCustomerBatch").disabled=!state.readyToSend}
+  var response=await delivery("reserveBatch",{campaign_id:state.activeCampaign,batch_size:amount,confirm_phrase:phrase});
+  if(!response.batch.queued){setMsg("batchMessage",response.batch.message||"No eligible Vansco customers are available.");await refreshAudience();return}
+  state.activeBatch=response.batch.batch_id;setMsg("batchMessage",response.batch.reserved+" approved Vansco addresses reserved. Sending…");
+  await runVanscoBatch();
+ }catch(e){setMsg("batchMessage",e.message,true)}
+ finally{if(!state.batchRunning)el("startVanscoBatch").disabled=false}
+});
+el("reviewSource").addEventListener("click",async function(){
+ var source=el("listSource").value.trim(),notes=el("sourceReviewNotes").value.trim();
+ if(!source||notes.length<30){setMsg("customerSendMessage","Enter the exact imported source and 30+ characters of documented permission evidence.",true);return}
+ if(!confirm("Approve pending Vansco contacts imported from "+source+"?\n\nYou must have verified consent or a documented legitimate-interests assessment for this source. This will NOT send any messages."))return;
+ if(prompt("Type APPROVE VANSCO SOURCE to confirm the documented review")!=="APPROVE VANSCO SOURCE")return;
+ el("reviewSource").disabled=true;var total=0;
+ try{
+  while(true){
+   var response=await delivery("reviewSource",{source:source,permission_notes:notes,confirm_phrase:"APPROVE VANSCO SOURCE"});
+   total+=response.approved;
+   setMsg("customerSendMessage",total+" Vansco contacts approved from this documented source…");
+   if(!response.more_pending||!response.approved)break;
+  }
+  setMsg("customerSendMessage",total+" reviewed Vansco contacts approved. Suppressed addresses remain blocked.");
+  await Promise.all([refreshAudience(),refreshContacts(),refreshCounts()]);
+ }catch(e){setMsg("customerSendMessage","Source review stopped after "+total+" approvals: "+e.message,true)}
+ finally{el("reviewSource").disabled=false}
 });
 
 el("importContacts").addEventListener("click",async function(){
@@ -534,7 +645,7 @@ el("importContacts").addEventListener("click",async function(){
  if(!confirm("Import "+rows.length+" contacts into the separate Vansco list as PENDING REVIEW?\n\nThis does not email anyone. You must verify the marketing basis before activating addresses."))return;
  el("importContacts").disabled=true;setMsg("importMessage","Importing "+rows.length+" contacts in batches of 100…");
  try{var added=0,suppressed=0;for(var i=0;i<rows.length;i+=100){var result=await api("importContacts",{source:source,marketing_basis:basis,contacts:rows.slice(i,i+100)});added+=result.newly_added;suppressed+=result.suppressed_in_batch;setMsg("importMessage","Processed "+Math.min(i+100,rows.length)+" / "+rows.length+" rows…")}
- setMsg("importMessage","Vansco import complete. "+added+" new records; "+suppressed+" matched existing global suppression. All others pending review.");await refreshCounts();
+ setMsg("importMessage","Vansco import complete. "+added+" new records; "+suppressed+" matched existing global suppression. All others pending review.");await Promise.all([refreshCounts(),refreshAudience()]);
  }catch(e){setMsg("importMessage","Import stopped: "+e.message,true)}finally{el("importContacts").disabled=false}
 });
 init();
