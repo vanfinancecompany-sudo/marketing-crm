@@ -39,6 +39,15 @@ textarea{min-height:70px;resize:vertical}input:focus,textarea:focus,select:focus
 .btn.red{background:#bb2337;color:#fff;border-color:#bb2337}
 .subheading{font-size:12px;font-weight:700;color:#606670;margin:0 0 9px}
 .stock{max-height:325px;overflow:auto;display:grid;gap:7px}
+.sale-grid{display:grid;gap:9px;margin-top:14px}.sale-editor{border:1px solid #e3e4e6;border-radius:8px;padding:11px;background:#fcfcfc}
+.sale-editor-header{font-size:12px;font-weight:800;margin:0 0 9px;color:#30343a}
+.sale-editor-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.sale-editor-fields label{font-size:11px;font-weight:800;color:#5d656e;display:grid;gap:4px}
+.sale-editor-fields input{font-variant-numeric:tabular-nums;font-size:13px;padding:8px}
+.field-help{margin:6px 0 0;font-size:11px;color:#6c7078}
+.logo-upload{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.logo-upload input[type=file]{max-width:240px}.logo-upload .btn{white-space:nowrap}
+@media(max-width:450px){.sale-editor-fields{grid-template-columns:1fr}}
 .stock-row{display:flex;align-items:center;gap:10px;padding:7px;border:1px solid #e6e7e9;border-radius:7px;cursor:pointer}
 .stock-row img{width:74px;height:55px;object-fit:cover;border-radius:5px;background:#ddd}
 .stock-copy{flex:1;min-width:0}.stock-copy strong{font-size:12px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -97,9 +106,19 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      <div class="form">
       <label class="full">Subject line<input id="subject" maxlength="250"></label>
       <label class="full">Inbox preview text<input id="previewText" maxlength="300"></label>
+      <label class="full">Small header label<input id="eyebrow" maxlength="120" placeholder="HALLOWEEN EDITION"></label>
       <label class="full">Campaign headline<input id="headline" maxlength="160"></label>
+      <label class="full">Subheadline<input id="subheading" maxlength="240" placeholder="Quality used vans"></label>
       <label class="full">Introductory message<textarea id="introduction" maxlength="2000"></textarea></label>
       <label class="full">Promotional strapline<input id="offer" maxlength="300"></label>
+      <label class="full">Vansco brand description<textarea id="brandDescription" maxlength="2400" rows="4" placeholder="A little more about Vansco and why customers choose you."></textarea></label>
+      <label class="full">Additional campaign text<textarea id="extraText" maxlength="2400" rows="4" placeholder="Sale details, finance information or a second promotional message."></textarea></label>
+      <label class="full">Footer details / small print<textarea id="footerNote" maxlength="800" rows="3" placeholder="Optional contact information or campaign terms."></textarea></label>
+      <label class="full">Vansco logo image URL<input id="logoUrl" type="url" maxlength="1600" placeholder="https://..."></label>
+      <div class="full"><p class="subheading">Or upload the Vansco logo (transparent PNG preferred)</p>
+       <div class="logo-upload"><input id="logoFile" type="file" accept="image/png,image/jpeg,image/webp"><button type="button" id="uploadLogo" class="btn">Upload logo</button></div>
+       <p class="field-help" id="logoMessage" role="status">Once uploaded, the logo is used across all the seasonal themes.</p>
+      </div>
       <label>Button label<input id="ctaLabel" maxlength="75"></label>
       <label>Button destination<input id="ctaUrl" type="url"></label>
      </div>
@@ -115,6 +134,10 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      <div class="actions" style="margin:0 0 11px"><input id="vehicleSearch" placeholder="Search vans" style="flex:1"><button class="btn" id="refreshStock">Refresh</button></div>
      <div id="stockMessage" class="small muted" role="status">Loading Vansco stock…</div>
      <div class="stock" id="stockList"></div>
+     <div class="heading" style="margin-top:17px"><h3>Featured van sale prices</h3><span class="small muted">Manual overrides</span></div>
+     <p class="field-help">Enter Was and Now for each featured van. Save is calculated automatically if left blank. Any manual Save must match the difference. DealerKit prices are not changed.</p>
+     <div class="sale-grid" id="saleEditors"></div>
+     <p class="small muted" id="saleMessage" role="status"></p>
     </section>
     <section class="panel">
      <div class="heading"><h2>Save campaign draft</h2><span class="pill">NO AUTO SEND</span></div>
