@@ -207,7 +207,7 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
 var STORAGE="marketingCustomerDatabaseApiKey", API="/api/vansco-email-studio";
 var themes={
  standard:{subject:"Vansco | Latest Vans Available Now",preview_text:"Browse our latest used vans.",eyebrow:"VANSCO",heading:"FIND YOUR NEXT VAN",subheading:"Quality used vans across Southampton and the New Forest",introduction:"Explore the latest vans available now at Vansco.",offer:"Quality used vans. Great choice.",cta_label:"VIEW ALL VANS",cta_url:"https://www.vansco.co.uk/all-stock/"},
- halloween:{subject:"Vansco Halloween Sale | Used Van Offers",preview_text:"Take a look at our Halloween van offers.",eyebrow:"HALLOWEEN EDITION",heading:"HALLOWEEN VAN SALE",subheading:"A great selection of quality used vans",introduction:"Discover vans ready for their next owner in our Halloween selection.",offer:"Great seasonal deals on used vans.",cta_label:"EXPLORE THE SALE",cta_url:"https://www.vansco.co.uk/all-stock/"},
+ halloween:{"subject":"Vansco Halloween Giveaway | At Least £300 Off Every Van","preview_text":"At least £300 off every van, average savings of £500, a free 1-year AutoGuard warranty and FREE nationwide delivery.","eyebrow":"HALLOWEEN EDITION","heading":"HALLOWEEN VAN SALE","subheading":"Big savings on quality used vans this Halloween","introduction":"The Vansco Halloween Giveaway is here! Discover quality used vans with spookily good savings, FREE nationwide delivery and low-deposit van finance options.","offer":"AT LEAST £300 OFF EVERY VAN • AVERAGE SAVING £500 • FREE 1-YEAR AUTOGUARD WARRANTY","brand_description":"Hunting for your next work van? Vansco has a wide selection of quality used commercial vehicles across our three Hampshire locations. Our Halloween Giveaway includes at least £300 off every vehicle, with average savings of £500 per van. Every vehicle also comes with a FREE 1-year AutoGuard warranty.","extra_text":"Need a small van, a Transit Custom or a larger commercial vehicle? Browse our featured stock, or speak to the Vansco team about availability, part exchange and low-deposit finance options. We also offer FREE nationwide delivery, making it easy to buy wherever you are in the UK.","cta_label":"VIEW HALLOWEEN OFFERS","cta_url":"https://www.vansco.co.uk/all-stock/"},
  black_friday:{subject:"Vansco Black Friday | Used Vans",preview_text:"Explore this year's Black Friday van selection.",eyebrow:"BLACK FRIDAY EVENT",heading:"BLACK FRIDAY",subheading:"Featured Vansco offers",introduction:"Explore our Black Friday selection of used vans.",offer:"Find a van to suit your business.",cta_label:"VIEW BLACK FRIDAY VANS",cta_url:"https://www.vansco.co.uk/all-stock/"},
  christmas:{subject:"Vansco Christmas | Our Festive Van Selection",preview_text:"Explore our Christmas selection of vans.",eyebrow:"CHRISTMAS EDITION",heading:"CHRISTMAS VAN SALE",subheading:"Start the new year with the right van",introduction:"Find your next van this festive season at Vansco.",offer:"A fresh start for the road ahead.",cta_label:"SEE AVAILABLE VANS",cta_url:"https://www.vansco.co.uk/all-stock/"}
 };
@@ -284,7 +284,7 @@ function buildEmail(){
  function paragraph(value,style){
   return value?'<p style="'+style+'">'+lines(value)+'</p>':"";
  }
- var pumpkin=state.theme==="halloween"?'<span aria-hidden="true" style="font-size:24px">👻 🎃 🦇</span>':"";
+ var pumpkin=state.theme==="halloween"?'<span aria-hidden="true" style="font-size:17px;white-space:nowrap;padding-left:8px">👻 🎃</span>':"";
  var brandLogo=s.logo_url
   ?'<img src="'+escapeHtml(s.logo_url)+'" alt="Vansco" style="display:block;max-height:65px;max-width:190px;width:auto;height:auto;border:0">'
   :'<div style="font-size:23px;font-weight:900;letter-spacing:2px">VANSCO<span style="color:'+p.accent+'">.</span></div>';
@@ -316,12 +316,12 @@ function buildEmail(){
  if(!v.length)vehicleRows='<tr><td style="padding:26px;text-align:center;color:#91969a;font-family:Arial,sans-serif;font-size:14px">Select Vansco vehicles to preview the stock cards.</td></tr>';
  var company=paragraph(s.brand_description,'margin:0;color:#42464c;font-size:14px;line-height:23px');
  var additional=paragraph(s.extra_text,'margin:0;color:#30343a;font-size:14px;line-height:23px');
- var footer=paragraph(s.footer_note,'margin:10px 0 0;color:#636970;font-size:11px;line-height:17px');
+ var footer=s.footer_note?'<tr><td style="padding:23px 28px;background:#25232a;color:#eeeeef;font:13px/22px Arial,sans-serif">'+lines(s.footer_note)+'</td></tr>':"";
  return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media(max-width:600px){.van{display:block!important;width:100%!important}.body-pad{padding:25px!important}}</style><title>'+escapeHtml(s.subject)+'</title></head>'+
  '<body style="margin:0;background:#e9eaec;padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#e9eaec"><tr><td align="center" style="padding:22px 8px"><table role="presentation" width="650" style="border-collapse:collapse;width:100%;max-width:650px;background:white">'+
- '<tr><td style="background:'+p.dark+';padding:20px 25px 15px;color:#fff;font-family:Arial,sans-serif"><table role="presentation" width="100%" style="width:100%;border-collapse:collapse"><tr><td align="left" valign="middle">'+brandLogo+'</td><td align="right" valign="middle" style="color:'+p.accent+';font:700 10px Arial,sans-serif;letter-spacing:1.5px">'+pumpkin+escapeHtml(s.eyebrow||p.label)+pumpkin+'</td></tr></table></td></tr>'+
+ '<tr><td style="background:'+p.dark+';padding:20px 25px 15px;color:#fff;font-family:Arial,sans-serif"><table role="presentation" width="100%" style="width:100%;border-collapse:collapse"><tr><td align="left" valign="middle">'+brandLogo+'</td><td align="right" valign="middle" style="color:'+p.accent+';font:700 10px Arial,sans-serif;letter-spacing:1.5px">'+escapeHtml(s.eyebrow||p.label)+pumpkin+'</td></tr></table></td></tr>'+
  '<tr><td class="body-pad" style="padding:37px 30px 33px;background:'+p.dark+';color:#fff;font-family:Arial,sans-serif;border-top:2px solid '+p.accent+'">'+
- '<table role="presentation" width="100%"><tr><td valign="top"><h1 style="font-size:36px;letter-spacing:-1px;line-height:1.08;margin:0 0 12px;color:#fff">'+escapeHtml(s.heading)+'</h1></td><td width="82" valign="top" align="right">'+pumpkin+'</td></tr></table>'+
+ '<h1 style="font-size:36px;letter-spacing:-1px;line-height:1.08;margin:0 0 12px;color:#fff">'+escapeHtml(s.heading)+'</h1>'+
  (s.subheading?'<h2 style="font-size:18px;font-weight:600;line-height:25px;margin:0 0 15px;color:'+p.accent+'">'+escapeHtml(s.subheading)+'</h2>':"")+
  paragraph(s.introduction,'color:#efefef;font-size:15px;line-height:24px;margin:0')+
  '</td></tr>'+
@@ -331,8 +331,8 @@ function buildEmail(){
  vehicleRows+
  (additional?'<tr><td style="font-family:Arial,sans-serif;padding:20px 28px 4px">'+additional+'</td></tr>':"")+
  '<tr><td align="center" style="padding:29px"><a href="'+escapeHtml(s.cta_url)+'" style="display:inline-block;background:'+p.accent+';color:'+(saleMode&&state.theme!=="black_friday"?"#201c1f":"#ffffff")+';padding:15px 22px;text-decoration:none;font:800 13px Arial,sans-serif;letter-spacing:.4px">'+escapeHtml(s.cta_label)+'</a></td></tr>'+
- '<tr><td style="padding:19px 27px;background:#f2f3f3;font:12px/1.5 Arial,sans-serif;color:#565e65">Vansco Limited · <a href="https://www.vansco.co.uk/" style="color:#25282b">www.vansco.co.uk</a><p style="margin:8px 0 0">Vehicle availability, prices and VAT status are subject to confirmation.</p>'+
  footer+
+ '<tr><td style="padding:19px 27px;background:#f2f3f3;font:12px/1.5 Arial,sans-serif;color:#565e65">Vansco Limited · <a href="https://www.vansco.co.uk/" style="color:#25282b">www.vansco.co.uk</a><p style="margin:8px 0 0">Vehicle availability, prices and VAT status are subject to confirmation.</p>'+
  '<p style="margin:8px 0 0">Marketing unsubscribe link will be inserted by the verified sending system.</p></td></tr>'+
  '</table></td></tr></table></body></html>';
 }

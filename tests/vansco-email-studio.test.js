@@ -169,3 +169,18 @@ test("live Vansco email customer sends have separate ledger, a locked production
   assert.match(webhook,/isVanscoWebhookPayload/);
   assert.match(webhook,/continue;/);
 });
+
+test("Vansco Halloween copy and all three branch contact details appear in real email HTML", () => {
+  const studioApi=readFileSync(new URL("../api/vansco-email-studio.js",import.meta.url),"utf8");
+  const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
+  for(const text of ["333 Millbrook Road West","Senior Service Station","Spitfire Roundabout","02380 333 777","02380 813 119","02381 780 300","sales@vansco.co.uk"]){
+    assert.ok(studioApi.includes(text),"Missing Vansco branch content: "+text);
+  }
+  const footer=["CONTACT VANSCO","333 Showroom: 333 Millbrook Road West, Southampton, Hampshire SO15 0HW | 02380 333 777","New Forest: Senior Service Station, Romsey Road, Cadnam, Hampshire SO40 2NN | 02380 813 119","Southampton Airport: 201 Wide Lane, Spitfire Roundabout, Southampton, Hampshire SO18 2RZ | 02381 780 300","Email: sales@vansco.co.uk"].join("\n");
+  const html=renderVanscoEmail({settings:{...base,heading:"HALLOWEEN VAN SALE",eyebrow:"HALLOWEEN EDITION",footer_note:footer},vehicles:[],testMode:true});
+  for(const value of ["02380 333 777","02380 813 119","02381 780 300","sales@vansco.co.uk","👻","🎃"])assert.ok(html.includes(value),value);
+  assert.doesNotMatch(html,/🦇|🧙/);
+  assert.doesNotMatch(ui,/🦇|🧙/);
+  assert.match(ui,/footer=s\.footer_note/);
+  assert.match(studioApi,/FREE nationwide delivery/);
+});
