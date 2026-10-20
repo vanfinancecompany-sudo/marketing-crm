@@ -249,6 +249,8 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
    <div class="safe-send">SendGrid email tests are manual, and customer sending is separately protected behind a production-enable switch. The main CRM's automatic proof requests and customer emails are not part of this system.</div>
     <div class="actions"><button id="refreshReport" class="btn">Refresh delivery results</button></div>
     <div id="recentResults" class="list" style="margin-top:12px"></div>
+    <div class="heading" style="margin-top:19px"><h3>Customer campaign batches</h3><span class="small muted">Server-recorded results</span></div>
+    <div id="batchHistory" class="list"><p class="small muted">No Vansco customer batches yet.</p></div>
   </section>
  </div>
 </main>
@@ -519,6 +521,17 @@ async function refreshReport(){
   ["Submitted","Delivered","Opened","Clicked","Bounced","Unsubscribed"].forEach(function(k){
    el("r"+k).textContent=Number(r[k.toLowerCase()]||0).toLocaleString("en-GB");
   });
+  var history=await delivery("batchHistory");
+  el("batchHistory").innerHTML=(history.batches||[]).map(function(b){
+   var c=b.counts||{};
+   return '<div class="list-row"><strong>'+new Date(b.created_at).toLocaleString("en-GB")+'</strong> · '+
+    escapeHtml(b.status.replace(/_/g," "))+' · '+Number(b.reserved_count||0)+' queued'+
+    '<div class="small muted">'+Number(c.accepted||0)+' accepted · '+Number(c.delivered||0)+' delivered · '+
+     Number(c.opened||0)+' opened · '+Number(c.clicked||0)+' clicked · '+
+     Number(c.failed||0)+' failed · '+Number(c.unknown||0)+' uncertain · '+
+     Number(c.skipped||0)+' skipped · '+Number(c.bounced||0)+' bounced · '+
+     Number(c.unsubscribed||0)+' unsubscribed</div></div>';
+  }).join("")||'<p class="small muted">No customer campaign batches have been sent.</p>';
   el("recentResults").innerHTML='<p class="small muted">Internal tests: '+r.tests+'. Unknown provider outcomes: '+r.unknown+'. Customer sending: '+(r.production_enabled?"enabled":"locked pending sign-off")+'.</p>'+
     (r.recent||[]).map(function(row){return '<div class="list-row">'+escapeHtml(row.type)+' · '+escapeHtml(row.email)+' · <strong>'+escapeHtml(row.status.replace(/_/g," "))+'</strong> · '+new Date(row.at).toLocaleString("en-GB")+'</div>'}).join("");
  }catch(e){el("recentResults").innerHTML='<p class="err">'+escapeHtml(e.message)+'</p>'}
@@ -682,7 +695,7 @@ el("startVanscoBatch").addEventListener("click",async function(){
   state.activeBatch=response.batch.batch_id;state.previewToken="";setMsg("batchMessage",response.batch.reserved+" reviewed Vansco recipients queued. Background sending begins automatically.");
   await runVanscoBatch();
  }catch(e){setMsg("batchMessage",e.message,true)}
- finally{if(!state.batchRunning)el("startVanscoBatch").disabled=false}
+ finally{if(!state.batchRunning)el("startVanscoBatch").disabled=!state.readyToSend}
 });
 el("reviewSource").addEventListener("click",async function(){
  var source=el("listSource").value.trim(),notes=el("sourceReviewNotes").value.trim(),reviewer=el("reviewerName").value.trim(),evidence=el("reviewEvidence").value.trim(),basis=el("marketingBasis").value,risky=el("includeRiskyReview").checked;
