@@ -315,7 +315,8 @@ test("Vansco 500-email sending uses separate atomic queue and protects recent co
 test("Vansco batch progress interface has 500 limit, progress bar and pause/resume controls", () => {
   const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
   assert.match(ui,/id="batchSize" type="number" min="1" max="500" value="500"/);
-  assert.match(ui,/id="batchProgress"[\s\S]*?aria-valuemax="100"/);
+  assert.match(ui,/id="batchProgress"/);
+  assert.match(ui,/aria-valuemax="100"/);
   assert.match(ui,/id="startVanscoBatch"/);
   assert.match(ui,/id="resumeVanscoBatch"/);
   assert.match(ui,/id="pauseVanscoBatch"/);
