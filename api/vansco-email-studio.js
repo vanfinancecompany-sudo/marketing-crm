@@ -42,6 +42,13 @@ function defaultSettings() {
     preview_text: "Browse our latest vans and seasonal offers.",
     heading: "HALLOWEEN VAN SALE",
     introduction: "Explore a selection of vans available now at Vansco.",
+    eyebrow: "HALLOWEEN EDITION",
+    subheading: "A great selection of quality used vans",
+    brand_description: "Vansco supplies quality used vans across its Southampton and New Forest locations.",
+    extra_text: "",
+    footer_note: "",
+    logo_url: "",
+    sale_prices: {},
     offer: "Fantastic vans. Great seasonal savings.",
     cta_label: "VIEW ALL VANS",
     cta_url: "https://www.vansco.co.uk/all-stock/",
@@ -56,6 +63,49 @@ function vanscoUrl(value) {
     return parsed.href;
   } catch { failure("Please enter a valid https://www.vansco.co.uk link."); }
 }
+
+export function normalisePrice(value, label = "Sale price") {
+  const raw = clean(value, 40);
+  if (!raw) return "";
+  if (!/^(?:£\\s*)?\\d{1,8}(?:,\\d{3})*(?:\\.\\d{1,2})?$/.test(raw) && !/^(?:£\\s*)?\\d{1,8}(?:\\.\\d{1,2})?$/.test(raw)) {
+    failure(label + " must be a valid amount in pounds.");
+  }
+  const numeric = Number(raw.replace(/[£,\\s]/g, ""));
+  if (!Number.isFinite(numeric) || numeric <= 0 || numeric > 10000000) failure(label + " is outside the permitted range.");
+  return numeric.toFixed(2);
+}
+function normaliseLogoUrl(value) {
+  const raw = clean(value, 1600);
+  if (!raw) return "";
+  let parsed;
+  try { parsed = new URL(raw); } catch { failure("Enter a valid HTTPS logo image URL."); }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password) failure("Logo must use HTTPS.");
+  const hostname = parsed.hostname.toLowerCase();
+  const allowed = hostname === "vansco.co.uk" || hostname.endsWith(".vansco.co.uk")
+    || hostname === "static.wixstatic.com" || hostname.endsWith(".public.blob.vercel-storage.com");
+  if (!allowed) failure("Logo must use Vansco, Wixstatic or the CRM's hosted logo storage.");
+  return parsed.href;
+}
+export function normaliseSalePrices(value, keys = []) {
+  if (value == null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) failure("Vehicle sale prices must be a keyed object.");
+  const output = {};
+  for (const key of keys) {
+    const row = value[key] || {};
+    if (!row || typeof row !== "object" || Array.isArray(row)) failure("Vehicle sale prices must be editable fields.");
+    const was = normalisePrice(row.was, "Was price");
+    const now = normalisePrice(row.now, "Now price");
+    let save = normalisePrice(row.save, "Save price");
+    if (!was && !now && !save) continue;
+    if (!was || !now) failure("Enter both Was and Now prices for a sale vehicle.");
+    const difference = Math.round((Number(was) - Number(now)) * 100);
+    if (difference <= 0) failure("Was price must exceed Now price.");
+    if (!save) save = (difference / 100).toFixed(2);
+    if (Math.round(Number(save) * 100) !== difference) failure("Save price must equal Was minus Now.");
+    output[key] = { was, now, save };
+  }
+  return output;
+}
 export function normaliseSettings(value = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) failure("Template settings must be an object.");
   const theme = clean(value.theme, 40);
@@ -68,6 +118,13 @@ export function normaliseSettings(value = {}) {
     preview_text: clean(value.preview_text, 300),
     heading: clean(value.heading, 160),
     introduction: clean(value.introduction, 2000),
+    eyebrow: clean(value.eyebrow, 120),
+    subheading: clean(value.subheading, 240),
+    brand_description: clean(value.brand_description, 2400),
+    extra_text: clean(value.extra_text, 2400),
+    footer_note: clean(value.footer_note, 800),
+    logo_url: normaliseLogoUrl(value.logo_url),
+    sale_prices: normaliseSalePrices(value.sale_prices, selectedKeys),
     offer: clean(value.offer, 300),
     cta_label: clean(value.cta_label, 75),
     cta_url: vanscoUrl(value.cta_url || "https://www.vansco.co.uk/all-stock/"),
@@ -90,6 +147,7 @@ export function mappedVehicle(row) {
       url: url.href,
       mileage: clean(row.mileage, 40),
       branch: clean(row.branchKey, 50),
+      vat_label: clean(row.vatLabel, 100),
     };
   } catch { return null; }
 }
@@ -142,8 +200,9 @@ async function saveDraft(supabase, payload) {
   const stockMap = new Map(current.map(vehicle => [vehicle.key, vehicle]));
   const selected = settings.selected_keys.map(key => stockMap.get(key));
   if (selected.some(vehicle => !vehicle)) failure("A selected van is no longer available in Vansco stock. Refresh your selection.");
+  const priceSnapshots = selected.map(vehicle => ({ ...vehicle, sale_prices: settings.sale_prices[vehicle.key] || null }));
   const data = checkResult(await supabase.from(CAMPAIGNS_TABLE).insert({
-    name, theme: settings.theme, subject: settings.subject, settings, selected_vehicles: selected, status: "draft",
+    name, theme: settings.theme, subject: settings.subject, settings, selected_vehicles: priceSnapshots, status: "draft",
   }).select("id,name,theme,subject,status,created_at").single(), "Could not save Vansco draft");
   return { campaign: data };
 }
