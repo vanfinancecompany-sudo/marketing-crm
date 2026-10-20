@@ -119,32 +119,31 @@ async function reviewContact(supabase,body){
   const updated=checked(await supabase.from(CONTACTS).update({status:"ready",reviewed_at:new Date().toISOString(),permission_notes:notes,updated_at:new Date().toISOString()}).eq("id",id).eq("status","pending_review").select("id").single(),"Couldn't approve this Vansco contact");
   return {reviewed:true,id:updated.id};
 }
-export function isPermittedVanscoTestDestination(address,{configured = "",confirmedOwned = false} = {}) {
+export function isPermittedVanscoTestDestination(address,{configured = ""} = {}) {
   const to=email(address);
   if(!EMAIL.test(to))return false;
   if(to==="sales@vanfinancecompany.co.uk"||to.endsWith("@vansco.co.uk")||(configured&&to===email(configured)))return true;
-  return Boolean(confirmedOwned && /@(gmail\.com|googlemail\.com)$/.test(to));
+  // Test messages are single-recipient, sent manually by an authenticated Marketing CRM operator.
+  return /@(gmail\.com|googlemail\.com)$/.test(to);
 }
-async function checkVanscoTestRateLimit(supabase,to) {
+async function checkVanscoTestRateLimit(supabase) {
+  // Guard against accidental loops / stolen API keys without hindering daily design testing.
+  // The previous 3-per-recipient / 20-total limits were too restrictive.
   const since=new Date(Date.now()-24*60*60*1000).toISOString();
-  const [recipient,total]=await Promise.all([
-    supabase.from(SENDS).select("id",{count:"exact",head:true}).eq("send_type","test").eq("email_normalized",to).gte("created_at",since),
-    supabase.from(SENDS).select("id",{count:"exact",head:true}).eq("send_type","test").gte("created_at",since),
-  ]);
-  checked(recipient,"Couldn't check test email limit");
-  checked(total,"Couldn't check account test email limit");
-  if((recipient.count||0)>=3)fail("This test inbox has reached its limit of three test attempts in 24 hours. Try again tomorrow.",429);
-  if((total.count||0)>=20)fail("The Vansco Email Studio has reached its daily internal test limit. Try again tomorrow.",429);
+  const total=supabase.from(SENDS).select("id",{count:"exact",head:true})
+    .eq("send_type","test").gte("created_at",since);
+  const result=await total;
+  checked(result,"Couldn't check test-email safety limit");
+  if((result.count||0)>=100)fail("The email studio has reached its safety limit of 100 internal test sends in 24 hours.",429);
 }
 async function testSend(supabase,body){
   requireProvider();
   const to=email(body.to);
   const configured=email(process.env.SENDGRID_TEST_RECIPIENT_EMAIL||"");
-  if(!isPermittedVanscoTestDestination(to,{configured,confirmedOwned:body.own_inbox===true})) {
-    fail("Tests can be sent to existing approved staff addresses or your own Gmail account after you confirm ownership.");
+  if(!isPermittedVanscoTestDestination(to,{configured})) {
+    fail("Internal tests can only go to Vansco/VFC staff addresses, an authorised configured test address, or Gmail.");
   }
-  if(body.confirm_phrase!=="SEND TEST")fail('Type "SEND TEST" to confirm the internal test message.');
-  await checkVanscoTestRateLimit(supabase,to);
+  await checkVanscoTestRateLimit(supabase);
   const row=await campaign(supabase,body.campaign_id);
   const vehicles=await verifiedVehicles(row);
   const send=await registerAttempt(supabase,{campaignId:row.id,to,type:"test"});
