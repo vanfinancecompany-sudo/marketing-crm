@@ -235,6 +235,12 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
          <div><b id="aLocked">—</b><span>7-day lock</span></div>
          <div><b id="aSuppressed">—</b><span>Blocked / opted out</span></div>
        </div>
+       <div id="verificationHoldPanel" class="safe-send" hidden style="background:#f6f7f8;border-left-color:#6b737d;margin:12px 0">
+        <strong><span id="verificationHoldCount">0</span> Vansco contacts awaiting confirmation</strong>
+        <p class="small" style="margin:7px 0">These customers are held by the shared CRM's verification status, not by an unsubscribe. Confirm them for Vansco only. Existing unsubscribes and bounced addresses stay blocked.</p>
+        <div class="actions"><button class="btn dark" id="confirmVerificationHolds">Confirm these Vansco contacts</button></div>
+        <p id="verificationHoldMessage" class="small" role="status"></p>
+       </div>
        <div class="actions"><button class="btn" id="refreshAudience">Refresh counts</button><button class="btn dark" id="previewVanscoBatch">Preview recipients</button></div>
        <details class="advanced-panel"><summary>More mailing statistics</summary>
         <div class="audience-overview">
@@ -601,6 +607,9 @@ async function refreshAudience(){
    el(x[0]).textContent=Number(a[x[1]]||0).toLocaleString("en-GB");
   });
   el("crmActivation").hidden=Number(a.pending_review||0)===0;
+  var verification=info.verification_holds||{},onHold=Number(verification.pending||0);
+  el("verificationHoldPanel").hidden=onHold===0;
+  el("verificationHoldCount").textContent=onHold.toLocaleString("en-GB");
   if(info.active_batch&&info.active_batch.id){
    var status=await delivery("batchStatus",{batch_id:info.active_batch.id});
    updateBatchUI(status.batch);
@@ -720,6 +729,18 @@ el("searchContacts").addEventListener("click",refreshContacts);
 el("refreshReport").addEventListener("click",refreshReport);
 
 
+el("confirmVerificationHolds").addEventListener("click",async function(){
+ var count=Number(el("verificationHoldCount").textContent.replace(/,/g,""))||0;
+ if(!count)return;
+ if(!confirm("CONFIRM VANSCO CONTACTS\n\nConfirm "+count+" contacts held for verification by the shared Marketing CRM?\n\nOnly confirm if these are Vansco customers or enquirers you may lawfully market similar vans to. This only changes their Vansco mailing eligibility, not the other CRM's records.\n\nUnsubscribes, bounces and other blocked addresses will remain excluded. No emails will be sent by this confirmation."))return;
+ el("confirmVerificationHolds").disabled=true;
+ try{
+  var data=await delivery("confirmVerificationHolds",{confirmed:true});
+  setMsg("verificationHoldMessage",Number(data.verification.confirmed||0)+" Vansco contacts confirmed for future eligible mailings. Unsubscribes and bounces are still excluded.");
+  await refreshAudience();
+ }catch(e){setMsg("verificationHoldMessage",e.message,true)}
+ finally{el("confirmVerificationHolds").disabled=false}
+});
 el("refreshAudience").addEventListener("click",refreshAudience);
 el("batchSize").addEventListener("change",function(){state.previewToken="";});
 el("previewVanscoBatch").addEventListener("click",async function(){

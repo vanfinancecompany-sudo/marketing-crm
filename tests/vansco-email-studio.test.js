@@ -443,3 +443,26 @@ test("Vansco duplicate send requests return existing batch and the UI disables S
  assert.match(ui,/delivered or opened/);
  assert.match(ui,/No second batch was created/);
 });
+
+test("Vansco verification-held contacts can be confirmed once without touching shared CRM or opt-out protections",()=>{
+ const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
+ const api=readFileSync(new URL("../api/vansco-email-delivery.js",import.meta.url),"utf8");
+ const migration=readFileSync(new URL("../supabase/migrations/20261020_vansco_confirm_shared_verification_holds.sql",import.meta.url),"utf8");
+ const lookup=readFileSync(new URL("../supabase/migrations/20261020_vansco_legacy_email_lookup_index.sql",import.meta.url),"utf8");
+ assert.match(ui,/id="verificationHoldPanel"/);
+ assert.match(ui,/id="confirmVerificationHolds"/);
+ assert.match(ui,/id="verificationHoldCount"/);
+ assert.match(ui,/delivery\("confirmVerificationHolds",\{confirmed:true\}\)/);
+ assert.match(ui,/Existing unsubscribes and bounced addresses stay blocked/);
+ assert.match(api,/vansco_email_verification_hold_summary/);
+ assert.match(api,/vansco_email_confirm_verification_holds/);
+ assert.match(migration,/vansco_verification_confirmed_at/);
+ assert.match(migration,/marketing_vansco_verification_confirmations/);
+ assert.match(migration,/m\.lifecycle_status='awaiting_verification'/);
+ assert.match(migration,/not exists\(select 1 from public\.marketing_suppression_identities/);
+ assert.match(migration,/m\.suppression->'email_unsubscribed'/);
+ assert.match(migration,/m\.suppression->'email_bounced'/);
+ assert.doesNotMatch(migration,/update\s+public\.marketing_contacts\s/m);
+ assert.match(migration,/revoke all on function public\.vansco_email_confirm_verification_holds/);
+ assert.match(lookup,/marketing_contacts_email_lookup_vansco_idx/);
+});

@@ -191,7 +191,8 @@ export async function audience(supabase) {
   const active=checked(await supabase.from("marketing_vansco_email_batches")
     .select("id,campaign_id,status,requested_count,reserved_count,created_at")
     .in("status",["queued","sending","paused"]).order("created_at",{ascending:false}).limit(1),"Could not check ongoing Vansco send");
-  return {audience:summary,active_batch:active?.[0]||null};
+  const verification_holds=checked(await supabase.rpc("vansco_email_verification_hold_summary"),"Could not check Vansco CRM verification holds");
+  return {audience:summary,active_batch:active?.[0]||null,verification_holds};
 }
 async function reviewSource(supabase,body) {
   const source=clean(body.source,180),notes=clean(body.permission_notes,900);
@@ -415,6 +416,11 @@ export default async function handler(request,response){
       result={activation:checked(await supabase.rpc("vansco_email_confirm_crm_audience",{
         p_basis:body.basis,p_confirm:true
       }),"Couldn't activate the confirmed Vansco CRM list")};
+    }
+    else if(body.action==="confirmVerificationHolds"){
+      if(body.confirmed!==true)fail("Confirm that the Vansco CRM relationship permits marketing to these contacts.");
+      result={verification:checked(await supabase.rpc("vansco_email_confirm_verification_holds",{p_confirm:true}),
+        "Couldn't confirm Vansco-only customer verification")};
     }
     else if(body.action==="previewBatch")result=await previewBatch(supabase,body);
     else if(body.action==="reserveBatch")result=await reserveBatch(supabase,body);
