@@ -348,12 +348,64 @@ function parseCsv(content){
  return rows.map(function(x){var r={};headers.forEach(function(h,i){r[h]=String(x[i]||"").trim()});return {email:r.email||r.email_address||r["e-mail"]||"",first_name:r.first_name||r.firstname||"",last_name:r.last_name||r.lastname||""}}).filter(function(x){return x.email});
 }
 async function refreshCounts(){
- try{var stats=await api("overview");el("contactTotal").textContent=stats.contacts.total.toLocaleString("en-GB");el("contactReview").textContent=stats.contacts.pending_review.toLocaleString("en-GB");el("contactSuppressed").textContent=stats.contacts.suppressed.toLocaleString("en-GB");el("campaignCount").textContent=stats.campaigns.toLocaleString("en-GB");var r=stats.reporting||{};["Submitted","Delivered","Opened","Clicked","Bounced","Unsubscribed"].forEach(function(k){el("r"+k).textContent=stats.sending_enabled?Number(r[k.toLowerCase()]||0).toLocaleString("en-GB"):"—"})}
- catch(e){setMsg("templateMessage",e.message,true)}
+ try{
+  var stats=await api("overview");
+  el("contactTotal").textContent=stats.contacts.total.toLocaleString("en-GB");
+  el("contactReview").textContent=stats.contacts.pending_review.toLocaleString("en-GB");
+  el("contactSuppressed").textContent=stats.contacts.suppressed.toLocaleString("en-GB");
+  el("campaignCount").textContent=stats.campaigns.toLocaleString("en-GB");
+ }catch(e){setMsg("templateMessage",e.message,true)}
 }
 async function refreshDrafts(){
- try{var data=await api("listCampaigns");el("draftList").innerHTML=data.campaigns.slice(0,8).map(function(c){return '<div class="list-row"><strong>'+escapeHtml(c.name)+'</strong><div class="small muted">'+escapeHtml(c.theme.replace(/_/g," "))+' · '+c.vehicle_count+' vans · Draft · '+new Date(c.created_at).toLocaleDateString("en-GB")+'</div></div>'}).join("")||'<p class="small muted">No Vansco campaign drafts saved yet.</p>'}
- catch(e){setMsg("draftMessage",e.message,true)}
+ try{
+  var data=await api("listCampaigns"),select=el("activeCampaign"),current=state.activeCampaign;
+  select.innerHTML='<option value="">Choose a saved Vansco draft…</option>'+data.campaigns.map(function(c){
+   return '<option value="'+escapeHtml(c.id)+'">'+escapeHtml(c.name)+' · '+escapeHtml(c.theme.replace(/_/g," "))+' · '+c.vehicle_count+' vans</option>';
+  }).join("");
+  state.activeCampaign=data.campaigns.some(function(x){return x.id===current})?current:"";
+  select.value=state.activeCampaign;
+  el("draftList").innerHTML=data.campaigns.slice(0,8).map(function(c){
+   return '<div class="list-row"><strong>'+escapeHtml(c.name)+'</strong><div class="small muted">'+escapeHtml(c.theme.replace(/_/g," "))+' · '+c.vehicle_count+' vans · '+new Date(c.created_at).toLocaleDateString("en-GB")+'</div></div>';
+  }).join("")||'<p class="small muted">No Vansco drafts yet. Save your first campaign above.</p>';
+ }catch(e){setMsg("draftMessage",e.message,true)}
+}
+async function refreshContacts(){
+ try{
+  var data=await delivery("contacts",{query:el("contactSearch").value.trim()});
+  el("contactRows").innerHTML=data.contacts.map(function(c){
+   var ready=c.status==="ready",name=[c.first_name,c.last_name].filter(Boolean).join(" ");
+   return '<div class="contact-row">'+
+    '<input type="checkbox" class="batch-recipient" data-contact-id="'+escapeHtml(c.id)+'" '+(ready?"":"disabled")+' title="Select approved Vansco contact">'+
+    '<div style="flex:1;min-width:0"><strong>'+escapeHtml(c.email_normalized)+'</strong>'+
+    (name?'<div class="status">'+escapeHtml(name)+'</div>':"")+
+    '<div class="status">'+escapeHtml(c.status.replace(/_/g," "))+' · '+escapeHtml(c.source)+'</div></div>'+
+    (c.status==="pending_review"?'<button type="button" class="btn review-contact" data-review-id="'+escapeHtml(c.id)+'">Review</button>':"")+
+    '</div>';
+  }).join("")||'<p class="small muted">No Vansco customer emails found.</p>';
+  el("contactRows").querySelectorAll(".review-contact").forEach(function(button){
+   button.addEventListener("click",async function(){
+    var emailText=button.closest(".contact-row").querySelector("strong").textContent;
+    var notes=prompt("Record the evidence of valid Vansco marketing permission for "+emailText+". Enter source, consent or legitimate-interest assessment (at least 15 characters).");
+    if(!notes||notes.trim().length<15)return;
+    if(prompt('To confirm individual approval, type REVIEWED FOR VANSCO')!=="REVIEWED FOR VANSCO")return;
+    button.disabled=true;
+    try{await delivery("reviewContact",{contact_id:button.dataset.reviewId,permission_notes:notes,confirm_phrase:"REVIEWED FOR VANSCO"});setMsg("customerSendMessage","Contact reviewed and approved.");await Promise.all([refreshContacts(),refreshCounts()])}
+    catch(e){setMsg("customerSendMessage",e.message,true);button.disabled=false}
+   });
+  });
+ }catch(e){setMsg("customerSendMessage",e.message,true)}
+}
+async function refreshReport(){
+ try{
+  var r=await delivery("report");
+  state.readyToSend=r.production_enabled;
+  el("sendCustomerBatch").disabled=!r.production_enabled;
+  ["Submitted","Delivered","Opened","Clicked","Bounced","Unsubscribed"].forEach(function(k){
+   el("r"+k).textContent=Number(r[k.toLowerCase()]||0).toLocaleString("en-GB");
+  });
+  el("recentResults").innerHTML='<p class="small muted">Internal tests: '+r.tests+'. Unknown provider outcomes: '+r.unknown+'. Customer sending: '+(r.production_enabled?"enabled":"locked pending sign-off")+'.</p>'+
+    (r.recent||[]).map(function(row){return '<div class="list-row">'+escapeHtml(row.type)+' · '+escapeHtml(row.email)+' · <strong>'+escapeHtml(row.status.replace(/_/g," "))+'</strong> · '+new Date(row.at).toLocaleString("en-GB")+'</div>'}).join("");
+ }catch(e){el("recentResults").innerHTML='<p class="err">'+escapeHtml(e.message)+'</p>'}
 }
 async function refreshStock(){
  setMsg("stockMessage","Checking live Vansco DealerKit stock…");
