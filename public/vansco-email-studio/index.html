@@ -203,31 +203,50 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
       </details>
     </section>
      <section class="panel" id="vanscoBatchPanel">
-       <div class="heading"><h2>Vansco 500-email campaigns</h2><span class="pill">MANUAL · 7-DAY LOCK</span></div>
-       <p class="small muted">One email per customer in seven days, maximum four in any calendar month or rolling 30 days. Test messages do not count.</p>
+       <div class="heading"><h2>Send Vansco email campaign</h2><span class="pill">100 OR 500</span></div>
+       <p class="small muted">Choose your saved campaign above, select 100 or 500 customers and send. The system excludes opt-outs, duplicates and recently emailed customers automatically.</p>
+       <div class="safe-send" id="crmActivation" hidden style="margin:13px 0">
+        <strong>One-time Vansco CRM confirmation</strong>
+        <p class="small" style="margin:7px 0">These records came from your Vansco CRM. Confirm their marketing basis once. There is no need to approve customers individually.</p>
+        <label style="display:block;margin-bottom:8px">How may these contacts receive marketing emails?
+          <select id="crmBasis" style="display:block;width:100%;margin-top:5px">
+            <option value="existing_customer">Existing customers: similar vans, opt-out offered when collected</option>
+            <option value="consent">Customers with recorded marketing consent</option>
+          </select>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px">
+          <input id="crmConfirm" type="checkbox" style="width:auto;margin-top:2px">
+          <span>I confirm these Vansco CRM contacts meet the selected marketing basis and have not opted out. Existing blocked addresses remain excluded.</span>
+        </label>
+        <div class="actions" style="margin-top:9px"><button class="btn dark" id="activateCrm">Confirm Vansco mailing list</button></div>
+        <p id="crmActivationMessage" class="small" role="status"></p>
+       </div>
        <div class="audience-overview">
-         <div><b id="aTotal">—</b><span>Total contacts</span></div>
-         <div><b id="aApproved">—</b><span>Approved</span></div>
-         <div><b id="aEligible">—</b><span>Eligible now</span></div>
-         <div><b id="aLocked">—</b><span>Locked 7 days</span></div>
-         <div><b id="aMonthly">—</b><span>Monthly limit</span></div>
-         <div><b id="aSuppressed">—</b><span>Blocked / suppressed</span></div>
-         <div><b id="aUnsubscribed">—</b><span>Unsubscribed</span></div>
-         <div><b id="aBounced">—</b><span>Bounced</span></div>
-         <div><b id="aPending">—</b><span>Needs review</span></div>
-         <div><b id="aRisky">—</b><span>Risky (included)</span></div>
-         <div><b id="aQueued">—</b><span>Queued / claimed</span></div>
-         <div><b id="aRemaining">—</b><span>Available next</span></div>
+         <div><b id="aTotal">—</b><span>Vansco contacts</span></div>
+         <div><b id="aEligible">—</b><span>Available now</span></div>
+         <div><b id="aLocked">—</b><span>7-day lock</span></div>
+         <div><b id="aSuppressed">—</b><span>Blocked / opted out</span></div>
        </div>
-       <div class="actions"><button class="btn" id="refreshAudience">Refresh eligible counts</button><button class="btn dark" id="previewVanscoBatch">Preview next eligible batch</button></div>
-       <p id="batchPreview" class="small muted" role="status">Preview the next eligible recipients before confirming a real batch.</p>
+       <div class="actions"><button class="btn" id="refreshAudience">Refresh counts</button><button class="btn dark" id="previewVanscoBatch">Preview recipients</button></div>
+       <details class="advanced-panel"><summary>More mailing statistics</summary>
+        <div class="audience-overview">
+          <div><b id="aApproved">—</b><span>Confirmed</span></div>
+          <div><b id="aMonthly">—</b><span>Monthly limit</span></div>
+          <div><b id="aUnsubscribed">—</b><span>Unsubscribed</span></div>
+          <div><b id="aBounced">—</b><span>Bounced</span></div>
+          <div><b id="aPending">—</b><span>Not yet confirmed</span></div>
+          <div><b id="aRisky">—</b><span>Risky addresses</span></div>
+          <div><b id="aQueued">—</b><span>Queued / claimed</span></div>
+          <div><b id="aRemaining">—</b><span>Available next</span></div>
+        </div>
+       </details>
+       <p id="batchPreview" class="small muted" role="status">Preview recipients if you want, or click Send to preview automatically and confirm.</p>
        <div class="form" style="margin-top:12px">
-         <label>Batch size (maximum 500)<input id="batchSize" type="number" min="1" max="500" value="500"></label>
-         <label>Final authorisation<input id="batchPhrase" placeholder="Type SEND VANSCO 500"></label>
-       </div>
-       <div class="safe-send" style="margin-top:13px">Select a saved Vansco campaign above. Customer sending requires approved recipients, validated vehicle stock and your confirmation. No other CRM emails are affected.</div>
+         <label>How many customers?<select id="batchSize"><option value="100">100 emails</option><option value="500" selected>500 emails</option></select></label>
+        </div>
+       
        <div class="actions">
-        <button class="btn red" id="startVanscoBatch">Start real customer batch</button>
+        <button class="btn red" id="startVanscoBatch">Send selected campaign</button>
         <button class="btn dark" id="resumeVanscoBatch" disabled>Resume batch</button>
         <button class="btn" id="pauseVanscoBatch" disabled>Pause after this step</button>
        </div>
