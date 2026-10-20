@@ -314,7 +314,7 @@ test("Vansco 500-email sending uses separate atomic queue and protects recent co
 
 test("Vansco batch progress interface has 500 limit, progress bar and pause/resume controls", () => {
   const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
-  assert.match(ui,/id="batchSize" type="number" min="1" max="500" value="500"/);
+  assert.match(ui,/<select id="batchSize"><option value="100">100 emails<\/option><option value="500" selected>500 emails<\/option><\/select>/);
   assert.match(ui,/id="batchProgress"/);
   assert.match(ui,/aria-valuemax="100"/);
   assert.match(ui,/id="startVanscoBatch"/);
@@ -405,4 +405,23 @@ test("Vansco SendGrid rate limiting pauses a whole batch instead of draining que
   assert.match(delivery,/pause rate-limited Vansco batch/);
   assert.match(worker,/\["queued","sending"\]/);
   assert.match(worker,/VANSCO_EMAIL_PRODUCTION_ENABLED!=="true"/);
+});
+
+test("Vansco CRM mailing desk uses one-time confirmation and 100 or 500 send, with no daily review hoops",()=>{
+ const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
+ const delivery=readFileSync(new URL("../api/vansco-email-delivery.js",import.meta.url),"utf8");
+ const sql=readFileSync(new URL("../supabase/migrations/20261020_vansco_simple_crm_audience_activation.sql",import.meta.url),"utf8");
+ assert.match(ui,/id="crmActivation"/);
+ assert.match(ui,/id="activateCrm"/);
+ assert.match(ui,/id="crmConfirm"/);
+ assert.match(ui,/id="crmBasis"/);
+ assert.match(ui,/id="batchSize"/);
+ assert.match(ui,/await previewVanscoBatch\(\)/);
+ assert.doesNotMatch(ui,/id="batchPhrase"/);
+ assert.match(ui,/<details class="advanced-panel"><summary>Find a customer/);
+ assert.match(delivery,/activateCrmAudience/);
+ assert.match(sql,/vansco_email_confirm_crm_audience/);
+ assert.match(sql,/marketing_vansco_email_review_audit/);
+ assert.match(sql,/status='pending_review'/);
+ assert.match(sql,/revoke all on function public\.vansco_email_confirm_crm_audience/);
 });
