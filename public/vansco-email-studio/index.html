@@ -39,6 +39,15 @@ textarea{min-height:70px;resize:vertical}input:focus,textarea:focus,select:focus
 .btn.red{background:#bb2337;color:#fff;border-color:#bb2337}
 .subheading{font-size:12px;font-weight:700;color:#606670;margin:0 0 9px}
 .stock{max-height:325px;overflow:auto;display:grid;gap:7px}
+.sale-grid{display:grid;gap:9px;margin-top:14px}.sale-editor{border:1px solid #e3e4e6;border-radius:8px;padding:11px;background:#fcfcfc}
+.sale-editor-header{font-size:12px;font-weight:800;margin:0 0 9px;color:#30343a}
+.sale-editor-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.sale-editor-fields label{font-size:11px;font-weight:800;color:#5d656e;display:grid;gap:4px}
+.sale-editor-fields input{font-variant-numeric:tabular-nums;font-size:13px;padding:8px}
+.field-help{margin:6px 0 0;font-size:11px;color:#6c7078}
+.logo-upload{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.logo-upload input[type=file]{max-width:240px}.logo-upload .btn{white-space:nowrap}
+@media(max-width:450px){.sale-editor-fields{grid-template-columns:1fr}}
 .stock-row{display:flex;align-items:center;gap:10px;padding:7px;border:1px solid #e6e7e9;border-radius:7px;cursor:pointer}
 .stock-row img{width:74px;height:55px;object-fit:cover;border-radius:5px;background:#ddd}
 .stock-copy{flex:1;min-width:0}.stock-copy strong{font-size:12px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -97,9 +106,19 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      <div class="form">
       <label class="full">Subject line<input id="subject" maxlength="250"></label>
       <label class="full">Inbox preview text<input id="previewText" maxlength="300"></label>
+      <label class="full">Small header label<input id="eyebrow" maxlength="120" placeholder="HALLOWEEN EDITION"></label>
       <label class="full">Campaign headline<input id="headline" maxlength="160"></label>
+      <label class="full">Subheadline<input id="subheading" maxlength="240" placeholder="Quality used vans"></label>
       <label class="full">Introductory message<textarea id="introduction" maxlength="2000"></textarea></label>
       <label class="full">Promotional strapline<input id="offer" maxlength="300"></label>
+      <label class="full">Vansco brand description<textarea id="brandDescription" maxlength="2400" rows="4" placeholder="A little more about Vansco and why customers choose you."></textarea></label>
+      <label class="full">Additional campaign text<textarea id="extraText" maxlength="2400" rows="4" placeholder="Sale details, finance information or a second promotional message."></textarea></label>
+      <label class="full">Footer details / small print<textarea id="footerNote" maxlength="800" rows="3" placeholder="Optional contact information or campaign terms."></textarea></label>
+      <label class="full">Vansco logo image URL<input id="logoUrl" type="url" maxlength="1600" placeholder="https://..."></label>
+      <div class="full"><p class="subheading">Or upload the Vansco logo (transparent PNG preferred)</p>
+       <div class="logo-upload"><input id="logoFile" type="file" accept="image/png,image/jpeg,image/webp"><button type="button" id="uploadLogo" class="btn">Upload logo</button></div>
+       <p class="field-help" id="logoMessage" role="status">Once uploaded, the logo is used across all the seasonal themes.</p>
+      </div>
       <label>Button label<input id="ctaLabel" maxlength="75"></label>
       <label>Button destination<input id="ctaUrl" type="url"></label>
      </div>
@@ -115,6 +134,10 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      <div class="actions" style="margin:0 0 11px"><input id="vehicleSearch" placeholder="Search vans" style="flex:1"><button class="btn" id="refreshStock">Refresh</button></div>
      <div id="stockMessage" class="small muted" role="status">Loading Vansco stock…</div>
      <div class="stock" id="stockList"></div>
+     <div class="heading" style="margin-top:17px"><h3>Featured van sale prices</h3><span class="small muted">Manual overrides</span></div>
+     <p class="field-help">Enter Was and Now for each featured van. Save is calculated automatically if left blank. Any manual Save must match the difference. DealerKit prices are not changed.</p>
+     <div class="sale-grid" id="saleEditors"></div>
+     <p class="small muted" id="saleMessage" role="status"></p>
     </section>
     <section class="panel">
      <div class="heading"><h2>Save campaign draft</h2><span class="pill">NO AUTO SEND</span></div>
@@ -163,10 +186,10 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
 "use strict";
 var STORAGE="marketingCustomerDatabaseApiKey", API="/api/vansco-email-studio";
 var themes={
- standard:{subject:"Vansco | Latest Vans Available Now",preview_text:"Browse our latest used vans.",heading:"FIND YOUR NEXT VAN",introduction:"Explore the latest vans available now at Vansco.",offer:"Quality used vans. Great choice.",cta_label:"VIEW ALL VANS",cta_url:"https://www.vansco.co.uk/all-stock/"},
- halloween:{subject:"Vansco Halloween Sale | Used Van Offers",preview_text:"Take a look at our Halloween van offers.",heading:"HALLOWEEN VAN SALE",introduction:"Discover vans ready for their next owner in our Halloween selection.",offer:"Great seasonal deals on used vans.",cta_label:"EXPLORE THE SALE",cta_url:"https://www.vansco.co.uk/all-stock/"},
- black_friday:{subject:"Vansco Black Friday | Used Vans",preview_text:"Explore this year's Black Friday van selection.",heading:"BLACK FRIDAY",introduction:"Explore our Black Friday selection of used vans.",offer:"Find a van to suit your business.",cta_label:"VIEW BLACK FRIDAY VANS",cta_url:"https://www.vansco.co.uk/all-stock/"},
- christmas:{subject:"Vansco Christmas | Our Festive Van Selection",preview_text:"Explore our Christmas selection of vans.",heading:"CHRISTMAS VAN SALE",introduction:"Find your next van this festive season at Vansco.",offer:"A fresh start for the road ahead.",cta_label:"SEE AVAILABLE VANS",cta_url:"https://www.vansco.co.uk/all-stock/"}
+ standard:{subject:"Vansco | Latest Vans Available Now",preview_text:"Browse our latest used vans.",eyebrow:"VANSCO",heading:"FIND YOUR NEXT VAN",subheading:"Quality used vans across Southampton and the New Forest",introduction:"Explore the latest vans available now at Vansco.",offer:"Quality used vans. Great choice.",cta_label:"VIEW ALL VANS",cta_url:"https://www.vansco.co.uk/all-stock/"},
+ halloween:{subject:"Vansco Halloween Sale | Used Van Offers",preview_text:"Take a look at our Halloween van offers.",eyebrow:"HALLOWEEN EDITION",heading:"HALLOWEEN VAN SALE",subheading:"A great selection of quality used vans",introduction:"Discover vans ready for their next owner in our Halloween selection.",offer:"Great seasonal deals on used vans.",cta_label:"EXPLORE THE SALE",cta_url:"https://www.vansco.co.uk/all-stock/"},
+ black_friday:{subject:"Vansco Black Friday | Used Vans",preview_text:"Explore this year's Black Friday van selection.",eyebrow:"BLACK FRIDAY EVENT",heading:"BLACK FRIDAY",subheading:"Featured Vansco offers",introduction:"Explore our Black Friday selection of used vans.",offer:"Find a van to suit your business.",cta_label:"VIEW BLACK FRIDAY VANS",cta_url:"https://www.vansco.co.uk/all-stock/"},
+ christmas:{subject:"Vansco Christmas | Our Festive Van Selection",preview_text:"Explore our Christmas selection of vans.",eyebrow:"CHRISTMAS EDITION",heading:"CHRISTMAS VAN SALE",subheading:"Start the new year with the right van",introduction:"Find your next van this festive season at Vansco.",offer:"A fresh start for the road ahead.",cta_label:"SEE AVAILABLE VANS",cta_url:"https://www.vansco.co.uk/all-stock/"}
 };
 var palettes={
  standard:{dark:"#1a1b1f",accent:"#c82535",light:"#f5f5f6",label:"VANSCO"},
@@ -174,16 +197,16 @@ var palettes={
  black_friday:{dark:"#151515",accent:"#d02535",light:"#f0f0f0",label:"BLACK FRIDAY EVENT"},
  christmas:{dark:"#213e38",accent:"#bd9c5b",light:"#f6f3ec",label:"CHRISTMAS EDITION"}
 };
-var fields={subject:"subject",previewText:"preview_text",headline:"heading",introduction:"introduction",offer:"offer",ctaLabel:"cta_label",ctaUrl:"cta_url"};
-var state={theme:"halloween",selected:[],stock:[],ready:false};
+var fields={subject:"subject",previewText:"preview_text",eyebrow:"eyebrow",headline:"heading",subheading:"subheading",introduction:"introduction",offer:"offer",brandDescription:"brand_description",extraText:"extra_text",footerNote:"footer_note",logoUrl:"logo_url",ctaLabel:"cta_label",ctaUrl:"cta_url"};
+var state={theme:"halloween",selected:[],stock:[],salePrices:{},ready:false};
 function el(id){return document.getElementById(id)}
 function escapeHtml(v){return String(v==null?"":v).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function key(){return localStorage.getItem(STORAGE)||""}
 function setMsg(id,text,bad){var node=el(id);node.textContent=text||"";node.className=bad?"err":"small muted"}
 async function api(action,payload){var response=await fetch(API,{method:"POST",headers:{"Content-Type":"application/json","x-marketing-customer-database-key":key()},body:JSON.stringify(Object.assign({action:action},payload||{}))});var result=await response.json().catch(function(){return {message:"Unexpected server response."}});if(!response.ok||!result.ok)throw Error(result.message||"Request failed");return result}
-function values(){var settings={theme:state.theme,selected_keys:state.selected.slice()};Object.keys(fields).forEach(function(k){settings[fields[k]]=el(k).value.trim()});return settings}
-function fill(data){state.theme=data.theme in themes?data.theme:"halloween";state.selected=Array.isArray(data.selected_keys)?data.selected_keys:[];Object.keys(fields).forEach(function(k){el(k).value=data[fields[k]]||""});highlightThemes();renderStock();preview()}
-function switchTheme(theme){if(!themes[theme])return;var before=values();fill(Object.assign({},before,themes[theme],{theme:theme,selected_keys:state.selected}));el("campaignName").value="Vansco "+(theme==="standard"?"New Stock":theme==="black_friday"?"Black Friday":theme==="christmas"?"Christmas":"Halloween")+" Sale"}
+function values(){var settings={theme:state.theme,selected_keys:state.selected.slice(),sale_prices:state.salePrices};Object.keys(fields).forEach(function(k){settings[fields[k]]=el(k).value.trim()});return settings}
+function fill(data){state.theme=data.theme in themes?data.theme:"halloween";state.selected=Array.isArray(data.selected_keys)?data.selected_keys:[];state.salePrices=data.sale_prices&&typeof data.sale_prices==="object"?data.sale_prices:{};Object.keys(fields).forEach(function(k){el(k).value=data[fields[k]]||""});highlightThemes();renderStock();preview()}
+function switchTheme(theme){if(!themes[theme])return;var before=values();fill(Object.assign({},before,themes[theme],{theme:theme,selected_keys:state.selected,sale_prices:state.salePrices}));el("campaignName").value="Vansco "+(theme==="standard"?"New Stock":theme==="black_friday"?"Black Friday":theme==="christmas"?"Christmas":"Halloween")+" Sale"}
 function highlightThemes(){document.querySelectorAll("[data-theme]").forEach(function(button){button.setAttribute("aria-pressed",String(button.dataset.theme===state.theme))})}
 function money(value){var m=String(value||"").match(/([0-9][0-9,]*(?:\.[0-9]+)?)/);if(!m)return "";var n=Number(m[1].replace(/,/g,""));return Number.isFinite(n)?"£"+n.toLocaleString("en-GB",{maximumFractionDigits:0}):""}
 function selectedVehicles(){var map=new Map(state.stock.map(function(v){return [v.key,v]}));return state.selected.map(function(k){return map.get(k)}).filter(Boolean)}
@@ -201,28 +224,88 @@ function renderStock(){
   if(!node.checked)state.selected=state.selected.filter(function(k){return k!==node.dataset.key});
   renderStock();preview();
  })});
+ renderSaleEditors();
 }
+
+function parseAmount(value){var n=Number(String(value||"").replace(/[£,\s]/g,""));return Number.isFinite(n)&&n>0?n:0}
+function pounds(value){var n=parseAmount(value);return n?"£"+n.toLocaleString("en-GB",{minimumFractionDigits:0,maximumFractionDigits:2}):""}
+function renderSaleEditors(){
+ var vans=selectedVehicles();
+ el("saleEditors").innerHTML=vans.map(function(v){
+  var item=state.salePrices[v.key]||{},id=escapeHtml(v.key);
+  return '<div class="sale-editor"><div class="sale-editor-header">'+escapeHtml(v.title)+" · "+escapeHtml(v.registration||"")+'</div>'+
+   '<div class="sale-editor-fields"><label>Was (£)<input data-sale-key="'+id+'" data-sale-field="was" inputmode="decimal" placeholder="e.g. 15995" value="'+escapeHtml(item.was||"")+'"></label>'+
+   '<label>Now (£)<input data-sale-key="'+id+'" data-sale-field="now" inputmode="decimal" placeholder="e.g. 13995" value="'+escapeHtml(item.now||"")+'"></label>'+
+   '<label>Save (£)<input data-sale-key="'+id+'" data-sale-field="save" inputmode="decimal" placeholder="Auto if blank" value="'+escapeHtml(item.save||"")+'"></label></div></div>';
+ }).join("");
+ if(!vans.length)el("saleEditors").innerHTML='<p class="field-help">Select Vansco vans above to set their sale prices.</p>';
+ el("saleEditors").querySelectorAll("[data-sale-field]").forEach(function(input){
+  input.addEventListener("input",function(){
+   var k=input.dataset.saleKey,field=input.dataset.saleField;
+   var entry=Object.assign({},state.salePrices[k]||{});entry[field]=input.value.trim();state.salePrices[k]=entry;
+   var was=parseAmount(entry.was),now=parseAmount(entry.now),save=parseAmount(entry.save);
+   if(was&&now&&now>=was)setMsg("saleMessage","Now must be lower than Was.",true);
+   else if(was&&now&&save&&Math.abs((was-now)-save)>0.005)setMsg("saleMessage","Save must equal Was minus Now.",true);
+   else setMsg("saleMessage","","");
+   preview();
+  });
+ });
+}
+
 function buildEmail(){
- var s=values(),p=palettes[state.theme],v=selectedVehicles();
+ var s=values(),p=palettes[state.theme],v=selectedVehicles(),saleMode=state.theme!=="standard";
+ function lines(value){return escapeHtml(value||"").replace(/\r?\n/g,"<br>")}
+ function paragraph(value,style){
+  return value?'<p style="'+style+'">'+lines(value)+'</p>':"";
+ }
+ var pumpkin=state.theme==="halloween"?'<span aria-hidden="true" style="font-size:16px;padding-left:7px">🎃</span>':"";
+ var brandLogo=s.logo_url
+  ?'<img src="'+escapeHtml(s.logo_url)+'" alt="Vansco" style="display:block;max-height:65px;max-width:190px;width:auto;height:auto;border:0">'
+  :'<div style="font-size:23px;font-weight:900;letter-spacing:2px">VANSCO<span style="color:'+p.accent+'">.</span></div>';
  var vehicleRows="";
  for(var i=0;i<v.length;i+=2){
-  vehicleRows+='<tr><td style="padding:8px 22px"><table role="presentation" style="width:100%;border-collapse:collapse"><tr>';
+  vehicleRows+='<tr><td style="padding:8px 22px"><table role="presentation" width="100%" style="width:100%;border-collapse:collapse"><tr>';
   v.slice(i,i+2).forEach(function(item){
-   vehicleRows+='<td class="van" width="50%" valign="top" style="width:50%;padding:7px"><table role="presentation" style="width:100%;border:1px solid #e5e5e5;border-collapse:collapse"><tr><td><a href="'+escapeHtml(item.url)+'"><img src="'+escapeHtml(item.image)+'" alt="'+escapeHtml(item.title)+'" style="display:block;width:100%;height:auto;max-height:200px;object-fit:cover;border:0"></a></td></tr><tr><td style="padding:13px 12px;font-family:Arial,sans-serif"><strong style="font-size:14px;color:#202124">'+escapeHtml(item.title)+'</strong><p style="margin:7px 0 12px;font-size:17px;font-weight:bold;color:#202124">'+escapeHtml(money(item.price))+'</p><a href="'+escapeHtml(item.url)+'" style="color:'+p.dark+';font-size:12px;font-weight:bold;text-decoration:underline">VIEW VEHICLE</a></td></tr></table></td>';
+   var sale=state.salePrices[item.key]||{},was=parseAmount(sale.was),now=parseAmount(sale.now),saving=parseAmount(sale.save);
+   var saleValid=was>now&&now>0&&(!saving||Math.abs(saving-(was-now))<.005);
+   var priceHtml=saleValid?
+    '<div style="margin:8px 0 10px"><div style="font:11px Arial,sans-serif;color:#697079">WAS <span style="text-decoration:line-through">'+escapeHtml(pounds(was))+'</span></div>'+
+    '<div style="font:800 20px/1.4 Arial,sans-serif;color:#141414">NOW '+escapeHtml(pounds(now))+'</div>'+
+    '<div style="margin-top:5px;color:#c7263a;font:800 13px Arial,sans-serif">SAVE '+escapeHtml(pounds(was-now))+'</div></div>'
+   :'<div style="margin:8px 0 11px;font:800 18px Arial,sans-serif;color:#202124">'+escapeHtml(money(item.price))+'</div>';
+   // Do not crop or fix an image height: intrinsic aspect ratio works in email clients.
+   vehicleRows+='<td class="van" width="50%" valign="top" style="width:50%;padding:7px"><table role="presentation" width="100%" style="width:100%;border:1px solid #e6e6e6;border-collapse:collapse"><tr><td bgcolor="#f5f5f5" align="center">'+
+    '<a href="'+escapeHtml(item.url)+'"><img src="'+escapeHtml(item.image)+'" alt="'+escapeHtml(item.title)+'" width="290" style="display:block;width:100%;max-width:290px;height:auto;border:0;outline:none;text-decoration:none"></a></td></tr>'+
+    '<tr><td style="padding:13px 12px;font-family:Arial,sans-serif"><strong style="font-size:14px;line-height:19px;display:block;color:#202124">'+escapeHtml(item.title)+'</strong>'+
+    (item.registration?'<div style="margin-top:5px;color:#697079;font-size:11px">'+escapeHtml(item.registration)+'</div>':"")+
+    priceHtml+
+    (item.vat_label?'<div style="color:#656c75;font-size:11px;margin-bottom:10px">'+escapeHtml(item.vat_label)+'</div>':"")+
+    '<a href="'+escapeHtml(item.url)+'" style="color:'+p.dark+';font-size:12px;font-weight:bold;text-decoration:underline">VIEW VEHICLE</a></td></tr></table></td>';
   });
   if(i+1>=v.length)vehicleRows+='<td width="50%" class="van" style="width:50%"></td>';
   vehicleRows+='</tr></table></td></tr>';
  }
  if(!v.length)vehicleRows='<tr><td style="padding:26px;text-align:center;color:#91969a;font-family:Arial,sans-serif;font-size:14px">Select Vansco vehicles to preview the stock cards.</td></tr>';
- return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media(max-width:600px){.van{display:block!important;width:100%!important}.body-pad{padding:22px!important}}</style><title>'+escapeHtml(s.subject)+'</title></head>'+
- '<body style="margin:0;background:#e9eaec;padding:0"><table role="presentation" width="100%" style="border-collapse:collapse;background:#e9eaec"><tr><td align="center" style="padding:22px 8px"><table role="presentation" style="border-collapse:collapse;width:100%;max-width:650px;background:white">'+
- '<tr><td style="background:'+p.dark+';padding:20px 26px 15px;color:#fff;font-family:Arial,sans-serif"><div style="font-size:23px;font-weight:900;letter-spacing:2px">VANSCO<span style="color:'+p.accent+'">.</span></div><div style="margin-top:8px;font-size:10px;letter-spacing:3px;color:'+p.accent+'">'+escapeHtml(p.label)+'</div></td></tr>'+
- '<tr><td class="body-pad" style="padding:42px 30px 35px;background:'+p.dark+';color:#fff;font-family:Arial,sans-serif;border-top:3px solid '+p.accent+'"><h1 style="font-size:36px;letter-spacing:-1px;line-height:1.06;margin:0 0 18px">'+escapeHtml(s.heading)+'</h1><p style="color:#efefef;font-size:15px;line-height:1.6;margin:0">'+escapeHtml(s.introduction)+'</p></td></tr>'+
- '<tr><td style="background:'+p.light+';padding:22px 30px;font-family:Arial,sans-serif;color:'+p.dark+';font-weight:bold;font-size:20px">'+escapeHtml(s.offer)+'</td></tr>'+
- '<tr><td style="font-family:Arial,sans-serif;padding:23px 28px 4px"><h2 style="margin:0;font-size:19px;color:#202124">Featured Vans</h2><p style="margin:8px 0 0;color:#70777d;font-size:13px">Explore our latest available vehicles</p></td></tr>'+
+ var company=paragraph(s.brand_description,'margin:0;color:#42464c;font-size:14px;line-height:23px');
+ var additional=paragraph(s.extra_text,'margin:0;color:#30343a;font-size:14px;line-height:23px');
+ var footer=paragraph(s.footer_note,'margin:10px 0 0;color:#636970;font-size:11px;line-height:17px');
+ return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media(max-width:600px){.van{display:block!important;width:100%!important}.body-pad{padding:25px!important}}</style><title>'+escapeHtml(s.subject)+'</title></head>'+
+ '<body style="margin:0;background:#e9eaec;padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#e9eaec"><tr><td align="center" style="padding:22px 8px"><table role="presentation" width="650" style="border-collapse:collapse;width:100%;max-width:650px;background:white">'+
+ '<tr><td style="background:'+p.dark+';padding:20px 25px 15px;color:#fff;font-family:Arial,sans-serif"><table role="presentation" width="100%" style="width:100%;border-collapse:collapse"><tr><td align="left" valign="middle">'+brandLogo+'</td><td align="right" valign="middle" style="color:'+p.accent+';font:700 10px Arial,sans-serif;letter-spacing:1.5px">'+pumpkin+escapeHtml(s.eyebrow||p.label)+pumpkin+'</td></tr></table></td></tr>'+
+ '<tr><td class="body-pad" style="padding:37px 30px 33px;background:'+p.dark+';color:#fff;font-family:Arial,sans-serif;border-top:2px solid '+p.accent+'">'+
+ '<h1 style="font-size:36px;letter-spacing:-1px;line-height:1.08;margin:0 0 12px;color:#fff">'+escapeHtml(s.heading)+'</h1>'+
+ (s.subheading?'<h2 style="font-size:18px;font-weight:600;line-height:25px;margin:0 0 15px;color:'+p.accent+'">'+escapeHtml(s.subheading)+'</h2>':"")+
+ paragraph(s.introduction,'color:#efefef;font-size:15px;line-height:24px;margin:0')+
+ '</td></tr>'+
+ (s.offer?'<tr><td style="background:'+p.light+';padding:20px 28px;font-family:Arial,sans-serif;color:'+p.dark+';font-weight:bold;font-size:19px;line-height:27px">'+lines(s.offer)+'</td></tr>':"")+
+ (company?'<tr><td style="font-family:Arial,sans-serif;padding:22px 29px 8px">'+company+'</td></tr>':"")+
+ '<tr><td style="font-family:Arial,sans-serif;padding:23px 28px 4px"><h2 style="margin:0;font-size:19px;color:#202124">Featured Vans</h2><p style="margin:8px 0 0;color:#70777d;font-size:13px">Browse our selected used vans</p></td></tr>'+
  vehicleRows+
- '<tr><td align="center" style="padding:29px"><a href="'+escapeHtml(s.cta_url)+'" style="display:inline-block;background:'+p.accent+';color:'+(state.theme==="halloween"||state.theme==="christmas"?"#201c1f":"#ffffff")+';padding:15px 22px;text-decoration:none;font:800 13px Arial,sans-serif;letter-spacing:.4px">'+escapeHtml(s.cta_label)+'</a></td></tr>'+
- '<tr><td style="padding:19px 27px;background:#f2f3f3;font:12px/1.5 Arial,sans-serif;color:#565e65">Vansco Limited · <a href="https://www.vansco.co.uk/" style="color:#25282b">www.vansco.co.uk</a><p style="margin:8px 0 0">Vehicle availability, prices and VAT status are subject to confirmation.</p><p style="margin:8px 0 0">Marketing unsubscribe link will be inserted by the verified sending system.</p></td></tr>'+
+ (additional?'<tr><td style="font-family:Arial,sans-serif;padding:20px 28px 4px">'+additional+'</td></tr>':"")+
+ '<tr><td align="center" style="padding:29px"><a href="'+escapeHtml(s.cta_url)+'" style="display:inline-block;background:'+p.accent+';color:'+(saleMode&&state.theme!=="black_friday"?"#201c1f":"#ffffff")+';padding:15px 22px;text-decoration:none;font:800 13px Arial,sans-serif;letter-spacing:.4px">'+escapeHtml(s.cta_label)+'</a></td></tr>'+
+ '<tr><td style="padding:19px 27px;background:#f2f3f3;font:12px/1.5 Arial,sans-serif;color:#565e65">Vansco Limited · <a href="https://www.vansco.co.uk/" style="color:#25282b">www.vansco.co.uk</a><p style="margin:8px 0 0">Vehicle availability, prices and VAT status are subject to confirmation.</p>'+
+ footer+
+ '<p style="margin:8px 0 0">Marketing unsubscribe link will be inserted by the verified sending system.</p></td></tr>'+
  '</table></td></tr></table></body></html>';
 }
 function preview(){el("emailPreview").srcdoc=buildEmail()}
@@ -264,6 +347,33 @@ el("vehicleSearch").addEventListener("input",renderStock);
 el("refreshStock").addEventListener("click",refreshStock);
 el("saveMaster").addEventListener("click",async function(){try{var d=await api("saveMaster",{settings:values()});el("savedAt").textContent="Saved "+new Date(d.updated_at).toLocaleString("en-GB");setMsg("templateMessage","Master template saved.");}catch(e){setMsg("templateMessage",e.message,true)}});
 el("downloadHtml").addEventListener("click",downloadHtml);
+
+el("uploadLogo").addEventListener("click",async function(){
+ var file=el("logoFile").files[0];
+ if(!file){setMsg("logoMessage","Choose the Vansco logo image first.",true);return}
+ if(!["image/png","image/jpeg","image/webp"].includes(file.type)||file.size>1500000){
+  setMsg("logoMessage","Choose a PNG, JPG or WebP under 1.5 MB.",true);return
+ }
+ el("uploadLogo").disabled=true;
+ setMsg("logoMessage","Uploading logo to secure Vansco email storage...");
+ try{
+  var base64=await new Promise(function(resolve,reject){
+   var reader=new FileReader();
+   reader.onload=function(){resolve(String(reader.result||"").split(",")[1]||"")};
+   reader.onerror=function(){reject(new Error("The logo file could not be read."))};
+   reader.readAsDataURL(file);
+  });
+  var response=await fetch("/api/vansco-email-logo",{
+   method:"POST",headers:{"Content-Type":"application/json","x-marketing-customer-database-key":key()},
+   body:JSON.stringify({content_type:file.type,base64:base64})
+  });
+  var data=await response.json().catch(function(){return {message:"Logo storage did not respond."}});
+  if(!response.ok||!data.ok||!data.url)throw Error(data.message||"Could not upload logo.");
+  el("logoUrl").value=data.url;preview();
+  setMsg("logoMessage","Logo uploaded. Save the master template to keep it.");
+ }catch(e){setMsg("logoMessage",e.message,true)}finally{el("uploadLogo").disabled=false}
+});
+
 el("saveDraft").addEventListener("click",async function(){try{await api("saveDraft",{name:el("campaignName").value.trim(),settings:values()});setMsg("draftMessage","Vansco campaign draft saved. No emails sent.");await Promise.all([refreshCounts(),refreshDrafts()])}catch(e){setMsg("draftMessage",e.message,true)}});
 el("importContacts").addEventListener("click",async function(){
  var file=el("csvFile").files[0],source=el("listSource").value.trim(),basis=el("marketingBasis").value;
