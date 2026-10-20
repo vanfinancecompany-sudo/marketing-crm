@@ -145,6 +145,7 @@ export function mappedVehicle(row) {
       key: clean(row.vehicleKey, 260),
       registration: clean(row.registration, 20),
       title: clean(row.title, 180),
+      detail: clean([row.bodyStyle, row.description].filter(Boolean).join(" · ").replace(/\s+/g, " "), 190),
       price: clean(row.price, 60),
       image: clean(row.imageUrl, 1000),
       url: url.href,
@@ -154,7 +155,7 @@ export function mappedVehicle(row) {
     };
   } catch { return null; }
 }
-async function liveStock() {
+export async function liveStock() {
   const catalogue = await fetchVanscoMetaCatalogue({ preferLiveMetaImages: true });
   const seen = new Set();
   return catalogue.map(mappedVehicle).filter(vehicle => {
