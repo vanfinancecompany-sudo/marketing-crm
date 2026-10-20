@@ -238,9 +238,24 @@ async function reserveBatch(supabase,body) {
   const selected=await campaign(supabase,body.campaign_id);
   if(!validatePreviewToken(body.preview_token,selected.id,amount))fail("Preview the recipient audience again before confirming. The preview expires after ten minutes.",409);
   await verifiedVehicles(selected);
-  const result=checked(await supabase.rpc("vansco_email_reserve_batch",{p_campaign:selected.id,p_limit:amount}),
-    "Could not safely reserve Vansco mailing batch");
-  return {batch:result};
+  // Only one Vansco customer batch can be active. Return its ID instead of exposing a database error.
+  const activeQuery=()=>supabase.from("marketing_vansco_email_batches")
+    .select("id,status,reserved_count").in("status",["queued","sending","paused"])
+    .order("created_at",{ascending:false}).limit(1);
+  const active=checked(await activeQuery(),"Could not check the active Vansco mailing");
+  if(active?.length)return {batch:{queued:false,existing:true,batch_id:active[0].id,
+    message:"Your previous Vansco batch is still "+active[0].status+". Its progress is shown below. Wait until it finishes before starting another."}};
+  const reservation=await supabase.rpc("vansco_email_reserve_batch",{p_campaign:selected.id,p_limit:amount});
+  if(reservation.error){
+    // Race: a different tab started the one permitted active batch after the first check.
+    if(reservation.error.code==="23505"||/vansco_only_one_active_customer_batch/.test(reservation.error.message||"")){
+      const race=checked(await activeQuery(),"Could not locate the already-running Vansco batch");
+      if(race?.length)return {batch:{queued:false,existing:true,batch_id:race[0].id,
+        message:"A Vansco batch is already "+race[0].status+". No second batch was created. Follow its progress below."}};
+    }
+    checked(reservation,"Could not safely reserve Vansco mailing batch");
+  }
+  return {batch:reservation.data};
 }
 async function statusOfBatch(supabase,body) {
   if(!validId(body.batch_id))fail("Choose a Vansco mailing batch.");
