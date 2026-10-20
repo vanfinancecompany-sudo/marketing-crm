@@ -208,9 +208,48 @@ test("Vansco footer has three separated showroom sections and no duplicated lega
       assert.match(rendered,new RegExp("tel:\\+"+tel.slice(1)));
     }
     assert.equal(rendered.split("sales@vansco.co.uk").length - 1, 2,"one clickable email address");
-    assert.equal(rendered.split("border-bottom:1px solid #504b53").length - 1, 2);
+    assert.equal(rendered.split("border-right:1px solid #504b53").length - 1, 2);
+    assert.match(rendered, /class="vansco-branch /);
+    assert.equal((rendered.match(/width="33%"/g) || []).length, 3);
+    assert.match(rendered, /<tr><td class="vansco-branch/);
     assert.match(rendered,/mailto:sales@vansco\.co\.uk/);
     assert.equal(rendered.split("Vehicle prices and availability are subject to confirmation.").length-1,1);
     assert.doesNotMatch(rendered,/\| 02380/);
+  }
+});
+
+test("VAT label follows NOW amount on the same price line in actual Vansco emails", () => {
+  const ui = readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
+  const renderer = readFileSync(new URL("../lib/vanscoEmailRender.js",import.meta.url),"utf8");
+  const vehicle={key:"testvan",title:"Ford Transit Custom",url:"https://www.vansco.co.uk/v/one",image:"https://example.com/one.jpg",mileage:"35000",price:"£15,995",vat_label:"+ VAT"};
+  const html=renderVanscoEmail({
+    settings:{...base,stock_count:"278",stock_location:"Used Vehicles in Southampton, Hampshire",sale_prices:{testvan:{was:"15995",now:"13995",save:"2000"}}},
+    vehicles:[vehicle],testMode:true
+  });
+  assert.match(html,/NOW £13,995<span[^>]*>\+ VAT<\/span>/);
+  assert.match(html,/278 vehicles in stock/);
+  assert.match(html,/Used Vehicles in Southampton, Hampshire/);
+  assert.match(ui,/stockCount:"stock_count",stockLocation:"stock_location"/);
+  assert.match(ui,/class="vansco-branch /);
+  assert.match(renderer,/\.vansco-branch\{display:block!important/);
+  assert.doesNotMatch(ui,/item\.vat_label\?'<div/);
+  assert.doesNotMatch(renderer,/vehicle\.vat_label \? '<p style/);
+});
+
+test("unsale vehicle prices also display VAT inline", () => {
+  const html=renderVanscoEmail({
+    settings:{...base,stock_count:"278",stock_location:"Used Vehicles in Southampton, Hampshire"},
+    vehicles:[{key:"van",title:"Ford Transit",url:"https://www.vansco.co.uk/v/van",image:"https://example.com/van.jpg",price:"£15,995",vat_label:"+ VAT"}],
+    testMode:true
+  });
+  assert.match(html,/£15,995<span[^>]*>\+ VAT<\/span>/);
+  assert.doesNotMatch(html,/<p style="font-size:11px;color:#686e75/);
+});
+
+test("stock count settings accept an editable positive integer only", () => {
+  assert.equal(normaliseSettings({...base,stock_count:"278",stock_location:"Used Vehicles in Southampton, Hampshire"}).stock_count,"278");
+  assert.equal(normaliseSettings({...base,stock_count:""}).stock_count,"");
+  for(const invalid of ["-1","278 vehicles","23.5","0","1,000"]) {
+    assert.throws(()=>normaliseSettings({...base,stock_count:invalid}),/stock count/i);
   }
 });
