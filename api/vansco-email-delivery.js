@@ -115,15 +115,17 @@ async function listContacts(supabase,body={}){
   return {contacts:(rows||[]).map(r=>({...r,lock:map.get(r.id)||null}))};
 }
 async function reviewContact(supabase,body){
-  const id=clean(body.contact_id,80),notes=clean(body.permission_notes,700);
-  if(!validId(id)||notes.length<15||body.confirm_phrase!=="REVIEWED FOR VANSCO")fail('Review a single contact, explain its marketing basis and type "REVIEWED FOR VANSCO".');
-  const contact=checked(await supabase.from(CONTACTS).select("*").eq("id",id).maybeSingle(),"Couldn't read contact");
-  if(!contact||contact.status!=="pending_review")fail("Only pending Vansco contacts can be reviewed.");
-  // This only changes the brand-specific record, never the shared customer database.
-  const active=await recipientEligible(supabase,{...contact,status:"ready",reviewed_at:new Date().toISOString(),permission_notes:notes});
-  if(!active)fail("Existing suppression or invalid email blocks this address.",409);
-  const updated=checked(await supabase.from(CONTACTS).update({status:"ready",reviewed_at:new Date().toISOString(),permission_notes:notes,updated_at:new Date().toISOString()}).eq("id",id).eq("status","pending_review").select("id").single(),"Couldn't approve this Vansco contact");
-  return {reviewed:true,id:updated.id};
+ const id=clean(body.contact_id,80),notes=clean(body.permission_notes,900);
+ const reviewer=clean(body.reviewed_by,140),evidence=clean(body.evidence_reference,300);
+ const basis=clean(body.marketing_basis,45);
+ if(!validId(id)||notes.length<50||reviewer.length<3||evidence.length<8
+   ||!["consent","legitimate_interest"].includes(basis)
+   ||body.confirm_phrase!=="REVIEWED FOR VANSCO")
+  fail("Provide a reviewer, evidence reference, lawful marketing basis, 50+ character assessment and REVIEWED FOR VANSCO confirmation.");
+ return checked(await supabase.rpc("vansco_email_approve_contact",{
+   p_contact:id,p_reviewer:reviewer,p_evidence:evidence,p_basis:basis,
+   p_notes:notes,p_include_risky:body.include_risky===true
+ }),"Couldn't record audited Vansco contact review");
 }
 export function isPermittedVanscoTestDestination(address,{configured = ""} = {}) {
   const to=email(address);
