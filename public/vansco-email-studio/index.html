@@ -39,6 +39,10 @@ textarea{min-height:70px;resize:vertical}input:focus,textarea:focus,select:focus
 .btn.red{background:#bb2337;color:#fff;border-color:#bb2337}
 .subheading{font-size:12px;font-weight:700;color:#606670;margin:0 0 9px}
 .stock{max-height:325px;overflow:auto;display:grid;gap:7px}
+.contact-row{display:flex;gap:9px;align-items:center;padding:9px 10px;background:#f7f8f8;border:1px solid #e4e6e8;border-radius:6px;font-size:12px}
+.contact-row strong{font-size:12px}.contact-row .status{color:#606771;font-size:11px}.contact-row button{margin-left:auto}
+.contact-row input[type=checkbox]{width:18px;height:18px;flex:none;accent-color:#b82036}
+.safe-send{background:#f8f6f0;border-left:3px solid #bf9b55;padding:11px;font-size:12px;line-height:1.5;border-radius:5px}
 .sale-grid{display:grid;gap:9px;margin-top:14px}.sale-editor{border:1px solid #e3e4e6;border-radius:8px;padding:11px;background:#fcfcfc}
 .sale-editor-header{font-size:12px;font-weight:800;margin:0 0 9px;color:#30343a}
 .sale-editor-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
@@ -140,9 +144,17 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      <p class="small muted" id="saleMessage" role="status"></p>
     </section>
     <section class="panel">
-     <div class="heading"><h2>Save campaign draft</h2><span class="pill">NO AUTO SEND</span></div>
+     <div class="heading"><h2>Saved campaigns &amp; test email</h2><span class="pill">MANUAL SENDING</span></div>
      <label class="subheading" for="campaignName">Campaign name</label><input id="campaignName" value="Vansco Halloween Sale">
-     <div class="actions"><button class="btn red" id="saveDraft">Save Vansco draft</button><button class="btn" disabled title="Available once send-safety checks are complete">Send campaign</button></div>
+     <div class="actions"><button class="btn red" id="saveDraft">Save new campaign draft</button></div>
+      <div class="form" style="margin-top:14px">
+       <label class="full">Campaign to test / send<select id="activeCampaign"><option value="">Save or select a campaign draft…</option></select></label>
+       <label class="full">Internal test email address<input type="email" id="testRecipient" placeholder="sales@vanfinancecompany.co.uk"></label>
+       <label class="full">Test confirmation<input id="testConfirmation" placeholder="Type SEND TEST"></label>
+      </div>
+      <div class="actions"><button class="btn dark" id="sendInternalTest">Send internal test email</button><button class="btn" id="reloadDraft">Load selected draft into editor</button></div>
+      <p class="small muted">Use Save new campaign draft whenever you change text, pricing or vehicles. A test always sends the selected saved draft, not unsaved edits.</p>
+      <p id="testMessage" class="small" role="status"></p>
      <p class="small muted">Saved drafts have frozen vehicle selections. No customer emails are sent from this screen.</p>
      <div id="draftList" class="list"></div>
      <p id="draftMessage" class="small" role="status"></p>
@@ -158,6 +170,12 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      <div class="actions"><button class="btn dark" id="importContacts">Import into Vansco list</button></div>
      <p id="importMessage" class="small" role="status"></p>
      <p class="small muted">CSV columns: email, first_name, last_name. Verifying email deliverability does not itself establish permission to market.</p>
+     <div class="heading" style="margin-top:18px"><h3>Review &amp; select Vansco customers</h3><button class="btn" id="refreshContacts">Refresh</button></div>
+     <p class="small muted">Imported contacts remain pending until you review their marketing permissions. Review is individual and logged. Customer sends are limited to five approved contacts per click.</p>
+     <div class="actions"><input id="contactSearch" placeholder="Search by email" style="flex:1"><button class="btn" id="searchContacts">Search</button></div>
+     <div id="contactRows" class="list" style="max-height:360px;overflow:auto;margin-top:12px"></div>
+     <div class="actions"><input id="batchConfirmation" placeholder="Type SEND 1–5 to confirm" style="flex:1"><button class="btn red" id="sendCustomerBatch" disabled>Send selected customer batch</button></div>
+     <p id="customerSendMessage" class="small" role="status"></p>
     </section>
    </div>
    <section class="panel preview-wrap">
@@ -176,7 +194,9 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
     <div class="report"><b id="rUnsubscribed">—</b><span>Unsubscribed</span></div>
    </div>
    <p class="small muted">* Opens are estimated by email clients. Reporting will populate after safe manual sending and provider event tracking are enabled. CRM transactional emails are never included.</p>
-   <div class="notice">Sending is intentionally locked in this first stage. The main CRM’s automatic customer emails, current campaigns, suppression centre and scheduled jobs have not been changed.</div>
+   <div class="safe-send">SendGrid email tests are manual, and customer sending is separately protected behind a production-enable switch. The main CRM's automatic proof requests and customer emails are not part of this system.</div>
+    <div class="actions"><button id="refreshReport" class="btn">Refresh delivery results</button></div>
+    <div id="recentResults" class="list" style="margin-top:12px"></div>
   </section>
  </div>
 </main>
