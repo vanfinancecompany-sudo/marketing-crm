@@ -14,6 +14,7 @@
     { id: "suppression-centre", label: "Suppression Centre", path: "/suppression-centre/", paths: ["/suppression-centre/"], navigation: "document" },
     { id: "email-templates", label: "Email Templates", path: "/email-templates/", paths: ["/email-templates/"], navigation: "document" },
     { id: "campaigns", label: "Campaigns", path: "/campaigns/", paths: ["/campaigns/"], navigation: "document" },
+    { id: "vansco-email-studio", label: "Vansco Email Studio", path: "/vansco-email-studio/", paths: ["/vansco-email-studio/"], navigation: "document" },
     { id: "vansco-stock-watch", label: "DealerKit Stock Watch", path: "/vansco-stock-watch", paths: ["/vansco-stock-watch"], navigation: "react", view: "Vansco Stock Watch" },
     { id: "vansco-google-vehicle-ads", label: "Vansco Google Vehicle Ads", path: "/vansco-google-vehicle-ads", paths: ["/vansco-google-vehicle-ads"], navigation: "react", view: "Vansco Google Vehicle Ads" },
     { id: "youtube-generator", label: "YouTube Generator", path: "/youtube-generator", paths: ["/youtube-generator", "/youtube-shorts-beta"], navigation: "react", view: "YouTube Generator" },
