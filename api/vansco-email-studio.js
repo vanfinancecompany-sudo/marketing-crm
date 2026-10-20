@@ -226,50 +226,121 @@ function emailKey(value) {
   const email = clean(value, 254).toLowerCase();
   return EMAIL_PATTERN.test(email) ? email : "";
 }
+
+const IMPORT_JOBS = "marketing_vansco_email_import_jobs";
+const CSV_FIELDS = ["first_name","last_name","company","pipeline","tags","notes","brand","verifalia_classification","verifalia_status"];
+function importMetadata(raw) {
+  const result = {};
+  for (const field of CSV_FIELDS) result[field] = clean(raw?.[field], field==="notes" ? 4000 : field==="tags" ? 1200 : 255);
+  return result;
+}
 async function importContacts(supabase, payload) {
   const source = clean(payload.source, 160);
-  const marketingBasis = clean(payload.marketing_basis, 40);
+  const basis = clean(payload.marketing_basis || "unverified", 40);
   const rows = payload.contacts;
-  if (!source || !["consent", "legitimate_interest"].includes(marketingBasis)) failure("Record the mailing-list source and lawful marketing basis.");
+  if (!source || !["unverified", "consent", "legitimate_interest"].includes(basis)) {
+    failure("Choose a customer source and a marketing-permission assessment state.");
+  }
   if (!Array.isArray(rows) || !rows.length || rows.length > 100) failure("Upload 1 to 100 contacts per batch.");
+  const fingerprint = clean(payload.fingerprint, 64);
+  const totalRows = Number(payload.total_rows);
+  const offset = Number(payload.row_offset);
+  const tracked = /^[a-f0-9]{64}$/.test(fingerprint);
+  if (tracked && (!Number.isSafeInteger(totalRows) || totalRows < 1 || !Number.isSafeInteger(offset) || offset < 0 || offset + rows.length > totalRows)) {
+    failure("Invalid CSV import progress. Please select the original file again.");
+  }
+  let job = null;
+  if (tracked) {
+    const filename = clean(payload.filename || "Vansco customer import.csv", 200);
+    checkResult(await supabase.from(IMPORT_JOBS).upsert({
+      fingerprint, filename, total_rows: totalRows
+    }, { onConflict: "fingerprint", ignoreDuplicates: true }), "Could not create import session");
+    job = checkResult(await supabase.from(IMPORT_JOBS).select("*").eq("fingerprint", fingerprint).single(), "Could not resume import session");
+    if (job.total_rows !== totalRows) failure("This file has a different row count from its existing import session.", 409);
+    if (offset < job.processed_rows) return {
+      import_job: job, accepted: 0, newly_added: 0, already_existing: 0,
+      suppressed_in_batch: 0, invalid: 0, skipped_completed_segment: true
+    };
+    if (offset > job.processed_rows) failure("Import batches must be processed in order. Resume at row " + job.processed_rows + ".", 409);
+  }
   const unique = new Map();
+  let invalid = 0, repeated = 0;
   for (const raw of rows) {
     const email = emailKey(raw?.email);
-    if (!email) continue;
-    if (!unique.has(email)) unique.set(email, {
-      email_normalized: email,
-      first_name: clean(raw.first_name, 100),
-      last_name: clean(raw.last_name, 100),
-      source,
-      marketing_basis: marketingBasis,
+    if (!email) { invalid++; continue; }
+    if (unique.has(email)) { repeated++; continue; }
+    unique.set(email, { email_normalized: email, ...importMetadata(raw),
+      source: clean(raw?.source || source, 160),
+      marketing_basis: basis,
       status: "pending_review",
     });
   }
-  if (!unique.size) failure("No valid email addresses found.");
   const emails = [...unique.keys()];
-  // Global suppression identities and legacy VFC opt-outs must never be bypassed.
-  const [suppressionRows, sharedRows] = await Promise.all([
-    supabase.from("marketing_suppression_identities").select("email_normalized").in("email_normalized", emails),
-    supabase.from("marketing_contacts").select("email_normalized,marketing_status,suppression").in("email_normalized", emails),
-  ]);
-  checkResult(suppressionRows, "Global suppressions could not be checked");
-  checkResult(sharedRows, "Shared contact suppressions could not be checked");
-  const blocked = new Set((suppressionRows.data || []).map(row => emailKey(row.email_normalized)));
-  for (const row of sharedRows.data || []) {
-    const sup = row.suppression && typeof row.suppression === "object" ? row.suppression : {};
-    if (row.marketing_status !== "active" || ["email_unsubscribed", "email_bounced", "manual_suppression", "global_do_not_contact"].some(type => sup[type] && sup[type].active !== false)) {
-      blocked.add(emailKey(row.email_normalized));
+  let inserted = [], blocked = new Set();
+  if (emails.length) {
+    const [global, legacy, existing] = await Promise.all([
+      supabase.from("marketing_suppression_identities").select("email_normalized").in("email_normalized", emails),
+      supabase.from("marketing_contacts").select("email_normalized,marketing_status,lifecycle_status,suppression").in("email_normalized", emails),
+      supabase.from(CONTACTS_TABLE).select("id,email_normalized,first_name,last_name,company,pipeline,tags,notes,brand,verifalia_classification,verifalia_status,updated_at").in("email_normalized", emails),
+    ]);
+    checkResult(global, "Could not inspect global suppressions");
+    checkResult(legacy, "Could not inspect shared customer suppressions");
+    checkResult(existing, "Could not inspect existing Vansco customers");
+    blocked = new Set((global.data || []).map(r=>emailKey(r.email_normalized)));
+    for (const row of legacy.data || []) {
+      const flags = row.suppression || {};
+      if (row.marketing_status !== "active" || (row.lifecycle_status && row.lifecycle_status !== "active")
+        || ["email_unsubscribed","email_bounced","manual_suppression","global_do_not_contact"].some(x=>flags[x] && flags[x].active !== false)) {
+        blocked.add(emailKey(row.email_normalized));
+      }
+    }
+    const already = new Map((existing.data || []).map(r=>[r.email_normalized,r]));
+    const fresh = [...unique.values()].filter(r=>!already.has(r.email_normalized)).map(r=>blocked.has(r.email_normalized)
+      ? { ...r, status: "suppressed", suppression_reason: "Existing shared email suppression" } : r);
+    if (fresh.length) {
+      inserted = checkResult(await supabase.from(CONTACTS_TABLE)
+        .upsert(fresh, { onConflict: "email_normalized", ignoreDuplicates: true })
+        .select("email_normalized"), "Could not safely insert Vansco contacts");
+    }
+    // Reconcile missing CSV metadata only: never update status, marketing basis, permission or reviews.
+    const changes = [];
+    for (const row of unique.values()) {
+      const old = already.get(row.email_normalized);
+      if (!old) continue;
+      const missing = {};
+      for (const field of CSV_FIELDS) if (!old[field] && row[field]) missing[field] = row[field];
+      if (Object.keys(missing).length) changes.push({ old, missing });
+    }
+    for (let i=0; i<changes.length; i+=10) {
+      await Promise.all(changes.slice(i,i+10).map(async({old,missing})=>{
+        checkResult(await supabase.from(CONTACTS_TABLE).update(missing)
+          .eq("id",old.id).eq("updated_at",old.updated_at), "Could not reconcile imported contact metadata");
+      }));
     }
   }
-  const contacts = [...unique.values()].map(row => blocked.has(row.email_normalized)
-    ? { ...row, status: "suppressed", suppression_reason: "Existing shared email suppression" }
-    : row);
-  // Ignore duplicates rather than overwriting existing suppression, permission or other brand records.
-  const inserted = checkResult(await supabase.from(CONTACTS_TABLE)
-    .upsert(contacts, { onConflict: "email_normalized", ignoreDuplicates: true })
-    .select("id,status"), "Could not import Vansco mailing list");
-  return { accepted: contacts.length, newly_added: (inserted || []).length, suppressed_in_batch: contacts.filter(r => r.status === "suppressed").length, pending_review: contacts.filter(r => r.status === "pending_review").length };
+  const added = inserted.length, existingCount = unique.size - added;
+  const result = {
+    accepted: unique.size, newly_added: added, already_existing: existingCount,
+    suppressed_in_batch: [...unique.keys()].filter(k=>blocked.has(k)).length,
+    invalid, repeated_in_file: repeated,
+  };
+  if (job) {
+    const next = offset + rows.length;
+    const progress = checkResult(await supabase.from(IMPORT_JOBS).update({
+      processed_rows: next,
+      newly_imported: job.newly_imported + added,
+      already_existing: job.already_existing + existingCount,
+      suppressed_rows: job.suppressed_rows + result.suppressed_in_batch,
+      invalid_rows: job.invalid_rows + invalid,
+      status: next === totalRows ? "complete" : "in_progress",
+      updated_at: new Date().toISOString(),
+    }).eq("id",job.id).eq("processed_rows",offset).select("*").maybeSingle(), "Could not persist import progress");
+    if (!progress) failure("The import session changed. Recheck progress before retrying.",409);
+    result.import_job = progress;
+  }
+  return result;
 }
+
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store");
   if (request.method !== "POST") return response.status(405).json({ ok: false, message: "Method not allowed." });
