@@ -26,18 +26,32 @@ function convertWebpToPng(input) {
 export default async function handler(req,res){
   if(!["GET","HEAD"].includes(req.method))return res.status(405).end();
   try{
+    let png;
     const response=await fetch(VANSCO_EMAIL_LOGO_WEBP,{
       headers:{"Accept":"image/webp,image/*;q=0.8","User-Agent":"VanscoEmailStudio/1.0"},
       signal:AbortSignal.timeout(8000),
     });
-    if(!response.ok)throw new Error("Vansco logo source unavailable.");
-    const size=Number(response.headers.get("content-length")||0);
-    if(size>1_500_000)throw new Error("Vansco logo file oversized.");
-    const body=Buffer.from(await response.arrayBuffer());
-    if(body.length<16||body.length>1_500_000||body.toString("ascii",0,4)!=="RIFF"||body.toString("ascii",8,12)!=="WEBP"){
-      throw new Error("Vansco logo source is not WebP.");
+    if(response.ok){
+      const size=Number(response.headers.get("content-length")||0);
+      if(size>1_500_000)throw new Error("Vansco logo file oversized.");
+      const body=Buffer.from(await response.arrayBuffer());
+      if(body.length<16||body.length>1_500_000||body.toString("ascii",0,4)!=="RIFF"||body.toString("ascii",8,12)!=="WEBP"){
+        throw new Error("Vansco logo source is not WebP.");
+      }
+      png=await convertWebpToPng(body);
+    }else{
+      // Image CDN fallback for the publicly available logo when Vansco's origin
+      // denies server-side image requests. Validate the PNG signature before use.
+      const fallback=new URL("https://images.weserv.nl/");
+      fallback.searchParams.set("url",VANSCO_EMAIL_LOGO_WEBP);
+      fallback.searchParams.set("output","png");
+      const converted=await fetch(fallback.href,{signal:AbortSignal.timeout(10000)});
+      if(!converted.ok)throw new Error("Logo source HTTP "+response.status+", image CDN HTTP "+converted.status);
+      const size=Number(converted.headers.get("content-length")||0);
+      if(size>3_000_000)throw new Error("Converted logo oversized.");
+      png=Buffer.from(await converted.arrayBuffer());
+      if(png.length>3_000_000||!png.subarray(0,8).equals(pngHeader))throw new Error("Logo CDN returned a non-PNG image.");
     }
-    const png=await convertWebpToPng(body);
     // Simple diagnostics so the PNG conversion can be verified without sending an email.
     if(req.query?.check==="1")return res.status(200).json({ok:true,format:"png",bytes:png.length});
     res.setHeader("Content-Type","image/png");
