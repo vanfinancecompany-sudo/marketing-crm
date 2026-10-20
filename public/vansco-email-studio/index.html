@@ -65,6 +65,11 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
 .err{color:#a61e2e;font-weight:700;font-size:12px}.list{display:grid;gap:9px}.list-row{padding:11px 12px;background:#f5f6f7;border-radius:6px;font-size:12px}
 .reporting{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
 .report{background:#f6f7f7;border-radius:7px;padding:11px}
+.audience-overview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:9px 0 12px}
+.audience-overview>div{padding:12px;background:#f4f5f6;border-radius:7px}.audience-overview b{display:block;font-size:23px;line-height:1.2}.audience-overview span{font-size:11px;color:#687077}
+.batch-progress{height:15px;border-radius:8px;overflow:hidden;background:#e8e9eb;margin:12px 0}
+.batch-progress>div{height:100%;width:0;background:#bd2338;transition:width .2s ease}
+@media(max-width:620px){.audience-overview{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .report b{display:block;font-size:18px;margin-bottom:4px}.report span{font-size:11px;color:#656c75}
 [hidden]{display:none!important}
 @media(max-width:1250px){.stats{grid-template-columns:repeat(3,minmax(0,1fr))}.reporting{grid-template-columns:repeat(3,1fr)}.workspace{grid-template-columns:minmax(300px,1fr) minmax(350px,1fr)}}
@@ -173,12 +178,44 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      <p id="importMessage" class="small" role="status"></p>
      <p class="small muted">CSV columns: email, first_name, last_name. Verifying email deliverability does not itself establish permission to market.</p>
      <div class="heading" style="margin-top:18px"><h3>Review &amp; select Vansco customers</h3><button class="btn" id="refreshContacts">Refresh</button></div>
-     <p class="small muted">Imported contacts remain pending until you review their marketing permissions. Review is individual and logged. Customer sends are limited to five approved contacts per click.</p>
+     <p class="small muted">Imported contacts require a documented marketing basis and review. You can approve a verified source in batches after checking its evidence.</p>
+     <label class="subheading" for="sourceReviewNotes">Source permission review notes</label>
+     <textarea id="sourceReviewNotes" rows="3" placeholder="Record evidence for consent or legitimate interests (minimum 30 characters)"></textarea>
+     <div class="actions"><button class="btn" id="reviewSource">Approve reviewed import source</button></div>
+     <p class="small muted">Uses the exact List source entered above. Only its pending records are reviewed; shared suppressions still apply.</p>
      <div class="actions"><input id="contactSearch" placeholder="Search by email" style="flex:1"><button class="btn" id="searchContacts">Search</button></div>
      <div id="contactRows" class="list" style="max-height:360px;overflow:auto;margin-top:12px"></div>
-     <div class="actions"><input id="batchConfirmation" placeholder="Type SEND 1–5 to confirm" style="flex:1"><button class="btn red" id="sendCustomerBatch" disabled>Send selected customer batch</button></div>
+     <p class="small muted">Locked contacts are calculated from Vansco customer sends, not internal tests.</p>
      <p id="customerSendMessage" class="small" role="status"></p>
     </section>
+     <section class="panel" id="vanscoBatchPanel">
+       <div class="heading"><h2>Vansco 500-email campaigns</h2><span class="pill">MANUAL · 7-DAY LOCK</span></div>
+       <p class="small muted">One email per customer in seven days, maximum four in any calendar month or rolling 30 days. Test messages do not count.</p>
+       <div class="audience-overview">
+         <div><b id="aTotal">—</b><span>Total contacts</span></div>
+         <div><b id="aApproved">—</b><span>Approved</span></div>
+         <div><b id="aEligible">—</b><span>Eligible now</span></div>
+         <div><b id="aLocked">—</b><span>Locked 7 days</span></div>
+         <div><b id="aMonthly">—</b><span>Monthly limit</span></div>
+         <div><b id="aSuppressed">—</b><span>Suppressed</span></div>
+         <div><b id="aPending">—</b><span>Needs review</span></div>
+         <div><b id="aRemaining">—</b><span>Available next</span></div>
+       </div>
+       <div class="actions"><button class="btn" id="refreshAudience">Refresh eligible counts</button></div>
+       <div class="form" style="margin-top:12px">
+         <label>Batch size (maximum 500)<input id="batchSize" type="number" min="1" max="500" value="500"></label>
+         <label>Final authorisation<input id="batchPhrase" placeholder="Type SEND VANSCO 500"></label>
+       </div>
+       <div class="safe-send" style="margin-top:13px">Select a saved Vansco campaign above. Customer sending requires approved recipients, validated vehicle stock and your confirmation. No other CRM emails are affected.</div>
+       <div class="actions">
+        <button class="btn red" id="startVanscoBatch">Start real customer batch</button>
+        <button class="btn dark" id="resumeVanscoBatch" disabled>Resume batch</button>
+        <button class="btn" id="pauseVanscoBatch" disabled>Pause after this step</button>
+       </div>
+       <div class="batch-progress" role="progressbar" aria-label="Vansco customer email send progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="batchProgress"><div id="batchProgressFill"></div></div>
+       <p id="batchProgressText" class="small muted">No active customer batch.</p>
+       <p id="batchMessage" class="small muted" role="status"></p>
+     </section>
    </div>
    <section class="panel preview-wrap">
     <div class="preview-toolbar"><div><h2>Live email preview</h2><span class="small muted">Rendered with real selected Vansco vehicles</span></div><span class="pill">EMAIL DESIGN</span></div>
@@ -220,7 +257,7 @@ var palettes={
  christmas:{dark:"#213e38",accent:"#bd9c5b",light:"#f6f3ec",label:"CHRISTMAS EDITION"}
 };
 var fields={subject:"subject",previewText:"preview_text",eyebrow:"eyebrow",headline:"heading",subheading:"subheading",introduction:"introduction",offer:"offer",brandDescription:"brand_description",extraText:"extra_text",footerNote:"footer_note",stockCount:"stock_count",stockLocation:"stock_location",logoUrl:"logo_url",ctaLabel:"cta_label",ctaUrl:"cta_url"};
-var state={theme:"halloween",selected:[],stock:[],salePrices:{},ready:false,activeCampaign:"",readyToSend:false};
+var state={theme:"halloween",selected:[],stock:[],salePrices:{},ready:false,activeCampaign:"",readyToSend:false,activeBatch:"",batchRunning:false,batchPause:false};
 function el(id){return document.getElementById(id)}
 function escapeHtml(v){return String(v==null?"":v).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function key(){return localStorage.getItem(STORAGE)||""}
