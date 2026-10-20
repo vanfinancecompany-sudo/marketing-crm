@@ -333,7 +333,7 @@ function buildEmail(){
   var branchRows='<tr>'+vanscoBranches.map(function(b,i){
     return '<td class="vansco-branch '+(i===2?'vansco-branch-last':'')+'" width="33%" valign="top" style="width:33.33%;padding:13px 12px 12px;'+(i<2?'border-right:1px solid #504b53;':'')+'">'+
       '<strong style="display:block;color:#f0bf55;font:700 13px/20px Arial,sans-serif;margin-bottom:7px">'+escapeHtml(b.name)+'</strong>'+
-      '<span style="display:block;color:#e5e2e9;font:12px/18px Arial,sans-serif">'+escapeHtml(b.line1)+'<br>'+escapeHtml(b.line2)+'</span>'+
+      '<a href="https://www.google.com/maps/search/?api=1&amp;query='+encodeURIComponent(b.line1+', '+b.line2)+'" style="display:block;color:#e5e2e9!important;text-decoration:none!important;font:12px/18px Arial,sans-serif"><span style="color:#e5e2e9!important;text-decoration:none!important">'+escapeHtml(b.line1)+'<br>'+escapeHtml(b.line2)+'</span></a>'+
       '<a href="tel:'+escapeHtml(b.tel)+'" style="display:block;margin-top:10px;color:#fff;text-decoration:none;font:700 13px/20px Arial,sans-serif;white-space:nowrap">'+escapeHtml(b.phone)+'</a>'+
       '</td>';
   }).join("")+'</tr>';

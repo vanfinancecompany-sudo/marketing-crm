@@ -277,3 +277,13 @@ test("personal Gmail test UI includes explicit ownership check and backend rate 
   assert.match(delivery, /total\.count\|\|0\)>=20/);
   assert.match(delivery, /VANSCO_EMAIL_PRODUCTION_ENABLED!=="true"/);
 });
+
+test("Vansco showroom addresses use branded directions links instead of Gmail blue auto-links", () => {
+  const html=renderVanscoContactFooter("Vehicle prices subject to confirmation.");
+  const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
+  assert.equal((html.match(/www\.google\.com\/maps\/search/g)||[]).length,3);
+  assert.equal((html.match(/color:#e5e2e9!important;text-decoration:none!important/g)||[]).length,6);
+  assert.equal((html.match(/href="tel:/g)||[]).length,3);
+  assert.match(ui,/google\.com\/maps\/search/);
+  assert.match(html,/mailto:sales@vansco\.co\.uk/);
+});
