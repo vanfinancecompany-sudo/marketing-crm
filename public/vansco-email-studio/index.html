@@ -588,6 +588,7 @@ async function refreshAudience(){
   [["aTotal","total"],["aApproved","approved"],["aEligible","eligible"],["aLocked","locked_7d"],["aMonthly","monthly_cap"],["aSuppressed","suppressed"],["aUnsubscribed","unsubscribed"],["aBounced","bounced"],["aPending","pending_review"],["aRisky","risky"],["aQueued","queued"],["aRemaining","remaining"]].forEach(function(x){
    el(x[0]).textContent=Number(a[x[1]]||0).toLocaleString("en-GB");
   });
+  el("crmActivation").hidden=Number(a.pending_review||0)===0;
   if(info.active_batch&&info.active_batch.id){
    var status=await delivery("batchStatus",{batch_id:info.active_batch.id});updateBatchUI(status.batch);
    if(!state.batchRunning)setMsg("batchMessage",info.active_batch.status==="paused"?"Vansco batch paused. Click Resume when authorised.":"Vansco batch is queued. The background worker handles sending even if this tab is closed.");
@@ -700,7 +701,7 @@ el("refreshReport").addEventListener("click",refreshReport);
 
 
 el("refreshAudience").addEventListener("click",refreshAudience);
-el("batchSize").addEventListener("input",function(){el("batchPhrase").placeholder="Type SEND VANSCO "+el("batchSize").value;state.previewToken="";});
+el("batchSize").addEventListener("change",function(){state.previewToken="";});
 el("previewVanscoBatch").addEventListener("click",async function(){
  try{await previewVanscoBatch()}catch(e){setMsg("batchMessage",e.message,true)}
 });
@@ -716,12 +717,12 @@ el("startVanscoBatch").addEventListener("click",async function(){
  var amount=Number(el("batchSize").value),phrase="SEND VANSCO "+amount;
  if(!state.activeCampaign){setMsg("batchMessage","Select your saved Vansco campaign draft first.",true);return}
  if(!Number.isInteger(amount)||amount<1||amount>500){setMsg("batchMessage","Choose between one and 500 emails.",true);return}
- if(el("batchPhrase").value.trim()!==phrase){setMsg("batchMessage","Type "+phrase+" to confirm this real customer batch.",true);return}
- if(!state.previewToken||state.previewAmount!==amount||state.previewCampaign!==state.activeCampaign){
-  setMsg("batchMessage","Preview the next eligible recipients before final confirmation.",true);return;
- }
- if(!state.readyToSend){setMsg("batchMessage","Sending is locked until the customer audience and system are authorised.",true);return}
- if(!confirm("SEND REAL CUSTOMER EMAILS\n\nQueue up to "+amount+" eligible Vansco customers?\n\nThe seven-day and rolling 30-day locks apply. SendGrid acceptance does not guarantee delivery."))return;
+ if(!state.readyToSend){setMsg("batchMessage","Customer sending is not yet enabled on the server.",true);return}
+ var preview;
+ try{preview=await previewVanscoBatch()}catch(e){setMsg("batchMessage",e.message,true);return}
+ var actual=Number(preview.preview?.count||0);
+ if(actual<1){setMsg("batchMessage","No eligible Vansco customers available. Check audience figures.",true);return}
+ if(!confirm("SEND VANSCO CAMPAIGN\n\nSend this saved campaign to "+actual+" available customers (maximum "+amount+")?\n\nOpt-outs and frequency limits are rechecked before each message."))return;
  el("startVanscoBatch").disabled=true;
  try{
   var response=await delivery("reserveBatch",{campaign_id:state.activeCampaign,batch_size:amount,confirm_phrase:phrase,preview_token:state.previewToken});
@@ -730,6 +731,17 @@ el("startVanscoBatch").addEventListener("click",async function(){
   await runVanscoBatch();
  }catch(e){setMsg("batchMessage",e.message,true)}
  finally{if(!state.batchRunning)el("startVanscoBatch").disabled=!state.readyToSend}
+});
+el("activateCrm").addEventListener("click",async function(){
+ if(!el("crmConfirm").checked){setMsg("crmActivationMessage","Confirm that the marketing basis applies to these Vansco CRM contacts.",true);return}
+ if(!confirm("Confirm your Vansco CRM marketing audience?\n\nThis records your confirmation and does not send any messages. Global opt-outs remain blocked."))return;
+ el("activateCrm").disabled=true;
+ try{
+  var response=await delivery("activateCrmAudience",{basis:el("crmBasis").value,confirmed:true});
+  setMsg("crmActivationMessage",response.activation.activated+" contacts confirmed; "+response.activation.eligible_now+" available.");
+  await Promise.all([refreshAudience(),refreshCounts()]);
+ }catch(e){setMsg("crmActivationMessage",e.message,true)}
+ finally{el("activateCrm").disabled=false}
 });
 el("reviewSource").addEventListener("click",async function(){
  var source=el("listSource").value.trim(),notes=el("sourceReviewNotes").value.trim(),reviewer=el("reviewerName").value.trim(),evidence=el("reviewEvidence").value.trim(),basis=el("marketingBasis").value,risky=el("includeRiskyReview").checked;
