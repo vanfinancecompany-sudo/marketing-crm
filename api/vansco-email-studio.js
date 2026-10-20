@@ -189,6 +189,13 @@ async function saveMaster(supabase, payload) {
   const data = checkResult(await supabase.from(MASTER_TABLE).upsert({ id: 1, settings, updated_at: new Date().toISOString() }, { onConflict: "id" }).select("settings,updated_at").single(), "Could not save Vansco master");
   return { settings: data.settings, updated_at: data.updated_at };
 }
+async function loadCampaignDraft(supabase, body) {
+  const id=clean(body.id,80);
+  if(!/^[0-9a-f-]{36}$/i.test(id)) failure("Choose a saved Vansco draft.");
+  const data=checkResult(await supabase.from(CAMPAIGNS_TABLE).select("id,name,settings,selected_vehicles,status").eq("id",id).maybeSingle(),"Could not load Vansco draft");
+  if(!data||data.status!=="draft")failure("Vansco draft not found.");
+  return {campaign:data};
+}
 async function listCampaigns(supabase) {
   const data = checkResult(await supabase.from(CAMPAIGNS_TABLE)
     .select("id,name,theme,subject,status,selected_vehicles,created_at")
@@ -273,6 +280,7 @@ export default async function handler(request, response) {
     else if (action === "loadMaster") data = await loadMaster(supabase);
     else if (action === "saveMaster") data = await saveMaster(supabase, body.settings);
     else if (action === "listCampaigns") data = await listCampaigns(supabase);
+    else if (action === "loadCampaign") data = await loadCampaignDraft(supabase, body);
     else if (action === "saveDraft") data = await saveDraft(supabase, body);
     else if (action === "importContacts") data = await importContacts(supabase, body);
     else failure("Unknown Vansco studio action.");
