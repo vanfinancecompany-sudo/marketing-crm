@@ -56,7 +56,7 @@ function vanscoUrl(value) {
     return parsed.href;
   } catch { failure("Please enter a valid https://www.vansco.co.uk link."); }
 }
-function normaliseSettings(value = {}) {
+export function normaliseSettings(value = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) failure("Template settings must be an object.");
   const theme = clean(value.theme, 40);
   if (!THEMES.has(theme)) failure("Unknown Vansco email theme.");
@@ -76,7 +76,7 @@ function normaliseSettings(value = {}) {
   if (!settings.subject || !settings.heading || !settings.cta_label) failure("Subject, headline and call to action are required.");
   return settings;
 }
-function mappedVehicle(row) {
+export function mappedVehicle(row) {
   if (!isEligibleVanscoVehicle(row) || isVanscoCar(row)) return null;
   try {
     const url = new URL(row.vehicleUrl);
