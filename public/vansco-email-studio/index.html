@@ -303,6 +303,8 @@ function buildEmail(){
    vehicleRows+='<td class="van" width="50%" valign="top" style="width:50%;padding:7px"><table role="presentation" width="100%" style="width:100%;border:1px solid #e6e6e6;border-collapse:collapse"><tr><td bgcolor="#f5f5f5" align="center">'+
     '<a href="'+escapeHtml(item.url)+'"><img src="'+escapeHtml(item.image)+'" alt="'+escapeHtml(item.title)+'" width="290" style="display:block;width:100%;max-width:290px;height:auto;border:0;outline:none;text-decoration:none"></a></td></tr>'+
     '<tr><td style="padding:13px 12px;font-family:Arial,sans-serif"><strong style="font-size:14px;line-height:19px;display:block;color:#202124">'+escapeHtml(item.title)+'</strong>'+
+    (item.detail?'<div style="margin-top:6px;color:#565b63;font-size:12px;line-height:17px">'+escapeHtml(item.detail)+'</div>':"")+
+    (Number(String(item.mileage||"").replace(/[^0-9]/g,""))>0?'<div style="margin-top:6px;color:#333842;font-size:12px">Mileage: '+Number(String(item.mileage).replace(/[^0-9]/g,"")).toLocaleString("en-GB")+' miles</div>':"")+
     (item.registration?'<div style="margin-top:5px;color:#697079;font-size:11px">'+escapeHtml(item.registration)+'</div>':"")+
     priceHtml+
     (item.vat_label?'<div style="color:#656c75;font-size:11px;margin-bottom:10px">'+escapeHtml(item.vat_label)+'</div>':"")+
