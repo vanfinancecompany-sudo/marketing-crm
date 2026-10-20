@@ -46,7 +46,7 @@ function defaultSettings() {
     subheading: "Big savings on quality used vans this Halloween",
     brand_description: "Hunting for your next work van? Vansco has a wide selection of quality used commercial vehicles across our three Hampshire locations. Our Halloween Giveaway includes at least £300 off every vehicle, with average savings of £500 per van. Every vehicle also comes with a FREE 1-year AutoGuard warranty.",
     extra_text: "Need a small van, a Transit Custom or a larger commercial vehicle? Browse our featured stock, or speak to the Vansco team about availability, part exchange and low-deposit finance options. We also offer FREE nationwide delivery, making it easy to buy wherever you are in the UK.",
-    footer_note: "Vehicle prices and availability are subject to confirmation. Warranty cover is subject to AutoGuard terms. Finance is subject to status and lender terms. Savings may vary by vehicle.",
+    footer_note: "Contact Vansco\n333 Showroom: 333 Millbrook Road West, Southampton, Hampshire SO15 0HW | 02380 333 777\nNew Forest: Senior Service Station, Romsey Road, Cadnam, Hampshire SO40 2NN | 02380 813 119\nSouthampton Airport: 201 Wide Lane, Spitfire Roundabout, Southampton, Hampshire SO18 2RZ | 02381 780 300\nEmail: sales@vansco.co.uk\n\nVehicle prices and availability are subject to confirmation. Warranty cover is subject to AutoGuard terms. Finance is subject to status and lender terms. Savings may vary by vehicle.",
     logo_url: "",
     sale_prices: {},
     offer: "AT LEAST £300 OFF EVERY VAN • AVERAGE SAVING £500 • FREE 1-YEAR AUTOGUARD WARRANTY",
