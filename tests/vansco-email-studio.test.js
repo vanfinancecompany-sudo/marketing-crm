@@ -163,7 +163,7 @@ test("live Vansco email customer sends have separate ledger, a locked production
   const webhook=readFileSync(new URL("../api/sendgrid-email-webhook.js",import.meta.url),"utf8");
   assert.match(delivery,/VANSCO_EMAIL_PRODUCTION_ENABLED/);
   assert.match(delivery,/ids\.length>5/);
-  assert.match(delivery,/SEND TEST/);
+  assert.match(delivery,/checkVanscoTestRateLimit\(supabase\)/);
   assert.match(delivery,/marketing_vansco_email_sends/);
   assert.doesNotMatch(delivery,/marketing_email_send_recipients|marketing_email_sends|transactional-rent2buy/);
   assert.match(migration,/one_production_send_per_contact_campaign/);
@@ -255,27 +255,27 @@ test("stock count settings accept an editable positive integer only", () => {
   }
 });
 
-test("personal Gmail is accepted for manual test only after inbox confirmation", () => {
-  assert.equal(isPermittedVanscoTestDestination("mytest@gmail.com", { confirmedOwned: true }), true);
-  assert.equal(isPermittedVanscoTestDestination("My.Test+promo@googlemail.com", { confirmedOwned: true }), true);
-  assert.equal(isPermittedVanscoTestDestination("mytest@gmail.com", { confirmedOwned: false }), false);
-  assert.equal(isPermittedVanscoTestDestination("someone@yahoo.com", { confirmedOwned: true }), false);
-  assert.equal(isPermittedVanscoTestDestination("mytest@gmail.com.example.org", { confirmedOwned: true }), false);
+test("Gmail and authorised staff inboxes support frictionless manual testing", () => {
+  assert.equal(isPermittedVanscoTestDestination("vanfinancecompany@gmail.com"), true);
+  assert.equal(isPermittedVanscoTestDestination("My.Test+promo@googlemail.com"), true);
+  assert.equal(isPermittedVanscoTestDestination("someone@yahoo.com"), false);
+  assert.equal(isPermittedVanscoTestDestination("mytest@gmail.com.example.org"), false);
   assert.equal(isPermittedVanscoTestDestination("sales@vanfinancecompany.co.uk"), true);
   assert.equal(isPermittedVanscoTestDestination("staff@vansco.co.uk"), true);
-  assert.equal(isPermittedVanscoTestDestination("authorised@example.org", { configured: "authorised@example.org" }), true);
+  assert.equal(isPermittedVanscoTestDestination("authorised@example.org", {configured:"authorised@example.org"}), true);
 });
 
-test("personal Gmail test UI includes explicit ownership check and backend rate limits", () => {
-  const ui = readFileSync(new URL("../public/vansco-email-studio/index.html", import.meta.url), "utf8");
-  const delivery = readFileSync(new URL("../api/vansco-email-delivery.js", import.meta.url), "utf8");
-  assert.match(ui, /id="ownTestInbox"/);
-  assert.match(ui, /own_inbox:el\("ownTestInbox"\)\.checked/);
-  assert.match(delivery, /body\.own_inbox===true/);
-  assert.match(delivery, /checkVanscoTestRateLimit\(supabase,to\)/);
-  assert.match(delivery, /recipient\.count\|\|0\)>=3/);
-  assert.match(delivery, /total\.count\|\|0\)>=20/);
-  assert.match(delivery, /VANSCO_EMAIL_PRODUCTION_ENABLED!=="true"/);
+test("internal tests need no checkbox or phrase and customer sends remain locked", () => {
+  const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
+  const delivery=readFileSync(new URL("../api/vansco-email-delivery.js",import.meta.url),"utf8");
+  assert.doesNotMatch(ui,/id="ownTestInbox"|id="testConfirmation"|own_inbox:/);
+  assert.doesNotMatch(delivery,/body\.own_inbox|three test attempts|recipient\.count\|\|0\)>=3/);
+  assert.match(ui,/if\(!confirm\("Send a REAL INTERNAL TEST/);
+  assert.match(ui,/delivery\("testSend",\{campaign_id:state\.activeCampaign,to:to\}\)/);
+  assert.match(delivery,/checkVanscoTestRateLimit\(supabase\)/);
+  assert.match(delivery,/result\.count\|\|0\)>=100/);
+  assert.match(delivery,/VANSCO_EMAIL_PRODUCTION_ENABLED!=="true"/);
+  assert.match(delivery,/send_type","test"/);
 });
 
 test("Vansco showroom addresses use branded directions links instead of Gmail blue auto-links", () => {
