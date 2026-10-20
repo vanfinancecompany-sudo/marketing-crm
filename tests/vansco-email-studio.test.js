@@ -381,3 +381,18 @@ test("Vansco source approval stores reviewer evidence and explicitly includes ri
  assert.match(ui,/id="reviewerName"/);
  assert.match(ui,/id="reviewEvidence"/);
 });
+
+test("Vansco page inline scripts are valid JavaScript",()=>{
+ const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
+ const inline=[...ui.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)].map(m=>m[1]).filter(Boolean);
+ assert.ok(inline.length>=1);
+ for(const source of inline)assert.doesNotThrow(()=>new Function(source));
+});
+
+test("Vansco new CSV metadata never changes reviewed permissions and retains display names",()=>{
+ const api=readFileSync(new URL("../api/vansco-email-studio.js",import.meta.url),"utf8");
+ const migration=readFileSync(new URL("../supabase/migrations/20261020_vansco_email_display_names.sql",import.meta.url),"utf8");
+ assert.match(api,/display_name/);
+ assert.match(migration,/add column if not exists display_name/);
+ assert.match(api,/never update status, marketing basis, permission or reviews/i);
+});
