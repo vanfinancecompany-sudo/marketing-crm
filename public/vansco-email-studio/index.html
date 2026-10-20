@@ -116,6 +116,8 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
       <label class="full">Introductory message<textarea id="introduction" maxlength="2000"></textarea></label>
       <label class="full">Promotional strapline<input id="offer" maxlength="300"></label>
       <label class="full">Vansco brand description<textarea id="brandDescription" maxlength="2400" rows="4" placeholder="A little more about Vansco and why customers choose you."></textarea></label>
+      <label>Stock count (editable)<input id="stockCount" type="text" inputmode="numeric" maxlength="6" placeholder="278"></label>
+      <label>Stock location subtitle<input id="stockLocation" maxlength="120" placeholder="Used Vehicles in Southampton, Hampshire"></label>
       <label class="full">Additional campaign text<textarea id="extraText" maxlength="2400" rows="4" placeholder="Sale details, finance information or a second promotional message."></textarea></label>
       <label class="full">Footer details / small print<textarea id="footerNote" maxlength="800" rows="3" placeholder="Optional contact information or campaign terms."></textarea></label>
       <label class="full">Vansco logo image URL<input id="logoUrl" type="url" maxlength="1600" placeholder="https://..."></label>
@@ -217,7 +219,7 @@ var palettes={
  black_friday:{dark:"#151515",accent:"#d02535",light:"#f0f0f0",label:"BLACK FRIDAY EVENT"},
  christmas:{dark:"#213e38",accent:"#bd9c5b",light:"#f6f3ec",label:"CHRISTMAS EDITION"}
 };
-var fields={subject:"subject",previewText:"preview_text",eyebrow:"eyebrow",headline:"heading",subheading:"subheading",introduction:"introduction",offer:"offer",brandDescription:"brand_description",extraText:"extra_text",footerNote:"footer_note",logoUrl:"logo_url",ctaLabel:"cta_label",ctaUrl:"cta_url"};
+var fields={subject:"subject",previewText:"preview_text",eyebrow:"eyebrow",headline:"heading",subheading:"subheading",introduction:"introduction",offer:"offer",brandDescription:"brand_description",extraText:"extra_text",footerNote:"footer_note",stockCount:"stock_count",stockLocation:"stock_location",logoUrl:"logo_url",ctaLabel:"cta_label",ctaUrl:"cta_url"};
 var state={theme:"halloween",selected:[],stock:[],salePrices:{},ready:false,activeCampaign:"",readyToSend:false};
 function el(id){return document.getElementById(id)}
 function escapeHtml(v){return String(v==null?"":v).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
@@ -348,7 +350,7 @@ function buildEmail(){
  '</td></tr>'+
  (s.offer?'<tr><td style="background:'+p.light+';padding:20px 28px;font-family:Arial,sans-serif;color:'+p.dark+';font-weight:bold;font-size:19px;line-height:27px">'+lines(s.offer)+'</td></tr>':"")+
  (company?'<tr><td style="font-family:Arial,sans-serif;padding:22px 29px 8px">'+company+'</td></tr>':"")+
- '<tr><td style="font-family:Arial,sans-serif;padding:23px 28px 4px"><h2 style="margin:0;font-size:19px;color:#202124">Featured Vans</h2><p style="margin:8px 0 0;color:#70777d;font-size:13px">Browse our selected used vans</p></td></tr>'+
+ '<tr><td style="font-family:Arial,sans-serif;padding:23px 28px 4px"><table role="presentation" width="100%" style="width:100%;border-collapse:collapse"><tr><td valign="middle"><h2 style="margin:0;font-size:19px;color:#202124">Featured Vans</h2></td><td valign="middle" align="right">'+(s.stock_count?'<span style="display:inline-block;padding:6px 8px;background:#f1f1f1;color:#202124;font:700 12px/16px Arial,sans-serif;white-space:nowrap">'+escapeHtml(s.stock_count)+' vehicles in stock</span>':"")+'</td></tr></table><p style="margin:8px 0 0;color:#70777d;font-size:13px">'+escapeHtml(s.stock_location||"Browse our selected used vans")+'</p></td></tr>'+
  vehicleRows+
  (additional?'<tr><td style="font-family:Arial,sans-serif;padding:20px 28px 4px">'+additional+'</td></tr>':"")+
  '<tr><td align="center" style="padding:29px"><a href="'+escapeHtml(s.cta_url)+'" style="display:inline-block;background:'+p.accent+';color:'+(saleMode&&state.theme!=="black_friday"?"#201c1f":"#ffffff")+';padding:15px 22px;text-decoration:none;font:800 13px Arial,sans-serif;letter-spacing:.4px">'+escapeHtml(s.cta_label)+'</a></td></tr>'+
