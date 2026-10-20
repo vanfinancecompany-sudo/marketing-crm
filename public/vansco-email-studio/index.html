@@ -489,24 +489,33 @@ async function refreshContacts(){
  try{
   var data=await delivery("contacts",{query:el("contactSearch").value.trim()});
   el("contactRows").innerHTML=data.contacts.map(function(c){
-   var ready=c.status==="ready",name=[c.first_name,c.last_name].filter(Boolean).join(" ");
+   var ready=c.status==="ready",name=c.display_name||[c.first_name,c.last_name].filter(Boolean).join(" ");
    return '<div class="contact-row">'+
     '<span style="font-size:11px;font-weight:700;color:#687077;white-space:nowrap">'+(c.lock?.eligible?"Eligible":c.lock?.attempted_7d?"7-day lock":c.lock?.attempted_30d>=4||c.lock?.attempted_this_month>=4?"Monthly lock":c.lock?.suppressed?"Suppressed":"Review")+'</span>'+
     '<div style="flex:1;min-width:0"><strong>'+escapeHtml(c.email_normalized)+'</strong>'+
     (name?'<div class="status">'+escapeHtml(name)+'</div>':"")+
-    '<div class="status">'+escapeHtml(c.status.replace(/_/g," "))+' · '+escapeHtml(c.source)+(c.lock?.last_attempt_at?' · Last campaign: '+new Date(c.lock.last_attempt_at).toLocaleDateString("en-GB"):"")+'</div></div>'+
+    '<div class="status">'+escapeHtml(c.status.replace(/_/g," "))+' · '+escapeHtml(c.verifalia_classification||"Not classified")+' · '+escapeHtml(c.source)+(c.lock?.last_attempt_at?' · Last campaign: '+new Date(c.lock.last_attempt_at).toLocaleDateString("en-GB"):"")+'</div></div>'+
     (c.status==="pending_review"?'<button type="button" class="btn review-contact" data-review-id="'+escapeHtml(c.id)+'">Review</button>':"")+
     '</div>';
   }).join("")||'<p class="small muted">No Vansco customer emails found.</p>';
   el("contactRows").querySelectorAll(".review-contact").forEach(function(button){
    button.addEventListener("click",async function(){
     var emailText=button.closest(".contact-row").querySelector("strong").textContent;
-    var notes=prompt("Record the evidence of valid Vansco marketing permission for "+emailText+". Enter source, consent or legitimate-interest assessment (at least 15 characters).");
-    if(!notes||notes.trim().length<15)return;
+    var basis=el("marketingBasis").value,reviewer=el("reviewerName").value.trim(),evidence=el("reviewEvidence").value.trim(),risky=el("includeRiskyReview").checked;
+    if(!["consent","legitimate_interest"].includes(basis)||reviewer.length<3||evidence.length<8){
+     setMsg("customerSendMessage","Choose a verified marketing basis, named reviewer and evidence reference above before approving individual contacts.",true);return;
+    }
+    var notes=prompt("Record this customer's marketing-permission evidence for "+emailText+" (at least 50 characters).");
+    if(!notes||notes.trim().length<50)return;
     if(prompt('To confirm individual approval, type REVIEWED FOR VANSCO')!=="REVIEWED FOR VANSCO")return;
     button.disabled=true;
-    try{await delivery("reviewContact",{contact_id:button.dataset.reviewId,permission_notes:notes,confirm_phrase:"REVIEWED FOR VANSCO"});setMsg("customerSendMessage","Contact reviewed and approved.");await Promise.all([refreshContacts(),refreshCounts()])}
-    catch(e){setMsg("customerSendMessage",e.message,true);button.disabled=false}
+    try{
+     await delivery("reviewContact",{contact_id:button.dataset.reviewId,permission_notes:notes,
+      reviewed_by:reviewer,evidence_reference:evidence,marketing_basis:basis,
+      include_risky:risky,confirm_phrase:"REVIEWED FOR VANSCO"});
+     setMsg("customerSendMessage","Contact reviewed and audit evidence recorded.");
+     await Promise.all([refreshContacts(),refreshCounts(),refreshAudience()]);
+    }catch(e){setMsg("customerSendMessage",e.message,true);button.disabled=false}
    });
   });
  }catch(e){setMsg("customerSendMessage",e.message,true)}
