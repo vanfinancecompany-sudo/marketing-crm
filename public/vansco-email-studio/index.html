@@ -253,26 +253,59 @@ function renderSaleEditors(){
 }
 
 function buildEmail(){
- var s=values(),p=palettes[state.theme],v=selectedVehicles();
+ var s=values(),p=palettes[state.theme],v=selectedVehicles(),saleMode=state.theme!=="standard";
+ function lines(value){return escapeHtml(value||"").replace(/\r?\n/g,"<br>")}
+ function paragraph(value,style){
+  return value?'<p style="'+style+'">'+lines(value)+'</p>':"";
+ }
+ var pumpkin=state.theme==="halloween"?'<span aria-hidden="true" style="font-size:16px;padding-left:7px">🎃</span>':"";
+ var brandLogo=s.logo_url
+  ?'<img src="'+escapeHtml(s.logo_url)+'" alt="Vansco" style="display:block;max-height:65px;max-width:190px;width:auto;height:auto;border:0">'
+  :'<div style="font-size:23px;font-weight:900;letter-spacing:2px">VANSCO<span style="color:'+p.accent+'">.</span></div>';
  var vehicleRows="";
  for(var i=0;i<v.length;i+=2){
-  vehicleRows+='<tr><td style="padding:8px 22px"><table role="presentation" style="width:100%;border-collapse:collapse"><tr>';
+  vehicleRows+='<tr><td style="padding:8px 22px"><table role="presentation" width="100%" style="width:100%;border-collapse:collapse"><tr>';
   v.slice(i,i+2).forEach(function(item){
-   vehicleRows+='<td class="van" width="50%" valign="top" style="width:50%;padding:7px"><table role="presentation" style="width:100%;border:1px solid #e5e5e5;border-collapse:collapse"><tr><td><a href="'+escapeHtml(item.url)+'"><img src="'+escapeHtml(item.image)+'" alt="'+escapeHtml(item.title)+'" style="display:block;width:100%;height:auto;max-height:200px;object-fit:cover;border:0"></a></td></tr><tr><td style="padding:13px 12px;font-family:Arial,sans-serif"><strong style="font-size:14px;color:#202124">'+escapeHtml(item.title)+'</strong><p style="margin:7px 0 12px;font-size:17px;font-weight:bold;color:#202124">'+escapeHtml(money(item.price))+'</p><a href="'+escapeHtml(item.url)+'" style="color:'+p.dark+';font-size:12px;font-weight:bold;text-decoration:underline">VIEW VEHICLE</a></td></tr></table></td>';
+   var sale=state.salePrices[item.key]||{},was=parseAmount(sale.was),now=parseAmount(sale.now),saving=parseAmount(sale.save);
+   var saleValid=was>now&&now>0&&(!saving||Math.abs(saving-(was-now))<.005);
+   var priceHtml=saleValid?
+    '<div style="margin:8px 0 10px"><div style="font:11px Arial,sans-serif;color:#697079">WAS <span style="text-decoration:line-through">'+escapeHtml(pounds(was))+'</span></div>'+
+    '<div style="font:800 20px/1.4 Arial,sans-serif;color:#141414">NOW '+escapeHtml(pounds(now))+'</div>'+
+    '<div style="margin-top:5px;color:#c7263a;font:800 13px Arial,sans-serif">SAVE '+escapeHtml(pounds(was-now))+'</div></div>'
+   :'<div style="margin:8px 0 11px;font:800 18px Arial,sans-serif;color:#202124">'+escapeHtml(money(item.price))+'</div>';
+   // Do not crop or fix an image height: intrinsic aspect ratio works in email clients.
+   vehicleRows+='<td class="van" width="50%" valign="top" style="width:50%;padding:7px"><table role="presentation" width="100%" style="width:100%;border:1px solid #e6e6e6;border-collapse:collapse"><tr><td bgcolor="#f5f5f5" align="center">'+
+    '<a href="'+escapeHtml(item.url)+'"><img src="'+escapeHtml(item.image)+'" alt="'+escapeHtml(item.title)+'" width="290" style="display:block;width:100%;max-width:290px;height:auto;border:0;outline:none;text-decoration:none"></a></td></tr>'+
+    '<tr><td style="padding:13px 12px;font-family:Arial,sans-serif"><strong style="font-size:14px;line-height:19px;display:block;color:#202124">'+escapeHtml(item.title)+'</strong>'+
+    (item.registration?'<div style="margin-top:5px;color:#697079;font-size:11px">'+escapeHtml(item.registration)+'</div>':"")+
+    priceHtml+
+    (item.vat_label?'<div style="color:#656c75;font-size:11px;margin-bottom:10px">'+escapeHtml(item.vat_label)+'</div>':"")+
+    '<a href="'+escapeHtml(item.url)+'" style="color:'+p.dark+';font-size:12px;font-weight:bold;text-decoration:underline">VIEW VEHICLE</a></td></tr></table></td>';
   });
   if(i+1>=v.length)vehicleRows+='<td width="50%" class="van" style="width:50%"></td>';
   vehicleRows+='</tr></table></td></tr>';
  }
  if(!v.length)vehicleRows='<tr><td style="padding:26px;text-align:center;color:#91969a;font-family:Arial,sans-serif;font-size:14px">Select Vansco vehicles to preview the stock cards.</td></tr>';
- return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media(max-width:600px){.van{display:block!important;width:100%!important}.body-pad{padding:22px!important}}</style><title>'+escapeHtml(s.subject)+'</title></head>'+
- '<body style="margin:0;background:#e9eaec;padding:0"><table role="presentation" width="100%" style="border-collapse:collapse;background:#e9eaec"><tr><td align="center" style="padding:22px 8px"><table role="presentation" style="border-collapse:collapse;width:100%;max-width:650px;background:white">'+
- '<tr><td style="background:'+p.dark+';padding:20px 26px 15px;color:#fff;font-family:Arial,sans-serif"><div style="font-size:23px;font-weight:900;letter-spacing:2px">VANSCO<span style="color:'+p.accent+'">.</span></div><div style="margin-top:8px;font-size:10px;letter-spacing:3px;color:'+p.accent+'">'+escapeHtml(p.label)+'</div></td></tr>'+
- '<tr><td class="body-pad" style="padding:42px 30px 35px;background:'+p.dark+';color:#fff;font-family:Arial,sans-serif;border-top:3px solid '+p.accent+'"><h1 style="font-size:36px;letter-spacing:-1px;line-height:1.06;margin:0 0 18px">'+escapeHtml(s.heading)+'</h1><p style="color:#efefef;font-size:15px;line-height:1.6;margin:0">'+escapeHtml(s.introduction)+'</p></td></tr>'+
- '<tr><td style="background:'+p.light+';padding:22px 30px;font-family:Arial,sans-serif;color:'+p.dark+';font-weight:bold;font-size:20px">'+escapeHtml(s.offer)+'</td></tr>'+
- '<tr><td style="font-family:Arial,sans-serif;padding:23px 28px 4px"><h2 style="margin:0;font-size:19px;color:#202124">Featured Vans</h2><p style="margin:8px 0 0;color:#70777d;font-size:13px">Explore our latest available vehicles</p></td></tr>'+
+ var company=paragraph(s.brand_description,'margin:0;color:#42464c;font-size:14px;line-height:23px');
+ var additional=paragraph(s.extra_text,'margin:0;color:#30343a;font-size:14px;line-height:23px');
+ var footer=paragraph(s.footer_note,'margin:10px 0 0;color:#636970;font-size:11px;line-height:17px');
+ return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media(max-width:600px){.van{display:block!important;width:100%!important}.body-pad{padding:25px!important}}</style><title>'+escapeHtml(s.subject)+'</title></head>'+
+ '<body style="margin:0;background:#e9eaec;padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#e9eaec"><tr><td align="center" style="padding:22px 8px"><table role="presentation" width="650" style="border-collapse:collapse;width:100%;max-width:650px;background:white">'+
+ '<tr><td style="background:'+p.dark+';padding:20px 25px 15px;color:#fff;font-family:Arial,sans-serif"><table role="presentation" width="100%" style="width:100%;border-collapse:collapse"><tr><td align="left" valign="middle">'+brandLogo+'</td><td align="right" valign="middle" style="color:'+p.accent+';font:700 10px Arial,sans-serif;letter-spacing:1.5px">'+pumpkin+escapeHtml(s.eyebrow||p.label)+pumpkin+'</td></tr></table></td></tr>'+
+ '<tr><td class="body-pad" style="padding:37px 30px 33px;background:'+p.dark+';color:#fff;font-family:Arial,sans-serif;border-top:2px solid '+p.accent+'">'+
+ '<h1 style="font-size:36px;letter-spacing:-1px;line-height:1.08;margin:0 0 12px;color:#fff">'+escapeHtml(s.heading)+'</h1>'+
+ (s.subheading?'<h2 style="font-size:18px;font-weight:600;line-height:25px;margin:0 0 15px;color:'+p.accent+'">'+escapeHtml(s.subheading)+'</h2>':"")+
+ paragraph(s.introduction,'color:#efefef;font-size:15px;line-height:24px;margin:0')+
+ '</td></tr>'+
+ (s.offer?'<tr><td style="background:'+p.light+';padding:20px 28px;font-family:Arial,sans-serif;color:'+p.dark+';font-weight:bold;font-size:19px;line-height:27px">'+lines(s.offer)+'</td></tr>':"")+
+ (company?'<tr><td style="font-family:Arial,sans-serif;padding:22px 29px 8px">'+company+'</td></tr>':"")+
+ '<tr><td style="font-family:Arial,sans-serif;padding:23px 28px 4px"><h2 style="margin:0;font-size:19px;color:#202124">Featured Vans</h2><p style="margin:8px 0 0;color:#70777d;font-size:13px">Browse our selected used vans</p></td></tr>'+
  vehicleRows+
- '<tr><td align="center" style="padding:29px"><a href="'+escapeHtml(s.cta_url)+'" style="display:inline-block;background:'+p.accent+';color:'+(state.theme==="halloween"||state.theme==="christmas"?"#201c1f":"#ffffff")+';padding:15px 22px;text-decoration:none;font:800 13px Arial,sans-serif;letter-spacing:.4px">'+escapeHtml(s.cta_label)+'</a></td></tr>'+
- '<tr><td style="padding:19px 27px;background:#f2f3f3;font:12px/1.5 Arial,sans-serif;color:#565e65">Vansco Limited · <a href="https://www.vansco.co.uk/" style="color:#25282b">www.vansco.co.uk</a><p style="margin:8px 0 0">Vehicle availability, prices and VAT status are subject to confirmation.</p><p style="margin:8px 0 0">Marketing unsubscribe link will be inserted by the verified sending system.</p></td></tr>'+
+ (additional?'<tr><td style="font-family:Arial,sans-serif;padding:20px 28px 4px">'+additional+'</td></tr>':"")+
+ '<tr><td align="center" style="padding:29px"><a href="'+escapeHtml(s.cta_url)+'" style="display:inline-block;background:'+p.accent+';color:'+(saleMode&&state.theme!=="black_friday"?"#201c1f":"#ffffff")+';padding:15px 22px;text-decoration:none;font:800 13px Arial,sans-serif;letter-spacing:.4px">'+escapeHtml(s.cta_label)+'</a></td></tr>'+
+ '<tr><td style="padding:19px 27px;background:#f2f3f3;font:12px/1.5 Arial,sans-serif;color:#565e65">Vansco Limited · <a href="https://www.vansco.co.uk/" style="color:#25282b">www.vansco.co.uk</a><p style="margin:8px 0 0">Vehicle availability, prices and VAT status are subject to confirmation.</p>'+
+ footer+
+ '<p style="margin:8px 0 0">Marketing unsubscribe link will be inserted by the verified sending system.</p></td></tr>'+
  '</table></td></tr></table></body></html>';
 }
 function preview(){el("emailPreview").srcdoc=buildEmail()}
