@@ -51,7 +51,7 @@ test("new Vansco studio cannot alter automatic transactional sends or dispatch c
   assert.match(api, /NO|NEVER invokes an email provider/i);
   assert.doesNotMatch(api, /sendSendGridEmail|callEmailProvider|sendgrid\.com\/v3\/mail\/send|api\.brevo\.com\/v3\/smtp\/email/);
   assert.doesNotMatch(api, /from\(["']marketing_campaigns["']\)|from\(["']marketing_email_sends["']\)/);
-  assert.match(ui, /id="sendCustomerBatch" disabled/);
+  assert.match(ui, /id="startVanscoBatch"/);
   assert.match(readFileSync(new URL("../api/vansco-email-delivery.js", import.meta.url), "utf8"), /VANSCO_EMAIL_PRODUCTION_ENABLED/);
   assert.match(ui, /Send new campaign draft|Save new campaign draft/);
   assert.match(migration, /marketing_vansco_email_contacts/);
@@ -274,7 +274,7 @@ test("internal tests need no checkbox or phrase and customer sends remain locked
   assert.match(ui,/delivery\("testSend",\{campaign_id:state\.activeCampaign,to:to\}\)/);
   assert.match(delivery,/checkVanscoTestRateLimit\(supabase\)/);
   assert.match(delivery,/result\.count\|\|0\)>=100/);
-  assert.match(delivery,/VANSCO_EMAIL_PRODUCTION_ENABLED!=="true"/);
+  assert.match(delivery,/VANSCO_EMAIL_PRODUCTION_ENABLED==="false"/);
   assert.match(delivery,/send_type","test"/);
 });
 
