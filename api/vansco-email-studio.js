@@ -228,10 +228,10 @@ function emailKey(value) {
 }
 
 const IMPORT_JOBS = "marketing_vansco_email_import_jobs";
-const CSV_FIELDS = ["first_name","last_name","company","pipeline","tags","notes","brand","verifalia_classification","verifalia_status"];
+const CSV_FIELDS = ["first_name","last_name","display_name","company","pipeline","tags","notes","brand","verifalia_classification","verifalia_status"];
 function importMetadata(raw) {
   const result = {};
-  for (const field of CSV_FIELDS) result[field] = clean(raw?.[field], field==="notes" ? 4000 : field==="tags" ? 1200 : 255);
+  for (const field of CSV_FIELDS) result[field] = clean(field === "display_name" ? raw?.name || [raw?.first_name,raw?.last_name].filter(Boolean).join(" ") : raw?.[field], field==="notes" ? 4000 : field==="tags" ? 1200 : 255);
   return result;
 }
 async function importContacts(supabase, payload) {
@@ -281,7 +281,7 @@ async function importContacts(supabase, payload) {
     const [global, legacy, existing] = await Promise.all([
       supabase.from("marketing_suppression_identities").select("email_normalized").in("email_normalized", emails),
       supabase.from("marketing_contacts").select("email_normalized,marketing_status,lifecycle_status,suppression").in("email_normalized", emails),
-      supabase.from(CONTACTS_TABLE).select("id,email_normalized,first_name,last_name,company,pipeline,tags,notes,brand,verifalia_classification,verifalia_status,updated_at").in("email_normalized", emails),
+      supabase.from(CONTACTS_TABLE).select("id,email_normalized,first_name,last_name,display_name,company,pipeline,tags,notes,brand,verifalia_classification,verifalia_status,updated_at").in("email_normalized", emails),
     ]);
     checkResult(global, "Could not inspect global suppressions");
     checkResult(legacy, "Could not inspect shared customer suppressions");
