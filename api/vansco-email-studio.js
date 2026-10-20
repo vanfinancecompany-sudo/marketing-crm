@@ -44,7 +44,7 @@ function defaultSettings() {
     introduction: "Explore a selection of vans available now at Vansco.",
     eyebrow: "HALLOWEEN EDITION",
     subheading: "A great selection of quality used vans",
-    brand_description: "Vansco supplies quality used vans across its Southampton and New Forest locations.",
+    brand_description: "Looking for your next van? Vansco offers a wide selection of quality used commercial vehicles across our Southampton and New Forest locations, including Vansco 333, Southampton Airport and New Forest. Browse our latest available stock and contact the team for help choosing the right vehicle.",
     extra_text: "",
     footer_note: "",
     logo_url: "",
