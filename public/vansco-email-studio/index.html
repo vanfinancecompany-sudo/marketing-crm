@@ -168,7 +168,8 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
     </section>
     <section class="panel">
      <div class="heading"><h2>Vansco customer database</h2><span class="small muted">Separate from VFC</span></div>
-     <p class="small muted">Import a Vansco CSV without merging it into Van Finance Company or Rent2Buy contacts. All new addresses remain pending review until their marketing eligibility is checked.</p>
+     <details class="advanced-panel"><summary>Import another customer CSV</summary>
+      <p class="small muted">Import a Vansco CSV without merging it into Van Finance Company or Rent2Buy contacts. New addresses are checked before being included in mailings.</p>
      <div class="form">
       <label>List source<input id="listSource" placeholder="e.g. Vansco DealerKit export"></label>
       <label>Marketing basis<select id="marketingBasis"><option value="unverified" selected>Permission not yet verified</option><option value="consent">Recorded marketing consent</option><option value="legitimate_interest">Legitimate interests (assessed)</option></select></label>
@@ -178,8 +179,10 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      <p id="importMessage" class="small" role="status"></p>
      <div id="importProgress" class="batch-progress" role="progressbar" aria-label="Vansco CSV import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="importProgressFill"></div></div>
      <p id="importProgressText" class="small muted">Select a CSV to import or resume. All contacts remain pending permission review.</p>
-     <p class="small muted">CSV columns: email, first_name, last_name. Verifying email deliverability does not itself establish permission to market.</p>
-     <div class="heading" style="margin-top:18px"><h3>Review &amp; select Vansco customers</h3><button class="btn" id="refreshContacts">Refresh</button></div>
+     <p class="small muted">CSV columns: email, first_name, last_name.</p>
+      </details>
+     <details class="advanced-panel"><summary>Find a customer or open advanced records</summary>
+      <div class="heading" style="margin-top:18px"><h3>Customer lookup &amp; individual records</h3><button class="btn" id="refreshContacts">Refresh</button></div>
      <p class="small muted">Imported contacts require a documented marketing basis and review. You can approve a verified source in batches after checking its evidence.</p>
      <label class="subheading" for="sourceReviewNotes">Source permission review notes</label>
      <textarea id="sourceReviewNotes" rows="3" placeholder="Document UK electronic-marketing permission, supporting evidence and any relevant exceptions (at least 50 characters)"></textarea>
@@ -197,6 +200,7 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      <div id="contactRows" class="list" style="max-height:360px;overflow:auto;margin-top:12px"></div>
      <p class="small muted">Locked contacts are calculated from Vansco customer sends, not internal tests.</p>
      <p id="customerSendMessage" class="small" role="status"></p>
+      </details>
     </section>
      <section class="panel" id="vanscoBatchPanel">
        <div class="heading"><h2>Vansco 500-email campaigns</h2><span class="pill">MANUAL · 7-DAY LOCK</span></div>
