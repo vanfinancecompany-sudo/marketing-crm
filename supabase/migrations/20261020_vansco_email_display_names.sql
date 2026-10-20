@@ -1,0 +1,2 @@
+alter table public.marketing_vansco_email_contacts add column if not exists display_name text;
+update public.marketing_vansco_email_contacts set display_name=trim(concat_ws(' ',nullif(first_name,''),nullif(last_name,''))) where display_name is null;
