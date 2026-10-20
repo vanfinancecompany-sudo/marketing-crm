@@ -305,6 +305,14 @@ export async function processBatch(supabase,body) {
     }
     const result=await dispatch(supabase,{send:claim,campaignRow:selected,vehicles});
     if(result.accepted)accepted++;else if(result.status==="submission_unknown")unknown++;else failed++;
+    // Respect SendGrid throttling. Leave other queued recipients untouched until a manual resume.
+    if(result.status==="failed" && /\\b429\\b|rate.limit/i.test(result.error||"")){
+      checked(await supabase.from("marketing_vansco_email_batches")
+        .update({status:"paused",updated_at:new Date().toISOString()})
+        .eq("id",current.id).in("status",["queued","sending"]),
+        "Couldn't safely pause rate-limited Vansco batch");
+      break;
+    }
   }
   const progress=await statusOfBatch(supabase,{batch_id:current.id});
   return {...progress,step:{accepted,failed,skipped,unknown}};
