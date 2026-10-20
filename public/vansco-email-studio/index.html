@@ -171,11 +171,13 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      <p class="small muted">Import a Vansco CSV without merging it into Van Finance Company or Rent2Buy contacts. All new addresses remain pending review until their marketing eligibility is checked.</p>
      <div class="form">
       <label>List source<input id="listSource" placeholder="e.g. Vansco DealerKit export"></label>
-      <label>Marketing basis<select id="marketingBasis"><option value="">Select…</option><option value="consent">Recorded marketing consent</option><option value="legitimate_interest">Legitimate interests (assessed)</option></select></label>
+      <label>Marketing basis<select id="marketingBasis"><option value="unverified" selected>Permission not yet verified</option><option value="consent">Recorded marketing consent</option><option value="legitimate_interest">Legitimate interests (assessed)</option></select></label>
       <label class="full">Customer CSV<input id="csvFile" type="file" accept=".csv,text/csv"></label>
      </div>
      <div class="actions"><button class="btn dark" id="importContacts">Import into Vansco list</button></div>
      <p id="importMessage" class="small" role="status"></p>
+     <div id="importProgress" class="batch-progress" role="progressbar" aria-label="Vansco CSV import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="importProgressFill"></div></div>
+     <p id="importProgressText" class="small muted">Select a CSV to import or resume. All contacts remain pending permission review.</p>
      <p class="small muted">CSV columns: email, first_name, last_name. Verifying email deliverability does not itself establish permission to market.</p>
      <div class="heading" style="margin-top:18px"><h3>Review &amp; select Vansco customers</h3><button class="btn" id="refreshContacts">Refresh</button></div>
      <p class="small muted">Imported contacts require a documented marketing basis and review. You can approve a verified source in batches after checking its evidence.</p>
@@ -199,6 +201,8 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
          <div><b id="aMonthly">—</b><span>Monthly limit</span></div>
          <div><b id="aSuppressed">—</b><span>Suppressed</span></div>
          <div><b id="aPending">—</b><span>Needs review</span></div>
+         <div><b id="aRisky">—</b><span>Risky (included)</span></div>
+         <div><b id="aQueued">—</b><span>Queued / claimed</span></div>
          <div><b id="aRemaining">—</b><span>Available next</span></div>
        </div>
        <div class="actions"><button class="btn" id="refreshAudience">Refresh eligible counts</button></div>
@@ -399,14 +403,55 @@ function buildEmail(){
 function preview(){el("emailPreview").srcdoc=buildEmail()}
 function downloadHtml(){var blob=new Blob([buildEmail()],{type:"text/html;charset=utf-8"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="vansco-"+state.theme+"-email-preview.html";a.click();setTimeout(function(){URL.revokeObjectURL(url)},4000)}
 function parseCsv(content){
- var rows=[],row=[],field="",quoted=false,text=content.replace(/^\uFEFF/,"");
- for(var i=0;i<text.length;i++){var c=text[i];if(quoted){if(c==='"'&&text[i+1]==='"'){field+='"';i++}else if(c==='"')quoted=false;else field+=c}
- else if(c==='"')quoted=true;else if(c===','){row.push(field);field=""}else if(c==='\n'||c==='\r'){if(c==='\r'&&text[i+1]==='\n')i++;row.push(field);if(row.some(function(v){return v.trim()}))rows.push(row);row=[];field=""}else field+=c}
+ var rows=[],row=[],field="",quoted=false,text=String(content||"").replace(/^\uFEFF/,"");
+ for(var i=0;i<text.length;i++){
+  var c=text[i];
+  if(quoted){if(c==='"'&&text[i+1]==='"'){field+='"';i++}else if(c==='"')quoted=false;else field+=c}
+  else if(c==='"')quoted=true;
+  else if(c===','){row.push(field);field=""}
+  else if(c==='\n'||c==='\r'){
+   if(c==='\r'&&text[i+1]==='\n')i++;
+   row.push(field);
+   if(row.some(function(v){return String(v).trim()}))rows.push(row);
+   row=[];field="";
+  }else field+=c;
+ }
+ if(quoted)throw Error("CSV contains an unfinished quoted field. Check the file and try again.");
  if(field||row.length){row.push(field);rows.push(row)}
- if(rows.length<2)return [];
- var headers=rows.shift().map(function(x){return x.trim().toLowerCase().replace(/\s+/g,"_")});
- return rows.map(function(x){var r={};headers.forEach(function(h,i){r[h]=String(x[i]||"").trim()});return {email:r.email||r.email_address||r["e-mail"]||"",first_name:r.first_name||r.firstname||"",last_name:r.last_name||r.lastname||""}}).filter(function(x){return x.email});
+ if(!rows.length)throw Error("The selected CSV is empty.");
+ var headers=rows.shift().map(function(x){return x.replace(/^\uFEFF/,"").trim().toLowerCase().replace(/\s+/g,"_")});
+ var emailIndex=headers.findIndex(function(h){return ["email","email_address","e-mail","emailaddress"].includes(h)});
+ if(emailIndex<0)throw Error('Cannot find an email column. Detected headers: '+headers.slice(0,12).join(", ")+'.');
+ var fields=["email","first_name","last_name","company","pipeline","source","tags","notes","name","brand","verifalia_classification","verifalia_status"];
+ var result=rows.map(function(values){
+  var raw={};headers.forEach(function(h,i){raw[h]=String(values[i]||"").trim()});
+  var mapped={};
+  fields.forEach(function(field){mapped[field]=raw[field]||""});
+  mapped.email=(raw[headers[emailIndex]]||"").trim();
+  mapped.first_name=mapped.first_name||raw.firstname||"";
+  mapped.last_name=mapped.last_name||raw.lastname||"";
+  return mapped;
+ });
+ return {rows:result,headers:headers};
 }
+async function csvFingerprint(file){
+ var bytes=await file.arrayBuffer();
+ var digest=await crypto.subtle.digest("SHA-256",bytes);
+ return Array.from(new Uint8Array(digest)).map(function(n){return n.toString(16).padStart(2,"0")}).join("");
+}
+function showImportProgress(job,total){
+ var processed=Number(job?.processed_rows||0),rows=Number(total||job?.total_rows||0);
+ var percent=rows?Math.min(100,Math.round(100*processed/rows)):0;
+ el("importProgressFill").style.width=percent+"%";
+ el("importProgress").setAttribute("aria-valuenow",percent);
+ el("importProgressText").textContent="Processed "+processed+" / "+rows+
+  " ("+percent+"%). New: "+Number(job?.newly_imported||0)+
+  " · Already existing: "+Number(job?.already_existing||0)+
+  " · Suppressed: "+Number(job?.suppressed_rows||0)+
+  " · Invalid: "+Number(job?.invalid_rows||0)+
+  " · Remaining: "+Math.max(0,rows-processed);
+}
+
 async function refreshCounts(){
  try{
   var stats=await api("overview");
@@ -482,7 +527,7 @@ function updateBatchUI(batch){
 async function refreshAudience(){
  try{
   var info=await delivery("audience"),a=info.audience||{};
-  [["aTotal","total"],["aApproved","approved"],["aEligible","eligible"],["aLocked","locked_7d"],["aMonthly","monthly_cap"],["aSuppressed","suppressed"],["aPending","pending_review"],["aRemaining","remaining"]].forEach(function(x){
+  [["aTotal","total"],["aApproved","approved"],["aEligible","eligible"],["aLocked","locked_7d"],["aMonthly","monthly_cap"],["aSuppressed","suppressed"],["aPending","pending_review"],["aRisky","risky"],["aQueued","queued"],["aRemaining","remaining"]].forEach(function(x){
    el(x[0]).textContent=Number(a[x[1]]||0).toLocaleString("en-GB");
   });
   if(info.active_batch&&info.active_batch.id){
@@ -638,15 +683,36 @@ el("reviewSource").addEventListener("click",async function(){
 
 el("importContacts").addEventListener("click",async function(){
  var file=el("csvFile").files[0],source=el("listSource").value.trim(),basis=el("marketingBasis").value;
- if(!file||!source||!basis){setMsg("importMessage","Choose a CSV, its source and a documented marketing basis.",true);return}
+ if(!file){setMsg("importMessage","Choose a CSV first.",true);return}
  if(file.size>6*1024*1024){setMsg("importMessage","Please split CSV files larger than 6 MB.",true);return}
- var rows=parseCsv(await file.text());
- if(!rows.length){setMsg("importMessage","No email rows found. Include an email column.",true);return}
- if(!confirm("Import "+rows.length+" contacts into the separate Vansco list as PENDING REVIEW?\n\nThis does not email anyone. You must verify the marketing basis before activating addresses."))return;
- el("importContacts").disabled=true;setMsg("importMessage","Importing "+rows.length+" contacts in batches of 100…");
- try{var added=0,suppressed=0;for(var i=0;i<rows.length;i+=100){var result=await api("importContacts",{source:source,marketing_basis:basis,contacts:rows.slice(i,i+100)});added+=result.newly_added;suppressed+=result.suppressed_in_batch;setMsg("importMessage","Processed "+Math.min(i+100,rows.length)+" / "+rows.length+" rows…")}
- setMsg("importMessage","Vansco import complete. "+added+" new records; "+suppressed+" matched existing global suppression. All others pending review.");await Promise.all([refreshCounts(),refreshAudience()]);
- }catch(e){setMsg("importMessage","Import stopped: "+e.message,true)}finally{el("importContacts").disabled=false}
+ el("importContacts").disabled=true;
+ try{
+  var parsed=parseCsv(await file.text()),rows=parsed.rows;
+  source=source||rows.find(function(r){return r.source})?.source||"Vansco customer CSV";
+  el("listSource").value=source;
+  if(!basis)throw Error("Choose a marketing-permission assessment state.");
+  var fingerprint=await csvFingerprint(file);
+  var status=await api("importStatus",{fingerprint:fingerprint});
+  var job=status.import_job;
+  var offset=Number(job?.processed_rows||0);
+  if(job&&job.total_rows!==rows.length)throw Error("The stored import session has a different row count. Please check the original CSV.");
+  showImportProgress(job,rows.length);
+  if(offset===rows.length){setMsg("importMessage","This exact CSV was already imported. Nothing to repeat.");await Promise.all([refreshCounts(),refreshAudience()]);return}
+  if(!confirm((offset?"RESUME":"IMPORT")+" "+file.name+": process "+(rows.length-offset)+" of "+rows.length+" records?\n\nAll newly imported addresses remain pending permission review. No customer emails will be sent."))return;
+  setMsg("importMessage","Import running. The completed rows are recorded in the database and can be resumed after interruption.");
+  for(var i=offset;i<rows.length;i+=100){
+   var result=await api("importContacts",{
+    source:source,marketing_basis:basis,contacts:rows.slice(i,i+100),
+    fingerprint:fingerprint,filename:file.name,total_rows:rows.length,row_offset:i
+   });
+   job=result.import_job;
+   if(!job)throw Error("The import progress wasn't saved.");
+   showImportProgress(job,rows.length);
+  }
+  setMsg("importMessage","CSV import complete: "+job.newly_imported+" new, "+job.already_existing+" already in Vansco, "+job.suppressed_rows+" suppressed matches. Permission review is still required.");
+  await Promise.all([refreshCounts(),refreshAudience(),refreshContacts()]);
+ }catch(e){setMsg("importMessage","Import stopped safely: "+e.message+". Select the same file and click Import to resume.",true)}
+ finally{el("importContacts").disabled=false}
 });
 init();
 })();
