@@ -43,6 +43,14 @@ textarea{min-height:70px;resize:vertical}input:focus,textarea:focus,select:focus
 .contact-row strong{font-size:12px}.contact-row .status{color:#606771;font-size:11px}.contact-row button{margin-left:auto}
 .contact-row input[type=checkbox]{width:18px;height:18px;flex:none;accent-color:#b82036}
 .safe-send{background:#f8f6f0;border-left:3px solid #bf9b55;padding:11px;font-size:12px;line-height:1.5;border-radius:5px}
+.advanced-panel{margin:12px 0;border-top:1px solid #e6e8ea;padding-top:10px}
+.advanced-panel>summary{cursor:pointer;font-size:12px;font-weight:700;color:#59626b;list-style-position:inside;padding:6px 0}
+.advanced-panel[open]>summary{margin-bottom:10px}
+#vanscoBatchPanel .form{align-items:end}
+#vanscoBatchPanel #batchSize{font-weight:800;font-size:15px}
+#vanscoBatchPanel #startVanscoBatch{min-width:190px}
+#crmActivation{background:#f7f8f9;border-left:3px solid #37404a}
+
 .sale-grid{display:grid;gap:9px;margin-top:14px}.sale-editor{border:1px solid #e3e4e6;border-radius:8px;padding:11px;background:#fcfcfc}
 .sale-editor-header{font-size:12px;font-weight:800;margin:0 0 9px;color:#30343a}
 .sale-editor-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
@@ -83,7 +91,7 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
 <main>
  <div class="topline">
   <div><div class="eyebrow">VANSCO / CONTENT STUDIO</div><h1>Seasonal Email Campaigns</h1><p class="muted" style="margin:5px 0 0;font-size:13px">One master template. Four seasonal looks. Vansco stock only.</p></div>
-  <span class="pill">MANUAL · DRAFT STAGE</span>
+  <span class="pill">MANUAL CAMPAIGNS</span>
  </div>
  <div id="locked" class="panel" hidden>
   <h2>Unlock Vansco Email Studio</h2>
@@ -168,7 +176,8 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
     </section>
     <section class="panel">
      <div class="heading"><h2>Vansco customer database</h2><span class="small muted">Separate from VFC</span></div>
-     <p class="small muted">Import a Vansco CSV without merging it into Van Finance Company or Rent2Buy contacts. All new addresses remain pending review until their marketing eligibility is checked.</p>
+     <details class="advanced-panel"><summary>Import another customer CSV</summary>
+      <p class="small muted">Import a Vansco CSV without merging it into Van Finance Company or Rent2Buy contacts. New addresses are checked before being included in mailings.</p>
      <div class="form">
       <label>List source<input id="listSource" placeholder="e.g. Vansco DealerKit export"></label>
       <label>Marketing basis<select id="marketingBasis"><option value="unverified" selected>Permission not yet verified</option><option value="consent">Recorded marketing consent</option><option value="legitimate_interest">Legitimate interests (assessed)</option></select></label>
@@ -178,8 +187,10 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      <p id="importMessage" class="small" role="status"></p>
      <div id="importProgress" class="batch-progress" role="progressbar" aria-label="Vansco CSV import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="importProgressFill"></div></div>
      <p id="importProgressText" class="small muted">Select a CSV to import or resume. All contacts remain pending permission review.</p>
-     <p class="small muted">CSV columns: email, first_name, last_name. Verifying email deliverability does not itself establish permission to market.</p>
-     <div class="heading" style="margin-top:18px"><h3>Review &amp; select Vansco customers</h3><button class="btn" id="refreshContacts">Refresh</button></div>
+     <p class="small muted">CSV columns: email, first_name, last_name.</p>
+      </details>
+     <details class="advanced-panel"><summary>Find a customer or open advanced records</summary>
+      <div class="heading" style="margin-top:18px"><h3>Customer lookup &amp; individual records</h3><button class="btn" id="refreshContacts">Refresh</button></div>
      <p class="small muted">Imported contacts require a documented marketing basis and review. You can approve a verified source in batches after checking its evidence.</p>
      <label class="subheading" for="sourceReviewNotes">Source permission review notes</label>
      <textarea id="sourceReviewNotes" rows="3" placeholder="Document UK electronic-marketing permission, supporting evidence and any relevant exceptions (at least 50 characters)"></textarea>
@@ -197,33 +208,53 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      <div id="contactRows" class="list" style="max-height:360px;overflow:auto;margin-top:12px"></div>
      <p class="small muted">Locked contacts are calculated from Vansco customer sends, not internal tests.</p>
      <p id="customerSendMessage" class="small" role="status"></p>
+      </details>
     </section>
      <section class="panel" id="vanscoBatchPanel">
-       <div class="heading"><h2>Vansco 500-email campaigns</h2><span class="pill">MANUAL · 7-DAY LOCK</span></div>
-       <p class="small muted">One email per customer in seven days, maximum four in any calendar month or rolling 30 days. Test messages do not count.</p>
+       <div class="heading"><h2>Send Vansco email campaign</h2><span class="pill">100 OR 500</span></div>
+       <p class="small muted">Choose your saved campaign above, select 100 or 500 customers and send. The system excludes opt-outs, duplicates and recently emailed customers automatically.</p>
+       <div class="safe-send" id="crmActivation" hidden style="margin:13px 0">
+        <strong>One-time Vansco CRM confirmation</strong>
+        <p class="small" style="margin:7px 0">These records came from your Vansco CRM. Confirm their marketing basis once. There is no need to approve customers individually.</p>
+        <label style="display:block;margin-bottom:8px">How may these contacts receive marketing emails?
+          <select id="crmBasis" style="display:block;width:100%;margin-top:5px">
+            <option value="existing_customer">Existing customers: similar vans, opt-out offered when collected</option>
+            <option value="consent">Customers with recorded marketing consent</option>
+          </select>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px">
+          <input id="crmConfirm" type="checkbox" style="width:auto;margin-top:2px">
+          <span>I confirm these Vansco CRM contacts meet the selected marketing basis and have not opted out. Existing blocked addresses remain excluded.</span>
+        </label>
+        <div class="actions" style="margin-top:9px"><button class="btn dark" id="activateCrm">Confirm Vansco mailing list</button></div>
+        <p id="crmActivationMessage" class="small" role="status"></p>
+       </div>
        <div class="audience-overview">
-         <div><b id="aTotal">—</b><span>Total contacts</span></div>
-         <div><b id="aApproved">—</b><span>Approved</span></div>
-         <div><b id="aEligible">—</b><span>Eligible now</span></div>
-         <div><b id="aLocked">—</b><span>Locked 7 days</span></div>
-         <div><b id="aMonthly">—</b><span>Monthly limit</span></div>
-         <div><b id="aSuppressed">—</b><span>Blocked / suppressed</span></div>
-         <div><b id="aUnsubscribed">—</b><span>Unsubscribed</span></div>
-         <div><b id="aBounced">—</b><span>Bounced</span></div>
-         <div><b id="aPending">—</b><span>Needs review</span></div>
-         <div><b id="aRisky">—</b><span>Risky (included)</span></div>
-         <div><b id="aQueued">—</b><span>Queued / claimed</span></div>
-         <div><b id="aRemaining">—</b><span>Available next</span></div>
+         <div><b id="aTotal">—</b><span>Vansco contacts</span></div>
+         <div><b id="aEligible">—</b><span>Available now</span></div>
+         <div><b id="aLocked">—</b><span>7-day lock</span></div>
+         <div><b id="aSuppressed">—</b><span>Blocked / opted out</span></div>
        </div>
-       <div class="actions"><button class="btn" id="refreshAudience">Refresh eligible counts</button><button class="btn dark" id="previewVanscoBatch">Preview next eligible batch</button></div>
-       <p id="batchPreview" class="small muted" role="status">Preview the next eligible recipients before confirming a real batch.</p>
+       <div class="actions"><button class="btn" id="refreshAudience">Refresh counts</button><button class="btn dark" id="previewVanscoBatch">Preview recipients</button></div>
+       <details class="advanced-panel"><summary>More mailing statistics</summary>
+        <div class="audience-overview">
+          <div><b id="aApproved">—</b><span>Confirmed</span></div>
+          <div><b id="aMonthly">—</b><span>Monthly limit</span></div>
+          <div><b id="aUnsubscribed">—</b><span>Unsubscribed</span></div>
+          <div><b id="aBounced">—</b><span>Bounced</span></div>
+          <div><b id="aPending">—</b><span>Not yet confirmed</span></div>
+          <div><b id="aRisky">—</b><span>Risky addresses</span></div>
+          <div><b id="aQueued">—</b><span>Queued / claimed</span></div>
+          <div><b id="aRemaining">—</b><span>Available next</span></div>
+        </div>
+       </details>
+       <p id="batchPreview" class="small muted" role="status">Preview recipients if you want, or click Send to preview automatically and confirm.</p>
        <div class="form" style="margin-top:12px">
-         <label>Batch size (maximum 500)<input id="batchSize" type="number" min="1" max="500" value="500"></label>
-         <label>Final authorisation<input id="batchPhrase" placeholder="Type SEND VANSCO 500"></label>
-       </div>
-       <div class="safe-send" style="margin-top:13px">Select a saved Vansco campaign above. Customer sending requires approved recipients, validated vehicle stock and your confirmation. No other CRM emails are affected.</div>
+         <label>How many customers?<select id="batchSize"><option value="100">100 emails</option><option value="500" selected>500 emails</option></select></label>
+        </div>
+       
        <div class="actions">
-        <button class="btn red" id="startVanscoBatch">Start real customer batch</button>
+        <button class="btn red" id="startVanscoBatch">Send selected campaign</button>
         <button class="btn dark" id="resumeVanscoBatch" disabled>Resume batch</button>
         <button class="btn" id="pauseVanscoBatch" disabled>Pause after this step</button>
        </div>
@@ -565,6 +596,7 @@ async function refreshAudience(){
   [["aTotal","total"],["aApproved","approved"],["aEligible","eligible"],["aLocked","locked_7d"],["aMonthly","monthly_cap"],["aSuppressed","suppressed"],["aUnsubscribed","unsubscribed"],["aBounced","bounced"],["aPending","pending_review"],["aRisky","risky"],["aQueued","queued"],["aRemaining","remaining"]].forEach(function(x){
    el(x[0]).textContent=Number(a[x[1]]||0).toLocaleString("en-GB");
   });
+  el("crmActivation").hidden=Number(a.pending_review||0)===0;
   if(info.active_batch&&info.active_batch.id){
    var status=await delivery("batchStatus",{batch_id:info.active_batch.id});updateBatchUI(status.batch);
    if(!state.batchRunning)setMsg("batchMessage",info.active_batch.status==="paused"?"Vansco batch paused. Click Resume when authorised.":"Vansco batch is queued. The background worker handles sending even if this tab is closed.");
@@ -677,7 +709,7 @@ el("refreshReport").addEventListener("click",refreshReport);
 
 
 el("refreshAudience").addEventListener("click",refreshAudience);
-el("batchSize").addEventListener("input",function(){el("batchPhrase").placeholder="Type SEND VANSCO "+el("batchSize").value;state.previewToken="";});
+el("batchSize").addEventListener("change",function(){state.previewToken="";});
 el("previewVanscoBatch").addEventListener("click",async function(){
  try{await previewVanscoBatch()}catch(e){setMsg("batchMessage",e.message,true)}
 });
@@ -693,12 +725,12 @@ el("startVanscoBatch").addEventListener("click",async function(){
  var amount=Number(el("batchSize").value),phrase="SEND VANSCO "+amount;
  if(!state.activeCampaign){setMsg("batchMessage","Select your saved Vansco campaign draft first.",true);return}
  if(!Number.isInteger(amount)||amount<1||amount>500){setMsg("batchMessage","Choose between one and 500 emails.",true);return}
- if(el("batchPhrase").value.trim()!==phrase){setMsg("batchMessage","Type "+phrase+" to confirm this real customer batch.",true);return}
- if(!state.previewToken||state.previewAmount!==amount||state.previewCampaign!==state.activeCampaign){
-  setMsg("batchMessage","Preview the next eligible recipients before final confirmation.",true);return;
- }
- if(!state.readyToSend){setMsg("batchMessage","Sending is locked until the customer audience and system are authorised.",true);return}
- if(!confirm("SEND REAL CUSTOMER EMAILS\n\nQueue up to "+amount+" eligible Vansco customers?\n\nThe seven-day and rolling 30-day locks apply. SendGrid acceptance does not guarantee delivery."))return;
+ if(!state.readyToSend){setMsg("batchMessage","Customer sending is not yet enabled on the server.",true);return}
+ var preview;
+ try{preview=await previewVanscoBatch()}catch(e){setMsg("batchMessage",e.message,true);return}
+ var actual=Number(preview.preview?.count||0);
+ if(actual<1){setMsg("batchMessage","No eligible Vansco customers available. Check audience figures.",true);return}
+ if(!confirm("SEND VANSCO CAMPAIGN\n\nSend this saved campaign to "+actual+" available customers (maximum "+amount+")?\n\nOpt-outs and frequency limits are rechecked before each message."))return;
  el("startVanscoBatch").disabled=true;
  try{
   var response=await delivery("reserveBatch",{campaign_id:state.activeCampaign,batch_size:amount,confirm_phrase:phrase,preview_token:state.previewToken});
@@ -707,6 +739,17 @@ el("startVanscoBatch").addEventListener("click",async function(){
   await runVanscoBatch();
  }catch(e){setMsg("batchMessage",e.message,true)}
  finally{if(!state.batchRunning)el("startVanscoBatch").disabled=!state.readyToSend}
+});
+el("activateCrm").addEventListener("click",async function(){
+ if(!el("crmConfirm").checked){setMsg("crmActivationMessage","Confirm that the marketing basis applies to these Vansco CRM contacts.",true);return}
+ if(!confirm("Confirm your Vansco CRM marketing audience?\n\nThis records your confirmation and does not send any messages. Global opt-outs remain blocked."))return;
+ el("activateCrm").disabled=true;
+ try{
+  var response=await delivery("activateCrmAudience",{basis:el("crmBasis").value,confirmed:true});
+  setMsg("crmActivationMessage",response.activation.activated+" contacts confirmed; "+response.activation.eligible_now+" available.");
+  await Promise.all([refreshAudience(),refreshCounts()]);
+ }catch(e){setMsg("crmActivationMessage",e.message,true)}
+ finally{el("activateCrm").disabled=false}
 });
 el("reviewSource").addEventListener("click",async function(){
  var source=el("listSource").value.trim(),notes=el("sourceReviewNotes").value.trim(),reviewer=el("reviewerName").value.trim(),evidence=el("reviewEvidence").value.trim(),basis=el("marketingBasis").value,risky=el("includeRiskyReview").checked;
