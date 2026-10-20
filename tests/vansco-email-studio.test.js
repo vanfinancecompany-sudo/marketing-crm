@@ -50,8 +50,9 @@ test("new Vansco studio cannot alter automatic transactional sends or dispatch c
   assert.match(api, /NO|NEVER invokes an email provider/i);
   assert.doesNotMatch(api, /sendSendGridEmail|callEmailProvider|sendgrid\.com\/v3\/mail\/send|api\.brevo\.com\/v3\/smtp\/email/);
   assert.doesNotMatch(api, /from\(["']marketing_campaigns["']\)|from\(["']marketing_email_sends["']\)/);
-  assert.match(ui, /disabled title="Available once send-safety checks are complete"/);
-  assert.match(ui, /No customer emails are sent from this screen/);
+  assert.match(ui, /id="sendCustomerBatch" disabled/);
+  assert.match(readFileSync(new URL("../api/vansco-email-delivery.js", import.meta.url), "utf8"), /VANSCO_EMAIL_PRODUCTION_ENABLED/);
+  assert.match(ui, /Send new campaign draft|Save new campaign draft/);
   assert.match(migration, /marketing_vansco_email_contacts/);
   assert.doesNotMatch(migration, /alter table public\.marketing_contacts|update public\.marketing_contacts|delete from public\.marketing_contacts/i);
 });
