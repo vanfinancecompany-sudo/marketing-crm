@@ -395,6 +395,12 @@ export default async function handler(request,response){
     if(body.action==="contacts")result=await listContacts(supabase,body);
     else if(body.action==="audience")result=await audience(supabase);
     else if(body.action==="reviewSource")result=await reviewSource(supabase,body);
+    else if(body.action==="activateCrmAudience"){
+      if(body.confirmed!==true || !["consent","existing_customer"].includes(body.basis))fail("Confirm how these Vansco CRM contacts may receive marketing emails.");
+      result={activation:checked(await supabase.rpc("vansco_email_confirm_crm_audience",{
+        p_basis:body.basis,p_confirm:true
+      }),"Couldn't activate the confirmed Vansco CRM list")};
+    }
     else if(body.action==="previewBatch")result=await previewBatch(supabase,body);
     else if(body.action==="reserveBatch")result=await reserveBatch(supabase,body);
     else if(body.action==="pauseBatch")result=await pauseBatch(supabase,body);
