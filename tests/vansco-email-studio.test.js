@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { normaliseSettings, mappedVehicle } from "../api/vansco-email-studio.js";
+import { normaliseSettings, mappedVehicle, normaliseSalePrices, normalisePrice } from "../api/vansco-email-studio.js";
+import { verifyLogoBytes } from "../api/vansco-email-logo.js";
 
 const base = {
   theme: "halloween",
@@ -51,4 +52,54 @@ test("new Vansco studio cannot alter automatic transactional sends or dispatch c
   assert.match(ui, /No customer emails are sent from this screen/);
   assert.match(migration, /marketing_vansco_email_contacts/);
   assert.doesNotMatch(migration, /alter table public\.marketing_contacts|update public\.marketing_contacts|delete from public\.marketing_contacts/i);
+});
+
+test("more template fields persist without breaking legacy master settings", () => {
+  const settings = normaliseSettings({
+    ...base, eyebrow: "HALLOWEEN EDITION", subheading: "Autumn Vansco sale",
+    brand_description: "Vansco serves Southampton and the New Forest.",
+    extra_text: "Offers available while stock lasts.", footer_note: "Subject to availability.",
+    logo_url: "https://static.wixstatic.com/media/real-vansco-logo.png",
+  });
+  assert.equal(settings.eyebrow, "HALLOWEEN EDITION");
+  assert.equal(settings.brand_description, "Vansco serves Southampton and the New Forest.");
+  assert.equal(settings.footer_note, "Subject to availability.");
+  assert.match(settings.logo_url, /wixstatic/);
+  assert.equal(normaliseSettings(base).logo_url, "");
+  assert.throws(() => normaliseSettings({ ...base, logo_url: "https://example.com/malicious.svg" }), /Logo must use/);
+});
+
+test("sale pricing is isolated by selected van and mathematically consistent", () => {
+  assert.equal(normalisePrice("£15,995"), "15995.00");
+  assert.equal(normalisePrice("12999.50"), "12999.50");
+  assert.equal(normaliseSalePrices({ van1: { was: "15995", now: "13995", save: "2000" }, other: { was: "999", now: "1" } }, ["van1"]).van1.save, "2000.00");
+  assert.equal(normaliseSalePrices({ van1: { was: "15995", now: "13995" } }, ["van1"]).van1.save, "2000.00");
+  assert.deepEqual(normaliseSalePrices({ van1: { was: "15995", now: "13995" } }, ["van2"]), {});
+  assert.throws(() => normaliseSalePrices({ van1: { was: "15995", now: "13995", save: "1000" } }, ["van1"]), /must equal/);
+  assert.throws(() => normaliseSalePrices({ van1: { was: "100", now: "120" } }, ["van1"]), /exceed/);
+  assert.throws(() => normalisePrice("one thousand"), /valid amount/);
+});
+
+test("logo upload validates actual PNG/JPEG/WebP signatures and size", () => {
+  const png = Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), Buffer.alloc(50)]);
+  assert.equal(verifyLogoBytes(png, "image/png"), "image/png");
+  assert.throws(() => verifyLogoBytes(Buffer.alloc(40), "image/png"), /genuine/);
+  assert.throws(() => verifyLogoBytes(png, "image/jpeg"), /genuine/);
+  assert.throws(() => verifyLogoBytes(Buffer.alloc(1_500_001), "image/png"), /1.5 MB/);
+});
+
+test("seasonal email renderer preserves complete source image and promotion controls", () => {
+  const ui = readFileSync(new URL("../public/vansco-email-studio/index.html", import.meta.url), "utf8");
+  const api = readFileSync(new URL("../api/vansco-email-studio.js", import.meta.url), "utf8");
+  assert.match(ui, /id="saleEditors"/);
+  assert.match(ui, /id="logoFile"/);
+  assert.match(ui, /id="brandDescription"/);
+  assert.match(ui, /id="extraText"/);
+  assert.match(ui, /text-decoration:line-through/);
+  assert.match(ui, /SAVE /);
+  assert.match(ui, /🎃/);
+  assert.doesNotMatch(ui, /max-height:200px;object-fit:cover/);
+  assert.match(ui, /width:100%;max-width:290px;height:auto/);
+  assert.match(api, /selected_vehicles: priceSnapshots/);
+  assert.match(api, /normaliseSalePrices/);
 });
