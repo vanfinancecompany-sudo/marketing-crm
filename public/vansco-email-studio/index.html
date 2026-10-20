@@ -462,6 +462,47 @@ el("saveDraft").addEventListener("click",async function(){
   await Promise.all([refreshCounts(),refreshDrafts()]);
  }catch(e){setMsg("draftMessage",e.message,true)}
 });
+el("activeCampaign").addEventListener("change",function(){state.activeCampaign=el("activeCampaign").value});
+el("reloadDraft").addEventListener("click",async function(){
+ if(!state.activeCampaign){setMsg("draftMessage","Select a saved Vansco campaign first.",true);return}
+ try{
+  var data=await api("loadCampaign",{id:state.activeCampaign});
+  el("campaignName").value=data.campaign.name;
+  fill(data.campaign.settings);
+  setMsg("draftMessage","Saved campaign loaded into the designer.");
+ }catch(e){setMsg("draftMessage",e.message,true)}
+});
+el("sendInternalTest").addEventListener("click",async function(){
+ if(!state.activeCampaign){setMsg("testMessage","Save and select a Vansco campaign draft first.",true);return}
+ if(el("testConfirmation").value.trim()!=="SEND TEST"){setMsg("testMessage","Type SEND TEST exactly.",true);return}
+ var to=el("testRecipient").value.trim();
+ if(!confirm("Send a REAL INTERNAL TEST to "+to+" using the selected SAVED Vansco campaign?"))return;
+ el("sendInternalTest").disabled=true;setMsg("testMessage","Submitting to SendGrid...");
+ try{
+  var result=await delivery("testSend",{campaign_id:state.activeCampaign,to:to,confirm_phrase:"SEND TEST"});
+  setMsg("testMessage",result.result.accepted?"Internal test accepted by SendGrid. Check your inbox.":("Test: "+result.result.status+" "+(result.result.error||"Review report.")),!result.result.accepted);
+  await refreshReport();
+ }catch(e){setMsg("testMessage",e.message,true)}finally{el("sendInternalTest").disabled=false}
+});
+el("refreshContacts").addEventListener("click",refreshContacts);
+el("searchContacts").addEventListener("click",refreshContacts);
+el("refreshReport").addEventListener("click",refreshReport);
+el("sendCustomerBatch").addEventListener("click",async function(){
+ if(!state.readyToSend){setMsg("customerSendMessage","Customer sending is locked until production approval.",true);return}
+ if(!state.activeCampaign){setMsg("customerSendMessage","Select a saved campaign.",true);return}
+ var ids=Array.from(document.querySelectorAll(".batch-recipient:checked")).map(function(x){return x.dataset.contactId});
+ if(!ids.length||ids.length>5){setMsg("customerSendMessage","Select 1 to 5 reviewed contacts.",true);return}
+ var phrase="SEND "+ids.length;
+ if(el("batchConfirmation").value.trim()!==phrase){setMsg("customerSendMessage","Type "+phrase+" exactly.",true);return}
+ if(!confirm("FINAL CONFIRMATION\n\nSend "+ids.length+" REAL CUSTOMER EMAIL(S) from Vansco now?\n\nNo automatic retry."))return;
+ el("sendCustomerBatch").disabled=true;
+ try{
+  var result=await delivery("sendBatch",{campaign_id:state.activeCampaign,contact_ids:ids,confirm_phrase:phrase});
+  setMsg("customerSendMessage",result.accepted+" accepted, "+result.unknown+" unknown, "+result.failed+" failed. Check the results below.");
+  await Promise.all([refreshReport(),refreshContacts()]);
+ }catch(e){setMsg("customerSendMessage",e.message,true)}finally{el("sendCustomerBatch").disabled=!state.readyToSend}
+});
+
 el("importContacts").addEventListener("click",async function(){
  var file=el("csvFile").files[0],source=el("listSource").value.trim(),basis=el("marketingBasis").value;
  if(!file||!source||!basis){setMsg("importMessage","Choose a CSV, its source and a documented marketing basis.",true);return}
