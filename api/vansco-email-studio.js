@@ -358,6 +358,12 @@ export default async function handler(request, response) {
     else if (action === "listCampaigns") data = await listCampaigns(supabase);
     else if (action === "loadCampaign") data = await loadCampaignDraft(supabase, body);
     else if (action === "saveDraft") data = await saveDraft(supabase, body);
+    else if (action === "importStatus") {
+      const fingerprint = clean(body.fingerprint,64);
+      if (!/^[a-f0-9]{64}$/.test(fingerprint)) failure("Choose a valid CSV to inspect progress.");
+      const job = checkResult(await supabase.from(IMPORT_JOBS).select("*").eq("fingerprint",fingerprint).maybeSingle(),"Could not load import progress");
+      data = { import_job: job };
+    }
     else if (action === "importContacts") data = await importContacts(supabase, body);
     else failure("Unknown Vansco studio action.");
     return response.status(200).json({ ok: true, ...data });
