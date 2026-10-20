@@ -224,6 +224,12 @@ function escapeHtml(v){return String(v==null?"":v).replace(/[&<>"']/g,function(c
 function key(){return localStorage.getItem(STORAGE)||""}
 function setMsg(id,text,bad){var node=el(id);node.textContent=text||"";node.className=bad?"err":"small muted"}
 async function api(action,payload){var response=await fetch(API,{method:"POST",headers:{"Content-Type":"application/json","x-marketing-customer-database-key":key()},body:JSON.stringify(Object.assign({action:action},payload||{}))});var result=await response.json().catch(function(){return {message:"Unexpected server response."}});if(!response.ok||!result.ok)throw Error(result.message||"Request failed");return result}
+async function delivery(action,payload) {
+ const response=await fetch("/api/vansco-email-delivery",{method:"POST",headers:{"Content-Type":"application/json","x-marketing-customer-database-key":key()},body:JSON.stringify(Object.assign({action:action},payload||{}))});
+ const result=await response.json().catch(()=>({message:"Email service did not respond."}));
+ if(!response.ok||!result.ok)throw Error(result.message||"Email operation failed.");
+ return result;
+}
 function values(){var settings={theme:state.theme,selected_keys:state.selected.slice(),sale_prices:state.salePrices};Object.keys(fields).forEach(function(k){settings[fields[k]]=el(k).value.trim()});return settings}
 function fill(data){state.theme=data.theme in themes?data.theme:"halloween";state.selected=Array.isArray(data.selected_keys)?data.selected_keys:[];state.salePrices=data.sale_prices&&typeof data.sale_prices==="object"?data.sale_prices:{};Object.keys(fields).forEach(function(k){el(k).value=data[fields[k]]||""});highlightThemes();renderStock();preview()}
 function switchTheme(theme){if(!themes[theme])return;var before=values();fill(Object.assign({},before,themes[theme],{theme:theme,selected_keys:state.selected,sale_prices:state.salePrices}));el("campaignName").value="Vansco "+(theme==="standard"?"New Stock":theme==="black_friday"?"Black Friday":theme==="christmas"?"Christmas":"Halloween")+" Sale"}
