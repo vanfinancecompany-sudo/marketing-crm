@@ -77,6 +77,10 @@
     {
       "path": "/api/vansco-buffer-image-cleanup",
       "schedule": "43 4 * * *"
+    },
+    {
+      "path": "/api/vansco-email-worker",
+      "schedule": "* * * * *"
     }
   ],
   "functions": {
@@ -172,6 +176,12 @@
     },
     "api/vansco-buffer-image-cleanup.js": {
       "maxDuration": 180
+    },
+    "api/vansco-email-worker.js": {
+      "maxDuration": 300
+    },
+    "api/vansco-email-delivery.js": {
+      "maxDuration": 120
     }
   },
   "headers": [

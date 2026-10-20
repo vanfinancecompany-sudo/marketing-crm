@@ -157,7 +157,7 @@ test("Vansco provider event routing requires separate matching brand and send id
   assert.equal(isVanscoWebhookPayload({vansco_brand:"vansco",vansco_email_send_id:"bad",vansco_email_campaign_id:ids.vansco_email_campaign_id}),false);
 });
 
-test("live Vansco email customer sends have separate ledger, a locked production gate and no automations", () => {
+test("live Vansco customer sends have separate ledger, a locked gate and isolated worker", () => {
   const delivery=readFileSync(new URL("../api/vansco-email-delivery.js",import.meta.url),"utf8");
   const migration=readFileSync(new URL("../supabase/migrations/20261020_vansco_email_manual_sends.sql",import.meta.url),"utf8");
   const webhook=readFileSync(new URL("../api/sendgrid-email-webhook.js",import.meta.url),"utf8");
@@ -274,7 +274,7 @@ test("internal tests need no checkbox or phrase and customer sends remain locked
   assert.match(ui,/delivery\("testSend",\{campaign_id:state\.activeCampaign,to:to\}\)/);
   assert.match(delivery,/checkVanscoTestRateLimit\(supabase\)/);
   assert.match(delivery,/result\.count\|\|0\)>=100/);
-  assert.match(delivery,/VANSCO_EMAIL_PRODUCTION_ENABLED==="false"/);
+  assert.match(delivery,/VANSCO_EMAIL_PRODUCTION_ENABLED!=="true"/);
   assert.match(delivery,/send_type","test"/);
 });
 
@@ -329,4 +329,80 @@ test("Vansco batch progress interface has 500 limit, progress bar and pause/resu
   assert.match(ui,/APPROVE VANSCO SOURCE/);
   assert.doesNotMatch(ui,/id="sendCustomerBatch"/);
   assert.doesNotMatch(ui,/id="batchConfirmation"/);
+});
+
+
+test("CSV import preserves source metadata, audited offsets and risky contact classification", () => {
+ const studio=readFileSync(new URL("../api/vansco-email-studio.js",import.meta.url),"utf8");
+ const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
+ const sql=readFileSync(new URL("../supabase/migrations/20261020_vansco_import_recovery_and_send_preflight.sql",import.meta.url),"utf8");
+ for(const field of ["company","pipeline","tags","notes","brand","verifalia_classification","verifalia_status"]) {
+  assert.match(studio,new RegExp(field));
+  assert.match(ui,new RegExp(field));
+  assert.match(sql,new RegExp(field));
+ }
+ assert.match(studio,/row_offset/);
+ assert.match(studio,/ignoreDuplicates: true/);
+ assert.match(studio,/skipped_completed_segment/);
+ assert.match(ui,/^\s*async function csvFingerprint/m);
+ assert.match(ui,/id="importProgress"/);
+ assert.match(ui,/id="aRisky"/);
+ assert.match(sql,/marketing_vansco_email_import_jobs/);
+ assert.match(sql,/email_normalized/);
+ assert.doesNotMatch(studio,/sendSendGridEmail/);
+});
+
+test("Vansco queue continues without open browser and respects hard production opt-in",()=>{
+ const worker=readFileSync(new URL("../api/vansco-email-worker.js",import.meta.url),"utf8");
+ const config=JSON.parse(readFileSync(new URL("../vercel.json",import.meta.url),"utf8"));
+ const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
+ const delivery=readFileSync(new URL("../api/vansco-email-delivery.js",import.meta.url),"utf8");
+ assert.ok(config.crons.some(c=>c.path==="/api/vansco-email-worker"));
+ assert.match(worker,/CRON_SECRET/);
+ assert.match(worker,/VANSCO_EMAIL_PRODUCTION_ENABLED!=="true"/);
+ assert.match(worker,/submission_unknown/);
+ assert.match(delivery,/vansco_email_preflight_claim/);
+ assert.match(delivery,/vansco_email_preview_batch/);
+ assert.match(delivery,/validatePreviewToken/);
+ assert.match(ui,/id="previewVanscoBatch"/);
+ assert.match(ui,/id="batchPreview"/);
+ assert.doesNotMatch(ui,/delivery\("processBatch"/);
+});
+
+test("Vansco source approval stores reviewer evidence and explicitly includes risky only when selected",()=>{
+ const delivery=readFileSync(new URL("../api/vansco-email-delivery.js",import.meta.url),"utf8");
+ const reviewSql=readFileSync(new URL("../supabase/migrations/20261020_vansco_email_source_review_audit.sql",import.meta.url),"utf8");
+ const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
+ assert.match(reviewSql,/marketing_vansco_email_review_audit/);
+ assert.match(reviewSql,/p_include_risky/);
+ assert.match(delivery,/evidence_reference/);
+ assert.match(delivery,/vansco_email_approve_source/);
+ assert.match(ui,/id="includeRiskyReview"/);
+ assert.match(ui,/id="reviewerName"/);
+ assert.match(ui,/id="reviewEvidence"/);
+});
+
+test("Vansco page inline scripts are valid JavaScript",()=>{
+ const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
+ const inline=[...ui.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)].map(m=>m[1]).filter(Boolean);
+ assert.ok(inline.length>=1);
+ for(const source of inline)assert.doesNotThrow(()=>new Function(source));
+});
+
+test("Vansco new CSV metadata never changes reviewed permissions and retains display names",()=>{
+ const api=readFileSync(new URL("../api/vansco-email-studio.js",import.meta.url),"utf8");
+ const migration=readFileSync(new URL("../supabase/migrations/20261020_vansco_email_display_names.sql",import.meta.url),"utf8");
+ assert.match(api,/display_name/);
+ assert.match(migration,/add column if not exists display_name/);
+ assert.match(api,/never update status, marketing basis, permission or reviews/i);
+});
+
+test("Vansco SendGrid rate limiting pauses a whole batch instead of draining queued contacts",()=>{
+  const delivery=readFileSync(new URL("../api/vansco-email-delivery.js",import.meta.url),"utf8");
+  const worker=readFileSync(new URL("../api/vansco-email-worker.js",import.meta.url),"utf8");
+  assert.match(delivery,/Respect SendGrid throttling/);
+  assert.match(delivery,/if\(result\.status==="failed" && \/\\b429\\b\|rate\.limit\/i\.test\(result\.error\|\|""\)\)/);
+  assert.match(delivery,/pause rate-limited Vansco batch/);
+  assert.match(worker,/\["queued","sending"\]/);
+  assert.match(worker,/VANSCO_EMAIL_PRODUCTION_ENABLED!=="true"/);
 });
