@@ -296,9 +296,9 @@ function buildEmail(){
    var saleValid=was>now&&now>0&&(!saving||Math.abs(saving-(was-now))<.005);
    var priceHtml=saleValid?
     '<div style="margin:8px 0 10px"><div style="font:11px Arial,sans-serif;color:#697079">WAS <span style="text-decoration:line-through">'+escapeHtml(pounds(was))+'</span></div>'+
-    '<div style="font:800 20px/1.4 Arial,sans-serif;color:#141414">NOW '+escapeHtml(pounds(now))+'</div>'+
+    '<div style="font:800 20px/1.4 Arial,sans-serif;color:#141414;white-space:nowrap">NOW '+escapeHtml(pounds(now))+(item.vat_label?'<span style="font:600 12px Arial,sans-serif;color:#636972;white-space:nowrap;margin-left:5px">'+escapeHtml(item.vat_label)+'</span>':"")+'</div>'+
     '<div style="margin-top:5px;color:#c7263a;font:800 13px Arial,sans-serif">SAVE '+escapeHtml(pounds(was-now))+'</div></div>'
-   :'<div style="margin:8px 0 11px;font:800 18px Arial,sans-serif;color:#202124">'+escapeHtml(money(item.price))+'</div>';
+   :'<div style="margin:8px 0 11px;font:800 18px Arial,sans-serif;color:#202124;white-space:nowrap">'+escapeHtml(money(item.price))+(item.vat_label?'<span style="font:600 12px Arial,sans-serif;color:#636972;white-space:nowrap;margin-left:5px">'+escapeHtml(item.vat_label)+'</span>':"")+'</div>';
    // Do not crop or fix an image height: intrinsic aspect ratio works in email clients.
    vehicleRows+='<td class="van" width="50%" valign="top" style="width:50%;padding:7px"><table role="presentation" width="100%" style="width:100%;border:1px solid #e6e6e6;border-collapse:collapse"><tr><td bgcolor="#f5f5f5" align="center">'+
     '<a href="'+escapeHtml(item.url)+'"><img src="'+escapeHtml(item.image)+'" alt="'+escapeHtml(item.title)+'" width="290" style="display:block;width:100%;max-width:290px;height:auto;border:0;outline:none;text-decoration:none"></a></td></tr>'+
@@ -307,7 +307,6 @@ function buildEmail(){
     (Number(String(item.mileage||"").replace(/[^0-9]/g,""))>0?'<div style="margin-top:6px;color:#333842;font-size:12px">Mileage: '+Number(String(item.mileage).replace(/[^0-9]/g,"")).toLocaleString("en-GB")+' miles</div>':"")+
     (item.registration?'<div style="margin-top:5px;color:#697079;font-size:11px">'+escapeHtml(item.registration)+'</div>':"")+
     priceHtml+
-    (item.vat_label?'<div style="color:#656c75;font-size:11px;margin-bottom:10px">'+escapeHtml(item.vat_label)+'</div>':"")+
     '<a href="'+escapeHtml(item.url)+'" style="color:'+p.dark+';font-size:12px;font-weight:bold;text-decoration:underline">VIEW VEHICLE</a></td></tr></table></td>';
   });
   if(i+1>=v.length)vehicleRows+='<td width="50%" class="van" style="width:50%"></td>';
@@ -325,13 +324,13 @@ function buildEmail(){
   var legalNote=String(s.footer_note||"").split(/\r?\n/).filter(function(line){
     return !/^(?:contact vansco|333 showroom\s*:|new forest\s*:|southampton airport\s*:|email\s*:\s*sales@vansco\.co\.uk)/i.test(line.trim());
   }).join("\n").trim();
-  var branchRows=vanscoBranches.map(function(b,i){
-    return '<tr><td style="padding:13px 0 15px;border-bottom:'+(i<2?'1px solid #504b53':'0')+'">'+
-      '<strong style="display:block;color:#f0bf55;font:700 14px/20px Arial,sans-serif;margin-bottom:5px">'+escapeHtml(b.name)+'</strong>'+
-      '<span style="display:block;color:#e5e2e9;font:12px/19px Arial,sans-serif">'+escapeHtml(b.line1)+'<br>'+escapeHtml(b.line2)+'</span>'+
-      '<a href="tel:'+escapeHtml(b.tel)+'" style="display:inline-block;margin-top:7px;color:#fff;text-decoration:none;font:700 14px/20px Arial,sans-serif">'+escapeHtml(b.phone)+'</a>'+
-      '</td></tr>';
-  }).join("");
+  var branchRows='<tr>'+vanscoBranches.map(function(b,i){
+    return '<td class="vansco-branch '+(i===2?'vansco-branch-last':'')+'" width="33%" valign="top" style="width:33.33%;padding:13px 12px 12px;'+(i<2?'border-right:1px solid #504b53;':'')+'">'+
+      '<strong style="display:block;color:#f0bf55;font:700 13px/20px Arial,sans-serif;margin-bottom:7px">'+escapeHtml(b.name)+'</strong>'+
+      '<span style="display:block;color:#e5e2e9;font:12px/18px Arial,sans-serif">'+escapeHtml(b.line1)+'<br>'+escapeHtml(b.line2)+'</span>'+
+      '<a href="tel:'+escapeHtml(b.tel)+'" style="display:block;margin-top:10px;color:#fff;text-decoration:none;font:700 13px/20px Arial,sans-serif;white-space:nowrap">'+escapeHtml(b.phone)+'</a>'+
+      '</td>';
+  }).join("")+'</tr>';
   var footer='<tr><td style="padding:25px 27px 22px;background:#25232a;color:#fff;font-family:Arial,sans-serif">'+
     '<h2 style="font:bold 19px/25px Arial,sans-serif;margin:0 0 7px;color:#fff">Contact Vansco</h2>'+
     '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse">'+branchRows+'</table>'+
@@ -339,7 +338,7 @@ function buildEmail(){
     (legalNote?'<p style="margin:20px 0 0;padding-top:15px;border-top:1px solid #504b53;color:#aca8b2;font:11px/18px Arial,sans-serif">'+lines(legalNote)+'</p>':"")+
     '</td></tr>';
 
- return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media(max-width:600px){.van{display:block!important;width:100%!important}.body-pad{padding:25px!important}}</style><title>'+escapeHtml(s.subject)+'</title></head>'+
+ return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media(max-width:600px){.van{display:block!important;width:100%!important}.body-pad{padding:25px!important}.vansco-branch{display:block!important;box-sizing:border-box!important;width:100%!important;border-right:0!important;border-bottom:1px solid #504b53!important;padding:14px 5px!important}.vansco-branch-last{border-bottom:0!important}}</style><title>'+escapeHtml(s.subject)+'</title></head>'+
  '<body style="margin:0;background:#e9eaec;padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#e9eaec"><tr><td align="center" style="padding:22px 8px"><table role="presentation" width="650" style="border-collapse:collapse;width:100%;max-width:650px;background:white">'+
  '<tr><td style="background:'+p.dark+';padding:20px 25px 15px;color:#fff;font-family:Arial,sans-serif"><table role="presentation" width="100%" style="width:100%;border-collapse:collapse"><tr><td align="left" valign="middle">'+brandLogo+'</td><td align="right" valign="middle" style="color:'+p.accent+';font:700 10px Arial,sans-serif;letter-spacing:1.5px">'+escapeHtml(s.eyebrow||p.label)+pumpkin+'</td></tr></table></td></tr>'+
  '<tr><td class="body-pad" style="padding:37px 30px 33px;background:'+p.dark+';color:#fff;font-family:Arial,sans-serif;border-top:2px solid '+p.accent+'">'+
