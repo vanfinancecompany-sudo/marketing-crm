@@ -425,3 +425,21 @@ test("Vansco CRM mailing desk uses one-time confirmation and 100 or 500 send, wi
  assert.match(sql,/status='pending_review'/);
  assert.match(sql,/revoke all on function public\.vansco_email_confirm_crm_audience/);
 });
+
+test("Vansco duplicate send requests return existing batch and the UI disables Send until completion",()=>{
+ const api=readFileSync(new URL("../api/vansco-email-delivery.js",import.meta.url),"utf8");
+ const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
+ assert.match(api,/Only one Vansco customer batch can be active/);
+ assert.match(api,/batch:\{queued:false,existing:true,batch_id:/);
+ assert.match(api,/vansco_only_one_active_customer_batch/);
+ assert.match(api,/if\(race\?\.length\)/);
+ assert.match(ui,/startingBatch:false/);
+ assert.match(ui,/state\.activeBatch=active\?batch\.id:""/);
+ assert.match(ui,/!state\.readyToSend\|\|active\|\|state\.startingBatch/);
+ assert.match(ui,/if\(existing\.active_batch\?\.id\)/);
+ assert.match(ui,/if\(response\.batch\.existing&&response\.batch\.batch_id\)/);
+ assert.match(ui,/15000\);/);
+ assert.match(ui,/submitted, /);
+ assert.match(ui,/delivered or opened/);
+ assert.match(ui,/No second batch was created/);
+});
