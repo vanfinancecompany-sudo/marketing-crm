@@ -49,6 +49,8 @@ function defaultSettings() {
     footer_note: "Vehicle prices and availability are subject to confirmation. Warranty cover is subject to AutoGuard terms. Finance is subject to status and lender terms. Savings may vary by vehicle.",
     logo_url: "",
     sale_prices: {},
+    stock_count: "278",
+    stock_location: "Used Vehicles in Southampton, Hampshire",
     offer: "AT LEAST £300 OFF EVERY VAN • AVERAGE SAVING £500 • FREE 1-YEAR AUTOGUARD WARRANTY",
     cta_label: "VIEW HALLOWEEN OFFERS",
     cta_url: "https://www.vansco.co.uk/all-stock/",
@@ -128,11 +130,14 @@ export function normaliseSettings(value = {}) {
     footer_note: clean(value.footer_note, 800),
     logo_url: normaliseLogoUrl(value.logo_url),
     sale_prices: normaliseSalePrices(value.sale_prices, selectedKeys),
+    stock_count: clean(value.stock_count, 6),
+    stock_location: clean(value.stock_location, 120),
     offer: clean(value.offer, 300),
     cta_label: clean(value.cta_label, 75),
     cta_url: vanscoUrl(value.cta_url || "https://www.vansco.co.uk/all-stock/"),
     selected_keys: selectedKeys,
   };
+  if (settings.stock_count && (!/^[1-9]\d{0,5}$/.test(settings.stock_count))) failure("Vehicle stock count must be a positive whole number.");
   if (!settings.subject || !settings.heading || !settings.cta_label) failure("Subject, headline and call to action are required.");
   return settings;
 }
