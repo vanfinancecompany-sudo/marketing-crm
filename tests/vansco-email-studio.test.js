@@ -396,3 +396,13 @@ test("Vansco new CSV metadata never changes reviewed permissions and retains dis
  assert.match(migration,/add column if not exists display_name/);
  assert.match(api,/never update status, marketing basis, permission or reviews/i);
 });
+
+test("Vansco SendGrid rate limiting pauses a whole batch instead of draining queued contacts",()=>{
+  const delivery=readFileSync(new URL("../api/vansco-email-delivery.js",import.meta.url),"utf8");
+  const worker=readFileSync(new URL("../api/vansco-email-worker.js",import.meta.url),"utf8");
+  assert.match(delivery,/Respect SendGrid throttling/);
+  assert.match(delivery,/if\(result\.status==="failed" && \/\\b429\\b\|rate\.limit\/i\.test\(result\.error\|\|""\)\)/);
+  assert.match(delivery,/pause rate-limited Vansco batch/);
+  assert.match(worker,/\["queued","sending"\]/);
+  assert.match(worker,/VANSCO_EMAIL_PRODUCTION_ENABLED!=="true"/);
+});
