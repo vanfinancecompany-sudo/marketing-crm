@@ -305,7 +305,7 @@ var palettes={
  christmas:{dark:"#213e38",accent:"#bd9c5b",light:"#f6f3ec",label:"CHRISTMAS EDITION"}
 };
 var fields={subject:"subject",previewText:"preview_text",eyebrow:"eyebrow",headline:"heading",subheading:"subheading",introduction:"introduction",offer:"offer",brandDescription:"brand_description",extraText:"extra_text",footerNote:"footer_note",stockCount:"stock_count",stockLocation:"stock_location",logoUrl:"logo_url",ctaLabel:"cta_label",ctaUrl:"cta_url"};
-var state={theme:"halloween",selected:[],stock:[],salePrices:{},ready:false,activeCampaign:"",readyToSend:false,activeBatch:"",batchRunning:false,batchPause:false,previewToken:"",previewCampaign:"",previewAmount:0};
+var state={theme:"halloween",selected:[],stock:[],salePrices:{},ready:false,activeCampaign:"",readyToSend:false,activeBatch:"",batchRunning:false,startingBatch:false,batchPause:false,previewToken:"",previewCampaign:"",previewAmount:0};
 function el(id){return document.getElementById(id)}
 function escapeHtml(v){return String(v==null?"":v).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function key(){return localStorage.getItem(STORAGE)||""}
@@ -557,7 +557,7 @@ async function refreshReport(){
  try{
   var r=await delivery("report");
   state.readyToSend=r.production_enabled;
-  el("startVanscoBatch").disabled=!state.readyToSend;
+  el("startVanscoBatch").disabled=!state.readyToSend||!!state.activeBatch||state.startingBatch;
   if(!state.readyToSend)setMsg("batchMessage","Customer sending is locked until production readiness and explicit authorisation.");
 
   ["Submitted","Delivered","Opened","Clicked","Bounced","Unsubscribed"].forEach(function(k){
@@ -581,14 +581,18 @@ async function refreshReport(){
 
 function updateBatchUI(batch){
  if(!batch)return;
- state.activeBatch=batch.id;
- var pct=Number(batch.progress_percent||0);
+ var active=["queued","sending","paused"].includes(batch.status);
+ state.activeBatch=active?batch.id:"";
+ var pct=Number(batch.progress_percent||0),counts=batch.counts||{};
+ var submitted=Math.max(0,Number(batch.processed||0)-Number(counts.failed||0)-Number(counts.skipped||0)-Number(counts.unknown||0));
+ var received=Number(counts.delivered||0)+Number(counts.opened||0)+Number(counts.clicked||0);
  el("batchProgressFill").style.width=pct+"%";
  el("batchProgress").setAttribute("aria-valuenow",pct);
- el("batchProgressText").textContent=batch.processed+" / "+batch.total+" processed ("+pct+"%). "+batch.counts.accepted+" accepted, "+batch.counts.failed+" failed, "+batch.counts.unknown+" uncertain, "+batch.counts.skipped+" skipped.";
+ el("batchProgressText").textContent=batch.processed+" / "+batch.total+" processed ("+pct+"%). "+submitted+" submitted, "+received+" delivered or opened, "+Number(counts.failed||0)+" failed, "+Number(counts.unknown||0)+" uncertain, "+Number(counts.skipped||0)+" skipped.";
+ el("startVanscoBatch").disabled=!state.readyToSend||active||state.startingBatch;
  el("resumeVanscoBatch").disabled=batch.status!=="paused"||!state.readyToSend;
  el("pauseVanscoBatch").disabled=!["queued","sending"].includes(batch.status);
- if(batch.status==="completed"){state.activeBatch="";setMsg("batchMessage","Vansco batch completed. SendGrid acceptance does not guarantee inbox delivery.");}
+ if(batch.status==="completed")setMsg("batchMessage","Vansco batch complete. You can now select another 100 or 500 recipients.");
 }
 async function refreshAudience(){
  try{
@@ -598,9 +602,17 @@ async function refreshAudience(){
   });
   el("crmActivation").hidden=Number(a.pending_review||0)===0;
   if(info.active_batch&&info.active_batch.id){
-   var status=await delivery("batchStatus",{batch_id:info.active_batch.id});updateBatchUI(status.batch);
-   if(!state.batchRunning)setMsg("batchMessage",info.active_batch.status==="paused"?"Vansco batch paused. Click Resume when authorised.":"Vansco batch is queued. The background worker handles sending even if this tab is closed.");
-  }else if(!state.batchRunning){state.activeBatch="";el("resumeVanscoBatch").disabled=true}
+   var status=await delivery("batchStatus",{batch_id:info.active_batch.id});
+   updateBatchUI(status.batch);
+   if(state.activeBatch&&!state.startingBatch){
+    setMsg("batchMessage",info.active_batch.status==="paused"?"The current Vansco batch is paused. Resume it before starting another.":"One Vansco mailing is already running. The next can start when it finishes.");
+   }
+  }else{
+   state.activeBatch="";
+   el("resumeVanscoBatch").disabled=true;
+   el("pauseVanscoBatch").disabled=true;
+   el("startVanscoBatch").disabled=!state.readyToSend||state.startingBatch;
+  }
  }catch(e){setMsg("batchMessage",e.message,true)}
 }
 async function runVanscoBatch(){
@@ -722,23 +734,51 @@ el("resumeVanscoBatch").addEventListener("click",async function(){
  catch(e){setMsg("batchMessage",e.message,true)}
 });
 el("startVanscoBatch").addEventListener("click",async function(){
+ if(state.startingBatch)return;
+ if(state.activeBatch){
+  await runVanscoBatch();
+  setMsg("batchMessage","The current Vansco mailing is already in progress. Wait for it to finish before starting another.");
+  return;
+ }
  var amount=Number(el("batchSize").value),phrase="SEND VANSCO "+amount;
  if(!state.activeCampaign){setMsg("batchMessage","Select your saved Vansco campaign draft first.",true);return}
- if(!Number.isInteger(amount)||amount<1||amount>500){setMsg("batchMessage","Choose between one and 500 emails.",true);return}
- if(!state.readyToSend){setMsg("batchMessage","Customer sending is not yet enabled on the server.",true);return}
- var preview;
- try{preview=await previewVanscoBatch()}catch(e){setMsg("batchMessage",e.message,true);return}
- var actual=Number(preview.preview?.count||0);
- if(actual<1){setMsg("batchMessage","No eligible Vansco customers available. Check audience figures.",true);return}
- if(!confirm("SEND VANSCO CAMPAIGN\n\nSend this saved campaign to "+actual+" available customers (maximum "+amount+")?\n\nOpt-outs and frequency limits are rechecked before each message."))return;
+ if(![100,500].includes(amount)){setMsg("batchMessage","Choose 100 or 500 emails.",true);return}
+ if(!state.readyToSend){setMsg("batchMessage","Customer sending is not enabled on the server.",true);return}
+ state.startingBatch=true;
  el("startVanscoBatch").disabled=true;
  try{
+  var existing=await delivery("audience");
+  if(existing.active_batch?.id){
+   var current=await delivery("batchStatus",{batch_id:existing.active_batch.id});
+   updateBatchUI(current.batch);
+   setMsg("batchMessage","Another Vansco batch is already running. No second batch was created.");
+   return;
+  }
+  var preview=await previewVanscoBatch(),actual=Number(preview.preview?.count||0);
+  if(actual<1){setMsg("batchMessage","No available Vansco customers found. Check the audience figures.",true);return}
+  if(!confirm("SEND VANSCO CAMPAIGN\n\nSend this saved campaign to "+actual+" available customers (maximum "+amount+")?\n\nOpt-outs and frequency limits are rechecked before each message."))return;
   var response=await delivery("reserveBatch",{campaign_id:state.activeCampaign,batch_size:amount,confirm_phrase:phrase,preview_token:state.previewToken});
-  if(!response.batch.queued){setMsg("batchMessage",response.batch.message||"No eligible Vansco customers are available.");await refreshAudience();return}
-  state.activeBatch=response.batch.batch_id;state.previewToken="";setMsg("batchMessage",response.batch.reserved+" reviewed Vansco recipients queued. Background sending begins automatically.");
+  if(response.batch.existing&&response.batch.batch_id){
+   state.activeBatch=response.batch.batch_id;
+   await runVanscoBatch();
+   setMsg("batchMessage",response.batch.message||"The earlier batch is still running. Nothing was queued twice.");
+   return;
+  }
+  if(!response.batch.queued){
+   setMsg("batchMessage",response.batch.message||"No eligible Vansco customers available.");
+   await refreshAudience();return;
+  }
+  state.activeBatch=response.batch.batch_id;
+  state.previewToken="";
+  setMsg("batchMessage",response.batch.reserved+" Vansco customers queued. The background worker continues when you close this page.");
   await runVanscoBatch();
- }catch(e){setMsg("batchMessage",e.message,true)}
- finally{if(!state.batchRunning)el("startVanscoBatch").disabled=!state.readyToSend}
+ }catch(e){
+  setMsg("batchMessage","Could not start another batch: "+e.message,true);
+  await refreshAudience();
+ }finally{
+  state.startingBatch=false;
+  el("startVanscoBatch").disabled=!state.readyToSend||!!state.activeBatch;
+ }
 });
 el("activateCrm").addEventListener("click",async function(){
  if(!el("crmConfirm").checked){setMsg("crmActivationMessage","Confirm that the marketing basis applies to these Vansco CRM contacts.",true);return}
@@ -806,6 +846,7 @@ el("importContacts").addEventListener("click",async function(){
  finally{el("importContacts").disabled=false}
 });
 setInterval(function(){if(state.ready&&state.activeBatch)runVanscoBatch()},6000);
+setInterval(function(){if(state.ready)refreshAudience()},15000);
 init();
 })();
 </script>
