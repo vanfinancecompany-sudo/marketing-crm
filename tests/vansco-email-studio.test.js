@@ -66,6 +66,15 @@ test("more template fields persist without breaking legacy master settings", () 
   assert.equal(settings.footer_note, "Subject to availability.");
   assert.match(settings.logo_url, /wixstatic/);
   assert.equal(normaliseSettings(base).logo_url, "");
+  const previous = process.env.SUPABASE_URL;
+  try {
+    process.env.SUPABASE_URL = "https://vansco-test.supabase.co";
+    const logoUrl = "https://vansco-test.supabase.co/storage/v1/object/public/template-files/vansco-email-studio/logos/logo.png";
+    assert.equal(normaliseSettings({ ...base, logo_url: logoUrl }).logo_url, logoUrl);
+    assert.throws(() => normaliseSettings({ ...base, logo_url: "https://vansco-test.supabase.co/storage/v1/object/public/customer-docs/private.png" }), /Logo must use/);
+  } finally {
+    if (previous === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = previous;
+  }
   assert.throws(() => normaliseSettings({ ...base, logo_url: "https://example.com/malicious.svg" }), /Logo must use/);
 });
 
@@ -93,6 +102,9 @@ test("seasonal email renderer preserves complete source image and promotion cont
   const api = readFileSync(new URL("../api/vansco-email-studio.js", import.meta.url), "utf8");
   assert.match(ui, /id="saleEditors"/);
   assert.match(ui, /id="logoFile"/);
+  const upload = readFileSync(new URL("../api/vansco-email-logo.js", import.meta.url), "utf8");
+  assert.match(upload, /storage\.from\("template-files"\)/);
+  assert.doesNotMatch(upload, /BLOB_READ_WRITE_TOKEN/);
   assert.match(ui, /id="brandDescription"/);
   assert.match(ui, /id="extraText"/);
   assert.match(ui, /text-decoration:line-through/);
