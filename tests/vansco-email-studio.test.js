@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { normaliseSettings, mappedVehicle, normaliseSalePrices, normalisePrice } from "../api/vansco-email-studio.js";
 import { verifyLogoBytes } from "../api/vansco-email-logo.js";
-import { renderVanscoEmail, makeVanscoUnsubscribeToken, checkVanscoUnsubscribeToken } from "../lib/vanscoEmailRender.js";
+import { renderVanscoEmail, renderVanscoContactFooter, makeVanscoUnsubscribeToken, checkVanscoUnsubscribeToken } from "../lib/vanscoEmailRender.js";
 import { isVanscoWebhookPayload } from "../lib/vanscoEmailEvent.js";
 
 const base = {
@@ -174,13 +174,43 @@ test("Vansco Halloween copy and all three branch contact details appear in real 
   const studioApi=readFileSync(new URL("../api/vansco-email-studio.js",import.meta.url),"utf8");
   const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
   for(const text of ["333 Millbrook Road West","Senior Service Station","Spitfire Roundabout","02380 333 777","02380 813 119","02381 780 300","sales@vansco.co.uk"]){
-    assert.ok(studioApi.includes(text),"Missing Vansco branch content: "+text);
+    assert.ok(ui.includes(text),"Missing Vansco preview contact: "+text);
   }
   const footer=["CONTACT VANSCO","333 Showroom: 333 Millbrook Road West, Southampton, Hampshire SO15 0HW | 02380 333 777","New Forest: Senior Service Station, Romsey Road, Cadnam, Hampshire SO40 2NN | 02380 813 119","Southampton Airport: 201 Wide Lane, Spitfire Roundabout, Southampton, Hampshire SO18 2RZ | 02381 780 300","Email: sales@vansco.co.uk"].join("\n");
   const html=renderVanscoEmail({settings:{...base,heading:"HALLOWEEN VAN SALE",eyebrow:"HALLOWEEN EDITION",footer_note:footer},vehicles:[],testMode:true});
   for(const value of ["02380 333 777","02380 813 119","02381 780 300","sales@vansco.co.uk","👻","🎃"])assert.ok(html.includes(value),value);
   assert.doesNotMatch(html,/🦇|🧙/);
   assert.doesNotMatch(ui,/🦇|🧙/);
-  assert.match(ui,/footer=s\.footer_note/);
+  assert.match(ui,/var footer=.*Contact Vansco/);
+  assert.match(studioApi,/footer_note: "Vehicle prices and availability/);
   assert.match(studioApi,/FREE nationwide delivery/);
+});
+
+test("Vansco footer has three separated showroom sections and no duplicated legacy text", () => {
+  const legacy=[
+    "Contact Vansco",
+    "333 Showroom: 333 Millbrook Road West, Southampton, Hampshire SO15 0HW | 02380 333 777",
+    "New Forest: Senior Service Station, Romsey Road, Cadnam, Hampshire SO40 2NN | 02380 813 119",
+    "Southampton Airport: 201 Wide Lane, Spitfire Roundabout, Southampton, Hampshire SO18 2RZ | 02381 780 300",
+    "Email: sales@vansco.co.uk",
+    "",
+    "Vehicle prices and availability are subject to confirmation.",
+  ].join("\n");
+  for (const note of [legacy, "Vehicle prices and availability are subject to confirmation."]) {
+    const rendered=renderVanscoContactFooter(note);
+    for(const [place,phone,tel] of [
+      ["333 Showroom","02380 333 777","+442380333777"],
+      ["New Forest","02380 813 119","+442380813119"],
+      ["Southampton Airport","02381 780 300","+442381780300"],
+    ]) {
+      assert.equal(rendered.split(place).length - 1, 1,place+" repeated");
+      assert.equal(rendered.split(phone).length - 1, 1,phone+" repeated");
+      assert.match(rendered,new RegExp("tel:\\+"+tel.slice(1)));
+    }
+    assert.equal(rendered.split("sales@vansco.co.uk").length - 1, 2,"one clickable email address");
+    assert.equal(rendered.split("border-bottom:1px solid #504b53").length - 1, 2);
+    assert.match(rendered,/mailto:sales@vansco\.co\.uk/);
+    assert.equal(rendered.split("Vehicle prices and availability are subject to confirmation.").length-1,1);
+    assert.doesNotMatch(rendered,/\| 02380/);
+  }
 });
