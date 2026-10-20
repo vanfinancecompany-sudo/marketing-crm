@@ -41,7 +41,7 @@ select c.id,c.email_normalized,c.status,c.source,c.marketing_basis,c.reviewed_at
   c.status='ready' and c.reviewed_at is not null
   and length(coalesce(c.permission_notes,''))>=15
   and c.marketing_basis in ('consent','legitimate_interest')
-  and lower(coalesce(c.verifalia_classification,''))='deliverable'
+  and lower(coalesce(c.verifalia_classification,'')) in ('deliverable','risky')
   and c.email_normalized ~* '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
   and not blocks.globally_blocked and not blocks.legacy_blocked
   and h.attempted_7d=0 and h.attempted_30d<4 and h.attempted_this_month<4
@@ -72,8 +72,8 @@ create or replace function public.vansco_email_audience_summary()
 returns jsonb language sql stable set search_path='public'
 as $$
 select jsonb_build_object(
- 'total',count(*),'approved',count(*) filter(where status='ready'),
- 'pending_review',count(*) filter(where status='pending_review'),
+ 'total',count(*),'approved',count(*) filter(where e.status='ready'),
+ 'pending_review',count(*) filter(where e.status='pending_review'),
  'suppressed',count(*) filter(where suppressed),
  'risky',count(*) filter(where lower(coalesce(c.verifalia_classification,''))='risky'),
  'unverified_delivery',count(*) filter(where coalesce(c.verifalia_classification,'')=''),
@@ -99,7 +99,7 @@ begin
     or v_contact.status<>'ready' or v_contact.reviewed_at is null
     or length(coalesce(v_contact.permission_notes,''))<15
     or v_contact.marketing_basis not in ('consent','legitimate_interest')
-    or lower(coalesce(v_contact.verifalia_classification,''))<>'deliverable' then return false; end if;
+    or lower(coalesce(v_contact.verifalia_classification,'')) not in ('deliverable','risky') then return false; end if;
  if exists(select 1 from public.marketing_suppression_identities where email_normalized=v_send.email_normalized) then return false; end if;
  if exists(select 1 from public.marketing_contacts m where m.email_normalized=v_send.email_normalized
   and (m.marketing_status is distinct from 'active' or m.lifecycle_status is distinct from 'active'
