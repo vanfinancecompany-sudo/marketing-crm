@@ -19,6 +19,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: node --test tests/vansco-email-studio.test.js
       - run: node --test tests/marketing-recipient-personalisation.test.js
       - run: node --test tests/internal-link-strategy.test.js tests/knowledge-article-website-index.test.js tests/internal-link-refresh-plan.test.js
       - run: node --test tests/wix-draft-publish-plugin-support.test.js tests/wix-knowledge-rich-content-links.test.js
