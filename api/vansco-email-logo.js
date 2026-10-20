@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { put } from "@vercel/blob";
+import { createClient } from "@supabase/supabase-js";
 
 // Vansco Email Studio only. Does not share the customer-email provider or transactional routes.
 const KEY_HEADER = "x-marketing-customer-database-key";
@@ -35,11 +35,20 @@ export default async function handler(request, response) {
     }
     const buffer = Buffer.from(base64, "base64");
     verifyLogoBytes(buffer, contentType);
-    if (!process.env.BLOB_READ_WRITE_TOKEN) return response.status(503).json({ ok: false, message: "Logo uploads need Vercel Blob configured. You can paste an existing logo image URL instead." });
-    const result = await put("vansco-email-studio/logos/" + crypto.randomUUID() + MIME_TYPES[contentType], buffer, {
-      access: "public", addRandomSuffix: false, contentType, token: process.env.BLOB_READ_WRITE_TOKEN,
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return response.status(503).json({ ok: false, message: "Vansco logo storage is not configured." });
+    }
+    const client = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false },
     });
-    return response.status(200).json({ ok: true, url: result.url });
+    const objectPath = "vansco-email-studio/logos/" + crypto.randomUUID() + MIME_TYPES[contentType];
+    const uploaded = await client.storage.from("template-files").upload(objectPath, buffer, {
+      contentType, upsert: false, cacheControl: "3600",
+    });
+    if (uploaded.error) throw new Error("Logo storage rejected the image: " + uploaded.error.message);
+    const result = client.storage.from("template-files").getPublicUrl(objectPath);
+    if (!result.data?.publicUrl) throw new Error("Logo uploaded but public URL was not returned.");
+    return response.status(200).json({ ok: true, url: result.data.publicUrl });
   } catch (error) {
     console.error("[Vansco email logo]", String(error?.message || error).slice(0,140));
     return response.status(400).json({ ok: false, message: error.message || "Logo upload failed." });
