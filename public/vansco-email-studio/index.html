@@ -153,6 +153,10 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
        <label class="full">Campaign to test / send<select id="activeCampaign"><option value="">Save or select a campaign draft…</option></select></label>
        <label class="full">Internal test email address<input type="email" id="testRecipient" placeholder="sales@vanfinancecompany.co.uk"></label>
        <label class="full">Test confirmation<input id="testConfirmation" placeholder="Type SEND TEST"></label>
+       <label class="full" style="display:flex;flex-direction:row;align-items:center;gap:9px;font-weight:500">
+         <input id="ownTestInbox" type="checkbox" style="width:18px;height:18px;flex:none;accent-color:#ba2137">
+         I confirm I own this Gmail inbox or have permission to test it.
+       </label>
       </div>
       <div class="actions"><button class="btn dark" id="sendInternalTest">Send internal test email</button><button class="btn" id="reloadDraft">Load selected draft into editor</button></div>
       <p class="small muted">Use Save new campaign draft whenever you change text, pricing or vehicles. A test always sends the selected saved draft, not unsaved edits.</p>
@@ -499,10 +503,11 @@ el("sendInternalTest").addEventListener("click",async function(){
  if(!state.activeCampaign){setMsg("testMessage","Save and select a Vansco campaign draft first.",true);return}
  if(el("testConfirmation").value.trim()!=="SEND TEST"){setMsg("testMessage","Type SEND TEST exactly.",true);return}
  var to=el("testRecipient").value.trim();
+ if(/@(gmail\.com|googlemail\.com)$/i.test(to)&&!el("ownTestInbox").checked){setMsg("testMessage","Tick the confirmation that you own or have permission to test this Gmail inbox.",true);return}
  if(!confirm("Send a REAL INTERNAL TEST to "+to+" using the selected SAVED Vansco campaign?"))return;
  el("sendInternalTest").disabled=true;setMsg("testMessage","Submitting to SendGrid...");
  try{
-  var result=await delivery("testSend",{campaign_id:state.activeCampaign,to:to,confirm_phrase:"SEND TEST"});
+  var result=await delivery("testSend",{campaign_id:state.activeCampaign,to:to,confirm_phrase:"SEND TEST",own_inbox:el("ownTestInbox").checked});
   setMsg("testMessage",result.result.accepted?"Internal test accepted by SendGrid. Check your inbox.":("Test: "+result.result.status+" "+(result.result.error||"Review report.")),!result.result.accepted);
   await refreshReport();
  }catch(e){setMsg("testMessage",e.message,true)}finally{el("sendInternalTest").disabled=false}

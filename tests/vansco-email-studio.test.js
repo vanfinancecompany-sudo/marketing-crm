@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { normaliseSettings, mappedVehicle, normaliseSalePrices, normalisePrice } from "../api/vansco-email-studio.js";
+import { isPermittedVanscoTestDestination } from "../api/vansco-email-delivery.js";
 import { verifyLogoBytes } from "../api/vansco-email-logo.js";
 import { renderVanscoEmail, renderVanscoContactFooter, makeVanscoUnsubscribeToken, checkVanscoUnsubscribeToken } from "../lib/vanscoEmailRender.js";
 import { isVanscoWebhookPayload } from "../lib/vanscoEmailEvent.js";
@@ -252,4 +253,27 @@ test("stock count settings accept an editable positive integer only", () => {
   for(const invalid of ["-1","278 vehicles","23.5","0","1,000"]) {
     assert.throws(()=>normaliseSettings({...base,stock_count:invalid}),/stock count/i);
   }
+});
+
+test("personal Gmail is accepted for manual test only after inbox confirmation", () => {
+  assert.equal(isPermittedVanscoTestDestination("mytest@gmail.com", { confirmedOwned: true }), true);
+  assert.equal(isPermittedVanscoTestDestination("My.Test+promo@googlemail.com", { confirmedOwned: true }), true);
+  assert.equal(isPermittedVanscoTestDestination("mytest@gmail.com", { confirmedOwned: false }), false);
+  assert.equal(isPermittedVanscoTestDestination("someone@yahoo.com", { confirmedOwned: true }), false);
+  assert.equal(isPermittedVanscoTestDestination("mytest@gmail.com.example.org", { confirmedOwned: true }), false);
+  assert.equal(isPermittedVanscoTestDestination("sales@vanfinancecompany.co.uk"), true);
+  assert.equal(isPermittedVanscoTestDestination("staff@vansco.co.uk"), true);
+  assert.equal(isPermittedVanscoTestDestination("authorised@example.org", { configured: "authorised@example.org" }), true);
+});
+
+test("personal Gmail test UI includes explicit ownership check and backend rate limits", () => {
+  const ui = readFileSync(new URL("../public/vansco-email-studio/index.html", import.meta.url), "utf8");
+  const delivery = readFileSync(new URL("../api/vansco-email-delivery.js", import.meta.url), "utf8");
+  assert.match(ui, /id="ownTestInbox"/);
+  assert.match(ui, /own_inbox:el\("ownTestInbox"\)\.checked/);
+  assert.match(delivery, /body\.own_inbox===true/);
+  assert.match(delivery, /checkVanscoTestRateLimit\(supabase,to\)/);
+  assert.match(delivery, /recipient\.count\|\|0\)>=3/);
+  assert.match(delivery, /total\.count\|\|0\)>=20/);
+  assert.match(delivery, /VANSCO_EMAIL_PRODUCTION_ENABLED!=="true"/);
 });
