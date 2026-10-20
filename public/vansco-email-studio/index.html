@@ -39,6 +39,10 @@ textarea{min-height:70px;resize:vertical}input:focus,textarea:focus,select:focus
 .btn.red{background:#bb2337;color:#fff;border-color:#bb2337}
 .subheading{font-size:12px;font-weight:700;color:#606670;margin:0 0 9px}
 .stock{max-height:325px;overflow:auto;display:grid;gap:7px}
+.contact-row{display:flex;gap:9px;align-items:center;padding:9px 10px;background:#f7f8f8;border:1px solid #e4e6e8;border-radius:6px;font-size:12px}
+.contact-row strong{font-size:12px}.contact-row .status{color:#606771;font-size:11px}.contact-row button{margin-left:auto}
+.contact-row input[type=checkbox]{width:18px;height:18px;flex:none;accent-color:#b82036}
+.safe-send{background:#f8f6f0;border-left:3px solid #bf9b55;padding:11px;font-size:12px;line-height:1.5;border-radius:5px}
 .sale-grid{display:grid;gap:9px;margin-top:14px}.sale-editor{border:1px solid #e3e4e6;border-radius:8px;padding:11px;background:#fcfcfc}
 .sale-editor-header{font-size:12px;font-weight:800;margin:0 0 9px;color:#30343a}
 .sale-editor-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
@@ -140,9 +144,17 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      <p class="small muted" id="saleMessage" role="status"></p>
     </section>
     <section class="panel">
-     <div class="heading"><h2>Save campaign draft</h2><span class="pill">NO AUTO SEND</span></div>
+     <div class="heading"><h2>Saved campaigns &amp; test email</h2><span class="pill">MANUAL SENDING</span></div>
      <label class="subheading" for="campaignName">Campaign name</label><input id="campaignName" value="Vansco Halloween Sale">
-     <div class="actions"><button class="btn red" id="saveDraft">Save Vansco draft</button><button class="btn" disabled title="Available once send-safety checks are complete">Send campaign</button></div>
+     <div class="actions"><button class="btn red" id="saveDraft">Save new campaign draft</button></div>
+      <div class="form" style="margin-top:14px">
+       <label class="full">Campaign to test / send<select id="activeCampaign"><option value="">Save or select a campaign draft…</option></select></label>
+       <label class="full">Internal test email address<input type="email" id="testRecipient" placeholder="sales@vanfinancecompany.co.uk"></label>
+       <label class="full">Test confirmation<input id="testConfirmation" placeholder="Type SEND TEST"></label>
+      </div>
+      <div class="actions"><button class="btn dark" id="sendInternalTest">Send internal test email</button><button class="btn" id="reloadDraft">Load selected draft into editor</button></div>
+      <p class="small muted">Use Save new campaign draft whenever you change text, pricing or vehicles. A test always sends the selected saved draft, not unsaved edits.</p>
+      <p id="testMessage" class="small" role="status"></p>
      <p class="small muted">Saved drafts have frozen vehicle selections. No customer emails are sent from this screen.</p>
      <div id="draftList" class="list"></div>
      <p id="draftMessage" class="small" role="status"></p>
@@ -158,6 +170,12 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      <div class="actions"><button class="btn dark" id="importContacts">Import into Vansco list</button></div>
      <p id="importMessage" class="small" role="status"></p>
      <p class="small muted">CSV columns: email, first_name, last_name. Verifying email deliverability does not itself establish permission to market.</p>
+     <div class="heading" style="margin-top:18px"><h3>Review &amp; select Vansco customers</h3><button class="btn" id="refreshContacts">Refresh</button></div>
+     <p class="small muted">Imported contacts remain pending until you review their marketing permissions. Review is individual and logged. Customer sends are limited to five approved contacts per click.</p>
+     <div class="actions"><input id="contactSearch" placeholder="Search by email" style="flex:1"><button class="btn" id="searchContacts">Search</button></div>
+     <div id="contactRows" class="list" style="max-height:360px;overflow:auto;margin-top:12px"></div>
+     <div class="actions"><input id="batchConfirmation" placeholder="Type SEND 1–5 to confirm" style="flex:1"><button class="btn red" id="sendCustomerBatch" disabled>Send selected customer batch</button></div>
+     <p id="customerSendMessage" class="small" role="status"></p>
     </section>
    </div>
    <section class="panel preview-wrap">
@@ -176,7 +194,9 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
     <div class="report"><b id="rUnsubscribed">—</b><span>Unsubscribed</span></div>
    </div>
    <p class="small muted">* Opens are estimated by email clients. Reporting will populate after safe manual sending and provider event tracking are enabled. CRM transactional emails are never included.</p>
-   <div class="notice">Sending is intentionally locked in this first stage. The main CRM’s automatic customer emails, current campaigns, suppression centre and scheduled jobs have not been changed.</div>
+   <div class="safe-send">SendGrid email tests are manual, and customer sending is separately protected behind a production-enable switch. The main CRM's automatic proof requests and customer emails are not part of this system.</div>
+    <div class="actions"><button id="refreshReport" class="btn">Refresh delivery results</button></div>
+    <div id="recentResults" class="list" style="margin-top:12px"></div>
   </section>
  </div>
 </main>
@@ -198,12 +218,18 @@ var palettes={
  christmas:{dark:"#213e38",accent:"#bd9c5b",light:"#f6f3ec",label:"CHRISTMAS EDITION"}
 };
 var fields={subject:"subject",previewText:"preview_text",eyebrow:"eyebrow",headline:"heading",subheading:"subheading",introduction:"introduction",offer:"offer",brandDescription:"brand_description",extraText:"extra_text",footerNote:"footer_note",logoUrl:"logo_url",ctaLabel:"cta_label",ctaUrl:"cta_url"};
-var state={theme:"halloween",selected:[],stock:[],salePrices:{},ready:false};
+var state={theme:"halloween",selected:[],stock:[],salePrices:{},ready:false,activeCampaign:"",readyToSend:false};
 function el(id){return document.getElementById(id)}
 function escapeHtml(v){return String(v==null?"":v).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function key(){return localStorage.getItem(STORAGE)||""}
 function setMsg(id,text,bad){var node=el(id);node.textContent=text||"";node.className=bad?"err":"small muted"}
 async function api(action,payload){var response=await fetch(API,{method:"POST",headers:{"Content-Type":"application/json","x-marketing-customer-database-key":key()},body:JSON.stringify(Object.assign({action:action},payload||{}))});var result=await response.json().catch(function(){return {message:"Unexpected server response."}});if(!response.ok||!result.ok)throw Error(result.message||"Request failed");return result}
+async function delivery(action,payload) {
+ const response=await fetch("/api/vansco-email-delivery",{method:"POST",headers:{"Content-Type":"application/json","x-marketing-customer-database-key":key()},body:JSON.stringify(Object.assign({action:action},payload||{}))});
+ const result=await response.json().catch(()=>({message:"Email service did not respond."}));
+ if(!response.ok||!result.ok)throw Error(result.message||"Email operation failed.");
+ return result;
+}
 function values(){var settings={theme:state.theme,selected_keys:state.selected.slice(),sale_prices:state.salePrices};Object.keys(fields).forEach(function(k){settings[fields[k]]=el(k).value.trim()});return settings}
 function fill(data){state.theme=data.theme in themes?data.theme:"halloween";state.selected=Array.isArray(data.selected_keys)?data.selected_keys:[];state.salePrices=data.sale_prices&&typeof data.sale_prices==="object"?data.sale_prices:{};Object.keys(fields).forEach(function(k){el(k).value=data[fields[k]]||""});highlightThemes();renderStock();preview()}
 function switchTheme(theme){if(!themes[theme])return;var before=values();fill(Object.assign({},before,themes[theme],{theme:theme,selected_keys:state.selected,sale_prices:state.salePrices}));el("campaignName").value="Vansco "+(theme==="standard"?"New Stock":theme==="black_friday"?"Black Friday":theme==="christmas"?"Christmas":"Halloween")+" Sale"}
@@ -258,7 +284,7 @@ function buildEmail(){
  function paragraph(value,style){
   return value?'<p style="'+style+'">'+lines(value)+'</p>':"";
  }
- var pumpkin=state.theme==="halloween"?'<span aria-hidden="true" style="font-size:16px;padding-left:7px">🎃</span>':"";
+ var pumpkin=state.theme==="halloween"?'<span aria-hidden="true" style="font-size:24px">👻 🎃 🦇</span>':"";
  var brandLogo=s.logo_url
   ?'<img src="'+escapeHtml(s.logo_url)+'" alt="Vansco" style="display:block;max-height:65px;max-width:190px;width:auto;height:auto;border:0">'
   :'<div style="font-size:23px;font-weight:900;letter-spacing:2px">VANSCO<span style="color:'+p.accent+'">.</span></div>';
@@ -277,6 +303,8 @@ function buildEmail(){
    vehicleRows+='<td class="van" width="50%" valign="top" style="width:50%;padding:7px"><table role="presentation" width="100%" style="width:100%;border:1px solid #e6e6e6;border-collapse:collapse"><tr><td bgcolor="#f5f5f5" align="center">'+
     '<a href="'+escapeHtml(item.url)+'"><img src="'+escapeHtml(item.image)+'" alt="'+escapeHtml(item.title)+'" width="290" style="display:block;width:100%;max-width:290px;height:auto;border:0;outline:none;text-decoration:none"></a></td></tr>'+
     '<tr><td style="padding:13px 12px;font-family:Arial,sans-serif"><strong style="font-size:14px;line-height:19px;display:block;color:#202124">'+escapeHtml(item.title)+'</strong>'+
+    (item.detail?'<div style="margin-top:6px;color:#565b63;font-size:12px;line-height:17px">'+escapeHtml(item.detail)+'</div>':"")+
+    (Number(String(item.mileage||"").replace(/[^0-9]/g,""))>0?'<div style="margin-top:6px;color:#333842;font-size:12px">Mileage: '+Number(String(item.mileage).replace(/[^0-9]/g,"")).toLocaleString("en-GB")+' miles</div>':"")+
     (item.registration?'<div style="margin-top:5px;color:#697079;font-size:11px">'+escapeHtml(item.registration)+'</div>':"")+
     priceHtml+
     (item.vat_label?'<div style="color:#656c75;font-size:11px;margin-bottom:10px">'+escapeHtml(item.vat_label)+'</div>':"")+
@@ -293,7 +321,7 @@ function buildEmail(){
  '<body style="margin:0;background:#e9eaec;padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#e9eaec"><tr><td align="center" style="padding:22px 8px"><table role="presentation" width="650" style="border-collapse:collapse;width:100%;max-width:650px;background:white">'+
  '<tr><td style="background:'+p.dark+';padding:20px 25px 15px;color:#fff;font-family:Arial,sans-serif"><table role="presentation" width="100%" style="width:100%;border-collapse:collapse"><tr><td align="left" valign="middle">'+brandLogo+'</td><td align="right" valign="middle" style="color:'+p.accent+';font:700 10px Arial,sans-serif;letter-spacing:1.5px">'+pumpkin+escapeHtml(s.eyebrow||p.label)+pumpkin+'</td></tr></table></td></tr>'+
  '<tr><td class="body-pad" style="padding:37px 30px 33px;background:'+p.dark+';color:#fff;font-family:Arial,sans-serif;border-top:2px solid '+p.accent+'">'+
- '<h1 style="font-size:36px;letter-spacing:-1px;line-height:1.08;margin:0 0 12px;color:#fff">'+escapeHtml(s.heading)+'</h1>'+
+ '<table role="presentation" width="100%"><tr><td valign="top"><h1 style="font-size:36px;letter-spacing:-1px;line-height:1.08;margin:0 0 12px;color:#fff">'+escapeHtml(s.heading)+'</h1></td><td width="82" valign="top" align="right">'+pumpkin+'</td></tr></table>'+
  (s.subheading?'<h2 style="font-size:18px;font-weight:600;line-height:25px;margin:0 0 15px;color:'+p.accent+'">'+escapeHtml(s.subheading)+'</h2>':"")+
  paragraph(s.introduction,'color:#efefef;font-size:15px;line-height:24px;margin:0')+
  '</td></tr>'+
@@ -320,12 +348,64 @@ function parseCsv(content){
  return rows.map(function(x){var r={};headers.forEach(function(h,i){r[h]=String(x[i]||"").trim()});return {email:r.email||r.email_address||r["e-mail"]||"",first_name:r.first_name||r.firstname||"",last_name:r.last_name||r.lastname||""}}).filter(function(x){return x.email});
 }
 async function refreshCounts(){
- try{var stats=await api("overview");el("contactTotal").textContent=stats.contacts.total.toLocaleString("en-GB");el("contactReview").textContent=stats.contacts.pending_review.toLocaleString("en-GB");el("contactSuppressed").textContent=stats.contacts.suppressed.toLocaleString("en-GB");el("campaignCount").textContent=stats.campaigns.toLocaleString("en-GB");var r=stats.reporting||{};["Submitted","Delivered","Opened","Clicked","Bounced","Unsubscribed"].forEach(function(k){el("r"+k).textContent=stats.sending_enabled?Number(r[k.toLowerCase()]||0).toLocaleString("en-GB"):"—"})}
- catch(e){setMsg("templateMessage",e.message,true)}
+ try{
+  var stats=await api("overview");
+  el("contactTotal").textContent=stats.contacts.total.toLocaleString("en-GB");
+  el("contactReview").textContent=stats.contacts.pending_review.toLocaleString("en-GB");
+  el("contactSuppressed").textContent=stats.contacts.suppressed.toLocaleString("en-GB");
+  el("campaignCount").textContent=stats.campaigns.toLocaleString("en-GB");
+ }catch(e){setMsg("templateMessage",e.message,true)}
 }
 async function refreshDrafts(){
- try{var data=await api("listCampaigns");el("draftList").innerHTML=data.campaigns.slice(0,8).map(function(c){return '<div class="list-row"><strong>'+escapeHtml(c.name)+'</strong><div class="small muted">'+escapeHtml(c.theme.replace(/_/g," "))+' · '+c.vehicle_count+' vans · Draft · '+new Date(c.created_at).toLocaleDateString("en-GB")+'</div></div>'}).join("")||'<p class="small muted">No Vansco campaign drafts saved yet.</p>'}
- catch(e){setMsg("draftMessage",e.message,true)}
+ try{
+  var data=await api("listCampaigns"),select=el("activeCampaign"),current=state.activeCampaign;
+  select.innerHTML='<option value="">Choose a saved Vansco draft…</option>'+data.campaigns.map(function(c){
+   return '<option value="'+escapeHtml(c.id)+'">'+escapeHtml(c.name)+' · '+escapeHtml(c.theme.replace(/_/g," "))+' · '+c.vehicle_count+' vans</option>';
+  }).join("");
+  state.activeCampaign=data.campaigns.some(function(x){return x.id===current})?current:"";
+  select.value=state.activeCampaign;
+  el("draftList").innerHTML=data.campaigns.slice(0,8).map(function(c){
+   return '<div class="list-row"><strong>'+escapeHtml(c.name)+'</strong><div class="small muted">'+escapeHtml(c.theme.replace(/_/g," "))+' · '+c.vehicle_count+' vans · '+new Date(c.created_at).toLocaleDateString("en-GB")+'</div></div>';
+  }).join("")||'<p class="small muted">No Vansco drafts yet. Save your first campaign above.</p>';
+ }catch(e){setMsg("draftMessage",e.message,true)}
+}
+async function refreshContacts(){
+ try{
+  var data=await delivery("contacts",{query:el("contactSearch").value.trim()});
+  el("contactRows").innerHTML=data.contacts.map(function(c){
+   var ready=c.status==="ready",name=[c.first_name,c.last_name].filter(Boolean).join(" ");
+   return '<div class="contact-row">'+
+    '<input type="checkbox" class="batch-recipient" data-contact-id="'+escapeHtml(c.id)+'" '+(ready?"":"disabled")+' title="Select approved Vansco contact">'+
+    '<div style="flex:1;min-width:0"><strong>'+escapeHtml(c.email_normalized)+'</strong>'+
+    (name?'<div class="status">'+escapeHtml(name)+'</div>':"")+
+    '<div class="status">'+escapeHtml(c.status.replace(/_/g," "))+' · '+escapeHtml(c.source)+'</div></div>'+
+    (c.status==="pending_review"?'<button type="button" class="btn review-contact" data-review-id="'+escapeHtml(c.id)+'">Review</button>':"")+
+    '</div>';
+  }).join("")||'<p class="small muted">No Vansco customer emails found.</p>';
+  el("contactRows").querySelectorAll(".review-contact").forEach(function(button){
+   button.addEventListener("click",async function(){
+    var emailText=button.closest(".contact-row").querySelector("strong").textContent;
+    var notes=prompt("Record the evidence of valid Vansco marketing permission for "+emailText+". Enter source, consent or legitimate-interest assessment (at least 15 characters).");
+    if(!notes||notes.trim().length<15)return;
+    if(prompt('To confirm individual approval, type REVIEWED FOR VANSCO')!=="REVIEWED FOR VANSCO")return;
+    button.disabled=true;
+    try{await delivery("reviewContact",{contact_id:button.dataset.reviewId,permission_notes:notes,confirm_phrase:"REVIEWED FOR VANSCO"});setMsg("customerSendMessage","Contact reviewed and approved.");await Promise.all([refreshContacts(),refreshCounts()])}
+    catch(e){setMsg("customerSendMessage",e.message,true);button.disabled=false}
+   });
+  });
+ }catch(e){setMsg("customerSendMessage",e.message,true)}
+}
+async function refreshReport(){
+ try{
+  var r=await delivery("report");
+  state.readyToSend=r.production_enabled;
+  el("sendCustomerBatch").disabled=!r.production_enabled;
+  ["Submitted","Delivered","Opened","Clicked","Bounced","Unsubscribed"].forEach(function(k){
+   el("r"+k).textContent=Number(r[k.toLowerCase()]||0).toLocaleString("en-GB");
+  });
+  el("recentResults").innerHTML='<p class="small muted">Internal tests: '+r.tests+'. Unknown provider outcomes: '+r.unknown+'. Customer sending: '+(r.production_enabled?"enabled":"locked pending sign-off")+'.</p>'+
+    (r.recent||[]).map(function(row){return '<div class="list-row">'+escapeHtml(row.type)+' · '+escapeHtml(row.email)+' · <strong>'+escapeHtml(row.status.replace(/_/g," "))+'</strong> · '+new Date(row.at).toLocaleString("en-GB")+'</div>'}).join("");
+ }catch(e){el("recentResults").innerHTML='<p class="err">'+escapeHtml(e.message)+'</p>'}
 }
 async function refreshStock(){
  setMsg("stockMessage","Checking live Vansco DealerKit stock…");
@@ -337,7 +417,7 @@ async function init(){
  try{
   await api("validateAccess");state.ready=true;el("locked").hidden=true;el("app").hidden=false;
   try{var d=await api("loadMaster");fill(Object.assign({},themes.halloween,d.settings))}catch(e){fill(Object.assign({theme:"halloween",selected_keys:[]},themes.halloween));setMsg("templateMessage",e.message,true)}
-  await Promise.all([refreshCounts(),refreshDrafts(),refreshStock()]);
+  await Promise.all([refreshCounts(),refreshDrafts(),refreshStock(),refreshContacts(),refreshReport()]);
  }catch(e){el("locked").hidden=false;el("app").hidden=true;el("unlockError").textContent=e.message}
 }
 el("unlock").addEventListener("click",function(){localStorage.setItem(STORAGE,el("accessKey").value.trim());init()});
@@ -374,7 +454,55 @@ el("uploadLogo").addEventListener("click",async function(){
  }catch(e){setMsg("logoMessage",e.message,true)}finally{el("uploadLogo").disabled=false}
 });
 
-el("saveDraft").addEventListener("click",async function(){try{await api("saveDraft",{name:el("campaignName").value.trim(),settings:values()});setMsg("draftMessage","Vansco campaign draft saved. No emails sent.");await Promise.all([refreshCounts(),refreshDrafts()])}catch(e){setMsg("draftMessage",e.message,true)}});
+el("saveDraft").addEventListener("click",async function(){
+ try{
+  var result=await api("saveDraft",{name:el("campaignName").value.trim(),settings:values()});
+  state.activeCampaign=result.campaign.id;
+  setMsg("draftMessage","Vansco campaign saved and selected for an internal test.");
+  await Promise.all([refreshCounts(),refreshDrafts()]);
+ }catch(e){setMsg("draftMessage",e.message,true)}
+});
+el("activeCampaign").addEventListener("change",function(){state.activeCampaign=el("activeCampaign").value});
+el("reloadDraft").addEventListener("click",async function(){
+ if(!state.activeCampaign){setMsg("draftMessage","Select a saved Vansco campaign first.",true);return}
+ try{
+  var data=await api("loadCampaign",{id:state.activeCampaign});
+  el("campaignName").value=data.campaign.name;
+  fill(data.campaign.settings);
+  setMsg("draftMessage","Saved campaign loaded into the designer.");
+ }catch(e){setMsg("draftMessage",e.message,true)}
+});
+el("sendInternalTest").addEventListener("click",async function(){
+ if(!state.activeCampaign){setMsg("testMessage","Save and select a Vansco campaign draft first.",true);return}
+ if(el("testConfirmation").value.trim()!=="SEND TEST"){setMsg("testMessage","Type SEND TEST exactly.",true);return}
+ var to=el("testRecipient").value.trim();
+ if(!confirm("Send a REAL INTERNAL TEST to "+to+" using the selected SAVED Vansco campaign?"))return;
+ el("sendInternalTest").disabled=true;setMsg("testMessage","Submitting to SendGrid...");
+ try{
+  var result=await delivery("testSend",{campaign_id:state.activeCampaign,to:to,confirm_phrase:"SEND TEST"});
+  setMsg("testMessage",result.result.accepted?"Internal test accepted by SendGrid. Check your inbox.":("Test: "+result.result.status+" "+(result.result.error||"Review report.")),!result.result.accepted);
+  await refreshReport();
+ }catch(e){setMsg("testMessage",e.message,true)}finally{el("sendInternalTest").disabled=false}
+});
+el("refreshContacts").addEventListener("click",refreshContacts);
+el("searchContacts").addEventListener("click",refreshContacts);
+el("refreshReport").addEventListener("click",refreshReport);
+el("sendCustomerBatch").addEventListener("click",async function(){
+ if(!state.readyToSend){setMsg("customerSendMessage","Customer sending is locked until production approval.",true);return}
+ if(!state.activeCampaign){setMsg("customerSendMessage","Select a saved campaign.",true);return}
+ var ids=Array.from(document.querySelectorAll(".batch-recipient:checked")).map(function(x){return x.dataset.contactId});
+ if(!ids.length||ids.length>5){setMsg("customerSendMessage","Select 1 to 5 reviewed contacts.",true);return}
+ var phrase="SEND "+ids.length;
+ if(el("batchConfirmation").value.trim()!==phrase){setMsg("customerSendMessage","Type "+phrase+" exactly.",true);return}
+ if(!confirm("FINAL CONFIRMATION\n\nSend "+ids.length+" REAL CUSTOMER EMAIL(S) from Vansco now?\n\nNo automatic retry."))return;
+ el("sendCustomerBatch").disabled=true;
+ try{
+  var result=await delivery("sendBatch",{campaign_id:state.activeCampaign,contact_ids:ids,confirm_phrase:phrase});
+  setMsg("customerSendMessage",result.accepted+" accepted, "+result.unknown+" unknown, "+result.failed+" failed. Check the results below.");
+  await Promise.all([refreshReport(),refreshContacts()]);
+ }catch(e){setMsg("customerSendMessage",e.message,true)}finally{el("sendCustomerBatch").disabled=!state.readyToSend}
+});
+
 el("importContacts").addEventListener("click",async function(){
  var file=el("csvFile").files[0],source=el("listSource").value.trim(),basis=el("marketingBasis").value;
  if(!file||!source||!basis){setMsg("importMessage","Choose a CSV, its source and a documented marketing basis.",true);return}

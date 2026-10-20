@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { normaliseSettings, mappedVehicle, normaliseSalePrices, normalisePrice } from "../api/vansco-email-studio.js";
 import { verifyLogoBytes } from "../api/vansco-email-logo.js";
+import { renderVanscoEmail, makeVanscoUnsubscribeToken, checkVanscoUnsubscribeToken } from "../lib/vanscoEmailRender.js";
+import { isVanscoWebhookPayload } from "../lib/vanscoEmailEvent.js";
 
 const base = {
   theme: "halloween",
@@ -48,8 +50,9 @@ test("new Vansco studio cannot alter automatic transactional sends or dispatch c
   assert.match(api, /NO|NEVER invokes an email provider/i);
   assert.doesNotMatch(api, /sendSendGridEmail|callEmailProvider|sendgrid\.com\/v3\/mail\/send|api\.brevo\.com\/v3\/smtp\/email/);
   assert.doesNotMatch(api, /from\(["']marketing_campaigns["']\)|from\(["']marketing_email_sends["']\)/);
-  assert.match(ui, /disabled title="Available once send-safety checks are complete"/);
-  assert.match(ui, /No customer emails are sent from this screen/);
+  assert.match(ui, /id="sendCustomerBatch" disabled/);
+  assert.match(readFileSync(new URL("../api/vansco-email-delivery.js", import.meta.url), "utf8"), /VANSCO_EMAIL_PRODUCTION_ENABLED/);
+  assert.match(ui, /Send new campaign draft|Save new campaign draft/);
   assert.match(migration, /marketing_vansco_email_contacts/);
   assert.doesNotMatch(migration, /alter table public\.marketing_contacts|update public\.marketing_contacts|delete from public\.marketing_contacts/i);
 });
@@ -114,4 +117,55 @@ test("seasonal email renderer preserves complete source image and promotion cont
   assert.match(ui, /width:100%;max-width:290px;height:auto/);
   assert.match(api, /selected_vehicles: priceSnapshots/);
   assert.match(api, /normaliseSalePrices/);
+});
+
+test("Vansco branded HTML includes ghost, description, mileage, and manual discounts", () => {
+  const html = renderVanscoEmail({
+    settings: {
+      ...base, brand_description: "A trusted regional van dealer.",
+      subheading: "Halloween offers", sale_prices: { van1: { was: "15995.00", now: "13995.00", save: "2000.00" } },
+    },
+    vehicles: [{ key:"van1", url:"https://www.vansco.co.uk/v/van1", image:"https://example.com/van1.jpg", title:"2021 Ford Transit L3 Dropside", registration:"AB21 CDE", detail:"350 L3 Dropside", mileage:"72450", price:"£15,995", vat_label:"+ VAT" }],
+    unsubscribeUrl:"https://marketing-crm-six.vercel.app/api/vansco-email-unsubscribe?token=stub",
+  });
+  assert.match(html,/👻/);
+  assert.match(html,/350 L3 Dropside/);
+  assert.match(html,/72,450 miles/);
+  assert.match(html,/WAS/);
+  assert.match(html,/NOW/);
+  assert.match(html,/SAVE/);
+  assert.match(html,/text-decoration:line-through/);
+  assert.match(html,/unsubscribe from marketing emails/i);
+  assert.doesNotMatch(html,/object-fit:cover|max-height:200px/);
+  assert.match(html,/height:auto/);
+});
+
+test("signed Vansco opt-out token verifies only matching content and valid lifetime", () => {
+  const secret="test-secret-vansco-marketing";
+  const params={email:"buyer@example.com",contactId:"11111111-1111-4111-8111-111111111111",sendId:"22222222-2222-4222-8222-222222222222",secret,now:0};
+  const token=makeVanscoUnsubscribeToken(params);
+  assert.equal(checkVanscoUnsubscribeToken(token,secret,1000).email,params.email);
+  assert.throws(()=>checkVanscoUnsubscribeToken(token+"x",secret,1000),/Invalid/);
+  assert.throws(()=>checkVanscoUnsubscribeToken(token,secret,181*86400_000),/expired/);
+});
+
+test("Vansco provider event routing requires separate matching brand and send identifiers", () => {
+  const ids={vansco_email_send_id:"11111111-1111-4111-8111-111111111111",vansco_email_campaign_id:"22222222-2222-4222-8222-222222222222"};
+  assert.equal(isVanscoWebhookPayload({vansco_brand:"vansco",...ids}),true);
+  assert.equal(isVanscoWebhookPayload({...ids}),false);
+  assert.equal(isVanscoWebhookPayload({vansco_brand:"vansco",vansco_email_send_id:"bad",vansco_email_campaign_id:ids.vansco_email_campaign_id}),false);
+});
+
+test("live Vansco email customer sends have separate ledger, a locked production gate and no automations", () => {
+  const delivery=readFileSync(new URL("../api/vansco-email-delivery.js",import.meta.url),"utf8");
+  const migration=readFileSync(new URL("../supabase/migrations/20261020_vansco_email_manual_sends.sql",import.meta.url),"utf8");
+  const webhook=readFileSync(new URL("../api/sendgrid-email-webhook.js",import.meta.url),"utf8");
+  assert.match(delivery,/VANSCO_EMAIL_PRODUCTION_ENABLED/);
+  assert.match(delivery,/ids\.length>5/);
+  assert.match(delivery,/SEND TEST/);
+  assert.match(delivery,/marketing_vansco_email_sends/);
+  assert.doesNotMatch(delivery,/marketing_email_send_recipients|marketing_email_sends|transactional-rent2buy/);
+  assert.match(migration,/one_production_send_per_contact_campaign/);
+  assert.match(webhook,/isVanscoWebhookPayload/);
+  assert.match(webhook,/continue;/);
 });

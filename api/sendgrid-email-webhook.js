@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { isVanscoWebhookPayload, recordVanscoEmailEvent } from "../lib/vanscoEmailEvent.js";
 import { DEFAULT_MAIN_CRM_EVENT_URL, forwardApplicationReceivedCrmEvent } from "../lib/applicationReceivedEventForwarder.js";
 import {
   normalizeSendGridEvent,
@@ -173,6 +174,14 @@ export default async function handler(request, response) {
         continue;
       }
       const event = normalizeSendGridEvent(payload);
+      if (isVanscoWebhookPayload(payload)) {
+        const vanscoResult = await recordVanscoEmailEvent(getSupabase(), payload, event);
+        if (vanscoResult.duplicate) summary.duplicates += 1;
+        else if (vanscoResult.recorded) { summary.recorded += 1; summary.correlated += 1; }
+        else summary.uncorrelated += 1;
+        // Do not insert Vansco provider events into VFC reporting or forward to main CRM.
+        continue;
+      }
       const result = await processSendGridEvent(repository, event);
       if (result.duplicate) summary.duplicates += 1;
       else summary.recorded += 1;
