@@ -277,3 +277,35 @@ test("personal Gmail test UI includes explicit ownership check and backend rate 
   assert.match(delivery, /total\.count\|\|0\)>=20/);
   assert.match(delivery, /VANSCO_EMAIL_PRODUCTION_ENABLED!=="true"/);
 });
+
+test("the transparent Vansco WebP logo is converted to a PNG URL for Gmail only", () => {
+  const original="https://www.vansco.co.uk/dist/img/webp/logo-white.webp";
+  const pngUrl="https://marketing-crm-six.vercel.app/api/vansco-email-logo-png";
+  const image=readFileSync(new URL("../lib/vanscoEmailLogo.js",import.meta.url),"utf8");
+  const converter=readFileSync(new URL("../api/vansco-email-logo-png.js",import.meta.url),"utf8");
+  const render=readFileSync(new URL("../lib/vanscoEmailRender.js",import.meta.url),"utf8");
+  const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
+  assert.match(image,/logo-white\.webp/);
+  assert.match(image,/api\/vansco-email-logo-png/);
+  assert.match(converter,/image\/png/);
+  assert.match(converter,/ffmpeg-static/);
+  assert.match(converter,/pngHeader/);
+  assert.match(render,/emailCompatibleVanscoLogoUrl\(settings\.logo_url\)/);
+  assert.match(ui,/emailLogoUrl=s\.logo_url/);
+  assert.match(ui,/api\/vansco-email-logo-png/);
+  const oldLogo=renderVanscoEmail({settings:{...base,logo_url:original},vehicles:[],testMode:true});
+  assert.match(oldLogo,/src="https:\/\/marketing-crm-six\.vercel\.app\/api\/vansco-email-logo-png"/);
+  assert.doesNotMatch(oldLogo,/<img src="https:\/\/www\.vansco\.co\.uk\/dist\/img\/webp\/logo-white\.webp"/);
+  const png=renderVanscoEmail({settings:{...base,logo_url:"https://static.wixstatic.com/media/logo.png"},vehicles:[],testMode:true});
+  assert.match(png,/https:\/\/static\.wixstatic\.com\/media\/logo\.png/);
+});
+
+test("each Vansco address has an explicit styled maps link to prevent Gmail blue auto-links", () => {
+  const html=renderVanscoContactFooter("Vehicle prices subject to confirmation.");
+  const ui=readFileSync(new URL("../public/vansco-email-studio/index.html",import.meta.url),"utf8");
+  assert.equal((html.match(/www\.google\.com\/maps\/search/g)||[]).length,3);
+  assert.equal((html.match(/color:#e5e2e9!important;text-decoration:none!important/g)||[]).length,6);
+  assert.equal((html.match(/href="tel:/g)||[]).length,3);
+  assert.match(ui,/google\.com\/maps\/search/);
+  assert.match(html,/mailto:sales@vansco\.co\.uk/);
+});
