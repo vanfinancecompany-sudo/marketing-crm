@@ -284,7 +284,7 @@ function buildEmail(){
  function paragraph(value,style){
   return value?'<p style="'+style+'">'+lines(value)+'</p>':"";
  }
- var pumpkin=state.theme==="halloween"?'<span aria-hidden="true" style="font-size:16px;padding-left:7px">🎃</span>':"";
+ var pumpkin=state.theme==="halloween"?'<span aria-hidden="true" style="font-size:39px">👻 &nbsp; 🦇</span>':"";
  var brandLogo=s.logo_url
   ?'<img src="'+escapeHtml(s.logo_url)+'" alt="Vansco" style="display:block;max-height:65px;max-width:190px;width:auto;height:auto;border:0">'
   :'<div style="font-size:23px;font-weight:900;letter-spacing:2px">VANSCO<span style="color:'+p.accent+'">.</span></div>';
@@ -319,7 +319,7 @@ function buildEmail(){
  '<body style="margin:0;background:#e9eaec;padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#e9eaec"><tr><td align="center" style="padding:22px 8px"><table role="presentation" width="650" style="border-collapse:collapse;width:100%;max-width:650px;background:white">'+
  '<tr><td style="background:'+p.dark+';padding:20px 25px 15px;color:#fff;font-family:Arial,sans-serif"><table role="presentation" width="100%" style="width:100%;border-collapse:collapse"><tr><td align="left" valign="middle">'+brandLogo+'</td><td align="right" valign="middle" style="color:'+p.accent+';font:700 10px Arial,sans-serif;letter-spacing:1.5px">'+pumpkin+escapeHtml(s.eyebrow||p.label)+pumpkin+'</td></tr></table></td></tr>'+
  '<tr><td class="body-pad" style="padding:37px 30px 33px;background:'+p.dark+';color:#fff;font-family:Arial,sans-serif;border-top:2px solid '+p.accent+'">'+
- '<h1 style="font-size:36px;letter-spacing:-1px;line-height:1.08;margin:0 0 12px;color:#fff">'+escapeHtml(s.heading)+'</h1>'+
+ '<table role="presentation" width="100%"><tr><td valign="top"><h1 style="font-size:36px;letter-spacing:-1px;line-height:1.08;margin:0 0 12px;color:#fff">'+escapeHtml(s.heading)+'</h1></td><td width="82" valign="top" align="right">'+pumpkin+'</td></tr></table>'+
  (s.subheading?'<h2 style="font-size:18px;font-weight:600;line-height:25px;margin:0 0 15px;color:'+p.accent+'">'+escapeHtml(s.subheading)+'</h2>':"")+
  paragraph(s.introduction,'color:#efefef;font-size:15px;line-height:24px;margin:0')+
  '</td></tr>'+
