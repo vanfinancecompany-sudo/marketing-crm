@@ -316,7 +316,29 @@ function buildEmail(){
  if(!v.length)vehicleRows='<tr><td style="padding:26px;text-align:center;color:#91969a;font-family:Arial,sans-serif;font-size:14px">Select Vansco vehicles to preview the stock cards.</td></tr>';
  var company=paragraph(s.brand_description,'margin:0;color:#42464c;font-size:14px;line-height:23px');
  var additional=paragraph(s.extra_text,'margin:0;color:#30343a;font-size:14px;line-height:23px');
- var footer=s.footer_note?'<tr><td style="padding:23px 28px;background:#25232a;color:#eeeeef;font:13px/22px Arial,sans-serif">'+lines(s.footer_note)+'</td></tr>':"";
+
+  var vanscoBranches=[
+    {name:"333 Showroom",line1:"333 Millbrook Road West",line2:"Southampton, Hampshire SO15 0HW",phone:"02380 333 777",tel:"+442380333777"},
+    {name:"New Forest",line1:"Senior Service Station, Romsey Road",line2:"Cadnam, Hampshire SO40 2NN",phone:"02380 813 119",tel:"+442380813119"},
+    {name:"Southampton Airport",line1:"201 Wide Lane, Spitfire Roundabout",line2:"Southampton, Hampshire SO18 2RZ",phone:"02381 780 300",tel:"+442381780300"}
+  ];
+  var legalNote=String(s.footer_note||"").split(/\r?\n/).filter(function(line){
+    return !/^(?:contact vansco|333 showroom\s*:|new forest\s*:|southampton airport\s*:|email\s*:\s*sales@vansco\.co\.uk)/i.test(line.trim());
+  }).join("\n").trim();
+  var branchRows=vanscoBranches.map(function(b,i){
+    return '<tr><td style="padding:13px 0 15px;border-bottom:'+(i<2?'1px solid #504b53':'0')+'">'+
+      '<strong style="display:block;color:#f0bf55;font:700 14px/20px Arial,sans-serif;margin-bottom:5px">'+escapeHtml(b.name)+'</strong>'+
+      '<span style="display:block;color:#e5e2e9;font:12px/19px Arial,sans-serif">'+escapeHtml(b.line1)+'<br>'+escapeHtml(b.line2)+'</span>'+
+      '<a href="tel:'+escapeHtml(b.tel)+'" style="display:inline-block;margin-top:7px;color:#fff;text-decoration:none;font:700 14px/20px Arial,sans-serif">'+escapeHtml(b.phone)+'</a>'+
+      '</td></tr>';
+  }).join("");
+  var footer='<tr><td style="padding:25px 27px 22px;background:#25232a;color:#fff;font-family:Arial,sans-serif">'+
+    '<h2 style="font:bold 19px/25px Arial,sans-serif;margin:0 0 7px;color:#fff">Contact Vansco</h2>'+
+    '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse">'+branchRows+'</table>'+
+    '<p style="margin:17px 0 0;color:#e5e2e9;font:13px/20px Arial,sans-serif">Email: <a href="mailto:sales@vansco.co.uk" style="color:#f0bf55;font-weight:bold;text-decoration:underline">sales@vansco.co.uk</a></p>'+
+    (legalNote?'<p style="margin:20px 0 0;padding-top:15px;border-top:1px solid #504b53;color:#aca8b2;font:11px/18px Arial,sans-serif">'+lines(legalNote)+'</p>':"")+
+    '</td></tr>';
+
  return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media(max-width:600px){.van{display:block!important;width:100%!important}.body-pad{padding:25px!important}}</style><title>'+escapeHtml(s.subject)+'</title></head>'+
  '<body style="margin:0;background:#e9eaec;padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#e9eaec"><tr><td align="center" style="padding:22px 8px"><table role="presentation" width="650" style="border-collapse:collapse;width:100%;max-width:650px;background:white">'+
  '<tr><td style="background:'+p.dark+';padding:20px 25px 15px;color:#fff;font-family:Arial,sans-serif"><table role="presentation" width="100%" style="width:100%;border-collapse:collapse"><tr><td align="left" valign="middle">'+brandLogo+'</td><td align="right" valign="middle" style="color:'+p.accent+';font:700 10px Arial,sans-serif;letter-spacing:1.5px">'+escapeHtml(s.eyebrow||p.label)+pumpkin+'</td></tr></table></td></tr>'+
