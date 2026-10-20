@@ -81,8 +81,11 @@ function normaliseLogoUrl(value) {
   try { parsed = new URL(raw); } catch { failure("Enter a valid HTTPS logo image URL."); }
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) failure("Logo must use HTTPS.");
   const hostname = parsed.hostname.toLowerCase();
+  let ownStorageHost = "";
+  try { ownStorageHost = new URL(process.env.SUPABASE_URL || "").hostname.toLowerCase(); } catch {}
+  const isOwnUpload = Boolean(ownStorageHost && hostname === ownStorageHost && parsed.pathname.startsWith("/storage/v1/object/public/template-files/vansco-email-studio/logos/"));
   const allowed = hostname === "vansco.co.uk" || hostname.endsWith(".vansco.co.uk")
-    || hostname === "static.wixstatic.com" || hostname.endsWith(".public.blob.vercel-storage.com");
+    || hostname === "static.wixstatic.com" || isOwnUpload;
   if (!allowed) failure("Logo must use Vansco, Wixstatic or the CRM's hosted logo storage.");
   return parsed.href;
 }
