@@ -85,7 +85,7 @@ async function dispatch(supabase,{send,campaignRow,vehicles,test=false}){
       fromEmail:"sales@vanfinancecompany.co.uk",fromName:"Vansco",
       categories:["vansco-email-studio",test?"internal-test":"marketing"],
       customArgs:{vansco_email_send_id:send.id,vansco_email_campaign_id:campaignRow.id,vansco_brand:"vansco"},
-      ...(test?{}:{headers:{"List-Unsubscribe":"<"+unsubscribeUrl+">","List-Unsubscribe-Post":"List-Unsubscribe=One-Click"}}),
+      ...(test?{}:{headers:{"List-Unsubscribe":"<"+unsubscribeUrl+">"}}),
       timeoutMs:12000,
     });
     checked(await supabase.from(SENDS).update({
@@ -101,8 +101,11 @@ async function dispatch(supabase,{send,campaignRow,vehicles,test=false}){
     return {accepted:false,send_id:send.id,status,error:clean(error.message,160)};
   }
 }
-async function listContacts(supabase){
-  const rows=checked(await supabase.from(CONTACTS).select("id,email_normalized,first_name,last_name,status,source,marketing_basis,reviewed_at,permission_notes").order("created_at",{ascending:false}).limit(80),"Couldn't list Vansco contacts");
+async function listContacts(supabase,body={}){
+  let query=supabase.from(CONTACTS).select("id,email_normalized,first_name,last_name,status,source,marketing_basis,reviewed_at,permission_notes").order("created_at",{ascending:false}).limit(80);
+  const term=clean(body.query,60).replace(/[%_,()\\]/g,"");
+  if(term)query=query.ilike("email_normalized","%"+term+"%");
+  const rows=checked(await query,"Couldn't list Vansco contacts");
   return {contacts:rows||[]};
 }
 async function reviewContact(supabase,body){
@@ -177,7 +180,7 @@ export default async function handler(request,response){
     const body=typeof request.body==="string"?JSON.parse(request.body):(request.body||{});
     const supabase=db();
     let result;
-    if(body.action==="contacts")result=await listContacts(supabase);
+    if(body.action==="contacts")result=await listContacts(supabase,body);
     else if(body.action==="reviewContact")result=await reviewContact(supabase,body);
     else if(body.action==="testSend")result=await testSend(supabase,body);
     else if(body.action==="sendBatch")result=await productionBatch(supabase,body);
