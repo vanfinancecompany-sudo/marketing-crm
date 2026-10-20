@@ -347,6 +347,33 @@ el("vehicleSearch").addEventListener("input",renderStock);
 el("refreshStock").addEventListener("click",refreshStock);
 el("saveMaster").addEventListener("click",async function(){try{var d=await api("saveMaster",{settings:values()});el("savedAt").textContent="Saved "+new Date(d.updated_at).toLocaleString("en-GB");setMsg("templateMessage","Master template saved.");}catch(e){setMsg("templateMessage",e.message,true)}});
 el("downloadHtml").addEventListener("click",downloadHtml);
+
+el("uploadLogo").addEventListener("click",async function(){
+ var file=el("logoFile").files[0];
+ if(!file){setMsg("logoMessage","Choose the Vansco logo image first.",true);return}
+ if(!["image/png","image/jpeg","image/webp"].includes(file.type)||file.size>1500000){
+  setMsg("logoMessage","Choose a PNG, JPG or WebP under 1.5 MB.",true);return
+ }
+ el("uploadLogo").disabled=true;
+ setMsg("logoMessage","Uploading logo to secure Vansco email storage...");
+ try{
+  var base64=await new Promise(function(resolve,reject){
+   var reader=new FileReader();
+   reader.onload=function(){resolve(String(reader.result||"").split(",")[1]||"")};
+   reader.onerror=function(){reject(new Error("The logo file could not be read."))};
+   reader.readAsDataURL(file);
+  });
+  var response=await fetch("/api/vansco-email-logo",{
+   method:"POST",headers:{"Content-Type":"application/json","x-marketing-customer-database-key":key()},
+   body:JSON.stringify({content_type:file.type,base64:base64})
+  });
+  var data=await response.json().catch(function(){return {message:"Logo storage did not respond."}});
+  if(!response.ok||!data.ok||!data.url)throw Error(data.message||"Could not upload logo.");
+  el("logoUrl").value=data.url;preview();
+  setMsg("logoMessage","Logo uploaded. Save the master template to keep it.");
+ }catch(e){setMsg("logoMessage",e.message,true)}finally{el("uploadLogo").disabled=false}
+});
+
 el("saveDraft").addEventListener("click",async function(){try{await api("saveDraft",{name:el("campaignName").value.trim(),settings:values()});setMsg("draftMessage","Vansco campaign draft saved. No emails sent.");await Promise.all([refreshCounts(),refreshDrafts()])}catch(e){setMsg("draftMessage",e.message,true)}});
 el("importContacts").addEventListener("click",async function(){
  var file=el("csvFile").files[0],source=el("listSource").value.trim(),basis=el("marketingBasis").value;
