@@ -218,7 +218,7 @@ var palettes={
  christmas:{dark:"#213e38",accent:"#bd9c5b",light:"#f6f3ec",label:"CHRISTMAS EDITION"}
 };
 var fields={subject:"subject",previewText:"preview_text",eyebrow:"eyebrow",headline:"heading",subheading:"subheading",introduction:"introduction",offer:"offer",brandDescription:"brand_description",extraText:"extra_text",footerNote:"footer_note",logoUrl:"logo_url",ctaLabel:"cta_label",ctaUrl:"cta_url"};
-var state={theme:"halloween",selected:[],stock:[],salePrices:{},ready:false};
+var state={theme:"halloween",selected:[],stock:[],salePrices:{},ready:false,activeCampaign:"",readyToSend:false};
 function el(id){return document.getElementById(id)}
 function escapeHtml(v){return String(v==null?"":v).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function key(){return localStorage.getItem(STORAGE)||""}
