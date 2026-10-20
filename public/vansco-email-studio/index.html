@@ -186,10 +186,10 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
 "use strict";
 var STORAGE="marketingCustomerDatabaseApiKey", API="/api/vansco-email-studio";
 var themes={
- standard:{subject:"Vansco | Latest Vans Available Now",preview_text:"Browse our latest used vans.",heading:"FIND YOUR NEXT VAN",introduction:"Explore the latest vans available now at Vansco.",offer:"Quality used vans. Great choice.",cta_label:"VIEW ALL VANS",cta_url:"https://www.vansco.co.uk/all-stock/"},
- halloween:{subject:"Vansco Halloween Sale | Used Van Offers",preview_text:"Take a look at our Halloween van offers.",heading:"HALLOWEEN VAN SALE",introduction:"Discover vans ready for their next owner in our Halloween selection.",offer:"Great seasonal deals on used vans.",cta_label:"EXPLORE THE SALE",cta_url:"https://www.vansco.co.uk/all-stock/"},
- black_friday:{subject:"Vansco Black Friday | Used Vans",preview_text:"Explore this year's Black Friday van selection.",heading:"BLACK FRIDAY",introduction:"Explore our Black Friday selection of used vans.",offer:"Find a van to suit your business.",cta_label:"VIEW BLACK FRIDAY VANS",cta_url:"https://www.vansco.co.uk/all-stock/"},
- christmas:{subject:"Vansco Christmas | Our Festive Van Selection",preview_text:"Explore our Christmas selection of vans.",heading:"CHRISTMAS VAN SALE",introduction:"Find your next van this festive season at Vansco.",offer:"A fresh start for the road ahead.",cta_label:"SEE AVAILABLE VANS",cta_url:"https://www.vansco.co.uk/all-stock/"}
+ standard:{subject:"Vansco | Latest Vans Available Now",preview_text:"Browse our latest used vans.",eyebrow:"VANSCO",heading:"FIND YOUR NEXT VAN",subheading:"Quality used vans across Southampton and the New Forest",introduction:"Explore the latest vans available now at Vansco.",offer:"Quality used vans. Great choice.",cta_label:"VIEW ALL VANS",cta_url:"https://www.vansco.co.uk/all-stock/"},
+ halloween:{subject:"Vansco Halloween Sale | Used Van Offers",preview_text:"Take a look at our Halloween van offers.",eyebrow:"HALLOWEEN EDITION",heading:"HALLOWEEN VAN SALE",subheading:"A great selection of quality used vans",introduction:"Discover vans ready for their next owner in our Halloween selection.",offer:"Great seasonal deals on used vans.",cta_label:"EXPLORE THE SALE",cta_url:"https://www.vansco.co.uk/all-stock/"},
+ black_friday:{subject:"Vansco Black Friday | Used Vans",preview_text:"Explore this year's Black Friday van selection.",eyebrow:"BLACK FRIDAY EVENT",heading:"BLACK FRIDAY",subheading:"Featured Vansco offers",introduction:"Explore our Black Friday selection of used vans.",offer:"Find a van to suit your business.",cta_label:"VIEW BLACK FRIDAY VANS",cta_url:"https://www.vansco.co.uk/all-stock/"},
+ christmas:{subject:"Vansco Christmas | Our Festive Van Selection",preview_text:"Explore our Christmas selection of vans.",eyebrow:"CHRISTMAS EDITION",heading:"CHRISTMAS VAN SALE",subheading:"Start the new year with the right van",introduction:"Find your next van this festive season at Vansco.",offer:"A fresh start for the road ahead.",cta_label:"SEE AVAILABLE VANS",cta_url:"https://www.vansco.co.uk/all-stock/"}
 };
 var palettes={
  standard:{dark:"#1a1b1f",accent:"#c82535",light:"#f5f5f6",label:"VANSCO"},
@@ -197,16 +197,16 @@ var palettes={
  black_friday:{dark:"#151515",accent:"#d02535",light:"#f0f0f0",label:"BLACK FRIDAY EVENT"},
  christmas:{dark:"#213e38",accent:"#bd9c5b",light:"#f6f3ec",label:"CHRISTMAS EDITION"}
 };
-var fields={subject:"subject",previewText:"preview_text",headline:"heading",introduction:"introduction",offer:"offer",ctaLabel:"cta_label",ctaUrl:"cta_url"};
-var state={theme:"halloween",selected:[],stock:[],ready:false};
+var fields={subject:"subject",previewText:"preview_text",eyebrow:"eyebrow",headline:"heading",subheading:"subheading",introduction:"introduction",offer:"offer",brandDescription:"brand_description",extraText:"extra_text",footerNote:"footer_note",logoUrl:"logo_url",ctaLabel:"cta_label",ctaUrl:"cta_url"};
+var state={theme:"halloween",selected:[],stock:[],salePrices:{},ready:false};
 function el(id){return document.getElementById(id)}
 function escapeHtml(v){return String(v==null?"":v).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function key(){return localStorage.getItem(STORAGE)||""}
 function setMsg(id,text,bad){var node=el(id);node.textContent=text||"";node.className=bad?"err":"small muted"}
 async function api(action,payload){var response=await fetch(API,{method:"POST",headers:{"Content-Type":"application/json","x-marketing-customer-database-key":key()},body:JSON.stringify(Object.assign({action:action},payload||{}))});var result=await response.json().catch(function(){return {message:"Unexpected server response."}});if(!response.ok||!result.ok)throw Error(result.message||"Request failed");return result}
-function values(){var settings={theme:state.theme,selected_keys:state.selected.slice()};Object.keys(fields).forEach(function(k){settings[fields[k]]=el(k).value.trim()});return settings}
-function fill(data){state.theme=data.theme in themes?data.theme:"halloween";state.selected=Array.isArray(data.selected_keys)?data.selected_keys:[];Object.keys(fields).forEach(function(k){el(k).value=data[fields[k]]||""});highlightThemes();renderStock();preview()}
-function switchTheme(theme){if(!themes[theme])return;var before=values();fill(Object.assign({},before,themes[theme],{theme:theme,selected_keys:state.selected}));el("campaignName").value="Vansco "+(theme==="standard"?"New Stock":theme==="black_friday"?"Black Friday":theme==="christmas"?"Christmas":"Halloween")+" Sale"}
+function values(){var settings={theme:state.theme,selected_keys:state.selected.slice(),sale_prices:state.salePrices};Object.keys(fields).forEach(function(k){settings[fields[k]]=el(k).value.trim()});return settings}
+function fill(data){state.theme=data.theme in themes?data.theme:"halloween";state.selected=Array.isArray(data.selected_keys)?data.selected_keys:[];state.salePrices=data.sale_prices&&typeof data.sale_prices==="object"?data.sale_prices:{};Object.keys(fields).forEach(function(k){el(k).value=data[fields[k]]||""});highlightThemes();renderStock();preview()}
+function switchTheme(theme){if(!themes[theme])return;var before=values();fill(Object.assign({},before,themes[theme],{theme:theme,selected_keys:state.selected,sale_prices:state.salePrices}));el("campaignName").value="Vansco "+(theme==="standard"?"New Stock":theme==="black_friday"?"Black Friday":theme==="christmas"?"Christmas":"Halloween")+" Sale"}
 function highlightThemes(){document.querySelectorAll("[data-theme]").forEach(function(button){button.setAttribute("aria-pressed",String(button.dataset.theme===state.theme))})}
 function money(value){var m=String(value||"").match(/([0-9][0-9,]*(?:\.[0-9]+)?)/);if(!m)return "";var n=Number(m[1].replace(/,/g,""));return Number.isFinite(n)?"£"+n.toLocaleString("en-GB",{maximumFractionDigits:0}):""}
 function selectedVehicles(){var map=new Map(state.stock.map(function(v){return [v.key,v]}));return state.selected.map(function(k){return map.get(k)}).filter(Boolean)}
@@ -224,7 +224,34 @@ function renderStock(){
   if(!node.checked)state.selected=state.selected.filter(function(k){return k!==node.dataset.key});
   renderStock();preview();
  })});
+ renderSaleEditors();
 }
+
+function parseAmount(value){var n=Number(String(value||"").replace(/[£,\s]/g,""));return Number.isFinite(n)&&n>0?n:0}
+function pounds(value){var n=parseAmount(value);return n?"£"+n.toLocaleString("en-GB",{minimumFractionDigits:0,maximumFractionDigits:2}):""}
+function renderSaleEditors(){
+ var vans=selectedVehicles();
+ el("saleEditors").innerHTML=vans.map(function(v){
+  var item=state.salePrices[v.key]||{},id=escapeHtml(v.key);
+  return '<div class="sale-editor"><div class="sale-editor-header">'+escapeHtml(v.title)+" · "+escapeHtml(v.registration||"")+'</div>'+
+   '<div class="sale-editor-fields"><label>Was (£)<input data-sale-key="'+id+'" data-sale-field="was" inputmode="decimal" placeholder="e.g. 15995" value="'+escapeHtml(item.was||"")+'"></label>'+
+   '<label>Now (£)<input data-sale-key="'+id+'" data-sale-field="now" inputmode="decimal" placeholder="e.g. 13995" value="'+escapeHtml(item.now||"")+'"></label>'+
+   '<label>Save (£)<input data-sale-key="'+id+'" data-sale-field="save" inputmode="decimal" placeholder="Auto if blank" value="'+escapeHtml(item.save||"")+'"></label></div></div>';
+ }).join("");
+ if(!vans.length)el("saleEditors").innerHTML='<p class="field-help">Select Vansco vans above to set their sale prices.</p>';
+ el("saleEditors").querySelectorAll("[data-sale-field]").forEach(function(input){
+  input.addEventListener("input",function(){
+   var k=input.dataset.saleKey,field=input.dataset.saleField;
+   var entry=Object.assign({},state.salePrices[k]||{});entry[field]=input.value.trim();state.salePrices[k]=entry;
+   var was=parseAmount(entry.was),now=parseAmount(entry.now),save=parseAmount(entry.save);
+   if(was&&now&&now>=was)setMsg("saleMessage","Now must be lower than Was.",true);
+   else if(was&&now&&save&&Math.abs((was-now)-save)>0.005)setMsg("saleMessage","Save must equal Was minus Now.",true);
+   else setMsg("saleMessage","","");
+   preview();
+  });
+ });
+}
+
 function buildEmail(){
  var s=values(),p=palettes[state.theme],v=selectedVehicles();
  var vehicleRows="";
