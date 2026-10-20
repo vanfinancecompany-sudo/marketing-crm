@@ -181,7 +181,7 @@ test("Vansco Halloween copy and all three branch contact details appear in real 
   for(const value of ["02380 333 777","02380 813 119","02381 780 300","sales@vansco.co.uk","👻","🎃"])assert.ok(html.includes(value),value);
   assert.doesNotMatch(html,/🦇|🧙/);
   assert.doesNotMatch(ui,/🦇|🧙/);
-  assert.match(ui,/var footer=.*Contact Vansco/);
+  assert.match(ui,/var footer=[\s\S]*?Contact Vansco/);
   assert.match(studioApi,/footer_note: "Vehicle prices and availability/);
   assert.match(studioApi,/FREE nationwide delivery/);
 });
