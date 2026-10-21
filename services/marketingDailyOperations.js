@@ -63,6 +63,10 @@ export async function getDailyOperationsOverview(activityDate) {
   return requestDailyOperations("overview", { activity_date: activityDate });
 }
 
+export function getVanscoEmailToday(activityDate) {
+  return requestDailyOperations("vanscoEmailToday", { activity_date: activityDate });
+}
+
 export function getDailyOperationsTotals(startDate, endDate) {
   return requestDailyOperations("totals", {
     start_date: startDate,
