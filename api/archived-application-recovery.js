@@ -8,7 +8,8 @@ export default async function handler(req,res){
  if(!process.env.MARKETING_CUSTOMER_DATABASE_API_KEY||!equal(req.headers?.authorization?.replace(/^Bearer /i,''),process.env.MARKETING_CUSTOMER_DATABASE_API_KEY))
   return res.status(401).json({ok:false});
  if(process.env.RECOVERY_RELAY_ENABLED!=='true')return res.status(503).json({ok:false,message:'Recovery relay disabled'});
- const body=typeof req.body==='string'?JSON.parse(req.body):req.body||{};
+ let body;
+ try{body=typeof req.body==='string'?JSON.parse(req.body):req.body||{};}catch{return res.status(400).json({ok:false,message:'Invalid JSON'});}
  const to=clean(body.to).toLowerCase(),subject=clean(body.subject),text=clean(body.text),sendId=clean(body.send_id);
  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)||!subject||!text||!sendId.startsWith('recovery:')||text.length>30000)
   return res.status(400).json({ok:false,message:'Invalid recovery payload'});
@@ -17,7 +18,7 @@ export default async function handler(req,res){
  if(!process.env.SENDGRID_API_KEY)return res.status(503).json({ok:false,message:'Provider unavailable'});
  const rent2buy=/rent2buy/i.test(sendId)||/rent2buy/i.test(subject);
  try{
-  const provider=await sendSendGridEmail({apiKey:process.env.SENDGRID_API_KEY,to,subject,text,
+  const provider=await sendSendGridEmail({apiKey:process.env.SENDGRID_API_KEY,to,subject,text,html:'<div style="white-space:pre-line;font-family:Arial,sans-serif">'+text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>',
    fromEmail:rent2buy?'sales@rent2buyvans.co.uk':'sales@vanfinancecompany.co.uk',
    fromName:rent2buy?'Rent2Buy Vans':'Van Finance Company',
    categories:['archived-application-recovery'],customArgs:{recovery_send_id:sendId}});
