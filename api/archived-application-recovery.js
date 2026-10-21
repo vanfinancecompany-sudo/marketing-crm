@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {sendSendGridEmail} from '../lib/emailProviders/sendgrid.js';
+import {renderArchivedRecoveryHtml} from '../lib/emailProviders/archivedRecoveryHtml.js';
 const clean=v=>String(v??'').trim();
 const equal=(a,b)=>{const x=Buffer.from(clean(a)),y=Buffer.from(clean(b));return !!(x.length&&x.length===y.length&&crypto.timingSafeEqual(x,y));};
 export default async function handler(req,res){
@@ -22,7 +23,7 @@ export default async function handler(req,res){
  if(!process.env.SENDGRID_API_KEY)return res.status(503).json({ok:false,message:'Provider unavailable'});
  const rent2buy=sendId.startsWith('recovery:rent2buy:');
  try{
-  const provider=await sendSendGridEmail({apiKey:process.env.SENDGRID_API_KEY,to,subject,text,html:'<div style="white-space:pre-line;font-family:Arial,sans-serif">'+text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>',
+  const provider=await sendSendGridEmail({apiKey:process.env.SENDGRID_API_KEY,to,subject,text,html:renderArchivedRecoveryHtml({text,brand:rent2buy?'rent2buy':'vanFinance'}),
    fromEmail:'sales@vanfinancecompany.co.uk',
    fromName:rent2buy?'Rent2Buy Vans':'Van Finance Company',
    categories:['archived-application-recovery'],customArgs:{recovery_send_id:sendId}});
