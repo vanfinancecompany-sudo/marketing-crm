@@ -10,6 +10,7 @@ import {
   DAILY_OPERATIONS_REFRESH_EVENT,
   getDailyOperationsOverview,
   getDailyOperationsTotals,
+  getVanscoEmailToday,
   resetDailyTargetDefaults,
   saveDailyTargetOverride,
   saveDailyTargetSchedule,
@@ -62,6 +63,7 @@ const ACTIVITY_UNITS = {
   van_finance_reel: "generated",
   rent2buy_reel: "generated",
   emails_sent: "sent",
+  vansco_emails_sent: "sent",
   knowledge_hub_article: "sent to Wix",
 };
 
@@ -174,15 +176,16 @@ const ACTIVITY_NAVIGATION = {
 function ActivityCard({ metric, onOpen }) {
   const linked = Boolean(onOpen);
   const isVansco = String(metric.type || "").startsWith("vansco_");
+  const trackingOnly = metric.type === "vansco_emails_sent" && Number(metric.target || 0) === 0;
   const label = metric.label
     || (metric.type === "vansco_facebook_post" ? "Vansco Facebook posts" : ACTIVITY_LABELS[metric.type])
     || metric.type;
   const statusLabel = metric.statusLabel
-    || (metric.remaining === 0 ? "COMPLETE" : `${metric.remaining} LEFT`);
+    || (trackingOnly ? "SENT TODAY" : metric.remaining === 0 ? "COMPLETE" : `${metric.remaining} LEFT`);
   const completedLabel = metric.displayCompleted ?? metric.completed;
   return (
     <article
-      className={`operations-activity-card${metric.remaining === 0 ? " is-complete" : ""}${linked ? " is-linked" : ""}${isVansco ? " is-vansco" : ""}`}
+      className={`operations-activity-card${metric.remaining === 0 && !trackingOnly ? " is-complete" : ""}${linked ? " is-linked" : ""}${isVansco ? " is-vansco" : ""}`}
       role={linked ? "button" : undefined}
       tabIndex={linked ? 0 : undefined}
       onClick={onOpen}
@@ -200,14 +203,16 @@ function ActivityCard({ metric, onOpen }) {
       <div className="operations-activity-card__numbers">
         <strong>{completedLabel}</strong>
         <span>{ACTIVITY_UNITS[metric.type] || "posted"}</span>
-        <em>Target {metric.target}</em>
+        <em>{trackingOnly ? "Production sends · no daily target" : `Target ${metric.target}`}</em>
       </div>
-      <div
-        className="operations-progress"
-        aria-label={`${metric.percentage}% complete`}
-      >
-        <span style={{ width: `${metric.percentage}%` }} />
-      </div>
+      {!trackingOnly ? (
+        <div
+          className="operations-progress"
+          aria-label={`${metric.percentage}% complete`}
+        >
+          <span style={{ width: `${metric.percentage}%` }} />
+        </div>
+      ) : null}
       {metric.statusDetail ? (
         <small style={{ marginTop: 7, color: "#52657f", fontSize: 11, lineHeight: 1.35 }}>
           {metric.statusDetail}
@@ -259,6 +264,7 @@ export default function DashboardPage({ onNavigate }) {
   const today = londonDateKey();
   const todayWeekday = londonWeekday(new Date());
   const [overview, setOverview] = useState(null);
+  const [vanscoEmailToday, setVanscoEmailToday] = useState(null);
   const [totals, setTotals] = useState(null);
   const [period, setPeriod] = useState("today");
   const [customStart, setCustomStart] = useState(today);
@@ -329,6 +335,25 @@ export default function DashboardPage({ onNavigate }) {
       setGoogleVehicleInventory({ count: null, mode: "all", checkedAt: null, error: "Feed count unavailable" });
     }
   }
+
+  // Lightweight live refresh: real Vansco production sends only, no Buffer or other CRM changes.
+  useEffect(() => {
+    if (locked) return undefined;
+    let active = true;
+    async function refreshVanscoEmailCount() {
+      try {
+        const result = await getVanscoEmailToday(today);
+        if (active && result.date === today && Number.isFinite(Number(result.sent))) {
+          setVanscoEmailToday(Math.max(0, Number(result.sent)));
+        }
+      } catch {
+        // Keep the last confirmed figure rather than showing a misleading zero.
+      }
+    }
+    refreshVanscoEmailCount();
+    const timer = window.setInterval(refreshVanscoEmailCount, 60 * 1000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [locked, today]);
 
   useEffect(() => {
     if (locked) return undefined;
@@ -766,7 +791,20 @@ export default function DashboardPage({ onNavigate }) {
     ]);
     return [...DAILY_ACTIVITY_TYPES, "vansco_instagram_post"]
       .map((type) => live.get(type) || overview?.day?.metrics?.[type])
-      .filter(Boolean);
+      .filter(Boolean)
+      .map((metric) => {
+        if (metric.type !== "vansco_emails_sent") return metric;
+        const completed = vanscoEmailToday ?? metric.completed;
+        return {
+          ...metric,
+          completed,
+          displayCompleted: Number(completed).toLocaleString("en-GB"),
+          remaining: Math.max(0, metric.target - completed),
+          percentage: metric.target > 0 ? Math.min(100, Math.round(100 * completed / metric.target)) : 100,
+          statusLabel: "SENT TODAY",
+          statusDetail: "Confirmed SendGrid submissions · UK today",
+        };
+      });
   }, [
     overview,
     facebookStoryMetrics,
@@ -775,6 +813,7 @@ export default function DashboardPage({ onNavigate }) {
     vanscoInstagramMetric,
     vanscoStoryMetric,
     vanscoGoogleMetrics,
+    vanscoEmailToday,
   ]);
 
 
@@ -886,7 +925,9 @@ export default function DashboardPage({ onNavigate }) {
                   <ActivityCard
                     key={metric.type}
                     metric={metric}
-                    onOpen={destination ? () => onNavigate?.(destination) : undefined}
+                    onOpen={metric.type === "vansco_emails_sent"
+                      ? () => window.location.assign("/vansco-email-studio/")
+                      : destination ? () => onNavigate?.(destination) : undefined}
                   />
                 );
               })}
@@ -1033,7 +1074,9 @@ export default function DashboardPage({ onNavigate }) {
         ) : null}
       </section>
 
-      <details className="operations-drawer">
+      <details className="operations-drawer" onToggle={(event) => {
+        if (event.currentTarget.open) loadTotals(period).catch(() => {});
+      }}>
         <summary>VIEW TOTALS AND HISTORY</summary>
         <div className="operations-drawer__body">
           <div className="operations-period-tabs">
@@ -1096,18 +1139,39 @@ export default function DashboardPage({ onNavigate }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {DAILY_ACTIVITY_TYPES.map((type) => (
-                    <tr key={type}>
-                      <td>{ACTIVITY_LABELS[type]}</td>
-                      <td>{totals.totals[type].completed}</td>
-                      <td>{totals.totals[type].target}</td>
-                      <td>{totals.totals[type].shortfall}</td>
-                      <td>{totals.totals[type].daily_average}</td>
-                      <td>{totals.totals[type].completion_percentage}%</td>
-                    </tr>
-                  ))}
+                  {DAILY_ACTIVITY_TYPES.map((type) => {
+                    const row = totals.totals[type];
+                    const vanscoTrackingOnly = type === "vansco_emails_sent" && row.target === 0;
+                    return (
+                      <tr key={type}>
+                        <td>{ACTIVITY_LABELS[type]}</td>
+                        <td>{row.completed.toLocaleString("en-GB")}</td>
+                        <td>{vanscoTrackingOnly ? "—" : row.target}</td>
+                        <td>{vanscoTrackingOnly ? "—" : row.shortfall}</td>
+                        <td>{row.daily_average}</td>
+                        <td>{vanscoTrackingOnly ? "Tracking" : `${row.completion_percentage}%`}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
+              <section className="operations-vansco-email-history" aria-label="Vansco Email Studio daily history" style={{ marginTop: 20 }}>
+                <h3>Vansco Email Studio · Daily history</h3>
+                <p style={{ fontSize: 12, color: "#52657f" }}>
+                  Confirmed production emails submitted to SendGrid, by UK date. Tests and skipped recipients are excluded.
+                </p>
+                <table className="operations-table">
+                  <thead><tr><th>UK date</th><th>Emails sent</th></tr></thead>
+                  <tbody>
+                    {(totals.days || []).slice().reverse().map((day) => (
+                      <tr key={day.date}>
+                        <td>{day.date}</td>
+                        <td>{Number(day.metrics?.vansco_emails_sent?.completed || 0).toLocaleString("en-GB")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
             </div>
           ) : null}
           <section style={{ marginTop: 18, borderTop: "1px solid #dbe3ef", paddingTop: 14 }}>
