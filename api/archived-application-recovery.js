@@ -23,7 +23,7 @@ export default async function handler(req,res){
  const rent2buy=sendId.startsWith('recovery:rent2buy:');
  try{
   const provider=await sendSendGridEmail({apiKey:process.env.SENDGRID_API_KEY,to,subject,text,html:'<div style="white-space:pre-line;font-family:Arial,sans-serif">'+text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>',
-   fromEmail:rent2buy?'sales@rent2buyvans.co.uk':'sales@vanfinancecompany.co.uk',
+   fromEmail:'sales@vanfinancecompany.co.uk',
    fromName:rent2buy?'Rent2Buy Vans':'Van Finance Company',
    categories:['archived-application-recovery'],customArgs:{recovery_send_id:sendId}});
   return res.status(200).json({ok:true,provider_message_id:provider.messageId});
