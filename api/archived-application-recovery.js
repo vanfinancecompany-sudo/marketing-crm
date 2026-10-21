@@ -4,10 +4,14 @@ const clean=v=>String(v??'').trim();
 const equal=(a,b)=>{const x=Buffer.from(clean(a)),y=Buffer.from(clean(b));return !!(x.length&&x.length===y.length&&crypto.timingSafeEqual(x,y));};
 export default async function handler(req,res){
  res.setHeader('Cache-Control','no-store');
- if(req.method!=='POST')return res.status(405).json({ok:false});
+ if(!['GET','POST'].includes(req.method))return res.status(405).json({ok:false});
  if(!process.env.MARKETING_CUSTOMER_DATABASE_API_KEY||!equal(req.headers?.authorization?.replace(/^Bearer /i,''),process.env.MARKETING_CUSTOMER_DATABASE_API_KEY))
   return res.status(401).json({ok:false});
  if(process.env.RECOVERY_RELAY_ENABLED!=='true')return res.status(503).json({ok:false,message:'Recovery relay disabled'});
+ if(!process.env.SENDGRID_API_KEY)return res.status(503).json({ok:false,message:'Provider unavailable'});
+ // Authenticated read-only preflight: CRM checks the *actual* relay before it
+ // claims an address. GET never calls SendGrid or accepts a recipient.
+ if(req.method==='GET')return res.status(200).json({ok:true,ready:true,delivery:'configured'});
  let body;
  try{body=typeof req.body==='string'?JSON.parse(req.body):req.body||{};}catch{return res.status(400).json({ok:false,message:'Invalid JSON'});}
  const to=clean(body.to).toLowerCase(),subject=clean(body.subject),text=clean(body.text),sendId=clean(body.send_id);
