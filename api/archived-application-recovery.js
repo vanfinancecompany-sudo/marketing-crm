@@ -11,12 +11,12 @@ export default async function handler(req,res){
  let body;
  try{body=typeof req.body==='string'?JSON.parse(req.body):req.body||{};}catch{return res.status(400).json({ok:false,message:'Invalid JSON'});}
  const to=clean(body.to).toLowerCase(),subject=clean(body.subject),text=clean(body.text),sendId=clean(body.send_id);
- if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)||!subject||!text||!sendId.startsWith('recovery:')||text.length>30000)
+ if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)||!subject||!text||!/^recovery:(vanFinance|rent2buy):[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sendId)||sendId.split(':').slice(2).join(':').toLowerCase()!==to||text.length>30000)
   return res.status(400).json({ok:false,message:'Invalid recovery payload'});
  if(!/\/api\/customer-recovery-unsubscribe\?token=/.test(text))
   return res.status(400).json({ok:false,message:'Missing unsubscribe link'});
  if(!process.env.SENDGRID_API_KEY)return res.status(503).json({ok:false,message:'Provider unavailable'});
- const rent2buy=/rent2buy/i.test(sendId)||/rent2buy/i.test(subject);
+ const rent2buy=sendId.startsWith('recovery:rent2buy:');
  try{
   const provider=await sendSendGridEmail({apiKey:process.env.SENDGRID_API_KEY,to,subject,text,html:'<div style="white-space:pre-line;font-family:Arial,sans-serif">'+text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>',
    fromEmail:rent2buy?'sales@rent2buyvans.co.uk':'sales@vanfinancecompany.co.uk',
