@@ -249,3 +249,24 @@ test("completed production send batches keep existing email totals", () => {
   });
   assert.equal(summary.metrics.emails_sent.completed, 125);
 });
+
+test("Vansco Email Studio is independently counted from shared VFC/Rent2Buy email batches", () => {
+  const summary = summarizeDailyActivity({
+    targets: DEFAULT_DAILY_TARGETS,
+    emailSends: [{id:"vfc-one",send_type:"production",status:"completed",sent_count:80}],
+    vanscoEmailSends: [{activity_date:"2026-10-21",sent_count:457}],
+  });
+  assert.equal(summary.metrics.emails_sent.completed, 80);
+  assert.equal(summary.metrics.vansco_emails_sent.completed, 457);
+  assert.equal(summary.metrics.vansco_emails_sent.target, 0);
+  assert.equal(summary.metrics.vansco_emails_sent.remaining, 0);
+  assert.equal(summary.metrics.vansco_emails_sent.percentage, 100);
+  const next = summarizeDailyActivity({
+    targets: DEFAULT_DAILY_TARGETS,
+    vanscoEmailSends: [{activity_date:"2026-10-22",sent_count:25}],
+  });
+  const period = aggregatePeriod([summary,next]);
+  assert.equal(period.vansco_emails_sent.completed, 482);
+  assert.equal(period.emails_sent.completed, 80);
+  assert.equal(period.vansco_emails_sent.target, 0);
+});

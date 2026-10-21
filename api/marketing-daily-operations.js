@@ -112,10 +112,19 @@ async function fetchPagedRows(makeQuery, pageSize = 1000) {
   }
 }
 
+async function vanscoEmailCounts(supabase, startDate, endDate) {
+  const { data, error } = await supabase.rpc("vansco_email_daily_sent_counts", {
+    p_start_date: startDate,
+    p_end_date: endDate,
+  });
+  if (error) throw error;
+  return data || [];
+}
+
 async function loadActivity(supabase, startDate, endDate) {
   const startRange = londonDateRange(startDate);
   const endRange = londonDateRange(endDate);
-  const [events, sends, reels] = await Promise.all([
+  const [events, sends, reels, vanscoEmailSends] = await Promise.all([
     fetchPagedRows(() =>
       supabase
         .from("marketing_daily_activity_events")
@@ -142,8 +151,9 @@ async function loadActivity(supabase, startDate, endDate) {
         .lt("created_at", endRange.end)
         .order("created_at", { ascending: true }),
     ),
+    vanscoEmailCounts(supabase, startDate, endDate),
   ]);
-  return { events, sends, reels };
+  return { events, sends, reels, vanscoEmailSends };
 }
 
 function sendActivityDate(row) {
@@ -156,7 +166,7 @@ function reelActivityDate(row) {
 
 async function buildDays(supabase, startDate, endDate) {
   const dateKeys = enumerateDateKeys(startDate, endDate);
-  const [{ schedules, overrides }, { events, sends, reels }] = await Promise.all([
+  const [{ schedules, overrides }, { events, sends, reels, vanscoEmailSends }] = await Promise.all([
     loadConfiguration(supabase, startDate, endDate),
     loadActivity(supabase, startDate, endDate),
   ]);
@@ -172,6 +182,7 @@ async function buildDays(supabase, startDate, endDate) {
       targets,
       events: events.filter((event) => event.activity_date === dateKey),
       emailSends: sends.filter((row) => sendActivityDate(row) === dateKey),
+      vanscoEmailSends: vanscoEmailSends.filter((row) => row.activity_date === dateKey),
       generatedReels: reels.filter((row) => reelActivityDate(row) === dateKey),
     });
     return { date: dateKey, target_source: targets.source, ...summary };
@@ -350,6 +361,14 @@ export default async function handler(request, response) {
       return response.status(200).json({
         ok: true,
         ...(await overview(supabase, assertDateKey(body.activity_date))),
+      });
+    }
+    if (action === "vanscoEmailToday") {
+      const dateKey = assertDateKey(body.activity_date);
+      const counts = await vanscoEmailCounts(supabase, dateKey, dateKey);
+      return response.status(200).json({
+        ok: true, date: dateKey,
+        sent: counts.reduce((total, row) => total + Number(row.sent_count || 0), 0),
       });
     }
     if (action === "totals") {

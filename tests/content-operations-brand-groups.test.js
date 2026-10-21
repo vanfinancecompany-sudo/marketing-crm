@@ -13,6 +13,8 @@ test("Content Operations groups every live activity exactly once by business", (
   assert.deepEqual(groups.flatMap(g => g.metrics).map(m => m.type).sort(), types.sort());
   for (const g of groups) assert.equal(new Set(g.metrics.map(m => m.type)).size,g.metrics.length);
   assert.ok(groups.find(g => g.key==="vansco").metrics.some(m => m.type==="vansco_instagram_post"));
+  assert.ok(groups.find(g => g.key==="vansco").metrics.some(m => m.type==="vansco_emails_sent"));
+  assert.ok(!groups.find(g => g.key==="shared").metrics.some(m => m.type==="vansco_emails_sent"));
   assert.deepEqual(groups.find(g => g.key==="shared").metrics.map(m=>m.type),["emails_sent","knowledge_hub_article"]);
 });
 

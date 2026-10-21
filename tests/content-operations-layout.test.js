@@ -153,3 +153,30 @@ test("Buffer live status keeps updating placement cards without creating a dupli
   assert.match(bridge, /window\.dispatchEvent\(new CustomEvent\("buffer-facebook-live-status"/);
   assert.match(bridge, /if \(kind === "operations"\)/);
 });
+
+test("Vansco Email Studio card, live daily count and detailed totals are based on real isolated production sends", async () => {
+  const [page, endpoint, registry, migration] = await Promise.all([
+    read("pages/DashboardPage.jsx"),
+    read("api/marketing-daily-operations.js"),
+    read("lib/marketingDailyOperations.js"),
+    read("supabase/migrations/20261021_vansco_email_content_operations_daily_totals.sql"),
+  ]);
+  assert.match(registry, /vansco_emails_sent: "Vansco Email Studio"/);
+  assert.match(registry, /vansco_emails_sent: 0/);
+  assert.match(registry, /vanscoEmailSends\.reduce/);
+  assert.match(registry, /!\["emails_sent","vansco_emails_sent"\]\.includes\(type\)/);
+  assert.match(endpoint, /vansco_email_daily_sent_counts/);
+  assert.match(endpoint, /vanscoEmailSends: vanscoEmailSends\.filter/);
+  assert.match(endpoint, /if \(action === "vanscoEmailToday"\)/);
+  assert.match(page, /getVanscoEmailToday\(today\)/);
+  assert.match(page, /60 \* 1000/);
+  assert.match(page, /window\.location\.assign\("\/vansco-email-studio\/"\)/);
+  assert.match(page, /Vansco Email Studio · Daily history/);
+  assert.match(page, /day\.metrics\?\.vansco_emails_sent\?\.completed/);
+  assert.match(migration, /s\.send_type='production'/);
+  assert.match(migration, /s\.provider_message_id is not null/);
+  assert.match(migration, /s\.status in \('accepted','sent','delivered','opened','clicked','bounced'\)/);
+  assert.match(migration, /s\.created_at at time zone 'Europe\/London'/);
+  assert.match(migration, /revoke all on function public\.vansco_email_daily_sent_counts/);
+  assert.match(migration, /grant execute on function public\.vansco_email_daily_sent_counts.*to service_role/);
+});
