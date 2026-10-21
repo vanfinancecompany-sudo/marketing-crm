@@ -459,7 +459,7 @@ Apply now and get approved today.
 ${rentVehicleUrl(rentVehicle)}`);
   }
 
-  if (destination === "Rent2Buy Facebook") {
+  if (destination === "Rent2Buy Facebook" || destination === "Rent2Buy Marketplace") {
     return sanitizePostingCaption(`NO CREDIT CHECK | ${formatMonthlyMth(rentVehicle.monthly || "available")}
 
 RENT IT! - DRIVE IT! - OWN IT!
