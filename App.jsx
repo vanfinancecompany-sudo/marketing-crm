@@ -1197,7 +1197,9 @@ useEffect(() => {
   }, [creatives]);
 
   const financeVehicles = useMemo(() => {
-    return vehicles;
+    // Cars are a separate product lane. Never let Cars stock drift into
+    // Van Finance Facebook, Marketplace or Groups selection pools.
+    return vehicles.filter((vehicle) => vehicle.pipeline !== "cars");
   }, [vehicles]);
 
   const rentVehicles = useMemo(() => {
