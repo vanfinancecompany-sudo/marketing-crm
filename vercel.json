@@ -31,6 +31,10 @@
       "schedule": "3 * * * *"
     },
     {
+      "path": "/api/sync-cars-stock?auto=true",
+      "schedule": "7 * * * *"
+    },
+    {
       "path": "/api/buffer-facebook-automation-cron",
       "schedule": "5 6-22 * * *"
     },
@@ -181,6 +185,9 @@
       "maxDuration": 300
     },
     "api/vansco-email-delivery.js": {
+      "maxDuration": 120
+    },
+    "api/sync-cars-stock.js": {
       "maxDuration": 120
     }
   },
