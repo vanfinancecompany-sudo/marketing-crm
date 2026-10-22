@@ -27,6 +27,13 @@ function syncEnabled(environment = process.env) {
   return clean(environment.CARS_STOCK_SYNC_ENABLED).toLowerCase() === "true";
 }
 
+export function needsLargeCarsReconciliationConfirmation(preview = {}) {
+  const active = Number(preview?.counts?.crmActiveRegistrations || 0);
+  const deactivate = Number(preview?.counts?.deactivate || 0);
+  if (active <= 0 || deactivate < 5) return false;
+  return deactivate / active >= 0.5;
+}
+
 function authorisedCron(request, environment = process.env) {
   const expected = clean(environment.CRON_SECRET);
   const supplied = clean(request.headers?.authorization);
@@ -166,7 +173,7 @@ export function buildCarsWritePlan(sourceVehicles = [], existingRows = []) {
   };
 }
 
-async function syncCarsStock() {
+async function syncCarsStock({ allowLargeReconciliation = false } = {}) {
   const [source, supabase] = await Promise.all([
     loadPublishedCars(),
     Promise.resolve(getSupabaseServiceAdmin()),
@@ -176,6 +183,11 @@ async function syncCarsStock() {
 
   if (!preview.safeToApply) {
     throw new Error(`Cars stock reconciliation failed its safety preview: ${preview.warnings.join(" ") || "unsafe source"}`);
+  }
+  if (needsLargeCarsReconciliationConfirmation(preview) && !allowLargeReconciliation) {
+    throw new Error(
+      `Cars stock reconciliation circuit breaker: ${preview.counts.deactivate} of ${preview.counts.crmActiveRegistrations} active Cars would be deactivated. Run the authenticated manual sync with confirmLarge=true after reviewing the read-only preview.`
+    );
   }
 
   const plan = buildCarsWritePlan(source.vehicles, existingRows);
@@ -254,7 +266,11 @@ export default async function handler(request, response) {
   }
 
   try {
-    const result = await syncCarsStock();
+    const allowLargeReconciliation =
+      !automatic &&
+      (request.body?.confirmLarge === true ||
+        clean(request.query?.confirmLarge).toLowerCase() === "true");
+    const result = await syncCarsStock({ allowLargeReconciliation });
     console.info("[sync-cars-stock] complete", {
       automatic,
       wixRows: result.wixRows,
