@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { buildCarsWritePlan } from "../api/sync-cars-stock.js";
+import {
+  buildCarsWritePlan,
+  needsLargeCarsReconciliationConfirmation,
+} from "../api/sync-cars-stock.js";
 
 test("Cars write plan updates current, inserts new and deactivates stale only", () => {
   const source = [
@@ -58,4 +61,26 @@ test("Cars cron is hourly, isolated and feature-gated in source", async () => {
   assert.match(syncSource, /CARS_STOCK_SYNC_ENABLED/);
   assert.match(syncSource, /CRON_SECRET/);
   assert.match(syncSource, /if \(!syncEnabled\(\)\)/);
+});
+
+test("large Cars stock drops require explicit confirmation", () => {
+  assert.equal(
+    needsLargeCarsReconciliationConfirmation({
+      counts: { crmActiveRegistrations: 29, deactivate: 19 },
+    }),
+    true
+  );
+  assert.equal(
+    needsLargeCarsReconciliationConfirmation({
+      counts: { crmActiveRegistrations: 14, deactivate: 2 },
+    }),
+    false
+  );
+});
+
+test("automatic Cars sync can never opt into a large reconciliation", async () => {
+  const source = await readFile(new URL("../api/sync-cars-stock.js", import.meta.url), "utf8");
+  assert.match(source, /!automatic\s*&&/);
+  assert.match(source, /confirmLarge/);
+  assert.match(source, /circuit breaker/);
 });
