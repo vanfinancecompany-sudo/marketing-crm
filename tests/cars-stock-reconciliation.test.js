@@ -5,6 +5,11 @@ import {
   publishedCarsFromWixRows,
 } from "../lib/carStockReconciliation.js";
 
+test("Cars reconciliation preview endpoint module loads", async () => {
+  const module = await import("../api/cars-stock-reconciliation-preview.js");
+  assert.equal(typeof module.default, "function");
+});
+
 test("publishedCarsFromWixRows keeps only the latest published Cars row per registration", () => {
   const result = publishedCarsFromWixRows([
     {
