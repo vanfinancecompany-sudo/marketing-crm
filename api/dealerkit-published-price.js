@@ -1,4 +1,4 @@
-import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
+import { fetchDealerKitStockDetail, fetchDealerKitStockSnapshot } from "./_dealerkit-stock-adapter.js";
 import {
   VAN_FINANCE_WIX_COLLECTIONS,
   buildFinanceWixPricePatch,
@@ -134,7 +134,34 @@ async function freshDealerKitVehicle(body, pipeline) {
   }
 
   if (pipeline === "rent2buy") {
-    throw new ApiError(409, "Rent2Buy price updates require a fresh DealerKit vehicle identity so retail price, year and mileage are rechecked server-side. Refresh Stock Watch and retry.");
+    let snapshot;
+    try { snapshot = await fetchDealerKitStockSnapshot({ allowPartial: true }); }
+    catch (error) { throw new ApiError(502, `DealerKit stock could not be rechecked: ${clean(error?.message, 500) || "request failed"}`); }
+    const matches = (Array.isArray(snapshot?.vehicles) ? snapshot.vehicles : [])
+      .filter((vehicle) => normalizeFinanceRegistration(vehicle?.registration) === registration);
+    if (matches.length !== 1) {
+      throw new ApiError(409, matches.length > 1
+        ? "DealerKit contains more than one current stock record for this registration. Nothing was changed."
+        : "This Rent2Buy registration is not present in the current DealerKit stock feed. Nothing was changed.");
+    }
+    const current = matches[0];
+    if (!current?.supplierStockId) throw new ApiError(409, "DealerKit stock identity is missing for this Rent2Buy vehicle. Nothing was changed.");
+    let vehicle;
+    try { vehicle = await fetchDealerKitStockDetail(current.supplierStockId, { specifications: false }); }
+    catch (error) { throw new ApiError(502, `DealerKit could not be rechecked: ${clean(error?.message, 500) || "request failed"}`); }
+    if (normalizeFinanceRegistration(vehicle?.registration) !== registration ||
+        String(vehicle?.supplierStockId || "") !== String(current.supplierStockId)) {
+      throw new ApiError(409, "DealerKit registration or stock identity changed during the Rent2Buy price check. Nothing was changed.");
+    }
+    if (!["available", "in_stock", "due_in"].includes(clean(vehicle?.status || vehicle?.sourceStatus, 100).toLowerCase().replace(/[\s-]+/g, "_"))) {
+      throw new ApiError(409, "DealerKit no longer shows this vehicle as available for a Rent2Buy price update.");
+    }
+    const retailPrice = parseRetailPrice(vehicle?.retailPrice);
+    if (retailPrice === null || retailPrice < 1000 || retailPrice > 100000 ||
+        !Number.isFinite(Number(vehicle?.year)) || !Number.isFinite(Number(vehicle?.mileage))) {
+      throw new ApiError(409, "DealerKit does not currently provide the retail price, year and mileage required for Felix Rent2Buy pricing.");
+    }
+    return { ...vehicle, registration, retailPrice, supplierStockId: current.supplierStockId, sourceMode: "fresh_dealerkit_registration_lookup" };
   }
   throw new ApiError(409, "DealerKit stock identity is missing from this price card. Refresh Stock Watch before previewing or updating Wix prices.");
 }
