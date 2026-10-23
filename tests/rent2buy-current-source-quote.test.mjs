@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {rent2BuyPricingSourceRevision,verifyRent2BuyQuoteAgainstSource} from "../lib/rent2BuyCurrentSourceQuote.mjs";
-import {quoteRent2BuyMatrix,rent2BuyInitialRentalLadder} from "../lib/rent2BuyFlexiblePricing.mjs";
+import {quoteRent2BuyMatrix} from "../lib/rent2BuyFlexiblePricing.mjs";
 
 function source(registration="ZZ25XYZ",retail=12000){
  const id="dealerkit-"+registration;
@@ -9,7 +9,7 @@ function source(registration="ZZ25XYZ",retail=12000){
   vehicle:{registration,supplierStockId:id,title:"Test van",year:2025,mileage:12000,
     retailPrice:retail,vatStatus:"plus_vat",sourceUpdatedAt:"2026-10-23T12:00:00Z"},
   decision:{registration,supplierStockId:id,reviewStatus:"reviewed",rent2buyEnabled:true},
-  sourceRetailPrice:retail,activeSpecial:null,
+  sourceRetailPrice:retail,
  };
 }
 function quoteFor(s,options={}){
@@ -22,9 +22,10 @@ function quoteFor(s,options={}){
    sourceRevision:rent2BuyPricingSourceRevision(s),...result};
 }
 
-test("reviewed DealerKit retail source exactly confirms a matrix quote",()=>{
+test("reviewed DealerKit retail source exactly confirms a Felix matrix quote",()=>{
  const s=source(),q=quoteFor(s);
  assert.equal(q.monthlyExVat,400);
+ assert.equal(q.pricingMode,"matrix");
  const result=verifyRent2BuyQuoteAgainstSource(q,s);
  assert.equal(result.ok,true);
  assert.equal(result.sourceRevisionVerified,true);
@@ -38,44 +39,22 @@ test("source revision changes with retail, mileage, vehicle update or Rent2Buy r
  assert.notEqual(rent2BuyPricingSourceRevision({...s,decision:{...s.decision,rent2buyEnabled:false}}),revision);
 });
 
-test("unreviewed or changed pricing inputs fail without any stock snapshot subsystem",()=>{
+test("unreviewed or changed pricing inputs fail closed",()=>{
  const s=source(),q=quoteFor(s);
  assert.equal(verifyRent2BuyQuoteAgainstSource(q,{...s,sourceRetailPrice:13000}).reason,"source_revision_changed");
  assert.equal(verifyRent2BuyQuoteAgainstSource(q,{...s,decision:{...s.decision,rent2buyEnabled:false}}).reason,"rent2buy_not_reviewed");
  assert.equal(verifyRent2BuyQuoteAgainstSource(q,{...s,sourceRetailPrice:null}).reason,"retail_price_unavailable");
 });
 
-test("four protected legacy specials cannot fall back to matrix before migration",()=>{
+test("the four fixed legacy specials can never fall back to Felix matrix",()=>{
  const s=source("FV74BBJ",14695),q=quoteFor(s);
  assert.equal(verifyRent2BuyQuoteAgainstSource(q,s).reason,"fixed_legacy_special_not_customisable");
 });
 
-test("exact active special works; changing its settings returns to ordinary matrix",()=>{
- const s=source("ZZ25XYZ",14695);
- s.vehicle.year=2024;s.vehicle.mileage=46251;
- s.activeSpecial={id:"special-1",revision:3,status:"active",registration:"ZZ25XYZ",
-   supplier_stock_id:s.vehicle.supplierStockId,monthly_ex_vat:545,initial_ex_vat:2000,
-   term_months:36,miles_per_month:1000,expires_at:null};
- const special=quoteFor(s,{termMonths:36,milesPerMonth:1000,initialRentalExVat:2000,
-   specialDeal:{enabled:true,monthlyExVat:545,initialExVat:2000,termMonths:36,milesPerMonth:1000}});
- assert.equal(special.pricingMode,"special");
- assert.equal(verifyRent2BuyQuoteAgainstSource(special,s).ok,true);
- const initial=rent2BuyInitialRentalLadder(14695)[0];
- const matrix=quoteFor(s,{termMonths:24,milesPerMonth:1000,initialRentalExVat:initial,
-   specialDeal:{enabled:true,monthlyExVat:545,initialExVat:2000,termMonths:36,milesPerMonth:1000}});
- assert.equal(matrix.pricingMode,"matrix");
- assert.equal(verifyRent2BuyQuoteAgainstSource(matrix,s).ok,true);
-});
-
-test("expired special and changed signed amount are rejected",()=>{
- const s=source("ZZ25XYZ",14695);
- s.activeSpecial={id:"special-1",revision:2,status:"active",registration:"ZZ25XYZ",
-   supplier_stock_id:s.vehicle.supplierStockId,monthly_ex_vat:545,initial_ex_vat:2000,
-   term_months:36,miles_per_month:1000,expires_at:"2026-10-22T23:59:59Z"};
- const q=quoteFor(s,{termMonths:36,milesPerMonth:1000,initialRentalExVat:2000,
-   specialDeal:{enabled:true,monthlyExVat:545,initialExVat:2000,termMonths:36,milesPerMonth:1000}});
- assert.equal(verifyRent2BuyQuoteAgainstSource(q,s,{now:Date.UTC(2026,9,23)}).reason,"special_deal_not_active");
- s.activeSpecial.expires_at=null;
- const wrong={...q,sourceRevision:rent2BuyPricingSourceRevision(s),monthlyExVat:500};
- assert.equal(verifyRent2BuyQuoteAgainstSource(wrong,s).reason,"quoted_amount_changed");
+test("changed or relabelled signed amounts are rejected",()=>{
+ const s=source(),q=quoteFor(s,{termMonths:36,milesPerMonth:2000,initialRentalExVat:1750});
+ assert.equal(verifyRent2BuyQuoteAgainstSource(q,s).ok,true);
+ assert.equal(verifyRent2BuyQuoteAgainstSource({...q,monthlyExVat:q.monthlyExVat+5},s).reason,"quoted_amount_changed");
+ assert.equal(verifyRent2BuyQuoteAgainstSource({...q,pricingMode:"special"},s).reason,"quoted_amount_changed");
+ assert.equal(verifyRent2BuyQuoteAgainstSource({...q,milesPerMonth:4000},s).reason,"quoted_amount_changed");
 });
