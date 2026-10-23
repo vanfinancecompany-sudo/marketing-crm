@@ -135,7 +135,9 @@ async function freshDealerKitVehicle(body, pipeline) {
 
   const retailPrice = parseRetailPrice(body.retail_price);
   if (retailPrice === null || retailPrice < 1000 || retailPrice > 100000) throw new ApiError(400, "The DealerKit retail price is outside the permitted range.");
-  if (pipeline === "rent2buy" && !Number.isFinite(Number(body.mileage))) throw new ApiError(400, "DealerKit mileage is required to recalculate Rent2Buy pricing.");
+  if (pipeline === "rent2buy") {
+    throw new ApiError(409, "Rent2Buy price updates require a fresh DealerKit vehicle identity so retail price, year and mileage are rechecked server-side. Refresh Stock Watch and retry.");
+  }
   return {
     registration,
     retailPrice,
@@ -209,8 +211,12 @@ async function rent2BuyPreview(configuration, vehicle) {
   if (!master?.item) throw new ApiError(409, `${vehicle.registration} is not published in the shared Rent2Buy ALLRENT2BUYVANS collection. Nothing was changed.`);
 
   const pickup = rows.some(({ collection, item }) => collection.id === "PICKUPS" && item);
-  const pricing = calculatePublishedRent2BuyPricing({ retailPrice: vehicle.retailPrice, mileage: vehicle.mileage, vatStatus: vehicle.vatStatus, pickup });
-  if (!pricing) throw new ApiError(409, "Rent2Buy pricing could not be safely recalculated from the current DealerKit retail price and mileage.");
+  const pricing = calculatePublishedRent2BuyPricing({
+    retailPrice: vehicle.retailPrice,
+    registrationYear: vehicle.year,
+    mileage: vehicle.mileage,
+  });
+  if (!pricing) throw new ApiError(409, "Rent2Buy pricing could not be safely recalculated from the current DealerKit retail price, year and mileage.");
 
   const matches = rows.flatMap(({ collection, item }) => {
     if (!item) return [];
