@@ -30,3 +30,13 @@ test("existing non-Rent2Buy advertisements remain outside the manual-special hol
   const publisher=fs.readFileSync(new URL("../lib/dealerKitRent2BuyWixPlan.js", import.meta.url),"utf8");
   assert.match(publisher,/decision\.rent2buyEnabled \? pendingRent2BuySpecialDeal\(registration\) : null/);
 });
+
+test("Price Differences write endpoint blocks protected Rent2Buy deals before changing Wix", () => {
+  const source=fs.readFileSync(new URL("../api/dealerkit-published-price.js", import.meta.url),"utf8");
+  assert.match(source,/pendingRent2BuySpecialDeal\(body\.registration\)/);
+  assert.match(source,/protectedDeal && action === "update"/);
+  assert.match(source,/pendingRent2BuySpecialDeal\(vehicle\.registration\)/);
+  assert.match(source,/preview\.protected_special_deal = protectedDeal/);
+  assert.match(source,/approved manual special-deal price/);
+  assert.match(source,/if \(pipeline === "rent2buy" && action === "update"/);
+});
