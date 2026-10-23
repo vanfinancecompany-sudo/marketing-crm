@@ -51,8 +51,11 @@ export async function loadRent2BuyPricingSource(registration,{
   if(!vehicle||reg(vehicle.registration)!==target||
      String(vehicle.supplierStockId)!==String(decision.supplierStockId))
     reject("dealerkit_vehicle_mismatch");
-  if(!positive(vehicle.retailPrice)||!Number.isFinite(Number(vehicle.year))||
-     !Number.isFinite(Number(vehicle.mileage)))
+  if(!positive(vehicle.retailPrice)||
+     vehicle.year===null||vehicle.year===undefined||vehicle.year===""||
+     !Number.isFinite(Number(vehicle.year))||Number(vehicle.year)<=0||
+     vehicle.mileage===null||vehicle.mileage===undefined||vehicle.mileage===""||
+     !Number.isFinite(Number(vehicle.mileage))||Number(vehicle.mileage)<0)
     reject("pricing_inputs_missing");
 
   const activeSpecial=await loadSpecial(db,target);
