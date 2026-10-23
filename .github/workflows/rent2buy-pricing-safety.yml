@@ -8,6 +8,8 @@ on:
       - "api/_rent2buy-*.mjs"
       - "api/rent2buy-*.js"
       - "api/dealerkit-published-price.js"
+      - "api/dealerkit-controlled-publish.js"
+      - "api/_rent2buy-protected-price-write.mjs"
       - "api/dealerkit-rent2buy-special-deal.js"
       - "api/transactional-rent2buy-application.js"
       - "api/dealerkit-stock-watch-session.js"
