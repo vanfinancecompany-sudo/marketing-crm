@@ -112,3 +112,24 @@ A pure server-side token contract and tests are staged in lib/rent2BuyQuoteHando
 3. Special: exact approved combination uses special price; altered configuration returns to matrix (with valid initial ladder).
 4. Forged amount, wrong reg, stale token and unsupported contract fail closed with recovery path.
 5. Check untouched eligibility, proofs, archived vehicles and registration-only applicants.
+
+## Verified live Wix read-only snapshot, 23 October 2026
+
+Site: VAN FINANCE Wix CMS (the shared source for both public sites), site ID 85f11c52-ee54-495d-aaec-a351831709b5. Two collections queried with Wix Data Items Query, **without mutations**: ALLRENT2BUYVANS (listing) and VANPAGES (detail).
+
+| Reg | Listing monthly +VAT | Listing initial +VAT | Listing term | Detail monthly +VAT | Detail initial +VAT | Detail term |
+|---|---:|---:|---|---:|---:|---|
+| BT25LVK | £595 | £2,000 | x48 | £595 | £2,000 | 48X |
+| FV74BBJ | £545 | £2,000 | x48 | £545 | £2,000 | 36X |
+| FV74BEO | £595 | £2,000 | x48 | £595 | £2,000 | 48X |
+| BJ74HTL | £595 | £2,000 | x48 | £693 | £2,079 | 48X |
+
+**UNRESOLVED PREEXISTING INCONSISTENCIES:**
+1. BJ74HTL listing shows special £595 monthly and £2,000 initial, but detail shows £693 monthly and £2,079 initial. Never override either value automatically. Obtain approval which is binding before syncing.
+2. FV74BBJ listing shows x48 but detail says 36X. The screenshot confirms £545 special monthly, NOT the proper term. Ask commercial owner to confirm the special terms before importing/updating.
+3. None of these Wix CMS records includes an approved special-offer monthly mileage allowance. Do not assign 1,000 miles/month merely because the new matrix defaults to it.
+4. These are publicly published CMS price records, NOT a complete special-deal contract. Do not automatically treat them as full verified overrides.
+
+The temporary migration hold in lib/rent2BuyProtectedSpecialDeals.mjs blocks controlled Wix Rent2Buy publishing by registration, independent of conflicting source values. This safeguard exists ONLY ON THE DEVELOPMENT BRANCH until reviewed and merged; it is **not active in production**.
+
+Do not touch live Wix items or click CRM "Update Wix price" buttons for these registrations until the price/term discrepancy and contract mileage are resolved.
