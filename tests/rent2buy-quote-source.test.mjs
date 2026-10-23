@@ -31,7 +31,7 @@ test("uses existing reviewed Rent2Buy decision and DealerKit vehicle pricing inp
  assert.equal(result.sourceRetailPrice,12000);
  assert.equal(result.vehicle.mileage,12000);
  assert.equal(result.decision.rent2buyEnabled,true);
- assert.equal(result.activeSpecial,null);
+ assert.equal(Object.hasOwn(result,"activeSpecial"),false);
 });
 
 test("does not require or query a new stock snapshot or retail approval table",async()=>{
