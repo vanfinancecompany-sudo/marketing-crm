@@ -239,3 +239,14 @@ NO PUBLIC QUOTE ISSUANCE API YET. It would trigger expensive full DealerKit read
 - A live 90-second freshness target requires a reliable refresh cadence or many quote requests will rightly fail as unavailable. No cron/automation has been added.
 - The four legacy protected deals, VAT approval table, commercial term agreement, secure issuer, selector UI and end-to-end application/CRM/email previews must still be resolved.
 - GitHub actions: new tests in tests/rent2buy-complete-quote-snapshot.test.mjs, protected by Rent2Buy Pricing Safety CI. No production merge or deployment.
+
+### Observed actual refresh cadence (read-only live check, 23 October 2026)
+
+Production Vercel cron in vercel.json schedules /api/stock-watch-monitor-agent at `*/15 * * * *`. Read-only Supabase rows in public.stock_watch_monitor_runs confirm regular 15-minute DealerKit monitor runs; six latest inspected provider snapshots were complete, reporting about 257–258 vehicles. Importantly, this 15-minute monitor route is DIFFERENT from api/dealerkit-stock-watch-session.js where the optional quote-snapshot capture hook currently exists.
+
+Consequences:
+- The proposed 90-second strict freshness window is incompatible with the existing 15-minute schedule for continuously available customer calculators. DO NOT ENABLE customer quote issuance based on the current cadence.
+- No hourly/minute-level new DealerKit schedule has been approved or created. NEVER increase full-feed scanning frequency merely to satisfy a calculator without measuring the provider quota and request cost.
+- Investigate reusing the existing successful 15-minute monitor snapshot with a genuinely fresh single-vehicle detail request and a clearly defined acceptable freshness/stock-risk policy, OR plan a tested quota-safe faster bulk cadence. Both require explicit commercial and technical approval.
+- Until then, the safe result is "quote unavailable" outside the current 90-second window. This is a release-blocking availability concern, not a reason to ignore an expired snapshot.
+
