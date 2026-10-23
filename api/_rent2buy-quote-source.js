@@ -49,6 +49,9 @@ export async function loadRent2BuyPricingSource(registration,{
   if(!vehicle||reg(vehicle.registration)!==target||
      String(vehicle.supplierStockId)!==String(indexed.supplierStockId))
     reject("dealerkit_vehicle_mismatch");
+  const status=String(vehicle.status||vehicle.sourceStatus||"").trim().toLowerCase().replace(/[\s-]+/g,"_");
+  if(!["available","in_stock","due_in"].includes(status))
+    reject("dealerkit_vehicle_not_available");
   if(!positive(vehicle.retailPrice)||
      vehicle.year===null||vehicle.year===undefined||vehicle.year===""||
      !Number.isFinite(Number(vehicle.year))||Number(vehicle.year)<=0||
