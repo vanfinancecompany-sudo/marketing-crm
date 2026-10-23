@@ -235,7 +235,7 @@ function attachHelper(card) {
     const note = document.createElement("div");
     note.className = "vehicle-card__meta";
     note.setAttribute("data-rent2buy-price-protection", "true");
-    note.textContent = "SPECIAL DEAL PROTECTED · Published £" + special.publishedMonthlyExVat + " + VAT. Verify its initial rental, contract term and mileage before migration. Automatic Wix price updates are disabled.";
+    note.textContent = "SPECIAL DEAL PROTECTED · Wix listing £" + special.publishedMonthlyExVat + " + VAT. Vehicle-detail prices may differ. Verify the agreed initial rental, term and mileage before migration. Automatic Wix price updates are disabled.";
     const disabled = document.createElement("button");
     disabled.type = "button";
     disabled.className = "button button--primary";
