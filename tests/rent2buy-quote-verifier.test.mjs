@@ -10,8 +10,7 @@ const now=Date.UTC(2026,9,23,14),secret="server-side-test-secret-minimum-32-char
 const env={RENT2BUY_QUOTE_VERIFIER_ENABLED:"true",RENT2BUY_QUOTE_SIGNING_SECRET:secret};
 const source={vehicle:{registration:"ZZ25XYZ",supplierStockId:"dk-zz",title:"Test van",year:2025,mileage:12000,
   retailPrice:12000,vatStatus:"plus_vat",sourceUpdatedAt:"2026-10-23T10:00:00Z"},
- decision:{registration:"ZZ25XYZ",supplierStockId:"dk-zz",reviewStatus:"reviewed",rent2buyEnabled:true},
- sourceRetailPrice:12000,activeSpecial:null};
+ sourceRetailPrice:12000,sourceMode:"dealerkit_current_stock",activeSpecial:null};
 
 function token(overrides={}){
  const quote=quoteRent2BuyMatrix({retailPrice:source.sourceRetailPrice,registrationYear:source.vehicle.year,
@@ -22,7 +21,7 @@ function token(overrides={}){
   sourceRevision:rent2BuyPricingSourceRevision(source),issuedAt:now,expiresAt:now+3600000,...overrides},secret,now);
 }
 
-test("signed quote recalculates against the existing reviewed pricing source",async()=>{
+test("signed quote recalculates against the current DealerKit pricing source",async()=>{
  const result=await checkIncomingRent2BuyQuote({token:token(),registration:"ZZ25 XYZ"},{env,loadSource:async()=>source,now});
  assert.equal(result.ok,true);assert.equal(result.quote.monthlyExVat,400);
  assert.equal(result.quote.termMonths,48);assert.equal(result.sourceRevisionVerified,true);
@@ -49,7 +48,7 @@ test("disabled verifier, unavailable source and changed retail fail closed",asyn
    {env,loadSource:async()=>({...source,sourceRetailPrice:12500}),now})).reason,"source_revision_changed");
 });
 
-test("verification route depends on simplified pricing source, not snapshot machinery",()=>{
+test("verification route delegates current DealerKit source loading without writes",()=>{
  const route=fs.readFileSync(new URL("../api/rent2buy-quote-verify.js",import.meta.url),"utf8");
  assert.match(route,/RENT2BUY_QUOTE_VERIFIER_ENABLED/);
  assert.match(route,/timingSafeEqual/);
