@@ -18,7 +18,7 @@ function quoteFor(s,options={}){
   vehicleMileage:s.vehicle.mileage,...options,
  });
  assert.equal(result.status,"ok");
- return {quoteId:"q-001",registration:s.vehicle.registration,
+ return {quoteId:"quote-0001",registration:s.vehicle.registration,
    sourceRevision:rent2BuyPricingSourceRevision(s),...result};
 }
 
