@@ -3,6 +3,7 @@ import {
   updateDealerKitPublishedPrice,
 } from "../services/dealerKitPublishedPrice.js";
 import { getVfcPricingReviewHold } from "../lib/vfcPricingReviewHolds.mjs";
+import { pendingRent2BuySpecialDeal } from "../lib/rent2BuyProtectedSpecialDeals.mjs";
 
 const HELPER_ATTRIBUTE = "data-vansco-wix-price-helper";
 let scanScheduled = false;
@@ -226,6 +227,24 @@ function attachHelper(card) {
   const helper = document.createElement("div");
   helper.setAttribute(HELPER_ATTRIBUTE, "true");
   helper.style.marginTop = "10px";
+
+  // A manually agreed Rent2Buy deal is never a normal DealerKit price mismatch.
+  // Keep the update control disabled, as well as server-side reject protections.
+  const special = details.pipeline === "rent2buy" ? pendingRent2BuySpecialDeal(details.registration) : null;
+  if (special) {
+    const note = document.createElement("div");
+    note.className = "vehicle-card__meta";
+    note.setAttribute("data-rent2buy-price-protection", "true");
+    note.textContent = "SPECIAL DEAL PROTECTED · Published £" + special.publishedMonthlyExVat + " + VAT. Verify its initial rental, contract term and mileage before migration. Automatic Wix price updates are disabled.";
+    const disabled = document.createElement("button");
+    disabled.type = "button";
+    disabled.className = "button button--primary";
+    disabled.textContent = "Special deal protected";
+    disabled.disabled = true;
+    helper.append(note, disabled);
+    body.appendChild(helper);
+    return;
+  }
 
   const held = getVfcPricingReviewHold(details.registration);
   if (held) {
