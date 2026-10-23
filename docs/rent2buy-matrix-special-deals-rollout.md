@@ -294,3 +294,16 @@ Both website customer-application draft PRs #51 and #165 now include:
 7. Visual review desktop/mobile of the compact drawer and existing cards; commercial approval of prices. Only then discuss merging, schema migrations and production rollout.
 
 **No flags enabled, no migrations, no live Wix prices changed, no PR merged, and no customer quotation submissions sent in this continuation.**
+
+
+## 23 October continuation: future-special protection and contract reconciliation
+
+- A new server-side guard `api/_rent2buy-protected-price-write.mjs` blocks BOTH legacy Wix price writers when a new Rent2Buy override record is present, even after the current four legacy registrations. A missing/failed override lookup is a HARD HOLD, never proof of no special. The current four are held even before the new table exists. Finance/Cars operations stay outside the guard. All changes are still on unmerged draft PR #689.
+- Fixed a verified incompatibility: the Marketing CRM signed-quote issue response was missing the **top-level registration** required by BOTH site BFF proxies. The preview issue response now includes and validates that registration, with regression tests.
+- Re-read the four Wix listing/detail records without any writes on 23 October. The previously observed mismatches persist: BJ74HTL listing £595/£2,000/48 vs detail £693/£2,079/48; FV74BBJ listing £545/£2,000/48 vs detail £545/£2,000/36. BT25LVK and FV74BEO display £595/£2,000/48 in both. All monthly/initial amounts are +VAT; displayed prices are not a substitute for written contract approval.
+- Added a **read-only** `lib/rent2BuySpecialWixReconciliation.mjs` detector and tests that explicitly forbid automatic migration when Wix, stored review term, or approved deal details disagree. No automatic selection of correct Wix fields. The 1,000 monthly mileage matrix default MUST NOT become an unconfirmed agreement.
+- Created `docs/rent2buy-existing-specials-signoff.md` as the durable four-vehicle commercial confirmation sheet. No database migration, Wix write, live CRM change, merge or deployment.
+- The dedicated pricing suite now runs **80/80** tests, as verified from GitHub Actions logs. This is unit/regression coverage only; the full application-to-CRM/email E2E and real pricing source availability remain blocked.
+
+### Stock freshness release gate unchanged
+The existing DealerKit monitor runs every 15 minutes; a 90-second authoritative full-stock cache is usable for at most around 10% of the interval before processing delays. Recent read-only monitor rows were complete with about 256 vehicles, but the current design would still show "quote unavailable" most of the time. Do not simply extend the cache TTL: the feed is advertising-aware and a fresh vehicle-detail response may NOT independently prove that an advert remains eligible. A provider-confirmed lightweight "currently advertised" status lookup, or an approved quota-safe refresh strategy, must be verified before allowing real quotes at scale.
