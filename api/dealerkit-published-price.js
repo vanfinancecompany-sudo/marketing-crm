@@ -133,19 +133,10 @@ async function freshDealerKitVehicle(body, pipeline) {
     return { ...vehicle, registration, retailPrice, supplierStockId, sourceMode: "fresh_dealerkit" };
   }
 
-  const retailPrice = parseRetailPrice(body.retail_price);
-  if (retailPrice === null || retailPrice < 1000 || retailPrice > 100000) throw new ApiError(400, "The DealerKit retail price is outside the permitted range.");
   if (pipeline === "rent2buy") {
     throw new ApiError(409, "Rent2Buy price updates require a fresh DealerKit vehicle identity so retail price, year and mileage are rechecked server-side. Refresh Stock Watch and retry.");
   }
-  return {
-    registration,
-    retailPrice,
-    mileage: Number.isFinite(Number(body.mileage)) ? Number(body.mileage) : null,
-    vatStatus: clean(body.vat_status || body.vatStatus, 80) || "unknown",
-    supplierStockId: "",
-    sourceMode: "saved_dealerkit_snapshot",
-  };
+  throw new ApiError(409, "DealerKit stock identity is missing from this price card. Refresh Stock Watch before previewing or updating Wix prices.");
 }
 
 function makeMatch(configuration, collection, item, current, proposed) {
