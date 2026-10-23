@@ -25,19 +25,19 @@ test("selector exposes Felix-valid terms/mileage and initial options with no cli
 
 test("protected legacy Wix special has no standard-matrix fallback",()=>{
  const x=approvedRent2BuySelectorChoices(source("FV74BBJ",14695));
- assert.equal(x.ok,false);assert.equal(x.error,"protected_special_not_imported");
+ assert.equal(x.ok,false);assert.equal(x.error,"fixed_legacy_special_not_customisable");
 });
 
 test("exact migrated special is shown and signed",()=>{
- const s=source("FV74BBJ",14695);s.vehicle.year=2024;s.vehicle.mileage=40000;
- s.activeSpecial={id:"special-1",status:"active",registration:"FV74BBJ",
+ const s=source("ZZ25XYZ",14695);s.vehicle.year=2024;s.vehicle.mileage=40000;
+ s.activeSpecial={id:"special-1",status:"active",registration:"ZZ25XYZ",
   supplier_stock_id:s.vehicle.supplierStockId,revision:2,term_months:36,miles_per_month:1000,
   initial_ex_vat:2000,monthly_ex_vat:545};
  const choices=approvedRent2BuySelectorChoices(s);
  assert.equal(choices.ok,true);assert.equal(choices.special.monthlyExVat,545);
  const quote=issueApprovedRent2BuyQuote({source:s,secret,now,reference:"special-001"});
  assert.equal(quote.ok,true);assert.equal(quote.quote.monthlyExVat,545);
- assert.equal(verifyRent2BuyQuoteToken(quote.token,secret,{registration:"FV74BBJ",now}).monthlyExVat,545);
+ assert.equal(verifyRent2BuyQuoteToken(quote.token,secret,{registration:"ZZ25XYZ",now}).monthlyExVat,545);
 });
 
 test("preview route uses simplified pricing source and has no Wix/stock-monitor writes",()=>{
