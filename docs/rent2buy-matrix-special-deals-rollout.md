@@ -1,162 +1,179 @@
 # Rent2Buy flexible pricing rollout
 
-**Status:** DEVELOPMENT ONLY. Draft PRs are unmerged. No live Wix price, CRM record, DealerKit stock workflow, image feed, cron or production database schema has been changed.
+**Status: development only. All four PRs remain draft/unmerged. No live Wix, CRM, stock-feed, image, cron or production database changes have been made.**
 
-## Scope
+## Final scope
 
-This project adds Felix's configurable Rent2Buy pricing structure to the **existing** Rent2Buy stock and vehicle pages.
+There are only two Rent2Buy pricing paths:
 
-It does **not** replace DealerKit stock ingestion, images, galleries, Stock Watch, existing availability handling, social automation or unrelated Finance/Cars pricing.
+### 1. Normal Rent2Buy vehicles → Felix matrix
 
-The job is:
+Use the existing reviewed DealerKit vehicle:
+- retail price
+- registration year
+- current mileage
 
-1. Use the existing reviewed DealerKit vehicle retail price, year and mileage.
-2. Calculate Rent2Buy pricing from Felix's matrix.
-3. Let customers choose contract term, contractual monthly mileage and approved initial rental.
-4. Support exact manually approved special deals without allowing ordinary price sync to overwrite them.
-5. Carry the exact selected vehicle, term, contract mileage, monthly rental and initial rental into the application, Main CRM and internal email.
-6. Keep the customer's separate intended-use mileage and monthly budget questions unchanged.
+Customer can select:
+- contract term
+- contractual monthly mileage allowance
+- initial rental from the matrix ladder
 
-## Felix matrix implemented
+The server calculates and signs the resulting quote. The browser never calculates or supplies an authoritative price.
 
-Server-side pricing lives in `lib/rent2BuyFlexiblePricing.mjs`.
+### 2. Four legacy specials → fixed deal
 
-Ex-VAT monthly formula:
+These four registrations are completely outside the customisable Felix matrix:
 
-`Retail / T + Retail * 0.25 / 12 + (milesPerMonth - 3000) * 0.05 - ((initialRental - minInitial) * 1.5 / T)`
-
-Monthly rental rounds **up** to the next £5.
-
-Rules implemented:
-- Minimum initial rental £1,000 + VAT.
-- Initial options: 1x, 1.5x, 2x and 2.5x matrix minimum, rounded to nearest £10.
-- Terms: 12, 18, 24, 30, 36, 42, 48 months.
-- Up to 48 months where vehicle age is within four years and odometer is 50,000 miles or less; otherwise maximum 36.
-- Mileage: 1,000-2,000 supports up to 48 months; 2,500-3,000 up to 36; 3,500 up to 30; 4,000 up to 24.
-- Default advertised matrix configuration is longest eligible term, 1,000 miles/month and minimum initial rental.
-- Exact special deal applies only when term, contractual mileage and initial rental match the approved special. Changing them returns to standard matrix pricing.
-
-Reference calculations tested include Felix's £12,000 / £400 case and supplied Maxus, Transit Custom and Primastar examples.
-
-## Existing four fixed legacy special deals
-
-These four registrations are intentionally **off the Felix customisable matrix**:
-
-| Registration | Fixed monthly + VAT | Fixed initial + VAT | Fixed term |
-|---|---:|---:|---:|
-| BT25 LVK | £595 | £2,000 | 48 months |
-| FV74 BBJ | £545 | £2,000 | 48 months |
-| FV74 BEO | £595 | £2,000 | 48 months |
-| BJ74 HTL | £595 | £2,000 | 48 months |
-
-No contractual mileage allowance is stored or required for these four because the customer cannot customise them.
+| Registration | Monthly + VAT | Initial + VAT | Term | Contract mileage |
+|---|---:|---:|---:|---|
+| BT25 LVK | £595 | £2,000 | 48 months | Not used / not customisable |
+| FV74 BBJ | **£545** | £2,000 | **48 months** | Not used / not customisable |
+| FV74 BEO | £595 | £2,000 | 48 months | Not used / not customisable |
+| BJ74 HTL | **£595** | **£2,000** | **48 months** | Not used / not customisable |
 
 Confirmed corrections:
-- FV74 BBJ: 48 months. The old 36-month detail value is incorrect.
-- BJ74 HTL: £595 + VAT monthly / £2,000 + VAT initial / 48 months. The old detail value £693 / £2,079 is incorrect.
-- BJ74 HTL's earlier 40-month verbal reference was immediately corrected; 48 months is authoritative.
+- FV74 BBJ: the old 36-month detail value is wrong. 48 months is authoritative.
+- BJ74 HTL: the old detail £693 / £2,079 values are wrong. £595 / £2,000 / 48 months is authoritative.
+- The earlier verbal 40-month reference for BJ74 HTL was immediately corrected; 48 months is authoritative.
 
-Implementation rules:
-- hide the Customise your rental drawer on all four;
-- website detail rendering uses the fixed values above if CMS detail data differs;
-- normal Wix price sync remains blocked on all four;
-- Marketing CRM legacy-special section is read-only for all four;
-- API draft creation cannot convert any of the four to an editable special;
-- no contractual mileage is invented.
+The four fixed registrations:
+- never show the Customise your rental drawer;
+- cannot enter the signed matrix quote service;
+- cannot be converted to a generic special-deal draft;
+- are protected from normal Rent2Buy Wix price sync;
+- are displayed from a server-owned fixed map if Wix detail values disagree;
+- require no contractual mileage setting;
+- continue through the ordinary Rent2Buy application with fixed terms derived by Main CRM from registration.
 
-Detailed fixed-special record: `docs/rent2buy-existing-specials-signoff.md`.
+There is **no generic special-deal database/editor in this project**. Future promotions can be designed separately if ever needed.
 
-## Marketing CRM
+## Felix matrix
 
-Draft PR #689 contains:
-- Felix pricing engine and regression tests.
-- Four-registration migration hold.
-- Protection in both Rent2Buy Wix price-write paths.
-- Future special-deal write protection, activated only together with the special-deal editor.
-- Separate special-deal draft policy and review-only SQL proposal: `docs/sql/rent2buy_special_deals_REVIEW_ONLY.sql`.
-- Compact special-deal editor in Rent2Buy DealerKit review only.
-- Server-side selector choices and signed quote issuer.
-- Server-side signed quote verifier that recalculates against the **existing reviewed DealerKit vehicle retail/year/mileage**.
-- Internal application email display of verified selected rental.
-- Read-only Wix special-deal reconciliation.
+Implemented in `lib/rent2BuyFlexiblePricing.mjs`.
 
-The quote source deliberately does **not** use a new stock snapshot/cache or retail-approval subsystem.
+Ex-VAT formula:
 
-## Customer vehicle pages
+`monthlyRaw = Retail/T + Retail*0.25/12 + (milesPerMonth-3000)*0.05 - ((initialRental-minInitial)*1.5/T)`
 
-Standalone Rent2Buy draft PR #51 and VFC Rent2Buy draft PR #165 contain:
-- One compact **Customise your rental** trigger beneath the existing price cards.
-- Closed right-hand drawer / mobile full-width sheet.
-- Existing vehicle gallery, advertised Wix price boxes, specifications and current Apply Now remain intact.
-- Contract length, contractual monthly mileage and initial-rental selectors.
-- No Felix pricing maths in the browser.
-- Preview-only server bridge can request approved options and a signed quotation.
-- The old signed quote is cleared whenever the customer changes a selection.
-- Application handoff is a separate feature gate.
+Monthly rental rounds **up to the next £5**.
 
-## Application and Main CRM
+Rules:
+- minimum initial rental £1,000 + VAT;
+- initial ladder: 1x, 1.5x, 2x, 2.5x minimum, rounded nearest £10;
+- terms: 12, 18, 24, 30, 36, 42, 48;
+- vehicle eligible up to 48 months when age is within four years and odometer <=50,000; otherwise up to 36;
+- 1,000–2,000 miles/month: up to 48 months;
+- 2,500–3,000: up to 36;
+- 3,500: up to 30;
+- 4,000: up to 24;
+- default: longest eligible term + 1,000 miles/month + minimum initial.
 
-Main CRM draft PR #151 plus both website PRs provide:
-- Signed quote token passed instead of browser-entered approved amounts.
-- Server verification and recalculation before selected terms are accepted.
-- Exact vehicle, term, contractual monthly mileage, monthly rental and initial rental stored in lead notes.
-- VAT-inclusive amounts included.
-- Internal email receives the verified selected rental.
-- The application's existing intended-use monthly mileage and monthly budget remain separate.
-- Legacy registration-only applications remain supported.
+Reference calculations remain covered by automated tests.
 
-## Feature gates
+## Existing stock/images remain untouched
 
-Nothing should be enabled until preview testing and special-deal sign-off are complete.
+This feature does not replace or modify:
+- DealerKit stock ingestion;
+- vehicle images/galleries;
+- Stock Watch;
+- the existing 15-minute stock monitor;
+- Wix stock publication outside the four fixed-price protection guards;
+- Finance or Cars pricing.
 
-Relevant server switches:
-- `RENT2BUY_SPECIAL_PRICE_WRITE_GUARD_ENABLED`
-- `RENT2BUY_SPECIAL_DRAFTS_ENABLED`
-- `RENT2BUY_QUOTE_PREVIEW_ENDPOINT_ENABLED`
-- `RENT2BUY_QUOTE_VERIFIER_ENABLED`
-- Website preview: `RENT2BUY_CALCULATOR_PREVIEW_ENABLED`
-- Website server proxy: `RENT2BUY_QUOTE_PREVIEW_PROXY_ENABLED`
-- Application selected quote: `RENT2BUY_SELECTED_QUOTE_FORMS_ENABLED`
+The earlier experimental stock snapshot/90-second cache/readiness work was removed from the branch.
 
-The special-deal draft editor cannot save new specials unless the future-special Wix writer guard is also active.
+## Marketing CRM PR #689
 
-## Explicitly removed as out of scope
+Contains only:
+- Felix matrix;
+- fixed four-registration protection;
+- Price Differences protection for those four;
+- controlled Rent2Buy publisher protection for those four;
+- server-side matrix selector choices;
+- private preview quote endpoint;
+- HMAC-signed matrix quote;
+- server-side matrix quote revalidation against reviewed DealerKit retail/year/mileage;
+- internal email rendering for matrix quote and fixed legacy deal;
+- read-only Wix reconciliation of the four fixed deals;
+- focused Rent2Buy tests.
 
-The feature branch previously experimented with:
-- a separate complete DealerKit stock snapshot table,
-- a 90-second stock cache,
-- new Stock Watch / monitor capture hooks,
-- a stock-readiness analyser,
-- a separate retail/VAT approval table.
+No generic special-deal table/editor remains.
 
-Those changes have been removed. Existing stock/image/monitor behaviour is restored to `main`.
+## Websites: PR #51 and PR #165
 
-## Remaining work before completion
+Normal matrix vehicles:
+- compact Customise your rental trigger beneath existing price cards;
+- drawer/mobile sheet;
+- term, contractual mileage and initial-rental selectors;
+- pricing requested from server;
+- no browser Felix calculation;
+- signed token added to application URL only after server quote;
+- changing a selection clears the previous token.
 
-1. Keep the four fixed legacy specials protected as defined above. They no longer need mileage confirmation or migration into an editable special-deal record.
-2. Review the future-special database schema only for **new future promotions**, not these four legacy deals.
-3. Enable the matrix pricing preview only in protected development and visually inspect both vehicle pages on desktop/mobile.
-4. Run end-to-end tests for matrix vehicles:
-   - default matrix;
+Four fixed vehicles:
+- fixed public monthly/initial/48-month display;
+- no customisation drawer;
+- application displays the fixed deal;
+- any old/custom quote token in the URL is ignored.
+
+Existing vehicle galleries, stock data, advertised cards and normal Apply Now flow remain intact.
+
+## Main CRM PR #151
+
+Normal matrix:
+- verifies signed token;
+- independently calls Marketing CRM pricing verifier;
+- verifies registration, source revision, term, contractual mileage, monthly and initial rental;
+- stores exact selected matrix terms in lead notes;
+- passes verified matrix deal to internal email.
+
+Four fixed vehicles:
+- derives fixed deal from registration server-side;
+- deletes/ignores any browser-supplied fixed-price object;
+- rejects a customised matrix token for a fixed registration;
+- stores fixed monthly / initial / 48-month terms in lead notes;
+- no contractual mileage field is created;
+- applicant's separate intended-use mileage remains unchanged.
+
+## Important distinction
+
+The application question **"How many miles will you do per month?"** remains the customer's usage estimate.
+
+For matrix vehicles, **contractual mileage allowance** is a separate selected quote field.
+
+For the four fixed legacy deals, there is no contractual mileage selector/value in this implementation.
+
+## Remaining before merge
+
+1. Let all four focused CI/build suites finish green.
+2. Enable the calculator/quote flags only on protected preview deployments.
+3. Visual check desktop/mobile for normal matrix vehicle pages.
+4. Preview E2E tests:
+   - default matrix quote;
    - changed term;
-   - changed mileage;
+   - changed contractual mileage;
    - changed initial rental;
+   - invalid term/mileage combinations;
    - tampered/expired token rejection;
-   - exact selected deal visible on application review;
-   - exact deal in Main CRM notes and internal email;
-   - legacy registration-only application unchanged.
-5. Run fixed-special checks:
-   - all four show fixed monthly/initial/48-month values;
-   - no customisation drawer;
-   - BJ74 HTL never shows £693/£2,079;
-   - FV74 BBJ never shows 36 months.
-6. Only after those checks: decide merge/deployment sequence.
+   - selected matrix quote on application review;
+   - selected matrix quote in Main CRM notes;
+   - selected matrix quote in internal email;
+   - normal legacy registration-only application unchanged.
+5. Fixed-special E2E checks:
+   - BT25 LVK £595 / £2,000 / 48;
+   - FV74 BBJ £545 / £2,000 / 48;
+   - FV74 BEO £595 / £2,000 / 48;
+   - BJ74 HTL £595 / £2,000 / 48;
+   - no calculator on any of the four;
+   - BBJ never shows 36 months;
+   - BJ74 HTL never shows £693 / £2,079.
+6. Only then prepare merge/deployment order.
 
-## Branches
+## Draft PRs
 
-- Marketing CRM: draft PR #689
-- Main CRM: draft PR #151
-- Standalone Rent2Buy: draft PR #51
-- VFC Rent2Buy: draft PR #165
+- Marketing CRM #689
+- Main CRM #151
+- Standalone Rent2Buy #51
+- VFC Rent2Buy #165
 
 All remain unmerged.
