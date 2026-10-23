@@ -60,3 +60,21 @@ Put a small accessible "Customise your rental" link/button **beneath the price b
 - Stage feature behind a disabled server-side feature flag, with preview/rollback.
 - Smoke test 36/48m current ads, all five PDF examples, pickup/4x4, 1000 minimum, special overrides, quote changes, VAT, empty/invalid data, archived vehicles, and stale/reserved/sold stock handling.
 - On launch, monitor changed vehicle counts and diff all prices against approved figures; never silently replace special/manual prices or other products.
+
+
+## Confirmed currently protected specials (Marketing CRM screenshot, 23 Oct 2026)
+
+User explicitly identifies these **four Rent2Buy vehicle registrations** in the Marketing CRM *Price differences* advisory view as manually protected special deals. These are the **currently published monthly prices**, EX VAT:
+
+| Registration | Published monthly + VAT | Existing CRM expected monthly (old formula) | DealerKit retail (shown) |
+|---|---:|---:|---:|
+| BT25 LVK | £595 | £732 | £18,495 |
+| FV74 BBJ | £545 | £714 | £14,695 |
+| FV74 BEO | £595 | £621 | £15,695 |
+| BJ74 HTL | £595 | £693 | £17,495 |
+
+**CRITICAL: do not press 'Update Wix price' for these four registrations.** The *expected* values shown by the current Price differences system do **not** represent Felix's new variable-term matrix and must not be used as override prices.
+
+**Not yet established:** contract length, allowed miles per month, initial rental, offer eligibility/expiry, and whether the special applies to only one configuration. Read each vehicle's actual approved Wix records and/or confirm with the user before storing a complete deal and migrating to the new system. The screenshot alone is sufficient to mark these **candidates for protection** in the migration plan, but **not** to auto-activate a quote override with invented terms.
+
+Prior to cutover, snapshot every existing Wix published price and cross-check each site's current view; save durable special-deal overrides with price + qualifying terms and verify preview diffs before enabling any publisher changes. Leave current manual Wix pricing untouched.
