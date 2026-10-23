@@ -4,6 +4,7 @@ import {
 } from "../services/marketingAccess.js";
 
 import { currentWixAdvertForReview, currentWixAdvertPrice } from "../lib/dealerKitAdvertisedReviewContext.js";
+import { renderRent2BuySpecialDealEditor } from "./rent2BuySpecialDealEditor.js";
 
 const WORKSPACE_ATTRIBUTE = "data-dealerkit-review-workspace";
 const BUTTON_ATTRIBUTE = "data-dealerkit-review-button";
@@ -464,6 +465,7 @@ function renderVehicle(workspace, payload) {
   gallerySection.appendChild(gallery);
 
   body.appendChild(renderDecisionControls(vehicle, state));
+  if (product === "rent2buy") body.appendChild(renderRent2BuySpecialDealEditor(vehicle));
   body.appendChild(gallerySection);
   refreshGallery();
 
