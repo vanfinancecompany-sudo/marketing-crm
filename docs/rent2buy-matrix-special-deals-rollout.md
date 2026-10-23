@@ -270,3 +270,27 @@ Both public vehicle-page application PR branches now include `components/Rent2Bu
 Later integration MUST replace layout-preview values with the authenticated server-approved quote API and carry its signed token into the existing application summary. Do not duplicate Felix matrix pricing inside the client. The 15-minute full DealerKit feed versus 90-second strict quote freshness remains a release blocker. Commercial approval and end-to-end tests remain mandatory.
 
 Codex handoff discussions updated in standalone issue #50 and VFC issue #164. No Codex coding session was launched. Changes are only on existing development branches.
+## 23 October continuation: server-connected drawer, PRIVATE PREVIEW ONLY
+
+New Marketing CRM components committed in draft PR #689:
+- `lib/rent2BuyQuoteChoices.mjs` calculates **approved selector OPTIONS** from the single authoritative reviewed source: mileage bands, eligible contract lengths, authorised initial-rental ladder and the exact fixed special-deal configuration. Does not issue or calculate a browser quote.
+- `api/rent2buy-quote-preview.js` supports authenticated server-to-server POST `{action:"choices"|"issue",registration,selection?}`. It is **unavailable in production** and requires `VERCEL_ENV==="preview"`, `RENT2BUY_QUOTE_PREVIEW_ENDPOINT_ENABLED==="true"`, a server-only `RENT2BUY_QUOTE_VERIFY_KEY` and valid approved stock/pricing records. A selected quote calls `issueApprovedRent2BuyQuote` and returns the 30-minute HMAC-signed token. A missing/expired approval rejects; no fallbacks to Wix prices. NO stock/Wix/CRM writes.
+- `tests/rent2buy-quote-preview.test.mjs` and `tests/rent2buy-quote-preview-route.test.mjs` verify missing protected deals, exact special price, term limits, production off, private auth, and invalid selections.
+- **Fixed a real CI gap:** the dedicated workflow previously ran only four Rent2Buy test files even though eleven existed. It now installs pinned dependencies (`npm ci --ignore-scripts`) and runs `node --test tests/rent2buy-*.test.mjs`. The latest run passed **68/68** tests. Future Rent2Buy files are covered by the wildcard.
+
+Both website customer-application draft PRs #51 and #165 now include:
+- `app/api/rent2buy-quote-preview/route.js`: server-side HTTPS-only bridge using its private `RENT2BUY_QUOTE_VERIFY_KEY`; accepts only prevalidated registration and numeric term/mileage/initial. Production disabled, independent `RENT2BUY_QUOTE_PREVIEW_PROXY_ENABLED` flag required. It **does not leak the key to the browser**.
+- `Rent2BuyRentalDrawerPreview.jsx`: when the proxy is enabled, fetches vehicle-approved options, requests a server-issued quote, shows monthly and initial ex/inc VAT and invalidates the previous quote after a choice changes. It does NO Felix matrix calculation. Defaults to the original layout demonstration when the proxy is off. Existing public black/red Wix rental boxes and Apply Now links never change.
+- `RENT2BUY_SELECTED_QUOTE_FORMS_ENABLED` is a **separate** gate. The signed token only reaches the seven-step application when this has been specifically enabled and the backend verification test has passed. It remains OFF.
+- Both sites have passed their dedicated quote/layout test suites and Vercel preview builds.
+
+### Exact sequence before any preview features may be turned on
+1. **Do not enable either site's BFF on an unprotected public preview.** Authenticate preview viewers and verify upstream provider quotas. No browser credentials can substitute for a server-only upstream key.
+2. Review and create approved, RLS-restricted retail/VAT/term table, special-deal and snapshot tables (currently review-only SQL; nothing applied). Verify migrated values and permission policies.
+3. Resolve 15-minute source refresh versus 90-second strict cache validity without inflating DealerKit 429 risk. Live customer service remains OFF.
+4. Reconcile BJ74 HTL price mismatch, FV74 BBJ 36/48 term discrepancy, and mileage/initial conditions for all four protected specials.
+5. Configure private Marketing CRM preview endpoint and both website proxy flags only on authenticated preview deployments, with server-only secrets and the correct preview domain. Verify expiry and rejected stale stock.
+6. Test **real** signed choice-to-application-to-CRM lead and internal email against isolated preview infrastructure. Preserve original uncustomised applications.
+7. Visual review desktop/mobile of the compact drawer and existing cards; commercial approval of prices. Only then discuss merging, schema migrations and production rollout.
+
+**No flags enabled, no migrations, no live Wix prices changed, no PR merged, and no customer quotation submissions sent in this continuation.**
