@@ -6,19 +6,19 @@ import {
   canonicalRent2BuyRegistration,
 } from "../lib/rent2BuySpecialDealPolicy.mjs";
 
-const source={registration:"FV74 BBJ",supplierStockId:"stock-009",retailPrice:14695,year:2024,mileage:46251,vatStatus:"plus_vat",sourceUpdatedAt:"2026-10-23T12:00:00Z"};
+const source={registration:"ZZ25 XYZ",supplierStockId:"stock-099",retailPrice:14695,year:2024,mileage:46251,vatStatus:"plus_vat",sourceUpdatedAt:"2026-10-23T12:00:00Z"};
 const input={
-  registration:"FV74 BBJ",confirmRegistration:"FV74BBJ",supplierStockId:"stock-009",
-  monthlyExVat:545,initialExVat:2000,termMonths:36,milesPerMonth:1000,
+  registration:"ZZ25 XYZ",confirmRegistration:"ZZ25XYZ",supplierStockId:"stock-099",
+  monthlyExVat:625,initialExVat:2000,termMonths:36,milesPerMonth:1000,
   reason:"Approved sales manager special for October",expiresAt:"2050-12-31"
 };
 
 test("draft normalisation is independent of dealerkit review settings",()=>{
   const row=normaliseRent2BuySpecialDraft(input,source);
-  assert.equal(row.registration,"FV74BBJ");
-  assert.equal(row.supplier_stock_id,"stock-009");
+  assert.equal(row.registration,"ZZ25XYZ");
+  assert.equal(row.supplier_stock_id,"stock-099");
   assert.equal(row.status,"draft");
-  assert.equal(row.monthly_ex_vat,545);
+  assert.equal(row.monthly_ex_vat,625);
   assert.equal(row.initial_ex_vat,2000);
   assert.equal(row.term_months,36);
   assert.equal(row.miles_per_month,1000);
@@ -39,10 +39,14 @@ test("special deal drafts must be explicit and verified against live source",()=
 });
 
 test("protected specials remain pending until completed record is approved",()=>{
-  assert.equal(canonicalRent2BuyRegistration("FV74 BBJ"),"FV74BBJ");
+  assert.equal(canonicalRent2BuyRegistration("ZZ25 XYZ"),"ZZ25XYZ");
   const protectedRow=specialDealToClient({},"FV74 BBJ");
   assert.equal(protectedRow.protectedLegacy,true);
   assert.equal(protectedRow.legacyMonthlyExVat,545);
+  assert.equal(protectedRow.legacyInitialExVat,2000);
+  assert.equal(protectedRow.legacyTermMonths,48);
+  assert.equal(protectedRow.legacyFixedSpecial,true);
+  assert.equal(protectedRow.legacyCustomisable,false);
   assert.equal(protectedRow.persisted,false);
   assert.equal(protectedRow.termMonths,null);
   assert.equal(protectedRow.milesPerMonth,null);
@@ -78,4 +82,11 @@ test("review-only DDL is private, RLS enabled, and never auto-applied by deploy"
   assert.match(migration,/revoke all on public\.dealerkit_rent2buy_special_deals from anon, authenticated/);
   assert.match(migration,/grant select, insert, update on public\.dealerkit_rent2buy_special_deals to service_role/);
   assert.match(migration,/dealerkit_rent2buy_special_deal_audit/);
+});
+
+
+test("fixed legacy specials cannot be converted into editable draft deals",()=>{
+  const fixedSource={...source,registration:"FV74 BBJ",supplierStockId:"fixed-001"};
+  const fixedInput={...input,registration:"FV74 BBJ",confirmRegistration:"FV74BBJ",supplierStockId:"fixed-001"};
+  assert.throws(()=>normaliseRent2BuySpecialDraft(fixedInput,fixedSource),/fixed legacy special/);
 });
