@@ -56,7 +56,7 @@ test("DealerKit identity and required price/year/mileage must match reviewed veh
  }
 });
 
-test("known legacy special never gets a matrix quote until its override is migrated",async()=>{
+test("known fixed legacy special never enters the custom matrix quote service",async()=>{
  const specialReview={...review,supplier_stock_id:"dk-special",registration:"FV74BBJ"};
  const specialDetail={...detail,supplierStockId:"dk-special",registration:"FV74BBJ"};
  const specialDb={from:table=>({select:()=>({eq:()=>({limit:async()=>{
@@ -65,5 +65,5 @@ test("known legacy special never gets a matrix quote until its override is migra
  }})})})};
  await assert.rejects(loadRent2BuyPricingSource("FV74BBJ",{
    getDb:()=>specialDb,getDetail:async()=>specialDetail,
- }),error=>error?.code==="protected_special_not_migrated");
+ }),error=>error?.code==="fixed_legacy_special_not_customisable");
 });
