@@ -17,6 +17,7 @@ import {
 } from "../lib/dealerKitPublishedPrice.js";
 import { VAN_FINANCE_RENT2BUY_WIX_SITE_ID } from "../lib/dealerKitRent2BuyWixPlan.js";
 import { pendingRent2BuySpecialDeal } from "../lib/rent2BuyProtectedSpecialDeals.mjs";
+import { checkRent2BuyLegacyPriceWrite } from "./_rent2buy-protected-price-write.mjs";
 import { calculateVfcAdvertisedMonthly } from "../lib/vfcFinancePriceMatrix.mjs";
 import { getVfcPricingReviewHold } from "../lib/vfcPricingReviewHolds.mjs";
 
@@ -339,6 +340,10 @@ export default async function handler(request, response) {
     const protectedDeal = pipeline === "rent2buy" ? pendingRent2BuySpecialDeal(body.registration) : null;
     if (protectedDeal && action === "update") {
       throw new ApiError(409, "This Rent2Buy vehicle has an approved manual special-deal price. Automatic Update Wix price is locked until the complete special terms are imported and verified. Nothing was changed.");
+    }
+    if (pipeline === "rent2buy" && action === "update") {
+      const priceWriteGate = await checkRent2BuyLegacyPriceWrite(body.registration);
+      if (!priceWriteGate.permitted) throw new ApiError(409, priceWriteGate.message, { code: priceWriteGate.code });
     }
     const vehicle = await freshDealerKitVehicle(body, pipeline);
     if (pipeline === "rent2buy" && action === "update" && pendingRent2BuySpecialDeal(vehicle.registration)) {
