@@ -16,7 +16,7 @@ export function renderRent2BuySpecialDealEditor(vehicle={}) {
   const intro=document.createElement("p");
   intro.className="dealerkit-review__section-note";
   intro.textContent=legacy
-    ? "Existing special £"+legacy.publishedMonthlyExVat+" + VAT is identified for migration protection. Confirm all agreed terms before changing it."
+    ? "Existing Wix listing £"+legacy.publishedMonthlyExVat+" + VAT is identified for migration protection. The vehicle-detail price can differ; confirm all agreed terms before changing anything."
     : "Standard matrix applies by default. Only use a special deal for an approved, registration-specific promotion.";
   section.appendChild(intro);
   const status=document.createElement("p");
