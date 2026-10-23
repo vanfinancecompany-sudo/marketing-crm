@@ -250,3 +250,9 @@ Consequences:
 - Investigate reusing the existing successful 15-minute monitor snapshot with a genuinely fresh single-vehicle detail request and a clearly defined acceptable freshness/stock-risk policy, OR plan a tested quota-safe faster bulk cadence. Both require explicit commercial and technical approval.
 - Until then, the safe result is "quote unavailable" outside the current 90-second window. This is a release-blocking availability concern, not a reason to ignore an expired snapshot.
 
+
+### Existing scheduled monitor capture added (feature remains OFF)
+
+Additional development hook: api/stock-watch-monitor-agent.js (the existing Vercel */15 cron) now reuses its already-loaded DealerKit provider snapshot and may append a complete pricing manifest ONLY when RENT2BUY_QUOTE_SNAPSHOT_CAPTURE_ENABLED=true, source kind dealerkit, and the provider returns complete=true. A failed or incomplete capture is logged in the run snapshot but does not change Stock Watch operations. This adds ZERO second bulk-feed reads. The separate manual Stock Watch session hook remains optional and independently disabled.
+
+The dedicated CI now checks both hook locations and the unchanged */15 cron; passing that test does NOT prove a workable 90-second customer availability window. Keep the verification and issuer OFF until that operational mismatch, commercial approvals and secure customer API are settled.
