@@ -56,5 +56,5 @@ test("changed or relabelled signed amounts are rejected",()=>{
  assert.equal(verifyRent2BuyQuoteAgainstSource(q,s).ok,true);
  assert.equal(verifyRent2BuyQuoteAgainstSource({...q,monthlyExVat:q.monthlyExVat+5},s).reason,"quoted_amount_changed");
  assert.equal(verifyRent2BuyQuoteAgainstSource({...q,pricingMode:"special"},s).reason,"quoted_amount_changed");
- assert.equal(verifyRent2BuyQuoteAgainstSource({...q,milesPerMonth:4000},s).reason,"quoted_amount_changed");
+ assert.equal(verifyRent2BuyQuoteAgainstSource({...q,milesPerMonth:4000},s).reason,"term_not_allowed");
 });
