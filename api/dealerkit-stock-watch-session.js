@@ -1,6 +1,7 @@
 import { fetchStableDealerKitStockSnapshot } from "./_dealerkit-stable-stock-snapshot.js";
 import { getSupabaseServiceAdmin, normalizeRegistration, WATCH_TABLE } from "./_vansco-cache-utils.js";
 import { syncDealerKitSourceState } from "./_dealerkit-source-state.js";
+import { captureCompleteRent2BuyQuoteSnapshot } from "./_rent2buy-complete-quote-snapshot.mjs";
 import { buildDealerKitStockWatchPayload } from "./dealerkit-stock-watch-list.js";
 import { loadStockWatchComparisonInputs, STOCK_WATCH_PIPELINES } from "./_dealerkit-stock-watch-comparison.js";
 import { buildStockWatchImageReadiness } from "../lib/dealerkitStockWatchReadiness.js";
@@ -14,6 +15,7 @@ export async function createDealerKitStockWatchSession({
   getSupabase = getSupabaseServiceAdmin,
   loadComparison = loadStockWatchComparisonInputs,
   syncSourceState = syncDealerKitSourceState,
+  captureQuoteSnapshot = captureCompleteRent2BuyQuoteSnapshot,
   buildLane = buildDealerKitStockWatchPayload,
   loadActions = readActions,
   buildReadiness = buildStockWatchImageReadiness,
@@ -42,6 +44,23 @@ export async function createDealerKitStockWatchSession({
     sourceStateSync = await syncSourceState(supabase, snapshot);
   } catch (error) {
     sourceStateSync = { available: false, written: 0, error: String(error?.message || error) };
+  }
+  // Optional reuse of the ALREADY FETCHED complete Stock Watch snapshot.
+  // Never launches a second DealerKit bulk scan. No writes unless explicitly
+  // enabled after schema review. A failure does not disrupt current Stock Watch.
+  let quoteSnapshotCapture = { enabled: false, captured: false };
+  if (process.env.RENT2BUY_QUOTE_SNAPSHOT_CAPTURE_ENABLED === "true") {
+    if (snapshot.complete !== true) {
+      quoteSnapshotCapture = { enabled: true, captured: false, reason: "incomplete_source" };
+    } else {
+      try {
+        quoteSnapshotCapture = { enabled: true,
+          ...(await captureQuoteSnapshot(supabase, snapshot)) };
+      } catch (error) {
+        quoteSnapshotCapture = { enabled: true, captured: false,
+          reason: error?.code || "snapshot_unavailable" };
+      }
+    }
   }
   const laneStartedAt = Date.now();
   const laneDerivationMs = {};
@@ -106,6 +125,7 @@ export async function createDealerKitStockWatchSession({
     providerId: "dealerkit",
     snapshotGeneration: snapshot.checkedAt || new Date().toISOString(),
     sourceComplete: snapshot.complete === true,
+    quoteSnapshotCapture,
     diagnostics: snapshot.diagnostics || null,
     lanes,
     timing: {
