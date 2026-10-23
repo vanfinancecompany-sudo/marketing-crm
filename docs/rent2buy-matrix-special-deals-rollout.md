@@ -219,3 +219,23 @@ User-protected specials confirmed in active Supabase DealerKit review and settin
 New pure server-only module lib/rent2BuyQuoteIssue.mjs signs 30-minute quotes using the already-approved source, rechecking the full current-source quote verifier before signing. It supports fixed-term specials and the standard matrix, but will not silently turn a protected Wix special into the standard matrix. Tests in tests/rent2buy-quote-issue.test.mjs.
 
 NO PUBLIC QUOTE ISSUANCE API YET. It would trigger expensive full DealerKit reads and remains unsafe for customer traffic without a validated complete-stock snapshot strategy plus rate controls. Do NOT add a public endpoint or enable environment flags until approved. No live tables, Wix prices, websites or main CRM records were changed.
+## Complete DealerKit quote snapshot cache (staged 23 October 2026)
+
+**Problem addressed:** the original strict verifier launched a COMPLETE DealerKit stock scan for every customer's selected quote. This would multiply provider API calls and could trigger 429s. The existing 20-second in-process Stock Watch memo is not shared across Vercel instances; the dealerkit_stock_state table holds LAST-KNOWN stock and is not authoritative current availability.
+
+### New read-only quote path
+
+1. Existing api/dealerkit-stock-watch-session.js ALREADY loads a single stable bulk DealerKit snapshot. Behind a disabled RENT2BUY_QUOTE_SNAPSHOT_CAPTURE_ENABLED flag it can persist a **minimal manifest only when source completeness is confirmed**. This does **not** trigger an additional DealerKit scan or write to Wix. Partial snapshots are not stored as quote-authoritative.
+2. docs/sql/rent2buy_complete_quote_snapshots_REVIEW_ONLY.sql describes a proposed private, append-only complete-manifest table, with row-level security and no browser policies. The SQL is a **proposal and has not been applied**.
+3. api/_rent2buy-complete-quote-snapshot.mjs builds a canonical manifest, checks totals, duplicates and stability, hashes the exact data, and reads only the newest shared snapshot. A read fails closed after **90 seconds** since the source checked timestamp (not since cache insertion); database errors, altered data or duplicate IDs fail closed.
+4. api/_rent2buy-quote-source.js reads the shared database manifest instead of calling fetchDealerKitStockSnapshot on each quote. It still performs a **fresh single vehicle-detail read**, then checks the source's exact identity, status, odometer, year, price, VAT and updated timestamp against the cached complete snapshot.
+5. The private signed token verifier and the quote issuer remain gated OFF. No public quote issuance endpoint exists.
+
+### Release gates remaining
+
+- Review the proposed table/retention policy, current Stock Watch refresh frequency, appropriate expiry interval and actual DealerKit API quotas; do not assume that refreshing Stock Watch often enough is free.
+- Even with a valid shared manifest, the separate per-vehicle DealerKit detail request can still hit provider rate limits during high quote volume. Measure/limit before customer launch.
+- If the latest Stock Watch attempt is incomplete, the last previously complete manifest remains eligible only inside its already-short validity window. **Decide whether to add an explicit degradation invalidation marker before production.**
+- A live 90-second freshness target requires a reliable refresh cadence or many quote requests will rightly fail as unavailable. No cron/automation has been added.
+- The four legacy protected deals, VAT approval table, commercial term agreement, secure issuer, selector UI and end-to-end application/CRM/email previews must still be resolved.
+- GitHub actions: new tests in tests/rent2buy-complete-quote-snapshot.test.mjs, protected by Rent2Buy Pricing Safety CI. No production merge or deployment.
