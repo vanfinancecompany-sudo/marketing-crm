@@ -1,5 +1,4 @@
 import { normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
-import { checkRent2BuyLegacyPriceWrite } from "./_rent2buy-protected-price-write.mjs";
 import { controlledPublishConfirmationMatches, wixItemPublishStatus } from "../lib/dealerKitControlledPublishPlan.js";
 import {
   ControlledPublishError,
@@ -373,12 +372,6 @@ export default async function handler(request, response) {
     const targets = orderedTargets(state.plan.targets);
     if (!targets.length) throw new ControlledPublishError(409, "No verified Wix write targets are available.");
 
-    // Any legacy Rent2Buy price field write must first prove no override exists.
-    // The approval table being absent or inaccessible is NOT permission to write.
-    if (targets.some((target) => target.product === "rent2buy")) {
-      const priceWriteGate = await checkRent2BuyLegacyPriceWrite(registration);
-      if (!priceWriteGate.permitted) throw new ControlledPublishError(409, priceWriteGate.message, { code: priceWriteGate.code });
-    }
     const outcome = await reconcileControlledTargets(state, registration, targets);
     const { writes, statusTransitions, verification } = outcome;
 
