@@ -42,7 +42,7 @@ test("any saved future special, including draft or inactive, needs an audited pr
 });
 
 test("new Rent2Buy price write is allowed only after verifying no special record exists",async()=>{
- const result=await checkRent2BuyLegacyPriceWrite("ZZ25 XYZ",{db:dbWith({data:[]})});
+ const result=await checkRent2BuyLegacyPriceWrite("ZZ25 XYZ",{environment:{RENT2BUY_SPECIAL_PRICE_WRITE_GUARD_ENABLED:"true"},db:dbWith({data:[]})});
  assert.deepEqual(result,{permitted:true,code:"no_special_deal_override"});
 });
 
