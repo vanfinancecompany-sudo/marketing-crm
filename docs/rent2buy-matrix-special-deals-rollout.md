@@ -156,3 +156,29 @@ The same *unmerged draft branch* now includes:
 
 ### Decision gate
 The existing Wix listing/detail disagreements for BJ74 HTL and FV74 BBJ remain unresolved. The user confirmed **BJ74 HTL is 48 months**, reversing the previous 40-month comment. No initial price, contract allowance or term must be guessed. No production price updates.
+
+
+## Selected-deal application integration, staged 23 October 2026
+
+**Draft pull requests, all unmerged:**
+- Marketing CRM pricing + special-deal state, internal email & pure current-source quote verifier: https://github.com/vanfinancecompany-sudo/marketing-crm/pull/689
+- Main CRM approved quote and lead notes: https://github.com/vanfinancecompany-sudo/crm/pull/151
+- Standalone Rent2Buy customer application: https://github.com/vanfinancecompany-sudo/rent2buy-vans/pull/51
+- VFC Rent2Buy customer application: https://github.com/vanfinancecompany-sudo/vanfinance-co/pull/165
+
+### Data handoff
+The price selector must issue a short-lived, server-signed rental token only after checking the **authoritative** approved source revision. It identifies the vehicle registration, name, exact pricing mode, term, selected monthly **contract allowance**, initial rental ex/inc VAT and monthly rental ex/inc VAT. The customer's independent **estimated usage** question and **monthly budget** stay unchanged.
+
+Both public application forms have a new server-verified quote slot and a compact quote summary near the vehicle and at final review, plus token-only submission. Both keep seven application steps. An unverified quote link blocks progression **at the start**, instead of silently discarding the customer's choice. No raw client-entered amounts are sent as approved prices.
+
+The CRM ingestion PR verifies the signed token, registration and expiry; still requires a callback confirming the current source revision. The new marketing-crm pure helper lib/rent2BuyCurrentSourceQuote.mjs recalculates the price and validates the actual approved source. The internal email uses the same verified term, allowance and VAT figures. All parts are off or fail-closed until fully wired.
+
+### Critical pending integration (do not mistake passing unit tests for production readiness)
+1. No **server-side source adapter** yet builds a fully verified current pricing snapshot from DealerKit + authorised finance/retail VAT basis + reviewed decision + audited active override. Current status checks must require an in-stock, unambiguous identity.
+2. No authorised **active quote issuer / current-source API** yet signs quotes or verifies them using the dedicated source adapter. The website loader expects an authenticated endpoint response with ok=true, current=true, sourceRevisionVerified=true, quote.
+3. The CRM requires its independently trusted current-source callback. This is **unwired**. Therefore any customised token must currently be **rejected** even if an operator accidentally enables a front-end flag.
+4. Four legacy manual Wix special deals have not been imported/approved. BJ74 HTL is **48 months** (NOT 40) but listing/detail prices disagree; FV74 BBJ term still differs between listing and detail; their contract mileage is not verified.
+5. No production Supabase migration executed. No live Wix or main CRM records changed. All site application changes are in separate draft branches.
+6. Do not enable RENT2BUY_SELECTED_QUOTE_FORMS_ENABLED, RENT2BUY_QUOTE_HANDOFF_ENABLED, RENT2BUY_SPECIAL_DRAFTS_ENABLED, or any active quote issuance/publishing flag until all tests, commercial approval and preview CRM/email submissions pass.
+
+**Acceptance condition:** A customer selecting 36 months / 1,500 miles / approved initial rental must see those EXACT figures before submission, in final review, in main CRM notes and in the internal email. An expired or tampered quote must be rejected without a created lead. A normal registration-only application and existing proof workflow must remain unchanged.
