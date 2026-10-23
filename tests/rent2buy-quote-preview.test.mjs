@@ -11,7 +11,7 @@ function source(registration="ZZ25XYZ",price=12000){
  return {vehicle:{registration,supplierStockId:id,title:"Approved example van",year:2025,mileage:12000,
    retailPrice:price,vatStatus:"plus_vat",sourceUpdatedAt:"2026-10-23T13:00:00Z"},
   decision:{registration,supplierStockId:id,reviewStatus:"reviewed",rent2buyEnabled:true},
-  sourceRetailPrice:price,activeSpecial:null};
+  sourceRetailPrice:price};
 }
 
 test("selector exposes Felix-valid terms/mileage and initial options with no client monthly price",()=>{
@@ -20,24 +20,20 @@ test("selector exposes Felix-valid terms/mileage and initial options with no cli
  assert.deepEqual(x.allowedMileageTerms.find(t=>t.milesPerMonth===1000).termMonths,[12,18,24,30,36,42,48]);
  assert.deepEqual(x.allowedMileageTerms.find(t=>t.milesPerMonth===4000).termMonths,[12,18,24]);
  assert.deepEqual(x.initialRentalOptionsExVat,[1750,2630,3500,4380]);
+ assert.equal(x.special,null);
  assert.equal(Object.hasOwn(x,"monthlyExVat"),false);
 });
 
-test("protected legacy Wix special has no standard-matrix fallback",()=>{
+test("fixed legacy vehicle has no standard-matrix selector fallback",()=>{
  const x=approvedRent2BuySelectorChoices(source("FV74BBJ",14695));
  assert.equal(x.ok,false);assert.equal(x.error,"fixed_legacy_special_not_customisable");
 });
 
-test("exact migrated special is shown and signed",()=>{
- const s=source("ZZ25XYZ",14695);s.vehicle.year=2024;s.vehicle.mileage=40000;
- s.activeSpecial={id:"special-1",status:"active",registration:"ZZ25XYZ",
-  supplier_stock_id:s.vehicle.supplierStockId,revision:2,term_months:36,miles_per_month:1000,
-  initial_ex_vat:2000,monthly_ex_vat:545};
- const choices=approvedRent2BuySelectorChoices(s);
- assert.equal(choices.ok,true);assert.equal(choices.special.monthlyExVat,545);
- const quote=issueApprovedRent2BuyQuote({source:s,secret,now,reference:"special-001"});
- assert.equal(quote.ok,true);assert.equal(quote.quote.monthlyExVat,545);
- assert.equal(verifyRent2BuyQuoteToken(quote.token,secret,{registration:"ZZ25XYZ",now}).monthlyExVat,545);
+test("issued preview quote is matrix-only and signed",()=>{
+ const s=source();
+ const quote=issueApprovedRent2BuyQuote({source:s,secret,now,reference:"matrix-001"});
+ assert.equal(quote.ok,true);assert.equal(quote.quote.pricingMode,"matrix");assert.equal(quote.quote.monthlyExVat,400);
+ assert.equal(verifyRent2BuyQuoteToken(quote.token,secret,{registration:"ZZ25XYZ",now}).monthlyExVat,400);
 });
 
 test("preview route uses simplified pricing source and has no Wix/stock-monitor writes",()=>{
