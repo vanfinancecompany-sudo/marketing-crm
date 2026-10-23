@@ -9,12 +9,13 @@ function source(registration="ZZ25XYZ",price=12000){
  return {vehicle:{registration,supplierStockId:id,title:"Test van",year:2025,mileage:12000,
    retailPrice:price,vatStatus:"plus_vat",sourceUpdatedAt:"2026-10-23T09:00:00Z"},
   decision:{registration,supplierStockId:id,reviewStatus:"reviewed",rent2buyEnabled:true},
-  sourceRetailPrice:price,activeSpecial:null};
+  sourceRetailPrice:price};
 }
 
 test("server signs the Felix matrix quote from existing reviewed vehicle retail",()=>{
  const s=source(),result=issueApprovedRent2BuyQuote({source:s,secret,now,reference:"normal-123"});
  assert.equal(result.ok,true);
+ assert.equal(result.quote.pricingMode,"matrix");
  assert.equal(result.quote.monthlyExVat,400);
  assert.equal(result.quote.initialExVat,1750);
  const restored=verifyRent2BuyQuoteToken(result.token,secret,{now,registration:"ZZ25XYZ"});
@@ -22,7 +23,7 @@ test("server signs the Felix matrix quote from existing reviewed vehicle retail"
  assert.equal(restored.expiresAt-now,30*60*1000);
 });
 
-test("matrix enforces mileage/term and initial-rental options without extra commercial approval layer",()=>{
+test("matrix enforces mileage, term and initial-rental options",()=>{
  const s=source();
  const q=issueApprovedRent2BuyQuote({source:s,secret,now,selection:{termMonths:36,milesPerMonth:2000,initialExVat:1750}});
  assert.equal(q.ok,true);assert.equal(q.quote.termMonths,36);assert.equal(q.quote.milesPerMonth,2000);
@@ -30,19 +31,10 @@ test("matrix enforces mileage/term and initial-rental options without extra comm
  assert.equal(issueApprovedRent2BuyQuote({source:s,secret,now,selection:{termMonths:24,milesPerMonth:1000,initialExVat:2150}}).error,"initial_rental_not_on_matrix_ladder");
 });
 
-test("protected legacy special never falls back to matrix",()=>{
- assert.equal(issueApprovedRent2BuyQuote({source:source("FV74BBJ",14695),secret,now}).error,"fixed_legacy_special_not_customisable");
-});
-
-test("exact active special is signed only for its exact configuration",()=>{
- const s=source("ZZ25XYZ",14695);
- s.activeSpecial={id:"sp-1",status:"active",revision:2,registration:"ZZ25XYZ",
-  supplier_stock_id:s.vehicle.supplierStockId,monthly_ex_vat:545,initial_ex_vat:2000,
-  term_months:36,miles_per_month:1000,expires_at:null};
- const deal=issueApprovedRent2BuyQuote({source:s,secret,now});
- assert.equal(deal.ok,true);assert.equal(deal.quote.pricingMode,"special");assert.equal(deal.quote.monthlyExVat,545);
- const changed=issueApprovedRent2BuyQuote({source:s,secret,now,selection:{termMonths:24,milesPerMonth:1000,initialExVat:2150}});
- assert.equal(changed.ok,false);
+test("fixed legacy special never falls back to matrix even if extra special-like data is attached",()=>{
+ const s=source("FV74BBJ",14695);
+ s.activeSpecial={id:"ignored",status:"active",monthly_ex_vat:1};
+ assert.equal(issueApprovedRent2BuyQuote({source:s,secret,now}).error,"fixed_legacy_special_not_customisable");
 });
 
 test("missing signing secret or unreviewed source cannot issue a trusted quote",()=>{
