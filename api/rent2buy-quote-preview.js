@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { loadApprovedRent2BuySource } from "./_rent2buy-quote-source.js";
+import { loadRent2BuyPricingSource } from "./_rent2buy-quote-source.js";
 import { approvedRent2BuySelectorChoices } from "../lib/rent2BuyQuoteChoices.mjs";
 import { issueApprovedRent2BuyQuote } from "../lib/rent2BuyQuoteIssue.mjs";
 
@@ -64,7 +64,7 @@ export default async function handler(request,response){
   const data=parseRequest(request.body);
   if(!data)return response.status(400).json({ok:false,error:"invalid_selection"});
   let source;
-  try {source=await loadApprovedRent2BuySource(data.registration);}
+  try {source=await loadRent2BuyPricingSource(data.registration);}
   catch{return response.status(409).json({ok:false,error:"approved_quote_unavailable"});}
   if(data.action==="choices"){
     const options=approvedRent2BuySelectorChoices(source);
