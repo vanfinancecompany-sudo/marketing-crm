@@ -15,6 +15,7 @@ on:
       - "lib/rent2BuySpecialDealPolicy.mjs"
       - "utils/rent2BuySpecialDealEditor.js"
       - "utils/dealerKitReviewWorkspace.js"
+      - "utils/vanscoWixPriceHelper.js"
       - "styles/dealerkit-review-workspace.css"
       - "docs/sql/rent2buy_special_deals_REVIEW_ONLY.sql"
       - ".github/workflows/rent2buy-pricing-safety.yml"
