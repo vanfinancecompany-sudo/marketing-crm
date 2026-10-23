@@ -1,0 +1,30 @@
+name: Rent2Buy Pricing Safety
+on:
+  pull_request:
+    paths:
+      - "lib/rent2BuyFlexiblePricing.mjs"
+      - "lib/rent2BuyProtectedSpecialDeals.mjs"
+      - "lib/rent2BuyQuoteHandoff.mjs"
+      - "lib/dealerKitRent2BuyWixPlan.js"
+      - "api/dealerkit-published-price.js"
+      - "tests/rent2buy-flexible-pricing.test.mjs"
+      - "tests/rent2buy-protected-specials.test.mjs"
+      - "tests/rent2buy-quote-handoff.test.mjs"
+      - ".github/workflows/rent2buy-pricing-safety.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  price-matrix-and-overrides:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify Node runtime
+        run: node --version
+      - name: Test pricing, special-deal protection and quote handoff
+        run: node --test tests/rent2buy-flexible-pricing.test.mjs tests/rent2buy-protected-specials.test.mjs tests/rent2buy-quote-handoff.test.mjs
