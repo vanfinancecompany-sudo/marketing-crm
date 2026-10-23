@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import handler, {issuedQuotePreviewResponse} from "../api/rent2buy-quote-preview.js";
 
 const keys=[
- "VERCEL_ENV","RENT2BUY_QUOTE_PREVIEW_ENDPOINT_ENABLED",
+ "VERCEL_ENV","RENT2BUY_QUOTE_PREVIEW_ENDPOINT_ENABLED","RENT2BUY_QUOTE_ENDPOINT_ENABLED",
  "RENT2BUY_QUOTE_VERIFY_KEY"
 ];
 function response(){
@@ -31,7 +31,7 @@ async function withPreviewEnv(values,callback){
 }
 const validKey="test-only-private-quote-verifier-key-36-characters";
 
-test("production environment always refuses preview issuance, even when enabled",async()=>{
+test("production refuses quote issuance without its separate production flag",async()=>{
  await withPreviewEnv({VERCEL_ENV:"production",RENT2BUY_QUOTE_PREVIEW_ENDPOINT_ENABLED:"true",RENT2BUY_QUOTE_VERIFY_KEY:validKey},async()=>{
   const res=response();
   await handler({method:"POST",headers:{"x-rent2buy-quote-verifier-key":validKey},
@@ -41,6 +41,15 @@ test("production environment always refuses preview issuance, even when enabled"
   assert.match(res.headers["Cache-Control"],/no-store/);
  });
 });
+test("production flag still requires a valid server-only verification key",async()=>{
+ await withPreviewEnv({VERCEL_ENV:"production",RENT2BUY_QUOTE_ENDPOINT_ENABLED:"true",RENT2BUY_QUOTE_VERIFY_KEY:validKey},async()=>{
+  const res=response();
+  await handler({method:"POST",headers:{"x-rent2buy-quote-verifier-key":"invalid"},
+    body:{action:"choices",registration:"ZZ25XYZ"}},res);
+  assert.equal(res.statusCode,401);
+ });
+});
+
 test("missing flag and unauthorised callers fail before any source read",async()=>{
  await withPreviewEnv({VERCEL_ENV:"preview",RENT2BUY_QUOTE_VERIFY_KEY:validKey},async()=>{
   const res=response();
