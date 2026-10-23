@@ -5,12 +5,19 @@ import { pendingRent2BuySpecialDeal, RENT2BUY_PENDING_SPECIAL_DEAL_IMPORTS } fro
 
 test("the four current user-confirmed special deals are held from automatic Wix updates", () => {
   assert.deepEqual(RENT2BUY_PENDING_SPECIAL_DEAL_IMPORTS, {
-    BT25LVK: 595, FV74BBJ: 545, FV74BEO: 595, BJ74HTL: 595,
+    BT25LVK: {monthlyExVat:595,initialExVat:2000,termMonths:48},
+    FV74BBJ: {monthlyExVat:545,initialExVat:2000,termMonths:48},
+    FV74BEO: {monthlyExVat:595,initialExVat:2000,termMonths:48},
+    BJ74HTL: {monthlyExVat:595,initialExVat:2000,termMonths:48},
   });
-  for(const [reg,amount] of Object.entries(RENT2BUY_PENDING_SPECIAL_DEAL_IMPORTS)){
+  for(const [reg,deal] of Object.entries(RENT2BUY_PENDING_SPECIAL_DEAL_IMPORTS)){
     const hold=pendingRent2BuySpecialDeal(reg);
     assert.equal(hold?.publisherMustHold,true);
-    assert.equal(hold?.publishedMonthlyExVat,amount);
+    assert.equal(hold?.publishedMonthlyExVat,deal.monthlyExVat);
+    assert.equal(hold?.initialExVat,2000);
+    assert.equal(hold?.termMonths,48);
+    assert.equal(hold?.milesPerMonth,null);
+    assert.equal(hold?.customisable,false);
     assert.equal(hold?.overrideImported,false);
   }
   assert.equal(pendingRent2BuySpecialDeal("FV74 BBJ")?.publisherMustHold,true);
