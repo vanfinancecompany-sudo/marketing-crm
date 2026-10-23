@@ -134,10 +134,8 @@ The temporary migration hold in lib/rent2BuyProtectedSpecialDeals.mjs blocks con
 
 Do not touch live Wix items or click CRM "Update Wix price" buttons for these registrations until the price/term discrepancy and contract mileage are resolved.
 
-## Commercial correction: BJ74 HTL payment count (user-confirmed, 23 October 2026)
+## Corrected commercial term: BJ74 HTL (user-confirmed, 23 October 2026)
 
-**BJ74 HTL must be advertised with 40X monthly payments, not 48X.** The user has explicitly corrected this number. The Wix listing and vehicle-detail records were both observed showing x48/48X before this correction. These are now known to be incorrect, but **NO live Wix changes have been made**.
+The user corrected their earlier statement: **BJ74 HTL is 48 months, NOT 40**. Disregard the temporary 40X instruction as superseded. Both existing Wix listing and detail CMS entries showed 48X monthly payments in the read-only check, and the user now confirms that 48-month term is correct. Do not create any exceptional 40-payment agreement for this vehicle.
 
-This is an individually agreed special deal. **Do not force the 40X monthly-payment count into Felix's standard six-month-step pricing matrix or silently round it to 36/42/48.** Model it as an explicit special-offer payment count / commercial term, separate from the standard matrix's selectable contract lengths; verify whether it denotes 40 payments or a total 40-month contract before deriving contractual dates. The existing price disagreement is NOT resolved: listing £595 + VAT and £2,000 + VAT initial, detail £693 + VAT and £2,079 + VAT initial. Do not overwrite either value until the approved special monthly/initial pricing and application terms are reconciled.
-
-The migration hold for BJ74HTL remains active **only on the feature branch**, pending integration. Do not publish or update the live CMS until the price and term correction is included in the full protected-deal rollout and application handoff.
+The separate Wix price discrepancy is **still unresolved**: listing £595 + VAT monthly and £2,000 + VAT initial, versus vehicle detail £693 + VAT monthly and £2,079 + VAT initial. The user-approved special-deal status remains protected. Do not change live records or infer which price is authoritative without verification.
