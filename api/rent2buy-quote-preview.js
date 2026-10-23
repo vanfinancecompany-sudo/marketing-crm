@@ -69,5 +69,9 @@ export default async function handler(request,response){
     secret:process.env.RENT2BUY_QUOTE_SIGNING_SECRET,
   });
   if(!quote.ok)return response.status(409).json({ok:false,error:"approved_quote_unavailable"});
-  return response.status(200).json({ok:true,quote:quote.quote,token:quote.token});
+  // The two website proxies require the top-level identity for BOTH actions.
+  // Without it, a valid signed quote is rejected before reaching the drawer.
+  if (quote.quote.registration !== data.registration)
+    return response.status(409).json({ok:false,error:"quote_identity_mismatch"});
+  return response.status(200).json({ok:true,registration:data.registration,quote:quote.quote,token:quote.token});
 }
