@@ -22,6 +22,7 @@ const blocked = (code) => ({
 export async function checkRent2BuyLegacyPriceWrite(registration,{
   db = null,
   getDb = getSupabaseServiceAdmin,
+  environment = process.env,
 }={}){
   const reg=canonical(registration);
   if(!/^[A-Z]{2}[0-9]{2}[A-Z]{3}$/.test(reg))
@@ -31,6 +32,11 @@ export async function checkRent2BuyLegacyPriceWrite(registration,{
   if(pendingRent2BuySpecialDeal(reg))
     return blocked("confirmed_manual_special_hold");
 
+  // Backwards compatible until the new special-deal schema is migrated.
+  // The four existing holds above remain unconditional. A new special cannot
+  // be saved unless this same protection gate is enabled.
+  if(environment.RENT2BUY_SPECIAL_PRICE_WRITE_GUARD_ENABLED!=="true")
+    return {permitted:true,code:"new_override_guard_not_activated"};
   try{
     const client=db||getDb();
     const {data,error}=await client
