@@ -16,7 +16,7 @@ const source={vehicle:{registration:"ZZ25XYZ",supplierStockId:"dk-zz",title:"Tes
 function token(overrides={}){
  const quote=quoteRent2BuyMatrix({retailPrice:source.sourceRetailPrice,registrationYear:source.vehicle.year,
   vehicleMileage:source.vehicle.mileage,termMonths:48,milesPerMonth:1000});
- return signRent2BuyQuote({quoteId:"q-001",registration:"ZZ25XYZ",vehicleTitle:"Test van",
+ return signRent2BuyQuote({quoteId:"quote-0001",registration:"ZZ25XYZ",vehicleTitle:"Test van",
   pricingMode:quote.pricingMode,termMonths:quote.termMonths,milesPerMonth:quote.milesPerMonth,
   initialExVat:quote.initialExVat,monthlyExVat:quote.monthlyExVat,
   sourceRevision:rent2BuyPricingSourceRevision(source),issuedAt:now,expiresAt:now+3600000,...overrides},secret,now);
