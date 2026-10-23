@@ -133,3 +133,11 @@ Site: VAN FINANCE Wix CMS (the shared source for both public sites), site ID 85f
 The temporary migration hold in lib/rent2BuyProtectedSpecialDeals.mjs blocks controlled Wix Rent2Buy publishing by registration, independent of conflicting source values. This safeguard exists ONLY ON THE DEVELOPMENT BRANCH until reviewed and merged; it is **not active in production**.
 
 Do not touch live Wix items or click CRM "Update Wix price" buttons for these registrations until the price/term discrepancy and contract mileage are resolved.
+
+## Commercial correction: BJ74 HTL payment count (user-confirmed, 23 October 2026)
+
+**BJ74 HTL must be advertised with 40X monthly payments, not 48X.** The user has explicitly corrected this number. The Wix listing and vehicle-detail records were both observed showing x48/48X before this correction. These are now known to be incorrect, but **NO live Wix changes have been made**.
+
+This is an individually agreed special deal. **Do not force the 40X monthly-payment count into Felix's standard six-month-step pricing matrix or silently round it to 36/42/48.** Model it as an explicit special-offer payment count / commercial term, separate from the standard matrix's selectable contract lengths; verify whether it denotes 40 payments or a total 40-month contract before deriving contractual dates. The existing price disagreement is NOT resolved: listing £595 + VAT and £2,000 + VAT initial, detail £693 + VAT and £2,079 + VAT initial. Do not overwrite either value until the approved special monthly/initial pricing and application terms are reconciled.
+
+The migration hold for BJ74HTL remains active **only on the feature branch**, pending integration. Do not publish or update the live CMS until the price and term correction is included in the full protected-deal rollout and application handoff.
