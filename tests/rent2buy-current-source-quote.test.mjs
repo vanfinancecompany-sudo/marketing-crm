@@ -12,6 +12,7 @@ function source(reg="ZZ25XYZ",retail=12000){
     vehicle:{supplierStockId:id,registration:reg,sourceUpdatedAt:"2026-10-23T12:00:00Z",year:2025,mileage:12000,retailPrice:retail,vatStatus:"plus_vat"},
     decision:{supplierStockId:id,registration:reg,rent2buyEnabled:true,reviewStatus:"reviewed"},
     approvedRetailExVat:retail,retailVatBasisApproved:true,stockVerifiedCurrent:true,activeSpecial:null,
+    commercialTermsApproved:true,approvedTermMonths:[12,18,24,30,36,42,48],retailApproval:{revision:3},
   };
 }
 function quoteFor(s,options={}){
@@ -42,6 +43,12 @@ test("previous approved quote fails after source retail price or availability ch
  assert.equal(verifyRent2BuyQuoteAgainstSource(q,{...s,vehicle:{...s.vehicle,retailPrice:13000}}).reason,"source_revision_changed");
  assert.equal(verifyRent2BuyQuoteAgainstSource(q,{...s,stockVerifiedCurrent:false}).reason,"unverified_stock_or_review");
  assert.equal(verifyRent2BuyQuoteAgainstSource(q,{...s,retailVatBasisApproved:false}).reason,"retail_vat_basis_unverified");
+});
+
+test("explicit contract approval cannot be overridden by matrix eligibility",()=>{
+ const s=source(),q=quoteFor(s);
+ assert.equal(verifyRent2BuyQuoteAgainstSource(q,{...s,approvedTermMonths:[36]}).reason,"contract_term_not_approved");
+ assert.equal(verifyRent2BuyQuoteAgainstSource(q,{...s,commercialTermsApproved:false}).reason,"contract_term_not_approved");
 });
 
 test("all four protected manual Wix specials remain held pending complete active deal",()=>{
