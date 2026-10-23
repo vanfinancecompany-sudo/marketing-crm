@@ -12,15 +12,12 @@ on:
       - "api/_rent2buy-protected-price-write.mjs"
       - "api/dealerkit-rent2buy-special-deal.js"
       - "api/transactional-rent2buy-application.js"
-      - "api/dealerkit-stock-watch-session.js"
-      - "api/stock-watch-monitor-agent.js"
       - "utils/rent2BuySpecialDealEditor.js"
       - "utils/dealerKitReviewWorkspace.js"
       - "utils/vanscoWixPriceHelper.js"
       - "styles/dealerkit-review-workspace.css"
       - "docs/sql/rent2buy_*"
       - "tests/rent2buy-*.test.mjs"
-      - "vercel.json"
       - ".github/workflows/rent2buy-pricing-safety.yml"
   workflow_dispatch:
 
@@ -39,5 +36,5 @@ jobs:
         run: node --version
       - name: Install pinned dependencies without package scripts
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Test ALL Rent2Buy pricing, stock and quote integration safeguards
+      - name: Test all Rent2Buy pricing, special-deal and quote handoff safeguards
         run: node --test tests/rent2buy-*.test.mjs
