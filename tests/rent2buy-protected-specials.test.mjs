@@ -1,0 +1,32 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import { pendingRent2BuySpecialDeal, RENT2BUY_PENDING_SPECIAL_DEAL_IMPORTS } from "../lib/rent2BuyProtectedSpecialDeals.mjs";
+
+test("the four current user-confirmed special deals are held from automatic Wix updates", () => {
+  assert.deepEqual(RENT2BUY_PENDING_SPECIAL_DEAL_IMPORTS, {
+    BT25LVK: 595, FV74BBJ: 545, FV74BEO: 595, BJ74HTL: 595,
+  });
+  for(const [reg,amount] of Object.entries(RENT2BUY_PENDING_SPECIAL_DEAL_IMPORTS)){
+    const hold=pendingRent2BuySpecialDeal(reg);
+    assert.equal(hold?.publisherMustHold,true);
+    assert.equal(hold?.publishedMonthlyExVat,amount);
+    assert.equal(hold?.overrideImported,false);
+  }
+  assert.equal(pendingRent2BuySpecialDeal("FV74 BBJ")?.publisherMustHold,true);
+  assert.equal(pendingRent2BuySpecialDeal("NOTDEAL"),null);
+});
+
+test("controlled publisher produces zero target writes for pending manual specials", () => {
+  const publisher=fs.readFileSync(new URL("../lib/dealerKitRent2BuyWixPlan.js", import.meta.url),"utf8");
+  assert.match(publisher,/pendingRent2BuySpecialDeal\(registration\)/);
+  assert.match(publisher,/if \(pendingSpecial\)\s*\{\s*return \{/);
+  assert.match(publisher,/targets: \[\]/);
+  assert.match(publisher,/canPublish: false, protectedSpecialDeal: pendingSpecial/);
+  assert.match(publisher,/protected_special_deal_not_imported/);
+});
+
+test("existing non-Rent2Buy advertisements remain outside the manual-special hold", () => {
+  const publisher=fs.readFileSync(new URL("../lib/dealerKitRent2BuyWixPlan.js", import.meta.url),"utf8");
+  assert.match(publisher,/decision\.rent2buyEnabled \? pendingRent2BuySpecialDeal\(registration\) : null/);
+});
