@@ -57,6 +57,7 @@ function vehicle() {
     registration,
     title: "Ford Transit 350 EcoBlue HD Leader Chassis Cab",
     retailPrice: 13995,
+    year: 2021,
     mileage: 41000,
     vatStatus: "plus_vat",
     sourceStatus: "In Stock",
