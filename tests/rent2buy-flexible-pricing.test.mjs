@@ -106,3 +106,9 @@ test("fail closed for missing data, out-of-bounds terms and unselected upfront s
   assert.equal(quote({milesPerMonth:4500}).status,"unavailable");
   assert.equal(quote({initialRentalExVat:1950}).reason,"initial_rental_not_on_matrix_ladder");
 });
+
+test("Wix formatted registration year and comma-formatted odometer are accepted, blank odometer fails", () => {
+  assert.equal(rent2BuyMaximumTerm({registrationYear:"2023/73",vehicleMileage:"49,595 miles",currentYear:2026,milesPerMonth:1000}),48);
+  assert.equal(rent2BuyMaximumTerm({registrationYear:2023,vehicleMileage:null,currentYear:2026,milesPerMonth:1000}),null);
+  assert.equal(rent2BuyMaximumTerm({registrationYear:2023,vehicleMileage:"",currentYear:2026,milesPerMonth:1000}),null);
+});
