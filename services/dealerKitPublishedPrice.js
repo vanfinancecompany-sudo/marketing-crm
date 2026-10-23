@@ -3,7 +3,7 @@ import {
   parseMarketingJsonResponse,
 } from "./marketingAccess.js";
 
-async function requestPublishedPrice(action, { pipeline, registration, supplierStockId, retailPrice, mileage, vatStatus, confirmation = null }) {
+async function requestPublishedPrice(action, { pipeline, registration, supplierStockId, retailPrice, mileage, vatStatus, confirmation = null, holdReview = null }) {
   const response = await fetch("/api/marketing-centre-dealerkit-published-price", {
     method: "POST",
     headers: buildMarketingAccessHeaders({ "Content-Type": "application/json" }),
@@ -16,6 +16,7 @@ async function requestPublishedPrice(action, { pipeline, registration, supplierS
       mileage,
       vat_status: vatStatus,
       ...(confirmation ? { confirmation } : {}),
+      ...(holdReview ? { hold_review: holdReview } : {}),
     }),
   });
   return parseMarketingJsonResponse(response, "Published price update failed.");

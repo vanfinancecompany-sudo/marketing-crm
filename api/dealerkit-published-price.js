@@ -16,7 +16,8 @@ import {
   rent2BuyWixCurrentFields,
 } from "../lib/dealerKitPublishedPrice.js";
 import { VAN_FINANCE_RENT2BUY_WIX_SITE_ID } from "../lib/dealerKitRent2BuyWixPlan.js";
-import { calculateVfcAdvertisedMonthly, isVfcPricingReviewHeld } from "../lib/vfcFinancePriceMatrix.mjs";
+import { calculateVfcAdvertisedMonthly } from "../lib/vfcFinancePriceMatrix.mjs";
+import { getVfcPricingReviewHold } from "../lib/vfcPricingReviewHolds.mjs";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const clean = (value, limit = 10000) => String(value ?? "").trim().slice(0, limit);
@@ -158,7 +159,6 @@ function makeMatch(configuration, collection, item, current, proposed) {
 }
 
 async function financePreview(configuration, vehicle) {
-  if (isVfcPricingReviewHeld(vehicle.registration)) throw new ApiError(409, "This VFC vehicle has a pricing/VAT discrepancy on hold. Do not change its published price yet.");
   const queried = await Promise.all(VAN_FINANCE_WIX_COLLECTIONS.map(async (collection) => ({ collection, item: await queryRegistration(configuration, collection, vehicle.registration) })));
   const master = queried.find(({ collection }) => collection.id === "VANFINANCE-ALLVANS");
   if (!master?.item) throw new ApiError(409, `${vehicle.registration} is not currently published in the Van Finance master listing. Nothing was changed.`);
@@ -170,6 +170,7 @@ async function financePreview(configuration, vehicle) {
   return {
     pipeline: "finance",
     registration: vehicle.registration,
+    review_hold: getVfcPricingReviewHold(vehicle.registration),
     supplier_stock_id: vehicle.supplierStockId || null,
     source_mode: vehicle.sourceMode,
     retail_price: vehicle.retailPrice,
@@ -180,7 +181,6 @@ async function financePreview(configuration, vehicle) {
 }
 
 async function carPreview(configuration, vehicle) {
-  if (isVfcPricingReviewHeld(vehicle.registration)) throw new ApiError(409, "This VFC car has a pricing discrepancy on hold. Do not change its published price yet.");
   const queried = await Promise.all(CAR_WIX_PRICE_COLLECTIONS.map(async (collection) => ({ collection, item: await queryRegistration(configuration, collection, vehicle.registration) })));
   const master = queried.find(({ collection }) => collection.id === "CARFINANCE");
   if (!master?.item) throw new ApiError(409, `${vehicle.registration} is not currently published in the Car Finance master listing. Nothing was changed.`);
@@ -192,6 +192,7 @@ async function carPreview(configuration, vehicle) {
   return {
     pipeline: "cars",
     registration: vehicle.registration,
+    review_hold: getVfcPricingReviewHold(vehicle.registration),
     supplier_stock_id: vehicle.supplierStockId || null,
     source_mode: vehicle.sourceMode,
     retail_price: vehicle.retailPrice,
@@ -232,6 +233,32 @@ async function rent2BuyPreview(configuration, vehicle) {
     match_count: matches.length,
     matches,
   };
+}
+
+function verifyHeldPriceReview(body, vehicle, preview) {
+  if (!preview.review_hold) return;
+  const approval = body.hold_review;
+  const typedRegistration = normalizeFinanceRegistration(approval?.registration);
+  if (typedRegistration !== preview.registration ||
+      approval?.confirmed !== true ||
+      approval?.decision !== "use_fresh_dealerkit_price") {
+    throw new ApiError(409, "This vehicle has a historic pricing review hold. Read the Wix listing/detail comparison, confirm the correct price and type the registration in the CRM before updating.");
+  }
+  // Historic exceptions may be approved only against newly fetched supplier
+  // data. Never bypass the hold using a cached/typed source retail price.
+  if (vehicle.sourceMode !== "fresh_dealerkit" || !vehicle.supplierStockId) {
+    throw new ApiError(409, "This held vehicle needs a live DealerKit detail ID before Wix can be changed. Refresh Stock Watch and retry. Nothing was changed.");
+  }
+  const requiredCollections = preview.pipeline === "cars"
+    ? ["CARFINANCE", "CARPAGES"]
+    : ["VANFINANCE-ALLVANS", "VANFINANCEPAGES"];
+  const actual = new Set(preview.matches.map((match) => match.collection_id));
+  if (!requiredCollections.every((collection) => actual.has(collection))) {
+    throw new ApiError(409, "The current Wix listing and detail page could not both be verified for this held vehicle. Nothing was changed.");
+  }
+  if (preview.pipeline === "finance" && !["plus_vat", "no_vat", "vat_included"].includes(vehicle.vatStatus)) {
+    throw new ApiError(409, "DealerKit VAT treatment must be verified before this held Finance vehicle can be updated.");
+  }
 }
 
 function confirmationMatchesPreview(confirmation, preview) {
@@ -313,8 +340,9 @@ export default async function handler(request, response) {
     if (action === "preview") return response.status(200).json({ ok: true, preview });
 
     if (!confirmationMatchesPreview(body.confirmation, preview)) throw new ApiError(409, "DealerKit or Wix data changed after the preview. Nothing was changed. Preview again before updating.");
+    verifyHeldPriceReview(body, vehicle, preview);
     const applied = await applyPreview(configurations, preview);
-    console.info("DEALERKIT PUBLISHED PRICE UPDATE", { pipeline, registration: vehicle.registration, retail_price: vehicle.retailPrice, monthly_price: preview.monthly_price, targets: applied.map((match) => `${match.site_id}:${match.collection_id}`) });
+    console.info("DEALERKIT PUBLISHED PRICE UPDATE", { pipeline, registration: vehicle.registration, retail_price: vehicle.retailPrice, monthly_price: preview.monthly_price, historic_hold_review_approved: Boolean(preview.review_hold), targets: applied.map((match) => `${match.site_id}:${match.collection_id}`) });
     return response.status(200).json({ ok: true, updated: { ...preview, updated_count: applied.length } });
   } catch (error) {
     console.error("DEALERKIT PUBLISHED PRICE ERROR", { action: clean(body.action, 30), pipeline: clean(body.pipeline, 30), registration: clean(body.registration, 30), status: error.status || 500, message: clean(error?.message, 1000), details: error?.details || null });

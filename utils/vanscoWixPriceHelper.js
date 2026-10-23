@@ -2,6 +2,7 @@ import {
   previewDealerKitPublishedPrice,
   updateDealerKitPublishedPrice,
 } from "../services/dealerKitPublishedPrice.js";
+import { getVfcPricingReviewHold } from "../lib/vfcPricingReviewHolds.mjs";
 
 const HELPER_ATTRIBUTE = "data-vansco-wix-price-helper";
 let scanScheduled = false;
@@ -95,6 +96,59 @@ function renderPreview(container, preview, details, triggerButton) {
   list.textContent = preview.matches.map((match) => `${match.site_label}: ${match.collection_label}`).join(" • ");
   previewNode.appendChild(list);
 
+  // Compare each exact Wix listing/detail field, not just the DealerKit retail.
+  for (const match of preview.matches || []) {
+    const line = document.createElement("div");
+    line.className = "vehicle-card__meta";
+    line.style.marginTop = "8px";
+    const fields = (values) => Object.entries(values || {})
+      .filter(([key]) => ["price", "priceVat", "salePrice", "mthPrice", "wk", "monthlyPayments", "intialRentalCharge"].includes(key))
+      .map(([key, value]) => `${key}: ${value || "blank"}`).join(" · ");
+    const title = document.createElement("strong");
+    title.textContent = `${match.site_label} / ${match.collection_label}`;
+    const current = document.createElement("div");
+    current.textContent = `Current Wix: ${fields(match.current)}`;
+    const proposed = document.createElement("div");
+    proposed.textContent = `Proposed: ${fields(match.proposed)}`;
+    line.append(title, current, proposed);
+    previewNode.appendChild(line);
+  }
+
+  const hold = preview.review_hold;
+  let holdCheckbox = null;
+  let holdRegistration = null;
+  if (hold) {
+    const note = document.createElement("div");
+    note.className = "vehicle-card__meta";
+    note.style.marginTop = "10px";
+    const title = document.createElement("strong");
+    title.textContent = "Why this update was on hold: ";
+    note.append(title, document.createTextNode(`${hold.issue} ${hold.evidence} Required check: ${hold.check} These findings are historic; use the live Wix values above.`));
+    previewNode.appendChild(note);
+    if (preview.source_mode !== "fresh_dealerkit") {
+      const warning = document.createElement("div");
+      warning.className = "error-banner";
+      warning.textContent = "Cannot approve a held price with a saved DealerKit snapshot. Refresh Stock Watch to obtain the live DealerKit vehicle ID.";
+      previewNode.appendChild(warning);
+    }
+    const label = document.createElement("label");
+    label.className = "vehicle-card__meta";
+    label.style.display = "block";
+    label.style.marginTop = "8px";
+    holdCheckbox = document.createElement("input");
+    holdCheckbox.type = "checkbox";
+    holdCheckbox.style.marginRight = "8px";
+    label.append(holdCheckbox, document.createTextNode("I have checked the live Wix listing, detail and VAT/vehicle identity, and approve using the current DealerKit retail price."));
+    previewNode.appendChild(label);
+    holdRegistration = document.createElement("input");
+    holdRegistration.type = "text";
+    holdRegistration.placeholder = `Type ${preview.registration} to approve`;
+    holdRegistration.setAttribute("aria-label", "Confirm vehicle registration for reviewed Wix correction");
+    holdRegistration.style.width = "100%";
+    holdRegistration.style.marginTop = "8px";
+    previewNode.appendChild(holdRegistration);
+  }
+
   const actions = document.createElement("div");
   actions.className = "card-actions";
   actions.style.marginTop = "10px";
@@ -102,7 +156,18 @@ function renderPreview(container, preview, details, triggerButton) {
   const confirmButton = document.createElement("button");
   confirmButton.type = "button";
   confirmButton.className = "button button--primary";
-  confirmButton.textContent = "Confirm Wix update";
+  confirmButton.textContent = hold ? "Apply reviewed Wix correction" : "Confirm Wix update";
+  const canConfirm = () => !hold || (
+    preview.source_mode === "fresh_dealerkit"
+    && holdCheckbox?.checked === true
+    && cleanRegistration(holdRegistration?.value) === preview.registration
+  );
+  if (hold) {
+    confirmButton.disabled = true;
+    const enableIfApproved = () => { confirmButton.disabled = !canConfirm(); };
+    holdCheckbox.addEventListener("change", enableIfApproved);
+    holdRegistration.addEventListener("input", enableIfApproved);
+  }
 
   const cancelButton = document.createElement("button");
   cancelButton.type = "button";
@@ -112,15 +177,21 @@ function renderPreview(container, preview, details, triggerButton) {
   cancelButton.addEventListener("click", () => {
     previewNode.remove();
     triggerButton.disabled = false;
-    triggerButton.textContent = "Update Wix price";
+    triggerButton.textContent = hold ? "Review price difference" : "Update Wix price";
   });
 
   confirmButton.addEventListener("click", async () => {
+    if (!canConfirm()) return;
     confirmButton.disabled = true;
     cancelButton.disabled = true;
     confirmButton.textContent = "Updating Wix...";
     try {
-      const result = await updateDealerKitPublishedPrice({ ...details, confirmation: preview });
+      const holdReview = hold ? {
+        registration: cleanRegistration(holdRegistration.value),
+        confirmed: holdCheckbox.checked,
+        decision: "use_fresh_dealerkit_price",
+      } : null;
+      const result = await updateDealerKitPublishedPrice({ ...details, confirmation: preview, holdReview });
       const updated = result.updated;
       previewNode.remove();
       triggerButton.disabled = true;
@@ -129,9 +200,9 @@ function renderPreview(container, preview, details, triggerButton) {
       const extra = updated.pipeline === "rent2buy" ? ` Monthly £${updated.monthly_price}; initial £${updated.upfront_price}.` : ` Retail £${Number(updated.retail_price).toLocaleString("en-GB")}; monthly £${updated.monthly_price}.`;
       setMessage(container, `Wix updated successfully across ${updated.updated_count} exact published CMS record${updated.updated_count === 1 ? "" : "s"}.${extra}`, "success");
     } catch (error) {
-      confirmButton.disabled = false;
+      confirmButton.disabled = !canConfirm();
       cancelButton.disabled = false;
-      confirmButton.textContent = "Confirm Wix update";
+      confirmButton.textContent = hold ? "Apply reviewed Wix correction" : "Confirm Wix update";
       setMessage(previewNode, error.message || "Wix update failed. The controlled updater attempted rollback for any partial write.", "error");
     }
   });
@@ -156,10 +227,21 @@ function attachHelper(card) {
   helper.setAttribute(HELPER_ATTRIBUTE, "true");
   helper.style.marginTop = "10px";
 
+  const held = getVfcPricingReviewHold(details.registration);
+  if (held) {
+    const issueNote = document.createElement("div");
+    issueNote.className = "vehicle-card__meta";
+    issueNote.style.marginBottom = "8px";
+    const title = document.createElement("strong");
+    title.textContent = "Historic hold: ";
+    issueNote.append(title, document.createTextNode(`${held.issue} ${held.evidence} Open the CRM review to check the current Wix values.`));
+    helper.appendChild(issueNote);
+  }
+
   const button = document.createElement("button");
   button.type = "button";
   button.className = "button button--primary";
-  button.textContent = "Update Wix price";
+  button.textContent = held ? "Review price difference" : "Update Wix price";
 
   button.addEventListener("click", async () => {
     button.disabled = true;
@@ -173,7 +255,7 @@ function attachHelper(card) {
       renderPreview(helper, result.preview, details, button);
     } catch (error) {
       button.disabled = false;
-      button.textContent = "Update Wix price";
+      button.textContent = held ? "Review price difference" : "Update Wix price";
       setMessage(helper, error.message || "Could not safely preview the published price update.", "error");
     }
   });
