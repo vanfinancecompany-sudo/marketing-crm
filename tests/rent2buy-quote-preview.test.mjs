@@ -38,8 +38,11 @@ test("issued preview quote is matrix-only and signed",()=>{
 
 test("preview route uses simplified pricing source and has no Wix/stock-monitor writes",()=>{
  const route=fs.readFileSync(new URL("../api/rent2buy-quote-preview.js",import.meta.url),"utf8");
- assert.match(route,/VERCEL_ENV!=="preview"/);
- assert.match(route,/RENT2BUY_QUOTE_PREVIEW_ENDPOINT_ENABLED!=="true"/);
+ assert.match(route,/VERCEL_ENV==="preview"/);
+ assert.match(route,/RENT2BUY_QUOTE_PREVIEW_ENDPOINT_ENABLED==="true"/);
+ assert.match(route,/VERCEL_ENV==="production"/);
+ assert.match(route,/RENT2BUY_QUOTE_ENDPOINT_ENABLED==="true"/);
+ assert.match(route,/if\(!previewEnabled&&!productionEnabled\)/);
  assert.match(route,/x-rent2buy-quote-verifier-key/);
  assert.match(route,/loadRent2BuyPricingSource\(data\.registration\)/);
  assert.match(route,/issueApprovedRent2BuyQuote\(/);
