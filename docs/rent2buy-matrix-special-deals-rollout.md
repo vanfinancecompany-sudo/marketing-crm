@@ -206,3 +206,16 @@ rent_vehicles includes historical inactive duplicates. BT25LVK has an active int
 CAPACITY BLOCKER: strict adapter fetches a FULL DealerKit snapshot per verification. This is safe for isolated prototype tests but NOT production-suitable; do not enable customer traffic without a safe, short-lived complete-snapshot caching strategy and API-limit verification. Do not weaken completeness checks.
 
 Commercial blockers: the four exact approved terms/mileage, BJ74HTL price conflict, FV74BBJ agreement term, source retail VAT basis, permissible short contracts, secure quote issuance, Codex selector, preview E2E and internal email receipt.
+## Additional continuation: signed quote issuer and known stock identities
+
+User-protected specials confirmed in active Supabase DealerKit review and settings (read-only, 23 October 2026):
+| Registration | DealerKit stock ID | Stored term |
+|---|---|---:|
+| BT25LVK | c500e0856a9b1415e8194 | 48 |
+| FV74BBJ | c500e0856aa7d3d079064 | 36 (Wix listing says 48X; unresolved) |
+| FV74BEO | c500e0856aa7d41dd41aa | 48 |
+| BJ74HTL | c500e0856abce8a4b7b8b | 48 |
+
+New pure server-only module lib/rent2BuyQuoteIssue.mjs signs 30-minute quotes using the already-approved source, rechecking the full current-source quote verifier before signing. It supports fixed-term specials and the standard matrix, but will not silently turn a protected Wix special into the standard matrix. Tests in tests/rent2buy-quote-issue.test.mjs.
+
+NO PUBLIC QUOTE ISSUANCE API YET. It would trigger expensive full DealerKit reads and remains unsafe for customer traffic without a validated complete-stock snapshot strategy plus rate controls. Do NOT add a public endpoint or enable environment flags until approved. No live tables, Wix prices, websites or main CRM records were changed.
