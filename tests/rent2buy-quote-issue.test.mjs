@@ -31,12 +31,12 @@ test("matrix enforces mileage/term and initial-rental options without extra comm
 });
 
 test("protected legacy special never falls back to matrix",()=>{
- assert.equal(issueApprovedRent2BuyQuote({source:source("FV74BBJ",14695),secret,now}).error,"manual_special_migration_hold");
+ assert.equal(issueApprovedRent2BuyQuote({source:source("FV74BBJ",14695),secret,now}).error,"fixed_legacy_special_not_customisable");
 });
 
 test("exact active special is signed only for its exact configuration",()=>{
- const s=source("FV74BBJ",14695);
- s.activeSpecial={id:"sp-1",status:"active",revision:2,registration:"FV74BBJ",
+ const s=source("ZZ25XYZ",14695);
+ s.activeSpecial={id:"sp-1",status:"active",revision:2,registration:"ZZ25XYZ",
   supplier_stock_id:s.vehicle.supplierStockId,monthly_ex_vat:545,initial_ex_vat:2000,
   term_months:36,miles_per_month:1000,expires_at:null};
  const deal=issueApprovedRent2BuyQuote({source:s,secret,now});
