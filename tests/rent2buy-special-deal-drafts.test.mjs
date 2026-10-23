@@ -51,7 +51,11 @@ test("protected specials remain pending until completed record is approved",()=>
 test("draft saving requires explicit server-only unlock",()=>{
   assert.equal(allowedSpecialDraftWrite({}),false);
   assert.equal(allowedSpecialDraftWrite({RENT2BUY_SPECIAL_DRAFTS_ENABLED:"false"}),false);
-  assert.equal(allowedSpecialDraftWrite({RENT2BUY_SPECIAL_DRAFTS_ENABLED:"true"}),true);
+  assert.equal(allowedSpecialDraftWrite({RENT2BUY_SPECIAL_DRAFTS_ENABLED:"true"}),false);
+  assert.equal(allowedSpecialDraftWrite({
+    RENT2BUY_SPECIAL_DRAFTS_ENABLED:"true",
+    RENT2BUY_SPECIAL_PRICE_WRITE_GUARD_ENABLED:"true"
+  }),true);
   const api=fs.readFileSync(new URL("../api/dealerkit-rent2buy-special-deal.js",import.meta.url),"utf8");
   assert.match(api,/if\(request.method==="PUT" && !allowedSpecialDraftWrite\(\)\)/);
   assert.match(api,/body.action!=="save_draft"/);
