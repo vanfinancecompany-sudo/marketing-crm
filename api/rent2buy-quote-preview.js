@@ -38,6 +38,14 @@ function parseRequest(raw){
   return {action:"issue",registration:reg,selection:values};
 }
 
+export function issuedQuotePreviewResponse(issued,registration){
+  const id=String(registration??"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+  if(!issued?.ok||!issued?.quote||typeof issued.token!=="string"||
+     !issued.token||issued.quote.registration!==id)
+    return null;
+  return {ok:true,registration:id,quote:issued.quote,token:issued.token};
+}
+
 /**
  * Private, strictly preview-only server-to-server pricing endpoint.
  * No public/browser secret. This is deliberately distinct from the live
@@ -69,9 +77,8 @@ export default async function handler(request,response){
     secret:process.env.RENT2BUY_QUOTE_SIGNING_SECRET,
   });
   if(!quote.ok)return response.status(409).json({ok:false,error:"approved_quote_unavailable"});
-  // The two website proxies require the top-level identity for BOTH actions.
-  // Without it, a valid signed quote is rejected before reaching the drawer.
-  if (quote.quote.registration !== data.registration)
-    return response.status(409).json({ok:false,error:"quote_identity_mismatch"});
-  return response.status(200).json({ok:true,registration:data.registration,quote:quote.quote,token:quote.token});
+  // The website BFFs validate this same top-level identity for both actions.
+  const result=issuedQuotePreviewResponse(quote,data.registration);
+  if(!result)return response.status(409).json({ok:false,error:"quote_identity_mismatch"});
+  return response.status(200).json(result);
 }
