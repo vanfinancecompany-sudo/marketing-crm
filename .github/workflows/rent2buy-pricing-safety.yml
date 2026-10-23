@@ -23,6 +23,8 @@ on:
       - "api/_rent2buy-complete-quote-snapshot.mjs"
       - "api/_rent2buy-quote-source.js"
       - "api/dealerkit-stock-watch-session.js"
+      - "api/stock-watch-monitor-agent.js"
+      - "vercel.json"
       - "docs/sql/rent2buy_complete_quote_snapshots_REVIEW_ONLY.sql"
       - "tests/rent2buy-complete-quote-snapshot.test.mjs"
       - "tests/rent2buy-quote-issue.test.mjs"
