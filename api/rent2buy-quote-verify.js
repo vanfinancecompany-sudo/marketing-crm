@@ -16,7 +16,7 @@ function bodyOf(request){
 /**
  * Private server-to-server quote verification for both websites and Main CRM.
  * Disabled by default. No side effects or public API key exposures.
- * Do not enable full DealerKit reads without rate-limit/latency approval.
+ * Uses the existing reviewed DealerKit vehicle pricing inputs; no replacement stock feed or Stock Watch dependency.
  */
 export default async function handler(request,response){
   response.setHeader("Cache-Control","no-store, max-age=0");
@@ -31,7 +31,7 @@ export default async function handler(request,response){
   const body=bodyOf(request);
   if(!body||typeof body.token!=="string"||typeof body.registration!=="string")
     return response.status(400).json({ok:false,error:"missing_quote_information"});
-  // Both the HMAC and current DealerkIt source revision must pass.
+  // Both the HMAC and current reviewed pricing-input revision must pass.
   const result=await checkIncomingRent2BuyQuote({
     token:body.token,registration:body.registration,
   },{env,loadSource:loadRent2BuyPricingSource});
