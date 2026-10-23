@@ -6,7 +6,7 @@ import {
   canonicalRent2BuyRegistration,
 } from "../lib/rent2BuySpecialDealPolicy.mjs";
 
-const source={registration:"FV74 BBJ",supplierStockId:"stock-009",retailPrice:14695,vatStatus:"plus_vat",sourceUpdatedAt:"2026-10-23T12:00:00Z"};
+const source={registration:"FV74 BBJ",supplierStockId:"stock-009",retailPrice:14695,year:2024,mileage:46251,vatStatus:"plus_vat",sourceUpdatedAt:"2026-10-23T12:00:00Z"};
 const input={
   registration:"FV74 BBJ",confirmRegistration:"FV74BBJ",supplierStockId:"stock-009",
   monthlyExVat:545,initialExVat:2000,termMonths:36,milesPerMonth:1000,
@@ -34,6 +34,8 @@ test("special deal drafts must be explicit and verified against live source",()=
   assert.throws(()=>normaliseRent2BuySpecialDraft({...input,milesPerMonth:4500},source),/mileage allowance/);
   assert.throws(()=>normaliseRent2BuySpecialDraft({...input,initialExVat:999},source),/minimum/);
   assert.throws(()=>normaliseRent2BuySpecialDraft({...input,reason:"deal"},source),/reason/);
+  assert.throws(()=>normaliseRent2BuySpecialDraft({...input,termMonths:48},{...source,mileage:80000}),/not eligible/);
+  assert.throws(()=>normaliseRent2BuySpecialDraft({...input,termMonths:36,milesPerMonth:4000},source),/not eligible/);
 });
 
 test("protected specials remain pending until completed record is approved",()=>{
