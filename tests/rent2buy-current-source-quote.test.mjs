@@ -47,13 +47,13 @@ test("unreviewed or changed pricing inputs fail without any stock snapshot subsy
 
 test("four protected legacy specials cannot fall back to matrix before migration",()=>{
  const s=source("FV74BBJ",14695),q=quoteFor(s);
- assert.equal(verifyRent2BuyQuoteAgainstSource(q,s).reason,"manual_special_migration_hold");
+ assert.equal(verifyRent2BuyQuoteAgainstSource(q,s).reason,"fixed_legacy_special_not_customisable");
 });
 
 test("exact active special works; changing its settings returns to ordinary matrix",()=>{
- const s=source("FV74BBJ",14695);
+ const s=source("ZZ25XYZ",14695);
  s.vehicle.year=2024;s.vehicle.mileage=46251;
- s.activeSpecial={id:"special-1",revision:3,status:"active",registration:"FV74BBJ",
+ s.activeSpecial={id:"special-1",revision:3,status:"active",registration:"ZZ25XYZ",
    supplier_stock_id:s.vehicle.supplierStockId,monthly_ex_vat:545,initial_ex_vat:2000,
    term_months:36,miles_per_month:1000,expires_at:null};
  const special=quoteFor(s,{termMonths:36,milesPerMonth:1000,initialRentalExVat:2000,
@@ -68,8 +68,8 @@ test("exact active special works; changing its settings returns to ordinary matr
 });
 
 test("expired special and changed signed amount are rejected",()=>{
- const s=source("FV74BBJ",14695);
- s.activeSpecial={id:"special-1",revision:2,status:"active",registration:"FV74BBJ",
+ const s=source("ZZ25XYZ",14695);
+ s.activeSpecial={id:"special-1",revision:2,status:"active",registration:"ZZ25XYZ",
    supplier_stock_id:s.vehicle.supplierStockId,monthly_ex_vat:545,initial_ex_vat:2000,
    term_months:36,miles_per_month:1000,expires_at:"2026-10-22T23:59:59Z"};
  const q=quoteFor(s,{termMonths:36,milesPerMonth:1000,initialRentalExVat:2000,
