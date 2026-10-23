@@ -256,3 +256,17 @@ Consequences:
 Additional development hook: api/stock-watch-monitor-agent.js (the existing Vercel */15 cron) now reuses its already-loaded DealerKit provider snapshot and may append a complete pricing manifest ONLY when RENT2BUY_QUOTE_SNAPSHOT_CAPTURE_ENABLED=true, source kind dealerkit, and the provider returns complete=true. A failed or incomplete capture is logged in the run snapshot but does not change Stock Watch operations. This adds ZERO second bulk-feed reads. The separate manual Stock Watch session hook remains optional and independently disabled.
 
 The dedicated CI now checks both hook locations and the unchanged */15 cron; passing that test does NOT prove a workable 90-second customer availability window. Keep the verification and issuer OFF until that operational mismatch, commercial approvals and secure customer API are settled.
+## Development-only compact vehicle drawer (23 October 2026)
+
+Both public vehicle-page application PR branches now include `components/Rent2BuyRentalDrawerPreview.jsx` and `components/Rent2BuyRentalDrawerPreview.css`.
+- Standalone Rent2Buy PR #51: `app/van-pages/[registration]/page.jsx`, only nonarchived vans.
+- VFC Rent2Buy PR #165: `app/rent2buy-concept/vans/[registration]/page.jsx`, excluding Cars.
+- Both insert ONE compact `Customise your rental` trigger directly beneath the original price hero, before essential specifications; old gallery, price boxes, price labels, Apply Now links, benefits and page columns remain untouched.
+- Browser UI uses a dismissible native `<dialog>` with compact right-hand drawer and full-width mobile mode; selection state only illustrates length and monthly mileage. Initial rental is explicitly disabled pending the approved server-derived options.
+- **NO CLIENT CALCULATIONS, NO SIGNED QUOTES, NO CHANGED PRICES, NO APPLICATION LINK CHANGES.** Existing special Wix advert prices stay visible and unchanged.
+- Server-side page condition is `VERCEL_ENV === 'preview' && RENT2BUY_CALCULATOR_PREVIEW_ENABLED === 'true'`, so the drawer cannot render in Vercel production even if someone sets the feature flag. Flag is not enabled.
+- Dedicated `tests/rent2buy-layout-preview.test.mjs` added to both quote-application safety workflows. Both workflows and Vercel development builds have passed.
+
+Later integration MUST replace layout-preview values with the authenticated server-approved quote API and carry its signed token into the existing application summary. Do not duplicate Felix matrix pricing inside the client. The 15-minute full DealerKit feed versus 90-second strict quote freshness remains a release blocker. Commercial approval and end-to-end tests remain mandatory.
+
+Codex handoff discussions updated in standalone issue #50 and VFC issue #164. No Codex coding session was launched. Changes are only on existing development branches.
