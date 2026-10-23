@@ -44,15 +44,22 @@ returns trigger language plpgsql security invoker
 set search_path = ''
 as $$
 begin
-  insert into public.dealerkit_rent2buy_special_deal_audit
-    (special_deal_id, registration, operation, before_row, after_row)
-  values
-    (coalesce(new.id, old.id),
-     coalesce(new.registration, old.registration),
-     tg_op,
-     case when tg_op <> 'INSERT' then to_jsonb(old) else null end,
-     case when tg_op <> 'DELETE' then to_jsonb(new) else null end);
-  return coalesce(new, old);
+  if tg_op = 'DELETE' then
+    insert into public.dealerkit_rent2buy_special_deal_audit
+      (special_deal_id, registration, operation, before_row, after_row)
+    values (old.id, old.registration, tg_op, to_jsonb(old), null);
+    return old;
+  elsif tg_op = 'INSERT' then
+    insert into public.dealerkit_rent2buy_special_deal_audit
+      (special_deal_id, registration, operation, before_row, after_row)
+    values (new.id, new.registration, tg_op, null, to_jsonb(new));
+    return new;
+  else
+    insert into public.dealerkit_rent2buy_special_deal_audit
+      (special_deal_id, registration, operation, before_row, after_row)
+    values (new.id, new.registration, tg_op, to_jsonb(old), to_jsonb(new));
+    return new;
+  end if;
 end
 $$;
 revoke all on function public.audit_rent2buy_special_deal() from public, anon, authenticated;
