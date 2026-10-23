@@ -8,15 +8,8 @@ on:
       - "api/_rent2buy-*.mjs"
       - "api/rent2buy-*.js"
       - "api/dealerkit-published-price.js"
-      - "api/dealerkit-controlled-publish.js"
-      - "api/_rent2buy-protected-price-write.mjs"
-      - "api/dealerkit-rent2buy-special-deal.js"
       - "api/transactional-rent2buy-application.js"
-      - "utils/rent2BuySpecialDealEditor.js"
-      - "utils/dealerKitReviewWorkspace.js"
       - "utils/vanscoWixPriceHelper.js"
-      - "styles/dealerkit-review-workspace.css"
-      - "docs/sql/rent2buy_*"
       - "tests/rent2buy-*.test.mjs"
       - ".github/workflows/rent2buy-pricing-safety.yml"
   workflow_dispatch:
@@ -25,7 +18,7 @@ permissions:
   contents: read
 
 jobs:
-  price-matrix-and-overrides:
+  pricing-and-handoff:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -36,5 +29,5 @@ jobs:
         run: node --version
       - name: Install pinned dependencies without package scripts
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Test all Rent2Buy pricing, special-deal and quote handoff safeguards
+      - name: Test Felix matrix, fixed specials and quote handoff
         run: node --test tests/rent2buy-*.test.mjs
