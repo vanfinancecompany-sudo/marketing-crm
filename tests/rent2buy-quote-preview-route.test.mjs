@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import handler from "../api/rent2buy-quote-preview.js";
+import handler, {issuedQuotePreviewResponse} from "../api/rent2buy-quote-preview.js";
 
 const keys=[
  "VERCEL_ENV","RENT2BUY_QUOTE_PREVIEW_ENDPOINT_ENABLED",
@@ -73,4 +73,21 @@ test("malformed or unsupported term, mileage and upfront selections never fetch 
    assert.equal(res.body.error,"invalid_selection");
   }
  });
+});
+
+
+test("signed quote has the same top-level registration required by both website proxies",()=>{
+ const issued={
+  ok:true,
+  token:"r2bq1.signed-token.test",
+  quote:{registration:"ZZ25XYZ",termMonths:36,milesPerMonth:1000,initialExVat:2000,monthlyExVat:545},
+ };
+ const result=issuedQuotePreviewResponse(issued,"ZZ25XYZ");
+ assert.equal(result.ok,true);
+ assert.equal(result.registration,"ZZ25XYZ");
+ assert.equal(result.quote.registration,result.registration);
+ assert.equal(result.token,issued.token);
+ assert.equal(issuedQuotePreviewResponse(issued,"BT25LVK"),null);
+ assert.equal(issuedQuotePreviewResponse({...issued,token:""},"ZZ25XYZ"),null);
+ assert.equal(issuedQuotePreviewResponse({ok:false,...issued,token:""},"ZZ25XYZ"),null);
 });
