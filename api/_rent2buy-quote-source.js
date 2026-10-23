@@ -58,9 +58,9 @@ export async function loadRent2BuyPricingSource(registration,{
      !Number.isFinite(Number(vehicle.mileage))||Number(vehicle.mileage)<0)
     reject("pricing_inputs_missing");
 
+  if(pendingRent2BuySpecialDeal(target))
+    reject("fixed_legacy_special_not_customisable");
   const activeSpecial=await loadSpecial(db,target);
-  if(pendingRent2BuySpecialDeal(target) && !activeSpecial)
-    reject("protected_special_not_migrated");
 
   return {
     vehicle,
