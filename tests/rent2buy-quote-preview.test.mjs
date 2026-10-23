@@ -20,7 +20,7 @@ test("selector exposes Felix-valid terms/mileage and initial options with no cli
  assert.deepEqual(x.allowedMileageTerms.find(t=>t.milesPerMonth===1000).termMonths,[12,18,24,30,36,42,48]);
  assert.deepEqual(x.allowedMileageTerms.find(t=>t.milesPerMonth===4000).termMonths,[12,18,24]);
  assert.deepEqual(x.initialRentalOptionsExVat,[1750,2630,3500,4380]);
- assert.equal(x.special,null);
+ assert.equal(Object.hasOwn(x,"special"),false);
  assert.equal(Object.hasOwn(x,"monthlyExVat"),false);
 });
 
