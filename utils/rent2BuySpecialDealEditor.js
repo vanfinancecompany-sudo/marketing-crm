@@ -19,6 +19,16 @@ export function renderRent2BuySpecialDealEditor(vehicle={}) {
     ? "Existing Wix listing £"+legacy.publishedMonthlyExVat+" + VAT is identified for migration protection. The vehicle-detail price can differ; confirm all agreed terms before changing anything."
     : "Standard matrix applies by default. Only use a special deal for an approved, registration-specific promotion.";
   section.appendChild(intro);
+  if(legacy){
+    const fixed=document.createElement("p");
+    fixed.className="dealerkit-review__section-note";
+    fixed.dataset.rent2buyFixedSpecial="true";
+    fixed.textContent="FIXED SPECIAL · £"+legacy.monthlyExVat+" + VAT monthly · £"+
+      legacy.initialExVat+" + VAT initial · "+legacy.termMonths+
+      " months. No contractual mileage selector. This deal is not customisable and normal Wix price sync is blocked.";
+    section.appendChild(fixed);
+    return section;
+  }
   const status=document.createElement("p");
   status.className="dealerkit-review__section-note";
   status.setAttribute("role","status");
