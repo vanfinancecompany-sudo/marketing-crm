@@ -136,7 +136,8 @@ test("Rent2Buy detail price patch updates all public rental fields together from
 
 test("published price endpoint rechecks DealerKit and updates only the shared Rent2Buy Wix CMS", async () => {
   const source = await readFile(new URL("api/dealerkit-published-price.js", root), "utf8");
-  assert.match(source, /Rent2Buy price updates require a fresh DealerKit vehicle identity/);
+  assert.match(source, /fetchDealerKitStockSnapshot/);
+  assert.match(source, /fresh_dealerkit_registration_lookup/);
   assert.match(source, /registrationYear: vehicle\.year/);
   assert.match(source, /fetchDealerKitStockDetail/);
   assert.match(source, /VAN_FINANCE_RENT2BUY_WIX_SITE_ID/);
