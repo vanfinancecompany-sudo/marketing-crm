@@ -38,20 +38,33 @@ Rules implemented:
 
 Reference calculations tested include Felix's £12,000 / £400 case and supplied Maxus, Transit Custom and Primastar examples.
 
-## Existing four protected special deals
+## Existing four fixed legacy special deals
 
-These registrations must not be overwritten by ordinary Rent2Buy Wix price updates:
+These four registrations are intentionally **off the Felix customisable matrix**:
 
-| Registration | Protected monthly + VAT | Wix listing | Wix detail | Known term status |
-|---|---:|---|---|---|
-| BT25 LVK | £595 | £595 / £2,000 / 48 | £595 / £2,000 / 48 | 48 displayed; contract mileage still to confirm |
-| FV74 BBJ | £545 | £545 / £2,000 / 48 | £545 / £2,000 / 36 | **36/48 discrepancy must be confirmed** |
-| FV74 BEO | £595 | £595 / £2,000 / 48 | £595 / £2,000 / 48 | 48 displayed; contract mileage still to confirm |
-| BJ74 HTL | £595 | £595 / £2,000 / 48 | £693 / £2,079 / 48 | **48 months confirmed by user. Earlier 40-month comment was corrected. Price/upfront discrepancy remains.** |
+| Registration | Fixed monthly + VAT | Fixed initial + VAT | Fixed term |
+|---|---:|---:|---:|
+| BT25 LVK | £595 | £2,000 | 48 months |
+| FV74 BBJ | £545 | £2,000 | 48 months |
+| FV74 BEO | £595 | £2,000 | 48 months |
+| BJ74 HTL | £595 | £2,000 | 48 months |
 
-Do not infer the contractual mileage as 1,000 merely because that is the new matrix default.
+No contractual mileage allowance is stored or required for these four because the customer cannot customise them.
 
-Detailed sign-off sheet: `docs/rent2buy-existing-specials-signoff.md`.
+Confirmed corrections:
+- FV74 BBJ: 48 months. The old 36-month detail value is incorrect.
+- BJ74 HTL: £595 + VAT monthly / £2,000 + VAT initial / 48 months. The old detail value £693 / £2,079 is incorrect.
+- BJ74 HTL's earlier 40-month verbal reference was immediately corrected; 48 months is authoritative.
+
+Implementation rules:
+- hide the Customise your rental drawer on all four;
+- website detail rendering uses the fixed values above if CMS detail data differs;
+- normal Wix price sync remains blocked on all four;
+- Marketing CRM legacy-special section is read-only for all four;
+- API draft creation cannot convert any of the four to an editable special;
+- no contractual mileage is invented.
+
+Detailed fixed-special record: `docs/rent2buy-existing-specials-signoff.md`.
 
 ## Marketing CRM
 
@@ -120,21 +133,24 @@ Those changes have been removed. Existing stock/image/monitor behaviour is resto
 
 ## Remaining work before completion
 
-1. Confirm the incomplete commercial details for the four protected specials, especially FV74 BBJ term and BJ74 HTL correct monthly/initial pair, plus contractual mileage.
-2. Review the special-deal database schema, then apply it only when ready and populate the approved four records.
-3. Enable the pricing preview only in protected development and visually inspect both vehicle pages on desktop/mobile.
-4. Run end-to-end tests:
-   - normal matrix default;
+1. Keep the four fixed legacy specials protected as defined above. They no longer need mileage confirmation or migration into an editable special-deal record.
+2. Review the future-special database schema only for **new future promotions**, not these four legacy deals.
+3. Enable the matrix pricing preview only in protected development and visually inspect both vehicle pages on desktop/mobile.
+4. Run end-to-end tests for matrix vehicles:
+   - default matrix;
    - changed term;
    - changed mileage;
    - changed initial rental;
-   - exact special;
-   - changing away from exact special back to matrix;
    - tampered/expired token rejection;
    - exact selected deal visible on application review;
    - exact deal in Main CRM notes and internal email;
-   - legacy application unchanged.
-5. Only after those checks: decide merge/deployment sequence.
+   - legacy registration-only application unchanged.
+5. Run fixed-special checks:
+   - all four show fixed monthly/initial/48-month values;
+   - no customisation drawer;
+   - BJ74 HTL never shows £693/£2,079;
+   - FV74 BBJ never shows 36 months.
+6. Only after those checks: decide merge/deployment sequence.
 
 ## Branches
 
