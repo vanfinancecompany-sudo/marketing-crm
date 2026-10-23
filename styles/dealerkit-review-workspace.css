@@ -688,3 +688,17 @@ body.dealerkit-review-open {
   [data-wix-advert-image-editor] .dealerkit-review__gallery,
   [data-wix-advert-image-editor] .dealerkit-review__category-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+
+/* Draft-only Rent2Buy special-deal controls. Collapsed by default; no taller
+   live vehicle layout and no effect on Finance/Cars review panels. */
+.r2b-special-editor { margin-top: 12px; border: 1px solid #d9dee7; border-radius: 10px; }
+.r2b-special-editor > summary { cursor: pointer; font-weight: 800; padding: 12px 14px; font-size: 13px; }
+.r2b-special-editor[open] > summary { border-bottom: 1px solid #e5e7eb; }
+.r2b-special-editor .dealerkit-review__section-note { margin: 10px 14px; line-height: 1.45; }
+.r2b-special-editor__form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 8px 14px 14px; }
+.r2b-special-editor__field { display: grid; gap: 5px; min-width: 0; font-size: 12px; font-weight: 750; }
+.r2b-special-editor__field input,.r2b-special-editor__field select { width: 100%; min-width: 0; border: 1px solid #cbd5e1; border-radius: 7px; padding: 9px 10px; color: #111827; font-size: 14px; background: white; }
+.r2b-special-editor__form > button { grid-column: 1 / -1; justify-self: end; }
+.r2b-special-editor__form > button:disabled { cursor: not-allowed; opacity: .52; }
+@media (max-width: 620px) { .r2b-special-editor__form { grid-template-columns: minmax(0, 1fr); } .r2b-special-editor__form > button { width: 100%; } }
