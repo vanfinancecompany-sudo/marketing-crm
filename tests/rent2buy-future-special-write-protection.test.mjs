@@ -33,6 +33,7 @@ test("all four legacy manual Wix specials are protected even when the new table 
 test("any saved future special, including draft or inactive, needs an audited pricing decision",async()=>{
  for(const status of ["draft","active","inactive"]){
   const result=await checkRent2BuyLegacyPriceWrite("ZZ25 XYZ",{
+    environment:{RENT2BUY_SPECIAL_PRICE_WRITE_GUARD_ENABLED:"true"},
     db:dbWith({data:[{id:"special-123",registration:"ZZ25XYZ",status,revision:2}]}),
   });
   assert.equal(result.permitted,false);
@@ -52,7 +53,8 @@ test("missing table, error, duplicate rows and invalid registration all fail clo
    {db:dbWith({data:[{id:"one"},{id:"two"}]})},
    {getDb:()=>{throw Error("database offline");}},
  ]){
-  const result=await checkRent2BuyLegacyPriceWrite("ZZ25XYZ",option);
+  const result=await checkRent2BuyLegacyPriceWrite("ZZ25XYZ",{
+    environment:{RENT2BUY_SPECIAL_PRICE_WRITE_GUARD_ENABLED:"true"},...option});
   assert.equal(result.permitted,false);
  }
  const invalid=await checkRent2BuyLegacyPriceWrite("NOTREG",{getDb:()=>{throw Error("unexpected lookup");}});
@@ -70,4 +72,15 @@ test("the two legacy Wix write endpoints invoke guard before first Wix mutation"
  assert.ok(controlled.indexOf("await checkRent2BuyLegacyPriceWrite(registration)")<
            controlled.indexOf("await reconcileControlledTargets(state, registration, targets)"));
  assert.match(controlled,/ControlledPublishError\(409, priceWriteGate.message/);
+});
+
+
+test("new write gate stays backwards compatible before migration, while four legacy holds remain absolute",async()=>{
+ const result=await checkRent2BuyLegacyPriceWrite("ZZ25XYZ",{
+  environment:{},getDb:()=>{throw Error("should not query absent table");},
+ });
+ assert.deepEqual(result,{permitted:true,code:"new_override_guard_not_activated"});
+ const legacy=await checkRent2BuyLegacyPriceWrite("BJ74HTL",{environment:{}});
+ assert.equal(legacy.permitted,false);
+ assert.equal(legacy.code,"confirmed_manual_special_hold");
 });
