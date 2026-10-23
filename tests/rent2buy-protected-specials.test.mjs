@@ -30,7 +30,7 @@ test("controlled publisher produces zero target writes for pending manual specia
   assert.match(publisher,/if \(pendingSpecial\)\s*\{\s*return \{/);
   assert.match(publisher,/targets: \[\]/);
   assert.match(publisher,/canPublish: false, protectedSpecialDeal: pendingSpecial/);
-  assert.match(publisher,/protected_special_deal_not_imported/);
+  assert.match(publisher,/fixed_legacy_special/);
 });
 
 test("existing non-Rent2Buy advertisements remain outside the manual-special hold", () => {
@@ -44,7 +44,7 @@ test("Price Differences write endpoint blocks protected Rent2Buy deals before ch
   assert.match(source,/protectedDeal && action === "update"/);
   assert.match(source,/pendingRent2BuySpecialDeal\(vehicle\.registration\)/);
   assert.match(source,/preview\.protected_special_deal = protectedDeal/);
-  assert.match(source,/approved manual special-deal price/);
+  assert.match(source,/four fixed legacy specials|fixed legacy special/);
   assert.match(source,/if \(pipeline === "rent2buy" && action === "update"/);
 });
 
