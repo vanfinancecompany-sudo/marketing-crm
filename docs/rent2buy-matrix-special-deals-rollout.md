@@ -307,3 +307,13 @@ Both website customer-application draft PRs #51 and #165 now include:
 
 ### Stock freshness release gate unchanged
 The existing DealerKit monitor runs every 15 minutes; a 90-second authoritative full-stock cache is usable for at most around 10% of the interval before processing delays. Recent read-only monitor rows were complete with about 256 vehicles, but the current design would still show "quote unavailable" most of the time. Do not simply extend the cache TTL: the feed is advertising-aware and a fresh vehicle-detail response may NOT independently prove that an advert remains eligible. A provider-confirmed lightweight "currently advertised" status lookup, or an approved quota-safe refresh strategy, must be verified before allowing real quotes at scale.
+
+## 23 October continuation: measured DealerKit freshness readiness
+
+- READ-ONLY check of the existing Supabase stock-watch monitor, last 24 hours: **96/96 complete**, p95 scheduled interval **900.5s**, mean run duration **5.61s** and longest **17.73s**.
+- The existing authoritative 90-second quote TTL therefore gives only a **9.99% theoretical upper-bound availability window** with the current monitor schedule, even though DealerKit monitoring was healthy. This is not observed user availability.
+- Added **lib/rent2BuyQuoteReadiness.mjs** with conservative pure readiness calculations and tests. A healthy monitor alone cannot mark customer quoting ready, and supplier confirmation plus commercial approvals remain required. No provider calls made.
+- Added a verified repeatable read-only SQL report: **docs/sql/rent2buy_quote_stock_readiness_READ_ONLY.sql**; a full documented supplier verification/strategy decision is in **docs/rent2buy-dealerkit-freshness-decision.md**.
+- Important customer journey implication: the quote must pass authoritative freshness checks both when issued and at CRM acceptance. With the current 15-minute monitor/90-second source TTL, customers may be unable to submit a customised multi-step application even after having seen a quote. Do not activate the interface merely because the backend unit tests pass.
+- DealerKit public developer portal and Integrator Postman workspace could be located but did NOT establish whether an individually retrievable stock detail is still part of the active advertising-aware feed. Do not assume it is. Per-stock membership semantics and quotas must be confirmed.
+- Stock watcher schedule, TTL, publishing, websites, Supabase production schema and all four protected commercial specials remain unchanged. No PR merge/deploy.
