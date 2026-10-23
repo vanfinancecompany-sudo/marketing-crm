@@ -78,3 +78,37 @@ User explicitly identifies these **four Rent2Buy vehicle registrations** in the 
 **Not yet established:** contract length, allowed miles per month, initial rental, offer eligibility/expiry, and whether the special applies to only one configuration. Read each vehicle's actual approved Wix records and/or confirm with the user before storing a complete deal and migrating to the new system. The screenshot alone is sufficient to mark these **candidates for protection** in the migration plan, but **not** to auto-activate a quote override with invented terms.
 
 Prior to cutover, snapshot every existing Wix published price and cross-check each site's current view; save durable special-deal overrides with price + qualifying terms and verify preview diffs before enabling any publisher changes. Leave current manual Wix pricing untouched.
+
+## Mandatory customer application quote handoff (confirmed 23 October 2026)
+
+User instruction: after adjusting terms, customer's exact selected vehicle and deal MUST appear on the application form and submit to the main Rent2Buy CRM application, like the FlexiBuy example. This is LAUNCH-BLOCKING.
+
+### Traced live data route
+- Standalone Rent2Buy: rent2buy-vans/components/Rent2BuyApplicationForm.jsx → app/api/rent2buy-apply/route.js.
+- VFC Rent2Buy: vanfinance-co/components/Rent2BuyApplicationForm.jsx → app/api/rent2buy-apply/route.js.
+- CRM: crm/api/create-rent2buy-web-lead.js (authenticated) → crm/api/create-rent2buy-lead.js stores manual_leads.notes, registration, vehicle and source.
+- Internal notification: crm/api/_rent2BuyInternalNotification.js → marketing-crm/api/transactional-rent2buy-application.js.
+
+The existing general "Monthly mileage" form answer is a USAGE ESTIMATE and must remain separate from the SELECTED QUOTE MILEAGE ALLOWANCE.
+
+### Mandatory visible selection summary and persisted values
+- Vehicle identity: registration, model/title, image if available
+- Quoted contract length in months
+- Selected monthly mileage allowance in miles/month
+- Monthly rental EX VAT and INC VAT
+- Initial rental EX VAT and INC VAT
+- Pricing mode: matrix or special deal, with fixed special term restriction
+- Stable quote ID and source revision for audit
+
+The application form displays the summary on entry and review, submits a server-validated quote token alongside its current fields. Server must recheck registration, stock eligibility, current price revision, term/miles/initial and special-deal override. Never trust a submitted browser price, editable query parameter, or local storage. CRM writes verified terms to lead notes (or a protected reviewed structured table) AND shows the identical summary in its internal email. Validation failures need customer-friendly recovery; do not silently discard selection.
+
+Old registration-only applications must still work. No change to postcode (100 miles), proof requests or finance/other pipelines. Submitted quotes must not be retroactively overwritten.
+
+A pure server-side token contract and tests are staged in lib/rent2BuyQuoteHandoff.mjs but NOT connected to the live issuer or forms. Signing requires a secret held in server env only. End-to-end quote issuance, form summary, CRM ingest, notification and source revision revalidation MUST be complete before release.
+
+### Mandatory preview tests
+1. Change term, mileage and initial; see chosen vehicle and quote on application and final review.
+2. Preview submit: same quote appears in CRM lead notes and internal notification, with both VAT variants.
+3. Special: exact approved combination uses special price; altered configuration returns to matrix (with valid initial ladder).
+4. Forged amount, wrong reg, stale token and unsupported contract fail closed with recovery path.
+5. Check untouched eligibility, proofs, archived vehicles and registration-only applicants.
