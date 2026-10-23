@@ -37,3 +37,16 @@ Four unmerged draft PRs:
 - Van Finance Company #165: matching calculator and application
 
 No live Wix fields, Supabase schemas, jobs or customer applications were changed in this work.
+
+
+## Safe staged activation switches
+
+The four hardcoded 2026 special-deal holds remain effective in development regardless of new feature flags.
+
+For **future** per-registration special deals, the new Wix writer protection is activated only by a separate server-side switch:
+- `RENT2BUY_SPECIAL_PRICE_WRITE_GUARD_ENABLED=true`
+- The `RENT2BUY_SPECIAL_DRAFTS_ENABLED=true` editor cannot save a new special deal unless the writer guard is ALSO enabled.
+- Once enabled, an inaccessible or missing special-deal table causes Rent2Buy Wix price updates to fail closed.
+- With both switches absent (the present deployment state), the previous price updating behaviour for all **other, nonprotected** registrations is preserved. This avoids accidentally breaking normal stock sync before the schema has been created.
+
+These switches must be reviewed together during the database migration and cannot be assumed active. Do not create or activate a new special offer until the protection gate is proven in preview and the previously agreed rates remain correct.
