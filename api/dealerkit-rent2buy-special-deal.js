@@ -43,6 +43,13 @@ export default async function handler(request,response) {
     if(request.method==="PUT" && !allowedSpecialDraftWrite()) {
       return response.status(423).json({ok:false,message:"Special-deal draft saving is locked pending migration review. No prices were changed."});
     }
+    // Before the schema is reviewed/migrated, GET is an informational preview
+    // of the known manual-price hold. No query against an uncreated table.
+    if(request.method==="GET" && !allowedSpecialDraftWrite()) {
+      return response.status(200).json({ok:true,enabled:false,
+        deal:specialDealToClient({},registration),
+        message:"Special-deal draft storage is not yet enabled. Existing Wix prices are unchanged."});
+    }
     const db=getSupabaseServiceAdmin();
     const existing=await loadByStockId(db,supplierStockId);
     if(existing && canonicalRent2BuyRegistration(existing.registration)!==registration)
