@@ -47,16 +47,18 @@ export function issuedQuotePreviewResponse(issued,registration){
 }
 
 /**
- * Private, strictly preview-only server-to-server pricing endpoint.
- * No public/browser secret. This is deliberately distinct from the live
- * quote-verification route and NEVER changes a Wix price or stored approval.
- * Completely unusable in Vercel production, even if a flag is set.
+ * Authenticated server-to-server pricing endpoint. Preview and production
+ * are separately feature-gated. No public/browser secret, Wix price writes,
+ * or stock-system changes. The Felix pricing implementation is untouched.
  */
 export default async function handler(request,response){
   response.setHeader("Cache-Control","no-store, max-age=0");
   if(request.method!=="POST")return response.status(405).json({ok:false,error:"method_not_allowed"});
-  if(process.env.VERCEL_ENV!=="preview"||
-     process.env.RENT2BUY_QUOTE_PREVIEW_ENDPOINT_ENABLED!=="true")
+  const previewEnabled=process.env.VERCEL_ENV==="preview"&&
+    process.env.RENT2BUY_QUOTE_PREVIEW_ENDPOINT_ENABLED==="true";
+  const productionEnabled=process.env.VERCEL_ENV==="production"&&
+    process.env.RENT2BUY_QUOTE_ENDPOINT_ENABLED==="true";
+  if(!previewEnabled&&!productionEnabled)
     return response.status(503).json({ok:false,error:"preview_service_off"});
   if(!secureEqual(request.headers?.["x-rent2buy-quote-verifier-key"],
                   process.env.RENT2BUY_QUOTE_VERIFY_KEY))
