@@ -16,6 +16,7 @@ import {
   rent2BuyWixCurrentFields,
 } from "../lib/dealerKitPublishedPrice.js";
 import { VAN_FINANCE_RENT2BUY_WIX_SITE_ID } from "../lib/dealerKitRent2BuyWixPlan.js";
+import { pendingRent2BuySpecialDeal } from "../lib/rent2BuyProtectedSpecialDeals.mjs";
 import { calculateVfcAdvertisedMonthly } from "../lib/vfcFinancePriceMatrix.mjs";
 import { getVfcPricingReviewHold } from "../lib/vfcPricingReviewHolds.mjs";
 
@@ -333,9 +334,19 @@ export default async function handler(request, response) {
     if (!["preview", "update"].includes(action)) throw new ApiError(400, "Unsupported action.");
     if (!["finance", "rent2buy", "cars"].includes(pipeline)) throw new ApiError(400, "Choose Finance Vans, Rent2Buy Vans or Cars.");
 
+    // Manual Rent2Buy special prices are not normal DealerKit price differences.
+    // Reject updates before stock/Wix reads and again against the verified vehicle.
+    const protectedDeal = pipeline === "rent2buy" ? pendingRent2BuySpecialDeal(body.registration) : null;
+    if (protectedDeal && action === "update") {
+      throw new ApiError(409, "This Rent2Buy vehicle is one of the four fixed legacy specials. Automatic Update Wix price is disabled. Nothing was changed.");
+    }
     const vehicle = await freshDealerKitVehicle(body, pipeline);
+    if (pipeline === "rent2buy" && action === "update" && pendingRent2BuySpecialDeal(vehicle.registration)) {
+      throw new ApiError(409, "Protected Rent2Buy special deal: automatic Wix price update is disabled. Nothing was changed.");
+    }
     const configurations = wixConfigurations();
     const preview = await buildPreview(configurations, pipeline, vehicle);
+    if (protectedDeal) preview.protected_special_deal = protectedDeal;
     if (!preview.matches.length) throw new ApiError(404, `No published ${pipeline} Wix rows were found for ${vehicle.registration}. Nothing was changed.`);
     if (action === "preview") return response.status(200).json({ ok: true, preview });
 

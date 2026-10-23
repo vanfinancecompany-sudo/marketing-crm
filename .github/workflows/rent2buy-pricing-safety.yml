@@ -1,0 +1,33 @@
+name: Rent2Buy Pricing Safety
+on:
+  pull_request:
+    paths:
+      - "lib/rent2Buy*.mjs"
+      - "lib/dealerKitRent2BuyWixPlan.js"
+      - "api/_rent2buy-*.js"
+      - "api/_rent2buy-*.mjs"
+      - "api/rent2buy-*.js"
+      - "api/dealerkit-published-price.js"
+      - "api/transactional-rent2buy-application.js"
+      - "utils/vanscoWixPriceHelper.js"
+      - "tests/rent2buy-*.test.mjs"
+      - ".github/workflows/rent2buy-pricing-safety.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pricing-and-handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify Node runtime
+        run: node --version
+      - name: Install pinned dependencies without package scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Test Felix matrix, fixed specials and quote handoff
+        run: node --test tests/rent2buy-*.test.mjs
