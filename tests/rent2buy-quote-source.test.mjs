@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {loadRent2BuyPricingSource,Rent2BuyPricingSourceUnavailable} from "../api/_rent2buy-quote-source.js";
 
-const listing={supplierStockId:"dk-001",registration:"ZZ25XYZ",title:"Test van",year:2025,mileage:12000,retailPrice:12000};
+const listing={supplierStockId:"dk-001",registration:"ZZ25XYZ",title:"Test van",year:2025,mileage:12000,retailPrice:12000,status:"available"};
 const detail={...listing,vatStatus:"plus_vat",sourceUpdatedAt:"2026-10-23T10:00:00Z"};
 const snapshot=(vehicles=[listing])=>({vehicles,checkedAt:"2026-10-23T10:00:00Z"});
 
@@ -32,6 +32,7 @@ test("a unique current registration is required",async()=>{
 test("DealerKit identity and required price/year/mileage must remain current",async()=>{
  await rejects("dealerkit_vehicle_mismatch",{getSnapshot:async()=>snapshot(),getDetail:async()=>({...detail,registration:"BT25LVK"})});
  await rejects("dealerkit_vehicle_mismatch",{getSnapshot:async()=>snapshot(),getDetail:async()=>({...detail,supplierStockId:"other"})});
+ await rejects("dealerkit_vehicle_not_available",{getSnapshot:async()=>snapshot(),getDetail:async()=>({...detail,status:"reserved"})});
  for(const changed of [{retailPrice:null},{year:null},{mileage:null}]){
   await rejects("pricing_inputs_missing",{getSnapshot:async()=>snapshot(),getDetail:async()=>({...detail,...changed})});
  }
