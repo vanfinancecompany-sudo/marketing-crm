@@ -182,3 +182,27 @@ The CRM ingestion PR verifies the signed token, registration and expiry; still r
 6. Do not enable RENT2BUY_SELECTED_QUOTE_FORMS_ENABLED, RENT2BUY_QUOTE_HANDOFF_ENABLED, RENT2BUY_SPECIAL_DRAFTS_ENABLED, or any active quote issuance/publishing flag until all tests, commercial approval and preview CRM/email submissions pass.
 
 **Acceptance condition:** A customer selecting 36 months / 1,500 miles / approved initial rental must see those EXACT figures before submission, in final review, in main CRM notes and in the internal email. An expired or tampered quote must be rejected without a created lead. A normal registration-only application and existing proof workflow must remain unchanged.
+
+## Read-only Supabase verification and private current-source endpoint (23 October 2026)
+
+A read-only query against the active crm Supabase project identified existing dealerkit_review_decisions, dealerkit_rent2buy_settings, facebook_adverts and rent_vehicles. The proposed new dealerkit_rent2buy_special_deals and dealerkit_rent2buy_retail_approvals tables DO NOT exist. No SQL migration was applied.
+
+All four protected registrations have a saved reviewed decision with rent2buy_enabled=true:
+- BT25LVK: stored term 48 months.
+- FV74BBJ: stored term 36 months. Wix listing separately showed 48X; detail showed 36X. Commercial confirmation required.
+- FV74BEO: stored term 48 months.
+- BJ74HTL: stored term 48 months, as corrected by user (not 40). Wix listing/detail price conflict unresolved.
+
+rent_vehicles includes historical inactive duplicates. BT25LVK has an active internal row with £733 PM / £2,199 initial versus protected Wix special £595 / £2,000. Never use local rent_vehicles as the source of approved special prices.
+
+### Staged private stock and pricing verifier
+- docs/sql/rent2buy_retail_approvals_REVIEW_ONLY.sql: independent approval of EX-VAT base amount, source retail/VAT snapshot and explicit allowed term list; PROPOSAL ONLY.
+- api/_rent2buy-quote-source.js: read-only loader requiring complete DealerKit snapshot, one matching registration/stock ID, available status in both snapshot and fresh detail, matching mileage/retail/VAT/source timestamp, current saved reviewed Rent2Buy decision and approved retail basis/contract terms. Missing approval table fails closed.
+- lib/rent2BuyCurrentSourceQuote.mjs: version hashes include approval revision and contract terms; rejects unapproved terms.
+- api/_rent2buy-quote-verify-handler.mjs: checks signed token, expiry, vehicle identity and independent current approved source.
+- api/rent2buy-quote-verify.js: server-to-server x-rent2buy-quote-verifier-key header; default disabled by RENT2BUY_QUOTE_VERIFIER_ENABLED.
+- CRM PR #151 independently posts the signed token to the same approved-price verifier before writing any selected quote to a lead or internal email.
+
+CAPACITY BLOCKER: strict adapter fetches a FULL DealerKit snapshot per verification. This is safe for isolated prototype tests but NOT production-suitable; do not enable customer traffic without a safe, short-lived complete-snapshot caching strategy and API-limit verification. Do not weaken completeness checks.
+
+Commercial blockers: the four exact approved terms/mileage, BJ74HTL price conflict, FV74BBJ agreement term, source retail VAT basis, permissible short contracts, secure quote issuance, Codex selector, preview E2E and internal email receipt.
