@@ -40,3 +40,12 @@ test("Price Differences write endpoint blocks protected Rent2Buy deals before ch
   assert.match(source,/approved manual special-deal price/);
   assert.match(source,/if \(pipeline === "rent2buy" && action === "update"/);
 });
+
+test("Price Differences UI replaces Update Wix price with a disabled protected badge", () => {
+  const source=fs.readFileSync(new URL("../utils/vanscoWixPriceHelper.js",import.meta.url),"utf8");
+  assert.match(source,/details\.pipeline === "rent2buy" \? pendingRent2BuySpecialDeal\(details\.registration\)/);
+  assert.match(source,/if \(special\) \{/);
+  assert.match(source,/disabled\.disabled = true/);
+  assert.match(source,/disabled\.textContent = "Special deal protected"/);
+  assert.match(source,/data-rent2buy-price-protection/);
+});
