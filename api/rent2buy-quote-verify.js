@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { checkIncomingRent2BuyQuote } from "./_rent2buy-quote-verify-handler.mjs";
-import { loadApprovedRent2BuySource } from "./_rent2buy-quote-source.js";
+import { loadRent2BuyPricingSource } from "./_rent2buy-quote-source.js";
 
 const clean=(v,limit=4096)=>String(v??"").trim().slice(0,limit);
 function secureEqual(a,b){
@@ -34,7 +34,7 @@ export default async function handler(request,response){
   // Both the HMAC and current DealerkIt source revision must pass.
   const result=await checkIncomingRent2BuyQuote({
     token:body.token,registration:body.registration,
-  },{env,loadSource:loadApprovedRent2BuySource});
+  },{env,loadSource:loadRent2BuyPricingSource});
   if(!result.ok)return response.status(409).json({ok:false,current:false,sourceRevisionVerified:false,error:"quote_not_current"});
   return response.status(200).json(result);
 }
