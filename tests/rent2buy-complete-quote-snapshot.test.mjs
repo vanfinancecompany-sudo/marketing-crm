@@ -98,3 +98,16 @@ test("Stock Watch capture is feature-flagged and quote reads cannot call bulk De
  assert.doesNotMatch(source,/fetchDealerKitStockSnapshot|fetchStableDealerKitStockSnapshot/);
  assert.match(source,/fetchDealerKitStockDetail/);
 });
+
+
+test("existing 15-minute monitor can capture one already-read complete source without changing provider cadence",()=>{
+ const monitor=fs.readFileSync(new URL("../api/stock-watch-monitor-agent.js",import.meta.url),"utf8");
+ const vercel=JSON.parse(fs.readFileSync(new URL("../vercel.json",import.meta.url),"utf8"));
+ const job=vercel.crons.find(x=>x.path==="/api/stock-watch-monitor-agent");
+ assert.equal(job?.schedule,"*/15 * * * *");
+ assert.match(monitor,/environment\.RENT2BUY_QUOTE_SNAPSHOT_CAPTURE_ENABLED === "true"/);
+ assert.match(monitor,/provider\?\.complete !== true/);
+ assert.match(monitor,/captureCompleteRent2BuyQuoteSnapshot\(supabase, provider\)/);
+ assert.match(monitor,/loadStockSourceSnapshot\(/);
+ assert.equal((monitor.match(/loadStockSourceSnapshot\(/g)||[]).length,1);
+});
