@@ -1,14 +1,11 @@
 /**
  * Minimal Rent2Buy pricing source.
- *
- * This deliberately reuses the EXISTING reviewed DealerKit vehicle and its
- * retail/year/mileage. It is NOT a replacement stock feed and it does not
- * alter images, Stock Watch, Wix publishing, monitor cadence or availability.
+ * Reuses the EXISTING reviewed DealerKit vehicle retail/year/mileage only.
+ * Four fixed legacy specials are deliberately excluded from the matrix.
  */
 import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
 import { DEALERKIT_REVIEW_TABLE, rowToDealerKitReviewDecision } from "./_dealerkit-review-decisions.js";
 import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
-import { RENT2BUY_SPECIAL_DEALS_TABLE } from "../lib/rent2BuySpecialDealPolicy.mjs";
 import { pendingRent2BuySpecialDeal } from "../lib/rent2BuyProtectedSpecialDeals.mjs";
 
 const reg=v=>String(v??"").toUpperCase().replace(/[^A-Z0-9]/g,"");
@@ -29,15 +26,6 @@ async function loadReviewedRent2BuyByRegistration(db,registration){
     reject("rent2buy_not_reviewed");
   return decision;
 }
-async function loadSpecial(db,registration){
-  try{
-    const {data,error}=await db.from(RENT2BUY_SPECIAL_DEALS_TABLE).select("*")
-      .eq("registration",registration).limit(2);
-    if(error||!Array.isArray(data))return null; // table is staged, quote feature remains off
-    if(data.length>1)reject("duplicate_special_deal_records");
-    return data[0]||null;
-  }catch{return null}
-}
 
 export async function loadRent2BuyPricingSource(registration,{
   getDb=getSupabaseServiceAdmin,
@@ -45,6 +33,7 @@ export async function loadRent2BuyPricingSource(registration,{
 }={}){
   const target=reg(registration);
   if(!/^[A-Z]{2}[0-9]{2}[A-Z]{3}$/.test(target))reject("invalid_registration");
+  if(pendingRent2BuySpecialDeal(target))reject("fixed_legacy_special_not_customisable");
   const db=getDb();
   const decision=await loadReviewedRent2BuyByRegistration(db,target);
   const vehicle=await getDetail(decision.supplierStockId);
@@ -57,15 +46,5 @@ export async function loadRent2BuyPricingSource(registration,{
      vehicle.mileage===null||vehicle.mileage===undefined||vehicle.mileage===""||
      !Number.isFinite(Number(vehicle.mileage))||Number(vehicle.mileage)<0)
     reject("pricing_inputs_missing");
-
-  if(pendingRent2BuySpecialDeal(target))
-    reject("fixed_legacy_special_not_customisable");
-  const activeSpecial=await loadSpecial(db,target);
-
-  return {
-    vehicle,
-    decision,
-    sourceRetailPrice:Number(vehicle.retailPrice),
-    activeSpecial:activeSpecial?.status==="active"?activeSpecial:null,
-  };
+  return {vehicle,decision,sourceRetailPrice:Number(vehicle.retailPrice)};
 }
