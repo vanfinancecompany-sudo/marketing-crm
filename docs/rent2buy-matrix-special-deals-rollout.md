@@ -139,3 +139,20 @@ Do not touch live Wix items or click CRM "Update Wix price" buttons for these re
 The user corrected their earlier statement: **BJ74 HTL is 48 months, NOT 40**. Disregard the temporary 40X instruction as superseded. Both existing Wix listing and detail CMS entries showed 48X monthly payments in the read-only check, and the user now confirms that 48-month term is correct. Do not create any exceptional 40-payment agreement for this vehicle.
 
 The separate Wix price discrepancy is **still unresolved**: listing £595 + VAT monthly and £2,000 + VAT initial, versus vehicle detail £693 + VAT monthly and £2,079 + VAT initial. The user-approved special-deal status remains protected. Do not change live records or infer which price is authoritative without verification.
+
+
+## Development progress: isolated special-deal editor, 23 October 2026
+
+The same *unmerged draft branch* now includes:
+
+- lib/rent2BuySpecialDealPolicy.mjs: per-registration + DealerKit-stock-ID validation, exact term/mileage/price, £1,000 ex VAT initial minimum and audited-draft policy. Source retail amount preserves DealerKit VAT status instead of assuming ex-VAT.
+- docs/sql/rent2buy_special_deals_REVIEW_ONLY.sql: proposed independent per-vehicle and audit tables with RLS and revoked public access. **Never auto-applied. Not executed in production.**
+- api/dealerkit-rent2buy-special-deal.js: authenticated GET preview and PUT save_draft, behind RENT2BUY_SPECIAL_DRAFTS_ENABLED=true. **Default disabled**. No Wix publishing calls. Optimistic revision check; cannot overwrite an existing active or inactive deal via draft save.
+- utils/rent2BuySpecialDealEditor.js: compact collapsed DealerKit Rent2Buy-only pricing editor in current stock review. Shows the four known holds read-only until feature is enabled. Does not change VFC/Cars and cannot write current Wix prices.
+- utils/vanscoWixPriceHelper.js: the *Price Differences* UI disables its "Update Wix price" button for each of the four known protected Rent2Buy registrations; the API also rejects the action independently.
+- tests/rent2buy-special-deal-drafts.test.mjs and updated rent2buy-protected-specials.test.mjs, included in the dedicated CI workflow. GitHub Actions Rent2Buy Pricing Safety completed successfully on commit 13a1b93.
+
+**STILL PENDING**: approved special-deal term/mileage source, migration sign-off, enabling draft storage, active-price resolution, shared quote API, both public vehicle selector pages, application/CRM/email quote ingestion and cross-site preview tests. Do not merge or deploy based solely on the isolated unit tests.
+
+### Decision gate
+The existing Wix listing/detail disagreements for BJ74 HTL and FV74 BBJ remain unresolved. The user confirmed **BJ74 HTL is 48 months**, reversing the previous 40-month comment. No initial price, contract allowance or term must be guessed. No production price updates.
