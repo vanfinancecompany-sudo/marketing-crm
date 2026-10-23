@@ -7,7 +7,8 @@
  * This full scan is intentionally expensive and MUST NOT be enabled for customer
  * traffic until rate-limit/caching validation is completed. Feature flags OFF.
  */
-import { fetchDealerKitStockSnapshot, fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
+import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
+import { loadLatestVerifiedRent2BuyQuoteSnapshot } from "./_rent2buy-complete-quote-snapshot.mjs";
 import { loadDealerKitReviewDecision } from "./_dealerkit-review-decisions.js";
 import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
 import { RENT2BUY_SPECIAL_DEALS_TABLE } from "../lib/rent2BuySpecialDealPolicy.mjs";
@@ -108,18 +109,18 @@ export function buildApprovedRent2BuySource({
 }
 
 export async function loadApprovedRent2BuySource(registration,{
-  getSnapshot=()=>fetchDealerKitStockSnapshot({allowPartial:false}),
+  getSnapshot=loadLatestVerifiedRent2BuyQuoteSnapshot,
   getDetail=id=>fetchDealerKitStockDetail(id,{specifications:false}),
   getDb=getSupabaseServiceAdmin,
   getReview=loadDealerKitReviewDecision,
 }={}){
   const target=reg(registration);
   if(!/^[A-Z]{2}[0-9]{2}[A-Z]{3}$/.test(target))reject("invalid_registration");
-  const snapshot=await getSnapshot();
+  const db=getDb();
+  const snapshot=await getSnapshot(db);
   const listed=oneMatchingVehicle(snapshot,target);
   if(listed.status!=="available")reject("vehicle_not_available");
   const detail=await getDetail(listed.supplierStockId);
-  const db=getDb();
   const [reviewDecision,retailApproval,specialDeal]=await Promise.all([
     getReview(db,listed.supplierStockId),
     readByStockId(db,RETAIL_APPROVALS_TABLE,listed.supplierStockId),
