@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getSupabaseServiceAdmin, normalizeRegistration } from "./_vansco-cache-utils.js";
 import { loadStockSourceSnapshot, providerReservedRegistrations, stockSourceProviderConfig } from "./_stock-source-provider.js";
 import { buildStockWatchMonitorIssues, summariseMonitorHealth } from "./_stock-watch-monitor.js";
+import { captureCompleteRent2BuyQuoteSnapshot } from "./_rent2buy-complete-quote-snapshot.mjs";
 
 const FINANCE_WIX_SITE_ID = "85f11c52-ee54-495d-aaec-a351831709b5";
 const RENT2BUY_AUTHORITY_COLLECTION = "ALLRENT2BUYVANS";
@@ -269,6 +270,25 @@ export async function runStockWatchMonitor({ environment = process.env, fetchImp
       providerDiagnostics = error?.diagnostics && typeof error.diagnostics === "object" ? error.diagnostics : null;
     }
 
+    // Reuse the ALREADY LOADED 15-minute DealerKit monitor snapshot for the
+    // optional shared pricing manifest. No extra DealerKit bulk request.
+    // A partial feed must never become an authoritative quote snapshot.
+    let quoteSnapshotCapture = { enabled: false, captured: false };
+    if (config.kind === "dealerkit" &&
+        environment.RENT2BUY_QUOTE_SNAPSHOT_CAPTURE_ENABLED === "true") {
+      if (provider?.complete !== true) {
+        quoteSnapshotCapture = { enabled: true, captured: false,
+          reason: "source_incomplete" };
+      } else {
+        try {
+          quoteSnapshotCapture = { enabled: true,
+            ...(await captureCompleteRent2BuyQuoteSnapshot(supabase, provider)) };
+        } catch (error) {
+          quoteSnapshotCapture = { enabled: true, captured: false,
+            reason: error?.code || "snapshot_unavailable" };
+        }
+      }
+    }
     const [crmResult, rentWixResult, financeWixResult, actionLogResult, previousRunResult, existingIssuesResult] = await Promise.allSettled([
       loadCrmCounts(supabase),
       queryWixPublishedRegistrations(RENT2BUY_AUTHORITY_COLLECTION, environment, fetchImplementation),
@@ -340,7 +360,7 @@ export async function runStockWatchMonitor({ environment = process.env, fetchImp
     await persistIssues(supabase, runId, issues, aiResult, existingByFingerprint, now);
 
     const completedAt = new Date();
-    const storedSnapshot = { ...snapshot, aiError: aiError || null };
+    const storedSnapshot = { ...snapshot, aiError: aiError || null, quoteSnapshotCapture };
     const { error: finishError } = await supabase.from("stock_watch_monitor_runs").update({
       completed_at: completedAt.toISOString(),
       status: "complete",
