@@ -60,8 +60,10 @@ export default async function handler(request,response){
     process.env.RENT2BUY_QUOTE_ENDPOINT_ENABLED==="true";
   if(!previewEnabled&&!productionEnabled)
     return response.status(503).json({ok:false,error:"preview_service_off"});
-  if(!secureEqual(request.headers?.["x-rent2buy-quote-verifier-key"],
-                  process.env.RENT2BUY_QUOTE_VERIFY_KEY))
+  const providedKey=request.headers?.["x-rent2buy-quote-verifier-key"];
+  const authorised=secureEqual(providedKey,process.env.RENT2BUY_QUOTE_VERIFY_KEY)||
+    secureEqual(providedKey,process.env.RENT2BUY_VFC_QUOTE_VERIFY_KEY);
+  if(!authorised)
     return response.status(401).json({ok:false,error:"unauthorised"});
   const data=parseRequest(request.body);
   if(!data)return response.status(400).json({ok:false,error:"invalid_selection"});

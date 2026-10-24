@@ -24,9 +24,12 @@ export default async function handler(request,response){
   const env=process.env;
   if(env.RENT2BUY_QUOTE_VERIFIER_ENABLED!=="true")
     return response.status(503).json({ok:false,error:"quote_verification_unavailable"});
-  const key=clean(env.RENT2BUY_QUOTE_VERIFY_KEY);
-  if(!key||key.length<32||
-    !secureEqual(request.headers?.["x-rent2buy-quote-verifier-key"],key))
+  const providedKey=request.headers?.["x-rent2buy-quote-verifier-key"];
+  const primaryKey=clean(env.RENT2BUY_QUOTE_VERIFY_KEY);
+  const vfcKey=clean(env.RENT2BUY_VFC_QUOTE_VERIFY_KEY);
+  const authorised=(primaryKey.length>=32&&secureEqual(providedKey,primaryKey))||
+    (vfcKey.length>=32&&secureEqual(providedKey,vfcKey));
+  if(!authorised)
     return response.status(401).json({ok:false,error:"unauthorised"});
   const body=bodyOf(request);
   if(!body||typeof body.token!=="string"||typeof body.registration!=="string")
