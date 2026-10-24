@@ -5,6 +5,7 @@
  */
 import { fetchDealerKitStockDetail, fetchDealerKitStockSnapshot } from "./_dealerkit-stock-adapter.js";
 import { pendingRent2BuySpecialDeal } from "../lib/rent2BuyProtectedSpecialDeals.mjs";
+import {currentActiveRent2BuyManualSpecial} from "../lib/rent2BuyCurrentManualSpecial.mjs";
 
 const reg=v=>String(v??"").toUpperCase().replace(/[^A-Z0-9]/g,"");
 const positive=v=>Number.isFinite(Number(v))&&Number(v)>0;
@@ -33,6 +34,8 @@ export async function loadRent2BuyPricingSource(registration,{
   const target=reg(registration);
   if(!/^[A-Z]{2}[0-9]{2}[A-Z]{3}$/.test(target))reject("invalid_registration");
   if(pendingRent2BuySpecialDeal(target))reject("fixed_legacy_special_not_customisable");
+  try{if(await currentActiveRent2BuyManualSpecial(target))reject("approved_manual_special_not_customisable")}
+  catch(error){if(error instanceof Rent2BuyPricingSourceUnavailable)throw error;reject("manual_special_source_unavailable")}
 
   let snapshot;
   try{snapshot=await getSnapshot();}

@@ -1,3 +1,4 @@
+import {currentActiveRent2BuyManualSpecial} from "../lib/rent2BuyCurrentManualSpecial.mjs";
 import { normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
 import { controlledPublishConfirmationMatches, wixItemPublishStatus } from "../lib/dealerKitControlledPublishPlan.js";
 import {
@@ -364,6 +365,8 @@ export default async function handler(request, response) {
   try {
     const productMode = ["finance", "rent2buy", "both"].includes(clean(request.body?.productMode, 30)) ? clean(request.body.productMode, 30) : undefined;
     state = await buildFreshControlledPublishState(registration, process.env, { productMode });
+    if(["rent2buy","both"].includes(state.plan.mode) && await currentActiveRent2BuyManualSpecial(registration))
+      throw new ControlledPublishError(409,"Active manual Rent2Buy special: controlled Wix price publication is locked.");
     const requestedIntent = action === "update_existing_vehicle" ? "update_existing_vehicle" : "create_new_vehicle";
     if (state.plan.writeIntent !== requestedIntent) throw new ControlledPublishError(409, "The Wix write intent changed during the final recheck. Rebuild the preview before continuing.", { expected: state.plan.writeIntent, requested: requestedIntent });
     if (!state.plan.canPublish) throw new ControlledPublishError(409, "The fresh DealerKit/Wix state is not safe for controlled reconciliation.", { blockers: state.plan.blockers });
