@@ -42,6 +42,65 @@ async function queryCollection(collectionId,{registration=null,limit=100,offset=
   return Array.isArray(payload.dataItems)?payload.dataItems:[];
 }
 
+async function patchWixFields(collectionId,itemId,fields){
+  const fieldModifications=Object.entries(fields).map(([fieldPath,value])=>({
+    fieldPath,action:"SET_FIELD",setFieldOptions:{value}
+  }));
+  return wixRequest(`/wix-data/v2/items/${encodeURIComponent(itemId)}`,{
+    method:"PATCH",
+    body:{dataCollectionId:collectionId,patch:{dataItemId:itemId,fieldModifications}}
+  });
+}
+
+function fixedFields(deal){
+  const monthly=Number(deal.monthlyExVat);
+  const monthlyInc=Math.round(monthly*1.2);
+  const initial=Number(deal.initialExVat);
+  const initialInc=Math.round(initial*1.2);
+  return {
+    master:{
+      mth:`£${monthly} PM`,
+      weekly:`x${deal.termMonths}`,
+      initialRental2250Vat:`INITIAL RENTAL £${initial} +VAT`
+    },
+    detail:{
+      monthlyPayments:`£${monthly} +Vat (£${monthlyInc} INC VAT)`,
+      numberOfMonths:`${deal.termMonths}X MONTHLY PAYMENTS`,
+      intialRentalCharge:`£${initial} +Vat (£${initialInc} INC VAT)`,
+      weeklyPrice:`£${monthly} P/M`
+    }
+  };
+}
+
+async function fixFixedSpecials(state){
+  const prepared=[];
+  for(const deal of state.fixed){
+    const [masterRows,detailRows]=await Promise.all([
+      queryCollection(MASTER_COLLECTION,{registration:deal.registration,limit:3}),
+      queryCollection(DETAIL_COLLECTION,{registration:deal.registration,limit:3})
+    ]);
+    if(masterRows.length!==1||detailRows.length!==1)
+      throw new Error(`fixed_special_wix_identity_failed_${deal.registration}`);
+    prepared.push({
+      deal,
+      master:masterRows[0],
+      detail:detailRows[0],
+      fields:fixedFields(deal)
+    });
+  }
+
+  const updated=[];
+  for(const entry of prepared){
+    await patchWixFields(MASTER_COLLECTION,entry.master.id,entry.fields.master);
+    await patchWixFields(DETAIL_COLLECTION,entry.detail.id,entry.fields.detail);
+    updated.push(entry.deal.registration);
+  }
+
+  const verified=[];
+  for(const deal of state.fixed)verified.push(await verifyFixedSpecial(deal.registration));
+  return {updated,verified,ok:verified.every(x=>x.pass)};
+}
+
 async function allMasterRows(){
   const rows=[];
   for(let offset=0;;offset+=100){
@@ -174,6 +233,13 @@ export default async function handler(request,response){
     const missingExpected=state.missing.filter(r=>EXPECTED_SOURCE_MISSING.has(r));
     const fixedChecks=await Promise.all(state.fixed.map(item=>verifyFixedSpecial(item.registration)));
     const baseSafe=unexpectedMissing.length===0&&state.duplicates.length===0&&state.invalid.length===0&&fixedChecks.every(x=>x.pass);
+
+    if(mode==="fix-specials"){
+      if(unexpectedMissing.length||state.duplicates.length||state.invalid.length)
+        return reply(response,409,{ok:false,error:"global_identity_preflight_failed",unexpectedMissing,duplicates:state.duplicates,invalid:state.invalid});
+      const result=await fixFixedSpecials(state);
+      return reply(response,result.ok?200:502,{ok:result.ok,...result,noWrite:false});
+    }
 
     if(mode==="scan"){
       return reply(response,baseSafe?200:409,{
