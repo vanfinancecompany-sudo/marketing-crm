@@ -50,6 +50,7 @@ export default function StockPage({
 }) {
   const selectedCount = selectedVehicleIds.length;
   const [specialReg,setSpecialReg]=useState("");
+  const [specialOffers,setSpecialOffers]=useState([]);
   const [carslinkSyncing, setCarslinkSyncing] = useState(false);
   const [carslinkMessage, setCarslinkMessage] = useState("");
   const [carslinkError, setCarslinkError] = useState("");
@@ -201,7 +202,7 @@ export default function StockPage({
         {carslinkError ? <div className="notice notice--error">{carslinkError}</div> : null}
 
         <FilterBar filters={filters} onChange={onFiltersChange} />
-        {filters.pipeline==="rent2buy"?<Rent2BuySpecialDealPanel vehicles={vehicles} selectedRegistration={specialReg}/>:null}
+        {filters.pipeline==="rent2buy"?<Rent2BuySpecialDealPanel selectedRegistration={specialReg} onOffersChange={setSpecialOffers}/>:null}
 
         <div className="selection-summary stock-selection-summary">
           <strong>{selectedCount} selected for manual reel queue</strong>
@@ -278,6 +279,7 @@ export default function StockPage({
                 displayMode={filters.pipeline === "rent2buy" ? "rent2buy" : filters.pipeline === "cars" ? "cars" : "finance"}
                 onGenerateReel={onGenerateReel}
                 onViewCreatives={onViewCreatives}
+                specialDeal={filters.pipeline==="rent2buy"?specialOffers.find(o=>o.registration===String(vehicle.reg||vehicle.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,"")&&o.enabled===true)||null:null}
                 onSpecialDeal={filters.pipeline==="rent2buy"?(v)=>{setSpecialReg(String(v?.reg||v?.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,""));document.getElementById("rent2buy-special-deal-editor")?.scrollIntoView({behavior:"smooth",block:"start"});}:undefined}
                 selectable
                 selected={selectedVehicleIds.includes(String(vehicle.id || vehicle.reg || vehicle.registration || vehicle.name || ""))}

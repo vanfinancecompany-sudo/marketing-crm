@@ -51,3 +51,12 @@ test("numeric Wix price maintenance never touches protected or active manual spe
  assert.match(code,/rent2buy_special_deals/);
  assert.match(code,/if\(error\)throw new Error\("Cannot check active Rent2Buy special-deal exclusions/);
 });
+
+test("active new manual specials are visibly preselected on Rent2Buy stock cards",()=>{
+ const page=fs.readFileSync(new URL("../pages/StockPage.jsx",import.meta.url),"utf8");
+ const card=fs.readFileSync(new URL("../components/VehicleCard.jsx",import.meta.url),"utf8");
+ assert.match(page,/onOffersChange=\{setSpecialOffers\}/);
+ assert.match(page,/specialDeal=\{filters.pipeline/);
+ assert.match(card,/activeSpecial/);
+ assert.match(card,/aria-pressed=\{Boolean\(activeSpecial\)\}/);
+});

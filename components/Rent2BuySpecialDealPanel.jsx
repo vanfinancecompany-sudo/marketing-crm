@@ -2,8 +2,9 @@ import {useEffect,useState} from "react";
 import {incVat,protectedOffers,reg,validateDraft} from "../lib/rent2BuySpecialDealControl.mjs";
 import {getStoredMarketingAccessKey,MARKETING_ACCESS_HEADER} from "../services/marketingAccess.js";
 const pounds=v=>Number(v).toLocaleString("en-GB",{style:"currency",currency:"GBP"});
-export default function Rent2BuySpecialDealPanel({selectedRegistration=""}){
+export default function Rent2BuySpecialDealPanel({selectedRegistration="",onOffersChange=()=>{}}){
  const [offers,setOffers]=useState(protectedOffers());
+ useEffect(()=>{onOffersChange(offers);},[offers,onOffersChange]);
  const [registration,setRegistration]=useState("");
  const [monthly,setMonthly]=useState("");
  const [initial,setInitial]=useState("");
