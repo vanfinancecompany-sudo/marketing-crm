@@ -1,3 +1,4 @@
+import {pendingRent2BuySpecialDeal} from "../lib/rent2BuyProtectedSpecialDeals.mjs";
 export default function VehicleCard({
   vehicle,
   onGenerateReel,
@@ -18,13 +19,14 @@ export default function VehicleCard({
   const displayVehicle = isRentDisplay ? { ...vehicle, ...rentData } : vehicle;
   const pipelineLabel = isRentDisplay ? "RENT2BUY" : isCarsDisplay ? "CAR FINANCE" : "VAN FINANCE";
   const displayReg = displayVehicle.reg || "No reg";
+  const protectedSpecial = isRentDisplay ? pendingRent2BuySpecialDeal(displayReg) : null;
   const priceLabel = isRentDisplay ? "Initial rental" : "Price";
   const monthlyLabel = isRentDisplay ? "Monthly rental" : "Finance monthly";
   const displayPrice = isRentDisplay
-    ? displayVehicle.initialRental || displayVehicle.price || "Initial rental available"
+    ? protectedSpecial ? `£${protectedSpecial.initialExVat.toLocaleString("en-GB")} + VAT` : displayVehicle.initialRental || displayVehicle.price || "Initial rental available"
     : vehicle.price || "Finance price available";
   const displayMonthly = isRentDisplay
-    ? displayVehicle.monthly || "Monthly rental available"
+    ? protectedSpecial ? `£${protectedSpecial.monthlyExVat.toLocaleString("en-GB")} + VAT` : displayVehicle.monthly || "Monthly rental available"
     : vehicle.salePrice || "Finance monthly options available";
   const imageSrc =
     displayVehicle.image ||
@@ -84,7 +86,7 @@ export default function VehicleCard({
 
         {!compact ? (
           <div className="card-actions">
-            {isRentDisplay&&onSpecialDeal?<button className="button button--ghost" onClick={event=>{event.stopPropagation();onSpecialDeal(vehicle);}}>Special Deal</button>:null}
+            {isRentDisplay&&onSpecialDeal?<button className="button button--ghost" aria-pressed={Boolean(protectedSpecial)} title={protectedSpecial?"Protected existing special deal":"Review a manual special deal"} onClick={event=>{event.stopPropagation();onSpecialDeal(vehicle);}}>{protectedSpecial?"✓ Special Deal":"Special Deal"}</button>:null}
             <button
               className="button button--primary"
               disabled={reelLocked}

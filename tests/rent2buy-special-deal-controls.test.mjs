@@ -19,3 +19,6 @@ test("public output includes active only and never overrides legacy four",()=>{
  const visible=visibleOffers(rows);assert.equal(visible.length,5);assert.equal(visible.find(x=>x.registration==="BT25LVK").monthlyExVat,595);
  assert.equal(visible.find(x=>x.registration==="CD12EFG"),undefined);
 });
+
+import fs from "node:fs";
+test("stock card shows preselected locked specials rather than raw outdated rental",()=>{const src=fs.readFileSync(new URL("../components/VehicleCard.jsx",import.meta.url),"utf8");assert.match(src,/pendingRent2BuySpecialDeal\(displayReg\)/);assert.match(src,/aria-pressed=\{Boolean\(protectedSpecial\)\}/);assert.match(src,/protectedSpecial\.initialExVat/);assert.match(src,/protectedSpecial\.monthlyExVat/);});
