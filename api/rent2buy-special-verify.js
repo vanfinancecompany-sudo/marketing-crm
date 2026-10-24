@@ -1,4 +1,5 @@
-import {createHash,timingSafeEqual} from "node:crypto";
+import {timingSafeEqual} from "node:crypto";
+import {manualSpecialSourceRevision} from "../lib/rent2BuyManualSpecialRevision.mjs";
 import {getSupabaseServiceAdmin} from "./_vansco-cache-utils.js";
 import {fetchDealerKitStockDetail} from "./_dealerkit-stock-adapter.js";
 import {rent2BuyMaximumTerm} from "../lib/rent2BuyFlexiblePricing.mjs";
@@ -27,10 +28,7 @@ export const checkedManualSpecial=(registration,record,vehicle)=>{
     !["available","in_stock","due_in"].includes(status)||
     !Number.isFinite(Number(vehicle.retailPrice))||Number(vehicle.retailPrice)<=0)
    throw new Error("special_deal_no_longer_eligible");
- const sourceRevision=createHash("sha256").update(JSON.stringify({
-   kind:"rent2buy_manual_special_v1",registration:id,stockId:sourceId,
-   monthly,initial,term,updatedAt:String(record.updated_at||""),
- })).digest("hex").slice(0,40);
+ const sourceRevision=manualSpecialSourceRevision(record);
  return {registration:id,pricingMode:"fixed_manual_special",monthlyExVat:monthly,
    monthlyIncVat:Math.round(monthly*120)/100,initialExVat:initial,
    initialIncVat:Math.round(initial*120)/100,termMonths:term,

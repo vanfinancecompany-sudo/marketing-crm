@@ -3,6 +3,7 @@ import {getSupabaseServiceAdmin,isMissingOptionalTableError} from "./_vansco-cac
 import {fetchDealerKitStockDetail,fetchDealerKitStockSnapshot} from "./_dealerkit-stock-adapter.js";
 import {protectedOffers,reg,validateDraft,visibleOffers} from "../lib/rent2BuySpecialDealControl.mjs";
 import {rent2BuyMaximumTerm} from "../lib/rent2BuyFlexiblePricing.mjs";
+import {manualSpecialSourceRevision} from "../lib/rent2BuyManualSpecialRevision.mjs";
 const table="rent2buy_special_deals";
 const secretMatch=(candidate,expected)=>{
  const a=Buffer.from(String(candidate||"")),b=Buffer.from(String(expected||""));
@@ -15,7 +16,7 @@ const jsonBody=req=>{
  try{return JSON.parse(req.body||"{}");}catch{return null;}
 };
 const readRows=async supabase=>{
- const {data,error}=await supabase.from(table).select("registration,monthly_ex_vat,initial_ex_vat,term_months,enabled,updated_at").order("registration");
+ const {data,error}=await supabase.from(table).select("registration,monthly_ex_vat,initial_ex_vat,term_months,source_stock_id,enabled,updated_at").order("registration");
  if(error)throw error;
  return data||[];
 };
@@ -26,7 +27,9 @@ export default async function handler(req,res){
   if(admin&&!authorised(req))return res.status(401).json({ok:false,error:"Admin authorisation required."});
   try{
    const rows=await readRows(getSupabaseServiceAdmin());
-   const list=admin?rows:visibleOffers(rows.filter(x=>x.enabled));
+   const publishEnabled=process.env.RENT2BUY_MANUAL_SPECIALS_ENABLED==="true";
+   const selected=admin?rows:(publishEnabled?rows.filter(x=>x.enabled):[]);
+   const list=admin?rows:visibleOffers(selected).map(offer=>offer.protected?offer:{...offer,sourceRevision:manualSpecialSourceRevision(selected.find(x=>reg(x.registration)===offer.registration))});
    return res.status(200).json({ok:true,activationReady:process.env.RENT2BUY_MANUAL_SPECIAL_ACTIVATION_ENABLED==="true",offers:admin?[...protectedOffers(),...rows.filter(x=>!protectedOffers().some(p=>p.registration===reg(x.registration))).map(x=>({
       registration:reg(x.registration),monthlyExVat:Number(x.monthly_ex_vat),initialExVat:Number(x.initial_ex_vat),
       termMonths:Number(x.term_months),enabled:Boolean(x.enabled),protected:false,source:"manual_draft"
