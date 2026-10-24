@@ -1,23 +1,24 @@
 import {useEffect,useState} from "react";
 import {incVat,protectedOffers,reg,validateDraft} from "../lib/rent2BuySpecialDealControl.mjs";
+import {getStoredMarketingAccessKey,MARKETING_ACCESS_HEADER} from "../services/marketingAccess.js";
 const pounds=v=>Number(v).toLocaleString("en-GB",{style:"currency",currency:"GBP"});
-export default function Rent2BuySpecialDealPanel({vehicles=[],selectedRegistration="",onSelectRegistration=()=>{}}){
+export default function Rent2BuySpecialDealPanel({selectedRegistration=""}){
  const [offers,setOffers]=useState(protectedOffers());
  const [registration,setRegistration]=useState("");
  const [monthly,setMonthly]=useState("");
  const [initial,setInitial]=useState("");
  const [term,setTerm]=useState("36");
- const [key,setKey]=useState("");
+
  const [status,setStatus]=useState("");
  const [busy,setBusy]=useState(false);
  const [storageReady,setStorageReady]=useState(null);
- useEffect(()=>{let mounted=true;fetch("/api/rent2buy-special-deals",{cache:"no-store"}).then(r=>r.json()).then(x=>{
+ useEffect(()=>{let mounted=true;const k=getStoredMarketingAccessKey();fetch("/api/rent2buy-special-deals"+(k?"?admin=1":""),{cache:"no-store",headers:k?{[MARKETING_ACCESS_HEADER]:k}:{}}).then(r=>r.json()).then(x=>{
   if(mounted&&x.ok){setOffers(x.offers);setStorageReady(x.storageReady);}
  }).catch(()=>{if(mounted)setStatus("Cannot load saved specials. Four protected deals remain selected.");});
  return ()=>{mounted=false};},[]);
  useEffect(()=>{if(selectedRegistration){setRegistration(reg(selectedRegistration));setStatus("");}},[selectedRegistration]);
  const active=new Set(offers.filter(x=>x.enabled).map(x=>reg(x.registration)));
- const selected=active.has(reg(registration));
+
  const current=offers.find(x=>reg(x.registration)===reg(registration));
  const locked=Boolean(current?.protected);
  const draft=()=>{try{return validateDraft({registration,monthlyExVat:Number(monthly),initialExVat:Number(initial),termMonths:Number(term)});}catch{return null;}};
@@ -26,10 +27,11 @@ export default function Rent2BuySpecialDealPanel({vehicles=[],selectedRegistrati
   event.preventDefault();setStatus("");
   if(locked){setStatus("This protected deal cannot be edited here.");return;}
   if(!possible){setStatus("Enter a valid registration, rental prices and agreement term. Minimum initial rental £1,000 + VAT.");return;}
-  if(key.length<32){setStatus("Enter the dedicated special-deal admin key to save a draft.");return;}
+  const existingKey=getStoredMarketingAccessKey();
+  if(!existingKey){setStatus("Unlock the Customer Database once to authorise changes. Your existing saved access will be reused here.");return;}
   setBusy(true);
   try{
-   const r=await fetch("/api/rent2buy-special-deals",{method:"POST",headers:{"Content-Type":"application/json","x-rent2buy-special-admin-key":key},body:JSON.stringify(possible)});
+   const r=await fetch("/api/rent2buy-special-deals",{method:"POST",headers:{"Content-Type":"application/json",[MARKETING_ACCESS_HEADER]:existingKey},body:JSON.stringify(possible)});
    const j=await r.json();if(!r.ok||!j.ok)throw Error(j.error||"Save failed.");
    setStatus("Draft saved. No public pricing, badges or Felix matrix have changed.");
   }catch(error){setStatus(error.message||"Could not save draft.");}finally{setBusy(false);}
@@ -55,7 +57,7 @@ export default function Rent2BuySpecialDealPanel({vehicles=[],selectedRegistrati
     </div>
     {locked?<span className="notice">This is one of the four protected deals. Its existing terms are locked.</span>:null}
     {possible?<div className="notice">Preview: {pounds(possible.monthlyExVat)} + VAT ({pounds(incVat(possible.monthlyExVat))} inc VAT) monthly · {pounds(possible.initialExVat)} + VAT ({pounds(incVat(possible.initialExVat))} inc VAT) initial · {possible.termMonths} months</div>:null}
-    <label>Special-deal admin key <input type="password" value={key} onChange={e=>setKey(e.target.value)} autoComplete="off" placeholder="Required for protected draft saving"/></label>
+    <small>Uses your existing Customer Database access. No separate pricing password.</small>
     <button className="button button--primary" type="submit" disabled={busy||locked||storageReady===false}>{busy?"Saving draft...":"Save unpublished draft"}</button>
     {storageReady===false?<small>Special-deal storage is not installed yet. Existing four remain visible; new draft saving is unavailable.</small>:null}
     {status?<p role="status">{status}</p>:null}

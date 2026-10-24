@@ -5,9 +5,10 @@ import {protectedOffers,reg,validateDraft,visibleOffers} from "../lib/rent2BuySp
 const table="rent2buy_special_deals";
 const secretMatch=(candidate,expected)=>{
  const a=Buffer.from(String(candidate||"")),b=Buffer.from(String(expected||""));
- return a.length>=32&&a.length===b.length&&timingSafeEqual(a,b);
+ return a.length>0&&b.length>0&&a.length===b.length&&timingSafeEqual(a,b);
 };
-const authorised=(req,env=process.env)=>secretMatch(req.headers?.["x-rent2buy-special-admin-key"],env.RENT2BUY_SPECIAL_ADMIN_KEY);
+// Reuse the existing Customer Database authenticated admin access, not a second password.
+const authorised=(req,env=process.env)=>secretMatch(req.headers?.["x-marketing-customer-database-key"],env.MARKETING_CUSTOMER_DATABASE_API_KEY);
 const jsonBody=req=>{
  if(req.body&&typeof req.body==="object"&&!Array.isArray(req.body))return req.body;
  try{return JSON.parse(req.body||"{}");}catch{return null;}

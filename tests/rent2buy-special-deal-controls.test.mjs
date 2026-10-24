@@ -22,3 +22,13 @@ test("public output includes active only and never overrides legacy four",()=>{
 
 import fs from "node:fs";
 test("stock card shows preselected locked specials rather than raw outdated rental",()=>{const src=fs.readFileSync(new URL("../components/VehicleCard.jsx",import.meta.url),"utf8");assert.match(src,/pendingRent2BuySpecialDeal\(displayReg\)/);assert.match(src,/aria-pressed=\{Boolean\(protectedSpecial\)\}/);assert.match(src,/protectedSpecial\.initialExVat/);assert.match(src,/protectedSpecial\.monthlyExVat/);});
+
+test("special deal editor uses the existing Marketing CRM access key, not an invented second secret",()=>{
+ const ui=fs.readFileSync(new URL("../components/Rent2BuySpecialDealPanel.jsx",import.meta.url),"utf8");
+ const api=fs.readFileSync(new URL("../api/rent2buy-special-deals.js",import.meta.url),"utf8");
+ assert.match(ui,/getStoredMarketingAccessKey\(\)/);
+ assert.match(ui,/MARKETING_ACCESS_HEADER/);
+ assert.match(api,/MARKETING_CUSTOMER_DATABASE_API_KEY/);
+ assert.doesNotMatch(api,/RENT2BUY_SPECIAL_ADMIN_KEY/);
+ assert.doesNotMatch(ui,/Special-deal admin key/);
+});
