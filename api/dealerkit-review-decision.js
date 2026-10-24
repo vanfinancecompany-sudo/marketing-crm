@@ -9,7 +9,7 @@ import {
   loadDealerKitRent2BuySettings,
   saveDerivedDealerKitRent2BuySettings,
 } from "./_dealerkit-rent2buy-settings.js";
-import { deriveRent2BuyTermFromMileage } from "../lib/dealerKitRent2BuyPlan.js";
+import { deriveRent2BuyDefaultTermFromVehicle } from "../lib/dealerKitRent2BuyPlan.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 
@@ -41,7 +41,7 @@ async function verifyRent2BuySource(input) {
   if (!liveRegistration || liveRegistration !== normalized.registration) {
     throw new Error("DealerKit registration changed while saving the Rent2Buy review. Re-open the vehicle and review it again.");
   }
-  const term = deriveRent2BuyTermFromMileage(vehicle?.mileage);
+  const term = deriveRent2BuyDefaultTermFromVehicle({ year: vehicle?.year, mileage: vehicle?.mileage });
   if (term.blocker) throw new Error(term.blocker);
   return { normalized, vehicle };
 }
@@ -85,12 +85,12 @@ export default async function handler(request, response) {
         decision,
         rent2buySettings,
         message: rent2buySettings
-          ? `Review decisions saved. Rent2Buy term was derived automatically as ${rent2buySettings.termMonths} months from DealerKit mileage. No Wix or DealerKit stock data was changed.`
+          ? `Review decisions saved. Felix default Rent2Buy term is ${rent2buySettings.termMonths} months from DealerKit vehicle age and mileage. No Wix or DealerKit stock data was changed.`
           : "Review decisions saved. No Wix or DealerKit stock data was changed.",
       });
     } catch (error) {
       const message = error?.message || "Could not save DealerKit review state.";
-      const clientError = /required|not allowed|valid JSON|42,000|registration changed|mileage/i.test(message);
+      const clientError = /required|not allowed|valid JSON|registration changed|year|mileage/i.test(message);
       response.status(clientError ? 400 : 502).json({ ok: false, message });
     }
     return;

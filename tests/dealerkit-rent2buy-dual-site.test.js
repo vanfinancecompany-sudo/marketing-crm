@@ -121,8 +121,8 @@ test("runtime controlled publisher does not require a standalone Rent2Buy Wix wr
 });
 
 
-test("Rent2Buy publish targets use the central £1,000 + VAT initial-rental floor", () => {
-  const lowPriceVehicle = { ...vehicle(), retailPrice: 7352 };
+test("Rent2Buy publish targets use the Felix default quote and central £1,000 + VAT initial-rental floor", () => {
+  const lowPriceVehicle = { ...vehicle(), retailPrice: 6000 };
   const plan = buildControlledVehiclePublishPlan({
     vehicle: lowPriceVehicle,
     decision: decision(),
@@ -133,8 +133,46 @@ test("Rent2Buy publish targets use the central £1,000 + VAT initial-rental floo
   });
   const master = plan.targets.find((target) => target.collectionId === "ALLRENT2BUYVANS");
   const detail = plan.targets.find((target) => target.collectionId === "VANPAGES");
-  assert.equal(plan.rent2buy.pricing.monthly, 291);
+  assert.equal(plan.rent2buy.pricing.pricingMode, "matrix");
+  assert.equal(plan.rent2buy.pricing.milesPerMonth, 1000);
+  assert.equal(plan.rent2buy.pricing.termMonths, 48);
+  assert.equal(plan.rent2buy.pricing.monthly, 150);
   assert.equal(plan.rent2buy.pricing.upfront, 1000);
   assert.equal(master.data.initialRental2250Vat, "INITIAL RENTAL £1,000 +VAT");
   assert.equal(detail.data.intialRentalCharge, "£1,000 +VAT (£1,200 INC VAT)");
+});
+
+
+test("high-mileage Wix advert defaults to the same Felix 36-month / 1,000-mile quote as the customer calculator", () => {
+  const source = {
+    ...vehicle(),
+    supplierStockId: "ks69-source",
+    registration: "KS69 TNV",
+    year: 2020,
+    mileage: 95000,
+    retailPrice: 10995,
+  };
+  const reviewed = {
+    ...decision(),
+    supplierStockId: "ks69-source",
+    registration: "KS69TNV",
+  };
+  const plan = buildControlledVehiclePublishPlan({
+    vehicle: source,
+    decision: reviewed,
+    imageSets: imageSets(),
+    rent2buyWixResults: emptyResults(),
+    rent2buySites: sites,
+    productMode: "rent2buy",
+  });
+  const master = plan.targets.find((target) => target.collectionId === "ALLRENT2BUYVANS");
+  const detail = plan.targets.find((target) => target.collectionId === "VANPAGES");
+  assert.equal(plan.rent2buy.pricing.termMonths, 36);
+  assert.equal(plan.rent2buy.pricing.milesPerMonth, 1000);
+  assert.equal(plan.rent2buy.pricing.monthly, 435);
+  assert.equal(plan.rent2buy.pricing.upfront, 1600);
+  assert.equal(master.data.mth, "£435 PM");
+  assert.equal(master.data.initialRental2250Vat, "INITIAL RENTAL £1,600 +VAT");
+  assert.equal(detail.data.monthlyPayments, "£435 +Vat (£522 INC VAT)");
+  assert.equal(detail.data.intialRentalCharge, "£1,600 +VAT (£1,920 INC VAT)");
 });

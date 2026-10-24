@@ -1,4 +1,4 @@
-import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
+import { fetchDealerKitStockDetail, fetchDealerKitStockSnapshot } from "./_dealerkit-stock-adapter.js";
 import {
   VAN_FINANCE_WIX_COLLECTIONS,
   buildFinanceWixPricePatch,
@@ -133,17 +133,37 @@ async function freshDealerKitVehicle(body, pipeline) {
     return { ...vehicle, registration, retailPrice, supplierStockId, sourceMode: "fresh_dealerkit" };
   }
 
-  const retailPrice = parseRetailPrice(body.retail_price);
-  if (retailPrice === null || retailPrice < 1000 || retailPrice > 100000) throw new ApiError(400, "The DealerKit retail price is outside the permitted range.");
-  if (pipeline === "rent2buy" && !Number.isFinite(Number(body.mileage))) throw new ApiError(400, "DealerKit mileage is required to recalculate Rent2Buy pricing.");
-  return {
-    registration,
-    retailPrice,
-    mileage: Number.isFinite(Number(body.mileage)) ? Number(body.mileage) : null,
-    vatStatus: clean(body.vat_status || body.vatStatus, 80) || "unknown",
-    supplierStockId: "",
-    sourceMode: "saved_dealerkit_snapshot",
-  };
+  if (pipeline === "rent2buy") {
+    let snapshot;
+    try { snapshot = await fetchDealerKitStockSnapshot({ allowPartial: true }); }
+    catch (error) { throw new ApiError(502, `DealerKit stock could not be rechecked: ${clean(error?.message, 500) || "request failed"}`); }
+    const matches = (Array.isArray(snapshot?.vehicles) ? snapshot.vehicles : [])
+      .filter((vehicle) => normalizeFinanceRegistration(vehicle?.registration) === registration);
+    if (matches.length !== 1) {
+      throw new ApiError(409, matches.length > 1
+        ? "DealerKit contains more than one current stock record for this registration. Nothing was changed."
+        : "This Rent2Buy registration is not present in the current DealerKit stock feed. Nothing was changed.");
+    }
+    const current = matches[0];
+    if (!current?.supplierStockId) throw new ApiError(409, "DealerKit stock identity is missing for this Rent2Buy vehicle. Nothing was changed.");
+    let vehicle;
+    try { vehicle = await fetchDealerKitStockDetail(current.supplierStockId, { specifications: false }); }
+    catch (error) { throw new ApiError(502, `DealerKit could not be rechecked: ${clean(error?.message, 500) || "request failed"}`); }
+    if (normalizeFinanceRegistration(vehicle?.registration) !== registration ||
+        String(vehicle?.supplierStockId || "") !== String(current.supplierStockId)) {
+      throw new ApiError(409, "DealerKit registration or stock identity changed during the Rent2Buy price check. Nothing was changed.");
+    }
+    if (!["available", "in_stock", "due_in"].includes(clean(vehicle?.status || vehicle?.sourceStatus, 100).toLowerCase().replace(/[\s-]+/g, "_"))) {
+      throw new ApiError(409, "DealerKit no longer shows this vehicle as available for a Rent2Buy price update.");
+    }
+    const retailPrice = parseRetailPrice(vehicle?.retailPrice);
+    if (retailPrice === null || retailPrice < 1000 || retailPrice > 100000 ||
+        !Number.isFinite(Number(vehicle?.year)) || !Number.isFinite(Number(vehicle?.mileage))) {
+      throw new ApiError(409, "DealerKit does not currently provide the retail price, year and mileage required for Felix Rent2Buy pricing.");
+    }
+    return { ...vehicle, registration, retailPrice, supplierStockId: current.supplierStockId, sourceMode: "fresh_dealerkit_registration_lookup" };
+  }
+  throw new ApiError(409, "DealerKit stock identity is missing from this price card. Refresh Stock Watch before previewing or updating Wix prices.");
 }
 
 function makeMatch(configuration, collection, item, current, proposed) {
@@ -209,8 +229,12 @@ async function rent2BuyPreview(configuration, vehicle) {
   if (!master?.item) throw new ApiError(409, `${vehicle.registration} is not published in the shared Rent2Buy ALLRENT2BUYVANS collection. Nothing was changed.`);
 
   const pickup = rows.some(({ collection, item }) => collection.id === "PICKUPS" && item);
-  const pricing = calculatePublishedRent2BuyPricing({ retailPrice: vehicle.retailPrice, mileage: vehicle.mileage, vatStatus: vehicle.vatStatus, pickup });
-  if (!pricing) throw new ApiError(409, "Rent2Buy pricing could not be safely recalculated from the current DealerKit retail price and mileage.");
+  const pricing = calculatePublishedRent2BuyPricing({
+    retailPrice: vehicle.retailPrice,
+    registrationYear: vehicle.year,
+    mileage: vehicle.mileage,
+  });
+  if (!pricing) throw new ApiError(409, "Rent2Buy pricing could not be safely recalculated from the current DealerKit retail price, year and mileage.");
 
   const matches = rows.flatMap(({ collection, item }) => {
     if (!item) return [];

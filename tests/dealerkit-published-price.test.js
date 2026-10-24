@@ -96,42 +96,49 @@ test("Rent2Buy comparison uses the live Wix monthly rental and cannot resurrect 
   assert.equal(missingPublishedMonthly[0].monthly, null, "must fail closed rather than reuse stale rent_vehicles.monthly");
 });
 
-test("Rent2Buy recalculates monthly and initial rentals from DealerKit retail and mileage", () => {
-  const pricing = calculatePublishedRent2BuyPricing({ retailPrice: 11795, mileage: 22000, vatStatus: "plus_vat", pickup: false });
+test("Rent2Buy recalculates published defaults from the Felix matrix using DealerKit retail, year and mileage", () => {
+  const pricing = calculatePublishedRent2BuyPricing({ retailPrice: 11795, registrationYear: 2022, mileage: 22000 });
+  assert.equal(pricing.pricingMode, "matrix");
   assert.equal(pricing.termMonths, 48);
-  assert.equal(pricing.monthly, 467);
-  assert.equal(pricing.upfront, 1401);
+  assert.equal(pricing.milesPerMonth, 1000);
+  assert.equal(pricing.monthly, 395);
+  assert.equal(pricing.upfront, 1720);
   assert.equal(pricing.followingPayments, 48);
 
   const master = RENT2BUY_PRICE_COLLECTIONS.find((collection) => collection.id === "ALLRENT2BUYVANS");
   const patch = buildRent2BuyWixPricePatch(master, { id: "r2b-master", data: {} }, pricing, { standalone: false });
-  assert.equal(patch.fields.mth, "£467 PM");
+  assert.equal(patch.fields.mth, "£395 PM");
   assert.equal(patch.fields.weekly, "x48");
-  assert.equal(patch.fields.initialRental2250Vat, "INITIAL RENTAL £1401 +VAT");
+  assert.equal(patch.fields.initialRental2250Vat, "INITIAL RENTAL £1,720 +VAT");
   assert.equal(patch.fields.weeklyPrice1, undefined);
   assert.equal(patch.fields.monthlyPriceNumeric, undefined);
 });
 
-test("Rent2Buy pickup price sync keeps the four-upfront / term-minus-one rule", () => {
-  const pricing = calculatePublishedRent2BuyPricing({ retailPrice: 12000, mileage: 20000, vatStatus: "plus_vat", pickup: true });
+test("Rent2Buy pickup price sync uses the same Felix default as other normal vans", () => {
+  const pricing = calculatePublishedRent2BuyPricing({ retailPrice: 12000, registrationYear: 2023, mileage: 20000 });
+  assert.equal(pricing.pricingMode, "matrix");
   assert.equal(pricing.termMonths, 48);
-  assert.equal(pricing.upfrontMonths, 4);
-  assert.equal(pricing.followingPayments, 47);
-  assert.equal(pricing.upfront, pricing.monthly * 4);
+  assert.equal(pricing.milesPerMonth, 1000);
+  assert.equal(pricing.monthly, 400);
+  assert.equal(pricing.upfront, 1750);
+  assert.equal(pricing.followingPayments, 48);
 });
 
-test("Rent2Buy detail price patch updates all public rental fields together", () => {
-  const pricing = calculatePublishedRent2BuyPricing({ retailPrice: 11795, mileage: 22000, vatStatus: "plus_vat", pickup: false });
+test("Rent2Buy detail price patch updates all public rental fields together from Felix", () => {
+  const pricing = calculatePublishedRent2BuyPricing({ retailPrice: 11795, registrationYear: 2022, mileage: 22000 });
   const detail = RENT2BUY_PRICE_COLLECTIONS.find((collection) => collection.id === "VANPAGES");
   const patch = buildRent2BuyWixPricePatch(detail, { id: "detail-1", data: {} }, pricing);
-  assert.equal(patch.fields.intialRentalCharge, "£1401 +Vat (£1681 INC VAT)");
+  assert.equal(patch.fields.intialRentalCharge, "£1,720 +Vat (£2,064 INC VAT)");
   assert.equal(patch.fields.numberOfMonths, "48X MONTHLY PAYMENTS");
-  assert.equal(patch.fields.monthlyPayments, "£467 +Vat (£560 INC VAT)");
-  assert.equal(patch.fields.weeklyPrice, "£467 P/M");
+  assert.equal(patch.fields.monthlyPayments, "£395 +Vat (£474 INC VAT)");
+  assert.equal(patch.fields.weeklyPrice, "£395 P/M");
 });
 
 test("published price endpoint rechecks DealerKit and updates only the shared Rent2Buy Wix CMS", async () => {
   const source = await readFile(new URL("api/dealerkit-published-price.js", root), "utf8");
+  assert.match(source, /fetchDealerKitStockSnapshot/);
+  assert.match(source, /fresh_dealerkit_registration_lookup/);
+  assert.match(source, /registrationYear: vehicle\.year/);
   assert.match(source, /fetchDealerKitStockDetail/);
   assert.match(source, /VAN_FINANCE_RENT2BUY_WIX_SITE_ID/);
   assert.doesNotMatch(source, /STANDALONE_RENT2BUY_WIX_SITE_ID/);

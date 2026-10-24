@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import {
   RENT2BUY_MILEAGE_THRESHOLD,
   calculateRent2BuyPricing,
+  deriveRent2BuyDefaultTermFromVehicle,
   deriveRent2BuyTermFromMileage,
   rent2BuyPaymentStructure,
 } from "../lib/dealerKitRent2BuyPlan.js";
@@ -18,6 +19,13 @@ test("Rent2Buy term is automatic from the 42,000 mile boundary", () => {
   assert.equal(deriveRent2BuyTermFromMileage(90000).termMonths, 36);
   assert.match(deriveRent2BuyTermFromMileage(42000).blocker, /exactly 42,000/i);
   assert.match(deriveRent2BuyTermFromMileage(null).blocker, /mileage is required/i);
+});
+
+test("Felix review metadata uses vehicle age and 50k mileage cap for the default term", () => {
+  assert.equal(deriveRent2BuyDefaultTermFromVehicle({ year: 2023, mileage: 50000, currentYear: 2026 }).termMonths, 48);
+  assert.equal(deriveRent2BuyDefaultTermFromVehicle({ year: 2023, mileage: 50001, currentYear: 2026 }).termMonths, 36);
+  assert.equal(deriveRent2BuyDefaultTermFromVehicle({ year: 2021, mileage: 30000, currentYear: 2026 }).termMonths, 36);
+  assert.match(deriveRent2BuyDefaultTermFromVehicle({ year: null, mileage: 30000, currentYear: 2026 }).blocker, /year and mileage/i);
 });
 
 test("ordinary vans keep the current 3-upfront presentation and 36X/48X labels", () => {
@@ -108,7 +116,8 @@ test("advertised initial rental has a £1,000 + VAT floor without changing highe
 test("review save rechecks DealerKit before storing the derived Rent2Buy term", async () => {
   const source = await readFile(new URL("api/dealerkit-review-decision.js", root), "utf8");
   assert.match(source, /fetchDealerKitStockDetail/);
-  assert.match(source, /deriveRent2BuyTermFromMileage/);
+  assert.match(source, /deriveRent2BuyDefaultTermFromVehicle/);
   assert.match(source, /saveDerivedDealerKitRent2BuySettings/);
   assert.match(source, /registration changed/i);
+  assert.match(source, /vehicle age and mileage/i);
 });

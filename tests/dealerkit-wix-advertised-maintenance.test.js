@@ -11,7 +11,7 @@ import { encodeDealerKitProductImageState, decodeDealerKitProductImageState } fr
 
 const registration = "AB23CDE";
 const sourceUpdatedAt = "2026-09-30T09:00:00.000Z";
-const vehicle = { supplierStockId: "stock-1", registration, title: "Ford Transit", make: "Ford", model: "Transit", retailPrice: 13995, mileage: 30000, vatStatus: "plus_vat", status: "available", sourceUpdatedAt, images: [{ id: "one" }, { id: "two" }, { id: "three" }], specifications: {} };
+const vehicle = { supplierStockId: "stock-1", registration, title: "Ford Transit", make: "Ford", model: "Transit", retailPrice: 13995, year: 2023, mileage: 30000, vatStatus: "plus_vat", status: "available", sourceUpdatedAt, images: [{ id: "one" }, { id: "two" }, { id: "three" }], specifications: {} };
 const decision = { persisted: true, registration, supplierStockId: "stock-1", reviewStatus: "reviewed", reviewedSourceUpdatedAt: sourceUpdatedAt, financeEnabled: true, rent2buyEnabled: false, financeCategories: ["all_vans"], imageOrderIds: ["one", "two", "three"], primaryImageId: "three" };
 const images = { ready: true, mainUrl: "wix-primary", listingImageUrl: "wix-primary", galleryUrls: ["wix-primary", "wix-secondary"] };
 const row = (id, title = "AB23 CDE") => ({ id, data: { title, _publishStatus: "PUBLISHED" } });

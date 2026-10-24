@@ -258,33 +258,38 @@ test("Van Finance manual replacement stays isolated from Rent2Buy template", () 
   assert.ok(!sets.vanFinance.galleryUrls.includes(r2b.url));
 });
 
-test("Rent2Buy 4x4 under 42k uses template card image and 4 upfront plus 47", () => {
+test("Rent2Buy pickup under 50k uses the same Felix default matrix as every normal van", () => {
   const r2b = { selected: true, selectedAndReady: true, url: "https://static.wixstatic.com/media/r2b-template.png" };
   const d = decision({ rent2buyEnabled: true, financeCategories: ["all_vans", "pickup_4x4"] });
   const sets = buildProductImageSets({ vehicle: vehicle({ mileage: 30000 }), decision: d, importedDealerKitMedia: imported(), manualMediaReadiness: manualReadiness({ selections: { rent2buy_template: r2b } }) });
   const plan = buildDealerKitRent2BuyWixPlan({ vehicle: vehicle({ mileage: 30000 }), decision: d, imageSets: sets });
   assert.equal(plan.canPublish, true);
+  assert.equal(plan.pricing.pricingMode, "matrix");
   assert.equal(plan.pricing.termMonths, 48);
-  assert.equal(plan.pricing.upfrontMonths, 4);
-  assert.equal(plan.pricing.followingPayments, 47);
+  assert.equal(plan.pricing.milesPerMonth, 1000);
+  assert.equal(plan.pricing.monthly, 400);
+  assert.equal(plan.pricing.upfront, 1750);
+  assert.equal(plan.pricing.followingPayments, 48);
   const pickup = plan.targets.find((target) => target.collectionId === "PICKUPS");
   assert.equal(pickup.data.picture, r2b.url);
-  assert.equal(pickup.data.weekly, "x47");
+  assert.equal(pickup.data.weekly, "x48");
   const detail = plan.targets.find((target) => target.collectionId === "VANPAGES");
   assert.equal(detail.data.mediaGallery[0], r2b.url);
-  assert.equal(detail.data.numberOfMonths, "47X MONTHLY PAYMENTS");
+  assert.equal(detail.data.numberOfMonths, "48X MONTHLY PAYMENTS");
 });
 
-test("Rent2Buy 4x4 over 42k uses 75 percent and 4 upfront plus 35", () => {
+test("Rent2Buy pickup over 50k is capped at the Felix 36-month default", () => {
   const r2b = { selected: true, selectedAndReady: true, url: "https://static.wixstatic.com/media/r2b-template.png" };
   const d = decision({ rent2buyEnabled: true, financeCategories: ["all_vans", "pickup_4x4"] });
   const v = vehicle({ mileage: 80000 });
   const sets = buildProductImageSets({ vehicle: v, decision: d, importedDealerKitMedia: imported(), manualMediaReadiness: manualReadiness({ selections: { rent2buy_template: r2b } }) });
   const plan = buildDealerKitRent2BuyWixPlan({ vehicle: v, decision: d, imageSets: sets });
+  assert.equal(plan.pricing.pricingMode, "matrix");
   assert.equal(plan.pricing.termMonths, 36);
-  assert.equal(plan.pricing.upliftPercent, 75);
-  assert.equal(plan.pricing.followingPayments, 35);
-  assert.equal(plan.pricing.upfrontMonths, 4);
+  assert.equal(plan.pricing.milesPerMonth, 1000);
+  assert.equal(plan.pricing.monthly, 485);
+  assert.equal(plan.pricing.upfront, 1750);
+  assert.equal(plan.pricing.followingPayments, 36);
 });
 
 test("controlled publisher permits a fully new clean VFC vehicle", () => {

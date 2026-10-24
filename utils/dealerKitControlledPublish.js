@@ -101,8 +101,8 @@ function renderPayload(root, payload) {
   if (plan.rent2buy?.enabled && plan.rent2buy?.pricing) {
     const pricing = plan.rent2buy.pricing;
     summary.append(
-      element("div", "", `Rent2Buy term: ${pricing.termMonths} months · ${pricing.upliftPercent}%`),
-      element("div", "", `Rent2Buy: £${pricing.monthly} p/m · £${pricing.upfront} upfront · ${pricing.followingPayments} further payments`),
+      element("div", "", `Rent2Buy Felix default: ${pricing.termMonths} months · ${pricing.milesPerMonth || 1000} miles/month`),
+      element("div", "", `Rent2Buy: £${pricing.monthly} + VAT p/m · £${pricing.upfront} + VAT initial`),
     );
   }
   if (plan.mode === "cars" && Number.isFinite(Number(plan.retailPrice)) && Number.isFinite(Number(plan.monthlyPrice))) {

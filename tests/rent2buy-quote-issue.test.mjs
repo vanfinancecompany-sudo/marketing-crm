@@ -8,11 +8,10 @@ function source(registration="ZZ25XYZ",price=12000){
  const id="stock-"+registration;
  return {vehicle:{registration,supplierStockId:id,title:"Test van",year:2025,mileage:12000,
    retailPrice:price,vatStatus:"plus_vat",sourceUpdatedAt:"2026-10-23T09:00:00Z"},
-  decision:{registration,supplierStockId:id,reviewStatus:"reviewed",rent2buyEnabled:true},
-  sourceRetailPrice:price};
+  sourceRetailPrice:price,sourceMode:"dealerkit_current_stock"};
 }
 
-test("server signs the Felix matrix quote from existing reviewed vehicle retail",()=>{
+test("server signs the Felix matrix quote from current DealerKit vehicle retail",()=>{
  const s=source(),result=issueApprovedRent2BuyQuote({source:s,secret,now,reference:"normal-123"});
  assert.equal(result.ok,true);
  assert.equal(result.quote.pricingMode,"matrix");
@@ -37,8 +36,8 @@ test("fixed legacy special never falls back to matrix even if extra special-like
  assert.equal(issueApprovedRent2BuyQuote({source:s,secret,now}).error,"fixed_legacy_special_not_customisable");
 });
 
-test("missing signing secret or unreviewed source cannot issue a trusted quote",()=>{
+test("missing signing secret or non-current DealerKit source cannot issue a trusted quote",()=>{
  const s=source();
  assert.equal(issueApprovedRent2BuyQuote({source:s,now}).ok,false);
- assert.equal(issueApprovedRent2BuyQuote({source:{...s,decision:{...s.decision,rent2buyEnabled:false}},secret,now}).error,"rent2buy_not_reviewed");
+ assert.equal(issueApprovedRent2BuyQuote({source:{...s,sourceMode:""},secret,now}).error,"dealerkit_source_unavailable");
 });

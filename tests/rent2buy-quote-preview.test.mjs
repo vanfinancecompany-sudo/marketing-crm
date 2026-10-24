@@ -10,8 +10,7 @@ function source(registration="ZZ25XYZ",price=12000){
  const id="dealerkit-"+registration;
  return {vehicle:{registration,supplierStockId:id,title:"Approved example van",year:2025,mileage:12000,
    retailPrice:price,vatStatus:"plus_vat",sourceUpdatedAt:"2026-10-23T13:00:00Z"},
-  decision:{registration,supplierStockId:id,reviewStatus:"reviewed",rent2buyEnabled:true},
-  sourceRetailPrice:price};
+  sourceRetailPrice:price,sourceMode:"dealerkit_current_stock"};
 }
 
 test("selector exposes Felix-valid terms/mileage and initial options with no client monthly price",()=>{
