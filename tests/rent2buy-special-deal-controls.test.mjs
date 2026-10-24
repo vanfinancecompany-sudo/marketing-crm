@@ -38,3 +38,9 @@ test("manual special email requires independent server approval and is disabled 
  assert.match(route,/getSupabaseServiceAdmin/);assert.match(route,/RENT2BUY_MANUAL_SPECIALS_ENABLED/);
  assert.match(route,/\.eq\("enabled",true\)/);
 });
+
+test("new special activation is feature-locked and checked against current DealerKit vehicle data",()=>{
+ const src=fs.readFileSync(new URL("../api/rent2buy-special-deals.js",import.meta.url),"utf8");
+ assert.match(src,/RENT2BUY_MANUAL_SPECIAL_ACTIVATION_ENABLED/);assert.match(src,/fetchDealerKitStockDetail\(record.source_stock_id/);
+ assert.match(src,/rent2BuyMaximumTerm/);assert.match(src,/confirmRegistration/);
+});

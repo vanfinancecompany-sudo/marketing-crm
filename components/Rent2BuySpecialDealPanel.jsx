@@ -12,15 +12,19 @@ export default function Rent2BuySpecialDealPanel({selectedRegistration=""}){
  const [status,setStatus]=useState("");
  const [busy,setBusy]=useState(false);
  const [storageReady,setStorageReady]=useState(null);
+ const [activationReady,setActivationReady]=useState(false);
  useEffect(()=>{let mounted=true;const k=getStoredMarketingAccessKey();fetch("/api/rent2buy-special-deals"+(k?"?admin=1":""),{cache:"no-store",headers:k?{[MARKETING_ACCESS_HEADER]:k}:{}}).then(r=>r.json()).then(x=>{
-  if(mounted&&x.ok){setOffers(x.offers);setStorageReady(x.storageReady);}
+  if(mounted&&x.ok){setOffers(x.offers);setStorageReady(x.storageReady);setActivationReady(x.activationReady===true);}
  }).catch(()=>{if(mounted)setStatus("Cannot load saved specials. Four protected deals remain selected.");});
  return ()=>{mounted=false};},[]);
  useEffect(()=>{if(selectedRegistration){setRegistration(reg(selectedRegistration));setStatus("");}},[selectedRegistration]);
+ useEffect(()=>{const stored=offers.find(x=>reg(x.registration)===reg(registration)&&!x.protected);if(stored){setMonthly(String(stored.monthlyExVat));setInitial(String(stored.initialExVat));setTerm(String(stored.termMonths));}},[registration,offers]);
  const active=new Set(offers.filter(x=>x.enabled).map(x=>reg(x.registration)));
 
  const current=offers.find(x=>reg(x.registration)===reg(registration));
  const locked=Boolean(current?.protected);
+ const savedDraft=Boolean(current&&!current.protected);
+ const manuallyActive=savedDraft&&current.enabled===true;
  const draft=()=>{try{return validateDraft({registration,monthlyExVat:Number(monthly),initialExVat:Number(initial),termMonths:Number(term)});}catch{return null;}};
  const possible=draft();
  async function save(event){
@@ -33,8 +37,22 @@ export default function Rent2BuySpecialDealPanel({selectedRegistration=""}){
   try{
    const r=await fetch("/api/rent2buy-special-deals",{method:"POST",headers:{"Content-Type":"application/json",[MARKETING_ACCESS_HEADER]:existingKey},body:JSON.stringify(possible)});
    const j=await r.json();if(!r.ok||!j.ok)throw Error(j.error||"Save failed.");
-   setStatus("Draft saved. No public pricing, badges or Felix matrix have changed.");
+   setStatus("Draft saved. No public prices or badges have changed.");
+   const refreshed=await fetch("/api/rent2buy-special-deals?admin=1",{headers:{[MARKETING_ACCESS_HEADER]:existingKey},cache:"no-store"}).then(r=>r.json());
+   if(refreshed.ok){setOffers(refreshed.offers);setStorageReady(refreshed.storageReady);setActivationReady(refreshed.activationReady===true);}
   }catch(error){setStatus(error.message||"Could not save draft.");}finally{setBusy(false);}
+ }
+ async function changeStatus(action){
+  const existingKey=getStoredMarketingAccessKey();if(!existingKey){setStatus("Unlock the Customer Database first.");return;}
+  if(!activationReady||!savedDraft||locked){setStatus("Publishing is locked until the website and CRM release is complete.");return;}
+  if(!window.confirm(action==="activate"?`Activate the special rental for ${registration} on BOTH Rent2Buy websites?`:`End the special rental for ${registration} and restore Felix pricing?`))return;
+  setBusy(true);setStatus("");
+  try{
+   const response=await fetch("/api/rent2buy-special-deals",{method:"PATCH",headers:{"Content-Type":"application/json",[MARKETING_ACCESS_HEADER]:existingKey},body:JSON.stringify({action,registration,confirmRegistration:registration})});
+   const result=await response.json();if(!response.ok||!result.ok)throw Error(result.error||"Update failed.");
+   setStatus(result.message||"Updated.");
+   const refreshed=await fetch("/api/rent2buy-special-deals?admin=1",{headers:{[MARKETING_ACCESS_HEADER]:existingKey},cache:"no-store"}).then(r=>r.json());if(refreshed.ok)setOffers(refreshed.offers);
+  }catch(error){setStatus(error.message||"Special deal not updated.");}finally{setBusy(false);}
  }
  return <section className="panel" id="rent2buy-special-deal-editor" aria-label="Rent2Buy special-deal management" style={{padding:18,marginBottom:16}}>
    <div className="panel__header"><div><h3>Rent2Buy Special Deals</h3><p>Four approved legacy offers are selected and protected. New offers start as unpublished drafts.</p></div><span className="status-pill">{active.size} protected / active</span></div>
@@ -58,7 +76,9 @@ export default function Rent2BuySpecialDealPanel({selectedRegistration=""}){
     {locked?<span className="notice">This is one of the four protected deals. Its existing terms are locked.</span>:null}
     {possible?<div className="notice">Preview: {pounds(possible.monthlyExVat)} + VAT ({pounds(incVat(possible.monthlyExVat))} inc VAT) monthly · {pounds(possible.initialExVat)} + VAT ({pounds(incVat(possible.initialExVat))} inc VAT) initial · {possible.termMonths} months</div>:null}
     <small>Uses your existing Customer Database access. No separate pricing password.</small>
-    <button className="button button--primary" type="submit" disabled={busy||locked||storageReady===false}>{busy?"Saving draft...":"Save unpublished draft"}</button>
+    <button className="button button--primary" type="submit" disabled={busy||locked||storageReady===false||manuallyActive}>{busy?"Saving...":"Save unpublished draft"}</button>
+    {savedDraft?<button className="button button--ghost" type="button" disabled={busy||!activationReady} onClick={()=>changeStatus(manuallyActive?"deactivate":"activate")}>{manuallyActive?"End Special Deal":"Activate Special Deal"}</button>:null}
+    {!activationReady&&savedDraft?<small>Activation remains locked until the coordinated website and CRM release is complete.</small>:null}
     {storageReady===false?<small>Special-deal storage is not installed yet. Existing four remain visible; new draft saving is unavailable.</small>:null}
     {status?<p role="status">{status}</p>:null}
    </form>
