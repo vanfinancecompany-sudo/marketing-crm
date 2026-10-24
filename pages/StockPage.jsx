@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import VehicleCard from "../components/VehicleCard.jsx";
 import FilterBar from "../components/FilterBar.jsx";
+import Rent2BuySpecialDealPanel from "../components/Rent2BuySpecialDealPanel.jsx";
 
 const STOCK_AUTO_REFRESH_MS = 30 * 60 * 1000;
 const CARSLINK_STATUS_REFRESH_MS = 60 * 1000;
@@ -48,6 +49,7 @@ export default function StockPage({
   creativeError = "",
 }) {
   const selectedCount = selectedVehicleIds.length;
+  const [specialReg,setSpecialReg]=useState("");
   const [carslinkSyncing, setCarslinkSyncing] = useState(false);
   const [carslinkMessage, setCarslinkMessage] = useState("");
   const [carslinkError, setCarslinkError] = useState("");
@@ -199,6 +201,7 @@ export default function StockPage({
         {carslinkError ? <div className="notice notice--error">{carslinkError}</div> : null}
 
         <FilterBar filters={filters} onChange={onFiltersChange} />
+        {filters.pipeline==="rent2buy"?<Rent2BuySpecialDealPanel vehicles={vehicles} selectedRegistration={specialReg}/>:null}
 
         <div className="selection-summary stock-selection-summary">
           <strong>{selectedCount} selected for manual reel queue</strong>
@@ -275,6 +278,7 @@ export default function StockPage({
                 displayMode={filters.pipeline === "rent2buy" ? "rent2buy" : filters.pipeline === "cars" ? "cars" : "finance"}
                 onGenerateReel={onGenerateReel}
                 onViewCreatives={onViewCreatives}
+                onSpecialDeal={filters.pipeline==="rent2buy"?(v)=>{setSpecialReg(String(v?.reg||v?.registration||"").toUpperCase().replace(/[^A-Z0-9]/g,""));document.getElementById("rent2buy-special-deal-editor")?.scrollIntoView({behavior:"smooth",block:"start"});}:undefined}
                 selectable
                 selected={selectedVehicleIds.includes(String(vehicle.id || vehicle.reg || vehicle.registration || vehicle.name || ""))}
                 onSelect={onToggleVehicle}

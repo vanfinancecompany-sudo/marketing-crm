@@ -2,6 +2,7 @@ export default function VehicleCard({
   vehicle,
   onGenerateReel,
   onViewCreatives,
+  onSpecialDeal,
   onSelect,
   selected = false,
   selectable = false,
@@ -83,6 +84,7 @@ export default function VehicleCard({
 
         {!compact ? (
           <div className="card-actions">
+            {isRentDisplay&&onSpecialDeal?<button className="button button--ghost" onClick={event=>{event.stopPropagation();onSpecialDeal(vehicle);}}>Special Deal</button>:null}
             <button
               className="button button--primary"
               disabled={reelLocked}
