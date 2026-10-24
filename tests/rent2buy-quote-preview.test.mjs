@@ -43,6 +43,7 @@ test("preview route uses simplified pricing source and has no Wix/stock-monitor 
  assert.match(route,/RENT2BUY_QUOTE_ENDPOINT_ENABLED==="true"/);
  assert.match(route,/if\(!previewEnabled&&!productionEnabled\)/);
  assert.match(route,/x-rent2buy-quote-verifier-key/);
+ assert.match(route,/RENT2BUY_VFC_QUOTE_VERIFY_KEY/);
  assert.match(route,/loadRent2BuyPricingSource\(data\.registration\)/);
  assert.match(route,/issueApprovedRent2BuyQuote\(/);
  assert.doesNotMatch(route,/stock-watch|snapshot|wixRequest|wixPatch|createRent2BuyLead|\.upsert\(|\.update\(/);
