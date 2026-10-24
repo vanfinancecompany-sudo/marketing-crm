@@ -32,3 +32,9 @@ test("special deal editor uses the existing Marketing CRM access key, not an inv
  assert.doesNotMatch(api,/RENT2BUY_SPECIAL_ADMIN_KEY/);
  assert.doesNotMatch(ui,/Special-deal admin key/);
 });
+
+test("manual special email requires independent server approval and is disabled by default",()=>{
+ const route=fs.readFileSync(new URL("../api/transactional-rent2buy-application.js",import.meta.url),"utf8");
+ assert.match(route,/getSupabaseServiceAdmin/);assert.match(route,/RENT2BUY_MANUAL_SPECIALS_ENABLED/);
+ assert.match(route,/\.eq\("enabled",true\)/);
+});

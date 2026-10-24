@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import {getSupabaseServiceAdmin} from "./_vansco-cache-utils.js";
 import { sendSendGridEmail } from "../lib/emailProviders/sendgrid.js";
 import { normaliseRent2BuyNotificationQuote, rent2BuyNotificationQuoteLines, rent2BuyNotificationQuoteFields } from "../lib/rent2BuyNotificationQuote.mjs";
 import { normaliseRent2BuyNotificationFixedSpecial, rent2BuyNotificationFixedSpecialLines, rent2BuyNotificationFixedSpecialFields } from "../lib/rent2BuyNotificationFixedSpecial.mjs";
@@ -42,7 +43,7 @@ function escapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
-function normalizePayload(body = {}) {
+function normalizePayload(body = {}, approvedManualSpecial = null) {
   const applicationRef = text(body.applicationRef || body.application_ref, 40).toUpperCase();
   const applicant = body.applicant && typeof body.applicant === "object" ? body.applicant : {};
   const vehicle = body.vehicle && typeof body.vehicle === "object" ? body.vehicle : {};
@@ -88,7 +89,7 @@ function normalizePayload(body = {}) {
   };
 
   // This field originates only from the main CRM after approved HMAC + source verification.
-  payload.fixedSpecial = normaliseRent2BuyNotificationFixedSpecial(body.fixedSpecial, payload.vehicle.registration);
+  payload.fixedSpecial = normaliseRent2BuyNotificationFixedSpecial(body.fixedSpecial, payload.vehicle.registration, approvedManualSpecial);
   payload.selectedQuote = normaliseRent2BuyNotificationQuote(body.selectedQuote, payload.vehicle.registration);
   if(payload.fixedSpecial && payload.selectedQuote) throw new Error("Application cannot contain both a fixed special and a customised quote.");
 
@@ -125,7 +126,24 @@ export default async function handler(request, response) {
   if (!process.env.SENDGRID_API_KEY) return response.status(500).json({ ok: false, message: "Rent2Buy application email provider is not configured." });
 
   let payload;
-  try { payload = normalizePayload(parseBody(request)); }
+  try {
+    const body=parseBody(request);
+    let approvedManualSpecial=null;
+    if(body?.fixedSpecial?.pricingMode==="fixed_manual_special"){
+      if(process.env.RENT2BUY_MANUAL_SPECIALS_ENABLED!=="true")throw new Error("New special-deal notifications are not enabled.");
+      const registration=text(body?.vehicle?.registration||body?.registration,40).toUpperCase().replace(/[^A-Z0-9]/g,"");
+      if(!/^[A-Z]{2}[0-9]{2}[A-Z]{3}$/.test(registration))throw new Error("Invalid special-deal registration.");
+      const {data,error}=await getSupabaseServiceAdmin().from("rent2buy_special_deals")
+        .select("registration,monthly_ex_vat,initial_ex_vat,term_months,enabled")
+        .eq("registration",registration).eq("enabled",true).maybeSingle();
+      if(error||!data)throw new Error("New special deal is not approved in the current registry.");
+      approvedManualSpecial={registration,
+        monthlyExVat:Number(data.monthly_ex_vat),
+        initialExVat:Number(data.initial_ex_vat),
+        termMonths:Number(data.term_months)};
+    }
+    payload=normalizePayload(body,approvedManualSpecial);
+  }
   catch (error) { return response.status(400).json({ ok: false, message: text(error?.message, 240) || "Rent2Buy application email data is invalid." }); }
 
   const subject = `New Rent2Buy Application - ${payload.applicationRef} - ${payload.applicant.fullName}${payload.vehicle.registration ? ` - ${payload.vehicle.registration}` : ""}`;
