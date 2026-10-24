@@ -52,6 +52,7 @@ test("verification route delegates current DealerKit source loading without writ
  const route=fs.readFileSync(new URL("../api/rent2buy-quote-verify.js",import.meta.url),"utf8");
  assert.match(route,/RENT2BUY_QUOTE_VERIFIER_ENABLED/);
  assert.match(route,/timingSafeEqual/);
+ assert.match(route,/RENT2BUY_VFC_QUOTE_VERIFY_KEY/);
  assert.match(route,/loadRent2BuyPricingSource/);
  assert.doesNotMatch(route,/quote-snapshot|stock-watch|\.insert\(|\.upsert\(|wixRequest/);
 });
