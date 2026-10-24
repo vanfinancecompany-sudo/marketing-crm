@@ -17,6 +17,7 @@ import {
 } from "../lib/dealerKitPublishedPrice.js";
 import { VAN_FINANCE_RENT2BUY_WIX_SITE_ID } from "../lib/dealerKitRent2BuyWixPlan.js";
 import { pendingRent2BuySpecialDeal } from "../lib/rent2BuyProtectedSpecialDeals.mjs";
+import { currentActiveRent2BuyManualSpecial } from "../lib/rent2BuyCurrentManualSpecial.mjs";
 import { calculateVfcAdvertisedMonthly } from "../lib/vfcFinancePriceMatrix.mjs";
 import { getVfcPricingReviewHold } from "../lib/vfcPricingReviewHolds.mjs";
 
@@ -361,6 +362,8 @@ export default async function handler(request, response) {
     // Manual Rent2Buy special prices are not normal DealerKit price differences.
     // Reject updates before stock/Wix reads and again against the verified vehicle.
     const protectedDeal = pipeline === "rent2buy" ? pendingRent2BuySpecialDeal(body.registration) : null;
+    if(pipeline==="rent2buy" && action==="update" && await currentActiveRent2BuyManualSpecial(body.registration))
+      throw new ApiError(409,"Active manual Rent2Buy special: automatic Wix price update is disabled. Nothing was changed.");
     if (protectedDeal && action === "update") {
       throw new ApiError(409, "This Rent2Buy vehicle is one of the four fixed legacy specials. Automatic Update Wix price is disabled. Nothing was changed.");
     }
@@ -368,6 +371,8 @@ export default async function handler(request, response) {
     if (pipeline === "rent2buy" && action === "update" && pendingRent2BuySpecialDeal(vehicle.registration)) {
       throw new ApiError(409, "Protected Rent2Buy special deal: automatic Wix price update is disabled. Nothing was changed.");
     }
+    if(pipeline==="rent2buy" && action==="update" && await currentActiveRent2BuyManualSpecial(vehicle.registration))
+      throw new ApiError(409,"Active manual Rent2Buy special: Wix price update is locked.");
     const configurations = wixConfigurations();
     const preview = await buildPreview(configurations, pipeline, vehicle);
     if (protectedDeal) preview.protected_special_deal = protectedDeal;

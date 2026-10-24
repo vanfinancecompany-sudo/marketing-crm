@@ -47,3 +47,14 @@ test("transactional email keeps fixed deal separate from selected matrix quote a
   assert.match(source,/Monthly mileage/);
   assert.match(source,/rent2BuyNotificationFixedSpecialLines/);
 });
+
+test("new manual special internal email is permitted only when backed by an independently approved deal",()=>{
+ const approved={registration:"AB12CDE",monthlyExVat:550,initialExVat:1500,termMonths:36};
+ const raw={registration:"AB12CDE",pricingMode:"fixed_manual_special",
+  monthlyExVat:550,initialExVat:1500,termMonths:36,contractualMileage:null,customisable:false};
+ const value=normaliseRent2BuyNotificationFixedSpecial(raw,"AB12CDE",approved);
+ assert.equal(value.pricingMode,"fixed_manual_special");
+ assert.throws(()=>normaliseRent2BuyNotificationFixedSpecial(raw,"AB12CDE",null));
+ assert.throws(()=>normaliseRent2BuyNotificationFixedSpecial({...raw,monthlyExVat:5},"AB12CDE",approved));
+ assert.throws(()=>normaliseRent2BuyNotificationFixedSpecial({...raw,termMonths:48},"AB12CDE",approved));
+});

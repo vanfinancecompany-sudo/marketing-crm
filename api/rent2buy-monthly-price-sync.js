@@ -1,3 +1,5 @@
+import { pendingRent2BuySpecialDeal } from "../lib/rent2BuyProtectedSpecialDeals.mjs";
+import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
 import {
   RENT2BUY_ALL_VANS_COLLECTION_ID,
   RENT2BUY_WIX_SITE_ID,
@@ -109,13 +111,31 @@ export default async function handler(request, response) {
     }
 
     const items = await loadAllVans(config);
-    const { patches, skipped } = summarizeMonthlyPriceSync(items);
+
+    const registration=value=>String(value??"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+    // This standalone numeric-price sync must never overwrite a manually
+    // approved special. If the active registry is unreadable, skip all writes.
+    let manualRegs=[];
+    if(process.env.RENT2BUY_MANUAL_SPECIALS_ENABLED==="true"){
+      const {data,error}=await getSupabaseServiceAdmin().from("rent2buy_special_deals")
+        .select("registration").eq("enabled",true);
+      if(error)throw new Error("Cannot check active Rent2Buy special-deal exclusions.");
+      manualRegs=(data||[]).map(x=>registration(x.registration));
+    }
+    const protectedRegs=new Set(manualRegs);
+    const eligible=items.filter(item=>{
+      const id=registration(item?.data?.title);
+      return !protectedRegs.has(id)&&!pendingRent2BuySpecialDeal(id);
+    });
+    const { patches, skipped } = summarizeMonthlyPriceSync(eligible);
+    const protectedCount=items.length-eligible.length;
     const applied = patches.length ? await applyPatches(config, patches) : { successes: 0, failures: [] };
 
     console.info("RENT2BUY MONTHLY PRICE SYNC", {
       scanned: items.length,
       changes_needed: patches.length,
       updated: applied.successes,
+      protected_specials_skipped: protectedCount,
       failures: applied.failures.length,
       unparseable: skipped.length,
     });
@@ -125,6 +145,7 @@ export default async function handler(request, response) {
       scanned: items.length,
       changes_needed: patches.length,
       updated: applied.successes,
+      protected_specials_skipped: protectedCount,
       failures: applied.failures,
       unparseable: skipped,
     });
