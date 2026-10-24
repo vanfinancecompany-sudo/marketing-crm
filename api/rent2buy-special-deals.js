@@ -61,7 +61,7 @@ export default async function handler(req,res){
      const vehicle=await fetchDealerKitStockDetail(record.source_stock_id,{specifications:false});
      if(reg(vehicle.registration)!==registration||String(vehicle.supplierStockId)!==String(record.source_stock_id))
        return res.status(409).json({ok:false,error:"DealerKit vehicle identity changed."});
-     const status=String(vehicle.status||vehicle.sourceStatus||"").trim().toLowerCase().replace(/[\\s-]+/g,"_");
+     const status=String(vehicle.status||vehicle.sourceStatus||"").trim().toLowerCase().replace(/[\s-]+/g,"_");
      const maximum=rent2BuyMaximumTerm({registrationYear:vehicle.year,vehicleMileage:vehicle.mileage,milesPerMonth:1000});
      if(!["available","in_stock","due_in"].includes(status)||!maximum||Number(record.term_months)>maximum||
        !Number.isFinite(Number(vehicle.retailPrice))||Number(vehicle.retailPrice)<=0)
@@ -92,7 +92,7 @@ export default async function handler(req,res){
   const vehicle=await fetchDealerKitStockDetail(matches[0].supplierStockId,{specifications:false});
   if(reg(vehicle.registration)!==deal.registration||String(vehicle.supplierStockId)!==String(matches[0].supplierStockId))
    return res.status(409).json({ok:false,error:"Vehicle identity has changed in DealerKit."});
-  const status=String(vehicle.status||vehicle.sourceStatus||"").toLowerCase().replace(/[\\s-]+/g,"_");
+  const status=String(vehicle.status||vehicle.sourceStatus||"").toLowerCase().replace(/[\s-]+/g,"_");
   if(!["available","in_stock","due_in"].includes(status))return res.status(409).json({ok:false,error:"Vehicle is not currently available."});
   const sb=getSupabaseServiceAdmin();
   const {data:previous,error:previousError}=await sb.from(table).select("enabled").eq("registration",deal.registration).maybeSingle();

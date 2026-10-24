@@ -44,3 +44,10 @@ test("new special activation is feature-locked and checked against current Deale
  assert.match(src,/RENT2BUY_MANUAL_SPECIAL_ACTIVATION_ENABLED/);assert.match(src,/fetchDealerKitStockDetail\(record.source_stock_id/);
  assert.match(src,/rent2BuyMaximumTerm/);assert.match(src,/confirmRegistration/);
 });
+
+test("numeric Wix price maintenance never touches protected or active manual special registrations",()=>{
+ const code=fs.readFileSync(new URL("../api/rent2buy-monthly-price-sync.js",import.meta.url),"utf8");
+ assert.match(code,/pendingRent2BuySpecialDeal/);
+ assert.match(code,/rent2buy_special_deals/);
+ assert.match(code,/if\(error\)throw new Error\("Cannot check active Rent2Buy special-deal exclusions/);
+});
