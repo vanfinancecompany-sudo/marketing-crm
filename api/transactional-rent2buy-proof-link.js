@@ -41,6 +41,23 @@ function escapeHtml(value) {
 }
 
 function normalizePayload(body = {}) {
+  if (["rent2buy-quote-confirmation", "rent2buy-quote-staff"].includes(body.emailType)) {
+    const email = text(body.email,254).toLowerCase();
+    const subject = text(body.subject,998);
+    const plain = String(body.plain || "");
+    if (!EMAIL_PATTERN.test(email) || !plain.trim() || plain.length > 20000) throw Error("Quote email is invalid.");
+    if (body.emailType === "rent2buy-quote-confirmation") {
+      const url = new URL(text(body.confirmationUrl,12000));
+      if (url.protocol !== "https:" || !["www.rent2buyvans.co.uk","www.vanfinancecompany.co.uk"].includes(url.hostname)
+        || url.port || url.username || url.password || url.pathname !== "/rent2buy-confirm-update"
+        || !/^r2bqc1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(url.searchParams.get("token") || "")
+        || subject !== "Confirm your updated Rent2Buy quotation" || !plain.includes(url.href))
+        throw Error("Quote confirmation link is invalid.");
+    } else if (email !== "sales@vanfinancecompany.co.uk" || !subject.startsWith("Confirmed updated Rent2Buy quote - ")) {
+      throw Error("Quote staff notification is invalid.");
+    }
+    return {email,subject,plain,emailType:body.emailType};
+  }
   const applicationRef = text(body.applicationRef, 40).toUpperCase();
   const fullName = text(body.fullName, 200);
   const email = text(body.email, 254).toLowerCase();
@@ -65,6 +82,9 @@ function normalizePayload(body = {}) {
 }
 
 export function renderEmail(payload) {
+  if (payload.emailType) return {subject:payload.subject,plain:payload.plain,
+    html:"<html><body><pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">"+
+      payload.plain.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")+"</pre></body></html>"};
   const greeting = payload.fullName ? `Hi ${escapeHtml(payload.fullName)},` : "Hi there,";
   const subject = "Complete your Rent2Buy application – upload your documents";
   const plain = `We’ve received your Rent2Buy application details. To complete your application and allow the team to assess it, please upload the required supporting documents using your personal link below.\n\nYou will need:\n• 3 months’ full bank statements in PDF format\n• 2 proofs of your current address\n• your driving licence\n\n${payload.uploadUrl}\n\nApplication: ${payload.applicationRef}\nVehicle: ${payload.vehicle}\n\nYour personal link expires after seven days. If you need time to find a document, keep the link and return to it, but assessment cannot begin until the required proofs are received.`;
@@ -93,16 +113,18 @@ export default async function handler(request, response) {
       text: email.plain,
       fromEmail: "sales@vanfinancecompany.co.uk",
       fromName: "Rent2Buy Vans",
-      categories: ["transactional", "rent2buy-proof-link"],
+      categories: ["transactional", payload.emailType || "rent2buy-proof-link"],
       customArgs: {
         application_ref: payload.applicationRef,
-        transactional_template: "rent2buy-proof-link",
+        transactional_template: payload.emailType || "rent2buy-proof-link",
       },
     });
     console.info("RENT2BUY PROOF LINK EMAIL ACCEPTED", { applicationRef: payload.applicationRef, providerMessageId: provider.messageId });
     return response.status(200).json({ ok: true, provider: "sendgrid", provider_message_id: provider.messageId });
   } catch (error) {
-    console.error("RENT2BUY PROOF LINK EMAIL FAILED", { applicationRef: payload.applicationRef, message: error?.message || "send_failed", ambiguous: Boolean(error?.ambiguous) });
+    console.error("RENT2BUY PROOF LINK EMAIL FAILED", { applicationRef: payload.applicationRef,
+      status:error?.providerStatusCode || 0, category:error?.providerCategory || "send_failed",
+      message: error?.message || "send_failed", ambiguous: Boolean(error?.ambiguous) });
     return response.status(error?.statusCode || 502).json({
       ok: false,
       ambiguous: Boolean(error?.ambiguous),
