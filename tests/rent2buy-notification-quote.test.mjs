@@ -42,5 +42,7 @@ test("notification refuses wrong vehicle, special mode, VAT mismatch and forged 
  assert.throws(()=>normaliseRent2BuyNotificationQuote({...signedByCrm,monthlyIncVat:500},"ZZ25XYZ"));
  assert.throws(()=>normaliseRent2BuyNotificationQuote({...signedByCrm,initialExVat:900},"ZZ25XYZ"));
  assert.throws(()=>normaliseRent2BuyNotificationQuote({...signedByCrm,termMonths:40},"ZZ25XYZ"));
+ for(const termMonths of [18,30,42]) assert.throws(()=>normaliseRent2BuyNotificationQuote({...signedByCrm,termMonths},"ZZ25XYZ"));
  assert.throws(()=>normaliseRent2BuyNotificationQuote({...signedByCrm,milesPerMonth:4500},"ZZ25XYZ"));
+ for(const milesPerMonth of [1500,2500,3500]) assert.throws(()=>normaliseRent2BuyNotificationQuote({...signedByCrm,milesPerMonth},"ZZ25XYZ"));
 });
