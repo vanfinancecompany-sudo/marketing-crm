@@ -69,6 +69,8 @@ test("malformed or unsupported term, mileage and upfront selections never fetch 
   const invalids=[
     {action:"choices",registration:"NOTREG"},
     {action:"issue",registration:"ZZ25XYZ",selection:{termMonths:40,milesPerMonth:1000,initialExVat:1000}},
+    ...[18,30,42].map(termMonths=>({action:"issue",registration:"ZZ25XYZ",selection:{termMonths,milesPerMonth:1000,initialExVat:1000}})),
+    ...[1500,2500,3500].map(milesPerMonth=>({action:"issue",registration:"ZZ25XYZ",selection:{termMonths:36,milesPerMonth,initialExVat:1000}})),
     {action:"issue",registration:"ZZ25XYZ",selection:{termMonths:36,milesPerMonth:4500,initialExVat:1000}},
     {action:"issue",registration:"ZZ25XYZ",selection:{termMonths:36,milesPerMonth:1000,initialExVat:999}},
     {action:"issue",registration:"ZZ25XYZ",selection:{termMonths:36,milesPerMonth:1000,initialExVat:null}},

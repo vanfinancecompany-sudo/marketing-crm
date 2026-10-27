@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   RENT2BUY_MATRIX_TERMS,
+  RENT2BUY_MATRIX_MILEAGE_BANDS,
   availableRent2BuyTerms,
   rent2BuyInitialRentalLadder,
   rent2BuyMaximumTerm,
@@ -11,8 +12,9 @@ import {
 const base = { retailPrice: 12000, registrationYear: 2024, vehicleMileage: 25000, currentYear: 2026 };
 const quote = (data = {}) => quoteRent2BuyMatrix({ ...base, ...data });
 
-test("price matrix includes six-month steps from 12 through 48 months", () => {
-  assert.deepEqual(RENT2BUY_MATRIX_TERMS, [12, 18, 24, 30, 36, 42, 48]);
+test("matrix offers only 12, 24, 36 and 48 months with thousand-mile increments", () => {
+  assert.deepEqual(RENT2BUY_MATRIX_TERMS, [12, 24, 36, 48]);
+  assert.deepEqual(RENT2BUY_MATRIX_MILEAGE_BANDS, [1000, 2000, 3000, 4000]);
   assert.deepEqual(availableRent2BuyTerms({ registrationYear: 2024, vehicleMileage: 25000, currentYear: 2026, milesPerMonth: 1000 }), RENT2BUY_MATRIX_TERMS);
 });
 
@@ -29,8 +31,8 @@ test("PDF £12,000 van default: £400 / 48m / 1000mi, minimum £1750", () => {
   assert.equal(result.milesPerMonth, 1000);
 });
 
-test("PDF 36-month £12,000 matrix mileage bands", () => {
-  const values = new Map([[1000,485],[1500,510],[2000,535],[2500,560],[3000,585],[3500,null],[4000,null]]);
+test("36-month £12,000 matrix uses whole-thousand mileage options", () => {
+  const values = new Map([[1000,485],[2000,535],[3000,585],[4000,null]]);
   for (const [miles,monthly] of values) {
     const result = quote({ termMonths: 36, milesPerMonth: miles });
     if (monthly === null) assert.equal(result.status, "unavailable");
@@ -44,7 +46,7 @@ test("PDF £12,000 36m / 2000mi with £3500 upfront is £465", () => {
 });
 
 test("PDF £12,000 van long-term matrix minimum across term bands", () => {
-  const expected = [[12,1150],[18,820],[24,650],[30,550],[36,485],[42,440],[48,400]];
+  const expected = [[12,1150],[24,650],[36,485],[48,400]];
   for (const [term,monthly] of expected)
     assert.equal(quote({ termMonths:term }).monthlyExVat, monthly, String(term));
 });
@@ -66,8 +68,8 @@ test("vehicle age and mileage restrict term before customer mileage cap", () => 
   assert.equal(rent2BuyMaximumTerm({registrationYear:2022,vehicleMileage:50000,currentYear:2026,milesPerMonth:1000}),48);
   assert.equal(rent2BuyMaximumTerm({registrationYear:2022,vehicleMileage:50001,currentYear:2026,milesPerMonth:1000}),36);
   assert.equal(rent2BuyMaximumTerm({registrationYear:2021,vehicleMileage:10000,currentYear:2026,milesPerMonth:1000}),36);
-  assert.equal(rent2BuyMaximumTerm({registrationYear:2024,vehicleMileage:10000,currentYear:2026,milesPerMonth:2500}),36);
-  assert.equal(rent2BuyMaximumTerm({registrationYear:2024,vehicleMileage:10000,currentYear:2026,milesPerMonth:3500}),30);
+  assert.equal(rent2BuyMaximumTerm({registrationYear:2024,vehicleMileage:10000,currentYear:2026,milesPerMonth:3000}),36);
+  assert.equal(rent2BuyMaximumTerm({registrationYear:2024,vehicleMileage:10000,currentYear:2026,milesPerMonth:2000}),48);
   assert.equal(rent2BuyMaximumTerm({registrationYear:2024,vehicleMileage:10000,currentYear:2026,milesPerMonth:4000}),24);
 });
 
@@ -76,6 +78,10 @@ test("minimum initial rental is always at least £1000 + VAT", () => {
   assert.equal(result.minimumInitialExVat,1000);
   assert.equal(result.initialIncVat,1200);
   assert.equal(quote({retailPrice:5000,initialRentalExVat:900}).status,"unavailable");
+  // The 36-month, 3,000-mile rental for £5,000 retail is below £250,
+  // yet the minimum remains £1,000 ex VAT across every term and mileage choice.
+  assert.equal(quote({retailPrice:5000,termMonths:36,milesPerMonth:3000}).minimumInitialExVat,1000);
+  assert.deepEqual(rent2BuyInitialRentalLadder(5000),[1000,1500,2000,2500]);
 });
 
 test("special deals apply only to their exact term, mileage and upfront configuration", () => {
@@ -104,6 +110,8 @@ test("fail closed for missing data, out-of-bounds terms and unselected upfront s
   assert.equal(quote({registrationYear:null}).status,"unavailable");
   assert.equal(quote({termMonths:48,milesPerMonth:4000}).reason,"term_not_allowed");
   assert.equal(quote({milesPerMonth:4500}).status,"unavailable");
+  for(const termMonths of [18,30,42]) assert.equal(quote({termMonths}).status,"unavailable",String(termMonths));
+  for(const milesPerMonth of [1500,2500,3500]) assert.equal(quote({milesPerMonth}).status,"unavailable",String(milesPerMonth));
   assert.equal(quote({initialRentalExVat:1950}).reason,"initial_rental_not_on_matrix_ladder");
 });
 

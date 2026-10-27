@@ -21,8 +21,8 @@ function parseRequest(raw){
     return null;
   const values={};
   for(const [field,valid] of [
-    ["termMonths",[12,18,24,30,36,42,48]],
-    ["milesPerMonth",[1000,1500,2000,2500,3000,3500,4000]],
+    ["termMonths",[12,24,36,48]],
+    ["milesPerMonth",[1000,2000,3000,4000]],
   ]){
     const n=Number(value.selection[field]);
     if(!valid.includes(n))return null;

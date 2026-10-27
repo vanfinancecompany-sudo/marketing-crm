@@ -16,8 +16,10 @@ function source(registration="ZZ25XYZ",price=12000){
 test("selector exposes Felix-valid terms/mileage and initial options with no client monthly price",()=>{
  const x=approvedRent2BuySelectorChoices(source());
  assert.equal(x.ok,true);assert.equal(x.registration,"ZZ25XYZ");
- assert.deepEqual(x.allowedMileageTerms.find(t=>t.milesPerMonth===1000).termMonths,[12,18,24,30,36,42,48]);
- assert.deepEqual(x.allowedMileageTerms.find(t=>t.milesPerMonth===4000).termMonths,[12,18,24]);
+ assert.deepEqual(x.allowedMileageTerms.find(t=>t.milesPerMonth===1000).termMonths,[12,24,36,48]);
+ assert.deepEqual(x.allowedMileageTerms.find(t=>t.milesPerMonth===4000).termMonths,[12,24]);
+ assert.deepEqual(x.allowedMileageTerms.map(t=>t.milesPerMonth),[1000,2000,3000,4000]);
+ assert.deepEqual(x.allowedMileageTerms.find(t=>t.milesPerMonth===3000).termMonths,[12,24,36]);
  assert.deepEqual(x.initialRentalOptionsExVat,[1750,2630,3500,4380]);
  assert.equal(Object.hasOwn(x,"special"),false);
  assert.equal(Object.hasOwn(x,"monthlyExVat"),false);

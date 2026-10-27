@@ -47,7 +47,9 @@ test("expired, malformed and special-mode quote envelopes fail closed",()=>{
   assert.equal(verifyRent2BuyQuoteToken(token,secret,{registration:"ZZ25XYZ",now:now+3600000}),null);
   assert.equal(validateRent2BuyQuoteEnvelope({...quote,sourceRevision:""},now),null);
   assert.equal(validateRent2BuyQuoteEnvelope({...quote,termMonths:99},now),null);
+  for(const termMonths of [18,30,42]) assert.equal(validateRent2BuyQuoteEnvelope({...quote,termMonths},now),null);
   assert.equal(validateRent2BuyQuoteEnvelope({...quote,milesPerMonth:4500},now),null);
+  for(const milesPerMonth of [1500,2500,3500]) assert.equal(validateRent2BuyQuoteEnvelope({...quote,milesPerMonth},now),null);
   assert.equal(validateRent2BuyQuoteEnvelope({...quote,initialExVat:900},now),null);
   assert.equal(validateRent2BuyQuoteEnvelope({...quote,pricingMode:"special"},now),null);
 });
