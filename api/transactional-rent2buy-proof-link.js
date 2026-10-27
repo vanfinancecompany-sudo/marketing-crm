@@ -41,11 +41,13 @@ function escapeHtml(value) {
 }
 
 function normalizePayload(body = {}) {
-  if (["rent2buy-quote-confirmation", "rent2buy-quote-staff"].includes(body.emailType)) {
+  if (["rent2buy-quote-confirmation", "rent2buy-quote-acknowledgement", "rent2buy-quote-staff"].includes(body.emailType)) {
     const email = text(body.email,254).toLowerCase();
     const subject = text(body.subject,998);
     const plain = String(body.plain || "");
+    const html = String(body.html || "");
     if (!EMAIL_PATTERN.test(email) || !plain.trim() || plain.length > 20000) throw Error("Quote email is invalid.");
+    if(html.length>120000)throw Error("Quote email HTML is too large.");
     if (body.emailType === "rent2buy-quote-confirmation") {
       const url = new URL(text(body.confirmationUrl,12000));
       if (url.protocol !== "https:" || !["www.rent2buyvans.co.uk","www.vanfinancecompany.co.uk"].includes(url.hostname)
@@ -53,10 +55,12 @@ function normalizePayload(body = {}) {
         || !/^r2bqc1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(url.searchParams.get("token") || "")
         || subject !== "Confirm your updated Rent2Buy quotation" || !plain.includes(url.href))
         throw Error("Quote confirmation link is invalid.");
-    } else if (email !== "sales@vanfinancecompany.co.uk" || !subject.startsWith("Confirmed updated Rent2Buy quote - ")) {
+    } else if(body.emailType==="rent2buy-quote-acknowledgement"){
+      if(subject!=="We've received your updated Rent2Buy quote"||!html.trim())throw Error("Quote acknowledgement is invalid.");
+    } else if (email !== "sales@vanfinancecompany.co.uk" || !(subject.startsWith("Confirmed updated Rent2Buy quote - ")||subject.startsWith("UPDATED RENT2BUY QUOTE – "))) {
       throw Error("Quote staff notification is invalid.");
     }
-    return {email,subject,plain,emailType:body.emailType};
+    return {email,subject,plain,html,emailType:body.emailType};
   }
   const applicationRef = text(body.applicationRef, 40).toUpperCase();
   const fullName = text(body.fullName, 200);
@@ -83,7 +87,7 @@ function normalizePayload(body = {}) {
 
 export function renderEmail(payload) {
   if (payload.emailType) return {subject:payload.subject,plain:payload.plain,
-    html:"<html><body><pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">"+
+    html:payload.html||"<html><body><pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">"+
       payload.plain.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")+"</pre></body></html>"};
   const greeting = payload.fullName ? `Hi ${escapeHtml(payload.fullName)},` : "Hi there,";
   const subject = "Complete your Rent2Buy application – upload your documents";
