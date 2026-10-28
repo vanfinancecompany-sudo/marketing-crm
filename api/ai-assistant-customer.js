@@ -19,6 +19,7 @@ import {
 } from "../lib/publicAssistantFoundation.js";
 import { isRent2BuyGuarantorQuestion, publicApplicationGuidanceReply } from "../lib/publicApplicationGuidance.js";
 import { verifiedRent2BuyFirstTurnFaq } from "../lib/verifiedRent2BuyFirstTurnFaq.js";
+import { matchApprovedFirstTurnFaq, loadApprovedFaqReply } from "../lib/verifiedApprovedFirstTurnFaq.js";
 import { isVehicleSpecificationQuestion, publicVehiclePricingReply } from "../lib/publicVehiclePricing.js";
 import { controlledBusinessRuntimeReply, controlledProductComparisonReply, controlledVehicleNextStepReply } from "../lib/salesConversationEngine.js";
 import { buildPublicStockNavigation } from "../lib/publicStockNavigation.js";
@@ -348,6 +349,27 @@ async function continueConversation(supabase, body, environment, simulateConvers
       recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, responseMode: "verified_first_turn_faq" }),
     ]);
     return safeCustomerPayload({ reply, cta: null, conversationId, status: "ready" });
+  }
+
+  // Exact approved FAQ on an unambiguous first turn only; the source is read
+  // from the current Business Brain on each match. If missing or changed,
+  // always fall back to the full validated conversation flow.
+  const approvedFaqRoute = environment.VERCEL_ENV === "preview" &&
+    environment.VERCEL_GIT_COMMIT_REF === "test/askme-verified-faq-fastpath-20261028"
+      ? matchApprovedFirstTurnFaq({ message, session: { ...session, product_lock: productLock } })
+      : null;
+  const approvedFaqReply = approvedFaqRoute
+    ? await loadApprovedFaqReply(supabase, approvedFaqRoute)
+    : null;
+  if (approvedFaqReply) {
+    await Promise.all([
+      updateSession(supabase, session, {
+        conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: approvedFaqReply }]),
+        message_count: messageNumber,
+      }),
+      recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, responseMode: "verified_business_brain_faq" }),
+    ]);
+    return safeCustomerPayload({ reply: approvedFaqReply, cta: null, conversationId, status: "ready" });
   }
 
   const applicationGuidanceReply = publicApplicationGuidanceReply({
