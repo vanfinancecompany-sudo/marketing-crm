@@ -4,6 +4,8 @@ import { classifyConversationIntent, buildConversationMemory } from "../lib/conv
 import { isCoverageQuestion } from "../lib/productCoverageRules.js";
 import { classifyUniversalMessage } from "../lib/humanConversationRecovery.js";
 import { orchestrateConversationTurn } from "../lib/conversationKnowledgeOrchestrator.js";
+import { verifiedRent2BuyMileageUiGuidance } from "../lib/assistantVerifiedWebsiteGuidance.js";
+import { conversationPrompt } from "../api/marketing-ai-assistant-competence.js";
 import {
   controlledBusinessRuntimeReply,
   deterministicFinanceDepositReply,
@@ -76,4 +78,30 @@ test("Rent2Buy delivery answer explicitly addresses whether travelling to collec
   const simple=deterministicDeliveryReply("rent2buy","Can you deliver a van?",null);
   assert.match(simple,/collected from Southampton/);
   assert.doesNotMatch(simple,/Travelling to collect/);
+});
+
+test("Relevant rental mileage enquiries receive actual live website calculator guidance, never Finance or location replies",()=>{
+  const question="If I need 3,000 miles a month instead of 1,000, how do I change that, and what happens if I exceed my allowance?";
+  const guidance=verifiedRent2BuyMileageUiGuidance({message:question,productContext:"rent2buy"});
+  assert.match(guidance,/Miles per month/);
+  assert.match(guidance,/1,000 miles\/month/);
+  assert.match(guidance,/3,000 miles\/month/);
+  assert.match(guidance,/server-verified/);
+  assert.match(guidance,/How excess mileage works/);
+  assert.match(guidance,/signed agreement/);
+  assert.doesNotMatch(guidance,/20p per mile|£\d+ per mile|guaranteed/i);
+  assert.equal(verifiedRent2BuyMileageUiGuidance({message:question,productContext:"finance"}),"");
+  assert.equal(verifiedRent2BuyMileageUiGuidance({message:"I live 120 miles from Southampton. Can I apply?",productContext:"rent2buy"}),"");
+  const intent=classifyConversationIntent({message:question,productContext:"rent2buy"});
+  const prompt=conversationPrompt({
+    question,messages:[],sources:[],sections:[],settings:{},productContext:"rent2buy",comparison:false,intent,
+    memory:{remembered_facts:{},corrections:[]},
+  });
+  assert.match(prompt,/Verified Rent2Buy website calculator guidance/);
+  assert.match(prompt,/If a question asks both how to change monthly mileage and what happens when exceeding it, answer BOTH parts/);
+  const financePrompt=conversationPrompt({
+    question,messages:[],sources:[],sections:[],settings:{},productContext:"finance",comparison:false,intent,
+    memory:{remembered_facts:{},corrections:[]},
+  });
+  assert.doesNotMatch(financePrompt,/Verified Rent2Buy website calculator guidance/);
 });
