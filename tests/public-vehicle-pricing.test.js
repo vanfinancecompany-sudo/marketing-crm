@@ -90,6 +90,7 @@ test("current Rent2Buy vehicle context answers fixed initial rental, monthly pay
   });
   assert.match(priceReply, /initial rental of £2,000 \+ VAT \/ £2,400 inc VAT/i);
   assert.match(priceReply, /monthly payments of £499 \+ VAT \/ £598.80 inc VAT/i);
+  assert.doesNotMatch(priceReply, /inc VAT \+ VAT/i);
   assert.doesNotMatch(priceReply, /48 months/i);
 
   const termReply = publicVehiclePricingReply({
@@ -214,4 +215,47 @@ test("Finance and Rent2Buy application guidance uses the current page APPLY NOW 
     assert.match(reply, /APPLY NOW button on this page/i);
     assert.doesNotMatch(reply, /application below|link|navigate/i);
   }
+});
+
+test("Rent2Buy quick advertised amounts disclose VAT and defer selected calculator options", () => {
+  const vehicleContext = {
+    registration: "EA21TTE",
+    title: "Ford Ranger 2.0 XL Pickup",
+    term_months: 36,
+    pricing: { rent2buy_monthly: "£680", rent2buy_initial: "£2,330" },
+  };
+  const facts = { product_context: "rent2buy", vehicle_interest: "Ford Ranger" };
+  const answer = (message) => publicVehiclePricingReply({
+    message, pageType: "rent2buy_general", productLock: "rent2buy",
+    vehicleContext, rememberedFacts: facts,
+  });
+  const simple = answer("How much is this van per month?");
+  assert.match(simple, /£680 \+ VAT/);
+  assert.match(simple, /advertised figures/);
+  assert.match(simple, /YOUR RENT2BUY QUOTE/);
+  assert.doesNotMatch(simple, /£816/);
+  const upfront = answer("What is the initial rental for this van?");
+  assert.match(upfront, /£2,330 \+ VAT/);
+  const combined = answer("What is the initial rental and monthly payment for this van?");
+  assert.match(combined, /£2,330 \+ VAT/);
+  assert.match(combined, /£680 \+ VAT/);
+  const overview = answer("Tell me about this van");
+  assert.match(overview, /£680 \+ VAT/);
+  assert.match(overview, /choice of term, miles per month and initial rental/);
+  assert.doesNotMatch(overview, /fixed monthly payments/);
+  for (const question of [
+    "How much will I pay monthly for 3,000 miles, and can I change the term and upfront amount in the calculator?",
+    "Can I choose 48 months and what would that do to my monthly price?",
+    "How much would I pay if I select 4,000 miles per month?",
+    "What is the monthly price and does insurance come with the van?",
+    "How much is this van monthly if I adjust the initial rental?",
+  ]) {
+    assert.equal(answer(question), null, question);
+  }
+  assert.match(answer("What term is this van on?"), /36-month term/);
+  assert.match(publicVehiclePricingReply({
+    message: "How much is this van monthly?",
+    pageType: "finance_vehicle", productLock: "finance",
+    vehicleContext: { title: "Finance Van", pricing: { finance_monthly: "£299 + VAT" } },
+  }), /Finance from £299 \+ VAT/);
 });
