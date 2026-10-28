@@ -264,9 +264,9 @@ async function startConversation(supabase, body, environment) {
   });
 }
 
-async function continueConversation(supabase, body, environment, simulateConversation = simulateCustomerConversation) {
+async function continueConversation(supabase, body, environment, simulateConversation = simulateCustomerConversation, preloadedSession = null) {
   const conversationId = clean(body.conversation_id, 100);
-  const session = await loadSession(supabase, conversationId, environment);
+  const session = preloadedSession || await loadSession(supabase, conversationId, environment);
   const pageContext = normalisePageContext(body.page_context);
   assertPageContext(session, pageContext);
   const message = redactSensitiveCustomerData(body.message);
@@ -430,12 +430,26 @@ export async function handleCustomerAssistantRequest(request, response, dependen
     body = parseBody(request);
     conversationId = clean(body.conversation_id, 100) || null;
     const supabase = dependencies.supabase || getSupabase(environment);
-    await enforceRateLimits(supabase, request, environment);
-    const payload = body.action === "start"
-      ? await startConversation(supabase, body, environment)
-      : body.action === "message"
-        ? await continueConversation(supabase, body, environment, dependencies.simulateConversation || simulateCustomerConversation)
-        : (() => { throw new PublicAssistantError(400, "invalid_request", "Please start or continue an assistant conversation."); })();
+    // Rate-limit RPCs and the existing-session read are independent. Start them
+    // together, but wait for *both* before running any assistant logic.
+    // New-session creation still takes place only after rate limits pass.
+    let payload;
+    if (body.action === "message") {
+      const [, session] = await Promise.all([
+        enforceRateLimits(supabase, request, environment),
+        loadSession(supabase, clean(body.conversation_id, 100), environment),
+      ]);
+      payload = await continueConversation(
+        supabase, body, environment,
+        dependencies.simulateConversation || simulateCustomerConversation, session,
+      );
+    } else {
+      await enforceRateLimits(supabase, request, environment);
+      if (body.action !== "start") {
+        throw new PublicAssistantError(400, "invalid_request", "Please start or continue an assistant conversation.");
+      }
+      payload = await startConversation(supabase, body, environment);
+    }
     return response.status(200).json(payload);
   } catch (error) {
     const known = error instanceof PublicAssistantError;
