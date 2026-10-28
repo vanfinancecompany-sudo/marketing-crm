@@ -96,6 +96,7 @@ import {
   chooseAssistantModel,
 } from "../lib/aiAssistantModelRouter.js";
 import { resolveAiOperationModel } from "../lib/priorityAiModelPolicy.js";
+import { compactLiveAssistantSections } from "../lib/assistantCompactPromptExperiment.js";
 import {
   LIVE_JASMINE_PERSONA,
   controlledCompositionInstructions,
@@ -556,7 +557,14 @@ export async function simulateCustomerConversation(supabase, body, options = {})
       };
     } else {
       const generationStart = performance.now();
-      const prompt = await runStage("Conversation prompt creation", { ...context, source_count: sources.length }, async () => conversationPrompt({ question, messages, sources, sections: bounded.sections, settings: knowledge.settings, productContext, comparison, intent, memory, buyingSignals, lengthTarget, contextualResolution, journey, human, phraseDiagnostics: priorPhraseDiagnostics, pageContext: body.page_context, vehicleContext: body.vehicle_context, runtimeContext: body.runtime_context }));
+      const compactPromptPreview =
+        process.env.VERCEL_ENV === "preview" &&
+        process.env.VERCEL_GIT_COMMIT_REF === "test/askme-compact-prompt-sol-20261028" &&
+        !comparison;
+      const promptSections = compactPromptPreview
+        ? compactLiveAssistantSections(bounded.sections, sources)
+        : bounded.sections;
+      const prompt = await runStage("Conversation prompt creation", { ...context, source_count: sources.length, compact_prompt_preview: compactPromptPreview }, async () => conversationPrompt({ question, messages, sources, sections: promptSections, settings: knowledge.settings, productContext, comparison, intent, memory, buyingSignals, lengthTarget, contextualResolution, journey, human, phraseDiagnostics: priorPhraseDiagnostics, pageContext: body.page_context, vehicleContext: body.vehicle_context, runtimeContext: body.runtime_context }));
       const selectedModelRoute = chooseAssistantModel({
         message: question,
         intent,
