@@ -18,6 +18,7 @@ import {
   validateWixOrigin,
 } from "../lib/publicAssistantFoundation.js";
 import { isRent2BuyGuarantorQuestion, publicApplicationGuidanceReply } from "../lib/publicApplicationGuidance.js";
+import { verifiedRent2BuyFirstTurnFaq } from "../lib/verifiedRent2BuyFirstTurnFaq.js";
 import { isVehicleSpecificationQuestion, publicVehiclePricingReply } from "../lib/publicVehiclePricing.js";
 import { controlledBusinessRuntimeReply, controlledProductComparisonReply, controlledVehicleNextStepReply } from "../lib/salesConversationEngine.js";
 import { buildPublicStockNavigation } from "../lib/publicStockNavigation.js";
@@ -329,6 +330,24 @@ async function continueConversation(supabase, body, environment, simulateConvers
         return safeCustomerPayload({ reply, conversationId, status: "needs_product" });
       }
     }
+  }
+
+  // One isolated preview: respond to three precisely matched, immutable Rent2Buy FAQs
+  // without model paraphrasing. Never apply to personal circumstances or an active journey.
+  const verifiedFaq = environment.VERCEL_ENV === "preview" &&
+    environment.VERCEL_GIT_COMMIT_REF === "test/askme-verified-faq-fastpath-20261028"
+      ? verifiedRent2BuyFirstTurnFaq({ message, session: { ...session, product_lock: productLock } })
+      : null;
+  if (verifiedFaq) {
+    const reply = verifiedFaq.reply;
+    await Promise.all([
+      updateSession(supabase, session, {
+        conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: reply }]),
+        message_count: messageNumber,
+      }),
+      recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, responseMode: "verified_first_turn_faq" }),
+    ]);
+    return safeCustomerPayload({ reply, cta: null, conversationId, status: "ready" });
   }
 
   const applicationGuidanceReply = publicApplicationGuidanceReply({
