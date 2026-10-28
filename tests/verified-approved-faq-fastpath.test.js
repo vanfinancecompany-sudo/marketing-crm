@@ -32,6 +32,20 @@ test("approved answer comes from active Business Brain rather than hardcoded adv
    assert.equal(approvedFaqReply(rule,[{label:s.label,value:s.value}]),expected);
  }
 });
+test("short unambiguous site-locked questions match existing approved FAQ facts",()=>{
+ const variants=[
+   ["finance","Can you guarantee approval?","finance_guarantee"],
+   ["finance","Is the deposit always £99?","finance_deposit"],
+   ["finance","Can I finance VAT?","finance_vat"],
+   ["rent2buy","What documents do I need to apply?","rent2buy_documents"],
+   ["rent2buy","Do you cover the whole UK?","rent2buy_geography"],
+   ["rent2buy","Is insurance included?","rent2buy_insurance"],
+ ];
+ for(const [product,message,id] of variants){
+   const s={...baseSession(),product_lock:product,page_type:product==="finance"?"finance_general":"rent2buy_general"};
+   assert.equal(matchApprovedFirstTurnFaq({message,session:s})?.id,id,message);
+ }
+});
 test("missing, incomplete, duplicate or changed Business Brain policies fail closed",()=>{
  for(const s of samples){
    const state={...baseSession(),product_lock:s.product,page_type:s.product==="finance"?"finance_general":"rent2buy_general"};
