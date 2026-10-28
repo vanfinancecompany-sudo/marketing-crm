@@ -264,8 +264,9 @@ test("site-wide Rent2Buy resolution remains product-separated from Finance field
   assert.equal(modelCalls, 0);
   assert.match(response.payload.reply, /Peugeot Boxer Professional/i);
   assert.match(response.payload.reply, /YR22 OKJ/i);
-  assert.match(response.payload.reply, /initial rental is £1,800 \+ VAT/i);
-  assert.match(response.payload.reply, /fixed monthly payments of £515 \+ VAT/i);
+  assert.match(response.payload.reply, /advertises an initial rental of £1,800 \+ VAT/i);
+  assert.match(response.payload.reply, /monthly rental of £515 \+ VAT/i);
+  assert.doesNotMatch(response.payload.reply, /inc VAT \+ VAT|fixed monthly payments/i);
   assert.doesNotMatch(response.payload.reply, /£99,999|£9,999|retail price|Finance from/i);
   assert.equal(state.session.product_lock, "rent2buy");
   assert.equal(state.session.vehicle_context.pricing.finance_monthly, undefined);
