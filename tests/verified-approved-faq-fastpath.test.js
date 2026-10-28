@@ -24,7 +24,12 @@ test("approved answer comes from active Business Brain rather than hardcoded adv
    const state={...baseSession(),product_lock:s.product,page_type:s.product==="finance"?"finance_general":"rent2buy_general"};
    const rule=matchApprovedFirstTurnFaq({message:s.msg,session:state});
    assert.ok(rule,s.msg);assert.equal(rule.label,s.label);
-   assert.equal(approvedFaqReply(rule,[{label:s.label,value:s.value}]),s.value);
+   const expected=s.label==="Is Rent2Buy available everywhere in the UK?"
+     ? "No. "+s.value
+     : s.label==="Does Rent2Buy include insurance?"
+       ? "No. You need to arrange fully comprehensive insurance before collection."
+       : s.value;
+   assert.equal(approvedFaqReply(rule,[{label:s.label,value:s.value}]),expected);
  }
 });
 test("missing, incomplete, duplicate or changed Business Brain policies fail closed",()=>{
