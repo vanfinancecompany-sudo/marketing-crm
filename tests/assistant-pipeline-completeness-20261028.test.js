@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { classifyConversationIntent, buildConversationMemory } from "../lib/conversationIntelligence.js";
 import { isCoverageQuestion } from "../lib/productCoverageRules.js";
+import { classifyUniversalMessage } from "../lib/humanConversationRecovery.js";
+import { orchestrateConversationTurn } from "../lib/conversationKnowledgeOrchestrator.js";
 import {
   controlledBusinessRuntimeReply,
   deterministicFinanceDepositReply,
@@ -23,6 +25,18 @@ test("Rent2Buy mileage-contract enquiries cannot become postcode/location covera
     assert.equal(isCoverageQuestion(message),false,message);
     const remembered=buildConversationMemory([{role:"user",content:message}]);
     assert.notEqual(remembered.remembered_facts.main_concern,"location coverage",message);
+  }
+});
+test("Universal classifier and V6 orchestrator retrieve mileage knowledge, not conversation recovery",()=>{
+  for(const message of mileageQuestions){
+    const intent=classifyConversationIntent({message,productContext:"rent2buy"});
+    const human=classifyUniversalMessage({message,messages:[]});
+    assert.equal(human.message_type,"question",message);
+    assert.equal(human.recovery_required,false,message);
+    const orchestration=orchestrateConversationTurn({message,intent,human,journey:{},priorJourney:{},buyingSignals:{}});
+    assert.equal(orchestration.retrieval_required,true,message);
+    assert.equal(orchestration.recovery_required,false,message);
+    assert.ok(orchestration.detected_intents.includes("mileage"),message);
   }
 });
 test("Actual geographic eligibility still resolves postcodes and residential distance",()=>{
