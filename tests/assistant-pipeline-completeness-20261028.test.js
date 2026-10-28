@@ -9,6 +9,7 @@ import { conversationPrompt } from "../api/marketing-ai-assistant-competence.js"
 import {
   controlledBusinessRuntimeReply,
   deterministicFinanceDepositReply,
+  deterministicRent2BuyEndOfAgreementReply,
   deterministicDeliveryReply,
 } from "../lib/salesConversationEngine.js";
 
@@ -104,4 +105,24 @@ test("Relevant rental mileage enquiries receive actual live website calculator g
     memory:{remembered_facts:{},corrections:[]},
   });
   assert.doesNotMatch(financePrompt,/Verified Rent2Buy website calculator guidance/);
+});
+
+test("verified final purchase reply remains fast for single questions but never truncates other asked topics",()=>{
+  for(const text of [
+    "What is the final purchase option?",
+    "How much is the Rent2Buy final payment?",
+    "What happens at the end of the agreement?",
+  ]){
+    assert.match(deterministicRent2BuyEndOfAgreementReply(text),/£99 \+ VAT/);
+  }
+  for(const text of [
+    "What is the £99 final purchase option, and how do excess mileage charges work?",
+    "If I pay the £99 final purchase option at the end, does that mean I automatically own the van, and is insurance included while I rent it?",
+    "What is the final payment and do I need fully comprehensive insurance?",
+    "Does the final purchase option change if I have exceeded my mileage allowance?",
+    "How much is the final purchase option; what is my monthly rental?",
+  ]){
+    assert.equal(deterministicRent2BuyEndOfAgreementReply(text),null,text);
+    assert.equal(controlledBusinessRuntimeReply({message:text,productContext:"rent2buy"}),null,text);
+  }
 });
