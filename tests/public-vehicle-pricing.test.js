@@ -235,10 +235,10 @@ test("Rent2Buy quick advertised amounts disclose VAT and defer selected calculat
   assert.match(simple, /YOUR RENT2BUY QUOTE/);
   assert.doesNotMatch(simple, /£816/);
   const upfront = answer("What is the initial rental for this van?");
-  assert.match(upfront, /£2,330 \\+ VAT/);
+  assert.match(upfront, /£2,330 \+ VAT/);
   const combined = answer("What is the initial rental and monthly payment for this van?");
-  assert.match(combined, /£2,330 \\+ VAT/);
-  assert.match(combined, /£680 \\+ VAT/);
+  assert.match(combined, /£2,330 \+ VAT/);
+  assert.match(combined, /£680 \+ VAT/);
   const overview = answer("Tell me about this van");
   assert.match(overview, /£680 \+ VAT/);
   assert.match(overview, /choice of term, miles per month and initial rental/);
