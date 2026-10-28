@@ -96,6 +96,7 @@ import {
   chooseAssistantModel,
 } from "../lib/aiAssistantModelRouter.js";
 import { resolveAiOperationModel } from "../lib/priorityAiModelPolicy.js";
+import { canUseInstantAcknowledgement } from "../lib/assistantImmediateReplyPolicy.js";
 import {
   LIVE_JASMINE_PERSONA,
   controlledCompositionInstructions,
@@ -598,7 +599,10 @@ export async function simulateCustomerConversation(supabase, body, options = {})
     response = { ...response, reply: applicationModeReply(productContext, journey.application_state), insufficient_knowledge: false, human_handoff_recommended: false, recommended_action: productContext === "finance" ? "apply_finance" : "apply_rent2buy", confidence: 100, confidence_reason: "Server-side V4 Application Mode triggered by explicit customer progression.", source_ids: [] };
   }
 
-  if (!intent.retrieval_required && !controlledContinuityResponse && !controlledBusinessResponse && options.generationMode !== "deterministic") {
+  const instantAcknowledgement = canUseInstantAcknowledgement({
+    intent, orchestration, journey, latestQuestionRequiresAnswer, response,
+  });
+  if (!intent.retrieval_required && !controlledContinuityResponse && !controlledBusinessResponse && !instantAcknowledgement && options.generationMode !== "deterministic") {
     const fallbackResponse = { ...response, source_ids: Array.isArray(response.source_ids) ? response.source_ids : [] };
     const generationStart = performance.now();
     try {
