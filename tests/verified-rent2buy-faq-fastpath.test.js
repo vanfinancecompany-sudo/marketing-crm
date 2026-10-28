@@ -12,23 +12,25 @@ const session = Object.freeze({
 const question = (message, overrides = {}) => verifiedRent2BuyFirstTurnFaq({message, session: {...session, ...overrides}});
 
 test("precise FAQ answers include required qualifications, never invent terms", () => {
-  for (const text of ["What is Rent2Buy?", "How does Rent to Buy work?", "Tell me about Rent2Buy"]) {
+  for (const text of ["What is Rent2Buy?", "How does Rent to Buy work?", "Tell me about Rent2Buy", "How does it work?"]) {
     const r=question(text);
     assert.equal(r.topic,"core");
     for (const term of [/not a finance product/i,/no credit check/i,/affordability/i,/own employment or self-employed income/i,/collected from Southampton/i,/100 miles/i,/final purchase option/i,/not automatic/i]) assert.match(r.reply,term);
     assert.doesNotMatch(r.reply,/guaranteed|free delivery|£[\d,]+|APPLY NOW|credit approval|interest rate|APR/i);
   }
-  for (const text of ["Does Rent2Buy do a credit check?", "Is there a credit check for Rent to Buy?", "Do you check my credit for Rent2Buy?"]) {
+  for (const text of ["Does Rent2Buy do a credit check?", "Is there a credit check for Rent to Buy?", "Do you check my credit for Rent2Buy?", "Is there a credit check?", "Do you do credit checks?"]) {
     const r=question(text);
     assert.equal(r.topic,"credit_check");
     assert.match(r.reply,/does not use a credit check/i);
     assert.match(r.reply,/affordability/i);
     assert.match(r.reply,/not guaranteed/i);
   }
-  const r=question("Where are Rent2Buy vans collected?");
-  assert.equal(r.topic,"collection");
-  assert.match(r.reply,/collection only from Southampton/i);
-  assert.match(r.reply,/not delivered/i);
+  for (const text of ["Where are Rent2Buy vans collected?", "Where do I collect the van?", "Do I have to collect the van?"]) {
+    const r=question(text);
+    assert.equal(r.topic,"collection");
+    assert.match(r.reply,/collection only from Southampton/i);
+    assert.match(r.reply,/not delivered/i);
+  }
 });
 
 test("multi-part, contextual, personalised, price and adjacent questions never take FAQ shortcut", () => {
