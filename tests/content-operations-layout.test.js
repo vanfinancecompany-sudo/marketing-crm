@@ -180,3 +180,50 @@ test("Vansco Email Studio card, live daily count and detailed totals are based o
   assert.match(migration, /revoke all on function public\.vansco_email_daily_sent_counts/);
   assert.match(migration, /grant execute on function public\.vansco_email_daily_sent_counts.*to service_role/);
 });
+
+test("Realistic reel goals alter Content Operations cards only, not Buffer automation scheduling", async () => {
+  const { REEL_CARD_GOALS, applyRealisticReelCardGoal } = await import("../lib/contentOperationsCardGoals.js");
+  assert.deepEqual(REEL_CARD_GOALS, {
+    van_finance_reel: 7,
+    rent2buy_reel: 7,
+    van_finance_instagram_reel: 6,
+  });
+
+  for (const [type, goal, completed] of [
+    ["van_finance_reel", 7, 8],
+    ["rent2buy_reel", 7, 7],
+    ["van_finance_instagram_reel", 6, 5],
+  ]) {
+    const original = Object.freeze({ type, target: 10, completed, remaining: 10 - completed, statusLabel: "INCOMPLETE" });
+    const card = applyRealisticReelCardGoal(original);
+    assert.equal(card.target, goal);
+    assert.equal(card.completed, completed);
+    assert.equal(card.remaining, Math.max(0, goal - completed));
+    assert.match(card.statusDetail, /Buffer scheduling target 10 unchanged/);
+    assert.equal(original.target, 10, "original API metrics must stay untouched");
+  }
+
+  const unrelated = { type: "van_finance_facebook_post", target: 20, completed: 20 };
+  assert.equal(applyRealisticReelCardGoal(unrelated), unrelated);
+  const paused = { type: "rent2buy_reel", target: 0, completed: 0 };
+  assert.equal(applyRealisticReelCardGoal(paused), paused);
+  const offDay = { type: "van_finance_reel", target: 10, completed: 0 };
+  assert.equal(applyRealisticReelCardGoal(offDay, { offDay: true }), offDay);
+  assert.equal(applyRealisticReelCardGoal({ type: "rent2buy_reel", target: 4, completed: 0 }).target, 4);
+  assert.equal(applyRealisticReelCardGoal({ type: "van_finance_instagram_reel", target: 10, completed: 0, statusLabel: "CHECKING" }).statusLabel, "CHECKING");
+});
+
+test("Reel card goals are applied to presentation after server metrics and leave scheduled targets distinct", async () => {
+  const [page, config, targets] = await Promise.all([
+    read("pages/DashboardPage.jsx"),
+    read("lib/bufferAutomationConfig.js"),
+    read("lib/marketingDailyOperations.js"),
+  ]);
+  assert.match(page, /applyRealisticReelCardGoal\(metric, \{ offDay: Boolean\(overview\?\.day\?\.off_day\) \}\)/);
+  assert.match(page, /These are the scheduling targets used by Buffer automation/);
+  assert.match(page, /VIEW TOTALS AND HISTORY/);
+  assert.match(config, /alignBufferAutomationConfigToDailyTargets/);
+  assert.match(targets, /van_finance_reel: 10/);
+  assert.match(targets, /rent2buy_reel: 10/);
+  assert.match(targets, /van_finance_instagram_reel: 10/);
+});
