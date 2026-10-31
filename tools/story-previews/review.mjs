@@ -1,21 +1,23 @@
-// Isolated review tool. Only public GETs; no publishing, CRM clients or credentials.
-import { mkdir, writeFile } from "node:fs/promises";
-const out = new URL("../../story-preview-output/", import.meta.url);
-await mkdir(out, {recursive:true});
-const urls = [
- "https://www.vanfinancecompany.co.uk/_functions/marketingVanFinanceImages",
- "https://www.vanfinancecompany.co.uk/_functions/marketingRent2BuyImages",
- "https://www.vansco.co.uk/all-stock/",
- "https://www.vansco.co.uk/sitemap/",
+// Isolated review: public GETs only. No production credentials or writes.
+import {mkdir,writeFile} from "node:fs/promises";
+const out=new URL("../../story-preview-output/",import.meta.url);
+await mkdir(out,{recursive:true});
+const urls=[
+ "https://www.vanfinancecompany.co.uk/",
+ "https://www.rent2buyvans.co.uk/",
+ "https://vansco.dragon2000.net/",
+ ...["FV74BBJ","BT25LVK","CP16AZW"].map(reg=>"https://marketing-crm-six.vercel.app/api/vehicle-image-suite-stock?registration="+reg),
 ];
-for (const [index,url] of urls.entries()) {
+await Promise.all(urls.map(async(url,index)=>{
  try {
-  const response=await fetch(url,{method:"GET",signal:AbortSignal.timeout(20000),headers:{Accept:"application/json,text/html","User-Agent":"MarketingCRM-Story-Preview-Review/1.0"}});
-  const body=await response.text();
-  await writeFile(new URL("source-"+index+".txt",out),body);
-  let summary;
-  try {const json=JSON.parse(body);summary=JSON.stringify(json).slice(0,12000);}
-  catch {summary=body.match(/<title[^>]*>[\s\S]*?<\/title>/i)?.[0]||"";}
-  console.log(JSON.stringify({url,status:response.status,finalUrl:response.url,bytes:body.length,summary}));
- } catch(error) { console.log(JSON.stringify({url,error:error.message})); }
-}
+ const res=await fetch(url,{method:"GET",signal:AbortSignal.timeout(25000),headers:{Accept:"application/json,text/html","User-Agent":"MarketingCRM-Story-Preview-Review/1.0"}});
+ const body=await res.text();await writeFile(new URL("source-"+index+".txt",out),body);
+ let summary;
+ try {summary=JSON.parse(body)}catch {
+ const links=[...body.matchAll(/(?:href|src)=["']([^"']+)["']/gi)].map(x=>x[1]);
+ const data=[...body.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].map(x=>x[1].slice(0,3500));
+ summary={title:body.match(/<title[^>]*>[\s\S]*?<\/title>/i)?.[0],links:links.filter(x=>/van|vehicle|stock|logo|rent2buy/i.test(x)).slice(0,100),data};
+ }
+ console.log(JSON.stringify({url,status:res.status,finalUrl:res.url,bytes:body.length,summary}));
+ }catch(e){console.log(JSON.stringify({url,error:e.message}))}
+}));
