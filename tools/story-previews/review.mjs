@@ -103,30 +103,44 @@ const vansco={...finance,title:row.title.replace(/^\d{4}\s+/,""),fullTitle:row.t
  vatEvidenceUrl:finance.vehicleUrl,vatEvidenceRegistration:finance.registration,priceParityConfirmed:true,storeCode:row.store_code}};
 
 const fontPaths=[400,700,900].map(weight=>require.resolve("@fontsource/inter/files/inter-latin-"+weight+"-normal.woff"));
-const fontBytes=await readFile(fontPaths[2]);
-const font=opentype.parse(fontBytes.buffer.slice(fontBytes.byteOffset,fontBytes.byteOffset+fontBytes.byteLength));
+const fonts={};
+for (const [index,weight] of [400,700,900].entries()) {
+ const bytes=await readFile(fontPaths[index]);
+ fonts[weight]=opentype.parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));
+}
+const font=fonts[900];
 // Match the existing reel renderer's glyph-by-glyph width measurement.
 // Avoid unsupported OpenType substitution tables in the bundled Inter font.
 const measure=(text,size)=>Array.from(text).reduce((width,char)=>{
  const glyph=font.charToGlyph(char);
  return width+(glyph.advanceWidth||font.unitsPerEm*.5)*(size/font.unitsPerEm);
 },0);
+// SVG paths remain self-contained and render identically without installed fonts.
+const drawText=(value,x,y,size,fill="#ffffff",weight=700)=>{
+ const selected=fonts[weight]||fonts[700];let cursor=x;
+ const paths=Array.from(String(value)).map(char=>{
+  const glyph=selected.charToGlyph(char);
+  const d=glyph.getPath(cursor,y,size).toPathData(2);
+  cursor+=(glyph.advanceWidth||selected.unitsPerEm*.5)*(size/selected.unitsPerEm);
+  return '<path d="'+d+'"/>';
+ }).join("");
+ return '<g aria-label="'+escapeXml(value)+'" fill="'+fill+'">'+paths+'</g>';
+};
 const render=svg=>new Resvg(svg,{font:{fontFiles:fontPaths,loadSystemFonts:false,defaultFontFamily:"Inter"}}).render().asPng();
 const snapshots=[];
-for(const [brandKey,vehicle,logoPath] of [
- ["vanFinance",finance,"../../assets/van-finance-company.png"],
- ["rent2buy",rental,"../../assets/rent2buy-vans.png"],
- ["vansco",vansco,null],
+for(const [brandKey,vehicle] of [
+ ["vanFinance",finance],
+ ["rent2buy",rental],
+ ["vansco",vansco],
 ]) {
  const images=await gallery(vehicle.registration);
  // Use the existing raw, exact-registration DealerKit gallery, avoiding
  // legacy branded primaries that may already contain prices/captions.
  const photo=await embedPhoto(vehicle,images.primaryImage);
- const logoDataUrl=logoPath?"data:image/png;base64,"+(await readFile(new URL(logoPath,import.meta.url))).toString("base64"):"";
  const snapshot={...vehicle,photoRegistration:photo.photoRegistration,imageSource:photo.imageSource,
   supplierStockId:images.supplierStockId,gallerySource:images.sourceUrl};
  const model=buildStoryModel(brandKey,snapshot);
- const options={photoDataUrl:photo.dataUrl,logoDataUrl,measure};
+ const options={photoDataUrl:photo.dataUrl,measure,drawText};
  const svg=renderStorySvg(model,options);const png=render(svg);
  assert.ok(png.byteLength<4_000_000,"Story PNG exceeds the existing Facebook worker's image limit.");
  assert.equal(png.readUInt32BE(16),1080);assert.equal(png.readUInt32BE(20),1920);
@@ -135,7 +149,7 @@ for(const [brandKey,vehicle,logoPath] of [
  await writeFile(new URL(brandKey+"-safe.png",out),render(renderStorySvg(model,{...options,safeGuide:true})));
  const thumbnail=new Resvg(svg,{fitTo:{mode:"width",value:270},font:{fontFiles:fontPaths,loadSystemFonts:false}}).render().asPng();
  snapshots.push({brandKey,snapshot,model,bytes:png.byteLength,thumbnail:thumbnail.toString("base64")});
- console.log(JSON.stringify({preview:brandKey,registration:vehicle.registration,title:model.title,headline:model.headline,details:model.details,bytes:png.byteLength,branch:branchKey}));
+ console.log(JSON.stringify({preview:brandKey,registration:vehicle.registration,title:model.title,headline:model.headline,details:model.details,bytes:png.byteLength,branch:brandKey==="vansco"?branchKey:undefined}));
 }
 await writeFile(new URL("sources.json",out),JSON.stringify(snapshots.map(({thumbnail,...record})=>record),null,2));
 const sheet='<svg xmlns="http://www.w3.org/2000/svg" width="810" height="480">'+

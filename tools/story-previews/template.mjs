@@ -118,19 +118,23 @@ function rasterUri(value) {
   throw Error("Embed a verified PNG/JPEG photograph. Remote URLs are not rendered.");
  return value;
 }
-export function renderStorySvg(model,{photoDataUrl,logoDataUrl="",measure,safeGuide=false}={}) {
+export function renderStorySvg(model,{photoDataUrl,logoDataUrl="",measure,drawText,safeGuide=false}={}) {
  const b=model.brand;
  const title=fitText(model.title,{measure});
  const headline=fitText(model.headline,{maxLines:1,maxSize:76,minSize:44,measure});
  const facts=fitText(model.facts.join(" · ")||model.registration,{maxLines:1,maxSize:34,minSize:30,measure});
- const text=(value,x,y,size,fill="#ffffff",weight=700)=>'<text x="'+x+'" y="'+y+'" font-size="'+size+'" fill="'+fill+'" font-weight="'+weight+'">'+escapeXml(value)+'</text>';
+ const text=drawText || ((value,x,y,size,fill="#ffffff",weight=700)=>'<text x="'+x+'" y="'+y+'" font-size="'+size+'" fill="'+fill+'" font-weight="'+weight+'">'+escapeXml(value)+'</text>');
  const fitted=(value,y,{size=34,width=936,fill="#243040",weight=500}={})=>{
   const fit=fitText(value,{width,maxLines:1,maxSize:size,minSize:28,measure});
   return text(fit.lines[0],72,y,fit.size,fill,weight);
  };
  const logo=logoDataUrl
   ? '<image href="'+rasterUri(logoDataUrl)+'" x="94" y="266" width="530" height="88" preserveAspectRatio="xMinYMid meet"/>'
-  : text(b.name.toUpperCase(),96,328,model.brandKey==="vansco"?76:42,b.dark,900);
+  : (model.brandKey==="vanFinance"
+   ? text("VAN FINANCE",96,305,45,b.dark,900)+text("COMPANY",96,342,29,b.dark,700)
+   : model.brandKey==="rent2buy"
+    ? text("RENT2BUY",96,310,57,b.dark,900)+text("VANS",96,343,28,b.dark,700)
+    : text("VANSCO",96,330,76,b.dark,900));
  const titleY=title.lines.length===3?457:title.lines.length===2?492:527;
  const svg='<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">'+
  '<title>'+escapeXml(b.name+" · "+model.title+" · "+model.registration)+'</title>'+
