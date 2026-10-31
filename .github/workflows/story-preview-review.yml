@@ -7,9 +7,6 @@ on:
       - '.github/workflows/story-preview-review.yml'
 permissions:
   contents: read
-concurrency:
-  group: story-preview-review-${{ github.ref }}
-  cancel-in-progress: true
 jobs:
   previews:
     runs-on: ubuntu-latest
