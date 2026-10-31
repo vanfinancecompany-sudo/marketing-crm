@@ -9,6 +9,7 @@ import {createRequire} from "node:module";
 import {Resvg} from "@resvg/resvg-js";
 import opentype from "opentype.js";
 import {buildStoryModel,renderStorySvg,escapeXml} from "./template.mjs";
+import {publishedRetailVat} from "./sources.mjs";
 import {pendingRent2BuySpecialDeal} from "../../lib/rent2BuyProtectedSpecialDeals.mjs";
 import {vatLabelFromText,VANSCO_BRANCHES} from "../../lib/vanscoFacebookAutomation.js";
 const require=createRequire(import.meta.url);
@@ -49,7 +50,7 @@ async function publishedVehicle(url,registration) {
   mileage:Number.isFinite(Number(v.mileageFromOdometer?.value))?Number(v.mileageFromOdometer.value):undefined,
   fuel:v.fuelType,transmission:v.vehicleTransmission,vehicleUrl:url,
   price:v.offers?.priceCurrency==="GBP"?Number(v.offers.price):undefined,
-  vatLabel:vatLabelFromText(v.description),status:"published",
+  vatLabel:publishedRetailVat(html,Number(v.offers?.price))||vatLabelFromText(v.description),status:"published",
   source:{url,checkedAt,kind:"published_vehicle_structured_data"}};
  return {vehicle,schema:v};
 }
@@ -69,26 +70,16 @@ async function embedPhoto(vehicle,imageUrl) {
   imageSource:imageUrl,photoRegistration:vehicle.registration};
 }
 
-// Read-only evidence audit while selecting the final review photograph.
-for(const registration of ["FV74BBJ","LA24WZJ"]) {
- const url="https://www.vanfinancecompany.co.uk/vans/"+registration.toLowerCase();
- try {
-  const html=(await publicGet(url)).bytes.toString("utf8");
-  const vehicle=structuredVehicle(html,registration);
-  const plain=html.replace(/<script[\s\S]*?<\/script>/gi," ").replace(/<style[\s\S]*?<\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/\s+/g," ");
-  const prices=[...plain.matchAll(/£[0-9.,]+/g)].slice(0,18).map(m=>plain.slice(Math.max(0,m.index-55),m.index+160));
-  console.log(JSON.stringify({vehicleEvidence:registration,schema:vehicle,priceContext:prices}));
- }catch(error){console.log(JSON.stringify({vehicleEvidence:registration,error:error.message}))}
-}
 // Current examples come only from existing public pages and vehicle feeds.
 const feedUrl=stockOrigin+"/api/vansco-google-vehicle-feed?mode=full";
 const feed=(await publicGet(feedUrl)).bytes.toString("utf8").trim().split(/\r?\n/);
 const headers=feed.shift().split("\t");
 const rows=feed.map(line=>Object.fromEntries(line.split("\t").map((value,index)=>[headers[index],value])));
-const financePage=await publishedVehicle("https://www.vanfinancecompany.co.uk/vans/ds69rfo","DS69RFO");
+const financePage=await publishedVehicle("https://www.vanfinancecompany.co.uk/vans/la24wzj","LA24WZJ");
 const finance=financePage.vehicle;
 const financeGallery=await gallery(finance.registration);
-const selectedRow=rows.find(row=>row.id===finance.registration&&row.availability==="in_stock");
+const vanscoPage=await publishedVehicle("https://www.vanfinancecompany.co.uk/vans/fv74bbj","FV74BBJ");
+const selectedRow=rows.find(row=>row.id==="FV74BBJ"&&row.availability==="in_stock");
 const rentalPage=await publishedVehicle("https://www.rent2buyvans.co.uk/van-pages/fv74bbj","FV74BBJ");
 const rental=rentalPage.vehicle;
 const fixed=pendingRent2BuySpecialDeal(rental.registration);
@@ -102,19 +93,19 @@ assert.equal(Number(monthly[2]),fixed.termMonths);
 assert.equal(Number(initial[1].replace(/,/g,"")),fixed.initialExVat);
 
 const branchKeys={"VANSCO-333":"vansco333","VANSCO-AIRPORT":"southamptonAirport","VANSCO-NEWFOREST":"newForest"};
-// Match the same physical vehicle to the published stock page for an explicit
-// VAT label. The feed supplies its own price and branch; require price parity.
-// Unknown VAT or a mismatch holds this review, with no guessed default.
+// Exact-registration VAT evidence comes from its public retail-price label.
+// Vansco keeps its OWN current feed price; prices may legitimately differ by brand.
+// Unknown VAT/branch/price holds the review, with no guessed defaults.
 const row=selectedRow;
 assert.ok(row,"The exact Vansco example is absent from its current public vehicle feed.");
 const feedPrice=Number(String(row.price).match(/^([0-9.]+) GBP$/)?.[1]);
-assert.equal(feedPrice,finance.price,"Vansco/public vehicle prices differ; review required.");
-assert.ok(finance.vatLabel,"No explicit VAT treatment for the Vansco example.");
+assert.ok(Number.isFinite(feedPrice)&&feedPrice>0,"Vansco current feed price is unresolved.");
+assert.ok(vanscoPage.vehicle.vatLabel,"No explicit VAT treatment for the Vansco example.");
 const branchKey=branchKeys[row.store_code];
 assert.ok(VANSCO_BRANCHES[branchKey],"Vansco feed branch is unresolved.");
-const vansco={...finance,title:row.title.replace(/^\d{4}\s+/,""),fullTitle:row.title,price:feedPrice,branchKey,
+const vansco={...vanscoPage.vehicle,title:row.title.replace(/^\d{4}\s+/,""),fullTitle:row.title,price:feedPrice,branchKey,
  vehicleUrl:row.link,status:"available",source:{url:feedUrl,checkedAt,kind:"existing_vansco_vehicle_feed",
- vatEvidenceUrl:finance.vehicleUrl,vatEvidenceRegistration:finance.registration,priceParityConfirmed:true,storeCode:row.store_code}};
+ vatEvidenceUrl:vanscoPage.vehicle.vehicleUrl,vatEvidenceRegistration:vanscoPage.vehicle.registration,storeCode:row.store_code}};
 
 const fontPaths=[400,700,900].map(weight=>require.resolve("@fontsource/inter/files/inter-latin-"+weight+"-normal.woff"));
 const fonts={};
@@ -150,13 +141,12 @@ for(const [brandKey,vehicle] of [
  const images=vehicle.registration===finance.registration?financeGallery:await gallery(vehicle.registration);
  // Use the existing raw, exact-registration DealerKit gallery, avoiding
  // legacy branded primaries that may already contain prices/captions.
- // Existing second photo on this exact registration's published vehicle page.
- // The raw DealerKit primary has an old "Coming soon" ribbon; do not retouch it.
- const selectedImage=vehicle.registration===finance.registration?financePage.schema.image?.[1]:images.primaryImage;
+ // Exact-registration raw photographs; visually reviewed, no stock placeholders.
+ const selectedImage=images.primaryImage;
  assert.ok(selectedImage,"Reviewed alternate photograph is unavailable.");
  const photo=await embedPhoto(vehicle,selectedImage);
  const snapshot={...vehicle,photoRegistration:photo.photoRegistration,imageSource:photo.imageSource,
-  supplierStockId:images.supplierStockId,gallerySource:images.sourceUrl};
+  supplierStockId:images.supplierStockId,gallerySource:images.sourceUrl,photoAssociationSource:images.sourceUrl};
  const model=buildStoryModel(brandKey,snapshot);
  const options={photoDataUrl:photo.dataUrl,measure,drawText};
  const svg=renderStorySvg(model,options);const png=render(svg);

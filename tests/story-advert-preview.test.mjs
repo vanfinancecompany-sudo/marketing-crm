@@ -128,3 +128,15 @@ test("vector text adapter receives every visible claim and its safe-area positio
  for(const row of drawn)assert.ok(row.x>=72&&row.y>=250&&row.y<=1580);
  assert.doesNotMatch(svg,/<text /);
 });
+
+test("public retail VAT is tied to the exact cash price, not finance/old price or page-wide VAT words",async()=>{
+ const {publishedRetailVat}=await import("../tools/story-previews/sources.mjs");
+ const html='<nav>NO VAT vans</nav><p>Was £14,995 +VAT</p><div>Retail price <b>£14,695</b><span>+VAT</span></div><p>From £309 monthly</p>';
+ assert.equal(publishedRetailVat(html,14695),"+ VAT");
+ assert.equal(publishedRetailVat(html,14995),"");
+ assert.equal(publishedRetailVat('<div>Retail price £9,995 NO VAT</div>',9995),"NO VAT");
+ assert.equal(publishedRetailVat('<div>Retail price £9,995 INC VAT</div>',9995),"INC VAT");
+ assert.equal(publishedRetailVat(html+html,14695),"");
+ assert.equal(publishedRetailVat('<script>Retail price £14,695 NO VAT</script><p>VAT vans</p>',14695),"");
+ assert.equal(publishedRetailVat('<p>Finance from £309 +VAT</p>',309),"");
+});

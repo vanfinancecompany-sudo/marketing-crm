@@ -28,13 +28,13 @@ Existing cron configuration and publishing files are unchanged. In particular, V
 
 ## Designs and data
 
-All designs keep critical copy within x=72…1008 and y=250…1580, leaving 250px above and 340px below for Story UI. These are conservative design margins, not a platform guarantee. Photos use `meet` (contain), preserving the entire vehicle. The retail example uses an existing alternate photograph on its exact-registration vehicle page; photographs are not retouched. Missing price/VAT parity or a missing reviewed photograph holds rendering. Text wraps at complete words and uses measured Inter font widths, with glyph paths for reliable rasterisation; an overlong value is held for review.
+All designs keep critical copy within x=72…1008 and y=250…1580, leaving 250px above and 340px below for Story UI. These are conservative design margins, not a platform guarantee. Photos use `meet` (contain), preserving the entire vehicle. Exact-registration raw gallery photographs are visually reviewed and never retouched. Missing price, VAT, branch or verified photograph holds rendering. Text wraps at complete words and uses measured Inter font widths, with glyph paths for reliable rasterisation; an overlong value is held for review.
 
 - **VFC:** large brand-name lockup, red/navy editorial layout, verified vehicle cash price/VAT and specifications. No monthly finance, deposit, APR, acceptance or approval claims.
 - **Rent2Buy:** large brand-name lockup, red/charcoal layout, prominent fixed monthly rental and initial rental/term. The real example FV74 BBJ is a protected special: £545 + VAT monthly, £2,000 + VAT initially, 48 months. No contractual mileage allowance is inferred. All four protected registrations bypass the matrix. Ordinary rental amounts are only displayed when the existing current-source quote verifier passes and the caller confirms no manual special applies; otherwise the image directs customers to current rental terms. No old caption/monthly field is reused.
 - **Vansco:** established charcoal/red palette, precise feed price, explicit vehicle VAT and canonical branch name/telephone. Unknown or conflicting price/VAT/branch holds rendering.
 
-Examples use existing published vehicle pages and the existing public DealerKit gallery route. Vansco's existing full Google vehicle feed supplies its own current stock price and branch. Its VAT evidence is joined to the exact registration's published vehicle page; strict price parity is required. This is preview evidence, not a replacement for the existing production stock/eligibility checks.
+Examples use existing published vehicle pages and the existing public DealerKit gallery route. Vansco's existing full Google vehicle feed supplies its own current stock price and branch. Its VAT evidence is joined to the exact registration's explicit published retail-price label, verified against that page's structured cash price. Each brand retains its own published price; cross-brand prices are not substituted. This is preview evidence, not a replacement for the existing production stock/eligibility checks.
 
 The earlier legacy Wix image feed GETs returned HTTP 500 and direct Vansco pages returned a website-protection challenge. No workaround service was introduced. The renderer uses existing readable public data routes and records their provenance.
 
@@ -42,7 +42,7 @@ The CTA is visible artwork with a website address. It does not create a tappable
 
 ## Safety and proposed implementation
 
-`template.mjs` builds a validated view model and SVG; `review.mjs` reads the public examples, embeds exact-registration photographs and rasterises using the repository's existing Resvg/Inter dependencies. It writes only runner-local review files, then GitHub Actions retains an artifact. It has no production credentials, Buffer call, Blob upload or database client.
+`sources.mjs` validates public retail VAT evidence; `template.mjs` builds a validated view model and SVG; `review.mjs` reads the public examples, embeds exact-registration photographs and rasterises using the repository's existing Resvg/Inter dependencies. It writes only runner-local review files, then GitHub Actions retains an artifact. It has no production credentials, Buffer call, Blob upload or database client.
 
 A later approved integration could pass the existing selected vehicle's current verified facts and photo to this renderer, then supply its resulting image through the existing media handoff. That integration and all publishing changes are excluded here.
 
