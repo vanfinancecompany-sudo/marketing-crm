@@ -39,7 +39,8 @@ function structuredVehicle(html,registration) {
  return vehicles[0];
 }
 function shortTitle(name,year) {
- return String(name).replace(new RegExp("^"+year+"\\s+"),"").split(/\s+(?:Panel Van|Crew Van|Chassis Cab|Pickup|MPV)\b/i)[0].trim();
+ const prefix=new RegExp("^"+year+"(?:/\\d{2})?\\s+");
+ return String(name).replace(prefix,"").split(/\s+(?:Panel Van|Crew Van|Chassis Cab|Pickup|MPV)\b/i)[0].trim();
 }
 async function publishedVehicle(url,registration) {
  const {bytes}=await publicGet(url);const html=bytes.toString("utf8");
@@ -78,8 +79,8 @@ const rows=feed.map(line=>Object.fromEntries(line.split("\t").map((value,index)=
 const financePage=await publishedVehicle("https://www.vanfinancecompany.co.uk/vans/la24wzj","LA24WZJ");
 const finance=financePage.vehicle;
 const financeGallery=await gallery(finance.registration);
-const vanscoPage=await publishedVehicle("https://www.vanfinancecompany.co.uk/vans/fv74bbj","FV74BBJ");
-const selectedRow=rows.find(row=>row.id==="FV74BBJ"&&row.availability==="in_stock");
+const vanscoPage=financePage;
+const selectedRow=rows.find(row=>row.id===finance.registration&&row.availability==="in_stock");
 const rentalPage=await publishedVehicle("https://www.rent2buyvans.co.uk/van-pages/fv74bbj","FV74BBJ");
 const rental=rentalPage.vehicle;
 const fixed=pendingRent2BuySpecialDeal(rental.registration);

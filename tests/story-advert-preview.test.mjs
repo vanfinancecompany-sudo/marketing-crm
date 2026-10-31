@@ -110,7 +110,7 @@ test("untrusted text is escaped and external/SVG image payloads cannot enter the
   assert.throws(()=>renderStorySvg(model,{photoDataUrl:image}),/Embed a verified/);
 });
 test("preview code has no production client, publication or scheduling dependency",()=>{
- for(const file of ["template.mjs","review.mjs"]){
+ for(const file of ["template.mjs","review.mjs","sources.mjs"]){
   const source=readFileSync(new URL("../tools/story-previews/"+file,import.meta.url),"utf8");
   assert.doesNotMatch(source,/from ["'][^"']*(?:supabase|@vercel\/blob|buffer.*runtime|bufferPublishing|automation-worker)/i);
   assert.doesNotMatch(source,/method:\s*["'](?:POST|PUT|PATCH|DELETE)["']/i);
