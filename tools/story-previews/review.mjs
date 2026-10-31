@@ -105,7 +105,12 @@ const vansco={...finance,title:row.title.replace(/^\d{4}\s+/,""),fullTitle:row.t
 const fontPaths=[400,700,900].map(weight=>require.resolve("@fontsource/inter/files/inter-latin-"+weight+"-normal.woff"));
 const fontBytes=await readFile(fontPaths[2]);
 const font=opentype.parse(fontBytes.buffer.slice(fontBytes.byteOffset,fontBytes.byteOffset+fontBytes.byteLength));
-const measure=(text,size)=>font.getAdvanceWidth(text,size,{kerning:true});
+// Match the existing reel renderer's glyph-by-glyph width measurement.
+// Avoid unsupported OpenType substitution tables in the bundled Inter font.
+const measure=(text,size)=>Array.from(text).reduce((width,char)=>{
+ const glyph=font.charToGlyph(char);
+ return width+(glyph.advanceWidth||font.unitsPerEm*.5)*(size/font.unitsPerEm);
+},0);
 const render=svg=>new Resvg(svg,{font:{fontFiles:fontPaths,loadSystemFonts:false,defaultFontFamily:"Inter"}}).render().asPng();
 const snapshots=[];
 for(const [brandKey,vehicle,logoPath] of [
