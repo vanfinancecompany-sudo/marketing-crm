@@ -71,9 +71,9 @@ async function embedPhoto(vehicle,imageUrl) {
 
 // Current examples come only from existing public pages and vehicle feeds.
 const feedUrl=stockOrigin+"/api/vansco-google-vehicle-feed?mode=full";
-const feed=(await publicGet(feedUrl)).bytes.toString("utf8").trim().split(/\\r?\\n/);
-const headers=feed.shift().split("\\t");
-const rows=feed.map(line=>Object.fromEntries(line.split("\\t").map((value,index)=>[headers[index],value])));
+const feed=(await publicGet(feedUrl)).bytes.toString("utf8").trim().split(/\r?\n/);
+const headers=feed.shift().split("\t");
+const rows=feed.map(line=>Object.fromEntries(line.split("\t").map((value,index)=>[headers[index],value])));
 let finance,financeGallery,selectedRow;
 const heldExamples=[];
 for(const registration of ["LA24WZJ","DT73NHO","MW73CMZ","CJ73NXA","BD24GJY","CP16AZW"]) {
