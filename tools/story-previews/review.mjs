@@ -136,7 +136,12 @@ for(const [brandKey,vehicle] of [
  const images=await gallery(vehicle.registration);
  // Use the existing raw, exact-registration DealerKit gallery, avoiding
  // legacy branded primaries that may already contain prices/captions.
- const photo=await embedPhoto(vehicle,images.primaryImage);
+ // Visual review found a legacy "Coming soon" ribbon on this Ford's primary.
+ // Select its existing second gallery photograph rather than editing the photo
+ // or carrying that old availability claim into a new advert.
+ const selectedImage=vehicle.registration==="DS69RFO"?images.images?.[1]?.url:images.primaryImage;
+ assert.ok(selectedImage,"Reviewed alternate photograph is unavailable.");
+ const photo=await embedPhoto(vehicle,selectedImage);
  const snapshot={...vehicle,photoRegistration:photo.photoRegistration,imageSource:photo.imageSource,
   supplierStockId:images.supplierStockId,gallerySource:images.sourceUrl};
  const model=buildStoryModel(brandKey,snapshot);
