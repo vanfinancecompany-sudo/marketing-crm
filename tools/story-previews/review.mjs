@@ -69,6 +69,17 @@ async function embedPhoto(vehicle,imageUrl) {
   imageSource:imageUrl,photoRegistration:vehicle.registration};
 }
 
+// Read-only evidence audit while selecting the final review photograph.
+for(const registration of ["FV74BBJ","LA24WZJ"]) {
+ const url="https://www.vanfinancecompany.co.uk/vans/"+registration.toLowerCase();
+ try {
+  const html=(await publicGet(url)).bytes.toString("utf8");
+  const vehicle=structuredVehicle(html,registration);
+  const plain=html.replace(/<script[\\s\\S]*?<\\/script>/gi," ").replace(/<style[\\s\\S]*?<\\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/\\s+/g," ");
+  const prices=[...plain.matchAll(/£[0-9.,]+/g)].slice(0,18).map(m=>plain.slice(Math.max(0,m.index-55),m.index+160));
+  console.log(JSON.stringify({vehicleEvidence:registration,schema:vehicle,priceContext:prices}));
+ }catch(error){console.log(JSON.stringify({vehicleEvidence:registration,error:error.message}))}
+}
 // Current examples come only from existing public pages and vehicle feeds.
 const feedUrl=stockOrigin+"/api/vansco-google-vehicle-feed?mode=full";
 const feed=(await publicGet(feedUrl)).bytes.toString("utf8").trim().split(/\r?\n/);
