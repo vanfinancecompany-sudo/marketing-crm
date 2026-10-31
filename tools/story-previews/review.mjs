@@ -69,8 +69,26 @@ async function embedPhoto(vehicle,imageUrl) {
   imageSource:imageUrl,photoRegistration:vehicle.registration};
 }
 
-// These are existing public product pages. No feed, stock or page is modified.
-const finance=(await publishedVehicle("https://www.vanfinancecompany.co.uk/vans/ds69rfo","DS69RFO")).vehicle;
+// Current examples come only from existing public pages and vehicle feeds.
+const feedUrl=stockOrigin+"/api/vansco-google-vehicle-feed?mode=full";
+const feed=(await publicGet(feedUrl)).bytes.toString("utf8").trim().split(/\\r?\\n/);
+const headers=feed.shift().split("\\t");
+const rows=feed.map(line=>Object.fromEntries(line.split("\\t").map((value,index)=>[headers[index],value])));
+let finance,financeGallery,selectedRow;
+const heldExamples=[];
+for(const registration of ["LA24WZJ","DT73NHO","MW73CMZ","CJ73NXA","BD24GJY","CP16AZW"]) {
+ const candidate=rows.find(row=>row.id===registration&&row.availability==="in_stock");
+ if(!candidate)continue;
+ try {
+  const current=(await publishedVehicle("https://www.vanfinancecompany.co.uk/vans/"+registration.toLowerCase(),registration)).vehicle;
+  const price=Number(String(candidate.price).match(/^([0-9.]+) GBP$/)?.[1]);
+  if(!current.vatLabel||price!==current.price)throw Error("Price/VAT evidence is unresolved.");
+  const photos=await gallery(registration);
+  if(!photos.images?.[1]?.url)throw Error("No alternate photograph for review.");
+  finance=current;financeGallery=photos;selectedRow=candidate;break;
+ }catch(error){heldExamples.push({registration,reason:error.message})}
+}
+assert.ok(finance,"No verified current example with an alternate photograph: "+JSON.stringify(heldExamples));
 const rentalPage=await publishedVehicle("https://www.rent2buyvans.co.uk/van-pages/fv74bbj","FV74BBJ");
 const rental=rentalPage.vehicle;
 const fixed=pendingRent2BuySpecialDeal(rental.registration);
@@ -83,15 +101,11 @@ assert.equal(Number(monthly[1].replace(/,/g,"")),fixed.monthlyExVat);
 assert.equal(Number(monthly[2]),fixed.termMonths);
 assert.equal(Number(initial[1].replace(/,/g,"")),fixed.initialExVat);
 
-const feedUrl=stockOrigin+"/api/vansco-google-vehicle-feed?mode=full";
-const feed=(await publicGet(feedUrl)).bytes.toString("utf8").trim().split(/\r?\n/);
-const headers=feed.shift().split("\t");
-const rows=feed.map(line=>Object.fromEntries(line.split("\t").map((value,index)=>[headers[index],value])));
 const branchKeys={"VANSCO-333":"vansco333","VANSCO-AIRPORT":"southamptonAirport","VANSCO-NEWFOREST":"newForest"};
 // Match the same physical vehicle to the published stock page for an explicit
 // VAT label. The feed supplies its own price and branch; require price parity.
 // Unknown VAT or a mismatch holds this review, with no guessed default.
-const row=rows.find(v=>v.id===finance.registration&&v.availability==="in_stock");
+const row=selectedRow;
 assert.ok(row,"The exact Vansco example is absent from its current public vehicle feed.");
 const feedPrice=Number(String(row.price).match(/^([0-9.]+) GBP$/)?.[1]);
 assert.equal(feedPrice,finance.price,"Vansco/public vehicle prices differ; review required.");
@@ -133,13 +147,12 @@ for(const [brandKey,vehicle] of [
  ["rent2buy",rental],
  ["vansco",vansco],
 ]) {
- const images=await gallery(vehicle.registration);
+ const images=vehicle.registration===finance.registration?financeGallery:await gallery(vehicle.registration);
  // Use the existing raw, exact-registration DealerKit gallery, avoiding
  // legacy branded primaries that may already contain prices/captions.
- // Visual review found a legacy "Coming soon" ribbon on this Ford's primary.
- // Select its existing second gallery photograph rather than editing the photo
- // or carrying that old availability claim into a new advert.
- const selectedImage=vehicle.registration==="DS69RFO"?images.images?.[1]?.url:images.primaryImage;
+ // Choose an existing alternate for the shared retail example; do not retouch
+ // photographs or carry legacy artwork from a first-gallery image into the ad.
+ const selectedImage=vehicle.registration===finance.registration?images.images[1].url:images.primaryImage;
  assert.ok(selectedImage,"Reviewed alternate photograph is unavailable.");
  const photo=await embedPhoto(vehicle,selectedImage);
  const snapshot={...vehicle,photoRegistration:photo.photoRegistration,imageSource:photo.imageSource,
