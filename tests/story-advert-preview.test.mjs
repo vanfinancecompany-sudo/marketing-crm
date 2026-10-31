@@ -117,3 +117,14 @@ test("preview code has no production client, publication or scheduling dependenc
   assert.doesNotMatch(source,/process\.env\.(?:BUFFER|SUPABASE|DEALERKIT|WIX)/);
  }
 });
+
+test("vector text adapter receives every visible claim and its safe-area position",()=>{
+ const model=buildStoryModel("rent2buy",base({registration:"FV74BBJ",photoRegistration:"FV74BBJ"}));
+ const drawn=[];
+ const svg=renderStorySvg(model,{photoDataUrl:photo,drawText:(value,x,y)=>{drawn.push({value,x,y});return '<g aria-label="'+value+'"><path d="M0 0L1 1"/></g>'}});
+ assert.ok(drawn.some(x=>x.value===model.headline));
+ assert.ok(drawn.some(x=>x.value===model.brand.cta));
+ assert.ok(drawn.some(x=>x.value===model.registration));
+ for(const row of drawn)assert.ok(row.x>=72&&row.y>=250&&row.y<=1580);
+ assert.doesNotMatch(svg,/<text /);
+});

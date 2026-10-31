@@ -142,18 +142,20 @@ for(const [brandKey,vehicle] of [
  const model=buildStoryModel(brandKey,snapshot);
  const options={photoDataUrl:photo.dataUrl,measure,drawText};
  const svg=renderStorySvg(model,options);const png=render(svg);
+ const withoutCopy=render(renderStorySvg(model,{...options,drawText:()=>""}));
+ assert.ok(!png.equals(withoutCopy),"Story copy must be visible in the exported pixels.");
  assert.ok(png.byteLength<4_000_000,"Story PNG exceeds the existing Facebook worker's image limit.");
  assert.equal(png.readUInt32BE(16),1080);assert.equal(png.readUInt32BE(20),1920);
  await writeFile(new URL(brandKey+".png",out),png);
  await writeFile(new URL(brandKey+".svg",out),svg);
  await writeFile(new URL(brandKey+"-safe.png",out),render(renderStorySvg(model,{...options,safeGuide:true})));
- const thumbnail=new Resvg(svg,{fitTo:{mode:"width",value:270},font:{fontFiles:fontPaths,loadSystemFonts:false}}).render().asPng();
+ const thumbnail=new Resvg(svg,{fitTo:{mode:"width",value:360},font:{fontFiles:fontPaths,loadSystemFonts:false}}).render().asPng();
  snapshots.push({brandKey,snapshot,model,bytes:png.byteLength,thumbnail:thumbnail.toString("base64")});
  console.log(JSON.stringify({preview:brandKey,registration:vehicle.registration,title:model.title,headline:model.headline,details:model.details,bytes:png.byteLength,branch:brandKey==="vansco"?branchKey:undefined}));
 }
 await writeFile(new URL("sources.json",out),JSON.stringify(snapshots.map(({thumbnail,...record})=>record),null,2));
-const sheet='<svg xmlns="http://www.w3.org/2000/svg" width="810" height="480">'+
- snapshots.map((x,i)=>'<image x="'+(i*270)+'" width="270" height="480" href="data:image/png;base64,'+x.thumbnail+'"/>').join("")+'</svg>';
+const sheet='<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="640">'+
+ snapshots.map((x,i)=>'<image x="'+(i*360)+'" width="360" height="640" href="data:image/png;base64,'+x.thumbnail+'"/>').join("")+'</svg>';
 const sheetPng=render(sheet);await writeFile(new URL("contact-sheet.png",out),sheetPng);
 // Small contact sheet for visual review through GitHub job logs, without any PC files.
 console.log("STORY_CONTACT_SHEET_BASE64="+sheetPng.toString("base64"));
