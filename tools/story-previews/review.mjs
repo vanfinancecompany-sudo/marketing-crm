@@ -74,21 +74,10 @@ const feedUrl=stockOrigin+"/api/vansco-google-vehicle-feed?mode=full";
 const feed=(await publicGet(feedUrl)).bytes.toString("utf8").trim().split(/\r?\n/);
 const headers=feed.shift().split("\t");
 const rows=feed.map(line=>Object.fromEntries(line.split("\t").map((value,index)=>[headers[index],value])));
-let finance,financeGallery,selectedRow;
-const heldExamples=[];
-for(const registration of ["LA24WZJ","DT73NHO","MW73CMZ","CJ73NXA","BD24GJY","CP16AZW"]) {
- const candidate=rows.find(row=>row.id===registration&&row.availability==="in_stock");
- if(!candidate)continue;
- try {
-  const current=(await publishedVehicle("https://www.vanfinancecompany.co.uk/vans/"+registration.toLowerCase(),registration)).vehicle;
-  const price=Number(String(candidate.price).match(/^([0-9.]+) GBP$/)?.[1]);
-  if(!current.vatLabel||price!==current.price)throw Error("Price/VAT evidence is unresolved.");
-  const photos=await gallery(registration);
-  if(!photos.images?.[1]?.url)throw Error("No alternate photograph for review.");
-  finance=current;financeGallery=photos;selectedRow=candidate;break;
- }catch(error){heldExamples.push({registration,reason:error.message})}
-}
-assert.ok(finance,"No verified current example with an alternate photograph: "+JSON.stringify(heldExamples));
+const financePage=await publishedVehicle("https://www.vanfinancecompany.co.uk/vans/ds69rfo","DS69RFO");
+const finance=financePage.vehicle;
+const financeGallery=await gallery(finance.registration);
+const selectedRow=rows.find(row=>row.id===finance.registration&&row.availability==="in_stock");
 const rentalPage=await publishedVehicle("https://www.rent2buyvans.co.uk/van-pages/fv74bbj","FV74BBJ");
 const rental=rentalPage.vehicle;
 const fixed=pendingRent2BuySpecialDeal(rental.registration);
@@ -150,9 +139,9 @@ for(const [brandKey,vehicle] of [
  const images=vehicle.registration===finance.registration?financeGallery:await gallery(vehicle.registration);
  // Use the existing raw, exact-registration DealerKit gallery, avoiding
  // legacy branded primaries that may already contain prices/captions.
- // Choose an existing alternate for the shared retail example; do not retouch
- // photographs or carry legacy artwork from a first-gallery image into the ad.
- const selectedImage=vehicle.registration===finance.registration?images.images[1].url:images.primaryImage;
+ // Existing second photo on this exact registration's published vehicle page.
+ // The raw DealerKit primary has an old "Coming soon" ribbon; do not retouch it.
+ const selectedImage=vehicle.registration===finance.registration?financePage.schema.image?.[1]:images.primaryImage;
  assert.ok(selectedImage,"Reviewed alternate photograph is unavailable.");
  const photo=await embedPhoto(vehicle,selectedImage);
  const snapshot={...vehicle,photoRegistration:photo.photoRegistration,imageSource:photo.imageSource,
