@@ -11,7 +11,7 @@ import opentype from "opentype.js";
 import {buildStoryModel,renderStorySvg,escapeXml} from "./template.mjs";
 import {publishedRetailVat} from "./sources.mjs";
 import {pendingRent2BuySpecialDeal} from "../../lib/rent2BuyProtectedSpecialDeals.mjs";
-import {vatLabelFromText,VANSCO_BRANCHES} from "../../lib/vanscoFacebookAutomation.js";
+import {vatLabelFromText,VANSCO_BRANCHES,parseCsvRecords} from "../../lib/vanscoFacebookAutomation.js";
 const require=createRequire(import.meta.url);
 const out=new URL("../../story-preview-output/",import.meta.url);
 const stockOrigin="https://marketing-crm-six.vercel.app";
@@ -72,15 +72,14 @@ async function embedPhoto(vehicle,imageUrl) {
 }
 
 // Current examples come only from existing public pages and vehicle feeds.
-const feedUrl=stockOrigin+"/api/vansco-google-vehicle-feed?mode=full";
-const feed=(await publicGet(feedUrl)).bytes.toString("utf8").trim().split(/\r?\n/);
-const headers=feed.shift().split("\t");
-const rows=feed.map(line=>Object.fromEntries(line.split("\t").map((value,index)=>[headers[index],value])));
-const financePage=await publishedVehicle("https://www.vanfinancecompany.co.uk/vans/la24wzj","LA24WZJ");
+const feedUrl=stockOrigin+"/api/vansco-dealerkit-google-vehicle-feed";
+const rows=parseCsvRecords((await publicGet(feedUrl)).bytes.toString("utf8"));
+const financePage=await publishedVehicle("https://www.vanfinancecompany.co.uk/vans/fv74bbj","FV74BBJ");
 const finance=financePage.vehicle;
 const financeGallery=await gallery(finance.registration);
 const vanscoPage=financePage;
-const selectedRow=rows.find(row=>row.id===finance.registration&&row.availability==="in_stock");
+const selectedRow=rows.find(row=>row.id===financeGallery.supplierStockId);
+console.log(JSON.stringify({stockEvidence:finance.registration,galleryCount:financeGallery.images.length,supplierStockId:financeGallery.supplierStockId,matchedVanscoFeed:Boolean(selectedRow)}));
 const rentalPage=await publishedVehicle("https://www.rent2buyvans.co.uk/van-pages/fv74bbj","FV74BBJ");
 const rental=rentalPage.vehicle;
 const fixed=pendingRent2BuySpecialDeal(rental.registration);
@@ -104,7 +103,7 @@ assert.ok(Number.isFinite(feedPrice)&&feedPrice>0,"Vansco current feed price is 
 assert.ok(vanscoPage.vehicle.vatLabel,"No explicit VAT treatment for the Vansco example.");
 const branchKey=branchKeys[row.store_code];
 assert.ok(VANSCO_BRANCHES[branchKey],"Vansco feed branch is unresolved.");
-const vansco={...vanscoPage.vehicle,title:row.title.replace(/^\d{4}\s+/,""),fullTitle:row.title,price:feedPrice,branchKey,
+const vansco={...vanscoPage.vehicle,title:shortTitle(row.title,vanscoPage.vehicle.year),fullTitle:row.title,price:feedPrice,branchKey,
  vehicleUrl:row.link,status:"available",source:{url:feedUrl,checkedAt,kind:"existing_vansco_vehicle_feed",
  vatEvidenceUrl:vanscoPage.vehicle.vehicleUrl,vatEvidenceRegistration:vanscoPage.vehicle.registration,storeCode:row.store_code}};
 
