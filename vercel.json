@@ -2,7 +2,8 @@
   "git": {
     "deploymentEnabled": {
       "feature/vehicle-image-suite-dealerkit-bridge": false,
-      "codex/branded-story-previews": false
+      "codex/branded-story-previews": false,
+      "codex/story-artwork-publishing-integration": false
     }
   },
   "ignoreCommand": "test \"$VERCEL_PROJECT_ID\" = \"prj_zD76dAe2MHZdBTO08GNFSqOb9UHf\"",
