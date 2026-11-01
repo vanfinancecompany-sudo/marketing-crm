@@ -145,7 +145,7 @@ export function renderStorySvg(model,{photoDataUrl,logoDataUrl="",measure,drawTe
  fitText(model.title,{maxLines:2,maxSize:44,minSize:34,measure}).lines.map((line,i)=>text(line,72,1320+i*44,fitText(model.title,{maxLines:2,maxSize:48,minSize:36,measure}).size,b.dark,800)).join("")+
  text(model.kicker,72,1383,24,b.dark,700)+
  text(headline.lines[0],72,1440,headline.size,b.dark,900)+
- model.details.slice(0,2).map((line,i)=>fitted(line,1474+i*32,{size:32})).join("")+
+ model.details.map((line,i)=>fitted(line,(model.details.length>2?1464:1474)+i*(model.details.length>2?24:32),{size:model.details.length>2?28:32})).join("")+
  '<rect x="72" y="1520" width="936" height="60" rx="'+(model.brandKey==="rent2buy"?26:8)+'" fill="'+b.accent+'"/>'+
  text(b.cta,96,1548,30,"#ffffff",900)+
  text(b.website,96,1574,23,"#ffffff",600)+
