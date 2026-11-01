@@ -182,9 +182,7 @@ export function renderMatchedBrandAdvertSvg(model,{photoDataUrl,logoDataUrl,meas
  const collection=model.details.find(value=>value.startsWith("Collection only"));
  const detail=rental?model.details.filter(value=>value!==collection).join(" · "):model.details[0];
  const detailFit=one(detail,32);
- let branding;
- if(rental && logoDataUrl)branding='<rect x="72" y="250" width="590" height="106" rx="8" fill="#ffffff"/><image href="'+rasterUri(logoDataUrl)+'" x="86" y="258" width="562" height="90" preserveAspectRatio="xMinYMid meet"/>';
- else branding=text(rental?"Rent2Buy Vans":"Van Finance Company",72,314,rental?54:48,white,800);
+ const branding=text(rental?"Rent2Buy Vans":"Van Finance Company",72,314,rental?54:48,white,800);
  return '<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">'+
  '<title>'+escapeXml(model.brand.name+" · "+model.title+" · "+model.registration)+'</title>'+
  '<defs><linearGradient id="brand-night" x2="0.8" y2="1"><stop stop-color="#22282b"/><stop offset="1" stop-color="#070b0e"/></linearGradient></defs>'+

@@ -141,13 +141,15 @@ test("public retail VAT is tied to the exact cash price, not finance/old price o
  assert.equal(publishedRetailVat('<p>Finance from £309 +VAT</p>',309),"");
 });
 
-test("brand adaptations reuse the approved hero geometry with rental text fallback",()=>{
+test("brand adaptations reuse the approved hero geometry with rental text branding",()=>{
  const model=buildStoryModel("rent2buy",base({registration:"FV74BBJ",photoRegistration:"FV74BBJ"}));
  const fallback=renderStorySvg(model,{photoDataUrl:photo});
  assert.match(fallback,/Rent2Buy Vans/);
  const svg=renderStorySvg(model,{photoDataUrl:photo,logoDataUrl:photo});
  assert.match(svg,/width="1080" height="786" preserveAspectRatio="xMidYMid meet"/);
  assert.match(svg,/NO CREDIT CHECK VANS/);
+ assert.match(svg,/Rent2Buy Vans/);
+ assert.equal([...svg.matchAll(/<image /g)].length,1,"Rent2Buy must not embed a logo even when supplied");
  assert.doesNotMatch(svg,/fill="#f8f7f3"/);
 });
 test("VFC uses text branding even when a logo is supplied, with finance-led factual copy",()=>{

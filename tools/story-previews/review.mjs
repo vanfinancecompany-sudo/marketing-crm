@@ -165,7 +165,7 @@ for(const [brandKey,vehicle] of [
 ].filter(([key])=>!selectedBrand||key===selectedBrand)) {
  const logoSource=logoAssets[brandKey];
  assert.ok(logoSource?.path,"A saved genuine brand logo is required.");
- const logoBytes=brandKey==="vanFinance"?null:await readFile(new URL(logoSource.path,import.meta.url));
+ const logoBytes=brandKey!=="vansco"?null:await readFile(new URL(logoSource.path,import.meta.url));
  if(brandKey==="vansco")assert.ok(logoBytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),"Saved Vansco logo is not a PNG.");
  const logoDataUrl=logoBytes?trimmedLogo(logoBytes,"image/png",brandKey==="vansco"):"";
  const images=vehicle.registration===finance.registration?financeGallery:await gallery(vehicle.registration);
@@ -176,7 +176,7 @@ for(const [brandKey,vehicle] of [
  assert.ok(selectedImage,"Reviewed alternate photograph is unavailable.");
  const photo=await embedPhoto(vehicle,selectedImage);
  const snapshot={...vehicle,photoRegistration:photo.photoRegistration,imageSource:photo.imageSource,
-  supplierStockId:images.supplierStockId,gallerySource:images.sourceUrl,photoAssociationSource:images.sourceUrl,logoSource:brandKey==="vanFinance"?"text branding only":logoSource.path};
+  supplierStockId:images.supplierStockId,gallerySource:images.sourceUrl,photoAssociationSource:images.sourceUrl,logoSource:brandKey!=="vansco"?"text branding only":logoSource.path};
  const model=buildStoryModel(brandKey,snapshot);
  const options={photoDataUrl:photo.dataUrl,logoDataUrl,measure,drawText};
  const svg=renderStorySvg(model,options);const png=render(svg);
