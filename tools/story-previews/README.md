@@ -51,3 +51,7 @@ The only edit outside this tool, its tests and its review workflow is `vercel.js
 ## Checks
 
 The PR workflow installs locked dependencies without package scripts, runs focused template/pricing tests plus the existing Facebook/Instagram safety suites, and generates real previews. Output is rejected unless each PNG is 1080 × 1920 and below the existing Facebook worker's 4,000,000-byte limit. No website build/deploy command is added to this workflow. Existing repository PR checks remain in place.
+
+## Design revision
+
+Photo area increased to 960px (50% of the canvas); the complete 4:3 photograph is contained at up to 1080 × 810 without cropping or stretching. Genuine existing repository logos replace text lockups, with unused image padding trimmed for presentation only. Rent2Buy leads with NO CREDIT CHECK VANS, then protected prices and term. VFC emphasizes exploring finance, deposit and term options without rates or approval claims. Vansco's revised layout requires its genuine logo asset; no replacement is invented. Missing logo sources are recorded in held.json, and that brand is withheld from the new artifact until the asset is provided. Pricing and publishing code is unchanged.

@@ -9,8 +9,8 @@ import { VANSCO_BRANCHES } from "../../lib/vanscoFacebookAutomation.js";
 export const STORY_SIZE = Object.freeze({width:1080,height:1920});
 export const STORY_SAFE_AREA = Object.freeze({left:72,top:250,right:1008,bottom:1580});
 export const BRANDS = Object.freeze({
- vanFinance: {name:"Van Finance Company",accent:"#ef233c",dark:"#0b1d30",eyebrow:"YOUR NEXT WORK VAN",cta:"VIEW VAN DETAILS",website:"vanfinancecompany.co.uk"},
- rent2buy: {name:"Rent2Buy Vans",accent:"#f4213e",dark:"#15151b",eyebrow:"RENT TO OWN",cta:"VIEW RENTAL DETAILS",website:"rent2buyvans.co.uk"},
+ vanFinance: {name:"Van Finance Company",accent:"#ef233c",dark:"#0b1d30",eyebrow:"EXPLORE VAN FINANCE",cta:"EXPLORE FINANCE OPTIONS",website:"vanfinancecompany.co.uk"},
+ rent2buy: {name:"Rent2Buy Vans",accent:"#f4213e",dark:"#15151b",eyebrow:"NO CREDIT CHECK VANS",cta:"VIEW RENTAL DETAILS",website:"rent2buyvans.co.uk"},
  vansco: {name:"Vansco",accent:"#ca2638",dark:"#191b1f",eyebrow:"FIND YOUR NEXT VAN",cta:"VIEW THIS VAN",website:"vansco.co.uk"},
 });
 const clean = value => String(value ?? "").replace(/\s+/g," ").trim();
@@ -92,7 +92,7 @@ export function buildStoryModel(brandKey, vehicle) {
   } else if (validPrice) {
    model.kicker="VEHICLE CASH PRICE";
    model.headline=pounds(vehicle.price)+" "+vat;
-   model.details=["View this van's full details online"];
+   model.details=["Explore deposit & term options"];
   }
  }
  return model;
@@ -121,45 +121,34 @@ function rasterUri(value) {
 export function renderStorySvg(model,{photoDataUrl,logoDataUrl="",measure,drawText,safeGuide=false}={}) {
  const b=model.brand;
  const title=fitText(model.title,{measure});
- const headline=fitText(model.headline,{maxLines:1,maxSize:76,minSize:44,measure});
+ const headline=fitText(model.headline,{maxLines:1,maxSize:66,minSize:44,measure});
  const facts=fitText(model.facts.join(" · ")||model.registration,{maxLines:1,maxSize:34,minSize:30,measure});
  const text=drawText || ((value,x,y,size,fill="#ffffff",weight=700)=>'<text x="'+x+'" y="'+y+'" font-size="'+size+'" fill="'+fill+'" font-weight="'+weight+'">'+escapeXml(value)+'</text>');
  const fitted=(value,y,{size=34,width=936,fill="#243040",weight=500}={})=>{
   const fit=fitText(value,{width,maxLines:1,maxSize:size,minSize:28,measure});
   return text(fit.lines[0],72,y,fit.size,fill,weight);
  };
- const logo=logoDataUrl
-  ? '<image href="'+rasterUri(logoDataUrl)+'" x="94" y="266" width="530" height="88" preserveAspectRatio="xMinYMid meet"/>'
-  : (model.brandKey==="vanFinance"
-   ? text("VAN FINANCE",96,305,45,b.dark,900)+text("COMPANY",96,342,29,b.dark,700)
-   : model.brandKey==="rent2buy"
-    ? text("RENT2BUY",96,310,57,b.dark,900)+text("VANS",96,343,28,b.dark,700)
-    : text("VANSCO",96,330,76,b.dark,900));
- const titleY=title.lines.length===3?457:title.lines.length===2?492:527;
+ if(!logoDataUrl)throw Error("A genuine brand logo is required.");
+ const logo='<image href="'+rasterUri(logoDataUrl)+'" x="96" y="258" width="560" height="108" preserveAspectRatio="xMinYMid meet"/>';
  const svg='<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">'+
  '<title>'+escapeXml(b.name+" · "+model.title+" · "+model.registration)+'</title>'+
- '<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="'+b.dark+'"/><stop offset="1" stop-color="#03080d"/></linearGradient></defs>'+
  '<g font-family="Inter,Arial,sans-serif">'+
- '<rect width="1080" height="1920" fill="url(#bg)"/>'+
- '<circle cx="1060" cy="410" r="370" fill="'+b.accent+'" opacity=".11"/>'+
- '<path d="M 760 0 L 1080 0 L 1080 700 Z" fill="'+b.accent+'" opacity=".11"/>'+
- '<rect x="72" y="250" width="936" height="116" rx="18" fill="#ffffff"/>'+logo+
- '<rect x="746" y="279" width="234" height="58" rx="9" fill="'+b.accent+'"/>'+text(model.registration,764,318,30,model.brandKey==="rent2buy"?b.dark:"#ffffff",900)+
- text(b.eyebrow,72,413,28,b.accent,800)+
- title.lines.map((line,i)=>text(line,72,titleY+i*70,title.size)).join("")+
- text(facts.lines[0],72,655,facts.size,"#dce4eb",500)+
- '<rect x="0" y="690" width="1080" height="520" fill="#f3f4f5"/>'+
- '<image href="'+rasterUri(photoDataUrl)+'" x="24" y="700" width="1032" height="500" preserveAspectRatio="xMidYMid meet"/>'+
- '<rect x="0" y="1210" width="1080" height="710" fill="#f8f7f3"/>'+
- '<rect x="72" y="1236" width="66" height="6" fill="'+b.accent+'"/>'+
- text(model.kicker,155,1250,25,b.dark,800)+
- text(headline.lines[0],72,1325,headline.size,b.dark,900)+
- model.details.map((line,i)=>fitted(line,1370+i*38,{size:34})).join("")+
- (model.note && model.details.length<3?fitted(model.note,1450,{size:28,fill:"#56616d"}):"")+
- '<rect x="72" y="1484" width="936" height="96" rx="'+(model.brandKey==="rent2buy"?30:10)+'" fill="'+b.accent+'"/>'+
- text(b.cta,102,1525,34,model.brandKey==="rent2buy"?b.dark:"#ffffff",900)+
- text(b.website,102,1560,28,model.brandKey==="rent2buy"?b.dark:"#ffffff",600)+
- '<path d="M 919 1520 L 948 1534 L 919 1548 M 905 1534 H 946" fill="none" stroke="'+(model.brandKey==="rent2buy"?b.dark:"#ffffff")+'" stroke-width="5" stroke-linecap="round"/>'+
+ '<rect width="1080" height="1920" fill="'+b.dark+'"/>'+
+ '<rect x="72" y="250" width="936" height="124" rx="16" fill="#ffffff"/>'+logo+
+ '<rect x="754" y="288" width="230" height="54" rx="9" fill="'+b.accent+'"/>'+
+ text(model.registration,774,326,30,"#ffffff",900)+
+ text(b.eyebrow,72,414,model.brandKey==="rent2buy"?51:40,"#ffffff",900)+
+ text(facts.lines[0],72,451,facts.size,"#dce4eb",500)+
+ '<rect x="0" y="468" width="1080" height="960" fill="#f8f7f3"/>'+
+ '<image href="'+rasterUri(photoDataUrl)+'" x="0" y="468" width="1080" height="810" preserveAspectRatio="xMidYMid meet"/>'+
+ '<rect x="0" y="1278" width="1080" height="642" fill="#f8f7f3"/>'+
+ fitText(model.title,{maxLines:2,maxSize:44,minSize:34,measure}).lines.map((line,i)=>text(line,72,1320+i*44,fitText(model.title,{maxLines:2,maxSize:48,minSize:36,measure}).size,b.dark,800)).join("")+
+ text(model.kicker,72,1383,24,b.dark,700)+
+ text(headline.lines[0],72,1440,headline.size,b.dark,900)+
+ model.details.slice(0,2).map((line,i)=>fitted(line,1474+i*32,{size:32})).join("")+
+ '<rect x="72" y="1520" width="936" height="60" rx="'+(model.brandKey==="rent2buy"?26:8)+'" fill="'+b.accent+'"/>'+
+ text(b.cta,96,1548,30,"#ffffff",900)+
+ text(b.website,96,1574,23,"#ffffff",600)+
  (safeGuide?'<rect x="72" y="250" width="936" height="1330" fill="none" stroke="#09a3be" stroke-width="4" stroke-dasharray="16 12"/><rect width="1080" height="250" fill="#09a3be" opacity=".18"/><rect y="1580" width="1080" height="340" fill="#09a3be" opacity=".18"/>':"")+
  '</g></svg>';
  return svg;

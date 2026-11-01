@@ -71,7 +71,7 @@ test("missing or ambiguous Vansco facts hold rendering instead of defaulting VAT
 test("VFC never infers payments, deposits, APR or approval claims",()=>{
  const model=buildStoryModel("vanFinance",base({monthly:"£99",salePrice:"Guaranteed approval",price:14995,vatLabel:"unknown"}));
  assert.equal(model.headline,"Your next work van");
- const svg=renderStorySvg(model,{photoDataUrl:photo});
+ const svg=renderStorySvg(model,{logoDataUrl:photo,photoDataUrl:photo});
  assert.doesNotMatch(svg,/Guaranteed|approval|APR|deposit|£99/i);
  assert.equal(buildStoryModel("vanFinance",base({price:14995,vatLabel:"+ VAT"})).headline,"£14,995 + VAT");
 });
@@ -90,7 +90,7 @@ test("all three SVGs use the correct canvas, embedded photos and text-safe geome
  assert.deepEqual(STORY_SIZE,{width:1080,height:1920});
  for(const [key,vehicle] of [["vanFinance",base()],["rent2buy",base({registration:"FV74BBJ",photoRegistration:"FV74BBJ"})],["vansco",vansco()]]){
   const model=buildStoryModel(key,vehicle);
-  const svg=renderStorySvg(model,{photoDataUrl:photo});
+  const svg=renderStorySvg(model,{logoDataUrl:photo,photoDataUrl:photo});
   assert.match(svg,/width="1080" height="1920"/);
   assert.match(svg,/preserveAspectRatio="xMidYMid meet"/);
   assert.doesNotMatch(svg,/<image[^>]*href="https?:/);
@@ -99,15 +99,15 @@ test("all three SVGs use the correct canvas, embedded photos and text-safe geome
    assert.ok(Number(match[2])>=STORY_SAFE_AREA.top&&Number(match[2])<=STORY_SAFE_AREA.bottom);
   }
   assert.ok(svg.includes(model.registration));
-  assert.match(renderStorySvg(model,{photoDataUrl:photo,safeGuide:true}),/stroke-dasharray/);
+  assert.match(renderStorySvg(model,{logoDataUrl:photo,photoDataUrl:photo,safeGuide:true}),/stroke-dasharray/);
  }
 });
 test("untrusted text is escaped and external/SVG image payloads cannot enter the artwork",()=>{
  const model=buildStoryModel("vanFinance",base({title:'Ford <script>alert("x")</script> & Transit'}));
- const svg=renderStorySvg(model,{photoDataUrl:photo});
+ const svg=renderStorySvg(model,{logoDataUrl:photo,photoDataUrl:photo});
  assert.ok(svg.includes("&lt;script&gt;"));assert.doesNotMatch(svg,/<script>/);
  for(const image of ["https://example.com/a.jpg","data:image/svg+xml;base64,PHN2Zz4="])
-  assert.throws(()=>renderStorySvg(model,{photoDataUrl:image}),/Embed a verified/);
+  assert.throws(()=>renderStorySvg(model,{logoDataUrl:photo,photoDataUrl:image}),/Embed a verified/);
 });
 test("preview code has no production client, publication or scheduling dependency",()=>{
  for(const file of ["template.mjs","review.mjs","sources.mjs"]){
@@ -121,7 +121,7 @@ test("preview code has no production client, publication or scheduling dependenc
 test("vector text adapter receives every visible claim and its safe-area position",()=>{
  const model=buildStoryModel("rent2buy",base({registration:"FV74BBJ",photoRegistration:"FV74BBJ"}));
  const drawn=[];
- const svg=renderStorySvg(model,{photoDataUrl:photo,drawText:(value,x,y)=>{drawn.push({value,x,y});return '<g aria-label="'+value+'"><path d="M0 0L1 1"/></g>'}});
+ const svg=renderStorySvg(model,{logoDataUrl:photo,photoDataUrl:photo,drawText:(value,x,y)=>{drawn.push({value,x,y});return '<g aria-label="'+value+'"><path d="M0 0L1 1"/></g>'}});
  assert.ok(drawn.some(x=>x.value===model.headline));
  assert.ok(drawn.some(x=>x.value===model.brand.cta));
  assert.ok(drawn.some(x=>x.value===model.registration));
@@ -139,4 +139,14 @@ test("public retail VAT is tied to the exact cash price, not finance/old price o
  assert.equal(publishedRetailVat(html+html,14695),"");
  assert.equal(publishedRetailVat('<script>Retail price £14,695 NO VAT</script><p>VAT vans</p>',14695),"");
  assert.equal(publishedRetailVat('<p>Finance from £309 +VAT</p>',309),"");
+});
+
+test("revision requires a genuine logo and enlarges the photo without cropping",()=>{
+ const model=buildStoryModel("rent2buy",base({registration:"FV74BBJ",photoRegistration:"FV74BBJ"}));
+ assert.throws(()=>renderStorySvg(model,{photoDataUrl:photo}),/genuine brand logo/);
+ const svg=renderStorySvg(model,{photoDataUrl:photo,logoDataUrl:photo});
+ assert.match(svg,/width="1080" height="810" preserveAspectRatio="xMidYMid meet"/);
+ assert.match(svg,/height="960"/);
+ assert.match(svg,/NO CREDIT CHECK VANS/);
+ assert.doesNotMatch(svg,/>RENT2BUY</);
 });

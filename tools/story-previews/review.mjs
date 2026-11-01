@@ -16,8 +16,6 @@ const require=createRequire(import.meta.url);
 const out=new URL("../../story-preview-output/",import.meta.url);
 const stockOrigin="https://marketing-crm-six.vercel.app";
 const sourceHosts=new Set(["www.vanfinancecompany.co.uk","www.rent2buyvans.co.uk","marketing-crm-six.vercel.app","static.wixstatic.com","acdn.uk"]);
-sourceHosts.add("www.vansco.co.uk");
-sourceHosts.add("vansco.co.uk");
 const checkedAt=new Date().toISOString();
 await mkdir(out,{recursive:true});
 
@@ -135,21 +133,36 @@ const drawText=(value,x,y,size,fill="#ffffff",weight=700)=>{
 };
 const render=svg=>new Resvg(svg,{font:{fontFiles:fontPaths,loadSystemFonts:false,defaultFontFamily:"Inter"}}).render().asPng();
 
-for(const url of ["https://www.vansco.co.uk/","https://vansco.co.uk/","https://www.vansco.co.uk/favicon.ico","https://acdn.uk/vansco/logo.svg","https://acdn.uk/vansco/logo.png"]) {
- try {
-  const r=await publicGet(url);
-  console.log("LOGO_SOURCE="+JSON.stringify({url,type:r.type,bytes:r.bytes.length,
-   snippet:r.bytes.toString("utf8").slice(0,100),
-   logos:r.type.includes("html")?[...r.bytes.toString("utf8").matchAll(/(?:src|href)=["']([^"']*(?:logo|favicon)[^"']*)["']/gi)].map(x=>x[1]):[]}));
-  if(url.endsWith(".ico"))console.log("VANSCO_ICON_BASE64="+r.bytes.toString("base64"));
- }catch(error){console.log("LOGO_SOURCE="+JSON.stringify({url,error:error.message}));}
+function trimmedLogo(bytes) {
+ const uri="data:image/png;base64,"+bytes.toString("base64");
+ const square=new Resvg('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800"><image href="'+uri+'" width="800" height="800" preserveAspectRatio="xMidYMid meet"/></svg>').render();
+ const pixels=square.pixels;let left=800,top=800,right=0,bottom=0;
+ for(let y=0;y<800;y++)for(let x=0;x<800;x++){
+  const i=(y*800+x)*4;
+  if(pixels[i+3]>32 && Math.min(pixels[i],pixels[i+1],pixels[i+2])<230){
+   left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);
+  }
+ }
+ assert.ok(right>left&&bottom>top,"The genuine logo has no visible artwork.");
+ left=Math.max(0,left-8);top=Math.max(0,top-8);right=Math.min(799,right+8);bottom=Math.min(799,bottom+8);
+ const svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+(right-left+1)+'" height="'+(bottom-top+1)+'" viewBox="'+left+' '+top+' '+(right-left+1)+' '+(bottom-top+1)+'"><image href="'+uri+'" width="800" height="800" preserveAspectRatio="xMidYMid meet"/></svg>';
+ return "data:image/png;base64,"+new Resvg(svg).render().asPng().toString("base64");
 }
+const logoAssets={
+ vanFinance:{path:"../../assets/van-finance-company.png"},
+ rent2buy:{path:"../../assets/rent2buy-vans.png"},
+ // A genuine Vansco source must be supplied; never draw a substitute wordmark.
+};
 const snapshots=[];
+const held=[];
 for(const [brandKey,vehicle] of [
  ["vanFinance",finance],
  ["rent2buy",rental],
  ["vansco",vansco],
 ]) {
+ const logoSource=logoAssets[brandKey];
+ if(!logoSource){held.push({brandKey,reason:"Genuine existing logo source required"});continue;}
+ const logoDataUrl=trimmedLogo(await readFile(new URL(logoSource.path,import.meta.url)));
  const images=vehicle.registration===finance.registration?financeGallery:await gallery(vehicle.registration);
  // Use the existing raw, exact-registration DealerKit gallery, avoiding
  // legacy branded primaries that may already contain prices/captions.
@@ -158,9 +171,9 @@ for(const [brandKey,vehicle] of [
  assert.ok(selectedImage,"Reviewed alternate photograph is unavailable.");
  const photo=await embedPhoto(vehicle,selectedImage);
  const snapshot={...vehicle,photoRegistration:photo.photoRegistration,imageSource:photo.imageSource,
-  supplierStockId:images.supplierStockId,gallerySource:images.sourceUrl,photoAssociationSource:images.sourceUrl};
+  supplierStockId:images.supplierStockId,gallerySource:images.sourceUrl,photoAssociationSource:images.sourceUrl,logoSource:logoSource.path};
  const model=buildStoryModel(brandKey,snapshot);
- const options={photoDataUrl:photo.dataUrl,measure,drawText};
+ const options={photoDataUrl:photo.dataUrl,logoDataUrl,measure,drawText};
  const svg=renderStorySvg(model,options);const png=render(svg);
  const withoutCopy=render(renderStorySvg(model,{...options,drawText:()=>""}));
  assert.ok(!png.equals(withoutCopy),"Story copy must be visible in the exported pixels.");
@@ -173,6 +186,8 @@ for(const [brandKey,vehicle] of [
  snapshots.push({brandKey,snapshot,model,bytes:png.byteLength,thumbnail:thumbnail.toString("base64")});
  console.log(JSON.stringify({preview:brandKey,registration:vehicle.registration,title:model.title,headline:model.headline,details:model.details,bytes:png.byteLength,branch:brandKey==="vansco"?branchKey:undefined}));
 }
+await writeFile(new URL("held.json",out),JSON.stringify(held,null,2));
+console.log("HELD_STORIES="+JSON.stringify(held));
 await writeFile(new URL("sources.json",out),JSON.stringify(snapshots.map(({thumbnail,...record})=>record),null,2));
 const sheet='<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="640">'+
  snapshots.map((x,i)=>'<image x="'+(i*360)+'" width="360" height="640" href="data:image/png;base64,'+x.thumbnail+'"/>').join("")+'</svg>';
@@ -180,4 +195,4 @@ const sheetPng=render(sheet);await writeFile(new URL("contact-sheet.png",out),sh
 // Small contact sheet for visual review through GitHub job logs, without any PC files.
 console.log("STORY_CONTACT_SHEET_BASE64="+sheetPng.toString("base64"));
 const cards=snapshots.map(({brandKey,model})=>'<article><h2>'+escapeXml(model.brand.name)+'</h2><div class="image"><img src="'+brandKey+'.png" data-clean="'+brandKey+'.png" data-safe="'+brandKey+'-safe.png" alt="'+escapeXml(model.title+" "+model.headline)+'"></div><p>'+escapeXml(model.registration+" · "+model.title)+'</p><a href="'+brandKey+'.png" download>Download 1080 × 1920 PNG</a> · <a href="'+escapeXml(model.vehicleUrl)+'">Source listing</a></article>').join("");
-await writeFile(new URL("index.html",out),'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Branded Story previews · review only</title><style>body{margin:0;background:#eef0f3;color:#172333;font:16px/1.5 Arial,sans-serif}main{max-width:1250px;margin:auto;padding:30px}h1{font-size:30px}header{margin-bottom:30px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}article{padding:18px;background:white;border-radius:18px}h2{font-size:20px}.image img{display:block;width:100%;height:auto}a{color:#0656b0}button{padding:12px 18px;background:#172333;color:white;border:0;border-radius:8px;font:inherit;cursor:pointer}@media(max-width:850px){.grid{grid-template-columns:1fr}article{max-width:440px;margin:auto}}</style><main><header><p>REVIEW ONLY · NO PUBLISHING CONNECTION</p><h1>Vehicle Stories, designed for the small screen</h1><p>Three real vehicle examples. Public data checked '+escapeXml(checkedAt)+'. Existing stock, pricing, schedules and publishing are untouched.</p><button id="guides" aria-pressed="false">Show Story safe areas</button><p>Important copy stays between 250px and 1580px, with 72px side margins. Safe areas are a conservative design guide; platform interfaces vary. The CTA is visual artwork, not a clickable sticker.</p><a href="sources.json">Vehicle facts and source evidence</a></header><section class="grid">'+cards+'</section></main><script>document.querySelector("#guides").onclick=function(){const show=this.getAttribute("aria-pressed")!=="true";this.setAttribute("aria-pressed",show);this.textContent=show?"Hide Story safe areas":"Show Story safe areas";document.querySelectorAll("img[data-clean]").forEach(img=>img.src=show?img.dataset.safe:img.dataset.clean)}</script></html>');
+await writeFile(new URL("index.html",out),'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Branded Story previews · review only</title><style>body{margin:0;background:#eef0f3;color:#172333;font:16px/1.5 Arial,sans-serif}main{max-width:1250px;margin:auto;padding:30px}h1{font-size:30px}header{margin-bottom:30px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}article{padding:18px;background:white;border-radius:18px}h2{font-size:20px}.image img{display:block;width:100%;height:auto}a{color:#0656b0}button{padding:12px 18px;background:#172333;color:white;border:0;border-radius:8px;font:inherit;cursor:pointer}@media(max-width:850px){.grid{grid-template-columns:1fr}article{max-width:440px;margin:auto}}</style><main><header><p>REVIEW ONLY · NO PUBLISHING CONNECTION</p><h1>Vehicle Stories, designed for the small screen</h1><p>Verified vehicle design examples. Vansco revision awaits its genuine logo; see held.json. Public data checked '+escapeXml(checkedAt)+'. Existing stock, pricing, schedules and publishing are untouched.</p><button id="guides" aria-pressed="false">Show Story safe areas</button><p>Important copy stays between 250px and 1580px, with 72px side margins. Safe areas are a conservative design guide; platform interfaces vary. The CTA is visual artwork, not a clickable sticker.</p><a href="sources.json">Vehicle facts and source evidence</a></header><section class="grid">'+cards+'</section></main><script>document.querySelector("#guides").onclick=function(){const show=this.getAttribute("aria-pressed")!=="true";this.setAttribute("aria-pressed",show);this.textContent=show?"Hide Story safe areas":"Show Story safe areas";document.querySelectorAll("img[data-clean]").forEach(img=>img.src=show?img.dataset.safe:img.dataset.clean)}</script></html>');
