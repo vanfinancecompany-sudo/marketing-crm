@@ -16,6 +16,8 @@ const require=createRequire(import.meta.url);
 const out=new URL("../../story-preview-output/",import.meta.url);
 const stockOrigin="https://marketing-crm-six.vercel.app";
 const sourceHosts=new Set(["www.vanfinancecompany.co.uk","www.rent2buyvans.co.uk","marketing-crm-six.vercel.app","static.wixstatic.com","acdn.uk"]);
+sourceHosts.add("www.vansco.co.uk");
+sourceHosts.add("vansco.co.uk");
 const checkedAt=new Date().toISOString();
 await mkdir(out,{recursive:true});
 
@@ -132,6 +134,16 @@ const drawText=(value,x,y,size,fill="#ffffff",weight=700)=>{
  return '<g aria-label="'+escapeXml(value)+'" fill="'+fill+'">'+paths+'</g>';
 };
 const render=svg=>new Resvg(svg,{font:{fontFiles:fontPaths,loadSystemFonts:false,defaultFontFamily:"Inter"}}).render().asPng();
+
+for(const url of ["https://www.vansco.co.uk/","https://vansco.co.uk/","https://www.vansco.co.uk/favicon.ico","https://acdn.uk/vansco/logo.svg","https://acdn.uk/vansco/logo.png"]) {
+ try {
+  const r=await publicGet(url);
+  console.log("LOGO_SOURCE="+JSON.stringify({url,type:r.type,bytes:r.bytes.length,
+   snippet:r.bytes.toString("utf8").slice(0,100),
+   logos:r.type.includes("html")?[...r.bytes.toString("utf8").matchAll(/(?:src|href)=["']([^"']*(?:logo|favicon)[^"']*)["']/gi)].map(x=>x[1]):[]}));
+  if(url.endsWith(".ico"))console.log("VANSCO_ICON_BASE64="+r.bytes.toString("base64"));
+ }catch(error){console.log("LOGO_SOURCE="+JSON.stringify({url,error:error.message}));}
+}
 const snapshots=[];
 for(const [brandKey,vehicle] of [
  ["vanFinance",finance],
