@@ -264,3 +264,17 @@ test("owned Story mirror rechecks available stock and supplier identity before s
   getSnapshot:async()=>({...snapshot,vehicles:[{...snapshot.vehicles[0],supplierStockId:nextId}]}),
   getDetail:async()=>({...detail,supplierStockId:nextId})}),/supplier_changed/);
 });
+
+test("known pre-composed first-gallery source class holds live artwork while remaining inspectable in dry run",async()=>{
+ let writes=0,downloads=0;
+ const source={...vehicle,imageSource:"https://static.wixstatic.com/media/existing-advert.png"};
+ for(const brandKey of ["vanFinance","rent2buy"]){
+  const deps={env:{STORY_ARTWORK_VFC_ENABLED:"true",STORY_ARTWORK_RENT2BUY_ENABLED:"true"},
+   loadVehicle:async()=>source,fetchImpl:async()=>{downloads++;return response()},host:async()=>{writes++}};
+  await assert.rejects(prepareSelectedStoryArtwork({brandKey},deps),/embedded_copy_unverified/);
+ }
+ assert.equal(writes,0);assert.equal(downloads,0);
+ const review=await prepareSelectedStoryArtwork({brandKey:"vanFinance"},{
+  dryRun:true,loadVehicle:async()=>source,fetchImpl:async()=>response(),host:()=>{throw Error("no uploads")}});
+ assert.equal(review.provenance.publishingHold,"story_first_gallery_image_embedded_copy_unverified");
+});

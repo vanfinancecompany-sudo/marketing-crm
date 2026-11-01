@@ -92,3 +92,24 @@ Before activation, run the same script with --authoritative in an approved serve
 environment using EXISTING credentials; it calls the real current stock / Meta
 loaders but remains read-only (no Blob uploads or Buffer mutations). This is a
 remaining live-source rollout check, not a new system or permission to activate.
+
+
+## Source blocker found during visual review (do not activate)
+The REAL first VFC gallery photo in the YR73 ORV sample already contains a
+"From £99 Deposit" advert overlay. The first Rent2Buy FV74 BEO photo already
+includes a Rent2Buy logo/graphic panel. These are embedded SOURCE pixels, not
+new copy or a change to the approved templates. Index 0 cannot simply be replaced
+by a secondary / shared DealerKit image under #699's contract.
+
+There is no authoritative per-image proof that embedded finance/rental claims
+in these Wix media primaries are current. The new live artwork path therefore
+HOLDS VFC/Rent2Buy Wix first-image sources even if the per-brand flag is enabled.
+Read-only dry runs still render them, with publishingHold recorded explicitly.
+This is a conservative source-class hold, not a claim that every Wix image has
+a bad overlay. No OCR system, alternate source order, image crop, manual allowlist
+or pricing override has been added. Existing flag-off automation is unchanged.
+
+The owner must review the first-image source constraint before integration can
+be considered ready for activation. Do not solve this by silently choosing a
+cleaner second photo. The current PR is reviewable implementation plus evidence
+of this genuine source blocker, not a completed rollout recommendation.
