@@ -1,3 +1,5 @@
+import {createHash} from "node:crypto";
+import {ownedStoryArtworkUrl} from "../lib/storyArtworkPolicy.js";
 // Dormant integration only. No endpoint, scheduler, channel discovery or Buffer client.
 import {fetchDealerKitStockSnapshot,fetchDealerKitStockDetail} from "./_dealerkit-stock-adapter.js";
 import {storyArtworkEnabled,storyRegistration} from "../lib/storyArtworkPolicy.js";
@@ -62,4 +64,22 @@ export async function prepareSelectedStoryArtwork(input,{
  const hosted=await hostImpl({brandKey:input.brandKey,registration:model.registration,supplierStockId:vehicle.supplierStockId,
    png:rendered.png,provenance,dueAt:input.dueAt});
  return {...result,...hosted};
+}
+
+// Existing VFC Instagram Story mirror: the FB artwork may have been made hours
+// earlier. Recheck availability and exact supplier identity before scheduling it.
+export async function assertCurrentStoryArtworkStock(url,brandKey,registration,{
+ getSnapshot=()=>fetchDealerKitStockSnapshot({allowPartial:true}),
+ getDetail=id=>fetchDealerKitStockDetail(id,{specifications:false}),
+}={}){
+ const verified=ownedStoryArtworkUrl(url,brandKey,registration);
+ if(!verified)throw Error("story_artwork_identity_invalid");
+ const snapshot=await getSnapshot();
+ const matches=(snapshot?.vehicles||[]).filter(v=>v.registration===registration);
+ if(matches.length!==1||!matches[0].supplierStockId)throw Error("story_stock_identity_ambiguous");
+ const detail=await getDetail(matches[0].supplierStockId);
+ const supplierId=verifyStoryStock(registration,snapshot,detail);
+ const supplierHash=createHash("sha256").update(supplierId).digest("hex");
+ if(new URL(verified).pathname.split("/").at(-2)!==supplierHash)throw Error("story_artwork_supplier_changed");
+ return true;
 }

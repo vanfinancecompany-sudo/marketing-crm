@@ -5,7 +5,7 @@ import {readFile} from "node:fs/promises";
 import {Resvg} from "@resvg/resvg-js";
 import {storyArtworkEnabled,ownedStoryArtworkUrl} from "../lib/storyArtworkPolicy.js";
 import {publishedStoryVehicle,verifyStoryStock,vanscoStoryVehicle,boundedStoryGet,verifiedStoryPhoto,signedStoryRentalPricing} from "../lib/storyArtworkSources.mjs";
-import {prepareSelectedStoryArtwork,loadCurrentStoryVehicle} from "../api/_story-artwork.js";
+import {prepareSelectedStoryArtwork,loadCurrentStoryVehicle,assertCurrentStoryArtworkStock} from "../api/_story-artwork.js";
 import {hostStoryArtwork,inspectOwnedStoryArtwork} from "../lib/storyArtworkStorage.mjs";
 import {renderApprovedStory} from "../lib/storyArtworkRenderer.mjs";
 import {buildStoryModel} from "../tools/story-previews/template.mjs";
@@ -140,7 +140,7 @@ test("immutable hosting verifies all bytes, records exact brand/vehicle provenan
 // Existing slot / duplicate / queue functions remain real.
 let bufferInputs=[],artworkCalls=[],artworkFails=false,handoffSkips=[];
 mock.module("../api/_story-artwork.js",{namedExports:{
- loadCurrentStoryVehicle,
+ loadCurrentStoryVehicle,assertCurrentStoryArtworkStock,
  prepareSelectedStoryArtwork:async input=>{
   artworkCalls.push(input);if(artworkFails)throw Error("story_stock_unavailable");
   return {url:hostedUrl(input.brandKey,input.registration),text:"CURRENT STORY\nREGISTRATION: "+input.registration+"\nSee rental options",
@@ -253,4 +253,14 @@ test("actual VFC worker with flags off retains raw post and default media handof
   assert.equal(bufferInputs[0].assets[0].image.url,second);assert.match(bufferInputs[0].text,/ORIGINAL CAPTION/);
   assert.equal(handoffSkips.at(-1),false);
  }finally{globalThis.fetch=before}
+});
+
+test("owned Story mirror rechecks available stock and supplier identity before scheduling",async()=>{
+ const deps={getSnapshot:async()=>snapshot,getDetail:async()=>detail};
+ assert.equal(await assertCurrentStoryArtworkStock(hostedUrl(),"vanFinance",reg,deps),true);
+ await assert.rejects(assertCurrentStoryArtworkStock(hostedUrl(),"vanFinance",reg,{...deps,getDetail:async()=>({...detail,status:"sold"})}),/unavailable/);
+ const nextId="replacement-supplier";
+ await assert.rejects(assertCurrentStoryArtworkStock(hostedUrl(),"vanFinance",reg,{
+  getSnapshot:async()=>({...snapshot,vehicles:[{...snapshot.vehicles[0],supplierStockId:nextId}]}),
+  getDetail:async()=>({...detail,supplierStockId:nextId})}),/supplier_changed/);
 });

@@ -70,7 +70,7 @@ or expiry: owner-reviewed cleanup must check all scheduled/recovery Buffer refer
 and leases before removal. A full store holds new work rather than deleting old media.
 
 The existing VFC Instagram mirror recognises only the exact-registration owned
-Story namespace, verifies full artwork bytes and preserves it without a raw-image
+Story namespace, rechecks current availability and supplier identity, verifies full artwork bytes and preserves it without a raw-image
 fallback, even after a flag is disabled. Other Stories/feed/Reels retain existing
 selection. Wrong-brand/vehicle artwork is held. No Instagram channel is created.
 

@@ -392,6 +392,10 @@ export default async function handler(request, response) {
           continue;
         }
 
+        if (mirror.mediaKind === "story" && ownedStoryArtworkUrl(mirror.mediaUrl,"vanFinance",mirror.registration)) {
+          const {assertCurrentStoryArtworkStock} = await import("./_story-artwork.js");
+          await assertCurrentStoryArtworkStock(mirror.mediaUrl,"vanFinance",mirror.registration);
+        }
         const media = await resolveUsableMedia(supabase, mirror);
         const post = await createInstagramPost(channelId, {
           ...mirror,

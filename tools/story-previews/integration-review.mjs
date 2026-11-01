@@ -30,7 +30,22 @@ const feedUrl=stockOrigin+"/api/vansco-dealerkit-google-vehicle-feed";
 const rows=parseCsvRecords(await get(feedUrl));
 const branchKeys={"VANSCO-333":"vansco333","VANSCO-AIRPORT":"southamptonAirport","VANSCO-NEWFOREST":"newForest"};
 const authoritative=process.argv.includes("--authoritative");
-const specs=[["vanFinance","FV74BEO"],["rent2buy","BT25LVK"],["vansco","FV74BBJ"]];
+const held=[];
+const candidates=[["vanFinance",["FV74BEO"]],["rent2buy",["BT25LVK","BJ74HTL","FV74BBJ"]],["vansco",["FV74BBJ","BT25LVK","BJ74HTL"]]];
+const specs=[],used=new Set();
+for(const [brandKey,registrations]of candidates){
+ let found=false;
+ for(const registration of registrations){
+  if(used.has(registration))continue;
+  try{
+   const pageBrand=brandKey==="vansco"?"vanFinance":brandKey;
+   const url=(pageBrand==="vanFinance"?"https://www.vanfinancecompany.co.uk/vans/":"https://www.rent2buyvans.co.uk/van-pages/")+registration.toLowerCase();
+   publishedStoryVehicle(await get(url),pageBrand,registration);
+   specs.push([brandKey,registration]);used.add(registration);found=true;break;
+  }catch(error){held.push({brandKey,registration,reason:error.message});console.log("PREVIEW_HELD="+JSON.stringify(held.at(-1)))}
+ }
+ if(!found)throw Error("No current distinct public example for "+brandKey+"; "+JSON.stringify(held));
+}
 let meta=[];
 if(authoritative){
  const {fetchVanscoMetaCatalogue}=await import("../../api/_vansco-facebook-source.js");
@@ -83,7 +98,7 @@ for(const [brandKey,registration]of specs){
  reports.push(report);console.log(JSON.stringify(report));
 }
 assert.equal(new Set(reports.map(x=>x.registration)).size,3);
-await writeFile(new URL("provenance.json",out),JSON.stringify(reports,null,2));
+await writeFile(new URL("provenance.json",out),JSON.stringify({reports,held},null,2));
 const sheet='<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="640">'+thumbs.map((b,i)=>'<image x="'+i*360+'" width="360" height="640" href="data:image/png;base64,'+b.toString("base64")+'"/>').join("")+'</svg>';
 const png=new Resvg(sheet).render().asPng();await writeFile(new URL("contact-sheet.png",out),png);
 console.log("STORY_CONTACT_SHEET_BASE64="+png.toString("base64"));
