@@ -9,6 +9,9 @@ import {prepareSelectedStoryArtwork,loadCurrentStoryVehicle} from "../api/_story
 import {hostStoryArtwork,inspectOwnedStoryArtwork} from "../lib/storyArtworkStorage.mjs";
 import {renderApprovedStory} from "../lib/storyArtworkRenderer.mjs";
 import {buildStoryModel} from "../tools/story-previews/template.mjs";
+import {signRent2BuyQuote} from "../lib/rent2BuyQuoteHandoff.mjs";
+import {rent2BuyPricingSourceRevision} from "../lib/rent2BuyCurrentSourceQuote.mjs";
+import {quoteRent2BuyMatrix} from "../lib/rent2BuyFlexiblePricing.mjs";
 import {BUFFER_FACEBOOK_CHANNELS} from "../lib/bufferPublishing.js";
 import * as guard from "../lib/bufferRuntimeGuard.js";
 const reg="AB12CDE",id="supplier1234",first="https://acdn.uk/vansco/i/first.jpeg",second="https://acdn.uk/vansco/i/second.jpeg";
@@ -135,7 +138,7 @@ test("immutable hosting verifies all bytes, records exact brand/vehicle provenan
 
 // Actual existing Facebook worker, with Buffer and artwork boundaries mocked.
 // Existing slot / duplicate / queue functions remain real.
-let bufferInputs=[],artworkCalls=[],artworkFails=false;
+let bufferInputs=[],artworkCalls=[],artworkFails=false,handoffSkips=[];
 mock.module("../api/_story-artwork.js",{namedExports:{
  loadCurrentStoryVehicle,
  prepareSelectedStoryArtwork:async input=>{
@@ -145,7 +148,8 @@ mock.module("../api/_story-artwork.js",{namedExports:{
  },
 }});
 mock.module("../lib/bufferRuntimeGuard.js",{namedExports:{...guard,
- guardedBufferGraphql:async({variables})=>{
+ guardedBufferGraphql:async({variables,skipImageHandoff})=>{
+  handoffSkips.push(skipImageHandoff);
   const input=variables.input;bufferInputs.push(input);
   return {data:{createPost:{post:{...input,id:"new"+bufferInputs.length,status:"scheduled",assets:[{mimeType:"image/png",source:input.assets[0].image.url}]}}}};
  },
@@ -164,7 +168,7 @@ for(const productKey of ["vanFinance","rent2buy"]){
   assert.equal(result.created,true);assert.equal(bufferInputs.length,1);assert.equal(artworkCalls.length,1);
   assert.equal(artworkCalls[0].registration,reg);assert.equal(bufferInputs[0].channelId,channelId);
   assert.equal(bufferInputs[0].dueAt,productKey==="vanFinance"?"2026-11-02T10:15:00.000Z":"2026-11-02T10:25:00.000Z");
-  assert.equal(bufferInputs[0].metadata.facebook.type,"story");assert.doesNotMatch(bufferInputs[0].text,/693/);
+  assert.equal(bufferInputs[0].metadata.facebook.type,"story");assert.equal(handoffSkips.at(-1),true);assert.doesNotMatch(bufferInputs[0].text,/693/);
   assert.equal(bufferInputs[0].assets[0].image.url,hostedUrl(productKey,reg));
   artworkFails=true;bufferInputs=[];
   const held=await createNextStory({...args,posts:[post]});
@@ -219,4 +223,34 @@ test("actual Instagram resolver retains owned Story artwork, never changes feed/
   assert.equal(feed.source,"original_crm");assert.equal(calls[0],raw);
   await assert.rejects(resolveUsableMedia(db,{mediaKind:"story",registration:"XY34ZZZ",mediaUrl:hostedUrl()}),/identity mismatch/);
  } finally {globalThis.fetch=original}
+});
+
+test("ordinary numeric rental pricing requires valid signature, matching current revision and no manual special",()=>{
+ const now=Date.now(),secret="test-only-signing-key-".repeat(3);
+ const source={vehicle:{registration:reg,supplierStockId:id,title:"Test van",year:2025,mileage:12000,
+  vatStatus:"plus_vat",sourceUpdatedAt:"2026-10-23T12:00:00Z"},sourceRetailPrice:12000,sourceMode:"dealerkit_current_stock"};
+ const result=quoteRent2BuyMatrix({retailPrice:12000,registrationYear:2025,vehicleMileage:12000});
+ assert.equal(result.status,"ok");
+ const quote={...result,quoteId:"test-quote-0001",registration:reg,vehicleTitle:"Test van",sourceRevision:rent2BuyPricingSourceRevision(source),issuedAt:now,expiresAt:now+3600000};
+ const token=signRent2BuyQuote(quote,secret,now);
+ const context={token,secret,source,manualSpecialStatus:"none",now};
+ assert.ok(signedStoryRentalPricing(reg,context)?.quote);
+ assert.equal(signedStoryRentalPricing(reg,{...context,manualSpecialStatus:"unknown"}),undefined);
+ assert.equal(signedStoryRentalPricing(reg,{...context,manualSpecialStatus:"active"}),undefined);
+ assert.equal(signedStoryRentalPricing(reg,{...context,token:token+"x"}),undefined);
+ assert.equal(signedStoryRentalPricing(reg,{...context,now:now+3600001}),undefined);
+ assert.equal(signedStoryRentalPricing(reg,{...context,source:{...source,sourceRetailPrice:13000}}),undefined);
+});
+test("actual VFC worker with flags off retains raw post and default media handoff",async()=>{
+ delete process.env.STORY_ARTWORK_VFC_ENABLED;process.env.BUFFER_API_KEY="mock";
+ const before=globalThis.fetch;bufferInputs=[];artworkCalls=[];
+ try{
+  globalThis.fetch=async()=>response();
+  const post={id:"source-off",text:"REGISTRATION: AB12CDE\nORIGINAL CAPTION",channelId:BUFFER_FACEBOOK_CHANNELS["Van Finance Facebook"],status:"scheduled",
+   dueAt:"2026-11-02T09:00:00Z",assets:[{mimeType:"image/jpeg",source:second}]};
+  const result=await createNextStory({posts:[post],productKey:"vanFinance",dateKey:"2026-11-02",now:Date.parse("2026-11-02T08:00:00Z"),storyTarget:3});
+  assert.equal(result.created,true);assert.equal(artworkCalls.length,0);
+  assert.equal(bufferInputs[0].assets[0].image.url,second);assert.match(bufferInputs[0].text,/ORIGINAL CAPTION/);
+  assert.equal(handoffSkips.at(-1),false);
+ }finally{globalThis.fetch=before}
 });

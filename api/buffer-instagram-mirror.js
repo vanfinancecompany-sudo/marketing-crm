@@ -72,12 +72,13 @@ function bufferToken() {
   return token;
 }
 
-async function bufferGraphql(query, variables = undefined) {
+async function bufferGraphql(query, variables = undefined, {skipImageHandoff = false} = {}) {
   return guardedBufferGraphql({
     url: BUFFER_API_URL,
     token: bufferToken(),
     query,
     variables,
+    skipImageHandoff,
   });
 }
 
@@ -318,7 +319,9 @@ async function createInstagramPost(channelId, mirror) {
     dueAt: mirror.dueAt,
   });
   return parseBufferCreatePostPayload(
-    await bufferGraphql(BUFFER_CREATE_POST_MUTATION, { input }),
+    await bufferGraphql(BUFFER_CREATE_POST_MUTATION, { input }, {
+      skipImageHandoff:mirror.mediaKind === "story" && Boolean(ownedStoryArtworkUrl(mirror.mediaUrl,"vanFinance",mirror.registration)),
+    }),
   );
 }
 

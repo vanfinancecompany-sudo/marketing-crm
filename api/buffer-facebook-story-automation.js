@@ -134,12 +134,13 @@ function bufferToken() {
   return token;
 }
 
-async function bufferGraphql(query, variables = undefined) {
+async function bufferGraphql(query, variables = undefined, {skipImageHandoff = false} = {}) {
   return guardedBufferGraphql({
     url: BUFFER_API_URL,
     token: bufferToken(),
     query,
     variables,
+    skipImageHandoff,
   });
 }
 
@@ -425,7 +426,7 @@ async function createStory({ productKey, sourcePost, dueAt, brandedImageOverride
     },
   };
 
-  return parseCreatedPost(await bufferGraphql(CREATE_POST_MUTATION, { input }));
+  return parseCreatedPost(await bufferGraphql(CREATE_POST_MUTATION, { input }, {skipImageHandoff:Boolean(artwork)}));
 }
 
 export async function createNextStory({ posts, productKey, dateKey, now, storyTarget }) {
