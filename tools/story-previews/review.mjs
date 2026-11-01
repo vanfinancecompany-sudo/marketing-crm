@@ -25,7 +25,9 @@ async function publicGet(url,maxBytes=8_000_000) {
  if(parsed.protocol!=="https:"||!sourceHosts.has(parsed.hostname)||parsed.username||parsed.password||parsed.port)
   throw Error("Unapproved public Story source.");
  const response=await fetch(parsed,{method:"GET",redirect:"error",signal:AbortSignal.timeout(45000),
-  headers:{Accept:"application/json,text/html,image/png,image/jpeg,text/tab-separated-values","User-Agent":"MarketingCRM-Story-Preview-Review/1.0"}});
+  headers:parsed.hostname==="www.vansco.co.uk"
+   ? {Accept:"image/webp,image/png,image/jpeg,*/*;q=0.8",Referer:"https://www.vansco.co.uk/","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36"}
+   : {Accept:"application/json,text/html,image/png,image/jpeg,text/tab-separated-values","User-Agent":"MarketingCRM-Story-Preview-Review/1.0"}});
  if(!response.ok)throw Error("Public Story source returned HTTP "+response.status+": "+url);
  const chunks=[];let size=0;
  for await (const chunk of response.body) {size+=chunk.length;if(size>maxBytes)throw Error("Story source is too large.");chunks.push(chunk)}
@@ -193,7 +195,7 @@ for(const [brandKey,vehicle] of [
 await writeFile(new URL("held.json",out),JSON.stringify(held,null,2));
 console.log("HELD_STORIES="+JSON.stringify(held));
 await writeFile(new URL("sources.json",out),JSON.stringify(snapshots.map(({thumbnail,...record})=>record),null,2));
-const sheet='<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="640">'+
+const sheet='<svg xmlns="http://www.w3.org/2000/svg" width="'+(snapshots.length*360)+'" height="640">'+
  snapshots.map((x,i)=>'<image x="'+(i*360)+'" width="360" height="640" href="data:image/png;base64,'+x.thumbnail+'"/>').join("")+'</svg>';
 const sheetPng=render(sheet);await writeFile(new URL("contact-sheet.png",out),sheetPng);
 // Small contact sheet for visual review through GitHub job logs, without any PC files.
