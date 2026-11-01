@@ -16,7 +16,7 @@ const require=createRequire(import.meta.url);
 const out=new URL("../../story-preview-output/",import.meta.url);
 const stockOrigin="https://marketing-crm-six.vercel.app";
 const sourceHosts=new Set(["www.vanfinancecompany.co.uk","www.rent2buyvans.co.uk","marketing-crm-six.vercel.app","static.wixstatic.com","acdn.uk"]);
-sourceHosts.add("www.vansco.co.uk");
+sourceHosts.add("ohqmywlscgdaftlvodlz.supabase.co");
 const checkedAt=new Date().toISOString();
 await mkdir(out,{recursive:true});
 
@@ -154,7 +154,7 @@ function trimmedLogo(bytes,mime="image/png",white=false) {
 const logoAssets={
  vanFinance:{path:"../../assets/van-finance-company.png"},
  rent2buy:{path:"../../assets/rent2buy-vans.png"},
- vansco:{url:"https://www.vansco.co.uk/dist/img/webp/logo-white.webp"},
+ vansco:{url:"https://ohqmywlscgdaftlvodlz.supabase.co/storage/v1/object/public/template-files/vansco-email-studio/logos/b5f97498-5050-4aca-9adf-006734b8ac82.png"},
 };
 const snapshots=[];
 const held=[];
@@ -168,7 +168,13 @@ for(const [brandKey,vehicle] of [
  let logoBytes;
  try {logoBytes=logoSource.path?await readFile(new URL(logoSource.path,import.meta.url)):(await publicGet(logoSource.url)).bytes;}
  catch(error){if(brandKey!=="vansco")throw error;held.push({brandKey,reason:error.message,logoSource:logoSource.url});continue;}
- const logoDataUrl=trimmedLogo(logoBytes,logoSource.url?"image/webp":"image/png",brandKey==="vansco");
+ if(brandKey==="vansco"){
+  assert.ok(logoBytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),"Supplied logo is not a PNG.");
+  const encoded=logoBytes.toString("base64");
+  for(let offset=0,index=0;offset<encoded.length;offset+=16000,index++)
+   console.log("VANSCO_ASSET_CHUNK:"+index+":"+encoded.slice(offset,offset+16000));
+ }
+ const logoDataUrl=trimmedLogo(logoBytes,"image/png",brandKey==="vansco");
  const images=vehicle.registration===finance.registration?financeGallery:await gallery(vehicle.registration);
  // Use the existing raw, exact-registration DealerKit gallery, avoiding
  // legacy branded primaries that may already contain prices/captions.
