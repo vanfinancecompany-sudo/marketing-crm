@@ -1,3 +1,4 @@
+import {ownedStoryArtworkUrl} from "../lib/storyArtworkPolicy.js";
 import { createClient } from "@supabase/supabase-js";
 import {
   bufferDormantPayload,
@@ -245,7 +246,17 @@ export async function preflightPublicMedia(url, mediaKind, request = fetch) {
   }
 }
 
-async function resolveUsableMedia(supabase, mirror) {
+export async function resolveUsableMedia(supabase, mirror) {
+  // Only our exact-registration immutable artwork changes the existing Story path.
+  // Honour already queued artwork even if rollout is later switched off.
+  if (mirror.mediaKind === "story" && ownedStoryArtworkUrl(mirror.mediaUrl,"vanFinance",mirror.registration)) {
+    const {inspectOwnedStoryArtwork} = await import("../lib/storyArtworkStorage.mjs");
+    return {...await inspectOwnedStoryArtwork(mirror.mediaUrl,"vanFinance",mirror.registration),
+      source:"approved_first_image_story_artwork"};
+  }
+  if (mirror.mediaKind === "story" && String(mirror.mediaUrl).includes("/story-artwork/")) {
+    throw Error("Instagram Story artwork identity mismatch; held without raw-image fallback.");
+  }
   const original = await resolveOriginalMediaUrl(supabase, mirror).catch((error) => {
     console.warn("[buffer-instagram-mirror] original media lookup deferred", {
       registration: mirror.registration,
