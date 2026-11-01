@@ -1,5 +1,5 @@
 import {createHash} from "node:crypto";
-import {ownedStoryArtworkUrl,storyFirstPhotoPublishingHold} from "../lib/storyArtworkPolicy.js";
+import {ownedStoryArtworkUrl} from "../lib/storyArtworkPolicy.js";
 // Dormant integration only. No endpoint, scheduler, channel discovery or Buffer client.
 import {fetchDealerKitStockSnapshot,fetchDealerKitStockDetail} from "./_dealerkit-stock-adapter.js";
 import {storyArtworkEnabled,storyRegistration} from "../lib/storyArtworkPolicy.js";
@@ -49,13 +49,13 @@ export async function prepareSelectedStoryArtwork(input,{
 }={}){
  if(!dryRun&&!storyArtworkEnabled(input.brandKey,env))return null;
  const vehicle=await loadVehicle(input);
- const publishingHold=storyFirstPhotoPublishingHold(input.brandKey,vehicle.imageSource);
- if(publishingHold&&!dryRun)throw Error(publishingHold);
+ // Use the verified brand gallery's first image, even when it already carries
+ // the owner's existing promotional artwork. Never substitute a secondary.
  const photo=verifiedStoryPhoto(await boundedStoryGet(vehicle.imageSource,{fetchImpl,image:true}));
  const model=buildStoryModel(input.brandKey,vehicle);
  const renderImpl=render||(await import("../lib/storyArtworkRenderer.mjs")).renderApprovedStory;
  const rendered=await renderImpl(model,{photoDataUrl:photo.dataUrl});
- const provenance={source:vehicle.source,publishingHold:publishingHold||null,firstImageUrl:vehicle.imageSource,firstImageIndex:0,
+ const provenance={source:vehicle.source,publishingHold:null,firstImageUrl:vehicle.imageSource,firstImageIndex:0,
    sourceSha256:photo.sha256,pricingMode:model.pricingMode,layoutCommit:"db662f517a23b2bfeae2511e274fa163af2694ac"};
  // Freshly composed caption only. In particular, never repeat stale rental prices.
  const text=[model.brand.name+" · TODAY'S STORY",model.registration,model.title,
