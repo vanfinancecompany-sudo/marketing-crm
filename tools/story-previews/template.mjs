@@ -134,7 +134,7 @@ export function renderStorySvg(model,{photoDataUrl,logoDataUrl="",measure,drawTe
  '<title>'+escapeXml(b.name+" · "+model.title+" · "+model.registration)+'</title>'+
  '<g font-family="Inter,Arial,sans-serif">'+
  '<rect width="1080" height="1920" fill="'+b.dark+'"/>'+
- '<rect x="72" y="250" width="936" height="124" rx="16" fill="#ffffff"/>'+logo+
+ '<rect x="72" y="250" width="936" height="124" rx="16" fill="'+(model.brandKey==="vansco"?b.dark:"#ffffff")+'"/>'+logo+
  '<rect x="754" y="288" width="230" height="54" rx="9" fill="'+b.accent+'"/>'+
  text(model.registration,774,326,30,"#ffffff",900)+
  text(b.eyebrow,72,414,model.brandKey==="rent2buy"?51:40,"#ffffff",900)+

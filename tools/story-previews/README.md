@@ -55,3 +55,5 @@ The PR workflow installs locked dependencies without package scripts, runs focus
 ## Design revision
 
 Photo area increased to 960px (50% of the canvas); the complete 4:3 photograph is contained at up to 1080 × 810 without cropping or stretching. Genuine existing repository logos replace text lockups, with unused image padding trimmed for presentation only. Rent2Buy leads with NO CREDIT CHECK VANS, then protected prices and term. VFC emphasizes exploring finance, deposit and term options without rates or approval claims. Vansco's revised layout requires its genuine logo asset; no replacement is invented. Missing logo sources are recorded in held.json, and that brand is withheld from the new artifact until the asset is provided. Pricing and publishing code is unchanged.
+
+Vansco's genuine white logo source was supplied by the owner: https://www.vansco.co.uk/dist/img/webp/logo-white.webp . It is displayed on charcoal, without recolouring or recreating the artwork.
