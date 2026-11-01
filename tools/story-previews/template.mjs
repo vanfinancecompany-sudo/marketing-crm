@@ -166,7 +166,7 @@ export function renderVanscoAdvertSvg(model,{photoDataUrl,logoDataUrl,measure,dr
  const derivative=words.slice(2).join(" ");
  const nameFit=fitText(name,{maxLines:1,maxSize:88,minSize:48,measure});
  const trimFit=fitText(derivative,{maxLines:1,maxSize:38,minSize:28,measure});
- const factFit=fitText(model.facts.join("  ·  "),{maxLines:1,maxSize:32,minSize:28,measure});
+ const factFit=fitText(model.facts.join("  ·  "),{width:854,maxLines:1,maxSize:32,minSize:28,measure});
  const price=model.headline.match(/^(£[0-9,.]+)\s+(.+)$/);
  if(!price||!model.branch)throw Error("Verified Vansco price, VAT and branch are required.");
  const priceFit=fitText(price[1],{width:650,maxLines:1,maxSize:116,minSize:72,measure});
@@ -181,18 +181,18 @@ export function renderVanscoAdvertSvg(model,{photoDataUrl,logoDataUrl,measure,dr
  '<rect x="792" y="278" width="216" height="58" rx="9" fill="#2a3033" stroke="'+gold+'" stroke-width="2"/>'+
  text(model.registration,813,318,30,white,800)+
  text(nameFit.lines[0],72,425,nameFit.size,white,900)+
- text(trimFit.lines[0],76,477,trimFit.size,gold,500)+
- '<image href="'+rasterUri(photoDataUrl)+'" x="0" y="500" width="1080" height="810" preserveAspectRatio="xMidYMid meet"/>'+
- '<rect x="72" y="1336" width="60" height="4" fill="'+gold+'"/>'+
- text(factFit.lines[0],154,1350,factFit.size,"#dce0e1",500)+
- text(price[1],72,1453,priceFit.size,white,900)+
- text(price[2],vatX,1453,44,gold,700)+
- text(model.branch.label,72,1494,32,"#dce0e1",500)+
- '<rect x="72" y="1520" width="936" height="60" rx="10" fill="#ca2638"/>'+
- text("VIEW THIS VAN",100,1558,36,white,900)+
- '<circle cx="952" cy="1550" r="21" fill="#ffffff" opacity=".12"/>'+
- '<path d="M 942 1540 L 956 1550 L 942 1560 M 930 1550 H 955" stroke="#ffffff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'+
- text("vansco.co.uk",590,1558,28,white,500)+
+ text(trimFit.lines[0],76,466,trimFit.size,gold,500)+
+ '<image href="'+rasterUri(photoDataUrl)+'" x="0" y="480" width="1080" height="810" preserveAspectRatio="xMidYMid meet"/>'+
+ '<rect x="72" y="1304" width="60" height="4" fill="'+gold+'"/>'+
+ text(factFit.lines[0],154,1318,factFit.size,"#dce0e1",500)+
+ text(price[1],72,1428,priceFit.size,white,900)+
+ text(price[2],vatX,1428,44,gold,700)+
+ text(model.branch.label,72,1465,32,"#dce0e1",500)+
+ '<rect x="72" y="1484" width="936" height="96" rx="10" fill="#ca2638"/>'+
+ text("VIEW THIS VAN",102,1525,40,white,900)+
+ '<circle cx="934" cy="1532" r="31" fill="#ffffff" opacity=".12"/>'+
+ '<path d="M 925 1517 L 944 1532 L 925 1547 M 909 1532 H 943" stroke="#ffffff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'+
+ text("vansco.co.uk",102,1560,28,white,500)+
  (safeGuide?'<rect x="72" y="250" width="936" height="1330" fill="none" stroke="#09a3be" stroke-width="4" stroke-dasharray="16 12"/><rect width="1080" height="250" fill="#09a3be" opacity=".18"/><rect y="1580" width="1080" height="340" fill="#09a3be" opacity=".18"/>':"")+
  '</svg>';
 }
