@@ -155,13 +155,14 @@ const logoAssets={
  rent2buy:{path:"../../assets/rent2buy-vans.png"},
  vansco:{path:"../../assets/vansco-logo.png"},
 };
+const selectedBrand=process.argv.includes("--brand=vansco")?"vansco":"";
 const snapshots=[];
 const held=[];
 for(const [brandKey,vehicle] of [
  ["vanFinance",finance],
  ["rent2buy",rental],
  ["vansco",vansco],
-]) {
+].filter(([key])=>!selectedBrand||key===selectedBrand)) {
  const logoSource=logoAssets[brandKey];
  assert.ok(logoSource?.path,"A saved genuine brand logo is required.");
  const logoBytes=await readFile(new URL(logoSource.path,import.meta.url));
@@ -190,7 +191,7 @@ for(const [brandKey,vehicle] of [
  snapshots.push({brandKey,snapshot,model,bytes:png.byteLength,thumbnail:thumbnail.toString("base64")});
  console.log(JSON.stringify({preview:brandKey,registration:vehicle.registration,title:model.title,headline:model.headline,details:model.details,bytes:png.byteLength,branch:brandKey==="vansco"?branchKey:undefined}));
 }
-assert.equal(snapshots.length,3,"All three revised brand exports must be present.");
+assert.equal(snapshots.length,selectedBrand?1:3,"Requested brand exports must be present.");
 await writeFile(new URL("held.json",out),JSON.stringify(held,null,2));
 console.log("HELD_STORIES="+JSON.stringify(held));
 await writeFile(new URL("sources.json",out),JSON.stringify(snapshots.map(({thumbnail,...record})=>record),null,2));
@@ -200,4 +201,4 @@ const sheetPng=render(sheet);await writeFile(new URL("contact-sheet.png",out),sh
 // Small contact sheet for visual review through GitHub job logs, without any PC files.
 console.log("STORY_CONTACT_SHEET_BASE64="+sheetPng.toString("base64"));
 const cards=snapshots.map(({brandKey,model})=>'<article><h2>'+escapeXml(model.brand.name)+'</h2><div class="image"><img src="'+brandKey+'.png" data-clean="'+brandKey+'.png" data-safe="'+brandKey+'-safe.png" alt="'+escapeXml(model.title+" "+model.headline)+'"></div><p>'+escapeXml(model.registration+" · "+model.title)+'</p><a href="'+brandKey+'.png" download>Download 1080 × 1920 PNG</a> · <a href="'+escapeXml(model.vehicleUrl)+'">Source listing</a></article>').join("");
-await writeFile(new URL("index.html",out),'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Branded Story previews · review only</title><style>body{margin:0;background:#eef0f3;color:#172333;font:16px/1.5 Arial,sans-serif}main{max-width:1250px;margin:auto;padding:30px}h1{font-size:30px}header{margin-bottom:30px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}article{padding:18px;background:white;border-radius:18px}h2{font-size:20px}.image img{display:block;width:100%;height:auto}a{color:#0656b0}button{padding:12px 18px;background:#172333;color:white;border:0;border-radius:8px;font:inherit;cursor:pointer}@media(max-width:850px){.grid{grid-template-columns:1fr}article{max-width:440px;margin:auto}}</style><main><header><p>REVIEW ONLY · NO PUBLISHING CONNECTION</p><h1>Vehicle Stories, designed for the small screen</h1><p>Three revised brand designs with genuine saved logos. Public data checked '+escapeXml(checkedAt)+'. Existing stock, pricing, schedules and publishing are untouched.</p><button id="guides" aria-pressed="false">Show Story safe areas</button><p>Important copy stays between 250px and 1580px, with 72px side margins. Safe areas are a conservative design guide; platform interfaces vary. The CTA is visual artwork, not a clickable sticker.</p><a href="sources.json">Vehicle facts and source evidence</a></header><section class="grid">'+cards+'</section></main><script>document.querySelector("#guides").onclick=function(){const show=this.getAttribute("aria-pressed")!=="true";this.setAttribute("aria-pressed",show);this.textContent=show?"Hide Story safe areas":"Show Story safe areas";document.querySelectorAll("img[data-clean]").forEach(img=>img.src=show?img.dataset.safe:img.dataset.clean)}</script></html>');
+await writeFile(new URL("index.html",out),'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Branded Story previews · review only</title><style>body{margin:0;background:#eef0f3;color:#172333;font:16px/1.5 Arial,sans-serif}main{max-width:1250px;margin:auto;padding:30px}h1{font-size:30px}header{margin-bottom:30px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}article{padding:18px;background:white;border-radius:18px}h2{font-size:20px}.image img{display:block;width:100%;height:auto}a{color:#0656b0}button{padding:12px 18px;background:#172333;color:white;border:0;border-radius:8px;font:inherit;cursor:pointer}@media(max-width:850px){.grid{grid-template-columns:1fr}article{max-width:440px;margin:auto}}</style><main><header><p>REVIEW ONLY · NO PUBLISHING CONNECTION</p><h1>Vansco · dealership advert study</h1><p>Vansco dealership advert study. VFC and Rent2Buy designs are unchanged. Public data checked '+escapeXml(checkedAt)+'. Existing stock, pricing, schedules and publishing are untouched.</p><button id="guides" aria-pressed="false">Show Story safe areas</button><p>Important copy stays between 250px and 1580px, with 72px side margins. Safe areas are a conservative design guide; platform interfaces vary. The CTA is visual artwork, not a clickable sticker.</p><a href="sources.json">Vehicle facts and source evidence</a></header><section class="grid">'+cards+'</section></main><script>document.querySelector("#guides").onclick=function(){const show=this.getAttribute("aria-pressed")!=="true";this.setAttribute("aria-pressed",show);this.textContent=show?"Hide Story safe areas":"Show Story safe areas";document.querySelectorAll("img[data-clean]").forEach(img=>img.src=show?img.dataset.safe:img.dataset.clean)}</script></html>');

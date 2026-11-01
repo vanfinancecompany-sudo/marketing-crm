@@ -119,6 +119,7 @@ function rasterUri(value) {
  return value;
 }
 export function renderStorySvg(model,{photoDataUrl,logoDataUrl="",measure,drawText,safeGuide=false}={}) {
+ if(model.brandKey==="vansco")return renderVanscoAdvertSvg(model,{photoDataUrl,logoDataUrl,measure,drawText,safeGuide});
  const b=model.brand;
  const title=fitText(model.title,{measure});
  const headline=fitText(model.headline,{maxLines:1,maxSize:66,minSize:44,measure});
@@ -152,4 +153,46 @@ export function renderStorySvg(model,{photoDataUrl,logoDataUrl="",measure,drawTe
  (safeGuide?'<rect x="72" y="250" width="936" height="1330" fill="none" stroke="#09a3be" stroke-width="4" stroke-dasharray="16 12"/><rect width="1080" height="250" fill="#09a3be" opacity=".18"/><rect y="1580" width="1080" height="340" fill="#09a3be" opacity=".18"/>':"")+
  '</g></svg>';
  return svg;
+}
+
+/** Vansco-only dealership advert study. Other brand layouts stay unchanged. */
+export function renderVanscoAdvertSvg(model,{photoDataUrl,logoDataUrl,measure,drawText,safeGuide=false}={}) {
+ if(!logoDataUrl)throw Error("A genuine brand logo is required.");
+ const text=drawText||((value,x,y,size,fill="#ffffff",weight=700)=>'<text x="'+x+'" y="'+y+'" font-size="'+size+'" fill="'+fill+'" font-weight="'+weight+'">'+escapeXml(value)+'</text>');
+ const measureWidth=measure||((value,size)=>value.length*size*.64);
+ const gold="#d6b75a",white="#ffffff";
+ const words=model.title.split(" ");
+ const name=words.slice(0,2).join(" ");
+ const derivative=words.slice(2).join(" ");
+ const nameFit=fitText(name,{maxLines:1,maxSize:88,minSize:48,measure});
+ const trimFit=fitText(derivative,{maxLines:1,maxSize:38,minSize:28,measure});
+ const factFit=fitText(model.facts.join("  ·  "),{maxLines:1,maxSize:32,minSize:28,measure});
+ const price=model.headline.match(/^(£[0-9,.]+)\s+(.+)$/);
+ if(!price||!model.branch)throw Error("Verified Vansco price, VAT and branch are required.");
+ const priceFit=fitText(price[1],{width:650,maxLines:1,maxSize:116,minSize:72,measure});
+ const vatX=Math.min(780,72+measureWidth(price[1],priceFit.size)+24);
+ return '<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">'+
+ '<title>'+escapeXml("Vansco · "+model.title+" · "+model.registration)+'</title>'+
+ '<defs><linearGradient id="vansco-night" x2="0.8" y2="1"><stop stop-color="#22282b"/><stop offset="1" stop-color="#070b0e"/></linearGradient></defs>'+
+ '<rect width="1080" height="1920" fill="url(#vansco-night)"/>'+
+ '<path d="M 810 0 H 1080 V 1920 H 960 Z" fill="#d6b75a" opacity=".045"/>'+
+ '<path d="M 72 218 H 1008" stroke="'+gold+'" stroke-width="3" opacity=".6"/>'+
+ '<image href="'+rasterUri(logoDataUrl)+'" x="72" y="250" width="590" height="106" preserveAspectRatio="xMinYMid meet"/>'+
+ '<rect x="792" y="278" width="216" height="58" rx="9" fill="#2a3033" stroke="'+gold+'" stroke-width="2"/>'+
+ text(model.registration,813,318,30,white,800)+
+ text(nameFit.lines[0],72,425,nameFit.size,white,900)+
+ text(trimFit.lines[0],76,477,trimFit.size,gold,500)+
+ '<image href="'+rasterUri(photoDataUrl)+'" x="0" y="500" width="1080" height="810" preserveAspectRatio="xMidYMid meet"/>'+
+ '<rect x="72" y="1336" width="60" height="4" fill="'+gold+'"/>'+
+ text(factFit.lines[0],154,1350,factFit.size,"#dce0e1",500)+
+ text(price[1],72,1453,priceFit.size,white,900)+
+ text(price[2],vatX,1453,44,gold,700)+
+ text(model.branch.label,72,1494,32,"#dce0e1",500)+
+ '<rect x="72" y="1520" width="936" height="60" rx="10" fill="#ca2638"/>'+
+ text("VIEW THIS VAN",100,1558,36,white,900)+
+ '<circle cx="952" cy="1550" r="21" fill="#ffffff" opacity=".12"/>'+
+ '<path d="M 942 1540 L 956 1550 L 942 1560 M 930 1550 H 955" stroke="#ffffff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'+
+ text("vansco.co.uk",590,1558,28,white,500)+
+ (safeGuide?'<rect x="72" y="250" width="936" height="1330" fill="none" stroke="#09a3be" stroke-width="4" stroke-dasharray="16 12"/><rect width="1080" height="250" fill="#09a3be" opacity=".18"/><rect y="1580" width="1080" height="340" fill="#09a3be" opacity=".18"/>':"")+
+ '</svg>';
 }

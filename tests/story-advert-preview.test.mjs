@@ -150,3 +150,15 @@ test("revision requires a genuine logo and enlarges the photo without cropping",
  assert.match(svg,/NO CREDIT CHECK VANS/);
  assert.doesNotMatch(svg,/>RENT2BUY</);
 });
+
+test("Vansco advert study keeps the genuine logo, uncropped hero, safe copy and earlier arrow CTA",()=>{
+ const model=buildStoryModel("vansco",vansco());
+ const svg=renderStorySvg(model,{photoDataUrl:photo,logoDataUrl:photo});
+ assert.match(svg,/vansco-night/);
+ assert.match(svg,/width="1080" height="810" preserveAspectRatio="xMidYMid meet"/);
+ assert.match(svg,/VIEW THIS VAN/);
+ assert.match(svg,/stroke-linejoin="round"/);
+ assert.doesNotMatch(svg,/fill="#f8f7f3"/);
+ assert.ok(svg.includes(model.headline.split(" ")[0]));
+ assert.ok(svg.includes(model.branch.label));
+});
