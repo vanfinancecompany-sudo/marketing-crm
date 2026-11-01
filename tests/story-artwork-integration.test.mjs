@@ -265,16 +265,27 @@ test("owned Story mirror rechecks available stock and supplier identity before s
   getDetail:async()=>({...detail,supplierStockId:nextId})}),/supplier_changed/);
 });
 
-test("known pre-composed first-gallery source class holds live artwork while remaining inspectable in dry run",async()=>{
+test("owner-approved branded Wix first images stay first and pass the guarded artwork path",async()=>{
  let writes=0,downloads=0;
- const source={...vehicle,imageSource:"https://static.wixstatic.com/media/existing-advert.png"};
+ const originalImage="https://static.wixstatic.com/media/existing-advert.png";
  for(const brandKey of ["vanFinance","rent2buy"]){
+  const current={...vehicle,imageSource:originalImage,
+   vehicleUrl:brandKey==="rent2buy"?"https://www.rent2buyvans.co.uk/van-pages/ab12cde":vehicle.vehicleUrl};
   const deps={env:{STORY_ARTWORK_VFC_ENABLED:"true",STORY_ARTWORK_RENT2BUY_ENABLED:"true"},
-   loadVehicle:async()=>source,fetchImpl:async()=>{downloads++;return response()},host:async()=>{writes++}};
-  await assert.rejects(prepareSelectedStoryArtwork({brandKey},deps),/embedded_copy_unverified/);
+   loadVehicle:async()=>current,
+   fetchImpl:async url=>{assert.equal(url,originalImage);downloads++;return response()},
+   host:async()=>{writes++;return {url:hostedUrl(brandKey)}}};
+  const result=await prepareSelectedStoryArtwork({brandKey,dueAt:"2026-11-02T12:45:00Z"},deps);
+  assert.equal(result.provenance.firstImageUrl,originalImage);
+  assert.equal(result.provenance.firstImageIndex,0);
+  assert.equal(result.provenance.publishingHold,null);
+  assert.equal(result.url,hostedUrl(brandKey));
  }
- assert.equal(writes,0);assert.equal(downloads,0);
+ assert.equal(writes,2);assert.equal(downloads,2);
  const review=await prepareSelectedStoryArtwork({brandKey:"vanFinance"},{
-  dryRun:true,loadVehicle:async()=>source,fetchImpl:async()=>response(),host:()=>{throw Error("no uploads")}});
- assert.equal(review.provenance.publishingHold,"story_first_gallery_image_embedded_copy_unverified");
+  dryRun:true,loadVehicle:async()=>({...vehicle,imageSource:originalImage}),
+  fetchImpl:async url=>{assert.equal(url,originalImage);return response()},
+  host:()=>{throw Error("no uploads")}});
+ assert.equal(review.provenance.firstImageUrl,originalImage);
+ assert.equal(review.provenance.publishingHold,null);
 });
