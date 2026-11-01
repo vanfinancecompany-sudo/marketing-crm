@@ -1,3 +1,5 @@
+import {storyArtworkEnabled} from "../lib/storyArtworkPolicy.js";
+import {prepareSelectedStoryArtwork} from "./_story-artwork.js";
 import { createClient } from "@supabase/supabase-js";
 import {
   bufferDormantPayload,
@@ -132,12 +134,13 @@ function bufferToken() {
   return token;
 }
 
-async function bufferGraphql(query, variables = undefined) {
+async function bufferGraphql(query, variables = undefined, {skipImageHandoff = false} = {}) {
   return guardedBufferGraphql({
     url: BUFFER_API_URL,
     token: bufferToken(),
     query,
     variables,
+    skipImageHandoff,
   });
 }
 
@@ -397,15 +400,15 @@ async function loadFinanceBrandedImageUrls(registrations) {
   return byReg;
 }
 
-async function createStory({ productKey, sourcePost, dueAt, brandedImageOverride = "" }) {
-  const mediaUrl = brandedImageOverride || imageSource(sourcePost);
+async function createStory({ productKey, sourcePost, dueAt, brandedImageOverride = "", artwork = null }) {
+  const mediaUrl = artwork?.url || brandedImageOverride || imageSource(sourcePost);
   if (!mediaUrl) throw new Error("The selected classified image does not have a public image URL.");
   const originalText = String(sourcePost?.text || "").trim();
   if (!originalText) throw new Error("The selected classified post does not have a caption.");
   // Distinct copy: Buffer rejects publishing the exact same classified caption
   // again as a Story near the original Facebook image post.
   const storyHeading = productKey === "rent2buy" ? "RENT2BUY VANS · TODAY'S STORY" : "VAN FINANCE COMPANY · TODAY'S STORY";
-  const text = `${storyHeading}\n\n${originalText}`;
+  const text = artwork?.text || `${storyHeading}\n\n${originalText}`;
 
   const input = {
     text,
@@ -423,10 +426,10 @@ async function createStory({ productKey, sourcePost, dueAt, brandedImageOverride
     },
   };
 
-  return parseCreatedPost(await bufferGraphql(CREATE_POST_MUTATION, { input }));
+  return parseCreatedPost(await bufferGraphql(CREATE_POST_MUTATION, { input }, {skipImageHandoff:Boolean(artwork)}));
 }
 
-async function createNextStory({ posts, productKey, dateKey, now, storyTarget }) {
+export async function createNextStory({ posts, productKey, dateKey, now, storyTarget }) {
   if (storyTarget <= 0) {
     return { skipped: "target_met", existing: 0, target: 0 };
   }
@@ -466,6 +469,32 @@ async function createNextStory({ posts, productKey, dateKey, now, storyTarget })
       catchUp: Boolean(slotInfo.slot.catchUp),
     };
   };
+  // Opt-in changes media only AFTER the existing slot and candidates are chosen.
+  // A failed current-stock / first-photo check holds the candidate, never raw-caption fallback.
+  if (storyArtworkEnabled(productKey)) {
+    for (const sourcePost of candidates) {
+      let artwork;
+      try {
+        artwork = await prepareSelectedStoryArtwork({
+          brandKey: productKey, registration: extractBufferRegistration(sourcePost?.text),
+          dueAt: slotInfo.slot.dueAt,
+        });
+      } catch (error) {
+        recordFailure(String(error?.message || "story_artwork_unavailable").slice(0,100));
+        continue;
+      }
+      try {
+        const post = await createStory({productKey,sourcePost,dueAt:slotInfo.slot.dueAt,artwork});
+        return {...recordCreated(post,sourcePost,"approved_first_image_story_artwork"),
+          artwork:artwork.provenance};
+      } catch (error) {
+        if (!RECOVERABLE_STORY_MEDIA_ERROR.test(String(error?.message || error))) throw error;
+        rejectedDuplicateOrMedia += 1;
+      }
+    }
+    return {skipped:"story_artwork_held",checked:candidates.length,checkReasons,
+      bufferRejected:rejectedDuplicateOrMedia,localTime:slotInfo.slot.localTime};
+  }
   // Check Van Finance image headers together so six slow CDN responses cannot
   // consume the entire 120-second worker window. No additional Buffer calls.
   const primaryChecks = productKey === "vanFinance"

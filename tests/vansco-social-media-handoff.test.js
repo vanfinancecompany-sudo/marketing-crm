@@ -169,7 +169,9 @@ test("Vansco-only code paths have the handoff, while VFC/Rent2Buy retain their d
  const stories=readFileSync(new URL("../api/vansco-facebook-story-automation-worker.js",import.meta.url),"utf8");
  const instagram=readFileSync(new URL("../api/vansco-instagram-automation-worker.js",import.meta.url),"utf8");
  assert.match(vanscoRuntime,/prepareVanscoBufferImages\(urls, \{ vehicleId, dueAt \}\)/);
- assert.equal((vanscoRuntime.match(/prepareVanscoBufferImages\(\[compatibleImage\], \{ vehicleId, dueAt \}\)/g)||[]).length,2);
+ assert.equal((vanscoRuntime.match(/prepareVanscoBufferImages\(\[compatibleImage\], \{ vehicleId, dueAt \}\)/g)||[]).length,1);
+ assert.match(vanscoRuntime,/prepareImages = prepareVanscoBufferImages/);
+ assert.match(vanscoRuntime,/: await prepareImages\(\[compatibleImage\], \{ vehicleId, dueAt \}\)/);
  assert.match(instaRuntime,/prepareVanscoBufferImages\(\[url\], \{vehicleId,dueAt\}\)/);
  assert.match(instaRuntime,/skipImageHandoff:true/);
  assert.match(guard,/skipImageHandoff = false/);

@@ -1,0 +1,40 @@
+name: Story artwork integration review
+on:
+  pull_request:
+    paths:
+      - 'lib/storyArtwork*'
+      - 'api/_story-artwork.js'
+      - 'api/buffer-facebook-story-automation.js'
+      - 'api/buffer-instagram-mirror.js'
+      - 'api/vansco-facebook-story-automation-worker.js'
+      - 'api/_vansco-buffer-runtime.js'
+      - 'api/_vansco-facebook-source.js'
+      - 'tests/story-artwork-integration.test.mjs'
+      - 'tools/story-previews/integration-review.mjs'
+      - '.github/workflows/story-artwork-integration-review.yml'
+permissions:
+  contents: read
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Integration mocks and existing Story / pricing / mirror regressions
+        run: node --experimental-test-module-mocks --test tests/story-artwork-integration.test.mjs tests/story-advert-preview.test.mjs tests/rent2buy-current-source-quote.test.mjs tests/rent2buy-quote-handoff.test.mjs tests/rent2buy-flexible-pricing.test.mjs tests/buffer-full-automation.test.js tests/buffer-instagram-mirror.test.js tests/buffer-recovery-and-story-safety-20261011.test.js tests/vansco-facebook-automation.test.js tests/vansco-instagram-automation.test.js tests/vansco-social-media-handoff.test.js
+      - name: Render three distinct vehicles using public first-image sources, without credentials or writes
+        run: node tools/story-previews/integration-review.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: story-artwork-integration-review
+          path: story-integration-output/
+          if-no-files-found: warn
+          retention-days: 30

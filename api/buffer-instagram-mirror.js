@@ -1,3 +1,4 @@
+import {ownedStoryArtworkUrl} from "../lib/storyArtworkPolicy.js";
 import { createClient } from "@supabase/supabase-js";
 import {
   bufferDormantPayload,
@@ -71,12 +72,13 @@ function bufferToken() {
   return token;
 }
 
-async function bufferGraphql(query, variables = undefined) {
+async function bufferGraphql(query, variables = undefined, {skipImageHandoff = false} = {}) {
   return guardedBufferGraphql({
     url: BUFFER_API_URL,
     token: bufferToken(),
     query,
     variables,
+    skipImageHandoff,
   });
 }
 
@@ -245,7 +247,17 @@ export async function preflightPublicMedia(url, mediaKind, request = fetch) {
   }
 }
 
-async function resolveUsableMedia(supabase, mirror) {
+export async function resolveUsableMedia(supabase, mirror) {
+  // Only our exact-registration immutable artwork changes the existing Story path.
+  // Honour already queued artwork even if rollout is later switched off.
+  if (mirror.mediaKind === "story" && ownedStoryArtworkUrl(mirror.mediaUrl,"vanFinance",mirror.registration)) {
+    const {inspectOwnedStoryArtwork} = await import("../lib/storyArtworkStorage.mjs");
+    return {...await inspectOwnedStoryArtwork(mirror.mediaUrl,"vanFinance",mirror.registration),
+      source:"approved_first_image_story_artwork"};
+  }
+  if (mirror.mediaKind === "story" && String(mirror.mediaUrl).includes("/story-artwork/")) {
+    throw Error("Instagram Story artwork identity mismatch; held without raw-image fallback.");
+  }
   const original = await resolveOriginalMediaUrl(supabase, mirror).catch((error) => {
     console.warn("[buffer-instagram-mirror] original media lookup deferred", {
       registration: mirror.registration,
@@ -307,7 +319,9 @@ async function createInstagramPost(channelId, mirror) {
     dueAt: mirror.dueAt,
   });
   return parseBufferCreatePostPayload(
-    await bufferGraphql(BUFFER_CREATE_POST_MUTATION, { input }),
+    await bufferGraphql(BUFFER_CREATE_POST_MUTATION, { input }, {
+      skipImageHandoff:mirror.mediaKind === "story" && Boolean(ownedStoryArtworkUrl(mirror.mediaUrl,"vanFinance",mirror.registration)),
+    }),
   );
 }
 
@@ -378,6 +392,10 @@ export default async function handler(request, response) {
           continue;
         }
 
+        if (mirror.mediaKind === "story" && ownedStoryArtworkUrl(mirror.mediaUrl,"vanFinance",mirror.registration)) {
+          const {assertCurrentStoryArtworkStock} = await import("./_story-artwork.js");
+          await assertCurrentStoryArtworkStock(mirror.mediaUrl,"vanFinance",mirror.registration);
+        }
         const media = await resolveUsableMedia(supabase, mirror);
         const post = await createInstagramPost(channelId, {
           ...mirror,

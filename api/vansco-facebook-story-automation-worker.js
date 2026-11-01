@@ -1,3 +1,5 @@
+import {storyArtworkEnabled} from "../lib/storyArtworkPolicy.js";
+import {prepareSelectedStoryArtwork} from "./_story-artwork.js";
 import {
   bufferDormantPayload,
   isBufferScheduledRunDue,
@@ -178,7 +180,7 @@ export default async function handler(request, response) {
     }
 
     const [vehicles, bufferConfig, history] = await Promise.all([
-      fetchVanscoMetaCatalogue({ preferLiveMetaImages: true }),
+      fetchVanscoMetaCatalogue({ preferLiveMetaImages: true, storyPrimaryProof: storyArtworkEnabled("vansco") }),
       loadVanscoBufferConfig(),
       loadVanscoFacebookStoryHistory(),
     ]);
@@ -257,10 +259,25 @@ export default async function handler(request, response) {
         if (!vehicle) break;
 
         try {
+          let artwork = null;
+          if (storyArtworkEnabled("vansco")) {
+            try {
+              artwork = await prepareSelectedStoryArtwork({
+                brandKey:"vansco",registration:vehicle.registration,vehicle,dueAt:slot.dueAt,
+              });
+            } catch (error) {
+              // Keep existing candidate recovery, slots and history. No raw-photo substitution.
+              excludedUrls.add(vehicle.vehicleUrl);
+              held.push({vehicleKey:vehicle.vehicleKey,registration:vehicle.registration,
+                reason:"story_artwork_held",error:clean(error?.message||error).slice(0,200)});
+              continue;
+            }
+          }
           const post = await createVanscoFacebookStory({
             config: bufferConfig,
-            text: buildVanscoFacebookCaption(vehicle),
+            text: artwork?.text || buildVanscoFacebookCaption(vehicle),
             imageUrl: vehicle.imageUrl,
+            storyArtwork: artwork,
             vehicleId: vehicle.vehicleId,
             dueAt: slot.dueAt,
           });
@@ -277,6 +294,7 @@ export default async function handler(request, response) {
             vehicleUrl: vehicle.vehicleUrl,
             dueAt: post.dueAt || slot.dueAt,
             localTime: slot.localTime,
+            ...(artwork ? {artwork:artwork.provenance} : {}),
           });
           filled = true;
           break;

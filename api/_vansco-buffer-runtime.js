@@ -1,3 +1,4 @@
+import {ownedStoryArtworkUrl} from "../lib/storyArtworkPolicy.js";
 import { list, put } from "@vercel/blob";
 import { prepareVanscoBufferImages } from "../lib/vanscoSocialMediaHandoff.js";
 import { isBufferApiActiveWindow } from "../lib/bufferActiveWindow.js";
@@ -1059,14 +1060,23 @@ export async function createVanscoFacebookStory({
   imageUrl,
   dueAt,
   vehicleId,
+  storyArtwork = null,
+  request = bufferGraphql,
+  prepareImages = prepareVanscoBufferImages,
 }) {
-  const compatibleImage = vanscoBufferCompatibleImageUrl(imageUrl);
+  const artworkUrl = storyArtwork
+    ? ownedStoryArtworkUrl(storyArtwork.url,"vansco",storyArtwork.model?.registration) : "";
+  if (storyArtwork && (!artworkUrl || storyArtwork.vehicle?.supplierStockId !== vehicleId)) {
+    throw new Error("Vansco Story artwork identity is unverified.");
+  }
+  const compatibleImage = artworkUrl || vanscoBufferCompatibleImageUrl(imageUrl);
   if (!compatibleImage) {
     throw new Error("Vansco Facebook Story requires a compatible JPEG/PNG image.");
   }
 
-  const [hostedImage] = await prepareVanscoBufferImages([compatibleImage], { vehicleId, dueAt });
-  const payload = await bufferGraphql(CREATE_POST_MUTATION, {
+  const [hostedImage] = artworkUrl ? [artworkUrl]
+    : await prepareImages([compatibleImage], { vehicleId, dueAt });
+  const payload = await request(CREATE_POST_MUTATION, {
     input: {
       text: String(text || "").trim(),
       channelId: config.channelId,

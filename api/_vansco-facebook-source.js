@@ -197,7 +197,7 @@ async function hydrateVanscoVatFromCache(vehicles) {
   }
 }
 
-export async function fetchVanscoMetaCatalogue({ preferLiveMetaImages = false } = {}) {
+export async function fetchVanscoMetaCatalogue({ preferLiveMetaImages = false, storyPrimaryProof = false } = {}) {
   const username = String(process.env.DEALERKIT_META_USERNAME || "").trim();
   const password = String(process.env.DEALERKIT_META_PASSWORD || "").trim();
   if (!username || !password) {
@@ -220,7 +220,9 @@ export async function fetchVanscoMetaCatalogue({ preferLiveMetaImages = false } 
   const raw = await response.text();
   const rows = parseCsvRecords(raw);
   if (!rows.length) throw new Error("DealerKit Meta catalogue returned no vehicle rows.");
-  const vehicles = rows.map(normalizeVanscoMetaRow);
+  const vehicles = rows.map(normalizeVanscoMetaRow).map(vehicle => storyPrimaryProof
+    ? {...vehicle,storyMetaPrimaryImage:vehicle.imageUrls[0] || "",storyMetaVehicleId:vehicle.vehicleId}
+    : vehicle);
   const dealerKitHydrated = await hydrateVanscoVatFromDealerKitState(vehicles, { preferLiveMetaImages });
   return hydrateVanscoVatFromCache(dealerKitHydrated);
 }
