@@ -1,7 +1,8 @@
 {
   "git": {
     "deploymentEnabled": {
-      "feature/vehicle-image-suite-dealerkit-bridge": false
+      "feature/vehicle-image-suite-dealerkit-bridge": false,
+      "codex/branded-story-previews": false
     }
   },
   "ignoreCommand": "test \"$VERCEL_PROJECT_ID\" = \"prj_zD76dAe2MHZdBTO08GNFSqOb9UHf\"",
