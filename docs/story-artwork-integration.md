@@ -94,22 +94,22 @@ loaders but remains read-only (no Blob uploads or Buffer mutations). This is a
 remaining live-source rollout check, not a new system or permission to activate.
 
 
-## Source blocker found during visual review (do not activate)
-The REAL first VFC gallery photo in the YR73 ORV sample already contains a
-"From £99 Deposit" advert overlay. The first Rent2Buy FV74 BEO photo already
-includes a Rent2Buy logo/graphic panel. These are embedded SOURCE pixels, not
-new copy or a change to the approved templates. Index 0 cannot simply be replaced
-by a secondary / shared DealerKit image under #699's contract.
+## Owner clarification: keep the existing branded first images
 
-There is no authoritative per-image proof that embedded finance/rental claims
-in these Wix media primaries are current. The new live artwork path therefore
-HOLDS VFC/Rent2Buy Wix first-image sources even if the per-brand flag is enabled.
-Read-only dry runs still render them, with publishingHold recorded explicitly.
-This is a conservative source-class hold, not a claim that every Wix image has
-a bad overlay. No OCR system, alternate source order, image crop, manual allowlist
-or pricing override has been added. Existing flag-off automation is unchanged.
+The owner confirmed that the first gallery images on Van Finance Company and
+Rent2Buy Vans deliberately contain their existing promotional graphics.
+Examples include VFC's "From £99 Deposit" banner and Rent2Buy advertising
+panels. These images **are accepted as the first-image source**. The renderer
+must not replace them with a cleaner second photo or a different DealerKit
+gallery order; the prior class-wide hold on Wix gallery primaries was removed.
 
-The owner must review the first-image source constraint before integration can
-be considered ready for activation. Do not solve this by silently choosing a
-cleaner second photo. The current PR is reviewable implementation plus evidence
-of this genuine source blocker, not a completed rollout recommendation.
+This is a source-artwork decision, not proof of additional finance terms.
+The new template must never generate unsupported APR/monthly/deposit claims
+from the embedded image or a stale caption. Preserve all existing exact
+registration/supplier identity, live availability, source, VAT, signed rental
+pricing, Blob safety, and per-brand default-OFF rollout checks.
+
+**Still not ready to activate:** Vansco's private live-Meta index-0 order proof
+is pending. Do not merge or deploy until separately approved, after reviewing
+the fresh source previews and all CI results. Existing automation remains
+unchanged while artwork feature flags are OFF.
