@@ -122,7 +122,7 @@ test("vector text adapter receives every visible claim and its safe-area positio
  const model=buildStoryModel("rent2buy",base({registration:"FV74BBJ",photoRegistration:"FV74BBJ"}));
  const drawn=[];
  const svg=renderStorySvg(model,{logoDataUrl:photo,photoDataUrl:photo,drawText:(value,x,y)=>{drawn.push({value,x,y});return '<g aria-label="'+value+'"><path d="M0 0L1 1"/></g>'}});
- assert.ok(drawn.some(x=>x.value===model.headline));
+ assert.ok(drawn.some(x=>x.value===model.headline.split(" ")[0]));
  assert.ok(drawn.some(x=>x.value===model.brand.cta));
  assert.ok(drawn.some(x=>x.value===model.registration));
  for(const row of drawn)assert.ok(row.x>=72&&row.y>=250&&row.y<=1580);
@@ -141,14 +141,24 @@ test("public retail VAT is tied to the exact cash price, not finance/old price o
  assert.equal(publishedRetailVat('<p>Finance from £309 +VAT</p>',309),"");
 });
 
-test("revision requires a genuine logo and enlarges the photo without cropping",()=>{
+test("brand adaptations reuse the approved hero geometry with rental text fallback",()=>{
  const model=buildStoryModel("rent2buy",base({registration:"FV74BBJ",photoRegistration:"FV74BBJ"}));
- assert.throws(()=>renderStorySvg(model,{photoDataUrl:photo}),/genuine brand logo/);
+ const fallback=renderStorySvg(model,{photoDataUrl:photo});
+ assert.match(fallback,/Rent2Buy Vans/);
  const svg=renderStorySvg(model,{photoDataUrl:photo,logoDataUrl:photo});
- assert.match(svg,/width="1080" height="810" preserveAspectRatio="xMidYMid meet"/);
- assert.match(svg,/height="960"/);
+ assert.match(svg,/width="1080" height="786" preserveAspectRatio="xMidYMid meet"/);
  assert.match(svg,/NO CREDIT CHECK VANS/);
- assert.doesNotMatch(svg,/>RENT2BUY</);
+ assert.doesNotMatch(svg,/fill="#f8f7f3"/);
+});
+test("VFC uses text branding even when a logo is supplied, with finance-led factual copy",()=>{
+ const model=buildStoryModel("vanFinance",base({price:14695,vatLabel:"+ VAT"}));
+ const svg=renderStorySvg(model,{photoDataUrl:photo,logoDataUrl:photo});
+ assert.match(svg,/Van Finance Company/);
+ assert.equal([...svg.matchAll(/<image /g)].length,1);
+ assert.match(svg,/EXPLORE VAN FINANCE/);
+ assert.match(svg,/EXPLORE FINANCE OPTIONS/);
+ assert.match(svg,/VEHICLE CASH PRICE/);
+ assert.doesNotMatch(svg,/APR|guaranteed|approved/i);
 });
 
 test("Vansco advert study keeps the genuine logo, uncropped hero, safe copy and earlier arrow CTA",()=>{

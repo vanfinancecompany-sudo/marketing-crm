@@ -61,3 +61,7 @@ Vansco's genuine white-and-gold PNG was supplied by the owner from https://ohqmy
 ## Vansco-only dealership advert study
 
 The latest review workflow exports Vansco only (`--brand=vansco`). A separate Vansco rendering function uses the genuine saved logo, a charcoal/gold canvas, stronger vehicle-name and price typography, full-width uncropped photography, registration badge and the earlier red arrow CTA. There is no white lower slab. VFC and Rent2Buy renderers and all pricing/publishing logic are unchanged. Adaptation to those brands awaits approval of this study.
+
+## Approved master adaptations
+
+VFC and Rent2Buy now use the approved master’s charcoal/gold canvas, 492px / 786px contained hero geometry, registration badge, typography hierarchy and red arrow CTA. VFC uses text branding only and factual deposit/term exploration messaging, without rates or approval promises. Rent2Buy uses its genuine existing logo (text fallback when absent), prominent NO CREDIT CHECK VANS, verified monthly/initial/term and Southampton collection wording. Protected pricing functions are unchanged. The approved Vansco rendering function is unchanged. The latest artifact includes both adaptations and the approved Vansco reference.

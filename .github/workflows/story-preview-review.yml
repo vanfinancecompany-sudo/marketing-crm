@@ -22,11 +22,11 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Test templates and existing pricing / publishing safeguards
         run: node --test tests/story-advert-preview.test.mjs tests/rent2buy-flexible-pricing.test.mjs tests/buffer-full-automation.test.js tests/buffer-instagram-mirror.test.js tests/buffer-recovery-and-story-safety-20261011.test.js tests/vansco-facebook-automation.test.js tests/vansco-instagram-automation.test.js
-      - name: Render Vansco advert study only (public GETs only)
-        run: node tools/story-previews/review.mjs --brand=vansco
+      - name: Render matched VFC and Rent2Buy previews with approved Vansco reference
+        run: node tools/story-previews/review.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: vansco-story-design-study
+          name: matched-brand-story-previews
           path: story-preview-output/
           if-no-files-found: error
           retention-days: 30

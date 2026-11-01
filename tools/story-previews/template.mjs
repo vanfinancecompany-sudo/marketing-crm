@@ -120,39 +120,7 @@ function rasterUri(value) {
 }
 export function renderStorySvg(model,{photoDataUrl,logoDataUrl="",measure,drawText,safeGuide=false}={}) {
  if(model.brandKey==="vansco")return renderVanscoAdvertSvg(model,{photoDataUrl,logoDataUrl,measure,drawText,safeGuide});
- const b=model.brand;
- const title=fitText(model.title,{measure});
- const headline=fitText(model.headline,{maxLines:1,maxSize:66,minSize:44,measure});
- const facts=fitText(model.facts.join(" · ")||model.registration,{maxLines:1,maxSize:34,minSize:30,measure});
- const text=drawText || ((value,x,y,size,fill="#ffffff",weight=700)=>'<text x="'+x+'" y="'+y+'" font-size="'+size+'" fill="'+fill+'" font-weight="'+weight+'">'+escapeXml(value)+'</text>');
- const fitted=(value,y,{size=34,width=936,fill="#243040",weight=500}={})=>{
-  const fit=fitText(value,{width,maxLines:1,maxSize:size,minSize:28,measure});
-  return text(fit.lines[0],72,y,fit.size,fill,weight);
- };
- if(!logoDataUrl)throw Error("A genuine brand logo is required.");
- const logo='<image href="'+rasterUri(logoDataUrl)+'" x="96" y="258" width="560" height="108" preserveAspectRatio="xMinYMid meet"/>';
- const svg='<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">'+
- '<title>'+escapeXml(b.name+" · "+model.title+" · "+model.registration)+'</title>'+
- '<g font-family="Inter,Arial,sans-serif">'+
- '<rect width="1080" height="1920" fill="'+b.dark+'"/>'+
- '<rect x="72" y="250" width="936" height="124" rx="16" fill="'+(model.brandKey==="vansco"?b.dark:"#ffffff")+'"/>'+logo+
- '<rect x="754" y="288" width="230" height="54" rx="9" fill="'+b.accent+'"/>'+
- text(model.registration,774,326,30,"#ffffff",900)+
- text(b.eyebrow,72,414,model.brandKey==="rent2buy"?51:40,"#ffffff",900)+
- text(facts.lines[0],72,451,facts.size,"#dce4eb",500)+
- '<rect x="0" y="468" width="1080" height="960" fill="#f8f7f3"/>'+
- '<image href="'+rasterUri(photoDataUrl)+'" x="0" y="468" width="1080" height="810" preserveAspectRatio="xMidYMid meet"/>'+
- '<rect x="0" y="1278" width="1080" height="642" fill="#f8f7f3"/>'+
- fitText(model.title,{maxLines:2,maxSize:44,minSize:34,measure}).lines.map((line,i)=>text(line,72,1320+i*44,fitText(model.title,{maxLines:2,maxSize:48,minSize:36,measure}).size,b.dark,800)).join("")+
- text(model.kicker,72,1383,24,b.dark,700)+
- text(headline.lines[0],72,1440,headline.size,b.dark,900)+
- model.details.map((line,i)=>fitted(line,(model.details.length>2?1464:1474)+i*(model.details.length>2?24:32),{size:model.details.length>2?28:32})).join("")+
- '<rect x="72" y="1520" width="936" height="60" rx="'+(model.brandKey==="rent2buy"?26:8)+'" fill="'+b.accent+'"/>'+
- text(b.cta,96,1548,30,"#ffffff",900)+
- text(b.website,96,1574,23,"#ffffff",600)+
- (safeGuide?'<rect x="72" y="250" width="936" height="1330" fill="none" stroke="#09a3be" stroke-width="4" stroke-dasharray="16 12"/><rect width="1080" height="250" fill="#09a3be" opacity=".18"/><rect y="1580" width="1080" height="340" fill="#09a3be" opacity=".18"/>':"")+
- '</g></svg>';
- return svg;
+ return renderMatchedBrandAdvertSvg(model,{photoDataUrl,logoDataUrl,measure,drawText,safeGuide});
 }
 
 /** Vansco-only dealership advert study. Other brand layouts stay unchanged. */
@@ -193,6 +161,54 @@ export function renderVanscoAdvertSvg(model,{photoDataUrl,logoDataUrl,measure,dr
  '<circle cx="934" cy="1532" r="31" fill="#ffffff" opacity=".12"/>'+
  '<path d="M 925 1517 L 944 1532 L 925 1547 M 909 1532 H 943" stroke="#ffffff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'+
  text("vansco.co.uk",102,1560,28,white,500)+
+ (safeGuide?'<rect x="72" y="250" width="936" height="1330" fill="none" stroke="#09a3be" stroke-width="4" stroke-dasharray="16 12"/><rect width="1080" height="250" fill="#09a3be" opacity=".18"/><rect y="1580" width="1080" height="340" fill="#09a3be" opacity=".18"/>':"")+
+ '</svg>';
+}
+
+/** Matching VFC/Rent2Buy adaptations; the approved Vansco renderer is separate. */
+export function renderMatchedBrandAdvertSvg(model,{photoDataUrl,logoDataUrl,measure,drawText,safeGuide=false}={}) {
+ const rental=model.brandKey==="rent2buy";
+ const text=drawText||((value,x,y,size,fill="#ffffff",weight=700)=>'<text x="'+x+'" y="'+y+'" font-size="'+size+'" fill="'+fill+'" font-weight="'+weight+'">'+escapeXml(value)+'</text>');
+ const widthOf=measure||((value,size)=>value.length*size*.64);
+ const gold="#d6b75a",white="#ffffff";
+ const one=(value,size,width=936)=>fitText(value,{width,maxLines:1,maxSize:size,minSize:24,measure});
+ const words=model.title.split(" "),name=words.slice(0,2).join(" "),derivative=words.slice(2).join(" ");
+ const main=one(rental?"NO CREDIT CHECK VANS":name,rental?64:88);
+ const sub=one(rental?model.title:derivative,38);
+ const facts=one(model.facts.join("  ·  "),32,854);
+ const price=model.headline.match(/^(£[0-9,.]+)\s+(.+)$/);
+ const priceFit=one(price?price[1]:model.headline,price?116:66,price?650:936);
+ const vatX=price?Math.min(780,72+widthOf(price[1],priceFit.size)+24):72;
+ const collection=model.details.find(value=>value.startsWith("Collection only"));
+ const detail=rental?model.details.filter(value=>value!==collection).join(" · "):model.details[0];
+ const detailFit=one(detail,32);
+ let branding;
+ if(rental && logoDataUrl)branding='<rect x="72" y="250" width="590" height="106" rx="8" fill="#ffffff"/><image href="'+rasterUri(logoDataUrl)+'" x="86" y="258" width="562" height="90" preserveAspectRatio="xMinYMid meet"/>';
+ else branding=text(rental?"Rent2Buy Vans":"Van Finance Company",72,314,rental?54:48,white,800);
+ return '<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">'+
+ '<title>'+escapeXml(model.brand.name+" · "+model.title+" · "+model.registration)+'</title>'+
+ '<defs><linearGradient id="brand-night" x2="0.8" y2="1"><stop stop-color="#22282b"/><stop offset="1" stop-color="#070b0e"/></linearGradient></defs>'+
+ '<rect width="1080" height="1920" fill="url(#brand-night)"/>'+
+ '<path d="M 810 0 H 1080 V 1920 H 960 Z" fill="#d6b75a" opacity=".045"/>'+
+ '<path d="M 72 218 H 1008" stroke="'+gold+'" stroke-width="3" opacity=".6"/>'+branding+
+ (!rental?text("EXPLORE VAN FINANCE",74,355,28,gold,700):"")+
+ '<rect x="792" y="278" width="216" height="58" rx="9" fill="#2a3033" stroke="'+gold+'" stroke-width="2"/>'+
+ text(model.registration,813,318,30,white,800)+
+ text(main.lines[0],72,425,main.size,white,900)+
+ text(sub.lines[0],76,466,sub.size,gold,500)+
+ '<image href="'+rasterUri(photoDataUrl)+'" x="0" y="492" width="1080" height="786" preserveAspectRatio="xMidYMid meet"/>'+
+ '<rect x="72" y="1304" width="60" height="4" fill="'+gold+'"/>'+
+ text(facts.lines[0],154,1318,facts.size,"#dce0e1",500)+
+ (!rental?text("VEHICLE CASH PRICE",72,1346,20,"#dce0e1",500):"")+
+ text(price?price[1]:model.headline,72,1428,rental?priceFit.size:Math.min(priceFit.size,104),white,900)+
+ (price?text(price[2],rental?vatX:Math.min(780,72+widthOf(price[1],Math.min(priceFit.size,104))+24),1428,rental?40:44,gold,700):"")+
+ text(detailFit.lines[0],72,1465,detailFit.size,"#dce0e1",500)+
+ '<rect x="72" y="1484" width="936" height="96" rx="10" fill="#ca2638"/>'+
+ text(model.brand.cta,102,1525,38,white,900)+
+ '<circle cx="934" cy="1532" r="31" fill="#ffffff" opacity=".12"/>'+
+ '<path d="M 925 1517 L 944 1532 L 925 1547 M 909 1532 H 943" stroke="#ffffff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'+
+ text(model.brand.website,102,1560,28,white,500)+
+ (rental&&collection?text(collection,470,1560,22,white,500):"")+
  (safeGuide?'<rect x="72" y="250" width="936" height="1330" fill="none" stroke="#09a3be" stroke-width="4" stroke-dasharray="16 12"/><rect width="1080" height="250" fill="#09a3be" opacity=".18"/><rect y="1580" width="1080" height="340" fill="#09a3be" opacity=".18"/>':"")+
  '</svg>';
 }
