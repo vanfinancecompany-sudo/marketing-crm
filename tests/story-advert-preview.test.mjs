@@ -155,7 +155,7 @@ test("Vansco advert study keeps the genuine logo, uncropped hero, safe copy and 
  const model=buildStoryModel("vansco",vansco());
  const svg=renderStorySvg(model,{photoDataUrl:photo,logoDataUrl:photo});
  assert.match(svg,/vansco-night/);
- assert.match(svg,/width="1080" height="810" preserveAspectRatio="xMidYMid meet"/);
+ assert.match(svg,/width="1080" height="786" preserveAspectRatio="xMidYMid meet"/);
  assert.match(svg,/VIEW THIS VAN/);
  assert.match(svg,/stroke-linejoin="round"/);
  assert.doesNotMatch(svg,/fill="#f8f7f3"/);

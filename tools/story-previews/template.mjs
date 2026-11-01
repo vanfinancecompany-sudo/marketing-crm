@@ -182,7 +182,7 @@ export function renderVanscoAdvertSvg(model,{photoDataUrl,logoDataUrl,measure,dr
  text(model.registration,813,318,30,white,800)+
  text(nameFit.lines[0],72,425,nameFit.size,white,900)+
  text(trimFit.lines[0],76,466,trimFit.size,gold,500)+
- '<image href="'+rasterUri(photoDataUrl)+'" x="0" y="480" width="1080" height="810" preserveAspectRatio="xMidYMid meet"/>'+
+ '<image href="'+rasterUri(photoDataUrl)+'" x="0" y="492" width="1080" height="786" preserveAspectRatio="xMidYMid meet"/>'+
  '<rect x="72" y="1304" width="60" height="4" fill="'+gold+'"/>'+
  text(factFit.lines[0],154,1318,factFit.size,"#dce0e1",500)+
  text(price[1],72,1428,priceFit.size,white,900)+
