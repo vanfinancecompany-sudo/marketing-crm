@@ -31,7 +31,10 @@ const rows=parseCsvRecords(await get(feedUrl));
 const branchKeys={"VANSCO-333":"vansco333","VANSCO-AIRPORT":"southamptonAirport","VANSCO-NEWFOREST":"newForest"};
 const authoritative=process.argv.includes("--authoritative");
 const held=[];
-const candidates=[["vanFinance",["FV74BEO"]],["rent2buy",["BT25LVK","BJ74HTL","FV74BBJ"]],["vansco",["FV74BBJ","BT25LVK","BJ74HTL"]]];
+const stockHtml=await get("https://www.vanfinancecompany.co.uk/vans");
+const stockRegs=[...new Set([...stockHtml.matchAll(/href=["'](?:https:\/\/www\.vanfinancecompany\.co\.uk)?\/vans\/([a-z0-9]{5,8})["']/gi)].map(m=>m[1].toUpperCase()))].slice(0,12);
+console.log("CURRENT_VFC_REVIEW_CANDIDATES="+JSON.stringify(stockRegs));
+const candidates=[["rent2buy",["FV74BEO","FV74BBJ"]],["vansco",["FV74BBJ","FV74BEO",...stockRegs]],["vanFinance",stockRegs]];
 const specs=[],used=new Set();
 for(const [brandKey,registrations]of candidates){
  let found=false;
@@ -46,6 +49,7 @@ for(const [brandKey,registrations]of candidates){
  }
  if(!found)throw Error("No current distinct public example for "+brandKey+"; "+JSON.stringify(held));
 }
+specs.sort((a,b)=>["vanFinance","rent2buy","vansco"].indexOf(a[0])-["vanFinance","rent2buy","vansco"].indexOf(b[0]));
 let meta=[];
 if(authoritative){
  const {fetchVanscoMetaCatalogue}=await import("../../api/_vansco-facebook-source.js");
