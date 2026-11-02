@@ -16,7 +16,8 @@ test("review cannot execute in production, on other projects/hosts, or through m
  assert.equal(reads,0);
 });
 test("review uses authoritative Meta proof and stock then dry-run composer; output excludes private fields",async()=>{
- const meta={registration:"AB12CDE",storyMetaPrimaryImage:"https://acdn.uk/vansco/i/first.jpeg",vehicleId:"PRIVATE_SUPPLIER_ID"};
+ const meta={registration:"AB12CDE",storyMetaPrimaryImage:"https://acdn.uk/vansco/i/first.jpeg",vehicleId:"PRIVATE_SUPPLIER_ID",
+  branchKey:"newForest",vatLabel:"+ VAT"};
  const selected={source:{kind:"eligible_live_meta_first_image"},imageSource:meta.storyMetaPrimaryImage};
  let snapshots=0,loaded=0,composed=0;
  const r=reply();await createStoryArtworkReview({env,getSnapshot:async()=>{snapshots++;return {complete:true}},
@@ -31,6 +32,18 @@ test("review uses authoritative Meta proof and stock then dry-run composer; outp
  assert.equal(snapshots,1);assert.equal(loaded,1);assert.equal(composed,1);
  assert.equal(r.body.uploads,0);assert.equal(r.body.bufferWrites,0);
  assert.doesNotMatch(JSON.stringify(r.body),/PRIVATE_SUPPLIER_ID|password|secret/i);
+});
+test("review enriches unresolved Meta commercial fields just like the real worker",async()=>{
+ const primary="https://acdn.uk/vansco/i/first.jpeg";let enriched=0;
+ const original={registration:"AB12CDE",storyMetaPrimaryImage:primary};
+ const r=reply();await createStoryArtworkReview({env,getSnapshot:async()=>({}),getMeta:async()=>[original],
+  enrichVehicle:async v=>{enriched++;assert.equal(v,original);return {...v,branchKey:"newForest",vatLabel:"+ VAT"}},
+  loadVehicle:async({vehicle})=>{
+   assert.equal(vehicle.storyMetaPrimaryImage,primary);assert.equal(vehicle.vatLabel,"+ VAT");
+   return {source:{kind:"eligible_live_meta_first_image"},imageSource:primary};
+  },compose:()=>{throw Error("Vansco price, VAT and branch must be resolved.")}})(req,r);
+ assert.equal(enriched,1);assert.equal(r.body.reason,"story_vansco_commercial_fields_unresolved");
+ assert.equal(r.body.sourceProof.metaPrimaryMatches,true);
 });
 test("review holds ambiguous Meta identity before composing and sanitizes unexpected errors",async()=>{
  const r=reply();await createStoryArtworkReview({env,getSnapshot:async()=>({}),getMeta:async()=>[],

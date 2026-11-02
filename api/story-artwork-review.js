@@ -2,7 +2,8 @@
 // flags or returns supplier IDs/credentials. Production always returns 404.
 import {createHash} from "node:crypto";
 import {fetchDealerKitStockSnapshot,fetchDealerKitStockDetail} from "./_dealerkit-stock-adapter.js";
-import {fetchVanscoMetaCatalogue} from "./_vansco-facebook-source.js";
+import {fetchVanscoMetaCatalogue,enrichVanscoVehicleFromPage} from "./_vansco-facebook-source.js";
+import {isVanscoVatResolved} from "../lib/vanscoFacebookAutomation.js";
 import {loadCurrentStoryVehicle,prepareSelectedStoryArtwork} from "./_story-artwork.js";
 import {storyRegistration} from "../lib/storyArtworkPolicy.js";
 
@@ -12,6 +13,7 @@ export function createStoryArtworkReview({env=process.env,
  getSnapshot=()=>fetchDealerKitStockSnapshot({allowPartial:true}),
  getDetail=id=>fetchDealerKitStockDetail(id,{specifications:false}),
  getMeta=()=>fetchVanscoMetaCatalogue({preferLiveMetaImages:true,storyPrimaryProof:true}),
+ enrichVehicle=enrichVanscoVehicleFromPage,
  loadVehicle=loadCurrentStoryVehicle,compose=prepareSelectedStoryArtwork,
 }={}){
  return async function handler(request,response){
@@ -34,6 +36,7 @@ export function createStoryArtworkReview({env=process.env,
    registration=storyRegistration(request.query?.registration);
   }catch{return response.status(400).json({ok:false,reason:"invalid_review_vehicle"})}
   let stage="stock";
+  let sourceProof;
   try{
    const snapshot=await getSnapshot();
    let vehicle;
@@ -42,12 +45,25 @@ export function createStoryArtworkReview({env=process.env,
     const matches=(await getMeta()).filter(v=>v.registration===registration);
     if(matches.length!==1)throw Error("story_meta_identity_ambiguous");
     vehicle=matches[0];
+    // Match the real worker's candidate preparation, including unresolved
+    // branch/VAT enrichment. This does not change the captured Meta primary.
+    if(!vehicle.branchKey||vehicle.branchConflict||!isVanscoVatResolved(vehicle)){
+     stage="meta_enrichment";vehicle=await enrichVehicle(vehicle);
+    }
    }
    stage="vehicle";
    const selected=await loadVehicle({brandKey,registration,vehicle},{getSnapshot:async()=>snapshot,getDetail});
+   sourceProof={sourceKind:selected.source.kind,firstImageIndex:0,firstImageUrl:selected.imageSource,
+    metaPrimaryMatches:brandKey==="vansco"?selected.imageSource===vehicle.storyMetaPrimaryImage:undefined};
    stage="render";
    const result=await compose({brandKey,registration},{dryRun:true,
-    loadVehicle:async()=>selected,host:()=>{throw Error("review_upload_forbidden")}});
+    loadVehicle:async()=>selected,host:()=>{throw Error("review_upload_forbidden")},
+    fetchImpl:(...args)=>{stage="photo_fetch";return fetch(...args)},
+    render:async(...args)=>{
+     stage="native_renderer";
+     const {renderApprovedStory}=await import("../lib/storyArtworkRenderer.mjs");
+     return renderApprovedStory(...args);
+    }});
    const sha256=createHash("sha256").update(result.png).digest("hex");
    const proof={ok:true,dryRun:true,brandKey,registration,title:result.model.title,
     checkedAt:new Date().toISOString(),commit:env.VERCEL_GIT_COMMIT_SHA,
@@ -70,9 +86,10 @@ export function createStoryArtworkReview({env=process.env,
      /Cannot find module.*@fontsource\/inter/.test(message)?"story_font_asset_missing":
      /ENOENT/.test(error?.code||"")&&/vansco-logo/.test(message)?"story_logo_asset_missing":
      /Story text cannot fit safely/.test(message)?"story_text_does_not_fit":
+     /Vansco price, VAT and branch must be resolved/.test(message)?"story_vansco_commercial_fields_unresolved":
      /DealerKit.*HTTP (\d{3})/.test(message)?"story_stock_http_"+message.match(/HTTP (\d{3})/)[1]:"story_review_held");
    const runtimeCode=/^[A-Z_0-9]{1,40}$/.test(error?.code||"")?error.code:undefined;
-   return response.status(422).json({ok:false,dryRun:true,brandKey,registration,stage,reason,runtimeCode,uploads:0,bufferWrites:0});
+   return response.status(422).json({ok:false,dryRun:true,brandKey,registration,stage,reason,runtimeCode,sourceProof,uploads:0,bufferWrites:0});
   }
  };
 }
