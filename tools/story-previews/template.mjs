@@ -118,6 +118,17 @@ function rasterUri(value) {
   throw Error("Embed a verified PNG/JPEG photograph. Remote URLs are not rendered.");
  return value;
 }
+// Preserve the approved single-line appearance whenever it fits. Longer real
+// vehicle descriptions may use two complete lines in the existing title band;
+// neither the photograph nor the facts/pricing panels move. No words are cut.
+function storySubtitle(value,{measure,minSize=24}={}) {
+ try {
+  return {...fitText(value,{maxLines:1,maxSize:38,minSize,measure}),baselines:[466]};
+ } catch(error) {
+  if(error.message!=="Story text cannot fit safely. Review the vehicle title.")throw error;
+  return {...fitText(value,{maxLines:2,maxSize:26,minSize:24,measure}),baselines:[456,484]};
+ }
+}
 export function renderStorySvg(model,{photoDataUrl,logoDataUrl="",measure,drawText,safeGuide=false}={}) {
  if(model.brandKey==="vansco")return renderVanscoAdvertSvg(model,{photoDataUrl,logoDataUrl,measure,drawText,safeGuide});
  return renderMatchedBrandAdvertSvg(model,{photoDataUrl,logoDataUrl,measure,drawText,safeGuide});
@@ -133,7 +144,7 @@ export function renderVanscoAdvertSvg(model,{photoDataUrl,logoDataUrl,measure,dr
  const name=words.slice(0,2).join(" ");
  const derivative=words.slice(2).join(" ");
  const nameFit=fitText(name,{maxLines:1,maxSize:88,minSize:48,measure});
- const trimFit=fitText(derivative,{maxLines:1,maxSize:38,minSize:28,measure});
+ const trimFit=storySubtitle(derivative,{minSize:28,measure});
  const factFit=fitText(model.facts.join("  ·  "),{width:854,maxLines:1,maxSize:32,minSize:28,measure});
  const price=model.headline.match(/^(£[0-9,.]+)\s+(.+)$/);
  if(!price||!model.branch)throw Error("Verified Vansco price, VAT and branch are required.");
@@ -149,7 +160,7 @@ export function renderVanscoAdvertSvg(model,{photoDataUrl,logoDataUrl,measure,dr
  '<rect x="792" y="278" width="216" height="58" rx="9" fill="#2a3033" stroke="'+gold+'" stroke-width="2"/>'+
  text(model.registration,813,318,30,white,800)+
  text(nameFit.lines[0],72,425,nameFit.size,white,900)+
- text(trimFit.lines[0],76,466,trimFit.size,gold,500)+
+ trimFit.lines.map((line,i)=>text(line,76,trimFit.baselines[i],trimFit.size,gold,500)).join("")+
  '<image href="'+rasterUri(photoDataUrl)+'" x="0" y="492" width="1080" height="786" preserveAspectRatio="xMidYMid meet"/>'+
  '<rect x="72" y="1304" width="60" height="4" fill="'+gold+'"/>'+
  text(factFit.lines[0],154,1318,factFit.size,"#dce0e1",500)+
@@ -174,7 +185,7 @@ export function renderMatchedBrandAdvertSvg(model,{photoDataUrl,logoDataUrl,meas
  const one=(value,size,width=936)=>fitText(value,{width,maxLines:1,maxSize:size,minSize:24,measure});
  const words=model.title.split(" "),name=words.slice(0,2).join(" "),derivative=words.slice(2).join(" ");
  const main=one(rental?"NO CREDIT CHECK VANS":name,rental?64:88);
- const sub=one(rental?model.title:derivative,38);
+ const sub=storySubtitle(rental?model.title:derivative,{measure});
  const facts=one(model.facts.join("  ·  "),32,854);
  const price=model.headline.match(/^(£[0-9,.]+)\s+(.+)$/);
  const priceFit=one(price?price[1]:model.headline,price?116:66,price?650:936);
@@ -193,7 +204,7 @@ export function renderMatchedBrandAdvertSvg(model,{photoDataUrl,logoDataUrl,meas
  '<rect x="792" y="278" width="216" height="58" rx="9" fill="#2a3033" stroke="'+gold+'" stroke-width="2"/>'+
  text(model.registration,813,318,30,white,800)+
  text(main.lines[0],72,425,main.size,white,900)+
- text(sub.lines[0],76,466,sub.size,gold,500)+
+ sub.lines.map((line,i)=>text(line,76,sub.baselines[i],sub.size,gold,500)).join("")+
  '<image href="'+rasterUri(photoDataUrl)+'" x="0" y="492" width="1080" height="786" preserveAspectRatio="xMidYMid meet"/>'+
  '<rect x="72" y="1304" width="60" height="4" fill="'+gold+'"/>'+
  text(facts.lines[0],154,1318,facts.size,"#dce0e1",500)+
