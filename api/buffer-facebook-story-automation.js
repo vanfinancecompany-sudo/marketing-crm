@@ -668,10 +668,10 @@ export default async function handler(request, response) {
         bufferRejected: Number.isFinite(result.bufferRejected) ? result.bufferRejected : null,
       }];
     }));
-    console.info("[buffer-facebook-story-automation] Story refill diagnostics", {
-      date: dateKey,
-      products: refillDiagnostics,
-    });
+    // Stringify nested reasons so production logs show the actual hold categories,
+    // rather than Node's collapsed [Object]. Do not log supplier IDs or credentials.
+    console.info("[buffer-facebook-story-automation] Story refill diagnostics",
+      JSON.stringify({date:dateKey,products:refillDiagnostics}));
 
     response.status(200).json({
       ok: true,

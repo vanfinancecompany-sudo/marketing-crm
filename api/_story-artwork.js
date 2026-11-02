@@ -56,7 +56,9 @@ export async function prepareSelectedStoryArtwork(input,{
  const renderImpl=render||(await import("../lib/storyArtworkRenderer.mjs")).renderApprovedStory;
  const rendered=await renderImpl(model,{photoDataUrl:photo.dataUrl});
  const provenance={source:vehicle.source,publishingHold:null,firstImageUrl:vehicle.imageSource,firstImageIndex:0,
-   sourceSha256:photo.sha256,pricingMode:model.pricingMode,layoutCommit:"db662f517a23b2bfeae2511e274fa163af2694ac"};
+   sourceSha256:photo.sha256,pricingMode:model.pricingMode,
+   baseLayoutCommit:"db662f517a23b2bfeae2511e274fa163af2694ac",
+   layoutVersion:"approved-style-two-line-title-20261102",layoutCommit:env.VERCEL_GIT_COMMIT_SHA||null};
  // Freshly composed caption only. In particular, never repeat stale rental prices.
  const text=[model.brand.name+" · TODAY'S STORY",model.registration,model.title,
    model.headline,...model.details,model.vehicleUrl].join("\n");

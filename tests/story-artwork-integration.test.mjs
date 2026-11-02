@@ -46,6 +46,16 @@ for(const brand of ["vanFinance","rent2buy"]){
   assert.equal(result.source.galleryCount,2);
  });
 }
+test("VFC accepts only its exact same-registration canonical vanfinance.co alias",()=>{
+ const samePlate="https://vanfinance.co/vans/"+reg.toLowerCase();
+ const published=publishedStoryVehicle(schema("vanFinance",{url:samePlate}),"vanFinance",reg);
+ assert.equal(published.vehicleUrl,vehicle.vehicleUrl);
+ for(const wrongUrl of ["https://vanfinance.co/vans/zz99zzz",
+  "https://other.example/vans/ab12cde","https://vanfinance.co/van-pages/ab12cde"]){
+  assert.throws(()=>publishedStoryVehicle(schema("vanFinance",{url:wrongUrl}),"vanFinance",reg),/canonical_mismatch/);
+ }
+ assert.throws(()=>publishedStoryVehicle(schema("rent2buy",{url:samePlate}),"rent2buy",reg),/canonical_mismatch/);
+});
 test("website first frame cannot be skipped when invalid; duplicate/wrong/archive pages hold",()=>{
  assert.throws(()=>publishedStoryVehicle(schema("vanFinance",{image:["http://127.0.0.1/a",second]}),"vanFinance",reg));
  for(const html of [schema()+schema(),schema("vanFinance",{sku:"XY34ZZZ"}),schema("vanFinance",{description:"Previously listed vehicle"}),
@@ -113,6 +123,37 @@ test("source/renderer/hosting errors do not return publishable URLs",async()=>{
   render:async()=>({png:photo}),host:async()=>{throw Error("storage failed")}};
  await assert.rejects(prepareSelectedStoryArtwork({brandKey:"vanFinance"},opts),/storage failed/);
  await assert.rejects(prepareSelectedStoryArtwork({brandKey:"vanFinance"},{...opts,fetchImpl:async()=>response("bad")}));
+});
+test("real CA74 WVU long title renders all three brand layouts without losing words or uploading",async()=>{
+ // Public VFC Vehicle.name, checked 2 November 2026. The generic fitText test
+ // allows three lines; verify the actual native advert renderer too.
+ const title="Ford Transit Custom 2.0 320 EcoBlue Limited Kombi Double Cab 5dr Diesel Manual L2 H1 Euro 6 (s/s) (136 ps)";
+ let uploads=0;
+ for(const brandKey of ["vanFinance","rent2buy","vansco"]){
+  const result=await prepareSelectedStoryArtwork({brandKey},{
+   dryRun:true,
+   loadVehicle:async()=>({...vehicle,...(brandKey==="vansco"?{branchKey:"newForest"}:{}),title,
+    vehicleUrl:brandKey==="vansco"?vansco.vehicleUrl:brandKey==="vanFinance"?vehicle.vehicleUrl:
+    "https://www.rent2buyvans.co.uk/van-pages/ab12cde"}),
+   fetchImpl:async()=>response(),host:async()=>{uploads++;throw Error("must not upload")},
+  });
+  assert.equal(result.png.readUInt32BE(16),1080);
+  assert.equal(result.png.readUInt32BE(20),1920);
+  const labels=[...result.svg.matchAll(/aria-label="([^"]*)"/g)].map(m=>m[1]);
+  const header=brandKey==="rent2buy"?labels.slice(3,5):brandKey==="vanFinance"?labels.slice(3,6):labels.slice(1,4);
+  // Every source word remains present in the visible header paths, not only <title>.
+  assert.equal(header.join(" "),title);
+  assert.equal(result.model.title,title);
+ }
+ assert.equal(uploads,0);
+});
+test("titles beyond the two-line readable band still hold before hosting",async()=>{
+ let uploads=0;
+ await assert.rejects(prepareSelectedStoryArtwork({brandKey:"vanFinance"},{
+  env:{STORY_ARTWORK_VFC_ENABLED:"true"},loadVehicle:async()=>({...vehicle,title:"Ford Transit "+"Unbreakable".repeat(100)}),
+  fetchImpl:async()=>response(),host:async()=>{uploads++;throw Error("must not upload")},
+ }),/Story text cannot fit safely/);
+ assert.equal(uploads,0);
 });
 test("immutable hosting verifies all bytes, records exact brand/vehicle provenance and leases; caps/outages fail closed",async()=>{
  const {png}=await renderApprovedStory(buildStoryModel("vanFinance",vehicle),{photoDataUrl:verifiedStoryPhoto({bytes:photo,type:"image/png"}).dataUrl});
