@@ -198,7 +198,7 @@ function storyPostsForDay(posts, productKey, dateKey) {
   );
 }
 
-function storySlotForRun(posts, productKey, dateKey, now, storyTarget) {
+export function storySlotForRun(posts, productKey, dateKey, now, storyTarget) {
   const existingStories = storyPostsForDay(posts, productKey, dateKey);
   if (existingStories.length >= storyTarget) {
     return { slot: null, existing: existingStories.length, target: storyTarget, reason: "target_met" };
@@ -400,7 +400,7 @@ async function loadFinanceBrandedImageUrls(registrations) {
   return byReg;
 }
 
-async function createStory({ productKey, sourcePost, dueAt, brandedImageOverride = "", artwork = null }) {
+export async function createStory({ productKey, sourcePost, dueAt, brandedImageOverride = "", artwork = null }) {
   const mediaUrl = artwork?.url || brandedImageOverride || imageSource(sourcePost);
   if (!mediaUrl) throw new Error("The selected classified image does not have a public image URL.");
   const originalText = String(sourcePost?.text || "").trim();
