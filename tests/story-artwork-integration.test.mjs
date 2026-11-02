@@ -46,6 +46,16 @@ for(const brand of ["vanFinance","rent2buy"]){
   assert.equal(result.source.galleryCount,2);
  });
 }
+test("VFC accepts only its exact same-registration canonical vanfinance.co alias",()=>{
+ const samePlate="https://vanfinance.co/vans/"+reg.toLowerCase();
+ const published=publishedStoryVehicle(schema("vanFinance",{url:samePlate}),"vanFinance",reg);
+ assert.equal(published.vehicleUrl,vehicle.vehicleUrl);
+ for(const wrongUrl of ["https://vanfinance.co/vans/zz99zzz",
+  "https://other.example/vans/ab12cde","https://vanfinance.co/van-pages/ab12cde"]){
+  assert.throws(()=>publishedStoryVehicle(schema("vanFinance",{url:wrongUrl}),"vanFinance",reg),/canonical_mismatch/);
+ }
+ assert.throws(()=>publishedStoryVehicle(schema("rent2buy",{url:samePlate}),"rent2buy",reg),/canonical_mismatch/);
+});
 test("website first frame cannot be skipped when invalid; duplicate/wrong/archive pages hold",()=>{
  assert.throws(()=>publishedStoryVehicle(schema("vanFinance",{image:["http://127.0.0.1/a",second]}),"vanFinance",reg));
  for(const html of [schema()+schema(),schema("vanFinance",{sku:"XY34ZZZ"}),schema("vanFinance",{description:"Previously listed vehicle"}),
