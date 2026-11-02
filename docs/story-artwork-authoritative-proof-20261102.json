@@ -1,0 +1,85 @@
+[
+  {
+    "ok": true,
+    "dryRun": true,
+    "brandKey": "vanFinance",
+    "registration": "CA74WVU",
+    "title": "Ford Transit Custom 2.0 320 EcoBlue Limited Kombi Double Cab 5dr Diesel Manual L2 H1 Euro 6 (s/s) (136 ps)",
+    "checkedAt": "2026-11-02T17:05:05.194Z",
+    "commit": "24fcee4a9f175ea80da388a94eae6022acf7c31c",
+    "sourceKind": "brand_published_gallery_index_0",
+    "firstImageIndex": 0,
+    "firstImageUrl": "https://static.wixstatic.com/media/5ef4b7_b96820bdcaa44490b8b5866d0ea1d820~mv2.png",
+    "sourceSha256": "5fe5cabcfbc21358746c96c04a2b739466403e333eebbe6fc66d1538930ed134",
+    "pricingMode": "none",
+    "png": {
+      "sha256": "e3848e4c92a3b68307ba3ef4ef9138b43ed183fbae66dedaa67983b9dfb18f27",
+      "bytes": 1382183,
+      "width": 1080,
+      "height": 1920
+    },
+    "uploads": 0,
+    "bufferWrites": 0
+  },
+  {
+    "ok": true,
+    "dryRun": true,
+    "brandKey": "rent2buy",
+    "registration": "FV74BEO",
+    "title": "Nissan Primastar 2.0 dCi 30 Visia",
+    "checkedAt": "2026-11-02T17:05:37.171Z",
+    "commit": "24fcee4a9f175ea80da388a94eae6022acf7c31c",
+    "sourceKind": "brand_published_gallery_index_0",
+    "firstImageIndex": 0,
+    "firstImageUrl": "https://static.wixstatic.com/media/5ef4b7_3b8e0ee79d4c4baca6ec5239e11e2b77~mv2.png/v1/fit/w_1066%2Ch_800%2Cq_90%2Cenc_avif%2Cquality_auto/5ef4b7_3b8e0ee79d4c4baca6ec5239e11e2b77~mv2.png",
+    "sourceSha256": "f42dfc8046d5c2c6a25e4c634459214a7d6ab869897ebe3f55e6cc1a4ae568aa",
+    "pricingMode": "protected_special",
+    "png": {
+      "sha256": "8eac21eefc6e87654a1ceb1e247596dcaf9a8da516e4e9ee650936323381b0e1",
+      "bytes": 1464663,
+      "width": 1080,
+      "height": 1920
+    },
+    "uploads": 0,
+    "bufferWrites": 0
+  },
+  {
+    "ok": true,
+    "dryRun": true,
+    "brandKey": "vansco",
+    "registration": "CK24NRO",
+    "title": "Ford Transit Trend L3 H2 CREW VAN -",
+    "checkedAt": "2026-11-02T17:04:29.285Z",
+    "commit": "24fcee4a9f175ea80da388a94eae6022acf7c31c",
+    "sourceKind": "eligible_live_meta_first_image",
+    "firstImageIndex": 0,
+    "firstImageUrl": "https://acdn.uk/vansco/i/e3c1fae8-a88f-11f1-9966-1646053aaf43.jpeg",
+    "metaPrimaryMatches": true,
+    "sourceSha256": "a94712f5bf47ad443465f701a297c4fb35d6cf28d1c5cee5607efda069778c31",
+    "pricingMode": "none",
+    "png": {
+      "sha256": "599f5805c5be385932f603b45fa81ce009edd6e627566f653fcd2b491d0efceb",
+      "bytes": 1658301,
+      "width": 1080,
+      "height": 1920
+    },
+    "uploads": 0,
+    "bufferWrites": 0
+  },
+  {
+    "ok": false,
+    "dryRun": true,
+    "brandKey": "vansco",
+    "registration": "FV74BBJ",
+    "stage": "photo_fetch",
+    "reason": "story_vansco_commercial_fields_unresolved",
+    "sourceProof": {
+      "sourceKind": "eligible_live_meta_first_image",
+      "firstImageIndex": 0,
+      "firstImageUrl": "https://acdn.uk/vansco/i/cb5b8cba-b697-11f1-ba7c-1646053aaf43.jpeg",
+      "metaPrimaryMatches": true
+    },
+    "uploads": 0,
+    "bufferWrites": 0
+  }
+]
