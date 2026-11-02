@@ -124,6 +124,21 @@ test("source/renderer/hosting errors do not return publishable URLs",async()=>{
  await assert.rejects(prepareSelectedStoryArtwork({brandKey:"vanFinance"},opts),/storage failed/);
  await assert.rejects(prepareSelectedStoryArtwork({brandKey:"vanFinance"},{...opts,fetchImpl:async()=>response("bad")}));
 });
+test("real CA74 WVU long title holds both brand layouts before any hosting",async()=>{
+ // Public VFC Vehicle.name, checked 2 November 2026. The generic fitText test
+ // allows three lines; the approved advert renderer actually permits one.
+ const title="Ford Transit Custom 2.0 320 EcoBlue Limited Kombi Double Cab 5dr Diesel Manual L2 H1 Euro 6 (s/s) (136 ps)";
+ let uploads=0;
+ for(const brandKey of ["vanFinance","rent2buy"]){
+  await assert.rejects(prepareSelectedStoryArtwork({brandKey},{
+   env:{STORY_ARTWORK_VFC_ENABLED:"true",STORY_ARTWORK_RENT2BUY_ENABLED:"true"},
+   loadVehicle:async()=>({...vehicle,title,vehicleUrl:brandKey==="vanFinance"?vehicle.vehicleUrl:
+    "https://www.rent2buyvans.co.uk/van-pages/ab12cde"}),
+   fetchImpl:async()=>response(),host:async()=>{uploads++;throw Error("must not upload")},
+  }),/Story text cannot fit safely/);
+ }
+ assert.equal(uploads,0);
+});
 test("immutable hosting verifies all bytes, records exact brand/vehicle provenance and leases; caps/outages fail closed",async()=>{
  const {png}=await renderApprovedStory(buildStoryModel("vanFinance",vehicle),{photoDataUrl:verifiedStoryPhoto({bytes:photo,type:"image/png"}).dataUrl});
  const args={brandKey:"vanFinance",registration:reg,supplierStockId:id,png,provenance:{firstImageIndex:0,firstImageUrl:first},dueAt:new Date().toISOString()};
