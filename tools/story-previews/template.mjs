@@ -159,7 +159,8 @@ export function renderVanscoAdvertSvg(model,{photoDataUrl,logoDataUrl,measure,dr
  '<image href="'+rasterUri(logoDataUrl)+'" x="72" y="250" width="590" height="106" preserveAspectRatio="xMinYMid meet"/>'+
  '<rect x="792" y="278" width="216" height="58" rx="9" fill="#2a3033" stroke="'+gold+'" stroke-width="2"/>'+
  text(model.registration,813,318,30,white,800)+
- text(nameFit.lines[0],72,425,nameFit.size,white,900)+
+ text(nameFit.lines[0],72,trimFit.lines.length>1?413:425,
+  trimFit.lines.length>1?Math.min(nameFit.size,72):nameFit.size,white,900)+
  trimFit.lines.map((line,i)=>text(line,76,trimFit.baselines[i],trimFit.size,gold,500)).join("")+
  '<image href="'+rasterUri(photoDataUrl)+'" x="0" y="492" width="1080" height="786" preserveAspectRatio="xMidYMid meet"/>'+
  '<rect x="72" y="1304" width="60" height="4" fill="'+gold+'"/>'+
@@ -203,7 +204,8 @@ export function renderMatchedBrandAdvertSvg(model,{photoDataUrl,logoDataUrl,meas
  (!rental?text("EXPLORE VAN FINANCE",74,355,28,gold,700):"")+
  '<rect x="792" y="278" width="216" height="58" rx="9" fill="#2a3033" stroke="'+gold+'" stroke-width="2"/>'+
  text(model.registration,813,318,30,white,800)+
- text(main.lines[0],72,425,main.size,white,900)+
+ text(main.lines[0],72,!rental&&sub.lines.length>1?413:425,
+  !rental&&sub.lines.length>1?Math.min(main.size,72):main.size,white,900)+
  sub.lines.map((line,i)=>text(line,76,sub.baselines[i],sub.size,gold,500)).join("")+
  '<image href="'+rasterUri(photoDataUrl)+'" x="0" y="492" width="1080" height="786" preserveAspectRatio="xMidYMid meet"/>'+
  '<rect x="72" y="1304" width="60" height="4" fill="'+gold+'"/>'+

@@ -33,15 +33,19 @@ export function createStoryArtworkReview({env=process.env,
    if(!["vanFinance","rent2buy","vansco"].includes(brandKey))throw Error();
    registration=storyRegistration(request.query?.registration);
   }catch{return response.status(400).json({ok:false,reason:"invalid_review_vehicle"})}
+  let stage="stock";
   try{
    const snapshot=await getSnapshot();
    let vehicle;
    if(brandKey==="vansco"){
+    stage="meta";
     const matches=(await getMeta()).filter(v=>v.registration===registration);
     if(matches.length!==1)throw Error("story_meta_identity_ambiguous");
     vehicle=matches[0];
    }
+   stage="vehicle";
    const selected=await loadVehicle({brandKey,registration,vehicle},{getSnapshot:async()=>snapshot,getDetail});
+   stage="render";
    const result=await compose({brandKey,registration},{dryRun:true,
     loadVehicle:async()=>selected,host:()=>{throw Error("review_upload_forbidden")}});
    const sha256=createHash("sha256").update(result.png).digest("hex");
@@ -60,8 +64,15 @@ export function createStoryArtworkReview({env=process.env,
    return response.status(200).json(proof);
   }catch(error){
    // Return bounded categories only; adapter errors may contain private context.
-   const reason=String(error?.message||"").match(/^story_[a-z0-9_]+\b/)?.[0]||"story_review_held";
-   return response.status(422).json({ok:false,dryRun:true,brandKey,registration,reason,uploads:0,bufferWrites:0});
+   const message=String(error?.message||"");
+   const reason=message.match(/^story_[a-z0-9_]+\b/)?.[0]||
+    (/DEALERKIT_API_SECRET is required|DEALERKIT_DEALER_ID is required/.test(message)?"story_stock_configuration_missing":
+     /Cannot find module.*@fontsource\/inter/.test(message)?"story_font_asset_missing":
+     /ENOENT/.test(error?.code||"")&&/vansco-logo/.test(message)?"story_logo_asset_missing":
+     /Story text cannot fit safely/.test(message)?"story_text_does_not_fit":
+     /DealerKit.*HTTP (\d{3})/.test(message)?"story_stock_http_"+message.match(/HTTP (\d{3})/)[1]:"story_review_held");
+   const runtimeCode=/^[A-Z_0-9]{1,40}$/.test(error?.code||"")?error.code:undefined;
+   return response.status(422).json({ok:false,dryRun:true,brandKey,registration,stage,reason,runtimeCode,uploads:0,bufferWrites:0});
   }
  };
 }
