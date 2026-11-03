@@ -16,6 +16,7 @@ import {
   vanscoDailySlots,
   vanscoNextDateKey,
   VANSCO_FACEBOOK_MAX_POSTS_PER_DAY,
+  VANSCO_FACEBOOK_STORIES_PER_DAY,
 } from "../lib/vanscoFacebookAutomation.js";
 import {
   enrichVanscoVehicleFromPage,
