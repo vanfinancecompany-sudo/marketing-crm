@@ -2,7 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { vanscoBufferCooldownRemainingMs } from "../api/_vansco-buffer-runtime.js";
-import { vanscoRecoverableBufferPostError } from "../api/vansco-facebook-automation-worker.js";
+import {
+  dailyLimitFromState,
+  vanscoFacebookBufferConfigNeedsRefresh,
+  vanscoFacebookQueueCandidates,
+  vanscoRecoverableBufferPostError,
+} from "../api/vansco-facebook-automation-worker.js";
 import {
   activeVanscoMediaQuarantine,
   isVanscoMediaUrlFailure,
@@ -843,4 +848,53 @@ test("Vansco 333, Airport and New Forest precheck photo URLs independently befor
   assert.match(runtime,/loadVanscoCachedFailedGoogleBusinessPosts/);
   // A separate Google Business API error must NOT blacklist the source image.
   assert.doesNotMatch(worker.slice(worker.indexOf("} catch (error) {",worker.indexOf("createVanscoGoogleBusinessPost("))),/quarantineVanscoVehicle/);
+});
+
+
+test("Vansco feed refill bypasses one-photo stock without weakening the three-photo gate", () => {
+  const vehicle = (key, count, availability = "AVAILABLE") => ({
+    vehicleKey: key,
+    vehicleUrl: `https://www.vansco.co.uk/vehicle-details/${key}`,
+    title: "Ford Transit Custom",
+    availability,
+    price: "18995 GBP",
+    imageUrl: "https://example.com/front.jpeg",
+    imageUrls: Array.from({ length: count }, (_, index) => `https://example.com/${key}-${index}.jpeg`),
+  });
+  const eligible = vanscoFacebookQueueCandidates([
+    vehicle("one-image", 1),
+    vehicle("three-images", 3),
+    vehicle("sold-three", 3, "SOLD"),
+  ]);
+  assert.deepEqual(eligible.map((item) => item.vehicleKey), ["three-images"]);
+});
+
+test("Vansco queue refreshes a stale Free-plan cap but respects a current genuine cap", () => {
+  const now = Date.parse("2026-11-04T08:00:00.000Z");
+  assert.equal(vanscoFacebookBufferConfigNeedsRefresh({
+    scheduledPostsLimit: 10, verifiedAt: "2026-10-28T08:00:00.000Z",
+  }, now), true);
+  assert.equal(vanscoFacebookBufferConfigNeedsRefresh({
+    scheduledPostsLimit: 10, verifiedAt: "2026-11-04T07:00:00.000Z",
+  }, now), false);
+  assert.equal(vanscoFacebookBufferConfigNeedsRefresh({
+    scheduledPostsLimit: 5000, verifiedAt: "2026-10-28T08:00:00.000Z",
+  }, now), false);
+});
+
+test("Buffer null network daily limit means unlimited, never zero Vansco Facebook slots", () => {
+  assert.equal(dailyLimitFromState({ limit: null }), 25);
+  assert.equal(dailyLimitFromState(null), 25);
+  assert.equal(dailyLimitFromState({ limit: 35 }), 25);
+  assert.equal(dailyLimitFromState({ limit: 10 }), 10);
+});
+
+test("Vansco feed refill exposes safe queue diagnostics for genuine underfill", () => {
+  const worker = readFileSync(new URL("../api/vansco-facebook-automation-worker.js", import.meta.url), "utf8");
+  assert.match(worker, /threeImageReadyVehicleCount/);
+  assert.match(worker, /missingThreeImageGalleryCount/);
+  assert.match(worker, /refillDiagnostics/);
+  assert.match(worker, /checkedThreeImageVehicles/);
+  assert.match(worker, /configRefreshError/);
+  assert.match(worker, /vehicles: feedReady/);
 });
