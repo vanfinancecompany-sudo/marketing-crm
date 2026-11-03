@@ -2,7 +2,7 @@
 import {prepareSelectedStoryArtwork,loadCurrentStoryVehicle} from "./_story-artwork.js";
 import {fetchVanscoMetaCatalogue,enrichVanscoVehicleFromPage} from "./_vansco-facebook-source.js";
 import {createStory,storySlotForRun} from "./buffer-facebook-story-automation.js";
-import {createVanscoFacebookStory,loadVanscoBufferConfig} from "./_vansco-buffer-runtime.js";
+import {createVanscoFacebookStory,loadVanscoBufferConfig,loadVanscoFacebookActivity} from "./_vansco-buffer-runtime.js";
 import {BUFFER_API_URL,BUFFER_FACEBOOK_CHANNELS,bufferDestinationForProduct} from "../lib/bufferPublishing.js";
 import {guardedBufferGraphql} from "../lib/bufferRuntimeGuard.js";
 import {loadBufferAutomationConfig} from "../lib/bufferAutomationConfig.js";
@@ -42,7 +42,7 @@ export function createCanaryHandler({env=process.env,read=readPosts,load=source,
   try{
    const vc=brandKey==="vansco"?await vanscoConfig():null;
    const channelId=vc?.channelId||BUFFER_FACEBOOK_CHANNELS[bufferDestinationForProduct(brandKey)];
-   const posts=await read(channelId);
+   const posts=vc?(await loadVanscoFacebookActivity(vc)).posts:await read(channelId);
    const owned=posts.filter(p=>(p.assets||[]).some(a=>ownedStoryArtworkUrl(a.source,brandKey,REGS[brandKey])));
    if(request.method==="GET"||owned.length)return response.status(200).json({ok:true,brandKey,existing:owned.map(p=>({id:p.id,status:p.status,dueAt:p.dueAt,sentAt:p.sentAt,assets:p.assets}))});
    const time=now(),today=londonDateKeyForValue(new Date(time));
