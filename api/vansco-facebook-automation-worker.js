@@ -177,12 +177,33 @@ async function pruneStaleScheduledPosts(posts, liveVehicles) {
   return { kept, removed };
 }
 
-function dailyLimitFromState(limitState) {
-  const providerLimit = Number(limitState?.limit);
+export function dailyLimitFromState(limitState) {
+  // Buffer documents null as an unlimited daily allowance, not zero posts.
+  const rawLimit = limitState?.limit;
+  const providerLimit = rawLimit == null ? NaN : Number(rawLimit);
   if (Number.isFinite(providerLimit) && providerLimit >= 0) {
     return Math.min(VANSCO_FACEBOOK_MAX_POSTS_PER_DAY, providerLimit);
   }
   return VANSCO_FACEBOOK_MAX_POSTS_PER_DAY;
+}
+
+// The live detail-page enrichment only resolves branch, VAT and registration.
+// It cannot repair a one-photo Meta gallery, so do not waste the per-run
+// candidate or image-check budget on those vehicles.
+export function vanscoFacebookQueueCandidates(vehicles = []) {
+  return (vehicles || []).filter((vehicle) =>
+    isEligibleVanscoVehicle(vehicle) && vanscoFacebookImageUrls(vehicle).length === 3
+  );
+}
+
+// Buffer Essentials can hold up to 5,000 queued posts, but the stored setup
+// snapshot can retain an older 10-post Free-plan limit after a plan change.
+export function vanscoFacebookBufferConfigNeedsRefresh(config, now = Date.now()) {
+  const configured = Number(config?.scheduledPostsLimit);
+  const verifiedAt = new Date(config?.verifiedAt || 0).getTime();
+  return (!Number.isFinite(configured)
+    || configured < VANSCO_FACEBOOK_MAX_POSTS_PER_DAY + VANSCO_FACEBOOK_STORIES_PER_DAY)
+    && (!Number.isFinite(verifiedAt) || verifiedAt <= 0 || now - verifiedAt >= 6 * 60 * 60 * 1000);
 }
 
 function queueCapacity(config, posts) {
@@ -280,6 +301,9 @@ export default async function handler(request, response) {
 
     const vehicles = await fetchVanscoMetaCatalogue({ preferLiveMetaImages: true });
     const eligible = vehicles.filter(isEligibleVanscoVehicle);
+    const feedReady = vanscoFacebookQueueCandidates(eligible);
+    // Existing queued stock remains valid even when a later Meta photo feed
+    // temporarily contains fewer than three images.
     const liveVehicles = liveVehicleMap(eligible);
 
     if (dryRun) {
@@ -307,7 +331,7 @@ export default async function handler(request, response) {
       };
 
       for (const branchKey of ["vansco333", "newForest", "southamptonAirport"]) {
-        const candidate = eligible
+        const candidate = feedReady
           .filter((vehicle) => vehicle.branchKey === branchKey && !vehicle.branchConflict)
           .filter((vehicle) => !excludedUrls.has(vehicle.vehicleUrl))
           .sort((first, second) => {
@@ -336,7 +360,7 @@ export default async function handler(request, response) {
 
       while (selected.length < 5) {
         const result = await chooseResolvedCandidate({
-          vehicles: eligible,
+          vehicles: feedReady,
           history,
           excludedUrls,
         });
@@ -352,13 +376,26 @@ export default async function handler(request, response) {
         date: dateKey,
         metaVehicleCount: vehicles.length,
         eligibleVehicleCount: eligible.length,
+        threeImageReadyVehicleCount: feedReady.length,
         preview: selected,
         held: held.slice(0, 20),
         elapsedMs: Date.now() - startedAt,
       });
     }
 
-    const bufferConfig = await loadVanscoBufferConfig();
+    let bufferConfig = await loadVanscoBufferConfig();
+    let bufferConfigRefreshError = "";
+    if (vanscoFacebookBufferConfigNeedsRefresh(bufferConfig)) {
+      try {
+        bufferConfig = await loadVanscoBufferConfig({ forceDiscovery: true });
+      } catch (error) {
+        // Keep the last verified limit and never invent paid plan capacity.
+        bufferConfigRefreshError = clean(error?.message || error).slice(0, 160);
+        console.warn("[vansco-facebook-automation] Buffer queue limit refresh deferred", {
+          message: bufferConfigRefreshError,
+        });
+      }
+    }
     const now = Date.now();
     const [currentState, activity, priorMediaQuarantine] = await Promise.all([
       loadVanscoBufferState(bufferConfig, `${dateKey}T12:00:00.000Z`),
@@ -412,7 +449,8 @@ export default async function handler(request, response) {
       0,
       VANSCO_FACEBOOK_MAX_POSTS_PER_DAY - normalSent - normalScheduled,
     );
-    const providerDailyLimit = Number(state.limit?.limit);
+    const rawProviderDailyLimit = state.limit?.limit;
+    const providerDailyLimit = rawProviderDailyLimit == null ? NaN : Number(rawProviderDailyLimit);
     const remainingProvider = Number.isFinite(providerDailyLimit)
       ? Math.max(0, providerDailyLimit - providerSent - providerScheduled)
       : remainingNormal;
@@ -442,7 +480,7 @@ export default async function handler(request, response) {
 
       for (let attempt = 0; attempt < MAX_BRANCH_RESOLUTION_ATTEMPTS; attempt += 1) {
         const result = await chooseResolvedCandidate({
-          vehicles: eligible,
+          vehicles: feedReady,
           history,
           excludedUrls,
         });
@@ -453,10 +491,6 @@ export default async function handler(request, response) {
 
         const caption = buildVanscoFacebookCaption(vehicle);
         const imageUrls = vanscoFacebookImageUrls(vehicle);
-        // Bound both insufficient-gallery skips and actual network probes.
-        // A short Meta catalogue must not trigger repeated unbounded page reads.
-        if (checkedVehicles >= MAX_IMAGE_CHECKS_PER_RUN) break;
-        checkedVehicles += 1;
         // Normal Vansco Facebook feed posts always require the first three
         // verified photos. Stories and Google Business still use one.
         if (imageUrls.length !== 3) {
@@ -469,6 +503,9 @@ export default async function handler(request, response) {
           });
           continue;
         }
+        // Count actual three-photo preflights, never already-incomplete galleries.
+        if (checkedVehicles >= MAX_IMAGE_CHECKS_PER_RUN) break;
+        checkedVehicles += 1;
         const compatibleImages = imageUrls.map(vanscoBufferCompatibleImageUrl).filter(Boolean);
         const imageCheck = await preflightVanscoFacebookImages(compatibleImages);
         if (!imageCheck.ok || compatibleImages.length !== imageUrls.length) {
@@ -581,6 +618,19 @@ export default async function handler(request, response) {
       source: "dealerkit_meta_catalogue",
       metaVehicleCount: vehicles.length,
       eligibleVehicleCount: eligible.length,
+      threeImageReadyVehicleCount: feedReady.length,
+      missingThreeImageGalleryCount: eligible.length - feedReady.length,
+      refillDiagnostics: {
+        scheduledSlotsRemaining: slots.length,
+        permittedAdditions: capacity,
+        remainingNormal,
+        remainingProvider,
+        queueLimit: bufferConfig.scheduledPostsLimit,
+        queuedBefore: state.posts.length,
+        checkedThreeImageVehicles: checkedVehicles,
+        reachedImageCheckBudget: checkedVehicles >= MAX_IMAGE_CHECKS_PER_RUN && created.length < slots.length,
+        configRefreshError: bufferConfigRefreshError || null,
+      },
       buffer: {
         organizationId: bufferConfig.organizationId,
         channelId: bufferConfig.channelId,
