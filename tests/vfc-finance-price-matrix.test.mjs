@@ -39,7 +39,9 @@ test('future DealerKit sales prices use the same 9.9% APR rather than legacy fla
  assert.equal(calculateVfcAdvertisedMonthly(null),null);
 });
 test('original disputed Wix stock is protected in future VFC publishing',()=>{
- assert.equal(VFC_PRICING_REVIEW_HOLDS.length,10);
+ assert.equal(VFC_PRICING_REVIEW_HOLDS.length,9);
+ assert.equal(isVfcPricingReviewHeld('WGZ8806'),false); // Historical hold cleared after live CMS absence was verified.
+ assert.equal(isVfcPricingReviewHeld('WM73CXJ'),true); // Other unresolved holds remain.
  assert.equal(isVfcPricingReviewHeld('LM70 YPT'),true);
  assert.equal(isVfcPricingReviewHeld('FL71GZW'),true);
  assert.equal(isVfcPricingReviewHeld('BD73DXK'),false);
