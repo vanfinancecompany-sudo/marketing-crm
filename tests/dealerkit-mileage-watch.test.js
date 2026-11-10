@@ -73,10 +73,10 @@ test("unknown, ambiguous or invalid mileage cannot trigger destructive CMS repla
 test("zero mileage placeholders in Wix can be repaired without treating zero as a DealerKit source", () => {
   assert.equal(cleanMileage(0), null);
   assert.equal(listingMileage({vanSpec:"MILEAGE: 0"}, "finance"), null);
-  const listing = buildMileageFieldPatch("VANFINANCE-ALLVANS", { vanSpec: "YEAR: 2022\\nMILEAGE: 0\\nFUEL TYPE: DIESEL" }, 77500, "finance");
+  const listing = buildMileageFieldPatch("VANFINANCE-ALLVANS", { vanSpec: "YEAR: 2022\nMILEAGE: 0\nFUEL TYPE: DIESEL" }, 77500, "finance");
   assert.equal(listing.error, undefined);
   assert.equal(listing.previousMileage, 0);
-  assert.equal(listing.fields.vanSpec, "YEAR: 2022\\nMILEAGE: 77,500\\nFUEL TYPE: DIESEL");
+  assert.equal(listing.fields.vanSpec, "YEAR: 2022\nMILEAGE: 77,500\nFUEL TYPE: DIESEL");
   const detail = buildMileageFieldPatch("VANFINANCEPAGES", { mileage: "0", vehicleSpecificationText: "MILEAGE: 77,500" }, 77500, "finance");
   assert.equal(detail.error, undefined);
   assert.deepEqual(detail.fields, { mileage: "77,500" });
