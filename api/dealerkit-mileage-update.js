@@ -206,6 +206,9 @@ export default async function handler(request, response) {
     input = checkedBody(request.body);
     const action = clean(input.action, 20).toLowerCase();
     if (!["preview", "apply"].includes(action)) throw new MileageError(400, "Unsupported mileage action.");
+    if (action === "apply" && process.env.DEALERKIT_MILEAGE_UPDATE_ENABLED !== "true") {
+      throw new MileageError(423, "Mileage writes are currently disabled. Complete live Wix field verification and explicitly enable controlled updates before applying.");
+    }
     const preview = await buildMileagePreview(input);
     if (action === "preview") return response.status(200).json(publicPreview(preview));
     if (!/^[a-f0-9]{64}$/.test(clean(input.fingerprint, 100)) ||
