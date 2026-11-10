@@ -1,5 +1,6 @@
 import { normalizeRegistration } from "./_vansco-cache-utils.js";
 import { parseRent2BuyMonthlyPrice } from "../lib/rent2buyMonthlyPriceSync.js";
+import { listingMileage } from "../lib/dealerKitMileageWatch.js";
 
 const WIX_QUERY_URL = "https://www.wixapis.com/wix-data/v2/items/query";
 const PAGE_SIZE = 100;
@@ -101,6 +102,7 @@ export function publishedListingVehicle(item, pipelineValue, source = {}) {
     price: pipeline === "rent2buy" ? null : itemRetailPrice(item),
     monthly: pipeline === "rent2buy" ? itemRent2BuyMonthly(item) : null,
     vat: clean(data.vat ?? data.vatText ?? data.vat_text ?? ""),
+    mileage: listingMileage(data, pipeline),
     updated_at: itemUpdatedAt(item),
     collection_id: source.collectionId || "",
   };
