@@ -72,7 +72,7 @@ export default function StockWatchMileageCard({ record, onApplied }) {
             ))}
             <div>{preview.warning}</div>
             {preview.lowered && <label><input type="checkbox" checked={acceptLower} onChange={(event) => setAcceptLower(event.target.checked)} /> I approve this mileage reduction.</label>}
-            {preview.canApply ? (
+            {preview.canApply && preview.writesEnabled ? (
               <>
                 <label>Type the full registration to approve
                   <input className="field__input" value={typedReg} onChange={(event) => setTypedReg(event.target.value.toUpperCase())} placeholder={record.registration} />
@@ -83,6 +83,10 @@ export default function StockWatchMileageCard({ record, onApplied }) {
                   {busy === "apply" ? "Updating and verifying..." : "Confirm Wix mileage update"}
                 </button>
               </>
+            ) : preview.canApply ? (
+              <div role="status" style={{ padding: "9px 11px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, color: "#9a3412", fontWeight: 700 }}>
+                Preview only. Live Wix mileage updates remain disabled until rollout checks are complete.
+              </div>
             ) : <div>Wix already matches DealerKit across verified fields. No update is required.</div>}
           </div>
         )}
