@@ -75,13 +75,17 @@ function fingerprintFor(input, mileage, targets) {
 
 async function readWixRows(configuration, collectionId, registration, query = queryControlledRegistrationItems) {
   const rows = await query(configuration, collectionId, registration);
-  if (rows.length > 1) throw new MileageError(409, "Duplicate Wix records in " + collectionId + ". Resolve before updating mileage.");
-  if (!rows.length) return null;
-  const item = rows[0];
-  if (!item?.id) throw new MileageError(409, "Missing Wix item ID in " + collectionId + ".");
-  const status = wixItemPublishStatus(item);
-  if (!status) throw new MileageError(409, "Wix publish status could not be verified in " + collectionId + ".");
-  return status === "PUBLISHED" ? item : null;
+  const published = rows.filter((item) => wixItemPublishStatus(item) === "PUBLISHED");
+  if (published.length > 1) throw new MileageError(409, "Multiple published Wix records in " + collectionId + ". Resolve before updating mileage.");
+  if (!published.length) {
+    if (rows.some((item) => !wixItemPublishStatus(item))) {
+      throw new MileageError(409, "Wix publish status could not be verified in " + collectionId + ".");
+    }
+    return null; // Draft rows never become targets for a live mileage update.
+  }
+  const item = published[0];
+  if (!item?.id) throw new MileageError(409, "Missing published Wix item ID in " + collectionId + ".");
+  return item;
 }
 
 export async function buildMileagePreview(input, dependencies = {}) {
