@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
-import { controlledWixConfiguration, controlledWixRequest, queryControlledRegistrationItems, controlledRent2BuyWixConfigurations, wixItemPublishStatus } from "./_dealerkit-controlled-publish-state.js";
+import { controlledWixConfiguration, controlledWixRequest, queryControlledRegistrationItems, controlledRent2BuyWixConfigurations } from "./_dealerkit-controlled-publish-state.js";
+import { wixItemPublishStatus } from "../lib/dealerKitControlledPublishPlan.js";
 import { controlledCarWixConfiguration } from "./_dealerkit-car-controlled-publish-state.js";
 import { normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
 import { cleanMileage, MILEAGE_COLLECTIONS, MILEAGE_CANONICAL, buildMileageFieldPatch } from "../lib/dealerKitMileageWatch.js";
