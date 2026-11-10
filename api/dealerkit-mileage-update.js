@@ -193,7 +193,7 @@ export async function applyMileagePreview(input, preview, dependencies = {}) {
 
 function publicPreview(preview) {
   const { _plan, ...publicData } = preview;
-  return publicData;
+  return { ...publicData, writesEnabled: process.env.DEALERKIT_MILEAGE_UPDATE_ENABLED === "true" };
 }
 
 export default async function handler(request, response) {
