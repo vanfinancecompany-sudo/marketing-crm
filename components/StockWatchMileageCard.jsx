@@ -68,6 +68,7 @@ export default function StockWatchMileageCard({ record, onApplied }) {
               <div key={target.collectionId}>
                 <strong>{target.collectionId}</strong>: {display(target.previousMileage)} to {display(preview.dealerMileage)}
                 <div>Fields: {(target.changedFields || []).join(", ")}{target.conflicts ? " (existing fields disagree)" : ""}</div>
+                {target.missingMileage && <div style={{ color: "#92400e" }}>Wix detail mileage field is empty; will populate it using the verified specification and DealerKit mileage.</div>}
               </div>
             ))}
             <div>{preview.warning}</div>
