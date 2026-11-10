@@ -73,8 +73,8 @@ changeSection('  const filteredRecords = useMemo(', '  const lastCheckedAt = use
 }, "mileage search results");
 
 replaceOnce(
-  '          <SummaryCard label="All advertised stock" value={summary.advertisedStock}',
-  '          <SummaryCard label="Mileage changes" value={summary.mileageDifference} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "mileage_difference" }))} />\n          <SummaryCard label="All advertised stock" value={summary.advertisedStock}',
+  '          <SummaryCard label="All advertised stock"',
+  '          <SummaryCard label="Mileage changes" value={summary.mileageDifference} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "mileage_difference" }))} />\n          <SummaryCard label="All advertised stock"',
   "mileage summary card",
 );
 replaceOnce(
