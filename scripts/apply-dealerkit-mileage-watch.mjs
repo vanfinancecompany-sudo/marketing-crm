@@ -83,8 +83,8 @@ replaceOnce(
   "explanatory note",
 );
 replaceOnce(
-  '<WatchCard key={normalizeWatchRegistration(record.registration)',
-  'record.displayStatus === "mileage_difference" ? <StockWatchMileageCard key={record.id} record={record} onApplied={handleReloadComparison} /> : <WatchCard key={normalizeWatchRegistration(record.registration)',
+  '{filteredRecords.map((record) => ',
+  '{filteredRecords.map((record) => record.displayStatus === "mileage_difference" ? <StockWatchMileageCard key={record.id} record={record} onApplied={handleReloadComparison} /> : ',
   "mileage update review card",
 );
 
