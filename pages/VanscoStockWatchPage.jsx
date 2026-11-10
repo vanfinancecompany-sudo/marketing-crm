@@ -18,12 +18,15 @@ import {
 } from "../services/vanscoStockCache.js";
 
 import { fetchAdvertisedWixVehicles } from "../services/stockWatchWixListingPresence.js";
+import { buildMileageDifferences } from "../lib/dealerKitMileageWatch.js";
+import StockWatchMileageCard from "../components/StockWatchMileageCard.jsx";
 
 const DEFAULT_FILTERS = { finance: "missing", rent2buy: "missing", cars: "missing" };
 const BASE_FILTERS = [
   { value: "missing", label: "Missing from my stock" },
   { value: "local_not_vansco", label: "My stock not on DealerKit" },
   { value: "advertised_stock", label: "All advertised stock" },
+  { value: "mileage_difference", label: "Mileage changes" },
   { value: "advertised", label: "Advertised / Awaiting refresh" },
   { value: "reserved", label: "Reserved on DealerKit" },
   { value: "back_in_stock", label: "Back in stock / Review hidden" },
@@ -593,6 +596,7 @@ export default function VanscoStockWatchPage() {
   }, [activeLocalVehicles, dealerKitAccountedRegistrationSet, dealerKitSnapshotComplete, selectedPipeline]);
 
   const dealerKitByRegistration = useMemo(() => buildDealerKitByRegistration(rawActiveRecords), [rawActiveRecords]);
+  const mileageDifferenceRecords = useMemo(() => buildMileageDifferences(currentRawRecords, activeAdvertisedWixVehicles, selectedPipeline), [currentRawRecords, activeAdvertisedWixVehicles, selectedPipeline]);
 
   const advertisedStockRecords = useMemo(() => activeAdvertisedWixVehicles
     .map((vehicle, index) => mapAdvertisedLocalVehicleToWatchRecord(
@@ -604,14 +608,15 @@ export default function VanscoStockWatchPage() {
     )), [activeAdvertisedWixVehicles, dealerKitByRegistration, selectedPipeline]);
 
   const displayRecords = useMemo(
-    () => [...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords, ...advertisedStockRecords],
-    [activeRecords, advertisedStockRecords, localNotVanscoRecords, priceDifferenceRecords],
+    () => [...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords, ...mileageDifferenceRecords, ...advertisedStockRecords],
+    [activeRecords, advertisedStockRecords, localNotVanscoRecords, priceDifferenceRecords, mileageDifferenceRecords],
   );
 
   const summary = useMemo(() => ({
     missing: activeRecords.filter((record) => record.displayStatus === "missing").length,
     localNotVansco: localNotVanscoRecords.length,
     priceDifference: priceDifferenceRecords.length,
+    mileageDifference: mileageDifferenceRecords.length,
     advertisedStock: advertisedStockRecords.length,
     advertised: activeRecords.filter((record) => record.displayStatus === "advertised").length,
     reserved: activeRecords.filter((record) => record.displayStatus === "reserved").length,
@@ -621,23 +626,24 @@ export default function VanscoStockWatchPage() {
     hiddenNoReg: activeRecords.filter((record) => record.displayStatus === "hidden_no_registration").length,
     hiddenReserved: activeRecords.filter((record) => record.displayStatus === "hidden_reserved_not_advertised").length,
     alreadyListed: activeRecords.filter((record) => record.displayStatus === "hidden_already_ok").length,
-  }), [activeRecords, advertisedStockRecords, localNotVanscoRecords, priceDifferenceRecords]);
+  }), [activeRecords, advertisedStockRecords, localNotVanscoRecords, priceDifferenceRecords, mileageDifferenceRecords]);
 
   const filterCounts = useMemo(() => ({
     missing: summary.missing,
     local_not_vansco: summary.localNotVansco,
     price_difference: summary.priceDifference,
+    mileage_difference: summary.mileageDifference,
     advertised_stock: summary.advertisedStock,
     advertised: summary.advertised,
     reserved: summary.reserved,
     back_in_stock: summary.backInStock,
     hidden: summary.hidden,
     never: summary.never,
-    all: summary.missing + summary.localNotVansco + summary.priceDifference + summary.advertised + summary.reserved + summary.backInStock + summary.hidden + summary.never,
+    all: summary.missing + summary.localNotVansco + summary.priceDifference + summary.mileageDifference + summary.advertised + summary.reserved + summary.backInStock + summary.hidden + summary.never,
   }), [summary]);
 
   const filteredRecords = useMemo(() => {
-    const actionStatuses = ["missing", "local_not_vansco", "price_difference", "advertised", "reserved", "back_in_stock", "hidden", "never"];
+    const actionStatuses = ["missing", "local_not_vansco", "price_difference", "mileage_difference", "advertised", "reserved", "back_in_stock", "hidden", "never"];
     const byFilter = activeFilter === "all"
       ? displayRecords.filter((record) => actionStatuses.includes(record.displayStatus))
       : displayRecords.filter((record) => record.displayStatus === activeFilter);
@@ -743,6 +749,7 @@ export default function VanscoStockWatchPage() {
           <SummaryCard label={`Missing from ${pipelineLabel(selectedPipeline)}`} value={summary.missing} tone="blue" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "missing" }))} />
           <SummaryCard label="My stock not on DealerKit" value={summary.localNotVansco} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "local_not_vansco" }))} />
           {selectedPipeline === "finance" ? <SummaryCard label="Price differences" value={summary.priceDifference} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, finance: "price_difference" }))} /> : null}
+          <SummaryCard label="Mileage changes" value={summary.mileageDifference} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "mileage_difference" }))} />
           <SummaryCard label="All advertised stock" value={summary.advertisedStock} tone="blue" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "advertised_stock" }))} />
           <SummaryCard label="Advertised / Awaiting refresh" value={summary.advertised} tone="blue" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "advertised" }))} />
           <SummaryCard label="Reserved on DealerKit" value={summary.reserved} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "reserved" }))} />
@@ -752,6 +759,7 @@ export default function VanscoStockWatchPage() {
           <SummaryCard label="Local CRM regs loaded" value={activeLocalRegistrations.size} />
         </div>
         {selectedPipeline === "finance" ? <div className="vansco-watch-note"><strong>Price differences:</strong> Van Finance only. It compares exact registration matches where both prices and VAT basis are clear. It never changes Wix or DealerKit prices.</div> : null}
+        <div className="vansco-watch-note"><strong>Mileage changes:</strong> compares each live published Wix listing with the DealerKit mileage from the same Stock Watch snapshot. Preview before applying; only verified mileage fields are patched. Rent2Buy quotes and prices are never changed by mileage updates.</div>
         <div className="vansco-watch-note"><strong>All advertised stock:</strong> this is the live CMS stock for the selected lane. Open <strong>Review vehicle</strong> to upload/reorder photos in the published Wix gallery. On DealerKit-matched vehicles, <strong>Refresh from DealerKit</strong> remains available to import updated supplier photos through Prepare + Reconcile.</div>
         <div className="vansco-watch-note"><strong>Daytime workflow:</strong> when you advertise a Missing vehicle, use <strong>Mark as advertised</strong>. It leaves Missing immediately and remains in Advertised / Awaiting refresh until the registration appears in this CRM stock tab.</div>
         <div className={`vansco-watch-note${dealerKitSnapshotComplete ? "" : " vansco-watch-note--warning"}`}><strong>My stock not on DealerKit:</strong> {dealerKitSnapshotComplete ? "this reverse registration check shows active CRM vehicles absent from a complete DealerKit feed." : "temporarily suspended because the current DealerKit snapshot is incomplete. No CRM vehicle is classified as absent until a complete DealerKit snapshot proves it."}</div>
@@ -766,7 +774,7 @@ export default function VanscoStockWatchPage() {
         <div className="card-actions"><button className="button button--ghost" type="button" onClick={() => setShowDiagnostics((value) => !value)}>{showDiagnostics ? "Hide accuracy details" : "Show accuracy details"}</button></div>
         {showDiagnostics ? <pre className="diagnostics-panel">{JSON.stringify({ selectedPipeline, dealerKitSnapshotComplete, localRegsLoaded: activeLocalRegistrations.size, advertisedStockLoaded: summary.advertisedStock, financeRegsUsedForCars: selectedPipeline === "cars" ? financeRegistrationsForCars.size : 0, vanscoCurrentRegsLoaded: currentVanscoRegistrationSet.size, localNotVansco: summary.localNotVansco, priceDifferences: summary.priceDifference, localLoadError, cacheSummary, actionSummary: summary, debug: debugByPipeline[selectedPipeline] }, null, 2)}</pre> : null}
       </section>
-      <section className="panel"><div className="panel__header"><div><h3>{activeFilters.find((filter) => filter.value === activeFilter)?.label || "Action cards"}</h3><p>{filteredRecords.length} advisory cards for {pipelineLabel(selectedPipeline)}.</p></div><span className="status-pill">{filteredRecords.length} shown</span></div>{loadingPipeline === selectedPipeline ? <div className="empty-state">Loading Vansco comparison...</div> : filteredRecords.length === 0 ? <div className="empty-state">No vehicles in this view.</div> : <div className="vansco-card-grid">{filteredRecords.map((record) => record.displayStatus === "price_difference" ? <PriceDifferenceCard key={record.id} record={record} /> : <WatchCard key={normalizeWatchRegistration(record.registration) || record.stockUrl || record.localStockUrl || record.id} record={record} selectedPipeline={selectedPipeline} onRecordSaved={handleRecordSaved} />)}</div>}</section>
+      <section className="panel"><div className="panel__header"><div><h3>{activeFilters.find((filter) => filter.value === activeFilter)?.label || "Action cards"}</h3><p>{filteredRecords.length} advisory cards for {pipelineLabel(selectedPipeline)}.</p></div><span className="status-pill">{filteredRecords.length} shown</span></div>{loadingPipeline === selectedPipeline ? <div className="empty-state">Loading Vansco comparison...</div> : filteredRecords.length === 0 ? <div className="empty-state">No vehicles in this view.</div> : <div className="vansco-card-grid">{filteredRecords.map((record) => record.displayStatus === "price_difference" ? <PriceDifferenceCard key={record.id} record={record} /> : record.displayStatus === "mileage_difference" ? <StockWatchMileageCard key={record.id} record={record} onApplied={handleReloadComparison} /> : <WatchCard key={normalizeWatchRegistration(record.registration) || record.stockUrl || record.localStockUrl || record.id} record={record} selectedPipeline={selectedPipeline} onRecordSaved={handleRecordSaved} />)}</div>}</section>
     </div>
   );
 }
