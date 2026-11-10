@@ -65,9 +65,49 @@ test("Cars and Rent2Buy update listing and detail specification text, preserving
 test("unknown, ambiguous or invalid mileage cannot trigger destructive CMS replacement", () => {
   assert.match(buildMileageFieldPatch("VANPAGES", { specText: "YEAR: 2022" }, 60000, "rent2buy").error, /no safely identifiable/i);
   assert.match(buildMileageFieldPatch("VANPAGES", { specText: "MILEAGE: around 80,000" }, 81000, "rent2buy").error, /Ambiguous/i);
-  assert.match(buildMileageFieldPatch("VANFINANCEPAGES", { mileage: "", vehicleSpecificationText: "MILEAGE: 30,000" }, 31000, "finance").error, /missing/i);
+  assert.match(buildMileageFieldPatch("VANFINANCEPAGES", { mileage: "" }, 31000, "finance").error, /no safely identifiable/i);
   assert.match(buildMileageFieldPatch("CARPAGES", { descriptionLine: "MILEAGE: 50000\nMILEAGE: 50001" }, 51000, "cars").error, /Ambiguous/i);
   assert.equal(buildMileageFieldPatch("VANPAGES", { specText: "MILEAGE: 50,000" }, 50000, "rent2buy").changed, false);
+});
+
+test("published Finance detail pages with no mileage field are repaired only from an unambiguous specification", () => {
+  const missing = {
+    title: "HV22UVX",
+    vehicleSpecificationText: "YEAR: 2022\nMILLAGE: 16,430\nFUEL TYPE: DIESEL",
+    askingPrice: "£18,995",
+  };
+  const patch = buildMileageFieldPatch("VANFINANCEPAGES", missing, 16490, "finance");
+  assert.equal(patch.error, undefined);
+  assert.equal(patch.previousMileage, 16430);
+  assert.equal(patch.missingMileage, true);
+  assert.deepEqual(patch.fields, {
+    mileage: "16,490",
+    vehicleSpecificationText: "YEAR: 2022\nMILLAGE: 16,490\nFUEL TYPE: DIESEL",
+  });
+  assert.equal(Object.hasOwn(missing, "mileage"), false);
+  assert.equal(missing.askingPrice, "£18,995");
+
+  const alreadyCorrect = buildMileageFieldPatch("VANFINANCEPAGES", {
+    vehicleSpecificationText: "MILLAGE: 70,000"
+  }, 70000, "finance");
+  assert.deepEqual(alreadyCorrect.fields, { mileage: "70,000" });
+  assert.equal(alreadyCorrect.previousMileage, 70000);
+
+  const empty = buildMileageFieldPatch("VANFINANCEPAGES", {
+    mileage: "", vehicleSpecificationText: "MILLAGE: 78,000"
+  }, 79000, "finance");
+  assert.equal(empty.error, undefined);
+  assert.deepEqual(Object.keys(empty.fields).sort(), ["mileage", "vehicleSpecificationText"]);
+
+  const malformed = buildMileageFieldPatch("VANFINANCEPAGES", {
+    mileage: "unknown", vehicleSpecificationText: "MILEAGE: 78,000"
+  }, 79000, "finance");
+  assert.match(malformed.error, /unrecognised/i);
+
+  const ambiguous = buildMileageFieldPatch("VANFINANCEPAGES", {
+    vehicleSpecificationText: "MILEAGE: 77,000\nMILEAGE: 78,000"
+  }, 79000, "finance");
+  assert.match(ambiguous.error, /ambiguous/i);
 });
 
 test("zero mileage placeholders in Wix can be repaired without treating zero as a DealerKit source", () => {
@@ -138,6 +178,62 @@ test("successful Wix apply patches mileage only, then verifies both rows", async
   assert.equal(result.changedRecords, 2);
   assert.equal(writes, 2);
   assert.equal(rows.get("VANFINANCEPAGES").data.mileage, "74,250");
+});
+
+test("an absent Wix mileage field can be inserted and verified without disturbing other data", async () => {
+  const { rows, query, fetchDetail, input } = mockSetup();
+  const detail = rows.get("VANFINANCEPAGES");
+  delete detail.data.mileage;
+  const beforePrice = detail.data.priceVat;
+  const preview = await buildMileagePreview(input, { query, fetchDetail, configuration: {} });
+  const target = preview.targets.find(row => row.collectionId === "VANFINANCEPAGES");
+  assert.equal(target.missingMileage, true);
+  assert.equal(target.previousMileage, 71000);
+  assert.deepEqual(target.changedFields.sort(), ["mileage", "vehicleSpecificationText"]);
+  const request = async (_config, url, options) => {
+    const row = [...rows.values()].find(item => url.endsWith(item.id));
+    for (const change of options.body.patch.fieldModifications) {
+      assert.equal(change.action, "SET_FIELD");
+      row.data[change.fieldPath] = change.setFieldOptions.value;
+    }
+  };
+  const applied = await applyMileagePreview(input, preview, { query, request });
+  assert.equal(applied.verified, true);
+  assert.equal(detail.data.mileage, "74,250");
+  assert.equal(detail.data.vehicleSpecificationText, "MILEAGE: 74,250");
+  assert.equal(detail.data.priceVat, beforePrice);
+});
+
+test("rollback of a newly created mileage field removes it again if verification fails", async () => {
+  const { rows, fetchDetail, input } = mockSetup();
+  const detail = rows.get("VANFINANCEPAGES");
+  delete detail.data.mileage;
+  let writes = 0;
+  let failOnce = true;
+  const query = async (_config, collectionId) => {
+    if (writes === 2 && failOnce) {
+      failOnce = false;
+      throw new Error("Simulated Wix read failure after writes");
+    }
+    return rows.has(collectionId) ? [rows.get(collectionId)] : [];
+  };
+  const preview = await buildMileagePreview(input, { query, fetchDetail, configuration: {} });
+  const operations = [];
+  const request = async (_config, url, options) => {
+    const row = [...rows.values()].find(item => url.endsWith(item.id));
+    for (const change of options.body.patch.fieldModifications) {
+      operations.push(change.action + ":" + change.fieldPath);
+      if (change.action === "REMOVE_FIELD") delete row.data[change.fieldPath];
+      else if (change.action === "SET_FIELD") row.data[change.fieldPath] = change.setFieldOptions.value;
+      else assert.fail("Unexpected Wix field operation");
+    }
+    writes++;
+  };
+  await assert.rejects(applyMileagePreview(input, preview, { query, request }), /not fully verified/i);
+  assert.equal(Object.hasOwn(detail.data, "mileage"), false);
+  assert.equal(detail.data.vehicleSpecificationText, "MILEAGE: 71,000");
+  assert.equal(rows.get("VANFINANCE-ALLVANS").data.vanSpec, "YEAR: 2022\nMILEAGE: 71,000");
+  assert.ok(operations.includes("REMOVE_FIELD:mileage"));
 });
 
 test("Wix state changed after preview blocks before overwriting another edit", async () => {

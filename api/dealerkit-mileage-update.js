@@ -114,7 +114,7 @@ export async function buildMileagePreview(input, dependencies = {}) {
       const current = Object.fromEntries(Object.keys(proposed).map((key) => [key, row.data[key]]));
       targets.push({
         collectionId, itemId: row.id, current, proposed,
-        previousMileage: patch.previousMileage, conflicts: patch.conflicts,
+        previousMileage: patch.previousMileage, conflicts: patch.conflicts, missingMileage: patch.missingMileage === true,
       });
     }
   }
@@ -136,6 +136,7 @@ export async function buildMileagePreview(input, dependencies = {}) {
       collectionId: item.collectionId, itemId: item.itemId,
       previousMileage: item.previousMileage,
       changedFields: Object.keys(item.proposed),
+      missingMileage: item.missingMileage,
       conflicts: item.conflicts,
     })),
     // Server-only write plan, not included in HTTP output.
@@ -144,9 +145,14 @@ export async function buildMileagePreview(input, dependencies = {}) {
 }
 
 async function patchItem(config, target, values, request = controlledWixRequest) {
-  const fieldModifications = Object.entries(values).map(([fieldPath, value]) => ({
-    fieldPath, action: "SET_FIELD", setFieldOptions: { value },
-  }));
+  // REMOVE_FIELD is the documented Wix inverse of creating an absent field.
+  // Critical for rollback: a missing mileage field must return to missing,
+  // never be replaced with an invalid SET_FIELD value of undefined.
+  const fieldModifications = Object.entries(values).map(([fieldPath, value]) => (
+    value === undefined
+      ? { fieldPath, action: "REMOVE_FIELD" }
+      : { fieldPath, action: "SET_FIELD", setFieldOptions: { value } }
+  ));
   return request(config, "/wix-data/v2/items/" + encodeURIComponent(target.itemId), {
     method: "PATCH",
     body: { dataCollectionId: target.collectionId, patch: { dataItemId: target.itemId, fieldModifications } },
