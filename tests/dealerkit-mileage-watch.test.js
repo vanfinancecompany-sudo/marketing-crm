@@ -70,6 +70,26 @@ test("unknown, ambiguous or invalid mileage cannot trigger destructive CMS repla
   assert.equal(buildMileageFieldPatch("VANPAGES", { specText: "MILEAGE: 50,000" }, 50000, "rent2buy").changed, false);
 });
 
+test("zero mileage placeholders in Wix can be repaired without treating zero as a DealerKit source", () => {
+  assert.equal(cleanMileage(0), null);
+  assert.equal(listingMileage({vanSpec:"MILEAGE: 0"}, "finance"), null);
+  const listing = buildMileageFieldPatch("VANFINANCE-ALLVANS", { vanSpec: "YEAR: 2022\\nMILEAGE: 0\\nFUEL TYPE: DIESEL" }, 77500, "finance");
+  assert.equal(listing.error, undefined);
+  assert.equal(listing.previousMileage, 0);
+  assert.equal(listing.fields.vanSpec, "YEAR: 2022\\nMILEAGE: 77,500\\nFUEL TYPE: DIESEL");
+  const detail = buildMileageFieldPatch("VANFINANCEPAGES", { mileage: "0", vehicleSpecificationText: "MILEAGE: 77,500" }, 77500, "finance");
+  assert.equal(detail.error, undefined);
+  assert.deepEqual(detail.fields, { mileage: "77,500" });
+});
+test("conflicting positive mileage fields must block a Wix update", () => {
+  const check = buildMileageFieldPatch("VANFINANCEPAGES", {
+    mileage: "90,000",
+    vehicleSpecificationText: "MILEAGE: 94,000"
+  }, 98000, "finance");
+  assert.match(check.error, /disagree/i);
+  assert.deepEqual(check.fields, {});
+});
+
 test("all three pipelines target canonical listing and vehicle page, with Rent2Buy sharing Wix CMS", () => {
   for (const pipeline of ["finance", "rent2buy", "cars"]) {
     assert.equal(MILEAGE_CANONICAL[pipeline].length, 2);
