@@ -7,6 +7,7 @@ export async function removeSoldWixStock(pipeline, registration) {
     body: JSON.stringify({ pipeline, registration, confirmed: true }),
   });
   const result = await response.json().catch(() => ({}));
+  if (response.ok && result.previewOnly === true && result.ok === true && Number(result.changed) === 0) return result;
   if (!response.ok || result.ok !== true || Number(result.remaining) !== 0) {
     throw new Error(result.message || "Wix did not confirm that the vehicle has been removed from live listings.");
   }
