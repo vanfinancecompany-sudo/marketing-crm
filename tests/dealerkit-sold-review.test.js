@@ -56,5 +56,10 @@ test("post-build Stock Watch offers a separate Sold filter while keeping existin
   assert.match(card, /const isSoldPreview = (true|false)/);
   assert.match(card, /async function removeSoldFromWix\(\)/);
   assert.match(card, /onClick=\{removeSoldFromWix\}/);
+  assert.match(card, /onClick=\{checkSoldWix\}/);
+  assert.match(card, /disabled=\{soldRemoving \|\| isSoldPreview\}/);
+  assert.match(card, /Remove from website is disabled to protect live Wix adverts/);
+  assert.match(card, /Check Wix listing \(read-only\)/);
+
   assert.match(card, /function WatchCard\(\{[^}]*onSoldRemoved/);
 });
