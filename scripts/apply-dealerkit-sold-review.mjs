@@ -74,7 +74,12 @@ const updatedDisplay = originalDisplay
   .replace("[activeRecords,", "[activeRecords, soldReviewRecords,");
 source = source.slice(0, displayStart) + updatedDisplay + source.slice(displayEnd);
 replace("sold: activeRecords.filter((record) => record.displayStatus === \"sold\").length,", "sold: soldReviewRecords.length,", "Sold count");
-replace("  }), [activeRecords, advertisedStockRecords, localNotVanscoRecords, priceDifferenceRecords]);", "  }), [activeRecords, advertisedStockRecords, localNotVanscoRecords, priceDifferenceRecords, soldReviewRecords]);", "Sold count dependency");
+const summaryStart = source.indexOf("  const summary = useMemo(");
+const summaryEnd = source.indexOf("  const filterCounts = useMemo(", summaryStart);
+if (summaryStart < 0 || summaryEnd < 0) throw new Error("Sold review cannot find summary memo");
+const summaryBlock = source.slice(summaryStart, summaryEnd);
+if (!summaryBlock.includes("soldReviewRecords.length")) throw new Error("Sold review summary missing sold count");
+source = source.slice(0, summaryStart) + summaryBlock.replace("[activeRecords,", "[activeRecords, soldReviewRecords,") + source.slice(summaryEnd);
 replace("{activeFilter === \"advertised_stock\" && advertisedStockLoadError ?", "{(activeFilter === \"advertised_stock\" || activeFilter === \"sold\") && advertisedStockLoadError ?", "Show Wix error in sold filter");
 replace("  const [saveMessage, setSaveMessage] = useState(\"\");", "  const [saveMessage, setSaveMessage] = useState(\"\");\n  const [soldRemoving, setSoldRemoving] = useState(false);", "Sold action state");
 replace("  const status = workflowStatusOf(record);", "  async function removeSoldFromWix() {\n    if (record.displayStatus !== \"sold\" || soldRemoving || !record.wixItemId\n      || record.wixPublishStatus !== \"PUBLISHED\") return;\n    const approved = window.confirm(\"Remove \" + record.registration + \" from published \" + pipelineLabel(selectedPipeline) +\n      \" Wix stock? Historical vehicle detail pages will remain intact.\");\n    if (!approved) return;\n    setSoldRemoving(true);\n    setSaveMessage(\"\");\n    try {\n      const result = await removeSoldWixStock(selectedPipeline, record.registration);\n      await onSoldRemoved(record, result);\n      setSaveMessage(result.message || \"Wix listing removed.\");\n    } catch (error) {\n      setSaveMessage(error.message || \"Wix removal was not verified. The review remains open.\");\n    } finally {\n      setSoldRemoving(false);\n    }\n  }\n\n  const status = workflowStatusOf(record);", "Confirmed Wix removal action");
