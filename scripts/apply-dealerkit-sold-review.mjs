@@ -6,6 +6,18 @@ function replace(from, to, step) {
   if (!source.includes(from)) throw new Error("Sold review UI transform anchor missing: " + step);
   source = source.replace(from, to);
 }
+function replaceInWatchCard(from, to, step) {
+  const start = source.indexOf("function WatchCard(");
+  const end = source.indexOf("async function fetchLocalVehiclesForPipeline", start);
+  if (start < 0 || end < start) throw new Error("Sold review WatchCard boundary missing: " + step);
+  const prefix = source.slice(0, start);
+  const component = source.slice(start, end);
+  if (!component.includes(from) || component.indexOf(from) !== component.lastIndexOf(from)) {
+    throw new Error("Sold review WatchCard unique anchor missing: " + step);
+  }
+  source = prefix + component.replace(from, to) + source.slice(end);
+}
+
 replace(
   'import StockWatchMileageCard from "../components/StockWatchMileageCard.jsx";',
   'import StockWatchMileageCard from "../components/StockWatchMileageCard.jsx";\nimport { isSoldRemovalReview } from "../lib/dealerKitPublicAvailability.mjs";\n// DEALERKIT_SOLD_REVIEW_UI',
@@ -81,12 +93,12 @@ const summaryBlock = source.slice(summaryStart, summaryEnd);
 if (!summaryBlock.includes("soldReviewRecords.length")) throw new Error("Sold review summary missing sold count");
 source = source.slice(0, summaryStart) + summaryBlock.replace("[activeRecords,", "[activeRecords, soldReviewRecords,") + source.slice(summaryEnd);
 replace("{activeFilter === \"advertised_stock\" && advertisedStockLoadError ?", "{(activeFilter === \"advertised_stock\" || activeFilter === \"sold\") && advertisedStockLoadError ?", "Show Wix error in sold filter");
-replace("  const [saveMessage, setSaveMessage] = useState(\"\");", "  const [saveMessage, setSaveMessage] = useState(\"\");\n  const [soldRemoving, setSoldRemoving] = useState(false);", "Sold action state");
-replace("  const status = workflowStatusOf(record);", "  async function removeSoldFromWix() {\n    if (record.displayStatus !== \"sold\" || soldRemoving || !record.wixItemId\n      || record.wixPublishStatus !== \"PUBLISHED\") return;\n    const approved = window.confirm(\"Remove \" + record.registration + \" from published \" + pipelineLabel(selectedPipeline) +\n      \" Wix stock? Historical vehicle detail pages will remain intact.\");\n    if (!approved) return;\n    setSoldRemoving(true);\n    setSaveMessage(\"\");\n    try {\n      const result = await removeSoldWixStock(selectedPipeline, record.registration);\n      await onSoldRemoved(record, result);\n      setSaveMessage(result.message || \"Wix listing removed.\");\n    } catch (error) {\n      setSaveMessage(error.message || \"Wix removal was not verified. The review remains open.\");\n    } finally {\n      setSoldRemoving(false);\n    }\n  }\n\n  const status = workflowStatusOf(record);", "Confirmed Wix removal action");
-replace("<SourceStatusBadge status={record.sourceStatus} />", "<SourceStatusBadge status={record.displayStatus === \"sold\" ? (record.sourceLifecycleStatus || record.sourceStatus) : record.sourceStatus} />", "Actual lifecycle badge");
-replace("          {!isLocalNotVansco && record.stockUrl ? <a className=\"button button--ghost\"", "          {record.displayStatus === \"sold\" && record.wixItemId && record.wixPublishStatus === \"PUBLISHED\" ? <button className=\"button button--primary\" type=\"button\" disabled={soldRemoving} onClick={removeSoldFromWix}>{soldRemoving ? \"Removing from Wix...\" : \"Remove from website\"}</button> : null}\n          {!isLocalNotVansco && record.stockUrl ? <a className=\"button button--ghost\"", "Sold removal button");
-replace("!isAdvertisedStockMaintenance && (isAdvertised ?", "!isAdvertisedStockMaintenance && record.displayStatus !== \"sold\" && (isAdvertised ?", "Hide status not an alternative to Sold removal");
-replace("!isAdvertisedStockMaintenance && !isNeverShowStatus(status) ?", "!isAdvertisedStockMaintenance && record.displayStatus !== \"sold\" && !isNeverShowStatus(status) ?", "Never show not an alternative to Sold removal");
+replaceInWatchCard("  const [saveMessage, setSaveMessage] = useState(\"\");", "  const [saveMessage, setSaveMessage] = useState(\"\");\n  const [soldRemoving, setSoldRemoving] = useState(false);", "Sold action state");
+replaceInWatchCard("  const status = workflowStatusOf(record);", "  async function removeSoldFromWix() {\n    if (record.displayStatus !== \"sold\" || soldRemoving || !record.wixItemId\n      || record.wixPublishStatus !== \"PUBLISHED\") return;\n    const approved = window.confirm(\"Remove \" + record.registration + \" from published \" + pipelineLabel(selectedPipeline) +\n      \" Wix stock? Historical vehicle detail pages will remain intact.\");\n    if (!approved) return;\n    setSoldRemoving(true);\n    setSaveMessage(\"\");\n    try {\n      const result = await removeSoldWixStock(selectedPipeline, record.registration);\n      await onSoldRemoved(record, result);\n      setSaveMessage(result.message || \"Wix listing removed.\");\n    } catch (error) {\n      setSaveMessage(error.message || \"Wix removal was not verified. The review remains open.\");\n    } finally {\n      setSoldRemoving(false);\n    }\n  }\n\n  const status = workflowStatusOf(record);", "Confirmed Wix removal action");
+replaceInWatchCard("<SourceStatusBadge status={record.sourceStatus} />", "<SourceStatusBadge status={record.displayStatus === \"sold\" ? (record.sourceLifecycleStatus || record.sourceStatus) : record.sourceStatus} />", "Actual lifecycle badge");
+replaceInWatchCard("          {!isLocalNotVansco && record.stockUrl ? <a className=\"button button--ghost\"", "          {record.displayStatus === \"sold\" && record.wixItemId && record.wixPublishStatus === \"PUBLISHED\" ? <button className=\"button button--primary\" type=\"button\" disabled={soldRemoving} onClick={removeSoldFromWix}>{soldRemoving ? \"Removing from Wix...\" : \"Remove from website\"}</button> : null}\n          {!isLocalNotVansco && record.stockUrl ? <a className=\"button button--ghost\"", "Sold removal button");
+replaceInWatchCard("!isAdvertisedStockMaintenance && (isAdvertised ?", "!isAdvertisedStockMaintenance && record.displayStatus !== \"sold\" && (isAdvertised ?", "Hide status not an alternative to Sold removal");
+replaceInWatchCard("!isAdvertisedStockMaintenance && !isNeverShowStatus(status) ?", "!isAdvertisedStockMaintenance && record.displayStatus !== \"sold\" && !isNeverShowStatus(status) ?", "Never show not an alternative to Sold removal");
 replace("onRecordSaved={handleRecordSaved}", "onRecordSaved={handleRecordSaved} onSoldRemoved={handleSoldRemoved}", "Sold callback prop");
 replace("  function handleReservedDrafted(originalRecord, actionRecord) {", "  async function handleSoldRemoved(record, result) {\n    if (result?.previewOnly) { setSuccessMessage(result.message); return; }\n    if (!result?.ok || Number(result.remaining) !== 0) throw new Error(\"Wix removal was not verified.\");\n    await loadAdvertisedStock(selectedPipeline);\n    setSuccessMessage(\"Wix confirmed \" + record.registration + \" removed from published \" + pipelineLabel(selectedPipeline) + \" listings.\");\n  }\n\n  function handleReservedDrafted(originalRecord, actionRecord) {", "Refresh after sold removal");
 replace("The existing Hide control records your review in Stock Watch; it does not change Wix publication.", "Use Remove from website to move published Wix stock adverts to Draft. Vehicle detail pages remain protected.", "Sold instructions");
@@ -95,8 +107,14 @@ const soldSignature = source.match(/function WatchCard\(\{([^}]+)\}\)/);
 if (!soldSignature) throw new Error("Sold WatchCard props missing");
 source = source.replace(soldSignature[0], soldSignature[0].replace("onRecordSaved", "onRecordSaved, onSoldRemoved"));
 
-replace("  const [soldRemoving, setSoldRemoving] = useState(false);", "  const [soldRemoving, setSoldRemoving] = useState(false);\n  const isSoldPreview = " + JSON.stringify(process.env.VERCEL_ENV !== "production") + ";", "Sold preview mode marker");
-replace("soldRemoving ? \"Removing from Wix...\" : \"Remove from website\"", "soldRemoving ? \"Checking Wix...\" : isSoldPreview ? \"Preview check (no changes)\" : \"Remove from website\"", "Sold removal preview label");
-replace("const approved = window.confirm(\"Remove \" + record.registration + \" from published \" + pipelineLabel(selectedPipeline) +", "const approved = window.confirm(isSoldPreview ? \"Preview-only safety check for \" + record.registration + \". No Wix records will be changed.\" : \"Remove \" + record.registration + \" from published \" + pipelineLabel(selectedPipeline) +", "Sold preview confirmation");
+replaceInWatchCard("  const [soldRemoving, setSoldRemoving] = useState(false);", "  const [soldRemoving, setSoldRemoving] = useState(false);\n  const isSoldPreview = " + JSON.stringify(process.env.VERCEL_ENV !== "production") + ";", "Sold preview mode marker");
+replaceInWatchCard("soldRemoving ? \"Removing from Wix...\" : \"Remove from website\"", "soldRemoving ? \"Checking Wix...\" : isSoldPreview ? \"Preview check (no changes)\" : \"Remove from website\"", "Sold removal preview label");
+replaceInWatchCard("const approved = window.confirm(\"Remove \" + record.registration + \" from published \" + pipelineLabel(selectedPipeline) +", "const approved = window.confirm(isSoldPreview ? \"Preview-only safety check for \" + record.registration + \". No Wix records will be changed.\" : \"Remove \" + record.registration + \" from published \" + pipelineLabel(selectedPipeline) +", "Sold preview confirmation");
+const watchStart = source.indexOf("function WatchCard(");
+const watchEnd = source.indexOf("async function fetchLocalVehiclesForPipeline", watchStart);
+const watchComponent = source.slice(watchStart, watchEnd);
+for (const expected of ["const [soldRemoving, setSoldRemoving]", "async function removeSoldFromWix()", "const isSoldPreview =", "onClick={removeSoldFromWix}"]) {
+  if (!watchComponent.includes(expected)) throw new Error("Sold WatchCard is missing its own declaration: " + expected);
+}
 fs.writeFileSync(path, source);
 console.log("Added separate Sold / Removal Review cards across Finance Vans, Rent2Buy and Cars.");
