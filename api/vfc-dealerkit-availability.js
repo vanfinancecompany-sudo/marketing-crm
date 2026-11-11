@@ -3,8 +3,13 @@ import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
 import { projectPublicDealerKitAvailability } from "../lib/dealerKitPublicAvailability.mjs";
 
 function authorized(request) {
-  const expected = String(process.env.VFC_DEALERKIT_STATUS_KEY || "").trim();
-  const provided = String(request.headers?.["x-vfc-dealerkit-status-key"] || "").trim();
+  // A separate, narrowly scoped credential lets standalone Rent2Buy read
+  // the same sanitized DealerKit statuses without reusing the VFC site's key.
+  const rent2BuyKey = String(request.headers?.["x-rent2buy-dealerkit-status-key"] || "").trim();
+  const headerName = rent2BuyKey ? "x-rent2buy-dealerkit-status-key" : "x-vfc-dealerkit-status-key";
+  const envName = rent2BuyKey ? "RENT2BUY_DEALERKIT_STATUS_KEY" : "VFC_DEALERKIT_STATUS_KEY";
+  const expected = String(process.env[envName] || "").trim();
+  const provided = String(request.headers?.[headerName] || "").trim();
   if (!expected || !provided) return false;
   const a = Buffer.from(expected);
   const b = Buffer.from(provided);
