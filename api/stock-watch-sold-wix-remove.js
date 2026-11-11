@@ -144,6 +144,29 @@ export async function removeSoldWixListing(
   };
 }
 
+export async function inspectSoldWixListing(
+  { pipeline, registration },
+  { confirmStatus = confirmDealerKitNotAvailable, loadPreview } = {},
+) {
+  const lane = LANES[pipeline];
+  const reg = normalizeRegistration(registration);
+  if (!lane || !reg) safety("A supported stock lane and exact registration are required.");
+  const confirmed = await confirmStatus(reg);
+  const preview = await (loadPreview || lane.preview)(reg);
+  const matches = assertFullWixPreview(preview, pipeline);
+  return {
+    ok: true,
+    previewOnly: true,
+    registration: reg,
+    pipeline,
+    dealerKitState: confirmed.state,
+    wouldRemove: matches.length,
+    changed: 0,
+    remaining: matches.length,
+    message: "Preview-only safety check: " + matches.length + " published Wix record(s) found. No Wix items have been changed.",
+  };
+}
+
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store");
   if (!isMarketingStockWatchActionAuthorized(request)) {
@@ -157,6 +180,15 @@ export default async function handler(request, response) {
     return response.status(400).json({ ok: false, message: "Please confirm the Wix removal." });
   }
   try {
+    // Every development preview is read-only. A Vercel Preview must never
+    // draft a real customer's Wix listing, even when the operator confirms.
+    if (process.env.VERCEL_ENV !== "production") {
+      const result = await inspectSoldWixListing({
+        pipeline: clean(request.body?.pipeline).toLowerCase(),
+        registration: request.body?.registration,
+      });
+      return response.status(200).json(result);
+    }
     const result = await removeSoldWixListing({
       pipeline: clean(request.body?.pipeline).toLowerCase(),
       registration: request.body?.registration,
