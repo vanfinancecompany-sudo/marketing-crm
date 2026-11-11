@@ -176,23 +176,24 @@ export default async function handler(request, response) {
     response.setHeader("Allow", "POST");
     return response.status(405).json({ ok: false, message: "Method not allowed." });
   }
-  if (request.body?.confirmed !== true) {
-    return response.status(400).json({ ok: false, message: "Please confirm the Wix removal." });
-  }
+  const pipeline = clean(request.body?.pipeline).toLowerCase();
+  const registration = request.body?.registration;
+  const action = clean(request.body?.action).toLowerCase();
   try {
-    // Every development preview is read-only. A Vercel Preview must never
-    // draft a real customer's Wix listing, even when the operator confirms.
-    if (process.env.VERCEL_ENV !== "production") {
-      const result = await inspectSoldWixListing({
-        pipeline: clean(request.body?.pipeline).toLowerCase(),
-        registration: request.body?.registration,
-      });
+    if (action === "check") {
+      const result = await inspectSoldWixListing({ pipeline, registration });
       return response.status(200).json(result);
     }
-    const result = await removeSoldWixListing({
-      pipeline: clean(request.body?.pipeline).toLowerCase(),
-      registration: request.body?.registration,
-    });
+    if (action !== "remove") {
+      return response.status(400).json({ ok: false, message: "Unknown Sold / Removal Review action." });
+    }
+    if (request.body?.confirmed !== true) {
+      return response.status(400).json({ ok: false, message: "Please confirm the Wix removal." });
+    }
+    if (process.env.VERCEL_ENV !== "production") {
+      return response.status(409).json({ ok: false, previewOnly: true, message: "Preview mode is read-only. The real Remove from website action is only enabled in an approved CRM production release." });
+    }
+    const result = await removeSoldWixListing({ pipeline, registration });
     return response.status(result.ok ? 200 : 207).json(result);
   } catch (error) {
     return response.status(409).json({ ok: false, message: clean(error?.message || error) || "Wix removal safety check failed." });
