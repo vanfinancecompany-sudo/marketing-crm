@@ -73,7 +73,7 @@ replace(
   '        <div className="vansco-watch-note"><strong>Sold / Removal Review:</strong> DealerKit confirmed Sold, Awaiting Delivery, or a verified removal. Customer applications must stop. Review the live advert and manually remove it in Wix; Hide only records a Stock Watch decision.</div>\n        <div className="vansco-watch-note"><strong>All advertised stock:</strong>',
   "workflow description"
 );
-replace("import { isSoldRemovalReview } from \"../lib/dealerKitPublicAvailability.mjs\";", "import { isSoldRemovalReview } from \"../lib/dealerKitPublicAvailability.mjs\";\nimport { removeSoldWixStock } from \"../services/soldWixRemoval.js\";", "Sold Wix service import");
+replace("import { isSoldRemovalReview } from \"../lib/dealerKitPublicAvailability.mjs\";", "import { isSoldRemovalReview } from \"../lib/dealerKitPublicAvailability.mjs\";\nimport { removeSoldWixStock, checkSoldWixStock } from \"../services/soldWixRemoval.js\";", "Sold Wix service import");
 replace("  const displayRecords = useMemo(", "  const soldReviewRecords = useMemo(() => {\n    if (advertisedStockErrorByPipeline[selectedPipeline]) return [];\n    const liveByReg = new Map(activeAdvertisedWixVehicles\n      .filter(vehicle => vehicle.publishStatus === \"PUBLISHED\" && vehicle.wixItemId && vehicle.collection_id)\n      .map(vehicle => [normalizeWatchRegistration(vehicle.registration), vehicle]));\n    return activeRecords.filter(record => record.displayStatus === \"sold\").flatMap(record => {\n      const advert = liveByReg.get(normalizeWatchRegistration(record.registration));\n      return advert ? [{\n        ...record, wixItemId: advert.wixItemId, wixCollectionId: advert.collection_id,\n        wixPublishStatus: advert.publishStatus,\n        localStockUrl: advert.advertUrl || \"\", currentWixAdvert: advert,\n      }] : [];\n    });\n  }, [activeRecords, activeAdvertisedWixVehicles, advertisedStockErrorByPipeline, selectedPipeline]);\n  const displayRecords = useMemo(", "Sold cards require Wix published main stock");
 // Preserve any other Stock Watch card workstreams added by earlier build transformations.
 const displayStart = source.indexOf("  const displayRecords = useMemo(");
@@ -116,5 +116,53 @@ const watchComponent = source.slice(watchStart, watchEnd);
 for (const expected of ["const [soldRemoving, setSoldRemoving]", "async function removeSoldFromWix()", "const isSoldPreview =", "onClick={removeSoldFromWix}"]) {
   if (!watchComponent.includes(expected)) throw new Error("Sold WatchCard is missing its own declaration: " + expected);
 }
+
+replaceInWatchCard(
+  '  const [soldRemoving, setSoldRemoving] = useState(false);',
+  '  const [soldRemoving, setSoldRemoving] = useState(false);\n  const [soldChecking, setSoldChecking] = useState(false);',
+  'Sold Wix separate inspection state'
+);
+replaceInWatchCard(
+  '  async function removeSoldFromWix() {',
+  `  async function checkSoldWix() {
+    if (record.displayStatus !== "sold" || soldChecking || !record.wixItemId) return;
+    setSoldChecking(true);
+    setSaveMessage("");
+    try {
+      const result = await checkSoldWixStock(selectedPipeline, record.registration);
+      setSaveMessage(result.message || "Wix listing checked. No records were changed.");
+    } catch (error) {
+      setSaveMessage(error?.message || "Could not verify the published Wix listing.");
+    } finally {
+      setSoldChecking(false);
+    }
+  }
+
+  async function removeSoldFromWix() {`,
+  'Separate read-only Wix check'
+);
+const controlStart = source.indexOf('          {record.displayStatus === "sold" && record.wixItemId && record.wixPublishStatus === "PUBLISHED" ?');
+const controlEnd = source.indexOf('          {!isLocalNotVansco && record.stockUrl ?', controlStart);
+if (controlStart < 0 || controlEnd <= controlStart || source.slice(controlStart, controlEnd).indexOf("removeSoldFromWix") < 0) {
+  throw new Error("Sold Wix card controls cannot be located safely");
+}
+const newControl = `          {record.displayStatus === "sold" && record.wixItemId && record.wixPublishStatus === "PUBLISHED" ? (
+            <>
+              <button className="button button--primary" type="button" disabled={soldRemoving || isSoldPreview} onClick={removeSoldFromWix}>
+                {soldRemoving ? "Removing from Wix..." : "Remove from website"}
+              </button>
+              {isSoldPreview ? (
+                <>
+                  <button className="button button--ghost" type="button" disabled={soldChecking} onClick={checkSoldWix}>
+                    {soldChecking ? "Checking Wix..." : "Check Wix listing (read-only)"}
+                  </button>
+                  <div className="vehicle-card__meta">Development preview: Remove from website is disabled to protect live Wix adverts. The removal button becomes active only after the CRM production release is approved.</div>
+                </>
+              ) : null}
+            </>
+          ) : null}
+`;
+source = source.slice(0, controlStart) + newControl + source.slice(controlEnd);
+
 fs.writeFileSync(path, source);
 console.log("Added separate Sold / Removal Review cards across Finance Vans, Rent2Buy and Cars.");
