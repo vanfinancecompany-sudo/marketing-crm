@@ -6,8 +6,8 @@ import { isSoldRemovalReview, projectPublicDealerKitAvailability } from "../lib/
 test("only confirmed final lifecycle transitions enter Sold / Removal Review", () => {
   for (const sourceLifecycleStatus of ["sold", "awaiting_delivery", "removed_from_dealerkit"]) {
     assert.equal(isSoldRemovalReview({ sourceLifecycleStatus, sourceStatus: "reserved" }), true);
-    assert.equal(isSoldRemovalReview({ sourceLifecycleStatus, workflowStatus: "hidden" }), false);
-    assert.equal(isSoldRemovalReview({ sourceLifecycleStatus, workflowStatus: "never_show_again" }), false);
+    assert.equal(isSoldRemovalReview({ sourceLifecycleStatus, workflowStatus: "hidden" }), true);
+    assert.equal(isSoldRemovalReview({ sourceLifecycleStatus, workflowStatus: "never_show_again" }), true);
   }
   for (const sourceLifecycleStatus of ["reserved", "deposit_taken", "available", "source_unresolved"]) {
     assert.equal(isSoldRemovalReview({ sourceLifecycleStatus }), false);
@@ -43,6 +43,9 @@ test("post-build Stock Watch offers a separate Sold filter while keeping existin
   assert.match(source, /displayStatus: "sold"/);
   assert.match(source, /summary\.sold/);
   assert.match(source, /record\.displayStatus === "sold"/);
+  assert.match(source, /soldReviewRecords/);
+  assert.match(source, /Remove from website/);
+  assert.match(source, /onSoldRemoved/);
   assert.match(source, /saveWorkflow\("ignored", "Hidden"\)/);
   assert.match(source, /label="Reserved on DealerKit"/);
 });
