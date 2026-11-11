@@ -95,5 +95,8 @@ const soldSignature = source.match(/function WatchCard\(\{([^}]+)\}\)/);
 if (!soldSignature) throw new Error("Sold WatchCard props missing");
 source = source.replace(soldSignature[0], soldSignature[0].replace("onRecordSaved", "onRecordSaved, onSoldRemoved"));
 
+replace("  const [soldRemoving, setSoldRemoving] = useState(false);", "  const [soldRemoving, setSoldRemoving] = useState(false);\\n  const isSoldPreview = " + JSON.stringify(process.env.VERCEL_ENV !== "production") + ";", "Sold preview mode marker");
+replace("soldRemoving ? \"Removing from Wix...\" : \"Remove from website\"", "soldRemoving ? \"Checking Wix...\" : isSoldPreview ? \"Preview check (no changes)\" : \"Remove from website\"", "Sold removal preview label");
+replace("const approved = window.confirm(\"Remove \" + record.registration + \" from published \" + pipelineLabel(selectedPipeline) +", "const approved = window.confirm(isSoldPreview ? \"Preview-only safety check for \" + record.registration + \". No Wix records will be changed.\" : \"Remove \" + record.registration + \" from published \" + pipelineLabel(selectedPipeline) +", "Sold preview confirmation");
 fs.writeFileSync(path, source);
 console.log("Added separate Sold / Removal Review cards across Finance Vans, Rent2Buy and Cars.");
