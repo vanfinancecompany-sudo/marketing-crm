@@ -63,7 +63,16 @@ replace(
 );
 replace("import { isSoldRemovalReview } from \"../lib/dealerKitPublicAvailability.mjs\";", "import { isSoldRemovalReview } from \"../lib/dealerKitPublicAvailability.mjs\";\nimport { removeSoldWixStock } from \"../services/soldWixRemoval.js\";", "Sold Wix service import");
 replace("  const displayRecords = useMemo(", "  const soldReviewRecords = useMemo(() => {\n    if (advertisedStockErrorByPipeline[selectedPipeline]) return [];\n    const liveByReg = new Map(activeAdvertisedWixVehicles\n      .filter(vehicle => vehicle.publishStatus === \"PUBLISHED\" && vehicle.wixItemId && vehicle.collection_id)\n      .map(vehicle => [normalizeWatchRegistration(vehicle.registration), vehicle]));\n    return activeRecords.filter(record => record.displayStatus === \"sold\").flatMap(record => {\n      const advert = liveByReg.get(normalizeWatchRegistration(record.registration));\n      return advert ? [{\n        ...record, wixItemId: advert.wixItemId, wixCollectionId: advert.collection_id,\n        wixPublishStatus: advert.publishStatus,\n        localStockUrl: advert.advertUrl || \"\", currentWixAdvert: advert,\n      }] : [];\n    });\n  }, [activeRecords, activeAdvertisedWixVehicles, advertisedStockErrorByPipeline, selectedPipeline]);\n  const displayRecords = useMemo(", "Sold cards require Wix published main stock");
-replace("() => [...activeRecords, ...localNotVanscoRecords, ...priceDifferenceRecords, ...advertisedStockRecords],\n    [activeRecords, advertisedStockRecords, localNotVanscoRecords, priceDifferenceRecords],", "() => [...activeRecords.filter(record => record.displayStatus !== \"sold\"), ...soldReviewRecords, ...localNotVanscoRecords, ...priceDifferenceRecords, ...advertisedStockRecords],\n    [activeRecords, soldReviewRecords, advertisedStockRecords, localNotVanscoRecords, priceDifferenceRecords],", "Only display published sold records");
+// Preserve any other Stock Watch card workstreams added by earlier build transformations.
+const displayStart = source.indexOf("  const displayRecords = useMemo(");
+const displayEnd = source.indexOf("  const summary = useMemo(", displayStart);
+if (displayStart < 0 || displayEnd < 0) throw new Error("Sold review cannot find Stock Watch display memo");
+const originalDisplay = source.slice(displayStart, displayEnd);
+if (!originalDisplay.includes("...activeRecords")) throw new Error("Sold review cannot locate active Stock Watch records");
+const updatedDisplay = originalDisplay
+  .replace("...activeRecords", '...activeRecords.filter(record => record.displayStatus !== "sold"), ...soldReviewRecords')
+  .replace("[activeRecords,", "[activeRecords, soldReviewRecords,");
+source = source.slice(0, displayStart) + updatedDisplay + source.slice(displayEnd);
 replace("sold: activeRecords.filter((record) => record.displayStatus === \"sold\").length,", "sold: soldReviewRecords.length,", "Sold count");
 replace("  }), [activeRecords, advertisedStockRecords, localNotVanscoRecords, priceDifferenceRecords]);", "  }), [activeRecords, advertisedStockRecords, localNotVanscoRecords, priceDifferenceRecords, soldReviewRecords]);", "Sold count dependency");
 replace("{activeFilter === \"advertised_stock\" && advertisedStockLoadError ?", "{(activeFilter === \"advertised_stock\" || activeFilter === \"sold\") && advertisedStockLoadError ?", "Show Wix error in sold filter");
