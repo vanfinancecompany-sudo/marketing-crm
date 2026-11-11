@@ -130,6 +130,84 @@ test("conflicting positive mileage fields must block a Wix update", () => {
   assert.deepEqual(check.fields, {});
 });
 
+test("legacy Cars dotted thousands mileage can be safely normalised in both Wix fields", () => {
+  const values = [
+    ["CARFINANCE", "vanSpec"],
+    ["CARPAGES", "descriptionLine"],
+  ];
+  for (const [collectionId, field] of values) {
+    const existing = {
+      [field]: "REGISTRATION: DA67 PHV\nYEAR: 2017/67\nMILLAGE: 88.600\nEURO: 6",
+      priceVat: "£13,995",
+    };
+    // A dotted legacy record remains in the comparison until its Wix text is corrected.
+    assert.equal(mileageFromSpecification(existing[field]), null);
+    const patch = buildMileageFieldPatch(collectionId, existing, 88600, "cars");
+    assert.equal(patch.error, undefined, collectionId);
+    assert.equal(patch.changed, true, collectionId);
+    assert.equal(patch.previousMileage, 88600, collectionId);
+    assert.deepEqual(patch.fields, {
+      [field]: "REGISTRATION: DA67 PHV\nYEAR: 2017/67\nMILLAGE: 88,600\nEURO: 6",
+    });
+    assert.equal(existing.priceVat, "£13,995");
+  }
+});
+
+test("legacy dot mileage only accepts complete thousands groups, never guessed decimals", () => {
+  for (const malformed of ["88.6", "88.60", "88.6000", "88.60.0", "88,600.0", "88.600.12"]) {
+    const patch = buildMileageFieldPatch("CARFINANCE", { vanSpec: "MILLAGE: " + malformed }, 88600, "cars");
+    assert.match(patch.error, /Ambiguous|unrecognised/i, malformed);
+    assert.deepEqual(patch.fields, {}, malformed);
+  }
+});
+
+test("BMW car preview and apply normalises two published Wix specs, no other car fields", async () => {
+  const rows = new Map([
+    ["CARFINANCE", {
+      id: "car-listing",
+      data: {
+        title: "DA67PHV", _publishStatus: "PUBLISHED",
+        vanSpec: "REGISTRATION: DA67 PHV\nYEAR: 2017/67\nMILLAGE: 88.600\nEURO: 6",
+        askingPrice: 13500,
+      }
+    }],
+    ["CARPAGES", {
+      id: "car-detail",
+      data: {
+        title: "DA67PHV", _publishStatus: "PUBLISHED",
+        descriptionLine: "REGISTRATION: DA67 PHV\nMILLAGE: 88.600\nTRANSMISSION: AUTO",
+        image: "existing-car-image",
+      }
+    }],
+  ]);
+  const input = {
+    pipeline: "cars", registration: "DA67PHV", supplierStockId: "car-1"
+  };
+  const query = async (_config, collectionId) => rows.has(collectionId) ? [rows.get(collectionId)] : [];
+  const fetchDetail = async () => ({
+    registration: "DA67 PHV", supplierStockId: "car-1", mileage: 88600, status: "available"
+  });
+  const preview = await buildMileagePreview(input, { query, fetchDetail, configuration: {} });
+  assert.equal(preview.changedRecords, 2);
+  assert.deepEqual(preview.targets.map(x => x.collectionId).sort(), ["CARFINANCE", "CARPAGES"]);
+  assert.deepEqual(preview.targets.map(x => x.changedFields), [["vanSpec"], ["descriptionLine"]]);
+  assert.equal(preview.lowered, false);
+  const request = async (_config, url, options) => {
+    assert.equal(options.method, "PATCH");
+    const row = [...rows.values()].find(item => url.endsWith(item.id));
+    for (const modification of options.body.patch.fieldModifications) {
+      assert.equal(modification.action, "SET_FIELD");
+      row.data[modification.fieldPath] = modification.setFieldOptions.value;
+    }
+  };
+  const applied = await applyMileagePreview(input, preview, { query, request });
+  assert.equal(applied.verified, true);
+  assert.match(rows.get("CARFINANCE").data.vanSpec, /MILLAGE: 88,600/);
+  assert.match(rows.get("CARPAGES").data.descriptionLine, /MILLAGE: 88,600/);
+  assert.equal(rows.get("CARFINANCE").data.askingPrice, 13500);
+  assert.equal(rows.get("CARPAGES").data.image, "existing-car-image");
+});
+
 test("all three pipelines target canonical listing and vehicle page, with Rent2Buy sharing Wix CMS", () => {
   for (const pipeline of ["finance", "rent2buy", "cars"]) {
     assert.equal(MILEAGE_CANONICAL[pipeline].length, 2);
