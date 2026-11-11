@@ -52,9 +52,9 @@ test("post-build Stock Watch offers a separate Sold filter while keeping existin
   const finish = source.indexOf("async function fetchLocalVehiclesForPipeline", begin);
   assert.ok(begin >= 0 && finish > begin, "WatchCard component must be located");
   const card = source.slice(begin, finish);
-  assert.match(card, /const \\[soldRemoving, setSoldRemoving\\] = useState\\(false\\)/);
+  assert.match(card, /const \[soldRemoving, setSoldRemoving\] = useState\(false\)/);
   assert.match(card, /const isSoldPreview = (true|false)/);
-  assert.match(card, /async function removeSoldFromWix\\(\\)/);
-  assert.match(card, /onClick=\\{removeSoldFromWix\\}/);
-  assert.match(card, /function WatchCard\\(\\{[^}]*onSoldRemoved/);
+  assert.match(card, /async function removeSoldFromWix\(\)/);
+  assert.match(card, /onClick=\{removeSoldFromWix\}/);
+  assert.match(card, /function WatchCard\(\{[^}]*onSoldRemoved/);
 });
