@@ -36,6 +36,27 @@ test("server-safe availability projection retains only real observed registratio
   ]);
 });
 
+test("the latest confirmed DealerKit observation controls the badge", () => {
+  const now = Date.parse("2026-11-11T13:00:00Z");
+  const row = (registration, supplier_stock_id, source_status, minutesAgo) => ({
+    registration,
+    supplier_stock_id,
+    source_status,
+    last_seen_at: new Date(now - minutesAgo * 60000).toISOString(),
+  });
+  const source = [
+    row("AB22 CDE", "1", "Reserved", 10),
+    row("CC72 DEF", "2", "Awaiting Delivery", 5),
+    row("SO22 LDD", "3", "Available", 5),
+    row("AB22 CDE", "4", "In Stock", 5),
+    row("CC72 DEF", "5", "Reserved", 10),
+    row("SO22 LDD", "6", "Sold", 10),
+  ];
+  assert.deepEqual(projectPublicDealerKitAvailability(source, [], { now }), [
+    { registration: "CC72DEF", status: "unavailable", hidden: [] },
+  ]);
+});
+
 test("post-build Stock Watch offers a separate Sold filter while keeping existing Reserved controls", () => {
   const source = fs.readFileSync(new URL("../pages/VanscoStockWatchPage.jsx", import.meta.url), "utf8");
   assert.match(source, /DEALERKIT_SOLD_REVIEW_UI/);
