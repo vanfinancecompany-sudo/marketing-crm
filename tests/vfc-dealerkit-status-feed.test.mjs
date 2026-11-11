@@ -61,6 +61,10 @@ test("the latest confirmed DealerKit observation controls the badge", () => {
 test("DealerKit status feed is private, read-only and refuses missing credentials", () => {
   const route = fs.readFileSync(new URL("../api/vfc-dealerkit-availability.js", import.meta.url), "utf8");
   assert.match(route, /timingSafeEqual/);
+  assert.match(route, /RENT2BUY_DEALERKIT_STATUS_KEY/);
+  assert.match(route, /x-rent2buy-dealerkit-status-key/);
+  assert.match(route, /VFC_DEALERKIT_STATUS_KEY/);
+  assert.match(route, /x-vfc-dealerkit-status-key/);
   assert.match(route, /if \(!expected \|\| !provided\) return false/);
   assert.match(route, /request\.method !== "GET"/);
   assert.match(route, /response\.status\(401\)/);
