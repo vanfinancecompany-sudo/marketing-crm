@@ -47,8 +47,8 @@ replace(
   "filterable statuses"
 );
 replace(
-  '          <SummaryCard label="Reserved on DealerKit" value={summary.reserved} tone="amber"',
-  '          <SummaryCard label="Sold / Removal Review" value={summary.sold} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "sold" }))} />\n          <SummaryCard label="Reserved on DealerKit" value={summary.reserved} tone="amber"',
+  '          <SummaryCard label="Back in stock / Review hidden"',
+  '          <SummaryCard label="Sold / Removal Review" value={summary.sold} tone="amber" onClick={() => setFiltersByPipeline((prev) => ({ ...prev, [selectedPipeline]: "sold" }))} />\n          <SummaryCard label="Back in stock / Review hidden"',
   "summary card"
 );
 replace(
