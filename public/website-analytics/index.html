@@ -41,6 +41,30 @@
           <button type="button" class="site-tab" data-site="rent2buy">Rent2Buy</button>
         </section>
 
+        <section class="insight-card journey-panel" id="dailyJourneys" aria-labelledby="journeyTitle">
+          <div class="section-head journey-title-row">
+            <div>
+              <div class="eyebrow">DAILY WEBSITE INTELLIGENCE</div>
+              <h2 id="journeyTitle">Customer journeys</h2>
+              <p class="journey-intro">Where visitors arrive, which pages and vans they explore, and where applications begin or finish. Van Finance and Rent2Buy stay separate.</p>
+            </div>
+            <div class="journey-periods" role="group" aria-label="Customer journey reporting period">
+              <button type="button" class="journey-period" data-journey-period="today">Today · live</button>
+              <button type="button" class="journey-period is-active" data-journey-period="yesterday" aria-pressed="true">Yesterday</button>
+              <button type="button" class="journey-period" data-journey-period="7d">Last 7 days</button>
+            </div>
+          </div>
+          <p class="journey-status" id="journeyStatus" role="status" aria-live="polite">Loading first-party journey data…</p>
+          <div class="journey-stat-grid" id="journeySummary"></div>
+          <div id="journeyQuality" class="journey-quality"></div>
+          <div class="journey-detail-grid">
+            <div><h3>Most common journeys</h3><div id="journeyRoutes" class="journey-list"></div></div>
+            <div><h3>Entry pages and popular vans</h3><div id="journeyPopular" class="journey-list"></div></div>
+            <div><h3>Where visits come from</h3><div id="journeySources" class="journey-list"></div></div>
+          </div>
+          <p class="quiet-note">Supplemental, aggregate-only first-party data. A session is not a verified person; incomplete page-event coverage is shown explicitly. GA4 above/below remains the benchmark for settled traffic and confirmed CRM applications are reported separately.</p>
+        </section>
+
         <section class="metric-grid" id="metricGrid"></section>
         <p class="quiet-note combined-note" id="combinedNote"></p>
 
@@ -93,9 +117,9 @@
         </section>
 
         <section class="panel">
-          <div class="section-head"><div><div class="eyebrow">JOURNEYS</div><h2>Common visitor flows</h2></div></div>
+          <div class="section-head"><div><div class="eyebrow">JOURNEYS</div><h2>Legacy VFC-only visitor flows</h2></div></div>
           <div class="flow-list" id="flowRows"></div>
-          <p class="quiet-note">Journey sequences remain a supplemental first-party signal because the standard GA4 Data API does not expose full path sequences. They are kept here for weekly diagnosis but are not used in the GA4 headline totals.</p>
+          <p class="quiet-note">Historical supplemental routes currently cover Van Finance only. Use the daily Customer journeys panel above for separate Van Finance and Rent2Buy reporting, tracking coverage and application signals.</p>
         </section>
 
         <section class="panel">
@@ -106,6 +130,7 @@
       </main>
     </div>
     <script type="module" src="/website-analytics/app.js"></script>
+    <script type="module" src="/website-analytics/customer-journeys.js"></script>
     <script src="/website-analytics/live-status.js"></script>
     <script src="/website-analytics/live-finance-funnel.js"></script>
   </body>
