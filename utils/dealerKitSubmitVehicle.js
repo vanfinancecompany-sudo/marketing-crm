@@ -20,7 +20,22 @@ export async function submitDealerKitVehicle({
   const ensureCurrent = () => {
     if (!isCurrent()) throw new Error("This vehicle review is no longer open. Reopen it to continue.");
   };
-  const nonMediaBlockers = state => (state.plan?.blockers || []).filter(item => !MEDIA_BLOCKERS.has(item.code));
+  // The Rent2Buy master/detail targets cannot be built until the selected
+  // branded template and image gallery exist. Those "missing target" blockers
+  // are consequences of media readiness, not independent preflight failures.
+  // Defer them only while a related media blocker is present, then recheck
+  // every blocker after image upload/preparation before any Wix CMS write.
+  const nonMediaBlockers = state => {
+    const blockers = state.plan?.blockers || [];
+    const rent2BuyMediaPending = blockers.some(item => [
+      "rent2buy_media_not_prepared", "rent2buy_template_not_ready", "rent2buy_gallery_not_ready",
+    ].includes(item.code));
+    return blockers.filter(item => !MEDIA_BLOCKERS.has(item.code) && !(
+      rent2BuyMediaPending && [
+        "rent2buy_reconcile_master_missing", "rent2buy_reconcile_detail_missing",
+      ].includes(item.code)
+    ));
+  };
   const describe = blockers => blockers.map(item => item.message || item.code).join(" ");
   let step = "Saving vehicle";
   try {

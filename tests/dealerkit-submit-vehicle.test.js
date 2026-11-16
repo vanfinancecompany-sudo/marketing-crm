@@ -169,3 +169,64 @@ test("Cars sequence resolves a timestamp tie and keeps earlier unsequenced recor
   ];
   assert.deepEqual(orderCarsManualMedia(rows).map(row=>row.id),["old-a","old-b","new-sooner","new-later"]);
 });
+
+test("Rent2Buy missing master/detail targets caused by a not-yet-uploaded template do not block photo upload", async () => {
+  let readCount=0;
+  const pending={
+    plan: { mode:"rent2buy", blockers:[
+      {code:"rent2buy_template_not_ready", message:"Select a READY Rent2Buy template."},
+      {code:"rent2buy_gallery_not_ready", message:"Gallery not ready."},
+      {code:"rent2buy_reconcile_master_missing",message:"ALLRENT2BUYVANS could not be safely prepared."},
+      {code:"rent2buy_reconcile_detail_missing",message:"VANPAGES could not be safely prepared."},
+    ]},
+    media:{ unpreparedDealerKitImageIds:[] },
+  };
+  const runner=runHarness({
+    read:async()=>++readCount===1?pending:{plan:{mode:"rent2buy",canPublish:true,confirmation},media:{}},
+  });
+  await runner.result;
+  assert.deepEqual(runner.events,["save","upload","publish"]);
+  assert.equal(readCount,2);
+});
+
+test("Rent2Buy missing master remains a hard failure when not caused by missing media",async()=>{
+  let uploaded=false;
+  const runner=runHarness({
+    read:async()=>({plan:{mode:"rent2buy",blockers:[
+      {code:"rent2buy_reconcile_master_missing",message:"ALLRENT2BUYVANS could not be safely prepared."},
+    ]},media:{}}),
+    upload:async()=>{uploaded=true;},
+  });
+  await assert.rejects(runner.result,/Saving vehicle: ALLRENT2BUYVANS could not be safely prepared/);
+  assert.equal(uploaded,false);
+});
+
+test("Rent2Buy refuses Wix writes if the missing master persists after template preparation",async()=>{
+  let writes=0,reads=0;
+  const pending={plan:{mode:"rent2buy",blockers:[
+    {code:"rent2buy_template_not_ready"},
+    {code:"rent2buy_reconcile_master_missing",message:"ALLRENT2BUYVANS could not be safely prepared."},
+  ]},media:{}};
+  const runner=runHarness({
+    read:async()=>++reads===1?pending:{plan:{mode:"rent2buy",blockers:[
+      {code:"rent2buy_reconcile_master_missing",message:"ALLRENT2BUYVANS could not be safely prepared."},
+    ]},media:{}},
+    publish:async()=>{writes++;return {verified:true};},
+  });
+  await assert.rejects(runner.result,/Preparing photographs: ALLRENT2BUYVANS could not be safely prepared/);
+  assert.equal(writes,0);
+});
+
+test("Rent2Buy duplicate CMS records still block before any staged photo upload", async()=>{
+  let uploads=0;
+  const runner=runHarness({
+    read:async()=>({plan:{mode:"rent2buy",blockers:[
+      {code:"rent2buy_template_not_ready"},
+      {code:"rent2buy_reconcile_master_missing"},
+      {code:"rent2buy_existing_ambiguous",message:"Duplicate Rent2Buy Wix records found."},
+    ]},media:{}}),
+    upload:async()=>{uploads++;},
+  });
+  await assert.rejects(runner.result,/Duplicate Rent2Buy Wix records found/);
+  assert.equal(uploads,0);
+});
