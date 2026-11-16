@@ -31,7 +31,7 @@ from (values ('anon'), ('authenticated'), ('service_role')) roles(role_name);
 
 ## Production rollout after approval
 
-1. Pause DealerKit publishing while the schema and app are updated. Apply only the reviewed Cars media migration through the normal Supabase migration process. Run the read-only checks again. Verify RLS is still enabled, public roles still lack table access, and only service_role can execute the Cars selection function. Compare legacy row counts.
+1. Pause DealerKit publishing while the schema and app are updated. Apply only the reviewed Cars media migration through the normal Supabase migration process. Run the read-only checks again. Verify RLS is still enabled, public roles still lack table access, and only service_role can execute the Cars selection function. Compare legacy row counts. Confirm the Cars-only append sequence and trigger exist, and that the application service role can use the sequence.
 2. Release the reviewed Git commit to the existing Marketing CRM production project using the normal Git/Vercel workflow. Confirm the commit, deployment readiness and the three product review screens. Check capacities and relevant errors before resuming publication.
 3. Monitor the first authorized normal publication per product. Check Wix listing and detail IDs, category membership, prices and image order. If the CRM reports a partial rollback, reconcile the listed records before retrying.
 
@@ -41,4 +41,4 @@ Pause publishing and restore the prior Vercel deployment first. Leave the additi
 
 ## Validation performed
 
-The exact migration was applied to an isolated in-memory PostgreSQL instance using the repository's baseline table and grants. The checks covered retained legacy rows, valid and invalid pairs, duplicate file IDs, RLS and grants, atomic primary selection, and rollback. No live Supabase data was used. The browser and publishing tests used fixture responses for Wix. Real Wix Media signature, uploader response, READY status and display-name compatibility remain an isolated-site release gate.
+The exact migration was applied to an isolated in-memory PostgreSQL instance using the repository's baseline table and grants. The checks covered retained legacy rows, valid and invalid pairs, duplicate file IDs, RLS and grants, atomic primary selection, and rollback. No live Supabase data was used. The real CRM media handler also ran against that isolated database with mocked Wix responses. It exercised signed upload preparation, registration, READY polling, rejection of cross-registration and cross-product claims, and verified the proposed CMS payloads for a first publication and a replacement. Equal timestamps no longer change new Cars photo order because inserts receive a stored sequence. Real Wix Media signature, uploader response, READY status and display-name compatibility remain an isolated-site release gate.

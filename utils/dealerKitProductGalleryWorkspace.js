@@ -439,6 +439,7 @@ function renderPendingUpload(state, product, host) {
     });
     const image = document.createElement("img");
     image.src = pending.url;
+    image.draggable = false;
     image.alt = pending.file.name;
     const controls = element("div", "dealerkit-product-gallery__manual-copy");
     const primary = element("button", "dealerkit-product-gallery__mini-button",

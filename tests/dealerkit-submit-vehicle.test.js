@@ -158,3 +158,14 @@ test("a DealerKit source change discovered after photo staging aborts publicatio
   await assert.rejects(harness.result,/DealerKit changed/);
   assert.deepEqual(harness.events,["save","upload"]);
 });
+
+test("Cars sequence resolves a timestamp tie and keeps earlier unsequenced records first", () => {
+  const date = new Date("2026-11-16T12:00:00Z");
+  const rows = [
+    {id:"new-later",createdAt:date,carsGalleryOrder:12},
+    {id:"new-sooner",createdAt:date,carsGalleryOrder:11},
+    {id:"old-b",createdAt:"2026-11-15T10:00:00Z"},
+    {id:"old-a",createdAt:"2026-11-15T10:00:00Z"},
+  ];
+  assert.deepEqual(orderCarsManualMedia(rows).map(row=>row.id),["old-a","old-b","new-sooner","new-later"]);
+});

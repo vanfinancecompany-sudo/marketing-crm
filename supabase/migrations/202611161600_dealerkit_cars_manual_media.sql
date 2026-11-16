@@ -1,5 +1,6 @@
 alter table public.dealerkit_review_manual_media
   add column if not exists selected_at timestamptz,
+  add column cars_gallery_order bigint,
   drop constraint dealerkit_review_manual_media_site_scope_check,
   drop constraint dealerkit_review_manual_media_purpose_check,
   add constraint dealerkit_review_manual_media_scope_purpose_check check (
@@ -7,6 +8,29 @@ alter table public.dealerkit_review_manual_media
     (site_scope = 'rent2buy' and purpose = 'rent2buy_template') or
     (site_scope = 'cars' and purpose = 'cars_replacement')
   );
+
+-- Preserve legacy rows as-is. New Cars uploads receive a durable append order.
+create sequence public.dealerkit_cars_gallery_order_seq
+  owned by public.dealerkit_review_manual_media.cars_gallery_order;
+
+create function public.dealerkit_assign_cars_gallery_order() returns trigger
+language plpgsql security invoker set search_path = ''
+as $dealerkit_order$
+begin
+  if new.purpose = 'cars_replacement' then
+    new.cars_gallery_order := pg_catalog.nextval('public.dealerkit_cars_gallery_order_seq');
+  end if;
+  return new;
+end;
+$dealerkit_order$;
+
+create trigger dealerkit_cars_gallery_order
+  before insert on public.dealerkit_review_manual_media
+  for each row execute function public.dealerkit_assign_cars_gallery_order();
+
+revoke all on function public.dealerkit_assign_cars_gallery_order() from public, anon, authenticated;
+grant execute on function public.dealerkit_assign_cars_gallery_order() to service_role;
+grant usage on sequence public.dealerkit_cars_gallery_order_seq to service_role;
 
 -- Keep the previous primary if the candidate is no longer ready or owned.
 create function public.dealerkit_select_cars_primary(
