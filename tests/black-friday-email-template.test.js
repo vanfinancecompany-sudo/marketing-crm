@@ -133,6 +133,8 @@ test("campaign artwork is served from production, or from the previewed commit o
   assert.equal(premiumAssetBaseUrl({ VERCEL_ENV: "production", VERCEL_GIT_REPO_OWNER: "o", VERCEL_GIT_REPO_SLUG: "r", VERCEL_GIT_COMMIT_SHA: "a".repeat(40) }), "https://marketing-crm-six.vercel.app");
   assert.equal(premiumAssetBaseUrl({ VERCEL_ENV: "preview", VERCEL_GIT_REPO_OWNER: "o", VERCEL_GIT_REPO_SLUG: "r", VERCEL_GIT_COMMIT_SHA: "a".repeat(40) }), `https://raw.githubusercontent.com/o/r/${"a".repeat(40)}/public`);
   assert.equal(premiumAssetBaseUrl({ MARKETING_EMAIL_ASSET_BASE_URL: "https://cdn.example.com/" }), "https://cdn.example.com");
+  assert.equal(premiumAssetBaseUrl({ MARKETING_PUBLIC_BASE_URL: "https://crm.example.com/" }), "https://crm.example.com");
+  assert.equal(premiumAssetBaseUrl({ VERCEL_ENV: "preview", MARKETING_PUBLIC_BASE_URL: "https://crm.example.com", VERCEL_GIT_REPO_OWNER: "o", VERCEL_GIT_REPO_SLUG: "r", VERCEL_GIT_COMMIT_SHA: "b".repeat(40) }), `https://raw.githubusercontent.com/o/r/${"b".repeat(40)}/public`);
   for (const file of ["hero-van.jpg", "autoguard-warranties-logo.png", "icon-warranty.png", "icon-deposit.png", "icon-delivery.png", "icon-stock.png"]) {
     assert.ok(fs.existsSync(new URL(`../public/email-assets/black-friday-2026/${file}`, import.meta.url)), file);
   }
