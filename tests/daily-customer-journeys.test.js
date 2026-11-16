@@ -128,7 +128,7 @@ test('mobile homepage stock journey uses explicit same-session events and exclud
     e('a', 'finance_application_completed', '/apply', t(6)),
     e('b', 'page_view', '/', t(0)),
     e('b', 'page_view', '/cars', t(2)),
-    e('b', 'vehicle_view', '/vans/prehome', t(0)),
+    e('b', 'vehicle_view', '/vans/prehome', '2026-11-13T10:59:00Z'),
     e('c', 'page_view', '/', t(0)),
     e('c', 'page_view', '/vans', t(1)),
     e('d', 'page_view', '/vans', t(1)),
