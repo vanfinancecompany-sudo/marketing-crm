@@ -31,6 +31,16 @@
 .journey-entry.route{align-items:flex-start;flex-direction:column}
 .journey-entry.route strong{align-self:flex-end}
 .journey-empty{padding:13px;border:1px dashed #d8dce2;border-radius:9px;color:#747d89;font-size:12px;line-height:1.55}
+.journey-mobile-funnel{margin-top:22px;padding:17px;border:1px solid #e2e5e9;border-radius:13px;background:#fff}
+.journey-mobile-funnel h3{margin:0 0 6px;color:#343b46;font-size:16px}
+.journey-mobile-funnel>.quiet-note{margin:0 0 14px;max-width:900px;font-size:12px;line-height:1.5}
+.journey-mobile-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+.journey-mobile-site{min-width:0;background:#fafbfc;border:1px solid #e8ebef;padding:12px;border-radius:12px;display:grid;gap:7px;align-content:start}
+.journey-mobile-site h4{margin:0;font-size:14px}
+.journey-mobile-site>p{margin:0 0 4px;color:#667085;font-size:12px;line-height:1.5}
+.journey-mobile-site>.journey-mobile-caveat{margin-top:7px;font-size:11px}
+@media(max-width:900px){.journey-mobile-grid{grid-template-columns:1fr}}
+
 @media(max-width:1300px){.journey-stat-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.journey-detail-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:900px){.journey-title-row{flex-direction:column}.journey-detail-grid{grid-template-columns:1fr}.journey-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){.journey-stat-grid{grid-template-columns:1fr 1fr}.journey-stat{padding:11px}.journey-stat strong{font-size:23px}.journey-periods{width:100%}.journey-period{flex:1;padding:9px 5px;font-size:11px}}
