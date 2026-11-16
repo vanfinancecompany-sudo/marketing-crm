@@ -67,8 +67,8 @@ test("product gallery workspace separates Finance and Rent2Buy, previews uploads
   assert.match(client, /dealerkit-review-decision/);
   assert.match(client, /dealerkit-wix-manual-media/);
   assert.match(client, /registered\.media/);
-  assert.match(client, /preserveOnError:\s*true/);
-  assert.match(client, /uploaded and saved to this product workspace/);
+  assert.match(client, /uploadQueuedPhotos/);
+  assert.match(client, /input\.multiple = true/);
   assert.match(client, /observer\.observe\(document\.documentElement, \{ childList: true, subtree: true \}\)/);
   assert.doesNotMatch(client, /attributeFilter:\s*\["hidden"\]/);
 });
@@ -98,7 +98,7 @@ test("Cars review stays in Cars mode and uses the source-image review plus contr
   assert.match(review, /\["finance", "rent2buy", "cars"\]\.includes\(product\)/);
   assert.match(review, /Save Cars review/);
   assert.match(review, /product: "cars"/);
-  assert.match(gallery, /workspace\.dataset\.product === "cars"/);
+  assert.match(gallery, /purpose: "cars_replacement"/);
   assert.match(detail, /\["finance", "rent2buy", "cars"\]\.includes\(requestedProductRaw\)/);
   assert.match(controlled, /product === "cars"/);
   assert.match(controlled, /dealerkit-car-controlled-publish-preview/);

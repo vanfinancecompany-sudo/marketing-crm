@@ -1,7 +1,7 @@
 import { normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
 import { carPublishConfirmationMatches } from "../lib/dealerKitCarWixPlan.js";
 import { wixItemPublishStatus } from "../lib/dealerKitControlledPublishPlan.js";
-import { ControlledPublishError, controlledWixRequest, queryControlledRegistrationItems } from "./_dealerkit-controlled-publish-state.js";
+import { ControlledPublishError, controlledWixCreateId, controlledWixRequest, queryControlledRegistrationItems } from "./_dealerkit-controlled-publish-state.js";
 import { setTargetPublishStatus } from "./dealerkit-controlled-publish.js";
 import { buildFreshCarControlledPublishState } from "./_dealerkit-car-controlled-publish-state.js";
 
@@ -43,10 +43,10 @@ function rollbackFieldModifications(snapshot = {}) {
     : { fieldPath, action: "REMOVE_FIELD" });
 }
 
-async function insertTarget(configuration, target) {
+async function insertTarget(configuration, target, registration) {
   const payload = await controlledWixRequest(configuration, "/wix-data/v2/items", {
     method: "POST",
-    body: { dataCollectionId: target.collectionId, dataItem: { data: target.data } },
+    body: { dataCollectionId: target.collectionId, dataItem: { id: controlledWixCreateId(configuration.siteId, target.collectionId, registration), data: target.data } },
   });
   const item = payload?.dataItem;
   if (!item?.id) throw new ControlledPublishError(502, `Wix did not return an item ID after creating ${target.collectionId}.`);
@@ -72,8 +72,8 @@ async function updateTarget(configuration, target) {
   };
 }
 
-async function applyTarget(configuration, target) {
-  return target?.operation === "update" ? updateTarget(configuration, target) : insertTarget(configuration, target);
+async function applyTarget(configuration, target, registration) {
+  return target?.operation === "update" ? updateTarget(configuration, target) : insertTarget(configuration, target, registration);
 }
 
 async function rollbackWrite(configuration, item) {
@@ -183,7 +183,7 @@ export default async function handler(request, response) {
       throw new ControlledPublishError(409, "The verified Cars write plan must contain exactly CARFINANCE and CARPAGES.");
     }
 
-    for (const target of targets) writes.push(await applyTarget(state.configuration, target));
+    for (const target of targets) writes.push(await applyTarget(state.configuration, target, registration));
     for (const target of targets.filter((item) => item.publishStatusOperation)) {
       const itemId = target.operation === "create"
         ? clean(writes.find((write) => write.collectionId === target.collectionId)?.itemId, 300)
@@ -209,6 +209,7 @@ export default async function handler(request, response) {
       ok: true,
       published: true,
       verified: true,
+      galleryComplete: !state.media?.missingDealerKitImageIds?.length && !state.media?.pendingManualMedia,
       writeIntent: state.plan.writeIntent,
       registration,
       recordsWritten: writes.length,

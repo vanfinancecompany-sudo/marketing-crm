@@ -138,7 +138,7 @@ patchFile("../utils/dealerKitReviewWorkspace.js", [
 patchFile("../utils/dealerKitProductGalleryWorkspace.js", [
   {
     label: "Cars keep their standalone review image state",
-    already: 'if (workspace.dataset.product === "cars") {',
+    already: 'purpose: "cars_replacement"',
     before: '    const body = workspace.querySelector("[data-dealerkit-review-body]");',
     after: '    if (workspace.dataset.product === "cars") return;\n    const body = workspace.querySelector("[data-dealerkit-review-body]");',
   },

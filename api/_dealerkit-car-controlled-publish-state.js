@@ -5,6 +5,7 @@ import { ControlledPublishError, controlledWixRequest, queryControlledRegistrati
 import { normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
 import { decodeDealerKitProductImageState } from "../lib/dealerKitProductImageState.js";
 import { DEALERKIT_IMPORTED_MEDIA_TABLE, WIX_MEDIA_GET_FILE_URL, importedMediaRowToClient } from "../lib/dealerKitWixVehicleMedia.js";
+import { DEALERKIT_MANUAL_MEDIA_TABLE, manualMediaRowToClient, orderCarsManualMedia } from "../lib/dealerKitWixManualMedia.js";
 import { buildDealerKitCarWixPlan, buildCarPublishConfirmation } from "../lib/dealerKitCarWixPlan.js";
 
 const clean = (value, limit = 10000) => String(value ?? "").trim().slice(0, limit);
@@ -63,7 +64,26 @@ async function loadImportedReadiness(supabase, configuration, vehicle) {
   return items;
 }
 
-export function buildCarImageSet(vehicle = {}, decision = {}, importedDealerKitMedia = []) {
+async function loadCarManualMedia(supabase, configuration, vehicle, registration) {
+  const { data, error } = await supabase.from(DEALERKIT_MANUAL_MEDIA_TABLE).select("*")
+    .eq("supplier_stock_id", vehicle.supplierStockId).eq("registration", registration)
+    .eq("site_scope", "cars").eq("purpose", "cars_replacement").eq("wix_site_id", configuration.siteId)
+    .order("created_at", { ascending: true });
+  if (error) throw new ControlledPublishError(502, "Could not load staged Cars images.");
+  return Promise.all((data || []).map(async row => {
+    const stored = manualMediaRowToClient(row);
+    try {
+      const { file } = await controlledWixRequest(configuration, `${WIX_MEDIA_GET_FILE_URL}?fileId=${encodeURIComponent(stored.wixFileId)}`, { method: "GET" });
+      const ready = file?.id === stored.wixFileId && file.mediaType === "IMAGE" && file.operationStatus === "READY"
+        && (!file.siteId || file.siteId === configuration.siteId);
+      return { ...stored, ready: Boolean(ready), url: ready ? clean(file.url, 3000) : null };
+    } catch {
+      return { ...stored, ready: false, url: null };
+    }
+  }));
+}
+
+export function buildCarImageSet(vehicle = {}, decision = {}, importedDealerKitMedia = [], manualMedia = []) {
   const sourceIds = (Array.isArray(vehicle.images) ? vehicle.images : []).map((image) => clean(image?.id, 300)).filter(Boolean);
   const decoded = decodeDealerKitProductImageState(decision, sourceIds);
   const selectedIds = decoded.finance.includedOrderIds;
@@ -72,21 +92,25 @@ export function buildCarImageSet(vehicle = {}, decision = {}, importedDealerKitM
   const readyIds = selectedIds.filter((id) => importedById.get(id)?.ready && clean(importedById.get(id)?.wixUrl, 3000));
   const unpreparedIds = selectedIds.filter((id) => !importedById.has(id));
   const processingIds = selectedIds.filter((id) => importedById.has(id) && !importedById.get(id)?.ready);
-  const mainUrl = primaryId && importedById.get(primaryId)?.ready ? clean(importedById.get(primaryId)?.wixUrl, 3000) : null;
-  const galleryIds = mainUrl ? [primaryId, ...readyIds.filter((id) => id !== primaryId)] : readyIds;
-  const galleryUrls = galleryIds.map((id) => clean(importedById.get(id)?.wixUrl, 3000)).filter(Boolean);
+  const sourceMain = primaryId && importedById.get(primaryId)?.ready ? clean(importedById.get(primaryId)?.wixUrl, 3000) : null;
+  const selectedManual = manualMedia.filter(item => item.selected);
+  const manualPrimary = selectedManual.length === 1 && selectedManual[0].ready ? selectedManual[0].url : null;
+  const mainUrl = selectedManual.length ? manualPrimary : sourceMain;
+  const galleryIds = sourceMain ? [primaryId, ...readyIds.filter((id) => id !== primaryId)] : readyIds;
+  const galleryUrls = [...new Set([mainUrl, ...orderCarsManualMedia(manualMedia).filter(item => item.ready).map(item => item.url),
+    ...galleryIds.map(id => clean(importedById.get(id)?.wixUrl, 3000))].filter(Boolean))];
 
   return {
     imageSet: {
       dealerKitImageIds: selectedIds,
       mainUrl,
-      mainSource: mainUrl ? "dealerkit_primary" : null,
+      mainSource: manualPrimary ? "manual_replacement" : mainUrl ? "dealerkit_primary" : null,
       listingImageUrl: mainUrl,
       galleryUrls,
       // Cars follows the same rule as the van lanes: the chosen primary/card
       // image is the hard requirement. READY secondary photos are included,
       // while processing/unprepared secondary photos are advisory only.
-      ready: Boolean(selectedIds.length && mainUrl && galleryUrls.length),
+      ready: Boolean(mainUrl && galleryUrls.length),
     },
     media: {
       dealerKitImported: selectedIds.filter((id) => importedById.has(id)).length,
@@ -95,6 +119,7 @@ export function buildCarImageSet(vehicle = {}, decision = {}, importedDealerKitM
       missingDealerKitImageIds: [...unpreparedIds, ...processingIds],
       unpreparedDealerKitImageIds: unpreparedIds,
       processingDealerKitImageIds: processingIds,
+      pendingManualMedia: manualMedia.filter(item => !item.ready).length,
     },
   };
 }
@@ -113,12 +138,13 @@ export async function buildFreshCarControlledPublishState(registrationInput, env
   await assertDealerKitRegistrationUnambiguous(registration);
 
   const configuration = controlledCarWixConfiguration(environment);
-  const [importedDealerKitMedia, carListingRows, carDetailRows] = await Promise.all([
+  const [importedDealerKitMedia, carListingRows, carDetailRows, manualMedia] = await Promise.all([
     loadImportedReadiness(supabase, configuration, vehicle),
     queryRegistration(configuration, "CARFINANCE", registration),
     queryRegistration(configuration, "CARPAGES", registration),
+    loadCarManualMedia(supabase, configuration, vehicle, registration),
   ]);
-  const { imageSet, media } = buildCarImageSet(vehicle, decision, importedDealerKitMedia);
+  const { imageSet, media } = buildCarImageSet(vehicle, decision, importedDealerKitMedia, manualMedia);
   const plan = buildDealerKitCarWixPlan({ vehicle, decision, imageSet, carListingRows, carDetailRows });
   plan.confirmation = buildCarPublishConfirmation(plan);
 

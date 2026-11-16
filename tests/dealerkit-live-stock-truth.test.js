@@ -19,17 +19,17 @@ test("final Stock Watch uses live Wix listing presence for Finance, Rent2Buy and
   assert.match(page, /Stock data incomplete \/ last verified snapshot shown/);
 });
 
-test("Cars can open, save and use a Cars-specific controlled publish lane without inheriting van product galleries", () => {
+test("Cars can open, save and use a Cars-specific controlled publish lane with its own upload purpose", () => {
   const detailApi = read("api/dealerkit-stock-detail.js");
   const review = read("utils/dealerKitReviewWorkspace.js");
   const productGallery = read("utils/dealerKitProductGalleryWorkspace.js");
   const controlledPublish = read("utils/dealerKitControlledPublish.js");
 
   assert.match(detailApi, /\["finance", "rent2buy", "cars"\]\.includes/);
-  assert.match(review, /Cars maintenance uses the saved DealerKit image selection below/);
+  assert.match(review, /Cars uses the Cars stock category/);
   assert.match(review, /Save Cars review/);
   assert.match(review, /\["finance", "rent2buy", "cars"\]\.includes\(product\)/);
-  assert.match(productGallery, /if \(workspace\.dataset\.product === "cars"\) \{/);
+  assert.match(productGallery, /purpose: "cars_replacement"/);
   assert.match(controlledPublish, /dealerkit-car-controlled-publish-preview/);
   assert.match(controlledPublish, /dealerkit-car-controlled-publish/);
   assert.match(controlledPublish, /publish_new_car/);
