@@ -79,7 +79,7 @@ test("Black Friday master renders the authorised offer, four selling points and 
   assert.doesNotMatch(html, /\{\{|\}\}/);
   assert.equal(html.split("</body>").length, 2, "send pipeline appends the unsubscribe line before a single </body>");
   assert.ok(Buffer.byteLength(html, "utf8") < 90_000, "stays under Gmail's clipping limit");
-  assert.match(html, /max-width:660px/);
+  assert.match(html, /max-width:600px/);
 });
 
 test("vehicle grids accept ten vans and reject an eleventh", async () => {
