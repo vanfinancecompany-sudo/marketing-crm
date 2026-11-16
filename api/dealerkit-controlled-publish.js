@@ -301,6 +301,38 @@ export async function verifyWritten(state, registration, targets = [], writes = 
   return { verified: results.length === targets.length && results.every((item) => item.verified), results };
 }
 
+// Wix can return a temporarily incomplete read-back after publish-status tasks.
+// Retry only the read-only verification, never the CMS writes or publish task.
+export async function verifyWrittenWithRetry(state, registration, targets = [], writes = [], dependencies = {}) {
+  const verify = dependencies.verify || verifyWritten;
+  const wait = dependencies.wait || sleep;
+  const delays = [500, 1000, 2000];
+  let last = null;
+  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+    last = await verify(state, registration, targets, writes);
+    if (last?.verified) return last;
+    if (attempt < delays.length) await wait(delays[attempt]);
+  }
+  return last;
+}
+
+export function describeControlledPublishFailure(error = {}) {
+  const failures = (error?.details?.verification?.results || []).filter((item) => !item.verified);
+  if (!failures.length) return clean(error?.message, 450) || "Wix rejected the reconciliation.";
+  const describe = (item) => {
+    const collection = clean(item.collectionId, 100) || "Unknown Wix collection";
+    const reasons = [];
+    if (item.count !== 1) reasons.push(`record lookup returned ${Number(item.count || 0)} matches`);
+    if (item.expectedItemId && item.itemId !== item.expectedItemId) reasons.push("item ID did not match");
+    if (item.publishStatusVerified === false) reasons.push("publish status did not match");
+    if (item.galleryVerified === false) reasons.push("image gallery did not match");
+    if (item.countVerified === false) reasons.push("image count did not match");
+    if (!reasons.length) reasons.push("Wix confirmation not verified");
+    return `${collection}: ${reasons.join(", ")}`;
+  };
+  return failures.slice(0, 3).map(describe).join("; ");
+}
+
 function createdItemIdForTarget(target, writes) {
   if (target.operation !== "create") return clean(target.itemId, 300);
   return clean(writes.find((write) => targetKey(write) === targetKey(target))?.itemId, 300);
@@ -309,7 +341,7 @@ function createdItemIdForTarget(target, writes) {
 export async function reconcileControlledTargets(state, registration, targets = [], dependencies = {}) {
   const apply = dependencies.applyTarget || applyTarget;
   const setStatus = dependencies.setTargetPublishStatus || setTargetPublishStatus;
-  const verify = dependencies.verifyWritten || verifyWritten;
+  const verify = dependencies.verifyWritten || verifyWrittenWithRetry;
   const rollbackWrites = dependencies.rollbackCreatedAndUpdated || rollbackCreatedAndUpdated;
   const rollbackStatuses = dependencies.rollbackPublishStatuses || rollbackPublishStatuses;
   const writes = [];
@@ -426,7 +458,9 @@ export default async function handler(request, response) {
       publishStatusTransitions: error?.details?.statusTransitions || [],
       publishStatusRollback: error?.details?.statusRollback || [],
       manualAttentionRequired: Boolean(error?.details?.manualAttentionRequired),
-      message: error?.message || "Controlled Wix publishing failed.",
+      message: error?.details?.cause || error?.details?.verification
+        ? `${error?.message || "Controlled Wix publishing failed."} Reason: ${describeControlledPublishFailure({ message: error?.details?.cause || error?.message, details: error?.details })}`
+        : error?.message || "Controlled Wix publishing failed.",
       details: error?.details || null,
     });
   }
