@@ -19,6 +19,8 @@ test('London reporting periods include yesterday and seven settled days', () => 
   });
   assert.equal(journeyPeriod('7d', now).startDate, '2026-11-07');
   assert.equal(journeyPeriod('7d', now).endExclusive, '2026-11-14');
+  assert.equal(journeyPeriod('previous7d', now).startDate, '2026-10-31');
+  assert.equal(journeyPeriod('previous7d', now).endExclusive, '2026-11-07');
   assert.equal(journeyPeriod('today', now).provisional, true);
   assert.equal(journeyPeriod('today', new Date('2026-07-01T23:30:00Z')).startDate, '2026-07-02');
   assert.throws(() => journeyPeriod('year', now), /Unsupported period/);
@@ -104,4 +106,71 @@ test('daily journey panel is visible and GA4 headline reporting stays intact', (
   assert.match(api, /ANALYTICS_SITE_ORIGINS\.vfc/);
   assert.match(api, /ANALYTICS_SITE_ORIGINS\.rent2buy/);
   assert.doesNotMatch(api, /response\.status\([^)]+\)\.json\(\{\s*events\s*,/);
+});
+
+test('mobile homepage stock journey uses explicit same-session events and excludes desktop or missing page routes', () => {
+  const sessions = [
+    s('a', { landing_path: '/', device_category: 'mobile', page_view_count: 4 }),
+    s('b', { landing_path: '/', device_category: 'mobile', page_view_count: 10 }),
+    s('c', { landing_path: '/', device_category: 'desktop' }),
+    s('d', { landing_path: '/vans', device_category: 'mobile' }),
+    s('e', { landing_path: '/', device_category: 'mobile', page_view_count: 10 }),
+  ];
+  const t = (minute) => '2026-11-13T11:' + String(minute).padStart(2, '0') + ':00Z';
+  const events = [
+    e('a', 'page_view', '/', t(0)),
+    e('a', 'page_view', '/vans', t(1)),
+    e('a', 'vehicle_view', '/vans/ab12cde', t(2)),
+    e('a', 'page_view', '/vans/ab12cde', t(3)),
+    e('a', 'finance_application_reached', '/apply', t(4)),
+    e('a', 'finance_application_started', '/apply', t(5)),
+    e('a', 'finance_application_completed', '/apply', t(6)),
+    e('a', 'finance_application_completed', '/apply', t(6)),
+    e('b', 'page_view', '/', t(0)),
+    e('b', 'page_view', '/cars', t(2)),
+    e('b', 'vehicle_view', '/vans/prehome', t(0)),
+    e('c', 'page_view', '/', t(0)),
+    e('c', 'page_view', '/vans', t(1)),
+    e('d', 'page_view', '/vans', t(1)),
+    e('e', 'finance_application_completed', '/apply', t(5)),
+  ];
+  const funnel = summariseCustomerJourneys({ sessions, events, siteKey: 'vanFinance' }).mobileStockJourney;
+  assert.equal(funnel.capturedMobileHomepageSessions, 3);
+  assert.equal(funnel.observedMobileHomepageSessions, 2);
+  assert.equal(funnel.observedHomepageCoveragePct, 66.7);
+  assert.equal(funnel.stockListingSessions, 2);
+  assert.equal(funnel.vehicleDetailSessions, 1);
+  assert.equal(funnel.applicationEntrySessions, 1);
+  assert.equal(funnel.deliberateApplicationStartSessions, 1);
+  assert.equal(funnel.applicationCompletionSessions, 1);
+});
+
+test('Rent2Buy category pages and vehicle pages contribute without inventing direct clicks', () => {
+  const result = summariseCustomerJourneys({
+    siteKey: 'rent2buy',
+    sessions: [s('r', { device_category: 'mobile', landing_path: '/' })],
+    events: [
+      e('r', 'page_view', '/', '2026-11-13T09:00:00Z'),
+      e('r', 'page_view', '/view-small-vans', '2026-11-13T09:01:00Z'),
+      e('r', 'page_view', '/van-pages/ab12cde', '2026-11-13T09:02:00Z'),
+      e('r', 'rent2buy_full_application_opened', '/apply-for-no-credit-check-rent2buy-vans', '2026-11-13T09:03:00Z'),
+    ],
+  }).mobileStockJourney;
+  assert.equal(result.capturedMobileHomepageSessions, 1);
+  assert.equal(result.observedMobileHomepageSessions, 1);
+  assert.equal(result.stockListingSessions, 1);
+  assert.equal(result.vehicleDetailSessions, 1);
+  assert.equal(result.applicationEntrySessions, 1);
+  assert.equal(result.deliberateApplicationStartSessions, 1);
+  assert.equal(result.applicationCompletionSessions, 0);
+});
+
+test('mobile stock dashboard uses existing first-party events and keeps GA4 benchmark', () => {
+  const html = fs.readFileSync(new URL('../public/website-analytics/index.html', import.meta.url), 'utf8');
+  const dashboard = fs.readFileSync(new URL('../public/website-analytics/customer-journeys.js', import.meta.url), 'utf8');
+  assert.match(html, /id="journeyMobileStock"/);
+  assert.match(html, /data-journey-period="previous7d"/);
+  assert.match(dashboard, /renderMobileStock/);
+  assert.match(dashboard, /same-session observations/i);
+  assert.match(html, /GA4 is the source of truth/);
 });
