@@ -256,6 +256,7 @@ for (const productMode of ["finance", "rent2buy", "cars"]) {
       VAN_FINANCE_WIX_COLLECTIONS: [{ id: "VANFINANCE-ALLVANS" }, { id: "VANFINANCEPAGES" }],
       allRent2BuyCollectionIds: () => ["ALLRENT2BUYVANS", "VANPAGES"],
       loadManualReadiness: async () => ({}),
+      loadCarManualMedia: async () => [],
       loadImportedReadiness: async () => imported,
       queryRegistration: async (site, collectionId) => {
         events.push("wix-read");
