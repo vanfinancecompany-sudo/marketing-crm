@@ -1,3 +1,4 @@
+import { submitDealerKitVehicle } from "./dealerKitSubmitVehicle.js";
 import { buildMarketingAccessHeaders, parseMarketingJsonResponse } from "../services/marketingAccess.js";
 
 const ROOT_ATTRIBUTE = "data-dealerkit-controlled-publish";
@@ -355,7 +356,101 @@ function createPanel(registration, product = "finance") {
     refreshActionState(root);
   }));
 
+  addSubmit(root, registration, root.dataset.product);
   return root;
+}
+
+async function publishingRequest(url, body) {
+  const response = await fetch(url, {
+    method: body ? "POST" : "GET",
+    headers: buildMarketingAccessHeaders({ accept: "application/json", ...(body ? { "content-type": "application/json" } : {}) }),
+    cache: "no-store",
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const data = await parseMarketingJsonResponse(response.clone(), "DealerKit publishing request failed.").catch(async error => {
+    const payload = await response.json().catch(() => ({}));
+    const blockers = (payload.details?.blockers || []).map(item => item.message || item.code).join(" ");
+    if (blockers) error.message += " " + blockers;
+    error.manualAttentionRequired = Boolean(payload.manualAttentionRequired || payload.details?.manualAttentionRequired);
+    throw error;
+  });
+  return data;
+}
+
+function addSubmit(root, registration, product) {
+  const button = element("button", "dealerkit-wix-preview__apply", "Submit");
+  button.type = "button";
+  const feedback = element("p", "");
+  feedback.setAttribute("role", "status");
+  const actions = element("div", "dealerkit-wix-preview__actions");
+  actions.append(button, feedback);
+  root.prepend(actions);
+  const fallback = element("details", "");
+  fallback.append(element("summary", "", "Manual publishing controls"));
+  while (actions.nextSibling) fallback.appendChild(actions.nextSibling);
+  root.append(fallback);
+  const query = "?registration=" + encodeURIComponent(registration);
+  const endpoint = product === "cars" ? "/api/dealerkit-car-controlled-publish" : "/api/dealerkit-controlled-publish";
+  const request = { registration, confirmRegistration: registration, productMode: product };
+  button.addEventListener("click", async () => {
+    const workspace = root.closest("[data-dealerkit-review-workspace]");
+    const gallery = workspace?.querySelector("[data-dealerkit-product-gallery]");
+    if (!gallery?.savePublishingReview || gallery.dataset.registration !== registration || gallery.dataset.product !== product) {
+      feedback.textContent = "Photographs are still loading. Try again when the gallery is ready.";
+      return;
+    }
+    if (!window.confirm("Publish or update " + registration + " on live " + productLabel(product) + " after the selected photographs and categories pass validation?")) return;
+    button.disabled = true;
+    fallback.open = false;
+    fallback.hidden = true;
+    const isCurrent = () => root.isConnected && !workspace.hidden && workspace.dataset.product === product && gallery.isConnected;
+    const reviewBody = workspace.querySelector("[data-dealerkit-review-body]");
+    const locked = [gallery, reviewBody?.querySelector(".dealerkit-review__decisions")].filter(Boolean);
+    locked.forEach(node => { node.inert = true; });
+    let requiresReview = false;
+    let confirmedPlan;
+    try {
+      const result = await submitDealerKitVehicle({
+        save: gallery.savePublishingReview,
+        upload: gallery.uploadPublishingPhotos,
+        read: () => publishingRequest(endpoint + "-preview" + query + "&product=" + encodeURIComponent(product)),
+        prepare: () => publishingRequest("/api/dealerkit-wix-prepare-media", request),
+        publish: plan => {
+          confirmedPlan = plan;
+          return publishingRequest(endpoint, {
+          ...request,
+          action: plan.writeIntent === "update_existing_vehicle"
+            ? (product === "cars" ? "update_existing_car" : "update_existing_vehicle")
+            : (product === "cars" ? "publish_new_car" : "publish_new_vehicle"),
+            confirmation: plan.confirmation,
+          });
+        },
+        status: message => { feedback.textContent = message + "…"; },
+        isCurrent,
+      });
+      feedback.textContent = result.galleryComplete === false
+        ? (result.message || "Advert verified. Some photographs are still processing.")
+        : (result.message || "Published and verified successfully.");
+      const targetLink = confirmedPlan?.targets?.map(target => target.data?.webLink || target.data?.websiteLink).find(value => /^https:\/\/(www\.)?(vanfinancecompany|rent2buyvans)\.co\.uk\//i.test(value || ""));
+      const productUrl = { cars: "car-finance", finance: "van-finance", rent2buy: "guaranteed-rent2buy-vans" }[product];
+      const link = element("a", "", "View vehicle");
+      link.href = product === "cars" || !targetLink ? "https://www.vanfinancecompany.co.uk/" + productUrl + "/" + registration : targetLink;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      feedback.append(" ", link);
+      root._controlledPublishPayload = null;
+      refreshActionState(root);
+      button.textContent = result.galleryComplete === false ? "Retry gallery" : "Submit updates";
+    } catch (error) {
+      requiresReview = Boolean(error.cause?.manualAttentionRequired);
+      feedback.textContent = error.message + (requiresReview ? " Reconcile the reported rollback issue before retrying." : "");
+      button.textContent = requiresReview ? "Review required" : "Retry";
+    } finally {
+      button.disabled = requiresReview;
+      fallback.hidden = false;
+      locked.forEach(node => { node.inert = false; });
+    }
+  });
 }
 
 function installPanel() {

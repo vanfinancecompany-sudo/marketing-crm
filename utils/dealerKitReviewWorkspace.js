@@ -274,7 +274,7 @@ function renderDecisionControls(vehicle, state) {
     categories.appendChild(categoryGrid);
     section.appendChild(categories);
   } else {
-    section.appendChild(element("p", "dealerkit-review__section-note", "Cars maintenance uses the saved DealerKit image selection below. Choose the images / primary photo, then save before using Prepare images and Reconcile advert."));
+    section.appendChild(element("p", "dealerkit-review__section-note", "Cars uses the Cars stock category. Choose the photographs and a primary photo before submitting."));
   }
 
   const notesLabel = element("label", "dealerkit-review__field dealerkit-review__notes");
@@ -487,7 +487,7 @@ function renderVehicle(workspace, payload) {
   const future = element("section", "dealerkit-review__future");
   future.append(
     element("strong", "", `${product === "rent2buy" ? "Rent2Buy" : product === "cars" ? "Cars" : "Van Finance"} lane`),
-    element("p", "", "Choose the details and images above, then use Save, Prepare and Publish. Safety checks still run before any live Wix change."),
+    element("p", "", "Choose the photographs, check the categories and submit."),
   );
   if (vehicle.sourceUrl) {
     const link = element("a", "dealerkit-review__link", "Open DealerKit vehicle");

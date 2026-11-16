@@ -20,12 +20,15 @@ const PRODUCTS = Object.freeze({
     purpose: "van_finance_replacement",
     uploadLabel: "Finance template / showroom image",
   }),
+  cars: Object.freeze({ label: "Cars", purpose: "cars_replacement", uploadLabel: "Cars replacement photo" }),
   rent2buy: Object.freeze({
     label: "Rent2Buy",
     purpose: "rent2buy_template",
     uploadLabel: "Rent2Buy template / showroom image",
   }),
 });
+const lane = workspace => Object.hasOwn(PRODUCTS, workspace.dataset.product) ? workspace.dataset.product : "finance";
+const imageLane = product => product === "cars" ? "finance" : product;
 const CATEGORY_KEYS = Object.freeze({
   Small: "small",
   "Medium / MWB": "medium_mwb",
@@ -120,10 +123,10 @@ function copyMutableImageState(decoded) {
 }
 
 function refreshIncluded(state, product) {
-  const productState = state.imageState[product];
+  const productState = state.imageState[imageLane(product)];
   const excluded = new Set(productState.excludedIds);
   productState.includedOrderIds = productState.orderIds.filter((id) => !excluded.has(id));
-  if (product === "finance") {
+  if (imageLane(product) === "finance") {
     if (!productState.primaryId || excluded.has(productState.primaryId) || !productState.orderIds.includes(productState.primaryId)) {
       productState.primaryId = productState.includedOrderIds[0] || null;
     }
@@ -216,7 +219,7 @@ function renderPricing(state, product, host) {
   const vehicle = state.vehicle;
   const currentAdvert = state.currentWixAdvert;
   const local = state.local?.[product] || null;
-  if (product === "finance") {
+  if (imageLane(product) === "finance") {
     host.append(
       fact("DealerKit retail", retailMoney(vehicle.retailPrice), vehicle.vatStatus === "plus_vat" ? "+ VAT" : vehicle.vatStatus || ""),
       fact("Current Finance advert", currentAdvert ? currentWixAdvertPrice(currentAdvert) : local ? money(local.price) : "Not advertised", currentAdvert ? "Published in Wix" : ""),
@@ -243,7 +246,7 @@ function renderPricing(state, product, host) {
 
 function moveImage(state, product, draggedId, targetId) {
   if (!draggedId || !targetId || draggedId === targetId) return;
-  const order = state.imageState[product].orderIds;
+  const order = state.imageState[imageLane(product)].orderIds;
   const from = order.indexOf(draggedId);
   const to = order.indexOf(targetId);
   if (from < 0 || to < 0) return;
@@ -256,7 +259,7 @@ function moveImage(state, product, draggedId, targetId) {
 
 function sourceCard(state, product, image, displayIndex) {
   const id = clean(image?.id);
-  const productState = state.imageState[product];
+  const productState = state.imageState[imageLane(product)];
   const excluded = productState.excludedIds.includes(id);
   const card = element("article", `dealerkit-product-gallery__image${excluded ? " is-excluded" : ""}`);
   card.draggable = true;
@@ -296,7 +299,7 @@ function sourceCard(state, product, image, displayIndex) {
     primary.type = "button";
     primary.disabled = productState.primaryId === id;
     primary.addEventListener("click", () => {
-      if (product === "finance") productState.primaryId = id;
+      if (imageLane(product) === "finance") productState.primaryId = id;
       else {
         productState.orderIds = [id, ...productState.orderIds.filter((value) => value !== id)];
         refreshIncluded(state, product);
@@ -416,116 +419,119 @@ function manualCard(state, product, item) {
 }
 
 function renderPendingUpload(state, product, host) {
-  const pending = state.pendingUploads[product];
-  if (!pending?.url) return;
-  const card = element("article", "dealerkit-product-gallery__manual is-local-preview");
-  const image = document.createElement("img");
-  image.src = pending.url;
-  image.alt = `${PRODUCTS[product].label} local upload preview`;
-  card.appendChild(image);
-  const copy = element("div", "dealerkit-product-gallery__manual-copy");
-  copy.append(
-    element("strong", "", pending.file?.name || "Selected image"),
-    element("span", "dealerkit-product-gallery__local-badge", "LOCAL PREVIEW"),
-  );
-  card.appendChild(copy);
-  host.appendChild(card);
+  for (const pending of state.pendingUploads) {
+    const card = element("article", "dealerkit-product-gallery__manual is-local-preview");
+    card.draggable = true;
+    card.addEventListener("dragstart", event => {
+      event.dataTransfer?.setData("text/plain", String(state.pendingUploads.indexOf(pending)));
+    });
+    card.addEventListener("dragover", event => event.preventDefault());
+    card.addEventListener("drop", event => {
+      event.preventDefault();
+      const index = event.dataTransfer?.getData("text/plain");
+      const from = Number(index);
+      if (!index || !Number.isInteger(from) || !state.pendingUploads[from]) return;
+      const to = state.pendingUploads.indexOf(pending);
+      state.pendingUploads.splice(to, 0, ...state.pendingUploads.splice(from, 1));
+      renderActiveProduct(state);
+    });
+    const image = document.createElement("img");
+    image.src = pending.url;
+    image.alt = pending.file.name;
+    const controls = element("div", "dealerkit-product-gallery__manual-copy");
+    const primary = element("button", "dealerkit-product-gallery__mini-button",
+      state.pendingPrimary === pending ? "Primary photo" : "Set as primary");
+    primary.type = "button";
+    primary.addEventListener("click", () => { state.pendingPrimary = pending; renderActiveProduct(state); });
+    const remove = element("button", "dealerkit-product-gallery__mini-button", "Remove");
+    remove.type = "button";
+    remove.addEventListener("click", () => {
+      state.pendingUploads = state.pendingUploads.filter(item => item !== pending);
+      if (state.pendingPrimary === pending) state.pendingPrimary = null;
+      URL.revokeObjectURL(pending.url);
+      renderActiveProduct(state);
+    });
+    controls.append(element("strong", "", pending.file.name), primary, remove);
+    card.append(image, controls);
+    host.appendChild(card);
+  }
+}
+
+async function uploadQueuedPhotos(state, product) {
+  if (state.uploading) throw new Error("A photograph upload is already in progress.");
+  if (!state.pendingUploads.length) return;
+  state.uploading = true;
+  try {
+    const files = [...state.pendingUploads];
+    const primary = state.pendingPrimary || (selectedManual(state, product) ? null : files[0]);
+    for (const pending of files) {
+      const { file } = pending;
+      setMessage(state, `Uploading ${file.name}…`);
+      if (!pending.wixFileId) {
+        const prepared = await postManualMedia(state.registration, {
+          action: "prepare_upload", purpose: PRODUCTS[product].purpose,
+          fileName: file.name, mimeType: file.type, sizeInBytes: file.size,
+        }, "Could not prepare the Wix Media upload.");
+        const response = await fetch(prepared.uploadUrl, {
+          method: "PUT", headers: { "Content-Type": prepared.mimeType || file.type }, body: file,
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.file?.id) throw new Error(`Wix could not upload ${file.name} (HTTP ${response.status}).`);
+        pending.wixFileId = result.file.id;
+        pending.uploadReceipt = prepared.uploadReceipt;
+      }
+      if (!pending.media) {
+        const registered = await postManualMedia(state.registration, {
+          action: "register_upload", purpose: PRODUCTS[product].purpose,
+          wixFileId: pending.wixFileId, uploadReceipt: pending.uploadReceipt,
+        }, "Could not register the uploaded image.");
+        pending.media = registered.media;
+      }
+      if (pending === primary) {
+        for (let attempt = 0; pending.media.processing && attempt < 12; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 2500));
+          pending.media = await refreshOneManual(state, pending.media);
+        }
+        if (!pending.media.ready) throw new Error(pending.media.failed
+          ? "Wix could not process the selected primary photograph."
+          : "The selected primary photograph is still processing in Wix Media. Retry when ready.");
+        const selected = await postManualMedia(state.registration, {
+          action: "select_media", mediaId: pending.media.id,
+        }, "Could not select the primary photograph.");
+        pending.media = selected.media;
+        if (state.pendingPrimary === pending) state.pendingPrimary = null;
+        state.manualMedia = state.manualMedia.map(item => ({ ...item, selected: item.purpose === PRODUCTS[product].purpose ? false : item.selected }));
+      }
+      state.manualMedia = mergeManualMedia(state.manualMedia, pending.media);
+      state.pendingUploads = state.pendingUploads.filter(item => item !== pending);
+      URL.revokeObjectURL(pending.url);
+    }
+  } finally {
+    state.uploading = false;
+    renderActiveProduct(state);
+  }
 }
 
 function uploadPanel(state, product) {
   const panel = element("div", "dealerkit-product-gallery__upload");
-  const copy = element("div", "dealerkit-product-gallery__upload-copy");
-  copy.append(
-    element("strong", "", `Add ${PRODUCTS[product].label} image`),
-    element("span", "", "Choose a prepared/template image. You will see it in this gallery before it is uploaded."),
-  );
-
   const input = document.createElement("input");
   input.type = "file";
+  input.multiple = true;
   input.accept = "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp";
-  input.setAttribute("aria-label", `Choose ${PRODUCTS[product].label} image`);
+  input.setAttribute("aria-label", `Choose ${PRODUCTS[product].label} photographs`);
   input.addEventListener("change", () => {
-    const file = input.files?.[0] || null;
-    const issue = validateFile(file);
-    if (issue) {
-      setMessage(state, issue, "warning");
-      return;
+    for (const file of input.files || []) {
+      const issue = validateFile(file);
+      if (issue) { setMessage(state, issue, "warning"); continue; }
+      state.pendingUploads.push({ file, url: URL.createObjectURL(file) });
     }
-    const previous = state.pendingUploads[product];
-    if (previous?.url) URL.revokeObjectURL(previous.url);
-    state.pendingUploads[product] = { file, url: URL.createObjectURL(file) };
-    setMessage(state, `${file.name} is previewing in the ${PRODUCTS[product].label} gallery. Upload it when ready.`, "good");
     renderActiveProduct(state);
   });
-
-  const upload = element("button", "dealerkit-product-gallery__upload-button", "Upload image");
-  upload.type = "button";
-  upload.disabled = !state.pendingUploads[product]?.file || !state.decision?.persisted || state.uploading;
-  upload.addEventListener("click", async () => {
-    const pending = state.pendingUploads[product];
-    const file = pending?.file;
-    const issue = validateFile(file);
-    if (issue) {
-      setMessage(state, issue, "warning");
-      return;
-    }
-    if (!state.decision?.persisted) {
-      setMessage(state, "Save the review first, then upload the product image.", "warning");
-      return;
-    }
-
-    state.uploading = true;
-    renderActiveProduct(state);
-    setMessage(state, `Preparing secure ${PRODUCTS[product].label} upload…`);
-    try {
-      const prepared = await postManualMedia(state.registration, {
-        action: "prepare_upload",
-        purpose: PRODUCTS[product].purpose,
-        fileName: file.name,
-        mimeType: file.type,
-        sizeInBytes: file.size,
-      }, "Could not prepare the Wix Media upload.");
-
-      setMessage(state, `Uploading ${file.name} to Wix Media…`);
-      const uploadResponse = await fetch(prepared.uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": prepared.mimeType || file.type },
-        body: file,
-      });
-      const uploaded = await uploadResponse.json().catch(() => ({}));
-      if (!uploadResponse.ok) throw new Error(uploaded?.message || `Wix Media upload returned ${uploadResponse.status}.`);
-      const wixFileId = clean(uploaded?.file?.id);
-      if (!wixFileId) throw new Error("Wix accepted the image but did not return a file ID.");
-
-      const registered = await postManualMedia(state.registration, {
-        action: "register_upload",
-        purpose: PRODUCTS[product].purpose,
-        wixFileId,
-      }, "The image reached Wix, but the CRM could not register it.");
-      const registeredMedia = registered.media;
-      state.manualMedia = mergeManualMedia(state.manualMedia, registeredMedia);
-      if (pending?.url) URL.revokeObjectURL(pending.url);
-      state.pendingUploads[product] = null;
-      renderActiveProduct(state);
-      await loadManualMedia(state, { quiet: true, preserveOnError: true });
-      state.manualMedia = mergeManualMedia(state.manualMedia, registeredMedia);
-      setMessage(state, `${PRODUCTS[product].label} image uploaded and saved to this product workspace. It will remain here after refresh; choose Set as primary when Wix reports READY.`, "good");
-    } catch (error) {
-      setMessage(state, error?.message || "Image upload failed.", "warning");
-    } finally {
-      state.uploading = false;
-      renderActiveProduct(state);
-    }
-  });
-
-  const actions = element("div", "dealerkit-product-gallery__upload-actions");
-  actions.append(input, upload);
-  panel.append(copy, actions);
-  if (!state.decision?.persisted) panel.appendChild(element("small", "dealerkit-product-gallery__save-first", "Save the review once before uploading to Wix Media."));
+  panel.append(element("strong", "", "Add photographs"), input);
   return panel;
 }
 
-async function saveProductState(state) {
+async function saveProductState(state, { quiet = false } = {}) {
   const body = state.workspace.querySelector("[data-dealerkit-review-body]");
   const liveReview = readCurrentReviewControls(body, state.decision, state.activeProduct);
   const encoded = encodeDealerKitProductImageState(state.imageState);
@@ -539,7 +545,7 @@ async function saveProductState(state) {
       body: JSON.stringify({
         supplierStockId: state.vehicle.supplierStockId,
         registration: state.registration,
-        reviewStatus: liveReview.reviewStatus || "needs_review",
+        reviewStatus: "reviewed",
         financeEnabled: liveReview.financeEnabled !== false,
         financeCategories: liveReview.financeCategories || ["all_vans"],
         rent2buyEnabled: Boolean(liveReview.rent2buyEnabled),
@@ -554,10 +560,9 @@ async function saveProductState(state) {
     state.decision = payload.decision || { ...state.decision, ...liveReview, ...encoded, persisted: true };
     state.imageState = copyMutableImageState(decodeDealerKitProductImageState(state.decision, state.sourceIds));
     state.dirty = false;
-    await loadManualMedia(state, { quiet: true });
     setMessage(state, `Saved for ${PRODUCTS[state.activeProduct].label}. Nothing has been published yet.`, "good");
     renderActiveProduct(state);
-    window.dispatchEvent(new CustomEvent("dealerkit-product-gallery-saved", {
+    if (!quiet) window.dispatchEvent(new CustomEvent("dealerkit-product-gallery-saved", {
       detail: {
         registration: state.registration,
         product: state.workspace?.dataset?.product || state.activeProduct,
@@ -565,6 +570,7 @@ async function saveProductState(state) {
     }));
   } catch (error) {
     setMessage(state, error?.message || "Could not save product gallery choices.", "warning");
+    if (quiet) throw error;
   } finally {
     state.saving = false;
     renderSaveButton(state);
@@ -586,12 +592,17 @@ function renderActiveProduct(state) {
   const title = state.root.querySelector("[data-product-gallery-title]");
   if (title) title.textContent = `${config.label} images`;
   const subtitle = state.root.querySelector("[data-product-gallery-subtitle]");
-  if (subtitle) subtitle.textContent = product === "finance"
+  if (subtitle) subtitle.textContent = product === "cars"
+    ? "Choose a Cars primary photo and arrange the gallery before you submit."
+    : product === "finance"
     ? "This is the image order that will be used for Van Finance. A selected Finance template image becomes its cover/listing image."
     : "This is the separate Rent2Buy image order. A selected Rent2Buy template image becomes its cover/listing image.";
 
   const pricing = state.root.querySelector("[data-product-gallery-pricing]");
-  if (pricing) renderPricing(state, product, pricing);
+  if (pricing) {
+    pricing.hidden = product === "cars";
+    if (product !== "cars") renderPricing(state, product, pricing);
+  }
 
   const manualHost = state.root.querySelector("[data-product-gallery-manual]");
   if (manualHost) {
@@ -608,7 +619,7 @@ function renderActiveProduct(state) {
   if (gallery) {
     gallery.replaceChildren();
     const imageById = new Map((state.vehicle.images || []).map((image) => [clean(image.id), image]));
-    state.imageState[product].orderIds.forEach((id, index) => {
+    state.imageState[imageLane(product)].orderIds.forEach((id, index) => {
       const image = imageById.get(id);
       if (image?.url) gallery.appendChild(sourceCard(state, product, image, index));
     });
@@ -622,7 +633,7 @@ function renderActiveProduct(state) {
       ? `${selected.displayName || "Uploaded template"} is the optional replacement primary. The Current Wix image above is live until Reconcile.`
       : "DealerKit source photos are replacement choices. No template is selected; the Current Wix image above remains live.";
     else if (selected) primaryNote.textContent = `${selected.displayName || "Uploaded image"} is the ${config.label} product primary.`;
-    else if (state.imageState[product].primaryId) primaryNote.textContent = `No ${config.label} template selected. The chosen DealerKit source primary is first in this product's saved image order.`;
+    else if (state.imageState[imageLane(product)].primaryId) primaryNote.textContent = `No ${config.label} template selected. The chosen DealerKit source primary is first in this product's saved image order.`;
     else primaryNote.textContent = "No product template is selected as primary yet.";
   }
 
@@ -674,13 +685,22 @@ function buildRoot(state) {
   source.setAttribute("data-product-gallery-source", "true");
 
   const footer = element("div", "dealerkit-product-gallery__footer");
-  const message = element("div", "dealerkit-product-gallery__message", "Save stores this review and gallery. Prepare and Publish remain separate steps below.");
+  const message = element("div", "dealerkit-product-gallery__message", "Use Submit to save the review and prepare your chosen photographs.");
   message.setAttribute("data-product-gallery-message", "true");
   const save = element("button", "dealerkit-product-gallery__save", "Save");
   save.type = "button";
   save.setAttribute("data-product-gallery-save", "true");
+  const advanced = element("details", "");
+  advanced.append(element("summary", "", "Save or upload without publishing"), save);
+  const uploadOnly = element("button", "dealerkit-product-gallery__save", "Save and upload");
+  uploadOnly.type = "button";
+  uploadOnly.addEventListener("click", async () => {
+    try { await saveProductState(state, { quiet: true }); await uploadQueuedPhotos(state, state.activeProduct); }
+    catch (error) { setMessage(state, error.message, "warning"); }
+  });
+  advanced.append(uploadOnly);
   save.addEventListener("click", () => saveProductState(state));
-  footer.append(message, save);
+  footer.append(message, advanced);
 
   const manualHeading = element("div", "dealerkit-product-gallery__source-heading");
   if (state.currentWixAdvert) manualHeading.append(
@@ -701,7 +721,7 @@ async function initialiseWorkspace(workspace, body, registration) {
   const loading = element("section", "dealerkit-product-gallery is-loading", "Loading separate Van Finance and Rent2Buy galleries…");
   loading.setAttribute(ROOT_ATTRIBUTE, "true");
   loading.dataset.registration = registration;
-  loading.dataset.product = workspace.dataset.product === "rent2buy" ? "rent2buy" : "finance";
+  loading.dataset.product = lane(workspace);
   const hero = body.querySelector(".dealerkit-review__hero");
   if (hero) hero.insertAdjacentElement("afterend", loading);
   else body.prepend(loading);
@@ -728,8 +748,9 @@ async function initialiseWorkspace(workspace, body, registration) {
       sourceIds,
       imageState: copyMutableImageState(decodeDealerKitProductImageState(decision, sourceIds)),
       manualMedia: [],
-      pendingUploads: { finance: null, rent2buy: null },
-      activeProduct: workspace.dataset.product === "rent2buy" ? "rent2buy" : "finance",
+      pendingUploads: [],
+      pendingPrimary: null,
+      activeProduct: lane(workspace),
       dirty: false,
       saving: false,
       uploading: false,
@@ -741,6 +762,8 @@ async function initialiseWorkspace(workspace, body, registration) {
     if (requestId !== requestCounter || advertContext !== workspace._dealerKitCurrentWixAdvert || workspace._dealerKitReviewReady === false || !loading.isConnected) return;
     const root = buildRoot(state);
     state.root = root;
+    root.savePublishingReview = () => saveProductState(state, { quiet: true });
+    root.uploadPublishingPhotos = () => uploadQueuedPhotos(state, state.activeProduct);
     loading.replaceWith(root);
     workspace._dealerKitProductGalleryState = state;
     hideLegacyImageUi(workspace, body);
@@ -762,14 +785,9 @@ function scan() {
     const registration = normaliseRegistration(workspace.querySelector("[data-dealerkit-review-title]")?.textContent);
     if (!body || !registration) return;
 
-    if (workspace.dataset.product === "cars") {
-      body.querySelector(`[${ROOT_ATTRIBUTE}]`)?.remove();
-      return;
-    }
-
     hideLegacyImageUi(workspace, body);
     const current = body.querySelector(`[${ROOT_ATTRIBUTE}]`);
-    const product = workspace.dataset.product === "rent2buy" ? "rent2buy" : "finance";
+    const product = lane(workspace);
     if (current?.dataset.registration === registration && current.dataset.product === product && !current.classList.contains("is-loading")) return;
     if (current?.dataset.registration === registration && current.dataset.product === product && current.classList.contains("is-loading")) return;
     initialiseWorkspace(workspace, body, registration);

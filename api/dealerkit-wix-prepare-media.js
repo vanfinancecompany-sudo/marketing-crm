@@ -1,3 +1,4 @@
+import { controlledCarWixConfiguration } from "./_dealerkit-car-controlled-publish-state.js";
 import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
 import { DEALERKIT_REVIEW_TABLE, rowToDealerKitReviewDecision } from "./_dealerkit-review-decisions.js";
 import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
@@ -148,7 +149,7 @@ export default async function handler(request, response) {
     };
     const vehicle = await fetchDealerKitStockDetail(decision.supplierStockId, { specifications: false });
     if (normalizeFinanceRegistration(vehicle?.registration || "") !== registration) throw new ApiError(409, "DealerKit registration changed. Re-open and review the vehicle before preparing media.");
-    const configuration = wixConfiguration();
+    const configuration = productMode === "cars" ? controlledCarWixConfiguration() : wixConfiguration();
     const prepared = await prepareImages(supabase, configuration, vehicle, effectiveDecision);
 
     response.status(200).json({

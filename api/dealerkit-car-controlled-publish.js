@@ -209,6 +209,7 @@ export default async function handler(request, response) {
       ok: true,
       published: true,
       verified: true,
+      galleryComplete: !state.media?.missingDealerKitImageIds?.length && !state.media?.pendingManualMedia,
       writeIntent: state.plan.writeIntent,
       registration,
       recordsWritten: writes.length,

@@ -148,7 +148,7 @@ async function verifyManualRow(row) {
 }
 
 async function loadManualReadiness(supabase, registration) {
-  const { data, error } = await supabase.from(DEALERKIT_MANUAL_MEDIA_TABLE).select("*").eq("registration", registration).order("created_at", { ascending: false }).limit(30);
+  const { data, error } = await supabase.from(DEALERKIT_MANUAL_MEDIA_TABLE).select("*").eq("registration", registration).in("purpose", ["van_finance_replacement", "rent2buy_template"]).order("created_at", { ascending: false }).limit(30);
   if (error) throw new ControlledPublishError(502, `Manual media read failed: ${error.message || error}`);
   return buildDealerKitWixManualMediaReadiness(await Promise.all((data || []).map(verifyManualRow)));
 }

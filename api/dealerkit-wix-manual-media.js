@@ -1,3 +1,4 @@
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
 import {
   DEALERKIT_REVIEW_TABLE,
@@ -145,6 +146,24 @@ async function listManualMedia(supabase, registration) {
   return (data || []).map(manualMediaRowToClient);
 }
 
+function carUploadSignature(configuration, decision, fileName, expiresAt) {
+  return createHmac("sha256", configuration.apiKey)
+    .update(JSON.stringify([configuration.siteId, decision.supplierStockId, decision.registration, fileName, expiresAt]))
+    .digest("hex");
+}
+
+function validateCarUpload(configuration, decision, file, receipt) {
+  const fileName = clean(receipt?.fileName, 240);
+  const expiresAt = Number(receipt?.expiresAt);
+  const signature = clean(receipt?.signature, 64);
+  if (!fileName || !Number.isFinite(expiresAt) || expiresAt < Date.now() || !/^[0-9a-f]{64}$/.test(signature)) return false;
+  const expected = carUploadSignature(configuration, decision, fileName, expiresAt);
+  const actualName = clean(file.displayName, 500).toLowerCase();
+  const expectedName = fileName.toLowerCase();
+  return (actualName === expectedName || actualName === expectedName.replace(/\.[^.]+$/, ""))
+    && timingSafeEqual(Buffer.from(signature, "hex"), Buffer.from(expected, "hex"));
+}
+
 async function prepareUpload({ request, supabase, registration }) {
   const purpose = normaliseManualMediaPurpose(request.body?.purpose);
   if (!purpose) throw new ApiError(400, "Choose a supported Wix image destination.");
@@ -155,12 +174,19 @@ async function prepareUpload({ request, supabase, registration }) {
   const decision = await loadDecisionByRegistration(supabase, registration);
   await loadFreshVehicle(decision, registration);
   const configuration = siteConfiguration(purpose.key);
-  const wixFileName = buildManualMediaUploadFileName({
+  let wixFileName = buildManualMediaUploadFileName({
     registration,
     purpose: purpose.key,
     fileName: file.fileName,
   });
 
+  let uploadReceipt;
+  if (purpose.key === "cars_replacement") {
+    const extensions = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+    wixFileName = registration + "-cars_replacement-" + randomUUID() + "." + extensions[file.mimeType];
+    const expiresAt = Date.now() + 2 * 60 * 60 * 1000;
+    uploadReceipt = { fileName: wixFileName, expiresAt, signature: carUploadSignature(configuration, decision, wixFileName, expiresAt) };
+  }
   const payload = await wixRequest(configuration, WIX_MEDIA_GENERATE_UPLOAD_URL, {
     method: "POST",
     body: {
@@ -185,6 +211,7 @@ async function prepareUpload({ request, supabase, registration }) {
     sizeInBytes: file.sizeInBytes,
     uploadUrl,
     expiresWithWixSignature: true,
+    ...(uploadReceipt ? { uploadReceipt } : {}),
   };
 }
 
@@ -198,23 +225,34 @@ async function registerUpload({ request, supabase, registration }) {
   await loadFreshVehicle(decision, registration);
   const configuration = siteConfiguration(purpose.key);
   const file = await getVerifiedWixFile(configuration, wixFileId);
+  const name = clean(file.displayName, 500).toLowerCase();
+  if (purpose.key === "cars_replacement" && !validateCarUpload(configuration, decision, file, request.body?.uploadReceipt)) {
+    throw new ApiError(409, "This image was not staged for this Cars registration.");
+  }
+  if (purpose.key !== "cars_replacement" && /-cars_replacement[.-]/.test(name)) {
+    throw new ApiError(409, "A Cars upload cannot be attached to a van product.");
+  }
   const row = wixFileToManualMediaRow({
     file,
     decision,
     purpose: purpose.key,
     siteId: configuration.siteId,
   });
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from(DEALERKIT_MANUAL_MEDIA_TABLE)
-    .upsert(row, { onConflict: "wix_site_id,wix_file_id" })
-    .select("*")
-    .single();
+    .upsert(row, { onConflict: "wix_site_id,wix_file_id", ignoreDuplicates: true });
   if (error) throw new ApiError(502, `Manual Wix media metadata save failed: ${error.message || error}`);
+  const { data: owned, error: ownershipError } = await supabase.from(DEALERKIT_MANUAL_MEDIA_TABLE)
+    .select("*").eq("wix_site_id", row.wix_site_id).eq("wix_file_id", row.wix_file_id).single();
+  if (ownershipError) throw new ApiError(502, "Could not verify the staged image owner.");
+  if (owned?.supplier_stock_id !== row.supplier_stock_id || owned?.registration !== registration || owned?.purpose !== purpose.key) {
+    throw new ApiError(409, "This Wix image already belongs to another vehicle or product.");
+  }
 
   return {
     action: "register_upload",
     registration,
-    media: manualMediaRowToClient(data),
+    media: manualMediaRowToClient(owned),
   };
 }
 
