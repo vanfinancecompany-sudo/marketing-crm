@@ -506,6 +506,7 @@ async function uploadQueuedPhotos(state, product) {
       state.pendingUploads = state.pendingUploads.filter(item => item !== pending);
       URL.revokeObjectURL(pending.url);
     }
+    setMessage(state, "New photos are staged for Wix publishing.", "good");
   } finally {
     state.uploading = false;
     renderActiveProduct(state);

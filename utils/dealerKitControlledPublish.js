@@ -468,7 +468,9 @@ function installPanel() {
   let root = workspace.querySelector(`[${ROOT_ATTRIBUTE}]`);
   if (!root) {
     root = createPanel(registration, product);
-    if (gallery) gallery.insertAdjacentElement("afterend", root);
+    const categories = body.querySelector(".dealerkit-review__decisions");
+    if (categories) categories.insertAdjacentElement("afterend", root);
+    else if (gallery) gallery.insertAdjacentElement("afterend", root);
     else body.appendChild(root);
   } else if (root.dataset.registration !== registration || root.dataset.product !== product) {
     root.replaceWith(createPanel(registration, product));
