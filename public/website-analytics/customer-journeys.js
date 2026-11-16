@@ -33,6 +33,38 @@
   }
   function sectionEmpty(message) { return '<div class="journey-empty">' + safe(message) + '</div>'; }
 
+
+  function renderMobileStock(entries) {
+    const labels = [
+      ['observedMobileHomepageSessions', 'Homepage confirmed by page event'],
+      ['stockListingSessions', 'Then viewed stock listings / categories'],
+      ['vehicleDetailSessions', 'Then viewed an individual van'],
+      ['applicationEntrySessions', 'Then reached / opened application'],
+      ['deliberateApplicationStartSessions', 'Then deliberately started application'],
+      ['applicationCompletionSessions', 'Then recorded completion signal'],
+    ];
+    return entries.map(([key, site]) => {
+      if (!site?.ok) return '<div class="journey-mobile-site">' + sectionEmpty((LABELS[key] || key) + ': journey data unavailable.') + '</div>';
+      const funnel = site.mobileStockJourney;
+      if (!funnel) return '<div class="journey-mobile-site">' + sectionEmpty((LABELS[key] || key) + ': funnel data unavailable.') + '</div>';
+      const observed = Number(funnel.observedMobileHomepageSessions || 0);
+      const captured = Number(funnel.capturedMobileHomepageSessions || 0);
+      const percent = captured ? (100 * observed / captured).toFixed(1) + '%' : '—';
+      const note = key === 'vanFinance'
+        ? 'Application entry = page reached; deliberate start is a separate signal.'
+        : 'Rent2Buy application entry and start both mean full application opened.';
+      return '<div class="journey-mobile-site"><h4>' + safe(LABELS[key] || key) + '</h4>' +
+        '<p>' + num(captured) + ' mobile homepage landing sessions; ' + num(observed) +
+        ' have an explicit homepage page_view (' + safe(percent) + ' coverage).</p>' +
+        (observed ? labels.map(([field, label]) => {
+          const count = Number(funnel[field] || 0);
+          const rate = (100 * count / observed).toFixed(1);
+          return entry(label, count, rate + '% of observed homepage sessions');
+        }).join('') : sectionEmpty('Not enough verified homepage page events to assess the mobile stock journey. This does not establish zero traffic or zero conversions.')) +
+        '<p class="journey-mobile-caveat">' + safe(note) + ' These are same-session observations after the homepage, not proven clicks, a strictly sequential funnel or CRM-confirmed applications.</p></div>';
+    }).join('');
+  }
+
   function render() {
     if (!snapshot) return;
     const entries = siteEntries();
@@ -40,6 +72,7 @@
     if (!available.length) {
       el('journeySummary').innerHTML = sectionEmpty('First-party journey data is unavailable for the selected website.');
       el('journeyQuality').innerHTML = '';
+      el('journeyMobileStock').innerHTML = '';
       el('journeyRoutes').innerHTML = sectionEmpty('No verified route coverage available.');
       el('journeyPopular').innerHTML = '';
       el('journeySources').innerHTML = '';
@@ -88,6 +121,7 @@
       }
     }
     el('journeyQuality').innerHTML = quality.join('');
+    el('journeyMobileStock').innerHTML = renderMobileStock(entries);
 
     const names = currentSite() === 'all';
     const routes = available.flatMap(([key, site]) => (site.routes || []).map((route) => ({ ...route, siteKey: key })))
@@ -136,6 +170,7 @@
       el('journeyStatus').textContent = 'Daily customer journeys are temporarily unavailable. GA4 reports above remain separate.';
       el('journeySummary').innerHTML = sectionEmpty('Could not load the first-party journey feed.');
       el('journeyQuality').innerHTML = '';
+      el('journeyMobileStock').innerHTML = '';
       el('journeyRoutes').innerHTML = '';
       el('journeyPopular').innerHTML = '';
       el('journeySources').innerHTML = '';
