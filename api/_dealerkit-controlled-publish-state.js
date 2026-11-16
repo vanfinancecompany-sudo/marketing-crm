@@ -104,7 +104,7 @@ export async function queryControlledRegistrationItems(configuration, collection
     while (true) {
       const payload = await request(configuration, "/wix-data/v2/items/query", {
         method: "POST",
-        body: { dataCollectionId: collectionId, query: { filter: { title: { $eq: candidate } }, paging: { limit, offset } }, consistentRead: true },
+        body: { dataCollectionId: collectionId, query: { filter: { title: { $eq: candidate } }, paging: { limit, offset } }, consistentRead: true, publishPluginOptions: { includeDraftItems: true } },
       });
       const items = Array.isArray(payload.dataItems) ? payload.dataItems : [];
       for (const item of items) {
