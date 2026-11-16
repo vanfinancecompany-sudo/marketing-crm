@@ -52,11 +52,17 @@
               <button type="button" class="journey-period" data-journey-period="today">Today · live</button>
               <button type="button" class="journey-period is-active" data-journey-period="yesterday" aria-pressed="true">Yesterday</button>
               <button type="button" class="journey-period" data-journey-period="7d">Last 7 days</button>
+              <button type="button" class="journey-period" data-journey-period="previous7d">Prior 7 days</button>
             </div>
           </div>
           <p class="journey-status" id="journeyStatus" role="status" aria-live="polite">Loading first-party journey data…</p>
           <div class="journey-stat-grid" id="journeySummary"></div>
           <div id="journeyQuality" class="journey-quality"></div>
+          <div class="journey-mobile-funnel" aria-labelledby="mobileFunnelTitle">
+            <h3 id="mobileFunnelTitle">Mobile homepage → stock → application</h3>
+            <p class="quiet-note">Observed journeys for mobile sessions landing on the homepage, using actual page and application events. These are not verified button clicks or completed CRM deals. Use Last 7 days and Prior 7 days for a like-for-like date window.</p>
+            <div id="journeyMobileStock" class="journey-mobile-grid"></div>
+          </div>
           <div class="journey-detail-grid">
             <div><h3>Most common journeys</h3><div id="journeyRoutes" class="journey-list"></div></div>
             <div><h3>Entry pages and popular vans</h3><div id="journeyPopular" class="journey-list"></div></div>
