@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { fetchDealerKitStockDetail, fetchDealerKitStockSnapshot } from "./_dealerkit-stock-adapter.js";
 import { DEALERKIT_REVIEW_TABLE, rowToDealerKitReviewDecision } from "./_dealerkit-review-decisions.js";
 import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
@@ -49,10 +50,27 @@ export function controlledRent2BuyWixConfigurations(environment = process.env, p
   ];
 }
 
-export async function controlledWixRequest(configuration, path, { method = "POST", body } = {}) {
+export function controlledWixCreateId(siteId, collectionId, registration) {
+  const plate = normalizeFinanceRegistration(registration);
+  if (!siteId || !collectionId || !plate) throw new ControlledPublishError(409, "Wix create identity is incomplete.");
+  const hash = createHash("sha256").update(JSON.stringify(["dealerkit", siteId, collectionId, plate])).digest("hex");
+  return [hash.slice(0, 8), hash.slice(8, 12), "8" + hash.slice(13, 16), "8" + hash.slice(17, 20), hash.slice(20, 32)].join("-");
+}
+
+export const WIX_CMS_ITEM_LIMIT_MESSAGE = "Wix CMS item limit reached. Vehicle not published. Free up CMS capacity before retrying.";
+
+export function isWixCmsItemLimit(payload = {}) {
+  const applicationError = payload.details?.applicationError || {};
+  const details = [payload.code, applicationError.code, payload.message, applicationError.description,
+    ...(payload.details?.validationError?.fieldViolations || []).map(field => field.description)]
+    .filter(Boolean).join(" ").replaceAll("_", " ");
+  return /(?:item(?: count| storage)?|data storage) (?:limit|quota) (?:has been )?(?:reached|exceeded)|(?:limit|quota) (?:of|for) (?:the )?(?:maximum number of )?(?:data |collection )?items|maximum number of (?:data |collection )?items|(?:reached|exceeded) (?:the )?(?:cms |data )?(?:item(?: count)? (?:limit|quota)|(?:limit|quota) of [\d,]+ items)|(?:item count|data item) (?:limit|quota)\b/i.test(details);
+}
+
+export async function controlledWixRequest(configuration, path, { method = "POST", body, request = fetch } = {}) {
   let result;
   try {
-    result = await fetch(`${configuration.apiBaseUrl}${path}`, {
+    result = await request(`${configuration.apiBaseUrl}${path}`, {
       method,
       headers: {
         Authorization: configuration.apiKey,
@@ -66,6 +84,9 @@ export async function controlledWixRequest(configuration, path, { method = "POST
   }
   const payload = await result.json().catch(() => ({}));
   if (!result.ok) {
+    if (/^\/wix-data\/v2\/items(?:\/|$)/.test(path) && ["POST", "PATCH", "PUT"].includes(method) && isWixCmsItemLimit(payload)) {
+      throw new ControlledPublishError(409, WIX_CMS_ITEM_LIMIT_MESSAGE, { code: "wix_cms_item_limit", wixStatus: result.status });
+    }
     const message = clean(payload?.message || payload?.details?.applicationError?.description || payload?.details?.validationError?.fieldViolations?.[0]?.description, 1000);
     throw new ControlledPublishError(result.status === 401 || result.status === 403 ? 502 : result.status, message || `Wix returned status ${result.status}.`, { wixStatus: result.status, wixSiteId: configuration.siteId });
   }

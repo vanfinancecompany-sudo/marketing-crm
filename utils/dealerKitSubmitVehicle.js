@@ -3,6 +3,16 @@ const MEDIA_BLOCKERS = new Set([
   "rent2buy_media_not_prepared", "rent2buy_template_not_ready", "rent2buy_gallery_not_ready",
 ]);
 
+const VEHICLE_ROUTES = { cars: "/cars/", finance: "/vans/", rent2buy: "/rent2buy/vans/" };
+
+export function dealerKitPublishedVehicleUrl(product, registration) {
+  const route = VEHICLE_ROUTES[product];
+  const plate = String(registration || "").replace(/\s+/g, "").toLowerCase();
+  return typeof route === "string" && /^[a-z0-9]{5,8}$/.test(plate)
+    ? "https://www.vanfinancecompany.co.uk" + route + plate
+    : null;
+}
+
 export async function submitDealerKitVehicle({
   save, upload, read, prepare, publish, status, isCurrent,
   wait = () => new Promise(resolve => setTimeout(resolve, 3000)),

@@ -5,7 +5,7 @@ import { ControlledPublishError, controlledWixRequest, queryControlledRegistrati
 import { normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
 import { decodeDealerKitProductImageState } from "../lib/dealerKitProductImageState.js";
 import { DEALERKIT_IMPORTED_MEDIA_TABLE, WIX_MEDIA_GET_FILE_URL, importedMediaRowToClient } from "../lib/dealerKitWixVehicleMedia.js";
-import { DEALERKIT_MANUAL_MEDIA_TABLE, manualMediaRowToClient } from "../lib/dealerKitWixManualMedia.js";
+import { DEALERKIT_MANUAL_MEDIA_TABLE, manualMediaRowToClient, orderCarsManualMedia } from "../lib/dealerKitWixManualMedia.js";
 import { buildDealerKitCarWixPlan, buildCarPublishConfirmation } from "../lib/dealerKitCarWixPlan.js";
 
 const clean = (value, limit = 10000) => String(value ?? "").trim().slice(0, limit);
@@ -97,7 +97,7 @@ export function buildCarImageSet(vehicle = {}, decision = {}, importedDealerKitM
   const manualPrimary = selectedManual.length === 1 && selectedManual[0].ready ? selectedManual[0].url : null;
   const mainUrl = selectedManual.length ? manualPrimary : sourceMain;
   const galleryIds = sourceMain ? [primaryId, ...readyIds.filter((id) => id !== primaryId)] : readyIds;
-  const galleryUrls = [...new Set([mainUrl, ...manualMedia.filter(item => item.ready).map(item => item.url),
+  const galleryUrls = [...new Set([mainUrl, ...orderCarsManualMedia(manualMedia).filter(item => item.ready).map(item => item.url),
     ...galleryIds.map(id => clean(importedById.get(id)?.wixUrl, 3000))].filter(Boolean))];
 
   return {

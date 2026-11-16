@@ -4,6 +4,7 @@ import { controlledPublishConfirmationMatches, wixItemPublishStatus } from "../l
 import {
   ControlledPublishError,
   buildFreshControlledPublishState,
+  controlledWixCreateId,
   controlledWixRequest,
   queryControlledRegistrationItems,
 } from "./_dealerkit-controlled-publish-state.js";
@@ -56,10 +57,10 @@ function rollbackFieldModifications(snapshot = {}) {
     : { fieldPath, action: "REMOVE_FIELD" });
 }
 
-async function insertTarget(configuration, target) {
+async function insertTarget(configuration, target, registration) {
   const payload = await controlledWixRequest(configuration, "/wix-data/v2/items", {
     method: "POST",
-    body: { dataCollectionId: target.collectionId, dataItem: { data: target.data } },
+    body: { dataCollectionId: target.collectionId, dataItem: { id: controlledWixCreateId(configuration.siteId, target.collectionId, registration), data: target.data } },
   });
   const item = payload?.dataItem;
   if (!item?.id) throw new ControlledPublishError(502, `Wix did not return an item ID after creating ${target.collectionId}.`);
@@ -89,9 +90,9 @@ async function updateTarget(configuration, target) {
   };
 }
 
-async function applyTarget(configuration, target) {
+async function applyTarget(configuration, target, registration) {
   if (target?.operation === "update") return updateTarget(configuration, target);
-  if (target?.operation === "create") return insertTarget(configuration, target);
+  if (target?.operation === "create") return insertTarget(configuration, target, registration);
   throw new ControlledPublishError(409, `Unsupported field-write operation ${target?.operation || "(blank)"}.`);
 }
 
@@ -349,7 +350,7 @@ export async function reconcileControlledTargets(state, registration, targets = 
 
   try {
     for (const target of targets.filter((item) => item.operation !== "draft")) {
-      writes.push(await apply(configurationForTarget(state, target), target));
+      writes.push(await apply(configurationForTarget(state, target), target, registration));
     }
     for (const target of targets.filter((item) => item.publishStatusOperation)) {
       const itemId = createdItemIdForTarget(target, writes);
@@ -369,7 +370,7 @@ export async function reconcileControlledTargets(state, registration, targets = 
     const manualAttentionRequired = Boolean(error?.details?.publishStatusChangeUncertain || !statusRollbackComplete || !rollbackComplete);
     throw new ControlledPublishError(error?.status || 502, manualAttentionRequired
       ? "Wix reconciliation failed and at least one field or publish-status change needs manual attention."
-      : "Wix reconciliation failed, so completed changes were rolled back.", {
+      : (error?.details?.code === "wix_cms_item_limit" ? error.message : "Wix reconciliation failed, so completed changes were rolled back."), {
       ...(error?.details || {}),
       writes,
       statusTransitions,

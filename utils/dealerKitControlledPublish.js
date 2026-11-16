@@ -1,4 +1,4 @@
-import { submitDealerKitVehicle } from "./dealerKitSubmitVehicle.js";
+import { dealerKitPublishedVehicleUrl, submitDealerKitVehicle } from "./dealerKitSubmitVehicle.js";
 import { buildMarketingAccessHeaders, parseMarketingJsonResponse } from "../services/marketingAccess.js";
 
 const ROOT_ATTRIBUTE = "data-dealerkit-controlled-publish";
@@ -372,6 +372,7 @@ async function publishingRequest(url, body) {
     const blockers = (payload.details?.blockers || []).map(item => item.message || item.code).join(" ");
     if (blockers) error.message += " " + blockers;
     error.manualAttentionRequired = Boolean(payload.manualAttentionRequired || payload.details?.manualAttentionRequired);
+    error.capacityReached = payload.details?.code === "wix_cms_item_limit";
     throw error;
   });
   return data;
@@ -393,6 +394,7 @@ function addSubmit(root, registration, product) {
   const endpoint = product === "cars" ? "/api/dealerkit-car-controlled-publish" : "/api/dealerkit-controlled-publish";
   const request = { registration, confirmRegistration: registration, productMode: product };
   button.addEventListener("click", async () => {
+    if (button.disabled) return;
     const workspace = root.closest("[data-dealerkit-review-workspace]");
     const gallery = workspace?.querySelector("[data-dealerkit-product-gallery]");
     if (!gallery?.savePublishingReview || gallery.dataset.registration !== registration || gallery.dataset.product !== product) {
@@ -408,33 +410,27 @@ function addSubmit(root, registration, product) {
     const locked = [gallery, reviewBody?.querySelector(".dealerkit-review__decisions")].filter(Boolean);
     locked.forEach(node => { node.inert = true; });
     let requiresReview = false;
-    let confirmedPlan;
     try {
       const result = await submitDealerKitVehicle({
         save: gallery.savePublishingReview,
         upload: gallery.uploadPublishingPhotos,
         read: () => publishingRequest(endpoint + "-preview" + query + "&product=" + encodeURIComponent(product)),
         prepare: () => publishingRequest("/api/dealerkit-wix-prepare-media", request),
-        publish: plan => {
-          confirmedPlan = plan;
-          return publishingRequest(endpoint, {
+        publish: plan => publishingRequest(endpoint, {
           ...request,
           action: plan.writeIntent === "update_existing_vehicle"
             ? (product === "cars" ? "update_existing_car" : "update_existing_vehicle")
             : (product === "cars" ? "publish_new_car" : "publish_new_vehicle"),
-            confirmation: plan.confirmation,
-          });
-        },
+          confirmation: plan.confirmation,
+        }),
         status: message => { feedback.textContent = message + "…"; },
         isCurrent,
       });
       feedback.textContent = result.galleryComplete === false
         ? (result.message || "Advert verified. Some photographs are still processing.")
         : (result.message || "Published and verified successfully.");
-      const targetLink = confirmedPlan?.targets?.map(target => target.data?.webLink || target.data?.websiteLink).find(value => /^https:\/\/(www\.)?(vanfinancecompany|rent2buyvans)\.co\.uk\//i.test(value || ""));
-      const productUrl = { cars: "car-finance", finance: "van-finance", rent2buy: "guaranteed-rent2buy-vans" }[product];
       const link = element("a", "", "View vehicle");
-      link.href = product === "cars" || !targetLink ? "https://www.vanfinancecompany.co.uk/" + productUrl + "/" + registration : targetLink;
+      link.href = dealerKitPublishedVehicleUrl(product, registration);
       link.target = "_blank";
       link.rel = "noopener noreferrer";
       feedback.append(" ", link);
@@ -444,7 +440,7 @@ function addSubmit(root, registration, product) {
     } catch (error) {
       requiresReview = Boolean(error.cause?.manualAttentionRequired);
       feedback.textContent = error.message + (requiresReview ? " Reconcile the reported rollback issue before retrying." : "");
-      button.textContent = requiresReview ? "Review required" : "Retry";
+      button.textContent = requiresReview ? "Review required" : error.cause?.capacityReached ? "Retry after freeing CMS capacity" : "Retry";
     } finally {
       button.disabled = requiresReview;
       fallback.hidden = false;

@@ -1,3 +1,4 @@
+import { orderCarsManualMedia } from "../lib/dealerKitWixManualMedia.js";
 import {
   buildMarketingAccessHeaders,
   parseMarketingJsonResponse,
@@ -137,7 +138,8 @@ function refreshIncluded(state, product) {
 
 function manualForProduct(state, product) {
   const purpose = PRODUCTS[product].purpose;
-  return state.manualMedia.filter((item) => item?.purpose === purpose);
+  const media = state.manualMedia.filter((item) => item?.purpose === purpose);
+  return product === "cars" ? orderCarsManualMedia(media) : media;
 }
 
 function selectedManual(state, product) {

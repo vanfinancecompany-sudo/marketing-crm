@@ -95,3 +95,66 @@ test("manual Cars primary reaches both new and existing records and never falls 
   assert.equal(manualMediaSiteConfiguration("cars_replacement",env).siteId,controlledCarWixConfiguration(env).siteId);
   assert.equal(manualMediaSiteConfiguration("van_finance_replacement",env).siteId,"van-site");
 });
+import { dealerKitPublishedVehicleUrl } from "../utils/dealerKitSubmitVehicle.js";
+import { controlledWixCreateId, controlledWixRequest, WIX_CMS_ITEM_LIMIT_MESSAGE } from "../api/_dealerkit-controlled-publish-state.js";
+import { reconcileControlledTargets } from "../api/dealerkit-controlled-publish.js";
+import { orderCarsManualMedia } from "../lib/dealerKitWixManualMedia.js";
+
+test("publish success links use the three public vehicle routes", () => {
+  assert.equal(dealerKitPublishedVehicleUrl("cars", "PE71 YTG"), "https://www.vanfinancecompany.co.uk/cars/pe71ytg");
+  assert.equal(dealerKitPublishedVehicleUrl("finance", "BP73XHB"), "https://www.vanfinancecompany.co.uk/vans/bp73xhb");
+  assert.equal(dealerKitPublishedVehicleUrl("rent2buy", "BJ72PLF"), "https://www.vanfinancecompany.co.uk/rent2buy/vans/bj72plf");
+  assert.equal(dealerKitPublishedVehicleUrl("cars", "../admin"), null);
+});
+
+test("stable Wix create IDs collide only for the same site, collection and plate", () => {
+  const id = controlledWixCreateId("site", "CARFINANCE", "AB22 CDE");
+  assert.match(id, /^[a-f0-9-]{36}$/);
+  assert.equal(controlledWixCreateId("site", "CARFINANCE", "ab22cde"), id);
+  assert.notEqual(controlledWixCreateId("site", "CARPAGES", "AB22CDE"), id);
+  assert.notEqual(controlledWixCreateId("site", "CARFINANCE", "AB22CDF"), id);
+  assert.notEqual(controlledWixCreateId("other-site", "CARFINANCE", "AB22CDE"), id);
+});
+
+test("Wix CMS capacity errors stop writes, preserve rollback and exclude rate limits", async () => {
+  const configuration = {apiBaseUrl:"https://fixture.test",siteId:"fixture",apiKey:"fixture"};
+  const target = {collectionId:"CARFINANCE",operation:"create"};
+  let requests=0;
+  const quota = () => controlledWixRequest(configuration,"/wix-data/v2/items",{
+    request:async()=>{requests++;return Response.json({details:{applicationError:{code:"ITEM_COUNT_QUOTA_EXCEEDED",description:"Maximum number of data items reached"}}},{status:429});}
+  });
+  let rolledBack=false;
+  await assert.rejects(reconcileControlledTargets({configuration},"AB22CDE",[target,target,target],{
+    applyTarget:async()=>{if(!requests++){return {itemId:"new-row"};}return quota();},
+    rollbackCreatedAndUpdated:async(_state,writes)=>{assert.equal(writes.length,1);rolledBack=true;return [{rolledBack:true}];},
+    rollbackPublishStatuses:async()=>[],
+  }),error=>error.message===WIX_CMS_ITEM_LIMIT_MESSAGE&&error.details.code==="wix_cms_item_limit");
+  assert.equal(requests,3);
+  assert.equal(rolledBack,true);
+  await assert.rejects(controlledWixRequest(configuration,"/wix-data/v2/items",{
+    request:async()=>Response.json({message:"WDE0014: Requests per minute quota exceeded."},{status:429})
+  }),error=>error.status===429&&error.details.code!=="wix_cms_item_limit");
+});
+
+test("Cars preserves staged order as new images append, only promoting the selected READY primary", () => {
+  const item = (id, date, extra={})=>({id,createdAt:date,ready:true,url:"https://fixture.test/"+id,...extra});
+  const older=item("old","2026-11-15T10:00:00Z");
+  const previous=item("previous","2026-11-15T10:01:00Z");
+  const latest=item("latest","2026-11-16T10:01:00Z");
+  const primary=item("primary","2026-11-16T10:02:00Z",{selected:true});
+  const processing=item("processing","2026-11-16T10:03:00Z",{ready:false});
+  const rows=[processing,primary,latest,previous,older];
+  assert.deepEqual(orderCarsManualMedia(rows).map(row=>row.id),["old","previous","latest","primary","processing"]);
+  const {imageSet}=buildCarImageSet({}, {}, [], rows);
+  assert.equal(imageSet.listingImageUrl,primary.url);
+  assert.deepEqual(imageSet.galleryUrls,[primary.url,older.url,previous.url,latest.url]);
+});
+
+test("a DealerKit source change discovered after photo staging aborts publication", async () => {
+  let reads=0;
+  const harness=runHarness({read:async()=>++reads===1
+    ? {plan:{canPublish:true,confirmation}}
+    : {plan:{blockers:[{code:"stale_review",message:"DealerKit changed after the saved review."}]}}});
+  await assert.rejects(harness.result,/DealerKit changed/);
+  assert.deepEqual(harness.events,["save","upload"]);
+});

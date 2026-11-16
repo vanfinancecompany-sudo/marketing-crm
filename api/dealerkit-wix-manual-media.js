@@ -331,6 +331,18 @@ async function selectUpload({ request, supabase, registration }) {
     .eq("registration", registration);
   if (refreshError) throw new ApiError(502, `Manual Wix media verification save failed: ${refreshError.message || refreshError}`);
 
+  if (purpose.key === "cars_replacement") {
+    const { data, error } = await supabase.rpc("dealerkit_select_cars_primary", {
+      p_media_id: stored.id,
+      p_stock_id: decision.supplierStockId,
+      p_registration: registration,
+      p_site_id: configuration.siteId,
+    });
+    const selected = Array.isArray(data) ? data[0] : data;
+    if (error || selected?.id !== stored.id) throw new ApiError(502, "Could not confirm the Cars primary selection. Refresh the gallery before retrying.");
+    return { action: "select_media", registration, media: manualMediaRowToClient(selected), selectedPurpose: purpose.key, selectionOnly: true };
+  }
+
   const { error: clearError } = await supabase
     .from(DEALERKIT_MANUAL_MEDIA_TABLE)
     .update({ selected_at: null })
