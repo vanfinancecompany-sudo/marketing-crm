@@ -97,3 +97,20 @@ test("campaign page loader enables the simple send experience after the legacy f
   assert.match(loader, /20260915-resilient-endpoint/);
   assert.match(loader, /DOMContentLoaded/);
 });
+
+test("one-click Campaigns UI accepts 1,000 recipients and retains controlled sending", () => {
+  const simple = source("public/campaigns/simple-send-flow.js");
+  const form = source("public/campaigns/sending-foundation.js");
+  assert.match(simple, /value > 1000/);
+  assert.match(simple, /count <= 1000/);
+  assert.match(simple, /Maximum 1,000 recipients per batch/);
+  assert.match(form, /id="productionBatchSize" type="number" min="1" max="1000"/);
+  assert.match(form, /Math\.min\(1000, Number\(/);
+  assert.match(form, /Maximum 1,000 recipients per confirmed batch/);
+  assert.match(source("api/marketing-template-campaign-sends.js"), /const MAX_PRODUCTION_BATCH_SIZE = 1000;/);
+  assert.match(source("api/marketing-template-campaign-sends-router.js"), /const MAX_PRODUCTION_BATCH_SIZE = 1000;/);
+  assert.match(source("api/marketing-template-campaign-sends-resilient.js"), /const MAX_BATCH = 1000;/);
+  assert.match(source("api/marketing-template-campaign-sends-hardened.js"), /const MAX_PRODUCTION_BATCH_SIZE = 1000;/);
+  assert.match(source("api/marketing-template-campaign-send-worker.js"), /const WORKER_BATCH_SIZE = 40;/);
+  assert.match(source("api/marketing-template-campaign-sends.js"), /manualCustomerIds.length > 500/);
+});
