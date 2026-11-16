@@ -104,3 +104,47 @@ test("Cars review stays in Cars mode and uses the source-image review plus contr
   assert.match(controlled, /dealerkit-car-controlled-publish-preview/);
   assert.match(controlled, /dealerkit-car-controlled-publish/);
 });
+
+test("VFC controlled Wix lookup explicitly includes draft rows and uses consistent primary reads", async () => {
+  const { queryControlledRegistrationItems } = await import("../api/_dealerkit-controlled-publish-state.js");
+  const calls = [];
+  const matches = await queryControlledRegistrationItems({ siteId: "site-test" }, "VANFINANCEPAGES", "GD21SVZ", {
+    request: async (_configuration, path, options) => {
+      calls.push({ path, ...options });
+      return { dataItems: [] };
+    },
+  });
+  assert.deepEqual(matches, []);
+  assert.ok(calls.length > 0);
+  for (const call of calls) {
+    assert.equal(call.path, "/wix-data/v2/items/query");
+    assert.equal(call.method, "POST");
+    assert.equal(call.body.consistentRead, true);
+    assert.equal(call.body.publishPluginOptions.includeDraftItems, true);
+  }
+});
+
+test("VFC reconciliation retries readback without replaying Wix writes or publish actions", async () => {
+  const { verifyWrittenWithRetry } = await import("../api/dealerkit-controlled-publish.js");
+  let reads = 0;
+  const pauses = [];
+  const result = await verifyWrittenWithRetry({}, "GD21SVZ", [], [], {
+    verify: async () => ({ verified: ++reads === 3, results: [] }),
+    wait: async (ms) => pauses.push(ms),
+  });
+  assert.equal(result.verified, true);
+  assert.equal(reads, 3);
+  assert.deepEqual(pauses, [500, 1000]);
+});
+
+test("controlled Wix failure identifies failing collection and exact failed checks", async () => {
+  const { describeControlledPublishFailure } = await import("../api/dealerkit-controlled-publish.js");
+  const message = describeControlledPublishFailure({
+    details: {
+      verification: {
+        results: [{ collectionId: "VANFINANCEPAGES", count: 1, verified: false, expectedItemId: "id-1", itemId: "id-1", publishStatusVerified: true, galleryVerified: false, countVerified: true }],
+      },
+    },
+  });
+  assert.match(message, /VANFINANCEPAGES: image gallery did not match/);
+});
