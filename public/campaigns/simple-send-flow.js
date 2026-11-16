@@ -108,8 +108,8 @@
 
   function requestedBatchSize() {
     const value = Number(batchInput()?.value || 0);
-    if (!Number.isInteger(value) || value < 1 || value > 500) {
-      throw new Error("Enter a batch size between 1 and 500.");
+    if (!Number.isInteger(value) || value < 1 || value > 1000) {
+      throw new Error("Enter a batch size between 1 and 1000.");
     }
     return value;
   }
@@ -132,7 +132,7 @@
       ? "Preparing & Queueing…"
       : activeProgressIsSending()
         ? "Batch Sending…"
-        : Number.isInteger(count) && count >= 1 && count <= 500
+        : Number.isInteger(count) && count >= 1 && count <= 1000
           ? `Send ${fmt.format(count)} Emails`
           : "Send Batch";
   }
@@ -341,7 +341,7 @@
     if (!sendArea) return false;
 
     const warning = sendArea.querySelector(".send-warning");
-    if (warning) warning.textContent = "Maximum 500 recipients per batch. Enter how many you want, then press Send Batch once.";
+    if (warning) warning.textContent = "Maximum 1,000 recipients per batch. Enter how many you want, then press Send Batch once.";
     const heading = sendArea.querySelector(".send-danger");
     if (heading) heading.textContent = "This button sends real customer email.";
 

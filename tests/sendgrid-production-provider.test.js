@@ -188,9 +188,10 @@ test("SMTP2GO and Brevo send paths remain available", async () => {
   assert.equal(brevoResult.messageId, "brevo-message");
 });
 
-test("production batch size remains capped at 500", () => {
+test("production batch size is capped at 1000", () => {
   assert.equal(requestedBatchSize(500), 500);
-  assert.throws(() => requestedBatchSize(501), /between 1 and 500/i);
+  assert.equal(requestedBatchSize(1000), 1000);
+  assert.throws(() => requestedBatchSize(1001), /between 1 and 1000/i);
 });
 
 test("production workflow retains suppression, duplicate, confirmation and ambiguous-send protections", () => {

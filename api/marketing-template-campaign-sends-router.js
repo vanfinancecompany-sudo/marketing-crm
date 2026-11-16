@@ -28,7 +28,7 @@ const SEND_COLUMNS = "id,campaign_id,send_type,status,provider,requested_count,e
 const PIPELINES = new Set(["all", "finance", "rent2buy", "both"]);
 const AUDIENCE_MODES = new Set(["standard", "never_emailed", "recently_imported", "manual_customer_ids", "custom_search"]);
 const PAGE_SIZE = 1000;
-const MAX_PRODUCTION_BATCH_SIZE = 500;
+const MAX_PRODUCTION_BATCH_SIZE = 1000;
 
 class ApiError extends Error {
   constructor(statusCode, message) {

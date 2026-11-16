@@ -4,7 +4,7 @@ import campaignSendRouter from "./marketing-template-campaign-sends-router.js";
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const SEND_COLUMNS = "id,campaign_id,send_type,status,provider,requested_count,eligible_count,suppressed_count,sent_count,failed_count,skipped_duplicate_count,created_by,created_at,updated_at,started_at,completed_at,confirmation_token_hash,frozen_subject,frozen_preview_text,frozen_html_hash,metadata,error_summary";
 const RECOVERY_RECIPIENT_COLUMNS = "id,status,provider_message_id,last_event_at,metadata";
-const MAX_PRODUCTION_BATCH_SIZE = 500;
+const MAX_PRODUCTION_BATCH_SIZE = 1000;
 
 function json(response, status, payload) {
   response.status(status).json(payload);

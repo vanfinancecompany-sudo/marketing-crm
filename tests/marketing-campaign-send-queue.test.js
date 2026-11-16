@@ -161,3 +161,25 @@ test("Vercel runs orphan repair and queued sender every minute", () => {
   assert.equal(config.functions["api/marketing-template-campaign-send-orphan-worker.js"]?.maxDuration, 60);
   assert.equal(config.functions["api/marketing-template-campaign-send-worker.js"]?.maxDuration, 300);
 });
+
+test("pristine reservation recovery accepts a 1,000-email batch but rejects larger batches", () => {
+  const send = {
+    id: "send-1000",
+    campaign_id: "campaign-1000",
+    send_type: "production",
+    status: "sending",
+    requested_count: 1000,
+    metadata: {
+      queue_state: "reserving",
+      queued_recipient_count: 1000,
+      campaign_snapshot: { id: "campaign-1000" },
+    },
+  };
+  const recipients = Array.from({ length: 1000 }, () => ({
+    status: "pending", provider_message_id: null, last_event_at: null, metadata: {},
+  }));
+  assert.equal(reservationIsSafeToRecover(send, recipients), true);
+  assert.equal(reservationIsSafeToRecover({ ...send, requested_count: 1001,
+    metadata: { ...send.metadata, queued_recipient_count: 1001 } }, [...recipients, recipients[0]]), false);
+  assert.equal(reservationIsSafeToRecover(send, recipients.slice(0, 999)), false);
+});
