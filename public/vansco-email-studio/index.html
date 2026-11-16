@@ -154,7 +154,8 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      <div id="stockMessage" class="small muted" role="status">Loading Vansco stock…</div>
      <div class="stock" id="stockList"></div>
      <div class="heading" style="margin-top:17px"><h3>Featured van sale prices</h3><span class="small muted">Manual overrides</span></div>
-     <p class="field-help">Enter Was and Now for each featured van. Save is calculated automatically if left blank. Any manual Save must match the difference. DealerKit prices are not changed.</p>
+     <p id="salePriceHelp" class="field-help">Enter Was and Now for each featured van. Save is calculated automatically if left blank. Any manual Save must match the difference. DealerKit prices are not changed.</p>
+     <p id="blackFridayNotice" class="safe-send" hidden>Black Friday uses the live screen price. Saved Was/Now overrides are retained for other themes and are not shown in this campaign. Choose ONE extra; the £500 discount is agreed at sale. Before sending, confirm eligible vehicles, warranty cover/exclusions and any combination restrictions, and add the approved terms.</p>
      <div class="sale-grid" id="saleEditors"></div>
      <p class="small muted" id="saleMessage" role="status"></p>
     </section>
@@ -270,7 +271,7 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
      </section>
    </div>
    <section class="panel preview-wrap">
-    <div class="preview-toolbar"><div><h2>Live email preview</h2><span class="small muted">Rendered with real selected Vansco vehicles</span></div><span class="pill">EMAIL DESIGN</span></div>
+    <div class="preview-toolbar"><div><h2>Live email preview</h2><span class="small muted">Rendered with real selected Vansco vehicles</span></div><label class="small muted">Preview size<select id="previewSize" aria-label="Preview size"><option value="680">Desktop</option><option value="390">Mobile</option></select></label></div>
     <div class="preview-body"><iframe id="emailPreview" sandbox="" title="Seasonal campaign email preview"></iframe></div>
    </section>
   </div>
@@ -295,13 +296,14 @@ iframe{display:block;border:0;background:white;width:100%;height:715px;max-width
 </main>
 </div>
 <script>
-(function(){
+(async function(){
 "use strict";
+var { renderBlackFriday, blackFridayDefaults } = await import("/vansco-email-studio/black-friday.js");
 var STORAGE="marketingCustomerDatabaseApiKey", API="/api/vansco-email-studio";
 var themes={
  standard:{subject:"Vansco | Latest Vans Available Now",preview_text:"Browse our latest used vans.",eyebrow:"VANSCO",heading:"FIND YOUR NEXT VAN",subheading:"Quality used vans across Southampton and the New Forest",introduction:"Explore the latest vans available now at Vansco.",offer:"Quality used vans. Great choice.",cta_label:"VIEW ALL VANS",cta_url:"https://www.vansco.co.uk/all-stock/"},
  halloween:{"subject":"Vansco Halloween Giveaway | At Least £300 Off Every Van","preview_text":"At least £300 off every van, average savings of £500, a free 1-year AutoGuard warranty and FREE nationwide delivery.","eyebrow":"HALLOWEEN EDITION","heading":"HALLOWEEN VAN SALE","subheading":"Big savings on quality used vans this Halloween","introduction":"The Vansco Halloween Giveaway is here! Discover quality used vans with spookily good savings, FREE nationwide delivery and low-deposit van finance options.","offer":"AT LEAST £300 OFF EVERY VAN • AVERAGE SAVING £500 • FREE 1-YEAR AUTOGUARD WARRANTY","brand_description":"Hunting for your next work van? Vansco has a wide selection of quality used commercial vehicles across our three Hampshire locations. Our Halloween Giveaway includes at least £300 off every vehicle, with average savings of £500 per van. Every vehicle also comes with a FREE 1-year AutoGuard warranty.","extra_text":"Need a small van, a Transit Custom or a larger commercial vehicle? Browse our featured stock, or speak to the Vansco team about availability, part exchange and low-deposit finance options. We also offer FREE nationwide delivery, making it easy to buy wherever you are in the UK.","cta_label":"VIEW HALLOWEEN OFFERS","cta_url":"https://www.vansco.co.uk/all-stock/"},
- black_friday:{subject:"Vansco Black Friday | Used Vans",preview_text:"Explore this year's Black Friday van selection.",eyebrow:"BLACK FRIDAY EVENT",heading:"BLACK FRIDAY",subheading:"Featured Vansco offers",introduction:"Explore our Black Friday selection of used vans.",offer:"Find a van to suit your business.",cta_label:"VIEW BLACK FRIDAY VANS",cta_url:"https://www.vansco.co.uk/all-stock/"},
+ black_friday:blackFridayDefaults,
  christmas:{subject:"Vansco Christmas | Our Festive Van Selection",preview_text:"Explore our Christmas selection of vans.",eyebrow:"CHRISTMAS EDITION",heading:"CHRISTMAS VAN SALE",subheading:"Start the new year with the right van",introduction:"Find your next van this festive season at Vansco.",offer:"A fresh start for the road ahead.",cta_label:"SEE AVAILABLE VANS",cta_url:"https://www.vansco.co.uk/all-stock/"}
 };
 var palettes={
@@ -326,7 +328,7 @@ async function delivery(action,payload) {
 function values(){var settings={theme:state.theme,selected_keys:state.selected.slice(),sale_prices:state.salePrices};Object.keys(fields).forEach(function(k){settings[fields[k]]=el(k).value.trim()});return settings}
 function fill(data){state.theme=data.theme in themes?data.theme:"halloween";state.selected=Array.isArray(data.selected_keys)?data.selected_keys:[];state.salePrices=data.sale_prices&&typeof data.sale_prices==="object"?data.sale_prices:{};Object.keys(fields).forEach(function(k){el(k).value=data[fields[k]]||""});highlightThemes();renderStock();preview()}
 function switchTheme(theme){if(!themes[theme])return;var before=values();fill(Object.assign({},before,themes[theme],{theme:theme,selected_keys:state.selected,sale_prices:state.salePrices}));el("campaignName").value="Vansco "+(theme==="standard"?"New Stock":theme==="black_friday"?"Black Friday":theme==="christmas"?"Christmas":"Halloween")+" Sale"}
-function highlightThemes(){document.querySelectorAll("[data-theme]").forEach(function(button){button.setAttribute("aria-pressed",String(button.dataset.theme===state.theme))})}
+function highlightThemes(){el("salePriceHelp").hidden=state.theme==="black_friday";el("blackFridayNotice").hidden=state.theme!=="black_friday";el("saleEditors").hidden=state.theme==="black_friday";document.querySelectorAll("[data-theme]").forEach(function(button){button.setAttribute("aria-pressed",String(button.dataset.theme===state.theme))})}
 function money(value){var m=String(value||"").match(/([0-9][0-9,]*(?:\.[0-9]+)?)/);if(!m)return "";var n=Number(m[1].replace(/,/g,""));return Number.isFinite(n)?"£"+n.toLocaleString("en-GB",{maximumFractionDigits:0}):""}
 function selectedVehicles(){var map=new Map(state.stock.map(function(v){return [v.key,v]}));return state.selected.map(function(k){return map.get(k)}).filter(Boolean)}
 function renderStock(){
@@ -431,6 +433,7 @@ function buildEmail(){
     (legalNote?'<p style="margin:20px 0 0;padding-top:15px;border-top:1px solid #504b53;color:#aca8b2;font:11px/18px Arial,sans-serif">'+lines(legalNote)+'</p>':"")+
     '</td></tr>';
 
+ if(state.theme === "black_friday") return renderBlackFriday({settings:s,vehicles:v,footer:footer,preview:true});
  return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media(max-width:600px){.van{display:block!important;width:100%!important}.body-pad{padding:25px!important}.vansco-branch{display:block!important;box-sizing:border-box!important;width:100%!important;border-right:0!important;border-bottom:1px solid #504b53!important;padding:14px 5px!important}.vansco-branch-last{border-bottom:0!important}}</style><title>'+escapeHtml(s.subject)+'</title></head>'+
  '<body style="margin:0;background:#e9eaec;padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#e9eaec"><tr><td align="center" style="padding:22px 8px"><table role="presentation" width="650" style="border-collapse:collapse;width:100%;max-width:650px;background:white">'+
  '<tr><td style="background:'+p.dark+';padding:20px 25px 15px;color:#fff;font-family:Arial,sans-serif"><table role="presentation" width="100%" style="width:100%;border-collapse:collapse"><tr><td align="left" valign="middle">'+brandLogo+'</td><td align="right" valign="middle" style="color:'+p.accent+';font:700 10px Arial,sans-serif;letter-spacing:1.5px">'+escapeHtml(s.eyebrow||p.label)+pumpkin+'</td></tr></table></td></tr>'+
@@ -450,6 +453,7 @@ function buildEmail(){
  '<p style="margin:8px 0 0">Marketing unsubscribe link will be inserted by the verified sending system.</p></td></tr>'+
  '</table></td></tr></table></body></html>';
 }
+el("previewSize").addEventListener("change",function(){el("emailPreview").style.maxWidth=el("previewSize").value+"px"});
 function preview(){el("emailPreview").srcdoc=buildEmail()}
 function downloadHtml(){var blob=new Blob([buildEmail()],{type:"text/html;charset=utf-8"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="vansco-"+state.theme+"-email-preview.html";a.click();setTimeout(function(){URL.revokeObjectURL(url)},4000)}
 function parseCsv(content){
