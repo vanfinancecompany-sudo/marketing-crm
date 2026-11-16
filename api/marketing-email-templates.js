@@ -6,6 +6,7 @@ import {
   toMarketingVehicleSelectionContract,
 } from "../services/marketingVehicleContract.js";
 import { renderEmailHtml as renderSharedEmailHtml } from "../lib/marketingCampaignTemplateRenderer.js";
+import { MAX_VEHICLES_PER_GRID, PREMIUM_BLOCK_TYPES, isPremiumBlockType, normalizePremiumBlockSettings } from "../lib/marketingEmailPremiumCampaign.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const TEMPLATE_COLUMNS = "id,name,description,category,default_subject,preview_text,header_logo,hero_heading,intro_text,main_body,cta_text,cta_url,footer,brand_colour,company_name,secondary_colour,social_links,master_layout,content_blocks,status,created_by,created_at,updated_at,archived_at";
@@ -13,7 +14,7 @@ const CATEGORIES = new Set(["new_stock", "finance_offer", "rent2buy", "weekend_o
 const STATUSES = new Set(["draft", "active", "archived"]);
 const EDITABLE_STATUSES = new Set(["draft", "active"]);
 const MASTER_LAYOUTS = new Set(["new_stock", "finance_offer", "rent2buy", "weekend_offer", "re_engagement", "newsletter", "custom_blank"]);
-const BLOCK_TYPES = new Set(["text", "manual_image", "button", "divider", "spacer", "vehicle_grid"]);
+const BLOCK_TYPES = new Set(["text", "manual_image", "button", "divider", "spacer", "vehicle_grid", ...PREMIUM_BLOCK_TYPES]);
 const ALIGNMENTS = new Set(["left", "centre", "right"]);
 const TEXT_ALIGNMENTS = new Set(["left", "centre"]);
 const PADDING_SIZES = new Set(["small", "medium", "large"]);
@@ -270,7 +271,7 @@ function normalizeUnresolvedSelectedVehicle(vehicle, productMode) {
 function normalizeSelectedVehicles(value, productMode, enabled, options = {}) {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) throw new ValidationError("Vehicle grid selected_vehicles must be an array.");
-  if (value.length > 6) throw new ValidationError("Vehicle grid can contain a maximum of 6 selected vehicles.");
+  if (value.length > MAX_VEHICLES_PER_GRID) throw new ValidationError(`Vehicle grid can contain a maximum of ${MAX_VEHICLES_PER_GRID} selected vehicles.`);
   const seen = new Set();
   return value.map((vehicle) => {
     if (!isPlainObject(vehicle)) throw new ValidationError("Each selected vehicle snapshot must be an object.");
@@ -287,6 +288,7 @@ function normalizeSelectedVehicles(value, productMode, enabled, options = {}) {
 
 function normalizeBlockSettings(type, settings = {}, enabled = true, options = {}) {
   if (!isPlainObject(settings)) throw new ValidationError("Block settings must be an object.");
+  if (isPremiumBlockType(type)) return normalizePremiumBlockSettings(type, settings, enabled, (message) => { throw new ValidationError(message); });
   if (type === "text") {
     return {
       heading: cleanText(settings.heading, 300),
@@ -343,14 +345,14 @@ function normalizeBlockSettings(type, settings = {}, enabled = true, options = {
     const productMode = requireChoice(settings.product_mode || "finance", VEHICLE_PRODUCT_MODES, "Vehicle grid product mode");
     const sourceMode = requireChoice(settings.source_mode || "selected", VEHICLE_SOURCE_MODES, "Vehicle grid source mode");
     const selectedVehicles = normalizeSelectedVehicles(settings.selected_vehicles || [], productMode, enabled && sourceMode === "selected", options);
-    if (enabled && sourceMode === "selected" && selectedVehicles.length > 6) throw new ValidationError("Vehicle grid can contain a maximum of 6 selected vehicles.");
+    if (enabled && sourceMode === "selected" && selectedVehicles.length > MAX_VEHICLES_PER_GRID) throw new ValidationError(`Vehicle grid can contain a maximum of ${MAX_VEHICLES_PER_GRID} selected vehicles.`);
     const selectedCount = selectedVehicles.length;
     const requestedCount = selectedCount || settings.number_of_vehicles || 3;
     return {
       heading: cleanText(settings.heading, 300),
       intro_text: cleanText(settings.intro_text, 1000),
       top_padding: requireInteger(settings.top_padding ?? 24, "Vehicle grid top padding", { allowed: [0, 8, 16, 24], min: 0, max: 24 }),
-      number_of_vehicles: selectedCount || requireInteger(requestedCount, "Vehicle grid number of vehicles", { min: 1, max: 6 }),
+      number_of_vehicles: selectedCount || requireInteger(requestedCount, "Vehicle grid number of vehicles", { min: 1, max: MAX_VEHICLES_PER_GRID }),
       layout: requireChoice(settings.layout || "one_column", VEHICLE_LAYOUTS, "Vehicle grid layout"),
       source_mode: sourceMode,
       product_mode: productMode,
