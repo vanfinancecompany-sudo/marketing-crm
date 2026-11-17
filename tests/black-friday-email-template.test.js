@@ -148,3 +148,99 @@ test("the designer offers the Black Friday master without touching existing mast
     assert.match(designerSource, new RegExp(`\\b${key}: \\{ label:`), `${key} master is still defined`);
   }
 });
+
+// ---------- Dark-mode compatibility (Gmail, Outlook, Apple Mail) ----------
+import { renderFrozenCampaign } from "../api/marketing-template-campaign-sends.js";
+import { hardenDarkModeHtml } from "../lib/marketingEmailPremiumCampaign.js";
+
+function frozenBlackFridayCampaign(vehicleCount = 10) {
+  const template = blackFridayTemplate(0);
+  const grid = template.content_blocks.find((block) => block.type === "vehicle_grid");
+  grid.settings.number_of_vehicles = vehicleCount;
+  grid.settings.selected_vehicles = Array.from({ length: vehicleCount }, (_, index) => {
+    const row = stockRow(index + 1);
+    return { snapshot_status: "frozen", selection_id: `finance:${row.id}`, source_id: row.id, registration: "", title: row.title, description: "", spec: row.vanSpec, primary_image_url: row.picture, image_override_url: "", finance: { price: row.price, vat: row.vat, monthly: row.salePrice, url: row.weblink }, rent2buy: null };
+  });
+  return { subject_line: kit.master.subject, preview_text: kit.master.preview, template_snapshot: template };
+}
+
+function finalSendHtml() {
+  return renderFrozenCampaign(frozenBlackFridayCampaign(10), { unsubscribeUrl: "https://marketing-crm-six.vercel.app/unsubscribe?token=test", values: { first_name: "Customer" } }).html;
+}
+
+function inlineStyles(html) {
+  return [...html.matchAll(/<[a-z][a-z0-9]*\s[^<>]*?style="([^"]*)"/gi)].map((match) => match[1]);
+}
+
+test("final send HTML backs every solid background with a same-colour gradient so Gmail cannot invert it", () => {
+  const html = finalSendHtml();
+  const styles = inlineStyles(html.split("You can unsubscribe")[0]);
+  let checked = 0;
+  for (const style of styles) {
+    assert.doesNotMatch(style, /(^|;)\s*background\s*:\s*#/i, `solid background shorthand left unprotected: ${style.slice(0, 120)}`);
+    const colour = /background-color:(#[0-9a-f]{6})/i.exec(style)?.[1];
+    if (colour) { checked += 1; assert.ok(style.includes(`background-image:linear-gradient(${colour},${colour})`), `gradient must repeat ${colour}`); }
+  }
+  assert.ok(checked >= 40, `expected the shell, panels, cards and buttons to be protected (found ${checked})`);
+  // The design's colours are unchanged.
+  for (const colour of ["#050506", "#0b0b0d", "#131316", "#d81e36"]) assert.ok(html.includes(`background-color:${colour}`), colour);
+});
+
+test("final send HTML restores colours that Outlook.com and new Outlook rewrite in dark mode", () => {
+  const html = finalSendHtml();
+  const head = html.slice(0, html.indexOf("</head>"));
+  assert.match(head, /\[data-ogsc\] \.bf-c-ffffff,\.bf-c-ffffff\[data-ogsc\]\{color:#ffffff !important;\}/);
+  assert.match(head, /\[data-ogsc\] \.bf-c-a1a1aa/);
+  for (const colour of ["050506", "0b0b0d", "131316", "d81e36"]) assert.match(head, new RegExp(`\\[data-ogsb\\] \\.bf-bg-${colour},\\.bf-bg-${colour}\\[data-ogsb\\]\\{background-color:#${colour} !important;`));
+  assert.match(head, /@media \(prefers-color-scheme: dark\) \{/);
+  assert.match(head, /:root\{color-scheme:dark light;supported-color-schemes:dark light;\}/);
+  assert.match(head, /<meta name="color-scheme" content="dark light">/);
+  // Every class the head rules rely on is present on the elements themselves.
+  const body = html.slice(html.indexOf("<body"));
+  assert.match(body, /<h1 class="pc-h1 bf-c-ffffff"/);
+  assert.match(body, /class="email-vehicle-card bf-bg-131316"/);
+});
+
+test("final send HTML protects light text with the Gmail-only blend layers", () => {
+  const html = finalSendHtml();
+  assert.match(html, /<body class="body bf-bg-050506 bf-c-ffffff"/);
+  assert.match(html, /u \+ \.body \.bf-gm-s\{background:#000000;mix-blend-mode:screen;\}/);
+  assert.match(html, /u \+ \.body \.bf-gm-d\{background:#000000;mix-blend-mode:difference;\}/);
+  assert.match(html, /<span class="bf-gm-s"><span class="bf-gm-d">FREE 2-YEAR AUTOGUARD WARRANTY<\/span><\/span><\/h1>/);
+  assert.equal((html.match(/<span class="bf-gm-s"><span class="bf-gm-d">View this van/g) || []).length, 10);
+  // Coloured text (the red accent line) and dark plate text are not blended, so their colours stay true.
+  assert.match(html, /bf-c-d81e36"[^>]*>WITH EVERY VAN<\/div>/);
+  assert.doesNotMatch(html, /bf-gm-d"><span[^>]*bf-c-111111/);
+});
+
+test("dark-mode protection keeps the email intact: links, images, unsubscribe line and size", () => {
+  const html = finalSendHtml();
+  assert.equal((html.match(/View this van/g) || []).length, 10);
+  for (let index = 1; index <= 10; index += 1) assert.ok(html.includes(`https://www.vanfinancecompany.co.uk/van-finance/ab${10 + index}cde`));
+  assert.match(html, /autoguard-warranties-logo\.png/);
+  assert.equal((html.match(/unsubscribe\?token=test/g) || []).length, 1);
+  assert.match(html, /unsubscribe<\/a>\.<\/p><\/body><\/html>$/);
+  assert.match(html, /\.body > p a \{ color:#ffffff !important; \}|body > p a, \.body > p a \{ color:#ffffff !important; \}/);
+  assert.equal(html.split("</body>").length, 2);
+  assert.doesNotMatch(html, /\{\{|\}\}/);
+  assert.ok(Buffer.byteLength(html, "utf8") < 90_000, `final email must stay well under Gmail's 102KB clipping limit (${Buffer.byteLength(html, "utf8")} bytes)`);
+  assert.match(html, /@media only screen and \(max-width:600px\)/);
+});
+
+test("customer-entered wording that looks like markup is escaped and never touched by the dark-mode pass", () => {
+  const template = blackFridayTemplate(0);
+  template.content_blocks[0].settings.headline = 'BIG <b style="background:#ffffff;color:#000000">DEAL</b>';
+  const html = renderEmailHtml(template);
+  assert.match(html, /BIG &lt;b style=&quot;background:#ffffff;color:#000000&quot;&gt;DEAL&lt;\/b&gt;/);
+  const { html: again } = hardenDarkModeHtml('<p>a style="background:#ffffff" b</p>');
+  assert.equal(again, '<p>a style="background:#ffffff" b</p>');
+});
+
+test("other email templates are not affected by the Black Friday dark-mode protection", () => {
+  const template = blackFridayTemplate(0);
+  template.content_blocks = template.content_blocks.filter((block) => block.type === "text").map((block, index) => ({ ...block, position: index + 1 }));
+  template.master_layout = "finance_offer";
+  const html = renderEmailHtml(template);
+  assert.doesNotMatch(html, /bf-gm-|bf-bg-|bf-c-|data-ogsc|linear-gradient\(#/);
+  assert.doesNotMatch(html, /class="body/);
+});
