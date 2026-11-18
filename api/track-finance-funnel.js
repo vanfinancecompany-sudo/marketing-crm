@@ -12,8 +12,12 @@ const EVENTS = new Set([
   'finance_application_started',
   'finance_application_step_viewed',
   'finance_application_step_blocked',
+  'finance_application_submit_attempted',
+  'finance_application_submit_failed',
   'finance_application_completed',
 ]);
+// Fixed failure categories only. Upstream error text is never accepted.
+const FAILURE_REASONS = new Set(['timeout', 'network', 'unconfirmed', 'rejected', 'unavailable']);
 const STEP_NAMES = new Set([
   'Application type',
   'Company',
@@ -112,8 +116,12 @@ function sanitize(body = {}) {
   if ((eventName === 'finance_application_step_viewed' || eventName === 'finance_application_step_blocked') && (!step || !totalSteps || !stepName)) return null;
 
   const viewport = Number(body.viewportWidth);
+  const failureReason = eventName === 'finance_application_submit_failed'
+    ? (cleanEnum(body.failureReason, FAILURE_REASONS) || 'unconfirmed')
+    : null;
   return {
     eventName,
+    failureReason,
     eventId,
     sessionId,
     visitorId,
@@ -172,6 +180,7 @@ export default async function handler(request, response) {
         ...(payload.step ? { step: payload.step } : {}),
         ...(payload.totalSteps ? { total_steps: payload.totalSteps } : {}),
         ...(payload.stepName ? { step_name: payload.stepName } : {}),
+        ...(payload.failureReason ? { failure_reason: payload.failureReason } : {}),
       },
     });
     const missing = Boolean(rpc.error && isMissingSupabaseObjectError(rpc.error));

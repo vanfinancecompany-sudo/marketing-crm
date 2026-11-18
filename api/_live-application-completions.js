@@ -12,7 +12,11 @@ const SITE_EVENTS = Object.freeze({
   },
   rent2buy: {
     siteOrigin: ANALYTICS_SITE_ORIGINS.rent2buy,
-    startEventName: 'rent2buy_full_application_opened',
+    // Opening the form page is a reach. A genuine start is the customer running
+    // the postcode eligibility check, which is the form's first action.
+    reachedEventName: 'rent2buy_full_application_opened',
+    startEventName: 'rent2buy_postcode_pass',
+    startEventNames: ['rent2buy_postcode_pass', 'rent2buy_postcode_fail', 'rent2buy_postcode_gate_reached'],
     completionEventName: 'rent2buy_application_completed',
   },
 });
@@ -37,12 +41,13 @@ export function uniqueSessionCount(rows = []) {
   return new Set(rows.map((row) => String(row?.session_id || '').trim()).filter(Boolean)).size;
 }
 
-export function applicationSessionCounts(rows = [], { reachedEventName, startEventName, completionEventName } = {}) {
+export function applicationSessionCounts(rows = [], { reachedEventName, startEventName, startEventNames, completionEventName } = {}) {
+  const starters = new Set(startEventNames?.length ? startEventNames : [startEventName]);
   const reachedRows = reachedEventName ? rows.filter((row) => row?.event_name === reachedEventName) : [];
-  const startRows = rows.filter((row) => row?.event_name === startEventName);
+  const startRows = rows.filter((row) => starters.has(row?.event_name));
   const completionRows = rows.filter((row) => row?.event_name === completionEventName);
   const applicationRows = rows.filter((row) => (
-    row?.event_name === startEventName || row?.event_name === completionEventName
+    starters.has(row?.event_name) || row?.event_name === completionEventName
   ));
 
   return {
@@ -55,8 +60,8 @@ export function applicationSessionCounts(rows = [], { reachedEventName, startEve
   };
 }
 
-async function loadSiteCounts({ supabase, siteOrigin, reachedEventName, startEventName, completionEventName, startIso, endIso }) {
-  const eventNames = [reachedEventName, startEventName, completionEventName].filter(Boolean);
+async function loadSiteCounts({ supabase, siteOrigin, reachedEventName, startEventName, startEventNames, completionEventName, startIso, endIso }) {
+  const eventNames = [...new Set([reachedEventName, startEventName, ...(startEventNames || []), completionEventName].filter(Boolean))];
   const { data, error } = await supabase
     .from('site_analytics_events')
     .select('session_id,event_name')
@@ -66,7 +71,7 @@ async function loadSiteCounts({ supabase, siteOrigin, reachedEventName, startEve
     .lt('occurred_at', endIso)
     .limit(10000);
   if (error) throw error;
-  return applicationSessionCounts(data || [], { reachedEventName, startEventName, completionEventName });
+  return applicationSessionCounts(data || [], { reachedEventName, startEventName, startEventNames, completionEventName });
 }
 
 export async function loadLiveApplicationCompletions({ now = new Date(), supabase } = {}) {

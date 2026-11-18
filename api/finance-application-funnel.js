@@ -8,6 +8,8 @@ const EVENTS = [
   'finance_application_started',
   'finance_application_step_viewed',
   'finance_application_step_blocked',
+  'finance_application_submit_attempted',
+  'finance_application_submit_failed',
   'finance_application_completed',
 ];
 const STEP_ORDER = [
@@ -64,6 +66,14 @@ export function buildFinanceApplicationFunnel(rows = []) {
     (row.event_name === 'finance_application_step_viewed' && row?.metadata?.step_name !== 'Application type')
   )));
   const completions = uniqueSessions(rows.filter((row) => row.event_name === 'finance_application_completed'));
+  const attemptRows = rows.filter((row) => row.event_name === 'finance_application_submit_attempted');
+  const failedRows = rows.filter((row) => row.event_name === 'finance_application_submit_failed');
+  const attempts = uniqueSessions(attemptRows);
+  const failures = uniqueSessions(failedRows);
+  // A failed submission with no confirmed completion in the same session may be
+  // an application the customer believes was sent. It is the reconciliation queue.
+  const unresolvedFailures = [...failures].filter((sessionId) => !completions.has(sessionId)).length;
+  const failureReasons = groupCounts(failedRows.map((row) => ({ ...row, failure_reason: row?.metadata?.failure_reason })), 'failure_reason');
   const viewed = rows.filter((row) => row.event_name === 'finance_application_step_viewed');
   const blocked = rows.filter((row) => row.event_name === 'finance_application_step_blocked');
 
@@ -87,6 +97,14 @@ export function buildFinanceApplicationFunnel(rows = []) {
     startRate: reaches.size ? starts.size / reaches.size : 0,
     completions: completions.size,
     conversionRate: starts.size ? completions.size / starts.size : 0,
+    // Unique applicant journeys (sessions) versus individual submissions (events).
+    submitAttempts: attempts.size,
+    submitFailures: failures.size,
+    submitAttemptEvents: attemptRows.length,
+    submitFailureEvents: failedRows.length,
+    completionEvents: rows.filter((row) => row.event_name === 'finance_application_completed').length,
+    unresolvedFailures,
+    failureReasons,
     steps,
     blockedDevices: groupCounts(blocked, 'device_category'),
     blockedBrowsers: groupCounts(blocked, 'browser_category'),
