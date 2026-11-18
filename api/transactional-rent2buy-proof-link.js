@@ -103,11 +103,11 @@ export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (request.method !== "POST") return response.status(405).json({ ok: false, message: "Method not allowed." });
   if (!authorize(request)) return response.status(401).json({ ok: false, message: "Proof-link email access denied." });
-  if (!process.env.SENDGRID_API_KEY) return response.status(500).json({ ok: false, message: "Proof-link email provider is not configured." });
+  if (!process.env.SENDGRID_API_KEY) return response.status(500).json({ ok: false, ambiguous: false, message: "Proof-link email provider is not configured." });
 
   let payload;
   try { payload = normalizePayload(parseBody(request)); }
-  catch (error) { return response.status(400).json({ ok: false, message: text(error?.message, 240) || "Proof-link email request is invalid." }); }
+  catch (error) { return response.status(400).json({ ok: false, ambiguous: false, message: text(error?.message, 240) || "Proof-link email request is invalid." }); }
 
   const email = renderEmail(payload);
   try {

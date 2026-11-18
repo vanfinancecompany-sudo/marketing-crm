@@ -169,6 +169,7 @@ export default async function handler(request, response) {
       crm_forwarded: 0,
       crm_forward_failed: 0,
     };
+    const pendingCrmEvents = new Set();
     for (const payload of payloads) {
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
         summary.unknown += 1;
@@ -194,20 +195,21 @@ export default async function handler(request, response) {
       // Providers retry the same event ID when the webhook fails. Queue it
       // even if recording the original event already succeeded on that attempt.
       if (await enqueueCrmEmailEvent(supabase, payload, event)) {
-        try {
-          const forwarded = await dispatchCrmEmailEvent(supabase, {
-            endpoint: process.env.MAIN_CRM_APPLICATION_EMAIL_EVENT_URL || undefined,
-            apiKey: process.env.MARKETING_CUSTOMER_DATABASE_API_KEY,
-          }, event.provider_event_id);
-          if (forwarded?.forwarded) summary.crm_forwarded += 1;
-          else if (forwarded) {
-            summary.crm_forward_failed += 1;
-            console.warn("APPLICATION RECEIVED EVENT FORWARD FAILED:", forwarded.reason);
-          }
-        } catch (error) {
-          summary.crm_forward_failed += 1;
-          console.warn("APPLICATION RECEIVED EVENT FORWARD FAILED:", error?.code || "forward_failed");
-        }
+        pendingCrmEvents.add(event.provider_event_id);
+      }
+    }
+    // Persist the whole batch first. The retry worker drains any overflow.
+    const deliveries = await Promise.allSettled([...pendingCrmEvents].slice(0, 8).map(key =>
+      dispatchCrmEmailEvent(supabase, {
+        endpoint: process.env.MAIN_CRM_APPLICATION_EMAIL_EVENT_URL || undefined,
+        apiKey: process.env.MARKETING_CUSTOMER_DATABASE_API_KEY,
+      }, key)));
+    for (const delivery of deliveries) {
+      if (delivery.value?.forwarded) {
+        summary.crm_forwarded += 1;
+      } else if (delivery.status === "rejected" || delivery.value) {
+        summary.crm_forward_failed += 1;
+        console.warn("CRM EMAIL EVENT FORWARD FAILED:", delivery.value?.reason || "forward_failed");
       }
     }
     return json(response, 200, { ok: true, ...summary });

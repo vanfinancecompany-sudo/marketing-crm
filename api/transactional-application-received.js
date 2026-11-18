@@ -28,7 +28,7 @@ export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (request.method !== "POST") return json(response, 405, { ok: false, message: "Method not allowed." });
   if (!authorize(request)) return json(response, 401, { ok: false, message: "Transactional email access denied." });
-  if (!process.env.SENDGRID_API_KEY) return json(response, 500, { ok: false, message: "SendGrid is not configured." });
+  if (!process.env.SENDGRID_API_KEY) return json(response, 500, { ok: false, ambiguous: false, message: "SendGrid is not configured." });
 
   const payload = normalizeApplicationReceivedPayload(parseBody(request));
   if (!payload.leadId) return json(response, 400, { ok: false, message: "Lead ID is required." });
