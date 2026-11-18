@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { isVanscoWebhookPayload, recordVanscoEmailEvent } from "../lib/vanscoEmailEvent.js";
-import { DEFAULT_MAIN_CRM_EVENT_URL, forwardApplicationReceivedCrmEvent } from "../lib/applicationReceivedEventForwarder.js";
+import { dispatchCrmEmailEvent, enqueueCrmEmailEvent } from "../lib/crmEmailEventOutbox.js";
 import {
   normalizeSendGridEvent,
   processSendGridEvent,
@@ -156,7 +156,8 @@ export default async function handler(request, response) {
     try { parsed = JSON.parse(rawBody.toString("utf8")); }
     catch { return json(response, 400, { ok: false, message: "SendGrid webhook body is not valid JSON." }); }
     const payloads = Array.isArray(parsed) ? parsed : [parsed];
-    const repository = createSendGridRepository(getSupabase());
+    const supabase = getSupabase();
+    const repository = createSendGridRepository(supabase);
     const summary = {
       received: payloads.length,
       recorded: 0,
@@ -190,22 +191,22 @@ export default async function handler(request, response) {
       if (result.suppressed) summary.suppressed += 1;
       if (event.event_type === "unknown") summary.unknown += 1;
 
-      if (!result.duplicate) {
+      // Providers retry the same event ID when the webhook fails. Queue it
+      // even if recording the original event already succeeded on that attempt.
+      if (await enqueueCrmEmailEvent(supabase, payload, event)) {
         try {
-          const forwarded = await forwardApplicationReceivedCrmEvent({
-            payload,
-            event,
-            endpoint: process.env.MAIN_CRM_APPLICATION_EMAIL_EVENT_URL || DEFAULT_MAIN_CRM_EVENT_URL,
+          const forwarded = await dispatchCrmEmailEvent(supabase, {
+            endpoint: process.env.MAIN_CRM_APPLICATION_EMAIL_EVENT_URL || undefined,
             apiKey: process.env.MARKETING_CUSTOMER_DATABASE_API_KEY,
-          });
-          if (forwarded.forwarded) summary.crm_forwarded += 1;
-          else if (!forwarded.skipped) {
+          }, event.provider_event_id);
+          if (forwarded?.forwarded) summary.crm_forwarded += 1;
+          else if (forwarded) {
             summary.crm_forward_failed += 1;
             console.warn("APPLICATION RECEIVED EVENT FORWARD FAILED:", forwarded.reason);
           }
         } catch (error) {
           summary.crm_forward_failed += 1;
-          console.warn("APPLICATION RECEIVED EVENT FORWARD FAILED:", error?.message || "forward_failed");
+          console.warn("APPLICATION RECEIVED EVENT FORWARD FAILED:", error?.code || "forward_failed");
         }
       }
     }

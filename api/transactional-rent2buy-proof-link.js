@@ -82,7 +82,10 @@ function normalizePayload(body = {}) {
     throw new Error("Upload link host is not allowed.");
   }
 
-  return { applicationRef, fullName, email, vehicle, uploadUrl: parsedUrl.toString() };
+  const candidate = text(body.proofDispatchId, 36);
+  const proofDispatchId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidate)
+    ? candidate : "";
+  return { applicationRef, fullName, email, vehicle, uploadUrl: parsedUrl.toString(), proofDispatchId };
 }
 
 export function renderEmail(payload) {
@@ -121,6 +124,7 @@ export default async function handler(request, response) {
       customArgs: {
         application_ref: payload.applicationRef,
         transactional_template: payload.emailType || "rent2buy-proof-link",
+        ...(payload.proofDispatchId ? { crm_proof_dispatch_id: payload.proofDispatchId } : {}),
       },
     });
     console.info("RENT2BUY PROOF LINK EMAIL ACCEPTED", { applicationRef: payload.applicationRef, providerMessageId: provider.messageId });

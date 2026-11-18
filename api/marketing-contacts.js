@@ -12,6 +12,7 @@ import {
   customerUpsert,
 } from "../lib/marketingCustomerUpsert.js";
 import { contactHasPermanentSuppression, normalizeEmailIdentity } from "../lib/customerDatabaseCleanse.js";
+import { processCrmContactReceipt } from "../lib/crmContactReceipt.js";
 
 const CONTACT_COLUMNS = "id,customer_id,first_name,last_name,company,email,email_normalized,phone,phone_normalized,postcode,pipeline,source,sources,tags,notes,marketing_status,lifecycle_status,lifecycle_changed_at,email_ready,sms_ready,facebook_ready,duplicate_count,suppression,suppression_history,first_seen_at,last_seen_at,created_at,updated_at";
 const PAGE_SIZE = 50;
@@ -510,6 +511,12 @@ export default async function handler(request, response) {
     const supabase = getSupabase();
     const body = parseBody(request);
     const action = body.action || "list";
+    const deliveryKey = request.headers["idempotency-key"];
+    if (action === "upsert" && typeof deliveryKey === "string" && deliveryKey.startsWith("crm-intake-")) {
+      const receipt = await processCrmContactReceipt(supabase, deliveryKey, body.values || {},
+        () => upsertContact(supabase, body));
+      return json(response, receipt.status, receipt.body);
+    }
     let result;
 
     if (action === "list") result = await listContacts(supabase, body);
@@ -525,6 +532,10 @@ export default async function handler(request, response) {
 
     json(response, 200, { ok: true, ...result });
   } catch (error) {
+    if (String(request.headers["idempotency-key"] || "").startsWith("crm-intake-")) {
+      console.error("CRM contact update requires reconciliation", error?.code || "update_unconfirmed");
+      return json(response, 503, { ok: false, message: "CRM contact update could not be confirmed." });
+    }
     json(response, 500, { ok: false, message: error?.message || "Customer Database API error." });
   }
 }
