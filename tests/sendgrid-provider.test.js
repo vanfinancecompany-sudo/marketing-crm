@@ -49,6 +49,26 @@ test("SendGrid provider failure is surfaced without treating it as accepted", as
   );
 });
 
+test("SendGrid timeouts and gateway failures are held for delivery reconciliation", async () => {
+  for (const status of [408, 429, 500, 502, 503, 504]) {
+    await assert.rejects(
+      sendSendGridEmail({
+        apiKey: "synthetic-provider-key",
+        to: "delivery@example.test",
+        subject: "Synthetic acknowledgement",
+        html: "<p>Synthetic test</p>",
+        fetchImpl: async () => new Response("", { status }),
+      }),
+      (error) => {
+        assert.ok(error instanceof SendGridProviderError);
+        assert.equal(error.providerStatusCode, status);
+        assert.equal(error.ambiguous, status !== 429);
+        return true;
+      },
+    );
+  }
+});
+
 test("controlled test recipient must exactly match one configured internal address", () => {
   assert.equal(
     allowedSendGridTestRecipient("safe@vanfinancecompany.co.uk", "safe@vanfinancecompany.co.uk"),
