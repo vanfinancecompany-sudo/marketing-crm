@@ -9,6 +9,10 @@
   "ignoreCommand": "test \"$VERCEL_PROJECT_ID\" = \"prj_zD76dAe2MHZdBTO08GNFSqOb9UHf\"",
   "crons": [
     {
+      "path": "/api/application-received-event-retry",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/stock-watch-monitor-agent",
       "schedule": "*/15 * * * *"
     },
@@ -90,6 +94,9 @@
     }
   ],
   "functions": {
+    "api/application-received-event-retry.js": {
+      "maxDuration": 30
+    },
     "api/stock-watch-monitor-agent.js": {
       "maxDuration": 60
     },

@@ -63,12 +63,13 @@ test("CRM forwarding uses the shared server key and remains best effort", async 
     apiKey: "shared-secret",
     fetchImpl: async (url, options) => {
       calls.push({ url, options });
-      return { ok: true, status: 200 };
+      return Response.json({ ok: true });
     },
   });
   assert.equal(ok.forwarded, true);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].options.headers["x-marketing-customer-database-key"], "shared-secret");
+  assert.equal(calls[0].options.redirect, "error");
   const body = JSON.parse(calls[0].options.body);
   assert.equal(body.event_type, "delivered");
   assert.equal(body.acknowledgement_send_id, "lead-123:attempt-2");
@@ -83,4 +84,21 @@ test("CRM forwarding uses the shared server key and remains best effort", async 
   assert.equal(failed.forwarded, false);
   assert.equal(failed.skipped, false);
   assert.equal(failed.reason, "crm_http_503");
+});
+
+test("delivery forwarding retains events when HTTP success has no CRM acknowledgement", async () => {
+  for (const response of [
+    new Response("<html>Wrong route</html>"),
+    new Response(null, { status: 204 }),
+    Response.json({ ok: false }),
+  ]) {
+    const result = await forwardApplicationReceivedCrmEvent({
+      payload: payload(),
+      event: event(),
+      endpoint: "https://crm.example.test/api/application-received-email-event",
+      apiKey: "synthetic-secret",
+      fetchImpl: async () => response,
+    });
+    assert.deepEqual(result, { forwarded: false, skipped: false, reason: "crm_receipt_unconfirmed" });
+  }
 });

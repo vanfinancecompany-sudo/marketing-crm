@@ -78,7 +78,7 @@ test('provider event is stored before forwarding and retried with the same dispa
   const options = { endpoint: 'https://isolated.example.test/events', apiKey:'synthetic',
     fetchImpl: async (url, input) => {
       calls.push({ url, body: JSON.parse(input.body) });
-      return { ok: calls.length > 1, status: calls.length > 1 ? 200 : 503 };
+      return calls.length > 1 ? Response.json({ ok: true }) : Response.json({ ok: false }, { status: 503 });
     }
   };
   assert.equal((await dispatchCrmEmailEvent(db, options, 'event-one')).forwarded, false);
