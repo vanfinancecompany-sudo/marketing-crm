@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { buildFinanceApplicationFunnel } from '../api/finance-application-funnel.js';
+import trackFinanceFunnel from '../api/track-finance-funnel.js';
 
 test('submission attempts, failures and the reconciliation queue are counted by unique session', () => {
   const funnel = buildFinanceApplicationFunnel([
@@ -27,13 +28,46 @@ test('submission attempts, failures and the reconciliation queue are counted by 
   assert.deepEqual(funnel.failureReasons.map((r) => r.name).sort(), ['network', 'timeout']);
 });
 
-test('funnel intake accepts only fixed failure categories, never upstream text', () => {
-  const endpoint = fs.readFileSync(new URL('../api/track-finance-funnel.js', import.meta.url), 'utf8');
-  assert.match(endpoint, /'finance_application_submit_attempted'/);
-  assert.match(endpoint, /'finance_application_submit_failed'/);
-  assert.match(endpoint, /FAILURE_REASONS = new Set\(\['timeout', 'network', 'unconfirmed', 'rejected', 'unavailable'\]\)/);
-  assert.match(endpoint, /cleanEnum\(body\.failureReason, FAILURE_REASONS\)/);
-  assert.doesNotMatch(endpoint, /body\.(?:error|message)/);
+test('funnel intake persists attempt and failure events without accepting upstream text', async (t) => {
+  const settings = { SUPABASE_URL: 'https://analytics.example.test', SUPABASE_SECRET_KEY: 'synthetic-key' };
+  for (const [name, value] of Object.entries(settings)) {
+    const previous = process.env[name];
+    process.env[name] = value;
+    t.after(() => { if (previous === undefined) delete process.env[name]; else process.env[name] = previous; });
+  }
+  const writes = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(String(url), 'https://analytics.example.test/rest/v1/rpc/ingest_site_analytics_event');
+    writes.push(JSON.parse(options.body));
+    return Response.json(null);
+  });
+  const origin = 'https://www.vanfinancecompany.co.uk';
+  const sessionId = randomUUID();
+  const visitorId = randomUUID();
+  async function submit(eventName, extra = {}) {
+    const headers = new Map();
+    let result;
+    const response = {
+      setHeader(name, value) { headers.set(name, value); },
+      end(body) { result = JSON.parse(body); },
+    };
+    await trackFinanceFunnel({
+      method: 'POST', headers: { origin },
+      body: { eventName, sessionId, visitorId, eventId: randomUUID(), ...extra },
+    }, response);
+    assert.equal(headers.get('Access-Control-Allow-Origin'), origin);
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(result, { ok: true, accepted: true });
+  }
+  await submit('finance_application_submit_attempted');
+  await submit('finance_application_submit_failed', { failureReason: 'timeout' });
+  await submit('finance_application_submit_failed', { failureReason: 'synthetic@example.test', message: 'synthetic upstream error' });
+  assert.deepEqual(writes.map(row => row.p_event_name), [
+    'finance_application_submit_attempted', 'finance_application_submit_failed', 'finance_application_submit_failed',
+  ]);
+  assert.deepEqual(writes.map(row => row.p_metadata.failure_reason), [undefined, 'timeout', 'unconfirmed']);
+  assert.equal(new Set(writes.map(row => row.p_event_id)).size, 3);
+  assert.doesNotMatch(JSON.stringify(writes), /synthetic@example\.test|synthetic upstream error/);
 });
 
 test('Rent2Buy starts count postcode checks, not page opens', async () => {
