@@ -32,3 +32,21 @@ test('funnel intake accepts only fixed failure categories, never upstream text',
   assert.match(endpoint, /cleanEnum\(body\.failureReason, FAILURE_REASONS\)/);
   assert.doesNotMatch(endpoint, /body\.(?:error|message)/);
 });
+
+test('Rent2Buy starts count postcode checks, not page opens', async () => {
+  const { applicationSessionCounts } = await import('../api/_live-application-completions.js');
+  const counts = applicationSessionCounts([
+    { session_id: 'a', event_name: 'rent2buy_full_application_opened' },
+    { session_id: 'b', event_name: 'rent2buy_full_application_opened' },
+    { session_id: 'b', event_name: 'rent2buy_postcode_fail' },
+    { session_id: 'c', event_name: 'rent2buy_full_application_opened' },
+    { session_id: 'c', event_name: 'rent2buy_postcode_pass' },
+    { session_id: 'c', event_name: 'rent2buy_application_completed' },
+  ], {
+    reachedEventName: 'rent2buy_full_application_opened',
+    startEventName: 'rent2buy_postcode_pass',
+    startEventNames: ['rent2buy_postcode_pass', 'rent2buy_postcode_fail', 'rent2buy_postcode_gate_reached'],
+    completionEventName: 'rent2buy_application_completed',
+  });
+  assert.deepEqual(counts, { reaches: 3, starts: 2, explicitStarts: 2, completions: 1 });
+});
