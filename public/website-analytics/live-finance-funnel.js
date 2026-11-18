@@ -67,7 +67,10 @@
       const submissions = document.createElement('p');
       submissions.className = 'live-finance-funnel__submissions';
       const unresolved = Number(latest.unresolvedFailures || 0);
-      submissions.textContent = `${latest.submitAttempts || 0} submitted · ${latest.submitFailures || 0} could not be confirmed`
+      const attemptEvents = Number(latest.submitAttemptEvents || 0);
+      submissions.textContent = `${latest.submitAttempts || 0} applicants submitted`
+        + (attemptEvents > Number(latest.submitAttempts || 0) ? ` (${attemptEvents} submissions incl. retries)` : '')
+        + ` · ${latest.submitFailures || 0} could not be confirmed`
         + (unresolved ? ` · ${unresolved} not completed afterwards — check for missing applications` : '');
       element.appendChild(submissions);
     }

@@ -21,6 +21,9 @@ test('submission attempts, failures and the reconciliation queue are counted by 
   assert.equal(funnel.submitFailures, 2);
   assert.equal(funnel.unresolvedFailures, 1);
   assert.equal(funnel.completions, 2);
+  assert.equal(funnel.submitAttemptEvents, 4);
+  assert.equal(funnel.submitFailureEvents, 2);
+  assert.equal(funnel.completionEvents, 3);
   assert.deepEqual(funnel.failureReasons.map((r) => r.name).sort(), ['network', 'timeout']);
 });
 

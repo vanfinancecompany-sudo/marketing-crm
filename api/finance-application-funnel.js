@@ -97,8 +97,12 @@ export function buildFinanceApplicationFunnel(rows = []) {
     startRate: reaches.size ? starts.size / reaches.size : 0,
     completions: completions.size,
     conversionRate: starts.size ? completions.size / starts.size : 0,
+    // Unique applicant journeys (sessions) versus individual submissions (events).
     submitAttempts: attempts.size,
     submitFailures: failures.size,
+    submitAttemptEvents: attemptRows.length,
+    submitFailureEvents: failedRows.length,
+    completionEvents: rows.filter((row) => row.event_name === 'finance_application_completed').length,
     unresolvedFailures,
     failureReasons,
     steps,
