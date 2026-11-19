@@ -40,6 +40,7 @@ export default async function handler(request, response) {
       apiKey: process.env.SENDGRID_API_KEY,
       to: payload.customerEmail,
       toName: payload.customerName,
+      ...(payload.applicationType === "rent2buy" ? { fromName: "Rent2Buy Vans" } : {}),
       subject: email.subject,
       html: email.html,
       categories: ["transactional", "application-received"],
