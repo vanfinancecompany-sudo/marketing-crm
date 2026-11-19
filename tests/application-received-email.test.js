@@ -118,3 +118,22 @@ test("Application Received escapes customer and vehicle content", () => {
   assert.doesNotMatch(email.html, /<script>/);
   assert.match(email.html, /Transit &lt;Limited&gt;/);
 });
+
+
+test("Rent2Buy acknowledgement has a secure upload CTA before the vehicle without changing finance", () => {
+  const payload = {application_type:"rent2buy",customer_name:"Mrs Alex Example",application_ref:"R2B-ABC123",vehicle:{title:"Example van",registration:"AB12CDE"}};
+  const email=renderApplicationReceivedEmail(payload,{});
+  assert.match(email.subject,/documents required/i);
+  assert.match(email.html,/Hi Alex,/);
+  assert.match(email.html,/https:\/\/www\.rent2buyvans\.co\.uk\/upload-your-documents/);
+  assert.match(email.html,/3 months’ full bank statements/);
+  assert.match(email.html,/2 proofs of your current address/);
+  assert.match(email.html,/Your driving licence/);
+  assert.match(email.html,/R2B-ABC123/);
+  assert.match(email.html,/separate email with your personal secure upload link/);
+  assert.ok(email.html.indexOf("Upload my documents securely") < email.html.indexOf("Example van"));
+  assert.doesNotMatch(email.html,/If we need any further information/);
+  const finance=renderApplicationReceivedEmail({...payload,application_type:"finance"},{});
+  assert.doesNotMatch(finance.html,/upload-your-documents|Action required|Complete your application/);
+  assert.match(finance.html,/If we need any further information/);
+});
