@@ -288,3 +288,37 @@ test("manual media browser flow uploads bytes only to Wix and offers explicit ma
   assert.match(source, /This saves the media choice only/i);
   assert.doesNotMatch(source, /supabase/i);
 });
+
+test("manual-only galleries complete on both van products when all DealerKit photos are excluded", () => {
+  const vfc = readyManual({ id: "manual-vfc", purpose: "van_finance_replacement", url: "https://static.wixstatic.com/media/manual-vfc.png", selected: true });
+  const r2b = readyManual({ id: "manual-r2b", purpose: "rent2buy_template", url: "https://static.wixstatic.com/media/manual-r2b.png", selected: true });
+  const order = ["__VFC_PRODUCT_IMAGES__", "dk-1", "__R2B_PRODUCT_IMAGES__", "dk-1"];
+  const input = {
+    vehicle: { registration: "BC24VDT", images: [{ id: "dk-1" }] },
+    decision: { financeEnabled: true, rent2buyEnabled: true, imageOrderIds: order, excludedImageIds: order },
+    importedDealerKitMedia: [],
+    manualMediaReadiness: { items: [vfc, r2b], selections: { van_finance_replacement: vfc, rent2buy_template: r2b } },
+  };
+  const sets = buildProductImageSets(input);
+  assert.deepEqual(sets.dealerKitImageIds, []);
+  assert.deepEqual(sets.missingDealerKitImageIds, []);
+  for (const [product, manual] of [[sets.vanFinance, vfc], [sets.rent2buy, r2b]]) {
+    assert.equal(product.ready, true);
+    assert.equal(product.galleryComplete, true);
+    assert.deepEqual(product.galleryUrls, [manual.url]);
+  }
+  const empty = buildProductImageSets({ ...input, manualMediaReadiness: {} });
+  assert.equal(empty.vanFinance.ready, false);
+  assert.equal(empty.vanFinance.galleryComplete, false);
+  assert.equal(empty.rent2buy.ready, false);
+  assert.equal(empty.rent2buy.galleryComplete, false);
+  const selected = { ...input, decision: { ...input.decision, excludedImageIds: [] } };
+  const missing = buildProductImageSets(selected);
+  assert.equal(missing.vanFinance.galleryComplete, false);
+  assert.equal(missing.rent2buy.galleryComplete, false);
+  const processing = buildProductImageSets({ ...selected, importedDealerKitMedia: [{ dealerKitImageId: "dk-1", wixUrl: "https://static.wixstatic.com/media/source.jpg", operationStatus: "PROCESSING", ready: false }] });
+  assert.equal(processing.vanFinance.ready, true);
+  assert.equal(processing.rent2buy.ready, true);
+  assert.equal(processing.vanFinance.galleryComplete, false);
+  assert.equal(processing.rent2buy.galleryComplete, false);
+});
