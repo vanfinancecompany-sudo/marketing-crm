@@ -277,3 +277,21 @@ test('car with disputed Wix cash price is blocked in future DealerKit publishing
  assert.equal(plan.canPublish,false);
  assert.ok(plan.blockers.some(b=>b.code==='pricing_review_hold'));
 });
+
+test("Cars can publish only user-uploaded photos with every DealerKit image excluded", () => {
+  const carVehicle = vehicle({ images: [{ id: "image-1" }, { id: "image-2" }] });
+  const reviewed = decision({ excludedImageIds: ["image-1", "image-2"], primaryImageId: null });
+  const url = "https://static.wixstatic.com/media/manual-car.png";
+  const secondary = "https://static.wixstatic.com/media/manual-car-2.png";
+  const { imageSet: manualOnly, media } = buildCarImageSet(carVehicle, reviewed, [], [
+    { id: "manual-1", selected: true, ready: true, url, carsGalleryOrder: 1 },
+    { id: "manual-2", selected: false, ready: true, url: secondary, carsGalleryOrder: 2 },
+  ]);
+  assert.equal(manualOnly.ready, true);
+  assert.equal(manualOnly.mainUrl, url);
+  assert.deepEqual(manualOnly.galleryUrls, [url, secondary]);
+  assert.deepEqual(media.missingDealerKitImageIds, []);
+  assert.equal(media.pendingManualMedia, 0);
+  assert.equal(buildDealerKitCarWixPlan({ vehicle: carVehicle, decision: reviewed, imageSet: manualOnly }).canPublish, true);
+  assert.equal(buildCarImageSet(carVehicle, reviewed, [], []).imageSet.ready, false);
+});
