@@ -11,7 +11,7 @@ const configuration = { siteId: "test-site" };
 const collectionIds = { finance: "VANFINANCEPAGES", rent2buy: "VANPAGES", cars: "CARPAGES" };
 const blockerCodes = { finance: "vfc_duplicate_existing", rent2buy: "rent2buy_existing_ambiguous", cars: "car_detail_ambiguous" };
 const live = { id: "live-vehicle", data: { title: registration, _publishStatus: "PUBLISHED", slug: "vehicle-lx73ycr", price: 18000, images: ["wix:image://photo"], spec: { make: "Ford" } } };
-const draft = { id: "draft-vehicle", data: { ...live.data, _publishStatus: "DRAFT" } };
+const draft = { id: "draft-vehicle", data: { ...live.data, _publishStatus: "DRAFT", _updatedDate: { $date: "2026-11-20T09:00:00.000Z" } } };
 const wait = async () => {};
 
 function fixture(product = "finance", items = [live, draft]) {
@@ -56,6 +56,8 @@ for (const product of ["finance", "rent2buy", "cars"]) {
           events.push("patch");
           assert.equal(path, "/wix-data/v2/items/" + draft.id);
           assert.equal(body.dataCollectionId, collectionIds[product]);
+          assert.deepEqual(body.publishPluginOptions, { includeDraftItems: true });
+          assert.deepEqual(body.condition, { filter: { title: { $eq: registration }, _publishStatus: { $eq: "DRAFT" }, _updatedDate: { $eq: draft.data._updatedDate } } });
           const [change] = body.patch.fieldModifications;
           assert.equal(change.fieldPath, "title");
           archived = { id: draft.id, data: { ...draft.data, title: change.setFieldOptions.value } };
