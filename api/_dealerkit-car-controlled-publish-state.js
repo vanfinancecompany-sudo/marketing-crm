@@ -90,8 +90,11 @@ export function buildCarImageSet(vehicle = {}, decision = {}, importedDealerKitM
   const primaryId = selectedIds.includes(decoded.finance.primaryId) ? decoded.finance.primaryId : selectedIds[0] || null;
   const importedById = new Map((importedDealerKitMedia || []).map((item) => [clean(item?.dealerKitImageId, 300), item]));
   const readyIds = selectedIds.filter((id) => importedById.get(id)?.ready && clean(importedById.get(id)?.wixUrl, 3000));
-  const unpreparedIds = selectedIds.filter((id) => !importedById.has(id));
-  const processingIds = selectedIds.filter((id) => importedById.has(id) && !importedById.get(id)?.ready);
+  const unpreparedIds = selectedIds.filter(id => {
+    const file = importedById.get(id);
+    return !file || ["FAILED", "ERROR", "UNVERIFIED"].includes(file.operationStatus);
+  });
+  const processingIds = selectedIds.filter(id => !unpreparedIds.includes(id) && !importedById.get(id)?.ready);
   const sourceMain = primaryId && importedById.get(primaryId)?.ready ? clean(importedById.get(primaryId)?.wixUrl, 3000) : null;
   const selectedManual = manualMedia.filter(item => item.selected);
   const manualPrimary = selectedManual.length === 1 && selectedManual[0].ready ? selectedManual[0].url : null;

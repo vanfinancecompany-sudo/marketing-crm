@@ -1,8 +1,10 @@
+import { acquireDealerKitPublishLease, blockDealerKitPreviewWrite } from "./_dealerkit-publish-safety.js";
+import { approveDealerKitRecovery, verifyPendingDealerKitRepairs } from "./_dealerkit-publish-recovery.js";
 import { normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
 import { carPublishConfirmationMatches } from "../lib/dealerKitCarWixPlan.js";
 import { wixItemPublishStatus } from "../lib/dealerKitControlledPublishPlan.js";
 import { ControlledPublishError, controlledWixCreateId, controlledWixRequest, queryControlledRegistrationItems } from "./_dealerkit-controlled-publish-state.js";
-import { setTargetPublishStatus } from "./dealerkit-controlled-publish.js";
+import { reconcileRecoverableTargets, setTargetPublishStatus } from "./dealerkit-controlled-publish.js";
 import { buildFreshCarControlledPublishState } from "./_dealerkit-car-controlled-publish-state.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
@@ -162,17 +164,26 @@ export default async function handler(request, response) {
   if (!authorised(request)) return response.status(401).json({ ok: false, message: "Marketing CRM access is required." });
   if (request.method !== "POST") return response.status(405).json({ ok: false, message: "Method not allowed." });
   const action = clean(request.body?.action, 100);
-  if (!["publish_new_car", "update_existing_car"].includes(action)) return response.status(400).json({ ok: false, message: "Controlled Cars publish action is not supported." });
+  if (action !== "approve_recovery" && !["publish_new_car", "update_existing_car"].includes(action)) return response.status(400).json({ ok: false, message: "Controlled Cars publish action is not supported." });
 
   const registration = normalizeFinanceRegistration(request.body?.registration || "");
   const confirmRegistration = normalizeFinanceRegistration(request.body?.confirmRegistration || "");
   if (!registration || registration !== confirmRegistration) return response.status(400).json({ ok: false, message: "Type the vehicle registration exactly to unlock Cars publishing." });
 
+  if (blockDealerKitPreviewWrite(request, response)) return;
+  let releaseLease;
   let state = null;
   const writes = [];
   const statusTransitions = [];
   try {
-    state = await buildFreshCarControlledPublishState(registration);
+    releaseLease = await acquireDealerKitPublishLease(registration);
+    const refresh = () => buildFreshCarControlledPublishState(registration);
+    state = await refresh();
+    if (action === "approve_recovery") {
+      const result = await approveDealerKitRecovery(state, "cars", request.body?.recoveryApproval, { refresh });
+      await releaseLease();
+      return response.status(200).json({ ok: true, ...result });
+    }
     const requestedIntent = action === "update_existing_car" ? "update_existing_vehicle" : "create_new_vehicle";
     if (state.plan.writeIntent !== requestedIntent) throw new ControlledPublishError(409, "The Cars Wix write intent changed during the final recheck. Rebuild the preview before continuing.", { expected: state.plan.writeIntent, requested: requestedIntent });
     if (!state.plan.canPublish) throw new ControlledPublishError(409, "The fresh DealerKit/Wix Cars state is not safe for reconciliation.", { blockers: state.plan.blockers });
@@ -181,6 +192,22 @@ export default async function handler(request, response) {
     const targets = orderedTargets(state.plan.targets);
     if (targets.length !== 2 || !targets.some((target) => target.collectionId === "CARFINANCE") || !targets.some((target) => target.collectionId === "CARPAGES")) {
       throw new ControlledPublishError(409, "The verified Cars write plan must contain exactly CARFINANCE and CARPAGES.");
+    }
+
+    if (request.body?.resumePartial === true) {
+      await verifyPendingDealerKitRepairs(state, "cars");
+      const outcome = await reconcileRecoverableTargets(state, registration, "cars", targets);
+      await releaseLease();
+      return response.status(200).json({
+        ok: true, published: true, verified: true, registration,
+        galleryComplete: !state.media?.missingDealerKitImageIds?.length && !state.media?.pendingManualMedia,
+        writeIntent: state.plan.writeIntent,
+        recordsWritten: outcome.writes.length,
+        recordsCreated: outcome.writes.filter(item => item.operation === "create").length,
+        recordsUpdated: outcome.writes.filter(item => item.operation === "update").length,
+        writes: outcome.writes, publishStatusTransitions: outcome.statusTransitions, verification: outcome.verification.results,
+        message: registration + " was reconciled and verified in Cars.",
+      });
     }
 
     for (const target of targets) writes.push(await applyTarget(state.configuration, target, registration));
@@ -205,6 +232,7 @@ export default async function handler(request, response) {
 
     const created = writes.filter((item) => item.operation === "create");
     const updated = writes.filter((item) => item.operation === "update");
+    await releaseLease();
     return response.status(200).json({
       ok: true,
       published: true,
@@ -228,17 +256,20 @@ export default async function handler(request, response) {
     const reportedRollback = error?.details?.rollback || rollback;
     const rollbackComplete = !writes.length || (reportedRollback.length === writes.length && reportedRollback.every((item) => item.rolledBack));
     const statusRollbackComplete = !statusTransitions.length || (statusRollback.length === statusTransitions.length && statusRollback.every((item) => item.rolledBack));
+    await releaseLease?.();
     return response.status(error?.status || 502).json({
       ok: false,
       published: false,
       registration,
-      writesBeforeFailure: writes,
+      writesBeforeFailure: error?.details?.writes || writes,
       rollback: reportedRollback,
-      publishStatusTransitions: statusTransitions,
+      publishStatusTransitions: error?.details?.statusTransitions || statusTransitions,
       publishStatusRollback: statusRollback,
       manualAttentionRequired: Boolean(error?.details?.manualAttentionRequired || error?.details?.publishStatusChangeUncertain || (writes.length > 0 && !rollbackComplete) || (statusTransitions.length > 0 && !statusRollbackComplete)),
       message: error?.message || "Controlled Cars reconciliation failed.",
       details: error?.details || null,
     });
+  } finally {
+    await releaseLease?.();
   }
 }

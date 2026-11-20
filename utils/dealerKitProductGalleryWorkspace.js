@@ -1,3 +1,4 @@
+import { retryTemporaryPublishOperation, uploadDealerKitWixPhoto } from "../lib/dealerKitPublishRecovery.js";
 import { orderCarsManualMedia } from "../lib/dealerKitWixManualMedia.js";
 import {
   buildMarketingAccessHeaders,
@@ -471,23 +472,19 @@ async function uploadQueuedPhotos(state, product) {
       const { file } = pending;
       setMessage(state, `Uploading ${file.name}…`);
       if (!pending.wixFileId) {
-        const prepared = await postManualMedia(state.registration, {
+        const prepared = await retryTemporaryPublishOperation(() => postManualMedia(state.registration, {
           action: "prepare_upload", purpose: PRODUCTS[product].purpose,
           fileName: file.name, mimeType: file.type, sizeInBytes: file.size,
-        }, "Could not prepare the Wix Media upload.");
-        const response = await fetch(prepared.uploadUrl, {
-          method: "PUT", headers: { "Content-Type": prepared.mimeType || file.type }, body: file,
-        });
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok || !result.file?.id) throw new Error(`Wix could not upload ${file.name} (HTTP ${response.status}).`);
+        }, "Could not prepare the Wix Media upload."));
+        const result = await uploadDealerKitWixPhoto(prepared, file);
         pending.wixFileId = result.file.id;
         pending.uploadReceipt = prepared.uploadReceipt;
       }
       if (!pending.media) {
-        const registered = await postManualMedia(state.registration, {
+        const registered = await retryTemporaryPublishOperation(() => postManualMedia(state.registration, {
           action: "register_upload", purpose: PRODUCTS[product].purpose,
           wixFileId: pending.wixFileId, uploadReceipt: pending.uploadReceipt,
-        }, "Could not register the uploaded image.");
+        }, "Could not register the uploaded image."));
         pending.media = registered.media;
       }
       if (pending === primary) {

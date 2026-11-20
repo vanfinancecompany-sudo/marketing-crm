@@ -1,3 +1,4 @@
+import { blockDealerKitPreviewWrite } from "./_dealerkit-publish-safety.js";
 import { getSupabaseServiceAdmin, normalizeRegistration } from "./_vansco-cache-utils.js";
 import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
 import {
@@ -53,6 +54,7 @@ export default async function handler(request, response) {
   }
 
   response.setHeader("Cache-Control", "no-store, max-age=0");
+  if (blockDealerKitPreviewWrite(request, response)) return;
   const supabase = getSupabaseServiceAdmin();
 
   if (request.method === "GET") {

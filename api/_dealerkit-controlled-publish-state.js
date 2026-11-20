@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { retryTemporaryPublishOperation } from "../lib/dealerKitPublishRecovery.js";
 import { fetchDealerKitStockDetail, fetchDealerKitStockSnapshot } from "./_dealerkit-stock-adapter.js";
 import { DEALERKIT_REVIEW_TABLE, rowToDealerKitReviewDecision } from "./_dealerkit-review-decisions.js";
 import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
@@ -67,11 +68,19 @@ export function isWixCmsItemLimit(payload = {}) {
   return /(?:item(?: count| storage)?|data storage) (?:limit|quota) (?:has been )?(?:reached|exceeded)|(?:limit|quota) (?:of|for) (?:the )?(?:maximum number of )?(?:data |collection )?items|maximum number of (?:data |collection )?items|(?:reached|exceeded) (?:the )?(?:cms |data )?(?:item(?: count)? (?:limit|quota)|(?:limit|quota) of [\d,]+ items)|(?:item count|data item) (?:limit|quota)\b/i.test(details);
 }
 
-export async function controlledWixRequest(configuration, path, { method = "POST", body, request = fetch } = {}) {
+export async function controlledWixRequest(configuration, path, options = {}) {
+  const method = options.method || "POST";
+  const readOnly = method === "GET" || (method === "POST" && path === "/wix-data/v2/items/query");
+  const run = () => sendControlledWixRequest(configuration, path, options);
+  return readOnly ? retryTemporaryPublishOperation(run) : run();
+}
+
+async function sendControlledWixRequest(configuration, path, { method = "POST", body, request = fetch } = {}) {
   let result;
   try {
     result = await request(`${configuration.apiBaseUrl}${path}`, {
       method,
+      signal: AbortSignal.timeout(8000),
       headers: {
         Authorization: configuration.apiKey,
         "wix-site-id": configuration.siteId,
@@ -88,7 +97,13 @@ export async function controlledWixRequest(configuration, path, { method = "POST
       throw new ControlledPublishError(409, WIX_CMS_ITEM_LIMIT_MESSAGE, { code: "wix_cms_item_limit", wixStatus: result.status });
     }
     const message = clean(payload?.message || payload?.details?.applicationError?.description || payload?.details?.validationError?.fieldViolations?.[0]?.description, 1000);
-    throw new ControlledPublishError(result.status === 401 || result.status === 403 ? 502 : result.status, message || `Wix returned status ${result.status}.`, { wixStatus: result.status, wixSiteId: configuration.siteId });
+    const retryAfter = result.headers?.get?.("retry-after");
+    const retryAfterMs = retryAfter && (Number.isFinite(Number(retryAfter))
+      ? Number(retryAfter) * 1000 : Math.max(0, new Date(retryAfter).getTime() - Date.now()));
+    throw new ControlledPublishError(result.status === 401 || result.status === 403 ? 502 : result.status, message || `Wix returned status ${result.status}.`, {
+      wixStatus: result.status, wixSiteId: configuration.siteId,
+      retryAfterMs: retryAfterMs || 0,
+    });
   }
   return payload;
 }
@@ -116,7 +131,7 @@ export async function assertDealerKitRegistrationUnambiguous(registration, { fet
 }
 
 // Listing and detail rows use the same canonical identity, including legacy spaced titles.
-export async function queryControlledRegistrationItems(configuration, collectionId, registration, { request = controlledWixRequest } = {}) {
+export async function queryControlledRegistrationItems(configuration, collectionId, registration, { request = controlledWixRequest, includeDraftItems = true } = {}) {
   const matched = new Map();
   const missingIdentity = [];
   const limit = 100;
@@ -125,8 +140,11 @@ export async function queryControlledRegistrationItems(configuration, collection
     while (true) {
       const payload = await request(configuration, "/wix-data/v2/items/query", {
         method: "POST",
-        body: { dataCollectionId: collectionId, query: { filter: { title: { $eq: candidate } }, paging: { limit, offset } }, consistentRead: true, publishPluginOptions: { includeDraftItems: true } },
+        body: { dataCollectionId: collectionId, query: { filter: { title: { $eq: candidate } }, paging: { limit, offset } }, consistentRead: true, publishPluginOptions: { includeDraftItems } },
       });
+      if (!Array.isArray(payload.dataItems) && payload.pagingMetadata?.count !== 0) {
+        throw new ControlledPublishError(502, "Wix returned an incomplete registration lookup for " + collectionId + ".");
+      }
       const items = Array.isArray(payload.dataItems) ? payload.dataItems : [];
       for (const item of items) {
         if (normalizeFinanceRegistration(item?.data?.title || "") !== registration) continue;

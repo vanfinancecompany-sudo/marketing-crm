@@ -1,3 +1,4 @@
+import { blockDealerKitPreviewWrite } from "./_dealerkit-publish-safety.js";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
 import {
@@ -383,6 +384,7 @@ export default async function handler(request, response) {
     return;
   }
 
+  if (blockDealerKitPreviewWrite(request, response)) return;
   const registration = normalizeFinanceRegistration(
     request.method === "GET" ? request.query?.registration : request.body?.registration,
   );

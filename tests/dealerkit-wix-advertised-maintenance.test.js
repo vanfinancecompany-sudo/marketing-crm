@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { queryControlledRegistrationItems, assertDealerKitRegistrationUnambiguous, ControlledPublishError } from "../api/_dealerkit-controlled-publish-state.js";
 import { buildCarImageSet } from "../api/_dealerkit-car-controlled-publish-state.js";
+import { blockDealerKitPreviewWrite } from "../api/_dealerkit-publish-safety.js";
 import { verifyWritten as verifyVans } from "../api/dealerkit-controlled-publish.js";
 import { verifyWritten as verifyCars } from "../api/dealerkit-car-controlled-publish.js";
 import { buildControlledVehiclePublishPlan } from "../lib/dealerKitControlledPublishPlan.js";
@@ -194,6 +195,7 @@ test("Cars moves the READY chosen primary to gallery index zero while preserving
 test("saving review only persists decisions and cannot publish stock", async () => {
   const calls = [];
   const handler = await loadHandler("api/dealerkit-review-decision.js", {
+    blockDealerKitPreviewWrite: (request, response) => blockDealerKitPreviewWrite(request, response, {}),
     process: { env: { MARKETING_CUSTOMER_DATABASE_API_KEY: "test-key" } },
     getSupabaseServiceAdmin: () => ({}),
     normalizeRegistration: (value) => value,

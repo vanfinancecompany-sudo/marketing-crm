@@ -1,4 +1,7 @@
+import { acquireDealerKitPublishLease, blockDealerKitPreviewWrite } from "./_dealerkit-publish-safety.js";
 import {currentActiveRent2BuyManualSpecial} from "../lib/rent2BuyCurrentManualSpecial.mjs";
+import { retryTemporaryPublishOperation, samePublishValue, temporaryPublishError } from "../lib/dealerKitPublishRecovery.js";
+import { approveDealerKitRecovery, claimDealerKitPublishStatus, recordPublishRecovery, verifyPendingDealerKitRepairs } from "./_dealerkit-publish-recovery.js";
 import { normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
 import { controlledPublishConfirmationMatches, wixItemPublishStatus } from "../lib/dealerKitControlledPublishPlan.js";
 import {
@@ -132,7 +135,7 @@ export async function setTargetPublishStatus(configuration, target, itemId, depe
 
   let payload;
   try {
-    payload = await request(configuration, "/cms/v1/tasks", {
+    payload = await retryTemporaryPublishOperation(() => request(configuration, "/cms/v1/tasks", {
       method: "POST",
       body: {
         task: {
@@ -145,9 +148,10 @@ export async function setTargetPublishStatus(configuration, target, itemId, depe
           },
         },
       },
-    });
+    }), { retry: error => error?.details?.wixStatus === 429, wait });
   } catch (error) {
-    throw new ControlledPublishError(error?.status || 502, `${target.collectionId} publish-status task could not be started safely.`, { ...(error?.details || {}), publishStatusChangeUncertain: true });
+    const rejected = [400, 401, 403, 404, 422, 429].includes(error?.details?.wixStatus);
+    throw new ControlledPublishError(error?.status || 502, `${target.collectionId} publish-status task could not be started safely.`, { ...(error?.details || {}), publishStatusChangeUncertain: !rejected });
   }
   const taskId = clean(payload?.task?.id, 300);
   if (!taskId) throw new ControlledPublishError(502, `${target.collectionId} did not return a Wix publish-status task ID.`, { publishStatusChangeUncertain: true });
@@ -382,22 +386,171 @@ export async function reconcileControlledTargets(state, registration, targets = 
   }
 }
 
+function fieldsMatch(actual = {}, expected = {}) {
+  return Object.entries(expected).every(([key, value]) => {
+    if (["mainImages", "mediaGallery"].includes(key) && Array.isArray(value)) {
+      return Array.isArray(actual[key]) && exactImageListMatch(actual[key], value);
+    }
+    if (["picture", "image", "addPicture", "additonalPicture"].includes(key) && value) {
+      return Boolean(wixImageIdentity(actual[key])) && wixImageIdentity(actual[key]) === wixImageIdentity(value);
+    }
+    return samePublishValue(actual[key], value);
+  });
+}
+
+function verifiedWrite(target, itemId, operation = "unchanged") {
+  return { operation, product: target.product, siteId: target.siteId, collectionId: target.collectionId, kind: target.kind, itemId };
+}
+
+// Submit is resumable. Wix is the checkpoint for a known item ID and reviewed
+// values. Legacy callers of reconcileControlledTargets retain their rollback
+// contract while the staff Submit path verifies and reuses completed work.
+export async function reconcileRecoverableTargets(state, registration, product, targets, {
+  query = queryControlledRegistrationItems,
+  write = applyTarget,
+  setStatus = setTargetPublishStatus,
+  audit = recordPublishRecovery,
+  claimStatus = claimDealerKitPublishStatus,
+  wait,
+} = {}) {
+  const writes = [];
+  const statusTransitions = [];
+  const identity = target => target.operation === "create"
+    ? controlledWixCreateId(configurationForTarget(state, target).siteId, target.collectionId, registration)
+    : target.itemId;
+  const operations = targets.map(target => ({ ...verifiedWrite(target, identity(target), target.operation), desiredPublishStatus: target.desiredPublishStatus }));
+  await audit(state, product, "publish_started", { operations });
+
+  const getItem = async (target, configuration, { readLive = false } = {}) => {
+    const items = await query(configuration, target.collectionId, registration, { includeDraftItems: !readLive });
+    if (items.length > 1 || (items.length === 1 && items[0].id !== identity(target))) {
+      throw new ControlledPublishError(409, target.collectionId + " changed during publishing. Submit again to review the current Wix records.", {
+        code: "dealerkit_publish_identity_changed",
+      });
+    }
+    return items[0];
+  };
+  const verifyStatus = async (target, configuration, item) => {
+    const desired = target.desiredPublishStatus;
+    if (!desired) return true;
+    const observed = wixItemPublishStatus(item);
+    // Some old collections omit the status field on a live item. Verify it
+    // through the independent published-only read in that case.
+    return observed ? observed === desired : desired === "PUBLISHED" && Boolean(await getItem(target, configuration, { readLive: true }));
+  };
+
+  try {
+    for (const target of targets.filter(item => item.operation !== "draft")) {
+      const configuration = configurationForTarget(state, target);
+      let attempted = false;
+      let retries = 0;
+      const outcome = await retryTemporaryPublishOperation(async attempt => {
+        retries = attempt;
+        const existing = await getItem(target, configuration);
+        if (existing && fieldsMatch(existing.data, target.data)) {
+          return verifiedWrite(target, existing.id, attempted ? target.operation : "unchanged");
+        }
+        if (target.operation === "create" ? existing : !existing || !Object.keys(target.data).every(key => samePublishValue(existing.data?.[key], target.previousData?.[key]))) {
+          throw new ControlledPublishError(409, target.collectionId + " was edited or removed during publishing. Submit again to review the current Wix record.", {
+            code: "dealerkit_publish_fields_changed",
+          });
+        }
+        attempted = true;
+        return write(configuration, target, registration);
+      }, {
+        wait,
+        retry: error => temporaryPublishError(error) || (target.operation === "create" && error?.details?.wixStatus === 409),
+      });
+      if (outcome.itemId !== identity(target)) throw new ControlledPublishError(502, "Wix returned an unexpected item ID for " + target.collectionId + ".", { manualAttentionRequired: true });
+      writes.push(outcome);
+      if (retries || outcome.operation === "create" || outcome.operation === "unchanged") {
+        await audit(state, product, "record_reconciled", { ...outcome, retries, requestedOperation: target.operation });
+      }
+    }
+
+    for (const target of targets.filter(item => item.publishStatusOperation)) {
+      const configuration = configurationForTarget(state, target);
+      const item = await getItem(target, configuration);
+      if (!item) throw new ControlledPublishError(502, "Wix could not find " + target.collectionId + " for status verification.");
+      if (await verifyStatus(target, configuration, item)) continue;
+      const details = { siteId: configuration.siteId, collectionId: target.collectionId, itemId: item.id, status: target.desiredPublishStatus };
+      const claim = await claimStatus(state, product, details);
+      let statusTask;
+      let recoveredResponse = false;
+      try {
+        statusTask = await setStatus(configuration, target, item.id);
+      } catch (error) {
+        if (!error?.details?.publishStatusChangeUncertain) {
+          await audit(state, product, "status_rejected", { ...details, taskId: error.details?.taskId || null, reason: error.message }, claim);
+          throw error;
+        }
+        await retryTemporaryPublishOperation(async () => {
+          const latest = await getItem(target, configuration);
+          if (!latest || !await verifyStatus(target, configuration, latest)) {
+            throw new ControlledPublishError(502, "Wix has not confirmed the status change.");
+          }
+        }, { wait }).catch(() => { throw error; });
+        statusTask = {
+          ...verifiedWrite(target, item.id, "publish_status"),
+          taskId: error.details.taskId || null,
+          action: target.desiredPublishStatus === "DRAFT" ? "draft" : "publish",
+          desiredPublishStatus: target.desiredPublishStatus,
+        };
+        recoveredResponse = true;
+      }
+      statusTransitions.push(statusTask);
+      await audit(state, product, "status_verified", { ...details, taskId: statusTask.taskId, recoveredResponse }, claim);
+    }
+
+    const verification = await retryTemporaryPublishOperation(async () => {
+      const results = await Promise.all(targets.map(async target => {
+        const configuration = configurationForTarget(state, target);
+        const item = await getItem(target, configuration);
+        const verified = Boolean(item && fieldsMatch(item.data, target.data) && await verifyStatus(target, configuration, item));
+        return { collectionId: target.collectionId, siteId: configuration.siteId, itemId: item?.id || null, verified };
+      }));
+      if (!results.every(result => result.verified)) {
+        throw new ControlledPublishError(502, "Wix could not verify the saved fields and publishing status.", { verification: { results } });
+      }
+      return { verified: true, results };
+    }, { wait });
+    await audit(state, product, "publish_verified", { writes, statusTransitions, verification });
+    return { writes: writes.filter(item => item.operation !== "unchanged"), statusTransitions, verification };
+  } catch (error) {
+    const manualAttentionRequired = Boolean(error.details?.publishStatusChangeUncertain || error.details?.manualAttentionRequired);
+    await audit(state, product, "publish_interrupted", { writes, statusTransitions, reason: error.message, manualAttentionRequired });
+    throw new ControlledPublishError(error.status || 502, error.message, {
+      ...error.details, writes, statusTransitions, manualAttentionRequired, resumable: !manualAttentionRequired,
+    });
+  }
+}
+
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (!authorised(request)) return response.status(401).json({ ok: false, message: "Marketing CRM access is required." });
   if (request.method !== "POST") return response.status(405).json({ ok: false, message: "Method not allowed." });
 
   const action = clean(request.body?.action, 100);
-  if (!["publish_new_vehicle", "update_existing_vehicle"].includes(action)) return response.status(400).json({ ok: false, message: "Controlled publish action is not supported." });
+  if (action !== "approve_recovery" && !["publish_new_vehicle", "update_existing_vehicle"].includes(action)) return response.status(400).json({ ok: false, message: "Controlled publish action is not supported." });
 
   const registration = normalizeFinanceRegistration(request.body?.registration || "");
   const confirmRegistration = normalizeFinanceRegistration(request.body?.confirmRegistration || "");
   if (!registration || registration !== confirmRegistration) return response.status(400).json({ ok: false, message: "Type the vehicle registration exactly to unlock new-vehicle publishing." });
 
+  if (blockDealerKitPreviewWrite(request, response)) return;
+  let releaseLease;
   let state = null;
   try {
     const productMode = ["finance", "rent2buy", "both"].includes(clean(request.body?.productMode, 30)) ? clean(request.body.productMode, 30) : undefined;
-    state = await buildFreshControlledPublishState(registration, process.env, { productMode });
+    releaseLease = await acquireDealerKitPublishLease(registration);
+    const refresh = () => buildFreshControlledPublishState(registration, process.env, { productMode });
+    state = await refresh();
+    if (action === "approve_recovery") {
+      if (!["finance", "rent2buy"].includes(productMode)) throw new ControlledPublishError(400, "Choose one website for the Wix repair.");
+      const result = await approveDealerKitRecovery(state, productMode, request.body?.recoveryApproval, { refresh });
+      await releaseLease();
+      return response.status(200).json({ ok: true, ...result });
+    }
     if(["rent2buy","both"].includes(state.plan.mode) && await currentActiveRent2BuyManualSpecial(registration))
       throw new ControlledPublishError(409,"Active manual Rent2Buy special: controlled Wix price publication is locked.");
     const requestedIntent = action === "update_existing_vehicle" ? "update_existing_vehicle" : "create_new_vehicle";
@@ -408,7 +561,11 @@ export default async function handler(request, response) {
     const targets = orderedTargets(state.plan.targets);
     if (!targets.length) throw new ControlledPublishError(409, "No verified Wix write targets are available.");
 
-    const outcome = await reconcileControlledTargets(state, registration, targets);
+    const resumable = request.body?.resumePartial === true && ["finance", "rent2buy"].includes(state.plan.mode);
+    if (resumable) await verifyPendingDealerKitRepairs(state, state.plan.mode);
+    const outcome = resumable
+      ? await reconcileRecoverableTargets(state, registration, state.plan.mode, targets)
+      : await reconcileControlledTargets(state, registration, targets);
     const { writes, statusTransitions, verification } = outcome;
 
     const created = writes.filter((item) => item.operation === "create");
@@ -422,6 +579,7 @@ export default async function handler(request, response) {
         : state.plan.mode === "both"
           ? Boolean(state.imageSets?.vanFinance?.galleryComplete && state.imageSets?.rent2buy?.galleryComplete)
           : true;
+    await releaseLease();
     response.status(200).json({
       ok: true,
       published: true,
@@ -450,6 +608,7 @@ export default async function handler(request, response) {
   } catch (error) {
     const reportedRollback = error?.details?.rollback || [];
     const writesBeforeFailure = error?.details?.writes || [];
+    await releaseLease?.();
     response.status(error?.status || 502).json({
       ok: false,
       published: false,
@@ -464,5 +623,7 @@ export default async function handler(request, response) {
         : error?.message || "Controlled Wix publishing failed.",
       details: error?.details || null,
     });
+  } finally {
+    await releaseLease?.();
   }
 }
