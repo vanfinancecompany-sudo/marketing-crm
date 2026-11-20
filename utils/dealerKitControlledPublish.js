@@ -1,3 +1,4 @@
+import { retryTemporaryPublishOperation } from "../lib/dealerKitPublishRecovery.js";
 import { dealerKitPublishedVehicleUrl, submitDealerKitVehicle } from "./dealerKitSubmitVehicle.js";
 import { buildMarketingAccessHeaders, parseMarketingJsonResponse } from "../services/marketingAccess.js";
 
@@ -297,6 +298,7 @@ function createPanel(registration, product = "finance") {
       const body = root.dataset.product === "cars"
         ? { action: updateExisting ? "update_existing_car" : "publish_new_car", registration, confirmRegistration: normaliseRegistration(input.value), confirmation: payload.plan.confirmation }
         : { action: updateExisting ? "update_existing_vehicle" : "publish_new_vehicle", registration, confirmRegistration: normaliseRegistration(input.value), productMode: root.dataset.product, confirmation: payload.plan.confirmation };
+      body.resumePartial = true;
       const response = await fetch(endpoint, {
         method: "POST",
         headers: buildMarketingAccessHeaders({ accept: "application/json", "content-type": "application/json" }),
@@ -373,6 +375,8 @@ async function publishingRequest(url, body) {
     if (blockers) error.message += " " + blockers;
     error.manualAttentionRequired = Boolean(payload.manualAttentionRequired || payload.details?.manualAttentionRequired);
     error.capacityReached = payload.details?.code === "wix_cms_item_limit";
+    error.details = payload.details;
+    error.status = response.status;
     throw error;
   });
   return data;
@@ -384,7 +388,9 @@ function addSubmit(root, registration, product) {
   const feedback = element("p", "");
   feedback.setAttribute("role", "status");
   const actions = element("div", "dealerkit-wix-preview__actions");
-  actions.append(button, feedback);
+  const recoveryPanel = element("section", "dealerkit-wix-preview__verdict dealerkit-wix-preview__recovery is-warning");
+  recoveryPanel.hidden = true;
+  actions.append(button, feedback, recoveryPanel);
   root.prepend(actions);
   const fallback = element("details", "");
   fallback.append(element("summary", "", "Manual publishing controls"));
@@ -410,11 +416,44 @@ function addSubmit(root, registration, product) {
     const locked = [gallery, reviewBody?.querySelector(".dealerkit-review__decisions")].filter(Boolean);
     locked.forEach(node => { node.inert = true; });
     let requiresReview = false;
+    const approve = recovery => new Promise(resolve => {
+      const confirm = element("button", "dealerkit-wix-preview__apply", "Approve Fix & Continue Publishing");
+      const cancel = element("button", "", "Cancel");
+      confirm.type = cancel.type = "button";
+      const observer = new MutationObserver(() => {
+        if (!isCurrent()) finish(false);
+      });
+      const finish = choice => {
+        observer.disconnect();
+        recoveryPanel.hidden = true;
+        recoveryPanel.replaceChildren();
+        resolve(choice);
+      };
+      feedback.textContent = "Approval required";
+      recoveryPanel.replaceChildren(
+        element("strong", "", recovery.website + " · " + recovery.registration),
+        element("p", "", recovery.problem),
+        element("p", "", recovery.recommendation),
+        element("p", "", recovery.retained),
+        element("p", "", recovery.modified),
+        element("p", "", recovery.removed),
+        element("p", "", "After the repair is verified, publishing continues with your saved review."),
+        confirm, cancel,
+      );
+      recoveryPanel.hidden = false;
+      confirm.addEventListener("click", () => finish(true), { once: true });
+      cancel.addEventListener("click", () => finish(false), { once: true });
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "data-product"] });
+      confirm.focus();
+    });
     try {
       const result = await submitDealerKitVehicle({
         save: gallery.savePublishingReview,
         upload: gallery.uploadPublishingPhotos,
-        read: () => publishingRequest(endpoint + "-preview" + query + "&product=" + encodeURIComponent(product)),
+        read: () => retryTemporaryPublishOperation(
+          () => publishingRequest(endpoint + "-preview" + query + "&product=" + encodeURIComponent(product)),
+          { retry: error => error instanceof TypeError, delays: [600] },
+        ),
         prepare: () => publishingRequest("/api/dealerkit-wix-prepare-media", request),
         publish: plan => publishingRequest(endpoint, {
           ...request,
@@ -422,7 +461,10 @@ function addSubmit(root, registration, product) {
             ? (product === "cars" ? "update_existing_car" : "update_existing_vehicle")
             : (product === "cars" ? "publish_new_car" : "publish_new_vehicle"),
           confirmation: plan.confirmation,
+          resumePartial: true,
         }),
+        approve,
+        repair: recovery => publishingRequest(endpoint, { ...request, action: "approve_recovery", recoveryApproval: recovery.approval }),
         status: message => { feedback.textContent = message + "…"; },
         isCurrent,
       });
@@ -439,11 +481,15 @@ function addSubmit(root, registration, product) {
       button.textContent = result.galleryComplete === false ? "Retry gallery" : "Submit updates";
     } catch (error) {
       requiresReview = Boolean(error.cause?.manualAttentionRequired);
-      feedback.textContent = error.message + (requiresReview ? " Reconcile the reported rollback issue before retrying." : "");
+      feedback.textContent = error.message;
+      if (error.cause?.details?.resumable) feedback.append(" Confirmed changes are retained. Submit again to verify and continue.");
+      if (error.cause?.capacityReached) {
+        feedback.append(" Existing adverts can still be updated when they need no new rows. A site administrator can increase the Wix CMS allowance or review retired records for separate approval.");
+      }
       button.textContent = requiresReview ? "Review required" : error.cause?.capacityReached ? "Retry after freeing CMS capacity" : "Retry";
     } finally {
       button.disabled = requiresReview;
-      fallback.hidden = false;
+      fallback.hidden = requiresReview;
       locked.forEach(node => { node.inert = false; });
     }
   });

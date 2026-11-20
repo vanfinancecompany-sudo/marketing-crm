@@ -161,6 +161,15 @@
   font-weight: 700;
 }
 
+.dealerkit-wix-preview__recovery {
+  flex: 1 0 100%;
+  overflow-wrap: anywhere;
+}
+
+.dealerkit-wix-preview__recovery button + button {
+  margin-inline-start: 8px;
+}
+
 .dealerkit-wix-preview__write-gate {
   display: grid;
   gap: 12px;

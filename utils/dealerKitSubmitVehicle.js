@@ -14,7 +14,7 @@ export function dealerKitPublishedVehicleUrl(product, registration) {
 }
 
 export async function submitDealerKitVehicle({
-  save, upload, read, prepare, publish, status, isCurrent,
+  save, upload, read, prepare, publish, status, isCurrent, approve, repair,
   wait = () => new Promise(resolve => setTimeout(resolve, 3000)),
 }) {
   const ensureCurrent = () => {
@@ -38,12 +38,37 @@ export async function submitDealerKitVehicle({
   };
   const describe = blockers => blockers.map(item => item.message || item.code).join(" ");
   let step = "Saving vehicle";
+  const checkRecovery = async (initial) => {
+    let state = initial;
+    const handled = new Set();
+    while (state.recovery && approve && repair) {
+      const recovery = state.recovery;
+      if (!recovery.approval) {
+        const error = new Error(recovery.problem + " " + recovery.explanation);
+        error.manualAttentionRequired = true;
+        throw error;
+      }
+      if (handled.has(recovery.approval)) throw new Error("Wix still reports the same duplicate after the repair.");
+      handled.add(recovery.approval);
+      if (!await approve(recovery)) throw new Error("Repair cancelled. Submit again to continue.");
+      ensureCurrent();
+      const previousStep = step;
+      step = "Applying and verifying approved repair";
+      status(step);
+      const result = await repair(recovery);
+      if (!result.verified) throw new Error("Wix did not verify the approved repair.");
+      ensureCurrent();
+      state = await read();
+      step = previousStep;
+    }
+    return state;
+  };
   try {
     status(step);
     ensureCurrent();
     await save();
     ensureCurrent();
-    let state = await read();
+    let state = await checkRecovery(await read());
     const blockers = nonMediaBlockers(state);
     if (blockers.length) throw new Error(describe(blockers));
     step = "Preparing photographs";
@@ -51,18 +76,18 @@ export async function submitDealerKitVehicle({
     ensureCurrent();
     await upload();
     ensureCurrent();
-    state = await read();
+    state = await checkRecovery(await read());
     if (nonMediaBlockers(state).length) throw new Error(describe(nonMediaBlockers(state)));
     if (state.media?.unpreparedDealerKitImageIds?.length) {
       await prepare();
       ensureCurrent();
-      state = await read();
+      state = await checkRecovery(await read());
     }
     for (let attempt = 0; attempt < 12 && !state.plan?.canPublish; attempt++) {
       if (nonMediaBlockers(state).length || !state.media?.processingDealerKitImageIds?.length) break;
       await wait();
       ensureCurrent();
-      state = await read();
+      state = await checkRecovery(await read());
     }
     if (!state.plan?.canPublish || !state.plan.confirmation) {
       throw new Error(describe(state.plan?.blockers || []) || "The publish plan is not ready. Check the primary photo and retry.");

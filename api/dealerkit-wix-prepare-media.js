@@ -1,3 +1,5 @@
+import { controlledWixRequest } from "./_dealerkit-controlled-publish-state.js";
+import { retryTemporaryPublishOperation } from "../lib/dealerKitPublishRecovery.js";
 import { controlledCarWixConfiguration } from "./_dealerkit-car-controlled-publish-state.js";
 import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
 import { DEALERKIT_REVIEW_TABLE, rowToDealerKitReviewDecision } from "./_dealerkit-review-decisions.js";
@@ -37,26 +39,6 @@ function wixConfiguration(environment = process.env) {
   return { apiKey, siteId, apiBaseUrl: clean(environment.WIX_API_BASE_URL, 1000) || "https://www.wixapis.com" };
 }
 
-async function wixRequest(configuration, path, { method = "GET", body } = {}) {
-  let result;
-  try {
-    result = await fetch(`${configuration.apiBaseUrl}${path}`, {
-      method,
-      headers: {
-        Authorization: configuration.apiKey,
-        "wix-site-id": configuration.siteId,
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
-  } catch {
-    throw new ApiError(502, "Wix Media could not be reached. No vehicle CMS rows were changed.");
-  }
-  const payload = await result.json().catch(() => ({}));
-  if (!result.ok) throw new ApiError(result.status === 401 || result.status === 403 ? 502 : result.status, clean(payload?.message, 1000) || `Wix Media returned ${result.status}.`);
-  return payload;
-}
-
 async function loadDecision(supabase, registration) {
   const { data, error } = await supabase.from(DEALERKIT_REVIEW_TABLE).select("*").eq("registration", registration).limit(2);
   if (error) throw new ApiError(502, `DealerKit review read failed: ${error.message || error}`);
@@ -73,13 +55,15 @@ async function loadMappings(supabase, supplierStockId, wixSiteId) {
 
 async function verifyExisting(configuration, row) {
   try {
-    const payload = await wixRequest(configuration, `${WIX_MEDIA_GET_FILE_URL}?fileId=${encodeURIComponent(row.wix_file_id)}`);
+    const payload = await controlledWixRequest(configuration, `${WIX_MEDIA_GET_FILE_URL}?fileId=${encodeURIComponent(row.wix_file_id)}`, { method: "GET" });
     const file = payload?.file;
-    if (!file?.id || clean(file.id, 500) !== clean(row.wix_file_id, 500)) return null;
-    if (clean(file.mediaType, 80).toUpperCase() !== "IMAGE") return null;
-    return file;
-  } catch {
-    return null;
+    if (!file?.id || clean(file.id, 500) !== clean(row.wix_file_id, 500) || clean(file.mediaType, 80).toUpperCase() !== "IMAGE") {
+      throw new ApiError(409, "The existing Wix Media file identity could not be verified.");
+    }
+    return ["FAILED", "ERROR"].includes(clean(file.operationStatus, 80).toUpperCase()) ? null : file;
+  } catch (error) {
+    if (error?.details?.wixStatus === 404) return null;
+    throw error;
   }
 }
 
@@ -109,7 +93,12 @@ async function prepareImages(supabase, configuration, vehicle, decision) {
     if (!wixFile) {
       const requestBody = { url: sourceImage.sourceUrl, displayName: sourceImage.proposedBaseName || `${vehicle.registration}-${sourceImage.position}` };
       if (sourceImage.sourceMimeType) requestBody.mimeType = sourceImage.sourceMimeType;
-      const imported = await wixRequest(configuration, WIX_MEDIA_IMPORT_URL, { method: "POST", body: requestBody });
+      // An explicit Wix rate-limit response means the import was rejected.
+      // With transport failures Wix may already have accepted the import.
+      const imported = await retryTemporaryPublishOperation(
+        () => controlledWixRequest(configuration, WIX_MEDIA_IMPORT_URL, { method: "POST", body: requestBody }),
+        { retry: error => error?.details?.wixStatus === 429 },
+      );
       wixFile = imported?.file;
       if (!wixFile?.id || !wixFile?.url) throw new ApiError(502, `Wix did not return a usable media identity for DealerKit image ${sourceImage.id}.`);
     }
