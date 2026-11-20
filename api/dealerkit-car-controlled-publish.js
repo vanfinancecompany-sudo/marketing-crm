@@ -1,3 +1,4 @@
+import { acquireDealerKitPublishLease, blockDealerKitPreviewWrite } from "./_dealerkit-publish-safety.js";
 import { approveDealerKitRecovery, verifyPendingDealerKitRepairs } from "./_dealerkit-publish-recovery.js";
 import { normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
 import { carPublishConfirmationMatches } from "../lib/dealerKitCarWixPlan.js";
@@ -169,14 +170,18 @@ export default async function handler(request, response) {
   const confirmRegistration = normalizeFinanceRegistration(request.body?.confirmRegistration || "");
   if (!registration || registration !== confirmRegistration) return response.status(400).json({ ok: false, message: "Type the vehicle registration exactly to unlock Cars publishing." });
 
+  if (blockDealerKitPreviewWrite(request, response)) return;
+  let releaseLease;
   let state = null;
   const writes = [];
   const statusTransitions = [];
   try {
+    releaseLease = await acquireDealerKitPublishLease(registration);
     const refresh = () => buildFreshCarControlledPublishState(registration);
     state = await refresh();
     if (action === "approve_recovery") {
       const result = await approveDealerKitRecovery(state, "cars", request.body?.recoveryApproval, { refresh });
+      await releaseLease();
       return response.status(200).json({ ok: true, ...result });
     }
     const requestedIntent = action === "update_existing_car" ? "update_existing_vehicle" : "create_new_vehicle";
@@ -192,6 +197,7 @@ export default async function handler(request, response) {
     if (request.body?.resumePartial === true) {
       await verifyPendingDealerKitRepairs(state, "cars");
       const outcome = await reconcileRecoverableTargets(state, registration, "cars", targets);
+      await releaseLease();
       return response.status(200).json({
         ok: true, published: true, verified: true, registration,
         galleryComplete: !state.media?.missingDealerKitImageIds?.length && !state.media?.pendingManualMedia,
@@ -226,6 +232,7 @@ export default async function handler(request, response) {
 
     const created = writes.filter((item) => item.operation === "create");
     const updated = writes.filter((item) => item.operation === "update");
+    await releaseLease();
     return response.status(200).json({
       ok: true,
       published: true,
@@ -249,6 +256,7 @@ export default async function handler(request, response) {
     const reportedRollback = error?.details?.rollback || rollback;
     const rollbackComplete = !writes.length || (reportedRollback.length === writes.length && reportedRollback.every((item) => item.rolledBack));
     const statusRollbackComplete = !statusTransitions.length || (statusRollback.length === statusTransitions.length && statusRollback.every((item) => item.rolledBack));
+    await releaseLease?.();
     return response.status(error?.status || 502).json({
       ok: false,
       published: false,
@@ -261,5 +269,7 @@ export default async function handler(request, response) {
       message: error?.message || "Controlled Cars reconciliation failed.",
       details: error?.details || null,
     });
+  } finally {
+    await releaseLease?.();
   }
 }

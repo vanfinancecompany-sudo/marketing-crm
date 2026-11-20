@@ -1,3 +1,4 @@
+import { acquireDealerKitPublishLease, blockDealerKitPreviewWrite } from "./_dealerkit-publish-safety.js";
 import { fetchDealerKitStockDetail } from "./_dealerkit-stock-adapter.js";
 import {
   DEALERKIT_REVIEW_TABLE,
@@ -198,6 +199,8 @@ export default async function handler(request, response) {
     return;
   }
 
+  if (blockDealerKitPreviewWrite(request, response)) return;
+  let releaseLease;
   let body = {};
   try {
     body = parseBody(request);
@@ -211,6 +214,7 @@ export default async function handler(request, response) {
       throw new ApiError(400, "Type the vehicle registration exactly to confirm this Wix update.");
     }
 
+    releaseLease = await acquireDealerKitPublishLease(registration);
     const { configuration, preview } = await buildFreshPreview(registration);
     if (!preview.canPublishLater) {
       throw new ApiError(409, "The fresh DealerKit/Wix safety preview is blocked. Nothing was changed.", {
@@ -236,6 +240,7 @@ export default async function handler(request, response) {
       verified,
     });
 
+    await releaseLease();
     response.status(200).json({
       ok: true,
       registration,
@@ -259,10 +264,13 @@ export default async function handler(request, response) {
       message: clean(error?.message, 1000),
       details: error?.details || null,
     });
+    await releaseLease?.();
     response.status(error?.status || 502).json({
       ok: false,
       message: error?.message || "Controlled Wix update failed.",
       details: error?.details || null,
     });
+  } finally {
+    await releaseLease?.();
   }
 }

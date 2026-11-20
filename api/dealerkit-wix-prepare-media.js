@@ -1,3 +1,4 @@
+import { acquireDealerKitPublishLease, blockDealerKitPreviewWrite } from "./_dealerkit-publish-safety.js";
 import { controlledWixRequest } from "./_dealerkit-controlled-publish-state.js";
 import { retryTemporaryPublishOperation } from "../lib/dealerKitPublishRecovery.js";
 import { controlledCarWixConfiguration } from "./_dealerkit-car-controlled-publish-state.js";
@@ -120,12 +121,15 @@ export default async function handler(request, response) {
   if (!authorised(request)) return response.status(401).json({ ok: false, message: "Marketing CRM access is required." });
   if (request.method !== "POST") return response.status(405).json({ ok: false, message: "Method not allowed." });
 
+  if (blockDealerKitPreviewWrite(request, response)) return;
+  let releaseLease;
   try {
     const registration = normalizeFinanceRegistration(request.body?.registration || "");
     const confirmRegistration = normalizeFinanceRegistration(request.body?.confirmRegistration || "");
     if (!registration || registration !== confirmRegistration) throw new ApiError(400, "Type the vehicle registration exactly to prepare its Wix images.");
 
     const supabase = getSupabaseServiceAdmin();
+    releaseLease = await acquireDealerKitPublishLease(registration, supabase);
     const decision = await loadDecision(supabase, registration);
     const productMode = clean(request.body?.productMode, 30);
     const effectiveDecision = {
@@ -141,6 +145,7 @@ export default async function handler(request, response) {
     const configuration = productMode === "cars" ? controlledCarWixConfiguration() : wixConfiguration();
     const prepared = await prepareImages(supabase, configuration, vehicle, effectiveDecision);
 
+    await releaseLease();
     response.status(200).json({
       ok: true,
       registration,
@@ -155,6 +160,9 @@ export default async function handler(request, response) {
         : `Prepared ${prepared.images.length} DealerKit image(s) in Wix Media. Some secondary photos are still processing; once the chosen primary is READY, the advert can publish with the READY photos.`,
     });
   } catch (error) {
+    await releaseLease?.();
     response.status(error?.status || 502).json({ ok: false, cmsWritesAttempted: false, message: error?.message || "Could not prepare DealerKit images.", details: error?.details || null });
+  } finally {
+    await releaseLease?.();
   }
 }

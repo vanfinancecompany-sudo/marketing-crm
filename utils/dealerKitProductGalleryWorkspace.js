@@ -1,4 +1,4 @@
-import { retryTemporaryPublishOperation } from "../lib/dealerKitPublishRecovery.js";
+import { retryTemporaryPublishOperation, uploadDealerKitWixPhoto } from "../lib/dealerKitPublishRecovery.js";
 import { orderCarsManualMedia } from "../lib/dealerKitWixManualMedia.js";
 import {
   buildMarketingAccessHeaders,
@@ -476,19 +476,7 @@ async function uploadQueuedPhotos(state, product) {
           action: "prepare_upload", purpose: PRODUCTS[product].purpose,
           fileName: file.name, mimeType: file.type, sizeInBytes: file.size,
         }, "Could not prepare the Wix Media upload."));
-        const result = await retryTemporaryPublishOperation(async () => {
-          const response = await fetch(prepared.uploadUrl, {
-            method: "PUT", headers: { "Content-Type": prepared.mimeType || file.type }, body: file,
-          });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok || !payload.file?.id) {
-            const error = new Error(`Wix could not confirm the upload of ${file.name} (HTTP ${response.status}).`);
-            error.status = response.status;
-            error.details = { retryAfterMs: Number(response.headers.get("retry-after")) * 1000 || 0 };
-            throw error;
-          }
-          return payload;
-        }, { retry: error => error.status === 429 });
+        const result = await uploadDealerKitWixPhoto(prepared, file);
         pending.wixFileId = result.file.id;
         pending.uploadReceipt = prepared.uploadReceipt;
       }

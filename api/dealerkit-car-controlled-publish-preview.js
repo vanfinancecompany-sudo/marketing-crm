@@ -1,3 +1,4 @@
+import { isDealerKitPreview } from "./_dealerkit-publish-safety.js";
 import { dealerKitRecoverySummary } from "./_dealerkit-publish-recovery.js";
 import { normalizeFinanceRegistration } from "../lib/vanscoWixPrice.js";
 import { buildFreshCarControlledPublishState } from "./_dealerkit-car-controlled-publish-state.js";
@@ -27,6 +28,7 @@ export default async function handler(request, response) {
       registration: state.registration,
       plan: state.plan,
       recovery: dealerKitRecoverySummary(state),
+      publishingDisabled: isDealerKitPreview(),
       media: state.media,
     });
   } catch (error) {

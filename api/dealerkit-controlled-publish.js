@@ -1,3 +1,4 @@
+import { acquireDealerKitPublishLease, blockDealerKitPreviewWrite } from "./_dealerkit-publish-safety.js";
 import {currentActiveRent2BuyManualSpecial} from "../lib/rent2BuyCurrentManualSpecial.mjs";
 import { retryTemporaryPublishOperation, samePublishValue, temporaryPublishError } from "../lib/dealerKitPublishRecovery.js";
 import { approveDealerKitRecovery, claimDealerKitPublishStatus, recordPublishRecovery, verifyPendingDealerKitRepairs } from "./_dealerkit-publish-recovery.js";
@@ -536,14 +537,18 @@ export default async function handler(request, response) {
   const confirmRegistration = normalizeFinanceRegistration(request.body?.confirmRegistration || "");
   if (!registration || registration !== confirmRegistration) return response.status(400).json({ ok: false, message: "Type the vehicle registration exactly to unlock new-vehicle publishing." });
 
+  if (blockDealerKitPreviewWrite(request, response)) return;
+  let releaseLease;
   let state = null;
   try {
     const productMode = ["finance", "rent2buy", "both"].includes(clean(request.body?.productMode, 30)) ? clean(request.body.productMode, 30) : undefined;
+    releaseLease = await acquireDealerKitPublishLease(registration);
     const refresh = () => buildFreshControlledPublishState(registration, process.env, { productMode });
     state = await refresh();
     if (action === "approve_recovery") {
       if (!["finance", "rent2buy"].includes(productMode)) throw new ControlledPublishError(400, "Choose one website for the Wix repair.");
       const result = await approveDealerKitRecovery(state, productMode, request.body?.recoveryApproval, { refresh });
+      await releaseLease();
       return response.status(200).json({ ok: true, ...result });
     }
     if(["rent2buy","both"].includes(state.plan.mode) && await currentActiveRent2BuyManualSpecial(registration))
@@ -574,6 +579,7 @@ export default async function handler(request, response) {
         : state.plan.mode === "both"
           ? Boolean(state.imageSets?.vanFinance?.galleryComplete && state.imageSets?.rent2buy?.galleryComplete)
           : true;
+    await releaseLease();
     response.status(200).json({
       ok: true,
       published: true,
@@ -602,6 +608,7 @@ export default async function handler(request, response) {
   } catch (error) {
     const reportedRollback = error?.details?.rollback || [];
     const writesBeforeFailure = error?.details?.writes || [];
+    await releaseLease?.();
     response.status(error?.status || 502).json({
       ok: false,
       published: false,
@@ -616,5 +623,7 @@ export default async function handler(request, response) {
         : error?.message || "Controlled Wix publishing failed.",
       details: error?.details || null,
     });
+  } finally {
+    await releaseLease?.();
   }
 }

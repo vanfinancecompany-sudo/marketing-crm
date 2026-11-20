@@ -187,6 +187,7 @@ async function loadPreview(root, { force = false } = {}) {
   if (root._controlledPreviewRequestId !== requestId) return;
   if (root.dataset.publishCompleted === "true" && !force) return;
   renderPayload(root, payload);
+  if (payload.publishingDisabled) root._showReadOnlyRecovery?.(payload.recovery);
 }
 
 function createPanel(registration, product = "finance") {
@@ -396,6 +397,26 @@ function addSubmit(root, registration, product) {
   fallback.append(element("summary", "", "Manual publishing controls"));
   while (actions.nextSibling) fallback.appendChild(actions.nextSibling);
   root.append(fallback);
+  const displayRecovery = (recovery, ...controls) => {
+    recoveryPanel.replaceChildren(
+      element("strong", "", recovery.website + " · " + recovery.registration),
+      ...[recovery.problem, recovery.explanation, recovery.recommendation, recovery.retained, recovery.modified, recovery.removed]
+        .filter(Boolean).map(text => element("p", "", text)),
+      ...controls,
+    );
+    recoveryPanel.hidden = false;
+  };
+  root._showReadOnlyRecovery = recovery => {
+    button.disabled = true;
+    fallback.open = false;
+    fallback.hidden = true;
+    feedback.textContent = "DealerKit publishing is read-only in this Preview.";
+    if (!recovery) return;
+    const approvalButton = element("button", "dealerkit-wix-preview__apply", "Approve Fix & Continue Publishing");
+    approvalButton.disabled = true;
+    approvalButton.type = "button";
+    displayRecovery(recovery, ...(recovery.approval ? [approvalButton] : []));
+  };
   const query = "?registration=" + encodeURIComponent(registration);
   const endpoint = product === "cars" ? "/api/dealerkit-car-controlled-publish" : "/api/dealerkit-controlled-publish";
   const request = { registration, confirmRegistration: registration, productMode: product };
@@ -430,17 +451,10 @@ function addSubmit(root, registration, product) {
         resolve(choice);
       };
       feedback.textContent = "Approval required";
-      recoveryPanel.replaceChildren(
-        element("strong", "", recovery.website + " · " + recovery.registration),
-        element("p", "", recovery.problem),
-        element("p", "", recovery.recommendation),
-        element("p", "", recovery.retained),
-        element("p", "", recovery.modified),
-        element("p", "", recovery.removed),
+      displayRecovery(recovery,
         element("p", "", "After the repair is verified, publishing continues with your saved review."),
         confirm, cancel,
       );
-      recoveryPanel.hidden = false;
       confirm.addEventListener("click", () => finish(true), { once: true });
       cancel.addEventListener("click", () => finish(false), { once: true });
       observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "data-product"] });
