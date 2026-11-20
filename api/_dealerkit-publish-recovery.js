@@ -264,6 +264,12 @@ export async function approveDealerKitRecovery(state, product, approval, {
       await request(configuration, "/wix-data/v2/items/" + encodeURIComponent(draft.id), {
         method: "PATCH", body: {
           dataCollectionId: collectionId,
+          publishPluginOptions: { includeDraftItems: true },
+          condition: { filter: {
+            title: { $eq: draft.data.title },
+            _publishStatus: { $eq: "DRAFT" },
+            ...(draft.data._updatedDate ? { _updatedDate: { $eq: draft.data._updatedDate } } : {}),
+          } },
           patch: { dataItemId: draft.id, fieldModifications: [
             { fieldPath: "title", action: "SET_FIELD", setFieldOptions: { value: archivedTitle } },
           ] },
