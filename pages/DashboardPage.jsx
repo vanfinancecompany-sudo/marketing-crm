@@ -24,6 +24,7 @@ import {
 import AIVisibilityWidget from "../components/AIVisibilityWidget.jsx";
 import Ga4PipelinePanel from "../components/Ga4PipelinePanel.jsx";
 import { groupContentOperationsMetrics } from "../lib/contentOperationsBrandGroups.js";
+import { applyRealisticReelCardGoal } from "../lib/contentOperationsCardGoals.js";
 
 const WEEKDAYS = [
   "Sunday",
@@ -793,7 +794,9 @@ export default function DashboardPage({ onNavigate }) {
       .map((type) => live.get(type) || overview?.day?.metrics?.[type])
       .filter(Boolean)
       .map((metric) => {
-        if (metric.type !== "vansco_emails_sent") return metric;
+        if (metric.type !== "vansco_emails_sent") {
+          return applyRealisticReelCardGoal(metric, { offDay: Boolean(overview?.day?.off_day) });
+        }
         const completed = vanscoEmailToday ?? metric.completed;
         return {
           ...metric,
@@ -1204,6 +1207,11 @@ export default function DashboardPage({ onNavigate }) {
       <details className="operations-drawer">
         <summary>EDIT DAILY TARGETS</summary>
         <div className="operations-drawer__body">
+          <p style={{ color: "#52657f", fontSize: 12 }}>
+            These are the scheduling targets used by Buffer automation. Three Reel cards display
+            separate, realistic daily progress goals. Changing the targets here can also change
+            automatic posting volumes.
+          </p>
           <div className="field-grid">
             <label className="field">
               <span className="field__label">Targets effective from</span>
