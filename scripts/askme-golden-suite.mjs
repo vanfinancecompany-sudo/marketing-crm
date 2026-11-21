@@ -10,7 +10,7 @@ const BASE = (process.env.ASKME_BASE_URL || "").replace(/\/$/, "");
 const SHARE = process.env.ASKME_SHARE_URL || "";
 const ENGINES = (process.env.ASKME_ENGINES || "lean,legacy").split(",");
 const PACE_MS = Number(process.env.ASKME_PACE_MS || 4300); // CRM limit: 15 requests/minute per IP
-const SUITE = process.env.ASKME_SUITE || "all"; // golden | knowledge | all | review
+const SUITE = process.env.ASKME_SUITE || "all"; // golden | knowledge | all | review | conversation
 const CASE_IDS = (process.env.ASKME_CASES || "").split(",").filter(Boolean);
 if (!BASE) { console.error("Set ASKME_BASE_URL"); process.exit(2); }
 
@@ -77,6 +77,37 @@ const KNOWLEDGE_CASES = [
   ["K16", "not in knowledge 2", r2bGeneral, ["Can I pay the monthly rental in Bitcoin?"], [/\b(?:team|confirm|check|don.t|not)\b/i], [PROMISE], null, 0],
 ];
 
+// Multi-turn customer journeys: same session, added requirements and corrections.
+// Run with ASKME_SUITE=conversation and ASKME_ENGINES=lean.
+const CONVERSATION_CASES = [
+  ["C1", "VFC natural van-finding", financeGeneral, [
+    "Can you help me find a van for plumbing work?",
+    "It must be automatic.",
+    "I can spend around £400 a month.",
+    "I'll need to carry ladders and tools as well.",
+    "Okay, what should I do next?"
+  ], [/van|vehicle|stock|browse|ladder|carry|load|size|use|work/i], [REFUSAL, PROMISE], null, 0],
+  ["C2", "VFC corrects gearbox requirement", financeGeneral, [
+    "I'm looking for a manual Transit for furniture deliveries.",
+    "Actually, I've changed my mind. It must be automatic.",
+    "My business has only been trading for a few months.",
+    "Can I still apply?",
+    "What gearbox did I say I needed?"
+  ], [/automatic/i], [/you (?:said|wanted|need) manual/i, PROMISE], null, 0],
+  ["C3", "Rent2Buy topics across five turns", r2bGeneral, [
+    "I'm self-employed and thinking about Rent2Buy.",
+    "What documents would you need from me?",
+    "Would there be a credit check?",
+    "What if I wanted to finish the agreement early?",
+    "And do I need insurance before collection?"
+  ], [/insur/i], [PROMISE, /\blenders?\b|\bAPR\b/i], null, 1],
+  ["C4", "Rent2Buy reservation payment versus rental", r2bVehicle, [
+    "How much is this one per month?",
+    "What is the £200 vehicle reservation payment?",
+    "Is that separate from the initial rental?"
+  ], [/separate|different|not (?:the )?same|in addition/i, /reservation|holding deposit|£200/i], [PROMISE, /£525.*£2,190|£2,190.*£525/], null, 0],
+];
+
 // Extra natural phrasing and release-gate scenarios. Run separately from the 36 cases.
 const REVIEW_CASES = [
   ["I1", "warranty reference on a vehicle page", financeVan, ["Do your vans come with a warranty?", "Does that include the gearbox?"], [GEARBOX_COVER], [PROMISE, /manual gearbox/i], null, 1],
@@ -111,7 +142,7 @@ async function call(origin, body) {
 await authorise();
 const results = [];
 for (const engine of ENGINES) {
-  const cases = SUITE === "review" ? REVIEW_CASES : [...(SUITE === "knowledge" ? [] : CASES), ...(SUITE === "golden" ? [] : KNOWLEDGE_CASES)];
+  const cases = SUITE === "conversation" ? CONVERSATION_CASES : SUITE === "review" ? REVIEW_CASES : [...(SUITE === "knowledge" ? [] : CASES), ...(SUITE === "golden" ? [] : KNOWLEDGE_CASES)];
   for (const [id, group, context, messages, required, forbidden, action, minPassages = 0] of cases.filter(([id]) => !CASE_IDS.length || CASE_IDS.includes(id))) {
     const visitor = `askme-test-golden-${engine}`;
     const start = await call(context.origin, { action: "start", page_context: context.page, analytics_visitor_id: visitor, askme_engine: engine });
