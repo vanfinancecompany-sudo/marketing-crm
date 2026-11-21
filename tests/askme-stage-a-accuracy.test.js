@@ -201,3 +201,13 @@ test("spec answers name a car as a car and use the right article", () => {
   assert.match(reply, /this car/i);
   assert.match(reply, /an automatic gearbox/);
 });
+
+test("owner-approved early Rent2Buy return terms are included in verified facts", async () => {
+  const { businessFactsText } = await import("../lib/askme/businessFacts.js");
+  const text = businessFactsText("rent2buy");
+  assert.match(text, /14 days/i);
+  assert.match(text, /no early-termination penalty/i);
+  assert.match(text, /account is fully up to date/i);
+  assert.match(text, /initial rental is non-refundable/i);
+  assert.doesNotMatch(businessFactsText("finance"), /14 days/i);
+});
