@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
-import { simulateCustomerConversation } from "./marketing-ai-assistant-competence.js";
+import { loadKnowledge, simulateCustomerConversation } from "./marketing-ai-assistant-competence.js";
+import { retrieveKnowledge } from "../lib/askme/knowledgeRetrieval.js";
 import { isExplicitProductComparison } from "../lib/aiAssistantCompetence.js";
 import {
   createPublicConversationId,
@@ -313,6 +314,15 @@ async function continueWithLeanEngine({ supabase, body, environment, session, hi
     environment,
     links: website.links[productLock] || {},
     requestReply: dependencies.leanRequestReply,
+    retrieve: dependencies.leanRetrieve || ((input) => retrieveKnowledge(input, {
+      environment,
+      loadKnowledge: () => loadKnowledge(supabase),
+      loadBusinessPages: async () => {
+        const result = await supabase.from("knowledge_business_pages").select("title,url,product,description,keywords,customer_intent,priority,active").eq("active", true);
+        if (result.error) throw new Error(result.error.message);
+        return result.data || [];
+      },
+    })),
   });
   const persistStart = performance.now();
   // Session persistence stays on the critical path (conversation continuity); the

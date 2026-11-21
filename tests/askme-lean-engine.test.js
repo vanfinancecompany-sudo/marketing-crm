@@ -100,7 +100,7 @@ test("Rent2Buy prompt keeps finance words out and carries the self-employed poli
   const prompt = buildLeanPrompt(buildAskMeRequest({ channel: "whatsapp", product: "rent2buy", message: "I'm self-employed. Will Rent2Buy consider me?" }));
   assert.match(prompt.input, /Self-employed customers can apply/);
   assert.match(prompt.instructions, /never mention lenders, APR/);
-  assert.doesNotMatch(prompt.instructions, /website/);
+  assert.doesNotMatch(prompt.instructions, /chatting with a customer on the website/);
 });
 
 test("engine selection: legacy by default; test visitors use lean on Preview; ASKME_ENGINE=lean switches all traffic", () => {

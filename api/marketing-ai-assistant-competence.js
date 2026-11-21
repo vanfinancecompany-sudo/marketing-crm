@@ -174,7 +174,7 @@ const CONVERSATION_REPLY_SCHEMA = {
   },
 };
 
-async function loadKnowledge(supabase) {
+export async function loadKnowledge(supabase) {
   const [settings, sections, articles] = await Promise.all([
     runStage("Load knowledge settings", {}, async () => data(await supabase.from("knowledge_settings").select("*").eq("settings_key", "default").maybeSingle(), "Knowledge settings could not be loaded.") || {}),
     runStage("Load Business Brain", {}, async () => data(await supabase.from("knowledge_business_sections").select("*").eq("active", true).order("sort_order", { ascending: true }), "Business Brain could not be loaded.") || []),
