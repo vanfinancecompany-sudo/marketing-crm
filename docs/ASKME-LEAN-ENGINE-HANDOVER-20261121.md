@@ -229,3 +229,38 @@ Additional read-only checks: the current hosted VFC and standalone Rent2Buy prot
 The latest source includes `FIXED_CHARGE_QUESTION` routing to business facts even when a verified calculator quote is present, and the regression tests in `tests/askme-stage-a-accuracy.test.js` cover the £200 reservation payment and holding deposit wording. Codex reported 50 focused tests passing after this fix. **Those targeted tests and source inspection are not the same as a hosted interactive rerun of the payment question.**
 
 **Open release gates:** (1) rerun the hosted Rent2Buy selected quote → chat → application and explicitly ask whether the £200 reservation payment is separate from the initial rental on both protected website Previews connected to this exact CRM build; (2) repeat desktop/mobile launchers, reserved-stock and telemetry checks on these final deployed heads; (3) confirm the temporary rehearsal-only credentials/flags remain Preview-scoped and are not carried into Production; (4) obtain a separate explicit production-release authorization. No production merge, domain move or lean-engine enablement was made by this continuation.
+
+
+## Conversation continuity QA — 21 November 2026
+
+Owner requirement: **Ask Me must answer a broad range of relevant customer questions AND carry a natural, contextual multi-turn conversation**, not act as a fixed FAQ. Work remains isolated to `feature/askme-lean-backend-20261121`. All production releases and the public lean flag remain unchanged.
+
+### Changes on this CRM feature branch
+
+- `lib/askme/contract.js` now retains up to 24 bounded history entries in the channel-independent request contract. `lib/askme/leanEngine.js` presents the newest 16 previous turns (up to eight exchanges, each capped at 450 characters) to the model. This is a bounded *recent conversation*, **not indefinite long-term memory**.
+- Guidance explicitly treats chat as an ongoing conversation: build on earlier answers, honor corrected requirements, resolve pronouns and references, do not invent unverified stock/prices, do not force a question after every answer, and do not repeat unanswered earlier questions when the customer changes topic. One model call remains the maximum for the model answer path.
+- Follow-up interpretation now recognizes references such as `Is that separate?`; reservation/holding-deposit questions route through policy knowledge rather than being mistaken for another selected-quote/pricing question.
+- Added deterministic regression cases to `tests/askme-lean-engine.test.js` and four synthetic multi-turn conversations in `scripts/askme-golden-suite.mjs`, run with `ASKME_SUITE=conversation ASKME_ENGINES=lean`. The suite now includes each earlier answer as `conversation_replies` for manual review, not just final-turn assertions.
+
+### Live, connected CRM Preview conversation checks
+
+The protected CRM feature Previews were tested using Vercel sandboxes with synthetic sessions, pacing below the normal CRM rate limit. No customer identities, deposits, applications or production changes were involved.
+
+- **C1, five turns, passed:** finding a van for plumbing; customer specified automatic, a monthly budget, ladders/tools; the assistant used the requirements and asked the useful next question about ladder length, without guessing a van price.
+- **C2, five turns, passed:** customer first asked for a manual Transit for furniture deliveries, then corrected to automatic and discussed a newly established business. Asked at the end which gearbox they wanted, the assistant accurately remembered **automatic**, with no approval promise.
+- **C3, five turns, passed:** Rent2Buy self-employment → required documents → credit checks → early termination → insurance before collection. Answered from the correct Rent2Buy policies without drifting into finance terms.
+- **C4, three turns, passed:** on a Rent2Buy listing, monthly illustration → £200 reservation payment → `Is that separate from the initial rental?`. The assistant correctly distinguished the holding deposit from initial rental instead of repeating the listing/selected payment figures.
+
+The first four-case run was blocked by Preview sign-in until the correct Vercel `_vercel_share` URL was used. A subsequent same-region attempt hit the **shared test-egress IP's CRM 15/minute / 200/day limits**, producing HTTP 429; these were transport/rate-limit blocks, not customer-answer failures and **not counted as passing tests**. Fresh, differently located authorized sandboxes were used for successful final evaluations. The four passing scenarios are from real protected CRM API sessions.
+
+Manual review noticed the earlier model repeatedly asked about van size even after the customer moved to a finance eligibility question. Updated the prompt guidance in code commit `0fee1bb` and added explicit test guidance, then retested against **the final code Preview at `64a4023`** from a fresh Dublin sandbox. **C2 and C4 both passed on that final revision.** C2's five replies now follow the gearbox correction and the subsequent eligibility questions without repeatedly forcing the sizing question; final response correctly states automatic. C4 still answers that the £200 reservation payment is separate from initial rental. Final-turn client-to-CRM latency was approximately **1.35 seconds (C2)** and **1.44 seconds (C4)**; complete multi-turn browser/widget timings were not measured in this run.
+
+The previously recorded **36/36** lean-engine golden benchmark was measured on the earlier CRM feature code, before this final conversation-prompt polish. Its results remain a useful baseline **but are not a fresh 36-case regression on `64a4023`**.
+
+### Still required before any production release
+
+1. Run `node --test tests/askme-lean-engine.test.js tests/askme-knowledge-retrieval.test.js tests/askme-stage-a-accuracy.test.js` in the full CRM repository, and repeat the full 36-case live suite on the final approved code head (observe IP rate limits). The new dedicated Node tests were committed but not separately executed through the restricted assistant tooling; Preview build readiness is not a substitute.
+2. Complete the connected **hosted website** Preview rehearsal with both actual widgets, selected **CRM-signed Rent2Buy** calculator quotation, quote verification, reserve/status guards, application route and CTA/launcher telemetry. The above conversational tests exercised CRM sessions, **not browser-rendered signed-quote end-to-end**.
+3. The assistant currently guides customers about their needs and offers Browse but **cannot independently retrieve and recommend specific live available DealerKit stock** until the separate stock-search tool is added. Business-page metadata is linked; full page body text is not indexed. WhatsApp transport adapter remains future work.
+4. The recent-turn limit is deliberate: it preserves useful context for several exchanges without unbounded model cost; indefinite conversation memory or verified customer-specific retention has **not** been implemented. Measure longer real conversations before extending it further.
+5. Explicit production release authorization remains required. The lean switch is OFF for customers. Do not merge or attach public domains as part of conversation QA.
