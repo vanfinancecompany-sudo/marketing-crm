@@ -103,6 +103,54 @@ test("Rent2Buy prompt keeps finance words out and carries the self-employed poli
   assert.doesNotMatch(prompt.instructions, /chatting with a customer on the website/);
 });
 
+test("longer conversations retain eight exchanges, follow-ups and updated preferences without unbounded prompts", () => {
+  const history = [];
+  for (let i = 0; i < 9; i += 1) {
+    history.push({ role: "user", content: i === 1
+      ? "I need an automatic van for plumbing work."
+      : i === 7
+        ? "Correction: it has to be a manual van after all."
+        : `Question ${i + 1}: I am still looking for a working van.` });
+    history.push({ role: "assistant", content: `Reply ${i + 1}: What else matters to you?` });
+  }
+  const prompt = buildLeanPrompt(request({
+    message: "What did I say about the gearbox?",
+    history,
+  }));
+  assert.match(prompt.instructions, /continuing conversation/);
+  assert.match(prompt.instructions, /newest answer/);
+  assert.match(prompt.input, /automatic van for plumbing work/);
+  assert.match(prompt.input, /Correction: it has to be a manual van/);
+  assert.doesNotMatch(prompt.input, /Question 1:/);
+  assert.match(prompt.input, /What did I say about the gearbox/);
+  assert.ok(prompt.input.length < 15000, "conversation evidence remains bounded");
+});
+
+test("a warranty follow-up after earlier vehicle pricing stays on the knowledge path", async () => {
+  const seen = {};
+  const r = await answerCustomerMessage(request({
+    message: "And what about the gearbox under the warranty?",
+    context: { page_type: "finance_vehicle", vehicle: vfcVehicle },
+    history: [
+      { role: "user", content: "How much is this one a month?" },
+      { role: "assistant", content: "The listing shows finance from £641 a month." },
+      { role: "user", content: "Is there a warranty on it?" },
+      { role: "assistant", content: "There is an in-house warranty; let's check the coverage." },
+    ],
+  }), {
+    requestReply: modelReturning("The warranty generally covers covered gearbox mechanical breakdowns, subject to the terms.", "none", seen),
+    retrieve: async () => ({ passages: [{
+      title: "In-house warranty", heading: "What is covered?",
+      passage: "The in-house warranty generally covers mechanical breakdown to the gearbox during normal use.",
+      type: "article", score: 4,
+    }], pages: [] }),
+  });
+  assert.match(seen.prompt.input, /in-house warranty generally covers mechanical breakdown/);
+  assert.match(seen.prompt.input, /Is there a warranty on it/);
+  assert.equal(r.diagnostics.path, "model_with_knowledge");
+  assert.match(r.reply, /gearbox/i);
+});
+
 test("engine selection: legacy by default; test visitors use lean on Preview; ASKME_ENGINE=lean switches all traffic", () => {
   assert.equal(selectAskMeEngine({}, {}), "legacy");
   assert.equal(selectAskMeEngine({ analytics_visitor_id: "askme-test-1" }, {}), "legacy", "production test visitors stay legacy unless lean_test");
