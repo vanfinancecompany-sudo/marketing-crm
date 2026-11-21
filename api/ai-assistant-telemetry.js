@@ -59,7 +59,7 @@ export async function handleAssistantTelemetryRequest(request, response, depende
       customer_session_id: customerSessionId,
       page_type: body.page_type,
       product_context: body.product_context,
-      cta_action_key: eventType === "cta_click" ? body.cta_action_key : null,
+      cta_action_key: ["cta_click", "suggested_question_click"].includes(eventType) ? body.cta_action_key : null,
       cta_label: eventType === "cta_click" ? body.cta_label : null,
     });
     return response.status(200).json({ ok: true });
