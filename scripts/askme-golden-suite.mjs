@@ -10,6 +10,7 @@ const BASE = (process.env.ASKME_BASE_URL || "").replace(/\/$/, "");
 const SHARE = process.env.ASKME_SHARE_URL || "";
 const ENGINES = (process.env.ASKME_ENGINES || "lean,legacy").split(",");
 const PACE_MS = Number(process.env.ASKME_PACE_MS || 4300); // CRM limit: 15 requests/minute per IP
+const SUITE = process.env.ASKME_SUITE || "all"; // golden | knowledge | all
 if (!BASE) { console.error("Set ASKME_BASE_URL"); process.exit(2); }
 
 const VFC = "https://www.vanfinancecompany.co.uk";
@@ -53,6 +54,27 @@ const CASES = [
   ["R3b", "R2B self-employed rephrase", r2bGeneral, ["I'm self-employed. Will Rent2Buy consider me?"], [/\b(?:yes|can apply|you can|will consider|considered)\b/i], [REFUSAL, PROMISE], null],
 ];
 
+// Knowledge set: detailed questions that need the Knowledge Hub / Business Brain.
+// [.., required, forbidden, action, minPassages] — minPassages applies to the lean engine only.
+const KNOWLEDGE_CASES = [
+  ["K1", "warranty coverage", financeVan, ["Does the warranty cover the gearbox and engine?"], [/warrant/i], [PROMISE], null, 1],
+  ["K2", "warranty exclusions", financeGeneral, ["What isn't covered by the warranty?"], [/warrant/i], [PROMISE], null, 1],
+  ["K3", "insurance", financeGeneral, ["Do I need to have insurance in place before I collect the van?"], [/insur/i], [PROMISE], null, 1],
+  ["K4", "finance documents", financeGeneral, ["What documents do I need to apply for finance?"], [/\b(?:licen[cs]e|bank|address|ID|statement|document)/i], [PROMISE, /rent\s?2\s?buy/i], null, 1],
+  ["K5", "R2B documents", r2bGeneral, ["What documents do I need for Rent2Buy?"], [/\b(?:licen[cs]e|bank|address|ID|statement|document)/i], [PROMISE, /\blenders?\b|\bAPR\b/i], null, 1],
+  ["K6", "new business", financeGeneral, ["I've only been trading for three months, can I still get finance?"], [/\S/], [PROMISE], null, 0],
+  ["K7", "VAT explained", financeVan, ["Can you explain how the VAT works on this van?"], [/VAT/], [PROMISE], null, 0],
+  ["K8", "deposit explained", financeGeneral, ["How does the deposit work, and is it refundable?"], [/deposit/i], [PROMISE], null, 1],
+  ["K9", "R2B agreement + early end", r2bGeneral, ["What happens if I want to end the Rent2Buy agreement early?"], [/\S/], [PROMISE, /\blenders?\b|\bAPR\b/i], null, 1],
+  ["K10", "delivery", financeGeneral, ["Can you deliver the van to me and how long does it take?"], [/deliver/i], [PROMISE], null, 1],
+  ["K11", "collection", r2bGeneral, ["Can I collect the van myself?"], [/collect/i], [PROMISE], null, 0],
+  ["K12", "multi-part", financeGeneral, ["What documents do I need, and do I need insurance before delivery?"], [/insur/i, /\b(?:licen[cs]e|bank|address|ID|statement|document)/i], [PROMISE], null, 2],
+  ["K13", "follow-up turn", financeGeneral, ["Do your vans come with a warranty?", "Does that include the gearbox?"], [/\S/], [PROMISE], null, 1],
+  ["K14", "multi-turn context", financeVan, ["How much is this one a month?", "What would I need to bring to apply?"], [/\b(?:licen[cs]e|bank|address|ID|statement|document)/i], [PROMISE], null, 1],
+  ["K15", "not in knowledge", financeGeneral, ["Do you sell boats or jet skis?"], [/\S/], [PROMISE, /£\d/], null, 0],
+  ["K16", "not in knowledge 2", r2bGeneral, ["Can I pay the monthly rental in Bitcoin?"], [/\b(?:team|confirm|check|don.t|not)\b/i], [PROMISE], null, 0],
+];
+
 let cookie = "";
 async function authorise() {
   if (!SHARE) return;
@@ -75,7 +97,8 @@ async function call(origin, body) {
 await authorise();
 const results = [];
 for (const engine of ENGINES) {
-  for (const [id, group, context, messages, required, forbidden, action] of CASES) {
+  const cases = [...(SUITE === "knowledge" ? [] : CASES), ...(SUITE === "golden" ? [] : KNOWLEDGE_CASES)];
+  for (const [id, group, context, messages, required, forbidden, action, minPassages = 0] of cases) {
     const visitor = `askme-test-golden-${engine}`;
     const start = await call(context.origin, { action: "start", page_context: context.page, analytics_visitor_id: visitor, askme_engine: engine });
     let reply = null;
@@ -89,7 +112,9 @@ for (const engine of ENGINES) {
     for (const pattern of forbidden) if (pattern.test(text)) failures.push(`forbidden ${pattern}`);
     const actions = reply?.json?.actions || [];
     if (action && actions[0]?.type !== action) failures.push(`action expected ${action}, got ${actions[0]?.type || "none"}`);
-    results.push({ engine, id, group, pass: failures.length === 0, failures, start_ms: start.ms, message_ms: reply?.ms, diagnostics: reply?.json?.diagnostics || null, reply: text, actions });
+    const passages = reply?.json?.diagnostics?.retrieval?.passages || [];
+    if (engine === "lean" && passages.length < minPassages) failures.push(`expected >= ${minPassages} passages, got ${passages.length}`);
+    results.push({ engine, id, group, pass: failures.length === 0, failures, start_ms: start.ms, message_ms: reply?.ms, path: reply?.json?.diagnostics?.path || null, retrieval_ms: reply?.json?.diagnostics?.timings_ms?.retrieval_ms ?? null, passages: passages.map((item) => `${item.title} — ${item.heading} (${item.score})`), tokens: reply?.json?.diagnostics?.tokens || null, reply: text, actions });
     console.log(JSON.stringify(results.at(-1)));
   }
 }
@@ -99,15 +124,20 @@ const summary = {};
 for (const engine of ENGINES) {
   const rows = results.filter((row) => row.engine === engine);
   const times = rows.map((row) => row.message_ms);
-  const modelRows = rows.filter((row) => row.diagnostics?.path === "model" || row.diagnostics?.path === "model_rejected");
+  const modelRows = rows.filter((row) => /^model/.test(row.path || ""));
+  const byPath = {};
+  for (const row of rows) (byPath[row.path || "n/a"] ||= []).push(row.message_ms);
   summary[engine] = {
     passed: rows.filter((row) => row.pass).length,
     total: rows.length,
     message_ms_p50: pct(times, 50),
     message_ms_p95: pct(times, 95),
     start_ms_p50: pct(rows.map((row) => row.start_ms), 50),
-    tokens_in_avg: modelRows.length ? Math.round(modelRows.reduce((sum, row) => sum + (row.diagnostics?.tokens?.input || 0), 0) / modelRows.length) : null,
-    tokens_out_avg: modelRows.length ? Math.round(modelRows.reduce((sum, row) => sum + (row.diagnostics?.tokens?.output || 0), 0) / modelRows.length) : null,
+    tokens_in_avg: modelRows.length ? Math.round(modelRows.reduce((sum, row) => sum + (row.tokens?.input || 0), 0) / modelRows.length) : null,
+    tokens_out_avg: modelRows.length ? Math.round(modelRows.reduce((sum, row) => sum + (row.tokens?.output || 0), 0) / modelRows.length) : null,
+    retrieval_ms_p95: pct(rows.map((row) => row.retrieval_ms), 95),
+    by_path: Object.fromEntries(Object.entries(byPath).map(([path, values]) => [path, { n: values.length, p50: pct(values, 50), p95: pct(values, 95) }])),
+    failed: rows.filter((row) => !row.pass).map((row) => row.id),
   };
 }
 console.log("SUMMARY " + JSON.stringify(summary));
