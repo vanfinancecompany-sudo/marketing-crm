@@ -21,6 +21,9 @@ import { isRent2BuyGuarantorQuestion, publicApplicationGuidanceReply } from "../
 import { isVehicleSpecificationQuestion, publicVehiclePricingReply } from "../lib/publicVehiclePricing.js";
 import { controlledBusinessRuntimeReply, controlledProductComparisonReply, controlledVehicleNextStepReply } from "../lib/salesConversationEngine.js";
 import { buildPublicStockNavigation } from "../lib/publicStockNavigation.js";
+import { resolveSelectedQuote } from "../lib/askme/selectedQuote.js";
+import { checkIncomingRent2BuyQuote } from "./_rent2buy-quote-verify-handler.mjs";
+import { loadRent2BuyPricingSource } from "./_rent2buy-quote-source.js";
 import {
   buildCanonicalConversationInput,
   canonicalSessionState,
@@ -264,7 +267,7 @@ async function startConversation(supabase, body, environment) {
   });
 }
 
-async function continueConversation(supabase, body, environment, simulateConversation = simulateCustomerConversation) {
+async function continueConversation(supabase, body, environment, simulateConversation = simulateCustomerConversation, dependencies = {}) {
   const conversationId = clean(body.conversation_id, 100);
   const session = await loadSession(supabase, conversationId, environment);
   const pageContext = normalisePageContext(body.page_context);
@@ -357,12 +360,21 @@ async function continueConversation(supabase, body, environment, simulateConvers
     confidence_reason: "Verified public application guidance.",
   } : null;
 
+  // The customer's on-page calculator selection, verified server-side by the existing
+  // CRM quote verifier. Never reconstructed from browser figures.
+  const selectedQuote = await resolveSelectedQuote({
+    token: pageContext.selected_quote_token,
+    registration: session.vehicle_context?.registration,
+    product: productLock,
+  }, dependencies.quoteCheck || checkIncomingRent2BuyQuote, { env: environment, loadSource: dependencies.loadQuoteSource || loadRent2BuyPricingSource });
+
   const pricingReply = publicVehiclePricingReply({
     message,
     pageType: session.page_type,
     productLock,
     vehicleContext: session.vehicle_context,
     rememberedFacts: session.remembered_facts,
+    selectedQuote,
   });
   if (pricingReply) {
     const businessReply = controlledBusinessRuntimeReply({
@@ -390,6 +402,7 @@ async function continueConversation(supabase, body, environment, simulateConvers
     pageContext,
     controlledFallback,
   });
+  canonicalInput.selected_quote = selectedQuote;
   // Live customer chat keeps the saved competence result, but defers the heavy
   // knowledge-opportunity analysis to the existing protected "Analyse Existing" workflow.
   // That learning pass re-reads the full knowledge library and must not sit on the customer response path.
@@ -434,7 +447,7 @@ export async function handleCustomerAssistantRequest(request, response, dependen
     const payload = body.action === "start"
       ? await startConversation(supabase, body, environment)
       : body.action === "message"
-        ? await continueConversation(supabase, body, environment, dependencies.simulateConversation || simulateCustomerConversation)
+        ? await continueConversation(supabase, body, environment, dependencies.simulateConversation || simulateCustomerConversation, dependencies)
         : (() => { throw new PublicAssistantError(400, "invalid_request", "Please start or continue an assistant conversation."); })();
     return response.status(200).json(payload);
   } catch (error) {

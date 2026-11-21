@@ -35,6 +35,9 @@ import {
   insufficientKnowledgeReply,
   naturalConversationReply,
 } from "../lib/conversationIntelligence.js";
+import { businessFactsSource } from "../lib/askme/businessFacts.js";
+import { vehicleContextSource } from "../lib/askme/vehicleContext.js";
+import { selectedQuoteSource } from "../lib/askme/selectedQuote.js";
 import { buildPublicStockNavigation } from "../lib/publicStockNavigation.js";
 import { REAL_CUSTOMER_SCENARIOS } from "../lib/customerSimulationScenarios.js";
 import {
@@ -407,6 +410,15 @@ export async function simulateCustomerConversation(supabase, body, options = {})
   let orchestration = await runStage("Conversation and knowledge orchestration", context, async () => orchestrateConversationTurn({ message: question, intent, human, journey, priorJourney: body.journey_state, buyingSignals }));
   journey = preserveJourneyAcrossOrchestration(journey, body.journey_state, orchestration);
   intent.retrieval_required = orchestration.retrieval_required;
+  // "Can I apply with poor credit?" / "Can I apply if I'm self-employed?" are eligibility
+  // questions, not requests to start an application. The universal classifier labels any
+  // "can I apply" as ready_to_apply, which switched retrieval off and returned a canned
+  // application reply. Keep these as answerable questions so verified facts are used.
+  const ELIGIBILITY_TOPICS = ["poor_credit", "self_employed", "coverage", "trading_history"];
+  if (latestQuestionRequiresAnswer && (intent.secondary_intents || []).some((topic) => ELIGIBILITY_TOPICS.includes(topic))) {
+    intent.retrieval_required = true;
+    orchestration.retrieval_required = true;
+  }
   if (intent.primary_intent === "customer_fact_statement") {
     intent.retrieval_required = false;
     intent.clarification_required = false;
@@ -539,7 +551,15 @@ export async function simulateCustomerConversation(supabase, body, options = {})
     const lexical = await runStage("Conversation lexical ranking", { ...context, retrieval_query: retrievalQuery }, async () => rankKnowledge(retrievalQuery, corpus, { messages, limit: coverage ? 7 : 8 }));
     coverageConflicts = await runStage("Check conversation coverage conflicts", context, async () => detectCoverageConflicts(coverage, corpus, knowledge.settings));
     if (coverage) coverage.diagnostics.conflicting_sources = coverageConflicts;
-    sources = coverage ? [coverage.source, ...lexical].slice(0, 8) : lexical;
+    // Verified business facts, the live vehicle and the customer's verified quote are
+    // first-class evidence: they always accompany retrieval and can be cited, so an
+    // answer built from them is no longer discarded as "ungrounded".
+    const verifiedSources = [
+      businessFactsSource(productContext),
+      vehicleContextSource(body.vehicle_context, productContext),
+      selectedQuoteSource(body.selected_quote),
+    ].filter(Boolean);
+    sources = [...(coverage ? [coverage.source, ...lexical] : lexical).slice(0, 8 - verifiedSources.length), ...verifiedSources];
     retrievalTime = elapsed(retrievalStart);
     if (!sources.length) {
       response = insufficientKnowledgeReply(productContext);
