@@ -10,6 +10,18 @@ import {
 } from "../lib/aiAssistantTelemetry.js";
 import { buildAssistantCostSummary } from "../api/marketing-ai-assistant-analytics.js";
 
+test("suggested-question clicks are stored by fixed key, without customer text", () => {
+  const event = normaliseAssistantTelemetryEvent({
+    event_type: "suggested_question_click",
+    page_type: "finance_general",
+    product_context: "finance",
+    cta_action_key: "finance_poor_credit",
+  });
+  assert.equal(event.event_type, "suggested_question_click");
+  assert.equal(event.cta_action_key, "finance_poor_credit");
+  assert.equal(event.customer_question, undefined);
+});
+
 test("assistant telemetry hashes a browser-session id without returning the raw value", () => {
   const environment = { AI_ASSISTANT_SESSION_SECRET: "measurement-test-secret-1234567890" };
   const first = assistantTelemetryVisitorHash("browser-session-123", environment);
