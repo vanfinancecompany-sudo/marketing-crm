@@ -177,7 +177,7 @@ async function updateSession(supabase, session, changes) {
 
 function assertPageContext(session, supplied) {
   if (session.page_type !== supplied.page_type) throw new PublicAssistantError(409, "invalid_request", "The page context changed. Please start a new conversation on this page.");
-  if (session.page_type === "finance_vehicle") {
+  if (session.page_type === "finance_vehicle" || session.page_type === "rent2buy_general") {
     const storedRegistration = clean(session.vehicle_context?.registration, 20);
     const suppliedRegistration = clean(supplied.vehicle?.registration, 20);
     if (storedRegistration && suppliedRegistration && storedRegistration !== suppliedRegistration) throw new PublicAssistantError(409, "invalid_request", "The vehicle changed. Please start a new conversation for this van.");
@@ -208,9 +208,14 @@ export function isAskMeTestVisitor(body = {}) {
   return /^askme-test-/i.test(clean(body.analytics_visitor_id, 100));
 }
 
+function isEnabledAskMeTestTraffic(body, environment) {
+  const mode = clean(environment.ASKME_ENGINE, 20).toLowerCase();
+  return isAskMeTestVisitor(body) && (environment.VERCEL_ENV === "preview" || mode === "lean_test");
+}
+
 export function selectAskMeEngine(body = {}, environment = process.env) {
   const mode = clean(environment.ASKME_ENGINE, 20).toLowerCase();
-  if (isAskMeTestVisitor(body) && (environment.VERCEL_ENV === "preview" || mode === "lean_test")) {
+  if (isEnabledAskMeTestTraffic(body, environment)) {
     return clean(body.askme_engine, 10).toLowerCase() === "legacy" ? "legacy" : "lean";
   }
   return mode === "lean" ? "lean" : "legacy";
@@ -222,12 +227,12 @@ const WEBSITE_CHANNELS = Object.freeze({
     channel: "website_vfc",
     links: {
       finance: { browse_stock: "/vans", apply: "/apply", contact: "/contact" },
-      rent2buy: { browse_stock: "/rent2buy", contact: "/contact" },
+      rent2buy: { browse_stock: "/rent2buy/vans", apply: "/rent2buy-application", contact: "/contact" },
     },
   },
   "rent2buyvans.co.uk": {
     channel: "website_rent2buy",
-    links: { rent2buy: { browse_stock: "/view-all-vans", contact: "/contact" } },
+    links: { rent2buy: { browse_stock: "/view-all-vans", apply: "/apply-for-no-credit-check-rent2buy-vans", contact: "/contact" } },
   },
 });
 
@@ -253,7 +258,7 @@ async function recordTelemetrySafely(supabase, payload) {
 }
 
 async function recordResponseTelemetry({ supabase, body, environment, session, productContext, messageNumber, result = null, responseMode, cta = null }) {
-  if (isAskMeTestVisitor(body)) return;
+  if (isEnabledAskMeTestTraffic(body, environment)) return;
   const diagnostics = result
     ? telemetryFromAssistantResult(result)
     : {
@@ -339,14 +344,15 @@ async function continueWithLeanEngine({ supabase, body, environment, session, hi
   const persistMs = Math.round(performance.now() - persistStart);
   const payload = safeCustomerPayload({ reply: result.reply, actions: result.actions, conversationId, status: result.status });
   // Timings are returned only to test visitors, for benchmarking; never to customers.
-  if (isAskMeTestVisitor(body)) payload.diagnostics = { ...result.diagnostics, timings_ms: { ...result.diagnostics.timings_ms, persist_ms: persistMs } };
+  if (isEnabledAskMeTestTraffic(body, environment)) payload.diagnostics = { ...result.diagnostics, timings_ms: { ...result.diagnostics.timings_ms, persist_ms: persistMs } };
   return payload;
 }
 
 async function startConversation(supabase, body, environment) {
   const pageContext = normalisePageContext(body.page_context);
-  const { session, conversationId, greeting } = await createSession(supabase, pageContext, environment, { testTraffic: isAskMeTestVisitor(body) });
-  if (!isAskMeTestVisitor(body)) await recordTelemetrySafely(supabase, {
+  const testTraffic = isEnabledAskMeTestTraffic(body, environment);
+  const { session, conversationId, greeting } = await createSession(supabase, pageContext, environment, { testTraffic });
+  if (!testTraffic) await recordTelemetrySafely(supabase, {
     event_type: "conversation_start",
     visitor_hash: assistantTelemetryVisitorHash(body.analytics_visitor_id, environment),
     customer_session_id: session.id,
@@ -428,18 +434,6 @@ async function continueConversation(supabase, body, environment, simulateConvers
     }
   }
 
-  // The customer's on-page calculator selection, verified server-side by the existing
-  // CRM quote verifier. Never reconstructed from browser figures.
-  const selectedQuote = await resolveSelectedQuote({
-    token: pageContext.selected_quote_token,
-    registration: session.vehicle_context?.registration,
-    product: productLock,
-  }, dependencies.quoteCheck || checkIncomingRent2BuyQuote, { env: environment, loadSource: dependencies.loadQuoteSource || loadRent2BuyPricingSource });
-
-  if (productLock && selectAskMeEngine(body, environment) === "lean") {
-    return continueWithLeanEngine({ supabase, body, environment, session, history, message, messageNumber, productLock, pageContext, selectedQuote, conversationId, dependencies });
-  }
-
   const applicationGuidanceReply = publicApplicationGuidanceReply({
     message,
     pageType: session.page_type,
@@ -458,6 +452,18 @@ async function continueConversation(supabase, body, environment, simulateConvers
       messageNumber, responseMode: "verified_rent2buy_guarantor",
     });
     return safeCustomerPayload({ reply, cta: null, conversationId, status: "ready" });
+  }
+
+  // The customer's on-page calculator selection, verified server-side by the existing
+  // CRM quote verifier. Never reconstructed from browser figures.
+  const selectedQuote = await resolveSelectedQuote({
+    token: pageContext.selected_quote_token,
+    registration: session.vehicle_context?.registration,
+    product: productLock,
+  }, dependencies.quoteCheck || checkIncomingRent2BuyQuote, { env: environment, loadSource: dependencies.loadQuoteSource || loadRent2BuyPricingSource });
+
+  if (productLock && selectAskMeEngine(body, environment) === "lean") {
+    return continueWithLeanEngine({ supabase, body, environment, session, history, message, messageNumber, productLock, pageContext, selectedQuote, conversationId, dependencies });
   }
 
   let controlledFallback = applicationGuidanceReply ? {

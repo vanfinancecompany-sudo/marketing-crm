@@ -69,10 +69,22 @@ const KNOWLEDGE_CASES = [
   ["K10", "delivery", financeGeneral, ["Can you deliver the van to me and how long does it take?"], [/deliver/i], [PROMISE], null, 1],
   ["K11", "collection", r2bGeneral, ["Can I collect the van myself?"], [/collect/i], [PROMISE], null, 0],
   ["K12", "multi-part", financeGeneral, ["What documents do I need, and do I need insurance before delivery?"], [/insur/i, /\b(?:licen[cs]e|bank|address|ID|statement|document)/i], [PROMISE], null, 2],
-  ["K13", "follow-up turn", financeGeneral, ["Do your vans come with a warranty?", "Does that include the gearbox?"], [/\S/], [PROMISE], null, 1],
+  ["K13", "follow-up turn", financeGeneral, ["Do your vans come with a warranty?", "Does that include the gearbox?"], [/gearbox/i, /warrant|cover/i], [PROMISE, REFUSAL, /team (?:can|will|would need to) (?:confirm|check)|should check with/i], null, 1],
   ["K14", "multi-turn context", financeVan, ["How much is this one a month?", "What would I need to bring to apply?"], [/\b(?:licen[cs]e|bank|address|ID|statement|document)/i], [PROMISE], null, 1],
   ["K15", "not in knowledge", financeGeneral, ["Do you sell boats or jet skis?"], [/\S/], [PROMISE, /£\d/], null, 0],
   ["K16", "not in knowledge 2", r2bGeneral, ["Can I pay the monthly rental in Bitcoin?"], [/\b(?:team|confirm|check|don.t|not)\b/i], [PROMISE], null, 0],
+];
+
+// Extra natural phrasing and release-gate scenarios. Run separately from the 36 cases.
+const REVIEW_CASES = [
+  ["I1", "warranty reference on a vehicle page", financeVan, ["Do your vans come with a warranty?", "Does that include the gearbox?"], [/gearbox/i, /warrant|cover/i], [PROMISE, REFUSAL, /team (?:can|will|would need to) (?:confirm|check)/i, /manual gearbox/i], null, 1],
+  ["I2", "plain-English proof and insurance", financeGeneral, ["What ID, address or income proof do I need, and do I need insurance before delivery?"], [/identity|\bID\b|licen[cs]e/i, /address/i, /insurance/i], [PROMISE, /rent\s?2\s?buy/i], null, 2],
+  ["I3", "Rent2Buy application route", r2bGeneral, ["I'm ready to start the actual Rent2Buy application. Where do I go?"], [/apply|application/i], [PROMISE, /\blenders?\b|\bAPR\b/i], "apply"],
+  ["I4", "Rent2Buy geographic wording", r2bGeneral, ["I live quite a way from Southampton. How far away can applicants live?"], [/100/, /driving miles/i], [PROMISE, /lenders?|APR/i], null, 0],
+  ["I5", "Rent2Buy paperwork and ownership separated", r2bGeneral, ["Do you need proof of my address or bank statements before I can be accepted?"], [/address/i, /bank statement/i], [PROMISE, /\blenders?\b|\bAPR\b/i], null, 1],
+  ["I6", "unknown pricing policy fallback", financeGeneral, ["Can I pay the finance deposit with Bitcoin or gold bullion?"], [/team|confirm|check|don.t know|not confirmed/i], [PROMISE, /accept (?:Bitcoin|gold bullion)/i], null, 0],
+  ["I7", "Rent2Buy guarantor policy", r2bGeneral, ["Could somebody else guarantee the Rent2Buy payments for me? Can I use a guarantor?"], [/guarantor/i, /not|cannot|can.t|don.t/i], [PROMISE, /\blenders?\b|\bAPR\b/i], null, 0],
+  ["I8", "warranty reference on general page", financeGeneral, ["Do your vans come with a warranty?", "Does that include the gearbox?"], [/gearbox/i, /warrant|cover/i], [PROMISE, REFUSAL, /team (?:can|will|would need to) (?:confirm|check)/i], null, 1],
 ];
 
 let cookie = "";
@@ -97,16 +109,19 @@ async function call(origin, body) {
 await authorise();
 const results = [];
 for (const engine of ENGINES) {
-  const cases = [...(SUITE === "knowledge" ? [] : CASES), ...(SUITE === "golden" ? [] : KNOWLEDGE_CASES)];
+  const cases = SUITE === "review" ? REVIEW_CASES : [...(SUITE === "knowledge" ? [] : CASES), ...(SUITE === "golden" ? [] : KNOWLEDGE_CASES)];
   for (const [id, group, context, messages, required, forbidden, action, minPassages = 0] of cases) {
     const visitor = `askme-test-golden-${engine}`;
     const start = await call(context.origin, { action: "start", page_context: context.page, analytics_visitor_id: visitor, askme_engine: engine });
-    let reply = null;
-    for (const message of messages) {
-      reply = await call(context.origin, { action: "message", conversation_id: start.json.conversation_id, page_context: context.page, message, analytics_visitor_id: visitor, askme_engine: engine });
+    const turns = [];
+    for (const message of start.json.conversation_id ? messages : []) {
+      turns.push(await call(context.origin, { action: "message", conversation_id: start.json.conversation_id, page_context: context.page, message, analytics_visitor_id: visitor, askme_engine: engine }));
     }
+    const reply = turns.at(-1);
     const text = reply?.json?.reply || "";
     const failures = [];
+    if (start.status !== 200 || !start.json.conversation_id) failures.push("start http_" + start.status);
+    if (turns.slice(0, -1).some((turn) => turn.status !== 200)) failures.push("earlier turn failed");
     if (reply?.status !== 200) failures.push(`http_${reply?.status}`);
     for (const pattern of required) if (!pattern.test(text)) failures.push(`missing ${pattern}`);
     for (const pattern of forbidden) if (pattern.test(text)) failures.push(`forbidden ${pattern}`);
@@ -114,7 +129,7 @@ for (const engine of ENGINES) {
     if (action && actions[0]?.type !== action) failures.push(`action expected ${action}, got ${actions[0]?.type || "none"}`);
     const passages = reply?.json?.diagnostics?.retrieval?.passages || [];
     if (engine === "lean" && passages.length < minPassages) failures.push(`expected >= ${minPassages} passages, got ${passages.length}`);
-    results.push({ engine, id, group, pass: failures.length === 0, failures, start_ms: start.ms, message_ms: reply?.ms, path: reply?.json?.diagnostics?.path || null, retrieval_ms: reply?.json?.diagnostics?.timings_ms?.retrieval_ms ?? null, passages: passages.map((item) => `${item.title} — ${item.heading} (${item.score})`), tokens: reply?.json?.diagnostics?.tokens || null, reply: text, actions });
+    results.push({ engine, id, group, pass: failures.length === 0, failures, start_ms: start.ms, message_ms: reply?.ms, path: reply?.json?.diagnostics?.path || null, retrieval_ms: reply?.json?.diagnostics?.timings_ms?.retrieval_ms ?? null, knowledge_cache_hit: reply?.json?.diagnostics?.retrieval?.cache_hit ?? null, model: reply?.json?.diagnostics?.model ?? null, turns: turns.map((turn) => ({ status: turn.status, ms: turn.ms, model: turn.json.diagnostics?.model, cache_hit: turn.json.diagnostics?.retrieval?.cache_hit, retrieval_ms: turn.json.diagnostics?.timings_ms?.retrieval_ms })), passages: passages.map((item) => `${item.title} — ${item.heading} (${item.score})`), tokens: reply?.json?.diagnostics?.tokens || null, reply: text, actions });
     console.log(JSON.stringify(results.at(-1)));
   }
 }

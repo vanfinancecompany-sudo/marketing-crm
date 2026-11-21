@@ -197,3 +197,36 @@ test("warranty question on a vehicle page is not short-circuited as a gearbox sp
   assert.equal(modelCalled, true);
   assert.notEqual(result.diagnostics.path, "verified_pricing");
 });
+
+test("signed quote action survives both response envelopes without truncation", async () => {
+  const { safeCustomerPayload } = await import("../lib/publicAssistantFoundation.js");
+  const token = "r2bq1." + "a".repeat(1300) + ".signature";
+  const actions = buildLeanActions({ product: "rent2buy", vehicle: r2bVehicle, selectedQuote: verifiedQuote, quoteToken: token, choice: "apply" });
+  const payload = safeCustomerPayload({ actions });
+  assert.equal(new URL(payload.actions[0].url, "https://www.rent2buyvans.co.uk").searchParams.get("r2b_quote"), token);
+  assert.equal(payload.cta.url, payload.actions[0].url);
+});
+
+test("endpoint: regular Production does not treat a self-declared test visitor as privileged", async () => {
+  const { client, state } = mockSupabase(session());
+  const response = responseRecorder();
+  await handleCustomerAssistantRequest({
+    method: "POST", headers: { origin: "https://www.vanfinancecompany.co.uk" },
+    body: { action: "message", conversation_id: "conv-3", analytics_visitor_id: "askme-test-claimed", page_context: { page_type: "finance_vehicle", vehicle: { registration: "LS73XFA" } }, message: "What's the mileage?" },
+  }, response, { environment: { ...environment, VERCEL_ENV: "production", ASKME_ENGINE: "lean" }, supabase: client });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.payload.diagnostics, undefined);
+  assert.ok(state.tables.includes("ai_assistant_events"));
+});
+
+test("endpoint: Rent2Buy guarantor policy still bypasses the lean model", async () => {
+  const { client } = mockSupabase({ ...session(), page_type: "rent2buy_general", product_lock: "rent2buy", vehicle_context: {} });
+  const response = responseRecorder();
+  await handleCustomerAssistantRequest({
+    method: "POST", headers: { origin: "https://www.rent2buyvans.co.uk" },
+    body: { action: "message", conversation_id: "conv-4", analytics_visitor_id: "askme-test-guarantor", page_context: { page_type: "rent2buy_general" }, message: "Can I use a guarantor for Rent2Buy?" },
+  }, response, { environment, supabase: client, leanRequestReply: noModel, leanRetrieve: async () => null });
+  assert.equal(response.statusCode, 200);
+  assert.match(response.payload.reply, /(?:don.t|do not|doesn.t|does not|cannot|not accepted).*guarantor|guarantor.*(?:not|cannot)/i);
+  assert.equal(response.payload.actions, undefined);
+});

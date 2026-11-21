@@ -12,6 +12,7 @@ const knowledge = {
   sections: normalizeBusinessKnowledgeSections([], {}),
   articles: [
     article("warranty", "Used van warranty explained", "Van Finance", "## What the warranty covers\nEvery used van comes with a warranty covering the engine, gearbox and major mechanical components. Wear and tear items such as tyres, brakes and clutches are excluded from the warranty."),
+    article("gearbox-stock", "Manual gearbox specifications", "Van Finance", "## Gearbox\nVehicle specifications include the gearbox type, model and engine size."),
     article("insurance", "Do I need insurance for a financed van?", "Van Finance", "## Insurance requirements\nYou must have fully comprehensive insurance in place before the financed van is delivered or collected. The insurance must name the van and cover business use if you use it for work."),
     article("documents", "Documents needed for van finance", "Van Finance", "## Documents\nFor a finance application you normally need photo driving licence, proof of address and recent bank statements. Self-employed applicants may be asked for trading evidence."),
     article("r2b-agreement", "Rent2Buy agreement terms explained", "Rent2Buy", "## Ending the agreement early\nYou can return the van and end the Rent2Buy rental agreement early; the rental agreement explains notice and any charges for early termination."),
@@ -112,4 +113,23 @@ test("everyday phrasing 'what do I need to bring to apply' searches documents", 
   fresh();
   const result = await retrieveKnowledge({ product: "finance", message: "What would I need to bring to apply?", history: [{ role: "user", content: "How much is this one a month?" }] }, deps);
   assert.ok(result.passages.some((item) => /document/i.test(`${item.title} ${item.heading}`)), JSON.stringify(result.passages.map((item) => item.heading)));
+});
+
+test("a warranty follow-up uses the warranty passage on a vehicle page, not the gearbox specification", async () => {
+  fresh();
+  const request = buildAskMeRequest({
+    channel: "website_vfc", product: "finance",
+    message: "Does that include the gearbox?",
+    history: [{ role: "user", content: "Do your vans come with a warranty?" }, { role: "assistant", content: "Our vans come with a warranty." }],
+    context: { page_type: "finance_vehicle", vehicle: { registration: "TE57VAN", title: "Ford Transit", transmission: "Manual" } },
+  });
+  const result = await answerCustomerMessage(request, {
+    retrieve: (input) => retrieveKnowledge(input, deps),
+    requestReply: async (prompt) => {
+      assert.match(prompt.input, /Knowledge Hub — Used van warranty explained[\s\S]*covers|Knowledge Hub — Used van warranty explained[\s\S]*covering the engine, gearbox/);
+      return { reply: "Yes, the warranty covers the gearbox, subject to its terms.", action: "none" };
+    },
+  });
+  assert.equal(result.diagnostics.path, "model_with_knowledge");
+  assert.match(result.reply, /warranty covers the gearbox/);
 });
