@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
-import { loadKnowledge, simulateCustomerConversation } from "./marketing-ai-assistant-competence.js";
+import { simulateCustomerConversation } from "./marketing-ai-assistant-competence.js";
+import { loadKnowledge } from "./marketing-ai-assistant-competence.js";
 import { retrieveKnowledge } from "../lib/askme/knowledgeRetrieval.js";
 import { isExplicitProductComparison } from "../lib/aiAssistantCompetence.js";
 import {
