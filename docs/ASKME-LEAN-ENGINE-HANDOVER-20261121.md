@@ -1,6 +1,6 @@
 # Ask Me lean engine — handover (21 Nov 2026)
 
-Status: **Stages A–E complete on feature branches (E = on-demand knowledge retrieval, 21 Nov 2026 evening). Ready for independent review; not ready to switch on for customers until the owner confirms the fact wording and an end-to-end widget test is done (see Outstanding).** Nothing is merged or deployed to production. The lean engine is **off for customers** (`ASKME_ENGINE` unset = legacy).
+Status: **Independent review complete on the feature branches. Hold for owner wording approval and a connected hosted Preview rehearsal.** For the current release gates and measured results, see Independent review at the end of this handover.
 
 Audit: "Ask Me AI Assistant — Technical Audit" (21 Nov 2026). Audit references: marketing-crm `fcfdb59`, vanfinance-co `c382892`, rent2buy-vans `0dc84b5`.
 
@@ -8,9 +8,9 @@ Audit: "Ask Me AI Assistant — Technical Audit" (21 Nov 2026). Audit references
 
 | Repo | Branch | Base | Latest |
 | --- | --- | --- | --- |
-| marketing-crm | `feature/askme-lean-backend-20261121` | `main` @ `fcfdb59` | `bd727e0` (code; handover commit follows) |
-| vanfinance-co | `feature/vfc-askme-lean-integration-20261121` | `vfc/staging` @ `c382892` | `3568e08` |
-| rent2buy-vans | `feature/r2b-askme-lean-integration-20261121` | `main` @ `0dc84b5` | `abb2e04` |
+| marketing-crm | `feature/askme-lean-backend-20261121` | `main` @ `fcfdb59` | `5dc2110` (reviewed code) |
+| vanfinance-co | `feature/vfc-askme-lean-integration-20261121` | `vfc/staging` @ `c382892` | `09a7cec` |
+| rent2buy-vans | `feature/r2b-askme-lean-integration-20261121` | `main` @ `0dc84b5` | `ce51ad6` |
 
 Overlapping older drafts (not merged, superseded by this work; do not merge alongside it): marketing-crm #694, #695, #696; vanfinance-co #177; rent2buy-vans #61.
 
@@ -124,8 +124,86 @@ Testing note: the CRM allows 15 requests a minute and **200 requests a day per I
 7. WhatsApp adapter (later): map phone number → session, product choice prompt, `capabilities.buttons=false` (actions rendered as text links), authenticate the WhatsApp webhook; reuse `answerCustomerMessage()` unchanged.
 8. Starter questions (separate final stage, after 1–3).
 
-## Exact next steps for Codex
+## Original handover next steps (superseded by Independent review)
 
 1. `git fetch` all three branches; re-run unit tests: marketing-crm `node --test` (expect only the 111 pre-existing failures), vanfinance-co `node --test tests/*.test.mjs` (1 pre-existing), rent2buy-vans `node --test tests/*.test.mjs` (3 pre-existing).
 2. Re-run the golden suite against the latest CRM Preview: `ASKME_BASE_URL=<preview> ASKME_SHARE_URL=<vercel share link> [ASKME_SUITE=all|golden|knowledge] [ASKME_ENGINES=lean,legacy] node scripts/askme-golden-suite.mjs` (needs outbound access to *.vercel.app; ~11 min for all 36 cases on both engines because of the 15 req/min limit; mind the 200/day per-IP limit). Expect lean 36/36.
 3. After owner approval only: merge marketing-crm first (lean stays off), then the two website branches, then enable `ASKME_ENGINE=lean` and watch telemetry; rollback = unset `ASKME_ENGINE`.
+
+## Independent review — 21 Nov 2026
+
+**Release decision: hold for owner wording approval and a connected hosted Preview rehearsal.** The warranty defect was reproduced and corrected. The exact feature commits below were pushed. Their branch CI created Previews. Production branches, domains, environment and application routing were left untouched.
+
+| Repository | Feature branch | Reviewed code commit | Release base confirmed |
+| --- | --- | --- | --- |
+| Marketing CRM | `feature/askme-lean-backend-20261121` | `5dc21107ce23973d66cc92aa90aa98c5e82f85e9` | `main` at `fcfdb598d9893123fb806406d6ee6ba4c3ae148a` |
+| Van Finance Company | `feature/vfc-askme-lean-integration-20261121` | `09a7cec0b78865337d969456549a62035fc57a4b` | `vfc/staging` at `c382892b9e1dc2863213e4afc1ce62798cf3eae7` |
+| Rent2Buy Vans | `feature/r2b-askme-lean-integration-20261121` | `ce51ad6c4265f3ff09cb9595142d88bfdb321f53` | `main` at `0dc84b5b86f0b94a79728bf019b3b3401259200d` |
+
+The branch CI Previews were Marketing CRM `dpl_EQJNm19dpYGD2DX4dWBPpQsWWqGK`, Van Finance Company project `van-finance-company-vfc` deployment `dpl_FSawGBcSmKgXkwFGmwYgasEfkN9L`, and standalone Rent2Buy Vans project `rent2buy-vans` deployment `dpl_ExCNZvx5MDTHQ1hcHk5zPTAzCJ55`. The hosted CRM benchmark and local browser fixture checks use different endpoints.
+
+### Live CRM accuracy and response times
+
+Same-deployment comparison on protected CRM Preview `dpl_HXWBJ7CicYTXn1UQut5Ths1BLi8H` at `40a3762`, 36 cases per engine. Latency is the wall-clock time for the final message of each case from the test client to the CRM response. It includes network time to the CRM and excludes the website proxy and widget rendering.
+
+| Engine | Original assertions | Obvious failures after reading the replies | Reply p50 | Reply p95 | Conversation start p50 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| Lean | 36 passed, 0 failed | K13 warranty follow-up and Q3c van-search follow-up both deferred instead of helping | 1.66 s | 2.75 s | 0.22 s |
+| Legacy with Stage A | 28 passed, 8 failed | The original checks also missed the K13 warranty deferral | 3.04 s | 6.04 s | 0.23 s |
+
+The lean median was 45% lower and the p95 was 54% lower. Verified price/specification replies used no model and had a 0.32 s median. The original K13 assertion accepted any nonempty reply. It now requires a positive, qualified gearbox coverage answer. The legacy K1 answer on a vehicle page was an unrelated gearbox specification.
+
+Eight natural-language and multi-turn cases on `9161edf` scored 6/8. It handled Finance documents and insurance, Rent2Buy area, proofs, application and guarantor rules, and a question about an unsupported payment method. Both warranty follow-ups still failed because general warranty FAQs crowded out the passage that describes coverage. The first fix had restored the topic but still missed the component-level evidence.
+
+The latest protected Preview at `5dc2110` passed **6/6 targeted live cases** using GPT-6 Sol. I1 and I8 covered the warranty follow-up on vehicle and general pages. Q3c, K1, K12 and K13 checked stock-search continuity, direct warranty coverage, documents plus insurance, and the original follow-up. The top source for the gearbox follow-up on both page types was *What Warranty Coverage is Included with Your Van Purchase?* under *What Does the In-House Warranty Cover?*. The reply now explains general gearbox cover during normal use and qualifies exact vehicle terms. The stock-search follow-up asks a practical question about carrying needs and acknowledges the budget without turning it into a quoted payment. The full 36-by-two comparison was done at `40a3762`; it should be rerun at the approved release head from a fresh permitted test egress before activation. The existing 15/minute and 200/day limits continue to apply.
+
+Final targeted replies took 1.60–2.77 s over the network. On a cold knowledge-cache observation the first reply took 3.68 s, including 1.37 s of retrieval and cache population. The final targeted warm retrieval observations were 7–22 ms. A wider warm sample at `9161edf` was 2–48 ms. Leave the five-minute in-process cache in place. It coalesces overlapping loads, prepares separate product corpora, and expires on a bounded schedule. The observations do not justify scheduled pings or new infrastructure.
+
+The approved-knowledge checks covered Finance and Rent2Buy document differences, warranty exclusions, insurance, Finance delivery, Southampton-only Rent2Buy collection, and early termination under the customer's agreement. Unknown payment terms safely referred to the team. A generic multipart Finance documents reply could still give a fuller address and income checklist before conditional self-employment details. The live test of explicit ID, address and income wording answered that correctly. Business-page search supplies related-page metadata, and the approved passages provide the substantive evidence.
+
+### Widget, quote and telemetry verification
+
+Ran each actual Next.js widget in a local isolated Preview-mode configuration with synthetic stock, an in-memory CRM session/telemetry store and a test-only quote signer. The suite used the real CRM route handler, pricing matrix and quote verifier. Live model and approved-corpus behaviour were verified independently on the protected CRM Preview.
+
+- Van Finance Company showed the fixture listing illustration of £280/month and opened the existing application with `ZZ25XYZ` selected. The car reply identified the automatic gearbox and emitted the existing apply link for `ZZ25CAR`. The finance widget answers from the advertised listing. It does not read a customer's separate on-page Hire Purchase calculator selection.
+- Standalone Rent2Buy used the selected 48-month, 1,000-mile-per-month quote. The calculator, chat and application displayed £5,256 upfront and £384 monthly including VAT. The chat action carried the same signed token and registration as the calculator. The application reverified the quote and reached the postcode step. A reserved vehicle offered Browse and no application action. VFC and Rent2Buy context regressions also cover blocked stock.
+- At a 390px responsive viewport both existing mobile launchers opened and closed after the scroll reveal. The desktop actions opened the expected application routes. No application or postcode was submitted.
+- Reconciled launcher impressions, opens and closes from telemetry drafts `e343cee` and `7d86f77` by incorporating their final instrumentation into the two lean feature branches. Kept viewport and obstruction checks. Lean action clicks now use the existing CRM event and carry an action key and session association. Requests omit the quote token, action URL and free text. Both same-origin forwarders returned HTTP 200 for the launcher events in the local fixture. A real browser application click produced `cta_click` in the isolated CRM event store. Completion attribution is outside this check.
+- Signed quote URLs are preserved through both CRM response envelopes. The existing verifier rejects invalid signatures, expiry, registration mismatch and a changed pricing-source revision. Conversation IDs are opaque, hashed for storage, expire after 24 hours of inactivity and are checked with product/page context. The public test prefix is ignored for diagnostic access and suppression of telemetry in normal Production modes. Test-only diagnostics remain available under the existing explicit Preview/test configuration. An ungrounded or failed model reply returns safe copy and an approved contact action. The model and website proxy do not have a dedicated short upstream deadline, so verify the widget experience during a slow or unavailable upstream in the hosted rehearsal.
+
+Full local test results on Node 24 for exact original tips and reviewed code:
+
+| Repository | Original tip | Reviewed code |
+| --- | --- | --- |
+| CRM | 2,402 passed, 116 failed of 2,518 | 2,406 passed, 116 failed of 2,522 |
+| VFC | 184 passed, 4 failed of 188 | 186 passed, 4 failed of 190 |
+| Rent2Buy Vans | 118 passed, 5 failed of 123 | 121 passed, 5 failed of 126 |
+
+The targeted CRM Ask Me and quote-verifier run passed 43/43. Absolute full-suite failures differ from Opus's run. The failure identities were unchanged on all three repositories when compared to the same-environment original tips.
+
+### Customer-visible behaviour with the lean flag off
+
+- CRM Stage A changes the legacy replies too. Normalised Finance retail and monthly figures and specs reach the legacy formatter. Corrected Rent2Buy initial and monthly figures are labelled as illustrative unless a selected quote is verified. Verified selections are rechecked before the legacy reply and failed verification asks the customer to return to the calculator. Eligibility intent takes the knowledge path, and versioned business facts, verified vehicle context and quote evidence are citable by the legacy engine. VFC's approved policy and Rent2Buy amount wording therefore need sign-off before a flag-off release.
+- Both sites stop replacing CRM replies with hard-coded keyword copy. The VFC widget loads canonical finance vehicle and car context and works on the integrated Rent2Buy vehicle paths. The VFC proxy resolves start context from its stock source. Both sites pass the Rent2Buy selection token and suppress offers for known unavailable vehicle contexts through the existing availability checks. These changes affect legacy replies when the website branches are released.
+- The restored launcher analytics run either way. The mobile reveal, surrounding buttons and desktop launcher stay as implemented in the existing design. The widgets can render structured actions when supplied. The lean model and new knowledge-ranking path require the engine flag or an authorised Preview test session.
+- The exact case on legacy can still give an unrelated vehicle specification for a warranty question. The fallback for ungrounded model statements, and VFC listing prices versus its separate finance calculator, should both be included in the flag-off regression rehearsal. A standalone Recently viewed card outside Ask Me displayed a reserved fixture with an Apply label. The chat itself withheld Apply. Browser rehearsal should check the existing reserved-stock journeys separately.
+
+### Owner approvals and release sequence
+
+Confirm these three wording decisions before deploying any flag-off customer-visible changes:
+
+1. Preferred label for the £200 Rent2Buy payment. The brief says **holding deposit**, and the published copy says **vehicle reservation payment**. Keep it clearly separate from the £1,000 + VAT minimum initial rental.
+2. Whether Finance should explicitly say that applicants with CCJs or previous refusals can apply. Retain the condition that a lender assesses affordability and status and approval is never guaranteed.
+3. Whether to retain the published **new-start businesses considered** wording in the verified Finance facts. Confirm the intended scope without introducing a minimum-trading or approval promise.
+
+The existing legacy evidence guard can accept the approved Rent2Buy figures as business knowledge. That behaviour is distinct from the three wording decisions.
+
+After explicit owner approval:
+
+1. Verify the exact feature heads and unchanged release bases. Complete the branch-scoped hosted rehearsal first. Point both protected website Previews to the protected CRM Preview using the existing authenticated server-to-server path. Give the quote issuer, verifier and application form demonstrably matching Preview-only fixture settings. Repeat the full 36-case tests on the approved CRM head. Verify desktop and mobile actions, a changed signed quote, unavailable stock, and CRM telemetry. Existing hosted previews are not evidence of this connected quote path. Keep production routes, keys and data out of the rehearsal.
+2. Merge the CRM candidate into `marketing-crm/main` first with `ASKME_ENGINE` unset or `legacy`. Confirm the owner has approved the legacy-visible changes and the normal CRM release. Check that ordinary customer traffic gets legacy responses without diagnostics.
+3. Release the standalone website through `rent2buy-vans/main` after its approved Preview review. Smoke-test its application and quote handoffs and analytics before moving on.
+4. Integrate the VFC candidate into `vanfinance-co/vfc/staging` only. Verify the exact staging commit on a `van-finance-company-vfc` Preview, obtain explicit release approval, and build a fresh Production-target deployment from that exact commit with Production environment variables and domain assignment skipped. Record the commit and deployment ID. Check `/api/readiness` for VFC Production identity, `application.submissionMode = live`, application integration ready, address lookup configured, email configured and `productionReady = true`. Verify postcode lookup and both `/application-received` and `/finance-application-received` before and after moving the public domains. Assign customer domains only to the verified Production-target build.
+5. Enable the CRM's existing `ASKME_ENGINE=lean` switch only after both websites pass the application and telemetry checks. It enables lean for both sites. Watch reply failures, eligibility and warranty responses, latency, CTA clicks, quote/carry-through errors and successful application rates against the pre-release baseline.
+
+**Rollback.** For a lean-only regression switch CRM to `legacy` and create the approved Production rebuild. Verify that customers receive legacy replies. Flag-off CRM and widget behaviour remains in place. If a shared behaviour causes the incident, revert the responsible change on the correct release lineage and re-run the flag-off and application checks before releasing the corrected build. Preserve restored telemetry if it is unrelated. A whole-site VFC traffic rollback requires separate owner direction and a confirmed known-good Production deployment. A Preview deployment must never receive a public VFC alias.
