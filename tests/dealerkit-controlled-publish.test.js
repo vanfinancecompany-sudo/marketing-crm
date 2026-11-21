@@ -88,6 +88,26 @@ function cleanVfcPlan() {
   return buildControlledVehiclePublishPlan({ vehicle: v, decision: d, imageSets: sets, vfcWixResults: emptyVfcRows(), rent2buyWixResults: [] });
 }
 
+test("WGZ8806 can create fresh reviewed VFC listings after obsolete Wix hold is cleared", () => {
+  const v = vehicle({ registration: "WGZ8806", retailPrice: 10195, vatStatus: "plus_vat" });
+  const d = decision({ registration: "WGZ8806" });
+  const sets = buildProductImageSets({ vehicle: v, decision: d, importedDealerKitMedia: imported(), manualMediaReadiness: manualReadiness() });
+  const plan = buildControlledVehiclePublishPlan({ vehicle: v, decision: d, imageSets: sets, vfcWixResults: emptyVfcRows(), rent2buyWixResults: [], productMode: "finance" });
+  assert.equal(plan.canPublish, true);
+  assert.ok(!plan.blockers.some((entry) => /pricing_review_hold/.test(entry.code)));
+  assert.ok(plan.targets.some((entry) => entry.collectionId === "VANFINANCE-ALLVANS" && entry.operation === "create"));
+  assert.ok(plan.targets.some((entry) => entry.collectionId === "VANFINANCEPAGES" && entry.operation === "create"));
+});
+
+test("other historic VFC price/VAT holds still block controlled publishing", () => {
+  const v = vehicle({ registration: "WM73CXJ" });
+  const d = decision({ registration: "WM73CXJ" });
+  const sets = buildProductImageSets({ vehicle: v, decision: d, importedDealerKitMedia: imported(), manualMediaReadiness: manualReadiness() });
+  const plan = buildControlledVehiclePublishPlan({ vehicle: v, decision: d, imageSets: sets, vfcWixResults: emptyVfcRows(), rent2buyWixResults: [], productMode: "finance" });
+  assert.equal(plan.canPublish, false);
+  assert.ok(plan.blockers.some((entry) => entry.code === "vfc_pricing_review_hold"));
+});
+
 test("Van Finance primary image becomes both listing image and first gallery image", () => {
   const sets = buildProductImageSets({ vehicle: vehicle(), decision: decision(), importedDealerKitMedia: imported(), manualMediaReadiness: manualReadiness() });
   assert.equal(sets.vanFinance.mainUrl, "https://static.wixstatic.com/media/dk-2.jpg");
