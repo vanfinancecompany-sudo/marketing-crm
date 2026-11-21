@@ -16,6 +16,8 @@ const knowledge = {
     article("gearbox-stock", "Manual gearbox specifications", "Van Finance", "## Gearbox\nVehicle specifications include the gearbox type, model and engine size."),
     article("insurance", "Do I need insurance for a financed van?", "Van Finance", "## Insurance requirements\nYou must have fully comprehensive insurance in place before the financed van is delivered or collected. The insurance must name the van and cover business use if you use it for work."),
     article("documents", "Documents needed for van finance", "Van Finance", "## Documents\nFor a finance application you normally need photo driving licence, proof of address and recent bank statements. Self-employed applicants may be asked for trading evidence."),
+    article("new-business", "Van finance for new businesses", "Van Finance", "## Trading for only a few months\nA business that has only been trading for three months can still be considered. Lenders look at affordability and the business's circumstances; a short trading history can mean more questions."),
+    article("new-business-2", "Is van finance open to a new business?", "Van Finance", "## Short trading history\nNew businesses trading for a few months are considered. Approval depends on affordability and lender criteria."),
     article("r2b-agreement", "Rent2Buy agreement terms explained", "Rent2Buy", "## Ending the agreement early\nYou can return the van and end the Rent2Buy rental agreement early; the rental agreement explains notice and any charges for early termination."),
   ],
 };
@@ -134,4 +136,13 @@ test("a warranty follow-up uses the warranty passage on a vehicle page, not the 
   assert.equal(result.diagnostics.path, "model_with_knowledge");
   assert.match(result.reply, /warranty covers the gearbox/);
   assert.equal(result.diagnostics.retrieval.passages[0].title, "Used van warranty explained");
+});
+
+test("thin follow-up searches the latest question first: documents after a trading-history question", async () => {
+  fresh();
+  const history = [{ role: "user", content: "My business has only been trading for three months. Can I apply?" }, { role: "assistant", content: "Yes, you can apply." }];
+  const result = await retrieveKnowledge({ product: "finance", message: "What documents will I need?", history }, deps);
+  assert.equal(result.passages[0].title, "Documents needed for van finance", JSON.stringify(result.passages.map((item) => item.title)));
+  // Conversation context is kept alongside the latest question's evidence.
+  assert.ok(result.passages.some((item) => /new business/i.test(item.title)), JSON.stringify(result.passages.map((item) => item.title)));
 });
