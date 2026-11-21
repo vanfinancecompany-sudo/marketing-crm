@@ -110,11 +110,11 @@ test("verified business facts carry the approved policies, versioned, with revie
   assert.match(rent2buy, /no traditional credit check/i);
   assert.match(rent2buy, /100 driving miles of Southampton/i);
   assert.match(rent2buy, /£1,000 plus VAT/);
-  assert.match(rent2buy, /£200 holding deposit/);
+  assert.match(rent2buy, /£200 vehicle reservation payment \(holding deposit\)/);
   assert.doesNotMatch(finance, /Rent2Buy/i, "finance facts never mention Rent2Buy");
   assert.doesNotMatch(rent2buy, /lender|APR|hire purchase/i, "Rent2Buy facts never use finance terms");
   assert.match(businessFactsSource("finance").title, new RegExp(ASKME_BUSINESS_FACTS_VERSION.replace(/\./g, "\\.")));
-  assert.ok(ASKME_FACT_REVIEW_FLAGS.length >= 1);
+  assert.deepEqual(ASKME_FACT_REVIEW_FLAGS.map(({ fact }) => fact), ["rent2buy.reservation / rent2buy.initial_rental"]);
 });
 
 test("vehicle context text lists only present fields and labels listing figures as illustrations", () => {

@@ -29,10 +29,19 @@ async function currentSnapshot(){
 
 export async function loadRent2BuyPricingSource(registration,{
   getSnapshot=currentSnapshot,
+  environment=process.env,
   getDetail=(id)=>fetchDealerKitStockDetail(id,{specifications:false}),
 }={}){
   const target=reg(registration);
   if(!/^[A-Z]{2}[0-9]{2}[A-Z]{3}$/.test(target))reject("invalid_registration");
+  // Isolate issued quotes to the protected rehearsal branch and its test signer.
+  if(environment.VERCEL_ENV==="preview"&&environment.VERCEL_GIT_COMMIT_REF==="feature/askme-lean-backend-20261121"&&environment.ASKME_HOSTED_REHEARSAL==="true"){
+    if(target!=="ZZ25XYZ")reject("rehearsal_vehicle_unavailable");
+    return {
+      vehicle:{registration:target,supplierStockId:"askme-rehearsal-van",title:"Rehearsal Ford Transit Custom",year:2025,mileage:12000,retailPrice:12000,vatStatus:"plus_vat",status:"available"},
+      sourceRetailPrice:12000,sourceMode:"dealerkit_current_stock",
+    };
+  }
   if(pendingRent2BuySpecialDeal(target))reject("fixed_legacy_special_not_customisable");
   try{if(await currentActiveRent2BuyManualSpecial(target))reject("approved_manual_special_not_customisable")}
   catch(error){if(error instanceof Rent2BuyPricingSourceUnavailable)throw error;reject("manual_special_source_unavailable")}

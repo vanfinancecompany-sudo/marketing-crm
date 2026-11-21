@@ -1,6 +1,6 @@
 # Ask Me lean engine — handover (21 Nov 2026)
 
-Status: **Independent review complete on the feature branches. Hold for owner wording approval and a connected hosted Preview rehearsal.** For the current release gates and measured results, see Independent review at the end of this handover.
+Status: **All three policy wordings are owner-approved. Connected hosted Preview rehearsal is in progress.** For the current release gates and measured results, see Independent review at the end of this handover.
 
 Audit: "Ask Me AI Assistant — Technical Audit" (21 Nov 2026). Audit references: marketing-crm `fcfdb59`, vanfinance-co `c382892`, rent2buy-vans `0dc84b5`.
 
@@ -207,3 +207,7 @@ After explicit owner approval:
 5. Enable the CRM's existing `ASKME_ENGINE=lean` switch only after both websites pass the application and telemetry checks. It enables lean for both sites. Watch reply failures, eligibility and warranty responses, latency, CTA clicks, quote/carry-through errors and successful application rates against the pre-release baseline.
 
 **Rollback.** For a lean-only regression switch CRM to `legacy` and create the approved Production rebuild. Verify that customers receive legacy replies. Flag-off CRM and widget behaviour remains in place. If a shared behaviour causes the incident, revert the responsible change on the correct release lineage and re-run the flag-off and application checks before releasing the corrected build. Preserve restored telemetry if it is unrelated. A whole-site VFC traffic rollback requires separate owner direction and a confirmed known-good Production deployment. A Preview deployment must never receive a public VFC alias.
+
+### Owner approval recorded — 21 Nov 2026
+
+The owner approved all three outstanding policy wordings. Verified facts v2026-11-21.2 lead with **£200 vehicle reservation payment (holding deposit)**, separate from the initial rental. Finance applicants with CCJs or previous refusals can apply, subject to status, affordability and lender criteria. New-start businesses can be considered on the same basis. This approval covers wording and protected Preview rehearsal. Production release still requires a separate decision.
