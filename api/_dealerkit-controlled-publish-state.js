@@ -259,6 +259,7 @@ export function applyExistingRent2BuyMainImageFallback(imageSets = {}, rent2buyW
       listingImageUrl: rent2buyMain,
       mainSource: "existing_rent2buy_listing",
       galleryUrls,
+      galleryComplete: Boolean(galleryUrls.length && !(current.missingDealerKitImageIds || []).length),
       ready: Boolean(galleryUrls.length > 0 && !(current.unpreparedDealerKitImageIds || []).length),
     },
   };
