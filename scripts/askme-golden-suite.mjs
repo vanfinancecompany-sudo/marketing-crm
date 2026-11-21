@@ -10,12 +10,14 @@ const BASE = (process.env.ASKME_BASE_URL || "").replace(/\/$/, "");
 const SHARE = process.env.ASKME_SHARE_URL || "";
 const ENGINES = (process.env.ASKME_ENGINES || "lean,legacy").split(",");
 const PACE_MS = Number(process.env.ASKME_PACE_MS || 4300); // CRM limit: 15 requests/minute per IP
-const SUITE = process.env.ASKME_SUITE || "all"; // golden | knowledge | all
+const SUITE = process.env.ASKME_SUITE || "all"; // golden | knowledge | all | review
+const CASE_IDS = (process.env.ASKME_CASES || "").split(",").filter(Boolean);
 if (!BASE) { console.error("Set ASKME_BASE_URL"); process.exit(2); }
 
 const VFC = "https://www.vanfinancecompany.co.uk";
 const R2B = "https://www.rent2buyvans.co.uk";
 const REFUSAL = /can.t confirm|cannot confirm|not enough verified|don.t have enough|won.t guess|unable to confirm|check (?:that|the) vehicle.s pricing/i;
+const GEARBOX_COVER = /(?:generally |typically |normally |usually )?(?:covers? (?:the |major components including )?(?:gearbox|transmission)|(?:gearbox|transmission)(?: is| are)? (?:generally |typically |normally |usually )?(?:covered|included))|(?:gearbox|transmission).{0,30}(?:part of|comes under) (?:the )?(?:warranty|cover)/i;
 const PROMISE = /you(?:'ll| will) (?:be|get) (?:approved|accepted)|guaranteed (?:approval|acceptance)/i;
 
 const van = { registration: "TE57VAN", vehicle_kind: "van", title: "Ford Transit Custom 300 L1 Trend", year: "2022", mileage: "38,500", fuel: "Diesel", transmission: "Manual", stock_status: "available", specification: "MILEAGE: 38,500\nFUEL TYPE: DIESEL\nTRANSMISSION: MANUAL\nENGINE SIZE: 2.0\nBHP: 130", apply_link: "/apply?vehicle=TE57VAN", pricing: { finance_monthly: "£389", finance_retail_vat: "£18,995 +VAT" }, vat_status: "Plus VAT" };
@@ -40,7 +42,7 @@ const CASES = [
   ["Q2c", "VFC CCJ", financeGeneral, ["I've got a CCJ, can I still apply?"], [/\b(?:yes|can apply|can still apply|you can)\b/i], [REFUSAL, PROMISE], null],
   ["Q3", "VFC find a van", financeGeneral, ["Can you help me find a van?"], [/\?/, /\b(?:use|using|size|need|budget|work|carry|job)\b/i], [REFUSAL], null],
   ["Q3b", "VFC find a Transit", financeGeneral, ["Can you help me find a Transit?"], [/\?/], [REFUSAL], null],
-  ["Q3c", "VFC find a van follow-up", financeGeneral, ["Can you help me find a van?", "It's for building work, I can afford about £400 a month"], [/\S/], [REFUSAL, /£(?!400\b)\d/], null],
+  ["Q3c", "VFC find a van follow-up", financeGeneral, ["Can you help me find a van?", "It's for building work, I can afford about £400 a month"], [/\S/], [REFUSAL, /leave that one for the team/i, /£(?!400\b)\d/], null],
   ["Q4", "VFC key specs", financeVan, ["What are this van's key specs?"], [/38,500/, /diesel/i, /manual/i], [REFUSAL], null],
   ["Q4b", "VFC mileage", financeVan, ["What's the mileage on this van?"], [/38,500/], [REFUSAL], null],
   ["Q4c", "VFC car specs", financeCar, ["Is this car automatic?"], [/automatic/i], [REFUSAL], null],
@@ -69,7 +71,7 @@ const KNOWLEDGE_CASES = [
   ["K10", "delivery", financeGeneral, ["Can you deliver the van to me and how long does it take?"], [/deliver/i], [PROMISE], null, 1],
   ["K11", "collection", r2bGeneral, ["Can I collect the van myself?"], [/collect/i], [PROMISE], null, 0],
   ["K12", "multi-part", financeGeneral, ["What documents do I need, and do I need insurance before delivery?"], [/insur/i, /\b(?:licen[cs]e|bank|address|ID|statement|document)/i], [PROMISE], null, 2],
-  ["K13", "follow-up turn", financeGeneral, ["Do your vans come with a warranty?", "Does that include the gearbox?"], [/gearbox/i, /warrant|cover/i], [PROMISE, REFUSAL, /team (?:can|will|would need to) (?:confirm|check)|should check with/i], null, 1],
+  ["K13", "follow-up turn", financeGeneral, ["Do your vans come with a warranty?", "Does that include the gearbox?"], [GEARBOX_COVER], [PROMISE], null, 1],
   ["K14", "multi-turn context", financeVan, ["How much is this one a month?", "What would I need to bring to apply?"], [/\b(?:licen[cs]e|bank|address|ID|statement|document)/i], [PROMISE], null, 1],
   ["K15", "not in knowledge", financeGeneral, ["Do you sell boats or jet skis?"], [/\S/], [PROMISE, /£\d/], null, 0],
   ["K16", "not in knowledge 2", r2bGeneral, ["Can I pay the monthly rental in Bitcoin?"], [/\b(?:team|confirm|check|don.t|not)\b/i], [PROMISE], null, 0],
@@ -77,14 +79,14 @@ const KNOWLEDGE_CASES = [
 
 // Extra natural phrasing and release-gate scenarios. Run separately from the 36 cases.
 const REVIEW_CASES = [
-  ["I1", "warranty reference on a vehicle page", financeVan, ["Do your vans come with a warranty?", "Does that include the gearbox?"], [/gearbox/i, /warrant|cover/i], [PROMISE, REFUSAL, /team (?:can|will|would need to) (?:confirm|check)/i, /manual gearbox/i], null, 1],
+  ["I1", "warranty reference on a vehicle page", financeVan, ["Do your vans come with a warranty?", "Does that include the gearbox?"], [GEARBOX_COVER], [PROMISE, /manual gearbox/i], null, 1],
   ["I2", "plain-English proof and insurance", financeGeneral, ["What ID, address or income proof do I need, and do I need insurance before delivery?"], [/identity|\bID\b|licen[cs]e/i, /address/i, /insurance/i], [PROMISE, /rent\s?2\s?buy/i], null, 2],
   ["I3", "Rent2Buy application route", r2bGeneral, ["I'm ready to start the actual Rent2Buy application. Where do I go?"], [/apply|application/i], [PROMISE, /\blenders?\b|\bAPR\b/i], "apply"],
   ["I4", "Rent2Buy geographic wording", r2bGeneral, ["I live quite a way from Southampton. How far away can applicants live?"], [/100/, /driving miles/i], [PROMISE, /lenders?|APR/i], null, 0],
   ["I5", "Rent2Buy paperwork and ownership separated", r2bGeneral, ["Do you need proof of my address or bank statements before I can be accepted?"], [/address/i, /bank statement/i], [PROMISE, /\blenders?\b|\bAPR\b/i], null, 1],
   ["I6", "unknown pricing policy fallback", financeGeneral, ["Can I pay the finance deposit with Bitcoin or gold bullion?"], [/team|confirm|check|don.t know|not confirmed/i], [PROMISE, /accept (?:Bitcoin|gold bullion)/i], null, 0],
   ["I7", "Rent2Buy guarantor policy", r2bGeneral, ["Could somebody else guarantee the Rent2Buy payments for me? Can I use a guarantor?"], [/guarantor/i, /not|cannot|can.t|don.t/i], [PROMISE, /\blenders?\b|\bAPR\b/i], null, 0],
-  ["I8", "warranty reference on general page", financeGeneral, ["Do your vans come with a warranty?", "Does that include the gearbox?"], [/gearbox/i, /warrant|cover/i], [PROMISE, REFUSAL, /team (?:can|will|would need to) (?:confirm|check)/i], null, 1],
+  ["I8", "warranty reference on general page", financeGeneral, ["Do your vans come with a warranty?", "Does that include the gearbox?"], [GEARBOX_COVER], [PROMISE], null, 1],
 ];
 
 let cookie = "";
@@ -110,7 +112,7 @@ await authorise();
 const results = [];
 for (const engine of ENGINES) {
   const cases = SUITE === "review" ? REVIEW_CASES : [...(SUITE === "knowledge" ? [] : CASES), ...(SUITE === "golden" ? [] : KNOWLEDGE_CASES)];
-  for (const [id, group, context, messages, required, forbidden, action, minPassages = 0] of cases) {
+  for (const [id, group, context, messages, required, forbidden, action, minPassages = 0] of cases.filter(([id]) => !CASE_IDS.length || CASE_IDS.includes(id))) {
     const visitor = `askme-test-golden-${engine}`;
     const start = await call(context.origin, { action: "start", page_context: context.page, analytics_visitor_id: visitor, askme_engine: engine });
     const turns = [];

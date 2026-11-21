@@ -12,6 +12,7 @@ const knowledge = {
   sections: normalizeBusinessKnowledgeSections([], {}),
   articles: [
     article("warranty", "Used van warranty explained", "Van Finance", "## What the warranty covers\nEvery used van comes with a warranty covering the engine, gearbox and major mechanical components. Wear and tear items such as tyres, brakes and clutches are excluded from the warranty."),
+    article("warranty-general", "Best vans for work", "Van Finance", "## Do your vans come with a warranty?\nOur work vans come with a warranty. Speak to us for more details."),
     article("gearbox-stock", "Manual gearbox specifications", "Van Finance", "## Gearbox\nVehicle specifications include the gearbox type, model and engine size."),
     article("insurance", "Do I need insurance for a financed van?", "Van Finance", "## Insurance requirements\nYou must have fully comprehensive insurance in place before the financed van is delivered or collected. The insurance must name the van and cover business use if you use it for work."),
     article("documents", "Documents needed for van finance", "Van Finance", "## Documents\nFor a finance application you normally need photo driving licence, proof of address and recent bank statements. Self-employed applicants may be asked for trading evidence."),
@@ -132,4 +133,5 @@ test("a warranty follow-up uses the warranty passage on a vehicle page, not the 
   });
   assert.equal(result.diagnostics.path, "model_with_knowledge");
   assert.match(result.reply, /warranty covers the gearbox/);
+  assert.equal(result.diagnostics.retrieval.passages[0].title, "Used van warranty explained");
 });
