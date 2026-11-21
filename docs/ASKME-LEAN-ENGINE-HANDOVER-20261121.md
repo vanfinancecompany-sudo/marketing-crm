@@ -1,6 +1,6 @@
 # Ask Me lean engine — handover (21 Nov 2026)
 
-Status: **Stages A–D complete on feature branches. Ready for independent review; not ready to switch on for customers until the owner confirms the fact wording and an end-to-end widget test is done (see Outstanding).** Nothing is merged or deployed to production. The lean engine is **off for customers** (`ASKME_ENGINE` unset = legacy).
+Status: **Stages A–E complete on feature branches (E = on-demand knowledge retrieval, 21 Nov 2026 evening). Ready for independent review; not ready to switch on for customers until the owner confirms the fact wording and an end-to-end widget test is done (see Outstanding).** Nothing is merged or deployed to production. The lean engine is **off for customers** (`ASKME_ENGINE` unset = legacy).
 
 Audit: "Ask Me AI Assistant — Technical Audit" (21 Nov 2026). Audit references: marketing-crm `fcfdb59`, vanfinance-co `c382892`, rent2buy-vans `0dc84b5`.
 
@@ -8,7 +8,7 @@ Audit: "Ask Me AI Assistant — Technical Audit" (21 Nov 2026). Audit references
 
 | Repo | Branch | Base | Latest |
 | --- | --- | --- | --- |
-| marketing-crm | `feature/askme-lean-backend-20261121` | `main` @ `fcfdb59` | see `git log` |
+| marketing-crm | `feature/askme-lean-backend-20261121` | `main` @ `fcfdb59` | `bd727e0` (code; handover commit follows) |
 | vanfinance-co | `feature/vfc-askme-lean-integration-20261121` | `vfc/staging` @ `c382892` | `3568e08` |
 | rent2buy-vans | `feature/r2b-askme-lean-integration-20261121` | `main` @ `0dc84b5` | `abb2e04` |
 
@@ -69,8 +69,52 @@ Not measured: customer-visible streaming (not implemented), cold starts in isola
 
 Fix after the run: spec answers on car pages said "This van has a automatic gearbox" (shared legacy helper) — now "This car has an automatic gearbox" (`lib/publicVehiclePricing.js`, test added).
 
+## Stage E — on-demand knowledge retrieval (done, marketing-crm)
+
+Goal: restore full Knowledge Hub / Business Brain grounding in the lean engine without losing speed.
+
+What it does (`lib/askme/knowledgeRetrieval.js`, wired in `lib/askme/leanEngine.js` and `api/ai-assistant-customer.js`):
+
+- Reuses the existing approved corpus: `loadKnowledge` (now exported from `api/marketing-ai-assistant-competence.js`) → `getCachedAssistantKnowledge` (5-minute cache) → `preparedKnowledgeFor(product)` (strict Finance / Rent2Buy separation, unchanged). Active rows of `knowledge_business_pages` are cached separately (5 minutes) and offered as "related website pages".
+- Ranking: an in-memory BM25 index built once per cached corpus. Every meaningful word counts, weighted by rarity. (The legacy ranker keeps only whitelisted "focus terms", so "do I need insurance before delivery" was searched as just "delivery".) Small synonym map (docs/paperwork → documents, insure → insurance, cancel → termination, etc.).
+- Multi-part questions are split ("…, and do I need insurance…") and each part gets up to 3 passages (max 6). Single questions get up to 4 passages of ≤650 characters each, at most 2 per source, and must pass a relevance floor (coverage ≥ 0.3 of the question's specificity, score ≥ 0.35 of the best match). Unrelated questions get nothing.
+- Follow-ups: a thin follow-up ("does that include the gearbox?") also searches with the previous customer turn. A self-contained question searches alone. "What do I need to bring to apply?" is treated as a documents question.
+- No extra model call and no extra database round trip on a warm instance: retrieval runs before the single model call, and p95 retrieval time was 30 ms live. Retrieval failures never block an answer.
+- Prompt authority order: (1) verified facts, (2) live vehicle and verified calculator quote, (3) approved knowledge passages [K], (4) related website pages. A lower source never overrides a higher one; on conflict the reply follows the higher source and says the team can confirm. If nothing covers the question: "the team will confirm", never a guess. The £-figure, approval-promise and cross-product checks still run over all evidence, retrieved passages included.
+- The direct (no-model) price/spec answer is now only for plain price/spec questions. A question on a vehicle page that also mentions warranty, insurance, delivery, collection, documents, the agreement, cancelling or returns goes to the model with the same verified figures plus knowledge. Live bug found and fixed: "Does the warranty cover the gearbox?" had been answered "This van has a manual gearbox."
+- Diagnostics (test traffic only): path `model_with_knowledge`, passage titles, headings and scores, pages, corpus size, cache hits, `retrieval_ms`.
+- Tests: `tests/askme-knowledge-retrieval.test.js` (11) and `tests/askme-lean-engine.test.js` (12). Full CRM suite: only the 111 pre-existing failures.
+
+Golden suite: `scripts/askme-golden-suite.mjs` now has 36 cases (20 original + 16 knowledge: warranty coverage and exclusions, insurance, finance and Rent2Buy documents, new business, VAT, deposit, Rent2Buy early termination, delivery, collection, multi-part, follow-up turn, multi-turn, two unanswerable questions). `ASKME_SUITE=golden|knowledge|all`. Lean cases also assert a minimum number of retrieved passages. The summary splits latency by path.
+
+Live run 1 (21 Nov 2026, Vercel sandbox lhr1 → CRM Preview `marketing-muyes7zun`, commit `5058ee3`, model `gpt-6.1-sol`, same deployment for both engines):
+
+| Engine | Passed | Message p50 | Message p95 | Direct price/spec answers | Model answers (with knowledge) | Retrieval p95 | Avg tokens in/out |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Lean + retrieval | 35/36 | 1.42 s | 3.15 s | p50 0.28 s (n=9) | p50 1.62 s, p95 3.15 s (n=26) | 30 ms | 1,082 / 80 |
+| Legacy (+Stage A) | 27/36 | 2.82 s | 4.85 s | — | — | — | not reported |
+
+- Lean's only failure (K1, the warranty/gearbox shortcut) is fixed in `508e306`. Legacy failed the same K1, plus missing actions on pricing and reserved vans, "find a van" with no follow-up question, and a coverage reply that didn't ask for a location.
+- Cost: input grew from ~616 to ~1,080 tokens per model answer (the passages), and output is unchanged (~80). Direct price/spec answers still use no model.
+- Speed versus the Stage D baseline (p50 1.31 s / p95 3.99 s): p50 is about the same, p95 is better, and the knowledge path is well under the 5-second target.
+- Answer quality, read by hand: warranty exclusions, insurance before collection, Rent2Buy documents (3 bank statements, 2 proofs of address, licence), new business (3 months trading), VAT, deposit (from £99, lender confirms), Rent2Buy early termination, delivery (7–10 working days), collection (Southampton only) and the off-topic questions (boats → "vans only"; Bitcoin → team confirms) were all grounded and correct for the right product.
+- Weak in run 1, fixed in `bd727e0`, re-run below: the multi-part question answered insurance well but gave a generic documents line; the multi-turn "what would I need to bring to apply?" pulled passages from the earlier price turn.
+
+Live run 2 (knowledge set, lean, CRM Preview `marketing-l8wymlz9y`, commit `bd727e0`, fresh sandbox): **16/16 passed**. Message p50 2.27 s, p95 3.88 s. Average tokens 1,126 in / 76 out, with 4–6 passages per answer.
+- The warranty/gearbox question is now answered from the warranty knowledge.
+- The multi-part question gives both the documents list and the insurance answer.
+- "What would I need to bring to apply?" after a price question now lists ID, address and income documents.
+- Run 2 started on a cold instance, so it includes the first knowledge load from Supabase (~1.3–1.4 s, once per instance per 5-minute cache). On a warm instance retrieval is under 30 ms, which is why run 1's model-path p50 was 1.62 s.
+
+Testing note: the CRM allows 15 requests a minute and **200 requests a day per IP**. A full two-engine run (~155 requests) uses most of a day's allowance from one IP. A second run from the same sandbox gets 429s, so use a fresh sandbox, or `ASKME_SUITE=knowledge` / `ASKME_ENGINES=lean`.
+
 ## Outstanding (priority order)
 
+0. **Knowledge retrieval follow-ups (Stage E):**
+   - (a) Thin follow-ups are sometimes over-cautious. After "Do your vans come with a warranty?", "Does that include the gearbox?" got "the team can check", while the standalone question is answered from the warranty knowledge. Consider letting the model see the passages retrieved for the previous turn as well.
+   - (b) Keep the knowledge cache warm (a scheduled ping or a longer TTL) so the first question on a cold instance doesn't pay ~1.4 s for the Supabase load.
+   - (c) Business pages are only offered as links (the table holds no page text). Page bodies would need indexing if they should be quoted.
+   - (d) Semantic (embedding) retrieval was not added. The BM25 ranker passed every live knowledge case, so embeddings are only worth trying if real conversations show misses. Compare on the same suite before switching.
 1. **Owner review of fact wording** — `ASKME_FACT_REVIEW_FLAGS` in `lib/askme/businessFacts.js` (holding deposit vs reservation payment; CCJ wording; "new-start businesses" from website copy; legacy deposit-amount guardrail now satisfied by approved facts).
 2. **End-to-end widget test on Previews.** Website Previews call the PRODUCTION CRM by default (`JASMINE_PUBLIC_ENDPOINT`). Either point Preview-branch-scoped `JASMINE_PUBLIC_ENDPOINT` at the CRM Preview (protected; needs a bypass approach) or merge the CRM branch first with `ASKME_ENGINE` unset (no customer change) and then test the website Previews against production with `askme-test-` visitors + `ASKME_ENGINE=lean_test`. Owner approval needed either way.
 3. **Verified quote end-to-end.** Production CRM already has `RENT2BUY_QUOTE_VERIFIER_ENABLED` and `RENT2BUY_QUOTE_SIGNING_SECRET` (names checked, values not read); this feature branch's Preview does not, so on Preview every token resolves as "unverified" (that path was tested live). Verified-quote answers are unit-tested only until tested against production config.
@@ -83,5 +127,5 @@ Fix after the run: spec answers on car pages said "This van has a automatic gear
 ## Exact next steps for Codex
 
 1. `git fetch` all three branches; re-run unit tests: marketing-crm `node --test` (expect only the 111 pre-existing failures), vanfinance-co `node --test tests/*.test.mjs` (1 pre-existing), rent2buy-vans `node --test tests/*.test.mjs` (3 pre-existing).
-2. Re-run the golden suite against the latest CRM Preview: `ASKME_BASE_URL=<preview> ASKME_SHARE_URL=<vercel share link> node scripts/askme-golden-suite.mjs` (needs outbound access to *.vercel.app; ~6 min for both engines because of the 15 req/min rate limit).
+2. Re-run the golden suite against the latest CRM Preview: `ASKME_BASE_URL=<preview> ASKME_SHARE_URL=<vercel share link> [ASKME_SUITE=all|golden|knowledge] [ASKME_ENGINES=lean,legacy] node scripts/askme-golden-suite.mjs` (needs outbound access to *.vercel.app; ~11 min for all 36 cases on both engines because of the 15 req/min limit; mind the 200/day per-IP limit). Expect lean 36/36.
 3. After owner approval only: merge marketing-crm first (lean stays off), then the two website branches, then enable `ASKME_ENGINE=lean` and watch telemetry; rollback = unset `ASKME_ENGINE`.
