@@ -1,6 +1,6 @@
 # Ask Me lean engine — handover (21 Nov 2026)
 
-Status: **Stages A–C implemented and unit-tested; Stage D (live golden suite + benchmark) in progress.** Nothing is merged or deployed to production. The lean engine is **off for customers** (`ASKME_ENGINE` unset = legacy).
+Status: **Stages A–D complete on feature branches. Ready for independent review; not ready to switch on for customers until the owner confirms the fact wording and an end-to-end widget test is done (see Outstanding).** Nothing is merged or deployed to production. The lean engine is **off for customers** (`ASKME_ENGINE` unset = legacy).
 
 Audit: "Ask Me AI Assistant — Technical Audit" (21 Nov 2026). Audit references: marketing-crm `fcfdb59`, vanfinance-co `c382892`, rent2buy-vans `0dc84b5`.
 
@@ -50,7 +50,38 @@ Full suite: 2,495 tests, 111 failing — identical to the 111 failing on unchang
 
 Pricing matrix or quote calculations; quote verification rules; application eligibility criteria or routes; Supabase schema/security; session, rate-limit and telemetry tables; launcher buttons, labels, mobile scroll-to-reveal and the three-button mobile bars.
 
-## Next steps (in order)
+## Stage D — golden suite and benchmark (done)
 
-1. Stage D: run `scripts/askme-golden-suite.mjs` against the CRM Preview (both engines) — results below once recorded.
-2. Website Previews currently call the PRODUCTION CRM (`JASMINE_PUBLIC_ENDPOINT` default). To test end-to-end in the widgets, point a Preview-branch-scoped `JASMINE_PUBLIC_ENDPOINT` at the CRM Preview (needs a protection bypass) — not done; owner approval needed for env changes.
+`scripts/askme-golden-suite.mjs`: 20 cases (the 7 agreed questions + rephrasings: bad credit, CCJ, self-employed, postcode coverage, monthly cost, Transit search, follow-up turn, car page, reserved van, unverifiable quote). Checks reply content (required facts/figures, forbidden refusals, approval promises, cross-product words) and expected actions. Dummy vehicle fixtures; test visitors (`askme-test-golden-*`), excluded from telemetry.
+
+Run 21 Nov 2026 ~14:45 UTC from a Vercel sandbox in London (lhr1) against CRM Preview `marketing-r8ehfelp0` (commit `54babb7`), same deployment, same model (`gpt-6.1-sol` per Preview env), legacy engine = legacy WITH Stage A fixes:
+
+| Engine | Passed | Message p50 | Message p95 | Model-path median | Session start p50 | Avg tokens (in/out) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Lean | **20/20** | **1.31 s** | **3.99 s** | 1.9 s | 0.19 s | 616 / 85 |
+| Legacy (+Stage A) | 12/20 | 2.57 s | 4.47 s (max 10.3 s) | 3.25 s | 0.21 s | not reported by legacy |
+
+Lean timings breakdown (from diagnostics): verified pricing/spec answers 0.22–0.28 s end to end (no model); model call 1.3–3.9 s; checks ~1 ms; session persistence 40–75 ms. Legacy failures: no actions (pricing, reserved van), "find a van" without a follow-up question, reserved van answered "I can't confirm", coverage reply without asking for location.
+
+For comparison, the audit (21 Nov, before any change, production) measured 2.8–4.3 s model answers with 6 of 8 test questions failing.
+
+Not measured: customer-visible streaming (not implemented), cold starts in isolation, legacy token use.
+
+Fix after the run: spec answers on car pages said "This van has a automatic gearbox" (shared legacy helper) — now "This car has an automatic gearbox" (`lib/publicVehiclePricing.js`, test added).
+
+## Outstanding (priority order)
+
+1. **Owner review of fact wording** — `ASKME_FACT_REVIEW_FLAGS` in `lib/askme/businessFacts.js` (holding deposit vs reservation payment; CCJ wording; "new-start businesses" from website copy; legacy deposit-amount guardrail now satisfied by approved facts).
+2. **End-to-end widget test on Previews.** Website Previews call the PRODUCTION CRM by default (`JASMINE_PUBLIC_ENDPOINT`). Either point Preview-branch-scoped `JASMINE_PUBLIC_ENDPOINT` at the CRM Preview (protected; needs a bypass approach) or merge the CRM branch first with `ASKME_ENGINE` unset (no customer change) and then test the website Previews against production with `askme-test-` visitors + `ASKME_ENGINE=lean_test`. Owner approval needed either way.
+3. **Verified quote end-to-end.** Production CRM already has `RENT2BUY_QUOTE_VERIFIER_ENABLED` and `RENT2BUY_QUOTE_SIGNING_SECRET` (names checked, values not read); this feature branch's Preview does not, so on Preview every token resolves as "unverified" (that path was tested live). Verified-quote answers are unit-tested only until tested against production config.
+4. Streaming responses (proxy + widget) for ~1 s time-to-first-words on model answers.
+5. Stock search tool for "find me a van" so recommendations come from verified current stock (today: asks use/size/budget and offers Browse).
+6. Regional hosting: functions run in the default US region; moving CRM + website functions next to Supabase/UK users is a separate approved change (verify Supabase region first).
+7. WhatsApp adapter (later): map phone number → session, product choice prompt, `capabilities.buttons=false` (actions rendered as text links), authenticate the WhatsApp webhook; reuse `answerCustomerMessage()` unchanged.
+8. Starter questions (separate final stage, after 1–3).
+
+## Exact next steps for Codex
+
+1. `git fetch` all three branches; re-run unit tests: marketing-crm `node --test` (expect only the 111 pre-existing failures), vanfinance-co `node --test tests/*.test.mjs` (1 pre-existing), rent2buy-vans `node --test tests/*.test.mjs` (3 pre-existing).
+2. Re-run the golden suite against the latest CRM Preview: `ASKME_BASE_URL=<preview> ASKME_SHARE_URL=<vercel share link> node scripts/askme-golden-suite.mjs` (needs outbound access to *.vercel.app; ~6 min for both engines because of the 15 req/min rate limit).
+3. After owner approval only: merge marketing-crm first (lean stays off), then the two website branches, then enable `ASKME_ENGINE=lean` and watch telemetry; rollback = unset `ASKME_ENGINE`.

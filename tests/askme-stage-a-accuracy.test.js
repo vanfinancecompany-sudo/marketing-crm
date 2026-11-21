@@ -176,3 +176,10 @@ test("legacy engine: a spec answer from the live vehicle can cite the vehicle an
   assert.match(prompt, /MILEAGE: 21,000/);
   assert.match(result.reply || "", /21,000 miles/);
 });
+
+test("spec answers name a car as a car and use the right article", () => {
+  const vehicle = normalisePageContext({ page_type: "finance_vehicle", vehicle: { registration: "TE57CAR", vehicle_kind: "car", title: "Toyota Land Cruiser", transmission: "Automatic" } }).vehicle;
+  const reply = publicVehiclePricingReply({ message: "Is this car automatic?", pageType: "finance_vehicle", productLock: "finance", vehicleContext: vehicle });
+  assert.match(reply, /this car/i);
+  assert.match(reply, /an automatic gearbox/);
+});
