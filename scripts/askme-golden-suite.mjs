@@ -67,7 +67,7 @@ const KNOWLEDGE_CASES = [
   ["K6", "new business", financeGeneral, ["I've only been trading for three months, can I still get finance?"], [/\S/], [PROMISE], null, 0],
   ["K7", "VAT explained", financeVan, ["Can you explain how the VAT works on this van?"], [/VAT/], [PROMISE], null, 0],
   ["K8", "deposit explained", financeGeneral, ["How does the deposit work, and is it refundable?"], [/deposit/i], [PROMISE], null, 1],
-  ["K9", "R2B agreement + early end", r2bGeneral, ["What happens if I want to end the Rent2Buy agreement early?"], [/14\s+days?/i, /no (?:early[- ]termination )?penalt(?:y|ies)/i, /account|up to date|payments/i], [PROMISE, /\blenders?\b|\bAPR\b/i], null, 1],
+  ["K9", "R2B agreement + early end", r2bGeneral, ["What happens if I want to end the Rent2Buy agreement early?"], [/14\s+days?/i, /(?:no|without (?:an? )?) (?:early[- ]termination )?penalt(?:y|ies)/i, /account|up to date|payments/i], [PROMISE, /\blenders?\b|\bAPR\b/i], null, 1],
   ["K10", "delivery", financeGeneral, ["Can you deliver the van to me and how long does it take?"], [/deliver/i], [PROMISE], null, 1],
   ["K11", "collection", r2bGeneral, ["Can I collect the van myself?"], [/collect/i], [PROMISE], null, 0],
   ["K12", "multi-part", financeGeneral, ["What documents do I need, and do I need insurance before delivery?"], [/insur/i, /\b(?:licen[cs]e|bank|address|ID|statement|document)/i], [PROMISE], null, 2],
