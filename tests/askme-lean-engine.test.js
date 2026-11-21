@@ -182,3 +182,18 @@ test("endpoint: ordinary customers stay on the legacy engine and get no diagnost
   assert.equal(response.payload.reply, "Legacy reply.");
   assert.equal(response.payload.diagnostics, undefined);
 });
+
+test("warranty question on a vehicle page is not short-circuited as a gearbox spec answer", async () => {
+  const { answerCustomerMessage } = await import("../lib/askme/leanEngine.js");
+  let modelCalled = false;
+  const result = await answerCustomerMessage({
+    channel: "website", product: "finance", message: "Does the warranty cover the gearbox and engine?", history: [],
+    context: { page_type: "finance_vehicle", vehicle: { registration: "TE57VAN", title: "Ford Transit Custom", transmission: "Manual", stock_status: "available", pricing: { finance_monthly: "£389" } } },
+  }, {
+    environment: { OPENAI_API_KEY: "test" },
+    retrieve: async () => ({ passages: [{ title: "Warranty", heading: "Cover", passage: "The warranty covers the engine and gearbox.", type: "article", score: 5 }], pages: [] }),
+    requestReply: async () => { modelCalled = true; return { reply: "Yes, the warranty covers the engine and gearbox.", action: "none", usage: {} }; },
+  });
+  assert.equal(modelCalled, true);
+  assert.notEqual(result.diagnostics.path, "verified_pricing");
+});
