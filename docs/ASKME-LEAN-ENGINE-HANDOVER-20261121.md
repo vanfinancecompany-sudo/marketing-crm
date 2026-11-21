@@ -211,3 +211,21 @@ After explicit owner approval:
 ### Owner approval recorded — 21 Nov 2026
 
 The owner approved all three outstanding policy wordings. Verified facts v2026-11-21.2 lead with **£200 vehicle reservation payment (holding deposit)**, separate from the initial rental. Finance applicants with CCJs or previous refusals can apply, subject to status, affordability and lender criteria. New-start businesses can be considered on the same basis. This approval covers wording and protected Preview rehearsal. Production release still requires a separate decision.
+
+
+## Assistant continuation — final CRM Preview benchmark (21 Nov 2026)
+
+After Codex's Work usage limit interrupted the hosted rehearsal, the assistant located Codex's **still-running Vercel London sandbox** (session `sbx_fpBRSdzHNDGgtYS4Bra5z6G6X8MK`) and observed the existing comparison through completion. **This was continuation of the already-running test, not a new test with modified fixtures.** Output was `/tmp/askme-final-verified.jsonl` in the ephemeral session. Target was the protected Marketing CRM Preview `marketing-emlchp0nx-stuart-westons-projects.vercel.app`, deployed from exact feature **code commit `ebbcafc32eaa7f52cc8de63b065cbdb01d36a90c`**.
+
+| Same-Preview engine | Passed | Failed | Message p50 | Message p95 | HTTP errors |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Lean with knowledge | **36/36** | 0 | **1,630 ms** | **3,487 ms** | 0 |
+| Legacy with Stage A | **28/36** | 8 | **3,007 ms** | **5,015 ms** | 0 |
+
+Legacy failed Q1, Q1b, Q1c, Q3, Q4d, R2, R2b and K1. All 36 lean rows had `pass=true` and no non-200 response. The answers for K1 and K13 were manually inspected and correctly explained general gearbox warranty coverage with vehicle-specific qualification. K12 addressed documents using approved knowledge; R2 correctly distinguished an advertised Rent2Buy illustration from a selected verified quote; K16 did not invent Bitcoin payment acceptance. These are CRM-client measurements; **website proxy, browser widget rendering and actual application submission are excluded**.
+
+Additional read-only checks: the current hosted VFC and standalone Rent2Buy protected Preview vehicle pages for synthetic registration `ZZ25XYZ` both returned HTTP 200 and rendered expected synthetic vehicle content. This confirms page availability, **not** a newly completed interactive quote → chat → application rehearsal after the latest CRM fix. Earlier Codex hosted checks succeeded before its final routing correction; the latest end-to-end payment question still needs a connected browser rerun.
+
+The latest source includes `FIXED_CHARGE_QUESTION` routing to business facts even when a verified calculator quote is present, and the regression tests in `tests/askme-stage-a-accuracy.test.js` cover the £200 reservation payment and holding deposit wording. Codex reported 50 focused tests passing after this fix. **Those targeted tests and source inspection are not the same as a hosted interactive rerun of the payment question.**
+
+**Open release gates:** (1) rerun the hosted Rent2Buy selected quote → chat → application and explicitly ask whether the £200 reservation payment is separate from the initial rental on both protected website Previews connected to this exact CRM build; (2) repeat desktop/mobile launchers, reserved-stock and telemetry checks on these final deployed heads; (3) confirm the temporary rehearsal-only credentials/flags remain Preview-scoped and are not carried into Production; (4) obtain a separate explicit production-release authorization. No production merge, domain move or lean-engine enablement was made by this continuation.
