@@ -88,8 +88,11 @@ test("current Rent2Buy vehicle context answers fixed initial rental, monthly pay
     vehicleContext,
     rememberedFacts,
   });
-  assert.match(priceReply, /initial rental of £2,000 \+ VAT \/ £2,400 inc VAT/i);
-  assert.match(priceReply, /monthly payments of £499 \+ VAT \/ £598.80 inc VAT/i);
+  // Listing figures are labelled as an advertised illustration and point to the calculator.
+  assert.match(priceReply, /advertised illustration/i);
+  assert.match(priceReply, /£2,000 \+ VAT \/ £2,400 inc VAT initial rental/i);
+  assert.match(priceReply, /£499 \+ VAT \/ £598.80 inc VAT per month/i);
+  assert.match(priceReply, /calculator/i);
   assert.doesNotMatch(priceReply, /48 months/i);
 
   const termReply = publicVehiclePricingReply({

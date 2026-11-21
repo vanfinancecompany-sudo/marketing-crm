@@ -1,6 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
 import { simulateCustomerConversation } from "./marketing-ai-assistant-competence.js";
+import { loadKnowledge } from "./marketing-ai-assistant-competence.js";
+import { retrieveKnowledge } from "../lib/askme/knowledgeRetrieval.js";
 import { isExplicitProductComparison } from "../lib/aiAssistantCompetence.js";
 import {
   createPublicConversationId,
@@ -21,6 +23,11 @@ import { isRent2BuyGuarantorQuestion, publicApplicationGuidanceReply } from "../
 import { isVehicleSpecificationQuestion, publicVehiclePricingReply } from "../lib/publicVehiclePricing.js";
 import { controlledBusinessRuntimeReply, controlledProductComparisonReply, controlledVehicleNextStepReply } from "../lib/salesConversationEngine.js";
 import { buildPublicStockNavigation } from "../lib/publicStockNavigation.js";
+import { resolveSelectedQuote } from "../lib/askme/selectedQuote.js";
+import { answerCustomerMessage } from "../lib/askme/leanEngine.js";
+import { buildAskMeRequest } from "../lib/askme/contract.js";
+import { checkIncomingRent2BuyQuote } from "./_rent2buy-quote-verify-handler.mjs";
+import { loadRent2BuyPricingSource } from "./_rent2buy-quote-source.js";
 import {
   buildCanonicalConversationInput,
   canonicalSessionState,
@@ -114,7 +121,7 @@ function sessionExpiry() {
   return new Date(Date.now() + SESSION_HOURS * 60 * 60 * 1000).toISOString();
 }
 
-async function createSession(supabase, pageContext, environment = process.env) {
+async function createSession(supabase, pageContext, environment = process.env, { testTraffic = false } = {}) {
   const conversationId = createPublicConversationId();
   const productLock = pageProductLock(pageContext.page_type);
   const greeting = initialCustomerReply(pageContext.page_type, pageContext.vehicle);
@@ -131,7 +138,7 @@ async function createSession(supabase, pageContext, environment = process.env) {
     vehicle_context: pageContext.vehicle,
     conversation_history: [],
     remembered_facts: rememberedFacts,
-    journey_state: {},
+    journey_state: testTraffic ? { test_traffic: true } : {},
     application_readiness: "Exploring",
     budget: null,
     employment: null,
@@ -170,7 +177,7 @@ async function updateSession(supabase, session, changes) {
 
 function assertPageContext(session, supplied) {
   if (session.page_type !== supplied.page_type) throw new PublicAssistantError(409, "invalid_request", "The page context changed. Please start a new conversation on this page.");
-  if (session.page_type === "finance_vehicle") {
+  if (session.page_type === "finance_vehicle" || session.page_type === "rent2buy_general") {
     const storedRegistration = clean(session.vehicle_context?.registration, 20);
     const suppliedRegistration = clean(supplied.vehicle?.registration, 20);
     if (storedRegistration && suppliedRegistration && storedRegistration !== suppliedRegistration) throw new PublicAssistantError(409, "invalid_request", "The vehicle changed. Please start a new conversation for this van.");
@@ -192,6 +199,49 @@ function productSelectionReply(product) {
     : "Great — I’ll keep this conversation focused on Van Finance. What would you like to know?";
 }
 
+// ---- Ask Me engine selection and website channel adapter ---------------------------
+// ASKME_ENGINE: "legacy" (default) | "lean" (all traffic). Visitors whose analytics id
+// starts with "askme-test-" are test traffic: on Preview deployments they use the lean
+// engine (or legacy when they ask for it, for side-by-side benchmarks), and their
+// telemetry is never recorded, so they stay out of customer reporting.
+export function isAskMeTestVisitor(body = {}) {
+  return /^askme-test-/i.test(clean(body.analytics_visitor_id, 100));
+}
+
+function isEnabledAskMeTestTraffic(body, environment) {
+  const mode = clean(environment.ASKME_ENGINE, 20).toLowerCase();
+  return isAskMeTestVisitor(body) && (environment.VERCEL_ENV === "preview" || mode === "lean_test");
+}
+
+export function selectAskMeEngine(body = {}, environment = process.env) {
+  const mode = clean(environment.ASKME_ENGINE, 20).toLowerCase();
+  if (isEnabledAskMeTestTraffic(body, environment)) {
+    return clean(body.askme_engine, 10).toLowerCase() === "legacy" ? "legacy" : "lean";
+  }
+  return mode === "lean" ? "lean" : "legacy";
+}
+
+// Site-specific links belong to the channel adapter, not the engine.
+const WEBSITE_CHANNELS = Object.freeze({
+  "vanfinancecompany.co.uk": {
+    channel: "website_vfc",
+    links: {
+      finance: { browse_stock: "/vans", apply: "/apply", contact: "/contact" },
+      rent2buy: { browse_stock: "/rent2buy/vans", apply: "/rent2buy-application", contact: "/contact" },
+    },
+  },
+  "rent2buyvans.co.uk": {
+    channel: "website_rent2buy",
+    links: { rent2buy: { browse_stock: "/view-all-vans", apply: "/apply-for-no-credit-check-rent2buy-vans", contact: "/contact" } },
+  },
+});
+
+export function websiteChannelFor(origin = "") {
+  let host = "";
+  try { host = new URL(origin).hostname.replace(/^www\./, ""); } catch { host = ""; }
+  return WEBSITE_CHANNELS[host] || { channel: "website", links: {} };
+}
+
 async function recordTelemetrySafely(supabase, payload) {
   try {
     if (Array.isArray(payload)) await recordAssistantTelemetryEvents(supabase, payload);
@@ -208,6 +258,7 @@ async function recordTelemetrySafely(supabase, payload) {
 }
 
 async function recordResponseTelemetry({ supabase, body, environment, session, productContext, messageNumber, result = null, responseMode, cta = null }) {
+  if (isEnabledAskMeTestTraffic(body, environment)) return;
   const diagnostics = result
     ? telemetryFromAssistantResult(result)
     : {
@@ -246,10 +297,62 @@ async function recordResponseTelemetry({ supabase, body, environment, session, p
   await recordTelemetrySafely(supabase, events);
 }
 
+function requestOriginFromBody(body = {}) {
+  return clean(body.__origin, 500);
+}
+
+async function continueWithLeanEngine({ supabase, body, environment, session, history, message, messageNumber, productLock, pageContext, selectedQuote, conversationId, dependencies }) {
+  const website = websiteChannelFor(requestOriginFromBody(body));
+  const request = buildAskMeRequest({
+    channel: website.channel,
+    product: productLock,
+    message,
+    history,
+    facts: session.remembered_facts || {},
+    context: {
+      page_type: session.page_type,
+      vehicle: session.vehicle_context || {},
+      selected_quote: selectedQuote,
+      quote_token: selectedQuote?.status === "verified" ? pageContext.selected_quote_token : null,
+    },
+  });
+  const result = await answerCustomerMessage(request, {
+    environment,
+    links: website.links[productLock] || {},
+    requestReply: dependencies.leanRequestReply,
+    retrieve: dependencies.leanRetrieve || ((input) => retrieveKnowledge(input, {
+      environment,
+      loadKnowledge: () => loadKnowledge(supabase),
+      loadBusinessPages: async () => {
+        const result = await supabase.from("knowledge_business_pages").select("title,url,product,description,keywords,customer_intent,priority,active").eq("active", true);
+        if (result.error) throw new Error(result.error.message);
+        return result.data || [];
+      },
+    })),
+  });
+  const persistStart = performance.now();
+  // Session persistence stays on the critical path (conversation continuity); the
+  // legacy competence-result write and learning analysis are not used by this engine.
+  await Promise.all([
+    updateSession(supabase, session, {
+      product_lock: productLock,
+      conversation_history: boundedHistory([...history, { role: "user", content: message }, { role: "assistant", content: result.reply }]),
+      message_count: messageNumber,
+    }),
+    recordResponseTelemetry({ supabase, body, environment, session, productContext: productLock, messageNumber, responseMode: `lean_${result.diagnostics.path}`, cta: result.actions[0] ? { action_key: result.actions[0].type, label: result.actions[0].label } : null }),
+  ]);
+  const persistMs = Math.round(performance.now() - persistStart);
+  const payload = safeCustomerPayload({ reply: result.reply, actions: result.actions, conversationId, status: result.status });
+  // Timings are returned only to test visitors, for benchmarking; never to customers.
+  if (isEnabledAskMeTestTraffic(body, environment)) payload.diagnostics = { ...result.diagnostics, timings_ms: { ...result.diagnostics.timings_ms, persist_ms: persistMs } };
+  return payload;
+}
+
 async function startConversation(supabase, body, environment) {
   const pageContext = normalisePageContext(body.page_context);
-  const { session, conversationId, greeting } = await createSession(supabase, pageContext, environment);
-  await recordTelemetrySafely(supabase, {
+  const testTraffic = isEnabledAskMeTestTraffic(body, environment);
+  const { session, conversationId, greeting } = await createSession(supabase, pageContext, environment, { testTraffic });
+  if (!testTraffic) await recordTelemetrySafely(supabase, {
     event_type: "conversation_start",
     visitor_hash: assistantTelemetryVisitorHash(body.analytics_visitor_id, environment),
     customer_session_id: session.id,
@@ -264,7 +367,7 @@ async function startConversation(supabase, body, environment) {
   });
 }
 
-async function continueConversation(supabase, body, environment, simulateConversation = simulateCustomerConversation) {
+async function continueConversation(supabase, body, environment, simulateConversation = simulateCustomerConversation, dependencies = {}) {
   const conversationId = clean(body.conversation_id, 100);
   const session = await loadSession(supabase, conversationId, environment);
   const pageContext = normalisePageContext(body.page_context);
@@ -351,6 +454,18 @@ async function continueConversation(supabase, body, environment, simulateConvers
     return safeCustomerPayload({ reply, cta: null, conversationId, status: "ready" });
   }
 
+  // The customer's on-page calculator selection, verified server-side by the existing
+  // CRM quote verifier. Never reconstructed from browser figures.
+  const selectedQuote = await resolveSelectedQuote({
+    token: pageContext.selected_quote_token,
+    registration: session.vehicle_context?.registration,
+    product: productLock,
+  }, dependencies.quoteCheck || checkIncomingRent2BuyQuote, { env: environment, loadSource: dependencies.loadQuoteSource || loadRent2BuyPricingSource });
+
+  if (productLock && selectAskMeEngine(body, environment) === "lean") {
+    return continueWithLeanEngine({ supabase, body, environment, session, history, message, messageNumber, productLock, pageContext, selectedQuote, conversationId, dependencies });
+  }
+
   let controlledFallback = applicationGuidanceReply ? {
     reply: applicationGuidanceReply,
     recommended_action: "continue",
@@ -363,6 +478,7 @@ async function continueConversation(supabase, body, environment, simulateConvers
     productLock,
     vehicleContext: session.vehicle_context,
     rememberedFacts: session.remembered_facts,
+    selectedQuote,
   });
   if (pricingReply) {
     const businessReply = controlledBusinessRuntimeReply({
@@ -390,6 +506,7 @@ async function continueConversation(supabase, body, environment, simulateConvers
     pageContext,
     controlledFallback,
   });
+  canonicalInput.selected_quote = selectedQuote;
   // Live customer chat keeps the saved competence result, but defers the heavy
   // knowledge-opportunity analysis to the existing protected "Analyse Existing" workflow.
   // That learning pass re-reads the full knowledge library and must not sit on the customer response path.
@@ -428,13 +545,14 @@ export async function handleCustomerAssistantRequest(request, response, dependen
   let conversationId = null;
   try {
     body = parseBody(request);
+    Object.defineProperty(body, "__origin", { value: origin, enumerable: false });
     conversationId = clean(body.conversation_id, 100) || null;
     const supabase = dependencies.supabase || getSupabase(environment);
     await enforceRateLimits(supabase, request, environment);
     const payload = body.action === "start"
       ? await startConversation(supabase, body, environment)
       : body.action === "message"
-        ? await continueConversation(supabase, body, environment, dependencies.simulateConversation || simulateCustomerConversation)
+        ? await continueConversation(supabase, body, environment, dependencies.simulateConversation || simulateCustomerConversation, dependencies)
         : (() => { throw new PublicAssistantError(400, "invalid_request", "Please start or continue an assistant conversation."); })();
     return response.status(200).json(payload);
   } catch (error) {
