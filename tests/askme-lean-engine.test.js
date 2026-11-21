@@ -126,6 +126,24 @@ test("longer conversations retain eight exchanges, follow-ups and updated prefer
   assert.ok(prompt.input.length < 15000, "conversation evidence remains bounded");
 });
 
+test("Rent2Buy reservation-payment follow-up is answered as policy rather than repeating selected quote", async () => {
+  const history = [
+    { role: "user", content: "How much is this van a month?" },
+    { role: "assistant", content: "Your selected quote is £732 a month." },
+    { role: "user", content: "What is the £200 vehicle reservation payment?" },
+    { role: "assistant", content: "It holds the vehicle and is separate from the initial rental." },
+  ];
+  const seen = {};
+  const result = await answerCustomerMessage(buildAskMeRequest({
+    channel: "website_rent2buy", product: "rent2buy",
+    message: "Is that separate from the initial rental?", history,
+    context: { page_type: "rent2buy_general", vehicle: r2bVehicle, selected_quote: verifiedQuote, quote_token: "v1.abc.def" },
+  }), { requestReply: modelReturning("Yes, the £200 vehicle reservation payment is separate from the initial rental.", "none", seen) });
+  assert.match(seen.prompt.input, /£200 vehicle reservation payment/);
+  assert.match(result.reply, /separate from the initial rental/);
+  assert.equal(result.diagnostics.path, "model");
+});
+
 test("a warranty follow-up after earlier vehicle pricing stays on the knowledge path", async () => {
   const seen = {};
   const r = await answerCustomerMessage(request({
