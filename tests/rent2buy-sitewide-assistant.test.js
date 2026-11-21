@@ -106,11 +106,13 @@ test("hosted assistant may be framed by both Rent2Buy production domains", async
 test("vehicle greetings advertise only supported finance or Rent2Buy help", () => {
   assert.equal(
     initialCustomerReply("finance_vehicle", { registration: "AB12CDE" }),
-    "Hi — I can help with finance, pricing and applying for this van. What would you like to know?",
+    "Hi there, I'm here to help with this van: monthly payments, deposits, warranty and applying. Choose a question below or type your own.",
   );
   assert.equal(
     initialCustomerReply("rent2buy_general", { registration: "BL72VFF" }),
-    "Hi — I can help with Rent2Buy costs, terms and applying for this van. What would you like to know?",
+    "Hi there, I can help with Rent2Buy costs, terms and applying for this van. Choose a question below or type your own.",
   );
   assert.doesNotMatch(initialCustomerReply("finance_vehicle", { registration: "AB12CDE" }), /anything about this van/i);
+  assert.match(initialCustomerReply("finance_vehicle", { registration: "AB12CDE", vehicle_kind: "car" }), /this car/);
+  assert.doesNotMatch(initialCustomerReply("rent2buy_general", {}), /lender|APR|finance/i);
 });
