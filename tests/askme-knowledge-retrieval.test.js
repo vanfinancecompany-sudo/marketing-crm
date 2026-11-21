@@ -34,10 +34,9 @@ test("BM25 keeps specific words: 'insurance' is searched, not dropped", () => {
 test("retrieval finds the relevant approved article for a detailed question", async () => {
   fresh();
   const result = await retrieveKnowledge({ product: "finance", message: "Does the warranty cover the gearbox? What isn't covered?" }, deps);
-  // Approved Business Brain warranty answers and the warranty article both qualify; nothing unrelated does.
-  assert.ok(result.passages.length >= 1);
-  assert.ok(result.passages.filter((item) => /warranty/i.test(`${item.title} ${item.heading} ${item.passage}`)).length >= 2, JSON.stringify(result.passages.map((item) => item.heading)));
-  assert.ok(result.passages.some((item) => item.title === "Used van warranty explained" || item.type !== "article"));
+  // The approved warranty article (which lists the exclusions) ranks first.
+  assert.equal(result.passages[0].title, "Used van warranty explained");
+  assert.match(result.passages[0].passage, /tyres, brakes and clutches are excluded/);
   assert.ok(result.timings_ms.total_ms >= 0);
 });
 
