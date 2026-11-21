@@ -297,3 +297,9 @@ test("endpoint: Rent2Buy guarantor policy still bypasses the lean model", async 
   assert.match(response.payload.reply, /(?:don.t|do not|doesn.t|does not|cannot|not accepted).*guarantor|guarantor.*(?:not|cannot)/i);
   assert.equal(response.payload.actions, undefined);
 });
+
+test("prompt tells the model to give the usual requirements from passages rather than defer to the team", () => {
+  const prompt = buildLeanPrompt(buildAskMeRequest({ channel: "website", product: "finance", message: "What documents will I need?" }));
+  assert.match(prompt.instructions, /list the documents usually asked for/);
+  assert.match(prompt.instructions, /If nothing below covers the question, say the team will confirm it/);
+});
