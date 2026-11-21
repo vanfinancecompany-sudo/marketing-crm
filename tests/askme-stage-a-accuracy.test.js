@@ -67,6 +67,24 @@ test("a verified selected quote is quoted exactly and replaces the listing illus
   assert.doesNotMatch(reply, /£525|£2,190/);
 });
 
+test("a reservation payment question goes to business knowledge even with a selected quote", () => {
+  const vehicle = normalisePageContext({ page_type: "rent2buy_general", vehicle: listingVehicle }).vehicle;
+  const reply = (message) => publicVehiclePricingReply({
+    message, pageType: "rent2buy_general", productLock: "rent2buy", vehicleContext: vehicle, selectedQuote: verifiedQuote,
+  });
+  assert.equal(reply("Is the £200 vehicle reservation payment the same as the initial rental?"), null);
+  assert.equal(reply("Is the holding deposit included in what I pay upfront?"), null);
+});
+
+test("a term question uses the selected term when it differs from the listing", () => {
+  const vehicle = normalisePageContext({ page_type: "rent2buy_general", vehicle: listingVehicle }).vehicle;
+  const reply = publicVehiclePricingReply({
+    message: "What term is this van?", pageType: "rent2buy_general", productLock: "rent2buy", vehicleContext: vehicle, selectedQuote: verifiedQuote,
+  });
+  assert.match(reply, /selected Rent2Buy quote.*36-month term/);
+  assert.doesNotMatch(reply, /48-month/);
+});
+
 test("an unverifiable selection is never quoted; the customer is sent back to the calculator", () => {
   const vehicle = normalisePageContext({ page_type: "rent2buy_general", vehicle: listingVehicle }).vehicle;
   const reply = publicVehiclePricingReply({ message: "How much per month?", pageType: "rent2buy_general", productLock: "rent2buy", vehicleContext: vehicle, selectedQuote: { status: "unverified", reason: "invalid_or_expired_signature" } });
