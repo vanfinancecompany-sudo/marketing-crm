@@ -119,6 +119,7 @@ test("longer conversations retain eight exchanges, follow-ups and updated prefer
   }));
   assert.match(prompt.instructions, /continuing conversation/);
   assert.match(prompt.instructions, /newest answer/);
+  assert.match(prompt.instructions, /rather than repeating the same question/);
   assert.match(prompt.input, /automatic van for plumbing work/);
   assert.match(prompt.input, /Correction: it has to be a manual van/);
   assert.doesNotMatch(prompt.input, /Question 1:/);
