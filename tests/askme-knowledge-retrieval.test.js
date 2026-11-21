@@ -104,3 +104,12 @@ test("multi-part questions retrieve evidence for each part", async () => {
   assert.ok(titles.includes("Do I need insurance for a financed van?"), titles.join(" | "));
   assert.equal(result.query_parts, 2);
 });
+
+test("everyday phrasing 'what do I need to bring to apply' searches documents", async () => {
+  const { expandQuery } = await import("../lib/askme/knowledgeRetrieval.js");
+  assert.match(expandQuery("What would I need to bring to apply?"), /documents$/);
+  assert.equal(expandQuery("What documents do I need to apply?"), "What documents do I need to apply?");
+  fresh();
+  const result = await retrieveKnowledge({ product: "finance", message: "What would I need to bring to apply?", history: [{ role: "user", content: "How much is this one a month?" }] }, deps);
+  assert.ok(result.passages.some((item) => /document/i.test(`${item.title} ${item.heading}`)), JSON.stringify(result.passages.map((item) => item.heading)));
+});
