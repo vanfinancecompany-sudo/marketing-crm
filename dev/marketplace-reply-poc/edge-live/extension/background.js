@@ -196,7 +196,9 @@ async function tabCensus() {
   const tabs = await chrome.tabs.query({});
   const facebook = tabs.filter((t) => /^https:\/\/(www\.)?facebook\.com\//.test(t.url || t.pendingUrl || ""));
   const { tabId } = await chrome.storage.session.get("tabId");
-  return { tabs: tabs.length, facebookTabs: facebook.length, pinnedFacebookTabs: facebook.filter((t) => t.pinned).length, assistantTabId: tabId ?? null };
+  const assistant = tabs.find((t) => t.id === tabId);
+  return { tabs: tabs.length, facebookTabs: facebook.length, pinnedFacebookTabs: facebook.filter((t) => t.pinned).length, assistantTabId: tabId ?? null,
+    assistantTitleMarked: assistant ? (assistant.title || "").startsWith("[Assistant]") : null };
 }
 
 // ---- Self-update ----

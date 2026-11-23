@@ -88,6 +88,11 @@ async function waitFor(fn, label, ms = 45_000) {
   }
   throw new Error("Timed out waiting for: " + label);
 }
+// The dedicated tab is titled "[Assistant] ..." (read from the debug target list).
+const titledAssistant = async () => {
+  const tabs = await assistantTabs();
+  return tabs.length === 1 && tabs[0].title.startsWith("[Assistant] ") ? tabs[0].title : null;
+};
 const sentCount = async (n) => { const s = await api("/status"); return s.counts.sent === n ? s : null; };
 
 try {
@@ -111,6 +116,7 @@ try {
   const openerEvents = s0.events.filter((e) => e.type === "list-opener").map((e) => e.status).reverse();
   assert.equal(openerEvents[0], "clicked Messenger");
   assert.match(openerEvents.at(-1), /^clicked Marketplace \((centre|pointer|outer)\)$/);
+  const firstTitle = await waitFor(titledAssistant, "assistant tab titled [Assistant]", 30_000);
   const created = s0.events.find((e) => e.type === "tab-created");
   assert.match(created?.createdBy || "", /^assistant tab recovery: no assistant tab recorded/, JSON.stringify(created));
   assert.ok((await api("/status")).tabCensus?.facebookTabs >= 0);
@@ -201,7 +207,8 @@ try {
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
   await waitFor(async () => (await api("/status")).heartbeat?.ext === "9.9.9", "extension self-update", 120_000);
   await waitFor(async () => (await api("/status")).monitoring.ok, "monitoring after self-update", 90_000);
-  pass("extension updated itself from disk, reloaded the assistant tab, reopened the list and resumed monitoring");
+  await waitFor(titledAssistant, "[Assistant] title after self-update", 30_000);
+  pass("extension updated itself from disk, reloaded the assistant tab, reopened the list and resumed monitoring; tab still titled [Assistant]");
 
   // Deliberate activation: everything unread now is left for a person.
   await api("/control", { mode: "send", allowThreads: ["200", "300"] });
@@ -268,7 +275,8 @@ try {
   assert.equal(fb2.sends, 3);
   const tabs = await assistantTabs();
   assert.equal(tabs.length, 1, "restored assistant tab adopted, no duplicate: " + JSON.stringify(tabs.map((t) => t.url)));
-  pass("after Edge and service restart: exactly one assistant tab and one reply to the new message");
+  const restartTitle = await waitFor(titledAssistant, "[Assistant] title after restart", 30_000);
+  pass("after Edge and service restart: exactly one assistant tab, titled \"" + restartTitle.slice(0, 30) + "\", and one reply to the new message");
   console.log("Reply after restart:", JSON.stringify(fb2.threads["200"].messages.at(-1).text));
   const asked = (await api("/status")).recentJobs[0].customer;
   assert.match(asked, /self-employed/);

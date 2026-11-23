@@ -9,6 +9,9 @@
   const THREAD_PATH = /\/(?:messages\/(?:e2ee\/)?|marketplace\/)t\/(\d{1,32})(?:\/|$)/;
   const MAX_ROW_HEIGHT = 320;
   const LISTING_PATH = /\/marketplace\/item\/(\d{1,32})/;
+  const TITLE_MARK = "[Assistant] ";
+  const pageTitle = () => (document.title.startsWith(TITLE_MARK) ? document.title.slice(TITLE_MARK.length) : document.title);
+  function markTitle() { if (!document.title.startsWith(TITLE_MARK)) document.title = TITLE_MARK + document.title; }
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const norm = (value) => String(value || "").replace(/\s+/g, " ").trim();
   let home = null;
@@ -39,6 +42,10 @@
     if (!reply?.assistant) return;
     home = reply.home;
     sessionStorage.setItem("r2bAssistantTab", "1");
+    // Mark the dedicated tab "[Assistant]" in its title only (Facebook's page is
+    // untouched). Facebook rewrites the title (unread counts), so re-apply it.
+    markTitle();
+    new MutationObserver(markTitle).observe(document.head || document.documentElement, { childList: true, subtree: true, characterData: true });
     new MutationObserver(() => schedule(1_000)).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
     setInterval(() => schedule(0), 20_000);
     schedule(1_500);
@@ -365,7 +372,7 @@
     return {
       marketplaceNew: entry ? countIn(entry.textContent, /(\d+)\s+new messages?/i) : NaN,
       messengerUnread: badge ? countIn(badge, /(\d+)\s+unread/i) : NaN,
-      title: Number(document.title.match(/^\((\d+)\)/)?.[1] ?? 0),
+      title: Number(pageTitle().match(/^\((\d+)\)/)?.[1] ?? 0),
       topUnread,
     };
   }
@@ -500,7 +507,7 @@
     return {
       at: new Date().toISOString(),
       path: location.pathname.replace(/\d{3,}/g, "#"),
-      titleCount: Number(document.title.match(/^\((\d+)\)/)?.[1] || 0),
+      titleCount: Number(pageTitle().match(/^\((\d+)\)/)?.[1] || 0),
       visibility: document.visibilityState,
       threadLinkPatterns: [...new Set(links.map((l) => l.pattern))],
       hiddenThreadLinks: threadLinks({ includeHidden: true }).length - links.length,
