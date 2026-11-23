@@ -55,8 +55,9 @@ async function render() {
   const panel = document.getElementById("panel");
   panel.style.display = panelOpen ? "block" : "none";
   const grid = document.getElementById("grid");
-  if (!panelOpen) grid.innerHTML = "";
-  else if (tab === "chats") {
+  // Live (23 Nov, 20:04): a CLOSED panel stays in the page, hidden, with its
+  // Chats grid still rendered. Opening it shows the Chats view.
+  if (!panelOpen || tab === "chats") {
     const fresh = Object.values(s.threads).filter((t) => t.unread).length;
     grid.innerHTML = `<div role="grid" aria-label="Chats">`
       + `<div role="row"><div role="gridcell"><div role="link" tabindex="0" id="marketFolder" style="height:56px"><span>Marketplace</span> <span>· ${fresh} new messages</span></div></div></div>`

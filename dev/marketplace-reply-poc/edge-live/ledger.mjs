@@ -196,6 +196,9 @@ export function startPilot(state, { threadId, mustContain }) {
   if (!THREAD_ID.test(id)) throw new TypeError("Pilot needs a conversation ID");
   if (words.length < 3) throw new TypeError("Pilot needs words that must appear in the conversation row");
   if (state.mode !== "observe") throw new TypeError("Start the pilot from Observe mode");
+  if (state.heartbeat?.list !== "marketplace") {
+    throw new TypeError("The Marketplace list is not open in the assistant tab yet (" + (state.heartbeat?.list || "no report") + "). Wait for the green monitoring banner, then run the pilot.");
+  }
   state.pilot = { threadId: id, mustContain: words, status: "verifying", requestedAt: new Date().toISOString(), result: null };
   logEvent(state, "pilot", { status: "verifying", threadId: id, mustContain: words });
   return state.pilot;
@@ -235,12 +238,22 @@ export function verifyPilot(state, { threadId, found, rowText }) {
   return { ok: true };
 }
 
-export function pilotTimeout(state) {
+// The pilot never waits silently: it fails with a plain explanation when the
+// Marketplace list is not open, or when the Edge tab does not report in time.
+const PILOT_LIST_GRACE_MS = 30_000;
+const PILOT_VERIFY_MS = 90_000;
+export function pilotTimeout(state, now = Date.now()) {
   const pilot = state.pilot;
-  if (pilot?.status === "verifying" && Date.now() - Date.parse(pilot.requestedAt) > PILOT_TIMEOUT_MS) {
-    cancelPilot(state, "The Edge tab did not report the conversation row in time (is the extension updated?)");
+  const list = state.heartbeat?.list;
+  if (pilot?.status === "verifying") {
+    const waited = now - Date.parse(pilot.requestedAt);
+    if (list !== "marketplace" && waited > PILOT_LIST_GRACE_MS) {
+      cancelPilot(state, "The Marketplace list is not open in the assistant tab (" + (list || "none") + "), so the conversation could not be checked. It was not opened. The assistant keeps reopening the list; run the pilot again when the banner is green.");
+    } else if (waited > PILOT_VERIFY_MS) {
+      cancelPilot(state, "The Edge tab did not report the conversation row in time. It was not opened. Check that the extension shows version 0.3.0 or later.");
+    }
   }
-  if (pilot?.status === "opening" && Date.now() - Date.parse(pilot.openedAt) > PILOT_TIMEOUT_MS) {
+  if (pilot?.status === "opening" && now - Date.parse(pilot.openedAt) > PILOT_TIMEOUT_MS) {
     cancelPilot(state, "The conversation did not finish loading in time");
   }
 }

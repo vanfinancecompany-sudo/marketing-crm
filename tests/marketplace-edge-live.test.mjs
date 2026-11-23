@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   authoriseSend, emptyState, inspectInbox, inspectThread, loadState, publicStatus, recordDraft,
-  recordSendResult, resumeThread, saveState, setMode, startupMode, startPilot, verifyPilot, finishPilot, monitoringVerdict,
+  recordSendResult, resumeThread, saveState, setMode, startupMode, startPilot, verifyPilot, finishPilot, monitoringVerdict, pilotTimeout,
 } from "../dev/marketplace-reply-poc/edge-live/ledger.mjs";
 import { liveResponder } from "../dev/marketplace-reply-poc/edge-live/askme-live.mjs";
 import { draftMarketplaceReply } from "../dev/marketplace-reply-poc/assistant.mjs";
@@ -193,9 +193,32 @@ test("only the Marketplace list counts once lists are named; arrival reasons are
   assert.equal(state.events.filter((e) => e.type === "unread-observed").length, 1);
 });
 
+test("the pilot refuses to start, or fails clearly, when the Marketplace list is not open", () => {
+  const state = emptyState();
+  setMode(state, "observe");
+  state.heartbeat = { at: new Date().toISOString(), health: "healthy", list: "chats-only", opener: "no-marketplace-control", rows: 13 };
+  assert.throws(() => startPilot(state, { threadId: "500", mustContain: "Renault Master" }), /Marketplace list is not open/);
+  state.heartbeat.list = "marketplace";
+  startPilot(state, { threadId: "500", mustContain: "Renault Master" });
+  // The list disappears (live 23 Nov: panel closed after a reload).
+  state.heartbeat.list = "chats-only";
+  pilotTimeout(state, Date.parse(state.pilot.requestedAt) + 10_000);
+  assert.equal(state.pilot.status, "verifying", "short grace period");
+  pilotTimeout(state, Date.parse(state.pilot.requestedAt) + 31_000);
+  assert.equal(state.pilot.status, "failed");
+  assert.match(state.pilot.error, /not open in the assistant tab \(chats-only\).*It was not opened/);
+  assert.equal(state.mode, "observe");
+  // With the list open but no row report, it fails after 90 s.
+  state.heartbeat.list = "marketplace";
+  startPilot(state, { threadId: "500", mustContain: "Renault Master" });
+  pilotTimeout(state, Date.parse(state.pilot.requestedAt) + 91_000);
+  assert.match(state.pilot.error, /did not report the conversation row/);
+});
+
 test("the pilot opens its one conversation only when the row text matches, drafts once, then returns to Observe", () => {
   const state = emptyState();
   setMode(state, "observe");
+  state.heartbeat = { at: new Date().toISOString(), health: "healthy", list: "marketplace", opener: "present", rows: 2 };
   inspectInbox(state, [{ id: "500", unread: true, pos: 0, grid: "marketplace" }, { id: "501", unread: true, pos: 1, grid: "marketplace" }], { list: "marketplace" });
   assert.throws(() => startPilot(state, { threadId: "500", mustContain: "" }));
   startPilot(state, { threadId: "500", mustContain: "Renault Master" });

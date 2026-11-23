@@ -80,13 +80,16 @@
   // A row is the largest ancestor of a thread link that contains links to that
   // one conversation only. Facebook's lists often lack per-row roles, and the
   // nearest [role=row|listitem] can be a container shared by every conversation.
-  function threadLinks() {
+  // Live finding (23 Nov 2026, 20:04): Facebook keeps the Messenger panel and its
+  // conversation rows in the page when the panel is CLOSED, at zero size. Only
+  // rendered (non-zero) links count; hidden ones are reported in diagnostics.
+  function threadLinks({ includeHidden = false } = {}) {
     const found = [];
     for (const link of document.querySelectorAll("a[href]")) {
       let url;
       try { url = new URL(link.getAttribute("href"), location.href); } catch { continue; }
       const id = url.pathname.match(THREAD_PATH)?.[1];
-      if (id) found.push({ link, id, pattern: url.pathname.replace(/\d{3,}/g, "#") });
+      if (id && (includeHidden || visible(link))) found.push({ link, id, pattern: url.pathname.replace(/\d{3,}/g, "#") });
     }
     return found;
   }
@@ -205,7 +208,8 @@
   };
   function namedGrid(pattern) {
     return [...document.querySelectorAll('[role="grid"][aria-label]')]
-      .find((g) => pattern.test(norm(g.getAttribute("aria-label"))) && [...g.querySelectorAll("a[href]")].some(threadIdOf)) || null;
+      // A closed panel keeps its grids in the page at zero size: those do not count.
+      .find((g) => pattern.test(norm(g.getAttribute("aria-label"))) && visible(g) && [...g.querySelectorAll("a[href]")].some(threadIdOf)) || null;
   }
   function safeToClick(el) {
     const anchor = el.closest("a[href]");
@@ -360,6 +364,8 @@
       titleCount: Number(document.title.match(/^\((\d+)\)/)?.[1] || 0),
       visibility: document.visibilityState,
       threadLinkPatterns: [...new Set(links.map((l) => l.pattern))],
+      hiddenThreadLinks: threadLinks({ includeHidden: true }).length - links.length,
+      messengerPanelVisible: [...document.querySelectorAll('[role="dialog"][aria-label]')].some((d) => /^messenger$/i.test(norm(d.getAttribute("aria-label"))) && visible(d)),
       list: listState(),
       opener: openerStatus,
       chatWindows: [...document.querySelectorAll('[role="log"]')].filter(visible).length,
