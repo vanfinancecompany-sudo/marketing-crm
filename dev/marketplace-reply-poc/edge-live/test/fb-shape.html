@@ -27,9 +27,9 @@ async function render() {
     `<div role="list"><div role="listitem">` + Object.entries(s.threads).map(([id, t]) => {
       const last = t.messages.at(-1);
       return `<div style="display:flex;align-items:center;height:64px"><a href="/__fb/marketplace/t/${id}/" style="flex:1;text-decoration:none;color:inherit">
-        <span style="display:block;font-weight:600">${esc(t.name)} · ${esc(t.listing)}</span>
-        <span style="display:block;font-weight:${t.unread ? 700 : 400}">${esc(last ? (last.out ? "You: " : "") + last.text : "")}</span></a>
-        ${t.unread ? '<div style="width:12px;height:12px;border-radius:50%;background:rgb(0,100,224)"></div>' : '<div role="button" aria-label="Mark as unread"></div>'}</div>`;
+        <span style="display:block;font-weight:${t.unread ? 600 : 500}">${esc(t.name)} · ${esc(t.listing)}</span>
+        <span style="display:block;font-weight:400">${esc(last ? (last.out ? "You: " : "") + last.text : "")}</span></a>
+        ${t.unread ? '<div style="width:12px;height:12px;border-radius:50%;background:rgb(0,100,209)"></div>' : '<div role="button" aria-label="Mark as unread"></div>'}</div>`;
     }).join("") + `</div></div>`;
   document.getElementById("contacts").innerHTML = ["901", "902", "903"].map((id) => `<a href="/__fb/messages/t/${id}/">Contact</a><br>`).join("");
   const t = threadId && s.threads[threadId];

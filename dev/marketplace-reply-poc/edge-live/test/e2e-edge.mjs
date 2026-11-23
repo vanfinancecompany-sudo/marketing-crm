@@ -119,8 +119,11 @@ try {
   pass("Observe noticed the new unread conversation without opening it, changing read status, calling Ask Me or replying");
 
   // Row and unread classification under the conditions seen on the real account.
-  await sleep(61_000); // assistant-tab diagnostics are refreshed once a minute
-  const diag = (await api("/diagnostics"))["assistant-tab"];
+  // Assistant-tab diagnostics refresh about once a minute (background timers are throttled).
+  const diag = await waitFor(async () => {
+    const d = (await api("/diagnostics"))["assistant-tab"];
+    return d?.rows.some((r) => r.id === "300") ? d : null;
+  }, "diagnostics including conversation 300", 150_000);
   const row = (id) => diag.rows.find((r) => r.id === id);
   assert.equal(row("300").unread, true);
   assert.ok(row("300").signals.dot && row("300").signals.bold, JSON.stringify(row("300").signals));

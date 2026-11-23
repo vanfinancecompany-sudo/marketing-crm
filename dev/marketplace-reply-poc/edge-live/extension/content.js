@@ -138,17 +138,20 @@
     return { labels, label: labels.some(UNREAD_LABEL) || hiddenUnreadText, dot, snippetWeight, maxWeight, textLeaves };
   }
 
+  // Observed on the real account (Edge, 23 Nov 2026): an unread conversation
+  // shows a round blue dot, rgb(0, 100, 209), and its name in weight 600; read
+  // ones have no dot and weight 500. Both agreed on all 60 captured rows.
   // Bold is only meaningful relative to other rows in the same list.
   function classify(rows) {
     const minWeight = new Map();
     for (const r of rows) {
       r.signals = rowSignals(r.row);
-      minWeight.set(r.group, Math.min(minWeight.get(r.group) ?? 1000, r.signals.snippetWeight || 1000));
+      minWeight.set(r.group, Math.min(minWeight.get(r.group) ?? 1000, r.signals.maxWeight || 1000));
     }
     for (const r of rows) {
       const s = r.signals;
       s.groupMinWeight = minWeight.get(r.group);
-      s.bold = s.snippetWeight >= 600 && s.snippetWeight > s.groupMinWeight;
+      s.bold = s.maxWeight >= 600 && s.maxWeight > s.groupMinWeight;
       r.unread = Boolean(s.label || s.dot || s.bold);
     }
     return rows;
@@ -176,6 +179,19 @@
     return null;
   }
 
+  // Ancestors of a list that carry a role, a label or fixed positioning: shows
+  // whether the list sits in the page itself or in a pop-up panel.
+  function trail(el) {
+    const out = [];
+    for (let node = el?.parentElement; node && node !== document.body && out.length < 8; node = node.parentElement) {
+      const position = getComputedStyle(node).position;
+      if (node.getAttribute("role") || node.getAttribute("aria-label") || position === "fixed" || position === "sticky") {
+        out.push(describe(node) + (position === "fixed" || position === "sticky" ? " pos=" + position : ""));
+      }
+    }
+    return out;
+  }
+
   function diagnose() {
     const links = threadLinks();
     const rows = classify(rowsFromLinks(links));
@@ -191,9 +207,12 @@
     for (const r of rows) {
       const mark = landmark(r.row);
       const key = describe(mark) || "none";
-      const g = groups.get(key) || { landmark: key, rows: 0, unread: 0, visible: 0 };
+      const g = groups.get(key) || { landmark: key, rows: 0, unread: 0, visible: 0, dot: 0, bold: 0, disagree: 0, trail: trail(mark) };
       g.rows++;
       if (r.unread) g.unread++;
+      if (r.signals.dot) g.dot++;
+      if (r.signals.bold) g.bold++;
+      if (Boolean(r.signals.dot) !== r.signals.bold) g.disagree++;
       if (visible(r.row)) g.visible++;
       groups.set(key, g);
     }

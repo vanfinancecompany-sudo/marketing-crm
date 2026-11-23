@@ -61,7 +61,12 @@ Update later with `git -C "$env:USERPROFILERent2BuyAssistant" pull`, then select
 
 These cannot be tested without the signed-in Edge profile and a consenting test sender:
 
-1. **Unread signal in the real inbox.** A conversation row is the largest element around a thread link (`/messages/t/`, `/messages/e2ee/t/` or `/marketplace/t/`) that contains no other conversation. It is classed unread by any of three signals: an unread label (never "Mark as unread"), the round blue unread dot, or a preview bolder than other rows in the same list. The first live test showed 8 rows, all unread, and missed a real enquiry. The cause was a container shared by many conversations plus a "Mark as unread" label match, now fixed. Verify with the diagnostics below.
+1. **Unread signal: confirmed on the real account (Edge capture, 23 Nov 2026).**
+   - Conversation rows sit in two grids, `role=grid` "Chats" and "Marketplace". They link to `/messages/t/<id>` or `/messages/e2ee/t/<id>`, and each row is about 345–360 × 72 px.
+   - An unread row has a round blue dot, `rgb(0, 100, 209)`, and its name in font weight 600. A read row has no dot and weight 500.
+   - The two signals agreed on all 60 captured rows. Rows carry no "unread" label.
+
+   **Open blocker:** the hidden assistant tab, on `/marketplace/you/selling`, had no conversation list at all (0 thread links). The grids appear only when a chat panel is open in the tab. The popup and control page now warn when the list is missing.
 2. **Message direction.** Uses "You sent" / "<name> sent" labels (seen in the live inspection) with a bubble-position fallback.
 3. **Sending.** Text is inserted with `execCommand` into the Lexical composer and **Press enter to send** is clicked. Send is confirmed only when a new outgoing message ID with the same text appears.
 4. **Edge restart.** Tab IDs are kept in session storage, and the restored assistant tab is adopted by a page marker. Automated testing of an Edge relaunch on the same profile is blocked because Edge disables command-line-loaded extensions on relaunch. Check once on the PC that the extension stays enabled and there is one pinned tab after restarting Edge. Edge **Sleeping tabs** is countered with `autoDiscardable: false` and a 3-minute stale-heartbeat reload. Also add `facebook.com` to *Never put these sites to sleep*.
