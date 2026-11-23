@@ -1,4 +1,6 @@
 import { buildAskMeRequest } from "../../lib/askme/contract.js";
+import { businessFactsFor } from "../../lib/askme/businessFacts.js";
+import { marketplaceProduct, marketplaceReplyRoute, rent2BuyWebsiteReply } from "./reply-policy.mjs";
 import { referencedKnowledgeQuestion } from "../../lib/askme/knowledgeRetrieval.js";
 import { answerCustomerMessage } from "../../lib/askme/leanEngine.js";
 import { redactSensitiveCustomerData } from "../../lib/publicAssistantFoundation.js";
@@ -38,25 +40,23 @@ const FIXTURES = {
   },
 };
 
-const HUMAN = /\b(?:complaint|refund|human|speak to (?:a person|someone|an agent|the team)|my application|application status|personal quote)\b/i;
-
-export async function draftMarketplaceReply({ product, vehicle, message, history = [] }, { requestReply, respond, onAdapterTime } = {}) {
+export async function draftMarketplaceReply({ product: knownProduct, vehicle, message, history = [] }, { requestReply, respond, onAdapterTime } = {}) {
   const started = performance.now();
   const finish = (result, engineMs = 0) => {
     onAdapterTime?.(performance.now() - started - engineMs);
     return result;
   };
+  const product = marketplaceProduct(knownProduct, message);
+  const localReply = marketplaceReplyRoute(product, message);
+  if (localReply) return finish(localReply);
   const lane = FIXTURES[product];
-  if (!lane) return finish({ reason: "No verified product match" });
-  if (lane.otherProduct.test(message)) return finish({ reason: "Question crosses the listing's product boundary" });
-  if (HUMAN.test(message)) return finish({ reason: "Customer needs the team" });
 
   const request = buildAskMeRequest({
     channel: "marketplace",
     product,
     message: redactSensitiveCustomerData(message),
     history: history.map(({ role, content }) => ({ role, content: redactSensitiveCustomerData(content) })),
-    context: { vehicle },
+    context: product === "rent2buy" ? {} : { vehicle },
     capabilities: { buttons: false },
   });
   const engineStarted = performance.now();
@@ -70,7 +70,8 @@ export async function draftMarketplaceReply({ product, vehicle, message, history
   if (result.actions?.some((action) => action.type === "contact")) {
     return finish({ reason: "Ask Me referred this question to the team" }, engineMs);
   }
-  return finish({ text: result.reply }, engineMs);
+  const text = product === "rent2buy" ? rent2BuyWebsiteReply(result.reply, result.actions, request.history) : result.reply;
+  return finish({ text }, engineMs);
 }
 
 async function fixtureAnswer(request, lane, requestReply) {
@@ -79,6 +80,7 @@ async function fixtureAnswer(request, lane, requestReply) {
     || (timingFollowUp ? request.history.findLast((item) => item.role === "user")?.content || "" : "");
   const currentTopic = lane.topics.find((source) => source.terms.test(request.message));
   const topic = currentTopic || lane.topics.find((source) => source.terms.test(reference));
+  const fact = request.product === "rent2buy" ? fixturePolicyFact(request.message) : null;
   return answerCustomerMessage(request, {
     environment: {},
     links: { contact: lane.domain },
@@ -88,6 +90,7 @@ async function fixtureAnswer(request, lane, requestReply) {
       pages: [],
     }),
     requestReply: requestReply || (async (prompt) => {
+      if (fact && prompt.evidenceText.includes(fact.text)) return { reply: fact.text, action: "none" };
       if (!topic || !prompt.evidenceText.includes(topic.passage)) {
         return { reply: "The team can confirm that.", action: "contact" };
       }
@@ -95,4 +98,16 @@ async function fixtureAnswer(request, lane, requestReply) {
       return { reply, action: "none" };
     }),
   });
+}
+
+function fixturePolicyFact(message) {
+  const topic = [
+    [/\b(?:return(?:ing)?|termination)\b/i, "early_return"],
+    [/\b(?:eligib\w*|self.employed|credit check|qualif\w*|guarantor)\b|^\s*can i apply\b/i, "self_employed"],
+    [/\b(?:holding deposit|reservation(?: payment)?)\b/i, "reservation"],
+    [/\b(?:minimum initial rental|deposit|how much upfront)\b/i, "initial_rental"],
+    [/\b(?:mileage|allowance|monthly)\b/i, "pricing"],
+    [/\bhow does rent[\s-]*(?:2|to)[\s-]*buy work\b/i, "product"],
+  ].find(([pattern]) => pattern.test(message));
+  return topic && businessFactsFor("rent2buy").find(({ id }) => id === "rent2buy." + topic[1]);
 }

@@ -119,12 +119,12 @@ async function main() {
       for (const [topic, message] of [
         ["cross-product", "Can a lender finance this and what APR does it charge?"],
         ["human requested", "I want to speak to a person about my application."],
-        ["unverified stock request", "Can you confirm a 7 am tomorrow delivery slot and promise this vehicle is available?"],
+        ["stock redirected to website", "Can you confirm a 7 am tomorrow delivery slot and promise this vehicle is available?"],
       ]) {
         const adapted = await adapterTurn(product, marketplace, message, history);
         console.log(JSON.stringify({
           event: "safety", product, topic, adapterRequestMs: adapted.requestMs, adapterMs: adapted.adapterMs,
-          engineForAdapter: publicAnswer(adapted.response), handoff: adapted.draft.reason || null,
+          engineForAdapter: publicAnswer(adapted.response), handoff: adapted.draft.reason || null, websiteRedirect: adapted.draft.text || null,
         }));
       }
     }

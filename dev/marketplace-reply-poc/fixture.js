@@ -21,7 +21,7 @@ async function request(path, data) {
 }
 
 function threadLabel(thread, listings) {
-  return listings[thread.listingId]?.product || "Unknown";
+  return listings[thread.listingId]?.product || (thread.productKey === "rent2buy" ? "Rent2Buy" : "Unknown");
 }
 
 function renderControl(state) {
@@ -70,7 +70,8 @@ function renderControl(state) {
 function replyForm(thread, turn) {
   const form = document.createElement("form");
   form.dataset.turnId = turn.id;
-  const reply = document.createElement("input");
+  const reply = document.createElement("textarea");
+  reply.rows = 3;
   reply.name = "reply";
   reply.required = true;
   reply.setAttribute("aria-label", "Simulated reply");
@@ -90,6 +91,18 @@ function replyForm(thread, turn) {
     }
   });
   return form;
+}
+
+function renderOutgoing(element, message) {
+  const website = message.match(/https:\/\/www\.rent2buyvans\.co\.uk\/(?=$|\s)/);
+  element.textContent = "Seller: " + (website ? message.slice(0, website.index) : message);
+  if (!website) return;
+  const link = document.createElement("a");
+  link.href = website[0];
+  link.textContent = website[0];
+  link.target = "_blank";
+  link.rel = "noopener";
+  element.append(link, message.slice(website.index + website[0].length));
 }
 
 function renderInbox(state) {
@@ -118,7 +131,7 @@ function renderInbox(state) {
         const outgoing = document.createElement("p");
         outgoing.dataset.direction = "outgoing";
         outgoing.dataset.outgoingId = turn.outgoing.id;
-        outgoing.textContent = "Seller: " + turn.outgoing.text;
+        renderOutgoing(outgoing, turn.outgoing.text);
         row.append(outgoing);
       }
       if (!turn.outgoing && ["Waiting", "Drafting", "Sending"].includes(turn.status) && !thread.reviewReason) {

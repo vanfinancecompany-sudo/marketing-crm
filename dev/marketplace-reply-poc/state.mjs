@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { draftMarketplaceReply } from "./assistant.mjs";
+import { marketplaceProduct } from "./reply-policy.mjs";
 import { FIXTURE_RECEIPTS, inspectInboxSnapshot, marketplaceRegistry } from "./observation.mjs";
 
 export const LISTINGS = {
@@ -219,7 +220,8 @@ export function createReplySimulator(file, now = Date.now, { draftReply = draftM
           const turn = thread.turns.find((candidate) => candidate.status === "Waiting");
           if (!turn || !row.incomingIds?.includes(turn.id)) continue;
           const listing = LISTINGS[thread.listingId];
-          if (row.listingId !== thread.listingId || !listing) {
+          const product = marketplaceProduct(listing?.productKey || thread.productKey, turn.message || "");
+          if (row.listingId !== thread.listingId || (!listing && (!turn.message || !product))) {
             turn.status = turn.message ? "Needs human" : "Unmatched";
             if (turn.message) thread.reviewReason = "No verified listing match";
             continue;
@@ -237,11 +239,12 @@ export function createReplySimulator(file, now = Date.now, { draftReply = draftM
             return { ready: instruction(thread, turn) };
           }
 
+          if (!listing) thread.productKey = product;
           turn.status = "Drafting";
           return {
             pending: instruction(thread, turn),
             context: {
-              product: listing.productKey, vehicle: listing.vehicle,
+              product, vehicle: product === "finance" ? listing?.vehicle : undefined,
               message: turn.message, history: sentHistory(thread),
             },
           };

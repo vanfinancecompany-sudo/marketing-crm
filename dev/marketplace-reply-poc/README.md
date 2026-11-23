@@ -12,14 +12,20 @@ This is a developer-only tool mounted on the Marketing CRM Vite server. Its sepa
 
 The starting setting is Off. Enquiries already present before enabling are excluded from automatic replies. The development server saves its synthetic state to a per-checkout and port file in the OS temporary directory and restores the same settings and history after restart. The heartbeat is refreshed by an active inbox tab. A future hosted launcher must open that tab when Chrome starts and verify the extension is loaded. In the local headless test, Chrome retained its profile but the DevTools-installed extension had to be loaded again on restart. A signed-out, challenged or changed layout pauses sending until the inbox is restored and replies are turned off and back on.
 
+
+## Rent2Buy-first replies
+
+General programme questions go to the existing Ask Me adapter without vehicle or quote context. A known Rent2Buy conversation or an explicit Rent2Buy question can use that lane without matching an advert. Finance stays separate. Assign an ambiguous conversation to the team, particularly when the inbox contains both kinds of adverts.
+
+Questions about availability, specifications, individual prices and personalised quotes point to https://www.rent2buyvans.co.uk/. The adapter provides the full homepage URL without looking up the Facebook advert or claiming a vehicle is in stock. The first general answer, and later answers with browse or apply actions, invite the customer to see current stock and apply online. Complaints, individual application decisions and explicit human requests enter review and pause simulated replies.
 ## Try a multi-turn Ask Me conversation
 
 1. In **Ask Me conversations**, choose a Finance listing and start with “Do your vans come with a warranty?”
 2. After the first reply is confirmed, select the same conversation and add “Does that include the gearbox?” The synthetic reply should refer to warranty coverage.
 3. Start a separate Rent2Buy conversation with “When is the initial rental payment due?” and follow up with “When is that due?” The Rent2Buy reply should stay in its own conversation and use the Rent2Buy context.
-4. Ask for a human, ask a Finance-only question on a Rent2Buy listing or use an unrecognised listing. The CRM fixture marks the thread **Needs human**, gives the reason and stops automatic replies on that thread.
+4. Ask for a human, ask a Finance-only question on a Rent2Buy listing or use an unrecognised listing without naming Rent2Buy. The CRM fixture marks the thread **Needs human**, gives the reason and stops automatic replies on that thread.
 
-The fixture calls the existing Ask Me engine with the product locked to the listing and with recent confirmed exchanges only. It uses local synthetic knowledge and a deterministic model stand-in. It makes no real model, knowledge-store or postcode lookup calls. The extension still only observes and clicks inside the loopback inbox.
+The fixture calls the existing Ask Me engine with the product locked to the known lane or to an explicit Rent2Buy question, and with recent confirmed exchanges only. It uses local synthetic knowledge and a deterministic model stand-in. It makes no real model, knowledge-store or postcode lookup calls. The extension still only observes and clicks inside the loopback inbox.
 
 ## Compare against the live website Ask Me engine
 

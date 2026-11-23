@@ -216,7 +216,7 @@ test("wrong-product, unmatched and explicit human requests pause the relevant co
 });
 
 test("an unsupported question or rejected model output requires a human", async () => {
-  const context = { product: "rent2buy", vehicle: {}, history: [], message: "Can you fit a fridge freezer in it?" };
+  const context = { product: "rent2buy", vehicle: {}, history: [], message: "What is the name of the team’s contract manager?" };
   assert.match((await draftMarketplaceReply(context)).reason, /referred/);
   const bad = await draftMarketplaceReply({ ...context, message: "What documents do I need?" }, {
     requestReply: async () => ({ reply: "Our lenders will decide.", action: "none" }),
@@ -297,4 +297,105 @@ test("the benchmark transport uses the same adapter gates and times only local w
   assert.deepEqual(seen[0].history, history);
   assert.equal(times.length, 2);
   assert.ok(times.every((ms) => Number.isFinite(ms) && ms >= 0));
+});
+
+test("Rent2Buy stock, advert specifications, prices and individual quotes go to the website without calling Ask Me", async () => {
+  const messages = [
+    "Is it still available?",
+    "Available?",
+    "Do you have any stock?",
+    "What’s the price?",
+    "Do you have any automatic vans?",
+    "What is the mileage on this van?",
+    "What's the registration number?",
+    "Can you fit a fridge freezer in it?",
+    "How much is this one per month?",
+    "How much does it cost?",
+    "Can I get a personalised quote?",
+    "Can you give me my exact price with 2,000 miles?",
+  ];
+  for (const message of messages) {
+    const reply = await draftMarketplaceReply({ product: "rent2buy", message }, {
+      respond: () => assert.fail("A vehicle or quote query reached Ask Me: " + message),
+    });
+    assert.match(reply.text, /current vans, availability, vehicle details and prices/i);
+    assert.match(reply.text, /apply online/i);
+    assert.ok(reply.text.endsWith("https://www.rent2buyvans.co.uk/"));
+    assert.doesNotMatch(reply.text, /(?:this|the) van is available/i);
+  }
+});
+
+test("general Rent2Buy policy goes to Ask Me without vehicle data or a quote token", async () => {
+  const history = [{ role: "user", content: "How does Rent2Buy work?" }];
+  const messages = [
+    "What is the holding deposit?",
+    "What is the minimum initial rental?",
+    "How are monthly rentals worked out?",
+    "What mileage allowance can I choose?",
+    "Can I apply if I'm self-employed?",
+    "Is my initial rental refundable if I return it early?",
+  ];
+  for (const message of messages) {
+    let request;
+    const result = await draftMarketplaceReply({
+      product: "rent2buy", message, history,
+      vehicle: { registration: "SYNTH01", pricing: { rent2buy_monthly: "£450" } },
+    }, {
+      respond: async (incoming) => {
+        request = incoming;
+        return { status: "ready", reply: "Here's how the general Rent2Buy policy works.", actions: [] };
+      },
+    });
+    assert.equal(request.product, "rent2buy");
+    assert.deepEqual(request.context.vehicle, {});
+    assert.equal(request.context.quote_token, null);
+    assert.deepEqual(request.history, history);
+    assert.ok(result.text.endsWith("https://www.rent2buyvans.co.uk/"));
+    assert.doesNotMatch(result.text, /SYNTH01|£450/);
+  }
+});
+
+test("Rent2Buy invitations support browsing and applying while holding complaints and decisions for the team", async () => {
+  const history = [{ role: "assistant", content: "General programme information." }];
+  const result = await draftMarketplaceReply({ product: "rent2buy", message: "Can self-employed people apply?", history }, {
+    respond: async () => ({ status: "ready", reply: "Yes, self-employed customers can apply.", actions: [{ type: "apply" }] }),
+  });
+  assert.match(result.text, /browse current vans and apply online at https:\/\/www\.rent2buyvans\.co\.uk\//i);
+  const stockClaim = await draftMarketplaceReply({ product: "rent2buy", message: "How does Rent2Buy work?" }, {
+    respond: async () => ({ status: "ready", reply: "That van is still available.", actions: [] }),
+  });
+  assert.match(stockClaim.text, /Check the live website/);
+  assert.doesNotMatch(stockClaim.text, /still available/i);
+  for (const message of [
+    "I want to make a complaint about the advertised price.",
+    "Has my application been approved?",
+    "Why was my application turned down?",
+    "Can you refund my initial rental?",
+    "I want to cancel my agreement.",
+  ]) {
+    const handoff = await draftMarketplaceReply({ product: "rent2buy", message }, {
+      respond: () => assert.fail("An individual decision or complaint should go to the team"),
+    });
+    assert.equal(handoff.reason, "Customer needs the team");
+    assert.equal(handoff.text, undefined);
+  }
+});
+
+test("an explicit Rent2Buy enquiry uses a product lane without a matching vehicle", async (t) => {
+  const { simulator, restart } = setup(t);
+  simulator.setEnabled(true);
+  const thread = simulator.addEnquiry("unmatched", "How does Rent2Buy work?");
+  const first = await observe(simulator);
+  assert.equal(first.threadId, thread.id);
+  assert.match(first.text, /https:\/\/www\.rent2buyvans\.co\.uk\//);
+  assert.equal(simulator.deliver(first), true);
+  assert.equal(await observe(simulator), null);
+
+  const resumed = restart();
+  assert.equal(resumed.snapshot().threads[0].productKey, "rent2buy");
+  resumed.addFollowUp(thread.id, "How does the mileage allowance work?");
+  const reply = await observe(resumed);
+  assert.equal(reply.threadId, thread.id);
+  assert.match(reply.text, /mileage allowance/);
+  assert.doesNotMatch(reply.text, /lenders?|APR/i);
 });

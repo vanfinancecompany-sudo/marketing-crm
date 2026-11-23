@@ -26,18 +26,18 @@
       <h2>Ask Me conversations</h2>
       <form id="askme-start">
         <label for="askme-product">Listing</label> <select id="askme-product">
-          <option value="finance">Finance</option>
           <option value="rent2buy">Rent2Buy</option>
+          <option value="finance">Finance</option>
           <option value="unmatched">Unrecognised listing</option>
         </select>
-        <label>First question <input id="askme-message" required maxlength="800" value="Do your vans come with a warranty?"></label>
+        <label>First question <input id="askme-message" required maxlength="800" value="How does Rent2Buy work?"></label>
         <button type="submit">Start simulated conversation</button>
       </form>
       <form id="askme-follow-up">
         <fieldset id="follow-up" disabled>
           <legend>Add a customer follow-up</legend>
           <label for="follow-up-thread">Conversation</label> <select id="follow-up-thread"></select>
-          <label>Next question <input id="follow-up-message" required maxlength="800" placeholder="Does that include the gearbox?"></label>
+          <label>Next question <input id="follow-up-message" required maxlength="800" placeholder="Is that separate from the initial rental?"></label>
           <button type="submit">Add follow-up</button>
         </fieldset>
       </form>
