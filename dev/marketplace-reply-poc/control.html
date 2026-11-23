@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Marketplace reply simulator | Marketing CRM</title>
+  <link rel="stylesheet" href="/__marketplace-reply-poc/fixture.css">
+  <script type="module" src="/__marketplace-reply-poc/fixture.js"></script>
+</head>
+<body>
+  <main id="reply-control">
+    <h1>Marketplace reply simulator</h1>
+    <p>Marketing CRM development fixture. Every conversation and send is simulated.</p>
+    <section>
+      <h2>Reply control</h2>
+      <button id="toggle" type="button" aria-pressed="false" disabled>Turn replies on</button>
+      <p id="health" role="status">Connecting…</p>
+      <p id="summary"></p>
+      <table>
+        <caption>Conversation status</caption>
+        <thead><tr><th scope="col">Conversation</th><th scope="col">Product</th><th scope="col">Status</th><th scope="col">Mock sends</th></tr></thead>
+        <tbody id="records"></tbody>
+      </table>
+    </section>
+    <section>
+      <h2>Simulated inbox</h2>
+      <p><a href="/__marketplace-reply-poc/inbox" target="_blank" rel="noopener">Open inbox in the extension browser</a></p>
+      <button type="button" data-enquiry="finance">Add Finance enquiry</button>
+      <button type="button" data-enquiry="rent2buy">Add Rent2Buy enquiry</button>
+      <button type="button" data-enquiry="unmatched">Add unrecognised listing</button>
+      <button type="button" data-enquiry="answered">Add answered conversation</button>
+      <p><label>Inbox condition
+        <select id="inbox-health">
+          <option value="healthy">Healthy</option>
+          <option value="signed-out">Signed out</option>
+          <option value="security-challenge">Security challenge</option>
+          <option value="layout-changed">Layout changed</option>
+        </select>
+      </label></p>
+      <label><input id="hide-outgoing" type="checkbox"> Hold outgoing receipts</label>
+    </section>
+    <p id="fixture-error" role="alert"></p>
+  </main>
+</body>
+</html>

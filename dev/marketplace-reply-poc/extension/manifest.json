@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Marketing CRM Marketplace Reply Simulator",
+  "version": "0.1.0",
+  "description": "Responds only to the local Marketing CRM simulated inbox.",
+  "content_scripts": [
+    {
+      "matches": ["http://127.0.0.1/__marketplace-reply-poc/inbox"],
+      "js": ["inbox-worker.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

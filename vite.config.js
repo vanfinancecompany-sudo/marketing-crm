@@ -11,6 +11,12 @@ function retireDuplicateVercelRuntimePlugin() {
   };
 }
 
-export default defineConfig({
-  plugins: [react(), retireDuplicateVercelRuntimePlugin()],
+export default defineConfig(async ({ command, mode, isPreview }) => {
+  const plugins = [react(), retireDuplicateVercelRuntimePlugin()];
+  if (command === "serve" && !isPreview && mode === "marketplace-reply-poc") {
+    const { marketplaceReplyFixture } = await import("./dev/marketplace-reply-poc/plugin.mjs");
+    plugins.push(marketplaceReplyFixture());
+    return { plugins, server: { host: "127.0.0.1", port: 4617, strictPort: true } };
+  }
+  return { plugins };
 });

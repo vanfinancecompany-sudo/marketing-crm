@@ -1,0 +1,29 @@
+body {
+  margin: 0;
+  color: #18243a;
+  background: #f3f6fa;
+  font: 16px/1.5 system-ui, sans-serif;
+}
+
+main {
+  max-width: 56rem;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+section, li {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid #c4cddd;
+  border-radius: 0.5rem;
+  background: white;
+}
+
+h1, h2, p { margin: 0 0 0.75rem; }
+button, select, input { font: inherit; }
+button { margin: 0.25rem; padding: 0.3rem 0.65rem; }
+p:empty { display: none; }
+table { width: 100%; border-collapse: collapse; text-align: left; }
+caption { text-align: left; font-weight: 600; }
+th, td { padding: 0.35rem; border-bottom: 1px solid #dbe1eb; }
+#fixture-error { color: #96172c; }
