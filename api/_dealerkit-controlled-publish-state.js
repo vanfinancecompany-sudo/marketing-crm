@@ -75,7 +75,21 @@ export async function controlledWixRequest(configuration, path, options = {}) {
   return readOnly ? retryTemporaryPublishOperation(run) : run();
 }
 
+// Draft-aware Wix PATCH protection: CARFINANCE/CARPAGES and the van collections
+// may return WDE0197 if an existing draft item is patched without this option.
+// Add it before the first write (including rollback), not by replaying a failed write.
+// Respect an explicitly provided includeDraftItems value.
+export function draftAwareControlledWixBody(path, method, body) {
+  if (method !== "PATCH" || !/^\\/wix-data\\/v2\\/items\\/[^/?]+$/.test(path) ||
+      !body?.dataCollectionId || !body?.patch?.dataItemId ||
+      body?.publishPluginOptions?.includeDraftItems !== undefined) {
+    return body;
+  }
+  return { ...body, publishPluginOptions: { ...(body.publishPluginOptions || {}), includeDraftItems: true } };
+}
+
 async function sendControlledWixRequest(configuration, path, { method = "POST", body, request = fetch } = {}) {
+  const safeBody = draftAwareControlledWixBody(path, method, body);
   let result;
   try {
     result = await request(`${configuration.apiBaseUrl}${path}`, {
@@ -84,9 +98,9 @@ async function sendControlledWixRequest(configuration, path, { method = "POST", 
       headers: {
         Authorization: configuration.apiKey,
         "wix-site-id": configuration.siteId,
-        ...(body ? { "Content-Type": "application/json" } : {}),
+        ...(safeBody ? { "Content-Type": "application/json" } : {}),
       },
-      ...(body ? { body: JSON.stringify(body) } : {}),
+      ...(safeBody ? { body: JSON.stringify(safeBody) } : {}),
     });
   } catch {
     throw new ControlledPublishError(502, "Wix could not be reached.");
