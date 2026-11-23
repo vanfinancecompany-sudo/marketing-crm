@@ -438,6 +438,8 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
     const newCustomer = (snapshot.messages || []).filter((m) => m?.direction === "incoming" && !seen.has(m.id) && !isFacebookNotice(m.text));
     if (!job || job.status !== "draft") { endApprovedSend(state, "draft no longer available"); return { action: "none", reason: "Approved draft no longer available" }; }
     if (newCustomer.length) { endApprovedSend(state, "cancelled: the customer sent a new message"); return { action: "none", reason: "New customer message since the draft" }; }
+    // Send-time verification: the open conversation must show the listing the pilot verified.
+    if (!snapshot.listingId || (thread.listingId && snapshot.listingId !== thread.listingId)) { endApprovedSend(state, "cancelled: the open conversation does not show the verified listing"); return { action: "none", reason: "Listing does not match the verified conversation" }; }
     job.status = "claimed";
     logEvent(state, "claim", { threadId, jobId: job.id, approved: true });
     return { action: "send", jobId: job.id, text: job.text };
