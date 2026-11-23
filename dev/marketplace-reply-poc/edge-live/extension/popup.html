@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  body { font: 14px system-ui, sans-serif; width: 280px; margin: 12px; color: #1c1e21; }
+  button { font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid #ccd0d5; background: #fff; cursor: pointer; }
+  button.on { background: #1b74e4; color: #fff; border-color: #1b74e4; }
+  #stop { width: 100%; background: #c62828; color: #fff; border-color: #c62828; font-weight: 700; font-size: 16px; padding: 10px; margin-bottom: 10px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  #status { white-space: pre-wrap; font-size: 12px; color: #444; margin: 0 0 10px; }
+  input { width: 100%; box-sizing: border-box; font: inherit; padding: 4px; }
+  label { font-size: 12px; color: #65676b; }
+</style>
+</head>
+<body>
+<button id="stop">STOP NOW</button>
+<div class="row">
+  <button data-mode="off">Off</button>
+  <button data-mode="observe">Observe</button>
+  <button data-mode="draft">Draft</button>
+  <button data-mode="send">Send</button>
+</div>
+<pre id="status">Connecting…</pre>
+<label for="home">Assistant tab page</label>
+<input id="home">
+<div class="row" style="margin-top:6px"><button id="saveHome">Save</button><a href="http://127.0.0.1:4618/" target="_blank">Full control page</a></div>
+<script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marketplace Assistant</title>
+<style>
+  body { font: 15px/1.45 system-ui, sans-serif; margin: 0 auto; padding: 16px; max-width: 960px; color: #1c1e21; background: #f5f6f7; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid #ccd0d5; background: #fff; cursor: pointer; }
+  button.on { background: #1b74e4; color: #fff; border-color: #1b74e4; }
+  #stop { background: #c62828; color: #fff; border-color: #c62828; font-weight: 700; font-size: 17px; padding: 10px 22px; }
+  section { background: #fff; border: 1px solid #dddfe2; border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td, th { text-align: left; padding: 4px 6px; border-top: 1px solid #eee; vertical-align: top; }
+  .muted { color: #65676b; font-size: 13px; }
+  input[type=text] { font: inherit; padding: 6px; width: min(100%, 420px); }
+  pre { white-space: pre-wrap; margin: 0; }
+</style>
+</head>
+<body>
+<h1>Marketplace Assistant</h1>
+<div class="bar">
+  <button id="stop">STOP NOW</button>
+  <span class="muted">Mode:</span>
+  <button data-mode="off">Off</button>
+  <button data-mode="observe">Observe</button>
+  <button data-mode="draft">Draft only</button>
+  <button data-mode="send">Send</button>
+</div>
+<section>
+  <h2>Send allowlist</h2>
+  <p class="muted">Send mode only replies in these Facebook thread IDs, unless "all conversations" is ticked.</p>
+  <input id="allow" type="text" placeholder="Thread IDs, comma separated">
+  <label><input id="allowAll" type="checkbox"> all conversations</label>
+  <button id="saveAllow">Save</button>
+</section>
+<section><h2>Status</h2><pre id="status">Loading…</pre></section>
+<section><h2>Needs a person</h2><table id="human"></table></section>
+<section><h2>Recent replies</h2><table id="jobs"></table></section>
+<section><h2>Events</h2><table id="events"></table></section>
+<script>
+const api = (path, body) => fetch(path, body === undefined ? {} : {
+  method: "POST", headers: { "Content-Type": "application/json", "x-r2b-assistant": "1" }, body: JSON.stringify(body),
+}).then((r) => r.json());
+const esc = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function render(s) {
+  document.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === s.mode));
+  const hb = s.heartbeat;
+  document.getElementById("status").textContent = [
+    "Mode: " + s.mode + (s.enabledAt ? " since " + new Date(s.enabledAt).toLocaleString() : ""),
+    "Browser tab: " + (hb ? hb.health + ", " + hb.visibility + ", last seen " + Math.round((Date.now() - Date.parse(hb.at)) / 1000) + "s ago" : "not connected"),
+    "Unread at switch-on (left for a person): " + (s.baselineUnread ?? "not yet taken"),
+    "Waiting to open: " + (s.pendingOpen.join(", ") || "none"),
+    "Sent: " + s.counts.sent + "   Drafts: " + s.counts.drafts + "   Needs a person: " + s.counts.needsHuman,
+  ].join("\n");
+  if (document.activeElement?.id !== "allow") document.getElementById("allow").value = s.allowThreads.join(", ");
+  document.getElementById("allowAll").checked = s.allowAll;
+  document.getElementById("human").innerHTML = s.needsHuman.map((t) => `<tr><td><a href="https://www.facebook.com/messages/t/${esc(t.threadId)}/" target="_blank">${esc(t.threadId)}</a></td><td>${esc(t.listingTitle)}</td><td>${esc(t.reason)}</td><td><button data-resume="${esc(t.threadId)}">Hand back to assistant</button></td></tr>`).join("") || "<tr><td class=muted>None</td></tr>";
+  document.getElementById("jobs").innerHTML = s.recentJobs.map((j) => `<tr><td>${esc(new Date(j.at).toLocaleTimeString())}</td><td>${esc(j.threadId)}</td><td>${esc(j.status)}</td><td><b>Customer:</b> ${esc(j.customer)}<br><b>Reply:</b> ${esc(j.text)}</td></tr>`).join("") || "<tr><td class=muted>None</td></tr>";
+  document.getElementById("events").innerHTML = s.events.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleTimeString())}</td><td>${esc(e.type)}</td><td>${esc(JSON.stringify({ ...e, at: undefined, type: undefined }))}</td></tr>`).join("");
+}
+const refresh = () => api("/status").then(render).catch(() => { document.getElementById("status").textContent = "Service not reachable."; });
+document.getElementById("stop").onclick = () => api("/stop", {}).then(render);
+document.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => api("/control", { mode: b.dataset.mode }).then(render));
+document.getElementById("saveAllow").onclick = () => api("/status").then((s) => api("/control", {
+  mode: s.mode, allowThreads: document.getElementById("allow").value.split(/[\s,]+/).filter(Boolean), allowAll: document.getElementById("allowAll").checked,
+})).then(render);
+document.addEventListener("click", (e) => { if (e.target.dataset.resume) api("/control", { resumeThread: e.target.dataset.resume }).then(render); });
+refresh(); setInterval(refresh, 2000);
+</script>
+</body>
+</html>
