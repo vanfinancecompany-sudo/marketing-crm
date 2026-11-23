@@ -403,12 +403,22 @@ export function approveSend(state, { threadId, jobId, text }) {
   const id = String(threadId || "");
   const thread = state.threads[id];
   const job = thread?.jobs.find((j) => j.id === jobId);
-  if (!job || job.status !== "draft") throw new TypeError("That draft was not found or is not waiting for approval");
+  if (!job || !["draft", "cancelled"].includes(job.status)) throw new TypeError("That draft was not found or is not waiting for approval");
   if (normalise(job.text) !== normalise(text)) throw new TypeError("The approved text does not match the draft exactly");
   if (state.mode !== "observe") throw new TypeError("Approve the send from Observe mode");
   if (state.heartbeat?.list !== "marketplace") throw new TypeError("The Marketplace list is not open in the assistant tab yet");
+  // A draft cancelled before Send was pressed (never sent) is re-issued as a
+  // fresh copy of the identical text: the extension never presses Send twice
+  // for the same claim.
+  let approvedJob = job;
+  if (job.status === "cancelled") {
+    approvedJob = { ...job, id: randomUUID(), status: "draft", at: new Date().toISOString(), outgoingId: null, supersedes: job.id };
+    job.status = "superseded";
+    thread.jobs.push(approvedJob);
+  }
+  thread.needsHuman = null; // the owner has explicitly approved this send
   setMode(state, "send", { allowThreads: [id], allowAll: false });
-  state.approvedSend = { threadId: id, jobId, at: new Date().toISOString() };
+  state.approvedSend = { threadId: id, jobId: approvedJob.id, at: new Date().toISOString() };
   state.pendingOpen = [id];
   logEvent(state, "send-approved", { threadId: id, jobId });
   return state.approvedSend;

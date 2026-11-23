@@ -707,10 +707,20 @@
     if (home && !location.href.startsWith(home)) location.assign(home);
   }
 
+  // Live (23:34): typing line by line did not insert cleanly into Facebook's
+  // message box (line breaks). Insert the reply as a plain-text paste, which
+  // the box handles including line breaks; fall back to typing.
   function typeInto(box, text) {
     box.focus();
-    const lines = text.split("\n");
-    lines.forEach((line, index) => {
+    try {
+      const data = new DataTransfer();
+      data.setData("text/plain", text);
+      box.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    } catch {}
+    if (norm(box.innerText) === norm(text)) return;
+    clear(box);
+    box.focus();
+    text.split("\n").forEach((line, index) => {
       if (index) document.execCommand("insertLineBreak");
       if (line) document.execCommand("insertText", false, line);
     });
@@ -734,8 +744,9 @@
     typeInto(box, text);
     await sleep(400);
     if (norm(box.innerText) !== norm(text)) {
+      const got = norm(box.innerText).slice(0, 160); // our own reply text only
       clear(box);
-      return api("/sent", { jobId, confirmed: false, error: "Reply text did not insert cleanly" });
+      return api("/sent", { jobId, confirmed: false, error: "Reply text did not insert cleanly (box held: \"" + got + "\")" });
     }
     const go = await api("/go", { jobId });
     if (!go.go) { clear(box); return; }
