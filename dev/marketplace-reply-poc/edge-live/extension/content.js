@@ -273,12 +273,39 @@
   }
   const listReady = (list) => list === "marketplace" || list === "chats-only";
 
+  // Live finding (23 Nov 2026, 20:15-20:18): clicking the Marketplace entry's
+  // outer element (div role=button) had no effect, retried every 15 s; the
+  // handler sits on an inner element and a click event only bubbles UP. Click
+  // the way a mouse does: on the element actually under the entry's centre, so
+  // the event passes every handler on the way up. Strategies escalate per retry.
+  const CLICK_STRATEGIES = ["centre", "pointer", "outer"];
+  function innerAt(target) {
+    const r = target.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    const el = document.elementFromPoint(x, y);
+    return { el: el && target.contains(el) && safeToClick(el) ? el : target, x, y };
+  }
+  function clickLikeMouse(target, strategy) {
+    if (strategy === "outer") { target.click(); return; }
+    const { el, x, y } = innerAt(target);
+    if (strategy === "pointer") {
+      const base = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y, button: 0, pointerId: 1, pointerType: "mouse", isPrimary: true };
+      el.dispatchEvent(new PointerEvent("pointerdown", { ...base, buttons: 1 }));
+      el.dispatchEvent(new MouseEvent("mousedown", { ...base, buttons: 1 }));
+      el.dispatchEvent(new PointerEvent("pointerup", { ...base, buttons: 0 }));
+      el.dispatchEvent(new MouseEvent("mouseup", { ...base, buttons: 0 }));
+    }
+    el.click();
+  }
+
   let openerStatus = "";
   let lastOpenAt = 0;
   let messengerMisses = 0;
+  let marketplaceMisses = 0;
   async function ensureChatList() {
     if (sessionStorage.getItem("r2bOpenerTripped") === "1") return (openerStatus = "disabled: a conversation view appeared after a click");
-    if (namedGrid(/^marketplace$/i)) { messengerMisses = 0; return (openerStatus = "present"); }
+    if (namedGrid(/^marketplace$/i)) { messengerMisses = 0; marketplaceMisses = 0; return (openerStatus = "present"); }
     const backoff = messengerMisses >= 3 ? 600_000 : 15_000;
     if (Date.now() - lastOpenAt < backoff) return openerStatus;
     lastOpenAt = Date.now();
@@ -286,7 +313,9 @@
     const chatsOpen = Boolean(namedGrid(/^chats$/i));
     const target = chatsOpen ? marketplaceControl() : messengerButton();
     if (!target) return (openerStatus = chatsOpen ? "no-marketplace-control" : "no-messenger-button");
-    target.click();
+    const strategy = CLICK_STRATEGIES[marketplaceMisses % CLICK_STRATEGIES.length];
+    if (chatsOpen) clickLikeMouse(target, strategy);
+    else target.click(); // the Messenger button responds to a plain click (live)
     await sleep(2_500);
     if (location.pathname !== before.path || THREAD_PATH.test(location.pathname) || conversationSurfaces() > before.surfaces) {
       sessionStorage.setItem("r2bOpenerTripped", "1");
@@ -294,7 +323,12 @@
     }
     if (!chatsOpen) messengerMisses = namedGrid(/^chats$/i) ? 0 : messengerMisses + 1;
     if (messengerMisses >= 3) return (openerStatus = "messenger-panel-not-found");
-    return (openerStatus = chatsOpen ? "clicked Marketplace" : "clicked Messenger");
+    if (chatsOpen) {
+      if (namedGrid(/^marketplace$/i)) return (openerStatus = "clicked Marketplace (" + strategy + ")");
+      marketplaceMisses++;
+      return (openerStatus = "Marketplace click had no effect (" + strategy + "), attempt " + marketplaceMisses);
+    }
+    return (openerStatus = "clicked Messenger");
   }
 
   // ---- Read-only diagnostics ----

@@ -102,14 +102,15 @@ try {
 
   const s0 = await waitFor(async () => {
     const s = await api("/status");
-    return s.baselineUnread !== null && s.heartbeat?.list === "marketplace" && s.events.some((e) => e.status === "clicked Marketplace") ? s : null;
+    return s.baselineUnread !== null && s.heartbeat?.list === "marketplace" && s.events.some((e) => /^clicked Marketplace/.test(e.status)) ? s : null;
   }, "assistant tab opened the list and baselined", 90_000);
   assert.equal(s0.baselineUnread, 1);
   assert.equal(s0.heartbeat.list, "marketplace");
   assert.equal((await assistantTabs()).length, 1);
   assert.ok(!(await assistantTabs()).some((t) => /\/messages\/t\/|\/__fb\/marketplace\/$/.test(t.url)), "no conversation or navigation decoy opened");
   const openerEvents = s0.events.filter((e) => e.type === "list-opener").map((e) => e.status).reverse();
-  assert.deepEqual(openerEvents.slice(0, 2), ["clicked Messenger", "clicked Marketplace"]);
+  assert.equal(openerEvents[0], "clicked Messenger");
+  assert.match(openerEvents.at(-1), /^clicked Marketplace \((centre|pointer|outer)\)$/);
   pass(`background tab opened the list itself (${openerEvents.join(" -> ")}), never a conversation or decoy, then baselined 1 already-unread conversation`);
 
   // Recovery: the panel closes, then the page reloads; the list is restored each time.

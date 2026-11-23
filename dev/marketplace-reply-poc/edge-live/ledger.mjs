@@ -108,8 +108,14 @@ export function recordHeartbeat(state, { health, visibility, url, rows, unread, 
   if (state.mode !== "off" && health !== previous?.health && health !== "healthy" && health !== "loading") {
     logEvent(state, "health", { health });
   }
+  // Log opener changes by kind (ignoring the click method in brackets), and a
+  // repeated kind at most every 10 minutes, so retries never flood the log.
+  const kind = (value) => String(value || "").replace(/\s*\(.*$/, "");
   if (state.mode !== "off" && opener && opener !== previous?.opener && !/^(?:present|waiting)/.test(opener)) {
-    logEvent(state, "list-opener", { status: state.heartbeat.opener, list: state.heartbeat.list });
+    const last = state.events.findLast((e) => e.type === "list-opener");
+    if (!last || kind(last.status) !== kind(opener) || Date.now() - Date.parse(last.at) > 600_000) {
+      logEvent(state, "list-opener", { status: state.heartbeat.opener, list: state.heartbeat.list });
+    }
   }
 }
 
@@ -460,7 +466,7 @@ export function monitoringVerdict(state, now = Date.now()) {
     if (age > 150) reasons.push("No report from the Edge assistant tab for " + age + " s: Edge may be closed or asleep, or the extension disabled.");
     if (hb.health !== "healthy") reasons.push(HEALTH_TEXT[hb.health] || "The Facebook page is not healthy (" + hb.health + ").");
     if (/^tripped|^disabled/.test(hb.opener)) reasons.push("Safety stop: a conversation view appeared after a click, so the list opener switched itself off. Reload the assistant tab.");
-    else if (hb.list !== "marketplace") reasons.push(OPENER_TEXT[hb.opener] || "The Marketplace conversation list is not open in the assistant tab (" + (hb.list || "none") + ").");
+    else if (hb.list !== "marketplace") reasons.push(OPENER_TEXT[hb.opener] || (/^Marketplace click had no effect/.test(hb.opener) ? "The Marketplace entry in the Messenger panel was clicked but the Marketplace list did not open. Retrying every 15 s with a different click method (" + hb.opener + ")." : null) || "The Marketplace conversation list is not open in the assistant tab (" + (hb.list || "none") + ").");
     if (!hb.rows) reasons.push("No conversations are visible in the assistant tab.");
   }
   if (state.mode !== "off" && !state.inboxBaseline) reasons.push("Waiting for the first full snapshot of the Marketplace list.");

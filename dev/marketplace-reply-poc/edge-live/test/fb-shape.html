@@ -60,7 +60,9 @@ async function render() {
   if (!panelOpen || tab === "chats") {
     const fresh = Object.values(s.threads).filter((t) => t.unread).length;
     grid.innerHTML = `<div role="grid" aria-label="Chats">`
-      + `<div role="row"><div role="gridcell"><div role="link" tabindex="0" id="marketFolder" style="height:56px"><span>Marketplace</span> <span>· ${fresh} new messages</span></div></div></div>`
+      // Live: an outer div role=button whose click handler sits on an INNER
+      // element, so clicking the outer element itself does nothing.
+      + `<div role="row"><div role="gridcell"><div role="button" tabindex="0" style="height:56px;display:flex;align-items:center"><div id="marketFolder" style="width:100%;height:100%"><span>Marketplace</span><span>Unread message:${fresh} new messages</span></div></div></div></div>`
       + row("778", "Marketplace", "", false)
       + ["901", "902", "903"].map((id) => row(id, "Friend " + id, "See you soon", false)).join("") + `</div>`;
   } else {
