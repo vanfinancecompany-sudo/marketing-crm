@@ -35,18 +35,47 @@ async function isMarked(tabId) {
 
 // After an Edge restart tab IDs change. Adopt the restored assistant tab (it
 // carries a session marker) instead of opening a duplicate.
-async function ensureTab() {
+// A tab the assistant created or adopted earlier in this Edge session is
+// re-adopted even if its page does not answer (busy or reloading). The marker
+// check is retried, and at most one new tab is created per 10 minutes.
+const CREATE_GAP_MS = 600_000;
+async function ensureTab(status = {}) {
   const { home, tabId } = await settings();
   let tab = tabId === null ? null : await chrome.tabs.get(tabId).catch(() => null);
   if (!tab) {
-    const candidates = await chrome.tabs.query({ pinned: true, url: ["https://www.facebook.com/*", "http://127.0.0.1:4618/__fb/*"] });
-    for (const candidate of candidates) {
-      if (candidate.discarded) continue;
-      if (await isMarked(candidate.id)) { tab = candidate; break; }
+    const { ourTabs = [] } = await chrome.storage.session.get("ourTabs");
+    for (const id of ourTabs.slice().reverse()) {
+      tab = await chrome.tabs.get(id).catch(() => null);
+      if (tab) { tabEvent("assistant-tab-adopted", { tabId: tab.id, previousTabId: tabId, how: "tab the assistant created or adopted earlier" }); break; }
     }
   }
-  if (!tab) tab = await chrome.tabs.create({ url: home, pinned: true, active: false });
+  if (!tab) {
+    const candidates = await chrome.tabs.query({ pinned: true, url: ["https://www.facebook.com/*", "http://127.0.0.1:4618/__fb/*"] });
+    for (let attempt = 0; attempt < 3 && !tab; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, 1_500));
+      for (const candidate of candidates) {
+        if (candidate.discarded) continue;
+        if (await isMarked(candidate.id)) { tab = candidate; break; }
+      }
+    }
+    if (tab) tabEvent("assistant-tab-adopted", { tabId: tab.id, previousTabId: tabId, how: "pinned tab carrying the assistant marker", candidates: candidates.length });
+  }
+  if (!tab) {
+    const { lastTabCreatedAt = 0 } = await chrome.storage.local.get("lastTabCreatedAt");
+    if (Date.now() - lastTabCreatedAt < (status.tabCreateGapMs ?? CREATE_GAP_MS)) {
+      tabEvent("assistant-tab-not-created", { previousTabId: tabId, why: "a tab was created less than 10 minutes ago" });
+      return null;
+    }
+    await chrome.storage.local.set({ lastTabCreatedAt: Date.now() });
+    // The only place the assistant ever creates a tab.
+    const reason = tabId === null ? "no assistant tab recorded in this Edge session" : "recorded assistant tab " + tabId + " no longer exists";
+    creatingTab = { reason, at: Date.now() };
+    tab = await chrome.tabs.create({ url: home, pinned: true, active: false });
+    tabEvent("assistant-tab-created", { tabId: tab.id, reason });
+  }
   await chrome.storage.session.set({ tabId: tab.id });
+  const { ourTabs = [] } = await chrome.storage.session.get("ourTabs");
+  if (!ourTabs.includes(tab.id)) await chrome.storage.session.set({ ourTabs: [...ourTabs, tab.id].slice(-10) });
   if (tab.discarded) await chrome.tabs.reload(tab.id);
   await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   return tab;
@@ -66,12 +95,14 @@ async function supervise() {
     await badge(null, false);
     return;
   }
+  api("/tab-census", await tabCensus()).catch(() => {});
   const hb = status.heartbeat;
   await badge(status.mode, status.mode === "off" || (hb?.health === "healthy" && Date.now() - Date.parse(hb.at) < STALE_HEARTBEAT_MS));
   if (status.fixtureHome) await chrome.storage.local.set({ home: status.fixtureHome });
   if (await selfUpdateIfNeeded(status.extension?.expected)) return;
   if (status.mode === "off") return;
-  const tab = await ensureTab();
+  const tab = await ensureTab(status);
+  if (!tab) return;
   // Nudge the content script; background timers are throttled by the browser.
   chrome.tabs.sendMessage(tab.id, { type: "tick" }).catch(() => {});
   if (hb && Date.now() - Date.parse(hb.at) > STALE_HEARTBEAT_MS && !tab.status?.includes("loading")) {
@@ -117,6 +148,55 @@ async function visibilityAssist(tab) {
   }
   await api("/assist", { opened, ms: ASSIST_MAX_MS }).catch(() => {});
   return { ok: opened };
+}
+
+// ---- Tab diagnostics ----
+// Every new tab is recorded with who created it: the assistant's own tab
+// recovery (ensureTab, with its reason), a page in the assistant tab (Edge's
+// openerTabId), another tab, or nothing (Edge, Windows or a notification).
+// Only URL patterns are recorded: host and path, digits masked, no query.
+let creatingTab = null;
+const urlPattern = (url) => {
+  try { const u = new URL(url); return u.host + u.pathname.replace(/\d{3,}/g, "#"); } catch { return url ? "(unparsed)" : "(none yet)"; }
+};
+function tabEvent(kind, detail) { api("/tab-event", { kind, ...detail }).catch(() => {}); }
+chrome.tabs.onCreated.addListener(async (tab) => {
+  const { tabId: assistantTabId } = await chrome.storage.session.get("tabId");
+  const byAssistant = creatingTab && Date.now() - creatingTab.at < 5_000 ? creatingTab.reason : null;
+  if (byAssistant) creatingTab = null;
+  const win = await chrome.windows.get(tab.windowId).catch(() => null);
+  tabEvent("tab-created", {
+    tabId: tab.id,
+    createdBy: byAssistant ? "assistant tab recovery: " + byAssistant
+      : tab.openerTabId != null && tab.openerTabId === assistantTabId ? "a page in the assistant tab (opener " + tab.openerTabId + ")"
+      : tab.openerTabId != null ? "another tab (opener " + tab.openerTabId + ")"
+      : "no opener tab (Edge, Windows, a notification or the owner)",
+    openerTabId: tab.openerTabId ?? null,
+    assistantTabId: assistantTabId ?? null,
+    url: urlPattern(tab.pendingUrl || tab.url),
+    active: tab.active, pinned: tab.pinned, windowType: win?.type || null, windowFocused: win?.focused ?? null,
+  });
+});
+chrome.tabs.onUpdated.addListener((id, change, tab) => {
+  // The first real URL of a tab created in the last 30 s (new tabs often start blank).
+  if (change.url && recentTabs.has(id)) { recentTabs.delete(id); tabEvent("tab-url", { tabId: id, url: urlPattern(change.url), openerTabId: tab.openerTabId ?? null }); }
+});
+const recentTabs = new Set();
+chrome.tabs.onCreated.addListener((tab) => { recentTabs.add(tab.id); setTimeout(() => recentTabs.delete(tab.id), 30_000); });
+chrome.tabs.onRemoved.addListener(async (id) => {
+  const { tabId } = await chrome.storage.session.get("tabId");
+  if (id === tabId) tabEvent("assistant-tab-removed", { tabId: id });
+});
+chrome.tabs.onReplaced.addListener(async (added, removed) => {
+  const { tabId } = await chrome.storage.session.get("tabId");
+  if (removed === tabId) { await chrome.storage.session.set({ tabId: added }); tabEvent("assistant-tab-replaced", { tabId: added, previousTabId: removed }); }
+});
+chrome.windows.onCreated.addListener((win) => tabEvent("window-created", { windowId: win.id, windowType: win.type }));
+async function tabCensus() {
+  const tabs = await chrome.tabs.query({});
+  const facebook = tabs.filter((t) => /^https:\/\/(www\.)?facebook\.com\//.test(t.url || t.pendingUrl || ""));
+  const { tabId } = await chrome.storage.session.get("tabId");
+  return { tabs: tabs.length, facebookTabs: facebook.length, pinnedFacebookTabs: facebook.filter((t) => t.pinned).length, assistantTabId: tabId ?? null };
 }
 
 // ---- Self-update ----

@@ -25,7 +25,7 @@ export function createFixture(file) {
       return { ok: true };
     },
     // Simulate Facebook reloading the page or closing the chat panel.
-    "POST /__fb/api/command": ({ cmd }) => { if (["reload", "closepanel"].includes(cmd)) push(cmd); return { ok: true }; },
+    "POST /__fb/api/command": ({ cmd }) => { if (["reload", "closepanel", "popupnext", "dockednext"].includes(cmd)) push(cmd); return { ok: true }; },
     "POST /__fb/api/read": ({ threadId }) => { if (fb.threads[threadId]) fb.threads[threadId].unread = false; commit(); return { ok: true }; },
     "POST /__fb/api/send": ({ threadId, text }) => {
       fb.threads[threadId].messages.push({ id: "mid.$out" + fb.seq++, out: true, text: String(text) });

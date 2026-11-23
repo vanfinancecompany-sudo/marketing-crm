@@ -40,7 +40,20 @@ document.getElementById("tabChats").onclick = () => { tab = "chats"; render(); }
 // Live panel: the Marketplace entry is a row in the Chats grid with extra text
 // ("Marketplace · N new messages") and no link.
 document.getElementById("grid").addEventListener("click", (e) => {
-  if (e.target.closest("#marketFolder")) { tab = "marketplace"; render(); }
+  if (e.target.closest("#marketFolder")) {
+    // One-shot test events on the next Marketplace click:
+    // "popup": a customer message arrives and Facebook pops up its chat window
+    //          (owner's report, 21:29: Jim's Vauxhall Vivaro enquiry);
+    // "docked": a docked window appears with no incoming message.
+    if (window.__nextFolderClick === "popup") {
+      post("customer", { threadId: "500", name: "Jim", listing: "2014 Vauxhall Vivaro", text: "Hi, is this available?" });
+      addDocked("Messages in conversation with Jim");
+    } else if (window.__nextFolderClick === "docked") {
+      addDocked("Messages in conversation with Someone");
+    }
+    window.__nextFolderClick = null;
+    tab = "marketplace"; render();
+  }
 });
 
 const row = (id, name, preview, unread) => `<div style="display:flex;align-items:center;height:72px">
@@ -74,6 +87,10 @@ async function render() {
   }
   const t = threadId && s.threads[threadId];
   const main = document.getElementById("main");
+  // Facebook shows unread counts in the title and on the Messenger button.
+  const unreadCount = Object.values(s.threads).filter((x) => x.unread).length;
+  document.title = (unreadCount ? "(" + unreadCount + ") " : "") + "Facebook";
+  document.getElementById("messenger").setAttribute("aria-label", "Messenger" + (unreadCount ? ", " + unreadCount + " unread" : ""));
   if (!t) { main.innerHTML = "<h2>Your listings</h2>"; return; }
   if (!main.querySelector("[role=log]")) {
     main.innerHTML = `<h2><a href="/marketplace/item/${t.listingId}/">${esc(t.listing)}</a></h2><div role="log"></div>
@@ -91,6 +108,14 @@ async function render() {
 }
 // Live (20:52): Facebook restores the owner's docked chat windows a few seconds
 // after every page load. Without a settle period this tripped the safety stop.
+function addDocked(label) {
+  const docked = document.createElement("div");
+  docked.setAttribute("role", "log");
+  docked.setAttribute("aria-label", label);
+  docked.style.cssText = "position:fixed;bottom:0;left:" + (220 + 210 * document.querySelectorAll("[role=log]").length) + "px;width:200px;height:60px;background:#f6f6f6;border:1px solid #ccc";
+  docked.innerHTML = '<div data-message-id="mid.$d' + Date.now() + '"><div dir="auto">Docked</div></div>';
+  document.body.appendChild(docked);
+}
 setTimeout(() => {
   const docked = document.createElement("div");
   docked.setAttribute("role", "log");
@@ -102,6 +127,8 @@ setTimeout(() => {
 new EventSource("/__fb/api/events").onmessage = (e) => {
   if (e.data === "reload") return location.reload();
   if (e.data === "closepanel") { panelOpen = false; }
+  if (e.data === "popupnext") { window.__nextFolderClick = "popup"; return; }
+  if (e.data === "dockednext") { window.__nextFolderClick = "docked"; return; }
   render();
 };
 </script>

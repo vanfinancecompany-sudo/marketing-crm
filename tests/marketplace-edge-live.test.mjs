@@ -372,3 +372,30 @@ test("the finder needs the Marketplace list, records only IDs, and times out cle
   assert.equal(state.pilot.rowWords, 7);
   assert.ok(!JSON.stringify(state.pilot).includes("Trafic"));
 });
+
+test("the safety stop is service-wide: set by any tab's trip, carried over, cleared only by the owner's reset", async () => {
+  const { migrateSafetyStop, resetSafetyStop, recordHeartbeat: hb } = await import("../dev/marketplace-reply-poc/edge-live/ledger.mjs");
+  const state = emptyState();
+  setMode(state, "observe");
+  hb(state, { health: "healthy", list: "chats", opener: "tripped: a new docked chat window appeared after a click with no sign of an incoming message (1 -> 2); opener disabled", rows: 13 });
+  assert.match(state.openerTrip.reason, /^a new docked chat window/);
+  // A brand-new tab reports a normal status: the stop stays.
+  hb(state, { health: "healthy", list: "chats", opener: "clicked Messenger", rows: 13 });
+  assert.ok(state.openerTrip);
+  assert.match(publicStatus(state).monitoring.reasons.join(" "), /Safety stop is set/);
+  resetSafetyStop(state);
+  assert.equal(state.openerTrip, null);
+  assert.equal(state.resetOpenerRequested, true);
+  // Carry-over of a trip logged before the stop moved into the service.
+  const old = emptyState();
+  logEventForTest(old, "safety-reset", "2026-11-23T21:28:10.000Z");
+  logEventForTest(old, "list-opener", "2026-11-23T21:29:10.000Z", { status: "tripped: a new docked chat window appeared after a click (1 -> 2); opener disabl" });
+  assert.equal(migrateSafetyStop(old), true);
+  assert.equal(old.openerTrip.carriedOver, true);
+  const cleared = emptyState();
+  logEventForTest(cleared, "list-opener", "2026-11-23T21:29:10.000Z", { status: "tripped: x; opener disabled" });
+  logEventForTest(cleared, "safety-reset", "2026-11-23T21:30:00.000Z");
+  assert.equal(migrateSafetyStop(cleared), false, "a trip already reset is not carried over");
+});
+
+function logEventForTest(state, type, at, detail = {}) { state.events.push({ at, type, ...detail }); }

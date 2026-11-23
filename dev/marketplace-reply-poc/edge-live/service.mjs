@@ -11,6 +11,7 @@ import {
   authoriseSend, inspectInbox, inspectThread, loadState, logEvent, publicStatus, recordDraft,
   recordHeartbeat, recordSendResult, resumeThread, saveState, setMode, startupMode,
   startPilot, verifyPilot, cancelPilot, pilotTimeout, finishPilot, startFind, recordFind, findTimeout,
+  migrateSafetyStop, resetSafetyStop,
 } from "./ledger.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -37,6 +38,7 @@ const fixture = process.env.R2B_FIXTURE === "1"
 
 let state = loadState(STATE_FILE);
 const sendWasOn = startupMode(state);
+migrateSafetyStop(state);
 saveState(STATE_FILE, state);
 let queue = Promise.resolve();
 // Serialise every state change so two tabs or retries can never race a claim.
@@ -87,6 +89,8 @@ function statusWithExtension() {
   return {
     ...status,
     // A pre-0.3.0 extension reports no version and cannot update itself.
+    tabCensus: state.tabCensus || null,
+    ...(process.env.R2B_TAB_CREATE_GAP_MS ? { tabCreateGapMs: Number(process.env.R2B_TAB_CREATE_GAP_MS) } : {}),
     extension: { running, expected, updatePending: Boolean(expected && state.heartbeat && running !== expected), manualReloadNeeded: Boolean(state.heartbeat && !running) },
     ...(fixture ? { fixtureHome: "http://127.0.0.1:" + PORT + "/__fb/inbox/" } : {}),
   };
@@ -100,7 +104,7 @@ const ROUTES = {
     if (body.mode) { cancelPilot(state); setMode(state, body.mode, body); }
     if (body.startPilot) startPilot(state, body.startPilot);
     if (body.find) startFind(state, body.find);
-    if (body.resetOpener) { state.resetOpenerRequested = true; logEvent(state, "safety-reset", { requested: true }); }
+    if (body.resetOpener) resetSafetyStop(state);
     return statusWithExtension();
   },
   "POST /stop": () => { cancelPilot(state); setMode(state, "off"); logEvent(state, "emergency-stop"); return statusWithExtension(); },
@@ -108,7 +112,7 @@ const ROUTES = {
     recordHeartbeat(state, body);
     // Clear only once the page reports a real, non-tripped opener status (a fresh
     // page reports an empty status before it has checked the stop).
-    if (state.resetOpenerRequested && body.opener && !/^(?:tripped|disabled)/.test(String(body.opener))) state.resetOpenerRequested = false;
+    if (state.resetOpenerRequested && body.stopFlag === false) state.resetOpenerRequested = false; // page confirmed the stop is cleared
     pilotTimeout(state);
     findTimeout(state);
     return {
@@ -116,11 +120,27 @@ const ROUTES = {
       verifyThread: state.pilot?.status === "verifying" ? state.pilot.threadId : null,
       findWords: state.finder?.status === "searching" ? state.finder.words : null,
       resetOpener: state.resetOpenerRequested === true,
+      safetyStop: state.openerTrip?.reason || null,
       extensionVersion: expectedExtensionVersion(),
     };
   },
   "POST /pilot/verify": (body) => verifyPilot(state, body),
   "POST /find/result": (body) => recordFind(state, body),
+  "POST /opener-note": (body) => { logEvent(state, "opener-note", { note: String(body.note || "").slice(0, 200) }); return { ok: true }; },
+  "POST /tab-event": (body) => {
+    const detail = Object.fromEntries(Object.entries(body).filter(([k, v]) => k !== "kind" && (typeof v !== "string" || v.length <= 200)));
+    logEvent(state, String(body.kind || "tab-event").slice(0, 40), detail);
+    return { ok: true };
+  },
+  "POST /tab-census": (body) => {
+    const census = { at: new Date().toISOString(), tabs: Number(body.tabs) || 0, facebookTabs: Number(body.facebookTabs) || 0, pinnedFacebookTabs: Number(body.pinnedFacebookTabs) || 0, assistantTabId: body.assistantTabId ?? null };
+    const prev = state.tabCensus;
+    if (prev && (prev.facebookTabs !== census.facebookTabs || prev.pinnedFacebookTabs !== census.pinnedFacebookTabs)) {
+      logEvent(state, "tab-census-change", { facebookTabs: prev.facebookTabs + " -> " + census.facebookTabs, pinnedFacebookTabs: prev.pinnedFacebookTabs + " -> " + census.pinnedFacebookTabs });
+    }
+    state.tabCensus = census;
+    return { ok: true };
+  },
   "POST /assist": (body) => { logEvent(state, "visibility-assist", { opened: Boolean(body.opened) }); return { ok: true }; },
   "POST /inbox": (body) => ({ mode: state.mode, ...inspectInbox(state, body.threads, { listReady: body.listReady !== false, list: typeof body.list === "string" ? body.list.slice(0, 40) : null }) }),
   "POST /thread": (body) => handleThread(body),

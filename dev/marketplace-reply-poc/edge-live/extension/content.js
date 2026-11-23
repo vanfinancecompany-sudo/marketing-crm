@@ -339,14 +339,59 @@
   let lastOpenAt = 0;
   let messengerMisses = 0;
   let marketplaceMisses = 0;
+
+  // Independent signs of an incoming message (no message text is read):
+  // the Marketplace entry's "N new messages", the Messenger button's "N unread",
+  // the page title's "(N)", and which conversations are unread at the top of
+  // each visible list.
+  const countIn = (text, pattern) => Number(norm(text).match(pattern)?.[1] ?? NaN);
+  function incomingSignals() {
+    const entry = marketplaceCandidates()[0];
+    const badge = [...document.querySelectorAll('[aria-label]')].map((el) => el.getAttribute("aria-label")).find((l) => /^messenger\b.*\d+\s+unread/i.test(norm(l)));
+    // Per list, so switching from Chats to Marketplace is never read as new arrivals.
+    const topUnread = {};
+    const links = threadLinks();
+    for (const grid of document.querySelectorAll('[role="grid"][aria-label]')) {
+      if (!visible(grid)) continue;
+      const ids = [];
+      for (const a of grid.querySelectorAll("a[href]")) {
+        const id = threadIdOf(a);
+        if (id && !ids.includes(id)) ids.push(id);
+        if (ids.length >= 3) break;
+      }
+      const label = norm(grid.getAttribute("aria-label")).toLowerCase();
+      topUnread[label] = classify(rowsFromLinks(ids.map((id) => links.find((l) => l.id === id)).filter(Boolean))).filter((r) => r.unread).map((r) => r.id);
+    }
+    return {
+      marketplaceNew: entry ? countIn(entry.textContent, /(\d+)\s+new messages?/i) : NaN,
+      messengerUnread: badge ? countIn(badge, /(\d+)\s+unread/i) : NaN,
+      title: Number(document.title.match(/^\((\d+)\)/)?.[1] ?? 0),
+      topUnread,
+    };
+  }
+  function incomingEvidence(before, after) {
+    const out = [];
+    if (after.marketplaceNew > before.marketplaceNew) out.push("Marketplace new messages " + before.marketplaceNew + " -> " + after.marketplaceNew);
+    if (after.messengerUnread > before.messengerUnread) out.push("Messenger unread " + before.messengerUnread + " -> " + after.messengerUnread);
+    if (after.title > before.title) out.push("page title count " + before.title + " -> " + after.title);
+    for (const [list, ids] of Object.entries(after.topUnread)) {
+      if (!before.topUnread[list]) continue; // only a list visible both before and after
+      const newly = ids.filter((id) => !before.topUnread[list].includes(id));
+      if (newly.length) out.push("newly unread at the top of " + list + ": " + newly.join(", "));
+    }
+    return out;
+  }
+
+  let serviceStop = null; // the service-wide safety stop, from every heartbeat
   async function ensureChatList() {
+    if (serviceStop) return (openerStatus = "disabled: " + serviceStop);
     if (sessionStorage.getItem("r2bOpenerTripped") === "1") return (openerStatus = "disabled: " + (sessionStorage.getItem("r2bOpenerTripReason") || "a conversation view appeared after a click"));
     if (namedGrid(/^marketplace$/i)) { messengerMisses = 0; marketplaceMisses = 0; return (openerStatus = "present"); }
     const backoff = messengerMisses >= 3 ? 600_000 : 15_000;
     if (!pageSettled()) return (openerStatus = "waiting for the page to settle");
     if (Date.now() - lastOpenAt < backoff) return openerStatus;
     lastOpenAt = Date.now();
-    const before = { path: location.pathname, ...surfaceCounts() };
+    const before = { path: location.pathname, ...surfaceCounts(), incoming: incomingSignals() };
     const chatsOpen = Boolean(namedGrid(/^chats$/i));
     const target = chatsOpen ? marketplaceControl() : messengerButton();
     if (!target) return (openerStatus = chatsOpen ? "no-marketplace-control" : "no-messenger-button");
@@ -355,10 +400,25 @@
     else target.click(); // the Messenger button responds to a plain click (live)
     await sleep(2_500);
     const after = surfaceCounts();
+    // Live (21:29, owner's report): Facebook pops up a docked chat window when a
+    // new Marketplace message arrives, independently of any click. A new docked
+    // window is attributed to Facebook ONLY when there is simultaneous,
+    // independent evidence of an incoming message (a rising new-message count, or
+    // a conversation newly unread at the top of a list). An accidental click on a
+    // conversation would mark it read, so it cannot produce that evidence.
+    // Without it, the safety stop trips as before. Strong signals always trip.
+    let dockedWhy = null;
+    if (after.docked > before.docked) {
+      const evidence = incomingEvidence(before.incoming, incomingSignals());
+      if (evidence.length) {
+        api("/opener-note", { note: "Facebook opened a chat window for an incoming message during a click (" + before.docked + " -> " + after.docked + "); evidence: " + evidence.join("; ") }).catch(() => {});
+      } else {
+        dockedWhy = "a new docked chat window appeared after a click with no sign of an incoming message (" + before.docked + " -> " + after.docked + ")";
+      }
+    }
     const why = location.pathname !== before.path || THREAD_PATH.test(location.pathname) ? "the page changed after a click"
       : after.inPanelOrMain > before.inPanelOrMain ? "a conversation opened in the panel or main view after a click"
-      : after.docked > before.docked ? "a new docked chat window appeared after a click (" + before.docked + " -> " + after.docked + ")"
-      : null;
+      : dockedWhy;
     if (why) {
       sessionStorage.setItem("r2bOpenerTripReason", why);
       sessionStorage.setItem("r2bOpenerTripped", "1");
@@ -551,7 +611,9 @@
       health: state, visibility: document.visibilityState, url: location.pathname,
       rows: inbox.length, unread: inbox.filter((row) => row.unread).length, list: listState(), opener: openerStatus,
       ext: chrome.runtime.getManifest().version,
+      stopFlag: sessionStorage.getItem("r2bOpenerTripped") === "1",
     });
+    serviceStop = beat.safetyStop || null;
     if (beat.mode === "off" || state !== "healthy") return;
     if (beat.verifyThread && !threadId && listState() === "marketplace") await reportPilotRow(beat.verifyThread);
     if (beat.findWords && !threadId && listState() === "marketplace") await reportFind(beat.findWords);

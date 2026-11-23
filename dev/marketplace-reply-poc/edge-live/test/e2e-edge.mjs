@@ -33,7 +33,7 @@ let service;
 let edge;
 function startService() {
   service = spawn(process.execPath, [join(HERE, "..", "service.mjs")], {
-    env: { ...process.env, R2B_ASSISTANT_PORT: String(PORT), R2B_EXTENSION_DIR: join(work, "extension-" + (launches + 1)), R2B_ASSISTANT_STATE: stateFile, R2B_ASKME_STUB: "1", R2B_FIXTURE: "1" },
+    env: { ...process.env, R2B_ASSISTANT_PORT: String(PORT), R2B_EXTENSION_DIR: join(work, "extension-" + (launches + 1)), R2B_ASSISTANT_STATE: stateFile, R2B_ASKME_STUB: "1", R2B_FIXTURE: "1", R2B_TAB_CREATE_GAP_MS: "20000" },
     stdio: ["ignore", "pipe", "inherit"],
   });
   return new Promise((ok) => service.stdout.once("data", ok));
@@ -111,6 +111,9 @@ try {
   const openerEvents = s0.events.filter((e) => e.type === "list-opener").map((e) => e.status).reverse();
   assert.equal(openerEvents[0], "clicked Messenger");
   assert.match(openerEvents.at(-1), /^clicked Marketplace \((centre|pointer|outer)\)$/);
+  const created = s0.events.find((e) => e.type === "tab-created");
+  assert.match(created?.createdBy || "", /^assistant tab recovery: no assistant tab recorded/, JSON.stringify(created));
+  assert.ok((await api("/status")).tabCensus?.facebookTabs >= 0);
   pass(`background tab opened the list itself (${openerEvents.join(" -> ")}), never a conversation or decoy, then baselined 1 already-unread conversation`);
 
   // Recovery: the panel closes, then the page reloads; the list is restored each time.
@@ -273,6 +276,42 @@ try {
   console.log("Ask Me request for that reply:", JSON.stringify(asked));
   assert.ok(!fb2.threads["300"].messages.some((m) => m.out));
   pass("conversation first seen in Observe was never answered automatically");
+
+  // Facebook pops up a docked chat window for an incoming message during a
+  // Marketplace click (owner's report, 21:29): attributed to Facebook, no trip.
+  const tripsBefore = (await api("/status")).events.filter((e) => /^tripped/.test(e.status || "")).length;
+  await fb("command", { cmd: "popupnext" });
+  await fb("command", { cmd: "closepanel" });
+  const note = await waitFor(async () => (await api("/status")).events.find((e) => e.type === "opener-note" && /incoming message/.test(e.note)), "Facebook pop-up attributed", 150_000);
+  await waitFor(async () => { const st = await api("/status"); return st.heartbeat.list === "marketplace" && st.monitoring.ok; }, "list after pop-up", 120_000);
+  assert.equal((await api("/status")).events.filter((e) => /^tripped/.test(e.status || "")).length, tripsBefore, "no safety stop for a Facebook pop-up");
+  assert.match(note.note, /evidence: .*(Messenger unread|page title count|newly unread)/);
+  pass("Facebook pop-up window for an incoming message was attributed to Facebook with evidence (" + note.note.split("evidence: ")[1] + "); no safety stop");
+
+  // A docked window with no incoming message during a click still trips.
+  await fb("command", { cmd: "dockednext" });
+  await fb("command", { cmd: "closepanel" });
+  await waitFor(async () => (await api("/status")).events.some((e) => /^tripped: a new docked chat window appeared after a click with no sign of an inc/.test(e.status || "")), "trip without incoming evidence", 150_000);
+  pass("a docked window with no sign of an incoming message still trips the safety stop");
+
+  // The stop is service-wide: a NEW assistant tab must not click either (live
+  // 21:41:53, a fresh tab bypassed a per-tab stop).
+  const stopped = await waitFor(async () => (await api("/status")).safetyStop, "service-wide safety stop", 30_000);
+  const tripAt = new Date().toISOString();
+  const pageTab = (await assistantTabs())[0];
+  await fetch(`http://127.0.0.1:${DEBUG}/json/close/${pageTab.id}`); // HTTP endpoint; nothing attaches to pages
+  await waitFor(async () => (await api("/status")).events.some((e) => e.type === "assistant-tab-created" && e.at > tripAt), "replacement assistant tab", 150_000);
+  await sleep(40_000);
+  const afterNewTab = await api("/status");
+  assert.ok(!afterNewTab.events.some((e) => e.type === "list-opener" && /^clicked/.test(e.status) && e.at > tripAt), "a new tab must not click while the stop is set");
+  assert.match(afterNewTab.heartbeat.opener, /^disabled: /);
+  pass("safety stop held in a brand-new assistant tab (" + stopped.reason.slice(0, 60) + "...)");
+
+  // The owner resets the stop; monitoring resumes.
+  await api("/control", { resetOpener: true });
+  await fb("command", { cmd: "closepanel" });
+  await waitFor(async () => { const st = await api("/status"); return st.heartbeat.list === "marketplace" && !/^(tripped|disabled)/.test(st.heartbeat.opener) && st.monitoring.ok; }, "monitoring after reset", 150_000);
+  pass("after the owner's reset, the opener reopened the list and monitoring resumed");
 } finally {
   killEdge();
   await stopService().catch(() => {});

@@ -53,6 +53,25 @@ export function loadState(file) {
 
 // Called once when the service starts. Send is never restored from disk: after
 // any restart (service, Edge or Windows) it must be switched on deliberately.
+// Carry a trip recorded before the stop moved into the service: the last
+// "tripped" opener event after the last owner reset.
+export function migrateSafetyStop(state) {
+  if (state.openerTrip) return false;
+  const lastReset = state.events.findLast((e) => e.type === "safety-reset")?.at || "";
+  const trip = state.events.findLast((e) => e.type === "list-opener" && /^tripped: /.test(e.status || "") && e.at > lastReset);
+  if (!trip) return false;
+  state.openerTrip = { at: trip.at, reason: trip.status.replace(/^tripped: /, "").replace(/; opener disabl.*$/, ""), carriedOver: true };
+  logEvent(state, "safety-stop", { reason: state.openerTrip.reason, carriedOver: true });
+  return true;
+}
+
+export function resetSafetyStop(state) {
+  const had = Boolean(state.openerTrip);
+  state.openerTrip = null;
+  state.resetOpenerRequested = true;
+  logEvent(state, "safety-reset", { requested: true, hadStop: had });
+}
+
 export function startupMode(state) {
   if (state.mode !== "send") return false;
   setMode(state, "off");
@@ -102,7 +121,7 @@ export function recordHeartbeat(state, { health, visibility, url, rows, unread, 
   state.heartbeat = {
     at: new Date().toISOString(), health: String(health || "unknown"), visibility: String(visibility || ""),
     url: String(url || "").slice(0, 200), rows: Number(rows) || 0, unread: Number(unread) || 0,
-    list: String(list || "none").slice(0, 40), opener: String(opener || "").slice(0, 80),
+    list: String(list || "none").slice(0, 40), opener: String(opener || "").slice(0, 160),
     ext: typeof ext === "string" ? ext.slice(0, 20) : null,
   };
   if (state.mode !== "off" && health !== previous?.health && health !== "healthy" && health !== "loading") {
@@ -111,6 +130,12 @@ export function recordHeartbeat(state, { health, visibility, url, rows, unread, 
   // Log opener changes by kind (ignoring the click method in brackets), and a
   // repeated kind at most every 10 minutes, so retries never flood the log.
   const kind = (value) => String(value || "").replace(/\s*\(.*$/, "");
+  // A trip reported by ANY assistant tab sets the service-wide safety stop. It
+  // survives new tabs, reloads and restarts; only the owner's reset clears it.
+  if (/^tripped: /.test(String(opener || "")) && !state.openerTrip) {
+    state.openerTrip = { at: new Date().toISOString(), reason: String(opener).replace(/^tripped: /, "").replace(/; opener disabled$/, "").slice(0, 200) };
+    logEvent(state, "safety-stop", { reason: state.openerTrip.reason });
+  }
   if (state.mode !== "off" && opener && opener !== previous?.opener && !/^(?:present|waiting)/.test(opener)) {
     const last = state.events.findLast((e) => e.type === "list-opener");
     if (!last || kind(last.status) !== kind(opener) || Date.now() - Date.parse(last.at) > 600_000) {
@@ -501,7 +526,8 @@ export function monitoringVerdict(state, now = Date.now()) {
     const age = Math.round((now - Date.parse(hb.at)) / 1000);
     if (age > 150) reasons.push("No report from the Edge assistant tab for " + age + " s: Edge may be closed or asleep, or the extension disabled.");
     if (hb.health !== "healthy") reasons.push(HEALTH_TEXT[hb.health] || "The Facebook page is not healthy (" + hb.health + ").");
-    if (/^tripped|^disabled/.test(hb.opener)) reasons.push("Safety stop: " + hb.opener.replace(/^(?:tripped|disabled): /, "") + ". The list opener switched itself off. Check that no customer conversation was opened, then press \"Reset safety stop\".");
+    if (state.openerTrip && hb.list !== "marketplace") reasons.push("Safety stop is set (" + state.openerTrip.reason + "), so the list opener will not click. Check that no customer conversation was opened, then press \"Reset safety stop\".");
+    else if (/^tripped|^disabled/.test(hb.opener)) reasons.push("Safety stop: " + hb.opener.replace(/^(?:tripped|disabled): /, "") + ". The list opener switched itself off. Check that no customer conversation was opened, then press \"Reset safety stop\".");
     else if (hb.list !== "marketplace") reasons.push(OPENER_TEXT[hb.opener] || (/^Marketplace click had no effect/.test(hb.opener) ? "The Marketplace entry in the Messenger panel was clicked but the Marketplace list did not open. Retrying every 15 s with a different click method (" + hb.opener + ")." : null) || "The Marketplace conversation list is not open in the assistant tab (" + (hb.list || "none") + ").");
     if (!hb.rows) reasons.push("No conversations are visible in the assistant tab.");
   }
@@ -515,6 +541,7 @@ export function publicStatus(state) {
     monitoring: monitoringVerdict(state),
     pilot: state.pilot || null,
     finder: state.finder || null,
+    safetyStop: state.openerTrip || null,
     mode: state.mode,
     allowAll: state.allowAll,
     allowThreads: state.allowThreads,
