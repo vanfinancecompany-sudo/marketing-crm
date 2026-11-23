@@ -285,6 +285,9 @@ export function verifyPilot(state, { threadId, found, rowText }) {
     return { ok: false };
   }
   const text = normalise(rowText);
+  // Facebook keeps placeholder rows with no text for entries it is not drawing
+  // (live, 23:11). Wait for the text; the pilot still times out clearly.
+  if (!text) return { ok: false, waiting: "row not rendered yet" };
   const words = normalise(pilot.mustContain);
   // Several required parts can be joined with "+": every part must be present
   // as whole words. A part starting with "^" must begin the row, where Facebook
