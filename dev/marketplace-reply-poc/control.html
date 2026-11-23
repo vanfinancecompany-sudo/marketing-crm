@@ -10,7 +10,7 @@
 <body>
   <main id="reply-control">
     <h1>Marketplace reply simulator</h1>
-    <p>Marketing CRM development fixture. Every conversation and send is simulated.</p>
+    <p>Marketing CRM development fixture. Use synthetic conversations only.</p>
     <section>
       <h2>Reply control</h2>
       <button id="toggle" type="button" aria-pressed="false" disabled>Turn replies on</button>
@@ -18,9 +18,29 @@
       <p id="summary"></p>
       <table>
         <caption>Conversation status</caption>
-        <thead><tr><th scope="col">Conversation</th><th scope="col">Product</th><th scope="col">Status</th><th scope="col">Mock sends</th></tr></thead>
+        <thead><tr><th scope="col">Conversation</th><th scope="col">Product</th><th scope="col">Status</th><th scope="col">Mock sends</th><th scope="col">Review reason</th></tr></thead>
         <tbody id="records"></tbody>
       </table>
+    </section>
+    <section>
+      <h2>Ask Me conversations</h2>
+      <form id="askme-start">
+        <label for="askme-product">Listing</label> <select id="askme-product">
+          <option value="finance">Finance</option>
+          <option value="rent2buy">Rent2Buy</option>
+          <option value="unmatched">Unrecognised listing</option>
+        </select>
+        <label>First question <input id="askme-message" required maxlength="800" value="Do your vans come with a warranty?"></label>
+        <button type="submit">Start simulated conversation</button>
+      </form>
+      <form id="askme-follow-up">
+        <fieldset id="follow-up" disabled>
+          <legend>Add a customer follow-up</legend>
+          <label for="follow-up-thread">Conversation</label> <select id="follow-up-thread"></select>
+          <label>Next question <input id="follow-up-message" required maxlength="800" placeholder="Does that include the gearbox?"></label>
+          <button type="submit">Add follow-up</button>
+        </fieldset>
+      </form>
     </section>
     <section>
       <h2>Simulated inbox</h2>

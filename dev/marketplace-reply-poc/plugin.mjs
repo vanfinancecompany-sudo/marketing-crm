@@ -68,12 +68,15 @@ export function createFixtureMiddleware(stateFile) {
           simulator.configureInbox(input);
           break;
         case "/incoming":
-          return json(201, simulator.addEnquiry(input.scenario));
+          return json(201, simulator.addEnquiry(input.scenario, input.message));
+        case "/follow-up":
+          return json(201, simulator.addFollowUp(input.threadId, input.message));
         case "/observe":
-          if (!Array.isArray(input.rows) || input.rows.some((row) => !row || typeof row.threadId !== "string")) {
+          if (!Array.isArray(input.rows) || input.rows.some((row) => !row || typeof row.threadId !== "string"
+              || !Array.isArray(row.incomingIds) || !Array.isArray(row.outgoingIds))) {
             throw new TypeError("Invalid observed threads");
           }
-          return json(200, { instruction: simulator.observe(input) });
+          return json(200, { instruction: await simulator.observe(input) });
         case "/deliver":
           return simulator.deliver(input)
             ? json(200, { ok: true })

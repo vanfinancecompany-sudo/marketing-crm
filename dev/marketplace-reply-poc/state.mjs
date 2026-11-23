@@ -1,44 +1,46 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { draftMarketplaceReply } from "./assistant.mjs";
 
 export const LISTINGS = {
   "1001": {
     product: "Finance",
+    productKey: "finance",
+    vehicle: { title: "Simulated Finance van" },
     reply: "Thanks for your enquiry! For van finance, available vehicles and online applications, please visit https://www.vanfinancecompany.co.uk/",
   },
   "2002": {
     product: "Rent2Buy",
+    productKey: "rent2buy",
+    vehicle: { title: "Simulated Rent2Buy van" },
     reply: "Thanks for your enquiry! For full details about our Rent2Buy programme, available vans, monthly rental prices and online applications, please visit https://www.rent2buyvans.co.uk/",
   },
 };
 
-const SCENARIOS = {
-  finance: "1001",
-  rent2buy: "2002",
-  unmatched: "9999",
-  answered: "1001",
-};
-
+const SCENARIOS = { finance: "1001", rent2buy: "2002", unmatched: "9999", answered: "1001" };
 export const INBOX_HEALTH = ["healthy", "signed-out", "security-challenge", "layout-changed"];
 const CONFIRMATION_TIMEOUT_MS = 8_000;
-
-function initialState() {
-  return {
-    enabled: false,
-    enabledAfter: 0,
-    pauseReason: null,
-    health: "healthy",
-    hideOutgoing: false,
-    threads: [],
-  };
-}
+const ACTIVE = new Set(["Drafting", "Sending", "Unconfirmed"]);
 
 function loadState(file) {
   try {
-    return JSON.parse(readFileSync(file, "utf8"));
+    const state = JSON.parse(readFileSync(file, "utf8"));
+    for (const thread of state.threads) {
+      // The initial simulator stored a single synthetic acknowledgement per thread.
+      thread.turns ??= [{
+        id: thread.id + ":1", message: null, status: thread.status,
+        attemptId: thread.attemptId, startedAt: thread.startedAt, outgoing: thread.outgoing,
+        reply: LISTINGS[thread.listingId]?.reply,
+      }];
+      for (const turn of thread.turns) {
+        // Drafting never exposes a send instruction, so restarting can draft again.
+        if (turn.status === "Drafting") turn.status = "Waiting";
+      }
+    }
+    return state;
   } catch (error) {
-    if (error.code === "ENOENT") return initialState();
+    if (error.code === "ENOENT") return { enabled: false, pauseReason: null, health: "healthy", hideOutgoing: false, threads: [] };
     throw error;
   }
 }
@@ -50,12 +52,45 @@ function saveState(file, value) {
   renameSync(pending, file);
 }
 
-export function createReplySimulator(file, now = Date.now) {
+function addTurn(thread, message, enabled) {
+  const turn = {
+    id: thread.id + ":" + (thread.turns.length + 1),
+    message,
+    status: thread.reviewReason ? "Needs human" : enabled ? "Waiting" : "Ignored while off",
+  };
+  thread.turns.push(turn);
+  return turn;
+}
+
+function validateMessage(message) {
+  if (typeof message !== "string" || !message.trim() || message.trim().length > 800) {
+    throw new TypeError("Enter a synthetic customer message of 1–800 characters");
+  }
+  return message.trim();
+}
+
+function sentHistory(thread) {
+  return thread.turns.filter((turn) => turn.status === "Sent" && turn.message && turn.outgoing).flatMap((turn) => [
+    { role: "user", content: turn.message },
+    { role: "assistant", content: turn.outgoing.text },
+  ]).slice(-16);
+}
+
+function summarise(thread) {
+  const status = thread.reviewReason ? "Needs human"
+    : thread.turns.find((turn) => ACTIVE.has(turn.status))?.status || thread.turns.at(-1).status;
+  return { ...thread, status, outgoing: thread.turns.at(-1).outgoing || null };
+}
+
+function instruction(thread, turn) {
+  return { threadId: thread.id, listingId: thread.listingId, turnId: turn.id, attemptId: turn.attemptId, text: turn.reply };
+}
+
+export function createReplySimulator(file, now = Date.now, { draftReply = draftMarketplaceReply } = {}) {
   let state = loadState(file);
   let lastHeartbeat = null;
 
-  // One loopback server owns the state. Claims are written before returning an
-  // instruction to click, so concurrent tabs and restarts cannot claim twice.
+  // One loopback server owns the state. Reserve each turn before any async work.
   function change(update) {
     const next = structuredClone(state);
     const result = update(next);
@@ -69,7 +104,8 @@ export function createReplySimulator(file, now = Date.now) {
 
   return {
     snapshot() {
-      return { ...structuredClone(state), lastHeartbeat };
+      const copy = structuredClone(state);
+      return { ...copy, threads: copy.threads.map(summarise), lastHeartbeat };
     },
 
     setEnabled(enabled) {
@@ -78,11 +114,10 @@ export function createReplySimulator(file, now = Date.now) {
         if (next.enabled === enabled) return;
         next.enabled = enabled;
         next.pauseReason = enabled && next.health !== "healthy" ? next.health : null;
-        if (enabled) {
-          next.enabledAfter = next.threads.length;
-        } else {
-          for (const thread of next.threads) {
-            if (thread.status === "Waiting") thread.status = "Ignored while off";
+        if (enabled) return;
+        for (const thread of next.threads) {
+          for (const turn of thread.turns) {
+            if (turn.status === "Waiting" || turn.status === "Drafting") turn.status = "Ignored while off";
           }
         }
       });
@@ -92,89 +127,135 @@ export function createReplySimulator(file, now = Date.now) {
       if (health !== undefined && !INBOX_HEALTH.includes(health)) throw new TypeError("Unknown inbox state");
       if (hideOutgoing !== undefined && typeof hideOutgoing !== "boolean") throw new TypeError("Invalid receipt setting");
       change((next) => {
-        if (health !== undefined) {
-          next.health = health;
-        }
+        if (health !== undefined) next.health = health;
         if (hideOutgoing !== undefined) next.hideOutgoing = hideOutgoing;
       });
     },
 
-    addEnquiry(scenario) {
+    addEnquiry(scenario, message) {
       if (!Object.hasOwn(SCENARIOS, scenario)) throw new TypeError("Unknown synthetic enquiry");
+      const inbound = message === undefined ? null : validateMessage(message);
       return change((next) => {
         const thread = {
           id: "thread-" + (next.threads.length + 1),
           listingId: SCENARIOS[scenario],
-          status: scenario === "answered" ? "Already answered" : next.enabled ? "Waiting" : "Ignored while off",
-          attemptId: null,
-          startedAt: null,
-          outgoing: scenario === "answered" ? { id: randomUUID(), text: "The seller has already replied." } : null,
           sendCount: 0,
+          turns: [],
         };
+        const turn = addTurn(thread, inbound, next.enabled);
+        if (scenario === "answered") {
+          turn.status = "Already answered";
+          turn.outgoing = { id: randomUUID(), text: "The seller has already replied." };
+        }
         next.threads.push(thread);
-        return thread;
+        return summarise(thread);
       });
     },
 
-    observe({ health, rows }) {
+    addFollowUp(threadId, message) {
+      const inbound = validateMessage(message);
+      return change((next) => {
+        const thread = next.threads.find((candidate) => candidate.id === threadId);
+        if (!thread?.turns[0].message) throw new TypeError("Select a simulated Ask Me conversation");
+        return addTurn(thread, inbound, next.enabled);
+      });
+    },
+
+    async observe({ health, rows }) {
       if (!INBOX_HEALTH.includes(health) || !Array.isArray(rows)) throw new TypeError("Invalid inbox observation");
       const observedAt = now();
       lastHeartbeat = new Date(observedAt).toISOString();
       const visible = new Map(rows.map((row) => [row.threadId, row]));
 
-      return change((next) => {
+      const claim = change((next) => {
         if (next.enabled && health !== "healthy") next.pauseReason = health;
         for (const thread of next.threads) {
           const row = visible.get(thread.id);
-          if (thread.status !== "Sending" && thread.status !== "Unconfirmed") continue;
-          if (
-            health === "healthy" &&
-            row?.listingId === thread.listingId &&
-            row?.outgoingId &&
-            row.outgoingId === thread.outgoing?.id &&
-            !next.hideOutgoing
-          ) {
-            thread.status = "Sent";
-          } else if (observedAt - thread.startedAt >= CONFIRMATION_TIMEOUT_MS) {
-            thread.status = "Unconfirmed";
+          for (const turn of thread.turns) {
+            if (turn.status !== "Sending" && turn.status !== "Unconfirmed") continue;
+            if (
+              health === "healthy" && row?.listingId === thread.listingId && turn.outgoing?.id
+              && row.outgoingIds?.includes(turn.outgoing.id) && !next.hideOutgoing
+            ) {
+              turn.status = "Sent";
+            } else if (observedAt - turn.startedAt >= CONFIRMATION_TIMEOUT_MS) {
+              turn.status = "Unconfirmed";
+            }
           }
         }
 
         if (!next.enabled || next.pauseReason || health !== "healthy" || next.health !== "healthy") return null;
-        for (const thread of next.threads.slice(next.enabledAfter)) {
+        for (const thread of next.threads) {
           const row = visible.get(thread.id);
-          if (thread.status !== "Waiting" || !row) continue;
-          if (row.listingId !== thread.listingId || !Object.hasOwn(LISTINGS, thread.listingId)) {
-            thread.status = "Unmatched";
+          if (!row || thread.reviewReason || thread.turns.some((turn) => ACTIVE.has(turn.status))) continue;
+          const turn = thread.turns.find((candidate) => candidate.status === "Waiting");
+          if (!turn || !row.incomingIds?.includes(turn.id)) continue;
+          const listing = LISTINGS[thread.listingId];
+          if (row.listingId !== thread.listingId || !listing) {
+            turn.status = turn.message ? "Needs human" : "Unmatched";
+            if (turn.message) thread.reviewReason = "No verified listing match";
             continue;
           }
-          if (row.outgoingId || thread.outgoing) {
-            thread.status = "Already answered";
+          if (thread.turns.some((candidate) => candidate.status === "Already answered")) {
+            turn.status = "Already answered";
             continue;
           }
 
-          thread.attemptId = randomUUID();
-          thread.status = "Sending";
-          thread.startedAt = observedAt;
+          turn.attemptId = randomUUID();
+          turn.startedAt = observedAt;
+          if (!turn.message) {
+            turn.reply = listing.reply;
+            turn.status = "Sending";
+            return { ready: instruction(thread, turn) };
+          }
+
+          turn.status = "Drafting";
           return {
-            threadId: thread.id,
-            listingId: thread.listingId,
-            attemptId: thread.attemptId,
-            text: LISTINGS[thread.listingId].reply,
+            pending: instruction(thread, turn),
+            context: {
+              product: listing.productKey, vehicle: listing.vehicle,
+              message: turn.message, history: sentHistory(thread),
+            },
           };
         }
         return null;
       });
+
+      if (!claim?.pending) return claim?.ready ?? null;
+      let result;
+      try {
+        result = await draftReply(claim.context);
+      } catch {
+        result = { reason: "Ask Me could not verify a safe answer" };
+      }
+
+      return change((next) => {
+        const thread = next.threads.find((candidate) => candidate.id === claim.pending.threadId);
+        const turn = thread.turns.find((candidate) => candidate.id === claim.pending.turnId);
+        if (turn.status !== "Drafting" || turn.attemptId !== claim.pending.attemptId) return null;
+        if (!next.enabled || next.pauseReason || next.health !== "healthy") {
+          turn.status = "Ignored while off";
+          return null;
+        }
+        if (!result?.text || result.reason) {
+          thread.reviewReason = result?.reason || "Ask Me could not verify a safe answer";
+          turn.status = "Needs human";
+          return null;
+        }
+        turn.reply = result.text;
+        turn.status = "Sending";
+        turn.startedAt = now();
+        return instruction(thread, turn);
+      });
     },
 
-    deliver({ threadId, attemptId, text }) {
+    deliver({ threadId, turnId, attemptId, text }) {
       return change((next) => {
         const thread = next.threads.find((candidate) => candidate.id === threadId);
-        if (!next.enabled || next.pauseReason || next.health !== "healthy") return false;
-        if (!thread || thread.status !== "Sending" || thread.attemptId !== attemptId || thread.outgoing) return false;
-        if (text !== LISTINGS[thread.listingId]?.reply) return false;
-
-        thread.outgoing = { id: randomUUID(), text };
+        const turn = thread?.turns.find((candidate) => candidate.id === turnId);
+        if (!next.enabled || next.pauseReason || next.health !== "healthy" || thread?.reviewReason) return false;
+        if (!turn || turn.status !== "Sending" || turn.attemptId !== attemptId || turn.outgoing || text !== turn.reply) return false;
+        turn.outgoing = { id: randomUUID(), text };
         thread.sendCount += 1;
         return true;
       });

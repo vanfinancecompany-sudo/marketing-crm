@@ -12,12 +12,21 @@ This is a developer-only tool mounted on the Marketing CRM Vite server. Its sepa
 
 The starting setting is Off. Enquiries already present before enabling are excluded from automatic replies. The development server saves its synthetic state to a per-checkout and port file in the OS temporary directory and restores the same settings and history after restart. The heartbeat is refreshed by an active inbox tab. A future hosted launcher must open that tab when Chrome starts and verify the extension is loaded. In the local headless test, Chrome retained its profile but the DevTools-installed extension had to be loaded again on restart. A signed-out, challenged or changed layout pauses sending until the inbox is restored and replies are turned off and back on.
 
+## Try a multi-turn Ask Me conversation
+
+1. In **Ask Me conversations**, choose a Finance listing and start with “Do your vans come with a warranty?”
+2. After the first reply is confirmed, select the same conversation and add “Does that include the gearbox?” The synthetic reply should refer to warranty coverage.
+3. Start a separate Rent2Buy conversation with “When is the initial rental payment due?” and follow up with “When is that due?” The Rent2Buy reply should stay in its own conversation and use the Rent2Buy context.
+4. Ask for a human, ask a Finance-only question on a Rent2Buy listing or use an unrecognised listing. The CRM fixture marks the thread **Needs human**, gives the reason and stops automatic replies on that thread.
+
+The fixture calls the existing Ask Me engine with the product locked to the listing and with recent confirmed exchanges only. It uses local synthetic knowledge and a deterministic model stand-in. It makes no real model, knowledge-store or postcode lookup calls. The extension still only observes and clicks inside the loopback inbox.
+
 ## Verify recovery
 
 - Open two simulated inbox tabs to exercise duplicate detection.
 - Hold outgoing receipts, add a new enquiry and wait for the report to show one mock send. Close the browser, then reopen the same profile and turn off Hold outgoing receipts. The worker should confirm the existing receipt with the send count still at one.
 - A recorded attempt with no visible receipt becomes Unconfirmed after eight seconds in the fixture. The worker never repeats that attempt automatically.
-- Run `node --test tests/marketplace-reply-poc.test.mjs tests/marketplace-helper.test.js tests/marketplace-helper-package.test.js` for local regressions.
+- Run `node --test tests/marketplace-reply-poc.test.mjs tests/askme-lean-engine.test.js tests/marketplace-helper.test.js tests/marketplace-helper-package.test.js` for local regressions.
 
 ## Scope of the proof
 

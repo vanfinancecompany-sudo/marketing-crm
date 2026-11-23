@@ -19,7 +19,8 @@
           rows: rows.map((row) => ({
             threadId: row.dataset.threadId,
             listingId: row.dataset.listingId,
-            outgoingId: row.querySelector("[data-outgoing-id]")?.dataset.outgoingId,
+            incomingIds: [...row.querySelectorAll('[data-direction="incoming"][data-turn-id]')].map((item) => item.dataset.turnId),
+            outgoingIds: [...row.querySelectorAll('[data-direction="outgoing"][data-outgoing-id]')].map((item) => item.dataset.outgoingId),
           })),
         }),
       });
@@ -29,15 +30,17 @@
 
       const row = [...inbox.querySelectorAll("[data-thread-id]")]
         .find((item) => item.dataset.threadId === instruction.threadId);
-      const form = row?.querySelector("form");
+      if (!row || row.dataset.listingId !== instruction.listingId) return;
+      const form = [...row.querySelectorAll("form")]
+        .find((candidate) => candidate.dataset.turnId === instruction.turnId);
       const reply = form?.elements.namedItem("reply");
-      if (!reply || row.dataset.listingId !== instruction.listingId || row.querySelector("[data-outgoing-id]")) return;
+      if (!reply) return;
       form.dataset.attemptId = instruction.attemptId;
       reply.value = instruction.text;
       form.requestSubmit();
     } catch {
-      // The next scan only requests a new claim. A recorded attempt can never
-      // be automatically submitted again when a previous response was lost.
+      // The server records a claim before returning it. Poll again without
+      // resubmitting an attempt whose result may have been lost.
     } finally {
       observing = false;
     }
