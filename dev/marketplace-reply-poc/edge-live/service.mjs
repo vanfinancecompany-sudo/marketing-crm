@@ -2,7 +2,7 @@
 //   node dev/marketplace-reply-poc/edge-live/service.mjs
 // Listens on 127.0.0.1 only. Starts in Off mode unless the saved state says otherwise.
 import { createServer } from "node:http";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { draftMarketplaceReply } from "../assistant.mjs";
@@ -17,6 +17,10 @@ const PORT = Number(process.env.R2B_ASSISTANT_PORT || 4618);
 const STATE_FILE = process.env.R2B_ASSISTANT_STATE
   || join(process.env.LOCALAPPDATA || HERE, "Rent2BuyMarketplaceAssistant", "state.json");
 const STOP_FILE = join(dirname(STATE_FILE), "STOP");
+const DIAGNOSTICS_FILE = join(dirname(STATE_FILE), "inbox-diagnostics.json");
+// Latest structural snapshot per source (the assistant tab, or your own tab via
+// the popup). Kept outside the ledger; no message text is ever included.
+let diagnostics = existsSync(DIAGNOSTICS_FILE) ? JSON.parse(readFileSync(DIAGNOSTICS_FILE, "utf8")) : {};
 const DEFAULT_PRODUCT = process.env.R2B_DEFAULT_PRODUCT ?? "rent2buy";
 const STUB = process.env.R2B_ASKME_STUB === "1";
 // Test-only Facebook-shaped page; never enabled in normal use.
@@ -78,6 +82,14 @@ const ROUTES = {
   "POST /thread": (body) => handleThread(body),
   "POST /go": (body) => authoriseSend(state, String(body.jobId)),
   "POST /sent": (body) => { recordSendResult(state, String(body.jobId), body); return { ok: true }; },
+  "GET /diagnostics": () => diagnostics,
+  "POST /diagnostics": (body) => {
+    const source = body.source === "your-tab" ? "your-tab" : "assistant-tab";
+    if (!body.snapshot || typeof body.snapshot !== "object") throw new Error("No snapshot");
+    diagnostics = { ...diagnostics, [source]: { receivedAt: new Date().toISOString(), ...body.snapshot } };
+    writeFileSync(DIAGNOSTICS_FILE, JSON.stringify(diagnostics, null, 1));
+    return { ok: true };
+  },
 };
 
 async function readJson(request) {

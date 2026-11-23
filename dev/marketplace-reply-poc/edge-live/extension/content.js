@@ -5,7 +5,9 @@
 (() => {
   if (window.top !== window) return;
   const FIXTURE = location.hostname === "127.0.0.1";
-  const THREAD_PATH = /\/messages\/t\/(\d{1,32})(?:\/|$)/;
+  // Thread links seen on Facebook: /messages/t/<id>, /messages/e2ee/t/<id>, /marketplace/t/<id>.
+  const THREAD_PATH = /\/(?:messages\/(?:e2ee\/)?|marketplace\/)t\/(\d{1,32})(?:\/|$)/;
+  const MAX_ROW_HEIGHT = 320;
   const LISTING_PATH = /\/marketplace\/item\/(\d{1,32})/;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const norm = (value) => String(value || "").replace(/\s+/g, " ").trim();
@@ -22,6 +24,10 @@
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === "marker") sendResponse({ marked: sessionStorage.getItem("r2bAssistantTab") === "1" });
     if (message.type === "tick") { schedule(0); sendResponse({ ok: true }); }
+    // Read-only snapshot requested from the popup for this tab.
+    if (message.type === "diagnose") {
+      try { sendResponse({ snapshot: diagnose() }); } catch (error) { sendResponse({ error: error.message }); }
+    }
   });
 
   chrome.runtime.sendMessage({ type: "whoami" }).then((reply) => {
@@ -33,14 +39,17 @@
     schedule(1_500);
   }).catch(() => {});
 
+  // Facebook mutates the DOM constantly; scan at most every 3 seconds.
+  let lastRunAt = 0;
   function schedule(delay) {
     clearTimeout(debounce);
-    debounce = setTimeout(run, delay);
+    debounce = setTimeout(run, Math.max(delay, lastRunAt + 3_000 - Date.now()));
   }
 
   async function run() {
     if (busy) { queued = true; return; }
     busy = true;
+    lastRunAt = Date.now();
     try {
       await tick();
     } catch (error) {
@@ -67,25 +76,167 @@
     return FIXTURE ? location.origin + "/__fb/messages/t/" + id + "/" : "https://www.facebook.com/messages/t/" + id + "/";
   }
 
-  // Unread signals seen in Facebook's chat list. Text is never sent anywhere.
-  function isUnread(row) {
-    const labels = [row, ...row.querySelectorAll("[aria-label]")].map((el) => el.getAttribute("aria-label") || "").join(" | ");
-    if (/\bunread\b|\bmark as read\b/i.test(labels)) return true;
-    if ([...row.querySelectorAll("span")].some((el) => /^unread message:?$/i.test(norm(el.textContent)))) return true;
-    return false;
+  // ---- Conversation list (read-only) ----
+  // A row is the largest ancestor of a thread link that contains links to that
+  // one conversation only. Facebook's lists often lack per-row roles, and the
+  // nearest [role=row|listitem] can be a container shared by every conversation.
+  function threadLinks() {
+    const found = [];
+    for (const link of document.querySelectorAll("a[href]")) {
+      let url;
+      try { url = new URL(link.getAttribute("href"), location.href); } catch { continue; }
+      const id = url.pathname.match(THREAD_PATH)?.[1];
+      if (id) found.push({ link, id, pattern: url.pathname.replace(/\d{3,}/g, "#") });
+    }
+    return found;
+  }
+
+  function rowsFromLinks(links) {
+    const idsUnder = new Map();
+    for (const { link, id } of links) {
+      for (let el = link; el && el !== document.body; el = el.parentElement) {
+        let ids = idsUnder.get(el);
+        if (!ids) idsUnder.set(el, (ids = new Set()));
+        ids.add(id);
+      }
+    }
+    const rows = new Map();
+    for (const item of links) {
+      if (rows.has(item.id)) continue;
+      let row = item.link;
+      while (row.parentElement && row.parentElement !== document.body && idsUnder.get(row.parentElement)?.size === 1
+        && row.parentElement.getBoundingClientRect().height <= MAX_ROW_HEIGHT) row = row.parentElement;
+      rows.set(item.id, { ...item, row, group: row.parentElement });
+    }
+    return [...rows.values()];
+  }
+
+  const UNREAD_LABEL = (label) => (/\bunread\b/i.test(label) && !/\bmark(?:ed)? as unread\b/i.test(label)) || /\bmark as read\b/i.test(label);
+
+  function rowSignals(row) {
+    const labels = [row, ...row.querySelectorAll("[aria-label]")].map((el) => el.getAttribute("aria-label") || "").filter(Boolean);
+    const hiddenUnreadText = [...row.querySelectorAll("span")].some((el) => /^unread(?: message)?:?$/i.test(norm(el.textContent)));
+    let dot = null;
+    let snippetWeight = 0;
+    let maxWeight = 0;
+    let textLeaves = 0;
+    for (const el of row.querySelectorAll("*")) {
+      const style = getComputedStyle(el);
+      if (!el.children.length && norm(el.textContent)) {
+        const weight = Number(style.fontWeight) || 400;
+        textLeaves++;
+        snippetWeight = weight; // last text leaf in document order: the message preview
+        maxWeight = Math.max(maxWeight, weight);
+      }
+      if (!dot && !norm(el.textContent)) {
+        const r = el.getBoundingClientRect();
+        const m = style.backgroundColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+        if (m && r.width >= 6 && r.width <= 16 && Math.abs(r.width - r.height) <= 1 && parseFloat(style.borderRadius) >= r.width / 2 - 1
+            && Number(m[3]) >= 150 && Number(m[3]) - Number(m[1]) >= 60) dot = style.backgroundColor;
+      }
+    }
+    return { labels, label: labels.some(UNREAD_LABEL) || hiddenUnreadText, dot, snippetWeight, maxWeight, textLeaves };
+  }
+
+  // Bold is only meaningful relative to other rows in the same list.
+  function classify(rows) {
+    const minWeight = new Map();
+    for (const r of rows) {
+      r.signals = rowSignals(r.row);
+      minWeight.set(r.group, Math.min(minWeight.get(r.group) ?? 1000, r.signals.snippetWeight || 1000));
+    }
+    for (const r of rows) {
+      const s = r.signals;
+      s.groupMinWeight = minWeight.get(r.group);
+      s.bold = s.snippetWeight >= 600 && s.snippetWeight > s.groupMinWeight;
+      r.unread = Boolean(s.label || s.dot || s.bold);
+    }
+    return rows;
   }
 
   function scanInbox() {
-    const rows = new Map();
-    for (const link of document.querySelectorAll("a[href]")) {
-      let path;
-      try { path = new URL(link.getAttribute("href"), location.href).pathname; } catch { continue; }
-      const id = path.match(THREAD_PATH)?.[1];
-      if (!id || rows.has(id)) continue;
-      const row = link.closest('[role="row"], [role="listitem"]') || link;
-      rows.set(id, { id, unread: isUnread(row) });
+    return classify(rowsFromLinks(threadLinks())).map(({ id, unread }) => ({ id, unread }));
+  }
+
+  // ---- Read-only diagnostics ----
+  // Structure only: no message text, names or previews leave the page. Labels
+  // keep known UI words; every other word becomes "•".
+  const KEEP = new Set("a as at by chat chats conversation conversations delivered for from in inbox mark marketplace menu message messages more new of on options read seen selling buying sent to unread you your listings actions settings close open search".split(" "));
+  const redact = (label) => norm(label).slice(0, 80).split(" ").map((w) => (KEEP.has(w.toLowerCase().replace(/[^a-z]/g, "")) ? w : "•")).join(" ");
+  function describe(el) {
+    if (!el) return null;
+    const label = el.getAttribute("aria-label");
+    return [el.tagName.toLowerCase(), el.getAttribute("role") && "role=" + el.getAttribute("role"), label && "label=" + redact(label)].filter(Boolean).join(" ");
+  }
+  function landmark(el) {
+    for (let node = el; node && node !== document.body; node = node.parentElement) {
+      if (node.matches('[role="navigation"], [role="complementary"], [role="main"], [role="dialog"], [role="grid"], [role="list"], [aria-label]')
+          && node.querySelectorAll("a[href]").length > 1) return node;
     }
-    return [...rows.values()];
+    return null;
+  }
+
+  function diagnose() {
+    const links = threadLinks();
+    const rows = classify(rowsFromLinks(links));
+    const patterns = {};
+    for (const a of document.querySelectorAll("a[href]")) {
+      let url;
+      try { url = new URL(a.getAttribute("href"), location.href); } catch { continue; }
+      if (!/messages|marketplace|\/t\//.test(url.pathname)) continue;
+      const key = url.pathname.replace(/\d{3,}/g, "#").slice(0, 60);
+      patterns[key] = (patterns[key] || 0) + 1;
+    }
+    const groups = new Map();
+    for (const r of rows) {
+      const mark = landmark(r.row);
+      const key = describe(mark) || "none";
+      const g = groups.get(key) || { landmark: key, rows: 0, unread: 0, visible: 0 };
+      g.rows++;
+      if (r.unread) g.unread++;
+      if (visible(r.row)) g.visible++;
+      groups.set(key, g);
+    }
+    const unreadLabels = {};
+    for (const el of document.querySelectorAll("[aria-label]")) {
+      const label = el.getAttribute("aria-label");
+      if (/\bunread\b|\bmark as\b|\bnew message/i.test(label)) unreadLabels[redact(label)] = (unreadLabels[redact(label)] || 0) + 1;
+    }
+    const headings = [...document.querySelectorAll('h1, h2, h3, [role="heading"]')].map((h) => redact(h.textContent)).filter((t) => t && !/^[•\s]+$/.test(t)).slice(0, 20);
+    return {
+      at: new Date().toISOString(),
+      path: location.pathname.replace(/\d{3,}/g, "#"),
+      titleCount: Number(document.title.match(/^\((\d+)\)/)?.[1] || 0),
+      visibility: document.visibilityState,
+      threadLinkPatterns: [...new Set(links.map((l) => l.pattern))],
+      linkPatterns: patterns,
+      groups: [...groups.values()],
+      headings,
+      unreadLabels,
+      rows: rows.slice(0, 60).map((r) => {
+        const rect = r.row.getBoundingClientRect();
+        return {
+          id: r.id,
+          pattern: r.pattern,
+          unread: r.unread,
+          visible: rect.width > 0 && rect.height > 0,
+          size: [Math.round(rect.width), Math.round(rect.height)],
+          row: describe(r.row),
+          landmark: describe(landmark(r.row)),
+          signals: {
+            label: r.signals.label, dot: r.signals.dot, bold: r.signals.bold,
+            snippetWeight: r.signals.snippetWeight, maxWeight: r.signals.maxWeight, groupMinWeight: r.signals.groupMinWeight,
+            textLeaves: r.signals.textLeaves, labels: [...new Set(r.signals.labels.map(redact))].slice(0, 6),
+          },
+        };
+      }),
+    };
+  }
+
+  let lastDiagnosticAt = 0;
+  async function sendDiagnostics(source) {
+    lastDiagnosticAt = Date.now();
+    await api("/diagnostics", { source, snapshot: diagnose() });
   }
 
   function chatLog() {
@@ -153,6 +304,7 @@
         return;
       }
       await api("/inbox", { threads: inbox });
+      if (Date.now() - lastDiagnosticAt > 60_000) await sendDiagnostics("assistant-tab");
       return;
     }
 

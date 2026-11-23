@@ -31,3 +31,12 @@ document.getElementById("saveHome").onclick = () => {
 };
 refresh();
 setInterval(refresh, 2000);
+
+document.getElementById("diag").onclick = async () => {
+  const out = document.getElementById("diagResult");
+  out.textContent = "Capturing…";
+  const reply = await chrome.runtime.sendMessage({ type: "diagnose-active" });
+  out.textContent = reply?.error
+    ? "Not captured: " + reply.error
+    : "Saved. " + reply.rows + " conversation rows, " + reply.unread + " classed unread on " + reply.path + ".";
+};

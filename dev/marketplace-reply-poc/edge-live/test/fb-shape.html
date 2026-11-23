@@ -9,8 +9,9 @@
      thread links /messages/t/<id>, [role=log], [data-message-id], "<name> sent"
      headings, a /marketplace/item/<id> link, a contenteditable textbox and a
      "Press enter to send" control. Updates arrive over SSE like Facebook's push. -->
-<nav aria-label="Chats"><div role="grid" id="list"></div></nav>
+<nav aria-label="Marketplace chats"><div id="list"></div></nav>
 <main role="main" id="main"></main>
+<aside role="complementary" aria-label="Contacts" id="contacts" style="width:120px"></aside>
 <script>
 const threadId = location.pathname.match(/\/messages\/t\/(\d+)/)?.[1] || null;
 const esc = (v) => String(v).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
@@ -18,8 +19,19 @@ const post = (path, body) => fetch("/__fb/api/" + path, { method: "POST", header
 async function render() {
   const s = await fetch("/__fb/api/state").then((r) => r.json());
   if (threadId && s.threads[threadId]?.unread) { await post("read", { threadId }); return; }
-  document.getElementById("list").innerHTML = Object.entries(s.threads).map(([id, t]) =>
-    `<div role="row" class="${t.unread ? "unread" : ""}"><a href="/__fb/messages/t/${id}/">${esc(t.name)} · ${esc(t.listing)}</a>${t.unread ? '<div role="button" aria-label="Mark as read"></div>' : ""}</div>`).join("");
+  // Reproduces the conditions that broke detection on the real account: one
+  // listitem wrapping every conversation, /marketplace/t/ links, "Mark as unread"
+  // on read rows, unrelated /messages/t/ contact links, and unread shown only by
+  // a blue dot and a bold preview.
+  document.getElementById("list").innerHTML =
+    `<div role="list"><div role="listitem">` + Object.entries(s.threads).map(([id, t]) => {
+      const last = t.messages.at(-1);
+      return `<div style="display:flex;align-items:center;height:64px"><a href="/__fb/marketplace/t/${id}/" style="flex:1;text-decoration:none;color:inherit">
+        <span style="display:block;font-weight:600">${esc(t.name)} · ${esc(t.listing)}</span>
+        <span style="display:block;font-weight:${t.unread ? 700 : 400}">${esc(last ? (last.out ? "You: " : "") + last.text : "")}</span></a>
+        ${t.unread ? '<div style="width:12px;height:12px;border-radius:50%;background:rgb(0,100,224)"></div>' : '<div role="button" aria-label="Mark as unread"></div>'}</div>`;
+    }).join("") + `</div></div>`;
+  document.getElementById("contacts").innerHTML = ["901", "902", "903"].map((id) => `<a href="/__fb/messages/t/${id}/">Contact</a><br>`).join("");
   const t = threadId && s.threads[threadId];
   const main = document.getElementById("main");
   if (!t) { main.innerHTML = "<h2>Marketplace</h2>"; return; }

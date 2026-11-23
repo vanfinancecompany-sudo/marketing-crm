@@ -18,7 +18,9 @@ import assert from "node:assert/strict";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EXT = resolve(HERE, "..", "extension");
 const EDGE = process.env.EDGE_PATH || "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
-const BASE = "http://127.0.0.1:4618";
+// Own port, so a live assistant service on 4618 is never touched.
+const PORT = Number(process.env.E2E_PORT || 4628);
+const BASE = "http://127.0.0.1:" + PORT;
 const DEBUG = 9334; // read-only target listing over HTTP; nothing attaches to pages
 const work = mkdtempSync(join(tmpdir(), "r2b-e2e-"));
 const stateFile = join(work, "state.json");
@@ -31,7 +33,7 @@ let service;
 let edge;
 function startService() {
   service = spawn(process.execPath, [join(HERE, "..", "service.mjs")], {
-    env: { ...process.env, R2B_ASSISTANT_STATE: stateFile, R2B_ASKME_STUB: "1", R2B_FIXTURE: "1" },
+    env: { ...process.env, R2B_ASSISTANT_PORT: String(PORT), R2B_ASSISTANT_STATE: stateFile, R2B_ASKME_STUB: "1", R2B_FIXTURE: "1" },
     stdio: ["ignore", "pipe", "inherit"],
   });
   return new Promise((ok) => service.stdout.once("data", ok));
@@ -47,6 +49,10 @@ let launches = 0;
 function startEdge(extra = []) {
   const ext = join(work, "extension-" + ++launches);
   cpSync(EXT, ext, { recursive: true });
+  for (const file of ["manifest.json", "background.js", "content.js", "popup.js", "popup.html"]) {
+    const path = join(ext, file);
+    writeFileSync(path, readFileSync(path, "utf8").replaceAll("127.0.0.1:4618", "127.0.0.1:" + PORT).replaceAll(String.raw`127\.0\.0\.1:4618`, String.raw`127\.0\.0\.1:` + PORT));
+  }
   edge = spawn(EDGE, [
     "--user-data-dir=" + profile, "--no-first-run", "--no-default-browser-check",
     "--window-position=-3000,0", "--window-size=1200,900",
@@ -111,6 +117,19 @@ try {
   assert.equal(so.recentJobs.length, 0);
   assert.ok(!(await assistantTabs()).some((t) => t.url.includes("/messages/t/")), "assistant tab never opened a conversation");
   pass("Observe noticed the new unread conversation without opening it, changing read status, calling Ask Me or replying");
+
+  // Row and unread classification under the conditions seen on the real account.
+  await sleep(61_000); // assistant-tab diagnostics are refreshed once a minute
+  const diag = (await api("/diagnostics"))["assistant-tab"];
+  const row = (id) => diag.rows.find((r) => r.id === id);
+  assert.equal(row("300").unread, true);
+  assert.ok(row("300").signals.dot && row("300").signals.bold, JSON.stringify(row("300").signals));
+  assert.equal(row("200").unread, false, "read row with a 'Mark as unread' label must be read");
+  assert.ok(row("300").size[1] <= 80, "row is one conversation, not the whole list: " + row("300").size);
+  for (const id of ["901", "902", "903"]) assert.equal(row(id).unread, false);
+  assert.ok(diag.threadLinkPatterns.includes("/__fb/marketplace/t/#/"));
+  assert.ok(!JSON.stringify(diag).includes("Observe-only enquiry"), "diagnostics must not contain message text");
+  pass(`diagnostics: per-conversation rows (${row("300").size[1]}px), unread by dot+bold, 'Mark as unread' rows read, contact links not unread, no message text`);
 
   // Deliberate activation: everything unread now is left for a person.
   await api("/control", { mode: "send", allowThreads: ["200", "300"] });

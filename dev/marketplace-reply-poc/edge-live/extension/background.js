@@ -98,6 +98,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return api(message.path, message.body);
     }
     if (message.type === "supervise") { await supervise(); return { ok: true }; }
+    // Popup only: read-only structural snapshot of the Facebook tab you are looking at.
+    if (message.type === "diagnose-active" && !sender.tab) {
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (!tab || !/^https:\/\/www\.facebook\.com\/|^http:\/\/127\.0\.0\.1:4618\/__fb\//.test(tab.url || "")) throw new Error("Open a Facebook tab first");
+      const reply = await chrome.tabs.sendMessage(tab.id, { type: "diagnose" });
+      if (!reply?.snapshot) throw new Error(reply?.error || "No snapshot from the page; reload the Facebook tab");
+      await api("/diagnostics", { source: "your-tab", snapshot: reply.snapshot });
+      const s = reply.snapshot;
+      return { rows: s.rows.length, unread: s.rows.filter((r) => r.unread).length, path: s.path };
+    }
     throw new Error("Unknown message");
   })().then(sendResponse, (error) => sendResponse({ error: error.message }));
   return true;

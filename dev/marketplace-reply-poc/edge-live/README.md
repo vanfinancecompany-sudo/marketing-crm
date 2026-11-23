@@ -37,6 +37,13 @@ Update later with `git -C "$env:USERPROFILERent2BuyAssistant" pull`, then select
 
 `R2B_DEFAULT_PRODUCT` (default `rent2buy`) sets the product when the listing title does not say. Set it to an empty string to send unknown listings to a person.
 
+## Read-only inbox diagnostics
+
+- The assistant tab saves a structural snapshot once a minute while in Observe.
+- **Capture diagnostics from this tab** in the extension popup saves one from the Facebook tab you are looking at.
+- Both are written to `%LOCALAPPDATA%Rent2BuyMarketplaceAssistantinbox-diagnostics.json` and shown at http://127.0.0.1:4618/diagnostics.
+- A snapshot contains page path, thread-link patterns, list containers, and per-row size and unread signals (label, dot colour, font weights). Thread IDs are included. Message text, names and previews are never included: labels keep only known UI words, and every other word becomes "•".
+
 ## Tests
 
 - `node --test tests/marketplace-edge-live.test.mjs` covers the ledger rules and the live responder (with a fake fetch).
@@ -54,7 +61,7 @@ Update later with `git -C "$env:USERPROFILERent2BuyAssistant" pull`, then select
 
 These cannot be tested without the signed-in Edge profile and a consenting test sender:
 
-1. **Unread signal in the real inbox.** The scanner looks for thread links `/messages/t/<id>`, plus a "Mark as read" or "unread" label or a hidden "Unread message:" text in the row. Observe mode shows rows and unread counts in the popup, so you can confirm it in the first minute. If the count is 0 with unread chats visible, the selector in `content.js#isUnread` needs adjusting from a real DOM sample.
+1. **Unread signal in the real inbox.** A conversation row is the largest element around a thread link (`/messages/t/`, `/messages/e2ee/t/` or `/marketplace/t/`) that contains no other conversation. It is classed unread by any of three signals: an unread label (never "Mark as unread"), the round blue unread dot, or a preview bolder than other rows in the same list. The first live test showed 8 rows, all unread, and missed a real enquiry. The cause was a container shared by many conversations plus a "Mark as unread" label match, now fixed. Verify with the diagnostics below.
 2. **Message direction.** Uses "You sent" / "<name> sent" labels (seen in the live inspection) with a bubble-position fallback.
 3. **Sending.** Text is inserted with `execCommand` into the Lexical composer and **Press enter to send** is clicked. Send is confirmed only when a new outgoing message ID with the same text appears.
 4. **Edge restart.** Tab IDs are kept in session storage, and the restored assistant tab is adopted by a page marker. Automated testing of an Edge relaunch on the same profile is blocked because Edge disables command-line-loaded extensions on relaunch. Check once on the PC that the extension stays enabled and there is one pinned tab after restarting Edge. Edge **Sleeping tabs** is countered with `autoDiscardable: false` and a 3-minute stale-heartbeat reload. Also add `facebook.com` to *Never put these sites to sleep*.
