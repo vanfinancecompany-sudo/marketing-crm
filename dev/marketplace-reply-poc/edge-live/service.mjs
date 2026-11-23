@@ -105,6 +105,7 @@ const ROUTES = {
     if (body.startPilot) startPilot(state, body.startPilot);
     if (body.find) startFind(state, body.find);
     if (body.approveSend) approveSend(state, body.approveSend);
+    if (body.showAssistantTab) { state.showTab = { seconds: Math.min(Number(body.showAssistantTab.seconds) || 10, 20), at: new Date().toISOString() }; logEvent(state, "show-tab-requested", { seconds: state.showTab.seconds }); }
     if (body.resetOpener) resetSafetyStop(state);
     return statusWithExtension();
   },
@@ -123,6 +124,8 @@ const ROUTES = {
       findWords: state.finder?.status === "searching" ? state.finder.words : null,
       resetOpener: state.resetOpenerRequested === true,
       safetyStop: state.openerTrip?.reason || null,
+      // Handed to the page once, within a minute of the owner's request.
+      showTab: (() => { const t = state.showTab; state.showTab = null; return t && Date.now() - Date.parse(t.at) < 60_000 ? t : null; })(),
       extensionVersion: expectedExtensionVersion(),
     };
   },

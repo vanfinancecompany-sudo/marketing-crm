@@ -201,6 +201,28 @@ async function tabCensus() {
     assistantTitleMarked: assistant ? (assistant.title || "").startsWith("[Assistant]") : null };
 }
 
+// ---- Owner-requested: show the assistant tab for a few seconds ----
+// Facebook draws list rows and the Marketplace view only while the tab is on
+// screen. On the owner's request (control page / service), bring the assistant
+// tab to the front for N seconds (max 20), then return to the previous tab.
+let showing = false;
+async function showAssistantTab(tab, seconds) {
+  const { tabId } = await chrome.storage.session.get("tabId");
+  if (!tab || tab.id !== tabId || showing) return { ok: false };
+  showing = true;
+  const [previous] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+  const ms = Math.min(Math.max(Number(seconds) || 10, 3), 20) * 1000;
+  tabEvent("assistant-tab-shown", { tabId: tab.id, seconds: ms / 1000, previousTabId: previous?.id ?? null });
+  try {
+    await chrome.tabs.update(tab.id, { active: true });
+    await new Promise((r) => setTimeout(r, ms));
+  } finally {
+    if (previous && previous.id !== tab.id) await chrome.tabs.update(previous.id, { active: true }).catch(() => {});
+    showing = false;
+  }
+  return { ok: true };
+}
+
 // ---- Self-update ----
 // The service reports the extension version on disk in this install. When it is
 // newer than the running one (after a git pull), the extension reloads itself,
@@ -257,6 +279,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.type === "supervise") { await supervise(); return { ok: true }; }
     if (message.type === "need-visibility") return visibilityAssist(sender.tab);
+    if (message.type === "show-assistant-tab") return showAssistantTab(sender.tab, message.seconds);
     // Popup only: read-only structural snapshot of the Facebook tab you are looking at.
     if (message.type === "diagnose-active" && !sender.tab) {
       const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });

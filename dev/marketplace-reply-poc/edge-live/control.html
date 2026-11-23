@@ -97,6 +97,8 @@ const EVENT = {
   "tab-census-change": (e) => "Facebook tabs " + e.facebookTabs + ", pinned " + e.pinnedFacebookTabs,
   "safety-stop": (e) => "SAFETY STOP set" + (e.carriedOver ? " (carried over)" : "") + ": " + e.reason,
   "assistant-tab-not-created": (e) => "Assistant did not create another tab: " + e.why,
+  "assistant-tab-shown": (e) => "Assistant tab shown for " + e.seconds + " s, then back to tab " + e.previousTabId,
+  "show-tab-requested": (e) => "Requested: show the assistant tab for " + e.seconds + " s",
   "safety-reset": () => "Safety stop reset requested by the owner",
   "visibility-assist": (e) => "Idle visibility assist: assistant tab shown briefly; Marketplace list " + (e.opened ? "opened" : "did NOT open"),
 };

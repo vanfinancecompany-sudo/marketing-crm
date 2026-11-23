@@ -621,6 +621,7 @@
       stopFlag: sessionStorage.getItem("r2bOpenerTripped") === "1",
     });
     serviceStop = beat.safetyStop || null;
+    if (beat.showTab) chrome.runtime.sendMessage({ type: "show-assistant-tab", seconds: beat.showTab.seconds }).catch(() => {});
     if (beat.mode === "off" || state !== "healthy") return;
     if (beat.verifyThread && !threadId && listState() === "marketplace") await reportPilotRow(beat.verifyThread);
     if (beat.findWords && !threadId && listState() === "marketplace") await reportFind(beat.findWords);
